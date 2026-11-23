@@ -246,10 +246,11 @@ pub struct Lifecycle {
     removing: bool,
     exit: Option<i32>,
     exiting: bool,
+    replaying: bool,
 }
 impl Lifecycle {
     pub const fn new() -> Self {
-        Lifecycle { gen: 0, removing: false, exit: None, exiting: false }
+        Lifecycle { gen: 0, removing: false, exit: None, exiting: false, replaying: false }
     }
     /// A new window may open now: no removal running, no exit committed.
     pub fn may_open(&self) -> bool {
@@ -261,10 +262,14 @@ impl Lifecycle {
         self.gen
     }
     /// An exit request, with the window there or not: true if it's held (the caller prevents the exit).  An exit with
-    /// a code commits the exit (no window opens after it); the first code held is kept.
+    /// a code commits the exit (no window opens after it); the first code held is kept.  Once a held exit's removal
+    /// is done, its replay (and any exit after it) passes, even if the window is somehow still there (a failed close).
     pub fn exit_requested(&mut self, code: Option<i32>, window_open: bool) -> bool {
         if code.is_some() {
             self.exiting = true;
+        }
+        if self.replaying {
+            return false;
         }
         if !window_open && !self.removing {
             return false;
@@ -292,12 +297,16 @@ impl Lifecycle {
     }
     /// What a close at exit led to: true if the removal must start now (the close failed, so no Destroyed comes).
     pub fn closed(&mut self, failed: bool) -> bool {
-        failed && self.close_failed()
+        failed && !self.replaying && self.close_failed()
     }
     /// The removal is done: the held exit's code, to make it again with.
     pub fn cleanup_done(&mut self) -> Option<i32> {
         self.removing = false;
-        self.exit.take()
+        let code = self.exit.take();
+        if code.is_some() {
+            self.replaying = true;
+        }
+        code
     }
 }
 static LIFE: std::sync::Mutex<Lifecycle> = std::sync::Mutex::new(Lifecycle::new());
@@ -919,6 +928,21 @@ mod tests {
         assert!(life.closed(true));
         assert!(!life.closed(true) && !life.close_failed() && !life.cleanup_started(g), "once");
         assert_eq!(life.cleanup_done(), Some(3), "and the held exit is made with its code");
+    }
+
+    #[test]
+    fn a_replayed_exit_passes_even_if_the_window_is_still_registered() {
+        // (the close failed, so no Destroyed came and the window can still be there when the held exit is replayed)
+        let mut life = Lifecycle::new();
+        life.begin_open();
+        assert!(life.exit_requested(Some(3), true));
+        assert!(life.closed(true));
+        assert_eq!(life.cleanup_done(), Some(3));
+        assert!(!life.exit_requested(Some(3), true), "the replay isn't held again");
+        assert!(!life.closed(true), "nor does its close start another removal");
+        assert!(!life.exit_requested(Some(0), true), "nor any exit after it");
+        assert!(!life.may_open(), "and no window opens");
+        assert_eq!(life.cleanup_done(), None);
     }
 
     #[test]
