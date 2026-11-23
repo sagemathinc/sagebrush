@@ -95,10 +95,51 @@ try {
       let got; try { await m.fv.verifyGrant(${CTX}, CH, CERT, c.bytes, cur ?? null, F.now_ms); got = "ok"; } catch (e) { got = e?.code ?? String(e); } if (got !== c.expect) bad.push({ name: c.name, got, expect: c.expect }); } return { n: F.objects.grants.length, bad }; })()`);
     ok(g.n === 11 && g.bad.length === 0, `V-8: all ${g.n} of the agent's grant cases get the fixtures' answer through verifyGrant`, g);
   }
+  // ---- when this browser can't store the pin or the fork mark: storage_failed, never a fork it didn't record
+  // (IDBObjectStore.put made to throw QuotaExceededError, or to drop the write silently; restored afterwards)
+  const PUT_THROWS = `(window.realPut ??= IDBObjectStore.prototype.put, IDBObjectStore.prototype.put = function () { throw new DOMException("full", "QuotaExceededError"); }, true)`;
+  const PUT_DROPS = `(window.realPut ??= IDBObjectStore.prototype.put, IDBObjectStore.prototype.put = function () { return {}; }, true)`;
+  const PUT_OK = `(IDBObjectStore.prototype.put = window.realPut, true)`;
+  {
+    const P = await page();
+    await P.ev(`m.fv.syncChain(${CTX}, ${E(honest, [extend.append])}).then(() => true)`);
+    const before = await P.ev(`m.pin(F.ids.fleet)`);
+    await P.ev(PUT_THROWS);
+    const r = await code(P, `m.fv.syncChain(${CTX}, ${E(honest)})`);
+    await P.ev(PUT_OK);
+    const after = await P.ev(`m.pin(F.ids.fleet)`);
+    ok(r === "storage_failed" && after.seq === before.seq && after.forked === false, "V-9: a rollback the browser can't record (put throws): storage_failed, not chain_fork; nothing was recorded", { r, before, after });
+    ok((await code(P, `m.fv.syncChain(${CTX}, ${E(honest)})`)) === "chain_fork" && (await P.ev(`m.pin(F.ids.fleet)`)).forked === true, "V-9: once storage works, the same rollback is refused and recorded as a fork");
+  }
+  {
+    // (the write silently dropped: advancePin's own refusal comes back, but the read-back finds no fork mark)
+    const P = await page();
+    await P.ev(`m.advancePin(F.ids.fleet, { seq: 1, hash: ${JSON.stringify(H("Q"))} }).then(() => true)`);
+    await P.ev(PUT_DROPS);
+    const r = await code(P, `m.fv.syncChain(${CTX}, ${E(honest)})`);
+    await P.ev(PUT_OK);
+    const p = await P.ev(`m.pin(F.ids.fleet)`);
+    ok(r === "storage_failed" && p.forked === false && p.hash === H("Q"), "V-10: a fork whose mark didn't reach storage (write dropped): storage_failed, a fork is claimed only when read back", { r, p });
+  }
+  {
+    const P = await page();
+    const head = await P.ev(`m.fv.syncChain(${CTX}, ${E(honest)}).then(() => m.pin(F.ids.fleet))`);
+    await P.ev(PUT_THROWS);
+    const r = await code(P, `m.fv.syncChain(${CTX}, ${E(honest, [extend.append])})`);
+    await P.ev(PUT_OK);
+    const after = await P.ev(`m.pin(F.ids.fleet)`);
+    ok(r === "storage_failed" && after.seq === head.seq && after.forked === false, "V-11: a longer chain the browser can't pin (put throws): storage_failed, no chain returned, the pin unchanged", { r, head, after });
+    await P.ev(PUT_DROPS);
+    const r2 = await code(P, `m.fv.syncChain(${CTX}, ${E(honest, [extend.append])})`);
+    await P.ev(PUT_OK);
+    const after2 = await P.ev(`m.pin(F.ids.fleet)`);
+    ok(r2 === "storage_failed" && after2.seq === head.seq, "V-12: a longer chain whose pin write is dropped: storage_failed (the pin is read back before a chain is returned)", { r2, after2 });
+    ok((await code(P, `m.fv.syncChain(${CTX}, ${E(honest, [extend.append])})`)) === null && (await P.ev(`m.pin(F.ids.fleet)`)).seq === head.seq + 1, "V-12: once storage works, the same chain is pinned");
+  }
   {
     const P = await page();
     const names = await P.ev(`Object.keys(m.fv).sort().join()`);
-    ok(names === "syncChain,verifyGrant,verifyHostCert", "S-1: the module exports verification only: syncChain, verifyHostCert, verifyGrant", names);
+    ok(names === "StorageFailed,syncChain,verifyGrant,verifyHostCert", "S-1: the module exports verification only: syncChain, verifyHostCert, verifyGrant (and its StorageFailed error)", names);
   }
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));

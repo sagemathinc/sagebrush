@@ -16,13 +16,26 @@ export type HostCert = Awaited<ReturnType<ReturnType<typeof fleetCore>["verifyHo
 export type CurrentGrant = Readonly<{ gen: number; bytes: Uint8Array; body: unknown }>;
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
+// (advancePin's own refusal of a fork; it throws it only after its fork mark is committed)
+const isFork = (e: unknown) => e instanceof Error && e.message === "chain_fork";
+/** This browser couldn't record what it saw (IndexedDB refused or lost the write): never reported as a fork. */
+export class StorageFailed extends Error {
+  readonly code = "storage_failed";
+  constructor(cause?: unknown) { super("storage_failed", { cause }); }
+}
+
+/** A fork is claimed only once it is durable: the stored pin, read back, says forked. */
+async function forkRecorded(fleet: string, cause?: unknown): Promise<void> {
+  if (!(await storedPin(fleet))?.forked) throw new StorageFailed(cause);
+}
 
 /**
  * The fleet's chain, verified: every entry against its predecessor's signer, then against this browser's pin. A chain
  * that doesn't contain the pinned entry (another history at the pinned seq, or a chain shorter than the pin) is a
  * fork: it is recorded, for good, and refused with chain_fork, as is every later sync of a fleet already forked here
  * (the only way out is Reset this device). Otherwise the pin moves to the chain's head and the chain is returned.
- * Bad entries refuse with the core's own reason, and the pin stays where it was.
+ * Bad entries refuse with the core's own reason, and the pin stays where it was. When this browser can't store the
+ * pin or the fork mark, the sync fails with StorageFailed (storage_failed), never with a fork it didn't record.
  */
 export async function syncChain(ctx: FleetCtx, entries: readonly string[]): Promise<Chain> {
   const core = fleetCore();
@@ -34,15 +47,24 @@ export async function syncChain(ctx: FleetCtx, entries: readonly string[]): Prom
   if (was && (was.seq > chain.seq || chain.hashes[was.seq] !== was.hash)) {
     // (what fleet-device records as a fork: another hash at the pinned seq, or a head behind it)
     const seen = was.seq > chain.seq ? head : { seq: was.seq, hash: chain.hashes[was.seq] };
-    await advancePin(ctx.fleet, seen).catch(() => undefined);
+    let cause: unknown;
+    try { await advancePin(ctx.fleet, seen); } catch (e) { if (!isFork(e)) throw new StorageFailed(e); cause = e; }
+    await forkRecorded(ctx.fleet, cause);
     core.refuse("chain_fork", was.seq > chain.seq ? "a device list behind this device's" : "a device list that conflicts with this device's");
   }
   try {
     await advancePin(ctx.fleet, head);
-  } catch {
-    // (another tab moved or forked the pin meanwhile: refuse rather than return a chain the pin no longer vouches for)
+  } catch (e) {
+    if (!isFork(e)) throw new StorageFailed(e);
+    // (another tab forked the fleet meanwhile: refuse rather than return a chain the pin no longer vouches for)
+    await forkRecorded(ctx.fleet, e);
     core.refuse("chain_fork", "this device's pin changed while the list was checked");
   }
+  // (and the chain is returned only once its head is durably pinned: read back, at the head or past it, as another tab
+  //  may have moved it further meanwhile)
+  const now = await storedPin(ctx.fleet);
+  if (now?.forked) core.refuse("chain_fork", "this device's pin changed while the list was checked");
+  if (!now || now.seq < head.seq || (now.seq === head.seq && now.hash !== head.hash)) throw new StorageFailed();
   return chain;
 }
 
