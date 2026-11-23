@@ -159,7 +159,7 @@ jobs:
           cargo tauri icon icons/icon.png --ios-color '#ffffff' -o "$RUNNER_TEMP/out/icons"
           find "$RUNNER_TEMP/out/icons" -type f | LC_ALL=C sort
           # (`--ios-color` paints the background but the 1024 px icon keeps an
-          # alpha channel (first run of #379), which the App Store refuses: each
+          # alpha channel (seen on its first run), which the App Store refuses: each
           # 1024 px iOS icon goes through JPEG, which has no alpha, at its best
           # quality, and back to PNG; the no-alpha check below is unchanged)
           while IFS= read -r f; do

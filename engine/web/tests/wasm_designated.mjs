@@ -63,7 +63,10 @@ for (const [file, want] of [["designated_errors.jsonl", '{"error"'], ["designate
   for (const [label, at] of [["in the sieve", 1], ["in the a_p loop", total - 2]]) {
     polls = 0; stopAt = at;
     const r = run(inst());
-    if (!r.trap || r.ms > full.ms) { fail++; console.log(`FAIL Stop ${label} (poll ${at} of ${total}): ${r.trap ? `trapped after ${r.ms.toFixed(0)} ms (full call ${full.ms.toFixed(0)} ms)` : "not stopped"}`); }
+    // The deterministic contract is that the call traps at the host poll
+    // which reports Stop.  Comparing wall times with the full call makes a
+    // late Stop depend on whether the runner preempts either measurement.
+    if (!r.trap || polls !== at) { fail++; console.log(`FAIL Stop ${label} (poll ${at} of ${total}): ${r.trap ? `trapped at poll ${polls}` : "not stopped"}`); }
   }
   polls = 0; stopAt = Infinity;
   const again = run(inst());

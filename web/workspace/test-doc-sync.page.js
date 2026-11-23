@@ -22,9 +22,16 @@ T.init = async (name) => {
   T.hdb = await W.openHistoryDb();
   N.DOC_SYNC.on = true;
   T.kit = N.journalClasses({ IdbStore: W.IdbStore, IdbPatchStore: W.IdbPatchStore });
-  T.ds = new DS.DocSync({ retryMs: 200, askMs: 5000 });
+  // (each pulled page that stored patches, and the document's Files entry stamped with its time, as the pages do)
+  T.pages = [];
+  T.ds = new DS.DocSync({ retryMs: 200, askMs: 5000, onPage: (p) => { T.pages.push(p); void T.w.touch(p.doc, p.at); } });
   return true;
 };
+/** Notebook `id` listed in this device's Files (as the page lists a notebook it opens); its entry's `updated`. */
+T.list = async (id) => { await T.w.locked(() => T.w.adopt("/", "Synced " + id.slice(0, 4), ".ipynb", { kind: "notebook", ref: id, mode: "python" })); return T.updatedOf(id); };
+T.updatedOf = async (id) => { const p = await T.w.pathOf("notebook", id); return p ? (await T.w.stat(p))?.updated ?? null : null; };
+T.pagesOf = (id) => T.pages.filter((p) => p.doc === id);
+T.touch = async (id, t) => { await T.w.touch(id, t); return T.updatedOf(id); };
 
 /** The account socket (the front adds this device's session), hello, welcome, then DocSync connected on it. */
 T.connect = async (dev, account) => {
@@ -80,6 +87,8 @@ T.warnsFrom = (from) => T.warns.slice(from);
 T.hiddenCount = () => T.hidden.length;
 T.warnCount = () => T.warns.length;
 T.record = async (id) => { const r = await rawGet(T.w.main, "notebooks", id); return r ? { codes: codesOf(r), mark: r.unjournaled ?? null, j: r.j, hashOk: r.hash === (await N.docHash(r)), proof: r.proof ?? null, from: Array.isArray(r.from) ? r.from.length : 0, at: Array.isArray(r.at) ? r.at.length : 0, legacy: !!r.legacy } : null; };
+/** DEV's notebook sync turned off or on in this page (a notebook made and saved before sync was on, as a device has) */
+T.docSync = (on) => { N.DOC_SYNC.on = !!on; return N.DOC_SYNC.on; };
 T.journal = async (id) => { const js = await N.readJournal(T.hdb, id); return { start: js.start, slot: js.slot, lrows: js.lrows, cursor: js.cursor, J: js.J }; };
 T.events = () => T.ds.events.splice(0);
 T.stopped = () => Object.fromEntries(T.ds.stopped);
@@ -325,6 +334,22 @@ T.edDelete = (cid) => { const c = cellsOf(T.edDiv).find((x) => x.id === cid); if
 /** A document from elsewhere pushed to the fake editor: its cells, with outputs where given. */
 T.edPush = (cells) => {
   T.edStore.push({ ...structuredClone(T.edStore.doc), cells: cells.map(([id, code, outputs]) => ({ id, code, ...(outputs ? { outputs } : {}) })) });
+  return true;
+};
+/** The page asked to go away the moment after typing (a simulated beforeunload, as a reload or a closed tab sends it):
+ * whether the page asked to stay (the browser's leave prompt); the person then declines, and the page stays. */
+T.leaveAsked = () => {
+  const e = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(e);
+  return e.defaultPrevented;
+};
+/** A cell of the mounted notebook focused and its text selected, for the person's own typing (CDP Input.insertText,
+ * a trusted input: what the notebook's leave prompt waits for). */
+T.focus = (cid) => {
+  const cell = cellsOf(T.nbDiv).find((c) => c?.id === cid);
+  if (!cell) return false;
+  cell.ta.focus();
+  cell.ta.select();
   return true;
 };
 /** Typing in a cell of the mounted notebook: its text set, and the editor told (as a keystroke tells it). */

@@ -1,0 +1,170 @@
+{
+ "schema": "absorbing-markov-report/v1",
+ "rational_encoding": "Each exact rational is a JSON string 'p/q' in lowest terms with q>0, or 'p' when q==1 (Sage QQ str()). Parse with Python fractions.Fraction(s).",
+ "states": [
+  "new",
+  "engaged",
+  "converted",
+  "abandoned"
+ ],
+ "transient_states": [
+  "new",
+  "engaged"
+ ],
+ "absorbing_states": [
+  "converted",
+  "abandoned"
+ ],
+ "P": [
+  [
+   "1/2",
+   "1/4",
+   "1/4",
+   "0"
+  ],
+  [
+   "1/5",
+   "1/2",
+   "1/10",
+   "1/5"
+  ],
+  [
+   "0",
+   "0",
+   "1",
+   "0"
+  ],
+  [
+   "0",
+   "0",
+   "0",
+   "1"
+  ]
+ ],
+ "Q": [
+  [
+   "1/2",
+   "1/4"
+  ],
+  [
+   "1/5",
+   "1/2"
+  ]
+ ],
+ "R": [
+  [
+   "1/4",
+   "0"
+  ],
+  [
+   "1/10",
+   "1/5"
+  ]
+ ],
+ "fundamental_matrix_N": {
+  "rows": [
+   "new",
+   "engaged"
+  ],
+  "cols": [
+   "new",
+   "engaged"
+  ],
+  "value": [
+   [
+    "5/2",
+    "5/4"
+   ],
+   [
+    "1",
+    "5/2"
+   ]
+  ]
+ },
+ "absorption_probabilities_B": {
+  "rows": [
+   "new",
+   "engaged"
+  ],
+  "cols": [
+   "converted",
+   "abandoned"
+  ],
+  "value": [
+   [
+    "3/4",
+    "1/4"
+   ],
+   [
+    "1/2",
+    "1/2"
+   ]
+  ]
+ },
+ "expected_steps_to_absorption_t": {
+  "rows": [
+   "new",
+   "engaged"
+  ],
+  "value": [
+   "15/4",
+   "7/2"
+  ]
+ },
+ "step_count_variance": {
+  "rows": [
+   "new",
+   "engaged"
+  ],
+  "formula": "(2N - I) t - t_sq",
+  "value": [
+   "155/16",
+   "37/4"
+  ]
+ },
+ "P_power_5": {
+  "rows": [
+   "new",
+   "engaged",
+   "converted",
+   "abandoned"
+  ],
+  "cols": [
+   "new",
+   "engaged",
+   "converted",
+   "abandoned"
+  ],
+  "value": [
+   [
+    "1/10",
+    "11/100",
+    "31/50",
+    "17/100"
+   ],
+   [
+    "11/125",
+    "1/10",
+    "48/125",
+    "107/250"
+   ],
+   [
+    "0",
+    "0",
+    "1",
+    "0"
+   ],
+   [
+    "0",
+    "0",
+    "0",
+    "1"
+   ]
+  ]
+ },
+ "engine": {
+  "tool": "sagebrush",
+  "mode": "--sage",
+  "version": null
+ }
+}

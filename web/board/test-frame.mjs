@@ -9,16 +9,20 @@
 // own, it says what it is for.  The site's _headers give /frame/* one rule
 // with all its headers (Cloudflare keeps only the last of a path's rules).
 // Build web/dist first, then
-//   python3 web/serve.py 8765 &   node web/board/test-frame.mjs
+//   node web/board/test-frame.mjs          (or SB_URL=http://127.0.0.1:8765/ for a site already served)
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { devtoolsPort } from "../test-port.mjs";
+import { devtoolsPort, startServe } from "../test-port.mjs";
 
-const site = process.env.SB_URL ?? "http://127.0.0.1:8765/";
+// (without SB_URL, a server of its own on the port the system picks, used once it says it is listening: its first
+//  request comes at once, before a server started just ahead of it may be listening)
+let server = null;
+process.on("exit", () => server?.kill("SIGKILL"));
+const site = process.env.SB_URL ?? `http://127.0.0.1:${await startServe(() => (server = spawn("python3", [join(dirname(fileURLToPath(import.meta.url)), "..", "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] }))).port}/`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
 const check = (ok, what) => { console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) failed++; };
@@ -77,11 +81,12 @@ ws.onmessage = (ev) => {
   // (a frame in a process of its own: a target of its own, by its session)
   if (m.method === "Target.attachedToTarget" && m.params.targetInfo.type === "iframe") {
     frames.push(m.params.sessionId);
-    send("Runtime.runIfWaitingForDebugger", {}, m.params.sessionId);
+    send("Runtime.runIfWaitingForDebugger", {}, m.params.sessionId).catch(() => {});
   }
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
 };
-const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
+// (an answer that never comes, the page or the browser gone, fails by name instead of leaving node nothing to wait for)
+const send = (method, params = {}, sessionId, ms = 60000) => new Promise((resolve, reject) => { const id = ++n, timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method}: no answer within ${ms / 1000} s`)); }, ms); waiting.set(id, (r) => { clearTimeout(timer); resolve(r); }); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
 const evalIn = async (expression, sessionId, contextId) => {
   const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, ...(contextId ? { contextId } : {}) }, sessionId);
   if (r?.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 300));

@@ -3,7 +3,8 @@
 // then startSynced), so one nobody opens after sync is turned on never goes up, and the other device lists it with
 // no content ever.  This walks them, each loaded as its writer and let go, exactly as opening it would: recovery and
 // startSynced run as they always do, through no other write path.
-//   startAll(seams) -> { total, started, held, tooLarge: [path], noRoom: [path], failed: [path], stopped }
+//   startAll(seams) -> { listed, total, started, held, tooLarge: [path], noRoom: [path], failed: [path], stopped }
+// (listed: how many candidate notebooks the walk was given; total: those of them not yet started)
 // Seams (the page's; a test's fakes):
 //   list()          this device's own notebooks: [{ ref, path }] (not listed from the server, not missing, not in Trash)
 //   startOf(ref)    the notebook's synced history's start, or null if it hasn't started here (readJournal's)
@@ -20,10 +21,12 @@
 // turned off meanwhile ends the walk (nothing said of the rest; what was counted before may still be said).  Every
 // store loaded is let go.
 export async function startAll(s) {
-  const out = { total: 0, started: 0, held: 0, tooLarge: [], noRoom: [], failed: [], stopped: false };
+  const out = { listed: 0, total: 0, started: 0, held: 0, tooLarge: [], noRoom: [], failed: [], stopped: false };
   const cur = s.current();
   const todo = [];
-  for (const n of await s.list()) {
+  const all = await s.list();
+  out.listed = all.length;
+  for (const n of all) {
     if (n.ref === cur) continue;
     try {
       if ((await s.startOf(n.ref)) === null) todo.push(n);

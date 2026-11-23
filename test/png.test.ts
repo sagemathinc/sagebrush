@@ -32,6 +32,10 @@ test("colors are checked as matplotlib checks them, savefig's facecolor too, and
   assert.equal(run([TEST + "png_color_cases.py"]), oracle["png_color_cases.py"]);
 });
 
+test("the pixel marker ',' is one pixel of the PNG at any markersize and dpi, and scatter's is the square 's', as matplotlib's", () => {
+  assert.equal(run([TEST + "png_pixel_marker_cases.py"]), oracle["png_pixel_marker_cases.py"]);
+});
+
 test("a color's alpha, and none in any case, in the pixels of a PNG as in matplotlib's (CORR-3D8-1)", () => {
   // (each channel within 1 of matplotlib's: Agg truncates where tiny-skia rounds when it blends)
   const parse = (s: string) => s.trim().split("\n").map((l) => {

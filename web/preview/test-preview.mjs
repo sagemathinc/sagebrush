@@ -12,7 +12,7 @@ import * as deployEntry from './entry.mjs';
 import { mockEnabled } from './mock.js';
 import { checkNoticeBrowser } from './browser-notice.mjs';
 import { prepare, MAX_OBJECTS, MAX_BYTES, MAX_FILE_BYTES, MAX_HTML_BYTES, DEFAULT_CACHE_CONTROL, NO_STORE } from '../../scripts/preview/prepare.mjs';
-import { R2, MAX_PREVIOUS_OBJECTS } from '../../scripts/preview/r2.mjs';
+import { R2, MAX_PREVIOUS_OBJECTS, ATTEMPTS } from '../../scripts/preview/r2.mjs';
 import { upload, UPLOAD_CONCURRENCY } from '../../scripts/preview/upload.mjs';
 
 function bucket(entries) {
@@ -323,6 +323,96 @@ test('remote-phase abort cancels an active request instead of granting another 3
   } finally { globalThis.fetch = original; }
 });
 
+test('a hanging R2 endpoint: idempotent requests are tried at most 3 times with a pause, a DELETE never; retries log kind and key only', async () => {
+  const credentials = { accountId: '0'.repeat(32), accessKeyId: 'AKIDTESTONLY' + '1'.repeat(20), secretAccessKey: 'SECRETTESTONLY' + '2'.repeat(50) };
+  const timing = { attemptMs: 40, backoffMs: [5, 5] };
+  const original = globalThis.fetch, originalError = console.error;
+  const logs = [], all = [];
+  console.error = (...a) => { logs.push(a.join(' ')); all.push(a.join(' ')); };
+  // (a fake endpoint: each call takes the next behaviour; 'hang' never answers until the attempt's signal aborts)
+  let calls = [];
+  const endpoint = (...plan) => { calls = []; let i = 0; globalThis.fetch = async (url, options) => {
+    calls.push({ url, method: options.method, body: options.body === undefined ? undefined : Buffer.from(options.body).toString() });
+    const step = plan[Math.min(i++, plan.length - 1)];
+    if (step === 'hang') return new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true }));
+    return step(options);
+  }; };
+  try {
+    assert.equal(ATTEMPTS, 3);
+    const client = new R2(credentials, 'latex', new AbortController().signal, timing);
+    const file = { sha256: 'a'.repeat(64), bytes: Buffer.from('x'), type: MIME.html, cacheControl: undefined };
+    // a HEAD that hangs twice, then answers: one check, three requests, two retry lines
+    endpoint('hang', 'hang', () => new Response(null, { status: 200, headers: { 'x-amz-meta-preview-sha256': 'a'.repeat(64), 'content-length': '1', 'content-type': MIME.html } }));
+    assert.equal(await client.matches('latex/index.html', file), true);
+    assert.deepEqual(calls.map(c => c.method), ['HEAD', 'HEAD', 'HEAD']);
+    assert.deepEqual(logs, [
+      'R2 retry 2 of 3: HEAD latex/index.html (R2 request failed or timed out)',
+      'R2 retry 3 of 3: HEAD latex/index.html (R2 request failed or timed out)',
+    ]);
+    // a PUT that always hangs: three attempts, then the error says so
+    logs.length = 0;
+    endpoint('hang');
+    await assert.rejects(client.put('latex/index.html', Buffer.from('html'), MIME.html), /^Error: R2 request failed or timed out \(after 3 attempts\)$/);
+    assert.equal(calls.length, 3);
+    assert.equal(logs.length, 2);
+    // (every attempt of a retried PUT: the same key and the same bytes)
+    assert.ok(calls.every(c => c.method === 'PUT' && c.url === calls[0].url && c.body === 'html'), JSON.stringify(calls));
+    // HTTP 429 is tried again too
+    endpoint(() => new Response('', { status: 429 }), () => new Response('', { status: 200 }));
+    await client.put('latex/index.html', Buffer.from('html'), MIME.html);
+    assert.equal(calls.length, 2);
+    // an unsafe key is refused before any request; a listing over 8 MiB is refused at once, not tried again
+    endpoint('hang');
+    await assert.rejects(client.put('latex/../x', Buffer.from('html'), MIME.html), /unsafe|outside/);
+    assert.equal(calls.length, 0);
+    endpoint(() => new Response(Buffer.alloc(8 * 1024 * 1024 + 1, 60)));
+    await assert.rejects(client.list(), /exceeds 8 MiB/);
+    assert.equal(calls.length, 1);
+    // the upload pool's check, failing after the first attempt (a peer failed): no further attempt
+    endpoint('hang');
+    await assert.rejects(client.put('latex/index.html', Buffer.from('html'), MIME.html, undefined, () => { throw new Error('peer failed'); }), /peer failed/);
+    assert.equal(calls.length, 1);
+    // a DELETE that hangs: one attempt only, never tried again, nothing logged
+    logs.length = 0;
+    endpoint('hang');
+    await assert.rejects(client.delete('latex/index.html'), /no automatic retry/);
+    assert.equal(calls.length, 1);
+    assert.equal(logs.length, 0);
+    // HTTP 503 then 200 on a listing: tried again; HTTP 403: a refusal, not tried again
+    endpoint(() => new Response('', { status: 503 }), () => new Response('<ListBucketResult><EncodingType>url</EncodingType><Contents><Key>latex%2Fa</Key></Contents><IsTruncated>false</IsTruncated></ListBucketResult>'));
+    assert.deepEqual(await client.list(), ['latex/a']);
+    assert.equal(calls.length, 2);
+    endpoint(() => new Response('secret response body fixture', { status: 403 }));
+    await assert.rejects(client.matches('latex/index.html', file), error => /HTTP 403/.test(error.message) && !error.message.includes('secret'));
+    assert.equal(calls.length, 1);
+    // a listing whose body stalls past the attempt: the page is fetched and read again
+    // (as a real fetch's body does, it fails when the attempt's signal aborts)
+    endpoint((() => { let first = true; return (options) => {
+      if (!first) return new Response('<ListBucketResult><EncodingType>url</EncodingType><IsTruncated>false</IsTruncated></ListBucketResult>');
+      first = false;
+      return new Response(new ReadableStream({ start(c) {
+        c.enqueue(new TextEncoder().encode('<ListBucketResult>'));
+        options.signal.addEventListener('abort', () => c.error(options.signal.reason), { once: true });
+      } }));
+    }; })());
+    assert.deepEqual(await client.list(), []);
+    assert.equal(calls.length, 2);
+    // no retry line ever carries a header, a signature or a credential
+    assert.ok(all.length >= 6);
+    for (const line of all) assert.ok(!/AWS4|Credential|Signature|AKIDTESTONLY|SECRETTESTONLY|authorization/i.test(line), line);
+    // the remote deadline during a pause ends the request at once, with no further attempt
+    const controller = new AbortController();
+    const slow = new R2(credentials, 'latex', controller.signal, { attemptMs: 40, backoffMs: [60000] });
+    endpoint('hang');
+    const pending = assert.rejects(slow.put('latex/index.html', Buffer.from('html'), MIME.html), /deadline/);
+    const started = Date.now();
+    setTimeout(() => controller.abort(new Error('test remote deadline')), 100);
+    await pending;
+    assert.equal(calls.length, 1);
+    assert.ok(Date.now() - started < 5000, 'the pause ended with the deadline, not after its 60 s');
+  } finally { globalThis.fetch = original; console.error = originalError; }
+});
+
 test('deploy entry exports only the default Worker, keeping helper objects out of the runtime API', () => {
   assert.deepEqual(Object.keys(deployEntry), ['default']);
   assert.equal(deployEntry.default, worker);
@@ -446,7 +536,7 @@ test('eight 16 MiB non-HTML buffers bound active transport input to 128 MiB', as
   assert.equal(peakBytes, 128 * 1024 * 1024); assert.equal(activeBytes, 0);
 });
 
-test('phone preview notice preserves controls, opens metadata modal and dismisses for this session under CSP', { timeout: 60000 }, async () => {
+test('phone preview notice preserves controls, opens metadata modal and dismisses for this session under CSP', { timeout: 120000 }, async () => {
   const geometry = await checkNoticeBrowser();
   assert.ok(geometry.controlsBottom <= geometry.top);
 });

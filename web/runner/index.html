@@ -75,7 +75,7 @@ buffer staying here, and the page's answer is written to it.
         Atomics.store(ctrl, 0, 1);
         Atomics.notify(ctrl, 0);
       };
-      let flag = null, writable = null, flushing = null;
+      let flag = null, writable = null;
       // input() (design/runner.md, How 7): open requests by key, {id: the run,
       // buffer}; an answer writes only to the one its key and run name.  A
       // request is over at its answer, its run's next question or end, a Stop.
@@ -98,6 +98,12 @@ buffer staying here, and the page's answer is written to it.
         }
         Atomics.notify(ctl, 0);
       };
+      // a refused change asked while the run waits (web/worker.ts fsAsk): the one open request, {key, buffer}. The
+      // page's answer names its key: an allow carries the new policy's epoch, stored in the shared word BEFORE the answer
+      // is written (the worker adopts the policy only at exactly that epoch); anything else, a newer request, or a Stop
+      // answers no. This frame relays; the page decides.
+      let ask = null;
+      const askNo = () => { if (ask) { giveInput(ask.buffer, null); ask = null; } };
       // live data (src/live-data.ts): open requests by key, {id: the run, buffer};
       // the page's answer is written once, to the one its key and run name,
       // and a request is over at its answer, its run's end or a Stop
@@ -134,6 +140,11 @@ buffer staying here, and the page's answer is written to it.
           lives.set(d.liveData.key, { id: d.id, buffer: d.buffer });
           d = { ...d, buffer: null };
         }
+        if (d && d.fsAsk && d.buffer instanceof SharedArrayBuffer && d.buffer.byteLength >= 8) {
+          askNo();
+          if (typeof d.fsAsk.key === "string" && d.fsAsk.key.length <= 64) ask = { key: d.fsAsk.key, buffer: d.buffer };
+          d = { ...d, buffer: null };
+        }
         if (d && d.input && d.buffer instanceof SharedArrayBuffer && d.buffer.byteLength >= 8) {
           retire(d.id);
           if (typeof d.input.key === "string") inputs.set(d.input.key, { id: d.id, buffer: d.buffer });
@@ -152,11 +163,6 @@ buffer staying here, and the page's answer is written to it.
         if (d && d.ready && d.interrupt) {
           flag = new Int32Array(d.interrupt);
           d = { ...d, interrupt: null, interruptible: true };
-          // (every 200 ms, the flush request, bit 4: a run's compiled loops and the engine's polls then send
-          // what it has printed, so a long computation shows what it printed before it; one with nothing
-          // running is taken by the next run's first loop; src/runtime/interrupt.ts INTR_FLUSH)
-          // (notified, as every producer of the word is: a time.sleep waiting on it wakes, sees no Ctrl-C, and waits on)
-          flushing ??= setInterval(() => { if (flag) { Atomics.or(flag, 0, 16); Atomics.notify(flag, 0); } }, 200);
         }
         // (what it may change: the page's {fsWrite}; this frame holds the worker's epoch word)
         if (d && d.ready && d.epoch) { writable = new Int32Array(d.epoch); d = { ...d, epoch: null, epochShared: true }; }
@@ -184,6 +190,7 @@ buffer staying here, and the page's answer is written to it.
         if (d && typeof d.runnerInterrupt === "number") {
           retire(); // (every open input() request is over)
           retireLive();
+          askNo();
           if (flag) {
             Atomics.store(flag, 1, d.runnerInterrupt);
             // (bit 0, and the word notified: a time.sleep waits on it, src/runtime/interrupt.ts requestCtrlC)
@@ -192,8 +199,30 @@ buffer staying here, and the page's answer is written to it.
           }
           return;
         }
+        // (the page's flush request, bit 4, while a run is in flight (web/notebook/worker-kernel.js): its compiled loops
+        // and the engine's polls then send what it has printed, so a long computation shows what it printed before it;
+        // src/runtime/interrupt.ts INTR_FLUSH.  The page's timer, not one here: a hidden frame's timers are throttled.
+        // Notified, as every producer of the word is: a time.sleep waiting on it wakes, sees no Ctrl-C, and waits on)
+        if (d && d.runnerFlush === 1) {
+          if (flag) {
+            Atomics.or(flag, 0, 16);
+            Atomics.notify(flag, 0);
+          }
+          return;
+        }
         // (the new epoch stored BEFORE the policy goes on to the worker: a run in flight refuses at its next change)
         if (d && d.fsWrite && Number.isInteger(d.fsWrite.epoch) && writable) Atomics.store(writable, 0, d.fsWrite.epoch);
+        if (d && typeof d.runnerAsk === "string") {
+          if (ask && ask.key === d.runnerAsk) {
+            const a = ask;
+            ask = null;
+            if (typeof d.answer === "string" && Number.isInteger(d.epoch) && d.epoch > 0 && writable) {
+              Atomics.store(writable, 0, d.epoch);
+              giveInput(a.buffer, d.answer);
+            } else giveInput(a.buffer, null);
+          }
+          return;
+        }
         if (d && typeof d.runnerInput === "number") {
           const e = typeof d.key === "string" ? inputs.get(d.key) : undefined;
           if (e && e.id === d.runnerInput) {

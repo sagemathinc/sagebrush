@@ -26,10 +26,10 @@ document.addEventListener("load", (e) => { const t = e.target as HTMLImageElemen
 import { PAGE_CSS } from "./style";
 import { registerLatexTools, setTarget, clearTarget } from "./agent-tools";
 import { mark } from "./marks";
-import type { Example } from "./examples";
 import type { sessionOf } from "./run-core.mjs";
 import { seenOf, checkedResults } from "./results-check.mjs";
 import { staleWhy } from "./engine/sagetex.mjs";
+import { MADE_CHANNEL } from "../workspace/agent-made-tex";
 // (the embeddable editor, for the questions site: component.ts)
 export { mountEditor, type LatexEditor } from "./component";
 /** latex_build's dependencies (tools.ts latexBuild, build.ts): this module's own styles and input and image rules, so
@@ -52,11 +52,6 @@ const agentUrl = new URL("sagebrush-latex-agent.js", import.meta.url).href;
 // (the presenter, present.ts: a chunk of its own, /sagebrush-latex-present.js; a failed fetch is tried again by a URL of its own)
 const presentUrl = new URL("sagebrush-latex-present.js", import.meta.url).href;
 let presentMod: Promise<typeof import("./present")> | null = null, presentTries = 0;
-// (the ten examples, examples.ts: a chunk of its own, /sagebrush-latex-examples.js, fetched when their list opens (or
-// earlier, by the page's background loading); a failed fetch is tried again by a URL of its own)
-const examplesUrl = new URL("sagebrush-latex-examples.js", import.meta.url).href;
-let examplesMod: Promise<Example[]> | null = null, examplesTries = 0;
-export const loadExamples = (): Promise<Example[]> => (examplesMod ??= (import(examplesTries++ ? `${examplesUrl}?try=${examplesTries}` : examplesUrl) as Promise<typeof import("./examples")>).then((m) => m.EXAMPLES).catch((e) => { examplesMod = null; throw e; }));
 const loadPresent = () => (presentMod ??= (import(presentTries++ ? `${presentUrl}?try=${presentTries}` : presentUrl) as Promise<typeof import("./present")>).catch((e) => { presentMod = null; throw e; }));
 // (Run's Sage session, run-core.mjs: the hosting page's kernel and runner classes (Host.sandbox), its interpreter in
 // the runner, the opaque-origin sandbox, with no fallback; one per page, kept warm for the next Run and
@@ -75,6 +70,11 @@ let runMod: Promise<typeof import("./run-core.mjs")> | null = null, runTries = 0
 //  /sagebrush-latex-interact.js, fetched only once a preview or a Run has one; a failed fetch is tried again by a URL of
 //  its own)
 const interactUrl = new URL("sagebrush-latex-interact.js", import.meta.url).href;
+// (the preview's code blocks coloured: hl.ts, its own chunk, /sagebrush-latex-hl.js, fetched once a preview has one;
+//  one import for the page; not fetched, the code stays plain: a failed import isn't tried again, as the browser keeps
+//  it for its URL)
+const hlUrl = new URL("sagebrush-latex-hl.js", import.meta.url).href;
+let hlMod: Promise<typeof import("./hl") | null> | null = null;
 // (where you were in the file: view.ts, its own chunk, /sagebrush-latex-view.js (design/view-state.md))
 const viewUrl = new URL("sagebrush-latex-view.js", import.meta.url).href;
 let interactMod: Promise<typeof import("./interact")> | null = null, interactTries = 0;
@@ -83,8 +83,19 @@ const loadRun = () => (runMod ??= (import(runTries++ ? `${runUrl}?try=${runTries
 let runGen = 0;
 // (a failed fetch is forgotten, so the next try fetches again, by a URL of its own: a browser may keep a failed
 // module's result for its URL; each caller says the failure)
+// (an agent this tab had before its reload: its reload record (agent-pair.ts's RELOAD_KEY), resumed by the pairing module)
+// (another page's record (the Agents page's, kept while the person is on Files or here): left alone, unread past its
+//  page, for that page to take when they go back to it (A5); this page's own, on a reload or a navigation back: the
+//  pairing module decides (reloadDecision: fresh, the same scope); anything else is dropped here; a page in a frame (the
+//  Agents page's .tex pane) leaves the record alone: it shares the tab's sessionStorage, and the record is the top page's)
+const reloadRecorded = () => { try { if (window.top !== window) return false; const raw = sessionStorage.getItem("sb-agent-reload-v1"); if (raw === null) return false; let page: unknown = null; try { page = JSON.parse(raw)?.page ?? null; } catch {} if (typeof page === "string" && page !== location.origin + location.pathname) return false; const nav = (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type; if (nav === "reload" || (typeof page === "string" && (nav === "navigate" || nav === "back_forward"))) return true; sessionStorage.removeItem("sb-agent-reload-v1"); return false; } catch { return false; } };
+// (decided once, at load, before anything else is looked at: a ?pair= link or the desktop app never skips the drop)
+const reloadNow = reloadRecorded();
 let agentPairing: Promise<{ connect(): unknown }> | null = null, agentTries = 0;
-const pairAgent = (ws: Workspace) => (agentPairing ??= (import(agentTries++ ? `${agentUrl}?try=${agentTries}` : agentUrl) as Promise<typeof import("./agent")>).then((m) => m.mountAgentPairing(ws as any)))
+const pairAgent = (ws: Workspace) => (agentPairing ??= (import(agentTries++ ? `${agentUrl}?try=${agentTries}` : agentUrl) as Promise<typeof import("./agent")>).then((m) => m.mountAgentPairing(ws as any, {
+  // (a reload of this tab keeps the agent, from the tab's reload record, while the grant lasts (decided Nov 19 2026))
+  reload: { scope: { workspace: `sagebrush-workspace/${(ws as any).identity?.workspace}`, page: location.origin + location.pathname } },
+})))
   .catch((e) => { agentPairing = null; throw e; });
 
 export { PATCH_BUDGET, FOLLOW_KEY } from "./editor";
@@ -108,6 +119,15 @@ type Host = {
   fileMenu?(menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }): (e: KeyboardEvent) => void;
   /** A comment's text drawn into `box` as Markdown with math, by the notebook page's own renderer (boot.ts) */
   markdown?(box: HTMLElement, text: string): void;
+  /** The desktop app (boot.ts mountTex): why Run doesn't run there (APP_NO_RUN), said instead of NO_SANDBOX and as
+   * Run's title; and no Agent button or pairing, as its notebook page has none */
+  app?: string;
+  /** The site's address before its own paths: "" on the site, sagebrush.space's in the app (docs-link.ts siteHref) */
+  site?: string;
+  /** Embedded in the Agents page's pane (boot.ts, ?embed=1, a frame of this site's only): no Files, home, title, File
+   * menu, Agent or Share, never a pairing of its own, the document alone by default, and a may-close question from the
+   * pane answered by this page's own leave guard */
+  embed?: boolean;
 };
 // (true only in a SAGEBRUSH_LATEX_PREVIEW=test build, web/build.ts: the page test's hold on image reads)
 declare const __SB_LATEX_TEST__: boolean | undefined;
@@ -116,62 +136,20 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = ""):
   const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e;
 };
 const enc = new TextEncoder();
-
-/** "From an example" (boot.ts adds the item and loads this module on its click): a list of the examples
- * (examples.ts), as large buttons that fit a phone; the one chosen is made as a folder of its own,
- * "/LaTeX examples/<title>" (or "<title> (2)", ...: the first name not taken), with its files, and its main .tex
- * opened in the editor by boot.ts's hook (`open`). Escape, or the backdrop, closes it with nothing made. */
-export async function texExamples(ws: Workspace, open: (e: Entry) => unknown): Promise<void> {
-  let examples: Example[];
-  try { examples = await loadExamples(); }
-  catch { alert("The examples couldn't be loaded. Check the network, then try again."); return; }
-  const d = document.createElement("dialog");
-  d.className = "sb-tex-examples";
-  d.setAttribute("aria-label", "LaTeX examples");
-  d.style.cssText = "max-width:min(560px,calc(100vw - 16px));width:100%;max-height:calc(100dvh - 32px);padding:0;border:1px solid #c8ccc9;border-radius:10px;box-sizing:border-box";
-  const head = document.createElement("div");
-  head.style.cssText = "display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #e3e6e4;position:sticky;top:0;background:inherit";
-  const h = document.createElement("b"); h.textContent = "LaTeX examples";
-  const x = document.createElement("button"); x.textContent = "✕"; x.setAttribute("aria-label", "Close"); x.style.cssText = "min-width:44px;min-height:44px"; x.onclick = () => d.close();
-  head.append(h, x);
-  const list = document.createElement("div"); list.style.cssText = "display:grid;gap:8px;padding:12px";
-  for (const ex of examples) {
-    const b = document.createElement("button");
-    b.dataset.example = ex.id;
-    b.style.cssText = "display:block;width:100%;text-align:left;padding:10px 12px;min-height:44px;border:1px solid #d5d9d6;border-radius:8px;background:transparent;cursor:pointer";
-    const t = document.createElement("b"); t.textContent = ex.title;
-    const a = document.createElement("div"); a.textContent = ex.about; a.style.cssText = "font-size:13px;opacity:.75;margin-top:2px";
-    b.append(t, a);
-    b.onclick = async () => {
-      d.close();
-      try { open(await makeExample(ws, ex)); }
-      catch (err) { alert("The example couldn't be made: " + String((err as Error)?.message ?? err)); }
-    };
-    list.append(b);
-  }
-  d.append(head, list);
-  d.addEventListener("click", (ev) => { if (ev.target === d) d.close(); });
-  d.addEventListener("close", () => d.remove());
-  document.body.append(d);
-  d.showModal();
-}
-
-/** An example's folder and files; its main .tex (the first file) returned. */
-export async function makeExample(ws: Workspace, ex: Example): Promise<Entry> {
-  for (let i = 1; i <= 1000; i++) {
-    const dir = "/LaTeX examples/" + ex.title + (i > 1 ? " (" + i + ")" : "");
-    if (await ws.stat(dir)) continue;
-    await ws.mkdir(dir);
-    let main: Entry | undefined;
-    for (const [name, text, b64] of ex.files) {
-      const content = b64 ? Uint8Array.from(atob(text), (c) => c.charCodeAt(0)) : new TextEncoder().encode(text);
-      const e = await ws.createByPerson(dir + "/" + name, { content });
-      main ??= e;
-    }
-    return main!;
-  }
-  throw new Error("no free folder name");
-}
+// The page's views (the toggle's buttons, in order) and each file's, kept in this browser: one record, the last
+// VIEWS_KEPT files' (the oldest dropped first), a file's view moved to the end each time it is set
+type View = "source" | "both" | "pdf";
+const VIEWS: [View, string, string][] = [["source", "Source", "Show the source only"], ["both", "Both", "Show the source and the document side by side"], ["pdf", "PDF", "Show the document only"]];
+const VIEW_KEY = "sagebrush-tex-view", VIEWS_KEPT = 200;
+const viewsKept = (): Record<string, View> => { try { const m = JSON.parse(localStorage.getItem(VIEW_KEY) ?? "{}"); return m && typeof m === "object" && !Array.isArray(m) ? m : {}; } catch { return {}; } };
+const keptViewOf = (fid: string): View | null => { const v = viewsKept()[fid]; return VIEWS.some(([x]) => x === v) ? v : null; };
+const keepView = (fid: string, v: View) => {
+  const m = viewsKept();
+  delete m[fid]; m[fid] = v;
+  const ks = Object.keys(m);
+  for (const k of ks.slice(0, Math.max(0, ks.length - VIEWS_KEPT))) delete m[k];
+  try { localStorage.setItem(VIEW_KEY, JSON.stringify(m)); } catch {}
+};
 
 // ---- a published document, opened read only (?tex-doc=, boot.ts: the articles' links): doc.ts, a chunk of its own
 // (/sagebrush-latex-doc.js), fetched only for such a link; it's given the editor's pieces from here, so they aren't
@@ -200,7 +178,7 @@ export async function newTex(ws: Workspace, open: (e: Entry) => unknown, folder 
 
 // the page mounted now: another .tex is opened in place (no reload: William's B2, the notebook no longer flashing by),
 // so the one shown is disposed of first (its worker, image blobs and listeners)
-let current: { dispose(): void; close(): Promise<unknown>; dirty(): boolean; settle(): Promise<boolean>; hold(on: boolean): void } | null = null;
+let current: { dispose(): void; close(): Promise<unknown>; dirty(): boolean; pending(): boolean; settle(): Promise<boolean>; hold(on: boolean): void } | null = null;
 // each mount's number: a mount whose number is no longer the last one's was replaced while it waited (a read, a path
 // lookup), and stops at its next step, before it sets the title, makes an editor or becomes current
 let mounts = 0;
@@ -258,6 +236,37 @@ const onNavigate = (e: any) => {
   fenceLanding = !staleLanding && !!fenceTok && tok === fenceTok;
   if (staleLanding) { const c = navApi()?.currentEntry; staleFrom = c?.key; staleFromUrl = c?.url ?? undefined; }
 };
+// Leaving the page, not only the file: a notebook, a board or a code file opened from here, a link. With an
+// edit not yet in the file, the navigation waits for it, as a switch to another file does (leave.ts): held, the edit
+// written, then made again; with nothing pending it goes at once. (Its write would otherwise be cut off with the page,
+// and the edit would be in neither the file nor any other device.) Where the browser has no Navigation API, the page's
+// own ways out wait the same way through leaveThen (globalThis.__sbTexLeave for the hosting page's: a notebook or a
+// board from the files beside it, the File menu's, Back); a reload there goes at once, as before.
+let leavingTo = "";
+const onLeave = (e: any) => {
+  if (e.navigationType === "traverse" || !e.cancelable || e.destination?.sameDocument || e.downloadRequest) return;
+  const url: string | undefined = e.destination?.url;
+  if (!url || url === leavingTo || !current?.pending()) return;
+  e.preventDefault();
+  const replace = e.navigationType === "replace";
+  // (a reload made again as a load of the same URL)
+  void leaveOk().then((ok) => { if (ok) { leavingTo = url; replace ? location.replace(url) : location.assign(url); } });
+};
+/** Go elsewhere once the editor shown has settled (its edit written, or asked about), with or without the Navigation
+ *  API (its navigate event, onLeave, then finds nothing pending): so a host's own wait after it (the desktop app's
+ *  disk, index.html leaveTo) comes after the edit is written. `go` may say the page stays (false, or a promise of it):
+ *  the editor, held read-only while it settled, is let go again. */
+export const leaveThen = (go: () => unknown): void => {
+  if (!current?.pending()) { void go(); return; }
+  void leaveOk().then(async (ok) => { if (ok && (await go()) === false) current?.hold(false); });
+};
+/** To another page by the hosting page's way out (index.html leaveTo: this editor's edit written, then the desktop app's
+ *  disk), or, without one, once the edit is written. */
+const leaveBy = (url: string): void => {
+  const host = (globalThis as any).__sbLeaveTo;
+  if (host) void host(url);
+  else leaveThen(() => location.assign(url));
+};
 const fenceDone = () => { fenceTok = 0; if (fencing) { fencing = false; fenceEnd(); } };
 const fenceStale = (ev: PopStateEvent) => {
   if (fenceLanding) {
@@ -314,7 +323,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (the editor shown is closed first: its pending edits written, or durable in its drafts, before this file is read)
   const my = ++mounts;
   // (the fence's listener: once, before any mount's own, so a stale landing it takes never reaches them)
-  if (!fenceHooked) { fenceHooked = true; window.addEventListener("popstate", fenceStale); navApi()?.addEventListener?.("navigate", onNavigate); }
+  if (!fenceHooked) { fenceHooked = true; window.addEventListener("popstate", fenceStale); navApi()?.addEventListener?.("navigate", onNavigate); navApi()?.addEventListener?.("navigate", onLeave); }
   const prev = current; current = null;
   closing = closing.then(() => prev?.close()).catch(() => {});
   await closing;
@@ -330,7 +339,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   if (typeof st.sbTex !== "number" || typeof st.sbTexId !== "string") history.replaceState({ ...st, sbTex: typeof st.sbTex === "number" ? st.sbTex : 0, sbTexId: entryId() }, "");
   noteShown();
   let dispose = () => { life.abort(); };
-  current = { dispose: () => dispose(), close: async () => dispose(), dirty: () => false, settle: async () => true, hold: () => {} };
+  current = { dispose: () => dispose(), close: async () => dispose(), dirty: () => false, pending: () => false, settle: async () => true, hold: () => {} };
   mine = current;
   if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS + PRINT_CSS; document.head.appendChild(style); }
   if (!document.getElementById("sb-katex")) {
@@ -340,7 +349,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const page = el("div", "tex-page"); root.appendChild(page);
   const banner = el("div", "tex-banner"); banner.setAttribute("role", "note");
   const bannerText = el("span"), bannerLink = el("a", "", "How it differs from LaTeX"), bannerX = el("button", "tex-banner-x", "×");
-  bannerLink.href = DIFFERS; bannerLink.target = "_blank"; bannerLink.rel = "noopener";
+  bannerLink.href = (host.site ?? "") + DIFFERS; bannerLink.target = "_blank"; bannerLink.rel = "noopener";
   bannerX.title = "Dismiss this notice"; bannerX.setAttribute("aria-label", bannerX.title);
   banner.append(bannerText, " ", bannerLink, bannerX);
   const setBanner = (why?: string) => { bannerText.textContent = why ? NO_SAVE(why) : BANNER; bannerLink.hidden = bannerX.hidden = !!why; banner.hidden = !why && pref(BANNER_OFF, 0, 1, 0) > 0; };
@@ -356,9 +365,13 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const title = el("span", "tex-title");
   // (Sagebrush, then the file's name, beside the corner Files button, as on the notebook and board pages)
   const home = el("a", "tex-home", "Sagebrush") as HTMLAnchorElement; home.href = "/?home"; home.title = "About Sagebrush, and where to start";
+  // (a plain click: by the page's way out, the edit written first; a new tab or window as the browser makes it)
+  home.onclick = (ev) => { if (ev.button || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return; ev.preventDefault(); leaveBy(home.href); };
   // (the save state, as Google Docs shows it: Saving…, Saved ✓; a failed write stays shown, with its reason)
   const saveState = el("span", "tex-savestate"); saveState.setAttribute("role", "status"); saveState.setAttribute("aria-live", "polite");
-  const toggle = el("button", "tex-toggle", "Preview");
+  // (what the page shows: the source, both, or the document alone; one click each, see the view below)
+  const toggle = el("span", "tex-toggle tex-view"); toggle.setAttribute("role", "group"); toggle.setAttribute("aria-label", "Show");
+  const viewBtns = VIEWS.map(([v, text, tip]) => { const b = el("button", "", text); b.dataset.view = v; b.title = tip; toggle.append(b); return b; });
   const status = el("span", "tex-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
   // the source's font size and the preview's zoom, each remembered in this browser
   const tools = el("span", "tex-tools");
@@ -409,7 +422,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   shareBtn.append("Share");
   shareBtn.title = "Share this document: a link anyone can open";
   const shareItem = () => fileMenu.querySelector<HTMLButtonElement>('[data-item="share"]');
-  const shareShown = () => { const it = shareItem(); shareBtn.hidden = !it || it.hidden || it.disabled; };
+  const shareShown = () => { const it = shareItem(); shareBtn.hidden = !!host.embed || !it || it.hidden || it.disabled; };
   const shareObs = new MutationObserver(shareShown); shareObs.observe(fileMenu, { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden", "disabled"] }); shareShown();
   life.signal.addEventListener("abort", () => shareObs.disconnect());
   // (its dialog hangs under it, as the notebook page's does: index.html's anchorShare, where the page has it)
@@ -418,7 +431,12 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   page.appendChild(fileMenu);
   // (a ?pair= link, or an agent this browser remembers: the pairing module mounted now, to connect or reconnect)
   // (the link taken by the hosting page before this loaded: pair-link.ts's key; or still in the URL)
-  if ((globalThis as any)[Symbol.for("sagebrush.pairLink")] || new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws).catch(agentFailed);
+  //  (none in the desktop app: no Agent button there either)
+  // (embedded: the pane has its tab, Close and the file's name, and the Agents page's pairing is the only one: none here,
+  //  so the agent chunk isn't fetched at all; the page's left edge is the frame's, whatever the hosting page's files do)
+  if (host.embed) { for (const e of [back, home, title, fileBtn, agentBtn, shareBtn]) e.hidden = true; page.classList.add("tex-embedded"); page.style.left = "0"; }
+  if (host.app || host.embed) agentBtn.hidden = true;
+  else if ((globalThis as any)[Symbol.for("sagebrush.pairLink")] || new URLSearchParams(location.search).has("pair") || reloadNow) void pairAgent(host.ws).catch(agentFailed);
   else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws).catch(agentFailed); }, () => {});
   const main = el("div", "tex-main");
   const left = el("div", "tex-left"), right = el("div", "tex-right");
@@ -433,7 +451,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const barText = el("span", "tex-conflict-t");
   const useTheirs = el("button", "tex-theirs", "Use theirs (keep mine as a copy)"), keepMine = el("button", "tex-mine", "Keep mine (theirs stays in TimeTravel)");
   bar.append(barText, useTheirs, keepMine);
-  page.append(head, banner, bar, main);
+  // (the agent's bar, when one is connected: its row under the head and its strip, over the notebook page's;
+  //  workspace/agent-ui.ts)
+  const agentRow = el("div", "tex-agent"); agentRow.dataset.sbagSlot = "2";
+  page.append(head, banner, agentRow, bar, main);
   const say = (t: string) => { status.textContent = t; };
   const pref = (k: string, lo: number, hi: number, d: number) => { let v = d; try { v = Number(localStorage.getItem(k) ?? d); } catch {} return Number.isInteger(v) && v >= lo && v <= hi ? v : d; };
   const keep = (k: string, v: number) => { try { localStorage.setItem(k, String(v)); } catch {} };
@@ -454,7 +475,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // ---- a notebook opened while this page is up (from the files beside it, a row's menu, Open as a notebook, an
   // upload): the notebook page's openId() asks here first (index.html, in a LaTeX build only) and its page is opened
   // by URL instead, as a board's is; without this it would be loaded unseen under the editor
-  (globalThis as any).__sbTexOpen = (id: string) => { location.assign("/?nb=" + encodeURIComponent(id)); return true; };
+  (globalThis as any).__sbTexOpen = (id: string) => { leaveBy("/?nb=" + encodeURIComponent(id)); return true; };
+  (globalThis as any).__sbTexLeave = leaveThen;
   // another .tex (from the files beside this page, New, an example): opened here, in place, its URL pushed; a new tab
   // as before (boot.ts's hook); unsaved changes asked about first
   const g: any = globalThis, bootHook = (g.__sbTexBoot ??= g.__sbTex);
@@ -696,7 +718,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   });
   life.signal.addEventListener("abort", () => unwatchInputs());
   const E = createEditor({
-    left, right, preview, text: opened.text, large: read.content.length > 2 ** 20, say, images, sage: results,
+    left, right, preview, text: opened.text, large: read.content.length > 2 ** 20, say, images, sage: results, run: !!host.sandbox,
     workerUrl: new URL("sagebrush-latex-worker.js", location.href),
     onImageRefs: (refs, tok) => void resolveImages(refs, tok),
     inputs, onInputRefs: (refs, tok) => void readInputs(refs, tok),
@@ -800,6 +822,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (running) presenting.running(true);
   }, () => say("Couldn't load the presenter. Check the network, then click Present to try again."));
   E.onRendered(() => { presentBtn.hidden = slidesNow().length === 0; });
+  // (one wait for the chunk per page at most: renders while it comes add none, and once it comes the preview as it is
+  //  then is coloured; astra's SEC on #1009)
+  let hlWait = false;
+  E.onRendered(() => { if (!hlWait && preview.querySelector("pre.sageblock:not([data-hl])")) { hlWait = true; (hlMod ??= import(hlUrl).catch(() => null)).then((m) => { hlWait = false; if (m && live()) m.colour(preview, life.signal); }); } });
   // (the preview's interacts, drawn after each render that has one not drawn yet; the slide being presented shown again,
   //  so its copy has them)
   E.onRendered(() => {
@@ -820,7 +846,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   //  them, one rule for any set (board): "A", "A and B", "A, B and C")
   const langs = () => { const l = E.lastCheck()?.sage ?? [], m = (x: any) => (/^py/.test(x.mode) ? 1 : /^magma/.test(x.mode) ? 2 : 0); return ["Sage", "Python", "Magma"].filter((_, i) => l.some((x: any) => m(x) === i)); };
   const what = () => (langs().some((x) => x !== "Sage") ? "code item" : "SageTeX item");
-  const runTitle = () => { const L = langs(); return "Run the document's " + (L.length > 1 ? L.slice(0, -1).join(", ") + " and " + L[L.length - 1] : L[0] ?? "Sage") + " code in this browser: Shift+Enter"; };
+  const runTitle = () => { const L = langs(); return host.app || "Run the document's " + (L.length > 1 ? L.slice(0, -1).join(", ") + " and " + L[L.length - 1] : L[0] ?? "Sage") + " code in this browser: Shift+Enter"; };
   E.onRendered(() => { const c = E.lastCheck(); if (c) runBtn.hidden = !(Array.isArray(c.sage) && c.sage.length); if (!running) runBtn.title = runTitle(); });
   const runIdle = () => { running = false; presenting?.running(false); runBtn.textContent = "Run"; runBtn.title = runTitle(); };
   runBtn.onclick = async () => {
@@ -832,7 +858,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     // (the page replaced or closed while Run's code loaded: this Run never starts, so nothing of the old document's
     //  folder is listed or read (daybreak3, #824))
     if (!live() || running) return;
-    if (!host.sandbox) { say(rc.NO_SANDBOX); return; }
+    if (!host.sandbox) { say(host.app ?? rc.NO_SANDBOX); return; }
     const session = (sageSession ??= rc.sessionOf(rc.sandboxEngine(host.sandbox, new URL(".", import.meta.url))));
     const c = E.lastCheck();
     if (!c) { say("the preview is behind the source: try again when it has caught up"); return; }
@@ -905,6 +931,36 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     const n = (Array.isArray(c.sage) ? c.sage : []).filter((x: any) => x.s === "stale").length;
     if (n) say(`${n} ${what()}${n === 1 ? "" : "s"} out of date: Shift+Enter runs ${n === 1 ? "it" : "them"} again`);
   });
+  // A .tex the paired agent made runs once by itself when it is shown here (decided Nov 19 2026, as a notebook it created:
+  // workspace/agent-made-tex.ts). Shown at a revision whose code hasn't run (an item not run, or out of date), unedited,
+  // this page asks the pairing's page whether it may; the yes comes once for that file at that revision, from the
+  // pairing whose agent made it, under the grant it was made under, still in force with May run code and Everything.
+  // Then this page's own Run, as the person's, if it still shows that revision unedited. Asked again when the pairing
+  // says its agent made the revision shown (a build after this page opened it)
+  const made = typeof BroadcastChannel === "function" && host.sandbox && !host.app ? new BroadcastChannel(MADE_CHANNEL) : null;
+  let askedAt = "", asking: { id: string; rev: number; text: string } | null = null;
+  // (an item not run yet, as the check counts them (check.ts): not refused, and not ok, failed or blocked)
+  const unrun = () => { const c = E.lastCheck(); return hasCode(c) && c.sage.some((x: any) => !x.err && x.s !== "ok" && x.s !== "error" && x.s !== "blocked"); };
+  const askRun = () => {
+    if (!made || !live() || running || !saveable || src.value !== savedText || !unrun()) return;
+    if (askedAt === host.fid + "@" + docRev) return;
+    askedAt = host.fid + "@" + docRev;
+    asking = { id: crypto.randomUUID(), rev: docRev, text: src.value };
+    made.postMessage({ t: "tex-may-run", id: asking.id, fid: host.fid, rev: docRev });
+  };
+  if (made) {
+    made.onmessage = (e: MessageEvent) => {
+      const m = e.data;
+      if (m?.t === "tex-made" && m.fid === host.fid && m.rev === docRev) { askedAt = ""; askRun(); }
+      else if (m?.t === "tex-may-run" && m.ok === true && asking && m.id === asking.id) {
+        const q = asking;
+        asking = null;
+        if (live() && !running && docRev === q.rev && src.value === q.text && savedText === q.text && unrun()) runBtn.click();
+      }
+    };
+    life.signal.addEventListener("abort", () => made.close());
+    E.onRendered(askRun);
+  }
   const agentTarget = { file: () => where.path, text: () => src.value, lastCheck: E.lastCheck, current: E.posCurrent, preview, images, css: PAGE_CSS, refresh: loadResults };
   registerLatexTools(); setTarget(agentTarget);
   life.signal.addEventListener("abort", () => clearTarget(agentTarget));
@@ -980,7 +1036,21 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const flushKey = (ev: KeyboardEvent) => { if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && ev.key.toLowerCase() === "s") { ev.preventDefault(); if (saveable) void saver?.flush(); else say("This file can't be saved here: " + whyNot + "."); } };
   src.addEventListener("keydown", flushKey);
   document.addEventListener("keydown", (ev) => { if (ev.target !== src) flushKey(ev); }, on);
-  toggle.onclick = () => { const p = page.classList.toggle("show-preview"); toggle.textContent = p ? "Source" : "Preview"; };
+  // The view: the source, both side by side, or the document alone (PDF), one click each, remembered for this file in
+  // this browser (keptViewOf/keepView). With none kept, both on a wide page, and on a narrow one (700 px or less) the source,
+  // as before: there is no room for both there, so Both isn't offered (CSS: a kept "both" shows the document)
+  const setView = (v: View) => { page.dataset.view = v; for (const b of viewBtns) b.setAttribute("aria-pressed", String(b.dataset.view === v)); };
+  // (embedded, the pane's own record for the file, and the document alone until the person chooses: William, Nov 18)
+  const viewKey = host.embed ? "pane:" + host.fid : host.fid;
+  setView(keptViewOf(viewKey) ?? (host.embed ? "pdf" : matchMedia("(max-width: 700px)").matches ? "source" : "both"));
+  for (const b of viewBtns) b.onclick = () => { const v = b.dataset.view as View; setView(v); keepView(viewKey, v); };
+  // (embedded: the pane asks before it closes, {t: "may-close", id}, and this page's leave guard answers, its edit
+  //  written or the person asked, {t: "may-close", id, ok}; only from the frame's own parent, of this very origin)
+  if (host.embed) addEventListener("message", (e: MessageEvent) => {
+    if (e.source !== parent || e.origin !== location.origin || e.data?.t !== "may-close") return;
+    const id = String(e.data.id ?? "").slice(0, 64);
+    void leaveOk().then((ok) => parent.postMessage({ t: "may-close", id, ok }, location.origin));
+  }, on);
   // (the browser's own prompt on leaving only when a write has failed: William, Nov 2, "never" otherwise)
   window.addEventListener("beforeunload", (ev) => { if (saver?.failed) { ev.preventDefault(); ev.returnValue = ""; } }, on);
   window.addEventListener("pagehide", dropImages, on);
@@ -1026,7 +1096,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   //  its last write is under way it says so, rather than leaving an older state shown: a slow close write read as a
   //  failure (#551's DB3 follow-up))
   const closingSaid = () => { if (saver && saver.state.k !== "saved" && saver.state.k !== "readonly") { saveState.classList.remove("failed"); saveState.textContent = "Saving before switching…"; } };
-  current = { dispose: () => { void saver?.dispose(); dispose(); }, close: async () => { closingSaid(); await saver?.dispose(); dispose(); }, dirty: () => !!saver?.failed, hold: (on: boolean) => { held = on; src.readOnly = on || roSaver; }, settle: () => saver ? saver.settle() : Promise.resolve(true) };
+  current = { dispose: () => { void saver?.dispose(); dispose(); }, close: async () => { closingSaid(); await saver?.dispose(); dispose(); }, dirty: () => !!saver?.failed, pending: () => !!saver && isDirty(), hold: (on: boolean) => { held = on; src.readOnly = on || roSaver; }, settle: () => saver ? saver.settle() : Promise.resolve(true) };
   mine = current;
   // (the test build only: the page test tells this workspace an op as sync's view would; elsewhere this folds away)
   if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) { (globalThis as any).__sbTexWs = host.ws; (globalThis as any).__sbTexActor = () => actor; (globalThis as any).__sbTexSession = () => sageSession; }

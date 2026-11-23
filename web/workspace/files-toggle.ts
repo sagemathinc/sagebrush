@@ -29,7 +29,9 @@ export const FILES_TOGGLE_CSS = `
 body.sbft { --sbft-w: 44px; }
 /* (small, as claude.ai's (William, Nov 12): the icon alone, no border; "Files" is its name for screen readers and its
    tooltip, and the panel's header says it beside the button while the files are shown) */
-.sb-files-toggle { position: fixed; top: 8px; left: 8px; z-index: 1000; display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: none; color: #5d645f; cursor: pointer; }
+/* (under the dialogs over the page, z-index 900 and up: never on a dialog's heading, as on a phone, where a dialog
+   reaches the window's corner) */
+.sb-files-toggle { position: fixed; top: 8px; left: 8px; z-index: 899; display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: none; color: #5d645f; cursor: pointer; }
 .sb-files-toggle:hover { background: rgba(0, 0, 0, .07); color: #1f2421; }
 .sb-files-toggle:focus-visible { outline: 2px solid #4a6b49; outline-offset: -2px; }
 .sb-files-toggle svg { width: 18px; height: 18px; flex: none; }

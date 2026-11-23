@@ -96,14 +96,18 @@ export interface Figure {
 }
 
 // ---- the worker thread: the board's interpreter
-export function boardRunWorker(data: { dir: string }) {
+// (`importable`: its directory on sys.path too, as `sagebrush notebook` has it, so the files beside a notebook import:
+// `notebook run`'s, never a board's, whose directory is an empty one of its own)
+// (`confine`: the roots its program may use, src/runtime/modules.ts setConfine: `notebook run --confine`'s)
+export function boardRunWorker(data: { dir: string; importable?: boolean; confine?: string[] }) {
+  if (Array.isArray(data.confine)) require("./runtime/modules").setConfine(data.confine);
   const { notebookSession } = require("./notebook-session");
   const port = parentPort!;
   const session = notebookSession((m: any) => port.postMessage(m), {
     captureStreams: true,
     limit: { item: ITEM_OUTPUT_MAX, run: RUN_OUTPUT_MAX, displays: ITEM_DISPLAYS_MAX },
     limits: workerData?.sagebrushLimits ?? null,
-    init: (R: any) => R.importModule("os").chdir(data.dir),
+    init: (R: any) => { R.importModule("os").chdir(data.dir); if (data.importable === true) R.importModule("sys").path.push(data.dir); },
   });
   port.on("message", (m: any) => session.handle(m));
   const { R } = require("./compile");
@@ -571,7 +575,7 @@ export function collect(list: any[], m: any, kept: { run: number }) {
     size.cut = true;
     return;
   }
-  const bytes = m.stream ? String(m.text ?? "").length : m.display ? displayCost(m.display) : m.interact ? DISPLAY_ENVELOPE + JSON.stringify(m.interact).length : 0;
+  const bytes = m.stream ? String(m.text ?? "").length : m.display ? displayCost(m.display, m.metadata) : m.interact ? DISPLAY_ENVELOPE + JSON.stringify(m.interact).length : 0;
   if ((m.display || m.interact) && !size.cut && ++size.displays > ITEM_DISPLAYS_MAX) {
     size.cut = true;
     sayCut(list, "displays");
@@ -591,7 +595,8 @@ export function collect(list: any[], m: any, kept: { run: number }) {
     // (joined only with the same area's: the cell's own, or the same interact's)
     if (last?.output_type === "stream" && last.name === m.stream && interactTarget.has(last) === mine && (!mine || interactTarget.get(last) === m.target)) { last.text += m.text; if (mine) interactBytes.set(last, (interactBytes.get(last) ?? 0) + bytes); }
     else keep({ output_type: "stream", name: m.stream, text: m.text });
-  } else if (m.display) { const o = { output_type: "display_data", data: m.display, metadata: {} }; keep(o); if (mine) interactDisplays.add(o); }
+  // (its metadata kept as charged above, a plain object only: a PNG's size to show it at, saved and exported with it)
+  } else if (m.display) { const md = m.metadata && typeof m.metadata === "object" && !Array.isArray(m.metadata) ? m.metadata : {}; const o = { output_type: "display_data", data: m.display, metadata: md }; keep(o); if (mine) interactDisplays.add(o); }
   else if (m.interact) list.push({ output_type: "display_data", data: { "text/plain": "[interactive controls]" }, metadata: {} });
 }
 

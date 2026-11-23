@@ -25,6 +25,7 @@ import secrets
 import signal
 import stat
 import sys
+import shutil
 import tempfile
 import time
 
@@ -63,6 +64,38 @@ class Clock:
         return int(time.time() * 1000) + self.off
 
 
+def read_bytes(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except FileNotFoundError:
+        return b""
+
+
+def complete_lines(path):
+    """The lines a fake has written in full so far, each without its newline. A line still being written (no newline
+    yet) is not one: read mid-write, it would be a partial payload, taken for a whole message with its last byte cut."""
+    try:
+        with open(path) as f:
+            text = f.read()
+    except FileNotFoundError:
+        return []
+    return text.split("\n")[:-1]
+
+
+
+def test_a_line_still_being_written_is_not_read():
+    # (a fake's log read mid-write: only whole lines count; the line without its newline yet is left for the next read)
+    d = tempfile.mkdtemp(dir=TMP)
+    path = os.path.join(d, "fake.log")
+    assert complete_lines(path) == []
+    with open(path, "w") as f:
+        f.write('READY\n{"n":1}\n{"f":"fff')
+    assert complete_lines(path) == ["READY", '{"n":1}']
+    with open(path, "a") as f:
+        f.write('f"}\n')
+    assert complete_lines(path) == ["READY", '{"n":1}', '{"f":"ffff"}']
+    shutil.rmtree(d)
 class Run:
     """A runner serving agent pages, against a fake relay, in this process."""
 
@@ -93,35 +126,19 @@ class Run:
         return self
 
     def fake_lines(self):
-        try:
-            with open(self.fake_log) as f:
-                return [line[:-1] for line in f if line != "READY\n" and not line.startswith("RELAY ")]
-        except FileNotFoundError:
-            return []
+        return [line for line in complete_lines(self.fake_log) if line != "READY" and not line.startswith("RELAY ")]
 
     def relay_lines(self):
         """The runner's own lines the child got, in order, parsed."""
-        try:
-            with open(self.fake_log) as f:
-                return [json.loads(line[6:]) for line in f if line.startswith("RELAY ")]
-        except FileNotFoundError:
-            return []
+        return [json.loads(line[6:]) for line in complete_lines(self.fake_log) if line.startswith("RELAY ")]
 
     def child_lines(self):
         """Everything the child got, in order: the runner's lines as dicts, the page's messages as text."""
-        try:
-            with open(self.fake_log) as f:
-                return [json.loads(line[6:-1]) if line.startswith("RELAY ") else line[:-1] for line in f if line != "READY\n"]
-        except FileNotFoundError:
-            return []
+        return [json.loads(line[6:]) if line.startswith("RELAY ") else line for line in complete_lines(self.fake_log) if line != "READY"]
 
     def kind_lines(self, name):
         """The page messages one kind's fake got, in order."""
-        try:
-            with open(self.kind_logs[name]) as f:
-                return [line[:-1] for line in f if line != "READY\n" and not line.startswith("RELAY ")]
-        except FileNotFoundError:
-            return []
+        return [line for line in complete_lines(self.kind_logs[name]) if line != "READY" and not line.startswith("RELAY ")]
 
     def kind_ready(self, name):
         try:
@@ -835,15 +852,39 @@ async def test_line_split_across_writes_and_a_last_line_without_newline():
     sg = await signer()
     try:
         await AgentPage(run, sg).open()
+        before = []
         while True:
             m = await run.leg.json()
             if m.get("method") == "agent.ended":
                 break
-        await asyncio.sleep(0.2)
-        assert b"a last line with no newline was dropped" in open(run.log.path, "rb").read()
+            before.append(m)
+        # (the unterminated tail never reaches the page as a message. Whether the runner logs it is best effort: its
+        #  watcher, at the child's exit, cancels the pump, which logs the tail only if it reads EOF first. So it isn't
+        #  asserted here; the pump's own handling of a tail at EOF is the next test's)
+        assert not any("cut" in json.dumps(x) for x in before), before
     finally:
         sg.close()
         await run.end()
+
+
+@aio
+async def test_the_pump_delivers_whole_lines_and_logs_a_tail_without_newline_at_eof():
+    # (the pump alone, on a stream fed here: a whole line is delivered; at EOF the tail with no newline isn't, and is
+    #  logged with its length)
+    d = tempfile.mkdtemp(dir=TMP)
+    c = A.AgentChild([sys.executable, "-c", "pass"], log=A.AgentLog(os.path.join(d, "state")))
+    got = []
+
+    async def deliver(text, msg):
+        got.append(text)
+    c._deliver = deliver
+    c.stdout = asyncio.StreamReader()
+    c.stdout.feed_data(b'{"a":1}\n{"cut":')
+    c.stdout.feed_eof()
+    await asyncio.wait_for(c._pump(), 5)
+    assert got == ['{"a":1}'], got
+    assert b"[runner] a last line with no newline was dropped (7 bytes)\n" in read_bytes(c.log.path)
+    shutil.rmtree(d)
 
 
 @aio
@@ -915,11 +956,7 @@ def fake_child(*args, grace_ms=60_000):
 
 
 def lines(log):
-    try:
-        with open(log) as f:
-            return [x[:-1] for x in f]
-    except FileNotFoundError:
-        return []
+    return complete_lines(log)
 
 
 def pid_gone(pid):
@@ -1262,8 +1299,8 @@ async def test_cycles_ending_in_a_detach_leave_no_attached_line_behind():
 
 # ================= the reviewed sagebrush-agent, vendored: its version, and its clamp against the runner's frame
 
-VENDORED = os.path.join(HERE, "fixtures", "sagebrush-agent-0.5.0.tgz")
-VENDORED_SHA256 = "019b9020c12a0294705ac6c1ba76433b71dab8e89ef3be31e063cba54401016b"
+VENDORED = os.path.join(HERE, "fixtures", "sagebrush-agent-0.8.14.tgz")
+VENDORED_SHA256 = "73052fd1620bef59120c997327e8876461d719d5b2cad6651db8bd5a603301dd"
 STUB_DEPS = os.path.join(HERE, "remote_agent_stub_deps.mjs")
 
 
@@ -1311,8 +1348,9 @@ def test_vendored_agent_is_the_version_usage_names():
 
 
 def test_the_vendored_rows_stand_ins_fail_loudly_when_used():
-    """The two npm imports the vendored agent gets as stand-ins throw on any real use (ws constructed, a zod schema
-    validated or looked inside), so the clamp row passing shows neither does anything on the --stdio path."""
+    """The three npm imports the vendored agent gets as stand-ins throw on any real use (ws constructed, a zod schema
+    validated or looked inside, the Claude Agent SDK's settings resolver, model or MCP server called), so the clamp row
+    passing shows none does anything on the --stdio path with the fake model."""
     import shutil
     import subprocess
     probe = (
@@ -1324,11 +1362,14 @@ def test_the_vendored_rows_stand_ins_fail_loudly_when_used():
         'try { JSON.stringify(s); } catch { threw.push("JSON"); }'
         'const ws = await import("ws");'
         'try { new ws.WebSocketServer({}); } catch { threw.push("ws"); }'
+        'const sdk = await import("@anthropic-ai/claude-agent-sdk");'
+        'for (const k of ["resolveSettings", "filterEscalatingDefaultMode", "query", "deleteSession", "createSdkMcpServer", "tool"]) { try { sdk[k]({}); } catch { threw.push(k); } }'
         'console.log(threw.join(","));'
     )
     r = subprocess.run([shutil.which("node"), "--import", STUB_DEPS, "--input-type=module", "-e", probe],
                        capture_output=True, text=True, timeout=60)
-    assert r.stdout.strip() == "parse,safeParse,shape,_def,String,JSON,ws", (r.stdout, r.stderr[-500:])
+    assert r.stdout.strip() == ("parse,safeParse,shape,_def,String,JSON,ws,"
+                                "resolveSettings,filterEscalatingDefaultMode,query,deleteSession,createSdkMcpServer,tool"), (r.stdout, r.stderr[-500:])
 
 @aio
 async def test_vendored_agent_clamps_at_the_runner_frame():

@@ -227,7 +227,13 @@ test("3-D figures: the interactive view's scene (MATLAB's axes, colors and view)
   // (view(v): [x y z] toward the camera, as the documented example's angles; [caz, cel] = view(...); view(ax, 2);
   // one output, not the documented [caz, cel], refused)
   assert.equal(msgs.filter((m) => m.id === 10 && m.stream).map((m) => m.text).join(""), "135.0000 35.2644\n-68.1986 42.8760\n0 90\n" + "view: one output is not supported; use [caz, cel] = view.\n".repeat(2));
-  for (const id of [4, 5, 6, 7, 8, 9, 10]) {
+  // (cells 6 and 9, too big for the view, have SVGs over 1 MB: shown as a PNG instead, said under it,
+  // lib/_graphics.py figures' "auto")
+  for (const id of [6, 9]) {
+    assert.ok(shown(id)["image/png"] && !shown(id)["image/svg+xml"] && !scene(id), "cell " + id + ": a PNG, its SVG being over 1 MB");
+    assert.match(msgs.filter((m) => m.id === id && m.stream).map((m) => m.text).join(""), /^Shown as a PNG: its SVG would be [\d.]+ MB\./);
+  }
+  for (const id of [4, 5, 7, 8, 10]) {
     assert.ok(shown(id)["image/svg+xml"] && !scene(id), "cell " + id + ": the SVG only");
   }
   // (the figure's Color behind the SVG; MATLAB's dark gray, not the page's color)
@@ -239,7 +245,7 @@ test("3-D figures: the interactive view's scene (MATLAB's axes, colors and view)
   assert.match(shown(8)["image/svg+xml"], /aria-label="[^"]*currentColor label/);
 });
 
-test("reactive notebook: a MATLAB cell's definitions and references (src/dataflow.ts); no renaming", () => {
+test("reactive notebook: a MATLAB cell's definitions and references (src/dataflow.ts); renaming in MATLAB's tokens", () => {
   const { analyzeCell } = require("../src/dataflow");
   const { renameInCell, forwardRefers } = require("../src/rename");
   const names = (src: string) => {
@@ -254,7 +260,8 @@ test("reactive notebook: a MATLAB cell's definitions and references (src/dataflo
   assert.deepEqual(names("f(y)\n3 + 4\nans"), [[], ["f", "y"]]);
   assert.deepEqual(names("for k = 1:n\n  s = s + k;\nend"), [["k", "s"], ["n", "s"]]);
   assert.throws(() => analyzeCell("x = [1 2", "c", { mode: "matlab" }), MatlabSyntaxError);
-  assert.equal(renameInCell("x = 1", "x", "x_2", { mode: "matlab" }), null);
+  // (page-order scoping: test/matlab-page-order.test.ts)
+  assert.equal(renameInCell("x = 1", "x", "x_2", { mode: "matlab" }), "x_2 = 1");
   assert.equal(forwardRefers("x = 1", "x", "matlab"), false);
 });
 
@@ -2899,4 +2906,114 @@ test("x = save, x = clear and x = clearvars refuse before they run: no matlab.ma
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("assert(observed, expected[, tol]), Octave's form, which MATLAB lacks: compared as Octave 11.1 compares, its error table as Octave prints it", () => {
+  const { execFileSync } = require("node:child_process");
+  const cli = require("node:path").join(__dirname, "..", "src", "cli.js");
+  // (each case's message as octave-cli 11.1 printed it; Octave's header quotes the call's own text, which Sagebrush gives
+  // as its generic "cond,expected,tol")
+  const oracle: [string, string][] = [
+    [
+      "assert([1 2 3 4], [0 2 0 4])",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n    (1)           1            0         Abs err 1 exceeds tol 0 by 1\n    (3)           3            0         Abs err 3 exceeds tol 0 by 3"
+    ],
+    [
+      "assert(1/3, 0.3, 0.01)",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()        0.33333        0.3        Abs err 0.033333 exceeds tol 0.01 by 0.02"
+    ],
+    [
+      "assert(1, 1.2, -0.1)",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()           1           1.2        Rel err 0.16667 exceeds tol 0.1 by 0.07"
+    ],
+    [
+      "assert(1, 0, -0.1)",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()           1            0         Abs err 1 exceeds tol 0.1 by 0.9"
+    ],
+    [
+      "assert([1 2 3], [1 2])",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     .          O(1x3)       E(1x2)      Dimensions don't match"
+    ],
+    [
+      "assert('ab', 'abc')",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     []          'ab'        'abc'       Strings don't match"
+    ],
+    [
+      "assert(int8(1), 1)",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()           O            E         Class int8 != double"
+    ],
+    [
+      "assert([NaN 1 2 Inf], [1 1 3 5])",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n    (1)          NaN           1         'NaN' mismatch\n    (4)          Inf           5         'Inf' mismatch\n    (3)           2            3         Abs err 1 exceeds tol 0 by 1"
+    ],
+    [
+      "assert([1 2; 3 4], [1 2; 3 5])",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n   (2,2)          4            5         Abs err 1 exceeds tol 0 by 1"
+    ],
+    [
+      "assert(ones(2,1,2), zeros(2,1,2))",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n  (1,1,1)         1            0         Abs err 1 exceeds tol 0 by 1\n  (2,1,1)         1            0         Abs err 1 exceeds tol 0 by 1\n  (1,1,2)         1            0         Abs err 1 exceeds tol 0 by 1\n  (2,1,2)         1            0         Abs err 1 exceeds tol 0 by 1"
+    ],
+    [
+      "assert({1, 'a'}, {1, 'b'})",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     []          'a'          'b'        Strings don't match"
+    ],
+    [
+      "assert(struct('a', 1), struct('b', 1))",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     .            O            E         Structure fieldname mismatch"
+    ],
+    [
+      "assert(uint8(3), uint8(4))",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()           3            4         Abs err 0 exceeds tol 0 by 0"
+    ],
+    [
+      "assert(1+1i, 2+1i)",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()          1+1i         2+1i       Abs err 1 exceeds tol 0 by 1"
+    ],
+    [
+      "assert(-0.000123456, 1)",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()      -0.00012346       1         Abs err 1.0001 exceeds tol 0 by 1"
+    ],
+    [
+      "assert(complex(NaN,1),complex(NaN,2))",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()         NaN+1i       NaN+2i      Abs err 1 exceeds tol 0 by 1"
+    ],
+    [
+      "assert(complex(1,NaN),complex(2,NaN),-0.1)",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()         1+NaNi       2+NaNi      Rel err 0.5 exceeds tol 0.1 by 0.4"
+    ],
+    [
+      "assert(complex(NaN,1),complex(1,NaN))",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()         NaN+1i       1+NaNi      'NaN' mismatch"
+    ],
+    [
+      "assert(complex(NaN,Inf),complex(NaN,1))",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()        NaN+Infi      NaN+1i      'Inf' mismatch"
+    ],
+    [
+      "assert(complex(NaN,1),NaN)",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()           O            E         complex != real"
+    ],
+    [
+      "assert(1,complex(1,2))",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()           O            E         real != complex"
+    ]
+  ];
+  const code = oracle.map(([c]) => `try, ${c}, disp('PASS'), catch e, disp(e.message), end, disp('@@')`).join("\n");
+  const got = execFileSync(process.execPath, [cli, "--matlab", "-c", code], { encoding: "utf8" }).split("@@\n");
+  oracle.forEach(([c, want], k) => assert.equal(got[k].replace(/\n$/, ""), want, c));
+  // (within tolerance, NaN in the same places, equal text, cells and structs: no error)
+  const pass = ["assert(1, 1.05, 0.1)", "assert(100, 105, -0.1)", "assert([1 NaN], [1 NaN])", "assert('abc', 'abc')",
+    "assert({1, 'a'}, {1, 'a'})", "assert(struct('a', 1), struct('a', 1))", "assert(1+2i, 1+2.1i, 0.2)", "assert(0, 0, -0.1)",
+    "assert(complex(NaN, 1), complex(NaN, 1))", "assert(complex(NaN, NaN), complex(NaN, NaN))", "assert(complex(1, Inf), complex(1, Inf))"];
+  const p = execFileSync(process.execPath, [cli, "--matlab", "-c", pass.map((c) => `${c}; disp('ok')`).join("\n")], { encoding: "utf8" });
+  assert.equal(p, "ok\n".repeat(pass.length));
+  // MATLAB's own forms are kept: a condition with a message (text second argument), and a condition alone
+  const m = (c: string) => execFileSync(process.execPath, [cli, "--matlab", "-c", `try, ${c}, disp('PASS'), catch e, disp([e.identifier '|' e.message]), end`], { encoding: "utf8" }).trim();
+  assert.equal(m("assert(false)"), "MATLAB:assertion:failed|Assertion failed.");
+  assert.equal(m("assert(false, 'id:x', 'msg %s', 'q')"), "id:x|msg q");
+  // (where the readings differ, a numeric first argument with a text second is MATLAB's condition and message:
+  // Octave would compare 1 with 'a' and fail)
+  assert.equal(m("assert(1, 'a')"), "PASS");
+  assert.equal(m("assert(1, 1, 0.1, 4)"), "|assert(observed, expected, tol) takes at most three inputs.");
 });
