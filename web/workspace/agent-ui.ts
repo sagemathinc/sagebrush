@@ -156,6 +156,8 @@ export const RESTORE_MS = 10_000;
 // then given up on as before. Nothing about who may pair changes: the same session, the same refusal otherwise)
 export const BUSY_STEP_MS = 250;
 export const BUSY_FOR_MS = 2000;
+/** A connection's close reason when another tab of this browser asked for it (release()). */
+export const RELEASED = "let go for another tab";
 // (a connection lost while the page stays (a network drop, the agent's machine asleep) is tried again by itself: first
 // after RETRY_FIRST_MS, then twice as long each time up to RETRY_MAX_MS, for as long as the grant lasts; #1620)
 export const RETRY_FIRST_MS = 1000;
@@ -212,6 +214,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
   let kept: ReloadRecord | null = null;
   // (the pairings whose loss is being tried again: once each)
   const retried = new WeakSet<AgentPairing>();
+  // (the pairings let go because another tab asked: never tried again or restored here, SEC move-connection r1 A)
+  const released = new WeakSet<AgentPairing>();
 
   function dialog(title: string, body: (box: HTMLElement, close: () => void) => void, onClose?: () => void) {
     const box = h("div", { className: "sbag-box" }, h("h2", { textContent: title }));
@@ -422,6 +426,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
       if (p.state === "granted" && pairing === p) kept = null;
       if (p.state === "closed" && pairing === p && /^revoked by the person$|^the grant expired$/.test(p.closeReason)) kept = null;
       // (a refused hello is said in the Connect dialog itself; this is for a pairing that was connected)
+      // (let go for another tab: nothing kept for a [Reconnect], nothing tried again; the remembered grant stays)
+      if (released.has(p)) { if (pairing === p) kept = null; return; }
       if (was && p.state === "closed" && p.closeReason && !/^revoked by the person$|^not allowed$/.test(p.closeReason)) {
         if (pairing === p && p.closeReason !== "the grant expired") kept = p.lostRecord;
         // (B, #1620: tried again by itself, once per loss, on a page that keeps a reload record; a remembered grant's
@@ -541,6 +547,20 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
     }, () => { if (back?.isConnected && !pairingLive()) back.focus(); });
   }
   const pairingLive = () => !!pairing && pairing.state !== "closed";
+  /** Whether this page's connection is one another tab may take over: granted, local (not over a runner) and
+   * remembered in this browser. */
+  const releasable = () => !!pairing && pairing.state === "granted" && !pairing.link && pairing.remembers;
+  /** Another tab asked for the agent (#1550, SEC move-connection r1 option A): a releasable connection lets go, its
+   * socket closed and nothing else (never Revoke: the remembered grant and the chats stay), marked first so its loss is
+   * never tried again or restored here. Anything else (no connection, one over a runner, an unremembered one) is left
+   * as it is. Whether it let go. */
+  function release(): boolean {
+    const p = pairing;
+    if (!p || !releasable()) return false;
+    released.add(p);
+    p.drop(RELEASED);
+    return true;
+  }
 
   /** The first remembered grant still in force, for the page's "Use remembered access" (A14 N6); null if none. */
   async function remembered(): Promise<Kept["grant"] | null> {
@@ -715,7 +735,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
   if (link) { if (o.reload) void takeReloadRecord(storage, o.reload.scope); connect(link.code, link.port); }
   // (in a microtask: the caller has this function's result before any restore state is said to it)
   else queueMicrotask(() => void restoreOnLoad());
-  return { connect, reconnectKept, remembered, useRemembered: () => reconnect(), get canReconnect() { return !!(kept ?? pairing?.lostRecord); }, get pairing() { return pairing; },
+  return { connect, reconnectKept, remembered, release, releasable, useRemembered: () => reconnect(), get canReconnect() { return !!(kept ?? pairing?.lostRecord); }, get pairing() { return pairing; },
     // (another way to connect, the page's own (the Agents page's Chat here): a pairing over its link, watched as any,
     //  and the grant dialog for it)
     adopt: (link: AgentLink, computer: string) => { const p = make(0, { link, computer }); watch(p); return p; }, grant: (p: AgentPairing) => grantDialog(p), live: () => pairingLive() };
