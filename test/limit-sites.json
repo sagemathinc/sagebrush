@@ -5645,6 +5645,11 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing beyond MATLAB: the census matches 'exceeds' in MATLAB's own out-of-range index message; the line raises MATLAB's error (identifier MATLAB:badsubscript, as MATLAB Online printed it) for an index past the end, not a limit on a computation"
  },
+ "lib/_matlab.py :: _oob :: return _err(\"Index in position %d exceeds array bounds. Index must not exceed %d.\" % (pos + 1, n), \"MATLAB:badsubscript\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the census matches 'exceeds' in MATLAB's own out-of-range message for a subscript among several; the line raises MATLAB's error (MATLAB:badsubscript, observed R2026b) for a subscript past its dimension, not a limit"
+ },
  "lib/_matlab.py :: brace :: raise _err(\"Index exceeds the number of array elements. Index must not exceed %d.\" % _numel(obj), \"MATLAB:badsubscript\") #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
