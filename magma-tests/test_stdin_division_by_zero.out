@@ -27,13 +27,77 @@ User error: Illegal zero denominator
             ^
 User error: Illegal zero denominator
 
->> print 1/0x0;
-           ^
-User error: Illegal zero denominator
-
 >> print [3 + 10/0];
                  ^
 User error: Illegal zero denominator
+
+>> print -(1)/0;
+              ^
+User error: Illegal zero denominator
+
+>> print (-(1))/0;
+                ^
+User error: Illegal zero denominator
+
+>> print 1/-(0);
+           ^
+User error: Illegal zero denominator
+
+>> print 1/(-(0));
+            ^
+User error: Illegal zero denominator
+
+>> print 1/-(-0);
+           ^
+User error: Illegal zero denominator
+
+>> print 1/(-(-0));
+            ^
+User error: Illegal zero denominator
+
+>> print 1/--0;
+           ^
+User error: Illegal zero denominator
+
+>> print --1/0;
+             ^
+User error: Illegal zero denominator
+
+>> print -(-1)/0;
+               ^
+User error: Illegal zero denominator
+
+>> print 1/-((0));
+           ^
+User error: Illegal zero denominator
+
+>> print (-1)/(-(0));
+               ^
+User error: Illegal zero denominator
+
+>> print 1/0 eq 1;
+           ^
+User error: Illegal zero denominator
+
+>> x := [1/0 : i in [1]];
+           ^
+User error: Illegal zero denominator
+
+>> print 1/0X5;
+            ^
+User error: bad syntax
+
+>> print 1/0X0;
+            ^
+User error: bad syntax
+
+>> print 1/0 x;
+             ^
+User error: bad syntax
+
+>> print 1/0 1;
+             ^
+User error: bad syntax
 
 >> f := func< | 2/0 >;
                   ^
@@ -46,6 +110,16 @@ Runtime error in '/': Division by zero
 
 
 >> print 1/+0;
+          ^
+Runtime error in '/': Division by zero
+
+
+>> print 1/(+0);
+          ^
+Runtime error in '/': Division by zero
+
+
+>> print 1/0^2;
           ^
 Runtime error in '/': Division by zero
 

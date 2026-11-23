@@ -7,14 +7,34 @@ print (-1)/0;
 print 1/(0);
 print 1/-0;
 print 1/(-0);
-print 1/0x0;
 print [3 + 10/0];
+// either operand may be any mix of parentheses and unary minus around its literal; the caret after the leading (s
+print -(1)/0;
+print (-(1))/0;
+print 1/-(0);
+print 1/(-(0));
+print 1/-(-0);
+print 1/(-(-0));
+print 1/--0;
+print --1/0;
+print -(-1)/0;
+print 1/-((0));
+print (-1)/(-(0));
+print 1/0 eq 1;
+x := [1/0 : i in [1]];
+// a token that can't follow the zero is bad syntax there first (0X5 is 0 and X5)
+print 1/0X5;
+print 1/0X0;
+print 1/0 x;
+print 1/0 1;
 f := func< | 2/0 >;
 print "the statement before it ran";
 // anything computed divides when it runs, and the error is at the operator:
 x := 0;
 print 7/x;
 print 1/+0;
+print 1/(+0);
+print 1/0^2;
 print +1/0;
 print (1+1)/0;
 print 1/(0+0);
