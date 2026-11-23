@@ -85,7 +85,7 @@ export const onlyCurrent = (current: () => AgentPairing | null, f: (c: Created, 
 //  as wide as its longest option, pushed the whole dialog out of the box; found in testing, Nov 21)
 const CSS = `
 .sbag-dlg { position: fixed; inset: 0; background: rgba(20,25,18,.35); display: grid; place-items: center; z-index: 1000; font: 14px/1.45 system-ui, sans-serif; color: #1d241a; }
-.sbag-box { background: #fff; border-radius: 10px; padding: 18px 20px; width: min(440px, 92vw); box-shadow: 0 10px 40px rgba(0,0,0,.25); display: grid; gap: 10px; }
+.sbag-box { background: #fff; border-radius: 10px; padding: 18px 20px; width: min(440px, 92vw); max-height: calc(100dvh - 24px); overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,.25); display: grid; gap: 10px; }
 .sbag-box h2 { margin: 0; font-size: 16px; }
 .sbag-box>*,.sbag-box select{min-width:0}
 .sbag-box label { display: flex; gap: 8px; align-items: center; }

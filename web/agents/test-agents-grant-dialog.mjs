@@ -84,6 +84,36 @@ try {
     Hm.stop();
   }
   {
+    // (MG-4: the most tags a grant can carry (16) on a phone (360 x 740): the dialog is taller than the window, so its box
+    //  scrolls within it, and Allow is reached by an ordinary wheel scroll and pressed by a real click)
+    const Hm = delegateHost({ features: ["memory.1", "chat.resume"] });
+    const Q = await B.tab();
+    await Q.send("Page.addScriptToEvaluateOnNewDocument", { source: `try { localStorage.setItem("sb-memory-tags-v1", JSON.stringify(Array.from({ length: 16 }, (_, i) => ({ id: "a".repeat(24) + String.fromCharCode(97 + i) + "a", name: "notes-" + String(i).padStart(2, "0") })))); } catch {}` });
+    await Q.send("Emulation.setDeviceMetricsOverride", { width: 360, height: 740, deviceScaleFactor: 2, mobile: false });
+    await Q.navigate(`${site}/agents/?pair=123-456&port=${Hm.port}`);
+    await Q.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect')`, 30000);
+    await Q.ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect').click()`);
+    await Q.until(`!!document.querySelector('.sbag-box .memory')`, 30000);
+    const at = () => Q.ev(`(() => { const box = document.querySelector('.sbag-box .memory').closest('.sbag-box'), b = box.getBoundingClientRect(), a = [...box.querySelectorAll('button.primary')].pop().getBoundingClientRect(); return { boxTop: b.top, boxBottom: b.bottom, allowTop: a.top, allowBottom: a.bottom, allowX: a.left + a.width / 2, allowY: a.top + a.height / 2, view: innerHeight, tags: box.querySelectorAll('input[data-tag]').length, scrollTop: box.scrollTop }; })()`);
+    const a0 = await at();
+    // (own notes, then the last tag (by name, notes-15: by id too), ticked so the grant shows the click went through)
+    await Q.ev(`(() => { const m = document.querySelector('.sbag-box .memory'); m.querySelector('input[name=memory-own]').click(); [...m.querySelectorAll('input[data-tag]')].pop().click(); return true; })()`);
+    ok(a0.tags === 16 && a0.boxTop >= 0 && a0.boxBottom <= a0.view && a0.allowBottom > a0.view, "MG-4: 16 tags at 360 x 740: the box stays within the window and Allow starts below it", a0);
+    for (let i = 0; i < 10; i++) {
+      const a = await at();
+      if (a.allowTop >= 0 && a.allowBottom <= a.view) break;
+      await Q.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 180, y: Math.min(600, a.view - 40), deltaX: 0, deltaY: 400 });
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    const a1 = await at();
+    ok(a1.allowTop >= 0 && a1.allowBottom <= a1.view && a1.scrollTop > 0, "MG-4: an ordinary wheel scroll inside the box brings Allow fully into the window", a1);
+    for (const type of ["mousePressed", "mouseReleased"]) await Q.send("Input.dispatchMouseEvent", { type, x: a1.allowX, y: a1.allowY, button: "left", clickCount: 1 });
+    const connected = await Q.until(`document.querySelector('#connect').textContent === 'Connected'`, 15000).then(() => true, () => false);
+    for (const t = Date.now(); !Hm.grant?.memory && Date.now() - t < 5000; ) await new Promise((r) => setTimeout(r, 50));
+    ok(connected && Hm.grant?.memory?.tags?.join() === "a".repeat(24) + "pa", "MG-4: a real click on Allow there connects, with the ticked tag in the grant", { connected, memory: Hm.grant?.memory });
+    Hm.stop();
+  }
+  {
     const { Hm, mem } = await dialogFor(["chat.resume"], true);
     ok((await mem()) === null, "MG-3.agent-without: no memory choice where the agent's hello lacks memory.1");
     Hm.stop();
