@@ -104,7 +104,9 @@ export const LATEX_LAZY = {
 // (252,517 raw / 84,516 gzip: Nov 21 2026, the editor's own list of examples gone (the gallery's panel the only one):
 //  252,453 / 84,452 measured on the shipped build of its merge with master 68280840, with bun 1.4.4 and node 24.21.0,
 //  + 64)
-export const LATEX_CAPS = { raw: 252517, gzip: 84516 };
+// (253,108 raw / 84,728 gzip: Nov 23 2026, amsthm's \qedhere (issue 1800): 253,044 / 84,664 measured on the shipped
+//  build of master 4dd77825 with it (252,410 / 84,437 without), with bun 1.4.4 and node 24.21.0, + 64)
+export const LATEX_CAPS = { raw: 253108, gzip: 84728 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
