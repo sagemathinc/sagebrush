@@ -2822,7 +2822,7 @@ def _draw_axes(ax, mx, mfig):
             e = _vec(c.props["BinEdges"])
             v = _vec(c.props["Values"])
             mx.bar([(e[k] + e[k + 1]) / 2 for k in range(len(v))], v, width=e[1] - e[0], color=_hex(_rgbof(c.props["FaceColor"])),
-                   edgecolor="#000000", label=label, alpha=_f(c.props["FaceAlpha"]))
+                   edgecolor="#000000", linewidth=_BAR_EDGE, label=label, alpha=_f(c.props["FaceAlpha"]))
         elif isinstance(c, Bar):
             _draw_bar(c, mx, label)
         elif isinstance(c, ErrorBar):
@@ -3065,6 +3065,11 @@ def _rgbof(v):
     return tuple(c[:3]) if len(c) >= 3 else None
 
 
+# (the edge MATLAB's bars and histograms are drawn with: 0.8 SVG units, in
+# points as pyplot's bar takes it, whose own default is matplotlib's 1 point)
+_BAR_EDGE = 0.8 / (100 / 72)
+
+
 def _lw(v):
     # (MATLAB's line widths are points on a 96-dpi screen; matplotlib's look thinner)
     return 0.5 + _f(v)
@@ -3214,7 +3219,7 @@ def _draw_bar(c, mx, label):
     if _m._text(c.props["Horizontal"]) == "on":
         mx.barh(offs, heights, height=width, left=bottoms, **kw)
     else:
-        mx.bar(offs, heights, width=width, bottom=bottoms, edgecolor="#000000", **kw)
+        mx.bar(offs, heights, width=width, bottom=bottoms, edgecolor="#000000", linewidth=_BAR_EDGE, **kw)
 
 
 def _draw_image(c, mx, cmap, clim):
