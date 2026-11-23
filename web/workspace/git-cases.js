@@ -58,6 +58,27 @@ function manualClock() {
 }
 
 const CASES = {
+  async removedHandle(check) {
+    // (#1803, SEC's row: an old review handle {fid, head, seq} of a branch its agent removed, reconciled and made again
+    //  under the same name, can't accept into main)
+    const w = await fresh("rmh");
+    await smallMain(w);
+    await make(w, "same");
+    await edit(w, B("same/intro.txt"), () => enc("Branch text.\n"));
+    await commit(w, "same", "Old work", true);
+    const old = await at(w, "same");
+    await agent(w).remove(B("same"));
+    await W.withBranchLock(() => w.reconcileBranches("closed"));
+    await make(w, "same");
+    await edit(w, B("same/intro.txt"), () => enc("Branch text.\n"));
+    await commit(w, "same", "New work", true);
+    const now = await at(w, "same");
+    check(now.fid !== old.fid, `the branch made again has a fresh fid (${old.fid} -> ${now.fid})`);
+    const e = await caught(W.review(person(w), old, { files: { "/intro.txt": { decision: "accepted" } } }));
+    check(e?.message === R.moved && dec((await w.read("/intro.txt")).content) === "A long introduction.\n", `the old handle can't accept into main: ${e?.message}`);
+    check((await w.branchReview(old.fid, "same")) === null || (await w.branchReview(old.fid, "same"))?.review == null, "the old fid has no review state");
+  },
+
   async loop(check) {
     // (the acceptance loop, E3: submit A; changes asked on A; commit B; A's decisions neither reported nor accepted for
     //  B; decide B)
