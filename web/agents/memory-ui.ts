@@ -24,6 +24,7 @@ export const MEMORY_COPY = {
   long: "This note is too long to save. Shorten it in Edit….",
   decided: "This note was already decided.",
   failed: "The note couldn't be saved",
+  failedDismiss: "The note couldn't be dismissed",
   own: "this agent's own notes",
   tag: "a tag's notes",
 } as const;
@@ -85,12 +86,13 @@ export function memoryHooks(host: MemoryUiHost) {
   const scopeName = (s: Scope) => (s === "own" ? MEMORY_COPY.own : host.tagName?.(s.tag) ? `the tag ${host.tagName(s.tag)}` : MEMORY_COPY.tag);
   const refused = (e: unknown, pending: string, card: MemoryCard, action: "save" | "dismiss") => {
     const code = (e as { code?: string })?.code;
-    if (lost(e)) return host.toast(unreadable(e) ? (action === "save" ? MEMORY_COPY.unread : MEMORY_COPY.unreadDismiss) : `${MEMORY_COPY.failed}: ${(e as Error)?.message ?? e}`, 8000);
+    const failed = `${action === "save" ? MEMORY_COPY.failed : MEMORY_COPY.failedDismiss}: ${(e as Error)?.message ?? e}`;
+    if (lost(e)) return host.toast(unreadable(e) ? (action === "save" ? MEMORY_COPY.unread : MEMORY_COPY.unreadDismiss) : failed, 8000);
     if (!still(pending, card)) return;
     // (stale: it changed, or the agent's access did; not_found: the proposal is gone at the agent (decided in another
     //  tab, or the agent started again): either way this card can't be saved now)
     if (code === "stale" || code === "not_found") return end(card, "stale");
-    host.toast(code === "secret" ? MEMORY_COPY.secret : code === "full" ? MEMORY_COPY.full : code === "forbidden" ? MEMORY_COPY.forbidden : code === "conflict" ? MEMORY_COPY.conflict : code === "too_large" ? MEMORY_COPY.long : `${MEMORY_COPY.failed}: ${(e as Error)?.message ?? e}`, 8000);
+    host.toast(code === "secret" ? MEMORY_COPY.secret : code === "full" ? MEMORY_COPY.full : code === "forbidden" ? MEMORY_COPY.forbidden : code === "conflict" ? MEMORY_COPY.conflict : code === "too_large" ? MEMORY_COPY.long : failed, 8000);
   };
   // (revision: the one the person saw, the card's as drawn or as the dialog opened; a later one at the agent is stale)
   async function save(pending: string, revision: number, edit?: { scope: Scope; name: string; description: string; body: string; expires: number | null }) {
