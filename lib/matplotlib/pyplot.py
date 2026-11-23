@@ -1479,6 +1479,8 @@ class Figure:
         self._facecolor = facecolor if facecolor is not None else rcParams.get("figure.facecolor", "white")
         self.axes = []
         self._ca = None  # (plt.axes(ax)'s selection, and len(axes) then)
+        # (the subplot parameters subplots_adjust set, or None: rcParams')
+        self._subplotpars = None
         self._suptitle = None
         self._grid = (1, 1)
 
@@ -1542,6 +1544,22 @@ class Figure:
     def tight_layout(self, **kw):
         pass
 
+    def subplots_adjust(self, left=None, bottom=None, right=None, top=None, wspace=None, hspace=None):
+        """The subplot parameters of this figure's grid, as matplotlib's: those
+        given change, the others stay (rcParams' until set); its grid Axes are
+        then drawn where matplotlib puts them, the box the plot area and the
+        labels outside it."""
+        pars = dict(self._subplotpars or {k: float(rcParams["figure.subplot." + k]) for k in
+                                           ("left", "bottom", "right", "top", "wspace", "hspace")})
+        for k, v in (("left", left), ("bottom", bottom), ("right", right), ("top", top), ("wspace", wspace), ("hspace", hspace)):
+            if v is not None:
+                pars[k] = float(v)
+        if pars["left"] >= pars["right"]:
+            raise ValueError("left cannot be >= right")
+        if pars["bottom"] >= pars["top"]:
+            raise ValueError("bottom cannot be >= top")
+        self._subplotpars = pars
+
     @property
     def canvas(self):
         """The figure's canvas: draw(), get_width_height()."""
@@ -1556,8 +1574,21 @@ class Figure:
     def _panels(self):
         for ax in self.axes:
             ax._apply_aspect()
-        panels = [(ax._panel(), ax._rect) for ax in self.axes]
+        panels = [self._placed(ax) for ax in self.axes]
         return panels or [(Panel([], frame=True), (0, 0, 1, 1))]
+
+    def _placed(self, ax):
+        """An Axes' panel and where it goes: in the figure's grid as the
+        subplot parameters put it, once subplots_adjust set them (the box the
+        plot area, as matplotlib's); else as before."""
+        p = ax._panel()
+        if self._subplotpars is not None and not getattr(ax, "_cbs", None) and getattr(ax, "_cb_of", None) is None:
+            from matplotlib._axes_geometry import position, _uses_grid
+            if _uses_grid(ax):
+                bb = position(ax, original=True)
+                p.options["exact"] = True
+                return p, (bb.x0, 1 - bb.y1, bb.x1 - bb.x0, bb.y1 - bb.y0)
+        return p, ax._rect
 
     def _frame(self):
         """This figure as one animation frame: (SVG body, description)."""
@@ -1897,6 +1928,11 @@ def _flush_figures():
 
 def suptitle(s, **kw):
     gcf().suptitle(s)
+
+
+def subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=None, hspace=None):
+    """The current figure's subplot parameters (Figure.subplots_adjust)."""
+    gcf().subplots_adjust(left, bottom, right, top, wspace, hspace)
 
 
 def tight_layout(**kw):
