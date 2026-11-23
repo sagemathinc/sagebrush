@@ -99,10 +99,12 @@ pub fn clear_webview_dirs(data: &Path) {
 
 // ---- the page's commands (capabilities/default.json: "main" and "doc-*")
 
-/// A new window at this app's page `at` (lib.rs page_window, its own data folder); its label.
+/// A new window at this app's page `at` (lib.rs page_window, its own data folder); its label.  Async: a window made
+/// in a synchronous command deadlocks on Windows (WebView2 waits on the thread the command holds; Tauri's own warning),
+/// which the self-test's two-window probe hit there.
 #[cfg(desktop)]
 #[tauri::command]
-pub fn window_open(app: tauri::AppHandle, port: tauri::State<PagePort>, next: tauri::State<NextWindow>, at: String) -> Result<String, String> {
+pub async fn window_open(app: tauri::AppHandle, port: tauri::State<'_, PagePort>, next: tauri::State<'_, NextWindow>, at: String) -> Result<String, String> {
     let url = page_target(port.0, &at)?;
     let label = format!("doc-{}", next.0.fetch_add(1, Ordering::SeqCst));
     let data = crate::disk::data_dir(&app)?;
