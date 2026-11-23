@@ -3706,6 +3706,7 @@ def _log_gamma_neg(x):
         return pi.log() - abs((pi * F(q - n)).sin()).log() - F(1 - q).log_gamma()
 
     W = p + 32
+    re = None
     _ziv_depth[0] += 1
     try:
         for _ in range(_ZIV_CHECK_TRIES):
@@ -3742,10 +3743,14 @@ def _cc_of(p, re, im):
 
 def _cc_log(re, im):
     """(log |z|, arg z), -pi < arg z <= pi, of z = re + im I (doubles, not
-    NaN), as Sage's CC computes them (ComplexNumber.log): |z| correctly
-    rounded to 53 bits, its logarithm correctly rounded (so log |1 + 1e-10 I|
-    is 0, as in Sage), and arg z = atan2(im, re) correctly rounded: arctan(im /
-    re), +-pi when re < 0.  Zeros and infinities: C's atan2 and log, exact."""
+    NaN), as Sage's CC computes them (ComplexNumber.log, abs and argument):
+    |z| = sqrt(re^2 + im^2) with each of the four operations rounded to 53
+    bits to nearest, in a field with no double range (MPFR's), so not always
+    the correctly rounded |z|: CC(-0.5, 0.8660254037844386).log() has real
+    part -2^-53; then its logarithm, correctly rounded; and arg z = atan2(im,
+    re) correctly rounded: arctan(im / re), +-pi when re < 0.  Zeros and
+    infinities: |z| is the other part exactly or infinite, the angle C's
+    atan2's, exact."""
     R = RealField_(53, "RNDN")
     if not (math.isfinite(re) and math.isfinite(im)) or re == 0 or im == 0:
         # (|z| is |re| or |im| exactly, or infinite; arg z is 0, +-pi/2 or +-pi,
@@ -3753,10 +3758,11 @@ def _cc_log(re, im):
         r = math.hypot(re, im)
         lr = float(R(r).log()) if r and math.isfinite(r) else math.log(r) if r else -math.inf
         return lr, math.atan2(im, re)
-    s = _F(re) ** 2 + _F(im) ** 2
-    # |z| = sqrt(N / 2^k), rounded to 53 bits (nearest, ties to even): q =
-    # isqrt(N 2^t) has at least 55 bits; the dropped bits and q^2 != N 2^t
-    # decide the rounding
+    # (a^2, b^2 and their sum each rounded to 53 bits from the exact value, in
+    # MP numbers: a 53-bit field's own arithmetic would give RR's doubles)
+    s = R(R(_F(re) ** 2)._q() + R(_F(im) ** 2)._q())._q()
+    # then sqrt(N / 2^k) rounded (nearest, ties to even): q = isqrt(N 2^t) has
+    # at least 55 bits; the dropped bits and q^2 != N 2^t decide the rounding
     N, k = s.numerator, s.denominator.bit_length() - 1
     t = max(0, 110 - N.bit_length())
     t += (k + t) % 2

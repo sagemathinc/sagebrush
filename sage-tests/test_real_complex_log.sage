@@ -50,3 +50,22 @@ for y in [-5e-324, -1e-310, -2^-60, -2^-1000]:
     print(v, float(v.real()).hex(), float(v.imag()).hex())
 # (the function form at a pole: NaN + NaN*I, as Sage's)
 print(log_gamma(RR(-3)), log_gamma(-RR(2)^60))
+# |z| as Sage's CC computes it, sqrt(a^2 + b^2) with each step rounded, not the
+# correctly rounded |z|: 1 - 2^-53 here, so the real part is -2^-53
+import math
+for a, b in [(-0.5, 0.8660254037844386), (float.fromhex("0x1.eb222d0e56042p-7"), float.fromhex("-0x1.8dcf3b645a1cbp+4")),
+             (1.5e308, 1.5e308), (-1e-200, 3e-200)]:
+    v = CC(a, b).log()
+    print(v, float(v.real()).hex(), float(v.imag()).hex())
+# (seeded parts near |z| = 1, where the two |z| differ most)
+for _ in range(60):
+    a = float((Integer(nxt() >> 11) - 2^52) * 2^-52)
+    b = math.sqrt(float(1) - a * a) * (1 if nxt() % 2 else -1)
+    if nxt() % 3 == 0:
+        a, b = b, a
+    v = CC(a, b).log()
+    print(float(v.real()).hex(), float(v.imag()).hex())
+# (to the base 1: both parts over log(1) = +0, +-infinity or NaN, as MPFR's)
+for t in [(2, 1), (1, 0), (0, 1), (-1, 0), (0, 0), (0, -2), (-3, -4), (0.5, 0), (-0.5, 0), (3, -0.0)]:
+    print(CC(*t).log(1))
+print(RR(-2).log(1), RR(-1).log(1), CC(2, 1).log(2), CC(-2, 1).log(10))

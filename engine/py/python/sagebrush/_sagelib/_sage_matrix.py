@@ -4353,8 +4353,14 @@ class ComplexNumber(complex):
 
             sage: CC(2, 1).log(), CC(-1).log(), CC(-2).log()
             (0.804718956217050 + 0.463647609000806*I, 3.14159265358979*I, 0.693147180559945 + 3.14159265358979*I)
-            sage: CC(-1).log(2), CC(0).log()
-            (4.53236014182719*I, -infinity)
+            sage: CC(-1).log(2), CC(0).log(), CC(2, 1).log(1)
+            (4.53236014182719*I, -infinity, +infinity + +infinity*I)
+
+        |z| as Sage's CC computes it, each step rounded (here 1 - 2^-53, not
+        the correctly rounded 1)::
+
+            sage: CC(-0.5, 0.8660254037844386).log()
+            -1.11022302462516e-16 + 2.09439510239320*I
         """
         import _sage_real
         z = complex(self)
@@ -4362,12 +4368,20 @@ class ComplexNumber(complex):
             return ComplexNumber(z.real, z.real)
         if z.imag != z.imag:
             return ComplexNumber(z.imag, z.imag)
-        # (each part correctly rounded, as MPFR's: _cc_log)
+        # (each part as Sage's CC computes it: _cc_log)
         rho, theta = _sage_real._cc_log(z.real, z.imag)
         if base is None:
             return ComplexNumber(rho, theta)
-        lb = float(_sa().RR(base).log())
-        return ComplexNumber(rho / lb, theta / lb)
+        # (both parts over log(base), the correctly rounded logarithm in RR, each
+        # quotient as MPFR's: over log(1) = +0, +-infinity, or NaN for 0 / 0)
+        lb = float(_sage_real.RealField_(53, "RNDN")(float(_sa().RR(base))).log())
+
+        def over(x):
+            if lb:
+                return x / lb
+            import math
+            return math.nan if x == 0 or x != x else math.copysign(math.inf, x) * math.copysign(1.0, lb)
+        return ComplexNumber(over(rho), over(theta))
 
     def __add__(self, o):
         # (a matrix over a field answers for itself: complex(M) was the
