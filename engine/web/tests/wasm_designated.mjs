@@ -63,7 +63,9 @@ for (const [file, want] of [["designated_errors.jsonl", '{"error"'], ["designate
   for (const [label, at] of [["in the sieve", 1], ["in the a_p loop", total - 2]]) {
     polls = 0; stopAt = at;
     const r = run(inst());
-    if (!r.trap || r.ms > full.ms) { fail++; console.log(`FAIL Stop ${label} (poll ${at} of ${total}): ${r.trap ? `trapped after ${r.ms.toFixed(0)} ms (full call ${full.ms.toFixed(0)} ms)` : "not stopped"}`); }
+    // The host returns Stop on exactly this poll. The call must trap before another poll, not merely finish
+    // sooner than a separately timed full call: a shared runner can deschedule either call independently.
+    if (!r.trap || polls !== at) { fail++; console.log(`FAIL Stop ${label} (poll ${at} of ${total}): ${r.trap ? `trapped at poll ${polls} (${at} expected)` : `not stopped (${polls} polls)`}`); }
   }
   polls = 0; stopAt = Infinity;
   const again = run(inst());
