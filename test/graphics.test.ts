@@ -210,3 +210,38 @@ for g in [contour_plot(x^2 - y^2, (x, -2, 2), (y, -2, 2)), density_plot(sin(x*y)
   assert.match(lines[4], /^Plot: vector field \(-y, x\) at 400 points; x from -2 to 2, y from -2 to 2$/);
   assert.match(lines[5], /^Plot: slope field of y' = x - y at 400 points; x from -3 to 3, y from -3 to 3$/);
 });
+
+test("an SVG's numbers are printf's two decimals, from integers in Sagebrush's Python (their text the same, tie by tie)", () => {
+  const out = cli("-c", `
+import random, _graphics as g
+random.seed(5)
+vals = [k / 1000 for k in range(-30000, 30000)] + [k / 200 + d for k in range(-4000, 4000) for d in (0.0, 1e-9, -1e-9)]
+vals += [random.uniform(-1e5, 1e5) for _ in range(20000)] + [random.uniform(-1, 1) for _ in range(20000)]
+vals += [0.0, -0.0, 0.005, -0.005, 0.015, 2.675, 1.005, 99999.995, -99999.995, 1e-12, -1e-12, 1e14, -1e14, 1e300, -1e300]
+bad = [v for v in vals if g._fmt_int(v) != g._fmt_printf(v)]
+print(g._fmt is g._fmt_int, len(vals) > 100000, bad[:3])
+`);
+  assert.equal(out.trim(), "True True []");
+});
+
+test("many points: the pixel marker ',' is one path of whole pixels, and the other markers are _marker's text", () => {
+  const out = cli("-c", `
+import random, re, _graphics as g
+import matplotlib.pyplot as plt
+random.seed(2)
+xs = [random.random() for _ in range(2000)]
+ys = [random.random() for _ in range(2000)]
+fig, ax = plt.subplots()
+ax.plot(xs, ys, ",k")
+s = fig._svg(background=False)
+plt.close(fig)
+print(s.count('<path transform="scale(1)" fill="#000000" d="M'), s.count("h1v1h-1z"), s.count('width="1" height="1"'))
+P = g._Placed(10, 20, 600, 400, 0.0, 1.0, 0.0, 1.0, False, False)
+for m in ("o", ".", "s"):
+    fast = g._markers(P, xs, ys, m, 3.5, "#1f77b4", 0.5, None, "#000000")
+    each = "".join(g._marker(m, *P.map(x, y), 3.5, "#1f77b4", "#000000") for x, y in zip(xs, ys))
+    print(m, fast == '<g opacity="0.5">' + each + "</g>")
+`);
+  // (one path, a pixel for each of the 2000 points, and no rect of a pixel)
+  assert.deepEqual(out.trim().split("\n"), ["1 2000 0", "o True", ". True", "s True"]);
+});
