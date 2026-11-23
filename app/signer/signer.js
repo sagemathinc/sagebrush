@@ -5,7 +5,8 @@
 // (which must never reach the command).
 // A self-test's diagnostic (only when its probe is present): if the call is refused, the page reloads itself once with
 // ?probe=refused-acl or ?probe=refused, a fixed code the app logs; if it neither answers nor fails within 8 s,
-// ?probe=hung; a reloaded page doesn't call again.
+// ?probe=hung, and that is final: an answer or a failure arriving after it is ignored (no second report, no controls);
+// a reloaded page doesn't call again.
 (() => {
   const probe = window.__SB_SIGNER_PROBE__;
   if (!probe) return;
@@ -13,9 +14,15 @@
   if (location.search.includes("probe=")) { status.textContent = "probe: reported"; return; }
   const invoke = window.__TAURI__?.core?.invoke;
   (async () => {
-    const hung = setTimeout(() => location.replace(location.pathname + "?probe=hung"), 8000);
-    try { status.textContent = "probe: " + (await invoke("signer_probe_sign", { msg: "the signer page" })); clearTimeout(hung); }
-    catch (e) {
+    let timedOut = false;
+    const hung = setTimeout(() => { timedOut = true; location.replace(location.pathname + "?probe=hung"); }, 8000);
+    try {
+      const r = await invoke("signer_probe_sign", { msg: "the signer page" });
+      if (timedOut) return; // (too late: the hung report stands)
+      clearTimeout(hung);
+      status.textContent = "probe: " + r;
+    } catch (e) {
+      if (timedOut) return;
       clearTimeout(hung);
       status.textContent = "probe refused: " + (e?.message ?? e);
       const acl = /not allowed/i.test(String(e?.message ?? e));
