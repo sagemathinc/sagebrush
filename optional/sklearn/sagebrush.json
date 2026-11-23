@@ -45,6 +45,8 @@
       "sklearn.linear_model",
       "sklearn.manifold",
       "sklearn.metrics",
+      "sklearn.metrics._sk_classification",
+      "sklearn.metrics._sk_regression",
       "sklearn.metrics.pairwise",
       "sklearn.mixture",
       "sklearn.model_selection",
@@ -107,7 +109,9 @@
     "py/sklearn/kernel_ridge.py": "8043bbdde9ef0160a4e63233fa52026bea5ce8b8f332fa038e426355232d8b28",
     "py/sklearn/linear_model.py": "ca37b6113ce0f07e879dbcaef3b818f246c99394428ccc5ff48da7e06a0a274c",
     "py/sklearn/manifold.py": "e65b3eb35c2ac10b5a23389fd6288c14721b83bf6ae7c9fdf29fdad533571ef8",
-    "py/sklearn/metrics/__init__.py": "ddcdffbb7db6629c19b52ab2d2f7db5dd79baa44481ad94311385f82c3561111",
+    "py/sklearn/metrics/__init__.py": "d820d57da92ea7bdb1db48326e6cb9990ea50486f58e09b5b851dbf484b1e4c8",
+    "py/sklearn/metrics/_sk_classification.py": "4e0d01f8201bbb8b8121f07b94358748a48af2a89ae0373be873815cb55b3f9e",
+    "py/sklearn/metrics/_sk_regression.py": "dfa29ac5896b20e800e2c684522aaf754e46ade390d8c4c99857931943d4f4d2",
     "py/sklearn/metrics/pairwise.py": "efb298118b5cb8b785f6a6edad07eb8363cca35db5d4443031f9dcf158c255ca",
     "py/sklearn/mixture.py": "29bbe0bbfee4be88d714cc544b8d54f11806fabf3a6644149da8efaac4563608",
     "py/sklearn/model_selection.py": "78f50c359809fbd7eb34d9c5530559839e432987b2a5188682f6c9170897e727",
@@ -124,8 +128,8 @@
     "py/sklearn/tree.py": "7a38506afb8534dffa40030163f0c540e7f50ef0251940494a545f3ec2fbcfea",
     "py/sklearn/utils/__init__.py": "be0d9c5effb3a98dffafde2b486a96cc4d5850360b6c5c355687a4333967ff0b",
     "py/sklearn/utils/_sk_indexing.py": "64235c791bf74e13ddb737224f1b4c0679526cbf5a5adee58eb3251bf5e53343",
-    "py/sklearn/utils/_sk_param.py": "2b85d3f296493f86cb56a8c030bf5b0a6a6080e351a49a434c1c5b9c898d2c92",
-    "py/sklearn/utils/multiclass.py": "db02b837de17dfee8361d50f7d9a975bc5889632135bd2716bf7a9a0ddcd9fb4",
+    "py/sklearn/utils/_sk_param.py": "100f4f502ebebdee72b51046746c844b3a115d7c3b789d543a83edc5bd4abc4c",
+    "py/sklearn/utils/multiclass.py": "033ab35657107d96b3e812a1056fc6c56b9d2063d54c98c3827dd0734f00598d",
     "py/sklearn/utils/validation.py": "a8fee2b22a2ad92f1d389dc0d9d04b071385c0fdac88a77f5d67ddeb8538b6ec"
   }
 }
