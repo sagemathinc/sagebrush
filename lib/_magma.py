@@ -6895,6 +6895,16 @@ def _ffp_eval(f, x, where):
         return _MFFPoly(R, f.p(x.p))
     c = None if isinstance(x, _Fraction) else R._const(x)
     if c is None:
+        if _is_ff(x) and _ffwrap(x.parent()).p == R.F.p:
+            # (another field of f's characteristic: f evaluated in the smallest field containing both, as Magma 2.18
+            # does, a polynomial over GF(4) at an element of GF(16) in GF(16), at one of GF(8) in GF(64); the
+            # coefficients and x put there under one budget, admitted first)
+            cs = list(f.p._c)
+            ys = _ff_promote(cs + [x], "evaluation", where)[0]
+            r = ys[-1] * 0
+            for y in reversed(ys[:-1]):
+                r = r * ys[-1] + y
+            return r
         if _is_ff(x) or isinstance(x, _Fraction):
             raise MagmaError("Incompatible rings", where, True)
         if isinstance(x, (bool, str, MReal)):
