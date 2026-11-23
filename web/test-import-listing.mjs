@@ -15,46 +15,36 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { devtoolsPort } from "./test-port.mjs";
+import { startChrome, startServe } from "./test-port.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const tmp = mkdtempSync(join(tmpdir(), "sb-import-listing-"));
-// (the page's side of the Terminal's file channel, as a script the page evaluates: window.TermSync)
-const entry = join(tmp, "entry.ts");
-writeFileSync(entry, `import * as S from ${JSON.stringify(join(here, "term-sync.ts"))};\n(globalThis as any).TermSync = S;\n`);
-execFileSync("bun", ["build", entry, "--target=browser", "--format=iife", `--outfile=${join(tmp, "ts.js")}`], { stdio: ["ignore", "ignore", "inherit"] });
-const pageSide = readFileSync(join(tmp, "ts.js"), "utf8");
-const serve = spawn("python3", [join(here, "serve.py"), "0"], { stdio: ["ignore", "pipe", "inherit"] });
-const port = await new Promise((r) => serve.stdout.once("data", (d) => r(Number(String(d).trim().split(/\s+/).pop()))));
-const profile = join(tmp, "profile");
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--password-store=basic", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
-const cdp = await devtoolsPort(profile);
-let targets;
-for (let i = 0; i < 300; i++) {
-  try {
-    targets = await (await fetch(`http://127.0.0.1:${cdp}/json`)).json();
-    break;
-  } catch {
-    await sleep(100);
-  }
-}
-const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
-await new Promise((r) => (ws.onopen = r));
+// (every wait bounded: the socket's open (10 s), each DevTools call (CALL_MS, or RUN_MS for a run, whose page side
+//  gives up first at PAGE_RUN_MS), a closed or failed socket ending every call waiting, and the whole suite (SUITE_MS),
+//  past which Chrome and the server are killed. Everything started is started inside the try, so its finally owns it)
+const CALL_MS = 15000, PAGE_RUN_MS = 60000, RUN_MS = 75000, SUITE_MS = 300000;
+let tmp = null, serve = null, chrome = null, ws = null;
+const stopAll = () => {
+  try { ws?.close(); } catch {}
+  try { if (chrome?.pid) process.kill(-chrome.pid, "SIGKILL"); } catch {}
+  try { serve?.kill("SIGKILL"); } catch {}
+  try { if (tmp) rmSync(tmp, { recursive: true, force: true }); } catch {}
+};
+process.on("exit", stopAll);
+setTimeout(() => { console.error(`FAIL: the suite didn't end in ${SUITE_MS / 1000} s`); stopAll(); process.exit(1); }, SUITE_MS).unref();
 let n = 0;
 const waiting = new Map();
-ws.onmessage = (ev) => {
-  const m = JSON.parse(ev.data);
-  if (m.id && waiting.has(m.id)) {
-    waiting.get(m.id)(m.result ?? m.error);
-    waiting.delete(m.id);
-  }
-};
-const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
-const ev = async (expression) => {
-  const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-  if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 600));
-  return r.result?.value;
+const endAll = (why) => { for (const [, w] of waiting) w.no(new Error(why)); waiting.clear(); };
+const send = (method, params = {}, ms = CALL_MS) => new Promise((ok, no) => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return no(new Error(`${method}: the DevTools socket isn't open`));
+  const id = ++n, t = setTimeout(() => { waiting.delete(id); no(new Error(`${method} got no answer in ${ms} ms`)); }, ms);
+  waiting.set(id, { ok: (v) => { clearTimeout(t); ok(v); }, no: (e) => { clearTimeout(t); no(e); } });
+  ws.send(JSON.stringify({ id, method, params }));
+});
+const ev = async (expression, ms = CALL_MS) => {
+  const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms);
+  if (r?.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 600));
+  return r?.result?.value;
 };
 const fails = [];
 const check = (ok, what) => {
@@ -70,6 +60,7 @@ const notebook = `(() => {
   window.nb = {
     start(files, dir) {
       w = new Worker("sagebrush-worker.js", { type: "module" });
+      w.onerror = (e) => { for (const [, r] of runs) r.res({ workerError: String(e.message ?? e) }); runs.clear(); };
       w.onmessage = (e) => {
         const m = e.data, r = runs.get(m?.id);
         if (!r) return;
@@ -83,7 +74,12 @@ const notebook = `(() => {
     },
     run(code) {
       const id = ++next;
-      return new Promise((res) => { runs.set(id, { res, out: { stdout: "", stderr: "" } }); w.postMessage({ id, code }); });
+      return new Promise((res) => {
+        // (a run that doesn't end in ${PAGE_RUN_MS} ms is said to have timed out, as a worker that fails is said)
+        const t = setTimeout(() => { runs.delete(id); res({ timeout: true }); }, ${PAGE_RUN_MS});
+        runs.set(id, { res: (v) => { clearTimeout(t); res(v); }, out: { stdout: "", stderr: "" } });
+        w.postMessage({ id, code });
+      });
     },
     put(path, text) { w.postMessage({ fsPut: path, data: new TextEncoder().encode(text) }); return true; },
     stop() { w.terminate(); return true; },
@@ -132,7 +128,8 @@ const terminal = `(() => {
       if (m.fsSync || m.fsMore) { page.onMessage(m).catch((x) => console.error(x)); return; }
       if (m.termDone || m.termRefused) { w.terminate(); res({ ...(m.termDone ?? { refused: m.termRefused }), log }); }
     };
-    setTimeout(() => { w.terminate(); res({ timeout: true, log }); }, 90000);
+    setTimeout(() => { w.terminate(); res({ timeout: true, log }); }, ${PAGE_RUN_MS});
+    w.onerror = (e) => { w.terminate(); res({ workerError: String(e.message ?? e), log }); };
     w.postMessage({ init: { limits: null } });
     const plan = { run: true, mode: "python", argv0: "python", source: { kind: "code", code }, argv: ["-c"], path0: "/w" };
     w.postMessage({ term: { gen: 1, plan, cwd: "/w", stdin: new Uint8Array(0), env: { COLUMNS: 100, LINES: 30 }, out: { allowance: 1 << 20, backstop: 32 << 20 }, sync: { control: page.control, data: page.data } } });
@@ -144,6 +141,35 @@ const terminal = `(() => {
 const tryImport = (name, label = "absent") => `try:\n    import ${name}\nexcept ModuleNotFoundError:\n    print(${JSON.stringify(label)})\n`;
 
 try {
+  tmp = mkdtempSync(join(tmpdir(), "sb-import-listing-"));
+  // (the page's side of the Terminal's file channel, as a script the page evaluates: window.TermSync)
+  const entry = join(tmp, "entry.ts");
+  writeFileSync(entry, `import * as S from ${JSON.stringify(join(here, "term-sync.ts"))};\n(globalThis as any).TermSync = S;\n`);
+  execFileSync("bun", ["build", entry, "--target=browser", "--format=iife", `--outfile=${join(tmp, "ts.js")}`], { stdio: ["ignore", "ignore", "inherit"], timeout: 60000 });
+  const pageSide = readFileSync(join(tmp, "ts.js"), "utf8");
+  const served = startServe(() => (serve = spawn("python3", [join(here, "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] })));
+  const port = await served.port;
+  const profile = join(tmp, "profile");
+  const started = await startChrome(profile, () => (chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--password-store=basic", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"], detached: true })));
+  chrome = started.child;
+  let page = null;
+  for (let i = 0; i < 100 && !page; i++) {
+    try { page = (await (await fetch(`http://127.0.0.1:${started.port}/json`, { signal: AbortSignal.timeout(2000) })).json()).find((t) => t.type === "page"); } catch {}
+    if (!page) await sleep(100);
+  }
+  if (!page) throw new Error("Chrome showed no page in about 10 s");
+  ws = new WebSocket(page.webSocketDebuggerUrl);
+  await new Promise((ok, no) => {
+    const t = setTimeout(() => no(new Error("the DevTools socket didn't open in 10 s")), 10000);
+    ws.onopen = () => { clearTimeout(t); ok(); };
+    ws.onerror = () => { clearTimeout(t); no(new Error("the DevTools socket failed to open")); };
+  });
+  ws.onclose = () => endAll("the DevTools socket closed");
+  ws.onerror = () => endAll("the DevTools socket failed");
+  ws.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.id && waiting.has(m.id)) { waiting.get(m.id).ok(m.result ?? m.error); waiting.delete(m.id); }
+  };
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await sleep(1500);
@@ -154,34 +180,31 @@ try {
 
   // ---- a notebook's worker
   await ev(`nb.start([["/nb/other.py", "X = 0\\n"]], "/nb")`);
-  let r = await ev(`nb.run(${JSON.stringify("import os\nt = os.stat('.').st_mtime_ns\nopen('made.txt', 'w').close()\nprint(os.stat('.').st_mtime_ns > t)\n")})`);
+  let r = await ev(`nb.run(${JSON.stringify("import os\nt = os.stat('.').st_mtime_ns\nopen('made.txt', 'w').close()\nprint(os.stat('.').st_mtime_ns > t)\n")})`, RUN_MS);
   check(r.stdout === "True\n" && r.error === null, `a notebook: a folder's mtime moves when a file is made in it (${JSON.stringify(r)})`);
-  r = await ev(`nb.run(${JSON.stringify(tryImport("nbmod"))})`);
+  r = await ev(`nb.run(${JSON.stringify(tryImport("nbmod"))})`, RUN_MS);
   check(r.stdout === "absent\n", `a notebook: a module not there yet is absent (${JSON.stringify(r)})`);
   await ev(`nb.put("/nb/nbmod.py", "X = 1\\n")`);
-  r = await ev(`nb.run(${JSON.stringify("import nbmod\nprint(nbmod.X)\n")})`);
+  r = await ev(`nb.run(${JSON.stringify("import nbmod\nprint(nbmod.X)\n")})`, RUN_MS);
   check(r.stdout === "1\n" && r.error === null, `a notebook: a module the page put between two runs is found by the second (${JSON.stringify(r)})`);
-  r = await ev(`nb.run(${JSON.stringify(tryImport("wmod") + "open('wmod.py', 'w').write('Y = 2\\n')\nimport wmod\nprint(wmod.Y)\n")})`);
+  r = await ev(`nb.run(${JSON.stringify(tryImport("wmod") + "open('wmod.py', 'w').write('Y = 2\\n')\nimport wmod\nprint(wmod.Y)\n")})`, RUN_MS);
   check(r.stdout === "absent\n2\n" && r.error === null, `a notebook: a module a run writes is found by its next import, in the same run (${JSON.stringify(r)})`);
   await ev("nb.stop()");
 
   // ---- a Terminal command's worker
   await ev(`put("/w/trigger.txt", "go\\n")`);
-  r = await ev(`command(${JSON.stringify(tryImport("lmod") + "open('/w/lmod.py', 'w').write('W = 4\\n')\nimport lmod\nprint(lmod.W)\n")})`);
+  r = await ev(`command(${JSON.stringify(tryImport("lmod") + "open('/w/lmod.py', 'w').write('W = 4\\n')\nimport lmod\nprint(lmod.W)\n")})`, RUN_MS);
   check(r.code === 0 && r.stdout === "absent\n4\n", `a Terminal command: a module it writes is found by its next import (${JSON.stringify({ code: r.code, out: r.stdout, err: r.stderr?.slice(-200) })})`);
-  r = await ev(`command(${JSON.stringify(tryImport("tmod") + "open('/w/trigger.txt').read()\n" + tryImport("tmod", "still absent") + "import importlib\nimportlib.invalidate_caches()\nimport tmod\nprint(tmod.Z)\n")}, { "/w/trigger.txt": ["/w/tmod.py", "Z = 3\\n"] })`);
+  r = await ev(`command(${JSON.stringify(tryImport("tmod") + "open('/w/trigger.txt').read()\n" + tryImport("tmod", "still absent") + "import importlib\nimportlib.invalidate_caches()\nimport tmod\nprint(tmod.Z)\n")}, { "/w/trigger.txt": ["/w/tmod.py", "Z = 3\\n"] })`, RUN_MS);
   check(r.code === 0 && r.stdout === "absent\nstill absent\n3\n", `a Terminal command: a module the page adds while it runs is found after importlib.invalidate_caches(), not before (${JSON.stringify({ code: r.code, out: r.stdout, err: r.stderr?.slice(-200) })})`);
-  r = await ev(`command(${JSON.stringify("import colorsys, fractions\nprint('ok')\n")})`);
+  r = await ev(`command(${JSON.stringify("import colorsys, fractions\nprint('ok')\n")})`, RUN_MS);
   const probes = r.log.filter(([op, p]) => op !== "list" && /^\/w\/[^/]+(\.py|\/__init__\.py)$/.test(p) && !p.startsWith("/w/trigger") && !/^\/w\/[lt]mod\.py$/.test(p));
   const lists = r.log.filter(([op, p]) => op === "list" && p === "/w").length;
   check(r.code === 0 && r.stdout === "ok\n" && probes.length === 0 && lists === 1, `a Terminal command: library imports ask the page nothing about names the folder doesn't have (one listing of /w: ${lists}; probes: ${JSON.stringify(probes.slice(0, 6))})`);
 } catch (e) {
   check(false, "threw: " + (e?.stack ?? e));
 } finally {
-  ws.close();
-  chrome.kill();
-  serve.kill();
-  rmSync(tmp, { recursive: true, force: true });
+  stopAll();
 }
 console.log(fails.length ? `${fails.length} failed` : "all passed");
 process.exit(fails.length ? 1 : 0);
