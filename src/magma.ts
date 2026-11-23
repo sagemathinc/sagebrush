@@ -1408,15 +1408,37 @@ class Parser {
   }
 
   mulExpr(): string {
+    const i0 = this.i;
     const first = this.unary();
+    const i1 = this.i;
     const steps: Parameters<Parser["chain"]>[1] = [];
     while (this.at("*") || this.at("/") || this.at("div") || this.at("mod") || this.at("meet")) {
       const t = this.next();
       const f = `_m.${{ "*": "_mul", "/": "_div", div: "_idiv", mod: "_mod", meet: "_meet" }[t.v]}`;
+      const r0 = this.i;
       const r = this.unary(), pos = `(${t.line}, ${t.col})`;
+      if (t.v === "/" && !steps.length) this.zeroDenominator(i0, i1, r0, this.i);
       steps.push({ nest: (l) => `${f}(${l}, ${r}, ${pos})`, op: f, r, pos });
     }
     return this.chain(first, steps);
+  }
+
+  /** An integer literal over a literal zero is refused as Magma reads the statement, before it runs (Magma 2.18-5:
+   * `1/0`, `(-1)/0`, `1/(0)`, `1/-0`, `1/0x0`, even in a function never called), "Illegal zero denominator" at the
+   * zero; anything computed (`1/+0`, `(1+1)/0`, `1/(0+0)`, `x/0`) divides when it runs.  The tokens of each operand:
+   * [from, to). */
+  zeroDenominator(a0: number, a1: number, b0: number, b1: number) {
+    const literal = (from: number, to: number) => {
+      const T = this.toks.slice(from, to), op = (x: Tok | undefined, v: string) => x?.t === "op" && x.v === v;
+      let k = 0;
+      while (op(T[k], "(")) k++;
+      const neg = op(T[k], "-") ? 1 : 0, n = T[k + neg];
+      if (n?.t !== "num" || T.length !== 2 * k + neg + 1 || !T.slice(k + neg + 1).every((x) => op(x, ")"))) return null;
+      // (the caret at its first token inside the parentheses: the minus of -0 or (-0))
+      return { zero: /^(0+|0x0+)$/i.test(n.v), at: T[k] };
+    };
+    const a = literal(a0, a1), b = literal(b0, b1);
+    if (a && b?.zero) throw new MagmaSyntaxError("Illegal zero denominator", b.at.line, b.at.col, true);
   }
 
   unary(): string {

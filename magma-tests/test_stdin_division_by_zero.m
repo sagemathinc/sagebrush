@@ -1,0 +1,41 @@
+// Division by zero, as Magma 2.18-5 says it (a session: each error is reported and the input goes on).
+// An integer literal over a literal zero is refused as the statement is read, at the zero:
+print 1/0;
+print 1 / 0;
+print -1/0;
+print (-1)/0;
+print 1/(0);
+print 1/-0;
+print 1/(-0);
+print 1/0x0;
+print [3 + 10/0];
+f := func< | 2/0 >;
+print "the statement before it ran";
+// anything computed divides when it runs, and the error is at the operator:
+x := 0;
+print 7/x;
+print 1/+0;
+print +1/0;
+print (1+1)/0;
+print 1/(0+0);
+print 2*3/0;
+print 1/2/0;
+print (2/3)/0;
+print 1.5/0;
+print 1/0.0;
+print 7 div 0;
+print 7 mod 0;
+print 7 div (1-1);
+y := 3;
+y /:= 0;
+F := GF(7);
+print F!1 / F!0;
+P := PolynomialRing(Rationals());
+print (P.1 + 1)/0;
+print 1/(P.1 - P.1);
+print P.1/(0/1);
+print P.1 div 0;
+print P.1 mod 0;
+Z := PolynomialRing(Integers());
+print Z.1/0;
+print "end";

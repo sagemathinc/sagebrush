@@ -1,0 +1,147 @@
+
+>> print 1/0;
+           ^
+User error: Illegal zero denominator
+
+>> print 1 / 0;
+             ^
+User error: Illegal zero denominator
+
+>> print -1/0;
+            ^
+User error: Illegal zero denominator
+
+>> print (-1)/0;
+              ^
+User error: Illegal zero denominator
+
+>> print 1/(0);
+            ^
+User error: Illegal zero denominator
+
+>> print 1/-0;
+           ^
+User error: Illegal zero denominator
+
+>> print 1/(-0);
+            ^
+User error: Illegal zero denominator
+
+>> print 1/0x0;
+           ^
+User error: Illegal zero denominator
+
+>> print [3 + 10/0];
+                 ^
+User error: Illegal zero denominator
+
+>> f := func< | 2/0 >;
+                  ^
+User error: Illegal zero denominator
+the statement before it ran
+
+>> print 7/x;
+          ^
+Runtime error in '/': Division by zero
+
+
+>> print 1/+0;
+          ^
+Runtime error in '/': Division by zero
+
+
+>> print +1/0;
+           ^
+Runtime error in '/': Division by zero
+
+
+>> print (1+1)/0;
+              ^
+Runtime error in '/': Division by zero
+
+
+>> print 1/(0+0);
+          ^
+Runtime error in '/': Division by zero
+
+
+>> print 2*3/0;
+            ^
+Runtime error in '/': Division by zero
+
+
+>> print 1/2/0;
+            ^
+Runtime error in '/': Division by zero
+
+
+>> print (2/3)/0;
+              ^
+Runtime error in '/': Division by zero
+
+
+>> print 1.5/0;
+            ^
+Runtime error in '/': Division by zero
+
+
+>> print 1/0.0;
+          ^
+Runtime error in '/': Division by zero
+
+
+>> print 7 div 0;
+           ^
+Runtime error in 'div': Division by zero
+
+
+>> print 7 mod 0;
+           ^
+Runtime error in 'mod': Division by zero
+
+
+>> print 7 div (1-1);
+           ^
+Runtime error in 'div': Division by zero
+
+
+>> y /:= 0;
+     ^
+Runtime error in '/:=': Division by zero
+
+
+>> print F!1 / F!0;
+             ^
+Runtime error in '/': Division by zero
+
+
+>> print (P.1 + 1)/0;
+                  ^
+Runtime error in '/': Argument 2 is not a unit
+
+
+>> print 1/(P.1 - P.1);
+          ^
+Runtime error in '/': Division by zero
+
+
+>> print P.1/(0/1);
+            ^
+Runtime error in '/': Argument 2 is not a unit
+
+
+>> print P.1 div 0;
+             ^
+Runtime error in 'div': Division by zero
+
+
+>> print P.1 mod 0;
+             ^
+Runtime error in 'mod': Division by zero
+
+
+>> print Z.1/0;
+            ^
+Runtime error in '/': Argument 2 is not a unit
+
+end
