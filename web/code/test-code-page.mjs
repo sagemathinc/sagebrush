@@ -408,6 +408,15 @@ try {
   await sleep(500);
   const diskStayed = await ev(`({ drains: window.__drains, notebook: window.__leaves.map((x) => x.notebook), at: location.search, code: !!${C}, readOnly: document.querySelector(".code-page .code-edit textarea")?.readOnly ?? null })`);
   check(diskSaid && diskStayed.drains === 1 && JSON.stringify(diskStayed.notebook) === "[false]" && diskStayed.at === stayAt && diskStayed.code && diskStayed.readOnly === false, "✕ twice, the desktop app's disk not yet written: one drain (no notebook to save), the page stays, says so, and typing comes back: " + JSON.stringify(diskStayed));
+  // (a .tex opened from Files on this page (the LaTeX boot's __sbTex, which leaves through __sbLeaveTo): through the code
+  //  page's own way out too (no notebook to save), never index.html's leaveTo directly, #1798)
+  await ev("(window.__leaves = [], window.__drains = 0, 1)");
+  await ev(`(window.__sbLeaveTo(location.origin + "/?tex=probe"), 1)`);
+  // (its one drain and its one leave seen, then a moment for a second, which mustn't come)
+  await until("window.__drains >= 1 && window.__leaves.length >= 1", 15000);
+  await sleep(300);
+  const texLeave = await ev(`({ drains: window.__drains, notebook: window.__leaves.map((x) => x.notebook), at: location.search, code: !!${C} })`);
+  check(texLeave.drains === 1 && JSON.stringify(texLeave.notebook) === "[false]" && texLeave.at === stayAt && texLeave.code, "a .tex opened from Files (__sbLeaveTo) leaves through the code page's own way out: one drain, no notebook to save, and the page stays: " + JSON.stringify(texLeave));
   await ev(`(window.__sbTestDiskMirror(null), 1)`);
   await ev(`(document.querySelector(".code-page .code-close").click(), 1)`);
   check(await until(`location.search !== ${JSON.stringify(stayAt)} && !${C}`, 15000), "…written: ✕ leaves");
