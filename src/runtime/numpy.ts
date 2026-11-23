@@ -777,8 +777,8 @@ const CMP_OPS: Record<string, (a: bigint, b: bigint) => boolean> = {
 };
 // (an integer array compared with a Python int a double does not hold
 // exactly, or past int64: element by element, exactly, as NumPy 2)
-function bigCompare(op: string, A: { arr: NDArray; weak: Weak | null }, B: { arr: NDArray; weak: Weak | null }): NDArray {
-  const left = A.weak === null, arr = left ? A.arr : B.arr, big = (left ? B.weak : A.weak)!.big!;
+function bigCompare(op: string, A: { arr: NDArray; weak: Weak | null }, B: { arr: NDArray; weak: Weak | null }, big: bigint): NDArray {
+  const left = A.weak === null, arr = left ? A.arr : B.arr;
   const f = CMP_OPS[op];
   const res = empty(arr.shape, D.bool), od = res.data, d = arr.data;
   loop1(arr.shape, arr.strides, arr.offset, (p, k) => {
@@ -1569,9 +1569,17 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
   }
   // (a Python int past what a double or int64 holds, against an integer
   // array: compared exactly; in arithmetic with a float, NumPy's error)
+  // (and, as NumPy 2 compares them, a Python int outside an integer array's dtype: exactly, never an
+  // OverflowError; a bool array's loop is int64, so past int64 that is NumPy's OverflowError)
   if (CMP_OPS[op] && !out) {
     const w = A.weak ?? B.weak, o = A.weak ? B : A;
-    if (w && w.kind === "i" && w.big !== undefined && o.weak === null && (o.arr.dt.isInt || o.arr.dt.kind === "b") && (w.inexact || w.big < I64MIN || w.big > I64MAX)) return bigCompare(op, A, B);
+    if (w && w.kind === "i" && o.weak === null && (o.arr.dt.isInt || o.arr.dt.kind === "b")) {
+      const big = w.big ?? BigInt(w.v), dt = o.arr.dt;
+      const beyond64 = big < I64MIN || big > I64MAX;
+      const rg = RANGE[dt.name];
+      const outside = dt.kind !== "b" && (dt === D.uint64 ? big < 0n || big > U64MAX : rg ? big < BigInt(rg[0]) || big > BigInt(rg[1]) : beyond64);
+      if (outside || (dt.kind === "b" && !beyond64 && w.inexact) || (dt.kind !== "b" && w.inexact)) return bigCompare(op, A, B, big);
+    }
   }
   // (minimum and maximum of an integer array and a Python int a double does
   // not hold: compared exactly, the int refused only where it is chosen, so
