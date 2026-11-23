@@ -25,6 +25,13 @@ const ev = (seq, event, turn_id = "t1") => ({ seq, method: "turn.event", params:
     check(normalize(ev(9, { type, text: "x", usage: {}, state: "x" })) === null, `${type}: left out`);
   check(normalize({ seq: 9, method: "chat.unknown", params: {} }) === null && normalize({ seq: 0, method: "chat.rejected", params: { id: "x" } }) === null, "an unknown method, or a number below 1: left out");
   check(normalize({ seq: 10, method: "turn.event", params: { conversation: "c", omitted: { at_least: 262144 } } }) === null, "the agent's stub for an oversized entry: left out");
+  // (agent memory v1, §7.4: no note's text, name or id reaches the mirror; none of its events is kept)
+  const SENTINEL = "MEMORY-SENTINEL-7f3";
+  for (const event of [
+    { type: "memory_proposal", pending: "a".repeat(32), revision: 1, op: "new", scope: "own", name: "sentinel-name", description: SENTINEL, body: SENTINEL, expires: null },
+    { type: "memory_decided", pending: "a".repeat(32), outcome: "saved", note: "b".repeat(32) },
+    { type: "memory_used", notes: [{ note: "b".repeat(32), name: "sentinel-name", revision: 1 }] },
+  ]) check(normalize(ev(11, event)) === null, `${event.type}: left out (no note text, name or id in the mirror)`);
 }
 
 // ---- safe summaries
