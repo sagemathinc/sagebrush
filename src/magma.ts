@@ -82,6 +82,22 @@ export function lex(src: string): Tok[] {
     if (/[0-9]/.test(c)) {
       let j = i;
       while (j < n && /[0-9]/.test(src[j])) j++;
+      // hexadecimal, 0x1f (as Magma 2.18-5 reads it: a lower-case x, digits of either case): the integer, in decimal;
+      // digits and an x that aren't one (0x, 0xg, 10x5) are Magma's "Invalid hexadecimal integer", at the x
+      if (src[j] === "x") {
+        let k = j + 1;
+        while (k < n && /[0-9a-fA-F]/.test(src[k])) k++;
+        if (src.slice(i, j) === "0" && k > j + 1) {
+          out.push({ t: "num", v: BigInt(src.slice(i, k)).toString(), line: L, col: C });
+          adv(k - i);
+          continue;
+        }
+        out.push({ t: "num", v: src.slice(i, j).replace(/^0+(?=\d)/, ""), line: L, col: C });
+        adv(j - i);
+        out.push({ t: "bad", v: "x", line, col, msg: "Invalid hexadecimal integer" });
+        adv(1);
+        continue;
+      }
       let real = false;
       // 1.5 (but not 1..5) and 1e10
       if (src[j] === "." && /[0-9]/.test(src[j + 1] ?? "")) {
@@ -94,7 +110,8 @@ export function lex(src: string): Tok[] {
         j += 2;
         while (j < n && /[0-9]/.test(src[j])) j++;
       }
-      out.push({ t: real ? "real" : "num", v: src.slice(i, j), line: L, col: C });
+      // (an integer without its leading zeros: 007 is 7 in Magma, and not a Python literal)
+      out.push({ t: real ? "real" : "num", v: real ? src.slice(i, j) : src.slice(i, j).replace(/^0+(?=\d)/, ""), line: L, col: C });
       adv(j - i);
       continue;
     }
