@@ -11,7 +11,7 @@ It does not aim for 100% compatibility with SageMath. Where it answers, the answ
 :::
 
 *Code: `src/sagepre.ts` (the preparser), `lib/sage_all.py` and
-`lib/_sage_*.py` (the library, about 69,000 lines of Python), and the Rust
+`lib/_sage_*.py` (the library, about 90,000 lines of Python), and the Rust
 engines under `engine/`: `sym` (symbolic calculus), `mpoly` (multivariate
 polynomials), `arith` and `bigint` (exact arithmetic), and the number
 theory crates (`classgroup`, `modsym`, `galois`, `hmf` and others).*
@@ -295,7 +295,7 @@ A result is never presented as proven when it rests on an unproven step.
 SageMath was used as a black-box oracle: Sagebrush's authors ran it and
 compared outputs, but never read its source. There are four layers.
 
-**Program tests.** About 30 Sage programs (`sage-tests/`) print results
+**Program tests.** About 180 Sage programs (`sage-tests/`) print results
 across the library. Their output under SageMath 10.10 is committed, and the
 test suite requires Sagebrush's output to be identical, byte for byte.
 
@@ -321,8 +321,12 @@ arguments, empty matrices, rationals where integers are usual.
 
 ## 7. How close
 
-The latest coverage run was made on 16 October 2026, at commit
-`e4a9ce94`, with SageMath 10.10 as the oracle.
+The table below is from the coverage run of 16 October 2026, at commit
+`e4a9ce94`, with SageMath 10.10 as the oracle. The latest run, on 12
+November 2026 at commit `542cbba4`, keeps only matches and differences
+(`web/docs/coverage/corpora/`): 800 of the tutorial's 1,069 cases match
+(74.8%) and 49 differ (4.6%); 1,797 of the book's 2,615 match (68.7%) and
+177 differ (6.8%).
 
 | corpus | scored | match | different | error | refused | by design | timeout |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -357,10 +361,10 @@ every solution, `x == pi*n1` for an integer `n1`, where SageMath returns
 only `x == 0`. A **timeout** is a case that did not finish within the
 harness's time limit.
 
-The book's weakest chapters are numerical integration, combinatorics and
-graph theory, where much is still missing. Its strongest are the first
-steps, programming, and finite fields and number theory, where 86–94%
-of the cases match.
+In the latest run, the book's weakest chapters are combinatorics,
+differential equations and recurrences, and polynomials, where much is
+still missing. Its strongest are the first steps, programming, and finite
+fields and number theory, where 89–95% of the cases match.
 
 ## What would have saved time
 

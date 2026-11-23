@@ -12,8 +12,9 @@ MATLAB is a registered trademark of The MathWorks, Inc.
 :::
 
 *Code: `src/matlab.ts` (the translator), `lib/_matlab.py` (the runtime),
-`lib/_matlab_plot.py` (graphics), `lib/_matlab_mat.py` (`.mat` files).
-Design notes: `design/matlab.md`. About 13,700 lines in all.*
+`lib/_matlab_plot.py` (graphics), `lib/_matlab_mat.py` (`.mat` files),
+and the other `lib/_matlab_*.py` modules (ODE solvers, sparse matrices
+and more). Design notes: `design/matlab.md`. About 32,700 lines in all.*
 
 Type this into a Sagebrush notebook in MATLAB mode:
 
@@ -209,7 +210,7 @@ it prints differently (`x = 5` on one line, narrower columns), so the
 tests print values through a small neutral printer:
 
 - class, size, and `mat2str(x, 17)`, exact to the last bit;
-- 12 test files are compared with Octave this way, and 3 more, of
+- 38 test files are compared with Octave this way, and 14 more, of
   MATLAB's own output, are checked by hand.
 
 Where MATLAB and Octave disagree, Sagebrush follows MATLAB:
@@ -243,8 +244,7 @@ yet. The most common are:
 - `table` and `readtable`;
 - `graph` and `digraph`;
 - `datetime` and `categorical`;
-- `polarplot`;
-- ODE solvers.
+- `polarplot`.
 
 Many of the rest belong to toolboxes. Of the runnable examples that fail,
 most use syntax not yet supported (`classdef`, `!` shell commands) or need
@@ -252,7 +252,7 @@ sample data files that come with MATLAB.
 
 **Not yet:**
 - `classdef`, tables, `datetime` and `categorical`;
-- ODE solvers;
+- stiff ODE solvers (`ode15s`, `ode23s`);
 - lighting in 3-D.
 
 Speed has not been benchmarked: vectorized code runs on Sagebrush's numpy,
