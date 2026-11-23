@@ -8,9 +8,8 @@ import { join } from "node:path";
 // A WebAssembly kernel with no room in its module's memory (past wasm32's 4 GiB, or more than the computer could
 // give: its grow refused) answers "use JavaScript", and NumPy computes in JavaScript instead: never refused for the
 // kernel's sake (engine cost policy r2). Made deterministic and small here: a preload refuses any grow past 64 MiB, as
-// V8 refuses one past 4 GiB, and 20,000,000 doubles need more than that; so does a 3000 x 3000 product on engine/nd. argsort is the exception: its JavaScript path
-// keeps its indices in a JavaScript array, past V8's largest a crash rather than an error, so its MemoryError stays.
-test("a kernel with no room in its memory: NumPy computes in JavaScript; argsort's MemoryError stays", () => {
+// V8 refuses one past 4 GiB, and 20,000,000 doubles need more than that; so does a 3000 x 3000 product on engine/nd.
+test("a kernel with no room in its memory: NumPy computes in JavaScript, including argsort", () => {
   const dir = mkdtempSync(join(tmpdir(), "sb-room-"));
   const pre = join(dir, "pre.js");
   writeFileSync(pre, `const real = WebAssembly.Memory.prototype.grow;
@@ -36,7 +35,7 @@ step("matmul", lambda: bool((np.ones((3000, 256)) @ np.ones((256, 3000)) == 256.
 step("nd", lambda: np.linalg._kernels()["solve"]["path"])
 step("argsort", lambda: int(np.argsort(b)[0]))
 `], { encoding: "utf8" }).trim().split("\n");
-    for (const l of ["sort True", "sin True", "fft True", "nd engine/nd", "matmul True", "argsort EXC MemoryError a WebAssembly module's memory past its maximum (4 GiB at most: wasm32)"]) assert.ok(out.includes(l), l + "\n" + out.join("\n"));
+    for (const l of ["sort True", "sin True", "fft True", "nd engine/nd", "matmul True", "argsort 19999999"]) assert.ok(out.includes(l), l + "\n" + out.join("\n"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
