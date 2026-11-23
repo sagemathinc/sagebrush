@@ -234,9 +234,87 @@ pub fn remove_at_exit(data: &std::path::Path, window_alive: bool) -> Option<bool
     opened_this_session().then(|| remove_data_folder_within(data, wait))
 }
 
-/// An exit asked for while the approvals window is open, or its folder is being removed: held, with its exit code,
-/// until the removal is done (the window's Destroyed handler, in open, then exits with it).
-static PENDING_EXIT: std::sync::Mutex<(bool, Option<i32>)> = std::sync::Mutex::new((false, None));
+/// The approvals window's lifecycle, serialized under one lock (LIFE): which window owns the folder now (a generation
+/// per open), whether its folder is being removed, and an exit held for that removal.
+///   - No window opens while a removal runs, or once an exit with a code is committed: a new window's fresh folder
+///     must never be what an old removal's next try deletes.
+///   - A removal starts only for the window that owns the folder now: a late Destroyed of an older one removes nothing.
+///   - The first held exit code is the one replayed; later requests during the removal don't change it.
+#[derive(Debug, Default)]
+pub struct Lifecycle {
+    gen: u64,
+    removing: bool,
+    exit: Option<i32>,
+    exiting: bool,
+}
+impl Lifecycle {
+    pub const fn new() -> Self {
+        Lifecycle { gen: 0, removing: false, exit: None, exiting: false }
+    }
+    /// A new window may open now: no removal running, no exit committed.
+    pub fn may_open(&self) -> bool {
+        !self.removing && !self.exiting
+    }
+    /// A window opens: its generation (it owns the folder from now).  Only after may_open.
+    pub fn begin_open(&mut self) -> u64 {
+        self.gen += 1;
+        self.gen
+    }
+    /// An exit request, with the window there or not: true if it's held (the caller prevents the exit).  An exit with
+    /// a code commits the exit (no window opens after it); the first code held is kept.
+    pub fn exit_requested(&mut self, code: Option<i32>, window_open: bool) -> bool {
+        if code.is_some() {
+            self.exiting = true;
+        }
+        if !window_open && !self.removing {
+            return false;
+        }
+        match code {
+            Some(c) => {
+                self.exit.get_or_insert(c);
+                true
+            }
+            None => false,
+        }
+    }
+    /// The removal for window `gen` begins: false if it may not (an older window's, or one already running).
+    pub fn cleanup_started(&mut self, gen: u64) -> bool {
+        if gen != self.gen || self.removing {
+            return false;
+        }
+        self.removing = true;
+        true
+    }
+    /// The window's close failed (no Destroyed will come): its removal begins now instead.
+    pub fn close_failed(&mut self) -> bool {
+        let g = self.gen;
+        self.cleanup_started(g)
+    }
+    /// What a close at exit led to: true if the removal must start now (the close failed, so no Destroyed comes).
+    pub fn closed(&mut self, failed: bool) -> bool {
+        failed && self.close_failed()
+    }
+    /// The removal is done: the held exit's code, to make it again with.
+    pub fn cleanup_done(&mut self) -> Option<i32> {
+        self.removing = false;
+        self.exit.take()
+    }
+}
+static LIFE: std::sync::Mutex<Lifecycle> = std::sync::Mutex::new(Lifecycle::new());
+
+/// The removal of the window's folder, off the main thread (up to EXIT_WAIT on Windows, one checked try elsewhere),
+/// logged as a fixed code; then a held exit is made with its first code.  Only after cleanup_started.
+#[cfg(desktop)]
+fn run_cleanup(handle: tauri::AppHandle, data: std::path::PathBuf) {
+    std::thread::spawn(move || {
+        let gone = if cfg!(windows) { remove_data_folder_within(&data, EXIT_WAIT) } else { remove_data_folder(&data) };
+        eprintln!("[signer] data folder removed: {}", if gone { "yes" } else { "no" });
+        let code = LIFE.lock().unwrap().cleanup_done();
+        if let Some(c) = code {
+            handle.exit(c);
+        }
+    });
+}
 
 /// What the launch's cleanup found (logged as a fixed code, "[signer] startup data folder: …").
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -281,18 +359,23 @@ pub fn startup_cleanup(data: &std::path::Path) -> Startup {
 pub fn on_exit_requested(app: &tauri::AppHandle, code: Option<i32>, api: &tauri::ExitRequestApi) {
     use tauri::Manager;
     let window = app.get_webview_window(LABEL);
-    let mut pending = PENDING_EXIT.lock().unwrap();
-    let removing = pending.0;
-    if window.is_none() && !removing {
-        return;
-    }
-    if let Some(c) = code {
+    if LIFE.lock().unwrap().exit_requested(code, window.is_some()) {
         api.prevent_exit();
-        pending.1 = Some(c);
     }
-    drop(pending);
     if let Some(w) = window {
-        let _ = w.close();
+        // (a failed close: no Destroyed will come, so the same checked, bounded removal now, then the held exit)
+        let failed = w.close().is_err();
+        if LIFE.lock().unwrap().closed(failed) {
+            match crate::disk::data_dir(app) {
+                Ok(data) => run_cleanup(app.clone(), data),
+                Err(_) => {
+                    let code = LIFE.lock().unwrap().cleanup_done();
+                    if let Some(c) = code {
+                        app.exit(c);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -311,6 +394,14 @@ pub fn open(app: &tauri::AppHandle) -> Result<(), String> {
         let _ = w.set_focus();
         return Ok(());
     }
+    // (not while the last window's folder is being removed, nor once the app is exiting: Lifecycle)
+    let gen = {
+        let mut life = LIFE.lock().unwrap();
+        if !life.may_open() {
+            return Err("the approvals window is still closing".into());
+        }
+        life.begin_open()
+    };
     // (the native gate, immediately before the window is made: part 3's native signing commands check it again, each
     //  time, and refuse native signing if it fails or has changed)
     match crate::device_key::native_tier() {
@@ -396,24 +487,13 @@ pub fn open(app: &tauri::AppHandle) -> Result<(), String> {
         }
     }
     let made = w.build().map_err(|e| format!("the approvals window didn't open: {e}"))?;
-    // (once the window is gone, its data folder goes too, logged as a fixed code: off the main thread, waiting up to
-    //  EXIT_WAIT on Windows for WebView2's processes to let go of it; an exit held meanwhile (on_exit_requested) is
-    //  then made)
+    // (once the window is gone, its data folder goes too (run_cleanup), if this window still owns it)
     let handle = app.clone();
     made.on_window_event(move |e| {
         if let tauri::WindowEvent::Destroyed = e {
-            PENDING_EXIT.lock().unwrap().0 = true;
-            let (data, handle) = (data.clone(), handle.clone());
-            std::thread::spawn(move || {
-                let gone = if cfg!(windows) { remove_data_folder_within(&data, EXIT_WAIT) } else { remove_data_folder(&data) };
-                eprintln!("[signer] data folder removed: {}", if gone { "yes" } else { "no" });
-                let mut pending = PENDING_EXIT.lock().unwrap();
-                pending.0 = false;
-                if let Some(c) = pending.1.take() {
-                    drop(pending);
-                    handle.exit(c);
-                }
-            });
+            if LIFE.lock().unwrap().cleanup_started(gen) {
+                run_cleanup(handle.clone(), data.clone());
+            }
         }
     });
     Ok(())
@@ -779,6 +859,66 @@ mod tests {
         assert_eq!(remove_at_exit(&data, true), None);
         assert!(f.exists(), "not opened in this session: left for the next launch's cleanup");
         std::fs::remove_dir_all(&data).unwrap();
+    }
+
+    #[test]
+    fn no_window_opens_while_the_last_one_s_folder_is_removed_and_a_late_destroyed_removes_nothing() {
+        let data = temp();
+        let mut life = Lifecycle::new();
+        // (window 1 opens and closes: its removal is held mid-way, between two tries)
+        assert!(life.may_open());
+        let g1 = life.begin_open();
+        prepare_data_folder(&data).unwrap();
+        assert!(life.cleanup_started(g1));
+        assert!(!life.may_open(), "a reopen while the removal runs is refused");
+        assert!(!life.cleanup_started(g1), "and one removal at a time");
+        assert_eq!(life.cleanup_done(), None);
+        // (window 2 opens afterwards: its fresh folder; window 1's late Destroyed removes nothing)
+        assert!(life.may_open());
+        let g2 = life.begin_open();
+        let f = prepare_data_folder(&data).unwrap();
+        std::fs::write(f.join("live"), b"x").unwrap();
+        assert!(!life.cleanup_started(g1), "an older window's Destroyed starts no removal");
+        assert!(f.join("live").exists(), "the new window's folder is untouched");
+        assert!(life.cleanup_started(g2));
+        assert!(remove_data_folder(&data) && !f.exists());
+        assert_eq!(life.cleanup_done(), None);
+        std::fs::remove_dir_all(&data).unwrap();
+    }
+
+    #[test]
+    fn an_exit_held_for_the_removal_replays_its_first_code() {
+        let mut life = Lifecycle::new();
+        let g = life.begin_open();
+        assert!(life.exit_requested(Some(1), true), "held while the window is there");
+        assert!(!life.may_open(), "no window opens once an exit is committed");
+        assert!(life.cleanup_started(g));
+        assert!(life.exit_requested(Some(0), false), "held again during the removal");
+        assert!(life.exit_requested(Some(2), false));
+        assert_eq!(life.cleanup_done(), Some(1), "the first code, not a later one");
+        assert!(!life.exit_requested(Some(1), false), "the replayed exit passes");
+        assert!(!life.may_open());
+        // (the person's quit (no code) isn't held here, and commits nothing)
+        let mut life = Lifecycle::new();
+        life.begin_open();
+        assert!(!life.exit_requested(None, true) && life.may_open());
+        // (an exit with no window and no removal passes at once, and still commits)
+        let mut life = Lifecycle::new();
+        assert!(!life.exit_requested(Some(0), false) && !life.may_open());
+    }
+
+    #[test]
+    fn a_failed_close_starts_the_removal_and_the_held_exit_still_comes() {
+        let mut life = Lifecycle::new();
+        let g = life.begin_open();
+        assert!(life.exit_requested(Some(3), true));
+        // (a close that worked starts nothing here: Destroyed does)
+        assert!(!life.closed(false));
+        assert!(life.may_open() == false && !life.removing);
+        // (the close fails: no Destroyed; the removal starts now)
+        assert!(life.closed(true));
+        assert!(!life.closed(true) && !life.close_failed() && !life.cleanup_started(g), "once");
+        assert_eq!(life.cleanup_done(), Some(3), "and the held exit is made with its code");
     }
 
     #[test]
