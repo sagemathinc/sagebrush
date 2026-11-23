@@ -68,6 +68,7 @@ try {
     const P = await page(), F = "d".repeat(25) + "m";
     const adv = (seq, hash) => err(P, `fd.advancePin(${JSON.stringify(F)}, { seq: ${seq}, hash: ${JSON.stringify(hash)} })`);
     const pinNow = () => P.ev(`fd.pin(${JSON.stringify(F)})`);
+    const adv2 = (fleet, seq, hash) => err(P, `fd.advancePin(${JSON.stringify(fleet)}, { seq: ${seq}, hash: ${JSON.stringify(hash)} })`);
     ok((await pinNow()) === null, "P-1: no pin at first");
     ok((await adv(0, H("A"))) === null && (await adv(0, H("A"))) === null && (await adv(3, H("B"))) === null, "P-1: the first entry, the same again (no change), then a later one: each accepted");
     const p1 = await pinNow();
@@ -81,7 +82,14 @@ try {
     const G = "e".repeat(25) + "q";
     const advG = (seq, hash) => err(P, `fd.advancePin(${JSON.stringify(G)}, { seq: ${seq}, hash: ${JSON.stringify(hash)} })`);
     ok((await advG(5, H("E"))) === null && (await advG(4, H("F"))) === "chain_fork" && (await P.ev(`fd.pin(${JSON.stringify(G)})`)).forked === true, "P-3: a lower seq (a rollback) is a fork too");
-    for (const [why, expr] of [["fleet-upper", `fd.pin(${JSON.stringify(F.toUpperCase())})`], ["fleet-last-char", `fd.pin(${JSON.stringify("d".repeat(26))})`], ["seq-negative", `fd.advancePin(${JSON.stringify(G)}, { seq: -1, hash: ${JSON.stringify(H("A"))} })`], ["seq-float", `fd.advancePin(${JSON.stringify(G)}, { seq: 1.5, hash: ${JSON.stringify(H("A"))} })`], ["hash-short", `fd.advancePin(${JSON.stringify(G)}, { seq: 9, hash: "abc" })`], ["hash-pad-bits", `fd.advancePin(${JSON.stringify(G)}, { seq: 9, hash: ${JSON.stringify("A".repeat(42) + "B")} })`]]) ok(typeof (await err(P, expr)) === "string", `P-4.${why}: refused`);
+    // (P-4: bad input on a fleet never pinned, so a refusal is the input's own, never an earlier fork's: the exact reason,
+    //  and the pin still null)
+    const K = "g".repeat(25) + "y";
+    for (const [why, expr, reason] of [["fleet-upper", `fd.pin(${JSON.stringify(F.toUpperCase())})`, /not a fleet id/], ["fleet-last-char", `fd.pin(${JSON.stringify("d".repeat(26))})`, /not a fleet id/], ["seq-negative", `fd.advancePin(${JSON.stringify(K)}, { seq: -1, hash: ${JSON.stringify(H("A"))} })`, /not a chain position/], ["seq-float", `fd.advancePin(${JSON.stringify(K)}, { seq: 1.5, hash: ${JSON.stringify(H("A"))} })`, /not a chain position/], ["hash-short", `fd.advancePin(${JSON.stringify(K)}, { seq: 9, hash: "abc" })`, /not a chain position/], ["hash-pad-bits", `fd.advancePin(${JSON.stringify(K)}, { seq: 9, hash: ${JSON.stringify("A".repeat(42) + "B")} })`, /not a chain position/]]) {
+      const e = await err(P, expr);
+      ok(reason.test(e ?? "") && (await P.ev(`fd.pin(${JSON.stringify(K)})`)) === null, `P-4.${why}: refused as bad input (${reason.source}), nothing pinned`, e);
+    }
+    ok((await adv2(K, 9, H("A"))) === null && (await P.ev(`fd.pin(${JSON.stringify(K)})`)).seq === 9, "P-4: then a good position on that fleet is taken (the refusals left it clean)");
   }
   // ---- Reset this device
   {
