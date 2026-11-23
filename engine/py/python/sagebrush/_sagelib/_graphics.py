@@ -1452,7 +1452,7 @@ class Panel:
             return list(zip(ticks, _mpl_labels(ticks)))
         return [(v, _num(v, step)) for v in ticks]
 
-    def margins(self, w, h):
+    def _margins(self, w, h):
         """(left, top, right, bottom): the room around the plot area that this
         panel's tick labels, axis labels and title take in the box w x h; for
         matplotlib's exact axes (the box the plot area), none but a subtitle's
@@ -1490,7 +1490,7 @@ class Panel:
         right_y = o.get("yaxis_side") == "right"
         sub = o.get("subtitle") if title else None
         sub_h = tts + 4 if sub else 0  # (the subtitle's line, under the title)
-        left, top, right, bottom = self.margins(w, h)
+        left, top, right, bottom = self._margins(w, h)
         # (a grid's panels: at least the margins of the others in its column
         # (left, right) and row (top, bottom), so that their plot areas line up)
         least = o.get("margins_at_least")

@@ -1598,7 +1598,7 @@ class Figure:
                 continue
             nrows, ncols = ax._grid
             row, col = min(nrows - 1, int(round(fy * nrows))), min(ncols - 1, int(round(fx * ncols)))
-            m = p.margins(fw * width - 8, fh * (height - top) - 4)
+            m = p._margins(fw * width - 8, fh * (height - top) - 4)
             cells.append((p, (nrows, ncols, row, col), m))
         cols, rows = {}, {}
         for _, (nr, nc, r, c), (l, t, rt, b) in cells:
