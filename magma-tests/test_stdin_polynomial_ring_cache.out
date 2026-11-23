@@ -1,0 +1,24 @@
+P.1^2 + 1
+P.1
+true
+t^2 + 1
+true
+t
+s^2 + 1
+s
+true true 3
+true true
+s^2 + s + 1
+Univariate Polynomial Ring in s over Rational Field
+Z.1
+w
+true
+
+>> print Z eq Q;
+           ^
+Runtime error in 'eq': Arguments are not compatible
+Argument types given: RngUPol[RngInt], RngUPol[FldRat]
+
+u^3 - 2
+u
+end

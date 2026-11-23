@@ -1,0 +1,27 @@
+// PolynomialRing(Rationals()) and PolynomialRing(Integers()), one ring each for the session as Magma 2.18-5 has it:
+// naming one renames it everywhere, its elements made before too.
+P := PolynomialRing(Rationals());
+f := P.1^2 + 1;
+print f;
+R := PolynomialRing(Rationals());
+print R.1, P eq R;
+Q<t> := PolynomialRing(Rationals());
+print f;
+print P eq Q;
+R2 := PolynomialRing(Rationals());
+print R2.1;
+S := {f, t, t + 1};
+S2<s> := PolynomialRing(Rationals());
+print f, t;
+print f in S, s + 1 in S, #S;
+print t eq s, Parent(t) eq Parent(f);
+print f + s, Parent(f + s);
+Z := PolynomialRing(Integers());
+print Z.1;
+Z2<w> := PolynomialRing(Integers());
+print Z.1, Parent(Z.1) eq Z2;
+print Z eq Q;
+U<u> := PolynomialRing(Integers());
+g := w^3 - 2;
+print g, Z.1;
+print "end";

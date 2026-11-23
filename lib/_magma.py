@@ -6269,8 +6269,16 @@ FractionField = FieldOfFractions
 
 # ------------------------------------------------------------------ polynomials
 
+# PolynomialRing(Integers()) and PolynomialRing(Rationals()), one of each for the session, as Magma 2.18-5 has it
+# (base ring name -> ring): P := PolynomialRing(Rationals()); Q<t> := PolynomialRing(Rationals()); is one ring,
+# and naming it renames it everywhere, P.1 printing as t
+_ZQ_RINGS = {}
+
+
 def PolynomialRing(R, n=1):
-    """A new polynomial ring; its variable prints as $.1 until named."""
+    """The polynomial ring over R; its variable prints as $.1 until named.
+    Over the integers and the rationals it is the session's one ring
+    (_ZQ_RINGS); over a finite field, the field's."""
     # (one variable only: PolynomialRing(Q, 3) is not a univariate ring)
     if n != 1 or isinstance(n, bool):
         raise MagmaError("PolynomialRing in more than one variable (or with weights) is not supported yet", "'PolynomialRing'")
@@ -6283,7 +6291,9 @@ def PolynomialRing(R, n=1):
     base = _sp.ZZ if R is _ZZ else _sp.QQ if R is _QQ else None
     if base is None:
         raise MagmaError("PolynomialRing over a %s (not the integers, the rationals or a finite field) is not supported yet" % _type_of(R), "'PolynomialRing'")
-    out = _MPolyRingZQ(base, "$.1")
+    out = _ZQ_RINGS.get(base._name)
+    if out is None:
+        out = _ZQ_RINGS[base._name] = _MPolyRingZQ(base, "$.1")
     _fun_remember_poly(_fun_base_key(R), out)
     return out
 
@@ -6293,9 +6303,28 @@ class _MPolyRingZQ(_sp.PolynomialRing_):
     Until its variable is named, it prints as P.1 for the oldest global P that
     holds the ring now, and as $.1 when none does (Magma: `P := PolynomialRing(
     Rationals()); P.1 + 1;` prints P.1 + 1).  Only the printing changes: the
-    ring's _name, which equality and hashing use, stays $.1."""
+    ring's _name, which equality and hashing use, stays $.1, and a name given
+    to it, R<x> := ..., is _shown (the ring is shared, _ZQ_RINGS: naming it
+    again renames it, with its elements kept in sets and as keys)."""
+
+    _shown = None
+
+    def __repr__(self):
+        if self._shown is not None:
+            return "Univariate Polynomial Ring in %s over %r" % (self._shown, self._base)
+        return _sp.PolynomialRing_.__repr__(self)
+
+    # (the name the ring's variable was given, for what is built from it: a number field's generator, a ring
+    # made in the same variable)
+    def variable_name(self):
+        return self._shown if self._shown is not None else self._name
+
+    def variable_names(self):
+        return (self.variable_name(),)
 
     def _repr_name(self):
+        if self._shown is not None:
+            return self._shown
         if self._name != "$.1":
             return self._name
         v = _global_name(self)
@@ -6321,7 +6350,10 @@ def _refcall(f, refs, *args, **kw):
 
 def _assign_gen_names(R, names):
     """R<x, ...> := ...: the generators' names (a list of strings)."""
-    if isinstance(R, _sp.PolynomialRing_) and names:
+    if isinstance(R, _MPolyRingZQ) and names:
+        # (the session's shared ring: renamed for printing only, _shown)
+        R._shown = names[0]
+    elif isinstance(R, _sp.PolynomialRing_) and names:
         R._name = names[0]
     elif hasattr(R, "_magma_names"):
         R._magma_names(names)
