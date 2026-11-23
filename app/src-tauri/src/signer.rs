@@ -57,7 +57,7 @@ pub fn control_frame_ok(url: &Url, control: Option<&str>, other: Option<&Url>) -
 }
 
 /// The self-test's diagnostic codes for a signer page that didn't sign (a fixed set: nothing else is ever logged).
-pub const PROBE_CODES: [&str; 4] = ["no-probe", "no-tauri", "refused-acl", "refused"];
+pub const PROBE_CODES: [&str; 5] = ["no-probe", "no-tauri", "refused-acl", "refused", "hung"];
 
 /// The check Rust runs in the signer window after its page loads, in a self-test only: if the probe's global or the
 /// IPC global is missing, the page reloads itself once with ?probe=<code> (the navigation guard logs the code).
