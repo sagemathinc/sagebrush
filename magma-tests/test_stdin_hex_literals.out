@@ -1,0 +1,66 @@
+31
+31 11259375 255 0
+-16 6 RngIntElt
+340282366920938463463374607431768211455
+485
+5
+[ 1 .. 3 ]
+5 5 5 10 16 255 255
+
+>> print 0x;
+          ^
+User error: Invalid hexadecimal integer
+
+>> print 0xg;
+          ^
+User error: Invalid hexadecimal integer
+
+>> print 0x 5;
+          ^
+User error: Invalid hexadecimal integer
+
+>> print 0x_5;
+          ^
+User error: Invalid hexadecimal integer
+
+>> print 00x5;
+           ^
+User error: Invalid hexadecimal integer
+
+>> print 10x5;
+           ^
+User error: Invalid hexadecimal integer
+
+>> print 2x;
+          ^
+User error: Invalid hexadecimal integer
+
+>> print 1x;
+          ^
+User error: Invalid hexadecimal integer
+
+>> print 01x5;
+           ^
+User error: Invalid hexadecimal integer
+
+>> print 11x5;
+           ^
+User error: Invalid hexadecimal integer
+
+>> print 0x1g;
+            ^
+User error: bad syntax
+
+>> print 0x5x5;
+            ^
+User error: bad syntax
+
+>> print 3x1g;
+            ^
+User error: bad syntax
+
+>> print 0X5;
+          ^
+User error: bad syntax
+7 10 0 0
+end
