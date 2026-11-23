@@ -292,6 +292,10 @@ impl Node {
     pub fn is_float(&self) -> bool {
         matches!(&self.kind, Kind::Num(Num::Float(..)))
     }
+    /// A real of RealField(p), p != 53.
+    pub fn is_mp(&self) -> bool {
+        matches!(&self.kind, Kind::Num(Num::Mp(_)))
+    }
     pub fn is_infinite(&self) -> bool {
         matches!(&self.kind, Kind::Const(Const::Infinity | Const::MinusInfinity | Const::UnsignedInfinity))
     }
@@ -579,6 +583,7 @@ pub fn mul(factors: Vec<Expr>) -> Expr {
         let complex = match &coeff {
             Num::Exact(_, im) => !num_traits::Zero::is_zero(im),
             Num::Float(_, im, _) => *im != 0.0,
+            Num::Mp(_) => false,
         };
         if complex && c != Const::UnsignedInfinity {
             return constant(Const::UnsignedInfinity);
@@ -759,7 +764,8 @@ pub fn pow(b: &Expr, x: &Expr) -> Expr {
                 }
             }
         }
-        (Kind::Const(Const::E), Kind::Num(n)) if !n.is_exact() => {
+        // (e^x for x of RealField(p) is the front end's, mp_calls: its exp)
+        (Kind::Const(Const::E), Kind::Num(n)) if !n.is_exact() && n.as_mp().is_none() => {
             let (re, im) = n.to_c64();
             let m = re.exp();
             let k = n.fk().unwrap_or(crate::num::Fk::RR);
@@ -789,6 +795,22 @@ pub fn pow(b: &Expr, x: &Expr) -> Expr {
 }
 
 fn num_pow(b: &Num, x: &Num) -> Expr {
+    // a real of RealField(p) to an integer: its correctly rounded power (Sage's
+    // mpfr_pow_si); any other power with one is the front end's (mp_calls)
+    if b.as_mp().is_some() || x.as_mp().is_some() {
+        // (a power of NaN stays as it is, as Sage's NaN^2)
+        if b.as_mp().is_some_and(|m| m.sp == crate::mpnum::Sp::NaN) {
+            return raw(Kind::Pow(num(b.clone()), num(x.clone())));
+        }
+        // (a power past the exact one's bound is the front end's too: its
+        // bracketed powering, SR(RealField(100)(3))^(-10^6))
+        if let (Some(m), Some(n)) = (b.as_mp(), x.as_i64()) {
+            if crate::mpnum::pow_int_fits(m, n) {
+                return num(b.pow_int(n));
+            }
+        }
+        return raw(Kind::Pow(num(b.clone()), num(x.clone())));
+    }
     // an element of RDF or CDF to an exact integer: binary powering, as Sage's RDF (9.0 for
     // SR(RDF(3))^2, but 9.000000000000002 for SR(RDF(3))^RDF(2))
     // (CDF's power is always GSL's formula: SR(CDF(1, 2))^2 is -2.9999999999999987 + 4.0*I)

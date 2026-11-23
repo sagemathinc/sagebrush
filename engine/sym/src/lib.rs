@@ -21,6 +21,7 @@ pub mod ops;
 pub mod parse;
 pub mod poly;
 pub mod mpoly;
+pub mod mpnum;
 pub mod print;
 pub mod qpoly;
 pub mod rewrite;

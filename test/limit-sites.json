@@ -7799,10 +7799,35 @@
   "owner": "raster/image I/O",
   "row": "inv-31"
  },
+ "engine/sym/src/api.rs :: mp_calls :: Kind::Fun(f, _) if matches!(f, Fun::User(_) | Fun::Deriv(..) | Fun::Integral | Fun::Limit) => false, #0": {
+  "class": "none",
+  "owner": "symbolic engine",
+  "reason": "a match on the symbolic Limit function's name (calls of symbolic functions keep their RealField arguments unevaluated); refuses nothing"
+ },
  "engine/sym/src/definite.rs :: endpoints :: .or_else(|_| crate::limit::try_limit(&crate::rewrite::simplify_log(big_f), x, pt, dir)) #0": {
   "class": "none",
   "owner": "symbolic calculus (@sagebrush-matlab)",
   "reason": "try_limit is the name of the limit function: this line asks for a one-sided limit and refuses nothing"
+ },
+ "engine/sym/src/mpnum.rs ::  :: pub const MAX_EXP: i64 = 4096; #0": {
+  "class": "coverage",
+  "owner": "symbolic engine",
+  "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
+ },
+ "engine/sym/src/mpnum.rs :: checked :: if x.sp == Sp::Fin && !x.m.is_zero() && x.top().abs() > MAX_EXP { #0": {
+  "class": "coverage",
+  "owner": "symbolic engine",
+  "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
+ },
+ "engine/sym/src/mpnum.rs :: pow_int_fits :: n == 0 || x.sp != Sp::Fin || x.m.is_zero() || x.m.bits().saturating_mul(n.unsigned_abs()) <= crate::num::MAX_INT_BITS #0": {
+  "class": "none",
+  "owner": "symbolic engine",
+  "reason": "whether a RealField power is computed in the engine (its exact form within num::MAX_INT_BITS) or by the front end, which has no such bound; refuses nothing"
+ },
+ "engine/sym/src/mpnum.rs :: refuse_range :: MAX_EXP, MAX_EXP #0": {
+  "class": "coverage",
+  "owner": "symbolic engine",
+  "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
  },
  "engine/sym/src/num.rs ::  :: pub const MAX_INT_BITS: u64 = 1 << 21; #0": {
   "class": "2+3",
@@ -11901,6 +11926,11 @@
   "owner": "curves over QQ (@sagebrush-sage2)",
   "reason": "base_extend of a curve over RR to a ring other than RR: not available yet (Sage has them)"
  },
+ "lib/_sage_expr.py ::  :: _MP_MAX_EXP = 4096 #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
+ },
  "lib/_sage_expr.py ::  :: _SUM_SHIFT_LIMIT = 2000 # work limit of the shifted closed forms #0": {
   "class": "coverage",
   "owner": "Sage kernel",
@@ -11920,6 +11950,11 @@
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",
   "reason": "a docstring naming Maxima (Sage's simplify); it refuses nothing"
+ },
+ "lib/_sage_expr.py :: _complete_mp :: raise NotImplementedError(\"the value of %s is not available in sagebrush yet\" % _call(\"str\", calls[0])[0]) #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
  },
  "lib/_sage_expr.py :: _ilt_term :: raise NotImplementedError(\"inverse_laplace: no inverse known for %s\" % F) #0": {
   "class": "coverage",
@@ -11955,6 +11990,56 @@
   "class": "coverage",
   "owner": "Sage kernel (@sagebrush-sage2)",
   "reason": "laplace/inverse_laplace: no rule for this input; the public function returns it unevaluated, as Sage does (an unsupported case, not a cap)"
+ },
+ "lib/_sage_expr.py :: _mp_call_value :: raise NotImplementedError(\"%s of a real number of RealField(%d) with a complex, infinite, undefined \" #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
+ },
+ "lib/_sage_expr.py :: _mp_call_value :: raise NotImplementedError(\"%s of a real number of RealField(p) with a double or a complex number \" #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
+ },
+ "lib/_sage_expr.py :: _mp_call_value :: unavailable = NotImplementedError(\"%s of a real number of RealField(%d) in a symbolic expression is not \" #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
+ },
+ "lib/_sage_expr.py :: _mp_call_value :: with a real of RealField(p) among them, or NotImplementedError.\"\"\" #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a docstring naming the error a function raises; refuses nothing"
+ },
+ "lib/_sage_expr.py :: _mp_s :: \"symbolic expression is not available in sagebrush yet\" % (v, _MP_MAX_EXP, _MP_MAX_EXP)) #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
+ },
+ "lib/_sage_expr.py :: _mp_s :: if abs(v._e + abs(v._m).bit_length()) > _MP_MAX_EXP: #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
+ },
+ "lib/_sage_expr.py :: _mp_s :: m (p != 53), as a double for 53 bits; NotImplementedError where the #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a docstring naming the error a function raises; refuses nothing"
+ },
+ "lib/_sage_expr.py :: _mp_s :: raise NotImplementedError(\"%s, an element of RR past the double range, has no symbolic form in sagebrush yet\" % (v,)) #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
+ },
+ "lib/_sage_expr.py :: _mp_s :: raise NotImplementedError(\"%s: a real number of absolute value at least 2^%d or less than 2^-%d in a \" #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
+ },
+ "lib/_sage_expr.py :: _mp_s :: raise NotImplementedError(\"an element of %s in a symbolic expression is not available in sagebrush yet \" #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
  },
  "lib/_sage_expr.py :: _sum_signed_rational :: if sum(n for _, _, n, _ in shifts) > _SUM_SHIFT_LIMIT: # past the work limit: unevaluated #0": {
   "class": "coverage",

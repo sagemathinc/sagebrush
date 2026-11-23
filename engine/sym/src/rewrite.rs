@@ -268,7 +268,7 @@ fn last_term_negative(v: &Expr) -> bool {
 }
 
 fn has_float(e: &Expr) -> bool {
-    matches!(&e.kind, Kind::Num(Num::Float(..))) || e.children().iter().any(has_float)
+    matches!(&e.kind, Kind::Num(Num::Float(..) | Num::Mp(_))) || e.children().iter().any(has_float)
 }
 
 /// The most terms reduce_trig expands one product into.

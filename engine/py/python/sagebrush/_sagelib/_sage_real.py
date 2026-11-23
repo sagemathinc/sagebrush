@@ -22,6 +22,11 @@ def _sa():
     return sage_all
 
 
+def _sage_expr_type():
+    import _sage_expr
+    return _sage_expr.Expression
+
+
 def digits_to_prec(d):
     """The precision Sage uses for d decimal digits: ceil((d + 1) log2 10).
 
@@ -2043,6 +2048,10 @@ class RealNumberMP:
             return _sa().RDF(self) ** n
         if R._prec > 53 and type(n) is float:
             return _cpow(float(self), n)
+        if isinstance(n, _sage_expr_type()):
+            # (a symbolic exponent: the symbolic ring's power, as Sage:
+            # RealField(100)(2)^x is 2.0000000000000000000000000000^x)
+            return NotImplemented
         x = self
         y = n if isinstance(n, RealNumberMP) else R(n)
         # (Sage's identities, whatever the operands' field: x^0 = 1 (NaN
@@ -4321,12 +4330,15 @@ def _cplx(v, prec):
 
 def _ev(s, R, prec):
     import _sage_expr
-    e = _sage_expr.Expression(s)
+    e = _sage_expr._bare(s)
     op = e._op()
     tag = op[0]
     if s.startswith("n"):
         num, den = s[1:].rstrip(";").split("/")
         return R(_F(int(num), int(den)))
+    if tag == "mp":
+        # a real of RealField(p): rounded into R
+        return R(_sage_expr._py_number(s))
     if tag == "float":
         # (its IEEE bits; "re,im" for a complex double: log(CC(0)) is CC's -infinity)
         parts = s[1:].rstrip(";").split(",")
