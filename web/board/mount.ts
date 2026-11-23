@@ -119,6 +119,8 @@ export interface BoardHost {
   /** the engine of code items, made the first time a board has code (the document then) */
   /** an interpreter for a language (a board's items may be in several: codes.ts) */
   code?: (d: BoardDoc, mode: BoardMode) => BoardCode;
+  /** An unavailable exported engine: an explicit reader action, not a document's request. */
+  engineRecovery?(): (() => boolean) | null;
   /** KaTeX, loaded the first time a board has math */
   math?: () => Promise<{ typeset(el: Element): void }>;
   /** TimeTravel's history, asked for the first time it is needed */
@@ -995,7 +997,30 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     c.cacheId = outputsId;
     c.usePictures(docPixels);
     // (a language's interpreter could not start: the caption says why, until the next edit)
-    c.onError = (why) => { if (code === c) say(plain("The code can't run here:", why)); };
+    c.onError = async (why) => {
+      // All languages are registered synchronously by sync(). Wait for their
+      // checks, not just the first failure, before offering substitution.
+      await c.ready;
+      if (destroyed || code !== c) return;
+      const note = plain("The code can't run here:", why);
+      const recover = host.engineRecovery?.();
+      if (recover) {
+        const button = document.createElement("button");
+        button.textContent = "Use the latest engine from sagebrush.space";
+        button.onclick = () => {
+          if (destroyed || code !== c || !doc) return;
+          if (!recover()) return; // recheck pending checks and the load generation
+          button.disabled = true;
+          c.close();
+          code = null;
+          say("Loading the latest compatible engine from sagebrush.space…");
+          const d = doc, order = codeOrder(d);
+          if (order.length) engine()?.sync(withPreviews(d, order, byPage), d.mode ?? "python", d.seed).catch((e) => console.warn("board: engine recovery:", e));
+        };
+        note.append(" ", button, " Or upload this HTML file to sagebrush.space, then choose Open as a board in Files.");
+      }
+      say(note);
+    };
     const codeHost: CodeHost = { highlight: (s, id) => c.highlight(s, cell(id)) ?? escapeHtml(s), output: (id, copy) => c.output(cell(id), copy), state: (id) => c.state(cell(id)), run: (id) => { c.run([cell(id)]); } };
     // (an interpreter ready later, made as its language's items came: their
     // code shown again, highlighted now, UI-C5A-1)
