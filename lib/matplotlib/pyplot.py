@@ -611,8 +611,13 @@ class Axes:
         if s is not None and not isinstance(s, (int, float)):
             sizes = [math.sqrt(float(v)) * PT / 2 for v in _list(s)]
         r = math.sqrt(36 if s is None or sizes is not None else float(s)) * PT / 2
+        # (linewidths: the markers' edge width in points, one for all; the edge drawn when edgecolors are given)
+        lw = kw.get("linewidths", kw.get("linewidth", kw.get("lw")))
+        if lw is not None and not isinstance(lw, (int, float)):
+            lw = _list(lw)[0]
         p = Points(xs, ys, marker=marker, size=r, sizes=sizes, color=col, colors=colors, alpha=alpha,
-                   label=label, edgecolor=to_color(edgecolors) if edgecolors not in (None, "none", "face") else None)
+                   label=label, edgecolor=to_color(edgecolors) if edgecolors not in (None, "none", "face") else None,
+                   edgewidth=None if lw is None else float(lw) * PT)
         art = _Artist(self._add(p), "collections.PathCollection")
         if clim is not None:
             # (colored by values: a mappable, for colorbar)
@@ -629,10 +634,12 @@ class Axes:
             self._opts["xticklabels"] = xs
             xs = list(range(len(xs)))
         bs = _list(bottom) if bottom is not None and not isinstance(bottom, (int, float)) else [bottom or 0] * len(xs)
+        # (width: one for every bar, or one per bar, as matplotlib's)
+        wd = _list(width) if not isinstance(width, (int, float)) else [width] * len(xs)
         rects = []
-        for xi, h, b in zip(xs, hs, bs):
-            x0 = float(xi) - width / 2 if align == "center" else float(xi)
-            rects.append((x0, b, width, h) if h >= 0 else (x0, b + h, width, -h))
+        for xi, h, b, w in zip(xs, hs, bs, wd):
+            x0 = float(xi) - w / 2 if align == "center" else float(xi)
+            rects.append((x0, b, w, h) if h >= 0 else (x0, b + h, w, -h))
         colors = [to_color(c) for c in color] if isinstance(color, (list, tuple)) and color and not isinstance(color[0], (int, float)) else None
         col = colors[0] if colors else self._color(color, True)
         if alpha is not None:
@@ -1094,6 +1101,14 @@ class Axes:
         self._opts["xlabel"] = str(s)
         if (fontsize or kw.get("size")) is not None:
             self._opts["label_size"] = _size_px(fontsize or kw.get("size"), 10)
+
+    def get_xlabel(self):
+        """The x axis' label ("" when it has none)."""
+        return self._opts.get("xlabel", "")
+
+    def get_ylabel(self):
+        """The y axis' label ("" when it has none)."""
+        return self._opts.get("ylabel", "")
 
     def set_ylabel(self, s, fontsize=None, labelpad=None, **kw):
         self._opts["ylabel"] = str(s)
