@@ -18,6 +18,7 @@
     "web/sync-protocol/doc-protocol.ts",
     "web/workspace/agent-schema.ts",
     "web/workspace/agent-grant.ts",
+    "web/workspace/fleet-device.ts",
     "web/workspace/agent-pair.ts",
     "web/workspace/fleet/install.ts",
     "web/workspace/agent-ui.ts",
