@@ -1452,6 +1452,31 @@ class Panel:
             return list(zip(ticks, _mpl_labels(ticks)))
         return [(v, _num(v, step)) for v in ticks]
 
+    def _margins(self, w, h):
+        """(left, top, right, bottom): the room around the plot area that this
+        panel's tick labels, axis labels and title take in the box w x h; for
+        matplotlib's exact axes (the box the plot area), none but a subtitle's
+        line."""
+        o = self.options
+        show_axes = o.get("axes", True)
+        title, xlabel, ylabel = o.get("title"), o.get("xlabel"), o.get("ylabel")
+        # font sizes (pixels): tick labels, axis labels, title
+        ts, ls, tts = float(o.get("tick_size", 10.5)), float(o.get("label_size", 12)), float(o.get("title_size", 14))
+        sub_h = tts + 4 if title and o.get("subtitle") else 0  # (the subtitle's line, under the title)
+        if o.get("exact"):
+            # (matplotlib's axes: the box is the plot area; labels and the
+            # title go outside it, except a subtitle's line: the title stays
+            # where it was)
+            return 0, sub_h, 0, 0
+        top = 10 + (tts + 8 if title else 0) + sub_h
+        bottom = (ts * 1.75 + (ls * 1.3 + 4 if xlabel else 6)) if show_axes else 8
+        right = 14
+        guess = self.ranges(max(w - 70, 50), max(h - top - bottom, 50))
+        yt = self.ticks(guess[2], guess[3], guess[5], o.get("yticks"), o.get("yticklabels"), max(3, int(h / 70)), "y")
+        lw = max([len(_strip_tags(s)) for _, s in yt] + [1]) * ts * 0.61 + 10 if yt else 4
+        left = (lw + (ls + 6 if ylabel else 0)) if show_axes else 8
+        return left, top, right, bottom
+
     def svg(self, x, y, w, h):
         """SVG for this panel inside the box (x, y, w, h); returns (svg, description)."""
         o = self.options
@@ -1463,21 +1488,14 @@ class Panel:
         # font sizes (pixels): tick labels, axis labels, title
         ts, ls, tts = float(o.get("tick_size", 10.5)), float(o.get("label_size", 12)), float(o.get("title_size", 14))
         right_y = o.get("yaxis_side") == "right"
-        # margins around the plot area, for tick labels, axis labels and title
         sub = o.get("subtitle") if title else None
         sub_h = tts + 4 if sub else 0  # (the subtitle's line, under the title)
-        top = 10 + (tts + 8 if title else 0) + sub_h
-        bottom = (ts * 1.75 + (ls * 1.3 + 4 if xlabel else 6)) if show_axes else 8
-        right = 14
-        guess = self.ranges(max(w - 70, 50), max(h - top - bottom, 50))
-        yt = self.ticks(guess[2], guess[3], guess[5], o.get("yticks"), o.get("yticklabels"), max(3, int(h / 70)), "y")
-        lw = max([len(_strip_tags(s)) for _, s in yt] + [1]) * ts * 0.61 + 10 if yt else 4
-        left = (lw + (ls + 6 if ylabel else 0)) if show_axes else 8
-        if o.get("exact"):
-            # (matplotlib's axes: the box is the plot area; labels and the
-            # title go outside it)
-            left = top = right = bottom = 0
-            top = sub_h  # (except a subtitle's line: the title stays where it was)
+        left, top, right, bottom = self._margins(w, h)
+        # (a grid's panels: at least the margins of the others in its column
+        # (left, right) and row (top, bottom), so that their plot areas line up)
+        least = o.get("margins_at_least")
+        if least and not o.get("exact"):
+            left, top, right, bottom = (max(m, n) for m, n in zip((left, top, right, bottom), least))
         pw, ph = max(20, w - left - right), max(20, h - top - bottom)
         ar = o.get("aspect_ratio")
         if o.get("fit_aspect") and ar not in (None, "automatic", "auto"):

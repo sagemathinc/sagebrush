@@ -1579,7 +1579,36 @@ class Figure:
         for ax in self.axes:
             ax._apply_aspect()
         panels = [self._placed(ax) for ax in self.axes]
+        self._align_margins(panels)
         return panels or [(Panel([], frame=True), (0, 0, 1, 1))]
+
+    def _align_margins(self, panels):
+        """The grid's panels, so that their plot areas line up: each takes the
+        widest left and right margins of the panels in its grid column, and
+        the tallest top and bottom margins of those in its row (the room their
+        tick labels, axis labels and titles take), as render_frame lays out
+        their boxes.  Exact panels (subplots_adjust, gridspec) are placed by
+        matplotlib's positions already."""
+        from matplotlib._axes_geometry import _uses_grid
+        width, height = self._size[0] * 100, self._size[1] * 100
+        top = 30 if self._suptitle else 0
+        cells = []
+        for ax, (p, (fx, fy, fw, fh)) in zip(self.axes, panels):
+            if p.options.get("exact") or not _uses_grid(ax) or getattr(ax, "_cbs", None) or getattr(ax, "_cb_of", None) is not None:
+                continue
+            nrows, ncols = ax._grid
+            row, col = min(nrows - 1, int(round(fy * nrows))), min(ncols - 1, int(round(fx * ncols)))
+            m = p._margins(fw * width - 8, fh * (height - top) - 4)
+            cells.append((p, (nrows, ncols, row, col), m))
+        cols, rows = {}, {}
+        for _, (nr, nc, r, c), (l, t, rt, b) in cells:
+            k = (nr, nc, c)
+            cols[k] = (max(cols.get(k, (0, 0))[0], l), max(cols.get(k, (0, 0))[1], rt))
+            k = (nr, nc, r)
+            rows[k] = (max(rows.get(k, (0, 0))[0], t), max(rows.get(k, (0, 0))[1], b))
+        for p, (nr, nc, r, c), _ in cells:
+            (l, rt), (t, b) = cols[(nr, nc, c)], rows[(nr, nc, r)]
+            p.options["margins_at_least"] = (l, t, rt, b)
 
     def _placed(self, ax):
         """An Axes' panel and where it goes: in the figure's grid as the
