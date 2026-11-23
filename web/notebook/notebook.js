@@ -2889,7 +2889,7 @@ export function createNotebook(root, opts = {}) {
     get store() { return store; },
     on(event, f) { (listeners[event] ??= []).push(f); return () => { listeners[event] = listeners[event].filter((g) => g !== f); }; },
     showKeys() { keysDlg.showModal(); },
-    setReadOnly(ro) { opts.readOnly = !!ro; root.classList.toggle("readonly", !!ro); for (const c of cells()) c.ta.readOnly = !!ro; },
+    setReadOnly(ro) { opts.readOnly = !!ro; root.classList.toggle("readonly", !!ro); for (const c of cells()) c.ta.readOnly = !!ro; guard(); },
     // outputs, for other places (a console's picture panel) and agents
     output: { text: appendText, display: appendDisplay, interact: renderInteract, forget: forgetInteracts, sink: areaSink },
     outputText, pictures, interacts, setInteract, saveOutputs, loadOutputs,

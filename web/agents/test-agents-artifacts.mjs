@@ -673,8 +673,7 @@ try {
     await ev(`${cellJs(1)}.querySelector('.runb').click()`);
     await until(`/42/.test(${cellJs(1)}.querySelector('.out')?.textContent ?? '')`, 120000);
     await typeInto(0, "  # edited");
-    await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 5000).catch(() => {});
-    await sleep(800);
+    ok(await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000), "the person's edit reports a successful save before it is read back");
     const r = await call("workspace.read", { path });
     const c = r.content.json.cells;
     ok(c[0].code === "a = 1  # edited" && JSON.stringify(c[1].outputs ?? []).includes("42"), "the person's edit and the output are saved (read back through Workspace.read)", c);
@@ -683,7 +682,7 @@ try {
     const rec = await record(ref);
     await putRecord({ ...rec, rev: rec.rev + 1, cells: rec.cells.map((x, i) => (i === 2 ? { ...x, code: "b = 2  # theirs" } : x)) });
     await typeInto(0, " again");
-    await sleep(2000);
+    ok(await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000), "the edit after an outside change reports a successful save before reload");
     const after = await record(ref);
     const codes = after.cells.map((x) => x.code);
     ok(codes[0] === "a = 1  # edited again" && codes[2] === "b = 2  # theirs", "a save never goes over a change made since its base: both are kept (the store's compare and swap)", codes);
@@ -2519,7 +2518,7 @@ try {
       await lose(how);
       if (w === "W2") await ev(`window.__release()`);
       const res = await pending;
-      await sleep(900);
+      if (w === "W2") ok(await untilSaved(), `E21-W2${how}: the person's text saved after the workspace lock was released`);
       const after = await rec(path);
       const agentNone = !after.cells.some((c) => /AGENT/.test(c.code ?? ""));
       const name = how === "c" ? "E21c" : `E21-${w}${how}`;
