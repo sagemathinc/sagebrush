@@ -5555,8 +5555,9 @@ function wsShowFiles(on) {
     };
     wsBrowser = mountBrowser(wsSidebar, {
       ws,
-      // (Agents…: the agents page once this notebook is saved, as the board is opened; not saved, it stays, saying why)
-      agents: () => void toBoard("/agents/", "the agents page"),
+      // (Agents…: the agents page once this notebook is saved, as the board is opened; not saved, it stays, saying why.
+      // Not in the desktop app, which has no agents page yet (#1542): no Agents… and no Files | Agents switch there)
+      ...(desktopApp() ? {} : { agents: () => void toBoard("/agents/", "the agents page") }),
       current: () => (current.kind === "browser" && current.id ? { kind: "notebook", ref: current.id } : undefined),
       // (in the app, a notebook or board another window shows: that window to the front instead, claimHere)
       open(e, how) {

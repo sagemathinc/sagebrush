@@ -36,7 +36,7 @@ export type Hello = { protocol: 1; agent: { name: string; client: string; versio
  * chat.resume's tag back on its chat.replay, so the log mirror reads the agent's log apart from the display (mirror.ts);
  * "delegate.1", an agent that takes Delegate's tasks.* requests (pair-delegate-plan-r3.3 §2.5; the page's side is
  * tasks-client.ts); "chat.brief", an agent that drafts a Delegate task's brief from a Pair chat (Delegate briefs). */
-export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn", "chat.resume.tag", "delegate.1", "chat.brief"] as const;
+export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn", "chat.resume.tag", "delegate.1", "chat.brief", "delegate.run"] as const;
 /** The `log` an agent's hello or agent.ready names: its run, as the agent's random hex id; anything else, none. */
 export const logOf = (v: unknown): { instance: string } | undefined => {
   const i = (v as { instance?: unknown } | null)?.instance;
@@ -384,7 +384,7 @@ export class AgentPairing {
     // (what this page offers beyond the verbs, sent before its grant (A2-1): a notification, which a server that
     //  doesn't know it ignores, §1 rule 4)
     // (permission.digest: every Allow carries the digest of the action shown, from any page that pairs)
-    this.send({ jsonrpc: "2.0", method: "page.features", params: { features: [...(this.opts.notebookEdit ? ["notebook.edit", "edit.turn"] : []), "permission.digest", ...(this.opts.runVerbs ? ["run.context"] : []), ...(this.opts.egressTurn ? ["egress.turn"] : [])] } });
+    this.send({ jsonrpc: "2.0", method: "page.features", params: { features: [...(this.opts.notebookEdit ? ["notebook.edit", "edit.turn"] : []), "permission.digest", "tasks.reason", ...(this.opts.runVerbs ? ["run.context"] : []), ...(this.opts.egressTurn ? ["egress.turn"] : [])] } });
     this.send({ jsonrpc: "2.0", method: "grant.changed", params: changed(grant) });
     await this.keep();
     // (S4: while it waited, the grant may have been revoked, the pairing closed or the grant replaced: then nothing
