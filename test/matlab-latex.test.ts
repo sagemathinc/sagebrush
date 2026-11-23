@@ -76,7 +76,6 @@ const WRITERS: [string, string][] = [
   ["writematrix([1 2; 3 4], 'out.csv')", "writematrix writes a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook."],
   ["writematrix(magic(3), 'data.txt')", "writematrix writes a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook."],
   ["writematrix(4, 'data.txt', 'WriteMode', 'append')", "writematrix writes a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook."],
-  ["writematrix(4, 'data.txt', 'WriteMode', 'append')", "writematrix writes a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook."],
   ["cd('sub')", "cd changes the current folder, and code in a LaTeX document always runs in the document's folder: use paths relative to it."],
   ["diary on", "diary keeps a log file in MATLAB, and code in a LaTeX document can't write files."],
   ["diary('log.txt')", "diary keeps a log file in MATLAB, and code in a LaTeX document can't write files."],

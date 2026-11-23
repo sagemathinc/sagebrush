@@ -284,26 +284,124 @@ def _pi_reduce(M):
     return r
 
 
+# sin(pi t) and cos(pi t) for |t| <= 1/4, correctly rounded: pi t formed in double-double (Dekker, "A floating-point
+# technique for extending the available precision", 1971: the exact product by Veltkamp's split), then the Taylor
+# series of sin and cos in double-double to about 1e-30, so that the one rounding is the last (Muller et al.,
+# Handbook of Floating-Point Arithmetic, ch. 14)
+_PI_DD = (3.141592653589793, 1.2246467991473532e-16)
+# ((-1)^k / (2k+1)!, (-1)^k / (2k)!) as double-double pairs, k = 0..14 (|pi t| <= pi / 4: the last terms are below 1e-32)
+_SIN_DD = ((1.0, 0.0), (-0.16666666666666666, -9.25185853854297e-18), (0.008333333333333333, 1.1564823173178714e-19),
+           (-0.0001984126984126984, -1.7209558293420705e-22), (2.7557319223985893e-06, -1.858393274046472e-22),
+           (-2.505210838544172e-08, 1.448814070935912e-24), (1.6059043836821613e-10, 1.2585294588752098e-26),
+           (-7.647163731819816e-13, -7.03872877733453e-30), (2.8114572543455206e-15, 1.6508842730861433e-31),
+           (-8.22063524662433e-18, -2.2141894119604265e-34), (1.9572941063391263e-20, -1.3643503830087908e-36),
+           (-3.868170170630684e-23, 8.843177655482344e-40), (6.446950284384474e-26, -1.9330404233703465e-42),
+           (-9.183689863795546e-29, -1.4303150396787322e-45), (1.1309962886447716e-31, 1.0498015412959506e-47))
+_COS_DD = ((1.0, 0.0), (-0.5, 0.0), (0.041666666666666664, 2.3129646346357427e-18),
+           (-0.001388888888888889, 5.300543954373577e-20), (2.48015873015873e-05, 2.1511947866775882e-23),
+           (-2.755731922398589e-07, -2.3767714622250297e-23), (2.08767569878681e-09, -1.20734505911326e-25),
+           (-1.1470745597729725e-11, -2.0655512752830745e-28), (4.779477332387385e-14, 4.399205485834081e-31),
+           (-1.5619206968586225e-16, -1.1910679660273754e-32), (4.110317623312165e-19, 1.4412973378659527e-36),
+           (-8.896791392450574e-22, 7.911402614872376e-38), (1.6117375710961184e-24, -3.6846573564509766e-41),
+           (-2.4795962632247976e-27, 1.2953730964765229e-43), (3.279889237069838e-30, 1.5117542744029879e-46))
+
+
+def _two_sum(a, b):
+    s = a + b
+    v = s - a
+    return s, (a - (s - v)) + (b - v)
+
+
+def _two_prod(a, b):
+    """a b = p + e exactly (Veltkamp's split; |a|, |b| <= 4 here, so nothing overflows or underflows)"""
+    p = a * b
+    c = 134217729.0 * a
+    ah = c - (c - a)
+    al = a - ah
+    c = 134217729.0 * b
+    bh = c - (c - b)
+    bl = b - bh
+    return p, ((ah * bh - p) + ah * bl + al * bh) + al * bl
+
+
+def _dd_mul(ah, al, bh, bl):
+    p, e = _two_prod(ah, bh)
+    e = e + (ah * bl + al * bh)
+    s = p + e
+    return s, e - (s - p)
+
+
+def _dd_add(ah, al, bh, bl):
+    s, e = _two_sum(ah, bh)
+    e = e + (al + bl)
+    t = s + e
+    return t, e - (t - s)
+
+
+def _dd_series(zh, zl, coef):
+    """sum coef[k] z^k by Horner's rule in double-double"""
+    h, l = coef[-1]
+    for ch, cl in coef[-2::-1]:
+        h, l = _dd_mul(h, l, zh, zl)
+        h, l = _dd_add(h, l, ch, cl)
+    return h, l
+
+
+def _sincospi_small(t):
+    """(sin(pi t), cos(pi t)) for an array t with |t| <= 1/4, each correctly rounded but for the rare halfway case
+    closer than about 1e-30; a tiny t (below 2^-500) is scaled by 2^600 first, so the split stays exact"""
+    tiny = np.abs(t) < 2.0 ** -500
+    u = np.where(tiny, t * 2.0 ** 600, t)
+    yh, yl = _two_prod(u, np.full(np.shape(u), _PI_DD[0]))
+    yh, yl = _two_sum(yh, yl + u * _PI_DD[1])
+    zh, zl = _dd_mul(yh, yl, yh, yl)
+    sh, sl = _dd_series(zh, zl, _SIN_DD)
+    sh, sl = _dd_mul(sh, sl, yh, yl)
+    ch, cl = _dd_series(zh, zl, _COS_DD)
+    # (scaled back by 2^-600: exact for a normal result; for a subnormal one, yh's rounding is the only rounding
+    # unless the residual (the part of yh it dropped, which is exact, plus yl) passes half the subnormal ulp, 2^-1075:
+    # then one ulp, 2^-1074, toward it)
+    r1 = yh * 2.0 ** -600
+    t = (yh - r1 * 2.0 ** 600) + yl
+    sub = np.abs(r1) <= 2.0 ** -1022
+    r1 = np.where(sub & (t > 2.0 ** -475), r1 + 5e-324, np.where(sub & (t < -(2.0 ** -475)), r1 - 5e-324, r1))
+    s = np.where(tiny, r1, sh + sl)
+    c = np.where(tiny, 1.0, ch + cl)
+    return s, c
+
+
 @_bs("sinpi")
 def sinpi_(x):
-    """sin(pi*x), exact at the integers (a zero of x's sign: sinpi(-0) is -0, MATLAB's) and the half-integers (+-1)"""
+    """sin(pi*x), exact at the integers (a zero of x's sign: sinpi(-0) is -0, MATLAB's) and the half-integers (+-1),
+    and correctly rounded in double in between (sinpi(0.25) == sqrt(2)/2); MATLAB's results can differ from these by
+    one ulp"""
     M = _real_float(x, "sinpi")
-    with np.errstate(invalid="ignore"):
+    with np.errstate(invalid="ignore", over="ignore"):
         r = _pi_reduce(M)
         a = np.abs(r)
-        s = np.where(a <= 0.25, np.sin(np.pi * a), np.where(a <= 0.75, np.cos(np.pi * (a - 0.5)), np.sin(np.pi * (1 - a))))
-        s = np.copysign(s, r)
+        # (the reductions a - 1/2 and 1 - a are exact, by Sterbenz's lemma)
+        lo, mid = a <= 0.25, a <= 0.75
+        t = np.where(lo, a, np.where(mid, a - 0.5, 1 - a))
+        sn, cs = _sincospi_small(np.where(np.isfinite(t), t, 0.0))
+        s = np.where(lo, sn, np.where(mid, cs, sn))
+        s = np.where(np.isfinite(r), np.copysign(s, r), np.nan)
     return _out(s, _cls(x))
 
 
 @_bs("cospi")
 def cospi_(x):
-    """cos(pi*x), exact at the integers (+-1) and the half-integers (+0)"""
+    """cos(pi*x), exact at the integers (+-1) and the half-integers (+0), and correctly rounded in double in between;
+    MATLAB's results can differ from these by one ulp"""
     M = _real_float(x, "cospi")
-    with np.errstate(invalid="ignore"):
-        a = np.abs(_pi_reduce(M))
-        c = np.where(a <= 0.25, np.cos(np.pi * a), np.where(a <= 0.75, np.sin(np.pi * (0.5 - a)), -np.cos(np.pi * (1 - a))))
+    with np.errstate(invalid="ignore", over="ignore"):
+        r = _pi_reduce(M)
+        a = np.abs(r)
+        lo, mid = a <= 0.25, a <= 0.75
+        t = np.where(lo, a, np.where(mid, 0.5 - a, 1 - a))
+        sn, cs = _sincospi_small(np.where(np.isfinite(t), t, 0.0))
+        c = np.where(lo, cs, np.where(mid, sn, -cs))
         c = np.where(c == 0, 0.0, c)
+        c = np.where(np.isfinite(r), c, np.nan)
     return _out(c, _cls(x))
 
 
