@@ -43,4 +43,4 @@ One document at a time, in one small, uniform frame. We keep polishing it toward
 - **History is bounded,** so it never grows without limit.
 - **You can export everything to a zip at any time.**
 
-Browser storage can still be cleared by the browser or by you; export if the work matters. Sync across devices needs signing in, and is open only to the accounts the server's allowlist admits; paying adds more storage and longer history. Nothing here locks you in.
+Browser storage can still be cleared by the browser or by you; export if the work matters. Sync across devices needs signing in, and isn't available to every account yet; paying adds more storage and longer history. Nothing here locks you in.

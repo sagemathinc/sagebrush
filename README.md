@@ -756,8 +756,9 @@ Most of Sagebrush is MIT OR Apache-2.0. `web/cloud/` is under the Microsoft Refe
 A few parts derive from other permissively licensed projects (CPython,
 NumPy, Arm Optimized Routines, fdlibm) or implement another project's
 method with its author's permission (smalljac's, written from scratch),
-or are ported with their copyright holder's permission (PSAGE's Hilbert
-modular forms, first distributed under the GPL);
+or are ported with their copyright holder's permission (two parts of
+PSAGE, first distributed under the GPL: Hilbert modular forms over
+Q(sqrt(5)) and the modular symbol map of elliptic curves);
 [NOTICE.md](NOTICE.md) lists them with their notices.
 
 ### What each download contains, and under which licenses
