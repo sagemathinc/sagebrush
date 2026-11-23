@@ -1282,7 +1282,8 @@ mountAttach({
   conversation: () => draftOf || current().id,
   create: (path, bytes) => (workspace ? workspace.createByPerson(path, { content: bytes }) : Promise.reject(new Error("this browser's workspace isn't open"))),
   append(conv, line) {
-    const join = (v: string) => (v.trim() ? v.replace(/\s*$/, "") + "\n\n" : "") + line;
+    // (what is there kept as it is, every space of it; the line after a blank line)
+    const join = (v: string) => (v ? v + (v.endsWith("\n\n") ? "" : v.endsWith("\n") ? "\n" : "\n\n") : "") + line;
     if (draftOf === conv) { editor.value = join(editor.value); putDraft(conv, editor.value, true); }
     else putDraft(conv, join(draftsPending.get(conv) ?? readDrafts()[conv] ?? ""), true);
   },

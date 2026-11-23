@@ -17,6 +17,8 @@ export const ATTACH_COPY = {
   tooMany: `At most ${ATTACH_MAX} images at once.`,
   noWorkspace: "This browser's workspace isn't open, so the image can't be saved.",
   failed: (why: string) => `The image wasn't saved: ${why}`,
+  /** a refused save's reason, by the workspace's own error code; never its message */
+  why: { exists: "a file with its name is already there.", limit: "the workspace is at one of its limits.", storage: "this browser's storage refused it.", read: "it couldn't be read.", other: "something went wrong." } as Record<string, string>,
   outside: (agent: string) => `Saved, but ${agent} can't read ${ATTACH_ROOT}: its access doesn't include that folder.`,
   line: (path: string) => `Image: \`${path}\``,
 } as const;
@@ -54,12 +56,13 @@ export async function attach(h: AttachHost, conversation: string, files: File[])
     // (the size first, from the file itself: nothing over the cap is read)
     if (f.size > IMAGE_BYTES_MAX) { h.toast(ATTACH_COPY.tooBig(f.size)); continue; }
     let u: Uint8Array;
-    try { u = new Uint8Array(await f.arrayBuffer()); } catch { h.toast(ATTACH_COPY.failed("it couldn't be read")); continue; }
+    try { u = new Uint8Array(await f.arrayBuffer()); } catch { h.toast(ATTACH_COPY.failed(ATTACH_COPY.why.read)); continue; }
     if (u.length > IMAGE_BYTES_MAX) { h.toast(ATTACH_COPY.tooBig(u.length)); continue; }
     if (!isRaster(u)) { h.toast(ATTACH_COPY.notImage); continue; }
     const path = `${folder}/${randomName()}.${EXT(u)}`;
     try { await h.create(path, u); }
-    catch (e: any) { h.toast(ATTACH_COPY.failed(String(e?.message ?? e).slice(0, 200))); continue; }
+    // (said by its code only: an error's own text could carry anything)
+    catch (e: any) { const c = typeof e?.code === "string" && e.code !== "read" && e.code !== "other" && Object.hasOwn(ATTACH_COPY.why, e.code) ? e.code : "other"; h.toast(ATTACH_COPY.failed(ATTACH_COPY.why[c])); continue; }
     h.append(conversation, ATTACH_COPY.line(path));
     const a = h.agent();
     if (a && !a.reads(path)) h.toast(ATTACH_COPY.outside(a.name));

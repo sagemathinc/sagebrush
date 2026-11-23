@@ -15,7 +15,7 @@ const bytes = (head, n = 64) => { const u = new Uint8Array(n).fill(7); u.set(hea
 const file = (u, name = "x.png", type = "image/png") => new File([u], name, { type });
 function host({ agent = null, create = true, fail = null } = {}) {
   const H = { made: [], lines: [], toasts: [], reads: [] };
-  H.create = create ? async (path, u) => { if (fail) throw new Error(fail); if (H.made.some((m) => m.path === path)) throw new Error(`${path} is there already`); H.made.push({ path, u: new Uint8Array(u) }); } : null;
+  H.create = create ? async (path, u) => { if (fail) throw fail; if (H.made.some((m) => m.path === path)) throw new Error(`${path} is there already`); H.made.push({ path, u: new Uint8Array(u) }); } : null;
   H.append = (conv, line) => H.lines.push({ conv, line });
   H.agent = () => agent && { name: agent.name, reads: (p) => (H.reads.push(p), agent.reads(p)) };
   H.toast = (t) => H.toasts.push(t);
@@ -57,7 +57,7 @@ function host({ agent = null, create = true, fail = null } = {}) {
   ok(H4.made.length === 0 && H4.toasts[0] === ATTACH_COPY.tooBig(IMAGE_BYTES_MAX + 1), "bytes over the cap, whatever the file said its size was: refused");
   const H5 = host();
   await attach(H5, "c1", [{ size: 10, arrayBuffer: async () => { throw new Error("NotReadableError: secret/path/x.png"); } }, file(bytes(PNG))]);
-  ok(H5.made.length === 1 && H5.toasts[0] === ATTACH_COPY.failed("it couldn't be read"), "a file that can't be read: said in the page's words; the next one is still saved", H5.toasts);
+  ok(H5.made.length === 1 && H5.toasts[0] === ATTACH_COPY.failed(ATTACH_COPY.why.read) && !H5.toasts[0].includes("secret"), "a file that can't be read: said in the page's words, not the error's; the next one is still saved", H5.toasts);
 }
 // ---- how many at once, the chat's folder, the workspace
 {
@@ -74,9 +74,14 @@ function host({ agent = null, create = true, fail = null } = {}) {
   const H4 = host({ create: false });
   await attach(H4, "c1", [file(bytes(PNG))]);
   ok(H4.made.length === 0 && H4.lines.length === 0 && H4.toasts[0] === ATTACH_COPY.noWorkspace, "no workspace open: nothing saved, nothing in the draft, said");
-  const H5 = host({ fail: "the workspace is full" });
-  await attach(H5, "c1", [file(bytes(PNG))]);
-  ok(H5.lines.length === 0 && H5.toasts[0] === ATTACH_COPY.failed("the workspace is full"), "a create the workspace refuses (its limits, a taken path): nothing in the draft, its reason said", H5.toasts);
+  const said = [];
+  for (const code of ["exists", "limit", "storage", "read", "other", "toString", "__proto__", undefined]) {
+    const H5 = host({ fail: Object.assign(new Error("iVBORw0KGgo secret text"), code === undefined ? {} : { code }) });
+    await attach(H5, "c1", [file(bytes(PNG))]);
+    said.push(H5.lines.length === 0 && H5.toasts.length === 1 ? H5.toasts[0] : "BAD");
+  }
+  const W = ATTACH_COPY.why;
+  ok(JSON.stringify(said) === JSON.stringify([W.exists, W.limit, W.storage, W.other, W.other, W.other, W.other, W.other].map(ATTACH_COPY.failed)), "a create the workspace refuses: nothing in the draft; its reason said by its code (exists, limit, storage), anything else one fixed sentence; never the error's own text", said);
 }
 // ---- the paired agent's access: said when it can't read the folder
 {

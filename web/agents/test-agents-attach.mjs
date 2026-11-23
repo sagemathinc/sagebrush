@@ -97,6 +97,22 @@ try {
   const dB = await draftOfChat(P, b), shownB = await P.ev(`document.querySelector('#editor textarea')?.value ?? ''`);
   ok(a !== b && /^for chat A\n\nImage: `\/Attachments\//.test(dA) && (pathIn(dA) ?? "").startsWith(`/Attachments/${a}/`) && dB === "for chat B" && shownB === "for chat B", "T7: pasted in chat A, saved after chat B is shown: the path goes to A's draft, in A's folder; B's untouched", { a, b, dA, dB, shownB });
 
+  // ---- T10: a name that's taken (the same random name twice): the workspace's create refuses it, the first file's
+  //  bytes stay, nothing more goes in the draft, and the reason is said in the page's words
+  const id10 = await fresh(P, "keep  ");
+  await P.ev(`(() => { window.__grv = crypto.getRandomValues.bind(crypto); crypto.getRandomValues = (a) => (a.length === 12 ? a.fill(0xab) : window.__grv(a)); return true; })()`);
+  await paste(P);
+  const d10a = await lines(P, id10, 1);
+  const p10 = pathIn(d10a);
+  await P.ev(`(() => { const dt = new DataTransfer(); const u = new Uint8Array(64).fill(9); u.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); dt.items.add(new File([u], "b.png", { type: "image/png" })); (document.querySelector('#editor textarea') ?? document.querySelector('#editor .mb-block')).dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true })); return true; })()`);
+  await P.until(`/already there/.test(document.querySelector('#toast')?.textContent ?? '')`, 10000).catch(() => {});
+  await P.ev(`(crypto.getRandomValues = window.__grv, true)`);
+  const t10 = await P.ev(`document.querySelector('#toast')?.textContent ?? ''`);
+  await sleep(500);
+  const d10b = await draftOfChat(P, id10), s10 = p10 && (await saved(P, p10));
+  ok(p10 === `/Attachments/${id10}/${"ab".repeat(12)}.png` && t10 === "The image wasn't saved: a file with its name is already there." && d10b === d10a && s10 && JSON.stringify(s10.bytes) === JSON.stringify(PNG), "T10: a second image at a taken name: refused by the workspace, the first file's bytes kept, the draft unchanged, said in the page's words", { p10, t10, d10a, d10b });
+  ok(d10a.startsWith("keep  \n\nImage: `"), "T10: what was typed is kept as it is, its spaces too, the image's line after it", d10a);
+
   // ---- T8: an agent that takes images: the help line says so, and it reads the pasted file as an image
   const A = fakeAgent({ features: ["workspace.image"] });
   agents.push(A);
