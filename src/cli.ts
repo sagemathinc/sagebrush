@@ -1072,6 +1072,8 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
     process.exitCode = await promptFront(given, lim);
     return;
   }
+  // (a program's stdin that is a pipe or a file: input() reads its lines, as CPython's does; a terminal's isn't read)
+  if (!interactive && process.stdin.isTTY !== true) R.stdinInput = true;
   const sys = R.importModule("sys");
   sys.argv.length = 0;
   sys.argv.push(cmd !== null ? "-c" : mod !== null ? mod : file ?? "", ...argv);
