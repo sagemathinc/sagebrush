@@ -191,10 +191,9 @@ export function isRaster(u: Uint8Array): boolean {
     || at(0, [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]) || at(0, [0x47, 0x49, 0x46, 0x38, 0x39, 0x61]) // GIF87a, GIF89a
     || (at(0, [0x52, 0x49, 0x46, 0x46]) && at(8, [0x57, 0x45, 0x42, 0x50])); // RIFF....WEBP
 }
-/** A data file's bytes, if it is a raster image (else null, read as before): over IMAGE_BYTES_MAX refused with its
+/** A file's bytes, if they are a raster image (else null, read as before: text, a document, other bytes): over IMAGE_BYTES_MAX refused with its
  * size before any encoding. Nothing of the bytes goes into an error. */
-function imageOut(kind: string, c: unknown, what: string): { base64: string } | null {
-  if (kind === "notebook" || kind === "board" || typeof c === "string") return null;
+function imageOut(c: unknown, what: string): { base64: string } | null {
   const u = c instanceof Uint8Array ? c : c instanceof ArrayBuffer ? new Uint8Array(c) : null;
   if (!u || !isRaster(u)) return null;
   if (u.length > IMAGE_BYTES_MAX) throw new AgentError("limit", `${what}: an image of ${u.length} bytes, at most ${IMAGE_BYTES_MAX} for an agent to see`);
@@ -794,7 +793,7 @@ export class AgentPairing {
         if (r.entry.kind === "folder") throw new AgentError("invalid", `${p.path} is a folder: list it`);
         // (a raster image, to an agent that said it takes one: exactly {entry, rev, image}, nothing more; an older
         //  agent would pass that on as text, so it reads the file as before)
-        const image = this.hello?.features?.includes("workspace.image") ? imageOut(r.entry.kind, r.content, p.path) : null;
+        const image = this.hello?.features?.includes("workspace.image") ? imageOut(r.content, p.path) : null;
         if (image) {
           if (!Number.isSafeInteger(r.rev) || r.rev < 0) throw new AgentError("storage", `${p.path}: a revision in an unknown form`);
           return { entry: entryOut(r.entry, url), rev: r.rev, image };
