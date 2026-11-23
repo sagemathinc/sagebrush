@@ -1,0 +1,145 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import * as path from "node:path";
+
+// Sage mode's session namespace loads a domain the first time one of its names is used (lib/_sage_lazy.py session,
+// lib/_sage_names.py; the runtime's miss path, src/runtime/modules.ts builtinName): the session starts with sage_all's
+// base only, and every other name of sage_all's __all__ is still there, as the same object, wherever a use reaches it.
+// Each case is a fresh `--sage` process (dist/src/cli.js); it prints one JSON line after "@@".
+const CLI = path.join(__dirname, "../src/cli.js");
+const LIB = path.join(__dirname, "../../lib");
+
+function sage(code: string): any {
+  const r = spawnSync(process.execPath, [CLI, "--sage", "-c", code], { encoding: "utf8", timeout: 600_000 });
+  const i = r.stdout.lastIndexOf("@@");
+  assert.ok(i >= 0, `no result line: status ${r.status}\n${r.stdout}\n${r.stderr}`);
+  return JSON.parse(r.stdout.slice(i + 2));
+}
+const LOADED = `sorted(m for m in __import__("sys").modules if m.startswith(("_sage_", "sage_")))`;
+const out = (expr: string) => `import json as _json; print("@@" + _json.dumps(${expr}))`;
+
+// (the modules sage_all's start loads: itself and the base the preparser, ZZ, QQ, polynomials, matrices, the reals and
+// symbolic expressions need; the name index, read on a first use; _sage_shim installed in pyjs)
+const BASE = ["_sage_expr", "_sage_frac", "_sage_integer", "_sage_lang", "_sage_lazy", "_sage_matrix", "_sage_names", "_sage_poly", "_sage_real", "_sage_shim", "sage_all"];
+
+test("a session starts with sage_all's base only; one use of a name loads its domain (and what that imports), nothing else", () => {
+  assert.deepEqual(sage(out(LOADED)), BASE);
+  // (the use alone: what a call then does may import more, at call time, as Sage's modules do)
+  // (_sage_graph's GraphPlot subclasses sage_plot's Graphics, which a call at its module level imports)
+  const after: string[] = sage(`G = Graph\n${out(LOADED)}`);
+  assert.deepEqual(after.filter((m) => !BASE.includes(m)), ["_sage_graph", "sage_plot"]);
+  const lie: string[] = sage(`C = crystals\n${out(LOADED)}`);
+  assert.deepEqual(lie.filter((m) => !BASE.includes(m)), ["_sage_crystals", "_sage_lie"], "and the modules its DEPS name");
+});
+
+test("every name of sage_all's __all__ is the same object in the session as sage_all's attribute; a builtin's name is bound at the start", () => {
+  const r = sage(`import sage_all, builtins
+start = set(globals())
+# (eval at the top level, not in a comprehension, whose own variable would be the one it saw)
+shadow = [_k for _k in sage_all.__all__ if hasattr(builtins, _k)]
+bad_shadow = [_k for _k in shadow if _k not in start]
+lazy = [_k for _k in sage_all.__all__ if _k not in start]
+bad = []
+for _k in sage_all.__all__:
+    if eval(_k, globals()) is not getattr(sage_all, _k):
+        bad.append(_k)
+${out(`{"shadow": len(shadow), "bad_shadow": bad_shadow, "lazy": len(lazy), "bad": bad, "bound": all(_k in globals() for _k in lazy)}`)}`);
+  assert.deepEqual(r.bad_shadow, [], "a name that shadows a builtin must be bound at the session's start");
+  assert.deepEqual(r.bad, []);
+  assert.ok(r.lazy > 100, `the names loaded on first use: ${r.lazy}`);
+  assert.equal(r.bound, true, "a name once used is bound in the session");
+});
+
+test("a star import of sage_all (or of sage.all) binds every name of __all__, the same objects, as before", () => {
+  const r = sage(`import sage_all
+ns = {}
+exec("from sage_all import *", ns)
+ns2 = {}
+exec("from sage.all import *", ns2)
+names = set(sage_all.__all__)
+${out(`{"missing": sorted(names - set(ns)), "missing2": sorted(names - set(ns2)), "same": all(ns[n] is getattr(sage_all, n) for n in names)}`)}`);
+  assert.deepEqual(r.missing, []);
+  assert.deepEqual(r.missing2, []);
+  assert.equal(r.same, true);
+});
+
+test("a name first used inside a function, a lambda, a comprehension, a nested closure or a class body defined before that use", () => {
+  const r = sage(`def f(n):
+    return Partitions(n).cardinality()
+g = lambda: str(Zp(5))
+def outer():
+    def inner():
+        return DiGraph({0: [1]}).size()
+    return inner
+class C:
+    k = CartanType(["A", 2]).rank()
+${out(`[int(f(5)), g(), [int(Permutations(k).cardinality()) for k in (2, 3)], int(outer()()), int(C.k)]`)}`);
+  assert.deepEqual(r, [7, "5-adic Ring with capped relative precision 20", [2, 6], 1, 2]);
+});
+
+test("eval(s) and exec(s, globals()) in the session, sage_eval, and isinstance with a class loaded lazily", () => {
+  const r = sage(`exec("H = Graph({0: [1, 2]})", globals())
+from sage.graphs.graph import Graph as G2
+${out(`[int(H.size()), str(eval("QQbar(2).sqrt()")), int(sage_eval("Sandpile({0: {1: 1}, 1: {0: 1}}, 0).num_verts()")), isinstance(H, Graph), Graph is G2]`)}`);
+  assert.deepEqual(r, [2, "1.414213562373095?", 2, true, true]);
+});
+
+test("del: a name deleted, loaded or not yet, is a NameError afterwards, not loaded again; an unknown name's del is a NameError", () => {
+  const r = sage(`res = []
+x0 = Graph
+del Graph
+del NumberField
+for n in ("Graph", "NumberField"):
+    try:
+        eval(n)
+        res.append("bound")
+    except NameError:
+        res.append("NameError")
+try:
+    del no_such_name_anywhere
+except NameError:
+    res.append("NameError")
+Graph = 3
+res.append(Graph)
+${out("res")}`);
+  assert.deepEqual(r, ["NameError", "NameError", "NameError", 3]);
+});
+
+test("a domain that fails to import: its own error, a note naming the Sage name, nothing kept; the next use tries again", () => {
+  const r = sage(`import _sage_names as N
+N.NAMES["Polyhedron"] = "_sage_no_such_module"
+res = []
+for _ in range(2):
+    try:
+        Polyhedron
+    except ImportError as e:
+        res.append([type(e).__name__, e.__notes__])
+N.NAMES["Polyhedron"] = "_sage_polyhedra"
+res.append(str(Polyhedron([(0, 0), (1, 0), (0, 1)]).volume()))
+${out("res")}`);
+  const failed = ["ModuleNotFoundError", ["(loading 'Polyhedron' in Sage mode, from _sage_no_such_module)"]];
+  assert.deepEqual(r, [failed, failed, "1/2"]);
+});
+
+test("dir() lists the names not loaded yet, not a deleted one; globals() and a copy of it hold only what is bound (CPython's)", () => {
+  const r = sage(`a = "Graph" in dir()
+b = "Graph" in globals()
+c = "Graph" in dict(globals())
+x1 = Graph
+d = "Graph" in globals()
+del Sandpile
+${out(`[a, b, c, d, "Sandpile" in dir(), "Graph" in dir()]`)}`);
+  assert.deepEqual(r, [true, false, false, true, false, true]);
+});
+
+test("the name index names only library modules that exist, and the browser's chunks hold each of them", () => {
+  // (lib/_sage_names.py: NAMES, OVERRIDES and DEPS's modules; web/lib-chunks.mts puts every lib/ file in a group)
+  const r = sage(`import _sage_names as N
+mods = set(N.NAMES.values()) | set(N.OVERRIDES.values()) | set(N.DEPS) | {d for ds in N.DEPS.values() for d in ds}
+${out("sorted(mods)")}`);
+  const missing = (r as string[]).filter((m) => !existsSync(path.join(LIB, m + ".py")) && !existsSync(path.join(LIB, m, "__init__.py")));
+  assert.deepEqual(missing, []);
+  assert.ok(readFileSync(path.join(LIB, "_sage_names.py"), "utf8").includes("DEPS = {"));
+});
