@@ -19,6 +19,12 @@ z := Evaluate(x^2 + a*x, c);
 print z;
 print Parent(z);
 print Evaluate(x + a, c);
+print Evaluate(P!0, c), Parent(Evaluate(P!0, c));
+print Evaluate(P!a, c), Parent(Evaluate(P!a, c));
 // the polynomial's field the larger one: the subfield's element goes up
 R<t> := PolynomialRing(K);
 print Evaluate(t + b, a), Parent(Evaluate(t + b, a));
+// and the other way, a polynomial over GF(8) at an element of GF(4): their compositum, the zero polynomial too
+S<u> := PolynomialRing(L);
+print Evaluate(S!0, a), Parent(Evaluate(S!0, a));
+print Evaluate(u + c, a), Parent(Evaluate(u + c, a));

@@ -6899,11 +6899,11 @@ def _ffp_eval(f, x, where):
             # (another field of f's characteristic: f evaluated in the smallest field containing both, as Magma 2.18
             # does, a polynomial over GF(4) at an element of GF(16) in GF(16), at one of GF(8) in GF(64); the
             # coefficients and x put there under one budget, admitted first)
-            cs = list(f.p._c)
-            ys = _ff_promote(cs + [x], "evaluation", where)[0]
-            r = ys[-1] * 0
-            for y in reversed(ys[:-1]):
-                r = r * ys[-1] + y
+            # (f's field always among them, as a zero: the zero polynomial too is evaluated in the common field)
+            ys = _ff_promote([R.F.K(0), x] + list(f.p._c), "evaluation", where)[0]
+            r = ys[0]
+            for y in reversed(ys[2:]):
+                r = r * ys[1] + y
             return r
         if _is_ff(x) or isinstance(x, _Fraction):
             raise MagmaError("Incompatible rings", where, True)
