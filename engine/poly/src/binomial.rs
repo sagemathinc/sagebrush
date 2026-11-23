@@ -37,6 +37,9 @@ use std::cell::Cell;
 thread_local! {
     /// The route's units, by family, not yet in the tally (Counted adds
     /// them).  Plain counts: dropping them, at a thread's exit, does nothing.
+    /// Reached only under binomial::factor's Counted guard; a direct caller
+    /// of the route's functions would leave counts for the next factor on
+    /// that thread.
     static UNITS: Cell<[u64; FAMILIES]> = const { Cell::new([0; FAMILIES]) };
 }
 
