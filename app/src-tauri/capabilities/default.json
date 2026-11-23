@@ -31,6 +31,7 @@
     "allow-disk-rename",
     "allow-disk-remove",
     "allow-disk-where",
+    "allow-disk-reveal",
     "allow-settings-write",
     "allow-grants-read",
     "allow-grants-write",

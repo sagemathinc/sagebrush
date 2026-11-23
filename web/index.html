@@ -5506,6 +5506,8 @@ function wsShowFiles(on) {
       // (Agents…: the agents page once this notebook is saved, as the board is opened; not saved, it stays, saying why.
       // Not in the desktop app, which has no agents page yet (#1542): no Agents… and no Files | Agents switch there)
       ...(desktopApp() ? {} : { agents: () => void toBoard("/agents/", "the agents page") }),
+      // (Show in folder, and where the files are: the desktop app's workspace is real files on the computer (#1539))
+      ...(desktopApp() ? { reveal: (p) => TAURI.core.invoke("disk_reveal", { path: p }), where: () => wsFolder || undefined } : {}),
       current: () => (current.kind === "browser" && current.id ? { kind: "notebook", ref: current.id } : undefined),
       open(e, how) {
         const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);

@@ -154,3 +154,58 @@ fn a_saved_setting_holding_a_blank_is_never_filled_in() {
     assert!(out.contains(&format!("const saved = {saved};")), "the settings filled in, exactly as saved");
     assert_eq!(out.matches("/*KEYS*/[]").count(), 1, "the blank inside the saved value left as it is");
 }
+
+#[test]
+fn show_in_folder_names_only_what_is_in_the_workspace() {
+    let (rp, outside) = dirs("reveal");
+    let root = open_root(&rp).unwrap();
+    std::fs::create_dir_all(rp.join("a")).unwrap();
+    std::fs::write(rp.join("a/n.ipynb"), "{}").unwrap();
+    // (the root, a folder and a file: each itself, with whether it is a folder)
+    assert_eq!(reveal_target(&root, "/").unwrap(), (root.clone(), true));
+    assert_eq!(reveal_target(&root, "/a").unwrap(), (rp.join("a"), true));
+    assert_eq!(reveal_target(&root, "/a/n.ipynb").unwrap(), (rp.join("a/n.ipynb"), false));
+    // (what isn't there, and what isn't a workspace path: refused)
+    assert!(reveal_target(&root, "/a/missing.txt").is_err());
+    for p in ["/../outside", "/a/../../outside", "", "outside", "/a//n.ipynb", "/c:x"] {
+        assert!(reveal_target(&root, p).is_err(), "{p:?} accepted");
+    }
+    outside_untouched(&outside);
+}
+
+#[cfg(unix)]
+#[test]
+fn show_in_folder_follows_no_link() {
+    let (rp, outside) = dirs("reveal-links");
+    let root = open_root(&rp).unwrap();
+    std::os::unix::fs::symlink(&outside, rp.join("out")).unwrap();
+    std::os::unix::fs::symlink(outside.join("secret.txt"), rp.join("s.txt")).unwrap();
+    // (a link as the target, or on the way to it: refused, never outside the workspace)
+    assert!(reveal_target(&root, "/out").is_err());
+    assert!(reveal_target(&root, "/out/secret.txt").is_err());
+    assert!(reveal_target(&root, "/s.txt").is_err());
+    // (the workspace's folder itself a link: refused too)
+    let base = rp.parent().unwrap().join("linked");
+    let _ = std::fs::remove_file(&base);
+    std::os::unix::fs::symlink(&outside, &base).unwrap();
+    assert!(reveal_target(&base, "/").is_err());
+}
+
+#[test]
+fn show_in_folder_runs_the_file_manager_on_the_path_alone() {
+    let at = Path::new("/w/Workspace/a b/n.ipynb");
+    let (program, args) = reveal_argv(at, false);
+    let args: Vec<String> = args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
+    if cfg!(target_os = "macos") {
+        assert_eq!((program.as_str(), args), ("/usr/bin/open", vec!["-R".to_string(), "/w/Workspace/a b/n.ipynb".to_string()]));
+    } else if cfg!(windows) {
+        assert_eq!(program, "explorer.exe");
+        assert_eq!(args.len(), 1);
+        assert!(args[0].starts_with("/select,\"") && args[0].ends_with('"'));
+    } else {
+        // (xdg-open can't select a file: its folder)
+        assert_eq!((program.as_str(), args), ("xdg-open", vec!["/w/Workspace/a b".to_string()]));
+    }
+    let (_, args) = reveal_argv(Path::new("/w/Workspace"), true);
+    assert_eq!(args.len(), 1, "a folder: the folder alone");
+}
