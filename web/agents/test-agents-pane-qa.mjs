@@ -117,6 +117,26 @@ try {
   const d7 = await P.ev(`Object.values(JSON.parse(localStorage.getItem('sagebrush-agents-drafts-v1') ?? '{}'))`);
   ok(d7.includes("UNSENT_QUOTA_DRAFT") && d7.includes("after the refusal"), "D7: once storage takes writes again, the refused draft is written with the next one", d7.map((t) => t.slice(0, 30)));
 
+  // (D8: a new chat's draft written before the chats' own save: the chat is added to the stored record as the one shown,
+  //  not with the record's older choice (the page came back to the other chat after Files, astra2's D3 note). The
+  //  page's 300 ms timers are held, the test's, and only the draft's is run)
+  // (cleared from another page of the site: the Agents page stores its chats as it is left)
+  await P.send("Page.navigate", { url: `${site}/agents/connect/` });
+  await P.until(`location.pathname === '/agents/connect/' && document.readyState === 'complete'`);
+  await P.ev(`(localStorage.clear(), sessionStorage.clear(), true)`);
+  await P.navigate(`${site}/agents/`);
+  await P.until(`document.querySelectorAll('#threads .thread').length === 1`);
+  await P.draft("in the first chat");
+  await sleep(800);
+  await P.ev(`(() => { const st = window.setTimeout, ct = window.clearTimeout; window.__held = []; window.setTimeout = (f, ms, ...a) => (ms === 300 ? (__held.push(f), -__held.length) : st(f, ms, ...a)); window.clearTimeout = (id) => (typeof id === 'number' && id < 0 ? (__held[-id - 1] = null) : ct(id)); return true; })()`);
+  await P.ev(`(document.querySelector('#new').click(), true)`);
+  await P.until(`document.querySelectorAll('#threads .thread').length === 2`);
+  await P.draft("in the new chat");
+  const ran = await P.ev(`(() => { const f = __held.filter(Boolean).at(-1); f?.(); return !!f; })()`);
+  const d8 = await P.ev(`(() => { const v = JSON.parse(localStorage.getItem('sagebrush-agents-preview-v1') ?? '{}'); return { current: v.current, ids: v.threads?.map((t) => t.id) }; })()`);
+  ok(ran && d8.ids?.length === 2 && d8.current === d8.ids[1], "D8: the new chat, added to the stored chats with its draft, is stored as the one shown", d8);
+  await P.reload();
+
   // ======================================================================== #1617: Saving… only while a change is saved
   // (from a page of no chats: the pairing link's dialog, as a first visit shows it)
   await P.ev(`(localStorage.clear(), sessionStorage.clear(), true)`);
