@@ -1,4 +1,4 @@
-// The Agents page's side of agent memory v1 (design/workspace-agent-protocol.md §7): a proposed note's card in a Pair
+// The Agents page's side of agent memory v1 (the memory v1 protocol §7, to land in design/workspace-agent-protocol.md): a proposed note's card in a Pair
 // turn (agent-chat/view.ts draws it) and what its buttons do. Save and Dismiss are the person's decisions, sent by this
 // page over its pairing (memory.save, memory.dismiss) naming the card's pending id and revision; the agent saves
 // nothing on the model's word. Edit… opens the card's text, place and expiry for the person to change, then saves that.
@@ -26,7 +26,6 @@ export const MEMORY_COPY = {
   failed: "The note couldn't be saved",
   failedDismiss: "The note couldn't be dismissed",
   own: "this agent's own notes",
-  tag: "a tag's notes",
 } as const;
 
 export interface MemoryUiHost {
@@ -83,7 +82,8 @@ export function memoryHooks(host: MemoryUiHost) {
     delete card.proposal.body;
     host.changed();
   };
-  const scopeName = (s: Scope) => (s === "own" ? MEMORY_COPY.own : host.tagName?.(s.tag) ? `the tag ${host.tagName(s.tag)}` : MEMORY_COPY.tag);
+  // (a tag by the name this browser knows; one unnamed here by its whole id, so two are never confused)
+  const scopeName = (s: Scope) => (s === "own" ? MEMORY_COPY.own : `the tag ${host.tagName?.(s.tag) ?? s.tag}`);
   const refused = (e: unknown, pending: string, card: MemoryCard, action: "save" | "dismiss") => {
     const code = (e as { code?: string })?.code;
     const failed = `${action === "save" ? MEMORY_COPY.failed : MEMORY_COPY.failedDismiss}: ${(e as Error)?.message ?? e}`;
@@ -156,7 +156,7 @@ export function memoryHooks(host: MemoryUiHost) {
       el.name = "scope";
       const add = (value: string, text: string) => el.append(Object.assign(document.createElement("option"), { value, textContent: text }));
       add("own", "This agent's own notes");
-      for (const t of tags) add("tag:" + t, `Tag ${host.tagName?.(t) ?? t.slice(0, 8)}`);
+      for (const t of tags) add("tag:" + t, `Tag ${host.tagName?.(t) ?? t}`);
       // (a tag the grant no longer has isn't offered: the person chooses again)
       const want = pr.scope === "own" ? "own" : "tag:" + pr.scope.tag;
       if (want !== "own" && !tags.includes(want.slice(4))) {

@@ -1,5 +1,5 @@
 // ci: none (imported by the stand-in agent, test-delegate-host.mjs, not a suite itself)
-// The stand-in agent's notes (agent memory v1, design/workspace-agent-protocol.md §7, draft): the memory.* page
+// The stand-in agent's notes (agent memory v1, the memory v1 protocol §7, to land in design/workspace-agent-protocol.md): the memory.* page
 // requests and the memory turn events, from notes kept in memory, as the protocol says and no more. CI can't import the
 // agent's own repo, so this is what the page's lanes (C, E) are built and tested against until the agent's lands.
 //   - Allowed only when the hello lists memory.1, the page's features list memory.1, and the last grant holds memory:

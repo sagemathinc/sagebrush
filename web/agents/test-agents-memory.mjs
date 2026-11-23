@@ -1,5 +1,5 @@
 // ci: web-artifacts.1 order=47 runner=bun chrome
-// Agent memory v1 on the Agents page (design/workspace-agent-protocol.md §7; lane C1): a proposed note's card in a
+// Agent memory v1 on the Agents page (the memory v1 protocol §7, to land in design/workspace-agent-protocol.md; lane C1): a proposed note's card in a
 // Pair turn, as the stand-in agent (test-delegate-host.mjs with memory.1, test-memory-host.mjs) sends it.
 //   - The card is text: a note's name, place, description and body, never Markdown, so a note can't fetch anything.
 //   - A later revision replaces the card; a malformed proposal shows nothing.
@@ -228,9 +228,23 @@ try {
     await sleep(400);
     const c18 = await card();
     ok(!!m18 && c18.state === "Not saved" && !c18.buttons.length, "M18: the agent's end of a card stands when Save's answer comes after it", c18);
+    // ======================================================================== M20: a tag this browser hasn't named
+    const keptTags = await P.ev(`localStorage.getItem('sb-memory-tags-v1')`);
+    await P.ev(`(localStorage.setItem('sb-memory-tags-v1', '[]'), true)`);
+    H.memory.propose(send, { name: "unnamed", description: "to a tag named elsewhere", body: "u", scope: { tag: TAG } });
+    await P.until(`document.querySelectorAll('[data-memory]').length >= 11`, 10000);
+    const where20 = await P.ev(`${lastCard}.querySelector('.mem-where')?.textContent ?? ''`);
+    await clickLast("edit");
+    await P.until(`!!document.querySelector('dialog.memory-edit[open]')`, 5000);
+    const opts20 = await P.ev(`[...document.querySelector('dialog.memory-edit[open] [name=scope]').options].map((o) => o.textContent)`);
+    await P.ev(`([...document.querySelector('dialog.memory-edit[open]').querySelectorAll('button')].find((b) => b.textContent === 'Cancel').click(), true)`);
+    ok(where20.includes(`In the tag ${TAG} ·`) && opts20.includes(`Tag ${TAG}`), "M20: a tag this browser hasn't named is shown by its whole id, on the card and in Edit…", { where20, opts20 });
+    await P.ev(`(localStorage.setItem('sb-memory-tags-v1', ${JSON.stringify(keptTags ?? "[]")}), true)`);
+    await clickLast("dismiss");
+    await P.until(`/Not saved/.test(${lastCard}.querySelector('.mem-state')?.textContent ?? '')`, 10000).catch(() => {});
     // ======================================================================== M13: no note's text is kept in this browser
     H.memory.propose(send, { name: "later", description: "left open", body: "LATER-TEXT" });
-    await P.until(`document.querySelectorAll('[data-memory]').length >= 11`, 10000);
+    await P.until(`document.querySelectorAll('[data-memory]').length >= 12`, 10000);
     await sleep(700); // (the chat is kept 300 ms after a change)
     const kept = await P.ev(`localStorage.getItem('sagebrush-agents-preview-v1') ?? ''`);
     ok(kept.includes("left open") && !/LATER-TEXT|ELSEWHERE-TEXT|keychain|a lot of text|Explain proofs/.test(kept), "M13: the kept chat has the cards but none of their text, an open card's included");

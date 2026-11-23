@@ -1,4 +1,4 @@
-// What the page accepts from an agent's memory (agent memory v1, design/workspace-agent-protocol.md §7, accepted by the
+// What the page accepts from an agent's memory (agent memory v1, the memory v1 protocol §7, to land in design/workspace-agent-protocol.md, accepted by the
 // agent side), checked closed before any use, as tasks-schema.ts checks Delegate's: each memory.* result has exactly
 // its listed keys, each value its rule, and each memory turn event exactly its fields; anything else is refused
 // (MemoryShapeError), never shown. Limits are UTF-8 bytes with the metadata (name, description and scope count with

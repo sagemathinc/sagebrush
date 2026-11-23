@@ -38,7 +38,7 @@ export type TurnEvent = { seq: number; turn_id: string } & (
   | { type: "turn_usage"; usage: { input_tokens: number; output_tokens: number } }
   // (W3: the model and thinking level the turn runs with, as the agent's backend reported them; either may be absent)
   | { type: "turn_info"; model?: string; effort?: string }
-  // (agent memory v1, design/workspace-agent-protocol.md §7.4: a proposed note, its end, and the notes a turn read;
+  // (agent memory v1, the memory v1 protocol §7.4, to land in design/workspace-agent-protocol.md: a proposed note, its end, and the notes a turn read;
   //  each checked closed before it is applied (memory-schema.ts))
   | MemoryProposal
   | MemoryDecided
