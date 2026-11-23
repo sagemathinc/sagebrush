@@ -15,8 +15,8 @@
 
 import { checkCall, badValue, AGENT_LIMITS } from "./agent-schema";
 import { editProblem, type NotebookEdit } from "./notebook-edit";
-import { parseMemoryGrant } from "./agent-tags";
-import { authorize, grantFolders, grantMemoryTags, grantProblem, newGrantId, norm, GRANT_ID, type Grant, type GrantMemory, type TrashEntry } from "./agent-grant";
+import { parseEnabledTags, parseMemoryGrant } from "./agent-tags";
+import { authorize, grantFolders, grantProblem, newGrantId, norm, GRANT_ID, type Grant, type GrantMemory, type TrashEntry } from "./agent-grant";
 import { BRANCHES, within } from "./paths";
 import { entryUrl } from "./entry-url";
 import { MADE_CHANNEL, type TexMade, type TexMayRun, type TexMayRunYes } from "./agent-made-tex";
@@ -40,6 +40,11 @@ export type Hello = { protocol: 1; agent: { name: string; client: string; versio
  * "memory.1", an agent with agent memory v1 (design/workspace-agent-protocol.md §7): a grant may carry `memory` only for
  * it, and only where this page has its memory client (the pairing's `memory`), which then also says memory.1 itself. */
 export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn", "chat.resume.tag", "delegate.1", "chat.brief", "memory.1"] as const;
+/** A grant's memory tags as it keeps them, by the tags schema's own rules (agent-tags.ts parseEnabledTags: 0 to 16
+ * ids, strictly ascending). Throws on anything else; a list out of order or with a duplicate is refused, never sorted. */
+export function grantMemoryTags(tags: unknown): string[] {
+  return [...parseEnabledTags(tags)];
+}
 /** The `log` an agent's hello or agent.ready names: its run, as the agent's random hex id; anything else, none. */
 export const logOf = (v: unknown): { instance: string } | undefined => {
   const i = (v as { instance?: unknown } | null)?.instance;

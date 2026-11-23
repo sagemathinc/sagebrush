@@ -19,7 +19,6 @@
 //   workspace's check at use (branch-rules.ts), by the grant's `id`.
 
 import { TRASH, normPath, parentOf, within } from "./paths";
-import { parseEnabledTags } from "./agent-tags";
 
 
 export type Grant = {
@@ -53,11 +52,8 @@ const CHANGE = new Set(["workspace.write", "workspace.create", "workspace.mkdir"
 export const GRANT_ID = /^[0-9a-f]{32}$/;
 /** The grant's memory field: the tags enabled beyond the agent's own notes. */
 export type GrantMemory = { tags: string[] };
-/** The tags as a grant keeps them, by the tags schema's own rules (agent-tags.ts parseEnabledTags: 0 to 16 ids,
- * strictly ascending). Throws on anything else; a list out of order or with a duplicate is refused, never sorted. */
-export function grantMemoryTags(tags: unknown): string[] {
-  return [...parseEnabledTags(tags)];
-}
+// (its tags are checked where a grant is made, agent-pair.ts grantMemoryTags, by the tags schema's own module; this
+//  module stays free of it, as it is in the size-capped run chunk)
 /** The memory a grant allows: null when off (no grant, or no memory field), else its tags (own notes always). */
 export function grantMemory(g: Grant | null): GrantMemory | null {
   return g?.memory ? { tags: [...g.memory.tags] } : null;

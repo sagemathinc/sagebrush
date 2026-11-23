@@ -1127,7 +1127,8 @@ console.log(failures ? `${failures} failed` : "all passed");
 // record's exact parse, and the pairing's gate: memory only for an agent whose hello offers memory.1, on a page with its
 // memory client; told to the agent in grant.changed; never kept with a remembered grant
 {
-  const { grantMemoryTags, grantMemory } = await import("./agent-grant.ts");
+  const { grantMemory } = await import("./agent-grant.ts");
+  const { grantMemoryTags } = await import("./agent-pair.ts");
   const MEMORY_TAGS_MAX = (await import("./agent-tags.ts")).TAG_LIMITS.enabled;
   const tag = (c, last = "a") => c.repeat(25) + last;
   const T1 = tag("a"), T2 = tag("b", "e"), T3 = tag("c", "4");
