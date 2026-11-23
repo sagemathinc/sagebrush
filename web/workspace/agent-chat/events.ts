@@ -126,6 +126,9 @@ export interface MemoryCard {
    *  keeps one. Its decision is that pairing's; after a reload (no text then) the same run may still dismiss it */
   from?: string;
   run?: string;
+  /** set by apply on a card it has just put in (a new proposal, or a later revision), for the page to mark with its
+   *  connection and clear at once: only such a card is ever marked */
+  fresh?: true;
 }
 
 /** JSON.stringify's replacer for a chat as kept in this browser: every memory card without its text. A note's text is
@@ -137,7 +140,8 @@ export function withoutNoteText(this: unknown, key: string, value: unknown): unk
   for (const [k, c] of Object.entries(value as Record<string, MemoryCard>)) {
     if (!c || typeof c !== "object" || !c.proposal || typeof c.proposal !== "object") continue; // (not a card: not kept)
     const { body: _b, ...proposal } = c.proposal;
-    out[k] = { ...c, proposal };
+    const { fresh: _f, ...card } = c; // (never kept: a card read back is never one apply has just put in)
+    out[k] = { ...card, proposal };
   }
   return out;
 }
@@ -330,7 +334,7 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
         if (card && (card.outcome || m.revision <= card.proposal.revision)) break;
         const { type: _t, ...proposal } = m;
         if (!card) turn.parts.push({ kind: "memory", pending: m.pending });
-        put(turn.memory, m.pending, { proposal });
+        put(turn.memory, m.pending, { proposal, fresh: true });
       } else if (m.type === "memory_decided") {
         const card = turn.memory && own(turn.memory, m.pending);
         if (!card || card.outcome) break;

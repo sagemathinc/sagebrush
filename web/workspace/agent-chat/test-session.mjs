@@ -816,7 +816,7 @@ const turnOf = (t, id) => t.entries.find((e) => e.kind === "turn" && e.turn_id =
   const { withoutNoteText } = await import("./events.ts");
   const card = (body) => ({ proposal: { pending: "a".repeat(32), revision: 1, op: "new", scope: "own", name: "n", description: "d", ...(body !== undefined ? { body } : {}), expires: null } });
   const state = { threads: [{ id: "t", body: "a thread's own body key", entries: [
-    { kind: "turn", turn_id: "x", memory: { ["a".repeat(32)]: card("NOTE-TEXT"), ["b".repeat(32)]: { ...card(undefined), outcome: "saved" }, ["c".repeat(32)]: { outcome: "saved" } } },
+    { kind: "turn", turn_id: "x", memory: { ["a".repeat(32)]: { ...card("NOTE-TEXT"), fresh: true }, ["b".repeat(32)]: { ...card(undefined), outcome: "saved" }, ["c".repeat(32)]: { outcome: "saved" } } },
     { kind: "user", id: "u", text: "hi", memory: { keep: "a user entry's memory key is not a card" } },
   ] }] };
   const kept = JSON.stringify(state, withoutNoteText);
@@ -824,6 +824,7 @@ const turnOf = (t, id) => t.entries.find((e) => e.kind === "turn" && e.turn_id =
   check(!kept.includes("NOTE-TEXT") && back.threads[0].entries[0].memory["a".repeat(32)].proposal.name === "n", "memory: the kept chat has an open card without its text, the rest of it kept", back.threads[0].entries[0].memory);
   check(!("c".repeat(32) in back.threads[0].entries[0].memory) && back.threads[0].body === "a thread's own body key" && back.threads[0].entries[1].memory.keep, "memory: a malformed card is left out without an error; nothing outside a turn's cards is touched", back);
   check(state.threads[0].entries[0].memory["a".repeat(32)].proposal.body === "NOTE-TEXT", "memory: this tab keeps the text in memory (the replacer copies)");
+  check(!("fresh" in back.threads[0].entries[0].memory["a".repeat(32)]), "memory: a card's fresh flag (apply's, for the page to mark it) is never kept", back.threads[0].entries[0].memory);
 }
 
 const failed = results.filter(([ok]) => !ok).length;

@@ -334,12 +334,17 @@ try {
   await sleep(500);
   const c21 = await look4();
   ok(c21?.body === "RETAINED-BODY" && JSON.stringify(c21.buttons) === '["Dismiss"]', "M21: after a reconnect in the same tab to the same run, the card keeps its text and takes Dismiss only", c21);
+  // (each event is followed by a marker, memory_used, whose line shows once the page has handled both)
+  const handled = async (name) => {
+    send4({ type: "memory_used", notes: [{ note: "e".repeat(32), name, revision: 1 }] });
+    await P4.until(`[...document.querySelectorAll('.who-used')].some((u) => u.textContent.includes(${JSON.stringify(name)}))`, 10000);
+  };
   send4({ type: "memory_proposal", ...pr21, body: "DIFFERENT-BODY", extra: "malformed" });
-  await sleep(500);
+  await handled("marker-one");
   const c21b = await look4();
   ok(c21b?.body === "RETAINED-BODY" && JSON.stringify(c21b.buttons) === '["Dismiss"]', "M21: a malformed proposal at the same revision changes nothing: no new text, still Dismiss only", c21b);
   send4({ type: "memory_proposal", ...pr21 });
-  await sleep(500);
+  await handled("marker-two");
   const c21c = await look4();
   ok(c21c?.body === "RETAINED-BODY" && JSON.stringify(c21c.buttons) === '["Dismiss"]' && !H4.got.some((m) => m.method === "memory.save"), "M21: a valid proposal at the same revision changes nothing either: the card isn't bound to the new pairing", c21c);
   H4.memory.revise(send4, pr21.pending, { body: "REVISED-HERE" });

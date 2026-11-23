@@ -190,16 +190,17 @@ const session = new ChatSession({
   demo: (prompt, emit) => startFakeTurn(prompt, emit, speed()),
   mayDemo: (t) => mayDemo(t),
   emitted(thread, d, replayed, turn_id) {
-    // (agent memory v1: a proposed note's card is marked with the connection it came over, once: only a card this
-    //  event just made (a new proposal, or a later revision, which apply puts in as a new card without a mark). An
-    //  event apply refused (malformed, an equal or older revision, after the card's end) leaves the card as it was,
-    //  never bound again to the connection now here)
+    // (agent memory v1: a proposed note's card is marked with the connection it came over, once: only a card apply
+    //  just put in for this event (a new proposal, or a later revision: its `fresh`). An event apply refused
+    //  (malformed, an equal or older revision, after the card's end) leaves the card as it was, never bound again to
+    //  the connection now here)
     if (d.type === "memory_proposal") {
-      const { pending, revision } = d as { pending?: unknown; revision?: unknown };
+      const { pending } = d as { pending?: unknown };
       let turn: Turn | undefined;
       for (const e of thread.entries) if (e.kind === "turn" && e.turn_id === turn_id) turn = e; // (the last of that id, as apply's)
       const card = turn?.memory && typeof pending === "string" && Object.hasOwn(turn.memory, pending) ? turn.memory[pending] : null;
-      if (card && !card.outcome && card.from === undefined && card.proposal.revision === revision) {
+      if (card?.fresh) {
+        delete card.fresh;
         // (made while no connection is here (it can't be): marked so that none takes its decision)
         const m = connectionMarks();
         card.from = m ? m.tab : "none";

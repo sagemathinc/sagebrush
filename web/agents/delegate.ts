@@ -388,6 +388,8 @@ function take(t: DelegateTask, e: TaskLogEntry): boolean {
   // (a turn's events, untagged by the agent, belong to the turn its last turn_started began; tagged ones to their own)
   if (d.type === "turn_started" || !t.turn) t.turn = "s" + e.seq;
   const turn_id = typeof d.turn_id === "string" ? d.turn_id : t.turn;
+  // (a memory card here is never marked with a connection (only the chat's SessionHost.emitted does), so it never
+  //  takes a decision: memory-ui looks for cards in the chat's own threads)
   apply(th, { ...d, seq: e.seq, turn_id } as unknown as TurnEvent);
   if (d.type === "turn_finished") t.turn = null;
   th.applied_seq = e.seq;
