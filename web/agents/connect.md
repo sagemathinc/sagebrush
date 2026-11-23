@@ -40,7 +40,7 @@ There is also a relayed version, with a terminal on your computer: open [Connect
 
 ## 2. `sagebrush-agent`: Claude on your computer, the chat in your browser
 
-Needs `sagebrush-agent` 0.8.16 (below), Node 20 or later, and Claude Code logged in once with your Claude account. Works with the [Agents page](https://sagebrush.space/agents/) on this site. Codex: not here, only on a [connected computer](https://sagebrush.space/remote/connect).
+Needs `sagebrush-agent` 0.8.16 (below), Node 20 or later, and Claude Code logged in once with your Claude account. Reading Sagebrush's source needs Node 22.13 or later. Works with the [Agents page](https://sagebrush.space/agents/) on this site. Codex: not here, only on a [connected computer](https://sagebrush.space/remote/connect).
 
 A small program on your computer runs Claude with your own Claude login. You chat with it in the Agents page, and it works in the files of your Sagebrush workspace in this browser, in the folders you allow.
 
