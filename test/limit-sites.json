@@ -5142,6 +5142,15 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/poly/src/binomial_tests.rs :: a_refused_certificate_step_counts_nothing :: let b = Budget::default(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: a_refused_certificate_step_counts_nothing :: let mut meter = sagebrush_arith::cost::Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "reason": "the word max or MAX (an operand's maxbits, or u64::MAX as a test meter's allowance), not a limit: the route's work is bounded by the factoring budget it debits"
+ },
  "engine/poly/src/binomial_tests.rs :: ledger_audit_at :: let b = Budget::unlimited(); #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
