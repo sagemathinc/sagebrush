@@ -57,11 +57,12 @@ pub fn control_frame_ok(url: &Url, control: Option<&str>, other: Option<&Url>) -
 }
 
 /// The self-test's diagnostic codes for a signer page that didn't sign (a fixed set: nothing else is ever logged).
-pub const PROBE_CODES: [&str; 5] = ["no-probe", "no-tauri", "refused-acl", "refused", "hung"];
+pub const PROBE_CODES: [&str; 6] = ["no-probe", "no-tauri", "no-script", "refused-acl", "refused", "hung"];
 
 /// The check Rust runs in the signer window after its page loads, in a self-test only: if the probe's global or the
-/// IPC global is missing, the page reloads itself once with ?probe=<code> (the navigation guard logs the code).
-const PROBE_CHECK: &str = "(function(){if(location.search.indexOf('probe=')>=0)return;var c=!window.__SB_SIGNER_PROBE__?'no-probe':!(window.__TAURI__&&window.__TAURI__.core&&typeof window.__TAURI__.core.invoke==='function')?'no-tauri':null;if(c)location.replace(location.pathname+'?probe='+c);})()";
+/// IPC global is missing, or the page's own script didn't run (signer.js marks that first), the page reloads itself
+/// once with ?probe=<code> (the navigation guard logs the code).
+const PROBE_CHECK: &str = "(function(){if(location.search.indexOf('probe=')>=0)return;var c=!window.__SB_SIGNER_PROBE__?'no-probe':!(window.__TAURI__&&window.__TAURI__.core&&typeof window.__TAURI__.core.invoke==='function')?'no-tauri':!window.__SB_SIGNER_RAN__?'no-script':null;if(c)location.replace(location.pathname+'?probe='+c);})()";
 
 /// A self-test diagnostic report: the signer page's own URL with ?probe=<code>, the code one of PROBE_CODES.
 pub fn probe_report(url: &Url, control: Option<&str>) -> Option<&'static str> {
@@ -257,6 +258,10 @@ mod tests {
             assert_eq!(probe_report(&u(bad), None), None, "{bad}");
         }
         assert!(PROBE_CHECK.contains("location.replace") && !PROBE_CHECK.contains("invoke("), "the check never calls a command");
+        // (every code the check itself reports is a fixed one; app/selftest/test-signer-page.mjs runs it)
+        for code in ["no-probe", "no-tauri", "no-script"] {
+            assert!(PROBE_CHECK.contains(&format!("'{code}'")) && PROBE_CODES.contains(&code), "{code}");
+        }
     }
 
     #[test]

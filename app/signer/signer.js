@@ -6,7 +6,9 @@
 // A self-test's diagnostic (only when its probe is present): if the call is refused, the page reloads itself once with
 // ?probe=refused-acl or ?probe=refused, a fixed code the app logs; if it neither answers nor fails within 8 s,
 // ?probe=hung, and that is final: an answer or a failure arriving after it is ignored (no second report, no controls);
-// a reloaded page doesn't call again.
+// a reloaded page doesn't call again.  Its first statement marks that it ran (the app's check after the page loads
+// reports ?probe=no-script without it).
+window.__SB_SIGNER_RAN__ = true;
 (() => {
   const probe = window.__SB_SIGNER_PROBE__;
   if (!probe) return;
