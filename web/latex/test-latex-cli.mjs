@@ -347,6 +347,23 @@ $\sage{1/0}$ then $\sage{2+2}$.
   await run(dir, "render", "sage.tex", "-o", "sage.html");
   const sh = readFileSync(join(dir, "sage.html"), "utf8");
   check("render after run: the plot and the results drawn", /<img class="sageplot" alt="a plot" src="data:image\/svg\+xml;base64,/.test(sh) && sh.includes("274177") && !sh.includes("Sage item 2: not run"), null);
+  // (what a sageblock prints: never drawn, as in SageTeX, and not in the results file; but run reports it, each item's
+  //  output in --json and its last lines in the text, for whoever ran it; a \sage{} item printing nothing has none)
+  {
+    const PR = "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sageblock}\nn = 6*7\nprint(\"printed\", n)\n\\end{sageblock}\nThe value is $\\sage{n}$.\n\\end{document}\n";
+    writeFileSync(join(dir, "printed.tex"), PR);
+    const pj = await run(dir, "run", "printed.tex", "--json");
+    const pres = existsSync(join(dir, "printed.tex.results.json")) ? JSON.parse(readFileSync(join(dir, "printed.tex.results.json"), "utf8")) : null;
+    const pt = await run(dir, "run", "printed.tex");
+    await run(dir, "render", "printed.tex", "-o", "printed.html");
+    const ph = existsSync(join(dir, "printed.html")) ? readFileSync(join(dir, "printed.html"), "utf8") : "";
+    check("run: a sageblock's printed output in --json (its item, not the \\sage{} one) and in the text, never drawn, nor in the results file",
+      pj.code === 0 && pj.json?.items?.[0]?.mode === "block" && pj.json.items[0].output === "printed 42\n" && !("output" in (pj.json.items[1] ?? {}))
+      && pres && !JSON.stringify(pres).includes("printed 42") && /printed\.tex:4: SageTeX item 1 \(block\) printed \(not drawn in the document\):\n {4}printed 42\n/.test(pt.out)
+      && ph.includes("42") && !ph.includes("printed 42"), { code: pj.code, items: pj.json?.items, out: pt.out.slice(0, 400), err: pj.err.slice(-300) });
+    const help = await run(dir, "--help");
+    check("run's help: what an item prints isn't drawn, as in SageTeX; \\sage{} or \\sagestr{} puts a value there", /isn't drawn in the document, as in SageTeX/.test(help.out) && /\\sage\{\} or \\sagestr\{\}/.test(help.out), help.out.slice(0, 900));
+  }
   // (Magma in LaTeX, through `sagebrush latex run`: quit; ends only its item; Magma's names and Sage's apart, both ways;
   //  a Sage item's SystemExit is its failure and blocks the rest, which don't run (the item after it would write
   //  ran.txt); the summary counts code items)

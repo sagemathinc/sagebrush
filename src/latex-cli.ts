@@ -48,6 +48,9 @@ const HELP = `sagebrush latex: check, run and see a .tex file as Sagebrush's LaT
       session here, and keep the results beside it in FILE.tex.results.json: check and render show them
       (a result counts while its item and every item before it are unchanged). The code runs in the file's
       folder, so it can read and write files there. An item that fails stops the rest. Exits 1 if one failed.
+      What an item prints (print() in a sageblock or sagesilent) isn't drawn in the document, as in SageTeX
+      (\\sage{} or \\sagestr{} puts a value there); run reports it: each item's output in --json, its last
+      lines here.
       PythonTeX's \\py{}, pycode and pyblock run too, as plain Python, in a session of their own.
 
   sagebrush latex check FILE.tex [--json]
@@ -463,12 +466,17 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
   }
   const rp = resultsPath(file);
   writeFileSync(rp, JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush latex run", items: states, ...(deps === "incomplete" || deps.length ? { deps } : {}) }) + "\n");
-  const lines = items.map((it, k) => ({ n: k + 1, mode: String(it.mode), line: typeof it.at === "number" && it.at >= 0 ? text.slice(0, it.at).split("\n").length : null, state: states[k].s, ...(states[k].s === "error" ? { message: states[k].msg } : {}) }));
+  // (what an item printed (the last MSG_MAX characters, the session script's own record of it): reported for the agent,
+  //  never drawn, as in SageTeX, where a sageblock's print shows nowhere; a PythonTeX or Magma item's printed output is
+  //  its result already, so not again)
+  const printed = (k: number) => { const o = got[k]?.out; return typeof o === "string" && o && !/^(py|magma)/.test(String(items[k].mode)) ? o : null; };
+  const lines = items.map((it, k) => ({ n: k + 1, mode: String(it.mode), line: typeof it.at === "number" && it.at >= 0 ? text.slice(0, it.at).split("\n").length : null, state: states[k].s, ...(states[k].s === "error" ? { message: states[k].msg } : {}), ...(printed(k) !== null ? { output: printed(k) } : {}) }));
   const ms = Date.now() - t0, bad = states.some((x) => x.s === "error");
   if (!json) {
     // (with any PythonTeX item, "code item": board's rule, as the preview's banner)
     const what = items.some((it) => /^(py|magma)/.test(it.mode)) ? "code item" : "SageTeX item";
     process.stdout.write(`${file}: ran ${states.filter((x) => x.s === "ok").length} of ${items.length} ${what}${items.length === 1 ? "" : "s"} in ${(ms / 1000).toFixed(1)} s; results in ${rp}\n`);
+    for (const l of lines) if (l.output) process.stdout.write(`${file}:${l.line ?? "-"}: ${what} ${l.n} (${l.mode}) printed (not drawn in the document):\n${l.output.trimEnd().split("\n").slice(-6).map((x) => "    " + x).join("\n")}\n`);
     for (const l of lines) if (l.state !== "ok") process.stdout.write(`${file}:${l.line ?? "-"}: ${l.state === "error" ? "error" : "warning"}: ${what} ${l.n} (${l.mode})${l.state === "error" ? " failed:\n" + String(l.message).trimEnd().split("\n").slice(-6).map((x) => "    " + x).join("\n") : ": " + BLOCKED}\n`);
   }
   return report({ file, results: rp, ms, items: lines }, bad ? 1 : 0);
