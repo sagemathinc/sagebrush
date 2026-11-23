@@ -86,6 +86,7 @@
     const me = window.__TAURI_INTERNALS__?.metadata?.currentWebview?.label;
     window.__TAURI__?.event?.listen?.("sb-settings-changed", (ev) => { if (me && ev?.payload?.from !== me) void take(); })?.catch?.(() => {});
   };
-  if (window.__TAURI__?.event) listen();
-  else addEventListener("DOMContentLoaded", listen, { once: true });
+  // (the window's own page only, once its document is there: a frame of it (Windows runs this script in every frame,
+  // the self-test's board in one) never listens, and no IPC is made while a document is still being created)
+  if (window.top === window) addEventListener("DOMContentLoaded", listen, { once: true });
 })();

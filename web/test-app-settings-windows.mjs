@@ -43,7 +43,7 @@ function host() {
   return h;
 }
 // (a window: its own Storage, localStorage and sessionStorage, the script run first, as the app's init script)
-function windowOf(h, label) {
+function windowOf(h, label, { frame = false } = {}) {
   class Storage {
     constructor() { this.m = new Map(); }
     getItem(k) { return this.m.has(String(k)) ? this.m.get(String(k)) : null; }
@@ -51,14 +51,19 @@ function windowOf(h, label) {
     removeItem(k) { if (this.failRemove) { this.failRemove--; throw new Error("storage unavailable"); } this.m.delete(String(k)); }
     clear() { this.m.clear(); }
   }
-  const ctx = { Storage, queueMicrotask, console, Promise, Map, Set, Object, JSON, String, setTimeout, addEventListener: () => {} };
+  const loaded = [];
+  const ctx = { Storage, queueMicrotask, console, Promise, Map, Set, Object, JSON, String, setTimeout, addEventListener: (ev, f) => { if (ev === "DOMContentLoaded") loaded.push(f); } };
   ctx.localStorage = new Storage();
   ctx.sessionStorage = new Storage();
   ctx.window = ctx;
+  // (a frame of the window's page: its own top; Windows runs the script in frames too)
+  ctx.top = frame ? {} : ctx;
   ctx.__TAURI_INTERNALS__ = { metadata: { currentWebview: { label } } };
   ctx.__TAURI__ = { core: { invoke: h.invoke(label) }, event: { listen: (ev, f) => { if (ev === "sb-settings-changed") h.listeners.set(label, f); return Promise.resolve(() => {}); } } };
   vm.createContext(ctx);
   vm.runInContext(template.replace("/*KEYS*/[]", J(KEYS)).replace("/*SETTINGS*/null", J(h.file)), ctx);
+  // (the document is there)
+  for (const f of loaded) f();
   return ctx;
 }
 const settle = async () => { for (let i = 0; i < 20; i++) await tick(); };
@@ -181,6 +186,16 @@ const settle = async () => { for (let i = 0; i < 20; i++) await tick(); };
   await a.__sbSettingsFlush();
   await settle();
   ok(b.localStorage.getItem("sagebrush-mode") === null, "R1: ...the next read takes it: doc-1's mode removed");
+}
+
+// (a frame of a window's page (Windows runs the script in frames too: the self-test's board is in one) never listens
+// for other windows' settings; only the window's own page does)
+{
+  const h = host();
+  windowOf(h, "main", { frame: true });
+  ok(h.listeners.size === 0, "a frame of a window's page doesn't listen for other windows' settings");
+  windowOf(h, "main");
+  ok(h.listeners.has("main"), "...the window's own page does");
 }
 
 console.log(fails ? `${fails} of ${checks} failed` : `test-app-settings-windows: all ${checks} passed`);
