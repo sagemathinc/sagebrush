@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { pathJoin } from "../src/compile";
+import { libOnDisk } from "../src/notebook-run";
 
 // Windows: the runtime's virtual paths ("/$pyjs/lib/...", the embedded library and the packages' mounts) are POSIX
 // paths everywhere, and only a real file's path is joined by the system's path.join, path.win32's there.  Joined by
@@ -101,6 +102,31 @@ test("--sage under Windows' join: the startup import works; when it raises, a tr
     assert.match(r.stderr, /^Traceback \(most recent call last\):\n/);
     assert.match(r.stderr, /ModuleNotFoundError: No module named 'sage_all'\n$/);
     assert.doesNotMatch(r.stderr, /Unhandled|\[object Object\]|Node\.js v/);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// `notebook run --confine` from a build that reads the library from disk: its folder is one of the run's roots.  It
+// was told from the embedded library's virtual folder by a leading "/", which a Windows folder ("C:\...") hasn't.
+test("libOnDisk: a library folder of any form is on disk; the embedded library's virtual folder is not", () => {
+  const same = (p: string) => p;
+  assert.equal(libOnDisk("C:\\Users\\u\\sagebrush\\lib", same), "C:\\Users\\u\\sagebrush\\lib");
+  assert.equal(libOnDisk("/home/u/sagebrush/lib", same), "/home/u/sagebrush/lib");
+  assert.equal(libOnDisk("/$pyjs/lib", same), null);
+  // (this build's own: lib/ on disk, its real path)
+  assert.equal(libOnDisk(), realpathSync(LIB));
+});
+
+test("notebook run --confine from a source build: the notebook imports from the library on disk", () => {
+  const d = realpathSync(mkdtempSync(path.join(tmpdir(), "sb-winpaths-nb-")));
+  try {
+    const cell = { cell_type: "code", metadata: {}, outputs: [], execution_count: null, source: "import fractions\nprint(fractions.Fraction(1, 3))" };
+    writeFileSync(path.join(d, "f.ipynb"), JSON.stringify({ cells: [cell], metadata: {}, nbformat: 4, nbformat_minor: 5 }));
+    const r = spawnSync(process.execPath, [CLI, "notebook", "run", "f.ipynb", "--json", "--confine", d], { cwd: d, encoding: "utf8", timeout: 180_000 });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const out = JSON.stringify(JSON.parse(r.stdout));
+    assert.match(out, /1\/3/);
   } finally {
     rmSync(d, { recursive: true, force: true });
   }

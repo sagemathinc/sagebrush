@@ -292,11 +292,16 @@ function summary(list: any[]): Pick<CellReport, "stdout" | "stderr" | "outputs">
   return { stdout, stderr, outputs };
 }
 
-// (the Python library's folder when this build reads it from disk, not embedded: src/compile.ts libDir)
-function libOnDisk(): string | null {
-  const { libDir } = require("./compile");
-  const d: string = libDir();
-  try { return d.startsWith("/") ? realpathSync(d) : null; } catch { return null; }
+/**
+ * The Python library's folder when this build reads it from disk, or null when it is embedded (src/compile.ts libDir:
+ * then the virtual LIB_VIRTUAL).  Told apart by that name, not by the path's form: on Windows a folder is "C:\...".
+ * (`d` and `real`: for tests)
+ */
+export function libOnDisk(d?: string, real: (p: string) => string = realpathSync): string | null {
+  const { libDir, LIB_VIRTUAL } = require("./compile");
+  d ??= libDir() as string;
+  if (d === LIB_VIRTUAL) return null;
+  try { return real(d); } catch { return null; }
 }
 
 const indent = (s: string) => s.split("\n").map((l) => "       " + l).join("\n");
