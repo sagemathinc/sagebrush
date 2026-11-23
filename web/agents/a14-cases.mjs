@@ -28,6 +28,7 @@ export const COPY = {
   unusable: "This page's earlier connection to Claude couldn't be used, so it needs a new code.",
   kept: "Claude was connected to this page earlier.",
   elsewhere: "Claude is connected to another page. Use that page, or close it and Reconnect here.",
+  otherTab: "Claude is connected in another tab of this browser. Use that tab, or close it and Connect here with the new link sagebrush-agent prints.",
   hint: "Not connected: Connect Claude to send",
 };
 
@@ -491,16 +492,43 @@ export async function runA14({ site, ok, want = () => true }) {
     await Q.until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb')`, 20000);
     // (precondition: the opener held an exact record with no leftAt when it was copied; the copy's navigation)
     const nav = await Q.nav();
-    await Q.until(`document.querySelector('#conn-status').textContent !== ''`);
+    await Q.until(`document.querySelector('#conn-status').textContent === ${JSON.stringify(COPY.otherTab)}`);
     const quiet = await A.quiet(3000), bar = await Q.bar();
     ok(pre && pre.keys === RECORD_KEYS.replace("leftAt,", "") && pre.leftAt === null && nav === "navigate", "A14-3b precondition: the opener's record is exact with no leftAt, and the copy's navigation is 'navigate'", { pre: !!pre, leftAt: pre?.leftAt, nav });
-    ok(quiet && A.hellos === h0 && A.upgrades === u0 && bar.status === COPY.kept && bar.act === "Connect" && (await P.connected()), "A14-3b: the copy makes no silent attempt (no upgrade, no hello); it offers Connect, not Reconnect; the first tab stays connected", { quiet, hellos: A.hellos - h0, bar });
+    ok(quiet && A.hellos === h0 && A.upgrades === u0 && bar.status === COPY.otherTab && bar.act === "Connect" && (await P.connected()), "A14-3b: the copy makes no silent attempt (no upgrade, no hello); it says the first tab has Claude and offers Connect, not Reconnect; the first tab stays connected (#1550)", { quiet, hellos: A.hellos - h0, bar });
     const r0 = A.rejected, h1 = A.hellos;
     await Q.ev(`document.querySelector('#conn-act').click()`);
     await Q.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`);
     await sleep(500);
     const rt = await A.call("workspace.list", { folder: "/" });
-    ok(A.rejected === r0 && A.hellos === h1 && A.live.size === 1 && !!rt.result && (await P.connected()), "A14-3c: the copy's Connect opens the Connect dialog (a new code and Allow): no attempt with the first tab's grant, which stays connected", { rejected: A.rejected - r0, hellos: A.hellos - h1, live: A.live.size, rt: rt.result ? "answered" : rt });
+    const note = await Q.ev(`document.querySelector('.sbag-dlg .other-tab')?.textContent ?? null`);
+    ok(A.rejected === r0 && A.hellos === h1 && A.live.size === 1 && !!rt.result && (await P.connected()) && note === COPY.otherTab, "A14-3c: the copy's Connect opens the Connect dialog (a new code and Allow), saying first that the other tab has Claude: no attempt with the first tab's grant, which stays connected", { rejected: A.rejected - r0, hellos: A.hellos - h1, live: A.live.size, rt: rt.result ? "answered" : rt });
+  });
+
+  // A14-3d (#1550): a NEW tab while the first has the agent: no record, no attempt; it says the other tab has Claude, and
+  // its Connect says so too, instead of only asking for a link the agent hasn't printed; once the first tab is closed,
+  // the new one stops saying so by itself
+  await run("A14-3d", async (B, A) => {
+    const P = await B.tab();
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    const Q = await B.tab();
+    const h0 = A.hellos, u0 = A.upgrades;
+    await Q.navigate(`${site}/agents/`);
+    const said = await Q.until(`document.querySelector('#conn-status').textContent === ${JSON.stringify(COPY.otherTab)}`, 10000).then(() => true, () => false);
+    const quiet = await A.quiet(1000), bar = await Q.bar();
+    ok(said && quiet && A.hellos === h0 && A.upgrades === u0 && bar.status === COPY.otherTab && bar.act === "Connect" && !(await Q.connected()) && (await P.connected()), "A14-3d: a new tab while the first is connected says the other tab has Claude (no attempt, no hello); the first stays connected", { said, quiet, bar });
+    await Q.ev(`(document.querySelector('#connect').click(), true)`);
+    await Q.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`);
+    const note = await Q.ev(`document.querySelector('.sbag-dlg .other-tab')?.textContent ?? null`);
+    ok(note === COPY.otherTab, "A14-3d: its Connect dialog says the same first", note);
+    await Q.ev(`([...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click(), true)`);
+    await B.send("Target.closeTarget", { targetId: P.targetId });
+    const gone = await Q.until(`document.querySelector('#conn-status').textContent === '' && !document.querySelector('#conn-bar').classList.contains('on')`, 10000).then(() => true, () => false);
+    await Q.ev(`(document.querySelector('#connect').click(), true)`);
+    await Q.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`);
+    const after = await Q.ev(`document.querySelector('.sbag-dlg .other-tab')?.textContent ?? null`);
+    ok(gone && after === null, "A14-3d: with the first tab closed, the new tab stops saying so by itself, and its Connect asks only for the link", { gone, after });
   });
 
   // A14-4: Revoke, then reload: no bar, nothing reconnects, no record

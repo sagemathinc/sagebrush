@@ -179,7 +179,7 @@ async function again(deadline: number, mine: () => boolean): Promise<boolean> {
 /** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. `reload` (A14) turns on
  * the reload record: its scope, and a callback for the restore's states; `quietLoss` leaves an involuntary loss to the
  * page's own bar (no dialog). */
-export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; egressTurn?: boolean; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>, turnId?: string) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches; gitServe?: typeof gitServe }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runVerbs?: RunVerbs; extra?: (close: () => void) => HTMLElement; open?: (c: Created) => void; onCreated?: (c: Created, p: AgentPairing) => void } = {}) {
+export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => string | null; button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; egressTurn?: boolean; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>, turnId?: string) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches; gitServe?: typeof gitServe }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runVerbs?: RunVerbs; extra?: (close: () => void) => HTMLElement; open?: (c: Created) => void; onCreated?: (c: Created, p: AgentPairing) => void } = {}) {
   style();
   // `program`: the page's own program (the Agents page: sagebrush-agent) named in the dialog instead of sagebrush-mcp
   const named = (s: string) => o.program ? s.replace(/(the agent's |your agent's )?sagebrush-mcp/g, o.program) : s;
@@ -458,6 +458,9 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     dialog("Connect an agent", (box, close) => {
       // (one field: the link the agent gave, pasted, or its code and port; a ?pair link fills in the code and keeps its
       //  port (decided Nov 19 2026), so nobody types a port)
+      // (another tab of this browser has the agent: said first, the link field still there for another agent's link)
+      const other = code ? null : o.otherTab?.() ?? null;
+      if (other) box.append(h("div", { className: "note other-tab", textContent: other }));
       const c = h("input", { type: "text", placeholder: "the link the agent gave", value: code, autocomplete: "off" });
       const err = h("div", { className: "err" });
       if (code && !port) err.textContent = ONLY_CODE;

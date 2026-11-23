@@ -35,7 +35,7 @@ import { mountComposer, renderComposerState, stopLabel } from "../workspace/agen
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
-import { filesIcon, modeSwitch, answerAgentsLive, FILES_TAB } from "../workspace/mode-switch";
+import { filesIcon, modeSwitch, answerAgentsLive, agentsTabLive, FILES_TAB } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
 import { entryUrl } from "../workspace/entry-url";
 import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-chat/transcript";
@@ -1113,6 +1113,9 @@ function runnerBar(computer: string, e: LegEnd | { kind: string; why: string }):
 // (an attempt to one of your computers, between Chat here and its agent.ready: the header's "Connecting to …")
 let connectingTo: string | null = null;
 let waitingFor = false; // (its runner not connected yet: the header says it waits)
+// (another Agents tab of this browser has the agent: the agent serves one page at a time, so this one can't connect while
+//  that one is; and it prints a new link only once that page goes: #1550)
+const OTHER_TAB = "Claude is connected in another tab of this browser. Use that tab, or close it and Connect here with the new link sagebrush-agent prints.";
 const CONN = {
   lost: "Claude disconnected. Your chats are kept; Claude keeps their context while sagebrush-agent runs.",
   restoring: "Reconnecting to Claude…",
@@ -1123,6 +1126,7 @@ const CONN = {
   unusable: "This page's earlier connection to Claude couldn't be used, so it needs a new code.",
   kept: "Claude was connected to this page earlier.",
   elsewhere: "Claude is connected to another page. Use that page, or close it and Reconnect here.",
+  otherTab: OTHER_TAB,
 };
 let connBar: ConnBar | null = null;
 let connShown = false; // (the bar's ×: hidden until the next change)
@@ -1637,6 +1641,8 @@ function mountPairing(ws: Workspace) {
   delegateTasks.keepIn(kept, `sb-delegate-tasks-v1:${ws.identity.workspace}`);
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
+    // (the Connect dialog says so while another tab of this browser has the agent, #1550)
+    otherTab: () => (otherTabLive ? OTHER_TAB : null),
     runVerbs: runVerbsFor(agentRuns(ws)),
     button: $("#connect"),
     notebookEdit: editNotebook,
@@ -1717,6 +1723,20 @@ function mountPairing(ws: Workspace) {
 if (workspace) mountPairing(workspace);
 // (a Files tab this page opened asks whether its agent is still connected here, to come back to this tab: #1620)
 answerAgentsLive(() => pairing?.state === "granted");
+// (and asks the same of the others: while another Agents tab has the agent and this one has none, the bar says so, and
+//  goes once that tab no longer does; asked at load, each time this tab is shown again, and every few seconds while
+//  the bar says so, #1550)
+let otherTabLive = false, otherTabTimer = 0;
+async function checkOtherTab() {
+  const mine = !!pairing && pairing.state !== "closed";
+  otherTabLive = !mine && (await agentsTabLive());
+  if (otherTabLive && (!connBar || connBar.kind === "kept")) setConn({ kind: "otherTab", alert: false, action: "connect" });
+  else if (!otherTabLive && connBar?.kind === "otherTab") setConn(null);
+  clearTimeout(otherTabTimer);
+  if (connBar?.kind === "otherTab") otherTabTimer = window.setTimeout(() => void checkOtherTab(), 3000);
+}
+void checkOtherTab();
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") void checkOtherTab(); });
 // (the person's review of an agent's branches: in a dialog, its chunk fetched at the first click)
 $("#review").onclick = () => { if (workspace) void openReviewDialog(workspace.reviewHost(), new URL("../", import.meta.url)); };
 // (the storage message's [Retry]: the open again, then the pairing, as a load would; never `disabled` while it runs)
