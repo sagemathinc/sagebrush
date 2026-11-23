@@ -426,7 +426,15 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   // (P0 #1: the documents whose content is in this browser, read at each refresh, so another device's that hasn't
   // arrived reads "on another device", and stops as soon as it is here)
   let here: { notebook: Set<string>; board: Set<string> } = { notebook: new Set(), board: new Set() };
-  async function refresh() {
+  // (one refresh at a time: one asked for while another runs is made once more after it, so an older list, answered
+  // late, never draws over a newer one, and each caller's promise ends after a list read since its call)
+  let refreshing: Promise<void> | null = null, again = false;
+  function refresh(): Promise<void> {
+    if (refreshing) { again = true; return refreshing; }
+    refreshing = (async () => { do { again = false; await refreshOnce(); } while (again); })().finally(() => { refreshing = null; });
+    return refreshing;
+  }
+  async function refreshOnce() {
     try { entries = await w.list(trashView ? TRASH : "/", { recursive: true }); } catch (e) { fail(e); }
     if (entries.some((e) => e.remote && (e.kind === "notebook" || e.kind === "board"))) here = await w.contentIds().catch(() => here);
     byParent = new Map();

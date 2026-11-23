@@ -475,7 +475,10 @@ try {
   await until(`!!document.querySelector(".code-page .code-edit textarea") && !${C}.stopped()`);
   await ev(`(() => { const t = document.querySelector(".code-page .code-edit textarea"); t.value = "before new\\n"; t.dispatchEvent(new Event("input")); return 1; })()`);
   await ev(`(document.dispatchEvent(new KeyboardEvent("keydown", { key: "n", code: "KeyN", ctrlKey: true, altKey: true, bubbles: true })), 1)`);
-  check(await until(`/[?&]nb=/.test(location.search) && !document.querySelector(".code-page")`, 15000), "Ctrl+Alt+N on the code page: a new notebook, on its own page");
+  const newNb = await until(`/[?&]nb=/.test(location.search) && !document.querySelector(".code-page")`, 15000);
+  // (a CI flake, 3 times in a day, not seen here: where the page stood, so the next one says which step didn't happen)
+  if (!newNb) console.log("(Ctrl+Alt+N didn't leave: " + JSON.stringify(await ev(`({ at: location.search, codePage: !!document.querySelector(".code-page"), status: document.querySelector(".code-page .code-status")?.textContent ?? null, readOnly: document.querySelector(".code-page .code-edit textarea")?.readOnly ?? null, path: ${C}?.path ?? null, ready: document.readyState })`).catch((e) => String(e))) + `, dialogs ${dialogs.length}, page errors ${JSON.stringify(errors.slice(-3))})`);
+  check(newNb, "Ctrl+Alt+N on the code page: a new notebook, on its own page");
   check(await until(`${text("/demo.py")}.then((s) => s === "before new\\n").catch(() => false)`, 10000), "…the edit saved first");
 
   // a workspace slow to open (the page's lock requests held back until 10 s after it loads, past the few seconds the

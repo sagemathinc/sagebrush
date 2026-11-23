@@ -1556,7 +1556,8 @@ try {
     await until(`!!${W}`, 60000);
     if (await ev(`${S}.hidden`)) await click("#wsfilesbtn");
     await ev(`(async () => { const w = ${W}; await w.create("/lm a.ipynb", ${nb}); await new Promise((r) => setTimeout(r, 30)); await w.create("/lm b.ipynb", ${nb}); await w.create("/Number theory (10).ipynb", ${nb}); return 1; })()`);
-    await until(`!!${row("/lm b.ipynb")}`, 20000);
+    // (each row this block reads, not only the one made second: the third, made last, can be drawn by a later refresh)
+    await until(`!!${row("/lm a.ipynb")} && !!${row("/lm b.ipynb")} && !!${row("/Number theory (10).ipynb")}`, 20000);
     // (the time cell, and the hover over the visible name: the element under the pointer at the name's middle)
     const cell = (p) => ev(`(() => { const r = ${row(p)}, t = r?.querySelector(".t"), n = r?.querySelector(".n"); if (!t) return null; n.scrollIntoView({ block: "center" }); const b = n.getBoundingClientRect(), at = document.elementFromPoint(b.left + Math.min(20, b.width / 2), b.top + b.height / 2); return { shown: getComputedStyle(t).display !== "none", text: t.textContent, title: at?.closest("[title]")?.title ?? "", cut: n.scrollWidth > n.clientWidth }; })()`);
     const narrow = await cell("/Number theory (10).ipynb");
