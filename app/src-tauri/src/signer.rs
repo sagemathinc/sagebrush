@@ -181,28 +181,119 @@ pub fn prepare_data_folder(data: &std::path::Path) -> Result<std::path::PathBuf,
     Ok(f)
 }
 
-/// The signer window's data folder removed (when it closes, and when the app exits): true if it's gone.  Only a real
-/// folder (no symlink) no one else may write, with the same owner as `data`, is removed; anything else is left alone.
-/// On Windows, WebView2's helper processes can hold its files a moment after the window or the app is gone: tried
-/// again for up to 2 s.
-pub fn remove_data_folder(data: &std::path::Path) -> bool {
+/// Whether the approvals window was opened in this session: set once its data folder was made for it (open), never
+/// read from the folder being there.  Only this enables the longer removal at exit on Windows.
+static OPENED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn opened_this_session() -> bool {
+    OPENED.load(Ordering::SeqCst)
+}
+
+/// One checked attempt at removing the signer window's data folder: Some(true) if it's gone (or wasn't there),
+/// Some(false) if it's still there after a remove that failed (a file held open), None if it may not be removed: the
+/// fixed child of `data` must be a real folder (no symlink) no one else may write, with the same owner as `data`,
+/// itself a real folder no one else may write.  Anything else is left alone.
+fn remove_once(data: &std::path::Path) -> Option<bool> {
     let f = data_folder(data);
-    let tries = if cfg!(windows) { 20 } else { 1 };
-    for i in 0..tries {
-        match (std::fs::symlink_metadata(data), std::fs::symlink_metadata(&f)) {
-            (_, Err(e)) if e.kind() == std::io::ErrorKind::NotFound => return true,
-            (Ok(d), Ok(m)) if private_folder(&m) && owner(&m) == owner(&d) => {
-                if std::fs::remove_dir_all(&f).is_ok() {
-                    return true;
-                }
-            }
-            _ => return false,
-        }
-        if i + 1 < tries {
-            std::thread::sleep(std::time::Duration::from_millis(100));
+    let d = std::fs::symlink_metadata(data).ok()?;
+    if !private_folder(&d) {
+        return None;
+    }
+    match std::fs::symlink_metadata(&f) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(true),
+        Ok(m) if private_folder(&m) && owner(&m) == owner(&d) => Some(std::fs::remove_dir_all(&f).is_ok() || matches!(std::fs::symlink_metadata(&f), Err(e) if e.kind() == std::io::ErrorKind::NotFound)),
+        _ => None,
+    }
+}
+
+/// The signer window's data folder removed: true if it's gone.  Tried once, then, until the monotonic deadline `within`
+/// (if any), again every 100 ms, each try re-checking everything remove_once checks (a check that fails ends it: a
+/// failed remove never loosens a check).
+pub fn remove_data_folder_within(data: &std::path::Path, within: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + within;
+    loop {
+        match remove_once(data) {
+            Some(true) => return true,
+            None => return false,
+            Some(false) if std::time::Instant::now() >= deadline => return false,
+            Some(false) => std::thread::sleep(std::time::Duration::from_millis(100)),
         }
     }
-    false
+}
+/// The signer window's data folder removed, one checked try (when the window closes).
+pub fn remove_data_folder(data: &std::path::Path) -> bool {
+    remove_data_folder_within(data, std::time::Duration::ZERO)
+}
+/// How long the app waits at exit, on Windows, for WebView2's processes to let go of the folder (only if the
+/// approvals window was opened in this session).
+pub const EXIT_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+/// The removal at exit, if the window was opened in this session (else nothing: the next launch's cleanup handles a
+/// crash's leftover).  Normally the window is gone by then and its folder already removed (on_exit_requested): one
+/// checked try.  If the window is still there (an exit that couldn't wait for it), up to EXIT_WAIT on Windows.
+pub fn remove_at_exit(data: &std::path::Path, window_alive: bool) -> Option<bool> {
+    let wait = if cfg!(windows) && window_alive { EXIT_WAIT } else { std::time::Duration::ZERO };
+    opened_this_session().then(|| remove_data_folder_within(data, wait))
+}
+
+/// An exit asked for while the approvals window is open, or its folder is being removed: held, with its exit code,
+/// until the removal is done (the window's Destroyed handler, in open, then exits with it).
+static PENDING_EXIT: std::sync::Mutex<(bool, Option<i32>)> = std::sync::Mutex::new((false, None));
+
+/// What the launch's cleanup found (logged as a fixed code, "[signer] startup data folder: …").
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum Startup {
+    /// Nothing there.
+    Absent,
+    /// A previous launch's folder (a crash's, or one WebView2 held at exit), removed.
+    Removed,
+    /// A safe folder that couldn't be removed now (held open): open removes it again, or refuses.
+    Kept,
+    /// Something that may not be removed (a symlink, a file, a folder others may write or another's): left as it is;
+    /// the window then refuses to open (prepare_data_folder).
+    Refused,
+}
+impl Startup {
+    pub fn code(self) -> &'static str {
+        match self {
+            Startup::Absent => "absent",
+            Startup::Removed => "removed",
+            Startup::Kept => "kept",
+            Startup::Refused => "refused",
+        }
+    }
+}
+/// The launch's cleanup, before the approvals window can open: the same fixed folder and the same checks as every
+/// removal.
+pub fn startup_cleanup(data: &std::path::Path) -> Startup {
+    let there = std::fs::symlink_metadata(data_folder(data)).is_ok();
+    match remove_once(data) {
+        Some(true) if there => Startup::Removed,
+        Some(true) => Startup::Absent,
+        Some(false) => Startup::Kept,
+        None if !there => Startup::Absent,
+        None => Startup::Refused,
+    }
+}
+
+/// At an exit request: the approvals window, and only it, closed, so its web view lets go of its folder; an exit with
+/// a code (the app's own, not the person's quit, which lib.rs holds for the page's writes) is held until that folder
+/// is removed, then made again with the same code.
+#[cfg(desktop)]
+pub fn on_exit_requested(app: &tauri::AppHandle, code: Option<i32>, api: &tauri::ExitRequestApi) {
+    use tauri::Manager;
+    let window = app.get_webview_window(LABEL);
+    let mut pending = PENDING_EXIT.lock().unwrap();
+    let removing = pending.0;
+    if window.is_none() && !removing {
+        return;
+    }
+    if let Some(c) = code {
+        api.prevent_exit();
+        pending.1 = Some(c);
+    }
+    drop(pending);
+    if let Some(w) = window {
+        let _ = w.close();
+    }
 }
 
 /// Whether a call of a signing command comes from the signer window on its own page.
@@ -289,7 +380,9 @@ pub fn open(app: &tauri::AppHandle) -> Result<(), String> {
     //  protocol's and the IPC's handlers once per data folder: a window sharing the main window's (none, incognito, so
     //  wry built it an ephemeral context of its own) got neither, and its page never loaded (CI, Nov 23).)
     let data = crate::disk::data_dir(app)?;
-    w = w.incognito(true).data_directory(prepare_data_folder(&data)?);
+    let folder = prepare_data_folder(&data)?;
+    OPENED.store(true, Ordering::SeqCst);
+    w = w.incognito(true).data_directory(folder);
     // (a self-test's probe of the window: what the page is to try, the other local server's origin)
     if let Some(p) = probe {
         if let Some(other) = p.strip_prefix("signer:") {
@@ -297,11 +390,24 @@ pub fn open(app: &tauri::AppHandle) -> Result<(), String> {
         }
     }
     let made = w.build().map_err(|e| format!("the approvals window didn't open: {e}"))?;
-    // (once the window is gone, its data folder goes too, logged as a fixed code; an exit destroys no window one by
-    //  one, so lib.rs removes it then too)
+    // (once the window is gone, its data folder goes too, logged as a fixed code: off the main thread, waiting up to
+    //  EXIT_WAIT on Windows for WebView2's processes to let go of it; an exit held meanwhile (on_exit_requested) is
+    //  then made)
+    let handle = app.clone();
     made.on_window_event(move |e| {
         if let tauri::WindowEvent::Destroyed = e {
-            eprintln!("[signer] data folder removed: {}", if remove_data_folder(&data) { "yes" } else { "no" });
+            PENDING_EXIT.lock().unwrap().0 = true;
+            let (data, handle) = (data.clone(), handle.clone());
+            std::thread::spawn(move || {
+                let gone = if cfg!(windows) { remove_data_folder_within(&data, EXIT_WAIT) } else { remove_data_folder(&data) };
+                eprintln!("[signer] data folder removed: {}", if gone { "yes" } else { "no" });
+                let mut pending = PENDING_EXIT.lock().unwrap();
+                pending.0 = false;
+                if let Some(c) = pending.1.take() {
+                    drop(pending);
+                    handle.exit(c);
+                }
+            });
         }
     });
     Ok(())
@@ -586,6 +692,87 @@ mod tests {
         for d in [&data, &target, &real] {
             std::fs::remove_dir_all(d).unwrap();
         }
+    }
+
+    #[test]
+    fn the_launch_s_cleanup_removes_only_a_safe_leftover() {
+        let data = temp();
+        assert_eq!(startup_cleanup(&data), Startup::Absent);
+        // (a crash's leftover, with what a web view keeps)
+        std::fs::create_dir_all(data.join("signer-webview/EBWebView/Default/Network")).unwrap();
+        std::fs::write(data.join("signer-webview/EBWebView/Default/Network/Cookies"), b"x").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(data.join("signer-webview"), std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        assert_eq!(startup_cleanup(&data), Startup::Removed);
+        assert!(!data.join("signer-webview").exists());
+        assert_eq!(Startup::Removed.code(), "removed");
+        std::fs::remove_dir_all(&data).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_launch_s_cleanup_refuses_and_keeps_a_substituted_leftover() {
+        use std::os::unix::fs::PermissionsExt;
+        let data = temp();
+        let target = temp();
+        std::fs::write(target.join("keep"), b"x").unwrap();
+        std::os::unix::fs::symlink(&target, data.join("signer-webview")).unwrap();
+        assert_eq!(startup_cleanup(&data), Startup::Refused, "a symlink");
+        assert!(target.join("keep").exists() && std::fs::symlink_metadata(data.join("signer-webview")).unwrap().file_type().is_symlink(), "kept as it is");
+        assert!(prepare_data_folder(&data).is_err(), "and the window then refuses to open");
+        std::fs::remove_file(data.join("signer-webview")).unwrap();
+        std::fs::write(data.join("signer-webview"), b"x").unwrap();
+        assert_eq!(startup_cleanup(&data), Startup::Refused, "a file");
+        assert!(data.join("signer-webview").is_file());
+        std::fs::remove_file(data.join("signer-webview")).unwrap();
+        std::fs::create_dir(data.join("signer-webview")).unwrap();
+        std::fs::write(data.join("signer-webview/x"), b"x").unwrap();
+        std::fs::set_permissions(data.join("signer-webview"), std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert_eq!(startup_cleanup(&data), Startup::Refused, "a folder others may write");
+        assert!(data.join("signer-webview/x").exists());
+        // (and an app data folder others may write: nothing removed)
+        std::fs::set_permissions(data.join("signer-webview"), std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert_eq!(startup_cleanup(&data), Startup::Refused, "an app data folder others may write");
+        assert!(data.join("signer-webview/x").exists());
+        std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for d in [&data, &target] {
+            std::fs::remove_dir_all(d).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_removal_s_retries_recheck_and_stop_at_once_on_a_refusal() {
+        // (a symlink substituted: refused at the first try, no waiting out the deadline)
+        let data = temp();
+        let target = temp();
+        std::os::unix::fs::symlink(&target, data.join("signer-webview")).unwrap();
+        let t = std::time::Instant::now();
+        assert!(!remove_data_folder_within(&data, std::time::Duration::from_secs(5)));
+        assert!(t.elapsed() < std::time::Duration::from_secs(1), "a refusal ends the retries");
+        assert!(target.exists());
+        std::fs::remove_file(data.join("signer-webview")).unwrap();
+        // (gone: true at once)
+        assert!(remove_data_folder_within(&data, EXIT_WAIT));
+        for d in [&data, &target] {
+            std::fs::remove_dir_all(d).unwrap();
+        }
+        assert_eq!(EXIT_WAIT, std::time::Duration::from_secs(10));
+    }
+
+    #[test]
+    fn the_exit_s_removal_runs_only_if_the_window_was_opened_in_this_session() {
+        // (the tests never open the window: a folder that's there doesn't count)
+        let data = temp();
+        let f = prepare_data_folder(&data).unwrap();
+        assert!(!opened_this_session());
+        assert_eq!(remove_at_exit(&data, true), None);
+        assert!(f.exists(), "not opened in this session: left for the next launch's cleanup");
+        std::fs::remove_dir_all(&data).unwrap();
     }
 
     #[test]
