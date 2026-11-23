@@ -18,7 +18,8 @@ const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (r) => new URL
 const site = `http://127.0.0.1:${server.port}`;
 
 const F1 = "a".repeat(25) + "a", F2 = "b".repeat(25) + "e";
-const H = (c) => c.repeat(43);
+// (canonical base64url SHA-256 values: 42 characters, then one whose pad bits are zero)
+const H = (c) => c.repeat(42) + "A";
 const B = await browser();
 // (the helper's navigate and reload wait for the Agents app; this plain page is ready when its module is)
 const settle = async (P, before) => { for (const t = Date.now(); P.loads === before && Date.now() - t < 10000; ) await new Promise((r) => setTimeout(r, 50)); await P.until(`window.ready === true`, 10000); };
@@ -80,7 +81,7 @@ try {
     const G = "e".repeat(25) + "q";
     const advG = (seq, hash) => err(P, `fd.advancePin(${JSON.stringify(G)}, { seq: ${seq}, hash: ${JSON.stringify(hash)} })`);
     ok((await advG(5, H("E"))) === null && (await advG(4, H("F"))) === "chain_fork" && (await P.ev(`fd.pin(${JSON.stringify(G)})`)).forked === true, "P-3: a lower seq (a rollback) is a fork too");
-    for (const [why, expr] of [["fleet-upper", `fd.pin(${JSON.stringify(F.toUpperCase())})`], ["fleet-last-char", `fd.pin(${JSON.stringify("d".repeat(26))})`], ["seq-negative", `fd.advancePin(${JSON.stringify(G)}, { seq: -1, hash: ${JSON.stringify(H("A"))} })`], ["seq-float", `fd.advancePin(${JSON.stringify(G)}, { seq: 1.5, hash: ${JSON.stringify(H("A"))} })`], ["hash-short", `fd.advancePin(${JSON.stringify(G)}, { seq: 9, hash: "abc" })`]]) ok(typeof (await err(P, expr)) === "string", `P-4.${why}: refused`);
+    for (const [why, expr] of [["fleet-upper", `fd.pin(${JSON.stringify(F.toUpperCase())})`], ["fleet-last-char", `fd.pin(${JSON.stringify("d".repeat(26))})`], ["seq-negative", `fd.advancePin(${JSON.stringify(G)}, { seq: -1, hash: ${JSON.stringify(H("A"))} })`], ["seq-float", `fd.advancePin(${JSON.stringify(G)}, { seq: 1.5, hash: ${JSON.stringify(H("A"))} })`], ["hash-short", `fd.advancePin(${JSON.stringify(G)}, { seq: 9, hash: "abc" })`], ["hash-pad-bits", `fd.advancePin(${JSON.stringify(G)}, { seq: 9, hash: ${JSON.stringify("A".repeat(42) + "B")} })`]]) ok(typeof (await err(P, expr)) === "string", `P-4.${why}: refused`);
   }
   // ---- Reset this device
   {
