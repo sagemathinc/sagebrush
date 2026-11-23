@@ -23,7 +23,7 @@ for s in ("text", "", "é", "a" * 1000, b"text", b"", b"\x00\xff", bytearray(b"t
     t("init " + repr(s)[:24], lambda: random.Random(s).random())
 for s in ("text", "", "é", b"text", b"\xff"):
     t("v1 " + repr(s), lambda: stream(s, 1))
-t("v1 bytearray (v2's rule)", lambda: stream(bytearray(b"text"), 1))
+t("v1 bytearray (hashed: refused)", lambda: stream(bytearray(b"text"), 1))
 for s in (0, 1, -1, 2**64 + 5, -(2**100), True, 1.5, -1.5, 0.1, -0.0, 1e300, float("inf")):  # (a NaN hashes by identity since 3.10: no fixed stream)
     t("num " + repr(s), lambda: stream(s))
 for s in ((1, 2), [1], {1: 2}, 1j, object):
