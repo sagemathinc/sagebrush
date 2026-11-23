@@ -20,7 +20,7 @@ import { Mirror, MIRROR_COPY, mirrorTitle, type RemoteConversation, type Section
 import { startFakeTurn } from "./fake-agent";
 import { AgentError, RELOAD_KEY, type AgentPairing, type Created, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
-import { mountAgentPairing, type RestoreState } from "../workspace/agent-ui";
+import { mountAgentPairing, RELEASED, type RestoreState } from "../workspace/agent-ui";
 import { createdRunner } from "../workspace/agent-made";
 import { runVerbsFor } from "../workspace/run-holder";
 import { agentRunsFor } from "../workspace/agent-runs";
@@ -35,7 +35,7 @@ import { mountComposer, renderComposerState, stopLabel } from "../workspace/agen
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
-import { filesIcon, modeSwitch, answerAgentsLive, FILES_TAB } from "../workspace/mode-switch";
+import { filesIcon, modeSwitch, answerAgentsLive, agentsTabLive, agentsTabRemembered, releaseAgentsTab, FILES_TAB } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
 import { entryUrl } from "../workspace/entry-url";
 import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-chat/transcript";
@@ -1134,10 +1134,12 @@ function renderComposer() {
 const marked = (t: Thread) => session.marked(t);
 // (connected on this page, or a reload record found: a chat made since isn't the demo's either)
 let connectedHere = false;
-const mayDemo = (t: Thread) => !marked(t) && !connectedHere;
+// (another Agents tab of this browser has the agent, as it answers "live": this one isn't the demo meanwhile, #1688)
+let otherTabLive = false;
+const mayDemo = (t: Thread) => !marked(t) && !connectedHere && !otherTabLive;
 const inert = (t: Thread) => !live() && !mayDemo(t);
 
-type ConnBar = { kind: keyof typeof CONN | "runner"; text?: string; alert: boolean; action: "reconnect" | "connect" | null };
+type ConnBar = { kind: keyof typeof CONN | "runner"; text?: string; alert: boolean; action: "reconnect" | "connect" | "here" | null };
 const connText = (b: ConnBar) => b.text ?? (b.kind === "runner" ? "" : CONN[b.kind]);
 // (an agent on one of your computers: the words, word for word as reviewed)
 const NOT_SENT = {
@@ -1162,6 +1164,9 @@ function runnerBar(computer: string, e: LegEnd | { kind: string; why: string }):
 // (an attempt to one of your computers, between Chat here and its agent.ready: the header's "Connecting to …")
 let connectingTo: string | null = null;
 let waitingFor = false; // (its runner not connected yet: the header says it waits)
+// (another Agents tab of this browser has the agent: the agent serves one page at a time, so this one can't connect while
+//  that one is; and it prints a new link only once that page goes: #1550)
+const OTHER_TAB = "Claude is connected in another tab of this browser. Use that tab, or close it and Connect here with the new link sagebrush-agent prints.";
 const CONN = {
   lost: "Claude disconnected. Your chats are kept; Claude keeps their context while sagebrush-agent runs.",
   restoring: "Reconnecting to Claude…",
@@ -1172,6 +1177,11 @@ const CONN = {
   unusable: "This page's earlier connection to Claude couldn't be used, so it needs a new code.",
   kept: "Claude was connected to this page earlier.",
   elsewhere: "Claude is connected to another page. Use that page, or close it and Reconnect here.",
+  otherTab: OTHER_TAB,
+  // ("Use Claude here", #1550: the tab that let go says only that it was asked, never that another tab connected: the
+  //  channel proves no such thing; and the tab that asked, when its attempt didn't connect)
+  released: "This tab let go of Claude because another tab of this browser asked for it. Your chats here are kept.",
+  notHere: "Claude couldn't be connected here with your remembered access. Your chats and draft are kept; try again, or Connect with a new link.",
 };
 let connBar: ConnBar | null = null;
 let connShown = false; // (the bar's ×: hidden until the next change)
@@ -1210,7 +1220,7 @@ function renderConn() {
   act.hidden = !b?.action;
   for (const btn of [act, hact]) {
     const mine = reconnecting && busyBtn === btn;
-    setText(btn, mine ? "Reconnecting…" : action === "connect" ? "Connect" : "Reconnect");
+    setText(btn, mine ? (action === "here" ? "Connecting…" : "Reconnecting…") : action === "connect" ? "Connect" : action === "here" ? "Use Claude here" : "Reconnect");
     mine ? btn.setAttribute("aria-busy", "true") : btn.removeAttribute("aria-busy");
     reconnecting || rememberBusy ? btn.setAttribute("aria-disabled", "true") : btn.removeAttribute("aria-disabled");
   }
@@ -1247,6 +1257,7 @@ async function doAct(btn: HTMLElement) {
     connectFrom = btn;
     return agentUi.connect("", "", btn);
   }
+  if (connBar?.action === "here") return useHere(btn);
   reconnecting = true;
   busyBtn = btn;
   renderConn();
@@ -1257,6 +1268,36 @@ async function doAct(btn: HTMLElement) {
     busyBtn = null;
     renderConn();
   }
+}
+/** "Use Claude here" (#1550; SEC move-connection r1 option A): only on the person's click, both conditions asked
+ * again first (another tab's connection is local and remembered; a remembered grant in force here); then the other tab
+ * asked to let go, and this one connected with the remembered access as "Use remembered access" does: its grant
+ * exactly, no new Allow, waiting a bounded while for the other tab's socket to close. Nothing is said connected
+ * until it is; a failure leaves the chats and the draft as they are and says so. */
+async function useHere(btn: HTMLElement) {
+  if (!agentUi) return;
+  reconnecting = true;
+  busyBtn = btn;
+  renderConn();
+  let asked = false, g: Kept["grant"] | null = null;
+  try {
+    // (asked again at the click: either gone meanwhile, nothing is sent and the bar is drawn again from what is true now)
+    if ((await agentUi.remembered()) && (await agentsTabRemembered())) {
+      asked = true;
+      releaseAgentsTab();
+      g = await agentUi.useRemembered().catch(() => null);
+    }
+  } finally {
+    reconnecting = false;
+    busyBtn = null;
+  }
+  if (g) {
+    setText($("#who-status"), `connected with remembered access: ${grantScope(g)}`);
+    setConn(null);
+  } else if (live()) setConn(null);
+  else if (!asked) await checkOtherTab();
+  else setConn({ kind: "notHere", alert: true, action: "connect" });
+  renderHeader();
 }
 $("#conn-act").onclick = () => void doAct($("#conn-act"));
 $("#send-hint-act").onclick = () => void doAct($("#send-hint-act"));
@@ -1686,6 +1727,8 @@ function mountPairing(ws: Workspace) {
   delegateTasks.keepIn(kept, `sb-delegate-tasks-v1:${ws.identity.workspace}`);
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
+    // (the Connect dialog says so while another tab of this browser has the agent, #1550)
+    otherTab: () => (otherTabLive ? OTHER_TAB : null),
     // (agent memory v1: this page has the memory client (memory-ui.ts), so the grant dialog offers notes, with the
     //  tags kept in this browser)
     memory: true,
@@ -1757,7 +1800,11 @@ function mountPairing(ws: Workspace) {
         if (p.state === "closed" && pairing === p && granted && !p.link) {
           // (a connection that was in force ended: the person's Revoke says nothing more; an expiry or a loss, the bar)
           const why = p.closeReason;
-          if (why === "revoked by the person") setConn(null);
+          if (why === RELEASED) {
+            // (let go for another tab: said as asked, the remembered access offered again, nothing tried by itself)
+            setConn({ kind: "released", alert: false, action: "connect" });
+            void agentUi?.remembered().then((g) => { rememberedGrant = g; renderConn(); });
+          } else if (why === "revoked by the person") setConn(null);
           else if (why === "the grant expired") setConn({ kind: "expired", alert: true, action: "connect" });
           else setConn({ kind: "lost", alert: true, action: agentUi?.canReconnect ? "reconnect" : "connect" });
         }
@@ -1775,7 +1822,37 @@ function mountPairing(ws: Workspace) {
 }
 if (workspace) mountPairing(workspace);
 // (a Files tab this page opened asks whether its agent is still connected here, to come back to this tab: #1620)
-answerAgentsLive(() => pairing?.state === "granted");
+answerAgentsLive(() => pairing?.state === "granted", {
+  // ("Use Claude here" in another tab: this page's connection, if local and remembered, may be asked to let go; that
+  //  is all a message on the channel can do, #1550)
+  remembered: () => !!agentUi?.releasable(),
+  release: () => void agentUi?.release(),
+});
+// (and asks the same of the others: while another Agents tab has the agent and this one has none, the bar says so, and
+//  goes once that tab no longer does; asked at load, each time this tab is shown again, and every few seconds while
+//  the bar says so, #1550)
+let otherTabTimer = 0;
+async function checkOtherTab() {
+  const mine = !!pairing && pairing.state !== "closed";
+  const was = otherTabLive;
+  // (not while "Use Claude here" runs: its own end says what happened)
+  if (reconnecting) return;
+  otherTabLive = !mine && (await agentsTabLive());
+  // (the header, the banner and Send follow: not the scripted demo while that tab has Claude, #1688)
+  if (otherTabLive !== was) { renderHeader(); renderComposer(); }
+  // ("Use Claude here" offered only while that tab's connection is local and remembered and a remembered grant is in
+  //  force here: else Connect, as before)
+  const here = otherTabLive && (await agentsTabRemembered()) && !!(await agentUi?.remembered().catch(() => null));
+  if (otherTabLive && (!connBar || connBar.kind === "kept" || connBar.kind === "otherTab" || connBar.kind === "released")) {
+    const action = here ? "here" : "connect";
+    if (connBar?.kind !== "otherTab" || connBar.action !== action) setConn({ kind: "otherTab", alert: false, action });
+  }
+  else if (!otherTabLive && connBar?.kind === "otherTab") setConn(null);
+  clearTimeout(otherTabTimer);
+  if (connBar?.kind === "otherTab") otherTabTimer = window.setTimeout(() => void checkOtherTab(), 3000);
+}
+void checkOtherTab();
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") void checkOtherTab(); });
 // (the person's review of an agent's branches: in a dialog, its chunk fetched at the first click)
 $("#review").onclick = () => { if (workspace) void openReviewDialog(workspace.reviewHost(), new URL("../", import.meta.url)); };
 // (the storage message's [Retry]: the open again, then the pairing, as a load would; never `disabled` while it runs)
@@ -1915,6 +1992,8 @@ function renderHeader() {
     whoText(who, "wait", "", waitingFor ? RUNNER.waiting(connectingTo) : RUNNER.connecting(connectingTo));
   } else if (pairing && pairing.state === "paired") {
     whoText(who, "wait", agentName(), "waiting: allow it in the dialog");
+  } else if (otherTabLive) {
+    whoText(who, "", "Claude", "in another tab");
   } else if (inert(current())) {
     who.innerHTML = `<span class="conn"></span>Claude <small>not connected</small>`;
   } else {
