@@ -63,6 +63,8 @@ export const VIEW_COPY = {
   long: "This note is too long. Shorten it.",
   unread: "The agent's answer couldn't be read. It may have gone through: try again to see, or check the list.",
   busy: "Wait for the last change to finish.",
+  unreadDecision: "The agent's answer couldn't be read. It may have gone through: the note is shown as it is now.",
+  loading: "Loading…",
   editStale: "This note changed while you were editing it. It's shown as it is now behind this; your text is kept here. Save again to replace it.",
   failed: "That didn't work",
   readFailed: "The notes couldn't be read",
@@ -134,12 +136,21 @@ export function mountMemoryView(h: MemoryViewHost) {
   let shownNote: Note | null = null;
   let loading = 0;
   let opening = 0;
+  // (the first listing answered since the view opened or memory changed: until then, Loading…)
+  let listed = false;
+  // (what the rows and the open note were last drawn from: drawn again only when that changes, so focus and a
+  //  selection in them stay while the pairing says other things)
+  let notesVer = 0;
+  let drawnRows = "";
+  let drawnNote = "";
+  // (dialogs open on a note: closed when what they were for goes)
+  const dialogs = new Set<HTMLDialogElement>();
   // (one change at a time per note: its buttons wait for the answer)
   const busy = new Set<string>();
   // (a decision's id, kept only to send the very same request again after its answer was lost: the agent keeps each
   //  id's request and answer (§6.1); after any answer it could read, a new decision gets a new id. Renew's expiry is
   //  kept with it, so a retry is the same request)
-  const decisions = new Map<string, { key: string; id: string; expires?: number }>();
+  const decisions = new Map<string, { key: string; id: string; renew?: { revision: number; expires: number } }>();
   const LOST = new Set(["timeout", "closed"]);
   const unreadable = (e: unknown) => e instanceof MemoryShapeError || (e as { extra?: { answer?: unknown } })?.extra?.answer === true;
   const lost = (e: unknown) => unreadable(e) || LOST.has((e as { code?: string })?.code ?? "");
@@ -198,13 +209,16 @@ export function mountMemoryView(h: MemoryViewHost) {
   }
   function reset() {
     notes = [];
+    notesVer++;
     next = null;
     usage = null;
     path = "";
     readError = "";
     shownNote = null;
+    listed = false;
     opening++;
     loading++;
+    for (const d of [...dialogs]) d.close();
   }
 
   // ---- requests
@@ -218,7 +232,7 @@ export function mountMemoryView(h: MemoryViewHost) {
     const key = JSON.stringify([method, params]);
     const kept = decisions.get(note);
     const decision_id = kept?.key === key ? kept.id : hex(16);
-    decisions.set(note, { ...kept, key, id: decision_id });
+    decisions.set(note, { key, id: decision_id, ...(kept?.renew ? { renew: kept.renew } : {}) });
     try {
       const r = MEMORY_RESULTS[method](await request(method, { note, ...params, decision_id }));
       decisions.delete(note);
@@ -250,12 +264,15 @@ export function mountMemoryView(h: MemoryViewHost) {
       const r = MEMORY_RESULTS["memory.list"](await request("memory.list", params));
       if (ticket !== loading) return; // (a later listing was asked for meanwhile: its answer is the one shown)
       notes = more ? [...notes, ...r.notes] : r.notes;
+      notesVer++;
+      listed = true;
       next = r.next;
       usage = r.usage;
       path = r.path;
       readError = "";
     } catch (e) {
       if (ticket !== loading) return;
+      listed = true;
       readError = unreadable(e) ? VIEW_COPY.unread : `${VIEW_COPY.readFailed}: ${(e as Error)?.message ?? e}`;
     }
     render();
@@ -284,41 +301,50 @@ export function mountMemoryView(h: MemoryViewHost) {
     render();
     void load();
   }
-  // (after a change: the note again, as the agent has it now, and the list)
-  async function after(note: string | null, said: string) {
+  // (after a change: the note again, as the agent has it now, or the list; only if the person is still where they
+  //  were when they asked (`at`): one who has moved on is told, and stays)
+  async function after(note: string | null, said: string, at: number) {
     h.toast(said, 4000);
+    if (opening !== at || !open) { if (!shownNote) void load(); return; }
     if (note) await openNote(note);
     else toList();
-    void load();
   }
   async function act(n: Note, what: "renew" | "delete" | "accept") {
     if (busy.has(n.note)) return h.toast(VIEW_COPY.busy, 3000);
     if (what === "delete" && !(await confirm(VIEW_COPY.delTitle, VIEW_COPY.delBody, VIEW_COPY.del))) return;
+    if (busy.has(n.note)) return h.toast(VIEW_COPY.busy, 3000);
+    const at = opening;
     busy.add(n.note);
     render();
     try {
       if (what === "renew") {
-        // (a retry after a lost answer is the same request: the expiry it asked for is kept with its id)
+        // (a retry after a lost answer is the same request: the expiry it asked for is kept with its id, for that
+        //  revision only)
         const kept = decisions.get(n.note);
-        const expires = kept?.expires ?? Date.now() + 90 * DAY;
-        decisions.set(n.note, { ...(kept ?? { key: "", id: "" }), expires });
+        const expires = kept?.renew?.revision === n.revision ? kept.renew.expires : Date.now() + 90 * DAY;
+        decisions.set(n.note, { key: kept?.key ?? "", id: kept?.id ?? "", renew: { revision: n.revision, expires } });
         await decide(n.note, "memory.edit", { revision: n.revision, expires });
         busy.delete(n.note);
-        await after(n.note, VIEW_COPY.renewed);
+        await after(n.note, VIEW_COPY.renewed, at);
       } else if (what === "accept") {
         await decide(n.note, "memory.accept", { revision: n.revision });
         busy.delete(n.note);
-        await after(n.note, VIEW_COPY.accepted);
+        await after(n.note, VIEW_COPY.accepted, at);
       } else {
         await decide(n.note, "memory.delete", { revision: n.revision });
         busy.delete(n.note);
-        await after(null, VIEW_COPY.deleted);
+        await after(null, VIEW_COPY.deleted, at);
       }
     } catch (e) {
       busy.delete(n.note);
-      refused(e);
       const code = (e as { code?: string })?.code;
-      if (code === "stale") await openNote(n.note);
+      const stay = opening !== at || !open;
+      // (an answer that couldn't be read may have gone through, and asking again gets the same answer: the note is
+      //  shown as it is now)
+      if (unreadable(e)) { h.toast(VIEW_COPY.unreadDecision, 8000); if (!stay) await openNote(n.note); else render(); return; }
+      refused(e);
+      if (stay) render();
+      else if (code === "stale") await openNote(n.note);
       else if (code === "not_found") toList();
       else render();
     }
@@ -331,8 +357,9 @@ export function mountMemoryView(h: MemoryViewHost) {
       el("menu", {}, el("button", { value: "cancel", textContent: "Cancel" }), " ", el("button", { value: "ok", className: "primary", textContent: ok })));
     dlg.append(form);
     document.body.append(dlg);
+    dialogs.add(dlg);
     dlg.showModal();
-    return new Promise((resolve) => dlg.addEventListener("close", () => { resolve(dlg.returnValue === "ok"); dlg.remove(); }, { once: true }));
+    return new Promise((resolve) => dlg.addEventListener("close", () => { dialogs.delete(dlg); resolve(dlg.returnValue === "ok"); dlg.remove(); }, { once: true }));
   }
   function editNote(first: Note) {
     if (busy.has(first.note)) return h.toast(VIEW_COPY.busy, 3000);
@@ -351,8 +378,9 @@ export function mountMemoryView(h: MemoryViewHost) {
     const msg = el("p", { className: "msg", role: "alert" });
     const ok = el("button", { type: "button", className: "primary", textContent: "Save" });
     const cancel = el("button", { type: "button", textContent: "Cancel", onclick: () => dlg.close() });
+    dialogs.add(dlg);
     dlg.append(el("h2", { textContent: "Edit the note" }), el("label", {}, "Name", name), el("label", {}, "Description (one line)", description), el("label", {}, "Note", body), el("label", {}, "Where", where), msg, el("menu", {}, cancel, ok));
-    dlg.addEventListener("close", () => dlg.remove(), { once: true });
+    dlg.addEventListener("close", () => { dialogs.delete(dlg); dlg.remove(); }, { once: true });
     ok.onclick = async () => {
       if (!where.value) return h.toast("Choose where to keep this note.", 5000);
       if (busy.has(n.note)) return h.toast(VIEW_COPY.busy, 3000);
@@ -367,18 +395,26 @@ export function mountMemoryView(h: MemoryViewHost) {
       ok.disabled = true;
       busy.add(n.note);
       try {
+        const at = opening;
         const r = (await decide(n.note, "memory.edit", change)) as { note: string; revision: number };
         busy.delete(n.note);
         dlg.close();
-        await after(r.note, VIEW_COPY.saved);
+        await after(r.note, VIEW_COPY.saved, at);
       } catch (e) {
         busy.delete(n.note);
         const code = (e as { code?: string })?.code;
         if (code === "stale") {
-          // (changed at the agent: the dialog stays with the person's text, and the note behind it is the new one)
+          // (changed at the agent: the dialog stays with the person's text, and the note behind it is the new one. A
+          //  field the person didn't change takes the note's new value, so Save again sends only their own changes)
           const fresh = await openNote(n.note);
-          if (fresh) { n = fresh; msg.textContent = VIEW_COPY.editStale; }
-          else dlg.close();
+          if (fresh) {
+            if (name.value.trim() === n.name) name.value = fresh.name;
+            if (description.value.trim() === n.description) description.value = fresh.description;
+            if (body.value === n.body) body.value = fresh.body;
+            if (where.value === scopeKey(n.scope) && [...where.options].some((o) => o.value === scopeKey(fresh.scope))) where.value = scopeKey(fresh.scope);
+            n = fresh;
+            msg.textContent = VIEW_COPY.editStale;
+          } else if (dialogs.has(dlg)) msg.textContent = VIEW_COPY.readFailed; // (the note couldn't be read again: the text stays)
         } else if (code === "not_found") {
           refused(e);
           dlg.close();
@@ -471,7 +507,7 @@ export function mountMemoryView(h: MemoryViewHost) {
     why.hidden = !w;
     help.hidden = usageLine.hidden = listPart.hidden = notePart.hidden = !!w;
     // (nothing of the notes stays in the page while they can't be shown)
-    if (w) { listBox.replaceChildren(); notePart.replaceChildren(); return; }
+    if (w) { listBox.replaceChildren(); notePart.replaceChildren(); drawnRows = drawnNote = ""; return; }
     help.textContent = VIEW_COPY.help(path || null);
     if (usage) {
       const share = usage.bytes / usage.limit;
@@ -486,6 +522,11 @@ export function mountMemoryView(h: MemoryViewHost) {
     drawTags();
     errLine.textContent = readError;
     errLine.hidden = !readError;
+    more.hidden = !next;
+    const rowsSig = JSON.stringify([notesVer, listed, tagsDrawn]);
+    if (rowsSig === drawnRows) return;
+    drawnRows = rowsSig;
+    if (!listed) return void listBox.replaceChildren(el("p", { className: "memory-empty", textContent: VIEW_COPY.loading }));
     listBox.replaceChildren(...(notes.length ? notes.map((n) => {
       const b = el("button", { type: "button", className: "memory-note" + (n.state !== "ok" ? " " + n.state : "") },
         el("span", { className: "n", textContent: n.name }),
@@ -495,10 +536,12 @@ export function mountMemoryView(h: MemoryViewHost) {
       b.onclick = () => void openNote(n.note);
       return b;
     }) : [el("p", { className: "memory-empty", textContent: VIEW_COPY.empty })]));
-    more.hidden = !next;
   }
 
   function drawNote(n: Note) {
+    const sig = JSON.stringify([n, busy.has(n.note), tagsDrawn]);
+    if (sig === drawnNote) return;
+    drawnNote = sig;
     notePart.dataset.note = n.note;
     const toAll = el("button", { type: "button", className: "link", textContent: "← All notes", onclick: () => toList() });
     const actions = el("menu", { className: "memory-actions" });
@@ -524,7 +567,7 @@ export function mountMemoryView(h: MemoryViewHost) {
   function sync(relist = false) {
     const x = p();
     // (the person ended the connection: not "lost")
-    if (x?.state === "closed" && x.closeReason === "revoked by the person") wasEverHere = false;
+    if (x?.state === "closed" && (x.closeReason === "revoked by the person" || x.closeReason === "the grant expired")) wasEverHere = false;
     const key = keyNow();
     if (key !== shownFor) {
       shownFor = key;

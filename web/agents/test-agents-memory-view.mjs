@@ -153,21 +153,20 @@ try {
   await P.until(`!!document.querySelector('#memory-view .memory-note[data-note="${nAlg.note}"]')`, 5000);
   await openNote(nAlg.note);
   Object.assign(H.memory.notes.get(nAlg.note), { body: "Rings are commutative, with 1.", revision: 2 }); // (changed at the agent since it was opened)
-  await P.ev(`(document.querySelector('#memory-view [data-act=renew]').click(), true)`).catch(() => {});
-  const hasRenew = await P.ev(`!!document.querySelector('#memory-view [data-act=renew]')`);
-  // (a note without an expiry has no Renew: Edit instead)
-  if (!hasRenew) {
-    await P.ev(`(document.querySelector('#memory-view [data-act=edit]').click(), true)`);
-    await P.until(`!!document.querySelector('dialog.memory-edit[open]')`, 5000);
-    await P.ev(`(() => { const d = document.querySelector('dialog.memory-edit[open]'); d.querySelector('[name=description]').value = 'mine'; [...d.querySelectorAll('button')].find((b) => b.textContent === 'Save').click(); return true; })()`);
-  }
+  // (a note without an expiry: no Renew; Edit)
+  ok(!(await P.ev(`!!document.querySelector('#memory-view [data-act=renew]')`)), "V7: a note that never expires has no Renew");
+  await P.ev(`(document.querySelector('#memory-view [data-act=edit]').click(), true)`);
+  await P.until(`!!document.querySelector('dialog.memory-edit[open]')`, 5000);
+  await P.ev(`(() => { const d = document.querySelector('dialog.memory-edit[open]'); d.querySelector('[name=description]').value = 'mine'; [...d.querySelectorAll('button')].find((b) => b.textContent === 'Save').click(); return true; })()`);
+
   await P.until(`/changed while you were editing it/.test(document.querySelector('dialog.memory-edit[open] .msg')?.textContent ?? '')`, 5000).catch(() => {});
   const v7 = await P.ev(`(() => { const d = document.querySelector('dialog.memory-edit[open]'); return d ? { msg: d.querySelector('.msg').textContent, description: d.querySelector('[name=description]').value } : null; })()`);
   ok(/changed while you were editing it/.test(v7?.msg ?? "") && v7.description === "mine" && /with 1\./.test(await P.ev(`document.querySelector('#memory-view .memory-open .mem-body')?.textContent ?? ''`)) && H.memory.notes.get(nAlg.note).description === "rings are commutative", "V7: a stale answer keeps the dialog and the person's text, says so, and shows the note behind it as it is now; nothing changed at the agent", v7);
   // (Save again: now at the note's new revision)
   await P.ev(`([...document.querySelector('dialog.memory-edit[open]').querySelectorAll('button')].find((b) => b.textContent === 'Save').click(), true)`);
   await P.until(`!document.querySelector('dialog.memory-edit[open]')`, 5000).catch(() => {});
-  ok(H.memory.notes.get(nAlg.note).description === "mine" && sent(H, "memory.edit").at(-1)?.revision === 2, "V7: Save again goes at the note's new revision", sent(H, "memory.edit").at(-1));
+  const e7 = sent(H, "memory.edit").at(-1);
+  ok(H.memory.notes.get(nAlg.note).description === "mine" && e7?.revision === 2 && !("body" in e7) && /with 1\./.test(H.memory.notes.get(nAlg.note).body), "V7: Save again goes at the note's new revision with only the person's change: the agent's new text stays", { e7, body: H.memory.notes.get(nAlg.note).body });
 
   // ======================================================================== V8: a secret
   H.memory.secret = "sk-live-";
@@ -188,6 +187,7 @@ try {
   const d9 = await P.ev(`document.querySelector('dialog.memory-dlg[open]').textContent`);
   await P.ev(`(document.querySelector('dialog.memory-dlg[open] button.primary').click(), true)`);
   for (const t = Date.now(); !H.held.length && Date.now() - t < 5000; ) await sleep(50);
+  ok(await P.ev(`[...document.querySelectorAll('#memory-view .memory-actions button')].every((b) => b.disabled)`), "V9: while a change is out, the note's buttons wait");
   const m9 = H.held.splice(0)[0];
   H.answer(m9.id, { deleted: "yes" });
   await P.until(`/couldn't be read/.test(document.querySelector('#toast')?.textContent ?? '')`, 5000).catch(() => {});
@@ -202,6 +202,24 @@ try {
   const del9 = sent(H, "memory.delete").at(-1);
   ok(del9?.decision_id === m9.params.decision_id, "V9: Delete again after the unreadable answer sends the same decision id", { first: m9.params.decision_id, again: del9?.decision_id });
   ok(/stops reading it at once/.test(d9) && del9?.note === nAlg.note && del9.revision === 3 && !H.memory.notes.has(nAlg.note) && !(await P.ev(`!!document.querySelector('#memory-view .memory-note[data-note="${nAlg.note}"]')`)), "V9: Delete asks first, then sends memory.delete at the revision shown; the note leaves the list", { d9, del9 });
+
+  // ======================================================================== V16: an answer after the person moved on
+  // (Renew the first note, go to another before its answer: the answer is said, and the person stays where they went)
+  await P.until(`!!document.querySelector('#memory-view .memory-note[data-note="${nOwn.note}"]')`, 5000);
+  await openNote(nOwn.note);
+  H.hold.add("memory.edit");
+  await P.ev(`(document.querySelector('#memory-view [data-act=renew]').click(), true)`);
+  for (const t = Date.now(); !H.held.length && Date.now() - t < 5000; ) await sleep(50);
+  await back();
+  await P.until(`!!document.querySelector('#memory-view .memory-note[data-note="${nOut.note}"]')`, 5000);
+  await openNote(nOut.note);
+  H.hold.delete("memory.edit");
+  H.release();
+  await P.until(`/Renewed/.test(document.querySelector('#toast')?.textContent ?? '')`, 5000).catch(() => {});
+  await sleep(400);
+  ok(/Renewed/.test(await toast(P)) && (await P.ev(`document.querySelector('#memory-view .memory-open:not([hidden])')?.dataset.note`)) === nOut.note, "V16: a change's answer after the person moved to another note is said, and they stay on that note", await P.ev(`document.querySelector('#memory-view .memory-open:not([hidden])')?.dataset.note`));
+  await back();
+  await P.until(`document.querySelectorAll('#memory-view .memory-note').length >= 3`, 5000).catch(() => {});
 
   // ======================================================================== V10: Name this tag
   const tagRow = `document.querySelector('#memory-view .memory-tag[data-tag="${TAG2}"]')`;
