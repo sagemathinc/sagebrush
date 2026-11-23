@@ -35,7 +35,7 @@ An admission checks live facts:
 These belong to the fleet service, which doesn't exist yet. `fleet.ts` reads them through the `FleetFacts` interface. **Until the fleet service is built, the Worker runs with `NO_FACTS`, which refuses every open (`not_granted`).** The feed, the control plane's authentication and the call-id replay rule work in full.
 
 **When the fleet service exists, two things are needed:**
-- **A real `FleetFacts`.** It reads the epochs first and then the facts, twice around the epochs, as `fleet.ts` does.
+- **A real `FleetFacts` implementation** that supplies the live snapshots. The Worker reads one snapshot to identify the account and host, reads their epochs, then reads the snapshot it checks; it refuses if the account or host changed in between.
 - **Every path that changes such a fact calls `store.ts`'s `bump()`** for each account, agent and host the change touches. It commits the change first and bumps after.
 
 ## Storage
