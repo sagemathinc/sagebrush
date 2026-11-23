@@ -13658,6 +13658,16 @@
   "owner": "real/complex arithmetic",
   "row": "inv-17"
  },
+ "lib/_sage_real.py :: _cc_of :: raise NotImplementedError(\"%s + %s*I in CC, past the double range, is not available in sagebrush yet\" % (re, im)) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a complex value past the doubles: CC's numbers are doubles in Sagebrush, so a log_gamma whose part leaves them is refused rather than given as an infinity (an unsupported case, not a cap)"
+ },
+ "lib/_sage_real.py :: _log_gamma_neg :: raise NotImplementedError(\"log_gamma(%s) correctly rounded to %d bits is not decided within %d bits in sagebrush yet\" % (x, p, W)) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "fail-closed Ziv check of log_gamma's principal branch at a negative real: a real part whose correct rounding is not decided after _ZIV_CHECK_TRIES doublings of the working precision is refused, never guessed; not a resource cap"
+ },
  "lib/_sage_real.py :: _real_complex_pow :: if _cpow_scale(a, b) >= _CPOW_SCALE_MAX: #0": {
   "class": "2+3",
   "owner": "real/complex arithmetic",

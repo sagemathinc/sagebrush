@@ -2904,12 +2904,16 @@ class RealNumberMP:
         return R(v)
 
     def log_gamma(self):
-        """The logarithm of the gamma function.
+        """The logarithm of the gamma function; of a negative number, its
+        principal branch log |Gamma(x)| + pi floor(x) I in ComplexField(p), as
+        Sage's (mpmath's loggamma; not log(gamma(x))).
 
         EXAMPLES::
 
             sage: RealField(100)(10).log_gamma()
             12.801827480081469611207717875
+            sage: RealField(100)(-2.1).log_gamma()
+            1.5317138081950864826801495456 - 9.4247779607693797153879301498*I
             sage: RealField(100)(10^6).log_gamma()
             1.2815504569147611659976971785e7
             sage: R = RealField(100, rnd='RNDZ'); x = R(2)^(2^62 - 2); x.log_gamma() / x
@@ -2947,6 +2951,8 @@ class RealNumberMP:
             if E < -(R._prec + 40):
                 # -log x - euler_gamma x + ...: the linear term is far below
                 return _ziv_eval(R, lambda F: -F(self).log(), overflow=True)
+        if not self._special and self._m < 0:
+            return _log_gamma_neg(self)
         return self.gamma().log()
 
     def __round__(self, n=None):
@@ -3675,6 +3681,121 @@ def _gamma_reflected(x):
             return RealNumberMP(R, lo[0], lo[1])
         G *= 2
     raise NotImplementedError("Gamma(%s) at the bottom of the exponent range is not available in sagebrush yet" % x)
+
+
+def _log_gamma_neg(x):
+    """log_gamma of a negative x as Sage's (mpmath's loggamma): the principal
+    branch, log |Gamma(x)| + pi floor(x) I, in ComplexField(p), both parts
+    correctly rounded to nearest whatever x's rounding mode; at a pole
+    ValueError, as mpmath's.  The real part is log pi - log |sin(pi f)| -
+    log Gamma(1 - x) (f = x - round(x)), evaluated at W and 2W bits and
+    rounded when both ends of b +- max(|a - b|, 4 units of W) round alike, as
+    the checked functions (_ziv_checked)."""
+    R = x._R
+    p = R._prec
+    RN = RealField_(p, "RNDN")
+    if x._mag() < -(p + 40):
+        # (Gamma(x) = 1/x - euler_gamma + O(x): log |Gamma(x)| is -log |x|, the
+        # rest far below its last place, as for a tiny positive x; floor(x) = -1)
+        _ziv_depth[0] += 1
+        try:
+            re = _ziv_eval(RN, lambda F: -RealNumberMP(F, -x._m, x._e).log())
+            im = _ziv_eval(RN, lambda F: -F.pi())
+        finally:
+            _ziv_depth[0] -= 1
+        return _cc_of(p, re, im)
+    q = x._q()
+    if q.denominator == 1:
+        raise ValueError("gamma function pole")
+    n = round(q)
+
+    def part(W):
+        F = RealField_(W, "RNDN")
+        pi = F.pi()
+        return pi.log() - abs((pi * F(q - n)).sin()).log() - F(1 - q).log_gamma()
+
+    W = p + 32
+    re = None
+    _ziv_depth[0] += 1
+    try:
+        for _ in range(_ZIV_CHECK_TRIES):
+            W = W + 1 if W == 53 else W
+            a, b = part(W), part(2 * W)
+            if a._special or b._special or not b._m:
+                break
+            re = _ziv_rounds_alike(a, b, W, RN)
+            if re is not None:
+                break
+            W *= 2
+        else:
+            re = None
+    finally:
+        _ziv_depth[0] -= 1
+    if re is None:
+        raise NotImplementedError("log_gamma(%s) correctly rounded to %d bits is not decided within %d bits in sagebrush yet" % (x, p, W))
+    k = q.numerator // q.denominator
+    im = _ziv_eval(RN, lambda F: F.pi() * k)
+    return _cc_of(p, re, im)
+
+
+def _cc_of(p, re, im):
+    """re + im I in ComplexField(p) (CC, of doubles, for 53 bits)."""
+    if p == 53:
+        import _sage_matrix
+        z = complex(float(re), float(im))
+        if not (math.isfinite(z.real) and math.isfinite(z.imag)):
+            # (a finite part past the doubles: CC's elements are doubles here)
+            raise NotImplementedError("%s + %s*I in CC, past the double range, is not available in sagebrush yet" % (re, im))
+        return _sage_matrix.ComplexNumber(z)
+    return ComplexNumberMP(ComplexField(p), re, im)
+
+
+def _cc_log(re, im):
+    """(log |z|, arg z), -pi < arg z <= pi, of z = re + im I (doubles, not
+    NaN), as Sage's CC computes them (ComplexNumber.log, abs and argument):
+    |z| = sqrt(re^2 + im^2) with each of the four operations rounded to 53
+    bits to nearest, in a field with no double range (MPFR's), so not always
+    the correctly rounded |z|: CC(-0.5, 0.8660254037844386).log() has real
+    part -2^-53; then its logarithm, correctly rounded; and arg z = atan2(im,
+    re) correctly rounded: arctan(im / re), +-pi when re < 0.  Zeros and
+    infinities: |z| is the other part exactly or infinite, the angle C's
+    atan2's, exact."""
+    R = RealField_(53, "RNDN")
+    if not (math.isfinite(re) and math.isfinite(im)) or re == 0 or im == 0:
+        # (|z| is |re| or |im| exactly, or infinite; arg z is 0, +-pi/2 or +-pi,
+        # or a multiple of pi/4 at two infinities: C's atan2, exact)
+        r = math.hypot(re, im)
+        lr = float(R(r).log()) if r and math.isfinite(r) else math.log(r) if r else -math.inf
+        return lr, math.atan2(im, re)
+    # (a^2, b^2 and their sum each rounded to 53 bits from the exact value, in
+    # MP numbers: a 53-bit field's own arithmetic would give RR's doubles)
+    s = R(R(_F(re) ** 2)._q() + R(_F(im) ** 2)._q())._q()
+    # then sqrt(N / 2^k) rounded (nearest, ties to even): q = isqrt(N 2^t) has
+    # at least 55 bits; the dropped bits and q^2 != N 2^t decide the rounding
+    N, k = s.numerator, s.denominator.bit_length() - 1
+    t = max(0, 110 - N.bit_length())
+    t += (k + t) % 2
+    M = N << t
+    q = math.isqrt(M)
+    drop = q.bit_length() - 53
+    hi, rem, half = q >> drop, q & ((1 << drop) - 1), 1 << (drop - 1)
+    if rem > half or rem == half and (q * q != M or hi & 1):
+        hi += 1
+    rho = RealNumberMP(R, hi, drop - (k + t) // 2)
+    t = _F(im) / _F(re)
+
+    def arg(F):
+        a = F(t).arctan()
+        if re < 0:
+            a = a + F.pi() if im > 0 else a - F.pi()
+        return a
+    # (the working fields' own functions, unchecked: _ziv_eval's bound is theirs)
+    _ziv_depth[0] += 1
+    try:
+        theta = _ziv_eval(R, arg)
+    finally:
+        _ziv_depth[0] -= 1
+    return float(rho.log()), float(theta)
 
 
 def _log_gamma_stirling(x):
@@ -5058,6 +5179,9 @@ def _ziv_checked(name):
             C = ComplexField(R._prec)
             RN = C._R
             return ComplexNumberMP(C, RealNumberMP(RN, -self._m, self._e).log(), RN.pi())
+        if name == "log_gamma" and self._m < 0:
+            # (the principal branch, complex: its real part checked as these are, _log_gamma_neg)
+            return _log_gamma_neg(self)
         W = R._prec + 32
         _ziv_depth[0] += 1
         try:
