@@ -2323,6 +2323,14 @@ def _bad_index(pos):
     return _err(msg, "MATLAB:badsubscript")
 
 
+def _too_big(pos):
+    """MATLAB's error for an index of 2^48 or more in an assignment or a deletion (a read is out of range instead),
+    observed R2026b: positional when there are several subscripts"""
+    msg = "Indices must be less than 2^48."
+    msg = ("Index in position %d is invalid. " % (pos + 1) if pos >= 0 else "One or more indices are invalid. ") + msg
+    return _err(msg, "MATLAB:badsubscript")
+
+
 def _ivec(arg, n, pos, grow):
     """an index argument as 0-based positions (int64 ndarray, in order) and the
     dimensions of the index (for the shape of a linear index's result)"""
@@ -2335,6 +2343,8 @@ def _ivec(arg, n, pos, grow):
         k = int(arg)
         if k != arg:
             raise _bad_index(pos)
+        if grow and k >= 2 ** 48:
+            raise _too_big(pos)
         if k > n and not grow:
             raise _oob(pos, n)
         return np.array([k - 1], dtype=np.int64), (1, 1), False
@@ -2363,10 +2373,14 @@ def _ivec(arg, n, pos, grow):
         # (past the end before the conversion to integers: v([1 1e19]) is MATLAB's out-of-range error, not int64's)
         if f.size and not grow and np.max(f) > n:
             raise _oob(pos, n)
+        if f.size and grow and np.max(f) >= 2.0 ** 48:
+            raise _too_big(pos)
         idx = f.astype(np.int64) - 1
     else:
         if f.size and np.any(f < 1):
             raise _bad_index(pos)
+        if f.size and grow and np.max(f) >= 2 ** 48:
+            raise _too_big(pos)
         idx = f.astype(np.int64) - 1
     if idx.size and not grow:
         mx = int(np.max(idx))
@@ -3126,6 +3140,18 @@ def _set_numeric(cur, pos, v):
     return _box(out) if out.size == 1 else out
 
 
+def _del_ivec(a, n, pos):
+    """_ivec for a deletion: an index of 2^48 or more is MATLAB's 2^48 error there, as in an assignment, where a read
+    would be out of range"""
+    try:
+        return _ivec(a, n, pos, False)
+    except MatlabError:
+        f = _arr(a).reshape(-1) if type(a) is not float else np.array([a])
+        if f.dtype.kind in "fiu" and f.size and np.max(f) >= 2 ** 48:
+            raise _too_big(pos)
+        raise
+
+
 def _delete(cur, args):
     """cur(args) = []"""
     dims = _dims(cur)
@@ -3136,7 +3162,7 @@ def _delete(cur, args):
         if a is COLON:
             keep = np.array([], dtype=np.int64)
         else:
-            idx, _, _ = _ivec(a, total, -1, False)
+            idx, _, _ = _del_ivec(a, total, -1)
             mask = np.ones(total, dtype=bool)
             mask[idx] = False
             keep = np.nonzero(mask)[0]
@@ -3155,7 +3181,7 @@ def _delete(cur, args):
     if len(which) > 1:
         raise _err("A null assignment can have only one non-colon index.", "MATLAB:nullAssignmentNonColonIndex")
     k = which[0]
-    idx, _, _ = _ivec(args[k], d[k], k, False)
+    idx, _, _ = _del_ivec(args[k], d[k], k)
     mask = np.ones(d[k], dtype=bool)
     mask[idx] = False
     vecs = [np.arange(x, dtype=np.int64) for x in d]

@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 
 // Indexing errors as MATLAB raises them: every bad or out-of-range subscript is MATLAB:badsubscript; a bad linear
 // index says only "Array indices must be positive integers or logical values.", a bad subscript among several names
-// its position, and a logical index past the end has its own message. Each row's identifier and message were
+// its position, and a logical index past the end has its own message; an assignment or deletion at an index of 2^48
+// or more says "Indices must be less than 2^48." (a read there is out of range). Each row's identifier and message were
 // recorded from MATLAB R2026b (v = [1 2 3], m = magic(2)); NaN and Inf subscripts used to leak a Python error.
 
 const cli = join(__dirname, "..", "src", "cli.js");
@@ -53,9 +54,14 @@ const ROWS: [string, string, string][] = [
   ["cp0", "c = {1,2}; a = c(0);", "MATLAB:badsubscript|Array indices must be positive integers or logical values."],
   ["vbig2", "a = v([1 1e19]);", "MATLAB:badsubscript|Index exceeds the number of array elements. Index must not exceed 3."],
   ["mbig2", "a = m(1,[1 1e19]);", "MATLAB:badsubscript|Index in position 2 exceeds array bounds. Index must not exceed 2."],
+  ["gv", "v([1 1e19]) = 5;", "MATLAB:badsubscript|One or more indices are invalid. Indices must be less than 2^48."],
+  ["gs", "v(1e19) = 5;", "MATLAB:badsubscript|One or more indices are invalid. Indices must be less than 2^48."],
+  ["gm", "m(1,[1 1e19]) = 5;", "MATLAB:badsubscript|Index in position 2 is invalid. Indices must be less than 2^48."],
+  ["gms", "m(1e19,1) = 5;", "MATLAB:badsubscript|Index in position 1 is invalid. Indices must be less than 2^48."],
+  ["dv", "v([1 1e19]) = [];", "MATLAB:badsubscript|One or more indices are invalid. Indices must be less than 2^48."],
 ];
 
-test("every bad or out-of-range subscript raises MATLAB's identifier and message (39 rows recorded from MATLAB R2026b)", () => {
+test("every bad or out-of-range subscript raises MATLAB's identifier and message (44 rows recorded from MATLAB R2026b)", () => {
   const dir = mkdtempSync(join(tmpdir(), "sb-index-errors-"));
   const lines = ROWS.map(([name, code]) =>
     `v = [1 2 3]; m = magic(2); try, ${code} fprintf('${name}|OK\\n'); catch err, fprintf('${name}|%s|%s\\n', err.identifier, err.message); end`);
