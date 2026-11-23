@@ -64,6 +64,7 @@ import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistory
 import { Workspace, LIMITS, registerJournalWriter, stripBoard, type Entry } from "../workspace/api";
 import { migrate } from "../workspace/migrate";
 import { filesToggle } from "../workspace/files-toggle";
+import { backToAgentsTab } from "../workspace/mode-switch";
 import { filesResize } from "../workspace/resize";
 import { freePath, nameOf, parentOf, splitExt, safeName } from "../workspace/paths";
 import { startMigrator } from "../workspace/migrator";
@@ -1120,6 +1121,8 @@ async function go(url: string, what: string): Promise<boolean> {
   if (!(await settled(what))) return false;
   // (the desktop app: and on disk)
   if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror))) return false;
+  // (to Agents from the Files tab the Agents page opened, while that page's agent is connected: back to it, #1620)
+  if (await backToAgentsTab(url)) return true;
   location.assign(url);
   return true;
 }

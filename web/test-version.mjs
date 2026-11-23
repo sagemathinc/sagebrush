@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { handleVersion, mountVersionStamp, parseVersion, stampText, versionOf } from "./version.ts";
+import { appStampText, handleVersion, mountVersionStamp, parseAppVersion, parseVersion, stampText, versionOf } from "./version.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 let checks = 0;
@@ -95,6 +95,29 @@ for (const [status, body, why] of [
 e = el();
 ok((await mountVersionStamp(e, async () => { throw new Error("offline"); })) === false && e.hidden === true, "hidden when the fetch fails");
 ok((await mountVersionStamp(null, answer(200, good))) === false, "no element: nothing");
+
+// ---- the desktop app: its own build (window.__SB_APP_VERSION__, app/src-tauri/src/version.rs), and no request
+const APP = { version: "0.4.0", commit: CORE };
+const never = async () => { throw new Error("the app's stamp asked a server"); };
+e = el();
+ok((await mountVersionStamp(e, never, APP)) === true && e.hidden === false && e.textContent === `Sagebrush app 0.4.0 · ${CORE.slice(0, 8)}`, `the app's stamp: ${e.textContent}`);
+ok(e.title.includes(CORE) && e.title.includes("0.4.0"), "its title has the full commit and the version");
+e = el();
+ok((await mountVersionStamp(e, never, { version: "0.4.0", commit: "unknown" })) === true && e.textContent === "Sagebrush app 0.4.0 · commit unknown", "a build outside a checkout says so");
+for (const [bad, why] of [
+  [{ version: "0.4.0" }, "no commit"],
+  [{ ...APP, extra: 1 }, "an extra key"],
+  [{ ...APP, commit: CORE.toUpperCase() }, "an uppercase commit"],
+  [{ ...APP, commit: CORE.slice(0, 8) }, "a short commit"],
+  [{ ...APP, version: "0.4" }, "a version of two numbers"],
+  [{ ...APP, version: "<b>0.4.0</b>" }, "markup in the version"],
+  [null, "null"],
+  ["0.4.0", "a string"],
+]) {
+  e = el();
+  ok(parseAppVersion(bad) === null && (await mountVersionStamp(e, never, bad)) === false && e.hidden === true && e.textContent === "", `the app's stamp is hidden for ${why}`);
+}
+ok(appStampText(parseAppVersion(APP)) === `Sagebrush app 0.4.0 · ${CORE.slice(0, 8)}`, "appStampText");
 
 // ---- where the pages put it
 const index = readFileSync(join(here, "index.html"), "utf8");

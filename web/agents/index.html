@@ -343,6 +343,8 @@
   #tasks .tasks-h { font-size: 12px; color: var(--muted); padding: 4px 9px; text-transform: uppercase; letter-spacing: .04em; }
   #tasks .task { min-width: 0; max-width: 100%; gap: 6px; }
   #tasks .task .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  #tasks .away-note { margin: 0 9px 4px; font-size: 12px; color: var(--muted); }
+  #tasks .task.away { opacity: .7; cursor: default; }
   .chip { font-size: 11px; border-radius: 9px; padding: 1px 7px; background: #e8e5db; color: var(--ink); margin-left: auto; flex: none; font-weight: 400; }
   .chip.proposal, .chip.question { background: #f3dcc9; color: #7a2d07; }
   .chip.merged { background: #d8e8d6; color: #24502a; }
@@ -400,7 +402,7 @@
     </div>
     <div id="help" hidden>
       <b>Run this on your computer</b>, then open the link it prints. <a href="/agents/connect/">Learn more</a>
-      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.7.tgz</pre>
+      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.12.tgz</pre>
     </div>
     <div id="log">
       <div id="log-tools" hidden><button id="mirror-copy" type="button" hidden></button><button id="copychat" type="button" title="This chat as Markdown: what you wrote, the agent's answers, a line for each thing it did, and links to its files">⧉ Copy chat</button></div>
