@@ -61,7 +61,8 @@ const jumped = await until(`space3d.feet - space3d.floorY > 1`, 3000);
 const up = await ev(`space3d.feet - space3d.floorY`);
 await key(" ", false, { code: "Space" });
 ok(jumped, "Space jumps", { up });
-ok(await until(`Math.abs(space3d.feet - space3d.floorY) < 0.01`, 3000), "and you land again");
+// (a jump lands over a few drawn frames, and a headless browser draws few, fewer still beside another suite)
+ok(await until(`Math.abs(space3d.feet - space3d.floorY) < 0.01`, 10000), "and you land again");
 const c0 = await settle(), t0 = await ev(`space3d.controls.target.toArray()`);
 await send("Input.dispatchMouseEvent", { type: "mousePressed", x: 300, y: 200, button: "left", clickCount: 1 });
 for (let i = 1; i <= 5; i++) await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 300 + i * 30, y: 200, button: "left", buttons: 1 });

@@ -66,5 +66,5 @@ Instead of objects, a space can carry a whole tree of files: `"tree": { "name": 
 
 ## Tips
 
-- Write the whole space as one file (a few hundred objects are fine; at most 4,000, and 8 MB in all).
+- Write the whole space as one file (a few hundred objects are fine; at most 4,000, and 8 MiB in all, as JSON).
 - For a codebase: one `file` object per file (its text, or its first 200 lines) with its `summary` and `lines`, `group` = its directory or crate, an edge per import or `use`, a `note` per directory or crate explaining it, a few runnable `code` samples `near` what they illustrate, and a few `tours`. A long file can be several objects, one per part.

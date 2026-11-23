@@ -20,7 +20,7 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${server.address().port}/space/`;
 globalThis.location = new URL(base);
-const { LIMITS, checkSpace, readText, sameSite, utf8Bytes } = await import("./src/read.js");
+const { LIMITS, checkSpace, jsonSize, readText, sameSite, utf8Bytes } = await import("./src/read.js");
 const { treeRoom } = await import("./src/treeroom.js");
 const { KEPT, EDIT, keepEdit } = await import("./src/keep.js");
 
@@ -58,6 +58,17 @@ try {
   ok(await refuses(() => checkSpace(sp({ nodes: Array.from({ length: 9 }, (_, i) => ({ id: String(i), text: mib })) })), /too large/), "nine 1 MiB texts, each within the string limit, are refused in all (9 MiB > 8 MiB)");
   ok(checkSpace(sp({ nodes: Array.from({ length: 7 }, (_, i) => ({ id: String(i), text: mib })) })).nodes.length === 7, "seven pass");
   ok(await refuses(() => checkSpace(sp({ nodes: Array.from({ length: 3 }, (_, i) => ({ id: String(i), text: "€".repeat(1 << 20) })) })), /too large/), "the bound is in bytes: three million € (9 MiB in UTF-8, 3 Mi characters) are refused");
+
+  // ---- the whole space's size is its size as compact JSON: every value (numbers, true, false, null too) and every
+  //      structural byte, measured as JSON.stringify writes it
+  const sample = { s: 'q"b\\s\n\t\u0001 € 😀 \ud800', n: [0, -0, 0.1, -12.5e-7, 1e300, Number.MAX_VALUE, -Number.MAX_VALUE, 2 ** 53], b: [true, false, null], o: { "k\"ey": { deep: [[], {}, [1, [2, { x: "y" }]]] } }, e: "" };
+  ok(jsonSize(sample) === utf8Bytes(JSON.stringify(sample)), "its size is exactly compact JSON's, in UTF-8 (escapes, control characters, €, a character beyond the BMP, a lone surrogate, numbers, true/false/null, nesting)", [jsonSize(sample), utf8Bytes(JSON.stringify(sample))]);
+  const surface = (n, pad) => sp({ nodes: [{ id: "p", kind: "plot3d", surface: { z: new Array(n).fill(Number.MAX_VALUE) } }], pad: "x".repeat(pad) });
+  const n = 340000, bare = utf8Bytes(JSON.stringify(surface(n, 0)));
+  const atLimit = surface(n, LIMITS.bytes - bare);
+  ok(utf8Bytes(JSON.stringify(atLimit)) === LIMITS.bytes && checkSpace(atLimit) === atLimit, `a surface of ${n} numbers (Number.MAX_VALUE), padded to exactly 8 MiB as JSON: passes`);
+  ok(await refuses(() => checkSpace(surface(n, LIMITS.bytes - bare + 1)), /too large/), "one byte more: refused");
+  ok(await refuses(() => checkSpace(sp({ z: new Array(350000).fill(Number.MAX_VALUE) })), /too large/), "350,000 numbers alone (8.4 MB as JSON, no strings to speak of): refused");
 
   // ---- a room made from a tree, within the same limits, refused before it is laid out
   const flat = (n, prefix = "") => ({ name: "t", base: "/", files: Array.from({ length: n }, (_, i) => [`${prefix}f${i}.py`, 1]), imports: [] });
