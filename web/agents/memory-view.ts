@@ -407,6 +407,7 @@ export function mountMemoryView(h: MemoryViewHost) {
       if (Object.keys(change).length === 1) return dlg.close();
       ok.disabled = cancel.disabled = true;
       busy.add(n.note);
+      render(); // (the note's own buttons wait too)
       const g = gen;
       try {
         const at = opening;

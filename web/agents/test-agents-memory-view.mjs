@@ -221,12 +221,18 @@ try {
   await P.ev(`(() => { const d = document.querySelector('dialog.memory-edit[open]'); d.querySelector('[name=name]').value = 'plots'; [...d.querySelectorAll('button')].find((b) => b.textContent === 'Save').click(); return true; })()`);
   for (const t = Date.now(); !H.held.length && Date.now() - t < 5000; ) await sleep(50);
   await P.ev(`(document.querySelector('dialog.memory-edit[open]').close(), true)`);
+  const busy8 = await P.ev(`!!document.querySelector('#memory-view [data-act=delete][disabled]')`);
   const m8c = H.held.splice(0)[0];
   H.hold.delete("memory.edit");
   H.refuse(m8c.id, "conflict");
   await P.until(`/already there/.test(document.querySelector('#toast')?.textContent ?? '')`, 5000).catch(() => {});
+  const said8 = await toast(P);
+  // (free again: Delete asks its question, not "wait")
   await P.until(`!!document.querySelector('#memory-view [data-act=delete]:not([disabled])')`, 5000).catch(() => {});
-  ok(/already there/.test(await toast(P)) && (await P.ev(`!!document.querySelector('#memory-view [data-act=delete]:not([disabled])')`)), "V8: a dialog closed while its Save was out: the refusal is still said, and the note's buttons are free again", await toast(P));
+  await P.ev(`(document.querySelector('#memory-view [data-act=delete]').click(), true)`);
+  const asked8 = await P.until(`!!document.querySelector('dialog.memory-dlg[open]')`, 3000).then(() => true, () => false);
+  if (asked8) await P.ev(`([...document.querySelector('dialog.memory-dlg[open]').querySelectorAll('button')].find((b) => b.textContent === 'Cancel').click(), true)`);
+  ok(busy8 && /already there/.test(said8) && asked8, "V8: a dialog closed while its Save was out: the note waits until the answer, the refusal is still said, and the note is free again", { busy8, said8, asked8 });
 
   // ======================================================================== V9: Delete
   // (first its answer can't be read: the id is kept, and Delete again sends the very same request)
