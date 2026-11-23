@@ -2183,7 +2183,8 @@ def paren(obj, args, nargout=1):
             if i == args[0] and 0 < i <= obj.size:
                 x = obj.item(i - 1)
                 tx = type(x)
-                if tx is float or tx is bool:
+                # (item() gives a Python float for a single's element too: that one stays single, _box1)
+                if tx is bool or (tx is float and obj.dtype.itemsize == 8):
                     return x
                 return _box1(x, obj)
         elif n == 2 and obj.ndim == 2 and type(args[0]) is float and type(args[1]) is float:
@@ -2192,7 +2193,7 @@ def paren(obj, args, nargout=1):
             if i == args[0] and j == args[1] and 0 < i <= obj.shape[1] and 0 < j <= obj.shape[0]:
                 x = obj.item(j - 1, i - 1)
                 tx = type(x)
-                if tx is float or tx is bool:
+                if tx is bool or (tx is float and obj.dtype.itemsize == 8):
                     return x
                 return _box1(x, obj)
     if t is Builtin or t is Function or t is Anon or t is Handle:
