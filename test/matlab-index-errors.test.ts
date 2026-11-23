@@ -139,3 +139,18 @@ test("repmat's own size refusals carry MATLAB's size-preference identifier", () 
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.stdout.trim().split("\n"), cases.map((_, i) => `${i}|MATLAB:array:SizeLimitExceeded`));
 });
+
+test("huge cell arrays are refused before they are made, never a crash (#1783)", () => {
+  // (MATLAB R2026b: cell(2^45,1) is pmaxsize, 2^48 bytes at 8 per element; x{2^44} = 1 is out of memory. Below
+  // 2^48 bytes Sagebrush admits a cell array against this host's memory, so the refusal is its memory guard's,
+  // MATLAB:nomem, with its own message; small ones are made as before)
+  const dir = mkdtempSync(join(tmpdir(), "sb-index-errors-"));
+  const cases = ["x = cell(2^45, 1);", "x = {1}; x{2^44} = 1;", "x = cell(2^44, 1);", "x = cell(2^20, 2^20);",
+    "x = {1}; x{2^30} = 1;", "x = cell(1, 3); x{10} = 1; disp(numel(x));"];
+  writeFileSync(join(dir, "main.m"), cases.map((c, i) =>
+    `try, ${c} fprintf('${i}|OK\\n'); catch err, fprintf('${i}|%s\\n', err.identifier); end`).join("\n") + "\n");
+  const r = spawnSync(process.execPath, [cli, "--matlab", "main.m"], { cwd: dir, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.stdout.trim().split("\n").map((s) => s.trim()),
+    ["0|MATLAB:pmaxsize", "1|MATLAB:nomem", "2|MATLAB:nomem", "3|MATLAB:nomem", "4|MATLAB:nomem", "10", "5|OK"]);
+});

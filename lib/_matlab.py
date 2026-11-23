@@ -2418,6 +2418,25 @@ def _refuse_huge(dims, itemsize):
         raise _err("Requested array exceeds the maximum possible variable size.", "MATLAB:pmaxsize")
 
 
+# the bytes Sagebrush spends on one element of a cell array made with empty elements (measured on node: about
+# 430, the empty double each holds and its place in the list)
+_CELL_ELEMENT_BYTES = 512
+
+
+def _admit_cells(n):
+    """a cell array of n elements admitted against this host's memory before any is made: MATLAB's out of
+    memory (the memory guard's refusal, MATLAB:nomem) when it would not fit; where the host's memory can't be
+    measured, nothing is admitted, as for a full matrix (_matlab_sparse.full_arr)"""
+    need = n * _CELL_ELEMENT_BYTES
+    if need <= _sp.SMALL_NEED:
+        return
+    rec = _sp._capacity_record()
+    if _sp.unmeasured_reason(rec) is not None:
+        return
+    import _matlab_ledger
+    _matlab_ledger.Ledger("A cell array of %d elements" % n, "one array", rec=rec).reserve(need, "cells")
+
+
 def _refuse_huge_growth(dims, cur, v):
     """the 2^48-byte refusal for an assignment that grows cur, sized by cur's class before any conversion, as MATLAB
     R2026b sizes it (an int8 array stays int8 whatever is assigned into it; x(2^44) = 1i for a double x is 2^47
@@ -2426,6 +2445,7 @@ def _refuse_huge_growth(dims, cur, v):
     if type(cur) is Cell:
         if _prod(dims) * 8 >= 2 ** 48:
             raise MemoryError()
+        _admit_cells(_prod(dims))
         return
     _refuse_huge(dims, _itemsize(cur) if type(cur) in (np.ndarray, Char) else _itemsize(v))
 
@@ -9732,6 +9752,9 @@ def cell_(*args):
     if any(_istext(a) for a in args):
         raise _err("cell takes sizes only: a text argument is not supported.")
     d, _ = _dimsarg(args, "cell")
+    # (MATLAB's refusal at 2^48 bytes, 8 per element as MATLAB R2026b counts a cell's; below it, this host's memory)
+    _refuse_huge(d, 8)
+    _admit_cells(_prod(d))
     return Cell([_empty_double() for _ in range(_prod(d))], d)
 
 
