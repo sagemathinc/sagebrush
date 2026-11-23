@@ -7,8 +7,8 @@ polynomials are exact and proven (the engine checks a coefficient bound).
 """
 
 import re as _re
-from sagebrush import mf as _mf, ap as _ap
-from sagebrush._engine import call as _call
+from _sagebrush_lib import mf as _mf, ap as _ap
+from _sagebrush_lib._engine import call as _call
 
 
 def _gcd(a, b):
