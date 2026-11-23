@@ -3919,7 +3919,8 @@ class ComplexField_:
         x = re
         if isinstance(x, ComplexNumberMP):
             return ComplexNumberMP(self, R(x._re), R(x._im))
-        if isinstance(x, complex) or type(x).__name__ == "ComplexNumber":
+        if isinstance(x, complex) or type(x).__name__ in ("ComplexNumber", "ComplexDoubleElement"):
+            # (CC, CDF and Python complex: their two doubles; ComplexField(30)(CDF(1, 2)) was a TypeError)
             z = complex(x)
             return ComplexNumberMP(self, R(z.real), R(z.imag))
         s = getattr(x, "_s", None)
