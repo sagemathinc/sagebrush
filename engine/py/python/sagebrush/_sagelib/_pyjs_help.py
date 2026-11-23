@@ -38,12 +38,17 @@ def _function(obj):
                     init = k.__dict__["__init__"]
                     break
         return (init, True) if init is not None and hasattr(init, "__code__") else (None, False)
+    f = getattr(obj, "__func__", None)
+    if f is not None:
+        # (a bound method: its function, or the function that one wraps, without self, as inspect does)
+        w = getattr(f, "__wrapped__", None)
+        if w is not None and hasattr(w, "__code__"):
+            return w, True
+        if hasattr(f, "__code__"):
+            return f, True
     w = getattr(obj, "__wrapped__", None)
     if w is not None and hasattr(w, "__code__"):
         return w, False  # a wrapper shows the function it wraps, as inspect does
-    f = getattr(obj, "__func__", None)
-    if f is not None and hasattr(f, "__code__"):
-        return f, True
     if hasattr(obj, "__code__"):
         return obj, False
     call = getattr(type(obj), "__call__", None)
