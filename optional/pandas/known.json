@@ -447,6 +447,26 @@
       "reason": "pandas fetches a URL itself; Sagebrush's read_csv does no network I/O, and the file must be in the project first"
     },
     {
+      "case": "csv.dtype-uint8",
+      "message": "pandas.read_csv(dtype=uint8) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into the smaller integers (with its overflow and lossy-cast errors); Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype"
+    },
+    {
+      "case": "csv.dtype-dict-int32",
+      "message": "pandas.read_csv(dtype=int32) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into the smaller integers (with its overflow and lossy-cast errors); Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype"
+    },
+    {
+      "case": "csv.dtype-dict-int8",
+      "message": "pandas.read_csv(dtype=int8) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into the smaller integers (with its overflow and lossy-cast errors); Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype"
+    },
+    {
+      "case": "csv.dtype-dict-uint16",
+      "message": "pandas.read_csv(dtype=uint16) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into the smaller integers (with its overflow and lossy-cast errors); Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype"
+    },
+    {
       "case": "dt.series-values",
       "message": "pandas.Series.values of a datetime64[us] column (Sagebrush's numpy has no datetime64 yet) is not in Sagebrush's pandas 0.x subset",
       "reason": "Sagebrush's numpy has no datetime64 yet, which pandas returns here; the datetime column is kept as int64 microseconds internally and refuses rather than hand out those ints or another type (PR A; a numpy datetime64 can replace the internals later)"

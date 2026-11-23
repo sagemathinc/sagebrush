@@ -292,3 +292,11 @@
 !! NotImplementedError: read_excel from a URL isn't supported; download the file into the project first
 == csv.url-nothing-opened
 []
+== csv.dtype-uint8
+!! NotImplementedError: pandas.read_csv(dtype=uint8) is not in Sagebrush's pandas 0.x subset
+== csv.dtype-dict-int32
+!! NotImplementedError: pandas.read_csv(dtype=int32) is not in Sagebrush's pandas 0.x subset
+== csv.dtype-dict-int8
+!! NotImplementedError: pandas.read_csv(dtype=int8) is not in Sagebrush's pandas 0.x subset
+== csv.dtype-dict-uint16
+!! NotImplementedError: pandas.read_csv(dtype=uint16) is not in Sagebrush's pandas 0.x subset

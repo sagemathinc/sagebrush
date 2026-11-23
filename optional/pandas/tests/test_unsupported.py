@@ -183,3 +183,8 @@ try:
 finally:
     builtins.open = real_open
 case("csv.url-nothing-opened", lambda: opened)
+# (the smaller integers and float32 as read_csv's dtype: pandas parses into them; refused rather than mis-built)
+case("csv.dtype-uint8", lambda: rc("a,b\n1,2\n", dtype="uint8"))
+case("csv.dtype-dict-int32", lambda: rc("a,b\n1,2\n", dtype={"b": "int32"}))
+case("csv.dtype-dict-int8", lambda: rc("a,b\n1,2\n", dtype={"a": np.int8}))
+case("csv.dtype-dict-uint16", lambda: rc("a,b\n1,2\n", dtype={"a": "uint16"}))
