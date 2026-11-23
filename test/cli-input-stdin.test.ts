@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -61,6 +61,26 @@ test("a byte order mark is kept, as CPython's stdin keeps it: at the start, and 
   const split = Buffer.concat([Buffer.alloc(65535, "a"), bom, Buffer.from("z\n")]);
   assert.equal(run(["-c", "x = input(); print(len(x), repr(x[-3:]))"], split).stdout, "65537 'a\\ufeffz'\n");
 });
+
+// (a slow writer: the line comes a second after the program starts waiting; the wait must sleep in the read, not spin
+// on a non-blocking pipe, which opening process.stdin in the CLI would make it: CPU time well under the second)
+function slowPipe(code: string): Promise<string> {
+  return new Promise((done, fail) => {
+    const p = spawn(process.execPath, [CLI, "-c", code], { stdio: ["pipe", "pipe", "pipe"] });
+    let out = "", err = "";
+    p.stdout.on("data", (b) => (out += b));
+    p.stderr.on("data", (b) => (err += b));
+    p.on("error", fail);
+    p.on("close", () => (err ? fail(new Error(err)) : done(out)));
+    setTimeout(() => p.stdin.end("late\n"), 1500);
+  });
+}
+for (const [what, call] of [["input()", "input()"], ["sys.stdin.readline()", "sys.stdin.readline()"], ["sys.stdin.read()", "sys.stdin.read()"]]) {
+  test(`${what} waiting for a slow pipe sleeps: CPU time under 0.5 s while it waits 1.5 s`, async () => {
+    const out = await slowPipe(`import sys, time\nt = time.process_time()\nx = ${call}\nprint(repr(x), time.process_time() - t < 0.5)`);
+    assert.match(out, /^'late(\\n)?' True\n$/);
+  });
+}
 
 test("Sage mode reads it too", () => {
   assert.equal(run(["--sage", "-c", "n = Integer(input('n? ')); print(n^2)"], "12\n").stdout, "n? 144\n");
