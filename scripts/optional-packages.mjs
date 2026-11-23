@@ -267,6 +267,8 @@ export function lintPackage(pkg, api, others = []) {
   const foreignModule = (name) => foreign.has(name) && !own.has(name);
   const prefix = pkg.manifest.private_prefix;
   const coreModule = (name) => Object.hasOwn(api.modules, name);
+  // (a reference waiver names its target exactly: one without a target waives nothing)
+  const referenceWaiver = (file, line, target) => pkg.declarations.some((d) => d.file === file && d.line === line && d.construct === "reference" && d.target === target);
   const declaration = (file, line, construct, target) => pkg.declarations.find((d) => d.file === file && d.line === line && d.construct === construct && (d.target === undefined || d.target === target));
   // (a declared dynamic access waives its finding and is a use of the core
   // name it reaches, "access" (else its target), in its stated call form,
@@ -428,7 +430,7 @@ export function lintPackage(pkg, api, others = []) {
     const l = useLevel(api, u);
     if (l === null) {
       // (a reviewed declaration may waive it, as it may the other findings: one exact line and target)
-      if (!u.target.startsWith("*.") && !u.declared && !declaration(u.file, u.line, "reference", u.target)) findings.push({ file: u.file, line: u.line, construct: "reference", target: u.target, message: `${u.target} is not in the Core API (core-api-surface.json)` });
+      if (!u.target.startsWith("*.") && !u.declared && !referenceWaiver(u.file, u.line, u.target)) findings.push({ file: u.file, line: u.line, construct: "reference", target: u.target, message: `${u.target} is not in the Core API (core-api-surface.json)` });
     } else level = Math.max(level, l);
   }
   return { findings, uses, level };

@@ -48,7 +48,7 @@ Optional packages are **reviewed first-party code**. `scripts/optional-packages.
 
 A package-private attribute on anything but `self`/`cls` starts with the package's `private_prefix`.
 
-A reviewed exception is one entry in `contract-declarations.json`: `{file, line, construct, target, reason}`, plus, for a dynamic access, `access` (the core name it reaches) and `call` (the parameter names it passes). A `reference` to a core name outside the Core API is waived the same way, one exact line and target. A declared access counts as a use of `access`, at the level of the parameters in `call`. Without `call`, it takes that name's highest parameter level.
+A reviewed exception is one entry in `contract-declarations.json`: `{file, line, construct, target, reason}`, plus, for a dynamic access, `access` (the core name it reaches) and `call` (the parameter names it passes). A `reference` to a core name outside the Core API is waived the same way, by one exact file, line and target: a reference declaration names its target, and one without a target waives nothing. A declared access counts as a use of `access`, at the level of the parameters in `call`. Without `call`, it takes that name's highest parameter level.
 
 **The lint computes the package's `core_req`:** the highest level its uses need, including the levels of the parameters its calls pass. An older engine refuses a set that needs more.
 

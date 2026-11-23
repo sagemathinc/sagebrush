@@ -115,6 +115,7 @@ test("a package uses the packages it requires, at their exact ids, never their p
     ["import dep\ny = dep._hidden\n", "attribute", "_hidden"],
     ["from dep import sub\ny = sub._dp_state\n", "attribute", "_dp_state"],
     ["import dep\ndep.Thing = None\n", "monkeypatch", "Thing"],
+    ["from dep import *\n", "import", "dep.*"],
   ] as [string, string, string][]) {
     const line = src.split("\n").length - 1;
     const found = lint(src, undefined, declareAll(line, construct, target));
@@ -126,6 +127,10 @@ test("a package uses the packages it requires, at their exact ids, never their p
   assert.deepEqual(lint(ref, [], declareAll(2, "reference", "numpy.random.rand.__self__")), []);
   assert.ok(lint(ref, [], declareAll(1, "reference", "numpy.random.rand.__self__")).some((f: any) => f.construct === "reference"));
   assert.ok(lint(ref, [], declareAll(2, "reference", "numpy.random.randint")).some((f: any) => f.construct === "reference"));
+  // (a reference waiver without a target, or with another construct, waives nothing)
+  assert.ok(lint(ref, [], [{ file: "py/fixture.py", line: 2, construct: "reference", reason: "probe" }]).some((f: any) => f.construct === "reference"));
+  assert.ok(lint(ref, [], declareAll(2, "name", "numpy.random.rand.__self__")).some((f: any) => f.construct === "reference"));
+  assert.ok(lint(ref, [], [{ file: "py/other.py", line: 2, construct: "reference", target: "numpy.random.rand.__self__", reason: "probe" }]).some((f: any) => f.construct === "reference"));
 });
 
 test("requirements come from the call forms used (§6.2–6.3): a new keyword raises the level, the old call doesn't", async () => {
