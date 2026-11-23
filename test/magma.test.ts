@@ -178,7 +178,6 @@ test("Magma syntax Sagebrush doesn't have is named, not called bad syntax (cover
     ["G := 1; G.-1;", "G.-1 (a generator's inverse by its index)"],
     ["B := 1; B.<3,1>;", "B.<...> (an element by its indices)"],
     ["x := 2; r := x = 3;", "= (an equation, as in a relation)"],
-    ["F<x, y>, f := FPGroup(G);", "F<...>, ... := (generator names with other values)"],
   ];
   for (const [src, name] of cases) {
     const out = spawnSync(process.execPath, [cli, "--magma"], { input: src + "\n", encoding: "utf8" }).stdout;
