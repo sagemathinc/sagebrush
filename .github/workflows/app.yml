@@ -399,7 +399,13 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.SAGEBRUSH_MACOS_SIGN_ID }}
           APPLE_API_KEY: ${{ secrets.SAGEBRUSH_APPLE_NOTARY_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.SAGEBRUSH_APPLE_NOTARY_ISSUER_ID }}
-        run: APPLE_API_KEY_PATH="$SAGEBRUSH_NOTARY_KEY" tauri build --ci --bundles app -- --locked
+        # (only this job's build may enroll as native, N1: SAGEBRUSH_SIGNED_BUILD and the team id from the identity's
+        # "(TEAMID)" are compiled in; at run time the app checks its own code is signed by that team, src/device_key.rs)
+        run: |
+          team=$(printf '%s' "$APPLE_SIGNING_IDENTITY" | sed -n 's/.*(\([A-Z0-9]\{10\}\))$/\1/p')
+          [ -n "$team" ] || { echo "The signing identity doesn't end in a team id" >&2; exit 1; }
+          echo "SAGEBRUSH_TEAM_ID=$team" >> "$GITHUB_ENV"
+          SAGEBRUSH_SIGNED_BUILD=1 SAGEBRUSH_TEAM_ID="$team" APPLE_API_KEY_PATH="$SAGEBRUSH_NOTARY_KEY" tauri build --ci --bundles app -- --locked
       # (the engine's Node runs V8, which needs the JIT entitlements in the signature Tauri gave it, each the boolean
       # true: a key that is false or absent fails.  Checked after the Tauri build and before the separate DMG
       # notarization step and the app's self-test, so a mis-signed engine fails there and says why;
@@ -461,6 +467,7 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app"
           codesign -d --verbose=2 "$app" 2>&1 | grep -E '^(Authority|TeamIdentifier|Runtime Version|Timestamp)='
           codesign -d --verbose=2 "$app" 2>&1 | grep -q 'flags=.*runtime' || { echo "FAIL: the app isn't signed with the hardened runtime" >&2; exit 1; }
+          codesign -d --verbose=2 "$app" 2>&1 | grep -qx "TeamIdentifier=$SAGEBRUSH_TEAM_ID" || { echo "FAIL: the app isn't signed by the team compiled into it" >&2; exit 1; }
           spctl --assess --type execute --verbose=4 "$app"
           xcrun stapler validate "$app"
           spctl --assess --type open --context context:primary-signature --verbose=4 "$SAGEBRUSH_DMG"
