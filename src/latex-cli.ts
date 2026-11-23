@@ -66,8 +66,9 @@ const HELP = `sagebrush latex: check, run and see a .tex file as Sagebrush's LaT
       CHROME=/path/to/browser); nothing is installed. --steps: each frame at each of its overlay steps
       (\\pause, <2->, \\only, \\uncover), frame-02-1.png, frame-02-2.png, ..., as the editor's Present shows them.
       --pdf: the preview printed to a PDF by the same browser (a beamer document one page per frame).
-      With --png or --pdf, a display wider than the text is reported as a warning (TeX's Overfull \\hbox);
-      printed, it runs on into the margin.
+      In a document that isn't beamer's, --png or --pdf reports each display more than 1px wider than the
+      text (up to 50) as a warning (TeX's Overfull \\hbox), its line found from the start of its TeX where it
+      can be; printed, such a display runs on into the margin. (A beamer frame's overflow is its PNG's report.)
 
 Look at the PNGs after every change: they are what the reader sees.
 `;
