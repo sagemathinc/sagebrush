@@ -347,7 +347,7 @@
     "kind": "function",
     "signature": "Y = sinpi(X)",
     "summary": "sin(pi*x), exact at the integers and half-integers.",
-    "doc": "Computed after reducing `x` exactly modulo 2, so `sinpi(n)` is a zero for every integer `n` (of `x`'s sign: `sinpi(-0)` is `-0`) and `sinpi(n + 1/2)` is exactly $\\pm 1$. In between, every double result is correctly rounded (`sinpi(0.25) == sqrt(2)/2` is true). Inf and NaN give NaN.",
+    "doc": "Computed after reducing `x` exactly modulo 2, so `sinpi(n)` is a zero for every integer `n` (of `x`'s sign: `sinpi(-0)` is `-0`) and `sinpi(n + 1/2)` is exactly $\\pm 1$. In between, every double result is correctly rounded (`sinpi(0.25) == sqrt(2)/2` is true); MATLAB's results can differ from these by one ulp. Inf and NaN give NaN.",
     "examples": [
       {
         "code": "sinpi([0 0.5 1 1.5 1/6])",
@@ -371,7 +371,7 @@
     "kind": "function",
     "signature": "Y = cospi(X)",
     "summary": "cos(pi*x), exact at the integers and half-integers.",
-    "doc": "Computed after reducing `x` exactly modulo 2, so `cospi(n)` is exactly $\\pm 1$ for every integer `n` and `cospi(n + 1/2)` is exactly 0. In between, every double result is correctly rounded. Inf and NaN give NaN.",
+    "doc": "Computed after reducing `x` exactly modulo 2, so `cospi(n)` is exactly $\\pm 1$ for every integer `n` and `cospi(n + 1/2)` is exactly 0. In between, every double result is correctly rounded; MATLAB's results can differ from these by one ulp. Inf and NaN give NaN.",
     "examples": [
       {
         "code": "cospi([0 0.5 1 1/3])",

@@ -358,7 +358,14 @@ def _sincospi_small(t):
     sh, sl = _dd_series(zh, zl, _SIN_DD)
     sh, sl = _dd_mul(sh, sl, yh, yl)
     ch, cl = _dd_series(zh, zl, _COS_DD)
-    s = np.where(tiny, yh * 2.0 ** -600 + yl * 2.0 ** -600, sh + sl)
+    # (scaled back by 2^-600: exact for a normal result; for a subnormal one, yh's rounding is the only rounding
+    # unless the residual (the part of yh it dropped, which is exact, plus yl) passes half the subnormal ulp, 2^-1075:
+    # then one ulp, 2^-1074, toward it)
+    r1 = yh * 2.0 ** -600
+    t = (yh - r1 * 2.0 ** 600) + yl
+    sub = np.abs(r1) <= 2.0 ** -1022
+    r1 = np.where(sub & (t > 2.0 ** -475), r1 + 5e-324, np.where(sub & (t < -(2.0 ** -475)), r1 - 5e-324, r1))
+    s = np.where(tiny, r1, sh + sl)
     c = np.where(tiny, 1.0, ch + cl)
     return s, c
 
@@ -366,7 +373,8 @@ def _sincospi_small(t):
 @_bs("sinpi")
 def sinpi_(x):
     """sin(pi*x), exact at the integers (a zero of x's sign: sinpi(-0) is -0, MATLAB's) and the half-integers (+-1),
-    and correctly rounded in double in between, as MATLAB's (sinpi(0.25) == sqrt(2)/2)"""
+    and correctly rounded in double in between (sinpi(0.25) == sqrt(2)/2); MATLAB's results can differ from these by
+    one ulp"""
     M = _real_float(x, "sinpi")
     with np.errstate(invalid="ignore", over="ignore"):
         r = _pi_reduce(M)
@@ -382,8 +390,8 @@ def sinpi_(x):
 
 @_bs("cospi")
 def cospi_(x):
-    """cos(pi*x), exact at the integers (+-1) and the half-integers (+0), and correctly rounded in double in between,
-    as MATLAB's"""
+    """cos(pi*x), exact at the integers (+-1) and the half-integers (+0), and correctly rounded in double in between;
+    MATLAB's results can differ from these by one ulp"""
     M = _real_float(x, "cospi")
     with np.errstate(invalid="ignore", over="ignore"):
         r = _pi_reduce(M)
