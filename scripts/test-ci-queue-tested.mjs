@@ -168,6 +168,43 @@ for (const files of [["src/compile.ts"], ["web/notebook/x.ts"], ["engine/poly/sr
   }
   n += 6;
 }
+// ---- PR CI light (CI_PR_LIGHT, the repository variable PR_CI_LIGHT): a pull request runs only checks, the size gate
+// with its size-base, and the modules' build when it needs one; queue groups, pushes and a full-ci label are untouched
+{
+  const pr = (files, env = {}) => paths("pull_request", files, { GITHUB_REF: "refs/pull/1/merge", ...env });
+  const PR = { event_name: "pull_request", ref: "refs/pull/1/merge", repository: REPO };
+  const LIGHT = ["changes", "checks", "ci", "size-base", "size-gate"];
+  for (const files of [["src/compile.ts"], ["web/notebook/x.ts"], ["src/a.ts", "web/board/b.ts", "magma-tests/x.m"], ["engine/poly/src/lib.rs"], ["engine/mp/src/c.rs", "src/x.ts"]]) {
+    const off = pr(files), on = pr(files, { CI_PR_LIGHT: "true" });
+    assert.equal(on.pr_light, "true", files.join());
+    // (checks and size-base where checks would have run anyway; a Rust-only change never ran them and still doesn't: its
+    // engine suites are left to the merge_group run, like every other suite)
+    const checks = [off.node, off.web, off.size_inputs].includes("true");
+    const want = [...(checks ? LIGHT : ["changes", "ci", "size-gate"]), ...(off.wasm_build === "true" ? ["wasm-modules"] : [])].sort();
+    assert.deepEqual([...runSet(on, PR)].sort(), want, `${files.join()}: light runs only checks, the size gate and the modules' build`);
+    assert.ok(runSet(off, PR).size > want.length, `${files.join()}: off, the full PR set`);
+    // (the switch off, unset or anything but "true": exactly the outputs of no switch)
+    for (const v of ["false", "1", "TRUE", ""]) assert.deepEqual(pr(files, { CI_PR_LIGHT: v }), { ...off }, `${files.join()}: CI_PR_LIGHT=${JSON.stringify(v)}`);
+    // (full-ci asks for everything: light doesn't apply)
+    const label = pr(files, { CI_PR_LIGHT: "true", CI_PR_LABELS: "full-ci" });
+    assert.equal(label.pr_light, "false");
+    assert.deepEqual(label, pr(files, { CI_PR_LABELS: "full-ci" }));
+    n += 5;
+  }
+  // (a docs-only pull request: light changes nothing it runs)
+  assert.deepEqual([...runSet(pr(["design/x.md"], { CI_PR_LIGHT: "true" }), PR)].sort(), [...runSet(pr(["design/x.md"]), PR)].sort());
+  // (never a queue group, a push or a track push: the full set, whatever the switch says)
+  for (const [event, gh] of [["merge_group", github("merge_group")], ["push", github("push")]]) {
+    const o = paths(event, ["src/compile.ts"], { CI_PR_LIGHT: "true" });
+    assert.equal(o.pr_light, "false", event);
+    assert.deepEqual([...runSet(o, gh)].sort(), [...runSet(paths(event, ["src/compile.ts"]), gh)].sort(), event);
+  }
+  assert.equal(paths("push", ["src/x.ts"], { CI_PR_LIGHT: "true", GITHUB_REF: "refs/heads/track/math" }).full, "true");
+  // (ci.yml passes the variable to ci-paths, and nothing else reads it)
+  assert.match(yml, /\n          CI_PR_LIGHT: \$\{\{ vars\.PR_CI_LIGHT \}\}\n/);
+  assert.equal((yml.match(/PR_CI_LIGHT/g) ?? []).length, 1, "the env line only");
+  n += 5;
+}
 // (a track push, or a dispatch on master, ignores CI_QUEUE_TESTED: the full set)
 const track = paths("push", ["src/x.ts"], { CI_QUEUE_TESTED: "true", GITHUB_REF: "refs/heads/track/math" });
 assert.equal(track.queue_tested, "false");

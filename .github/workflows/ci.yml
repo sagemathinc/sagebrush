@@ -112,6 +112,8 @@ jobs:
         name: classify changed paths and select the tier
         env:
           CI_QUEUE_TESTED: ${{ steps.queue.outputs.queue_tested }}
+          # (PR CI light: William's repository switch, off unless exactly "true"; scripts/ci-paths.mjs prLight)
+          CI_PR_LIGHT: ${{ vars.PR_CI_LIGHT }}
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
           CI_PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
           # (a dispatch's long input: the long tier, scripts/ci-paths.mjs)
