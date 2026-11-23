@@ -70,9 +70,8 @@ let resident = "";
 
 // (no room in a module's memory: its grow refused, past wasm32's 4 GiB or more than the computer could give: each kernel
 //  below answers "use JavaScript" (null or false), as it does below its size, and its caller computes in JavaScript; a
-//  computation the JavaScript path can make is never refused for a kernel's sake: engine cost policy r2.
-//  engine/nd's products and factorizations, src/runtime/nd.ts, too: their callers take the same
-//  test)
+//  computation the JavaScript path can make is never refused for a kernel's sake (engine cost policy r2),
+//  including engine/nd's products and factorizations in src/runtime/nd.ts: their callers take the same test)
 export const noRoom = (e: unknown) => e instanceof RangeError && /WebAssembly\.Memory\.grow|failed to grow memory/.test(e.message);
 // Make room for `doubles` float64s at the scratch base; returns the views
 // (valid until the next reserve).
