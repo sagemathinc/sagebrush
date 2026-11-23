@@ -12,7 +12,7 @@ import * as FD from "./fdlibm";
 import * as CR from "./crmath";
 import * as PG from "./pygamma";
 import { floatRepr, intDigits } from "./format";
-import { heapLimit } from "./heap";
+import { admitHeap, heapLimit } from "./heap";
 
 export const sysModules = new PyDict();
 const factories: Record<string, (m: any) => void> = Object.create(null);
@@ -1821,18 +1821,22 @@ export class MT {
     } while (v > 0n);
     this.initByArray(key);
   }
-  getrandbits(k: number): number | bigint {
+  getrandbits(k: number, shown: string = String(k)): number | bigint {
     if (k < 0) raise(T.ValueError, "number of bits must be non-negative");
     if (k === 0) return 0;
     if (k <= 32) return this.genrand() >>> (32 - k);
-    let r = 0n, shift = 0n;
-    for (let left = k; left > 0; left -= 32) {
+    // (CPython's words, least significant first, the last one's top bits; made one int at once from their hex, not
+    // OR-ed in one at a time, which copied the growing int at each word: k = 2^20 took 0.4 s)
+    const n = Math.ceil(k / 32);
+    // (the words, their hex and the int: about 5/8 of a byte per bit)
+    admitHeap(Math.ceil((k * 5) / 8), `getrandbits(${shown})`);
+    const hex: string[] = new Array(n);
+    for (let i = 0, left = k; i < n; i++, left -= 32) {
       let w = this.genrand();
       if (left < 32) w >>>= 32 - left;
-      r |= BigInt(w) << shift;
-      shift += 32n;
+      hex[n - 1 - i] = (w >>> 0).toString(16).padStart(8, "0");
     }
-    return O.normBig(r);
+    return O.normBig(BigInt("0x" + hex.join("")));
   }
 }
 
@@ -1844,7 +1848,14 @@ newBuiltinModule("_random", (m) => {
   });
   Ty.method(RandomType, "seed", (r: MT, x: any = null) => (r.seed(x), null));
   Ty.method(RandomType, "random", (r: MT) => O.mkfloat(r.random()));
-  Ty.method(RandomType, "getrandbits", (r: MT, k: any) => r.getrandbits(Number(k)));
+  // (k an index, as CPython's uint64_t argument: a float or a str a TypeError, a negative one or one past 64 bits a
+  // ValueError or OverflowError in its words; a large one a MemoryError, getrandbits's admission)
+  Ty.method(RandomType, "getrandbits", (r: MT, k: any) => {
+    const i = O.index(k);
+    if (i < 0) raise(T.ValueError, "Cannot convert negative int");
+    if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, "Python int too large for C uint64_t");
+    return r.getrandbits(Number(i), String(i));
+  });
   Ty.method(RandomType, "getstate", (r: MT) => tuple([3, tuple([...r.mt, r.mti]), null]));
   Ty.method(RandomType, "setstate", (r: MT, st: any) => {
     const inner = O.toArray(st[1]);
