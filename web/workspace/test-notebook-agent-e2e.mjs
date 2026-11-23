@@ -465,7 +465,17 @@ try {
     await send("Page.reload");
     await sleep(300);
     ok(await until("!window.__old && !!window.sagebrush?.workspace", 60000), "(the tab reloads)");
+    const readyBy = Date.now() + 20000;
     ok(await until(`!!document.querySelector(".sbag-bar")`, 20000) && !(await ev(`!!document.querySelector(".sbag-box")`)), "after a reload of the tab, the agent is back by itself: its bar, and no Connect or Allow", await ev(`document.querySelector(".sbag-box")?.textContent ?? ""`).catch(() => ""));
+    // The bar is local: grant.changed may still be in transit. Use the remaining reconnect budget to observe
+    // server readiness before the ONE call under test, rather than retrying that call or sleeping for a guess.
+    let ready;
+    while (Date.now() < readyBy) {
+      ready = await drive({ op: "status" });
+      if (ready.ok?.paired === true && ready.ok?.granted === true) break;
+      await sleep(100);
+    }
+    ok(ready?.ok?.paired === true && ready.ok?.granted === true, "after the reload, the server has received the restored grant", ready);
     const lr = await drive({ op: "req", method: "workspace.list", params: { folder: "/" } });
     ok(Array.isArray(lr.ok?.entries), "…and the agent's next call works", JSON.stringify(lr).slice(0, 200));
     // (this tab's record of that live pairing, exactly as the page keeps it)
