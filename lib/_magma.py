@@ -7511,12 +7511,49 @@ _CALLPOS = []
 
 
 def _call(pos, f, *args, **kw):
-    """f(*args, **kw), made at pos (the "(" of the call in the source)."""
+    """f(*args, **kw), made at pos (the "(" of the call in the source).  Only
+    what Magma can call is called: a function or procedure (the user's or an
+    intrinsic), a map, and a tuple as a product of cycles, (1, 2)(3, 4)
+    (_magma_callable); anything else (an integer, a sequence, a matrix, a
+    structure, a polynomial: Magma's map application isn't defined for it) is
+    refused there, in Magma 2.18-5's words: with one argument "Bad argument
+    types" and its types (the argument's, then the value's), else "Attempting
+    to call something that is not callable"."""
+    if not _magma_callable(f):
+        if len(args) == 1 and not kw:
+            raise MagmaError("Bad argument types\nArgument types given: %s, %s" % (_ext_type(args[0]), _ext_type(f)), None, True, pos)
+        raise MagmaError("Attempting to call something that is not callable", None, True, pos)
     _CALLPOS.append((pos, getattr(f, "__name__", None)))
     try:
         return f(*args, **kw)
     finally:
         _CALLPOS.pop()
+
+
+# (what Magma can call: functions, Python's and builtins, bound methods, classes (intrinsics made as classes),
+# forward cells, maps, and tuples and their products as cycles)
+_CALLABLE_TYPES = (type(lambda: 0), type(len), type(_Cell("f").get), type, _Cell, _CellCall, MMap, MTuple, _MCycles)
+
+
+def _magma_callable(f):
+    return isinstance(f, _CALLABLE_TYPES)
+
+
+def _call_bare(pos, f, *args, **kw):
+    """_call, the call being a whole expression statement, f(3);, where Magma
+    2.18-5 names its errors: "Runtime error in '@': Bad argument types", and
+    "Runtime error in procedure call: Attempting to call something that is
+    not callable" (inside anything else, no name)."""
+    try:
+        return _call(pos, f, *args, **kw)
+    except MagmaError as e:
+        if e.pos == pos and e.where is None:
+            if str(e).startswith("Bad argument types"):
+                e.where = "'@'"
+            elif str(e) == "Attempting to call something that is not callable":
+                # (with no empty line after it, as Magma's)
+                e.where, e.blank = "procedure call", False
+        raise
 
 
 def _located(name):
