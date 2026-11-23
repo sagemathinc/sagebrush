@@ -41,6 +41,7 @@ import { entryUrl } from "../workspace/entry-url";
 import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-chat/transcript";
 import { DelegateTasks } from "./delegate";
 import { memoryHooks } from "./memory-ui";
+import { mountMemoryView } from "./memory-view";
 import { listTags, tagName } from "./memory-tags";
 import { mountDelegate } from "./delegate-ui";
 import { ownClaudeCommand } from "./own-claude";
@@ -283,6 +284,7 @@ let mirrorDeleting = false;
 async function openMirror(c: RemoteConversation) {
   // (a task's view shown: it gives the main pane to the mirrored conversation, closed first, as a thread's click does)
   if (delegateUi.showing() !== null) delegateUi.close();
+  if (memoryView.showing()) memoryView.close();
   if (!mirrorOpen && !(await mayLeaveThread())) return;
   const r = await mirror.readConversation(c.conversation).catch(() => null);
   // (a task opened while the conversation was read: the person's later choice stands)
@@ -367,6 +369,7 @@ function renderSidebar() {
     a.onclick = async () => {
       // (a task's view shown: back to the chats, this one)
       if (delegateUi.showing() !== null) delegateUi.close();
+      if (memoryView.showing()) memoryView.close();
       if (t.id === state.current && !mirrorOpen) return;
       if (!mirrorOpen && !(await mayLeaveThread())) return;
       closeMirror();
@@ -1349,6 +1352,7 @@ const delegateUi = mountDelegate({
   // (a task shown takes the main pane from a mirrored conversation too: the mirror closes, as when a thread is opened)
   shown: (on) => {
     document.body.classList.toggle("task-shown", on);
+    if (on && memoryView.showing()) memoryView.close();
     if (on && mirrorOpen) { closeMirror(); renderAll(); }
     if (!on) renderAll();
   },
@@ -1359,6 +1363,18 @@ const delegateUi = mountDelegate({
   // (Merge: this browser's workspace, and the agent's record of it)
   merge: workspaceIO(() => workspace, (task, params) => delegateTasks.merged(task, params), /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? async (op, path) => { if (typeof (window as any).__mergeSeam === "function") await (window as any).__mergeSeam(op, path); } : undefined),
   session: sessionStorage,
+});
+// (agent memory v1: the Memory view, in place of the chat as a task's view is; memory-view.ts)
+const memoryView = mountMemoryView({
+  pairing: () => pairing,
+  agent: agentName,
+  toast,
+  shown: (on) => {
+    document.body.classList.toggle("memory-shown", on);
+    if (on && delegateUi.showing() !== null) delegateUi.close();
+    if (on && mirrorOpen) { closeMirror(); renderAll(); }
+    if (!on) renderAll();
+  },
 });
 // (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with
 //  its files, as the file panel's switch opens this page; William, Nov 12)
@@ -1395,6 +1411,7 @@ $("#files-big").prepend(filesIcon());
 $("#files-big").onclick = () => void toFiles();
 $("#new").onclick = async () => {
   if (delegateUi.showing() !== null) delegateUi.close();
+  if (memoryView.showing()) memoryView.close();
   // (from a mirrored conversation: nothing of this browser's to leave; it closes)
   if (!mirrorOpen && !(await mayLeaveThread())) return;
   closeMirror();
@@ -1711,6 +1728,7 @@ function mountPairing(ws: Workspace) {
     onPairing(p) {
       pairing = p;
       renderThread(); // (memory cards: the pairing they came on is no longer this one)
+      memoryView.changed();
       delegateTasks.attach(p);
       cards.clear();
       // (only while this pairing is the page's: a late message from one it replaced changes nothing; the replaced
@@ -1722,6 +1740,7 @@ function mountPairing(ws: Workspace) {
       let drawnHello: unknown = null;
       p.onChange(() => {
         cards.refresh(); // (a pairing that closed or changed child: Allows waiting for a digest for it go)
+        memoryView.changed();
         // (memory cards take a decision only while their connection is here: drawn again as it comes and goes)
         //  (and when a runner's agent process changes under the same pairing: another hello)
         if (pairing === p && (p.state !== drawnState || p.hello !== drawnHello) && (p.state === "granted" || p.state === "closed")) { drawnState = p.state; drawnHello = p.hello; renderThread(); }

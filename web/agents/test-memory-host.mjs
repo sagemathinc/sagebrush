@@ -11,7 +11,8 @@
 //   - Limits as §7.2: UTF-8 bytes with the metadata (name, description and scope count with the body).
 // Controls for the rows: H.memory.propose(...) (as the model's memory_propose would, emitting memory_proposal on a
 // turn), H.memory.used(...), H.memory.outside(note) (an edit made outside Sagebrush), H.memory.secret (a substring the
-// scan refuses), H.memory.full (the store refuses saves).
+// scan refuses), H.memory.full (the store refuses saves), H.memory.usageBytes (the use memory.list reports, for the
+// view's warnings).
 const enc = new TextEncoder();
 const hex = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => b.toString(16).padStart(2, "0")).join("");
 const bytes = (s) => enc.encode(s).length;
@@ -106,7 +107,7 @@ export function memoryHost(H, { now = () => Date.now() } = {}) {
         all.sort((a, b) => (a.note < b.note ? -1 : 1));
         if (p.after) all = all.filter((n) => n.note > p.after);
         const page = all.slice(0, MEMORY_LIMITS.listPage);
-        return { notes: page.map(view), next: all.length > page.length ? page.at(-1).note : null, usage: { bytes: used(), limit: MEMORY_LIMITS.store }, path: "/home/person/.local/share/sagebrush-agent/memory" };
+        return { notes: page.map(view), next: all.length > page.length ? page.at(-1).note : null, usage: { bytes: M.usageBytes ?? used(), limit: MEMORY_LIMITS.store }, path: "/home/person/.local/share/sagebrush-agent/memory" };
       }
       case "memory.get": {
         const n = M.notes.get(p.note);

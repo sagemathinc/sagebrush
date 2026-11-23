@@ -148,9 +148,9 @@
   .memory-card .mem-actions { display: flex; gap: 8px; margin-top: 8px; }
   .memory-card .mem-state { font-size: 13px; margin-top: 6px; color: var(--muted); }
   .memory-card.saved .mem-state { color: var(--ok); }
-  dialog.memory-edit { border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; width: min(560px, 92vw); }
-  dialog.memory-edit label { display: block; margin: 8px 0; font-size: 13px; }
-  dialog.memory-edit input, dialog.memory-edit textarea, dialog.memory-edit select { display: block; width: 100%; box-sizing: border-box; margin-top: 3px; font: inherit; }
+  dialog.memory-edit, dialog.memory-dlg { border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; width: min(560px, 92vw); }
+  dialog.memory-edit label, dialog.memory-dlg label { display: block; margin: 8px 0; font-size: 13px; }
+  dialog.memory-edit input, dialog.memory-edit textarea, dialog.memory-edit select, dialog.memory-dlg input { display: block; width: 100%; box-sizing: border-box; margin-top: 3px; font: inherit; }
   dialog.memory-edit menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; margin: 12px 0 0; }
   .avatar { color: var(--accent); font-size: 16px; }
   .demo { font-weight: 400; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 0 6px; }
@@ -333,6 +333,33 @@
 <style id="delegate-styles">
   /* Delegate (delegate-ui.ts): the switch, the Tasks list and its chips, a task's view in place of the chat, the sheet */
   body.task-shown #log, body.task-shown .composer-wrap .composer { display: none; }
+  /* Memory (memory-view.ts): its button above Files…, and its view in place of the chat, as a task's is */
+  body.memory-shown #log, body.memory-shown .composer-wrap .composer { display: none; }
+  nav.side #memory-btn { display: flex; align-items: center; width: 100%; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: inherit; font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+  nav.side #memory-btn[hidden] { display: none; }
+  nav.side #memory-btn:not([hidden]) { margin-top: auto; }
+  nav.side #memory-btn:not([hidden]) + #files-big { margin-top: 6px; }
+  nav.side #memory-btn.on { border-color: var(--accent2, #4a6b49); }
+  #memory-view { flex: 1; overflow-y: auto; padding: 16px 24px; }
+  #memory-view > * { max-width: 760px; margin-left: auto; margin-right: auto; }
+  #memory-view .memory-head { display: flex; align-items: center; gap: 10px; }
+  #memory-view .memory-head h2 { font-size: 18px; margin: 0; }
+  #memory-view .link { border: 0; background: none; color: var(--accent2); text-decoration: underline; cursor: pointer; padding: 0; font: inherit; }
+  #memory-view .memory-help, #memory-view .memory-usage, #memory-view .memory-unavailable { color: var(--muted); font-size: 13px; }
+  #memory-view .memory-usage.warn80 b, #memory-view .memory-usage.warn90 b { color: var(--bad); font-weight: 600; }
+  #memory-view .memory-controls { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+  #memory-view .memory-controls input { flex: 1; min-width: 180px; }
+  #memory-view .memory-tags { display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--muted); margin-bottom: 8px; overflow-wrap: anywhere; }
+  #memory-view .memory-note { display: grid; gap: 2px; width: 100%; text-align: left; padding: 8px 10px; margin: 4px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: inherit; font: inherit; cursor: pointer; }
+  #memory-view .memory-note .n { font-weight: 600; }
+  #memory-view .memory-note small, #memory-view .memory-open .where { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+  #memory-view .memory-note.expired, #memory-view .memory-note.invalid { opacity: .7; }
+  #memory-view .memory-open .mem-body { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 13px; }
+  #memory-view .memory-open .note-state { color: var(--bad); font-size: 13px; }
+  #memory-view .memory-actions { display: flex; gap: 8px; padding: 0; flex-wrap: wrap; }
+  #memory-view .msg { color: var(--bad); }
+  dialog.memory-dlg .tag-id { font-family: ui-monospace, monospace; font-size: 12px; overflow-wrap: anywhere; color: var(--muted); }
+  dialog.memory-dlg .msg { color: var(--bad); }
   #task-view { flex: 1; overflow-y: auto; padding: 16px 24px; }
   #task-view > * { max-width: 760px; margin-left: auto; margin-right: auto; }
   #task-view .task-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

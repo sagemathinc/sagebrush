@@ -1,7 +1,7 @@
 // The person's memory tags (agent memory v1): lane D's {id, name}, kept in this browser only (v1's ruling: another
 // browser shows a tag's id until it's named there). The page owns this list; an agent never supplies or sees it.
-// Making and renaming tags comes with the Memory view.
-import { parseTag, type AgentTag } from "../workspace/agent-tags";
+// The Memory view names a tag here (Name this tag, Rename).
+import { parseTag, validTagId, validTagName, type AgentTag } from "../workspace/agent-tags";
 
 export const MEMORY_TAGS_KEY = "sb-memory-tags-v1";
 
@@ -23,3 +23,19 @@ export function listTags(): readonly AgentTag[] {
 
 /** A tag's name here, or null: a display name only, never authority. */
 export const tagName = (id: string): string | null => listTags().find((t) => t.id === id)?.name ?? null;
+
+/** Names a tag in this browser (or renames it). Refused, with why, for a name lane D doesn't allow or one another tag
+ *  has here already; the list is written back as kept, with that one tag changed or added. */
+export function nameTag(id: string, name: string): { ok: true } | { ok: false; why: "name" | "taken" | "storage" } {
+  if (!validTagId(id)) return { ok: false, why: "name" };
+  if (!validTagName(name)) return { ok: false, why: "name" };
+  const tags = listTags();
+  if (tags.some((t) => t.name === name && t.id !== id)) return { ok: false, why: "taken" };
+  const next = [...tags.filter((t) => t.id !== id), { id, name }];
+  try {
+    localStorage.setItem(MEMORY_TAGS_KEY, JSON.stringify(next));
+  } catch {
+    return { ok: false, why: "storage" };
+  }
+  return { ok: true };
+}
