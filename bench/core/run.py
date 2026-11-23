@@ -236,6 +236,87 @@ def machine(label: str) -> dict:
     }
 
 
+def _read(path: str) -> str | None:
+    try:
+        return Path(path).read_text().strip()
+    except OSError:
+        return None
+
+
+def host() -> dict:
+    """What this machine is, in detail, for the cost fits: recorded with
+    every point and never compared (two VMs of one type may differ in
+    microcode, boost or cache sizes without being a different type; the
+    type's identity is `machine`)."""
+    info: dict = {}
+    try:
+        for line in Path("/proc/cpuinfo").read_text().splitlines():
+            key, _, value = line.partition(":")
+            key = key.strip()
+            for want, name in (
+                ("cpu family", "family"),
+                ("model", "model"),
+                ("stepping", "stepping"),
+                ("microcode", "microcode"),
+                ("CPU implementer", "implementer"),
+                ("CPU part", "part"),
+                ("CPU variant", "variant"),
+                ("CPU revision", "revision"),
+            ):
+                if key == want and name not in info:
+                    info[name] = value.strip()
+    except OSError:
+        pass
+    cores = set()
+    for d in Path("/sys/devices/system/cpu").glob("cpu[0-9]*/topology"):
+        core, pkg = _read(f"{d}/core_id"), _read(f"{d}/physical_package_id")
+        if core is not None:
+            cores.add((pkg, core))
+    caches = []
+    for d in sorted(Path("/sys/devices/system/cpu/cpu0/cache").glob("index[0-9]*")):
+        level, kind, size = _read(f"{d}/level"), _read(f"{d}/type"), _read(f"{d}/size")
+        if level and kind and size:
+            caches.append({"level": int(level), "type": kind, "size": size})
+    mem = None
+    for line in (_read("/proc/meminfo") or "").splitlines():
+        if line.startswith("MemTotal:"):
+            mem = int(line.split()[1]) * 1024
+    node = shutil.which("node")
+    js = None
+    if node:
+        try:
+            js = subprocess.run(
+                [
+                    node,
+                    "-e",
+                    "console.log(process.versions.node + ' ' + process.versions.v8)",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            ).stdout.split()
+        except (OSError, subprocess.TimeoutExpired):
+            js = None
+    return {
+        "cpu": info,
+        "physical_cores": len(cores) or None,
+        "logical_cpus": os.cpu_count(),
+        "smt_active": _read("/sys/devices/system/cpu/smt/active"),
+        "numa_nodes": len(list(Path("/sys/devices/system/node").glob("node[0-9]*")))
+        or None,
+        "caches": caches,
+        "memory_bytes": mem,
+        "governor": _read("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
+        "boost": _read("/sys/devices/system/cpu/cpufreq/boost"),
+        "kernel": platform.release(),
+        "node": js[0] if js and len(js) == 2 else None,
+        "v8": js[1] if js and len(js) == 2 else None,
+    }
+
+
+HOST: dict | None = None
+
+
 def toolchain() -> str:
     m = re.search(
         r'^channel = "(.+)"',
@@ -1022,8 +1103,12 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
     size = row["sizes"][key]
     n, timeout = size["n"], float(size["timeout"])
     k = variants(row, key)
+    global HOST
+    if HOST is None:
+        HOST = host()
     rec = dict(
         ident,
+        host=HOST,
         row=row["id"],
         item=row["item"],
         category=row["category"],

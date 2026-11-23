@@ -417,6 +417,19 @@ class Acceptance(unittest.TestCase):
                 "bc-vm",
             )
 
+    def test_the_host_record_is_never_compared(self):
+        # (microcode, boost or cache sizes may differ between two VMs of
+        # one type: the per-point host record is not part of any identity)
+        self.accept(row(host={"cpu": {"microcode": "0x1"}}))
+        self.rows.check_identity(
+            "x86", row(host={"cpu": {"microcode": "0x2"}}), "bc-vm"
+        )
+        self.rows.check_identity(
+            "x86", row(host={"cpu": {"microcode": "0x3"}}), "bc-vm-2"
+        )
+        self.assertNotIn("host", shard.identity_of(row(host={"x": 1})))
+        self.assertNotIn("host", shard.vm_identity_of(row(host={"x": 1})))
+
     def test_a_rejected_point_records_no_vm_identity(self):
         self.rows.check_identity("x86", row(build={"rustc": "1.99.2"}), "bc-vm-0")
         with self.assertRaises(shard.Fatal):

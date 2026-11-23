@@ -1053,5 +1053,33 @@ class CalibrationSizes(unittest.TestCase):
             self.assertFalse(shard.SIZE_RE.match(k), k)
 
 
+class Host(unittest.TestCase):
+    def test_the_host_record(self):
+        h = run.host()
+        json.dumps(h)
+        self.assertEqual(
+            sorted(h),
+            sorted(
+                [
+                    "cpu",
+                    "physical_cores",
+                    "logical_cpus",
+                    "smt_active",
+                    "numa_nodes",
+                    "caches",
+                    "memory_bytes",
+                    "governor",
+                    "boost",
+                    "kernel",
+                    "node",
+                    "v8",
+                ]
+            ),
+        )
+        self.assertEqual(h["logical_cpus"], os.cpu_count())
+        for c in h["caches"]:
+            self.assertEqual(sorted(c), ["level", "size", "type"])
+
+
 if __name__ == "__main__":
     unittest.main()
