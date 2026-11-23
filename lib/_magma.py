@@ -4864,9 +4864,12 @@ def _order_in(v, depth=0):
 
 def _order_tuple_str(v, col, indent, tail):
     """A tuple holding a maximal equation order, laid out as Magma 2.18-5 lays
-    it out: a line broken in the order's description or polynomial continued
-    4 in, as a polynomial is (<1, <O, 2>>), one broken anywhere else at the
-    tuple's indentation (<O, 1>); under printf's %o, at the indentation."""
+    it out: a line broken in the polynomial after its first term continued 4
+    in, as a polynomial is (<1, <O, 2>>), one broken anywhere else (in the
+    description, before the first term, after the order: <O, 1>) at the
+    tuple's indentation, as _MOrder._pieces says; under printf's %o, at the
+    indentation.  The other elements in their in-tuple forms
+    (strings quoted)."""
     plus = 0 if _SPRINT[0] is not None else 4
 
     def pieces(x):
@@ -4876,13 +4879,17 @@ def _order_tuple_str(v, col, indent, tail):
                 out += pieces(p) + [(", " if k < len(x) - 1 else ">", indent)]
             return out
         if isinstance(x, _MOrder) and x.K._nfdata()["index"] == 1:
-            head, f, rest = x._parts()
-            return [(head + " " + f, indent + plus), (" " + rest, indent)]
-        return [(_inline(x), indent)]
+            return x._pieces(indent, plus)
+        return [(_inline(x, True), indent)]
 
-    # (the words, each with the continuation column of the piece it starts in)
-    words, cur, at = [], "", indent
-    for text, cont in pieces(v) + [(tail, indent)]:
+    return _flow(_cont_words(pieces(v) + [(tail, indent)]), col if col is not None else indent, indent, indent)
+
+
+def _cont_words(pieces):
+    """The words of pieces (text, continuation column), for _flow: each word
+    with the column of the piece it starts in."""
+    words, cur, at = [], "", 0
+    for text, cont in pieces:
         for ch in text:
             if ch == " ":
                 words.append((cur, True, at))
@@ -4892,7 +4899,7 @@ def _order_tuple_str(v, col, indent, tail):
                     at = cont
                 cur += ch
     words.append((cur, False, at))
-    return _flow(words, col if col is not None else indent, indent, indent)
+    return words
 
 
 def _flow(chunks, first_col, cont, indent=None):
@@ -9605,23 +9612,22 @@ class _MOrder:
     def __repr__(self):
         return "%s %s %s" % self._parts()
 
+    def _pieces(self, indent, plus):
+        """The order's text in pieces with the column a line broken in each
+        continues at (_cont_words): the polynomial's terms after its first
+        `plus` more in, as a polynomial is; the description, the first term
+        and what follows at the indentation (Magma 2.18-5)."""
+        head, f, rest = self._parts()
+        first = f.split(" ")[0]
+        return [(head + " " + first, indent), (f[len(first):], indent + plus), (" " + rest, indent)]
+
     def _str(self, col, indent, tail):
         """Laid out as Magma prints a maximal equation order past WIDTH
-        columns: the description and the polynomial continued 4 more in (as a
-        polynomial is), what follows the polynomial at the order's own
-        indentation."""
-        head, f, rest = self._parts()
-        # (the order of an equation order prints on one line however long, as Magma's does)
+        columns (_pieces); under printf's %o without the polynomial's 4."""
         if _making_string() or self.K._nfdata()["index"] != 1:
             return repr(self) + tail
-        if _SPRINT[0] is not None:
-            # (printf's %o: laid out on 80 columns, continued at the indentation, without the polynomial's 4)
-            words = (repr(self) + tail).split(" ")
-            return _flow([(w, k < len(words) - 1) for k, w in enumerate(words)], col, indent, indent)
-        first = _flow([(w, True) for w in (head + " " + f).split(" ")], col, indent + 4, indent)
-        c = len(first) - first.rfind("\n") - 1 if "\n" in first else col + len(first)
-        words = (rest + tail).split(" ")
-        return first + _flow([(w, k < len(words) - 1) for k, w in enumerate(words)], c, indent, indent)
+        plus = 0 if _SPRINT[0] is not None else 4
+        return _flow(_cont_words(self._pieces(indent, plus) + [(tail, indent)]), col, indent, indent)
 
     def _magma_degree(self):
         return self.K.degree()

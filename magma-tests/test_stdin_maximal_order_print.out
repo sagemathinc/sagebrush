@@ -28,5 +28,17 @@ x^2 + x + 1 over its ground order
     <Maximal Equation Order with defining polynomial x^6 + x^5 + x^4 + x^3 + x^2
         + x + 1 over its ground order>
 ]
+<"ab", Maximal Equation Order with defining polynomial x^6 + x^5 + x^4 + x^3 + 
+    x^2 + x + 1 over its ground order>
+<1/2, "c", Maximal Equation Order with defining polynomial x^6 + x^5 + x^4 + x^3
+    + x^2 + x + 1 over its ground order>
+<"a long string to push the order further right", Maximal Equation Order with 
+defining polynomial x^6 + x^5 + x^4 + x^3 + x^2 + x + 1 over its ground order>
+<"a long string to push the order further", Maximal Equation Order with defining
+polynomial x^6 + x^5 + x^4 + x^3 + x^2 + x + 1 over its ground order>
+<"a long string to push the order furth", Maximal Equation Order with defining 
+polynomial x^6 + x^5 + x^4 + x^3 + x^2 + x + 1 over its ground order>
+<12345678901234567890123456789, Maximal Equation Order with defining polynomial 
+x^6 + x^5 + x^4 + x^3 + x^2 + x + 1 over its ground order>
 105
 end
