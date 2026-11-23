@@ -4759,8 +4759,6 @@ def _str1(v, indent, col, tail):
         raise MagmaError("printing a tuple or record holding a matrix over a finite field is not supported yet")
     if isinstance(v, _MOrder):
         return v._str(col, indent, tail), True
-    if isinstance(v, MTuple) and not _making_string() and _order_in(v) and not any(_multiline(p) for p in v):
-        return _order_tuple_str(v, col, indent, tail), True
     if getattr(v, "_magma_nowrap", False):
         return _inline(v), False
     if isinstance(v, MTuple) and any(_multiline(p) for p in v):
@@ -4855,36 +4853,6 @@ def _extra(v):
     return 0
 
 
-def _order_in(v, depth=0):
-    """Whether the tuple v holds a maximal equation order (in a tuple in it too)."""
-    if isinstance(v, _MOrder):
-        return v.K._nfdata()["index"] == 1
-    return isinstance(v, MTuple) and depth < _PRINT_DEPTH_MAX and any(_order_in(p, depth + 1) for p in v)
-
-
-def _order_tuple_str(v, col, indent, tail):
-    """A tuple holding a maximal equation order, laid out as Magma 2.18-5 lays
-    it out: a line broken in the polynomial after its first term continued 4
-    in, as a polynomial is (<1, <O, 2>>), one broken anywhere else (in the
-    description, before the first term, after the order: <O, 1>) at the
-    tuple's indentation, as _MOrder._pieces says; under printf's %o, at the
-    indentation.  The other elements in their in-tuple forms
-    (strings quoted)."""
-    plus = 0 if _SPRINT[0] is not None else 4
-
-    def pieces(x):
-        if isinstance(x, MTuple):
-            out = [("<", indent)]
-            for k, p in enumerate(x):
-                out += pieces(p) + [(", " if k < len(x) - 1 else ">", indent)]
-            return out
-        if isinstance(x, _MOrder) and x.K._nfdata()["index"] == 1:
-            return x._pieces(indent, plus)
-        return [(_inline(x, True), indent)]
-
-    return _flow(_cont_words(pieces(v) + [(tail, indent)]), col if col is not None else indent, indent, indent)
-
-
 def _cont_words(pieces):
     """The words of pieces (text, continuation column), for _flow: each word
     with the column of the piece it starts in."""
@@ -4918,8 +4886,8 @@ def _flow(chunks, first_col, cont, indent=None):
     indent = cont if indent is None else indent
     out, c = [], first_col
     for chunk in chunks:
-        # (a chunk may carry its own continuation column, a third element: a maximal order's polynomial in a tuple,
-        # _order_tuple_str)
+        # (a chunk may carry its own continuation column, a third element: a maximal order's polynomial,
+        # _MOrder._pieces)
         text, space = chunk[0], chunk[1]
         cc = chunk[2] if len(chunk) > 2 else cont
         # (the first chunk of a value printf writes after its own text is
