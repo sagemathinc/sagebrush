@@ -291,9 +291,13 @@ async function attach(B, targetId, { clock = false, retry = false } = {}) {
   };
   /** Text in the composer, typed (the editor's textarea comes on a click into its block). */
   P.draft = async (text) => {
-    if (!(await P.ev(`!!document.querySelector('#editor textarea')`))) {
-      const [x, y] = await P.ev(`(() => { const r = document.querySelector('#editor .mb-block').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
-      for (const type of ["mousePressed", "mouseReleased"]) await P.send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+    // (found in one step: the page may give the composer its textarea by itself between a look and a click (its boot
+    //  focuses the composer, so the block it would click is gone); then there is nothing to click)
+    for (const end = Date.now() + WAIT_MS; Date.now() < end; ) {
+      const at = await P.ev(`(() => { if (document.querySelector('#editor textarea')) return "typing"; const b = document.querySelector('#editor .mb-block'); if (!b) return null; const r = b.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+      if (at === "typing") break;
+      if (at) for (const type of ["mousePressed", "mouseReleased"]) await P.send("Input.dispatchMouseEvent", { type, x: at[0], y: at[1], button: "left", clickCount: 1 });
+      await P.until(`!!document.querySelector('#editor textarea')`, 2000).catch(() => {});
     }
     await P.until(`!!document.querySelector('#editor textarea')`);
     await P.ev(`document.querySelector('#editor textarea').focus()`);
