@@ -1,0 +1,92 @@
+{
+ "about": "The fleet protocol's pure core, vendored unchanged from sagebrush-agent for the fleet Worker (web/cloud/fleet/). Each file is the commit's, byte for byte; vendor/sync.mjs verify re-checks them against a clone.",
+ "repository": "https://github.com/sagemathinc/sagebrush-agent",
+ "commit": "0e3c4e19486d5cbaff0cbd383a7617c544fdd8c0",
+ "license": "MIT",
+ "files": {
+  "core/bytes.mjs": {
+   "from": "lib/fleet/core/bytes.mjs",
+   "sha256": "be5c199fcadf375336c49dae692fce6af96644af6f98b11161a4fb0d65eaaf6b"
+  },
+  "core/canon.mjs": {
+   "from": "lib/fleet/core/canon.mjs",
+   "sha256": "d9b7831f6772f6010689ecb74a8727280470e8e1437a2166fc0fd6b1728f08e8"
+  },
+  "core/canonical.mjs": {
+   "from": "lib/fleet/core/canonical.mjs",
+   "sha256": "7943e0fe146f6ad12a802e9cab7f9284a7879f0181ee9adcf2ae024ad9e819e3"
+  },
+  "core/chain.mjs": {
+   "from": "lib/fleet/core/chain.mjs",
+   "sha256": "a41abf0844266372b84f80c045d8db6af8eb7539e9f72b58ea2e3fd779c9e643"
+  },
+  "core/control.mjs": {
+   "from": "lib/fleet/core/control.mjs",
+   "sha256": "629e121cda57bdbb5a3b2c144173a75198486736f7dacd129f25a35723116aa5"
+  },
+  "core/crypto.mjs": {
+   "from": "lib/fleet/core/crypto.mjs",
+   "sha256": "34d85de82f75c4bbae276d7fb24fddce0b8fd576825298fbe452535db12557b4"
+  },
+  "core/ed25519.mjs": {
+   "from": "lib/fleet/core/ed25519.mjs",
+   "sha256": "63420ae7dd5f17d159e56bc3a0ad91a3e96269a7eedf56196da2599a3a05c4ad"
+  },
+  "core/envelope.mjs": {
+   "from": "lib/fleet/core/envelope.mjs",
+   "sha256": "415d31991e6e5c11d61ebdf94d4c61ca1d813f2479746ad2099d17489c315842"
+  },
+  "core/hpke.mjs": {
+   "from": "lib/fleet/core/hpke.mjs",
+   "sha256": "f078320d9cdbc30373356101fdd05a0470e2c53a7500a59f9dafd35e2ed3630a"
+  },
+  "core/index.mjs": {
+   "from": "lib/fleet/core/index.mjs",
+   "sha256": "cea774ace5cd45be55e10679acfc6a0820b6188b175ff248d5545121f6ce6cf7"
+  },
+  "core/recovery.mjs": {
+   "from": "lib/fleet/core/recovery.mjs",
+   "sha256": "a636cdaab732d71eeb24c241cd6f0c61b5d1634bafd5992675976083e36a90ff"
+  },
+  "core/relay.mjs": {
+   "from": "lib/fleet/core/relay.mjs",
+   "sha256": "e48ee81fc34e0e9a2fd3c60304a80c424ccb07046764a92861cacb597b606cdd"
+  },
+  "core/request.mjs": {
+   "from": "lib/fleet/core/request.mjs",
+   "sha256": "004c275e22bb893d8f59192a18d8cb7d8ad21bdf040ebe4920bd940051615636"
+  },
+  "core/schema.mjs": {
+   "from": "lib/fleet/core/schema.mjs",
+   "sha256": "f7e0c255623d3bfad7212c147dbe2ee6bc3a36b6c06c8879f000c1efdb52e495"
+  },
+  "core/schemas.mjs": {
+   "from": "lib/fleet/core/schemas.mjs",
+   "sha256": "bfa451095b2aaab83f12e9bc0a8a3326dcb635caceb088429057c22122aae7f9"
+  },
+  "core/sealed.mjs": {
+   "from": "lib/fleet/core/sealed.mjs",
+   "sha256": "ac143fd0f9742d879a802dd85ef061f10a672980cfe66137aa44297d53de3290"
+  },
+  "core/verify.mjs": {
+   "from": "lib/fleet/core/verify.mjs",
+   "sha256": "456973de9ecdb8a72382600d7c0ad8086236555d8ca698a1e31dda2ec4448d88"
+  },
+  "core/webcrypto.mjs": {
+   "from": "lib/fleet/core/webcrypto.mjs",
+   "sha256": "82f5b25fcd77710fa75f18c65df00dbea5be223315ff4f32308f3164acb0e61b"
+  },
+  "schema/fleet.schema.json": {
+   "from": "schema/fleet/fleet.schema.json",
+   "sha256": "50b7a3b8e3bed9afe63a40cae8b52854c839d1482fa55caaef7bdccf59e82063"
+  },
+  "schema/reasons.json": {
+   "from": "schema/fleet/reasons.json",
+   "sha256": "0dff469bdd8157ac4515d18f7fab299e233e5454966a13236f43dfae90875dd1"
+  },
+  "LICENSE": {
+   "from": "LICENSE",
+   "sha256": "bca4b8cd5e2ef5652bab4a89a8289af39316e4de7d258f0808db344ef844ad11"
+  }
+ }
+}
