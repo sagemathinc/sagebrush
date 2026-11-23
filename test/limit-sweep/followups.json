@@ -63,6 +63,16 @@
    "owner": "matlab",
    "status": "open",
    "what": "MATLAB PR 2's routing floor (legacy_band_route: master's band predicate, MAX_FULL 2^28 and MAX_BAND_WORK 2^29, as a route, never a refusal), kept by William's decisions of Oct 27 2026 (D-W1, D-W2: its two inherited edge cliffs are known costs) until the routing-model project replaces it."
+  },
+  {
+   "id": "FU-B16-4",
+   "keys": [
+    "lib/_matlab.py :: repmat_ :: raise _err(\"repmat: a result of %d elements (%d bytes) is not supported in Sagebrush: at most %d bytes.\" % (total, total * size, _REPMAT_BYTES_MAX), \"MATLAB:array:SizeLimitExceeded\") #0",
+    "lib/_matlab.py :: repmat_ :: raise _err(\"repmat: a result of %d elements is not supported in Sagebrush: at most %d for a %s array.\" % (total, _REPMAT_OBJECT_MAX, class_(x)), \"MATLAB:array:SizeLimitExceeded\") #0"
+   ],
+   "owner": "matlab",
+   "status": "open",
+   "what": "repmat's fixed result caps (8 MiB for a numeric, char or logical result; 200,000 elements for a cell, struct or string array) refuse below the memory guard, with MATLAB's identifier for its own size-preference refusal (MATLAB:array:SizeLimitExceeded); give them way to the memory guard's route (memguard), so a result the host can hold is made"
   }
  ],
  "note": "The sweep's follow-ups, the source of truth (plan-limit-sites-sweep-r3 section 2): {id FU-<batch>-<n>, status open|fixed|withdrawn, keys, what, owner, withdrawn_because; fixed_by {pr?, commit?} is optional history, checked when given}. A fixed one needs no fixed_by: master's squash merge puts the fix and the status in one commit, its provenance. An open one has at least one active key, and its active keys and the entries pointing to it agree; no active key points to a fixed or withdrawn one.",
