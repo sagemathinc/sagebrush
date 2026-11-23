@@ -467,6 +467,31 @@
       "reason": "pandas parses into the smaller integers (with its overflow and lossy-cast errors); Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype"
     },
     {
+      "case": "csv.dtype-int16",
+      "message": "pandas.read_csv(dtype=int16) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into the smaller integers (with its overflow and lossy-cast errors); Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype"
+    },
+    {
+      "case": "csv.dtype-dict-int16",
+      "message": "pandas.read_csv(dtype=int16) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into the smaller integers (with its overflow and lossy-cast errors); Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype"
+    },
+    {
+      "case": "csv.dtype-uint32",
+      "message": "pandas.read_csv(dtype=uint32) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into the smaller integers (with its overflow and lossy-cast errors); Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype"
+    },
+    {
+      "case": "csv.dtype-dict-uint32",
+      "message": "pandas.read_csv(dtype=uint32) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into the smaller integers (with its overflow and lossy-cast errors); Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype"
+    },
+    {
+      "case": "csv.dtype-float32",
+      "message": "pandas: dtype='float32' is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into float32; float32 isn't one of the subset's dtypes yet, so the dtype is refused before reading"
+    },
+    {
       "case": "dt.series-values",
       "message": "pandas.Series.values of a datetime64[us] column (Sagebrush's numpy has no datetime64 yet) is not in Sagebrush's pandas 0.x subset",
       "reason": "Sagebrush's numpy has no datetime64 yet, which pandas returns here; the datetime column is kept as int64 microseconds internally and refuses rather than hand out those ints or another type (PR A; a numpy datetime64 can replace the internals later)"
