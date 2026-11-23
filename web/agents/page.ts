@@ -649,16 +649,14 @@ function reopenTab(t: Thread, id: string) {
   t.closed = [...c];
   save();
 }
-// (one close at a time per tab: a second click while one asks or saves changes nothing)
-const closingTabs = new Set<string>();
+// (a second click while one close asks or saves changes nothing: the host's release is shared, each step checks the
+//  host is still this one, and a tab closed twice is closed once)
 const STOP_WAIT_MS = 5000;
 const TAB_COPY = { stillRunning: "A cell started running again in this notebook, so its tab stays open." } as const;
 async function closeTab(threadId: string, id: string) {
   if (current().id !== threadId) return;
   const k = hostKey(threadId, id);
-  if (closingTabs.has(k)) return;
-  closingTabs.add(k);
-  try {
+  {
     const h = hosts.get(k);
     if (h?.nb?.isRunning()) {
       if (!(await mayStopRunning([[k, h]]))) return;
@@ -715,8 +713,6 @@ async function closeTab(threadId: string, id: string) {
       const all = $("#all-arts-chat");
       (tab ?? (all.hidden ? null : all))?.focus();
     }
-  } finally {
-    closingTabs.delete(k);
   }
 }
 /** #1792: everything this chat has produced, closed tabs included: a click opens it (its tab back). */
