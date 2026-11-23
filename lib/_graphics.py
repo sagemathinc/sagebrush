@@ -698,13 +698,26 @@ def _markers(P, xs, ys, marker, r, color, alpha, sizes=None, edge=None):
         f, c = _fmt, _esc(color)
         st = ' stroke="%s" stroke-width="0.8"' % _esc(edge) if edge else ""
         if marker == ",":
-            # (one path of whole pixels, numbered: the pixel a point is in, as _marker's)
+            # (one path of whole pixels, numbered: the pixel a point is in, as
+            # _marker's; translucent, the pixels k points are in drawn with
+            # the alpha of k layers, 1 - (1 - alpha)^k, as matplotlib draws
+            # each point over the others)
             u, d = _PIXEL, []
             for p in pts:
                 if p is not None:
-                    d.append("M" + str(math.floor(p[0] / u + 1e-6)) + " " + str(math.floor(p[1] / u + 1e-6)) + "h1v1h-1z")
-            if d:
-                out.append('<path transform="scale(%.9g)" fill="%s" d="%s"/>' % (u, c, "".join(d)))
+                    d.append("M" + str(math.floor(p[0] / u + 1e-6)) + " " + str(math.floor(p[1] / u + 1e-6)))
+            if d and alpha is not None:
+                count = {}
+                for k in d:
+                    count[k] = count.get(k, 0) + 1
+                layers = {}
+                for k, n in count.items():
+                    layers.setdefault(n, []).append(k)
+                for n in sorted(layers):
+                    out.append('<path transform="scale(%.9g)" fill="%s" fill-opacity="%.6g" d="%s"/>' % (
+                        u, c, 1 - (1 - alpha) ** n, "h1v1h-1z".join(layers[n]) + "h1v1h-1z"))
+            elif d:
+                out.append('<path transform="scale(%.9g)" fill="%s" d="%s"/>' % (u, c, "h1v1h-1z".join(d) + "h1v1h-1z"))
         elif marker in ("s", "square"):
             tail = '" width="%s" height="%s" fill="%s"%s/>' % (f(2 * r), f(2 * r), c, st)
             for p in pts:
@@ -724,8 +737,16 @@ def _markers(P, xs, ys, marker, r, color, alpha, sizes=None, edge=None):
             out.append(_marker(marker, p[0], p[1], rr, c, edge))
     if not out:
         return ""
-    a = ' opacity="%s"' % _fmt(alpha) if alpha is not None else ""
-    return "<g%s>%s</g>" % (a, "".join(out))
+    return "<g%s>%s</g>" % (_alpha_each(alpha), "".join(out))
+
+
+def _alpha_each(alpha):
+    """A group's alpha as matplotlib applies it: to each shape in it on its
+    own, its face and its edge (so where shapes, or an edge and its face,
+    overlap, the color builds up), not once to the group drawn whole"""
+    if alpha is None:
+        return ""
+    return ' fill-opacity="%s" stroke-opacity="%s"' % (_fmt(alpha), _fmt(alpha))
 
 
 # The size of one pixel of the picture being drawn, in SVG units (100 to the
@@ -853,8 +874,7 @@ class Rects(Primitive):
             out.append('<rect x="%s" y="%s" width="%s" height="%s" fill="%s"%s/>' % (
                 _fmt(min(a[0], b[0])), _fmt(min(a[1], b[1])), _fmt(abs(b[0] - a[0])), _fmt(abs(b[1] - a[1])), _esc(c),
                 ' stroke="%s" stroke-width="0.8"' % _esc(edge) if edge else ""))
-        a = o.get("alpha")
-        return "<g%s>%s</g>" % (' opacity="%s"' % _fmt(a) if a is not None else "", "".join(out))
+        return "<g%s>%s</g>" % (_alpha_each(o.get("alpha")), "".join(out))
 
     def describe(self):
         return "%d bars%s" % (len(self.rects), _label(self))

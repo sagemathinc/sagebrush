@@ -240,7 +240,7 @@ P = g._Placed(10, 20, 600, 400, 0.0, 1.0, 0.0, 1.0, False, False)
 for m in ("o", ".", "s"):
     fast = g._markers(P, xs, ys, m, 3.5, "#1f77b4", 0.5, None, "#000000")
     each = "".join(g._marker(m, *P.map(x, y), 3.5, "#1f77b4", "#000000") for x, y in zip(xs, ys))
-    print(m, fast == '<g opacity="0.5">' + each + "</g>")
+    print(m, fast == '<g fill-opacity="0.5" stroke-opacity="0.5">' + each + "</g>")
 `);
   // (one path, a pixel for each of the 2000 points, and no rect of a pixel)
   assert.deepEqual(out.trim().split("\n"), ["1 2000 0", "o True", ". True", "s True"]);
