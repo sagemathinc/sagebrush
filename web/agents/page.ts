@@ -289,8 +289,8 @@ function submit(mode: UserEntry["mode"]) {
   // (a mirrored conversation is read-only: nothing is sent from it)
   if (mirrorOpen) return;
   // (not connected, in a chat the demo may not answer: Send is inert and the draft stays, A14 C1; a note still posts)
-  // (dictating stops as the message goes: words still being recognized aren't added after it)
-  if (mode !== "note") dictation.stop();
+  // (dictating stops as the message or note goes: words still being recognized aren't added after it)
+  dictation.stop();
   if (!session.submit(editor.value, mode)) return;
   if (mode !== "note") void mirror.kick(current().id);
   editor.value = "";
@@ -1272,11 +1272,13 @@ const dictation = mountDictation({
   value: () => editor.value,
   setValue: (v) => { editor.value = v; if (draftOf) putDraft(draftOf, v); },
   toast: (t, ms) => toast(t, ms),
+  conversation: () => draftOf || current().id,
 });
 /** The chat shown's draft in the composer, when another chat's was there. */
 function showDraft() {
   const id = current().id;
   if (draftOf === null || draftOf === id) return;
+  dictation.stop(); // (dictating belongs to the chat it started in: another chat's draft shown, it stops)
   draftOf = id;
   editor.value = draftsPending.get(id) ?? readDrafts()[id] ?? "";
 }

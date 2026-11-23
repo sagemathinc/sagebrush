@@ -38,6 +38,8 @@ export interface DictationHost {
   value(): string;
   setValue(v: string): void;
   toast(text: string, ms?: number): void;
+  /** the chat whose draft the composer holds: dictation belongs to the one it started in */
+  conversation(): string;
 }
 
 // (the person turned dictation on in this browser: "1"; absent, it asks first)
@@ -64,11 +66,15 @@ export function mountDictation(h: DictationHost) {
   const discard = Object.assign(document.createElement("button"), { type: "button", className: "link", textContent: DICTATION_COPY.discard });
   h.before.before(btn, ask, status);
 
+  // (the status line: its words, and its two controls, mounted once so the keyboard stays on them as words arrive)
+  const words = document.createElement("span");
+  status.append(words, " ", discard, " · ", off);
+
   let rec: Recognition | null = null;
-  // (what was in the draft when listening started, and what has been heard since, final; the interim part is shown
-  //  in the status line only, so the draft holds nothing that may still change)
-  let base = "";
-  let heard = "";
+  // (the chat it started in, and the pieces it has added to that chat's draft, in order: Discard takes those out and
+  //  nothing else, whatever the person typed meanwhile)
+  let conv = "";
+  let added: string[] = [];
   const join = (a: string, b: string) => (!a ? b : !b ? a : /\s$/.test(a) ? a + b : a + " " + b);
 
   function draw(on: boolean, interim = "") {
@@ -76,25 +82,37 @@ export function mountDictation(h: DictationHost) {
     btn.setAttribute("aria-pressed", String(on));
     btn.setAttribute("aria-label", on ? DICTATION_COPY.stop : DICTATION_COPY.start);
     status.hidden = !on;
-    status.replaceChildren(...(on ? [interim ? `${DICTATION_COPY.listening} ${interim}` : DICTATION_COPY.listening, " ", discard, " · ", off] : []));
+    words.textContent = on ? (interim ? `${DICTATION_COPY.listening} ${interim}` : DICTATION_COPY.listening) : "";
   }
   function start() {
-    const r = new Ctor!();
-    r.continuous = true;
-    r.interimResults = true;
-    r.lang = navigator.language || "en-US";
-    base = h.value();
-    heard = "";
+    if (rec) return; // (one at a time)
+    let r: Recognition;
+    try {
+      r = new Ctor!();
+      r.continuous = true;
+      r.interimResults = true;
+      r.lang = navigator.language || "en-US";
+    } catch (err) {
+      h.toast(`${DICTATION_COPY.failed}: ${(err as Error)?.message ?? err}`, 8000);
+      return;
+    }
+    conv = h.conversation();
+    added = [];
     r.onresult = (e) => {
       if (rec !== r) return;
+      // (another chat's draft in the composer now: this one stops, adding nothing there)
+      if (h.conversation() !== conv) return stop();
       let interim = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const res = e.results[i];
         const text = (res[0]?.transcript ?? "").trim();
         if (!text) continue;
         if (res.isFinal) {
-          heard = join(heard, text);
-          h.setValue(join(base, heard));
+          // (added to the draft as it is now, after whatever the person has typed meanwhile)
+          const now = h.value();
+          const next = join(now, text);
+          added.push(next.slice(now.length));
+          h.setValue(next);
         } else interim = join(interim, text);
       }
       draw(true, interim);
@@ -129,17 +147,30 @@ export function mountDictation(h: DictationHost) {
     try { r.abort(); } catch {}
     draw(false);
   }
+  /** Discard: listening stops, and the pieces it added to this chat's draft come out (the last of each, from the end),
+   *  what the person typed staying. */
+  function discardAll() {
+    const mine = h.conversation() === conv;
+    stop();
+    if (!mine) return;
+    let v = h.value();
+    for (const piece of [...added].reverse()) {
+      const at = v.lastIndexOf(piece);
+      if (at >= 0) v = v.slice(0, at) + v.slice(at + piece.length);
+    }
+    added = [];
+    h.setValue(v);
+  }
   btn.onclick = () => {
     if (rec) return stop();
     if (isOn()) return start();
     ask.hidden = !ask.hidden; // (asked; a second click on the mic puts the question away)
     if (!ask.hidden) setTimeout(() => on.focus(), 0); // (after the click's own handling, which may move focus)
   };
-  on.onclick = () => { setOn(true); ask.hidden = true; start(); };
+  on.onclick = () => { setOn(true); ask.hidden = true; btn.focus(); start(); };
   not.onclick = () => { ask.hidden = true; btn.focus(); };
   off.onclick = () => { stop(); setOn(false); btn.focus(); };
-  // (Discard: listening stops, and the draft is as it was before it started: what was dictated is dropped)
-  discard.onclick = () => { const was = base; stop(); h.setValue(was); btn.focus(); };
+  discard.onclick = () => { discardAll(); btn.focus(); };
   // (never in the background: a hidden tab stops listening)
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") stop(); });
   return { stop, available: true };

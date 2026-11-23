@@ -50,10 +50,16 @@ try {
   await P.navigate(`${site}/agents/?speed=20`);
   await P.ev(`(localStorage.removeItem('sb-dictation-on-v1'), true)`);
   await P.navigate(`${site}/agents/?speed=20`);
+  // (the page settled: its first render puts the keyboard in the composer, after load)
+  await P.until(`document.activeElement?.tagName === 'TEXTAREA' || document.readyState === 'complete'`, 10000).catch(() => {});
+  await sleep(1500);
 
   // ---- D2: off until turned on: the first click asks, saying where the voice goes; nothing listens
   const m0 = await mic(P);
-  await P.ev(`(document.querySelector('#mic').click(), true)`);
+  // (a real click, as the person's: the mouse moves the focus off the composer)
+  const [mx, my] = await P.ev(`(() => { const r = document.querySelector('#mic').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+  for (const type of ["mousePressed", "mouseReleased"]) await P.send("Input.dispatchMouseEvent", { type, x: mx, y: my, button: "left", clickCount: 1 });
+  await sleep(100);
   const m2 = await mic(P);
   ok(m0?.label === "Dictate" && m0.pressed === "false" && m2.ask && /sends your voice to your browser's speech service \(Google's, in Chrome\)/.test(m2.ask) && m2.recs === 0, "D2: dictation is off until turned on: the first click asks next to the mic, saying where the voice goes, and nothing listens", { m0, m2 });
   await sleep(50);
@@ -100,10 +106,11 @@ try {
   await P.draft("What can you do?");
   await P.ev(`(document.querySelector('#mic').click(), true)`);
   const n9 = await P.ev(`window.__recs.length`);
+  const users9 = await P.ev(`document.querySelectorAll('#log .user').length`);
   await P.ev(`(document.querySelector('#send').click(), true)`);
   await sleep(100);
   const m9 = await mic(P);
-  ok(m9.recs === n9 && m9.aborted && m9.pressed === "false", "D9: sending the message stops listening", m9);
+  ok(m9.recs === n9 && m9.aborted && m9.pressed === "false" && (await P.ev(`document.querySelectorAll('#log .user').length`)) === users9 + 1, "D9: sending the message stops listening (and the message is in the chat: the count D12 relies on)", m9);
 
   // ---- D10: Turn off: it stops, and the next click asks again
   await P.until(`document.querySelector('#stop').hidden`, 60000).catch(() => {});
@@ -141,6 +148,45 @@ try {
   await P.ev(`(window.__recs.at(-1).onerror({ error: 'network' }), window.__recs.at(-1).onend(), true)`);
   await sleep(100);
   ok(/couldn't be reached/.test(await toast(P)) && (await draftOf(P)).trim() === "Keep this" && (await P.ev(`document.querySelectorAll('#log .user').length`)) === sent12, "D12: a network failure is said, keeps the draft, and sends nothing", { toast: await toast(P), draft: await draftOf(P) });
+
+  // ---- D13: typing while it listens is kept; Discard takes out only what it added
+  // (D12's toast put away first: it lies over the composer, where the typing helper clicks)
+  await P.ev(`(() => { const t = document.querySelector('#toast'); if (t) t.style.display = 'none'; return true; })()`);
+  await P.draft("");
+  await P.ev(`(() => { const t = document.querySelector('#editor textarea'); t.value = "A"; t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await P.ev(`(document.querySelector('#mic').click(), true)`);
+  await P.ev(`(window.__say([["one", true]]), true)`);
+  await sleep(50);
+  await P.draft(""); // (the editor open again for typing: the mic's click took its focus)
+  await P.ev(`(() => { const t = document.querySelector('#editor textarea'); t.value = t.value + " B"; t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await P.ev(`(window.__say([["two", true]]), true)`);
+  await sleep(50);
+  const d13a = await draftOf(P);
+  await P.ev(`([...document.querySelectorAll('#mic-status button')].find((b) => b.textContent === 'Discard').click(), true)`);
+  await sleep(50);
+  const d13b = await draftOf(P);
+  ok(d13a.trim() === "A one B two" && d13b.trim() === "A B", "D13: what the person types while it listens is kept; Discard takes out only the dictated words", { d13a, d13b });
+
+  // ---- D14: another chat shown: it stops, and a late result adds nothing to that chat's draft
+  await P.ev(`(document.querySelector('#mic').click(), true)`);
+  const r14 = await P.ev(`window.__recs.length`);
+  await P.ev(`(document.querySelector('#new').click(), true)`);
+  await sleep(300);
+  await P.ev(`(window.__recs[${r14} - 1].onresult?.({ resultIndex: 0, results: [Object.assign([{ transcript: 'late words' }], { isFinal: true })] }), true)`);
+  await sleep(50);
+  const m14 = await mic(P);
+  ok(m14.pressed === "false" && !/late words/.test(await draftOf(P)), "D14: another chat shown stops listening; a late result adds nothing to its draft", { m14, draft: await draftOf(P) });
+  // (back to the first chat)
+  await P.ev(`([...document.querySelectorAll('#threads .thread:not(.mirror)')].find((t) => !t.classList.contains('on'))?.click(), true)`);
+  await sleep(300);
+
+  // ---- D15: posting a note stops it too
+  await P.draft("a note");
+  await P.ev(`(document.querySelector('#mic').click(), true)`);
+  await P.ev(`(document.querySelector('#note').click(), true)`);
+  await sleep(100);
+  const m15 = await mic(P);
+  ok(m15.aborted && m15.pressed === "false", "D15: posting a note stops listening", m15);
   ok(P.errors.length === 0 && P0.errors.length === 0, "no page errors", [P.errors, P0.errors]);
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));
