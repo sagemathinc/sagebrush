@@ -17,7 +17,8 @@ const DB = "sagebrush-fleet-v1";
 /** A fleet id (schemas r2.3 §1.1): 26 lowercase base32 characters, 128 random bits and 2 zero bits. */
 export const FLEET_ID = /^[a-z2-7]{25}[aeimquy4]$/;
 /** A pin's hash: the base64url SHA-256 of a chain entry's signed bytes, canonical (schemas r2.3 §1.2, §2.1): 43
- * characters, the last carrying 2 bits and 4 zero pad bits, so it is one of A E I M Q U Y c g k o s w 0 4 8. */
+ * characters (256 bits: 42 full characters and 4 bits), the last carrying those 4 bits and 2 zero pad bits, so it is one of
+ * A E I M Q U Y c g k o s w 0 4 8. */
 const HASH = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
 export type Pin = { seq: number; hash: string };
