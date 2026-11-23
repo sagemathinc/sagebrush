@@ -2469,6 +2469,8 @@ function filesPrompt(doc, generation, path, changed, what, ask = null) {
     return say(changed ? "This notebook's permissions changed while it ran. Run the cell again." : `This change to ${shown(name)} is allowed now. Run the cell again to ${done} (the notebook's variables are cleared).`, ["fbok"]);
   }
   if (perms.deniedWrite(doc, path)) { ask?.reply(null); return; } // (Don't allow: silent for the rest of the session)
+  // (the app's grants set aside while its permissions file can't be read: refused, saying why, nothing to allow)
+  if (perms.suspended()) { ask?.reply(null); fbReq = { open: false }; return say(perms.suspended(), ["fbok"]); }
   const req = { open: true, id: ++fbSeq, doc, generation, path, folder, trees: now.join("\n"), rev: revOf(doc), armedAt: performance.now() + FB_ARM, pressed: null, ask: ask ? { ...ask, claimed: false } : null };
   fbReq = req;
   if (folder === "/") return say(`This notebook is trying to ${doing} ${shown(name)} at the top of ${whereIs("/")}. To allow that, use File > Permissions…`, ["fbperms", "fbdeny"]);
@@ -2531,7 +2533,7 @@ function filesShown() {
   const only = current.id && !on ? perms.writeTrees(current.id) : [];
   const fp = document.getElementById("filesperm"); // (the Permissions panel's)
   if (fp) fp.textContent = on ? "Don't allow file changes" : "Allow file changes anywhere";
-  $("#permsfiles").textContent = !current.id ? "" : on ? "Allowed: this notebook's code may change your files." : only.length ? `Allowed only in ${only.join(", ")}: this notebook's code can't change files anywhere else.` : "Not allowed: this notebook's code can't change your files.";
+  $("#permsfiles").textContent = !current.id ? "" : perms.suspended() ? perms.suspended() : on ? "Allowed: this notebook's code may change your files." : only.length ? `Allowed only in ${only.join(", ")}: this notebook's code can't change files anywhere else.` : "Not allowed: this notebook's code can't change your files.";
   $("#permsfor").textContent = current.id ? `For "${docName()}".` : "";
   if (on && !filesBarEl.hidden) filesBar(false);
 }
@@ -5048,15 +5050,21 @@ const wsReady = (async () => {
       grantsKept = d.keepGrants(w, invoke, (f) => perms.onChange(f), undefined, undefined, grantsFile);
       // (another window of the app wrote grants.json, #1541: merged in, so what it took back is gone here too)
       const me = window.__TAURI_INTERNALS__?.metadata?.currentWebview?.label;
-      TAURI.event.listen("sb-grants-changed", async (ev) => {
-        if (!me || ev?.payload?.from === me) return;
+      // (one that can't be read: every grant here set aside until it can, tried again every 5 s: grants-file.ts
+      // reconcileGrants)
+      let again = null;
+      const reconcile = async () => {
+        clearTimeout(again);
+        again = null;
         try {
-          const r = await grantsFile.adopt();
-          if (r.changed) { for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); } if (current.id) filesShown(); }
+          const r = await d.reconcileGrants(grantsFile, perms);
+          if (r.changed) { for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); } if (fbReq?.doc !== undefined) filesBar(false); if (current.id) filesShown(); }
           // (this page's own changes grants.json hasn't yet: written, over what was just merged)
           if (r.ahead) grantsKept.changed();
+          if (r.failed) again = setTimeout(reconcile, 5000);
         } catch (e) { console.warn("grants.json:", e); }
-      }).catch((e) => console.warn("grants.json:", e));
+      };
+      TAURI.event.listen("sb-grants-changed", (ev) => { if (me && ev?.payload?.from !== me) void reconcile(); }).catch((e) => console.warn("grants.json:", e));
       // (in the quit's and the leave's barrier, as the settings' flush is: disk-mirror.ts keepAll)
       window.__sbGrantsFlush = () => grantsKept.flush();
     } catch (e) { console.warn("grants.json:", e); }

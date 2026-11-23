@@ -106,13 +106,15 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
     /** At launch: grants.json merged in (nothing seen yet, so what this page already holds wins); how many changed. */
     restore: () => one(async () => { try { return (await take(await read())).changed; } catch (e) { console.warn("grants.json:", e); return 0; } }),
     /** Another window wrote grants.json: merged in; how many documents changed here (and `ahead`: this page has
-     * changes of its own to write).  A read that fails changes nothing; a grants.json that isn't a record reads as
-     * none, as at launch (nothing stays allowed but what this page changed since). */
-    adopt: () => one(async () => {
-      let text: string;
-      try { text = await read(); } catch (e) { console.warn("grants.json:", e); return { changed: 0, ahead: false }; }
-      if (text === seen) return { changed: 0, ahead: false };
-      return take(text);
+     * changes of its own to write).  A grants.json that isn't a record reads as none, as at launch (nothing stays
+     * allowed but what this page changed since).  One that can't be read, or merged, is `failed`: this page can't
+     * know what is allowed now (reconcileGrants then sets its grants aside). */
+    adopt: () => one(async (): Promise<{ changed: number; ahead: boolean; failed?: unknown }> => {
+      try {
+        const text = await read();
+        if (text === seen) return { changed: 0, ahead: false };
+        return await take(text);
+      } catch (e) { console.warn("grants.json:", e); return { changed: 0, ahead: false, failed: e }; }
     }),
     /** This page's record written, over the grants.json it last saw; another window's write found there merged in,
      * then written again. */
@@ -146,6 +148,17 @@ export async function grantsToKeep(ws: GrantsWorkspace, storage: Store = localSt
     }
   }
   return out;
+}
+
+/** After another window wrote grants.json (and again while it can't be read): adopted; while it can't be read, every
+ * grant this page holds is set aside (permissions.js suspend: nothing allowed, nothing widens), and they come back only
+ * once it is read and merged.  `changed`: what the page's code may do changed (the page tells every interpreter);
+ * `ahead`: this page has changes of its own to write; `failed`: still set aside. */
+export async function reconcileGrants(sync: ReturnType<typeof grantsSync>, perms: { suspend(why: string | null): boolean }) {
+  const r = await sync.adopt();
+  const why = r.failed ? `Sagebrush couldn't read its file permissions (${String((r.failed as any)?.message ?? r.failed).slice(0, 200)}), so no notebook may change files until it can` : null;
+  const flipped = perms.suspend(why);
+  return { changed: r.changed > 0 || flipped, ahead: r.ahead, failed: !!r.failed };
 }
 
 /** grants.json written at each change of the record (`onChange`), one write at a time, the record as it is when each

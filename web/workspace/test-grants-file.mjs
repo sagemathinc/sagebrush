@@ -2,7 +2,7 @@
 // The desktop app's file permissions across launches (web/workspace/grants-file.ts, #1565): the record kept in
 // grants.json by where each notebook is, and brought back at the next launch under the notebooks' new ids.
 //   bun web/workspace/test-grants-file.mjs
-import { restoreGrants, grantsToKeep, keepGrants, grantsSync, mergeGrants, parseGrants, GRANTS_KEY } from "./grants-file.ts";
+import { restoreGrants, grantsToKeep, keepGrants, grantsSync, mergeGrants, reconcileGrants, parseGrants, GRANTS_KEY } from "./grants-file.ts";
 
 let fails = 0, checks = 0;
 const ok = (c, what) => { checks++; console.log((c ? "ok   " : "FAIL ") + what); if (!c) fails++; };
@@ -223,6 +223,61 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
     await k.flush();
     ok(!k.unwritten && J(parseGrants(f.kept()).docs) === J({ "ws:/a/one.ipynb": more }), "two windows: a keepGrants write held while the other window revokes: merged and written, the revocation stays: " + f.kept());
   }
+}
+
+// grants.json that can't be read after another window's write (astra4's SEC hold): fail closed.  The page's real
+// permissions (web/notebook/permissions.js, over a localStorage of the test's) set aside: the old write denied, no
+// Allow made; a later read that succeeds brings them back (reconcileGrants, as the page calls it)
+{
+  const mem = new Map();
+  globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
+  const { createPermissions } = await import("../notebook/permissions.js");
+  const perms = createPermissions();
+  const f = files(), w = workspace({ "/n.ipynb": { kind: "notebook", ref: "id1" } });
+  let broken = false;
+  const invoke = async (c, a) => { if (c === "grants_read" && broken) throw new Error("EACCES: permission denied, open 'grants.json'"); return f.invoke(c, a); };
+  const sync = grantsSync(w, invoke, localStorage);
+  ok(perms.grant("id1", "write", "/allowed").ok && perms.writeTrees("id1").join() === "/allowed", "fail closed: a notebook allowed in /allowed");
+  await sync.write();
+  await sync.restore();
+  // (another window then writes; this one's read of it fails)
+  broken = true;
+  const r = await reconcileGrants(sync, perms);
+  ok(r.failed && r.changed && perms.writeTrees("id1").length === 0 && perms.may("id1", "files") === false && /couldn't read its file permissions/.test(perms.suspended() ?? ""), "fail closed: a read that fails (EACCES) after another window's write sets the grants aside: the old write is denied, and the page is told (changed): " + J({ r, trees: perms.writeTrees("id1"), why: perms.suspended() }));
+  const g = perms.grant("id1", "write", "/more");
+  ok(!g.ok && g.why === "suspended" && perms.set("id1", "files", true) === false && perms.may("id1", "files") === false, "fail closed: meanwhile no Allow is made, nor held in this page: " + J(g));
+  const r2 = await reconcileGrants(sync, perms);
+  ok(r2.failed && !r2.changed && perms.writeTrees("id1").length === 0, "fail closed: still failing: still set aside, nothing new to tell");
+  broken = false;
+  const r3 = await reconcileGrants(sync, perms);
+  ok(!r3.failed && r3.changed && perms.suspended() === null && perms.writeTrees("id1").join() === "/allowed" && perms.may("id1", "files") === false, "fail closed: a later read that succeeds brings the grants back, and the page is told: " + J({ r3, trees: perms.writeTrees("id1") }));
+  // (and a revocation written meanwhile by the other window is what comes back: not the old grant)
+  broken = true;
+  await reconcileGrants(sync, perms);
+  f.set(J({ v: 1, seq: 9, docs: {} }));
+  broken = false;
+  await reconcileGrants(sync, perms);
+  ok(perms.suspended() === null && perms.writeTrees("id1").length === 0, "fail closed: a revocation written while the read failed is what comes back, not the old grant: " + J(perms.writeTrees("id1")));
+  // (no queued write around it: set aside again while the other window has taken a grant back, this page's write (a
+  // narrowing made meanwhile, queued in keepGrants) is refused by the app (it isn't over what this page last saw) and
+  // can't merge (the read fails): grants.json keeps the revocation, the grants stay set aside)
+  ok(perms.grant("id1", "write", "/again").ok, "fail closed: allowed again (/again) while it could be read");
+  await sync.write();
+  const sawFile = f.kept();
+  broken = true;
+  await reconcileGrants(sync, perms);
+  f.set(J({ v: 1, seq: 11, docs: {} }));
+  let changed;
+  const k = keepGrants(w, invoke, (fn) => (changed = fn), localStorage, 30, sync);
+  perms.deny("id1", "read", "/x");
+  changed();
+  const why = await k.flush().then(() => "written", (e) => String(e.message));
+  ok(why !== "written" && k.unwritten && J(parseGrants(f.kept()).docs) === J({}) && f.kept() !== sawFile && perms.writeTrees("id1").length === 0, "fail closed: a write queued while set aside doesn't put the old grant back in grants.json: " + J({ why, file: f.kept() }));
+  broken = false;
+  await reconcileGrants(sync, perms);
+  await k.flush();
+  ok(!k.unwritten && perms.writeTrees("id1").length === 0 && !JSON.stringify(parseGrants(f.kept()).docs).includes("/again"), "fail closed: ...and once read again, the revocation stands, the narrowing written with it: " + f.kept());
+  delete globalThis.localStorage;
 }
 
 console.log(fails ? `${fails} of ${checks} failed` : `test-grants-file: all ${checks} passed`);
