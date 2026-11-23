@@ -126,7 +126,13 @@ test("a package uses the packages it requires, at their exact ids, never their p
     ["from dep import Thing\nT = Thing if True else None\nT.attr = None\n", "monkeypatch", "attr"],
     // (a module object other than as an attribute's base, and any private name not self's in a requiring package)
     ["import dep\nf(dep)\n", "escape", "dep"],
-    ["from dep import sub\nreturn_it = [sub]\n", "escape", "sub"],
+    ["from dep import sub\nreturn_it = [sub]\n", "escape", "dep.sub"],
+    // (a submodule reached through its package: passed, stored, bound, returned)
+    ["import dep\nf(dep.sub)\n", "escape", "dep.sub"],
+    ["import dep\nx = [dep.sub]\n", "escape", "dep.sub"],
+    ["import dep\nx = dep.sub\n", "escape", "dep.sub"],
+    ["import dep\ndef g():\n    return dep.sub\n", "escape", "dep.sub"],
+    ["import dep.sub as s\nh = {1: s}\n", "escape", "dep.sub"],
     ["import dep\nclass K: pass\ny = K()._other\n", "attribute", "_other"],
   ] as [string, string, string][]) {
     const line = src.split("\n").length - 1;
@@ -134,7 +140,7 @@ test("a package uses the packages it requires, at their exact ids, never their p
     assert.ok(found.some((f: any) => f.construct === construct && f.hard === true), `${JSON.stringify(src)}: a hard ${construct} finding, declared or not`);
   }
   // (a call's result is a new value, not the package's: using it is no finding)
-  assert.deepEqual(lint("import dep\nx = dep.Thing(1)\nx.attr = 2\ny = dep.sub.f().g\n"), []);
+  assert.deepEqual(lint("import dep\nx = dep.Thing(1)\nx.attr = 2\ny = dep.sub.f().g\nz = dep.sub.Thing\n"), []);
   // (a reference outside the Core API: a finding; a reviewed declaration of that line and target waives it, no other)
   const ref = "import numpy as np\nr = np.random.rand.__self__\n";
   assert.ok(lint(ref, []).some((f: any) => f.construct === "reference" && f.target === "numpy.random.rand.__self__"));

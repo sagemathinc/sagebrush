@@ -297,7 +297,7 @@ export function lintPackage(pkg, api, others = []) {
     // names bound to core modules, or to names imported from them, in this file
     const coreAlias = new Map(); // local name -> "module" or "module.attr"
     const requiredAlias = new Set(); // local names bound to a required package's modules or names
-    const requiredModules = new Set(); // those bound to its modules themselves
+    const requiredModules = new Map(); // local name -> the required module it is bound to
     nodes(tree, (n) => {
       if (n.k === "Import") {
         for (const a of n.names) {
@@ -307,7 +307,7 @@ export function lintPackage(pkg, api, others = []) {
               if (parts.some((p) => p.startsWith("_"))) hard(file, n.line, "import", a.name, `imports the private module ${a.name} of a required package`);
               else {
                 requiredAlias.add(a.asname ?? parts[0]);
-                requiredModules.add(a.asname ?? parts[0]);
+                requiredModules.set(a.asname ?? parts[0], a.asname ? a.name : parts[0]);
               }
               continue;
             }
@@ -334,7 +334,7 @@ export function lintPackage(pkg, api, others = []) {
             else if (a.name.startsWith("_")) hard(file, n.line, "import", `${mod}.${a.name}`, `imports the private name ${mod}.${a.name} of a required package`);
             else {
               requiredAlias.add(a.asname ?? a.name);
-              if (requiredModule(`${mod}.${a.name}`)) requiredModules.add(a.asname ?? a.name);
+              if (requiredModule(`${mod}.${a.name}`)) requiredModules.set(a.asname ?? a.name, `${mod}.${a.name}`);
             }
           }
           return;
@@ -393,15 +393,25 @@ export function lintPackage(pkg, api, others = []) {
         }
       });
     }
-    // (a required package's module object is used only as the base of an attribute (pd.DataFrame): bound to
-    // another name, passed, returned or stored, it could be changed where the lint can't follow it)
+    // (a required package's module object, dep or dep.sub, is used only as the base of a longer attribute
+    // (pd.DataFrame, dep.sub.Thing): bound to another name, passed, returned or stored, it could be changed where the
+    // lint can't follow it)
+    const requiredModuleOf = (e) => {
+      if (e?.k === "Name") return requiredModules.get(e.id) ?? null;
+      if (e?.k === "Attribute") {
+        const b = requiredModuleOf(e.value);
+        return b !== null && requiredModule(`${b}.${e.attr}`) ? `${b}.${e.attr}` : null;
+      }
+      return null;
+    };
     const attributeBases = new Set();
     nodes(tree, (n) => {
       if (n.k === "Attribute") attributeBases.add(n.value);
     });
     nodes(tree, (n) => {
-      if (n.k === "Name" && requiredModules.has(n.id) && !attributeBases.has(n)) {
-        hard(file, n.line, "escape", n.id, `uses ${n.id}, a required package's module, other than as the base of an attribute`);
+      if ((n.k === "Name" || n.k === "Attribute") && !attributeBases.has(n)) {
+        const m = requiredModuleOf(n);
+        if (m !== null) hard(file, n.line, "escape", m, `uses ${m}, a required package's module, other than as the base of an attribute`);
       }
     });
     // the resolved core target of an expression, or null
