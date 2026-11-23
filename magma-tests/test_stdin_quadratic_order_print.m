@@ -1,0 +1,34 @@
+// A quadratic field's maximal order, printed as Magma 2.18-5 prints it: by the global variable that holds the
+// (cached) field now, else the field in full; "Maximal Equation Order of" where the order is Z[sqrt(d)].
+K := QuadraticField(5);
+print MaximalOrder(K);
+print Integers(K);
+A := QuadraticField(12);
+B := QuadraticField(3);
+print A eq B;
+print MaximalOrder(B);
+C := QuadraticField(-1);
+print MaximalOrder(C);
+print [MaximalOrder(C)];
+print <MaximalOrder(C), 1>;
+O := MaximalOrder(QuadraticField(-7));
+print O;
+D := QuadraticField(-7);
+print O;
+Q := QuadraticField(-3);
+O3 := MaximalOrder(Q);
+Q := 5;
+print O3;
+L := [QuadraticField(-11)];
+print MaximalOrder(L[1]);
+f := function() F := QuadraticField(-15); return F; end function;
+M := f();
+print MaximalOrder(M);
+K2<w> := QuadraticField(13);
+L2 := QuadraticField(13);
+print L2.1, MaximalOrder(L2);
+print MaximalOrder(QuadraticField(-19)), 2;
+print 3, MaximalOrder(QuadraticField(-5)), 3;
+print 3, MaximalOrder(QuadraticField(-7)), 3;
+print 3, MaximalOrder(QuadraticField(-11)), 3;
+print "end";
