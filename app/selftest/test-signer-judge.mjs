@@ -10,7 +10,10 @@ const d = (n, label, origin = label === "signer" ? "tauri://localhost" : "http:/
 const s = (n, k, label) => `[signer] signed ${n} (signature ${k}) for ${label}`;
 const refusedLine = "ok persist: signer at http://127.0.0.1:5: this page's signing call refused: Command not allowed; a page's signer_open refused: Command not found; an output frame's refused: not allowed";
 const reachedLine = "ok persist: signer at http://127.0.0.1:5: this page's signing call REACHED probe-signature-2; a page's signer_open refused: Command not found; an output frame's refused: not allowed";
-const v = (err, { out = refusedLine, seen = ["frame: requested", "frame: loaded", "frame: refused: not allowed"], control, code = 0, signal = null, problems = [] } = {}) => signerVerdict({ err: err.join("\n"), out, seen, control, code, signal, problems });
+// (every run's log ends with the signer page loaded and its state read, unless `bare`: the rows on those lines say so)
+const GOOD_STATE = "[signer] state: ready=complete probe=yes tauri=yes ran=yes protocol=tauri body=yes";
+const LOADED = ["[signer] page started null/signer/index.html", "[signer] page finished null/signer/index.html", "[signer] state check sent", GOOD_STATE];
+const v = (err, { out = refusedLine, seen = ["frame: requested", "frame: loaded", "frame: refused: not allowed"], control, code = 0, signal = null, problems = [], left = null, bare = false } = {}) => signerVerdict({ err: (bare ? err : [...err, ...LOADED]).join("\n"), out, seen, control, code, signal, problems, left });
 
 ok(signerLog([d(1, "signer"), s(1, 1, "signer"), "[signer] refused 2: not the signer window's page", d(2, "main")].join("\n")).dispatches.length === 2, "the log's lines are read: dispatches and signatures");
 
@@ -51,6 +54,28 @@ ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "nonsense" }).ok, "an unkn
   ok(!v([pg("finished", "http://127.0.0.1:9/sframe"), sent, d(1, "signer"), s(1, 1, "signer")], { control: "csp-off", seen: ["sframe: loaded"] }).ok, "the state check: sent on a frame's or another server's page fails");
   ok(!v([pg("finished", "null/index.html"), sent, d(1, "signer"), s(1, 1, "signer")]).ok, "the state check: sent on another app page fails");
   ok(v([pg("finished", "http://tauri.localhost/signer/index.html"), sent, d(1, "signer"), s(1, 1, "signer")]).ok && v([pg("finished", "null/signer/probe-nocsp.html"), sent, d(1, "signer"), s(1, 1, "signer")], { control: "csp-off", seen: ["sframe: loaded"] }).ok, "the state check: on the signer page on Windows, and the csp-off page: passes");
+}
+
+// the signer page must be its own document with its script run (the Linux failure: an empty document, ran=no)
+{
+  const pre = ["[signer] page finished null/signer/index.html", "[signer] state check sent"];
+  const good = [d(1, "signer"), s(1, 1, "signer")];
+  ok(!v([...pre, "[signer] state: ready=complete probe=yes tauri=yes ran=no protocol=other body=no", ...good], { bare: true }).ok, "the state: an empty document (ran=no protocol=other body=no, Linux on Nov 23) fails");
+  ok(!v(good, { bare: true }).ok, "the state: no state line at all fails");
+  ok(!v([...pre, "[signer] state: no-answer", ...good], { bare: true }).ok && !v([...pre, "[signer] state: unreadable", ...good], { bare: true }).ok, "the state: no-answer or unreadable fails");
+  ok(!v([...pre, "[signer] state: ready=complete probe=yes tauri=yes ran=yes protocol=other body=yes", ...good], { bare: true }).ok, "the state: our page's script, but not on the app protocol, fails");
+  ok(v([...pre, "[signer] state: ready=complete probe=yes tauri=yes ran=yes protocol=http body=yes", ...good], { bare: true }).ok, "the state: Windows' http://tauri.localhost passes");
+  ok(v([...pre, GOOD_STATE, ...good], { bare: true }).ok, "the state: the page's own document, its script run: passes");
+}
+
+// once the app has quit, the approvals window's data folder holds nothing like stored web data
+{
+  const good = [d(1, "signer"), s(1, 1, "signer")];
+  ok(v(good, { left: null }).ok && v(good, { left: [] }).ok, "the data folder: gone, or empty: passes");
+  ok(v(good, { left: ["salt", "mediakeys/"] }).ok, "the data folder: other framework files (listed for review): pass");
+  for (const bad of ["Cookies", "cookies.sqlite", "LocalStorage/", "Local Storage/leveldb/000003.log", "IndexedDB/", "Session Storage/", "CacheStorage/", "Cache/", "Service Worker/", "databases/", "storage/", "WebsiteData/hsts-storage.sqlite", "History", "Web Data", "Login Data", "x.db", "x.db-wal"]) {
+    ok(!v(good, { left: ["ok-file", bad] }).ok, `the data folder: ${bad} left fails`);
+  }
 }
 
 // (astra2: a run whose log shows everything it must, but whose app didn't end cleanly, never passes)

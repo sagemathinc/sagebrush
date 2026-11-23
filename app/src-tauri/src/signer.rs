@@ -111,6 +111,76 @@ pub fn state_check_due(selftest: bool, finished: bool, url: &Url, control: Optio
     check_due(selftest, finished, url, control) && !url.query_pairs().any(|(k, _)| k == "probe")
 }
 
+/// The signer window's web view data folder, under the app's data folder: a name fixed here (never from a page or any
+/// input), not a document window's (windows.rs webview_dir: webviews/doc-<n> only).  Its own folder gives the window
+/// a web view context of its own (see open).
+pub const DATA_FOLDER: &str = "signer-webview";
+pub fn data_folder(data: &std::path::Path) -> std::path::PathBuf {
+    data.join(DATA_FOLDER)
+}
+
+/// Whether `m` is a real folder (no symlink) no one but its owner may write (on Unix: no group or other write bit).
+fn private_folder(m: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    let private = {
+        use std::os::unix::fs::PermissionsExt;
+        m.permissions().mode() & 0o022 == 0
+    };
+    #[cfg(not(unix))]
+    let private = true;
+    m.file_type().is_dir() && private
+}
+#[cfg(unix)]
+fn owner(m: &std::fs::Metadata) -> u32 {
+    use std::os::unix::fs::MetadataExt;
+    m.uid()
+}
+#[cfg(not(unix))]
+fn owner(_: &std::fs::Metadata) -> u32 {
+    0
+}
+
+/// The signer window's data folder, made fresh before the window opens, or refused.  The app's data folder `data`
+/// must be a real folder (no symlink) no one else may write; a previous signer folder there must be one too, with
+/// the same owner, and is removed; the new one is made owner-only (0700 on Unix) and must then have the same owner
+/// as `data` (the folder this process just made is its own, so `data` is this user's).  (Windows: no symlink, a
+/// folder; its per-user ACLs aren't checked here.)
+pub fn prepare_data_folder(data: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let d = std::fs::symlink_metadata(data).map_err(|e| format!("the app's data folder: {e}"))?;
+    if !private_folder(&d) {
+        return Err("the app's data folder isn't a folder only its owner may write".into());
+    }
+    let f = data_folder(data);
+    match std::fs::symlink_metadata(&f) {
+        Ok(m) if private_folder(&m) && owner(&m) == owner(&d) => std::fs::remove_dir_all(&f).map_err(|e| format!("the approvals window's old data folder: {e}"))?,
+        Ok(_) => return Err("the approvals window's data folder isn't a folder only its owner may write".into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("the approvals window's data folder: {e}")),
+    }
+    #[cfg_attr(not(unix), allow(unused_mut))]
+    let mut b = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        b.mode(0o700);
+    }
+    // (create, not create_all: it fails if anything is there again)
+    b.create(&f).map_err(|e| format!("the approvals window's data folder: {e}"))?;
+    let m = std::fs::symlink_metadata(&f).map_err(|e| format!("the approvals window's data folder: {e}"))?;
+    #[cfg(unix)]
+    let only_owner = {
+        use std::os::unix::fs::PermissionsExt;
+        m.permissions().mode() & 0o077 == 0
+    };
+    #[cfg(not(unix))]
+    let only_owner = true;
+    if !(private_folder(&m) && only_owner && owner(&m) == owner(&d)) {
+        let _ = std::fs::remove_dir(&f);
+        return Err("the app's data folder isn't this user's".into());
+    }
+    Ok(f)
+}
+
 /// Whether a call of a signing command comes from the signer window on its own page.
 pub fn signer_caller_ok(label: &str, url: &Url, control: Option<&str>) -> bool {
     label == LABEL && signer_page(url, control)
@@ -196,20 +266,27 @@ pub fn open(app: &tauri::AppHandle) -> Result<(), String> {
             }
             yes
         });
-    // (incognito, so the window keeps no web storage, except on Linux: there WebKitGTK gives an incognito web view an
-    //  ephemeral context of its own, without the app protocol's handlers, and the page never ran (CI, Nov 23). The
-    //  signer page stores nothing itself, and Linux builds enroll only as browser tier.)
-    #[cfg(not(target_os = "linux"))]
-    {
-        w = w.incognito(true);
-    }
+    // (incognito, so the window keeps no web storage, and a web view context of its own: its own data folder, made
+    //  fresh here and removed when it closes.  Tauri keeps one context per data folder, and on Linux registers the app
+    //  protocol's and the IPC's handlers once per data folder: a window sharing the main window's (none, incognito, so
+    //  wry built it an ephemeral context of its own) got neither, and its page never loaded (CI, Nov 23).)
+    let folder = prepare_data_folder(&crate::disk::data_dir(app)?)?;
+    w = w.incognito(true).data_directory(folder.clone());
     // (a self-test's probe of the window: what the page is to try, the other local server's origin)
     if let Some(p) = probe {
         if let Some(other) = p.strip_prefix("signer:") {
             w = w.initialization_script(&format!("window.__SB_SIGNER_PROBE__ = {};", serde_json::json!({ "other": other, "control": c })));
         }
     }
-    w.build().map(|_| ()).map_err(|e| format!("the approvals window didn't open: {e}"))
+    let made = w.build().map_err(|e| format!("the approvals window didn't open: {e}"))?;
+    // (once the window is gone, its data folder goes too: best effort, logged as a fixed code)
+    made.on_window_event(move |e| {
+        if let tauri::WindowEvent::Destroyed = e {
+            let gone = std::fs::remove_dir_all(&folder).is_ok() || !folder.exists();
+            eprintln!("[signer] data folder removed: {}", if gone { "yes" } else { "no" });
+        }
+    });
+    Ok(())
 }
 
 static DISPATCHED: AtomicU64 = AtomicU64::new(0);
@@ -383,6 +460,87 @@ mod tests {
             for c in [None, Some("cap"), Some("cap+check"), Some("csp-off"), Some("guard-off")] {
                 assert!(!state_check_due(true, true, &u(other), c) && !check_due(true, true, &u(other), c), "{other} {c:?}");
             }
+        }
+    }
+
+    #[test]
+    fn the_signer_window_has_a_web_view_data_folder_of_its_own() {
+        let data = std::path::Path::new("/data");
+        assert_eq!(data_folder(data), std::path::Path::new("/data/signer-webview"));
+        // (no document window's folder is the signer's: those are doc-<n> only, and the main window has none)
+        assert!(crate::windows::webview_dir(data, LABEL).is_none() && crate::windows::webview_dir(data, "main").is_none());
+        assert_ne!(crate::windows::webview_dir(data, "doc-1"), Some(data_folder(data)));
+    }
+
+    fn temp() -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("sb-signer-{}-{:x}", std::process::id(), rand_suffix()));
+        std::fs::create_dir(&d).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        d
+    }
+    fn rand_suffix() -> u64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        static N: AtomicU64 = AtomicU64::new(0);
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64 ^ (N.fetch_add(1, Ordering::SeqCst) << 48)
+    }
+
+    #[test]
+    fn the_data_folder_is_made_fresh_and_owner_only() {
+        let data = temp();
+        let f = prepare_data_folder(&data).unwrap();
+        assert_eq!(f, data.join("signer-webview"));
+        // (a previous one's contents are gone)
+        std::fs::create_dir_all(f.join("WebKit/LocalStorage")).unwrap();
+        std::fs::write(f.join("cookies.sqlite"), b"x").unwrap();
+        let f = prepare_data_folder(&data).unwrap();
+        assert_eq!(std::fs::read_dir(&f).unwrap().count(), 0, "made empty again");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+        std::fs::remove_dir_all(&data).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_data_folder_is_refused_when_shared_or_substituted() {
+        use std::os::unix::fs::PermissionsExt;
+        // (an app data folder others may write)
+        for mode in [0o777, 0o775, 0o757, 0o722] {
+            let data = temp();
+            std::fs::set_permissions(&data, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert!(prepare_data_folder(&data).is_err(), "{mode:o}");
+            assert!(!data.join("signer-webview").exists(), "{mode:o}: nothing made");
+            std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o700)).unwrap();
+            std::fs::remove_dir_all(&data).unwrap();
+        }
+        // (a symlink as the app data folder)
+        let real = temp();
+        let link = real.with_extension("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(prepare_data_folder(&link).is_err(), "a symlinked app data folder");
+        std::fs::remove_file(&link).unwrap();
+        // (a symlink, a file, or a folder others may write, as the signer folder: refused, and the target untouched)
+        let data = temp();
+        let target = temp();
+        std::fs::write(target.join("keep"), b"x").unwrap();
+        std::os::unix::fs::symlink(&target, data.join("signer-webview")).unwrap();
+        assert!(prepare_data_folder(&data).is_err(), "a symlinked signer folder");
+        assert!(target.join("keep").exists(), "the symlink's target is untouched");
+        std::fs::remove_file(data.join("signer-webview")).unwrap();
+        std::fs::write(data.join("signer-webview"), b"x").unwrap();
+        assert!(prepare_data_folder(&data).is_err(), "a file as the signer folder");
+        std::fs::remove_file(data.join("signer-webview")).unwrap();
+        std::fs::create_dir(data.join("signer-webview")).unwrap();
+        std::fs::set_permissions(data.join("signer-webview"), std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(prepare_data_folder(&data).is_err(), "a signer folder others may write");
+        for d in [&data, &target, &real] {
+            std::fs::remove_dir_all(d).unwrap();
         }
     }
 

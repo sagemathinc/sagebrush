@@ -270,12 +270,27 @@ if (passed) {
 // framing the other server's page, and "guard-off" the signer window's navigation guard left out, the window sent to
 // that page (each loads there, and reaches nothing).  Calls that reached the command and signatures are counted from
 // the app's own log.
+// (what's in a folder, as relative paths, folders ending in "/"; null if it isn't there)
+function listTree(dir, rel = "") {
+  if (!existsSync(dir)) return null;
+  const out = [];
+  for (const e of readdirSync(join(dir, rel), { withFileTypes: true })) {
+    const r = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) out.push(`${r}/`, ...listTree(dir, r));
+    else out.push(r);
+  }
+  return out;
+}
 async function signerLaunch(control) {
   const o = await otherServer();
-  const res = await launch({ SAGEBRUSH_APP_PERSIST: `signer:${o.origin}`, SAGEBRUSH_APP_DATA_DIR: mkdtempSync(join(tmpdir(), "sagebrush-app-data-")), ...(control ? { SAGEBRUSH_APP_SIGNER_CONTROL: control } : {}) }, 120000);
+  const data = mkdtempSync(join(tmpdir(), "sagebrush-app-data-"));
+  const res = await launch({ SAGEBRUSH_APP_PERSIST: `signer:${o.origin}`, SAGEBRUSH_APP_DATA_DIR: data, ...(control ? { SAGEBRUSH_APP_SIGNER_CONTROL: control } : {}) }, 120000);
   await new Promise((r) => setTimeout(r, 1000));
   o.close();
-  const v = signerVerdict({ err: res.err, out: res.out, seen: o.seen, control, code: res.code, signal: res.signal, problems: res.problems });
+  // (the approvals window's web view data folder once the app has quit: signer.rs DATA_FOLDER)
+  const left = listTree(join(data, "signer-webview"));
+  console.log(`  the approvals window's data folder after the app quit: ${left === null ? "absent" : left.length ? `${left.length} entries: ${left.slice(0, 80).join(", ")}` : "empty"}`);
+  const v = signerVerdict({ err: res.err, out: res.out, seen: o.seen, control, code: res.code, signal: res.signal, problems: res.problems, left });
   console.log(`launch${control ? ` (control: ${control})` : ""}: ${persistLine(res)} (exit ${res.code}); reached the command ${v.counts.dispatches} (${v.counts.dispatchesOthers} not the approvals window's), signed ${v.counts.signed} (${v.counts.signedOthers} not the approvals window's)`);
   console.log(`  the other server (${o.origin}) saw: ${o.seen.length ? o.seen.join("; ") : "nothing"}`);
   return v;

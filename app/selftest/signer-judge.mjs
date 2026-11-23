@@ -18,7 +18,11 @@
 // that printed every expected line and then crashed, was killed or timed out never passes.  And the self-test's state
 // check ("[signer] state check sent", signer.rs) may only ever run on the signer's own page: each one must follow a
 // finished load of that page (tauri://localhost, or http://tauri.localhost on Windows), never another page the window
-// loaded (the guard-off control's destination) and never with no load before it.
+// loaded (the guard-off control's destination) and never with no load before it.  On that page, in every run, it
+// must find the page's own document with its script run ("ran=yes", "body=yes", on tauri: or Windows' http:), so a
+// page that never loaded fails by name.  And once the app has quit, the approvals window's web view data folder
+// (`left`: its entries, or null if it's gone) must hold nothing like stored web data: cookies, storage, databases,
+// caches, sessions, service workers, history.
 export function signerLog(err) {
   const dispatches = [...err.matchAll(/^\[signer\] dispatch (\d+) from (\S+) at (\S+)$/gm)].map((m) => ({ n: +m[1], label: m[2], origin: m[3] }));
   const signed = [...err.matchAll(/^\[signer\] signed (\d+) \(signature (\d+)\) for (\S+)$/gm)].map((m) => ({ n: +m[1], label: m[3] }));
@@ -37,11 +41,23 @@ export function stateChecksElsewhere(err) {
   return bad;
 }
 
-export function signerVerdict({ err, out, seen, control, code, signal, problems }) {
+/** The leftover entries that look like stored web data. */
+export const STORED = /cookie|storage|indexeddb|database|cache|session|service ?worker|history|login|web ?data|leveldb|\.ldb$|\.sqlite|\.db$|\.db-|hsts/i;
+export function storedLeft(left) {
+  return (left ?? []).filter((e) => STORED.test(e));
+}
+
+export function signerVerdict({ err, out, seen, control, code, signal, problems, left = null }) {
   const { dispatches, signed } = signerLog(err);
   const why = [];
   const elsewhere = stateChecksElsewhere(err);
   if (elsewhere.length) why.push(`the state check ran on another page than the signer's: ${elsewhere.join("; ")}`);
+  const states = [...err.matchAll(/^\[signer\] state: (.*)$/gm)].map((m) => m[1]).filter((x) => x !== "not-signer-page");
+  if (!states.some((x) => /^ready=complete probe=yes tauri=yes ran=yes protocol=(tauri|http) body=yes$/.test(x))) {
+    why.push(`the approvals window's page wasn't its own document with its script run (state: ${states.join("; ") || "none"})`);
+  }
+  const stored = storedLeft(left);
+  if (stored.length) why.push(`the approvals window's data folder kept stored web data after the app quit: ${stored.slice(0, 20).join(", ")}`);
   if (code !== 0 || signal != null || (problems ?? []).length) why.push(`the app didn't end cleanly (exit ${code}, signal ${signal ?? "none"}${(problems ?? []).length ? `; ${problems.join("; ")}` : ""})`);
   const fromSigner = (xs) => xs.filter((x) => x.label === "signer");
   const fromOthers = (xs) => xs.filter((x) => x.label !== "signer");
