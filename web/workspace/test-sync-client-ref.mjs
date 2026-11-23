@@ -30,11 +30,13 @@ if (process.env.SYNC_REQUIRE_CLAIM !== "1") {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const J = JSON.stringify;
-// (each case signs in its own account, so none sees another's log)
-const ACCOUNTS = Array.from({ length: 89 }, (_, i) => `c1c1c1c1-${String(i).padStart(4, "0")}-4c1c-8c1c-c1c1c1c1c1${String(i).padStart(2, "0")}`);
+// (each case signs in its own account, so none sees another's log: 97 of them, then FULL and SMALL, which end the
+// cases' pool; an id's index stays under 100, its last group 12 hex digits)
+const accountId = (i) => `c1c1c1c1-${String(i).padStart(4, "0")}-4c1c-8c1c-c1c1c1c1c1${String(i).padStart(2, "0")}`;
 // (the cloud's fake CoCalc gives FULL a small storage and SMALL small files; the reference server has no plan limits,
 // so the two cases that use them are skipped here, by name)
-const FULL = ACCOUNTS[87], SMALL = ACCOUNTS[88];
+const FULL = accountId(87), SMALL = accountId(88);
+const ACCOUNTS = [...Array.from({ length: 99 }, (_, i) => accountId(i)).filter((a) => a !== FULL && a !== SMALL), FULL, SMALL];
 // (the control pages' accounts: their own, so no case of the main run sees a control's log)
 // (each control page takes its own 3 of them, by its place in CONTROL_PAGES)
 const CTL_ACCOUNTS = Array.from({ length: 30 }, (_, i) => `d0d0d0d0-${String(i).padStart(4, "0")}-4d0d-8d0d-d0d0d0d0d0${String(i).padStart(2, "0")}`);
@@ -428,6 +430,7 @@ async function control(body) {
     case "set": Object.assign(ctl, body.set); return { ok: true };
     case "log": { const out = JSON.parse(JSON.stringify(log)); if (body.reset) resetLog(); return out; }
     case "closeAll": { if (ctl.closeAllReject) throw new Error("injected: closeAll rejected"); const n = closers.size; for (const f of [...closers]) f(1000); return { closed: n }; }
+    case "dead": { let n = 0; for (const c of pageSockets) if (!c.data.dead) { c.data.dead = true; n++; } return { dead: n }; }
     case "release": { const n = held.length; for (const f of held.splice(0)) f(); return { released: n }; }
     case "probe": return probe(body);
     // (index_changed notices, as the account object sends them (plan-sync-index-changed r1), `times` of them to every
@@ -743,6 +746,8 @@ const websocket = {
       return d.closeBoth(1000);
     }
     up.onmessage = (text) => {
+      // (a socket gone dead without a close (a NAT or Wi-Fi path that stopped carrying anything): nothing passes)
+      if (d.dead) return;
       let m;
       try { m = JSON.parse(text); } catch { m = {}; }
       log.got.push({ t: m.t, req: m.req, ops: m.t === "ack" ? m.ops : m.t === "index" ? m.ops?.length : undefined, code: m.code });
@@ -797,6 +802,7 @@ const websocket = {
     try { m = JSON.parse(text); } catch { m = {}; }
     log.sent.push(m.t === "ops" ? { t: "ops", req: m.req, dseqs: m.ops.map((o) => o.dseq), json: m.ops.map((o) => JSON.stringify(o)), at: Date.now() } : { t: m.t, req: m.req, index_after: m.index_after, after: m.after, at: Date.now() });
     if (m.t === "hello") d.helloAccount = m.account ?? null;
+    if (d.dead) return;
     fl({ k: "sent", t: m.t, req: m.req, ...(m.t === "batch" ? { doc: m.doc } : {}) });
     // (every batch checked as the canonical reference server checks it (§5.8: one generation for each client in its
     // patches, and no other): a failing one is refused here, routed to its request, and never forwarded)

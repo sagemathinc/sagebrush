@@ -303,8 +303,11 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
                 return None;
             }
             // nonsingular, but every prime tried divides det a: keep looking
+            // (det a can hold many of them; one elimination per prime)
+            let _phase = sagebrush_interrupt::enter("arith.solve_prime");
             let mut found = None;
             for p in Primes::below(below).skip(3) {
+                sagebrush_interrupt::check();
                 let m = Modulus::new(p);
                 if let Some(lu) = a.reduce(&m).lu() {
                     found = Some((m, lu));
@@ -554,8 +557,92 @@ fn minor_bound_log2(a: &ZMat, r: usize) -> f64 {
 /// The reduced row echelon form over Q of an integer matrix, as
 /// (N, den, pivots): the nonzero rows are N / den (rank = pivots.len()).
 ///
-/// Multimodular: modulo each prime, the rref R_p and d_p = det A[S, P]
-/// for a fixed nonsingular pivot minor (rows S, pivot columns P) give
+/// One prime's elimination gives pivots P and rank k first.  If k is the
+/// number of columns the form is [I; 0]: the rank over Q is at least the
+/// rank modulo a prime, and at most the number of columns.  If only a few
+/// columns F are free (|F| <= k / DIXON_FREE_RATIO), the rest of the form
+/// is X = A[S, P]^-1 A[S, F] for independent rows S, by Dixon's lifting
+/// (`solve`), certified exactly (`rref_dixon`); a prime that was unlucky
+/// fails the certificate.  Otherwise, or then, `rref_multimodular`.
+pub fn rref(a: &ZMat) -> (ZMat, BigInt, Vec<usize>) {
+    if a.d.iter().all(|x| x.is_zero()) {
+        return (ZMat::zero(0, a.cols), BigInt::one(), vec![]);
+    }
+    let cols = a.cols;
+    let p = Primes::new().next().expect("a prime");
+    let m = Modulus::new(p);
+    let mut r = a.reduce(&m);
+    let piv = r.rref();
+    let k = piv.len();
+    if k == cols {
+        let mut id = ZMat::zero(k, cols);
+        for i in 0..k {
+            id.d[i * cols + i] = BigInt::one();
+        }
+        return (id, BigInt::one(), piv);
+    }
+    if k > 0 && (cols - k) * DIXON_FREE_RATIO <= k {
+        if let Some(f) = rref_dixon(a, &piv, &m) {
+            return f;
+        }
+    }
+    rref_multimodular(a)
+}
+
+/// Dixon's lifting pays for itself while few columns are free.  Measured
+/// natively (release build, one core) on random 200-row matrices of rank
+/// 200 with entries in [-2, 2]: with 2 free columns it was 5 times faster
+/// than the multimodular elimination, with 20 about as fast, and with 40
+/// slower.
+const DIXON_FREE_RATIO: usize = 16;
+
+/// The reduced echelon form from the pivots `piv` found modulo the prime
+/// of `m`, or None if they are not the form's pivots over Q.  With S the
+/// rows of A independent in its pivot columns modulo p (so A[S, P] is
+/// nonsingular over Q), N = den A[S, P]^-1 A[S, :] has den I in the
+/// columns P, X = solve(A[S, P], A[S, F]) in the free columns, and the
+/// row space of A[S, :].  It is den times the reduced echelon form of A
+/// exactly when (a) each row of N is zero left of its pivot, and (b) every
+/// row of A outside S is in its row space: A[r, :] den = A[r, P] N.  Both
+/// are checked exactly; a failure means the prime was unlucky.
+fn rref_dixon(a: &ZMat, piv: &[usize], m: &Modulus) -> Option<(ZMat, BigInt, Vec<usize>)> {
+    let cols = a.cols;
+    let k = piv.len();
+    let mut t = a.select(&(0..a.rows).collect::<Vec<_>>(), piv).transpose().reduce(m);
+    let srows = t.rref();
+    if srows.len() != k {
+        return None;
+    }
+    let free: Vec<usize> = (0..cols).filter(|c| !piv.contains(c)).collect();
+    let (x, den) = solve(&a.select(&srows, piv), &a.select(&srows, &free))?;
+    let mut nm = ZMat::zero(k, cols);
+    for i in 0..k {
+        nm.d[i * cols + piv[i]] = den.clone();
+        for (j, &f) in free.iter().enumerate() {
+            nm.d[i * cols + f] = x.get(i, j).clone();
+        }
+    }
+    // (a) zero left of each pivot
+    for i in 0..k {
+        if free.iter().any(|&f| f < piv[i] && !nm.get(i, f).is_zero()) {
+            return None;
+        }
+    }
+    // (b) the other rows in the row space
+    let others: Vec<usize> = (0..a.rows).filter(|i| !srows.contains(i)).collect();
+    if !rows_in_span(a, &others, piv, &nm.d, &den) {
+        return None;
+    }
+    // lowest terms (solve's den is the least common denominator already)
+    Some((nm, den, piv.to_vec()))
+}
+
+/// The reduced echelon form by multimodular elimination alone (`rref`'s
+/// general case, and its fallback).
+///
+/// Modulo each prime, the rref R_p and d_p = det A[S, P]
+/// for a fixed nonsingular pivot minor (rows S, pivot columns P: the rows
+/// the first prime's elimination took, whose pivots give d_p) give
 /// N = d R modulo p, reconstructed by CRT (|N|, |d| are r x r minors, so
 /// below the Hadamard bound B).  The identity A d = A[:, P] N holds
 /// modulo every prime used, and its entries are below (r + 1) |A| B, so
@@ -564,7 +651,7 @@ fn minor_bound_log2(a: &ZMat, r: usize) -> f64 {
 /// <= rank A, so N / d is the reduced echelon form.  Primes whose pivots
 /// differ from the best seen are skipped (an unlucky prime only loses
 /// rank or moves pivots right).
-pub fn rref(a: &ZMat) -> (ZMat, BigInt, Vec<usize>) {
+pub fn rref_multimodular(a: &ZMat) -> (ZMat, BigInt, Vec<usize>) {
     if a.d.iter().all(|x| x.is_zero()) {
         return (ZMat::zero(0, a.cols), BigInt::one(), vec![]);
     }
@@ -576,10 +663,20 @@ pub fn rref(a: &ZMat) -> (ZMat, BigInt, Vec<usize>) {
     let mut res: Vec<Vec<u64>> = vec![];
     let mut bits = 0.0f64;
     let mut target = f64::INFINITY;
+    // early stop: a fixed weighted sum of the free entries of the form R
+    // (not den R) reconstructed as a rational n / d at doubling checkpoints;
+    // each new prime only tests n = d x (mod p).  When a
+    // reconstruction holds for a new prime well below the bound, the whole
+    // form is reconstructed rationally and kept only if it passes the exact
+    // check (the sum is only a trigger)
+    let mut sentinel = Sentinel { free: vec![], last: None, rec_bits: 0.0 };
+    let mut next_try = 0.0f64;
+    let mut early: Option<Vec<BigInt>> = None;
     for p in Primes::new() {
         let m = Modulus::new(p);
         let mut r = a.reduce(&m);
-        let piv = r.rref();
+        // the elimination's own pivot rows, and det A[those rows, P]
+        let (piv, prows, pdet) = r.rref_rows();
         let reset = match &best {
             None => true,
             Some(b) => better(&piv, b),
@@ -588,38 +685,87 @@ pub fn rref(a: &ZMat) -> (ZMat, BigInt, Vec<usize>) {
             if piv.is_empty() {
                 continue;
             }
-            // rows S: independent rows of A[:, P] modulo p
-            let mut t = a.select(&(0..a.rows).collect::<Vec<_>>(), &piv).transpose().reduce(&m);
-            srows = t.rref();
+            // rows S: the rows the pivots were found in (A[S, P] is
+            // nonsingular modulo p, so over Q)
+            srows = prows.clone();
             let k = piv.len();
             let bound = minor_bound_log2(a, k);
             target = bound + ((k + 1) as f64).log2() + amax + 2.0;
             primes.clear();
             res.clear();
             bits = 0.0;
+            next_try = 0.0;
+            // the trigger's entries: those right of each row's pivot in the
+            // free columns (one entry, or a constant column, could settle
+            // long before the form)
+            let mut ispiv = vec![false; cols];
+            for &c in &piv {
+                ispiv[c] = true;
+            }
+            let mut free = vec![];
+            for (i, &pc) in piv.iter().enumerate() {
+                for c in pc + 1..cols {
+                    if !ispiv[c] {
+                        free.push(i * cols + c);
+                    }
+                }
+            }
+            sentinel = Sentinel { free, last: None, rec_bits: 0.0 };
             best = Some(piv.clone());
         } else if Some(&piv) != best.as_ref() {
             continue;
         }
         let pv = best.as_ref().unwrap();
-        let dp = a.select(&srows, pv).reduce(&m).det();
+        // d_p = det A[S, P] modulo p: from the elimination when it took the
+        // same rows, else computed
+        let dp = if prows == srows { pdet } else { a.select(&srows, pv).reduce(&m).det() };
         if dp == 0 {
             continue;
         }
         let k = pv.len();
         let mut v: Vec<u64> = r.d[..k * cols].iter().map(|&x| m.mul(dp, x)).collect();
         v.push(dp);
+        // the trigger's residue in R_p (not d_p R_p)
+        let x = m.mul(trigger(&m, &v, &sentinel.free), m.inv(dp).expect("a nonzero determinant"));
         primes.push(p);
         res.push(v);
         bits += (p as f64).log2();
         if bits > target {
             break;
         }
+        // (only below the share of the bound where a stop may be tried; each
+        // prime costs one test, a reconstruction only at doubling checkpoints)
+        if bits < EARLY_STOP_SHARE * target {
+            let mut stable = false;
+            if let Some((n, d)) = &sentinel.last {
+                stable = mod_u64(n, &m) == m.mul(mod_u64(d, &m), x);
+                if !stable {
+                    sentinel.last = None;
+                }
+            }
+            if sentinel.last.is_none() && bits >= 2.0 * sentinel.rec_bits && bits < TRIGGER_SHARE * target {
+                sentinel.last = sentinel_rational(&primes, &res, &sentinel.free);
+                sentinel.rec_bits = bits;
+                #[cfg(test)]
+                RECONSTRUCTIONS.with(|c| c.set(c.get() + 1));
+            }
+            if stable && bits >= next_try {
+                #[cfg(test)]
+                ATTEMPTS.with(|c| c.set(c.get() + 1));
+                if let Some(all) = rref_rational(&primes, &res).filter(|all| rref_certified(a, pv, all)) {
+                    #[cfg(test)]
+                    EARLY_STOPS.with(|c| c.set(c.get() + 1));
+                    early = Some(all);
+                    break;
+                }
+                next_try = 2.0 * bits;
+            }
+        }
         sagebrush_interrupt::check();
     }
     let piv = best.unwrap();
     let k = piv.len();
-    let mut all = crt_all(&primes, &res);
+    let mut all = early.unwrap_or_else(|| crt_all(&primes, &res));
     let mut den = all.pop().unwrap();
     let mut nm = ZMat { rows: k, cols, d: all };
     // lowest terms, positive denominator
@@ -639,6 +785,140 @@ pub fn rref(a: &ZMat) -> (ZMat, BigInt, Vec<usize>) {
     (nm, den, piv)
 }
 
+/// The share of the bound below which the trigger entry is reconstructed:
+/// a rational reconstruction costs about the square of its size, and a form
+/// that settles that early (in at most a quarter of the bound) is the one an
+/// early stop pays for; the stop itself may still be tried, on a
+/// reconstruction made earlier, up to EARLY_STOP_SHARE.
+const TRIGGER_SHARE: f64 = 0.25;
+
+/// The early stop's trigger: the indices `free` of the entries it weighs
+/// in a prime's residues, its last rational reconstruction n / d (None once
+/// a prime disagrees) and the bits of the modulus it was made with.
+struct Sentinel {
+    free: Vec<usize>,
+    last: Option<(BigInt, BigInt)>,
+    rec_bits: f64,
+}
+
+/// The trigger's weight for the entry at index i of a prime's residues:
+/// fixed, odd and below 2^16.
+fn trigger_weight(i: usize) -> u64 {
+    ((i as u64 + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15) >> 48) | 1
+}
+
+/// The trigger's sum of w_i v_i over the indices `free`, modulo the prime
+/// (each term is below 2^80, so the sum of fewer than 2^48 fits).
+fn trigger(m: &Modulus, v: &[u64], free: &[usize]) -> u64 {
+    let mut t = 0u128;
+    for &i in free {
+        t += trigger_weight(i) as u128 * v[i] as u128;
+    }
+    m.reduce_u128(t)
+}
+
+/// The trigger (the weighted sum of R's entries at `free`) as a rational
+/// n / d with |n|, d <= sqrt(m / 2), m the primes' product, from the
+/// residues d_p R_p (and d_p last).
+fn sentinel_rational(primes: &[u64], res: &[Vec<u64>], free: &[usize]) -> Option<(BigInt, BigInt)> {
+    let raw: Vec<Vec<u64>> = primes
+        .iter()
+        .zip(res)
+        .map(|(&p, v)| {
+            let md = Modulus::new(p);
+            vec![md.mul(trigger(&md, v, free), md.inv(v[v.len() - 1]).expect("a nonzero determinant"))]
+        })
+        .collect();
+    let m = product(primes);
+    let half = (&m / 2u32).sqrt();
+    ratrecon(&crt_all(primes, &raw)[0], &m, &half, &half)
+}
+
+/// The product of the primes.
+fn product(primes: &[u64]) -> BigInt {
+    primes.iter().fold(BigInt::one(), |acc, &p| acc * BigInt::from(p))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The trigger's rational reconstructions, for the tests.
+    static RECONSTRUCTIONS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// The early stops tried (a whole reconstruction and check each), for
+    /// the tests.
+    static ATTEMPTS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// The early stops taken, for the tests.
+    static EARLY_STOPS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// The share of the reconstruction bound below which `rref_multimodular`
+/// tries an early stop.  The random matrices measured (entries in [-100,
+/// 100], up to 200 x 300) have forms that need most of the bound, and no
+/// stop was tried for them; a form much smaller than the bound (a Hecke
+/// operator's kernel, say) stops after a few primes.
+const EARLY_STOP_SHARE: f64 = 0.6;
+
+/// The form R itself from the residues d_p R_p (and d_p last): R_p's
+/// entries reconstructed together and as rationals with one denominator L,
+/// |numerators|, L <= sqrt(m / 2), returned as L R's entries then L; None
+/// if they are not such rationals yet.
+fn rref_rational(primes: &[u64], res: &[Vec<u64>]) -> Option<Vec<BigInt>> {
+    let m = &product(primes);
+    let raw: Vec<Vec<u64>> = primes
+        .iter()
+        .zip(res)
+        .map(|(&p, v)| {
+            let md = Modulus::new(p);
+            let (body, dp) = v.split_at(v.len() - 1);
+            let inv = md.inv(dp[0]).expect("a nonzero determinant");
+            body.iter().map(|&x| md.mul(x, inv)).collect()
+        })
+        .collect();
+    let half = (m / 2u32).sqrt();
+    let (mut nm, den) = ratrecon_vec(&crt_all(primes, &raw), m, &half, &half)?;
+    nm.push(den);
+    Some(nm)
+}
+
+/// Whether `all` (N's k x cols entries row by row, then den, from the
+/// reconstruction) is den times the reduced echelon form of A with pivots
+/// `piv`.  N is zero left of each pivot and den I in the pivot columns by
+/// construction (every prime's residues are).  It is the form exactly when
+/// den A = A[:, P] N: then N = den A[S, P]^-1 A[S, :] for any rows S where
+/// A[S, P] is nonsingular, so its rows span A's row space, and they are in
+/// reduced echelon form (`rows_in_span`, for every row).
+fn rref_certified(a: &ZMat, piv: &[usize], all: &[BigInt]) -> bool {
+    let den = &all[piv.len() * a.cols];
+    !den.is_zero() && rows_in_span(a, &(0..a.rows).collect::<Vec<_>>(), piv, all, den)
+}
+
+/// Whether den A[r, :] = A[r, P] N for each row r in `rows`, where N (k x
+/// cols, row by row at the start of `n`) is den I in the pivot columns P,
+/// so that only the free columns need checking; exactly, over Z.
+#[inline(never)]
+fn rows_in_span(a: &ZMat, rows: &[usize], piv: &[usize], n: &[BigInt], den: &BigInt) -> bool {
+    let cols = a.cols;
+    let mut ispiv = vec![false; cols];
+    for &c in piv {
+        ispiv[c] = true;
+    }
+    for &row in rows {
+        sagebrush_interrupt::check();
+        for f in (0..cols).filter(|&c| !ispiv[c]) {
+            let mut s = a.get(row, f) * den;
+            for (i, &pc) in piv.iter().enumerate() {
+                let w = a.get(row, pc);
+                if !w.is_zero() {
+                    s -= w * &n[i * cols + f];
+                }
+            }
+            if !s.is_zero() {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 pub fn rank(a: &ZMat) -> usize {
     rref(a).2.len()
 }
@@ -656,6 +936,156 @@ pub fn kernel(a: &ZMat) -> ZMat {
         }
     }
     k
+}
+
+/// The Hermite normal form (upper triangular rows generating the row
+/// lattice L of a, positive pivots, entries above a pivot in [0, pivot))
+/// of a square nonsingular matrix, attempted for the form
+/// [[I, h], [0, d]] (Z^n / L cyclic of order d = |det a|, generated by the
+/// last unit vector), or None: for every other form, and for that one when
+/// the right-hand sides below do not find h (the caller then falls back).
+///
+/// For a vector b, x = d a^-1 b (an integer vector: adj(a) b up to sign;
+/// a Dixon solve) has a x = d b = 0 (mod d).  If a = U H with H as above,
+/// x = (d c - c_n h, c_n) for c = U^-1 b, so when x_n = c_n is invertible
+/// modulo d, w = x / x_n (mod d) = (-h, 1).  b is random (a fixed sequence,
+/// so results are reproducible): with b = e_n, c_n is an entry of U^-1 that
+/// can share a factor with d even in this case.  When the first b's c_n
+/// does, more right-hand sides are solved and combined so that the last
+/// entry is 1 (mod d); anything else is left to the caller.  The first
+/// solve's denominator, a large divisor of det a, also leaves few primes
+/// for d (as in `det`).  `hermite_cyclic_holds` then checks a H^-1
+/// integral exactly: with det H = d = |det a| that makes the row lattices
+/// equal (Pernet and Stein, "Fast computation of Hermite normal forms of
+/// random integer matrices", J. Number Theory 130 (2010): the last-column
+/// step).
+pub fn hermite_cyclic(a: &ZMat) -> Option<ZMat> {
+    let n = a.rows;
+    if n == 0 || a.cols != n {
+        return None;
+    }
+    let hb = hadamard_log2(a);
+    if hb == f64::NEG_INFINITY {
+        return None;
+    }
+    let mut seed = 0x9e3779b97f4a7c15u64;
+    let mut rhs = |k: usize| -> ZMat {
+        let mut b = ZMat::zero(n, k);
+        for x in b.d.iter_mut() {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            *x = BigInt::from((seed % 201) as i64 - 100);
+        }
+        b
+    };
+    let (u, den) = solve(a, &rhs(1))?;
+    let d = det_crt(a, &den, hb - den.bits() as f64 + 1.0).abs();
+    if d.is_zero() {
+        return None;
+    }
+    if n == 1 {
+        return Some(ZMat {
+            rows: 1,
+            cols: 1,
+            d: vec![d],
+        });
+    }
+    // the columns x = d u / den modulo d (integral: den divides det a)
+    let cols = |u: &ZMat, den: &BigInt| -> Option<Vec<Vec<BigInt>>> {
+        let (f, r) = d.div_rem(den);
+        if !r.is_zero() {
+            return None;
+        }
+        Some((0..u.cols).map(|j| (0..n).map(|i| (u.get(i, j) * &f).mod_floor(&d)).collect()).collect())
+    };
+    let mut xs = cols(&u, &den)?;
+    let mut g = xs[0][n - 1].gcd(&d);
+    for &k in HERMITE_CYCLIC_MORE_RHS {
+        if g.is_one() {
+            break;
+        }
+        let (u, den) = solve(a, &rhs(k))?;
+        let more = cols(&u, &den)?;
+        for x in &more {
+            g = g.gcd(&x[n - 1]);
+        }
+        xs.extend(more);
+    }
+    // In the form above each column is x = c (-h, 1) (mod d), c = x_n.
+    // Combine the columns: sum mu_j c_j = gcd(c_1, .., c_k, d) (mod d); if
+    // that is 1, w = sum mu_j x_j (mod d) has w_n = 1 and w = (-h, 1).  When
+    // Z^n / L is not cyclic, of exponent e < d, every x is d/e times an
+    // integer vector, so the gcd is never 1.
+    if !g.is_one() {
+        return None;
+    }
+    let mut g = d.clone();
+    let mut mu = vec![BigInt::zero(); xs.len()];
+    for (j, x) in xs.iter().enumerate() {
+        let e = g.extended_gcd(&x[n - 1]);
+        for m in mu.iter_mut() {
+            *m = (&*m * &e.x).mod_floor(&d);
+        }
+        mu[j] = e.y.mod_floor(&d);
+        g = e.gcd;
+        if g.is_one() {
+            break;
+        }
+    }
+    if !g.is_one() {
+        return None;
+    }
+    let w = |i: usize| -> BigInt {
+        let mut t = BigInt::zero();
+        for (m, x) in mu.iter().zip(&xs) {
+            if !m.is_zero() {
+                t += m * &x[i];
+            }
+        }
+        t.mod_floor(&d)
+    };
+    if !(w(n - 1) - 1u32).mod_floor(&d).is_zero() {
+        return None;
+    }
+    let h: Vec<BigInt> = (0..n - 1).map(|i| (-w(i)).mod_floor(&d)).collect();
+    if !hermite_cyclic_holds(a, &h, &d) {
+        return None;
+    }
+    let mut out = ZMat::zero(n, n);
+    for i in 0..n - 1 {
+        out.d[i * n + i] = BigInt::one();
+        out.d[i * n + n - 1] = h[i].clone();
+    }
+    out.d[n * n - 1] = d;
+    Some(out)
+}
+
+/// The further random right-hand sides hermite_cyclic solves for, a batch
+/// at a time, while the last entries' gcd with d is not 1.
+const HERMITE_CYCLIC_MORE_RHS: &[usize] = &[2, 5];
+
+/// Whether H = [[I, h], [0, d]] (h of length n - 1) generates the row
+/// lattice L of the square matrix a, given d = |det a|: a H^-1 is integral
+/// exactly when every row r of a has r_n - sum_(i<n) r_i h_i = 0 (mod d),
+/// which puts L inside the lattice of H; both have determinant d, so they
+/// are equal.
+pub fn hermite_cyclic_holds(a: &ZMat, h: &[BigInt], d: &BigInt) -> bool {
+    let n = a.rows;
+    if a.cols != n || h.len() + 1 != n || d.is_zero() {
+        return false;
+    }
+    for r in 0..n {
+        sagebrush_interrupt::check();
+        let mut s = a.get(r, n - 1).clone();
+        for (i, hi) in h.iter().enumerate() {
+            s -= a.get(r, i) * hi;
+        }
+        if !s.mod_floor(d).is_zero() {
+            return false;
+        }
+    }
+    true
 }
 
 /// (N, den) with a^-1 = N / den in lowest terms, or None if a is
@@ -832,6 +1262,232 @@ mod tests {
         assert_eq!(piv, vec![1, 3]);
         assert_eq!(nm.row(0), &[BigInt::zero(), den.clone(), &den * 2, BigInt::zero()]);
         assert_eq!(rank(&ZMat::zero(3, 3)), 0);
+    }
+    /// The early stop's exact check: den A = A[:, P] N in the free columns.
+    /// It accepts the form, and refuses one entry off, a zero denominator,
+    /// and the form scaled in one row only.
+    #[test]
+    fn rref_certified_accepts_only_the_form() {
+        let z = |v: &[i64]| v.iter().map(|&x| BigInt::from(x)).collect::<Vec<_>>();
+        // rows (3, 0, 1) + (0, 3, 2), (3, 0, 1) and their sum: rank 2, form
+        // [[1, 0, 1/3], [0, 1, 2/3]]
+        let a = ZMat::from_rows(vec![z(&[3, 3, 3]), z(&[3, 0, 1]), z(&[6, 3, 4])]);
+        let piv = [0usize, 1];
+        let good: Vec<BigInt> = z(&[3, 0, 1, 0, 3, 2, 3]);
+        assert!(rref_certified(&a, &piv, &good));
+        let mut off = good.clone();
+        off[5] += BigInt::one();
+        assert!(!rref_certified(&a, &piv, &off));
+        let mut zero = good.clone();
+        zero[6] = BigInt::zero();
+        assert!(!rref_certified(&a, &piv, &zero));
+        let row = z(&[3, 0, 1, 0, 6, 4, 3]);
+        assert!(!rref_certified(&a, &piv, &row));
+        // the same with a row of A over 2^130
+        let big: BigInt = BigInt::one() << 130usize;
+        let a2 = ZMat::from_rows(vec![a.d[0..3].iter().map(|x| x * &big).collect(), a.d[3..6].to_vec(), a.d[6..9].to_vec()]);
+        assert!(rref_certified(&a2, &piv, &good));
+        assert!(!rref_certified(&a2, &piv, &off));
+    }
+
+    /// A trigger that fires on a wrong form: A = [[1, 0, w5 T], [0, 1, -w2 T]]
+    /// (its own form; w2, w5 the trigger's weights for those entries) with T
+    /// = 1 + M U, M the first two primes' product and U about 2^200.  The
+    /// trigger is 0 after any prime, so an early stop is tried at the
+    /// second, and modulo M the form reconstructs as [[1, 0, w5], [0, 1,
+    /// -w2]].  The exact check refuses it and the primes go on to the bound.
+    #[test]
+    fn rref_early_stop_refuses_a_wrong_form() {
+        let m: BigInt = Primes::new().take(2).map(BigInt::from).product();
+        let t: BigInt = BigInt::one() + &m * ((BigInt::one() << 200usize) + BigInt::from(12345u64));
+        let (z0, one) = (BigInt::zero(), BigInt::one());
+        let x = BigInt::from(trigger_weight(5)) * &t;
+        let y = -BigInt::from(trigger_weight(2)) * &t;
+        let a = ZMat::from_rows(vec![vec![one.clone(), z0.clone(), x], vec![z0, one.clone(), y]]);
+        ATTEMPTS.with(|c| c.set(0));
+        EARLY_STOPS.with(|c| c.set(0));
+        let (nm, den, piv) = rref_multimodular(&a);
+        assert!(ATTEMPTS.with(|c| c.get()) >= 1, "no early stop was tried");
+        assert_eq!(EARLY_STOPS.with(|c| c.get()), 0);
+        assert_eq!(piv, vec![0, 1]);
+        assert_eq!(den, one);
+        assert_eq!(nm, a);
+    }
+
+    /// A random 3 x 6 matrix with 2000-bit entries and its last column
+    /// replaced (by zeros, or by its first column): that column of the form
+    /// is constant modulo every prime, and the other free entries are not,
+    /// so the trigger never settles early and no early stop is tried.
+    #[test]
+    fn rref_early_stop_ignores_a_constant_column() {
+        let mut s = 0x2545_f491_4f6c_dd1du64;
+        let big = |s: &mut u64| {
+            let mut x = BigInt::zero();
+            for _ in 0..32 {
+                x = (x << 64usize) + BigInt::from(rng(s));
+            }
+            if rng(s) % 2 == 0 { -x } else { x }
+        };
+        let r = ZMat::from_rows((0..3).map(|_| (0..6).map(|_| big(&mut s)).collect()).collect());
+        for copy in [false, true] {
+            let mut a = r.clone();
+            for i in 0..3 {
+                a.d[i * 6 + 5] = if copy { a.d[i * 6].clone() } else { BigInt::zero() };
+            }
+            ATTEMPTS.with(|c| c.set(0));
+            let (nm, den, piv) = rref_multimodular(&a);
+            assert_eq!(ATTEMPTS.with(|c| c.get()), 0, "early stops tried (copy: {copy})");
+            assert_eq!(piv, vec![0, 1, 2]);
+            for i in 0..3 {
+                let want = if copy && i == 0 { den.clone() } else { BigInt::zero() };
+                assert_eq!(nm.get(i, 5), &want, "row {i} (copy: {copy})");
+            }
+            assert!(rref_certified(&a, &piv, &nm.d.iter().cloned().chain(std::iter::once(den)).collect::<Vec<_>>()));
+        }
+    }
+
+    /// The trigger's cost on a form that never stops early: a random 3 x 6
+    /// matrix with 2000-bit entries needs about 8000 bits of primes, and
+    /// the trigger may be reconstructed only at doubling checkpoints below
+    /// a quarter of that (6 times), testing each other prime in linear
+    /// time; one reconstruction per prime up to 60% would be about 77.
+    #[test]
+    fn rref_early_stop_trigger_is_cheap_when_it_never_fires() {
+        let mut s = 0x5bd1_e995_0123_4567u64;
+        let big = |s: &mut u64| {
+            let mut x = BigInt::zero();
+            for _ in 0..32 {
+                x = (x << 64usize) + BigInt::from(rng(s));
+            }
+            if rng(s) % 2 == 0 { -x } else { x }
+        };
+        let a = ZMat::from_rows((0..3).map(|_| (0..6).map(|_| big(&mut s)).collect()).collect());
+        RECONSTRUCTIONS.with(|c| c.set(0));
+        let (nm, den, piv) = rref_multimodular(&a);
+        let n = RECONSTRUCTIONS.with(|c| c.get());
+        assert!((1..=10).contains(&n), "{n} reconstructions");
+        assert_eq!(piv, vec![0, 1, 2]);
+        assert!(rref_certified(&a, &piv, &nm.d.iter().cloned().chain(std::iter::once(den)).collect::<Vec<_>>()));
+    }
+
+    /// A form far smaller than its bound, as a Hecke operator's kernel: A =
+    /// U [6 I | X] with small X and U mixing rows with large multipliers.
+    /// The early stop is taken, and gives the form [I | X / 6].
+    #[test]
+    fn rref_small_form_of_a_large_matrix() {
+        let mut s = 0x0123_4567_89ab_cdefu64;
+        let (k, f) = (30usize, 6usize);
+        let cols = k + f;
+        let mut r = ZMat::zero(k, cols);
+        for i in 0..k {
+            r.d[i * cols + i] = BigInt::from(6u64);
+            for j in 0..f {
+                r.d[i * cols + k + j] = BigInt::from((rng(&mut s) % 7) as i64 - 3);
+            }
+        }
+        // rows of 6 [I | X/6] mixed by elementary operations with big multipliers
+        let mut a = r.clone();
+        for _ in 0..4 * k {
+            let (i, j) = ((rng(&mut s) % k as u64) as usize, (rng(&mut s) % k as u64) as usize);
+            if i != j {
+                let m = BigInt::from((rng(&mut s) % 2001) as i64 - 1000);
+                for c in 0..cols {
+                    let v = &m * &a.d[j * cols + c];
+                    a.d[i * cols + c] += v;
+                }
+            }
+        }
+        EARLY_STOPS.with(|c| c.set(0));
+        let (nm, den, piv) = rref_multimodular(&a);
+        assert_eq!(EARLY_STOPS.with(|c| c.get()), 1, "the early stop was not taken");
+        assert_eq!(piv, (0..k).collect::<Vec<_>>());
+        // the form: I in the pivots, X / 6 in lowest terms
+        for i in 0..k {
+            for j in 0..f {
+                let x = &r.d[i * cols + k + j];
+                assert_eq!(nm.get(i, k + j) * BigInt::from(6u64), x * &den, "entry ({i}, {j})");
+            }
+        }
+    }
+
+    /// The pivot rows can differ between primes with the same pivots: here
+    /// row 0 is the first prime times (1009, 0, 1), zero modulo that prime,
+    /// so its elimination takes rows {1, 2} and the next prime's takes
+    /// {0, 1}.  The minor's determinant must then be the first rows' modulo
+    /// every prime (computed, not the elimination's own): with different
+    /// minors the primes reconstruct different multiples of the form, which
+    /// denominators as large as 1009 and 1013 do not survive by chance.
+    #[test]
+    fn rref_multimodular_when_primes_take_other_rows() {
+        let p1 = Primes::new().next().unwrap();
+        let z = |v: &[i64]| v.iter().map(|&x| BigInt::from(x)).collect::<Vec<_>>();
+        let r0: Vec<BigInt> = [1009u64, 0, 1].iter().map(|&x| BigInt::from(x) * BigInt::from(p1)).collect();
+        let a = ZMat::from_rows(vec![r0, z(&[0, 1013, 1]), z(&[1009, 1013, 2])]);
+        let (nm, den, piv) = rref_multimodular(&a);
+        assert_eq!(piv, vec![0, 1]);
+        // [[1, 0, 1/1009], [0, 1, 1/1013]]
+        assert_eq!(den, BigInt::from(1009 * 1013));
+        assert_eq!(nm, ZMat::from_rows(vec![z(&[1009 * 1013, 0, 1013]), z(&[0, 1009 * 1013, 1009])]));
+    }
+
+
+    /// rref (with its one-prime, [I; 0] and Dixon paths) against the
+    /// multimodular elimination alone, on random and rank-deficient matrices.
+    #[test]
+    fn rref_paths_agree_with_multimodular() {
+        let mut s = 31u64;
+        let mut cases: Vec<(&str, ZMat)> = vec![];
+        // full column rank: square and tall, small and large entries
+        for (n, range) in [(1, 3), (5, 2), (30, 2), (80, 2), (20, 1 << 40)] {
+            cases.push(("square", rand_zmat(n, n, range, &mut s)));
+        }
+        cases.push(("tall", rand_zmat(40, 25, 5, &mut s)));
+        // a few free columns: the Dixon path
+        for f in [1, 2, 3] {
+            cases.push(("near full", rand_zmat(48, 48 + f, 3, &mut s)));
+        }
+        // singular square: rank n - 1, one free column
+        let mut b = rand_zmat(40, 40, 4, &mut s);
+        for j in 0..40 {
+            b.d[39 * 40 + j] = b.get(0, j) + b.get(1, j) * 3;
+        }
+        cases.push(("rank n-1", b));
+        // many free columns or low rank: the multimodular path
+        cases.push(("wide", rand_zmat(20, 40, 9, &mut s)));
+        cases.push(("rank 4", rand_zmat(7, 4, 50, &mut s).mul(&rand_zmat(4, 9, 50, &mut s))));
+        cases.push(("rank 30 of 60", rand_zmat(60, 30, 3, &mut s).mul(&rand_zmat(30, 31, 3, &mut s))));
+        for (what, a) in &cases {
+            assert_eq!(rref(a), rref_multimodular(a), "{what} {}x{}", a.rows, a.cols);
+        }
+    }
+
+    /// A prime whose pivots are wrong fails rref_dixon's certificate, and
+    /// rref falls back to the multimodular elimination.
+    #[test]
+    fn rref_unlucky_first_prime_falls_back() {
+        let p0 = Primes::new().next().unwrap();
+        let m = Modulus::new(p0);
+        let mut s = 41u64;
+        // column 0 a multiple of p0: modulo p0 the pivots are 1..=20, over Q 0..20
+        let mut a = rand_zmat(20, 21, 7, &mut s);
+        for i in 0..20 {
+            a.d[i * 21] = BigInt::from(p0) * BigInt::from(i as i64 + 1);
+        }
+        let piv_p = a.reduce(&m).rref();
+        assert_eq!(piv_p, (1..21).collect::<Vec<_>>());
+        assert!(rref_dixon(&a, &piv_p, &m).is_none(), "zeros left of a pivot");
+        let (_, _, piv) = rref(&a);
+        assert_eq!(piv, (0..20).collect::<Vec<_>>());
+        assert_eq!(rref(&a), rref_multimodular(&a));
+        // a row that is in the row space modulo p0 only: rank 32 modulo p0, 33 over Q
+        let mut b = rand_zmat(33, 33, 7, &mut s);
+        for j in 0..33 {
+            b.d[32 * 33 + j] = b.get(0, j).clone() + if j == 5 { BigInt::from(p0) } else { BigInt::zero() };
+        }
+        let piv_p = b.reduce(&m).rref();
+        assert_eq!(piv_p.len(), 32);
+        assert!(rref_dixon(&b, &piv_p, &m).is_none(), "a row outside the row space");
+        assert_eq!(rref(&b), (ZMat::identity(33), BigInt::one(), (0..33).collect()));
     }
 
     #[test]

@@ -19,9 +19,9 @@ Jupyter); on the command line show() writes an SVG file and prints its path.
 
 import math
 import os
-from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
+from _graphics import (InlineFigure as _InlineFigure, Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
                        show as _show, save_svg, TAB10, to_color as _css, colormap, describe_svg, mpl_ticks, DASHES,
-                       LEGEND_LOCS as _LEGEND_LOCS)
+                       LEGEND_LOCS as _LEGEND_LOCS, pixel_size as _pixel_size)
 from matplotlib.colors import to_rgba as _to_rgba, CSS4_COLORS as _CSS4_COLORS, Colormap as _Colormap
 # (one rcParams: matplotlib's, with its defaults and its key checks)
 from matplotlib import rcParams, rcParamsDefault, rcParamsOrig, rc, rcdefaults, rc_context
@@ -582,6 +582,12 @@ class Axes:
                 edgecolors=None, color=None, vmin=None, vmax=None, **kw):
         xs, ys = _list(x), _list(y)
         n = len(xs)
+        if marker == ",":  # (as matplotlib's scatter: a square, with its warning)
+            import warnings
+            warnings.warn("The pixel maker ',' is not supported on scatter(); using a finite-sized square instead, which is "
+                          "not necessarily 1 pixel in size. Use the square marker 's' instead to suppress this warning.",
+                          UserWarning, stacklevel=2)
+            marker = "s"
         colors = clim = None
         if c is not None and not isinstance(c, str) and not (isinstance(c, tuple) and len(c) in (3, 4)):
             cl = list(c.tolist() if hasattr(c, "tolist") else c)
@@ -1362,7 +1368,6 @@ class Axes:
         or legend(labels), legend(handles, labels), legend(handles=...),
         as matplotlib's; its entries are those of the moment it is called."""
         handles, labels = kw.pop("handles", None), kw.pop("labels", None)
-        title = kw.pop("title", None)
         if len(args) == 1:
             labels = args[0]
         elif len(args) == 2:
@@ -1381,11 +1386,27 @@ class Axes:
             entries = [(p, str(s)) for (p, _), s in zip(self._legend_handles(), labels)]
         else:
             entries = [(p, str(s)) for p, s in self._legend_handles() if s is not None and not str(s).startswith("_")]
+        anchor, pad, title = kw.pop("bbox_to_anchor", None), kw.pop("borderaxespad", None), kw.pop("title", None)
         if kw:
             raise NotImplementedError("legend(): %s not supported by sagebrush's matplotlib" % ", ".join(sorted(kw)))
+        if anchor is not None:
+            # (bbox_to_anchor: a point (x, y) or a box (x, y, width, height), in axes fractions)
+            a = [float(v) for v in (anchor.bounds if hasattr(anchor, "bounds") else anchor)]
+            if len(a) not in (2, 4):
+                raise ValueError("Invalid bbox: %r" % (anchor,))
+            self._opts["legend_anchor"] = tuple(a)
+        else:
+            self._opts.pop("legend_anchor", None)
+        if pad is not None:
+            self._opts["legend_pad"] = float(pad) * 10 * PT  # (in font sizes: the legend's 10 points)
+        else:
+            self._opts.pop("legend_pad", None)
+        if title is not None and str(title) != "":  # (an empty title is none, as matplotlib's)
+            self._opts["legend_title"] = str(title)
+        else:
+            self._opts.pop("legend_title", None)
         self._opts["legend"] = True
         self._opts["legend_entries"] = entries
-        self._opts["legend_title"] = None if title is None or str(title) == "" else str(title)
         if loc is not None:
             # (as matplotlib checks it; "best" is drawn upper right)
             if isinstance(loc, str):
@@ -1710,8 +1731,9 @@ class Figure:
         """This figure as one animation frame: (SVG body, description)."""
         return render_frame(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle, getattr(self, "_markup", None))
 
-    def _svg(self, background=True):
-        svg = render_svg(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle, getattr(self, "_markup", None))
+    def _svg(self, background=True, grow=True):
+        # (grow: a legend outside the figure widens it, as a notebook's inline figure; savefig's doesn't)
+        svg = render_svg(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle, getattr(self, "_markup", None), grow)
         # (a facecolor the program gave, or set in rcParams, colors the
         # figure as matplotlib's; otherwise it is the page's background)
         if background and self._facecolor_given:
@@ -1720,11 +1742,29 @@ class Figure:
                 svg = _svg_background(svg, css, self._size[0] * 100, self._size[1] * 100)
         return svg
 
-    def _repr_svg_(self):
+    def _sagebrush_svg_(self):
         anim = getattr(self, "_animation", None)
         if anim is not None:  # a figure being animated shows its animation
             return anim._repr_svg_()
         return self._svg()
+
+    # (shown as figure_mode() says, lib/_graphics.py: an SVG, or a PNG at twice the dpi; an animation always as its
+    # animated SVG)
+    def _repr_svg_(self):
+        if getattr(self, "_animation", None) is not None:
+            return self._sagebrush_svg_()
+        return _InlineFigure._repr_svg_(self)
+
+    def _repr_png_(self):
+        if getattr(self, "_animation", None) is not None:
+            return None
+        return _InlineFigure._repr_png_(self)
+
+    def _sagebrush_png_(self, scale):
+        import io
+        b = io.BytesIO()
+        self.savefig(b, format="png", dpi=self.dpi * scale)
+        return b.getvalue(), (self._size[0] * self.dpi, self._size[1] * self.dpi)
 
     def description(self):
         return describe_svg(self._svg())
@@ -1771,7 +1811,7 @@ class Figure:
             if metadata is not None:
                 raise NotImplementedError("savefig: metadata for SVG is not implemented in Sagebrush")
             # (savefig's own background: the one asked for, or none)
-            svg = self._svg(background=False)
+            svg = self._svg(background=False, grow=False)
             if given and background != "none":
                 svg = _svg_background(svg, background, self._size[0] * 100, self._size[1] * 100)
             _write(fname, svg, text=True)
@@ -1781,7 +1821,13 @@ class Figure:
         if dpi == "figure":
             dpi = self.dpi
         dpi = float(dpi)
-        svg = self._svg(background=False)
+        # (the pixel marker ',' is one pixel of this PNG: 100 / dpi SVG units)
+        old = _pixel_size(100.0 / dpi) if dpi > 0 and math.isfinite(dpi) else None
+        try:
+            svg = self._svg(background=False, grow=False)
+        finally:
+            if old is not None:
+                _pixel_size(old)
         if not transparent:
             svg = _axes_patches(svg, self.axes)
         text = {"Software": "Sagebrush"}

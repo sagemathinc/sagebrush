@@ -1,6 +1,6 @@
-// ci: web-runner-sync order=20
-// The Numbl corpus ratchet (upstream/numbl/README.md) on CI's full tier: master pushes, the nightly schedule and a
-// dispatch (web-runner-sync is a full-tier-only job, and builds the CLI this runs), never a pull request's fast tier.
+// ci: web-runner-sync.2 order=20
+// The Numbl corpus ratchet (upstream/numbl/README.md) in CI's long tier: the nightly schedule, and a dispatch that asks
+// for it (web-runner-sync's own step; the job builds the CLI this runs), never a pull request or a master push.
 // Every vendored numbl script through the CLI's MATLAB mode: red on a regression or a script lost, NEW PASS reported.
 // test/numbl-ratchet.test.ts keeps this header where it is, and checks this file's exit status (N3): non-zero for a red
 // ratchet, a missing CLI and a ratchet killed by a signal. (NUMBL_CORPUS_CLI and NUMBL_CORPUS_RATCHET are for that

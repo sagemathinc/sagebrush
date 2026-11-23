@@ -39,7 +39,8 @@ export function snapshotOf(thread: Thread, now: Date = new Date()): SnapshotResu
   for (const e of thread.entries) {
     if (e.kind === "user") {
       const u = e as UserEntry;
-      if (u.mode === "sent" && u.text.trim()) messages.push({ role: "user", text: u.text });
+      // (a steer is a message the person sent: kept, whatever became of it, unless the agent refused it)
+      if ((u.mode === "sent" || (u.mode === "steer" && u.receipt !== "rejected")) && u.text.trim()) messages.push({ role: "user", text: u.text });
     } else if (e.kind === "turn") {
       const t = e as Turn;
       if (t.state === "running") continue;

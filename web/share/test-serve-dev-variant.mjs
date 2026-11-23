@@ -76,5 +76,17 @@ let explicit = null;
 const free = await new Promise((r) => { const s = createServer(); s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => r(p)); }); });
 const r2 = await startDev({ sitePort: free, filesPort: 0, onBound: async (b) => { explicit = b; throw STOP; } }).then(() => "resolved", (e) => e);
 ok(r2 === STOP && explicit?.site === `http://127.0.0.1:${free}`, `an explicit free port: the site listens on exactly it (${explicit?.site})`);
+// a request that reaches the servers once the Worker is gone (a page's last request at a test's teardown, master's
+// web-sync.2 test-share-mine): answered 502, never an unhandled rejection that ends the process
+{
+  const dev = await startDev({ sitePort: 0, filesPort: 0 });
+  const before = await fetch(dev.site + "/api/share/me").then((r) => r.status, (e) => String(e));
+  await dev.mf.dispose();
+  const after = await fetch(dev.site + "/api/share/me").then((r) => r.status, (e) => String(e));
+  const files = await fetch(dev.files + "/x").then((r) => r.status, (e) => String(e));
+  ok(before === 401, `the Worker up: the site's API answers (${before})`);
+  ok(after === 502 && files === 502, `the Worker gone: the site's API and the files domain answer 502 (${after}, ${files})`);
+  await dev.close().catch(() => {});
+}
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);

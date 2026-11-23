@@ -28,5 +28,5 @@ test("a 1.2-million-bit int: made under Node, a MemoryError where the engine can
   assert.equal(execFileSync(process.execPath, [cli, "-c", PROGRAM], { encoding: "utf8" }), "made 1200000\n");
   if (spawnSync("bun", ["--version"], { stdio: "ignore" }).status !== 0) return;
   const out = execFileSync("bun", [cli, "-c", PROGRAM], { encoding: "utf8" });
-  assert.ok(out === "made 1200000\n" || out === "MemoryError MemoryError()\n", out);
+  assert.ok(out === "made 1200000\n" || /^MemoryError MemoryError\("an int past the JavaScript engine's largest/.test(out), out);
 });

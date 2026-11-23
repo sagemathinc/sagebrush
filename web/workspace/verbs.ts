@@ -34,10 +34,10 @@ export const obj = (props: Record<string, unknown>, required: string[]) => ({ ty
 
 export const VERBS = {
   list: { description: "The entries in a folder (with recursive, everything under it), by path; Trash only when listed itself.", params: obj({ folder: path, recursive: { type: "boolean" }, cursor: { type: "string" } }, ["folder"]) },
-  stat: { description: "One entry, or null.", params: obj({ path }, ["path"]) },
+  stat: { description: "One entry, or null. An entry with a page of its own (a notebook, a board, a .tex or code file) has url: its address on the person's Sagebrush site, a link to give them.", params: obj({ path }, ["path"]) },
   read: { description: "An entry and its contents, with the revision to give write as base.", params: obj({ path }, ["path"]) },
   write: { description: "New contents for a notebook, board or data file, only if its revision is still base (else a conflict, with the current contents). A data file's old bytes are kept as a version.", params: obj({ path, content, base: { type: "integer", minimum: 0 } }, ["path", "content", "base"]) },
-  create: { description: "A new notebook (.ipynb), board (.board.json) or data file, its kind from its name; a taken path is refused.", params: obj({ path, content, mode: { enum: [...DOCUMENT_MODES] } }, ["path"]) },
+  create: { description: "A new notebook (.ipynb), board (.board.json) or data file, its kind from its name; a taken path is refused. A notebook runs its cells in its language, mode: Python, Sage, MATLAB or Magma.", params: obj({ path, content, mode: { enum: [...DOCUMENT_MODES], description: "The notebook's or board's language (python if left out): python, print(2**10); sage, factor(2^64 - 1); matlab, x = linspace(0, 3, 200); plot(x, sin(x.^2)); magma, print Factorization(2^64 - 1);. Jupyter content whose metadata.kernelspec names one of them sets it too." } }, ["path"]) },
   mkdir: { description: "A folder, and any above it that aren't there.", params: obj({ path }, ["path"]) },
   rename: { description: "An entry (a folder with all it holds) moved to a free path.", params: obj({ from: path, to: path }, ["from", "to"]) },
   duplicate: { description: "A copy of a notebook, board or data file, at to (else the first free \"name (2)\" beside it).", params: obj({ path, to: path }, ["path"]) },

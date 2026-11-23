@@ -19,15 +19,21 @@ test("np.arange and np.linspace give NumPy's elements, to the bit, and its lengt
 });
 
 // LIMIT-PR55-1 (daybreak2): every array is admitted before it is allocated
-// (admitArray, in empty): at most 2**32 elements and 2**32 bytes, both
-// inclusive. Each dtype width at the limit is admitted, and one element more
-// refused, without allocating anything (admitArray only counts).
+// (admitArray, in empty): at most 2**32 elements and, in a browser, 2**32
+// bytes, both inclusive (on the person's own computer, the desktop app's engine
+// and the CLI, there is no byte cap: the test below it). Each dtype width at
+// a browser's limit is admitted, and one element more refused, without
+// allocating anything (admitArray only counts).
+const BROWSER_CAPS = { elements: 2 ** 32, bytes: 2 ** 32 };
 test("admitArray: each dtype's limit admitted, one element more refused, nothing allocated", () => {
   const np = require("../src/runtime/numpy");
   const F = require("../src/runtime/format");
   const D: Record<string, any> = {};
   for (const name of ["bool", "int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64", "complex64", "complex128"]) D[name] = np.toDtype(name);
   const before = process.memoryUsage().arrayBuffers;
+  const saved = { ...np.ARRAY_LIMITS };
+  Object.assign(np.ARRAY_LIMITS, BROWSER_CAPS);
+  try {
   for (const [name, dt] of Object.entries(D)) {
     const at = Math.min(np.ARRAY_LIMITS.elements, Math.floor(np.ARRAY_LIMITS.bytes / dt.itemsize));
     assert.doesNotThrow(() => np.admitArray([at], dt), name);
@@ -36,24 +42,43 @@ test("admitArray: each dtype's limit admitted, one element more refused, nothing
     // (the bytes count scratch too)
     assert.throws(() => np.admitArray([at], dt, 1), (e: any) => e !== undefined, name + " with scratch");
   }
+  } finally {
+    Object.assign(np.ARRAY_LIMITS, saved);
+  }
   assert.ok(process.memoryUsage().arrayBuffers - before < 1 << 20, "nothing allocated");
 });
 
-test("arange, linspace and zeros past the caps fail fast with the refusal, before allocating", () => {
+test("arange, linspace and zeros past a browser's caps fail fast with the refusal, before allocating", async () => {
+  // (in this process, with a browser's caps set: on the person's own computer there are none, and these would be made)
+  const np = require("../src/runtime/numpy");
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
   const code = [
     "import numpy as np, time",
+    "r = []",
     "for f in (lambda: np.arange(0, 2**33), lambda: np.arange(0.0, 2.0**33), lambda: np.arange(0, 2**30, 0.25),",
     "          lambda: np.linspace(0, 1, 2**33), lambda: np.linspace(0, 1, 2**29 + 1), lambda: np.zeros(2**33, np.int8),",
     "          lambda: np.arange(0, 2**29 + 1, dtype=np.complex128), lambda: np.arange(0, 2**33, 1, dtype=np.uint8)):",
     "    t = time.perf_counter()",
     "    try:",
     "        f()",
-    "        print('allocated')",
+    "        r.append('allocated')",
     "    except MemoryError as e:",
-    "        print(type(e).__name__, str(e).split(' for ')[0], time.perf_counter() - t < 1)",
+    "        r.append(type(e).__name__ + ' ' + str(e).split(' for ')[0] + ' ' + str(time.perf_counter() - t < 1))",
+    "print('\\n'.join(r))",
   ].join("\n");
-  const r = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" });
-  assert.deepEqual(r.trim().split("\n"), [
+  const saved = { ...np.ARRAY_LIMITS };
+  Object.assign(np.ARRAY_LIMITS, BROWSER_CAPS);
+  let out = "";
+  try {
+    await s.handle({ id: 1, code });
+    out = msgs.filter((m) => m.id === 1 && m.stream).map((m) => m.text).join("");
+  } finally {
+    Object.assign(np.ARRAY_LIMITS, saved);
+  }
+  assert.deepEqual(out.trim().split("\n"), [
     "MemoryError Unable to allocate 64.0 GiB True",
     "MemoryError Unable to allocate 64.0 GiB True",
     "MemoryError Unable to allocate 32.0 GiB True",
@@ -63,6 +88,12 @@ test("arange, linspace and zeros past the caps fail fast with the refusal, befor
     "MemoryError Unable to allocate 8.00 GiB True",
     "MemoryError Unable to allocate 8.00 GiB True",
   ]);
+});
+
+test("on the person's own computer (the CLI) there is no byte cap: an array of more than 4 GiB is made", () => {
+  // (np.zeros: the operating system's zeroed pages, none touched, so nothing is spent; a browser refuses it)
+  const r = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", "import numpy as np\na = np.zeros(2**31 + 4, np.uint16)\nprint(a.nbytes, a.shape)"], { encoding: "utf8" });
+  assert.equal(r.trim(), `${2 ** 32 + 8} (${2 ** 31 + 4},)`);
 });
 
 // LIMIT-PR55-2 (daybreak2): frombuffer and histogram's counts are admitted

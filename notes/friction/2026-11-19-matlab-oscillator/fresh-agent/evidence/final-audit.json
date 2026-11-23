@@ -1,0 +1,12 @@
+{
+  "utc": "2026-11-19T16:26:06.254110+00:00",
+  "numerical_validation_passed": true,
+  "native_stop_notebook_verified": true,
+  "all_four_prior_vector_components_asserted": true,
+  "stop_latency_ms": 54,
+  "final_browser_harness_exit": 0,
+  "notebook_server_timeout_exit": 124,
+  "notebook_port_closed": true,
+  "reference": "GNU Octave 11.1.0",
+  "scope": "scratch-local files, public npm release; no product edits"
+}
