@@ -399,7 +399,11 @@ class RealDoubleElement(float):
             if type(e).__name__ in ("ComplexDoubleElement", "Expression"):
                 # (a symbolic exponent: the symbolic power, as Sage's RDF(1.5)^x is 1.5^x)
                 return NotImplemented
-            y = float(e)
+            try:
+                y = float(e)
+            except TypeError:
+                # (no number: the other operand's power, M.__rpow__)
+                return NotImplemented
         if x == 0:
             # (0.0 or -0.0 itself for a positive or NaN exponent)
             if y < 0:
@@ -905,6 +909,10 @@ class ComplexDoubleElement:
         if m is not None and m.is_exact_algebraic(o):
             # (an element of Zmod(n), a finite field or a number field refuses CDF, as Sage)
             return None
+        if type(o).__name__ == "Expression":
+            # (a symbolic expression takes the number into SR, as Sage: CDF(1, 2)*SR(0)
+            # is the symbolic 0)
+            return None
         try:
             return complex(o)
         except (TypeError, ValueError):
@@ -962,10 +970,13 @@ class ComplexDoubleElement:
         if type(e).__name__ == "Expression":
             # (a symbolic exponent: the symbolic power, as Sage's CDF(1, 2)^x)
             return NotImplemented
+        w = self._c(e)
+        if w is None:
+            # (no number: the other operand's power, M.__rpow__)
+            return NotImplemented
         z = self._z
         if z == 0:
             return ComplexDoubleElement(0.0, 0.0)
-        w = self._c(e)
         # as Sage (GSL's gsl_complex_pow, with its log |z|)
         lr = _logabs(z.real, z.imag)
         th = math.atan2(z.imag, z.real)
@@ -979,6 +990,8 @@ class ComplexDoubleElement:
     def __eq__(self, o):
         if getattr(o, "_is_ffmatrix", False):
             return NotImplemented  # (the matrix compares: c == A as A == c)
+        if type(o).__name__ == "Expression":
+            return NotImplemented  # (a symbolic relation, CDF(1, 2) == x, not False)
         v = self._c(o)
         return v is not None and v == self._z
 
@@ -1220,6 +1233,14 @@ def _inverse(M):
     if not M.is_square():
         raise ArithmeticError("self must be a square matrix")
     return _from_array(M._base, np.linalg.inv(_array(M)))
+
+
+def _scalar_over(c, M):
+    """c/M: X with X*M = c times the identity, by numpy's solve of M^T X^T =
+    c I, as Sage solves it (2/M is exactly -4.0 where 2 times the inverse is
+    -3.9999999999999996); numpy's LinAlgError when M is singular."""
+    np = _np()
+    return _from_array(M._base, np.linalg.solve(_array(M).T, float(c) * np.eye(M.nrows())).T)
 
 
 def _rank(M):

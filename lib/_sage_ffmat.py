@@ -2189,6 +2189,34 @@ class FFMatrix:
             return NotImplemented if p is None else p
         return self * (1 / c)
 
+    def __rtruediv__(self, o):
+        # a number over a square matrix: X with X*M = c times the identity,
+        # c times the inverse, as Sage solves it (2/M over GF(7))
+        c = self._scalar(o)
+        if c is None:
+            return NotImplemented
+        n = len(self._rows)
+        if type(self._base).__name__ == "RealDoubleField_":
+            if n != self._ncols:
+                raise TypeError("unsupported operand parent(s) for /: '%s' and '%s'" % (_sa().parent(o), self.parent()))
+            import _sage_rdf
+            return _sage_rdf._scalar_over(c, self)
+        if c == 0 and isinstance(o, (int, _F)) and not isinstance(o, bool):
+            # (an exact 0: X = 0 solves X*M = 0, any shape, as Sage; n x n,
+            # its size checked first: a tall matrix's is larger than itself)
+            _admit_size(self._base, n, n)
+            return FFMatrix(self._base, [[c] * n for _ in range(n)], n)
+        if n != self._ncols:
+            raise TypeError("unsupported operand parent(s) for /: '%s' and '%s'" % (_sa().parent(o), self.parent()))
+        from numpy.linalg import LinAlgError
+        try:
+            inv = self.inverse()
+        except (ZeroDivisionError, LinAlgError):
+            if c == 0:
+                return self * c
+            raise ValueError("matrix equation has no solutions") from None
+        return inv * c
+
     def charpoly(self, var="x"):
         """The characteristic polynomial (Hessenberg reduction).
 
