@@ -143,7 +143,9 @@ test("repmat's own size refusals carry MATLAB's size-preference identifier", () 
 test("huge cell arrays are refused before they are made, never a crash (#1783)", () => {
   // (MATLAB R2026b: cell(2^45,1) is pmaxsize, 2^48 bytes at 8 per element; x{2^44} = 1 is out of memory. Below
   // 2^48 bytes Sagebrush admits a cell array against this host's memory, so the refusal is its memory guard's,
-  // MATLAB:nomem, with its own message; small ones are made as before)
+  // MATLAB:nomem, with its own message; small ones are made as before. For cell(2^44,1) MATLAB R2026b gives
+  // MATLAB:array:SizeLimitExceeded instead, its 5 GB array-size preference: Sagebrush's nomem there is a deliberate
+  // difference, the same one zeros has)
   const dir = mkdtempSync(join(tmpdir(), "sb-index-errors-"));
   const cases = ["x = cell(2^45, 1);", "x = {1}; x{2^44} = 1;", "x = cell(2^44, 1);", "x = cell(2^20, 2^20);",
     "x = {1}; x{2^30} = 1;", "x = cell(1, 3); x{10} = 1; disp(numel(x));"];
@@ -153,4 +155,13 @@ test("huge cell arrays are refused before they are made, never a crash (#1783)",
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.stdout.trim().split("\n").map((s) => s.trim()),
     ["0|MATLAB:pmaxsize", "1|MATLAB:nomem", "2|MATLAB:nomem", "3|MATLAB:nomem", "4|MATLAB:nomem", "10", "5|OK"]);
+});
+
+test("cell admission against stand-in capacity records: measured, no figure, no JS domains, below the floor (#1783)", () => {
+  // (test/matlab_cell_admit_cases.py: nothing large is allocated; each check prints one "ok" line)
+  const r = spawnSync(process.execPath, [cli, join(__dirname, "..", "..", "test", "matlab_cell_admit_cases.py")], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const lines = r.stdout.trim().split("\n");
+  assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
+  assert.equal(lines.length, 5, r.stdout);
 });

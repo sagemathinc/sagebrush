@@ -2421,20 +2421,29 @@ def _refuse_huge(dims, itemsize):
 # the bytes Sagebrush spends on one element of a cell array made with empty elements (measured on node: about
 # 430, the empty double each holds and its place in the list)
 _CELL_ELEMENT_BYTES = 512
+# where this host's memory can't be measured (the browser today), the most a cell array's estimated memory may be:
+# 2 GiB, about 4 million elements at _CELL_ELEMENT_BYTES, matching the legacy full-array cap for doubles
+# ((1 << 28) x 8 bytes, _matlab_sparse._legacy_full_arr) and half the 4 GiB wasm32 ceiling; not a guarantee that
+# the host has that memory free (a measured host is admitted by the Ledger instead)
+_CELL_UNMEASURED_MAX_BYTES = 1 << 31
 
 
 def _admit_cells(n):
-    """a cell array of n elements admitted against this host's memory before any is made: MATLAB's out of
-    memory (the memory guard's refusal, MATLAB:nomem) when it would not fit; where the host's memory can't be
-    measured, nothing is admitted, as for a full matrix (_matlab_sparse.full_arr)"""
+    """a cell array of n elements admitted before any is made, against this host's memory, or against the
+    fixed bound where it can't be measured: the memory guard's refusal (MATLAB:nomem, MATLAB's out of memory)
+    when it would not fit"""
     need = n * _CELL_ELEMENT_BYTES
     if need <= _sp.SMALL_NEED:
         return
+    what = "A cell array of %d elements" % n
     rec = _sp._capacity_record()
     if _sp.unmeasured_reason(rec) is not None:
+        if need > _CELL_UNMEASURED_MAX_BYTES:
+            from _memguard import memory_guard
+            raise memory_guard(what, need, _CELL_UNMEASURED_MAX_BYTES, "one array", record=rec, fixed=True)
         return
     import _matlab_ledger
-    _matlab_ledger.Ledger("A cell array of %d elements" % n, "one array", rec=rec).reserve(need, "cells")
+    _matlab_ledger.Ledger(what, "one array", rec=rec).reserve(need, "cells")
 
 
 def _refuse_huge_growth(dims, cur, v):
