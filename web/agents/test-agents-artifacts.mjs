@@ -2688,11 +2688,14 @@ try {
   // editor through the journal's store, as the notebook page's is: editable and runnable; an agent's edit is applied,
   // lands in the journal, and a notebook tab of this browser shows it, the person's typing there kept)
   if (want("journal-live")) {
+    // (paired as the edit cases pair, May run code off, when run on its own: with it on, a notebook the agent makes
+    // runs by itself in the pane at once, which then writes it, and J1-J5's notebooks would start in a pane already;
+    // J10 and J11 pair again with it on)
     if (!FEATURES) {
       FEATURES = true;
       await ev(`document.querySelector('#new')?.click()`);
       await sleep(700);
-      await pair();
+      await pair({ run: false });
     }
     await converse();
     const turn = `t${++turnN}`;
