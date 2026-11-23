@@ -10,7 +10,7 @@ Status (2026-10-05): built, following the recommendation below. The core is
 promotion, ufuncs, reductions, indexing, shapes, printing, random, linalg,
 fft, polynomials, printing options and float formatting. `python3
 numpy-tests/run.py` runs each one under CPython with the real NumPy (2.5.1)
-and under sagebrush, and requires the output to be **byte-identical**. All 17
+and under sagebrush, and requires the output to be **byte-identical**. All 33
 pass, and CI runs them.
 
 - **Printing:** `repr`/`str` port NumPy's `arrayprint` rules (dragon4
@@ -52,8 +52,11 @@ pass, and CI runs them.
   every one of 200,000 test inputs each, and Python's `math.log`/`math.exp`
   use it too, so they match CPython.
 - **Not bit-for-bit, to rounding error only:**
-  - `sin`, `cos`, `tan`, `arctan`... (glibc's are IBM's larger code; V8
-    differs in the last bit for a few percent of inputs).
+  - `sinh`, `cosh`, `tanh`, `expm1`, `log10` and `cbrt`
+    (`src/runtime/fdlibm.ts`). `sin`, `cos`, `tan`, `arcsin`, `arccos`,
+    `arctan`, `arctan2`, `hypot`, `log2`, `arcsinh`, `arccosh` and `arctanh`
+    are correctly rounded (`src/runtime/crmath.ts`), so they agree with glibc
+    wherever glibc is correctly rounded.
   - linalg decompositions (LAPACK's blocked algorithms order operations
     differently).
   - fft (pocketfft).
@@ -91,15 +94,19 @@ pass, and CI runs them.
   `np.True_`) print and promote as in NumPy.
 
 **Not yet:**
-- string, object and structured arrays;
+- object and structured arrays (string arrays, dtype `<Un`, support creation,
+  `astype`, indexing, comparisons, sorting, `unique`, `where`, `isin` and
+  printing; other operations on them are refused);
 - datetime;
 - masked arrays;
-- `np.save`/`np.load` (`savetxt`/`loadtxt` exist);
+- `.npz` archives and the pickle format (`np.save`/`np.load` handle `.npy`
+  files of numbers and booleans, and `np.load` reads string arrays;
+  `savetxt`, `loadtxt` and `genfromtxt` exist);
 - complex `linalg`;
 - int64 and uint64 are exact only up to 2^53, since they are stored as
   doubles;
-- float16 (half) is stored as float32 (so values and rounding differ from
-  NumPy's float16), and longdouble is float64;
+- float16 (half) and longdouble: using them raises NotImplementedError, as
+  does a float ufunc that NumPy computes in float16 (of bool, int8 or uint8);
 - `.flat` of a noncontiguous array is a read-only copy (writing through it
   raises instead of reaching the array).
 
@@ -140,11 +147,11 @@ Python arithmetic is unaffected.
 
 ### WebAssembly SIMD kernels
 
-Dense linear algebra, the FFT, `exp`, `log`, sorting and random number
-generation run in Rust
+Dense linear algebra, the FFT, `exp`, `log`, `sin`, `cos`, sorting and random
+number generation run in Rust
 ([kernels/src](kernels/src)). They are compiled for
 `wasm32-unknown-unknown` with `simd128`, `no_std` and without wasm-bindgen,
-to a 70 KB module:
+to a 74 KB module:
 
 - `dgemm`: matmul, register-blocked 4×4 with `f64x2`;
 - `dgetrf`/`dgetrs`: LU with partial pivoting (`det`, `slogdet`, `solve`,
@@ -161,6 +168,8 @@ to a 70 KB module:
   resident in WebAssembly memory between calls of the same length;
 - `vexp`/`vlog`: glibc's `exp` and `log` over arrays, two lanes at a time
   (`np.exp`, `np.log`);
+- `vsincos`: correctly rounded `sin` and `cos` over arrays, the fast path of
+  `src/runtime/crmath.ts` (`np.sin`, `np.cos`);
 - `sort_f64`/`argsort_f64`: a stable LSD radix sort on 64-bit keys that
   order like the numbers (as a typed array's sort: -0 before +0, NaN last;
   for `argsort` -0 equals +0). There are six 11-bit passes, each skipped
@@ -202,7 +211,7 @@ about 2 inputs in 10^5. JavaScript has no fused multiply-add, so the
 TypeScript computes one exactly with Dekker's product, at about 20
 operations each. WebAssembly's relaxed SIMD has `f64x2.relaxed_madd`, which
 V8 compiles to the hardware FMA, but the spec allows it to round twice. So
-`exp`, `log` and the random fills are also built as a separate 25 KB module with relaxed SIMD
+`exp`, `log`, `sin`, `cos` and the random fills are also built as a separate 28 KB module with relaxed SIMD
 ([kernels/relaxed](kernels/relaxed)), which is used only where a probe at
 startup shows that its multiply-add rounds once. The results are the same
 bits either way. In Node, per 10^6 values: `exp` 40 ms in TypeScript, 19 ms
