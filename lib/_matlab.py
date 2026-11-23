@@ -2179,8 +2179,10 @@ def paren(obj, args, nargout=1):
         # (fast paths: one element, by one or two scalar subscripts)
         n = len(args)
         if n == 1 and type(args[0]) is float:
-            i = int(args[0])
-            if i == args[0] and 0 < i <= obj.size:
+            # (the range is compared first: NaN and +-Inf fail it and take the general path, which refuses them)
+            a0 = args[0]
+            i = int(a0) if 0 < a0 <= obj.size else _NOIX
+            if i == a0:
                 x = obj.item(i - 1)
                 tx = type(x)
                 # (item() gives a Python float for a single's element too: that one stays single, _box1)
@@ -2188,9 +2190,11 @@ def paren(obj, args, nargout=1):
                     return x
                 return _box1(x, obj)
         elif n == 2 and obj.ndim == 2 and type(args[0]) is float and type(args[1]) is float:
-            i = int(args[0])
-            j = int(args[1])
-            if i == args[0] and j == args[1] and 0 < i <= obj.shape[1] and 0 < j <= obj.shape[0]:
+            a0 = args[0]
+            a1 = args[1]
+            i = int(a0) if 0 < a0 <= obj.shape[1] else _NOIX
+            j = int(a1) if 0 < a1 <= obj.shape[0] else _NOIX
+            if i == a0 and j == a1:
                 x = obj.item(j - 1, i - 1)
                 tx = type(x)
                 if tx is bool or (tx is float and obj.dtype.itemsize == 8):
@@ -2305,13 +2309,18 @@ def persistent_set(fname, name, v):
 # ------------------------------------------------------------------ indexing
 
 
-def _bad_index(x):
-    if x != x or (x != _math.floor(x)) or x < 1:
-        if x == 0.0:
-            # (MATLAB's identifier for a zero index is MATLAB:badsubscript too, observed R2026b: v(0))
-            return _err("Index in position 1 is invalid. Array indices must be positive integers or logical values.", "MATLAB:badsubscript")
-        return _err("Array indices must be positive integers or logical values.", "MATLAB:badsubscript")
-    return None
+# (a fast path's "not this index": NaN equals no subscript, so the comparison that follows fails)
+_NOIX = float("nan")
+
+
+def _bad_index(pos):
+    """MATLAB's error for a subscript that is not a positive integer (zero, negative, fractional, NaN or +-Inf),
+    observed R2026b: a linear index (pos < 0) says only "Array indices must be ...", a subscript among several
+    names its position"""
+    msg = "Array indices must be positive integers or logical values."
+    if pos >= 0:
+        msg = "Index in position %d is invalid. %s" % (pos + 1, msg)
+    return _err(msg, "MATLAB:badsubscript")
 
 
 def _ivec(arg, n, pos, grow):
@@ -2321,9 +2330,11 @@ def _ivec(arg, n, pos, grow):
     if arg is COLON:
         return np.arange(n, dtype=np.int64), (n, 1), True
     if t is float:
+        if not (arg >= 1 and arg != _math.inf):
+            raise _bad_index(pos)
         k = int(arg)
-        if k != arg or k < 1:
-            raise _bad_index(arg) or _err("Array indices must be positive integers or logical values.")
+        if k != arg:
+            raise _bad_index(pos)
         if k > n and not grow:
             raise _oob(pos, n)
         return np.array([k - 1], dtype=np.int64), (1, 1), False
@@ -2331,6 +2342,8 @@ def _ivec(arg, n, pos, grow):
         m = _arr(arg).reshape(-1)
         idx = np.nonzero(m)[0].astype(np.int64)
         if idx.size and idx[-1] >= n and not grow:
+            if pos < 0:
+                raise _err("The logical indices contain a true value outside of the array bounds.", "MATLAB:badsubscript")
             raise _oob(pos, n)
         d = _dims(arg)
         shape = (1, idx.size) if (len(d) == 2 and d[0] == 1) else (idx.size, 1)
@@ -2341,16 +2354,19 @@ def _ivec(arg, n, pos, grow):
         return _ivec(_sp.full(arg), n, pos, grow)
     a = _arr(arg)
     if a.dtype.kind == "c":
-        raise _err("Array indices must be positive integers or logical values.", "MATLAB:badsubscript")
+        raise _bad_index(pos)
     f = a.reshape(-1)
     if f.dtype.kind == "f":
-        if f.size and (np.any(f != np.floor(f)) or np.any(f < 1)):
-            bad = f[(f != np.floor(f)) | (f < 1)][0]
-            raise _bad_index(float(bad)) or _err("Array indices must be positive integers or logical values.")
+        # (NaN fails f >= 1, and +-Inf is refused before the conversion to integers)
+        if f.size and not np.all((f >= 1) & (f == np.floor(f)) & (f != np.inf)):
+            raise _bad_index(pos)
+        # (past the end before the conversion to integers: v([1 1e19]) is MATLAB's out-of-range error, not int64's)
+        if f.size and not grow and np.max(f) > n:
+            raise _oob(pos, n)
         idx = f.astype(np.int64) - 1
     else:
         if f.size and np.any(f < 1):
-            raise _err("Array indices must be positive integers or logical values.", "MATLAB:badsubscript")
+            raise _bad_index(pos)
         idx = f.astype(np.int64) - 1
     if idx.size and not grow:
         mx = int(np.max(idx))
@@ -2362,7 +2378,8 @@ def _ivec(arg, n, pos, grow):
 def _oob(pos, n):
     if pos < 0:
         return _err("Index exceeds the number of array elements. Index must not exceed %d." % n, "MATLAB:badsubscript")
-    return _err("Index in position %d exceeds array bounds. Index must not exceed %d." % (pos + 1, n), "MATLAB:index:exceedsdims")
+    # (MATLAB:badsubscript for a subscript among several too, observed R2026b: m(3,1) on a 2-by-2)
+    return _err("Index in position %d exceeds array bounds. Index must not exceed %d." % (pos + 1, n), "MATLAB:badsubscript")
 
 
 def _positions(dims, args):
@@ -2419,13 +2436,16 @@ def index(obj, args):
     # fast paths: one or two scalar subscripts of an array
     if t is np.ndarray and len(args) <= 2 and type(args[0]) is float and (len(args) == 1 or type(args[1]) is float):
         if len(args) == 1:
-            k = int(args[0])
-            if k == args[0] and 1 <= k <= obj.size:
+            a0 = args[0]
+            k = int(a0) if 1 <= a0 <= obj.size else _NOIX
+            if k == a0:
                 return _box1(obj.reshape(-1)[k - 1], obj)
         elif obj.ndim == 2:
-            i = int(args[0])
-            j = int(args[1])
-            if i == args[0] and j == args[1] and 1 <= i <= obj.shape[1] and 1 <= j <= obj.shape[0]:
+            a0 = args[0]
+            a1 = args[1]
+            i = int(a0) if 1 <= a0 <= obj.shape[1] else _NOIX
+            j = int(a1) if 1 <= a1 <= obj.shape[0] else _NOIX
+            if i == a0 and j == a1:
                 return _box1(obj[j - 1, i - 1], obj)
     if t is float or t is bool or t is complex:
         for a in args:
@@ -2513,8 +2533,9 @@ def brace_cs(obj, args):
     t = type(obj)
     if t is Cell:
         if len(args) == 1 and type(args[0]) is float:
-            k = int(args[0])
-            if k == args[0] and 1 <= k <= len(obj.a):
+            a0 = args[0]
+            k = int(a0) if 1 <= a0 <= len(obj.a) else _NOIX
+            if k == a0:
                 return [obj.a[k - 1]]
         pos, out = _positions(obj.shape, args)
         return [obj.a[int(k)] for k in pos.reshape(-1)]
@@ -2528,8 +2549,9 @@ def brace_cs(obj, args):
 
 def brace(obj, args):
     if type(obj) is Cell and len(args) == 1 and type(args[0]) is float:
-        k = int(args[0])
-        if k == args[0] and 1 <= k <= len(obj.a):
+        a0 = args[0]
+        k = int(a0) if 1 <= a0 <= len(obj.a) else _NOIX
+        if k == a0:
             return obj.a[k - 1]
     vals = brace_cs(obj, args)
     if not vals:
@@ -2771,9 +2793,9 @@ def _asg(cur, path, i, v):
 def set1(cur, i, v):
     """cur(i) = v"""
     if type(cur) is np.ndarray and type(i) is float and type(v) is float and cur.dtype == np.float64:
-        k = int(i)
+        k = int(i) if 0 < i <= cur.size + 1 else _NOIX
         if k == i:
-            if 0 < k <= cur.size and cur.ndim == 2:
+            if k <= cur.size and cur.ndim == 2:
                 cur[(k - 1) // cur.shape[1], (k - 1) % cur.shape[1]] = v
                 return cur
             if k == cur.size + 1 and cur.ndim == 2:
@@ -2790,9 +2812,9 @@ def set1(cur, i, v):
 def set2(cur, i, j, v):
     """cur(i, j) = v"""
     if type(cur) is np.ndarray and type(i) is float and type(j) is float and type(v) is float and cur.dtype == np.float64 and cur.ndim == 2:
-        a = int(i)
-        b = int(j)
-        if a == i and b == j and 0 < a <= cur.shape[1] and 0 < b <= cur.shape[0]:
+        a = int(i) if 0 < i <= cur.shape[1] else _NOIX
+        b = int(j) if 0 < j <= cur.shape[0] else _NOIX
+        if a == i and b == j:
             cur[b - 1, a - 1] = v
             return cur
     return _assign_paren(None if isinstance(cur, Undef) else cur, [i, j], v)
@@ -2920,18 +2942,21 @@ def _assign_paren(cur, args, v, brace=False):
     # fast path: a(k) = scalar, within bounds
     if cur is not None and type(cur) is np.ndarray and tv is float and cur.dtype == np.float64 and len(args) <= 2 and type(args[0]) is float:
         if len(args) == 1:
-            k = int(args[0])
-            if k == args[0] and 1 <= k <= cur.size and cur.ndim == 2:
+            a0 = args[0]
+            k = int(a0) if 1 <= a0 <= cur.size + 1 else _NOIX
+            if k == a0 and k <= cur.size and cur.ndim == 2:
                 cur[(k - 1) // cur.shape[1], (k - 1) % cur.shape[1]] = v
                 return cur
-            if k == args[0] and k == cur.size + 1 and cur.ndim == 2:
+            if k == a0 and k == cur.size + 1 and cur.ndim == 2:
                 g = _grow1(cur, k, v)
                 if g is not None:
                     return g
         elif type(args[1]) is float and cur.ndim == 2:
-            i = int(args[0])
-            j = int(args[1])
-            if i == args[0] and j == args[1] and 1 <= i <= cur.shape[1] and 1 <= j <= cur.shape[0]:
+            a0 = args[0]
+            a1 = args[1]
+            i = int(a0) if 1 <= a0 <= cur.shape[1] else _NOIX
+            j = int(a1) if 1 <= a1 <= cur.shape[0] else _NOIX
+            if i == a0 and j == a1:
                 cur[j - 1, i - 1] = v
                 return cur
     if cur is None or (_isempty_double(cur) and not brace):
