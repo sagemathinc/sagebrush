@@ -35,7 +35,7 @@ export const COPY = {
 // gets 409 before the upgrade while a page is paired, :136); the session secret from a code hello, a session hello
 // checked against it; a refused hello answered, then the socket closed (:192-193); chats by conversation. Unlike it,
 // the code here stays valid (it's single use there, :188): the cases that pair again use the same one.
-export function fakeAgent({ name = "Claude", client = "claude-agent-sdk" } = {}) {
+export function fakeAgent({ name = "Claude", client = "claude-agent-sdk", features } = {}) {
   const A = { secret: randomBytes(32).toString("base64url"), live: new Set(), rejected: 0, upgrades: 0, hellos: 0, notes: [], resume: new Map(), silent: false, port: 0, server: null, pending: new Map(), n: 0, page: null, delay: 0, busyHello: false, busied: 0, hold: false };
   const start = (port) => {
     A.server = Bun.serve({
@@ -68,7 +68,7 @@ export function fakeAgent({ name = "Claude", client = "claude-agent-sdk" } = {})
               return void ws.close(1008, "refused");
             }
             A.page = ws;
-            const answer = () => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name, client, version: "0.3.0" }, wants: { folders: ["/"], write: true, run: false }, ...(typeof p.code === "string" ? { session: A.secret } : {}) } }));
+            const answer = () => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name, client, version: "0.3.0" }, wants: { folders: ["/"], write: true, run: false }, ...(features ? { features } : {}), ...(typeof p.code === "string" ? { session: A.secret } : {}) } }));
             // (an answer held for A.delay ms: the attempt lasts past a rendering update, so focus effects are seen)
             if (A.delay > 0) setTimeout(answer, A.delay); else answer();
           } else if (m.id && A.pending.has(m.id)) {
@@ -320,7 +320,7 @@ async function attach(B, targetId, { clock = false, retry = false } = {}) {
 
 /** Open the page with a pairing link, connect, and allow everything for `how` (chosen explicitly, never by default:
  * "page", "3600000" or "86400000"); `remember` ticks "Remember this agent"; `write` false grants read only. */
-async function pair(P, A, site, how = "page", remember = false, write = true) {
+export async function pair(P, A, site, how = "page", remember = false, write = true) {
   await P.navigate(`${site}/agents/?pair=123-456&port=${A.port}`);
   // (30 s: under a full counted run's load the page's first load and its dialog can take longer than 15 s)
   await timed("pair-dialog", P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect')`, 30000));

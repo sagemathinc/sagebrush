@@ -45,6 +45,8 @@ import { ownClaudeCommand } from "./own-claude";
 import { workspaceIO } from "./delegate-merge";
 import { toIpynb } from "../notebook/ipynb.js";
 import { mountVersionStamp } from "../version";
+import { ATTACH_COPY, mountAttach } from "./attach";
+import { inGrant } from "../workspace/agent-grant";
 
 // (the build this site serves, under the chat list, for whoever tests it: web/version.ts; first, before anything that
 // waits, so it shows even while the workspace opens; nothing where the site doesn't say)
@@ -1274,6 +1276,19 @@ function showDraft() {
 //  then the person may have typed)
 draftOf = "";
 showDraft();
+// (an image pasted or dropped into the composer: saved in its chat's folder, its path added to that chat's draft)
+mountAttach({
+  composer: $(".composer"),
+  conversation: () => draftOf || current().id,
+  create: (path, bytes) => (workspace ? workspace.createByPerson(path, { content: bytes }) : Promise.reject(new Error("this browser's workspace isn't open"))),
+  append(conv, line) {
+    const join = (v: string) => (v.trim() ? v.replace(/\s*$/, "") + "\n\n" : "") + line;
+    if (draftOf === conv) { editor.value = join(editor.value); putDraft(conv, editor.value, true); }
+    else putDraft(conv, join(draftsPending.get(conv) ?? readDrafts()[conv] ?? ""), true);
+  },
+  agent: () => (live() && pairing?.grant ? { name: agentName(), reads: (p) => inGrant(p, pairing!.grant!.folders) } : null),
+  toast: (t) => toast(t, 6000),
+});
 // (Delegate, for an agent on this computer that offers it: delegate.ts's tasks, drawn by delegate-ui.ts)
 const delegateTasks = new DelegateTasks({ changed: () => delegateUi?.render() });
 const delegateUi = mountDelegate({
@@ -1862,6 +1877,7 @@ function renderHeader() {
     who.innerHTML = `<span class="conn demo"></span>Claude <small>scripted demo</small>`;
   }
   for (const el of document.querySelectorAll<HTMLElement>("#editor [data-placeholder]")) el.dataset.placeholder = `Message ${agentName()}…  (Shift+Enter to send)`;
+  $("#attach-hint").textContent = ATTACH_COPY.help + (live() && pairing?.hello?.features?.includes("workspace.image") ? " " + ATTACH_COPY.sees(agentName()) : "");
   $("#connect").textContent = live() ? "Connected" : "Connect Claude";
   $("#stop").textContent = stopLabel(agentName());
   $("#connect").toggleAttribute("disabled", live());
