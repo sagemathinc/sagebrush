@@ -24,4 +24,7 @@ print Z eq Q;
 U<u> := PolynomialRing(Integers());
 g := w^3 - 2;
 print g, Z.1;
+print (s + 1)/(s - 1), u/(u + 1);
+h := f/(s^2 - 1);
+print h;
 print "end";
