@@ -16,6 +16,8 @@ from . import _pd_reduce as R
 from . import _pd_repr
 from . import _pd_sort as S
 from . import _pd_reshape as RS
+from . import _pd_combine as CB
+from . import _pd_info as INF
 
 __all__ = ["Series"]
 
@@ -140,16 +142,26 @@ class Series(object):
     def values(self):
         return _export(self._pd_col, "Series.values")
 
-    def to_numpy(self, dtype=None, copy=False, na_value=None):
-        if dtype is not None or na_value is not None:
-            raise _unsupported("Series.to_numpy(dtype=, na_value=)")
+    def to_numpy(self, dtype=None, copy=False, na_value=RS.NO_VALUE, **kwargs):
+        """The values as a numpy array: missing values as na_value if given,
+        converted to dtype if given (a new, writable array when that changes
+        the dtype); see _export."""
+        if kwargs:
+            raise _unsupported("Series.to_numpy(**kwargs)")
+        col = self._pd_col if na_value is RS.NO_VALUE else with_na_value(self._pd_col, na_value)
+        if dtype is not None:
+            a = export_as([col], dtype, "Series.to_numpy(dtype=)")[:, 0]
+            # (read-only where the values already have that dtype: pandas' view of them)
+            if not copy and not col.is_list and str(a.dtype) == str(col._pd_values.dtype):
+                a.flags.writeable = False
+            return a
         if copy:
-            if self._pd_col.dtype is DT or self._pd_col.dtype is STR:
-                return _export(self._pd_col, "Series.to_numpy()")
-            if self._pd_col.is_list:
-                raise _unsupported("Series.to_numpy() of a%s %s column" % ("n" if self._pd_col.dtype == "object" else "", self._pd_col.dtype))
-            return self._pd_col._pd_values.copy()
-        return _export(self._pd_col, "Series.to_numpy()")
+            if col.dtype is DT or col.dtype is STR:
+                return _export(col, "Series.to_numpy()")
+            if col.is_list:
+                raise _unsupported("Series.to_numpy() of a%s %s column" % ("n" if col.dtype == "object" else "", col.dtype))
+            return col._pd_values.copy()
+        return _export(col, "Series.to_numpy()")
 
     @property
     def array(self):
@@ -580,6 +592,57 @@ class Series(object):
             return None
         return out
 
+    def value_counts(self, normalize=False, sort=True, ascending=False, bins=None, dropna=True):
+        """Each distinct value's count (or share of all, normalize=True),
+        most frequent first, ties in order of first appearance (pandas'
+        stable sort); the values become the index, named after the Series."""
+        if bins is not None:
+            raise _unsupported("Series.value_counts(bins=) (an IntervalIndex)")
+        first, counts = CB.count_values(self._pd_col, dropna)
+        order = list(range(len(counts)))
+        if sort:
+            order.sort(key=lambda k: counts[k] if ascending else -counts[k])
+        index = Index(self._pd_col.take([first[k] for k in order]), name=self._pd_name)
+        n = np.array([counts[k] for k in order], dtype=np.int64)
+        if normalize:
+            return Series._pd_new(Column("float64", n / n.sum() if len(n) else np.array([], dtype=np.float64)), index, "proportion")
+        return Series._pd_new(Column("int64", n), index, "count")
+
+    def drop(self, labels=None, *, axis=0, index=None, columns=None, level=None, inplace=_INPLACE, errors="raise"):
+        """Without the rows of labels (or index=; columns= is a frame's and
+        ignored here), every row of a repeated label."""
+        inplace = inplace_given(inplace, "Series.drop")
+        if level is not None:
+            raise _unsupported("Series.drop(level=)")
+        if axis not in (0, "index", "rows"):
+            raise ValueError("No axis named %s for object type Series" % (axis,))
+        if labels is not None:
+            if index is not None or columns is not None:
+                raise ValueError("Cannot specify both 'labels' and 'index'/'columns'")
+        elif index is None and columns is None:
+            raise ValueError("Need to specify at least one of 'labels', 'index' or 'columns'")
+        else:
+            labels = index
+        if labels is None:
+            out = self.copy()
+        else:
+            keep = CB.keep_positions(self._pd_index, labels, errors)
+            out = Series._pd_new(self._pd_col.take(keep), CB.kept_index(self._pd_index, keep), self._pd_name)
+        if inplace:
+            self._pd_col, self._pd_index = out._pd_col, out._pd_index
+            return None
+        return out
+
+    def memory_usage(self, index=True, deep=False):
+        """The bytes pandas counts for the values (and the index); see
+        _pd_info."""
+        if deep:
+            INF.check_deep("Series.memory_usage(deep=True)", [self._pd_col], self._pd_index if index else None)
+        return INF.column_nbytes(self._pd_col) + (INF.index_nbytes(self._pd_index) if index else 0)
+
+    def info(self, verbose=None, buf=None, max_cols=None, memory_usage=None, show_counts=True):
+        return INF.series_info(self, verbose, buf, max_cols, memory_usage, show_counts)
+
     # --- reprs -------------------------------------------------------------
 
     def __repr__(self):
@@ -650,6 +713,59 @@ def _export(col, what, readonly=True):
     a = col._pd_values.copy()
     if readonly:
         a.flags.writeable = False
+    return a
+
+
+def with_na_value(col, na_value):
+    """col with its missing values replaced by na_value (to_numpy's), the
+    dtype kept where it holds the value (a float column filled with an int
+    stays float64), else inferred."""
+    missing = col.isna().tolist()
+    if not any(missing):
+        return col
+    vals = [na_value if m else v for v, m in zip(col.tolist(), missing)]
+    d = infer(vals)
+    if d == "int64" and col.dtype == "float64":
+        d = "float64"
+    return column_from(vals, d)
+
+
+def export_as(cols, dtype, what):
+    """to_numpy(dtype=) of columns, as a new 2-D array: numeric and bool
+    columns converted one by one with numpy's casts, str columns as their
+    '<U' array for dtype=str. Other conversions go through pandas' object
+    arrays, which Sagebrush's numpy doesn't have yet."""
+    if dtype is object or (isinstance(dtype, str) and dtype in ("O", "object")):
+        raise _unsupported("%s with dtype=object (Sagebrush's numpy has no object dtype yet)" % what)
+    n, m = (len(cols[0]) if cols else 0), len(cols)
+    if dtype is str or (isinstance(dtype, str) and dtype in ("str", "U", "<U")):
+        if cols and all(c.dtype is STR for c in cols):
+            parts = [_export(c, what, False) for c in cols]
+            return np.array([[p[i] for p in parts] for i in range(n)], dtype=str) if n else np.empty((0, m), dtype="<U1")
+        if any(c.is_list or c.dtype is DT for c in cols):
+            raise _unsupported("%s of str mixed with other columns, or of object or datetime columns" % what)
+        return _stacked(cols, np.result_type(*[c._pd_values.dtype for c in cols])).astype(str)
+    target = np.dtype(dtype)
+    if target.kind not in "biuf":
+        raise _unsupported("%s with dtype=%s" % (what, target))
+    if any(c.is_list or c.dtype is DT for c in cols):
+        raise _unsupported("%s of str, object or datetime columns to a numeric dtype (pandas converts an object array)" % what)
+    if target.kind in "iu" and any(c.isna().any() for c in cols):
+        raise _unsupported("%s of missing values to an integer dtype (numpy's cast of NaN; give na_value=)" % what)
+    return _stacked(cols, target)
+
+
+def is_int_target(dtype):
+    """Whether to_numpy's dtype is a numpy integer one."""
+    if dtype is object or dtype is str or (isinstance(dtype, str) and dtype in ("O", "object", "str", "U", "<U")):
+        return False
+    return np.dtype(dtype).kind in "iu"
+
+
+def _stacked(cols, dtype):
+    a = np.empty((len(cols[0]) if cols else 0, len(cols)), dtype=dtype)
+    for j, c in enumerate(cols):
+        a[:, j] = c._pd_values.astype(dtype)
     return a
 
 

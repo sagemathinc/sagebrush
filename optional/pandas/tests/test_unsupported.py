@@ -55,8 +55,6 @@ case("c3.frame-str-values", lambda: dfs.values)
 case("c3.frame-numeric-to_numpy-object", lambda: df.to_numpy(dtype=object))
 case("c3.frame-int-bool-to_numpy", lambda: dfb.to_numpy())
 case("c3.series-array", lambda: s.array)
-case("c3.to_numpy-dtype", lambda: s.to_numpy(dtype="float64"))
-case("c3.to_numpy-na_value", lambda: s.to_numpy(na_value=0))
 case("c3.series-str-to_numpy-copy", lambda: ss.to_numpy(copy=True))
 
 # dtypes and values outside the subset
@@ -69,11 +67,11 @@ case("value.sum-beyond-2-53", lambda: pd.Series([2 ** 52, 2 ** 52, 1]).sum())
 case("frame.ragged-rows", lambda: pd.DataFrame([[1, 2], [3]]))
 
 # names outside the subset
-for name in ["NA", "merge", "concat", "Timedelta", "Categorical", "MultiIndex", "read_parquet", "get_dummies"]:
+for name in ["NA", "merge", "crosstab", "Timedelta", "Categorical", "MultiIndex", "read_parquet", "get_dummies"]:
     case("name.pd." + name, lambda name=name: getattr(pd, name))
-for name in ["groupby", "merge", "describe", "rank", "drop", "pivot_table", "nlargest", "plot", "info", "value_counts", "to_csv", "where"]:
+for name in ["groupby", "merge", "describe", "rank", "query", "pivot_table", "nlargest", "plot", "nsmallest", "value_counts", "to_csv", "where"]:
     case("name.DataFrame." + name, lambda name=name: getattr(df, name))
-for name in ["str", "rolling", "groupby", "value_counts", "rank", "map", "nlargest", "plot", "nunique", "quantile"]:
+for name in ["str", "rolling", "groupby", "mode", "rank", "map", "nlargest", "plot", "nunique", "quantile"]:
     case("name.Series." + name, lambda name=name: getattr(s, name))
 case("name.Index.sort_values", lambda: getattr(pd.Index([1]), "sort_values"))
 case("name.pd.unknown-is-AttributeError", lambda: getattr(pd, "no_such_name"))
@@ -97,6 +95,28 @@ case("d1.reset_index-level", lambda: df.reset_index(level=0))
 case("d1.fillna-limit", lambda: s.fillna(0, limit=1))
 case("d1.asarray-str", lambda: np.asarray(pd.Series(["a", "b"])))
 case("d1.frame-asarray-str", lambda: np.asarray(pd.DataFrame({"x": ["a"]})))
+
+# Counting, joining and reshaping's refusals: forms outside the subset (a MultiIndex, an IntervalIndex, the sizes of
+# Python objects) and conversions that need an object array or numpy's cast of NaN
+case("reshape.value_counts-bins", lambda: pd.Series([1.0, 2.0]).value_counts(bins=2))
+case("reshape.concat-keys", lambda: pd.concat([df, df], keys=["p", "q"]))
+case("reshape.concat-dict", lambda: pd.concat({"p": df}))
+case("reshape.concat-repeated-column", lambda: pd.concat([pd.DataFrame([[1, 2]], columns=["a", "a"]), pd.DataFrame({"b": [1]})]))
+case("reshape.concat-union_categories", lambda: pd.concat([df, df], union_categories=True))
+case("reshape.drop-level", lambda: df.drop(0, level=0))
+case("reshape.series-drop-level", lambda: s.drop(0, level=0))
+case("reshape.melt-col_level", lambda: df.melt(col_level=0))
+case("reshape.melt-repeated-id", lambda: pd.DataFrame([[1, 2, 3]], columns=["a", "a", "b"]).melt(id_vars="a"))
+case("reshape.melt-series", lambda: pd.melt(s))
+case("reshape.memory_usage-deep-str", lambda: dfs.memory_usage(deep=True))
+case("reshape.series-memory_usage-deep-str", lambda: pd.Series(["a"]).memory_usage(deep=True))
+case("reshape.info-deep-str", lambda: dfs.info(memory_usage="deep"))
+case("reshape.to_numpy-nan-to-int", lambda: pd.Series([1.5, np.nan]).to_numpy(dtype="int64"))
+case("reshape.frame-to_numpy-nan-to-int", lambda: pd.DataFrame({"a": [1.5, np.nan]}).to_numpy(dtype="int64", na_value=0))
+case("reshape.frame-to_numpy-str-to-float", lambda: dfs.to_numpy(dtype=float))
+case("reshape.to_numpy-str-to-float", lambda: pd.Series(["1.5"]).to_numpy(dtype=float))
+case("reshape.to_numpy-datetime-to-int", lambda: sdt.to_numpy(dtype="int64"))
+case("reshape.to_numpy-kwargs", lambda: s.to_numpy(foo=1))
 
 # arithmetic and frame comparisons (M2)
 case("op.series-add", lambda: s + 1)
