@@ -502,7 +502,7 @@ jobs:
     if: always() && (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
-    # (pull-requests: read, only to read the track-pull label of a queued pull request)
+    # (pull-requests: read, only to read the track-pull or size-accepted label of a queued pull request)
     permissions:
       contents: read
       pull-requests: read
@@ -528,20 +528,24 @@ jobs:
       # the track already passed this backstop against the track, and the pull sums them. With
       # the track-pull label the table is still measured and reported, but growth over the
       # backstop doesn't fail it; the merger reads every row. Missing records still fail closed.
+      # The size-accepted label is the same excuse for any pull request whose growth @sagebrush accepted after the
+      # size checklist (@sagebrush's ruling, Nov 23 2026, #1697); only he applies it.
       - name: a track pull?
         id: track
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          # (the names as a JSON array, matched element by element: a label named "x,size-accepted" is not size-accepted)
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           QUEUE_REF: ${{ github.event.merge_group.head_ref }}
         run: |
           pull=false
+          excused='(. // []) | any(.[]; . == "track-pull" or . == "size-accepted")'
           if [ "$EVENT" = pull_request ]; then
-            case ",$LABELS," in *,track-pull,*) pull=true ;; esac
+            if printf '%s' "$LABELS" | jq -e "$excused" > /dev/null; then pull=true; fi
           elif [ "$EVENT" = merge_group ]; then
             n=$(printf '%s' "$QUEUE_REF" | sed -n 's#^refs/heads/gh-readonly-queue/[^/]*/pr-\([0-9][0-9]*\)-.*#\1#p')
-            if [ -n "$n" ] && gh api "repos/$GITHUB_REPOSITORY/issues/$n/labels" --jq '.[].name' | grep -qx track-pull; then pull=true; fi
+            if [ -n "$n" ] && gh api "repos/$GITHUB_REPOSITORY/issues/$n/labels" --jq '[.[].name]' | jq -e "$excused" > /dev/null; then pull=true; fi
           fi
           echo "track pull: $pull"
           echo "pull=$pull" >> "$GITHUB_OUTPUT"
@@ -568,7 +572,7 @@ jobs:
               # (only growth is excused: a record, recipe or toolchain problem still fails)
               if [ "$TRACK_PULL" = true ] && node -e 'const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.exit(r.rows.length > 0 && r.problems.length > 0 && r.problems.every((p) => /: growth \+\d+ exceeds \d+ bytes/.test(p)) ? 0 : 1)' "$RUNNER_TEMP/size-records/size-gate.json"; then
                 echo "::warning::a track pull: growth over the backstop is reported, not enforced; the merger reads every row"
-                echo "**A track pull (track-pull label): the rows above are reported, not enforced. The merger reads every row.**" >> "$GITHUB_STEP_SUMMARY"
+                echo "**A track pull or accepted size (track-pull or size-accepted label): the rows above are reported, not enforced. The merger reads every row.**" >> "$GITHUB_STEP_SUMMARY"
               else
                 exit 1
               fi

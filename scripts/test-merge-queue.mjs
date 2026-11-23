@@ -2,7 +2,7 @@
 // Replay queue payloads against real git histories, including a cumulative head.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -74,6 +74,42 @@ assert.equal(guard(appGuard, passingApp), 0);
 for (const env of [{ PAGE: 'skipped' }, { APP: 'failure' }, { WASM_CHANGES: 'skipped' }, { WASM: 'failure' }])
   assert.notEqual(guard(appGuard, { ...passingApp, ...env }), 0);
 console.log('PASS: required workflow triggers and aggregate failure/skip guards');
+
+// The size gate's excuse (design/size-gate.md, "Track pulls"; @sagebrush's ruling on #1697, Nov 23 2026): the
+// track-pull or size-accepted label, on a pull request's labels or, in the queue, on the queued pull request's (read
+// with gh, stubbed here), turns pull=true; any other label, a lookalike, or none, false.  The real step's script runs.
+{
+  const step = ci.jobs['size-gate'].steps.find(s => s.id === 'track');
+  assert.ok(step, "size-gate's \"a track pull?\" step");
+  const stub = mkdtempSync(join(tmpdir(), 'gh-stub-'));
+  // (gh api ... --jq '[.[].name]': the queued pull request's names as one JSON array)
+  writeFileSync(join(stub, 'gh'), '#!/bin/sh\nprintf "%s\\n" "$STUB_NAMES"\n', { mode: 0o755 });
+  const pull = (env) => {
+    const out = join(stub, 'out');
+    writeFileSync(out, '');
+    const r = spawnSync('bash', ['-e', '-c', step.run], { encoding: 'utf8', env: { PATH: `${stub}:${process.env.PATH}`, GITHUB_OUTPUT: out, GITHUB_REPOSITORY: 'sagemathinc/sagebrush', ...env } });
+    assert.equal(r.status, 0, r.stderr);
+    return readFileSync(out, 'utf8').trim();
+  };
+  const QREF = 'refs/heads/gh-readonly-queue/master/pr-1697-0123456789abcdef0123456789abcdef01234567';
+  // (each row: the label names, as the pull request has them and as the queue reads them; the same verdict both ways.
+  // A name that contains a comma, a space or a newline around an excusing label is one other label: astra4b's hold)
+  for (const [labels, want] of [[['track-pull'], true], [['size-accepted'], true], [['full-ci', 'size-accepted'], true], [['size-accepted', 'track-pull'], true],
+    [[], false], [['full-ci'], false], [['size-accepted-x'], false], [['x-size-accepted'], false], [['track-pulls'], false], [['size accepted'], false],
+    [['x,size-accepted'], false], [['x,track-pull'], false], [['size-accepted,x'], false], [['track-pull,size-accepted'], false],
+    [['x size-accepted'], false], [['x\nsize-accepted'], false], [['x\ntrack-pull'], false], [[' size-accepted'], false], [['Size-Accepted'], false]]) {
+    const names = JSON.stringify(labels);
+    // (toJSON's form: pretty-printed, as GitHub renders it)
+    assert.equal(pull({ EVENT: 'pull_request', LABELS: JSON.stringify(labels, null, 2) }), `pull=${want}`, `a pull request labelled ${names}`);
+    assert.equal(pull({ EVENT: 'merge_group', QUEUE_REF: QREF, STUB_NAMES: names }), `pull=${want}`, `a queued pull request labelled ${names}`);
+  }
+  // (a push (toJSON of no pull request: null), or a queue ref that names no pull request, is never excused)
+  assert.equal(pull({ EVENT: 'push', LABELS: 'null' }), 'pull=false');
+  assert.equal(pull({ EVENT: 'pull_request', LABELS: 'null' }), 'pull=false');
+  assert.equal(pull({ EVENT: 'merge_group', QUEUE_REF: 'refs/heads/other', STUB_NAMES: '["size-accepted"]' }), 'pull=false');
+  rmSync(stub, { recursive: true, force: true });
+  console.log('PASS: the size gate excuses growth only for the track-pull or size-accepted label (pull request and queue)');
+}
 
 // Queue runs never write a cache: a queue ref is unique, so a cache saved there is never read again and only evicts
 // master's.  Every cache-capable step of a workflow that runs on merge_group, and of every local action, is guarded;
