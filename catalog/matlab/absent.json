@@ -39,6 +39,19 @@
     ]
   },
   {
+    "name": "contourslice",
+    "kind": "function",
+    "signature": "contourslice(X, Y, Z, V, xslice, yslice, zslice)",
+    "summary": "Contour lines on planes through a 3-D volume.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Contour 2-D cuts of the volume, one subplot per cut: contour(X(:,:,k), Y(:,:,k), V(:,:,k), levels) for the plane Z = Z(1,1,k) (squeeze(X(:,k,:)) and the like for a plane of constant X).",
+    "tags": [
+      "plots"
+    ]
+  },
+  {
     "name": "csvread",
     "kind": "function",
     "signature": "M = csvread(filename)",
@@ -355,6 +368,45 @@
     ]
   },
   {
+    "name": "isocaps",
+    "kind": "function",
+    "signature": "fvc = isocaps(X, Y, Z, V, isovalue)",
+    "summary": "The faces that close an isosurface where it meets the volume's boundary.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "isosurface isn't in Sagebrush yet either. Draw each plane with surf, colored by V: for meshgrid arrays, the plane X = X(1,k,1) is surf(squeeze(X(:,k,:)), squeeze(Y(:,k,:)), squeeze(Z(:,k,:)), squeeze(V(:,k,:))) and the plane Z = Z(1,1,k) is surf(X(:,:,k), Y(:,:,k), Z(:,:,k), V(:,:,k)); hold on between planes, then shading interp and colorbar. A scatter3 of every point of the volume is too crowded to read.",
+    "tags": [
+      "plots"
+    ]
+  },
+  {
+    "name": "isonormals",
+    "kind": "function",
+    "signature": "isonormals(X, Y, Z, V, p)",
+    "summary": "Sets an isosurface patch's vertex normals from the volume's gradient.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "isosurface isn't in Sagebrush yet either. Draw each plane with surf, colored by V: for meshgrid arrays, the plane X = X(1,k,1) is surf(squeeze(X(:,k,:)), squeeze(Y(:,k,:)), squeeze(Z(:,k,:)), squeeze(V(:,k,:))) and the plane Z = Z(1,1,k) is surf(X(:,:,k), Y(:,:,k), Z(:,:,k), V(:,:,k)); hold on between planes, then shading interp and colorbar. A scatter3 of every point of the volume is too crowded to read.",
+    "tags": [
+      "plots"
+    ]
+  },
+  {
+    "name": "isosurface",
+    "kind": "function",
+    "signature": "fv = isosurface(X, Y, Z, V, isovalue)",
+    "summary": "The surface where a 3-D volume takes a given value, as faces and vertices for patch.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Draw each plane with surf, colored by V: for meshgrid arrays, the plane X = X(1,k,1) is surf(squeeze(X(:,k,:)), squeeze(Y(:,k,:)), squeeze(Z(:,k,:)), squeeze(V(:,k,:))) and the plane Z = Z(1,1,k) is surf(X(:,:,k), Y(:,:,k), Z(:,:,k), V(:,:,k)); hold on between planes, then shading interp and colorbar. A scatter3 of every point of the volume is too crowded to read. For the level itself, contour 2-D cuts: contour(X(:,:,k), Y(:,:,k), V(:,:,k), [isovalue isovalue]) for a few k, one subplot each.",
+    "tags": [
+      "plots"
+    ]
+  },
+  {
     "name": "issorted",
     "kind": "function",
     "signature": "tf = issorted(A)",
@@ -521,6 +573,19 @@
     "alternative": "Sage mode's Graph(...).shortest_path(s, t, by_weight=True) for an undirected graph; in MATLAB mode, Dijkstra's algorithm on an adjacency matrix (nonnegative weights), taking the min over the unvisited nodes.",
     "tags": [
       "graphs"
+    ]
+  },
+  {
+    "name": "slice",
+    "kind": "function",
+    "signature": "slice(X, Y, Z, V, xslice, yslice, zslice)",
+    "summary": "Draws planes through a 3-D volume, colored by the volume's values.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "Draw each plane with surf, colored by V: for meshgrid arrays, the plane X = X(1,k,1) is surf(squeeze(X(:,k,:)), squeeze(Y(:,k,:)), squeeze(Z(:,k,:)), squeeze(V(:,k,:))) and the plane Z = Z(1,1,k) is surf(X(:,:,k), Y(:,:,k), Z(:,:,k), V(:,:,k)); hold on between planes, then shading interp and colorbar. A scatter3 of every point of the volume is too crowded to read.",
+    "tags": [
+      "plots"
     ]
   },
   {
