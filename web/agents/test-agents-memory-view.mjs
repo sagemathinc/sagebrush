@@ -175,6 +175,7 @@ try {
   await P.ev(`(() => { const d = document.querySelector('dialog.memory-edit[open]'); d.querySelector('[name=body]').value = 'key sk-live-999'; [...d.querySelectorAll('button')].find((b) => b.textContent === 'Save').click(); return true; })()`);
   await P.until(`/looks like it holds a secret/.test(document.querySelector('#toast')?.textContent ?? '')`, 5000).catch(() => {});
   const t8 = await toast(P);
+  ok(await P.ev(`!!document.querySelector('#memory-view [data-act=delete]:not([disabled])')`), "V8: after the refusal, with the dialog still open, the note's buttons are free again");
   ok(/looks like it holds a secret/.test(t8) && !t8.includes("sk-live") && (await P.ev(`document.querySelector('dialog.memory-edit[open] [name=body]')?.value`)) === "key sk-live-999", "V8: a secret is refused in the page's words, without echoing it; the dialog keeps the text to fix", t8);
   // (an answer that can't be read: the dialog stays, says so, and Save again is a new request)
   H.memory.secret = null;
