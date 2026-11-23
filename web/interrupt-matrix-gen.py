@@ -72,7 +72,7 @@ covered = {c["transport"] for c in CASES}
 CHEAP = {
     "engineCall": "ntt_cache_stats dims level_data commute estimate estimate_newforms is_prime factor_estimate cost_probe li".split(),
     "symCall": ("add sub mul div neg const complex e euler_gamma float int pi rat str sym uinf fun rel latex variables operator "
-                "number pysrc numerator denominator degree coefficient coefficients is_zero special_calls enclose").split(),
+                "number pysrc numerator denominator degree coefficient coefficients is_zero special_calls mp_calls enclose").split(),
     "mpCall": "new newp text eq len neg scale add sub".split(),
 }
 FAMILY = [  # (name test, family, owner)
