@@ -492,8 +492,9 @@
 <body class="opening">
 <div id="wssidebar" hidden></div>
 <!-- (the files shown before the page draws, as they were left (wsShowFiles keeps the choice), so the first paint has
-its final layout and the files never arrive a moment later; not on a phone, where they would cover the page) -->
-<script>try { if (localStorage.getItem("sagebrush-files-sidebar") === "1" && !matchMedia("(max-width: 640px)").matches) { document.body.classList.add("wsfiles"); document.getElementById("wssidebar").hidden = false; } } catch {} setTimeout(() => document.body.classList.add("opening-late"), 4000);</script>
+its final layout and the files never arrive a moment later; not on a phone, where they would cover the page, nor in
+the Agents pane's frame of the LaTeX editor, /?tex=&embed=1, which is the editor alone: texEmbedded below) -->
+<script>try { const q = new URLSearchParams(location.search); if (localStorage.getItem("sagebrush-files-sidebar") === "1" && !matchMedia("(max-width: 640px)").matches && !(q.has("tex") && q.get("embed") === "1" && parent !== window)) { document.body.classList.add("wsfiles"); document.getElementById("wssidebar").hidden = false; } } catch {} setTimeout(() => document.body.classList.add("opening-late"), 4000);</script>
 <!-- (the bottom panels' one host: the Python console, the browser terminal and the remote terminal, beside the files
      while they show, as the LaTeX editor is, never over or under them (decided Nov 12), and above the alpha notice) -->
 <div id="sbpanels"></div>
@@ -777,6 +778,7 @@ its final layout and the files never arrive a moment later; not on a phone, wher
 // or reports the URL; the agent chunk, loaded later, is handed it)
 import { pairLink, adoptLink } from "./workspace/pair-link.ts";
 import { takeHandoff } from "./workspace/pair-handoff.ts";
+import { backToAgentsTab } from "./workspace/mode-switch.ts";
 import { createdRunner, runInputs } from "./workspace/agent-made.ts";
 // (a bare pairing link the board page handed over within this tab (pair-handoff.ts): this page's link, taken once, before
 // anything reads it; only when the address has no query and no hash)
@@ -830,7 +832,9 @@ import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIM
 import { mountBrowser } from "./workspace/browser.ts";
 import { mountAccount } from "./workspace/account.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
-import { latexBoot, latexHereFor, desktopApp, mountTex, texNew } from "./latex/boot.ts";
+import { latexBoot, latexHereFor, mountTex, texNew } from "./latex/boot.ts";
+// (whether this is the desktop app: in every build, the editor's or not)
+import { desktopApp } from "./desktop-app.ts";
 import { codeBoot, codeHooks } from "./code/boot.ts";
 import { createPermissions, hostMade, canonicalScope } from "./notebook/permissions.js";
 import { covers, stateOf, meetTrees, sameTrees, EPOCH_MAX } from "./notebook/confine.js";
@@ -2847,6 +2851,8 @@ function afterRendered(fn) {
 let booted, isBooted = false;
 const bootDone = new Promise((r) => (booted = () => { isBooted = true; r(); }));
 async function openShare() {
+  // (not in the app: APP_SHARE_WHY; its menu item is disabled, and this keeps any other way in, such as ?share, closed)
+  if (TAURI) return;
   // (while uploading, Share only shows the dialog again, with the upload's own state: UI-B1)
   if (shareDialog.busy) return void shareDialog.open();
   const t = ++shareOpens;
@@ -3610,12 +3616,21 @@ const fileMenu = $("#filemenu"), fileBtn = $("#filebtn");
 // The one File menu (design/workspace-files.md §3, web/workspace/filemenu.ts):
 // drawn the same as the board page's; what an item does is here, by its key
 // (data-f).  Without the workspace, what needs it is disabled.
+// (the LaTeX editor's page in the Agents page's pane, /?tex=<fid>&embed=1 in a frame of its own (web/latex/boot.ts): the
+// editor alone, so no files beside it, however the person keeps them on this page; their choice stays theirs, unwritten.
+// A pane narrower than 641 px had them over the whole editor. Every way the files are shown
+// stops here (wsShowFiles), and the early script before the page draws has the same test)
+const texEmbedded = (() => { const q = new URLSearchParams(location.search); return q.has("tex") && q.get("embed") === "1" && parent !== window; })();
 // (whether this page has the LaTeX editor: New ▸ LaTeX document in the File menu and the file panel, U0)
 const latexHere = typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && latexHereFor(location.hostname, desktopApp());
 // (the editor's Run sandbox and Share on this page, for latexBoot and the app self-test's mount alike: no Share on the
 //  CLI's page or in the app, which can't publish (the editor's Share says why); no sandbox in the app, RUNNER)
 const texSandbox = () => (RUNNER ? { WorkerKernel, RunnerWorker } : null);
 const texShare = LOCAL || TAURI ? null : (doc) => void openTalkShare(doc);
+// (the app has no share server at its own origin, so a share couldn't be checked or made there: File ▸ Share… is
+//  disabled, saying where to share instead, the header's Share follows it, and Share folder… and Your shares… aren't
+//  offered, as on the CLI's page)
+const APP_SHARE_WHY = "Sharing isn't available in the app: upload this notebook, and the files it uses, to sagebrush.space and share it there";
 function drawFileMenu() {
   const none = !ws;
   renderFileMenu(fileMenu, {
@@ -3623,8 +3638,8 @@ function drawFileMenu() {
     latex: latexHere,
     keys: { newNotebook: "new", newBoard: "whiteboard", newLatex: "newlatex", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
     // (the examples are the gallery's, which `sagebrush notebook`'s page doesn't carry: disabled there, saying where they are)
-    disabled: { newFolder: none, fromExample: none || !!LOCAL },
-    why: LOCAL ? { fromExample: "The examples are on sagebrush.space and in the Sagebrush app" } : undefined,
+    disabled: { newFolder: none, fromExample: none || !!LOCAL, share: !!TAURI },
+    why: LOCAL || TAURI ? { ...(LOCAL ? { fromExample: "The examples are on sagebrush.space and in the Sagebrush app" } : {}), ...(TAURI ? { share: APP_SHARE_WHY } : {}) } : undefined,
     downloads: [
       { key: "ipynb", label: ".ipynb" },
       { key: "py", label: ".py" },
@@ -3644,7 +3659,7 @@ function drawFileMenu() {
       { after: "print", key: "gstemplate", label: "Gradescope template…", title: "For instructors: each exercise's pages in every student's PDF, the template PDF and the page list for Gradescope" },
       // (whether this notebook's code may change the person's files: no-mutation's one switch, a document's setting)
       // (the person's shares: Your shares, a dialog of its own; not where there is no share server, the CLI's page)
-      { after: "share", key: "mine", label: "Your shares…", hidden: !!LOCAL },
+      { after: "share", key: "mine", label: "Your shares…", hidden: !!LOCAL || !!TAURI },
       { after: "share", key: "perms", label: "Permissions…", title: "What this notebook's code may do: change your files (no notebook may until you allow it)" },
     ],
     recent: ws ? async () => (await recentOpened(ws, current.kind === "browser" ? { kind: "notebook", ref: current.id } : undefined)).map((e) => ({ label: recentLabel(e), title: e.path, open: () => openEntry(e) })) : undefined,
@@ -4899,6 +4914,12 @@ async function selftest(path) {
       const native = await Promise.all([["plugin:fs|exists", { path: "/" }], ["plugin:fs|read_dir", { path: "/" }]].map(([c, a]) => TAURI.core.invoke(c, a).then(() => `${c} REACHED`, (e) => `${c} refused: ${String(e?.message ?? e).slice(0, 120)}`)));
       const aclRefused = (r) => / refused: (Command plugin:fs\|\w+ not allowed by ACL|fs\.\w+ not allowed\. (Plugin not found|Command not found|Permissions associated)|fs\.\w+ not allowed on origin)/.test(r);
       check("the page has no fs plugin", facade === "undefined" && native.every(aclRefused), JSON.stringify({ facade, native }));
+      // (Share isn't the app's, APP_SHARE_WHY: File ▸ Share… disabled saying so, the header's Share hidden, Your shares…
+      //  hidden, and the dialog not opened even when asked for, as ?share would)
+      const sm = $("#sharemenu"), mine = fileMenu.querySelector('[data-f="mine"]');
+      await openShare();
+      const share = { disabled: !!sm?.disabled, title: sm?.title === APP_SHARE_WHY, button: $("#sharebtn").hidden, mine: !mine || mine.hidden, dialog: $("#sharedlg").open };
+      check("Share isn't offered in the app", share.disabled && share.title && share.button && share.mine && !share.dialog, JSON.stringify(share));
     }
     // Stop: KeyboardInterrupt in a running loop, keeping the variables
     const exec = (code) => new Promise((resolve) => {
@@ -4981,6 +5002,8 @@ async function leaveTo(url, notebook = true) {
   leaveSeen?.({ url, notebook });
   const go = async () => {
     if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror, notebook ? () => nb.saved() : undefined))) return false;
+    // (to Agents from the Files tab the Agents page opened, while that page's agent is connected: back to it, #1620)
+    if (await backToAgentsTab(url)) return true;
     location.assign(url);
     return true;
   };
@@ -5471,6 +5494,7 @@ function wsTrackCurrent() { wsBrowser?.refresh(); }
 // panel (web/workspace/account.ts); hidden for any other answer
 mountAccount($("#acctslot"), { status: shareFirst, storage: () => { if (!ws) return; wsShowFiles(true); wsBrowser?.storage(); } });
 function wsShowFiles(on) {
+  if (on && texEmbedded) return;
   wsSidebar.hidden = !on;
   document.body.classList.toggle("wsfiles", on);
   wsFilesBtn.setAttribute("aria-pressed", String(on));
@@ -5507,7 +5531,7 @@ function wsShowFiles(on) {
       // (the Storage panel's export: its lazy chunk beside this page; the open notebook saved first)
       exportUrl: (f) => new URL(f, location.href).href,
       // (Share folder…: not under `sagebrush notebook`, which has no sharing)
-      shareFolder: LOCAL ? undefined : (e) => void openFolderShare(e),
+      shareFolder: LOCAL || TAURI ? undefined : (e) => void openFolderShare(e),
       saveOpen: async () => { saveNow(); await nb.saved(); },
       // (the open notebook renamed here: a typed title's rename not yet made
       // is dropped, and its name follows, as if typed)
@@ -5607,7 +5631,7 @@ wsReady.then(() => drawFileMenu());
 $("#installbtn").onclick = () => installPrompt?.prompt();
 wsReady.then(async (w) => {
   // (no workspace: no files to show, so the space kept for them before the page drew goes)
-  if (!w) { document.body.classList.remove("wsfiles"); wsSidebar.hidden = true; return; }
+  if (!w || texEmbedded) { document.body.classList.remove("wsfiles"); wsSidebar.hidden = true; return; }
   wsFilesBtn.hidden = false;
   let pref = null;
   try { pref = localStorage.getItem("sagebrush-files-sidebar"); } catch {}

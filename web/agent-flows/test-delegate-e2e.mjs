@@ -117,6 +117,12 @@ try {
   await must(`!!document.querySelector("#task-view .proposal-card")`, "the proposal's card");
   const card = await page.ev(`document.querySelector("#task-view .proposal-card").textContent`);
   ok(/^Proposal: 1 file changed · base [0-9a-f]{7} · proposal [0-9a-f]{7}$/.test(card), "6. the task's proposal card: one file changed, both commits", card);
+  // (its thread read, then nothing in it still going: no tool call with its spinner (the propose call answered), no
+  //  turn still working; sagebrush-agent 0.8.11 closes the turn with the proposal)
+  await must(`!!document.querySelector("#task-view .turn")`, "the task's thread");
+  await sleep(2000);
+  const still = await page.ev(`({ spinners: document.querySelectorAll("#task-view .spinner").length, working: document.querySelector("#task-view").textContent.includes("Working…"), running: [...document.querySelectorAll("#task-view details.tool")].filter((d) => d.querySelector(".spinner")).map((d) => d.querySelector("summary")?.textContent.trim().slice(0, 80)) })`);
+  ok(still.spinners === 0 && !still.working, "6. nothing in the task's view is still going: no tool call spinning, no turn working", still);
   await shot("6-task");
   await page.ev(`(document.querySelector("#task-view .proposal-card").click(), true)`);
   await must(`!!document.querySelector("dialog.proposal[open] .sbpv .file")`, "the proposal view", 30000);

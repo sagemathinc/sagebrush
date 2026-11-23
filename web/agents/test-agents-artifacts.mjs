@@ -1545,6 +1545,58 @@ try {
     }
   }
 
+  // ======================================================================== LaTeX: the framed editor, not the files
+  // (TF6, QA on DEV: a .tex artifact showed the workspace's Files sidebar instead of the editor. The framed page is the
+  //  notebook page, which shows its files where the person keeps them shown (or has more than one notebook or board),
+  //  and in a pane narrower than 641 px they cover the page. Embedded, the frame is the editor alone: with the files
+  //  kept shown, the sidebar stays hidden, the point at the frame's middle is the editor's, and the person's own
+  //  choice (shown) is kept for the notebook page; TF6b and TF6c: the other ways the page shows them, a file dragged
+  //  over it and its early script before the workspace opens, in a full-screen pane)
+  if (want("texfiles") && TEXFRAME) {
+    const T = "/notes/files-kept.tex";
+    const FR = `document.querySelector('${PANE} iframe.tex-frame')`;
+    const FD = `${FR}.contentDocument`;
+    await ev(`(localStorage.setItem('sagebrush-files-sidebar', '1'), true)`);
+    for (const n of ["a", "b"]) await call("workspace.create", { path: `/notes/kept-${n}.ipynb`, content: docFor(`/notes/kept-${n}.ipynb`, [{ code: "x = 1" }]), mode: "python" });
+    await call("workspace.create", { path: T, content: { text: "\\documentclass{article}\n\\begin{document}\nKept in view.\n\\end{document}\n" } });
+    await artifactTurn(T);
+    await until(`!!${FD}?.querySelector('.tex-page .tex-preview')?.textContent.includes('Kept in view')`, 60000).catch(() => {});
+    // (the notebook page's files are drawn once its workspace is open: time for them to have come, if they would)
+    await sleep(2500);
+    const tf6 = await ev(`(() => { const f = ${FR}, d = f?.contentDocument; if (!d) return null; const sb = d.getElementById('wssidebar'), r = f.getBoundingClientRect();
+      const at = d.elementFromPoint(r.width / 2, r.height / 2);
+      return { width: Math.round(r.width), sidebar: !!sb && !sb.hidden && getComputedStyle(sb).display !== 'none', wsfiles: d.body.classList.contains('wsfiles'), atEditor: !!at?.closest('.tex-page'), at: at ? at.tagName + '.' + at.className : null, pref: localStorage.getItem('sagebrush-files-sidebar') }; })()`);
+    ok(tf6 && !tf6.sidebar && !tf6.wsfiles && tf6.atEditor && tf6.pref === "1",
+      "TF6: a .tex artifact is the editor, not the workspace's files: with the files kept shown (and more than one notebook), the framed page shows no Files sidebar, the frame's middle is the editor, and the person's choice to show them is kept", tf6);
+    // (TF6b: a file dragged over the pane, which on the notebook page shows the files to drop it in: in the frame they
+    //  stay hidden, and the person's choice (hidden, this time) isn't written)
+    const files = `(() => { const d = ${FD}, sb = d.getElementById('wssidebar'); return { sidebar: !!sb && !sb.hidden && getComputedStyle(sb).display !== 'none', wsfiles: d.body.classList.contains('wsfiles') }; })()`;
+    await ev(`(localStorage.setItem('sagebrush-files-sidebar', '0'), true)`);
+    await ev(`(() => { const w = ${FR}.contentWindow, dt = new w.DataTransfer(); dt.items.add(new w.File(['x'], 'dropped.txt', { type: 'text/plain' })); w.document.querySelector('.tex-page').dispatchEvent(new w.DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true })); return true; })()`);
+    await sleep(500);
+    const tf6b = { ...(await ev(files)), pref: await ev(`localStorage.getItem('sagebrush-files-sidebar')`) };
+    ok(!tf6b.sidebar && !tf6b.wsfiles && tf6b.pref === "0", "TF6b: a file dragged over the framed editor shows no Files sidebar there, and the person's choice (hidden) isn't written", tf6b);
+    // (TF6c: the pane full screen, wider than 640 px, the files kept shown: the page's early script, which shows them
+    //  before the workspace opens, leaves them hidden in the frame too: the frame reloaded and watched from its first
+    //  moment (a watcher put in the new document before any of its scripts, which notes every change that shows them),
+    //  then once its workspace is open)
+    await ev(`(localStorage.setItem('sagebrush-files-sidebar', '1'), document.querySelector('#full').click(), true)`);
+    await sleep(800);
+    const watch = await send("Page.addScriptToEvaluateOnNewDocument", { source: `if (/[?&]embed=1/.test(location.search)) { window.__tf6c = { watched: false, files: 0 }; new MutationObserver(() => { const b = document.body, sb = document.getElementById('wssidebar'); if (b) window.__tf6c.watched = true; if (b?.classList.contains('wsfiles') || (sb && !sb.hidden)) window.__tf6c.files++; }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'hidden'] }); }` });
+    await ev(`(${FR}.contentWindow.location.reload(), true)`);
+    await sleep(500);
+    await until(`!!${FD}?.querySelector('.tex-page .tex-preview')?.textContent.includes('Kept in view')`, 60000).catch(() => {});
+    await sleep(2500);
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: watch.identifier });
+    const tf6c = { width: await ev(`Math.round(${FR}.getBoundingClientRect().width)`), early: await ev(`${FR}.contentWindow.__tf6c ?? null`), after: await ev(files), pref: await ev(`localStorage.getItem('sagebrush-files-sidebar')`) };
+    ok(tf6c.width > 640 && tf6c.early?.watched && tf6c.early.files === 0 && !tf6c.after.sidebar && !tf6c.after.wsfiles && tf6c.pref === "1",
+      "TF6c: the pane full screen (wider than 640 px), the files kept shown: the framed editor shows no Files sidebar before its workspace opens nor after, and the choice is kept", tf6c);
+    await ev(`(document.querySelector('#full')?.click(), true)`);
+    await ev(`(localStorage.removeItem('sagebrush-files-sidebar'), true)`);
+    await ev(`document.querySelector('#close').click()`);
+    await until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
+  }
+
   // ======================================================================== LaTeX: the editor fills its pane (A4, A8)
   // (William, Oct 31: typing at the bottom moved the source and its cursor out of view; the source couldn't be
   // scrolled to its top. The editor had no height in the pane: it took its content's, and each preview render moved
