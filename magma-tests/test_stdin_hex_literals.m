@@ -8,6 +8,8 @@ print 0x1e5;
 x := 0x5;
 print x;
 print [0x1..3];
+// any ONE digit before the x, which is ignored
+print 1x5, 2x5, 9x5, 7xA, 1x10, 1xff, 9xff;
 // digits and an x that aren't one: "Invalid hexadecimal integer", at the x
 print 0x;
 print 0xg;
@@ -16,9 +18,13 @@ print 0x_5;
 print 00x5;
 print 10x5;
 print 2x;
+print 1x;
+print 01x5;
+print 11x5;
 // a hexadecimal literal followed by a letter, or an upper-case X: bad syntax there
 print 0x1g;
 print 0x5x5;
+print 3x1g;
 print 0X5;
 // leading zeros
 print 007, 0010, -000, 00;
