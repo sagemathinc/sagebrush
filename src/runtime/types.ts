@@ -3597,8 +3597,38 @@ export function builtinTypeFor(name: string, jsClass: any, module: string, call:
 
 // object.__class__ and object.__dict__ (a snapshot for now; writes through
 // __dict__ are not reflected).
+// (__class__ assignment's layout check, CPython's compatible_for_assignment: from each class down its first bases
+// while one adds nothing to its instances' layout (no slot of its own, no __dict__ its base hasn't), then the two
+// classes reached are one, or add the same slots and the same __dict__ over one base; slots by name, sorted, as
+// CPython's type_new sorts them, so ("y", "x") is ("x", "y")'s layout)
+const ownSlots = (c: any): PyMember[] => [...c.$dict.values()].filter((v: any) => v instanceof PyMember && v.owner === c).sort((p, q) => (p.name < q.name ? -1 : p.name > q.name ? 1 : 0));
+const baseHasDict = (b: any): boolean => (b.$heap === true ? b.$noDict !== true : b !== object);
+const addsDict = (c: any): boolean => c.$noDict !== true && !(c.$bases.length && baseHasDict(c.$bases[0]));
+const layoutBase = (c: any): any => {
+  while (c.$heap === true && c.$bases.length && ownSlots(c).length === 0 && !addsDict(c)) c = c.$bases[0];
+  return c;
+};
 getset(object, "__class__", (o) => typeOf(o), (o, c) => {
-  if (!isType(c) || c.$ctor === null || !hasInstanceDict(o) || c.$jsBase !== null || o.$cls.$jsBase !== null) raise(T.TypeError, "__class__ assignment only supported for mutable types or ModuleType subclasses");
+  // (both classes Python's own, mutable, or both modules', as CPython's object_set_class: never a builtin type's
+  // instance, object() included; the layouts are compared below)
+  const old = o !== null && typeof o === "object" ? o.$cls : undefined;
+  const modules = isType(c) && old !== undefined && c.$mro.includes(T.module) && old.$mro.includes(T.module);
+  const mutable = isType(c) && old !== undefined && (c as any).$heap === true && old.$heap === true;
+  if (!isType(c) || c.$ctor === null || !(modules || mutable) || c.$jsBase !== null || old.$jsBase !== null) raise(T.TypeError, "__class__ assignment only supported for mutable types or ModuleType subclasses");
+  const from = layoutBase(o.$cls), to = layoutBase(c);
+  if (from !== to) {
+    const fs = ownSlots(from), ts = ownSlots(to);
+    if (from.$bases[0] !== to.$bases[0] || addsDict(from) !== addsDict(to) || fs.length !== ts.length || fs.some((m, i) => m.name !== ts[i].name)) {
+      raise(T.TypeError, `__class__ assignment: '${c.$name}' object layout differs from '${o.$cls.$name}'`);
+    }
+    // (each class's slot is its own member, under its own key (CORR-D77-1): the values the old class's members hold
+    // move to the new one's, the same layout's same places, as CPython's assignment keeps them in place)
+    for (let i = 0; i < fs.length; i++) {
+      const v = o[fs[i].key];
+      delete o[fs[i].key];
+      if (v !== undefined) Object.defineProperty(o, ts[i].key, { value: v, writable: true, configurable: true, enumerable: false });
+    }
+  }
   Object.setPrototypeOf(o, c.$ctor!.prototype);
 });
 getset(object, "__dict__", (o) => {

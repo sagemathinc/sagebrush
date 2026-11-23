@@ -1,0 +1,23 @@
+A->B ok ('B', 1)
+B.y unset AttributeError 'B' object has no attribute 'y'
+B set y ok (5, 1)
+B->C TypeError __class__ assignment: 'C' object layout differs from 'B'
+B->D ok None
+B->A ok (1, 5)
+A->P TypeError __class__ assignment: 'P' object layout differs from 'A'
+P->Q ok ('Q', 3, {'z': 3})
+Q->A TypeError __class__ assignment: 'A' object layout differs from 'Q'
+Q->S0 TypeError __class__ assignment: 'S0' object layout differs from 'Q'
+S0->P TypeError __class__ assignment: 'P' object layout differs from 'S0'
+A1->A2 ok ('A2', 7)
+A2->A ok 7
+A3->A4 ok (9, 1)
+A4->A1 TypeError __class__ assignment: 'A1' object layout differs from 'A4'
+module->M ok M
+E1->E2 ok ('E2', ('hi',))
+int TypeError __class__ assignment only supported for mutable types or ModuleType subclasses
+object() TypeError __class__ assignment only supported for mutable types or ModuleType subclasses
+P->int TypeError __class__ assignment only supported for mutable types or ModuleType subclasses
+Pv1->Pv2 TypeError __class__ assignment: 'Pv2' object layout differs from 'Pv1'
+W->W2 ok (1, 2)
+W2->A TypeError __class__ assignment: 'A' object layout differs from 'W2'
