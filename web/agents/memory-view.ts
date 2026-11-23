@@ -20,14 +20,14 @@ export const VIEW_COPY = {
   help: (path: string | null) =>
     `These are the notes this agent may use: its own, and those of the tags you allowed. They're kept on this computer${path ? `, in ${path}` : ""}. ` +
     "Reading and searching them here sends them nowhere. A note the agent reads in a turn goes to its model provider with that turn. " +
-    "Notes expire 90 days after they're saved or renewed; reading them doesn't renew them. " +
+    "Each note shows when it expires; some never expire. Renew sets its expiry to 90 days from now. Reading a note doesn't renew it. " +
     "When you connect your own Claude Code instead (a native session), it doesn't use these notes: it keeps its own memory, which isn't shown here. " +
     "Tag names are kept in this browser only: another browser shows a tag's id until you name it there.",
   noAgent: "Connect your agent to see the notes it may use.",
   noFeature: "This agent doesn't keep notes.",
   notGranted: "Memory isn't turned on for this agent. Turn it on in the agent's access: Notes it may use.",
   link: "Memory isn't available over this connection yet: it opens with an agent on this computer.",
-  otherTab: "Memory is open in your other tab.",
+  otherTab: "Memory is available in your other tab.",
   lost: (agent: string) => `Memory isn't available: ${agent} isn't connected (its computer may be asleep). It opens again when the agent is back.`,
   all: "All notes",
   own: "This agent's own notes",
@@ -36,8 +36,8 @@ export const VIEW_COPY = {
   empty: "No notes.",
   more: "More",
   usage: (used: string, limit: string) => `${used} of ${limit} used`,
-  warn80: "Your notes are over 80% of their room.",
-  warn90: "Your notes are over 90% of their room: new notes will be refused when it's full.",
+  warn80: "Your notes use at least 80% of their room.",
+  warn90: "Your notes use at least 90% of their room: new notes will be refused when it's full.",
   states: { ok: "", expired: "Expired", outside_edit: "Changed outside Sagebrush", invalid: "Unreadable" } as Record<string, string>,
   outsideEdit: "This note was changed outside Sagebrush, so the agent doesn't read it until you accept it as it is now.",
   invalid: "This note's file can't be read, so the agent never reads it. Delete it, or fix the file.",

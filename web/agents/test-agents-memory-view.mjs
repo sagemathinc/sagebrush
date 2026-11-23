@@ -7,7 +7,7 @@
 //   - Edit (only what changed), Renew, Accept (a note changed outside Sagebrush) and Delete are decisions with ids;
 //     stale and secret answers are said in the page's words.
 //   - A tag this browser hasn't named shows its id, with Name this tag.
-//   - Another tab says "Memory is open in your other tab"; a lost connection, and an agent without memory granted, say
+//   - Another tab says "Memory is available in your other tab"; a lost connection, and an agent without memory granted, say
 //     so; no note's text is kept by the page.
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/agents/test-agents-memory-view.mjs
 import { spawn } from "node:child_process";
@@ -68,7 +68,7 @@ try {
   await P.until(`document.querySelectorAll('#memory-view .memory-note').length >= 5`, 10000);
   const t1 = await viewText(P);
   const r1 = await rows(P);
-  ok(/kept on this computer, in \/home\/person\//.test(t1) && /sends them nowhere/.test(t1) && /model provider/.test(t1) && /connect your own Claude Code instead \(a native session\), it doesn't use these notes: it keeps its own memory/.test(t1) && /Tag names are kept in this browser only/.test(t1), "V1: the view says where the notes are, what reading them does and doesn't do, the native session's own memory, and where tag names live", t1.slice(0, 600));
+  ok(/kept on this computer, in \/home\/person\//.test(t1) && /sends them nowhere/.test(t1) && /model provider/.test(t1) && /connect your own Claude Code instead \(a native session\), it doesn't use these notes: it keeps its own memory/.test(t1) && /Tag names are kept in this browser only/.test(t1) && /Each note shows when it expires; some never expire\. Renew sets its expiry to 90 days from now\. Reading a note doesn't renew it\./.test(t1), "V1: the view says where the notes are, what reading them does and doesn't do, the native session's own memory, and where tag names live", t1.slice(0, 600));
   ok(/ of 10\.0 MB used/.test(t1), "V1: and their use of the room", t1.slice(0, 600));
   ok(r1.length === 5 && r1.some((r) => r.name === "rings" && /Tag algebra/.test(r.meta)) && r1.some((r) => r.name === "plots" && r.meta.includes(`Tag ${TAG2}`)) && r1.some((r) => r.name === "notation" && /This agent's own notes/.test(r.meta) && /expires \d{4}-\d\d-\d\d/.test(r.meta) && /Proposed by Claude Code/.test(r.meta)) && r1.some((r) => r.name === "style" && /Changed outside Sagebrush/.test(r.meta)), "V1: each note with its place (a tag by this browser's name, or by its id), size, expiry, state and source", r1);
   ok(await P.ev(`document.body.classList.contains('memory-shown') && getComputedStyle(document.querySelector('#log')).display === 'none'`), "V1: the view takes the chat's place");
@@ -312,15 +312,15 @@ try {
   ok(sent(H, "memory.edit").every((e) => !JSON.stringify(e).includes("figures")) && !JSON.stringify(H.got).includes("figures"), "V10: a tag's name never goes to the agent");
 
   // ======================================================================== V11: the room's warnings
-  H.memory.usageBytes = Math.round(0.85 * 10 * 1024 * 1024);
+  H.memory.usageBytes = Math.ceil(0.8 * 10 * 1024 * 1024); // (exactly 80%: "at least")
   await P.ev(`(() => { const s = document.querySelector('#memory-view input[name=memory-search]'); s.value = 'x'; s.dispatchEvent(new Event('input')); return true; })()`);
-  await P.until(`/over 80%/.test(document.querySelector('#memory-view .memory-usage')?.textContent ?? '')`, 5000).catch(() => {});
+  await P.until(`/at least 80%/.test(document.querySelector('#memory-view .memory-usage')?.textContent ?? '')`, 5000).catch(() => {});
   const w80 = await P.ev(`document.querySelector('#memory-view .memory-usage')?.textContent ?? ''`);
-  H.memory.usageBytes = Math.round(0.95 * 10 * 1024 * 1024);
+  H.memory.usageBytes = Math.ceil(0.9 * 10 * 1024 * 1024); // (exactly 90%)
   await P.ev(`(() => { const s = document.querySelector('#memory-view input[name=memory-search]'); s.value = ''; s.dispatchEvent(new Event('input')); return true; })()`);
-  await P.until(`/over 90%/.test(document.querySelector('#memory-view .memory-usage')?.textContent ?? '')`, 5000).catch(() => {});
+  await P.until(`/at least 90%/.test(document.querySelector('#memory-view .memory-usage')?.textContent ?? '')`, 5000).catch(() => {});
   const w90 = await P.ev(`document.querySelector('#memory-view .memory-usage')?.textContent ?? ''`);
-  ok(/over 80%/.test(w80) && /over 90%/.test(w90), "V11: the room's use warns at 80% and at 90%", { w80, w90 });
+  ok(/at least 80%/.test(w80) && /at least 90%/.test(w90), "V11: the room's use warns at 80% and at 90%", { w80, w90 });
   H.memory.usageBytes = undefined;
 
   // ======================================================================== V12: nothing of a note kept by the page
@@ -333,17 +333,17 @@ try {
   await P2.navigate(`${site}/agents/`);
   await P2.until(`!document.querySelector('#memory-btn')?.hidden`, 10000).catch(() => {});
   await P2.ev(`(document.querySelector('#memory-btn')?.click(), true)`);
-  await P2.until(`/Memory is open in your other tab/.test(document.querySelector('#memory-view')?.textContent ?? '')`, 5000).catch(() => {});
+  await P2.until(`/Memory is available in your other tab/.test(document.querySelector('#memory-view')?.textContent ?? '')`, 5000).catch(() => {});
   const t13 = await P2.ev(`document.querySelector('#memory-view')?.textContent ?? ''`);
-  ok(/Memory is open in your other tab/.test(t13) && !document_has_notes(t13), "V13: another tab of this browser says Memory is open in the other tab, and shows no notes", t13.slice(0, 300));
+  ok(/Memory is available in your other tab/.test(t13) && !document_has_notes(t13), "V13: another tab of this browser says Memory is available in the other tab, and shows no notes", t13.slice(0, 300));
   ok(P2.errors.length === 0, "no page errors (second tab)", P2.errors);
 
   // ======================================================================== V14: a lost connection
   H.sock.close();
   await P.until(`/isn't connected/.test(document.querySelector('#memory-view')?.textContent ?? '')`, 10000).catch(() => {});
   const t14 = await viewText(P);
-  await P2.until(`!/Memory is open in your other tab/.test(document.querySelector('#memory-view')?.textContent ?? '')`, 5000).catch(() => {});
-  ok(!/Memory is open in your other tab/.test(await P2.ev(`document.querySelector('#memory-view')?.textContent ?? ''`)), "V14: the other tab no longer says Memory is open there once it's gone", await P2.ev(`document.querySelector('#memory-view')?.textContent ?? ''`));
+  await P2.until(`!/Memory is available in your other tab/.test(document.querySelector('#memory-view')?.textContent ?? '')`, 5000).catch(() => {});
+  ok(!/Memory is available in your other tab/.test(await P2.ev(`document.querySelector('#memory-view')?.textContent ?? ''`)), "V14: the other tab no longer says Memory is available there once it's gone", await P2.ev(`document.querySelector('#memory-view')?.textContent ?? ''`));
   ok(/Memory isn't available: .* isn't connected/.test(t14) && !(await P.ev(`!!document.querySelector('#memory-view .memory-note')`)), "V14: a lost connection says Memory isn't available, and the notes go", t14.slice(0, 300));
   ok(P.errors.length === 0, "no page errors", P.errors);
 
