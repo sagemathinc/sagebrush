@@ -72,7 +72,57 @@ try {
     await rejected;
     assert.deepEqual(decisions, [false], "integrity refusal suppresses recovery in either part order");
   }
-  console.log("PASS public recovery: opt-in, fixed site, API, id, manifest hash, part hash, HTTP and network refusal");
+  // Different languages share the decision, including checks which have
+  // started but have not reported a failure yet (H2).
+  const recovery = new mod.EngineRecovery();
+  const missing = () => new mod.EnginePartError("404", "missing", "https://old.invalid/");
+  let rejectSage;
+  const sageHash = new Promise((_, reject) => { rejectSage = reject; });
+  const lang = (mode) => recovery.track(mode, (unavailable) => mod.fileEngine(async () => ({
+    names: ["lib/sage.pre.0123456789abcdef.json"],
+    bytes: async (name) => {
+      if (name.startsWith("lib/sage.pre")) return sageHash;
+      if (name === "sagebrush-engine.wasm") throw missing();
+      return new ArrayBuffer(0);
+    },
+  }), { sage: mode === "sage", unavailable }));
+  const py = lang("python").module(), sa = lang("sage").module();
+  const saFailed = assert.rejects(sa, /SHA-256 differs/);
+  await assert.rejects(py, /isn't published/);
+  let selected = 0;
+  assert.equal(recovery.action(() => selected++), null, "early Python missing cannot bypass pending Sage integrity checks");
+  rejectSage(new Error("SHA-256 differs: refused"));
+  await saFailed;
+  assert.equal(recovery.action(() => selected++), null, "late Sage refusal vetoes the whole load");
+  assert.equal(selected, 0);
+  recovery.reset();
+  const fail = (mode) => recovery.track(mode, (unavailable) => mod.fileEngine(async () => ({ names: [], bytes: async () => { throw missing(); } }), { sage: false, unavailable })).module();
+  await assert.rejects(fail("python"));
+  const stale = recovery.action(() => selected++);
+  assert.ok(stale, "availability-only load offers recovery");
+  const late = fail("sage");
+  assert.equal(stale(), false, "click rechecks a language registered after the offer");
+  await assert.rejects(late);
+  const old = recovery.action(() => selected++);
+  recovery.reset();
+  assert.equal(old(), false, "a previous generation's action is fenced");
+  let completeReady;
+  const ready = recovery.track("sage", () => ({ module: () => new Promise((resolve) => { completeReady = resolve; }) })).module();
+  await assert.rejects(fail("python"));
+  assert.equal(recovery.action(() => selected++), null, "a successful but pending language also vetoes an early offer");
+  completeReady({}); await ready;
+  assert.ok(recovery.action(() => selected++), "availability failure plus a successfully checked language allows recovery");
+  recovery.reset();
+  // A result from a reset/replaced load cannot poison the new generation.
+  let rejectOld;
+  const oldLoad = recovery.track("sage", (unavailable) => ({ module: () => new Promise((_, reject) => { rejectOld = () => { unavailable(false); reject(new Error("old refusal")); }; }) })).module();
+  const oldFailed = assert.rejects(oldLoad, /old refusal/);
+  recovery.reset();
+  await assert.rejects(fail("python"));
+  rejectOld(); await oldFailed;
+  assert.equal(recovery.action(() => selected++)(), true, "stale refusal cannot modify the current generation");
+  assert.equal(selected, 1);
+  console.log("PASS public recovery: opt-in, fixed site, API, hashes, mixed parts/languages, pending checks, click recheck and stale generations");
 } finally {
   globalThis.fetch = originalFetch;
   rmSync(dir, { recursive: true, force: true });

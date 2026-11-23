@@ -139,6 +139,21 @@ try {
   check(await until("/SHA-256 differs/.test(document.querySelector('[data-sbb=say]').textContent)", 30000), "a delayed integrity refusal takes precedence over the earlier 404");
   check(await ev("!document.querySelector('[data-sbb=say] button')"), "mixed failure does not offer public-engine substitution after a hash refusal");
   await clearBefore();
+  at = "Python missing before Sage integrity check finishes";
+  const bilingual = webHtml.replace(/(<script[^>]*id="sb-doc"[^>]*>)([^<]*)/, (_, tag, json) => {
+    const d = JSON.parse(json);
+    d.nodes.push({ id: "s", title: "Sage", code: "2+3", mode: "sage" });
+    return tag + JSON.stringify(d);
+  });
+  await before(`(() => { const f = window.fetch; window.__sawRecovery = false; new MutationObserver(() => { if (document.querySelector('[data-sbb=say] button')) window.__sawRecovery = true; }).observe(document, {childList:true,subtree:true}); window.fetch = (u,o) => { const p = new URL(String(u instanceof Request ? u.url : u),location.href).pathname; if (/lib\\/sage\\.pre\\./.test(p)) return new Promise(r => { window.__releaseSage = () => r(new Response('tampered Sage library')); }); if (p.endsWith('/sagebrush-engine.wasm')) { window.__missing = (window.__missing || 0)+1; return Promise.resolve(new Response('', {status:404})); } return f(u,o); }; })();`);
+  await send("Page.navigate", { url: file("language-refusal.html", bilingual) });
+  check(await until("!!window.__releaseSage && window.__missing >= 2", 30000), "Python and Sage checks start, with Sage's hash deliberately pending");
+  await sleep(300);
+  check(await ev("!window.__sawRecovery && !document.querySelector('[data-sbb=say] button')"), "early Python missing never offers recovery while Sage's hash is pending");
+  await ev("window.__releaseSage(), 1");
+  check(await until("/SHA-256 differs/.test(document.querySelector('[data-sbb=say]').textContent)", 30000), "the late Sage integrity refusal is reported");
+  check(await ev("!window.__sawRecovery && !document.querySelector('[data-sbb=say] button')"), "no substitution action appears at any point across the language race");
+  await clearBefore();
   // (in Safari's words: a network failure there is a TypeError \"Load failed\", not \"Failed to fetch\")
   await before(`(() => { window.fetch = () => Promise.reject(new TypeError("Load failed")); })();`);
   await send("Page.navigate", { url: file("safari.html", webHtml) });

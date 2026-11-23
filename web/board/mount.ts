@@ -120,7 +120,7 @@ export interface BoardHost {
   /** an interpreter for a language (a board's items may be in several: codes.ts) */
   code?: (d: BoardDoc, mode: BoardMode) => BoardCode;
   /** An unavailable exported engine: an explicit reader action, not a document's request. */
-  engineRecovery?(): (() => void) | null;
+  engineRecovery?(): (() => boolean) | null;
   /** KaTeX, loaded the first time a board has math */
   math?: () => Promise<{ typeset(el: Element): void }>;
   /** TimeTravel's history, asked for the first time it is needed */
@@ -993,8 +993,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     c.cacheId = outputsId;
     c.usePictures(docPixels);
     // (a language's interpreter could not start: the caption says why, until the next edit)
-    c.onError = (why) => {
-      if (code !== c) return;
+    c.onError = async (why) => {
+      // All languages are registered synchronously by sync(). Wait for their
+      // checks, not just the first failure, before offering substitution.
+      await c.ready;
+      if (destroyed || code !== c) return;
       const note = plain("The code can't run here:", why);
       const recover = host.engineRecovery?.();
       if (recover) {
@@ -1002,8 +1005,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
         button.textContent = "Use the latest engine from sagebrush.space";
         button.onclick = () => {
           if (destroyed || code !== c || !doc) return;
+          if (!recover()) return; // recheck pending checks and the load generation
           button.disabled = true;
-          recover();
           c.close();
           code = null;
           say("Loading the latest compatible engine from sagebrush.space…");

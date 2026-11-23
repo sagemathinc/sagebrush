@@ -26,6 +26,38 @@ export const OWN_ENGINE = typeof __SB_ENGINE__ === "undefined" ? null : __SB_ENG
 /** Where a downloaded file's engine comes from: the site it was downloaded from. */
 export interface EngineRef { site: string; id: string }
 
+/** Recovery belongs to the whole load, not the first language to fail.
+ * Register a language before starting it; pending checks and any refusal
+ * veto substitution. Tickets from replaced loads cannot change this one. */
+export class EngineRecovery {
+  private loads = new Map<string, { pending: boolean; failure: boolean | null }>();
+  private revision = 0;
+  reset() { this.loads.clear(); this.revision++; }
+  track(mode: string, make: (unavailable: (recoverable: boolean) => void) => EngineParts): EngineParts {
+    const state = { pending: true, failure: null as boolean | null };
+    this.loads.set(mode, state);
+    this.revision++;
+    const current = () => this.loads.get(mode) === state;
+    const parts = make((yes) => { if (current()) state.failure = state.failure === false ? false : yes; });
+    return { ...parts, module: async () => {
+      try { return await parts.module(); }
+      catch (e) { if (current() && state.failure === null) state.failure = false; throw e; }
+      finally { if (current()) state.pending = false; }
+    } };
+  }
+  action(select: () => void): (() => boolean) | null {
+    const allowed = () => this.loads.size > 0 && [...this.loads.values()].every((s) => !s.pending && s.failure !== false) && [...this.loads.values()].some((s) => s.failure === true);
+    if (!allowed()) return null;
+    const revision = this.revision;
+    return () => {
+      if (revision !== this.revision || !allowed()) return false;
+      this.reset();
+      select();
+      return true;
+    };
+  }
+}
+
 /** The parts a downloaded file needs, of an engine with files `names`: the
  * Python library's sources (web/lib-chunks.mts), and for Sage its compiled
  * modules too (those of Sage's start and the scientific modules', which it
