@@ -14,6 +14,8 @@ setKatex(katex.renderToString);
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 600)); };
+// (a section that throws fails as a row of its own, named, rather than stopping the file: so a broken branch names its row)
+const section = (name, fn) => { try { fn(); } catch (e) { check(name + " (crashed)", false, String(e?.stack ?? e).slice(0, 300)); } };
 const R = () => ({ colors: {}, idn: 0 });
 const draw = (src, opts = {}, r = R()) => renderTikz(src, opts, r);
 const named = (src) => { try { draw(src); return null; } catch (e) { return e instanceof TikzError ? e.why : "NOT NAMED: " + e?.message; } };
@@ -66,7 +68,7 @@ const TEX = [
   ["fillnoline", "\\fill (0,0) rectangle (1,1);", [0.0, 0.0, 28.45274, 28.45274]],
   ["gridcorner", "\\draw[step=1] (0.2,0.2) grid (0.8,0.8);", [5.49046, 5.49046, 28.65274, 28.65274]],
 ];
-{
+section("tex-boxes", () => {
   const bad = [];
   for (const [name, src, t] of TEX) {
     let b; try { b = box(draw(src)); } catch (e) { bad.push([name, String(e.message)]); continue; }
@@ -77,43 +79,61 @@ const TEX = [
   // (the transform order TeX applies: the last option first. shift then rotate is not rotate then shift)
   const tb = (n) => TEX.find((r) => r[0] === n)[2];
   check("transform-order-pinned", tb("shift-rotate")[1] > 28 && tb("rotate-shift")[1] > 56 && tb("scale-xshift")[0] > 113 && tb("xshift-scale")[0] < 86, null);
-}
+});
 
 // ---- geometry the box doesn't show
 {
   // + doesn't move the reference point, ++ does: (1,1) -- +(1,0) -- +(0,1) ends at (1,2); with ++ at (2,2)
-  const p1 = points(draw("\\draw (1,1) -- +(1,0) -- +(0,1);")), p2 = points(draw("\\draw (1,1) -- ++(1,0) -- ++(0,1);"));
-  check("relative-plus", near(p1[2][0], CM) && near(p1[2][1], 2 * CM), p1);
-  check("relative-plusplus", near(p2[2][0], 2 * CM) && near(p2[2][1], 2 * CM), p2);
+  section("relative-plus", () => {
+    const p1 = points(draw("\\draw (1,1) -- +(1,0) -- +(0,1);")), p2 = points(draw("\\draw (1,1) -- ++(1,0) -- ++(0,1);"));
+    check("relative-plus", near(p1[2][0], CM) && near(p1[2][1], 2 * CM), p1);
+    check("relative-plusplus", near(p2[2][0], 2 * CM) && near(p2[2][1], 2 * CM), p2);
+  });
   // a scope's transform and styles stay in it; the path after it is as if it weren't there
-  const sc = draw("\\begin{scope}[shift={(5,5)}, my/.style={red}] \\draw[my] (0,0) -- (1,0); \\end{scope} \\draw (0,0) -- (1,0);");
-  const paths = [...sc.matchAll(/<path d="([^"]+)" fill="none" stroke="([^"]+)"/g)];
-  check("scope-isolation", paths.length === 2 && paths[0][2] === "rgb(255,0,0)" && paths[1][2] === "rgb(0,0,0)" && named("\\begin{scope}[my/.style={red}] \\end{scope} \\draw[my] (0,0) -- (1,0);") === "an option the preview doesn't draw: my", paths.map((p) => p[2]));
+  section("scope-isolation", () => {
+    const sc = draw("\\begin{scope}[shift={(5,5)}, my/.style={red}] \\draw[my] (0,0) -- (1,0); \\end{scope} \\draw (0,0) -- (1,0);");
+    const paths = [...sc.matchAll(/<path d="([^"]+)" fill="none" stroke="([^"]+)"/g)];
+    check("scope-isolation", paths.length === 2 && paths[0][2] === "rgb(255,0,0)" && paths[1][2] === "rgb(0,0,0)" && named("\\begin{scope}[my/.style={red}] \\end{scope} \\draw[my] (0,0) -- (1,0);") === "an option the preview doesn't draw: my", paths.map((p) => p[2]));
+  });
   // a named point used in another scope: where it was put on the canvas, whatever this scope's transform
-  const nm = points(draw("\\coordinate (A) at (1,0); \\begin{scope}[rotate=90, scale=3] \\draw (0,0) -- (A); \\end{scope}"));
-  check("named-point-canvas", near(nm[1][0], CM) && near(nm[1][1], 0), nm);
+  section("named-point-canvas", () => {
+    const nm = points(draw("\\coordinate (A) at (1,0); \\begin{scope}[rotate=90, scale=3] \\draw (0,0) -- (A); \\end{scope}"));
+    check("named-point-canvas", near(nm[1][0], CM) && near(nm[1][1], 0), nm);
+  });
   // \foreach: lists, ranges with a step, pairs, nesting
-  const fe = draw("\\foreach \\x/\\y in {0/1, 2/3} \\draw (\\x,0) -- (\\x,\\y); \\foreach \\a in {0,0.5,...,1} \\foreach \\b in {0,1} \\draw (\\a,\\b) -- +(0.1,0);");
-  const fp = points(draw("\\foreach \\x/\\y in {2/3} \\draw (\\x,0) -- (\\x,\\y);"));
-  const fg = draw("\\foreach \\x in {0,2} \\foreach \\y in {0,2} { \\draw (\\x,\\y) -- +(1,0); \\draw (\\x,\\y) -- +(0,1); }");
-  check("foreach-pairs-ranges-nesting", (fg.match(/<path /g) || []).length === 8 && (fe.match(/<path /g) || []).length === 2 + 3 * 2 && near(fp.at(-1)[0], 2 * CM) && near(fp.at(-1)[1], 3 * CM), [(fe.match(/<path /g) || []).length, fp]);
+  section("foreach-pairs-ranges-nesting", () => {
+    const fe = draw("\\foreach \\x/\\y in {0/1, 2/3} \\draw (\\x,0) -- (\\x,\\y); \\foreach \\a in {0,0.5,...,1} \\foreach \\b in {0,1} \\draw (\\a,\\b) -- +(0.1,0);");
+    const fp = points(draw("\\foreach \\x/\\y in {2/3} \\draw (\\x,0) -- (\\x,\\y);"));
+    const fg = draw("\\foreach \\x in {0,2} \\foreach \\y in {0,2} { \\draw (\\x,\\y) -- +(1,0); \\draw (\\x,\\y) -- +(0,1); }");
+    check("foreach-pairs-ranges-nesting", (fg.match(/<path /g) || []).length === 8 && (fe.match(/<path /g) || []).length === 2 + 3 * 2 && near(fp.at(-1)[0], 2 * CM) && near(fp.at(-1)[1], 3 * CM), [(fe.match(/<path /g) || []).length, fp]);
+  });
   // x= and y= as vectors: (1,1) is x + y
-  const xv = points(draw("\\draw[x={(1cm,0.5cm)}, y={(0cm,2cm)}] (0,0) -- (1,1);"));
-  check("xy-vectors", near(xv[1][0], CM) && near(xv[1][1], 2.5 * CM), xv);
+  section("xy-vectors", () => {
+    const xv = points(draw("\\draw[x={(1cm,0.5cm)}, y={(0cm,2cm)}] (0,0) -- (1,1);"));
+    check("xy-vectors", near(xv[1][0], CM) && near(xv[1][1], 2.5 * CM), xv);
+  });
   // a style, then appended to: both apply (red, and thick's 0.8 pt)
-  const ap = draw("\\draw[my/.style={red}, my/.append style={thick}, my] (0,0) -- (1,0);");
-  check("append-style", /stroke="rgb\(255,0,0\)"/.test(ap) && /stroke-width="0.8"/.test(ap), ap.slice(0, 300));
+  section("append-style", () => {
+    const ap = draw("\\draw[my/.style={red}, my/.append style={thick}, my] (0,0) -- (1,0);");
+    check("append-style", /stroke="rgb\(255,0,0\)"/.test(ap) && /stroke-width="0.8"/.test(ap), ap.slice(0, 300));
+  });
   // polar, calc's midpoint, units and x=
-  const pc = points(draw("\\coordinate (A) at (0,0); \\coordinate (B) at (2,2); \\draw (30:2) -- ($(A)!0.5!(B)$) -- (1cm,10pt);"));
-  check("polar-calc-units", near(pc[0][0], 2 * CM * Math.cos(Math.PI / 6)) && near(pc[1][0], CM) && near(pc[1][1], CM) && near(pc[2][1], 10), pc);
+  section("polar-calc-units", () => {
+    const pc = points(draw("\\coordinate (A) at (0,0); \\coordinate (B) at (2,2); \\draw (30:2) -- ($(A)!0.5!(B)$) -- (1cm,10pt);"));
+    check("polar-calc-units", near(pc[0][0], 2 * CM * Math.cos(Math.PI / 6)) && near(pc[1][0], CM) && near(pc[1][1], CM) && near(pc[2][1], 10), pc);
+  });
   // pgfmath: degrees, precedence, unary minus, functions
-  check("pgfmath", near(evalMath("2+3*4^2").v, 50) && near(evalMath("sin(30)").v, 0.5, 1e-9) && near(evalMath("-2^2").v, -4) && near(evalMath("max(1,sqrt(16))").v, 4) && evalMath("2cm").units && near(evalMath("2cm").v, 2 * CM), null);
+  section("pgfmath", () => {
+    check("pgfmath", near(evalMath("2+3*4^2").v, 50) && near(evalMath("sin(30)").v, 0.5, 1e-9) && near(evalMath("-2^2").v, -4) && near(evalMath("max(1,sqrt(16))").v, 4) && evalMath("2cm").units && near(evalMath("2cm").v, 2 * CM), null);
+  });
   // colours: xcolor's names and mixes, the document's \definecolor, as rgb() only
-  check("colours", colorRgb("blue!50") === "rgb(128,128,255)" && colorRgb("red!30!green") === "rgb(77,179,0)" && colorRgb("mine", { mine: "rgb(1,2,3)" }) === "rgb(1,2,3)" && colorRgb("nope") === null, null);
+  section("colours", () => {
+    check("colours", colorRgb("blue!50") === "rgb(128,128,255)" && colorRgb("red!30!green") === "rgb(77,179,0)" && colorRgb("mine", { mine: "rgb(1,2,3)" }) === "rgb(1,2,3)" && colorRgb("nope") === null, null);
+  });
 }
 
 // ---- output safety: every value is ours (numbers we formatted, colours as rgb(), fixed words)
-{
+section("safety", () => {
   const all = [
     "\\draw[->, red!20, line width=2pt, dashed, opacity=0.5] (0,0) to[bend left] (3,1);",
     "\\filldraw[fill=blue!10, draw=black, rounded corners] (0,0) rectangle (2,1);",
@@ -123,10 +143,10 @@ const TEX = [
   check("safety-colours-rgb-only", attrs.length > 0 && attrs.every((v) => /^(none|rgb\(\d{1,3},\d{1,3},\d{1,3}\))$/.test(v)), [...new Set(attrs)]);
   check("safety-numbers", !/NaN|Infinity|undefined/.test(all) && [...all.matchAll(/ d="([^"]*)"/g)].every((m) => /^[MLCZ0-9., -]*$/.test(m[1])), null);
   check("safety-no-raw-option-text", named('\\draw[draw=red" onload="alert(1)] (0,0) -- (1,0);') !== null && named("\\draw[fill=url(#x)] (0,0) -- (1,0);") !== null && named("\\draw[line cap=<script>] (0,0) -- (1,0);") !== null, null);
-}
+});
 
 // ---- bounds and malformed input: each a named problem (TikzError), never a partial picture, NaN, or unbounded work
-{
+section("bounds", () => {
   const t0 = Date.now();
   const cases = {
     "a style naming itself": "[a/.style={a}] \\draw[a] (0,0) -- (1,0);",
@@ -174,10 +194,10 @@ const TEX = [
   check("bounds-quick", Date.now() - t0 < 5000, Date.now() - t0);
   const segs = named("\\foreach \\a in {1,...,1000} \\foreach \\b in {1,...,9} \\draw (0,0) -- (1,0) -- (2,0) -- (3,0);");
   check("bound-segments", /path segments|expanded more than/.test(segs ?? ""), segs);
-}
+});
 
 // ---- in the engine: drawn, styles from \tikzset, a placeholder naming what it doesn't draw, check's problem; marker ids
-{
+section("engine", () => {
   const doc = (b, pre = "") => "\\documentclass{article}\n\\usepackage{tikz}\n" + pre + "\\begin{document}\n" + b + "\n\\end{document}\n";
   const r1 = new Engine().update(doc("\\begin{tikzpicture}[scale=2]\n\\draw[mine] (0,0) circle (1);\n\\end{tikzpicture}", "\\tikzset{mine/.style={blue, thick}}\n"));
   const h1 = r1.chunks.join("");
@@ -194,7 +214,7 @@ const TEX = [
   const ids = (h) => { const defs = [...h.matchAll(/<marker id="([^"]+)"/g)].map((m) => m[1]), refs = [...h.matchAll(/url\(#([^)]+)\)/g)].map((m) => m[1]); return { defs, refs, ok: defs.length === new Set(defs).size && refs.every((r) => defs.includes(r)) && defs.length >= 4 }; };
   const a = ids(e.update(doc(pic + pic)).chunks.join("")), b = ids(e.update(doc(pic + "Text.\n" + pic + pic)).chunks.join(""));
   check("marker-ids-unique-after-edits", a.ok && b.ok && b.defs.length >= 6, { a, b });
-}
+});
 
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);
 console.log(failed.length ? `FAIL: ${failed.length} of ${results.length}: ${failed.join(", ")}` : `ok: TikZ in the LaTeX preview, ${results.length} checks`);

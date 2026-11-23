@@ -68,7 +68,7 @@ For every $n \ge 1$, $\sum_{k=1}^n k = \frac{n(n+1)}{2}$.
 \end{frame}
 \begin{frame}[plain]{Not shown}
 \begin{weirdenv}inside\end{weirdenv}
-\begin{tikzpicture}\draw (0,0) -- (1,1);\end{tikzpicture}
+\begin{tikzpicture}\draw (0,0) -- (1,1) node {x};\end{tikzpicture}
 \includegraphics{../outside.png}
 
 \mystery{x} and $\frac{1}{$ there.
@@ -106,7 +106,9 @@ try {
   check("check-unknown-command-warning-with-line", p("command", "mystery")?.severity === "warning" && p("command", "mystery").line === lineOf(TALK, "\\mystery"), j.problems);
   check("check-math-error", p("math")?.severity === "error" && p("math").line === lineOf(TALK, "\\mystery"), j.problems);
   check("check-unknown-environment", p("environment", "weirdenv")?.severity === "warning" && p("environment", "weirdenv").line === lineOf(TALK, "\\begin{weirdenv}"), j.problems);
-  check("check-tikz-not-rendered", p("not-rendered", "tikzpicture")?.severity === "warning", j.problems);
+  // (a picture with a node isn't drawn yet: its problem names why, "tikzpicture (a node on a path: ...)")
+  const tz = j.problems.find((x) => x.kind === "not-rendered" && x.name.startsWith("tikzpicture (") && /node/.test(x.name));
+  check("check-tikz-not-rendered", tz?.severity === "warning", j.problems);
   check("check-beamer-commands-known", !j.problems.some((x) => ["usetheme", "institute", "alert", "only", "pause", "frametitle", "framesubtitle"].includes(x.name)), j.problems);
   check("check-images-report", j.images.find((i) => i.name === "wave")?.found === true && j.images.find((i) => i.name === "wave").path === "wave.svg", j.images);
   check("check-problems-in-line-order", j.problems.every((x, k, a) => k === 0 || (a[k - 1].line ?? 1e9) <= (x.line ?? 1e9)), j.problems.map((x) => x.line));
