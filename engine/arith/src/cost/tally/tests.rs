@@ -311,6 +311,7 @@ fn nmod_mat_pinned_units() {
     }
     let lu = a.lu().unwrap();
     let rhs = poly(40, 9, &small);
+    let col = crate::nmod_mat::Mat::from_rows(&rhs.iter().map(|&x| vec![x]).collect::<Vec<_>>(), small);
     type Op<'a> = (&'a str, Box<dyn Fn() + 'a>);
     let ops: Vec<Op> = vec![
         ("from_rows 40x40", Box::new(|| drop(rand_mat(40, 40, small, 1)))),
@@ -324,25 +325,27 @@ fn nmod_mat_pinned_units() {
         ("lu 40", Box::new(|| drop(a.lu()))),
         ("solve_vec 40", Box::new(|| drop(lu.solve_vec(&rhs)))),
         ("solve 40 by 30", Box::new(|| drop(a.solve(&b)))),
+        ("solve 40 by 1", Box::new(|| drop(a.solve(&col)))),
         ("inverse 40", Box::new(|| drop(a.inverse()))),
         ("nullspace 40x50 rank 20", Box::new(|| drop(low.nullspace()))),
         ("charpoly 40 small p (Hessenberg)", Box::new(|| drop(a.charpoly()))),
         ("charpoly 40 big p (Krylov)", Box::new(|| drop(ab.charpoly()))),
     ];
-    const PINNED: [(&str, [u64; FAMILIES]); 15] = [
+    const PINNED: [(&str, [u64; FAMILIES]); 16] = [
         ("from_rows 40x40", units_of(&[(ModArith, 1600)])),
-        ("mul 40x40 40x30", units_of(&[(MulSchool, 48000), (Move, 3600), (ModArith, 1200)])),
+        ("mul 40x40 40x30", units_of(&[(MulSchool, 48000), (Move, 1200), (ModArith, 1200)])),
         ("mul 40x40 big p", units_of(&[(MulSchool, 64000), (Move, 4800), (ModArith, 4800)])),
         ("mul_vec 40", units_of(&[(MulSchool, 1600), (ModArith, 40)])),
         ("transpose 40x30", units_of(&[(Move, 2400)])),
-        ("rank 40x40", units_of(&[(MulSchool, 20540), (Move, 2951), (ModArith, 2919)])),
+        ("rank 40x40", units_of(&[(MulSchool, 20540), (Move, 2398), (ModArith, 2390)])),
         ("det 40x40 big p", units_of(&[(MulSchool, 20540), (Move, 2951), (ModArith, 3599)])),
-        ("rref rank 20 40x50", units_of(&[(MulSchool, 28570), (Move, 3284), (ModArith, 4240)])),
-        ("lu 40", units_of(&[(MulSchool, 20540), (Move, 2951), (ModArith, 2919)])),
+        ("rref rank 20 40x50", units_of(&[(MulSchool, 32140), (Move, 2501), (ModArith, 3481)])),
+        ("lu 40", units_of(&[(MulSchool, 20540), (Move, 2398), (ModArith, 2390)])),
         ("solve_vec 40", units_of(&[(MulSchool, 1560), (Move, 80), (ModArith, 158)])),
-        ("solve 40 by 30", units_of(&[(MulSchool, 87880), (Move, 9371), (ModArith, 8139)])),
-        ("inverse 40", units_of(&[(MulSchool, 103480), (Move, 12851), (ModArith, 9619)])),
-        ("nullspace 40x50 rank 20", units_of(&[(MulSchool, 28570), (Move, 6784), (ModArith, 4840)])),
+        ("solve 40 by 30", units_of(&[(MulSchool, 87880), (Move, 8128), (ModArith, 6920)])),
+        ("solve 40 by 1", units_of(&[(MulSchool, 22100), (Move, 2598), (ModArith, 2548)])),
+        ("inverse 40", units_of(&[(MulSchool, 103480), (Move, 11378), (ModArith, 8170)])),
+        ("nullspace 40x50 rank 20", units_of(&[(MulSchool, 32140), (Move, 6001), (ModArith, 4081)])),
         ("charpoly 40 small p (Hessenberg)", units_of(&[(MulSchool, 29640), (Move, 1600), (ModArith, 35840)])),
         ("charpoly 40 big p (Krylov)", units_of(&[(MulSchool, 106640), (Move, 5519), (ModArith, 10375)])),
     ];
@@ -355,11 +358,12 @@ fn nmod_mat_pinned_units() {
         assert_eq!(meter.units().0, pin, "{}", name);
     }
     // the products' counts by formula: r k c multiply-adds, one reduction
-    // per entry and batch of 16 (p near 2^62), the result and B's transpose
-    // filled and copied
+    // per entry and batch of 16 (p near 2^62), the result filled (and, on
+    // the u128 route of a big p, B's transpose filled and copied)
     assert_eq!(PINNED[1].1[Family::MulSchool as usize], 40 * 40 * 30);
     assert_eq!(PINNED[2].1[Family::ModArith as usize], 40 * 40 * 40u64.div_ceil(16));
-    assert_eq!(PINNED[1].1[Family::Move as usize], 40 * 30 + 2 * 40 * 30);
+    assert_eq!(PINNED[1].1[Family::Move as usize], 40 * 30);
+    assert_eq!(PINNED[2].1[Family::Move as usize], 40 * 40 + 2 * 40 * 40);
     // the leaf rule: solve is the augment, the rref of [A | B] and the copy
     // of X out; inverse is solve with the identity (its fill counted too)
     let mut meter = acct();
@@ -367,6 +371,16 @@ fn nmod_mat_pinned_units() {
     let rref = meter.units().0;
     assert_eq!(PINNED[10].1[Family::MulSchool as usize], rref[Family::MulSchool as usize]);
     assert_eq!(PINNED[10].1[Family::Move as usize], rref[Family::Move as usize] + 40 * 30);
+    // and for a few columns, the LU factorization, a solve_vec per column,
+    // X's fill and the columns' copies in and out
+    let mut meter = acct();
+    metered(&mut meter, || {
+        let lu = a.lu().unwrap();
+        drop(lu.solve_vec(&rhs));
+    });
+    let mut by_lu = meter.units().0;
+    by_lu[Family::Move as usize] += 3 * 40;
+    assert_eq!(PINNED[11].1, by_lu);
 }
 
 /// nmod_poly's Poll flushes its accumulator when it drops while unwinding

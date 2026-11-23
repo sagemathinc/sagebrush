@@ -36,7 +36,13 @@ impl Lu {
         poll.count(Family::MulSchool, (n * n.saturating_sub(1)) as u64);
         poll.count(Family::ModArith, (2 * (0..n).map(|i| i.div_ceil(batch)).sum::<usize>() + 2 * n) as u64);
         poll.count(Family::Move, 2 * n as u64);
+        let (b64, pinv) = (batch64(&m), u64::MAX / m.n);
         let dot = |row: &[u64], v: &[u64]| -> u64 {
+            if row.len() <= b64 {
+                // one u64 sum, one reduction: as one u128 chunk
+                let s: u64 = row.iter().zip(v).map(|(&x, &y)| (x as u32 as u64) * (y as u32 as u64)).sum();
+                return reduce32(s, m.n, pinv);
+            }
             let mut r = 0u64;
             for (ca, cb) in row.chunks(batch).zip(v.chunks(batch)) {
                 let mut acc = 0u128;
@@ -160,8 +166,7 @@ fn batch_len(m: &Modulus) -> usize {
 /// and with no data.  Off that case the real count differs: a zero factor
 /// skips its products (MulSchool and ModArith lower), a zero pivot's row
 /// swap adds 2 cols moves (Move higher).
-pub(crate) fn echelon_units_dense(rows: usize, cols: usize, batch: usize) -> [u64; FAMILIES] {
-    const BLOCK: usize = 16;
+pub(crate) fn echelon_units_dense(rows: usize, cols: usize, batch: usize, block: usize) -> [u64; FAMILIES] {
     let mut u = [0u64; FAMILIES];
     let (ms, ma, mv) = (Family::MulSchool as usize, Family::ModArith as usize, Family::Move as usize);
     // `count` row updates of `len` entries by `factors` pivots each
@@ -181,8 +186,8 @@ pub(crate) fn echelon_units_dense(rows: usize, cols: usize, batch: usize) -> [u6
         }
         u[ma] = u[ma].saturating_add((cols - col) as u64 + 1);
         let (r1, col1) = (r + 1, col + 1);
-        if r1 - block_start == BLOCK {
-            upd(&mut u, cols - col1, BLOCK, rows - r1);
+        if r1 - block_start == block {
+            upd(&mut u, cols - col1, block, rows - r1);
             block_start = r1;
         }
     }
@@ -200,18 +205,136 @@ pub(crate) fn echelon_units_dense(rows: usize, cols: usize, batch: usize) -> [u6
     u
 }
 
+/// [`Mat::solve`] takes the LU route for at most this many columns.
+const SOLVE_LU_COLS: usize = 8;
+
+/// How many products of reduced residues fit in a u64 sum, for a modulus
+/// below 2^32 (0 above: the residues are not 32-bit); at most batch_len.
+fn batch64(m: &Modulus) -> usize {
+    if m.n > 1 << 32 {
+        return 0;
+    }
+    let sq = (m.n - 1) * (m.n - 1);
+    if sq == 0 {
+        1 << 30
+    } else {
+        ((u64::MAX / sq) as usize).min(1 << 30)
+    }
+}
+
+/// The sums of a row update: u128, or u64 when the products are of 32-bit
+/// residues and few enough to fit (see [`batch64`]).
+struct Acc {
+    w: Vec<u128>,
+    s: Vec<u64>,
+}
+
+impl Acc {
+    fn new(len: usize) -> Acc {
+        Acc { w: vec![0; len], s: vec![0; len] }
+    }
+}
+
+/// x mod n for any u64 and n below 2^32, without branches (Barrett):
+/// with pinv = floor((2^64 - 1) / n) >= 2^64 / n - 1, the quotient
+/// estimate q = floor(x pinv / 2^64) is more than x / n - 2, so it is
+/// floor(x / n) or one less and x - q n is below 2 n.
+#[inline(always)]
+fn reduce32(x: u64, n: u64, pinv: u64) -> u64 {
+    let q = ((x as u128 * pinv as u128) >> 64) as u64;
+    let r = x - q * n;
+    // (masks, not branches: the comparisons are random on random data)
+    r - (n & 0u64.wrapping_sub((r >= n) as u64))
+}
+
+/// (x - (a mod n)) mod n for x a residue, n below 2^32, without branches.
+#[inline(always)]
+fn sub_reduce32(x: u64, a: u64, n: u64, pinv: u64) -> u64 {
+    let d = x + n - reduce32(a, n, pinv);
+    d - (n & 0u64.wrapping_sub((d >= n) as u64))
+}
+
+/// acc += f * src, f and the entries of src residues below 2^32, the sums
+/// in u64 (the caller bounds how many products it adds).
+#[allow(unsafe_code)]
+fn axpy32(acc: &mut [u64], src: &[u64], f: u64) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if std::is_x86_feature_detected!("avx2") {
+            // SAFETY: AVX2 was just detected; the body is the safe kernel.
+            unsafe { axpy32_avx2(acc, src, f) };
+            return;
+        }
+    }
+    axpy32_generic(acc, src, f)
+}
+
+#[inline(always)]
+fn axpy32_generic(acc: &mut [u64], src: &[u64], f: u64) {
+    // (the 32-bit casts are exact on residues below 2^32 and let the
+    // compiler multiply 32 x 32 -> 64 bits, several lanes at a time)
+    let f = f as u32 as u64;
+    for (a, &y) in acc.iter_mut().zip(src) {
+        *a += f * (y as u32 as u64);
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+// SAFETY: the caller must have checked AVX2 (axpy32 does); the body is the
+// safe generic kernel.
+#[allow(unsafe_code)]
+unsafe fn axpy32_avx2(acc: &mut [u64], src: &[u64], f: u64) {
+    axpy32_generic(acc, src, f)
+}
+
+
 /// [`batch_len`] for the models.
 pub(crate) fn batch_of(m: &Modulus) -> usize {
     batch_len(m)
+}
+
+/// How many pivots [`Mat::echelon`] collects before it brings the rows
+/// below up to date: 32 when their products fit u64 sums (fewer passes
+/// over the rows below, which cost more than the sums), else 16.
+pub(crate) fn block_of(m: &Modulus) -> usize {
+    if batch64(m) >= 32 {
+        32
+    } else {
+        16
+    }
 }
 
 /// row[j] -= sum_t row[blk[t]] * src(t)[j] for j >= from: the products
 /// summed in u128 (`batch` at a time), one reduction per entry.
 #[inline]
 #[allow(clippy::too_many_arguments)]
-fn update_row<'a, F: Fn(usize) -> &'a [u64]>(row: &mut [u64], from: usize, blk: &[usize], src: F, m: &Modulus, batch: usize, acc: &mut [u128], poll: &mut Poll) {
+fn update_row<'a, F: Fn(usize) -> &'a [u64]>(row: &mut [u64], from: usize, blk: &[usize], src: F, m: &Modulus, batch: usize, acc: &mut Acc, poll: &mut Poll) {
     let len = row.len() - from;
-    let acc = &mut acc[..len];
+    if blk.len() <= batch64(m) {
+        // one u64 sum per entry: the same products and reductions as one
+        // u128 batch (batch_len >= batch64), so the same counts
+        let acc = &mut acc.s[..len];
+        acc.iter_mut().for_each(|x| *x = 0);
+        let mut cnt = 0;
+        for (t, &ct) in blk.iter().enumerate() {
+            let f = row[ct];
+            if f == 0 {
+                continue;
+            }
+            axpy32(acc, &src(t)[from..], f);
+            cnt += 1;
+        }
+        poll.count(Family::MulSchool, (cnt * len) as u64);
+        poll.count(Family::ModArith, len as u64);
+        poll.count(Family::Move, len as u64);
+        let pinv = u64::MAX / m.n;
+        for (x, &a) in row[from..].iter_mut().zip(acc.iter()) {
+            *x = sub_reduce32(*x, a, m.n, pinv);
+        }
+        return;
+    }
+    let acc = &mut acc.w[..len];
     let mut part: Option<Vec<u64>> = None;
     acc.iter_mut().for_each(|x| *x = 0);
     let mut cnt = 0;
@@ -424,7 +547,7 @@ impl Mat {
     /// (L, with the pivot values on its diagonal) and record the row
     /// permutation, for a square matrix.
     fn echelon_impl(&mut self, reduced: bool, want_det: bool, mut lu: Option<(&mut Vec<usize>, &mut Vec<u64>)>, mut rows_at: Option<&mut Vec<usize>>) -> (Vec<usize>, u64) {
-        const BLOCK: usize = 16;
+        let block = block_of(&self.m);
         let keep = lu.is_some();
         let m = self.m;
         let (rows, cols) = (self.rows, self.cols);
@@ -434,7 +557,7 @@ impl Mat {
         let mut r = 0;
         let mut block_start = 0; // first pivot row of the pending block
         let mut col = 0;
-        let mut acc = vec![0u128; cols];
+        let mut acc = Acc::new(cols);
         let mut poll = Poll::new();
         let phase = sagebrush_interrupt::enter("eliminate");
         while col < cols && r < rows {
@@ -444,6 +567,17 @@ impl Mat {
             if !blk.is_empty() {
                 poll.count(Family::MulSchool, ((rows - r) * blk.len()) as u64);
                 poll.count(Family::ModArith, reductions(rows - r, blk.len(), batch) as u64);
+                if blk.len() <= batch64(&m) {
+                    // (one u64 sum per entry, as in update_row)
+                    let pinv = u64::MAX / m.n;
+                    for i in r..rows {
+                        let mut s = 0u64;
+                        for (t, &ct) in blk.iter().enumerate() {
+                            s += (self.d[i * cols + ct] as u32 as u64) * (self.d[(block_start + t) * cols + col] as u32 as u64);
+                        }
+                        self.d[i * cols + col] = sub_reduce32(self.d[i * cols + col], s, m.n, pinv);
+                    }
+                } else {
                 for i in r..rows {
                     let mut s = 0u128;
                     let mut red = 0u64;
@@ -457,6 +591,7 @@ impl Mat {
                     }
                     let red = m.add(red, m.reduce_u128(s));
                     self.d[i * cols + col] = m.sub(self.d[i * cols + col], red);
+                }
                 }
             }
             let Some(pr) = (r..rows).find(|&i| self.d[i * cols + col] != 0) else {
@@ -474,8 +609,10 @@ impl Mat {
                     at.swap(r, pr);
                 }
             }
-            // the pivot row, up to date for the columns after col
+            // the pivot row, up to date for the columns after col (work
+            // toward the next poll as a row of a flush)
             if !blk.is_empty() {
+                poll.add(cols * blk.len());
                 let (head, tail) = self.d.split_at_mut(r * cols);
                 let row = &mut tail[..cols];
                 update_row(row, col + 1, blk, |t| &head[(block_start + t) * cols..(block_start + t + 1) * cols], &m, batch, &mut acc, &mut poll);
@@ -498,7 +635,7 @@ impl Mat {
             pivots.push(col);
             r += 1;
             col += 1;
-            if pivots.len() - block_start == BLOCK {
+            if pivots.len() - block_start == block {
                 self.flush(block_start, &pivots[block_start..], r, col, batch, &mut acc, keep, &mut poll);
                 block_start = pivots.len();
             }
@@ -526,7 +663,7 @@ impl Mat {
     /// block's pivots in the columns from `from`, and zero in the block's
     /// pivot columns.
     #[allow(clippy::too_many_arguments)]
-    fn flush(&mut self, start: usize, blk: &[usize], below: usize, from: usize, batch: usize, acc: &mut [u128], keep: bool, poll: &mut Poll) {
+    fn flush(&mut self, start: usize, blk: &[usize], below: usize, from: usize, batch: usize, acc: &mut Acc, keep: bool, poll: &mut Poll) {
         let cols = self.cols;
         let m = self.m;
         let (head, tail) = self.d.split_at_mut(below * cols);
@@ -546,7 +683,7 @@ impl Mat {
 
     /// From the echelon form with normalized pivot rows to the reduced
     /// form: R_i = U_i - sum_{t > i} U_i[c_t] R_t, bottom up.
-    fn back_substitute(&mut self, piv: &[usize], batch: usize, acc: &mut [u128]) {
+    fn back_substitute(&mut self, piv: &[usize], batch: usize, acc: &mut Acc) {
         let cols = self.cols;
         let m = self.m;
         let k = piv.len();
@@ -597,9 +734,27 @@ impl Mat {
     }
 
     /// X with self X = b, for self square and nonsingular; None if singular.
+    /// For a few columns, by an LU factorization and two triangular solves
+    /// per column (about n^3/3 + 2 k n^2 multiply-adds for k columns);
+    /// else by the reduced echelon form of [self | b] (about 2 n^3/3 +
+    /// 3 k n^2 / 2, in products over whole blocks).
     pub fn solve(&self, b: &Mat) -> Option<Mat> {
         assert_eq!(self.rows, self.cols);
         let n = self.rows;
+        if n > 0 && b.cols <= SOLVE_LU_COLS {
+            assert_eq!(b.rows, n);
+            let lu = self.lu()?;
+            let mut x = Mat::zero(n, b.cols, self.m);
+            for j in 0..b.cols {
+                let col: Vec<u64> = (0..n).map(|i| b.d[i * b.cols + j]).collect();
+                for (i, v) in lu.solve_vec(&col).into_iter().enumerate() {
+                    x.d[i * b.cols + j] = v;
+                }
+            }
+            // (the columns' copies in and out)
+            tally(Family::Move, (2 * n * b.cols) as u64);
+            return Some(x);
+        }
         let mut a = self.augment(b);
         let piv = a.rref();
         // (n = 0: the empty solution; piv[n - 1] would panic)
@@ -643,7 +798,6 @@ impl Mat {
     pub fn mul(&self, o: &Mat) -> Mat {
         assert_eq!(self.cols, o.rows);
         let m = self.m;
-        let bt = o.transpose();
         let sq = (m.n as u128 - 1) * (m.n as u128 - 1);
         let batch = if sq == 0 { usize::MAX } else { (u128::MAX / sq).min(1 << 30) as usize };
         let mut c = Mat::zero(self.rows, o.cols, m);
@@ -652,6 +806,25 @@ impl Mat {
         step[Family::MulSchool as usize] = (o.cols * self.cols) as u64;
         step[Family::ModArith as usize] = (o.cols * self.cols.div_ceil(batch)) as u64;
         let mut poll = Poll::stepping(step);
+        if self.cols <= batch64(&m) {
+            // row i of C as one u64 sum per entry, row k of o times a_ik
+            // (a reduction per entry, as one u128 batch: the same counts)
+            let mut acc = vec![0u64; o.cols];
+            for i in 0..self.rows {
+                acc.iter_mut().for_each(|x| *x = 0);
+                for (k, &f) in self.row(i).iter().enumerate() {
+                    axpy32(&mut acc, o.row(k), f);
+                }
+                let pinv = u64::MAX / m.n;
+                for (x, &a) in c.d[i * o.cols..(i + 1) * o.cols].iter_mut().zip(&acc) {
+                    *x = reduce32(a, m.n, pinv);
+                }
+                poll.step();
+                poll.add(o.cols * self.cols);
+            }
+            return c;
+        }
+        let bt = o.transpose();
         for i in 0..self.rows {
             let a = self.row(i);
             for j in 0..o.cols {
@@ -1101,6 +1274,67 @@ mod tests {
             assert!(r.row(i).iter().all(|&x| x == 0));
         }
     }
+
+    /// The u64 sums at their edges: primes on both sides of block 32
+    /// (batch64 >= 32), of the u64 row updates (batch64 >= 16) and of
+    /// 32-bit residues, products whose inner length is batch64 (the
+    /// largest u64 sum) or one more (the u128 route), all of p - 1, and
+    /// the two routes of solve.
+    #[test]
+    fn small_modulus_sums_at_their_edges() {
+        use crate::nmod::prev_prime;
+        let mut s = 31u64;
+        let b32 = prev_prime(759_250_126);
+        let ps = [65537, b32, prev_prime(b32 + 2000), prev_prime((1 << 30) + 2), prev_prime(1 << 30), prev_prime(1 << 32), (1 << 32) + 15];
+        for p in ps {
+            let m = Modulus::new(p);
+            let b = batch64(&m);
+            // (the thresholds fall where the names say)
+            assert_eq!(block_of(&m) == 32, p <= b32, "p={p}");
+            assert_eq!(b >= 16, p <= (1 << 30) + 1, "p={p}");
+            assert_eq!(b == 0, p > 1 << 32, "p={p}");
+            for k in [b.min(64), b.min(64) + 1] {
+                let full = |r, c| Mat { rows: r, cols: c, m, d: vec![p - 1; r * c] };
+                // (p - 1)^2 k mod p = k
+                let want = Mat { rows: 3, cols: 5, m, d: vec![k as u64 % p; 15] };
+                assert_eq!(full(3, k).mul(&full(k, 5)), want, "p={p} k={k}");
+                let (x, y) = (rand_mat(4, k, m, &mut s), rand_mat(k, 6, m, &mut s));
+                let c = x.mul(&y);
+                for i in 0..4 {
+                    for j in 0..6 {
+                        let e = (0..k).fold(0u128, |t, l| (t + x.get(i, l) as u128 * y.get(l, j) as u128) % p as u128);
+                        assert_eq!(c.get(i, j) as u128, e, "p={p} k={k}");
+                    }
+                }
+            }
+            for n in [1usize, 33, 70] {
+                let a = rand_mat(n, n, m, &mut s);
+                // rank n - 5 (n > 5): rows past n - 5 sums of earlier ones
+                let mut low = a.clone();
+                if n > 5 {
+                    for i in n - 5..n {
+                        for j in 0..n {
+                            let v = m.add(low.get(i - (n - 5), j), low.get(i - 1, j));
+                            low.set(i, j, v);
+                        }
+                    }
+                    assert_eq!(low.rank(), n - 5, "p={p} n={n}");
+                    assert_eq!(low.det(), 0);
+                    assert!(low.solve(&rand_mat(n, 2, m, &mut s)).is_none());
+                }
+                let few = rand_mat(n, SOLVE_LU_COLS, m, &mut s);
+                let many = rand_mat(n, SOLVE_LU_COLS + 1, m, &mut s);
+                match (a.solve(&few), a.solve(&many)) {
+                    (Some(x), Some(y)) => {
+                        assert_eq!(a.mul(&x), few, "LU route p={p} n={n}");
+                        assert_eq!(a.mul(&y), many, "echelon route p={p} n={n}");
+                    }
+                    (None, None) => assert_eq!(a.det(), 0),
+                    _ => panic!("the routes disagree on singularity p={p} n={n}"),
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1141,7 +1375,7 @@ mod echelon_units_twin {
             }
             compared += 1;
             let got: Vec<u64> = (0..FAMILIES).map(|i| after.0[i].wrapping_sub(before.0[i])).collect();
-            let want = echelon_units_dense(n, 2 * n, batch_of(&m));
+            let want = echelon_units_dense(n, 2 * n, batch_of(&m), block_of(&m));
             assert_eq!(got, want.to_vec(), "n = {n}");
         }
         assert_eq!(compared, 128, "every n compared");
