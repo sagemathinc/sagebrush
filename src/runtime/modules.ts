@@ -1811,8 +1811,9 @@ export class MT {
     // seed(None): 256 bits of os.urandom, as CPython (it was the clock)
     if (x === null || x === undefined) v = [...(require("crypto").randomBytes(32) as Uint8Array)].reduce((a, b) => (a << 8n) | BigInt(b), 0n);
     else if (O.isPyInt(x)) v = BigInt(typeof x === "boolean" ? +x : x);
-    else if (typeof x === "string") v = BigInt.asUintN(64, BigInt(O.hashAny(x)));
-    else v = BigInt.asUintN(64, BigInt(O.hashAny(x)));
+    // (anything else, a float say: its hash cast to unsigned, as CPython's random_seed; the exact hash, never a
+    // double's rounding of it: hash(1.5) is 2^60 + 1)
+    else v = BigInt.asUintN(64, BigInt(O.hashExact(x)));
     if (v < 0n) v = -v;
     const key: number[] = [];
     do {
