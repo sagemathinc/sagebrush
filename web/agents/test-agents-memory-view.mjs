@@ -190,6 +190,28 @@ try {
   await P.until(`!document.querySelector('dialog.memory-edit[open]')`, 5000).catch(() => {});
   const e8 = sent(H, "memory.edit").at(-1);
   ok(/couldn't be read/.test(msg8) && e8.decision_id !== m8.params.decision_id && H.memory.notes.get(nAlg.note).body === "Rings are commutative, with 1, always.", "V8: an Edit answer that can't be read keeps the dialog and says so; Save again is a new request, and saves", { msg8, first: m8.params.decision_id, again: e8.decision_id });
+  // (while a Save is out, Cancel and Escape wait; and an unreadable answer to an Edit that did go through: Save again
+  //  finds nothing left to send, and closes)
+  await P.until(`document.querySelector('#memory-view .memory-open:not([hidden])')?.dataset.note === ${JSON.stringify(nAlg.note)}`, 5000);
+  await P.ev(`(document.querySelector('#memory-view [data-act=edit]').click(), true)`);
+  await P.until(`!!document.querySelector('dialog.memory-edit[open]')`, 5000);
+  H.hold.add("memory.edit");
+  await P.ev(`(() => { const d = document.querySelector('dialog.memory-edit[open]'); d.querySelector('[name=body]').value = 'Went through.'; [...d.querySelectorAll('button')].find((b) => b.textContent === 'Save').click(); return true; })()`);
+  for (const t = Date.now(); !H.held.length && Date.now() - t < 5000; ) await sleep(50);
+  await P.ev(`([...document.querySelector('dialog.memory-edit[open]').querySelectorAll('button')].find((b) => b.textContent === 'Cancel').click(), true)`);
+  await P.ev(`(document.querySelector('dialog.memory-edit[open]').dispatchEvent(new Event('cancel', { cancelable: true })), true)`);
+  await sleep(200);
+  ok(await P.ev(`!!document.querySelector('dialog.memory-edit[open]')`), "V8: while a Save is out, Cancel and Escape wait for its answer");
+  const m8b = H.held.splice(0)[0];
+  H.hold.delete("memory.edit");
+  const nb = H.memory.notes.get(nAlg.note);
+  Object.assign(nb, { body: "Went through.", revision: nb.revision + 1 }); // (the agent did apply it)
+  H.answer(m8b.id, { note: "x" });
+  await P.until(`/couldn't be read/.test(document.querySelector('dialog.memory-edit[open] .msg')?.textContent ?? '')`, 5000).catch(() => {});
+  const edits8 = sent(H, "memory.edit").length;
+  await P.ev(`([...document.querySelector('dialog.memory-edit[open]').querySelectorAll('button')].find((b) => b.textContent === 'Save').click(), true)`);
+  await P.until(`!document.querySelector('dialog.memory-edit[open]')`, 5000).catch(() => {});
+  ok(sent(H, "memory.edit").length === edits8 && !(await P.ev(`!!document.querySelector('dialog.memory-edit[open]')`)), "V8: an unreadable answer to an Edit that went through: Save again has nothing left to send, and closes");
 
   // ======================================================================== V9: Delete
   // (first its answer can't be read: the id is kept, and Delete again sends the very same request)
@@ -213,7 +235,7 @@ try {
   await P.until(`!document.querySelector('#memory-view .memory-note[data-note="${nAlg.note}"]') && !!document.querySelector('#memory-view .memory-note')`, 5000).catch(() => {});
   const del9 = sent(H, "memory.delete").at(-1);
   ok(del9?.decision_id === m9.params.decision_id, "V9: Delete again after the unreadable answer sends the same decision id", { first: m9.params.decision_id, again: del9?.decision_id });
-  ok(/stops reading it at once/.test(d9) && del9?.note === nAlg.note && del9.revision === 4 && !H.memory.notes.has(nAlg.note) && !(await P.ev(`!!document.querySelector('#memory-view .memory-note[data-note="${nAlg.note}"]')`)), "V9: Delete asks first, then sends memory.delete at the revision shown; the note leaves the list", { d9, del9 });
+  ok(/stops reading it at once/.test(d9) && del9?.note === nAlg.note && del9.revision === 5 && !H.memory.notes.has(nAlg.note) && !(await P.ev(`!!document.querySelector('#memory-view .memory-note[data-note="${nAlg.note}"]')`)), "V9: Delete asks first, then sends memory.delete at the revision shown; the note leaves the list", { d9, del9 });
 
   // ======================================================================== V16: an answer after the person moved on
   // (Renew the first note, go to another before its answer: the answer is said, and the person stays where they went)

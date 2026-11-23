@@ -64,6 +64,7 @@ export const VIEW_COPY = {
   unread: "The agent's answer couldn't be read. It may have gone through: try again to see, or check the list.",
   busy: "Wait for the last change to finish.",
   unreadDecision: "The agent's answer couldn't be read. It may have gone through: the note is shown as it is now.",
+  unreadEdit: "The agent's answer couldn't be read. It may have gone through: the note behind this is shown as it is now, and Save again sends only what still differs.",
   loading: "Loading…",
   editStale: "This note changed while you were editing it. It's shown as it is now behind this; your text is kept here. Save again to replace it.",
   failed: "That didn't work",
@@ -147,6 +148,8 @@ export function mountMemoryView(h: MemoryViewHost) {
   const dialogs = new Set<HTMLDialogElement>();
   // (one change at a time per note: its buttons wait for the answer)
   const busy = new Set<string>();
+  // (each reset starts a generation: an answer to a request of an earlier one changes nothing here but its toast)
+  let gen = 0;
   // (a decision's id, kept only to send the very same request again after its answer was lost: the agent keeps each
   //  id's request and answer (§6.1); after any answer it could read, a new decision gets a new id. Renew's expiry is
   //  kept with it, so a retry is the same request)
@@ -217,6 +220,7 @@ export function mountMemoryView(h: MemoryViewHost) {
     shownNote = null;
     listed = false;
     busy.clear(); // (a request still out on the earlier pairing answers to no one)
+    gen++;
     opening++;
     loading++;
     for (const d of [...dialogs]) d.close();
@@ -316,7 +320,7 @@ export function mountMemoryView(h: MemoryViewHost) {
     if (busy.has(n.note)) return h.toast(VIEW_COPY.busy, 3000);
     if (what === "delete" && !(await confirm(VIEW_COPY.delTitle, VIEW_COPY.delBody, VIEW_COPY.del))) return;
     if (busy.has(n.note)) return h.toast(VIEW_COPY.busy, 3000);
-    const at = opening;
+    const at = opening, g = gen;
     busy.add(n.note);
     render();
     try {
@@ -327,18 +331,22 @@ export function mountMemoryView(h: MemoryViewHost) {
         const expires = kept?.renew?.revision === n.revision ? kept.renew.expires : Date.now() + 90 * DAY;
         decisions.set(n.note, { key: kept?.key ?? "", id: kept?.id ?? "", renew: { revision: n.revision, expires } });
         await decide(n.note, "memory.edit", { revision: n.revision, expires });
+        if (g !== gen) return h.toast(VIEW_COPY.renewed, 4000);
         busy.delete(n.note);
         await after(n.note, n.note, VIEW_COPY.renewed, at);
       } else if (what === "accept") {
         await decide(n.note, "memory.accept", { revision: n.revision });
+        if (g !== gen) return h.toast(VIEW_COPY.accepted, 4000);
         busy.delete(n.note);
         await after(n.note, n.note, VIEW_COPY.accepted, at);
       } else {
         await decide(n.note, "memory.delete", { revision: n.revision });
+        if (g !== gen) return h.toast(VIEW_COPY.deleted, 4000);
         busy.delete(n.note);
         await after(n.note, null, VIEW_COPY.deleted, at);
       }
     } catch (e) {
+      if (g !== gen) return; // (a request of an earlier pairing: nothing of it here)
       busy.delete(n.note);
       const code = (e as { code?: string })?.code;
       const stay = !open || (opening !== at && shownNote?.note !== n.note);
@@ -380,7 +388,9 @@ export function mountMemoryView(h: MemoryViewHost) {
     if (where.value !== scopeKey(n.scope)) { where.prepend(el("option", { value: "", textContent: "Choose…", disabled: true })); where.value = ""; }
     const msg = el("p", { className: "msg", role: "alert" });
     const ok = el("button", { type: "button", className: "primary", textContent: "Save" });
-    const cancel = el("button", { type: "button", textContent: "Cancel", onclick: () => dlg.close() });
+    // (while a Save is out the dialog waits for its answer: Cancel and Escape do nothing until then)
+    const cancel = el("button", { type: "button", textContent: "Cancel", onclick: () => { if (!busy.has(n.note)) dlg.close(); } });
+    dlg.addEventListener("cancel", (e) => { if (busy.has(n.note)) e.preventDefault(); });
     dialogs.add(dlg);
     dlg.append(el("h2", { textContent: "Edit the note" }), el("label", {}, "Name", name), el("label", {}, "Description (one line)", description), el("label", {}, "Note", body), el("label", {}, "Where", where), msg, el("menu", {}, cancel, ok));
     dlg.addEventListener("close", () => { dialogs.delete(dlg); dlg.remove(); }, { once: true });
@@ -395,19 +405,21 @@ export function mountMemoryView(h: MemoryViewHost) {
       if (body.value !== n.body) change.body = body.value;
       if (where.value !== scopeKey(n.scope)) change.scope = where.value === "own" ? "own" : { tag: where.value.slice(4) };
       if (Object.keys(change).length === 1) return dlg.close();
-      ok.disabled = true;
+      ok.disabled = cancel.disabled = true;
       busy.add(n.note);
+      const g = gen;
       try {
         const at = opening;
         const r = (await decide(n.note, "memory.edit", change)) as { note: string; revision: number };
+        if (g !== gen) return h.toast(VIEW_COPY.saved, 4000);
         busy.delete(n.note);
         dlg.close();
         await after(n.note, r.note, VIEW_COPY.saved, at);
       } catch (e) {
+        // (a reset closed the dialog meanwhile: nothing else moves)
+        if (g !== gen || !dialogs.has(dlg)) return;
         busy.delete(n.note);
         const code = (e as { code?: string })?.code;
-        // (a reset closed the dialog meanwhile: said, and nothing else moves)
-        if (!dialogs.has(dlg)) { refused(e); return; }
         if (code === "stale" || unreadable(e)) {
           // (changed at the agent, or an answer that couldn't be read (it may have gone through; asking again would get
           //  the same answer): the dialog stays with the person's text, and the note behind it is read again. A field
@@ -420,7 +432,7 @@ export function mountMemoryView(h: MemoryViewHost) {
             if (body.value === n.body) body.value = fresh.body;
             if (where.value === scopeKey(n.scope) && [...where.options].some((o) => o.value === scopeKey(fresh.scope))) where.value = scopeKey(fresh.scope);
             n = fresh;
-            msg.textContent = unreadable(e) ? VIEW_COPY.unreadDecision : VIEW_COPY.editStale;
+            msg.textContent = unreadable(e) ? VIEW_COPY.unreadEdit : VIEW_COPY.editStale;
           } else if (dialogs.has(dlg)) msg.textContent = VIEW_COPY.readFailed; // (the note couldn't be read again: the text stays)
         } else if (code === "not_found") {
           refused(e);
@@ -428,7 +440,7 @@ export function mountMemoryView(h: MemoryViewHost) {
           toList();
         } else refused(e); // (a refusal the person can fix (a secret, a name, the size) keeps the dialog and its text)
       } finally {
-        ok.disabled = false;
+        ok.disabled = cancel.disabled = false;
       }
     };
     document.body.append(dlg);
