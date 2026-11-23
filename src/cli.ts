@@ -14,7 +14,7 @@ import { homedir, tmpdir } from "os";
 import * as readline from "readline";
 import { PassThrough } from "stream";
 import { oneLine } from "./terminal-text";
-import { initParser, compile, execModule, R, libDir, findModuleSource, packageModuleNames, installPackageSet, coreBuildId, reservedNames } from "./compile";
+import { initParser, compile, execModule, sageGlobals, R, libDir, findModuleSource, packageModuleNames, installPackageSet, coreBuildId, reservedNames } from "./compile";
 import { prepareSet } from "./pkgcache";
 import { magmaToPython, magmaIsIncomplete, MagmaSyntaxError, magmaSyntaxMessage, type Recover } from "./magma";
 import { installMagmaCompile } from "./magma-builtin";
@@ -388,7 +388,7 @@ function mainModule(file: string): any {
   m.__file__ = file;
   m.__builtins__ = R.builtins;
   R.dictSet(R.sysModules, "__main__", m);
-  if (sage) R.loader.exec("from sage_all import *\nimport _sage_lazy as _sage_lazy_; _sage_lazy_.bind(globals()); del _sage_lazy_\n", m, "exec", "<sage>");
+  if (sage) sageGlobals(m);
   return m;
 }
 

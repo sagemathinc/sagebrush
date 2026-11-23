@@ -250,6 +250,26 @@ const pyEntry: (code: any, g: any, R: any, state: typeof frameState) => any = ru
 // whatever its code does with it, aliases included, even if it then raises,
 // the module is already known as what it is: execFile's optional-set tag)
 let moduleRuns = 0;
+
+/** Sage's implicit startup is runtime code, not a user's import. Load it
+ * from the library without claiming the public `sagebrush` package name:
+ * their subsequent import must still find their own sagebrush.py/package.
+ * Keep the original path object and cache entries, even if startup raises. */
+export function sageGlobals(m: any): void {
+  const sys = R.importModule("sys"), path = sys.path;
+  const own = (name: string) => name === "sagebrush" || name.startsWith("sagebrush.");
+  const saved = [...R.sysModules.$m.entries()].filter(([name]) => typeof name === "string" && own(name));
+  for (const [name] of saved) dictDelete(R.sysModules, name);
+  sys.path = [libDir()];
+  try {
+    R.loader.exec("from sage_all import *\nimport _sage_lazy as _sage_lazy_; _sage_lazy_.bind(globals()); del _sage_lazy_\n", m, "exec", "<sage>");
+  } finally {
+    sys.path = path;
+    for (const name of R.sysModules.$m.keys()) if (typeof name === "string" && own(name)) dictDelete(R.sysModules, name);
+    for (const [name, value] of saved) R.dictSet(R.sysModules, name, value);
+  }
+}
+
 export function execModule(source: string, filename: string, name: string, isPackage = false, sage = filename.endsWith(".sage"), made?: (m: any) => void): any {
   const m = R.newModule(name);
   made?.(m);
@@ -273,7 +293,7 @@ export function execModule(source: string, filename: string, name: string, isPac
   R.scripts.set(jsName, { filename, lines: source.split("\n"), lineMap: compiled.lineMap, globals: new WeakRef(m) });
   const fn = script.runInThisContext();
   try {
-    if (sage) R.loader.exec("from sage_all import *\nimport _sage_lazy as _sage_lazy_; _sage_lazy_.bind(globals()); del _sage_lazy_\n", m, "exec", "<sage>");
+    if (sage) sageGlobals(m);
     pyEntry(fn, m, R, frameState);
   } catch (e) {
     dictDelete(R.sysModules, name);
