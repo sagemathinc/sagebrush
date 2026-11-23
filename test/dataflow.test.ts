@@ -143,3 +143,48 @@ test("import * is refused in Sagebrush's words: why, and the way forward (no 'ma
   assert.match(msg("from os.path import *"), /`import os\.path`\) or the names you use \(`from os\.path import a, b`\)/);
   assert.match(msg("x = 1\nfrom ..pkg import *"), /`from \.\.pkg import \*`/);
 });
+
+test("IPython's output names (_, __, ___, _N) read in a cell that doesn't bind them: the interpreter's, never renamed", () => {
+  const names = (code: string) => {
+    const tree: any = parse(code, "exec");
+    mangleLocals(tree, "abc");
+    const out: string[] = [];
+    const walk = (n: any) => { if (n && typeof n === "object") { if (n._type === "Name") out.push(n.id); for (const k of Object.keys(n)) if (k !== "_type") walk(n[k]); } };
+    walk(tree.body);
+    return out;
+  };
+  assert.deepEqual(names("_ * 2"), ["_"]);
+  assert.deepEqual(names("print(_, __, ___, _1, _23)"), ["print", "_", "__", "___", "_1", "_23"]);
+  assert.deepEqual(names("def f():\n    return _3"), ["_3"]);
+  // (bound in the cell: its own, at every use, as marimo has it)
+  assert.deepEqual(names("_ = 5\nprint(_)"), ["_cell_abc_", "print", "_cell_abc_"]);
+  assert.deepEqual(names("for _ in r:\n    pass"), ["_cell_abc_", "r"]);
+  assert.deepEqual(names("_2 = 1\n_2"), ["_cell_abc_2", "_cell_abc_2"]);
+  // (any other private name: the cell's own, read or bound)
+  assert.deepEqual(names("_x = 1\nprint(_x, _y)"), ["_cell_abc_x", "print", "_cell_abc_x", "_cell_abc_y"]);
+  // (and none of them is a definition or a reference in the graph)
+  const a = analyzeCell("print(_ * 2, _1)\nfor _ in r:\n    pass", "abc");
+  assert.deepEqual([...a.defs], []);
+  assert.deepEqual([...a.refs].sort(), ["print", "r"]);
+});
+
+test("a cell's outputs: the output names it reads without binding them (_, __, ___; not _N)", () => {
+  const outs = (code: string, mode?: "python" | "sage" | "matlab" | "magma") => [...(analyzeCell(code, "c", mode ? { mode } : {}).outputs ?? [])].sort();
+  assert.deepEqual(outs("_"), ["_"]);
+  assert.deepEqual(outs("print(_, __, ___, _1)"), ["_", "__", "___"]);
+  // (read in a function or a comprehension: still the interpreter's, read when it runs)
+  assert.deepEqual(outs("def f():\n    return __\n[___ for i in range(2)]"), ["__", "___"]);
+  // (bound in the cell: the cell's own, not an output read)
+  assert.deepEqual(outs("_ = 5\nprint(_)"), []);
+  assert.deepEqual(outs("for _ in range(3):\n    pass"), []);
+  assert.deepEqual(outs("_2 * 2"), []);
+  assert.deepEqual(outs("x = 1"), []);
+  // (Sage too; MATLAB and Magma have no output names)
+  assert.deepEqual(outs("_ + 1", "sage"), ["_"]);
+  assert.deepEqual(outs("x = 1;", "matlab"), []);
+  // (and an output name is still neither a definition nor a reference)
+  const a = analyzeCell("y = _ + __");
+  assert.deepEqual([...a.defs], ["y"]);
+  assert.ok(!a.refs.has("_") && !a.refs.has("__"));
+});
+

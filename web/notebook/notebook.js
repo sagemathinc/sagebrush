@@ -239,7 +239,14 @@ export function createNotebook(root, opts = {}) {
   // use) over the SVG, which stays for saving, agents and when WebGL fails.
   let viewer3d = null;
   function mount3d(fig, sceneText) {
-    viewer3d ??= import(asset("sagebrush-viewer3d.js")).then(() => window.SagebrushViewer3d);
+    viewer3d ??= import(asset("sagebrush-viewer3d.js")).then(() => {
+      // (its headset mode, web/viewer3d-xr.js, where this page has it: a host that maps its own assets (a downloaded
+      //  board's) offers it only if it maps that file too; the viewer shows "Enter VR" only with it)
+      const v = window.SagebrushViewer3d;
+      const xr = opts.assetUrl ? opts.assetUrl("sagebrush-viewer3d-xr.js") : asset("sagebrush-viewer3d-xr.js");
+      if (v && xr && !v.xrModule) v.xrModule = xr;
+      return v;
+    });
     viewer3d.then((v) => v?.mount(fig, JSON.parse(sceneText))).catch(() => {});
   }
   // A graph's picture (Graph.plot): a canvas whose vertices can be dragged
@@ -347,9 +354,19 @@ export function createNotebook(root, opts = {}) {
     }
   }
   // (an output that can't be drawn, however malformed: said, with its text, the rest of the document drawn all the same)
-  function appendDisplay(box, b) {
+  // A picture's size to show it at, from a display's metadata ({mime: {width, height}}): both finite positive numbers
+  // (at most 100,000 each), else none, and the picture is shown at its own size.
+  function pictureShownSize(md, mime) {
+    const m = md && typeof md === "object" ? md[mime] : null;
+    const w = m && typeof m === "object" ? m.width : undefined, ht = m && typeof m === "object" ? m.height : undefined;
+    const ok = (x) => typeof x === "number" && Number.isFinite(x) && x > 0 && x <= 1e5;
+    return ok(w) && ok(ht) ? { width: Math.round(w), height: Math.round(ht) } : null;
+  }
+  // (md: the display's metadata, Jupyter's: a picture's width and height to show it at, a PNG drawn at twice its
+  // size, lib/_graphics.py; taken only as finite positive numbers, pictureShownSize)
+  function appendDisplay(box, b, md) {
     try {
-      drawDisplay(box, b);
+      drawDisplay(box, b, md);
     } catch (e) {
       const el = h("div", "html-out");
       el.sbBundle = { ...b };
@@ -359,7 +376,7 @@ export function createNotebook(root, opts = {}) {
       box.appendChild(el);
     }
   }
-  function drawDisplay(box, b) {
+  function drawDisplay(box, b, md) {
     if (b["text/latex"] && b["application/vnd.sagebrush.typeset"]) return appendLatex(box, b);
     if (typeof b["text/markdown"] === "string" && !b["image/svg+xml"] && !b["image/png"] && !b["image/jpeg"] && !b["image/webp"]) return appendMarkdown(box, b);
     const fig = h("figure", "plot");
@@ -392,7 +409,10 @@ export function createNotebook(root, opts = {}) {
     else if (raster) {
       // (within the bounds its header gives, and this document's pixels in
       // all: image-size.ts; else a placeholder, the picture kept as it was)
-      const show = () => Object.assign(new Image(), { src: `data:${raster[0]};base64,${raster[1]}`, alt: b["text/plain"] || "image" });
+      // (shown at the size its metadata gives, when it gives one: a PNG drawn at twice it is sharp on a dense screen)
+      const size = pictureShownSize(md, raster[0]);
+      if (size) fig.sbMeta = { [raster[0]]: size };
+      const show = () => Object.assign(new Image(), { src: `data:${raster[0]};base64,${raster[1]}`, alt: b["text/plain"] || "image" }, size ?? {});
       const why = pixels.take(imageSize(raster[0], raster[1]), raster[0] + "\n" + pictureKey(raster[1]));
       if (!why) fig.appendChild(show());
       else {
@@ -428,7 +448,7 @@ export function createNotebook(root, opts = {}) {
     if (!box) return null;
     return {
       out: (text, isErr) => appendText(box, text, isErr),
-      display: (b) => appendDisplay(box, b),
+      display: (b, md) => appendDisplay(box, b, md),
       interact: (spec) => renderInteract(box, spec),
       clear: () => box.replaceChildren(),
       input: (prompt, reply) => askInput(box, prompt, reply, waiting),
@@ -498,12 +518,12 @@ export function createNotebook(root, opts = {}) {
         // notebook: its picture is, and running the cell again restores the view
         const b = { ...el.sbBundle };
         if ((b[SCENE3D]?.length ?? 0) > 8e6) delete b[SCENE3D];
-        outs.push({ output_type: "display_data", data: b, metadata: {} });
+        outs.push({ output_type: "display_data", data: b, metadata: el.sbMeta ?? {} });
       } else if (el.tagName === "FIGURE") {
         const svg = el.querySelector("svg"), img = el.querySelector("img"), data = {};
         if (svg) { data["image/svg+xml"] = new XMLSerializer().serializeToString(svg); data["text/plain"] = svg.getAttribute("aria-label") || "picture"; }
         else if (img) { const [head, b64] = img.src.split(","); data[head.slice(5, head.indexOf(";"))] = b64; data["text/plain"] = img.alt; }
-        outs.push({ output_type: "display_data", data, metadata: {} });
+        outs.push({ output_type: "display_data", data, metadata: (img && el.sbMeta) || {} });
       } else if (el.classList.contains("interact")) {
         stream("stdout", "[interactive controls: run the cell to use them]\n");
         outs.push(...saveOutputs(el.querySelector(".iout")));
@@ -524,7 +544,7 @@ export function createNotebook(root, opts = {}) {
         const b = {};
         for (const [key, v] of Object.entries(o.data)) b[key] = joinText(v);
         if (Object.keys(b).every((k) => k === "text/plain")) appendText(box, (b["text/plain"] ?? "") + "\n", false);
-        else appendDisplay(box, b);
+        else appendDisplay(box, b, o.metadata);
       }
     }
   }
@@ -802,7 +822,7 @@ export function createNotebook(root, opts = {}) {
         }, INTERACT_SWAP_MS);
       },
       out: (text, isErr) => appendText(box(), text, isErr),
-      display: (b) => appendDisplay(box(), b),
+      display: (b, md) => appendDisplay(box(), b, md),
       interact: (spec) => renderInteract(box(), spec),
       clear: () => box().replaceChildren(),
       input: (prompt, reply) => askInput(box(), prompt, reply),
@@ -826,7 +846,7 @@ export function createNotebook(root, opts = {}) {
         finish();
       },
       stopped(message) { end(null); it.buffer = null; it.superseded = false; appendText(it.out, message, true); it.dirty = false; finish(); },
-    });
+    }, { figures: figures() });
   }
 
   // ---------------------------------------------------------- running cells
@@ -1023,7 +1043,7 @@ export function createNotebook(root, opts = {}) {
     let waited = 0, waitFrom = null;
     const k = kernel;
     const send = viaWave ?? ((c, o, sink) => k.execute(c, o, sink));
-    return cellSeed(cell).then((seed) => new Promise((resolve) => send(code, { mode, cell: cell.id, forget, mangle: reactive(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}), ...(extra ?? {}) }, {
+    return cellSeed(cell).then((seed) => new Promise((resolve) => send(code, { mode, cell: cell.id, forget, mangle: reactive(), ...(reactive() ? { above: cellsAbove(cell) } : {}), figures: figures(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}), ...(extra ?? {}) }, {
       start() {
         clear();
         cell.el.classList.replace("queued", "running");
@@ -1061,7 +1081,7 @@ export function createNotebook(root, opts = {}) {
             const n = ++k.execCount;
             k.ran?.add(cell.id);
             (k.parked ??= new Map()).set(cell.id, { nodes: [...cell.out.childNodes], n, ms, interrupted: !!info?.interrupted });
-            return resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}), ...(info?.files ? { files: info.files } : {}) });
+            return resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}), ...(info?.files ? { files: info.files } : {}), ...(typeof info?.shown === "boolean" ? { shown: info.shown } : {}) });
           }
           if (!live) return resolve({ ok: false, ms, stopped: true });
           forgetInteracts(live.out);
@@ -1077,7 +1097,7 @@ export function createNotebook(root, opts = {}) {
         if (!info?.interrupted) rememberTime(cell, ms);
         cell.time.textContent = `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
         announce(`Cell ${index(cell) + 1} ${failed || info?.error ? "raised an error" : "finished"}`);
-        resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}), ...(info?.files ? { files: info.files } : {}) });
+        resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}), ...(info?.files ? { files: info.files } : {}), ...(typeof info?.shown === "boolean" ? { shown: info.shown } : {}) });
       },
       stopped(message) {
         // (a running cell whose interpreter was ended, Stop's last resort:
@@ -1109,6 +1129,13 @@ export function createNotebook(root, opts = {}) {
         resolve({ ok: false, ms: 0, stopped: true });
       },
     })));
+  }
+  // (a reactive cell's `above`: the keys of the code cells above it, nearest first, as the worker keys each cell's
+  // shown value; _, __ and ___ in it are the values shown by the nearest of them that showed one)
+  function cellsAbove(cell) {
+    const code = cells().filter((c) => c.type === "code");
+    const i = code.findIndex((c) => c.id === cell.id);
+    return i < 0 ? [] : code.slice(0, i).reverse().map((c) => String(c.id).replace(/[^A-Za-z0-9]/g, ""));
   }
   // The reactive notebook's per-cell seed: SHA-256 of the notebook's seed (made
   // once, kept in the document) and the cell's id, so a cell draws the same
@@ -1157,7 +1184,7 @@ export function createNotebook(root, opts = {}) {
             analyses.set(key, opts.analyzer.analyze(code, mode).then((a) => {
               // (the analyzer failed, not the code: not kept, so that the next run asks again)
               if (a.error?.kind === "analyzer") analyses.delete(key);
-              return a.error ? a : { defs: new Set(a.defs), refs: new Set(a.refs), deleted: new Set(a.deleted), mutations: new Set(a.mutations ?? []), imports: new Map(a.imports ?? []) };
+              return a.error ? a : { defs: new Set(a.defs), refs: new Set(a.refs), deleted: new Set(a.deleted), mutations: new Set(a.mutations ?? []), imports: new Map(a.imports ?? []), outputs: new Set(a.outputs ?? []) };
             }));
           }
           return analyses.get(key);
@@ -1884,7 +1911,9 @@ export function createNotebook(root, opts = {}) {
       highlight: (src) => highlightMarkdown(src, isSage()),
       placeholder: "Text: Markdown, with math: $x^2$",
       tabIndents: true,
-      onChange: (v) => { cell.blocksText = v; setText(cell, v); cell.ta.dispatchEvent(new Event("input")); },
+      // (the person's own edit: the block editor's paste, a block split or joined, has no input event of its own, so it
+      // counts as typed here, for the leave prompt)
+      onChange: (v) => { typed = true; cell.blocksText = v; setText(cell, v); cell.ta.dispatchEvent(new Event("input")); },
       onKey: (e) => mdKey(cell, e),
       onEdge: (up) => { const to = up ? prevCell(cell) : nextCell(cell); if (!to) return false; edit(to, up ? "end" : "start"); return true; },
     });
@@ -2019,7 +2048,7 @@ export function createNotebook(root, opts = {}) {
   // ---------------------------------------------------------- the document
   // A document is {mode, cells: [{id, type?, code, outputs?, n?, attachments?, metadata?}], ...meta}.
   // A cell's metadata (nbformat's: tags, ...) is kept as it is.
-  let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0, lastSaveError = null;
+  let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0, guarded = false, typed = false;
   // The document shown, from when it is loaded until another is (or it is
   // detached): what is known of it, which its saves keep to, even one still
   // waiting its turn when another document is shown (CORR-989-1).
@@ -2049,18 +2078,33 @@ export function createNotebook(root, opts = {}) {
   // before closing while there are any, their saves only here)
   const leftChanged = () => emit("left", leftCount());
   // (one whose save was busy stays outstanding until it is sent again: counted, asked about before closing)
-  const leftSettled = (s) => { if (!s.inflight && !unkept.has(s) && !busy.has(s)) outstanding.delete(s); leftChanged(); };
-  async function keepDetached(key, doc, theirs) {
+  const leftSettled = (s) => { if (!s.inflight && !unkept.has(s) && !busy.has(s) && !failed.has(s)) outstanding.delete(s); leftChanged(); };
+  // (a save that failed, thrown or refused ("not saved: ..."), kept with ITS notebook, shown or left, with what it sent:
+  // only a later save of that same notebook that succeeds clears it, never another notebook's; saved() sends a left one
+  // again, and rejects, naming it, while any is still failed; a left one stays counted (LIMIT-900-2))
+  const failed = new Map();
+  function saveFailed(mine, st, sent, json, seq, error) {
+    if ((failed.get(mine)?.seq ?? 0) > seq) return;
+    failed.set(mine, { st, sent, json, seq, error });
+    outstanding.add(mine);
+  }
+  function saveSucceeded(mine, seq) {
+    if ((failed.get(mine)?.seq ?? Infinity) <= seq) failed.delete(mine);
+  }
+  // (`why`: absent for a conflict (changed elsewhere); for a save refused or failed again when sent once more,
+  // { refused, message }, passed to the page so that what it names and says is what happened)
+  async function keepDetached(key, doc, theirs, why = null) {
+    const what = why ? `couldn't be saved after it was closed here (${why.refused ? "refused" : "failed"}: ${why.message})` : "changed elsewhere after it was closed here";
     try {
-      if (!detachedConflict) throw new Error("changed elsewhere after it was closed here, and not kept");
-      await detachedConflict(doc, theirs, key);
+      if (!detachedConflict) throw new Error(`${what}, and not kept`);
+      await detachedConflict(doc, theirs, key, why);
       unkept.delete(key);
       leftSettled(key);
     } catch (e) {
-      unkept.set(key, { doc, theirs, error: e ?? new Error("not kept") });
+      unkept.set(key, { doc, theirs, why, error: e ?? new Error("not kept") });
       outstanding.add(key);
       leftChanged();
-      emit("saved", `not saved: ${doc.name ?? "a notebook"} changed elsewhere after it was closed here, and your changes to it couldn't be kept (${e?.message ?? e})`);
+      emit("saved", `not saved: ${doc.name ?? "a notebook"} ${what}, and your changes to it couldn't be kept (${e?.message ?? e})`);
     }
   }
   const cellType = (c) => (c.type === "markdown" || c.type === "raw" ? c.type : "code");
@@ -2071,6 +2115,30 @@ export function createNotebook(root, opts = {}) {
   const baseOf = (m, list) => ({ mode: m, cells: (list ?? []).map((c) => ({ id: c.id, code: c.code ?? "", ...(c.type === "markdown" || c.type === "raw" ? { type: c.type } : {}), ...(c.type === "markdown" && c.attachments ? { attachments: c.attachments } : {}) })) });
   const syncedOf = (rev, list, m) => ({ rev, cells: new Map((list ?? []).map((c) => [c.id, cellKey(c)])), doc: baseOf(m, list) });
   const setSynced = (rev, list, m) => { shown.synced = syncedOf(rev, list, m); };
+  // How this notebook's figures are shown (the page's Figures choice, in every language): "auto" (an SVG, or a sharp
+  // PNG for one whose SVG would be over 1 MiB), "svg" or "png"; kept in the notebook's metadata, sagebrush.figures,
+  // only when it isn't "auto", and given to the interpreter with each run (lib/_graphics.py figures).
+  const FIGURES = ["auto", "svg", "png"];
+  function figures() {
+    const f = meta.metadata?.sagebrush?.figures;
+    return FIGURES.includes(f) ? f : "auto";
+  }
+  // m with sagebrush.figures set to f in its metadata (undefined: removed), and no empty metadata left; m itself unchanged
+  function withFigures(m, f) {
+    const { metadata, ...r } = m;
+    const md = { ...(metadata ?? {}) }, sb = { ...(md.sagebrush ?? {}) };
+    if (f === undefined) delete sb.figures;
+    else sb.figures = f;
+    if (Object.keys(sb).length) md.sagebrush = sb;
+    else delete md.sagebrush;
+    return Object.keys(md).length ? { ...r, metadata: md } : r;
+  }
+  function setFigures(f) {
+    if (!FIGURES.includes(f) || f === figures()) return;
+    meta = withFigures(meta, f === "auto" ? undefined : f);
+    gateCfg = null;
+    schedule();
+  }
   function snapshot() {
     return {
       ...meta, mode,
@@ -2091,11 +2159,16 @@ export function createNotebook(root, opts = {}) {
     clearTimeout(timer);
     emit("dirty");
     timer = setTimeout(flush, 500);
+    guard();
   }
-  function flush() {
+  function flush() { try { return flushNow(); } finally { guard(); } }
+  function flushNow() {
     clearTimeout(timer);
     timer = null;
     if (loading) return;
+    // (a journal's store that follows another tab's (focus takeover): nothing saved from here, nothing refused to say;
+    // this page is read-only, so nothing typed waits, and it reloads the document when it writes)
+    if (store?.journaled && store.readOnly === "other") return;
     const doc = snapshot(), json = JSON.stringify(doc), mine = shown, seen = mine.remoteSeen;
     if (json === lastJson) return;
     lastJson = json;
@@ -2133,8 +2206,10 @@ export function createNotebook(root, opts = {}) {
       saveChain = p.then((t) => {
         // (an older busy one, superseded by this save: its error no longer stands, and it isn't sent again)
         if ((busy.get(mine)?.seq ?? Infinity) <= seq) busy.delete(mine);
-        if (mine.busyError && mine.busySeq <= seq) { if (lastSaveError === mine.busyError) lastSaveError = null; mine.busyError = null; }
+        if (mine.busyError && mine.busySeq <= seq) mine.busyError = null;
         if (t && typeof t === "object" && t.conflict) {
+          // (answered, not failed: an older failure of this notebook no longer stands; what it had is merged, or kept)
+          saveSucceeded(mine, seq);
           // written elsewhere first: merge that, then save the merge; a
           // document no longer shown has nothing here to merge into: what
           // this save had is kept by the page, beside the other, never over
@@ -2146,6 +2221,23 @@ export function createNotebook(root, opts = {}) {
           applyRemote(t.conflict, true, true);
           return;
         }
+        // (a save the store refused, answered rather than thrown ("not saved: ...", the journal's way): nothing of it was
+        // kept, so nothing here is taken as saved (not its revision, not its cells as the base), it is sent again with the
+        // next save, and saved() rejects with why, as for a thrown one: a page leaving for elsewhere stays, its edit kept)
+        const refused = (t && typeof t === "object" ? t.saved : t);
+        if (typeof refused === "string" && /^not saved\b/.test(refused)) {
+          if (lastJson === json) lastJson = null;
+          // (refused by a journal's store that, still this page's, isn't the writer, or isn't ready again yet: the focus
+          // takeover's moment, while another tab writes; this page follows, and reloads the document when it writes
+          // again, the keys typed meanwhile passed on (web/page/handover.ts): nothing to say or send again, as flush
+          // sends nothing while it follows; a store let go (another notebook opened) is a failed save, as any)
+          if (st.journaled && !st.released && (!st.writer || !st.ready)) return;
+          // (for any notebook, shown or just left, as a thrown one is: saved() names it; said only for the one shown)
+          saveFailed(mine, st, sent, json, seq, Object.assign(new Error(refused.replace(/^not saved:?\s*/, "") || "not saved"), { refused: true }));
+          if (mine !== shown || store !== st) return;
+          emit("saved", refused);
+          return;
+        }
         // (its revision kept for its next save, shown or not; what the store saved, which a journal store merged
         // with changes from elsewhere this page doesn't show yet: shown here at once, typed text kept, and the base
         // from then on (never an older one))
@@ -2155,17 +2247,17 @@ export function createNotebook(root, opts = {}) {
           if (lastJson === json) lastJson = null;
           applyRemote({ ...kept, rev: r }, true, true);
         } else if (newer) mine.synced = syncedOf(r, kept.cells, kept.mode);
+        saveSucceeded(mine, seq);
         if (mine !== shown || store !== st) return;
-        lastSaveError = null;
         emit("saved", (t && typeof t === "object" ? t.saved : t) ?? "saved");
       }, (e) => {
         if (lastJson === json) lastJson = null;
         // (a busy one superseded by a later save of this document, asked for since: that one answers for it)
         if (e?.busy && seq !== mine.saveSeq) return;
         if (e?.busy) { busy.set(mine, { st, sent, json, seq }); mine.busyError = e; mine.busySeq = seq; }
-        lastSaveError = e ?? new Error("not saved");
+        saveFailed(mine, st, sent, json, seq, e ?? new Error("not saved"));
         emit("saved", "not saved: " + (e?.message ?? e));
-      }).finally(() => { savesPending--; mine.inflight--; leftSettled(mine); });
+      }).finally(() => { savesPending--; mine.inflight--; leftSettled(mine); guard(); });
     }
   }
   // Every change so far saved: resolves once the saves asked for (this one
@@ -2178,12 +2270,29 @@ export function createNotebook(root, opts = {}) {
       flush();
       // (busy ones sent again, the shown document's by flush already)
       for (const [m, b] of [...busy]) if (busy.get(m) === b && m !== shown) queueSave(m, b.st, b.sent, b.json, m.remoteSeen);
+      // (failed ones of documents left sent again once, as they were, through their own store: a refusal that has
+      // passed recovers here; one that fails again (refused, or a store that can no longer write it) is kept as a
+      // copy beside it, as a conflict's is, never written over it; a copy not kept is unkept, tried again below)
+      const resent = new Map();
+      for (const [m, f] of [...failed]) if (failed.get(m) === f && m !== shown && !busy.has(m)) { resent.set(m, f.seq); queueSave(m, f.st, f.sent, f.json, m.remoteSeen); }
       await saveChain;
-      if (lastSaveError) throw lastSaveError;
+      for (const [m, seq] of resent) {
+        const f = failed.get(m);
+        if (!f || f.seq <= seq || m === shown || busy.has(m)) continue;
+        failed.delete(m);
+        saveChain = saveChain.then(() => keepDetached(m, f.sent, null, { refused: !!f.error?.refused, message: String(f.error?.message ?? f.error ?? "not saved") }));
+      }
+      await saveChain;
+      // (still failed: the shown notebook's, said as it is; else the first notebook left, named)
+      if (failed.has(shown)) throw failed.get(shown).error;
+      if (failed.size) {
+        const [m, f] = [...failed][0];
+        throw Object.assign(new Error(`${f.sent?.name ?? "a notebook"}, a notebook you left: ${f.error?.message ?? f.error}`), { left: m });
+      }
       // (saves of documents no longer shown that couldn't be kept: tried
       // again, in turn with the saves; one kept or replaced meanwhile isn't)
       if (unkept.size) {
-        saveChain = saveChain.then(async () => { for (const [key, u] of [...unkept]) if (unkept.get(key) === u) await keepDetached(key, u.doc, u.theirs); });
+        saveChain = saveChain.then(async () => { for (const [key, u] of [...unkept]) if (unkept.get(key) === u) await keepDetached(key, u.doc, u.theirs, u.why); });
         await saveChain;
       }
       if (unkept.size) throw [...unkept.values()].at(-1).error;
@@ -2196,6 +2305,38 @@ export function createNotebook(root, opts = {}) {
   observer.observe(cellsEl, { childList: true, subtree: true, characterData: true });
   const onHidden = () => { if (document.visibilityState === "hidden" && timer) flush(); };
   addEventListener("visibilitychange", onHidden);
+  // (the page going away (a reload, a closed tab) with an edit not yet saved: a waiting save flushed, and the browser's
+  // leave prompt requested, since a save can't finish once the page is gone; if the person leaves anyway, the last
+  // edit may not be kept)
+  // (unsaved: a save running, the last one failed or was busy (kept to send again), or a change waiting that differs
+  // from what was last saved (typed and undone before its save asks nothing); a notebook left, with its saves still
+  // to make, is the page's to ask about (its "left" listener))
+  // (and only once the person has typed here since everything was last saved (`typed`: a trusted input event, or a
+  // Markdown cell's block editor's change); while this notebook's saves fail or are busy, any of the person's own
+  // keys, clicks, pastes or drops too, as a cell moved, deleted or retyped then can't be saved either. A run's output,
+  // a change from elsewhere or one a script made do not arm it by themselves; once `typed` is set, though, any work
+  // still to save keeps it armed. So a script that hasn't set `typed` (a test, an automation) isn't held by the
+  // prompt; one that sends trusted input (CDP Input.*, as a person types) sets it, and must answer the prompt or let
+  // its saves finish first. Notebooks left are the page's own prompt's, as before)
+  const unsaved = (dirty) => typed && !!store && !store.readOnly && !!(savesPending || failed.has(shown) || busy.size || dirty());
+  root.addEventListener("input", (e) => { if (e.isTrusted) typed = true; }, true);
+  // (armed at once: such a key or click may change nothing that schedules a save, so nothing else would call guard())
+  for (const t of ["keydown", "pointerdown", "paste", "drop"]) root.addEventListener(t, (e) => { if (e.isTrusted && store && (failed.has(shown) || busy.size)) { typed = true; guard(); } }, true);
+  function onBeforeUnload(ev) {
+    if (!unsaved(() => timer && JSON.stringify(snapshot()) !== lastJson)) return;
+    if (timer) flush();
+    ev.preventDefault();
+    ev.returnValue = "";
+  }
+  // (the listener there only while something may be unsaved, and taken away once nothing is: a page with any
+  // beforeunload listener is navigated away from more slowly, so a clean notebook's page reloads exactly as before)
+  function guard() {
+    if (!(savesPending || failed.has(shown) || busy.size || timer)) typed = false; // (all saved: the person's typing kept)
+    const want = unsaved(() => timer);
+    if (want === guarded) return;
+    guarded = want;
+    (want ? addEventListener : removeEventListener)("beforeunload", onBeforeUnload);
+  }
 
   function fill(cell, c) {
     cell.metadata = c.metadata ?? null;
@@ -2233,6 +2374,8 @@ export function createNotebook(root, opts = {}) {
     shown.synced = { ...syncedOf(rev, snap.cells, snap.mode), doc: baseOf(snap.mode, list ?? []) };
     Promise.resolve().then(() => { loading = false; showParked(); }); // after the observer's records for this
     reactiveLoad();
+    typed = false; // (another document shown: nothing typed in it yet; one left with saves to make is the page's to ask)
+    guard(); // (its own failed save, or none)
   }
   // (the runs of this notebook that ended while it wasn't shown (execCell's done): their output, prompt number and
   // time put in their cells, once loaded, as a change of the document, so it is saved)
@@ -2293,6 +2436,12 @@ export function createNotebook(root, opts = {}) {
     let dirty = false;
     meta = { ...meta, ...rest };
     gateCfg = null;
+    // (how its figures are shown is the incoming document's alone: none there is Auto, never the old choice kept)
+    const incoming = rest.metadata?.sagebrush?.figures;
+    if (meta.metadata?.sagebrush?.figures !== incoming) {
+      meta = withFigures(meta, incoming);
+      gateCfg = null;
+    }
     if (!keepLocal) kernel?.remoteGate?.documentReplaced(); // (a revert replaces the document)
     if (m && m !== mode) setMode(m, false);
     const order = cells().map((c) => c.id);
@@ -2670,7 +2819,7 @@ export function createNotebook(root, opts = {}) {
     // started starts a new one first (confinement phase 2), whose restart makes every cell stale)
     runCells(ids, { consent: _consent, ...o } = {}) { opts.onExplicitRun?.(); return reactive() ? engine().run(ids, o) : Promise.all(ids.map((id) => cellById(id)).filter(Boolean).map((c) => run(c))); },
     applyEdits, graph, verify, fixRedefinitions,
-    setMode, setType, setInput, renderMd, select, edit,
+    setMode, setType, setInput, renderMd, select, edit, figures, setFigures,
     /** X1: load the language's environment now, for the user's choice of it (index.html's menu). */
     warm,
     /** Measure every editor again now (after the notebook was hidden). */
@@ -2693,6 +2842,7 @@ export function createNotebook(root, opts = {}) {
       const doc = await s.load();
       load(doc);
       store = s;
+      guard();
       unsubscribe = s.subscribe?.((d) => applyRemote(d)) ?? null;
       // (2c-3: another device's changes reached this notebook's history: merged with the record by the store, then with
       // what this page shows, its unsaved edits merged cell by cell (applyRemote), and saved.  Every edit is kept, as in
@@ -2735,7 +2885,7 @@ export function createNotebook(root, opts = {}) {
     /** Saves of documents no longer shown that met a change made elsewhere and couldn't be kept: only in this page. */
     get unkeptCount() { return unkept.size; },
     onDetachedConflict(f) { const was = detachedConflict; detachedConflict = f; return was; },
-    detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; if (store?.journaled) store.onremote = null; store = null; shown = { synced: null, remoteSeen: 0 }; leftChanged(); },
+    detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; if (store?.journaled) store.onremote = null; store = null; shown = { synced: null, remoteSeen: 0 }; leftChanged(); guard(); },
     get store() { return store; },
     on(event, f) { (listeners[event] ??= []).push(f); return () => { listeners[event] = listeners[event].filter((g) => g !== f); }; },
     showKeys() { keysDlg.showModal(); },
@@ -2749,6 +2899,8 @@ export function createNotebook(root, opts = {}) {
       sizeObserver?.disconnect();
       removeEventListener("resize", resizeAll);
       removeEventListener("visibilitychange", onHidden);
+      removeEventListener("beforeunload", onBeforeUnload);
+      guarded = false;
       document.removeEventListener("pointerdown", onPointerDown);
       for (const el of [completer, menu, dropline, keysDlg]) el.remove();
       root.replaceChildren();

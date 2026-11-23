@@ -16,6 +16,22 @@ import type { BoardDoc } from "./doc";
 import type { CachedOutputs } from "./outcache";
 import { OWN_ENGINE, checked, embeddedText, engineFiles, fetched, pack, type EngineRef } from "./engine";
 
+/** Where a file exported from the desktop app finds its engine: the public site, by the engine's id.  The app's own
+ * page is a local server (http://127.0.0.1:<a port>/) that a downloaded file can't reach, and that goes when the app
+ * quits. */
+export const PUBLIC_ENGINE_SITE = "https://sagebrush.space/";
+const inDesktopApp = () => (globalThis as { __SB_DESKTOP_APP__?: unknown }).__SB_DESKTOP_APP__ === true;
+
+/** Whether the public site is known to have engine `id` (its manifest answers), so that a file naming it can fetch it
+ * there.  False for a 404 and for any failure to tell (no network, another error) alike. */
+async function published(id: string): Promise<boolean> {
+  try {
+    return (await fetch(new URL(`engine/${id}/manifest.json`, PUBLIC_ENGINE_SITE), { cache: "no-store" })).ok;
+  } catch {
+    return false;
+  }
+}
+
 /** Whether this page is an exported file (its document embedded). */
 export const embedded = () => document.getElementById("sb-doc");
 
@@ -84,7 +100,7 @@ export function katexFontsInline(css: string, font: (path: string) => string): s
 
 /** The board page as one HTML file holding `doc`; with `python`, the code's
  * engine too (engine.ts), compressed, so its code runs without the network. */
-export async function exportHtml(doc: BoardDoc, o: { python?: boolean; outputs?: CachedOutputs[] } = {}): Promise<string> {
+export async function exportHtml(doc: BoardDoc, o: { python?: boolean; outputs?: CachedOutputs[]; carried?: () => void } = {}): Promise<string> {
   const own = (id: string) => document.getElementById(id)?.textContent ?? null;
   const here = new URL(".", location.href); // (the board's directory: /board/)
   const site = new URL("..", here);
@@ -98,7 +114,16 @@ export async function exportHtml(doc: BoardDoc, o: { python?: boolean; outputs?:
   const mathCss = !math ? null : ex && own("sb-katex") ? own("sb-katex")! : await katexCss(site);
   // the engine: where it comes from (this site, or the file's), and with
   // python its parts, each checked (or carried as they are from a file that has them)
-  const ref: EngineRef | null = ex ? engineRef() : OWN_ENGINE ? { site: site.href, id: OWN_ENGINE.id } : null;
+  // (an exported file's own; a page that names its engine's site (the frame, `sagebrush board open`'s page) that one;
+  // the desktop app the public site; else this page's site, the engine beside it)
+  const named = engineRef();
+  const ref: EngineRef | null = ex ? named : named ?? (OWN_ENGINE ? { site: inDesktopApp() ? PUBLIC_ENGINE_SITE : site.href, id: OWN_ENGINE.id } : null);
+  // (the desktop app's engine not known to be on the public site, unpublished or not checkable: a board with code
+  // carries it, so that its code runs, and the caller says so (`carried`))
+  if (!o.python && !ex && ref && OWN_ENGINE && ref.site === PUBLIC_ENGINE_SITE && inDesktopApp() && /"code"\s*:/.test(JSON.stringify(doc)) && !(await published(OWN_ENGINE.id))) {
+    o = { ...o, python: true };
+    o.carried?.();
+  }
   const engine: string[] = [];
   if (ref) engine.push(`<script type="application/json" id="sb-engine-ref">${JSON.stringify(ref).replace(/</g, "\\u003c")}</script>`);
   if (ref && o.python && OWN_ENGINE) {

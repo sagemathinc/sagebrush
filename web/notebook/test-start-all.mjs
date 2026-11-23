@@ -53,6 +53,7 @@ function world(spec, over = {}) {
   const { s, nb, log } = world({ a: { path: "/a.ipynb" }, b: { path: "/b.ipynb" }, c: { path: "/c.ipynb" } });
   const r = await startAll(s);
   check(r.total === 3 && r.started === 3 && [...nb.values()].every((n) => n.started), "every notebook not yet started is started: " + J(r));
+  check(r.listed === nb.size, "listed: how many notebooks the walk was given: " + J({ listed: r.listed, given: nb.size }));
   check(J(log.loads) === J(["a", "b", "c"]) && J(log.releases) === J(["a", "b", "c"]), "each loaded once and let go: " + J(log));
   check(J(log.progress.at(-1)) === J([3, 3]), "progress ends at the total");
   check(startAllSummary(r) === null, "nothing to tell when all started");

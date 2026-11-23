@@ -2,7 +2,7 @@
 
 None of these files is in this repository. `run.mjs` fetches each from the
 commit-pinned URLs in `corpus.json` into `corpus-cache/` (not tracked) and
-checks its sha256, or generates it, or takes it from `web/latex/examples.ts`.
+checks its sha256, or generates it, or takes it from `scripts/latex-examples.mjs`.
 
 | id | document | source | license |
 |---|---|---|---|
@@ -14,4 +14,4 @@ checks its sha256, or generates it, or takes it from `web/latex/examples.ts`.
 | C5 | SageTeX's `example.tex`, and `sagetex.ins` / `.dtx` (to make `sagetex.sty`) | [sagemath/sagetex @ f9f1ba62](https://github.com/sagemath/sagetex/tree/f9f1ba62c9aa5b3a22f7ac2b5c583df749594cd3) | GPL 2 or later ([LICENSE](https://github.com/sagemath/sagetex/blob/f9f1ba62c9aa5b3a22f7ac2b5c583df749594cd3/LICENSE)) |
 | C5b | `pythontex_gallery.tex` | [gpoore/pythontex @ 78c98144](https://github.com/gpoore/pythontex/blob/78c98144145150b6884e3e68159fa8b95bc53c1d/pythontex_gallery/pythontex_gallery.tex) | LPPL (LaTeX code; [README.rst](https://github.com/gpoore/pythontex/blob/78c98144145150b6884e3e68159fa8b95bc53c1d/README.rst)) |
 | C6 | the pgfplots manual: its preamble and the chapter on 2D plots, with the repository's pgfplots | [pgf-tikz/pgfplots @ 80c5c7cf](https://github.com/pgf-tikz/pgfplots/tree/80c5c7cf40257258bd03c69a77cd46adbf05e028) (GitHub's archive of the commit) | GPL 3 or later (the repository's [README.md](https://github.com/pgf-tikz/pgfplots/blob/80c5c7cf40257258bd03c69a77cd46adbf05e028/README.md)) |
-| C7a–C7j | our ten examples | `web/latex/examples.ts` | this repository's (MIT / Apache-2.0) |
+| C7a–C7j | our ten examples | `scripts/latex-examples.mjs` | this repository's (MIT / Apache-2.0) |

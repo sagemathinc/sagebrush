@@ -33,6 +33,10 @@ export type Grant = {
    * kept without it (made before PR 4) is false: never promoted until the person grants again */
   run: boolean;
   expires: number | null; // ms since the epoch; null: until this page closes
+  /** The Delegate switch (design/workspace-agent-protocol.md §6.2: "Allow Delegate tasks on this computer"): present,
+   * and true, only while the person has it on for this pairing; never kept with a remembered grant or a reload record,
+   * so a new pairing starts with it off */
+  delegate?: true;
   created: number;
   lastUsed: number;
 };

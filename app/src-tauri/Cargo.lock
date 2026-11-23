@@ -2550,14 +2550,17 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "sagebrush-app"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
+ "getrandom 0.3.4",
+ "libc",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
- "tauri-plugin-localhost",
+ "tiny_http",
 ]
 
 [[package]]
@@ -3251,21 +3254,6 @@ dependencies = [
  "thiserror 2.0.21",
  "toml 1.1.6+spec-1.1.0",
  "url",
-]
-
-[[package]]
-name = "tauri-plugin-localhost"
-version = "2.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8c9c1c5b33e5f19317f30520a9ce542e231fabc1b793da70337151dc01f3bb4"
-dependencies = [
- "http",
- "log",
- "serde",
- "serde_json",
- "tauri",
- "thiserror 2.0.21",
- "tiny_http",
 ]
 
 [[package]]

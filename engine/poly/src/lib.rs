@@ -31,7 +31,11 @@ use std::ops::Deref;
 
 mod binomial;
 pub mod budget;
-mod lll;
+pub mod l2;
+pub mod l2_verify;
+pub mod limbs;
+pub mod lll;
+pub mod lll_cert;
 pub mod nf;
 /// The recombination faults, for other crates' tests of how an internal
 /// error reaches their surfaces (feature `test-faults`, dev-dependencies
@@ -42,7 +46,7 @@ pub mod test_faults {
 }
 mod vanhoeij;
 
-pub use budget::{with_default_limits, Budget, FactorLimit, Kind, Limits, MemorySource, Phase, INTERNAL_PREFIX};
+pub use budget::{with_default_limits, Budget, FactorLimit, Kind, Limits, MemorySource, Phase, INTERNAL_PREFIX, LLL_INTERNAL_PREFIX};
 use budget::{big_bytes, div_work, limbs, mul_work, poly_bytes, words_bytes, FResult, Reservation};
 
 pub type ZPoly = Vec<BigInt>;
@@ -1341,6 +1345,11 @@ pub(crate) mod alloc_spy {
     /// Bytes allocated by this thread so far.
     pub fn allocated() -> u64 {
         BYTES.with(|b| b.get())
+    }
+
+    /// This thread's live bytes now.
+    pub fn live() -> i64 {
+        LIVE.with(|l| l.get())
     }
 
     /// Run f; the peak of this thread's live bytes during it, above the

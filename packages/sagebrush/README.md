@@ -11,6 +11,15 @@ npx sagebrush --sage          # Sage syntax: 2^3 == 8, 2/3 is exact, factor(), .
 
 or `npm install -g sagebrush`, then `sagebrush`.
 
+On Linux with a small user virtual-address range (for example, browser Linux
+guests), the Node launcher enables inline WebAssembly bounds checks before
+loading the engine. This avoids large wasm guard-region reservations without
+raising the JS heap limit. It uses a low highest mapping in `/proc/self/maps`
+as a conservative compatibility hint; unreadable or unknown maps leave Node
+unchanged. Existing `NODE_OPTIONS` are preserved. If automatic detection is
+unavailable, use `NODE_OPTIONS=--disable-wasm-trap-handler npx sagebrush --sage`
+with a Node version that supports that option. Bounds checks can be slower.
+
 ## A Jupyter kernel
 
 ```

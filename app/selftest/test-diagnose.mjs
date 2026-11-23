@@ -100,7 +100,7 @@ const oneLine = (lines) => lines.every((l) => !/[\r\n]/.test(l));
     check("a stalled load is rejected at its bound", stalled === "Error: timed out after 0.3 s" && Date.now() - t0 < 1000, `${stalled} after ${Date.now() - t0} ms`);
     check("a load that answers passes through", (await bounded(Promise.resolve(42), 300)) === 42);
   }
-  check("the module's import is bounded at 15 s, and its failure logged", /bounded\(import\(new URL\("sagebrush-selftest\.js", location\.href\)\.href\), 15000\)/.test(html) && html.includes('console.log("diagnose import: " + e)'));
+  check("the module's import is bounded at 15 s, and its failure logged", /bounded\(import\(new URL\("sagebrush-selftest\.js" \+ q, location\.href\)\.href\), 15000\)/.test(html) && html.includes('console.log("diagnose import: " + e)'));
 }
 if (bad) { console.log("FAIL: diagnose()"); process.exit(1); }
 console.log("ok: diagnose() fills every key with one bounded line");

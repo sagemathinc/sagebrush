@@ -14,10 +14,10 @@ function svg(parts: [string, Record<string, string>][]): SVGSVGElement {
   }
   return s;
 }
-/** A folder. */
-const filesIcon = () => svg([["path", { d: "M1.8 4.2c0-.7.5-1.2 1.2-1.2h3l1.4 1.6H13c.7 0 1.2.5 1.2 1.2v6.4c0 .7-.5 1.2-1.2 1.2H3c-.7 0-1.2-.5-1.2-1.2z" }]]);
+/** A folder (the agents page's Files… button has it too). */
+export const filesIcon = () => svg([["path", { d: "M1.8 4.2c0-.7.5-1.2 1.2-1.2h3l1.4 1.6H13c.7 0 1.2.5 1.2 1.2v6.4c0 .7-.5 1.2-1.2 1.2H3c-.7 0-1.2-.5-1.2-1.2z" }]]);
 /** A speech bubble with a spark: a chat with an agent. */
-const agentsIcon = () => svg([["path", { d: "M2.2 4.5c0-1 .8-1.8 1.8-1.8h8c1 0 1.8.8 1.8 1.8v4.6c0 1-.8 1.8-1.8 1.8H7.2L4.4 13.3v-2.4H4c-1 0-1.8-.8-1.8-1.8z" }],
+export const agentsIcon = () => svg([["path", { d: "M2.2 4.5c0-1 .8-1.8 1.8-1.8h8c1 0 1.8.8 1.8 1.8v4.6c0 1-.8 1.8-1.8 1.8H7.2L4.4 13.3v-2.4H4c-1 0-1.8-.8-1.8-1.8z" }],
   ["path", { d: "M8 4.6v3M6.5 6.1h3" }]]);
 
 export const MODE_SWITCH_CSS = `
@@ -65,8 +65,46 @@ export function modeSwitch(current: Mode): HTMLElement {
     b.setAttribute("aria-label", m.label);
     b.setAttribute("aria-pressed", String(m.mode === current));
     b.append(m.icon());
-    if (m.mode !== current) b.onclick = () => location.assign(m.href);
+    if (m.mode !== current) b.onclick = () => void backToAgentsTab(m.href).then((closed) => { if (!closed) location.assign(m.href); });
     box.append(b);
   }
   return box;
+}
+
+// Back to Agents from a Files tab the Agents page opened (#1620). While an agent is connected and a turn runs there, the
+// Agents page opens Files in a tab of its own, named FILES_TAB (a window's name stays through its own navigations: a
+// .tex opened in it too). Going to Agents from that tab closes it, back to the Agents tab that is still connected,
+// rather than opening a second Agents page beside it: the agent pairs with one page at a time, so the second would only
+// be refused. Over the channel go only "live?" and "live", never anything of the pairing.
+export const FILES_TAB = "sb-files-from-agents";
+const LIVE = "sb-agents-live";
+/** The Agents page's answer to "live?": "live" while `live()` (its agent connected). */
+export function answerAgentsLive(live: () => boolean): void {
+  try {
+    const ch = new BroadcastChannel(LIVE);
+    ch.onmessage = (e) => { if (e.data === "live?" && live()) ch.postMessage("live"); };
+  } catch { /* (no BroadcastChannel: no answer, so Agents opens as a page, as before) */ }
+}
+/** Whether an Agents page of this site, in another tab, says its agent is connected, within `ms`. */
+export function agentsTabLive(ms = 400): Promise<boolean> {
+  return new Promise((done) => {
+    let ch: BroadcastChannel;
+    try { ch = new BroadcastChannel(LIVE); } catch { done(false); return; }
+    const t = setTimeout(() => { ch.close(); done(false); }, ms);
+    ch.onmessage = (e) => { if (e.data !== "live") return; clearTimeout(t); ch.close(); done(true); };
+    ch.postMessage("live?");
+  });
+}
+/** Leaving for `url`: from a Files tab the Agents page opened, to the Agents page while that tab's agent is connected,
+ * this tab closes instead (true). Else false (another tab, another address, no such Agents tab, or the browser kept
+ * this tab open), and the caller goes to `url` as before. */
+export async function backToAgentsTab(url: string): Promise<boolean> {
+  if (window.name !== FILES_TAB) return false;
+  let to: URL;
+  try { to = new URL(url, location.href); } catch { return false; }
+  if (to.origin !== location.origin || to.pathname !== "/agents/") return false;
+  if (!(await agentsTabLive())) return false;
+  window.close();
+  await new Promise((r) => setTimeout(r, 300));
+  return window.closed;
 }

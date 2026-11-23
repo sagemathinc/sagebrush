@@ -17,17 +17,21 @@ const CEILING_RAW = 96 * 1024, CEILING_GZIP = 32 * 1024;
 // (the committed caps: the first reviewed measurement plus 64 bytes each; measured locally with bun
 //  1.3.14 at 47,638 / 18,437 (Node gzip -9) before CI's; after the code review's fixes (the board's counts without
 //  recursion, the list's bounds, Markdown as text) 48,848 / 18,820 locally; measured by CI (bun 1.4.4, Node 24.21.0's
-//  gzip -9) at 73ac2518: 48,876 / 18,552; + 64)
-const CAP_RAW = 48940, CAP_GZIP = 18616;
+//  gzip -9) at 73ac2518: 48,876 / 18,552; + 64. Nov 21 2026: the Delegate proposal view joins the chunk
+//  (proposal-view.ts, and the diff renderers it shares with the review page, moved to diff-render.ts): 52,620 / 19,806
+//  with bun 1.4.4 and Node 24.21.0's gzip -9; + 64. Nov 22 2026: a proposal's .tex rendered under its diff (the
+//  LaTeX page module's read-only preview, As proposed and Before; proposal-view.ts): 53,985 / 20,312 on master
+//  b56e23d5, with bun 1.4.4 and Node 24.21.0's gzip -9; + 64)
+const CAP_RAW = 54049, CAP_GZIP = 20376;
 // (the reviewed inputs, relative to web/: the entry and what it imports; the board's canonical text comes with
 //  review-actions.ts's canonical bytes (branch-canon.ts), which an accept of a board needs)
 const INPUTS = [
   "board/doc.ts", "board/ink.ts", "board/preview.ts", "board/route.ts", "graph/spring.ts", "image-size.ts",
   "workspace/branch-canon.ts", "workspace/branch-rules.ts", "workspace/branch-store.ts", "workspace/branch-wake.ts",
   "workspace/canon-doc.ts", "workspace/paths.ts", "workspace/review-actions.ts", "workspace/review/board-summary.ts",
-  "workspace/review/cells.ts",
+  "workspace/review/cells.ts", "workspace/review/diff-render.ts",
   "workspace/review/json-scan.ts", "workspace/review/line-diff.ts", "workspace/review/outputs.ts",
-  "workspace/review/review-page.ts", "workspace/review/run-line.ts", "workspace/sha256-hex.ts",
+  "workspace/review/proposal-view.ts", "workspace/review/review-page.ts", "workspace/review/run-line.ts", "workspace/sha256-hex.ts",
 ];
 
 const web = join(import.meta.dir, "..", "..");
