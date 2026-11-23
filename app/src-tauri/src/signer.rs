@@ -56,6 +56,22 @@ pub fn control_frame_ok(url: &Url, control: Option<&str>, other: Option<&Url>) -
     control == Some("csp-off") && other.is_some_and(|o| matches!(o.scheme(), "http") && o.host_str() == Some("127.0.0.1") && o.origin() == url.origin())
 }
 
+/// The self-test's diagnostic codes for a signer page that didn't sign (a fixed set: nothing else is ever logged).
+pub const PROBE_CODES: [&str; 4] = ["no-probe", "no-tauri", "refused-acl", "refused"];
+
+/// The check Rust runs in the signer window after its page loads, in a self-test only: if the probe's global or the
+/// IPC global is missing, the page reloads itself once with ?probe=<code> (the navigation guard logs the code).
+const PROBE_CHECK: &str = "(function(){if(location.search.indexOf('probe=')>=0)return;var c=!window.__SB_SIGNER_PROBE__?'no-probe':!(window.__TAURI__&&window.__TAURI__.core&&typeof window.__TAURI__.core.invoke==='function')?'no-tauri':null;if(c)location.replace(location.pathname+'?probe='+c);})()";
+
+/// A self-test diagnostic report: the signer page's own URL with ?probe=<code>, the code one of PROBE_CODES.
+pub fn probe_report(url: &Url, control: Option<&str>) -> Option<&'static str> {
+    if !signer_page(url, control) {
+        return None;
+    }
+    let code = url.query_pairs().find(|(k, _)| k == "probe").map(|(_, v)| v.into_owned())?;
+    PROBE_CODES.iter().copied().find(|c| *c == code)
+}
+
 /// Whether a call of a signing command comes from the signer window on its own page.
 pub fn signer_caller_ok(label: &str, url: &Url, control: Option<&str>) -> bool {
     label == LABEL && signer_page(url, control)
@@ -85,16 +101,27 @@ pub fn open(app: &tauri::AppHandle) -> Result<(), String> {
     let probe = std::env::var("SAGEBRUSH_APP_PERSIST").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some());
     let other: Option<Url> = probe.as_deref().and_then(|p| p.strip_prefix("signer:")).and_then(|o| o.parse().ok());
     let go = other.clone();
+    let selftest = probe.is_some();
     let mut w = tauri::WebviewWindowBuilder::new(app, LABEL, tauri::WebviewUrl::App(page.into()))
         .title("Sagebrush: approvals")
         .inner_size(560.0, 640.0)
         .disable_drag_drop_handler()
-        // (each load of the window's pages, by origin and path only: the self-test reads how far the page got)
-        .on_page_load(|_w, p| {
+        // (each load of the window's pages, by origin and path only: the self-test reads how far the page got; in a
+        //  self-test, once loaded, the fixed check of the probe's and the IPC's globals runs in the page)
+        .on_page_load(move |w, p| {
             let u = p.url();
-            eprintln!("[signer] page {} {}{}", if matches!(p.event(), tauri::webview::PageLoadEvent::Started) { "started" } else { "finished" }, u.origin().ascii_serialization(), u.path());
+            let finished = !matches!(p.event(), tauri::webview::PageLoadEvent::Started);
+            eprintln!("[signer] page {} {}{}", if finished { "finished" } else { "started" }, u.origin().ascii_serialization(), u.path());
+            if selftest && finished {
+                let _ = w.eval(PROBE_CHECK);
+            }
         })
         .on_navigation(move |u| {
+            if selftest {
+                if let Some(code) = probe_report(u, gc.as_deref()) {
+                    eprintln!("[signer] probe report: {code}");
+                }
+            }
             let yes = guard_off || may_load(u, gc.as_deref()) || control_frame_ok(u, gc.as_deref(), go.as_ref());
             if !yes {
                 eprintln!("[signer] refused to load {}", u.origin().ascii_serialization());
@@ -212,6 +239,24 @@ mod tests {
         // (an "other" that isn't a local http server is never let in)
         let remote = u("https://example.com");
         assert!(!control_frame_ok(&u("https://example.com/x"), Some("csp-off"), Some(&remote)));
+    }
+
+    #[test]
+    fn only_a_fixed_probe_code_on_the_signer_s_own_page_is_a_report() {
+        for code in PROBE_CODES {
+            assert_eq!(probe_report(&u(&format!("tauri://localhost/signer/index.html?probe={code}")), None), Some(code));
+        }
+        for bad in [
+            "tauri://localhost/signer/index.html",
+            "tauri://localhost/signer/index.html?probe=",
+            "tauri://localhost/signer/index.html?probe=secret-text",
+            "tauri://localhost/signer/index.html?probe=NO-TAURI",
+            "tauri://localhost/index.html?probe=no-tauri",
+            "http://127.0.0.1:49214/signer/index.html?probe=no-tauri",
+        ] {
+            assert_eq!(probe_report(&u(bad), None), None, "{bad}");
+        }
+        assert!(PROBE_CHECK.contains("location.replace") && !PROBE_CHECK.contains("invoke("), "the check never calls a command");
     }
 
     #[test]
