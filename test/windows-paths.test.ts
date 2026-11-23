@@ -118,16 +118,34 @@ test("libOnDisk: a library folder of any form is on disk; the embedded library's
   assert.equal(libOnDisk(), realpathSync(LIB));
 });
 
-test("notebook run --confine from a source build: the notebook imports from the library on disk", () => {
+// (--confine's path checks are POSIX paths' so far: on Windows it refuses up front, and this row waits for that,
+// https://github.com/sagemathinc/sagebrush/issues/1667)
+const UNSUPPORTED = /--confine is not supported on Windows yet: https:\/\/github\.com\/sagemathinc\/sagebrush\/issues\/1667/;
+function confinedRun(preload?: string) {
   const d = realpathSync(mkdtempSync(path.join(tmpdir(), "sb-winpaths-nb-")));
   try {
     const cell = { cell_type: "code", metadata: {}, outputs: [], execution_count: null, source: "import fractions\nprint(fractions.Fraction(1, 3))" };
     writeFileSync(path.join(d, "f.ipynb"), JSON.stringify({ cells: [cell], metadata: {}, nbformat: 4, nbformat_minor: 5 }));
-    const r = spawnSync(process.execPath, [CLI, "notebook", "run", "f.ipynb", "--json", "--confine", d], { cwd: d, encoding: "utf8", timeout: 180_000 });
-    assert.equal(r.status, 0, r.stdout + r.stderr);
-    const out = JSON.stringify(JSON.parse(r.stdout));
-    assert.match(out, /1\/3/);
+    if (preload !== undefined) writeFileSync(path.join(d, "platform.cjs"), preload);
+    const pre = preload !== undefined ? ["-r", path.join(d, "platform.cjs")] : [];
+    return spawnSync(process.execPath, [...pre, CLI, "notebook", "run", "f.ipynb", "--json", "--confine", d], { cwd: d, encoding: "utf8", timeout: 180_000 });
   } finally {
     rmSync(d, { recursive: true, force: true });
   }
+}
+test("notebook run --confine from a source build: the notebook imports from the library on disk (on Windows: refused up front)", () => {
+  const r = confinedRun();
+  if (process.platform === "win32") {
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, UNSUPPORTED);
+    return;
+  }
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(JSON.stringify(JSON.parse(r.stdout)), /1\/3/);
+});
+test("notebook run --confine where the platform is win32: refused before anything is read or run, status 2", () => {
+  const r = confinedRun('Object.defineProperty(process, "platform", { value: "win32" });\n');
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, UNSUPPORTED);
+  assert.equal(r.stdout, "");
 });

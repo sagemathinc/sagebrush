@@ -165,6 +165,9 @@ async function notebookRunInner(argv: string[], life: { held: boolean }): Promis
   // program's paths get: within a root, no link on the way, a regular file with one link)
   let roots: string[] | undefined;
   if (confine.length) {
+    // (the confinement's path checks are POSIX paths' so far, src/runtime/modules.ts confinedPath: on Windows every
+    //  file would be refused, the notebook too, so it says so here instead)
+    if (process.platform === "win32") { say("--confine is not supported on Windows yet: https://github.com/sagemathinc/sagebrush/issues/1667"); return 2; }
     try { roots = confine.map((d) => realpathSync(d)); } catch (e: any) { say(`--confine: ${e?.code ?? e?.message ?? e}`); return 2; }
     try { confinedPath(roots, process.cwd(), file); } catch { say(`${file} is not in a folder named with --confine, or is reached through a link`); return 2; }
   }
