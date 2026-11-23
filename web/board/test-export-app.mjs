@@ -122,6 +122,17 @@ try {
   await send("Page.navigate", { url: file("unreachable.html", webHtml.replace(JSON.stringify(own), JSON.stringify({ site: "http://127.0.0.1:9/", id: own.id }))) });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 30000);
   check(await until("/can't run here/.test(document.querySelector('[data-sbb=say]').textContent) && /127\\.0\\.0\\.1:9, which can't be reached/.test(document.querySelector('[data-sbb=say]').textContent) && /offline mode/.test(document.querySelector('[data-sbb=say]').textContent)", 30000), "a file whose site can't be reached says so, naming it, and how to carry the engine: " + await caption());
+  check(await ev("[...document.querySelectorAll('[data-sbb=say] button')].some(b => b.textContent === 'Use the latest engine from sagebrush.space')"), "unreachable pinned engine offers an explicit public-engine recovery action");
+  // Public recovery uses this test's engine server, never the public network.
+  at = "explicit public engine recovery";
+  await before(`(() => { const f = window.fetch; window.__publicRecovery = []; window.fetch = (u, o) => { const s = String(u instanceof Request ? u.url : u); if (s.startsWith('https://sagebrush.space/')) { window.__publicRecovery.push(s); return f(${JSON.stringify(base)} + new URL(s).pathname.slice(1), o); } return f(u, o); }; })();`);
+  await send("Page.navigate", { url: file("recover.html", webHtml.replace(JSON.stringify(own), JSON.stringify({ site: "http://127.0.0.1:9/", id: own.id }))) });
+  check(await until("!!document.querySelector('[data-sbb=say] button')", 30000), "recovery button appears after pinned-engine failure");
+  check(await ev("window.__publicRecovery.length") === 0, "no public engine request before the reader chooses it");
+  await ev("document.querySelector('[data-sbb=say] button').click(), 1");
+  check(await until("window.sagebrush.board.outputs().then(os => os.some(o => o.id === 'c' && o.output.trim() === '5'))", 60000), "explicit recovery runs the original document using the checked public engine");
+  check(await ev("window.__publicRecovery.some(u => u.endsWith('/engine/latest.json')) && window.__publicRecovery.some(u => u.endsWith('/manifest.json'))"), "recovery fetches latest metadata and its manifest");
+  await clearBefore();
   // (in Safari's words: a network failure there is a TypeError \"Load failed\", not \"Failed to fetch\")
   await before(`(() => { window.fetch = () => Promise.reject(new TypeError("Load failed")); })();`);
   await send("Page.navigate", { url: file("safari.html", webHtml) });

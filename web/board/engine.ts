@@ -102,6 +102,29 @@ export function whyNoEngine(e: EnginePartError, name: string): string {
     : `this file's code needs parts of Sagebrush it doesn't carry (${name}), from ${host}, which can't be reached (no network, or a page that isn't open any more). Download it again in offline mode, so it carries them.`;
 }
 
+/** Explicit recovery chosen by the reader, never an automatic substitution.
+ * A newer API cannot safely talk to this file's old script; report that rather
+ * than loading it, or quietly falling back to the unavailable pinned engine. */
+export async function publicLatestEngine(): Promise<{ bytes: Bytes; id: string; names: string[] }> {
+  if (!OWN_ENGINE) throw new Error("this file's script has no engine of its own");
+  const site = "https://sagebrush.space/";
+  const r = await fetch(new URL("engine/latest.json", site), { cache: "no-store" });
+  if (!r.ok) throw new Error(`sagebrush.space: latest engine unavailable (HTTP ${r.status})`);
+  const latest = await r.json();
+  if (latest?.api !== OWN_ENGINE.api) throw new Error("sagebrush.space's latest engine needs a newer file reader; open this board's HTML on Sagebrush using Files, then Open as a board");
+  if (typeof latest.id !== "string" || !/^[0-9a-f]{20}$/.test(latest.id)) throw new Error("sagebrush.space: invalid latest engine id");
+  const base = new URL(`engine/${latest.id}/`, site).href;
+  const manifest = await fetch(new URL("manifest.json", base), { cache: "no-store" });
+  if (!manifest.ok) throw new Error(`sagebrush.space: engine manifest unavailable (HTTP ${manifest.status})`);
+  const m = await manifest.json();
+  if (!isManifest(m) || m.id !== latest.id || m.api !== OWN_ENGINE.api ||
+      (await sha256(new TextEncoder().encode(engineIdText(m.api, m.files)).buffer as ArrayBuffer)).slice(0, 20) !== m.id) {
+    throw new Error("sagebrush.space: invalid engine manifest (id, API or hash differs): refused");
+  }
+  const sums = Object.fromEntries(Object.entries(m.files).map(([k, v]) => [k, v.sha256]));
+  return { bytes: checked(fetched(base), sums), id: m.id, names: Object.keys(sums) };
+}
+
 /** `bytes`, each part checked against its SHA-256 in `sums`. */
 export function checked(bytes: Bytes, sums: Record<string, string>): Bytes {
   return async (name) => {
@@ -139,7 +162,7 @@ export async function chooseEngine(ref: EngineRef, use: "pinned" | "latest" | un
 /** The engine's parts from `bytes`: all loaded and checked before Python
  * starts.  `math`: the file's own math module (sagebrush-math.js), for the
  * notebook's outputs. */
-export function fileEngine(load: () => Promise<{ bytes: Bytes; names: string[] }>, o: { sage: boolean; math?: string | null }): EngineParts {
+export function fileEngine(load: () => Promise<{ bytes: Bytes; names: string[] }>, o: { sage: boolean; math?: string | null; unavailable?: () => void }): EngineParts {
   const urls = new Map<string, string>(), raw = new Map<string, ArrayBuffer>();
   const type = (n: string) => (n.endsWith(".js") ? "text/javascript" : n.endsWith(".wasm") ? "application/wasm" : "application/json");
   return {
@@ -147,6 +170,7 @@ export function fileEngine(load: () => Promise<{ bytes: Bytes; names: string[] }
       const { bytes, names: all } = await load();
       const names = engineFiles(o.sage, all);
       const got = await Promise.all(names.map((n) => bytes(n).catch((e) => {
+        if (e instanceof EnginePartError) o.unavailable?.();
         throw new Error(e instanceof EnginePartError ? whyNoEngine(e, n) : String(e?.message ?? e));
       })));
       names.forEach((n, i) => { raw.set(n, got[i]); urls.set(n, URL.createObjectURL(new Blob([got[i]], { type: type(n) }))); });
