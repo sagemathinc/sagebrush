@@ -31,7 +31,8 @@ __version__ = "0.13.2"
 
 __all__ = ["set", "set_theme", "set_style", "set_context", "set_palette", "color_palette", "despine", "reset_defaults",
            "reset_orig", "histplot", "kdeplot", "displot", "jointplot", "stripplot", "swarmplot", "boxplot",
-           "violinplot", "lineplot", "scatterplot", "heatmap", "FacetGrid", "JointGrid"]
+           "violinplot", "lineplot", "scatterplot", "heatmap", "barplot", "pairplot", "load_dataset", "get_dataset_names",
+           "FacetGrid", "JointGrid", "PairGrid"]
 
 # seaborn's named palettes (its colors, as seaborn/palettes.py lists them)
 _PALETTES = {
@@ -246,7 +247,7 @@ def _groups(data, var, hue, palette):
     keys = _column(data, hue)
     keys = keys.tolist() if hasattr(keys, "tolist") else list(keys)
     vals = vals.tolist() if hasattr(vals, "tolist") else list(vals)
-    order = []
+    order = list(_known_order(data, hue) or [])
     for k in keys:
         if k not in order:
             order.append(k)
@@ -355,7 +356,9 @@ def histplot(data=None, *, x=None, y=None, hue=None, weights=None, stat="count",
     total = len(allv)
     alpha = kwargs.pop("alpha", 0.75 if len(groups) == 1 else 0.5)
     lw = kwargs.pop("linewidth", kwargs.pop("lw", None))
-    for label, v, gcol in groups:
+    arts = {}
+    # (hue levels drawn last first, so that the first is on top, as seaborn layers them; the legend in order)
+    for label, v, gcol in (groups[::-1] if hue is not None else groups):
         col = _rgb(color) if color is not None else gcol if gcol is not None else ax._color(None, True)
         n = len(v)
         norm = total if common_norm and hue is not None else n
@@ -385,10 +388,10 @@ def histplot(data=None, *, x=None, y=None, hue=None, weights=None, stat="count",
             ys.append(0.0)
             if fill:
                 ax.fill_between(xs, ys, 0, color=col, alpha=0.25)
-            ax.plot(xs, ys, color=col, label=label)
+            arts[label] = ax.plot(xs, ys, color=col, label=label)[0]
         else:
-            ax.bar(edges[:-1], h, width=widths, align="edge", color=col, alpha=alpha, label=label,
-                   edgecolor=kwargs.get("edgecolor", _mpl.rcParams["patch.edgecolor"] if lw != 0 else None))
+            arts[label] = ax.bar(edges[:-1], h, width=widths, align="edge", color=col, alpha=alpha, label=label,
+                                 edgecolor=kwargs.get("edgecolor", _mpl.rcParams["patch.edgecolor"] if lw != 0 else None))
         if kde:
             kk = dict(kde_kws or {})
             curve = _kde_curve(v, kk.get("bw_adjust", 1.0), kk.get("cut", 0), kk.get("clip"),
@@ -411,7 +414,8 @@ def histplot(data=None, *, x=None, y=None, hue=None, weights=None, stat="count",
         ax.set_xlabel(xname)
     ax.set_ylabel(_STAT_LABEL[stat])
     if hue is not None and legend:
-        ax.legend()  # (seaborn titles it with the hue variable; this matplotlib has no legend title yet)
+        # (seaborn titles it with the hue variable; this matplotlib has no legend title yet)
+        ax.legend([arts[lab] for lab, _, _ in groups if lab in arts], [lab for lab, _, _ in groups if lab in arts])
     return ax
 
 
@@ -426,7 +430,8 @@ def kdeplot(data=None, *, x=None, y=None, hue=None, weights=None, palette=None, 
     ax = _ax(ax)
     groups = _groups(data, x, hue, palette)
     total = sum(len(v) for _, v, _ in groups)
-    for label, v, gcol in groups:
+    arts = {}
+    for label, v, gcol in (groups[::-1] if hue is not None else groups):
         col = _rgb(color) if color is not None else gcol if gcol is not None else ax._color(None)
         curve = _kde_curve(v, bw_adjust, cut, clip, gridsize, bw_method)
         if curve is None:
@@ -446,13 +451,17 @@ def kdeplot(data=None, *, x=None, y=None, hue=None, weights=None, palette=None, 
             gy = out
         if fill:
             ax.fill_between(gx, gy, 0, color=col, alpha=kwargs.get("alpha", 0.25))
-        ax.plot(gx, gy, color=col, label=label, linewidth=kwargs.get("linewidth", kwargs.get("lw", 1.5)))
+        arts[label] = ax.plot(gx, gy, color=col, label=label if hue is None else None,
+                              linewidth=kwargs.get("linewidth", kwargs.get("lw", 1.5)))[0]
     xname = x if isinstance(x, str) else _name(x) if x is not None else _name(data) if _is_series(data) else None
     if xname:
         ax.set_xlabel(xname)
     ax.set_ylabel("Density")
+    # (the densities' axis starts at 0, as matplotlib's sticky edge at a fill's base: as for bars)
+    ax._opts.setdefault("_bars", True)
     if hue is not None and legend:
-        ax.legend()  # (seaborn titles it with the hue variable; this matplotlib has no legend title yet)
+        # (seaborn titles it with the hue variable; this matplotlib has no legend title yet)
+        ax.legend([arts[lab] for lab, _, _ in groups if lab in arts], [lab for lab, _, _ in groups if lab in arts])
     return ax
 
 
@@ -644,6 +653,8 @@ def _categories(data, x, y, hue, orient, palette, order=None):
     keys = keys.tolist() if hasattr(keys, "tolist") else list(keys)
     vals = _column(data, val)
     vals = vals.tolist() if hasattr(vals, "tolist") else list(vals)
+    if order is None:
+        order = _known_order(data, cat)
     levels = list(order) if order is not None else []
     if order is None:
         for k in keys:
@@ -885,6 +896,185 @@ def violinplot(data=None, *, x=None, y=None, hue=None, order=None, hue_order=Non
     return _finish(ax, groups, vert, cn, vn)
 
 
+def _estimate(vals, estimator):
+    """seaborn's estimate of a group's values: "mean" (the default), another numpy function's name, or a
+    callable"""
+    a = _np.asarray(vals, dtype=float)
+    if callable(estimator):
+        return float(estimator(a))
+    if estimator == "size":
+        return float(len(a))
+    f = getattr(_np, estimator, None)
+    if f is None:
+        raise ValueError("%r is not an estimator Sagebrush's seaborn knows" % (estimator,))
+    return float(f(a))
+
+
+def _interval(vals, estimate, errorbar, estimator, n_boot, seed):
+    """(low, high) of seaborn's error bar for a group's values, or None: ("ci", level) a percentile
+    bootstrap of the estimator, resampled as seaborn does (a new generator from seed for each group); ("pi",
+    level) the values' percentile interval; ("sd", k) and ("se", k) k standard deviations or errors"""
+    if errorbar is None:
+        return None
+    if callable(errorbar):
+        lo, hi = errorbar(_np.asarray(vals, dtype=float))
+        return float(lo), float(hi)
+    method, level = (errorbar, None) if isinstance(errorbar, str) else errorbar
+    if level is None:
+        level = {"ci": 95, "pi": 95, "sd": 1, "se": 1}.get(method)
+    if method not in ("ci", "pi", "sd", "se"):
+        raise ValueError("`errorbar` must be one of 'ci', 'pi', 'se', or 'sd', or a callable.")
+    a = _np.asarray(vals, dtype=float)
+    n = len(a)
+    if n <= 1:
+        return None
+    if method == "sd":
+        h = float(a.std(ddof=1)) * level
+        return estimate - h, estimate + h
+    if method == "se":
+        h = float(a.std(ddof=1)) / _math.sqrt(n) * level
+        return estimate - h, estimate + h
+    if method == "pi":
+        lo, hi = _np.percentile(a[~_np.isnan(a)], [50 - level / 2, 50 + level / 2]).tolist()
+        return lo, hi
+    rng = seed if isinstance(seed, _np.random.Generator) else _np.random.default_rng(seed)
+    f = (lambda s: float(estimator(s))) if callable(estimator) else getattr(_np, estimator)
+    boots = []
+    for _ in range(int(n_boot)):
+        idx = rng.integers(0, n, n, dtype=_np.intp)
+        boots.append(f(a.take(idx)))
+    b = _np.array(boots)
+    lo, hi = _np.percentile(b[~_np.isnan(b)], [50 - level / 2, 50 + level / 2]).tolist()
+    return lo, hi
+
+
+def barplot(data=None, *, x=None, y=None, hue=None, order=None, hue_order=None, estimator="mean",
+            errorbar=("ci", 95), n_boot=1000, seed=None, units=None, weights=None, orient=None, color=None,
+            palette=None, saturation=.75, fill=True, hue_norm=None, width=.8, dodge="auto", gap=0, log_scale=None,
+            native_scale=False, formatter=None, legend="auto", capsize=0, err_kws=None, ax=None, **kwargs):
+    """Each category's estimate (the mean of its values) as a bar, with an error bar (by default a 95%
+    bootstrap confidence interval, resampled as seaborn resamples it, so a seed gives seaborn's interval), as
+    seaborn's barplot; hue= splits each category's bar into one bar per level, side by side. Returns the Axes."""
+    for k, v in (("units", units), ("weights", weights), ("log_scale", log_scale), ("formatter", formatter)):
+        if v is not None:
+            raise NotImplementedError("barplot(%s=...): not in Sagebrush's seaborn" % k)
+    if estimator is len:
+        estimator = "size"
+    ax = _ax(ax)
+    wide = False
+    # the categories, the values of each, and the hue levels
+    if x is None and y is None:
+        groups = [(lab, v) for lab, v in _wide(data)]
+        vert = _vertical(orient, None, None, data)
+        cats = [lab if lab is not None else "0" for lab, _ in groups]
+        cells = {(c, None): v for c, (_, v) in zip(cats, groups)}
+        hlev = [None]
+        cn = vn = None
+        wide = True
+    else:
+        if orient is None:
+            xs_, _ = _vector(data, x)
+            ys_, _ = _vector(data, y)
+            # (seaborn's inference: categories along the axis whose variable isn't numeric, else along x)
+            numx = xs_ is not None and all(_is_number(v) or _missing_value(v) for v in xs_)
+            numy = ys_ is not None and all(_is_number(v) or _missing_value(v) for v in ys_)
+            vert = not (numx and not numy) if ys_ is not None else False
+        else:
+            vert = _vertical(orient, x, y, data)
+        cat, val = (x, y) if vert else (y, x)
+        keys, cn = _vector(data, cat)
+        vals, vn = _vector(data, val)
+        if keys is None:
+            keys = [0] * len(vals)
+        cats = _order(keys, order if order is not None else _known_order(data, cat))
+        hk, _ = _vector(data, hue)
+        hlev = _order(hk, hue_order if hue_order is not None else _known_order(data, hue)) if hk is not None else [None]
+        cells = {}
+        for i, (k, v) in enumerate(zip(keys, vals)):
+            if _missing_value(k) or _missing_value(v) or (hk is not None and _missing_value(hk[i])):
+                continue
+            cells.setdefault((k, hk[i] if hk is not None else None), []).append(float(v))
+    # colors
+    if hlev != [None]:
+        if isinstance(palette, dict):
+            hcols = [_rgb(palette[h]) for h in hlev]
+        else:
+            hcols = list(color_palette(palette, len(hlev))) if palette is not None else \
+                list(color_palette(None, len(hlev)))
+        hcols = [_desaturate(c, saturation) if saturation < 1 and fill else c for c in hcols]
+    elif wide and color is None:
+        # (wide data: each column its own color, from the palette or the color cycle, as seaborn's)
+        hcols = list(color_palette(palette, len(cats)))
+        hcols = [_desaturate(c, saturation) if saturation < 1 and fill else c for c in hcols]
+    else:
+        base = _rgb(color) if color is not None else _rgb(ax._color(None, True))
+        hcols = [_desaturate(base, saturation) if saturation < 1 and fill else base]
+    nh = len(hlev)
+    dodged = nh > 1 if dodge == "auto" else bool(dodge)
+    each = width / nh if dodged else width
+    ek = dict(err_kws or {})
+    ecol = ek.pop("color", ek.pop("c", ".26"))
+    elw = ek.pop("linewidth", ek.pop("lw", 1.5 * _mpl.rcParams["lines.linewidth"]))
+    cap = capsize / nh if dodged and capsize else capsize
+    for j, h in enumerate(hlev):
+        pos, est, errs = [], [], []
+        for i, c in enumerate(cats):
+            v = cells.get((c, h))
+            if not v:
+                continue
+            e = _estimate(v, estimator)
+            p = i + ((j - (nh - 1) / 2) * each if dodged else 0)
+            pos.append(p)
+            est.append(e)
+            errs.append(_interval(v, e, errorbar, estimator, n_boot, seed))
+        if not pos:
+            continue
+        edges = [p - each * (1 - gap) / 2 for p in pos]
+        w = each * (1 - gap)
+        kw = dict(kwargs)
+        if fill:
+            kw.setdefault("color", [hcols[cats.index(c)] for c in cats if cells.get((c, h))] if wide and len(hcols) > 1
+                          else hcols[j])
+        else:
+            kw.setdefault("edgecolor", hcols[j])
+            kw.setdefault("color", "none")
+        if vert:
+            ax.bar(edges, est, width=w, align="edge", label=None if h is None else str(h), **kw)
+        else:
+            ax.barh([p for p in pos], est, height=w, label=None if h is None else str(h), **kw)
+        for p, iv in zip(pos, errs):
+            if iv is None:
+                continue
+            lo, hi = iv
+            if cap:
+                cw = cap / 2
+                ps = [p - cw, p + cw, _math.nan, p, p, _math.nan, p - cw, p + cw]
+                vs = [lo, lo, _math.nan, lo, hi, _math.nan, hi, hi]
+            else:
+                ps, vs = [p, p], [lo, hi]
+            px, py = _xy(vert, ps, vs)
+            ax.plot(px, py, color=ecol, linewidth=elw, **ek)
+    pos = list(range(len(cats)))
+    labels = [str(c) for c in cats]
+    if vert:
+        ax.set_xticks(pos, labels)
+        ax.set_xlim(-0.5, len(cats) - 0.5)
+        if cn:
+            ax.set_xlabel(cn)
+        if vn:
+            ax.set_ylabel(vn)
+    else:
+        ax.set_yticks(pos, labels)
+        ax.set_ylim(len(cats) - 0.5, -0.5)
+        if cn:
+            ax.set_ylabel(cn)
+        if vn:
+            ax.set_xlabel(vn)
+    if hlev != [None] and legend:
+        ax.legend()  # (seaborn titles it with the hue variable; this matplotlib's legend has no title yet)
+    return ax
+
+
 # ------------------------------------------------------------------ relations
 
 def _cubehelix_table(start=0.0, rot=0.4, gamma=1.0, hue=0.8, light=0.85, dark=0.15, reverse=False):
@@ -1069,7 +1259,8 @@ def scatterplot(data=None, *, x=None, y=None, hue=None, size=None, style=None, p
         raise NotImplementedError("scatterplot(%s): not in Sagebrush's seaborn" % ", ".join(sorted(kw)))
     look = None
     if hs is not None:
-        levels, look, numeric = _hue_mapping([hs[i] for i in rows], palette, hue_order, hue_norm)
+        levels, look, numeric = _hue_mapping([hs[i] for i in rows], palette,
+                                             hue_order if hue_order is not None else _known_order(data, hue), hue_norm)
         key = (lambda v: float(v) if isinstance(v, float) else v) if numeric else (lambda v: v)
         cols = [look[key(hs[i])] for i in rows]
         art = ax.scatter(px, py, s=area, c=cols, marker=marker, alpha=alpha, edgecolors=ec, linewidths=lw)
@@ -1117,7 +1308,7 @@ def lineplot(data=None, *, x=None, y=None, hue=None, size=None, style=None, unit
         else:
             keys = _column(data, hue)
             keys = keys.tolist() if hasattr(keys, "tolist") else list(keys)
-            lev = []
+            lev = list(_known_order(data, hue) or [])
             for k in keys:
                 if k not in lev:
                     lev.append(k)
@@ -1169,6 +1360,218 @@ def lineplot(data=None, *, x=None, y=None, hue=None, size=None, style=None, unit
     elif legend and (x is None and y is None and len(series) > 1 or kwargs.get("label") is not None):
         ax.legend()  # (as seaborn's: a legend whenever a line is labelled, of all the Axes' labelled lines)
     return ax
+
+
+# ------------------------------------------------------------------ grids of plots
+
+class _Grid:
+    """a grid of Axes as seaborn's numpy array of them: grid[i, j], grid[i] (a row), its rows when iterated,
+    shape, flat and ravel()"""
+
+    def __init__(self, nr, nc):
+        self._rows = [[None] * nc for _ in range(nr)]
+        self.shape = (nr, nc)
+
+    def __getitem__(self, k):
+        if isinstance(k, tuple):
+            return self._rows[k[0]][k[1]]
+        return self._rows[k]
+
+    def __setitem__(self, k, v):
+        self._rows[k[0]][k[1]] = v
+
+    def __iter__(self):
+        return iter(self._rows)
+
+    def __len__(self):
+        return len(self._rows)
+
+    @property
+    def flat(self):
+        return iter([a for r in self._rows for a in r])
+
+    def ravel(self):
+        return [a for r in self._rows for a in r]
+
+    def __repr__(self):
+        return "array(%r, dtype=object)" % (self._rows,)
+
+
+class PairGrid:
+    """pairplot's grid: axes (rows the y variables, columns the x variables; None where corner=True leaves a
+    cell out), diag_axes, figure, x_vars, y_vars"""
+
+    def __init__(self, figure, axes, diag_axes, x_vars, y_vars):
+        self.figure = self.fig = figure
+        self.axes, self.diag_axes = axes, diag_axes
+        self.x_vars, self.y_vars = list(x_vars), list(y_vars)
+        self._legend = None
+
+    def set(self, **kwargs):
+        for row in self.axes:
+            for ax in row:
+                if ax is not None:
+                    for k, v in kwargs.items():
+                        getattr(ax, "set_" + k)(v)
+        return self
+
+    def savefig(self, *args, **kwargs):
+        self.figure.savefig(*args, **kwargs)
+
+
+def pairplot(data, *, hue=None, hue_order=None, palette=None, vars=None, x_vars=None, y_vars=None, kind="scatter",
+             diag_kind="auto", markers=None, height=2.5, aspect=1, corner=False, dropna=False, plot_kws=None,
+             diag_kws=None, grid_kws=None, size=None):
+    """Each pair of a frame's numeric columns as a scatter plot, in a grid with each column's distribution on
+    the diagonal (a histogram, or a density per hue level), as seaborn's pairplot. Returns a PairGrid.
+    The diagonal is drawn in its cell's own Axes (seaborn draws it on a twin Axes with its own y scale)."""
+    if not _is_frame(data):
+        raise TypeError("'data' must be pandas DataFrame object, not: %s" % type(data))
+    if kind != "scatter":
+        raise NotImplementedError("pairplot(kind=%r): Sagebrush's seaborn draws kind='scatter'" % (kind,))
+    if markers is not None or grid_kws:
+        raise NotImplementedError("pairplot(markers=, grid_kws=): not in Sagebrush's seaborn")
+    if size is not None:
+        height = size
+    cols = [str(c) for c in data.columns]
+
+    def numeric(c):
+        vals = data[c].tolist()
+        return bool(vals) and all(_is_number(v) or _missing_value(v) for v in vals) and not \
+            all(_missing_value(v) for v in vals)
+    if vars is not None:
+        x_vars = y_vars = list(vars)
+    if x_vars is None or y_vars is None:
+        found = [c for c in cols if c != hue and numeric(c)]
+        x_vars = list(x_vars) if x_vars is not None else found
+        y_vars = list(y_vars) if y_vars is not None else found
+    x_vars, y_vars = [x_vars] if isinstance(x_vars, str) else list(x_vars), \
+        [y_vars] if isinstance(y_vars, str) else list(y_vars)
+    if diag_kind == "auto":
+        diag_kind = "hist" if hue is None else "kde"
+    square = x_vars == y_vars
+    nr, nc = len(y_vars), len(x_vars)
+    fig = _plt.figure(figsize=(nc * height * aspect, nr * height))
+    axes = _Grid(nr, nc)
+    diag = []
+    for i, yv in enumerate(y_vars):
+        for j, xv in enumerate(x_vars):
+            if corner and j > i:
+                axes[i, j] = None
+                continue
+            ax = fig.add_subplot(nr, nc, i * nc + j + 1)
+            axes[i, j] = ax
+            if square and i == j:
+                if diag_kind is not None:
+                    dk = dict(diag_kws or {})
+                    if diag_kind == "hist":
+                        histplot(data=data, x=xv, hue=hue, hue_order=hue_order, palette=palette, ax=ax, legend=False,
+                                 **dk)
+                    else:
+                        dk.setdefault("fill", True)
+                        kdeplot(data=data, x=xv, hue=hue, hue_order=hue_order, palette=palette, ax=ax, legend=False,
+                                **dk)
+                    diag.append(ax)
+            else:
+                pk = dict(plot_kws or {})
+                scatterplot(data=data, x=xv, y=yv, hue=hue, hue_order=hue_order, palette=palette, ax=ax,
+                            legend=False, **pk)
+    # labels on the outer Axes only: x on the bottom row, y on the left column, as seaborn's
+    for i in range(nr):
+        for j in range(nc):
+            ax = axes[i, j]
+            if ax is None:
+                continue
+            bottom = i == nr - 1
+            ax.set_xlabel(x_vars[j] if bottom else "")
+            ax.set_ylabel(y_vars[i] if j == 0 else "")
+            if not bottom:
+                t = ax.get_xticks()
+                ax.set_xticks(t, [""] * len(t))
+            if j != 0:
+                t = ax.get_yticks()
+                ax.set_yticks(t, [""] * len(t))
+    g = PairGrid(fig, axes, diag, x_vars, y_vars)
+    if hue is not None:
+        # the hue legend, on the top right Axes (seaborn puts it beside the grid, titled with the hue variable)
+        hs, _ = _vector(data, hue)
+        levels, look, _ = _hue_mapping(hs, palette, hue_order if hue_order is not None else _known_order(data, hue))
+        from _graphics import Points
+        r = 6 * (100 / 72) / 2
+        handles = [_Handle(Points([], [], marker="o", size=r, color=_mpl.colors.to_hex(look[v]))) for v in levels]
+        target = axes[0, nc - 1] if axes[0, nc - 1] is not None else axes[nr - 1, nc - 1]
+        target.legend(handles, [str(v) for v in levels])
+        g._legend = target
+    return g
+
+
+# ------------------------------------------------------------------ example datasets
+
+_DATASET_SOURCE = "https://raw.githubusercontent.com/mwaskom/seaborn-data/master"
+
+
+def load_dataset(name, cache=True, data_home=None, **kws):
+    """One of seaborn's example datasets ("tips", "titanic", "mpg", ...) as a DataFrame, read as seaborn reads
+    it: from seaborn's data repository online, <name>.csv.  Sagebrush's Python reaches the network only
+    through the folder's data snapshot (urllib.request), so a dataset that isn't in it raises URLError saying
+    the download couldn't be made.  seaborn also makes some columns ordered categoricals (tips' day, for
+    one); here they stay strings, so plots order those levels as they first appear."""
+    if _is_frame(name):
+        raise TypeError("This function accepts only strings (the name of an example dataset). You passed a pandas "
+                        "DataFrame. If you have your own dataset, it is not necessary to use this function before "
+                        "plotting.")
+    import io
+    import pandas as pd
+    from urllib.request import urlopen
+    from urllib.error import URLError
+    url = "%s/%s.csv" % (_DATASET_SOURCE, name)
+    try:
+        with urlopen(url) as r:
+            text = r.read().decode("utf-8")
+    except URLError as e:
+        raise URLError("seaborn's example dataset %r is downloaded from %s, which Sagebrush can't do here (%s)"
+                       % (name, url, getattr(e, "reason", e))) from None
+    df = pd.read_csv(io.StringIO(text), **kws)
+    if len(df) and df.iloc[-1].isnull().all():
+        df = df.iloc[:-1]
+    orders = _DATASET_ORDERS.get(name)
+    if orders:
+        import weakref
+        _LOADED.append((weakref.ref(df), orders))
+        del _LOADED[:-16]
+    return df
+
+
+# the ordered levels seaborn's load_dataset gives some datasets' columns (as ordered categoricals there), used
+# here as those columns' order when this frame is plotted
+_DATASET_ORDERS = {
+    "tips": {"day": ["Thur", "Fri", "Sat", "Sun"], "sex": ["Male", "Female"], "time": ["Lunch", "Dinner"],
+             "smoker": ["Yes", "No"]},
+    "exercise": {"time": ["1 min", "15 min", "30 min"], "kind": ["rest", "walking", "running"],
+                 "diet": ["no fat", "low fat"]},
+    "titanic": {"class": ["First", "Second", "Third"], "deck": list("ABCDEFG")},
+    "diamonds": {"color": list("DEFGHIJ"), "clarity": ["IF", "VVS1", "VVS2", "VS1", "VS2", "SI1", "SI2", "I1"],
+                 "cut": ["Ideal", "Premium", "Very Good", "Good", "Fair"]},
+}
+_LOADED = []
+
+
+def _known_order(data, key):
+    """the ordered levels of column key of a frame load_dataset returned, or None"""
+    if not isinstance(key, str) or data is None:
+        return None
+    for ref, orders in _LOADED:
+        if ref() is data:
+            return orders.get(key)
+    return None
+
+
+def get_dataset_names():
+    """The names of seaborn's example datasets: seaborn reads them from its data repository's page online,
+    which Sagebrush can't download here."""
+    from urllib.error import URLError
+    raise URLError("seaborn's dataset names are read from https://github.com/mwaskom/seaborn-data, which "
+                   "Sagebrush can't download here")
 
 
 # ------------------------------------------------------------------ matrices
@@ -1339,9 +1742,8 @@ def _seaborn_cmap(name):
 
 def __getattr__(name):
     # (seaborn's other functions: named, and refused, rather than an AttributeError)
-    if name in ("clustermap", "pairplot", "regplot", "lmplot", "relplot", "catplot",
-                "barplot", "countplot", "pointplot", "boxenplot", "residplot", "ecdfplot", "rugplot", "PairGrid",
-                "load_dataset"):
+    if name in ("clustermap", "regplot", "lmplot", "relplot", "catplot",
+                "countplot", "pointplot", "boxenplot", "residplot", "ecdfplot", "rugplot"):
         def missing(*args, **kwargs):
             raise NotImplementedError("seaborn.%s is not in Sagebrush's seaborn yet" % name)
         missing.__name__ = name
