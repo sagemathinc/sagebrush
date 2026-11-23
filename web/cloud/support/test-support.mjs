@@ -454,20 +454,20 @@ try {
     ok(!all.includes("reader@example.com") && !all.includes("203.0.113") && !all.includes("198.51.100") && !all.includes(KEY) && !all.includes(SECRET) && !all.includes("polars"), "no email, IP, key, secret or body text in any log line");
   }
 
-  // ---- the backstop, on a fixed clock: its windows are UTC hours and days, so the rows below run at the middle of an
-  // hour (30 minutes from either boundary, whatever the real time) and never cross a real boundary mid-test; the
-  // boundary itself is tested on purpose at its end
+  // ---- the backstop, on a fixed clock: its windows are UTC hours and days, so the rows below run with the backstop's
+  // clock fixed at the middle of an hour, and nothing (a slow run, a real boundary) moves it; the boundary itself is
+  // tested on purpose at its end, at fixed instants
   {
     reset();
     await db.prepare("DELETE FROM support_backstop").run();
     const HOUR = 3_600_000;
     const mid = Math.floor(Date.now() / HOUR) * HOUR + HOUR / 2;
-    let offset = 0;
+    let fixed = null;
     const setClock = async (at) => {
-      offset = at - Date.now();
-      ok((await (await dispatch(mf, `https://support-dev.sagebrush.space/__test/clock?offset=${offset}`)).json()).ok === true, "the backstop's clock set");
+      fixed = at;
+      ok((await (await dispatch(mf, `https://support-dev.sagebrush.space/__test/clock?at=${at ?? "real"}`)).json()).ok === true, "the backstop's clock set");
     };
-    const now = () => Date.now() + offset;
+    const now = () => fixed ?? Date.now();
     await setClock(mid);
     const w = windows(now());
     await setCount(w.hour, 598);
@@ -528,8 +528,7 @@ try {
     await setClock(next);
     const fresh = windows(now());
     ok(fresh.hour !== late.hour && (await send()).status === 200 && (await counters())[fresh.hour] === 1, "at the next hour: a fresh row admits");
-    await setClock(Date.now());
-    offset = 0;
+    await setClock(null);
     // (the cron: old hour rows after 2 days, day rows after 30)
     const t = Math.floor(Date.now() / 1000);
     await db.prepare("INSERT INTO support_backstop (win, n, created) VALUES ('h:2000-01-01T00', 5, ?1), ('h:2000-01-02T00', 5, ?2), ('d:2000-01-01', 5, ?3), ('d:2000-01-02', 5, ?4)").bind(t - 3 * 86400, t - 86400, t - 31 * 86400, t - 3 * 86400).run();
