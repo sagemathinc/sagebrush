@@ -57,7 +57,7 @@ _MATLAB_PLOT = set(("plot plot3 scatter scatter3 bar barh hist histogram histogr
                     "fplot fsurf fcontour fimplicit spy waterfall ribbon pcolor clf gca gcf set get xlim ylim zlim xticks yticks "
                     "zticks xticklabels yticklabels box daspect caxis clim shading lighting camlight light annotation rectangle "
                     "histcounts pareto compass feather comet rose scatterhistogram heatmap bar3 bar3h stem3 cylinder sphere "
-                    "ellipsoid peaks").split())
+                    "ellipsoid peaks slice").split())
 _MATLAB_LINALG = set(("inv det eig eigs svd svds qr lu chol norm normest rank null orth pinv kron trace expm logm sqrtm funm "
                       "linsolve mldivide mrdivide cond rcond condest lsqnonneg lsqminnorm schur hess balance cross dot "
                       "triu tril diag mtimes mpower vecnorm subspace gsvd qz ordschur rref").split())

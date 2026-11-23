@@ -3,6 +3,7 @@ matrices and matrix functions.  Each registers a built-in in _matlab's table
 (_bs/_bi), the same way lib/_matlab.py's do.
 """
 
+import itertools as _itertools
 import math as _math
 
 import numpy as np
@@ -866,11 +867,14 @@ def interp2_(*args):
             jj = np.where((y.size > 1) & (yq - y[j] >= y[np.minimum(j + 1, y.size - 1)] - yq), np.minimum(j + 1, y.size - 1), j)
             res = V[jj, ii]
         else:
+            # (along x, then along y, each step (1 - t) a + t b: MATLAB's rounding)
             i1, j1 = np.minimum(i + 1, x.size - 1), np.minimum(j + 1, y.size - 1)
             with np.errstate(invalid="ignore", divide="ignore"):
                 tx = np.where(i1 > i, (xq - x[i]) / (x[i1] - x[i]), 0.0)
                 ty = np.where(j1 > j, (yq - y[j]) / (y[j1] - y[j]), 0.0)
-            res = (V[j, i] * (1 - tx) * (1 - ty) + V[j, i1] * tx * (1 - ty) + V[j1, i] * (1 - tx) * ty + V[j1, i1] * tx * ty)
+            r0 = (1 - tx) * V[j, i] + tx * V[j, i1]
+            r1 = (1 - tx) * V[j1, i] + tx * V[j1, i1]
+            res = (1 - ty) * r0 + ty * r1
         out[inside] = res[inside]
     out[~inside] = _math.nan if extrap is None else extrap
     return _unmat(out.reshape(shape))
@@ -919,6 +923,237 @@ def _cubic_conv2(x, y, V, xq, yq):
         for b in range(-1, 3):
             res = res + E[j + a + 1, i + b + 1] * (wy * _keys(tu - b))
     return res
+
+
+# ------------------------------------------------------------------ interp3
+
+def _nd(v):
+    """a value as a float array in MATLAB's index order (rows, columns, pages)"""
+    a = _m._farr(v)
+    a = np.array(a.T)
+    while a.ndim < 3:
+        a = a.reshape(a.shape + (1,))
+    return a
+
+
+def _un_nd(a):
+    """an array in MATLAB's index order as a MATLAB value"""
+    a = np.asarray(a)
+    if a.ndim == 1:
+        a = a.reshape((-1, 1))
+    return _box(_m._contig(a.T))
+
+
+def _grid_vec(G, axis, n, what):
+    """a grid's coordinates along axis: a vector of n, or a full grid array varying only along axis"""
+    a = _m._farr(G)
+    if a.size == n and sum(1 for k in a.shape if k != 1) <= 1:
+        return np.array(a.reshape(-1), dtype=np.float64)
+    A = _nd(G)
+    if A.shape[axis] != n:
+        raise _err("GridVectors must define a grid whose size is compatible with the Values array.", "MATLAB:griddedInterpolant:MixedGridCoordSizeErrId")
+    idx = [0, 0, 0]
+    idx[axis] = slice(None)
+    g = A[tuple(idx)]
+    if not np.all(A == np.expand_dims(g, tuple(k for k in range(3) if k != axis))):
+        raise _err("Input grid is not a valid MESHGRID.", "MATLAB:interp3:InvalidMeshgrid")
+    return np.array(g, dtype=np.float64)
+
+
+def _spline_weights(g, q):
+    """W with W @ v the not-a-knot spline through (g, v) at the points q, for any v: the spline of each
+    unit vector"""
+    n = g.size
+    br, C, dim, _ = _spline_pp(_box(np.array(g.reshape((-1, 1)))), _unmat(np.eye(n)))
+    return np.array(_ppval(br, C, dim, q).T)
+
+
+def _interp_axes(grids, V, qs, method, extrap, seq=None):
+    """V (in MATLAB's index order) on the increasing grid vectors grids[k] along axis k, at the query
+    coordinates qs[k] (flat, one per axis): linear, nearest, cubic or spline, along the axes
+    in the order seq (MATLAB's: columns, then rows, then pages); NaN, or extrap, outside the grid (a spline
+    extrapolates when no extrap is given)"""
+    n = len(grids)
+    seq = list(seq) if seq is not None else ([1, 0] + list(range(2, n)) if n >= 2 else [0])
+    nq = qs[0].size
+    out = np.full(nq, np.nan, dtype=V.dtype if V.dtype.kind == "c" else np.float64)
+    inside = np.ones(nq, dtype=bool)
+    for g, q in zip(grids, qs):
+        inside &= (q >= g[0]) & (q <= g[-1])
+    if method == "spline":
+        sel = inside if extrap is not None else ~np.any([np.isnan(q) for q in qs], axis=0)
+        Ws = [_spline_weights(g, q[sel]) for g, q in zip(grids, qs)]
+        res = np.zeros(int(np.count_nonzero(sel)), dtype=out.dtype)
+        for i in range(res.size):
+            M = V
+            # (one axis at a time, in seq's order: the axis summed away, the later axes' numbers shift down)
+            left = list(range(n))
+            for k in seq:
+                a = left.index(k)
+                M = np.tensordot(M, Ws[k][i], axes=([a], [0]))
+                left.pop(a)
+            res[i] = M
+        out[sel] = res
+    elif method == "cubic":
+        hs = [_uniform_step(g, "xyz"[k] if k < 3 else "grid") for k, g in enumerate(grids)]
+        E = V
+        for k in range(n):
+            E = _keys_extend(E, k)
+        us = [(q[inside] - g[0]) / h for g, q, h in zip(grids, qs, hs)]
+        ii = [np.clip(np.floor(u).astype(np.int64), 0, g.size - 2) for u, g in zip(us, grids)]
+        ts = [u - i for u, i in zip(us, ii)]
+
+        def conv(level, fixed):
+            if level < 0:
+                return E[tuple(fixed)]
+            k = seq[level]
+            acc = 0.0
+            for o in range(4):
+                acc = acc + _keys(ts[k] - (o - 1)) * conv(level - 1, fixed[:k] + [ii[k] + o] + fixed[k + 1:])
+            return acc
+        out[inside] = conv(n - 1, [None] * n)
+    else:
+        qi = [q[inside] for q in qs]
+        lo, hi, t = [], [], []
+        for g, q in zip(grids, qi):
+            i = np.clip(np.searchsorted(g, q, side="right") - 1, 0, max(g.size - 2, 0))
+            i1 = np.minimum(i + 1, g.size - 1)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                tk = np.where(i1 > i, (q - g[i]) / (g[i1] - g[i]), 0.0)
+            lo.append(i)
+            hi.append(i1)
+            t.append(tk)
+        if method == "nearest":
+            idx = tuple(np.where(tk >= 0.5, h, l) for l, h, tk in zip(lo, hi, t))
+            out[inside] = V[idx]
+        else:
+            # (one axis at a time, in seq's order: each step (1 - t) a + t b between two values, as MATLAB rounds it)
+            def corner(level, fixed):
+                if level < 0:
+                    return V[tuple(fixed)]
+                k = seq[level]
+                a = corner(level - 1, fixed[:k] + [lo[k]] + fixed[k + 1:])
+                b = corner(level - 1, fixed[:k] + [hi[k]] + fixed[k + 1:])
+                return (1 - t[k]) * a + t[k] * b
+            out[inside] = corner(n - 1, [None] * n)
+    if extrap is not None:
+        out[~inside] = extrap
+    return out
+
+
+def interp_method(m, fname):
+    """a gridded interpolation method's name, lowercase; 'pchip', which MATLAB supports only in 1-D, is
+    'linear' with MATLAB's warning"""
+    method = _text(m).lower().lstrip("*")
+    if method in ("linear", "nearest", "cubic", "spline"):
+        return method
+    if method == "pchip":
+        _m.warning_("The 'pchip' method is only supported in 1D.\nReverting to the default 'linear' method because this condition is not met.")
+        return "linear"
+    if method in ("makima", "next", "previous"):
+        raise _err("%s: the '%s' method is not supported in Sagebrush." % (fname, method))
+    raise _err("The interpolation method must be 'linear', 'nearest', 'next', 'previous', 'pchip', 'cubic', 'spline', or 'makima'.",
+               "MATLAB:griddedInterpolant:BadInterpTypeErrId")
+
+
+def _cubic_or_else(grids, method):
+    """'cubic' as MATLAB runs it on these grids: 'linear' when a dimension has fewer than 3 points, 'spline'
+    when the spacing isn't uniform, each with MATLAB's warning"""
+    if method != "cubic":
+        return method
+    if any(g.size < 3 for g in grids):
+        _m.warning_("The 'cubic' method requires at least 3 points in each dimension.\nReverting to the default 'linear' method because this condition is not met.")
+        return "linear"
+    for g in grids:
+        h = (g[-1] - g[0]) / (g.size - 1)
+        tol = 64 * 2.220446049250313e-16 * abs(h) + 4 * 2.220446049250313e-16 * max(abs(g[0]), abs(g[-1]))
+        if np.max(np.abs(np.diff(g) - h)) > tol:
+            _m.warning_("The 'cubic' method requires the grid to have a uniform spacing.\nSwitching the method from 'cubic' to 'spline' because this condition is not met.")
+            return "spline"
+    return "cubic"
+
+
+def _increasing(V, grids):
+    """(grids, V) with each grid vector increasing: a decreasing one, and V along it, reversed"""
+    grids = list(grids)
+    for axis, g in enumerate(grids):
+        if g.size != V.shape[axis]:
+            raise _err("GridVectors must define a grid whose size is compatible with the Values array.", "MATLAB:griddedInterpolant:MixedGridCoordSizeErrId")
+        dg = np.diff(g)
+        if dg.size and not np.all(dg > 0):
+            if not np.all(dg < 0):
+                raise _err("The grid vectors must be strictly monotonic.", "MATLAB:griddedInterpolant:NonMonotonicCompVecsErrId")
+            grids[axis] = g[::-1]
+            V = np.flip(V, axis)
+    return grids, V
+
+
+def volume_args(args, fname):
+    """(x, y, z, V, rest) from (X, Y, Z, V, ...) or (V, ...): the grid vectors as given and V in MATLAB's
+    index order; n_rest is how many arguments follow the volume (3 for interp3's queries or slice's planes)"""
+    if len(args) == 7:
+        V = _nd(args[3])
+        ny, nx, nz = V.shape
+        return _grid_vec(args[0], 1, nx, True), _grid_vec(args[1], 0, ny, True), _grid_vec(args[2], 2, nz, True), V, list(args[4:])
+    if len(args) == 4:
+        V = _nd(args[0])
+        y, x, z = (np.arange(1.0, s + 1) for s in V.shape)
+        return x, y, z, V, list(args[1:])
+    raise _err("Wrong number of input arguments.")
+
+
+def interp_volume(x, y, z, V, xq, yq, zq, method="linear", extrap=None):
+    """V on the grid vectors x, y, z (any monotonic order) at flat query coordinates"""
+    grids, W = _increasing(V, [y, x, z])
+    return _interp_axes(grids, W, [yq, xq, zq], _cubic_or_else(grids, method), extrap)
+
+
+@_bs("interp3")
+def interp3_(*args):
+    """interp3(X, Y, Z, V, Xq, Yq, Zq[, method[, extrapval]]), interp3(V, Xq, Yq, Zq), interp3(V[, k]):
+    linear (the default), nearest, cubic (Keys's cubic convolution on a uniform grid, else as MATLAB falls
+    back) or spline (tensor-product not-a-knot, which extrapolates); NaN outside the grid unless given
+    extrapval; the grid increasing or decreasing"""
+    args = list(args)
+    method, extrap = "linear", None
+    if len(args) >= 2 and not _istext(args[-1]) and _istext(args[-2]):
+        extrap = _scalar(args.pop())
+    if args and _istext(args[-1]):
+        method = interp_method(args.pop(), "interp3")
+    if len(args) in (1, 2):
+        V = _nd(args[0])
+        k = _m._int_arg(args[1]) if len(args) == 2 else 1
+        step = 2.0 ** -k
+        y, x, z = (np.arange(1.0, s + 1) for s in V.shape)
+        Yq, Xq, Zq = np.meshgrid(*(np.arange(1.0, s + step / 2, step) for s in V.shape), indexing="ij")
+    elif len(args) == 4:
+        V = _nd(args[0])
+        y, x, z = (np.arange(1.0, s + 1) for s in V.shape)
+        Xq, Yq, Zq = _nd(args[1]), _nd(args[2]), _nd(args[3])
+    elif len(args) == 7:
+        V = _nd(args[3])
+        ny, nx, nz = V.shape
+        x = _grid_vec(args[0], 1, nx, True)
+        y = _grid_vec(args[1], 0, ny, True)
+        z = _grid_vec(args[2], 2, nz, True)
+        Xq, Yq, Zq = _nd(args[4]), _nd(args[5]), _nd(args[6])
+    else:
+        raise _err("Wrong number of input arguments.")
+    grids, V = _increasing(V, [y, x, z])
+    # (vectors of queries of different orientations: their grid, as meshgrid makes it)
+    vecs = [q for q in (Xq, Yq, Zq) if sum(1 for s in q.shape if s != 1) <= 1]
+    if len(vecs) == 3 and len({tuple(q.shape) for q in (Xq, Yq, Zq)}) == 3:
+        Yq, Xq, Zq = np.meshgrid(Yq.reshape(-1), Xq.reshape(-1), Zq.reshape(-1), indexing="ij")
+    shapes = {q.shape for q in (Xq, Yq, Zq)}
+    if len(shapes) != 1:
+        raise _err("The query arrays must all be the same size.")
+    shape = Xq.shape
+    qs = [Yq.reshape(-1), Xq.reshape(-1), Zq.reshape(-1)]
+    out = _interp_axes(grids, V, qs, _cubic_or_else(grids, method), extrap)
+    r = _un_nd(out.reshape(shape))
+    if _m.class_(args[3] if len(args) == 7 else args[0]) == "single":
+        return _m._canon(_arr(r).astype(np.float32))
+    return r
 
 
 # ------------------------------------------------------------------ numgrid, delsq

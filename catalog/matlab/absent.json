@@ -46,7 +46,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "Contour 2-D cuts of the volume, one subplot per cut: contour(X(:,:,k), Y(:,:,k), V(:,:,k), levels) for the plane Z = Z(1,1,k) (squeeze(X(:,k,:)) and the like for a plane of constant X).",
+    "alternative": "Contour 2-D cuts of the volume, one subplot per cut: contour(X(:,:,k), Y(:,:,k), V(:,:,k), levels) for the plane Z = Z(1,1,k), or contour(squeeze(Y(:,k,:)), squeeze(Z(:,k,:)), squeeze(V(:,k,:)), levels) for the plane X = X(1,k,1). slice(X, Y, Z, V, xslice, yslice, zslice) draws the same planes colored by V.",
     "tags": [
       "plots"
     ]
@@ -375,7 +375,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "isosurface isn't in Sagebrush yet either. Draw each plane with surf, colored by V: for meshgrid arrays, the plane X = X(1,k,1) is surf(squeeze(X(:,k,:)), squeeze(Y(:,k,:)), squeeze(Z(:,k,:)), squeeze(V(:,k,:))) and the plane Z = Z(1,1,k) is surf(X(:,:,k), Y(:,:,k), Z(:,:,k), V(:,:,k)); hold on between planes, then shading interp and colorbar. A scatter3 of every point of the volume is too crowded to read.",
+    "alternative": "isosurface isn't in Sagebrush yet either. slice(X, Y, Z, V, xslice, yslice, zslice) draws planes through the volume colored by V; shading interp and colorbar make them easier to read. A scatter3 of every point of the volume is too crowded to read.",
     "tags": [
       "plots"
     ]
@@ -388,7 +388,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "isosurface isn't in Sagebrush yet either. Draw each plane with surf, colored by V: for meshgrid arrays, the plane X = X(1,k,1) is surf(squeeze(X(:,k,:)), squeeze(Y(:,k,:)), squeeze(Z(:,k,:)), squeeze(V(:,k,:))) and the plane Z = Z(1,1,k) is surf(X(:,:,k), Y(:,:,k), Z(:,:,k), V(:,:,k)); hold on between planes, then shading interp and colorbar. A scatter3 of every point of the volume is too crowded to read.",
+    "alternative": "isosurface isn't in Sagebrush yet either. slice(X, Y, Z, V, xslice, yslice, zslice) draws planes through the volume colored by V; shading interp and colorbar make them easier to read. A scatter3 of every point of the volume is too crowded to read.",
     "tags": [
       "plots"
     ]
@@ -401,7 +401,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "Draw each plane with surf, colored by V: for meshgrid arrays, the plane X = X(1,k,1) is surf(squeeze(X(:,k,:)), squeeze(Y(:,k,:)), squeeze(Z(:,k,:)), squeeze(V(:,k,:))) and the plane Z = Z(1,1,k) is surf(X(:,:,k), Y(:,:,k), Z(:,:,k), V(:,:,k)); hold on between planes, then shading interp and colorbar. A scatter3 of every point of the volume is too crowded to read. For the level itself, contour 2-D cuts: contour(X(:,:,k), Y(:,:,k), V(:,:,k), [isovalue isovalue]) for a few k, one subplot each.",
+    "alternative": "slice(X, Y, Z, V, xslice, yslice, zslice) draws planes through the volume colored by V; shading interp and colorbar make them easier to read. A scatter3 of every point of the volume is too crowded to read. For the level itself, contour 2-D cuts: contour(X(:,:,k), Y(:,:,k), V(:,:,k), [isovalue isovalue]) for a few k, one subplot each.",
     "tags": [
       "plots"
     ]
@@ -573,19 +573,6 @@
     "alternative": "Sage mode's Graph(...).shortest_path(s, t, by_weight=True) for an undirected graph; in MATLAB mode, Dijkstra's algorithm on an adjacency matrix (nonnegative weights), taking the min over the unvisited nodes.",
     "tags": [
       "graphs"
-    ]
-  },
-  {
-    "name": "slice",
-    "kind": "function",
-    "signature": "slice(X, Y, Z, V, xslice, yslice, zslice)",
-    "summary": "Draws planes through a 3-D volume, colored by the volume's values.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "Draw each plane with surf, colored by V: for meshgrid arrays, the plane X = X(1,k,1) is surf(squeeze(X(:,k,:)), squeeze(Y(:,k,:)), squeeze(Z(:,k,:)), squeeze(V(:,k,:))) and the plane Z = Z(1,1,k) is surf(X(:,:,k), Y(:,:,k), Z(:,:,k), V(:,:,k)); hold on between planes, then shading interp and colorbar. A scatter3 of every point of the volume is too crowded to read.",
-    "tags": [
-      "plots"
     ]
   },
   {

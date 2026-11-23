@@ -663,7 +663,8 @@ class Surface(Contour):
         d = Contour.defaults(self)
         for k in ("ContourMatrix", "ShowText", "LevelList", "Fill"):
             del d[k]
-        d.update({"CData": np.zeros((0, 0)), "FaceColor": _m.Char("flat"), "EdgeColor": _rgb_value((0, 0, 0)), "FaceAlpha": 1.0})
+        d.update({"CData": np.zeros((0, 0)), "FaceColor": _m.Char("flat"), "EdgeColor": _rgb_value((0, 0, 0)), "FaceAlpha": 1.0,
+                  "CDataMapping": _m.Char("scaled"), "FaceLighting": _m.Char("flat")})
         return d
 
     def extent(self, axis):
@@ -675,6 +676,16 @@ class Surface(Contour):
     def crange(self):
         v = [x for x in _vec(self.props["CData"]) if x == x]
         return (min(v), max(v)) if v else Contour.crange(self)
+
+
+class PrimitiveSurface(Surface):
+    """the surface object slice makes: MATLAB's low-level surface class, its edges dark gray"""
+    _mclass = "matlab.graphics.primitive.Surface"
+
+    def defaults(self):
+        d = Surface.defaults(self)
+        d["EdgeColor"] = _rgb_value((33 / 255, 33 / 255, 33 / 255))
+        return d
 
 
 class Legend(GObj):
@@ -1939,6 +1950,48 @@ def _surface(args, mesh):
     if view3:
         ax.props["View"] = np.array([[-37.5], [30.0]])
     return s
+
+
+@_fn("slice")
+def slice_(nargout, args):
+    """slice(X, Y, Z, V, xslice, yslice, zslice[, method]), slice(V, xslice, yslice, zslice): a surface for
+    each plane x = xslice(k), then y = yslice(k), then z = zslice(k), on the volume's grid lines and colored
+    by V interpolated there; with matrices xslice, yslice and zslice of one size, the one surface they make"""
+    import _matlab_numeric as _mn
+    ax, args = _axes_arg(args)
+    method = "linear"
+    if args and _m._istext(args[-1]):
+        method = _mn.interp_method(args.pop(), "slice")
+    if len(args) not in (4, 7):
+        raise _m._err("Not enough input arguments." if len(args) < 4 else "Too many input arguments.")
+    if any(len(_m._dims(s)) > 2 for s in args[-3:]):
+        # (slice(X, Y, Z, V) is slice(V, xslice, yslice, zslice) with 3-D planes: MATLAB's surface error)
+        raise _m._err("Value must be a vector or 2D array of numeric type.", "MATLAB:hg:shaped_arrays:SurfaceXYDataSize")
+    x, y, z, V, (xs, ys, zs) = _mn.volume_args(args, "slice")
+    pieces = []
+    if all(_m._numel(s) > 1 and not _m._isvec(s) for s in (xs, ys, zs)) and len({_m._dims(s) for s in (xs, ys, zs)}) == 1:
+        XI, YI, ZI = (np.array(_m._mat(s)) for s in (xs, ys, zs))
+        pieces.append((XI, YI, ZI))
+    else:
+        for k in _m._farr(xs).reshape(-1):
+            Yp, Zp = np.meshgrid(y, z, indexing="ij")
+            pieces.append((np.full(Yp.shape, float(k)), Yp, Zp))
+        for k in _m._farr(ys).reshape(-1):
+            Xp, Zp = np.meshgrid(x, z, indexing="ij")
+            pieces.append((Xp, np.full(Xp.shape, float(k)), Zp))
+        for k in _m._farr(zs).reshape(-1):
+            Yp, Xp = np.meshgrid(y, x, indexing="ij")
+            pieces.append((Xp, Yp, np.full(Xp.shape, float(k))))
+    view3 = not ax.holding()
+    ax.newplot()
+    objs = []
+    for XP, YP, ZP in pieces:
+        C = _mn.interp_volume(x, y, z, V, XP.reshape(-1), YP.reshape(-1), ZP.reshape(-1), method).reshape(XP.shape)
+        objs.append(PrimitiveSurface(ax, XData=_m._unmat(XP), YData=_m._unmat(YP), ZData=_m._unmat(ZP), CData=_m._unmat(C),
+                            FaceColor=_m.Char("flat")))
+    if view3:
+        ax.props["View"] = np.array([[-37.5], [30.0]])
+    return _harr(objs)
 
 
 @_fn("pcolor")
