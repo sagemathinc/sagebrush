@@ -1596,6 +1596,7 @@ export const R: any = {
   importStar: M.importStar,
   resolveRelative: M.resolveRelative,
   sysModules: M.sysModules,
+  IMPORT_NAME: M.IMPORT_NAME,
   importEpoch: M.importEpoch,
   loader: M.loader,
   newModule: Ty.newModule,

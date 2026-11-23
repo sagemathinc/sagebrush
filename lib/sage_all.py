@@ -337,7 +337,7 @@ def timeit(stmt, number=0, repeat=3, globals=None, **kwds):
         # as Sage: the statement is Sage code, so 2^3 is 8 and 1/2 exact
         code = _b.__pyjs_compile_sage__(stmt, "<timeit>", "exec")
     else:
-        from sagebrush.preparse import preparse as _preparse
+        from _sagebrush_lib.preparse import preparse as _preparse
         code = compile(_preparse(stmt), "<timeit>", "exec")
     n = int(number) or 1
     if not number:
@@ -395,7 +395,7 @@ def sage_eval(source, locals=None, cmds="", preparse=True):
             return compile(code, "<sage_eval>", mode)
         if hasattr(_b, "__pyjs_compile_sage__"):
             return _b.__pyjs_compile_sage__(code, "<sage_eval>", mode)
-        from sagebrush.preparse import preparse as _preparse
+        from _sagebrush_lib.preparse import preparse as _preparse
         return compile(_preparse(code).strip(), "<sage_eval>", mode)
 
     # as Sage: the commands and the assignment of the expression's value
@@ -2530,7 +2530,7 @@ def factor(n, proof=None, **kwds):
         TypeError: factor(): deadline= is not available in this build
     """
     if kwds:
-        from sagebrush import records as _records
+        from _sagebrush_lib import records as _records
         _records.refuse_later_options("factor", kwds)
     if isinstance(n, (_Polynomial, _Expr)) or (not isinstance(n, (int, _Fraction)) and hasattr(n, "factor")):
         F = n.factor()
@@ -2556,7 +2556,7 @@ def factor(n, proof=None, **kwds):
             n //= p
     if n > 1 << 40:
         # the Rust engine (sagebrush.nf.factor_integer)
-        from sagebrush import nf as _nfmod
+        from _sagebrush_lib import nf as _nfmod
         for p, e in _nfmod.factor_integer(n):
             out[p] = out.get(p, 0) + e
     else:
