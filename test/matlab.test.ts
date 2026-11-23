@@ -2269,7 +2269,7 @@ test("repmat refuses a result past its limits (8 MiB numeric, 200,000 objects), 
     { encoding: "utf8", timeout: 60000 });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.stdout.split("\n").map((s: string) => s.trim()).filter((s: string) => s !== ""), [
-    "refused: repmat: a result of 1000000000", "refused: repmat: a result of 4002000 el", "refused: repmat: a result of 1000000000", "refused: repmat: a result of 100000000", "refused: repmat: a result of 1000000 el", "refused: repmat: a result of 16000000 e", "refused: repmat: a result of 200001 ele", "refused: repmat: a result of 250000 ele", "refused: repmat: a result of 4000000000", "1000000", "200000", "0",
+    "refused: repmat: a result of 1000000000", "refused: repmat: a result of 4002000 el", "refused: repmat: a result of 1000000000", "refused: repmat: a result of 100000000", "refused: repmat: a result of 1000000 el", "refused: repmat: a result of 16000000 e", "refused: repmat: a result of 200001 ele", "refused: repmat: a result of 250000 ele", "refused: Requested array exceeds the ma", "1000000", "200000", "0",
     "524288", "refused: repmat: a result of 524289 ele", "1048576", "refused: repmat: a result of 1048577 el"]);
 });
 
