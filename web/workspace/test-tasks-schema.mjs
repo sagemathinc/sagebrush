@@ -105,7 +105,9 @@ const prop = clone(F.notifications.find((n) => n.event.type === "proposal").even
 ok(!refused(() => taskEvent(prop)), "a proposal event accepted");
 ok(refused(() => taskEvent({ ...prop, round: 0 })), "a proposal of round 0: refused (a proposal's round is at least 1)");
 ok(refused(() => taskEvent({ ...prop, extra: true })), "a proposal with a field more: refused");
-ok(!refused(() => taskEvent({ type: "task_status", status: "failed", reason: "x" })) && refused(() => taskEvent({ type: "task_status", status: "failed", reason: "x".repeat(2000) })), "task_status: a reason within its bound, and over it refused");
+// (the bound is the agent's own for a reason, in its state and its events: 2000 UTF-8 bytes, sagebrush-agent's wellText)
+ok(!refused(() => taskEvent({ type: "task_status", status: "failed", reason: "x" })) && !refused(() => taskEvent({ type: "task_status", status: "failed", reason: "x".repeat(2000) })) && refused(() => taskEvent({ type: "task_status", status: "failed", reason: "x".repeat(2001) })), "task_status: a reason within its bound (2000 bytes, the agent's), and over it refused");
+ok(!refused(() => taskEvent({ type: "task_status", status: "failed", reason: "界".repeat(666) })) && refused(() => taskEvent({ type: "task_status", status: "failed", reason: "界".repeat(667) })), "task_status: the bound in UTF-8 bytes: 666 three-byte characters (1998 bytes) taken, 667 (2001 bytes) refused");
 const q = { type: "question", qid: 1, revision: 2, text: "Which?", blocking: true, choices: ["a", "b"] };
 ok(!refused(() => taskEvent(q)) && refused(() => taskEvent({ ...q, revision: 0 })) && refused(() => taskEvent({ ...q, choices: Array(17).fill("c") })) && refused(() => taskEvent({ ...q, blocking: "yes" })), "question: accepted; revision 0, 17 choices, or a blocking that isn't a boolean refused");
 ok(!refused(() => taskEvent({ type: "question_answered", qid: 1, revision: 2, answer_id: "b".repeat(32), current: false })) && refused(() => taskEvent({ type: "question_answered", qid: 1, revision: 2, answer_id: "B".repeat(32), current: false })), "question_answered: accepted; an answer_id not lowercase hex refused");

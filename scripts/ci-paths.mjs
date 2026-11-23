@@ -468,5 +468,17 @@ const outputs = {
   examples_ids: JSON.stringify(exampleSelection),
   examples_matrix: JSON.stringify(Array.from({ length: shardCount(exampleSelection.length) }, (_, i) => i + 1)),
 };
+// A master push of the very commit the merge queue's run tested and passed (scripts/ci-queue-tested.mjs, which sets
+// CI_QUEUE_TESTED in ci.yml's changes job): that run was the full tier on this exact commit, so no test runs again.
+// Only what a push alone does still runs: the modules' build and their publication (wasm_build, which a push always
+// sets), the size gate's docs-only record and the ci summary.  Every other selection is off, whatever it was (the CI
+// capacity ruling's second cut, Nov 22 2026; test/ci-paths.test.ts checks each output).
+const queueTested = event === "push" && ref === "refs/heads/master" && process.env.CI_QUEUE_TESTED === "true";
+if (queueTested) {
+  for (const key of ["full", "node", "web", "modes", "engine_smoke", "engine_full", "engine_cpython", "webkit", "web_runner", "web_export",
+    "web_lookalike", "web_share", "census", "unsafe_sweep", "slow_tests", "size_inputs"]) outputs[key] = false;
+  Object.assign(outputs, { web_groups: "[]", web_matrix: "[]", examples_ids: "[]", examples_matrix: "[]", slow_scope: "" });
+}
+outputs.queue_tested = queueTested;
 for (const [key, value] of Object.entries(outputs)) console.log(`${key}=${value}`);
 console.error(`ci paths (${event}, ${files.length} files): ${JSON.stringify(outputs)}`);
