@@ -349,6 +349,15 @@ method(getsetType, "__set__", (d: GetSet, o: any, v: any) => {
 // CPython's member descriptors; each its own slot, so that a subclass's
 // slot of the same name as a base's is another (CORR-D77-1)
 let memberIds = 0;
+// (whether a class's instances have a __dict__, and a weakref slot: a Python class's from what it recorded when made
+// (its own and its first bases'); of the builtins, a module's have both, object's and an exception's no weakref slot)
+function baseHasDict(b: any): boolean {
+  return b.$heap === true ? b.$noDict !== true : b !== object;
+}
+function hasWeakSlot(b: any): boolean {
+  if (b.$heap === true) return b.$addsWeak === true || (b.$bases.length > 0 && hasWeakSlot(b.$bases[0]));
+  return b.$mro?.includes(T.module) === true;
+}
 export class PyMember {
   key: string;
   constructor(public owner: PyType, public name: string) {
@@ -983,7 +992,7 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
   // __slots__, as CPython's type_new: its names, mangled, become member
   // descriptors; the instances have no __dict__ unless a slot or a base
   // gives them one
-  let slotNames: string[] | null = null, slotDict = false;
+  let slotNames: string[] | null = null, slotDict = false, slotWeak = false;
   if (ns.has("__slots__")) {
     const sv = ns.get("__slots__");
     const items = typeof unbox(sv) === "string" ? [sv] : O.toArray(sv);
@@ -998,7 +1007,11 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
         slotDict = true;
         continue;
       }
-      if (n === "__weakref__") continue;
+      if (n === "__weakref__") {
+        if (slotWeak || (bases.length > 0 && hasWeakSlot(bases[0]))) raise(T.TypeError, "__weakref__ slot disallowed: we already got one");
+        slotWeak = true;
+        continue;
+      }
       // (a private name mangled, as CPython's _Py_Mangle)
       const owner = name.replace(/^_+/, "");
       slotNames.push(n.startsWith("__") && !n.endsWith("__") && owner !== "" ? `_${owner}${n}` : n);
@@ -1007,10 +1020,22 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
   }
   const cls = objectType(name, bases.length ? bases : [object], ns, module);
   (cls as any).$heap = true;
+  const own: PyMember[] = [];
   if (slotNames !== null) {
-    for (const n of slotNames) ns.set(n, new PyMember(cls, n));
+    for (const n of slotNames) {
+      const m = new PyMember(cls, n);
+      own.push(m);
+      ns.set(n, m);
+    }
     if (!slotDict && bases.every((b: any) => b.$heap !== true || b.$noDict === true)) (cls as any).$noDict = true;
   }
+  // (its instances' layout over its first base, fixed now, as CPython's type_new fixes it: its own slots, sorted by
+  // name, with the keys their values are kept under, and whether it adds a __dict__ and a weakref slot; __class__
+  // assignment compares these, never the class's dict, where a slot's descriptor can be replaced or deleted)
+  const first = bases.length ? bases[0] : object;
+  (cls as any).$slotLayout = own.map((m) => ({ name: m.name, key: m.key })).sort((p, q) => (p.name < q.name ? -1 : p.name > q.name ? 1 : 0));
+  (cls as any).$addsDict = (cls as any).$noDict !== true && !baseHasDict(first);
+  (cls as any).$addsWeak = (slotNames === null || slotWeak) && !hasWeakSlot(first);
   if (cell !== undefined) cell.v = cls;
   if (dcell !== undefined) classDictHooks.bind!(dcell, cls);
   if (meta !== T.type) (cls as any).$meta = meta;
@@ -3598,14 +3623,14 @@ export function builtinTypeFor(name: string, jsClass: any, module: string, call:
 // object.__class__ and object.__dict__ (a snapshot for now; writes through
 // __dict__ are not reflected).
 // (__class__ assignment's layout check, CPython's compatible_for_assignment: from each class down its first bases
-// while one adds nothing to its instances' layout (no slot of its own, no __dict__ its base hasn't), then the two
-// classes reached are one, or add the same slots and the same __dict__ over one base; slots by name, sorted, as
-// CPython's type_new sorts them, so ("y", "x") is ("x", "y")'s layout)
-const ownSlots = (c: any): PyMember[] => [...c.$dict.values()].filter((v: any) => v instanceof PyMember && v.owner === c).sort((p, q) => (p.name < q.name ? -1 : p.name > q.name ? 1 : 0));
-const baseHasDict = (b: any): boolean => (b.$heap === true ? b.$noDict !== true : b !== object);
-const addsDict = (c: any): boolean => c.$noDict !== true && !(c.$bases.length && baseHasDict(c.$bases[0]));
+// while one adds nothing to its instances' layout (no slot of its own, no __dict__ or weakref slot its base hasn't),
+// then the two classes reached are one, or add the same slots (by name, sorted, as CPython's type_new sorts them),
+// the same __dict__ and the same weakref slot over one base; each class's layout as recorded when it was made)
+type SlotLayout = { name: string; key: string }[];
+const layoutOf = (c: any): { slots: SlotLayout; dict: boolean; weak: boolean } =>
+  c.$heap === true ? { slots: c.$slotLayout ?? [], dict: c.$addsDict === true, weak: c.$addsWeak === true } : { slots: [], dict: false, weak: false };
 const layoutBase = (c: any): any => {
-  while (c.$heap === true && c.$bases.length && ownSlots(c).length === 0 && !addsDict(c)) c = c.$bases[0];
+  for (let l = layoutOf(c); c.$heap === true && c.$bases.length && l.slots.length === 0 && !l.dict && !l.weak; l = layoutOf(c)) c = c.$bases[0];
   return c;
 };
 getset(object, "__class__", (o) => typeOf(o), (o, c) => {
@@ -3615,14 +3640,15 @@ getset(object, "__class__", (o) => typeOf(o), (o, c) => {
   const modules = isType(c) && old !== undefined && c.$mro.includes(T.module) && old.$mro.includes(T.module);
   const mutable = isType(c) && old !== undefined && (c as any).$heap === true && old.$heap === true;
   if (!isType(c) || c.$ctor === null || !(modules || mutable) || c.$jsBase !== null || old.$jsBase !== null) raise(T.TypeError, "__class__ assignment only supported for mutable types or ModuleType subclasses");
-  const from = layoutBase(o.$cls), to = layoutBase(c);
+  const from = layoutBase(old), to = layoutBase(c);
   if (from !== to) {
-    const fs = ownSlots(from), ts = ownSlots(to);
-    if (from.$bases[0] !== to.$bases[0] || addsDict(from) !== addsDict(to) || fs.length !== ts.length || fs.some((m, i) => m.name !== ts[i].name)) {
+    const f = layoutOf(from), t = layoutOf(to), fs = f.slots, ts = t.slots;
+    if (from.$bases[0] !== to.$bases[0] || f.dict !== t.dict || f.weak !== t.weak || fs.length !== ts.length || fs.some((m, i) => m.name !== ts[i].name)) {
       raise(T.TypeError, `__class__ assignment: '${c.$name}' object layout differs from '${o.$cls.$name}'`);
     }
-    // (each class's slot is its own member, under its own key (CORR-D77-1): the values the old class's members hold
-    // move to the new one's, the same layout's same places, as CPython's assignment keeps them in place)
+    // (each class's slot is its own member, under its own key (CORR-D77-1): the values under the old class's recorded
+    // keys move to the new one's, the same layout's same places, as CPython's assignment keeps them in place; one
+    // never set stays unset)
     for (let i = 0; i < fs.length; i++) {
       const v = o[fs[i].key];
       delete o[fs[i].key];

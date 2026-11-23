@@ -21,3 +21,17 @@ P->int TypeError __class__ assignment only supported for mutable types or Module
 Pv1->Pv2 TypeError __class__ assignment: 'Pv2' object layout differs from 'Pv1'
 W->W2 ok (1, 2)
 W2->A TypeError __class__ assignment: 'A' object layout differs from 'W2'
+weak->weak ok W3
+weak->empty TypeError __class__ assignment: 'E0' object layout differs from 'W1'
+empty->weak TypeError __class__ assignment: 'W1' object layout differs from 'E0'
+plain->dictslot TypeError __class__ assignment: 'D1' object layout differs from 'P'
+dictslot->dictslot ok D2
+plain->dict+weak slots ok DW
+x->x+weak TypeError __class__ assignment: 'X2' object layout differs from 'X1'
+weakref twice TypeError __weakref__ slot disallowed: we already got one
+weakref over a plain class TypeError __weakref__ slot disallowed: we already got one
+weakref over Exception ok Q
+slot descriptor replaced ok ('R2', 7)
+slot descriptor deleted ok ('S2', 8)
+unset slot kept unset ok 1
+unset slot read AttributeError 'U2' object has no attribute 'x'

@@ -683,7 +683,8 @@
   {"key":"src/runtime/types.ts :: toBytes :: reserve ?. ( Number ( x ) ) #0","before":"delegating","after":"absent","replacement":["src/runtime/types.ts :: toBytes :: reserve ?. ( Number ( n ) ) #0"],"reason":"bytes(n)/bytearray(n): the same reservation, its operand renamed to the checked count n"},
   {"key":"src/runtime/types.ts :: toBytes :: toBytes ( n , undefined , undefined , array , reserve ) #0","before":"store","after":"absent","replacement":["src/runtime/types.ts :: toBytes :: toBytes ( n , undefined , undefined , array , reserve , typeName ( x ) ) #0"],"reason":"bytes(n)/bytearray(n): the same recursive call for an __index__ object, now passing its type name for the OverflowError, as CPython names it"},
   {"key":"src/compile.ts :: <module> :: process . on ( \"exit\" , ( ) => { const out = process . env . SAGEBRUSH_PRECOMPILE_OUT ! ; let prev : Precompiled | null = null ; try { prev = JSON . parse ( rea… 7a56981a #0","before":"opaque","after":"absent","replacement":["src/compile.ts :: <module> :: process . on ( \"exit\" , ( ) => { if ( isConfined ( ) ) return ; const out = process . env . SAGEBRUSH_PRECOMPILE_OUT ! ; let prev : Precompiled | null = null ; … 27ef3711 #0"],"reason":"The precompile recording's exit hook returns first while the run is confined (notebook run --confine): a confined run writes no recording. The same process.on call, the same Process.on callee and opaque type; only its callback's first statement is new."},
-  {"key":"src/compile.ts :: mountOptional :: optPre . set ( join ( base , e . path ) + ( e . sage ? \"\\0sage\" : \"\\0py\" ) , { module : e . module , code : e . code , lineMap : e . lineMap } ) #0","before":"opaque","after":"absent","replacement":["src/compile.ts :: mountOptional :: optPre . set ( pathJoin ( base , e . path ) + ( e . sage ? \"\\0sage\" : \"\\0py\" ) , { module : e . module , code : e . code , lineMap : e . lineMap } ) #0"],"reason":"Windows paths: an optional set's mount is a virtual path, joined by pathJoin (POSIX for a path under /$pyjs on every system) instead of the system's path.join. The same Map.set of the precompiled entry, its callee and opaque value unchanged; only the key's join is new."}
+  {"key":"src/compile.ts :: mountOptional :: optPre . set ( join ( base , e . path ) + ( e . sage ? \"\\0sage\" : \"\\0py\" ) , { module : e . module , code : e . code , lineMap : e . lineMap } ) #0","before":"opaque","after":"absent","replacement":["src/compile.ts :: mountOptional :: optPre . set ( pathJoin ( base , e . path ) + ( e . sage ? \"\\0sage\" : \"\\0py\" ) , { module : e . module , code : e . code , lineMap : e . lineMap } ) #0"],"reason":"Windows paths: an optional set's mount is a virtual path, joined by pathJoin (POSIX for a path under /$pyjs on every system) instead of the system's path.join. The same Map.set of the precompiled entry, its callee and opaque value unchanged; only the key's join is new."},
+  {"key":"src/runtime/types.ts :: buildClass :: ns . set ( n , new PyMember ( cls , n ) ) #0","before":"opaque","after":"absent","replacement":["src/runtime/types.ts :: buildClass :: ns . set ( n , m ) #0"],"reason":"a __slots__ member is made first, kept in the class's own list (its recorded layout, for __class__ assignment), then set in the namespace: the same new PyMember and namespace set, split over three lines, so the record's text and key changed"}
 ],
 "parity": {
   "src/compile.ts :: compile :: analyze ( mod ) #0": {"kind59":"clean","tsc7":"unresolved","reason":"the type graph is deeper than the type-level walk's depth cap (12 levels): the compiler's recursive AST and scope types; TypeScript 5.9's walk keeps a visited set and finished it"},
@@ -1983,7 +1984,7 @@
   "276757ad0fb4ac4e": {"decl":"src/runtime/types.ts :: attr","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "72585f5fee8464b6": {"decl":"src/runtime/types.ts :: back","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "490b0de7b42843e4": {"decl":"src/runtime/types.ts :: box","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
-  "a00b7d0c0d0ef368": {"decl":"src/runtime/types.ts :: buildClass","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
+  "31f4fb2226148449": {"decl":"src/runtime/types.ts :: buildClass","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "d56961e8feded166": {"decl":"src/runtime/types.ts :: builtinGetattr","class":"allocates","via":"src/runtime/object.ts :: getattr"},
   "2d9f505cde8ec5c9": {"decl":"src/runtime/types.ts :: builtinTypeFor","class":"allocates","via":"src/runtime/types.ts :: bindClass"},
   "25c79c0f6297e278": {"decl":"src/runtime/types.ts :: call","class":"allocates","via":"web/lib-lazy.ts :: get"},
@@ -2012,7 +2013,7 @@
   "14e73ba55e6a53a9": {"decl":"src/runtime/types.ts :: intOrStr","class":"no-new-store"},
   "65dcc4eb3f520d78": {"decl":"src/runtime/types.ts :: iteratorType","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "16b631e386c79759": {"decl":"src/runtime/types.ts :: latin","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
-  "97469c4d8e71837c": {"decl":"src/runtime/types.ts :: layoutBase","class":"allocates","via":"web/lib-lazy.ts :: get"},
+  "577c5f8d004c0947": {"decl":"src/runtime/types.ts :: layoutBase","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "9fd0dd2e63bd1b9d": {"decl":"src/runtime/types.ts :: lookup","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "cd7300a1ab28e3d2": {"decl":"src/runtime/types.ts :: lookupDunder","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "7752be856e1142a5": {"decl":"src/runtime/types.ts :: make","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
@@ -2025,7 +2026,6 @@
   "a7c01a58ffc83350": {"decl":"src/runtime/types.ts :: newModule","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "293ffddb7529b72a": {"decl":"src/runtime/types.ts :: nsDict","class":"no-new-store"},
   "d5f2b364bbf91b69": {"decl":"src/runtime/types.ts :: objectBytes","class":"allocates","via":"lib:lib.es2015.iterable.d.ts :: Uint8ArrayConstructor.from"},
-  "7fb50f49a5a43e05": {"decl":"src/runtime/types.ts :: ownSlots","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "5a79459d85690fb9": {"decl":"src/runtime/types.ts :: params","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "c90176da8a20cc76": {"decl":"src/runtime/types.ts :: paramsOf","class":"allocates","via":"src/runtime/object.ts :: tuple"},
   "0029dd986d57a7ba": {"decl":"src/runtime/types.ts :: propCopy","class":"no-new-store"},

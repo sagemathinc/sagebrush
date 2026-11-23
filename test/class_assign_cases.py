@@ -132,3 +132,71 @@ t("W->W2", ww)
 def wa():
     w.__class__ = A
 t("W2->A", wa)
+# a weakref slot is part of the layout, as __dict__ is
+class W1:
+    __slots__ = ("__weakref__",)
+class W3:
+    __slots__ = ("__weakref__",)
+class E0:
+    __slots__ = ()
+def cls_to(o, B):
+    o.__class__ = B
+    return type(o).__name__
+t("weak->weak", lambda: cls_to(W1(), W3))
+t("weak->empty", lambda: cls_to(W1(), E0))
+t("empty->weak", lambda: cls_to(E0(), W1))
+class D1:
+    __slots__ = ("__dict__",)
+class D2:
+    __slots__ = ("__dict__",)
+class DW:
+    __slots__ = ("__dict__", "__weakref__")
+t("plain->dictslot", lambda: cls_to(P(), D1))
+t("dictslot->dictslot", lambda: cls_to(D1(), D2))
+t("plain->dict+weak slots", lambda: cls_to(P(), DW))
+class X1:
+    __slots__ = ("x",)
+class X2:
+    __slots__ = ("x", "__weakref__")
+t("x->x+weak", lambda: cls_to(X1(), X2))
+# a duplicate weakref slot, and one over a base that has one, are refused; an exception's base has none
+def mk(slots, base=object):
+    return type("Q", (base,), {"__slots__": slots}).__name__
+t("weakref twice", lambda: mk(("__weakref__", "__weakref__")))
+t("weakref over a plain class", lambda: mk(("__weakref__",), P))
+t("weakref over Exception", lambda: mk(("__weakref__",), Exception))
+# the layout is the class's as made: a slot's descriptor replaced or deleted afterwards changes nothing
+class R1:
+    __slots__ = ("x",)
+class R2:
+    __slots__ = ("x",)
+r = R1()
+r.x = 7
+R1.x = 99
+def rr():
+    r.__class__ = R2
+    return type(r).__name__, r.x
+t("slot descriptor replaced", rr)
+class S1:
+    __slots__ = ("x",)
+class S2:
+    __slots__ = ("x",)
+s = S1()
+s.x = 8
+del S1.x
+def ss():
+    s.__class__ = S2
+    return type(s).__name__, s.x
+t("slot descriptor deleted", ss)
+# a slot never set stays unset
+class U1:
+    __slots__ = ("x", "y")
+class U2:
+    __slots__ = ("x", "y")
+u = U1()
+u.y = 1
+def uu():
+    u.__class__ = U2
+    return u.y
+t("unset slot kept unset", uu)
+t("unset slot read", lambda: u.x)
