@@ -354,12 +354,6 @@ class Parser {
           else if (T[q].v === "," && depth === 0) return found("for i in S, j in T (several loops in one for)");
         }
       }
-      if (a.t === "id" && b.v === "<" && k === from) {
-        // S<y>, h := f(...): generator names, and other values
-        let q = k + 2;
-        while (q < T.length && T[q].v !== ">" && T[q].v !== ";") q++;
-        if (T[q]?.v === ">" && T[q + 1]?.v === ",") return found(`${a.v}<...>, ... := (generator names with other values)`);
-      }
       if (a.v === "." && (b.v === "-" || b.v === "<") && k > from && T[k - 1].t === "id") return found(b.v === "-" ? `${T[k - 1].v}.-1 (a generator's inverse by its index)` : `${T[k - 1].v}.<...> (an element by its indices)`);
       if (a.v === "=" && a.t === "op") return found("= (an equation, as in a relation)");
       if (a.v === "^" && b.v === "^" && next(a, b)) return found("a^^n (a multiplicity in a multiset)");
@@ -919,7 +913,8 @@ class Parser {
         gens.push(this.next().v);
         if (!this.eat(",")) break;
       }
-      if (this.eat(">") && this.at(":=")) return { kind: "gens", py: pyName(name), gens: gens.map(pyName), names: gens, read: pyName(name) };
+      // (and in a multiple assignment, G<g>, m := ext<F | 3>, the values at their places)
+      if (this.eat(">") && (this.at(":=") || this.at(","))) return { kind: "gens", py: pyName(name), gens: gens.map(pyName), names: gens, read: pyName(name) };
       this.i = save;
       return null;
     }
@@ -975,13 +970,9 @@ class Parser {
     const op = this.toks[this.i - 1];
     // R<x> := PolynomialRing(...)
     if (lhs.length === 1 && lhs[0].kind === "gens") {
-      const g = lhs[0];
       const e = this.expr();
       this.expect(";");
-      this.declareGlobal(g.py);
-      this.emit(`${g.py} = _m._first(${e})`);
-      this.emit(`_m._assign_gen_names(${g.py}, ${JSON.stringify(g.names)})`);
-      g.gens!.forEach((x, k) => { this.declareGlobal(x); this.emit(`${x} = _m._gen(${g.py}, ${k + 1})`); });
+      this.nameGens(lhs[0], `_m._first(${e})`);
       return;
     }
     const e = this.exprStatement();
@@ -994,11 +985,20 @@ class Parser {
     this.emit(`${tmp} = _m._values(${this.all(e.code)}, ${lhs.length}, (${op.line}, ${op.col}))`);
     lhs.forEach((t, k) => {
       if (t.py === "_m_discard") return;
+      if (t.kind === "gens") return this.nameGens(t, `${tmp}[${k}]`);
       if (t.kind !== "name") return this.store(t, `_m._present(${tmp}[${k}])`);
       // a missing return value (return x, _;) leaves the variable unassigned
       this.store(t, `${tmp}[${k}]`);
       this.emit(`if ${t.py} is _m._NOVAL: del ${t.py}`);
     });
+  }
+
+  /** R<x, ...> bound to value (its code), and its generators named x, ... */
+  nameGens(g: Target, value: string) {
+    this.declareGlobal(g.py);
+    this.emit(`${g.py} = ${value}`);
+    this.emit(`_m._assign_gen_names(${g.py}, ${JSON.stringify(g.names)})`);
+    g.gens!.forEach((x, k) => { this.declareGlobal(x); this.emit(`${x} = _m._gen(${g.py}, ${k + 1})`); });
   }
 
   // ---- control
