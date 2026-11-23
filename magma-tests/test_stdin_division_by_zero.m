@@ -27,6 +27,35 @@ print 1/0X5;
 print 1/0X0;
 print 1/0 x;
 print 1/0 1;
+print 1/0 true;
+print 1/0 false;
+print 1/0 return;
+print 1/0 if;
+print 1/0 function;
+print 1/0 # 1;
+print 1/0 is 1;
+x := 1/0 :: 2;
+1/0 :: 2;
+// and where it can continue, the zero is refused: an operator, a closer or separator, these keywords
+print 1/0 ne 1;
+print 1/0 in [1];
+print 1/0 div 1;
+print 1/0 and true;
+print 1/0 join {1};
+print 1/0 subset {1};
+if 1/0 then print 1; end if;
+while 1/0 do print 1; end while;
+for i := 1 to 1/0 do print 1; end for;
+for i := 1 to 2 by 1/0 do print 1; end for;
+x := 1/0 select 1 else 2;
+x := true select 1/0 else 2;
+print 1/0 where x is 1;
+x := [1/0 .. 3];
+x := [i : i in [1] | 1/0];
+x := <1/0, 2>;
+x := {@ 1/0 @};
+x := 1/0 -> 2;
+case 1: when 1/0: print 1; end case;
 f := func< | 2/0 >;
 print "the statement before it ran";
 // anything computed divides when it runs, and the error is at the operator:
@@ -58,4 +87,11 @@ print P.1 div 0;
 print P.1 mod 0;
 Z := PolynomialRing(Integers());
 print Z.1/0;
+// a zero literal written in hexadecimal or with leading zeros is a zero denominator too, and an assignment
+// operator keyword after it continues the statement
+1/0x0;
+1/00 true;
+1/0x0 true;
+x := 1/0x00;
+h := 1; h div:= 1/0x0;
 print "end";
