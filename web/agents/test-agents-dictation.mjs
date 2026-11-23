@@ -151,8 +151,33 @@ try {
   await sleep(100);
   ok(/couldn't be reached/.test(await toast(P)) && (await draftOf(P)) === d12 && (await P.ev(`document.querySelectorAll('#log .user').length`)) === sent12, "D12: a network failure is said, keeps the draft, and sends nothing", { toast: await toast(P), draft: await draftOf(P) });
 
-  // ---- D14: another chat shown: it stops, its words go to the chat they were spoken for, none to the new one
+  // (D12's toast put away: it lies over the composer, where the typing helper clicks)
   await P.ev(`(() => { const t = document.querySelector('#toast'); if (t) t.style.display = 'none'; return true; })()`);
+  // ---- D13: a failure after words were heard: the typed draft stays, the words heard go after it, nothing is sent
+  await setDraft(P, "typed");
+  const sent13 = await P.ev(`document.querySelectorAll('#log .user').length`);
+  await clickMic(P);
+  await P.ev(`(window.__say([["heard words", true]]), true)`);
+  await P.ev(`(window.__recs.at(-1).onerror({ error: 'network' }), window.__recs.at(-1).onend(), true)`);
+  await sleep(100);
+  ok((await draftOf(P)).trim() === "typed heard words" && (await P.ev(`document.querySelectorAll('#log .user').length`)) === sent13, "D13: a failure after words were heard keeps the typed draft, puts the words after it, and sends nothing", await draftOf(P));
+  // (late callbacks of a stopped or discarded listening change nothing: no word added twice, none discarded comes back)
+  await clickMic(P);
+  const old = await P.ev(`window.__recs.length - 1`);
+  await P.ev(`(window.__say([["once", true]]), true)`);
+  await clickMic(P); // (Stop: "once" added)
+  await sleep(50);
+  await P.ev(`(window.__recs[${old}].onresult({ resultIndex: 0, results: [Object.assign([{ transcript: 'late' }], { isFinal: true })] }), window.__recs[${old}].onend(), true)`);
+  await clickMic(P);
+  const old2 = await P.ev(`window.__recs.length - 1`);
+  await P.ev(`(window.__say([["dropped", true]]), true)`);
+  await statusBtn(P, "Discard");
+  await P.ev(`(window.__recs[${old2}].onresult({ resultIndex: 0, results: [Object.assign([{ transcript: 'dropped' }], { isFinal: true })] }), window.__recs[${old2}].onend(), true)`);
+  await sleep(50);
+  const d13 = (await draftOf(P)).trim();
+  ok(d13 === "typed heard words once" && (await mic(P)).pressed === "false", "D13: late results after Stop or Discard add nothing: no word twice, nothing discarded comes back", d13);
+
+  // ---- D14: another chat shown: it stops, its words go to the chat they were spoken for, none to the new one
   await setDraft(P, "first chat");
   await clickMic(P);
   await P.ev(`(window.__say([["for the first", true]]), true)`);

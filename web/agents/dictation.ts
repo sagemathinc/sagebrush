@@ -4,7 +4,8 @@
 // Turn off (while listening) takes it back. While it listens, what is heard collects in the line by the mic, never in
 // the draft: the draft stays the person's alone. Stop (the mic again) puts what was heard at the end of the draft;
 // Discard drops it. Sending, another chat, a hidden tab or a failure stop it, and what was heard goes into the draft
-// it was spoken for: nothing heard is sent, and nothing is lost without the person's Discard. Where the browser
+// it was spoken for: the words recognized are never lost without the person's Discard (a part still being recognized
+// when it stops is). Where the browser
 // can't turn speech into text, there is no mic at all.
 
 export const DICTATION_COPY = {
@@ -104,13 +105,17 @@ export function mountDictation(h: DictationHost) {
     interim = "";
     r.onresult = (e) => {
       if (rec !== r) return;
-      interim = "";
+      // (new final words added once, from resultIndex; the part still being recognized, from every result not final)
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const res = e.results[i];
         const text = (res[0]?.transcript ?? "").trim();
-        if (!text) continue;
-        if (res.isFinal) heard = join(heard, text);
-        else interim = join(interim, text);
+        if (text && res.isFinal) heard = join(heard, text);
+      }
+      interim = "";
+      for (let i = 0; i < e.results.length; i++) {
+        const res = e.results[i];
+        const text = (res[0]?.transcript ?? "").trim();
+        if (text && !res.isFinal) interim = join(interim, text);
       }
       draw();
     };
