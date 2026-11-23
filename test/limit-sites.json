@@ -5645,6 +5645,11 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing beyond MATLAB: the census matches 'exceeds' in MATLAB's own out-of-range index message; the line raises MATLAB's error (identifier MATLAB:badsubscript, as MATLAB Online printed it) for an index past the end, not a limit on a computation"
  },
+ "lib/_matlab.py :: _refuse_huge :: raise _err(\"Requested array exceeds the maximum possible variable size.\", \"MATLAB:pmaxsize\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the census matches 'exceeds' and 'maximum' in MATLAB's own message; the line raises MATLAB:pmaxsize, as MATLAB R2026b does, for an array of 2^48 bytes or more, before anything is allocated"
+ },
  "lib/_matlab.py :: _oob :: return _err(\"Index in position %d exceeds array bounds. Index must not exceed %d.\" % (pos + 1, n), \"MATLAB:badsubscript\") #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",

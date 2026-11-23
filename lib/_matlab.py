@@ -2331,40 +2331,45 @@ def _too_big(pos):
     return _err(msg, "MATLAB:badsubscript")
 
 
-def _first_bad(f, pos, big):
+def _first_bad(f, pos, big, n):
     """MATLAB's check of an assignment's, a deletion's or a read's numeric subscript f (float64), observed R2026b:
     element by element, left to right, the first offending one decides: not finite, below 1 or fractional is
-    "Array indices must be ...", and (big: an assignment or a deletion) a finite integer of 2^48 or more is
-    "Indices must be less than 2^48." (Inf is the first kind)"""
+    "Array indices must be ...", and a finite integer of 2^48 or more is "Indices must be less than 2^48." in an
+    assignment or a deletion (big), out of range in a read (v([1e19 0]) is the out-of-range error) (Inf is the first
+    kind; an ordinary out-of-range value is checked after this scan)"""
     invalid = ~(np.isfinite(f) & (f >= 1) & (f == np.floor(f)))
-    bad = invalid | (f >= 2.0 ** 48) if big else invalid
+    bad = invalid | (f >= 2.0 ** 48)
     if np.any(bad):
         i = int(np.argmax(bad))
-        raise _bad_index(pos) if invalid[i] else _too_big(pos)
+        raise _bad_index(pos) if invalid[i] else _too_big(pos) if big else _oob(pos, n)
 
 
-def _ivec(arg, n, pos, grow, big=None):
+def _ivec(arg, n, pos, grow, big=None, dele=False):
     """an index argument as 0-based positions (int64 ndarray, in order) and the
     dimensions of the index (for the shape of a linear index's result); big (default: grow) refuses an index of
-    2^48 or more, as MATLAB does in an assignment or a deletion"""
+    2^48 or more, as MATLAB does in an assignment or a deletion; dele: a deletion's out-of-range error is MATLAB's
+    "Matrix index is out of range for deletion." (MATLAB:subsdeldimmismatch, observed R2026b)"""
     if big is None:
         big = grow
+    oob = _del_oob if dele else _oob
     t = type(arg)
     if arg is COLON:
         return np.arange(n, dtype=np.int64), (n, 1), True
     if t is float:
         if not (arg >= 1 and arg != _math.inf) or arg != _math.floor(arg):
             raise _bad_index(pos)
-        if big and arg >= 2.0 ** 48:
-            raise _too_big(pos)
+        if arg >= 2.0 ** 48:
+            raise _too_big(pos) if big else oob(pos, n)
         k = int(arg)
         if k > n and not grow:
-            raise _oob(pos, n)
+            raise oob(pos, n)
         return np.array([k - 1], dtype=np.int64), (1, 1), False
     if t is bool or (t is np.ndarray and arg.dtype.kind == "b"):
         m = _arr(arg).reshape(-1)
         idx = np.nonzero(m)[0].astype(np.int64)
         if idx.size and idx[-1] >= n and not grow:
+            if dele:
+                raise oob(pos, n)
             if pos < 0:
                 raise _err("The logical indices contain a true value outside of the array bounds.", "MATLAB:badsubscript")
             raise _oob(pos, n)
@@ -2374,7 +2379,7 @@ def _ivec(arg, n, pos, grow, big=None):
     if t is Str or t is StrArr or t is Cell or t is Struct or _iscallable(arg):
         raise _err("Unable to use a value of type %s as an index." % class_(arg), "MATLAB:badsubscript")
     if t is Sparse:
-        return _ivec(_sp.full(arg), n, pos, grow, big)
+        return _ivec(_sp.full(arg), n, pos, grow, big, dele)
     a = _arr(arg)
     if a.dtype.kind == "c":
         raise _bad_index(pos)
@@ -2382,12 +2387,47 @@ def _ivec(arg, n, pos, grow, big=None):
     if f.size:
         # (as float64: an int8 to uint32 subscript compared with 2^48 directly would overflow numpy's comparison)
         g = f if f.dtype.kind == "f" else f.astype(np.float64)
-        _first_bad(g, pos, big)
+        _first_bad(g, pos, big, n)
         # (past the end before the conversion to integers: v([1 1e19]) is MATLAB's out-of-range error, not int64's)
         if not grow and np.max(g) > n:
-            raise _oob(pos, n)
+            raise oob(pos, n)
     idx = f.astype(np.int64) - 1
     return idx, _dims(arg), False
+
+
+def _itemsize(x):
+    """bytes per element as MATLAB stores x: its numeric class's, 2 for char, 8 otherwise (a cell's or a struct's
+    element)"""
+    t = type(x)
+    if t is np.ndarray:
+        return x.dtype.itemsize
+    if t is Char:
+        return 2
+    if t is complex:
+        return 16
+    if t is bool:
+        return 1
+    return 8
+
+
+def _refuse_huge(dims, itemsize):
+    """MATLAB's refusal of an array of 2^48 bytes or more, observed R2026b (2^45 doubles, 2^46 singles, 2^44 complex
+    doubles; an int8 or logical array never reaches it below index 2^48), with the error raised here, before anything is
+    allocated; a smaller request is the memory guard's"""
+    if _prod(dims) * itemsize >= 2 ** 48:
+        raise _err("Requested array exceeds the maximum possible variable size.", "MATLAB:pmaxsize")
+
+
+def _refuse_huge_growth(dims, cur, v):
+    """the 2^48-byte refusal for an assignment that grows cur, sized by cur's class before any conversion, as MATLAB
+    R2026b sizes it (an int8 array stays int8 whatever is assigned into it; x(2^44) = 1i for a double x is 2^47
+    bytes, not refused here)"""
+    _refuse_huge(dims, _itemsize(cur) if type(cur) in (np.ndarray, Char) else _itemsize(v))
+
+
+def _del_oob(pos, n):
+    """a deletion's index past the end, as MATLAB R2026b raises it (a subscript among several too)"""
+    return _err("Matrix index is out of range for deletion.", "MATLAB:subsdeldimmismatch")
 
 
 def _oob(pos, n):
@@ -2994,6 +3034,7 @@ def _assign_paren(cur, args, v, brace=False):
     dims = _dims(cur)
     nd = _grow_dims(dims, args, vd)
     if tuple(nd) != tuple(dims):
+        _refuse_huge_growth(nd, cur, v)
         cur = _resize(cur, nd)
         dims = _dims(cur)
     pos, out = _positions(dims, args)
@@ -3144,7 +3185,7 @@ def _set_numeric(cur, pos, v):
 def _del_ivec(a, n, pos):
     """_ivec for a deletion: an index of 2^48 or more is MATLAB's 2^48 error there, as in an assignment (a read would
     be out of range), classified left to right with the invalid ones"""
-    return _ivec(a, n, pos, False, True)
+    return _ivec(a, n, pos, False, True, True)
 
 
 def _delete(cur, args):
@@ -4322,6 +4363,7 @@ def _dimsarg(args, fname):
 
 def _filled(dims, value, cls):
     cls = cls or "double"
+    _refuse_huge(dims, {"double": 8, "single": 4, "logical": 1}.get(cls) or (np.dtype(_INTS[cls][0]).itemsize if cls in _INTS else 8))
     if cls == "double":
         return _box(np.full(_stored(dims), value, dtype=np.float64))
     if cls == "single":
@@ -7022,6 +7064,9 @@ def repmat_(x, *args):
             raise _err("repmat: a result of %d elements is not supported in Sagebrush: at most %d for a %s array." % (total, _REPMAT_OBJECT_MAX, class_(x)))
     else:
         size = _arr(x).dtype.itemsize
+        # (MATLAB's own refusal first, at 2^48 bytes of MATLAB's storage: a char is 2 bytes there, whatever its
+        # backing array's dtype; below it, Sagebrush's bound on the real bytes)
+        _refuse_huge((total,), _itemsize(x))
         if total * size > _REPMAT_BYTES_MAX:
             raise _err("repmat: a result of %d elements (%d bytes) is not supported in Sagebrush: at most %d bytes." % (total, total * size, _REPMAT_BYTES_MAX))
     if 0 in r or 0 in d:
