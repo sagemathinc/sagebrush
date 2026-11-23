@@ -276,6 +276,25 @@ ${"many words ".repeat(14000)}
     writeFileSync(join(dir, "breaks.tex"), "\\documentclass{article}\n\\begin{document}\n\\newpage\nOne.\n\\newpage\nTwo.\\pagebreak[2] Still two.\\clearpage\\newpage Three.\\pagebreak Four.\n\\newpage\n\\end{document}\n");
     const bk = await runOpts({ env: { CHROME: browser } }, CLI, dir, "render", "breaks.tex", "--pdf", "breaks.pdf", "--json");
     check("pdf: an article's \\newpage, \\clearpage and \\pagebreak are its pages, as TeX's (3, none blank)", bk.code === 0 && bk.json?.pdf?.pages === 3, { code: bk.code, pdf: bk.json?.pdf, err: bk.json?.pdf_error ?? bk.err.slice(-300) });
+    // (a display wider than the text (the content pilot's, run 017): TeX lets it run on into the margin with an
+    //  "Overfull \hbox" warning, nothing lost; the PDF had it cut off at its box's edge, the check saying nothing. Now
+    //  printed it runs on (the print rules), and render reports it: one warning, on its line, the exit 0 and ok as
+    //  for any warning; a document whose displays fit has none)
+    writeFileSync(join(dir, "wide.tex"), "\\documentclass{article}\n\\begin{document}\n\\[\n\\mu(x)=\\sup\\left\\{\\nu>0:\\ 0<\\left|x-\\frac pq\\right|<\\frac1{q^\\nu}\n\\text{ for infinitely many coprime integers }p,q,\\ q\\ge2\\right\\}.\n\\]\n\\end{document}\n");
+    const wd = await runOpts({ env: { CHROME: browser } }, CLI, dir, "render", "wide.tex", "--pdf", "wide.pdf", "--json");
+    const wideOver = (wd.json?.check?.problems ?? []).filter((p) => p.kind === "overfull");
+    const printRule = /@media print \{[^@]*\.sb-standalone \.dmath \{ overflow: visible; \}/.test(existsSync(join(dir, "wide.html")) ? readFileSync(join(dir, "wide.html"), "utf8") : "");
+    check("pdf: a display wider than the text runs on when printed, and is reported: one overfull warning on its line, exit 0", wd.code === 0 && wd.json?.pdf?.pages === 1 && wd.json?.check?.ok === true && wideOver.length === 1 && wideOver[0].severity === "warning" && wideOver[0].line === 4 && /\\mu ?\(x\)/.test(wideOver[0].name) && /\d+px wider than the text/.test(wideOver[0].message) && printRule,
+      { code: wd.code, pdf: wd.json?.pdf, problems: wd.json?.check?.problems, printRule, err: wd.json?.pdf_error ?? wd.err.slice(-300) });
+    // (two displays that start alike, the first fitting, the second too wide: the warning on the second's own line,
+    //  each display found in the source in order, not the first that starts the same way)
+    writeFileSync(join(dir, "twice.tex"), "\\documentclass{article}\n\\begin{document}\n\\[\n\\mu(x)=\\sup\\left\\{\\nu>0:\\ 0<\\left|x-\\frac pq\\right|<\\frac1{q^\\nu}\\right\\}.\n\\]\nText.\n\\[\n\\mu(x)=\\sup\\left\\{\\nu>0:\\ 0<\\left|x-\\frac pq\\right|<\\frac1{q^\\nu}\n\\text{ for infinitely many coprime integers }p,q,\\ q\\ge2\\right\\}.\n\\]\n\\end{document}\n");
+    const tw = await runOpts({ env: { CHROME: browser } }, CLI, dir, "render", "twice.tex", "--pdf", "twice.pdf", "--json");
+    const twOver = (tw.json?.check?.problems ?? []).filter((p) => p.kind === "overfull");
+    check("pdf: of two displays that start alike, the overfull second one is reported on its own line (8), not the first's (4)", tw.code === 0 && twOver.length === 1 && twOver[0].line === 8, { code: tw.code, problems: tw.json?.check?.problems, err: tw.json?.pdf_error ?? tw.err.slice(-300) });
+    writeFileSync(join(dir, "fits.tex"), "\\documentclass{article}\n\\begin{document}\n\\[\n\\mu(x)=\\sup\\left\\{\\nu>0:\\ 0<\\left|x-\\frac pq\\right|<\\frac1{q^\\nu}\\right\\}.\n\\]\n\\end{document}\n");
+    const ft = await runOpts({ env: { CHROME: browser } }, CLI, dir, "render", "fits.tex", "--pdf", "fits.pdf", "--json");
+    check("pdf: a document whose displays fit has no overfull warning", ft.code === 0 && ft.json?.pdf?.pages === 1 && !(ft.json?.check?.problems ?? []).some((p) => p.kind === "overfull"), { code: ft.code, problems: ft.json?.check?.problems, err: ft.json?.pdf_error ?? ft.err.slice(-300) });
     check("png-overflow-reported", pages[3]?.overflow_px > 0 && pages.filter((x) => x.overflow_px).length === 1 && pages[1].title === "Overlays", pages);
     // (sim run 11 X01, run 12 BL01: displays squeezed and clipped while their frame read as fitting. Against TeX Live
     //  2025, beamer at aspectratio=169: X01's frame fits; with k copies of its nested-root display, each after a line
