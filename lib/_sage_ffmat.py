@@ -107,7 +107,9 @@ def _entry_cost(base):
     # (a ring of a module that isn't loaded can't be base: the checks below load none, so a matrix over GF(p) doesn't
     # fetch the number fields', QQbar's and RDF's parts of the library in the browser)
     import sys
-    _sage_nf, qb, _sage_rdf = (sys.modules.get(m) for m in ("_sage_nf", "_sage_qqbar", "_sage_rdf"))
+    _sage_nf = sys.modules.get("_sage_nf")
+    qb = sys.modules.get("_sage_qqbar")
+    _sage_rdf = sys.modules.get("_sage_rdf")
     if isinstance(base, _ff.IntegerModRing_):
         return 150 + 2 * int(base.order()).bit_length() // 5
     if isinstance(base, _ff.FiniteField_ext):
