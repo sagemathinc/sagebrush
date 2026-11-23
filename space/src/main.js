@@ -2060,7 +2060,10 @@ xr.supported("immersive-vr").then((ok) => ($("#vr").hidden = !ok));
 xr.supported("immersive-ar").then((ok) => ($("#ar").hidden = !ok));
 
 let lastTick = performance.now();
+// (drawn frames, counted for tests: a key or a controller button is read once a frame)
+let frames = 0;
 function tick(now) {
+  frames++;
   const dt = Math.max(0, Math.min(0.1, (now - lastTick) / 1000));
   lastTick = now;
   if (xr.presenting) xr.step(dt);
@@ -2082,6 +2085,7 @@ renderer.setAnimationLoop(tick);
 // (the API for an agent driving the page, and for tests: what is selected, select an object (and fly to it), the
 // space, Back and Forward)
 window.whitespace = {
+  get frames() { return frames; },
   get space() { return space; }, get objects() { return objects; }, camera, controls,
   get selection() { return selectionOf(selected); },
   select(id) { const nd = space?.nodes.find((n) => n.id === id); if (!nd) return false; openOverlay(nd); return true; },

@@ -64,13 +64,24 @@ ok(await until(`/objects/.test(document.querySelector('#status')?.textContent ??
 ok(await until(`!document.querySelector('#vr').hidden`), "Enter VR is offered (the headset supports immersive-vr)");
 
 // ---- enter VR
-const camBefore = await ev(`whitespace.camera.position.toArray().map((x) => +x.toFixed(3))`);
+// (first the page's opening view must be in place: it is framed over a few drawn frames, and headless Chromium draws
+//  few. Until then the camera is at the origin, and Back would return there. Wait until it has moved and stopped.)
+const camNow = () => ev(`whitespace.camera.position.toArray().map((x) => +x.toFixed(3))`);
+let camBefore = await camNow();
+for (const t = Date.now(); Date.now() - t < 15000; ) { await sleep(400); const c = await camNow(); if (JSON.stringify(c) === JSON.stringify(camBefore) && c.some((x) => x !== 0)) break; camBefore = c; }
 await ev(`document.querySelector('#vr').click(), true`);
 ok(await until(`whitespace.xr.presenting`), "in VR");
 ok((await ev(`document.querySelector('#vr').textContent`)) === "Exit VR", "the button says Exit VR");
 await sleep(800);
 await shot("vr-enter");
 
+// (a controller button is read once a drawn frame, and headless Chromium draws few: a press is held for 2 drawn frames
+//  and then released for 2, never for a fixed time, so the page sees both the press and its release)
+const frames = async (n, ms = 10000) => { const f0 = await ev(`whitespace.frames`); return until(`whitespace.frames >= ${f0 + n}`, ms); };
+const tap = async (hand, button) => {
+  await ev(`window.__xrDevice.controllers.${hand}.updateButtonValue('${button}', 1), true`); await frames(2);
+  await ev(`window.__xrDevice.controllers.${hand}.updateButtonValue('${button}', 0), true`); await frames(2);
+};
 // ---- point the right controller at an object (the logistic map's slab) and pull the trigger
 const aim = (target) => `(() => {
   const W = whitespace, rig = W.xr.rig, V = rig.position.constructor, Q = rig.quaternion.constructor;
@@ -83,10 +94,8 @@ const aim = (target) => `(() => {
   return true;
 })()`;
 await ev(aim("logistic"));
-await sleep(300);
-await ev(`window.__xrDevice.controllers.right.updateButtonValue('trigger', 1), true`);
-await sleep(200);
-await ev(`window.__xrDevice.controllers.right.updateButtonValue('trigger', 0), true`);
+await frames(2);
+await tap("right", "trigger");
 ok(await until(`whitespace.xr.panel?.id === 'logistic'`, 5000), "the trigger on an object opens its reading panel", await ev(`whitespace.xr.panel`));
 ok((await ev(`whitespace.selection?.id`)) === "logistic", "and selects it (as a click does: the agent sees it)");
 // (and flies you to it: your head where the desktop's camera would go, about 9 units in front of its face)
@@ -108,35 +117,32 @@ await shot("vr-ran");
 // ---- the thumbsticks: left forward moves; right sideways turns 30°
 const rigBefore = await ev(`[...whitespace.xr.rig.position.toArray(), whitespace.xr.rig.rotation.y].map((x) => +x.toFixed(3))`);
 await ev(`window.__xrDevice.controllers.left.updateAxes('thumbstick', 0, -1), true`);
-await sleep(600);
+await until(`Math.hypot(whitespace.xr.rig.position.x - ${"${rigBefore[0]}"}, whitespace.xr.rig.position.z - ${"${rigBefore[2]}"}) > 1`, 10000);
 await ev(`window.__xrDevice.controllers.left.updateAxes('thumbstick', 0, 0), true`);
 const rigMoved = await ev(`whitespace.xr.rig.position.toArray().map((x) => +x.toFixed(3))`);
 const moved = Math.hypot(rigMoved[0] - rigBefore[0], rigMoved[2] - rigBefore[2]);
 ok(moved > 1, "the left thumbstick moves you", { moved: +moved.toFixed(2) });
 await ev(`window.__xrDevice.controllers.right.updateAxes('thumbstick', 1, 0), true`);
-await sleep(300);
+await frames(2);
 await ev(`window.__xrDevice.controllers.right.updateAxes('thumbstick', 0, 0), true`);
-await sleep(200);
+await frames(2);
 const turned = (await ev(`whitespace.xr.rig.rotation.y`)) - rigBefore[3];
 ok(Math.abs(Math.abs(turned) - Math.PI / 6) < 1e-3, "the right thumbstick turns you 30°", { turned: +turned.toFixed(3) });
 
 // ---- the wrist menu: Back flies back to where you were; Forward returns; See all; B is Back too
 const far = async () => ev(headTo("logistic"));
 const beforeBack = await far(); // (where the thumbsticks left you: what Forward returns to)
+// (a flight starts on the next drawn frame, and headless Chromium draws few: each step waits for where it ends, with
+//  a deadline, never for "not flying", which holds before the flight has begun)
 await ev(`whitespace.xr.menuPress('back'), true`);
-await until(`whitespace.xr.history.flying === false`, 3000);
-await sleep(100);
+await until(`${headTo("logistic")} > ${beforeBack + 5} && whitespace.xr.history.flying === false`, 8000);
 const afterBack = await far();
 ok(afterBack > beforeBack + 5, "Back (wrist menu) flies back to where you were before flying to it", { distance: afterBack });
 await ev(`whitespace.xr.menuPress('forward'), true`);
-await until(`whitespace.xr.history.flying === false`, 3000);
-await sleep(100);
+await until(`Math.abs(${headTo("logistic")} - ${beforeBack}) < 0.5 && whitespace.xr.history.flying === false`, 8000);
 ok(Math.abs((await far()) - beforeBack) < 0.5, "Forward returns to where you were at the object", { distance: await far(), beforeBack });
-await ev(`window.__xrDevice.controllers.left.updateButtonValue('y-button', 1), true`);
-await sleep(300);
-await ev(`window.__xrDevice.controllers.left.updateButtonValue('y-button', 0), true`);
-await until(`whitespace.xr.history.flying === false`, 3000);
-await sleep(100);
+await tap("left", "y-button");
+await until(`${headTo("logistic")} > ${beforeBack + 5} && whitespace.xr.history.flying === false`, 8000);
 ok((await far()) > beforeBack + 5, "Y is Back too", { distance: await far(), history: await ev(`whitespace.xr.history`) });
 await ev(`whitespace.xr.menuPress('home'), true`);
 await until(`whitespace.xr.history.flying === false`, 3000);
@@ -152,16 +158,13 @@ ok(await until(`whitespace.xr.panel === null`, 3000), "Close ends the tour's pan
 
 // ---- A closes the panel; Exit VR puts the camera back
 await ev(aim("logistic"));
-await ev(`window.__xrDevice.controllers.right.updateButtonValue('trigger', 1), true`);
-await sleep(200);
-await ev(`window.__xrDevice.controllers.right.updateButtonValue('trigger', 0), true`);
+await tap("right", "trigger");
 await until(`whitespace.xr.panel?.id === 'logistic'`, 5000);
-await ev(`window.__xrDevice.controllers.right.updateButtonValue('a-button', 1), true`);
-await sleep(300);
-await ev(`window.__xrDevice.controllers.right.updateButtonValue('a-button', 0), true`);
+await tap("right", "a-button");
 ok(await until(`whitespace.xr.panel === null`, 3000), "A closes the panel");
 await ev(`whitespace.xr.menuPress('exit'), true`);
 ok(await until(`!whitespace.xr.presenting`), "Exit VR (wrist menu) leaves");
+await until(`JSON.stringify(whitespace.camera.position.toArray().map((x) => +x.toFixed(3))) === ${JSON.stringify(JSON.stringify(camBefore))}`, 5000);
 const camAfter = await ev(`whitespace.camera.position.toArray().map((x) => +x.toFixed(3))`);
 ok(JSON.stringify(camAfter) === JSON.stringify(camBefore), "the camera is back where it was", [camBefore, camAfter]);
 // ---- AR: the space in the room (no background, so passthrough shows), and the background back afterwards
@@ -182,9 +185,7 @@ await ev(`document.querySelector('#vr').click(), true`);
 ok(await until(`whitespace.xr.presenting`), "in VR again");
 await ev(aim("d:lib"));
 await sleep(300);
-await ev(`window.__xrDevice.controllers.right.updateButtonValue('trigger', 1), true`);
-await sleep(200);
-await ev(`window.__xrDevice.controllers.right.updateButtonValue('trigger', 0), true`);
+await tap("right", "trigger");
 ok(await until(`whitespace.xr.panel?.id === 'd:lib' && whitespace.xr.panel.buttons.includes('enter')`, 5000), "a directory's panel offers Enter", await ev(`whitespace.xr.panel`));
 await until(`whitespace.xr.history.flying === false`, 3000);
 await ev(`whitespace.xr.press('enter'), true`);
@@ -234,9 +235,7 @@ await ev(`(() => { const W = whitespace, rig = W.xr.rig, V = rig.position.constr
   const c = window.__xrDevice.controllers.right, from = new V(c.position.x, c.position.y, c.position.z);
   const q = new Q().setFromUnitVectors(new V(0, 0, -1), t.sub(from).normalize()); c.quaternion.set(q.x, q.y, q.z, q.w); return true; })()`);
 await sleep(300);
-await ev(`window.__xrDevice.controllers.right.updateButtonValue('trigger', 1), true`);
-await sleep(200);
-await ev(`window.__xrDevice.controllers.right.updateButtonValue('trigger', 0), true`);
+await tap("right", "trigger");
 ok(await until(`!!whitespace.xr.chat`, 5000), "pointing at the agent opens its chat", await ev(`whitespace.xr.chat`));
 const sugg = await ev(`whitespace.xr.chat.buttons`);
 ok(sugg.length >= 1 && /plot/i.test(sugg[0]), "it offers a suggestion to point at", sugg);

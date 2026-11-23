@@ -46,20 +46,27 @@ const P = () => ev(`whitespace.camera.position.toArray().map((x) => +x.toFixed(2
 await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 700, y: 860 });
 for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: 700, y: 860, button: "left", clickCount: 1 });
 ok(await until(`Math.abs(whitespace.feet - whitespace.floorY) < 0.01`, 5000), "a click on the floor takes you there, standing on it", { feet: await ev(`whitespace.feet`), floor: await ev(`whitespace.floorY`) });
-const a = await P();
-await key("w"); await sleep(700); await key("w", false);
-const b = await P();
-ok(Math.hypot(b[0] - a[0], b[2] - a[2]) > 3 && Math.abs(b[1] - a[1]) < 0.01, "W walks along the floor", { a, b });
-await key(" ", true, { code: "Space" }); await sleep(250);
+// (movement is per drawn frame, and headless Chromium draws this scene only a few frames a second: a key is held
+//  until what it does has happened (with a deadline), never for a fixed time; then the view is let settle)
+const settle = async () => { let p = await P(); for (const t = Date.now(); Date.now() - t < 5000; ) { await sleep(300); const q = await P(); if (JSON.stringify(q) === JSON.stringify(p)) return q; p = q; } return p; };
+const a = await settle();
+await key("w");
+const walked = await until(`Math.hypot(whitespace.camera.position.x - ${a[0]}, whitespace.camera.position.z - ${a[2]}) > 3`, 8000);
+await key("w", false);
+const b = await settle();
+ok(walked && Math.abs(b[1] - a[1]) < 0.01, "W walks along the floor", { a, b });
+await key(" ", true, { code: "Space" });
+const jumped = await until(`whitespace.feet - whitespace.floorY > 1`, 3000);
 const up = await ev(`whitespace.feet - whitespace.floorY`);
 await key(" ", false, { code: "Space" });
-ok(up > 1, "Space jumps", { up });
+ok(jumped, "Space jumps", { up });
 ok(await until(`Math.abs(whitespace.feet - whitespace.floorY) < 0.01`, 3000), "and you land again");
-const t0 = await ev(`whitespace.controls.target.toArray()`), c0 = await P();
+const c0 = await settle(), t0 = await ev(`whitespace.controls.target.toArray()`);
 await send("Input.dispatchMouseEvent", { type: "mousePressed", x: 300, y: 200, button: "left", clickCount: 1 });
 for (let i = 1; i <= 5; i++) await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 300 + i * 30, y: 200, button: "left", buttons: 1 });
 await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 450, y: 200, button: "left", clickCount: 1 });
-const t1 = await ev(`whitespace.controls.target.toArray()`), c1 = await P();
+await until(`Math.hypot(whitespace.controls.target.x - ${t0[0]}, whitespace.controls.target.z - ${t0[2]}) > 1`, 5000);
+const t1 = await ev(`whitespace.controls.target.toArray()`), c1 = await settle();
 ok(Math.hypot(t1[0] - t0[0], t1[2] - t0[2]) > 1 && JSON.stringify(c1) === JSON.stringify(c0), "dragging looks around, without moving you", { t0, t1 });
 await key("g"); await key("g", false);
 ok((await ev(`whitespace.walking`)) === false && (await ev(`whitespace.controls.enabled`)), "G flies instead (the orbit controls back)");
