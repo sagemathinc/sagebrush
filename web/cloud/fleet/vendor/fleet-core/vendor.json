@@ -1,7 +1,7 @@
 {
  "about": "The fleet protocol's pure core, vendored unchanged from sagebrush-agent for the fleet Worker (web/cloud/fleet/). Each file is the commit's, byte for byte; vendor/sync.mjs verify re-checks them against a clone.",
  "repository": "https://github.com/sagemathinc/sagebrush-agent",
- "commit": "0e3c4e19486d5cbaff0cbd383a7617c544fdd8c0",
+ "commit": "59f393aa30f04874de95ec6af51dca4582951f3d",
  "license": "MIT",
  "files": {
   "core/bytes.mjs": {
