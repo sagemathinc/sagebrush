@@ -88,8 +88,6 @@ ALL = tuple(n for n, _ in VALUES) + tuple(UNIVERSES)
 ORDER = ("lt", "le", "gt", "ge")
 MUTATE = ("in", "incl", "tin", "append", "insert", "excl", "index", "remincl", "tappend", "tinsert", "trevincl")
 ARITH = ("add", "sub", "mul", "div", "idiv", "mod")
-# (P and P2 are one ring: PolynomialRing(Integers()) is the session's one ring over the integers, as Magma's)
-RING = {"x": "P", "x2": "P", "y": "Q", "z": "P"}
 GE_TUPLES = "ge of tuples of two lengths (Magma answers true both ways, where lt, le and gt call them incompatible)"
 SEQ_REASON = "a sequence converted into an element of a structure (Magma's coefficient conversion)"
 REFUSED = [
@@ -101,7 +99,6 @@ REFUSED = [
     (ORDER, ("mset",), ("mset",), "Magma's order on multisets"),
     (("ge",), ("tup",), ("tup3",), GE_TUPLES),
     (("ge",), ("tup3",), ("tup",), GE_TUPLES),
-    (ARITH, POLY, POLY, "arithmetic of polynomials of two rings (Magma maps generator to generator)"),
     (("add", "sub", "mul", "idiv", "mod"), ("real",), POLY, "polynomials over the real numbers"),
     (("add", "sub", "mul", "idiv", "mod"), POLY, ("real",), "polynomials over the real numbers"),
     (("add", "sub"), NUM + POLY + NFE, MAT, "a scalar added to a matrix"),
@@ -128,8 +125,6 @@ def refused(op, p, q):
     """The reason Sagebrush refuses the statement `op p q`, if it does."""
     for ops, ps, qs, reason in REFUSED:
         if op in ops and p in ps and q in qs:
-            if ops is ARITH and RING[p] == RING[q]:
-                continue
             return reason
     return None
 

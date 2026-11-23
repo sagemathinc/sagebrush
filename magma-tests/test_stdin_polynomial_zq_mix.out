@@ -1,0 +1,102 @@
+true
+2*x
+Univariate Polynomial Ring in x over Rational Field
+x^2
+0
+0
+4*x^2
+3/2*x
+7/3*x
+true
+false
+false
+true
+x - 1
+4
+x - 1
+Univariate Polynomial Ring in x over Rational Field
+1
+x - 1
+4
+1/2*x^2 - 1/4*x + 1/8
+-1/8
+Univariate Polynomial Ring in x over Rational Field
+1
+x/(x + 1)
+x^2 + x + 3
+Univariate Polynomial Ring in x over Rational Field
+x^2
+x - 1
+Univariate Polynomial Ring in x over Rational Field
+x + 1
+x^2 - 1
+Univariate Polynomial Ring in x over Rational Field
+x - 1
+4
+x^2
+[
+    x,
+    x
+]
+[
+    x,
+    x,
+    1/2
+]
+
+>> [y, 1/2];
+   ^
+Runtime error in [ ... ]: No valid universe containing all elements
+
+{
+    x
+}
+1
+{
+    x
+}
+{@
+    x
+@}
+<y, x>
+true
+true
+true
+[
+    x,
+    x
+]
+[
+    y,
+    y
+]
+2
+[
+    y,
+    y
+]
+true
+true
+true
+
+>> 1/2 in R;
+       ^
+Runtime error in 'in': Bad argument types
+
+true
+
+>> x in R;
+     ^
+Runtime error in 'in': Arguments are not compatible
+
+
+>> y in P;
+     ^
+Runtime error in 'in': Arguments are not compatible
+
+
+>> y notin P;
+     ^
+Runtime error in 'notin': Arguments are not compatible
+
+end

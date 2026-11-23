@@ -829,6 +829,7 @@ def _seq(items, universe=None):
     if universe is None and any(isinstance(x, _MResElt) for x in items):
         items = _res_items(items, None, "seq")
     if universe is None:
+        items = _zq_items(items, "[ ... ]")
         items = _ff_universe(items, "[ ... ]")
         if any(isinstance(x, _MFFPoly) for x in items):
             items = _ffp_items(items)
@@ -866,7 +867,7 @@ def _set_universe(items):
 def _set(items, universe=None, derived=False):
     items = list(items)
     if universe is None:
-        items = _cyc_items(items, "{ ... }")
+        items = _zq_items(_cyc_items(items, "{ ... }"), "{ ... }")
     items = _into_universe(list(items), universe, "set")
     inf = _infer_from(items) if universe is None else None
     m = MSet(_set_universe(_as_inferred(items, inf)), "set", universe)
@@ -880,7 +881,7 @@ def _set(items, universe=None, derived=False):
 def _iset(items, universe=None, derived=False):
     items = list(items)
     if universe is None:
-        items = _cyc_items(items, "{@ ... @}")
+        items = _zq_items(_cyc_items(items, "{@ ... @}"), "{@ ... @}")
     items = _into_universe(list(items), universe, "indexed")
     inf = _infer_from(items) if universe is None else None
     m = MSet(_set_universe(_as_inferred(items, inf)), "indexed", universe)
@@ -894,7 +895,7 @@ def _iset(items, universe=None, derived=False):
 def _mset(items, universe=None, derived=False):
     items = list(items)
     if universe is None:
-        items = _cyc_items(items, "{* ... *}")
+        items = _zq_items(_cyc_items(items, "{* ... *}"), "{* ... *}")
     items = _into_universe(list(items), universe, "multi")
     inf = _infer_from(items) if universe is None else None
     m = MSet(_set_universe(_as_inferred(items, inf)), "multi", universe)
@@ -2669,11 +2670,51 @@ def _rule_add(A, B, a, b, err, unsupported):
 
 def _poly_rings(A, B, a, b, unsupported):
     """Refused: polynomials of two rings (Magma maps generator to
-    generator) and polynomials with real numbers (over the reals)."""
-    if A[0] == B[0] == "P" and a.parent() is not b.parent() and a.parent() != b.parent():
+    generator) and polynomials with real numbers (over the reals); except
+    the session's rings over the integers and the rationals, which meet in
+    the latter (_zq_pair)."""
+    if A[0] == B[0] == "P" and a.parent() is not b.parent() and a.parent() != b.parent() and not _zq_mixed(a, b):
         raise unsupported("arithmetic of polynomials of two rings")
     if {A[0], B[0]} == {"P", "N"} and "R" in (A[1], B[1]):
         raise unsupported("polynomials over the real numbers")
+
+
+def _zq_mixed(a, b):
+    """Whether a and b are polynomials of the session's rings over the
+    integers and over the rationals, one each."""
+    if not (isinstance(a, _sp.Polynomial) and isinstance(b, _sp.Polynomial)):
+        return False
+    ra, rb = a.parent(), b.parent()
+    return isinstance(ra, _MPolyRingZQ) and isinstance(rb, _MPolyRingZQ) and ra._base is not rb._base
+
+
+def _zq_pair(a, b):
+    """a and b, a polynomial over the integers with one over the rationals
+    taken into the latter's ring, generator to generator, as Magma does
+    (y + x is 2*x in Q[x]); others as they are."""
+    if not _zq_mixed(a, b):
+        return a, b
+    if a.parent()._base is _sp.ZZ:
+        return b.parent()(a.list()), b
+    return a, a.parent()(b.list())
+
+
+def _zq_items(items, where):
+    """A collection's items with no declared universe: polynomials over the
+    integers go into the session's ring over the rationals when there are
+    polynomials over the rationals among them, as Magma's [y, x] is [x, x];
+    a rational that is not an integer with polynomials over the integers
+    only has no common universe ([y, 1/2], as Magma says)."""
+    polys = [x for x in items if isinstance(x, _sp.Polynomial) and isinstance(x.parent(), _MPolyRingZQ)]
+    if not polys:
+        return items
+    Q = next((x.parent() for x in polys if x.parent()._base is _sp.QQ), None)
+    if Q is None:
+        if any(isinstance(x, _Fraction) for x in items):
+            raise MagmaError("No valid universe containing all elements", where)
+        return items
+    return [Q(x.list()) if isinstance(x, _sp.Polynomial) and isinstance(x.parent(), _MPolyRingZQ) and x.parent()._base is _sp.ZZ
+            else x for x in items]
 
 
 def _rule_mul(A, B, a, b, err, pos, unsupported):
@@ -2831,6 +2872,7 @@ def _add(a, b, pos=None, op="+"):
         return _ffpoly_op("+", a, b, pos)
     if isinstance(a, _FFLIN) or isinstance(b, _FFLIN):
         return _ffmat_op("+", a, b, pos)
+    a, b = _zq_pair(a, b)
     a, b = _ff_operands(a, b, "+", pos)
     try:
         return _mod_result(a + b, "+", a, b)
@@ -2848,6 +2890,7 @@ def _sub(a, b, pos=None, op="-"):
         return _ffpoly_op("-", a, b, pos)
     if isinstance(a, _FFLIN) or isinstance(b, _FFLIN):
         return _ffmat_op("-", a, b, pos)
+    a, b = _zq_pair(a, b)
     a, b = _ff_operands(a, b, "-", pos)
     try:
         return _mod_result(a - b, "-", a, b)
@@ -2867,6 +2910,7 @@ def _mul(a, b, pos=None, op="*"):
         return _ffpoly_op("*", a, b, pos)
     if isinstance(a, _FFLIN) or isinstance(b, _FFLIN):
         return _ffmat_op("*", a, b, pos)
+    a, b = _zq_pair(a, b)
     a, b = _ff_operands(a, b, "*", pos)
     try:
         return _mod_result(a * b, "*", a, b)
@@ -2909,6 +2953,7 @@ def _div(a, b, pos=None, op="/"):
     if isinstance(a, MReal) or isinstance(b, MReal):
         a, b = _real_pair(a, b)
         return a / b
+    a, b = _zq_pair(a, b)
     a, b = _ff_operands(a, b, "/", pos)
     return _mod_result(a / b, "/", a, b)
 
@@ -2922,6 +2967,7 @@ def _idiv(a, b, pos=None):
     _arith("div", (a, b), pos)
     if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
         return _ffpoly_op("div", a, b, pos)
+    a, b = _zq_pair(a, b)
     if hasattr(a, "quo_rem"):
         return a.quo_rem(b)[0]
     return a // b
@@ -2936,6 +2982,7 @@ def _mod(a, b, pos=None):
     _arith("mod", (a, b), pos)
     if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
         return _ffpoly_op("mod", a, b, pos)
+    a, b = _zq_pair(a, b)
     if hasattr(a, "quo_rem"):
         return a.quo_rem(b)[1]
     return a % b
@@ -3600,6 +3647,13 @@ def _in(x, s, pos=None, op="in"):
         if isinstance(s, MSet) and _desc(x) in (("Z",), ("Str",), ("Bool",), None):
             return x in s  # a keyed lookup
         return any(_cmpeq(x, y) for y in s)
+    if isinstance(s, _MPolyRingZQ):
+        # (Magma's: a polynomial of the other ring of the two is not
+        # compatible, a rational not an integer is not one of Z[x]'s)
+        if isinstance(x, _sp.Polynomial) and isinstance(x.parent(), _MPolyRingZQ) and x.parent()._base is not s._base:
+            raise MagmaError("Arguments are not compatible", "'%s'" % op, True, pos)
+        if isinstance(x, _Fraction) and x.denominator != 1 and s._base is _sp.ZZ:
+            raise MagmaError("Bad argument types", "'%s'" % op, True, pos)
     return x in s
 
 
@@ -4035,7 +4089,9 @@ def _cat(a, b, pos=None):
                 ok = d is not None and du is not None and _common(d, du) is None
             if not ok:
                 raise MagmaError("Incompatible sequences", "'cat'", True, pos)
-        return _carry(MSeq(list(a) + list(b), getattr(a, "universe", None) or getattr(b, "universe", None),
+        u = getattr(a, "universe", None) or getattr(b, "universe", None)
+        items = list(a) + list(b) if u is not None else _zq_items(list(a) + list(b), "'cat'")
+        return _carry(MSeq(items, u,
                            getattr(a, "sample", None) or getattr(b, "sample", None)), a, b)
     raise _bad_types("cat", (a, b), pos)
 
@@ -7249,6 +7305,7 @@ def _gcd(name, args):
     if any(isinstance(a, _MFFPoly) for a in args):
         return _ffp_gcd(args, name=name)
     if any(isinstance(a, _sp.Polynomial) for a in args):
+        args = _zq_items(list(args), "'%s'" % name)  # (Z[x]'s with Q[x]'s: in Q[x])
         g = args[0]
         for a in args[1:]:
             g = g.gcd(a)
@@ -7295,7 +7352,7 @@ def _lcm(name, args):
     if not all(_int(a) or isinstance(a, _sp.Polynomial) for a in args):
         raise _bad_types(name, given)
     if any(isinstance(a, _sp.Polynomial) for a in args):
-        return _sa.lcm(*args)
+        return _sa.lcm(*_zq_items(list(args), "'%s'" % name))  # (Z[x]'s with Q[x]'s: in Q[x])
     # (a fold, nonnegative, 0 with a 0 among them, as Magma's: Lcm([-5]) is 5)
     l = 1
     for a in args:
