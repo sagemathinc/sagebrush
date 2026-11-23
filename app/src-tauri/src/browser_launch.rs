@@ -1,14 +1,20 @@
 // The browser lane's processes (browser-lane3-runtime.md sha256 49dc86d4, "Rust launches Chrome" and SEC §2, §3; O11
-// §2): Rust starts Chrome itself, on its debugging pipe, and records its PID with a start identity that can't be
-// reused; the cdp sidecar runs with no network (a Seatbelt profile) and gets the other ends of Chrome's pipe on its own
-// fds 3 and 4. macOS only: everywhere else start() is a typed refusal, decided at compile time, with no switch.
+// §2): Rust starts Chrome itself, on its debugging pipe; the cdp sidecar runs with no network (a Seatbelt profile) and
+// gets the other ends of Chrome's pipe on its own fds 3 and 4. macOS only: everywhere else platform() is a typed
+// refusal, decided at compile time, with no switch.
 //
-// The unsafe code is three small items, each with its own comment for review:
+// Ending (the SEC ruling on #1761, H3): nothing here ever signals a process by its PID.
+//   - A live session ends Chrome and the sidecars through the Child handles the app holds.
+//   - After an app crash the OS closes the app's pipe ends; Chrome (on --remote-debugging-pipe) and both sidecars
+//     exit on that EOF (the crash rows in the tests show it).
+//   - At the next start, the sweep removes a session's 0700 profile directory only once no process with the recorded
+//     start identity remains; if one does, it refuses, leaves the directory and says so with a fixed reason. It never
+//     signals.
+//
+// The unsafe code is two small items, each with its own comment for review:
 //   - `place_fds`: the child-side closure (pre_exec) that puts two pipe ends on fds 3 and 4, with async-signal-safe
 //     calls only (fcntl, dup2);
-//   - `start_identity` / `executable`: proc_pidinfo and proc_pidpath, to tell a recorded process from a reused PID;
-//   - `kill_if_same`: kill(2), only after both of those match the record.
-// Everything else (the flags, the profile directory, the record and the sweep's decisions) is safe code.
+//   - `start_identity`: proc_pidinfo, to tell a recorded process from a reused PID.
 use std::path::{Path, PathBuf};
 
 /// Why a browser session can't start here.
@@ -60,13 +66,12 @@ pub fn profile_dir(root: &Path, session: &str) -> Result<PathBuf, StartError> {
     Ok(dir)
 }
 
-/// The record Rust keeps of each Chrome it launches (O11 §2, the crash sweep): the PID with its start identity and
-/// executable, and the profile directory.  A PID alone is never enough to kill.
+/// The record Rust keeps of each Chrome it launches, for the sweep at the next start: the PID with its start identity,
+/// and the profile directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Launched {
     pub pid: u32,
     pub started: (u64, u64),
-    pub exe: PathBuf,
     pub profile: PathBuf,
 }
 
@@ -89,22 +94,23 @@ pub fn debugging_pipes() -> std::io::Result<(PipePair, PipePair)> {
 }
 
 /// Give a command the pair's ends as its fds 3 and 4 (and nothing else beyond stdio: every other descriptor Rust
-/// holds is close-on-exec, as std makes them).
+/// holds is close-on-exec, as std makes them).  The command takes the pair: its descriptors stay open, owned by the
+/// command, until the command is dropped, so drop it once the child is spawned (then only the child holds them).
 #[cfg(unix)]
-pub fn with_fds(cmd: &mut std::process::Command, pair: &PipePair) {
+pub fn with_fds(cmd: &mut std::process::Command, pair: PipePair) {
     use std::os::fd::AsRawFd;
     use std::os::unix::process::CommandExt;
-    let (a, b) = (pair.child_fd3.as_raw_fd(), pair.child_fd4.as_raw_fd());
     // SAFETY: the closure runs in the forked child before exec; it calls only fcntl and dup2, which are
-    // async-signal-safe, allocates nothing and touches no lock.  `a` and `b` are open in the child (fork copies the
-    // table; std's fds are close-on-exec, which dup2's targets aren't).
+    // async-signal-safe, allocates nothing and touches no lock.  It owns the pair, so both descriptors are open
+    // whenever the child is forked (fork copies the table; std's fds are close-on-exec, which dup2's targets aren't).
     unsafe {
-        cmd.pre_exec(move || place_fds(a, b));
+        cmd.pre_exec(move || place_fds(pair.child_fd3.as_raw_fd(), pair.child_fd4.as_raw_fd()));
     }
 }
 
-/// In the child: `a` onto fd 3 and `b` onto fd 4.  A source that is itself 3 or 4 is first moved above 4, so the two
-/// dup2s can't clobber each other; dup2 leaves the targets without close-on-exec.
+/// In the child: `a` onto fd 3 and `b` onto fd 4.  A source that is itself 3 or 4 is first copied above 4, close-on-exec
+/// (so the copy is gone at exec and the child holds nothing but its fds 3 and 4), and the two dup2s can't clobber each
+/// other; dup2 leaves the targets without close-on-exec.
 #[cfg(unix)]
 fn place_fds(a: i32, b: i32) -> std::io::Result<()> {
     // SAFETY: plain syscalls on descriptors this process owns; each result is checked.
@@ -113,7 +119,7 @@ fn place_fds(a: i32, b: i32) -> std::io::Result<()> {
             if fd > 4 {
                 return Ok(fd);
             }
-            let r = libc::fcntl(fd, libc::F_DUPFD, 5);
+            let r = libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 5);
             if r < 0 { Err(std::io::Error::last_os_error()) } else { Ok(r) }
         };
         let (a, b) = (high(a)?, high(b)?);
@@ -136,35 +142,18 @@ pub fn start_identity(pid: u32) -> Option<(u64, u64)> {
     }
 }
 
-/// A process's executable path, or None.
+/// The sweep at app start, for one recorded session: remove its profile directory, unless a process with the
+/// recorded start identity still exists (then the directory stays, and the reason says why).  Never a signal.
 #[cfg(target_os = "macos")]
-pub fn executable(pid: u32) -> Option<PathBuf> {
-    let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
-    // SAFETY: proc_pidpath writes at most the buffer's length, which we pass, and returns the length written.
-    let n = unsafe { libc::proc_pidpath(pid as i32, buf.as_mut_ptr() as *mut libc::c_void, buf.len() as u32) };
-    if n <= 0 {
-        return None;
+pub fn sweep_profile(l: &Launched) -> Result<(), &'static str> {
+    if start_identity(l.pid) == Some(l.started) {
+        return Err("its browser is still running");
     }
-    buf.truncate(n as usize);
-    use std::os::unix::ffi::OsStringExt;
-    Some(PathBuf::from(std::ffi::OsString::from_vec(buf)))
-}
-
-/// Whether the process now at `l.pid` is the one recorded: the same start identity and the same executable.
-#[cfg(target_os = "macos")]
-pub fn is_same(l: &Launched) -> bool {
-    start_identity(l.pid) == Some(l.started) && executable(l.pid).as_deref() == Some(l.exe.as_path())
-}
-
-/// The crash sweep's kill: SIGKILL the recorded process only if it is still the one recorded.  True if killed.
-#[cfg(target_os = "macos")]
-pub fn kill_if_same(l: &Launched) -> bool {
-    if !is_same(l) {
-        return false;
+    match std::fs::remove_dir_all(&l.profile) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err("the profile directory couldn't be removed"),
     }
-    // SAFETY: kill(2) with a positive pid we just checked is the recorded process (start time and executable); a pid
-    // of 0 or below is impossible from a u32 that the kernel just reported on.
-    l.pid > 0 && unsafe { libc::kill(l.pid as i32, libc::SIGKILL) } == 0
 }
 
 /// Start a browser session's processes.  Not macOS: refused, at compile time.

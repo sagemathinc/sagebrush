@@ -1,19 +1,34 @@
-// browser_launch: the flags, the profile directory, Chrome's pipe on a real child's fds 3 and 4, the start identity,
-// the identity-checked kill and the cdp sidecar's Seatbelt profile.  The process rows are macOS only (as the lane is).
+// browser_launch: the flags, the profile directory, Chrome's pipe on a real child's fds 3 and 4 (and nothing else, even
+// with colliding or churned descriptors), the start identity and the sweep, the cdp sidecar's Seatbelt profile, and
+// the crash rows: when the holder of the app's pipe ends dies abruptly, Chrome and the net sidecar exit on the EOF.
+// The process rows are macOS only (as the lane is).
 use super::*;
 
 #[test]
 fn chrome_gets_o11_s_flags_exactly() {
-    let a = chrome_args(Path::new("/tmp/p"), 50123);
-    assert_eq!(a[0], "--remote-debugging-pipe");
-    assert!(a.contains(&"--user-data-dir=/tmp/p".to_string()));
-    assert!(a.contains(&"--proxy-server=http://127.0.0.1:50123".to_string()));
-    assert!(a.contains(&"--proxy-bypass-list=<-loopback>".to_string()));
-    for f in ["--disable-quic", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp", "--dns-prefetch-disable", "--deny-permission-prompts", "--disable-blink-features=AutomationControlled", "--no-first-run", "--disable-extensions", "--disable-background-networking"] {
-        assert!(a.iter().any(|x| x == f), "{f}");
-    }
-    assert!(!a.iter().any(|x| x.starts_with("--remote-debugging-port")), "never a debugging port");
-    assert_eq!(a.len(), 17);
+    // (the whole list, in order: nothing more, nothing less, never a debugging port)
+    assert_eq!(
+        chrome_args(Path::new("/tmp/p"), 50123),
+        [
+            "--remote-debugging-pipe",
+            "--user-data-dir=/tmp/p",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-sync",
+            "--disable-extensions",
+            "--disable-component-extensions-with-background-pages",
+            "--disable-background-networking",
+            "--disable-default-apps",
+            "--proxy-server=http://127.0.0.1:50123",
+            "--proxy-bypass-list=<-loopback>",
+            "--disable-quic",
+            "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+            "--dns-prefetch-disable",
+            "--deny-permission-prompts",
+            "--disable-blink-features=AutomationControlled",
+            "about:blank",
+        ]
+    );
 }
 
 #[cfg(unix)]
@@ -39,9 +54,9 @@ fn a_child_gets_the_pipe_ends_on_fds_3_and_4() {
     // (a stand-in Chrome: reads a line on fd 3, answers on fd 4)
     let mut cmd = std::process::Command::new("/bin/sh");
     cmd.args(["-c", "read l <&3; echo \"got:$l\" >&4"]);
-    with_fds(&mut cmd, &chrome);
+    with_fds(&mut cmd, chrome);
     let mut child = cmd.spawn().unwrap();
-    drop(chrome); // (Rust keeps only the sidecar's ends)
+    drop(cmd); // (now only the child holds Chrome's ends)
     let mut to = std::fs::File::from(sidecar.child_fd3);
     writeln!(to, "hello").unwrap();
     drop(to);
@@ -51,25 +66,118 @@ fn a_child_gets_the_pipe_ends_on_fds_3_and_4() {
     assert!(child.wait().unwrap().success());
 }
 
+/// How a child's fds 3 and 4 were set up for `child_view`.
+#[cfg(unix)]
+#[derive(Clone, Copy)]
+enum Setup {
+    Plain,
+    /// The sources first moved onto these low descriptors in the child, then placed.
+    Collide(i32, i32),
+    /// The caller's descriptors churned (many opened and closed) between with_fds and spawn.
+    Churn,
+}
+
+/// The descriptors above 4 a child holds, as the child itself sees them (/dev/fd), and whether its fd 4 alone keeps the
+/// pipe's write end open: the child closes 4, then waits 3 s; the parent must see EOF within 2 s.
+#[cfg(unix)]
+fn child_view(setup: Setup) -> (String, bool) {
+    use std::io::Read;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::process::CommandExt;
+    let (chrome, sidecar) = debugging_pipes().unwrap();
+    let mut cmd = std::process::Command::new("/bin/sh");
+    cmd.args(["-c", "for f in 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32; do [ -e /dev/fd/$f ] && printf '%s ' $f; done >&2; exec 4>&-; sleep 3"]);
+    cmd.stderr(std::process::Stdio::piped());
+    match setup {
+        Setup::Collide(x, y) => {
+            // SAFETY: test-only, in the child before exec: dup2 only, then place_fds.  The closure owns the pair.
+            unsafe {
+                cmd.pre_exec(move || {
+                    if libc::dup2(chrome.child_fd3.as_raw_fd(), x) < 0 || libc::dup2(chrome.child_fd4.as_raw_fd(), y) < 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    // (close-on-exec, as std makes every descriptor it hands out: what place_fds is given in real use)
+                    if libc::fcntl(x, libc::F_SETFD, libc::FD_CLOEXEC) < 0 || libc::fcntl(y, libc::F_SETFD, libc::FD_CLOEXEC) < 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    place_fds(x, y)
+                });
+            }
+        }
+        Setup::Plain => with_fds(&mut cmd, chrome),
+        Setup::Churn => {
+            with_fds(&mut cmd, chrome);
+            // (the caller opens and closes many descriptors, pipes included, before spawning: the pair must survive)
+            for _ in 0..64 {
+                let f = std::fs::File::open("/dev/null").unwrap();
+                let p = std::io::pipe().unwrap();
+                drop((f, p));
+            }
+            let _held: Vec<std::fs::File> = (0..8).map(|_| std::fs::File::open("/dev/null").unwrap()).collect();
+        }
+    }
+    let mut child = cmd.spawn().unwrap();
+    drop(cmd);
+    drop(sidecar.child_fd3);
+    let mut seen = String::new();
+    let mut err = child.stderr.take().unwrap();
+    let start = std::time::Instant::now();
+    let mut from = std::fs::File::from(sidecar.child_fd4);
+    let mut buf = [0u8; 16];
+    let eof = from.read(&mut buf).unwrap() == 0 && start.elapsed() < std::time::Duration::from_secs(2);
+    err.read_to_string(&mut seen).unwrap();
+    child.kill().ok();
+    child.wait().unwrap();
+    (seen.trim().to_string(), eof)
+}
+
+#[cfg(unix)]
+#[test]
+fn a_child_holds_only_its_fds_3_and_4_even_when_the_sources_collide() {
+    let (plain, plain_eof) = child_view(Setup::Plain);
+    assert!(plain_eof, "closing the child's fd 4 ends the pipe: nothing else holds its write end");
+    // (sources already on the targets, swapped, and one low and one high)
+    for (x, y) in [(3, 4), (4, 3), (3, 6)] {
+        let (seen, eof) = child_view(Setup::Collide(x, y));
+        assert_eq!(seen, plain, "({x}, {y}): no temporary copy of a pipe end survives exec");
+        assert!(eof, "({x}, {y}): closing the child's fd 4 ends the pipe");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn the_pair_survives_the_caller_s_descriptor_churn_until_spawn() {
+    let (plain, _) = child_view(Setup::Plain);
+    let (seen, eof) = child_view(Setup::Churn);
+    assert_eq!(seen, plain, "exactly the intended pair, nothing else");
+    assert!(eof, "and it is the pair: closing the child's fd 4 ends the pipe");
+}
+
 #[cfg(target_os = "macos")]
 #[test]
-fn the_start_identity_and_executable_tell_a_process_from_a_reused_pid() {
+fn the_sweep_leaves_a_live_session_s_profile_and_removes_a_dead_one_s() {
     let me = std::process::id();
-    let started = start_identity(me).expect("this process");
-    assert!(started.0 > 1_700_000_000);
-    assert_eq!(executable(me).unwrap(), std::env::current_exe().unwrap().canonicalize().unwrap());
+    assert!(start_identity(me).expect("this process").0 > 1_700_000_000);
+    let root = std::env::temp_dir().join(format!("sb-sweep-test-{me}"));
+    std::fs::create_dir_all(&root).unwrap();
     let mut child = std::process::Command::new("/bin/sleep").arg("30").spawn().unwrap();
-    let rec = Launched { pid: child.id(), started: start_identity(child.id()).unwrap(), exe: executable(child.id()).unwrap(), profile: PathBuf::from("/nonexistent") };
-    assert!(is_same(&rec));
-    // (a record whose start time or executable differs is someone else's process: never killed)
-    for other in [Launched { started: (rec.started.0, rec.started.1 + 1), ..rec.clone() }, Launched { exe: PathBuf::from("/bin/cat"), ..rec.clone() }] {
-        assert!(!kill_if_same(&other));
-    }
-    assert!(child.try_wait().unwrap().is_none(), "still running");
-    assert!(kill_if_same(&rec));
-    use std::os::unix::process::ExitStatusExt;
-    assert_eq!(child.wait().unwrap().signal(), Some(libc::SIGKILL));
-    assert!(start_identity(rec.pid).is_none() || !is_same(&rec), "gone");
+    let rec = Launched { pid: child.id(), started: start_identity(child.id()).unwrap(), profile: profile_dir(&root, "s1").unwrap() };
+    // (alive: refused, the directory stays, and nothing is signalled)
+    assert_eq!(sweep_profile(&rec), Err("its browser is still running"));
+    assert!(rec.profile.exists());
+    assert!(child.try_wait().unwrap().is_none(), "never signalled");
+    // (a record with another start time is another process: the directory is removed, the live child untouched)
+    let other = Launched { started: (rec.started.0, rec.started.1 + 1), profile: profile_dir(&root, "s2").unwrap(), ..rec.clone() };
+    assert_eq!(sweep_profile(&other), Ok(()));
+    assert!(!other.profile.exists());
+    assert!(child.try_wait().unwrap().is_none());
+    // (once the process is gone, its directory is removed; and again is fine)
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert_eq!(sweep_profile(&rec), Ok(()));
+    assert!(!rec.profile.exists());
+    assert_eq!(sweep_profile(&rec), Ok(()));
+    std::fs::remove_dir_all(&root).unwrap();
 }
 
 #[cfg(target_os = "macos")]
@@ -94,6 +202,94 @@ fn the_cdp_sidecar_s_profile_refuses_the_network() {
     assert!(!try_connect(true), "with the profile it's refused");
     // (and the profile still runs a program that doesn't touch the network)
     assert!(std::process::Command::new("/usr/bin/sandbox-exec").args(["-p", CDP_PROFILE, "/usr/bin/true"]).status().unwrap().success());
+}
+
+/// Wait up to `ms` for `cond`.
+#[cfg(target_os = "macos")]
+fn within(ms: u64, mut cond: impl FnMut() -> bool) -> bool {
+    let end = std::time::Instant::now() + std::time::Duration::from_millis(ms);
+    while std::time::Instant::now() < end {
+        if cond() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    cond()
+}
+
+/// Whether any process's command line still names `needle` (pgrep -f).
+#[cfg(target_os = "macos")]
+fn any_process_names(needle: &str) -> bool {
+    std::process::Command::new("/usr/bin/pgrep").args(["-f", needle]).stdout(std::process::Stdio::null()).status().map(|s| s.success()).unwrap_or(false)
+}
+
+/// The crash row for Chrome: the app's ends of Chrome's pipe are held by a stand-in app process that is then killed
+/// abruptly (SIGKILL: no cleanup runs); the OS closes its ends, and Chrome and every helper process it started must
+/// be gone within a bound.  Chrome runs headless here (no window on the build machine); SAGEBRUSH_TEST_CHROME names the
+/// binary, else the installed Google Chrome; without one the row says so and passes vacuously.
+#[cfg(target_os = "macos")]
+#[test]
+fn after_an_abrupt_app_death_chrome_exits_on_the_pipe_s_eof() {
+    let chrome_bin = std::env::var("SAGEBRUSH_TEST_CHROME").unwrap_or_else(|_| "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".into());
+    if !Path::new(&chrome_bin).exists() {
+        eprintln!("NO CHROME: {chrome_bin} doesn't exist; the crash row didn't run");
+        return;
+    }
+    let root = std::env::temp_dir().join(format!("sb-crash-test-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let profile = profile_dir(&root, "crash").unwrap();
+    let (chrome_ends, app_ends) = debugging_pipes().unwrap();
+    let mut args = chrome_args(&profile, 9);
+    args.insert(1, "--headless=new".into());
+    let mut cmd = std::process::Command::new(&chrome_bin);
+    cmd.args(&args).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    with_fds(&mut cmd, chrome_ends);
+    let mut chrome = cmd.spawn().unwrap();
+    drop(cmd);
+    // (the stand-in app: it alone holds the app's ends, on its own fds 3 and 4)
+    let mut app = std::process::Command::new("/bin/sleep");
+    app.arg("600");
+    with_fds(&mut app, app_ends);
+    let mut holder = app.spawn().unwrap();
+    drop(app);
+    let needle = profile.display().to_string();
+    assert!(within(10_000, || any_process_names(&needle)), "Chrome started");
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    assert!(chrome.try_wait().unwrap().is_none(), "Chrome waits on its pipe while the app lives");
+    holder.kill().unwrap(); // (SIGKILL)
+    holder.wait().unwrap();
+    let started = std::time::Instant::now();
+    assert!(within(15_000, || chrome.try_wait().unwrap().is_some()), "Chrome exited on the pipe's EOF");
+    assert!(within(15_000, || !any_process_names(&needle)), "and every process it started is gone");
+    eprintln!("Chrome and its helpers gone {:?} after the app's death", started.elapsed());
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// The crash row for the net sidecar: the real sidecar (SAGEBRUSH_TEST_AGENT_DIR: a sagebrush-agent checkout) with its
+/// stdin held by a stand-in app process that is killed abruptly; the sidecar must see the EOF and exit.
+#[cfg(target_os = "macos")]
+#[test]
+fn after_an_abrupt_app_death_the_net_sidecar_exits_on_stdin_s_eof() {
+    let Ok(agent) = std::env::var("SAGEBRUSH_TEST_AGENT_DIR") else {
+        eprintln!("NO AGENT CHECKOUT: SAGEBRUSH_TEST_AGENT_DIR unset; the net sidecar crash row didn't run");
+        return;
+    };
+    let node = std::env::var("SAGEBRUSH_TEST_NODE").unwrap_or_else(|_| "/opt/homebrew/bin/node".into());
+    let main = Path::new(&agent).join("lib/fleet/browser/sidecar-net-main.mjs");
+    assert!(main.exists(), "{}", main.display());
+    // (the stand-in app holds the write end of the sidecar's stdin; the sidecar's stdout goes nowhere)
+    let (stdin_r, stdin_w) = std::io::pipe().unwrap();
+    let mut sidecar = std::process::Command::new(&node).arg(&main).stdin(stdin_r).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
+    let mut app = std::process::Command::new("/bin/sleep");
+    app.arg("600").stdout(std::process::Stdio::from(std::os::fd::OwnedFd::from(stdin_w)));
+    let mut holder = app.spawn().unwrap();
+    drop(app);
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    assert!(sidecar.try_wait().unwrap().is_none(), "the sidecar waits on stdin while the app lives");
+    holder.kill().unwrap();
+    holder.wait().unwrap();
+    assert!(within(10_000, || sidecar.try_wait().unwrap().is_some()), "the sidecar exited on stdin's EOF");
+    assert!(sidecar.wait().unwrap().success(), "with status 0");
 }
 
 #[test]
