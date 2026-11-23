@@ -1,0 +1,114 @@
+# Checks Windows signing (the sagebrush-signing-windows environment) without signing anything that ships: a
+# throwaway executable, built here and unsigned, is signed through Azure Artifact Signing with an RFC 3161 timestamp,
+# then checked with signtool verify and Get-AuthenticodeSignature.  The sign-in is GitHub's OIDC token for this job
+# (a federated credential trusted only for this environment): no Windows credential is stored anywhere; the
+# environment holds only identifiers (tenant, client, subscription) and the account, profile and endpoint names.
+# Prints only PASS or FAIL per check, and keeps the signed probe as a one-day run artifact; nothing is released.
+# Run by hand: gh workflow run windows-signing-check.yml -R sagemathinc/sagebrush --ref master -f sign_windows=true
+name: windows-signing-check
+
+on:
+  workflow_dispatch:
+    inputs:
+      sign_windows:
+        description: "Sign a throwaway executable with the Windows signing account (the sagebrush-signing-windows environment)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # (only by hand, from master, on this repository, and only when asked to sign: the environment's own branch and
+    #  tag limit and its required reviewer enforce the same; scripts/test-app-release-guard.mjs pins the cases)
+    if: github.repository == 'sagemathinc/sagebrush' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.sign_windows
+    runs-on: windows-latest
+    environment: sagebrush-signing-windows
+    timeout-minutes: 15
+    # (the OIDC token, for this job alone)
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: The environment's names are all set
+        shell: pwsh
+        env:
+          TENANT: ${{ secrets.AZURE_TENANT_ID }}
+          CLIENT: ${{ secrets.AZURE_CLIENT_ID }}
+          SUBSCRIPTION: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ENDPOINT: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          ACCOUNT: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          PROFILE: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+        run: |
+          $fails = 0
+          foreach ($n in 'TENANT','CLIENT','SUBSCRIPTION','ENDPOINT','ACCOUNT','PROFILE') {
+            if ([string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($n))) { "FAIL  $n is empty or missing"; $fails++ } else { "PASS  $n is set" }
+          }
+          if ($env:ENDPOINT -notmatch '^https://[a-z0-9]+\.codesigning\.azure\.net/?$') { "FAIL  ARTIFACT_SIGNING_ENDPOINT isn't an Artifact Signing endpoint"; $fails++ } else { "PASS  ARTIFACT_SIGNING_ENDPOINT is an Artifact Signing endpoint" }
+          if ($fails) { exit 1 }
+
+      # (a new console executable, unsigned: a .NET assembly from four lines of C#, by Windows PowerShell's compiler)
+      - name: Build the throwaway executable
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\probe" | Out-Null
+          $exe = "$env:RUNNER_TEMP\probe\sagebrush-signing-probe.exe"
+          Add-Type -OutputType ConsoleApplication -OutputAssembly $exe -TypeDefinition 'public static class P { public static void Main() { System.Console.WriteLine("sagebrush signing probe"); } }'
+          $s = Get-AuthenticodeSignature $exe
+          if ($s.Status -ne 'NotSigned') { "FAIL  the probe isn't unsigned before signing ($($s.Status))"; exit 1 }
+          "PASS  the probe is built, unsigned"
+
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # (signs with the Azure CLI sign-in above alone: every other credential type is left out; no caches in this job)
+      - uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          files: ${{ runner.temp }}\probe\sagebrush-signing-probe.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          cache-dependencies: false
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+
+      - name: Check the signature and its timestamp
+        shell: pwsh
+        run: |
+          $exe = "$env:RUNNER_TEMP\probe\sagebrush-signing-probe.exe"
+          $fails = 0
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
+          if (-not $signtool) { "FAIL  no signtool.exe on the runner"; exit 1 }
+          & $signtool.FullName verify /pa /all /v $exe | Out-Null
+          if ($LASTEXITCODE -eq 0) { "PASS  signtool verify /pa /all" } else { "FAIL  signtool verify /pa /all (exit $LASTEXITCODE)"; $fails++ }
+          $s = Get-AuthenticodeSignature $exe
+          if ($s.Status -eq 'Valid') { "PASS  Get-AuthenticodeSignature: Valid" } else { "FAIL  Get-AuthenticodeSignature: $($s.Status)"; $fails++ }
+          if ($s.TimeStamperCertificate) { "PASS  the signature is timestamped" } else { "FAIL  the signature has no timestamp"; $fails++ }
+          if ($s.SignerCertificate -and $s.SignerCertificate.Subject -match 'O=("?)SageMath, Inc\.') { "PASS  the signer is SageMath, Inc." } else { "FAIL  the signer isn't SageMath, Inc."; $fails++ }
+          (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower() + "  sagebrush-signing-probe.exe" | Out-File -Encoding ascii "$env:RUNNER_TEMP\probe\SHA256SUMS"
+          if ($fails) { exit 1 }
+
+      # (the signed probe only, for one day: a throwaway that prints one line, never the app)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-signing-probe
+          path: |
+            ${{ runner.temp }}/probe/sagebrush-signing-probe.exe
+            ${{ runner.temp }}/probe/SHA256SUMS
+          retention-days: 1
+          if-no-files-found: error
