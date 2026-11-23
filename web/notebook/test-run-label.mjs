@@ -1,6 +1,6 @@
 // ci: web-browser/notebook order=248
 // A cell's ▶ is labelled (William, Nov 20 2026, #1549: the agent said "click Run" and the button was an unlabeled play
-// icon): a "Run" caption under it, "Stop" while the cell runs or waits, shown and hidden with the button, inside the
+// icon): a "Run" caption under it ("Show" for a Markdown cell being written), "Stop" while the cell runs or waits, shown and hidden with the button, inside the
 // cell and its gutter at the page's widths (desktop, narrow); the button's own text (▶ / ■, which the Stop guard reads)
 // and its accessible name are unchanged. The built page, served by web/serve.py, in headless Chrome.
 // Run after `bun web/build.ts`:
@@ -47,6 +47,9 @@ try {
       const t = await P.ev(`(() => { const c = sagebrush.notebook.cells().find((x) => x.type === "code"); c.el.classList.add(${JSON.stringify(cls)}); const v = getComputedStyle(c.runb, "::after").content; c.el.classList.remove(${JSON.stringify(cls)}); return v; })()`);
       ok(t === '"Stop"', `${what}: while the cell is ${cls}, the caption says Stop`, t);
     }
+    // (a Markdown cell being written: its button shows the text, and says so)
+    const md = await P.ev(`(() => { const c = sagebrush.notebook.cells().find((x) => x.type === "code"); c.el.classList.add("markdown"); const v = getComputedStyle(c.runb, "::after").content; c.el.classList.remove("markdown"); return v; })()`);
+    ok(md === '"Show"', `${what}: a Markdown cell's caption says Show, as its title does`, md);
     // (a cell neither active nor hovered: no button, and so no caption)
     const hidden = await P.ev(`(() => { const c = sagebrush.notebook.cells().find((x) => x.type === "code"); c.el.classList.remove("active"); c.ta.blur(); document.activeElement?.blur?.(); return getComputedStyle(c.runb).visibility; })()`);
     ok(hidden === "hidden", `${what}: an inactive cell shows neither the button nor its caption`, hidden);
