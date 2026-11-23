@@ -842,6 +842,7 @@ def writematrix_(A, *args):
     or .csv; no extension adds .txt), comma-separated by default, numbers in long g format (NaN and -0 as written),
     an N-d array's trailing dimensions collapsed into columns (MATLAB's writematrix page)"""
     import os
+    _m._latex_refuse("writematrix")
     args = list(args)
     if not args or not _istext(args[0]):
         raise _err("writematrix: name the file, writematrix(A, filename): taking the name from the variable's is not supported in Sagebrush.")
