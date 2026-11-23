@@ -49,6 +49,13 @@ pub fn may_load(url: &Url, control: Option<&str>) -> bool {
     signer_page(url, control)
 }
 
+/// In the self-test's csp-off control only: whether `url` is the other local server the control frames, which the
+/// guard then lets load.  On macOS the navigation guard also sees a frame's loads, so without this the frame never
+/// loads and the control can't show that the capability and the command's check refuse it without the CSP.
+pub fn control_frame_ok(url: &Url, control: Option<&str>, other: Option<&Url>) -> bool {
+    control == Some("csp-off") && other.is_some_and(|o| matches!(o.scheme(), "http") && o.host_str() == Some("127.0.0.1") && o.origin() == url.origin())
+}
+
 /// Whether a call of a signing command comes from the signer window on its own page.
 pub fn signer_caller_ok(label: &str, url: &Url, control: Option<&str>) -> bool {
     label == LABEL && signer_page(url, control)
@@ -68,20 +75,35 @@ pub fn open(app: &tauri::AppHandle) -> Result<(), String> {
     let page = if c.as_deref() == Some("csp-off") { PAGE_NO_CSP } else { PAGE };
     let guard_off = c.as_deref() == Some("guard-off");
     let gc = c.clone();
+    // (the self-test's other local server, which the controls frame or visit)
+    let probe = std::env::var("SAGEBRUSH_APP_PERSIST").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some());
+    let other: Option<Url> = probe.as_deref().and_then(|p| p.strip_prefix("signer:")).and_then(|o| o.parse().ok());
+    let go = other.clone();
     let mut w = tauri::WebviewWindowBuilder::new(app, LABEL, tauri::WebviewUrl::App(page.into()))
         .title("Sagebrush: approvals")
         .inner_size(560.0, 640.0)
-        .incognito(true)
         .disable_drag_drop_handler()
+        // (each load of the window's pages, by origin and path only: the self-test reads how far the page got)
+        .on_page_load(|_w, p| {
+            let u = p.url();
+            eprintln!("[signer] page {} {}{}", if matches!(p.event(), tauri::webview::PageLoadEvent::Started) { "started" } else { "finished" }, u.origin().ascii_serialization(), u.path());
+        })
         .on_navigation(move |u| {
-            let yes = guard_off || may_load(u, gc.as_deref());
+            let yes = guard_off || may_load(u, gc.as_deref()) || control_frame_ok(u, gc.as_deref(), go.as_ref());
             if !yes {
                 eprintln!("[signer] refused to load {}", u.origin().ascii_serialization());
             }
             yes
         });
+    // (incognito, so the window keeps no web storage, except on Linux: there WebKitGTK gives an incognito web view an
+    //  ephemeral context of its own, without the app protocol's handlers, and the page never ran (CI, Nov 23). The
+    //  signer page stores nothing itself, and Linux builds enroll only as browser tier.)
+    #[cfg(not(target_os = "linux"))]
+    {
+        w = w.incognito(true);
+    }
     // (a self-test's probe of the window: what the page is to try, the other local server's origin)
-    if let Some(p) = std::env::var("SAGEBRUSH_APP_PERSIST").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some()) {
+    if let Some(p) = probe {
         if let Some(other) = p.strip_prefix("signer:") {
             w = w.initialization_script(&format!("window.__SB_SIGNER_PROBE__ = {};", serde_json::json!({ "other": other, "control": c })));
         }
@@ -165,6 +187,25 @@ mod tests {
         let p: serde_json::Value = serde_json::from_str(&crate::nav::page_capability(49214)).unwrap();
         assert!(!p["permissions"].as_array().unwrap().iter().any(|x| x.as_str().is_some_and(|s| s.contains("signer"))), "{p}");
         assert!(!p["windows"].as_array().unwrap().iter().any(|w| w == "signer" || w == "*"), "{p}");
+    }
+
+    #[test]
+    fn only_the_csp_off_control_lets_the_other_server_load() {
+        let other = u("http://127.0.0.1:49314");
+        assert!(control_frame_ok(&u("http://127.0.0.1:49314/sframe"), Some("csp-off"), Some(&other)));
+        for (url, control, o) in [
+            ("http://127.0.0.1:49314/sframe", None, Some(&other)),
+            ("http://127.0.0.1:49314/sframe", Some("cap"), Some(&other)),
+            ("http://127.0.0.1:49314/sframe", Some("guard-off"), Some(&other)),
+            ("http://127.0.0.1:49314/sframe", Some("csp-off"), None),
+            ("http://127.0.0.1:49315/sframe", Some("csp-off"), Some(&other)),
+            ("https://sagebrush.space/", Some("csp-off"), Some(&other)),
+        ] {
+            assert!(!control_frame_ok(&u(url), control, o), "{url} {control:?}");
+        }
+        // (an "other" that isn't a local http server is never let in)
+        let remote = u("https://example.com");
+        assert!(!control_frame_ok(&u("https://example.com/x"), Some("csp-off"), Some(&remote)));
     }
 
     #[test]
