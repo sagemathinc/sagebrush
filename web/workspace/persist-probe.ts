@@ -181,6 +181,37 @@ export async function persistProbe(spec: string, host: { ws: () => Promise<any>;
         ok = !!saw && saw.label === label && label !== "main" && !marks.length && saw.file === tok && saw.holder === "main";
         line = `windows at ${location.origin}: ${!saw ? `no word from the second window (${label}) within 60 s` : `the second window (${saw.label}) ${marks.length ? `saw the first's marker in ${marks.join(", ")}` : "saw none of the first's markers (localStorage, sessionStorage, IndexedDB)"}, ${saw.file === tok ? "found the first's file on disk" : `found ${JSON.stringify(saw.file)} for the first's file`}, and was told ${saw.holder === "main" ? "the first window has it" : `${JSON.stringify(saw.holder)} has it`}; what it saw reached the first as another window's change`}`;
       }
+    } else if (mode === "signer") {
+      // "signer:<origin>" (N1, app/src-tauri/src/signer.rs): who can reach the approvals window's signing command.  The
+      // app opens that window itself (as its menu does), whose page signs once (the positive).  This page, a second
+      // window's, a notebook output's frame and another local server's frame each try the command, and this page tries a
+      // command that would open the window from a page (there is none).  What reached the command, and what signed, is
+      // judged by run.mjs from the app's own log (signer.rs's lines), not by this page.
+      const other = token, me = (window as any).__TAURI_INTERNALS__?.metadata?.currentWebview?.label;
+      const tryIt = (cmd: string) => host.invoke(cmd, { msg: "page " + me }).then((v: any) => `REACHED ${String(v).slice(0, 40)}`, (e: any) => `refused: ${String(e?.message ?? e).slice(0, 80)}`);
+      const sign = await tryIt("signer_probe_sign");
+      if (me !== "main") { peer = true; return; }
+      const open = await tryIt("signer_open");
+      const frameOut: any = await new Promise((res) => {
+        const f = document.createElement("iframe");
+        f.setAttribute("sandbox", "allow-scripts");
+        f.style.display = "none";
+        const done = (v: any) => { removeEventListener("message", on); f.remove(); res(v); };
+        const on = (e: MessageEvent) => { if (e.source === f.contentWindow && e.data?.sbSignerProbe) done(e.data.sbSignerProbe); };
+        addEventListener("message", on);
+        setTimeout(() => done(null), 15000);
+        f.srcdoc = `<script>(async () => { let r; try { r = "REACHED " + await window.__TAURI_INTERNALS__.invoke("signer_probe_sign", { msg: "frame" }); } catch (e) { r = "refused: " + String(e && e.message || e).slice(0, 80); } parent.postMessage({ sbSignerProbe: r }, "*"); })();<\/script>`;
+        document.body.append(f);
+      });
+      const ff = document.createElement("iframe");
+      ff.style.display = "none";
+      ff.src = other + "/frame";
+      document.body.append(ff);
+      await host.invoke("window_open", { at: "/" }).catch(() => {});
+      // (the approvals window's page, its controls, the second window: time to act)
+      await new Promise((r) => setTimeout(r, 8000));
+      ok = true;
+      line = `signer at ${location.origin}: this page's signing call ${sign}; a page's signer_open ${open}; an output frame's ${frameOut ?? "(no answer)"}`;
     } else line = `no such mode ${JSON.stringify(mode)}`;
   } catch (e: any) { line = `${mode} at ${location.origin}: ${e?.message ?? e}`; }
   // (the second window of "windows" reports through the first)

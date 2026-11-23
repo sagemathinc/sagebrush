@@ -53,6 +53,7 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capture, judge, python } from "./run-judge.mjs";
+import { signerVerdict } from "./signer-judge.mjs";
 
 const RUN_MS = 360000;
 
@@ -185,6 +186,9 @@ function otherServer() {
       catch (e) { say("refused: " + String(e && e.message || e).slice(0, 80)); }
       try { const x = await window.__TAURI__.fs.exists("/"); say("REACHED fs.exists " + x); }
       catch (e) { say("fs refused: " + String(e && e.message || e).slice(0, 80)); }
+      // (the approvals window's signing command, N1: never another origin's page's, wherever it is loaded)
+      try { const x = await window.__TAURI__.core.invoke("signer_probe_sign", { msg: "${name}" }); say("REACHED signer " + String(x).slice(0, 40)); }
+      catch (e) { say("signer refused: " + String(e && e.message || e).slice(0, 80)); }
     })();
   <\/script>`;
   const server = httpCreateServer((req, res) => {
@@ -254,6 +258,35 @@ if (passed) {
     console.log(why ? "the control failed, for its reason, as it must" : `FAIL the control didn't fail for its reason (the markers seen): ${c.line}`);
     if (c.left.length) console.log("FAIL the last launch's web view data folders weren't removed at this launch");
     passed &&= why && !c.left.length;
+  }
+}
+// The approvals window (N1, app/src-tauri/src/signer.rs; the verdict is signer-judge.mjs, whose expectations it
+// states): a launch with SAGEBRUSH_APP_PERSIST=signer:<another local server's origin>.  The app opens the approvals
+// window as its menu does; its page signs once with the stand-in command (no key yet).  The main page, a second window,
+// a notebook output's frame and the other server's frame each try the command, and the main page tries to open the
+// window from a page.  Then the controls, each leaving one guard out (SAGEBRUSH_APP_SIGNER_CONTROL): "cap" the command
+// in the page's capability too (other windows' calls reach it; its own check refuses them), "cap+check" that and no
+// check (another window's call signs: the probe sees the path it checks), "csp-off" the signer's page without its CSP,
+// framing the other server's page, and "guard-off" the signer window's navigation guard left out, the window sent to
+// that page (each loads there, and reaches nothing).  Calls that reached the command and signatures are counted from
+// the app's own log.
+async function signerLaunch(control) {
+  const o = await otherServer();
+  const res = await launch({ SAGEBRUSH_APP_PERSIST: `signer:${o.origin}`, SAGEBRUSH_APP_DATA_DIR: mkdtempSync(join(tmpdir(), "sagebrush-app-data-")), ...(control ? { SAGEBRUSH_APP_SIGNER_CONTROL: control } : {}) }, 120000);
+  await new Promise((r) => setTimeout(r, 1000));
+  o.close();
+  const v = signerVerdict({ err: res.err, out: res.out, seen: o.seen, control });
+  console.log(`launch${control ? ` (control: ${control})` : ""}: ${persistLine(res)} (exit ${res.code}); reached the command ${v.counts.dispatches} (${v.counts.dispatchesOthers} not the approvals window's), signed ${v.counts.signed} (${v.counts.signedOthers} not the approvals window's)`);
+  console.log(`  the other server (${o.origin}) saw: ${o.seen.length ? o.seen.join("; ") : "nothing"}`);
+  return v;
+}
+if (passed) {
+  for (const control of [null, "cap", "cap+check", "csp-off", "guard-off"]) {
+    console.log(`\nthe approvals window${control ? `, the control "${control}"` : ": only its own page signs"}`);
+    const v = await signerLaunch(control);
+    console.log(v.ok ? "as it must" : `FAIL ${v.why.join("; ")}`);
+    passed &&= v.ok;
+    if (!passed) break;
   }
 }
 process.exit(passed ? 0 : 1);
