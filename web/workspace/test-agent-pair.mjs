@@ -342,6 +342,10 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
     W.files.set("/A/text.png", "not an image");
     W.files.set("/A/wave.webp", bytes([...ascii("RIFF"), 1, 2, 3, 4, ...ascii("WAVE")]));
     W.files.set("/A/half.png", bytes(PNG.slice(0, 7)));
+    W.files.set("/A/half.jpg", bytes([0xff, 0xd8]));
+    W.files.set("/A/half.gif", bytes(ascii("GIF89")));
+    W.files.set("/A/half.webp", bytes([...ascii("RIFF"), 1, 2, 3, 4, ...ascii("WEB")]));
+    W.files.set("/A/buf.png", bytes(PNG).buffer);
     W.files.set("/A/exact.png", bytes(PNG, 3_750_000));
     W.files.set("/A/over.png", bytes(PNG, 3_750_001));
   };
@@ -365,6 +369,11 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   const n3 = await S.request("workspace.read", { path: "/A/wave.webp" }, w);
   const n4 = await S.request("workspace.read", { path: "/A/half.png" }, w);
   ok(n3.result?.content !== undefined && !("image" in n3.result) && typeof n4.result?.content?.base64 === "string" && !("image" in n4.result), "RIFF that isn't WEBP, and a cut PNG signature: read as before ({content})");
+  const cut = [];
+  for (const p of ["/A/half.jpg", "/A/half.gif", "/A/half.webp"]) cut.push(await S.request("workspace.read", { path: p }, w));
+  ok(cut.every((r) => r.result?.content !== undefined && !("image" in r.result)), "a cut JPEG, GIF or WebP signature: not an image");
+  const ab = await S.request("workspace.read", { path: "/A/buf.png" }, w);
+  ok(ab.result?.image?.base64?.length === 88, "an image held as an ArrayBuffer: sent as an image too");
   const n5 = await S.request("workspace.read", { path: "/A/x.txt" }, w);
   const n6 = await S.request("workspace.read", { path: "/A/doc.ipynb" }, w);
   ok(n5.result?.content?.text === "hello" && n6.result?.content?.json?.cells !== undefined, "text and documents are read as before");
