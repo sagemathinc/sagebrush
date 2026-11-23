@@ -849,7 +849,8 @@ class Polynomial:
             sage: (t^2).variable_name()
             't'
         """
-        return self._ring._name
+        # (the ring's, as it says it: Magma mode's shared rings show a name their _name doesn't carry)
+        return self._ring.variable_name()
 
     def degree(self):
         """The degree (-1 for the zero polynomial).
