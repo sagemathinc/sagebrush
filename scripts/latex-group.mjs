@@ -104,10 +104,10 @@ export const LATEX_LAZY = {
 // (252,517 raw / 84,516 gzip: Nov 21 2026, the editor's own list of examples gone (the gallery's panel the only one):
 //  252,453 / 84,452 measured on the shipped build of its merge with master 68280840, with bun 1.4.4 and node 24.21.0,
 //  + 64)
-// (281,906 raw / 95,077 gzip: Nov 23 2026, TikZ pictures drawn in the preview, round 1 part a (paths, styles,
-//  transforms, \foreach: web/latex/engine/tikz.mjs, in the worker's bundle as ruled): 281,842 / 95,013 measured on the
+// (283,012 raw / 95,467 gzip: Nov 23 2026, TikZ pictures drawn in the preview (paths, styles,
+//  transforms, \foreach: web/latex/engine/tikz.mjs, in the worker's bundle, with its bounds): 282,948 / 95,403 measured on the
 //  shipped build of its merge with master 6d1c0b06, with bun 1.4.4 and node 24.21.0, + 64)
-export const LATEX_CAPS = { raw: 281906, gzip: 95077 };
+export const LATEX_CAPS = { raw: 283012, gzip: 95467 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:

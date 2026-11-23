@@ -1,5 +1,5 @@
 {
-  "_": "The TikZ benchmark's pictures (round 1 part a: paths, styles, transforms, \\foreach; no nodes), written for this benchmark. src: a tikzpicture's body. iou: the least ink overlap (within 0.24 pt) the picture is held to, recorded from its first run, with why when it is not the default.",
+  "_": "The TikZ benchmark's pictures (paths, styles, transforms, \\foreach; no nodes, which the preview doesn't draw yet), written for this benchmark. src: a tikzpicture's body. iou: the least ink overlap (within 0.24 pt) the picture is held to, recorded from its first run, with why when it is not the default.",
   "pictures": [
     { "id": "T01", "name": "segment", "src": "\\draw (0,0) -- (3,1);" },
     { "id": "T02", "name": "polyline-cycle", "src": "\\draw (0,0) -- (2,0) -- (2.5,1.5) -- (0.5,2) -- cycle;" },

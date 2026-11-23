@@ -645,7 +645,7 @@ class Renderer {
         const b = flow.open("div", ' class="env-' + esc(env) + '"'); this.walk(n.kids, c2, flow); flow.close(b); return;
       }
       case "tikzpicture": {
-        // (TikZ's drawing: tikz.mjs, round 1: paths, styles, transforms, \foreach; what it doesn't draw, a placeholder
+        // (TikZ's drawing: tikz.mjs: paths, styles, transforms, \foreach; what it doesn't draw, a placeholder
         //  naming it, and check's problem says it)
         try { flow.html(renderTikz(this.tikzStr(n.kids), { styles: this.tikzStyles || "" }, this), c2.st); }
         catch (e) {

@@ -34,4 +34,4 @@ number) and `table.md`.
     without one. A picture's own `iou` is recorded with its reason (`why`).
 
 The pictures were written for this benchmark. They are paths, styles,
-transforms and `\foreach`; nodes come in the next round.
+transforms and `\foreach`. Nodes (text in a picture) aren't drawn by the preview yet, so no picture here has one.

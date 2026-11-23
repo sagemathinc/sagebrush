@@ -14275,11 +14275,19 @@
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
  "web/latex/engine/tikz.mjs :: dim :: case \"line cap\": if (!/^(butt|round|rect)$/.test(val)) fail(\"a line cap the preview doesn't draw: \" + val); st.cap = val === \"rect\" ? \"square\" : val; return; #0": {
-  "class": "none",
+  "class": "coverage",
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "matched text that refuses nothing: the line cap's attribute, the path state's cap field, pgfmath's max function"
+  "reason": "an unsupported feature, not a cap: a line cap TikZ doesn't have is named, not drawn"
  },
  "web/latex/engine/tikz.mjs :: evalMath :: if (s.length > TIKZ_LIMITS.EXPR_LEN) fail(\"an expression over \" + TIKZ_LIMITS.EXPR_LEN + \" characters\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: expandList :: for (let j = 1; j <= n; j++) { out.push(fmtNum(a + j * step)); if (out.length > TIKZ_LIMITS.EXPAND) fail(\"a \\\\foreach list of more than \" + TIKZ_LIMITS.EXPAND + \" items\"); } #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -14319,6 +14327,30 @@
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
+ "web/latex/engine/tikz.mjs :: foreach :: if (size > TIKZ_LIMITS.SRC_MAX) fail(\"a \\\\foreach body over \" + TIKZ_LIMITS.SRC_MAX / 1024 + \" KiB once its variables are replaced\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: foreach :: if (this.lexed + size > TIKZ_LIMITS.LEX_TEXT) fail(\"more than \" + TIKZ_LIMITS.LEX_TEXT / 2 ** 20 + \" MiB of picture text read, \\\\foreach bodies expanded included\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: options :: if ((this.optionText += text.length + 32) > TIKZ_LIMITS.OPTION_TEXT) fail(\"options and styles past \" + TIKZ_LIMITS.OPTION_TEXT + \" characters applied in all (styles naming styles many times over?)\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
  "web/latex/engine/tikz.mjs :: options :: if (depth > TIKZ_LIMITS.STYLE_DEPTH) fail(\"styles naming styles more than \" + TIKZ_LIMITS.STYLE_DEPTH + \" deep (a style that names itself?)\"); #0": {
   "class": "1",
   "disposition": {
@@ -14336,6 +14368,22 @@
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
  "web/latex/engine/tikz.mjs :: renderTikz :: if (src.length > TIKZ_LIMITS.SRC_MAX) throw new TikzError(\"a picture over \" + TIKZ_LIMITS.SRC_MAX / 1024 + \" KiB of source\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: renderTikz :: throw new TikzError(\"a picture the preview couldn't draw (\" + (e instanceof RangeError ? \"too large\" : \"an internal error\") + \")\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: run :: if (sdepth >= TIKZ_LIMITS.SCOPE_DEPTH) fail(\"scopes inside scopes more than \" + TIKZ_LIMITS.SCOPE_DEPTH + \" deep\"); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"

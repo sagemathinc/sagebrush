@@ -1,11 +1,11 @@
-// TikZ in the preview (round 1, part a): a tikzpicture's paths drawn as SVG. One entry point, renderTikz(src, opts, R):
+// TikZ in the preview: a tikzpicture's paths drawn as SVG. One entry point, renderTikz(src, opts, R):
 // `src` the picture's source (its [options] first), as the renderer's str() gives it; R the renderer, of which only
 // problem() and the document's colours (R.colors) and id counter (R.idn) are used. The subset: \draw, \fill,
 // \filldraw, \path, \coordinate, \foreach, scope, \tikzset and .style; coordinates (x,y) with or without units, polar
 // (a:r), named, + and ++, the calc library's ($(A)!t!(B)$) and ($(A)+(B)$); --, |-, -|, rectangle, circle, ellipse,
 // arc, to[out,in] and bend, .. controls .., cycle, grid; colours (xcolor's names and mixes), line widths, dash
 // patterns, opacity, rounded corners, arrows; scale, shift, rotate, applied as TikZ applies them. Anything else (nodes
-// among them, until part b) is a placeholder naming what stopped it, never a partial picture.
+// among them, for now) is a placeholder naming what stopped it, never a partial picture.
 // Everything is bounded (TIKZ_LIMITS): the expansion of \foreach bodies and styles, path segments, grid lines, the
 // math evaluator's depth and length, coordinates' size and the SVG's bytes.
 // Geometry: the picture's user space is TeX points (1 cm = 72.27/2.54 pt), y up; a path is lines and cubic Béziers in
@@ -15,6 +15,11 @@ export const TIKZ_LIMITS = {
   ITEMS: 20000,            // path segments in one picture
   EXPAND: 10000,           // \foreach body expansions in one picture, all loops together
   FOREACH_DEPTH: 4,        // \foreach inside \foreach
+  LEX_TEXT: 4 * 2 ** 20,   // characters read in one picture: its source and every \foreach body as expanded, together
+  SCOPE_DEPTH: 32,         // a scope inside a scope
+  OPTION_TEXT: 1000000,    // options and styles applied in one picture, all together: their characters, and 32 for
+                           // each list (a style naming styles many times over is work that grows with each level, not
+                           // only with the depth)
   STYLE_DEPTH: 8,          // a .style naming another style, naming another...
   GRID_LINES: 2000,        // lines one grid draws
   EXPR_LEN: 400,           // characters of one math expression
@@ -96,7 +101,7 @@ const FUNCS = {
   tan: (x) => { const r = ((x % 180) + 180) % 180; if (Math.abs(r - 90) < 1e-9) fail("tan(" + fmtNum(x) + ") is infinite"); return Math.tan((x * Math.PI) / 180); },
   sqrt: (x) => { if (x < 0) fail("sqrt of a negative number (" + fmtNum(x) + ")"); return Math.sqrt(x); },
   abs: Math.abs, exp: (x) => Math.exp(x), ln: (x) => { if (x <= 0) fail("ln of " + fmtNum(x)); return Math.log(x); },
-  deg: (x) => (x * 180) / Math.PI, rad: (x) => (x * Math.PI) / 180, round: Math.round, floor: Math.floor, ceil: Math.ceil,
+  deg: (x) => (x * 180) / Math.PI, rad: (x) => (x * Math.PI) / 180, round: (x) => Math.sign(x) * Math.round(Math.abs(x)), floor: Math.floor, ceil: Math.ceil,
   asin: (x) => { if (x < -1 || x > 1) fail("asin of " + fmtNum(x)); return (Math.asin(x) * 180) / Math.PI; },
   acos: (x) => { if (x < -1 || x > 1) fail("acos of " + fmtNum(x)); return (Math.acos(x) * 180) / Math.PI; },
   atan: (x) => (Math.atan(x) * 180) / Math.PI,
@@ -228,10 +233,13 @@ class Picture {
     this.styles = new Map();          // name -> option text (.style)
     this.named = new Map();           // coordinate name -> canvas point
     this.paths = [];                  // drawn paths: {d: [[cmd, pts...]], st}
-    this.items = 0; this.expansions = 0;
+    this.items = 0; this.expansions = 0; this.lexed = 0; this.optionText = 0;
     this.box = null;                  // the bounding box in canvas pt
     this.markers = new Map();
   }
+  // (every text read, the source's and each expansion's, counted: a body read again for each item is work again; the
+  //  bound is checked in foreach, before an expansion is made)
+  lex(text) { this.lexed += text.length; return lex(text); }
   count(n = 1) { if ((this.items += n) > TIKZ_LIMITS.ITEMS) fail("more than " + TIKZ_LIMITS.ITEMS + " path segments"); }
 
   // ---- state: a scope's transform and style
@@ -242,6 +250,7 @@ class Picture {
   // the options of a scope or path, applied left to right to a copy of `st`
   options(text, st, depth = 0) {
     if (depth > TIKZ_LIMITS.STYLE_DEPTH) fail("styles naming styles more than " + TIKZ_LIMITS.STYLE_DEPTH + " deep (a style that names itself?)");
+    if ((this.optionText += text.length + 32) > TIKZ_LIMITS.OPTION_TEXT) fail("options and styles past " + TIKZ_LIMITS.OPTION_TEXT + " characters applied in all (styles naming styles many times over?)");
     for (const o of splitOptions(text)) this.option(o, st, depth);
     return st;
   }
@@ -323,7 +332,7 @@ class Picture {
     if (/^\$.*\$$/s.test(t)) return this.calc(t.slice(1, -1), st);
     if ((m = /^([A-Za-z][\w ]*?)(?:\.(\w[\w ]*))?$/.exec(t)) && !/^\d/.test(t) && !t.includes(",") && !t.includes(":")) {
       if (rel) fail("a named point where a vector is needed: " + t);
-      if (m[2] !== undefined) fail("a node's anchor (" + t + "): nodes come in the next round");
+      if (m[2] !== undefined) fail("a node's anchor (" + t + "): nodes aren't drawn by the preview yet");
       if (!this.named.has(m[1].trim())) fail("a point not defined before it is used: (" + t + ")");
       return apply(inverse(st.m), this.named.get(m[1].trim()));
     }
@@ -332,8 +341,9 @@ class Picture {
     for (let i = 0; i < t.length; i++) { const c = t[i]; if (c === "{" || c === "(") d++; else if (c === "}" || c === ")") d--; else if (d === 0 && c === ":" && k < 0) k = i; }
     if (k >= 0) {
       const a = evalMath(unbrace(t.slice(0, k))).v, rr = evalMath(unbrace(t.slice(k + 1)));
-      const r = rr.units ? rr.v : rr.v * Math.hypot(st.x[0], st.x[1]);
-      return checkPt([r * Math.cos((a * Math.PI) / 180), r * Math.sin((a * Math.PI) / 180)]);
+      const c = rr.v * Math.cos((a * Math.PI) / 180), sn = rr.v * Math.sin((a * Math.PI) / 180);
+      // (with a unit, in the canvas's own pt; without, along the x and y vectors, as pgf's \pgfpointpolarxy)
+      return checkPt(rr.units ? [c, sn] : [c * st.x[0] + sn * st.y[0], c * st.x[1] + sn * st.y[1]]);
     }
     const parts = splitOptions(t);
     if (parts.length !== 2) fail("a coordinate the preview can't read: (" + t + ")");
@@ -361,10 +371,11 @@ class Picture {
     fail("a calc expression the preview doesn't draw: ($" + t + "$)");
   }
 
-  // ---- the commands, from the token list
-  run(toks, st, depth = 0) {
-    let i = 0;
-    while (i < toks.length) {
+  // ---- the commands, from the token list: toks[lo..hi) (a scope's own range, not a copy); depth: \foreach's nesting,
+  // sdepth: the scopes'
+  run(toks, st, depth = 0, lo = 0, hi = toks.length, sdepth = 0) {
+    let i = lo;
+    while (i < hi) {
       const tk = toks[i];
       if (tk.t === "ch" && tk.v === ";") { i++; continue; }
       if (tk.t !== "cs") fail(tk.t === "ch" ? "text the preview can't read in a picture: " + tk.v : "a group the preview can't read in a picture");
@@ -372,32 +383,33 @@ class Picture {
       i++;
       if (name === "draw" || name === "fill" || name === "filldraw" || name === "path" || name === "clip" || name === "shade" || name === "shadedraw" || name === "pattern") {
         if (name === "clip" || name === "shade" || name === "shadedraw" || name === "pattern") fail("\\" + name + " isn't drawn by the preview yet");
-        const end = toEnd(toks, i);
+        const end = toEnd(toks, i, hi);
         this.path(name, toks.slice(i, end), st);
         i = end + 1;
       } else if (name === "coordinate") {
-        const end = toEnd(toks, i);
+        const end = toEnd(toks, i, hi);
         this.coordinate(toks.slice(i, end), st);
         i = end + 1;
       } else if (name === "node" || name === "matrix" || name === "pic" || name === "graph") {
-        fail("\\" + name + (name === "node" ? ": nodes come in the next round" : " isn't drawn by the preview yet"));
+        fail("\\" + name + (name === "node" ? ": nodes aren't drawn by the preview yet" : " isn't drawn by the preview yet"));
       } else if (name === "foreach") {
-        i = this.foreach(toks, i, st, depth);
+        i = this.foreach(toks, i, st, depth, hi, sdepth);
       } else if (name === "begin") {
         const env = toks[i]?.t === "g" ? toks[i].v.trim() : "";
         if (env !== "scope") fail(env ? "the " + env + " environment inside a picture isn't drawn by the preview yet" : "\\begin without its name");
+        if (sdepth >= TIKZ_LIMITS.SCOPE_DEPTH) fail("scopes inside scopes more than " + TIKZ_LIMITS.SCOPE_DEPTH + " deep");
         // (the scope's styles and transform stay in it: the style table as it was, back after it)
         const saved = new Map(this.styles);
         let j = i + 1, inner = { ...st, arrows: { ...st.arrows } };
         if (toks[j]?.t === "o") { inner = this.options(toks[j].v, inner); j++; }
         // (the matching \end{scope})
         let d = 1, k = j;
-        for (; k < toks.length; k++) {
+        for (; k < hi; k++) {
           if (toks[k].t === "cs" && toks[k].v === "begin" && toks[k + 1]?.t === "g" && toks[k + 1].v.trim() === "scope") d++;
           if (toks[k].t === "cs" && toks[k].v === "end" && toks[k + 1]?.t === "g" && toks[k + 1].v.trim() === "scope" && --d === 0) break;
         }
-        if (k >= toks.length) fail("a scope without its \\end{scope}");
-        try { this.run(toks.slice(j, k), inner, depth); } finally { this.styles = saved; }
+        if (k >= hi) fail("a scope without its \\end{scope}");
+        try { this.run(toks, inner, depth, j, k, sdepth + 1); } finally { this.styles = saved; }
         i = k + 2;
       } else if (name === "tikzset") {
         if (toks[i]?.t !== "g") fail("\\tikzset without its {...}");
@@ -421,7 +433,7 @@ class Picture {
   }
 
   // \foreach \x in {list} body, or \foreach \x/\y in {a/b, ...}; the body a {group} or one command up to its ;
-  foreach(toks, i, st, depth) {
+  foreach(toks, i, st, depth, hi, sdepth) {
     if (depth >= TIKZ_LIMITS.FOREACH_DEPTH) fail("\\foreach inside \\foreach more than " + TIKZ_LIMITS.FOREACH_DEPTH + " deep");
     const vars = [];
     while (toks[i]?.t === "cs") { vars.push(toks[i].v); i++; if (toks[i]?.t === "ch" && toks[i].v === "/") i++; else break; }
@@ -434,13 +446,19 @@ class Picture {
     i++;
     let body, next;
     if (toks[i]?.t === "g") { body = toks[i].v; next = i + 1; }
-    else { const end = bodyEnd(toks, i); body = srcOf(toks.slice(i, end + 1)); next = end + 1; }
+    else { const end = bodyEnd(toks, i, hi); body = srcOf(toks.slice(i, end + 1)); next = end + 1; }
+    const res = vars.map((v) => new RegExp("\\\\" + v.replace(/[^A-Za-z@]/g, (c) => "\\" + c) + "(?![A-Za-z@])", "g"));
+    const uses = res.map((re) => (body.match(re) || []).length);
     for (const item of list) {
       if (++this.expansions > TIKZ_LIMITS.EXPAND) fail("\\foreach bodies expanded more than " + TIKZ_LIMITS.EXPAND + " times");
       const vals = splitSlash(item, vars.length);
+      // (its size before it is made: each use of a variable replaced by its value)
+      const size = body.length + vals.reduce((n, v, q) => n + uses[q] * v.length, 0);
+      if (size > TIKZ_LIMITS.SRC_MAX) fail("a \\foreach body over " + TIKZ_LIMITS.SRC_MAX / 1024 + " KiB once its variables are replaced");
+      if (this.lexed + size > TIKZ_LIMITS.LEX_TEXT) fail("more than " + TIKZ_LIMITS.LEX_TEXT / 2 ** 20 + " MiB of picture text read, \\foreach bodies expanded included");
       let text = body;
-      vars.forEach((v, q) => { text = text.replace(new RegExp("\\\\" + v.replace(/[^A-Za-z@]/g, (c) => "\\" + c) + "(?![A-Za-z@])", "g"), vals[q]); });
-      this.run(lex(text), st, depth + 1);
+      res.forEach((re, q) => { text = text.replace(re, () => vals[q]); });
+      this.run(this.lex(text), st, depth + 1, 0, undefined, sdepth);
     }
     return next;
   }
@@ -553,6 +571,8 @@ class Picture {
         } else fail("arc without its angles and radius");
         if ([a0, a1, rx, ry].some((x) => x === undefined)) fail("an arc without its start, end or radius");
         if (!cur) fail("an arc with nothing before it");
+        // (the angles brought near 0, by whole turns: cos and sin keep their precision)
+        { const turn = a0 - (((a0 % 360) + 360) % 360); a0 -= turn; a1 -= turn; }
         const ctr = [cur[0] - rx * Math.cos((a0 * Math.PI) / 180), cur[1] - ry * Math.sin((a0 * Math.PI) / 180)];
         const bs = ellipseArc(ctr, rx, ry, a0, a1);
         bs.slice(1).forEach((s) => curve(s[0], s[1], s[2]));
@@ -607,7 +627,7 @@ class Picture {
       }
       if (isWord(toks, i, "node") || isWord(toks, i, "coordinate") || isWord(toks, i, "pic") || isWord(toks, i, "edge") || isWord(toks, i, "plot") || isWord(toks, i, "sin") || isWord(toks, i, "cos") || isWord(toks, i, "parabola")) {
         const w = ["node", "coordinate", "pic", "edge", "plot", "sin", "cos", "parabola"].find((x) => isWord(toks, i, x));
-        fail(w === "node" || w === "coordinate" ? "a " + w + " on a path: nodes come in the next round" : "the path operation " + w + " isn't drawn by the preview yet");
+        fail(w === "node" || w === "coordinate" ? "a " + w + " on a path: nodes aren't drawn by the preview yet" : "the path operation " + w + " isn't drawn by the preview yet");
       }
       fail("a path the preview can't read at " + JSON.stringify(srcOf(toks.slice(i, i + 4))));
     }
@@ -714,16 +734,16 @@ function checkPt(p) {
 const isWord = (toks, i, w) => { for (let k = 0; k < w.length; k++) if (!(toks[i + k]?.t === "ch" && toks[i + k].v === w[k])) return false; const after = toks[i + w.length]; return !(after?.t === "ch" && /[A-Za-z]/.test(after.v)); };
 // (the index of the ; ending the command that starts at i, at the top level)
 // (a \foreach's body when not a {group}: one command up to its ;, or a \foreach, ending where its own body ends)
-function bodyEnd(toks, i) {
+function bodyEnd(toks, i, hi = toks.length) {
   while (toks[i]?.t === "cs" && toks[i].v === "foreach") {
     let k = i + 1;
-    while (k < toks.length && toks[k].t !== "g") k++;
-    if (toks[k + 1]?.t === "g") return k + 1;
+    while (k < hi && toks[k].t !== "g") k++;
+    if (k + 1 < hi && toks[k + 1]?.t === "g") return k + 1;
     i = k + 1;
   }
-  return toEnd(toks, i);
+  return toEnd(toks, i, hi);
 }
-function toEnd(toks, i) { for (let k = i; k < toks.length; k++) if (toks[k].t === "ch" && toks[k].v === ";") return k; fail("a command without its ;"); }
+function toEnd(toks, i, hi = toks.length) { for (let k = i; k < hi; k++) if (toks[k].t === "ch" && toks[k].v === ";") return k; fail("a command without its ;"); }
 function srcOf(toks) { return toks.map((t) => (t.t === "cs" ? "\\" + t.v + " " : t.t === "g" ? "{" + t.v + "}" : t.t === "o" ? "[" + t.v + "]" : t.t === "c" ? "(" + t.v + ")" : t.v)).join(""); }
 // \foreach's list: items, with "a,...,b" and "a,b,...,c" ranges
 function expandList(text) {
@@ -736,7 +756,9 @@ function expandList(text) {
       const step = k >= 2 && /^[-\d.]+$/.test(items[k - 2]) ? a - evalMath(items[k - 2]).v : z >= a ? 1 : -1;
       if (step === 0 || Math.sign(step) !== Math.sign(z - a || step)) fail("a \\foreach range that never ends");
       if (Math.abs((z - a) / step) > TIKZ_LIMITS.EXPAND) fail("a \\foreach range of more than " + TIKZ_LIMITS.EXPAND + " items");
-      for (let v = a + step; step > 0 ? v <= z + 1e-9 : v >= z - 1e-9; v += step) out.push(fmtNum(v));
+      // (the number of steps first: a + step can round back to a, so a loop on the value might never end)
+      const n = Math.floor(Math.abs((z - a) / step) + 1e-9);
+      for (let j = 1; j <= n; j++) { out.push(fmtNum(a + j * step)); if (out.length > TIKZ_LIMITS.EXPAND) fail("a \\foreach list of more than " + TIKZ_LIMITS.EXPAND + " items"); }
       k++;
       // (the end item itself was pushed by the loop; skip pushing it again)
       continue;
@@ -757,7 +779,8 @@ function splitSlash(item, n) {
 function ellipseArc(c, rx, ry, a0, a1) {
   const dir = a1 >= a0 ? 1 : -1, cuts = [a0];
   if (Math.abs(a1 - a0) > 36000) fail("an arc of more than 100 turns");
-  for (let a = a0 + 90 * dir; dir > 0 ? a < a1 - 1e-9 : a > a1 + 1e-9; a += 90 * dir) cuts.push(a);
+  const n = Math.ceil(Math.abs(a1 - a0) / 90 - 1e-9);
+  for (let j = 1; j < n; j++) cuts.push(a0 + 90 * dir * j);
   cuts.push(a1);
   const pt = (a) => [c[0] + rx * Math.cos(a), c[1] + ry * Math.sin(a)];
   const out = [[pt((a0 * Math.PI) / 180)]];
@@ -809,13 +832,20 @@ function markerSvg(id, tip, color, lw) {
 export function renderTikz(src, opts, R) {
   if (src.length > TIKZ_LIMITS.SRC_MAX) throw new TikzError("a picture over " + TIKZ_LIMITS.SRC_MAX / 1024 + " KiB of source");
   const P = new Picture(R, opts);
-  let st = P.base();
-  if (opts?.styles) P.options(opts.styles, st);
-  const toks = lex(src);
-  let i = 0;
-  if (toks[0]?.t === "o") { st = P.options(toks[0].v, st); i = 1; }
-  P.run(toks.slice(i), st);
-  const html = P.svg();
+  let html;
+  try {
+    let st = P.base();
+    if (opts?.styles) P.options(opts.styles, st);
+    const toks = P.lex(src);
+    let i = 0;
+    if (toks[0]?.t === "o") { st = P.options(toks[0].v, st); i = 1; }
+    P.run(toks, st, 0, i);
+    html = P.svg();
+  } catch (e) {
+    // (anything else, a RangeError of a string or the stack among them: this picture's placeholder, not the document's end)
+    if (e instanceof TikzError) throw e;
+    throw new TikzError("a picture the preview couldn't draw (" + (e instanceof RangeError ? "too large" : "an internal error") + ")");
+  }
   if (html === null) throw new TikzError("an empty picture");
   return html;
 }

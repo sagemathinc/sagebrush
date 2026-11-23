@@ -1,5 +1,5 @@
 {
- "date": "2026-11-23T20:56:33.567Z",
+ "date": "2026-11-23T23:23:07.047Z",
  "dpi": 300,
  "ink": 240,
  "widen_px": 2,
@@ -10,7 +10,7 @@
   "pgf": "3.1.11a",
   "chrome": "Chromium 149.0.7827.196 built on Ubuntu 26.04 LTS"
  },
- "tex_ms": 1060,
+ "tex_ms": 1572,
  "passed": 40,
  "pictures": [
   {
