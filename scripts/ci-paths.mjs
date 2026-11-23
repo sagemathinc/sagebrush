@@ -394,21 +394,24 @@ const webGroups = [
   ["terminal", webRuntime || inArea("shell") || suiteGroups.has("terminal")],
   ["remote-preview", webRuntime || suiteGroups.has("remote-preview")],
 ].filter(([, selected]) => web && selected).map(([group]) => group);
-const webMatrix = webGroups.flatMap((group) => {
-  const total = group === "notebook" || group === "remote-preview" ? 3 : 1;
-  return Array.from({ length: total }, (_, i) => ({
-    name: total === 1 ? group : `${group}-${i + 1}-of-${total}`,
-    group,
-    shard: i + 1,
-    total,
-  }));
-});
+// (the web-browser jobs: the selected groups packed into at most three, the CI capacity ruling, Nov 22 2026, the org's 60
+// concurrent jobs; 13 before, most of each its setup.  A job runs its groups in this order, every one even after one
+// failed.  latex is alone: its build has the editor on loopback hosts.  terminal is last in its job: it rebuilds
+// web/dist with the bash set.  Every group is in exactly one job: test/ci-paths.test.ts)
+export const WEB_BUCKETS = [
+  ["board", ["board-a", "board-b", "board-c", "board-unit", "preload"]],
+  ["notebook", ["notebook", "remote-preview", "terminal"]],
+  ["latex", ["latex"]],
+];
+const webMatrix = WEB_BUCKETS
+  .map(([name, groups]) => ({ name, groups: groups.filter((g) => webGroups.includes(g)).join(" ") }))
+  .filter((job) => job.groups);
 // (web-runner: the runner, the workspace, the board frame and the notebook's merges)
 const webRunner = web && (webRuntime || inArea("board") || inArea("workspace") || suiteJobs.has("web-runner"));
 const webWorkspace = web && (allWeb || inArea("workspace"));
 const webExport = webWorkspace || (web && suiteJobs.has("web-export"));
 const webLookalike = webWorkspace || (web && suiteJobs.has("web-lookalike"));
-// The share dialog's browser suite (web-sync.3, about 8.5 min alone, its own web-sync shard): in the full tier, but on a
+// The share dialog's browser suite (web-sync.3, about 8.5 min, in web-sync's client shard): in the full tier, but on a
 // pull request only when it changes sharing (web/share/, web/share-client/, web/cloud/share/, the suites among them) or the
 // account at the top right (web/workspace/account.ts, which reads the same first check as Share), or has the full-ci
 // label; a master push, the schedule and a dispatch always run it (grader's web-sync CI-time plan, Nov 9: PR CI <= 10 min)
@@ -440,7 +443,7 @@ const outputs = {
   // (mpmath's suite: the core backend always; the Python backend, a rollback path, the long tier's)
   mpmath_backends: JSON.stringify(long ? ["sagebrush", "python"] : ["sagebrush"]),
   // (web-sync's shards: the share dialog's part 2, its big listing and upload leaks, the long tier's)
-  web_sync_shards: JSON.stringify(["core", "client", "moves", "pwa", "share-dialog", ...(long ? ["share-dialog-2"] : [])]),
+  web_sync_shards: JSON.stringify(["core", "client", "pwa", ...(long ? ["share-dialog-2"] : [])]),
   wasm_build: wasmBuild,
   engine_cpython: engineCpython,
   webkit,
@@ -461,7 +464,7 @@ const outputs = {
   size_inputs: event === "workflow_dispatch" || event === "schedule" || gateInputs(files).length > 0 ||
     (onTrack(runRefs(process.env)) && files.some((file) => enginePaths.some((p) => p.test(file)))),
   files: files.length,
-  // (the examples job: the ids it runs and its shard matrix, at most 16 examples a shard (SHARD_MAX); plan U7 section 2)
+  // (the examples job: the ids it runs and its shard matrix, at most 64 examples a shard (SHARD_MAX); plan U7 section 2)
   examples_ids: JSON.stringify(exampleSelection),
   examples_matrix: JSON.stringify(Array.from({ length: shardCount(exampleSelection.length) }, (_, i) => i + 1)),
 };
