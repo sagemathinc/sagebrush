@@ -31,6 +31,6 @@ test("help()'s signature line is CPython's inspect.signature, *args, keyword-onl
   if (v !== "True") return t.skip("no python3 3.12 or later");
   const f = join(ROOT, "test/help_signature_cases.py");
   const want = execFileSync("python3", ["-I", f, "inspect"], { encoding: "utf8" });
-  assert.equal(want.split("\n").length, 11);
+  assert.equal(want.split("\n").length, 12);
   assert.equal(execFileSync(process.execPath, [CLI, f], { encoding: "utf8" }), want);
 });

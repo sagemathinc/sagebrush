@@ -13583,6 +13583,16 @@
   "owner": "real/complex arithmetic",
   "row": "inv-17"
  },
+ "lib/_sage_real.py :: _ziv_checked.checked :: or not b._m or not _EMIN + 4 * W < b._e + abs(b._m).bit_length() < _EMAX - 64): #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "the exponent-range test of the Ziv check: a value near the ends of the range goes to the method's own range logic, unchecked; it refuses nothing"
+ },
+ "lib/_sage_real.py :: _ziv_checked.checked :: raise NotImplementedError(\"%s(%s) correctly rounded to %d bits is not decided within %d bits in sagebrush yet\" #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "fail-closed Ziv check: a value whose correct rounding is not decided after _ZIV_CHECK_TRIES doublings of the working precision is refused, never guessed; not a resource cap"
+ },
  "lib/_sage_rpoly.py :: PolynomialInexact.__pow__ :: raise NotImplementedError(\"a power of a polynomial over %r by %r is not available in sagebrush yet\" % (self._ring._base, n)) #0": {
   "class": "coverage",
   "owner": "polynomials over inexact fields (@sagebrush-sage2)",
