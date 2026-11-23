@@ -121,6 +121,8 @@ try {
     //  rather than pushing the buttons out of the header)
     const h = await ev(`(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(), top = r('.top'), who = r('#who'), how = r('#howto'), con = r('#connect');
       return { chat: r('main').width, whoTop: who.top, howTop: how.top, conTop: con.top, whoRight: who.right, howLeft: how.left, conRight: con.right, topRight: top.right, topH: top.height, conH: con.height }; })()`);
+    const al = await ev(`(() => { const t = document.querySelector('.top'), cs = getComputedStyle(t), g = document.querySelector('.top .top-actions').getBoundingClientRect(), r = t.getBoundingClientRect(); return { gap: (r.right - parseFloat(cs.paddingRight)) - g.right }; })()`);
+    ok("L2-header-actions-right", Math.abs(al.gap) < 1.5, "with the chat at 420 px the header's actions keep to its right edge (#1793)", al);
     ok("L2-header-one-line", near(h.chat, 420) && Math.abs(h.conTop - h.howTop) < 2 && Math.abs(h.conTop - h.whoTop) < 6 && h.topH < 2 * h.conH && h.whoRight <= h.howLeft + 1 && h.conRight <= h.topRight + 1, "with the chat at 420 px the header is one line: the name gives way, the buttons stay in the header", h);
     // (board's B-O2-1: "on your computer" either whole or visually hidden, never cut to a letter; the name itself whole,
     //  its own characters measured, not the space after it)
@@ -134,16 +136,19 @@ try {
     // (#1793: all four of the header's actions shown (Use your own Claude, Review changes, Delegate, Connected) with the
     //  chat at its 420 px minimum: they wrap within the header, and none is drawn past the chat over the pane's tabs)
     const h4 = await ev(`(() => {
+      document.querySelector('#howto').hidden = false;
       document.querySelector('#review').hidden = false;
       const con = document.querySelector('#connect'); con.hidden = false; con.textContent = 'Connected';
       let sw = document.querySelector('#delegate-switch');
       if (!sw) { sw = Object.assign(document.createElement('button'), { id: 'delegate-switch', className: 'link', type: 'button' }); con.before(sw); }
       sw.hidden = false; sw.textContent = 'Delegate: on';
       const r = (e) => e.getBoundingClientRect(), main = r(document.querySelector('main')), pane = r(document.querySelector('#artifacts'));
-      const btns = ['#howto', '#review', '#delegate-switch', '#connect'].map((s) => { const b = r(document.querySelector(s)); return { s, left: b.left, right: b.right, top: b.top }; });
+      const btns = ['#howto', '#review', '#delegate-switch', '#connect'].map((s) => { const b = r(document.querySelector(s)); return { s, left: b.left, right: b.right, top: b.top, bottom: b.bottom, w: b.width, h: b.height }; });
       return { mainRight: main.right, paneLeft: pane.left, btns };
     })()`);
-    ok("L2-header-actions-fit", h4.btns.every((b) => b.right <= h4.mainRight + 0.5 && b.right <= h4.paneLeft + 0.5 && b.left >= 0), "with the chat at 420 px and all four header actions shown, none runs past the chat over the pane's tabs (#1793)", h4);
+    const apart = (a, b) => a.right <= b.left + 0.5 || b.right <= a.left + 0.5 || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5;
+    const noOverlap = h4.btns.every((a, i) => h4.btns.every((b, j) => i === j || apart(a, b)));
+    ok("L2-header-actions-fit", h4.btns.every((b) => b.w > 0 && b.h > 0 && b.right <= h4.mainRight + 0.5 && b.right <= h4.paneLeft + 0.5 && b.left >= 0) && noOverlap, "with the chat at 420 px and all four header actions shown (each drawn), none runs past the chat over the pane's tabs, and none overlaps another (#1793)", h4);
     await ev(`(() => { document.querySelector('#review').hidden = true; const con = document.querySelector('#connect'); con.hidden = true; const sw = document.querySelector('#delegate-switch'); if (sw) sw.hidden = true; return true; })()`);
   }
   for (const [id, pane] of [["L2-pane-319", 319], ["L2-pane-320", 320]]) {
