@@ -311,6 +311,16 @@
   .tabs { display: flex; gap: 2px; overflow-x: auto; margin-right: auto; }
   .tab { border: 0; background: none; padding: 5px 10px; border-radius: 7px; cursor: pointer; white-space: nowrap; font-size: 14px; }
   .tab.on { background: var(--card); box-shadow: 0 0 0 1px var(--line); font-weight: 550; }
+  /* (dictation, #1791: the mic by Send, red while listening, and what is being heard) */
+  #mic { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 4px 9px; cursor: pointer; font-size: 15px; line-height: 1; }
+  #mic.rec { background: #b3261e; border-color: #b3261e; color: #fff; animation: mic-pulse 1.2s ease-in-out infinite; }
+  @keyframes mic-pulse { 50% { opacity: .65; } }
+  @media (prefers-reduced-motion: reduce) { #mic.rec { animation: none; } }
+  .mic-ask { font-size: 12px; max-width: 46ch; }
+  .mic-ask button { font-size: 12px; }
+  .mic-status .link { border: 0; background: none; color: var(--accent2); text-decoration: underline; cursor: pointer; padding: 0; font: inherit; }
+  .mic-status { font-size: 12px; color: var(--muted); max-width: 52ch; max-height: 5.5em; overflow-y: auto; }
+  .mic-status .mic-heard { color: var(--ink); }
   .icon { border: 0; background: none; width: 30px; height: 30px; border-radius: 7px; cursor: pointer; font-size: 16px; color: var(--muted); }
   .icon:hover { background: var(--side); color: var(--ink); }
   /* (one scroller: the host shown; the body only holds it, so a host a pixel taller than its content never adds a
