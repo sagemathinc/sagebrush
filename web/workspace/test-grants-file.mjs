@@ -277,6 +277,22 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
   await reconcileGrants(sync, perms);
   await k.flush();
   ok(!k.unwritten && perms.writeTrees("id1").length === 0 && !JSON.stringify(parseGrants(f.kept()).docs).includes("/again"), "fail closed: ...and once read again, the revocation stands, the narrowing written with it: " + f.kept());
+  // (astra2's storage failure: the merge of a revocation can't be stored here (localStorage full); the grants are set
+  // aside; a retry of the same grants.json once storage works must merge it again, never take it for done and bring
+  // the old grant back.  The oracle: permissions.js's own writeTrees)
+  {
+    perms.suspend(null);
+    ok(perms.grant("id1", "write", "/kept").ok, "storage failure: allowed in /kept");
+    await sync.write();
+    f.set(J({ v: 1, seq: 20, docs: {} }));
+    const real = globalThis.localStorage.setItem;
+    globalThis.localStorage.setItem = () => { const e = new Error("The quota has been exceeded."); e.name = "QuotaExceededError"; throw e; };
+    const r1 = await reconcileGrants(sync, perms);
+    globalThis.localStorage.setItem = real;
+    ok(r1.failed && perms.writeTrees("id1").length === 0, "storage failure: a merge that can't be stored sets the grants aside: " + J(r1));
+    const r2 = await reconcileGrants(sync, perms);
+    ok(!r2.failed && perms.suspended() === null && perms.writeTrees("id1").length === 0, "storage failure: the same grants.json tried again is merged again: the revocation holds, the old grant doesn't come back: " + J({ r2, trees: perms.writeTrees("id1") }));
+  }
   delete globalThis.localStorage;
 }
 

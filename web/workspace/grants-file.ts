@@ -93,12 +93,14 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
       const merged = mergeGrants(base, file, local);
       for (const [k, e] of Object.entries(merged)) { const id = await idOf(ws, k); if (id) docs[id] = e; }
       if (storage.getItem(GRANTS_KEY) !== raw) { if (tries < 20) continue; throw new Error("grants: the record kept changing here while it was merged"); }
-      seen = text;
-      base = file;
       const ids = new Set([...Object.keys(cur.docs), ...Object.keys(docs)]);
       const changed = [...ids].filter((id) => J(cur.docs[id]) !== J(docs[id])).length;
       // (seq: permissions.js's own counter, kept no lower than grants.json's; never read as an order here)
       if (changed) storage.setItem(GRANTS_KEY, J({ ...cur, seq: Math.max(Number(cur.seq) || 0, Number(kept?.seq) || 0), docs, ...(kept?.migrated === 1 || cur.migrated === 1 ? { migrated: 1 } : {}) }));
+      // (only once the merge is kept here: a merge that couldn't be stored (localStorage full) leaves grants.json unseen,
+      // so the next try merges it again rather than taking it for done)
+      seen = text;
+      base = file;
       return { changed, ahead: J(merged) !== J(file) };
     }
   };
