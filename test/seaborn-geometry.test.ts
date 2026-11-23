@@ -53,7 +53,7 @@ function compare(want: any, got: any, path: string, bad: string[]) {
   bad.push(`${path}: seaborn ${JSON.stringify(want)}, ours ${JSON.stringify(got)}`);
 }
 
-test("seaborn's scatterplot, lineplot, histplot, kdeplot, stripplot, barplot, heatmap and pairplot draw what seaborn draws", () => {
+test("seaborn's scatterplot, lineplot, histplot, kdeplot, stripplot, barplot and heatmap draw what seaborn draws", () => {
   const C = readFileSync(join(ROOT, "test", "seaborn_geometry_cases.py"), "utf8");
   // (each case in a namespace of its own, after the primitives' readers and the data)
   const program = `
