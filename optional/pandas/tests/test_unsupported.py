@@ -9,7 +9,7 @@ import pandas as pd
 from _cases import case
 
 s = pd.Series([1, 2])
-ss = pd.Series(["a", "b"])
+ss = pd.Series(["a", None])
 so = pd.Series(["a", 1])
 df = pd.DataFrame({"a": [1, 2]})
 dfs = pd.DataFrame({"a": [1, 2], "s": ["x", "y"]})
@@ -71,13 +71,32 @@ case("frame.ragged-rows", lambda: pd.DataFrame([[1, 2], [3]]))
 # names outside the subset
 for name in ["NA", "merge", "concat", "Timedelta", "Categorical", "MultiIndex", "read_parquet", "get_dummies"]:
     case("name.pd." + name, lambda name=name: getattr(pd, name))
-for name in ["groupby", "merge", "describe", "sort_values", "drop", "rename", "apply", "plot", "info", "value_counts", "to_csv", "where"]:
+for name in ["groupby", "merge", "describe", "rank", "drop", "pivot_table", "nlargest", "plot", "info", "value_counts", "to_csv", "where"]:
     case("name.DataFrame." + name, lambda name=name: getattr(df, name))
-for name in ["str", "rolling", "groupby", "value_counts", "apply", "map", "astype", "plot", "unique", "quantile"]:
+for name in ["str", "rolling", "groupby", "value_counts", "rank", "map", "nlargest", "plot", "nunique", "quantile"]:
     case("name.Series." + name, lambda name=name: getattr(s, name))
 case("name.Index.sort_values", lambda: getattr(pd.Index([1]), "sort_values"))
 case("name.pd.unknown-is-AttributeError", lambda: getattr(pd, "no_such_name"))
 case("name.DataFrame.unknown-is-AttributeError", lambda: df.no_such_name)
+
+# Sorting and reshaping's refusals: forms of those methods outside the subset, and the dtypes they don't take yet
+su = pd.Series([1, 2]).astype("uint8")
+case("d1.astype-category", lambda: pd.Series(["a", "b"]).astype("category"))
+case("d1.frame-astype-category", lambda: pd.DataFrame({"s": ["a"]}).astype({"s": "category"}))
+case("d1.astype-errors", lambda: s.astype("float64", errors="ignore"))
+case("d1.small-int-from-values", lambda: pd.Series([1, 2], dtype="uint8"))
+case("d1.small-int-setitem", lambda: su.__setitem__(0, 5))
+case("d1.sort_values-key", lambda: s.sort_values(key=lambda v: v))
+case("d1.apply-func-name", lambda: s.apply("sum"))
+case("d1.apply-returns-series", lambda: s.apply(lambda v: pd.Series([v, v])))
+case("d1.frame-apply-raw", lambda: df.apply(sum, raw=True))
+case("d1.unique-str-missing", lambda: ss.unique())
+case("d1.frame-to_numpy-str-missing", lambda: pd.DataFrame({"x": ["a", None]}).to_numpy())
+case("d1.rename-level", lambda: df.rename(columns={"a": "b"}, level=0))
+case("d1.reset_index-level", lambda: df.reset_index(level=0))
+case("d1.fillna-limit", lambda: s.fillna(0, limit=1))
+case("d1.asarray-str", lambda: np.asarray(pd.Series(["a", "b"])))
+case("d1.frame-asarray-str", lambda: np.asarray(pd.DataFrame({"x": ["a"]})))
 
 # arithmetic and frame comparisons (M2)
 case("op.series-add", lambda: s + 1)
