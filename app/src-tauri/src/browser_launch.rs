@@ -6,7 +6,8 @@
 // Ending (the SEC ruling on #1761, H3): nothing here ever signals a process by its PID.
 //   - A live session ends Chrome and the sidecars through the Child handles the app holds.
 //   - After an app crash the OS closes the app's pipe ends; Chrome (on --remote-debugging-pipe) and both sidecars
-//     exit on that EOF (the crash rows in the tests show it).
+//     exit on that EOF. The crash rows in the tests show it for each of the three: Chrome, the net sidecar, and the
+//     cdp sidecar launched as the app will launch it (under CDP_PROFILE, with Chrome's pipe ends on its fds 3 and 4).
 //   - At the next start, the sweep removes a session's 0700 profile directory only once no process with the recorded
 //     start identity remains; if one does, it refuses, leaves the directory and says so with a fixed reason. It never
 //     signals.

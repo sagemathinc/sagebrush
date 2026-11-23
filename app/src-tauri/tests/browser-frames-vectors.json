@@ -1,6 +1,6 @@
 {
  "$comment": "Frame vectors from the sagebrush-agent codec (lib/fleet/browser/frames.mjs), for the app's Rust router. Made by tests/make-browser-frames-vectors.mjs.",
- "agent_commit": "b95a4c97b2798c4f9d56cfe47598d9f60574bbe2",
+ "agent_commit": "e7369fb3fe026e505335eb13671f43478c8973e3",
  "frames_sha256": "12564cfdf8ba626eee6316cdbff5e24e32ab68415e0cab5734054c49edd4bced",
  "limits": {
   "headBytes": 65536,

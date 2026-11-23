@@ -6,7 +6,7 @@ use super::*;
 use serde_json::json;
 
 const VECTORS: &str = include_str!("../tests/browser-frames-vectors.json");
-const VECTORS_COMMIT: &str = "b95a4c97b2798c4f9d56cfe47598d9f60574bbe2";
+const VECTORS_COMMIT: &str = "e7369fb3fe026e505335eb13671f43478c8973e3";
 const FRAMES_SHA256: &str = "12564cfdf8ba626eee6316cdbff5e24e32ab68415e0cab5734054c49edd4bced";
 
 fn b64(s: &str) -> Vec<u8> {
