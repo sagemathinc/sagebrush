@@ -10,7 +10,7 @@ const d = (n, label, origin = label === "signer" ? "tauri://localhost" : "http:/
 const s = (n, k, label) => `[signer] signed ${n} (signature ${k}) for ${label}`;
 const refusedLine = "ok persist: signer at http://127.0.0.1:5: this page's signing call refused: Command not allowed; a page's signer_open refused: Command not found; an output frame's refused: not allowed";
 const reachedLine = "ok persist: signer at http://127.0.0.1:5: this page's signing call REACHED probe-signature-2; a page's signer_open refused: Command not found; an output frame's refused: not allowed";
-const v = (err, { out = refusedLine, seen = ["frame: requested", "frame: loaded", "frame: refused: not allowed"], control } = {}) => signerVerdict({ err: err.join("\n"), out, seen, control });
+const v = (err, { out = refusedLine, seen = ["frame: requested", "frame: loaded", "frame: refused: not allowed"], control, code = 0, signal = null, problems = [] } = {}) => signerVerdict({ err: err.join("\n"), out, seen, control, code, signal, problems });
 
 ok(signerLog([d(1, "signer"), s(1, 1, "signer"), "[signer] refused 2: not the signer window's page", d(2, "main")].join("\n")).dispatches.length === 2, "the log's lines are read: dispatches and signatures");
 
@@ -38,6 +38,14 @@ ok(!v([d(1, "signer"), s(1, 1, "signer"), d(2, "signer", "http://127.0.0.1:9")],
 ok(v([d(1, "signer"), s(1, 1, "signer")], { control: "guard-off", seen: ["stop: loaded", "stop: refused: not allowed"] }).ok, "guard-off: the other server's page loaded in the signer window, and reached nothing: passes");
 ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "guard-off" }).ok, "guard-off: the page never loaded there fails");
 ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "nonsense" }).ok, "an unknown control fails");
+
+// (astra2: a run whose log shows everything it must, but whose app didn't end cleanly, never passes)
+const good = [d(1, "signer"), s(1, 1, "signer")];
+ok(!v(good, { code: 1 }).ok, "an otherwise passing run whose app exited 1 fails");
+ok(!v(good, { code: null, signal: "SIGKILL" }).ok, "an otherwise passing run whose app was killed (a signal) fails");
+ok(!v(good, { problems: ["the app did not report and end its output within 120 s"] }).ok, "an otherwise passing run that timed out fails");
+ok(!v(good, { problems: ["the app's output did not end within 20 s of its exit"] }).ok, "an otherwise passing run whose output never ended fails");
+ok(!v([d(1, "signer"), s(1, 1, "signer"), d(2, "main"), s(2, 2, "main")], { control: "cap+check", out: reachedLine, code: 101 }).ok, "the positive control with a crashed app fails too");
 
 console.log(fails ? `${fails} of ${checks} failed` : `test-signer-judge: all ${checks} passed`);
 process.exit(fails ? 1 : 0);

@@ -13,16 +13,19 @@
 //   - "guard-off" (the signer window's navigation guard left out, the window sent to the other server): that page
 //     loaded in the signer window, and nothing of it reached the command: dispatches 1, signatures 1.
 // In every run the other server's pages must have reached nothing ("REACHED" in what they said), and in every run but
-// "cap+check" the main page's own call, a page's signer_open and an output frame's call must have been refused.
+// "cap+check" the main page's own call, a page's signer_open and an output frame's call must have been refused.  And in
+// every run the app must have ended cleanly: exit 0, no signal, its output captured to the end (no timeout), so a run
+// that printed every expected line and then crashed, was killed or timed out never passes.
 export function signerLog(err) {
   const dispatches = [...err.matchAll(/^\[signer\] dispatch (\d+) from (\S+) at (\S+)$/gm)].map((m) => ({ n: +m[1], label: m[2], origin: m[3] }));
   const signed = [...err.matchAll(/^\[signer\] signed (\d+) \(signature (\d+)\) for (\S+)$/gm)].map((m) => ({ n: +m[1], label: m[3] }));
   return { dispatches, signed };
 }
 
-export function signerVerdict({ err, out, seen, control }) {
+export function signerVerdict({ err, out, seen, control, code, signal, problems }) {
   const { dispatches, signed } = signerLog(err);
   const why = [];
+  if (code !== 0 || signal != null || (problems ?? []).length) why.push(`the app didn't end cleanly (exit ${code}, signal ${signal ?? "none"}${(problems ?? []).length ? `; ${problems.join("; ")}` : ""})`);
   const fromSigner = (xs) => xs.filter((x) => x.label === "signer");
   const fromOthers = (xs) => xs.filter((x) => x.label !== "signer");
   const reached = seen.filter((s) => /REACHED/.test(s));

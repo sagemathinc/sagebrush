@@ -275,7 +275,7 @@ async function signerLaunch(control) {
   const res = await launch({ SAGEBRUSH_APP_PERSIST: `signer:${o.origin}`, SAGEBRUSH_APP_DATA_DIR: mkdtempSync(join(tmpdir(), "sagebrush-app-data-")), ...(control ? { SAGEBRUSH_APP_SIGNER_CONTROL: control } : {}) }, 120000);
   await new Promise((r) => setTimeout(r, 1000));
   o.close();
-  const v = signerVerdict({ err: res.err, out: res.out, seen: o.seen, control });
+  const v = signerVerdict({ err: res.err, out: res.out, seen: o.seen, control, code: res.code, signal: res.signal, problems: res.problems });
   console.log(`launch${control ? ` (control: ${control})` : ""}: ${persistLine(res)} (exit ${res.code}); reached the command ${v.counts.dispatches} (${v.counts.dispatchesOthers} not the approvals window's), signed ${v.counts.signed} (${v.counts.signedOthers} not the approvals window's)`);
   console.log(`  the other server (${o.origin}) saw: ${o.seen.length ? o.seen.join("; ") : "nothing"}`);
   return v;
