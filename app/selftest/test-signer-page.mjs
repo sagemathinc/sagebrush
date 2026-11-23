@@ -1,7 +1,8 @@
 // The approvals window's page (app/signer/signer.js) in a VM, with a fake window: the self-test probe's paths, and the
 // diagnostic's reports (a refused call reports once; a call that neither answers nor fails within 8 s reports "hung",
 // and that is final: a late answer or failure after it reports nothing more and runs no control); and the app's check
-// after the page loads (PROBE_CHECK in app/src-tauri/src/signer.rs): no probe, no IPC, or a page whose script didn't run.
+// after the page loads (PROBE_CHECK in app/src-tauri/src/signer.rs): no probe, no IPC, or a page whose script didn't run;
+// and its state check (STATE_CHECK: the numbers Rust turns into fixed codes; it only reads).
 //   node app/selftest/test-signer-page.mjs
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
@@ -10,6 +11,8 @@ const SOURCE = readFileSync(new URL("../signer/signer.js", import.meta.url), "ut
 const RUST = readFileSync(new URL("../src-tauri/src/signer.rs", import.meta.url), "utf8");
 const CHECK = /^const PROBE_CHECK: &str = "([^"\\]*)";$/m.exec(RUST)?.[1];
 if (!CHECK) { console.log("FAIL no PROBE_CHECK in signer.rs"); process.exit(1); }
+const STATE = /^const STATE_CHECK: &str = "([^"\\]*)";$/m.exec(RUST)?.[1];
+if (!STATE) { console.log("FAIL no STATE_CHECK in signer.rs"); process.exit(1); }
 let fails = 0, checks = 0;
 const ok = (c, what) => { checks++; console.log((c ? "ok   " : "FAIL ") + what); if (!c) fails++; };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -105,6 +108,31 @@ ok(same(check({ probe: false, tauri: false, ran: false }), ["/signer/index.html?
 ok(same(check({ ran: false, search: "?probe=hung" }), []), "the check: a reloaded page: no report");
 { const w = page({ probe: null }); ok(w.window.__SB_SIGNER_RAN__ === true, "the page marks that it ran, with no probe too"); }
 { const w = page(); ok(w.window.__SB_SIGNER_RAN__ === true && same(check({ ran: w.window.__SB_SIGNER_RAN__ === true }), []), "after the page ran, the check reports nothing"); }
+
+// (the state check: [ready, probe, tauri, ran, protocol, body] as numbers; it navigates nowhere and calls nothing)
+function state({ ready = "complete", probe = true, tauri = true, ran = true, protocol = "tauri:", body = true, search = "" } = {}) {
+  const touched = [];
+  const window = {
+    ...(probe ? { __SB_SIGNER_PROBE__: { control: null, other: "http://127.0.0.1:9" } } : {}),
+    ...(tauri ? { __TAURI__: { core: { invoke: () => { touched.push("invoke"); } } } } : {}),
+    ...(ran ? { __SB_SIGNER_RAN__: true } : {}),
+  };
+  const location = { protocol, search, pathname: "/signer/index.html", replace: () => touched.push("replace"), assign: () => touched.push("assign") };
+  const document = { readyState: ready, getElementById: (id) => (body && id === "status" ? {} : null) };
+  const r = vm.runInNewContext(STATE, { window, location, document });
+  return { r: JSON.parse(JSON.stringify(r)), touched };
+}
+ok(same(state(), { r: [3, 1, 1, 1, 1, 1], touched: [] }), "the state check: everything there, read only");
+ok(same(state({ ran: false }).r, [3, 1, 1, 0, 1, 1]), "the state check: the script didn't run: ran 0");
+ok(same(state({ ready: "loading", probe: false, tauri: false, ran: false, protocol: "about:", body: false }).r, [1, 0, 0, 0, 0, 0]), "the state check: an empty page: all 0, loading");
+ok(same(state({ ready: "interactive", protocol: "http:" }).r, [2, 1, 1, 1, 2, 1]), "the state check: interactive, http");
+ok(same(state({ ready: "odd", protocol: "https:" }).r, [0, 1, 1, 1, 0, 1]), "the state check: anything else is 0");
+ok(!/location\.(replace|assign|href)|invoke\(|fetch\(/.test(STATE), "the state check's text navigates nowhere and calls nothing");
+{
+  const window = {}, location = { protocol: "tauri:" };
+  const document = { get readyState() { throw new Error("x"); }, getElementById: () => null };
+  ok(same(vm.runInNewContext(STATE, { window, location, document }), []), "the state check: a throw answers [] (unreadable to Rust)");
+}
 
 console.log(fails ? `${fails} of ${checks} failed` : `test-signer-page: all ${checks} passed`);
 process.exit(fails ? 1 : 0);

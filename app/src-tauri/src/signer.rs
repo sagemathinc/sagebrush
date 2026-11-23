@@ -73,6 +73,38 @@ pub fn probe_report(url: &Url, control: Option<&str>) -> Option<&'static str> {
     PROBE_CODES.iter().copied().find(|c| *c == code)
 }
 
+/// The self-test's reading of the signer window's state after its page loads (why a page that loaded never reported):
+/// a fixed expression, read and logged by Rust as fixed codes only ("[signer] state: …"), or "no-answer" if no answer
+/// arrives within STATE_WAIT, or "eval-failed" if it couldn't be sent.  It never navigates and never calls a command.
+const STATE_CHECK: &str = "(function(){try{var s=document.readyState,p=location.protocol,t=window.__TAURI__;return [s==='loading'?1:s==='interactive'?2:s==='complete'?3:0,window.__SB_SIGNER_PROBE__?1:0,(t&&t.core&&typeof t.core.invoke==='function')?1:0,window.__SB_SIGNER_RAN__===true?1:0,p==='tauri:'?1:p==='http:'?2:0,document.getElementById('status')?1:0];}catch(e){return [];}})()";
+pub const STATE_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+/// Every code a state line can hold, field by field (nothing the page says is ever logged as text).
+pub const STATE_CODES: [(&str, &[&str]); 6] = [
+    ("ready", &["other", "loading", "interactive", "complete"]),
+    ("probe", &["no", "yes"]),
+    ("tauri", &["no", "yes"]),
+    ("ran", &["no", "yes"]),
+    ("protocol", &["other", "tauri", "http"]),
+    ("body", &["no", "yes"]),
+];
+
+/// The state line for the check's answer (its JSON): each field's fixed code, or "unreadable" for anything else.
+pub fn state_line(answer: &str) -> String {
+    let v: Option<Vec<u64>> = serde_json::from_str(answer).ok();
+    match v {
+        Some(v) if v.len() == STATE_CODES.len() && v.iter().zip(STATE_CODES).all(|(n, (_, c))| (*n as usize) < c.len()) => {
+            STATE_CODES.iter().zip(&v).map(|((f, c), n)| format!("{f}={}", c[*n as usize])).collect::<Vec<_>>().join(" ")
+        }
+        _ => "unreadable".into(),
+    }
+}
+
+/// Whether the state check runs for this load: in a self-test only, once the page has loaded, and never on a page
+/// reloaded with a probe report.
+pub fn state_check_due(selftest: bool, finished: bool, url: &Url) -> bool {
+    selftest && finished && !url.query_pairs().any(|(k, _)| k == "probe")
+}
+
 /// Whether a call of a signing command comes from the signer window on its own page.
 pub fn signer_caller_ok(label: &str, url: &Url, control: Option<&str>) -> bool {
     label == LABEL && signer_page(url, control)
@@ -102,13 +134,35 @@ pub fn open(app: &tauri::AppHandle) -> Result<(), String> {
         .inner_size(560.0, 640.0)
         .disable_drag_drop_handler()
         // (each load of the window's pages, by origin and path only: the self-test reads how far the page got; in a
-        //  self-test, once loaded, the fixed check of the probe's and the IPC's globals runs in the page)
+        //  self-test, once loaded, the fixed check of the probe's and the IPC's globals runs in the page, and the fixed
+        //  state check reads the page's state back as codes)
         .on_page_load(move |w, p| {
             let u = p.url();
             let finished = !matches!(p.event(), tauri::webview::PageLoadEvent::Started);
             eprintln!("[signer] page {} {}{}", if finished { "finished" } else { "started" }, u.origin().ascii_serialization(), u.path());
             if selftest && finished {
                 let _ = w.eval(PROBE_CHECK);
+            }
+            if state_check_due(selftest, finished, u) {
+                // (the first of the answer and the deadline logs; the other then logs nothing)
+                let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let d = done.clone();
+                let sent = w.eval_with_callback(STATE_CHECK, move |a| {
+                    if !d.swap(true, Ordering::SeqCst) {
+                        eprintln!("[signer] state: {}", state_line(&a));
+                    }
+                });
+                if sent.is_err() {
+                    done.store(true, Ordering::SeqCst);
+                    eprintln!("[signer] state: eval-failed");
+                } else {
+                    std::thread::spawn(move || {
+                        std::thread::sleep(STATE_WAIT);
+                        if !done.swap(true, Ordering::SeqCst) {
+                            eprintln!("[signer] state: no-answer");
+                        }
+                    });
+                }
             }
         })
         .on_navigation(move |u| {
@@ -255,6 +309,37 @@ mod tests {
         // (every code the check itself reports is a fixed one; app/selftest/test-signer-page.mjs runs it)
         for code in ["no-probe", "no-tauri", "no-script"] {
             assert!(PROBE_CHECK.contains(&format!("'{code}'")) && PROBE_CODES.contains(&code), "{code}");
+        }
+    }
+
+    #[test]
+    fn the_state_line_is_fixed_codes_only() {
+        assert_eq!(state_line("[3,1,1,1,1,1]"), "ready=complete probe=yes tauri=yes ran=yes protocol=tauri body=yes");
+        assert_eq!(state_line("[1,0,0,0,0,0]"), "ready=loading probe=no tauri=no ran=no protocol=other body=no");
+        assert_eq!(state_line("[2,1,1,0,2,1]"), "ready=interactive probe=yes tauri=yes ran=no protocol=http body=yes");
+        for bad in ["", "null", "[]", "[3,1,1,1,1]", "[3,1,1,1,1,1,1]", "[4,1,1,1,1,1]", "[3,2,1,1,1,1]", "[3,1,1,1,3,1]", "[-1,1,1,1,1,1]",
+            "[3,1,1,1,1,1.5]", "[\"complete\",1,1,1,1,1]", "{\"ready\":3}", "\"ready=complete\"", "[3,1,1,1,1,1] x"] {
+            assert_eq!(state_line(bad), "unreadable", "{bad}");
+        }
+        // (every value a line can hold is one of the fixed codes)
+        let fields: Vec<&str> = STATE_CODES.iter().map(|(f, _)| *f).collect();
+        assert_eq!(fields, ["ready", "probe", "tauri", "ran", "protocol", "body"]);
+        assert!(STATE_CODES.iter().all(|(_, c)| c.iter().all(|x| x.chars().all(|ch| ch.is_ascii_lowercase()))));
+        // (the check only reads: no navigation, no command, no network)
+        for no in ["location.replace", "location.href", "location.assign", "invoke(", "fetch(", "XMLHttpRequest", "src=", "open("] {
+            assert!(!STATE_CHECK.contains(no), "{no}");
+        }
+        assert_eq!(STATE_WAIT, std::time::Duration::from_secs(5));
+    }
+
+    #[test]
+    fn the_state_check_runs_in_a_self_test_on_a_loaded_page_only() {
+        let page = u("tauri://localhost/signer/index.html");
+        assert!(state_check_due(true, true, &page));
+        assert!(!state_check_due(false, true, &page), "never outside a self-test");
+        assert!(!state_check_due(true, false, &page), "never before the page has loaded");
+        for reloaded in ["tauri://localhost/signer/index.html?probe=hung", "tauri://localhost/signer/index.html?probe=", "tauri://localhost/signer/index.html?x=1&probe=no-script"] {
+            assert!(!state_check_due(true, true, &u(reloaded)), "{reloaded}");
         }
     }
 
