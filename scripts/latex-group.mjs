@@ -209,7 +209,10 @@ export const LATEX_LAZY_CAPS = {
   //  page module rather than bundled again; measured 16,482 / 6,886 on master 4d4225f9, + 64. Was 16 / 6 KiB)
   // (17,335 / 7,231: renewed at the landing merge on master 14279164: 16,494 / 6,881 before it -> 17,271 / 7,167 after,
   //  +777 / +286 inherited from a shared check's and the tools' changes, none of it that change's own code; + 64)
-  TOOLS: { label: "the LaTeX agent tools' chunk", raw: 17335, gzip: 7231 },
+  // (17,472 raw: Nov 23 2026, KaTeX's stylesheet for latex_render's pages fetched beside the module, not the page, and a
+  //  failed fetch said (issue 1799): 17,408 measured on the shipped build of master 605c7e6c with it, bun 1.4.4 and
+  //  node 24.21.0, + 64; gzip 7,218, within its cap, unchanged)
+  TOOLS: { label: "the LaTeX agent tools' chunk", raw: 17472, gzip: 7231 },
   // (the presenter: web/latex/present.ts with overlay.ts, fetched only when Present is pressed)
   PRESENT: { label: "the LaTeX presenter's chunk", raw: 16 * 1024, gzip: 6 * 1024 },
   // (a published document opened read only, doc.ts: fetched only for a /?tex-doc= link, the articles';

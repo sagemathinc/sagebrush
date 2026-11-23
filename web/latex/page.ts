@@ -343,7 +343,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   mine = current;
   if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS + PRINT_CSS; document.head.appendChild(style); }
   if (!document.getElementById("sb-katex")) {
-    const link = document.createElement("link"); link.rel = "stylesheet"; link.href = new URL("katex/katex.min.css", location.href).href; document.head.appendChild(link);
+    // (beside this module, the site's: not beside the page, which may be below the site's root, /agents/ (issue 1799))
+    const link = document.createElement("link"); link.id = "sb-katex"; link.rel = "stylesheet"; link.href = new URL("katex/katex.min.css", import.meta.url).href; document.head.appendChild(link);
   }
   root.textContent = "";
   const page = el("div", "tex-page"); root.appendChild(page);

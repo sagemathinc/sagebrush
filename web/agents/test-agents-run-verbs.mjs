@@ -16,6 +16,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { inflateSync } from "node:zlib";
 import { devtoolsPort } from "../test-port.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
@@ -24,6 +25,32 @@ if (process.env.EXPECT_LATEX === "1" && !LATEX) throw new Error("EXPECT_LATEX=1 
 let failures = 0, checks = 0;
 const ok = (c, msg, detail) => { checks++; console.log((c ? "ok   " : "FAIL ") + msg + (c || detail === undefined ? "" : " " + JSON.stringify(detail).slice(0, 600))); if (!c) failures++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// (a PNG's ink: the box of its dark pixels (8-bit RGB or RGBA, not interlaced, as a canvas writes it), or null)
+function inkBox(png) {
+  let p = 8, w = 0, h = 0, ch = 0;
+  const idat = [];
+  while (p < png.length) {
+    const len = png.readUInt32BE(p), type = png.toString("latin1", p + 4, p + 8), data = png.subarray(p + 8, p + 8 + len);
+    if (type === "IHDR") { w = data.readUInt32BE(0); h = data.readUInt32BE(4); if (data[8] !== 8 || data[12] !== 0) return null; ch = { 2: 3, 6: 4 }[data[9]]; if (!ch) return null; }
+    else if (type === "IDAT") idat.push(data);
+    p += 12 + len;
+  }
+  const raw = inflateSync(Buffer.concat(idat)), stride = w * ch, img = Buffer.alloc(h * stride);
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)], row = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)), out = img.subarray(y * stride, (y + 1) * stride), up = y ? img.subarray((y - 1) * stride, y * stride) : null;
+    for (let x = 0; x < stride; x++) {
+      const a = x >= ch ? out[x - ch] : 0, b = up ? up[x] : 0, c = up && x >= ch ? up[x - ch] : 0;
+      const pr = (() => { const q = a + b - c, pa = Math.abs(q - a), pb = Math.abs(q - b), pc = Math.abs(q - c); return pa <= pb && pa <= pc ? a : pb <= pc ? b : c; })();
+      out[x] = (row[x] + [0, a, b, (a + b) >> 1, pr][f]) & 255;
+    }
+  }
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = y * stride + x * ch, alpha = ch === 4 ? img[i + 3] : 255;
+    if (alpha > 128 && img[i] + img[i + 1] + img[i + 2] < 3 * 128) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  }
+  return x1 < 0 ? null : { w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
 
 // ---- the site, as web/serve.py serves it (the site's headers: COOP/COEP and the CSP)
 const server = spawn("python3", ["-u", join(here, "..", "serve.py"), "0"], { stdio: ["ignore", "pipe", "inherit"] });
@@ -174,6 +201,13 @@ try {
     r = b.ok;
     ok(r?.ok === true && r.ended === "done" && r.report?.ok === true && r.sagetex?.ran === 1 && r.sagetex.failed === 0, "latex_build on the Agents page: built, its SageTeX item run", b);
     ok(r?.pages?.length >= 1 && typeof r.pages[0].png === "string" && Buffer.from(r.pages[0].png, "base64").subarray(0, 4).toString("latin1") === "\x89PNG", "latex_build: its first page as a PNG", r?.pages?.map((p) => [p.n, p.w]));
+    // (issue 1799: in the pages an agent got here, each formula was followed by a plain-text copy of itself: KaTeX's
+    //  stylesheet, which hides its MathML (the copy for screen readers), was fetched beside this page, /agents/katex/,
+    //  not the site's. A fraction alone, drawn once, is taller than it is wide; with its MathML's text after it, wider)
+    ok(!!(await req("workspace.create", { path: "/agent-frac.tex", content: { text: "\\documentclass{article}\n\\begin{document}\n\\[\\frac{a}{b}\\]\n\\end{document}\n" } })).ok, "the agent creates a .tex of one fraction");
+    const fr = (await req("workspace.latex_build", { path: "/agent-frac.tex", timeout_s: 120 }, 180)).ok;
+    const ink = typeof fr?.pages?.[0]?.png === "string" ? inkBox(Buffer.from(fr.pages[0].png, "base64")) : null;
+    ok(fr?.ok === true && ink && ink.h > 10 && ink.w < ink.h, "latex_build on the Agents page: a formula drawn once, not followed by its MathML as text (a lone fraction taller than wide)", { ok: fr?.ok, ink });
   } else ok(b.err?.code && /no LaTeX/.test(b.err.message ?? ""), "latex_build in a build without the LaTeX editor: refused (no LaTeX)", b);
 
   r = (await req("workspace.run_stop", {})).ok;

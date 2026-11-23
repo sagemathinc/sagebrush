@@ -53,8 +53,12 @@ const dataUrl = async (blob: Blob) => await new Promise<string>((ok, no) => { co
 /** KaTeX's stylesheet as the page has it, its fonts (WOFF2) as data: URLs: an SVG drawn as an image loads nothing. */
 function katexStyles(): Promise<string> {
   return (katexCss ??= (async () => {
-    const url = new URL("katex/katex.min.css", location.href);
-    const css = await (await fetch(url)).text();
+    // (beside this module, the site's, not beside the page: on the Agents page, /agents/, that was a 404's page, so the
+    //  pages an agent got had no KaTeX rules, each formula broken or followed by its MathML as text: issue 1799)
+    const url = new URL("katex/katex.min.css", import.meta.url);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("KaTeX's stylesheet couldn't be loaded (" + res.status + "): the pages would show each formula's MathML as text");
+    const css = await res.text();
     const names = [...new Set([...css.matchAll(/url\((fonts\/[A-Za-z0-9_-]+\.woff2)\)/g)].map((m) => m[1]))];
     const urls = new Map<string, string>();
     await Promise.all(names.map(async (n) => { try { urls.set(n, await dataUrl(await (await fetch(new URL(n, url))).blob())); } catch {} }));
@@ -81,7 +85,9 @@ async function shots(t: ToolTarget, want?: number[], steps = false, fit?: PageFi
   const page = document.createElement("div");
   page.className = "page tex-preview" + (beamer ? " beamer" : "");
   host.appendChild(page);
-  const style = document.createElement("style"); style.textContent = SHOT_CSS;
+  // (the copy measured here with the same rules it is drawn with: on a page without the editor's styles or KaTeX's,
+  //  the Agents page, it was measured unstyled, too short, and the drawing cut there: issue 1799)
+  const style = document.createElement("style"); style.textContent = css;
   document.head.appendChild(style); document.body.appendChild(host);
   try {
     // (the copy's images as data: URLs: the page's are blob: URLs, which an SVG image can't load)
