@@ -19,11 +19,12 @@ pub fn page_script() -> String {
     format!("window.__SB_APP_VERSION__ = {};", serde_json::json!({ "version": VERSION, "commit": COMMIT }))
 }
 
-/// The macOS menu bar: Tauri's default menu (tauri 2's Menu::default), with About naming the commit too.
-#[cfg(target_os = "macos")]
 /// The app menu's Approvals… item (the approvals window, signer.rs).
+#[cfg(target_os = "macos")]
 pub const APPROVALS: &str = "sb-approvals";
 
+/// The macOS menu bar: Tauri's default menu (tauri 2's Menu::default), with About naming the commit too.
+#[cfg(target_os = "macos")]
 pub fn menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<tauri::menu::Menu<R>> {
     use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem as P, Submenu, HELP_SUBMENU_ID, WINDOW_SUBMENU_ID};
     let name = app.package_info().name.clone();
