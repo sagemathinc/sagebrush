@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import * as path from "node:path";
 
 // Sage mode's session namespace loads a domain the first time one of its names is used (lib/_sage_lazy.py session,
@@ -132,6 +133,35 @@ d = "Graph" in globals()
 del Sandpile
 ${out(`[a, b, c, d, "Sandpile" in dir(), "Graph" in dir()]`)}`);
   assert.deepEqual(r, [true, false, false, true, false, true]);
+});
+
+test("a user's sagebrush.py beside the program: the first use of every lazily loaded name works, the user's import gets theirs", () => {
+  // (each domain loaded later imports the library's own package by its private name, _sagebrush_lib, whatever the
+  // program's folder holds: src/compile.ts libraryPackage)
+  const d = realpathSync(mkdtempSync(path.join(tmpdir(), "sb-lazy-shadow-")));
+  try {
+    writeFileSync(path.join(d, "sagebrush.py"), "MINE = 'mine'\n");
+    writeFileSync(path.join(d, "p.sage"), `import sage_all
+start = set(globals())
+bad = []
+for _k in sage_all.__all__:
+    if _k not in start:
+        try:
+            eval(_k, globals())
+        except Exception as e:
+            bad.append("%s: %s: %s" % (_k, type(e).__name__, e))
+import sagebrush
+${out(`{"bad": bad, "mine": getattr(sagebrush, "MINE", None), "loaded": len([m for m in __import__("sys").modules if m.startswith(("_sage_", "sage_"))])}`)}`);
+    const r = spawnSync(process.execPath, [CLI, "p.sage"], { cwd: d, encoding: "utf8", timeout: 600_000 });
+    const i = r.stdout.lastIndexOf("@@");
+    assert.ok(i >= 0, `no result line: ${r.status}\n${r.stdout}\n${r.stderr}`);
+    const res = JSON.parse(r.stdout.slice(i + 2));
+    assert.deepEqual(res.bad, []);
+    assert.equal(res.mine, "mine");
+    assert.ok(res.loaded > 30, `the domains loaded: ${res.loaded}`);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
 });
 
 test("the name index names only library modules that exist, and the browser's chunks hold each of them", () => {

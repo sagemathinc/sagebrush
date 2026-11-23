@@ -233,4 +233,6 @@ def session(ns):
             ns[name] = loaded[name]
     if hook is not None:
         hook(ns, _Session(ns, frozenset(names)))
+    # (and a session for LazyImport's stubs, a user's lazy_import's: one resolved is rebound here too)
+    bind(ns)
 

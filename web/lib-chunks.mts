@@ -124,14 +124,18 @@ export function groupOf(path: string, sets: Record<string, Set<string>>): string
   if (sub) return "mod-scipy-" + sub[1];
   return modGroup(top);
 }
+// Sage-layer modules whose group is their own though they import another at module level: Graph imports sage_plot,
+// and in its group plot()'s users, more than Graph's, would fetch Graph's 66 kB too (16 kB compressed), to save
+// Graph's users one fetch
+const SAGE_OWN_GROUP = new Set(["_sage_graph"]);
 // The group of Sage-layer module `top` no start uses: its DEPS parent's, while that isn't a start's, else its own
 function sageDomainGroup(top: string, sets: Record<string, Set<string>>): string {
   return "mod-sage-" + sageDomainRoot(top, sets).replace(/^_?sage_/, "").replace(/_/g, "-");
 }
-// (the module whose group it is: following DEPS while there's exactly one parent no start uses)
-function sageDomainRoot(top: string, sets: Record<string, Set<string>>): string {
-  const deps = sageDeps();
-  for (let seen = new Set<string>(); !seen.has(top); ) {
+// (the module whose group it is: following DEPS while there's exactly one parent no start uses, except from a
+// module in SAGE_OWN_GROUP)
+export function sageDomainRoot(top: string, sets: Record<string, Set<string>>, deps: Record<string, string[]> = sageDeps()): string {
+  for (let seen = new Set<string>(); !seen.has(top) && !SAGE_OWN_GROUP.has(top); ) {
     seen.add(top);
     const parents = (deps[top] ?? []).filter((p) => !Object.values(sets).some((s) => s?.has(p + ".py")));
     if (parents.length !== 1) break;

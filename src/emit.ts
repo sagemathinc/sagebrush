@@ -229,8 +229,8 @@ export class Emitter {
         // the code's builtins, $B)
         const ns = this.gns(id) === "$G" ? (nameLoad ? "$G" : "$GL") : "$g";
         if (!this.moduleBinds(id) && this.builtinNames.has(id)) return `((${t} = ${ns}${prop(id)}) !== undefined ? ${t} : (${t} = $B${prop(id)}) !== undefined ? ${t} : R.unboundName(${q(id)}))`;
-        // (and $G, whose lazy names, Sage mode's session's, a miss may still find: builtinName)
-        return `((${t} = ${ns}${prop(id)}) !== undefined ? ${t} : R.builtinName($B, ${q(id)}, $G))`;
+        // (a miss: $N, builtinName with $G, whose lazy names, Sage mode's session's, it may still find)
+        return `((${t} = ${ns}${prop(id)}) !== undefined ? ${t} : $N(${q(id)}))`;
       }
       case "class": {
         if (id[0] === "$") return this.classTemp(id);
@@ -1406,6 +1406,8 @@ export class Emitter {
       "const $G = R.realGlobals($g);",
       "const $GL = R.globalLoads($G);",
       "const $B = R.builtinsOf($G);",
+      // (one function, so each global name's miss is a short call: the pre-compiled library's size)
+      "const $N = (k) => R.builtinName($B, k, $G);",
       ...this.hoisted,
     ];
     if (this.fn.temps.length) head.push(`let ${this.fn.temps.join(", ")};`);
