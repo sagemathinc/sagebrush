@@ -58,6 +58,52 @@ function manualClock() {
 }
 
 const CASES = {
+  async restoredBeforeReconcile(check) {
+    // (SEC's H1 ordering: the agent removes its branch, the person restores it from Trash BEFORE any reconcile, then
+    //  the reconcile: the restored folder (the same fid) is a plain folder; the former owner can't write in it, the
+    //  old review handle can't accept into main, and a branch made again under the name has a fresh fid)
+    const w = await fresh("rrb");
+    await smallMain(w);
+    await make(w, "same");
+    await edit(w, B("same/intro.txt"), () => enc("Branch text.\n"));
+    await commit(w, "same", "Old work", true);
+    const old = await at(w, "same");
+    const gone = await agent(w).remove(B("same"));
+    const back = await w.restore(gone.path, gone);
+    check(back.path === B("same") && back.fid === old.fid, `the person restores it at once, the same fid (${back.fid})`);
+    await W.withBranchLock(() => w.reconcileBranches("closed"));
+    check((await w.branchAtName("same"))?.record == null && (await w.branchReview(old.fid, "same"))?.review == null, "after the reconcile: no record, no review state");
+    const e1 = await caught(edit(w, B("same/intro.txt"), () => enc("again\n")));
+    check(e1?.message === RULE.notYours, `the former owner can't write in the restored folder: ${e1?.message}`);
+    const e2 = await caught(W.review(person(w), old, { files: { "/intro.txt": { decision: "accepted" } } }));
+    check(e2?.message === R.moved && dec((await w.read("/intro.txt")).content) === "A long introduction.\n", `the old handle can't accept into main: ${e2?.message}`);
+    const e3 = await caught(make(w, "same"));
+    check(e3 !== null, "the name is a plain folder now, not free for git_branch: " + e3?.message);
+    await w.remove(B("same"));
+    await make(w, "same");
+    check((await fidOf(w, "same")) !== old.fid, "made again once the person removed the plain folder: a fresh fid");
+  },
+
+  async restoredBeforeReconcileLarge(check) {
+    // (the same ordering for a branch large enough to be moved in chunks (D11's largeMove: lowered to 10 here))
+    const was = { ...W.D11 };
+    W.configureD11({ ...W.D11, chunk: 10, page: 10, planPage: 100, validatePage: 10 });
+    try {
+      const w = await fresh("rrbl");
+      for (let i = 0; i < 14; i++) await w.putFile(`/many/f${i}.txt`, enc("x" + i));
+      await make(w, "big");
+      const fid = await fidOf(w, "big");
+      const gone = await agent(w).remove(B("big"));
+      const back = await w.restore(gone.path, gone);
+      await W.withBranchLock(() => w.reconcileBranches("closed"));
+      check(back.fid === fid && (await w.branchAtName("big"))?.record == null, "a large branch's root: its record goes with the removal; restored, it is a plain folder");
+      const e = await caught(agent(w).write(B("big/many/f0.txt"), enc("again"), { base: (await w.read(B("big/many/f0.txt"))).rev }));
+      check(e?.message === RULE.notYours, `the former owner can't write in it: ${e?.message}`);
+    } finally {
+      W.configureD11(was);
+    }
+  },
+
   async removedHandle(check) {
     // (#1803, SEC's row: an old review handle {fid, head, seq} of a branch its agent removed, reconciled and made again
     //  under the same name, can't accept into main)

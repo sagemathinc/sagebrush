@@ -125,8 +125,9 @@ export function branchRefusal(c: { op: string; role: string; path: string; entry
   if (!root) return T.onlyGitBranch;
   if (!rec || root.kind !== "folder" || rec.name !== nameOf(root.path)) return T.notYours;
   // (its own branch's folder, removed: to Trash, behind the remove's approval like any file, which says the branch's
-  // review history goes with it; reconcileBranches then releases its record, review state, runs and hash pages.  A
-  // failed branch's folder too: the one thing an agent may do with a failed branch)
+  // review history goes with it; the removal's own transaction deletes its record, review state, runs and hash pages
+  // (Workspace.move), so a restore gives a plain folder.  A failed branch's folder too: the one thing an agent may do
+  // with a failed branch)
   if (atRoot && c.op === "remove") {
     if (rec.status !== "ready" && rec.status !== "failed") return T.unfinished;
     return owner === null || rec.owner !== owner ? T.otherConnection : null;

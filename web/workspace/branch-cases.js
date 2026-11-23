@@ -183,7 +183,7 @@ const CASES = {
     check(!!(await w.stat("/Branches/theirs")), "and it stays where it is");
     const gone = await mine.remove("/Branches/own");
     check(gone.path.startsWith("/Trash/") && !(await w.stat("/Branches/own")) && !!(await w.stat(gone.path)), `its own ready branch: removed, to Trash (${gone.path})`);
-    check((await recOf(w, "own"))?.fid === before.fid, "its record stays until the reconcile (the delayed path)");
+    check((await recOf(w, "own")) === null && !(await metaRows(w)).some(([k]) => k.includes(before.fid)), "its record, review, runs and hash pages go with the removal itself, in its transaction");
     // (before the reconcile: the record's root missing, every change there refused as no branch; git_branch reconciles
     //  first, so the name is free for it)
     await refusedRm("a write at the removed branch's path before the reconcile", mine.create("/Branches/own/n.txt"), T.onlyGitBranch);
