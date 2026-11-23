@@ -4759,6 +4759,8 @@ def _str1(v, indent, col, tail):
         raise MagmaError("printing a tuple or record holding a matrix over a finite field is not supported yet")
     if isinstance(v, _MOrder):
         return v._str(col, indent, tail), True
+    if isinstance(v, MTuple) and not _making_string() and _order_in(v) and not any(_multiline(p) for p in v):
+        return _order_tuple_str(v, col, indent, tail), True
     if getattr(v, "_magma_nowrap", False):
         return _inline(v), False
     if isinstance(v, MTuple) and any(_multiline(p) for p in v):
@@ -4853,6 +4855,46 @@ def _extra(v):
     return 0
 
 
+def _order_in(v, depth=0):
+    """Whether the tuple v holds a maximal equation order (in a tuple in it too)."""
+    if isinstance(v, _MOrder):
+        return v.K._nfdata()["index"] == 1
+    return isinstance(v, MTuple) and depth < _PRINT_DEPTH_MAX and any(_order_in(p, depth + 1) for p in v)
+
+
+def _order_tuple_str(v, col, indent, tail):
+    """A tuple holding a maximal equation order, laid out as Magma 2.18-5 lays
+    it out: a line broken in the order's description or polynomial continued
+    4 in, as a polynomial is (<1, <O, 2>>), one broken anywhere else at the
+    tuple's indentation (<O, 1>); under printf's %o, at the indentation."""
+    plus = 0 if _SPRINT[0] is not None else 4
+
+    def pieces(x):
+        if isinstance(x, MTuple):
+            out = [("<", indent)]
+            for k, p in enumerate(x):
+                out += pieces(p) + [(", " if k < len(x) - 1 else ">", indent)]
+            return out
+        if isinstance(x, _MOrder) and x.K._nfdata()["index"] == 1:
+            head, f, rest = x._parts()
+            return [(head + " " + f, indent + plus), (" " + rest, indent)]
+        return [(_inline(x), indent)]
+
+    # (the words, each with the continuation column of the piece it starts in)
+    words, cur, at = [], "", indent
+    for text, cont in pieces(v) + [(tail, indent)]:
+        for ch in text:
+            if ch == " ":
+                words.append((cur, True, at))
+                cur = ""
+            else:
+                if not cur:
+                    at = cont
+                cur += ch
+    words.append((cur, False, at))
+    return _flow(words, col if col is not None else indent, indent, indent)
+
+
 def _flow(chunks, first_col, cont, indent=None):
     """Magma's layout of chunks (text, space after it) on lines of WIDTH
     columns, the first starting at first_col (its text already written),
@@ -4868,19 +4910,23 @@ def _flow(chunks, first_col, cont, indent=None):
     sequences, nested sequences, tuples and print lines)."""
     indent = cont if indent is None else indent
     out, c = [], first_col
-    for text, space in chunks:
+    for chunk in chunks:
+        # (a chunk may carry its own continuation column, a third element: a maximal order's polynomial in a tuple,
+        # _order_tuple_str)
+        text, space = chunk[0], chunk[1]
+        cc = chunk[2] if len(chunk) > 2 else cont
         # (the first chunk of a value printf writes after its own text is
         # split where it doesn't fit, never moved: _sprint_str)
         nomove, _NOMOVE[0] = _NOMOVE[0], False
         if text:
-            if not nomove and (2 * (c - indent) > WIDTH - indent and c > 2 * indent or c >= WIDTH - 1) and c > cont:
+            if not nomove and (2 * (c - indent) > WIDTH - indent and c > 2 * indent or c >= WIDTH - 1) and c > cc:
                 if c + len(text) <= WIDTH:
                     out.append(text)
                     c += len(text)
                     text = ""
                 else:
-                    out.append("\n" + " " * cont)
-                    c = cont
+                    out.append("\n" + " " * cc)
+                    c = cc
             # (by offsets: no copy of the rest of a long chunk for each line)
             i, n = 0, len(text)
             while i < n and c + n - i > WIDTH - 1:
@@ -4889,9 +4935,9 @@ def _flow(chunks, first_col, cont, indent=None):
                     # (just the backslash when the line is full and the
                     # next has room, as after printf's own text; else at
                     # least one character, so that deep lines progress)
-                    k = 0 if c == WIDTH - 1 and cont < WIDTH - 1 else 1
-                out.append(text[i:i + k] + "\\\n" + " " * cont)
-                i, c = i + k, cont
+                    k = 0 if c == WIDTH - 1 and cc < WIDTH - 1 else 1
+                out.append(text[i:i + k] + "\\\n" + " " * cc)
+                i, c = i + k, cc
             out.append(text[i:])
             c += n - i
         if space and c < WIDTH:
@@ -9568,6 +9614,10 @@ class _MOrder:
         # (the order of an equation order prints on one line however long, as Magma's does)
         if _making_string() or self.K._nfdata()["index"] != 1:
             return repr(self) + tail
+        if _SPRINT[0] is not None:
+            # (printf's %o: laid out on 80 columns, continued at the indentation, without the polynomial's 4)
+            words = (repr(self) + tail).split(" ")
+            return _flow([(w, k < len(words) - 1) for k, w in enumerate(words)], col, indent, indent)
         first = _flow([(w, True) for w in (head + " " + f).split(" ")], col, indent + 4, indent)
         c = len(first) - first.rfind("\n") - 1 if "\n" in first else col + len(first)
         words = (rest + tail).split(" ")

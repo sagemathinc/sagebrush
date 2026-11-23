@@ -16,5 +16,17 @@ Maximal Equation Order with defining polynomial x^3 - 2 over its ground order
 ]
 <Maximal Equation Order with defining polynomial x^3 - 2 over its ground order, 
 1>
+<1, <Maximal Equation Order with defining polynomial x^6 + x^5 + x^4 + x^3 + x^2
+    + x + 1 over its ground order, 2>>
+<Maximal Equation Order with defining polynomial x^6 + x^5 + x^4 + x^3 + x^2 + x
+    + 1 over its ground order, 1>
+Maximal Equation Order with defining polynomial x^6 + x^5 + x^4 + x^3 + x^2 + x 
++ 1 over its ground order
+order: Maximal Equation Order with defining polynomial x^6 + x^5 + x^4 + x^3 + 
+x^2 + x + 1 over its ground order
+[
+    <Maximal Equation Order with defining polynomial x^6 + x^5 + x^4 + x^3 + x^2
+        + x + 1 over its ground order>
+]
 105
 end
