@@ -10,6 +10,8 @@
 //   grantsToKeep(ws): the record as grants.json keeps it (a notebook no longer in the workspace: left out).
 //   keepGrants(ws, invoke, onChange): grants.json written whenever the record changes, one write at a time, the
 //     last one winning.
+//   adoptGrants(ws, invoke): another window of the app wrote grants.json (#1541): its record is this page's from now,
+//     so what it allowed or took back is so here too, and this page's next write carries it rather than undoing it.
 
 export const GRANTS_KEY = "sagebrush-grants";
 type Rec = { v: 1; seq?: number; migrated?: number; docs: Record<string, unknown> };
@@ -54,6 +56,35 @@ export async function restoreGrants(ws: GrantsWorkspace, invoke: Invoke, storage
   return n;
 }
 
+/** The id of the document grants.json names `k`, here: the notebook at a "ws:" path now (none if there is none), or a
+ * notebook file's own "file:" id. */
+async function idOf(ws: GrantsWorkspace, k: string): Promise<string | null> {
+  if (k.startsWith("ws:")) {
+    const s = await ws.stat(k.slice(3)).catch(() => undefined);
+    return s?.kind === "notebook" && s.ref ? s.ref : null;
+  }
+  return k.startsWith("file:") ? k : null;
+}
+/** grants.json's record, written by another window, this page's (each document by its id here; one that isn't a
+ * notebook here left out, its permission gone, so a prompt comes back); only what grants.json can't name (a document
+ * neither a workspace notebook nor a notebook file) is kept as it was.  Whether the record here changed.  A grants.json
+ * that can't be read changes nothing. */
+export async function adoptGrants(ws: GrantsWorkspace, invoke: Invoke, storage: Store = localStorage): Promise<boolean> {
+  const kept = parseGrants(await invoke("grants_read").catch(() => ""));
+  if (!kept) return false;
+  const cur = parseGrants(storage.getItem(GRANTS_KEY)) ?? { v: 1, seq: 0, docs: {} };
+  const docs: Record<string, unknown> = {};
+  for (const [id, e] of Object.entries(cur.docs)) if (!id.startsWith("file:") && !(await ws.pathOf("notebook", id).catch(() => undefined))) docs[id] = e;
+  for (const [k, e] of Object.entries(kept.docs)) {
+    const id = await idOf(ws, k);
+    if (id) docs[id] = e;
+  }
+  if (JSON.stringify(docs) === JSON.stringify(cur.docs)) return false;
+  const next: Rec = { ...cur, seq: Math.max(Number(cur.seq) || 0, Number(kept.seq) || 0), docs };
+  if (kept.migrated === 1) next.migrated = 1;
+  storage.setItem(GRANTS_KEY, JSON.stringify(next));
+  return true;
+}
 /** The record as grants.json keeps it: each document by where it is now. */
 export async function grantsToKeep(ws: GrantsWorkspace, storage: Store = localStorage): Promise<Rec> {
   const cur = parseGrants(storage.getItem(GRANTS_KEY)) ?? { v: 1, seq: 0, docs: {} };

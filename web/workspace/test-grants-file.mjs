@@ -2,7 +2,7 @@
 // The desktop app's file permissions across launches (web/workspace/grants-file.ts, #1565): the record kept in
 // grants.json by where each notebook is, and brought back at the next launch under the notebooks' new ids.
 //   bun web/workspace/test-grants-file.mjs
-import { restoreGrants, grantsToKeep, keepGrants, parseGrants, GRANTS_KEY } from "./grants-file.ts";
+import { restoreGrants, grantsToKeep, keepGrants, adoptGrants, parseGrants, GRANTS_KEY } from "./grants-file.ts";
 
 let fails = 0, checks = 0;
 const ok = (c, what) => { checks++; console.log((c ? "ok   " : "FAIL ") + what); if (!c) fails++; };
@@ -120,6 +120,32 @@ ok(nWrites >= 1 && nWrites <= 2 && J(parseGrants(fk.kept()).docs) === J({ "ws:/a
   changed();
   const done = await Promise.race([g.flush().then(() => "flushed"), new Promise((r) => setTimeout(() => r("stuck"), 1000))]);
   ok(done === "flushed" && writes === before + 1 && !g.unwritten && J(parseGrants(kept).docs) === J({ "ws:/a/one.ipynb": { write: ["/late"], t: 30 } }), "a retry firing after a successful flush: the next change is still written, and flush() resolves: " + J({ done, writes: writes - before }));
+}
+
+// two windows of the app (#1541): each its own ids for the same notebooks; what one allows or takes back, and writes,
+// is the other's once it adopts grants.json, so the other's next write carries it instead of undoing it
+{
+  const f = files();
+  const wa = workspace({ "/a/one.ipynb": { kind: "notebook", ref: "a1" }, "/b/two.ipynb": { kind: "notebook", ref: "a2" } });
+  const wb = workspace({ "/a/one.ipynb": { kind: "notebook", ref: "b1" }, "/b/two.ipynb": { kind: "notebook", ref: "b2" } });
+  const sa = store({ [GRANTS_KEY]: J({ v: 1, seq: 4, docs: { a1: { write: ["/a"], t: 1 }, a2: { write: ["/b"], t: 2 } } }) });
+  f.set(J(await grantsToKeep(wa, sa)));
+  const sb = store();
+  await restoreGrants(wb, f.invoke, sb);
+  // (the first window takes back two.ipynb's permission and writes the record; the second, meanwhile, has its own
+  // unsaved-to-disk ephemeral grant for a document grants.json can't name)
+  sa.setItem(GRANTS_KEY, J({ v: 1, seq: 5, docs: { a1: { write: ["/a"], t: 1 } } }));
+  f.set(J(await grantsToKeep(wa, sa)));
+  const rb = JSON.parse(sb.getItem(GRANTS_KEY));
+  rb.docs.scratch = { write: ["/s"], t: 9 };
+  sb.setItem(GRANTS_KEY, J(rb));
+  const changed = await adoptGrants(wb, f.invoke, sb);
+  const after = parseGrants(sb.getItem(GRANTS_KEY));
+  ok(changed && J(after.docs) === J({ scratch: { write: ["/s"], t: 9 }, b1: { write: ["/a"], t: 1 } }) && after.seq === 5, "two windows: a permission taken back in one is gone in the other once adopted (by its own ids), what grants.json can't name kept: " + J(after));
+  ok(J((await grantsToKeep(wb, sb)).docs) === J({ "ws:/a/one.ipynb": { write: ["/a"], t: 1 } }), "two windows: and the other's next write doesn't bring it back");
+  ok((await adoptGrants(wb, f.invoke, sb)) === false, "two windows: adopting the same record again changes nothing");
+  f.set("not json");
+  ok((await adoptGrants(wb, f.invoke, sb)) === false && J(parseGrants(sb.getItem(GRANTS_KEY)).docs) === J(after.docs), "two windows: a grants.json that can't be read changes nothing");
 }
 
 console.log(fails ? `${fails} of ${checks} failed` : `test-grants-file: all ${checks} passed`);

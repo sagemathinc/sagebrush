@@ -18,7 +18,7 @@ mod folder_fs;
 use folder_fs::Grant;
 
 /// The app's data folder (a self-test may name its own, SAGEBRUSH_APP_DATA_DIR).
-fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let base = app.path().app_data_dir().map_err(|e| format!("the app's data folder: {e}"))?;
     Ok(std::env::var_os("SAGEBRUSH_APP_DATA_DIR").map(PathBuf::from).filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some()).unwrap_or(base))
 }
@@ -29,7 +29,26 @@ fn root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     open_root(&d.join("Workspace"))
 }
 
-// ---- the page's commands (the main window only: capabilities/default.json)
+/// Whether `p` is a workspace path ("/a/b.ipynb", as every disk command takes it).
+pub fn workspace_path(p: &str) -> Result<(), String> {
+    components(p).map(|_| ())
+}
+
+/// Window `from` changed the workspace on disk (`what` "sb-disk-changed") or grants.json ("sb-grants-changed"): the
+/// app's other windows are told, to read it again (#1541: web/workspace/disk-mirror.ts DiskMirror.pull,
+/// grants-file.ts adoptGrants).  Every window hears it (a page listens for any window's events); each leaves out its
+/// own.
+fn told(app: &tauri::AppHandle, from: &tauri::Webview, what: &str) {
+    use tauri::Emitter;
+    if app.webview_windows().len() > 1 {
+        let _ = app.emit(what, serde_json::json!({ "from": from.label() }));
+    }
+}
+fn changed(app: &tauri::AppHandle, from: &tauri::Webview) {
+    told(app, from, "sb-disk-changed");
+}
+
+// ---- the page's commands (the app's windows: capabilities/default.json)
 
 fn path_header(req: &tauri::ipc::Request) -> Result<String, String> {
     let h = req.headers().get("Sagebrush-Path").ok_or("no path")?.to_str().map_err(|_| "a path that isn't text")?;
@@ -65,12 +84,13 @@ pub fn disk_read(app: tauri::AppHandle, path: String) -> Result<tauri::ipc::Resp
 /// The bytes are the request's body; the path its Sagebrush-Path header (percent-encoded), and what the page expects
 /// the file to be its Sagebrush-Expect header (disk_fs.rs Expect).  The file as written: {size, mtime, sha256}.
 #[tauri::command]
-pub fn disk_write(app: tauri::AppHandle, request: tauri::ipc::Request) -> Result<Option<Entry>, String> {
+pub fn disk_write(app: tauri::AppHandle, webview: tauri::Webview, request: tauri::ipc::Request) -> Result<Option<Entry>, String> {
     let p = path_header(&request)?;
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("the bytes must be sent as bytes".into()) };
     let expect = Expect::parse(request.headers().get("Sagebrush-Expect").and_then(|h| h.to_str().ok()))?;
     let root = root(&app)?;
     write(&root, &p, bytes, &expect)?;
+    changed(&app, &webview);
     stat(&root, &p)
 }
 
@@ -80,18 +100,24 @@ pub fn disk_stat(app: tauri::AppHandle, path: String) -> Result<Option<Entry>, S
 }
 
 #[tauri::command]
-pub fn disk_mkdir(app: tauri::AppHandle, path: String) -> Result<(), String> {
-    mkdir(&root(&app)?, &path)
+pub fn disk_mkdir(app: tauri::AppHandle, webview: tauri::Webview, path: String) -> Result<(), String> {
+    mkdir(&root(&app)?, &path)?;
+    changed(&app, &webview);
+    Ok(())
 }
 
 #[tauri::command]
-pub fn disk_rename(app: tauri::AppHandle, from: String, to: String, expect: Option<String>) -> Result<(), String> {
-    rename(&root(&app)?, &from, &to, &Expect::parse(expect.as_deref())?)
+pub fn disk_rename(app: tauri::AppHandle, webview: tauri::Webview, from: String, to: String, expect: Option<String>) -> Result<(), String> {
+    rename(&root(&app)?, &from, &to, &Expect::parse(expect.as_deref())?)?;
+    changed(&app, &webview);
+    Ok(())
 }
 
 #[tauri::command]
-pub fn disk_remove(app: tauri::AppHandle, path: String, expect: Option<String>) -> Result<(), String> {
-    remove(&root(&app)?, &path, &Expect::parse(expect.as_deref())?)
+pub fn disk_remove(app: tauri::AppHandle, webview: tauri::Webview, path: String, expect: Option<String>) -> Result<(), String> {
+    remove(&root(&app)?, &path, &Expect::parse(expect.as_deref())?)?;
+    changed(&app, &webview);
+    Ok(())
 }
 
 /// The folder the workspace is kept in, for the page to say where the files are.
@@ -194,9 +220,11 @@ pub fn grants_read(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn grants_write(app: tauri::AppHandle, json: String) -> Result<(), String> {
+pub fn grants_write(app: tauri::AppHandle, webview: tauri::Webview, json: String) -> Result<(), String> {
     grants_of(&json)?;
-    write_small(&open_root(&data_dir(&app)?)?, "grants.json", &json)
+    write_small(&open_root(&data_dir(&app)?)?, "grants.json", &json)?;
+    told(&app, &webview, "sb-grants-changed");
+    Ok(())
 }
 
 #[cfg(test)]

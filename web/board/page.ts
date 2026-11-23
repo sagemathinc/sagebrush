@@ -1106,6 +1106,12 @@ function openEntry(e: Entry, how: "here" | "tab") {
   const url = e.kind === "board" ? location.pathname + "?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref!);
   if (how === "tab") return void window.open(url, "_blank", "noopener");
   if (e.kind === "board" && e.ref === source.slice(6)) return;
+  // (in the app, a notebook or board another window shows: that window to the front instead, app/src-tauri/src/windows.rs
+  // window_claim, #1541)
+  if (desktopApp && (e.kind === "notebook" || e.kind === "board")) {
+    void (window as any).__TAURI__.core.invoke("window_claim", { doc: e.path }).then((at: string | null) => { if (at == null) void leaveFor(url, nameOf(e.path)); }, () => void leaveFor(url, nameOf(e.path)));
+    return;
+  }
   void leaveFor(url, nameOf(e.path));
 }
 // Leaving this board for another page, whichever way (an open, an upload, the file browser): what
