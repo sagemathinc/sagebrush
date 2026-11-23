@@ -76,6 +76,10 @@ fn enc(e: &Expr, s: &mut String) {
                 let _ = write!(s, "h{:x},{:x};", a.to_bits(), b.to_bits());
             }
         },
+        // m: a real of RealField(p), p != 53 (mpnum's wire form)
+        Kind::Num(Num::Mp(x)) => {
+            let _ = write!(s, "m{};", x.wire());
+        }
         Kind::Sym(n) => {
             let _ = write!(s, "s{}:{}", n.len(), n);
         }
@@ -223,6 +227,10 @@ impl<'a> Dec<'a> {
                 let p = |t: &str| f64::from_bits(u64::from_str_radix(t, 16).unwrap_or_else(|_| bad()));
                 let k = if c == b'g' { crate::num::Fk::CC } else { crate::num::Fk::CDF };
                 raw(Kind::Num(Num::Float(p(a), p(b), k)))
+            }
+            b'm' => {
+                let h = self.until(b';');
+                raw(Kind::Num(Num::mp(crate::mpnum::Mp::from_wire(h).unwrap_or_else(|| bad()))))
             }
             b's' => raw(Kind::Sym(self.name().into())),
             b'c' => raw(Kind::Const(match self.next() {
@@ -397,6 +405,7 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
         "operator" => {
             let e = d(arg(0));
             let (tag, ch): (String, Vec<Expr>) = match &e.kind {
+                Kind::Num(Num::Mp(_)) => ("mp".into(), vec![]),
                 Kind::Num(n) => (if n.is_exact() { if n.is_real() { "rational" } else { "complex" } } else { "float" }.into(), vec![]),
                 Kind::Sym(_) => ("symbol".into(), vec![]),
                 Kind::Const(_) => ("constant".into(), vec![]),
@@ -418,6 +427,8 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
                 Some(Num::Exact(a, b)) => vec!["z".into(), format!("{}/{}", a.numer(), a.denom()), format!("{}/{}", b.numer(), b.denom())],
                 // (the parent as a fourth field: RR, CC, RDF or CDF)
                 Some(Num::Float(x, y, k)) => vec!["f".into(), format!("{:e}", x), format!("{:e}", y), format!("{:?}", k)],
+                // (its wire form: the precision, then the value)
+                Some(Num::Mp(x)) => vec!["m".into(), x.wire()],
                 None => vec!["".into()],
             }
         }
@@ -431,6 +442,14 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
         // computes: mode "float", those with numeric arguments, a float among
         // them, that Sage evaluates at once (gamma(2.5), not psi(1, 2.5));
         // mode "const", the outermost ones without symbols (for n())
+        // the calls and powers of numbers with a real of RealField(p),
+        // p != 53, among them that Sage evaluates at once in that field
+        // (sin(a), a^(1/2), 2^a, e^a), innermost first, for the front end
+        "mp_calls" => {
+            let mut out = vec![];
+            mp_calls(&d(arg(0)), &mut out);
+            out.iter().map(encode).collect()
+        }
         "special_calls" => {
             let mut out = vec![];
             special_calls(&d(arg(0)), arg(1) == "const", &mut out);
@@ -649,6 +668,28 @@ pub fn pysrc(e: &Expr) -> String {
     }
 }
 
+fn mp_calls(e: &Expr, out: &mut Vec<Expr>) {
+    let ch = e.children();
+    let hit = match &e.kind {
+        // (a symbolic function, a derivative, an integral or a limit stays as it is,
+        // as Sage keeps f(0.5); so does a call with NaN, Sage's sin(NaN) and e^NaN)
+        Kind::Fun(f, _) if matches!(f, Fun::User(_) | Fun::Deriv(..) | Fun::Integral | Fun::Limit) => false,
+        _ if ch.iter().any(|t| t.as_num().and_then(|n| n.as_mp()).is_some_and(|m| m.sp == crate::mpnum::Sp::NaN)) => false,
+        Kind::Fun(..) => ch.iter().all(|t| t.is_num()) && ch.iter().any(|t| t.is_mp()),
+        Kind::Pow(b, x) => (b.is_num() || b.is_const(Const::E)) && x.is_num() && (b.is_mp() || x.is_mp()),
+        _ => false,
+    };
+    if hit {
+        if !out.contains(e) {
+            out.push(e.clone());
+        }
+        return;
+    }
+    for c in ch {
+        mp_calls(&c, out);
+    }
+}
+
 fn special_calls(e: &Expr, konst: bool, out: &mut Vec<Expr>) {
     if let Kind::Fun(f, a) = &e.kind {
         if crate::special::is_special(f) || matches!(f, Fun::Gamma | Fun::Erf) {
@@ -659,6 +700,7 @@ fn special_calls(e: &Expr, konst: bool, out: &mut Vec<Expr>) {
                     && a.iter().any(|t| t.is_float())
                     && !(matches!(f, Fun::Psi) && a.len() == 2)
                     && !matches!(f, Fun::ZetaDeriv)
+                    && !a.iter().any(|t| t.is_mp())
             };
             if hit {
                 if !out.contains(e) {

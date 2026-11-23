@@ -1276,6 +1276,13 @@
    "owner": "symbolic engine"
   },
   {
+   "id": "symCall:mp_calls",
+   "transport": "symCall:mp_calls",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
    "id": "symCall:mul",
    "transport": "symCall:mul",
    "status": "cheap-candidate",
