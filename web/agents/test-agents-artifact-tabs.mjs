@@ -96,6 +96,25 @@ try {
   await P.ev(`(document.querySelector('#send').click(), true)`);
   await P.until(`document.querySelector('#artifacts .tab.on')?.dataset.tab === 'doc-eig' && document.querySelector('#stop').hidden`, 60000).catch(() => {});
   ok(!before8.includes("doc-eig") && (await shown(P)) === "doc-eig", "T8: the agent writing a closed artifact again brings its tab back, shown", { before8, after: await tabs(P) });
+
+  // ---- T9: by keyboard: Tab from a tab reaches its ×, Enter closes it, and the keyboard's place is the tab shown
+  const key = async (k, code, vk, text) => { for (const type of ["keyDown", "keyUp"]) await P.send("Input.dispatchKeyEvent", { type, key: k, code, windowsVirtualKeyCode: vk, ...(type === "keyDown" && text ? { text } : {}) }); };
+  await P.ev(`(document.querySelector('#artifacts .tab[data-tab="stats-diff"]').focus(), true)`);
+  await key("Tab", "Tab", 9);
+  const onX = await P.ev(`document.activeElement?.dataset?.close ?? null`);
+  await key("Enter", "Enter", 13, "\r");
+  await P.until(`!document.querySelector('#artifacts .tab[data-tab="stats-diff"]')`, 5000).catch(() => {});
+  await sleep(200);
+  const after9 = await P.ev(`({ tabs: [...document.querySelectorAll('#artifacts .tab')].map((t) => t.dataset.tab), focus: document.activeElement?.dataset?.tab ?? document.activeElement?.id ?? null })`);
+  ok(onX === "stats-diff" && JSON.stringify(after9.tabs) === '["plot-code","doc-eig"]' && after9.focus === "doc-eig", "T9: by keyboard, Tab from a tab reaches its ×, Enter closes it, and the keyboard is then on the tab shown", { onX, after9 });
+  // (and the last one's ×: the pane closes, and the keyboard is on the chat's All artifacts)
+  for (const id of ["plot-code", "doc-eig"]) {
+    await P.ev(`(document.querySelector('#artifacts [data-close="${id}"]').focus(), true)`);
+    await key("Enter", "Enter", 13, "\r");
+    await P.until(`!document.querySelector('#artifacts .tab[data-tab="${id}"]') || document.querySelector('#artifacts').offsetWidth === 0`, 5000).catch(() => {});
+    await sleep(200);
+  }
+  ok((await P.ev(`document.querySelector('#artifacts').offsetWidth === 0`)) && (await P.ev(`document.activeElement?.id ?? null`)) === "all-arts-chat", "T9: the last tab's × by keyboard closes the pane; the keyboard is on the chat's All artifacts", await P.ev(`document.activeElement?.id ?? document.activeElement?.tagName`));
   ok(P.errors.length === 0, "no page errors", P.errors);
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));

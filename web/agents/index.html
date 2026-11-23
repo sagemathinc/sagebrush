@@ -299,7 +299,7 @@
   .tab-wrap.on { background: var(--card); box-shadow: 0 0 0 1px var(--line); }
   .tab-wrap.on .tab.on { box-shadow: none; background: none; }
   .tab-x { border: 0; background: none; cursor: pointer; padding: 2px 6px; margin-left: -6px; border-radius: 5px; color: var(--muted); font-size: 15px; line-height: 1; visibility: hidden; }
-  .tab-wrap:hover .tab-x, .tab-wrap.on .tab-x, .tab-x:focus-visible { visibility: visible; }
+  .tab-wrap:hover .tab-x, .tab-wrap.on .tab-x, .tab-wrap:focus-within .tab-x { visibility: visible; }
   .tab-x:hover { background: var(--side); color: inherit; }
   dialog.arts-dlg { border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; width: min(520px, 92vw); }
   dialog.arts-dlg h3 { margin: 0 0 8px; font-size: 16px; }

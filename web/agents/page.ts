@@ -649,42 +649,61 @@ function reopenTab(t: Thread, id: string) {
   t.closed = [...c];
   save();
 }
+// (one close at a time per tab: a second click while one is saving changes nothing)
+const closingTabs = new Set<string>();
 async function closeTab(threadId: string, id: string) {
   if (current().id !== threadId) return;
-  const k = hostKey(threadId, id), h = hosts.get(k);
-  if (h?.nb?.isRunning() && !(await mayStopRunning([[k, h]]))) return;
-  if (current().id !== threadId) return;
-  if (h) {
-    const r: Released = h.release ? await h.release().catch((e) => ({ ok: false as const, why: String((e as Error)?.message ?? e) })) : { ok: true };
-    if (!r.ok) {
-      // (it could neither save nor keep a copy: it stays, shown, with its bar, as on the pane's close)
-      h.bar = {
-        kind: "refused",
-        text: r.why,
-        actions: [
-          { label: "Try again", run: () => void closeTab(threadId, id) },
-          ...(h.download?.() ? [{ label: "Download a copy", run: () => saveDownload(h.download!()) }] : []),
-          { label: "Close without keeping", run: () => void (async () => { await h.dispose?.(); if (hosts.get(k) === h) hosts.delete(k); h.el.remove(); await closeTab(threadId, id); })() },
-        ],
-      };
-      if (current().id === threadId) { openArtifact = id; renderArtifacts(); }
-      return;
+  const k = hostKey(threadId, id);
+  if (closingTabs.has(k)) return;
+  closingTabs.add(k);
+  // (the keyboard's place: on the tab shown next, or the chat's All artifacts once the pane closes)
+  const hadFocus = document.activeElement instanceof HTMLElement && $("#artifacts").contains(document.activeElement);
+  try {
+    const h = hosts.get(k);
+    if (h?.nb?.isRunning() && !(await mayStopRunning([[k, h]]))) return;
+    if (current().id !== threadId || hosts.get(k) !== h) return;
+    // (a cell started meanwhile (the agent's run): the tab stays open, as the person didn't say to stop that one)
+    if (h?.nb?.isRunning()) return;
+    if (h) {
+      const r: Released = h.release ? await h.release().catch((e) => ({ ok: false as const, why: String((e as Error)?.message ?? e) })) : { ok: true };
+      if (hosts.get(k) !== h) return; // (replaced or gone meanwhile: nothing of this close applies)
+      if (!r.ok) {
+        // (it could neither save nor keep a copy: it stays, shown, with its bar, as on the pane's close)
+        h.bar = {
+          kind: "refused",
+          text: r.why,
+          actions: [
+            { label: "Try again", run: () => void closeTab(threadId, id) },
+            ...(h.download?.() ? [{ label: "Download a copy", run: () => saveDownload(h.download!()) }] : []),
+            { label: "Close without keeping", run: () => void (async () => { await h.dispose?.(); if (hosts.get(k) === h) hosts.delete(k); h.el.remove(); await closeTab(threadId, id); })() },
+          ],
+        };
+        if (current().id === threadId) { openArtifact = id; renderArtifacts(); }
+        return;
+      }
+      hosts.delete(k);
+      h.el.remove();
     }
-    if (hosts.get(k) === h) hosts.delete(k);
-    h.el.remove();
+    if (current().id !== threadId) return;
+    const t = current(), closed = closedOf(t);
+    closed.add(id);
+    t.closed = [...closed];
+    save();
+    if (openArtifact === id) {
+      const i = t.artifacts.findIndex((x) => x.id === id);
+      const next = t.artifacts.slice(i + 1).find((x) => !closed.has(x.id)) ?? t.artifacts.slice(0, Math.max(i, 0)).reverse().find((x) => !closed.has(x.id));
+      openArtifact = next?.id ?? null;
+      if (!next) fullscreen = false;
+    }
+    renderArtifacts();
+    if (hadFocus) {
+      const tab = openArtifact ? document.querySelector<HTMLElement>(`#artifacts [data-tab="${CSS.escape(openArtifact)}"]`) : null;
+      const all = $("#all-arts-chat");
+      (tab ?? (all.hidden ? null : all))?.focus();
+    }
+  } finally {
+    closingTabs.delete(k);
   }
-  if (current().id !== threadId) return;
-  const t = current(), closed = closedOf(t);
-  closed.add(id);
-  t.closed = [...closed];
-  save();
-  if (openArtifact === id) {
-    const i = t.artifacts.findIndex((x) => x.id === id);
-    const next = t.artifacts.slice(i + 1).find((x) => !closed.has(x.id)) ?? t.artifacts.slice(0, Math.max(i, 0)).reverse().find((x) => !closed.has(x.id));
-    openArtifact = next?.id ?? null;
-    if (!next) fullscreen = false;
-  }
-  renderArtifacts();
 }
 /** #1792: everything this chat has produced, closed tabs included: a click opens it (its tab back). */
 function artifactBrowser() {
