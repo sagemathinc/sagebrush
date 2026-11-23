@@ -28,7 +28,7 @@ const site = `http://127.0.0.1:${sitePort}`;
 const H = delegateHost({ features: ["delegate.1", "chat.resume", "memory.1"], log: "aaaa1111" });
 const B = await browser();
 const TAG = "abcdefghijklmnopqrstuvwxya";
-const H2 = delegateHost({ features: ["delegate.1", "chat.resume", "memory.1"], log: "bbbb2222" });
+const H2 = delegateHost({ features: ["delegate.1", "chat.resume", "memory.1"] });
 // (Connect, then Allow: with memory ticked (own notes and the tag), or not)
 async function pair(P, host, memory) {
   await P.navigate(`${site}/agents/?pair=123-456&port=${host.port}`);
@@ -166,15 +166,32 @@ try {
     await P.until(`/Not saved/.test(${lastCard}.querySelector('.mem-state')?.textContent ?? '')`, 10000).catch(() => {});
     const c11 = await card();
     ok(c11.state === "Not saved" && c11.body === null && !c11.buttons.length, "M11: memory_decided from the agent ends the card, and its text leaves the chat", c11);
+    // ======================================================================== M15: a revision while Edit… is open
+    const pr15 = H.memory.propose(send, { name: "moving", description: "revised under the dialog", body: "first" });
+    await P.until(`document.querySelectorAll('[data-memory]').length >= 8`, 10000);
+    await clickLast("edit");
+    await P.until(`!!document.querySelector('dialog.memory-edit[open]')`, 5000);
+    H.memory.revise(send, pr15.pending, { body: "second" });
+    await P.until(`${lastCard}.querySelector('.mem-body')?.textContent === 'second'`, 10000).catch(() => {});
+    const sent15 = H.got.filter((m) => m.method === "memory.save").length;
+    await P.ev(`(() => { const d = document.querySelector('dialog.memory-edit[open]'); d.querySelector('[name=body]').value = 'mine'; [...d.querySelectorAll('button')].find((b) => b.textContent === 'Save').click(); return true; })()`);
+    await sleep(500);
+    const c15 = await card();
+    ok(H.got.filter((m) => m.method === "memory.save").length === sent15 && c15.body === "second" && c15.buttons.includes("Save") && /changed this note while you were looking/.test(await toastText()) && (await P.ev(`!!document.querySelector('dialog.memory-edit[open]')`)), "M15: Save in Edit… after the agent revised the note sends nothing; the card shows the new text, still open, and the dialog stays", c15);
+    await P.ev(`([...document.querySelector('dialog.memory-edit[open]').querySelectorAll('button')].find((b) => b.textContent === 'Cancel').click(), true)`);
+    await clickLast("dismiss");
+    await P.until(`/Not saved/.test(${lastCard}.querySelector('.mem-state')?.textContent ?? '')`, 10000).catch(() => {});
     // ======================================================================== M13: no note's text is kept in this browser
     H.memory.propose(send, { name: "later", description: "left open", body: "LATER-TEXT" });
-    await P.until(`document.querySelectorAll('[data-memory]').length >= 8`, 10000);
+    await P.until(`document.querySelectorAll('[data-memory]').length >= 9`, 10000);
     await sleep(700); // (the chat is kept 300 ms after a change)
     const kept = await P.ev(`localStorage.getItem('sagebrush-agents-preview-v1') ?? ''`);
     ok(kept.includes("left open") && !/LATER-TEXT|ELSEWHERE-TEXT|keychain|a lot of text|Explain proofs/.test(kept), "M13: the kept chat has the cards but none of their text, an open card's included");
   }
   send({ type: "turn_finished", outcome: "completed" });
   ok(P.errors.length === 0, "no page errors", P.errors);
+  // (the first chat kept with its turn finished, so that in the next tab only the card's agent keeps it from a decision)
+  await P.until(`(() => { try { const v = JSON.parse(localStorage.getItem('sagebrush-agents-preview-v1')); return v.threads.some((t) => t.entries.some((e) => e.turn_id === 't-mem' && e.state !== 'running' && e.finished)); } catch { return false; } })()`, 10000);
 
   // ======================================================================== M12: no memory in the grant
   // (another agent, allowed without memory: its proposal still shows, but Save is refused by the page itself, in its
@@ -204,8 +221,8 @@ try {
   send2({ type: "turn_finished", outcome: "completed" });
   // (M13/M14: this tab reads the kept chat: the first agent's open card is there without its text, and takes no
   //  decision here, where another agent is connected)
-  const later = await P2.ev(`(async () => { for (const el of document.querySelectorAll('#threads .thread:not(.mirror)')) { el.click(); await new Promise((r) => setTimeout(r, 150)); const c = [...document.querySelectorAll('[data-memory]')].find((x) => /left open/.test(x.textContent)); if (c) return { body: c.querySelector('.mem-body')?.textContent ?? null, buttons: [...c.querySelectorAll('button')].map((b) => b.textContent), text: c.textContent }; } return null; })()`);
-  ok(later && later.body === null && !/LATER-TEXT/.test(later.text) && later.buttons.length === 0, "M14: another tab shows the first agent's open card without its text, and with no decision while another agent is connected", later);
+  const later = await P2.ev(`(async () => { for (const el of document.querySelectorAll('#threads .thread:not(.mirror)')) { el.click(); await new Promise((r) => setTimeout(r, 150)); const c = [...document.querySelectorAll('[data-memory]')].find((x) => /left open/.test(x.textContent)); if (c) return { body: c.querySelector('.mem-body')?.textContent ?? null, buttons: [...c.querySelectorAll('button')].map((b) => b.textContent), text: c.textContent, away: /connection to the agent was lost|Interrupted/.test(c.closest('.turn')?.textContent ?? '') }; } return null; })()`);
+  ok(later && later.body === null && !/LATER-TEXT/.test(later.text) && later.buttons.length === 0 && !later.away, "M14: another tab shows the first agent's open card without its text, and with no decision while another agent is connected", later);
   ok(P2.errors.length === 0, "no page errors (second agent)", P2.errors);
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));

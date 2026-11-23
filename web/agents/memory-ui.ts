@@ -6,7 +6,7 @@
 import type { AgentPairing } from "../workspace/agent-pair";
 import { grantMemory } from "../workspace/agent-grant";
 import { TaskClient } from "../workspace/tasks-client";
-import { MEMORY_RESULTS, type Scope } from "../workspace/memory-schema";
+import { MEMORY_RESULTS, MemoryShapeError, type Scope } from "../workspace/memory-schema";
 import type { MemoryCard, Thread, Turn } from "../workspace/agent-chat/events";
 import { expiresText } from "../workspace/agent-chat/view";
 
@@ -18,6 +18,8 @@ export const MEMORY_COPY = {
   conflict: "A note with that name is already there, so this wasn't saved. Choose another name in Edit….",
   away: "The agent that proposed this note isn't the one connected now.",
   where: "Choose where to keep this note.",
+  changed: "The agent changed this note while you were looking at it. Check it again.",
+  unread: "The agent's answer couldn't be read. Try again.",
   failed: "The note couldn't be saved",
   own: "this agent's own notes",
   tag: "a tag's notes",
@@ -31,8 +33,8 @@ export interface MemoryUiHost {
   toast(text: string, ms?: number): void;
   /** a tag's display name, if the page knows it (lane D's names; never authority) */
   tagName?(id: string): string | null;
-  /** whether this thread's agent is the one connected now (only its cards take a decision) */
-  live(thread: Thread): boolean;
+  /** whether the card's agent is the one connected now (only its cards take a decision) */
+  live(card: MemoryCard): boolean;
 }
 
 const hex = (n: number) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => b.toString(16).padStart(2, "0")).join("");
@@ -44,7 +46,10 @@ export function memoryHooks(host: MemoryUiHost) {
   //  after any answer, or for another revision or text, a new decision gets a new id)
   const busy = new Set<string>();
   const decisions = new Map<string, { key: string; id: string }>();
-  const LOST = new Set(["timeout", "closed"]);
+  // (no answer, or none the page could read (not as §7.2 has it, or over the connection's bound): the same request
+  //  again, under the same id, gets the agent's kept answer)
+  const LOST = new Set(["timeout", "closed", "too_large"]);
+  const lost = (e: unknown) => e instanceof MemoryShapeError || LOST.has((e as { code?: string })?.code ?? "");
   const find = (pending: string): { thread: Thread; turn: Turn; card: MemoryCard } | null => {
     for (const t of host.threads()) for (const e of t.entries) if (e.kind === "turn" && e.memory && Object.hasOwn(e.memory, pending)) return { thread: t, turn: e, card: e.memory[pending] };
     return null;
@@ -53,18 +58,29 @@ export function memoryHooks(host: MemoryUiHost) {
   const decidable = (pending: string) => {
     const f = find(pending), p = host.pairing();
     if (!f || f.card.outcome || !p || busy.has(pending)) return null;
-    if (!host.live(f.thread)) { host.toast(MEMORY_COPY.away, 6000); return null; }
+    if (!host.live(f.card)) { host.toast(MEMORY_COPY.away, 6000); return null; }
     return { ...f, p };
   };
+  // (a decision names the revision the person saw; a later one shown since is theirs to look at first: nothing sent)
+  const seen = (f: { card: MemoryCard }, revision: number) => {
+    if (f.card.proposal.revision === revision) return true;
+    host.toast(MEMORY_COPY.changed, 6000);
+    return false;
+  };
+  // (an answer changes the card it was for, never a later revision's)
+  const still = (pending: string, card: MemoryCard) => find(pending)?.card === card;
   const end = (card: MemoryCard, outcome: MemoryCard["outcome"], note?: string) => {
+    decisions.delete(card.proposal.pending);
     card.outcome = outcome;
     if (note) card.note = note;
     delete card.proposal.body;
     host.changed();
   };
   const scopeName = (s: Scope) => (s === "own" ? MEMORY_COPY.own : host.tagName?.(s.tag) ? `the tag ${host.tagName(s.tag)}` : MEMORY_COPY.tag);
-  const refused = (e: unknown, card: MemoryCard) => {
+  const refused = (e: unknown, pending: string, card: MemoryCard) => {
     const code = (e as { code?: string })?.code;
+    if (lost(e)) return host.toast(e instanceof MemoryShapeError ? MEMORY_COPY.unread : `${MEMORY_COPY.failed}: ${(e as Error)?.message ?? e}`, 8000);
+    if (!still(pending, card)) return;
     // (stale: it changed, or the agent's access did; not_found: the proposal is gone at the agent (decided in another
     //  tab, or the agent started again): either way this card can't be saved now)
     if (code === "stale" || code === "not_found") return end(card, "stale");
@@ -73,7 +89,7 @@ export function memoryHooks(host: MemoryUiHost) {
   // (revision: the one the person saw, the card's as drawn or as the dialog opened; a later one at the agent is stale)
   async function save(pending: string, revision: number, edit?: { scope: Scope; name: string; description: string; body: string; expires: number | null }) {
     const f = decidable(pending);
-    if (!f) return;
+    if (!f || !seen(f, revision)) return;
     busy.add(pending);
     const key = JSON.stringify([revision, edit ?? null]);
     const kept = decisions.get(pending);
@@ -81,24 +97,24 @@ export function memoryHooks(host: MemoryUiHost) {
     decisions.set(pending, { key, id: decision_id });
     try {
       const r = MEMORY_RESULTS["memory.save"](await TaskClient.of(f.p).request("memory.save", { pending, revision, decision_id, ...(edit ? { edit } : {}) }));
+      if (still(pending, f.card)) end(f.card, "saved", r.note);
       decisions.delete(pending);
-      end(f.card, "saved", r.note);
     } catch (e) {
-      if (!LOST.has((e as { code?: string })?.code ?? "")) decisions.delete(pending);
-      refused(e, f.card);
+      if (!lost(e)) decisions.delete(pending);
+      refused(e, pending, f.card);
     } finally {
       busy.delete(pending);
     }
   }
   async function dismiss(pending: string, revision: number) {
     const f = decidable(pending);
-    if (!f) return;
+    if (!f || !seen(f, revision)) return;
     busy.add(pending);
     try {
       MEMORY_RESULTS["memory.dismiss"](await TaskClient.of(f.p).request("memory.dismiss", { pending, revision }));
-      end(f.card, "dismissed");
+      if (still(pending, f.card)) end(f.card, "dismissed");
     } catch (e) {
-      refused(e, f.card);
+      refused(e, pending, f.card);
     } finally {
       busy.delete(pending);
     }
@@ -154,6 +170,8 @@ export function memoryHooks(host: MemoryUiHost) {
     dlg.addEventListener("close", () => dlg.remove(), { once: true });
     ok.onclick = () => {
       if (!where.value) return host.toast(MEMORY_COPY.where, 5000);
+      // (the agent revised it while the dialog was open: the dialog stays, for the person to compare and start again)
+      if (find(pending)?.card.proposal.revision !== revision) return host.toast(MEMORY_COPY.changed, 6000);
       const scope: Scope = where.value === "own" ? "own" : { tag: where.value.slice(4) };
       const expires = keep.value === "never" ? null : keep.value === "as" ? pr.expires : Date.now() + 90 * 24 * 3600 * 1000;
       dlg.close();

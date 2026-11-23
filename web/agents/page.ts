@@ -13,7 +13,7 @@ import "../workspace/pair-link";
 import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
 import { colorBlock } from "./code-color";
-import { runningTurn, withoutNoteText, type Artifact, type Thread, type Turn, type UserEntry } from "../workspace/agent-chat/events";
+import { runningTurn, withoutNoteText, type Artifact, type MemoryCard, type Thread, type Turn, type UserEntry } from "../workspace/agent-chat/events";
 import { ChatSession } from "../workspace/agent-chat/session";
 import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, diffHtml, mirrorSectionNode } from "../workspace/agent-chat/view";
 import { Mirror, MIRROR_COPY, mirrorTitle, type RemoteConversation, type Section } from "../workspace/agent-chat/mirror";
@@ -190,6 +190,12 @@ const session = new ChatSession({
   demo: (prompt, emit) => startFakeTurn(prompt, emit, speed()),
   mayDemo: (t) => mayDemo(t),
   emitted(thread, d, replayed) {
+    // (agent memory v1: a proposed note's card is marked with the connection it came over)
+    if (d.type === "memory_proposal") {
+      const pending = (d as { pending?: unknown }).pending;
+      const mark = connectionMark();
+      for (const e of thread.entries) if (e.kind === "turn" && e.memory && typeof pending === "string" && Object.hasOwn(e.memory, pending) && mark) e.memory[pending].from = mark;
+    }
     if (d.type === "artifact") {
       // (one replayed from the agent's log after a reconnect is recorded, but never moves the pane)
       if (!replayed) openArtifact = (d as { id: string }).id;
@@ -415,7 +421,7 @@ function renderThread() {
   for (const entry of thread.entries) {
     const eid = entry.kind === "user" ? entry.id : entry.turn_id;
     seen.add(eid);
-    const key = entry.kind === "user" ? `${entry.mode}|${entry.receipt ?? ""}|${!!entry.settled}` : JSON.stringify([entry.parts, entry.tools, entry.attention, entry.state, entry.error, !!entry.away, entry.memory, entry.used, entry.memory ? memoryLive(thread) : null]);
+    const key = entry.kind === "user" ? `${entry.mode}|${entry.receipt ?? ""}|${!!entry.settled}` : JSON.stringify([entry.parts, entry.tools, entry.attention, entry.state, entry.error, !!entry.away, entry.memory, entry.used, entry.memory ? Object.values(entry.memory).map(memoryLive) : null]);
     let r = rendered.get(eid);
     if (!r || r.key !== key) {
       const node = entry.kind === "user" ? userNode(entry) : turnNode(thread, entry);
@@ -448,11 +454,23 @@ const memory = memoryHooks({
   changed: () => { save(); renderThread(); },
   toast: (t, ms) => toast(t, ms),
   tagName,
-  live: (t) => memoryLive(t),
+  live: (card) => memoryLive(card),
 });
-// (a thread's memory cards take a decision only while its agent, the same run of it, is the one connected)
-function memoryLive(thread: Thread): boolean {
-  return session.live() && thread.agent_instance === pairing?.hello?.log?.instance;
+// (a memory card takes a decision only over the connection it came on: the same run of the agent (its log's instance,
+//  which a reload keeps), else the same pairing in this tab)
+const pairingMarks = new WeakMap<object, string>();
+function connectionMark(): string | null {
+  const p = pairing;
+  if (!p || !session.live()) return null;
+  const instance = p.hello?.log?.instance;
+  if (instance) return "log:" + instance;
+  let m = pairingMarks.get(p);
+  if (!m) pairingMarks.set(p, (m = "tab:" + crypto.randomUUID()));
+  return m;
+}
+function memoryLive(card: MemoryCard): boolean {
+  const m = connectionMark();
+  return m !== null && card.from === m;
 }
 function turnNode(thread: Thread, turn: Turn): HTMLElement {
   const node = viewTurnNode(thread, turn, {
@@ -460,7 +478,7 @@ function turnNode(thread: Thread, turn: Turn): HTMLElement {
     openArtifact: (id) => { openArtifact = id; renderArtifacts(); },
     md,
     ...memory,
-    memoryLive: () => memoryLive(thread),
+    memoryLive,
   });
   return withCopy(node, async () => turnMarkdown(thread, turn, { agent: agentName(), link: await fileLinks(thread) }));
 }

@@ -122,6 +122,9 @@ export interface MemoryCard {
   proposal: Omit<MemoryProposal, "type" | "body"> & { body?: string };
   outcome?: "saved" | "dismissed" | "stale";
   note?: string;
+  /** the connection it came over, as the page marks it (the agent run's log instance, else this tab's pairing): only
+   *  that connection's agent can take its decision */
+  from?: string;
 }
 
 /** JSON.stringify's replacer for a chat as kept in this browser: every memory card without its text. A note's text is
@@ -131,6 +134,7 @@ export function withoutNoteText(this: unknown, key: string, value: unknown): unk
   if (key !== "memory" || (this as { kind?: unknown } | null)?.kind !== "turn" || !value || typeof value !== "object") return value;
   const out: Record<string, MemoryCard> = {};
   for (const [k, c] of Object.entries(value as Record<string, MemoryCard>)) {
+    if (!c || typeof c !== "object" || !c.proposal || typeof c.proposal !== "object") continue; // (not a card: not kept)
     const { body: _b, ...proposal } = c.proposal;
     out[k] = { ...c, proposal };
   }

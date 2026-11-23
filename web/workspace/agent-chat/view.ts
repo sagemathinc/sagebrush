@@ -1,7 +1,7 @@
 // The agents chat's turn view (web/agents, and the chat panel to come): a person's message and an agent's turn as DOM
 // nodes, its tool calls, permission prompts and artifact cards, as the Agents page has always drawn them. What a click
 // does (answering a prompt, opening an artifact) and how Markdown is rendered are the caller's, passed in.
-import { ATTENTION_STATES, TOOL_STATUSES, count, langOf, own, type Artifact, type Attention, type Thread, type ToolCall, type Turn, type UserEntry } from "./events";
+import { ATTENTION_STATES, TOOL_STATUSES, count, langOf, own, type Artifact, type Attention, type MemoryCard, type Thread, type ToolCall, type Turn, type UserEntry } from "./events";
 import { MIRROR_COPY, present, reasonText, type InertBlock, type InertPart, type Section } from "./mirror";
 
 // (a class name from a known set only, whatever the thread holds: a stored thread from before apply checked it included)
@@ -19,8 +19,8 @@ export interface TurnHooks {
    *  and where a scope is, in the person's words. Without these the card shows, with no actions */
   memory?(pending: string, action: "save" | "edit" | "dismiss", turn: string, revision: number): void;
   scopeName?(scope: "own" | { tag: string }): string;
-  /** whether this thread's agent is the one connected now: only its cards take a decision */
-  memoryLive?(): boolean;
+  /** whether the card's agent is the one connected now: only its cards take a decision */
+  memoryLive?(card: MemoryCard): boolean;
 }
 
 /** A note's expiry in words: a day, or never (a date past what a Date holds says only "later"). */
@@ -35,7 +35,7 @@ const MEMORY_OUTCOME: Record<string, string> = { saved: "Saved to your notes", d
 function memoryCardHtml(card: NonNullable<Turn["memory"]>[string], turn: Turn, h: TurnHooks): string {
   const pr = card.proposal;
   const where = h.scopeName ? h.scopeName(pr.scope) : pr.scope === "own" ? "this agent's own notes" : "a tag's notes";
-  const open = !card.outcome && !turn.away && !!h.memory && (h.memoryLive?.() ?? true);
+  const open = !card.outcome && !turn.away && !!h.memory && (h.memoryLive?.(card) ?? true);
   // (its text is in this tab only: after a reload an open card has none, and can only be dismissed)
   const text = pr.body !== undefined;
   return (
