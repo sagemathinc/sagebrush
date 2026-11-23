@@ -435,8 +435,28 @@ function clearLine(rl: readline.Interface) {
   (rl as any).cursor = 0;
 }
 
+/** A disappearing terminal can report an I/O error before SIGHUP is delivered (in particular, readline writes
+ * its cursor after the visible prompt). Take the same exit path; other stream errors remain fatal. */
+function terminalHangup(hangup: () => void) {
+  const error = (e: NodeJS.ErrnoException) => {
+    if (e.code === "EIO" || e.code === "EPIPE" || e.code === "ECONNRESET") hangup();
+    else throw e;
+  };
+  process.stdin.on("error", error);
+  process.stdout.on("error", error);
+  return { error, dispose: () => {
+    process.stdin.off("error", error);
+    process.stdout.off("error", error);
+  } };
+}
+
 function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<number> {
   removeFiguresOnSignal();
+  const terminal = terminalHangup(() => {
+    removeFigures();
+    process.removeAllListeners("SIGHUP");
+    process.kill(process.pid, "SIGHUP");
+  });
   const leave = mode === "magma" ? "quit; or Ctrl-D to leave" : mode === "matlab" ? "exit or Ctrl-D to leave" : "exit() or Ctrl-D to leave";
   if (!quiet) process.stdout.write(mode === "python" ? `${VERSION}\nType help(obj) for help, ${leave}.\n` : `${VERSION} (${mode === "magma" ? "Magma" : "MATLAB"})\nType ${leave}.\n`);
   // (the session's step, shared with the Terminal's prompt: src/repl-step.ts; the language's library and
@@ -462,6 +482,7 @@ function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<num
   }
   // (completion in the prompt's language: src/interactive.ts completeIn)
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, completer: completer(main, mode), history, historySize: 1000, terminal: process.stdin.isTTY });
+  rl.on("error", terminal.error); // (readline forwards input errors too)
   const ps1 = () => session.ps1();
   const ps2 = () => session.ps2();
   let buf: string[] = [];
@@ -474,6 +495,7 @@ function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<num
       done = true;
       R.stdout.flush();
       rl.close();
+      terminal.dispose();
       resolveExit(code);
     };
     rl.on("line", (line) => {
@@ -571,9 +593,11 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
   const die = (sig: NodeJS.Signals) => {
     removeFiguresHere();
     raw(false);
+    void worker.terminate();
     process.removeAllListeners(sig);
     process.kill(process.pid, sig);
   };
+  const terminal = terminalHangup(() => die("SIGHUP"));
   // (Ctrl-C while an input runs, the key or a SIGINT: the flag, as the launcher sets it. Another while the first is
   // still unseen: within GRACE of it, the same press (a double tap lands both before any call could have polled);
   // from GRACE to 2 s, or one before the worker has handed over its flag: SIGINT's default action)
@@ -663,6 +687,7 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
       process.stdin.pause();
       raw(false);
       removeFiguresHere();
+      terminal.dispose();
       if (interrupted) return die("SIGINT");
       resolveExit(code);
     };
@@ -699,6 +724,7 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
         ask({ complete: line }).then((m) => cb(null, m.complete ?? [[], line]));
       };
       rl = readline.createInterface({ input: inp, output: process.stdout, completer, history, historySize: 1000, terminal: tty });
+      rl.on("error", terminal.error);
       let buf: string[] = [];
       // (one line at a time, from feed: the next is given once this one is done)
       const take = async (line: string) => {
