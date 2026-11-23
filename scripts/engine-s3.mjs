@@ -34,22 +34,25 @@ export function makeS3({ endpoint, bucket, accessKeyId, secretAccessKey, region 
   const u = new URL(endpoint);
   if (u.protocol !== "https:" || u.pathname !== "/" || u.search) throw new Error("the S3 endpoint must be https://host/ only");
   if (!/^[a-z0-9-]+$/.test(bucket)) throw new Error("bad bucket name");
-  async function call(method, key, body = null, extra = {}) {
+  // (`unsigned`: headers sent but not signed.  Accept-Encoding: identity on reads, so the object comes back as stored,
+  // with its Content-Length: R2 behind Cloudflare compressed a JSON object on the fly for node's default
+  // gzip/deflate/br and dropped the length (engine-publish, Nov 22 2026).  Unsigned, as something between may rewrite it)
+  async function call(method, key, body = null, extra = {}, unsigned = {}) {
     if (!KEY.test(key) || key.split("/").some((p) => p === "" || p === "." || p === "..")) throw new Error(`refused object key ${JSON.stringify(key)}`);
     const path = `/${bucket}/${key}`;
     const payloadHash = sha256hex(body ?? "");
     const amzDate = now().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
     const { authorization, headers } = sign({ method, host: u.host, path, headers: extra, payloadHash, accessKeyId, secretAccessKey, region, amzDate });
     const { host, ...send } = headers;
-    return fetch(`https://${u.host}${enc(path, true)}`, { method, headers: { ...send, authorization }, body: body ?? undefined });
+    return fetch(`https://${u.host}${enc(path, true)}`, { method, headers: { ...unsigned, ...send, authorization }, body: body ?? undefined });
   }
   return {
     async head(key) {
-      const r = await call("HEAD", key);
+      const r = await call("HEAD", key, null, {}, { "accept-encoding": "identity" });
       return { status: r.status, size: r.headers.get("content-length") === null ? null : Number(r.headers.get("content-length")) };
     },
     async get(key) {
-      const r = await call("GET", key);
+      const r = await call("GET", key, null, {}, { "accept-encoding": "identity" });
       return { status: r.status, body: r.status === 200 ? Buffer.from(await r.arrayBuffer()) : null };
     },
     async put(key, bytes, contentType) {

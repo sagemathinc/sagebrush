@@ -897,3 +897,23 @@ test("wasm_build: what the modules are built from or handled by builds them on a
   assert.equal(build([], { GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/master" }), "true");
   assert.equal(build([], { GITHUB_EVENT_NAME: "schedule", GITHUB_REF: "refs/heads/master" }), "true");
 });
+
+test("a master push the merge queue already tested (CI_QUEUE_TESTED): every test selection is off; only the modules' build stays", () => {
+  const push = { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" };
+  for (const files of [["src/compile.ts"], ["web/notebook/x.ts", "engine/poly/src/lib.rs", "magma-tests/x.m"]]) {
+    const o = classify(files, "", { ...push, CI_QUEUE_TESTED: "true" });
+    assert.equal(o.queue_tested, "true");
+    // (the matrices' contents, read only by jobs now off, and the counts aren't selections)
+    const kept = new Set(["wasm_build", "queue_tested", "mpmath_backends", "web_sync_shards", "files"]);
+    for (const [k, v] of Object.entries(o)) if (!kept.has(k)) assert.ok(v === "false" || v === "[]" || v === "", `${files.join()}: ${k}=${v}`);
+    assert.equal(o.wasm_build, "true");
+    // (without it, or not "true", the same push runs the full tier)
+    for (const t of [undefined, "false", "1", "TRUE"]) {
+      const f = classify(files, "", t === undefined ? push : { ...push, CI_QUEUE_TESTED: t });
+      assert.deepEqual([f.queue_tested, f.full, f.node, f.engine_full], ["false", "true", "true", "true"], String(t));
+    }
+  }
+  // (only a master push: a track push, the queue's own run, a pull request ignore it)
+  assert.equal(classify(["src/x.ts"], "", { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/track/math", CI_QUEUE_TESTED: "true" }).full, "true");
+  assert.equal(classify(["src/x.ts"], "", { CI_QUEUE_TESTED: "true" }).queue_tested, "false");
+});
