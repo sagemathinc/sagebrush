@@ -614,7 +614,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     if (pairing !== p) { p.drop(); return { res: "unreachable", p }; }
     // (Delegate on again where it was on, in the same grant: its tasks shown as before the page left and never stopped
     //  by an off between, #1622)
-    try { await p.allow({ folders: r.grant.folders, write: r.grant.write, run: r.grant.run === true, ...(r.grant.delegate ? { delegate: true } : {}), expires: r.grant.expires, ...(r.grant.id ? { id: r.grant.id } : {}) }, false); } catch { void p.revoke("the grant couldn't be given again"); return { res: "refused", p }; }
+    try { await p.allow({ folders: r.grant.folders, write: r.grant.write, run: r.grant.run === true, ...(r.grant.delegate ? { delegate: true } : {}), ...(r.grant.memory ? { memory: r.grant.memory } : {}), expires: r.grant.expires, ...(r.grant.id ? { id: r.grant.id } : {}) }, false); } catch { void p.revoke("the grant couldn't be given again"); return { res: "refused", p }; }
     if (pairing !== p) { p.drop(); return { res: "unreachable", p }; } // (superseded while the grant was being given)
     showBar();
     return { res: "ok", p };
