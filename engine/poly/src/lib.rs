@@ -1314,6 +1314,11 @@ pub mod binomial_testing {
     pub fn pending() -> u64 {
         super::binomial::pending_units()
     }
+    /// n's residue-prefilter fold passes (the second too when `plus`),
+    /// under the route's guard.
+    pub fn fold_passes(n: &sagebrush_bigint::BigInt, plus: bool) {
+        super::binomial::fold_passes(n, plus);
+    }
 }
 
 #[cfg(test)]

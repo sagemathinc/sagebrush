@@ -91,6 +91,19 @@ pub(crate) fn pending_units() -> u64 {
     UNITS.with(|c| c.get().iter().fold(0u64, |a, &x| a.saturating_add(x)))
 }
 
+/// Tests: n's first fold pass, and its second when `plus`, under the
+/// route's guard, as the residue prefilter runs them (their checks alone:
+/// each pass a check, its debit's check, then its own).
+pub(crate) fn fold_passes(n: &BigInt, plus: bool) {
+    let _counted = Counted;
+    let b = Budget::unlimited();
+    if let Ok(mut f) = Folds::of(&b, n) {
+        if plus {
+            let _ = f.plus(&b, n);
+        }
+    }
+}
+
 /// Adds the route's counted units to the tally, once, when dropped: on
 /// return, on an early return or a refusal, and while unwinding from a Stop.
 struct Counted;
