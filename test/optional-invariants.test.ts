@@ -116,11 +116,25 @@ test("a package uses the packages it requires, at their exact ids, never their p
     ["from dep import sub\ny = sub._dp_state\n", "attribute", "_dp_state"],
     ["import dep\ndep.Thing = None\n", "monkeypatch", "Thing"],
     ["from dep import *\n", "import", "dep.*"],
+    // (through a name bound from the package: SEC's H1, then each way of binding one)
+    ["import dep\nx = dep\ny = x._secret\n", "attribute", "_secret"],
+    ["import dep\nx = dep\nx.Thing = None\n", "monkeypatch", "Thing"],
+    ["import dep\nT = dep.Thing\nT.attr = None\n", "monkeypatch", "attr"],
+    ["import dep\na, b = dep.Thing, 1\na.attr = None\n", "monkeypatch", "attr"],
+    ["import dep\nfor c in [dep.Thing]:\n    c.attr = None\n", "monkeypatch", "attr"],
+    ["import dep\nif (c := dep.Thing):\n    c.attr = None\n", "monkeypatch", "attr"],
+    ["from dep import Thing\nT = Thing if True else None\nT.attr = None\n", "monkeypatch", "attr"],
+    // (a module object other than as an attribute's base, and any private name not self's in a requiring package)
+    ["import dep\nf(dep)\n", "escape", "dep"],
+    ["from dep import sub\nreturn_it = [sub]\n", "escape", "sub"],
+    ["import dep\nclass K: pass\ny = K()._other\n", "attribute", "_other"],
   ] as [string, string, string][]) {
     const line = src.split("\n").length - 1;
     const found = lint(src, undefined, declareAll(line, construct, target));
     assert.ok(found.some((f: any) => f.construct === construct && f.hard === true), `${JSON.stringify(src)}: a hard ${construct} finding, declared or not`);
   }
+  // (a call's result is a new value, not the package's: using it is no finding)
+  assert.deepEqual(lint("import dep\nx = dep.Thing(1)\nx.attr = 2\ny = dep.sub.f().g\n"), []);
   // (a reference outside the Core API: a finding; a reviewed declaration of that line and target waives it, no other)
   const ref = "import numpy as np\nr = np.random.rand.__self__\n";
   assert.ok(lint(ref, []).some((f: any) => f.construct === "reference" && f.target === "numpy.random.rand.__self__"));

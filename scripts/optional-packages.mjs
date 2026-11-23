@@ -297,6 +297,7 @@ export function lintPackage(pkg, api, others = []) {
     // names bound to core modules, or to names imported from them, in this file
     const coreAlias = new Map(); // local name -> "module" or "module.attr"
     const requiredAlias = new Set(); // local names bound to a required package's modules or names
+    const requiredModules = new Set(); // those bound to its modules themselves
     nodes(tree, (n) => {
       if (n.k === "Import") {
         for (const a of n.names) {
@@ -304,7 +305,10 @@ export function lintPackage(pkg, api, others = []) {
           if (!ownTop.has(parts[0])) {
             if (requiredModule(a.name)) {
               if (parts.some((p) => p.startsWith("_"))) hard(file, n.line, "import", a.name, `imports the private module ${a.name} of a required package`);
-              else requiredAlias.add(a.asname ?? parts[0]);
+              else {
+                requiredAlias.add(a.asname ?? parts[0]);
+                requiredModules.add(a.asname ?? parts[0]);
+              }
               continue;
             }
             if (foreignModule(a.name)) {
@@ -328,7 +332,10 @@ export function lintPackage(pkg, api, others = []) {
           for (const a of n.names) {
             if (a.name === "*") hard(file, n.line, "import", mod + ".*", "from ... import * hides which names are used");
             else if (a.name.startsWith("_")) hard(file, n.line, "import", `${mod}.${a.name}`, `imports the private name ${mod}.${a.name} of a required package`);
-            else requiredAlias.add(a.asname ?? a.name);
+            else {
+              requiredAlias.add(a.asname ?? a.name);
+              if (requiredModule(`${mod}.${a.name}`)) requiredModules.add(a.asname ?? a.name);
+            }
           }
           return;
         }
@@ -347,6 +354,54 @@ export function lintPackage(pkg, api, others = []) {
             uses.push({ file, line: n.line, target: `${mod}.${a.name}`, bound: null });
           }
         }
+      }
+    });
+    // (a required package's names, followed: a name bound from one, through assignment, destructuring, a for or
+    // with target, a comprehension or :=, is one too, so a change to it or a private name read through it is a hard
+    // finding; a call's result is a new value, not the package's)
+    const fromRequired = (v) => {
+      switch (v?.k) {
+        case "Name": return requiredAlias.has(v.id);
+        case "Attribute": case "Subscript": case "Starred": case "NamedExpr": return fromRequired(v.value);
+        case "Tuple": case "List": case "Set": return (v.elts ?? []).some(fromRequired);
+        case "Dict": return (v.values ?? []).some(fromRequired);
+        case "IfExp": return fromRequired(v.body) || fromRequired(v.orelse);
+        case "BoolOp": return (v.values ?? []).some(fromRequired);
+        default: return false;
+      }
+    };
+    const boundNames = (t, out) => {
+      if (typeof t === "string") out.push(t);
+      else if (t?.k === "Name") out.push(t.id);
+      else if (t?.k === "Tuple" || t?.k === "List") for (const y of t.elts ?? []) boundNames(y, out);
+      else if (t?.k === "Starred") boundNames(t.value, out);
+      return out;
+    };
+    for (let grew = true; grew; ) {
+      grew = false;
+      nodes(tree, (n) => {
+        const pairs = n.k === "Assign" ? (n.targets ?? []).map((t) => [t, n.value])
+          : n.k === "AnnAssign" || n.k === "NamedExpr" ? [[n.target, n.value]]
+          : n.k === "For" || n.k === "AsyncFor" || n.k === "comprehension" ? [[n.target, n.iter]]
+          : n.k === "withitem" ? [[n.optional_vars, n.context_expr]] : [];
+        for (const [t, v] of pairs) {
+          if (!fromRequired(v)) continue;
+          for (const name of boundNames(t, [])) if (!requiredAlias.has(name)) {
+            requiredAlias.add(name);
+            grew = true;
+          }
+        }
+      });
+    }
+    // (a required package's module object is used only as the base of an attribute (pd.DataFrame): bound to
+    // another name, passed, returned or stored, it could be changed where the lint can't follow it)
+    const attributeBases = new Set();
+    nodes(tree, (n) => {
+      if (n.k === "Attribute") attributeBases.add(n.value);
+    });
+    nodes(tree, (n) => {
+      if (n.k === "Name" && requiredModules.has(n.id) && !attributeBases.has(n)) {
+        hard(file, n.line, "escape", n.id, `uses ${n.id}, a required package's module, other than as the base of an attribute`);
       }
     });
     // the resolved core target of an expression, or null
@@ -390,7 +445,8 @@ export function lintPackage(pkg, api, others = []) {
           hard(file, n.line, "attribute", n.attr, `.${n.attr}: a private name of a required package`);
         } else if (n.attr.startsWith("_") && !(n.attr.startsWith("__") && n.attr.endsWith("__")) && !n.attr.startsWith(prefix)) {
           const base = n.value?.k === "Name" ? n.value.id : null;
-          if (base !== "self" && base !== "cls") flag(file, n.line, "attribute", n.attr, `.${n.attr} on something other than self or cls: package-private names start with ${prefix}`);
+          // (in a package that requires another, any such name could be that package's private one: hard)
+          if (base !== "self" && base !== "cls") (required.size ? hard : flag)(file, n.line, "attribute", n.attr, `.${n.attr} on something other than self or cls: package-private names start with ${prefix}`);
         }
         const t = resolve(n);
         if (t !== null && n.attr.startsWith("_") && !(n.attr.startsWith("__") && n.attr.endsWith("__"))) flag(file, n.line, "attribute", t, `uses the private core name ${t}`);

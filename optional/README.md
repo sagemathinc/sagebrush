@@ -39,7 +39,7 @@ Optional packages are **reviewed first-party code**. `scripts/optional-packages.
 - the public names in `core-api-surface.json` (modules, their names and their public types' members, with the level each appeared at);
 - the documented protocols (`_repr_html_`, `__array__`, the number and sequence dunders, …);
 - its own names;
-- the public names of the packages it `requires`, at their exact ids: the modules their manifests list, and those modules' public names. Their private modules and names, and any change to them, are findings no declaration waives; so is importing any module of a package it doesn't require at that exact id.
+- the public names of the packages it `requires`, at their exact ids: the modules their manifests list, and those modules' public names. Their private modules and names, and any change to them, are findings no declaration waives; so is importing any module of a package it doesn't require at that exact id. A required package's module object may be used only as the base of an attribute (`pd.DataFrame`): bound to another name, passed, returned or stored, it's a hard finding. A name bound from a required package's names, through assignment, destructuring, `for`, `with`, a comprehension or `:=`, counts as that package's: changing its attributes or reading its private names is hard too. In a package that requires another, a private name on anything but `self` or `cls` that isn't the package's own prefix is always hard.
 
 **Banned whatever their arguments:**
 - reflection and dynamic import (`importlib`, `__import__`, `builtins`, `eval`/`exec`/`compile`, `getattr`/`setattr`/`hasattr`/`vars`/`dir`, `__dict__`, `sys.modules`), and aliases of them;
