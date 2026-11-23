@@ -39,6 +39,20 @@ ok(v([d(1, "signer"), s(1, 1, "signer")], { control: "guard-off", seen: ["stop: 
 ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "guard-off" }).ok, "guard-off: the page never loaded there fails");
 ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "nonsense" }).ok, "an unknown control fails");
 
+// the state check runs on the signer's own loaded page only (never the guard-off destination, a frame or nothing)
+{
+  const pg = (ev, at) => `[signer] page ${ev} ${at}`;
+  const sent = "[signer] state check sent";
+  const stop = [pg("started", "null/signer/index.html"), pg("finished", "null/signer/index.html"), sent, "[signer] state: ready=complete probe=yes tauri=yes ran=yes protocol=tauri body=yes", d(1, "signer"), s(1, 1, "signer"), pg("started", "http://127.0.0.1:9/stop"), pg("finished", "http://127.0.0.1:9/stop"), "[signer] state: not-signer-page"];
+  ok(v(stop, { control: "guard-off", seen: ["stop: loaded"] }).ok, "the state check: once on the signer page, none on the guard-off destination: passes");
+  ok(!v([...stop, sent], { control: "guard-off", seen: ["stop: loaded"] }).ok, "the state check: sent on the guard-off destination fails");
+  ok(!v([sent, d(1, "signer"), s(1, 1, "signer")]).ok, "the state check: sent with no page loaded before it fails");
+  ok(!v([pg("started", "null/signer/index.html"), sent, d(1, "signer"), s(1, 1, "signer")]).ok, "the state check: sent before the page finished loading fails");
+  ok(!v([pg("finished", "http://127.0.0.1:9/sframe"), sent, d(1, "signer"), s(1, 1, "signer")], { control: "csp-off", seen: ["sframe: loaded"] }).ok, "the state check: sent on a frame's or another server's page fails");
+  ok(!v([pg("finished", "null/index.html"), sent, d(1, "signer"), s(1, 1, "signer")]).ok, "the state check: sent on another app page fails");
+  ok(v([pg("finished", "http://tauri.localhost/signer/index.html"), sent, d(1, "signer"), s(1, 1, "signer")]).ok && v([pg("finished", "null/signer/probe-nocsp.html"), sent, d(1, "signer"), s(1, 1, "signer")], { control: "csp-off", seen: ["sframe: loaded"] }).ok, "the state check: on the signer page on Windows, and the csp-off page: passes");
+}
+
 // (astra2: a run whose log shows everything it must, but whose app didn't end cleanly, never passes)
 const good = [d(1, "signer"), s(1, 1, "signer")];
 ok(!v(good, { code: 1 }).ok, "an otherwise passing run whose app exited 1 fails");
