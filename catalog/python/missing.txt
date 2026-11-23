@@ -46,6 +46,8 @@ matplotlib.axes.Axes.set_ylim
 matplotlib.axes.Axes.set_yscale
 matplotlib.axes.Axes.set_yticklabels
 matplotlib.axes.Axes.set_yticks
+matplotlib.axes.Axes.sharex
+matplotlib.axes.Axes.sharey
 matplotlib.axes.Axes.stem
 matplotlib.axes.Axes.step
 matplotlib.axes.Axes.text
@@ -63,6 +65,7 @@ matplotlib.figure.Figure.gca
 matplotlib.figure.Figure.savefig
 matplotlib.figure.Figure.set_size_inches
 matplotlib.figure.Figure.show
+matplotlib.figure.Figure.subplots_adjust
 matplotlib.figure.Figure.suptitle
 matplotlib.figure.Figure.tight_layout
 matplotlib.pyplot.Axes
@@ -103,6 +106,7 @@ matplotlib.pyplot.sci
 matplotlib.pyplot.stem
 matplotlib.pyplot.step
 matplotlib.pyplot.subplot
+matplotlib.pyplot.subplots_adjust
 matplotlib.pyplot.suptitle
 matplotlib.pyplot.text
 matplotlib.pyplot.tight_layout
