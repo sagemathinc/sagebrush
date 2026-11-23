@@ -1278,10 +1278,13 @@ try {
       const { writes, elapsed } = await ev(`(() => { const { start, end } = window.__conflictTiming; return { writes: window.__writes, elapsed: start === null || end === null ? null : end - start }; })()`);
       await ev(`(window.__stopConflicts(), delete window.__stopConflicts, delete window.__conflictTiming, delete window.__sbTexCommentsWrite, true)`);
       const dx = await sideDoc();
+      // The core also stops before sleeping if the next jittered backoff would reach the deadline.
+      // Use this attempt's maximum permitted backoff, not the largest backoff of any attempt.
+      const backoff = writes > 0 && writes < C.LIMITS.attempts ? Math.round(C.LIMITS.backoffMs[writes - 1] * 1.25) : 0;
       check(busy && Number.isInteger(writes) && writes >= 0 && writes <= C.LIMITS.attempts && elapsed !== null &&
-        (writes === C.LIMITS.attempts || elapsed >= C.LIMITS.deadlineMs) &&
+        (writes === C.LIMITS.attempts || elapsed + backoff >= C.LIMITS.deadlineMs) &&
         !dx.threads.some((t) => t.messages.some((m) => m.text.value === "never lands")),
-        "comments: on a conflict every attempt, the attempt cap or deadline then busy, the draft kept, nothing written", { busy, writes, elapsed });
+        "comments: on a conflict every attempt, the attempt cap or deadline then busy, the draft kept, nothing written", { busy, writes, elapsed, backoff });
     }
     // (8) PR 316's bounds on re-finding and drawing, measured and printed: slices at most 8 ms up to 256 KiB and 32 ms
     // up to 2 MiB (the source limit); drawing and the list bounded by what is near the view (300 and 2,000 threads);
