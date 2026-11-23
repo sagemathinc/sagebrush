@@ -19,6 +19,7 @@
 //   workspace's check at use (branch-rules.ts), by the grant's `id`.
 
 import { TRASH, normPath, parentOf, within } from "./paths";
+import { parseEnabledTags } from "./agent-tags";
 
 
 export type Grant = {
@@ -50,24 +51,12 @@ const READ = new Set(["workspace.list", "workspace.stat", "workspace.read", "wor
 const CHANGE = new Set(["workspace.write", "workspace.create", "workspace.mkdir", "workspace.rename", "workspace.duplicate", "workspace.remove", "workspace.restore"]);
 /** A grant's id: 16 random bytes, as hex. */
 export const GRANT_ID = /^[0-9a-f]{32}$/;
-/** A memory tag's id (memory v1 §7.2, the tags schema's format): 26 lowercase base32 characters, 128 random bits and
- * 2 zero bits, so the last is one of a e i m q u y 4. */
-export const TAG_ID = /^[a-z2-7]{25}[aeimquy4]$/;
-/** At most this many tags in a grant's memory (the tags schema's `enabled.maxItems`). */
-export const MEMORY_TAGS_MAX = 16;
 /** The grant's memory field: the tags enabled beyond the agent's own notes. */
 export type GrantMemory = { tags: string[] };
-/** The tags as a grant keeps them: 0 to MEMORY_TAGS_MAX ids, each TAG_ID, strictly ascending. Throws on anything
- * else; a list out of order or with a duplicate is refused, never sorted (§7.1). */
+/** The tags as a grant keeps them, by the tags schema's own rules (agent-tags.ts parseEnabledTags: 0 to 16 ids,
+ * strictly ascending). Throws on anything else; a list out of order or with a duplicate is refused, never sorted. */
 export function grantMemoryTags(tags: unknown): string[] {
-  if (!Array.isArray(tags)) throw new Error("memory tags are a list");
-  if (tags.length > MEMORY_TAGS_MAX) throw new Error(`at most ${MEMORY_TAGS_MAX} memory tags`);
-  for (let i = 0; i < tags.length; i++) {
-    const t = tags[i];
-    if (typeof t !== "string" || !TAG_ID.test(t)) throw new Error(`not a tag id: ${JSON.stringify(String(t)).slice(0, 40)}`);
-    if (i > 0 && !(tags[i - 1] < t)) throw new Error("memory tags must be strictly ascending, with no duplicates");
-  }
-  return [...tags];
+  return [...parseEnabledTags(tags)];
 }
 /** The memory a grant allows: null when off (no grant, or no memory field), else its tags (own notes always). */
 export function grantMemory(g: Grant | null): GrantMemory | null {

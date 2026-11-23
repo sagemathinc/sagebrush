@@ -15,6 +15,7 @@
 
 import { checkCall, badValue, AGENT_LIMITS } from "./agent-schema";
 import { editProblem, type NotebookEdit } from "./notebook-edit";
+import { parseMemoryGrant } from "./agent-tags";
 import { authorize, grantFolders, grantMemoryTags, grantProblem, newGrantId, norm, GRANT_ID, type Grant, type GrantMemory, type TrashEntry } from "./agent-grant";
 import { BRANCHES, within } from "./paths";
 import { entryUrl } from "./entry-url";
@@ -863,8 +864,7 @@ export function parseReloadRecord(raw: string | null): ReloadRecord | null {
   //  no record)
   if ("memory" in g) {
     const m = g.memory;
-    if (!m || typeof m !== "object" || Array.isArray(m) || !keysAre(m, ["tags"])) return null;
-    try { grantMemoryTags(m.tags); } catch { return null; }
+    try { parseMemoryGrant(m); } catch { return null; }
   }
   if ("id" in g && !(typeof g.id === "string" && GRANT_ID.test(g.id))) return null;
   if (!Array.isArray(g.folders) || g.folders.length < 1 || g.folders.length > 64 || !g.folders.every((f: unknown) => isStr(f, 512))) return null;
