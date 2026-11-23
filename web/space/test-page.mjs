@@ -73,6 +73,20 @@ await sleep(1000);
 ok(await ev(`!window.__got.some((m) => m.from === "plain" && m.kind === "space-select")`), "a viewer only framed tells it nothing", await ev(`window.__got`));
 ok(await ev(`window.__got.every((m) => m.origin === location.origin)`), "every message is from this site");
 
+
+// ---- a space over the limits in all (nine 1 MiB texts: each within the string limit, 9 MiB together), refused from
+// every source: given directly (the page's API), and sent by the page that embedded the viewer
+const big = `({ format: "sagebrush-space", version: 1, nodes: Array.from({ length: 9 }, (_, i) => ({ id: "n" + i, kind: "note", text: "m".repeat(1 << 20) })) })`;
+ok(await ev(`space3d.load(${big}, "big.space.json").then(() => "drawn", (e) => String(e.message))`) === "the space is too large to show here", "given directly: refused", await ev(`document.querySelector('#status').textContent`));
+ok(await ev(`space3d.space?.nodes?.length`) === space.nodes.length, "and the space shown stays as it was");
+await ev(`(document.querySelector('#embed').contentWindow.postMessage({ sagebrush: "space-load", version: 1, name: "big", space: ${big} }, location.origin), true)`);
+ok(await until(`/too large/.test(document.querySelector('#embed').contentWindow.document.querySelector('#status')?.textContent ?? '')`, 15000), "sent by the embedding page: refused, and said", await ev(`document.querySelector('#embed').contentWindow.document.querySelector('#status')?.textContent`));
+
+// ---- an object's code that can be run says where its edits are kept
+const runnable = await ev(`space3d.space.nodes.find((n) => n.kind === "code")?.id`);
+await ev(`space3d.select(${JSON.stringify(runnable)})`);
+ok(await until(`/kept in this browser, on this site/.test(document.querySelector('#overlay .kept')?.textContent ?? '')`, 10000), "runnable code: its edits are said to be kept in this browser, on this site");
+
 ok(errors.length === 0, "no page errors", errors.slice(0, 3));
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);

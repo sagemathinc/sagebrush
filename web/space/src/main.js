@@ -15,6 +15,7 @@ import { run, interrupt, sceneObject, SCENE } from "./run.js";
 import { sizeOf } from "./sizes.js";
 import { treeRoom } from "./treeroom.js";
 import { checkSpace, readText, sameSite } from "./read.js";
+import { EDIT, keepEdit } from "./keep.js";
 import { groundPlan, placedOnGround, moundFor, supportAt as blockAt, EYE, SIGN, STEP } from "./ground.js";
 const $ = (s) => document.querySelector(s);
 
@@ -670,7 +671,8 @@ async function load(name, data = null, again = false, opts = {}) {
   $("#status").textContent = "loading " + name + "…";
   let next = checkSpace(data ?? JSON.parse(await readText(sameSite(name, { space: true }))));
   // (a space carrying a whole tree instead of objects: its top directory's room)
-  if (next?.format === "sagebrush-space" && next.tree && !next.nodes?.length) next = { ...treeRoom(next.tree, ""), title: next.title ?? next.tree.name, summary: next.summary };
+  // (and the room made from it, checked the same way: treeroom.js refuses a folder over the limits before laying it out)
+  if (next?.format === "sagebrush-space" && next.tree && !next.nodes?.length) next = checkSpace({ ...treeRoom(next.tree, ""), title: next.title ?? next.tree.name, summary: next.summary });
   if (!Array.isArray(next.nodes)) throw new Error(name + " has no objects");
   // (the file written again while you are inside one of its rooms: it is what you'll come back out to)
   if (again && scopes.length && !opts.room) {
@@ -1039,7 +1041,7 @@ function showOverlay(nd) {
     const mode = RUNS.includes(nd.lang) ? nd.lang : nd.kind === "plot3d" ? "sage" : "python";
     body += `<div class="runbar"><select class="mode" title="The language">${RUNS.map((m) => `<option${m === mode ? " selected" : ""}>${m}</option>`).join("")}</select>` +
       `<button class="run" title="Run (Shift+Enter)">▶ Run</button><button class="stop" title="Stop" hidden>■ Stop</button><span class="runstate"></span></div>` +
-      `<div class="code-edit"></div><div class="label">Output</div><div class="output">${outputHtml(nd)}</div>` +
+      `<div class="code-edit"></div><p class="hint kept">Your edits and runs here are kept in this browser, on this site.</p><div class="label">Output</div><div class="output">${outputHtml(nd)}</div>` +
       (nd.kind === "plot3d" || nd.scene ? `<p class="hint">A 3D plot is a real object in the space: drag to turn around it. Edit its code and run it to change it.</p>` : "");
   } else {
     // (a file whose text is elsewhere (`src`): fetched now, and the drawer drawn again when it comes)
@@ -1202,7 +1204,7 @@ async function fullText(nd) {
   return text;
 }
 async function roomFor(nd, k) {
-  if (k === "dir") return treeRoom(space.tree, nd.enter.path);
+  if (k === "dir") return checkSpace(treeRoom(space.tree, nd.enter.path));
   const s = checkSpace(JSON.parse(await fullText(nd)));
   if (!(Array.isArray(s.nodes) || s.tree)) throw new Error("it has no objects");
   return s;
@@ -1435,40 +1437,13 @@ function liveHtml(r) {
 // names the file's text it was made from (`base`): once the file says something else (the agent wrote it again),
 // the file wins and the copy is dropped. The code itself is kept only if it was really edited here.
 const KEEP = ["lang", "output", "outputError", "svg", "png", "scene"];
-// (on this site's origin, in localStorage: at most KEPT.entries copies and KEPT.bytes in all, the oldest dropped first;
-//  a copy over KEPT.entry without its figures, and none if still over)
-const KEPT = { entries: 200, bytes: 4 << 20, entry: 256 << 10 };
-const EDIT = "space3d:edit:";
+// (kept by keep.js: in this browser, on this site, within its byte limits)
 const keyOf = (nd) => `${EDIT}${$("#space").value}:${nd.id}`;
-function keep(key, v) {
-  let text = JSON.stringify(v);
-  if (text.length > KEPT.entry) text = JSON.stringify({ ...v, svg: null, png: null, scene: null });
-  if (text.length > KEPT.entry) return;
-  try {
-    localStorage.setItem(key, text);
-    const all = [];
-    for (let k = 0; k < localStorage.length; k++) {
-      const name = localStorage.key(k);
-      if (!name?.startsWith(EDIT)) continue;
-      const t = localStorage.getItem(name) ?? "";
-      let at = 0;
-      try { at = Number(JSON.parse(t).at) || 0; } catch {}
-      all.push([name, t.length, at]);
-    }
-    all.sort((a, b) => a[2] - b[2]);
-    let bytes = all.reduce((n, x) => n + x[1], 0), count = all.length;
-    for (const [name, len] of all) {
-      if (count <= KEPT.entries && bytes <= KEPT.bytes) break;
-      if (name === key) continue;
-      localStorage.removeItem(name); count--; bytes -= len;
-    }
-  } catch {}
-}
 const fileText = (nd) => (nd._file ? nd._file.text : String(nd.text ?? ""));
 function save(nd) {
   const edited = String(nd.text ?? "") !== fileText(nd);
   const v = { base: fileText(nd), text: edited ? nd.text : null, ...Object.fromEntries(KEEP.map((k) => [k, nd[k] ?? null])) };
-  keep(keyOf(nd), { at: Date.now(), ...v });
+  keepEdit(localStorage, keyOf(nd), { at: Date.now(), ...v });
 }
 function restore(nodes) {
   for (const nd of nodes) {

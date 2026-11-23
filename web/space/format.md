@@ -1,6 +1,6 @@
 # The space format (`*.space.json`), for agents
 
-A space is a board in 3D: notes, code with its output, files and 3D plots, placed by their links and groups. In the Sagebrush agents chat, a file you write whose name ends in `.space.json` (with `workspace_write`) opens beside the chat as a 3D space the person can fly through, search, and click. You write the structure, not the geometry: the viewer lays it out.
+A space is a board in 3D: notes, code with its output, files and 3D plots, placed by their links and groups. A `.space.json` file of the site opens at `/space/?space=NAME` as a 3D space the person can walk or fly through, search, and click. You write the structure, not the geometry: the viewer lays it out.
 
 ```json
 {
@@ -29,7 +29,7 @@ A space is a board in 3D: notes, code with its output, files and 3D plots, place
   - `file`: a source file; `text` is its code, highlighted by `lang` (`rust`, `python`, `typescript`, `javascript`, `json`, `matlab`); `lines` is its length.
   - `code`: code the person can edit and run in the browser; `lang` is the language it runs in: `python`, `sage`, `matlab` or `magma`. Give `output` (text) if you know it; otherwise the person presses Run.
   - `plot3d`: a 3D plot shown as a real object. Give `text` (Sage code making a 3D plot, which runs and replaces the object) and, so something shows before it runs, an optional `surface`: `x` and `y` are the grid's values, and `z[j][i]` is the height over `x[i]`, `y[j]`.
-- `src`: for a `file`, where its whole text is (an https URL, such as raw.githubusercontent.com at a commit). Then `text` can be just its first lines: the whole file is fetched when it is opened, and a Python or Sage file can be entered (its functions, classes and calls).
+- `src`: for a `file`, where its whole text is: a path on the same site, such as `/files/lib.rs` (files of other sites aren't read). Then `text` can be just its first lines: the whole file is read when it is opened. A file whose name ends in `.space.json` can be entered: it opens as a room, and Back leaves it.
 - `group`: objects of a group cluster together, in one color, with the group's name above them from afar. Use groups for directories, crates, modules or topics.
 - `near`: another object's id; this one is placed beside it (a sample beside the code it illustrates).
 - Don't give `position`: the layout is computed and is the same each time for the same file.
@@ -50,7 +50,11 @@ Give every object a `summary`: one to three sentences on what it is *for* (a fil
   "steps": [ { "node": "picking", "text": "It starts with the mouse: …" }, { "node": "flying", "text": "…" } ] } ]
 ```
 
-A tour is a path through objects in an order that teaches, each stop with a few sentences of narration: what to notice there, and how it leads to the next. The person picks a tour and goes Next / Back (in a headset too). Three or four tours of four to seven stops are a good start for a codebase. Use real function names.
+A tour is a path through objects in an order that teaches, each stop with a few sentences of narration: what to notice there, and how it leads to the next. The person picks a tour and goes Next / Back. Three or four tours of four to seven stops are a good start for a codebase. Use real function names.
+
+## Folders as rooms: `tree`
+
+Instead of objects, a space can carry a whole tree of files: `"tree": { "name": "project", "base": "/files/", "files": [["src/main.py", 120], ["README.md", 40]], "imports": [[0, 1]] }`. Each file is a path and its length in lines; `imports` are pairs of indexes into `files`. Each folder is then a room of its own: its subfolders and files, laid out as stands on the ground; a folder is entered with Enter, and Back leaves it. A file's text is read from `base` followed by its path, on the same site.
 
 ## Links (`edges`)
 
@@ -58,9 +62,9 @@ A tour is a path through objects in an order that teaches, each stop with a few 
 
 ## What the person selected: `selected`
 
-When the person clicks an object, its `id` is written into the file as `"selected"` (null when nothing is). Read the file with `workspace_read` to see what they are looking at ("this", "the selected one"). Keep `selected` as you read it when you write the file again, and write with the revision you read as `base`: a click since then makes the write refuse, so read again and redo it.
+`"selected"`: the `id` of the object shown selected when the space opens, or null. A link can also select one: `/space/?space=NAME#sel=ID`.
 
 ## Tips
 
-- Write the whole space in one `workspace_write` (a few hundred objects are fine). To change it, read it, change the JSON, and write it back: the person's camera and selection stay where they are.
+- Write the whole space as one file (a few hundred objects are fine; at most 4,000, and 8 MB in all).
 - For a codebase: one `file` object per file (its text, or its first 200 lines) with its `summary` and `lines`, `group` = its directory or crate, an edge per import or `use`, a `note` per directory or crate explaining it, a few runnable `code` samples `near` what they illustrate, and a few `tours`. A long file can be several objects, one per part.

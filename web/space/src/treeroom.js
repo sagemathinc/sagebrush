@@ -5,6 +5,7 @@
 // room).  Its links: the imports between what is in it, a subdirectory standing for everything inside it.
 //   treeRoom(tree, dir)  -> a sagebrush-space ("" is the top)
 import { layered } from "./roomlayout.js";
+import { LIMITS } from "./read.js";
 
 const EXT = { py: "python", sage: "sage", pyx: "python", ts: "typescript", mts: "typescript", tsx: "typescript", js: "javascript", mjs: "javascript",
   rs: "rust", m: "matlab", magma: "magma", json: "json", md: "markdown", sh: "bash", toml: "toml", yml: "yaml", yaml: "yaml", html: "html", css: "css" };
@@ -58,6 +59,10 @@ export function treeRoom(tree, dir = "") {
   nodes.sort((x, y) => (x.kind === "dir" ? 0 : 1) - (y.kind === "dir" ? 0 : 1) || x.title.localeCompare(y.title));
   nodes.forEach((n, i) => (n.order = i));
   for (const nd of nodes) if (!edges.some((e) => e.from === nd.id || e.to === nd.id)) nd.shelf = true;
+  // (a room within the viewer's limits, before it is laid out: a folder of more files than a space may have objects
+  //  isn't shown)
+  if (nodes.length > LIMITS.nodes) throw new Error(`the folder has more than ${LIMITS.nodes} entries`);
+  if (edges.length > LIMITS.edges) throw new Error(`the folder has more than ${LIMITS.edges} links`);
   layered(nodes, edges);
   const name = dir ? dir.split("/").pop() + "/" : tree.name ?? "the repository";
   const nf = nodes.filter((n) => n.kind === "file").length, nd = nodes.length - nf;

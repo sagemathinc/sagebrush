@@ -20,7 +20,9 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${server.address().port}/space/`;
 globalThis.location = new URL(base);
-const { LIMITS, checkSpace, readText, sameSite } = await import("./src/read.js");
+const { LIMITS, checkSpace, readText, sameSite, utf8Bytes } = await import("./src/read.js");
+const { treeRoom } = await import("./src/treeroom.js");
+const { KEPT, EDIT, keepEdit } = await import("./src/keep.js");
 
 try {
   // ---- where from
@@ -49,6 +51,43 @@ try {
   ok(await refuses(() => checkSpace(sp({ extra: new Array(LIMITS.values + 1).fill(0) })), /too large/), "too many values in all are refused");
   ok(await refuses(() => checkSpace(sp({ tree: { files: "not a list" } })), /tree/), "a tree whose files aren't a list is refused");
   ok(await refuses(() => checkSpace(sp({ nodes: "x" })), /objects aren't a list/), "objects that aren't a list are refused");
+
+  // ---- the whole space's bytes, wherever it comes from: its strings and keys, in UTF-8, LIMITS.bytes in all
+  ok(utf8Bytes("a€😀") === 1 + 3 + 4, "UTF-8 lengths: a, €, and a character beyond the BMP", utf8Bytes("a€😀"));
+  const mib = "m".repeat(1 << 20);
+  ok(await refuses(() => checkSpace(sp({ nodes: Array.from({ length: 9 }, (_, i) => ({ id: String(i), text: mib })) })), /too large/), "nine 1 MiB texts, each within the string limit, are refused in all (9 MiB > 8 MiB)");
+  ok(checkSpace(sp({ nodes: Array.from({ length: 7 }, (_, i) => ({ id: String(i), text: mib })) })).nodes.length === 7, "seven pass");
+  ok(await refuses(() => checkSpace(sp({ nodes: Array.from({ length: 3 }, (_, i) => ({ id: String(i), text: "€".repeat(1 << 20) })) })), /too large/), "the bound is in bytes: three million € (9 MiB in UTF-8, 3 Mi characters) are refused");
+
+  // ---- a room made from a tree, within the same limits, refused before it is laid out
+  const flat = (n, prefix = "") => ({ name: "t", base: "/", files: Array.from({ length: n }, (_, i) => [`${prefix}f${i}.py`, 1]), imports: [] });
+  ok(checkSpace(treeRoom(flat(LIMITS.nodes), "")).nodes.length === LIMITS.nodes, `a top folder of ${LIMITS.nodes} files: its room is made`);
+  ok(await refuses(() => treeRoom(flat(LIMITS.nodes + 1), ""), /more than 4000 entries/), `one more file: refused, before the room is laid out`);
+  ok(checkSpace(sp({ tree: flat(LIMITS.nodes + 1) })).tree.files.length === LIMITS.nodes + 1, "(the tree itself passes the input check: the limit is the room's)");
+  ok(await refuses(() => treeRoom(flat(LIMITS.nodes + 1, "sub/"), "sub"), /more than 4000 entries/), "an entered folder over the limit is refused the same way");
+  ok(treeRoom(flat(LIMITS.nodes + 1, "sub/"), "").nodes.length === 1, "while the folder above it, one entry, is made");
+  const linked = flat(150); linked.imports = []; for (let i = 0; i < 150; i++) for (let j = 0; j < 150; j++) if (i !== j) linked.imports.push([i, j]);
+  ok(await refuses(() => treeRoom(linked, ""), /more than 20000 links/), "a room whose links (from its tree's imports) are over the limit is refused");
+
+  // ---- what is kept in this browser: bytes in UTF-8, the oldest dropped before a write, never over the limits
+  const store = () => { const m = new Map(); return { m, get length() { return m.size; }, key: (k) => [...m.keys()][k] ?? null, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) }; };
+  const bytesIn = (st) => [...st.m].filter(([k]) => k.startsWith(EDIT)).reduce((n, [k, v]) => n + utf8Bytes(k) + utf8Bytes(v), 0);
+  { const st = store();
+    ok(keepEdit(st, EDIT + "a", { at: 1, text: "x" }) && st.m.size === 1, "an edit is kept");
+    ok(!keepEdit(st, EDIT + "big", { at: 2, text: "€".repeat(100000) }) && !st.m.has(EDIT + "big"), "a copy of 300 KB in UTF-8 (100,000 characters) is over the 256 KiB entry limit: not kept");
+    ok(keepEdit(st, EDIT + "fig", { at: 3, text: "y", svg: "s".repeat(300000) }) && JSON.parse(st.m.get(EDIT + "fig")).svg === null, "one over the limit only by its figure is kept without it"); }
+  { const st = store(), lim = { entries: 200, bytes: 600000, entry: 256 << 10 };
+    for (let i = 0; i < 5; i++) keepEdit(st, EDIT + i, { at: i, text: "€".repeat(40000) }, lim); // (about 120 KB each)
+    ok(bytesIn(st) <= lim.bytes && !st.m.has(EDIT + "0") && st.m.has(EDIT + "4"), "the total, in bytes: the oldest dropped, never over", { kept: [...st.m.keys()], bytes: bytesIn(st) }); }
+  { const st = store(), lim = { entries: 3, bytes: 1 << 20, entry: 1 << 10 };
+    for (let i = 0; i < 5; i++) keepEdit(st, EDIT + i, { at: i, text: "t" }, lim);
+    ok(st.m.size === 3 && [...st.m.keys()].join() === [2, 3, 4].map((i) => EDIT + i).join(), "at most so many copies: the oldest dropped", [...st.m.keys()]); }
+  { // (a storage that refuses a write that would take it over its quota: the oldest are dropped first, so the write fits)
+    const st = store(), quota = 300000, lim = { entries: 200, bytes: quota, entry: 256 << 10 };
+    const setItem = st.setItem; st.setItem = (k, v) => { if (bytesIn(st) + utf8Bytes(k) + utf8Bytes(v) > quota) throw new Error("QuotaExceededError"); setItem(k, v); };
+    for (let i = 0; i < 3; i++) keepEdit(st, EDIT + i, { at: i, text: "€".repeat(30000) }, lim);
+    ok(keepEdit(st, EDIT + "new", { at: 9, text: "€".repeat(30000) }, lim) && st.m.has(EDIT + "new"), "pruned before the write: a full store still takes the newest", [...st.m.keys()]); }
+  ok(KEPT.entries === 200 && KEPT.bytes === 4 << 20 && KEPT.entry === 256 << 10, "the limits: 200 copies, 4 MiB, 256 KiB each");
 } finally {
   server.close();
 }
