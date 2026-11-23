@@ -18,7 +18,7 @@ let failures = 0;
 const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 600) : "")); if (!c) failures++; };
 
 // ---- the mirror: the upstream commit and each file's sha256 there (a new upstream version means new pins, reviewed)
-const UPSTREAM = "b2908c03093f314eafdeeefad5acaa34b9137725";
+const UPSTREAM = "2311c35a9796e6378c3409863f651aef5b381d96";
 const PINS = {
   "core/bytes.mjs": ["lib/fleet/core/bytes.mjs", "be5c199fcadf375336c49dae692fce6af96644af6f98b11161a4fb0d65eaaf6b"],
   "core/canon.mjs": ["lib/fleet/core/canon.mjs", "d9b7831f6772f6010689ecb74a8727280470e8e1437a2166fc0fd6b1728f08e8"],
@@ -38,10 +38,10 @@ const PINS = {
   "core/sealed.mjs": ["lib/fleet/core/sealed.mjs", "bd9d9843486dd5a70061bc30c4db2defaa1afbada4fdaa52401361d53ba52fb5"],
   "core/verify.mjs": ["lib/fleet/core/verify.mjs", "456973de9ecdb8a72382600d7c0ad8086236555d8ca698a1e31dda2ec4448d88"],
   "core/webcrypto.mjs": ["lib/fleet/core/webcrypto.mjs", "82f5b25fcd77710fa75f18c65df00dbea5be223315ff4f32308f3164acb0e61b"],
-  "fleet.schema.json": ["schema/fleet/fleet.schema.json", "50b7a3b8e3bed9afe63a40cae8b52854c839d1482fa55caaef7bdccf59e82063"],
+  "fleet.schema.json": ["schema/fleet/fleet.schema.json", "6f4ada49b3dc7708423309eeda60520eb4d915e8889b422a32b7c6578cc2730c"],
   "reasons.json": ["schema/fleet/reasons.json", "0dff469bdd8157ac4515d18f7fab299e233e5454966a13236f43dfae90875dd1"],
   "fleet-fixtures.json": ["test/fixtures/fleet-fixtures.json", "560fe3fdbfe463bca22e60fe773928a716bb24f45cf0bfc91003c61442702d80"],
-  "fleet-hpke-fixtures.json": ["test/fixtures/fleet-hpke-fixtures.json", "b047a9bae9b3b57c765bac6afc635922be12e4ddb2b5cea6ab212305515df453"],
+  "fleet-hpke-fixtures.json": ["test/fixtures/fleet-hpke-fixtures.json", "2e73d694e466c5faacc3137358a9a33a04d650af82498c9fb277f9beba24e567"],
   "hpke-x25519-sha256-aes256gcm.json": ["test/fixtures/hpke-x25519-sha256-aes256gcm.json", "054c8e53704afdc91aae501f96ee964828c78fd4581e5894d21593b93a066d8e"],
   "fleet-fixture-cases.mjs": ["test/fleet-fixture-cases.mjs", "4680b39dc785c84cd020865ce666ca4434338a6eefea029d8c3284fde5666017"],
 };
@@ -130,6 +130,9 @@ try {
     //  them, expecting a refusal, and C-8 has just seen the core refuse it)
     const claude = JSON.parse(hpkeFixtures.toString("utf8")).packages.filter((c) => /claude-setup-token/.test(c.name));
     ok(claude.length === 1 && claude[0].expect === "bad_form" && !h.bad.some((b) => b.name === claude[0].name), "C-9: a claude-setup-token package is refused (bad_form): the core takes no Claude purpose", claude);
+    // (and the schema the page installs names no Claude provider where a subscription or a sealed package is described)
+    const prov = await P.ev(`(() => { const d = fc.fleetCore().fleetSchema().$defs; return ["subscription", "sealed-package", "package_plaintext"].map((n) => JSON.stringify(d[n]?.properties?.provider?.enum ?? null)); })()`);
+    ok(prov.every((e) => e === '["codex"]'), "C-10: the installed schema allows only codex as a subscription, sealed-package and package provider (no Claude subscription)", prov);
   }
   {
     const P = await page();

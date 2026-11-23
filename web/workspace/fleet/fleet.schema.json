@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sagebrush.org/schema/fleet/1",
   "title": "Sagebrush fleet protocol v1 (O6/O7 r2.3)",
-  "$comment": "Frozen design: agent-autonomous-schemas.md r2.3, sha256 db905c9d72ba5d4e18620d3267ea9214992d3a82c735289dda4088970dddc7e3. Bodies by type name in $defs (sb.<name>.v1). The browser-session body is O11's, imported from O11 draft 5.1 (sha256 66755f3a1a97d060…); the four audit bodies are daybreak3's, absent here until imported by exact revision. Validate with lib/fleet/schema.mjs (closed subset).",
+  "$comment": "Frozen design: agent-autonomous-schemas.md r2.3, sha256 db905c9d72ba5d4e18620d3267ea9214992d3a82c735289dda4088970dddc7e3. Bodies by type name in $defs (sb.<name>.v1). The browser-session body is O11's, imported from O11 draft 5.1 (sha256 66755f3a1a97d060…); the four audit bodies are daybreak3's, absent here until imported by exact revision. Validate with lib/fleet/schema.mjs (closed subset). Amended Nov 23 2026 by the owner's ruling (a Claude login is never held, sealed or relayed by the service; Claude subscriptions are host-local, signed in through Claude Code's own flow): no subscription, sealed package or package plaintext names provider claude, and there is no claude-setup-token purpose. Nor does an agent's broker list a claude-subscription right: the host-local pool is the only authority on Claude subscriptions, and the service never learns of one. An agent's client may still be claude.",
   "$defs": {
     "agent_or_all": {
       "oneOf": [
@@ -1412,13 +1412,11 @@
         },
         "provider": {
           "enum": [
-            "claude",
             "codex"
           ]
         },
         "purpose": {
           "enum": [
-            "claude-setup-token",
             "codex-refresh-home",
             "codex-access-token"
           ]
@@ -1586,7 +1584,6 @@
     },
     "right": {
       "enum": [
-        "claude-subscription",
         "codex-access-token",
         "messages",
         "memory",
@@ -1660,13 +1657,11 @@
         },
         "provider": {
           "enum": [
-            "claude",
             "codex"
           ]
         },
         "purpose": {
           "enum": [
-            "claude-setup-token",
             "codex-refresh-home",
             "codex-access-token"
           ]
@@ -1756,7 +1751,6 @@
         },
         "provider": {
           "enum": [
-            "claude",
             "codex"
           ]
         },
