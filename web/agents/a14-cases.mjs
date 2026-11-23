@@ -641,6 +641,27 @@ export async function runA14({ site, ok, want = () => true }) {
     const took = Date.now() - t0, draft = await Q.composer();
     ok(said && took < 15000 && !(await Q.connected()) && draft === "a draft kept", "A14-3e: a takeover that can't connect ends within its bounded wait, says so, and keeps the draft (nothing said connected)", { said, took, draft });
   });
+  await run("A14-3e-stale", async (B, A) => {
+    // (#1706, the tests review's case: a retry queued from an older loss never takes back a newer connection that was
+    //  let go. The older loss's first retry timer (RETRY_FIRST_MS, 1000 ms) is held; the person connects a newer
+    //  remembered pairing from the Connect dialog; a release lets it go; then the held timer fires)
+    const R = await recorder(B);
+    const P = await B.tab({ retry: true });
+    await pair(P, A, site, "3600000", true);
+    await chat(P, A);
+    await P.ev(`(() => { window.__nativeTimeout = window.setTimeout; window.__wakes = []; window.setTimeout = (f, ms, ...args) => { if (ms === 1000) { __wakes.push(() => f(...args)); return __nativeTimeout(() => {}, 60000); } return __nativeTimeout(f, ms, ...args); }; return true; })()`);
+    A.stop();
+    await P.until(`window.__wakes.length > 0 && document.querySelector('#connect').textContent !== 'Connected'`, 10000);
+    A.restart();
+    await connectDialog(P, A, "3600000", true);
+    ok(await P.connected(), "A14-3e precondition: a newer remembered pairing is connected while the older loss's retry is still queued");
+    await R.release();
+    await P.until(`document.querySelector('#conn-status').textContent === ${JSON.stringify(COPY.released)}`, 10000);
+    const h = A.hellos;
+    await P.ev(`(window.setTimeout = window.__nativeTimeout, window.__wakes.splice(0).forEach((f) => f()), true)`);
+    await sleep(4000);
+    ok(!(await P.connected()) && A.live.size === 0 && A.hellos === h, "A14-3e: a retry queued from an older loss doesn't take back a newer connection that was let go (#1706)", { connected: await P.connected(), live: A.live.size, extraHellos: A.hellos - h, bar: await P.bar() });
+  });
   await run("A14-3e-turn", async (B, A) => {
     // (released while a turn runs: the first tab keeps its chat, ends nothing of the person's, throws nothing late, and
     //  doesn't take Claude back; the second is connected)

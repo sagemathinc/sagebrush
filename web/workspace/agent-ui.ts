@@ -216,6 +216,12 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
   const retried = new WeakSet<AgentPairing>();
   // (the pairings let go because another tab asked: never tried again or restored here, SEC move-connection r1 A)
   const released = new WeakSet<AgentPairing>();
+  // (the retries' fence: a release, and every newer connection the person starts (Connect, a runner's, "Use
+  //  remembered access"), moves it on; a retry already queued from an older loss checks it after each wait and stops
+  //  once it moved, so it never takes back a connection let go meanwhile, nor replaces a newer one: #1706)
+  let retryGen = 0;
+  /** Whether an attempt started under fence `gen` (a retry's; undefined for the person's own) has been overtaken. */
+  const fenced = (gen?: number) => gen !== undefined && gen !== retryGen;
 
   function dialog(title: string, body: (box: HTMLElement, close: () => void) => void, onClose?: () => void) {
     const box = h("div", { className: "sbag-box" }, h("h2", { textContent: title }));
@@ -486,6 +492,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
         const onViolation = (e: SecurityPolicyViolationEvent) => { if (/^wss?:\/\/(127\.0\.0\.1|localhost)/.test(e.blockedURI)) blocked = "this page's security policy blocked the connection to the agent"; };
         document.addEventListener("securitypolicyviolation", onViolation);
         try {
+          retryGen++;
           const p = make(n, { code: r.code });
           watch(p);
           await Promise.race([
@@ -558,6 +565,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
     const p = pairing;
     if (!p || !releasable()) return false;
     released.add(p);
+    retryGen++;
     p.drop(RELEASED);
     return true;
   }
@@ -570,11 +578,13 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
     } catch { return null; }
   }
   /** A remembered agent: reconnect with its session, and give it the same grant again (if it hasn't expired). The
-   * grant given, or null. */
-  async function reconnect(): Promise<Kept["grant"] | null> {
+   * grant given, or null. A retry passes its fence `gen`: once a release or a newer connection moves it, the attempt
+   * stops after whatever it was awaiting, its socket dropped, and nothing is given (#1706). */
+  async function reconnect(gen?: number): Promise<Kept["grant"] | null> {
     const kept = (await ws.agentGrants()) as Record<string, Kept>;
+    if (fenced(gen)) return null;
     for (const [id, k] of Object.entries(kept)) {
-      if (!k?.grant || !k.session || (k.grant.expires !== null && !(Date.now() < k.grant.expires))) { await ws.putAgentGrant(id, null); continue; }
+      if (!k?.grant || !k.session || (k.grant.expires !== null && !(Date.now() < k.grant.expires))) { await ws.putAgentGrant(id, null); if (fenced(gen)) return null; continue; }
       const deadline = Date.now() + BUSY_FOR_MS;
       for (;;) {
         let p: AgentPairing | null = null;
@@ -583,22 +593,23 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
           p = make(k.port, { session: k.session, pairingId: id });
           watch(p);
           await p.paired();
-          // (superseded meanwhile by a pairing the person chose: this attempt goes, touching nothing of theirs)
-          if (pairing !== p) { p.drop(); return null; }
+          // (superseded meanwhile by a pairing the person chose, or fenced by a release: this attempt goes, touching
+          //  nothing of theirs)
+          if (pairing !== p || fenced(gen)) { p.drop(); return null; }
           // (expired while it paired: an attempt asked in time can be answered after the expiry; never given then, as
           //  restoreWith's)
           if (k.grant.expires !== null && !(Date.now() < k.grant.expires)) { void p.revoke("the grant expired"); break; }
           await p.allow({ folders: k.grant.folders, write: k.grant.write, run: k.grant.run === true, expires: k.grant.expires, id: k.grant.id }, true);
-          // (superseded while the grant was being given, by a Connect submitted meanwhile: its socket goes too, so no
-          //  granted connection outlives the person's choice)
-          if (pairing !== p) { p.drop(); return null; }
+          // (superseded while the grant was being given, by a Connect submitted meanwhile, or fenced: its socket goes
+          //  too, so no granted connection outlives the person's choice)
+          if (pairing !== p || fenced(gen)) { p.drop(); return null; }
           showBar();
           return k.grant;
         } catch {
           // (the old page's connection not yet seen closed: asked again, briefly, while this attempt still owns the page)
           const tried = p;
-          if (tried && busy(tried) && (await again(deadline, () => pairing === tried))) continue;
-          if (tried && pairing !== tried) return null;
+          if (tried && busy(tried) && (await again(deadline, () => pairing === tried && !fenced(gen)))) continue;
+          if ((tried && pairing !== tried) || fenced(gen)) return null;
           /* (the server restarted, or the agent is gone: a new code is needed; the grant stays until it expires or is revoked) */
           break;
         }
@@ -610,7 +621,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
   /** One attempt with a reload record (A14): its session, at most RESTORE_MS; the agent must be the one it was, the
    * grant not expired; then exactly its grant again (never wider, never longer), which writes the record anew. With
    * the pairing it made (null if none), so a caller can tell whether a newer pairing replaced it meanwhile (S2). */
-  async function restoreWith(r: ReloadRecord): Promise<{ res: "ok" | "unreachable" | "refused" | "expired" | "elsewhere"; p: AgentPairing | null }> {
+  async function restoreWith(r: ReloadRecord, gen?: number): Promise<{ res: "ok" | "unreachable" | "refused" | "expired" | "elsewhere"; p: AgentPairing | null }> {
     if (r.grant.expires !== null && !(Date.now() < r.grant.expires)) return { res: "expired", p: null };
     let p: AgentPairing;
     const timeout = new Promise<"timeout">((res) => setTimeout(() => res("timeout"), RESTORE_MS));
@@ -623,11 +634,12 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
       got = await Promise.race([p.paired().then(() => "paired" as const, (e) => (e instanceof AgentError && e.code !== "refused" ? "refused" : /^the agent refused/.test(p.closeReason) ? "refused" : "unreachable") as "refused" | "unreachable"), timeout]);
       // (the old page's connection not yet seen closed: asked again, briefly, within RESTORE_MS)
       const tried = p;
-      if (got === "refused" && busy(tried) && (await again(deadline, () => pairing === tried))) continue;
+      if (got === "refused" && busy(tried) && (await again(deadline, () => pairing === tried && !fenced(gen)))) continue;
       break;
     }
-    // (superseded meanwhile by a pairing the person chose: the caller's current(p) says nothing and keeps nothing)
-    if (pairing !== p) { if (got === "paired") p.drop(); return { res: "unreachable", p }; }
+    // (superseded meanwhile by a pairing the person chose, or a retry fenced by a release (#1706): the caller's
+    //  current(p) says nothing and keeps nothing)
+    if (pairing !== p || fenced(gen)) { if (got === "paired") p.drop(); return { res: "unreachable", p }; }
     if (got === "timeout") { void p.revoke("no answer from the agent"); return { res: "unreachable", p }; }
     // (still another page's after the wait: another page has the agent; this record stays for a click,
     //  #1620)
@@ -638,7 +650,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
     // (Delegate on again where it was on, in the same grant: its tasks shown as before the page left and never stopped
     //  by an off between, #1622)
     try { await p.allow({ folders: r.grant.folders, write: r.grant.write, run: r.grant.run === true, ...(r.grant.delegate ? { delegate: true } : {}), expires: r.grant.expires, ...(r.grant.id ? { id: r.grant.id } : {}) }, false); } catch { void p.revoke("the grant couldn't be given again"); return { res: "refused", p }; }
-    if (pairing !== p) { p.drop(); return { res: "unreachable", p }; } // (superseded while the grant was being given)
+    if (pairing !== p || fenced(gen)) { p.drop(); return { res: "unreachable", p }; } // (superseded or fenced while the grant was being given)
     showBar();
     return { res: "ok", p };
   }
@@ -651,19 +663,19 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
    * unreachable agent, kept for one click while the grant lasts). It stops, saying nothing, once the page is leaving, a
    * pairing is live, or the record is no longer the one kept; it waits while the person's own [Reconnect] runs. */
   async function retryLost(r: ReloadRecord) {
-    const until = r.grant.expires ?? Date.now() + RETURN_MS;
+    const until = r.grant.expires ?? Date.now() + RETURN_MS, gen = retryGen;
     for (let wait = RETRY_FIRST_MS; ; wait = Math.min(wait * 2, RETRY_MAX_MS)) {
       await pause(Math.min(wait, until - Date.now()));
       while (byHand && !leaving) await pause(100);
-      if (leaving || kept !== r || pairingLive()) return;
+      if (leaving || kept !== r || pairingLive() || gen !== retryGen) return;
       if (!(Date.now() < until)) {
         const over = r.grant.expires !== null;
         if (over) kept = null;
         say({ kind: "not-restored", why: over ? "expired" : "unreachable", canReconnect: !over });
         return;
       }
-      const { res, p } = await restoreWith(r);
-      if (!current(p) || kept !== r) return;
+      const { res, p } = await restoreWith(r, gen);
+      if (!current(p) || kept !== r || gen !== retryGen) return;
       if (res === "ok") { kept = null; say({ kind: "restored" }); return; }
       if (res === "elsewhere") { say({ kind: "not-restored", why: res, canReconnect: true }); return; }
       if (res !== "unreachable") { kept = null; say({ kind: "not-restored", why: res, canReconnect: false }); return; }
@@ -672,12 +684,14 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
   /** The same for a remembered grant's pairing, which keeps no reload record: its remembered access tried again, for
    * RETURN_MS at most, until a remembered grant is in force again or none is left. */
   async function retryRemembered(lost: AgentPairing) {
-    const until = Date.now() + RETURN_MS;
+    const until = Date.now() + RETURN_MS, gen = retryGen;
     for (let wait = RETRY_FIRST_MS; Date.now() < until; wait = Math.min(wait * 2, RETRY_MAX_MS)) {
       await pause(Math.min(wait, until - Date.now()));
-      if (leaving || pairingLive() || (pairing !== lost && pairing?.state !== "closed")) return;
+      if (leaving || pairingLive() || (pairing !== lost && pairing?.state !== "closed") || gen !== retryGen) return;
       if (!(await remembered())) return;
-      const g = await reconnect();
+      if (gen !== retryGen) return;
+      const g = await reconnect(gen);
+      if (gen !== retryGen) return;
       if (g) { o.reload?.onRemembered?.(g); return; }
     }
   }
@@ -735,8 +749,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
   if (link) { if (o.reload) void takeReloadRecord(storage, o.reload.scope); connect(link.code, link.port); }
   // (in a microtask: the caller has this function's result before any restore state is said to it)
   else queueMicrotask(() => void restoreOnLoad());
-  return { connect, reconnectKept, remembered, release, releasable, useRemembered: () => reconnect(), get canReconnect() { return !!(kept ?? pairing?.lostRecord); }, get pairing() { return pairing; },
+  return { connect, reconnectKept, remembered, release, releasable, useRemembered: () => { retryGen++; return reconnect(); }, get canReconnect() { return !!(kept ?? pairing?.lostRecord); }, get pairing() { return pairing; },
     // (another way to connect, the page's own (the Agents page's Chat here): a pairing over its link, watched as any,
     //  and the grant dialog for it)
-    adopt: (link: AgentLink, computer: string) => { const p = make(0, { link, computer }); watch(p); return p; }, grant: (p: AgentPairing) => grantDialog(p), live: () => pairingLive() };
+    adopt: (link: AgentLink, computer: string) => { retryGen++; const p = make(0, { link, computer }); watch(p); return p; }, grant: (p: AgentPairing) => grantDialog(p), live: () => pairingLive() };
 }
