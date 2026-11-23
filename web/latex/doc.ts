@@ -24,7 +24,7 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = ""):
 export async function openDoc(kit: Kit, root: HTMLElement, path: string, ws: Workspace | null, open: (e: Entry) => unknown): Promise<void> {
   if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = kit.css; document.head.appendChild(style); }
   if (!document.getElementById("sb-katex")) {
-    const link = el("link"); link.id = "sb-katex"; link.rel = "stylesheet"; link.href = new URL("katex/katex.min.css", location.href).href; document.head.appendChild(link);
+    const link = el("link"); link.id = "sb-katex"; link.rel = "stylesheet"; link.href = new URL("katex/katex.min.css", import.meta.url).href; document.head.appendChild(link);
   }
   root.textContent = "";
   const page = el("div", "tex-page tex-doc"); root.appendChild(page);
