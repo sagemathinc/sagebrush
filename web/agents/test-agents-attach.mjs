@@ -60,7 +60,9 @@ try {
   const s2 = p2 && (await saved(P, p2));
   ok(took && new RegExp(`^/Attachments/${id}/[0-9a-f]{24}\\.png$`).test(p2 ?? "") && /^Look at this\n\nImage: `[^`]+`$/.test(c2), "T2: a pasted image: its path in the chat's draft, after what was typed, in /Attachments/<this chat>/ under a random name", { c2, id });
   ok(s2 && s2.kind === "file" && s2.size === 64 && JSON.stringify(s2.bytes) === JSON.stringify(PNG), "T2: …saved in this browser's workspace with its own bytes", s2);
-  ok(/Image: \/Attachments\//.test(await P.ev(`document.querySelector('#editor').textContent`)), "T2: …and shown in the composer");
+  await P.ev(`(document.activeElement?.blur(), true)`);
+  await sleep(300);
+  ok(/Image: \/Attachments\//.test(await P.ev(`document.querySelector('#editor').textContent`)) && (await P.ev(`document.querySelectorAll('#editor img, #log img').length`)) === 0 && (await P.ev(`performance.getEntriesByType('resource').filter((r) => r.name.includes('/Attachments/')).length`)) === 0, "T2: …shown in the composer as text (code): no image element, nothing fetched from its path");
 
   // ---- T3: a drop
   const took3 = await paste(P, { drop: true });
