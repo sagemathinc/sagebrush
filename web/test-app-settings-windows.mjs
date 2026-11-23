@@ -47,8 +47,8 @@ function windowOf(h, label) {
   class Storage {
     constructor() { this.m = new Map(); }
     getItem(k) { return this.m.has(String(k)) ? this.m.get(String(k)) : null; }
-    setItem(k, v) { this.m.set(String(k), String(v)); }
-    removeItem(k) { this.m.delete(String(k)); }
+    setItem(k, v) { if (this.failSet) { this.failSet--; const e = new Error("The quota has been exceeded."); e.name = "QuotaExceededError"; throw e; } this.m.set(String(k), String(v)); }
+    removeItem(k) { if (this.failRemove) { this.failRemove--; throw new Error("storage unavailable"); } this.m.delete(String(k)); }
     clear() { this.m.clear(); }
   }
   const ctx = { Storage, queueMicrotask, console, Promise, Map, Set, Object, JSON, String, setTimeout, addEventListener: () => {} };
@@ -153,6 +153,34 @@ const settle = async () => { for (let i = 0; i < 20; i++) await tick(); };
   release();
   await settle();
   ok(h.file["sagebrush-theme"] === "solar" && b.localStorage.getItem("sagebrush-theme") === "solar" && a.localStorage.getItem("sagebrush-theme") === "solar", "H2: a read made before this window's own later change, returned late, isn't taken: disk " + J(h.file) + ", doc-1 " + b.localStorage.getItem("sagebrush-theme") + ", main " + a.localStorage.getItem("sagebrush-theme"));
+}
+
+// (astra2's R1: another window's change that can't be stored here (localStorage full, or a removal failing) isn't
+// taken for seen: the next read, of the same version, takes it)
+{
+  const h = host();
+  h.file = { "sagebrush-theme": "light", "sagebrush-mode": "python" };
+  const a = windowOf(h, "main"), b = windowOf(h, "doc-1");
+  b.localStorage.failSet = 1;
+  a.localStorage.setItem("sagebrush-theme", "dark");
+  await a.__sbSettingsFlush();
+  await settle();
+  ok(h.file["sagebrush-theme"] === "dark" && b.localStorage.getItem("sagebrush-theme") === "light", "R1: a change that can't be stored here (storage full): not taken yet: disk dark, doc-1 " + b.localStorage.getItem("sagebrush-theme"));
+  // (an unrelated change told later: the same version of the theme is taken this time)
+  a.localStorage.setItem("sagebrush-files-sort", "name");
+  await a.__sbSettingsFlush();
+  await settle();
+  ok(b.localStorage.getItem("sagebrush-theme") === "dark" && b.localStorage.getItem("sagebrush-files-sort") === "name", "R1: ...the next read, the theme's version unchanged, takes it: doc-1 " + b.localStorage.getItem("sagebrush-theme"));
+  // (a removal that fails here: the same)
+  b.localStorage.failRemove = 1;
+  a.localStorage.removeItem("sagebrush-mode");
+  await a.__sbSettingsFlush();
+  await settle();
+  ok(h.file["sagebrush-mode"] === undefined && b.localStorage.getItem("sagebrush-mode") === "python", "R1: a removal that fails here: not taken yet");
+  a.localStorage.setItem("sagebrush-files-sort", "size");
+  await a.__sbSettingsFlush();
+  await settle();
+  ok(b.localStorage.getItem("sagebrush-mode") === null, "R1: ...the next read takes it: doc-1's mode removed");
 }
 
 console.log(fails ? `${fails} of ${checks} failed` : `test-app-settings-windows: all ${checks} passed`);

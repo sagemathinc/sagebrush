@@ -77,9 +77,9 @@
     if (!values || typeof values !== "object" || !versions || typeof versions !== "object") return;
     for (const k of KEYS) {
       if (dirty.has(k) || queued || (gen.get(k) ?? 0) !== (before.get(k) ?? 0) || !later(k, versions[k])) continue;
-      seen.set(k, versions[k]);
       const v = typeof values[k] === "string" ? values[k] : null;
-      try { if (localStorage.getItem(k) !== v) { if (v === null) remove.call(localStorage, k); else set.call(localStorage, k, v); } } catch {}
+      // (seen only once it is kept here: a value that couldn't be stored (storage full) is taken again at the next read)
+      try { if (localStorage.getItem(k) !== v) { if (v === null) remove.call(localStorage, k); else set.call(localStorage, k, v); } seen.set(k, versions[k]); } catch (e) { console.warn("settings:", e); }
     }
   }));
   const listen = () => {

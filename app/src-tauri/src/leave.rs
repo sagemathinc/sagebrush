@@ -110,10 +110,12 @@ impl Leave {
         vec![Act::Stalled(label.to_string())]
     }
     /// The person's answer about stalled window `label`: close it anyway (it counts as done), or wait (it is watched
-    /// again).  An answer about a window no longer asked (it answered, or went, meanwhile) changes nothing.
+    /// again).  An answer about a window that is no longer stalled changes nothing: one that said it is writing
+    /// meanwhile is waited for until it is done, as any writing window (the native dialog can't be withdrawn, so its
+    /// answer is ignored instead), and one done or gone meanwhile has nothing left to decide.
     pub fn stalled(&mut self, label: &str, close_anyway: bool) -> Vec<Act> {
         self.asking.remove(label);
-        if !self.asked(label) {
+        if !self.asked(label) || self.held.contains(label) {
             return vec![];
         }
         if close_anyway {
@@ -174,7 +176,27 @@ mod tests {
     }
 
     #[test]
-    fn a_window_that_answers_while_the_person_is_asked_goes_its_own_way() {
+    fn a_window_that_says_it_is_writing_while_the_person_is_asked_is_waited_for() {
+        // (it holds while the dialog is up: Close anyway is ignored, and it isn't destroyed until it is done)
+        let mut l = Leave::default();
+        l.close("doc-4", w(&["main", "doc-4"]));
+        assert_eq!(l.answer_timeout("doc-4"), vec![Act::Stalled(s("doc-4"))]);
+        l.hold("doc-4");
+        assert_eq!(l.stalled("doc-4", true), vec![]);
+        assert_eq!(l.answer_timeout("doc-4"), vec![]);
+        assert_eq!(l.done("doc-4"), vec![Act::Destroy(s("doc-4"))]);
+        // (the same in a quit: Close anyway ignored, the app waits for its done)
+        let mut q = Leave::default();
+        q.quit(w(&["main"]));
+        assert_eq!(q.answer_timeout("main"), vec![Act::Stalled(s("main"))]);
+        q.hold("main");
+        assert_eq!(q.stalled("main", true), vec![]);
+        assert_eq!(q.stalled("main", false), vec![]);
+        assert_eq!(q.done("main"), vec![Act::Exit]);
+    }
+
+    #[test]
+    fn a_window_that_finishes_while_the_person_is_asked_goes_its_own_way() {
         let mut l = Leave::default();
         l.close("doc-3", w(&["main", "doc-3"]));
         assert_eq!(l.answer_timeout("doc-3"), vec![Act::Stalled(s("doc-3"))]);

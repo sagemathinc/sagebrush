@@ -413,19 +413,35 @@ fn files_waiting(app: &tauri::AppHandle, to: &str) {
 }
 
 /// The window to open the files the system hands over (#1541): of `windows` (label, its page's path, focused), the
-/// focused one whose page is the notebook's ("/", which opens files: web/index.html), else "main" if it is there, else
-/// another whose page is the notebook's, else "main" (gone, or on a board: the files wait there for its next
-/// notebook page to ask, startup_files).  Never a board's page, which has nothing that opens them.
+/// focused one whose page is the notebook's ("/", which opens files: web/index.html), else "main" if its page is the
+/// notebook's, else another whose page is, else "main" (gone, or on a board: the files wait for its next notebook
+/// page to ask, startup_files).  Never a board's page, which has nothing that opens them.
 #[allow(dead_code)]
 fn files_target(windows: Vec<(String, String, bool)>) -> String {
     let notebook = |p: &str| p == "/" || p == "/index.html";
     windows
         .iter()
         .find(|(_, p, f)| *f && notebook(p))
-        .or_else(|| windows.iter().find(|(l, _, _)| l == "main"))
+        .or_else(|| windows.iter().find(|(l, p, _)| l == "main" && notebook(p)))
         .or_else(|| windows.iter().find(|(_, p, _)| notebook(p)))
         .map(|(l, _, _)| l.clone())
         .unwrap_or_else(|| "main".into())
+}
+
+/// Window `gone` closed: the files still waiting for it, for the window files_target chooses among `left` (none left:
+/// they stay); that window, if any moved.
+#[allow(dead_code)]
+fn retarget(pending: &mut [(String, String)], gone: &str, left: Vec<(String, String, bool)>) -> Option<String> {
+    if left.is_empty() {
+        return None;
+    }
+    let to = files_target(left);
+    let mut moved = false;
+    for e in pending.iter_mut().filter(|(t, _)| t == gone) {
+        e.0 = to.clone();
+        moved = true;
+    }
+    moved.then_some(to)
 }
 
 // the page's commands: the engine's on the desktop too
@@ -536,19 +552,10 @@ pub fn run() {
                 windows::closed(_app, label);
                 // (files still waiting for that window: for another that opens files, told; with none left, they wait)
                 let left: Vec<(String, String, bool)> = _app.webview_windows().iter().filter(|(l, _)| *l != label).map(|(l, w)| (l.clone(), w.url().map(|u| u.path().to_string()).unwrap_or_default(), w.is_focused().unwrap_or(false))).collect();
-                if !left.is_empty() {
-                    let to = files_target(left);
-                    let pending = _app.state::<Pending>();
-                    let mut p = pending.0.lock().unwrap();
-                    let mut moved = false;
-                    for e in p.iter_mut().filter(|(t, _)| t == label) {
-                        e.0 = to.clone();
-                        moved = true;
-                    }
-                    drop(p);
-                    if moved {
-                        files_waiting(_app, &to);
-                    }
+                let pending = _app.state::<Pending>();
+                let to = retarget(&mut pending.0.lock().unwrap(), label, left);
+                if let Some(to) = to {
+                    files_waiting(_app, &to);
                 }
                 let acts = _app.state::<Leaving>().0.lock().unwrap().destroyed(label);
                 leave_do(_app, acts);
@@ -590,10 +597,26 @@ mod tests {
         // (none focused)
         assert_eq!(super::files_target(vec![w("doc-3", "/index.html", false)]), "doc-3");
         assert_eq!(super::files_target(vec![w("doc-3", "/index.html", true)]), "doc-3");
+        // (main on a board, a board focused: the notebook window, never main (astra2's row))
+        assert_eq!(super::files_target(vec![w("main", "/board/", false), w("doc-1", "/board/", true), w("doc-2", "/", false)]), "doc-2");
         // (main gone: another notebook window; only boards: kept for main)
         assert_eq!(super::files_target(vec![w("doc-4", "/board/", true), w("doc-5", "/", false)]), "doc-5");
         assert_eq!(super::files_target(vec![w("doc-4", "/board/", true)]), "main");
         assert_eq!(super::files_target(vec![]), "main");
+    }
+
+    #[test]
+    fn a_closed_window_s_files_go_to_another_that_opens_them() {
+        let w = |l: &str, p: &str, f: bool| (l.to_string(), p.to_string(), f);
+        let mut p = vec![("doc-1".to_string(), "/a.ipynb".to_string()), ("main".to_string(), "/b.ipynb".to_string())];
+        // (doc-1 closed: its file for the notebook window left, told; main's own file stays main's)
+        assert_eq!(super::retarget(&mut p, "doc-1", vec![w("main", "/board/", false), w("doc-2", "/", false)]), Some("doc-2".into()));
+        assert_eq!(p, vec![("doc-2".to_string(), "/a.ipynb".to_string()), ("main".to_string(), "/b.ipynb".to_string())]);
+        // (a window with no files waiting closed: nothing moved, nobody told)
+        assert_eq!(super::retarget(&mut p, "doc-9", vec![w("main", "/", false)]), None);
+        // (the last window closed: they stay, nobody told)
+        assert_eq!(super::retarget(&mut p, "doc-2", vec![]), None);
+        assert_eq!(p[0].0, "doc-2");
     }
 
     #[test]
