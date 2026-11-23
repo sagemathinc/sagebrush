@@ -130,6 +130,22 @@ try {
     const whole = l.smallW > 1 && l.smallRight <= l.whoRight + 0.5, hidden = l.smallW <= 1 && l.clip !== "none" && l.display !== "none" && l.visibility === "visible";
     ok("L2-header-label", (whole || hidden) && l.nameRight <= l.whoRight + 0.5 && l.smallText.trim() !== "", "with the chat at 420 px the agent's name is whole, and the where-it-runs label is either whole or visually hidden (still read by screen readers), never cut", l);
   }
+  {
+    // (#1793: all four of the header's actions shown (Use your own Claude, Review changes, Delegate, Connected) with the
+    //  chat at its 420 px minimum: they wrap within the header, and none is drawn past the chat over the pane's tabs)
+    const h4 = await ev(`(() => {
+      document.querySelector('#review').hidden = false;
+      const con = document.querySelector('#connect'); con.hidden = false; con.textContent = 'Connected';
+      let sw = document.querySelector('#delegate-switch');
+      if (!sw) { sw = Object.assign(document.createElement('button'), { id: 'delegate-switch', className: 'link', type: 'button' }); con.before(sw); }
+      sw.hidden = false; sw.textContent = 'Delegate: on';
+      const r = (e) => e.getBoundingClientRect(), main = r(document.querySelector('main')), pane = r(document.querySelector('#artifacts'));
+      const btns = ['#howto', '#review', '#delegate-switch', '#connect'].map((s) => { const b = r(document.querySelector(s)); return { s, left: b.left, right: b.right, top: b.top }; });
+      return { mainRight: main.right, paneLeft: pane.left, btns };
+    })()`);
+    ok("L2-header-actions-fit", h4.btns.every((b) => b.right <= h4.mainRight + 0.5 && b.right <= h4.paneLeft + 0.5 && b.left >= 0), "with the chat at 420 px and all four header actions shown, none runs past the chat over the pane's tabs (#1793)", h4);
+    await ev(`(() => { document.querySelector('#review').hidden = true; const con = document.querySelector('#connect'); con.hidden = true; const sw = document.querySelector('#delegate-switch'); if (sw) sw.hidden = true; return true; })()`);
+  }
   for (const [id, pane] of [["L2-pane-319", 319], ["L2-pane-320", 320]]) {
     await drag("sep-pane", 1600 - pane);
     const m = await w();

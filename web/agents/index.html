@@ -99,6 +99,7 @@
   .file-body .code-edit { width: 100%; min-height: 70vh; border: 0; outline: none; resize: none; padding: 14px 18px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: #fff; }
   .agent small { font-weight: 400; color: var(--muted); white-space: nowrap; }
   .top .link, .top #connect { white-space: nowrap; }
+  .top .top-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px 10px; min-width: 0; }
   /* (O-2: beside the pane the chat can be 420 px; the header stays one line there, and the agent's name, not the
      buttons, gives way, cut with an ellipsis; the narrow layout keeps wrapping. Where the chat is under 520 px (the
      header's content box under 488), "on your computer" is visually hidden, kept for screen readers, rather than cut
@@ -106,6 +107,9 @@
   @media (min-width: 901px) {
     .top { flex-wrap: nowrap; container: sb-top / inline-size; }
     .top #who { display: block; flex: 0 1 auto; }
+    /* (the actions give way too: when the name has given what it can, they wrap within their group, under each
+       other, rather than run past the chat into the pane, #1793) */
+    .top .top-actions { flex: 0 1 auto; }
     .top #who .conn { display: inline-block; vertical-align: middle; margin-right: 8px; }
     @container sb-top (max-width: 488px) {
       .top #who small { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -388,9 +392,13 @@
       <a class="wordmark" href="/?home" title="About Sagebrush, and where to start">Sagebrush</a>
       <div class="agent" id="who"><span class="conn demo"></span>Claude <small>scripted demo</small></div>
       <span class="spacer"></span>
-      <button id="howto" class="link">Use your own Claude</button>
-      <button id="review" class="link" hidden>Review changes</button>
-      <button id="connect" hidden>Connect Claude</button>
+      <!-- (the header's actions, one group: beside the pane, when they don't all fit on the header's line, they wrap
+           within it, so none is ever drawn past the chat (#1793)) -->
+      <span class="top-actions">
+        <button id="howto" class="link">Use your own Claude</button>
+        <button id="review" class="link" hidden>Review changes</button>
+        <button id="connect" hidden>Connect Claude</button>
+      </span>
       <span id="who-status" class="vh" role="status"></span>
     </div>
     <div id="help" hidden>
