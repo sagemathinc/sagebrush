@@ -166,6 +166,9 @@ const noRetry = () => { try { return /^(127\.0\.0\.1|localhost)$/.test(location.
 // (exactly the agent server's words, engine/py/python/sagebrush/pairing.py; not the remote computer's, which differ)
 // (or, from sagebrush-agent 0.8.12, its reason: data.reason "busy")
 const busy = (p: AgentPairing) => p.refusedFor === "busy" || /^the agent refused: another page is paired with this agent$/.test(p.closeReason);
+// Older Python pairing servers have no data.reason: only their exact unusable-session refusals qualify, never busy
+// or an unreachable server (both must retain remembered access).
+export const unusableSession = (p: Pick<AgentPairing, "refusedFor" | "closeReason">) => p.refusedFor === "unknown-session" || /^the agent refused: (this agent no longer knows that page: ask the agent for a new code|wrong session)$/.test(p.closeReason);
 // (whether to ask again: a wait of at most what is left of the window, then yes only if the window is still open and
 // the attempt still owns the page (`mine`: no other pairing has been adopted meanwhile, as a person's own Connect);
 // no attempt ever begins at or after the deadline, nor after it was superseded)
@@ -240,6 +243,20 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
 
   function showBar() {
     const p = pairing;
+    if (p?.cleanup) {
+      const key = "cleanup:" + p.cleanup;
+      if (bar && barKey === key && shownP === p) return;
+      bar?.remove(); barText = null; barMade = null; closeMenu = null;
+      const pending = p.cleanup === "pending";
+      const status = h("span", { textContent: pending ? "Revoked; local cleanup pending." : "Revoking…" });
+      status.setAttribute("role", "status");
+      const retry = h("button", { textContent: pending ? "Retry local cleanup" : "Revoking…", disabled: !pending });
+      retry.onclick = () => void p.retryCleanup();
+      bar = h("div", { className: "sbag-bar" }, status, retry);
+      bar.dataset.cleanup = p.cleanup;
+      barKey = key; shownP = p; dock();
+      return;
+    }
     if (!p || p.state !== "granted" || !p.grant) { bar?.remove(); bar = null; barKey = ""; barText = null; barMade = null; closeMenu = null; shownP = null; return; }
     const g = p.grant;
     const where = g.folders.includes("/") ? "everywhere" : "in " + g.folders.join(", ");
@@ -444,6 +461,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
 
   /** The Connect dialog. `back` (A14 §3): where focus returns if it closes without connecting (the page's bar button). */
   function connect(code = "", port = "", back?: HTMLElement) {
+    if (pairing?.cleanup) { showBar(); return; }
     if (isSafari() && o.extra) {
       // (Safari can't reach a program on this computer; the page's other way to connect (Chat here) it can use)
       if (pairing && pairing.state !== "closed") { showBar(); return; }
@@ -537,7 +555,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
       setTimeout(() => c.focus());
     }, () => { if (back?.isConnected && !pairingLive()) back.focus(); });
   }
-  const pairingLive = () => !!pairing && pairing.state !== "closed";
+  const pairingLive = () => !!pairing && (pairing.state !== "closed" || !!pairing.cleanup);
 
   /** The first remembered grant still in force, for the page's "Use remembered access" (A14 N6); null if none. */
   async function remembered(): Promise<Kept["grant"] | null> {
@@ -549,6 +567,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   /** A remembered agent: reconnect with its session, and give it the same grant again (if it hasn't expired). The
    * grant given, or null. */
   async function reconnect(): Promise<Kept["grant"] | null> {
+    if (pairing?.cleanup) { showBar(); return null; }
     const kept = (await ws.agentGrants()) as Record<string, Kept>;
     for (const [id, k] of Object.entries(kept)) {
       if (!k?.grant || !k.session || (k.grant.expires !== null && !(Date.now() < k.grant.expires))) { await ws.putAgentGrant(id, null); continue; }
@@ -572,6 +591,12 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
           showBar();
           return k.grant;
         } catch {
+          if (p && unusableSession(p)) {
+            // A revoked/replaced session is not an offline or busy agent. Await forgetting it before going on.
+            await p.revoke("the remembered session is no longer valid");
+            if (p.cleanup) return null;
+            break;
+          }
           // (the old page's connection not yet seen closed: asked again, briefly, while this attempt still owns the page)
           const tried = p;
           if (tried && busy(tried) && (await again(deadline, () => pairing === tried))) continue;
@@ -588,6 +613,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
    * grant not expired; then exactly its grant again (never wider, never longer), which writes the record anew. With
    * the pairing it made (null if none), so a caller can tell whether a newer pairing replaced it meanwhile (S2). */
   async function restoreWith(r: ReloadRecord): Promise<{ res: "ok" | "unreachable" | "refused" | "expired" | "elsewhere"; p: AgentPairing | null }> {
+    if (pairing?.cleanup) { showBar(); return { res: "refused", p: pairing }; }
     if (r.grant.expires !== null && !(Date.now() < r.grant.expires)) return { res: "expired", p: null };
     let p: AgentPairing;
     const timeout = new Promise<"timeout">((res) => setTimeout(() => res("timeout"), RESTORE_MS));
@@ -606,6 +632,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     // (superseded meanwhile by a pairing the person chose: the caller's current(p) says nothing and keeps nothing)
     if (pairing !== p) { if (got === "paired") p.drop(); return { res: "unreachable", p }; }
     if (got === "timeout") { void p.revoke("no answer from the agent"); return { res: "unreachable", p }; }
+    if (unusableSession(p)) await p.revoke("the remembered session is no longer valid");
     // (still another page's after the wait: another page has the agent; this record stays for a click,
     //  #1620)
     if (got === "refused" && busy(p)) return { res: "elsewhere", p };
@@ -715,5 +742,5 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   return { connect, reconnectKept, remembered, useRemembered: () => reconnect(), get canReconnect() { return !!(kept ?? pairing?.lostRecord); }, get pairing() { return pairing; },
     // (another way to connect, the page's own (the Agents page's Chat here): a pairing over its link, watched as any,
     //  and the grant dialog for it)
-    adopt: (link: AgentLink, computer: string) => { const p = make(0, { link, computer }); watch(p); return p; }, grant: (p: AgentPairing) => grantDialog(p), live: () => pairingLive() };
+    adopt: (link: AgentLink, computer: string) => { if (pairing?.cleanup) throw new AgentError("busy", "Revoked; local cleanup pending."); const p = make(0, { link, computer }); watch(p); return p; }, grant: (p: AgentPairing) => { if (pairing?.cleanup) showBar(); else grantDialog(p); }, live: () => !pairing?.cleanup && pairingLive() };
 }
