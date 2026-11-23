@@ -9577,9 +9577,9 @@ class _MOrder:
 
     @property
     def _magma_block(self):
-        # (printed on lines of its own, except a quadratic field's order by its field's name, which Magma 2.18-5 prints
-        # inline: print L.1, MaximalOrder(L); is "w Maximal Order of K")
-        return not (self.K._quadratic and _global_name(self.K) is not None)
+        # (printed on lines of its own, except a quadratic field's order, which Magma 2.18-5 prints inline, named or not:
+        # print L.1, MaximalOrder(L); is "w Maximal Order of K")
+        return not self.K._quadratic
 
     @property
     def _magma_nowrap(self):

@@ -28,4 +28,7 @@ K2<w> := QuadraticField(13);
 L2 := QuadraticField(13);
 print L2.1, MaximalOrder(L2);
 print MaximalOrder(QuadraticField(-19)), 2;
+print 3, MaximalOrder(QuadraticField(-5)), 3;
+print 3, MaximalOrder(QuadraticField(-7)), 3;
+print 3, MaximalOrder(QuadraticField(-11)), 3;
 print "end";
