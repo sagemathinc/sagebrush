@@ -29,8 +29,9 @@ import {
 } from "./vendor/fleet-core/core/control.mjs";
 import { parseCommit, parseOpenTarget, verifyAppOpen, verifyCommit, verifyHostOpen } from "./vendor/fleet-core/core/relay.mjs";
 import { parseSig } from "./vendor/fleet-core/core/request.mjs";
-import { FleetError, refuse, unb64 } from "./vendor/fleet-core/core/bytes.mjs";
-import { consumeCall, readEpochs, readFeed, type Epochs } from "./store.ts";
+import { FleetError, enc, refuse, unb64 } from "./vendor/fleet-core/core/bytes.mjs";
+import { canonText } from "./vendor/fleet-core/core/canonical.mjs";
+import { consumeCall, readEpochs, readFeed, type Change, type Epochs } from "./store.ts";
 import { useCrypto } from "./vendor/fleet-core/core/crypto.mjs";
 import { webCrypto } from "./vendor/fleet-core/core/webcrypto.mjs";
 import { useSchemas } from "./vendor/fleet-core/core/schemas.mjs";
@@ -81,9 +82,18 @@ export interface FleetOptions {
 
 const BODY_DEADLINE_MS = 5_000;
 const LIMIT_CHANGES = 3 * FEED_MAX;
-// (a feed answer's bytes with every list empty and every number at its widest; each entry is counted at its own size)
-const FEED_BASE_BYTES = 400;
+// The feed answer's size, exactly as signControlAnswer will encode it, at its largest: the answer with every list
+// empty and every number at its widest, then each entry's own canonical bytes with its epoch at its widest (an id
+// may hold characters canonical JSON escapes, a quote or a backslash, so its length isn't its size) and a comma.
+const WIDEST = Number.MAX_SAFE_INTEGER;
+const FEED_BASE_BYTES = enc(
+  canonText({
+    v: 1, answer: "epochs", call: "A".repeat(22), call_sha256: "A".repeat(43), result: "ok", since: WIDEST, cursor: WIDEST, at_ms: WIDEST, more: false,
+    agents: [], accounts: [], hosts: [],
+  }),
+).length;
 const FEED_BUDGET = 16 * 1024 - FEED_BASE_BYTES;
+export const entryBytes = (id: string): number => enc(canonText({ id, epoch: WIDEST })).length + 1;
 
 function log(code: string, extra: Record<string, string | number> = {}): void {
   console.log(JSON.stringify({ code, ...extra }));
@@ -335,18 +345,27 @@ async function admit(body: Uint8Array, env: FleetEnv, facts: FleetFacts, now: nu
 async function epochs(db: D1Database, since: number, now: number): Promise<Answer> {
   const read = await readFeed(db, since, LIMIT_CHANGES + 1);
   if (read.expired) return { code: "refused-cursor_expired", fields: { result: "refused", since, code: "cursor_expired" } };
-  // (each identity once per list, at its highest epoch; at most FEED_MAX a list and the answer within 16 KiB: past
-  // either, the answer stops at the last change it took, its cursor that change's seq, and says more)
+  const fields = feedPage(read.changes, read.tick, since, now);
+  return { code: fields.more ? "feed-more" : "feed", fields };
+}
+
+/**
+ * One feed answer's fields from the changes after since (in seq order, at most LIMIT_CHANGES + 1) and this answer's
+ * tick: each identity once per list, at its highest epoch; at most FEED_MAX a list and the encoded answer within
+ * 16 KiB (counted at its widest, above).  Past either, the answer stops at the last change it took, its cursor that
+ * change's seq, and says more.
+ */
+export function feedPage(changes: Change[], tick: number, since: number, now: number) {
   const lists = { agent: new Map<string, number>(), account: new Map<string, number>(), host: new Map<string, number>() };
   let bytes = 0;
-  let cursor = read.tick;
+  let cursor = tick;
   let more = false;
-  for (const [i, c] of read.changes.entries()) {
+  for (const [i, c] of changes.entries()) {
     const list = lists[c.kind];
     const fresh = !list.has(c.id);
-    const cost = fresh ? 40 + c.id.length : 0;
+    const cost = fresh ? entryBytes(c.id) : 0;
     if (i >= LIMIT_CHANGES || (fresh && (list.size >= FEED_MAX || bytes + cost > FEED_BUDGET))) {
-      cursor = read.changes[i - 1].seq;
+      cursor = changes[i - 1].seq;
       more = true;
       break;
     }
@@ -354,9 +373,5 @@ async function epochs(db: D1Database, since: number, now: number): Promise<Answe
     bytes += cost;
   }
   const entries = (m: Map<string, number>) => [...m].map(([id, epoch]) => ({ id, epoch }));
-  return {
-    code: more ? "feed-more" : "feed",
-    fields: { result: "ok", since, cursor, at_ms: now, more, agents: entries(lists.agent), accounts: entries(lists.account), hosts: entries(lists.host) },
-  };
+  return { result: "ok", since, cursor, at_ms: now, more, agents: entries(lists.agent), accounts: entries(lists.account), hosts: entries(lists.host) };
 }
-

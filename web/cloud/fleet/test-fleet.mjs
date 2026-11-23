@@ -294,6 +294,10 @@ async function commitReq(o = {}, c = {}) {
   ok(await code(await appReq()) === "not_granted", "the agent now on another host: not_granted");
   await facts({ agent: { ...FACTS.agent, revoked: true } });
   ok(await code(await appReq()) === "agent_revoked", "a revoked agent: agent_revoked");
+  // (an app open is refused once the agent's grant has ended, whatever its record's window: the relay's retention of
+  // app request ids relies on it)
+  await facts({ agent: { ...FACTS.agent, notAfterMs: Date.now() - 1 } });
+  ok(await code(await appReq()) === "grant_expired", "an app open after the agent's grant ended: grant_expired");
   await facts();
 }
 
@@ -384,6 +388,52 @@ async function commitReq(o = {}, c = {}) {
   let total = big.agents.length + big.accounts.length + big.hosts.length, c2 = big.cursor;
   for (let i = 0; i < 5 && total < 3 * FEED_MAX; i++) { const p = await feed(c2); total += p.agents.length + p.accounts.length + p.hosts.length; c2 = p.cursor; }
   ok(total === 3 * FEED_MAX, `every change delivered across the pages: ${total}`);
+  // (ids canonical JSON escapes: 80 account ids of 128 characters, almost all quotes and backslashes, so each is about
+  // twice its length on the wire, with full lists of agents and hosts: every page signed, within 16 KiB, each
+  // identity delivered exactly once, never an unsigned 503)
+  let since = (await feed(c2)).cursor;
+  const escaped = Array.from({ length: FEED_MAX }, (_, i) => String(i).padStart(4, "0") + '\\"'.repeat(62));
+  ok(escaped.every((id) => id.length === 128) && new Set(escaped).size === FEED_MAX, "80 distinct 128-character escape-heavy ids");
+  for (const id of escaped) {
+    await t(`/__test/bump?kind=account&id=${encodeURIComponent(id)}`);
+    await t(`/__test/bump?kind=agent&id=${newId()}`);
+    await t(`/__test/bump?kind=host&id=${newId()}`);
+  }
+  const got = new Map();
+  let entries = 0, escPages = 0, escMore = true, biggest = 0;
+  while (escMore && escPages < 10) {
+    const r = await control("GET", epochsTarget(since));
+    ok(r.status === 200 && r.header !== null, `escaped page ${escPages}: signed (${r.status})`);
+    if (r.status !== 200) break;
+    biggest = Math.max(biggest, r.body.length);
+    const p = await answer(r, "epochs");
+    for (const e of p.accounts) got.set(e.id, (got.get(e.id) ?? 0) + 1);
+    entries += p.agents.length + p.accounts.length + p.hosts.length;
+    escMore = p.more; since = p.cursor; escPages++;
+  }
+  ok(biggest <= 16 * 1024 && biggest > 12 * 1024, `every escaped page within 16 KiB, and filled: the largest ${biggest} bytes over ${escPages} pages`);
+  ok(escaped.every((id) => got.get(id) === 1) && got.size === FEED_MAX && entries === 3 * FEED_MAX, `each escaped id delivered exactly once, and every change: ${entries}`);
+  // (the worst case no D1 run reaches: every epoch, cursor and time at their widest, 128-character ids of quotes and
+  // backslashes in every list, or plain ones: each page signs within 16 KiB, is nearly full, and taking every page in
+  // turn delivers each identity exactly once)
+  const W = Number.MAX_SAFE_INTEGER;
+  for (const [shape, idOf] of [["escaped", (k, i) => (k === "account" ? String(i).padStart(4, "0") + '\\"'.repeat(62) : newId())], ["plain", (k, i) => (k === "account" ? String(i).padStart(128, "a") : newId())]]) {
+    const all = [];
+    for (let i = 0; i < FEED_MAX; i++) for (const k of ["account", "agent", "host"]) all.push({ kind: k, id: idOf(k, i), epoch: W });
+    let rest = all.map((c, j) => ({ ...c, seq: W - 1000 + j })), pages = 0, seen = new Map(), fullest = 0, sizesOk = true;
+    while (rest.length && pages < 10) {
+      const r = await (await dispatch(mf, `${ORIGIN}/__test/page`, { method: "POST", body: JSON.stringify({ changes: rest.slice(0, 3 * FEED_MAX + 1), tick: W, since: W - 1001, now: W }) })).json();
+      if (r.refused) { sizesOk = false; break; }
+      sizesOk &&= r.bytes <= 16 * 1024;
+      if (r.more) fullest = Math.max(fullest, r.bytes);
+      for (const id of r.ids) seen.set(id, (seen.get(id) ?? 0) + 1);
+      rest = r.more ? rest.filter((c) => c.seq > r.cursor) : [];
+      pages++;
+    }
+    ok(sizesOk && rest.length === 0, `${shape} worst case: every page signed within 16 KiB (${pages} pages)`);
+    ok(fullest > 16 * 1024 - 300, `${shape} worst case: a cut page is nearly full (${fullest} bytes)`);
+    ok(seen.size === all.length && [...seen.values()].every((n) => n === 1), `${shape} worst case: each identity exactly once`);
+  }
   // (retention: after the cleanup at 25 hours, a cursor from before it is cursor_expired; a fresh one isn't)
   await t(`/__test/clean?offset=${25 * 3_600_000}`);
   const old = await feed(start.cursor);

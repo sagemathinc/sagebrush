@@ -8,9 +8,13 @@
 // - POST /__test/clock?offset=<ms>: the Worker's clock, moved;
 // - POST /__test/bump?kind=&id=: a recorded change (store.ts's bump, as the fleet service will call it);
 // - POST /__test/clean?offset=<ms>: the cron's cleanup, at the clock moved by offset;
+// - POST /__test/page: feedPage over the given { changes, tick, since, now }, signed as the Worker signs it: the
+//   encoded size, or the code signControlAnswer refused it with (worst-case pages no D1 run can reach);
 // - /__test/logs: this isolate's log lines since the last call (Miniflare doesn't hand console output over).
 import { fleetWorker } from "./src/index.ts";
-import type { FleetEnv, FleetFacts, HostFacts, Snapshot } from "./fleet.ts";
+import { feedPage, type FleetEnv, type FleetFacts, type HostFacts, type Snapshot } from "./fleet.ts";
+import { signControlAnswer } from "./vendor/fleet-core/core/control.mjs";
+import type { Change } from "./store.ts";
 import { bump, clean, type Kind } from "./store.ts";
 import { apply as applyChainEntry } from "./vendor/fleet-core/core/chain.mjs";
 import { FleetError, unb64 } from "./vendor/fleet-core/core/bytes.mjs";
@@ -77,6 +81,16 @@ export default {
         return Response.json({ ok: true });
       case "/__test/bump":
         return Response.json({ epoch: await bump(env.FLEET_RELAY_DB, p.get("kind") as Kind, p.get("id")!, Date.now() + offset) });
+      case "/__test/page": {
+        const q = (await request.json()) as { changes: Change[]; tick: number; since: number; now: number };
+        const fields = feedPage(q.changes, q.tick, q.since, q.now);
+        try {
+          const signed = await signControlAnswer({ key: new Uint8Array(32).fill(1), call: { id: "A".repeat(22), digest: "A".repeat(43) }, answer: "epochs", fields });
+          return Response.json({ bytes: signed.body.length, more: fields.more, cursor: fields.cursor, ids: [...fields.agents, ...fields.accounts, ...fields.hosts].map((e) => e.id) });
+        } catch (e) {
+          return Response.json({ refused: (e as { code?: string }).code ?? "exception" });
+        }
+      }
       case "/__test/clean":
         await clean(env.FLEET_RELAY_DB, Date.now() + Number(p.get("offset")));
         return Response.json({ ok: true });
