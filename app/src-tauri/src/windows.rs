@@ -106,10 +106,12 @@ pub fn clear_webview_dirs(data: &Path) {
 /// A new window at this app's page `at` (lib.rs page_window, its own data folder): File ▸ New window, or a workspace
 /// document `doc` opened in a window of its own (at "/?wsopen=<doc>", or the board's page).  A document another window
 /// shows brings that window to the front instead, and no window opens; else the new window holds it from the start
-/// (its page's own claim then finds it its own).  {label, opened}.
+/// (its page's own claim then finds it its own).  {label, opened}.  Async: a window made in a synchronous command
+/// deadlocks on Windows (WebView2 waits on the thread the command holds; Tauri's own warning), which the self-test's
+/// two-window probe hit there.
 #[cfg(desktop)]
 #[tauri::command]
-pub fn window_open(app: tauri::AppHandle, port: tauri::State<PagePort>, next: tauri::State<NextWindow>, docs: tauri::State<Docs>, at: String, doc: Option<String>) -> Result<serde_json::Value, String> {
+pub async fn window_open(app: tauri::AppHandle, port: tauri::State<'_, PagePort>, next: tauri::State<'_, NextWindow>, docs: tauri::State<'_, Docs>, at: String, doc: Option<String>) -> Result<serde_json::Value, String> {
     use tauri::Manager;
     let url = page_target(port.0, &at)?;
     if let Some(d) = &doc {

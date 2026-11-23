@@ -171,7 +171,8 @@ export async function persistProbe(spec: string, host: { ws: () => Promise<any>;
         let saw: any = null, label = "main";
         if (control === "same") saw = await look();
         else {
-          label = await host.invoke("window_open", { at: "/" });
+          // (window_open's answer: {label, opened}, app/src-tauri/src/windows.rs)
+          label = (await host.invoke("window_open", { at: "/" }))?.label;
           for (let i = 0; i < 600 && !(await ws.stat(out)); i++) await new Promise((r) => setTimeout(r, 100));
           if (await ws.stat(out)) saw = JSON.parse(dec((await ws.read(out)).content));
         }

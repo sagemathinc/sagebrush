@@ -593,6 +593,12 @@ pub fn run() {
             #[cfg(desktop)]
             if let tauri::RunEvent::Exit = _event {
                 _app.state::<engine::Engine>().stop();
+                // (and the later windows' web view data folders: an exit (a quit, the self-test's) destroys no window
+                // one by one, so windows::closed never ran for them; what a web view still holds waits for the next
+                // launch's clear, windows.rs)
+                if let Ok(d) = disk::data_dir(_app) {
+                    windows::clear_webview_dirs(&d);
+                }
             }
             // macOS hands over files (Finder, `open -a Sagebrush f.ipynb`) as an event: kept for startup_files, each for
             // the window that is to open it (files_target: a notebook page's, never a board's), and that window alone
