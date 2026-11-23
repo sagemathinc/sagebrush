@@ -9660,7 +9660,11 @@ def QuadraticField(d):
     s = _squarefree_part(d)
     if s in (0, 1):
         raise MagmaError("QuadraticField of a square (Magma's rational field) is not supported yet")
-    return _MNumberField([-s, 0, 1], quadratic=True)
+    K = _MNumberField([-s, 0, 1], quadratic=True)
+    # (its defining polynomial is in the session's polynomial ring over the integers, as Magma 2.18-5 has it: it
+    # prints as $.1^2 - 5, P.1^2 - 5 for an unnamed ring P holds, w^2 - 5 once the ring is named w, even later)
+    K._fring = PolynomialRing(_ZZ)
+    return K
 
 
 # (the degree of a cyclotomic field built: Phi_n is made in O(2^k d) steps
