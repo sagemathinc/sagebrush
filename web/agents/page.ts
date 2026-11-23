@@ -17,6 +17,7 @@ import { runningTurn, type Artifact, type Thread, type Turn, type UserEntry } fr
 import { ChatSession } from "../workspace/agent-chat/session";
 import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, diffHtml, mirrorSectionNode } from "../workspace/agent-chat/view";
 import { Mirror, MIRROR_COPY, mirrorTitle, type RemoteConversation, type Section } from "../workspace/agent-chat/mirror";
+import { mountDictation } from "./dictation";
 import { startFakeTurn } from "./fake-agent";
 import { AgentError, RELOAD_KEY, type AgentPairing, type Created, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
@@ -288,6 +289,8 @@ function submit(mode: UserEntry["mode"]) {
   // (a mirrored conversation is read-only: nothing is sent from it)
   if (mirrorOpen) return;
   // (not connected, in a chat the demo may not answer: Send is inert and the draft stays, A14 C1; a note still posts)
+  // (dictating stops as the message goes: words still being recognized aren't added after it)
+  if (mode !== "note") dictation.stop();
   if (!session.submit(editor.value, mode)) return;
   if (mode !== "note") void mirror.kick(current().id);
   editor.value = "";
@@ -1262,6 +1265,13 @@ const editor = mountComposer({
   render: md,
   typeset: (el) => typeset(el),
   changed: (v) => { if (draftOf) putDraft(draftOf, v); },
+});
+// (dictation into the draft, #1791: a mic by Send where the browser turns speech into text)
+const dictation = mountDictation({
+  before: $("#send"),
+  value: () => editor.value,
+  setValue: (v) => { editor.value = v; if (draftOf) putDraft(draftOf, v); },
+  toast: (t, ms) => toast(t, ms),
 });
 /** The chat shown's draft in the composer, when another chat's was there. */
 function showDraft() {
