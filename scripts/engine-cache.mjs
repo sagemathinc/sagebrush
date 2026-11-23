@@ -5,7 +5,7 @@
 // build scripts (SOURCE_PATHS).  Its key is the sha256 of their git object ids at HEAD, plus the bytes of any uncommitted
 // change to them (a mutant under review is a source too) and $RUSTFLAGS.  Then:
 //   - the source and the pins are those of the merge base with master (whose pins are always its own source's build,
-//     check-fresh-wasm.mjs): the pinned modules are fetched (wasm-fetch.mjs);
+//     check-fresh-wasm.mjs), and $RUSTFLAGS is unset: the pinned modules are fetched (wasm-fetch.mjs);
 //   - otherwise, a cache entry for the key is copied in, after its bytes are checked against the entry's manifest;
 //   - otherwise, the engine is built (build-engine.mjs, into one shared cargo target) and stored under the key.
 // The modules a build or the cache put in wasm/ get their sidecars (wasm-modules.mjs) and wasm/engine-source.local.json,
@@ -66,9 +66,11 @@ export function sourceKey(root = ROOT, env = process.env) {
 
 // Is the working tree's source the one its committed pins were built from?  Master's pins are always its own source's
 // build (check-fresh-wasm.mjs is strict there), so they are when the source and the pins are those of the branch's
-// merge base with master.  (A track's engine moves ahead of its pins: it is built.)
-export function isPinnedSource(root = ROOT, dirty = sourceKey(root).dirty, master = process.env.SAGEBRUSH_PINS_REF || "origin/master") {
-  if (dirty) return false;
+// merge base with master, and $RUSTFLAGS is unset as when CI builds them.  (A track's engine moves ahead of its pins:
+// it is built.)
+export function isPinnedSource(root = ROOT, env = process.env, dirty = sourceKey(root, env).dirty) {
+  if (dirty || env.RUSTFLAGS) return false;
+  const master = env.SAGEBRUSH_PINS_REF || "origin/master";
   const git = gitIn(root);
   let base;
   try {
@@ -138,11 +140,16 @@ function store(root, key, cache) {
   return { commit, modules };
 }
 
+const fetchPinned = (root, env) =>
+  execFileSync(process.execPath, [join(root, "scripts", "wasm-fetch.mjs"), "--force"], { cwd: root, stdio: "inherit", env });
+const buildEngine = (root, env) =>
+  execFileSync(process.execPath, [join(root, "scripts", "build-engine.mjs")], { cwd: root, stdio: "inherit", env });
+
 // Make wasm/ this tree's engine.  Returns how: "pinned", "cached" or "built".
-export function ensure({ root = ROOT, env = process.env, log = console.log } = {}) {
-  const { key, dirty } = sourceKey(root);
-  if (isPinnedSource(root, dirty)) {
-    execFileSync(process.execPath, [join(root, "scripts", "wasm-fetch.mjs"), "--force"], { cwd: root, stdio: "inherit", env });
+export function ensure({ root = ROOT, env = process.env, log = console.log, fetch = fetchPinned, build = buildEngine } = {}) {
+  const { key, dirty } = sourceKey(root, env);
+  if (isPinnedSource(root, env, dirty)) {
+    fetch(root, env);
     rmSync(markerPath(root), { force: true });
     log(`engine: the pinned modules (this tree's engine source is the pins' own)`);
     return "pinned";
@@ -159,18 +166,18 @@ export function ensure({ root = ROOT, env = process.env, log = console.log } = {
   }
   log(`engine: building this tree's engine (${key.slice(0, 12)}${dirty ? ", with uncommitted changes" : ""})`);
   const target = env.CARGO_TARGET_DIR || join(cache, "target");
-  execFileSync(process.execPath, [join(root, "scripts", "build-engine.mjs")], { cwd: root, stdio: "inherit", env: { ...env, CARGO_TARGET_DIR: target } });
+  build(root, { ...env, CARGO_TARGET_DIR: target });
   // (the key again: a source edited during the build must not be stored under the old one)
-  if (sourceKey(root).key !== key) throw new Error("engine-cache: the engine source changed during the build; run it again");
+  if (sourceKey(root, env).key !== key) throw new Error("engine-cache: the engine source changed during the build; run it again");
   const stored = store(root, key, cache);
   installFrom(join(cache, key), stored, root, key);
   return "built";
 }
 
 // Whether wasm/ is this tree's engine: { ok, mode } (the run mode its tests need), or { ok: false, why }.
-export function check({ root = ROOT } = {}) {
-  const { key, dirty } = sourceKey(root);
-  if (isPinnedSource(root, dirty)) {
+export function check({ root = ROOT, env = process.env } = {}) {
+  const { key, dirty } = sourceKey(root, env);
+  if (isPinnedSource(root, env, dirty)) {
     try {
       checkModules({ root, mode: "pinned" });
       return { ok: true, mode: "pinned" };
@@ -204,7 +211,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.log(`engine: wasm/ is this tree's engine (${r.mode}${r.mode === "local" ? ": run tests with SAGEBRUSH_WASM_LOCAL=1" : ""})`);
   } else if (arg === "--key") {
     const { key, dirty } = sourceKey();
-    console.log(JSON.stringify({ key, dirty, pinned: isPinnedSource(ROOT, dirty) }));
+    console.log(JSON.stringify({ key, dirty, pinned: isPinnedSource(ROOT, process.env, dirty) }));
   } else if (arg === undefined) {
     ensure();
   } else {

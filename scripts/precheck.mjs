@@ -169,7 +169,7 @@ function main(argv) {
     }
     if (ready) {
       // (a local build is this tree's engine, and the tests read it only when told to)
-      if (checkEngine({ root: ROOT }).mode === "local") env.SAGEBRUSH_WASM_LOCAL = "1";
+      if (checkEngine({ root: ROOT, env }).mode === "local") env.SAGEBRUSH_WASM_LOCAL = "1";
       for (const s of steps.filter((s) => s.tier !== "quick")) run(s);
     } else console.log("     (the build failed: the build-tier steps were not run)");
   }

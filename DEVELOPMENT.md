@@ -192,7 +192,9 @@ It runs, with ci.yml's own commands, the checks a change most often fails on CI:
 inventory, test discovery, the generated files and docs index (`sync-python-package.sh --check`), the Core API
 surface, the interrupt census and the rest of the `checks` job's quick gates, and every test file the branch
 touches. It runs them all and reports every failure at once. An author runs it before sending a head, and a
-reviewer runs it first. When CI fails on a gate this could have run, add the gate to `STEPS` in
+reviewer runs it first. A track gets it with its pull of master, which brings the workflow lines it checks
+against; before that, a copy of `scripts/precheck.mjs` and `scripts/engine-cache.mjs` runs there and skips the gates
+the track's own CI doesn't have yet. When CI fails on a gate this could have run, add the gate to `STEPS` in
 `scripts/precheck.mjs` with ci.yml's command: `scripts/test-precheck.mjs` holds each such step to a line of a
 workflow.
 

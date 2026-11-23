@@ -2,7 +2,9 @@
 r"""Mutants for a meter review: break one charge or poll site at a time, run the
 tests, and report each mutant as KILLED (the tests fail), SURVIVED (they pass:
 nothing pins that site) or BUILD-ERROR.  The file is restored after every
-mutant, and at the end byte for byte, even on an error or an interrupt.
+mutant, and at the end byte for byte, even on an error or an interrupt.  A hard
+kill (SIGKILL, a restart) leaves the mutant in place: `git checkout -- FILE`, or
+the copy whose path it printed first.
 
 A site is a line matching --site, a whole statement ending in ';'.  The mutant:
   - with --to-after PAT: the site moves up to just after the nearest line above
@@ -140,6 +142,8 @@ def main():
     backup = tempfile.NamedTemporaryFile(prefix="meter-mutants-", suffix=".orig", delete=False)
     backup.write(original)
     backup.close()
+    # (a hard kill or a restart can't run the restore: say where the original is first)
+    print("meter-mutants: the original of %s is kept in %s until the end (after a crash: git checkout -- FILE)" % (a.file, backup.name), flush=True)
 
     def restore():
         with open(a.file, "wb") as f:
