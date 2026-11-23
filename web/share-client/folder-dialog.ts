@@ -6,7 +6,7 @@
 //
 // Its words (William, Nov 12): what is shared is the folder's contents, nothing special about notebooks; the share is a
 // copy, the same until the folder is shared again; no account is needed to open it, run its code or edit its LaTeX;
-// nothing shared is indexed by search engines; signed out, this is where to sign in or make an account; the license
+// shared pages ask search engines not to list them (noindex), which they may ignore; signed out, this is where to sign in or make an account; the license
 // is "None given" unless chosen, with what that means (CoCalc's policies).
 //
 // A talk's Share… (the LaTeX editor's File menu, `talk`): the same dialog for the talk's folder, as a talk's code can
@@ -50,7 +50,7 @@ export const TALK_SAVE_FAILED = "Couldn't save the document, so nothing was shar
 export const TALK_SCOPE = "Shares this document and the files it uses, ticked below. The other files in its folder are listed unticked: tick any it needs that weren't found.";
 
 /** The dialog's words: what a share is and isn't (also the sign-in prompt's). */
-export const SHARE_OPEN = "Anyone with a link can open the share, run its code and edit its LaTeX in their browser, with no account. Nothing shared is listed by search engines.";
+export const SHARE_OPEN = "Anyone with a link can open the share, run its code and edit its LaTeX in their browser, with no account. Shared pages ask search engines not to list them.";
 export const SHARE_COPY = "The share is a copy: it stays as it is while you keep working here. Share again to publish your changes, at the same links.";
 /** Where sharing isn't (a preview, the CLI's page): what it is and where it works, never a dead end (William, Nov 12). */
 export const SHARE_NOSERVER = "Publishing a link needs Sagebrush's share service, which this site doesn't have. On sagebrush.space, sign in (or make an account) and share from there.";
