@@ -3,9 +3,10 @@
 // `delegate.1`); Start; the Delegate switch's off; and a proposal's files for the proposal view. No DOM here: the page
 // (page.ts) draws it.
 //
-// - Nothing about a task is kept on the page: the list comes from tasks.list on every connect and switch-on, a task's
-//   thread from tasks.get (paged by `after`) when it is opened, and both move on with task.event while connected. A
-//   task's chip moves only forward (chip()): an event or answer older than what the page has never moves it back.
+// - The list comes from tasks.list on every connect and switch-on, a task's thread from tasks.get (paged by `after`)
+//   when it is opened, and both move on with task.event while connected. A task's chip moves only forward (chip()): an
+//   event or answer older than what the page has never moves it back. Only the list's entries are kept on the page,
+//   its last one in this browser's storage (keepIn), shown while the agent isn't connected (#1622).
 // - Every answer and event is checked first (tasks-schema.ts). One event this page refuses is skipped and counted
 //   (`skipped`), and the rest of the thread still shows.
 // - A task's chat turn events go into an ordinary chat thread (agent-chat/events.ts apply), numbered by the task's seq.
@@ -17,7 +18,7 @@
 //   the blob id tasks.diff gave for that path at that commit (its git blob id, recomputed here).
 import { AgentError, type AgentPairing } from "../workspace/agent-pair";
 import { BRIEF_FEATURE, DELEGATE_FEATURE, RUN_FEATURE, TaskClient } from "../workspace/tasks-client";
-import { TASK_LIMITS, TASK_RESULTS, blobId, briefResult, contentBytes, taskLog, taskNotice, type DiffFile, type TaskEntry, type TaskEvent, type TaskLogEntry, type TaskResult } from "../workspace/tasks-schema";
+import { TASK_LIMITS, TASK_RESULTS, blobId, briefResult, contentBytes, taskEntry, taskLog, taskNotice, type DiffFile, type TaskEntry, type TaskEvent, type TaskLogEntry, type TaskResult } from "../workspace/tasks-schema";
 import type { MergedParams } from "./delegate-merge";
 import { apply, newThread, type Thread, type TurnEvent } from "../workspace/agent-chat/events";
 import type { ProposalDiff, ProposalSource } from "../workspace/review/proposal-view";
@@ -41,7 +42,7 @@ export type DelegateTask = {
 };
 
 // (noteBytes: Ask for changes' note, UTF-8 bytes; the agent takes up to 64 KiB, the page asks for less)
-export const DELEGATE_LIMITS = Object.freeze({ briefMs: 70_000, pages: 1000, closing: 4, closeMs: 10_000, noteBytes: 16 * 1024 });
+export const DELEGATE_LIMITS = Object.freeze({ briefMs: 70_000, pages: 1000, closing: 4, closeMs: 10_000, noteBytes: 16 * 1024, kept: 200 });
 
 export const DELEGATE_TEXT = {
   chip: { working: "Working", question: "Question", proposal: "Proposal ready", merged: "Merged", closed: "Closed", failed: "Failed", interrupted: "Interrupted" } as Record<string, string>,
@@ -85,8 +86,33 @@ export class DelegateTasks {
   private unlisten: (() => void)[] = [];
   private wasOn = false;
   private loading = new Map<string, Promise<void>>();
+  // (where the last list is kept between visits: this browser's storage, under the workspace's key)
+  private keepAt: { storage: Pick<Storage, "getItem" | "setItem" | "removeItem">; key: string } | null = null;
 
   constructor(private o: { changed: () => void; closeMs?: number }) {}
+
+  /** Keep the last list the agent gave in `storage` under `key` (#1622): shown, marked, while it isn't connected. */
+  keepIn(storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null, key: string) {
+    this.keepAt = storage ? { storage, key } : null;
+    this.o.changed();
+  }
+  /** The last list the agent gave, newest first, while it isn't connected (none while it is): its entries only, each
+   * checked as the agent's answer is (tasks-schema.ts); a kept list that isn't one is none. */
+  lastKnown(): TaskEntry[] {
+    if (!this.keepAt || this.p?.state === "granted") return [];
+    try {
+      const v = JSON.parse(this.keepAt.storage.getItem(this.keepAt.key) ?? "null");
+      if (!v || v.v !== 1 || !Array.isArray(v.tasks)) return [];
+      return v.tasks.slice(0, DELEGATE_LIMITS.kept).map((e: unknown) => taskEntry(e));
+    } catch { return []; }
+  }
+  // (what the page shows changed: while the switch is on, the list kept as it is now)
+  private changed() {
+    if (this.keepAt && this.state() === "on") {
+      try { this.keepAt.storage.setItem(this.keepAt.key, JSON.stringify({ v: 1, tasks: this.tasks.slice(0, DELEGATE_LIMITS.kept).map((t) => t.entry) })); } catch { /* (no room: the last one kept stays) */ }
+    }
+    this.o.changed();
+  }
 
   /** Follow this pairing (or none): its switch, and its task.event notifications. */
   attach(p: AgentPairing | null) {
@@ -116,7 +142,7 @@ export class DelegateTasks {
     if (on && !this.wasOn) void this.refresh().catch(() => {});
     if (!on && this.state() !== "turning-off" && this.tasks.length) this.tasks = [];
     this.wasOn = on;
-    this.o.changed();
+    this.changed();
   }
 
   private client(): TaskClient {
@@ -140,7 +166,7 @@ export class DelegateTasks {
       } else next.push(fresh(entry));
     }
     this.tasks = next.sort((a, b) => b.entry.updated - a.entry.updated);
-    this.o.changed();
+    this.changed();
   }
 
   /** A task's thread read from the agent: tasks.get from what this page has, page by page, until its seq. */
@@ -165,7 +191,7 @@ export class DelegateTasks {
         // (the same rule for tasks.get's entry, unless the log was read again from its start)
         if (cur === t) chip(cur, r.task.seq, r.task);
         cur.loaded = true;
-        this.o.changed();
+        this.changed();
         if (r.last >= r.task.seq || !r.events.length) return;
       }
     })();
@@ -183,11 +209,11 @@ export class DelegateTasks {
     if (!t) { void this.refresh().catch(() => {}); return; }
     if (!t.loaded) {
       if ("event" in n) chipOfEvent(t, n.event, n.seq);
-      this.o.changed();
+      this.changed();
       return;
     }
     if (!take(t, n)) void this.open(n.task).catch(() => {});
-    this.o.changed();
+    this.changed();
   }
 
   /** Close a task's proposal for good (tasks.close {proposal, seq}): the proposal as it was read (`seq`, from its
@@ -312,7 +338,7 @@ export class DelegateTasks {
     }
     // (the chip at once, as the agent's own task_status will say: its event moves it on from there)
     const now = this.task(id);
-    if (now && now.entry.status === "proposal") { now.entry = { ...now.entry, status: r.status as TaskEntry["status"], question: false }; this.o.changed(); }
+    if (now && now.entry.status === "proposal") { now.entry = { ...now.entry, status: r.status as TaskEntry["status"], question: false }; this.changed(); }
     void this.refresh().catch(() => {});
     return r;
   }
@@ -326,7 +352,7 @@ export class DelegateTasks {
     const p = this.p;
     if (!p || this.off) return [];
     this.off = true;
-    this.o.changed();
+    this.changed();
     const failed: string[] = [];
     try {
       const left = [...close];
@@ -340,6 +366,7 @@ export class DelegateTasks {
       p.setDelegate(false);
       this.off = false;
       if (p === this.p) this.tasks = [];
+      try { this.keepAt?.storage.removeItem(this.keepAt.key); } catch { /* (no storage) */ }
       this.moved();
     }
     return failed;

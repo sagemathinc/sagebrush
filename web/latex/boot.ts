@@ -13,6 +13,7 @@ import { openGallery } from "../examples/open";
 import { render as markdown } from "../markdown";
 import { loadRemotePicture } from "../safe-html";
 import { siteHref } from "../docs-link";
+import { desktopApp } from "../desktop-app";
 
 declare const __SB_LATEX_HOSTS__: string[];
 declare const __SB_LATEX_TEST__: boolean | undefined;
@@ -21,9 +22,8 @@ declare const __SB_LATEX_TEST__: boolean | undefined;
 export function latexOn(host: string, hosts: readonly string[] = __SB_LATEX_HOSTS__) {
   return hosts.includes(host);
 }
-/** Whether this page is the desktop app's: app/src-tauri/src/lib.rs sets __SB_DESKTOP_APP__ there only (window.__TAURI__
- * is in the phone apps too; the CLI's page, on the same 127.0.0.1, has neither). */
-export const desktopApp = (w: any = globalThis) => !!w.__TAURI__ && w.__SB_DESKTOP_APP__ === true;
+// (whether this page is the desktop app's: its own module, ../desktop-app.ts, which every build has)
+export { desktopApp };
 /** Whether the editor is on here: on the build's hosts (latexOn), and in the desktop app. */
 export function latexHereFor(host: string, desktop: boolean, hosts: readonly string[] = __SB_LATEX_HOSTS__) {
   return desktop || latexOn(host, hosts);

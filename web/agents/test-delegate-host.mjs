@@ -11,7 +11,7 @@ import { blobId } from "../workspace/tasks-schema.ts";
 const enc = new TextEncoder();
 const hex = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => b.toString(16).padStart(2, "0")).join("");
 
-export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSize = 50, version = "2.0" } = {}) {
+export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSize = 50, version = "2.0", session = "SECRET" } = {}) {
   // (H.features and H.version: what its next hello says; H.noNotes: an agent before 0.8.13, which refuses a Resume's note)
   const H = { staleCloses: 0, got: [], grant: null, sock: null, closed: false, tasks: new Map(), hold: new Set(), fail: new Map(), held: [], pageSize, changes: [], asks: [], features, version, noNotes: false, resumes: [] };
   const send = (m) => H.sock?.send(JSON.stringify(m));
@@ -182,7 +182,7 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
         const m = JSON.parse(String(data));
         H.got.push(m);
         if (m.method === undefined && calls.has(m.id)) { calls.get(m.id)(m); calls.delete(m.id); return; }
-        if (m.method === "hello") return answer(m.id, { protocol: 1, agent: { name: "Claude Code", client: "claude-code", version: H.version }, wants: { write: true, run: false }, session: "SECRET", features: H.features });
+        if (m.method === "hello") return answer(m.id, { protocol: 1, agent: { name: "Claude Code", client: "claude-code", version: H.version }, wants: { write: true, run: false }, session, features: H.features });
         if (m.method === "page.features") { H.pageFeatures = Array.isArray(m.params?.features) ? m.params.features : []; return; }
         if (m.method === "grant.changed") {
           const g = Array.isArray(m.params?.folders) ? m.params : null;

@@ -29,8 +29,9 @@ let server;
 const sitePort = await startServe(() => (server = spawn("python3", [join(here, "..", "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] }))).port;
 const site = `http://127.0.0.1:${sitePort}`;
 
-// (an agent of 0.8.13 or later, which takes a note with Resume)
-const H = delegateHost({ version: "0.8.13" });
+// (an agent of 0.8.13 or later, which takes a note with Resume; and a session as sagebrush-agent gives one, 43
+//  characters, so the page keeps it for a return: the #1622 rows)
+const H = delegateHost({ version: "0.8.13", session: "S".repeat(43) });
 const nb = JSON.stringify({ cells: [{ cell_type: "code", id: "c1", metadata: {}, source: ["1+1"], outputs: [] }], metadata: {}, nbformat: 4, nbformat_minor: 5 });
 const A = await H.addTask({ title: "Factor the polynomial", base: { "work/a.ipynb": nb, "work/notes.txt": "one\n" }, proposal: { "work/a.ipynb": nb.replace("1+1", "2+2"), "work/notes.txt": "one\ntwo\n" } });
 const B = await H.addTask({ title: "Plot it" });
@@ -332,6 +333,29 @@ try {
     ok(v.prose.includes("I've added a section, More facts about E.") && !v.proseInError && v.error === "Error: Claude ended the turn with an error", "a turn that ended with an error: Claude's own words shown as a message, only the agent's error line as the error", v);
     await P.ev(`document.querySelector('#task-view .task-head .link').click()`);
   }
+
+  // ---- #1622: coming back to the page, Delegate is on again and its tasks are listed; the agent not connected, the
+  //      last list stays, marked, until it is back
+  await P.ev(`document.querySelector('#task-view .task-head .link')?.click()`);
+  const before = (await ui()).tasks;
+  // (the same tasks with the same chips; their order is the agent's list's, newest first by its own clock)
+  const same = (x, y) => JSON.stringify([...(x ?? [])].sort()) === JSON.stringify([...(y ?? [])].sort());
+  const n0 = H.changes.length;
+  await P.reload();
+  await P.until(`document.querySelector('#connect').textContent === 'Connected' && document.querySelector('#delegate-switch')?.textContent === 'Delegate: on'`, 20000);
+  await P.until(`document.querySelectorAll('#tasks .task').length === ${before?.length ?? -1}`, 10000).catch(() => {});
+  u = await ui();
+  ok(H.grant?.delegate === true && H.changes.length > n0 && H.changes.slice(n0).every((g) => g?.delegate === true) && u.sw === "Delegate: on" && same(u.tasks, before) && u.dialogs.length === 0, "#1622: a reload of the page reconnects with Delegate on again (no confirmation, never off in between, so no task is stopped), and its tasks are listed as before", { changes: H.changes.slice(n0).map((g) => g?.delegate ?? null), before, after: u.tasks, sw: u.sw, delegate: H.grant?.delegate });
+  await P.ev(`(localStorage.setItem('__sbnoretry', '1'), true)`);
+  H.sock.close(1011, "gone");
+  await P.until(`document.querySelector('#connect').textContent !== 'Connected'`, 10000);
+  await P.until(`document.querySelector('#tasks')?.classList.contains('away') && !document.querySelector('#tasks').hidden`, 10000).catch(() => {});
+  const away = await P.ev(`(() => { const t = document.querySelector('#tasks'); return { shown: !!t && !t.hidden && !!t.offsetParent, note: t?.querySelector('.away-note')?.textContent ?? null, rows: [...(t?.querySelectorAll('.task') ?? [])].map((b) => b.querySelector('.t').textContent + ' · ' + b.querySelector('.chip').textContent), buttons: t?.querySelectorAll('button.task').length ?? -1 }; })()`);
+  ok(away.shown && away.note === "Agent not connected: these are the tasks it had when the page last heard from it." && same(away.rows, before) && away.buttons === 0, "#1622: the agent not connected: the last task list stays, marked so, each task shown but not opened", away);
+  await P.ev(`(localStorage.removeItem('__sbnoretry'), true)`);
+  await P.ev(`document.querySelector('#conn-act')?.click()`);
+  await P.until(`document.querySelector('#connect').textContent === 'Connected' && document.querySelectorAll('#tasks button.task').length === ${before?.length ?? -1}`, 20000);
+  ok(!(await P.ev(`document.querySelector('#tasks').classList.contains('away')`)), "#1622: connected again: the list is the agent's own again, its tasks open");
 
   // ---- the switch off: the running tasks closed first (ticked), Delegate… disabled while it turns off, then the host told
   await P.ev(`document.querySelector('#delegate-switch').click()`);
