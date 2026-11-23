@@ -48,3 +48,71 @@ export async function checkFixtures(core, F) {
   }
   return { bad, n };
 }
+
+// The RFC 9180 known-answer vector for r2.3 §7's suite (test/fixtures/hpke-x25519-sha256-aes256gcm.json), through one
+// loaded core: both derived key pairs, the encapsulated key, and every encryption sealed and opened in sequence.
+export async function checkHpkeVector(core, V) {
+  const hex = (h) => Uint8Array.from(h.match(/../g) ?? [], (x) => parseInt(x, 16));
+  const toHex = (b) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  const bad = [];
+  const E = await core.deriveKeyPair(hex(V.ikmE)), R = await core.deriveKeyPair(hex(V.ikmR));
+  if (toHex(E.raw) !== V.pkEm) bad.push("pkEm");
+  if (toHex(R.raw) !== V.pkRm) bad.push("pkRm");
+  const S = await core.setupSender(R.raw, hex(V.info), E), O = await core.setupRecipient(R, hex(V.enc), hex(V.info));
+  if (toHex(S.enc) !== V.enc) bad.push("enc");
+  let n = 0;
+  for (const [i, e] of V.encryptions.entries()) {
+    if (toHex(await S.seal(hex(e.aad), hex(e.pt))) !== e.ct) bad.push(`seal ${i}`);
+    if (toHex(await O.open(hex(e.aad), hex(e.ct))) !== e.pt) bad.push(`open ${i}`);
+    n++;
+  }
+  // overlapping calls on one context (ruled): the first runs, any other started while it is pending is refused
+  // (in_progress) without touching the sequence, so a nonce is never shared; the next call afterwards takes seq + 1
+  const [e0, e1, e2] = V.encryptions;
+  const refusedNow = (r) => r.status === "rejected" && r.reason?.code === "in_progress";
+  const S2 = await core.setupSender(R.raw, hex(V.info), await core.deriveKeyPair(hex(V.ikmE)));
+  const seals = await Promise.allSettled([S2.seal(hex(e0.aad), hex(e0.pt)), S2.seal(hex(e1.aad), hex(e1.pt)), S2.seal(hex(e2.aad), hex(e2.pt))]);
+  if (seals[0].status !== "fulfilled" || toHex(seals[0].value) !== e0.ct || !refusedNow(seals[1]) || !refusedNow(seals[2])) bad.push("overlapping seals");
+  if (toHex(await S2.seal(hex(e1.aad), hex(e1.pt))) !== e1.ct) bad.push("the seal after overlapping ones");
+  const O2 = await core.setupRecipient(R, hex(V.enc), hex(V.info));
+  const opens = await Promise.allSettled([O2.open(hex(e0.aad), hex(e0.ct)), O2.open(hex(e0.aad), hex(e0.ct))]);
+  if (opens[0].status !== "fulfilled" || toHex(opens[0].value) !== e0.pt || !refusedNow(opens[1])) bad.push("the same ciphertext opened twice at once");
+  // a refused open leaves the sequence where it was
+  let refused = "";
+  try { await O2.open(hex(e0.aad), hex(e0.ct)); } catch (x) { refused = x.code; }
+  if (refused !== "bad_form") bad.push("seq-0 ciphertext again, alone");
+  if (toHex(await O2.open(hex(e1.aad), hex(e1.ct))) !== e1.pt) bad.push("the next ciphertext after a refused one");
+  return { bad, n };
+}
+
+// The fleet HPKE vectors (test/fixtures/fleet-hpke-fixtures.json): the X25519 key id, every sealed-package case (the
+// host's §7 checks, then opening), and every capability-mint case, through one loaded core. The host's key is
+// deriveKeyPair(host_enc_ikm).
+export async function checkHpkeFixtures(core, F) {
+  const { FleetError } = core;
+  const enc = (s) => new TextEncoder().encode(s);
+  const hex = (h) => Uint8Array.from(h.match(/../g) ?? [], (x) => parseInt(x, 16));
+  const result = async (fn) => { try { await fn(); return "ok"; } catch (e) { if (e instanceof FleetError) return e.code; throw e; } };
+  const bad = [];
+  let n = 0;
+  const check = (group, name, got, expect) => { n++; if (got !== expect) bad.push({ group, name, got, expect }); };
+  for (const c of F.key_ids) check("key_ids", c.name, await core.keyId(c.alg, core.unb64(c.raw, 32)), c.key_id);
+  const ctx = { aud: F.aud, fleet: F.ids.fleet };
+  const chain = await core.replayChain(F.chain.map(enc), ctx);
+  const cert = await core.verifyHostCert(enc(F.host_cert), { ...ctx, chain });
+  const encKey = await core.deriveKeyPair(hex(F.host_enc_ikm));
+  for (const c of F.packages) {
+    let opened = null;
+    const v = { ...ctx, chain, cert, hostRevoked: () => c.ctx.host_revoked, encKey, currentGen: c.ctx.current_gen, grant: F.grant, now: c.ctx.now_ms, revoked: (p) => c.ctx.revoked.includes(p), opened: (p) => c.ctx.opened.includes(p) };
+    const got = await result(async () => { opened = await core.verifyPackage(enc(c.bytes), v); });
+    check("packages", c.name, got, c.expect);
+    if (c.plaintext) check("packages", `${c.name}: its plaintext`, opened && core.canonText(opened.plaintext), core.canonText(c.plaintext));
+  }
+  for (const c of F.caps) {
+    let p = null;
+    const got = await result(async () => { p = await core.openCap(c.response, { ...c.ctx, now: c.ctx.now_ms, encKey }); });
+    check("caps", c.name, got, c.expect);
+    if (c.token) check("caps", `${c.name}: its token`, p?.token, c.token);
+  }
+  return { bad, n };
+}

@@ -13,4 +13,6 @@ export { AUDIENCES, TYPES, signedBytes, parseEnvelope, seal, sealAdd, open } fro
 export { compile } from "./schema.mjs";
 export { apply as applyChainEntry, replay as replayChain, deviceKey, requireTier, serviceKeyAt } from "./chain.mjs";
 export { newRecoveryCode, showCode, readCode, recoveryKey } from "./recovery.mjs";
-export { canonicalPath, hostFingerprint, deviceFingerprint, showFingerprint, narrowsOnly, preimageHash, verifyHostCert, verifyGrant, verifyGrantAck, verifyHostOp, verifyRevocation, verifyApproval } from "./verify.mjs";
+export { openByDevice, canonicalPath, hostFingerprint, deviceFingerprint, showFingerprint, narrowsOnly, preimageHash, verifyHostCert, verifyGrant, verifyGrantAck, verifyHostOp, verifyRevocation, verifyApproval } from "./verify.mjs";
+export { HPKE, deriveKeyPair, setupSender, setupRecipient, seal as hpkeSeal, open as hpkeOpen } from "./hpke.mjs";
+export { encKeyId, sealPackage, verifyPackage, sealCap, openCap } from "./sealed.mjs";
