@@ -9,7 +9,8 @@ import { tmpdir } from "node:os";
 // index says only "Array indices must be positive integers or logical values.", a bad subscript among several names
 // its position, and a logical index past the end has its own message; an assignment or deletion at an index of 2^48
 // or more says "Indices must be less than 2^48." (a read there is out of range). Each row's identifier and message were
-// recorded from MATLAB R2026b (v = [1 2 3], m = magic(2)); NaN and Inf subscripts used to leak a Python error.
+// recorded from MATLAB R2026b (v = [1 2 3], m = magic(2)); NaN and Inf subscripts used to leak a Python error. In a
+// mixed subscript the first offending element, left to right, decides which message (Inf is invalid, not too big).
 
 const cli = join(__dirname, "..", "src", "cli.js");
 
@@ -59,9 +60,24 @@ const ROWS: [string, string, string][] = [
   ["gm", "m(1,[1 1e19]) = 5;", "MATLAB:badsubscript|Index in position 2 is invalid. Indices must be less than 2^48."],
   ["gms", "m(1e19,1) = 5;", "MATLAB:badsubscript|Index in position 1 is invalid. Indices must be less than 2^48."],
   ["dv", "v([1 1e19]) = [];", "MATLAB:badsubscript|One or more indices are invalid. Indices must be less than 2^48."],
+  ["vz2", "v([1e19 0]) = 1;", "MATLAB:badsubscript|One or more indices are invalid. Indices must be less than 2^48."],
+  ["vn2", "v([1e19 NaN]) = 1;", "MATLAB:badsubscript|One or more indices are invalid. Indices must be less than 2^48."],
+  ["vinf", "v([1e19 Inf]) = 1;", "MATLAB:badsubscript|One or more indices are invalid. Indices must be less than 2^48."],
+  ["d3", "v([0 1e19]) = [];", "MATLAB:badsubscript|Array indices must be positive integers or logical values."],
+  ["d5", "v([1.5 1e19]) = [];", "MATLAB:badsubscript|Array indices must be positive integers or logical values."],
+  ["di1", "v([Inf 2^48]) = [];", "MATLAB:badsubscript|Array indices must be positive integers or logical values."],
+  ["di2", "v([2^48 Inf]) = [];", "MATLAB:badsubscript|One or more indices are invalid. Indices must be less than 2^48."],
+  ["di3", "v(Inf) = [];", "MATLAB:badsubscript|Array indices must be positive integers or logical values."],
+  ["di4", "v([2^48 1.5]) = [];", "MATLAB:badsubscript|One or more indices are invalid. Indices must be less than 2^48."],
+  ["ai1", "v([Inf 2^48]) = 1;", "MATLAB:badsubscript|Array indices must be positive integers or logical values."],
+  ["dm4", "m([0 2^48],:) = [];", "MATLAB:badsubscript|Index in position 1 is invalid. Array indices must be positive integers or logical values."],
+  ["ai32", "v(int32(5)) = 9;", "OK"],
+  ["au8", "v(uint8([1 4])) = 9;", "OK"],
+  ["mi32", "m(int32(1),int32(3)) = 7;", "OK"],
+  ["mu8", "m(uint8(3),uint8(1)) = 7;", "OK"],
 ];
 
-test("every bad or out-of-range subscript raises MATLAB's identifier and message (44 rows recorded from MATLAB R2026b)", () => {
+test("every bad or out-of-range subscript raises MATLAB's identifier and message (59 rows: MATLAB R2026b's errors, and integer-class assignments MATLAB accepts)", () => {
   const dir = mkdtempSync(join(tmpdir(), "sb-index-errors-"));
   const lines = ROWS.map(([name, code]) =>
     `v = [1 2 3]; m = magic(2); try, ${code} fprintf('${name}|OK\\n'); catch err, fprintf('${name}|%s|%s\\n', err.identifier, err.message); end`);
