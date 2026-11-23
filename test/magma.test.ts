@@ -1249,7 +1249,7 @@ test("matrix arithmetic over a finite field is admitted before it computes, unde
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
   const t0 = Date.now();
-  const src = "F := GF(5); Matrix(F, 300, 300, [1..90000]);\nMatrix(F, 2, 2, [1..10^12]);\nr := [1..30000]; Matrix(F, [r : i in [1..20000]]);\nM := Matrix(F, 150, 150, [1..22500]);\nN := M * M;\nDeterminant(M);\nRank(M);\n" +
+  const src = "F := GF(5); Matrix(F, 300, 300, [1..90000]);\nMatrix(F, 2, 2, [1..10^12]);\nr := [1..30000]; Matrix(F, [r : i in [1..20000]]);\nM := Matrix(F, 130, 130, [1..16900]);\nN := M * M;\nDeterminant(M);\nRank(M);\n" +
     "M^(10^100);\nCharacteristicPolynomial(M);\nK<w> := GF(9); P := Matrix(K, 80, 80, [w : i in [1..6400]]); Q := P * P;\nNrows(M); Rank(Matrix(F, 20, 20, [1..400]));\n\"end\";\n";
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
   assert.equal(r.signal, null, r.stderr);
@@ -1257,6 +1257,10 @@ test("matrix arithmetic over a finite field is admitted before it computes, unde
   // (the 300 x 300 shape bounded before any entry, HARD-DE1-1; the 20000
   // rows of 30000, fewer rows than the bound, by their entries: 20000, not
   // 30000, as the bound is the heap left over in 96 MiB, 29696 in Oct 2026)
+  // (M is 130 x 130, 16900 entries, admitted with room: the bound was 22528
+  // under Node 24 in Nov 2026 and moves in steps of 1024 with the runner's
+  // heap, so a 150 x 150 M, 22500, was refused on one runner; its products,
+  // 130^3 = 2197000, are still past the 2000000 entry products)
   assert.equal((out.match(/a matrix of more than \d+ entries, rows or columns is not supported yet/g) ?? []).length, 1, r.stdout);
   assert.equal((out.match(/a matrix of more than \d+ entries is not supported yet/g) ?? []).length, 1, r.stdout);
   assert.match(out, /Runtime error in 'Matrix': Sequence should have length 4/);
@@ -1264,7 +1268,7 @@ test("matrix arithmetic over a finite field is admitted before it computes, unde
   for (const what of ["Determinant", "Rank", "a power", "CharacteristicPolynomial"])
     assert.ok(out.includes(`${what} of matrices over a finite field of more than 2000000 entry products is not supported yet`), what + r.stdout);
   assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
-  assert.match(r.stdout, /\n150\n1\nend\n$/);
+  assert.match(r.stdout, /\n130\n1\nend\n$/);
   assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 

@@ -99,9 +99,42 @@ pub fn stop_requested() -> bool {
     false
 }
 
+#[cfg(debug_assertions)]
+thread_local! {
+    static NO_POLL: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// A scope in which this thread must not poll (debug builds assert it at
+/// every check): bookkeeping that runs inside a computation but is not part
+/// of it, such as a progress forecast.
+pub struct NoPoll {
+    _p: (),
+}
+
+/// Enters a [`NoPoll`] scope until the guard drops.
+pub fn no_poll() -> NoPoll {
+    #[cfg(debug_assertions)]
+    NO_POLL.with(|d| d.set(d.get() + 1));
+    NoPoll { _p: () }
+}
+
+impl Drop for NoPoll {
+    fn drop(&mut self) {
+        #[cfg(debug_assertions)]
+        NO_POLL.with(|d| d.set(d.get().saturating_sub(1)));
+    }
+}
+
+#[inline]
+fn assert_may_poll() {
+    #[cfg(debug_assertions)]
+    debug_assert!(NO_POLL.with(|d| d.get()) == 0, "a poll inside a no-poll scope (progress bookkeeping)");
+}
+
 /// Stop here (by unwinding) if an interrupt has been requested.
 #[inline]
 pub fn check() {
+    assert_may_poll();
     poll_host();
     #[cfg(feature = "test-hooks")]
     hooks::count(false);
@@ -114,6 +147,7 @@ pub fn check() {
 /// host is asked at every call (one import call), not every 1024th.
 #[inline]
 pub fn check_coarse() {
+    assert_may_poll();
     poll_host_now();
     #[cfg(feature = "test-hooks")]
     hooks::count(true);

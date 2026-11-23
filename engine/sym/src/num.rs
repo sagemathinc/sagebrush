@@ -499,7 +499,9 @@ pub fn double_str(x: f64) -> String {
 /// 10^{20} (RR)
 fn sci_latex(s: String) -> String {
     match s.split_once('e') {
-        Some((m, e)) => format!("{} \\times 10^{{{}}}", m, e.trim_start_matches('+').trim_start_matches('0').replace("-0", "-")),
+        // (the exponent's digits as printed, a "+" dropped: RR's 1.50000000000000e-7 is
+        // 10^{-7}, RDF's 2.5e-07 is 10^{-07}, as Sage)
+        Some((m, e)) => format!("{} \\times 10^{{{}}}", m, e.trim_start_matches('+')),
         None => s,
     }
 }
