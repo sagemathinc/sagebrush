@@ -29,6 +29,7 @@ const H = delegateHost({ features: ["delegate.1", "chat.resume", "memory.1"], lo
 const B = await browser();
 const TAG = "abcdefghijklmnopqrstuvwxya";
 const H2 = delegateHost({ features: ["delegate.1", "chat.resume", "memory.1"] });
+const H3 = delegateHost({ features: ["delegate.1", "chat.resume", "memory.1"], log: "aaaa1111" });
 // (Connect, then Allow: with memory ticked (own notes and the tag), or not)
 async function pair(P, host, memory) {
   await P.navigate(`${site}/agents/?pair=123-456&port=${host.port}`);
@@ -269,6 +270,21 @@ try {
   //  decision here, where another agent is connected)
   const later = await P2.ev(`(async () => { for (const el of document.querySelectorAll('#threads .thread:not(.mirror)')) { el.click(); await new Promise((r) => setTimeout(r, 150)); const c = [...document.querySelectorAll('[data-memory]')].find((x) => /left open/.test(x.textContent)); if (c) return { body: c.querySelector('.mem-body')?.textContent ?? null, buttons: [...c.querySelectorAll('button')].map((b) => b.textContent), text: c.textContent, away: /connection to the agent was lost|Interrupted/.test(c.closest('.turn')?.textContent ?? '') }; } return null; })()`);
   ok(later && later.body === null && !/LATER-TEXT/.test(later.text) && later.buttons.length === 0 && !later.away, "M14: another tab shows the first agent's open card without its text, and with no decision while another agent is connected", later);
+
+  // ======================================================================== M19: another connection to the same run
+  // (an agent whose hello names the first one's run, as a reconnect or a reload does: its open card (without its text,
+  //  as kept) takes Dismiss only, and that goes to the agent connected now)
+  const P3 = await B.tab();
+  await pair(P3, H3, true);
+  const later3 = `[...document.querySelectorAll('[data-memory]')].find((x) => /left open/.test(x.textContent))`;
+  await P3.ev(`(async () => { for (const el of document.querySelectorAll('#threads .thread:not(.mirror)')) { el.click(); await new Promise((r) => setTimeout(r, 150)); if (${later3}) return true; } return false; })()`);
+  const c19 = await P3.ev(`(() => { const c = ${later3}; return c ? { buttons: [...c.querySelectorAll('button')].map((b) => b.textContent), body: c.querySelector('.mem-body')?.textContent ?? null } : null; })()`);
+  ok(c19 && c19.body === null && JSON.stringify(c19.buttons) === '["Dismiss"]', "M19: over another connection to the same run, the open card offers Dismiss only", c19);
+  await P3.ev(`(${later3}.querySelector('[data-mem=dismiss]').click(), true)`);
+  for (const t = Date.now(); !H3.got.some((m) => m.method === "memory.dismiss") && Date.now() - t < 5000; ) await sleep(50);
+  await P3.until(`/Not saved/.test(${later3}?.querySelector('.mem-state')?.textContent ?? '')`, 5000).catch(() => {});
+  ok(H3.got.some((m) => m.method === "memory.dismiss") && !H3.got.some((m) => m.method === "memory.save") && /Not saved/.test(await P3.ev(`${later3}?.querySelector('.mem-state')?.textContent ?? ''`)), "M19: its Dismiss goes to the agent connected now (which no longer has it), and the card ends");
+  ok(P3.errors.length === 0, "no page errors (third tab)", P3.errors);
   ok(P2.errors.length === 0, "no page errors (second agent)", P2.errors);
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));
@@ -276,6 +292,7 @@ try {
   await B.close();
   H.stop();
   H2.stop();
+  H3.stop();
   server.kill();
 }
 console.log(failures ? `${failures} FAILED` : "all passed");

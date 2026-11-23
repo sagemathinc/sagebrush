@@ -20,6 +20,7 @@ export const MEMORY_COPY = {
   where: "Choose where to keep this note.",
   changed: "The agent changed this note while you were looking at it. Check it again.",
   unread: "The agent's answer couldn't be read. It may have been saved: the card will say once the agent does.",
+  unreadDismiss: "The agent's answer couldn't be read. It may have been dismissed: the card will say once the agent does.",
   long: "This note is too long to save. Shorten it in Edit….",
   decided: "This note was already decided.",
   failed: "The note couldn't be saved",
@@ -52,7 +53,8 @@ export function memoryHooks(host: MemoryUiHost) {
   // (no answer, or one the page couldn't read (not as §7.2 has it): the same request again, under the same id, gets
   //  the agent's kept answer, and its memory_decided settles the card)
   const LOST = new Set(["timeout", "closed"]);
-  const lost = (e: unknown) => e instanceof MemoryShapeError || LOST.has((e as { code?: string })?.code ?? "") || (e as { extra?: { answer?: unknown } })?.extra?.answer === true;
+  const unreadable = (e: unknown) => e instanceof MemoryShapeError || (e as { extra?: { answer?: unknown } })?.extra?.answer === true;
+  const lost = (e: unknown) => unreadable(e) || LOST.has((e as { code?: string })?.code ?? "");
   const find = (pending: string): { thread: Thread; turn: Turn; card: MemoryCard } | null => {
     for (const t of host.threads()) for (const e of t.entries) if (e.kind === "turn" && e.memory && Object.hasOwn(e.memory, pending)) return { thread: t, turn: e, card: e.memory[pending] };
     return null;
@@ -81,9 +83,9 @@ export function memoryHooks(host: MemoryUiHost) {
     host.changed();
   };
   const scopeName = (s: Scope) => (s === "own" ? MEMORY_COPY.own : host.tagName?.(s.tag) ? `the tag ${host.tagName(s.tag)}` : MEMORY_COPY.tag);
-  const refused = (e: unknown, pending: string, card: MemoryCard) => {
+  const refused = (e: unknown, pending: string, card: MemoryCard, action: "save" | "dismiss") => {
     const code = (e as { code?: string })?.code;
-    if (lost(e)) return host.toast(e instanceof MemoryShapeError || (e as { code?: string })?.code === "too_large" ? MEMORY_COPY.unread : `${MEMORY_COPY.failed}: ${(e as Error)?.message ?? e}`, 8000);
+    if (lost(e)) return host.toast(unreadable(e) ? (action === "save" ? MEMORY_COPY.unread : MEMORY_COPY.unreadDismiss) : `${MEMORY_COPY.failed}: ${(e as Error)?.message ?? e}`, 8000);
     if (!still(pending, card)) return;
     // (stale: it changed, or the agent's access did; not_found: the proposal is gone at the agent (decided in another
     //  tab, or the agent started again): either way this card can't be saved now)
@@ -107,7 +109,7 @@ export function memoryHooks(host: MemoryUiHost) {
       decisions.delete(pending);
     } catch (e) {
       if (!lost(e)) decisions.delete(pending);
-      refused(e, pending, f.card);
+      refused(e, pending, f.card, "save");
     } finally {
       busy.delete(pending);
     }
@@ -120,7 +122,7 @@ export function memoryHooks(host: MemoryUiHost) {
       MEMORY_RESULTS["memory.dismiss"](await TaskClient.of(f.p).request("memory.dismiss", { pending, revision }));
       if (still(pending, f.card)) end(f.card, "dismissed");
     } catch (e) {
-      refused(e, pending, f.card);
+      refused(e, pending, f.card, "dismiss");
     } finally {
       busy.delete(pending);
     }

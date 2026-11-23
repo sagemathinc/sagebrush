@@ -1716,10 +1716,12 @@ function mountPairing(ws: Workspace) {
       offAgent = p.onNotification((m, params) => { if (pairing === p) session.onAgent(m, params, p); });
       let granted = false;
       let drawnState = "";
+      let drawnHello: unknown = null;
       p.onChange(() => {
         cards.refresh(); // (a pairing that closed or changed child: Allows waiting for a digest for it go)
         // (memory cards take a decision only while their connection is here: drawn again as it comes and goes)
-        if (pairing === p && p.state !== drawnState && (p.state === "granted" || p.state === "closed")) { drawnState = p.state; renderThread(); }
+        //  (and when a runner's agent process changes under the same pairing: another hello)
+        if (pairing === p && (p.state !== drawnState || p.hello !== drawnHello) && (p.state === "granted" || p.state === "closed")) { drawnState = p.state; drawnHello = p.hello; renderThread(); }
         if (p.link && p.state !== "connecting") connectingTo = null;
         if (p.link && p.state === "closed" && pairing === p && p.closeReason !== "not allowed") {
           // (over a runner: the person's own Disconnect says only its line; anything else, why the leg ended)
