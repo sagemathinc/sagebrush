@@ -366,9 +366,18 @@ try {
     const state = () => ev(`(() => { const q = (s) => document.querySelector(s); return { running: !q('#stop').hidden, primary: q('#send').textContent, keys: q('#keys').textContent, now: !q('#send-now').hidden && q('#send-now').textContent, queued: q('#queued').textContent, interrupted: [...document.querySelectorAll('.status')].filter((x) => x.textContent === 'Interrupted').length, users: [...document.querySelectorAll('.user')].map((u) => u.className) }; })()`);
     const idle = await state();
     ok("Q1-idle", idle.primary === "Send" && idle.keys === "send" && idle.now === false && !idle.running, "with no turn running: Send, Shift+Enter sends, no Send now", idle);
+    // (#1806: the keys aren't said three times: no sidebar line, a plain placeholder, and the row under the prompt only
+    //  once there's text; Send's tooltip says its key)
+    const keysOf = () => ev(`(() => { const ph = [...document.querySelectorAll('#editor [data-placeholder], #editor textarea')].map((e) => e.dataset?.placeholder || e.placeholder || '').filter(Boolean); return { hint: getComputedStyle(document.querySelector('.composer .hint')).visibility, side: document.querySelector('nav.side').innerText, ph, sendTitle: document.querySelector('#send').title }; })()`);
+    const k0 = await keysOf();
+    ok("K1-empty", k0.hint === "hidden" && !/Shift\+Enter/.test(k0.side) && k0.ph.length > 0 && k0.ph.every((p) => /^Message .+…$/.test(p) && !/Enter/.test(p)) && /Shift\+Enter/.test(k0.sendTitle), "with nothing typed: no keys under the prompt, none in the chat list, the placeholder plain; Send's tooltip says Shift+Enter (#1806)", k0);
     await type("plot a Fourier series");
+    const k1 = await keysOf();
+    ok("K1-typed", k1.hint === "visible", "once there's text, the keys row shows (#1806)", k1);
     await shiftEnter();
     await until(`!document.querySelector('#stop').hidden`, 10000);
+    await until(`getComputedStyle(document.querySelector('.composer .hint')).visibility === 'hidden'`, 3000).catch(() => {});
+    ok("K1-sent", (await keysOf()).hint === "hidden", "after a send clears the prompt, the keys row goes again (#1806)", await keysOf());
     const run0 = await state();
     ok("Q2-running", run0.primary === "Queue" && run0.keys === "queue" && run0.now === "Send now", "while a turn runs: the primary button is Queue, Shift+Enter queues, Send now beside it", run0);
     await type("and a square wave too");
