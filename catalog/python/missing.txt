@@ -269,6 +269,7 @@ numpy.random.MT19937
 numpy.random.PCG64
 numpy.random.RandomState
 numpy.random.SeedSequence
+numpy.random.binomial
 numpy.random.choice
 numpy.random.exponential
 numpy.random.get_state
