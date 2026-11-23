@@ -598,6 +598,10 @@ pub fn run() {
                 // launch's clear, windows.rs)
                 if let Ok(d) = disk::data_dir(_app) {
                     windows::clear_webview_dirs(&d);
+                    // (the approvals window's too, if it was opened: signer.rs)
+                    if std::fs::symlink_metadata(signer::data_folder(&d)).is_ok() {
+                        eprintln!("[signer] data folder removed: {}", if signer::remove_data_folder(&d) { "yes" } else { "no" });
+                    }
                 }
             }
             // macOS hands over files (Finder, `open -a Sagebrush f.ipynb`) as an event: kept for startup_files, each for

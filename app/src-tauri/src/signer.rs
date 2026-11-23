@@ -181,6 +181,30 @@ pub fn prepare_data_folder(data: &std::path::Path) -> Result<std::path::PathBuf,
     Ok(f)
 }
 
+/// The signer window's data folder removed (when it closes, and when the app exits): true if it's gone.  Only a real
+/// folder (no symlink) no one else may write, with the same owner as `data`, is removed; anything else is left alone.
+/// On Windows, WebView2's helper processes can hold its files a moment after the window or the app is gone: tried
+/// again for up to 2 s.
+pub fn remove_data_folder(data: &std::path::Path) -> bool {
+    let f = data_folder(data);
+    let tries = if cfg!(windows) { 20 } else { 1 };
+    for i in 0..tries {
+        match (std::fs::symlink_metadata(data), std::fs::symlink_metadata(&f)) {
+            (_, Err(e)) if e.kind() == std::io::ErrorKind::NotFound => return true,
+            (Ok(d), Ok(m)) if private_folder(&m) && owner(&m) == owner(&d) => {
+                if std::fs::remove_dir_all(&f).is_ok() {
+                    return true;
+                }
+            }
+            _ => return false,
+        }
+        if i + 1 < tries {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+    false
+}
+
 /// Whether a call of a signing command comes from the signer window on its own page.
 pub fn signer_caller_ok(label: &str, url: &Url, control: Option<&str>) -> bool {
     label == LABEL && signer_page(url, control)
@@ -264,8 +288,8 @@ pub fn open(app: &tauri::AppHandle) -> Result<(), String> {
     //  fresh here and removed when it closes.  Tauri keeps one context per data folder, and on Linux registers the app
     //  protocol's and the IPC's handlers once per data folder: a window sharing the main window's (none, incognito, so
     //  wry built it an ephemeral context of its own) got neither, and its page never loaded (CI, Nov 23).)
-    let folder = prepare_data_folder(&crate::disk::data_dir(app)?)?;
-    w = w.incognito(true).data_directory(folder.clone());
+    let data = crate::disk::data_dir(app)?;
+    w = w.incognito(true).data_directory(prepare_data_folder(&data)?);
     // (a self-test's probe of the window: what the page is to try, the other local server's origin)
     if let Some(p) = probe {
         if let Some(other) = p.strip_prefix("signer:") {
@@ -273,11 +297,11 @@ pub fn open(app: &tauri::AppHandle) -> Result<(), String> {
         }
     }
     let made = w.build().map_err(|e| format!("the approvals window didn't open: {e}"))?;
-    // (once the window is gone, its data folder goes too: best effort, logged as a fixed code)
+    // (once the window is gone, its data folder goes too, logged as a fixed code; an exit destroys no window one by
+    //  one, so lib.rs removes it then too)
     made.on_window_event(move |e| {
         if let tauri::WindowEvent::Destroyed = e {
-            let gone = std::fs::remove_dir_all(&folder).is_ok() || !folder.exists();
-            eprintln!("[signer] data folder removed: {}", if gone { "yes" } else { "no" });
+            eprintln!("[signer] data folder removed: {}", if remove_data_folder(&data) { "yes" } else { "no" });
         }
     });
     Ok(())
@@ -496,6 +520,32 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+        std::fs::remove_dir_all(&data).unwrap();
+    }
+
+    #[test]
+    fn the_data_folder_is_removed_and_only_ours() {
+        let data = temp();
+        assert!(remove_data_folder(&data), "none: gone already");
+        let f = prepare_data_folder(&data).unwrap();
+        std::fs::create_dir_all(f.join("EBWebView/Default/Cache")).unwrap();
+        std::fs::write(f.join("hsts-storage.sqlite"), b"x").unwrap();
+        assert!(remove_data_folder(&data) && !f.exists(), "removed with what's in it");
+        #[cfg(unix)]
+        {
+            // (a symlink in its place: not followed, its target untouched, and not reported gone)
+            let target = temp();
+            std::fs::write(target.join("keep"), b"x").unwrap();
+            std::os::unix::fs::symlink(&target, &f).unwrap();
+            assert!(!remove_data_folder(&data) && target.join("keep").exists());
+            std::fs::remove_file(&f).unwrap();
+            std::fs::remove_dir_all(&target).unwrap();
+            // (a folder others may write: left alone)
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::create_dir(&f).unwrap();
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o777)).unwrap();
+            assert!(!remove_data_folder(&data) && f.exists());
         }
         std::fs::remove_dir_all(&data).unwrap();
     }
