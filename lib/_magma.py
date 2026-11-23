@@ -2699,6 +2699,39 @@ def _zq_pair(a, b):
     return a, a.parent()(b.list())
 
 
+def _zq_poly(x):
+    """Whether x is a polynomial of the session's ring over the integers or
+    over the rationals."""
+    return isinstance(x, _sp.Polynomial) and isinstance(x.parent(), _MPolyRingZQ)
+
+
+def _zq_fraction(a, b, pos, op="/"):
+    """a / b, b a polynomial of the session's ring over the integers or the
+    rationals and a a number or a polynomial of that ring: the quotient in
+    the ring's field of fractions, Magma's rational function field (the
+    one FunctionField(k) is), as Magma 2.18-5 has it, even when b divides a
+    ((x^2 - 1)/(x - 1) is x + 1 there).  The field's variable takes the
+    ring's name if it has none yet: Q<t> := ...; t/(t + 1); prints
+    t/(t + 1), and a field named before, F<u> := ..., or by an earlier
+    quotient keeps its name."""
+    R = b.parent()
+    if op == "/:=":
+        # (h /:= g stays in the polynomial ring, as Magma's: g must be a unit there, a constant, +-1 over the integers)
+        c = b.list()[0] if b.degree() == 0 else 0
+        if not c or (R._base is _sp.ZZ and c not in (1, -1)):
+            raise MagmaError("Argument 1 is not invertible", "'%s'" % op, True, pos)
+        return R([x / c for x in R(a).list()]) if R._base is _sp.QQ else R([x * int(c) for x in R(a).list()])
+    if R._base is _sp.ZZ and _num(a) and not _int(a) and _Fraction(a).denominator != 1:
+        # (Magma's: (1/2)/y is "Bad argument types" over the integers)
+        raise _bad_types(op, (a, b), pos)
+    if not b:
+        raise MagmaError("Division by zero", "'%s'" % op, True, pos)
+    F = FieldOfFractions(R)
+    if not F._named and R._shown is not None:
+        F._magma_names([R._shown])
+    return _fun_binary("/", a, F._magma_coerce(b), pos)
+
+
 def _zq_items(items, where):
     """A collection's items with no declared universe: polynomials over the
     integers go into the session's ring over the rationals when there are
@@ -2948,12 +2981,17 @@ def _div(a, b, pos=None, op="/"):
     if isinstance(a, _FFLIN) or isinstance(b, _FFLIN):
         return _ffmat_op("/", a, b, pos)
     if isinstance(a, _sp.Polynomial) and _num(b) and b not in (1, -1) and a.parent().base_ring() == _sp.ZZ:
-        # over the integers a number divides only if it is a unit
+        # over the integers an integer divides only if it is a unit; a rational that is not an integer is not one of
+        # the ring's (Magma's: y/(1/2) is "Arguments are not compatible")
+        if not _int(b) and _Fraction(b).denominator != 1:
+            raise _incompatible("C", op, a, b, pos)
         raise MagmaError("Argument 2 is not a unit", "'%s'" % op, True, pos)
     if isinstance(a, MReal) or isinstance(b, MReal):
         a, b = _real_pair(a, b)
         return a / b
     a, b = _zq_pair(a, b)
+    if _zq_poly(b) and (_num(a) or _zq_poly(a) and a.parent() is b.parent()):
+        return _zq_fraction(a, b, pos, op)
     a, b = _ff_operands(a, b, "/", pos)
     return _mod_result(a / b, "/", a, b)
 
@@ -2963,6 +3001,8 @@ def _idiv(a, b, pos=None):
         if b == 0:
             raise MagmaError("Division by zero", "'div'")
         return a // b
+    if isinstance(a, _MFunRatElt) or isinstance(b, _MFunRatElt):
+        raise _fun_no_euclid("div", a, b, pos)
     _no_rationals("div", a, b, pos)
     _arith("div", (a, b), pos)
     if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
@@ -2978,6 +3018,8 @@ def _mod(a, b, pos=None):
         if b == 0:
             raise MagmaError("Division by zero", "'mod'")
         return a % b
+    if isinstance(a, _MFunRatElt) or isinstance(b, _MFunRatElt):
+        raise _fun_no_euclid("mod", a, b, pos)
     _no_rationals("mod", a, b, pos)
     _arith("mod", (a, b), pos)
     if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
@@ -5942,6 +5984,8 @@ def _fun_cache_put(key, F):
 class _MFunRat:
     """Magma's FldFunRat presentation over Q, Z, or an admitted GF(p)."""
 
+    _named = False
+
     def __init__(self, ground, source=None):
         self._ground = ground
         self._char = ground.p if isinstance(ground, _MFinField) else 0
@@ -5969,6 +6013,8 @@ class _MFunRat:
         # the field generator.  Commit both only after validation.
         self._name = name
         self._backend_ring._name = name
+        # (named now: a quotient in a named polynomial ring no longer names it, _zq_fraction)
+        self._named = True
 
     def _magma_gen(self, i):
         if i != 1:
@@ -6233,6 +6279,21 @@ def _fun_binary(op, a, b, pos=None, budget=None):
         raise
     except (TypeError, ValueError, ArithmeticError):
         raise _bad_types(op, (a, b), pos)
+
+
+def _fun_no_euclid(op, a, b, pos=None):
+    """Magma's error for div and mod of rational functions, which a field
+    doesn't have: an operand the field takes shows as one of its elements
+    (Magma's: 2 div (t/(t + 1)) gives FldFunRatUElt[FldRat] twice)."""
+    F = _fun_parent_from(a, b)
+    def shown(x):
+        if isinstance(x, _MFunRatElt):
+            return x
+        try:
+            return F._magma_coerce(x)
+        except MagmaError:
+            return x
+    return _bad_types(op, (shown(a), shown(b)), pos)
 
 
 def _fun_unary(op, a, pos=None):
