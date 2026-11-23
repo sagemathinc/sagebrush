@@ -11,6 +11,7 @@ let renderToString = null;
 export function setKatex(f) { renderToString = f; }
 import { CAT, isCs, catOf, codeOf, depthOf } from "./demo-machine.mjs";
 import { TEXT_SYMBOLS, ACCENTS, SIZES, COLORS } from "./symbols.mjs";
+import { renderTikz, TikzError, TIKZ_LIMITS } from "./tikz.mjs";
 import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected, staleTitle, STALE_TITLE, isPy, isMagma, isNonSage } from "./sagetex.mjs";
 
 // ------------------------------------------------------------------ helpers
@@ -232,7 +233,7 @@ const CREF_CAP = { "eq.": "Equation", "eqs.": "Equations", "fig.": "Figure", "fi
 const GOBBLE = { index: [0, 1], glossary: [0, 1], addcontentsline: [0, 3], markboth: [0, 2], markright: [0, 1], pagestyle: [0, 1], thispagestyle: [0, 1],
   pagenumbering: [0, 1], hypersetup: [0, 1], lstset: [0, 1], bibliographystyle: [0, 1], nocite: [0, 1], addtolength: [0, 2], settowidth: [0, 2],
   settoheight: [0, 2], settodepth: [0, 2], newlength: [0, 1], hyphenation: [0, 1], graphicspath: [0, 1], DeclareGraphicsExtensions: [0, 1],
-  DeclareGraphicsRule: [0, 4], lstdefinelanguage: [1, 1], lstdefinestyle: [0, 2], geometry: [0, 1], usetikzlibrary: [0, 1], tikzset: [0, 1], pgfplotsset: [0, 1],
+  DeclareGraphicsRule: [0, 4], lstdefinelanguage: [1, 1], lstdefinestyle: [0, 2], geometry: [0, 1], usetikzlibrary: [0, 1], pgfplotsset: [0, 1],
   sisetup: [0, 1], captionsetup: [1, 1], setlist: [1, 1], newgeometry: [0, 1], titleformat: [1, 5], titlespacing: [0, 4], fancyhead: [1, 1], fancyfoot: [1, 1],
   fancyhf: [0, 1], linespread: [0, 1], setstretch: [0, 1], enlargethispage: [0, 1], includeonly: [0, 1], newsavebox: [0, 1], allowdisplaybreaks: [1, 0], restylefloat: [0, 1],
   floatstyle: [0, 1], newfloat: [1, 3], floatname: [0, 2], DeclareUnicodeCharacter: [0, 2], colorlet: [0, 2], pdfbookmark: [1, 2],
@@ -633,7 +634,18 @@ class Renderer {
         if (env === "itshape") c2.st.i = true; if (env === "bfseries") c2.st.b = true; if (Object.hasOwn(SIZES, env)) c2.st.size = SIZES[env];
         const b = flow.open("div", ' class="env-' + esc(env) + '"'); this.walk(n.kids, c2, flow); flow.close(b); return;
       }
-      case "tikzpicture": case "tikzcd": case "axis": case "pspicture": {
+      case "tikzpicture": {
+        // (TikZ's drawing: tikz.mjs, round 1: paths, styles, transforms, \foreach; what it doesn't draw, a placeholder
+        //  naming it, and check's problem says it)
+        try { flow.html(renderTikz(this.str(n.kids), { styles: this.tikzStyles || "" }, this), c2.st); }
+        catch (e) {
+          if (!(e instanceof TikzError)) throw e;
+          this.problem("not-rendered", "tikzpicture (" + e.why + ")");
+          flow.block('<div class="placeholder">[tikzpicture: ' + esc(e.why) + "]</div>");
+        }
+        return;
+      }
+      case "tikzcd": case "axis": case "pspicture": {
         this.problem("not-rendered", env);
         flow.block('<div class="placeholder">[' + esc(env) + ": not rendered in this prototype]</div>"); return;
       }
@@ -1162,6 +1174,8 @@ const CMDS = {
   color: function (nodes, i, ctx) { const [o, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); const c = this.colorOf(this.str(a).trim(), o ? this.str(o) : null); if (c) ctx.st.color = c; return j; },
   textcolor: function (nodes, i, ctx, flow) { const [o, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); const [b, j2] = this.arg(nodes, j); const c = this.colorOf(this.str(a).trim(), o ? this.str(o) : null); const c2 = Object.assign({}, ctx, { st: Object.assign({}, ctx.st, c ? { color: c } : {}) }); this.walk(b, c2, flow); return j2; },
   colorbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); const [b, j2] = this.arg(nodes, j); const c = this.colorOf(this.str(a).trim(), null); flow.html('<span class="cbox"' + (c ? ' style="background:' + c + '"' : "") + ">" + this.inline(b, ctx) + "</span>", ctx.st); return j2; },
+  // (TikZ's styles for the document's pictures, kept for tikz.mjs; at most TIKZ_LIMITS.TIKZSET characters of them)
+  tikzset: function (nodes, i) { const [a, j] = this.arg(nodes, i); const t = this.str(a); if ((this.tikzStyles || "").length + t.length <= TIKZ_LIMITS.TIKZSET) this.tikzStyles = (this.tikzStyles ? this.tikzStyles + "," : "") + t; else this.problem("not-rendered", "\\tikzset past " + TIKZ_LIMITS.TIKZSET + " characters"); return j; },
   definecolor: function (nodes, i) { const [a, j] = this.arg(nodes, i); const [m, j2] = this.arg(nodes, j); const [v, j3] = this.arg(nodes, j2); const c = this.parseColor(this.str(m).trim(), this.str(v)); if (c) this.colors[this.str(a).trim()] = c; return j3; },
   newtheorem: function (nodes, i, ctx) {
     const [star, j0] = this.star(nodes, i);
