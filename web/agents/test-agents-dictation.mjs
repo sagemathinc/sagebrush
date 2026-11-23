@@ -158,14 +158,24 @@ try {
   await P.ev(`(window.__say([["one", true]]), true)`);
   await sleep(50);
   await P.draft(""); // (the editor open again for typing: the mic's click took its focus)
-  await P.ev(`(() => { const t = document.querySelector('#editor textarea'); t.value = t.value + " B"; t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await P.ev(`(() => { const t = document.querySelector('#editor textarea'); t.value = t.value + " B one"; t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   await P.ev(`(window.__say([["two", true]]), true)`);
   await sleep(50);
   const d13a = await draftOf(P);
   await P.ev(`([...document.querySelectorAll('#mic-status button')].find((b) => b.textContent === 'Discard').click(), true)`);
   await sleep(50);
   const d13b = await draftOf(P);
-  ok(d13a.trim() === "A one B two" && d13b.trim() === "A B", "D13: what the person types while it listens is kept; Discard takes out only the dictated words", { d13a, d13b });
+  ok(d13a.trim() === "A one B one two" && d13b.trim() === "A B one", "D13: what the person types while it listens is kept (even the same words); Discard takes out only the dictated ones", { d13a, d13b });
+  // (an edit before the end: Discard takes nothing out, and says so)
+  await P.ev(`(document.querySelector('#mic').click(), true)`);
+  await P.ev(`(window.__say([["three", true]]), true)`);
+  await sleep(50);
+  await P.draft("");
+  await P.ev(`(() => { const t = document.querySelector('#editor textarea'); t.value = "X" + t.value; t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await P.ev(`([...document.querySelectorAll('#mic-status button')].find((b) => b.textContent === 'Discard').click(), true)`);
+  await sleep(100);
+  const d13c = await draftOf(P);
+  ok(d13c.trim() === "XA B one three" && /mixed with the dictated words/.test(await toast(P)), "D13: after an edit before the end, Discard takes nothing out and says so", { d13c, toast: await toast(P) });
 
   // ---- D14: another chat shown: it stops, and a late result adds nothing to that chat's draft
   await P.ev(`(document.querySelector('#mic').click(), true)`);

@@ -14,6 +14,7 @@ export const DICTATION_COPY = {
   listening: "Listening (your browser's speech service)…",
   turnOff: "Turn off",
   discard: "Discard",
+  cantDiscard: "Your edits are mixed with the dictated words, so nothing was taken out: remove what you don't want yourself.",
   denied: "The microphone isn't allowed for this page. Allow it in the browser's site settings to dictate.",
   noMic: "No microphone was found.",
   network: "Dictation needs the browser's speech service, which couldn't be reached.",
@@ -71,10 +72,22 @@ export function mountDictation(h: DictationHost) {
   status.append(words, " ", discard, " · ", off);
 
   let rec: Recognition | null = null;
-  // (the chat it started in, and the pieces it has added to that chat's draft, in order: Discard takes those out and
-  //  nothing else, whatever the person typed meanwhile)
+  // (the chat it started in, and its draft as pieces, typed or dictated, in order, while the person only adds to its
+  //  end: Discard keeps the typed pieces and nothing else. An edit before the end (`tracked` false) mixes them, and
+  //  Discard then takes nothing out, saying so)
   let conv = "";
-  let added: string[] = [];
+  let pieces: { dictated: boolean; text: string }[] = [];
+  let last = "";
+  let tracked = true;
+  /** The person's typing since the last piece, if only at the end; else the pieces are no longer to be trusted. */
+  const follow = () => {
+    const now = h.value();
+    if (!tracked) return now;
+    if (now.startsWith(last)) { if (now.length > last.length) pieces.push({ dictated: false, text: now.slice(last.length) }); }
+    else tracked = false;
+    last = now;
+    return now;
+  };
   const join = (a: string, b: string) => (!a ? b : !b ? a : /\s$/.test(a) ? a + b : a + " " + b);
 
   function draw(on: boolean, interim = "") {
@@ -97,7 +110,9 @@ export function mountDictation(h: DictationHost) {
       return;
     }
     conv = h.conversation();
-    added = [];
+    last = h.value();
+    pieces = [{ dictated: false, text: last }];
+    tracked = true;
     r.onresult = (e) => {
       if (rec !== r) return;
       // (another chat's draft in the composer now: this one stops, adding nothing there)
@@ -109,9 +124,10 @@ export function mountDictation(h: DictationHost) {
         if (!text) continue;
         if (res.isFinal) {
           // (added to the draft as it is now, after whatever the person has typed meanwhile)
-          const now = h.value();
+          const now = follow();
           const next = join(now, text);
-          added.push(next.slice(now.length));
+          pieces.push({ dictated: true, text: next.slice(now.length) });
+          last = next;
           h.setValue(next);
         } else interim = join(interim, text);
       }
@@ -147,19 +163,17 @@ export function mountDictation(h: DictationHost) {
     try { r.abort(); } catch {}
     draw(false);
   }
-  /** Discard: listening stops, and the pieces it added to this chat's draft come out (the last of each, from the end),
-   *  what the person typed staying. */
+  /** Discard: listening stops, and the dictated pieces of this chat's draft come out, the typed ones staying; if the
+   *  person edited before the end, nothing is taken out, and the page says so. */
   function discardAll() {
     const mine = h.conversation() === conv;
     stop();
     if (!mine) return;
-    let v = h.value();
-    for (const piece of [...added].reverse()) {
-      const at = v.lastIndexOf(piece);
-      if (at >= 0) v = v.slice(0, at) + v.slice(at + piece.length);
-    }
-    added = [];
-    h.setValue(v);
+    follow();
+    if (!tracked) { if (pieces.some((p) => p.dictated)) h.toast(DICTATION_COPY.cantDiscard, 8000); return; }
+    h.setValue(pieces.filter((p) => !p.dictated).map((p) => p.text).join(""));
+    pieces = [{ dictated: false, text: h.value() }];
+    last = h.value();
   }
   btn.onclick = () => {
     if (rec) return stop();
