@@ -126,7 +126,9 @@
     ],
     "differs": [
       "The 'makima' method is refused, and so are 'next' and 'previous', which MATLAB's interp3 page doesn't list.",
-      "'cubic' and 'spline' results can differ from MATLAB's in the last digits (a few units of 1e-15 relative); 'linear' and 'nearest' match MATLAB's to the bit."
+      "'cubic' and 'spline' results can differ from MATLAB's in the last digits (up to about 1e-13); 'linear' and 'nearest' match MATLAB's to the bit.",
+      "With single data the result is single, computed in double and then rounded, so it can differ from MATLAB's by a unit in the last place.",
+      "Query coordinates of mixed types (single and double) are accepted; MATLAB refuses them."
     ],
     "status": "partial",
     "see_also": [

@@ -798,6 +798,7 @@ def interp2_(*args):
     uniform grid) or spline (a tensor-product not-a-knot spline, which
     extrapolates unless given extrapval); the grid increasing or decreasing"""
     args = list(args)
+    single = bool(args) and _m.class_(args[2] if sum(1 for a in args if not _istext(a)) >= 5 else args[0]) == "single"
     method, extrap = "linear", None
     if args and not _istext(args[-1]) and len(args) >= 2 and _istext(args[-2]):
         extrap = _scalar(args.pop())
@@ -877,7 +878,9 @@ def interp2_(*args):
             res = (1 - ty) * r0 + ty * r1
         out[inside] = res[inside]
     out[~inside] = _math.nan if extrap is None else extrap
-    return _unmat(out.reshape(shape))
+    r = _unmat(out.reshape(shape))
+    # (a single V gives a single result, as in MATLAB: computed in double here, then rounded)
+    return _m._canon(_arr(r).astype(np.float32 if out.dtype.kind != "c" else np.complex64)) if single else r
 
 
 def _keys(t):
@@ -944,13 +947,16 @@ def _un_nd(a):
     return _box(_m._contig(a.T))
 
 
-def _grid_vec(G, axis, n, what):
-    """a grid's coordinates along axis: a vector of n, or a full grid array varying only along axis"""
+def _grid_vec(G, axis, shape):
+    """a grid's coordinates along axis: a vector of shape[axis] values, or a full grid array of V's shape
+    varying only along axis"""
     a = _m._farr(G)
-    if a.size == n and sum(1 for k in a.shape if k != 1) <= 1:
+    if sum(1 for k in a.shape if k != 1) <= 1:
+        if a.size != shape[axis]:
+            raise _err("GridVectors must define a grid whose size is compatible with the Values array.", "MATLAB:griddedInterpolant:MixedGridCoordSizeErrId")
         return np.array(a.reshape(-1), dtype=np.float64)
     A = _nd(G)
-    if A.shape[axis] != n:
+    if A.shape != tuple(shape):
         raise _err("GridVectors must define a grid whose size is compatible with the Values array.", "MATLAB:griddedInterpolant:MixedGridCoordSizeErrId")
     idx = [0, 0, 0]
     idx[axis] = slice(None)
@@ -1051,7 +1057,7 @@ def interp_method(m, fname):
         _m.warning_("The 'pchip' method is only supported in 1D.\nReverting to the default 'linear' method because this condition is not met.")
         return "linear"
     if method in ("makima", "next", "previous"):
-        raise _err("%s: the '%s' method is not supported in Sagebrush." % (fname, method))
+        raise _err("%s: the '%s' method is not supported in Sagebrush." % (fname, method), "Sagebrush:%s:unsupportedMethod" % fname)
     raise _err("The interpolation method must be 'linear', 'nearest', 'next', 'previous', 'pchip', 'cubic', 'spline', or 'makima'.",
                "MATLAB:griddedInterpolant:BadInterpTypeErrId")
 
@@ -1093,8 +1099,11 @@ def volume_args(args, fname):
     index order; n_rest is how many arguments follow the volume (3 for interp3's queries or slice's planes)"""
     if len(args) == 7:
         V = _nd(args[3])
-        ny, nx, nz = V.shape
-        return _grid_vec(args[0], 1, nx, True), _grid_vec(args[1], 0, ny, True), _grid_vec(args[2], 2, nz, True), V, list(args[4:])
+        # (full grid arrays: all three of one 3-D size, or MATLAB's grid-structure error; then V's size)
+        full = [_m._dims(G) for G in args[:3] if sum(1 for k in _m._dims(G) if k != 1) > 1]
+        if full and (len(full) != 3 or len(set(full)) != 1 or len(full[0]) != 3):
+            raise _err("Grid arrays must have NDGRID structure.", "MATLAB:griddedInterpolant:BadGridErrId")
+        return _grid_vec(args[0], 1, V.shape), _grid_vec(args[1], 0, V.shape), _grid_vec(args[2], 2, V.shape), V, list(args[4:])
     if len(args) == 4:
         V = _nd(args[0])
         y, x, z = (np.arange(1.0, s + 1) for s in V.shape)
@@ -1131,12 +1140,8 @@ def interp3_(*args):
         y, x, z = (np.arange(1.0, s + 1) for s in V.shape)
         Xq, Yq, Zq = _nd(args[1]), _nd(args[2]), _nd(args[3])
     elif len(args) == 7:
-        V = _nd(args[3])
-        ny, nx, nz = V.shape
-        x = _grid_vec(args[0], 1, nx, True)
-        y = _grid_vec(args[1], 0, ny, True)
-        z = _grid_vec(args[2], 2, nz, True)
-        Xq, Yq, Zq = _nd(args[4]), _nd(args[5]), _nd(args[6])
+        x, y, z, V, q = volume_args(args, "interp3")
+        Xq, Yq, Zq = (_nd(a) for a in q)
     else:
         raise _err("Wrong number of input arguments.")
     grids, V = _increasing(V, [y, x, z])

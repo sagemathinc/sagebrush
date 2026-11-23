@@ -183,3 +183,76 @@ test("interp3 at 40 irregular points (linear to the bit, as MATLAB rounds it), i
   for (const want of EXACT_2) assert.equal(got.get(want.split("|")[0]), want);
   for (const want of CLOSE_2) close(got.get(want.split("|")[0]), want, 1e-12);
 });
+
+const PROGRAM_3 = [
+  "[X,Y] = meshgrid(0:4, 0:3); V = sin(1.7*X + 0.3).*cos(0.9*Y - 0.2) + X.*Y/7;",
+  "xq = mod((1:25)*0.6180339887498949,1)*4; yq = mod((1:25)*0.7548776662466927,1)*3;",
+  "P = @(s, v) fprintf('%s|%s\\n', s, sprintf('%.17g ', v));",
+  "try, P('i2lin', interp2(X,Y,V,xq,yq)); catch e, fprintf('i2lin|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "try, P('i2near', interp2(X,Y,V,xq,yq,'nearest')); catch e, fprintf('i2near|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "try, P('i2cub', interp2(X,Y,V,xq,yq,'cubic')); catch e, fprintf('i2cub|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "try, P('i2spl', interp2(X,Y,V,xq,yq,'spline')); catch e, fprintf('i2spl|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "try, P('i2out', interp2(X,Y,V,[-1 5 2],[1 1 4])); catch e, fprintf('i2out|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "try, P('i2ext', interp2(X,Y,V,[-1 5 2],[1 1 1],'linear',-3)); catch e, fprintf('i2ext|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "try, W = V; W(2,3) = NaN; P('i2nan', interp2(X,Y,W,[1.5 2.5 3.5],[0.5 1.5 2.5])); catch e, fprintf('i2nan|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "try, r = interp2(V); P('i2ref', [size(r) r(2,2) r(4,6)]); catch e, fprintf('i2ref|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "try, r = interp2(V, 2); P('i2ref2', size(r)); catch e, fprintf('i2ref2|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "try, P('i2Vform', interp2(V, [1.5 3.25], [2.5 1.75])); catch e, fprintf('i2Vform|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "try, [Xu,Yu] = meshgrid([0 0.5 1.5 3 4],[0 1 1.2 3]); P('i2nonu', interp2(Xu,Yu,V,xq,yq)); catch e, fprintf('i2nonu|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "try, P('i2desc', interp2(4:-1:0, 0:3, V, xq(1:5), yq(1:5))); catch e, fprintf('i2desc|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "try, r = interp2(X,Y,single(V),xq(1:5),yq(1:5)); fprintf('i2sgl|%s|%s\\n', class(r), sprintf('%.9g ', r)); catch e, fprintf('i2sgl|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "try, P('i2vec', interp2(0:4, 0:3, V, xq(1:5), yq(1:5))); catch e, fprintf('i2vec|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "try, [xg,yg] = meshgrid([0.5 1.5], [0.25 2.75]); r = interp2(X,Y,V,xg,yg); P('i2grid', [size(r) r(:)']); catch e, fprintf('i2grid|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "try, P('i2rowcol', size(interp2(0:4, 0:3, V, [0.5 1.5 2.5], [0.5; 1.5]))); catch e, fprintf('i2rowcol|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "[X3,Y3,Z3] = meshgrid(1:3,1:4,1:2); V3 = X3 + 10*Y3 + 100*Z3;",
+  "try, P('a5shape', interp3(X3(1:2,:,:),Y3,Z3,V3,1.5,2.5,1.5)); catch e, fprintf('a5shape|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "try, P('a5shape2', interp3(X3,Y3(:,:,1),Z3,V3,1.5,2.5,1.5)); catch e, fprintf('a5shape2|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "try, P('a5shape3', interp3(X3(:,:,1),Y3(:,:,1),Z3(:,:,1),V3,1.5,2.5,1.5)); catch e, fprintf('a5shape3|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "[Xs,Ys,Zs] = meshgrid(0:4, 0:3, 0:5); Vs = sin(1.7*Xs + 0.3).*cos(0.9*Ys - 0.2) + exp(0.31*Zs)./(1 + Xs.^2);",
+  "xq3 = mod((1:10)*0.6180339887498949,1)*4; yq3 = mod((1:10)*0.7548776662466927,1)*3; zq3 = mod((1:10)*0.5698402909980532,1)*5;",
+  "try, r = interp3(single(Xs),single(Ys),single(Zs),Vs,xq3(1:3),yq3(1:3),zq3(1:3)); fprintf('a5sglgrid|%s|%s\\n', class(r), sprintf('%.17g ', r)); catch e, fprintf('a5sglgrid|ERR|%s|%s\\n', e.identifier, e.message); end",
+  ""
+];
+const EXACT_3 = [
+  "i2lin|0.95026903466810375 0.50783386788008922 0.26816791358385994 -0.34162625606744534 -0.024338419630630166 0.42430417214222604 0.53365835915988213 0.4395896558716238 0.95647470523666822 0.35542792832332004 0.037557604791617169 -0.0040450406402697536 -0.092234794962750513 0.49655333760558495 0.7602239655805626 0.17415372202171911 0.94543761526917192 0.22100184593543548 -0.13227585398471237 0.30991529570487303 1.1540581642132999 0.55127957933165272 0.70613875368092927 -0.081869609041334709 0.79849255271332809 ",
+  "i2near|0.58689953364105774 0.25916323522118467 -0.16247145234666999 -0.51927469343679655 -0.0086290488648892629 0.87970721103089222 0.83832617568265433 0.71443819250838203 0.58689953364105774 0.25916323522118467 -0.16247145234666999 -0.51927469343679655 -0.0086290488648892629 0.87970721103089222 0.83832617568265433 0.71443819250838203 0.58689953364105774 -0.0086290488648892629 -0.16247145234666999 0.89117201734889273 1.1302768218574921 0.58689953364105774 0.83832617568265433 -0.7573606467962376 1.2816176987177217 ",
+  "i2out|NaN NaN NaN ",
+  "i2ext|-3 -3 -0.11952674720053852 ",
+  "i2nan|NaN NaN 1.2590913123106464 ",
+  "i2ref|7 9 0.56128849797667146 0.29615213628118536 ",
+  "i2ref2|13 17 ",
+  "i2Vform|0.32872167082214321 -0.24239623805946775 ",
+  "i2nonu|1.3142087632814476 0.40439282992219472 0.26816791358385994 -0.55458923249331893 -0.10676302694929375 1.059990113254033 0.021337489378979106 0.4395896558716238 1.2975692128847847 0.26190187574252372 0.037557604791617169 -0.47158655457524701 -0.15485393994366653 1.0669788489607355 0.27439431311223778 0.17415372202171911 1.2745434548821728 0.083666343283068892 -0.016506392162074959 -0.32908001640652662 1.1727987021045214 1.0675813770614904 0.44349357241673321 -0.081869609041334709 1.2451314892736169 ",
+  "i2desc|0.45935709457664997 0.43013071217076565 0.59517449668454381 -0.52113974631700821 1.1556195458170726 ",
+  "i2vec|0.95026903466810375 0.50783386788008922 0.26816791358385994 -0.34162625606744534 -0.024338419630630166 ",
+  "i2grid|2 2 0.57584462273193782 -0.1699309241036121 0.22931142502730054 0.47389958329071791 ",
+  "i2rowcol|2 3 ",
+  "a5shape|ERR|MATLAB:griddedInterpolant:BadGridErrId|Grid arrays must have NDGRID structure.",
+  "a5shape2|ERR|MATLAB:griddedInterpolant:BadGridErrId|Grid arrays must have NDGRID structure.",
+  "a5shape3|ERR|MATLAB:griddedInterpolant:BadGridErrId|Grid arrays must have NDGRID structure.",
+  "a5sglgrid|double|0.52215926009914015 0.96338701787360947 0.13248416046786649 "
+];
+const CLOSE_3 = [
+  "i2cub|0.99438169161546952 0.55662844436748582 0.079607953535693152 -0.38813377335720639 -0.092116853904544632 0.36684463255773614 0.64454630241900446 0.3025737221583451 0.99872308804333365 0.4279022204938755 -0.083684507141970205 -0.01810841603703963 -0.13859770907298233 0.44530661635736679 0.81946004855974253 -0.034311290710041228 0.95338509779996594 0.27102541351630904 -0.15664929493777882 0.40027675060147616 1.1838211672940921 0.52762074214938715 0.81234009577132704 -0.28755391838327204 0.82146594063116019 ",
+  "i2spl|1.0262200847436724 0.57173946661601238 0.078874049970830584 -0.37202762672486445 -0.1906200373879933 0.35999849316749349 0.58865318739453776 0.31384088331962512 1.0383950299302624 0.48131325515602469 -0.085943690579949522 -0.021527399282964099 -0.21537059905427569 0.43050931985865915 0.78820748852814693 -0.0310437834771502 0.9776838805296173 0.32316257889208366 -0.15525026889438542 0.35654862200819692 1.1617286938880558 0.51402438735499612 0.87029346717837019 -0.29890534402969526 0.82177755676269315 "
+];
+
+test("interp2 after its linear rounding change, and interp3's grid checks: MATLAB R2026b's rows; a single V gives single", () => {
+  const got = run(PROGRAM_3);
+  for (const want of EXACT_3) assert.equal(got.get(want.split("|")[0]), want);
+  for (const want of CLOSE_3) close(got.get(want.split("|")[0]), want, 1e-12);
+  // (MATLAB's single values are computed in single; Sagebrush's in double, then rounded: only the class is checked)
+  assert.match(got.get("i2sgl") ?? "", /^i2sgl\|single\|/);
+});
+
+test("the methods Sagebrush lacks are refused with an identifier", () => {
+  const got = run([
+    "[X,Y,Z] = meshgrid(1:3); V = X + Y + Z;",
+    "try, interp3(X,Y,Z,V,1.5,1.5,1.5,'makima'); catch e, fprintf('mak|%s|%s\\n', e.identifier, e.message); end",
+    "try, interp3(X,Y,Z,V,1.5,1.5,1.5,'next'); catch e, fprintf('next|%s|%s\\n', e.identifier, e.message); end",
+    "try, slice(X,Y,Z,V,2,[],[],'makima'); catch e, fprintf('slmak|%s|%s\\n', e.identifier, e.message); end",
+  ]);
+  assert.equal(got.get("mak"), "mak|Sagebrush:interp3:unsupportedMethod|interp3: the 'makima' method is not supported in Sagebrush.");
+  assert.equal(got.get("next"), "next|Sagebrush:interp3:unsupportedMethod|interp3: the 'next' method is not supported in Sagebrush.");
+  assert.equal(got.get("slmak"), "slmak|Sagebrush:slice:unsupportedMethod|slice: the 'makima' method is not supported in Sagebrush.");
+});

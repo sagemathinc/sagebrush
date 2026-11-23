@@ -15793,5 +15793,10 @@
   },
   "owner": "3D viewer (@sagebrush-space)",
   "reason": "the 3D viewer's source, embedded for Jupyter's HTML: its LIMITS on what an untrusted saved scene may draw (checkScene, counted after expansion) protect the page, which keeps the static picture and says why; no computation is refused"
+ },
+ "lib/_matlab_numeric.py :: interp_method :: raise _err(\"%s: the '%s' method is not supported in Sagebrush.\" % (fname, method), \"Sagebrush:%s:unsupportedMethod\" % fname) #0": {
+  "class": "coverage",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "interp3 and slice refuse the interpolation methods Sagebrush doesn't implement (makima, and next and previous, which MATLAB's interp3 page doesn't list): an unsupported option, not a cap"
  }
 }
