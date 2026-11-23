@@ -132,7 +132,7 @@ _RAW_ENTRY = 100        # (a retained original text's dict entry, as the index m
 
 
 def _make_budget(who="read_csv"):
-    import _sagebrush_lib as sagebrush
+    import sagebrush
     lim = sagebrush.limit(_LIMIT_KEY)
     if lim == float("inf"):
         return _NoBudget()

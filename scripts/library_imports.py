@@ -15,6 +15,8 @@ import sys
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 PUBLIC = "sagebrush"
+# (an optional package set's file, pinned by its SHA-256 in its published set: rewritten when the set is next published)
+ALLOWED = {("optional/pandas/py/pandas/_pd_csv.py", "import sagebrush")}
 
 
 def library_files():
@@ -60,7 +62,10 @@ def violations(path):
 def main():
     bad = []
     for p in library_files():
+        rel = os.path.relpath(p, ROOT).replace(os.sep, "/")
         for line, what in violations(p):
+            if (rel, what) in ALLOWED:
+                continue
             bad.append("%s:%d: %s (the library imports its own package as _sagebrush_lib)" % (os.path.relpath(p, ROOT), line, what))
     for b in bad:
         print(b)

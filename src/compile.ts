@@ -446,7 +446,7 @@ export function libDir(): string {
 // object (scripts/library-imports check: the library never imports the public name).
 export const LIB_PACKAGE = "_sagebrush_lib";
 const PUBLIC_PACKAGE = "sagebrush";
-const libraryModules = new Map<string, any>(); // "" or ".x" -> the library's module
+const libraryModules: Map<string, any> = new Map(); // "" or ".x" -> the library's module
 function libraryPackageDir(): string {
   return pathJoin(libDir(), PUBLIC_PACKAGE);
 }
