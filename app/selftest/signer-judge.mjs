@@ -15,16 +15,33 @@
 // In every run the other server's pages must have reached nothing ("REACHED" in what they said), and in every run but
 // "cap+check" the main page's own call, a page's signer_open and an output frame's call must have been refused.  And in
 // every run the app must have ended cleanly: exit 0, no signal, its output captured to the end (no timeout), so a run
-// that printed every expected line and then crashed, was killed or timed out never passes.
+// that printed every expected line and then crashed, was killed or timed out never passes.  And the self-test's state
+// check ("[signer] state check sent", signer.rs) may only ever run on the signer's own page: each one must follow a
+// finished load of that page (tauri://localhost, or http://tauri.localhost on Windows), never another page the window
+// loaded (the guard-off control's destination) and never with no load before it.
 export function signerLog(err) {
   const dispatches = [...err.matchAll(/^\[signer\] dispatch (\d+) from (\S+) at (\S+)$/gm)].map((m) => ({ n: +m[1], label: m[2], origin: m[3] }));
   const signed = [...err.matchAll(/^\[signer\] signed (\d+) \(signature (\d+)\) for (\S+)$/gm)].map((m) => ({ n: +m[1], label: m[3] }));
   return { dispatches, signed };
 }
 
+/** The state checks sent on a page other than the signer's own (each with the page last loaded, or "none"). */
+export function stateChecksElsewhere(err) {
+  const bad = [];
+  let last = "none";
+  for (const l of err.split("\n")) {
+    const p = /^\[signer\] page (started|finished) (\S+)$/.exec(l);
+    if (p) last = `${p[1]} ${p[2]}`;
+    else if (l === "[signer] state check sent" && !/^finished (null|http:\/\/tauri\.localhost|https:\/\/tauri\.localhost)\/signer\/(index|probe-nocsp)\.html$/.test(last)) bad.push(last);
+  }
+  return bad;
+}
+
 export function signerVerdict({ err, out, seen, control, code, signal, problems }) {
   const { dispatches, signed } = signerLog(err);
   const why = [];
+  const elsewhere = stateChecksElsewhere(err);
+  if (elsewhere.length) why.push(`the state check ran on another page than the signer's: ${elsewhere.join("; ")}`);
   if (code !== 0 || signal != null || (problems ?? []).length) why.push(`the app didn't end cleanly (exit ${code}, signal ${signal ?? "none"}${(problems ?? []).length ? `; ${problems.join("; ")}` : ""})`);
   const fromSigner = (xs) => xs.filter((x) => x.label === "signer");
   const fromOthers = (xs) => xs.filter((x) => x.label !== "signer");

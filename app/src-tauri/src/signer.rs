@@ -75,7 +75,8 @@ pub fn probe_report(url: &Url, control: Option<&str>) -> Option<&'static str> {
 
 /// The self-test's reading of the signer window's state after its page loads (why a page that loaded never reported):
 /// a fixed expression, read and logged by Rust as fixed codes only ("[signer] state: …"), or "no-answer" if no answer
-/// arrives within STATE_WAIT, or "eval-failed" if it couldn't be sent.  It never navigates and never calls a command.
+/// arrives within STATE_WAIT, or "eval-failed" if it couldn't be sent; on any other page the window loads, it isn't
+/// sent ("not-signer-page").  It never navigates and never calls a command.
 const STATE_CHECK: &str = "(function(){try{var s=document.readyState,p=location.protocol,t=window.__TAURI__;return [s==='loading'?1:s==='interactive'?2:s==='complete'?3:0,window.__SB_SIGNER_PROBE__?1:0,(t&&t.core&&typeof t.core.invoke==='function')?1:0,window.__SB_SIGNER_RAN__===true?1:0,p==='tauri:'?1:p==='http:'?2:0,document.getElementById('status')?1:0];}catch(e){return [];}})()";
 pub const STATE_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 /// Every code a state line can hold, field by field (nothing the page says is ever logged as text).
@@ -99,10 +100,15 @@ pub fn state_line(answer: &str) -> String {
     }
 }
 
-/// Whether the state check runs for this load: in a self-test only, once the page has loaded, and never on a page
-/// reloaded with a probe report.
-pub fn state_check_due(selftest: bool, finished: bool, url: &Url) -> bool {
-    selftest && finished && !url.query_pairs().any(|(k, _)| k == "probe")
+/// Whether the checks run for this load (the state check, and the probe check on a page not yet reloaded): in a
+/// self-test only, once the page has loaded, and only on the signer's own page (never another page the window or a
+/// frame in it loads, such as the guard-off control's destination, whose own scripts could run inside the check).
+pub fn check_due(selftest: bool, finished: bool, url: &Url, control: Option<&str>) -> bool {
+    selftest && finished && signer_page(url, control)
+}
+/// Whether the state check runs for this load: as check_due, and never on a page reloaded with a probe report.
+pub fn state_check_due(selftest: bool, finished: bool, url: &Url, control: Option<&str>) -> bool {
+    check_due(selftest, finished, url, control) && !url.query_pairs().any(|(k, _)| k == "probe")
 }
 
 /// Whether a call of a signing command comes from the signer window on its own page.
@@ -130,6 +136,7 @@ pub fn open(app: &tauri::AppHandle) -> Result<(), String> {
     let page = if c.as_deref() == Some("csp-off") { PAGE_NO_CSP } else { PAGE };
     let guard_off = c.as_deref() == Some("guard-off");
     let gc = c.clone();
+    let lc = c.clone();
     // (the self-test's other local server, which the controls frame or visit)
     let probe = std::env::var("SAGEBRUSH_APP_PERSIST").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some());
     let other: Option<Url> = probe.as_deref().and_then(|p| p.strip_prefix("signer:")).and_then(|o| o.parse().ok());
@@ -146,11 +153,17 @@ pub fn open(app: &tauri::AppHandle) -> Result<(), String> {
             let u = p.url();
             let finished = !matches!(p.event(), tauri::webview::PageLoadEvent::Started);
             eprintln!("[signer] page {} {}{}", if finished { "finished" } else { "started" }, u.origin().ascii_serialization(), u.path());
-            if selftest && finished {
+            if check_due(selftest, finished, u, lc.as_deref()) {
                 let _ = w.eval(PROBE_CHECK);
             }
-            if state_check_due(selftest, finished, u) {
-                // (the first of the answer and the deadline logs; the other then logs nothing)
+            if selftest && finished && !check_due(selftest, finished, u, lc.as_deref()) {
+                // (another page in the window, such as the guard-off control's destination: no check runs there)
+                eprintln!("[signer] state: not-signer-page");
+            }
+            if state_check_due(selftest, finished, u, lc.as_deref()) {
+                // (logged before it's sent, so the self-test sees which page each check ran on: signer-judge.mjs; the
+                //  first of the answer and the deadline logs, and the other then logs nothing)
+                eprintln!("[signer] state check sent");
                 let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
                 let d = done.clone();
                 let sent = w.eval_with_callback(STATE_CHECK, move |a| {
@@ -339,13 +352,37 @@ mod tests {
     }
 
     #[test]
-    fn the_state_check_runs_in_a_self_test_on_a_loaded_page_only() {
+    fn the_checks_run_in_a_self_test_on_the_signer_s_own_loaded_page_only() {
         let page = u("tauri://localhost/signer/index.html");
-        assert!(state_check_due(true, true, &page));
-        assert!(!state_check_due(false, true, &page), "never outside a self-test");
-        assert!(!state_check_due(true, false, &page), "never before the page has loaded");
+        for c in [None, Some("cap"), Some("cap+check"), Some("guard-off")] {
+            assert!(state_check_due(true, true, &page, c) && check_due(true, true, &page, c), "{c:?}");
+        }
+        let nocsp = u("tauri://localhost/signer/probe-nocsp.html");
+        assert!(state_check_due(true, true, &nocsp, Some("csp-off")) && check_due(true, true, &nocsp, Some("csp-off")));
+        assert!(!state_check_due(true, true, &nocsp, None) && !check_due(true, true, &nocsp, None), "the csp-off page outside its control");
+        assert!(!state_check_due(false, true, &page, None) && !check_due(false, true, &page, None), "never outside a self-test");
+        assert!(!state_check_due(true, false, &page, None) && !check_due(true, false, &page, None), "never before the page has loaded");
         for reloaded in ["tauri://localhost/signer/index.html?probe=hung", "tauri://localhost/signer/index.html?probe=", "tauri://localhost/signer/index.html?x=1&probe=no-script"] {
-            assert!(!state_check_due(true, true, &u(reloaded)), "{reloaded}");
+            assert!(!state_check_due(true, true, &u(reloaded), None), "{reloaded}");
+            assert!(check_due(true, true, &u(reloaded), None), "the probe check still runs there (and returns at once): {reloaded}");
+        }
+        // (never another page: the guard-off control's destination, the csp-off control's framed page, the main page,
+        //  any other app page or scheme), under every control
+        for other in [
+            "http://127.0.0.1:49214/stop",
+            "http://127.0.0.1:49214/sframe",
+            "http://127.0.0.1:49214/",
+            "http://127.0.0.1:49214/signer/index.html",
+            "tauri://localhost/index.html",
+            "tauri://localhost/signer/other.html",
+            "tauri://evil/signer/index.html",
+            "about:blank",
+            "data:text/html,x",
+            "https://example.com/signer/index.html",
+        ] {
+            for c in [None, Some("cap"), Some("cap+check"), Some("csp-off"), Some("guard-off")] {
+                assert!(!state_check_due(true, true, &u(other), c) && !check_due(true, true, &u(other), c), "{other} {c:?}");
+            }
         }
     }
 
