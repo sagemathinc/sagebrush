@@ -31,6 +31,13 @@ mod windows;
 mod leave;
 #[cfg(desktop)]
 mod signer;
+// (fleet signing and the device key, N1 part 2: nothing calls them yet but their tests; the signer's commands use them
+//  in part 3)
+#[allow(dead_code)]
+mod fleet_sig;
+#[cfg(desktop)]
+#[allow(dead_code)]
+mod device_key;
 // (the agent the app hosts, desktop only: its owned child and bundle check, for the agents page's launcher, which
 //  comes next; until then nothing calls it but its tests)
 #[cfg(desktop)]

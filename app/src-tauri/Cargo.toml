@@ -22,9 +22,17 @@ sha2 = "0.10"
 serde_json = "1"
 # (the agent host, src/agent_host.rs: the pairing code from the OS's CSPRNG; on Unix, the child's process group)
 getrandom = "0.3"
+# (fleet signing, src/fleet_sig.rs and src/device_key.rs: pinned exactly; a new version is a reviewed change)
+ed25519-dalek = "=2.2.0"
+zeroize = "=1.9.2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# (the device key's store, the macOS Keychain only, and the runtime code-signature check of native_tier; pinned exactly)
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "=3.6.3", default-features = false, features = ["apple-native"] }
+security-framework = "=3.7.0"
 
 # (the fs plugin: a phone's only, linked only there, since withGlobalTauri puts every linked plugin's
 # window.__TAURI__ API on the page, registered or not; the desktop page reaches files by grants: src/disk.rs. The cfg is
