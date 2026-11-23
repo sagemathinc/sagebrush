@@ -191,11 +191,14 @@ export function isRaster(u: Uint8Array): boolean {
     || at(0, [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]) || at(0, [0x47, 0x49, 0x46, 0x38, 0x39, 0x61]) // GIF87a, GIF89a
     || (at(0, [0x52, 0x49, 0x46, 0x46]) && at(8, [0x57, 0x45, 0x42, 0x50])); // RIFF....WEBP
 }
-/** A file's bytes, if they are a raster image (else null, read as before: text, a document, other bytes): over IMAGE_BYTES_MAX refused with its
- * size before any encoding. Nothing of the bytes goes into an error. */
+/** A file's contents as bytes, if they are a raster image's; else null (text, a document, other bytes). */
+const imageBytes = (c: unknown): Uint8Array | null => { const u = c instanceof Uint8Array ? c : c instanceof ArrayBuffer ? new Uint8Array(c) : null; return u && isRaster(u) ? u : null; };
+const isImageBytes = (c: unknown) => imageBytes(c) !== null;
+/** A file's bytes, if they are a raster image (else null, read as before): over IMAGE_BYTES_MAX refused with its size
+ * before any encoding. Nothing of the bytes goes into an error. */
 function imageOut(c: unknown, what: string): { base64: string } | null {
-  const u = c instanceof Uint8Array ? c : c instanceof ArrayBuffer ? new Uint8Array(c) : null;
-  if (!u || !isRaster(u)) return null;
+  const u = imageBytes(c);
+  if (!u) return null;
   if (u.length > IMAGE_BYTES_MAX) throw new AgentError("limit", `${what}: an image of ${u.length} bytes, at most ${IMAGE_BYTES_MAX} for an agent to see`);
   return { base64: b64(u) };
 }
@@ -620,7 +623,8 @@ export class AgentPairing {
       const extra: Record<string, unknown> = {};
       if (code === "conflict" && method === "workspace.write") {
         // (the current contents, if within the content bound: else the conflict is said without them, and why)
-        try { const r = await verbs!.read((params as any).path); extra.current = { entry: entryOut(r.entry), rev: r.rev, content: contentOut(r.entry.kind, r.content, (params as any).path) }; }
+        // (an image, to an agent that takes images: never as text in an error; it reads it as one)
+        try { const r = await verbs!.read((params as any).path); if (this.images() && isImageBytes(r.content)) extra.currentOmitted = "its current contents are an image: read it"; else extra.current = { entry: entryOut(r.entry), rev: r.rev, content: contentOut(r.entry.kind, r.content, (params as any).path) }; }
         catch (e2: any) { if (e2 instanceof AgentError && e2.code === "limit") extra.currentOmitted = e2.message; }
         // (that read was a wait too: checked again before it is said)
         if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
@@ -633,6 +637,8 @@ export class AgentPairing {
 
   /** Whether this pairing edits notebooks by cell: the page offers it and the agent said it uses it (its hello). */
   private edits() { return !!this.opts.notebookEdit && !!this.hello?.features?.includes("notebook.edit"); }
+  /** Whether this pairing's agent takes a raster image's read as an image (its hello's "workspace.image"). */
+  private images() { return !!this.hello?.features?.includes("workspace.image"); }
 
   /** An agent's edit of a notebook (notebook-edit.ts): its grammar, then the grant as for a write of its path, then the
    * page's own apply (the open notebook's host); the same grant checked after every wait, as for the verbs. */
@@ -793,7 +799,7 @@ export class AgentPairing {
         if (r.entry.kind === "folder") throw new AgentError("invalid", `${p.path} is a folder: list it`);
         // (a raster image, to an agent that said it takes one: exactly {entry, rev, image}, nothing more; an older
         //  agent would pass that on as text, so it reads the file as before)
-        const image = this.hello?.features?.includes("workspace.image") ? imageOut(r.content, p.path) : null;
+        const image = this.images() ? imageOut(r.content, p.path) : null;
         if (image) {
           if (!Number.isSafeInteger(r.rev) || r.rev < 0) throw new AgentError("storage", `${p.path}: a revision in an unknown form`);
           return { entry: entryOut(r.entry, url), rev: r.rev, image };

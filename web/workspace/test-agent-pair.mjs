@@ -356,7 +356,7 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
     const r = await S.request("workspace.read", { path: p }, w);
     const got = r.result?.image?.base64 ? Uint8Array.from(atob(r.result.image.base64), (c) => c.charCodeAt(0)) : null;
     const exact = r.result && Object.keys(r.result).sort().join() === "entry,image,rev" && Object.keys(r.result.image).join() === "base64" && r.result.rev === 1 && r.result.entry?.path === p;
-    if (!exact || !got || got.length !== 64 || !h.every((b, i) => got[i] === b)) { all = false; console.log("  ", p, JSON.stringify(r).slice(0, 200)); }
+    if (!exact || !got || got.length !== 64 || !h.every((b, i) => got[i] === b)) { all = false; console.log("  ", p, r.result ? Object.keys(r.result).join() : r.error?.data?.code, r.result?.rev, r.result?.image?.base64?.length); }
   }
   ok(all, "PNG, JPEG, GIF87a, GIF89a and WebP: exactly {entry, rev, image: {base64}}, the file's bytes, no type or size");
   const n1 = await S.request("workspace.read", { path: "/A/png-named.txt" }, w);
@@ -379,7 +379,36 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   const v2 = await S.request("workspace.read", { path: "/A/a.png" }, w);
   delete W.rev;
   ok(v1.error?.data?.code === "storage" && v2.error?.data?.code === "storage" && !JSON.stringify([v1, v2]).includes("iVBORw0KGgo"), "a revision that isn't a safe whole number from 0: refused, no image sent");
+  W.files.set("/B/b.png", bytes(PNG));
+  const reads = W.calls.filter((c) => c === "read").length;
+  const g1 = await S.request("workspace.read", { path: "/B/b.png" }, w);
+  ok(g1.error?.data?.code === "invalid" && W.calls.filter((c) => c === "read").length === reads && !JSON.stringify(g1).includes("iVBORw0KGgo"), "an image outside the grant: refused before the workspace, as any read");
+  W.conflictOn.add("/A/a.png");
+  const c1 = await S.request("workspace.write", { path: "/A/a.png", content: { text: "x" }, base: 1 }, w);
+  ok(c1.error?.data?.code === "conflict" && !("current" in c1.error.data) && c1.error.data.currentOmitted === "its current contents are an image: read it" && !JSON.stringify(c1).includes("iVBORw0KGgo"), "a conflict on an image: said without its contents (read it as an image), none of its bytes");
+  W.conflictOn.add("/A/x.txt");
+  const c2 = await S.request("workspace.write", { path: "/A/x.txt", content: { text: "x" }, base: 1 }, w);
+  ok(c2.error?.data?.current?.content?.text === "hello", "a conflict on text still carries its current contents");
+  W.versionBytes = bytes(PNG);
+  const vv = await S.request("workspace.version", { path: "/A/a.png", index: 0 }, w);
+  ok(typeof vv.result?.content?.base64 === "string" && Object.keys(vv.result).join() === "content", "workspace.version is as before (only workspace.read gives images)");
   S.srv.stop(true);
+  // (the grant checked after the read's wait: one that expired meanwhile gets no image)
+  {
+    let t = 7_000_000;
+    const S3 = server(withImage), W3 = fakeWs(), P3 = mk(S3, W3, { code: "x" }, () => t);
+    fill(W3);
+    await P3.paired();
+    await P3.allow({ folders: ["/A"], write: true, expires: t + 60_000 }, false);
+    const go = W3.holdReads();
+    const pending = S3.request("workspace.read", { path: "/A/a.png" }, { wait: 5000 });
+    await until(() => W3.reads === 1);
+    t += 61_000;
+    go();
+    const late = await pending;
+    ok(late.error?.data?.code === "invalid" && !("result" in late) && !JSON.stringify(late).includes("iVBORw0KGgo"), "an image read whose grant expired while it read: refused, none of its bytes");
+    S3.srv.stop(true);
+  }
   // (an agent that didn't say workspace.image gets the bytes as before: it would pass {image} on as text)
   const S2 = server(pairOk), W2 = fakeWs(), P2 = mk(S2, W2);
   fill(W2);
@@ -388,6 +417,9 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   const o1 = await S2.request("workspace.read", { path: "/A/a.png" }, w);
   const o2 = await S2.request("workspace.read", { path: "/A/over.png" }, w);
   ok(typeof o1.result?.content?.base64 === "string" && !("image" in o1.result) && typeof o2.result?.content?.base64 === "string", "without workspace.image: an image is {content: {base64}} as before, and the image cap doesn't apply");
+  W2.conflictOn.add("/A/a.png");
+  const o3 = await S2.request("workspace.write", { path: "/A/a.png", content: { text: "x" }, base: 1 }, w);
+  ok(typeof o3.error?.data?.current?.content?.base64 === "string", "without workspace.image: a conflict on an image carries its contents as before");
   S2.srv.stop(true);
 }
 // ---- after the LAST wait, before anything is said: the same grant, in force now
