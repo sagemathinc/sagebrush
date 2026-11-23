@@ -759,4 +759,3 @@ def matrix_plot(mat, xrange=None, yrange=None, **options):
     g = Graphics([prim], **gopts)
     g._options.update({"flip_y": flip, "ticks_integer": True})
     return g
-

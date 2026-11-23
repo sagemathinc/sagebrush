@@ -1,0 +1,84 @@
+CDF(1, 2) / RDF | [-2.0 - 4.0*I  1.0 + 2.0*I] ; [ 1.5 + 3.0*I -0.5 - 1.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF(1, 2) * RDF | [1.0 + 2.0*I 2.0 + 4.0*I] ; [3.0 + 6.0*I 4.0 + 8.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RDF * CDF(1, 2) | [1.0 + 2.0*I 2.0 + 4.0*I] ; [3.0 + 6.0*I 4.0 + 8.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF(1, 2) + RDF | [2.0 + 2.0*I         2.0] ; [        3.0 5.0 + 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RDF - CDF(1, 2) | [     -2.0*I         2.0] ; [        3.0 3.0 - 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF(1, 2) / RR | [ -2.00000000000000 - 4.00000000000000*I   1.00000000000000 + 2.00000000000000*I] ; [  1.50000000000000 + 3.00000000000000*I -0.500000000000000 - 1.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CDF(1, 2) * RR | [1.00000000000000 + 2.00000000000000*I 2.00000000000000 + 4.00000000000000*I] ; [3.00000000000000 + 6.00000000000000*I 4.00000000000000 + 8.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR * CDF(1, 2) | [1.00000000000000 + 2.00000000000000*I 2.00000000000000 + 4.00000000000000*I] ; [3.00000000000000 + 6.00000000000000*I 4.00000000000000 + 8.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CDF(1, 2) + RR | [2.00000000000000 + 2.00000000000000*I                      2.00000000000000] ; [                     3.00000000000000 5.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR - CDF(1, 2) | [                  -2.00000000000000*I                      2.00000000000000] ; [                     3.00000000000000 3.00000000000000 - 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CDF(1, 2) * N | [ 1.0 + 2.0*I  2.0 + 4.0*I  3.0 + 6.0*I] ; [ 4.0 + 8.0*I 5.0 + 10.0*I 6.0 + 12.0*I] | Full MatrixSpace of 2 by 3 dense matrices over Complex Double Field
+CDF(1, 2) / N | ERR TypeError
+CC(1, 2) / RDF | [ -2.00000000000000 - 4.00000000000000*I   1.00000000000000 + 2.00000000000000*I] ; [  1.50000000000000 + 3.00000000000000*I -0.500000000000000 - 1.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(1, 2) * RDF | [1.00000000000000 + 2.00000000000000*I 2.00000000000000 + 4.00000000000000*I] ; [3.00000000000000 + 6.00000000000000*I 4.00000000000000 + 8.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RDF * CC(1, 2) | [1.00000000000000 + 2.00000000000000*I 2.00000000000000 + 4.00000000000000*I] ; [3.00000000000000 + 6.00000000000000*I 4.00000000000000 + 8.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(1, 2) + RDF | [2.00000000000000 + 2.00000000000000*I                      2.00000000000000] ; [                     3.00000000000000 5.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RDF - CC(1, 2) | [                  -2.00000000000000*I                      2.00000000000000] ; [                     3.00000000000000 3.00000000000000 - 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(1, 2) / RR | [ -2.00000000000000 - 4.00000000000000*I   1.00000000000000 + 2.00000000000000*I] ; [  1.50000000000000 + 3.00000000000000*I -0.500000000000000 - 1.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(1, 2) * RR | [1.00000000000000 + 2.00000000000000*I 2.00000000000000 + 4.00000000000000*I] ; [3.00000000000000 + 6.00000000000000*I 4.00000000000000 + 8.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR * CC(1, 2) | [1.00000000000000 + 2.00000000000000*I 2.00000000000000 + 4.00000000000000*I] ; [3.00000000000000 + 6.00000000000000*I 4.00000000000000 + 8.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(1, 2) + RR | [2.00000000000000 + 2.00000000000000*I                      2.00000000000000] ; [                     3.00000000000000 5.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR - CC(1, 2) | [                  -2.00000000000000*I                      2.00000000000000] ; [                     3.00000000000000 3.00000000000000 - 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(1, 2) * N | [1.00000000000000 + 2.00000000000000*I 2.00000000000000 + 4.00000000000000*I 3.00000000000000 + 6.00000000000000*I] ; [4.00000000000000 + 8.00000000000000*I 5.00000000000000 + 10.0000000000000*I 6.00000000000000 + 12.0000000000000*I] | Full MatrixSpace of 2 by 3 dense matrices over Complex Field with 53 bits of precision
+CC(1, 2) / N | ERR TypeError
+CDF(0) / RDF | [0.0 0.0] ; [0.0 0.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF(0) * RDF | [0.0 0.0] ; [0.0 0.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RDF * CDF(0) | [0.0 0.0] ; [0.0 0.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF(0) + RDF | [1.0 2.0] ; [3.0 4.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RDF - CDF(0) | [1.0 2.0] ; [3.0 4.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF(0) / RR | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CDF(0) * RR | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR * CDF(0) | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CDF(0) + RR | [1.00000000000000 2.00000000000000] ; [3.00000000000000 4.00000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR - CDF(0) | [1.00000000000000 2.00000000000000] ; [3.00000000000000 4.00000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CDF(0) * N | [0.0 0.0 0.0] ; [0.0 0.0 0.0] | Full MatrixSpace of 2 by 3 dense matrices over Complex Double Field
+CDF(0) / N | ERR TypeError
+CC(0) / RDF | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(0) * RDF | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RDF * CC(0) | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(0) + RDF | [1.00000000000000 2.00000000000000] ; [3.00000000000000 4.00000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RDF - CC(0) | [1.00000000000000 2.00000000000000] ; [3.00000000000000 4.00000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(0) / RR | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(0) * RR | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR * CC(0) | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(0) + RR | [1.00000000000000 2.00000000000000] ; [3.00000000000000 4.00000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR - CC(0) | [1.00000000000000 2.00000000000000] ; [3.00000000000000 4.00000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(0) * N | [0.000000000000000 0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 3 dense matrices over Complex Field with 53 bits of precision
+CC(0) / N | ERR TypeError
+complex * RDF | [1.0 + 2.0*I 2.0 + 4.0*I] ; [3.0 + 6.0*I 4.0 + 8.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RDF * complex | [1.0 + 2.0*I 2.0 + 4.0*I] ; [3.0 + 6.0*I 4.0 + 8.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+complex + RDF | [2.0 + 2.0*I         2.0] ; [        3.0 5.0 + 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RDF - complex | [     -2.0*I         2.0] ; [        3.0 3.0 - 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+complex * RR | [1.00000000000000 + 2.00000000000000*I 2.00000000000000 + 4.00000000000000*I] ; [3.00000000000000 + 6.00000000000000*I 4.00000000000000 + 8.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR * complex | [1.00000000000000 + 2.00000000000000*I 2.00000000000000 + 4.00000000000000*I] ; [3.00000000000000 + 6.00000000000000*I 4.00000000000000 + 8.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+complex + RR | [2.00000000000000 + 2.00000000000000*I                      2.00000000000000] ; [                     3.00000000000000 5.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR - complex | [                  -2.00000000000000*I                      2.00000000000000] ; [                     3.00000000000000 3.00000000000000 - 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+complex * N | [ 1.0 + 2.0*I  2.0 + 4.0*I  3.0 + 6.0*I] ; [ 4.0 + 8.0*I 5.0 + 10.0*I 6.0 + 12.0*I] | Full MatrixSpace of 2 by 3 dense matrices over Complex Double Field
+CDF(-0.5, 3) / RDF | [  1.0 - 6.0*I  -0.5 + 3.0*I] ; [-0.75 + 4.5*I  0.25 - 1.5*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF(-0.5, 3) * RDF | [ -0.5 + 3.0*I  -1.0 + 6.0*I] ; [ -1.5 + 9.0*I -2.0 + 12.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RDF * CDF(-0.5, 3) | [ -0.5 + 3.0*I  -1.0 + 6.0*I] ; [ -1.5 + 9.0*I -2.0 + 12.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF(-0.5, 3) + RDF | [0.5 + 3.0*I         2.0] ; [        3.0 3.5 + 3.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RDF - CDF(-0.5, 3) | [1.5 - 3.0*I         2.0] ; [        3.0 4.5 - 3.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF(-0.5, 3) / RR | [  1.00000000000000 - 6.00000000000000*I -0.500000000000000 + 3.00000000000000*I] ; [-0.750000000000000 + 4.50000000000000*I  0.250000000000000 - 1.50000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CDF(-0.5, 3) * RR | [-0.500000000000000 + 3.00000000000000*I  -1.00000000000000 + 6.00000000000000*I] ; [ -1.50000000000000 + 9.00000000000000*I  -2.00000000000000 + 12.0000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR * CDF(-0.5, 3) | [-0.500000000000000 + 3.00000000000000*I  -1.00000000000000 + 6.00000000000000*I] ; [ -1.50000000000000 + 9.00000000000000*I  -2.00000000000000 + 12.0000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CDF(-0.5, 3) + RR | [0.500000000000000 + 3.00000000000000*I                       2.00000000000000] ; [                      3.00000000000000  3.50000000000000 + 3.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR - CDF(-0.5, 3) | [1.50000000000000 - 3.00000000000000*I                      2.00000000000000] ; [                     3.00000000000000 4.50000000000000 - 3.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CDF(-0.5, 3) * N | [ -0.5 + 3.0*I  -1.0 + 6.0*I  -1.5 + 9.0*I] ; [-2.0 + 12.0*I -2.5 + 15.0*I -3.0 + 18.0*I] | Full MatrixSpace of 2 by 3 dense matrices over Complex Double Field
+CDF(-0.5, 3) / N | ERR TypeError
+RDF / CDF(1, 2) | [0.19999999999999998 - 0.39999999999999997*I  0.39999999999999997 - 0.7999999999999999*I] ; [                                0.6 - 1.2*I   0.7999999999999999 - 1.5999999999999999*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RDF / CC(1, 2) | [0.200000000000000 - 0.400000000000000*I 0.400000000000000 - 0.800000000000000*I] ; [ 0.600000000000000 - 1.20000000000000*I  0.800000000000000 - 1.60000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RDF / CDF(0) | [NaN + NaN*I NaN + NaN*I] ; [NaN + NaN*I NaN + NaN*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RDF / CC(0) | [NaN + NaN*I NaN + NaN*I] ; [NaN + NaN*I NaN + NaN*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR / CDF(1, 2) | [0.200000000000000 - 0.400000000000000*I 0.400000000000000 - 0.800000000000000*I] ; [ 0.600000000000000 - 1.20000000000000*I  0.800000000000000 - 1.60000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR / CC(1, 2) | [0.200000000000000 - 0.400000000000000*I 0.400000000000000 - 0.800000000000000*I] ; [ 0.600000000000000 - 1.20000000000000*I  0.800000000000000 - 1.60000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR / CDF(0) | [NaN + NaN*I NaN + NaN*I] ; [NaN + NaN*I NaN + NaN*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR / CC(0) | [NaN + NaN*I NaN + NaN*I] ; [NaN + NaN*I NaN + NaN*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(1)/CC(0) | NaN + NaN*I | Complex Field with 53 bits of precision
+1/CC(0) | NaN + NaN*I | Complex Field with 53 bits of precision
+CC(1, 2)/0 | NaN + NaN*I | Complex Field with 53 bits of precision
+RR(1)/CC(0) | NaN + NaN*I | Complex Field with 53 bits of precision
+~CC(0) | NaN + NaN*I | Complex Field with 53 bits of precision
+~CC(1, 2) | 0.200000000000000 - 0.400000000000000*I | Complex Field with 53 bits of precision
+CC(0)/CC(0) | NaN + NaN*I | Complex Field with 53 bits of precision
