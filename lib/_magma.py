@@ -4068,6 +4068,40 @@ def _sdiff(a, b, pos=None):
                             a.kind if a.kind == b.kind else "set"), "sdiff", a, b, pos, "No valid universe containing all elements")
 
 
+def _opassign(f, a, b, pos, name):
+    """x div:= y and the other keyword assignments (src/magma.ts): f's value,
+    and an error of f's named after the assignment, at it, as Magma 2.18-5
+    says it: "Runtime error in 'div:=': Division by zero"; a bad argument
+    with no types listed, as for x +:= y (_bad_types)."""
+    try:
+        return f(a, b, pos)
+    except MagmaError as e:
+        if e.where == "'%s'" % name[:-2]:
+            if str(e).startswith("Bad argument types"):
+                raise MagmaError("Bad argument types", "'%s'" % name, True, pos)
+            e.where, e.pos = "'%s'" % name, e.pos or pos
+        raise
+
+
+def _and(a, b, pos=None):
+    return _logic("and", a, b, pos) and b
+
+
+def _or(a, b, pos=None):
+    return _logic("or", a, b, pos) or b
+
+
+def _xor(a, b, pos=None):
+    return _logic("xor", a, b, pos) != b
+
+
+def _logic(op, a, b, pos):
+    """a, if a and b are both booleans (b and:= c, b or:= c, b xor:= c)."""
+    if not isinstance(a, bool) or not isinstance(b, bool):
+        raise MagmaError("Bad argument types", "'%s'" % op, True, pos)
+    return a
+
+
 def _reduce(op, s, pos=None):
     items = list(_iter(s))
     if op in ("and", "or") and not all(isinstance(x, bool) for x in items):

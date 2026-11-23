@@ -59,6 +59,10 @@ export const KEYWORDS = new Set(
 const OPS = [":->", "@@", "+:=", "-:=", "*:=", "/:=", "^:=", ":=", "..", "->", "{@", "@}", "{*", "*}", "$$", "<", ">", "(", ")", "[", "]", "{", "}",
   ",", ";", ":", "|", "#", "&", "~", "+", "-", "*", "/", "^", ".", "!", "`", "@", "=", "\\"];
 
+// The keywords whose assignment form Magma has, x div:= 2 (Magma 2.18-5; not eq:=, cmpeq:= or subset:=)
+const OPA_KW = new Set(["cat", "div", "mod", "join", "meet", "diff", "sdiff", "and", "or", "xor"]);
+const OPAS = ["+:=", "-:=", "*:=", "/:=", "^:=", ...[...OPA_KW].map((k) => k + ":=")];
+
 export function lex(src: string): Tok[] {
   const out: Tok[] = [];
   let i = 0, line = 1, col = 1;
@@ -102,6 +106,12 @@ export function lex(src: string): Tok[] {
       let j = i;
       while (j < n && /[A-Za-z0-9_]/.test(src[j])) j++;
       const w = src.slice(i, j);
+      // div:= and the other keyword assignments, one token as Magma reads them (div := is its bad syntax)
+      if (OPA_KW.has(w) && src.startsWith(":=", j)) {
+        out.push({ t: "op", v: w + ":=", line: L, col: C });
+        adv(j + 2 - i);
+        continue;
+      }
       out.push({ t: KEYWORDS.has(w) ? "kw" : "id", v: w, line: L, col: C });
       adv(j - i);
       continue;
@@ -136,7 +146,6 @@ export function lex(src: string): Tok[] {
       adv(j + 1 - i);
       continue;
     }
-    if (src.startsWith("cat:=", i)) { out.push({ t: "op", v: "cat:=", line: L, col: C }); adv(5); continue; }
     const op = OPS.find((o) => src.startsWith(o, i));
     if (!op) {
       // reported by the parser when it reaches it, so that the statements
@@ -342,7 +351,6 @@ class Parser {
       if (a.v === "$" && b.t === "num" && !operandBefore) return found("$1 (the values printed last)");
       if (a.v === "$$" && T.slice(from, k).some((x) => x.v === "func")) return found("$$ in func< >");
       if (a.t === "id" && b.v === "<" && c.v === "[") return found(`${a.v}<[...]> (generator names in a sequence)`);
-      if (a.t === "kw" && ["join", "meet", "cat", "diff", "sdiff", "div", "mod", "and", "or", "xor"].includes(a.v) && b.v === ":=") return found(`${a.v}:= (an assignment with ${a.v})`);
       if (a.v === "for" && b.t === "id" && c.v === ",") return found("for x, y in S (several loop variables)");
       if (a.v === "load" && a.t === "id" && k === from) return found("load (Magma's library files)");
       if (a.v === "for" && b.t === "id" && c.v === "in") {
@@ -836,7 +844,7 @@ class Parser {
         this.next();
         return this.assign(lhs);
       }
-      const opa = ["+:=", "-:=", "*:=", "/:=", "^:=", "cat:="].find((o) => this.at(o));
+      const opa = OPAS.find((o) => this.at(o));
       if (opa && lhs.length === 1) {
         const ot = this.next();
         const e = this.expr();
@@ -848,7 +856,9 @@ class Parser {
         // an error points at the operator and is named after it ('+:=')
         const at = `(${ot.line}, ${ot.col}), ${JSON.stringify(opa)}`;
         const helper = { "+": "_add", "-": "_sub", "*": "_mul", "/": "_div", "^": "_pow" }[op];
-        const val = helper ? `_m.${helper}(${cur}, ${e}, ${at})` : `_m._cat(${cur}, ${e})`;
+        // (the keyword ones through _opassign, which names their errors after the assignment, 'div:=')
+        const kw: Record<string, string> = { cat: "_cat", div: "_idiv", mod: "_mod", join: "_join", meet: "_meet", diff: "_diff", sdiff: "_sdiff", and: "_and", or: "_or", xor: "_xor" };
+        const val = helper ? `_m.${helper}(${cur}, ${e}, ${at})` : `_m._opassign(_m.${kw[op]}, ${cur}, ${e}, ${at})`;
         this.store(target, val);
         return;
       }
@@ -901,7 +911,7 @@ class Parser {
       out.push(t);
       if (!this.eat(",")) break;
     }
-    if (!this.at(":=") && !["+:=", "-:=", "*:=", "/:=", "^:=", "cat:="].some((o) => this.at(o))) { this.i = save; return null; }
+    if (!this.at(":=") && !OPAS.some((o) => this.at(o))) { this.i = save; return null; }
     return out;
   }
 
