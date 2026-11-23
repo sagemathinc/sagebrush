@@ -23,7 +23,7 @@ columns ("long form"), where a `hue=` column splits the values into colored grou
 statistics use: numpy's "auto" histogram bins, Gaussian kernel densities with Scott's bandwidth, quartiles with 1.5
 IQR whiskers. histplot and kdeplot accept weights but do not use it.
 What isn't drawn here (facets over rows and columns, regression plots, clustered heatmaps) raises
-NotImplementedError. Legends aren't titled with the hue variable yet."""
+NotImplementedError."""
 
 import builtins as _builtins
 import math as _math
@@ -260,6 +260,12 @@ def _groups(data, var, hue, palette):
     return [(str(k), _floats([v for v, kk in zip(vals, keys) if kk == k]), cols[i]) for i, k in enumerate(order)]
 
 
+def _hue_title(data, hue):
+    """the legend's title, as seaborn's: the hue variable's name (a column's, or a Series'), if it has one"""
+    name = hue if isinstance(hue, str) else _name(hue) if hue is not None else None
+    return {"title": name} if name else {}
+
+
 def _ax(ax):
     return ax if ax is not None else _plt.gca()
 
@@ -419,8 +425,8 @@ def histplot(data=None, *, x=None, y=None, hue=None, weights=None, stat="count",
         ax.set_xlabel(xname)
     ax.set_ylabel(_STAT_LABEL[stat])
     if hue is not None and legend:
-        # (seaborn titles it with the hue variable; this matplotlib has no legend title yet)
-        ax.legend([arts[lab] for lab, _, _ in groups if lab in arts], [lab for lab, _, _ in groups if lab in arts])
+        ax.legend([arts[lab] for lab, _, _ in groups if lab in arts], [lab for lab, _, _ in groups if lab in arts],
+                  **_hue_title(data, hue))
     return ax
 
 
@@ -465,8 +471,8 @@ def kdeplot(data=None, *, x=None, y=None, hue=None, weights=None, palette=None, 
     # (the densities' axis starts at 0, as matplotlib's sticky edge at a fill's base: as for bars)
     ax._opts.setdefault("_bars", True)
     if hue is not None and legend:
-        # (seaborn titles it with the hue variable; this matplotlib has no legend title yet)
-        ax.legend([arts[lab] for lab, _, _ in groups if lab in arts], [lab for lab, _, _ in groups if lab in arts])
+        ax.legend([arts[lab] for lab, _, _ in groups if lab in arts], [lab for lab, _, _ in groups if lab in arts],
+                  **_hue_title(data, hue))
     return ax
 
 
@@ -1076,7 +1082,7 @@ def barplot(data=None, *, x=None, y=None, hue=None, order=None, hue_order=None, 
         if vn:
             ax.set_xlabel(vn)
     if hlev != [None] and legend:
-        ax.legend()  # (seaborn titles it with the hue variable; this matplotlib's legend has no title yet)
+        ax.legend(**_hue_title(data, hue))
     return ax
 
 
@@ -1278,14 +1284,13 @@ def scatterplot(data=None, *, x=None, y=None, hue=None, size=None, style=None, p
     if yn:
         ax.set_ylabel(yn)
     if look is not None and legend:
-        # (an entry per level; seaborn also titles the legend with the hue variable's name, which this
-        #  matplotlib's legend has no title for)
+        # (an entry per level, titled with the hue variable's name)
         from _graphics import Points
         r = _math.sqrt(area) * (100 / 72) / 2
         handles = [_Handle(Points([], [], marker=marker, size=r, color=_mpl.colors.to_hex(look[v]),
                                   edgecolor=_mpl.colors.to_hex(_rgb(ec)) if ec not in (None, "none", "face") else None))
                    for v in levels]
-        ax.legend(handles, [str(v) for v in levels])
+        ax.legend(handles, [str(v) for v in levels], **({"title": hn} if hn else {}))
     return ax
 
 
@@ -1361,7 +1366,7 @@ def lineplot(data=None, *, x=None, y=None, hue=None, size=None, style=None, unit
     if isinstance(y, str):
         ax.set_ylabel(y)
     if hue is not None and legend:
-        ax.legend()  # (seaborn titles it with the hue variable; this matplotlib has no legend title yet)
+        ax.legend(**_hue_title(data, hue))
     elif legend and (x is None and y is None and len(series) > 1 or kwargs.get("label") is not None):
         ax.legend()  # (as seaborn's: a legend whenever a line is labelled, of all the Axes' labelled lines)
     return ax

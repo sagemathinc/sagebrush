@@ -10,7 +10,7 @@ import { join } from "node:path";
 // (test/seaborn_geometry_cases.py; seaborn's side recorded by test/seaborn_oracle_gen.py into
 // test/seaborn-oracle.json): the points, bars, cells and lines, their colors, sizes and edges, the axes'
 // limits, ticks and labels, and the legends' entries.  Numbers agree to 1e-9 relative; colors to the byte
-// they are drawn as.  Legend titles are not compared: this matplotlib's legend has no title yet.
+// they are drawn as.
 const ROOT = join(__dirname, "..", "..");
 const CLI = join(__dirname, "..", "src", "cli.js");
 const oracle: Record<string, any> = JSON.parse(readFileSync(join(ROOT, "test", "seaborn-oracle.json"), "utf8")).rows;
@@ -30,7 +30,6 @@ const run = (program: string, cwd?: string, extra: string[] = []) =>
     { encoding: "utf8", cwd: cwd ?? work, maxBuffer: 64 << 20 });
 
 function compare(want: any, got: any, path: string, bad: string[]) {
-  if (path.endsWith(".legend.title")) return;
   if (want === null && got === null) return;
   if (Array.isArray(want) && Array.isArray(got)) {
     if (want.length !== got.length) { bad.push(`${path}: ${want.length} items, ours ${got.length}`); return; }

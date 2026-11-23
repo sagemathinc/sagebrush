@@ -107,7 +107,7 @@ def frame(ax):
 def legend(ax):
     if not ax._opts.get("legend"):
         return None
-    return {"title": ax._opts.get("legend_title", ""), "texts": [s for _, s in ax._opts.get("legend_entries", [])]}
+    return {"title": ax._opts.get("legend_title") or "", "texts": [s for _, s in ax._opts.get("legend_entries", [])]}
 def _line(p):
     o = p.options
     return {"x": list(p.xs), "y": list(p.ys), "color": _rgba(o.get("color")), "lw": o.get("thickness", 1.5 * PT) / PT,
