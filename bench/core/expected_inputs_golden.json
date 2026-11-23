@@ -527,7 +527,7 @@
    "input_hash": "134140893"
   }
  },
- "pending_note": "Points not yet confirmed by every backend in a VM run: expected_inputs.py's hashes. The calibration sizes (c0 .. c4) are timed on the calibrated targets only (the Sage-mode, native and wasm drivers), and test_expected_inputs.py checks only their shape (their hashes take minutes to recompute). The first VM run that agrees on a point moves it into points, in a reviewed commit.",
+ "pending_note": "Points not yet confirmed by every backend in a VM run: expected_inputs.py's hashes. The calibration sizes (c0 .. c4) are timed on the calibrated targets only (the Sage-mode, native and wasm drivers), and test_expected_inputs.py checks only their shape (their hashes take minutes to recompute). The first VM run that agrees on a point moves it into points, in a reviewed commit. mat_z_rank_wide's calibration hashes were computed on a spot VM (n2-standard-16, Nov 23 2026; up to 16 min each, for the certified-rank inputs), the smaller two also in the project.",
  "pending": {
   "mat_fp_charpoly:c0": {
    "n": 59,
@@ -653,6 +653,31 @@
    "n": 1145,
    "variants": 8,
    "input_hash": "505286096"
+  },
+  "mat_z_rank_wide:c0": {
+   "input_hash": "531346180",
+   "n": 85,
+   "variants": 8
+  },
+  "mat_z_rank_wide:c1": {
+   "input_hash": "689581221",
+   "n": 151,
+   "variants": 8
+  },
+  "mat_z_rank_wide:c2": {
+   "input_hash": "316277446",
+   "n": 268,
+   "variants": 8
+  },
+  "mat_z_rank_wide:c3": {
+   "input_hash": "565143403",
+   "n": 477,
+   "variants": 8
+  },
+  "mat_z_rank_wide:c4": {
+   "input_hash": "223634763",
+   "n": 848,
+   "variants": 8
   },
   "poly_fp_mul:c0": {
    "n": 5096,
