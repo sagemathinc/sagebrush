@@ -23,7 +23,7 @@ import { itemKey, MAX_RESULT, WRAPPER_VERSION, depsOf, safeRel, DEPS_MAX, DEPS_B
 import { PAGE_CSS } from "../web/latex/style";
 import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_EXTS } from "../web/latex/images";
 import { engineInputs, admitInput, INPUT_BOUNDS, type Known } from "../web/latex/inputs";
-import { checkResult, checkText, type CheckResult, type ImageReport } from "../web/latex/check";
+import { checkResult, checkText, lineOf, type CheckResult, type ImageReport } from "../web/latex/check";
 import { applyStep } from "../web/latex/overlay";
 import { splitChunk, tooLargeProblem } from "../web/latex/split";
 
@@ -38,6 +38,10 @@ const TEX_MAX = 4 * 2 ** 20;
 const PAGES_MAX = 60;
 /** The most PNGs one render writes (--steps: every step of every frame). */
 const SHOTS_MOST = 400;
+/** The PDF's paper for a document that isn't beamer's: Letter, its width and margins in inches. */
+const LETTER_W = 8.5, LETTER_MARGIN = 0.4;
+/** The most displays wider than the text that one render reports. */
+const OVERFULL_MOST = 50;
 /** A beamer slide's width in the HTML and the PNGs, in CSS pixels (its height follows the aspect ratio). */
 const SLIDE_W = 1024;
 
@@ -62,6 +66,8 @@ const HELP = `sagebrush latex: check, run and see a .tex file as Sagebrush's LaT
       CHROME=/path/to/browser); nothing is installed. --steps: each frame at each of its overlay steps
       (\\pause, <2->, \\only, \\uncover), frame-02-1.png, frame-02-2.png, ..., as the editor's Present shows them.
       --pdf: the preview printed to a PDF by the same browser (a beamer document one page per frame).
+      With --png or --pdf, a display wider than the text is reported as a warning (TeX's Overfull \\hbox);
+      printed, it runs on into the margin.
 
 Look at the PNGs after every change: they are what the reader sees.
 `;
@@ -105,7 +111,17 @@ export async function latexCommand(argv: string[], opts: { cli?: string } = {}):
   const report: any = { html: htmlPath, check: result };
   let code = 0;
   if (png !== null || pdf !== null) {
-    try { const b = await screenshots(htmlPath, png, result, steps, pdf); if (png !== null) report.png = b; if (pdf !== null) report.pdf = b.pdf; }
+    try {
+      const { overfull, ...b } = await screenshots(htmlPath, png, result, steps, pdf);
+      if (png !== null) report.png = b;
+      if (pdf !== null) report.pdf = b.pdf;
+      // (a display wider than the text, as TeX's "Overfull \hbox" warns of it: a warning in the check's problems, its
+      //  line where its TeX is found in the source)
+      for (const o of overfull) {
+        const at = texAt(text, o.tex);
+        result.problems.push({ severity: "warning", kind: "overfull", name: o.tex.slice(0, 80), line: at < 0 ? null : lineOf(text, at), message: `a display is ${o.px}px wider than the text (TeX's Overfull \\hbox): ${pdf !== null ? "in the PDF it runs on into the right margin, and past the paper's edge if it is wider than that" : "the PNG shows only its start"}; break it over lines (multline, split, align)` });
+      }
+    }
     catch (e: any) { report[png !== null ? "png_error" : "pdf_error"] = String(e?.message ?? e); code = 1; }
   }
   if (json) process.stdout.write(JSON.stringify(report, null, 2) + "\n");
@@ -115,10 +131,24 @@ export async function latexCommand(argv: string[], opts: { cli?: string } = {}):
     if (report.pdf) process.stdout.write(`wrote ${report.pdf.file} (${report.pdf.pages} page${report.pdf.pages === 1 ? "" : "s"})\n`);
     if (report.png_error) process.stderr.write(`sagebrush latex: no PNGs: ${report.png_error}\n`);
     if (report.pdf_error) process.stderr.write(`sagebrush latex: no PDF: ${report.pdf_error}\n`);
-    const n = result.problems.length;
+    // (a display wider than the text is found by drawing the page, so check can't list it: said here)
+    for (const p of result.problems) if (p.kind === "overfull") process.stdout.write(`warning${p.line ? ` (line ${p.line})` : ""}: ${p.message}: ${p.name}\n`);
+    const n = result.problems.filter((p) => p.kind !== "overfull").length;
     if (n) process.stdout.write(`${n} problem${n === 1 ? "" : "s"} (sagebrush latex check ${file} lists them)\n`);
   }
   return code;
+}
+
+/** Where a display's TeX, as KaTeX's annotation has it (spaced its own way: "\sup \left \{"), starts in the source:
+ * its first 24 characters that aren't spaces, found among the source's, or -1. */
+function texAt(text: string, tex: string): number {
+  const want = tex.replace(/\s+/g, "").slice(0, 24);
+  if (!want) return -1;
+  let squeezed = "";
+  const at: number[] = [];
+  for (let i = 0; i < text.length; i++) if (!/\s/.test(text[i])) { squeezed += text[i]; at.push(i); }
+  const k = squeezed.indexOf(want);
+  return k < 0 ? -1 : at[k];
 }
 
 function usage(why: string): number { process.stderr.write(`sagebrush latex: ${why}\n\n${HELP}`); return 2; }
@@ -501,6 +531,7 @@ body { margin: 0; background: #eef0f2; }
 .sb-standalone .page.beamer > .slide { margin: 0 0 16px; }
 @media print {
   body { background: #fff; }
+  .sb-standalone .dmath { overflow: visible; }
   .sb-standalone .page.beamer { padding: 0; }
   .sb-standalone .page.beamer > .slide { margin: 0; border: none; box-shadow: none; break-after: page; break-inside: avoid; }
   .sb-standalone .page:not(.beamer) { box-shadow: none; margin: 0 auto; }
@@ -610,6 +641,22 @@ async function screenshots(htmlPath: string, dir: string | null, check: CheckRes
     await cdp.send("Page.navigate", { url: pathToFileURL(resolve(htmlPath)).href });
     await loaded;
     await cdp.eval("document.fonts.ready.then(() => Promise.all([...document.images].map((i) => i.decode().catch(() => null)))).then(() => 1)");
+    // (a display wider than the text: on paper it runs on into the margin (STANDALONE_CSS's print rules), as TeX's
+    //  overfull box does, rather than being cut off at its box's edge, and it is reported, with its TeX; measured as
+    //  printed, at the PDF's text width, when there is a PDF, else as the PNGs show it. A beamer frame's own overflow is
+    //  its PNG's overflow_px)
+    let overfull: { px: number; tex: string }[] = [];
+    if (!beamer) {
+      if (pdf !== null) {
+        await cdp.send("Emulation.setEmulatedMedia", { media: "print" });
+        await cdp.send("Emulation.setDeviceMetricsOverride", { width: Math.round((LETTER_W - 2 * LETTER_MARGIN) * 96), height: 800, deviceScaleFactor: 1, mobile: false });
+      }
+      overfull = await cdp.eval(`[...document.querySelectorAll(".dmath")].map((d) => ({ px: Math.ceil(d.scrollWidth - d.clientWidth), tex: (d.querySelector("annotation")?.textContent ?? d.textContent ?? "").trim().replace(/\\s+/g, " ") })).filter((x) => x.px > 1).slice(0, ${OVERFULL_MOST})`);
+      if (pdf !== null) {
+        await cdp.send("Emulation.setEmulatedMedia", { media: "" });
+        await cdp.send("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
+      }
+    }
     const boxes: { x: number; y: number; w: number; h: number; over: number }[] = await cdp.eval(beamer
       ? `[...document.querySelectorAll("section.slide")].map((s) => { const r = s.getBoundingClientRect(), b = s.querySelector(".slide-body");
           const over = b ? Math.max(0, Math.ceil(b.scrollHeight - b.clientHeight), Math.ceil(b.scrollWidth - b.clientWidth)) : 0;
@@ -621,7 +668,7 @@ async function screenshots(htmlPath: string, dir: string | null, check: CheckRes
     //  Letter paper; the print rules are STANDALONE_CSS's)
     let pdfOut: { file: string; pages: number } | undefined;
     if (pdf !== null) {
-      const sz = beamer && boxes.length ? { paperWidth: boxes[0].w / 96, paperHeight: boxes[0].h / 96, marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0 } : { paperWidth: 8.5, paperHeight: 11, marginTop: 0.4, marginBottom: 0.4, marginLeft: 0.4, marginRight: 0.4 };
+      const sz = beamer && boxes.length ? { paperWidth: boxes[0].w / 96, paperHeight: boxes[0].h / 96, marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0 } : { paperWidth: LETTER_W, paperHeight: 11, marginTop: LETTER_MARGIN, marginBottom: LETTER_MARGIN, marginLeft: LETTER_MARGIN, marginRight: LETTER_MARGIN };
       const r = await cdp.send("Page.printToPDF", { printBackground: true, ...sz });
       const bytes = Buffer.from(r.data, "base64");
       writeFileSync(pdf, bytes);
@@ -643,7 +690,7 @@ async function screenshots(htmlPath: string, dir: string | null, check: CheckRes
         pages.push({ file: f, ...(fr ? { frame: fr.n, ...(steps ? { step: s } : {}), title: fr.title } : {}), ...(b.over ? { overflow_px: b.over } : {}) });
       }
     }
-    return { browser, ...(noSandbox ? { browser_sandbox: false } : {}), pages, ...(pdfOut ? { pdf: pdfOut } : {}) };
+    return { browser, ...(noSandbox ? { browser_sandbox: false } : {}), pages, ...(pdfOut ? { pdf: pdfOut } : {}), overfull };
   } finally {
     try { ws?.close(); } catch {}
     if (proc && proc.exitCode === null) { proc.kill(); await new Promise((r) => { proc!.once("exit", r); setTimeout(r, 3000); }); }
