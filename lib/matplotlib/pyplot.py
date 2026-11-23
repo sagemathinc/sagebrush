@@ -464,8 +464,13 @@ class Axes:
         if s is not None and not isinstance(s, (int, float)):
             sizes = [math.sqrt(float(v)) * PT / 2 for v in _list(s)]
         r = math.sqrt(36 if s is None or sizes is not None else float(s)) * PT / 2
+        # (linewidths: the markers' edge width in points, one for all; the edge drawn when edgecolors are given)
+        lw = kw.get("linewidths", kw.get("linewidth", kw.get("lw")))
+        if lw is not None and not isinstance(lw, (int, float)):
+            lw = _list(lw)[0]
         p = Points(xs, ys, marker=marker, size=r, sizes=sizes, color=col, colors=colors, alpha=alpha,
-                   label=label, edgecolor=to_color(edgecolors) if edgecolors not in (None, "none", "face") else None)
+                   label=label, edgecolor=to_color(edgecolors) if edgecolors not in (None, "none", "face") else None,
+                   edgewidth=None if lw is None else float(lw) * PT)
         art = _Artist(self._add(p), "collections.PathCollection")
         if clim is not None:
             # (colored by values: a mappable, for colorbar)
@@ -898,6 +903,12 @@ class Axes:
         self._opts["xlabel"] = str(s)
         if (fontsize or kw.get("size")) is not None:
             self._opts["label_size"] = _size_px(fontsize or kw.get("size"), 10)
+
+    def get_xlabel(self):
+        return self._opts.get("xlabel", "")
+
+    def get_ylabel(self):
+        return self._opts.get("ylabel", "")
 
     def set_ylabel(self, s, fontsize=None, labelpad=None, **kw):
         self._opts["ylabel"] = str(s)

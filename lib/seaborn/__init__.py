@@ -9,7 +9,8 @@ The functions are seaborn 0.13's, for one variable or a few groups of values:
 - distributions: `histplot`, `kdeplot`, `displot` (a figure of its own) and `jointplot` (a scatter plot with each
   variable's histogram on its margins);
 - categories: `stripplot`, `swarmplot`, `boxplot` and `violinplot`;
-- `lineplot`, with the mean and a 95% bootstrap confidence band where an x value repeats;
+- relations: `scatterplot` (colored by a hue variable: one color per level, or along a colormap for numbers) and
+  `lineplot`, with the mean and a 95% bootstrap confidence band where an x value repeats;
 - the theme: `set`, `set_theme`, `set_style`, `set_context`, `set_palette`, `color_palette`, `despine`.
 
 Data are given as seaborn takes them: a list or array of values; several of them (a list of lists, a 2-d array, a
@@ -19,6 +20,7 @@ statistics use: numpy's "auto" histogram bins, Gaussian kernel densities with Sc
 IQR whiskers. histplot and kdeplot accept weights but do not use it.
 What isn't drawn here (facets over rows and columns, regression plots, heatmaps) raises NotImplementedError."""
 
+import builtins as _builtins
 import math as _math
 
 import numpy as _np
@@ -29,7 +31,7 @@ __version__ = "0.13.2"
 
 __all__ = ["set", "set_theme", "set_style", "set_context", "set_palette", "color_palette", "despine", "reset_defaults",
            "reset_orig", "histplot", "kdeplot", "displot", "jointplot", "stripplot", "swarmplot", "boxplot",
-           "violinplot", "lineplot", "FacetGrid", "JointGrid"]
+           "violinplot", "lineplot", "scatterplot", "FacetGrid", "JointGrid"]
 
 # seaborn's named palettes (its colors, as seaborn/palettes.py lists them)
 _PALETTES = {
@@ -386,7 +388,7 @@ def histplot(data=None, *, x=None, y=None, hue=None, weights=None, stat="count",
             ax.plot(xs, ys, color=col, label=label)
         else:
             ax.bar(edges[:-1], h, width=widths, align="edge", color=col, alpha=alpha, label=label,
-                   edgecolor=kwargs.get("edgecolor", "white" if lw != 0 else None))
+                   edgecolor=kwargs.get("edgecolor", _mpl.rcParams["patch.edgecolor"] if lw != 0 else None))
         if kde:
             kk = dict(kde_kws or {})
             curve = _kde_curve(v, kk.get("bw_adjust", 1.0), kk.get("cut", 0), kk.get("clip"),
@@ -696,6 +698,7 @@ def stripplot(data=None, *, x=None, y=None, hue=None, order=None, hue_order=None
     """Each value as a point over its category, spread a little at random (jitter) so they don't hide each
     other, as seaborn's stripplot. Returns the Axes."""
     ax = _ax(ax)
+    size = kwargs.get("s", size)  # (s=, matplotlib's name, is the points' size here too, as seaborn's)
     groups, vert, cn, vn = _categories(data, x, y, hue, orient, palette, order)
     cols = _colors(ax, groups, color, palette)
     width = 0.8
@@ -884,6 +887,210 @@ def violinplot(data=None, *, x=None, y=None, hue=None, order=None, hue_order=Non
 
 # ------------------------------------------------------------------ relations
 
+def _cubehelix_table(start=0.0, rot=0.4, gamma=1.0, hue=0.8, light=0.85, dark=0.15, reverse=False):
+    """seaborn's cubehelix colormap (as_cmap=True): 256 RGB colors from light to dark. The helix is sampled
+    as matplotlib samples a colormap made of functions (256 entries at j / 255), and each of the 256 colors
+    is the entry floor(256 x) at its x from light to dark."""
+    def channel(p0, p1, x):
+        xg = x ** gamma
+        a = hue * xg * (1 - xg) / 2
+        phi = 2 * _math.pi * (start / 3 + rot * x)
+        return min(1.0, max(0.0, xg + a * (p0 * _math.cos(phi) + p1 * _math.sin(phi))))
+    lut = [(channel(-0.14861, 1.78277, j / 255), channel(-0.29227, -0.90649, j / 255), channel(1.97294, 0.0, j / 255))
+           for j in range(256)]
+    xs = _np.linspace(light, dark, 256).tolist()
+    if reverse:
+        xs = xs[::-1]
+    return [lut[min(255, max(0, int(x * 256)))] for x in xs]
+
+
+def _cubehelix_args(name):
+    """the arguments of a "ch:" palette string, as seaborn reads them ("ch:s=.25,rot=-.25", "_r" reversed)"""
+    s = name[3:]
+    kw = {}
+    if s.endswith("_r"):
+        kw["reverse"] = True
+        s = s[:-2]
+    keys = {"s": "start", "r": "rot", "g": "gamma", "h": "hue", "l": "light", "d": "dark"}
+    for part in (p.strip() for p in s.split(",") if p.strip()):
+        k, _, v = part.partition("=")
+        kw[keys.get(k.strip(), k.strip())] = float(v)
+    return kw
+
+
+class _Cmap:
+    """a continuous palette as a table of N RGB colors, looked up as matplotlib's ListedColormap: floor(N t),
+    the first entry below the range and the last above it"""
+
+    def __init__(self, table):
+        self.table = table
+
+    def __call__(self, t):
+        n = len(self.table)
+        return tuple(self.table[0 if t != t or t <= 0 else n - 1 if t >= 1 else min(n - 1, int(t * n))])
+
+
+def _continuous(palette):
+    """the colormap a numeric hue is drawn with: seaborn's default cubehelix ("ch:"), another "ch:" string, or a
+    matplotlib colormap's name"""
+    if palette is None:
+        palette = "ch:"
+    if hasattr(palette, "N") and callable(palette):
+        return _Cmap([tuple(palette(i)[:3]) for i in range(palette.N)])
+    if isinstance(palette, str):
+        if palette.startswith("ch:"):
+            return _Cmap(_cubehelix_table(**_cubehelix_args(palette)))
+        from matplotlib import colormaps
+        name, rev = (palette[:-2], True) if palette.endswith("_r") and palette[:-2] in colormaps else (palette, False)
+        if name in colormaps:
+            from _graphics import cmap_table
+            tab = cmap_table(name)
+            if tab is not None:
+                tab = [tuple(float(v) for v in c[:3]) for c in tab]
+                return _Cmap(tab[::-1] if rev else tab)
+    raise ValueError("%r is not a palette Sagebrush's seaborn can draw a numeric hue with" % (palette,))
+
+
+_QUALITATIVE = ("deep", "muted", "pastel", "bright", "dark", "colorblind", "tab10", "tab20", "tab20b", "tab20c",
+                "Set1", "Set2", "Set3", "Pastel1", "Pastel2", "Paired", "Accent", "Dark2")
+
+
+def _vector(data, key):
+    """a variable's values as a list (None when not given), and its name"""
+    if key is None:
+        return None, None
+    v = _column(data, key)
+    name = key if isinstance(key, str) else _name(v)
+    return (v.tolist() if hasattr(v, "tolist") else list(v)), name
+
+
+def _missing_value(v):
+    return v is None or (isinstance(v, float) and v != v)
+
+
+def _is_number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) or type(v).__name__ in (
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float16", "float32", "float64")
+
+
+def _order(values, given=None):
+    """seaborn's categorical order: the given order, else the levels as they first appear, sorted when they are
+    all numbers"""
+    if given is not None:
+        return list(given)
+    out = []
+    for v in values:
+        if not _missing_value(v) and v not in out:
+            out.append(v)
+    if out and all(_is_number(v) for v in out):
+        out.sort()
+    return out
+
+
+def _hue_mapping(values, palette=None, order=None, norm=None):
+    """(levels, {level: RGB}, numeric) for a hue variable, as seaborn maps it: numbers (unless the palette is
+    qualitative, a list or a dict) along a continuous colormap normalized to their range, else one color per level:
+    the color cycle when it has enough colors, a named palette, a list (cycled) or a dict"""
+    present = [v for v in values if not _missing_value(v)]
+    numeric = bool(present) and all(_is_number(v) for v in present) and not isinstance(palette, (list, tuple, dict)) \
+        and palette not in _QUALITATIVE
+    if numeric and order is None:
+        levels = sorted(_builtins.set(float(v) if isinstance(v, float) else v for v in present))
+        cmap = _continuous(palette)
+        lo, hi = (norm if isinstance(norm, tuple) else (min(present), max(present)))
+        lo, hi = float(lo), float(hi)
+        look = {v: cmap((float(v) - lo) / (hi - lo) if hi > lo else 0.0) for v in levels}
+        return levels, look, True
+    levels = _order(values, order)
+    n = len(levels)
+    if isinstance(palette, dict):
+        look = {v: _rgb(palette[v]) for v in levels}
+    else:
+        if palette is None:
+            cycle = _mpl.rcParams["axes.prop_cycle"].by_key()["color"]
+            if n > len(cycle):
+                raise NotImplementedError("Sagebrush's seaborn colors at most %d hue levels from the color cycle "
+                                          "(seaborn's husl palette for more is not here): pass palette=" % len(cycle))
+            cols = color_palette(None, n)
+        elif isinstance(palette, (list, tuple)):
+            if len(palette) < n:
+                import warnings
+                warnings.warn("The palette list has fewer values (%d) than needed (%d) and will cycle, which may "
+                              "produce an uninterpretable plot." % (len(palette), n), UserWarning, stacklevel=3)
+            cols = [_rgb(palette[i % len(palette)]) for i in range(n)]
+        else:
+            cols = color_palette(palette, n)
+        look = {v: tuple(cols[i]) for i, v in enumerate(levels)}
+    return levels, look, False
+
+
+class _Handle:
+    """a legend entry's marker: the primitive the legend draws for it"""
+
+    def __init__(self, prim):
+        self._prim = prim
+
+
+def scatterplot(data=None, *, x=None, y=None, hue=None, size=None, style=None, palette=None, hue_order=None,
+                hue_norm=None, sizes=None, size_order=None, size_norm=None, markers=True, style_order=None,
+                legend="auto", ax=None, **kwargs):
+    """y against x as points, as seaborn's scatterplot: one color per hue level (the color cycle, or a palette),
+    or, for a numeric hue, a color along seaborn's cubehelix colormap; white edges. Returns the Axes."""
+    if size is not None or style is not None:
+        raise NotImplementedError("scatterplot(size=..., style=...): Sagebrush's seaborn maps hue only")
+    ax = _ax(ax)
+    xs, xn = _vector(data, x)
+    ys, yn = _vector(data, y)
+    if xs is None and ys is None:
+        raise NotImplementedError("scatterplot(data) without x= and y=: Sagebrush's seaborn takes x and y")
+    if xs is None:
+        xs = list(range(len(ys)))
+    if ys is None:
+        ys = list(range(len(xs)))
+    hs, hn = _vector(data, hue)
+    rows = [i for i in range(len(xs)) if not _missing_value(xs[i]) and not _missing_value(ys[i])
+            and (hs is None or not _missing_value(hs[i]))]
+    px = [float(xs[i]) for i in rows]
+    py = [float(ys[i]) for i in rows]
+    kw = dict(kwargs)
+    s = kw.pop("s", None)
+    area = float(s) if s is not None else _mpl.rcParams["lines.markersize"] ** 2
+    lw = kw.pop("linewidth", kw.pop("linewidths", kw.pop("lw", None)))
+    if lw is None:
+        lw = 0.08 * _math.sqrt(area)  # (seaborn's: 0.08 times the root of the marker's area)
+    ec = kw.pop("edgecolor", kw.pop("edgecolors", kw.pop("ec", "w")))
+    marker = kw.pop("marker", "o")
+    alpha = kw.pop("alpha", None)
+    label = kw.pop("label", None)
+    color = kw.pop("color", kw.pop("c", None))
+    if kw:
+        raise NotImplementedError("scatterplot(%s): not in Sagebrush's seaborn" % ", ".join(sorted(kw)))
+    look = None
+    if hs is not None:
+        levels, look, numeric = _hue_mapping([hs[i] for i in rows], palette, hue_order, hue_norm)
+        key = (lambda v: float(v) if isinstance(v, float) else v) if numeric else (lambda v: v)
+        cols = [look[key(hs[i])] for i in rows]
+        art = ax.scatter(px, py, s=area, c=cols, marker=marker, alpha=alpha, edgecolors=ec, linewidths=lw)
+    else:
+        c = _rgb(color) if color is not None else _rgb(ax._color(None, True))
+        art = ax.scatter(px, py, s=area, color=c, marker=marker, alpha=alpha, edgecolors=ec, linewidths=lw,
+                         label=label)
+    if xn:
+        ax.set_xlabel(xn)
+    if yn:
+        ax.set_ylabel(yn)
+    if look is not None and legend:
+        # (an entry per level; seaborn also titles the legend with the hue variable's name, which this
+        #  matplotlib's legend has no title for)
+        from _graphics import Points
+        r = _math.sqrt(area) * (100 / 72) / 2
+        handles = [_Handle(Points([], [], marker=marker, size=r, color=_mpl.colors.to_hex(look[v]),
+                                  edgecolor=_mpl.colors.to_hex(_rgb(ec)) if ec not in (None, "none", "face") else None))
+                   for v in levels]
+        ax.legend(handles, [str(v) for v in levels])
+    return ax
+
+
 def lineplot(data=None, *, x=None, y=None, hue=None, size=None, style=None, units=None, weights=None,
              palette=None, hue_order=None, hue_norm=None, sizes=None, size_order=None, size_norm=None, dashes=True,
              markers=None, style_order=None, estimator="mean", errorbar=("ci", 95), n_boot=1000, seed=None,
@@ -949,22 +1156,22 @@ def lineplot(data=None, *, x=None, y=None, hue=None, size=None, style=None, unit
                     lo.append(a_)
                     hi.append(b_)
             ax.fill_between(xs, lo, hi, color=col, alpha=0.2)
-        o = {k: v for k, v in kwargs.items() if k != "color"}
-        ax.plot(xs, ys, color=col, label=lab, **o)
+        o = {k: v for k, v in kwargs.items() if k not in ("color", "label")}
+        ax.plot(xs, ys, color=col, label=lab if lab is not None else kwargs.get("label"), **o)
     if isinstance(x, str):
         ax.set_xlabel(x)
     if isinstance(y, str):
         ax.set_ylabel(y)
     if hue is not None and legend:
         ax.legend()  # (seaborn titles it with the hue variable; this matplotlib has no legend title yet)
-    elif x is None and y is None and len(series) > 1 and legend:
-        ax.legend()
+    elif legend and (x is None and y is None and len(series) > 1 or kwargs.get("label") is not None):
+        ax.legend()  # (as seaborn's: a legend whenever a line is labelled, of all the Axes' labelled lines)
     return ax
 
 
 def __getattr__(name):
     # (seaborn's other functions: named, and refused, rather than an AttributeError)
-    if name in ("heatmap", "clustermap", "pairplot", "regplot", "lmplot", "relplot", "catplot", "scatterplot",
+    if name in ("heatmap", "clustermap", "pairplot", "regplot", "lmplot", "relplot", "catplot",
                 "barplot", "countplot", "pointplot", "boxenplot", "residplot", "ecdfplot", "rugplot", "PairGrid",
                 "load_dataset"):
         def missing(*args, **kwargs):
