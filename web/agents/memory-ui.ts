@@ -35,8 +35,9 @@ export interface MemoryUiHost {
   toast(text: string, ms?: number): void;
   /** a tag's display name, if the page knows it (lane D's names; never authority) */
   tagName?(id: string): string | null;
-  /** whether the card's agent is the one connected now (only its cards take a decision) */
-  live(card: MemoryCard): boolean;
+  /** which decisions the card takes now: all over the pairing it came on, Dismiss over another connection to the same
+   *  run of its agent, none otherwise */
+  live(card: MemoryCard): "all" | "dismiss" | false;
 }
 
 const hex = (n: number) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => b.toString(16).padStart(2, "0")).join("");
@@ -51,16 +52,17 @@ export function memoryHooks(host: MemoryUiHost) {
   // (no answer, or one the page couldn't read (not as §7.2 has it): the same request again, under the same id, gets
   //  the agent's kept answer, and its memory_decided settles the card)
   const LOST = new Set(["timeout", "closed"]);
-  const lost = (e: unknown) => e instanceof MemoryShapeError || LOST.has((e as { code?: string })?.code ?? "");
+  const lost = (e: unknown) => e instanceof MemoryShapeError || LOST.has((e as { code?: string })?.code ?? "") || (e as { extra?: { answer?: unknown } })?.extra?.answer === true;
   const find = (pending: string): { thread: Thread; turn: Turn; card: MemoryCard } | null => {
     for (const t of host.threads()) for (const e of t.entries) if (e.kind === "turn" && e.memory && Object.hasOwn(e.memory, pending)) return { thread: t, turn: e, card: e.memory[pending] };
     return null;
   };
   // (the card, if it is open and its agent is the one connected now; else said why not)
-  const decidable = (pending: string) => {
+  const decidable = (pending: string, action: "save" | "edit" | "dismiss") => {
     const f = find(pending), p = host.pairing();
     if (!f || f.card.outcome || !p || busy.has(pending)) return null;
-    if (!host.live(f.card)) { host.toast(MEMORY_COPY.away, 6000); return null; }
+    const may = host.live(f.card);
+    if (may === false || (may === "dismiss" && action !== "dismiss")) { host.toast(MEMORY_COPY.away, 6000); return null; }
     return { ...f, p };
   };
   // (a decision names the revision the person saw; a later one shown since is theirs to look at first: nothing sent)
@@ -69,8 +71,8 @@ export function memoryHooks(host: MemoryUiHost) {
     host.toast(MEMORY_COPY.changed, 6000);
     return false;
   };
-  // (an answer changes the card it was for, never a later revision's)
-  const still = (pending: string, card: MemoryCard) => find(pending)?.card === card;
+  // (an answer changes the card it was for, never a later revision's, nor one the agent's memory_decided ended first)
+  const still = (pending: string, card: MemoryCard) => find(pending)?.card === card && !card.outcome;
   const end = (card: MemoryCard, outcome: MemoryCard["outcome"], note?: string) => {
     decisions.delete(card.proposal.pending);
     card.outcome = outcome;
@@ -81,7 +83,7 @@ export function memoryHooks(host: MemoryUiHost) {
   const scopeName = (s: Scope) => (s === "own" ? MEMORY_COPY.own : host.tagName?.(s.tag) ? `the tag ${host.tagName(s.tag)}` : MEMORY_COPY.tag);
   const refused = (e: unknown, pending: string, card: MemoryCard) => {
     const code = (e as { code?: string })?.code;
-    if (lost(e)) return host.toast(e instanceof MemoryShapeError ? MEMORY_COPY.unread : `${MEMORY_COPY.failed}: ${(e as Error)?.message ?? e}`, 8000);
+    if (lost(e)) return host.toast(e instanceof MemoryShapeError || (e as { code?: string })?.code === "too_large" ? MEMORY_COPY.unread : `${MEMORY_COPY.failed}: ${(e as Error)?.message ?? e}`, 8000);
     if (!still(pending, card)) return;
     // (stale: it changed, or the agent's access did; not_found: the proposal is gone at the agent (decided in another
     //  tab, or the agent started again): either way this card can't be saved now)
@@ -90,7 +92,7 @@ export function memoryHooks(host: MemoryUiHost) {
   };
   // (revision: the one the person saw, the card's as drawn or as the dialog opened; a later one at the agent is stale)
   async function save(pending: string, revision: number, edit?: { scope: Scope; name: string; description: string; body: string; expires: number | null }) {
-    const f = decidable(pending);
+    const f = decidable(pending, "save");
     if (!f || !seen(f, revision)) return;
     busy.add(pending);
     const key = JSON.stringify([revision, edit ?? null]);
@@ -111,7 +113,7 @@ export function memoryHooks(host: MemoryUiHost) {
     }
   }
   async function dismiss(pending: string, revision: number) {
-    const f = decidable(pending);
+    const f = decidable(pending, "dismiss");
     if (!f || !seen(f, revision)) return;
     busy.add(pending);
     try {
@@ -125,7 +127,7 @@ export function memoryHooks(host: MemoryUiHost) {
   }
   // (Edit…: the card's text in a dialog, its place among the grant's scopes, and its expiry; Save there saves that)
   function edit(pending: string, revision: number) {
-    const f = decidable(pending);
+    const f = decidable(pending, "edit");
     if (!f || f.card.proposal.body === undefined || f.card.proposal.revision !== revision) return;
     const pr = f.card.proposal;
     const tags = (grantMemory(f.p.grant)?.tags ?? []).slice();

@@ -87,7 +87,7 @@ export class TaskClient {
     this.pending.delete(msg.id);
     clearTimeout(r.timer);
     // (an answer's raw frame over §2.5's bound: refused, its result or error never handed on)
-    if (bytes > TASK_REQUESTS.frameBytes) { r.reject(new AgentError("too_large", "the agent's answer is over the limit")); return true; }
+    if (bytes > TASK_REQUESTS.frameBytes) { r.reject(new AgentError("too_large", "the agent's answer is over the limit", { answer: true })); return true; }
     if (msg.error !== undefined) {
       const code = typeof msg.error?.data?.code === "string" ? msg.error.data.code.slice(0, 40) : "error";
       r.reject(new AgentError(code, String(msg.error?.message ?? "refused").slice(0, 300)));

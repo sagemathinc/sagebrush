@@ -187,6 +187,8 @@ try {
     H.hold.add("memory.save");
     await clickLast("save");
     for (const t = Date.now(); !H.held.length && Date.now() - t < 5000; ) await sleep(50);
+    const held16 = H.held.map((m) => m.params);
+    ok(held16.length === 1 && held16[0].pending === pr16.pending && held16[0].revision === 1, "M16: Save went, naming revision 1", held16);
     H.memory.revise(send, pr16.pending, { body: "two" });
     await P.until(`${lastCard}.querySelector('.mem-body')?.textContent === 'two'`, 10000).catch(() => {});
     H.hold.delete("memory.save");
@@ -210,9 +212,24 @@ try {
     H.release();
     await P.until(`/Saved to your notes/.test(${lastCard}.querySelector('.mem-state')?.textContent ?? '')`, 10000).catch(() => {});
     ok(/couldn't be read/.test(t17) && c17.buttons.includes("Save") && again?.decision_id === m17.params.decision_id && /Saved to your notes/.test((await card()).state ?? ""), "M17: an unreadable answer is said so, the card stays open, and Save again sends the same decision id", { t17, again: again?.decision_id, first: m17.params.decision_id });
+    // ======================================================================== M18: the agent's end while Save is on its way
+    const pr18 = H.memory.propose(send, { name: "ended", description: "ended in flight", body: "x" });
+    await P.until(`document.querySelectorAll('[data-memory]').length >= 10`, 10000);
+    H.hold.add("memory.save");
+    await clickLast("save");
+    for (const t = Date.now(); !H.held.length && Date.now() - t < 5000; ) await sleep(50);
+    const m18 = H.held.splice(0)[0];
+    H.hold.delete("memory.save");
+    H.memory.pending.delete(pr18.pending);
+    send({ type: "memory_decided", pending: pr18.pending, outcome: "dismissed" });
+    await P.until(`/Not saved/.test(${lastCard}.querySelector('.mem-state')?.textContent ?? '')`, 10000).catch(() => {});
+    H.refuse(m18.id, "not_found");
+    await sleep(400);
+    const c18 = await card();
+    ok(!!m18 && c18.state === "Not saved" && !c18.buttons.length, "M18: the agent's end of a card stands when Save's answer comes after it", c18);
     // ======================================================================== M13: no note's text is kept in this browser
     H.memory.propose(send, { name: "later", description: "left open", body: "LATER-TEXT" });
-    await P.until(`document.querySelectorAll('[data-memory]').length >= 10`, 10000);
+    await P.until(`document.querySelectorAll('[data-memory]').length >= 11`, 10000);
     await sleep(700); // (the chat is kept 300 ms after a change)
     const kept = await P.ev(`localStorage.getItem('sagebrush-agents-preview-v1') ?? ''`);
     ok(kept.includes("left open") && !/LATER-TEXT|ELSEWHERE-TEXT|keychain|a lot of text|Explain proofs/.test(kept), "M13: the kept chat has the cards but none of their text, an open card's included");

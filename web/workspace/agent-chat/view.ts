@@ -19,8 +19,9 @@ export interface TurnHooks {
    *  and where a scope is, in the person's words. Without these the card shows, with no actions */
   memory?(pending: string, action: "save" | "edit" | "dismiss", turn: string, revision: number): void;
   scopeName?(scope: "own" | { tag: string }): string;
-  /** whether the card's agent is the one connected now: only its cards take a decision */
-  memoryLive?(card: MemoryCard): boolean;
+  /** which decisions the card takes now: "all" over the pairing it came on, "dismiss" over another connection to the
+   *  same run of its agent (a reconnect, a reload), none otherwise */
+  memoryLive?(card: MemoryCard): "all" | "dismiss" | false;
 }
 
 /** A note's expiry in words: a day, or never (a date past what a Date holds says only "later"). */
@@ -35,18 +36,21 @@ const MEMORY_OUTCOME: Record<string, string> = { saved: "Saved to your notes", d
 function memoryCardHtml(card: NonNullable<Turn["memory"]>[string], turn: Turn, h: TurnHooks): string {
   const pr = card.proposal;
   const where = h.scopeName ? h.scopeName(pr.scope) : pr.scope === "own" ? "this agent's own notes" : "a tag's notes";
-  const open = !card.outcome && !turn.away && !!h.memory && (h.memoryLive?.(card) ?? true);
+  const may = !card.outcome && !turn.away && !!h.memory ? (h.memoryLive?.(card) ?? "all") : false;
+  const open = may !== false;
   // (its text is in this tab only: after a reload an open card has none, and can only be dismissed)
   const text = pr.body !== undefined;
+  const full = may === "all" && text;
   return (
     `<div class="memory-card ${cls(card.outcome ?? "open", ["open", "saved", "dismissed", "stale"])}" data-memory="${esc(pr.pending)}" data-revision="${pr.revision}">` +
     `<div class="mem-title">${pr.op === "edit" ? "Change this note?" : "Remember this?"} <b>${esc(pr.name)}</b></div>` +
     `<div class="mem-where">In ${esc(where)} · ${esc(expiresText(pr.expires))}</div>` +
     `<div class="mem-desc">${esc(pr.description)}</div>` +
     (text ? `<pre class="mem-body">${esc(pr.body!)}</pre>` : "") +
-    (open && !text && !card.outcome ? `<div class="mem-gone">Its text isn't kept after a reload. Dismiss it, or ask the agent to propose it again.</div>` : "") +
+    (open && !text ? `<div class="mem-gone">Its text isn't kept after a reload. Dismiss it, or ask the agent to propose it again.</div>` : "") +
+    (open && text && !full ? `<div class="mem-gone">The agent connected again, so this can only be dismissed. Ask it to propose the note again.</div>` : "") +
     (open
-      ? `<div class="mem-actions">${text ? `<button data-mem="save">Save</button><button data-mem="edit">Edit…</button>` : ""}<button data-mem="dismiss">Dismiss</button></div>`
+      ? `<div class="mem-actions">${full ? `<button data-mem="save">Save</button><button data-mem="edit">Edit…</button>` : ""}<button data-mem="dismiss">Dismiss</button></div>`
       : `<div class="mem-state">${card.outcome ? MEMORY_OUTCOME[card.outcome] : "Not decided"}</div>`) +
     `</div>`
   );

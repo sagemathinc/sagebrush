@@ -193,7 +193,9 @@ const session = new ChatSession({
     // (agent memory v1: a proposed note's card, as this event left it, is marked with the connection it came over)
     if (d.type === "memory_proposal") {
       const { pending, revision } = d as { pending?: unknown; revision?: unknown };
-      const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && e.turn_id === turn_id);
+      // (the last turn of that id, as apply's)
+      let turn: Turn | undefined;
+      for (const e of thread.entries) if (e.kind === "turn" && e.turn_id === turn_id) turn = e;
       const card = turn?.memory && typeof pending === "string" && Object.hasOwn(turn.memory, pending) ? turn.memory[pending] : null;
       const m = connectionMarks();
       if (card && m && !card.outcome && card.proposal.revision === revision) {
@@ -462,22 +464,24 @@ const memory = memoryHooks({
   tagName,
   live: (card) => memoryLive(card),
 });
-// (a memory card takes a decision only over the connection it came on: this tab's same pairing. After a reload its
-//  text is gone and only Dismiss is left, which the same run of the agent (its log's instance) may take: an instance
-//  is no secret (the page names it to whichever agent it resumes with), so it never opens a card that has its text)
+// (a memory card takes every decision only over the connection it came on: this tab's same pairing, to the same agent
+//  process (a runner's new child is another). Over another connection to the same run of the agent (its log's
+//  instance: a reconnect, a reload) it can only be dismissed, which carries no text: an instance is no secret (the
+//  page names it to whichever agent it resumes with), so it never takes a Save or an Edit…)
 const pairingMarks = new WeakMap<object, string>();
 function connectionMarks(): { tab: string; run?: string } | null {
   const p = pairing;
   if (!p || !session.live()) return null;
-  let tab = pairingMarks.get(p);
-  if (!tab) pairingMarks.set(p, (tab = crypto.randomUUID()));
+  const key: object = p.hello ?? p;
+  let tab = pairingMarks.get(key);
+  if (!tab) pairingMarks.set(key, (tab = crypto.randomUUID()));
   const instance = p.hello?.log?.instance;
   return { tab, ...(instance ? { run: instance } : {}) };
 }
-function memoryLive(card: MemoryCard): boolean {
+function memoryLive(card: MemoryCard): "all" | "dismiss" | false {
   const m = connectionMarks();
   if (!m) return false;
-  return card.from === m.tab || (card.proposal.body === undefined && m.run !== undefined && card.run === m.run);
+  return card.from === m.tab ? "all" : m.run !== undefined && card.run === m.run ? "dismiss" : false;
 }
 function turnNode(thread: Thread, turn: Turn): HTMLElement {
   const node = viewTurnNode(thread, turn, {
@@ -1703,6 +1707,7 @@ function mountPairing(ws: Workspace) {
     extra: (close) => chatHereSection(close),
     onPairing(p) {
       pairing = p;
+      renderThread(); // (memory cards: the pairing they came on is no longer this one)
       delegateTasks.attach(p);
       cards.clear();
       // (only while this pairing is the page's: a late message from one it replaced changes nothing; the replaced
@@ -1710,10 +1715,11 @@ function mountPairing(ws: Workspace) {
       offAgent?.();
       offAgent = p.onNotification((m, params) => { if (pairing === p) session.onAgent(m, params, p); });
       let granted = false;
+      let drawnState = "";
       p.onChange(() => {
         cards.refresh(); // (a pairing that closed or changed child: Allows waiting for a digest for it go)
         // (memory cards take a decision only while their connection is here: drawn again as it comes and goes)
-        if (pairing === p && (p.state === "granted" || p.state === "closed")) renderThread();
+        if (pairing === p && p.state !== drawnState && (p.state === "granted" || p.state === "closed")) { drawnState = p.state; renderThread(); }
         if (p.link && p.state !== "connecting") connectingTo = null;
         if (p.link && p.state === "closed" && pairing === p && p.closeReason !== "not allowed") {
           // (over a runner: the person's own Disconnect says only its line; anything else, why the leg ended)
