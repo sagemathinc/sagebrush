@@ -78,10 +78,12 @@ const ALL = [
   /^scripts\/examples[^/]*\.mjs$/,
   /^\.github\/workflows\/ci\.yml$/,
 ];
+// (not the CPython package's own Python, engine/py/python/ and its tests: the CLI doesn't run it, and no module is
+// built from it; scripts/ci-paths.mjs enginePythonOnlyPaths)
 const ENGINE = [
   /^src\//,
   /^lib\//,
-  /^engine\//,
+  /^engine\/(?!py\/python\/|py\/test_[^/]*\.py$)/,
   /^wasm\//,
   /^pyparse\//,
   /^kernels\//,
