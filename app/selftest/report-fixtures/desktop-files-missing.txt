@@ -4,6 +4,7 @@ ok   opened the notebook from disk: ready
 ok   a notebook runs before it may change files, its write refused: {"ran":"42","wrote":"refused"}
 ok   a grant the app didn't make reaches nothing
 ok   a name outside the notebook's folder is refused
+ok   Share isn't offered in the app: {"disabled":true,"title":true,"button":true,"mine":true,"dialog":false}
 ok   ran it: Sage and the engines: "274177 * 67280421310721"
 ok   Python read a file in the notebook's folder
 ok   3D graphics

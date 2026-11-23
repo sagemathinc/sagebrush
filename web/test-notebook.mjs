@@ -71,6 +71,8 @@ try {
   ok(await ev("(() => { const c = document.querySelector('.cell.markdown:not(.rendered)') ?? [...document.querySelectorAll('.cell.markdown')].at(-1); const hl = c.querySelector('.mb-edit pre'); return !!hl && (!!hl.querySelector('.hp') || !!hl.querySelector('.hk')); })()"), "the Markdown being edited is highlighted (the block written in)");
   await ev("(() => { const ta = [...document.querySelectorAll('.cell.markdown textarea')].at(-1); ta.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', ctrlKey: true, bubbles: true})); })()");
   await until("[...document.querySelectorAll('.cell.markdown')].at(-1).classList.contains('rendered')");
+  // no side panel registers on this page: no Agent button beside Share, and no empty panel to open (#1616)
+  ok(await ev("document.querySelector('#sidebtn').hidden && document.querySelector('#sbside').hidden && (window.sagebrush.side?.shown ?? null) === null"), "no Agent button beside Share and no empty side panel: nothing registers one here yet");
   // the toolbar stays in view as the notebook scrolls (William, Oct 17): Run all, the
   // function search and the File menu a press away at the bottom of a long notebook
   {

@@ -77,6 +77,11 @@ test("select: each row of the trigger table", () => {
   // (examples/shared/: the LaTeX previews' one stylesheet, so the LaTeX examples; grader's C2)
   assert.deepEqual(ids(["examples/shared/katex-preview.css"]), ["latex/plain", "latex/sage-doc"]);
   assert.deepEqual(ids(["README.md"]), []);
+  // (the CPython package's own Python: in no module, and the CLI doesn't run it; its crate's Rust is the engine's)
+  assert.deepEqual(ids(["engine/py/python/sagebrush/cli.py"]), []);
+  assert.deepEqual(ids(["engine/py/test_mcp.py"]), []);
+  assert.deepEqual(ids(["engine/py/src/lib.rs"]), ids(["src/compile.ts"]));
+  assert.deepEqual(ids(["engine/py/fixtures/a.py"]), ids(["src/compile.ts"]));
   assert.deepEqual(
     ids(["README.md"], { all: true }),
     CORPUS.map((e) => e.id),

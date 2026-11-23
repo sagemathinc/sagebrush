@@ -430,12 +430,12 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   for (const [id, raw] of Object.entries(bad)) ok(parseReloadRecord(raw) === null, `U-3.${id}: malformed, so no record`);
   ok(parseReloadRecord(null) === null, "U-3.null: no stored value, no record");
   const d = (r, navType, now) => reloadDecision(r, { scope, navType, now });
-  ok(RETURN_MS === 10 * 60 * 1000, "U-7.window: one constant, 10 minutes (A5 item 2)");
+  ok(RETURN_MS === 10 * 60 * 1000, "U-7.window: one constant, 10 minutes, for a grant with no end (A5 item 2; kept by the Nov 22 2026 ruling)");
   ok(d(good, "reload", 1000 + RETURN_MS) === "silent", "U-7.silent: a reload, fresh (age = 10 min), same scope: silent");
-  ok(d(good, "reload", 1000 + RETURN_MS + 1) === "click", "U-7.stale: older than 10 min: kept for one click");
-  ok(d(good, "reload", 999) === "click", "U-7.future: a leftAt in the future fails freshness: kept for one click");
+  ok(d(good, "reload", 1000 + RETURN_MS + 1) === "click", "U-7.stale: a grant with no end, older than 10 min: kept for one click");
+  ok(d(good, "reload", 999) === "discard", "U-7.future: a leftAt in the future: discarded, nothing kept for a click (SEC, Nov 22 2026)");
   ok(d(good, "navigate", 1500) === "silent" && d(good, "back_forward", 1000 + RETURN_MS) === "silent", "U-7.return: a navigation back (Files and back, or Back) within 10 min, same scope: silent (A5 item 2)");
-  ok(d(good, "navigate", 1000 + RETURN_MS + 1) === "discard" && d(good, "back_forward", 1000 + RETURN_MS + 1) === "discard", "U-7.return-stale: a navigation back older than 10 min: discarded, nothing kept for a click");
+  ok(d(good, "navigate", 1000 + RETURN_MS + 1) === "discard" && d(good, "back_forward", 1000 + RETURN_MS + 1) === "discard", "U-7.return-stale: a grant with no end, a navigation back older than 10 min: discarded, nothing kept for a click");
   ok(d(good, "navigate", 999) === "discard", "U-7.return-future: a navigation with a leftAt in the future: discarded");
   ok(d(good, "prerender", 1500) === "discard" && d(good, "", 1500) === "discard", "U-7.other-nav: any other navigation type: discarded");
   ok(d(noLeft, "navigate", 1500) === "discard", "U-7.return-noleft: a navigation with no leftAt: discarded");
@@ -448,6 +448,11 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(d({ ...timed, leftAt: 4990 }, "reload", 5000) === "discard", "U-8.at: now = expires: discarded (R1-e)");
   ok(d({ ...timed, leftAt: 4990 }, "reload", 5001) === "discard", "U-8.after: now = expires + 1: discarded");
   ok(d({ ...timed, leftAt: 4990 }, "navigate", 5000) === "discard", "U-8.click: an expired record is never kept for a click");
+  // (a grant with an end: a return is silent for as long as it lasts, however long ago the page left (#1620))
+  const long = { ...good, grant: { ...good.grant, expires: 1000 + 3 * RETURN_MS } };
+  ok(d(long, "navigate", 1000 + 2 * RETURN_MS) === "silent" && d(long, "back_forward", 1000 + 2 * RETURN_MS) === "silent" && d(long, "reload", 1000 + 2 * RETURN_MS) === "silent", "U-8.grant-window: a grant with an end, a return 20 min after leaving and before it ends: silent (#1620)");
+  ok(d(long, "navigate", 1000 + 3 * RETURN_MS) === "discard" && d(long, "reload", 1000 + 3 * RETURN_MS) === "discard", "U-8.grant-over: the same return as the grant ends (never extended): discarded");
+  ok(d({ ...long, leftAt: 1000 + RETURN_MS }, "navigate", 1000 + RETURN_MS - 1) === "discard" && d({ ...long, leftAt: 1000 + RETURN_MS }, "reload", 1000 + RETURN_MS - 1) === "discard", "U-8.grant-future: a grant with an end, a leftAt in the future: discarded, a reload too");
   // take with this page's scope (A5): another page's record is left where it is; this page's own, or one that can't be
   // read, is taken as before
   {

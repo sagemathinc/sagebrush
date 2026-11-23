@@ -175,6 +175,13 @@ const docsPaths = [
   /^CONTRIBUTING(?:\.[^/]*)?$/,
   /^SECURITY(?:\.[^/]*)?$/,
   /^LICENSE(?:[-.][^/]*)?$/,
+  // (the other top-level prose (not NOTICE.md, which the notices' and imports' scripts read and the packages ship),
+  // docs/'s own pages (not docs/schemas/, which lib/sagebrush/records.py and
+  // test/records.test.ts read) and the friction notes: read by no code, only named in comments, as
+  // test/ci-paths.test.ts checks; the CI capacity ruling, Nov 22 2026, item 2)
+  /^(?:DEVELOPMENT|DOCTESTS|NUMPY|PLAN|PLOTTING|PRODUCT|SECURITY-MODEL)\.md$/,
+  /^docs\/[^/]+\.md$/,
+  /^notes\//,
 ];
 const docsOnly = !full && every(docsPaths);
 
@@ -200,7 +207,10 @@ const runtimePaths = [
 ];
 // (the app's engine subprocess, app/engine/, is the page's worker on a pipe: its suite, web/test-app-engine.mjs, runs
 // in checks; app/ is otherwise the app workflow's alone)
-const webPaths = [/^web\//, /^examples\//, /^packages\/sagebrush-board\//, /^app\/engine\//];
+// (the site's articles and blog: the site's build reads them, web/build-articles.ts and web/build-blog.ts, and
+// scripts/architecture-article.mjs, in checks; web's core, not the unknown-path fallback, which ran the engine's
+// jobs too: the CI capacity ruling, Nov 22 2026, item 2)
+const webPaths = [/^web\//, /^examples\//, /^packages\/sagebrush-board\//, /^app\/engine\//, /^articles\//, /^blog\//];
 const modePaths = [
   /^sage-tests\//, /^magma-tests\//, /^matlab-tests\//,
   /^numpy-tests\//, /^scipy-tests\//, /^pypi-tests\//, /^bench\/mpmath\//,
@@ -299,7 +309,10 @@ const engineSmoke = full || workflowOrBuild || engineChange || fallback;
 // a dispatch and the schedule have no file list)
 // (and a pull request into a track always builds: a track's pin lags its engine until the track's pull into master
 // (scripts/pin-policy.mjs), so the published modules its pins name may not be its engine)
-const wasmBuild = event !== "pull_request" || fallback || onTrack(runRefs(process.env)) || files.some((file) => wasmBuildPaths.some((p) => p.test(file)));
+// (the CPython package's own Python, enginePythonOnlyPaths, is in no module: engine/py is its own crate, not one of
+// the four builds (engine/web, engine/nd, engine/raster, engine/mp); the CI capacity ruling, Nov 22 2026, item 2)
+const wasmBuild = event !== "pull_request" || fallback || onTrack(runRefs(process.env)) ||
+  files.some((file) => wasmBuildPaths.some((p) => p.test(file)) && !enginePythonOnlyPaths.some((p) => p.test(file)));
 const engineCpython = full || workflowOrBuild || matches(cpythonPaths) || fallback;
 const webkit = event === "merge_group" || event === "workflow_dispatch" || event === "schedule" ||
   (event === "pull_request" && (fullTier || matches(webkitPaths) || fallback));
@@ -339,7 +352,7 @@ const unsafeSweep = full || matches(unsafeSweepPaths);
 // long tier.  Another pull request's engine is byte-identical to the published pin its ordinary suites already ran on,
 // so the pass would repeat them.  engine-wasm, which they need, still runs where it did (engine_smoke: the engine's
 // changes, the full tier and a pull request touching the engine's runtime, src/runtime/); a pull request's passes only
-// where it runs (the CPython package's own Python sets wasm_build, but builds no engine engine-wasm would test).
+// where it runs (the modules' fetcher sets wasm_build, but builds no engine engine-wasm would test).
 const engineRuntime = full || matches([/^src\/runtime\//]);
 const engineFull = event === "merge_group" || long || integrationPush || (event === "pull_request" && wasmBuild && (engineSmoke || engineRuntime));
 
