@@ -1436,6 +1436,13 @@ function ipow(x: number, y: number): number {
   return r;
 }
 
+// A 0-d operand as float32 (its value rounded to the float32 nearest)
+function asType32(x: NDArray): NDArray {
+  const r = empty([], D.float32);
+  r.data[0] = Math.fround(Number(x.data[x.offset]));
+  return r;
+}
+
 function operand(x: any): { arr: NDArray; weak: Weak | null } {
   if (x instanceof NDArray) return { arr: x, weak: null };
   const w = pyScalar(x);
@@ -1581,6 +1588,10 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
   if (spec.out === "float" && (ct.kind === "b" || ct.isInt)) ct = floatLoop(op, A, B, ct);
   if (op === "power" && ct.kind === "b") ct = D.int8;
   const rt = spec.out === "bool" ? D.bool : ct;
+  // (a Python scalar takes a float32 loop's type before the loop runs, as NumPy casts it: 0.1 is the float32
+  // nearest 0.1, so a float32 array times 0.1 rounds each product of two float32 values, and a comparison
+  // with 0.1 compares float32 values)
+  if (ct === D.float32) for (const W of [A, B]) if (W.weak && W.arr.dt !== D.float32) W.arr = asType32(W.arr);
   const a = A.arr, b = B.arr;
   const kop = op === "power" ? powerExponent(ct, b) : op; // the kernel
   const shape = broadcastShapes(a.shape, b.shape);
@@ -4160,7 +4171,8 @@ newBuiltinModule("_numpy", (m) => {
         if (ct.kind === "f") {
           const rt = spec.out === "bool" ? D.bool : ct;
           const f = spec.f;
-          const v = castNum(rt, f(wa.v, wb.v));
+          // (each operand in the loop's type first: a Python float with a float32 scalar is the float32 nearest)
+          const v = ct === D.float32 ? castNum(rt, f(Math.fround(wa.v), Math.fround(wb.v))) : castNum(rt, f(wa.v, wb.v));
           return pyScalarOf(rt, [v], 0);
         }
       }
