@@ -46,7 +46,7 @@
 //
 //   node app/selftest/run.mjs <the app's executable>
 import { spawn } from "node:child_process";
-import { mkdtempSync, copyFileSync, existsSync, writeFileSync, readFileSync, chmodSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, copyFileSync, existsSync, writeFileSync, readFileSync, chmodSync, readdirSync } from "node:fs";
 import { createServer } from "node:net";
 import { createServer as httpCreateServer } from "node:http";
 import { fileURLToPath } from "node:url";
@@ -284,6 +284,9 @@ function listTree(dir, rel = "") {
 async function signerLaunch(control) {
   const o = await otherServer();
   const data = mkdtempSync(join(tmpdir(), "sagebrush-app-data-"));
+  // (a previous launch's leftover, as a crash leaves it: the launch's cleanup must remove it, signer.rs)
+  mkdirSync(join(data, "signer-webview"), { mode: 0o700 });
+  writeFileSync(join(data, "signer-webview", "crash-leftover"), "x");
   const res = await launch({ SAGEBRUSH_APP_PERSIST: `signer:${o.origin}`, SAGEBRUSH_APP_DATA_DIR: data, ...(control ? { SAGEBRUSH_APP_SIGNER_CONTROL: control } : {}) }, 120000);
   await new Promise((r) => setTimeout(r, 1000));
   o.close();

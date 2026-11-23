@@ -64,7 +64,8 @@ export type BrowserHost = {
   /** Hide the file browser (its ✕); none: no ✕. */
   close?(): void;
   /** To the agents page (Agents… at the foot, and the switch's Agents): the page leaves the way it leaves for any
-   * other page, its own saves made first; none (the Open… dialog): no Agents…. */
+   * other page, its own saves made first; none (the Open… dialog, the desktop app): no Agents…, and no Files | Agents
+   * switch. */
   agents?(): void;
   /** The Storage panel's "Export all current files (.zip)" (export plan E1 r2c): where the lazy export chunk's files
    * are, and this tab's open documents saved first; without exportUrl, not offered. */
@@ -310,12 +311,14 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   upBtn.setAttribute("aria-label", "Upload");
   moreBtn.setAttribute("aria-label", "More");
   head.append(newBtn, upBtn, moreBtn);
-  // (the page's side panel: the Files | Agents switch where its ✕ was; the corner toggle hides the panel, William Nov 12)
-  if (host.close) {
+  // (the page's side panel: the Files | Agents switch where its ✕ was; the corner toggle hides the panel, William Nov 12.
+  // Only where the page gives a way to the agents page: none (the desktop app, which has no agents page yet, #1542),
+  // no switch, as no Agents… below)
+  if (host.close && host.agents) {
     const sw = modeSwitch("files");
-    // (its Agents, as Agents… below: the page's own way out, when the page gives one)
+    // (its Agents, as Agents… below: the page's own way out)
     const a = sw.querySelector<HTMLButtonElement>('[data-mode="agents"]');
-    if (a && host.agents) a.onclick = () => host.agents!();
+    if (a) a.onclick = () => host.agents!();
     head.append(sw);
   }
   const search = h("input", { className: "fsearch", placeholder: "Search files", type: "search" });

@@ -554,6 +554,8 @@ pub fn run() {
             #[cfg(desktop)]
             if let Ok(d) = disk::data_dir(app.handle()) {
                 windows::clear_webview_dirs(&d);
+                // (and a previous launch's approvals window folder, before that window can open: signer.rs)
+                eprintln!("[signer] startup data folder: {}", signer::startup_cleanup(&d).code());
             }
             #[cfg(desktop)]
             app.manage(windows::PagePort(port));
@@ -570,6 +572,12 @@ pub fn run() {
         .build(context)
         .expect("error while starting Sagebrush")
         .run(|_app, _event| {
+            // (an exit: the approvals window, and only it, closed first, and an exit with a code held until its folder
+            //  is removed: signer.rs)
+            #[cfg(desktop)]
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = &_event {
+                signer::on_exit_requested(_app, *code, api);
+            }
             // (a window closed or the app quit by the person: held until the page has written its changes to disk)
             #[cfg(desktop)]
             match &_event {
@@ -608,9 +616,9 @@ pub fn run() {
                 // launch's clear, windows.rs)
                 if let Ok(d) = disk::data_dir(_app) {
                     windows::clear_webview_dirs(&d);
-                    // (the approvals window's too, if it was opened: signer.rs)
-                    if std::fs::symlink_metadata(signer::data_folder(&d)).is_ok() {
-                        eprintln!("[signer] data folder removed: {}", if signer::remove_data_folder(&d) { "yes" } else { "no" });
+                    // (the approvals window's too, if it was opened in this session: signer.rs; up to 10 s on Windows)
+                    if let Some(gone) = signer::remove_at_exit(&d, _app.get_webview_window(signer::LABEL).is_some()) {
+                        eprintln!("[signer] data folder removed: {}", if gone { "yes" } else { "no" });
                     }
                 }
             }

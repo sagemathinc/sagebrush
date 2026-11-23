@@ -12,7 +12,7 @@ const refusedLine = "ok persist: signer at http://127.0.0.1:5: this page's signi
 const reachedLine = "ok persist: signer at http://127.0.0.1:5: this page's signing call REACHED probe-signature-2; a page's signer_open refused: Command not found; an output frame's refused: not allowed";
 // (every run's log ends with the signer page loaded and its state read, unless `bare`: the rows on those lines say so)
 const GOOD_STATE = "[signer] state: ready=complete probe=yes tauri=yes ran=yes protocol=tauri body=yes";
-const LOADED = ["[signer] page started null/signer/index.html", "[signer] page finished null/signer/index.html", "[signer] state check sent", GOOD_STATE];
+const LOADED = ["[signer] startup data folder: removed", "[signer] page started null/signer/index.html", "[signer] page finished null/signer/index.html", "[signer] state check sent", GOOD_STATE];
 const v = (err, { out = refusedLine, seen = ["frame: requested", "frame: loaded", "frame: refused: not allowed"], control, code = 0, signal = null, problems = [], left = null, bare = false } = {}) => signerVerdict({ err: (bare ? err : [...err, ...LOADED]).join("\n"), out, seen, control, code, signal, problems, left });
 
 ok(signerLog([d(1, "signer"), s(1, 1, "signer"), "[signer] refused 2: not the signer window's page", d(2, "main")].join("\n")).dispatches.length === 2, "the log's lines are read: dispatches and signatures");
@@ -58,7 +58,7 @@ ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "nonsense" }).ok, "an unkn
 
 // the signer page must be its own document with its script run (the Linux failure: an empty document, ran=no)
 {
-  const pre = ["[signer] page finished null/signer/index.html", "[signer] state check sent"];
+  const pre = ["[signer] startup data folder: removed", "[signer] page finished null/signer/index.html", "[signer] state check sent"];
   const good = [d(1, "signer"), s(1, 1, "signer")];
   ok(!v([...pre, "[signer] state: ready=complete probe=yes tauri=yes ran=no protocol=other body=no", ...good], { bare: true }).ok, "the state: an empty document (ran=no protocol=other body=no, Linux on Nov 23) fails");
   ok(!v(good, { bare: true }).ok, "the state: no state line at all fails");
@@ -68,11 +68,15 @@ ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "nonsense" }).ok, "an unkn
   ok(v([...pre, GOOD_STATE, ...good], { bare: true }).ok, "the state: the page's own document, its script run: passes");
 }
 
-// once the app has quit, the approvals window's data folder holds nothing like stored web data
+// once the app has quit, the approvals window's data folder is gone; the launch's cleanup removed the old one
 {
   const good = [d(1, "signer"), s(1, 1, "signer")];
-  ok(v(good, { left: null }).ok && v(good, { left: [] }).ok, "the data folder: gone, or empty: passes");
-  ok(v(good, { left: ["salt", "mediakeys/"] }).ok, "the data folder: other framework files (listed for review): pass");
+  ok(v(good, { left: null }).ok, "the data folder: gone: passes");
+  ok(!v(good, { left: [] }).ok, "the data folder: there but empty fails (it must be gone)");
+  ok(!v(good, { left: ["salt", "mediakeys/"] }).ok, "the data folder: other framework files left fail");
+  ok(!v(["[signer] startup data folder: refused", ...LOADED.slice(1), ...good], { bare: true }).ok, "the launch's cleanup: refused (the leftover kept) fails");
+  ok(!v([...LOADED.slice(1), ...good], { bare: true }).ok, "the launch's cleanup: no line fails");
+  ok(!v(["[signer] startup data folder: absent", ...LOADED.slice(1), ...good], { bare: true }).ok, "the launch's cleanup: absent (the leftover not seen) fails");
   for (const bad of ["Cookies", "cookies.sqlite", "LocalStorage/", "Local Storage/leveldb/000003.log", "IndexedDB/", "Session Storage/", "CacheStorage/", "Cache/", "Service Worker/", "databases/", "storage/", "WebsiteData/hsts-storage.sqlite", "History", "Web Data", "Login Data", "x.db", "x.db-wal"]) {
     ok(!v(good, { left: ["ok-file", bad] }).ok, `the data folder: ${bad} left fails`);
   }

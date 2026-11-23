@@ -283,7 +283,7 @@ Every method, field, bound and error below is closed: anything not listed is ref
 | Method | params | result | Checks |
 |---|---|---|---|
 | `tasks.start` | `{title, prompt, target: "local", run: bool, docs: [{path, kind, content}]}` | `{task, base, seq}` | `run` is frozen into the grant (§6.2); `run: true` is refused as `unavailable` when the runner is unavailable |
-| `tasks.list` | `{}` | `{tasks: [{task, title, status, target, run, round, seq, proposal: commit\|null, question: bool, updated}]}` | at most 64 entries |
+| `tasks.list` | `{}` | `{tasks: [{task, title, status, target, run, round, seq, proposal: commit\|null, question: bool, updated, reason?, reason_code?}]}` | at most 64 entries; `reason` and `reason_code` only for an `interrupted` task, and only to a page that announced `tasks.reason` |
 | `tasks.get` | `{task, after: seq}` | `{task: <list entry>, events: [{seq, event}], last: seq, reset: bool}` | events after `after`, at most 4 MiB per answer, so `last` may be short of the task's `seq`: a long log is read by repeating with `after = last` until `last` equals `task.seq`; `reset` when `after` is unknown |
 | `tasks.diff` | `{task, commit}` | `{task, base, commit, round, seq, files: [{path, kind, change: "added"\|"modified"\|"deleted", base_blob: blob\|null, blob: blob\|null}]}` | `commit` is a proposal commit of this task, pinned by the caller; never "the latest" |
 | `tasks.file` | `{task, commit, path}` | `{blob, content}` | the page checks that the git blob id of `content`'s bytes equals `blob` |
@@ -292,7 +292,7 @@ Every method, field, bound and error below is closed: anything not listed is ref
 | `tasks.ask` | `{task, proposal: commit, seq, note, current: [{path, kind, content}]}` | `{status, round}` | `stale` if moved; `current` only the task's own paths |
 | `tasks.stop` | `{task}` | `{status}` | stops the turn and the run; the task becomes `interrupted` |
 | `tasks.revoke` | `{task}` | `{status}` | `closed`; the grant is void, and queued work is dropped |
-| `tasks.resume` | `{task}` | `{status}` | only from `interrupted`, with the frozen grant |
+| `tasks.resume` | `{task, note?}` | `{status}` | only from `interrupted`, with the frozen grant; `note` (0.8.13): text of at most 64 KiB, for the resumed turn only |
 | `tasks.answer` (M2) | `{task, qid, revision, answer_id, text}` | `{accepted: bool, current: bool}` | §6.4 |
 
 **`tasks.merged`'s two outcomes:**
@@ -307,7 +307,16 @@ Every method, field, bound and error below is closed: anything not listed is ref
 
 **Events (`task.event {task, seq, event}`):**
 - the chat turn events (as `agent-chat/events.ts`), and:
-- `{type: "task_status", status, reason?}`;
+- `{type: "task_status", status, reason?, code?}`. `code` is present only when the status is `interrupted`, and only for a page that announced `tasks.reason` in `page.features`; the task log keeps it always. It is one of:
+  - `no_proposal`: the turn completed with no change in the copy;
+  - `unproposable`: it completed with changes the store refused;
+  - `stopped`: the person's Stop;
+  - `switched_off`: the Delegate switch turned off;
+  - `limit`: the transcript bound, the disk, or the 24-hour limit;
+  - `failed`: the turn ended in an error;
+  - `restarted`: the agent restarted while the task was working.
+  A page that doesn't know a code shows a plain interruption. A page without `tasks.reason` gets exactly the shapes it had before.
+- A turn whose result Claude Code marks as an error (`is_error`) sends Claude's text as an ordinary message, then `turn_error {code: "is_error", message: "Claude ended the turn with an error"}`;
 - `{type: "proposal", round, base, commit, files}`, with files as in `tasks.diff`;
 - **M2:**
   - `{type: "question", qid, revision, text, blocking, choices?}`;

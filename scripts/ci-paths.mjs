@@ -394,21 +394,24 @@ const webGroups = [
   ["terminal", webRuntime || inArea("shell") || suiteGroups.has("terminal")],
   ["remote-preview", webRuntime || suiteGroups.has("remote-preview")],
 ].filter(([, selected]) => web && selected).map(([group]) => group);
-const webMatrix = webGroups.flatMap((group) => {
-  const total = group === "notebook" || group === "remote-preview" ? 3 : 1;
-  return Array.from({ length: total }, (_, i) => ({
-    name: total === 1 ? group : `${group}-${i + 1}-of-${total}`,
-    group,
-    shard: i + 1,
-    total,
-  }));
-});
+// (the web-browser jobs: the selected groups packed into at most three, the CI capacity ruling, Nov 22 2026, the org's 60
+// concurrent jobs; 13 before, most of each its setup.  A job runs its groups in this order, every one even after one
+// failed.  latex is alone: its build has the editor on loopback hosts.  terminal is last in its job: it rebuilds
+// web/dist with the bash set.  Every group is in exactly one job: test/ci-paths.test.ts)
+export const WEB_BUCKETS = [
+  ["board", ["board-a", "board-b", "board-c", "board-unit", "preload"]],
+  ["notebook", ["notebook", "remote-preview", "terminal"]],
+  ["latex", ["latex"]],
+];
+const webMatrix = WEB_BUCKETS
+  .map(([name, groups]) => ({ name, groups: groups.filter((g) => webGroups.includes(g)).join(" ") }))
+  .filter((job) => job.groups);
 // (web-runner: the runner, the workspace, the board frame and the notebook's merges)
 const webRunner = web && (webRuntime || inArea("board") || inArea("workspace") || suiteJobs.has("web-runner"));
 const webWorkspace = web && (allWeb || inArea("workspace"));
 const webExport = webWorkspace || (web && suiteJobs.has("web-export"));
 const webLookalike = webWorkspace || (web && suiteJobs.has("web-lookalike"));
-// The share dialog's browser suite (web-sync.3, about 8.5 min alone, its own web-sync shard): in the full tier, but on a
+// The share dialog's browser suite (web-sync.3, about 8.5 min, in web-sync's client shard): in the full tier, but on a
 // pull request only when it changes sharing (web/share/, web/share-client/, web/cloud/share/, the suites among them) or the
 // account at the top right (web/workspace/account.ts, which reads the same first check as Share), or has the full-ci
 // label; a master push, the schedule and a dispatch always run it (grader's web-sync CI-time plan, Nov 9: PR CI <= 10 min)
@@ -440,7 +443,7 @@ const outputs = {
   // (mpmath's suite: the core backend always; the Python backend, a rollback path, the long tier's)
   mpmath_backends: JSON.stringify(long ? ["sagebrush", "python"] : ["sagebrush"]),
   // (web-sync's shards: the share dialog's part 2, its big listing and upload leaks, the long tier's)
-  web_sync_shards: JSON.stringify(["core", "client", "moves", "pwa", "share-dialog", ...(long ? ["share-dialog-2"] : [])]),
+  web_sync_shards: JSON.stringify(["core", "client", "pwa", ...(long ? ["share-dialog-2"] : [])]),
   wasm_build: wasmBuild,
   engine_cpython: engineCpython,
   webkit,
@@ -461,9 +464,37 @@ const outputs = {
   size_inputs: event === "workflow_dispatch" || event === "schedule" || gateInputs(files).length > 0 ||
     (onTrack(runRefs(process.env)) && files.some((file) => enginePaths.some((p) => p.test(file)))),
   files: files.length,
-  // (the examples job: the ids it runs and its shard matrix, at most 16 examples a shard (SHARD_MAX); plan U7 section 2)
+  // (the examples job: the ids it runs and its shard matrix, at most 64 examples a shard (SHARD_MAX); plan U7 section 2)
   examples_ids: JSON.stringify(exampleSelection),
   examples_matrix: JSON.stringify(Array.from({ length: shardCount(exampleSelection.length) }, (_, i) => i + 1)),
 };
+// A master push of the very commit the merge queue's run tested and passed (scripts/ci-queue-tested.mjs, which sets
+// CI_QUEUE_TESTED in ci.yml's changes job): that run was the full tier on this exact commit, so no test runs again.
+// Only what a push alone does still runs: the modules' build and their publication (wasm_build, which a push always
+// sets), the size gate's docs-only record and the ci summary.  Every other selection is off, whatever it was (the CI
+// capacity ruling's second cut, Nov 22 2026; test/ci-paths.test.ts checks each output).
+const queueTested = event === "push" && ref === "refs/heads/master" && process.env.CI_QUEUE_TESTED === "true";
+if (queueTested) {
+  for (const key of ["full", "node", "web", "modes", "engine_smoke", "engine_full", "engine_cpython", "webkit", "web_runner", "web_export",
+    "web_lookalike", "web_share", "census", "unsafe_sweep", "slow_tests", "size_inputs"]) outputs[key] = false;
+  Object.assign(outputs, { web_groups: "[]", web_matrix: "[]", examples_ids: "[]", examples_matrix: "[]", slow_scope: "" });
+}
+outputs.queue_tested = queueTested;
+// PR CI light (the repository variable PR_CI_LIGHT, exactly "true", set by William while the merge queue is starved of
+// runners; ci.yml's changes job passes it as CI_PR_LIGHT): a pull request runs only checks and the size gate (with its
+// size-base), as an ordinary pull request does when checks runs, and the modules' build when it needs one; every other
+// suite is left to its merge_group run, which is the full tier and gates the merge.  Never a queue group, a push, the
+// schedule or a dispatch; and a pull request labelled full-ci still runs everything it selected.  (@sagebrush's go,
+// Nov 23 2026: 44 of 53 running jobs were pull requests', and the merge queue had none)
+const prLight = event === "pull_request" && process.env.CI_PR_LIGHT === "true" && !labels.includes("full-ci");
+if (prLight) {
+  const checksRan = outputs.node === true || outputs.web === true || outputs.size_inputs === true;
+  for (const key of ["full", "node", "web", "modes", "engine_smoke", "engine_full", "engine_cpython", "webkit", "web_runner", "web_export",
+    "web_lookalike", "web_share", "census", "unsafe_sweep", "slow_tests"]) outputs[key] = false;
+  Object.assign(outputs, { web_groups: "[]", web_matrix: "[]", examples_ids: "[]", examples_matrix: "[]", slow_scope: "" });
+  // (checks and size-base run on size_inputs; where checks would have run, they still do, and the gate measures)
+  outputs.size_inputs = checksRan;
+}
+outputs.pr_light = prLight;
 for (const [key, value] of Object.entries(outputs)) console.log(`${key}=${value}`);
 console.error(`ci paths (${event}, ${files.length} files): ${JSON.stringify(outputs)}`);
