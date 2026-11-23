@@ -9572,14 +9572,27 @@ class _MNumberField(_snf.NumberField_absolute):
 
 
 class _MOrder:
-    _magma_block = True
-    _magma_nowrap = True  # Magma prints the description on one line
-
     def __init__(self, K):
         self.K = K
 
+    @property
+    def _magma_block(self):
+        # (printed on lines of its own, except a quadratic field's order by its field's name, which Magma 2.18-5 prints
+        # inline: print L.1, MaximalOrder(L); is "w Maximal Order of K")
+        return not (self.K._quadratic and _global_name(self.K) is not None)
+
+    @property
+    def _magma_nowrap(self):
+        # (an equation order's description prints on one line; a quadratic field's order wraps as text, as Magma's)
+        return not self.K._quadratic
+
     def __repr__(self):
         K = self.K
+        if K._quadratic:
+            # (a quadratic field's: by the global variable holding the field now, else the field in full, as Magma
+            # 2.18-5 prints it; "Maximal Equation Order of" where it is Z[sqrt(d)], index 1)
+            head = "Maximal Equation Order of " if K._nfdata()["index"] == 1 else "Maximal Order of "
+            return head + (_global_name(K) or repr(K))
         f = _snf._repr_poly(K._f, K._var)
         if K._nfdata()["index"] == 1:
             return "Maximal Equation Order with defining polynomial %s over its ground order" % f
@@ -9652,6 +9665,10 @@ def _squarefree_part(d):
     raise MagmaError("QuadraticField: the squarefree part of %d was not found within the limit (its prime factors above %d are not known); this is not supported yet" % (d, _SQUAREFREE_TRIAL), "'QuadraticField'")
 
 
+# QuadraticField(d) for the session, by d's squarefree part (s -> field)
+_QUADRATIC_FIELDS = {}
+
+
 def QuadraticField(d):
     # (an integer only: int() would take 25/7 as 3)
     if isinstance(d, bool) or not isinstance(d, int):
@@ -9660,7 +9677,11 @@ def QuadraticField(d):
     s = _squarefree_part(d)
     if s in (0, 1):
         raise MagmaError("QuadraticField of a square (Magma's rational field) is not supported yet")
-    K = _MNumberField([-s, 0, 1], quadratic=True)
+    # (one field for each squarefree part, as Magma's: QuadraticField(12) is QuadraticField(3))
+    K = _QUADRATIC_FIELDS.get(s)
+    if K is not None:
+        return K
+    K = _QUADRATIC_FIELDS[s] = _MNumberField([-s, 0, 1], quadratic=True)
     # (its defining polynomial is in the session's polynomial ring over the integers, as Magma 2.18-5 has it: it
     # prints as $.1^2 - 5, P.1^2 - 5 for an unnamed ring P holds, w^2 - 5 once the ring is named w, even later)
     K._fring = PolynomialRing(_ZZ)
