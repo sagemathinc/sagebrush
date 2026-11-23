@@ -113,6 +113,32 @@ try {
   ok(p10 === `/Attachments/${id10}/${"ab".repeat(12)}.png` && t10 === "The image wasn't saved: a file with its name is already there." && d10b === d10a && s10 && JSON.stringify(s10.bytes) === JSON.stringify(PNG), "T10: a second image at a taken name: refused by the workspace, the first file's bytes kept, the draft unchanged, said in the page's words", { p10, t10, d10a, d10b });
   ok(d10a.startsWith("keep  \n\nImage: `"), "T10: what was typed is kept as it is, its spaces too, the image's line after it", d10a);
 
+  // ---- T11: typing on in the same chat while the image is saved: what is typed stays, the path after it
+  const id11 = await fresh(P, "before");
+  await P.ev(`(() => { window.__release = null; navigator.locks.request("sagebrush-workspace", { mode: "exclusive" }, () => new Promise((r) => (window.__release = r))); return true; })()`);
+  await P.until(`typeof window.__release === "function"`);
+  await paste(P);
+  await sleep(300);
+  await P.ev(`document.querySelector('#editor textarea').focus()`);
+  await P.send("Input.insertText", { text: " and after" });
+  await sleep(500);
+  await P.ev(`(window.__release(), true)`);
+  const d11 = await lines(P, id11, 1);
+  ok(/^before and after\n\nImage: `\/Attachments\//.test(d11), "T11: typing on while the image is saved: all of it kept, the image's path after it", d11);
+
+  // ---- T12: the workspace's own limit (a folder of 10,000 entries): the attachment is refused by it, nothing added
+  const id12 = await fresh(P, "full");
+  const filled = await P.ev(`(async () => {
+    const db = await new Promise((ok, no) => { const r = indexedDB.open("sagebrush-workspace"); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+    try { await new Promise((ok, no) => { const t = db.transaction("entries", "readwrite"), st = t.objectStore("entries"); for (let i = 0; i < 10000; i++) st.put({ path: "/Attachments/${id12}/f" + i, kind: "file", created: 1, updated: 1, size: 0, fid: "x" + i }); t.oncomplete = ok; t.onerror = () => no(t.error); }); return true; } finally { db.close(); }
+  })()`, {}, 60000);
+  await paste(P);
+  await P.until(`/limits/.test(document.querySelector('#toast')?.textContent ?? '')`, 15000).catch(() => {});
+  const t12 = await P.ev(`document.querySelector('#toast')?.textContent ?? ''`);
+  await sleep(500);
+  const n12 = await P.ev(`(async () => { const db = await new Promise((ok) => { const r = indexedDB.open("sagebrush-workspace"); r.onsuccess = () => ok(r.result); }); try { return await new Promise((ok) => { const r = db.transaction("entries").objectStore("entries").count(IDBKeyRange.bound("/Attachments/${id12}/", "/Attachments/${id12}/\\uffff")); r.onsuccess = () => ok(r.result); }); } finally { db.close(); } })()`);
+  ok(filled && t12 === "The image wasn't saved: the workspace is at one of its limits." && n12 === 10000 && (await draftOfChat(P, id12)) === "full", "T12: a folder the workspace says is full: the image refused by its limit, nothing saved, the draft unchanged", { t12, n12 });
+
   // ---- T8: an agent that takes images: the help line says so, and it reads the pasted file as an image
   const A = fakeAgent({ features: ["workspace.image"] });
   agents.push(A);

@@ -67,7 +67,7 @@ function host({ agent = null, create = true, fail = null } = {}) {
   const H2 = host();
   await attach(H2, "c1", Array.from({ length: ATTACH_MAX }, () => file(bytes(PNG))));
   ok(H2.made.length === ATTACH_MAX, `${ATTACH_MAX} at once: all saved`);
-  ok(attachFolder("abc_-9Z") === "/Attachments/abc_-9Z" && attachFolder("../x") === null && attachFolder("a/b") === null && attachFolder("") === null && attachFolder("a".repeat(65)) === null && attachFolder("a b") === null, "a chat's folder only from an id that is a plain name (no /, .., spaces; at most 64)");
+  ok(attachFolder("abc_-9Z") === "/Attachments/abc_-9Z" && attachFolder("../x") === null && attachFolder("a/b") === null && attachFolder("") === null && attachFolder("a".repeat(65)) === null && attachFolder("a b") === null && attachFolder("abc\n") === null && attachFolder("abc\n\n") === null, "a chat's folder only from an id that is a plain name (no /, .., spaces; at most 64)");
   const H3 = host();
   await attach(H3, "../etc", [file(bytes(PNG))]);
   ok(H3.made.length === 0 && H3.toasts[0] === ATTACH_COPY.noWorkspace, "a chat whose id isn't a plain name: nothing saved");
