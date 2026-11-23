@@ -568,6 +568,11 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
   // (and out of it however this thread ends, an exception's end included)
   process.on("exit", () => raw(false));
   const removeFiguresHere = () => { if (figures !== null && !figures.kept) try { rmSync(figures.dir, { recursive: true, force: true }); } catch {} };
+  // Closing a pty does not invariably reach us as SIGHUP: a write to the
+  // vanished terminal can fail first and make Node exit with status 1.  The
+  // worker cannot then finish its own cleanup, so cover every ordinary exit
+  // in this front thread too (rmSync is deliberately safe to repeat).
+  process.on("exit", removeFiguresHere);
   const die = (sig: NodeJS.Signals) => {
     removeFiguresHere();
     raw(false);
