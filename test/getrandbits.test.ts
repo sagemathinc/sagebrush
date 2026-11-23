@@ -28,6 +28,23 @@ test("a k too large for memory is a MemoryError naming the call, before any word
   assert.match(r.stdout, /^getrandbits\(9223372036854775808\) needs about \d+ MiB, more than this session's \d+ MiB\n$/);
 });
 
+test("a k just above what the session admits (1 byte per bit) is refused before any word is drawn: the stream hasn't moved", () => {
+  const code = `import random, re
+r = random.Random(5)
+try:
+    r.getrandbits(2**62)
+except MemoryError as e:
+    limit = int(re.search(r"this session's (\\d+) MiB", str(e)).group(1))
+k = limit * 2**20 + 64
+try:
+    r.getrandbits(k)
+    print("drawn")
+except MemoryError:
+    print("MemoryError", r.random() == random.Random(5).random())`;
+  const r = spawnSync(process.execPath, [CLI, "-c", code], { encoding: "utf8", timeout: 120_000 });
+  assert.equal(r.stdout, "MemoryError True\n", r.stderr);
+});
+
 // (the recording's provenance: CI's CPython, when it is 3.14.10, prints the committed .out)
 test("getrandbits_cases.out is what CPython 3.14.10 prints", (t) => {
   const v = execFileSync("python3", ["-c", "import sys; print('%d.%d.%d' % sys.version_info[:3])"], { encoding: "utf8" }).trim();
