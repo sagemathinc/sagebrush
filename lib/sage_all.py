@@ -79,7 +79,11 @@ __all__ = [
 ]
 
 # (an attribute loaded on first use: prime_pi.plot, moebius.range; a module-level name is the index's, __getattr__)
-from _sage_lazy import LazyImport as _LazyImport
+from _sage_lazy import lazy_import as _lazy_import, LazyImport as _LazyImport
+# (Sage's table(), cached_function and cached_method: stubs, as the Core API records them, each its module loaded at
+# its first call; a session binds the stub and is rebound to what it resolves to then, _sage_lazy.bind)
+_lazy_import("_sage_table", "table", globals())
+_lazy_import("_sage_cached", ["cached_function", "cached_method"], globals())
 from _sage_expr import (Expression as _Expr, _expr, var, x, pi, e, I, oo, infinity, Infinity, symbolic_sum, assume, forget, assumptions, assuming,
                         euler_gamma, SR, function, sin, cos, tan, cot, sec, csc, asin, acos, atan,
                         arcsin, arccos, arctan, arccot, arcsec, arccsc, atan2, arctan2, sinh, cosh,

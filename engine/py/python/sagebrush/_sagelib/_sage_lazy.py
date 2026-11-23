@@ -165,3 +165,74 @@ def bind(ns):
     for k, v in list(ns.items()):
         if isinstance(v, LazyImport) and v._target is not _UNSET and v._name == k:
             ns[k] = v._target
+
+
+class _Session:
+    """A Sage-mode session namespace's names that aren't loaded yet.  The
+    runtime asks it when a global load misses in that namespace (_miss) and
+    tells it of ``del name`` there (_delete); only a session's namespace has
+    one (session()), never a library module's."""
+
+    __slots__ = ("_ns", "_names", "_dead")
+
+    def __init__(self, ns, names):
+        self._ns = ns
+        self._names = names
+        self._dead = set()
+
+    def _miss(self, name):
+        # (a name the session deleted, or none of sage_all's: no such name, the NameError; a domain that fails to
+        # import raises its own error, and nothing is bound, so the next use tries again)
+        if name in self._dead or name not in self._names:
+            raise KeyError(name)
+        import sage_all
+        value = getattr(sage_all, name)
+        self._ns[name] = value
+        return value
+
+    def _unloaded(self):
+        # (dir() at the session's top level lists these too: a use would load them)
+        return [n for n in self._names if n not in self._ns and n not in self._dead]
+
+    def _delete(self, name):
+        # (`del name`: deleted for good, a later use a NameError, not loaded again; True when the name is one of
+        # sage_all's the session hasn't used yet, which deletes as a bound one does)
+        if name not in self._names:
+            return False
+        unloaded = name not in self._dead and name not in self._ns
+        self._dead.add(name)
+        return unloaded
+
+
+def session(ns):
+    """Make ns a Sage-mode session namespace: sage_all's names (its
+    ``__all__``, what ``from sage_all import *`` binds).  In pyjs the names
+    sage_all's own start loaded are bound now and every other one is loaded
+    the first time it's used, with its domain (lib/_sage_names.py); elsewhere,
+    all of them now.
+
+    EXAMPLES::
+
+        sage: from _sage_lazy import session
+        sage: ns = {}
+        sage: session(ns)
+        sage: ns["ZZ"]
+        Integer Ring
+    """
+    import builtins
+    import sage_all
+    # (the index, which a first use reads: loaded with the session, not fetched then)
+    import _sage_names  # noqa: F401
+    hook = getattr(builtins, "__pyjs_lazy_namespace__", None)
+    names = tuple(sage_all.__all__)
+    loaded = sage_all.__dict__
+    for name in names:
+        if hook is None:
+            ns[name] = getattr(sage_all, name)
+        elif name in loaded:
+            ns[name] = loaded[name]
+    if hook is not None:
+        hook(ns, _Session(ns, frozenset(names)))
+    # (and a session for LazyImport's stubs, a user's lazy_import's: one resolved is rebound here too)
+    bind(ns)
+

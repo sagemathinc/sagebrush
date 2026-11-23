@@ -323,6 +323,9 @@ def _sbtx_deps():
 with open(_sbtx_in) as _sbtx_f:
     _sbtx_items = json.load(_sbtx_f)
 _sbtx_g = dict(globals())
+# (a copy of the Sage session's namespace is a session too: a Sage name not used yet loads at its first use)
+import _sage_lazy as _sbtx_lazy
+_sbtx_lazy.session(_sbtx_g)
 # (PythonTeX's items: plain Python, not preparsed, in a namespace of their own, as PythonTeX's own session)
 _sbtx_pg = {}
 _sbtx_mg = {}
