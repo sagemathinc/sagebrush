@@ -31,7 +31,7 @@ __version__ = "0.13.2"
 
 __all__ = ["set", "set_theme", "set_style", "set_context", "set_palette", "color_palette", "despine", "reset_defaults",
            "reset_orig", "histplot", "kdeplot", "displot", "jointplot", "stripplot", "swarmplot", "boxplot",
-           "violinplot", "lineplot", "scatterplot", "FacetGrid", "JointGrid"]
+           "violinplot", "lineplot", "scatterplot", "heatmap", "FacetGrid", "JointGrid"]
 
 # seaborn's named palettes (its colors, as seaborn/palettes.py lists them)
 _PALETTES = {
@@ -940,6 +940,8 @@ def _continuous(palette):
     if isinstance(palette, str):
         if palette.startswith("ch:"):
             return _Cmap(_cubehelix_table(**_cubehelix_args(palette)))
+        if palette in ("rocket", "icefire", "rocket_r", "icefire_r"):
+            return _Cmap(_seaborn_cmap(palette))
         from matplotlib import colormaps
         name, rev = (palette[:-2], True) if palette.endswith("_r") and palette[:-2] in colormaps else (palette, False)
         if name in colormaps:
@@ -1169,9 +1171,175 @@ def lineplot(data=None, *, x=None, y=None, hue=None, size=None, style=None, unit
     return ax
 
 
+# ------------------------------------------------------------------ matrices
+
+def _table(cmap):
+    """a colormap given to heatmap, as a table of RGB colors: a matplotlib colormap's name (or name_r), a
+    "ch:" cubehelix, a list of colors, or a matplotlib.colors colormap"""
+    if isinstance(cmap, (list, tuple)):
+        return [tuple(_rgb(c)) for c in cmap]
+    if isinstance(cmap, str):
+        return _continuous(cmap).table
+    if hasattr(cmap, "N") and callable(cmap):
+        return [tuple(float(v) for v in cmap(i)[:3]) for i in range(cmap.N)]
+    raise ValueError("cmap=%r is not a colormap Sagebrush's seaborn can draw" % (cmap,))
+
+
+def _luminance(c):
+    """the relative luminance of an RGB color (WCAG's, as seaborn's relative_luminance)"""
+    lin = [v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4 for v in c[:3]]
+    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+
+def _ticks_every(n, length_in, fontsize):
+    """seaborn's automatic tick labels: every k-th, so that they fit at one font height each"""
+    most = int(length_in // (fontsize / 72))
+    if most < 1:
+        return 0
+    return n // most + 1
+
+
+def heatmap(data, *, vmin=None, vmax=None, cmap=None, center=None, robust=False, annot=None, fmt=".2g",
+            annot_kws=None, linewidths=0, linecolor="white", cbar=True, cbar_kws=None, cbar_ax=None, square=False,
+            xticklabels="auto", yticklabels="auto", mask=None, ax=None, **kwargs):
+    """A matrix as a grid of colored cells, as seaborn's heatmap: row i, column j is the cell from (j, i) to
+    (j + 1, i + 1), the first row at the top; the colors span vmin to vmax (the data's range unless given, or
+    its 2nd to 98th percentiles with robust=True); center= sets the color in the middle; annot=True writes each
+    value (with fmt) in a color that stands out from its cell's; a colorbar beside it. Returns the Axes."""
+    if kwargs:
+        raise NotImplementedError("heatmap(%s): not in Sagebrush's seaborn" % ", ".join(sorted(kwargs)))
+    if _is_frame(data):
+        rows = [str(v) for v in list(data.index)]
+        cols = [str(v) for v in list(data.columns)]
+        values = _np.asarray(data.to_numpy(), dtype=float)
+        rname = getattr(data.index, "name", None)
+        cname = getattr(data.columns, "name", None)
+    else:
+        values = _np.asarray(data, dtype=float)
+        if values.ndim != 2:
+            raise ValueError("Must pass 2-d input. shape=%s" % (values.shape,))
+        rows = [str(i) for i in range(values.shape[0])]
+        cols = [str(j) for j in range(values.shape[1])]
+        rname = cname = None
+    nr, nc = values.shape
+    hidden = _np.isnan(values)
+    if mask is not None:
+        m = _np.asarray(mask.to_numpy() if _is_frame(mask) else mask, dtype=bool)
+        if m.shape != values.shape:
+            raise ValueError("Mask must have the same shape as data.")
+        hidden = hidden | m
+    shown = values[~hidden]
+    if vmin is None:
+        vmin = float(_np.percentile(shown, 2)) if robust and shown.size else float(shown.min()) if shown.size else 0.0
+    if vmax is None:
+        vmax = float(_np.percentile(shown, 98)) if robust and shown.size else float(shown.max()) if shown.size else 1.0
+    vmin, vmax = float(vmin), float(vmax)
+    if cmap is None:
+        tab = _seaborn_cmap("icefire" if center is not None else "rocket")
+    else:
+        tab = _table(cmap)
+    if center is not None:
+        # (as seaborn: the part of the colormap from center - r to center + r, r the larger distance from center
+        #  to vmin or vmax, resampled to 256 colors, so that center has the colormap's middle color)
+        base = _Cmap(tab)
+        r = max(vmax - center, center - vmin)
+        lo, hi = center - r, center + r
+        cmin, cmax = (vmin - lo) / (hi - lo), (vmax - lo) / (hi - lo)
+        tab = [base(t) for t in _np.linspace(cmin, cmax, 256).tolist()]
+    cm = _Cmap(tab)
+    ax = _ax(ax)
+    span = vmax - vmin
+    rects, colors, texts = [], [], []
+    for i in range(nr):
+        for j in range(nc):
+            if hidden[i, j]:
+                continue
+            v = float(values[i, j])
+            c = cm((v - vmin) / span if span else 0.0)
+            rects.append((j, i, 1, 1))
+            colors.append(_mpl.colors.to_hex(c))
+            texts.append((j + 0.5, i + 0.5, c, i, j))
+    from _graphics import Rects
+    edge = _mpl.colors.to_hex(_rgb(linecolor)) if linewidths else None
+    ax._add(Rects(rects, colors=colors, color=colors[0] if colors else None, edgecolor=edge))
+    ax.set_xlim(0, nc)
+    ax.set_ylim(nr, 0)
+    if annot is not None and annot is not False:
+        labels = values if annot is True else _np.asarray(annot.to_numpy() if _is_frame(annot) else annot)
+        if labels.shape != values.shape:
+            raise ValueError("`data` and `annot` must have same shape.")
+        kws = dict(annot_kws or {})
+        for x, y, c, i, j in texts:
+            val = labels[i, j]
+            val = val.item() if hasattr(val, "item") else val
+            if annot is True and fmt == "d":
+                val = int(val)
+            col = kws.get("color", ".15" if _luminance(c) > 0.408 else "w")
+            ax.text(x, y, ("{:" + fmt + "}").format(val), color=col, ha="center", va="center",
+                    fontsize=kws.get("fontsize", kws.get("size", 10)))
+    # tick labels: every one, every k-th to fit (auto), none (False), every k-th (an int), or the given list
+    fig = getattr(ax, "figure", None)
+    try:
+        fw, fh = (float(v) for v in fig.get_size_inches())
+    except AttributeError:
+        fw, fh = (float(v) for v in _mpl.rcParams["figure.figsize"])
+    box = ax.get_position()
+    for axis, labels, given, n, length in (("x", cols, xticklabels, nc, fw * (box.x1 - box.x0)),
+                                           ("y", rows, yticklabels, nr, fh * (box.y1 - box.y0))):
+        if given is True:
+            every = 1
+        elif given is False:
+            every = 0
+        elif isinstance(given, int):
+            every = given
+        elif isinstance(given, str) and given == "auto":
+            every = _ticks_every(n, length, 10)
+        else:
+            labels, every = [str(s) for s in given], 1
+        pos = [k + 0.5 for k in range(0, n, every)] if every else []
+        labs = labels[::every] if every else []
+        if axis == "x":
+            ax.set_xticks(pos, labs)
+        else:
+            ax.set_yticks(pos, labs)
+    if cname is not None:
+        ax.set_xlabel(str(cname))
+    if rname is not None:
+        ax.set_ylabel(str(rname))
+    if square:
+        ax.set_aspect("equal")
+    if cbar:
+        art = _HeatMappable(tab, vmin, vmax, ax)
+        _plt.gcf().colorbar(art, cax=cbar_ax, ax=None if cbar_ax is not None else ax, **(cbar_kws or {}))
+    return ax
+
+
+class _HeatMappable:
+    """what heatmap's colorbar reads: its colormap and range"""
+
+    def __init__(self, tab, vmin, vmax, ax):
+        from matplotlib.colors import ListedColormap
+        self.cmap = ListedColormap([_mpl.colors.to_hex(c) for c in tab])
+        self._clim, self._ax = (vmin, vmax), ax
+
+    def get_clim(self):
+        return self._clim
+
+    def get_cmap(self):
+        return self.cmap
+
+
+def _seaborn_cmap(name):
+    """seaborn's own colormap (rocket, icefire, or either reversed with _r) as its table of 256 RGB colors"""
+    from seaborn._cm import TABLES
+    rev = name.endswith("_r")
+    tab = list(TABLES[name[:-2] if rev else name])
+    return tab[::-1] if rev else tab
+
+
 def __getattr__(name):
     # (seaborn's other functions: named, and refused, rather than an AttributeError)
-    if name in ("heatmap", "clustermap", "pairplot", "regplot", "lmplot", "relplot", "catplot",
+    if name in ("clustermap", "pairplot", "regplot", "lmplot", "relplot", "catplot",
                 "barplot", "countplot", "pointplot", "boxenplot", "residplot", "ecdfplot", "rugplot", "PairGrid",
                 "load_dataset"):
         def missing(*args, **kwargs):
