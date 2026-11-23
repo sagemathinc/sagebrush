@@ -141,6 +141,9 @@ export interface Thread {
   // came from; the page's applied_seq above is its own, separate from these
   agent_seq?: number;
   agent_instance?: string;
+  /** #1792: the artifacts whose tabs the person closed (their ids): kept with the chat; opening one again brings its tab
+   *  back */
+  closed?: string[];
   /** a conversation read back from the account's mirror (M2): shown, read-only; nothing in it is ever sent to an agent */
   source?: "mirror";
 }

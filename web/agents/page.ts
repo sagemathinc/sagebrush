@@ -15,7 +15,7 @@ import { render as markdown } from "../markdown";
 import { colorBlock } from "./code-color";
 import { runningTurn, type Artifact, type Thread, type Turn, type UserEntry } from "../workspace/agent-chat/events";
 import { ChatSession } from "../workspace/agent-chat/session";
-import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, diffHtml, mirrorSectionNode } from "../workspace/agent-chat/view";
+import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, artifactLabel, diffHtml, mirrorSectionNode } from "../workspace/agent-chat/view";
 import { Mirror, MIRROR_COPY, mirrorTitle, type RemoteConversation, type Section } from "../workspace/agent-chat/mirror";
 import { startFakeTurn } from "./fake-agent";
 import { AgentError, RELOAD_KEY, type AgentPairing, type Created, type Kept } from "../workspace/agent-pair";
@@ -190,7 +190,11 @@ const session = new ChatSession({
   emitted(thread, d, replayed) {
     if (d.type === "artifact") {
       // (one replayed from the agent's log after a reconnect is recorded, but never moves the pane)
-      if (!replayed) openArtifact = (d as { id: string }).id;
+      if (!replayed) {
+        openArtifact = (d as { id: string }).id;
+        // (written again by the agent: its tab is back if the person had closed it, #1792)
+        reopenTab(thread, openArtifact);
+      }
       // (a notebook the agent wrote: which cells, as it wrote them, for the written-by label)
       const art = d as { kind?: string; path?: string };
       if (art.kind === "notebook" && art.path && workspace) {
@@ -407,6 +411,8 @@ function renderThread() {
   }
   $("#empty").hidden = thread.entries.length > 0;
   $("#log-tools").hidden = thread.entries.length === 0;
+  // (#1792: everything the chat has made, to open again, even with the pane closed)
+  $("#all-arts-chat").hidden = !thread.artifacts.length;
   const nearEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
   const seen = new Set<string>();
   let prev: HTMLElement | null = null;
@@ -620,7 +626,10 @@ let leavingThread: string | null = null;
 /** Before a pane or thread closes: a running cell is stopped only if the person says so. */
 async function mayClosePane(threadId: string | null): Promise<boolean> {
   if (!threadId) return true;
-  const busy = [...hosts].filter(([k, h]) => k.startsWith(threadId + "\u0000") && h.nb?.isRunning());
+  return mayStopRunning([...hosts].filter(([k, h]) => k.startsWith(threadId + "\u0000") && h.nb?.isRunning()));
+}
+/** These hosts' running cells stopped, if the person says so (one tab closing, a pane or a thread). */
+async function mayStopRunning(busy: [string, Host][]): Promise<boolean> {
   if (!busy.length) return true;
   // (the notebook's popups close first: a modal dialog is above them, in the top layer)
   for (const p of document.querySelectorAll<HTMLElement>(".sbnb-pop:not(dialog)")) p.hidden = true;
@@ -631,6 +640,83 @@ async function mayClosePane(threadId: string | null): Promise<boolean> {
   if (answer !== "stop") return false;
   for (const [, h] of busy) h.nb?.interrupt();
   return true;
+}
+
+// #1792: an artifact's tab closed (its ×, or a middle click), its host saved or kept first as when the pane closes: the
+// next tab is shown, or the pane closes with the last. The artifact stays in the chat: its card there, the pane's All
+// artifacts, or the agent's writing it again bring the tab back.
+const closedOf = (t: Thread) => new Set((Array.isArray(t.closed) ? t.closed : []).filter((x): x is string => typeof x === "string"));
+function reopenTab(t: Thread, id: string) {
+  const c = closedOf(t);
+  if (!c.delete(id)) return;
+  t.closed = [...c];
+  save();
+}
+async function closeTab(threadId: string, id: string) {
+  if (current().id !== threadId) return;
+  const k = hostKey(threadId, id), h = hosts.get(k);
+  if (h?.nb?.isRunning() && !(await mayStopRunning([[k, h]]))) return;
+  if (current().id !== threadId) return;
+  if (h) {
+    const r: Released = h.release ? await h.release().catch((e) => ({ ok: false as const, why: String((e as Error)?.message ?? e) })) : { ok: true };
+    if (!r.ok) {
+      // (it could neither save nor keep a copy: it stays, shown, with its bar, as on the pane's close)
+      h.bar = {
+        kind: "refused",
+        text: r.why,
+        actions: [
+          { label: "Try again", run: () => void closeTab(threadId, id) },
+          ...(h.download?.() ? [{ label: "Download a copy", run: () => saveDownload(h.download!()) }] : []),
+          { label: "Close without keeping", run: () => void (async () => { await h.dispose?.(); if (hosts.get(k) === h) hosts.delete(k); h.el.remove(); await closeTab(threadId, id); })() },
+        ],
+      };
+      if (current().id === threadId) { openArtifact = id; renderArtifacts(); }
+      return;
+    }
+    if (hosts.get(k) === h) hosts.delete(k);
+    h.el.remove();
+  }
+  if (current().id !== threadId) return;
+  const t = current(), closed = closedOf(t);
+  closed.add(id);
+  t.closed = [...closed];
+  save();
+  if (openArtifact === id) {
+    const i = t.artifacts.findIndex((x) => x.id === id);
+    const next = t.artifacts.slice(i + 1).find((x) => !closed.has(x.id)) ?? t.artifacts.slice(0, Math.max(i, 0)).reverse().find((x) => !closed.has(x.id));
+    openArtifact = next?.id ?? null;
+    if (!next) fullscreen = false;
+  }
+  renderArtifacts();
+}
+/** #1792: everything this chat has produced, closed tabs included: a click opens it (its tab back). */
+function artifactBrowser() {
+  const t = current(), closed = closedOf(t);
+  const dlg = Object.assign(document.createElement("dialog"), { className: "arts-dlg" });
+  dlg.setAttribute("aria-labelledby", "arts-dlg-t");
+  const h = Object.assign(document.createElement("h3"), { id: "arts-dlg-t", textContent: "Artifacts in this chat" });
+  const list = Object.assign(document.createElement("div"), { className: "arts-list" });
+  for (const x of t.artifacts) {
+    const b = Object.assign(document.createElement("button"), { type: "button", className: "arts-item" + (x.id === openArtifact ? " on" : "") });
+    b.dataset.art = x.id;
+    b.append(
+      Object.assign(document.createElement("span"), { className: "ai", textContent: artifactIcon(x) }),
+      Object.assign(document.createElement("span"), { className: "t", textContent: x.title }),
+      Object.assign(document.createElement("small"), { textContent: [artifactLabel(x).replace(/&[a-z]+;|&#\d+;/g, ""), closed.has(x.id) ? "closed" : x.id === openArtifact ? "shown" : ""].filter(Boolean).join(" · ") }),
+    );
+    b.onclick = () => { dlg.close(); if (current().id !== t.id) return; openArtifact = x.id; renderArtifacts(); };
+    list.append(b);
+  }
+  if (!t.artifacts.length) list.append(Object.assign(document.createElement("p"), { textContent: "Nothing yet: what the agent makes, and the files it opens, show here." }));
+  const close = Object.assign(document.createElement("button"), { type: "button", textContent: "Close" });
+  close.onclick = () => dlg.close();
+  const menu = document.createElement("menu");
+  menu.append(close);
+  dlg.append(h, list, menu);
+  dlg.addEventListener("close", () => dlg.remove(), { once: true });
+  document.body.append(dlg);
+  dlg.showModal();
+  (list.querySelector<HTMLElement>(".arts-item.on") ?? list.querySelector<HTMLElement>(".arts-item"))?.focus();
 }
 
 function renderArtifacts() {
@@ -651,29 +737,43 @@ function renderArtifacts() {
     renderBar(undefined);
     return;
   }
+  // (shown again: its tab is back, #1792)
+  reopenTab(thread, a.id);
+  const closed = closedOf(thread);
   // (the tab shown is seen: its "changed" mark goes)
   const seenHost = hosts.get(hostKey(thread.id, a.id));
   if (seenHost) seenHost.changed = false;
   // the head: tabs (a running notebook's name says so, and one the agent changed behind another), copy, full screen, close
-  const hk = JSON.stringify([thread.id, thread.artifacts.map((x) => [x.id, x.title, hosts.get(hostKey(thread.id, x.id))?.running ?? false, hosts.get(hostKey(thread.id, x.id))?.changed ?? false]), a.id, fullscreen]);
+  const hk = JSON.stringify([thread.id, thread.artifacts.map((x) => [x.id, x.title, hosts.get(hostKey(thread.id, x.id))?.running ?? false, hosts.get(hostKey(thread.id, x.id))?.changed ?? false, closed.has(x.id)]), a.id, fullscreen]);
   if (hk !== headKey) {
     headKey = hk;
+    // (a tab and its ×, #1792: closed ones aren't shown, the one shown always is)
     const tabs = thread.artifacts
+      .filter((x) => x.id === a.id || !closed.has(x.id))
       .map((x) => {
         const run = hosts.get(hostKey(thread.id, x.id))?.running;
         const changed = hosts.get(hostKey(thread.id, x.id))?.changed;
-        return `<button class="tab${x.id === a.id ? " on" : ""}" data-tab="${esc(x.id)}">${artifactIcon(x)} ${esc(x.title)}${run ? ` <span class="tab-running">· running</span>` : ""}${changed ? ` <span class="tab-changed">· changed</span>` : ""}</button>`;
+        const on = x.id === a.id ? " on" : "";
+        return `<span class="tab-wrap${on}"><button class="tab${on}" data-tab="${esc(x.id)}">${artifactIcon(x)} ${esc(x.title)}${run ? ` <span class="tab-running">· running</span>` : ""}${changed ? ` <span class="tab-changed">· changed</span>` : ""}</button><button class="tab-x" type="button" data-close="${esc(x.id)}" title="Close" aria-label="Close ${esc(x.title)}">×</button></span>`;
       })
       .join("");
     // (the control that had the focus has it again after the head is redrawn: a tab, copy, full screen or close, BAC-6)
     const had = document.activeElement instanceof HTMLElement && head.contains(document.activeElement) ? document.activeElement : null;
-    const refocus = had ? (had.dataset.tab !== undefined ? `[data-tab="${CSS.escape(had.dataset.tab)}"]` : had.id ? `#${had.id}` : null) : null;
+    const refocus = had ? (had.dataset.tab !== undefined ? `[data-tab="${CSS.escape(had.dataset.tab)}"]` : had.dataset.close !== undefined ? `[data-close="${CSS.escape(had.dataset.close)}"]` : had.id ? `#${had.id}` : null) : null;
     head.innerHTML =
       `<div class="tabs">${tabs}</div>` +
+      `<button class="icon" id="all-arts" title="All artifacts in this chat">☰</button>` +
       `<button class="icon" id="copy" title="Copy">⧉</button>` +
       `<button class="icon" id="full" title="${fullscreen ? "Exit full screen" : "Full screen"}">${fullscreen ? "⤡" : "⤢"}</button>` +
       `<button class="icon" id="close" title="Close">✕</button>`;
-    for (const t of head.querySelectorAll<HTMLButtonElement>("[data-tab]")) t.onclick = () => ((openArtifact = t.dataset.tab!), renderArtifacts());
+    for (const t of head.querySelectorAll<HTMLButtonElement>("[data-tab]")) {
+      t.onclick = () => ((openArtifact = t.dataset.tab!), renderArtifacts());
+      // (a middle click closes it, as a browser's tab; its mousedown doesn't start the page's autoscroll)
+      t.onmousedown = (e) => { if (e.button === 1) e.preventDefault(); };
+      t.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); void closeTab(thread.id, t.dataset.tab!); } };
+    }
+    for (const x of head.querySelectorAll<HTMLButtonElement>("[data-close]")) x.onclick = () => void closeTab(thread.id, x.dataset.close!);
+    $("#all-arts", head).onclick = () => artifactBrowser();
     $("#full", head).onclick = () => ((fullscreen = !fullscreen), renderArtifacts());
     $("#close", head).onclick = async () => {
       if (!(await mayClosePane(thread.id)) || current().id !== thread.id) return;
@@ -1830,6 +1930,7 @@ setInterval(() => {
   for (const t of state.threads) if (isRunning(t)) void mirror.kick(t.id);
 }, 30_000);
 void mirror.refresh().then(() => mirror.remote()).catch(() => {});
+$("#all-arts-chat").onclick = () => artifactBrowser();
 $("#copychat").onclick = () => { const t = current(); void copyText(async () => threadMarkdown(t, { agent: agentName(), link: await fileLinks(t) }), "Copied the chat"); };
 
 /** The header's agent line from text only (an agent's and a computer's names are text, never markup). */
