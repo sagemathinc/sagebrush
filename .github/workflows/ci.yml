@@ -1254,6 +1254,10 @@ jobs:
               # stays inside PR CI's 10 min; selected exactly as notebook is, scripts/ci-paths.mjs webGroups)
               node scripts/web-tests.mjs run web-browser/preload
               ;;
+            space)
+              # (a space in 3D, /space/: the ground and walking, in headless Chromium against the built site)
+              node scripts/web-tests.mjs run web-browser/space
+              ;;
             terminal)
               # (the terminal panel, plan-bash-shell r8c step 6: a group of its own, since its page test needs a flagged
               # build and its own time: its renderer and caps, its size (E5.6), then the page with the bash set in dist,

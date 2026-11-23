@@ -367,6 +367,8 @@ const webAreas = {
   board: [/^web\/board\//, /^web\/graph\//, /^web\/board-[^/]+$/, /^examples\/board\//, /^packages\/sagebrush-board\//],
   shell: [/^web\/shell\//],
   workspace: [/^web\/workspace\//],
+  // (a space in 3D, /space/: the viewer and its suites; its page loads nothing of the others')
+  space: [/^web\/space\//],
   // (the engine and its suite: checks only, no browser group)
   "app-engine": [/^app\/engine\//, /^web\/test-app-engine\.mjs$/],
 };
@@ -393,6 +395,7 @@ const webGroups = [
   ["board-unit", webRuntime || inArea("board") || inArea("workspace") || suiteGroups.has("board-unit")],
   ["terminal", webRuntime || inArea("shell") || suiteGroups.has("terminal")],
   ["remote-preview", webRuntime || suiteGroups.has("remote-preview")],
+  ["space", webRuntime || inArea("space") || suiteGroups.has("space")],
 ].filter(([, selected]) => web && selected).map(([group]) => group);
 // (the web-browser jobs: the selected groups packed into at most three, the CI capacity ruling, Nov 22 2026, the org's 60
 // concurrent jobs; 13 before, most of each its setup.  A job runs its groups in this order, every one even after one
@@ -400,7 +403,7 @@ const webGroups = [
 // web/dist with the bash set.  Every group is in exactly one job: test/ci-paths.test.ts)
 export const WEB_BUCKETS = [
   ["board", ["board-a", "board-b", "board-c", "board-unit", "preload"]],
-  ["notebook", ["notebook", "remote-preview", "terminal"]],
+  ["notebook", ["notebook", "remote-preview", "space", "terminal"]],
   ["latex", ["latex"]],
 ];
 const webMatrix = WEB_BUCKETS

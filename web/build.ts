@@ -793,6 +793,22 @@ if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force:
     for (const f of ["index.html", "agents.js", "connect/index.html", "connect/copy.js", "connect.md"]) copyFileSync(join(here, "dist", "agents", f), join(siteDir, "public", "agents", f));
   }
 }
+// a space in 3D (web/space, /space/): the viewer, its page and the format's description. Its code loads only there:
+// three.js and highlight.js in its own bundle, chunks split out, nothing in any other page's bundle
+{
+  const out = join(here, "dist", "space");
+  rmSync(out, { recursive: true, force: true });
+  const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "space", "src", "main.js")], outdir: out, naming: { entry: "space.js", chunk: "chunks/[name]-[hash].js" }, splitting: true, target: "browser", format: "esm", minify: true });
+  if (!r.success) {
+    for (const l of r.logs) console.error(l);
+    process.exit(1);
+  }
+  for (const f of ["index.html", "format.md"]) copyFileSync(join(here, "space", f), join(out, f));
+  // (the example spaces: the page's list, spaces.json, is what it offers)
+  const examples = readdirSync(join(here, "space", "examples")).filter((f) => f.endsWith(".space.json")).sort();
+  for (const f of examples) copyFileSync(join(here, "space", "examples", f), join(out, f));
+  writeFileSync(join(out, "spaces.json"), JSON.stringify(examples) + "\n");
+}
 // the numerics core's browser-threads demo (web/threads, numerics-core r4.2 milestone M0): a dense product on 1 and N
 // threads of the tab, through engine/nd's WebAssembly module (wasm/sagebrush-nd.wasm). Flagged like the questions
 // preview: built only for a hosted preview (scripts/preview.sh sets SAGEBRUSH_PREVIEW_HOST) or with SAGEBRUSH_THREADS=1
