@@ -5011,7 +5011,9 @@ async function leaveTo(url, notebook = true) {
   if (globalThis.__sbTexLeave) return void globalThis.__sbTexLeave(go);
   return go();
 }
-globalThis.__sbLeaveTo = leaveTo;
+// (from outside this file, the LaTeX boot's .tex opens (Files' row, New ▸ LaTeX document) among them: while the code
+// page is up, through its own way out, its edits saved and asked about first, as every other way off it, #1798)
+globalThis.__sbLeaveTo = (url) => (codePageUp ? leaveCodePage(url) : leaveTo(url));
 // (tests, loopback pages in a browser only, never the app (whose page is on localhost too): a stand-in for the desktop
 // app's disk mirror, so the page's ways out meet its drain, and what each way out asked of leaveTo)
 let leaveSeen = null;
