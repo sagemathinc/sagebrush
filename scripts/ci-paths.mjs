@@ -394,13 +394,16 @@ const webGroups = [
   ["terminal", webRuntime || inArea("shell") || suiteGroups.has("terminal")],
   ["remote-preview", webRuntime || suiteGroups.has("remote-preview")],
 ].filter(([, selected]) => web && selected).map(([group]) => group);
-// (the web-browser jobs: the selected groups packed into at most three, the CI capacity ruling, Nov 22 2026, the org's 60
+// (the web-browser jobs: the selected groups packed into at most four, the CI capacity ruling, Nov 22 2026, the org's 60
 // concurrent jobs; 13 before, most of each its setup.  A job runs its groups in this order, every one even after one
 // failed.  latex is alone: its build has the editor on loopback hosts.  terminal is last in its job: it rebuilds
-// web/dist with the bash set.  Every group is in exactly one job: test/ci-paths.test.ts)
+// web/dist with the bash set.  notebook is alone since Nov 23 2026: notebook, remote-preview and terminal in one job
+// took 21 min (10 + 7.7 + 2.6), the longest job of a merge_group run; split, each half is about 11.  Every group is
+// in exactly one job: test/ci-paths.test.ts)
 export const WEB_BUCKETS = [
   ["board", ["board-a", "board-b", "board-c", "board-unit", "preload"]],
-  ["notebook", ["notebook", "remote-preview", "terminal"]],
+  ["notebook", ["notebook"]],
+  ["remote-terminal", ["remote-preview", "terminal"]],
   ["latex", ["latex"]],
 ];
 const webMatrix = WEB_BUCKETS

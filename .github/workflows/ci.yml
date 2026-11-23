@@ -1179,12 +1179,13 @@ jobs:
       matrix:
         # (the groups a change selects, scripts/ci-paths.mjs webGroups: all of notebook, preload, latex, board-a, board-b, board-c,
         # board-unit, terminal and remote-preview on the full tier, a core web, runtime or workflow change; packed into at
-        # most three jobs, ci-paths WEB_BUCKETS, since the CI capacity ruling, Nov 22 2026: board, notebook and latex)
+        # most four jobs, ci-paths WEB_BUCKETS, since the CI capacity ruling, Nov 22 2026: board, notebook, remote-terminal
+        # and latex)
         include: ${{ fromJSON(needs.changes.outputs.web_matrix) }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    # (the notebook job runs notebook, remote compute's preview (about 8 min in the project) and the terminal (its own
-    # flagged build and a long page test, about 11 min in the project), in that order: 45; board and latex: 30)
-    timeout-minutes: ${{ matrix.name == 'notebook' && 45 || 30 }}
+    # (each job about 11 min or less since notebook has its own: notebook about 10, remote compute's preview and the
+    # terminal about 8 and 3, board and latex less)
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
