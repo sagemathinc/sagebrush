@@ -1608,6 +1608,8 @@ class Panel:
             tick.append("M%s %sv%s" % (_fmt(p[0]), _fmt(ax_y), "4" if frame else "3"))
             if skip_x is not None and abs(v - skip_x) < 1e-12:
                 continue
+            if o.get("xtick_labels") is False:  # (matplotlib's labelbottom=False: the tick, no label)
+                continue
             ly = (P.top + P.h if frame else min(max(ax_y, P.top), P.top + P.h)) + ts * 1.43
             if xrot:
                 # (turned as matplotlib's default rotation_mode places it:
@@ -1631,6 +1633,8 @@ class Panel:
                 continue
             ytick.append("M%s %sh%s" % (_fmt(ax_x), _fmt(p[1]), "-4" if frame else "-3"))
             if skip_y is not None and abs(v - skip_y) < 1e-12:
+                continue
+            if o.get("ytick_labels") is False:  # (labelleft=False)
                 continue
             lx = (P.left if frame else min(max(ax_x, P.left), P.left + P.w)) - 6
             ylabels.append('<text x="%s" y="%s" text-anchor="end" dominant-baseline="middle">%s</text>' % (_fmt(lx), _fmt(p[1]), s))
