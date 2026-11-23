@@ -101,8 +101,9 @@ export function writeAll(fd: number, s: string): void {
 }
 // stdin: read synchronously from fd 0.
 let stdinBuf = "", stdinEof = false;
-// (UTF-8 decoded as a stream: a character whose bytes two reads split is one character, not two U+FFFD)
-const stdinDecoder = new TextDecoder("utf-8");
+// (UTF-8 decoded as a stream: a character whose bytes two reads split is one character, not two U+FFFD; a leading
+// byte order mark kept, U+FEFF, as CPython's stdin keeps it)
+const stdinDecoder = new TextDecoder("utf-8", { ignoreBOM: true });
 function stdinFill(): boolean {
   if (stdinEof) return false;
   const b = Buffer.alloc(65536);

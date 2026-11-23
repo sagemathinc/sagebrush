@@ -52,6 +52,16 @@ test("UTF-8 split across two reads of stdin is one character (input() and sys.st
   assert.equal(run(["-c", "import sys; x = sys.stdin.read(); print(len(x), repr(x[-4:]))"], big).stdout, "65538 'aéz\\n'\n");
 });
 
+test("a byte order mark is kept, as CPython's stdin keeps it: at the start, and split across two reads", () => {
+  const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+  const lead = Buffer.concat([bom, Buffer.from("abc\n")]);
+  assert.equal(run(["-c", "print(repr(input()))"], lead).stdout, "'\\ufeffabc'\n");
+  assert.equal(run(["-c", "import sys; print(repr(sys.stdin.read()))"], lead).stdout, "'\\ufeffabc\\n'\n");
+  // (its bytes at 65535..65537: the first read ends inside it)
+  const split = Buffer.concat([Buffer.alloc(65535, "a"), bom, Buffer.from("z\n")]);
+  assert.equal(run(["-c", "x = input(); print(len(x), repr(x[-3:]))"], split).stdout, "65537 'a\\ufeffz'\n");
+});
+
 test("Sage mode reads it too", () => {
   assert.equal(run(["--sage", "-c", "n = Integer(input('n? ')); print(n^2)"], "12\n").stdout, "n? 144\n");
 });
