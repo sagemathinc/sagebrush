@@ -1240,7 +1240,16 @@ def _scalar_over(c, M):
     c I, as Sage solves it (2/M is exactly -4.0 where 2 times the inverse is
     -3.9999999999999996); numpy's LinAlgError when M is singular."""
     np = _np()
-    return _from_array(M._base, np.linalg.solve(_array(M).T, float(c) * np.eye(M.nrows())).T)
+    A, I = _array(M).T, np.eye(M.nrows())
+    import _sage_ffmat
+    if _sage_ffmat._complex_kind(c) is None:
+        return _from_array(M._base, np.linalg.solve(A, float(c) * I).T)
+    # (a complex c over a real matrix: its real and imaginary parts solved
+    # apart, as a complex solve of a real matrix does, the result in c's
+    # field: CDF, or CC for CC(1, 2)/matrix(RDF, ...) as Sage)
+    z = complex(c)
+    re, im = np.linalg.solve(A, z.real * I).T.tolist(), np.linalg.solve(A, z.imag * I).T.tolist()
+    return _from_array(c.parent(), np.array([[complex(a, b) for a, b in zip(r, s)] for r, s in zip(re, im)], dtype=complex))
 
 
 def _rank(M):

@@ -314,6 +314,12 @@ def _admit(B, o):
     if o is None or isinstance(o, (list, tuple, str, dict)) or getattr(o, "_is_ffmatrix", False) or isinstance(o, FFVector):
         return None
     if not _strict_base(B):
+        k = _num_kind(B)
+        if k is not None and not k[0] and _complex_kind(o) is not None:
+            # (a complex number meets a real numerical matrix in the complex
+            # field, CDF(0)*matrix(RDF, ...) over CDF as Sage: _pushout; not
+            # converted into the real field, which dropped a zero imaginary part)
+            return None
         try:
             return B(o)
         except (TypeError, ValueError):
@@ -342,8 +348,20 @@ def _pushout(B, o):
     QQbar CDF, RR gives RR or CC, a QQbar element with AA gives QQbar),
     else None."""
     import _sage_qqbar as qb
-    if (B is not qb.QQbar and B is not qb.AA) or isinstance(o, int):
+    if isinstance(o, int):
         return None
+    if B is not qb.QQbar and B is not qb.AA:
+        # a real numerical field and a complex number: the complex field, a
+        # double one when both are doubles (RDF with CDF or a Python complex
+        # is CDF, as Sage), else ComplexField of the lower precision (RR or
+        # RDF with CC is CC)
+        k, c = _num_kind(B), _complex_kind(o)
+        if k is None or k[0] or c is None:
+            return None
+        import _sage_rdf
+        if k[1] and c[0]:
+            return _sage_rdf.CDF
+        return _sa().ComplexField(min(k[2], c[1]))
     par = getattr(o, "parent", None)
     P = None
     if callable(par):
@@ -363,6 +381,20 @@ def _pushout(B, o):
     if B is qb.QQbar and is_r:
         F = _sage_rdf.CDF if F is _sage_rdf.RDF else _sa().ComplexField(F.prec())
     return F
+
+
+def _complex_kind(o):
+    """(double, bits) when o is a complex number (a Python complex, or an
+    element of CDF, CC or ComplexField(p)), else None; by its exact type."""
+    import _sage_rdf, _sage_real, _sage_matrix
+    t = type(o)
+    if t is complex or t is _sage_rdf.ComplexDoubleElement:
+        return (True, 53)
+    if t is _sage_matrix.ComplexNumber:
+        return (False, 53)
+    if t is _sage_real.ComplexNumberMP:
+        return (False, o.prec())
+    return None
 
 
 # ------------------------------------------------------------------ vector parents
@@ -2194,8 +2226,21 @@ class FFMatrix:
         # c times the inverse, as Sage solves it (2/M over GF(7))
         c = self._scalar(o)
         if c is None:
-            return NotImplemented
+            # (a complex number over a real numerical matrix: in the complex
+            # field, CDF(1, 2)/matrix(RDF, ...) over CDF as Sage)
+            # (a Python complex is refused, as Sage: complex(1, 2)/M fails there)
+            F = _pushout(self._base, o)
+            if F is None or _complex_kind(o) is None or type(o) is complex:
+                return NotImplemented
+            c = F(o)
         n = len(self._rows)
+        k = _complex_kind(c)
+        if c == 0 and k is not None and not k[0] and n == self._ncols:
+            # (an MPFR complex 0, CC(0), over a real matrix: Sage solves in CC,
+            # where 0 solves X*M = 0 even for a singular M; CDF(0) over RDF is
+            # numpy's solve, and its LinAlgError, as Sage)
+            _admit_size(c.parent(), n, n)
+            return FFMatrix(c.parent(), [[c.parent().zero()] * n for _ in range(n)], n)
         if type(self._base).__name__ == "RealDoubleField_":
             if n != self._ncols:
                 raise TypeError("unsupported operand parent(s) for /: '%s' and '%s'" % (_sa().parent(o), self.parent()))
@@ -2208,12 +2253,15 @@ class FFMatrix:
             return FFMatrix(self._base, [[c] * n for _ in range(n)], n)
         if n != self._ncols:
             raise TypeError("unsupported operand parent(s) for /: '%s' and '%s'" % (_sa().parent(o), self.parent()))
+        if c == 0:
+            # (0 = X*M has the solution 0, in c's field: zeros, not c times
+            # the inverse's signed zeros; the size of M itself)
+            _admit_size(c.parent(), n, n)
+            return FFMatrix(c.parent(), [[c.parent().zero()] * n for _ in range(n)], n)
         from numpy.linalg import LinAlgError
         try:
             inv = self.inverse()
         except (ZeroDivisionError, LinAlgError):
-            if c == 0:
-                return self * c
             raise ValueError("matrix equation has no solutions") from None
         return inv * c
 

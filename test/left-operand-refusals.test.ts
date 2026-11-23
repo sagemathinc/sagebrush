@@ -17,5 +17,6 @@ test("an inexact number over a polynomial: sagebrush's own refusal, not a TypeEr
     frac("Complex Double Field"),
     "TypeError: unsupported operand type(s) for /: 'float' and 'Polynomial'",
     "TypeError: unsupported operand type(s) for /: 'complex' and 'Polynomial'",
+    "TypeError: unsupported operand type(s) for /: 'complex' and 'FFMatrix'",
   ]);
 });

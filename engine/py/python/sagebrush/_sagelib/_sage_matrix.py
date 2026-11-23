@@ -4209,6 +4209,13 @@ def _cc(o):
     return complex(o)
 
 
+def _cc_div(a, b):
+    """a / b in CC: by zero NaN + NaN*I, as Sage's CC (Python's complex raised)."""
+    if b == 0:
+        return ComplexNumber(float("nan"), float("nan"))
+    return ComplexNumber(a / b)
+
+
 class ComplexNumber(complex):
     """A 53-bit complex number, printed as Sage prints elements of CC.
 
@@ -4370,7 +4377,7 @@ class ComplexNumber(complex):
         c = _cc_or_none(o)
         if c is None:
             return NotImplemented
-        return ComplexNumber(complex(self) / c)
+        return _cc_div(complex(self), c)
 
     def __rtruediv__(self, o):
         if getattr(o, "_is_ffmatrix", False):
@@ -4378,7 +4385,10 @@ class ComplexNumber(complex):
         c = _cc_or_none(o)
         if c is None:
             return NotImplemented
-        return ComplexNumber(c / complex(self))
+        return _cc_div(c, complex(self))
+
+    def __invert__(self):
+        return _cc_div(1, complex(self))
 
     def __neg__(self):
         return ComplexNumber(-complex(self))
