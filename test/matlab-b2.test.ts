@@ -53,6 +53,24 @@ test("sinpi, cospi, reallog and realsqrt: exact at the integers and half-integer
     "MATLAB:reallog:complexResult\nMATLAB:realsqrt:complexResult\nMATLAB:validators:mustBeReal\n0.86602544784545898\n");
 });
 
+test("sinpi and cospi are correctly rounded in double, as MATLAB's: sinpi(0.25) == sqrt(2)/2", () => {
+  // (the expected bits are mpmath's sinpi and cospi at 300 bits, rounded once to double)
+  const xs = "[0.1 0.2 0.25 1/3 0.3 0.4 1/7 0.01 1e-5 123.456 -0.7 1.9]";
+  const r = run([
+    `x = ${xs}; s = sinpi(x); c = cospi(x);`,
+    "fprintf('%s ', string(num2hex(s))), fprintf('\\n')",
+    "fprintf('%s ', string(num2hex(c))), fprintf('\\n')",
+    "disp([sinpi(0.25) == sqrt(2)/2, cospi(0.25) == sqrt(2)/2, sinpi(-0.75) == -sqrt(2)/2])",
+  ].join("\n"));
+  assert.equal(r.status, 0, r.err);
+  assert.equal(r.out,
+    "3fd3c6ef372fe950 3fe2cf2304755a5e 3fe6a09e667f3bcd 3febb67ae8584caa 3fe9e3779b97f4a8 3fee6f0e13445500 " +
+    "3fdbc4c04d71abc1 3fa015122df75860 3f0078930424a5d3 bfefb1dc28ea220d bfe9e3779b97f4a8 bfd3c6ef372fe954 \n" +
+    "3fee6f0e134454ff 3fe9e3779b97f4a8 3fe6a09e667f3bcd 3fe0000000000000 3fe2cf2304755a5e 3fd3c6ef372fe94e " +
+    "3fecd4bca9cb5c71 3feffbf52e9d1086 3fefffffffbc2d35 bfc1a31cbc19312a bfe2cf2304755a5d 3fee6f0e134454ff \n" +
+    "   1   1   1\n");
+});
+
 test("num2hex, bsxfun and compose as their pages show them", () => {
   const r = run([
     "disp(num2hex([1 -2.5])), disp(num2hex(single(1)))",
