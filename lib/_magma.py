@@ -4757,6 +4757,8 @@ def _str1(v, indent, col, tail):
         return ("\n" + " " * indent).join(repr(v).split("\n")) + tail, True
     if isinstance(v, (MTuple, MRec)) and any(isinstance(p, _MFFMat) for p in (v if isinstance(v, MTuple) else v.vals.values())):
         raise MagmaError("printing a tuple or record holding a matrix over a finite field is not supported yet")
+    if isinstance(v, _MOrder):
+        return v._str(col, indent, tail), True
     if getattr(v, "_magma_nowrap", False):
         return _inline(v), False
     if isinstance(v, MTuple) and any(_multiline(p) for p in v):
@@ -9541,17 +9543,35 @@ class _MNumberField(_snf.NumberField_absolute):
 
 class _MOrder:
     _magma_block = True
-    _magma_nowrap = True  # Magma prints the description on one line
 
     def __init__(self, K):
         self.K = K
 
-    def __repr__(self):
+    def _parts(self):
+        # (the defining polynomial always in x, whatever the field's own variable is called: Magma 2.18-5 prints the
+        # equation order's polynomial so, for NumberField(t^3 - 2) and NumberField(PolynomialRing(Rationals()).1^3 - 2)
+        # alike)
         K = self.K
-        f = _snf._repr_poly(K._f, K._var)
-        if K._nfdata()["index"] == 1:
-            return "Maximal Equation Order with defining polynomial %s over its ground order" % f
-        return "Maximal Order of Equation Order with defining polynomial %s over its ground order" % f
+        f = _snf._repr_poly(K._f, "x")
+        head = "Maximal Equation Order" if K._nfdata()["index"] == 1 else "Maximal Order of Equation Order"
+        return head + " with defining polynomial", f, "over its ground order"
+
+    def __repr__(self):
+        return "%s %s %s" % self._parts()
+
+    def _str(self, col, indent, tail):
+        """Laid out as Magma prints a maximal equation order past WIDTH
+        columns: the description and the polynomial continued 4 more in (as a
+        polynomial is), what follows the polynomial at the order's own
+        indentation."""
+        head, f, rest = self._parts()
+        # (the order of an equation order prints on one line however long, as Magma's does)
+        if _making_string() or self.K._nfdata()["index"] != 1:
+            return repr(self) + tail
+        first = _flow([(w, True) for w in (head + " " + f).split(" ")], col, indent + 4, indent)
+        c = len(first) - first.rfind("\n") - 1 if "\n" in first else col + len(first)
+        words = (rest + tail).split(" ")
+        return first + _flow([(w, k < len(words) - 1) for k, w in enumerate(words)], c, indent, indent)
 
     def _magma_degree(self):
         return self.K.degree()
