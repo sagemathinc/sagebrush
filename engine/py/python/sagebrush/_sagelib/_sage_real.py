@@ -3705,7 +3705,8 @@ def _log_gamma_stirling(x):
 
 
 def _gamma(q, prec):
-    """Gamma(q) to prec bits, q rational (Stirling's series)."""
+    """Gamma(q) to prec bits, q rational (Stirling's series; near a pole the
+    reflection loses no bits: test/real-gamma-reflection.test.ts)."""
     # log Gamma(q) is about q log q: its exponential needs that many more
     # bits (gamma(3^30) lost its last digits at prec + 40)
     big = max(0, abs(q.numerator).bit_length() - q.denominator.bit_length())
@@ -3715,9 +3716,15 @@ def _gamma(q, prec):
     if q <= 0 and q.denominator == 1:
         raise ValueError("gamma has a pole at %s" % q)
     if q < _F(1, 2):
-        # reflection: Gamma(q) Gamma(1 - q) = pi / sin(pi q)
-        pq = R.pi() * R(q)
-        return R.pi() / (pq.sin() * R(_gamma(1 - q, prec + 20)))
+        # reflection: Gamma(q) Gamma(1 - q) = pi / sin(pi q), with
+        # sin(pi q) = (-1)^n sin(pi (q - n)) for the integer n nearest q, q - n
+        # exact: the sine of pi q itself cancelled near the poles (Gamma(-1 +
+        # 2^-97) to 100 bits was wrong from its 13th digit)
+        n = round(q)
+        s = (R.pi() * R(q - n)).sin()
+        if n % 2:
+            s = -s
+        return R.pi() / (s * R(_gamma(1 - q, prec + 20)))
     # shift q up to N, then Stirling with Bernoulli numbers
     N = int(prec * 0.35) + 10
     shift = 0
@@ -3745,14 +3752,28 @@ _BERN = [_F(1)]
 
 
 def _bernoulli_list(n):
-    """B_0 .. B_n (B_1 = -1/2), by the Akiyama-Tanigawa recurrence."""
-    while len(_BERN) <= n:
-        m = len(_BERN)
-        A = [_F(1, k + 1) for k in range(m + 1)]
-        for j in range(m, 0, -1):
-            for i in range(j):
-                A[i] = (i + 1) * (A[i] - A[i + 1])
-        _BERN.append(A[0] if m != 1 else _F(-1, 2))
+    """B_0 .. B_n (B_1 = -1/2), from the tangent numbers T_k (integers, Brent
+    and Harvey's recurrence): B_2k = (-1)^(k-1) 2k T_k / (4^k (4^k - 1)).
+    (The Akiyama-Tanigawa recurrence on fractions, from scratch for each
+    number, took a minute for the 140 numbers of a 132-bit gamma.)"""
+    if len(_BERN) <= n:
+        K = n // 2 + 1
+        T = [0] * (K + 1)
+        T[1] = 1
+        for k in range(2, K + 1):
+            T[k] = (k - 1) * T[k - 1]
+        for k in range(2, K + 1):
+            for j in range(k, K + 1):
+                T[j] = (j - k) * T[j - 1] + (j - k + 2) * T[j]
+        B = [_F(1), _F(-1, 2)]
+        for m in range(2, 2 * K + 1):
+            if m % 2:
+                B.append(_F(0))
+            else:
+                k = m // 2
+                q = 4 ** k
+                B.append(_F((-1) ** (k - 1) * 2 * k * T[k], q * (q - 1)))
+        _BERN[:] = B
     return _BERN
 
 
@@ -4930,3 +4951,138 @@ class RealIntervalElement:
 
     def __float__(self):
         return float((self._lo + self._hi) / 2)
+
+
+# ------------------------------------------------------------------ checked functions
+# RealNumberMP's functions, correctly rounded by a Ziv check.  Each method
+# works at a fixed number of guard bits, which is not enough near the points
+# where its formula cancels (tan and cot near multiples of pi/2, arcsin,
+# arccos and arccosh near +-1, gamma near its poles, log_gamma near its
+# roots), where it gave wrong digits: tan(RealField(100).pi()) was
+# -1.6956855279e-31 for Sage's -1.6956855320e-31.  So each is evaluated, to
+# nearest, at W and at 2W bits; the difference of the two values, and at least
+# 4 units in the last place of W bits, is taken as the 2W value's error, and
+# the value is accepted only when both ends of that interval round alike in
+# the field's own mode (two directed roundings agreeing proved nothing next
+# to a boundary: sec(2^-200) rounded up was 1).  Otherwise W doubles; past
+# _ZIV_CHECK_TRIES doublings it is NotImplementedError, never a guess.  Values
+# that lie next to a boundary by their nature are decided first, analytically
+# (_ziv_edge): sec, csc and cot of tiny numbers, tanh of large ones.  The calls
+# a checked function makes inside are not checked again (_ziv_depth).
+
+_ZIV_CHECK_TRIES = 4
+_ziv_depth = [0]
+
+
+def _ziv_edge(name, x, raw):
+    """name(x) when x is so small (or, for tanh, so large) that the value is a
+    number of the field moved far below its last place, else None: sec x =
+    1 + x^2/2, csc x = 1/x + x/6, cot x = 1/x - x/3, tanh x = +-(1 - 2 e^-2|x|);
+    and gamma(n) = (n - 1)! at the integers n < 3000, exact; gamma of numbers
+    below 2^-(p+40), the method's own analytic value (1/x - euler_gamma)."""
+    R = x._R
+    p, E = R._prec, x._mag()
+    sgn = 1 if x._m > 0 else -1
+    if name == "gamma":
+        if E < -(p + 40):
+            return raw(x)
+        if x._m > 0 and 0 < E <= 40:
+            q = x._q()
+            # ((n - 1)! exactly when it has at most about 4p + 4096 bits: the
+            # value is then a number of the field, or a midpoint, at the
+            # largest precisions, gamma(3000) to 27330 bits)
+            if q.denominator == 1 and int(q) * max(1, int(q).bit_length() - 1) <= 4 * p + 4096 + 3000 * 11:
+                return R(math.factorial(int(q) - 1))
+        return None
+    if name == "sec" and E < -(p // 2) - 4:
+        return _nudge(R, 1, 0, 1)
+    if name in ("csc", "cot") and E < -(p + 8):
+        d = sgn if name == "csc" else -sgn
+        a = abs(x._m)
+        if a & (a - 1) == 0:
+            # (1/x a number of the field: moved by x/6 or -x/3)
+            return _nudge(R, sgn, -(x._e + a.bit_length() - 1), d)
+        # (1/x is not dyadic, so x^2 / 3 relative, below 2^-(2p+16), does not
+        # cross a boundary of the field: 1/x correctly rounded)
+        return R(_F(1) / x._q())
+    if name == "tanh" and abs(x)._cmpq(_F(p + 8, 2)) > 0:
+        # (e^-2|x| < 2^-(1.44 (p + 8)): 1 - tanh |x| is far below the last place)
+        return _nudge(R, sgn, 0, -sgn)
+    return None
+
+
+def _ziv_rounds_alike(a, b, W, R):
+    """Whether b, with the error |a - b| and at least 4 units of W bits, rounds
+    alike at both ends in R (a and b finite, b nonzero)."""
+    top = b._e + abs(b._m).bit_length()
+    e = min(a._e, b._e, top - W) if a._m else min(b._e, top - W)
+    am = (a._m << (a._e - e)) if a._m else 0
+    bm = b._m << (b._e - e)
+    err = max(abs(am - bm), 4 << (top - W - e))
+    lo, hi = bm - err, bm + err
+    if (lo > 0) != (hi > 0) or lo == 0 or hi == 0:
+        return None
+    rl, rh = _round_int(lo, e, R._prec, R._rnd), _round_int(hi, e, R._prec, R._rnd)
+    return RealNumberMP(R, *rl) if rl == rh else None
+
+
+def _ziv_checked(name):
+    raw = getattr(RealNumberMP, name)
+
+    def checked(self, *args, **kw):
+        if args or kw or _ziv_depth[0] or self._special or not self._m:
+            return raw(self, *args, **kw)
+        v = _ziv_edge(name, self, raw) if name in ("sec", "csc", "cot", "tanh", "gamma") else None
+        if v is None and (name in _ODD or name in _EVEN or name == "exp"):
+            # (the method's own analytic value at tiny numbers: x or 1 moved far
+            # below the last place, in the field's direction)
+            v = self._small(name)
+        if v is not None:
+            return v
+        R = self._R
+        if name == "log" and self._m < 0 and R._prec != 53:
+            # (log x = log |x| + pi I in ComplexField(p), to nearest as Sage: the
+            # real part from the checked real logarithm)
+            C = ComplexField(R._prec)
+            RN = C._R
+            return ComplexNumberMP(C, RealNumberMP(RN, -self._m, self._e).log(), RN.pi())
+        W = R._prec + 32
+        _ziv_depth[0] += 1
+        try:
+            for _ in range(_ZIV_CHECK_TRIES):
+                # (never 53 bits: RealField(53) is RR, a double)
+                W = W + 1 if W == 53 else W
+                a = raw(RealNumberMP(RealField_(W, "RNDN"), self._m, self._e))
+                b = raw(RealNumberMP(RealField_(2 * W, "RNDN"), self._m, self._e))
+                if (not (isinstance(a, RealNumberMP) and isinstance(b, RealNumberMP)) or a._special or b._special
+                        or not b._m or not _EMIN + 4 * W < b._e + abs(b._m).bit_length() < _EMAX - 64):
+                    # (a complex value, an infinity, NaN or 0, or a value at the ends
+                    # of the exponent range, where the working fields overflow or
+                    # underflow too: the function's own range and domain logic, in
+                    # this field's rounding mode)
+                    break
+                v = _ziv_rounds_alike(a, b, W, R)
+                if v is not None:
+                    return v
+                W *= 2
+            else:
+                raise NotImplementedError("%s(%s) correctly rounded to %d bits is not decided within %d bits in sagebrush yet"
+                                          % (name, self, R._prec, W))
+        finally:
+            _ziv_depth[0] -= 1
+        _ziv_depth[0] += 1
+        try:
+            return raw(self)
+        finally:
+            _ziv_depth[0] -= 1
+
+    checked.__name__, checked.__doc__ = raw.__name__, raw.__doc__
+    return checked
+
+
+for _name in ("exp", "sin", "cos", "tan", "cot", "sec", "csc", "arctan", "arcsin", "arccos", "sinh", "cosh",
+              "tanh", "arcsinh", "arccosh", "arctanh", "gamma", "log_gamma"):
+    setattr(RealNumberMP, _name, _ziv_checked(_name))
+RealNumberMP.atan, RealNumberMP.asin, RealNumberMP.acos = RealNumberMP.arctan, RealNumberMP.arcsin, RealNumberMP.arccos
+RealNumberMP.log = _ziv_checked("log")
+RealNumberMP.ln = RealNumberMP.log
