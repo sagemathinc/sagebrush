@@ -364,18 +364,20 @@ class Renderer {
     return s;
   }
   math(src, display) {
-    // (amsthm's \qedhere: in a proof, the end-of-proof symbol here, at the right of this display (or after this
-    //  formula), not again at the proof's end; outside a proof, nothing. KaTeX never sees it)
-    let qed = "";
+    // (amsthm's \qedhere: in a proof, the end-of-proof symbol here, and not again at the proof's end. In a display, KaTeX's
+    //  \tag* where it stands, so the symbol is at the right of the very row it is in (an align*'s first, or last, as
+    //  amsthm places it); in a display already numbered or tagged, which can't take a second tag, the symbol stays at the
+    //  proof's end and check says so. After a formula in the text: after it. Outside a proof: nothing. KaTeX never sees
+    //  \qedhere itself)
+    let after = "";
     if (src.includes("qedhere") && /\\qedhere(?![A-Za-z@])/.test(src)) {
-      src = src.replace(/\\qedhere(?![A-Za-z@])/g, "");
-      if (this.qed && !this.qed.here) {
-        this.qed.here = true;
-        qed = display ? '<span class="qed" style="position:absolute;right:0;top:50%;transform:translateY(-50%);float:none">∎</span>' : '<span class="qed">∎</span>';
-      }
+      const re = /\\qedhere(?![A-Za-z@])/g;
+      if (!this.qed || this.qed.here) src = src.replace(re, "");
+      else if (!display) { src = src.replace(re, ""); this.qed.here = true; after = '<span class="qed">∎</span>'; }
+      else if (/\\(tag|notag|nonumber)(?![A-Za-z@])/.test(src)) { src = src.replace(re, ""); this.problem("not-rendered", "\\qedhere in a numbered display (the end-of-proof symbol is at the proof's end)"); }
+      else { let first = true; src = src.replace(re, () => (first ? ((first = false), "\\tag*{$\\blacksquare$}") : "")); this.qed.here = true; }
     }
-    if (qed && display) { const inner = this.math(src, display); return '<span style="position:relative;display:block">' + inner + qed + "</span>"; }
-    if (qed) return this.math(src, display) + qed;
+    if (after) return this.math(src, display) + after;
     const h = texMath(src, display, this.macros, this.macroSig, this.stats);
     if (h.includes("katex-error")) this.problem("math", String(src).slice(0, 120));
     // (a region holding a stale \sage value: the whole of it marked stale, as one value can't be marked inside KaTeX)
