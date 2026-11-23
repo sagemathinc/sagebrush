@@ -1,6 +1,6 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
-import { globalsDict, realGlobals, namespaceOf, instanceDict, NS_DICT, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity, bindArgs, sig, raiseExc } from "./object";
+import { globalsDict, realGlobals, namespaceOf, instanceDict, NS_DICT, NS_LAZY, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity, bindArgs, sig, raiseExc } from "./object";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
 import { T, DONE, markRaised, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, PrimBox, unbox, builtin, tuple, getattr, isinstance, dictSet, dictGet, dictDelete, typeName, callKw, callObj, positionalArray } from "./object";
 import * as O from "./ops";
@@ -306,10 +306,29 @@ export function builtinsObject(b: any): any {
   const d = b[NS_DICT];
   return d !== undefined ? d : instanceDict(b);
 }
-export function builtinName(b: any, k: string): any {
+// (G: the globals the load missed in; a lazy namespace's, NS_LAZY, may still supply the name: Sage mode's session
+// loads a domain on the first use of one of its names, lib/_sage_lazy.py)
+export function builtinName(b: any, k: string, G?: any): any {
   const v = b === builtins ? (Object.prototype.hasOwnProperty.call(b, k) ? b[k] : undefined) : b[k];
-  if (v === undefined) raise(T.NameError, `name '${k}' is not defined`);
+  if (v === undefined) {
+    const lazy = G === undefined ? undefined : G[NS_LAZY];
+    if (lazy !== undefined) {
+      const w = lazyName(lazy, k);
+      if (w !== undefined) return w;
+    }
+    raise(T.NameError, `name '${k}' is not defined`);
+  }
   return v;
+}
+// A lazy namespace's name k, loaded and bound there, or undefined when it has none (a KeyError from _miss); any other
+// error, a domain that fails to import, is the load's own
+export function lazyName(lazy: any, k: string): any {
+  try {
+    return callObj(getattr(lazy, "_miss"), [k]);
+  } catch (e) {
+    if (isinstance(e, T.KeyError)) return undefined;
+    throw e;
+  }
 }
 // (the importing code's builtins' __import__, those it started with:
 // CPython's IMPORT_NAME, the frame's builtins)

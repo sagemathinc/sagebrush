@@ -229,7 +229,8 @@ export class Emitter {
         // the code's builtins, $B)
         const ns = this.gns(id) === "$G" ? (nameLoad ? "$G" : "$GL") : "$g";
         if (!this.moduleBinds(id) && this.builtinNames.has(id)) return `((${t} = ${ns}${prop(id)}) !== undefined ? ${t} : (${t} = $B${prop(id)}) !== undefined ? ${t} : R.unboundName(${q(id)}))`;
-        return `((${t} = ${ns}${prop(id)}) !== undefined ? ${t} : R.builtinName($B, ${q(id)}))`;
+        // (and $G, whose lazy names, Sage mode's session's, a miss may still find: builtinName)
+        return `((${t} = ${ns}${prop(id)}) !== undefined ? ${t} : R.builtinName($B, ${q(id)}, $G))`;
       }
       case "class": {
         if (id[0] === "$") return this.classTemp(id);
@@ -661,7 +662,8 @@ export class Emitter {
       return `R.localsDict(${JSON.stringify(ls)}, [${vs.join(", ")}])`;
     };
     if (f.id === "locals" || f.id === "vars") return n === 0 ? localsExpr() : null;
-    if (f.id === "dir") return `sortedKeys(${localsExpr()})`;
+    // (at a module's top level, with a lazy namespace's names not loaded yet, Sage mode's session's: R.dirModule)
+    if (f.id === "dir") return scope.kind === "module" ? "R.dirModule($g)" : `sortedKeys(${localsExpr()})`;
     if (n < 1 || n > 3) return null;
     const args = e.args.map((a) => this.ex(a));
     const callerLocals = n === 1 && scope.kind !== "module" ? localsExpr() : "null";

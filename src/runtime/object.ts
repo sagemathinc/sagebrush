@@ -2070,6 +2070,10 @@ export function globalsDict(g: any): PyDict {
 export const NS_DICT = Symbol("globals dict");
 
 export const NS_GLOBALS = Symbol("globals of a layered namespace");
+// A namespace whose missing names may be loaded on first use: Sage mode's session (lib/_sage_lazy.py _Session), its
+// value the object the runtime asks (_miss(name) on a global load that misses, _delete(name) on `del name`).  Set
+// only on a session's namespace, never on a library module's (builtinName, delName).
+export const NS_LAZY = Symbol("a namespace's lazy names");
 export const NS_LOCALS = Symbol("locals of a layered namespace");
 // The globals behind a module's namespace: a layered one's (exec and eval
 // with separate locals), else the namespace itself
@@ -2086,7 +2090,8 @@ export function moduleLocals(g: any): PyDict {
 export function namespaceOf(d: any): any {
   if (d instanceof PyDict && (d.$m as any) instanceof ObjMap) return ((d.$m as any) as ObjMap).o;
   return new Proxy(Object.create(null), {
-    get: (_t, k) => (typeof k === "string" ? dictGet(d, k) : k === NS_DICT ? d : undefined),
+    // (a plain dict's lazy names, NS_LAZY: kept on the dict itself, as this proxy is made anew for each use)
+    get: (_t, k) => (typeof k === "string" ? dictGet(d, k) : k === NS_DICT ? d : k === NS_LAZY ? d[NS_LAZY] : undefined),
     set: (_t, k, v) => (typeof k === "string" && dictSet(d, k, v), true),
     has: (_t, k) => typeof k === "string" && dictGet(d, k) !== undefined,
     deleteProperty: (_t, k) => (typeof k === "string" && dictDelete(d, k), true),

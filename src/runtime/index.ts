@@ -383,6 +383,18 @@ Obj.hooks.excThrown = (e: any) => {
 
 // ------------------------------------------------------------------ globals, locals, exec, eval
 
+// dir() at a module's top level: its names, and a lazy namespace's names that aren't loaded yet (Sage mode's session,
+// lib/_sage_lazy.py _Session), which a use would load; exec's separate locals list only themselves
+export function dirModule(g: any): any[] {
+  const ks = sortedKeys(Obj.moduleLocals(g));
+  const more = lazyUnloaded(g);
+  return more.length ? [...new Set([...ks, ...more])].sort() : ks;
+}
+// A lazy namespace's names not loaded yet (dir(), tab completion: src/interactive.ts); none for any other namespace
+export function lazyUnloaded(g: any): string[] {
+  const lazy = g[Obj.NS_GLOBALS] === undefined ? g[Obj.NS_LAZY] : undefined;
+  return lazy === undefined ? [] : (O.toArray(Obj.callObj(Obj.getattr(lazy, "_unloaded"), [])) as string[]);
+}
 export function sortedKeys(d: any): any[] {
   if (Obj.typeOf(d) === T.dict) return O.toArray(d).sort();
   const a = mappingKeys(d);
@@ -544,6 +556,15 @@ export function globalLoads(G: any): any {
 }
 // `del name` at a module's top level, or of a name declared global
 export function delName(ns: any, k: string): void {
+  // (a lazy namespace, Sage mode's session: the name is deleted for good, a later use a NameError rather than its
+  // domain loaded again; one of its names not loaded yet deletes as a bound one does, lib/_sage_lazy.py _Session)
+  const lazy = ns[Obj.NS_GLOBALS] === undefined ? ns[Obj.NS_LAZY] : undefined;
+  if (lazy !== undefined) {
+    const unloaded = Obj.callObj(Obj.getattr(lazy, "_delete"), [k]) === true;
+    if (ns[k] === undefined && !unloaded) raise(T.NameError, `name '${k}' is not defined`);
+    delete ns[k];
+    return;
+  }
   // (a layered namespace checks its locals itself; elsewhere a builtin's
   // name is unbound too, unlike a load's, CPython's DELETE_NAME/GLOBAL)
   if (ns[Obj.NS_GLOBALS] === undefined && ns[k] === undefined) raise(T.NameError, `name '${k}' is not defined`);
@@ -594,6 +615,15 @@ Obj.builtin(compileBuiltin, "compile");
 B.builtins.compile = compileBuiltin;
 // compile() for Sage source (lib/sage_all.py's timeit): 2^3 is a power and
 // 1/2 exact when the code object runs
+// Sage mode's session namespace (lib/_sage_lazy.py session): `session`, a _Session, supplies the names a global load
+// misses there (builtinName) and hears of `del` (delName); only that namespace, never a library module's
+B.builtins.__pyjs_lazy_namespace__ = Obj.builtin((g: any, session: any) => {
+  if (!(g instanceof Obj.PyDict)) raise(T.TypeError, "__pyjs_lazy_namespace__() needs a namespace's dict");
+  // (a module's namespace object behind its dict; a plain dict keeps it itself, Obj.namespaceOf)
+  const m = (g as any).$m;
+  ((m instanceof Obj.ObjMap ? m.o : g) as any)[Obj.NS_LAZY] = session;
+  return null;
+}, "__pyjs_lazy_namespace__");
 B.builtins.__pyjs_compile_sage__ = Obj.builtin((src: any, filename: any, mode: any) => compileSource(src, filename, mode, true), "__pyjs_compile_sage__");
 B.builtins.open = Obj.builtin((...a: any[]) => Obj.callObj(Obj.getattr(M.importModule("_pyjs_open"), "open"), a), "open");
 B.builtins.open.$kw = (pos: any[], names: string[], values: any[]) => Obj.callKw(Obj.getattr(M.importModule("_pyjs_open"), "open"), pos, names, values);
@@ -1509,6 +1539,8 @@ export const R: any = {
   realGlobals: Obj.realGlobals,
   localsDict,
   sortedKeys,
+  dirModule,
+  lazyUnloaded,
   delName,
   originalBuiltins,
   builtinsOf: M.builtinsOf,
