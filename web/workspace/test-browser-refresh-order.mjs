@@ -38,7 +38,9 @@ const ws = new Proxy({
 window.calls = calls;
 window.add = (p, told = true) => { files.push(p); if (told) watcher?.({ path: p }); };
 window.rows = () => [...document.querySelectorAll(".frow[data-sel]")].map((r) => r.dataset.path);
-window.b = mountBrowser(document.getElementById("box"), { ws, current: () => undefined, open: () => {} });
+// (host.current is read at the end of each refresh's draw: armed, it asks for one more refresh two microtasks later,
+// the step between the last read of whether to read again and the refresh's end (TESTS, #1805))
+window.b = mountBrowser(document.getElementById("box"), { ws, current: () => { if (window.armGap) { window.armGap = false; queueMicrotask(() => queueMicrotask(() => { add("/gap.ipynb", false); window.gapDone = b.refresh().then(() => rows()); })); } return undefined; }, open: () => {} });
 window.ready = true;
 </script>`);
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
@@ -51,6 +53,8 @@ const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
 let port = Number(process.env.CDP_PORT) || 0;
 const profile = mkdtempSync(join(tmpdir(), "sb-refresh-order-chrome-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+// (the whole suite bounded too: past 120 s it fails, Chrome killed)
+setTimeout(() => { console.error("FAIL: the suite didn't end in 120 s"); try { chrome.kill("SIGKILL"); } catch {} process.exit(1); }, 120_000).unref();
 const fails = [];
 let checks = 0;
 const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
@@ -58,14 +62,25 @@ try {
   if (!port) port = await devtoolsPort(profile);
   let targets;
   for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); if (targets.some((x) => x.type === "page")) break; } catch {} await sleep(100); }
-  const ws = new WebSocket(targets.find((x) => x.type === "page").webSocketDebuggerUrl);
-  await new Promise((r) => (ws.onopen = r));
+  const page = targets?.find((x) => x.type === "page");
+  if (!page) throw new Error("Chrome showed no page in 30 s");
+  const ws = new WebSocket(page.webSocketDebuggerUrl);
+  // (every wait bounded: the socket's open, each call (CALL_MS), and a closed or failed socket ends every call waiting)
+  const CALL_MS = 15000;
+  await new Promise((ok, no) => { const t = setTimeout(() => no(new Error("the DevTools socket didn't open in 10 s")), 10000); ws.onopen = () => { clearTimeout(t); ok(); }; ws.onerror = () => { clearTimeout(t); no(new Error("the DevTools socket failed to open")); }; });
   let n = 0;
   const waiting = new Map(), errors = [];
-  const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+  const endAll = (why) => { for (const [, w] of waiting) w.no(new Error(why)); waiting.clear(); };
+  ws.onclose = () => endAll("the DevTools socket closed");
+  ws.onerror = () => endAll("the DevTools socket failed");
+  const send = (method, params = {}) => new Promise((ok, no) => {
+    const id = ++n, t = setTimeout(() => { waiting.delete(id); no(new Error(`${method} got no answer in ${CALL_MS} ms`)); }, CALL_MS);
+    waiting.set(id, { ok: (v) => { clearTimeout(t); ok(v); }, no: (e) => { clearTimeout(t); no(e); } });
+    ws.send(JSON.stringify({ id, method, params }));
+  });
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
-    if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+    if (m.id && waiting.has(m.id)) { waiting.get(m.id).ok(m.result ?? m.error); waiting.delete(m.id); }
     if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? m.params.exceptionDetails?.text);
   };
   await send("Runtime.enable");
@@ -73,7 +88,9 @@ try {
   const until = async (f, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await f()) return true; await sleep(100); } return false; };
   // (answer every waiting list call, the newest first, until none waits: an older one answered after a newer one)
   const answerAll = async () => {
+    const end = Date.now() + 20000;
     for (let quiet = 0; quiet < 3; ) {
+      if (Date.now() > end) throw new Error("list calls still waiting after 20 s of answering");
       const open = await ev("calls.flatMap((c, i) => (c.answer && !c.answered ? [i] : []))");
       if (!open.length) { quiet++; await sleep(200); continue; }
       quiet = 0;
@@ -103,6 +120,15 @@ try {
   await answering;
   check(atP2.includes("/z.ipynb"), "a refresh asked for while another reads: when it ends, the file made before it is shown: " + JSON.stringify(atP2));
   check(JSON.stringify(await ev("rows()")) === JSON.stringify(["/x.ipynb", "/y.ipynb", "/z.ipynb"]), "…and stays shown: " + JSON.stringify(await ev("rows()")));
+
+  // a refresh asked for in the step between a refresh's last read of whether to read again and its end: its promise
+  // ends with a list read after its call (TESTS, #1805: one cleared a microtask later handed back a promise no read
+  // followed)
+  await ev("(hold = false, window.armGap = true, window.gapDone = null, window.gapStart = b.refresh(), 1)");
+  await ev("gapStart");
+  check(await until(() => ev("!!window.gapDone"), 5000), "the refresh asked for at the seam was asked for");
+  const gapRows = await ev("gapDone");
+  check(gapRows?.includes("/gap.ipynb"), "a refresh asked for at a refresh's end: when it ends, the file made before it is shown: " + JSON.stringify(gapRows));
   for (const e of errors) fails.push("page error: " + e);
   ws.close();
 } catch (e) {

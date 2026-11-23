@@ -427,11 +427,13 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   // arrived reads "on another device", and stops as soon as it is here)
   let here: { notebook: Set<string>; board: Set<string> } = { notebook: new Set(), board: new Set() };
   // (one refresh at a time: one asked for while another runs is made once more after it, so an older list, answered
-  // late, never draws over a newer one, and each caller's promise ends after a list read since its call)
+  // late, never draws over a newer one, and each caller's promise ends after a list read since its call. `refreshing`
+  // is cleared in the same step as the last `again` is read, never a microtask later: one asked for in between
+  // would get a promise no read follows)
   let refreshing: Promise<void> | null = null, again = false;
   function refresh(): Promise<void> {
     if (refreshing) { again = true; return refreshing; }
-    refreshing = (async () => { do { again = false; await refreshOnce(); } while (again); })().finally(() => { refreshing = null; });
+    refreshing = (async () => { try { do { again = false; await refreshOnce(); } while (again); } finally { refreshing = null; } })();
     return refreshing;
   }
   async function refreshOnce() {
