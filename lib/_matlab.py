@@ -13121,6 +13121,7 @@ _LATEX_WRITERS = {
     "mkdir": "mkdir makes a folder, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook.",
     "rmdir": "rmdir removes a folder, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook.",
     "delete": "delete removes a file, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook.",
+    "writematrix": "writematrix writes a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook.",
     # (diary keeps no log in Sagebrush, in any run: its line says what it does in MATLAB, and promises nothing more)
     "diary": "diary keeps a log file in MATLAB, and code in a LaTeX document can't write files.",
     # (print, saveas and exportgraphics write a figure to a file: the line names the one called)
@@ -13154,8 +13155,8 @@ def _latex_refuse(name):
 def latex_run():
     """A LaTeX build's MATLAB run begins: a new session's state (as fresh_session(), and no open files, timers,
     figures or cached paths), the session's errors kept for cell_error() (host_shows_errors()), and the LaTeX switch
-    on: the writers (save, fopen in any mode but reading, mkdir, rmdir, delete, diary, cd, and print, saveas and
-    exportgraphics) refused with their lines, an item's
+    on: the writers (save, writematrix, fopen in any mode but reading, mkdir, rmdir, delete, diary, cd, and print,
+    saveas and exportgraphics) refused with their lines, an item's
     error framed with its name and line (report_cell), and each figure an item would show replaced by
     LATEX_FIGURE."""
     fresh_session()
