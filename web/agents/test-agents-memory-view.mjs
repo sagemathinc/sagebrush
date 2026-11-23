@@ -176,8 +176,20 @@ try {
   await P.until(`/looks like it holds a secret/.test(document.querySelector('#toast')?.textContent ?? '')`, 5000).catch(() => {});
   const t8 = await toast(P);
   ok(/looks like it holds a secret/.test(t8) && !t8.includes("sk-live") && (await P.ev(`document.querySelector('dialog.memory-edit[open] [name=body]')?.value`)) === "key sk-live-999", "V8: a secret is refused in the page's words, without echoing it; the dialog keeps the text to fix", t8);
-  await P.ev(`([...document.querySelector('dialog.memory-edit[open]').querySelectorAll('button')].find((b) => b.textContent === 'Cancel').click(), true)`);
+  // (an answer that can't be read: the dialog stays, says so, and Save again is a new request)
   H.memory.secret = null;
+  H.hold.add("memory.edit");
+  await P.ev(`(() => { const d = document.querySelector('dialog.memory-edit[open]'); d.querySelector('[name=body]').value = 'Rings are commutative, with 1, always.'; [...d.querySelectorAll('button')].find((b) => b.textContent === 'Save').click(); return true; })()`);
+  for (const t = Date.now(); !H.held.length && Date.now() - t < 5000; ) await sleep(50);
+  const m8 = H.held.splice(0)[0];
+  H.answer(m8.id, { note: "x" });
+  await P.until(`/couldn't be read/.test(document.querySelector('dialog.memory-edit[open] .msg')?.textContent ?? '')`, 5000).catch(() => {});
+  const msg8 = await P.ev(`document.querySelector('dialog.memory-edit[open] .msg')?.textContent ?? ''`);
+  H.hold.delete("memory.edit");
+  await P.ev(`([...document.querySelector('dialog.memory-edit[open]').querySelectorAll('button')].find((b) => b.textContent === 'Save').click(), true)`);
+  await P.until(`!document.querySelector('dialog.memory-edit[open]')`, 5000).catch(() => {});
+  const e8 = sent(H, "memory.edit").at(-1);
+  ok(/couldn't be read/.test(msg8) && e8.decision_id !== m8.params.decision_id && H.memory.notes.get(nAlg.note).body === "Rings are commutative, with 1, always.", "V8: an Edit answer that can't be read keeps the dialog and says so; Save again is a new request, and saves", { msg8, first: m8.params.decision_id, again: e8.decision_id });
 
   // ======================================================================== V9: Delete
   // (first its answer can't be read: the id is kept, and Delete again sends the very same request)
@@ -201,7 +213,7 @@ try {
   await P.until(`!document.querySelector('#memory-view .memory-note[data-note="${nAlg.note}"]') && !!document.querySelector('#memory-view .memory-note')`, 5000).catch(() => {});
   const del9 = sent(H, "memory.delete").at(-1);
   ok(del9?.decision_id === m9.params.decision_id, "V9: Delete again after the unreadable answer sends the same decision id", { first: m9.params.decision_id, again: del9?.decision_id });
-  ok(/stops reading it at once/.test(d9) && del9?.note === nAlg.note && del9.revision === 3 && !H.memory.notes.has(nAlg.note) && !(await P.ev(`!!document.querySelector('#memory-view .memory-note[data-note="${nAlg.note}"]')`)), "V9: Delete asks first, then sends memory.delete at the revision shown; the note leaves the list", { d9, del9 });
+  ok(/stops reading it at once/.test(d9) && del9?.note === nAlg.note && del9.revision === 4 && !H.memory.notes.has(nAlg.note) && !(await P.ev(`!!document.querySelector('#memory-view .memory-note[data-note="${nAlg.note}"]')`)), "V9: Delete asks first, then sends memory.delete at the revision shown; the note leaves the list", { d9, del9 });
 
   // ======================================================================== V16: an answer after the person moved on
   // (Renew the first note, go to another before its answer: the answer is said, and the person stays where they went)
@@ -218,6 +230,27 @@ try {
   await P.until(`/Renewed/.test(document.querySelector('#toast')?.textContent ?? '')`, 5000).catch(() => {});
   await sleep(400);
   ok(/Renewed/.test(await toast(P)) && (await P.ev(`document.querySelector('#memory-view .memory-open:not([hidden])')?.dataset.note`)) === nOut.note, "V16: a change's answer after the person moved to another note is said, and they stay on that note", await P.ev(`document.querySelector('#memory-view .memory-open:not([hidden])')?.dataset.note`));
+  // (and back on the same note before the answer: it's shown as it is now, its buttons free)
+  await back();
+  await P.until(`!!document.querySelector('#memory-view .memory-note[data-note="${nOwn.note}"]')`, 5000);
+  await openNote(nOwn.note);
+  H.hold.add("memory.edit");
+  await P.ev(`(document.querySelector('#memory-view [data-act=renew]').click(), true)`);
+  for (const t = Date.now(); !H.held.length && Date.now() - t < 5000; ) await sleep(50);
+  await back();
+  await P.until(`!!document.querySelector('#memory-view .memory-note[data-note="${nOut.note}"]')`, 5000);
+  await openNote(nOut.note);
+  await back();
+  await P.until(`!!document.querySelector('#memory-view .memory-note[data-note="${nOwn.note}"]')`, 5000);
+  await openNote(nOwn.note);
+  const rev16 = H.memory.notes.get(nOwn.note).revision;
+  H.hold.delete("memory.edit");
+  H.release();
+  await P.until(`!!document.querySelector('#memory-view [data-act=renew]:not([disabled])')`, 5000).catch(() => {});
+  await sleep(300);
+  await P.ev(`(document.querySelector('#memory-view [data-act=renew]').click(), true)`);
+  for (const t = Date.now(); sent(H, "memory.edit").at(-1)?.revision !== rev16 + 1 && Date.now() - t < 5000; ) await sleep(50);
+  ok(sent(H, "memory.edit").at(-1)?.revision === rev16 + 1, "V16: back on the same note before its answer: shown again as it is now, its buttons free (the next Renew goes at the new revision)", { last: sent(H, "memory.edit").at(-1), rev16 });
   await back();
   await P.until(`document.querySelectorAll('#memory-view .memory-note').length >= 3`, 5000).catch(() => {});
 

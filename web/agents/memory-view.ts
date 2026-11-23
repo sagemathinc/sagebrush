@@ -216,6 +216,7 @@ export function mountMemoryView(h: MemoryViewHost) {
     readError = "";
     shownNote = null;
     listed = false;
+    busy.clear(); // (a request still out on the earlier pairing answers to no one)
     opening++;
     loading++;
     for (const d of [...dialogs]) d.close();
@@ -303,9 +304,11 @@ export function mountMemoryView(h: MemoryViewHost) {
   }
   // (after a change: the note again, as the agent has it now, or the list; only if the person is still where they
   //  were when they asked (`at`): one who has moved on is told, and stays)
-  async function after(note: string | null, said: string, at: number) {
+  async function after(acted: string, note: string | null, said: string, at: number) {
     h.toast(said, 4000);
-    if (opening !== at || !open) { if (!shownNote) void load(); return; }
+    if (!open) return;
+    // (moved on, and back on that same note: it's shown again as it is now, its buttons free)
+    if (opening !== at && shownNote?.note !== acted) { if (!shownNote) void load(); else render(); return; }
     if (note) await openNote(note);
     else toList();
   }
@@ -325,20 +328,20 @@ export function mountMemoryView(h: MemoryViewHost) {
         decisions.set(n.note, { key: kept?.key ?? "", id: kept?.id ?? "", renew: { revision: n.revision, expires } });
         await decide(n.note, "memory.edit", { revision: n.revision, expires });
         busy.delete(n.note);
-        await after(n.note, VIEW_COPY.renewed, at);
+        await after(n.note, n.note, VIEW_COPY.renewed, at);
       } else if (what === "accept") {
         await decide(n.note, "memory.accept", { revision: n.revision });
         busy.delete(n.note);
-        await after(n.note, VIEW_COPY.accepted, at);
+        await after(n.note, n.note, VIEW_COPY.accepted, at);
       } else {
         await decide(n.note, "memory.delete", { revision: n.revision });
         busy.delete(n.note);
-        await after(null, VIEW_COPY.deleted, at);
+        await after(n.note, null, VIEW_COPY.deleted, at);
       }
     } catch (e) {
       busy.delete(n.note);
       const code = (e as { code?: string })?.code;
-      const stay = opening !== at || !open;
+      const stay = !open || (opening !== at && shownNote?.note !== n.note);
       // (an answer that couldn't be read may have gone through, and asking again gets the same answer: the note is
       //  shown as it is now)
       if (unreadable(e)) { h.toast(VIEW_COPY.unreadDecision, 8000); if (!stay) await openNote(n.note); else render(); return; }
@@ -399,21 +402,25 @@ export function mountMemoryView(h: MemoryViewHost) {
         const r = (await decide(n.note, "memory.edit", change)) as { note: string; revision: number };
         busy.delete(n.note);
         dlg.close();
-        await after(r.note, VIEW_COPY.saved, at);
+        await after(n.note, r.note, VIEW_COPY.saved, at);
       } catch (e) {
         busy.delete(n.note);
         const code = (e as { code?: string })?.code;
-        if (code === "stale") {
-          // (changed at the agent: the dialog stays with the person's text, and the note behind it is the new one. A
-          //  field the person didn't change takes the note's new value, so Save again sends only their own changes)
+        // (a reset closed the dialog meanwhile: said, and nothing else moves)
+        if (!dialogs.has(dlg)) { refused(e); return; }
+        if (code === "stale" || unreadable(e)) {
+          // (changed at the agent, or an answer that couldn't be read (it may have gone through; asking again would get
+          //  the same answer): the dialog stays with the person's text, and the note behind it is read again. A field
+          //  the person didn't change takes the note's new value, so Save again sends only their own changes)
+          if (unreadable(e)) decisions.delete(n.note);
           const fresh = await openNote(n.note);
-          if (fresh) {
+          if (fresh && dialogs.has(dlg)) {
             if (name.value.trim() === n.name) name.value = fresh.name;
             if (description.value.trim() === n.description) description.value = fresh.description;
             if (body.value === n.body) body.value = fresh.body;
             if (where.value === scopeKey(n.scope) && [...where.options].some((o) => o.value === scopeKey(fresh.scope))) where.value = scopeKey(fresh.scope);
             n = fresh;
-            msg.textContent = VIEW_COPY.editStale;
+            msg.textContent = unreadable(e) ? VIEW_COPY.unreadDecision : VIEW_COPY.editStale;
           } else if (dialogs.has(dlg)) msg.textContent = VIEW_COPY.readFailed; // (the note couldn't be read again: the text stays)
         } else if (code === "not_found") {
           refused(e);
@@ -523,10 +530,12 @@ export function mountMemoryView(h: MemoryViewHost) {
     errLine.textContent = readError;
     errLine.hidden = !readError;
     more.hidden = !next;
-    const rowsSig = JSON.stringify([notesVer, listed, tagsDrawn]);
+    const rowsSig = JSON.stringify([notesVer, listed, tagsDrawn, !!readError]);
     if (rowsSig === drawnRows) return;
     drawnRows = rowsSig;
     if (!listed) return void listBox.replaceChildren(el("p", { className: "memory-empty", textContent: VIEW_COPY.loading }));
+    // (a listing that failed with nothing shown: its error only, never "No notes")
+    if (readError && !notes.length) return void listBox.replaceChildren();
     listBox.replaceChildren(...(notes.length ? notes.map((n) => {
       const b = el("button", { type: "button", className: "memory-note" + (n.state !== "ok" ? " " + n.state : "") },
         el("span", { className: "n", textContent: n.name }),
