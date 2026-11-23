@@ -556,6 +556,47 @@ def _vector_pushout(R, S):
     return qb.QQbar  # (AA and QQbar)
 
 
+def _matrix_divide(A, B):
+    """A / B for a matrix B (A a matrix or a vector): X with X*B = A, as
+    Sage's B.solve_left(A), over the ring where A and B meet (Sage's
+    TypeError where there is none).
+
+    EXAMPLES::
+
+        sage: matrix(QQ, [[1, 2], [3, 4]]) / matrix(QQ, [[2, 1], [1, 1]])
+        [-1  3]
+        [-1  5]
+        sage: vector(QQ, [1, 2]) / matrix(QQ, [[2, 1], [1, 1]])
+        (-1, 3)
+    """
+    RA, RB = A.base_ring(), B.base_ring()
+    # (B's ring first: of RDF and RR, or CDF and CC, B's, as Sage's
+    # B.solve_left(A): matrix(RR, ...)/matrix(RDF, ...) is over RDF)
+    R = RA if RA is RB else _vector_pushout(RB, RA)
+    if R is None:
+        raise TypeError("no common canonical parent for objects with parents: '%r' and '%r'" % (RB, RA))
+    from _sage_matrix import Matrix
+    is_mat = isinstance(A, (Matrix, FFMatrix))
+    kr, kb = _num_kind(R), _num_kind(RB)
+    if kr is not None and kr[0] and kb is not None and not kb[0]:
+        # (a complex numerator over a real numerical matrix: its real and
+        # imaginary parts solved apart over B's field, as a complex solve of
+        # a real matrix does; numpy here has no complex solve)
+        def part(f):
+            if is_mat:
+                return FFMatrix(RB, [[RB(f(R(x))) for x in r] for r in A.rows()], A.ncols())
+            return _sa().vector(RB, [RB(f(R(x))) for x in A])
+        Xr, Xi = B.solve_left(part(lambda z: z.real())), B.solve_left(part(lambda z: z.imag()))
+        if is_mat:
+            return FFMatrix(R, [[R(a, b) for a, b in zip(r, s)] for r, s in zip(Xr.rows(), Xi.rows())], Xr.ncols())
+        return _sa().vector(R, [R(a, b) for a, b in zip(Xr, Xi)])
+    if RB is not R:
+        B = B.change_ring(R)
+    if RA is not R:
+        A = A.change_ring(R) if is_mat else _sa().vector(R, list(A))
+    return B.solve_left(A)
+
+
 # ------------------------------------------------------------------ equality through coercion
 #
 # Sage's x == y (William, who designed it: "it uses the coercion model to
@@ -1197,6 +1238,10 @@ class FFVector:
             ...
             TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Rational Field'
         """
+        from _sage_matrix import Matrix
+        if isinstance(o, (FFMatrix, Matrix)):
+            # (by a matrix: X with X*M = v, as Sage)
+            return _matrix_divide(self, o)
         if isinstance(o, (FFVector, FFMatrix)) or _vec_base(o) is not None:
             return NotImplemented
         m = self._inexact_meet(o)
@@ -2226,6 +2271,10 @@ class FFMatrix:
         return self.transpose().solve_right(_rhs_entries(b, self.ncols(), "columns"))
 
     def __truediv__(self, o):
+        from _sage_matrix import Matrix
+        if isinstance(o, (FFMatrix, Matrix)):
+            # (by a matrix: X with X*o = self, as Sage's o.solve_left(self))
+            return _matrix_divide(self, o)
         c = self._scalar(o)
         if c is None:
             p = self._numeric_op(o, "/")

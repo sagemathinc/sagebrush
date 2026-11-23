@@ -234,6 +234,9 @@ class Vector(list):
         return _over_qq(Vector(_norm(other * a) for a in self), self, other)
 
     def __truediv__(self, other):
+        if isinstance(other, Matrix) or isinstance(other, _ffmat().FFMatrix):
+            # (by a matrix: X with X*other = self, as Sage)
+            return _ffmat()._matrix_divide(self, other)
         L = self._inexact_lift(other)
         if L is not None:
             # (by the inverse, as Sage: v/CDF(1, 2) is v times 1/CDF(1, 2))
@@ -1539,6 +1542,9 @@ class Matrix:
             [3/2   2], [6/x 8/x]
             )
         """
+        if isinstance(other, Matrix) or isinstance(other, _ffmat().FFMatrix):
+            # (by a matrix: X with X*other = self, as Sage's other.solve_left(self))
+            return _ffmat()._matrix_divide(self, other)
         L = self._inexact_lift(other)
         if L is not None:
             # (by the inverse, as Sage's M/RR(1.5))
@@ -1943,7 +1949,10 @@ class Matrix:
             for i, p in enumerate(piv):
                 X[p] = R[i][n:]
         if is_vec:
-            return Vector(_norm(r[0]) for r in X)
+            # (over QQ, integral entries too, as Sage's solution vector)
+            w = Vector(_norm(r[0]) for r in X)
+            w._ring = _sa().QQ
+            return w
         return Matrix(_sa().QQ, X, Bm.ncols())
 
     def solve_left(self, B):
@@ -1956,6 +1965,8 @@ class Matrix:
             (-1, 2)
         """
         if isinstance(B, Matrix):
+            if B.ncols() != self.ncols():
+                raise ValueError("number of columns of self must equal number of columns of right-hand side")
             return self.transpose().solve_right(B.transpose()).transpose()
         return self.transpose().solve_right(B)
 
