@@ -56,9 +56,13 @@ export function isNotePath(path: string): boolean {
   return NOTE_NAME.test(rest);
 }
 
-/** Whether a rename or duplicate may go from `from` to `to` (§3): both in the same namespace, or neither in one. */
+/** Whether a rename or duplicate may go from `from` to `to` (§3): if either is in the reserved folder, both must be
+ * notes (isNotePath) in the same namespace; anything else there (the folder's own paths, the memory parents, a
+ * namespace's root, an id that isn't a fleet id, a nested pseudo-note) never moves.  Two ordinary paths: not this
+ * rule's to refuse. */
 export function sameNamespaceMove(from: string, to: string): boolean {
-  return namespaceOf(from) === namespaceOf(to) && within(from, RESERVED) === within(to, RESERVED);
+  if (!within(from, RESERVED) && !within(to, RESERVED)) return true;
+  return isNotePath(from) && isNotePath(to) && namespaceOf(from) === namespaceOf(to);
 }
 
 /** A note's text within its limit (§4): at most 8,192 bytes of UTF-8. */

@@ -33,6 +33,19 @@ ok(M.sameNamespaceMove(`/.agents/memory/agent/${A}/a.md`, `/.agents/memory/agent
 ok(!M.sameNamespaceMove(`/.agents/memory/agent/${A}/a.md`, "/x.md") && !M.sameNamespaceMove("/x.md", `/.agents/memory/agent/${A}/a.md`), "never out to, or in from, an ordinary path (fixture 6)");
 ok(!M.sameNamespaceMove(`/.agents/memory/agent/${A}/a.md`, `/.agents/memory/tag/${T}/a.md`) && !M.sameNamespaceMove(`/.agents/memory/agent/${A}/a.md`, `/.agents/memory/agent/${B}/a.md`), "never into another namespace (fixtures 7, 8)");
 ok(M.sameNamespaceMove("/x.md", "/y/z.md") && !M.sameNamespaceMove("/x.md", "/.agents/x.md"), "ordinary to ordinary is not this rule's; into the reserved folder never");
+// (in the reserved folder, only notes move, and only within their namespace: SEC's #1807 repro and its neighbours)
+const own = (n) => `/.agents/memory/agent/${A}/${n}`;
+for (const [from, to, what] of [
+  ["/.agents/x", "/.agents/y", "the reserved folder's own paths"],
+  ["/.agents/memory/agent", "/.agents/memory/tag", "the memory parents"],
+  ["/.agents/memory", "/.agents/other", "the memory folder"],
+  [`/.agents/memory/agent/${A}`, `/.agents/memory/agent/${A}x`, "a namespace's root"],
+  [own("a.md"), `/.agents/memory/agent/${A}`, "a note onto its namespace's root"],
+  ["/.agents/memory/agent/x/a.md", "/.agents/memory/agent/x/b.md", "an id that isn't a fleet id"],
+  [own("sub/a.md"), own("sub/b.md"), "nested pseudo-notes"],
+  [own("a.md"), own("sub/b.md"), "a note into a nested pseudo-note"],
+  [own("a.md"), own("B.md"), "a note to a name outside the grammar"],
+]) ok(!M.sameNamespaceMove(from, to) && !M.sameNamespaceMove(to, from), `refused both ways: ${what}`);
 
 // §4: names
 const name = (n) => M.isNotePath(`/.agents/memory/agent/${A}/${n}`);
