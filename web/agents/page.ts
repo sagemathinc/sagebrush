@@ -190,11 +190,8 @@ const session = new ChatSession({
   emitted(thread, d, replayed) {
     if (d.type === "artifact") {
       // (one replayed from the agent's log after a reconnect is recorded, but never moves the pane)
-      if (!replayed) {
-        openArtifact = (d as { id: string }).id;
-        // (written again by the agent: its tab is back if the person had closed it, #1792)
-        reopenTab(thread, openArtifact);
-      }
+      // (shown: its tab back if the person had closed it, #1792, as renderArtifacts does for any artifact shown)
+      if (!replayed) openArtifact = (d as { id: string }).id;
       // (a notebook the agent wrote: which cells, as it wrote them, for the written-by label)
       const art = d as { kind?: string; path?: string };
       if (art.kind === "notebook" && art.path && workspace) {
