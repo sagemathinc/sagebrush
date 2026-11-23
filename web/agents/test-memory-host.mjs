@@ -19,15 +19,19 @@ const bytes = (s) => enc.encode(s).length;
 export const MEMORY_LIMITS = { note: 8 * 1024, store: 10 * 1024 * 1024, pending: 8, listPage: 200, query: 200, tags: 16 };
 const HEX32 = /^[0-9a-f]{32}$/;
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+// (a tag id, lane D's frozen format: 128 bits in lowercase base32, sagebrush-agent lib/tags.mjs)
+export const TAG = /^[a-z2-7]{25}[aeimquy4]$/;
 const DAY = 24 * 3600 * 1000;
 
 /** The memory part of the stand-in agent: `H` is the delegate host (its send, answer, refuse, grant). */
 export function memoryHost(H, { now = () => Date.now() } = {}) {
   const M = { notes: new Map(), pending: new Map(), ledger: new Map(), commits: 0, secret: null, full: false, decided: [] };
-  const scopeKey = (s) => (s === "own" ? "own" : s && typeof s === "object" && HEX32.test(s.tag ?? "") && Object.keys(s).length === 1 ? "tag:" + s.tag : null);
+  const scopeKey = (s) => (s === "own" ? "own" : s && typeof s === "object" && TAG.test(s.tag ?? "") && Object.keys(s).length === 1 ? "tag:" + s.tag : null);
   const granted = () => {
     const m = H.grant?.memory;
-    return m && Array.isArray(m.tags) ? new Set(["own", ...m.tags.map((t) => "tag:" + t)]) : null;
+    // (lane D's enabled: at most 16, strictly ascending, each a tag id; anything else is no grant at all)
+    if (!m || !Array.isArray(m.tags) || m.tags.length > 16 || !m.tags.every((t, i) => TAG.test(t) && (i === 0 || m.tags[i - 1] < t))) return null;
+    return new Set(["own", ...m.tags.map((t) => "tag:" + t)]);
   };
   const visible = (key) => granted()?.has(key) ?? false;
   const size = (n) => bytes(n.name) + bytes(n.description) + bytes(n.body) + bytes(n.scopeKey);
@@ -114,7 +118,9 @@ export function memoryHost(H, { now = () => Date.now() } = {}) {
         if (p.revision !== pr.revision) return { error: "stale" };
         const f = { ...pr, ...(p.edit ?? {}) };
         const key = scopeKey(f.scope);
-        if (!key || !visible(key)) return { error: "not_found" };
+        if (!key) return { error: "bad_request" };
+        // (the grant rechecked at commit: a scope the grant no longer holds is stale)
+        if (!visible(key)) return { error: "stale" };
         const bad = checkFields({ ...f, scopeKey: key });
         if (bad) return { error: bad };
         if (M.full || used() + bytes(f.name) + bytes(f.description) + bytes(f.body) > MEMORY_LIMITS.store) return { error: "full" };
@@ -162,14 +168,14 @@ export function memoryHost(H, { now = () => Date.now() } = {}) {
         commit();
         return { deleted: true };
       });
-      case "memory.accept": {
+      case "memory.accept": return once(null, p, () => {
         const n = M.notes.get(p.note);
         if (!n || !visible(n.scopeKey)) return { error: "not_found" };
         if (p.revision !== n.revision || n.state !== "outside_edit") return { error: "stale" };
         n.state = "ok";
         commit();
         return { note: n.note, revision: n.revision };
-      }
+      });
       default: return { error: "bad_request" };
     }
   }
