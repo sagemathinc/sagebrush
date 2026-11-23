@@ -366,6 +366,8 @@ export function lintPackage(pkg, api, others = []) {
         case "Tuple": case "List": case "Set": return (v.elts ?? []).some(fromRequired);
         case "Dict": return (v.values ?? []).some(fromRequired);
         case "IfExp": return fromRequired(v.body) || fromRequired(v.orelse);
+        // (a comprehension's elements: a list, set or generator of them, or a dict's keys and values)
+        case "Comp": return fromRequired(v.elt) || fromRequired(v.value);
         case "BoolOp": return (v.values ?? []).some(fromRequired);
         default: return false;
       }
@@ -383,7 +385,8 @@ export function lintPackage(pkg, api, others = []) {
         const pairs = n.k === "Assign" ? (n.targets ?? []).map((t) => [t, n.value])
           : n.k === "AnnAssign" || n.k === "NamedExpr" ? [[n.target, n.value]]
           : n.k === "For" || n.k === "AsyncFor" || n.k === "comprehension" ? [[n.target, n.iter]]
-          : n.k === "withitem" ? [[n.optional_vars, n.context_expr]] : [];
+          : n.k === "withitem" ? [[n.optional_vars, n.context_expr]]
+          : n.k === "Comp" ? (n.generators ?? []).map((g) => [g.target, g.iter]) : [];
         for (const [t, v] of pairs) {
           if (!fromRequired(v)) continue;
           for (const name of boundNames(t, [])) if (!requiredAlias.has(name)) {
@@ -424,6 +427,8 @@ export function lintPackage(pkg, api, others = []) {
       return null;
     };
     const rootName = (e) => (e?.k === "Attribute" ? rootName(e.value) : e?.k === "Name" ? e.id : null);
+    // (the name an attribute or item of a required package's binding starts from: xs[0].attr is xs's)
+    const requiredRoot = (e) => (e?.k === "Attribute" || e?.k === "Subscript" ? requiredRoot(e.value) : e?.k === "Name" ? e.id : null);
     // the names and attributes stored to, and those only read as the start of
     // a longer reference: neither lets a core callable escape
     const notEscaping = new Set();
@@ -451,7 +456,7 @@ export function lintPackage(pkg, api, others = []) {
       if (n.k === "Attribute") {
         if (BANNED_ATTRS.has(n.attr)) flag(file, n.line, "attribute", n.attr, `uses .${n.attr}, which the contract bans`);
         else if (n.attr === "modules" && rootName(n.value) !== null && coreAlias.get(rootName(n.value)) === "sys") flag(file, n.line, "attribute", "sys.modules", "uses sys.modules");
-        else if (n.attr.startsWith("_") && !(n.attr.startsWith("__") && n.attr.endsWith("__")) && requiredAlias.has(rootName(n.value))) {
+        else if (n.attr.startsWith("_") && !(n.attr.startsWith("__") && n.attr.endsWith("__")) && requiredAlias.has(requiredRoot(n.value))) {
           hard(file, n.line, "attribute", n.attr, `.${n.attr}: a private name of a required package`);
         } else if (n.attr.startsWith("_") && !(n.attr.startsWith("__") && n.attr.endsWith("__")) && !n.attr.startsWith(prefix)) {
           const base = n.value?.k === "Name" ? n.value.id : null;
@@ -467,7 +472,7 @@ export function lintPackage(pkg, api, others = []) {
         const walk = (x) => {
           if (x?.k === "Tuple" || x?.k === "List") for (const y of x.elts ?? []) walk(y);
           else if (x?.k === "Attribute" && resolve(x.value) !== null) flag(file, n.line, "monkeypatch", resolve(x), `changes the core's ${resolve(x)}`);
-          else if (x?.k === "Attribute" && requiredAlias.has(rootName(x.value))) hard(file, n.line, "monkeypatch", x.attr, `changes the required package's .${x.attr}`);
+          else if (x?.k === "Attribute" && requiredAlias.has(requiredRoot(x.value))) hard(file, n.line, "monkeypatch", x.attr, `changes the required package's .${x.attr}`);
         };
         walk(t);
       }

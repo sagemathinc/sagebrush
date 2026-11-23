@@ -124,6 +124,13 @@ test("a package uses the packages it requires, at their exact ids, never their p
     ["import dep\nfor c in [dep.Thing]:\n    c.attr = None\n", "monkeypatch", "attr"],
     ["import dep\nif (c := dep.Thing):\n    c.attr = None\n", "monkeypatch", "attr"],
     ["from dep import Thing\nT = Thing if True else None\nT.attr = None\n", "monkeypatch", "attr"],
+    // (a comprehension's elements, and an item of what it builds)
+    ["import dep\nxs = [dep.Thing for _ in [0]]\nxs[0].attr = 1\n", "monkeypatch", "attr"],
+    ["import dep\nys = {k: dep.Thing for k in [0]}\nys[0].attr = 1\n", "monkeypatch", "attr"],
+    ["import dep\nfor t in (dep.Thing for _ in [0]):\n    t.attr = 1\n", "monkeypatch", "attr"],
+    ["import dep\nfor t in {dep.Thing for _ in [0]}:\n    t.attr = 1\n", "monkeypatch", "attr"],
+    ["import dep\nzs = [c for c in [dep.Thing]]\nzs[0].attr = 1\n", "monkeypatch", "attr"],
+    ["import dep\nxs = [dep.Thing for _ in [0]]\ny = xs[0]._secret\n", "attribute", "_secret"],
     // (a module object other than as an attribute's base, and any private name not self's in a requiring package)
     ["import dep\nf(dep)\n", "escape", "dep"],
     ["from dep import sub\nreturn_it = [sub]\n", "escape", "dep.sub"],
@@ -141,6 +148,8 @@ test("a package uses the packages it requires, at their exact ids, never their p
   }
   // (a call's result is a new value, not the package's: using it is no finding)
   assert.deepEqual(lint("import dep\nx = dep.Thing(1)\nx.attr = 2\ny = dep.sub.f().g\nz = dep.sub.Thing\n"), []);
+  // (instances built in a comprehension are new values too)
+  assert.deepEqual(lint("import dep\nxs = [dep.Thing() for _ in [0]]\nxs[0].attr = 1\nys = {k: dep.Thing(k) for k in [0]}\nys[0].attr = 2\n"), []);
   // (a reference outside the Core API: a finding; a reviewed declaration of that line and target waives it, no other)
   const ref = "import numpy as np\nr = np.random.rand.__self__\n";
   assert.ok(lint(ref, []).some((f: any) => f.construct === "reference" && f.target === "numpy.random.rand.__self__"));
