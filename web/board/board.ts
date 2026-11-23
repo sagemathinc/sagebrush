@@ -721,7 +721,7 @@ export class Board {
       b.type = "button";
       b.className = "board-ask-check";
       b.textContent = fb?.pending ? "Asking…" : "Get feedback on my words";
-      b.title = "Asks which of the ideas this question looks for your words show (your words aren't sent to whoever made the board until you submit)";
+      b.title = "Sends your words to the page this board is shown in, which says which of the ideas this question looks for they show. Your answers reach whoever made the board only when you submit.";
       b.disabled = !!fb?.pending;
       const why = document.createElement("span");
       why.className = "board-ask-why";
