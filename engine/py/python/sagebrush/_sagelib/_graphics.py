@@ -706,7 +706,8 @@ def _markers(P, xs, ys, marker, r, color, alpha, sizes=None, edge=None):
             for p in pts:
                 if p is not None:
                     d.append("M" + str(math.floor(p[0] / u + 1e-6)) + " " + str(math.floor(p[1] / u + 1e-6)))
-            if d and alpha is not None:
+            a, c = (alpha, c) if alpha is not None else _css_alpha(color)
+            if d and a is not None:
                 count = {}
                 for k in d:
                     count[k] = count.get(k, 0) + 1
@@ -715,7 +716,7 @@ def _markers(P, xs, ys, marker, r, color, alpha, sizes=None, edge=None):
                     layers.setdefault(n, []).append(k)
                 for n in sorted(layers):
                     out.append('<path transform="scale(%.9g)" fill="%s" fill-opacity="%.6g" d="%s"/>' % (
-                        u, c, 1 - (1 - alpha) ** n, "h1v1h-1z".join(layers[n]) + "h1v1h-1z"))
+                        u, c, 1 - (1 - a) ** n, "h1v1h-1z".join(layers[n]) + "h1v1h-1z"))
             elif d:
                 out.append('<path transform="scale(%.9g)" fill="%s" d="%s"/>' % (u, c, "h1v1h-1z".join(d) + "h1v1h-1z"))
         elif marker in ("s", "square"):
@@ -738,6 +739,27 @@ def _markers(P, xs, ys, marker, r, color, alpha, sizes=None, edge=None):
     if not out:
         return ""
     return "<g%s>%s</g>" % (_alpha_each(alpha), "".join(out))
+
+
+def _css_alpha(css):
+    """(alpha, the opaque color, escaped) of a CSS color that carries its own
+    alpha, rgba(r, g, b, a) or #rrggbbaa; (None, the color, escaped) of any
+    other (a pixel marker's color: its alpha is the layers' alpha, as
+    alpha= would be)"""
+    s = str(css).strip()
+    try:
+        if s.startswith("rgba(") and s.endswith(")"):
+            r, g, b, a = [v.strip() for v in s[5:-1].split(",")]
+            a = float(a)
+            if a < 1:
+                return a, _esc("rgb(%s, %s, %s)" % (r, g, b))
+        elif s.startswith("#") and len(s) == 9:
+            a = int(s[7:9], 16) / 255.0
+            if a < 1:
+                return a, _esc(s[:7])
+    except ValueError:
+        pass
+    return None, _esc(s)
 
 
 def _alpha_each(alpha):

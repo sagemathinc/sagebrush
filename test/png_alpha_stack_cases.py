@@ -58,5 +58,12 @@ def drawn(draw):
 
 for k in (1, 2, 3):
     print("pixel marker, %d in one pixel" % k, drawn(lambda ax: ax.plot([0.505] * k + [0.205], [0.505] * k + [0.205], ",", color="b", alpha=0.3)))
+# the color's own alpha does as alpha= does; alpha= wins over it; and an
+# opaque color stays opaque, however many points
+for k in (2, 3):
+    print("pixel marker, RGBA color, %d in one pixel" % k, drawn(lambda ax: ax.plot([0.505] * k + [0.205], [0.505] * k + [0.205], ",", color=(0, 0, 1, 0.3))))
+    print("pixel marker, #rrggbbaa color, %d in one pixel" % k, drawn(lambda ax: ax.plot([0.505] * k + [0.205], [0.505] * k + [0.205], ",", color="#0000ff4d")))
+print("pixel marker, RGBA color and alpha=0.6, 2 in one pixel", drawn(lambda ax: ax.plot([0.505] * 2 + [0.205], [0.505] * 2 + [0.205], ",", color=(0, 0, 1, 0.3), alpha=0.6)))
+print("pixel marker, opaque, 3 in one pixel", drawn(lambda ax: ax.plot([0.505] * 3 + [0.205], [0.505] * 3 + [0.205], ",", color="b")))
 # one line crossing itself at the center: drawn once, no darker there
 print("a line crossing itself", pixels(lambda ax: ax.plot([0, 1, 1, 0], [0, 1, 0, 1], color="k", linewidth=12, alpha=0.5), [(50, 50), (25, 25)]))
