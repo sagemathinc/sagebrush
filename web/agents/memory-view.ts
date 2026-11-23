@@ -17,11 +17,11 @@ export const VIEW_COPY = {
   button: "Memory…",
   title: "Memory",
   back: "← Back to chats",
-  help: (path: string) =>
-    `These are the notes this agent may use: its own, and those of the tags you allowed. They're kept on this computer, in ${path}. ` +
+  help: (path: string | null) =>
+    `These are the notes this agent may use: its own, and those of the tags you allowed. They're kept on this computer${path ? `, in ${path}` : ""}. ` +
     "Reading and searching them here sends them nowhere. A note the agent reads in a turn goes to its model provider with that turn. " +
     "Notes expire 90 days after they're saved or renewed; reading them doesn't renew them. " +
-    "Your own Claude Code, run outside Sagebrush, keeps its own memory, which isn't shown here. " +
+    "When you connect your own Claude Code instead (a native session), it doesn't use these notes: it keeps its own memory, which isn't shown here. " +
     "Tag names are kept in this browser only: another browser shows a tag's id until you name it there.",
   noAgent: "Connect your agent to see the notes it may use.",
   noFeature: "This agent doesn't keep notes.",
@@ -61,7 +61,9 @@ export const VIEW_COPY = {
   full: "Your notes are full, so this wasn't saved. Delete or shorten some notes, then try again.",
   conflict: "A note with that name is already there. Choose another name.",
   long: "This note is too long. Shorten it.",
-  unread: "The agent's answer couldn't be read. It may have gone through: the list shows how it is now.",
+  unread: "The agent's answer couldn't be read. It may have gone through: try again to see, or check the list.",
+  busy: "Wait for the last change to finish.",
+  editStale: "This note changed while you were editing it. It's shown as it is now behind this; your text is kept here. Save again to replace it.",
   failed: "That didn't work",
   readFailed: "The notes couldn't be read",
   tagName: "Name for this tag (lowercase letters, digits and dashes)",
@@ -85,13 +87,15 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string,
   return e;
 };
 const hex = (n: number) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => b.toString(16).padStart(2, "0")).join("");
-const kb = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / (1024 * 1024)).toFixed(1)} MB`);
+const kb = (n: number) => (n < 1024 * 1024 ? `${n === 0 ? 0 : Math.max(1, Math.round(n / 1024))} KB` : `${(n / (1024 * 1024)).toFixed(1)} MB`);
 const DAY = 24 * 3600 * 1000;
 const scopeKey = (s: Scope) => (s === "own" ? "own" : "tag:" + s.tag);
 const tagLabel = (id: string) => tagName(id) ?? id;
 const scopeLabel = (s: Scope) => (s === "own" ? VIEW_COPY.own : VIEW_COPY.tag(tagLabel(s.tag)));
 
-// (the tab whose agent is connected with memory says so to this browser's other tabs: theirs then say where it is)
+// (the tab whose agent is connected with memory says so to this browser's other tabs: theirs then say where it is.
+//  Display only: any page of this origin could post here, but a tab's own memory never depends on what it hears, and
+//  nothing is sent on the channel but these words)
 const CHANNEL = "sb-memory-view-v1";
 
 export function mountMemoryView(h: MemoryViewHost) {
@@ -99,6 +103,24 @@ export function mountMemoryView(h: MemoryViewHost) {
   document.querySelector("#files-big")?.before(btn);
   const view = el("section", { id: "memory-view", hidden: true, ariaLabel: VIEW_COPY.title });
   document.querySelector("main .composer-wrap")?.before(view);
+
+  // (the view's parts, made once: a redraw fills them, and never replaces the controls, so typing in the search keeps
+  //  its place and focus)
+  const back = el("button", { type: "button", className: "link", textContent: VIEW_COPY.back });
+  const head = el("div", { className: "memory-head" }, back, el("h2", { textContent: VIEW_COPY.title }));
+  const why = el("p", { className: "memory-unavailable", role: "status" });
+  const help = el("p", { className: "memory-help" });
+  const usageLine = el("p", { className: "memory-usage" });
+  const scopeSel = el("select", { name: "memory-scope" });
+  const search = el("input", { type: "search", name: "memory-search", placeholder: VIEW_COPY.search, maxLength: MEMORY_LIMITS.query });
+  const controls = el("div", { className: "memory-controls" }, scopeSel, search);
+  const tagsBox = el("div", { className: "memory-tags" });
+  const errLine = el("p", { className: "msg", role: "alert" });
+  const listBox = el("div", { className: "memory-rows" });
+  const more = el("button", { type: "button", className: "link", textContent: VIEW_COPY.more });
+  const listPart = el("div", { className: "memory-list" }, controls, tagsBox, errLine, listBox, more);
+  const notePart = el("div", { className: "memory-open" });
+  view.append(head, why, help, usageLine, listPart, notePart);
 
   let open = false;
   let otherTab = false;
@@ -111,9 +133,13 @@ export function mountMemoryView(h: MemoryViewHost) {
   let readError = "";
   let shownNote: Note | null = null;
   let loading = 0;
+  let opening = 0;
+  // (one change at a time per note: its buttons wait for the answer)
+  const busy = new Set<string>();
   // (a decision's id, kept only to send the very same request again after its answer was lost: the agent keeps each
-  //  id's request and answer (§6.1); after any answer, a new decision gets a new id)
-  const decisions = new Map<string, { key: string; id: string }>();
+  //  id's request and answer (§6.1); after any answer it could read, a new decision gets a new id. Renew's expiry is
+  //  kept with it, so a retry is the same request)
+  const decisions = new Map<string, { key: string; id: string; expires?: number }>();
   const LOST = new Set(["timeout", "closed"]);
   const unreadable = (e: unknown) => e instanceof MemoryShapeError || (e as { extra?: { answer?: unknown } })?.extra?.answer === true;
   const lost = (e: unknown) => unreadable(e) || LOST.has((e as { code?: string })?.code ?? "");
@@ -124,17 +150,18 @@ export function mountMemoryView(h: MemoryViewHost) {
     const x = p();
     return !!x && x.state === "granted" && !x.link && !!x.hello?.features?.includes(MEMORY_FEATURE) && !!grantMemory(x.grant);
   };
+  const grantedTags = () => grantMemory(p()?.grant ?? null)?.tags ?? [];
   let bc: BroadcastChannel | null = null;
   try { bc = new BroadcastChannel(CHANNEL); } catch { bc = null; }
   let otherTimer = 0;
   bc?.addEventListener("message", (e) => {
     const m = e.data as { kind?: unknown } | null;
     if (m?.kind === "ask" && here()) bc!.postMessage({ kind: "here" });
-    else if (m?.kind === "here") { otherTab = true; clearTimeout(otherTimer); otherTimer = window.setTimeout(() => { otherTab = false; render(); }, 15000); render(); }
-    else if (m?.kind === "gone") { otherTab = false; render(); }
+    else if (m?.kind === "here") { otherTab = true; clearTimeout(otherTimer); otherTimer = window.setTimeout(() => { otherTab = false; render(); }, 25000); render(); }
+    else if (m?.kind === "gone") { otherTab = false; clearTimeout(otherTimer); render(); }
   });
   let wasHere = false;
-  // (memory was here in this tab since it opened: its loss is said as such, not as "connect your agent")
+  // (memory was here in this tab, and the connection was lost (not ended by the person): said as such)
   let wasEverHere = false;
   const announce = () => {
     const now = here();
@@ -158,6 +185,27 @@ export function mountMemoryView(h: MemoryViewHost) {
     if (!x.hello?.features?.includes(MEMORY_FEATURE)) return VIEW_COPY.noFeature;
     return VIEW_COPY.notGranted;
   }
+  // (what the listing depends on: memory here or not, the pairing, and the grant's tags. Only a change of these lists
+  //  again, and drops what was shown from before)
+  let shownFor = "";
+  const keyNow = () => (here() ? JSON.stringify([pairingId(p()), grantedTags()]) : "");
+  const ids = new WeakMap<object, string>();
+  function pairingId(x: object | null): string {
+    if (!x) return "";
+    let id = ids.get(x);
+    if (!id) ids.set(x, (id = hex(8)));
+    return id;
+  }
+  function reset() {
+    notes = [];
+    next = null;
+    usage = null;
+    path = "";
+    readError = "";
+    shownNote = null;
+    opening++;
+    loading++;
+  }
 
   // ---- requests
   async function request(method: string, params: Record<string, unknown>) {
@@ -165,16 +213,16 @@ export function mountMemoryView(h: MemoryViewHost) {
     if (!x) throw Object.assign(new Error("the agent isn't connected"), { code: "closed" });
     return TaskClient.of(x).request(method, params);
   }
-  /** A decision (edit, delete, accept): its id kept only across a lost answer. */
+  /** A decision (edit, delete, accept): its id kept only across a lost answer, and dropped once an answer is read. */
   async function decide(note: string, method: "memory.edit" | "memory.delete" | "memory.accept", params: Record<string, unknown>) {
     const key = JSON.stringify([method, params]);
     const kept = decisions.get(note);
     const decision_id = kept?.key === key ? kept.id : hex(16);
-    decisions.set(note, { key, id: decision_id });
+    decisions.set(note, { ...kept, key, id: decision_id });
     try {
-      const r = await request(method, { note, ...params, decision_id });
+      const r = MEMORY_RESULTS[method](await request(method, { note, ...params, decision_id }));
       decisions.delete(note);
-      return MEMORY_RESULTS[method](r);
+      return r;
     } catch (e) {
       if (!lost(e)) decisions.delete(note);
       throw e;
@@ -192,6 +240,7 @@ export function mountMemoryView(h: MemoryViewHost) {
 
   async function load(more = false) {
     if (unavailable()) return render();
+    if (more && !next) return;
     const ticket = ++loading;
     const params: Record<string, unknown> = {};
     if (filter !== "all") params.scope = filter === "own" ? "own" : { tag: filter.slice(4) };
@@ -211,41 +260,67 @@ export function mountMemoryView(h: MemoryViewHost) {
     }
     render();
   }
-  async function openNote(note: string) {
+  /** A note opened: shown once its answer comes, unless the person has moved on meanwhile. */
+  async function openNote(note: string): Promise<Note | null> {
+    const ticket = ++opening;
+    let got: Note | null = null;
     try {
-      shownNote = MEMORY_RESULTS["memory.get"](await request("memory.get", { note }));
+      got = MEMORY_RESULTS["memory.get"](await request("memory.get", { note }));
     } catch (e) {
+      if (ticket !== opening) return null;
       shownNote = null;
       refused(e);
       void load();
+      return null;
     }
+    if (ticket !== opening || !open) return null;
+    shownNote = got;
     render();
+    return got;
+  }
+  function toList() {
+    opening++;
+    shownNote = null;
+    render();
+    void load();
   }
   // (after a change: the note again, as the agent has it now, and the list)
   async function after(note: string | null, said: string) {
     h.toast(said, 4000);
     if (note) await openNote(note);
-    else shownNote = null;
-    await load();
+    else toList();
+    void load();
   }
   async function act(n: Note, what: "renew" | "delete" | "accept") {
+    if (busy.has(n.note)) return h.toast(VIEW_COPY.busy, 3000);
+    if (what === "delete" && !(await confirm(VIEW_COPY.delTitle, VIEW_COPY.delBody, VIEW_COPY.del))) return;
+    busy.add(n.note);
+    render();
     try {
       if (what === "renew") {
-        await decide(n.note, "memory.edit", { revision: n.revision, expires: Date.now() + 90 * DAY });
+        // (a retry after a lost answer is the same request: the expiry it asked for is kept with its id)
+        const kept = decisions.get(n.note);
+        const expires = kept?.expires ?? Date.now() + 90 * DAY;
+        decisions.set(n.note, { ...(kept ?? { key: "", id: "" }), expires });
+        await decide(n.note, "memory.edit", { revision: n.revision, expires });
+        busy.delete(n.note);
         await after(n.note, VIEW_COPY.renewed);
       } else if (what === "accept") {
         await decide(n.note, "memory.accept", { revision: n.revision });
+        busy.delete(n.note);
         await after(n.note, VIEW_COPY.accepted);
       } else {
-        if (!(await confirm(VIEW_COPY.delTitle, VIEW_COPY.delBody, VIEW_COPY.del))) return;
         await decide(n.note, "memory.delete", { revision: n.revision });
+        busy.delete(n.note);
         await after(null, VIEW_COPY.deleted);
       }
     } catch (e) {
+      busy.delete(n.note);
       refused(e);
       const code = (e as { code?: string })?.code;
       if (code === "stale") await openNote(n.note);
-      else if (code === "not_found") { shownNote = null; await load(); }
+      else if (code === "not_found") toList();
+      else render();
     }
   }
 
@@ -259,8 +334,11 @@ export function mountMemoryView(h: MemoryViewHost) {
     dlg.showModal();
     return new Promise((resolve) => dlg.addEventListener("close", () => { resolve(dlg.returnValue === "ok"); dlg.remove(); }, { once: true }));
   }
-  function editNote(n: Note) {
-    const tags = grantMemory(p()?.grant ?? null)?.tags ?? [];
+  function editNote(first: Note) {
+    if (busy.has(first.note)) return h.toast(VIEW_COPY.busy, 3000);
+    // (the note as last read: a stale answer reads it again, and the person's text stays in the dialog)
+    let n = first;
+    const tags = grantedTags();
     const dlg = el("dialog", { className: "memory-edit" });
     const name = el("input", { name: "name", value: n.name, maxLength: MEMORY_LIMITS.name });
     const description = el("input", { name: "description", value: n.description, maxLength: MEMORY_LIMITS.description });
@@ -270,13 +348,15 @@ export function mountMemoryView(h: MemoryViewHost) {
     where.value = scopeKey(n.scope);
     // (a place the grant no longer has isn't offered: the person chooses again)
     if (where.value !== scopeKey(n.scope)) { where.prepend(el("option", { value: "", textContent: "Choose…", disabled: true })); where.value = ""; }
+    const msg = el("p", { className: "msg", role: "alert" });
     const ok = el("button", { type: "button", className: "primary", textContent: "Save" });
     const cancel = el("button", { type: "button", textContent: "Cancel", onclick: () => dlg.close() });
-    dlg.append(el("h2", { textContent: "Edit the note" }), el("label", {}, "Name", name), el("label", {}, "Description (one line)", description), el("label", {}, "Note", body), el("label", {}, "Where", where), el("menu", {}, cancel, ok));
+    dlg.append(el("h2", { textContent: "Edit the note" }), el("label", {}, "Name", name), el("label", {}, "Description (one line)", description), el("label", {}, "Note", body), el("label", {}, "Where", where), msg, el("menu", {}, cancel, ok));
     dlg.addEventListener("close", () => dlg.remove(), { once: true });
     ok.onclick = async () => {
       if (!where.value) return h.toast("Choose where to keep this note.", 5000);
-      // (only what changed is sent: the agent keeps the rest as it is)
+      if (busy.has(n.note)) return h.toast(VIEW_COPY.busy, 3000);
+      // (only what changed from the note as read is sent: the agent keeps the rest as it is)
       const change: Record<string, unknown> = { revision: n.revision };
       const nm = name.value.trim(), ds = description.value.trim();
       if (nm !== n.name) change.name = nm;
@@ -285,16 +365,25 @@ export function mountMemoryView(h: MemoryViewHost) {
       if (where.value !== scopeKey(n.scope)) change.scope = where.value === "own" ? "own" : { tag: where.value.slice(4) };
       if (Object.keys(change).length === 1) return dlg.close();
       ok.disabled = true;
+      busy.add(n.note);
       try {
-        const r = await decide(n.note, "memory.edit", change);
+        const r = (await decide(n.note, "memory.edit", change)) as { note: string; revision: number };
+        busy.delete(n.note);
         dlg.close();
-        await after((r as { note: string }).note, VIEW_COPY.saved);
+        await after(r.note, VIEW_COPY.saved);
       } catch (e) {
-        refused(e);
-        // (a refusal the person can fix (a secret, a name, the size) keeps the dialog and its text)
+        busy.delete(n.note);
         const code = (e as { code?: string })?.code;
-        if (code === "stale") { dlg.close(); await openNote(n.note); }
-        else if (code === "not_found") { dlg.close(); shownNote = null; await load(); }
+        if (code === "stale") {
+          // (changed at the agent: the dialog stays with the person's text, and the note behind it is the new one)
+          const fresh = await openNote(n.note);
+          if (fresh) { n = fresh; msg.textContent = VIEW_COPY.editStale; }
+          else dlg.close();
+        } else if (code === "not_found") {
+          refused(e);
+          dlg.close();
+          toList();
+        } else refused(e); // (a refusal the person can fix (a secret, a name, the size) keeps the dialog and its text)
       } finally {
         ok.disabled = false;
       }
@@ -313,8 +402,9 @@ export function mountMemoryView(h: MemoryViewHost) {
     dlg.addEventListener("close", () => dlg.remove(), { once: true });
     ok.onclick = () => {
       const r = nameTag(id, input.value.trim());
-      if (!r.ok) { msg.textContent = r.why === "taken" ? VIEW_COPY.tagTaken : r.why === "storage" ? VIEW_COPY.tagStorage : VIEW_COPY.tagBad; return; }
+      if (r.ok === false) { const why = (r as { why: string }).why; msg.textContent = why === "taken" ? VIEW_COPY.tagTaken : why === "storage" ? VIEW_COPY.tagStorage : VIEW_COPY.tagBad; return; }
       dlg.close();
+      drawTags(true);
       render();
     };
     document.body.append(dlg);
@@ -322,19 +412,44 @@ export function mountMemoryView(h: MemoryViewHost) {
     input.focus();
   }
 
+  // ---- the controls (their handlers once)
+  back.onclick = () => close();
+  scopeSel.onchange = () => { filter = scopeSel.value; next = null; void load(); };
+  let typing = 0;
+  search.oninput = () => { clearTimeout(typing); typing = window.setTimeout(() => { query = search.value; next = null; void load(); }, 250); };
+  more.onclick = () => void load(true);
+  // (the place choices and the tag lines: drawn again only when the granted tags or their names change)
+  let tagsDrawn = "";
+  function drawTags(force = false) {
+    const tags = grantedTags();
+    const sig = JSON.stringify(tags.map((t) => [t, tagName(t)]));
+    if (sig === tagsDrawn && !force) return;
+    tagsDrawn = sig;
+    scopeSel.replaceChildren(el("option", { value: "all", textContent: VIEW_COPY.all }), el("option", { value: "own", textContent: VIEW_COPY.own }), ...tags.map((t) => el("option", { value: "tag:" + t, textContent: VIEW_COPY.tag(tagLabel(t)) })));
+    scopeSel.value = filter;
+    if (scopeSel.value !== filter) { filter = "all"; scopeSel.value = "all"; }
+    // (a granted tag this browser hasn't named: its id, and Name this tag; a named one: Rename)
+    tagsBox.replaceChildren(...tags.map((t) => {
+      const row = el("div", { className: "memory-tag" }, el("span", { textContent: VIEW_COPY.tag(tagLabel(t)) }), " ",
+        el("button", { type: "button", className: "link", textContent: tagName(t) ? VIEW_COPY.rename : VIEW_COPY.nameTag, onclick: () => nameDialog(t) }));
+      row.dataset.tag = t;
+      return row;
+    }));
+    tagsBox.hidden = !tags.length;
+  }
+
   // ---- drawing
   function show() {
     open = true;
-    shownNote = null;
     h.shown(true);
     // (another tab may have memory: asked, and its answer redraws)
     if (!here()) bc?.postMessage({ kind: "ask" });
-    render();
-    void load();
+    sync(true);
   }
   function close() {
     if (!open) return;
     open = false;
+    opening++;
     shownNote = null;
     view.hidden = true;
     h.shown(false);
@@ -351,42 +466,27 @@ export function mountMemoryView(h: MemoryViewHost) {
     btn.classList.toggle("on", open);
     if (!open) { view.hidden = true; return; }
     view.hidden = false;
-    const back = el("button", { type: "button", className: "link", textContent: VIEW_COPY.back, onclick: () => close() });
-    const head = el("div", { className: "memory-head" }, back, el("h2", { textContent: VIEW_COPY.title }));
-    const why = unavailable();
-    if (why) {
-      view.replaceChildren(head, el("p", { className: "memory-unavailable", role: "status", textContent: why }));
-      return;
-    }
-    const parts: Node[] = [head];
-    if (path) parts.push(el("p", { className: "memory-help", textContent: VIEW_COPY.help(path) }));
+    const w = unavailable();
+    why.textContent = w ?? "";
+    why.hidden = !w;
+    help.hidden = usageLine.hidden = listPart.hidden = notePart.hidden = !!w;
+    // (nothing of the notes stays in the page while they can't be shown)
+    if (w) { listBox.replaceChildren(); notePart.replaceChildren(); return; }
+    help.textContent = VIEW_COPY.help(path || null);
     if (usage) {
       const share = usage.bytes / usage.limit;
-      const u = el("p", { className: "memory-usage" + (share >= 0.9 ? " warn90" : share >= 0.8 ? " warn80" : "") }, VIEW_COPY.usage(kb(usage.bytes), kb(usage.limit)));
-      if (share >= 0.8) u.append(" ", el("b", { textContent: share >= 0.9 ? VIEW_COPY.warn90 : VIEW_COPY.warn80 }));
-      parts.push(u);
+      usageLine.className = "memory-usage" + (share >= 0.9 ? " warn90" : share >= 0.8 ? " warn80" : "");
+      usageLine.replaceChildren(VIEW_COPY.usage(kb(usage.bytes), kb(usage.limit)));
+      if (share >= 0.8) usageLine.append(" ", el("b", { textContent: share >= 0.9 ? VIEW_COPY.warn90 : VIEW_COPY.warn80 }));
     }
-    if (shownNote) parts.push(noteView(shownNote));
-    else parts.push(listView());
-    view.replaceChildren(...parts);
-  }
-
-  function listView(): HTMLElement {
-    const tags = grantMemory(p()?.grant ?? null)?.tags ?? [];
-    const scope = el("select", { name: "memory-scope" });
-    scope.append(el("option", { value: "all", textContent: VIEW_COPY.all }), el("option", { value: "own", textContent: VIEW_COPY.own }), ...tags.map((t) => el("option", { value: "tag:" + t, textContent: VIEW_COPY.tag(tagLabel(t)) })));
-    scope.value = filter;
-    if (scope.value !== filter) { filter = "all"; scope.value = "all"; }
-    scope.onchange = () => { filter = scope.value; void load(); };
-    const search = el("input", { type: "search", name: "memory-search", placeholder: VIEW_COPY.search, value: query, maxLength: MEMORY_LIMITS.query });
-    let timer = 0;
-    search.oninput = () => { clearTimeout(timer); timer = window.setTimeout(() => { query = search.value; void load(); }, 250); };
-    // (a granted tag this browser hasn't named: its id, and Name this tag; a named one: Rename)
-    const tagRows = tags.map((t) => el("div", { className: "memory-tag" },
-      el("span", { textContent: VIEW_COPY.tag(tagLabel(t)) }), " ",
-      el("button", { type: "button", className: "link", textContent: tagName(t) ? VIEW_COPY.rename : VIEW_COPY.nameTag, onclick: () => nameDialog(t) })));
-    for (const [i, r] of tagRows.entries()) r.dataset.tag = tags[i];
-    const rows = notes.map((n) => {
+    usageLine.hidden = !usage;
+    listPart.hidden = !!shownNote;
+    notePart.hidden = !shownNote;
+    if (shownNote) return drawNote(shownNote);
+    drawTags();
+    errLine.textContent = readError;
+    errLine.hidden = !readError;
+    listBox.replaceChildren(...(notes.length ? notes.map((n) => {
       const b = el("button", { type: "button", className: "memory-note" + (n.state !== "ok" ? " " + n.state : "") },
         el("span", { className: "n", textContent: n.name }),
         el("span", { className: "d", textContent: n.description }),
@@ -394,46 +494,53 @@ export function mountMemoryView(h: MemoryViewHost) {
       b.dataset.note = n.note;
       b.onclick = () => void openNote(n.note);
       return b;
-    });
-    const box = el("div", { className: "memory-list" },
-      el("div", { className: "memory-controls" }, scope, search),
-      ...(tagRows.length ? [el("div", { className: "memory-tags" }, ...tagRows)] : []),
-      ...(readError ? [el("p", { className: "msg", role: "alert", textContent: readError })] : []),
-      ...(rows.length ? rows : [el("p", { className: "memory-empty", textContent: VIEW_COPY.empty })]));
-    if (next) box.append(el("button", { type: "button", className: "link", textContent: VIEW_COPY.more, onclick: () => void load(true) }));
-    return box;
+    }) : [el("p", { className: "memory-empty", textContent: VIEW_COPY.empty })]));
+    more.hidden = !next;
   }
 
-  function noteView(n: Note): HTMLElement {
-    const back = el("button", { type: "button", className: "link", textContent: "← All notes", onclick: () => { shownNote = null; render(); void load(); } });
-    const note = el("div", { className: "memory-open" },
-      back,
+  function drawNote(n: Note) {
+    notePart.dataset.note = n.note;
+    const toAll = el("button", { type: "button", className: "link", textContent: "← All notes", onclick: () => toList() });
+    const actions = el("menu", { className: "memory-actions" });
+    const working = busy.has(n.note);
+    const btnOf = (label: string, what: string, fn: () => void) => { const b = el("button", { type: "button", textContent: label, onclick: fn, disabled: working }); b.dataset.act = what; return b; };
+    if (n.state !== "invalid") actions.append(btnOf(VIEW_COPY.edit, "edit", () => editNote(n)));
+    if (n.expires !== null || n.state === "expired") actions.append(btnOf(VIEW_COPY.renew, "renew", () => void act(n, "renew")));
+    if (n.state === "outside_edit") actions.append(btnOf(VIEW_COPY.accept, "accept", () => void act(n, "accept")));
+    actions.append(btnOf(VIEW_COPY.del, "delete", () => void act(n, "delete")));
+    notePart.replaceChildren(
+      toAll,
       el("h3", { textContent: n.name }),
       el("p", { className: "d", textContent: n.description }),
       el("p", { className: "where", textContent: [scopeLabel(n.scope), expiresText(n.expires), VIEW_COPY.states[n.state]].filter(Boolean).join(" · ") }),
       ...(n.state === "outside_edit" ? [el("p", { className: "note-state", textContent: VIEW_COPY.outsideEdit })] : []),
       ...(n.state === "invalid" ? [el("p", { className: "note-state", textContent: VIEW_COPY.invalid })] : []),
       ...(n.state === "expired" ? [el("p", { className: "note-state", textContent: VIEW_COPY.expired })] : []),
-      el("pre", { className: "mem-body", textContent: n.body }));
-    const actions = el("menu", { className: "memory-actions" });
-    const btnOf = (label: string, what: string, fn: () => void) => { const b = el("button", { type: "button", textContent: label, onclick: fn }); b.dataset.act = what; return b; };
-    if (n.state !== "invalid") actions.append(btnOf(VIEW_COPY.edit, "edit", () => editNote(n)));
-    if (n.expires !== null || n.state === "expired") actions.append(btnOf(VIEW_COPY.renew, "renew", () => void act(n, "renew")));
-    if (n.state === "outside_edit") actions.append(btnOf(VIEW_COPY.accept, "accept", () => void act(n, "accept")));
-    actions.append(btnOf(VIEW_COPY.del, "delete", () => void act(n, "delete")));
-    note.append(actions);
-    return note;
+      el("pre", { className: "mem-body", textContent: n.body }),
+      actions);
+  }
+
+  /** Drawn again for where memory is now; listed again only when what the listing depends on changed (or asked). */
+  function sync(relist = false) {
+    const x = p();
+    // (the person ended the connection: not "lost")
+    if (x?.state === "closed" && x.closeReason === "revoked by the person") wasEverHere = false;
+    const key = keyNow();
+    if (key !== shownFor) {
+      shownFor = key;
+      reset();
+      relist = true;
+    }
+    render();
+    if (open && relist && key) void load();
   }
 
   return {
     render,
     close,
     showing: () => open,
-    /** The pairing changed (connected, lost, its grant): the view says where memory is now, and lists again when here. */
-    changed() {
-      const was = here();
-      render();
-      if (open && was) void load();
-    },
+    /** The pairing changed (connected, lost, its grant, or anything else it says): drawn again, listed again only if
+     *  memory, the pairing or the granted tags changed. */
+    changed: () => sync(),
   };
 }

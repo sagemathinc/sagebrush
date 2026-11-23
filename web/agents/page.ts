@@ -287,8 +287,8 @@ async function openMirror(c: RemoteConversation) {
   if (memoryView.showing()) memoryView.close();
   if (!mirrorOpen && !(await mayLeaveThread())) return;
   const r = await mirror.readConversation(c.conversation).catch(() => null);
-  // (a task opened while the conversation was read: the person's later choice stands)
-  if (delegateUi.showing() !== null) return;
+  // (a task or the Memory view opened while the conversation was read: the person's later choice stands)
+  if (delegateUi.showing() !== null || memoryView.showing()) return;
   if (!r) return toast(MIRROR_COPY.gap);
   const title = mirrorTitle(r.sections);
   mirrorTitles.set(c.conversation, title);

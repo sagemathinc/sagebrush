@@ -68,7 +68,7 @@ try {
   await P.until(`document.querySelectorAll('#memory-view .memory-note').length >= 5`, 10000);
   const t1 = await viewText(P);
   const r1 = await rows(P);
-  ok(/kept on this computer, in \/home\/person\//.test(t1) && /sends them nowhere/.test(t1) && /model provider/.test(t1) && /Your own Claude Code, run outside Sagebrush, keeps its own memory/.test(t1) && /Tag names are kept in this browser only/.test(t1), "V1: the view says where the notes are, what reading them does and doesn't do, the native session's own memory, and where tag names live", t1.slice(0, 600));
+  ok(/kept on this computer, in \/home\/person\//.test(t1) && /sends them nowhere/.test(t1) && /model provider/.test(t1) && /connect your own Claude Code instead \(a native session\), it doesn't use these notes: it keeps its own memory/.test(t1) && /Tag names are kept in this browser only/.test(t1), "V1: the view says where the notes are, what reading them does and doesn't do, the native session's own memory, and where tag names live", t1.slice(0, 600));
   ok(/ of 10\.0 MB used/.test(t1), "V1: and their use of the room", t1.slice(0, 600));
   ok(r1.length === 5 && r1.some((r) => r.name === "rings" && /Tag algebra/.test(r.meta)) && r1.some((r) => r.name === "plots" && r.meta.includes(`Tag ${TAG2}`)) && r1.some((r) => r.name === "notation" && /This agent's own notes/.test(r.meta) && /expires \d{4}-\d\d-\d\d/.test(r.meta) && /Proposed by Claude Code/.test(r.meta)) && r1.some((r) => r.name === "style" && /Changed outside Sagebrush/.test(r.meta)), "V1: each note with its place (a tag by this browser's name, or by its id), size, expiry, state and source", r1);
   ok(await P.ev(`document.body.classList.contains('memory-shown') && getComputedStyle(document.querySelector('#log')).display === 'none'`), "V1: the view takes the chat's place");
@@ -87,10 +87,27 @@ try {
   await P.ev(`(() => { const s = document.querySelector('#memory-view select[name=memory-scope]'); s.value = 'all'; s.dispatchEvent(new Event('change')); return true; })()`);
   await P.until(`document.querySelectorAll('#memory-view .memory-note').length === 5`, 5000).catch(() => {});
 
+  // ======================================================================== V2b: typing while a listing is out
+  // (keys typed one at a time; the listing for the first few is held, then answered: the box keeps its focus and all
+  //  that was typed, and the last listing is for all of it)
+  await P.ev(`(document.querySelector('#memory-view input[name=memory-search]').focus(), true)`);
+  H.hold.add("memory.list");
+  for (const c of "comm") { await P.send("Input.insertText", { text: c }); await sleep(30); }
+  await sleep(400);
+  for (const c of "utative") { await P.send("Input.insertText", { text: c }); await sleep(30); }
+  H.hold.delete("memory.list");
+  H.release();
+  await sleep(600);
+  const s2b = await P.ev(`(() => { const s = document.querySelector('#memory-view input[name=memory-search]'); return { value: s.value, focused: document.activeElement === s }; })()`);
+  await P.until(`document.querySelectorAll('#memory-view .memory-note').length === 1`, 5000).catch(() => {});
+  ok(s2b.value === "commutative" && s2b.focused && sent(H, "memory.list").at(-1)?.query === "commutative" && (await rows(P)).map((r) => r.name).join() === "rings", "V2: typing while a listing is out keeps the box's focus and every key; the last listing is for all of it", { s2b, last: sent(H, "memory.list").at(-1) });
+  await P.ev(`(() => { const s = document.querySelector('#memory-view input[name=memory-search]'); s.value = ''; s.dispatchEvent(new Event('input')); return true; })()`);
+  await P.until(`document.querySelectorAll('#memory-view .memory-note').length === 5`, 5000).catch(() => {});
+
   // ======================================================================== V3: a note, as text
   const openNote = async (note) => {
     await P.ev(`(document.querySelector('#memory-view .memory-note[data-note="${note}"]').click(), true)`);
-    await P.until(`!!document.querySelector('#memory-view .memory-open')`, 5000);
+    await P.until(`document.querySelector('#memory-view .memory-open:not([hidden])')?.dataset.note === ${JSON.stringify(note)}`, 5000);
   };
   await openNote(nBad.note);
   const o3 = await P.ev(`(() => { const o = document.querySelector('#memory-view .memory-open'); return { body: o.querySelector('.mem-body').textContent, imgs: o.querySelectorAll('img').length, links: o.querySelectorAll('a').length }; })()`);
@@ -127,6 +144,7 @@ try {
   ok(/changed outside Sagebrush, so the agent doesn't read it until you accept it/.test(t6) && /Proofs first, then code\./.test(t6), "V6: a note changed outside Sagebrush says so, with its text as it is now", t6.slice(0, 400));
   await P.ev(`(document.querySelector('#memory-view [data-act=accept]').click(), true)`);
   await P.until(`/Accepted/.test(document.querySelector('#toast')?.textContent ?? '')`, 5000).catch(() => {});
+  await P.until(`!document.querySelector('#memory-view [data-act=accept]')`, 5000).catch(() => {});
   const a6 = sent(H, "memory.accept").at(-1);
   ok(a6?.note === nOut.note && a6.revision === 2 && H.memory.notes.get(nOut.note).state === "ok" && !(await P.ev(`!!document.querySelector('#memory-view [data-act=accept]')`)), "V6: Accept is memory.accept at the revision shown; the note is ok again", a6);
   await back();
@@ -143,9 +161,13 @@ try {
     await P.until(`!!document.querySelector('dialog.memory-edit[open]')`, 5000);
     await P.ev(`(() => { const d = document.querySelector('dialog.memory-edit[open]'); d.querySelector('[name=description]').value = 'mine'; [...d.querySelectorAll('button')].find((b) => b.textContent === 'Save').click(); return true; })()`);
   }
-  await P.until(`/changed since you opened it/.test(document.querySelector('#toast')?.textContent ?? '')`, 5000).catch(() => {});
-  await P.until(`/with 1\\./.test(document.querySelector('#memory-view .memory-open .mem-body')?.textContent ?? '')`, 5000).catch(() => {});
-  ok(/changed since you opened it/.test(await toast(P)) && /with 1\./.test(await viewText(P)) && H.memory.notes.get(nAlg.note).description === "rings are commutative", "V7: a stale answer says so and shows the note as it is now; nothing changed at the agent", await toast(P));
+  await P.until(`/changed while you were editing it/.test(document.querySelector('dialog.memory-edit[open] .msg')?.textContent ?? '')`, 5000).catch(() => {});
+  const v7 = await P.ev(`(() => { const d = document.querySelector('dialog.memory-edit[open]'); return d ? { msg: d.querySelector('.msg').textContent, description: d.querySelector('[name=description]').value } : null; })()`);
+  ok(/changed while you were editing it/.test(v7?.msg ?? "") && v7.description === "mine" && /with 1\./.test(await P.ev(`document.querySelector('#memory-view .memory-open .mem-body')?.textContent ?? ''`)) && H.memory.notes.get(nAlg.note).description === "rings are commutative", "V7: a stale answer keeps the dialog and the person's text, says so, and shows the note behind it as it is now; nothing changed at the agent", v7);
+  // (Save again: now at the note's new revision)
+  await P.ev(`([...document.querySelector('dialog.memory-edit[open]').querySelectorAll('button')].find((b) => b.textContent === 'Save').click(), true)`);
+  await P.until(`!document.querySelector('dialog.memory-edit[open]')`, 5000).catch(() => {});
+  ok(H.memory.notes.get(nAlg.note).description === "mine" && sent(H, "memory.edit").at(-1)?.revision === 2, "V7: Save again goes at the note's new revision", sent(H, "memory.edit").at(-1));
 
   // ======================================================================== V8: a secret
   H.memory.secret = "sk-live-";
@@ -159,14 +181,27 @@ try {
   H.memory.secret = null;
 
   // ======================================================================== V9: Delete
+  // (first its answer can't be read: the id is kept, and Delete again sends the very same request)
+  H.hold.add("memory.delete");
   await P.ev(`(document.querySelector('#memory-view [data-act=delete]').click(), true)`);
   await P.until(`!!document.querySelector('dialog.memory-dlg[open]')`, 5000);
   const d9 = await P.ev(`document.querySelector('dialog.memory-dlg[open]').textContent`);
   await P.ev(`(document.querySelector('dialog.memory-dlg[open] button.primary').click(), true)`);
+  for (const t = Date.now(); !H.held.length && Date.now() - t < 5000; ) await sleep(50);
+  const m9 = H.held.splice(0)[0];
+  H.answer(m9.id, { deleted: "yes" });
+  await P.until(`/couldn't be read/.test(document.querySelector('#toast')?.textContent ?? '')`, 5000).catch(() => {});
+  ok(/couldn't be read/.test(await toast(P)) && H.memory.notes.has(nAlg.note), "V9: an answer that can't be read is said so", await toast(P));
+  H.hold.delete("memory.delete");
+  await P.until(`!!document.querySelector('#memory-view [data-act=delete]:not([disabled])')`, 5000);
+  await P.ev(`(document.querySelector('#memory-view [data-act=delete]').click(), true)`);
+  await P.until(`!!document.querySelector('dialog.memory-dlg[open]')`, 5000);
+  await P.ev(`(document.querySelector('dialog.memory-dlg[open] button.primary').click(), true)`);
   await P.until(`/Deleted/.test(document.querySelector('#toast')?.textContent ?? '')`, 5000).catch(() => {});
   await P.until(`!document.querySelector('#memory-view .memory-note[data-note="${nAlg.note}"]') && !!document.querySelector('#memory-view .memory-note')`, 5000).catch(() => {});
   const del9 = sent(H, "memory.delete").at(-1);
-  ok(/stops reading it at once/.test(d9) && del9?.note === nAlg.note && del9.revision === 2 && !H.memory.notes.has(nAlg.note) && !(await P.ev(`!!document.querySelector('#memory-view .memory-note[data-note="${nAlg.note}"]')`)), "V9: Delete asks first, then sends memory.delete at the revision shown; the note leaves the list", { d9, del9 });
+  ok(del9?.decision_id === m9.params.decision_id, "V9: Delete again after the unreadable answer sends the same decision id", { first: m9.params.decision_id, again: del9?.decision_id });
+  ok(/stops reading it at once/.test(d9) && del9?.note === nAlg.note && del9.revision === 3 && !H.memory.notes.has(nAlg.note) && !(await P.ev(`!!document.querySelector('#memory-view .memory-note[data-note="${nAlg.note}"]')`)), "V9: Delete asks first, then sends memory.delete at the revision shown; the note leaves the list", { d9, del9 });
 
   // ======================================================================== V10: Name this tag
   const tagRow = `document.querySelector('#memory-view .memory-tag[data-tag="${TAG2}"]')`;
@@ -195,8 +230,8 @@ try {
 
   // ======================================================================== V12: nothing of a note kept by the page
   await sleep(500);
-  const store12 = await P.ev(`JSON.stringify(Object.fromEntries(Object.keys(localStorage).map((k) => [k, localStorage.getItem(k)])))`);
-  ok(!/metres; t is seconds|Proofs first, then code|Plots in grayscale|onerror/.test(store12), "V12: no note's text is kept in this browser's storage");
+  const store12 = await P.ev(`JSON.stringify([localStorage, sessionStorage].map((st) => Object.fromEntries(Object.keys(st).map((k) => [k, st.getItem(k)]))))`);
+  ok(!/metres; t is seconds|Proofs first, then code|Plots in grayscale|onerror/.test(store12), "V12: no note's text is kept in this browser's storage (local or session)");
 
   // ======================================================================== V13: another tab
   const P2 = await B.tab();
@@ -212,6 +247,8 @@ try {
   H.sock.close();
   await P.until(`/isn't connected/.test(document.querySelector('#memory-view')?.textContent ?? '')`, 10000).catch(() => {});
   const t14 = await viewText(P);
+  await P2.until(`!/Memory is open in your other tab/.test(document.querySelector('#memory-view')?.textContent ?? '')`, 5000).catch(() => {});
+  ok(!/Memory is open in your other tab/.test(await P2.ev(`document.querySelector('#memory-view')?.textContent ?? ''`)), "V14: the other tab no longer says Memory is open there once it's gone", await P2.ev(`document.querySelector('#memory-view')?.textContent ?? ''`));
   ok(/Memory isn't available: .* isn't connected/.test(t14) && !(await P.ev(`!!document.querySelector('#memory-view .memory-note')`)), "V14: a lost connection says Memory isn't available, and the notes go", t14.slice(0, 300));
   ok(P.errors.length === 0, "no page errors", P.errors);
 
