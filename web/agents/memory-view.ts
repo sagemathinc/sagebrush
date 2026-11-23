@@ -420,6 +420,7 @@ export function mountMemoryView(h: MemoryViewHost) {
         // (a reset meanwhile: nothing of it here)
         if (g !== gen) return;
         busy.delete(n.note);
+        render(); // (the note's buttons free again, whatever comes next)
         const code = (e as { code?: string })?.code;
         // (the dialog closed anyway (a browser may let Escape through): said as the note's other changes are, and the
         //  note shown again if the person is still on it)
