@@ -9101,7 +9101,7 @@ def Random(s, b=None):
 # ------------------------------------------------------------------ modular forms
 
 import _sage_modular as _smod
-from sagebrush import mf as _mf
+from _sagebrush_lib import mf as _mf
 
 
 _HECKE_RING = []
@@ -9930,7 +9930,7 @@ def IntegralBasis(K):
     F = _field(K)
     d = F._nfdata()
     rows = d["basis"]
-    from sagebrush import nf as _nfm
+    from _sagebrush_lib import nf as _nfm
     rev = _nfm.hermite_form([list(reversed(r)) for r in rows])
     rev = [list(reversed(r)) for r in rev]
     rev.reverse()
