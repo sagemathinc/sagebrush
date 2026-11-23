@@ -30,6 +30,7 @@ const B = await browser();
 const TAG = "abcdefghijklmnopqrstuvwxya";
 const H2 = delegateHost({ features: ["delegate.1", "chat.resume", "memory.1"] });
 const H3 = delegateHost({ features: ["delegate.1", "chat.resume", "memory.1"], log: "aaaa1111" });
+const H4 = delegateHost({ features: ["delegate.1", "chat.resume", "memory.1"], log: "cccc3333" });
 // (Connect, then Allow: with memory ticked (own notes and the tag), or not)
 async function pair(P, host, memory) {
   await P.navigate(`${site}/agents/?pair=123-456&port=${host.port}`);
@@ -299,6 +300,53 @@ try {
   await P3.until(`/Not saved/.test(${later3}?.querySelector('.mem-state')?.textContent ?? '')`, 5000).catch(() => {});
   ok(H3.got.some((m) => m.method === "memory.dismiss") && !H3.got.some((m) => m.method === "memory.save") && /Not saved/.test(await P3.ev(`${later3}?.querySelector('.mem-state')?.textContent ?? ''`)), "M19: its Dismiss goes to the agent connected now (which no longer has it), and the card ends");
   ok(P3.errors.length === 0, "no page errors (third tab)", P3.errors);
+
+  // ======================================================================== M21: a reconnect in the same tab
+  // (no reload: the card keeps its text in this tab. The same run of the agent pairs again, with memory, and resumes
+  //  the turn: the card takes Dismiss only. A proposal event for it at the same revision, malformed or valid, changes
+  //  nothing and never binds the card to the new pairing; a later revision is a new card, made over this pairing,
+  //  which takes every decision)
+  const P4 = await B.tab();
+  await pair(P4, H4, true);
+  await P4.ev(`(document.querySelector('#new').click(), true)`);
+  await sleep(300);
+  await P4.draft("remember");
+  await P4.ev(`(document.querySelector('#send').click(), true)`);
+  for (const t = Date.now(); !H4.got.some((m) => m.method === "chat.message") && Date.now() - t < 5000; ) await sleep(50);
+  const conv4 = H4.got.find((m) => m.method === "chat.message")?.params?.conversation;
+  const send4 = (event) => H4.turnEvent(conv4, "t-mem4", event);
+  send4({ type: "turn_started" });
+  const pr21 = H4.memory.propose(send4, { name: "retained", description: "same tab reconnect", body: "RETAINED-BODY" });
+  const card4 = `[...document.querySelectorAll('[data-memory]')].find((c) => /same tab reconnect/.test(c.textContent))`;
+  const look4 = () => P4.ev(`(() => { const c = ${card4}; return c ? { body: c.querySelector('.mem-body')?.textContent ?? null, buttons: [...c.querySelectorAll('button')].map((b) => b.textContent) } : null; })()`);
+  await P4.until(`${card4}?.querySelector('.mem-body')?.textContent === 'RETAINED-BODY'`, 10000);
+  H4.sock.close();
+  await sleep(800);
+  await P4.ev(`(document.querySelector('#conn-act').click(), true)`);
+  await P4.until(`!!document.querySelector('.sbag-dlg input')`, 10000);
+  await P4.ev(`(document.querySelector('.sbag-dlg input').value = ${JSON.stringify(`http://127.0.0.1:${H4.port}/?pair=123-456&port=${H4.port}`)}, true)`);
+  await P4.ev(`([...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect').click(), true)`);
+  await P4.until(`[...document.querySelectorAll('.sbag-box h2')].some((h) => h.textContent === 'Allow this agent?')`, 10000);
+  await P4.ev(`(() => { const d = [...document.querySelectorAll('.sbag-box')].at(-1); d.querySelector('input[name=memory-own]').click(); d.querySelector('button.primary').click(); return true; })()`);
+  await P4.until(`document.querySelector('#connect').textContent === 'Connected'`, 10000);
+  await sleep(500);
+  H4.sock.send(JSON.stringify({ jsonrpc: "2.0", method: "chat.replay", params: { conversation: conv4, instance: "cccc3333", last: 2, events: [], done: true, running: ["t-mem4"] } }));
+  await sleep(500);
+  const c21 = await look4();
+  ok(c21?.body === "RETAINED-BODY" && JSON.stringify(c21.buttons) === '["Dismiss"]', "M21: after a reconnect in the same tab to the same run, the card keeps its text and takes Dismiss only", c21);
+  send4({ type: "memory_proposal", ...pr21, body: "DIFFERENT-BODY", extra: "malformed" });
+  await sleep(500);
+  const c21b = await look4();
+  ok(c21b?.body === "RETAINED-BODY" && JSON.stringify(c21b.buttons) === '["Dismiss"]', "M21: a malformed proposal at the same revision changes nothing: no new text, still Dismiss only", c21b);
+  send4({ type: "memory_proposal", ...pr21 });
+  await sleep(500);
+  const c21c = await look4();
+  ok(c21c?.body === "RETAINED-BODY" && JSON.stringify(c21c.buttons) === '["Dismiss"]' && !H4.got.some((m) => m.method === "memory.save"), "M21: a valid proposal at the same revision changes nothing either: the card isn't bound to the new pairing", c21c);
+  H4.memory.revise(send4, pr21.pending, { body: "REVISED-HERE" });
+  await P4.until(`${card4}?.querySelector('.mem-body')?.textContent === 'REVISED-HERE'`, 10000).catch(() => {});
+  const c21d = await look4();
+  ok(c21d?.body === "REVISED-HERE" && JSON.stringify(c21d.buttons) === '["Save","Edit…","Dismiss"]', "M21: a later revision over the new pairing is a new card, which takes every decision", c21d);
+  ok(P4.errors.length === 0, "no page errors (fourth tab)", P4.errors);
   ok(P2.errors.length === 0, "no page errors (second agent)", P2.errors);
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));
@@ -307,6 +355,7 @@ try {
   H.stop();
   H2.stop();
   H3.stop();
+  H4.stop();
   server.kill();
 }
 console.log(failures ? `${failures} FAILED` : "all passed");
