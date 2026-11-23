@@ -53,6 +53,29 @@ def to_color(c, default=None):
     return "#%02x%02x%02x" % tuple(v)
 
 
+def _bar_edges(edgecolor, kw, alpha):
+    """The edge options of bars (bar, barh, hist), as matplotlib's: edgecolor=
+    (or ec=) and linewidth= (or lw=), one for all the bars or a list of one
+    each; the width in points, rcParams["patch.linewidth"] if not given (in
+    SVG units); alpha= replacing an edge color's own, as a face color's"""
+    ec = edgecolor if edgecolor is not None else kw.get("ec")
+    lw = kw.get("linewidth", kw.get("lw"))
+    one = lambda c: _opaque(to_color(c)) if alpha is not None else to_color(c)
+    out = {}
+    if ec is not None:
+        if isinstance(ec, (list, tuple)) and ec and not isinstance(ec[0], (int, float)):
+            out["edgecolors"] = [one(c) for c in ec]
+        else:
+            out["edgecolor"] = one(ec)
+    if lw is None:
+        lw = rcParams.get("patch.linewidth", 1.0)
+    if isinstance(lw, (list, tuple)) or hasattr(lw, "tolist"):
+        out["linewidths"] = [float(v) * PT for v in _list(lw)]
+    else:
+        out["linewidth"] = float(lw) * PT
+    return out
+
+
 def _opaque(css):
     """A color without its alpha: alpha= replaces a color's, as in matplotlib"""
     if isinstance(css, str):
@@ -490,8 +513,8 @@ class Axes:
         col = colors[0] if colors else self._color(color, True)
         if alpha is not None:
             col, colors = _opaque(col), colors and [_opaque(v) for v in colors]
-        p = Rects(rects, color=col, colors=colors, label=label,
-                  edgecolor=to_color(edgecolor), alpha=alpha, legend_role="container")
+        p = Rects(rects, color=col, colors=colors, label=label, alpha=alpha, legend_role="container",
+                  **_bar_edges(edgecolor, kw, alpha))
         if tick_label is not None:
             self._opts["xticks"] = [float(v) for v in xs]
             self._opts["xticklabels"] = list(tick_label)
@@ -509,8 +532,8 @@ class Axes:
         rects = [(l, float(yi) - height / 2, w, height) if w >= 0 else (l + w, float(yi) - height / 2, -w, height)
                  for yi, w, l in zip(ys, ws, ls_)]
         col = self._color(color, True)
-        p = Rects(rects, color=col if alpha is None else _opaque(col), label=label,
-                  edgecolor=to_color(edgecolor), alpha=alpha, legend_role="container")
+        p = Rects(rects, color=col if alpha is None else _opaque(col), label=label, alpha=alpha, legend_role="container",
+                  **_bar_edges(edgecolor, kw, alpha))
         self._opts.setdefault("_barsh", True)
         return _Artist(self._add(p), "container.BarContainer")
 
@@ -552,8 +575,8 @@ class Axes:
         else:
             rects = [(edges[i], 0, edges[i + 1] - edges[i], counts[i]) for i in builtin_range(nb)]
             # (matplotlib's: the label on the first bar, and a BarContainer)
-            self._add(Rects(rects, color=col, alpha=alpha, label=label, edgecolor=to_color(edgecolor),
-                            legend_role="both" if label is not None else "container"))
+            self._add(Rects(rects, color=col, alpha=alpha, label=label,
+                            legend_role="both" if label is not None else "container", **_bar_edges(edgecolor, kw, alpha)))
         self._opts.setdefault("_bars", True)
         import sys
         np = sys.modules.get("numpy")

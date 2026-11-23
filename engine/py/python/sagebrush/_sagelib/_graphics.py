@@ -883,6 +883,10 @@ class Rects(Primitive):
         colors = o.get("colors")
         fill = to_color(o.get("color"), "#1f77b4")
         edge = to_color(o.get("edgecolor"))
+        # (matplotlib's bar edges: a color and a width for all the bars, or
+        # one each; the width in SVG units, 0.8 where none is given)
+        edges, widths = o.get("edgecolors"), o.get("linewidths")
+        width = o.get("linewidth", 0.8)
         out = []
         for i, (x, y, w, h) in enumerate(self.rects):
             if P.ylog and y <= 0:  # a bar from 0 on a log axis starts at the bottom
@@ -893,9 +897,11 @@ class Rects(Primitive):
             if a is None or b is None:
                 continue
             c = colors[i % len(colors)] if colors else fill
+            e = edges[i % len(edges)] if edges else edge
+            lw = widths[i % len(widths)] if widths else width
             out.append('<rect x="%s" y="%s" width="%s" height="%s" fill="%s"%s/>' % (
                 _fmt(min(a[0], b[0])), _fmt(min(a[1], b[1])), _fmt(abs(b[0] - a[0])), _fmt(abs(b[1] - a[1])), _esc(c),
-                ' stroke="%s" stroke-width="0.8"' % _esc(edge) if edge else ""))
+                ' stroke="%s" stroke-width="%s"' % (_esc(e), _fmt(lw)) if e and e != "none" and lw > 0 else ""))
         return "<g%s>%s</g>" % (_alpha_each(o.get("alpha")), "".join(out))
 
     def describe(self):
