@@ -484,6 +484,10 @@ jobs:
     if: always() && (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
+    # (pull-requests: read, only to read the track-pull label of a queued pull request)
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -502,8 +506,30 @@ jobs:
         with:
           name: size-base-${{ github.sha }}
           path: ${{ runner.temp }}/size-records
+      # A track's pull into master (design/size-gate.md, "Track pulls"): every pull request on
+      # the track already passed this backstop against the track, and the pull sums them. With
+      # the track-pull label the table is still measured and reported, but growth over the
+      # backstop doesn't fail it; the merger reads every row. Missing records still fail closed.
+      - name: a track pull?
+        id: track
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          QUEUE_REF: ${{ github.event.merge_group.head_ref }}
+        run: |
+          pull=false
+          if [ "$EVENT" = pull_request ]; then
+            case ",$LABELS," in *,track-pull,*) pull=true ;; esac
+          elif [ "$EVENT" = merge_group ]; then
+            n=$(printf '%s' "$QUEUE_REF" | sed -n 's#^refs/heads/gh-readonly-queue/[^/]*/pr-\([0-9][0-9]*\)-.*#\1#p')
+            if [ -n "$n" ] && gh api "repos/$GITHUB_REPOSITORY/issues/$n/labels" --jq '.[].name' | grep -qx track-pull; then pull=true; fi
+          fi
+          echo "track pull: $pull"
+          echo "pull=$pull" >> "$GITHUB_OUTPUT"
       - name: the gate
         env:
+          TRACK_PULL: ${{ steps.track.outputs.pull }}
           CHANGES: ${{ needs.changes.result }}
           CHECKS: ${{ needs.checks.result }}
           BASE: ${{ needs.size-base.result }}
@@ -520,7 +546,15 @@ jobs:
             exit 1
           else
             cp "$RUNNER_TEMP/size-merge/sizes.json" "$RUNNER_TEMP/size-records/merge-record.json"
-            node scripts/size-measure.mjs --gate --records "$RUNNER_TEMP/size-records" --out "$RUNNER_TEMP/size-records/size-gate.json"
+            if ! node scripts/size-measure.mjs --gate --records "$RUNNER_TEMP/size-records" --out "$RUNNER_TEMP/size-records/size-gate.json"; then
+              # (only growth is excused: a record, recipe or toolchain problem still fails)
+              if [ "$TRACK_PULL" = true ] && node -e 'const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.exit(r.rows.length > 0 && r.problems.length > 0 && r.problems.every((p) => /: growth \+\d+ exceeds \d+ bytes/.test(p)) ? 0 : 1)' "$RUNNER_TEMP/size-records/size-gate.json"; then
+                echo "::warning::a track pull: growth over the backstop is reported, not enforced; the merger reads every row"
+                echo "**A track pull (track-pull label): the rows above are reported, not enforced. The merger reads every row.**" >> "$GITHUB_STEP_SUMMARY"
+              else
+                exit 1
+              fi
+            fi
           fi
       # (report-only: it reads the two npm-pack records and appends a table to
       # the summary; the gate's result stays the gate step's own)
@@ -1105,6 +1139,9 @@ jobs:
       - name: the terminal's long-line pages copy as one line in WebKit (board's B-LL-4)
         timeout-minutes: 3
         run: BROWSER=webkit PLAYWRIGHT="$RUNNER_TEMP/pw" node web/shell/test-panel-pages-copy.mjs
+      - name: the LaTeX source pane's textarea and the lines behind it wrap alike in WebKit (the caret where the text goes)
+        timeout-minutes: 3
+        run: BROWSER=webkit PLAYWRIGHT="$RUNNER_TEMP/pw" node web/latex/test-latex-webkit-wrap.mjs
       - name: "Playwright's Firefox, pinned"
         timeout-minutes: 10
         run: cd "$RUNNER_TEMP/pw" && npx playwright install --with-deps firefox
@@ -1390,8 +1427,39 @@ jobs:
         with:
           workspaces: engine
           save-if: ${{ github.event_name != 'merge_group' }}
+      # (the Smith form's work estimate test writes every row it scores to a report in the
+      # target directory, before asserting anything about it; a cached copy from an earlier
+      # run must not pass for this one's)
+      - name: clear the Smith estimate report
+        run: rm -f engine/target/tmp/smith-estimate-rows.txt
       - working-directory: engine
         run: cargo test --workspace --exclude sagebrush-flint --exclude sagebrush-oracle
+      # The report, pass or fail: its rows per corpus and seed in the job summary, the file
+      # itself as an artifact.  Report-only: a missing report (the test isn't on this branch)
+      # is a line in the summary, never a failure.
+      - name: the Smith estimate report
+        if: always()
+        continue-on-error: true
+        run: |
+          f=engine/target/tmp/smith-estimate-rows.txt
+          {
+            echo "### Smith form work estimate: the test's report"
+            if [ -f "$f" ]; then
+              python3 scripts/smith-estimate-summary.py "$f" || echo "(the summary failed; the report is in the artifact)"
+              echo
+              echo "Every row (the run's units and each stage's estimate) is in the artifact smith-estimate-report."
+            else
+              echo "No report in this run (the estimate test isn't on this branch, or didn't run)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        continue-on-error: true
+        with:
+          name: smith-estimate-report
+          path: engine/target/tmp/smith-estimate-rows.txt
+          if-no-files-found: ignore
+          retention-days: 14
 
   # (numerics-core P2a, r4.2 §12: no microkernel ships that no CI host has executed. engine/nd's NEON kernel
   # runs only on aarch64; this job executes its oracle, thread-determinism and bit-family tests on Apple

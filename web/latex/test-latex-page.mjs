@@ -1600,6 +1600,22 @@ try {
   const mOn = await middle("?latex=1");
   check(mOn.rows && nothing(mOn["/mid.csv"]), "flag on: a middle-click on a non-.tex file does nothing (no preview here, no tab)", mOn);
   check(mOn.rows && mOn["/mid.tex"] && mOn["/mid.tex"].opened.length === 1 && mOn["/mid.tex"].opened[0].includes("?tex=" + midFid) && !mOn["/mid.tex"].preview && mOn["/mid.tex"].here, "flag on: a middle-click on a .tex file opens the editor in a new tab only", mOn);
+  // ---- a code file clicked in the file panel while a .tex is open (William, Nov 21): its own page (/?code=<fid>), as
+  // from a notebook, never the data-file preview over the editor; left by the LaTeX page's way out, its edit written
+  {
+    const pyFid = await mk("/from-tex.py", enc("print(1)\n")), texFid = await mk("/from-tex.tex", enc(DOC));
+    await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
+    await open(texFid);
+    const sel = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
+    const rows = await until(`!!document.querySelector(${sel("/from-tex.py")})`, 20000);
+    await ev(`(() => { const s = document.querySelector(".tex-src"); s.focus(); s.setSelectionRange(s.value.length, s.value.length); document.execCommand("insertText", false, "% typed before leaving\\n"); return 1; })()`);
+    if (rows) await ev(`(document.querySelector(${sel("/from-tex.py")}).click(), true)`);
+    const moved = rows && await until(`new URLSearchParams(location.search).get("code") === ${JSON.stringify(pyFid)} && !!window.sagebrush?.code`, 30000);
+    const preview = await ev(`!!document.querySelector(".sbfprev")`);
+    const written = await ev(`${W}.read("/from-tex.tex").then((r) => new TextDecoder().decode(r.content).includes("% typed before leaving"))`);
+    check(moved && !preview && written, "a .py clicked in the file panel with a .tex open: the code page (/?code=), not the preview; the .tex's edit written first", { rows, moved, preview, written });
+    await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
+  }
   // ---- U1 (William, Nov 2 evening): with a BOARD open, a .tex file clicked in the file panel did nothing. It opens the
   // LaTeX editor (the notebook page's /?tex=<fid>): a click here, the board left the way any open leaves it; a
   // middle-click in a new tab; any other file still its preview, the board kept

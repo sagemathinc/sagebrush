@@ -72,6 +72,54 @@ test("Rust-only engine changes and prose stay narrow", () => {
   assert.deepEqual(suites(classify(["design/notes.md", "README.md"])), { node: "false", web: "false", modes: "false", engine_smoke: "false", docs_only: "true" });
 });
 
+// (the CI capacity ruling, Nov 22 2026, item 2: prose no code reads is docs-only, and the site's articles and blog are
+// web's, not the unknown-path fallback that ran the engine's jobs too)
+const prose = ["DEVELOPMENT.md", "DOCTESTS.md", "NUMPY.md", "PLAN.md", "PLOTTING.md", "PRODUCT.md", "SECURITY-MODEL.md"];
+test("prose no code reads is docs-only: the other top-level pages, docs/'s pages, the friction notes", () => {
+  const docs = { node: "false", web: "false", modes: "false", engine_smoke: "false", docs_only: "true" };
+  for (const f of [...prose, "docs/agent-readable-code.md", "notes/friction/2026-11-19-cli-markov.md", "notes/friction/x/evidence.json", "notes/friction/x/a.tar.gz"])
+    assert.deepEqual(suites(classify([f])), docs, f);
+  assert.deepEqual(suites(classify(["SECURITY-MODEL.md", "notes/friction/x/REPORT.md", "design/a.md"])), docs);
+  assert.equal(classify(["notes/friction/x.md"]).wasm_build, "false");
+  // (and what code reads is not: NOTICE.md (the notices' and imports' scripts, the packages), docs/schemas/
+  // (lib/sagebrush/records.py, test/records.test.ts), a file under docs/ that isn't a page, a new top-level page)
+  for (const f of ["NOTICE.md", "docs/schemas/record.json", "docs/schemas/a.md", "docs/x.json", "NEW.md"])
+    assert.equal(classify([f]).docs_only, "false", f);
+  assert.equal(classify(["docs/schemas/record.json"]).node, "true");
+  // (prose beside code is code's)
+  assert.equal(classify(["PLAN.md", "src/emit.ts"]).docs_only, "false");
+  assert.equal(classify(["PLAN.md", "src/emit.ts"]).node, "true");
+});
+
+test("prose classified docs-only is read by no code: no tracked file names one as a path", () => {
+  const root = join(__dirname, "..", "..");
+  const grep = (pattern: string) => {
+    const r = spawnSync("git", ["grep", "-nIE", pattern, "--", ":!design/", ":!notes/", ":!docs/*.md", ":!*.md", ":!test/ci-paths.test.ts"], { cwd: root, encoding: "utf8" });
+    assert.ok(r.status === 0 || r.status === 1, r.stderr);
+    return r.stdout.trim();
+  };
+  // (a page's name as a string, as reading it would need: `join(root, "PLAN.md")`, `"../NUMPY.md"`)
+  const names = prose.map((f) => f.replace(".", "\\.")).join("|");
+  assert.equal(grep(`["'\`/](${names})["'\`]`), "", "a top-level page named as a path");
+  // (docs/'s pages by name; the folder itself only as web/docs/, the site's, whose build reads its own)
+  const pages = spawnSync("git", ["ls-files", "docs/*.md"], { cwd: root, encoding: "utf8" }).stdout.split("\n").filter((f) => /^docs\/[^/]+\.md$/.test(f));
+  assert.ok(pages.length > 0);
+  assert.equal(grep(`(${pages.map((f) => f.replace(/[.]/g, "\\.")).join("|")})`), "", "a docs/ page named as a path");
+  // (the notes: by their folder, or the repository's notes/ joined)
+  assert.equal(grep(`["'\`](\\.\\./)*notes/friction|join\\((root|ROOT|repo|repoRoot)[^)]*["'\`]notes["'\`]`), "", "the notes named as a path");
+  // (the control: NOTICE.md, which scripts read, is found)
+  assert.notEqual(grep(`["'\`/]NOTICE\\.md["'\`]`), "");
+});
+
+test("the site's articles and blog are web's core: the web jobs and checks, not the engine's", () => {
+  for (const f of ["articles/architecture/index.md", "articles/groebner/a.board.json", "blog/sagebrush.md", "blog/sagebrush.png"]) {
+    const o = classify([f]);
+    assert.deepEqual(suites(o), { node: "true", web: "true", modes: "false", engine_smoke: "false", docs_only: "false" }, f);
+    assert.deepEqual([o.wasm_build, o.engine_full, o.engine_cpython, o.unsafe_sweep], ["false", "false", "false", "false"], f);
+    assert.deepEqual(JSON.parse(o.web_groups).length, 9, f);
+  }
+});
+
 test("an unknown path triggers the fast suite even beside known ones", () => {
   assert.deepEqual(suites(classify(["engine/poly/src/lib.rs", "somewhere/new.txt"])), { node: "true", web: "true", modes: "true", engine_smoke: "true", docs_only: "false" });
   assert.deepEqual(suites(classify(["design/notes.md", "somewhere/new.txt"])), { node: "true", web: "true", modes: "true", engine_smoke: "true", docs_only: "false" });
@@ -114,6 +162,15 @@ test("the CPython package's own Python selects engine-cpython, not the engine's 
   assert.equal(classify(["engine/modsym/examples/gen.py"]).engine_smoke, "true");
   // (and the full tier still runs everything)
   assert.equal(classify(["engine/py/python/sagebrush/cli.py"], "full-ci").engine_smoke, "true");
+  // (no module is built from it, and the CLI the examples run doesn't run it: no modules' build, no examples; the CI
+  // capacity ruling, Nov 22 2026, item 2.  Its pyo3 crate's Rust, engine/py/src/, still builds them)
+  for (const f of ["engine/py/python/sagebrush/mcp_server.py", "engine/py/test_mcp.py"]) {
+    const r = classify([f]);
+    assert.deepEqual([r.wasm_build, r.examples_matrix], ["false", "[]"], f);
+  }
+  assert.equal(classify(["engine/py/src/lib.rs"]).wasm_build, "true");
+  assert.notEqual(classify(["engine/py/src/lib.rs"]).examples_matrix, "[]");
+  assert.equal(classify(["engine/py/python/sagebrush/cli.py"], "full-ci").examples_matrix === "[]", false);
 });
 
 test("Python tests invoked by checks select node, derived from this checkout's workflow", () => {
@@ -240,9 +297,9 @@ test("a rename is classified by both of its names, from a real git history", () 
 // push, and always the nightly schedule and a dispatch, which have no file list.
 test("the WebKit job: its inputs on pull requests, never master pushes, always nightly and dispatch", () => {
   const wk = (files: string[]) => classify(files).webkit;
-  for (const f of ["src/compile.ts", "src/runtime/object.ts", "src/runtime/js-engine.ts", "lib/_sage_padic_lseries.py", "lib/_capacity.py", "lib/_limits.py", "lib/fractions.py", "lib/sage_all.py", "lib/sagebrush/progress.py", "lib/json/__init__.py", "wasm/sagebrush-engine.wasm", "web/worker.ts", "web/build.ts", "web/lib-lazy.ts", "web/lib-chunks.mts", "web/runner/index.html", "web/test-kedlaya-worker.mjs", "web/test-port.mjs", "test/kedlaya.test.ts", "scripts/build-cli.mjs", "scripts/sandbox-env.mjs", "scripts/ci-paths.mjs", "package.json", "pnpm-lock.yaml", "tsconfig.json", ".github/workflows/ci.yml", "web/shell/panel.ts", "web/shell/panel.css", "web/shell/test-panel-pages-copy.mjs", "an/unknown/path.txt"])
+  for (const f of ["src/compile.ts", "web/latex/editor.ts", "web/latex/style.ts", "web/latex/test-latex-webkit-wrap.mjs", "src/runtime/object.ts", "src/runtime/js-engine.ts", "lib/_sage_padic_lseries.py", "lib/_capacity.py", "lib/_limits.py", "lib/fractions.py", "lib/sage_all.py", "lib/sagebrush/progress.py", "lib/json/__init__.py", "wasm/sagebrush-engine.wasm", "web/worker.ts", "web/build.ts", "web/lib-lazy.ts", "web/lib-chunks.mts", "web/runner/index.html", "web/test-kedlaya-worker.mjs", "web/test-port.mjs", "test/kedlaya.test.ts", "scripts/build-cli.mjs", "scripts/sandbox-env.mjs", "scripts/ci-paths.mjs", "package.json", "pnpm-lock.yaml", "tsconfig.json", ".github/workflows/ci.yml", "web/shell/panel.ts", "web/shell/panel.css", "web/shell/test-panel-pages-copy.mjs", "an/unknown/path.txt"])
     assert.equal(wk([f]), "true", f);
-  for (const f of ["README.md", "design/runner.md", "web/board/test-merge.mjs", "web/shell/panel-render.ts", "web/shell/test-panel-page.mjs", "engine/classgroup/src/api.rs", "app/src/main.ts", "sage-tests/test_numberfield.sage", ".github/workflows/optional.yml"])
+  for (const f of ["README.md", "web/latex/test-latex-page.mjs", "design/runner.md", "web/board/test-merge.mjs", "web/shell/panel-render.ts", "web/shell/test-panel-page.mjs", "engine/classgroup/src/api.rs", "app/src/main.ts", "sage-tests/test_numberfield.sage", ".github/workflows/optional.yml"])
     assert.equal(wk([f]), "false", f);
   const run = (event: string, ref: string, files: string) => {
     const list = join(dir, "files.txt");
@@ -272,10 +329,15 @@ test("the engine's full passes: master and track pushes, a pull request that reb
   }
   for (const f of ["src/compile.ts", "web/x.ts", "lib/fractions.py", "README.md", "web/sync/doc.ts"])
     assert.equal(classify([f]).engine_full, "false", f);
-  // (wasm_build without engine-wasm, which the passes need: the CPython package's own Python, the modules' fetcher)
-  for (const f of ["engine/py/python/sagebrush/cli.py", "scripts/wasm-fetch.mjs"]) {
+  // (wasm_build without engine-wasm, which the passes need: the modules' fetcher)
+  for (const f of ["scripts/wasm-fetch.mjs"]) {
     const o = classify([f]);
     assert.deepEqual([o.wasm_build, o.engine_smoke, o.engine_full], ["true", "false", "false"], f);
+  }
+  // (and neither: the CPython package's own Python, in no module (the CI capacity ruling, Nov 22 2026, item 2))
+  for (const f of ["engine/py/python/sagebrush/cli.py", "engine/py/test_mcp.py"]) {
+    const o = classify([f]);
+    assert.deepEqual([o.wasm_build, o.engine_smoke, o.engine_full], ["false", "false", "false"], f);
   }
   // (the full-ci label: the full tier, not the engine's passes)
   const labelled = classify(["lib/_matlab.py"], "full-ci");
@@ -487,7 +549,7 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
     "web/workspace/doc-sync.ts", "web/notebook/sync-rows.js", "web/notebook/db-merge3.ts", "web/board/syncdb.ts",
     "web/share/files.ts", "web/share-client/upload.ts", "web/csp.ts", "web/csp-policy.mts", "web/safe-html.ts",
     "web/cloud/share/server.ts", "web/cloud/share/migrations/0009_remotes.sql", "web/cloud/remote/relay.ts",
-    "web/cloud/mirror/account.ts", "web/workspace/agent-chat/mirror-format.ts",
+    "web/cloud/mirror/account.ts", "web/cloud/support/support.ts", "web/workspace/agent-chat/mirror-format.ts",
     "web/workspace/export/run.ts", "web/workspace/db.ts", "web/workspace/api.ts", "web/workspace/migrate.ts", "web/board/export.ts",
     "web/latex/save.ts", "scripts/check-export-size.mjs",
     // (the LaTeX group's inputs: its ceiling is checked only in the full tier's web-artifacts)
@@ -663,6 +725,8 @@ test("web_share: the share dialog's shard runs on a pull request that changes sh
   // (the hosted remotes: the full tier, but no share dialog)
   assert.equal(classify(["web/cloud/remote/relay.ts"]).full, "true");
   assert.equal(classify(["web/cloud/remote/relay.ts"]).web_share, "false");
+  assert.equal(classify(["web/cloud/support/test-support.mjs"]).full, "true");
+  assert.equal(classify(["web/cloud/support/test-support.mjs"]).web_share, "false");
   // (the licence files alone: neither)
   assert.equal(classify(["web/cloud/README.md"]).web_share, "false");
   // (the full tier for another reason: no share dialog on the pull request)

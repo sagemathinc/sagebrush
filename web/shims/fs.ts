@@ -20,7 +20,11 @@ const hooks: {
   /** a rename, as one change of every path it moves (confinement phase 2: the page admits it whole or not at all);
    * unset, each path's change goes to `changed` */
   renamed: ((from: string, to: string, changes: [string, Uint8Array | null][]) => void) | null;
-} = { write: () => {}, changed: () => {}, read: () => {}, refused: () => {}, renamed: null };
+  /** a change refused as outside what this document may change: the person asked while the run waits (web/worker.ts);
+   * "allowed" once a new policy covering it is adopted, "denied" (asked, and not allowed: no other prompt), or
+   * "unavailable" (no waiting here: the refusal goes on as `refused` says) */
+  ask: ((path: string, what: string) => "allowed" | "denied" | "unavailable") | null;
+} = { write: () => {}, changed: () => {}, read: () => {}, refused: () => {}, renamed: null, ask: null };
 export const __hooks = hooks;
 
 // What this document may change (the page's policy, web/notebook/permissions.js; confinement phase 2, write trees):
@@ -32,7 +36,7 @@ export const __hooks = hooks;
 export type Refusal = "refused" | "changed";
 let allowed: (path: string) => true | Refusal = () => true;
 export function setWritable(f: (path: string) => true | Refusal) { allowed = f; }
-export const NOT_WRITABLE = "this notebook isn't allowed to change this file: allow its folder when the bar asks, or in File > Permissions…, then run it again";
+export const NOT_WRITABLE = "this notebook isn't allowed to change this file: allow its folder when Sagebrush asks, or in File > Permissions…, then run the cell again";
 export const PERMS_CHANGED = "this notebook's permissions changed while it ran: run it again";
 /** Scratch: /tmp and /$pyjs and what is below them, by path segment (/tmpfile and /tmp2 are ordinary paths). */
 export const scratch = (r: string) => r === "/tmp" || r.startsWith("/tmp/") || r === "/$pyjs" || r.startsWith("/$pyjs/");
@@ -40,7 +44,11 @@ function mayChange(r: string, what: string) {
   if (scratch(r)) return;
   const ok = allowed(r);
   if (ok === true) return;
-  hooks.refused(r, what, ok);
+  // (outside what may be changed: asked while the run waits, where it can; allowed, the change goes ahead in this run,
+  // checked again against the policy just adopted; a change while the permissions are changing is never asked)
+  const asked = ok === "refused" && hooks.ask ? hooks.ask(r, what) : "unavailable";
+  if (asked === "allowed" && allowed(r) === true) return;
+  if (asked === "unavailable") hooks.refused(r, what, ok);
   // (named so the runtime's open() and os calls raise PermissionError with these words, src/runtime/file-once.ts)
   const e: any = new Error(ok === "changed" ? PERMS_CHANGED : NOT_WRITABLE);
   e.name = "PermissionDenied";

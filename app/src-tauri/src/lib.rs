@@ -25,7 +25,13 @@ use std::sync::Mutex;
 mod disk;
 #[cfg(desktop)]
 mod engine;
+// (the agent the app hosts, desktop only: its owned child and bundle check, for the agents page's launcher, which
+//  comes next; until then nothing calls it but its tests)
+#[cfg(desktop)]
+#[allow(dead_code)]
+mod agent_host;
 mod nav;
+mod version;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 // the Terminal's shell worker's Content-Security-Policy (shell/worker-boot.js), the site's own
@@ -313,7 +319,7 @@ fn app_quit_now(app: tauri::AppHandle) {
 // the page's commands: the engine's on the desktop too
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_write, app_quit_hold, app_quit_now]
+    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_write, disk::grants_read, disk::grants_write, app_quit_hold, app_quit_now]
 }
 #[cfg(mobile)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
@@ -350,6 +356,9 @@ pub fn run() {
         .iter()
         .map(|(k, _)| if k.starts_with('/') { k.into_owned() } else { format!("/{k}") })
         .collect();
+    // (macOS's menu bar: Tauri's default, with About naming the commit, version.rs)
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(version::menu);
     builder
         .setup(move |app| {
             // (the page's server, listening before the window exists: the window never loads a page from a port
@@ -397,6 +406,7 @@ pub fn run() {
                 // the page's IndexedDB a cache of them for one launch, disk.rs)
                 .incognito(true)
                 .initialization_script("window.__SB_DESKTOP_APP__ = true;")
+                .initialization_script(&version::page_script())
                 .initialization_script(&disk::settings_script(app.handle()));
             // (a self-test's control of the workspace on disk: its import or its write-through left out, run.mjs)
             #[cfg(desktop)]

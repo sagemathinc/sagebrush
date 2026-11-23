@@ -284,13 +284,17 @@
   .sharesr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .sharefoot { margin: 12px 0 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 13px; }
   @media (max-width: 480px) { .sharetabs button { padding: 6px 8px; } #sharecardlink { font-size: 14px; } .sharestaterow { flex-direction: column; align-items: stretch; } .sharestate { flex: none; } .shareaction { align-self: flex-start; } }
-  #filesbar, #runbar { margin: 6px 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); font-size: 14px; }
-  #filesbar[hidden], #runbar[hidden] { display: none; }
+  /* (the prompt at a refused write is a modal <dialog> (showModal: the page behind inert, the dialog in the top layer,
+     the focus kept in it), over the window: it never pushes the notebook down) */
+  #filesbar { padding: 0; border: none; background: transparent; max-width: none; }
+  #filesbar[hidden] { display: none; }
+  #filesbar::backdrop { background: rgba(0, 0, 0, .35); }
+  #filesbar:focus { outline: none; }
+  #filesbar .fbbox { box-sizing: border-box; width: min(480px, calc(100vw - 32px)); padding: 16px 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font-size: 14px; box-shadow: 0 12px 32px rgba(0, 0, 0, .3); }
+  #filesbar #fbtext { margin: 0; overflow-wrap: anywhere; }
+  #filesbar .fbbtns { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+  #filesbar [hidden] { display: none; }
   /* (the sentence, then the button on a row of its own, then the note: each on its own line) */
-  #runbar #rbtext, #runbar .note { display: block; }
-  #runbar .note { color: var(--muted); font-size: 13px; }
-  #runbar #rballow { margin: 8px 0 6px; }
-  #runbar [hidden] { display: none; }
   /* the console, docked at the bottom */
   #console { position: fixed; left: 0; right: 0; bottom: 0; height: 38vh; min-height: 120px; display: flex; flex-direction: column; background: var(--code); border-top: 1px solid var(--line); box-shadow: 0 -4px 18px rgba(0,0,0,.12); z-index: 5; }
   #console[hidden] { display: none; }
@@ -488,8 +492,9 @@
 <body class="opening">
 <div id="wssidebar" hidden></div>
 <!-- (the files shown before the page draws, as they were left (wsShowFiles keeps the choice), so the first paint has
-its final layout and the files never arrive a moment later; not on a phone, where they would cover the page) -->
-<script>try { if (localStorage.getItem("sagebrush-files-sidebar") === "1" && !matchMedia("(max-width: 640px)").matches) { document.body.classList.add("wsfiles"); document.getElementById("wssidebar").hidden = false; } } catch {} setTimeout(() => document.body.classList.add("opening-late"), 4000);</script>
+its final layout and the files never arrive a moment later; not on a phone, where they would cover the page, nor in
+the Agents pane's frame of the LaTeX editor, /?tex=&embed=1, which is the editor alone: texEmbedded below) -->
+<script>try { const q = new URLSearchParams(location.search); if (localStorage.getItem("sagebrush-files-sidebar") === "1" && !matchMedia("(max-width: 640px)").matches && !(q.has("tex") && q.get("embed") === "1" && parent !== window)) { document.body.classList.add("wsfiles"); document.getElementById("wssidebar").hidden = false; } } catch {} setTimeout(() => document.body.classList.add("opening-late"), 4000);</script>
 <!-- (the bottom panels' one host: the Python console, the browser terminal and the remote terminal, beside the files
      while they show, as the LaTeX editor is, never over or under them (decided Nov 12), and above the alpha notice) -->
 <div id="sbpanels"></div>
@@ -604,8 +609,7 @@ its final layout and the files never arrive a moment later; not on a phone, wher
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File<span class="sb-caret" aria-hidden="true"></span></button>
     <button id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="Text cells, the interpreter, files, console, TimeTravel, keys" aria-label="More">⋯</button>
   </div>
-  <div id="filesbar" role="status" hidden><span id="fbtext"></span> <button id="fballow" hidden></button> <button id="fbonce" hidden>Allow once</button> <button id="fbdeny" hidden>Don't allow</button> <button id="fbperms" hidden>File &gt; Permissions…</button></div>
-  <div id="runbar" role="status" hidden><span id="rbtext"></span> <button id="rballow" class="primary">Allow file changes and run</button> <span class="note">Remembered for this notebook; change it in File &gt; Permissions…</span></div>
+  <dialog id="filesbar" aria-labelledby="fbtext" tabindex="-1" hidden><div class="fbbox"><p id="fbtext"></p><div class="fbbtns"><button id="fbdeny" hidden>Don't allow</button> <button id="fbonce" hidden>Allow once</button> <button id="fbperms" hidden>File &gt; Permissions…</button> <button id="fballow" class="primary" hidden></button> <button id="fbok" hidden>OK</button></div></div></dialog>
   <!-- (the agent's bar, when one is connected: a row here, never over a cell or a plot; workspace/agent-ui.ts) -->
   <div data-sbag-slot="1"></div>
   <section id="files" aria-label="Files" hidden>
@@ -774,6 +778,7 @@ its final layout and the files never arrive a moment later; not on a phone, wher
 // or reports the URL; the agent chunk, loaded later, is handed it)
 import { pairLink, adoptLink } from "./workspace/pair-link.ts";
 import { takeHandoff } from "./workspace/pair-handoff.ts";
+import { backToAgentsTab } from "./workspace/mode-switch.ts";
 import { createdRunner, runInputs } from "./workspace/agent-made.ts";
 // (a bare pairing link the board page handed over within this tab (pair-handoff.ts): this page's link, taken once, before
 // anything reads it; only when the address has no query and no hash)
@@ -827,8 +832,10 @@ import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIM
 import { mountBrowser } from "./workspace/browser.ts";
 import { mountAccount } from "./workspace/account.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
-import { latexBoot, latexHereFor, desktopApp, mountTex, texNew } from "./latex/boot.ts";
-import { codeBoot } from "./code/boot.ts";
+import { latexBoot, latexHereFor, mountTex, texNew } from "./latex/boot.ts";
+// (whether this is the desktop app: in every build, the editor's or not)
+import { desktopApp } from "./desktop-app.ts";
+import { codeBoot, codeHooks } from "./code/boot.ts";
 import { createPermissions, hostMade, canonicalScope } from "./notebook/permissions.js";
 import { covers, stateOf, meetTrees, sameTrees, EPOCH_MAX } from "./notebook/confine.js";
 import { renderFileMenu, fileMenuKey, menuGroup } from "./workspace/filemenu.ts";
@@ -981,26 +988,10 @@ const perms = createPermissions();
 const coversW = covers;
 const PERM_RESTARTED = "\nThis notebook's permissions changed, so its interpreter was restarted; variables are gone.\n";
 const PERM_ROTATED = "\nRestarted so the new permission applies (variables are gone).\n";
-// (a document whose code can't change files never runs in a plain worker, which has this page's network: its interpreter
-// is the sandboxed runner, or none, as the no-mutation review cleared; every run then says why, as a runner given up does)
-const NEEDS_RUNNER = window.__TAURI__
-  // (the app has no sandbox: a notebook that may not change files can't run in it at all, as ruled)
-  ? "This notebook can't run in the app while it isn't allowed to change files: the app has no sandbox to run it in. Allow file changes (File > Permissions…) to run it.\n"
-  : "This notebook can't run here: it isn't allowed to change your files, so it runs only in Sagebrush's sandbox, which didn't start in this browser. Allow changes for this notebook (File > Permissions…) to run it in this page's own interpreter.\n";
-// (with `refused`, the page's one bar says why and offers the one way to run it here (runBar): each run is then answered
-// as not run, no message in its cell, so a Run all stops at the bar, not at one refusal per cell)
-class RefusingWorker {
-  constructor(text, refused = null, why = "browser") { this.text = text; this.refused = refused; this.why = why; this.onmessage = null; this.onerror = null; }
-  postMessage(m) {
-    const say = (d) => setTimeout(() => this.onmessage?.({ data: d }));
-    if (m && m.init !== undefined) return say({ ready: true, version: "" });
-    if (!m || typeof m !== "object" || m.id === undefined) return;
-    if ((m.code !== undefined || m.interact !== undefined) && this.refused) { this.refused(); say({ id: m.id, skipped: true }); }
-    else if (m.code !== undefined || m.interact !== undefined) { say({ id: m.id, stream: "stderr", text: this.text }); say({ id: m.id, done: true, error: true, ms: 0 }); }
-    else say({ id: m.id, skipped: true });
-  }
-  terminate() {}
-}
+// (no run gate (William, Nov 21 2026: "only ask for read/write approval if there's an actual read/write attempt"): every
+// notebook runs, in the sandboxed runner where this browser has one, else in this page's own worker or, in the app, the
+// engine; what it may change is the interpreter's ceiling and the page's admit() (below), and a write outside it is
+// refused and asked about at the write (filesPrompt))
 let kernel = null, journal = null; // the current notebook's
 // A notebook's optional package set (plan-modular-packages-r4 §4.4, amended
 // Nov 4): the one it pins (metadata pkgset), or else the site's latest
@@ -1100,6 +1091,8 @@ function makeKernel(owner) {
   // and ends with that interpreter: each once scope is bound to the first generation that starts with it, and expires
   // at any later start; the document closed ends them all, with its session's denials)
   const onceAt = new Map(); // once scope -> the generation it took effect in
+  // (the grant an Allow at a waiting change's prompt is making, during it: policyChanged doesn't end that request for it)
+  let ownGrant = false;
   // (whether sender `w` may change `path` now: the document's current interpreter, of that generation, and both its
   // ceiling and the document's trees now cover it; asked as a change arrives and again at its final admission)
   const admit = (w, path) => {
@@ -1115,18 +1108,15 @@ function makeKernel(owner) {
       // (a document whose code can't change files never gets a plain worker, as the no-mutation review cleared)
       // (what the interpreter being made may change: `on`, a plain worker may run it; `scoped` only in the sandboxed
       // runner, never in a plain worker (no fallback to one); `off`, as before)
-      const st = owner === null ? "on" : stateOf(meetTrees(cap, perms.writeTrees(owner)));
-      // (refused here: the bar, for this document, saying why: no sandbox in this browser or the app, or one that didn't start)
-      const refusing = (why) => new RefusingWorker(NEEDS_RUNNER, owner === null ? null : () => runBar(owner, why), why);
-      // (why there's no sandbox here: the app has none; WebKit can't run it; else it didn't start, or this page can't
-      // start it (not cross-origin isolated; ?runner=0, tests' loopback only))
-      // (in the app, the engine subprocess's interpreter where the app has one, else this page's own worker:
-      // web/notebook/native-worker.js)
+      // (where there's no sandbox (the app has none; WebKit can't run it; it didn't start, or this page can't start it:
+      // not cross-origin isolated, ?runner=0 on the tests' loopback), the notebook runs anyway, whatever it may change:
+      // in the app, the engine subprocess's interpreter where the app has one, else this page's own worker
+      // (web/notebook/native-worker.js); its ceiling (onStart's fsWrite) and admit() hold its writes as the runner's)
       const own = () => new Worker("sagebrush-worker.js", { type: "module", name });
-      const plain = () => (st !== "on" ? refusing(window.__TAURI__ ? "app" : !RUNNER_BROWSER ? "browser" : "gave-up") : TAURI ? new NativeWorker(TAURI.core, { name, fallback: own }) : own());
+      const plain = () => (TAURI ? new NativeWorker(TAURI.core, { name, fallback: own }) : own());
       // (a sandbox this page has given up on isn't waited for again: the next interpreter, after a grant or a restart,
       // is what its fallback would have been, without first holding a run for it)
-      return LOCAL ? new RemoteWorker() : RUNNER && !runnerGaveUp ? new RunnerWorker("runner/", { name, fallback: () => ((runnerGaveUp = true), st === "scoped" ? refusing("gave-up") : plain()) }) : plain();
+      return LOCAL ? new RemoteWorker() : RUNNER && !runnerGaveUp ? new RunnerWorker("runner/", { name, fallback: () => ((runnerGaveUp = true), plain()) }) : plain();
     },
     // the browser's files (and, in the app, the notebook's folder) for Python's open()
     // (a resumed session: the files it had, from the journal)
@@ -1156,6 +1146,9 @@ function makeKernel(owner) {
       epoch = 1;
       sentTrees = cap;
       if (!LOCAL) w.postMessage({ fsWrite: { epoch, state: stateOf(cap), trees: cap } });
+      // (this page answers a change a run waits on, with its prompt (the write-wait design): the interpreter asks only once
+      // told so; the tests' refuse-at-once switch (ASK_WAIT) keeps it from asking at all)
+      if (!LOCAL && owner !== null && ASK_WAIT) w.postMessage({ fsAskable: true });
       // (its own folder: the working folder and sys.path[0], as Jupyter runs a notebook, so it opens and imports the
       // files beside it (Nov 4 ruling); read at each start, so a rename or a move takes effect at the next one. A
       // notebook kept only in this browser, as a link (?open=) opens one, is in no folder: it starts at the top of the
@@ -1190,10 +1183,27 @@ function makeKernel(owner) {
         }
         return true;
       }
+      // (a change the interpreter asks about while its run waits (web/worker.ts fsAsk), which the kernel admitted as a
+      // request of the run in flight (WorkerKernel.takeAsk): the prompt for that path, bound to this request, this
+      // interpreter and the policy it was asked under; the answer (k.answerAsk) allows only by an Allow there, widening
+      // this generation's ceiling (widenFor). `live`, asked now and again before anything is granted or widened: still
+      // that run's open request (no Stop, not over), this document's current interpreter, and the epoch the request was
+      // made at still this page's (a permission change since: no). Anything else is answered no at once)
+      if (m.fsAsk !== undefined) {
+        const a = m.fsAsk, sender_ = sender, g = gens.get(sender);
+        let settled = false;
+        const reply = (policy) => { if (settled) return; settled = true; k.answerAsk(m, sender_, policy); };
+        const live = () => owner !== null && owner === current.id && sender_ === k.worker && g === gen && a.epoch === epoch && k.askLive(m);
+        if (!live() || !fsCanon(a.path) || /^\/(tmp|\$pyjs)(\/|$)/.test(a.path)) { reply(null); return true; }
+        // (the tests' switch: refused at once, the prompt saying to run again, as where the run can't wait)
+        if (!ASK_WAIT) { reply(null); filesPrompt(owner, g, a.path, false, a.what); return true; }
+        filesPrompt(owner, g, a.path, false, a.what, { key: a.key, live, reply, widen: (folder, once) => (live() ? widenFor(sender_, folder, once) : null), grant: (f) => { ownGrant = true; try { return f(); } finally { ownGrant = false; } } });
+        return true;
+      }
       // (a change the interpreter refused: the prompt for that path, for the document shown)
       if (m.fsRefused !== undefined) {
         // (a refusal the interpreter reports: a prompt only for a canonical path of this document's current interpreter)
-        if (owner !== null && owner === current.id && sender === k.worker && fsCanon(m.fsRefused)) filesPrompt(owner, gens.get(sender), m.fsRefused, m.why === "changed");
+        if (owner !== null && owner === current.id && sender === k.worker && fsCanon(m.fsRefused)) filesPrompt(owner, gens.get(sender), m.fsRefused, m.why === "changed", m.what);
         return true;
       }
       if (m.fsChanged === undefined && m.fsRename === undefined) return false;
@@ -1239,10 +1249,10 @@ function makeKernel(owner) {
   k.on("status", (text) => { if (k === kernel) statusEl.textContent = text; });
   // (a Stop, by any route (WorkerKernel.interrupt): this document's open prompt closes unanswered: PROMPT934-3)
   k.on("interrupt", () => { if (owner !== null && fbReq?.doc === owner) filesBar(false); });
+  // (a waiting change retired by the kernel (its run's Stop or end, a new interpreter): its prompt closes, unanswered)
+  k.on("ask-retired", (key) => { if (fbReq?.ask?.key === key) filesBar(false); });
   // (background loading, web/preload.ts: a Run starts no further prefetch; one in flight finishes)
   k.on("execute", preloadStop);
-  // (a run the refusing interpreter will answer: its cell, for the bar's "and run")
-  k.on("execute", (r) => { const w = k.worker; if (owner !== null && r?.cell && (w instanceof RefusingWorker || w?.inner instanceof RefusingWorker)) runBarCell(owner, r.cell); });
   if (owner !== null) {
     j = createJournal({
       kernel: k, nb, local: !!LOCAL,
@@ -1262,8 +1272,22 @@ function makeKernel(owner) {
   // epoch's end); a widening waits for the person's next Run (rotateIfWidened); nothing else changes here)
   function policyChanged() {
     if (owner === null || !k.worker) return;
-    const next = meetTrees(cap, perms.writeTrees(owner));
-    if (sameTrees(next, sentTrees)) return;
+    const now = perms.writeTrees(owner), next = meetTrees(cap, now);
+    // (the generation's own ceiling narrowed too, never widened here: what admit() and an Allow's widening (widenFor)
+    // build on, so a permission taken away stays away in this generation, whatever is granted again before a Run)
+    if (ceilings.has(gen)) ceilings.set(gen, meetTrees(ceilings.get(gen), now));
+    // (a change that leaves this interpreter's trees as they are (a grant elsewhere, one undone): the epoch moves all the
+    // same, the same trees at the next one, so a change asked about before it, perhaps still in delivery, is over (its
+    // epoch isn't the page's: live() below) and a run in flight refuses its next change as "changed"; but not for the
+    // grant an Allow at the prompt makes for the change it answers (ownGrant), which widenFor's epoch then follows)
+    if (sameTrees(next, sentTrees)) {
+      // (no shared epoch word: no change waits, none asks; the epoch's end: a new interpreter, as for a narrowing there)
+      if (ownGrant || !k.sharesEpoch) return;
+      if (epoch >= EPOCH_MAX) return k.restart(PERM_RESTARTED);
+      epoch++;
+      k.setPolicy({ epoch, state: stateOf(sentTrees), trees: sentTrees });
+      return;
+    }
     cap = next;
     // (a restart where the epoch can't do it: a plain worker of the page, which a document that may not change
     // everything never keeps (scoped runs only in the sandboxed runner); no shared epoch word; the epoch's end)
@@ -1272,6 +1296,28 @@ function makeKernel(owner) {
     epoch++;
     sentTrees = next;
     k.setPolicy({ epoch, state: stateOf(next), trees: next });
+  }
+  // (an Allow at the prompt of a change this interpreter waits on (the write-wait design, SEC ruling of Nov 22, 2026):
+  // its ceiling widened, for its own generation only, to that folder (never "/", which the prompt never offers): the
+  // policy at the next epoch, for the answer, whose holder stores the epoch before writing it; null where it can't be
+  // (another interpreter or generation now, no shared epoch word, the epoch's end, a policy past the answer's bound).
+  // Every other widening still waits for the next Run (rotateIfWidened); an Allow once ends with this generation)
+  function widenFor(w, folder, once) {
+    const g = gens.get(w);
+    if (owner === null || folder === "/" || !fsCanon(folder) || g === undefined || g !== gen || k.worker !== w || !k.sharesEpoch || epoch >= EPOCH_MAX) return null;
+    // (from what this generation may change now, its ceiling as narrowed since it started and what is allowed now, and
+    // that one folder, which must be allowed now: nothing taken away since comes back with it)
+    const now = perms.writeTrees(owner);
+    if (!now.some((t) => coversW(t, folder))) return null;
+    const wide = meetTrees([...meetTrees(ceilings.get(g) ?? [], now), folder], now);
+    const pol = { epoch: epoch + 1, state: stateOf(wide), trees: wide };
+    if (JSON.stringify(pol).length > 64 * 1024) return null;
+    epoch = pol.epoch;
+    cap = wide;
+    sentTrees = wide;
+    ceilings.set(g, wide);
+    if (once) onceAt.set(folder, g);
+    return pol;
   }
   // (an explicit run (notebook.js onExplicitRun: the person's Run, or the page's own run()/runAll(), which the document's
   // code can't reach), before anything is asked: a permission widened beyond this
@@ -1528,7 +1574,7 @@ const handover = writerHandover({
   shownDoc: () => (nb.store ? nb.snapshot() : null),
   replaceDoc: (doc) => nb.replace(doc),
 });
-const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, refuseRun: (cell) => refuseHere(cell), onExplicitRun: () => { if (current.id) kernels.get(current.id)?.rotateIfWidened?.(); }, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook() });
+const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, onExplicitRun: () => { if (current.id) kernels.get(current.id)?.rotateIfWidened?.(); }, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook() });
 // Where this browser's reader was in each notebook (design/view-state.md):
 // the top cell and its offset resist reflow; the fraction is a fallback if
 // that cell was deleted, and the selected cell comes back when it still
@@ -2286,7 +2332,6 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
   if (current.id !== id || current.kind !== kind) inputNotAppliedCount = 0;
   current = { id, kind };
   if (fbReq && fbReq.doc !== id) filesBar(false); // (another document shown: its prompt closed unanswered)
-  if (rbReq && rbReq.doc !== id) runBarClose(); // (and its run bar)
   perms.provenance(id, how);
   filesBar(false);
   filesShown();
@@ -2351,15 +2396,38 @@ const filesBarEl = $("#filesbar");
 let fbReq = null, fbSeq = 0;
 function filesBar(on) {
   if (on) return; // (a refusal without a path: nothing more to say than the refusal itself)
+  // (a change waiting on this prompt, not answered by one of its buttons: no. Every way the prompt closes comes here:
+  // Esc, OK, another notebook shown, a new interpreter, a Stop, any change of the permissions)
+  if (fbReq?.ask && !fbReq.ask.claimed) { fbReq.ask.claimed = true; fbReq.ask.reply(null); }
   fbReq = null;
+  if (filesBarEl.open) filesBarEl.close();
   filesBarEl.hidden = true;
 }
+// (OK, Esc (the dialog's cancel), or the browser closing it: closed unanswered; a queued close event from an earlier
+// close is ignored once the prompt is open again)
+$("#fbok").addEventListener("click", () => filesBar(false));
+filesBarEl.addEventListener("cancel", (e) => { e.preventDefault(); filesBar(false); });
+filesBarEl.addEventListener("close", () => { if (!filesBarEl.open && !filesBarEl.hidden) filesBar(false); });
+// (where the workspace is, said in the prompt: in the app, its folder on disk (disk.rs disk_where), read once; in a
+// browser, this browser's own storage)
+let wsFolder = null;
+if (desktopApp()) TAURI.core.invoke("disk_where").then((p) => { if (typeof p === "string") wsFolder = p; }, () => {});
+const whereIs = (folder) => {
+  if (!wsFolder) return folder === "/" ? "your Sagebrush workspace" : `${folder} in ${window.__TAURI__ ? "your" : "this browser's"} Sagebrush workspace`;
+  const sep = wsFolder.includes("\\") ? "\\" : "/";
+  return folder === "/" ? wsFolder : wsFolder + folder.replaceAll("/", sep);
+};
 // The prompt at a refused change (confinement phase 2, spec §3): "Allow in ‹folder›" (the folder of the file being
 // written, never "/"), "Allow once", "Don't allow" (silent for the rest of the session); a file at the top of the files
 // gets no Allow here, only File > Permissions… ("anywhere" is never a prompt's default). It arms after FB_ARM ms and
 // takes only a fresh trusted press that begins after that (a press begun before, a held or repeating key, an
 // untrusted event: nothing); an answer is bound to the request, and any change of context closes it unanswered.
 const FB_ARM = 500;
+// (a change the run waits on (the write-wait design) is asked about while it waits; on the loopback only, tests may keep
+// it refused at once instead, the prompt saying to run the cell again, as where the run can't wait (no shared memory):
+// "sagebrush-ask" "0" in localStorage, for the suites of that path (web/test-confine-writes.mjs,
+// web/test-file-permissions.mjs), as ?runner=0 is for the sandbox)
+const ASK_WAIT = !(/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) && (() => { try { return localStorage.getItem("sagebrush-ask") === "0"; } catch { return false; } })());
 // (a path an interpreter sends, in its one canonical form: a write grant's (canonicalScope) and, as the same string, within
 // the workspace's own path rules (normPath: its depth, name and character bounds); not "/")
 const fsCanon = (p) => { try { return typeof p === "string" && p !== "/" && canonicalScope("write", p) === p && normPath(p) === p; } catch { return false; } };
@@ -2367,30 +2435,55 @@ const fsCanon = (p) => { try { return typeof p === "string" && p !== "/" && cano
 // made before one, even a change and its undoing, answers nothing: PROMPT934-3)
 const permRev = new Map();
 const revOf = (doc) => permRev.get(doc) ?? 0;
-function filesPrompt(doc, generation, path, changed) {
-  if (doc !== current.id || fbReq?.open) return; // (one at a time: further refusals only error)
+// (what the refused change was, as the interpreter's file layer names it (web/shims/fs.ts mayChange), said as it is: a
+// save, a new folder, a delete, a move; anything else, or a name it doesn't send, "change")
+const FS_DOING = {
+  write: ["save", "save it"], append: ["save", "save it"], open: ["save", "save it"],
+  mkdir: ["create the folder", "create it"], unlink: ["delete", "delete it"], rmdir: ["delete the folder", "delete it"],
+  rename: ["move or rename", "make the change"],
+};
+// (`ask`: the change waits on this prompt (web/worker.ts fsAsk): {key, live(), reply(policy | null), widen(folder, once),
+// grant(f): f, the Allow's own grant, made without ending this request}; answered
+// once, by an Allow there (the policy widenFor gives) or no, and the change then goes ahead or is refused in that run.
+// Without it the change was refused already, and the prompt says to run the cell again)
+function filesPrompt(doc, generation, path, changed, what, ask = null) {
+  const [doing, done] = Object.hasOwn(FS_DOING, what) ? FS_DOING[what] : ["change", "make the change"];
+  if (doc !== current.id || fbReq?.open) { ask?.reply(null); return; } // (one at a time: further refusals only error)
   const now = perms.writeTrees(doc);
   const folder = path.slice(0, path.lastIndexOf("/")) || "/";
   const shown = (t) => (t.length > 120 ? "…" + t.slice(-119) : t);
   const say = (text, buttons) => {
     $("#fbtext").textContent = text;
-    for (const id of ["fballow", "fbonce", "fbdeny", "fbperms"]) $("#" + id).hidden = !buttons.includes(id);
+    for (const id of ["fballow", "fbonce", "fbdeny", "fbperms", "fbok"]) $("#" + id).hidden = !buttons.includes(id);
     filesBarEl.hidden = false;
+    if (!filesBarEl.open) filesBarEl.showModal();
+    // (the dialog itself takes the focus, not a button: an Enter meant for the cell answers nothing)
+    filesBarEl.focus();
   };
+  const name = path.slice(path.lastIndexOf("/") + 1);
   // (allowed now, but not for this interpreter: a widening waits for the next Run, which restarts it)
   if (changed || now.some((t) => coversW(t, path))) {
+    // (allowed already, but not in this interpreter: that widening waits for the next Run, as every other)
+    ask?.reply(null);
     fbReq = { open: false };
-    return say(changed ? "This notebook's permissions changed while it ran: run it again." : `Allowed: run it again to use it (the interpreter restarts).`, []);
+    return say(changed ? "This notebook's permissions changed while it ran. Run the cell again." : `This change to ${shown(name)} is allowed now. Run the cell again to ${done} (the notebook's variables are cleared).`, ["fbok"]);
   }
-  if (perms.deniedWrite(doc, path)) return; // (Don't allow: silent for the rest of the session)
-  const req = { open: true, id: ++fbSeq, doc, generation, path, folder, trees: now.join("\n"), rev: revOf(doc), armedAt: performance.now() + FB_ARM, pressed: null };
+  if (perms.deniedWrite(doc, path)) { ask?.reply(null); return; } // (Don't allow: silent for the rest of the session)
+  const req = { open: true, id: ++fbSeq, doc, generation, path, folder, trees: now.join("\n"), rev: revOf(doc), armedAt: performance.now() + FB_ARM, pressed: null, ask: ask ? { ...ask, claimed: false } : null };
   fbReq = req;
-  if (folder === "/") return say(`This notebook wants to change ${shown(path)}, at the top of your files. To allow that, use`, ["fbperms", "fbdeny"]);
-  $("#fballow").textContent = `Allow in ${shown(folder)}, then run again (restarts)`;
-  say(`This notebook wants to change ${shown(path)}.`, ["fballow", "fbonce", "fbdeny"]);
+  if (folder === "/") return say(`This notebook is trying to ${doing} ${shown(name)} at the top of ${whereIs("/")}. To allow that, use File > Permissions…`, ["fbperms", "fbdeny"]);
+  $("#fballow").textContent = `Allow in ${shown(folder)}`;
+  // (waiting: an Allow lets this run go on; refused already: the cell runs again to make the change)
+  say(`This notebook is trying to ${doing} ${shown(name)} in ${shown(whereIs(folder))}.${ask ? "" : ` If you allow it, run the cell again to ${done}.`}`, ["fballow", "fbonce", "fbdeny"]);
 }
 // (an answer: only for the open request, still the current document's and interpreter's, the trees unchanged since it
 // opened, from a fresh trusted press on this same button that began after arming)
+// (after this request's own grant: the same document shown, the same interpreter and generation, and its folder now
+// allowed; the revision moved by that grant alone)
+function fbCurrentAfterGrant(req) {
+  const e = kernels.get(req.doc);
+  return req.doc === current.id && e?.generation?.() === req.generation && revOf(req.doc) === req.rev + 1 && perms.writeTrees(req.doc).some((t) => coversW(t, req.path));
+}
 function fbCurrent(req) {
   const e = kernels.get(req.doc);
   return req === fbReq && req.open && req.doc === current.id && e?.generation?.() === req.generation && revOf(req.doc) === req.rev && perms.writeTrees(req.doc).join("\n") === req.trees;
@@ -2410,10 +2503,26 @@ for (const id of ["fballow", "fbonce", "fbdeny", "fbperms"]) {
     if (!fbCurrent(req)) { filesBar(false); return; }
     req.open = false;
     if (id === "fbperms") { filesBar(false); showPerms(); return; }
-    const ok = id === "fbdeny" ? perms.deny(req.doc, "write", req.folder) : perms.grant(req.doc, "write", req.folder, { once: id === "fbonce" }).ok;
+    // (a waiting change: this press answers it, after the grant is made; the grant's own change of the permissions
+    // closes the prompt without answering it no)
+    const ask = req.ask;
+    if (ask) ask.claimed = true;
+    // (a waiting change no longer that run's open request, or asked under permissions since changed: answered no, and
+    // nothing granted for it)
+    if (ask && !ask.live()) { ask.reply(null); filesBar(false); return; }
+    const give = () => perms.grant(req.doc, "write", req.folder, { once: id === "fbonce" }).ok;
+    const ok = id === "fbdeny" ? perms.deny(req.doc, "write", req.folder) : ask ? ask.grant(give) : give();
     filesBar(false);
+    if (ask) {
+      // (still this request's interpreter and generation, its permissions as just given: widened, and answered with that)
+      const pol = ok && id !== "fbdeny" && fbCurrentAfterGrant(req) ? ask.widen(req.folder, id === "fbonce") : null;
+      ask.reply(pol);
+      if (!ok) statusEl.textContent = "This browser couldn't keep that choice";
+      else if (id !== "fbdeny" && !pol) statusEl.textContent = `Allowed in ${req.folder}: run the cell again to make the change`;
+      return;
+    }
     if (!ok) statusEl.textContent = "This browser couldn't keep that choice";
-    else if (id !== "fbdeny") statusEl.textContent = `Allowed in ${req.folder}: run it again (the interpreter restarts)`;
+    else if (id !== "fbdeny") statusEl.textContent = `Allowed in ${req.folder}: run the cell again to make the change`;
   });
 }
 function filesShown() {
@@ -2424,7 +2533,7 @@ function filesShown() {
   if (fp) fp.textContent = on ? "Don't allow file changes" : "Allow file changes anywhere";
   $("#permsfiles").textContent = !current.id ? "" : on ? "Allowed: this notebook's code may change your files." : only.length ? `Allowed only in ${only.join(", ")}: this notebook's code can't change files anywhere else.` : "Not allowed: this notebook's code can't change your files.";
   $("#permsfor").textContent = current.id ? `For "${docName()}".` : "";
-  if (on) filesBarEl.hidden = true;
+  if (on && !filesBarEl.hidden) filesBar(false);
 }
 // The Permissions panel (File > Permissions…): what the notebook shown may do, and the person's own switch
 const permsDlg = $("#permsdlg");
@@ -2447,105 +2556,17 @@ window.addEventListener("storage", (e) => {
   if (e.key !== null && e.key !== "sagebrush-grants") return;
   for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); }
   if (fbReq?.doc !== undefined) { permRev.set(fbReq.doc, revOf(fbReq.doc) + 1); filesBar(false); }
-  if (rbReq) runBarClose();
   if (current.id) filesShown();
 });
 // (a press held while the window loses focus or the page is hidden: let go of; PROMPT934-3)
-window.addEventListener("blur", () => { if (fbReq) fbReq.pressed = null; if (rbReq) rbReq.pressed = null; });
-document.addEventListener("visibilitychange", () => { if (document.hidden && fbReq) fbReq.pressed = null; if (document.hidden && rbReq) rbReq.pressed = null; });
+window.addEventListener("blur", () => { if (fbReq) fbReq.pressed = null; });
+document.addEventListener("visibilitychange", () => { if (document.hidden && fbReq) fbReq.pressed = null; });
 perms.onChange((doc) => {
   permRev.set(doc, revOf(doc) + 1);
   kernels.get(doc)?.policyChanged?.();
   if (fbReq && fbReq.doc === doc) filesBar(false);
-  if (rbReq && rbReq.doc === doc) runBarClose();
   if (doc === current.id) filesShown();
 });
-// The run bar: a notebook whose code may not change your files runs only in Sagebrush's
-// sandbox; where that can't run (the app; a sandbox that didn't start), its runs
-// are refused, each cell left as it was, and this one bar says why, with the one way to run it in this page: the
-// notebook's files permission, the very one File > Permissions… gives, which covers your whole browser workspace (the
-// button says so). Only the person's fresh trusted press on the button, begun after the bar arms, grants it: nothing
-// else (a refusal, a timeout, Run all, a share's copy) ever does. The bar belongs to the notebook shown and to its
-// permissions as they were when it opened: a switch to another notebook, or any change of its permissions, closes it
-// unanswered. Granted, the refused cells run (a Run, so the interpreter restarts with the permission), if the same
-// notebook is still shown with the permissions just given.
-const runBarEl = $("#runbar");
-const RB_WHY = {
-  browser: "This browser can't use Sagebrush's sandbox yet.",
-  app: "The app has no sandbox to run notebooks in.",
-  "gave-up": "Sagebrush's sandbox didn't start in this browser.",
-};
-const RB_ASK = "To run in this page, this notebook needs permission to change files in your browser workspace.";
-let rbReq = null, rbSeq = 0;
-function runBar(doc, why) {
-  if (doc !== current.id) return;
-  if (rbReq?.open && rbReq.doc === doc) return;
-  rbReq = { open: true, id: ++rbSeq, doc, rev: revOf(doc), armedAt: performance.now() + FB_ARM, pressed: null, cells: new Set(rbReq?.doc === doc ? rbReq.cells : []) };
-  $("#rbtext").textContent = `${RB_WHY[why] ?? RB_WHY.browser} ${window.__TAURI__ ? "To run it, this notebook needs permission to change your files." : RB_ASK}`;
-  runBarEl.hidden = false;
-}
-// (the cells a refused run asked for, for the bar's "and run": collected for the notebook shown, even before the bar opens)
-function runBarCell(doc, cell) {
-  if (doc !== current.id) return;
-  if (!rbReq || rbReq.doc !== doc) rbReq = { open: false, id: ++rbSeq, doc, rev: revOf(doc), armedAt: Infinity, pressed: null, cells: new Set() };
-  rbReq.cells.add(cell);
-}
-// (a Run of the notebook shown that its interpreter would refuse (it may not change files, and its interpreter is the
-// refusing one): none of its cells touched, the bar instead, with the cells asked for (all of them for a Run all))
-function refuseHere(cell) {
-  const id = current.id, w = kernel?.worker;
-  const r = w instanceof RefusingWorker ? w : w?.inner instanceof RefusingWorker ? w.inner : null;
-  if (!id || !r || !r.refused || perms.may(id, "files")) return false;
-  for (const c of cell ? [cell] : nb.cells().filter((x) => x.type === "code")) runBarCell(id, c.id);
-  runBar(id, r.why);
-  return true;
-}
-function runBarClose() {
-  rbReq = null;
-  runBarEl.hidden = true;
-  $("#rballow").hidden = false;
-  runBarEl.querySelector(".note").hidden = false;
-}
-// (a note in the bar's place, with no button: closed as the bar is, by another notebook shown or its permissions changed)
-function runBarNote(doc, text) {
-  if (doc !== current.id) return;
-  rbReq = { open: false, id: ++rbSeq, doc, rev: revOf(doc), armedAt: Infinity, pressed: null, cells: new Set() };
-  $("#rbtext").textContent = text;
-  $("#rballow").hidden = true;
-  runBarEl.querySelector(".note").hidden = true;
-  runBarEl.hidden = false;
-}
-{
-  const b = $("#rballow");
-  const press = () => { if (rbReq?.open) rbReq.pressed = { req: rbReq.id, rev: revOf(rbReq.doc) }; };
-  const release = () => { if (rbReq) rbReq.pressed = null; };
-  b.addEventListener("pointerdown", (e) => { if (rbReq && e.isTrusted && performance.now() >= rbReq.armedAt) press(); });
-  b.addEventListener("keydown", (e) => { if (rbReq && e.isTrusted && !e.repeat && (e.key === "Enter" || e.key === " ") && performance.now() >= rbReq.armedAt) press(); });
-  for (const ev of ["pointercancel", "pointerleave", "blur"]) b.addEventListener(ev, release);
-  b.addEventListener("click", async (e) => {
-    const req = rbReq, p = req?.pressed;
-    if (!req || !req.open || !e.isTrusted || !p || p.req !== req.id || p.rev !== revOf(req.doc)) return;
-    req.pressed = null;
-    if (req.doc !== current.id || revOf(req.doc) !== req.rev) { runBarClose(); return; }
-    req.open = false;
-    const cellIds = [...req.cells];
-    // (the existing grant, as File > Permissions… makes it: kept, or held in this page only, which the bar then says,
-    // where the interpreter's own status can't write over it)
-    const kept = setFiles(e, true);
-    runBarClose();
-    if (!kept) runBarNote(req.doc, "Allowed in this page only: this browser couldn't keep the choice, so a reload forgets it.");
-    const rev = revOf(req.doc);
-    await Promise.resolve();
-    // (still the same notebook shown, its permissions as just given: then the refused cells run, a Run. Nothing today
-    // lands between the grant and here (one microtask: a switch, a storage event, the dialog and a press all come as
-    // tasks); the check is for a change that would make one land)
-    if (req.doc !== current.id || revOf(req.doc) !== rev || !perms.may(req.doc, "files")) return;
-    // (the refused cells still there, in the order they were refused: the notebook's cells read once)
-    const live = new Set(nb.cells().map((c) => c.id));
-    const ids = cellIds.filter((id) => live.has(id));
-    if (ids.length) nb.runCells(ids); else nb.runAll();
-  });
-}
 async function openDocument(doc, here = false, made = "elsewhere", guard = null, intent = null) {
   const id = newId();
   // (Sagebrush's own (the first visit's Welcome, an example): host-made before its interpreter starts, so it never
@@ -2830,6 +2851,8 @@ function afterRendered(fn) {
 let booted, isBooted = false;
 const bootDone = new Promise((r) => (booted = () => { isBooted = true; r(); }));
 async function openShare() {
+  // (not in the app: APP_SHARE_WHY; its menu item is disabled, and this keeps any other way in, such as ?share, closed)
+  if (TAURI) return;
   // (while uploading, Share only shows the dialog again, with the upload's own state: UI-B1)
   if (shareDialog.busy) return void shareDialog.open();
   const t = ++shareOpens;
@@ -3593,12 +3616,21 @@ const fileMenu = $("#filemenu"), fileBtn = $("#filebtn");
 // The one File menu (design/workspace-files.md §3, web/workspace/filemenu.ts):
 // drawn the same as the board page's; what an item does is here, by its key
 // (data-f).  Without the workspace, what needs it is disabled.
+// (the LaTeX editor's page in the Agents page's pane, /?tex=<fid>&embed=1 in a frame of its own (web/latex/boot.ts): the
+// editor alone, so no files beside it, however the person keeps them on this page; their choice stays theirs, unwritten.
+// A pane narrower than 641 px had them over the whole editor. Every way the files are shown
+// stops here (wsShowFiles), and the early script before the page draws has the same test)
+const texEmbedded = (() => { const q = new URLSearchParams(location.search); return q.has("tex") && q.get("embed") === "1" && parent !== window; })();
 // (whether this page has the LaTeX editor: New ▸ LaTeX document in the File menu and the file panel, U0)
 const latexHere = typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && latexHereFor(location.hostname, desktopApp());
 // (the editor's Run sandbox and Share on this page, for latexBoot and the app self-test's mount alike: no Share on the
 //  CLI's page or in the app, which can't publish (the editor's Share says why); no sandbox in the app, RUNNER)
 const texSandbox = () => (RUNNER ? { WorkerKernel, RunnerWorker } : null);
 const texShare = LOCAL || TAURI ? null : (doc) => void openTalkShare(doc);
+// (the app has no share server at its own origin, so a share couldn't be checked or made there: File ▸ Share… is
+//  disabled, saying where to share instead, the header's Share follows it, and Share folder… and Your shares… aren't
+//  offered, as on the CLI's page)
+const APP_SHARE_WHY = "Sharing isn't available in the app: upload this notebook, and the files it uses, to sagebrush.space and share it there";
 function drawFileMenu() {
   const none = !ws;
   renderFileMenu(fileMenu, {
@@ -3606,8 +3638,8 @@ function drawFileMenu() {
     latex: latexHere,
     keys: { newNotebook: "new", newBoard: "whiteboard", newLatex: "newlatex", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
     // (the examples are the gallery's, which `sagebrush notebook`'s page doesn't carry: disabled there, saying where they are)
-    disabled: { newFolder: none, fromExample: none || !!LOCAL },
-    why: LOCAL ? { fromExample: "The examples are on sagebrush.space and in the Sagebrush app" } : undefined,
+    disabled: { newFolder: none, fromExample: none || !!LOCAL, share: !!TAURI },
+    why: LOCAL || TAURI ? { ...(LOCAL ? { fromExample: "The examples are on sagebrush.space and in the Sagebrush app" } : {}), ...(TAURI ? { share: APP_SHARE_WHY } : {}) } : undefined,
     downloads: [
       { key: "ipynb", label: ".ipynb" },
       { key: "py", label: ".py" },
@@ -3627,7 +3659,7 @@ function drawFileMenu() {
       { after: "print", key: "gstemplate", label: "Gradescope template…", title: "For instructors: each exercise's pages in every student's PDF, the template PDF and the page list for Gradescope" },
       // (whether this notebook's code may change the person's files: no-mutation's one switch, a document's setting)
       // (the person's shares: Your shares, a dialog of its own; not where there is no share server, the CLI's page)
-      { after: "share", key: "mine", label: "Your shares…", hidden: !!LOCAL },
+      { after: "share", key: "mine", label: "Your shares…", hidden: !!LOCAL || !!TAURI },
       { after: "share", key: "perms", label: "Permissions…", title: "What this notebook's code may do: change your files (no notebook may until you allow it)" },
     ],
     recent: ws ? async () => (await recentOpened(ws, current.kind === "browser" ? { kind: "notebook", ref: current.id } : undefined)).map((e) => ({ label: recentLabel(e), title: e.path, open: () => openEntry(e) })) : undefined,
@@ -3717,8 +3749,9 @@ function drawFileMenu() {
     get shown() { return shown?.id ?? null; },
   };
   window.sagebrush.side = side;
-  // (until the agent's panel registers itself: a stand-in, so the layout can be seen and built against)
-  side.register({ id: "agent", label: "Agent", load: async () => ({ mount: (el) => { const p = document.createElement("p"); p.style.cssText = "padding:16px;color:var(--muted)"; p.textContent = "Agent panel"; el.replaceChildren(p); return () => {}; } }) });
+  // (no panel registers here yet: the button stays hidden until one does. The Agent stand-in that was here is gone
+  //  (#1616): it showed an empty "Agent panel", and moving the notebook to the Agents page instead would end this page's
+  //  kernel, so its session couldn't be kept)
 }
 // (the share dialog opened from a top-right Share button hangs just under it, its right edge at the button's, as
 // claude.ai's does (decided Nov 12: "Anchored feels better"); opened from File it stays centred. Only where it is
@@ -4834,14 +4867,28 @@ async function selftest(path) {
     // (the desktop app grants the self-test's notebook as it would a picked one; a phone opens it by path)
     await openDiskFile(desktopApp() ? await TAURI.core.invoke("selftest_open") : path);
     check("opened the notebook from disk", !!diskFile && current.id === "file:" + diskFile.path && cells().length > 0, statusEl.textContent);
-    // (every notebook starts with file changes off (confinement 1b), and the app has no sandbox, so it runs none that
-    // isn't allowed: the app's own self-test allows its notebook, as the person's click would, and waits for the
-    // page's own interpreter. No check line of its own: the judges' list of checks is closed, and if this fails, "ran
-    // it" fails with the refusal in its output.)
+    // (no run gate: the notebook runs before it may change files (every notebook starts with file changes off,
+    // confinement 1b), in the app's engine, and only its write is refused, and asked about at the write)
+    if (desktopApp()) {
+      await until(() => kernel.ready, 60000);
+      const run = (code) => new Promise((resolve) => { let t = ""; kernel.execute(code, { mode: nb.mode }, { start() {}, out(x) { t += x; }, display() {}, interact() {}, clear() {}, done() { resolve(t); }, stopped(m) { resolve(t + (m || "")); }, skipped() { resolve(t + "(not run)"); } }); });
+      const ran = (await run("print(6 * 7)")).trim();
+      // (the write waits while its prompt asks (the write-wait design), where the engine's memory is shared; the prompt
+      // closed unanswered, as Esc would, refuses it in that run. Without shared memory it was refused at once)
+      let over = false;
+      const writing = run("try:\n    open('not-allowed.txt', 'w').write('x')\n    print('wrote')\nexcept PermissionError:\n    print('refused')").then((t) => ((over = true), t));
+      await until(() => over || !!fbReq?.open, 30000);
+      const waited = !over && !!fbReq?.ask;
+      filesBar(false);
+      const wrote = (await writing).trim();
+      check("a notebook runs before it may change files, its write refused", ran === "42" && wrote === "refused", JSON.stringify({ ran, wrote, waited }));
+      filesBar(false);
+    }
+    // (the rest of the self-test's notebook writes files: the app's own self-test allows it, as the person's click would)
     perms.set(current.id, "files", true);
     // (a widening takes effect through an explicit run, which starts a new interpreter: confinement phase 2)
     kernels.get(current.id)?.rotateIfWidened?.();
-    await until(() => kernel.ready && !((kernel.worker?.inner ?? kernel.worker) instanceof RefusingWorker), 60000);
+    await until(() => kernel.ready, 60000);
     // (which interpreter ran it, in the app's log, not the report: the engine subprocess's, or this page's own worker)
     console.log("interpreter: " + (kernel.worker instanceof NativeWorker && kernel.worker.native ? "the engine subprocess's" : "the page's own worker"));
     await nb.runAll();
@@ -4868,6 +4915,12 @@ async function selftest(path) {
       const native = await Promise.all([["plugin:fs|exists", { path: "/" }], ["plugin:fs|read_dir", { path: "/" }]].map(([c, a]) => TAURI.core.invoke(c, a).then(() => `${c} REACHED`, (e) => `${c} refused: ${String(e?.message ?? e).slice(0, 120)}`)));
       const aclRefused = (r) => / refused: (Command plugin:fs\|\w+ not allowed by ACL|fs\.\w+ not allowed\. (Plugin not found|Command not found|Permissions associated)|fs\.\w+ not allowed on origin)/.test(r);
       check("the page has no fs plugin", facade === "undefined" && native.every(aclRefused), JSON.stringify({ facade, native }));
+      // (Share isn't the app's, APP_SHARE_WHY: File ▸ Share… disabled saying so, the header's Share hidden, Your shares…
+      //  hidden, and the dialog not opened even when asked for, as ?share would)
+      const sm = $("#sharemenu"), mine = fileMenu.querySelector('[data-f="mine"]');
+      await openShare();
+      const share = { disabled: !!sm?.disabled, title: sm?.title === APP_SHARE_WHY, button: $("#sharebtn").hidden, mine: !mine || mine.hidden, dialog: $("#sharedlg").open };
+      check("Share isn't offered in the app", share.disabled && share.title && share.button && share.mine && !share.dialog, JSON.stringify(share));
     }
     // Stop: KeyboardInterrupt in a running loop, keeping the variables
     const exec = (code) => new Promise((resolve) => {
@@ -4926,6 +4979,8 @@ let wsSettled = false;
 // (the desktop app: the workspace's files on disk, web/workspace/disk-mirror.ts; null elsewhere) and its own module,
 // the app's only (web/workspace/desktop-entry.ts: sagebrush-desktop.js, which neither the site nor the CLI serves)
 let diskMirror = null, diskFailed = null;
+// (the app's file permissions kept in grants.json: keepGrants's handle, for a save to wait on)
+let grantsKept = null;
 const desktopModule = () => import(new URL("sagebrush-desktop.js", location.href).href);
 // (the disk can't be read: nothing done here would be kept, so nothing can be done: said over the whole page, the
 // notebook read-only, every save refused by the save gate)
@@ -4948,6 +5003,8 @@ async function leaveTo(url, notebook = true) {
   leaveSeen?.({ url, notebook });
   const go = async () => {
     if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror, notebook ? () => nb.saved() : undefined))) return false;
+    // (to Agents from the Files tab the Agents page opened, while that page's agent is connected: back to it, #1620)
+    if (await backToAgentsTab(url)) return true;
     location.assign(url);
     return true;
   };
@@ -4965,6 +5022,16 @@ const wsReady = (async () => {
     try { await migrate(w, localStorage); } catch (e) { console.warn("workspace: bringing in what was kept before:", e); }
     // (the desktop app: its files are on disk, this workspace their copy for this launch)
     if (TAURI && desktopApp()) try { diskMirror = await (await desktopModule()).diskWorkspace(w, (c, a, o) => TAURI.core.invoke(c, a, o)); } catch (e) { console.warn("disk workspace:", e); diskFailed = String(e?.message ?? e); diskBlocked(diskFailed); }
+    // (and its file permissions, kept in grants.json by where each notebook is (web/workspace/grants-file.ts): back
+    // before any notebook of this launch asks, then kept at each change; whatever already runs is told, as a change
+    // made in another tab is)
+    if (TAURI && desktopApp() && diskMirror) try {
+      const d = await desktopModule(), invoke = (c, a) => TAURI.core.invoke(c, a);
+      if (await d.restoreGrants(w, invoke)) { for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); } if (current.id) filesShown(); }
+      grantsKept = d.keepGrants(w, invoke, (f) => perms.onChange(f));
+      // (in the quit's and the leave's barrier, as the settings' flush is: disk-mirror.ts keepAll)
+      window.__sbGrantsFlush = () => grantsKept.flush();
+    } catch (e) { console.warn("grants.json:", e); }
     ws = w;
     window.sagebrush.workspace = w.forAgent("agent:page");
     // (tests: the workspace itself, its verbs with a check of the test's own (admit): loopback pages only)
@@ -5428,6 +5495,7 @@ function wsTrackCurrent() { wsBrowser?.refresh(); }
 // panel (web/workspace/account.ts); hidden for any other answer
 mountAccount($("#acctslot"), { status: shareFirst, storage: () => { if (!ws) return; wsShowFiles(true); wsBrowser?.storage(); } });
 function wsShowFiles(on) {
+  if (on && texEmbedded) return;
   wsSidebar.hidden = !on;
   document.body.classList.toggle("wsfiles", on);
   wsFilesBtn.setAttribute("aria-pressed", String(on));
@@ -5464,7 +5532,7 @@ function wsShowFiles(on) {
       // (the Storage panel's export: its lazy chunk beside this page; the open notebook saved first)
       exportUrl: (f) => new URL(f, location.href).href,
       // (Share folder…: not under `sagebrush notebook`, which has no sharing)
-      shareFolder: LOCAL ? undefined : (e) => void openFolderShare(e),
+      shareFolder: LOCAL || TAURI ? undefined : (e) => void openFolderShare(e),
       saveOpen: async () => { saveNow(); await nb.saved(); },
       // (the open notebook renamed here: a typed title's rename not yet made
       // is dropped, and its name follows, as if typed)
@@ -5564,7 +5632,7 @@ wsReady.then(() => drawFileMenu());
 $("#installbtn").onclick = () => installPrompt?.prompt();
 wsReady.then(async (w) => {
   // (no workspace: no files to show, so the space kept for them before the page drew goes)
-  if (!w) { document.body.classList.remove("wsfiles"); wsSidebar.hidden = true; return; }
+  if (!w || texEmbedded) { document.body.classList.remove("wsfiles"); wsSidebar.hidden = true; return; }
   wsFilesBtn.hidden = false;
   let pref = null;
   try { pref = localStorage.getItem("sagebrush-files-sidebar"); } catch {}
@@ -5604,6 +5672,9 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // (the LaTeX editor: in a build with it, and on, its hooks are installed, and /?tex=<fid> is its page; a build
   // without it has none of this: web/latex/boot.ts, web/build.ts SAGEBRUSH_LATEX_PREVIEW)
   // (either editor's page up: its Terminal button's pressed state set at once, as the Terminal's changes set it after)
+  // (the code page's hooks for the file panel and the preview first: on the LaTeX editor's page too, a code file opens
+  //  on its own page (/?code=) as from a notebook, by this page's way out, which has the editor write its edit first)
+  codeHooks((url, fromCodePage) => leaveTo(url, !fromCodePage));
   if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, texSandbox(), { share: texShare }))) return void dispatchEvent(new Event("sb-term-place"));
   // (a code or text file's own page, /?code=<fid> (1a): web/code/boot.ts; its hooks for the file browser and the preview either way)
   if (await codeBoot(ws, (e, how) => openEntry(e, how), agentHere && ws ? codeAgent(ws) : null, (url, fromCodePage) => leaveTo(url, !fromCodePage))) {
@@ -5809,7 +5880,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     // (a quit, or the window closed: the notebook's save, the settings and every change on disk first)
     if (desktopApp()) desktopModule().then((d) => d.drainOnQuit({ mirror: () => diskMirror, invoke: (c, a) => TAURI.core.invoke(c, a), listen: (ev, f) => TAURI.event.listen(ev, f), freeze: () => nb.setReadOnly(true), flushEditor: () => nb.saved() })).catch((e) => console.warn("quit:", e));
     const persist = st && desktopApp() && await TAURI.core.invoke("selftest_persist");
-    if (persist) desktopModule().then((d) => d.persistProbe(persist, { ws: () => wsReady.then(() => ws), mirror: () => diskMirror, invoke: (c, a) => TAURI.core.invoke(c, a) }));
+    if (persist) desktopModule().then((d) => d.persistProbe(persist, { ws: () => wsReady.then(() => ws), mirror: () => diskMirror, invoke: (c, a) => TAURI.core.invoke(c, a), grant: (doc, folder) => perms.grant(doc, "write", folder).ok, trees: (doc) => perms.writeTrees(doc), grantsSaved: () => grantsKept?.flush() }));
     else if (st) selftest(st);
   }
   // (however the start ends, an error included, Share stops waiting for it)

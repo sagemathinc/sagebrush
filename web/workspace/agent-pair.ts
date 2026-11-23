@@ -35,8 +35,8 @@ export type Hello = { protocol: 1; agent: { name: string; client: string; versio
  * offers "for this turn", its own action and digest (agent-egress.ts); "chat.resume.tag", an agent that gives a
  * chat.resume's tag back on its chat.replay, so the log mirror reads the agent's log apart from the display (mirror.ts);
  * "delegate.1", an agent that takes Delegate's tasks.* requests (pair-delegate-plan-r3.3 §2.5; the page's side is
- * tasks-client.ts). */
-export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn", "chat.resume.tag", "delegate.1"] as const;
+ * tasks-client.ts); "chat.brief", an agent that drafts a Delegate task's brief from a Pair chat (Delegate briefs). */
+export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn", "chat.resume.tag", "delegate.1", "chat.brief"] as const;
 /** The `log` an agent's hello or agent.ready names: its run, as the agent's random hex id; anything else, none. */
 export const logOf = (v: unknown): { instance: string } | undefined => {
   const i = (v as { instance?: unknown } | null)?.instance;
@@ -236,6 +236,12 @@ export class AgentPairing {
   private sessionSecret: string | undefined;
   private readonly gen = ++pairingGen;
   lostRecord: ReloadRecord | null = null;
+  /** Why the agent refused this page's hello, where it says (sagebrush-agent 0.8.12 and later, data.reason): another
+   * page is paired, a session it doesn't know (it restarted, or another code paired since), or a wrong, spent or
+   * expired code; null where it didn't say. */
+  refusedFor: "busy" | "unknown-session" | "bad-code" | null = null;
+  /** Whether its grant was remembered (kept in IndexedDB with its session, not in a reload record). */
+  get remembers(): boolean { return this.remember; }
   private revoked = false;
   // (the page's own requests (Delegate's, tasks-client.ts): who hears their answers)
   private ownAnswers: ((msg: any, bytes: number) => boolean) | null = null;
@@ -300,6 +306,8 @@ export class AgentPairing {
           if (msg.id !== "p1") return this.close(1002, "the first answer must be the hello's");
           if (msg.error) {
             const m = String(msg.error?.data?.message ?? msg.error?.message ?? "refused").slice(0, 300);
+            const why = msg.error?.data?.reason;
+            if (why === "busy" || why === "unknown-session" || why === "bad-code") this.refusedFor = why;
             this.end("the agent refused: " + m);
             return reject(new AgentError(String(msg.error?.data?.code ?? "refused"), m));
           }
@@ -361,13 +369,15 @@ export class AgentPairing {
 
   /** The person's grant: sent to the server, kept (with the session secret if `remember`), and in force from now.
    * `id`: the id of the grant this resumes (a remembered one, or the reload record's); else this pairing's grant's,
-   * if it has one; else a new one (Q1: made here, never the agent's). */
-  async allow(g: { folders: string[]; write: boolean; run?: boolean; expires: number | null; id?: string }, remember: boolean) {
+   * if it has one; else a new one (Q1: made here, never the agent's). `delegate`: a return to the page given its grant
+   * again with the Delegate switch on, as it was (#1622): in the same grant, so the agent never sees it off between,
+   * which would stop its tasks' turns; only for an agent on this computer that offers Delegate, as setDelegate. */
+  async allow(g: { folders: string[]; write: boolean; run?: boolean; delegate?: boolean; expires: number | null; id?: string }, remember: boolean) {
     if (this.state !== "paired" && this.state !== "granted") throw new AgentError("invalid", "not paired");
     const h = this.hello!, now = this.now();
     const id = typeof g.id === "string" && GRANT_ID.test(g.id) ? g.id : this.grant?.id ?? newGrantId();
     // (the Delegate switch is apart from Pair's grant (§6.2): a new grant from the person keeps it as it was)
-    const grant: Grant = { id, agent: h.agent.name, client: h.agent.client, folders: grantFolders(g.folders), write: !!g.write, run: g.run === true, expires: g.expires, ...(this.grant?.delegate ? { delegate: true as const } : {}), created: this.grant?.created ?? now, lastUsed: now };
+    const grant: Grant = { id, agent: h.agent.name, client: h.agent.client, folders: grantFolders(g.folders), write: !!g.write, run: g.run === true, expires: g.expires, ...(this.grant?.delegate || (g.delegate === true && !this.link && h.features?.includes("delegate.1")) ? { delegate: true as const } : {}), created: this.grant?.created ?? now, lastUsed: now };
     this.grant = grant;
     this.remember = remember;
     this.verbs = this.opts.verbsFor(actorOf(h.agent.name, h.agent.client), { owner: () => grant.id });
@@ -402,7 +412,7 @@ export class AgentPairing {
   private keepForReload() {
     const r = this.opts.reload, g = this.grant, h = this.hello;
     if (!r || !g || !h || this.remember || !this.pairingId || !this.sessionSecret || this.gen !== pairingGen) return;
-    putReloadRecord(r.storage, { v: 1, pairingId: this.pairingId, session: this.sessionSecret, port: this.port, agent: { name: h.agent.name, client: h.agent.client }, grant: { folders: g.folders, write: g.write, ...(g.run ? { run: true } : {}), expires: g.expires, id: g.id }, workspace: r.scope.workspace, page: r.scope.page });
+    putReloadRecord(r.storage, { v: 1, pairingId: this.pairingId, session: this.sessionSecret, port: this.port, agent: { name: h.agent.name, client: h.agent.client }, grant: { folders: g.folders, write: g.write, ...(g.run ? { run: true } : {}), ...(g.delegate ? { delegate: true } : {}), expires: g.expires, id: g.id }, workspace: r.scope.workspace, page: r.scope.page });
   }
   /** The record removed from storage, if it is this pairing's (its id) and this is the newest pairing (its gen). */
   private dropReload() {
@@ -432,6 +442,9 @@ export class AgentPairing {
     if (this.state !== "granted" || !g || !!g.delegate === on || (on && (this.link || !this.hello?.features?.includes("delegate.1")))) return false;
     const { delegate: _, ...rest } = g;
     this.regrant(on ? { ...rest, delegate: true } : rest);
+    // (in this page's reload record too, so a return to the page turns it on again (#1622); a remembered grant never
+    //  keeps it, keep())
+    this.keepForReload();
     return true;
   }
   // (the grant in force replaced by `next`: a call or run made under the old one finds it changed (current()) and ends)
@@ -794,15 +807,16 @@ export class AgentPairing {
 export const RELOAD_KEY = "sb-agent-reload-v1";
 // (the newest pairing's number on this page: only the newest writes or drops the record, A14 r3.1 §3)
 let pairingGen = 0;
-/** At most this long between the page leaving (pagehide) and its return, a reload or a navigation back to the same page
- * in this browsing context, for the reconnect to be silent (R1-b; A5 item 2, ruled Nov 20 2026: one constant). */
+/** A return (a reload, or a navigation back to the same page in this browsing context) is silent until the grant's own
+ * end, never extended (ruled Nov 22 2026, #1620, SEC's bound); a grant with no end (while the page is open) for at most
+ * this long after the page left (R1-b; A5 item 2, ruled Nov 20 2026: one constant). */
 export const RETURN_MS = 10 * 60 * 1000;
 const RELOAD_MAX = 4096;
 
 export type ReloadRecord = {
   v: 1; pairingId: string; session: string; port: number;
   agent: { name: string; client: string };
-  grant: { folders: string[]; write: boolean; run?: boolean; expires: number | null; id?: string };
+  grant: { folders: string[]; write: boolean; run?: boolean; delegate?: boolean; expires: number | null; id?: string };
   workspace: string; page: string; leftAt?: number;
 };
 /** The page a record belongs to: its workspace's store and its own address (R1-d). */
@@ -830,9 +844,10 @@ export function parseReloadRecord(raw: string | null): ReloadRecord | null {
   const a = v.agent, g = v.grant;
   if (!a || typeof a !== "object" || Array.isArray(a) || !keysAre(a, ["name", "client"])) return null;
   if (!isStr(a.name, 80) || typeof a.client !== "string" || a.client.length > 40) return null;
-  if (!g || typeof g !== "object" || Array.isArray(g) || !keysAre(g, ["folders", "write", "expires"], ["id", "run"])) return null;
-  // ("May run code": present only as true; a record without it is a grant that may not run code)
+  if (!g || typeof g !== "object" || Array.isArray(g) || !keysAre(g, ["folders", "write", "expires"], ["id", "run", "delegate"])) return null;
+  // ("May run code", and the Delegate switch on: present only as true; a record without one is a grant without it)
   if ("run" in g && g.run !== true) return null;
+  if ("delegate" in g && g.delegate !== true) return null;
   if ("id" in g && !(typeof g.id === "string" && GRANT_ID.test(g.id))) return null;
   if (!Array.isArray(g.folders) || g.folders.length < 1 || g.folders.length > 64 || !g.folders.every((f: unknown) => isStr(f, 512))) return null;
   if (typeof g.write !== "boolean") return null;
@@ -847,19 +862,22 @@ export function parseReloadRecord(raw: string | null): ReloadRecord | null {
 
 /** What a page may do with a parsed record:
  *  - "silent": reconnect now, with no gesture: a reload, or a navigation back to the same page in this browsing context
- *    (leaving for Files and coming back), within RETURN_MS of leaving, the same scope, the grant not expired (R1-a..e;
- *    A5 item 2, design r3, SEC-cleared Nov 20 2026). A copy of the record in a duplicated, restored or window.open tab is
- *    taken once there too: the agent's one live page decides between them;
- *  - "click": keep it in memory for one [Reconnect]: a reload, the same scope, not expired, only older than RETURN_MS;
+ *    (leaving for Files and coming back), until the grant's own end (one with no end: within RETURN_MS of leaving), the
+ *    same scope (R1-a..e; A5 item 2, design r3, SEC-cleared Nov 20 2026; the grant's window, ruled Nov 22 2026). A copy
+ *    of the record in a duplicated, restored or window.open tab is taken once there too: the agent's one live page
+ *    decides between them;
+ *  - "click": keep it in memory for one [Reconnect]: a reload, the same scope, not expired, only past that window;
  *  - "discard": never usable: another workspace or page, the grant over, a record with no leftAt (as a copy taken
- *    while its page lived has), any other navigation type, or a navigation back older than RETURN_MS: those need a new
- *    Allow unless the grant was remembered. */
+ *    while its page lived has) or one in the future, any other navigation type, or a navigation back past that window:
+ *    those need a new Allow unless the grant was remembered. */
 export function reloadDecision(r: ReloadRecord, o: { scope: ReloadScope; navType: string; now: number }): "silent" | "click" | "discard" {
   if (r.workspace !== o.scope.workspace || r.page !== o.scope.page) return "discard";
   if (r.grant.expires !== null && !(o.now < r.grant.expires)) return "discard";
   if (r.leftAt === undefined || !(o.navType === "reload" || o.navType === "navigate" || o.navType === "back_forward")) return "discard";
   const age = o.now - r.leftAt;
-  if (age >= 0 && age <= RETURN_MS) return "silent";
+  // (a leftAt in the future is no time the page left: never used, SEC's bound)
+  if (!(age >= 0)) return "discard";
+  if (r.grant.expires !== null || age <= RETURN_MS) return "silent";
   return o.navType === "reload" ? "click" : "discard";
 }
 

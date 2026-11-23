@@ -168,10 +168,16 @@ try {
   // ---- the list
   await ev("window.open1({}, true)");
   await until("document.querySelectorAll('#p .file').length === 5");
-  const head = await ev(`({ h: document.querySelector('#p h3')?.textContent, st: document.querySelector('#p .st')?.textContent, rows: [...document.querySelectorAll('#p .file')].map((r) => r.textContent), acts: document.querySelector('#p .sbpv > #acts')?.textContent ?? null })`);
+  const head = await ev(`({ h: document.querySelector('#p h3')?.textContent, st: document.querySelector('#p .st')?.textContent, rows: [...document.querySelectorAll('#p .file')].map((r) => r.textContent), acts: document.querySelector('#p .sbpv + #acts')?.textContent ?? null })`);
   ok(head.h === "Proposal, round 2" && head.st === "5 files changed · from 1111111 to 2222222", "the header: its round, its files and both commits, short", head);
   ok(head.rows.join("|") === "nb.ipynb changed|notes.txt changed|old.txt deleted|new.md added|pic.png added", "each changed file a row, with its change", head.rows);
   ok(head.acts === "ACTIONS", "the host page's actions at the foot", head.acts);
+  // (the actions beside what is drawn: kept while it is read again, and when that read fails)
+  await ev("window.open1({ failDiff: true }, true)");
+  await until("!!document.querySelector('#p .sbpv .msg')");
+  ok((await ev(`document.querySelector('#p .sbpv + #acts')?.textContent ?? null`)) === "ACTIONS", "a read that fails: the host page's actions still there");
+  await ev("window.open1({}, true)");
+  await until("document.querySelectorAll('#p .file').length === 5");
   ok((await ev("window.reads.length")) === 0, "nothing read before a file is opened", await ev("window.reads"));
 
   // ---- a notebook: cell by cell, and as proposed
