@@ -39,7 +39,7 @@ Optional packages are **reviewed first-party code**. `scripts/optional-packages.
 - the public names in `core-api-surface.json` (modules, their names and their public types' members, with the level each appeared at);
 - the documented protocols (`_repr_html_`, `__array__`, the number and sequence dunders, …);
 - its own names;
-- the public names of the packages it `requires`, at their exact ids: the modules their manifests list, and those modules' public names. Their private modules and names, and any change to them, are findings no declaration waives.
+- the public names of the packages it `requires`, at their exact ids: the modules their manifests list, and those modules' public names. Their private modules and names, and any change to them, are findings no declaration waives; so is importing any module of a package it doesn't require at that exact id.
 
 **Banned whatever their arguments:**
 - reflection and dynamic import (`importlib`, `__import__`, `builtins`, `eval`/`exec`/`compile`, `getattr`/`setattr`/`hasattr`/`vars`/`dir`, `__dict__`, `sys.modules`), and aliases of them;

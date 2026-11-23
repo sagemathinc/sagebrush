@@ -261,6 +261,10 @@ export function lintPackage(pkg, api, others = []) {
     if (dep) for (const m of dep.manifest.python.modules) required.add(m);
   }
   const requiredModule = (name) => required.has(name);
+  // (the modules of every other package read with it: one it doesn't require is never its to import, declared or not)
+  const foreign = new Set();
+  for (const o of others) if (o.kind !== "js" && o.id !== pkg.id && !(pkg.manifest.requires ?? []).includes(o.id)) for (const m of o.manifest.python.modules) foreign.add(m);
+  const foreignModule = (name) => foreign.has(name) && !own.has(name);
   const prefix = pkg.manifest.private_prefix;
   const coreModule = (name) => Object.hasOwn(api.modules, name);
   const declaration = (file, line, construct, target) => pkg.declarations.find((d) => d.file === file && d.line === line && d.construct === construct && (d.target === undefined || d.target === target));
@@ -301,6 +305,10 @@ export function lintPackage(pkg, api, others = []) {
               else requiredAlias.add(a.asname ?? parts[0]);
               continue;
             }
+            if (foreignModule(a.name)) {
+              hard(file, n.line, "import", a.name, `imports ${a.name}, a module of a package it doesn't require`);
+              continue;
+            }
             if (parts.some((p) => p.startsWith("_"))) flag(file, n.line, "import", a.name, `imports the private module ${a.name}`);
             if (BANNED_MODULES.has(parts[0])) flag(file, n.line, "import", a.name, `imports ${a.name}, a reflection or dynamic-import module`);
             else if (!coreModule(a.name)) flag(file, n.line, "import", a.name, `${a.name} is not a public core module (core-api-surface.json)`);
@@ -320,6 +328,10 @@ export function lintPackage(pkg, api, others = []) {
             else if (a.name.startsWith("_")) hard(file, n.line, "import", `${mod}.${a.name}`, `imports the private name ${mod}.${a.name} of a required package`);
             else requiredAlias.add(a.asname ?? a.name);
           }
+          return;
+        }
+        if (foreignModule(mod)) {
+          hard(file, n.line, "import", mod, `imports from ${mod}, a module of a package it doesn't require`);
           return;
         }
         if (mod.split(".").some((p) => p.startsWith("_"))) flag(file, n.line, "import", mod, `imports from the private module ${mod}`);

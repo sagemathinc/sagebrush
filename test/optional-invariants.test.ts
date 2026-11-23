@@ -101,6 +101,11 @@ test("a package uses the packages it requires, at their exact ids, never their p
   // (not required, or required at another version: not allowed)
   assert.ok(lint("import dep\n", []).some((f: any) => f.construct === "import" && f.target === "dep"));
   assert.ok(lint("import dep\n", ["@sagebrush/dep@0.2.0"]).some((f: any) => f.construct === "import"));
+  // (and a declaration never makes another package's module its own to import, public or private)
+  for (const [src, target] of [["import dep\n", "dep"], ["import dep._dp_impl\n", "dep._dp_impl"], ["from dep._dp_impl import x\n", "dep._dp_impl"], ["from dep.sub import f\n", "dep.sub"]]) {
+    const found = lint(src, [], [{ file: "py/fixture.py", line: 1, construct: "import", target, reason: "probe" }]);
+    assert.ok(found.some((f: any) => f.construct === "import" && f.hard === true), `${JSON.stringify(src)}: a hard import finding when dep isn't required, declared or not`);
+  }
   // (its private names, a change to it: findings no declaration waives)
   const declareAll = (line: number, construct: string, target: string) => [{ file: "py/fixture.py", line, construct, target, reason: "probe" }];
   for (const [src, construct, target] of [
