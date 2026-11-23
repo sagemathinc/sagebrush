@@ -337,6 +337,30 @@ if (jit) {
   ok(/files: \$\{\{ runner\.temp \}\}\\probe\\sagebrush-signing-probe\.exe/.test(signStep) && !/files-folder|files-catalog/.test(signStep), "the sign step signs the throwaway probe alone");
   const verifyStep = check.slice(verify, upload);
   ok(/verify \/pa \/all/.test(verifyStep) && /Get-AuthenticodeSignature/.test(verifyStep) && /TimeStamperCertificate/.test(verifyStep), "the check runs signtool verify /pa /all and Get-AuthenticodeSignature, timestamp included");
+  // (each required postcondition, as the exact line that checks it and counts its failure, in order, and the step
+  //  failing on any count: so a check replaced by if ($true), or dropped, or no longer counted, fails here)
+  const lines = verifyStep.split("\n").map((l) => l.trim()).filter((l) => l && l !== "-" && !l.startsWith("#"));
+  const must = [
+    "$fails = 0",
+    "& $signtool.FullName verify /pa /all /v $exe | Out-Null",
+    'if ($LASTEXITCODE -eq 0) { "PASS  signtool verify /pa /all" } else { "FAIL  signtool verify /pa /all (exit $LASTEXITCODE)"; $fails++ }',
+    "$s = Get-AuthenticodeSignature $exe",
+    `if ($s.Status -eq 'Valid') { "PASS  Get-AuthenticodeSignature: Valid" } else { "FAIL  Get-AuthenticodeSignature: $($s.Status)"; $fails++ }`,
+    'if ($s.TimeStamperCertificate) { "PASS  the signature is timestamped" } else { "FAIL  the signature has no timestamp"; $fails++ }',
+    "$subject = if ($s.SignerCertificate) { $s.SignerCertificate.Subject } else { '' }",
+    `if (($subject -cmatch $OrgPattern) -and ([regex]::Matches($subject, $AnyOrg).Count -eq 1)) { "PASS  the signer is SageMath, Inc." } else { "FAIL  the signer isn't SageMath, Inc."; $fails++ }`,
+    "if ($fails) { exit 1 }",
+  ];
+  let from = 0;
+  for (const m of must) {
+    const i = lines.indexOf(m, from);
+    ok(i >= 0, `the check step has, in order: ${m}`);
+    if (i >= 0) from = i + 1;
+  }
+  ok(lines[lines.length - 1] === "if ($fails) { exit 1 }", "the check step ends by failing on any failed check");
+  ok(lines[lines.indexOf("& $signtool.FullName verify /pa /all /v $exe | Out-Null") + 1]?.startsWith("if ($LASTEXITCODE -eq 0)"), "signtool's exit code is read right after it runs");
+  ok(lines.filter((l) => /\$fails\s*=/.test(l)).length === 1 && lines.filter((l) => l.includes('"FAIL ')).every((l) => /\$fails\+\+ \}$|exit 1 \}$/.test(l)), "every FAIL counts (or exits), and $fails is set only once, to 0");
+  ok(!/if \(\$true\)|-or \$true|\| Out-Null; \$LASTEXITCODE = 0/.test(verifyStep), "no check is short-circuited");
   // (the signer's organization: the step's own two patterns (.NET regex, in the subset JavaScript reads the same:
   //  groups, alternation, anchors, escapes), run over the subject forms .NET writes and near misses; the check passes
   //  when the first matches, case-sensitively, and the second matches exactly once)
