@@ -23,6 +23,7 @@ _EPS = 2.220446049250313e-16
 
 class ConfidenceInterval(tuple):
     """(low, high): SciPy's ConfidenceInterval"""
+    _fields = ("low", "high")
 
     def __new__(cls, low, high):
         return tuple.__new__(cls, (low, high))
@@ -517,3 +518,214 @@ def zscore(a, axis=0, ddof=0, nan_policy="propagate"):
         sd = np.std(arr, axis=axis, ddof=ddof, keepdims=True)
     with np.errstate(divide="ignore", invalid="ignore"):
         return (arr - mn) / sd
+
+
+# ------------------------------------------------------------------ bootstrap
+
+class BootstrapResult:
+    """SciPy's BootstrapResult: confidence_interval (low, high), bootstrap_distribution (the statistic of each
+    resample, along the last axis) and standard_error (that distribution's standard deviation, ddof 1)"""
+
+    def __init__(self, confidence_interval, bootstrap_distribution, standard_error):
+        self.confidence_interval = confidence_interval
+        self.bootstrap_distribution = bootstrap_distribution
+        self.standard_error = standard_error
+
+    def __repr__(self):
+        return "BootstrapResult(confidence_interval=%r, bootstrap_distribution=%r, standard_error=%r)" % (
+            self.confidence_interval, self.bootstrap_distribution, self.standard_error)
+
+
+class DegenerateDataWarning(RuntimeWarning):
+    """SciPy's warning for data a method can't use (scipy.stats.DegenerateDataWarning)"""
+
+
+def _vectorized(statistic):
+    """an n-sample statistic made to take axis=: applied to each 1-d slice along the axis, as SciPy's
+    _vectorize_statistic (the samples concatenated, split again for each call)"""
+    def stat_nd(*data, axis=0):
+        lengths = [s.shape[axis] for s in data]
+        cuts = np.cumsum(lengths)[:-1].tolist()
+        z = np.concatenate([np.moveaxis(s, axis, -1) for s in data], axis=-1)
+        flat = z.reshape(-1, z.shape[-1])
+        out = []
+        for row in flat:
+            parts = [row[a:b] for a, b in zip([0] + cuts, cuts + [row.shape[0]])]
+            out.append(statistic(*parts))
+        res = np.array(out, dtype=float).reshape(z.shape[:-1])
+        return res[()] if res.ndim == 0 else res
+    return stat_nd
+
+
+def _quantile7(sorted_rows, p):
+    """SciPy's stats.quantile, method "linear" (Hyndman and Fan's 7), of rows sorted ascending, at p: the
+    position j + g = p n + 1 - p, between the j-th and the next (1-based), as SciPy computes it"""
+    n = sorted_rows.shape[-1]
+    jg = p * n + (1 - p)
+    jp1 = _math.floor(jg)
+    j = jp1 - 1
+    g = jg % 1
+    if j < 0:
+        g = 0.0
+    j = min(max(j, 0), n - 1)
+    jp1 = min(max(jp1, 0), n - 1)
+    return (1 - g) * sorted_rows[..., j] + g * sorted_rows[..., jp1]
+
+
+def bootstrap(data, statistic, *, n_resamples=9999, batch=None, vectorized=None, paired=False, axis=0,
+              confidence_level=0.95, alternative="two-sided", method="BCa", bootstrap_result=None, rng=None,
+              random_state=None):
+    """A two-sided (or one-sided) bootstrap confidence interval of a statistic of one or more samples, as SciPy
+    1.18's bootstrap: n_resamples resamples drawn as SciPy draws them (rng: a Generator or a seed for
+    default_rng; random_state: SciPy's older argument, a seed for a RandomState), so a seed gives SciPy's
+    resamples; the percentile, basic or BCa (bias-corrected and accelerated, by the jackknife) interval."""
+    import inspect
+    import warnings
+    if random_state is not None and rng is not None:
+        raise TypeError("bootstrap() got an unexpected keyword argument 'random_state'")
+    if vectorized not in (True, False, None):
+        raise ValueError("`vectorized` must be `True`, `False`, or `None`.")
+    if vectorized is None:
+        try:
+            vectorized = "axis" in inspect.signature(statistic).parameters
+        except (TypeError, ValueError):
+            vectorized = False
+    if not vectorized:
+        statistic = _vectorized(statistic)
+    axis_int = int(axis)
+    if axis != axis_int:
+        raise ValueError("`axis` must be an integer.")
+    try:
+        n_samples = len(data)
+    except TypeError:
+        raise ValueError("`data` must be a sequence of samples.") from None
+    if n_samples == 0:
+        raise ValueError("`data` must contain at least one sample.")
+    samples = [np.asarray(s) for s in data]
+    if any(s.dtype.kind not in "biuf" for s in samples):
+        samples = [np.asarray(s, dtype=float) for s in samples]
+    # (broadcast all but the axis, as SciPy's _broadcast_arrays with axis)
+    nd = max(s.ndim for s in samples)
+    samples = [s.reshape((1,) * (nd - s.ndim) + s.shape) for s in samples]
+    ax = axis_int % nd if nd else 0
+    other = [tuple(d for i, d in enumerate(s.shape) if i != ax) for s in samples]
+    common = np.broadcast_shapes(*other)
+    out = []
+    for s in samples:
+        moved = np.moveaxis(s, ax, -1)
+        out.append(np.broadcast_to(moved, common + (moved.shape[-1],)))
+    data_iv = []
+    for s in out:
+        if s.shape[-1] <= 1:
+            raise ValueError("each sample in `data` must contain two or more observations along `axis`.")
+        data_iv.append(np.array(s))
+    if paired not in (True, False):
+        raise ValueError("`paired` must be `True` or `False`.")
+    if paired:
+        n = data_iv[0].shape[-1]
+        for s in data_iv[1:]:
+            if s.shape[-1] != n:
+                raise ValueError("When `paired is True`, all samples must have the same length along `axis`")
+        unpaired, originals = statistic, data_iv
+
+        def statistic(i, axis=-1):
+            return unpaired(*[s[..., i] for s in originals], axis=axis)
+        data_iv = [np.arange(n)]
+    cl = float(confidence_level)
+    alternative = alternative.lower()
+    if alternative not in ("two-sided", "less", "greater"):
+        # (SciPy's message prints a set, in an order that varies from run to run; here, its source's order)
+        raise ValueError("`alternative` must be one of {'two-sided', 'less', 'greater'}")
+    n_res = int(n_resamples)
+    if n_resamples != n_res or n_res < 0:
+        raise ValueError("`n_resamples` must be a non-negative integer.")
+    if batch is not None:
+        b = int(batch)
+        if batch != b or b <= 0:
+            raise ValueError("`batch` must be a positive integer or None.")
+        batch = b
+    method = method.lower()
+    if method not in ("percentile", "basic", "bca"):
+        raise ValueError("`method` must be in {'percentile', 'basic', 'bca'}")
+    if bootstrap_result is not None and not hasattr(bootstrap_result, "bootstrap_distribution"):
+        raise ValueError("`bootstrap_result` must have attribute `bootstrap_distribution'")
+    if (bootstrap_result is None or not np.asarray(bootstrap_result.bootstrap_distribution).size) and n_res == 0:
+        raise ValueError("Either `bootstrap_result.bootstrap_distribution.size` or `n_resamples` must be positive.")
+    if rng is not None:
+        g = rng if isinstance(rng, np.random.Generator) else np.random.default_rng(rng)
+    else:
+        from scipy.stats import _random_state
+        g = _random_state(random_state)
+    draw = g.integers if isinstance(g, np.random.Generator) else g.randint
+    # the resamples, batch by batch, each sample's in turn (SciPy's order of draws)
+    parts = [] if bootstrap_result is None else [np.asarray(bootstrap_result.bootstrap_distribution, dtype=float)]
+    step = batch or n_res or 1
+    for k in range(0, n_res, step):
+        m = min(step, n_res - k)
+        res = []
+        for s in data_iv:
+            n = s.shape[-1]
+            i = draw(0, n, (m, n))
+            res.append(s[..., i])
+        parts.append(np.asarray(statistic(*res, axis=-1), dtype=float))
+    theta_b = np.concatenate(parts, axis=-1)
+    alpha = (1 - cl) / 2 if alternative == "two-sided" else (1 - cl)
+    lead = theta_b.shape[:-1]
+    if method == "bca":
+        theta_hat = np.asarray(statistic(*data_iv, axis=-1), dtype=float)
+        B = theta_b.shape[-1]
+        th = theta_hat[..., None]
+        pct = (np.count_nonzero(theta_b < th, axis=-1) + np.count_nonzero(theta_b <= th, axis=-1)) / (2 * B)
+        z0 = _sc.ndtri(pct)
+        nums, dens = 0.0, 0.0
+        for j, s in enumerate(data_iv):
+            n = s.shape[-1]
+            jack = np.stack([np.delete(s, i, axis=-1) for i in range(n)], axis=-2)
+            others = [x[..., None, :] for x in data_iv]
+            others[j] = jack
+            shapes = [x.shape[:-1] for x in others]
+            full = np.broadcast_shapes(*shapes)
+            args = [np.broadcast_to(x, full + (x.shape[-1],)) for x in others]
+            theta_i = np.asarray(statistic(*args, axis=-1), dtype=float)
+            nj = float(theta_i.shape[-1])
+            dot = np.mean(theta_i, axis=-1, keepdims=True)
+            U = (nj - 1) * (dot - theta_i)
+            nums = nums + np.sum(U ** 3, axis=-1) / nj ** 3
+            dens = dens + np.sum(U ** 2, axis=-1) / nj ** 2
+        a_hat = 1 / 6 * nums / dens ** (3 / 2)
+        z_alpha = float(_sc.ndtri(alpha))
+        num1 = z0 + z_alpha
+        lo_p = _sc.ndtr(z0 + num1 / (1 - a_hat * num1))
+        num2 = z0 - z_alpha
+        hi_p = _sc.ndtr(z0 + num2 / (1 - a_hat * num2))
+    else:
+        lo_p = np.full(lead, alpha)
+        hi_p = np.full(lead, 1 - alpha)
+    lo_p, hi_p = np.broadcast_to(np.asarray(lo_p, dtype=float), lead), np.broadcast_to(np.asarray(hi_p, dtype=float), lead)
+    srt = np.sort(theta_b, axis=-1)
+    flat, fl, fh = srt.reshape(-1, srt.shape[-1]), lo_p.reshape(-1).tolist(), hi_p.reshape(-1).tolist()
+    nan = float("nan")
+
+    def q(row, p):
+        if p != p or not 0 <= p <= 1 or np.isnan(row).any():
+            return nan
+        return float(_quantile7(row, p))
+    ci_l = np.array([q(r, p) for r, p in zip(flat, fl)], dtype=float).reshape(lead)
+    ci_u = np.array([q(r, p) for r, p in zip(flat, fh)], dtype=float).reshape(lead)
+    if np.isnan(ci_l).any() or np.isnan(ci_u).any():
+        warnings.warn(DegenerateDataWarning("The BCa confidence interval cannot be calculated. This problem is known "
+                                            "to occur when the distribution is degenerate or the statistic is np.min."),
+                      stacklevel=2)
+    if method == "basic":
+        theta_hat = np.asarray(statistic(*data_iv, axis=-1), dtype=float)
+        ci_l, ci_u = 2 * theta_hat - ci_u, 2 * theta_hat - ci_l
+    if alternative == "less":
+        ci_l = np.full_like(ci_l, -np.inf)
+    elif alternative == "greater":
+        ci_u = np.full_like(ci_u, np.inf)
+    se = np.std(theta_b, ddof=1, axis=-1)
+
+    def one(v):
+        # (a 0-d result as a NumPy scalar, as SciPy's)
+        return np.float64(float(np.asarray(v))) if np.ndim(v) == 0 else v
+    return BootstrapResult(ConfidenceInterval(one(ci_l), one(ci_u)), theta_b, one(se))

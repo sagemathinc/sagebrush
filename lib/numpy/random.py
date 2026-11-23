@@ -13,7 +13,7 @@ import numpy as _np
 import _nprandom as _r
 
 __all__ = ["seed", "rand", "randn", "random", "random_sample", "ranf", "sample", "randint", "random_integers",
-           "uniform", "normal", "standard_normal", "exponential", "standard_exponential", "poisson",
+           "uniform", "normal", "standard_normal", "exponential", "standard_exponential", "poisson", "binomial",
            "choice", "shuffle", "permutation", "RandomState", "Generator", "default_rng", "get_state", "set_state"]
 
 
@@ -50,6 +50,23 @@ def _poisson(g, lam, size):
         return _r.poisson(g, lam, _size(size))
     lam = _np.broadcast_to(_np.asarray(lam, float), tuple(_size(size)))
     return _np.array([_r.poisson(g, float(v), None) for v in lam.ravel().tolist()], dtype=_np.int64).reshape(lam.shape)
+
+
+def _binomial(g, n, p, size, legacy):
+    """NumPy's binomial draws (random_binomial: inversion, or BTPE when n min(p, 1 - p) > 30), n checked first"""
+    na, pa = _np.asarray(n), _np.asarray(p, float)
+    if _np.any(na < 0):
+        raise ValueError("n < 0")
+    if _np.any(pa < 0) or _np.any(pa > 1) or _np.any(_np.isnan(pa)):
+        raise ValueError("p < 0, p > 1 or p is NaN")
+    size = _bsize(size, n, p)
+    if not _np.shape(n) and not _np.shape(p):
+        return _r.binomial(g, int(n), float(p), _size(size), legacy)
+    shape = tuple(_size(size))
+    nb = _np.broadcast_to(_np.asarray(n).astype(_np.int64), shape).ravel().tolist()
+    pb = _np.broadcast_to(pa, shape).ravel().tolist()
+    return _np.array([_r.binomial(g, int(a), float(b), None, legacy) for a, b in zip(nb, pb)],
+                     dtype=_np.int64).reshape(shape)
 
 
 class RandomState:
@@ -118,6 +135,11 @@ class RandomState:
 
     def poisson(self, lam=1.0, size=None):
         return _poisson(self._g, lam, size)
+
+    def binomial(self, n, p, size=None):
+        """Draws from the binomial distribution of n trials of probability p, as NumPy's (the same numbers for a
+        seed)."""
+        return _binomial(self._g, n, p, size, True)
 
     def randint(self, low, high=None, size=None, dtype=int):
         if high is None:
@@ -204,6 +226,7 @@ uniform = _global.uniform
 exponential = _global.exponential
 standard_exponential = _global.standard_exponential
 poisson = _global.poisson
+binomial = _global.binomial
 randint = _global.randint
 random_integers = _global.random_integers
 shuffle = _global.shuffle
@@ -308,6 +331,11 @@ class Generator:
 
     def poisson(self, lam=1.0, size=None):
         return _poisson(self._g, lam, size)
+
+    def binomial(self, n, p, size=None):
+        """Draws from the binomial distribution of n trials of probability p, as NumPy's (the same numbers for a
+        seed: NumPy's algorithm over this generator's stream)."""
+        return _binomial(self._g, n, p, size, False)
 
     def shuffle(self, x, axis=0):
         n = len(x)
