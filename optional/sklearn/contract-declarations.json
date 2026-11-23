@@ -1,0 +1,58 @@
+[
+  {
+    "file": "py/sklearn/_sk_pprint.py",
+    "line": 8,
+    "construct": "import",
+    "target": "inspect",
+    "reason": "an estimator's repr shows only the parameters given non-default values, read from its __init__'s signature (inspect.signature, inspect.Parameter.empty), as scikit-learn's _changed_params"
+  },
+  {
+    "file": "py/sklearn/base.py",
+    "line": 6,
+    "construct": "import",
+    "target": "inspect",
+    "reason": "an estimator's parameters are its __init__'s parameters (inspect.signature), the basis of get_params, set_params, clone and the repr, as scikit-learn's BaseEstimator._get_param_names; inspect.isclass in clone"
+  },
+  {
+    "file": "py/sklearn/base.py",
+    "line": 95,
+    "construct": "name",
+    "target": "getattr",
+    "reason": "get_params reads each parameter, named by __init__'s signature, from the estimator itself (getattr(self, key)): the estimator API's definition"
+  },
+  {
+    "file": "py/sklearn/base.py",
+    "line": 119,
+    "construct": "name",
+    "target": "setattr",
+    "reason": "set_params sets a parameter named by the caller on the estimator itself (setattr(self, key, value)), after checking it is one of get_params' names: the estimator API's definition"
+  },
+  {
+    "file": "py/sklearn/utils/validation.py",
+    "line": 8,
+    "construct": "import",
+    "target": "inspect",
+    "reason": "check_is_fitted refuses a class (inspect.isclass); has_fit_parameter reads fit's signature (inspect.signature), as scikit-learn's"
+  },
+  {
+    "file": "py/sklearn/utils/validation.py",
+    "line": 428,
+    "construct": "name",
+    "target": "hasattr",
+    "reason": "check_is_fitted(estimator, attributes): whether the estimator has each fitted attribute the caller names, as scikit-learn's _is_fitted"
+  },
+  {
+    "file": "py/sklearn/utils/validation.py",
+    "line": 431,
+    "construct": "name",
+    "target": "vars",
+    "reason": "check_is_fitted without attributes: an estimator is fitted when one of its own attributes ends in an underscore (vars(estimator)), as scikit-learn's _is_fitted"
+  },
+  {
+    "file": "py/sklearn/utils/validation.py",
+    "line": 410,
+    "construct": "reference",
+    "target": "numpy.random.rand.__self__",
+    "reason": "check_random_state(None) returns NumPy's global RandomState itself, the one np.random.seed seeds (scikit-learn's np.random.mtrand._rand, a private name); the module functions' bound instance is that object"
+  }
+]

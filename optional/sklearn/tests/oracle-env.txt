@@ -1,0 +1,7 @@
+python 3.14.4 x86_64 glibc
+package numpy 2.5.5
+package pandas 3.1.1
+package scikit-learn 1.9.1
+package scipy 1.18.1
+package joblib 1.6.0
+package threadpoolctl 3.8.0

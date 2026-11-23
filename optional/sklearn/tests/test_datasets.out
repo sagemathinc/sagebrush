@@ -1,0 +1,136 @@
+== load_wine.keys
+['DESCR', 'data', 'feature_names', 'frame', 'target', 'target_names']
+== load_wine.data
+('float64', (178, 13), '8edcf3903afd97c6')
+== load_wine.target
+('int64', (178,), 'b6514e07a6d27854')
+== load_wine.target_names
+array(['class_0', 'class_1', 'class_2'], dtype='<U7')
+== load_wine.feature_names
+['alcohol', 'malic_acid', 'ash', 'alcalinity_of_ash', 'magnesium', 'total_phenols', 'flavanoids', 'nonflavanoid_phenols', 'proanthocyanins', 'color_intensity', 'hue', 'od280/od315_of_diluted_wines', 'proline']
+== load_wine.descr
+(3367, ['.. _wine_dataset:', '', 'Wine recognition dataset'])
+== load_wine.attr
+True
+== load_wine.xy
+[('float64', (178, 13), '8edcf3903afd97c6'), ('int64', (178,), 'b6514e07a6d27854')]
+== load_wine.frame
+('DataFrame', (178, 14), ['od280/od315_of_diluted_wines', 'proline', 'target'])
+== load_wine.frame-dtypes
+['float64', 'int64']
+== load_wine.frame-data
+('DataFrame', (178, 13), ('float64', (178, 13), '8edcf3903afd97c6'))
+== load_wine.frame-target
+('Series', 'target', 'int64', ('int64', (178,), 'b6514e07a6d27854'))
+== load_wine.frame-head
+
+   alcohol  malic_acid   ash
+0    14.23        1.71  2.43
+1    13.20        1.78  2.14
+2    13.16        2.36  2.67
+== load_wine.frame-xy
+['DataFrame', 'Series']
+== load_iris.keys
+['DESCR', 'data', 'data_module', 'feature_names', 'filename', 'frame', 'target', 'target_names']
+== load_iris.data
+('float64', (150, 4), '012f498fe9c8b3b3')
+== load_iris.target
+('int64', (150,), '734737f111629912')
+== load_iris.target_names
+array(['setosa', 'versicolor', 'virginica'], dtype='<U10')
+== load_iris.feature_names
+['sepal length (cm)', 'sepal width (cm)', 'petal length (cm)', 'petal width (cm)']
+== load_iris.descr
+(2656, ['.. _iris_dataset:', '', 'Iris plants dataset'])
+== load_iris.attr
+True
+== load_iris.xy
+[('float64', (150, 4), '012f498fe9c8b3b3'), ('int64', (150,), '734737f111629912')]
+== load_iris.frame
+('DataFrame', (150, 5), ['petal length (cm)', 'petal width (cm)', 'target'])
+== load_iris.frame-dtypes
+['float64', 'int64']
+== load_iris.frame-data
+('DataFrame', (150, 4), ('float64', (150, 4), '012f498fe9c8b3b3'))
+== load_iris.frame-target
+('Series', 'target', 'int64', ('int64', (150,), '734737f111629912'))
+== load_iris.frame-head
+
+   sepal length (cm)  sepal width (cm)  petal length (cm)
+0                5.1               3.5                1.4
+1                4.9               3.0                1.4
+2                4.7               3.2                1.3
+== load_iris.frame-xy
+['DataFrame', 'Series']
+== load_breast_cancer.keys
+['DESCR', 'data', 'data_module', 'feature_names', 'filename', 'frame', 'target', 'target_names']
+== load_breast_cancer.data
+('float64', (569, 30), '6b202a2072f9a038')
+== load_breast_cancer.target
+('int64', (569,), '1763c0f8cd3f454b')
+== load_breast_cancer.target_names
+array(['malignant', 'benign'], dtype='<U9')
+== load_breast_cancer.feature_names
+[np.str_('mean radius'), np.str_('mean texture'), np.str_('mean perimeter'), np.str_('mean area'), np.str_('mean smoothness'), np.str_('mean compactness'), np.str_('mean concavity'), np.str_('mean concave points'), np.str_('mean symmetry'), np.str_('mean fractal dimension'), np.str_('radius error'), np.str_('texture error'), np.str_('perimeter error'), np.str_('area error'), np.str_('smoothness error'), np.str_('compactness error'), np.str_('concavity error'), np.str_('concave points error'), np.str_('symmetry error'), np.str_('fractal dimension error'), np.str_('worst radius'), np.str_('worst texture'), np.str_('worst perimeter'), np.str_('worst area'), np.str_('worst smoothness'), np.str_('worst compactness'), np.str_('worst concavity'), np.str_('worst concave points'), np.str_('worst symmetry'), np.str_('worst fractal dimension')]
+== load_breast_cancer.descr
+(4794, ['.. _breast_cancer_dataset:', '', 'Breast cancer Wisconsin (diagnostic) dataset'])
+== load_breast_cancer.attr
+True
+== load_breast_cancer.xy
+[('float64', (569, 30), '6b202a2072f9a038'), ('int64', (569,), '1763c0f8cd3f454b')]
+== load_breast_cancer.frame
+('DataFrame', (569, 31), ['worst symmetry', 'worst fractal dimension', 'target'])
+== load_breast_cancer.frame-dtypes
+['float64', 'int64']
+== load_breast_cancer.frame-data
+('DataFrame', (569, 30), ('float64', (569, 30), '6b202a2072f9a038'))
+== load_breast_cancer.frame-target
+('Series', 'target', 'int64', ('int64', (569,), '1763c0f8cd3f454b'))
+== load_breast_cancer.frame-head
+
+   mean radius  mean texture  mean perimeter
+0        17.99         10.38           122.8
+1        20.57         17.77           132.9
+2        19.69         21.25           130.0
+== load_breast_cancer.frame-xy
+['DataFrame', 'Series']
+== load_digits.keys
+['DESCR', 'data', 'feature_names', 'frame', 'images', 'target', 'target_names']
+== load_digits.data
+('float64', (1797, 64), '20def7f70a702f0a')
+== load_digits.target
+('int64', (1797,), 'a3c91c262eddcf7b')
+== load_digits.target_names
+array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+== load_digits.feature_names
+['pixel_0_0', 'pixel_0_1', 'pixel_0_2', 'pixel_0_3', 'pixel_0_4', 'pixel_0_5', 'pixel_0_6', 'pixel_0_7', 'pixel_1_0', 'pixel_1_1', 'pixel_1_2', 'pixel_1_3', 'pixel_1_4', 'pixel_1_5', 'pixel_1_6', 'pixel_1_7', 'pixel_2_0', 'pixel_2_1', 'pixel_2_2', 'pixel_2_3', 'pixel_2_4', 'pixel_2_5', 'pixel_2_6', 'pixel_2_7', 'pixel_3_0', 'pixel_3_1', 'pixel_3_2', 'pixel_3_3', 'pixel_3_4', 'pixel_3_5', 'pixel_3_6', 'pixel_3_7', 'pixel_4_0', 'pixel_4_1', 'pixel_4_2', 'pixel_4_3', 'pixel_4_4', 'pixel_4_5', 'pixel_4_6', 'pixel_4_7', 'pixel_5_0', 'pixel_5_1', 'pixel_5_2', 'pixel_5_3', 'pixel_5_4', 'pixel_5_5', 'pixel_5_6', 'pixel_5_7', 'pixel_6_0', 'pixel_6_1', 'pixel_6_2', 'pixel_6_3', 'pixel_6_4', 'pixel_6_5', 'pixel_6_6', 'pixel_6_7', 'pixel_7_0', 'pixel_7_1', 'pixel_7_2', 'pixel_7_3', 'pixel_7_4', 'pixel_7_5', 'pixel_7_6', 'pixel_7_7']
+== load_digits.descr
+(2007, ['.. _digits_dataset:', '', 'Optical recognition of handwritten digits dataset'])
+== load_digits.attr
+True
+== load_digits.xy
+[('float64', (1797, 64), '20def7f70a702f0a'), ('int64', (1797,), 'a3c91c262eddcf7b')]
+== load_digits.frame
+('DataFrame', (1797, 65), ['pixel_7_6', 'pixel_7_7', 'target'])
+== load_digits.frame-dtypes
+['float64', 'int64']
+== load_digits.frame-data
+('DataFrame', (1797, 64), ('float64', (1797, 64), '20def7f70a702f0a'))
+== load_digits.frame-target
+('Series', 'target', 'int64', ('int64', (1797,), 'a3c91c262eddcf7b'))
+== load_digits.frame-head
+
+   pixel_0_0  pixel_0_1  pixel_0_2
+0        0.0        0.0        5.0
+1        0.0        0.0        0.0
+2        0.0        0.0        0.0
+== load_digits.frame-xy
+['DataFrame', 'Series']
+== digits.images
+('float64', (1797, 8, 8), '20def7f70a702f0a')
+== digits.n_class
+[('float64', (537, 64), '389071c97a0abb8a'), ('int64', (537,), 'e028399aece68c0e')]
+== digits.n_class-frame
+(360, 65)
+== iris.filename
+('iris.csv', 'sklearn.datasets.data')

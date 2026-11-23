@@ -1,0 +1,114 @@
+# check_array, check_X_y and the other input checks in sklearn.utils.validation.
+import numpy as np
+import pandas as pd
+from sklearn.base import BaseEstimator
+from sklearn.utils.validation import (check_array, check_X_y, column_or_1d, check_consistent_length,
+                                      check_random_state, check_scalar, check_non_negative,
+                                      as_float_array, has_fit_parameter, validate_data, indexable)
+from _cases import case
+
+
+def arr(a):
+    return (a.dtype.name, a.shape, a.tolist())
+
+
+case("list-int", lambda: arr(check_array([[1, 2], [3, 4]])))
+case("list-float", lambda: arr(check_array([[1.5, 2], [3, 4]])))
+case("list-bool", lambda: arr(check_array([[True, False]])))
+case("dtype-float64", lambda: arr(check_array([[1, 2]], dtype=np.float64)))
+case("dtype-list", lambda: arr(check_array(np.array([[1, 2]], dtype=np.int64), dtype=[np.float64, np.float32])))
+case("float32-kept", lambda: arr(check_array(np.ones((1, 2), dtype=np.float32), dtype=[np.float64, np.float32])))
+case("one-d", lambda: check_array([1, 2, 3]))
+case("one-d-allowed", lambda: arr(check_array([1, 2, 3], ensure_2d=False)))
+case("scalar", lambda: check_array(5))
+case("scalar-1d-off", lambda: check_array(5, ensure_2d=False))
+case("three-d", lambda: check_array(np.zeros((2, 2, 2))))
+case("three-d-allowed", lambda: check_array(np.zeros((2, 2, 2)), allow_nd=True).shape)
+case("empty", lambda: check_array([[]]))
+case("no-samples", lambda: check_array(np.zeros((0, 3))))
+case("min-samples", lambda: check_array([[1.0]], ensure_min_samples=2))
+case("min-features", lambda: check_array([[1.0]], ensure_min_features=2))
+case("nan", lambda: check_array([[np.nan, 1.0]]))
+case("inf", lambda: check_array([[np.inf, 1.0]]))
+case("nan-allowed", lambda: arr(check_array([[np.nan, 1.0]], ensure_all_finite="allow-nan")))
+case("inf-with-allow-nan", lambda: check_array([[np.inf, 1.0]], ensure_all_finite="allow-nan"))
+case("nan-not-checked", lambda: arr(check_array([[np.nan]], ensure_all_finite=False)))
+case("nan-input-name", lambda: check_array([[np.nan]], input_name="X"))
+case("strings", lambda: check_array([["a", "b"]]))
+case("strings-dtype-none", lambda: arr(check_array([["a", "b"]], dtype=None)))
+case("complex", lambda: check_array([[1 + 2j]]))
+case("copy", lambda: (lambda a: check_array(a, copy=True) is a)(np.ones((2, 2))))
+case("no-copy", lambda: (lambda a: check_array(a) is a)(np.ones((2, 2))))
+case("order-f", lambda: check_array(np.ones((2, 3)), order="F").flags["F_CONTIGUOUS"])
+case("estimator-name", lambda: check_array([1, 2], estimator="MyModel"))
+case("frame", lambda: arr(check_array(pd.DataFrame({"a": [1, 2], "b": [3.5, 4.0]}))))
+case("frame-ints", lambda: arr(check_array(pd.DataFrame({"a": [1, 2], "b": [3, 4]}))))
+case("frame-bool", lambda: arr(check_array(pd.DataFrame({"a": [True, False]}))))
+case("frame-bool-mixed", lambda: arr(check_array(pd.DataFrame({"a": [True, False], "b": [1, 2]}))))
+case("frame-bool-float", lambda: arr(check_array(pd.DataFrame({"a": [True, False], "b": [1, 2], "c": [0.5, 1.0]}))))
+case("frame-dtype-float64", lambda: arr(check_array(pd.DataFrame({"a": [1, 2]}), dtype=np.float64)))
+case("frame-nan", lambda: check_array(pd.DataFrame({"a": [1.0, np.nan]}), input_name="X"))
+case("frame-one-column-series", lambda: check_array(pd.Series([1.0, 2.0])))
+case("series-1d", lambda: arr(check_array(pd.Series([1.0, 2.0]), ensure_2d=False)))
+
+case("xy", lambda: [arr(a) for a in check_X_y([[1, 2], [3, 4]], [0, 1])])
+case("xy-length", lambda: check_X_y([[1, 2], [3, 4]], [0, 1, 1]))
+case("xy-none", lambda: check_X_y([[1, 2]], None))
+case("xy-y-2d", lambda: check_X_y([[1, 2], [3, 4]], [[0], [1]]))
+case("xy-y-2d-multi", lambda: arr(check_X_y([[1, 2], [3, 4]], [[0, 1], [1, 0]], multi_output=True)[1]))
+case("xy-y-nan", lambda: check_X_y([[1, 2], [3, 4]], [0, np.nan]))
+case("xy-y-numeric", lambda: arr(check_X_y([[1], [2]], np.array([1, 2]), y_numeric=True)[1]))
+case("xy-y-strings", lambda: arr(check_X_y([[1], [2]], ["a", "b"])[1]))
+
+case("column-or-1d", lambda: arr(column_or_1d([[1], [2]], warn=False)))
+case("column-or-1d-2", lambda: column_or_1d([[1, 2], [3, 4]]))
+case("consistent", lambda: check_consistent_length([1, 2], [3, 4], None))
+case("inconsistent", lambda: check_consistent_length([1, 2], [3, 4, 5], [6]))
+case("indexable", lambda: [type(a).__name__ for a in indexable([1, 2], np.arange(2), None)])
+
+case("rs-int", lambda: check_random_state(3).randint(1000, size=4).tolist())
+case("rs-instance", lambda: (lambda r: check_random_state(r) is r)(np.random.RandomState(0)))
+case("rs-bad", lambda: check_random_state("seed"))
+case("rs-none-type", lambda: type(check_random_state(None)).__name__)
+
+case("scalar-ok", lambda: check_scalar(3, "n", int, min_val=1))
+case("scalar-type", lambda: check_scalar(3.5, "n", int))
+case("scalar-low", lambda: check_scalar(0, "n", int, min_val=1))
+case("scalar-high-left", lambda: check_scalar(1.0, "alpha", float, min_val=0.0, max_val=1.0, include_boundaries="left"))
+case("scalar-bounds", lambda: check_scalar(1.0, "alpha", float, include_boundaries="both", min_val=None))
+case("non-negative", lambda: check_non_negative([[1, -1]], "MyModel.fit"))
+case("non-negative-ok", lambda: check_non_negative([[1, 0]], "MyModel.fit"))
+case("as-float", lambda: arr(as_float_array([[1, 2]])))
+case("as-float-32", lambda: arr(as_float_array(np.ones((1, 2), dtype=np.float32))))
+
+
+class Fits(BaseEstimator):
+    def fit(self, X, y=None, sample_weight=None):
+        X = validate_data(self, X)
+        return self
+
+
+class Fits2(BaseEstimator):
+    def fit(self, X, y):
+        X, y = validate_data(self, X, y)
+        return self
+
+    def predict(self, X):
+        X = validate_data(self, X, reset=False)
+        return X[:, 0]
+
+
+case("has-fit-parameter", lambda: (has_fit_parameter(Fits(), "sample_weight"), has_fit_parameter(Fits2(), "sample_weight")))
+case("n-features-in", lambda: Fits().fit([[1, 2, 3]]).n_features_in_)
+case("no-feature-names", lambda: hasattr(Fits().fit([[1, 2, 3]]), "feature_names_in_"))
+df = pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
+case("feature-names", lambda: Fits().fit(df).feature_names_in_.tolist())
+case("feature-names-int-columns", lambda: hasattr(Fits().fit(pd.DataFrame({0: [1.0], 1: [2.0]})), "feature_names_in_"))
+case("feature-names-mixed", lambda: Fits().fit(pd.DataFrame({0: [1.0], "b": [2.0]})))
+case("feature-names-refit-array", lambda: hasattr(Fits().fit(df).fit([[1.0, 2.0]]), "feature_names_in_"))
+case("predict-names-after-array", lambda: Fits2().fit([[1.0, 2.0], [3.0, 4.0]], [0, 1]).predict(df))
+case("predict-array-after-names", lambda: Fits2().fit(df, [0, 1]).predict(np.array([[1.0, 2.0]])))
+case("predict-wrong-n", lambda: Fits2().fit([[1, 2], [3, 4]], [0, 1]).predict([[1, 2, 3]]))
+case("predict-ok", lambda: Fits2().fit([[1, 2], [3, 4]], [0, 1]).predict([[5, 6]]))
+case("predict-renamed", lambda: Fits2().fit(df, [0, 1]).predict(pd.DataFrame({"b": [1.0], "a": [2.0]})))
+case("predict-extra-name", lambda: Fits2().fit(df, [0, 1]).predict(pd.DataFrame({"a": [1.0], "b": [2.0], "c": [0.0]})))
