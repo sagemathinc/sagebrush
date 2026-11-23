@@ -2421,7 +2421,12 @@ def _refuse_huge(dims, itemsize):
 def _refuse_huge_growth(dims, cur, v):
     """the 2^48-byte refusal for an assignment that grows cur, sized by cur's class before any conversion, as MATLAB
     R2026b sizes it (an int8 array stays int8 whatever is assigned into it; x(2^44) = 1i for a double x is 2^47
-    bytes, not refused here)"""
+    bytes, not refused here); a cell grown that far is out of memory instead (x{2^45} = 1 and x{2^48-1} = 1 are
+    MATLAB:nomem in R2026b)"""
+    if type(cur) is Cell:
+        if _prod(dims) * 8 >= 2 ** 48:
+            raise MemoryError()
+        return
     _refuse_huge(dims, _itemsize(cur) if type(cur) in (np.ndarray, Char) else _itemsize(v))
 
 
@@ -4361,9 +4366,15 @@ def _dimsarg(args, fname):
     return _canon_dims(d), cls
 
 
+def _cls_bytes(cls):
+    """bytes per element of the numeric class cls (None: double), as _refuse_huge counts them"""
+    cls = cls or "double"
+    return {"double": 8, "single": 4, "logical": 1}.get(cls) or (np.dtype(_INTS[cls][0]).itemsize if cls in _INTS else 8)
+
+
 def _filled(dims, value, cls):
     cls = cls or "double"
-    _refuse_huge(dims, {"double": 8, "single": 4, "logical": 1}.get(cls) or (np.dtype(_INTS[cls][0]).itemsize if cls in _INTS else 8))
+    _refuse_huge(dims, _cls_bytes(cls))
     if cls == "double":
         return _box(np.full(_stored(dims), value, dtype=np.float64))
     if cls == "single":
@@ -4526,6 +4537,7 @@ def eye_(*args):
     d, cls = _dimsarg(args, "eye")
     if len(d) > 2:
         raise _err("N-dimensional arrays are not supported.")
+    _refuse_huge(d, _cls_bytes(cls))
     m = np.eye(d[0], d[1])
     return _as_like(_finish(_contig(m.T), cls or "double"), _like_proto(args))
 
@@ -4683,6 +4695,7 @@ def _rand_class(args, fname, classes):
 @_bs("rand")
 def rand_(*args):
     d, cls = _rand_class(args, "rand", ("double", "single"))
+    _refuse_huge(d, _cls_bytes(cls))
     n = _prod(d)
     v = _rng[0].random_sample(n) if n else np.zeros(0)
     return _finish(np.asarray(v, dtype=np.float64).reshape(_stored(d)), cls or "double")
@@ -4691,6 +4704,7 @@ def rand_(*args):
 @_bs("randn")
 def randn_(*args):
     d, cls = _rand_class(args, "randn", ("double", "single"))
+    _refuse_huge(d, _cls_bytes(cls))
     n = _prod(d)
     v = _randn(n) if n else np.zeros(0)
     return _finish(np.asarray(v, dtype=np.float64).reshape(_stored(d)), cls or "double")
@@ -4710,6 +4724,7 @@ def randi_(r, *args):
     top = 2.0 ** 24 if cls == "single" else 2.0 ** 53
     if abs(lo) > top or abs(hi) > top:
         raise _err("randi: the range [%d %d] is past the integers %s holds exactly: not supported in Sagebrush." % (lo, hi, "single" if cls == "single" else "a double"))
+    _refuse_huge(d, _cls_bytes(cls))
     n = _prod(d)
     u = _rng[0].random_sample(n) if n else np.zeros(0)
     v = lo + np.floor(u * (hi - lo + 1))
@@ -7061,14 +7076,14 @@ def repmat_(x, *args):
         total *= a * b
     if t in (Cell, Struct, StrArr):
         if total > _REPMAT_OBJECT_MAX:
-            raise _err("repmat: a result of %d elements is not supported in Sagebrush: at most %d for a %s array." % (total, _REPMAT_OBJECT_MAX, class_(x)))
+            raise _err("repmat: a result of %d elements is not supported in Sagebrush: at most %d for a %s array." % (total, _REPMAT_OBJECT_MAX, class_(x)), "MATLAB:array:SizeLimitExceeded")
     else:
         size = _arr(x).dtype.itemsize
         # (MATLAB's own refusal first, at 2^48 bytes of MATLAB's storage: a char is 2 bytes there, whatever its
         # backing array's dtype; below it, Sagebrush's bound on the real bytes)
         _refuse_huge((total,), _itemsize(x))
         if total * size > _REPMAT_BYTES_MAX:
-            raise _err("repmat: a result of %d elements (%d bytes) is not supported in Sagebrush: at most %d bytes." % (total, total * size, _REPMAT_BYTES_MAX))
+            raise _err("repmat: a result of %d elements (%d bytes) is not supported in Sagebrush: at most %d bytes." % (total, total * size, _REPMAT_BYTES_MAX), "MATLAB:array:SizeLimitExceeded")
     if 0 in r or 0 in d:
         # (an empty result, of the input's kind and the product of the sizes)
         out_d = tuple(a * b for a, b in zip(d, r))
@@ -9029,7 +9044,9 @@ def deblank_(x):
 
 @_bs("blanks")
 def blanks_(n):
-    return Char(" " * _int_arg(n))
+    n = _int_arg(n)
+    _refuse_huge((1, n), 2)
+    return Char(" " * n)
 
 
 @_bs("newline")

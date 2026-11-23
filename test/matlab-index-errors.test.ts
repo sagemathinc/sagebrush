@@ -12,7 +12,8 @@ import { tmpdir } from "node:os";
 // recorded from MATLAB R2026b (v = [1 2 3], m = magic(2)); NaN and Inf subscripts used to leak a Python error. In a
 // mixed subscript the first offending element, left to right, decides which message (Inf is invalid, not too big);
 // on a read, an element of 2^48 or more is out of range. A deletion past the end is MATLAB:subsdeldimmismatch, and an
-// array of 2^48 bytes or more (growth, zeros/ones, repmat) MATLAB:pmaxsize, refused before anything is allocated.
+// array of 2^48 bytes or more (growth, zeros/ones, rand/randn/randi, eye, blanks, repmat) MATLAB:pmaxsize, refused before
+// anything is allocated; a cell grown that far is out of memory (MATLAB:nomem) instead.
 
 const cli = join(__dirname, "..", "src", "cli.js");
 
@@ -91,9 +92,17 @@ const ROWS: [string, string, string][] = [
   ["cs", "x = 1i; x(2^44) = 1;", "MATLAB:pmaxsize|Requested array exceeds the maximum possible variable size."],
   ["rc47", "x = repmat('a', 2^47, 1);", "MATLAB:pmaxsize|Requested array exceeds the maximum possible variable size."],
   ["rcx", "x = repmat(1i, 2^44, 1);", "MATLAB:pmaxsize|Requested array exceeds the maximum possible variable size."],
+  ["rn", "x = rand(2^24, 2^21);", "MATLAB:pmaxsize|Requested array exceeds the maximum possible variable size."],
+  ["rnn", "x = randn(2^45, 1);", "MATLAB:pmaxsize|Requested array exceeds the maximum possible variable size."],
+  ["rni", "x = randi(5, 2^45, 1);", "MATLAB:pmaxsize|Requested array exceeds the maximum possible variable size."],
+  ["rns", "x = rand(2^46, 1, 'single');", "MATLAB:pmaxsize|Requested array exceeds the maximum possible variable size."],
+  ["ey", "x = eye(2^23, 2^22);", "MATLAB:pmaxsize|Requested array exceeds the maximum possible variable size."],
+  ["bl", "x = blanks(2^47);", "MATLAB:pmaxsize|Requested array exceeds the maximum possible variable size."],
+  ["ce", "x = {1}; x{2^45} = 1;", "MATLAB:nomem|Out of memory."],
+  ["ce48", "x = {1}; x{2^48-1} = 1;", "MATLAB:nomem|Out of memory."],
 ];
 
-test("every bad or out-of-range subscript raises MATLAB's identifier and message (73 rows: MATLAB R2026b's errors, and integer-class assignments MATLAB accepts)", () => {
+test("every bad or out-of-range subscript raises MATLAB's identifier and message (81 rows: MATLAB R2026b's errors, and integer-class assignments MATLAB accepts)", () => {
   const dir = mkdtempSync(join(tmpdir(), "sb-index-errors-"));
   const lines = ROWS.map(([name, code]) =>
     `v = [1 2 3]; m = magic(2); try, ${code} fprintf('${name}|OK\\n'); catch err, fprintf('${name}|%s|%s\\n', err.identifier, err.message); end`);
@@ -117,4 +126,16 @@ test("below 2^48 bytes in MATLAB's storage, no pmaxsize: a char counts 2 bytes, 
   const got = r.stdout.trim().split("\n");
   assert.equal(got.length, cases.length, r.stdout);
   got.forEach((line, i) => assert.notEqual(line, `${i}|MATLAB:pmaxsize`, cases[i]));
+});
+
+test("repmat's own size refusals carry MATLAB's size-preference identifier", () => {
+  // (MATLAB R2026b refuses these with MATLAB:array:SizeLimitExceeded, naming the machine's preference; Sagebrush's
+  // repmat refuses them below the memory guard with its own message and the same identifier)
+  const dir = mkdtempSync(join(tmpdir(), "sb-index-errors-"));
+  const cases = ["x = repmat('a', 2^45, 1);", "x = repmat('a', 2^47-1, 1);", "x = repmat({1}, 2^45, 1);", "x = repmat(1i, 2^44-1, 1);"];
+  writeFileSync(join(dir, "main.m"), cases.map((c, i) =>
+    `try, ${c} fprintf('${i}|OK\\n'); catch err, fprintf('${i}|%s\\n', err.identifier); end`).join("\n") + "\n");
+  const r = spawnSync(process.execPath, [cli, "--matlab", "main.m"], { cwd: dir, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.stdout.trim().split("\n"), cases.map((_, i) => `${i}|MATLAB:array:SizeLimitExceeded`));
 });

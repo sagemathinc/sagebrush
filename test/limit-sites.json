@@ -15794,6 +15794,26 @@
   "owner": "3D viewer (@sagebrush-space)",
   "reason": "the 3D viewer's source, embedded for Jupyter's HTML: its LIMITS on what an untrusted saved scene may draw (checkScene, counted after expansion) protect the page, which keeps the static picture and says why; no computation is refused"
  },
+ "lib/_matlab.py :: repmat_ :: raise _err(\"repmat: a result of %d elements (%d bytes) is not supported in Sagebrush: at most %d bytes.\" % (total, total * size, _REPMAT_BYTES_MAX), \"MATLAB:array:SizeLimitExceeded\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "followup": "FU-B16-4"
+   }
+  },
+  "owner": "matlab",
+  "reason": "repmat's fixed result caps (8 MiB numeric, 200,000 objects), refused with MATLAB's size-preference identifier until the memory guard admits repmat's result (FU-B16-4)"
+ },
+ "lib/_matlab.py :: repmat_ :: raise _err(\"repmat: a result of %d elements is not supported in Sagebrush: at most %d for a %s array.\" % (total, _REPMAT_OBJECT_MAX, class_(x)), \"MATLAB:array:SizeLimitExceeded\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "followup": "FU-B16-4"
+   }
+  },
+  "owner": "matlab",
+  "reason": "repmat's fixed result caps (8 MiB numeric, 200,000 objects), refused with MATLAB's size-preference identifier until the memory guard admits repmat's result (FU-B16-4)"
+ },
  "lib/_matlab_numeric.py :: interp_method :: raise _err(\"%s: the '%s' method is not supported in Sagebrush.\" % (fname, method), \"Sagebrush:%s:unsupportedMethod\" % fname) #0": {
   "class": "coverage",
   "owner": "matlab (@sagebrush-matlab)",
