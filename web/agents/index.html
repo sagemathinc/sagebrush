@@ -139,6 +139,19 @@
   .turn { margin-bottom: 26px; }
   .who { display: flex; align-items: center; gap: 7px; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
   .who-info { font-size: 12px; color: var(--muted); margin: -4px 0 6px 31px; }
+  /* (agent memory v1: the notes a turn read; a proposed note's card, its text as text; its Edit… dialog) */
+  .who-used { font-size: 12px; color: var(--muted); margin: -2px 0 6px 31px; overflow-wrap: anywhere; }
+  .memory-card { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 8px 0; background: var(--card); }
+  .memory-card .mem-title { font-weight: 550; overflow-wrap: anywhere; }
+  .memory-card .mem-where, .memory-card .mem-desc { font-size: 13px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+  .memory-card .mem-body { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 16em; overflow: auto; margin: 8px 0 0; padding: 8px; background: var(--code); border-radius: 6px; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .memory-card .mem-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .memory-card .mem-state { font-size: 13px; margin-top: 6px; color: var(--muted); }
+  .memory-card.saved .mem-state { color: var(--ok); }
+  dialog.memory-edit { border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; width: min(560px, 92vw); }
+  dialog.memory-edit label { display: block; margin: 8px 0; font-size: 13px; }
+  dialog.memory-edit input, dialog.memory-edit textarea, dialog.memory-edit select { display: block; width: 100%; box-sizing: border-box; margin-top: 3px; font: inherit; }
+  dialog.memory-edit menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; margin: 12px 0 0; }
   .avatar { color: var(--accent); font-size: 16px; }
   .demo { font-weight: 400; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 0 6px; }
   .msg { margin: 6px 0 10px; }

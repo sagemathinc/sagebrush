@@ -40,6 +40,7 @@ import { icon as panelIcon } from "../workspace/files-toggle";
 import { entryUrl } from "../workspace/entry-url";
 import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-chat/transcript";
 import { DelegateTasks } from "./delegate";
+import { memoryHooks } from "./memory-ui";
 import { mountDelegate } from "./delegate-ui";
 import { ownClaudeCommand } from "./own-claude";
 import { workspaceIO } from "./delegate-merge";
@@ -413,7 +414,7 @@ function renderThread() {
   for (const entry of thread.entries) {
     const eid = entry.kind === "user" ? entry.id : entry.turn_id;
     seen.add(eid);
-    const key = entry.kind === "user" ? `${entry.mode}|${entry.receipt ?? ""}|${!!entry.settled}` : JSON.stringify([entry.parts, entry.tools, entry.attention, entry.state, entry.error, !!entry.away]);
+    const key = entry.kind === "user" ? `${entry.mode}|${entry.receipt ?? ""}|${!!entry.settled}` : JSON.stringify([entry.parts, entry.tools, entry.attention, entry.state, entry.error, !!entry.away, entry.memory, entry.used]);
     let r = rendered.get(eid);
     if (!r || r.key !== key) {
       const node = entry.kind === "user" ? userNode(entry) : turnNode(thread, entry);
@@ -439,11 +440,19 @@ function userNode(e: UserEntry): HTMLElement {
   return withCopy(viewUserNode(e, md), () => userMarkdown(e));
 }
 
+// (agent memory v1: a proposed note's card, Save, Edit and Dismiss, memory-ui.ts)
+const memory = memoryHooks({
+  pairing: () => pairing,
+  threads: () => state.threads,
+  changed: () => { save(); renderThread(); },
+  toast: (t, ms) => toast(t, ms),
+});
 function turnNode(thread: Thread, turn: Turn): HTMLElement {
   const node = viewTurnNode(thread, turn, {
     answer: (att, approve, turnId, instance) => answer(thread, att, approve, turnId, instance),
     openArtifact: (id) => { openArtifact = id; renderArtifacts(); },
     md,
+    ...memory,
   });
   return withCopy(node, async () => turnMarkdown(thread, turn, { agent: agentName(), link: await fileLinks(thread) }));
 }
