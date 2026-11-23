@@ -1,7 +1,0 @@
-{
-  "v": 1,
-  "reason": "An agent's whole write of a notebook under notebook sync goes through sync's journal (web/workspace/api.ts writeJournaled: the no-holder write as create's, the two-phase request to the tab holding the notebook's writer lock, every ok read back from the record as the whole document, at most 64 writes under way) and the holder's side of it (web/page/handover.ts). The workspace module is in six of the web bundles the CLI's bundle carries (the notebook page, its history bundle, share copy, the agents chat, both board pages), so its code counts in each. cli/pyjs.cjs grows +13300 bytes, exact, measured with pinned node 24.21.0 and bun 1.4.4 on tested base 32b08bda (to be bound to CI's governed measurement if it differs); the bound adds 64 bytes of slack.",
-  "bytes": {
-    "cli/pyjs.cjs": 13364
-  }
-}
