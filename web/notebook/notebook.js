@@ -158,12 +158,12 @@ const KEYS_HTML = `<form method="dialog"><b>Keyboard shortcuts</b><button aria-l
 <tr><td>${k("D")} ${k("D")}</td><td>delete the cell</td></tr>
 <tr><td>${k("Z")}</td><td>undo the cell deletion</td></tr>
 <tr><td>${k("X")} ${k("C")} ${k("V")}</td><td>cut, copy, paste below (${k("Shift", "V")}: above)</td></tr>
-<tr><td>${k("M")} ${k("Y")}</td><td>to Markdown, to code</td></tr>
+<tr><td>${k("M")} ${k("Y")} ${k("R")}</td><td>to Markdown, to code, to raw</td></tr>
 <tr><td>${k("Shift", "M")}</td><td>merge with the cell below</td></tr>
 <tr><td>${k("I")} ${k("I")}</td><td>interrupt</td></tr>
 <tr><td>${k("0")} ${k("0")}</td><td>restart the interpreter</td></tr>
 <tr><td>${k("H")}</td><td>this list</td></tr></table></div></div>
-<p>Drag a cell by its prompt (or the ⠿ handle) to move it. On a Mac, ${k("Cmd")} works where ${k("Ctrl")} is shown.</p>`;
+<p>Drag a cell by its prompt (or the ⠿ handle) to move it. On a Mac, ${k("Cmd")} works where ${k("Ctrl")} is shown, except in ${k("Ctrl", "M")}.</p>`;
 
 /**
  * A notebook in `root`.
