@@ -11,6 +11,7 @@ import { readFileSync, readSync, writeSync, mkdirSync, appendFileSync, writeFile
 import { dirname, resolve, join } from "path";
 import { createRequire } from "module";
 import { homedir, tmpdir } from "os";
+import { isatty } from "tty";
 import * as readline from "readline";
 import { PassThrough } from "stream";
 import { oneLine } from "./terminal-text";
@@ -1103,6 +1104,10 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
     process.exitCode = await promptFront(given, lim);
     return;
   }
+  // (a program's stdin that is a pipe or a file: input() reads its lines, as CPython's does; a terminal's isn't read.
+  // isatty(0), never process.stdin: opening that stream puts a pipe in non-blocking mode, and stdin's readSync then
+  // spins on EAGAIN while a slow writer has nothing to send)
+  if (!interactive && !isatty(0)) R.stdinInput = true;
   const sys = R.importModule("sys");
   sys.argv.length = 0;
   sys.argv.push(cmd !== null ? "-c" : mod !== null ? mod : file ?? "", ...argv);
