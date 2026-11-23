@@ -1,0 +1,15 @@
+$.1^2 + $.1 + a
+0 1
+Finite field of size 2^4
+[ b^5, b^8, b^5, b^11, b^2, b^10 ]
+0 Finite field of size 2^4
+b^5 Finite field of size 2^4
+0 Finite field of size 2^4
+$.1^7
+Finite field of size 2^6
+$.1^61
+0 Finite field of size 2^6
+$.1^21 Finite field of size 2^6
+b^2 Finite field of size 2^4
+0 Finite field of size 2^6
+$.1^61 Finite field of size 2^6
