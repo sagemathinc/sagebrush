@@ -352,3 +352,13 @@
 !! NotImplementedError: pandas.read_csv(dtype=int8) is not in Sagebrush's pandas 0.x subset
 == csv.dtype-dict-uint16
 !! NotImplementedError: pandas.read_csv(dtype=uint16) is not in Sagebrush's pandas 0.x subset
+== csv.dtype-int16
+!! NotImplementedError: pandas.read_csv(dtype=int16) is not in Sagebrush's pandas 0.x subset
+== csv.dtype-dict-int16
+!! NotImplementedError: pandas.read_csv(dtype=int16) is not in Sagebrush's pandas 0.x subset
+== csv.dtype-uint32
+!! NotImplementedError: pandas.read_csv(dtype=uint32) is not in Sagebrush's pandas 0.x subset
+== csv.dtype-dict-uint32
+!! NotImplementedError: pandas.read_csv(dtype=uint32) is not in Sagebrush's pandas 0.x subset
+== csv.dtype-float32
+!! NotImplementedError: pandas: dtype='float32' is not in Sagebrush's pandas 0.x subset
