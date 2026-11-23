@@ -147,7 +147,9 @@ GRACE = 5.0
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
-        "--sizes", default="s,m,l", help="comma-separated size keys (s, m, l)"
+        "--sizes",
+        default="s,m,l",
+        help="comma-separated size keys (s, m, l; c0 .. c4, the calibration sizes, on the rows that have them)",
     )
     p.add_argument(
         "--only",
@@ -921,6 +923,10 @@ def adapter(backend: str, row: dict) -> str:
 VTIME_TARGETS = ("user", "native", "native-host", "wasm")
 
 
+def is_calibration_size(key: str) -> bool:
+    return re.fullmatch(r"c[0-4]", key) is not None
+
+
 def wants_vtime(backend: str, row: dict) -> bool:
     return backend in VTIME_TARGETS and row.get("calibration", True) is not False
 
@@ -1029,6 +1035,11 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
         backends={},
     )
     present = [b for b in backends if command(b, row, n, "once")]
+    if is_calibration_size(key):
+        # (a calibration size times only the calibrated targets: the
+        # references need no calibration, and some sizes would take them
+        # far past the point's timeout)
+        present = [b for b in present if b in VTIME_TARGETS]
     arts = ident.get("artifacts") or {}
     for b in list(present):
         missing = [a for a in needs(b, row) if not arts.get(a)]
@@ -1180,7 +1191,12 @@ def engine_label(rec: dict) -> str:
 
 def summary(out: Path, items: dict) -> None:
     recs = sorted(
-        (json.loads(p.read_text()) for p in (out / "rows").glob("*.json")),
+        (
+            r
+            for r in (json.loads(p.read_text()) for p in (out / "rows").glob("*.json"))
+            # (the calibration sizes are for the cost fits, not this table)
+            if not is_calibration_size(r["size"])
+        ),
         key=lambda r: (r["item"], r["row"], "sml".index(r["size"])),
     )
     if not recs:
@@ -1256,7 +1272,7 @@ def main() -> int:
     if args.dry_run:
         print(json.dumps(machine(args.host_label)))
         for row in rows:
-            for key in sizes:
+            for key in (k for k in sizes if k in row["sizes"]):
                 found = [
                     b
                     for b in backends
@@ -1312,7 +1328,7 @@ def main() -> int:
         "backends": backends,
     }
     for row in rows:
-        for key in sizes:
+        for key in (k for k in sizes if k in row["sizes"]):
             path = out / "rows" / f"{row['id']}-{key}.json"
             if path.exists():
                 old = json.loads(path.read_text())

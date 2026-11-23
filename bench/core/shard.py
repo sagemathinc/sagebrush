@@ -48,6 +48,9 @@ ROOT = HERE.parents[1]
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 RUNID_RE = re.compile(r"^[0-9a-f]{16}$")
 TYPE_RE = re.compile(r"^[a-z][a-z0-9]{0,11}$")
+# A point's size: s, m, l, or a calibration size c0 .. c4 (the calibrated
+# targets only)
+SIZE_RE = re.compile(r"^(s|m|l|c[0-4])$")
 TOKEN_RE = re.compile(r"^[a-z0-9_]{1,64}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 HEX64L = re.compile(r"\A[0-9a-f]{64}\Z")
@@ -149,7 +152,7 @@ def validate_plan(plan: dict) -> None:
     need(isinstance(points, list) and points, "points")
     for p in points:
         row, _, size = str(p).partition(":")
-        need(TOKEN_RE.match(row) and size in ("s", "m", "l"), f"point {p!r}")
+        need(TOKEN_RE.match(row) and SIZE_RE.match(size), f"point {p!r}")
     exp = plan.get("expected_inputs")
     need(
         isinstance(exp, dict) and all(p in exp for p in points),
@@ -490,11 +493,7 @@ class Rows:
 
     def paths(self, tk: str, key: str) -> tuple[Path, Path]:
         row, _, size = key.partition(":")
-        if (
-            not TYPE_RE.match(tk)
-            or not TOKEN_RE.match(row)
-            or size not in ("s", "m", "l")
-        ):
+        if not TYPE_RE.match(tk) or not TOKEN_RE.match(row) or not SIZE_RE.match(size):
             raise Fatal(f"bad key {tk}/{key}")
         name = f"{row}-{size}"
         return (

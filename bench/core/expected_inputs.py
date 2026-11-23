@@ -311,7 +311,7 @@ def expected(sizes: list[str], only: list[str]) -> dict:
     for row in rows:
         if only and row["id"] not in only:
             continue
-        for key in sizes:
+        for key in (k for k in (sizes or row["sizes"]) if k in row["sizes"]):
             n, k = row["sizes"][key]["n"], run.variants(row, key)
             out[f"{row['id']}:{key}"] = {
                 "n": n,
@@ -323,10 +323,13 @@ def expected(sizes: list[str], only: list[str]) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--size", default="all", help="s, m, l or all")
+    ap.add_argument(
+        "--size", default="all", help="comma-separated sizes (s, m, l, c0 .. c4) or all"
+    )
     ap.add_argument("--only", action="append", default=[], metavar="ROW")
     a = ap.parse_args()
-    sizes = ["s", "m", "l"] if a.size == "all" else a.size.split(",")
+    # ("all": every size each row has, calibration sizes included)
+    sizes = [] if a.size == "all" else a.size.split(",")
     print(json.dumps(expected(sizes, a.only), indent=1, sort_keys=True))
     return 0
 

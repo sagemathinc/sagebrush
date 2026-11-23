@@ -527,6 +527,182 @@
    "input_hash": "134140893"
   }
  },
- "pending_note": "Points not yet confirmed by every backend in a VM run (none at present): expected_inputs.py's hashes, matched at size s by the python-flint and Magma drivers in the project and by the Rust formulas (the native and flint-rust drivers' helper) at s and l. The first VM run that agrees on them moves each into points, in a reviewed commit.",
- "pending": {}
+ "pending_note": "Points not yet confirmed by every backend in a VM run: expected_inputs.py's hashes. The calibration sizes (c0 .. c4) are timed on the calibrated targets only (the Sage-mode, native and wasm drivers), and test_expected_inputs.py checks only their shape (their hashes take minutes to recompute). The first VM run that agrees on a point moves it into points, in a reviewed commit.",
+ "pending": {
+  "mat_fp_charpoly:c0": {
+   "n": 59,
+   "variants": 8,
+   "input_hash": "770670486"
+  },
+  "mat_fp_charpoly:c1": {
+   "n": 105,
+   "variants": 8,
+   "input_hash": "396589592"
+  },
+  "mat_fp_charpoly:c2": {
+   "n": 187,
+   "variants": 8,
+   "input_hash": "892518264"
+  },
+  "mat_fp_charpoly:c3": {
+   "n": 333,
+   "variants": 8,
+   "input_hash": "155267895"
+  },
+  "mat_fp_charpoly:c4": {
+   "n": 592,
+   "variants": 8,
+   "input_hash": "542254701"
+  },
+  "mat_fp_det:c0": {
+   "n": 122,
+   "variants": 8,
+   "input_hash": "439680061"
+  },
+  "mat_fp_det:c1": {
+   "n": 218,
+   "variants": 8,
+   "input_hash": "981948290"
+  },
+  "mat_fp_det:c2": {
+   "n": 387,
+   "variants": 8,
+   "input_hash": "438108019"
+  },
+  "mat_fp_det:c3": {
+   "n": 688,
+   "variants": 8,
+   "input_hash": "933800001"
+  },
+  "mat_fp_det:c4": {
+   "n": 1224,
+   "variants": 8,
+   "input_hash": "61937367"
+  },
+  "mat_fp_rank:c0": {
+   "n": 122,
+   "variants": 8,
+   "input_hash": "439680061"
+  },
+  "mat_fp_rank:c1": {
+   "n": 218,
+   "variants": 8,
+   "input_hash": "981948290"
+  },
+  "mat_fp_rank:c2": {
+   "n": 387,
+   "variants": 8,
+   "input_hash": "438108019"
+  },
+  "mat_fp_rank:c3": {
+   "n": 688,
+   "variants": 8,
+   "input_hash": "933800001"
+  },
+  "mat_fp_rank:c4": {
+   "n": 1223,
+   "variants": 8,
+   "input_hash": "829039473"
+  },
+  "mat_fp_solve:c0": {
+   "n": 106,
+   "variants": 8,
+   "input_hash": "351910578"
+  },
+  "mat_fp_solve:c1": {
+   "n": 188,
+   "variants": 8,
+   "input_hash": "197024135"
+  },
+  "mat_fp_solve:c2": {
+   "n": 335,
+   "variants": 8,
+   "input_hash": "791339548"
+  },
+  "mat_fp_solve:c3": {
+   "n": 595,
+   "variants": 8,
+   "input_hash": "696338882"
+  },
+  "mat_fp_solve:c4": {
+   "n": 1058,
+   "variants": 8,
+   "input_hash": "342325696"
+  },
+  "mat_z_rank:c0": {
+   "n": 114,
+   "variants": 8,
+   "input_hash": "919160649"
+  },
+  "mat_z_rank:c1": {
+   "n": 204,
+   "variants": 8,
+   "input_hash": "637482691"
+  },
+  "mat_z_rank:c2": {
+   "n": 362,
+   "variants": 8,
+   "input_hash": "708513545"
+  },
+  "mat_z_rank:c3": {
+   "n": 644,
+   "variants": 8,
+   "input_hash": "550645032"
+  },
+  "mat_z_rank:c4": {
+   "n": 1145,
+   "variants": 8,
+   "input_hash": "505286096"
+  },
+  "poly_fp_mul:c0": {
+   "n": 5096,
+   "variants": 8,
+   "input_hash": "183644479"
+  },
+  "poly_fp_mul:c1": {
+   "n": 24229,
+   "variants": 8,
+   "input_hash": "994691979"
+  },
+  "poly_fp_mul:c2": {
+   "n": 117799,
+   "variants": 8,
+   "input_hash": "515956616"
+  },
+  "poly_fp_mul:c3": {
+   "n": 582663,
+   "variants": 8,
+   "input_hash": "158411277"
+  },
+  "poly_fp_mul:c4": {
+   "n": 2921707,
+   "variants": 8,
+   "input_hash": "260180386"
+  },
+  "poly_z_mul:c0": {
+   "n": 4917,
+   "variants": 8,
+   "input_hash": "697118656"
+  },
+  "poly_z_mul:c1": {
+   "n": 23366,
+   "variants": 8,
+   "input_hash": "563554821"
+  },
+  "poly_z_mul:c2": {
+   "n": 113551,
+   "variants": 8,
+   "input_hash": "230893628"
+  },
+  "poly_z_mul:c3": {
+   "n": 561450,
+   "variants": 8,
+   "input_hash": "138169403"
+  },
+  "poly_z_mul:c4": {
+   "n": 2814536,
+   "variants": 8,
+   "input_hash": "961238924"
+  }
+ }
 }

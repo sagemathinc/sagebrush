@@ -963,12 +963,11 @@ class Files(unittest.TestCase):
         self.assertEqual(len([i for i in ids if i != "int"]), 37)
         for r in m["rows"]:
             self.assertIn(r["item"], ids)
-            self.assertEqual(sorted(r["sizes"]), ["l", "m", "s"])
+            # (s, m and l; and either all five calibration sizes or none)
+            cal = sorted(k for k in r["sizes"] if k not in ("s", "m", "l"))
+            self.assertEqual(sorted(set(r["sizes"]) - set(cal)), ["l", "m", "s"])
+            self.assertIn(cal, ([], ["c0", "c1", "c2", "c3", "c4"]))
         self.assertEqual(len(m["rows"]), 35)
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class Units(unittest.TestCase):
@@ -1037,3 +1036,22 @@ class Units(unittest.TestCase):
     def test_unmetered_is_recorded_as_such(self):
         self.fake("print('UNITS|unmetered')\n")
         self.assertEqual(run.units({"id": "r"}, 1, 30, 1), ("unmetered", ""))
+
+
+class CalibrationSizes(unittest.TestCase):
+    def test_names(self):
+        self.assertTrue(all(run.is_calibration_size(f"c{i}") for i in range(5)))
+        for k in ("s", "m", "l", "c5", "c", "cc0", "c0x"):
+            self.assertFalse(run.is_calibration_size(k), k)
+
+    def test_the_shard_driver_accepts_them_and_nothing_else(self):
+        import shard
+
+        for k in ("s", "m", "l", "c0", "c4"):
+            self.assertTrue(shard.SIZE_RE.match(k), k)
+        for k in ("c5", "x", "c0/../l", "s "):
+            self.assertFalse(shard.SIZE_RE.match(k), k)
+
+
+if __name__ == "__main__":
+    unittest.main()
