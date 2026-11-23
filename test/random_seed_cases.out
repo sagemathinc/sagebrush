@@ -43,6 +43,8 @@ refused by seed TypeError: The only supported seed types are: None, int, float, 
 module seed str [0.2068944855925381, 67]
 module seed v1 0.4303330009731158
 subclass seed runs from __init__ 0.6394267984578837
+subclass seed that does nothing: gauss still works (None, 'float')
+subclass seed setting gauss_next: __init__ clears it (None, -0.14409032957792836)
 randbytes(0) ('', 1988601454)
 randbytes(1) ('76', 2633739374)
 randbytes(2) ('8776', 2633739374)

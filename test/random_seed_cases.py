@@ -41,6 +41,23 @@ class Sub(random.Random):
 
 
 t("subclass seed runs from __init__", lambda: Sub("ignored").random())
+
+
+class Pass(random.Random):
+    def seed(self, a=None, version=2):
+        pass
+
+
+t("subclass seed that does nothing: gauss still works", lambda: (Pass(1).gauss_next, type(Pass(1).gauss()).__name__))
+
+
+class Sets(random.Random):
+    def seed(self, a=None, version=2):
+        super().seed(42)
+        self.gauss_next = 99
+
+
+t("subclass seed setting gauss_next: __init__ clears it", lambda: (Sets(1).gauss_next, Sets(1).gauss()))
 for n in (0, 1, 2, 9, 17, 100):
     r = random.Random(9)
     t(f"randbytes({n})", lambda: (r.randbytes(n).hex(), r.getrandbits(32)))

@@ -42,9 +42,10 @@ def _seed_value(a, version):
 
 class Random:
     def __init__(self, x=None):
-        # (seeded by self.seed, as CPython's: a subclass's own seed runs)
+        # (seeded by self.seed, as CPython's: a subclass's own seed runs; then gauss_next cleared, whatever it did)
         self._r = _random.Random(0)
         self.seed(x)
+        self.gauss_next = None
 
     def seed(self, a=None, version=2):
         self._r.seed(_cell_entropy() if a is None else _seed_value(a, version))
