@@ -1,7 +1,8 @@
 // Each top-level entry point starts a new run: a Smith progress state a
 // trapped call left behind (a trap runs no destructors) is cleared, and the
 // run generation moves (engine/web's new_run, the live progress's two trap
-// defenses in production).  The state is left as a trap leaves it: opened,
+// defenses in production), and the binomial factoring route's counts a
+// trapped call left are dropped.  The state is left as a trap leaves it: opened,
 // its guard forgotten.  Its own test binary (the progress state and the
 // generation are the process's), one test.
 use sagebrush_arith::smith::progress::testing;
@@ -34,9 +35,12 @@ fn every_entry_point_starts_a_new_run() {
     for (name, f, req) in entries {
         assert!(testing::open_and_leak(&a), "{name}: a state left behind");
         assert!(testing::state_set());
+        // (and the binomial factoring route's counts, left as a trap leaves them)
+        sagebrush_poly::binomial_testing::leave(1000);
         let g = generation();
         call(f, req);
         assert!(!testing::state_set(), "{name}: the stale state survived the call");
+        assert_eq!(sagebrush_poly::binomial_testing::pending(), 0, "{name}: the binomial route's stale counts survived the call");
         assert!(generation() > g, "{name}: the run generation did not move");
     }
     testing::set_threshold(None);

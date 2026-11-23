@@ -1293,6 +1293,29 @@ pub(crate) mod alloc_spy {
     }
 }
 
+/// Drops the binomial factoring route's counts that a trapped call left
+/// behind (a wasm trap runs no destructors, so its guard never added them
+/// to the tally, and the next call would charge them): engine/web's
+/// new_run calls it at each top-level call's start.
+pub fn reset_binomial_units() {
+    binomial::reset_units();
+}
+
+/// The tests' hooks for the binomial route's counts (doc-hidden, inert
+/// unless called).
+#[doc(hidden)]
+pub mod binomial_testing {
+    /// Leaves `u` MulSchool units counted and not added to the tally, as a
+    /// trapped call leaves them.
+    pub fn leave(u: u64) {
+        super::binomial::leave_units(u);
+    }
+    /// The route's counts not yet in the tally.
+    pub fn pending() -> u64 {
+        super::binomial::pending_units()
+    }
+}
+
 #[cfg(test)]
 #[global_allocator]
 static SPY: alloc_spy::Spy = alloc_spy::Spy;
