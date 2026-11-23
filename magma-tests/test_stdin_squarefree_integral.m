@@ -40,4 +40,5 @@ Normalize(5);
 Normalize(1/2);
 Normalize([1, 2]);
 SquarefreeFactorization(P!0);
+SquarefreeFactorization(R!0);
 print "end";

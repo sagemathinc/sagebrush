@@ -103,4 +103,9 @@ Argument types given: SeqEnum[RngIntElt]
                           ^
 Runtime error in 'SquarefreeFactorization': Argument 1 is not non-zero
 
+
+>> SquarefreeFactorization(R!0);
+                          ^
+Runtime error in 'SquarefreeFactorization': Argument 1 is not non-zero
+
 end

@@ -1597,8 +1597,19 @@ class Polynomial:
             (-6, [(y^2 - 3, 1), (y + 1, 2)])
             sage: ((2*y + 1)^2*(3*y - 1)).squarefree_decomposition()
             (3*y - 1) * (2*y + 1)^2
+            sage: (3/7*x*(x + 1)^2).squarefree_decomposition(), (-3*x*(x + 1)^2).squarefree_decomposition()
+            (3/7*x * (x + 1)^2, (-3*x) * (x + 1)^2)
+            sage: F = S(0).squarefree_decomposition(); F, F.unit(), list(F)
+            (0, 0, [])
+            sage: R(0).squarefree_decomposition()
+            Traceback (most recent call last):
+            ...
+            ValueError: square-free decomposition not defined for zero polynomial
         """
         if not self._c:
+            if self._ring._base is ZZ:
+                # (as Sage's: over ZZ, 0 is the empty decomposition with unit 0)
+                return PolyFactorization([], _norm(0), field=True, by_exponent=True)
             raise ValueError("square-free decomposition not defined for zero polynomial")
         lc = _F(self._c[-1])
         parts = []
@@ -1822,7 +1833,8 @@ class PolyFactorization(list):
 
         def term(f, e):
             s = repr(f)
-            if (e != 1 or paren) and any(c in s for c in "*+- "):
+            # (a sign or a space only, as Sage's: 3/7*x * (x + 1)^2, (-3*x) * (x + 1)^2)
+            if (e != 1 or paren) and any(c in s for c in "+- "):
                 s = "(%s)" % s
             return s if e == 1 else "%s^%d" % (s, e)
 
