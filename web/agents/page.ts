@@ -189,12 +189,18 @@ const session = new ChatSession({
   pairing: () => pairing,
   demo: (prompt, emit) => startFakeTurn(prompt, emit, speed()),
   mayDemo: (t) => mayDemo(t),
-  emitted(thread, d, replayed) {
-    // (agent memory v1: a proposed note's card is marked with the connection it came over)
+  emitted(thread, d, replayed, turn_id) {
+    // (agent memory v1: a proposed note's card, as this event left it, is marked with the connection it came over)
     if (d.type === "memory_proposal") {
-      const pending = (d as { pending?: unknown }).pending;
-      const mark = connectionMark();
-      for (const e of thread.entries) if (e.kind === "turn" && e.memory && typeof pending === "string" && Object.hasOwn(e.memory, pending) && mark) e.memory[pending].from = mark;
+      const { pending, revision } = d as { pending?: unknown; revision?: unknown };
+      const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && e.turn_id === turn_id);
+      const card = turn?.memory && typeof pending === "string" && Object.hasOwn(turn.memory, pending) ? turn.memory[pending] : null;
+      const m = connectionMarks();
+      if (card && m && !card.outcome && card.proposal.revision === revision) {
+        card.from = m.tab;
+        if (m.run) card.run = m.run;
+        else delete card.run;
+      }
     }
     if (d.type === "artifact") {
       // (one replayed from the agent's log after a reconnect is recorded, but never moves the pane)
@@ -456,21 +462,22 @@ const memory = memoryHooks({
   tagName,
   live: (card) => memoryLive(card),
 });
-// (a memory card takes a decision only over the connection it came on: the same run of the agent (its log's instance,
-//  which a reload keeps), else the same pairing in this tab)
+// (a memory card takes a decision only over the connection it came on: this tab's same pairing. After a reload its
+//  text is gone and only Dismiss is left, which the same run of the agent (its log's instance) may take: an instance
+//  is no secret (the page names it to whichever agent it resumes with), so it never opens a card that has its text)
 const pairingMarks = new WeakMap<object, string>();
-function connectionMark(): string | null {
+function connectionMarks(): { tab: string; run?: string } | null {
   const p = pairing;
   if (!p || !session.live()) return null;
+  let tab = pairingMarks.get(p);
+  if (!tab) pairingMarks.set(p, (tab = crypto.randomUUID()));
   const instance = p.hello?.log?.instance;
-  if (instance) return "log:" + instance;
-  let m = pairingMarks.get(p);
-  if (!m) pairingMarks.set(p, (m = "tab:" + crypto.randomUUID()));
-  return m;
+  return { tab, ...(instance ? { run: instance } : {}) };
 }
 function memoryLive(card: MemoryCard): boolean {
-  const m = connectionMark();
-  return m !== null && card.from === m;
+  const m = connectionMarks();
+  if (!m) return false;
+  return card.from === m.tab || (card.proposal.body === undefined && m.run !== undefined && card.run === m.run);
 }
 function turnNode(thread: Thread, turn: Turn): HTMLElement {
   const node = viewTurnNode(thread, turn, {
@@ -1705,6 +1712,8 @@ function mountPairing(ws: Workspace) {
       let granted = false;
       p.onChange(() => {
         cards.refresh(); // (a pairing that closed or changed child: Allows waiting for a digest for it go)
+        // (memory cards take a decision only while their connection is here: drawn again as it comes and goes)
+        if (pairing === p && (p.state === "granted" || p.state === "closed")) renderThread();
         if (p.link && p.state !== "connecting") connectingTo = null;
         if (p.link && p.state === "closed" && pairing === p && p.closeReason !== "not allowed") {
           // (over a runner: the person's own Disconnect says only its line; anything else, why the leg ended)

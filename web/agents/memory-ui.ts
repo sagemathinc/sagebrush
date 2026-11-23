@@ -19,7 +19,9 @@ export const MEMORY_COPY = {
   away: "The agent that proposed this note isn't the one connected now.",
   where: "Choose where to keep this note.",
   changed: "The agent changed this note while you were looking at it. Check it again.",
-  unread: "The agent's answer couldn't be read. Try again.",
+  unread: "The agent's answer couldn't be read. It may have been saved: the card will say once the agent does.",
+  long: "This note is too long to save. Shorten it in Edit….",
+  decided: "This note was already decided.",
   failed: "The note couldn't be saved",
   own: "this agent's own notes",
   tag: "a tag's notes",
@@ -46,9 +48,9 @@ export function memoryHooks(host: MemoryUiHost) {
   //  after any answer, or for another revision or text, a new decision gets a new id)
   const busy = new Set<string>();
   const decisions = new Map<string, { key: string; id: string }>();
-  // (no answer, or none the page could read (not as §7.2 has it, or over the connection's bound): the same request
-  //  again, under the same id, gets the agent's kept answer)
-  const LOST = new Set(["timeout", "closed", "too_large"]);
+  // (no answer, or one the page couldn't read (not as §7.2 has it): the same request again, under the same id, gets
+  //  the agent's kept answer, and its memory_decided settles the card)
+  const LOST = new Set(["timeout", "closed"]);
   const lost = (e: unknown) => e instanceof MemoryShapeError || LOST.has((e as { code?: string })?.code ?? "");
   const find = (pending: string): { thread: Thread; turn: Turn; card: MemoryCard } | null => {
     for (const t of host.threads()) for (const e of t.entries) if (e.kind === "turn" && e.memory && Object.hasOwn(e.memory, pending)) return { thread: t, turn: e, card: e.memory[pending] };
@@ -84,7 +86,7 @@ export function memoryHooks(host: MemoryUiHost) {
     // (stale: it changed, or the agent's access did; not_found: the proposal is gone at the agent (decided in another
     //  tab, or the agent started again): either way this card can't be saved now)
     if (code === "stale" || code === "not_found") return end(card, "stale");
-    host.toast(code === "secret" ? MEMORY_COPY.secret : code === "full" ? MEMORY_COPY.full : code === "forbidden" ? MEMORY_COPY.forbidden : code === "conflict" ? MEMORY_COPY.conflict : `${MEMORY_COPY.failed}: ${(e as Error)?.message ?? e}`, 8000);
+    host.toast(code === "secret" ? MEMORY_COPY.secret : code === "full" ? MEMORY_COPY.full : code === "forbidden" ? MEMORY_COPY.forbidden : code === "conflict" ? MEMORY_COPY.conflict : code === "too_large" ? MEMORY_COPY.long : `${MEMORY_COPY.failed}: ${(e as Error)?.message ?? e}`, 8000);
   };
   // (revision: the one the person saw, the card's as drawn or as the dialog opened; a later one at the agent is stale)
   async function save(pending: string, revision: number, edit?: { scope: Scope; name: string; description: string; body: string; expires: number | null }) {
@@ -92,6 +94,8 @@ export function memoryHooks(host: MemoryUiHost) {
     if (!f || !seen(f, revision)) return;
     busy.add(pending);
     const key = JSON.stringify([revision, edit ?? null]);
+    // (ids kept for cards that have since ended, or gone, aren't needed again)
+    for (const k of [...decisions.keys()]) { const c = find(k)?.card; if (!c || c.outcome) decisions.delete(k); }
     const kept = decisions.get(pending);
     const decision_id = kept?.key === key ? kept.id : hex(16);
     decisions.set(pending, { key, id: decision_id });
@@ -170,8 +174,11 @@ export function memoryHooks(host: MemoryUiHost) {
     dlg.addEventListener("close", () => dlg.remove(), { once: true });
     ok.onclick = () => {
       if (!where.value) return host.toast(MEMORY_COPY.where, 5000);
-      // (the agent revised it while the dialog was open: the dialog stays, for the person to compare and start again)
-      if (find(pending)?.card.proposal.revision !== revision) return host.toast(MEMORY_COPY.changed, 6000);
+      // (decided meanwhile: the dialog closes, and says so; revised by the agent: the dialog stays, for the person to
+      //  compare and start again)
+      const now = find(pending)?.card;
+      if (!now || now.outcome) { dlg.close(); return host.toast(MEMORY_COPY.decided, 6000); }
+      if (now.proposal.revision !== revision) return host.toast(MEMORY_COPY.changed, 6000);
       const scope: Scope = where.value === "own" ? "own" : { tag: where.value.slice(4) };
       const expires = keep.value === "never" ? null : keep.value === "as" ? pr.expires : Date.now() + 90 * 24 * 3600 * 1000;
       dlg.close();

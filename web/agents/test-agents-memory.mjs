@@ -181,9 +181,38 @@ try {
     await P.ev(`([...document.querySelector('dialog.memory-edit[open]').querySelectorAll('button')].find((b) => b.textContent === 'Cancel').click(), true)`);
     await clickLast("dismiss");
     await P.until(`/Not saved/.test(${lastCard}.querySelector('.mem-state')?.textContent ?? '')`, 10000).catch(() => {});
+    // ======================================================================== M16: a revision while Save is on its way
+    const pr16 = H.memory.propose(send, { name: "racing", description: "revised in flight", body: "one" });
+    await P.until(`document.querySelectorAll('[data-memory]').length >= 9`, 10000);
+    H.hold.add("memory.save");
+    await clickLast("save");
+    for (const t = Date.now(); !H.held.length && Date.now() - t < 5000; ) await sleep(50);
+    H.memory.revise(send, pr16.pending, { body: "two" });
+    await P.until(`${lastCard}.querySelector('.mem-body')?.textContent === 'two'`, 10000).catch(() => {});
+    H.hold.delete("memory.save");
+    H.release(); // (the agent answers stale: it was for revision 1)
+    await sleep(500);
+    const c16 = await card();
+    ok(c16.body === "two" && c16.buttons.includes("Save") && c16.state === null, "M16: a stale answer for the revision Save named leaves the newer revision's card open, with its text", c16);
+    // ======================================================================== M17: an answer the page can't read
+    H.hold.add("memory.save");
+    await clickLast("save");
+    for (const t = Date.now(); !H.held.length && Date.now() - t < 5000; ) await sleep(50);
+    const m17 = H.held.splice(0)[0];
+    H.answer(m17.id, { note: "not-a-note-id", extra: true });
+    await P.until(`/couldn't be read/.test(document.querySelector('#toast')?.textContent ?? '')`, 5000).catch(() => {});
+    const t17 = await toastText();
+    const c17 = await card();
+    await clickLast("save");
+    for (const t = Date.now(); !H.held.length && Date.now() - t < 5000; ) await sleep(50);
+    const again = H.held[0]?.params;
+    H.hold.delete("memory.save");
+    H.release();
+    await P.until(`/Saved to your notes/.test(${lastCard}.querySelector('.mem-state')?.textContent ?? '')`, 10000).catch(() => {});
+    ok(/couldn't be read/.test(t17) && c17.buttons.includes("Save") && again?.decision_id === m17.params.decision_id && /Saved to your notes/.test((await card()).state ?? ""), "M17: an unreadable answer is said so, the card stays open, and Save again sends the same decision id", { t17, again: again?.decision_id, first: m17.params.decision_id });
     // ======================================================================== M13: no note's text is kept in this browser
     H.memory.propose(send, { name: "later", description: "left open", body: "LATER-TEXT" });
-    await P.until(`document.querySelectorAll('[data-memory]').length >= 9`, 10000);
+    await P.until(`document.querySelectorAll('[data-memory]').length >= 10`, 10000);
     await sleep(700); // (the chat is kept 300 ms after a change)
     const kept = await P.ev(`localStorage.getItem('sagebrush-agents-preview-v1') ?? ''`);
     ok(kept.includes("left open") && !/LATER-TEXT|ELSEWHERE-TEXT|keychain|a lot of text|Explain proofs/.test(kept), "M13: the kept chat has the cards but none of their text, an open card's included");

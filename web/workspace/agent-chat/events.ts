@@ -122,9 +122,10 @@ export interface MemoryCard {
   proposal: Omit<MemoryProposal, "type" | "body"> & { body?: string };
   outcome?: "saved" | "dismissed" | "stale";
   note?: string;
-  /** the connection it came over, as the page marks it (the agent run's log instance, else this tab's pairing): only
-   *  that connection's agent can take its decision */
+  /** the connection it came over, as the page marks it: this tab's pairing, and the agent run's log instance if it
+   *  keeps one. Its decision is that pairing's; after a reload (no text then) the same run may still dismiss it */
   from?: string;
+  run?: string;
 }
 
 /** JSON.stringify's replacer for a chat as kept in this browser: every memory card without its text. A note's text is

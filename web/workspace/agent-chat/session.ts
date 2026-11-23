@@ -31,7 +31,7 @@ export interface SessionHost {
   mayDemo(t: Thread): boolean;
   /** an event was applied to a thread (the page draws it, opens an artifact, ...); `replayed`: it came from the agent's
    *  log after a reconnect, not live (the page records it but doesn't move the pane for it) */
-  emitted(thread: Thread, d: Draft, replayed?: boolean): void;
+  emitted(thread: Thread, d: Draft, replayed?: boolean, turn_id?: string): void;
   /** what the composer shows changed (running, queued); `all`: the thread and its list too */
   changed(all: boolean): void;
   /** a message didn't go to the agent: its queue is full, it's over the connection's limit, or the agent is gone */
@@ -165,7 +165,7 @@ export class ChatSession {
     apply(thread, e);
     // (a turn ended: a steer still waiting for its receipt is no longer said to be on its way)
     if (d.type === "turn_finished") for (const x of thread.entries) if (x.kind === "user" && x.mode === "steer" && x.receipt !== "delivered" && x.receipt !== "rejected" && x.receipt !== "queued") x.settled = true;
-    this.host.emitted(thread, d, replayed);
+    this.host.emitted(thread, d, replayed, turn_id);
     this.save();
   }
 
