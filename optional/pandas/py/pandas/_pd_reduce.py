@@ -67,6 +67,8 @@ def reduce_column(col, op, skipna):
             return float("nan")
         r = _scalar(v.min() if op == "min" else v.max())
         return np.bool_(bool(r)) if d == "bool" else _INT_SCALARS[d](int(r))
+    if d == "float32":
+        return _reduce_float32(col._pd_values, op, skipna)
     if d == "float64":
         v = col._pd_values
         if not len(v):
@@ -109,6 +111,33 @@ def reduce_column(col, op, skipna):
     return min(vals) if op == "min" else max(vals)
 
 
+def _reduce_float32(v, op, skipna):
+    # (pandas' nanops for float32: missing values filled in place (0 for the sum, +-inf for min/max), the sum and the
+    # mean in float32 (numpy's float32 pairwise sum, then over a float32 count), each a np.float32)
+    mask = v != v
+    nmissing = int(_scalar(mask.sum()))
+    if nmissing and not skipna:
+        return np.float32(float("nan"))
+    count = len(v) - nmissing
+    if op == "sum":
+        filled = v.copy()
+        filled[mask] = 0.0
+        return np.float32(_scalar(filled.sum())) if len(v) else np.float32(0.0)
+    if op == "mean":
+        if not count:
+            return float("nan")
+        filled = v.copy()
+        filled[mask] = 0.0
+        return np.float32(_scalar(filled.sum())) / np.float32(count)
+    if not len(v):
+        return float("nan")
+    if not count:
+        return np.float32(float("nan"))
+    bound = v.copy()
+    bound[mask] = float("inf") if op == "min" else float("-inf")
+    return np.float32(_scalar(bound.min() if op == "min" else bound.max()))
+
+
 _OPS = {
     "eq": operator.eq, "ne": operator.ne, "lt": operator.lt,
     "le": operator.le, "gt": operator.gt, "ge": operator.ge,
@@ -121,6 +150,9 @@ def compare(col, right, op):
     f = _OPS[op]
     if not col.is_list and (not isinstance(right, Column) or not right.is_list) and not isinstance(right, str):
         rv = right._pd_values if isinstance(right, Column) else right
+        if col.dtype == "float32" and isinstance(rv, (int, float)) and not isinstance(rv, bool):
+            # (NumPy 2's weak promotion: a Python number compares with a float32 column as a float32)
+            rv = np.float32(rv)
         if rv is None:
             return Column("bool", np.full(len(col), op == "ne", dtype=bool))
         return Column("bool", np.asarray(f(col._pd_values, rv), dtype=bool))

@@ -316,8 +316,9 @@ def format_column(col, na_rep="NaN", justify="right", leading_space=True, max_co
     """format_array of one column: its values as fixed-width strings."""
     d = col.dtype
     digits = _opt("precision")
-    if d == "float64":
-        strs = _float_strings(col._pd_values, na_rep, leading_space, justify, digits)
+    if d == "float64" or d == "float32":
+        # (a float32 shows its value as a float64, as pandas formats it)
+        strs = _float_strings(col._pd_values.astype("float64"), na_rep, leading_space, justify, digits)
     elif d in INTS:
         spec = "d" if leading_space is False else " d"
         strs = [format(x, spec) for x in col._pd_values.tolist()]
@@ -388,6 +389,10 @@ def index_repr(index):
             # (DatetimeIndex: its labels as the column shows them, quoted, and its freq, never set here)
             from ._pd_index import Index
             data = format_object_summary(Index(fmt_times(col._pd_values.tolist())), default_pprint, is_justify=True, name=klass_name)
+        elif col.dtype == "float32":
+            # (float32 labels show as float64 values, as pandas' Index repr does)
+            from ._pd_index import Index
+            data = format_object_summary(Index(col._pd_values.astype("float64")), default_pprint, is_justify=True, name=klass_name)
         else:
             is_justify = not _inferred_string(col)
             data = format_object_summary(index, default_pprint, is_justify=is_justify)
@@ -598,7 +603,7 @@ class _FrameFormatter(object):
         fmt_columns = index_format_flat(self.tr_frame.columns, include_name=False)
         # (pandas zips the shown labels with the whole frame's dtypes)
         dtypes = [c.dtype for c in self.frame._pd_cols]
-        return [[" " + x if d in INTS or d in ("float64", "bool") else x]
+        return [[" " + x if d in INTS or d in ("float64", "float32", "bool") else x]
                 for x, d in zip(fmt_columns, dtypes)]
 
     def _strcols_without_index(self):

@@ -478,8 +478,8 @@
     },
     {
       "case": "csv.dtype-float32",
-      "message": "pandas: dtype='float32' is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas parses into float32; float32 isn't one of the subset's dtypes yet, so the dtype is refused before reading"
+      "message": "pandas.read_csv(dtype=float32) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into float32; Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype (astype('float32') after reading gives one)"
     },
     {
       "case": "dt.series-values",
@@ -685,6 +685,16 @@
       "case": "d1.frame-astype-category",
       "message": "pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet",
       "reason": "the category dtype comes in a later step; a dict naming it raises before any column is converted"
+    },
+    {
+      "case": "cast.astype-float-beyond-int32",
+      "message": "pandas: astype of float values beyond int32's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a float beyond the integer type's range has no defined numpy cast (pandas gives INT_MIN with a RuntimeWarning on x86); Sagebrush refuses it rather than give another value"
+    },
+    {
+      "case": "cast.astype-float-beyond-int64",
+      "message": "pandas: astype of float values beyond int64's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a float beyond the integer type's range has no defined numpy cast (pandas gives INT_MIN with a RuntimeWarning on x86); Sagebrush refuses it rather than give another value"
     },
     {
       "case": "d1.astype-errors",

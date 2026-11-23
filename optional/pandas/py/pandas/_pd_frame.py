@@ -8,7 +8,7 @@ derived from a frame is an eager copy (Copy-on-Write, r7 §C3).
 import numpy as np
 
 from ._pd_column import Column, column_from, set_values
-from ._pd_dtypes import STR, INTS, infer, is_missing, resolve_dtype
+from ._pd_dtypes import STR, INTS, FLOATS, infer, is_missing, resolve_dtype
 from ._pd_index import Index, RangeIndex, default_index, ensure_index
 from ._pd_series import Series, _astype, _broadcast, _head_positions, _tail_positions, _sample_positions, dtype_object, diff_column, \
     with_na_value, export_as, is_int_target
@@ -57,20 +57,21 @@ def _common_dtype(cols):
         return "object"
     if all(d == ds[0] for d in ds):
         return ds[0]
-    if all(d in INTS or d == "float64" for d in ds):
-        # (numpy's promotion: uint8 with int64 is int64, any integer with float64 float64)
+    if all(d in INTS or d in FLOATS for d in ds):
+        # (numpy's promotion: uint8 with int64 is int64, any integer with float64 float64, float32 with int16
+        # float32 but with int32 float64)
         return str(np.result_type(*ds))
     return "object"
 
 
 def _row_values(cols, i, dtype):
-    if dtype == "float64":
+    if dtype in FLOATS:
         return [float(c._pd_values[i]) for c in cols]
     return [c.value(i) for c in cols]
 
 
 def _column_of(values, dtype):
-    if dtype in INTS or dtype in ("float64", "bool"):
+    if dtype in INTS or dtype in FLOATS or dtype == "bool":
         return Column(dtype, np.array(values, dtype=dtype))
     if dtype is DT:
         return Column(DT, np.array([to_us(v) for v in values], dtype=np.int64))
@@ -116,7 +117,7 @@ class DataFrame(object):
                 data = data.reshape((len(data), 1))
             if data.ndim != 2:
                 raise ValueError("Must pass 2-d input. shape=%r" % (tuple(data.shape),))
-            if str(data.dtype) not in ("int64", "float64", "bool"):
+            if str(data.dtype) not in ("int64", "float64", "float32", "bool"):
                 raise _unsupported("DataFrame of an array of dtype %s" % data.dtype)
             n, m = data.shape
             cols = [column_from(data[:, j].copy(), want) for j in range(m)]
@@ -287,7 +288,7 @@ class DataFrame(object):
         cols = self._pd_cols
         if dtype is not None:
             # (pandas casts before it fills: a float NaN cast to an integer is numpy's, whatever na_value is)
-            if is_int_target(dtype) and any(c.dtype == "float64" and c.isna().any() for c in cols):
+            if is_int_target(dtype) and any(c.dtype in FLOATS and c.isna().any() for c in cols):
                 raise _unsupported("DataFrame.to_numpy(dtype=) of missing values to an integer dtype (pandas casts NaN "
                                    "with numpy before na_value applies)")
         if filling:
@@ -322,7 +323,7 @@ class DataFrame(object):
         if any(c.dtype is STR for c in self._pd_cols) and not all(c.is_list for c in self._pd_cols):
             raise _unsupported("%s of a frame mixing str and other columns (pandas gives an object array; Sagebrush's numpy has no object dtype yet)" % what)
         d = _common_dtype(self._pd_cols)
-        if (d not in INTS and d not in ("float64", "bool")) or any(c.is_list for c in self._pd_cols):
+        if (d not in INTS and d not in FLOATS and d != "bool") or any(c.is_list for c in self._pd_cols):
             raise _unsupported("%s of a frame with %s columns" % (what, "str/object" if any(c.is_list for c in self._pd_cols) else "mixed bool"))
         n, m = self.shape
         a = np.empty((n, m), dtype=d)
@@ -390,13 +391,16 @@ class DataFrame(object):
     def _pd_reduce(self, op, axis, skipna, numeric_only, kwargs, min_count=0):
         R.check_args("DataFrame.%s" % op, axis, kwargs, min_count)
         keep = [j for j, c in enumerate(self._pd_cols)
-                if not numeric_only or c.dtype in ("int64", "float64", "bool")]
+                if not numeric_only or c.dtype in INTS or c.dtype in FLOATS or c.dtype == "bool"]
         vals = [R.reduce_column(self._pd_cols[j], op, skipna) for j in keep]
         labels = self._pd_columns._pd_take(keep)
         if op == "count":
             col = Column("int64", np.array([int(v) for v in vals], dtype=np.int64))
         elif numeric_only and any(self._pd_cols[j].dtype == "float64" for j in keep) and op in ("sum", "mean"):
             col = Column("float64", np.array([float(v) for v in vals], dtype=np.float64))
+        elif vals and all(isinstance(v, np.float32) for v in vals):
+            # (float32 results alone stay float32, as pandas' frame of float32 sums)
+            col = Column("float32", np.array([float(v) for v in vals], dtype=np.float32))
         else:
             col = column_from(vals) if vals else Column("float64" if op != "count" else "int64", np.array([], dtype=np.float64))
         return Series._pd_new(col, labels)
@@ -794,7 +798,7 @@ class DataFrame(object):
         column or fewer than min_periods rows. Columns convert as
         to_numpy(dtype=float) does; numeric_only keeps the numbers and bools."""
         ST.check_method(method, "DataFrame.corr")
-        js = [j for j, c in enumerate(self._pd_cols) if not numeric_only or c.dtype in INTS or c.dtype in ("float64", "bool")]
+        js = [j for j, c in enumerate(self._pd_cols) if not numeric_only or c.dtype in INTS or c.dtype in FLOATS or c.dtype == "bool"]
         mat = ST.float_columns([self._pd_cols[j] for j in js], "DataFrame.corr")
         minp = 1 if min_periods is None else int(min_periods)
         out = ST.callable_corr(mat, method, minp) if callable(method) else ST.nancorr(mat, minp)
@@ -985,7 +989,7 @@ class DataFrame(object):
             old = c.tolist()
             d = c.dtype
             try:
-                cols.append(column_from(old + [v], d if infer([v]) == d or (d == "float64" and infer([v]) == "int64") else None))
+                cols.append(column_from(old + [v], d if infer([v]) == d or (d in FLOATS and infer([v]) in ("int64", "float64")) else None))
             except (TypeError, ValueError):
                 cols.append(column_from(old + [v]))
         self._pd_cols = cols

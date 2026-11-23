@@ -20,7 +20,7 @@ import math
 import numpy as np
 
 from ._pd_column import Column, column_from
-from ._pd_dtypes import STR, INTS, is_missing
+from ._pd_dtypes import STR, INTS, FLOATS, is_missing
 from ._pd_datetime import DT
 from . import _pd_combine as CB
 
@@ -38,9 +38,9 @@ def _scalar(x):
 
 
 def is_numeric(dtype):
-    """describe's numeric columns: the integers and float64 (bool is
+    """describe's numeric columns: the integers and the floats (bool is
     described as categories)."""
-    return dtype in INTS or dtype == "float64"
+    return dtype in INTS or dtype in FLOATS
 
 
 # --- percentiles -------------------------------------------------------------
@@ -111,7 +111,57 @@ def _quantile(values, q):
 
 # --- describe ----------------------------------------------------------------
 
+def _quantile32(values, q, cast):
+    # (numpy's quantile of float32 values: the two neighbours' difference in float32, the lerp in float64; cast:
+    # back to float32, as pandas' masked path does)
+    n = len(values)
+    virtual = (n - 1) * q
+    if virtual >= n - 1 or virtual < 0:
+        return values[-1] if virtual >= n - 1 else values[0]
+    prev = math.floor(virtual)
+    gamma = virtual - prev
+    a, b = values[int(prev)], values[int(prev) + 1]
+    diff = float(np.float32(b) - np.float32(a))
+    r = b - diff * (1 - gamma) if gamma >= 0.5 else a + diff * gamma
+    return float(np.float32(r)) if cast else r
+
+
+def _numeric_stats32(col, qs):
+    # (pandas' nanops for float32: the mean summed in float32 over a float32 count; the variance in float64 from
+    # sum(dtype=float64), cast to float32 before its square root; min, max and the percentiles float32)
+    v = col._pd_values
+    mask = v != v
+    count = len(v) - int(_scalar(mask.sum()))
+    nan = float("nan")
+    if count == 0:
+        return [0.0, nan, nan, nan] + [nan] * len(qs) + [nan]
+    filled = v.copy()
+    filled[mask] = 0.0
+    c32 = np.float32(count)
+    mean = float(np.float32(_scalar(filled.sum())) / c32)
+    if count <= 1:
+        std = nan
+    else:
+        avg = float(_scalar(filled.sum(dtype=np.float64))) / float(c32)
+        d = avg - filled.astype(np.float64)
+        sqr = d * d
+        sqr[mask] = 0.0
+        var = float(_scalar(sqr.sum())) / float(np.float32(count - 1))
+        std = float(np.sqrt(np.float32(var)))
+    lo = v.copy()
+    lo[mask] = float("inf")
+    hi = v.copy()
+    hi[mask] = float("-inf")
+    present = sorted(x for x, m in zip(v.tolist(), mask.tolist()) if not m)
+    # (with a missing value pandas' masked path casts the percentiles back to float32; without one numpy's float64
+    # result stands)
+    quantiles = [_quantile32(present, q, count < len(v)) for q in qs]
+    return [float(count), mean, std, float(_scalar(lo.min()))] + quantiles + [float(_scalar(hi.max()))]
+
+
 def _numeric_stats(col, qs):
+    if col.dtype == "float32":
+        return _numeric_stats32(col, qs)
     v = col._pd_values
     if col.dtype == "float64":
         mask = v != v
@@ -191,7 +241,7 @@ def _kind_of(spec):
     if spec is np.integer or spec == "integer":
         return (lambda d: d in INTS), False
     if spec is np.floating or spec == "floating":
-        return (lambda d: d == "float64"), False
+        return (lambda d: d in FLOATS), False
     if spec in ("datetime", "datetime64", "datetime64[us]", "M8[us]"):
         return (lambda d: d is DT), False
     if spec == "category":
@@ -204,7 +254,7 @@ def _kind_of(spec):
         name = str(np.dtype(spec))
     except Exception:
         name = None
-    if name in INTS or name == "float64":
+    if name in INTS or name in FLOATS:
         return (lambda d: d == name), False
     raise _unsupported("DataFrame.describe(include=, exclude=) with %r" % (spec,))
 

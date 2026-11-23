@@ -156,6 +156,10 @@
 !! NotImplementedError: pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet
 == d1.frame-astype-category
 !! NotImplementedError: pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet
+== cast.astype-float-beyond-int32
+!! NotImplementedError: pandas: astype of float values beyond int32's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset
+== cast.astype-float-beyond-int64
+!! NotImplementedError: pandas: astype of float values beyond int64's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset
 == d1.astype-errors
 !! NotImplementedError: pandas.Series.astype(errors=, a dict) is not in Sagebrush's pandas 0.x subset
 == d1.small-int-from-values
@@ -361,4 +365,4 @@
 == csv.dtype-dict-uint32
 !! NotImplementedError: pandas.read_csv(dtype=uint32) is not in Sagebrush's pandas 0.x subset
 == csv.dtype-float32
-!! NotImplementedError: pandas: dtype='float32' is not in Sagebrush's pandas 0.x subset
+!! NotImplementedError: pandas.read_csv(dtype=float32) is not in Sagebrush's pandas 0.x subset

@@ -21,7 +21,7 @@ __all__ = ["frame_info", "series_info", "column_nbytes", "index_nbytes", "check_
 _MAX_INFO_COLUMNS = 100
 _MAX_INFO_ROWS = 1690785
 
-_ITEMSIZE = {"bool": 1, "int8": 1, "uint8": 1, "int16": 2, "uint16": 2, "int32": 4, "uint32": 4, "int64": 8, "float64": 8}
+_ITEMSIZE = {"bool": 1, "int8": 1, "uint8": 1, "int16": 2, "uint16": 2, "int32": 4, "uint32": 4, "int64": 8, "float64": 8, "float32": 4}
 
 
 def _unsupported(what):

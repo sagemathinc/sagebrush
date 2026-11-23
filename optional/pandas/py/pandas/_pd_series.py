@@ -7,7 +7,7 @@ derived from a Series is an eager copy (Copy-on-Write, r7 §C3).
 import numpy as np
 
 from ._pd_column import Column, column_from, set_values, astype_column
-from ._pd_dtypes import STR, INTS, infer, is_missing, resolve_dtype
+from ._pd_dtypes import STR, INTS, FLOATS, infer, is_missing, resolve_dtype
 from ._pd_datetime import DT, NaT, FIELDS
 from .errors import _INPLACE, inplace_given
 from ._pd_index import Index, RangeIndex, default_index, ensure_index
@@ -434,7 +434,7 @@ class Series(object):
         vals = self.tolist() + [value]
         dt = self._pd_col.dtype
         try:
-            col = column_from(vals, dt if infer([value]) == dt or (dt == "float64" and infer([value]) == "int64") else None)
+            col = column_from(vals, dt if infer([value]) == dt or (dt in FLOATS and infer([value]) in ("int64", "float64")) else None)
         except (TypeError, ValueError):
             col = column_from(vals)
         self._pd_col = col
@@ -719,7 +719,7 @@ _ObjectDtype = _ObjectDtypeType()
 
 def dtype_object(d):
     """The dtype object pandas shows for a column dtype."""
-    if d in INTS or d in ("float64", "bool"):
+    if d in INTS or d in FLOATS or d == "bool":
         return np.dtype(d)
     return d if d is STR or d is DT else _ObjectDtype
 
@@ -759,8 +759,8 @@ def with_na_value(col, na_value):
         return col
     vals = [na_value if m else v for v, m in zip(col.tolist(), missing)]
     d = infer(vals)
-    if d == "int64" and col.dtype == "float64":
-        d = "float64"
+    if d in ("int64", "float64") and col.dtype in FLOATS:
+        d = col.dtype
     return column_from(vals, d)
 
 
@@ -883,23 +883,25 @@ class _SeriesLoc(object):
 
 
 def diff_column(col, periods):
-    """Column.diff: float64, NaN where the value `periods` away is missing
-    or past either end (pandas 3.1: int64 and float64 alike)."""
+    """Column.diff: float64 (float32 for a float32 column, computed in it),
+    NaN where the value `periods` away is missing or past either end (pandas
+    3.1: the integers and float64 alike)."""
     if isinstance(periods, bool) or not isinstance(periods, (int, np.integer)):
         raise ValueError("periods must be an integer")
     periods = int(periods)
     if col.dtype is DT:
         raise _unsupported("diff of a datetime64[us] column (a Timedelta column)")
-    if col.dtype not in INTS and col.dtype != "float64":
+    if col.dtype not in INTS and col.dtype not in FLOATS:
         raise _unsupported("diff of a %s column" % (col.dtype,))
-    v = col._pd_values.astype(np.float64)
+    d = "float32" if col.dtype == "float32" else "float64"
+    v = col._pd_values.astype(d)
     n = len(v)
-    out = np.full(n, np.nan, dtype=np.float64)
+    out = np.full(n, np.nan, dtype=d)
     if periods >= 0 and periods < n:
         out[periods:] = v[periods:] - v[:n - periods]
     elif periods < 0 and -periods < n:
         out[:n + periods] = v[:n + periods] - v[-periods:]
-    return Column("float64", out)
+    return Column(d, out)
 
 
 class _DatetimeProperties(object):

@@ -34,7 +34,8 @@ import numpy as np
 
 from .errors import EmptyDataError, ParserError
 from ._pd_column import Column
-from ._pd_dtypes import STR, SMALL_INTS, resolve_dtype
+from ._pd_dtypes import STR, resolve_dtype
+from ._pd_datetime import DT
 from ._pd_index import Index, RangeIndex, default_index
 
 __all__ = ["read_csv"]
@@ -68,12 +69,12 @@ _SUPPORTED = frozenset(["sep", "header", "names", "index_col", "usecols", "na_va
 
 
 def _parsed_dtype(d):
-    # (the dtypes the parser fills: str, object, float64, int64 and bool; a datetime is pandas' TypeError, and the
-    # smaller integers and float32, which pandas parses into, are refused rather than mis-built)
+    # (the dtypes the parser fills: str, object, float64, int64 and bool; datetime64[us] is pandas' TypeError, and
+    # any other dtype (the smaller integers, float32), which pandas parses into, is refused rather than mis-built)
     if d is not None and d is not STR and d not in ("object", "float64", "int64", "bool"):
-        if d in SMALL_INTS or d == "float32":
-            raise _unsupported("dtype=%s" % (d,))
-        raise TypeError("the dtype %s is not supported for parsing, pass this column using parse_dates instead" % (d,))
+        if d is DT:
+            raise TypeError("the dtype %s is not supported for parsing, pass this column using parse_dates instead" % (d,))
+        raise _unsupported("dtype=%s" % (d,))
     return d
 
 
