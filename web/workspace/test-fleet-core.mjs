@@ -66,18 +66,23 @@ const impure = Object.keys(PINS).filter((f) => f.startsWith("core/")).flatMap((f
 });
 ok(impure.length === 0, "M-4: the mirrored core is pure (only ./*.mjs imports; no node:, Buffer, process, import.meta, require)", impure);
 
-// ---- no page code reaches the core yet: until the first verifier that uses it is reviewed, it is only mirrored
-// (any web/ module other than fleet/ itself and the tests that imports fleet/install or fleet/core fails this row)
+// ---- who reaches the core: only the page's verifier (fleet-verify.ts, which signs nothing), and nothing reaches the
+// verifier yet: until a page that uses it is reviewed, no path is live
+// (any other web/ module, fleet/ itself and the tests aside, that imports fleet/install, fleet/core or fleet-verify
+// fails these rows)
 const web = join(here, "..");
-const users = [];
+const users = [], verifierUsers = [];
 const scan = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) {
   const p = join(d, e.name);
   if (e.isDirectory()) { if (!["node_modules", "dist", ".cache"].includes(e.name) && p !== fleet) scan(p); continue; }
   if (!/\.(?:ts|mts|js|mjs)$/.test(e.name) || /^test-/.test(e.name)) continue;
-  if (/fleet\/(?:install|core)/.test(readFileSync(p, "utf8"))) users.push(relative(web, p));
+  const s = readFileSync(p, "utf8");
+  if (/fleet\/(?:install|core)/.test(s)) users.push(relative(web, p));
+  if (/fleet-verify/.test(s) && relative(web, p) !== "workspace/fleet-verify.ts") verifierUsers.push(relative(web, p));
 } };
 scan(web);
-ok(users.length === 0, "N-1: no page module imports the fleet core yet (mirrored only; no signing or verifying path is live)", users);
+ok(JSON.stringify(users) === JSON.stringify(["workspace/fleet-verify.ts"]), "N-1: the only page module that imports the fleet core is the verifier, fleet-verify.ts", users);
+ok(verifierUsers.length === 0, "N-2: no page module imports the verifier yet (no verifying path is live)", verifierUsers);
 
 // ---- the agent's fixture cases, in Chromium, through fleetCore()
 const dir = mkdtempSync(join(tmpdir(), "sb-fleet-core-"));
