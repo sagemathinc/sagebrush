@@ -29,11 +29,54 @@
 use super::*;
 use num_integer::Roots;
 use sagebrush_interrupt::{check, enter};
+use sagebrush_arith::cost::{publish_progress, tally_all, Family, FAMILIES};
+use std::cell::Cell;
+
+// ------------------------------------------------------------------ units
+
+thread_local! {
+    /// The route's units, by family, not yet in the tally (Counted adds
+    /// them).  Plain counts: dropping them, at a thread's exit, does nothing.
+    static UNITS: Cell<[u64; FAMILIES]> = const { Cell::new([0; FAMILIES]) };
+}
+
+/// Debit `units` from the budget, and count them in family `f` for the
+/// tally: the route meters itself with the budget, whose debits no kernel
+/// counts, so a metered caller sees them only through here (the cost
+/// policy, arith cost/tally.rs).  Nothing is counted when the debit is
+/// refused.
+fn spend(b: &Budget, f: Family, units: Option<u64>) -> FResult<()> {
+    b.debit(units)?;
+    if let Some(u) = units {
+        UNITS.with(|c| {
+            let mut a = c.get();
+            a[f as usize] = a[f as usize].saturating_add(u);
+            c.set(a);
+        });
+    }
+    Ok(())
+}
+
+/// Adds the route's counted units to the tally, once, when dropped: on
+/// return, on an early return or a refusal, and while unwinding from a Stop.
+struct Counted;
+
+impl Drop for Counted {
+    fn drop(&mut self) {
+        let a = UNITS.with(|c| c.replace([0; FAMILIES]));
+        if a.iter().any(|&x| x != 0) {
+            tally_all(&a);
+            publish_progress();
+        }
+    }
+}
 
 /// The factors of f (primitive, positive leading coefficient, degree >= 1)
 /// with their multiplicities, when f = x^k (a x^m + b) is a binomial this
 /// module handles; None for today's path.
 pub(crate) fn factor<'b>(b: &'b Budget, f: &[BigInt]) -> FResult<Option<Vec<(Held<'b>, u32)>>> {
+    // (the units the route debits go to the tally, once, when it ends)
+    let _counted = Counted;
     // S1: the detection scan (two nonzero coefficients, the top one last)
     let (k, top) = {
         let _s = enter("binomial S1 scan");
@@ -184,9 +227,9 @@ fn divisors_and_primes(b: &Budget, n: u64) -> FResult<(Vec<u64>, Vec<u64>)> {
     let s = n.sqrt();
     let (mut small, mut large, mut primes) = (vec![], vec![], vec![]);
     let mut rest = n;
-    b.debit(Some(1))?;
+    spend(b, Family::Div, Some(1))?;
     for j in 1..=s {
-        b.debit(Some(1))?;
+        spend(b, Family::Div, Some(1))?;
         if n % j == 0 {
             small.push(j);
             if j != n / j {
@@ -422,7 +465,7 @@ pub(crate) fn cyclotomics<'b>(
         for &d in &ds {
             let mut r = rad(d, primes);
             loop {
-                b.debit(Some(1))?;
+                spend(b, Family::Other, Some(1))?;
                 if let Err(i) = ks.binary_search(&r) {
                     ks.insert(i, r);
                 }
@@ -457,13 +500,13 @@ pub(crate) fn cyclotomics<'b>(
         a[0] = -BigInt::one();
         a[r as usize] = BigInt::one();
         for e in evens {
-            b.debit((a.len() as u64).checked_add(e).and_then(|l| l.checked_mul(limbs(maxbits(&a) + 1))))?;
+            spend(b, Family::AddSub, (a.len() as u64).checked_add(e).and_then(|l| l.checked_mul(limbs(maxbits(&a) + 1))))?;
             let _s4 = enter("cyclotomic S4 sparse");
             a = mul_binom(&a, e as usize);
         }
         for e in odds {
             let l = a.len() as u64;
-            b.debit(l.checked_mul(limbs(maxbits(&a) + clog2(l.div_ceil(e) + 1))))?;
+            spend(b, Family::AddSub, l.checked_mul(limbs(maxbits(&a) + clog2(l.div_ceil(e) + 1))))?;
             if fault(fault::NOT_EXACT) && !divided {
                 a[0] += 1;
             }
@@ -491,7 +534,7 @@ pub(crate) fn cyclotomics<'b>(
             let (br, bs) = (maxbits(fr), maxbits(fs));
             let n = fr.len() + fs.len() - 1;
             let bprod = br + bs + clog2(fr.len().min(fs.len()) as u64) + 1;
-            b.debit(mul_work(fr.len() as u64, br, fs.len() as u64, bs).and_then(|w| w.checked_add((n as u64).checked_mul(limbs(bprod) + limbs(bs))?)))?;
+            spend(b, Family::MulSchool, mul_work(fr.len() as u64, br, fs.len() as u64, bs).and_then(|w| w.checked_add((n as u64).checked_mul(limbs(bprod) + limbs(bs))?)))?;
             let mut prod = vec![BigInt::zero(); n];
             for (x, u) in fr.iter().enumerate() {
                 check();
@@ -530,7 +573,7 @@ pub(crate) fn cyclotomics<'b>(
         let k = (d / r) as usize;
         let l = phi(d, primes) as u64 + 1;
         let bk = limbs(maxbits(ker));
-        b.debit(l.checked_mul(bk).and_then(|x| x.checked_add(l.checked_mul(bk.checked_mul(2)? + 1)?)))?;
+        spend(b, Family::Move, l.checked_mul(bk).and_then(|x| x.checked_add(l.checked_mul(bk.checked_mul(2)? + 1)?)))?;
         let mut v = vec![BigInt::zero(); (ker.len() - 1) * k + 1];
         for (j, c) in ker.iter().enumerate() {
             if j & 1023 == 0 {
@@ -589,7 +632,7 @@ fn pow_cmp(b: &Budget, c: &BigInt, l: u64, n: &BigInt) -> FResult<Option<bool>> 
     let mut e = l;
     loop {
         if e & 1 == 1 {
-            b.debit(limbs(result.bits()).checked_mul(limbs(base.bits())))?;
+            spend(b, Family::MulSchool, limbs(result.bits()).checked_mul(limbs(base.bits())))?;
             result *= &base;
             if &result > n {
                 return Ok(None);
@@ -599,7 +642,7 @@ fn pow_cmp(b: &Budget, c: &BigInt, l: u64, n: &BigInt) -> FResult<Option<bool>> 
         if e == 0 {
             return Ok(Some(&result == n));
         }
-        b.debit(limbs(base.bits()).checked_mul(limbs(base.bits())))?;
+        spend(b, Family::MulSchool, limbs(base.bits()).checked_mul(limbs(base.bits())))?;
         base = &base * &base;
         if &base > n {
             // the remaining factors are at least base
@@ -736,7 +779,7 @@ impl Folds {
     fn of(b: &Budget, n: &BigInt) -> FResult<Folds> {
         // the first pass
         check();
-        b.debit(limbs(n.bits()).checked_add(1))?;
+        spend(b, Family::ModArith, limbs(n.bits()).checked_add(1))?;
         #[cfg(test)]
         audit::set(|a| a.fold_passes += 1);
         let (m64, m48) = fold_minus(n);
@@ -749,7 +792,7 @@ impl Folds {
         }
         // the second pass, once
         check();
-        b.debit(limbs(n.bits()).checked_add(1))?;
+        spend(b, Family::ModArith, limbs(n.bits()).checked_add(1))?;
         #[cfg(test)]
         audit::set(|a| a.fold_passes += 1);
         let r = fold_plus(n);
@@ -777,7 +820,7 @@ fn not_a_power_with(b: &Budget, n: &BigInt, f: &mut Folds, l: u64) -> FResult<bo
     audit::set(|a| a.prefilter_calls += 1);
     let mut tried = 0u64;
     for &(p, wide) in TIER1.iter().filter(|&&(p, _)| p % l == 1) {
-        b.debit(Some(130))?;
+        spend(b, Family::ModArith, Some(130))?;
         tried += 1;
         #[cfg(test)]
         audit::set(|a| a.prefilter_evals += 1);
@@ -790,7 +833,7 @@ fn not_a_power_with(b: &Budget, n: &BigInt, f: &mut Folds, l: u64) -> FResult<bo
     if FOLD_PLUS.iter().any(|&p| p % l == 1) {
         let rp = f.plus(b, n)?;
         for &p in FOLD_PLUS.iter().filter(|&&p| p % l == 1) {
-            b.debit(Some(130))?;
+            spend(b, Family::ModArith, Some(130))?;
             tried += 1;
             #[cfg(test)]
             audit::set(|a| a.prefilter_evals += 1);
@@ -810,11 +853,11 @@ fn not_a_power_with(b: &Budget, n: &BigInt, f: &mut Folds, l: u64) -> FResult<bo
             continue;
         }
         check();
-        b.debit(Some(p.sqrt() + 1))?;
+        spend(b, Family::Div, Some(p.sqrt() + 1))?;
         if !is_prime_trial(p) {
             continue;
         }
-        b.debit(limbs(n.bits()).checked_add(66))?;
+        spend(b, Family::ModArith, limbs(n.bits()).checked_add(66))?;
         tried += 1;
         #[cfg(test)]
         audit::set(|a| a.prefilter_evals += 1);
@@ -1037,14 +1080,14 @@ fn stage_b<'b>(b: &'b Budget, m: u64, a: &BigInt, c0: &BigInt) -> FResult<Option
         let _s = enter("homogenize S8");
         let ph = f.len() - 1;
         let k = &costs[i];
-        b.debit(Some(k.pw))?;
+        spend(b, Family::MulSchool, Some(k.pw))?;
         let mut t = phi_power(&p, ph as u64);
         // (the length's room is reserved: a size beyond the address space
         // is refused, never narrowed)
         let len = usize::try_from(k.len).map_err(|_| b.refuse("memory (overflow)", u64::MAX, 0))?;
         let mut v = vec![BigInt::zero(); len];
         for (j, cj) in f.iter().enumerate() {
-            b.debit(Some(k.build))?;
+            spend(b, Family::MulSchool, Some(k.build))?;
             v[j * h] = cj * &t;
             if j < ph {
                 t = &t / &p * &q;
@@ -1086,7 +1129,7 @@ fn phis_certify(b: &Budget, phis: &[(u64, Held)], pieces: &[Held], p: &BigInt, q
     let _s = enter("homogenize S10 certificate");
     for (((_, f), piece), k) in phis.iter().zip(pieces).zip(costs) {
         let ph = f.len() - 1;
-        b.debit(Some(k.len))?;
+        spend(b, Family::Move, Some(k.len))?;
         if piece.len() as u64 != k.len {
             return Err(failed(b, "binomial verification"));
         }
@@ -1098,11 +1141,11 @@ fn phis_certify(b: &Budget, phis: &[(u64, Held)], pieces: &[Held], p: &BigInt, q
                 return Err(failed(b, "binomial verification"));
             }
         }
-        b.debit(Some(k.pw))?;
+        spend(b, Family::MulSchool, Some(k.pw))?;
         let pphi = phi_power(p, ph as u64);
         let (mut pi, mut qi) = (BigInt::one(), BigInt::one());
         for (i, ci) in f.iter().enumerate() {
-            b.debit(Some(k.cert))?;
+            spend(b, Family::MulSchool, Some(k.cert))?;
             let lhs = &piece[i * h] * &pi;
             let rhs = ci * &qi * &pphi;
             if lhs != rhs {

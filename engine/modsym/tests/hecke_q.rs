@@ -108,9 +108,13 @@ fn the_units_are_pinned() {
         // (each includes its CRT's setup: one prime for 11.2 and 37.2,
         // [1, 0, 0, 0, 0, 3, 4, ..], four for 60.4, [23, 0, 0, 0, 0, 16, 95,
         // ..]; sagebrush_arith::crt::MultiCrt::setup_units)
-        (11u64, 2usize, 2u64, [97u64, 0, 47, 0, 12, 149, 1198, 0, 0, 0]),
+        // (11.2's Div includes the binomial factoring route's two
+        // divisor-enumeration units, counted in the tally since issue 1811)
+        (11u64, 2usize, 2u64, [97u64, 0, 49, 0, 12, 149, 1198, 0, 0, 0]),
         (37, 2, 3, [599, 0, 82, 0, 114, 764, 3926, 0, 0, 0]),
-        (60, 4, 5, [934975, 0, 11825, 0, 17745, 104396, 438711, 294, 0, 0]),
+        // (60.4's include the binomial factoring route's units in every
+        // family it debits, since issue 1811)
+        (60, 4, 5, [935042, 0, 11839, 0, 17745, 104416, 446007, 297, 0, 3]),
     ] {
         let prec = sturm_bound(n, k).unwrap() as usize + 2;
         let got = units_of(|| cusp_hecke_matrix(n, k, p, prec, false, &factor, &mut Free).unwrap());

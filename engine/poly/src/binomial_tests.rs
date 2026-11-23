@@ -772,3 +772,25 @@ fn live_memory_stays_within_the_budget() {
         }
     }
 }
+
+/// The route's budget debits reach the tally, family by family (issue
+/// 1811): a metered caller of factoring x^12 - 1 (stage A) and 4 x^6 - 9
+/// (stage B) sees the route's units, pinned here.  Without the merge both
+/// arrays are all zero.
+#[test]
+fn units_reach_the_tally() {
+    let units = |f: Vec<BigInt>| {
+        let mut meter = sagebrush_arith::cost::Meter::accounting(u64::MAX);
+        let r = sagebrush_arith::cost::metered(&mut meter, || crate::try_factor(&f));
+        (r.expect("factored").1.len(), meter.units().0)
+    };
+    let mut a = vec![BigInt::zero(); 13];
+    a[0] = -BigInt::one();
+    a[12] = BigInt::one();
+    let mut b = vec![BigInt::zero(); 7];
+    b[0] = BigInt::from(-9);
+    b[6] = BigInt::from(4);
+    // (families: MulSchool, MulNtt, Div, DivNewton, Gcd, Move, ModArith, AddSub, Walk, Other)
+    assert_eq!(units(a), (6, [38, 0, 4, 0, 0, 72, 0, 28, 0, 13]));
+    assert_eq!(units(b), (2, [233, 0, 5, 0, 0, 162, 7474, 3, 0, 3]));
+}
