@@ -15,7 +15,7 @@
 
 import { checkCall, badValue, AGENT_LIMITS } from "./agent-schema";
 import { editProblem, type NotebookEdit } from "./notebook-edit";
-import { parseEnabledTags, parseMemoryGrant } from "./agent-tags";
+import { TAG_LIMITS, validTagId } from "./agent-tags";
 import { authorize, grantFolders, grantProblem, newGrantId, norm, GRANT_ID, type Grant, type GrantMemory, type TrashEntry } from "./agent-grant";
 import { BRANCHES, within } from "./paths";
 import { entryUrl } from "./entry-url";
@@ -40,10 +40,13 @@ export type Hello = { protocol: 1; agent: { name: string; client: string; versio
  * "memory.1", an agent with agent memory v1 (design/workspace-agent-protocol.md §7): a grant may carry `memory` only for
  * it, and only where this page has its memory client (the pairing's `memory`), which then also says memory.1 itself. */
 export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn", "chat.resume.tag", "delegate.1", "chat.brief", "memory.1"] as const;
-/** A grant's memory tags as it keeps them, by the tags schema's own rules (agent-tags.ts parseEnabledTags: 0 to 16
- * ids, strictly ascending). Throws on anything else; a list out of order or with a duplicate is refused, never sorted. */
+/** A grant's memory tags as it keeps them, by the tags schema's rules (agent-tags.ts: its id format and `enabled`
+ * bound; its parseEnabledTags' order rule, here without its canonical-JSON snapshot, which the LaTeX page's pairing
+ * chunk doesn't carry): 0 to 16 ids, strictly ascending. Throws on anything else, never sorts. */
 export function grantMemoryTags(tags: unknown): string[] {
-  return [...parseEnabledTags(tags)];
+  if (!Array.isArray(tags) || tags.length > TAG_LIMITS.enabled) throw new Error("memory tags: a list of at most 16");
+  for (let i = 0; i < tags.length; i++) if (!validTagId(tags[i]) || (i > 0 && !(tags[i - 1] < tags[i]))) throw new Error("memory tags: tag ids, strictly ascending");
+  return [...tags];
 }
 /** The `log` an agent's hello or agent.ready names: its run, as the agent's random hex id; anything else, none. */
 export const logOf = (v: unknown): { instance: string } | undefined => {
@@ -869,7 +872,8 @@ export function parseReloadRecord(raw: string | null): ReloadRecord | null {
   //  no record)
   if ("memory" in g) {
     const m = g.memory;
-    try { parseMemoryGrant(m); } catch { return null; }
+    if (!m || typeof m !== "object" || Array.isArray(m) || !keysAre(m, ["tags"])) return null;
+    try { grantMemoryTags(m.tags); } catch { return null; }
   }
   if ("id" in g && !(typeof g.id === "string" && GRANT_ID.test(g.id))) return null;
   if (!Array.isArray(g.folders) || g.folders.length < 1 || g.folders.length > 64 || !g.folders.every((f: unknown) => isStr(f, 512))) return null;
