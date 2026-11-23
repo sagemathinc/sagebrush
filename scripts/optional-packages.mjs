@@ -364,7 +364,8 @@ export function lintPackage(pkg, api, others = []) {
         case "Name": return requiredAlias.has(v.id);
         case "Attribute": case "Subscript": case "Starred": case "NamedExpr": return fromRequired(v.value);
         case "Tuple": case "List": case "Set": return (v.elts ?? []).some(fromRequired);
-        case "Dict": return (v.values ?? []).some(fromRequired);
+        // (a dict's values, and its keys, which iterating it yields)
+        case "Dict": return (v.values ?? []).some(fromRequired) || (v.keys ?? []).some(fromRequired);
         case "IfExp": return fromRequired(v.body) || fromRequired(v.orelse);
         // (a comprehension's elements: a list, set or generator of them, or a dict's keys and values)
         case "Comp": return fromRequired(v.elt) || fromRequired(v.value);
