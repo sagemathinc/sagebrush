@@ -108,7 +108,7 @@ try {
   const after9 = await P.ev(`({ tabs: [...document.querySelectorAll('#artifacts .tab')].map((t) => t.dataset.tab), focus: document.activeElement?.dataset?.tab ?? document.activeElement?.id ?? null })`);
   ok(onX === "stats-diff" && JSON.stringify(after9.tabs) === '["plot-code","doc-eig"]' && after9.focus === "doc-eig", "T9: by keyboard, Tab from a tab reaches its ×, Enter closes it, and the keyboard is then on the tab shown", { onX, after9 });
   // (and the last one's ×: the pane closes, and the keyboard is on the chat's All artifacts)
-  for (const id of ["plot-code", "doc-eig"]) {
+  for (const id of ["doc-eig", "plot-code"]) { // (each the tab shown, whose × is shown)
     await P.ev(`(document.querySelector('#artifacts [data-close="${id}"]').focus(), true)`);
     await key("Enter", "Enter", 13, "\r");
     await P.until(`!document.querySelector('#artifacts .tab[data-tab="${id}"]') || document.querySelector('#artifacts').offsetWidth === 0`, 5000).catch(() => {});
