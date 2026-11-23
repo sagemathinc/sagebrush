@@ -20,7 +20,7 @@ import math
 import os
 from _graphics import (InlineFigure as _InlineFigure, Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
                        show as _show, save_svg, TAB10, to_color as _css, colormap, describe_svg, mpl_ticks, DASHES,
-                       LEGEND_LOCS as _LEGEND_LOCS)
+                       LEGEND_LOCS as _LEGEND_LOCS, pixel_size as _pixel_size)
 from matplotlib.colors import to_rgba as _to_rgba, CSS4_COLORS as _CSS4_COLORS, Colormap as _Colormap
 # (one rcParams: matplotlib's, with its defaults and its key checks)
 from matplotlib import rcParams, rcParamsDefault, rcParamsOrig, rc, rcdefaults, rc_context
@@ -435,6 +435,12 @@ class Axes:
                 edgecolors=None, color=None, vmin=None, vmax=None, **kw):
         xs, ys = _list(x), _list(y)
         n = len(xs)
+        if marker == ",":  # (as matplotlib's scatter: a square, with its warning)
+            import warnings
+            warnings.warn("The pixel maker ',' is not supported on scatter(); using a finite-sized square instead, which is "
+                          "not necessarily 1 pixel in size. Use the square marker 's' instead to suppress this warning.",
+                          UserWarning, stacklevel=2)
+            marker = "s"
         colors = clim = None
         if c is not None and not isinstance(c, str) and not (isinstance(c, tuple) and len(c) in (3, 4)):
             cl = list(c.tolist() if hasattr(c, "tolist") else c)
@@ -1542,7 +1548,13 @@ class Figure:
         if dpi == "figure":
             dpi = self.dpi
         dpi = float(dpi)
-        svg = self._svg(background=False)
+        # (the pixel marker ',' is one pixel of this PNG: 100 / dpi SVG units)
+        old = _pixel_size(100.0 / dpi) if dpi > 0 and math.isfinite(dpi) else None
+        try:
+            svg = self._svg(background=False)
+        finally:
+            if old is not None:
+                _pixel_size(old)
         if not transparent:
             svg = _axes_patches(svg, self.axes)
         text = {"Software": "Sagebrush"}

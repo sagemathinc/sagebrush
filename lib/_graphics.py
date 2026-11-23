@@ -675,8 +675,31 @@ def _markers(P, xs, ys, marker, r, color, alpha, sizes=None, edge=None):
     return "<g%s>%s</g>" % (a, "".join(out))
 
 
+# The size of one pixel of the picture being drawn, in SVG units (100 to the
+# inch): 1 for an SVG, 100 / dpi while savefig draws a PNG (pixel_size).
+_PIXEL = 1.0
+
+
+def pixel_size(u):
+    """Sets the size of a pixel of the picture being drawn, in SVG units, for
+    matplotlib's pixel marker ','; returns the size it had."""
+    global _PIXEL
+    old, _PIXEL = _PIXEL, float(u)
+    return old
+
+
 def _marker(m, x, y, r, color, edge=None):
     c = _esc(color)
+    if m == ",":
+        # matplotlib's pixel marker: the one pixel of the picture that the point
+        # is in, whatever the marker's size, and filled whole: its edges are on
+        # the pixel's edges, written in full (at 300 dpi a pixel is 1/3 unit).
+        # A point on a pixels' edge (the centre of a pixel at 100 dpi, drawn at
+        # 200) takes the pixel after it, the same for each such point, also when
+        # rounding put it a hair before the edge.
+        u = _PIXEL
+        return '<rect x="%.9g" y="%.9g" width="%.9g" height="%.9g" fill="%s"/>' % (
+            math.floor(x / u + 1e-6) * u, math.floor(y / u + 1e-6) * u, u, u, c)
     st = ' stroke="%s" stroke-width="0.8"' % _esc(edge) if edge else ""
     X, Y, R = _fmt(x), _fmt(y), _fmt(r)
     if m in ("o", ".", None, True, "circle"):

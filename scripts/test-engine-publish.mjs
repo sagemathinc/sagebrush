@@ -2,7 +2,9 @@
 // The engine publisher (scripts/engine-publish.mjs) and its S3 signer (scripts/engine-s3.mjs): AWS's published
 // signature example; a new engine (lib objects, its files, its manifest LAST, read back); another manifest or a lib
 // object of another size refuses before ANY write; an engine already published only gets its missing lib objects; an
-// unclear GET stops; validation refuses a tampered file, a symlink, an unsafe key, a bad id; the environment.
+// unclear GET stops; a HEAD without a length (R2's compressed answer, Nov 22 2026) is settled by the object's sha256;
+// reads ask for the stored bytes, unsigned; validation refuses a tampered file, a symlink, an unsafe key, a bad id;
+// the environment.
 //   node --test scripts/test-engine-publish.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -77,6 +79,29 @@ test("publish: a lib object there with another size refuses, never overwritten, 
   await assert.rejects(publishEngine({ dir, s3, log: quiet }), /ANOTHER size/);
   assert.equal(s3.log.filter(([m]) => m === "PUT").length, 0);
 });
+// (Nov 22 2026, engine-publish's first runs: R2 answered HEAD on a lib JSON object 200 with no Content-Length)
+const noLength = (s3) => { s3.head = async (k) => { s3.log.push(["HEAD", k]); return s3.objects.has(k) ? { status: 200, size: null } : { status: 404, size: null }; }; return s3; };
+test("publish: a lib object there whose HEAD has no length: the same bytes are kept, by sha256", async () => {
+  const { dir } = engineDir(FILES), s3 = noLength(fakeS3(new Map([["lib/a.chunk", Buffer.from("aaaa")]])));
+  await publishEngine({ dir, s3, log: quiet });
+  const puts = s3.log.filter(([m]) => m === "PUT").map(([, k]) => k);
+  assert.ok(!puts.includes("lib/a.chunk"), "kept, not overwritten");
+  assert.ok(s3.log.some(([m, k]) => m === "GET" && k === "lib/a.chunk"), "read to compare");
+  assert.equal(puts.at(-1), `engine/${ID}/manifest.json`);
+});
+test("publish: a lib object there whose HEAD has no length, with other bytes (even of the same size), refuses before ANY write", async () => {
+  for (const other of ["bbbb", "different"]) {
+    const { dir } = engineDir(FILES), s3 = noLength(fakeS3(new Map([["lib/a.chunk", Buffer.from(other)]])));
+    await assert.rejects(publishEngine({ dir, s3, log: quiet }), /ANOTHER content/, other);
+    assert.equal(s3.log.filter(([m]) => m === "PUT").length, 0, other);
+  }
+  // (and a GET that then fails stops)
+  const { dir } = engineDir(FILES), s3 = noLength(fakeS3(new Map([["lib/a.chunk", Buffer.from("aaaa")]])));
+  const get0 = s3.get;
+  s3.get = async (k) => (k === "lib/a.chunk" ? { status: 500, body: null } : get0(k));
+  await assert.rejects(publishEngine({ dir, s3, log: quiet }), /GET lib\/a\.chunk: 500/);
+  assert.equal(s3.log.filter(([m]) => m === "PUT").length, 0);
+});
 test("publish: already published with this manifest: only missing lib objects", async () => {
   const { dir } = engineDir(FILES);
   const s3 = fakeS3(new Map([[`engine/${ID}/manifest.json`, readFileSync(join(dir, "manifest.json"))]]));
@@ -117,4 +142,12 @@ test("environment: the wasm-publish environment's three names, an account id, th
   await s3.head("engine/x/manifest.json");
   assert.equal(seen[0][0], `https://${"a".repeat(32)}.r2.cloudflarestorage.com/sagebrush-releases/engine/x/manifest.json`);
   assert.ok(!JSON.stringify(seen[0][1].headers).includes('"s"') && /^AWS4-HMAC-SHA256 Credential=k\//.test(seen[0][1].headers.authorization));
+  // (reads ask for the stored bytes, so the length comes back; the header is sent, not signed; a PUT doesn't send it)
+  await s3.get("engine/x/manifest.json");
+  await s3.put("lib/x", Buffer.from("x"), "text/plain");
+  for (const [, init] of seen.slice(0, 2)) {
+    assert.equal(init.headers["accept-encoding"], "identity", init.method);
+    assert.ok(!/accept-encoding/.test(init.headers.authorization), init.method);
+  }
+  assert.equal(seen[2][1].headers["accept-encoding"], undefined);
 });
