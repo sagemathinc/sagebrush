@@ -15,7 +15,8 @@ import { render as markdown } from "../markdown";
 import { colorBlock } from "./code-color";
 import { runningTurn, type Artifact, type Thread, type Turn, type UserEntry } from "../workspace/agent-chat/events";
 import { ChatSession } from "../workspace/agent-chat/session";
-import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, diffHtml } from "../workspace/agent-chat/view";
+import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, diffHtml, mirrorSectionNode } from "../workspace/agent-chat/view";
+import { Mirror, MIRROR_COPY, mirrorTitle, type RemoteConversation, type Section } from "../workspace/agent-chat/mirror";
 import { startFakeTurn } from "./fake-agent";
 import { AgentError, RELOAD_KEY, type AgentPairing, type Created, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
@@ -34,13 +35,20 @@ import { mountComposer, renderComposerState, stopLabel } from "../workspace/agen
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
-import { filesIcon, modeSwitch } from "../workspace/mode-switch";
+import { filesIcon, modeSwitch, answerAgentsLive, FILES_TAB } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
 import { entryUrl } from "../workspace/entry-url";
 import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-chat/transcript";
 import { DelegateTasks } from "./delegate";
 import { mountDelegate } from "./delegate-ui";
+import { ownClaudeCommand } from "./own-claude";
+import { workspaceIO } from "./delegate-merge";
 import { toIpynb } from "../notebook/ipynb.js";
+import { mountVersionStamp } from "../version";
+
+// (the build this site serves, under the chat list, for whoever tests it: web/version.ts; first, before anything that
+// waits, so it shows even while the workspace opens; nothing where the site doesn't say)
+void mountVersionStamp(document.getElementById("sbversion"));
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
@@ -48,6 +56,8 @@ declare const __SB_LATEX_HOSTS__: string[];
 const LATEX_URL = new URL("../sagebrush-latex.js", import.meta.url).href;
 
 const STORE = "sagebrush-agents-preview-v1";
+// (the log mirror's cursors, by conversation: local and non-secret, M2)
+const MIRROR_CURSORS = "sagebrush-agents-mirror-v1";
 // (Open in Sagebrush: the file's own page, as the File menu opens it (web/workspace/entry-url.ts), by the entry's id,
 // found when the link is drawn; hidden for a file with no page of its own)
 function openFull(path: string): HTMLAnchorElement {
@@ -58,6 +68,88 @@ function openFull(path: string): HTMLAnchorElement {
   }, () => {});
   return a;
 }
+// The composer's draft, by chat, in this browser (as CoCalc keeps one, #1615): kept as it is typed, back when its chat is
+// shown again (after another chat, Files or a reload), gone once sent. One localStorage record; each chat's draft is
+// written alone into the record as read then, so another tab's drafts of other chats stay. Bounded, so the chats' own
+// record has room: a draft over DRAFT_MAX isn't kept, a chat no longer stored loses its draft, and over DRAFTS_MAX in
+// all the other chats' longest drafts go first, whether written before or waiting now. Both are measured as stored
+// (JSON, its escapes counted). Best effort: storage that is full or unavailable keeps nothing new.
+const DRAFTS = "sagebrush-agents-drafts-v1";
+const DRAFT_MAX = 64 * 1024;
+const DRAFTS_MAX = 512 * 1024;
+function readDrafts(): Record<string, string> {
+  const d: Record<string, string> = Object.create(null);
+  try {
+    const v = JSON.parse(localStorage.getItem(DRAFTS) ?? "{}");
+    if (v && typeof v === "object" && !Array.isArray(v)) for (const [k, t] of Object.entries(v)) if (typeof t === "string") d[k] = t;
+  } catch {}
+  return d;
+}
+// (drafts not written yet: a refused write keeps them here, so a chat shows its own again and the next write retries)
+const draftsPending = new Map<string, string>();
+let draftTimer = 0;
+function flushDrafts() {
+  clearTimeout(draftTimer);
+  draftTimer = 0;
+  if (!draftsPending.size) return;
+  const d = readDrafts();
+  for (const [id, t] of draftsPending) {
+    if (!t.trim()) delete d[id];
+    else if (JSON.stringify(t).length <= DRAFT_MAX) d[id] = t;
+    // (over the limit: the last copy within it stays)
+  }
+  // (the chats as stored (another tab's newer ones too), and this tab's)
+  let stored: Set<string> | null = null;
+  let record: { threads: Thread[] } | null = null;
+  try {
+    const v = JSON.parse(localStorage.getItem(STORE) ?? "null");
+    if (v && Array.isArray(v.threads)) record = v;
+    stored = new Set(record ? record.threads.map((t) => t?.id) : []);
+  } catch {}
+  // (a chat with a draft is stored too: a first visit's chat isn't until something happens in it, and its draft would
+  //  come back to no chat. Added to the record as stored, not this tab's chats written over it, which would undo
+  //  another tab's newer)
+  const missing = stored ? state.threads.filter((t) => draftsPending.has(t.id) && !stored!.has(t.id)) : [];
+  if (missing.length) {
+    try {
+      // (and the chat shown here as the one shown: the person is in this tab; the record's own would undo a switch
+      //  whose save comes before this write)
+      localStorage.setItem(STORE, JSON.stringify(record ? { ...record, threads: [...record.threads, ...missing], current: state.current } : state));
+      for (const t of missing) stored!.add(t.id);
+    } catch {}
+  }
+  if (stored) for (const id of Object.keys(d)) if (!stored.has(id) && !state.threads.some((t) => t.id === id)) delete d[id];
+  // (the composer's chat keeps its draft (at most DRAFT_MAX, well under DRAFTS_MAX); the others longest first, then by
+  //  id, so the same drafts always go)
+  const others = Object.keys(d)
+    .filter((id) => id !== draftOf)
+    .sort((a, b) => d[b].length - d[a].length || (a < b ? -1 : a > b ? 1 : 0));
+  while (others.length && JSON.stringify(d).length > DRAFTS_MAX) delete d[others.shift()!];
+  try {
+    localStorage.setItem(DRAFTS, JSON.stringify(d));
+    draftsPending.clear();
+  } catch {} // (refused: still waiting, in draftsPending, written with the next draft's write)
+}
+// (here, before anything the page waits for: a page left, even while it still opens, keeps its draft, and the chats and
+//  the no-demo marker if their save is still waiting (a reload within save()'s 300 ms would lose them); only then, so
+//  a tab left idle never writes its chats over another tab's newer ones)
+addEventListener("pagehide", () => {
+  flushDrafts();
+  if (storeWaiting) {
+    try {
+      localStorage.setItem(STORE, JSON.stringify(state));
+    } catch {}
+  }
+});
+let storeWaiting = false;
+function putDraft(id: string, text: string, now = false) {
+  draftsPending.set(id, text);
+  if (now) return flushDrafts();
+  clearTimeout(draftTimer);
+  draftTimer = window.setTimeout(flushDrafts, 300);
+}
+/** The chat whose draft the composer holds (null until the composer is up). */
+let draftOf: string | null = null;
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;
 
@@ -84,7 +176,13 @@ const session = new ChatSession({
   },
   store(s) {
     clearTimeout(saveTimer);
-    saveTimer = window.setTimeout(() => localStorage.setItem(STORE, JSON.stringify(s)), 300);
+    storeWaiting = true;
+    saveTimer = window.setTimeout(() => {
+      storeWaiting = false;
+      try {
+        localStorage.setItem(STORE, JSON.stringify(s));
+      } catch {} // (storage full: the chats stay here, kept at the next save that fits)
+    }, 300);
   },
   pairing: () => pairing,
   demo: (prompt, emit) => startFakeTurn(prompt, emit, speed()),
@@ -109,9 +207,13 @@ const session = new ChatSession({
         );
       }
     }
+    // (a turn of the agent's that ended live: the log mirror uploads what it has)
+    if (d.type === "turn_finished" && !replayed && !session.readOnly(thread)) void mirror.kick(thread.id);
     if (thread.id === state.current) schedule();
   },
   changed: (all) => (all ? renderAll() : renderComposer()),
+  // (a replay with a tag is the log mirror's, never the display's)
+  tagged: (params, from) => { mirror.onReplay(params, from); },
   notSent(why) {
     // (over a runner, each cause in its own words: a queue that's full now, or a message over the connection's limit)
     if (why === "full") toast(NOT_SENT.full(agentName()), 6000);
@@ -129,12 +231,67 @@ const current = () => session.current();
 const interrupt = (thread: Thread) => session.interrupt(thread);
 
 // ---------------------------------------------------------------------------
+// The log mirror (M2, agent-chat/mirror.ts): with it on, this page uploads its agent's log to the person's account,
+// and lists and shows (read-only) what the account holds that this browser doesn't. Nothing of it shows where the
+// site's mirror isn't available to the person.
+
+const mirror = new Mirror({
+  fetch: (path, init) => fetch(path, init),
+  pairing: () => pairing,
+  loadCursors() {
+    try {
+      return JSON.parse(localStorage.getItem(MIRROR_CURSORS) ?? "");
+    } catch {
+      return null;
+    }
+  },
+  storeCursors(c) {
+    try {
+      localStorage.setItem(MIRROR_CURSORS, JSON.stringify(c));
+    } catch {}
+  },
+  changed: () => {
+    renderSidebar();
+    renderMirrorSettings();
+    renderHeader(); // (the banner says where the chats are kept)
+  },
+});
+/** The mirrored conversation shown instead of a thread of this browser's, or null. */
+let mirrorOpen: { conversation: string; locator: string; title: string; sections: Section[] } | null = null;
+const mirrorTitles = new Map<string, string>();
+let mirrorDeleting = false;
+
+async function openMirror(c: RemoteConversation) {
+  // (a task's view shown: it gives the main pane to the mirrored conversation, closed first, as a thread's click does)
+  if (delegateUi.showing() !== null) delegateUi.close();
+  if (!mirrorOpen && !(await mayLeaveThread())) return;
+  const r = await mirror.readConversation(c.conversation).catch(() => null);
+  // (a task opened while the conversation was read: the person's later choice stands)
+  if (delegateUi.showing() !== null) return;
+  if (!r) return toast(MIRROR_COPY.gap);
+  const title = mirrorTitle(r.sections);
+  mirrorTitles.set(c.conversation, title);
+  mirrorOpen = { conversation: c.conversation, locator: r.locator, title, sections: r.sections };
+  openArtifact = null;
+  $("#mirror-log").dataset.conv = ""; // (drawn again, as read now: new sections, new marks)
+  renderAll();
+  document.body.classList.remove("nav-open");
+}
+function closeMirror() {
+  mirrorOpen = null;
+}
+
+// ---------------------------------------------------------------------------
 // Sending
 
 function submit(mode: UserEntry["mode"]) {
+  // (a mirrored conversation is read-only: nothing is sent from it)
+  if (mirrorOpen) return;
   // (not connected, in a chat the demo may not answer: Send is inert and the draft stays, A14 C1; a note still posts)
   if (!session.submit(editor.value, mode)) return;
+  if (mode !== "note") void mirror.kick(current().id);
   editor.value = "";
+  putDraft(draftOf || current().id, "", true);
   renderAll();
   scrollToEnd(true);
 }
@@ -174,6 +331,7 @@ function md(src: string): string {
 
 function renderAll() {
   renderSidebar();
+  renderMirrorView();
   renderThread();
   renderArtifacts();
   renderComposer();
@@ -184,14 +342,15 @@ function renderSidebar() {
   list.innerHTML = "";
   for (const t of [...state.threads].reverse()) {
     const a = document.createElement("button");
-    a.className = "thread" + (t.id === state.current ? " on" : "");
+    a.className = "thread" + (t.id === state.current && !mirrorOpen ? " on" : "");
     a.textContent = t.title;
     if (isRunning(t)) a.append(Object.assign(document.createElement("span"), { className: "dot", title: "working" }));
     a.onclick = async () => {
       // (a task's view shown: back to the chats, this one)
       if (delegateUi.showing() !== null) delegateUi.close();
-      if (t.id === state.current) return;
-      if (!(await mayLeaveThread())) return;
+      if (t.id === state.current && !mirrorOpen) return;
+      if (!mirrorOpen && !(await mayLeaveThread())) return;
+      closeMirror();
       state.current = t.id;
       openArtifact = t.artifacts.at(-1)?.id ?? null;
       save();
@@ -201,6 +360,37 @@ function renderSidebar() {
     };
     list.append(a);
   }
+  // (a chat of this browser's that the account also holds: its mirrored copy stays readable, apart, never merged)
+  const copy = mirror.cached().find((c) => c.conversation === current().id && c.streams.some((x) => x.next_n > 1));
+  const cb = $("#mirror-copy");
+  cb.hidden = !copy || !!mirrorOpen;
+  setText(cb, MIRROR_COPY.viewCopy);
+  cb.onclick = () => { if (copy) void openMirror(copy); };
+  // (the account's mirrored conversations this browser doesn't have: the same list, each with a small badge, Q2)
+  const here = new Set(state.threads.map((t) => t.id));
+  for (const c of mirror.cached()) {
+    if (here.has(c.conversation) || !c.streams.some((x) => x.next_n > 1)) continue;
+    const a = document.createElement("button");
+    a.className = "thread mirror" + (mirrorOpen?.conversation === c.conversation ? " on" : "");
+    a.textContent = mirrorTitles.get(c.conversation) ?? MIRROR_COPY.untitled;
+    a.append(Object.assign(document.createElement("span"), { className: "badge", textContent: MIRROR_COPY.badge }));
+    a.onclick = () => void openMirror(c);
+    list.append(a);
+  }
+}
+
+/** A mirrored conversation, in place of the thread: its sections, read-only, with no composer. */
+function renderMirrorView() {
+  const m = mirrorOpen;
+  const view = $("#mirror-log");
+  $("#log").hidden = !!m;
+  view.hidden = !m;
+  $(".composer-wrap").hidden = !!m;
+  $("#mirror-readonly").hidden = !m;
+  if (!m) return void (view.dataset.conv = "");
+  if (view.dataset.conv === m.conversation) return;
+  view.dataset.conv = m.conversation;
+  view.replaceChildren(...m.sections.map((sec) => mirrorSectionNode(sec, agentName())));
 }
 
 // What's in the DOM, by entry, so a streaming turn re-renders alone.
@@ -446,7 +636,8 @@ async function mayClosePane(threadId: string | null): Promise<boolean> {
 function renderArtifacts() {
   const thread = current();
   const pane = $("#artifacts");
-  const a = thread.artifacts.find((x) => x.id === openArtifact);
+  // (a mirrored conversation shown: no pane, not even the hidden chat's)
+  const a = mirrorOpen ? undefined : thread.artifacts.find((x) => x.id === openArtifact);
   applyPaneClasses(a, fullscreen);
   relayout(); // (the columns re-clamped for the pane now shown or gone: an agent's own open too)
   if (paneThread !== thread.id) {
@@ -763,12 +954,14 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
     clearTimeout(timer);
     const value = latest(); // (the text as it is now: what this write writes, whenever its turn comes)
     inflight = inflight.then(async () => {
-      if (!open || stopped || rev < 0 || value === savedText) return;
+      if (!open || stopped || rev < 0) return;
+      // (nothing new to write: said as saved once the text shown is the file's, so no "Saving…" stays, #1617)
+      if (value === savedText) return void (latest() === savedText && guard === "open" && say("Saved"));
       try {
         const r = await workspace!.write(path, value, { base: rev, ...(fid ? { fid } : {}), admit });
         rev = r.rev;
         savedText = value;
-        say(latest() === value ? "Saved" : "Editing…");
+        if (guard === "open") say(latest() === value ? "Saved" : "Saving…");
       } catch (e) {
         if (!open) return; // (closed meanwhile: refused by design)
         stopped = true;
@@ -781,7 +974,8 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
   const changed = (value: string) => {
     if (!alive) return;
     text = value;
-    say("Editing…");
+    // (not over why a write failed (nothing more is written from here), nor over Closing…)
+    if (!stopped && guard === "open") say("Saving…");
     clearTimeout(timer);
     timer = window.setTimeout(() => void write(), 700);
   };
@@ -968,6 +1162,7 @@ function mountTexFrame(path: string, box: HTMLElement): FileHost {
 }
 
 function renderComposer() {
+  showDraft();
   renderComposerState(isRunning(current()), queues.get(current().id)?.length ?? 0, session.isAway(current()), session.canSteer(current()));
   renderConn();
 }
@@ -1017,6 +1212,7 @@ const CONN = {
   discarded: "Claude's earlier connection was for another page or workspace, so it needs a new code.",
   unusable: "This page's earlier connection to Claude couldn't be used, so it needs a new code.",
   kept: "Claude was connected to this page earlier.",
+  elsewhere: "Claude is connected to another page. Use that page, or close it and Reconnect here.",
 };
 let connBar: ConnBar | null = null;
 let connShown = false; // (the bar's ×: hidden until the next change)
@@ -1150,7 +1346,24 @@ function toast(text: string, ms = 1500) {
 // ---------------------------------------------------------------------------
 // The page
 
-const editor = mountComposer({ submit, stop: () => interrupt(current()), render: md, typeset: (el) => typeset(el) });
+const editor = mountComposer({
+  submit,
+  stop: () => interrupt(current()),
+  render: md,
+  typeset: (el) => typeset(el),
+  changed: (v) => { if (draftOf) putDraft(draftOf, v); },
+});
+/** The chat shown's draft in the composer, when another chat's was there. */
+function showDraft() {
+  const id = current().id;
+  if (draftOf === null || draftOf === id) return;
+  draftOf = id;
+  editor.value = draftsPending.get(id) ?? readDrafts()[id] ?? "";
+}
+// (the chat shown's draft at once, as the composer comes up: the page's first render waits for the workspace, and by
+//  then the person may have typed)
+draftOf = "";
+showDraft();
 // (Delegate, for an agent on this computer that offers it: delegate.ts's tasks, drawn by delegate-ui.ts)
 const delegateTasks = new DelegateTasks({ changed: () => delegateUi?.render() });
 const delegateUi = mountDelegate({
@@ -1159,7 +1372,9 @@ const delegateUi = mountDelegate({
   mayRun: () => pairing?.grant?.run === true,
   openPath: () => current().artifacts.find((x) => x.id === openArtifact)?.path ?? null,
   draft: () => editor.value,
-  clearDraft: () => { editor.value = ""; },
+  // (the Pair chat shown, once something has been said in it: a brief is drafted from it, the agent saying if it can't)
+  conversation: () => { const t = current(); return t.entries.some((e) => e.kind === "turn" || e.kind === "user") ? t.id : null; },
+  clearDraft: () => { editor.value = ""; putDraft(draftOf || current().id, "", true); },
   // (a workspace document as the task's copy starts from it: a notebook's .ipynb text, a text file's text; its path as
   //  the protocol has it, relative)
   async readDoc(path) {
@@ -1172,26 +1387,37 @@ const delegateUi = mountDelegate({
   },
   // (a task's turns are the paired agent's, on this computer: never shown as the scripted demo's)
   turnNode: (thread, turn) => viewTurnNode(thread, { ...turn, agent: turn.agent ?? agentName() }, { answer: () => {}, openArtifact: () => {}, md }),
-  shown: (on) => { document.body.classList.toggle("task-shown", on); if (!on) renderAll(); },
+  // (a task shown takes the main pane from a mirrored conversation too: the mirror closes, as when a thread is opened)
+  shown: (on) => {
+    document.body.classList.toggle("task-shown", on);
+    if (on && mirrorOpen) { closeMirror(); renderAll(); }
+    if (!on) renderAll();
+  },
   site: new URL("../", import.meta.url),
+  // (a proposal's .tex rendered under its diff, where this page has the LaTeX editor, as an artifact's .tex is)
+  latex: __SB_LATEX__ && __SB_LATEX_HOSTS__.includes(location.hostname) ? () => import(/* @vite-ignore */ LATEX_URL) : null,
   toast,
+  // (Merge: this browser's workspace, and the agent's record of it)
+  merge: workspaceIO(() => workspace, (task, params) => delegateTasks.merged(task, params), /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? async (op, path) => { if (typeof (window as any).__mergeSeam === "function") await (window as any).__mergeSeam(op, path); } : undefined),
+  session: sessionStorage,
 });
 // (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with
 //  its files, as the file panel's switch opens this page; William, Nov 12)
 { const sw = modeSwitch("agents"), brand = document.querySelector<HTMLElement>("nav.side .brand"); sw.style.marginLeft = "auto"; if (brand) { brand.style.whiteSpace = "nowrap"; brand.append(sw); } const f = sw.querySelector<HTMLButtonElement>('[data-mode="files"]'); if (f) f.onclick = () => void toFiles(); }
-// (to the files: the notebook page with its file browser shown.  With an agent connected or connecting, in a new tab:
-//  leaving would end this page's connection, and a page that comes back by navigating can't take it up again (only a
-//  reload can), so the agent's turn would be lost.  This page, its chat and the agent stay as they are.  Else the
-//  thread is left as New chat leaves it (mayLeaveThread): its files' pending edits saved, a running cell stopped only
-//  if the person says so; refused, this page stays and nothing is changed.  Admitted, the browser's own choice to show
-//  the files is set, then the page left)
+// (to the files: the notebook page with its file browser shown, in this tab: coming back reconnects the agent by itself
+//  while its grant lasts (#1620, agent-pair.ts reloadDecision).  Only while an agent's turn runs here, in a new tab, so
+//  the turn's work in this page goes on; that tab is named so its way back to Agents returns here (mode-switch.ts
+//  backToAgentsTab) rather than opening a second Agents page the agent would refuse.  Else the thread is left as New
+//  chat leaves it (mayLeaveThread): its files' pending edits saved, a running cell stopped only if the person says so;
+//  refused, this page stays and nothing is changed.  Admitted, the browser's own choice to show the files is set, then
+//  the page left)
 let leaving = false;
 async function toFiles() {
-  if (pairing && pairing.state !== "closed") {
+  if (pairing && pairing.state !== "closed" && state.threads.some((t) => isRunning(t))) {
     try { localStorage.setItem("sagebrush-files-sidebar", "1"); } catch {}
     // (opened in the click itself, so the browser allows it; refused anyway, this page stays and says so)
     const w = window.open("/", "_blank");
-    if (w) w.opener = null;
+    if (w) { w.name = FILES_TAB; w.opener = null; }
     else toast("Your browser blocked the new tab for Files. Allow pop-ups for this site, or open it in a new tab yourself.", 6000);
     return;
   }
@@ -1210,7 +1436,9 @@ $("#files-big").prepend(filesIcon());
 $("#files-big").onclick = () => void toFiles();
 $("#new").onclick = async () => {
   if (delegateUi.showing() !== null) delegateUi.close();
-  if (!(await mayLeaveThread())) return;
+  // (from a mirrored conversation: nothing of this browser's to leave; it closes)
+  if (!mirrorOpen && !(await mayLeaveThread())) return;
+  closeMirror();
   session.newThread();
   openArtifact = null;
   renderAll();
@@ -1251,7 +1479,8 @@ addEventListener("keydown", (e) => {
   if (e.key === "Escape" && fullscreen) {
     fullscreen = false;
     renderArtifacts();
-  } else if (e.key === "Escape" && isRunning(current()) && !editor.field) {
+  } else if (e.key === "Escape" && !mirrorOpen && isRunning(current()) && !editor.field) {
+    // (never while a mirrored conversation is shown over the chat: Escape there stops nothing of the hidden chat's)
     interrupt(current());
   }
 });
@@ -1492,6 +1721,10 @@ const agentRuns = (ws: Workspace) => agentRunsFor(ws as any, {
 // (the current pairing's listener for the agent's messages, removed when another pairing replaces it)
 let offAgent: (() => void) | null = null;
 function mountPairing(ws: Workspace) {
+  // (Delegate's last task list, kept in this browser for this workspace: shown while the agent isn't connected, #1622)
+  let kept: Storage | null = null;
+  try { kept = localStorage; } catch { kept = null; }
+  delegateTasks.keepIn(kept, `sb-delegate-tasks-v1:${ws.identity.workspace}`);
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
     runVerbs: runVerbsFor(agentRuns(ws)),
@@ -1535,6 +1768,13 @@ function mountPairing(ws: Workspace) {
           granted = true;
           // (what this page missed while it was away, from the agent's log; an agent without one: away turns end)
           session.resume();
+          // (the log mirror: the runner's log checked against what the account holds (the runner wins), then what the
+          //  account doesn't have yet uploaded)
+          void mirror.refresh().then(async () => {
+            if (pairing !== p) return;
+            await mirror.reconcile().catch(() => {});
+            for (const t of state.threads) if (session.marked(t) && !session.readOnly(t)) void mirror.kick(t.id);
+          });
           if (connBar) setConn(null);
           if (connectFrom) {
             connectFrom = null;
@@ -1565,6 +1805,8 @@ function mountPairing(ws: Workspace) {
   });
 }
 if (workspace) mountPairing(workspace);
+// (a Files tab this page opened asks whether its agent is still connected here, to come back to this tab: #1620)
+answerAgentsLive(() => pairing?.state === "granted");
 // (the person's review of an agent's branches: in a dialog, its chunk fetched at the first click)
 $("#review").onclick = () => { if (workspace) void openReviewDialog(workspace.reviewHost(), new URL("../", import.meta.url)); };
 // (the storage message's [Retry]: the open again, then the pairing, as a load would; never `disabled` while it runs)
@@ -1590,11 +1832,94 @@ $("#ws-retry").onclick = async () => {
     renderHeader();
   }
 };
-addEventListener("pagehide", () => {
-  // (the chats, and the no-demo marker, kept now: a reload within save()'s 300 ms would lose them)
-  if (saveTimer) localStorage.setItem(STORE, JSON.stringify(state));
-});
 $("#howto").onclick = () => ($("#help").hidden = !$("#help").hidden);
+// (the help box's command for this site: the release's line, with --origin where the agent doesn't trust this page's
+//  origin by default, as on a DEV or preview site (#1604))
+{ const pre = document.querySelector<HTMLElement>("#help pre"); if (pre) pre.textContent = ownClaudeCommand(pre.textContent?.trim() ?? "", location.origin); }
+
+// ---- the log mirror's settings (design §5): the switch, what it means, the storage line; turning it off deletes
+let mirrorConfirm = false;
+function fmtBytes(n: number): string {
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1000 && i < u.length - 1) (n /= 1000), i++;
+  return `${i === 0 ? n : n < 10 ? n.toFixed(1) : Math.round(n)} ${u[i]}`;
+}
+function renderMirrorSettings() {
+  const st = mirror.status;
+  $("#mirror-btn").hidden = !st.available;
+  const box = $("#mirror-settings");
+  const on = mirror.on();
+  const sw = $<HTMLInputElement>("#mirror-switch");
+  sw.checked = on;
+  setText($("#mirror-about"), on ? MIRROR_COPY.on : MIRROR_COPY.off);
+  const lines: string[] = [];
+  if (on) lines.push(MIRROR_COPY.storage(fmtBytes(st.bytes ?? 0), st.quota !== undefined ? fmtBytes(st.quota) : null));
+  if (on && mirror.full) lines.push(MIRROR_COPY.full);
+  if (on && live() && !mirror.agentCan()) lines.push(MIRROR_COPY.updateAgent);
+  // ("deleted" only from a status read that says nothing is pending; one that couldn't be read says nothing more)
+  if (!on && mirrorDeleting) lines.push(st.available && st.pending === 0 ? MIRROR_COPY.deleted : MIRROR_COPY.deleting);
+  $("#mirror-lines").replaceChildren(...lines.map((t) => Object.assign(document.createElement("div"), { textContent: t })));
+  $("#mirror-confirm").hidden = !mirrorConfirm;
+  box.toggleAttribute("data-on", on);
+}
+$("#mirror-btn").onclick = () => {
+  mirrorConfirm = false;
+  void mirror.refresh();
+  renderMirrorSettings();
+  $<HTMLDialogElement>("#mirror-dlg").showModal();
+};
+$("#mirror-close").onclick = () => $<HTMLDialogElement>("#mirror-dlg").close();
+$<HTMLInputElement>("#mirror-switch").onchange = async (e) => {
+  const sw = e.target as HTMLInputElement;
+  if (sw.checked) {
+    mirrorDeleting = false;
+    await mirror.enable();
+    await mirror.remote(true).catch(() => []);
+    if (live()) for (const t of state.threads) if (session.marked(t)) void mirror.kick(t.id);
+  } else {
+    // (turning it off deletes the copy: asked first, in the panel's own words)
+    sw.checked = true;
+    mirrorConfirm = true;
+  }
+  renderMirrorSettings();
+};
+$("#mirror-confirm-no").onclick = () => {
+  mirrorConfirm = false;
+  renderMirrorSettings();
+};
+$("#mirror-confirm-yes").onclick = async () => {
+  mirrorConfirm = false;
+  mirrorDeleting = true;
+  if (await mirror.disable()) {
+    closeMirror();
+    renderAll();
+    // ("deleted" only once the account's object says nothing is pending)
+    for (let i = 0; i < 100 && !(mirror.status.available && mirror.status.pending === 0) && !mirror.on(); i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      await mirror.refresh();
+    }
+  }
+  renderMirrorSettings();
+};
+$("#mirror-delete-one").textContent = MIRROR_COPY.deleteOne;
+$("#mirror-delete-one").onclick = async () => {
+  const m = mirrorOpen;
+  if (!m) return;
+  if (await mirror.deleteConversation(m.locator)) {
+    closeMirror();
+    renderAll();
+  }
+};
+setText($("#mirror-readonly-text"), MIRROR_COPY.readOnly);
+setText($("#mirror-switch-label"), MIRROR_COPY.switch);
+setText($("#mirror-confirm-text"), MIRROR_COPY.confirmOff);
+setText($("#mirror-confirm-yes"), MIRROR_COPY.confirmOffButton);
+// (every 30 s of a running turn, the mirror uploads what the log has so far)
+setInterval(() => {
+  for (const t of state.threads) if (isRunning(t)) void mirror.kick(t.id);
+}, 30_000);
+void mirror.refresh().then(() => mirror.remote()).catch(() => {});
 $("#copychat").onclick = () => { const t = current(); void copyText(async () => threadMarkdown(t, { agent: agentName(), link: await fileLinks(t) }), "Copied the chat"); };
 
 /** The header's agent line from text only (an agent's and a computer's names are text, never markup). */
@@ -1604,6 +1929,11 @@ function whoText(who: HTMLElement, dot: string, name: string, small: string) {
   const s = document.createElement("small");
   s.textContent = small;
   who.replaceChildren(d, ...(name ? [document.createTextNode(name + " ")] : []), s);
+}
+
+/** Where the chats are kept, for the banner: "mirrored" only while uploads are actually under way (mirror.ts). */
+function keptWhere() {
+  return mirror.keptLine();
 }
 
 function renderHeader() {
@@ -1626,14 +1956,14 @@ function renderHeader() {
   $("#stop").textContent = stopLabel(agentName());
   $("#connect").toggleAttribute("disabled", live());
   $("#banner").innerHTML = live()
-    ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; chats are kept in this browser.`
+    ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; ${mirror.uploading() ? "chats are kept in this browser and mirrored to your Sagebrush account" : "chats are kept in this browser"}.`
     : connBar?.kind === "restoring"
     ? "Reconnecting to Claude on your computer…"
     : pairing && pairing.state === "paired" && connectingTo === null
-    ? `${esc(agentName())} is waiting for you to allow it in the dialog. Chats are kept in this browser only.`
+    ? `${esc(agentName())} is waiting for you to allow it in the dialog. ${keptWhere()}`
     : inert(current())
-    ? "Claude isn't connected to this page. Chats are kept in this browser only."
-    : "Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own (\"Use your own Claude\"). Chats are kept in this browser only.";
+    ? `Claude isn't connected to this page. ${keptWhere()}`
+    : `Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own ("Use your own Claude"). ${keptWhere()}`;
 }
 
 renderHeader();

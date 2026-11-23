@@ -6,8 +6,10 @@
 // files checked against their blob ids.
 //   bun web/agents/test-delegate.mjs
 import { AgentPairing } from "../workspace/agent-pair.ts";
-import { DelegateTasks, chipOf, DELEGATE_TEXT } from "./delegate.ts";
+import { DelegateTasks, chipOf, currentOf, DELEGATE_TEXT, DELEGATE_LIMITS } from "./delegate.ts";
+import { TASK_RESULTS } from "../workspace/tasks-schema.ts";
 import { delegateHost } from "./test-delegate-host.mjs";
+import { isDone, mergedParams, newRecord, prepare, run } from "./delegate-merge.ts";
 
 let failures = 0;
 const ok = (c, msg, extra) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c && extra !== undefined ? " " + JSON.stringify(extra).slice(0, 400) : "")); if (!c) failures++; };
@@ -76,6 +78,52 @@ ok(chipOf(tB().entry) === "Failed" && tB().reason === "the runner stopped" && !t
 const C = await H.addTask({ title: "A third" });
 await until(() => D.tasks.length === 3);
 ok(D.task(C.task)?.entry.title === "A third", "an event for a task not listed: the list read again");
+
+// ---- why an interrupted task stopped (#1621): the page announces "tasks.reason", and an agent that gives a reason's
+//      code has the chip say what happened, never "Interrupted" unless it was; an unknown code, or none, is Interrupted
+ok(H.pageFeatures?.includes("tasks.reason"), "the page announces tasks.reason in page.features", H.pageFeatures);
+H.emit(C.task, { type: "task_status", status: "interrupted", reason: "the agent's turn ended without a proposal", code: "no_proposal" });
+await until(() => D.task(C.task).entry.status === "interrupted");
+ok(chipOf(D.task(C.task).entry, D.task(C.task).code) === "Ended without a proposal" && D.task(C.task).reason === "the agent's turn ended without a proposal", "a turn that ended without a proposal: the chip says so, its reason kept", { chip: chipOf(D.task(C.task).entry, D.task(C.task).code), reason: D.task(C.task).reason });
+for (const [code, want] of [["stopped", "Stopped"], ["switched_off", "Stopped: Delegate turned off"], ["limit", "Stopped at a limit"], ["failed", "Ended with an error"], ["restarted", "Stopped: the agent restarted"], ["unproposable", "Couldn't propose"], ["brand_new", "Interrupted"]]) {
+  ok(chipOf({ status: "interrupted", question: false }, code) === want, `an interrupted task with code ${code}: ${want}`);
+}
+ok(chipOf({ status: "interrupted", question: false }) === "Interrupted" && chipOf({ status: "working", question: false }, "stopped") === "Working", "no code: Interrupted; a code on a task not interrupted changes nothing");
+// (a reason as long as the agent allows, in characters of three UTF-8 bytes each: 380 characters, 1080 bytes, past the
+//  page's old 1024-byte bound; on its event here, and from tasks.list and tasks.get below)
+const LONG = "the copy cannot be proposed (" + "界".repeat(350) + ")";
+H.emit(C.task, { type: "task_status", status: "working" });
+H.emit(C.task, { type: "task_status", status: "interrupted", reason: LONG, code: "unproposable" });
+await until(() => D.task(C.task).reason === LONG);
+ok(D.task(C.task).reason === LONG && chipOf(D.task(C.task).entry, D.task(C.task).code) === "Couldn't propose" && new TextEncoder().encode(LONG).length === 1080, "a multibyte reason within the agent's bound (380 characters, 1080 bytes) on its event: kept whole", { bytes: new TextEncoder().encode(LONG).length, reason: (D.task(C.task).reason ?? "").length });
+// (Resume through the page's own call: refused, the task still stopped and still says why; done, working again and its
+//  old reason and code gone, as soon as it answers and after the agent's own events and a fresh list)
+H.emit(C.task, { type: "task_status", status: "working" });
+H.emit(C.task, { type: "task_status", status: "interrupted", reason: "stopped by the person", code: "stopped" });
+await until(() => D.task(C.task).code === "stopped");
+H.fail.set("tasks.resume", "busy");
+const refusedResume = await why(D.resume(C.task));
+H.fail.clear();
+ok(refusedResume === "busy" && D.task(C.task).entry.status === "interrupted" && D.task(C.task).reason === "stopped by the person" && D.task(C.task).code === "stopped", "a refused Resume: still stopped, and still says why", { refusedResume, reason: D.task(C.task).reason, code: D.task(C.task).code });
+await D.resume(C.task);
+const atOnce = { status: D.task(C.task).entry.status, reason: D.task(C.task).reason, code: D.task(C.task).code };
+await until(() => sentTasks(H).filter((m) => m.method === "tasks.list").length > 0 && D.task(C.task).entry.seq === C.log.length);
+await D.refresh();
+const settled = { status: D.task(C.task).entry.status, reason: D.task(C.task).reason, code: D.task(C.task).code, chip: chipOf(D.task(C.task).entry, D.task(C.task).code) };
+ok(atOnce.status === "working" && atOnce.reason === undefined && atOnce.code === undefined && settled.status === "working" && settled.reason === undefined && settled.code === undefined && settled.chip === "Working", "Resume done: working again, its old reason and code gone at once and after the agent's events and a fresh list", { atOnce, settled });
+// (and Stop through the page's own call: stopped at once, nothing older shown until the agent's event says why)
+const stopped = await D.stop(C.task).then((s) => s, (e) => e?.code ?? String(e));
+const stopNow = { status: D.task(C.task).entry.status, reason: D.task(C.task).reason, code: D.task(C.task).code };
+await until(() => D.task(C.task).code === "stopped");
+ok(stopped === "interrupted" && stopNow.status === "interrupted" && stopNow.reason === undefined && D.task(C.task).reason === "stopped by the person" && chipOf(D.task(C.task).entry, D.task(C.task).code) === "Stopped", "Stop: stopped at once, then why from the agent's own event", { stopNow, reason: D.task(C.task).reason });
+{
+  // (the schema: the fields only in their shapes; a code that isn't one is refused, as any malformed answer)
+  const e = { task: "a".repeat(32), title: "t", status: "interrupted", target: "local", run: false, round: 0, seq: 1, proposal: null, question: false, updated: 1 };
+  const parse = (x) => { try { return TASK_RESULTS["tasks.list"]({ tasks: [x] }).tasks[0]; } catch (err) { return "refused"; } };
+  ok(parse({ ...e, reason: "r", reason_code: "no_proposal" })?.reason_code === "no_proposal" && parse({ ...e, reason_code: "NO!" }) === "refused" && parse({ ...e, reason: 7 }) === "refused" && parse(e)?.reason_code === undefined, "the schema: reason and reason_code taken in their shapes, a malformed code refused, an entry without them as before");
+  // (the bound, in UTF-8 bytes: the agent's 500 characters of up to 4 bytes, 2000; one byte past it refused)
+  ok(parse({ ...e, reason: "𝔼".repeat(500) })?.reason?.length === 1000 && parse({ ...e, reason: "𝔼".repeat(500) + "x" }) === "refused", "the schema's reason bound is the agent's: 500 four-byte characters (2000 bytes) taken, one byte more refused");
+}
 H.sock.send(JSON.stringify({ jsonrpc: "2.0", method: "task.event", params: { task: A.task, seq: A.log.length + 1, event: { type: "ask", note: "x" } } }));
 A.log.push({ seq: A.log.length + 1, event: { type: "ask", note: "x" } });
 await until(() => tA().skipped === 2);
@@ -101,6 +149,35 @@ ok(/^[0-9a-f]{32}$/.test(id) && D.tasks.length === before + 1 && st.params.targe
   ok((await why(src.file("work/notes.txt", d.proposal))) === "stale", "bytes whose blob id isn't the diff's: refused (stale), never shown");
   A.commits.get(d.proposal)["work/notes.txt"].blob = "0".repeat(40);
   ok((await why(src.file("work/notes.txt", d.proposal))) === "stale", "an answer naming another blob than the diff's: refused (stale)");
+}
+
+// ---- Ask for changes (S3 P2): the note and the person's current versions back to the same task; its next round
+{
+  const asks = () => sentTasks(H).filter((m) => m.method === "tasks.ask").length;
+  const commit1 = tA().proposal.commit;
+  ok((await why(D.ask(A.task, { proposal: commit1, seq: 0, note: "   ", current: [] }))) === "bad_request" && asks() === 0, "an empty note: refused here, nothing sent");
+  ok((await why(D.ask(A.task, { proposal: commit1, seq: 0, note: "x".repeat(DELEGATE_LIMITS.noteBytes + 1), current: [] }))) === "too_large" && asks() === 0, "a note over 16 KB: refused here, nothing sent");
+  ok((await why(D.ask(A.task, { proposal: "f".repeat(40), seq: 0, note: "more", current: [] }))) === "stale" && asks() === 0, "a proposal that isn't the task's latest: refused here (stale), nothing sent");
+  ok((await why(D.ask(A.task, { proposal: commit1, seq: 0, note: "more", current: [{ path: "work/notes.txt", kind: "file", content: "x".repeat(4 * 2 ** 20 + 1) }] }))) === "too_large" && asks() === 0, "a current version over 4 MB: refused here, by name, nothing sent");
+  // (the current versions: the task's own files only, as the workspace has them; one gone is left out)
+  const files = [{ path: "work/a.ipynb", change: "modified" }, { path: "work/new.txt", change: "added" }, { path: "work/notes.txt", change: "modified" }];
+  const read = async (path) => { if (path === "work/notes.txt") throw new Error("gone"); return { path, kind: path.endsWith(".ipynb") ? "notebook" : "file", content: "mine of " + path }; };
+  const current = await currentOf(files, read);
+  ok(current.map((d) => d.path).join() === "work/a.ipynb" && current[0].content === "mine of work/a.ipynb", "the current versions: the task's own files (not one the agent added), one gone from the workspace left out", current.map((d) => d.path));
+  const src = D.source(A.task, commit1);
+  await src.diff();
+  const seq = src.seen().seq;
+  const r = await D.ask(A.task, { proposal: commit1, seq, note: "  Also a line at the top.\n", current });
+  const sent = sentTasks(H).findLast((m) => m.method === "tasks.ask")?.params;
+  ok(r.status === "working" && sent?.task === A.task && sent.proposal === commit1 && sent.seq === seq && sent.note === "Also a line at the top." && sent.current.length === 1 && H.asks.length === 1, "Ask for changes: tasks.ask with the proposal, the task's seq, the note (trimmed) and the current versions", sent);
+  ok(chipOf(tA().entry) === "Working", "the chip back to Working at once", chipOf(tA().entry));
+  await until(() => tA().entry.seq > seq);
+  ok((await why(D.ask(A.task, { proposal: commit1, seq, note: "again", current: [] }))) === "stale" && asks() === 1, "asked again on the same proposal, now moved on: refused (stale), said as such", asks());
+  ok((await D.ask(A.task, { proposal: commit1, seq, note: "again", current: [] }).catch((e) => e.message)) === DELEGATE_TEXT.askMoved, "its words: open the latest proposal");
+  // (the next round, from the agent: the chip Proposal ready again, with round 2's commit)
+  const commit2 = await H.propose(A.task, { "work/notes.txt": "top\none\ntwo\n" });
+  await until(() => tA().entry.proposal === commit2 && tA().entry.status === "proposal");
+  ok(tA().entry.proposal === commit2 && tA().entry.round === 2 && chipOf(tA().entry) === "Proposal ready", "round 2: the chip Proposal ready again, the task's proposal now round 2's commit", { round: tA().entry.round, chip: chipOf(tA().entry) });
 }
 
 // ---- the switch's off: Start refused from its first moment; the chosen tasks closed first; then the capability
@@ -248,6 +325,128 @@ for (const [what, event, chip] of [["failed", { type: "task_status", status: "fa
   H7.stop();
 }
 
+// ---- Close (tasks.close {proposal, seq}): the proposal as it was read; a task that moved on since is refused (stale)
+{
+  const H8 = delegateHost();
+  const T1 = await H8.addTask({ title: "one", base: { "a.txt": "x\n" }, proposal: { "a.txt": "y\n" } });
+  const T2 = await H8.addTask({ title: "two", base: { "a.txt": "x\n" }, proposal: { "a.txt": "z\n" } });
+  const D8 = new DelegateTasks({ changed: () => {} });
+  const P8 = pairWith(H8);
+  D8.attach(P8);
+  await P8.paired();
+  await P8.allow({ folders: ["/"], write: true, expires: null }, false);
+  ok((await why(D8.close(T1.task, T1.proposal, 1))) === "forbidden" && !H8.got.some((m) => m.method === "tasks.close"), "Close with the switch off: refused here, nothing sent");
+  D8.turnOn();
+  await until(() => D8.tasks.length === 2);
+  const s1 = D8.source(T1.task, T1.proposal);
+  ok(s1.seen() === null, "a proposal not read yet has no seq to close it with");
+  await s1.diff();
+  ok(s1.seen()?.seq === T1.log.length, "read: the seq it was read at, the task's", { seen: s1.seen(), log: T1.log.length });
+  ok((await D8.close(T1.task, T1.proposal, s1.seen().seq)) === "closed", "Close: tasks.close answered closed");
+  const sent = H8.got.findLast((m) => m.method === "tasks.close")?.params;
+  ok(sent && sent.task === T1.task && sent.proposal === T1.proposal && sent.seq === s1.seen().seq && Object.keys(sent).length === 3, "it names the task, the proposal commit and the seq it was read at, nothing else", sent);
+  await until(() => D8.task(T1.task)?.entry.status === "closed");
+  ok(chipOf(D8.task(T1.task).entry) === "Closed", "its chip: Closed");
+  // (the task moves on after the proposal was read: Close refused, nothing closed)
+  const s2 = D8.source(T2.task, T2.proposal);
+  await s2.diff();
+  H8.emit(T2.task, { type: "turn_started" });
+  ok((await why(D8.close(T2.task, T2.proposal, s2.seen().seq))) === "stale" && H8.tasks.get(T2.task).status === "proposal", "a task that moved on since it was read: refused (stale), not closed");
+  P8.revoke();
+  H8.stop();
+}
+
+// ---- Merge's record at the agent (tasks.merged): from the proposal as read; idempotent by merge_id
+{
+  const H9 = delegateHost();
+  const T = await H9.addTask({ title: "merge", base: { "a.txt": "x\nb\nc\n" }, proposal: { "a.txt": "y\nb\nc\n" } });
+  const U = await H9.addTask({ title: "moved", base: { "a.txt": "x\nb\nc\n" }, proposal: { "a.txt": "z\nb\nc\n" } });
+  const D9 = new DelegateTasks({ changed: () => {} });
+  const P9 = pairWith(H9);
+  D9.attach(P9);
+  await P9.paired();
+  await P9.allow({ folders: ["/"], write: true, expires: null }, false);
+  const mine = { "a.txt": { id: { kind: "file", fid: "f1", created: 1, ref: null }, rev: 1, text: "x\nb\nc\nmine\n" } };
+  const io = { async mine(p) { return mine[p] ? { ...mine[p] } : null; }, async write(p, k, text, at) { mine[p] = { ...at, rev: at.rev + 1, text }; return at.id; }, async create() { throw new Error("no"); }, async remove() {}, async load() {}, async save() {}, merged: (t, p) => D9.merged(t, p) };
+  const params = { task: T.task, proposal: T.proposal, seq: 1, merge_id: "a".repeat(32), files: [] };
+  ok((await why(D9.merged(T.task, params))) === "forbidden" && !H9.got.some((m) => m.method === "tasks.merged"), "tasks.merged with the switch off: refused here, nothing sent");
+  D9.turnOn();
+  await until(() => D9.tasks.length === 2);
+  const src = D9.source(T.task, T.proposal);
+  await src.diff();
+  const seen = src.seen();
+  ok(seen.base === T.base && seen.commit === T.proposal && seen.files.length === 1, "a proposal read: its base, commit and files, for the decision", seen);
+  const pin = { task: T.task, base: seen.base, proposal: seen.commit, seq: seen.seq, files: seen.files };
+  const plans = await prepare(io, src, pin);
+  const rec = await run(io, newRecord(pin, plans, {}));
+  ok(isDone(rec) && mine["a.txt"].text === "y\nb\nc\nmine\n" && H9.got.filter((m) => m.method === "tasks.file").length === 2, "Merge through the page's source: both sides read and checked, the person's file written", mine["a.txt"]);
+  const req = await mergedParams(rec);
+  const r1 = await D9.merged(T.task, req);
+  ok(r1.recorded === "merge" && /^[0-9a-f]{40}$/.test(r1.commit), "tasks.merged with every file in full: recorded as a merge, its commit", r1);
+  await until(() => D9.task(T.task)?.entry.status === "merged");
+  ok(chipOf(D9.task(T.task).entry) === "Merged", "after it is recorded, the chip says Merged");
+  const r2 = await D9.merged(T.task, await mergedParams(rec));
+  ok(JSON.stringify(r2) === JSON.stringify(r1) && H9.tasks.get(T.task).log.filter((e) => e.event.status === "merged").length === 1, "a retry after a lost answer (the same merge_id, the same bytes): the same answer, recorded once");
+  ok((await why(D9.merged(T.task, { ...req, files: req.files.map((f) => ({ ...f, merged: { absent: true } })) }))) === "conflict", "the same merge_id with another request: refused (conflict)");
+  ok((await why(D9.merged(T.task, { ...req, merge_id: "b".repeat(32) }))) === "final", "a new merge_id for a task already merged: refused (final)");
+  // (the task moved on after its proposal was read: a decision on it refused)
+  mine["a.txt"].text = "x\nb\nc\nmine\n";
+  const su = D9.source(U.task, U.proposal);
+  await su.diff();
+  const pu = { task: U.task, base: U.base, proposal: U.proposal, seq: su.seen().seq, files: su.seen().files };
+  H9.emit(U.task, { type: "turn_started" });
+  ok((await why(D9.merged(U.task, await mergedParams(newRecord(pu, await prepare(io, su, pu), {}))))) === "stale", "a decision on a proposal the task moved on from: refused (stale)");
+  ok((await why(D9.merged(U.task, { ...req }))) === "bad_request", "a request for another task than named: refused here");
+  P9.revoke();
+  H9.stop();
+}
+
+// ---- Delegate briefs (chat.brief): only to an agent that lists it, with the switch on; its answer checked; cancel
+{
+  const conv = "c".repeat(32);
+  const brief = { title: "Plot sin(x)", brief: "Goal\nPlot sin(x)", bytes: 17, cut: false };
+  // (an agent without chat.brief: not offered, nothing sent)
+  const H0 = delegateHost();
+  const D0 = new DelegateTasks({ changed: () => {} });
+  const P0 = pairWith(H0);
+  D0.attach(P0);
+  await P0.paired();
+  await P0.allow({ folders: ["/"], write: true, expires: null }, false);
+  D0.turnOn();
+  await until(() => H0.grant?.delegate === true);
+  ok(!D0.briefOffered() && (await why(D0.brief(conv))) === "unavailable" && !H0.got.some((m) => m.method === "chat.brief"), "an agent without chat.brief: briefs not offered, refused here, nothing sent");
+  P0.revoke();
+  H0.stop();
+  const HB = delegateHost({ features: ["delegate.1", "chat.resume", "chat.brief"] });
+  const DB = new DelegateTasks({ changed: () => {} });
+  const PB = pairWith(HB);
+  DB.attach(PB);
+  await PB.paired();
+  await PB.allow({ folders: ["/"], write: true, expires: null }, false);
+  ok(!DB.briefOffered() && (await why(DB.brief(conv))) === "unavailable", "chat.brief listed but the switch off: not offered");
+  DB.turnOn();
+  await until(() => HB.grant?.delegate === true);
+  HB.briefs.set(conv, brief);
+  const r = await DB.brief(conv);
+  const sent = HB.got.findLast((m) => m.method === "chat.brief")?.params;
+  ok(DB.briefOffered() && JSON.stringify(r) === JSON.stringify({ title: brief.title, brief: brief.brief, cut: false }) && JSON.stringify(sent) === JSON.stringify({ conversation: conv }), "chat.brief {conversation}: its title, brief and cut", { r, sent });
+  for (const [bad, what] of [[{ ...brief, title: "" }, "an empty title"], [{ ...brief, title: "t".repeat(201) }, "a title over 200 characters"], [{ ...brief, extra: 1 }, "an unknown field"], [{ ...brief, brief: "x\u0000" }, "a NUL in the brief"], [{ ...brief, cut: "no" }, "cut not true or false"]]) {
+    HB.briefs.set(conv, bad);
+    ok((await why(DB.brief(conv))) !== "resolved", `an answer with ${what}: refused`);
+  }
+  HB.briefs.set(conv, { error: "busy" });
+  ok((await why(DB.brief(conv))) === "busy", "the agent's refusal (busy): its code");
+  HB.briefs.set(conv, brief);
+  HB.hold.add("chat.brief");
+  const held = why(DB.brief(conv));
+  await until(() => HB.held.some((m) => m.method === "chat.brief"));
+  DB.cancelBrief(conv);
+  ok((await held) === "stopped" && JSON.stringify(HB.got.findLast((m) => m.method === "chat.brief_cancel")?.params) === JSON.stringify({ conversation: conv }), "cancelBrief: chat.brief_cancel {conversation}; the held draft answered stopped");
+  HB.hold.clear();
+  PB.revoke();
+  HB.stop();
+}
+
 // ---- an agent that doesn't offer Delegate: no switch
 {
   const H3 = delegateHost({ features: ["chat.resume"] });
@@ -261,6 +460,38 @@ for (const [what, event, chip] of [["failed", { type: "task_status", status: "fa
   H3.stop();
 }
 ok(DELEGATE_TEXT.chip.question === "Question" && chipOf({ status: "working", question: true }) === "Question", "a working task waiting for an answer: its chip says Question");
+
+{
+  // (#1621, a page that only reads the list (it saw no event): the entry's reason and code, from tasks.list; and an old
+  //  page's shapes, from a host that wasn't told tasks.reason: no reason, no code)
+  const H5 = delegateHost();
+  const T5 = await H5.addTask({ title: "Stopped earlier" });
+  H5.emit(T5.task, { type: "task_status", status: "interrupted", reason: "the agent's turn ended without a proposal", code: "no_proposal" });
+  // (and one whose reason is as long as the agent allows, in multibyte characters: the list keeps it, it isn't refused)
+  const T6 = await H5.addTask({ title: "Stopped with a long reason" });
+  const LONG6 = "the copy cannot be proposed (" + "界".repeat(350) + ")";
+  H5.emit(T6.task, { type: "task_status", status: "interrupted", reason: LONG6, code: "unproposable" });
+  const D5 = new DelegateTasks({ changed: () => {} });
+  const P5 = pairWith(H5);
+  D5.attach(P5);
+  await P5.paired();
+  await P5.allow({ folders: ["/"], write: true, expires: null }, false);
+  D5.turnOn();
+  await until(() => D5.task(T5.task) !== undefined);
+  const t5 = D5.task(T5.task);
+  ok(t5 && chipOf(t5.entry, t5.code) === "Ended without a proposal" && t5.reason === "the agent's turn ended without a proposal" && !("reason_code" in t5.entry) && !("reason" in t5.entry), "from tasks.list alone: the chip and the reason from the entry's reason_code and reason", t5 && { chip: chipOf(t5.entry, t5.code), reason: t5.reason, entry: t5.entry });
+  const t6 = D5.task(T6.task);
+  ok(t6 && t6.reason === LONG6 && chipOf(t6.entry, t6.code) === "Couldn't propose", "a multibyte reason within the agent's bound (1080 bytes) in tasks.list: the list taken whole, the reason kept", t6 && { reason: t6.reason.length, chip: chipOf(t6.entry, t6.code) });
+  // (tasks.get: its task entry, with the same long reason, taken as the list's is)
+  await D5.open(T6.task);
+  ok(D5.task(T6.task).loaded && D5.task(T6.task).reason === LONG6, "a multibyte reason within the agent's bound in tasks.get: the task read, the reason kept", { loaded: D5.task(T6.task).loaded });
+  const listed = H5.got.filter((m) => m.method === "tasks.list").length;
+  H5.pageFeatures = [];
+  await D5.refresh();
+  ok(H5.got.filter((m) => m.method === "tasks.list").length === listed + 1 && chipOf(D5.task(T5.task).entry, undefined) === "Interrupted", "an agent that gives no code (or a page it wasn't told): Interrupted, as before");
+  P5.revoke();
+  H5.stop();
+}
 
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);

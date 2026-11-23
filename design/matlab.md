@@ -1,8 +1,8 @@
 # MATLAB
 
 *October 13, 2026.* Sagebrush runs MATLAB programs: `sagebrush --matlab
-file.m`. Cambridge University Press, whose journals publish code with
-papers, asked for MATLAB language support. As with Magma (src/magma.ts),
+file.m`. A customer whose journals publish code with papers asked for
+MATLAB language support. As with Magma (src/magma.ts),
 the MATLAB source is translated to Python, which the usual pipeline compiles
 and runs on a runtime library with MATLAB's semantics:
 

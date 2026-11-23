@@ -16,8 +16,10 @@
 // compared inside the lock, so no tab puts an older one back.
 //
 // What can't be detected: the site's data cleared completely (every witness
-// with it) looks exactly like a first visit; a witness that can't be read
-// (private browsing, storage denied) is "unknown", never "first visit".
+// with it) looks exactly like a first visit; when no witness can be read
+// (private browsing, storage denied) it is "unknown", never "first visit". One
+// witness read with nothing there decides, the other unreadable (WebKit's OPFS
+// throws "an unknown transient reason" and never holds one).
 
 export type Witness = { v: 1; workspace: string; generation: number; seq: number; entries: number; sampled: number; reset?: { to: number; kind: ResetKind; at: number } };
 export type ResetKind = "new" | "delete" | "import" | "keep";
@@ -146,14 +148,23 @@ export function best(reads: Read[]): { witness?: Witness; unreadable: string[] }
   return { witness: top, unreadable };
 }
 
+/** A message as a clause inside a sentence: trimmed, without its own closing period. */
+export const clause = (m: string) => String(m).trim().replace(/[\s.]+$/, "");
+
 /** The decision at open (A.2), a prepared reset already resolved. */
 export function decide(held: Held | null, reads: Read[]): State {
   const { witness: w, unreadable } = best(reads);
   if (!held) return { state: "unknown", why: "this browser's storage can't be opened" };
   if (held.dataLoss === "total") return { state: "confirmed", witness: w, why: `the browser deleted its storage as damaged${held.dataLossMessage ? ` (${held.dataLossMessage})` : ""}` };
   if (!w) {
-    // (a record that can't be read: a lost workspace can't be told from a first visit here)
-    if (unreadable.length) return held.fresh ? { state: "unknown", why: `the record that would show a lost workspace can't be read here (${unreadable.join("; ")})` } : { state: "ok", unavailable: unreadable.join("; ") };
+    // (one record read, with none there, decides even if the other couldn't be read: WebKit's OPFS (Safari's, and the
+    //  Mac app's web view) throws "an unknown transient reason" and never holds one, and the localStorage record,
+    //  written with every commit, is enough to tell. Only when no record can be read is a lost workspace not told from
+    //  a first visit here)
+    if (unreadable.length && !reads.some((r) => "none" in r)) {
+      const errs = unreadable.map(clause).join("; ");
+      return held.fresh ? { state: "unknown", why: `no record that would show one can be read here: ${errs}` } : { state: "ok", unavailable: errs };
+    }
     return held.fresh ? { state: "first" } : { state: "ok" };
   }
   if (held.fresh) return { state: "confirmed", witness: w, why: "this browser had a workspace, and its storage is gone" };

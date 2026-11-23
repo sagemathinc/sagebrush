@@ -84,6 +84,9 @@ if (args.includes("--classic")) q.set("reactive", "0");
 q.set("open", site + "t/" + encodeURIComponent(basename(nbPath)));
 for (const f of files) q.append("file", site + "t/" + encodeURIComponent(f));
 await send("Page.enable");
+// (unattended: a write the notebook may not make is refused at once, the "permission" class, rather than waiting on a
+// prompt no one answers: the page's loopback-only switch, web/index.html ASK_WAIT)
+await send("Page.addScriptToEvaluateOnNewDocument", { source: "try { localStorage.setItem('sagebrush-ask', '0'); } catch {}" });
 await send("Page.navigate", { url: site + "?" + q });
 if (!(await until("document.querySelector('#status')?.textContent.startsWith('ready') && window.sagebrush?.notebook?.cells().length > 0", 120_000))) {
   say({ page: "error", detail: String(await ev("document.querySelector('#status')?.textContent")).slice(0, 300) });

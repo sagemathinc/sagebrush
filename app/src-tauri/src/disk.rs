@@ -170,6 +170,50 @@ pub fn settings_write(app: tauri::AppHandle, json: String) -> Result<(), String>
     write_small(&open_root(&data_dir(&app)?)?, "settings.json", &json)
 }
 
+/// The page's file permissions kept across launches, in grants.json beside settings.json: the record permissions.js
+/// keeps in localStorage (whose web view forgets it at quit), its documents named by where they are ("ws:" and a
+/// workspace notebook's path, or a notebook file's own "file:" id), since a workspace notebook's id is new at every
+/// launch (web/workspace/grants-file.ts). A JSON object {v: 1, docs: {...}} of at most GRANTS_MAX bytes; anything
+/// else is refused, and a grants.json that isn't one is read as none (nothing allowed: a prompt comes back).
+const GRANTS_MAX: usize = 1024 * 1024;
+fn grants_of(json: &str) -> Result<(), String> {
+    if json.len() > GRANTS_MAX {
+        return Err(format!("grants: larger than {GRANTS_MAX} bytes"));
+    }
+    let v = serde_json::from_str::<serde_json::Value>(json).map_err(|e| format!("grants: {e}"))?;
+    if v.get("v").and_then(|x| x.as_u64()) != Some(1) || !v.get("docs").is_some_and(|d| d.is_object()) {
+        return Err("grants: not the page's record ({v: 1, docs})".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn grants_read(app: tauri::AppHandle) -> Result<String, String> {
+    let kept = read_small(&open_root(&data_dir(&app)?)?, "grants.json", GRANTS_MAX as u64)?;
+    Ok(kept.filter(|s| grants_of(s).is_ok()).unwrap_or_default())
+}
+
+#[tauri::command]
+pub fn grants_write(app: tauri::AppHandle, json: String) -> Result<(), String> {
+    grants_of(&json)?;
+    write_small(&open_root(&data_dir(&app)?)?, "grants.json", &json)
+}
+
+#[cfg(test)]
+mod grants_tests {
+    use super::grants_of;
+
+    #[test]
+    fn only_the_page_s_record_within_its_cap() {
+        assert!(grants_of(r#"{"v":1,"seq":3,"docs":{"ws:/a/b.ipynb":{"write":["/a"],"t":3}}}"#).is_ok());
+        for bad in [r#"{"v":2,"docs":{}}"#, r#"{"docs":{}}"#, r#"{"v":1,"docs":[]}"#, r#"[1]"#, "not json", ""] {
+            assert!(grants_of(bad).is_err(), "{bad}");
+        }
+        let big = format!(r#"{{"v":1,"docs":{{"x":"{}"}}}}"#, "a".repeat(super::GRANTS_MAX));
+        assert!(grants_of(&big).is_err());
+    }
+}
+
 // ---- a notebook opened from the computer, and the files beside it (folder_fs.rs): through grants made here only,
 // for a file the person picked in the app's own Open or Save dialog, or the system handed over; the page names a
 // grant, never a path.  The fs plugin isn't the page's on the desktop (capabilities/default.json).

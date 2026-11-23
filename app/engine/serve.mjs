@@ -93,7 +93,10 @@ export function serve({ root, memory, input, write, queued, exit, outMax = OUT_M
 
   function open(sid, name) {
     // (the runner frame's state, per interpreter: web/runner/index.html)
-    const s = { thread: null, flag: null, epoch: null, inputs: new Map(), lives: new Map() };
+    // (ask: the one refused change asked while its run waits (web/worker.ts fsAsk), {key, buffer}, as the runner's frame
+    // keeps it: an allow's epoch is stored in the shared word BEFORE its answer is written; anything else answers no)
+    const s = { thread: null, flag: null, epoch: null, inputs: new Map(), lives: new Map(), ask: null };
+    s.askNo = () => { if (s.ask) { giveInput(s.ask.buffer, null); s.ask = null; } };
     s.thread = new Worker(new URL("./thread.mjs", import.meta.url), { workerData: { root, name, memory: heapMb }, resourceLimits: { maxOldGenerationSizeMb: heapMb }, stdout: false, stderr: false });
     const retire = (map, id) => { for (const [k, e] of map) if (id === undefined || e.id === id) map.delete(k); };
     s.retire = (id) => { retire(s.inputs, id); retire(s.lives, id); };
@@ -104,6 +107,11 @@ export function serve({ root, memory, input, write, queued, exit, outMax = OUT_M
         if (typeof d.liveData.key !== "string" || s.lives.has(d.liveData.key)) return;
         retire(s.lives, d.id);
         s.lives.set(d.liveData.key, { id: d.id, buffer: d.buffer });
+        d = { ...d, buffer: null };
+      }
+      if (d.fsAsk && d.buffer instanceof SharedArrayBuffer && d.buffer.byteLength >= 8) {
+        s.askNo();
+        if (typeof d.fsAsk.key === "string" && d.fsAsk.key.length <= 64) s.ask = { key: d.fsAsk.key, buffer: d.buffer };
         d = { ...d, buffer: null };
       }
       if (d.input && d.buffer instanceof SharedArrayBuffer && d.buffer.byteLength >= 8) {
@@ -133,6 +141,7 @@ export function serve({ root, memory, input, write, queued, exit, outMax = OUT_M
     if (d && typeof d === "object") {
       if (typeof d.runnerInterrupt === "number") {
         s.retire(); // (every open input() and live data request is over)
+        s.askNo();
         if (s.flag) {
           Atomics.store(s.flag, 1, d.runnerInterrupt);
           // (bit 0, and the word notified: a time.sleep waits on it, src/runtime/interrupt.ts requestCtrlC)
@@ -143,6 +152,15 @@ export function serve({ root, memory, input, write, queued, exit, outMax = OUT_M
       }
       // (the new epoch stored BEFORE the policy goes on to the interpreter: a run in flight refuses at its next change)
       if (d.fsWrite && Number.isInteger(d.fsWrite.epoch) && s.epoch) Atomics.store(s.epoch, 0, d.fsWrite.epoch);
+      if (typeof d.runnerAsk === "string") {
+        if (s.ask && s.ask.key === d.runnerAsk) {
+          const a = s.ask;
+          s.ask = null;
+          if (typeof d.answer === "string" && Number.isInteger(d.epoch) && d.epoch > 0 && s.epoch) { Atomics.store(s.epoch, 0, d.epoch); giveInput(a.buffer, d.answer); }
+          else giveInput(a.buffer, null);
+        }
+        return;
+      }
       if (typeof d.runnerInput === "number") {
         const e = typeof d.key === "string" ? s.inputs.get(d.key) : undefined;
         if (e && e.id === d.runnerInput) { s.inputs.delete(d.key); giveInput(e.buffer, d.text); }

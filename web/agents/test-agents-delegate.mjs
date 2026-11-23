@@ -1,11 +1,16 @@
 // ci: web-artifacts.1 order=30 runner=bun chrome
+// ci: web-artifacts.2 order=20 runner=bun chrome env=AGENTS_LATEX=1
 // Delegate on the Agents page (Pair and Delegate plan, UI-3), end to end in headless Chromium: the built page
 // (SAGEBRUSH_AGENTS=1), served by web/serve.py, paired as a person pairs it (a ?pair= link, Connect, the grant dialog)
 // with the stand-in Delegate host (test-delegate-host.mjs). What it shows: nothing of Delegate until the agent offers
 // it; the switch on only after its confirmation, and the host told; the Tasks list with chips; a task's view (its
 // thread, its proposal's card) in place of the chat, and back; the proposal view from the host, each file checked;
+// its actions: a newer round in place, Ask for changes (the note kept per task, sent with the current versions, then
+// the next round replacing it) and Close;
 // Delegate… (the sheet: the composer's text, the documents, May run code) and Start; the switch off, with the running
-// tasks closed first when ticked, Delegate… disabled while it turns off, then the host told.
+// tasks closed first when ticked, Delegate… disabled while it turns off, then the host told. A proposal's .tex: its
+// diff, and (AGENTS_LATEX=1, the LaTeX test build) the document rendered read only beside Before; without the LaTeX
+// editor on this host, its diff only.
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/agents/test-agents-delegate.mjs
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -24,7 +29,9 @@ let server;
 const sitePort = await startServe(() => (server = spawn("python3", [join(here, "..", "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] }))).port;
 const site = `http://127.0.0.1:${sitePort}`;
 
-const H = delegateHost();
+// (an agent of 0.8.13 or later, which takes a note with Resume; and a session as sagebrush-agent gives one, 43
+//  characters, so the page keeps it for a return: the #1622 rows)
+const H = delegateHost({ version: "0.8.13", session: "S".repeat(43) });
 const nb = JSON.stringify({ cells: [{ cell_type: "code", id: "c1", metadata: {}, source: ["1+1"], outputs: [] }], metadata: {}, nbformat: 4, nbformat_minor: 5 });
 const A = await H.addTask({ title: "Factor the polynomial", base: { "work/a.ipynb": nb, "work/notes.txt": "one\n" }, proposal: { "work/a.ipynb": nb.replace("1+1", "2+2"), "work/notes.txt": "one\ntwo\n" } });
 const B = await H.addTask({ title: "Plot it" });
@@ -48,6 +55,8 @@ try {
   await P.ev(`(() => { const d = [...document.querySelectorAll('.sbag-dlg')].at(-1); const all = [...d.querySelectorAll('label')].find((l) => l.textContent.startsWith('Everything')).querySelector('input'); all.checked = true; all.dispatchEvent(new Event('change')); [...d.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click(); })()`);
   await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
   await P.until(`!!document.querySelector('#delegate-switch')?.offsetParent`);
+  // (the grant reaches the host on its own message, which can come after the page shows the switch)
+  await hostUntil(() => !!H.grant);
   let u = await ui();
   ok(u.sw === "Delegate: off" && u.btn && u.tasks === null && H.grant && !H.grant.delegate, "granted, an agent that offers Delegate: the switch shown, off; Delegate… shown; no tasks; the grant has no delegate", u);
   ok(H.got.filter((m) => m.method?.startsWith("tasks.")).length === 0, "nothing asked of the host's tasks while the switch is off");
@@ -77,6 +86,12 @@ try {
   u = await ui();
   const bText = await P.ev(`document.querySelector('#task-view').textContent`);
   ok(u.view && !u.log && /Plotting the first terms\./.test(bText), "a task opened: its view in place of the chat, its thread from the host", { u, bText: bText.slice(0, 200) });
+  // (A1, #1546: with a task's view shown the composer's footer row isn't, so the agent's access is in the row above it,
+  //  still in view; back in the chats it is the footer's icon again)
+  const where = () => P.ev(`(() => { const b = document.querySelector('.sbag-bar'); return { above: !!b?.parentElement?.matches('.composer-wrap > [data-sbag-slot]'), footer: !!b?.parentElement?.matches('.composer .row > [data-sbag-footer]'), seen: !!b && b.getBoundingClientRect().width > 0 && b.offsetParent !== null }; })()`);
+  await P.until(`!!document.querySelector('.sbag-bar')?.parentElement?.matches('.composer-wrap > [data-sbag-slot]')`, 5000).catch(() => {});
+  const inTask = await where();
+  ok(inTask.above && inTask.seen, "A1: a task's view shown: the agent's access is in the row above the composer, still in view", inTask);
   const tags = await P.ev(`[...document.querySelectorAll('#task-view .turn .demo')].map((e) => e.textContent)`);
   ok(tags.length > 0 && tags.every((t) => t === "on your computer"), "a task's turns are the agent's on this computer, never labelled demo", tags);
   H.emit(B.task, { type: "text_delta", message: "m1", revision: 1, text: " Done." });
@@ -96,11 +111,146 @@ try {
   await P.until(`document.querySelector('dialog.proposal[open]').textContent.includes('two')`, 20000).catch(() => {});
   ok(fileAsks().includes("work/notes.txt@base") && fileAsks().includes("work/notes.txt@proposal") && (await P.ev(`document.querySelector('dialog.proposal[open]').textContent.includes('two')`)), "a file opened: both sides read (tasks.file, base and proposal), its diff shown", fileAsks());
   await shot("4-proposal");
-  ok(/Merge, Close and Ask for changes come in a later update\./.test(await P.ev(`document.querySelector('dialog.proposal[open]').textContent`)), "no decisions offered yet: the view says they come later");
+  // (its actions: Merge, Ask for changes and Close, all on)
+  const acts = await P.ev(`[...document.querySelectorAll('dialog.proposal[open] button[data-act]')].map((b) => [b.dataset.act, b.textContent, b.getAttribute('aria-disabled')])`);
+  ok(JSON.stringify(acts) === JSON.stringify([["merge", "Merge", null], ["ask", "Ask for changes", null], ["close", "Close", null]]) && !/comes in the next update/.test(await P.ev(`document.querySelector('dialog.proposal[open]').textContent`)), "the proposal's actions: Merge, Ask for changes and Close, none said to come later", acts);
+  // (a newer round of the task, while its proposal is open: it replaces the one shown, in place)
+  const r2 = await H.propose(A.task, { "work/notes.txt": "one\ntwo\nthree\n" });
+  await P.until(`document.querySelector('dialog.proposal[open] .sbpv h3')?.textContent === 'Proposal, round 2'`, 20000);
+  const round2 = await P.ev(`({ status: document.querySelector('dialog.proposal[open] .proposal-actions [role=status]').textContent, files: [...document.querySelectorAll('dialog.proposal[open] .sbpv .file')].map((r) => r.querySelector('.path').textContent) })`);
+  ok(/round 2/.test(round2.status) && round2.files.join() === "work/notes.txt" && H.got.some((m) => m.method === "tasks.diff" && m.params.commit === r2), "a new round while the proposal is open: it replaces the one shown, in the same dialog, said so", round2);
+  // ---- Ask for changes (S3 P2): the note, with the person's current versions of the task's own files, to the same task
+  await H.call("workspace.create", { path: "/work/notes.txt", content: { text: "alpha\n" } });
+  const KEY = `sb-delegate-ask-v1:${A.task}`;
+  const askBtn = `document.querySelector('dialog.proposal[open] button[data-act="ask"]')`;
+  const block = `document.querySelector('dialog.proposal[open] .ask-slot .ask-block')`;
+  await P.ev(`${askBtn}.click()`);
+  await P.until(`!!${block} && !${block}.hidden`);
+  const ask0 = await P.ev(`({ files: ${block}.querySelector('.ask-files').textContent, focused: document.activeElement?.id })`);
+  ok(ask0.files === "When available, your current versions of these files go with your note: work/notes.txt. A file that can't be read here is left out, and the task uses its own copy of it." && ask0.focused === "delegate-note", "Ask for changes: its block under the actions, the note focused, naming the files whose current versions go with it", ask0);
+  // (the unsent note kept per task: the dialog closed and the proposal opened again, it's still there)
+  await P.ev(`(() => { const t = document.querySelector('dialog.proposal[open] #delegate-note'); t.value = 'Also number the lines.'; t.dispatchEvent(new Event('input')); })()`);
+  ok((await P.ev(`localStorage.getItem(${JSON.stringify(KEY)})`)) === "Also number the lines.", "the unsent note is kept in this browser, per task");
   await P.ev(`document.querySelector('dialog.proposal[open] .x').click()`);
+  await P.ev(`document.querySelector('#task-view .proposal-card').click()`);
+  await P.until(`!!${askBtn} && !!document.querySelector('dialog.proposal[open] .sbpv .file')`, 20000);
+  await P.ev(`${askBtn}.click()`);
+  await P.until(`!!${block} && !${block}.hidden`);
+  ok((await P.ev(`document.querySelector('dialog.proposal[open] #delegate-note').value`)) === "Also number the lines.", "the proposal opened again: the note is still there");
+  // (an empty note: said so, nothing sent)
+  await P.ev(`(() => { const t = document.querySelector('dialog.proposal[open] #delegate-note'); t.value = '   '; t.dispatchEvent(new Event('input')); ${block}.querySelector('button.primary').click(); })()`);
+  await sleep(200);
+  ok((await P.ev(`${block}.querySelector('.msg').textContent`)) === "Write what you'd like changed first" && !H.got.some((m) => m.method === "tasks.ask"), "an empty note: said so, nothing sent");
+  // (the task moved on since the proposal was read (an event of its, the proposal still the latest): the agent answers
+  //  stale; the page says so, reads the proposal again, and keeps the note to send again)
+  H.emit(A.task, { type: "turn", event: { type: "turn_started" } });
+  const diffs0 = H.got.filter((m) => m.method === "tasks.diff").length;
+  await P.ev(`(() => { const t = document.querySelector('dialog.proposal[open] #delegate-note'); t.value = '  Also number the lines.\\n'; t.dispatchEvent(new Event('input')); ${block}.querySelector('button.primary').click(); })()`);
+  const said = await P.until(`/moved on since you opened this/.test(document.querySelector('dialog.proposal[open] .proposal-actions [role=status]').textContent)`, 5000).then(() => true, () => false);
+  const reread = await hostUntil(() => H.got.filter((m) => m.method === "tasks.diff").length > diffs0, 5000);
+  // (and the page has the re-read: the view drawn again, its actions back under it)
+  await P.until(`!!document.querySelector('dialog.proposal[open] .sbpv .file') && !!document.querySelector('dialog.proposal[open] .proposal-actions')?.isConnected`, 10000).catch(() => {});
+  await sleep(100);
+  const st = await P.ev(`({ said: ${JSON.stringify(said)}, reread: ${JSON.stringify(reread)}, note: document.querySelector('dialog.proposal[open] #delegate-note')?.value, ro: document.querySelector('dialog.proposal[open] #delegate-note')?.readOnly, send: ${block}.querySelector('button.primary').getAttribute('aria-disabled') })`);
+  ok(st.said && st.reread && H.asks.length === 0 && st.note === "  Also number the lines.\n" && st.ro === false && st.send === null, "the task moved on since it was read: refused (stale), said so, the proposal read again, the note kept to send again", st);
+  // (sent while held at the host: Close can't be pressed meanwhile)
+  H.hold.add("tasks.ask");
+  const seqShown = A.log.length;
+  await P.ev(`${block}.querySelector('button.primary').click()`);
+  await hostUntil(() => H.held.some((m) => m.method === "tasks.ask"));
+  ok((await P.ev(`document.querySelector('dialog.proposal[open] button[data-act="close"]').getAttribute('aria-disabled')`)) === "true", "while Ask for changes is being sent: Close disabled");
+  // (and the note can't be edited meanwhile: typing changes nothing, so nothing typed after Send is lost)
+  const pend = await P.ev(`(() => { const t = document.querySelector('dialog.proposal[open] #delegate-note'); const before = t.value; t.focus(); document.execCommand('insertText', false, ' extra'); return { ro: t.readOnly, same: t.value === before, label: ${block}.querySelector('button.primary').textContent }; })()`);
+  ok(pend.ro && pend.same && pend.label === "Sending…", "while it is being sent: the note is read only (typing changes nothing), Send says Sending…", pend);
+  H.hold.clear();
+  H.release();
+  await hostUntil(() => H.asks.length === 1);
+  const asked = H.asks[0], askSent = H.got.findLast((m) => m.method === "tasks.ask")?.params;
+  ok(asked?.note === "Also number the lines." && askSent?.proposal === r2 && askSent?.seq === seqShown && JSON.stringify(asked.current) === JSON.stringify([{ path: "work/notes.txt", kind: "file", content: "alpha\n" }]), "Ask for changes sent: tasks.ask for the round shown, at the seq it was read at, the note trimmed, the current version of the task's file", { askSent, asked });
+  await P.until(`${block}?.textContent.startsWith('Asked.') || !!document.querySelector('dialog.proposal[open] .ask-slot .asked')`);
+  await P.until(`document.querySelector('#tasks .task[data-task="${A.task}"] .chip')?.textContent === 'Working'`);
+  const after = await P.ev(`({ text: document.querySelector('dialog.proposal[open] .ask-slot').textContent, ask: ${askBtn}.getAttribute('aria-disabled'), close: document.querySelector('dialog.proposal[open] button[data-act="close"]').getAttribute('aria-disabled'), kept: localStorage.getItem(${JSON.stringify(KEY)}) })`);
+  ok(/^Asked\. The task is working on round 3/.test(after.text) && after.ask === "true" && after.close === "true" && after.kept === null, "after it: \"Asked\", the chip back to Working, Ask and Close disabled while the task works, the kept note gone", after);
+  // (round 3, from the agent: it replaces round 2 in the same dialog; the old round's Ask block goes)
+  const r3 = await H.propose(A.task, { "work/notes.txt": "1 one\n2 two\n3 three\n" });
+  await P.until(`document.querySelector('dialog.proposal[open] .sbpv h3')?.textContent === 'Proposal, round 3'`, 20000);
+  const round3 = await P.ev(`({ slot: document.querySelector('dialog.proposal[open] .ask-slot').children.length, ask: ${askBtn}.getAttribute('aria-disabled') })`);
+  ok(round3.slot === 0 && round3.ask === null, "round 3 replaces round 2 in the same dialog: the Ask block gone, Ask for changes offered again", round3);
+  // (while an older note is still being sent, the proposal closed and opened again: every action stays off there,
+  //  Ask for changes included, as the send is under way for the task, not for one dialog. A newer draft written
+  //  meanwhile elsewhere (another tab of this browser, which keeps its own drafts in the same storage): the older
+  //  send's success doesn't remove it, and it stays across the next round replacing this one)
+  H.hold.add("tasks.ask");
+  await P.ev(`${askBtn}.click()`);
+  await P.until(`!!${block} && !${block}.hidden`);
+  await P.ev(`(() => { const t = document.querySelector('dialog.proposal[open] #delegate-note'); t.value = 'Round 3 note'; t.dispatchEvent(new Event('input')); ${block}.querySelector('button.primary').click(); })()`);
+  await hostUntil(() => H.held.some((m) => m.method === "tasks.ask"));
+  await P.ev(`document.querySelector('dialog.proposal[open] .x').click()`);
+  await P.ev(`document.querySelector('#task-view .proposal-card').click()`);
+  await P.until(`!!${askBtn} && !!document.querySelector('dialog.proposal[open] .sbpv .file')`, 20000);
+  await sleep(300);
+  const reopened = await P.ev(`[...document.querySelectorAll('dialog.proposal[open] button[data-act]')].map((b) => b.getAttribute('aria-disabled'))`);
+  await P.ev(`${askBtn}.click()`);
+  await sleep(200);
+  ok(reopened.every((a) => a === "true") && !(await P.ev(`!!${block}`)), "the proposal opened again while the note is sent: Merge, Ask for changes and Close all off, Ask opens nothing", reopened);
+  await P.ev(`localStorage.setItem(${JSON.stringify(KEY)}, "A newer draft")`);
+  H.hold.clear();
+  H.release();
+  await hostUntil(() => H.asks.length === 2);
+  await P.until(`document.querySelector('#tasks .task[data-task="${A.task}"] .chip')?.textContent === 'Working'`);
+  await sleep(300);
+  ok(H.asks[1]?.note === "Round 3 note" && (await P.ev(`localStorage.getItem(${JSON.stringify(KEY)})`)) === "A newer draft", "a newer draft, written elsewhere while the older note was being sent: the older send's success leaves it kept", { sent: H.asks[1]?.note, kept: await P.ev(`localStorage.getItem(${JSON.stringify(KEY)})`) });
+  const r4 = await H.propose(A.task, { "work/notes.txt": "1 one\n2 two\n3 three\n4 four\n" });
+  await P.until(`document.querySelector('dialog.proposal[open] .sbpv h3')?.textContent === 'Proposal, round 4'`, 20000);
+  await P.ev(`${askBtn}.click()`);
+  await P.until(`!!${block} && !${block}.hidden`);
+  ok((await P.ev(`document.querySelector('dialog.proposal[open] #delegate-note').value`)) === "A newer draft", "round 4 replaces round 3: the newer draft is still there for it");
+  // (Close: asked first, then the task closed at the host with the proposal shown and its seq; the dialog goes)
+  await P.ev(`document.querySelector('dialog.proposal[open] button[data-act="close"]').click()`);
+  await P.until(`[...document.querySelectorAll('dialog.delegate-dlg[open] h3')].some((h) => h.textContent === 'Close this proposal?')`);
+  ok(!H.got.some((m) => m.method === "tasks.close"), "Close asks first: nothing sent yet");
+  await P.ev(`[...document.querySelectorAll('dialog.delegate-dlg[open] button')].find((b) => b.textContent === 'Close the task').click()`);
+  await hostUntil(() => H.tasks.get(A.task).status === "closed");
+  const closeSent = H.got.find((m) => m.method === "tasks.close")?.params;
+  ok(closeSent?.proposal === r4 && closeSent?.seq === A.log.length - 1, "Close: tasks.close for the round shown, at the seq it was read at", { closeSent, log: A.log.length });
+  await P.until(`!document.querySelector('dialog.proposal[open]') && document.querySelector('#tasks .task[data-task="${A.task}"] .chip')?.textContent === 'Closed'`);
+  ok(true, "closed: the dialog goes, and the task's chip says Closed");
   await P.ev(`document.querySelector('#task-view .task-head .link').click()`);
   u = await ui();
   ok(!u.view && u.log, "Back to chats: the chat shown again", u);
+  await P.until(`!!document.querySelector('.sbag-bar')?.parentElement?.matches('.composer .row > [data-sbag-footer]')`, 5000).catch(() => {});
+  const back = await where();
+  ok(back.footer && back.seen, "A1: back in the chats: the access is the composer footer's icon again", back);
+
+  // ---- a proposal's .tex: its diff, and the document rendered (the LaTeX page module's read-only preview), As proposed
+  //  and Before; on a host without the LaTeX editor, its diff only
+  const TEX0 = "\\documentclass{article}\n\\begin{document}\n\\section{Introduction}\nHello.\n\\end{document}\n";
+  const C = await H.addTask({ title: "Add a results section", status: "proposal", base: { "work/paper.tex": TEX0 }, proposal: { "work/paper.tex": TEX0.replace("\\end{document}", "\\section{Results}\nIt works.\n\\end{document}") } });
+  await P.until(`!!document.querySelector('#tasks .task[data-task="${C.task}"]')`);
+  await P.ev(`document.querySelector('#tasks .task[data-task="${C.task}"]').click()`);
+  await P.until(`!!document.querySelector('#task-view .proposal-card')`);
+  await P.ev(`document.querySelector('#task-view .proposal-card').click()`);
+  await P.until(`!!document.querySelector('dialog.proposal[open] .sbpv pre.diff')`, 20000);
+  const latexHere = process.env.AGENTS_LATEX === "1";
+  if (latexHere) {
+    // (P.until only waits (it resolves to the time it took, 0 when already true): each check reads the page itself)
+    const texShown = () => P.ev(`document.querySelector('dialog.proposal[open] .tex-rendered .tex-preview')?.textContent ?? ''`);
+    await P.until(`/Results/.test(document.querySelector('dialog.proposal[open] .tex-rendered .tex-preview')?.textContent ?? '')`, 60000).catch(() => {});
+    const drawn = /Results/.test(await texShown());
+    await shot("4b-proposal-tex");
+    const tv = await P.ev(`(() => { const r = document.querySelector('dialog.proposal[open] .tex-rendered'); const run = r?.querySelector('.tex-run'); return { buttons: [...r.querySelectorAll(':scope > p button')].map((b) => b.textContent + ":" + b.getAttribute('aria-pressed')), plus: [...document.querySelectorAll('dialog.proposal[open] .l\\\\+')].map((x) => x.textContent), run: !!run && !run.hidden && !!run.offsetParent, typing: [...r.querySelectorAll('textarea')].filter((t) => !t.readOnly && t.offsetParent).length }; })()`);
+    ok(drawn && tv.plus.includes("+ \\section{Results}") && JSON.stringify(tv.buttons) === JSON.stringify(["As proposed:true", "Before:false"]), "a proposal's .tex: its line diff, and the document as proposed rendered under it (its new section), Before offered", { drawn, tv });
+    ok(!tv.run && tv.typing === 0, "the rendered document is read only: no Run, nothing to type in", tv);
+    await P.ev(`[...document.querySelectorAll('dialog.proposal[open] .tex-rendered button')].find((b) => b.textContent === 'Before').click()`);
+    await P.until(`(() => { const t = document.querySelector('dialog.proposal[open] .tex-rendered .tex-preview')?.textContent ?? ''; return /Introduction/.test(t) && !/Results/.test(t); })()`, 60000).catch(() => {});
+    const beforeText = await texShown();
+    ok(/Introduction/.test(beforeText) && !/Results/.test(beforeText), "Before: the document as it was rendered in its place (no Results section)", beforeText.slice(0, 200));
+  } else {
+    await sleep(500);
+    ok(await P.ev(`!document.querySelector('dialog.proposal[open] .tex-rendered') && !document.querySelector('dialog.proposal[open] .file .msg')`), "a proposal's .tex where this host has no LaTeX editor: its diff only, nothing said");
+  }
+  await P.ev(`document.querySelector('dialog.proposal[open] .x').click()`);
+  await P.ev(`document.querySelector('#task-view .task-head .link').click()`);
 
   // ---- Delegate…: the sheet, from the composer's text and the documents; Start
   await H.call("workspace.create", { path: "/work/notes.txt", content: { text: "alpha\n" } });
@@ -108,8 +258,9 @@ try {
   await P.ev(`document.querySelector('#delegate').click()`);
   await P.until(`!!document.querySelector('dialog.sheet[open]')`);
   await shot("5-sheet");
-  const sheet = await P.ev(`(() => { const d = document.querySelector('dialog.sheet[open]'); return { prompt: d.querySelector('#delegate-prompt').value, title: d.querySelector('#delegate-title').value, run: d.querySelector('#delegate-run').disabled, where: d.textContent.includes('This computer') }; })()`);
+  const sheet = await P.ev(`(() => { const d = document.querySelector('dialog.sheet[open]'), r = d.querySelector('#delegate-run'); return { prompt: d.querySelector('#delegate-prompt').value, title: d.querySelector('#delegate-title').value, runOff: r.disabled && !r.checked, runNote: r.closest('.field').querySelector('small').textContent, threadRuns: !!document.querySelector('.sbag-bar .chip')?.title.includes('may run code'), where: d.textContent.includes('This computer') }; })()`);
   ok(sheet.prompt === "Tidy these notes\nand number the sections." && sheet.title === "Tidy these notes" && sheet.where, "the sheet: the task from the composer, its title from the first line, Where: this computer", sheet);
+  ok(sheet.threadRuns && sheet.runOff && sheet.runNote === "Running code in a delegated task isn't available yet.", "the sheet's May run code, with the thread able to run code: off and disabled, and says running code in a delegated task isn't available yet (#1612)", sheet);
   await P.ev(`document.querySelector('dialog.sheet[open] button[type=submit]').click()`);
   await sleep(200);
   ok(/No documents/.test(await P.ev(`document.querySelector('dialog.sheet[open] .msg').textContent`)) && !H.got.some((m) => m.method === "tasks.start"), "Start with no documents: says so, nothing sent");
@@ -119,6 +270,92 @@ try {
   ok(start && start.title === "Tidy these notes" && start.target === "local" && start.run === false && start.docs.length === 1 && start.docs[0].path === "work/notes.txt" && start.docs[0].kind === "file" && start.docs[0].content === "alpha\n", "Start: tasks.start with the task, its document's text from the workspace, target local, May run code off", start);
   await P.until(`!document.querySelector('dialog.sheet[open]') && !!document.querySelector('#task-view')?.offsetParent`);
   ok((await P.ev(`document.querySelector('#task-view h2').textContent`)) === "Tidy these notes" && (await P.composer()) === "", "started: the new task's view shown, the composer emptied");
+
+  // ---- Stop and tell Claude… (a working task): Stop, then Resume with the person's note (tasks.stop, tasks.resume
+  //      {task, note}); an empty note is said and nothing sent; an agent that refuses notes (before 0.8.13) is said so,
+  //      and the stopped task is resumed plainly
+  const tid = start.task ?? [...H.tasks.values()].find((t) => t.title === "Tidy these notes")?.task;
+  const steerUi = () => P.ev(`(() => { const q = (s) => document.querySelector(s); const shown = (s) => !!q(s) && !q(s).hidden && !!q(s).offsetParent; return { stop: shown('#delegate-steer'), resume: shown('#delegate-resume'), resumeNote: shown('#delegate-resume-note'), form: shown('#task-view .steer-form'), send: q('#task-view .steer-form .primary')?.textContent ?? null, msg: q('#task-view .steer .msg')?.textContent ?? '', chip: q('#task-view .task-head .chip')?.textContent ?? null }; })()`);
+  let sv = await steerUi();
+  ok(sv.stop && !sv.resume && !sv.form && sv.chip === "Working", "a working task: Stop and tell Claude… offered", sv);
+  await P.ev(`document.querySelector('#delegate-steer').click()`);
+  sv = await steerUi();
+  ok(sv.form && sv.send === "Stop and send" && !sv.stop, "Stop and tell Claude…: the note box, its button Stop and send", sv);
+  const s0 = H.got.length;
+  await P.ev(`document.querySelector('#task-view .steer-form .primary').click()`);
+  await sleep(200);
+  sv = await steerUi();
+  ok(/Write what you'd like changed first/.test(sv.msg) && !H.got.slice(s0).some((m) => m.method === "tasks.stop" || m.method === "tasks.resume"), "an empty note: said, and nothing sent (the task isn't stopped)", sv);
+  // (typed, then the view drawn again by the task's own events: what is typed stays)
+  await P.ev(`(() => { const t = document.querySelector('#delegate-steer-note'); t.value = 'Use the second dataset instead.'; t.dispatchEvent(new Event('input')); })()`);
+  H.emit(tid, { type: "turn_started" });
+  await sleep(300);
+  ok((await P.ev(`document.querySelector('#delegate-steer-note')?.value`)) === "Use the second dataset instead.", "what is typed in the note stays while the task's view is drawn again");
+  await P.ev(`document.querySelector('#task-view .steer-form .primary').click()`);
+  await hostUntil(() => H.resumes.length === 1);
+  await P.until(`document.querySelector('#task-view .task-head .chip')?.textContent === 'Working' && document.querySelector('#task-view .steer-form').hidden`, 10000).catch(() => {});
+  const sOrder = H.got.slice(s0).filter((m) => m.method === "tasks.stop" || m.method === "tasks.resume").map((m) => m.method + (m.params.note !== undefined ? ":" + m.params.note : ""));
+  ok(JSON.stringify(sOrder) === JSON.stringify(["tasks.stop", "tasks.resume:Use the second dataset instead."]) && H.resumes[0].note === "Use the second dataset instead.", "Stop and send: the task stopped, then resumed with the note as typed; working again, the box closed", { order: sOrder, sv: await steerUi() });
+  // (an agent before 0.8.13: the note refused, said, and the task, stopped, resumed without it)
+  H.noNotes = true;
+  await P.ev(`document.querySelector('#delegate-steer').click()`);
+  await P.ev(`(() => { const t = document.querySelector('#delegate-steer-note'); t.value = 'One more thing.'; })()`);
+  await P.ev(`document.querySelector('#task-view .steer-form .primary').click()`);
+  await P.until(`/sagebrush-agent 0.8.13 or later/.test(document.querySelector('#task-view .steer .msg')?.textContent ?? '')`, 10000).catch(() => {});
+  sv = await steerUi();
+  ok(/needs sagebrush-agent 0.8.13 or later/.test(sv.msg) && sv.chip === "Stopped" && H.resumes.length === 1, "an agent that refuses notes: said so plainly; the task stays stopped (its chip says Stopped), nothing resumed", sv);
+  await P.ev(`document.querySelector('#task-view .steer-form button:not(.primary)').click()`);
+  sv = await steerUi();
+  ok(sv.resume && !sv.form, "the stopped task: Resume offered", sv);
+  await P.ev(`document.querySelector('#delegate-resume').click()`);
+  await hostUntil(() => H.resumes.length === 2);
+  await P.until(`document.querySelector('#task-view .task-head .chip')?.textContent === 'Working'`, 10000).catch(() => {});
+  ok(H.resumes[1].note === undefined && (await steerUi()).chip === "Working", "Resume: tasks.resume without a note; working again", H.resumes[1]);
+  H.noNotes = false;
+
+  // ---- #1621: a task the agent left interrupted says why on its chip (its code), never "Interrupted" unless it was,
+  //      its reason a quiet line; a turn that ended with an error shows Claude's own words as a message, and only the
+  //      agent's error line as the error (sagebrush-agent's is_error turn, as 0.8.14 sends it)
+  {
+    const E = await H.addTask({ title: "More facts about E" });
+    H.emit(E.task, { type: "turn_started" });
+    H.emit(E.task, { type: "message_revised", message: "e1", revision: 1 });
+    H.emit(E.task, { type: "text_delta", message: "e1", revision: 1, text: "I've added a section, More facts about E." });
+    H.emit(E.task, { type: "turn_error", code: "is_error", message: "Claude ended the turn with an error" });
+    H.emit(E.task, { type: "turn_finished", outcome: "error", code: "is_error" });
+    H.emit(E.task, { type: "task_status", status: "interrupted", reason: "the agent's turn ended with an error, without a proposal", code: "failed" });
+    await P.until(`!!document.querySelector('#tasks .task[data-task="${E.task}"]')`, 10000).catch(async (e) => { throw new Error(e.message + " the list: " + JSON.stringify(await P.ev(`({ sw: document.querySelector('#delegate-switch')?.textContent, tasks: [...document.querySelectorAll('#tasks .task')].map((b) => (b.dataset.task ?? '').slice(0, 6) + ':' + b.textContent) })`)) + " host lists: " + H.got.filter((m) => m.method === "tasks.list").length + " tasks: " + H.tasks.size); });
+    const listChip = await P.ev(`document.querySelector('#tasks .task[data-task="${E.task}"] .chip').textContent`);
+    await P.ev(`document.querySelector('#tasks .task[data-task="${E.task}"]').click()`);
+    await P.until(`!!document.querySelector('#task-view .turn') && document.querySelector('#task-view h2')?.textContent === 'More facts about E'`, 10000);
+    const v = await P.ev(`(() => { const q = (s) => document.querySelector(s); const err = q('#task-view .turn .turn-error'); return { chip: q('#task-view .task-head .chip')?.textContent, reason: q('#task-view .reason')?.textContent, reasonRed: !!q('#task-view .reason') && getComputedStyle(q('#task-view .reason')).color === getComputedStyle(err ?? q('#task-view .reason')).color && !!err, error: err?.textContent ?? null, prose: [...document.querySelectorAll('#task-view .turn .msg')].map((m) => m.textContent).join('|'), proseInError: !!err && err.textContent.includes("I've added a section") }; })()`);
+    ok(listChip === "Ended with an error" && v.chip === "Ended with an error" && v.reason === "the agent's turn ended with an error, without a proposal" && !v.reasonRed, "an interrupted task with the agent's code: its chip says what happened (in the list and its view), its reason a quiet line, not red", { listChip, ...v });
+    ok(v.prose.includes("I've added a section, More facts about E.") && !v.proseInError && v.error === "Error: Claude ended the turn with an error", "a turn that ended with an error: Claude's own words shown as a message, only the agent's error line as the error", v);
+    await P.ev(`document.querySelector('#task-view .task-head .link').click()`);
+  }
+
+  // ---- #1622: coming back to the page, Delegate is on again and its tasks are listed; the agent not connected, the
+  //      last list stays, marked, until it is back
+  await P.ev(`document.querySelector('#task-view .task-head .link')?.click()`);
+  const before = (await ui()).tasks;
+  // (the same tasks with the same chips; their order is the agent's list's, newest first by its own clock)
+  const same = (x, y) => JSON.stringify([...(x ?? [])].sort()) === JSON.stringify([...(y ?? [])].sort());
+  const n0 = H.changes.length;
+  await P.reload();
+  await P.until(`document.querySelector('#connect').textContent === 'Connected' && document.querySelector('#delegate-switch')?.textContent === 'Delegate: on'`, 20000);
+  await P.until(`document.querySelectorAll('#tasks .task').length === ${before?.length ?? -1}`, 10000).catch(() => {});
+  u = await ui();
+  ok(H.grant?.delegate === true && H.changes.length > n0 && H.changes.slice(n0).every((g) => g?.delegate === true) && u.sw === "Delegate: on" && same(u.tasks, before) && u.dialogs.length === 0, "#1622: a reload of the page reconnects with Delegate on again (no confirmation, never off in between, so no task is stopped), and its tasks are listed as before", { changes: H.changes.slice(n0).map((g) => g?.delegate ?? null), before, after: u.tasks, sw: u.sw, delegate: H.grant?.delegate });
+  await P.ev(`(localStorage.setItem('__sbnoretry', '1'), true)`);
+  H.sock.close(1011, "gone");
+  await P.until(`document.querySelector('#connect').textContent !== 'Connected'`, 10000);
+  await P.until(`document.querySelector('#tasks')?.classList.contains('away') && !document.querySelector('#tasks').hidden`, 10000).catch(() => {});
+  const away = await P.ev(`(() => { const t = document.querySelector('#tasks'); return { shown: !!t && !t.hidden && !!t.offsetParent, note: t?.querySelector('.away-note')?.textContent ?? null, rows: [...(t?.querySelectorAll('.task') ?? [])].map((b) => b.querySelector('.t').textContent + ' · ' + b.querySelector('.chip').textContent), buttons: t?.querySelectorAll('button.task').length ?? -1 }; })()`);
+  ok(away.shown && away.note === "Agent not connected: these are the tasks it had when the page last heard from it." && same(away.rows, before) && away.buttons === 0, "#1622: the agent not connected: the last task list stays, marked so, each task shown but not opened", away);
+  await P.ev(`(localStorage.removeItem('__sbnoretry'), true)`);
+  await P.ev(`document.querySelector('#conn-act')?.click()`);
+  await P.until(`document.querySelector('#connect').textContent === 'Connected' && document.querySelectorAll('#tasks button.task').length === ${before?.length ?? -1}`, 20000);
+  ok(!(await P.ev(`document.querySelector('#tasks').classList.contains('away')`)), "#1622: connected again: the list is the agent's own again, its tasks open");
 
   // ---- the switch off: the running tasks closed first (ticked), Delegate… disabled while it turns off, then the host told
   await P.ev(`document.querySelector('#delegate-switch').click()`);
@@ -140,6 +377,24 @@ try {
   const order = H.got.filter((m) => m.method === "tasks.revoke" || m.method === "grant.changed").map((m) => m.method === "grant.changed" ? (m.params.delegate ? "on" : "off") : "revoke").slice(-3);
   ok(order.join() === "revoke,revoke,off" && u.tasks === null && !u.view && u.log, "off: the chosen tasks closed, then the host told (no delegate); no tasks shown, back to the chats", { order, u });
   ok([...H.tasks.values()].filter((t) => running.includes(t.title)).every((t) => t.status === "closed"), "the ticked tasks are closed at the host");
+  // ---- an agent that runs a task's code (delegate.run, 0.8.13 on Linux): May run code offered, and ticked by default
+  //      where the thread may run code (#1612's ruling)
+  H.features = [...H.features, "delegate.run"];
+  await P.navigate(`${site}/agents/?pair=123-456&port=${H.port}`);
+  await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect')`, 30000);
+  await P.ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect').click()`);
+  await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`, 30000);
+  await P.ev(`(() => { const d = [...document.querySelectorAll('.sbag-dlg')].at(-1); const all = [...d.querySelectorAll('label')].find((l) => l.textContent.startsWith('Everything')).querySelector('input'); all.checked = true; all.dispatchEvent(new Event('change')); [...d.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click(); })()`);
+  await P.until(`document.querySelector('#connect').textContent === 'Connected' && !!document.querySelector('#delegate-switch')?.offsetParent`);
+  await P.ev(`document.querySelector('#delegate-switch').click()`);
+  await P.until(`!!document.querySelector('dialog.delegate-dlg[open]')`);
+  await P.ev(`[...document.querySelectorAll('dialog.delegate-dlg[open] button')].find((b) => b.textContent === 'Turn on').click()`);
+  await P.until(`document.querySelector('#delegate-switch').textContent === 'Delegate: on'`);
+  await P.ev(`document.querySelector('#delegate').click()`);
+  await P.until(`!!document.querySelector('dialog.sheet[open]')`);
+  const runs = await P.ev(`(() => { const r = document.querySelector('dialog.sheet[open] #delegate-run'); return { disabled: r.disabled, checked: r.checked, note: r.closest('.field').querySelector('small').textContent, threadRuns: !!document.querySelector('.sbag-bar .chip')?.title.includes('may run code') }; })()`);
+  ok(runs.threadRuns && !runs.disabled && runs.checked && runs.note === "Fixed for this task once it starts.", "an agent that offers delegate.run: May run code can be chosen, and starts ticked as the thread may run code", runs);
+  await P.ev(`[...document.querySelectorAll('dialog.sheet[open] button')].find((b) => b.textContent === 'Cancel').click()`);
   ok(P.errors.length === 0, "no page errors", P.errors);
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));

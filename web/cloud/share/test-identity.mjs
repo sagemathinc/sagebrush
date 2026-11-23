@@ -1048,8 +1048,12 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
   // a later sign-in replaces it, a later unverified one clears it
   const a2 = await signIn("user_01EMAIL1", "session_01EM1b", { user: u("user_01EMAIL1", "alice.new@example.test", true) });
   ok(a2.cb.status === 302 && (await emailOf("user_01EMAIL1")).email === "alice.new@example.test", "E8 a later sign-in with another verified address replaces it");
+  // (the account menu: /api/share/me says who is signed in, from the identity's verified address)
+  const meA2 = await (await me(a2.session)).json();
+  ok(meA2.email === "alice.new@example.test", `E8 /api/share/me names the signed-in account by its verified address (${JSON.stringify(meA2.email)})`);
   const a3 = await signIn("user_01EMAIL1", "session_01EM1c", { user: u("user_01EMAIL1", "alice.new@example.test", false) });
   ok(a3.cb.status === 302 && (await emailOf("user_01EMAIL1")).email === null, "E8 a later sign-in whose address is no longer verified clears it");
+  ok((await (await me(a3.session)).json()).email == null, "E8 ...and /api/share/me then names no address: never an unverified one");
 
   // a refresh: WorkOS's answer for the same user sets, changes or clears it; an outage changes nothing
   const r = await signIn("user_01EMAILR", "session_01EMR", { user: u("user_01EMAILR", "rita@example.test", true) });

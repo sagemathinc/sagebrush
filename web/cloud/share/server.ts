@@ -1904,7 +1904,10 @@ async function route(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | 
   const id = who?.id;
   if (!who || !id) return err(401, "sign in first");
   if (p === "/api/share/me" && m === "GET") {
-    const a = await env.SHARE_DB.prepare("SELECT email, name FROM accounts WHERE account_id = ?1").bind(id).first();
+    // (who you are, for the account menu: the account's own address where it has one (a DEV test session's), else the
+    //  newest verified address of one of its identities: WorkOS's own answer, stored at sign-in and each refresh, never
+    //  anything a page sent; none, and the menu says only "Your account")
+    const a = await env.SHARE_DB.prepare("SELECT name, COALESCE(email, (SELECT i.email FROM identities i WHERE i.account_id = accounts.account_id AND i.email IS NOT NULL ORDER BY i.email_at DESC LIMIT 1)) AS email FROM accounts WHERE account_id = ?1").bind(id).first();
     return json({ account_id: id, ...a, ...(await breakdown(env, id)), limits: await limits(env, who) });
   }
   if (p === "/api/share/mine" && m === "GET") return mine(env, id);

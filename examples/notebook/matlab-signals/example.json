@@ -1,0 +1,16 @@
+{
+ "title": "Signals and interpolation (MATLAB)",
+ "summary": "The FFT of a noisy signal, filtering by convolution and with filter, and interpolation with interp1 and splines.",
+ "tags": [
+  "data",
+  "plots"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "matlab",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

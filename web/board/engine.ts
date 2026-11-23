@@ -26,6 +26,38 @@ export const OWN_ENGINE = typeof __SB_ENGINE__ === "undefined" ? null : __SB_ENG
 /** Where a downloaded file's engine comes from: the site it was downloaded from. */
 export interface EngineRef { site: string; id: string }
 
+/** Recovery belongs to the whole load, not the first language to fail.
+ * Register a language before starting it; pending checks and any refusal
+ * veto substitution. Tickets from replaced loads cannot change this one. */
+export class EngineRecovery {
+  private loads = new Map<string, { pending: boolean; failure: boolean | null }>();
+  private revision = 0;
+  reset() { this.loads.clear(); this.revision++; }
+  track(mode: string, make: (unavailable: (recoverable: boolean) => void) => EngineParts): EngineParts {
+    const state = { pending: true, failure: null as boolean | null };
+    this.loads.set(mode, state);
+    this.revision++;
+    const current = () => this.loads.get(mode) === state;
+    const parts = make((yes) => { if (current()) state.failure = state.failure === false ? false : yes; });
+    return { ...parts, module: async () => {
+      try { return await parts.module(); }
+      catch (e) { if (current() && state.failure === null) state.failure = false; throw e; }
+      finally { if (current()) state.pending = false; }
+    } };
+  }
+  action(select: () => void): (() => boolean) | null {
+    const allowed = () => this.loads.size > 0 && [...this.loads.values()].every((s) => !s.pending && s.failure !== false) && [...this.loads.values()].some((s) => s.failure === true);
+    if (!allowed()) return null;
+    const revision = this.revision;
+    return () => {
+      if (revision !== this.revision || !allowed()) return false;
+      this.reset();
+      select();
+      return true;
+    };
+  }
+}
+
 /** The parts a downloaded file needs, of an engine with files `names`: the
  * Python library's sources (web/lib-chunks.mts), and for Sage its compiled
  * modules too (those of Sage's start and the scientific modules', which it
@@ -72,12 +104,57 @@ export function embeddedText(): Map<string, string> {
 }
 
 /** The engine's parts from `base` (<site>/engine/<id>/). */
+/** An engine part that couldn't be had from `site`: it can't be reached (no network, or a local page that's gone), or it
+ * doesn't have it (404: an engine never published there). */
+export class EnginePartError extends Error {
+  constructor(message: string, readonly kind: "unreachable" | "missing", readonly site: string) { super(message); }
+}
+
 export function fetched(base: string): Bytes {
   return async (name) => {
-    const r = await fetch(new URL(name, base));
+    let r: Response;
+    // (a request that fails before any answer is a TypeError in every browser, whatever its words: Chrome's "Failed
+    // to fetch", Safari's "Load failed", Firefox's "NetworkError when attempting to fetch resource.")
+    try { r = await fetch(new URL(name, base)); } catch (e) {
+      if (e instanceof TypeError) throw new EnginePartError(`${name}: ${e.message}`, "unreachable", base);
+      throw e;
+    }
+    if (r.status === 404) throw new EnginePartError(`${name}: 404 ${r.statusText}`, "missing", base);
     if (!r.ok) throw new Error(`${name}: ${r.status} ${r.statusText}`);
     return r.arrayBuffer();
   };
+}
+
+/** Why a file's code can't run, an engine part `name` missing (what follows "The code can't run here:"). */
+export function whyNoEngine(e: EnginePartError, name: string): string {
+  let host = e.site;
+  try { host = new URL(e.site).host; } catch {}
+  return e.kind === "missing"
+    ? `this file's code needs parts of Sagebrush it doesn't carry (${name}), and ${host}, where it looks for them, doesn't have them: the version of Sagebrush it was made with isn't published there. Download it again in offline mode, so it carries them.`
+    : `this file's code needs parts of Sagebrush it doesn't carry (${name}), from ${host}, which can't be reached (no network, or a page that isn't open any more). Download it again in offline mode, so it carries them.`;
+}
+
+/** Explicit recovery chosen by the reader, never an automatic substitution.
+ * A newer API cannot safely talk to this file's old script; report that rather
+ * than loading it, or quietly falling back to the unavailable pinned engine. */
+export async function publicLatestEngine(): Promise<{ bytes: Bytes; id: string; names: string[] }> {
+  if (!OWN_ENGINE) throw new Error("this file's script has no engine of its own");
+  const site = "https://sagebrush.space/";
+  const r = await fetch(new URL("engine/latest.json", site), { cache: "no-store" });
+  if (!r.ok) throw new Error(`sagebrush.space: latest engine unavailable (HTTP ${r.status})`);
+  const latest = await r.json();
+  if (latest?.api !== OWN_ENGINE.api) throw new Error("sagebrush.space's latest engine needs a newer file reader; open this board's HTML on Sagebrush using Files, then Open as a board");
+  if (typeof latest.id !== "string" || !/^[0-9a-f]{20}$/.test(latest.id)) throw new Error("sagebrush.space: invalid latest engine id");
+  const base = new URL(`engine/${latest.id}/`, site).href;
+  const manifest = await fetch(new URL("manifest.json", base), { cache: "no-store" });
+  if (!manifest.ok) throw new Error(`sagebrush.space: engine manifest unavailable (HTTP ${manifest.status})`);
+  const m = await manifest.json();
+  if (!isManifest(m) || m.id !== latest.id || m.api !== OWN_ENGINE.api ||
+      (await sha256(new TextEncoder().encode(engineIdText(m.api, m.files)).buffer as ArrayBuffer)).slice(0, 20) !== m.id) {
+    throw new Error("sagebrush.space: invalid engine manifest (id, API or hash differs): refused");
+  }
+  const sums = Object.fromEntries(Object.entries(m.files).map(([k, v]) => [k, v.sha256]));
+  return { bytes: checked(fetched(base), sums), id: m.id, names: Object.keys(sums) };
 }
 
 /** `bytes`, each part checked against its SHA-256 in `sums`. */
@@ -117,16 +194,25 @@ export async function chooseEngine(ref: EngineRef, use: "pinned" | "latest" | un
 /** The engine's parts from `bytes`: all loaded and checked before Python
  * starts.  `math`: the file's own math module (sagebrush-math.js), for the
  * notebook's outputs. */
-export function fileEngine(load: () => Promise<{ bytes: Bytes; names: string[] }>, o: { sage: boolean; math?: string | null }): EngineParts {
+export function fileEngine(load: () => Promise<{ bytes: Bytes; names: string[] }>, o: { sage: boolean; math?: string | null; unavailable?: (recoverable: boolean) => void }): EngineParts {
   const urls = new Map<string, string>(), raw = new Map<string, ArrayBuffer>();
   const type = (n: string) => (n.endsWith(".js") ? "text/javascript" : n.endsWith(".wasm") ? "application/wasm" : "application/json");
   return {
     async module() {
       const { bytes, names: all } = await load();
       const names = engineFiles(o.sage, all);
-      const got = await Promise.all(names.map((n) => bytes(n).catch((e) => {
-        throw new Error(e?.message === "Failed to fetch" ? `this file's code needs parts of Sagebrush it doesn't carry (${n}), from the site it came from, which can't be reached (no network?). Download it again in offline mode.` : String(e?.message ?? e));
-      })));
+      // Decide recovery only after every part has settled: a fast missing
+      // part must not offer substitution while another part's hash is still
+      // being checked. Any non-availability failure takes precedence.
+      const results = await Promise.allSettled(names.map((n) => bytes(n)));
+      const failed = results.flatMap((r, i) => r.status === "rejected" ? [{ name: names[i], error: r.reason }] : []);
+      if (failed.length) {
+        const refusal = failed.find((f) => !(f.error instanceof EnginePartError));
+        o.unavailable?.(!refusal);
+        const { name, error } = refusal ?? failed[0];
+        throw new Error(error instanceof EnginePartError ? whyNoEngine(error, name) : String(error?.message ?? error));
+      }
+      const got = results.map((r) => (r as PromiseFulfilledResult<ArrayBuffer>).value);
       names.forEach((n, i) => { raw.set(n, got[i]); urls.set(n, URL.createObjectURL(new Blob([got[i]], { type: type(n) }))); });
       if (o.math) urls.set("sagebrush-math.js", URL.createObjectURL(new Blob([o.math], { type: "text/javascript" })));
       return import(urls.get("sagebrush-notebook.js")!);

@@ -8,6 +8,7 @@
 import { writerHandover } from "../page/handover";
 import type { Workspace } from "../workspace/api";
 import { canonical, cellForm, preflight, type NotebookEdit } from "../workspace/notebook-edit";
+import { docValue, ENVELOPE } from "../workspace/notebook-form";
 import type { Kept, PageRun } from "../workspace/run-verbs";
 
 // (stores.js's FENCE, the workspace's record in the notebooks store; test-agents-artifacts checks they're equal)
@@ -152,19 +153,13 @@ export const TAKE_MS = 10_000;
 /** A read of an agent's run that the pane's letting go cut short. */
 const GONE = Symbol("gone");
 
-// What the store keeps beside a notebook's content, for itself (ART-C2a r4): left out when "is this what the store
-// has" is asked, and when content is kept as a copy. Everything else is the content: the mode, the document's
-// metadata (seed, autorun, ...) and each cell whole (its metadata, attachments, outputs, counts and times).
-const BOOKKEEPING = ["id", "rev", "updated", "baseRev", "name", "j", "hash", "unjournaled"];
-const contentOf = (doc: any) => Object.fromEntries(Object.entries(doc ?? {}).filter(([k]) => !BOOKKEEPING.includes(k)));
-// (a stable form to compare: keys sorted at every depth, so the store's key order and the snapshot's don't matter)
-const stable = (v: unknown): string =>
-  Array.isArray(v)
-    ? `[${v.map(stable).join(",")}]`
-    : v && typeof v === "object"
-      ? `{${Object.keys(v).filter((k) => (v as any)[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${stable((v as any)[k])}`).join(",")}}`
-      : JSON.stringify(v ?? null);
-const sameContent = (a: any, b: any) => stable(contentOf(a)) === stable(contentOf(b));
+// What the store keeps beside a notebook's content, for itself (ART-C2a r4: the workspace's own list, ENVELOPE, so a
+// field the store adds (sync's journal: the versions a record is) is never taken for an unsaved change): left out when
+// "is this what the store has" is asked, and when content is kept as a copy. Everything else is the content: the mode,
+// the document's metadata (seed, autorun, ...) and each cell whole (its metadata, attachments, outputs, counts and
+// times), compared in the form the notebook keeps it (docValue: its key order and a cell's stored form don't matter).
+const contentOf = (doc: any) => Object.fromEntries(Object.entries(doc ?? {}).filter(([k]) => !ENVELOPE.includes(k)));
+const sameContent = (a: any, b: any) => docValue(a) === docValue(b);
 
 /**
  * A notebook artifact, mounted into `box`. The handle is returned at once and owns everything the mount makes, so it
@@ -719,15 +714,35 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
     const owned = () => alive && nb === comp && comp.store === mine;
     ui.saved("Saved");
     if (jstore) showWriter(comp);
-    comp.on("dirty", () => owned() && ui.saved("Editing…"));
+    // (Saving… from the first touch until its change is saved. "dirty" comes with any touch, a change or not, and
+    //  nothing follows one that changed nothing: with no "change" past the component's half second, the pane says
+    //  again what it said last (Saved, or why the last save was refused: that save is still to make). It said
+    //  "Editing…", for good, #1617. Never over Closing…)
+    let idle = 0, last = "Saved";
+    const say = (t: string) => owned() && !frozen && ui.saved(t);
+    comp.on("dirty", () => {
+      if (!owned() || frozen) return;
+      ui.saved("Saving…");
+      clearTimeout(idle);
+      idle = window.setTimeout(() => say(last), 900);
+    });
+    comp.on("change", () => {
+      clearTimeout(idle);
+      say("Saving…");
+    });
     // (a save the store refused: shown as it says; if the workspace's fence moved (a reset, sync), the pane lets go)
     comp.on("saved", (t: unknown) => {
       if (!owned()) return;
       const refused = typeof t === "string" && t.startsWith("not saved");
-      ui.saved(refused ? (t as string) : "Saved");
-      if (refused) void check();
+      last = refused ? (t as string) : "Saved";
+      say(last);
+      // (not while closing: the close says what became of it)
+      if (refused && !frozen) void check();
     });
-    comp.on("remote", () => owned() && ui.saved("Updated from elsewhere"));
+    comp.on("remote", () => {
+      last = "Saved";
+      say("Updated from elsewhere");
+    });
     // (a save of this notebook made after it was let go met a change made elsewhere: what it had is kept as a copy)
     // (or, `why`, a save refused or failed when sent again: said as that, not as a change made elsewhere)
     comp.onDetachedConflict(async (doc: any, _theirs: unknown, _key: unknown, why?: { refused: boolean; message: string } | null) => {

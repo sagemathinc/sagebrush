@@ -195,6 +195,12 @@ export function lex(src: string): Tok[] {
     if (/[A-Za-z]/.test(c)) {
       let j = i;
       while (j < n && /[A-Za-z0-9_]/.test(src[j])) j++;
+      // (a reactive notebook's page-order scoping names a later definition of x xʹ2, U+02B9 and digits, a suffix no
+      // MATLAB name can have: src/rename-matlab.ts; the runtime shows it as x, lib/_matlab.py _written)
+      if (src[j] === "ʹ" && /[0-9]/.test(src[j + 1] ?? "")) {
+        j++;
+        while (j < n && /[0-9]/.test(src[j])) j++;
+      }
       const w = src.slice(i, j);
       if (KEYWORDS.has(w)) {
         if (w === "end" && argBlock && stmtStart) argBlock = false;

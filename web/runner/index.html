@@ -98,6 +98,12 @@ buffer staying here, and the page's answer is written to it.
         }
         Atomics.notify(ctl, 0);
       };
+      // a refused change asked while the run waits (web/worker.ts fsAsk): the one open request, {key, buffer}. The
+      // page's answer names its key: an allow carries the new policy's epoch, stored in the shared word BEFORE the answer
+      // is written (the worker adopts the policy only at exactly that epoch); anything else, a newer request, or a Stop
+      // answers no. This frame relays; the page decides.
+      let ask = null;
+      const askNo = () => { if (ask) { giveInput(ask.buffer, null); ask = null; } };
       // live data (src/live-data.ts): open requests by key, {id: the run, buffer};
       // the page's answer is written once, to the one its key and run name,
       // and a request is over at its answer, its run's end or a Stop
@@ -132,6 +138,11 @@ buffer staying here, and the page's answer is written to it.
           if (typeof d.liveData.key !== "string" || lives.has(d.liveData.key)) return;
           retireLive(d.id);
           lives.set(d.liveData.key, { id: d.id, buffer: d.buffer });
+          d = { ...d, buffer: null };
+        }
+        if (d && d.fsAsk && d.buffer instanceof SharedArrayBuffer && d.buffer.byteLength >= 8) {
+          askNo();
+          if (typeof d.fsAsk.key === "string" && d.fsAsk.key.length <= 64) ask = { key: d.fsAsk.key, buffer: d.buffer };
           d = { ...d, buffer: null };
         }
         if (d && d.input && d.buffer instanceof SharedArrayBuffer && d.buffer.byteLength >= 8) {
@@ -179,6 +190,7 @@ buffer staying here, and the page's answer is written to it.
         if (d && typeof d.runnerInterrupt === "number") {
           retire(); // (every open input() request is over)
           retireLive();
+          askNo();
           if (flag) {
             Atomics.store(flag, 1, d.runnerInterrupt);
             // (bit 0, and the word notified: a time.sleep waits on it, src/runtime/interrupt.ts requestCtrlC)
@@ -200,6 +212,17 @@ buffer staying here, and the page's answer is written to it.
         }
         // (the new epoch stored BEFORE the policy goes on to the worker: a run in flight refuses at its next change)
         if (d && d.fsWrite && Number.isInteger(d.fsWrite.epoch) && writable) Atomics.store(writable, 0, d.fsWrite.epoch);
+        if (d && typeof d.runnerAsk === "string") {
+          if (ask && ask.key === d.runnerAsk) {
+            const a = ask;
+            ask = null;
+            if (typeof d.answer === "string" && Number.isInteger(d.epoch) && d.epoch > 0 && writable) {
+              Atomics.store(writable, 0, d.epoch);
+              giveInput(a.buffer, d.answer);
+            } else giveInput(a.buffer, null);
+          }
+          return;
+        }
         if (d && typeof d.runnerInput === "number") {
           const e = typeof d.key === "string" ? inputs.get(d.key) : undefined;
           if (e && e.id === d.runnerInput) {

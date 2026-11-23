@@ -42,6 +42,11 @@
    "kind": "host",
    "where": "engine/poly/src/budget.rs::with_default_limits",
    "default": "engine/poly/src/budget.rs::default_with"
+  },
+  {
+   "id": "bytes-count-bound",
+   "kind": "memory",
+   "where": "src/runtime/types.ts::toBytes"
   }
  ]
 }
