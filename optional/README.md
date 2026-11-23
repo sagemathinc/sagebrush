@@ -7,6 +7,8 @@ The design is plan-modular-packages-r4 (approved Oct 23 2026). Optional packages
 - A change only under `optional/` runs none of the default CI suites (`scripts/ci-paths.mjs`).
 - `scripts/size-budget.mjs` fails a core build that grows, or that contains an optional package.
 
+**A package may stand for a distribution.** `"distribution": "<project name>"` in its manifest (pandas: `"pandas"`; sklearn: `"scikit-learn"`) goes into the set's index with the package's version. With the set in use, `importlib.metadata.version(name)` answers it, by the normalized name, as CPython's does; a set has one package per distribution name.
+
 **They are published as package sets.** A set is content-addressed: its id is the SHA-256 of its index, and the index pins every chunk and file. A notebook pins the set it runs with.
 
 **Hosts.** Every host checks every byte against those pins before using it (`src/pkgset.ts`):
@@ -20,7 +22,8 @@ The design is plan-modular-packages-r4 (approved Oct 23 2026). Optional packages
 optional/<name>/
   sagebrush.json      name "@sagebrush/<name>", version, kind "optional", modes,
                       python {root, modules}, requires (exact ids), private_prefix,
-                      provides (optional), oracle (optional), files (every shipped file -> SHA-256)
+                      provides (optional), distribution (optional), oracle (optional),
+                      files (every shipped file -> SHA-256)
   py/...              the shipped files (python.root)
   tests/test_*.py     programs whose printed output is checked (tests/test_*.out, or the oracle)
   known.json          accepted differences from the oracle, each with a reason
@@ -35,7 +38,8 @@ Optional packages are **reviewed first-party code**. `scripts/optional-packages.
 **A package may use:**
 - the public names in `core-api-surface.json` (modules, their names and their public types' members, with the level each appeared at);
 - the documented protocols (`_repr_html_`, `__array__`, the number and sequence dunders, …);
-- its own names.
+- its own names;
+- the public names of the packages it `requires`, at their exact ids: the modules their manifests list, and those modules' public names. Their private modules and names, and any change to them, are findings no declaration waives.
 
 **Banned whatever their arguments:**
 - reflection and dynamic import (`importlib`, `__import__`, `builtins`, `eval`/`exec`/`compile`, `getattr`/`setattr`/`hasattr`/`vars`/`dir`, `__dict__`, `sys.modules`), and aliases of them;
@@ -44,7 +48,7 @@ Optional packages are **reviewed first-party code**. `scripts/optional-packages.
 
 A package-private attribute on anything but `self`/`cls` starts with the package's `private_prefix`.
 
-A reviewed exception is one entry in `contract-declarations.json`: `{file, line, construct, target, reason}`, plus, for a dynamic access, `access` (the core name it reaches) and `call` (the parameter names it passes). A declared access counts as a use of `access`, at the level of the parameters in `call`. Without `call`, it takes that name's highest parameter level.
+A reviewed exception is one entry in `contract-declarations.json`: `{file, line, construct, target, reason}`, plus, for a dynamic access, `access` (the core name it reaches) and `call` (the parameter names it passes). A `reference` to a core name outside the Core API is waived the same way, one exact line and target. A declared access counts as a use of `access`, at the level of the parameters in `call`. Without `call`, it takes that name's highest parameter level.
 
 **The lint computes the package's `core_req`:** the highest level its uses need, including the levels of the parameters its calls pass. An older engine refuses a set that needs more.
 

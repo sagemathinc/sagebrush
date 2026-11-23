@@ -90,6 +90,39 @@ test("the contract lint flags reflection, private access and monkeypatching, and
   assert.ok(lintPackage(pkg({ "py/fixture.py": "" }, { private_prefix: used }), api).findings.some((f: any) => f.construct === "private_prefix"));
 });
 
+test("a package uses the packages it requires, at their exact ids, never their private names; a reference finding waives only by its declared line", async () => {
+  const { lintPackage, loadApi } = await esm("scripts/optional-packages.mjs");
+  const api = loadApi(repo);
+  const dep = { dir: "dep", id: "@sagebrush/dep@0.1.0", kind: "python", manifest: { python: { root: "py", modules: ["dep", "dep._dp_impl", "dep.sub"] }, private_prefix: "_dp_", requires: [] }, files: {}, declarations: [] };
+  const pkg = (src: string, requires: string[] = ["@sagebrush/dep@0.1.0"], declarations: any[] = []) => ({ dir: "fixture", id: "@sagebrush/fixture@0.1.0", manifest: { python: { root: "py", modules: ["fixture"] }, private_prefix: "_fx_", requires }, files: { "py/fixture.py": src }, declarations });
+  const lint = (src: string, requires?: string[], declarations?: any[]) => lintPackage(pkg(src, requires, declarations), api, [dep]).findings;
+  // (its public modules and names: allowed, and not checked against the Core API)
+  assert.deepEqual(lint("import dep\nimport dep.sub as s\nfrom dep.sub import f\nx = dep.Thing(1).method(s.g, f)\n"), []);
+  // (not required, or required at another version: not allowed)
+  assert.ok(lint("import dep\n", []).some((f: any) => f.construct === "import" && f.target === "dep"));
+  assert.ok(lint("import dep\n", ["@sagebrush/dep@0.2.0"]).some((f: any) => f.construct === "import"));
+  // (its private names, a change to it: findings no declaration waives)
+  const declareAll = (line: number, construct: string, target: string) => [{ file: "py/fixture.py", line, construct, target, reason: "probe" }];
+  for (const [src, construct, target] of [
+    ["import dep._dp_impl\n", "import", "dep._dp_impl"],
+    ["from dep._dp_impl import x\n", "import", "dep._dp_impl"],
+    ["from dep import _hidden\n", "import", "dep._hidden"],
+    ["import dep\ny = dep._hidden\n", "attribute", "_hidden"],
+    ["from dep import sub\ny = sub._dp_state\n", "attribute", "_dp_state"],
+    ["import dep\ndep.Thing = None\n", "monkeypatch", "Thing"],
+  ] as [string, string, string][]) {
+    const line = src.split("\n").length - 1;
+    const found = lint(src, undefined, declareAll(line, construct, target));
+    assert.ok(found.some((f: any) => f.construct === construct && f.hard === true), `${JSON.stringify(src)}: a hard ${construct} finding, declared or not`);
+  }
+  // (a reference outside the Core API: a finding; a reviewed declaration of that line and target waives it, no other)
+  const ref = "import numpy as np\nr = np.random.rand.__self__\n";
+  assert.ok(lint(ref, []).some((f: any) => f.construct === "reference" && f.target === "numpy.random.rand.__self__"));
+  assert.deepEqual(lint(ref, [], declareAll(2, "reference", "numpy.random.rand.__self__")), []);
+  assert.ok(lint(ref, [], declareAll(1, "reference", "numpy.random.rand.__self__")).some((f: any) => f.construct === "reference"));
+  assert.ok(lint(ref, [], declareAll(2, "reference", "numpy.random.randint")).some((f: any) => f.construct === "reference"));
+});
+
 test("requirements come from the call forms used (§6.2–6.3): a new keyword raises the level, the old call doesn't", async () => {
   const { useLevel } = await esm("scripts/optional-packages.mjs");
   // level 1 had f(x); level 2 added extra=False (keyword-only) and a positional y=0

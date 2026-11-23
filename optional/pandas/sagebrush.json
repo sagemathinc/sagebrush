@@ -32,6 +32,7 @@
   },
   "requires": [],
   "private_prefix": "_pd_",
+  "distribution": "pandas",
   "files": {
     "py/pandas/__init__.py": "4f61508823bf3ca842307977d369a08e94dde6a721931e51092e0095f803b2b4",
     "py/pandas/_pd_column.py": "a2785fe953a71996cf75a13de73aec20df13909f542972729a8b388bcbcd1c9a",
