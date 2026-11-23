@@ -1,0 +1,129 @@
+python 3.14.4 x86_64 glibc
+package numpy 2.5.5
+package pandas 3.1.1
+package scikit-learn 1.9.1
+package scipy 1.18.1
+package joblib 1.6.0
+package threadpoolctl 3.8.0
+--
+== repr
+"Pipeline(steps=[('scale', StandardScaler()),\n                ('clf', DummyClassifier(strategy='most_frequent'))])"
+== repr-make
+"Pipeline(steps=[('standardscaler', StandardScaler()),\n                ('double', Double(factor=3)),\n                ('dummyregressor', DummyRegressor())])"
+== names
+['double-1', 'double-2', 'standardscaler', 'double-3']
+== names-str
+['passthrough-1', 'double', 'passthrough-2']
+== len
+2
+== getitem
+('StandardScaler()', "DummyClassifier(strategy='most_frequent')", "DummyClassifier(strategy='most_frequent')")
+== slice
+"Pipeline(steps=[('scale', StandardScaler())])"
+== slice-step
+!! ValueError: Pipeline slicing only supports a step of 1
+== named_steps
+['clf', 'scale']
+== named_steps-attr
+'StandardScaler()'
+== params-shallow
+['memory', 'steps', 'transform_input', 'verbose']
+== params-deep
+['clf', 'clf__constant', 'clf__random_state', 'clf__strategy', 'memory', 'scale', 'scale__copy', 'scale__with_mean', 'scale__with_std', 'steps', 'transform_input', 'verbose']
+== set_params-nested
+"Pipeline(steps=[('scale', StandardScaler(with_mean=False)),\n                ('clf', DummyClassifier())])"
+== set_params-step
+"Pipeline(steps=[('scale', 'passthrough'),\n                ('clf', DummyClassifier(strategy='most_frequent'))])"
+== set_params-steps
+"Pipeline(steps=[('d', Double())])"
+== clone
+("Pipeline(steps=[('scale', StandardScaler()),\n                ('clf', DummyClassifier(strategy='most_frequent'))])", False)
+== is_classifier
+(True, False, True)
+== fit-returns
+"Pipeline(steps=[('scale', StandardScaler()),\n                ('clf', DummyClassifier(strategy='most_frequent'))])"
+== predict
+('int64', (178,), '5e1a5fb4a12a3f07')
+== predict_proba
+('float64', (5, 3), 'b6316d2690e0ba36')
+== predict_log_proba
+array([[-inf,   0., -inf],
+       [-inf,   0., -inf]])
+== score
+0.398876404494382
+== score-weighted
+0.4011299435028249
+== classes
+array([0, 1, 2])
+== n_features_in
+13
+== fitted-steps
+('float64', (13,), 'cbe1a40c4c46f495')
+== same-object
+True
+== transform-of-classifier
+!! AttributeError: This 'Pipeline' has no attribute 'transform'
+== has-transform
+[False, False, True, False, False, False]
+== fit_transform
+('float64', (178, 13), 'c6edf336f0cb2156')
+== transform
+('float64', (4, 13), 'fd17686a570a1f84')
+== inverse
+('float64', (178, 13), '238a12973e6eba18')
+== names-out
+!! AttributeError: Estimator double does not provide get_feature_names_out. Did you mean to call pipeline[:-1].get_feature_names_out()?
+== names-out-frame
+['a', 'b']
+== names-out-missing
+!! AttributeError: Estimator dummyclassifier does not provide get_feature_names_out. Did you mean to call pipeline[:-1].get_feature_names_out()?
+== passthrough
+('float64', (178, 13), 'c44e09e067f11546')
+== passthrough-none
+('float64', (178, 13), 'c44e09e067f11546')
+== passthrough-last
+('float64', (178, 13), 'c44e09e067f11546')
+== passthrough-last-fit_transform
+('float64', (178, 13), 'c44e09e067f11546')
+== all-passthrough-fitted
+('float64', (178, 13), '8edcf3903afd97c6')
+== fit-only-last
+False
+== fit-params
+'hello'
+== fit-params-weight
+array([[0.93820225]])
+== fit-params-bad
+!! ValueError: Pipeline.fit does not accept the sample_weight parameter. You can pass parameters to specific steps of your pipeline using the stepname__parameter format, e.g. `Pipeline.fit(X, y, logisticregression__sample_weight=sample_weight)`.
+== transform-params
+!! ValueError: Passing extra keyword arguments to Pipeline.transform is only supported if enable_metadata_routing=True, which you can set using `sklearn.set_config`. See the User Guide <https://scikit-learn.org/stable/metadata_routing.html> for more details. Extra parameters passed are: {'extra'}
+== unfitted-predict
+!! NotFittedError: This Pipeline instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.
+== frame
+('float64', (1,), 'c2628abf3135153c')
+== frame-names
+['a']
+== verbose
+'[Pipeline] ............. (step 1 of 3) Processing scale, total=T\n[Pipeline] .............. (step 2 of 3) Processing skip, total=T\n[Pipeline] ............... (step 3 of 3) Processing clf, total=T\n'
+== empty
+!! ValueError: The pipeline is empty. Please add steps.
+== dup-names
+!! ValueError: Names provided are not unique: ['a', 'a']
+== name-conflict
+!! ValueError: Estimator names conflict with constructor arguments: ['memory', 'verbose']
+== name-dunder
+!! ValueError: Estimator names must not contain __: got ['a__b']
+== class-not-instance
+!! TypeError: Expected an estimator instance (Double()), got estimator class instead (Double).
+== not-transformer
+!! TypeError: All intermediate steps should be transformers and implement fit and transform or be the string 'passthrough' 'FitOnly()' (type <class '__main__.FitOnly'>) doesn't
+== last-no-fit
+!! TypeError: Last step of Pipeline should implement fit or be the string 'passthrough'. '3' (type <class 'int'>) doesn't
+== transform_input
+!! ValueError: The `transform_input` parameter can only be set if metadata routing is enabled. You can enable metadata routing using `sklearn.set_config(enable_metadata_routing=True)`.
+== param.steps
+!! InvalidParameterError: The 'steps' parameter of Pipeline must be an instance of 'list'. Got 'abc' instead.
+== param.verbose
+!! InvalidParameterError: The 'verbose' parameter of Pipeline must be an instance of 'bool' or an instance of 'numpy.bool'. Got 'yes' instead.
+== param.memory
+!! InvalidParameterError: The 'memory' parameter of Pipeline must be None, an instance of 'str' or an object implementing 'cache'. Got 5 instead.

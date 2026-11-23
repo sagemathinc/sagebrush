@@ -4,7 +4,7 @@
 
 Parts of this package are ported from scikit-learn 1.9.1 (https://github.com/scikit-learn/scikit-learn). Its license is shipped with the package as `py/sklearn/_sk_license.py`, whose docstring holds scikit-learn's license verbatim. The ported parts are:
 
-- **`py/sklearn/base.py`:** from `sklearn/base.py`: clone, BaseEstimator, the mixins, is_classifier and is_regressor.
+- **`py/sklearn/base.py`:** from `sklearn/base.py`: clone, BaseEstimator, the mixins (OneToOneFeatureMixin among them), `_fit_context`, is_classifier and is_regressor.
 - **`py/sklearn/_sk_pprint.py`:** the estimator repr, from `sklearn/utils/_pprint.py`, `_EstimatorPrettyPrinter`, `_changed_params` and `_safe_repr` (see the Python Software Foundation License below).
 - **`py/sklearn/_sk_config.py`:** from `sklearn/_config.py`.
 - **`py/sklearn/_sk_tags.py`:** from `sklearn/utils/_tags.py`.
@@ -16,7 +16,12 @@ Parts of this package are ported from scikit-learn 1.9.1 (https://github.com/sci
 - **`py/sklearn/metrics/_sk_regression.py`:** from `sklearn/metrics/_regression.py`: the four regression metrics and `_check_reg_targets`.
 - **`py/sklearn/metrics/_sk_classification.py`:** from `sklearn/metrics/_classification.py`: `_check_targets`, the classification metrics and `classification_report`; `_nanaverage` from `sklearn/utils/extmath.py`.
 - **`py/sklearn/model_selection/_sk_split.py`:** from `sklearn/model_selection/_split.py`: the splitters, `_validate_shuffle_split`, `check_cv`, `train_test_split` and the splitters' repr (`_pprint`, `_build_repr`).
-- **`py/sklearn/utils/_sk_extmath.py`:** `_approximate_mode`, from `sklearn/utils/extmath.py`.
+- **`py/sklearn/utils/_sk_extmath.py`:** `_approximate_mode`, `_incremental_mean_and_var` and `_safe_accumulator_op`, from `sklearn/utils/extmath.py`.
+- **`py/sklearn/pipeline.py`:** from `sklearn/pipeline.py`: Pipeline, make_pipeline and their helpers, and `_BaseComposition` from `sklearn/utils/metaestimators.py`.
+- **`py/sklearn/preprocessing/_sk_data.py`:** StandardScaler, `_handle_zeros_in_scale` and `_is_constant_feature`, from `sklearn/preprocessing/_data.py`.
+- **`py/sklearn/dummy.py`:** from `sklearn/dummy.py`.
+- **`py/sklearn/utils/_sk_available_if.py`:** from `sklearn/utils/_available_if.py`.
+- **`py/sklearn/utils/_sk_stats.py`:** `_weighted_percentile`, from `sklearn/utils/stats.py`.
 - **`py/sklearn/utils/multiclass.py`:** from `sklearn/utils/multiclass.py`.
 - **`py/sklearn/datasets/__init__.py`:** the loaders, from `sklearn/datasets/_base.py`.
 - **`py/sklearn/datasets/_sk_data_*.py`:** scikit-learn's bundled data files and their descriptions (`sklearn/datasets/data/`, `sklearn/datasets/descr/`), embedded by `tests/gen-data.py`. Each file's docstring gives the sha256 of the data file it embeds.

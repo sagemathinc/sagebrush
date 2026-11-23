@@ -35,6 +35,31 @@
       "case": "missing.unknown",
       "printed": "!! AttributeError: module 'sklearn.utils' has no attribute 'no_such_name'",
       "reason": "a name scikit-learn doesn't have either: AttributeError, as scikit-learn; the case shows the two kinds stay apart"
+    },
+    {
+      "case": "dummy.stratified",
+      "printed": "!! NotImplementedError: sklearn.dummy.DummyClassifier(strategy='stratified') is not in Sagebrush's sklearn 0.x subset (it needs numpy.random.RandomState.multinomial)",
+      "reason": "the stratified strategy draws with RandomState.multinomial, which needs NumPy's legacy binomial sampler; Sagebrush's numpy doesn't have it yet, so it refuses rather than draw other numbers"
+    },
+    {
+      "case": "scaler.set_output-pandas",
+      "printed": "!! NotImplementedError: sklearn's set_output(transform='pandas') is not in Sagebrush's sklearn 0.x subset",
+      "reason": "pandas (and polars) output containers are not in the subset; set_output with the default container works"
+    },
+    {
+      "case": "scaler.names-out-dtype",
+      "printed": "dtype('<U2')",
+      "reason": "get_feature_names_out gives the same names as a str array: scikit-learn's is an object array, which Sagebrush's numpy doesn't have yet"
+    },
+    {
+      "case": "pipeline.memory",
+      "printed": "!! NotImplementedError: sklearn.pipeline.Pipeline(memory=...) is not in Sagebrush's sklearn 0.x subset",
+      "reason": "caching fitted transformers goes through joblib.Memory and a directory; without it the pipeline fits its steps as scikit-learn does with memory=None"
+    },
+    {
+      "case": "pipeline.routing",
+      "printed": "!! NotImplementedError: sklearn's metadata routing is not in Sagebrush's sklearn 0.x subset",
+      "reason": "metadata routing (enable_metadata_routing=True) is not in the subset; with it off, parameters pass to steps by stepname__parameter, as in scikit-learn"
     }
   ]
 }

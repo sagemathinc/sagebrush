@@ -1,0 +1,140 @@
+== clf.prior.fit
+{'class_prior_': array([0.28571429, 0.42857143, 0.28571429]), 'classes_': array([1, 2, 3]), 'n_classes_': 3, 'n_features_in_': 2, 'n_outputs_': 1, 'sparse_output_': False}
+== clf.prior.predict
+array([2, 2, 2, 2, 2])
+== clf.prior.proba
+array([[0.28571429, 0.42857143, 0.28571429],
+       [0.28571429, 0.42857143, 0.28571429]])
+== clf.prior.score
+0.42857142857142855
+== clf.most_frequent.fit
+{'class_prior_': array([0.28571429, 0.42857143, 0.28571429]), 'classes_': array([1, 2, 3]), 'n_classes_': 3, 'n_features_in_': 2, 'n_outputs_': 1, 'sparse_output_': False}
+== clf.most_frequent.predict
+array([2, 2, 2, 2, 2])
+== clf.most_frequent.proba
+array([[0., 1., 0.],
+       [0., 1., 0.]])
+== clf.most_frequent.score
+0.42857142857142855
+== clf.uniform.fit
+{'class_prior_': array([0.28571429, 0.42857143, 0.28571429]), 'classes_': array([1, 2, 3]), 'n_classes_': 3, 'n_features_in_': 2, 'n_outputs_': 1, 'sparse_output_': False}
+== clf.uniform.predict
+array([1, 2, 1, 2, 2])
+== clf.uniform.proba
+array([[0.33333333, 0.33333333, 0.33333333],
+       [0.33333333, 0.33333333, 0.33333333]])
+== clf.uniform.score
+0.2857142857142857
+== clf.weighted
+{'class_prior_': array([0.1, 0.3, 0.6]), 'classes_': array([1, 2, 3]), 'n_classes_': 3, 'n_features_in_': 2, 'n_outputs_': 1, 'sparse_output_': False}
+== clf.weighted-predict
+array([3, 3, 3])
+== clf.strings
+['a', 'a']
+== clf.strings-classes
+['a', 'b', 'c']
+== clf.str-series
+['a', 'a']
+== clf.constant
+array([3, 3, 3])
+== clf.constant-proba
+array([[0., 1., 0.],
+       [0., 1., 0.]])
+== clf.constant-str
+['c', 'c']
+== clf.constant-missing
+!! ValueError: Constant target value has to be specified when the constant strategy is used.
+== clf.constant-absent
+!! ValueError: The constant target value must be present in the training data. You provided constant=9. Possible values are: [1, 2, 3].
+== clf.constant-shape
+!! ValueError: Constant target value should have shape (1, 1).
+== clf.log-proba
+array([[-inf,   0., -inf]])
+== clf.multioutput
+array([[2, 1],
+       [2, 1]])
+== clf.multioutput-proba
+[array([[0.28571429, 0.42857143, 0.28571429]]), array([[0.42857143, 0.57142857]])]
+== clf.score-none
+0.42857142857142855
+== clf.not-fitted
+!! NotFittedError: This DummyClassifier instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.
+== clf.length
+!! ValueError: Found input variables with inconsistent numbers of samples: [7, 3]
+== clf.repr
+"DummyClassifier(random_state=3, strategy='uniform')"
+== clf.n_features_in
+2
+== clf.feature-names
+['a', 'b']
+== reg.mean.fit
+{'constant_': array([[2.17857143]]), 'n_features_in_': 2, 'n_outputs_': 1}
+== reg.mean.predict
+array([2.17857143, 2.17857143, 2.17857143])
+== reg.mean.weighted
+array([[3.95]])
+== reg.mean.score
+0.0
+== reg.median.fit
+{'constant_': array([[2.]]), 'n_features_in_': 2, 'n_outputs_': 1}
+== reg.median.predict
+array([2., 2., 2.])
+== reg.median.weighted
+array([[2.]])
+== reg.median.score
+-0.0039974416373522725
+== reg.quantile.fit
+{'constant_': array([[1.3]]), 'n_features_in_': 2, 'n_outputs_': 1}
+== reg.quantile.predict
+array([1.3, 1.3, 1.3])
+== reg.quantile.weighted
+array([[2.]])
+== reg.quantile.score
+-0.09676367125040009
+== reg.constant.fit
+{'constant_': array([[4.5]]), 'n_features_in_': 2, 'n_outputs_': 1}
+== reg.constant.predict
+array([4.5, 4.5, 4.5])
+== reg.constant.weighted
+array([[4.5]])
+== reg.constant.score
+-0.6755676367125041
+== reg.multioutput
+{'constant_': array([[2.17857143, 5.35714286]]), 'n_features_in_': 2, 'n_outputs_': 2}
+== reg.multioutput-median-weighted
+array([[2., 5.],
+       [2., 5.]])
+== reg.quantile-ends
+[[[-2.0]], [[8.0]]]
+== reg.quantile-ends-weighted
+[[[-2.0]], [[2.0]], [[8.0]]]
+== reg.quantile-missing
+!! ValueError: When using `strategy='quantile', you have to specify the desired quantile in the range [0, 1].
+== reg.constant-missing
+!! TypeError: Constant target value has to be specified when the constant strategy is used.
+== reg.constant-multi
+array([[1, 2]])
+== reg.constant-multi-shape
+!! ValueError: Constant target value should have shape (2, 1).
+== reg.return-std
+(array([2.17857143, 2.17857143]), array([0., 0.]))
+== reg.empty
+!! ValueError: Found array with 0 sample(s) (shape=(0,)) while a minimum of 1 is required.
+== reg.int-target
+array([4.])
+== reg.score-none
+0.0
+== reg.repr
+"DummyRegressor(quantile=0.25, strategy='quantile')"
+== param.clf.strategy
+!! InvalidParameterError: The 'strategy' parameter of DummyClassifier must be a str among {'constant', 'most_frequent', 'prior', 'stratified', 'uniform'}. Got 'random' instead.
+== param.clf.random_state
+!! InvalidParameterError: The 'random_state' parameter of DummyClassifier must be an int in the range [0, 4294967295], an instance of 'numpy.random.mtrand.RandomState' or None. Got 'seed' instead.
+== param.clf.constant-type
+!! InvalidParameterError: The 'constant' parameter of DummyClassifier must be an instance of 'int', an instance of 'str', an array-like or None. Got 1.5 instead.
+== param.reg.strategy
+!! InvalidParameterError: The 'strategy' parameter of DummyRegressor must be a str among {'constant', 'mean', 'median', 'quantile'}. Got 'mode' instead.
+== param.reg.quantile
+!! InvalidParameterError: The 'quantile' parameter of DummyRegressor must be a float in the range [0.0, 1.0] or None. Got 1.5 instead.
+== param.reg.constant-str
+!! InvalidParameterError: The 'constant' parameter of DummyRegressor must be a float in the range (-inf, inf), an array-like or None. Got 'x' instead.

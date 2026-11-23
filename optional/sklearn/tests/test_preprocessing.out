@@ -1,0 +1,84 @@
+== fit
+{'mean_': ('float64', (3,), ['0x1.5000000000000p+1', '0x1.6000000000000p+0', '0x1.8000000000000p+1']), 'var_': ('float64', (3,), ['0x1.4580000000000p+3', '0x1.9b00000000000p+2', '0x0.0p+0']), 'scale_': ('float64', (3,), ['0x1.983c37ca9aa04p+1', '0x1.445ec2bc36615p+1', '0x1.0000000000000p+0']), 'n_samples_seen_': 'np.float64(4.0)', 'n_features_in_': 3}
+== transform
+('float64', (4, 3), ['-0x1.04de846394c01p-1', '-0x1.54f19df8481b8p+0', '0x0.0p+0', '0x1.b97891460f6c7p-2', '0x1.6e32ec0aac437p+0', '0x0.0p+0', '0x1.5f2b8ad4d2164p+0', '-0x1.619245017a2f8p-2'])
+== fit_transform
+('float64', (4, 3), ['-0x1.04de846394c01p-1', '-0x1.54f19df8481b8p+0', '0x0.0p+0', '0x1.b97891460f6c7p-2', '0x1.6e32ec0aac437p+0', '0x0.0p+0', '0x1.5f2b8ad4d2164p+0', '-0x1.619245017a2f8p-2'])
+== wine
+({'mean_': ('float64', (13,), ['0x1.a0050ffe28baap+3', '0x1.2b0d7629a67c7p+1', '0x1.2eea06368960bp+1', '0x1.37eb4a36138f4p+4', '0x1.8ef75eebdd7bbp+6', '0x1.25c63de675209p+1', '0x1.03bf1bba818d8p+1', '0x1.7289d65983827p-2']), 'var_': ('float64', (13,), ['0x1.4f8b4f82e924ep-1', '0x1.3db27185c58b7p+0', '0x1.328d50c911130p-4', '0x1.62e187e2497d2p+3', '0x1.95afc8ab6bb86p+7', '0x1.8ed6367fd8845p-2', '0x1.fbf64d5c11437p-1', '0x1.f8ae253312580p-7']), 'scale_': ('float64', (13,), ['0x1.9e7c68ad378ddp-1', '0x1.1d2f577980ea9p+0', '0x1.182355e69ce34p-2', '0x1.aa4300aba2984p+1', '0x1.c7c0fc0594ceap+3', '0x1.3f88cc65eec0ap-1', '0x1.fdfa20c63017dp-1', '0x1.fc53b3286fa4dp-4']), 'n_samples_seen_': 'np.float64(178.0)', 'n_features_in_': 13}, ('float64', (178, 13), 'd7f713b79c8aa9e6'))
+== wine-inverse
+('float64', (178, 13), '238a12973e6eba18')
+== weighted
+{'mean_': ('float64', (3,), ['0x1.b13b13b13b13bp+0', '0x1.313b13b13b13bp+1', '0x1.8000000000000p+1']), 'var_': ('float64', (3,), ['0x1.56d10a9a8245bp+3', '0x1.0cafb74a398ffp+2', '0x0.0p+0']), 'scale_': ('float64', (3,), ['0x1.a2f41c4e19e2ep+1', '0x1.064439369c387p+1', '0x1.0000000000000p+0']), 'n_samples_seen_': 'np.float64(6.5)', 'n_features_in_': 3}
+== weighted-transform
+('float64', (4, 3), ['-0x1.b12f4e42c1791p-3', '-0x1.11e9143e72723p+1', '0x0.0p+0', '0x1.68fcc137a13a3p-1', '0x1.46c53796d95fdp+0', '0x0.0p+0', '0x1.9f22aafff9696p+0', '-0x1.d6ef0c5966737p-1'])
+== no-mean
+({'mean_': ('float64', (3,), ['0x1.5000000000000p+1', '0x1.6000000000000p+0', '0x1.8000000000000p+1']), 'var_': ('float64', (3,), ['0x1.4580000000000p+3', '0x1.9b00000000000p+2', '0x0.0p+0']), 'scale_': ('float64', (3,), ['0x1.983c37ca9aa04p+1', '0x1.445ec2bc36615p+1', '0x1.0000000000000p+0']), 'n_samples_seen_': 'np.float64(4.0)', 'n_features_in_': 3}, ('float64', (4, 3), ['0x1.4111de04684eep-2', '-0x1.9414e126427f6p-1', '0x1.8000000000000p+1', '0x1.4111de04684eep+0', '0x1.f91a196fd31f4p+0', '0x1.8000000000000p+1', '0x1.18efa243db450p+1', '0x1.9414e126427f6p-3']))
+== no-std
+({'mean_': ('float64', (3,), ['0x1.5000000000000p+1', '0x1.6000000000000p+0', '0x1.8000000000000p+1']), 'var_': None, 'scale_': None, 'n_samples_seen_': 'np.float64(4.0)', 'n_features_in_': 3}, ('float64', (4, 3), ['-0x1.a000000000000p+0', '-0x1.b000000000000p+1', '0x0.0p+0', '0x1.6000000000000p+0', '0x1.d000000000000p+1', '0x0.0p+0', '0x1.1800000000000p+2', '-0x1.c000000000000p-1']))
+== neither
+({'mean_': None, 'var_': None, 'scale_': None, 'n_samples_seen_': 'np.int64(4)', 'n_features_in_': 3}, ('float64', (4, 3), ['0x1.0000000000000p+0', '-0x1.0000000000000p+1', '0x1.8000000000000p+1', '0x1.0000000000000p+2', '0x1.4000000000000p+2', '0x1.8000000000000p+1', '0x1.c000000000000p+2', '0x1.0000000000000p-1']))
+== constant-column
+('float64', (3,), ['0x1.983c37ca9aa04p+1', '0x1.445ec2bc36615p+1', '0x1.0000000000000p+0'])
+== near-constant
+{'mean_': ('float64', (1,), ['0x1.0000000000001p+0']), 'var_': ('float64', (1,), ['0x1.638e38e38e38fp-102']), 'scale_': ('float64', (1,), ['0x1.0000000000000p+0']), 'n_samples_seen_': 'np.float64(3.0)', 'n_features_in_': 1}
+== nan
+{'mean_': ('float64', (3,), ['0x1.1555555555555p+1', '0x1.aaaaaaaaaaaabp+0', '0x1.8000000000000p+1']), 'var_': ('float64', (3,), ['0x1.971c71c71c71dp+3', '0x1.071c71c71c71dp+3', '0x0.0p+0']), 'scale_': ('float64', (3,), ['0x1.c88da3243d798p+1', '0x1.6f0854d9eac68p+1', '0x1.0000000000000p+0']), 'n_samples_seen_': 'array([3., 3., 4.])', 'n_features_in_': 3}
+== nan-transform
+('float64', (4, 3), ['-0x1.4ef04af7ee7f0p-2', '-0x1.475a75310faa3p+0', '0x0.0p+0', 'nan', '0x1.29980d726b54dp+0', '0x0.0p+0', '0x1.5ae696c9eddf1p+0', 'nan'])
+== nan-weighted
+{'mean_': ('float64', (3,), ['0x1.5555555555555p-1', '0x1.5d1745d1745d1p+1', '0x1.8000000000000p+1']), 'var_': ('float64', (3,), ['0x1.81c71c71c71c7p+3', '0x1.0cb1b810ecf57p+2', '0x0.0p+0']), 'scale_': ('float64', (3,), ['0x1.bc6e230755150p+1', '0x1.064533793a43bp+1', '0x1.0000000000000p+0']), 'n_samples_seen_': 'array([4.5, 5.5, 6.5])', 'n_features_in_': 3}
+== partial
+{'mean_': ('float64', (3,), ['0x1.5000000000000p+1', '0x1.6000000000000p+0', '0x1.8000000000000p+1']), 'var_': ('float64', (3,), ['0x1.4580000000000p+3', '0x1.9b00000000000p+2', '0x0.0p+0']), 'scale_': ('float64', (3,), ['0x1.983c37ca9aa04p+1', '0x1.445ec2bc36615p+1', '0x1.0000000000000p+0']), 'n_samples_seen_': 'np.float64(4.0)', 'n_features_in_': 3}
+== partial-nan
+{'mean_': ('float64', (3,), ['0x1.36db6db6db6dbp+1', '0x1.8000000000000p+0', '0x1.8000000000000p+1']), 'var_': ('float64', (3,), ['0x1.6a1f58d0fac68p+3', '0x1.cdb6db6db6db8p+2', '0x0.0p+0']), 'scale_': ('float64', (3,), ['0x1.ae96ba03684dfp+1', '0x1.57ccf48ef0db0p+1', '0x1.0000000000000p+0']), 'n_samples_seen_': 'array([7., 7., 8.])', 'n_features_in_': 3}
+== partial-weighted
+{'mean_': ('float64', (3,), ['0x1.b13b13b13b13bp+0', '0x1.313b13b13b13bp+1', '0x1.8000000000000p+1']), 'var_': ('float64', (3,), ['0x1.56d10a9a8245bp+3', '0x1.0cafb74a398ffp+2', '0x0.0p+0']), 'scale_': ('float64', (3,), ['0x1.a2f41c4e19e2ep+1', '0x1.064439369c387p+1', '0x1.0000000000000p+0']), 'n_samples_seen_': 'np.float64(6.5)', 'n_features_in_': 3}
+== partial-wine
+{'mean_': ('float64', (13,), ['0x1.a0050ffe28baep+3', '0x1.2b0d7629a67c8p+1', '0x1.2eea063689609p+1', '0x1.37eb4a36138f3p+4', '0x1.8ef75eebdd7bbp+6', '0x1.25c63de675209p+1', '0x1.03bf1bba818dap+1', '0x1.7289d65983825p-2']), 'var_': ('float64', (13,), ['0x1.4f8b4f82e9238p-1', '0x1.3db27185c58b4p+0', '0x1.328d50c911133p-4', '0x1.62e187e2497d5p+3', '0x1.95afc8ab6bb81p+7', '0x1.8ed6367fd883cp-2', '0x1.fbf64d5c1143ap-1', '0x1.f8ae25331257fp-7']), 'scale_': ('float64', (13,), ['0x1.9e7c68ad378d0p-1', '0x1.1d2f577980ea8p+0', '0x1.182355e69ce36p-2', '0x1.aa4300aba2986p+1', '0x1.c7c0fc0594ce7p+3', '0x1.3f88cc65eec06p-1', '0x1.fdfa20c63017fp-1', '0x1.fc53b3286fa4cp-4']), 'n_samples_seen_': 'np.float64(178.0)', 'n_features_in_': 13}
+== float32
+({'mean_': ('float64', (3,), ['0x1.5000000000000p+1', '0x1.6000000000000p+0', '0x1.8000000000000p+1']), 'var_': ('float64', (3,), ['0x1.4580000000000p+3', '0x1.9b00000000000p+2', '0x0.0p+0']), 'scale_': ('float64', (3,), ['0x1.983c37ca9aa04p+1', '0x1.445ec2bc36615p+1', '0x1.0000000000000p+0']), 'n_samples_seen_': 'np.float64(4.0)', 'n_features_in_': 3}, ('float32', (4, 3), ['-0x1.04de840000000p-1', '-0x1.54f19e0000000p+0', '0x0.0p+0', '0x1.b978920000000p-2', '0x1.6e32ec0000000p+0', '0x0.0p+0', '0x1.5f2b8a0000000p+0', '-0x1.6192460000000p-2']))
+== ints
+('float64', (3, 2), ['-0x1.561829eb82d34p+0', '-0x1.561829eb82d34p+0', '0x1.11acee560242cp-2', '0x1.11acee560242bp+0', '0x1.11acee560242bp+0', '0x1.11acee560242cp-2'])
+== copy-false
+(True, ('float64', (4, 3), ['-0x1.04de846394c01p-1', '-0x1.54f19df8481b8p+0', '0x0.0p+0', '0x1.b97891460f6c7p-2', '0x1.6e32ec0aac437p+0', '0x0.0p+0', '0x1.5f2b8ad4d2164p+0', '-0x1.619245017a2f8p-2']))
+== copy-default
+(False, ('float64', (4, 3), ['0x1.0000000000000p+0', '-0x1.0000000000000p+1', '0x1.8000000000000p+1', '0x1.0000000000000p+2', '0x1.4000000000000p+2', '0x1.8000000000000p+1', '0x1.c000000000000p+2', '0x1.0000000000000p-1']))
+== transform-copy-false
+True
+== frame
+('float64', (3, 2), ['-0x1.11acee560242bp+0', '0x1.3988e1409212ep+0', '-0x1.11acee560242cp-2', '-0x1.3988e1409212ep+0', '0x1.561829eb82d34p+0', '0x0.0p+0'])
+== frame-names
+['a', 'b']
+== names-out
+['a', 'b']
+== names-out-generated
+['x0', 'x1', 'x2']
+== names-out-given
+['p', 'q', 'r']
+== names-out-wrong
+!! ValueError: input_features is not equal to feature_names_in_
+== names-out-length
+!! ValueError: input_features should have length equal to number of features (3), got 1
+== names-out-unfitted
+!! NotFittedError: This StandardScaler instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.
+== transform-wrong-features
+!! ValueError: X has 2 features, but StandardScaler is expecting 3 features as input.
+== transform-unfitted
+!! NotFittedError: This StandardScaler instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.
+== one-sample
+{'mean_': ('float64', (3,), ['0x1.0000000000000p+0', '-0x1.0000000000000p+1', '0x1.8000000000000p+1']), 'var_': ('float64', (3,), ['0x0.0p+0', '0x0.0p+0', '0x0.0p+0']), 'scale_': ('float64', (3,), ['0x1.0000000000000p+0', '0x1.0000000000000p+0', '0x1.0000000000000p+0']), 'n_samples_seen_': 'np.float64(1.0)', 'n_features_in_': 3}
+== 1d
+!! ValueError: Expected 2D array, got 1D array instead:
+array=[0. 1. 2.].
+Reshape your data either using array.reshape(-1, 1) if your data has a single feature or array.reshape(1, -1) if it contains a single sample.
+== inf
+!! ValueError: Input X contains infinity or a value too large for dtype('float64').
+== repr
+'StandardScaler(with_mean=False)'
+== set_output-default
+'StandardScaler()'
+== param.copy
+!! InvalidParameterError: The 'copy' parameter of StandardScaler must be an instance of 'bool' or an instance of 'numpy.bool'. Got 'yes' instead.
+== param.with_mean
+!! InvalidParameterError: The 'with_mean' parameter of StandardScaler must be an instance of 'bool' or an instance of 'numpy.bool'. Got 1 instead.

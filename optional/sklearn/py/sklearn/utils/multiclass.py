@@ -224,5 +224,26 @@ def type_of_target(y, input_name="", raise_unknown=False):
         return "binary"
 
 
+
+def class_distribution(y, sample_weight=None):
+    """Compute class priors from multioutput-multiclass target data (dense y)."""
+    classes = []
+    n_classes = []
+    class_prior = []
+
+    n_samples, n_outputs = y.shape
+    if sample_weight is not None:
+        sample_weight = np.asarray(sample_weight)
+
+    for k in range(n_outputs):
+        classes_k, y_k = np.unique(y[:, k], return_inverse=True)
+        classes.append(classes_k)
+        n_classes.append(classes_k.shape[0])
+        class_prior_k = np.bincount(y_k, weights=sample_weight)
+        class_prior.append(class_prior_k / class_prior_k.sum())
+
+    return (classes, n_classes, class_prior)
+
+
 def __getattr__(name):
     return _sk_missing("sklearn.utils.multiclass", name)
