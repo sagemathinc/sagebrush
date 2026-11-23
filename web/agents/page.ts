@@ -1882,7 +1882,7 @@ function renderHeader() {
   } else if (pairing && pairing.state === "paired") {
     whoText(who, "wait", agentName(), "waiting: allow it in the dialog");
   } else if (otherTabLive) {
-    who.innerHTML = `<span class="conn"></span>Claude <small>in another tab</small>`;
+    whoText(who, "", "Claude", "in another tab");
   } else if (inert(current())) {
     who.innerHTML = `<span class="conn"></span>Claude <small>not connected</small>`;
   } else {
