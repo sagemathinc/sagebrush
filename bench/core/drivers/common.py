@@ -33,6 +33,12 @@ row's reference input, the old scoreboard's):
     each batch's seconds per operation.
   The seed is BENCH_SEED (0 when unset).  BENCH_TIMING=per-op|batched
   forces a mode (tests).
+  With BENCH_VTIME=1 (the calibrated targets only), the record also has
+  `vtime`: each variant timed on its own, {v, seconds, min, max, reps,
+  samples} per variant (protocol 5's per-variant pass).  A variant whose
+  single operation takes at least TARGET reuses its per-op samples;
+  otherwise its repetitions are calibrated to at least TARGET seconds and
+  VSAMPLES samples are taken, seconds per operation, the median kept.
 
 Input construction, signature conversion and process startup are never
 timed.
@@ -45,6 +51,7 @@ import time
 MOD = 1000000007
 TARGET = 0.2
 SAMPLES = 5
+VSAMPLES = 3
 MAX_REPS = 1 << 24
 
 
@@ -140,6 +147,52 @@ def per_op(prepare, k, fresh, ops, rotations, seed):
     return samples
 
 
+class One(Rotation):
+    """One variant's repetitions alone (the per-variant pass)."""
+
+    def __init__(self, prepare, v, fresh, op):
+        self.prepare, self.k, self.fresh, self.i = prepare, 1, fresh, 0
+        self.v = v
+        self.ops = None if fresh else [op]
+
+    def run(self, reps):
+        total = 0.0
+        for _ in range(reps):
+            op = self.prepare(self.v) if self.fresh else self.ops[0]
+            t0 = time.perf_counter()
+            op()
+            total += time.perf_counter() - t0
+        return total
+
+
+def vtimes(prepare, k, fresh, ops, per_op_samples):
+    """Each variant timed on its own: [{v, seconds, min, max, reps,
+    samples}] (see the module docstring)."""
+    out = []
+    for v in range(k):
+        s = per_op_samples[v] if per_op_samples else None
+        if s and min(s) >= TARGET:
+            xs, reps = sorted(s), 1
+        else:
+            one = One(prepare, v, fresh, None if fresh else ops[v])
+            t0 = time.perf_counter()
+            (prepare(v) if fresh else ops[v])()
+            warm = time.perf_counter() - t0
+            reps, _ = calibrate(one, warm)
+            xs = sorted(one.run(reps) / reps for _ in range(VSAMPLES))
+        out.append(
+            {
+                "v": v,
+                "seconds": xs[len(xs) // 2],
+                "min": xs[0],
+                "max": xs[-1],
+                "reps": reps,
+                "samples": len(xs),
+            }
+        )
+    return out
+
+
 def timing_line(record):
     import json
 
@@ -215,8 +268,11 @@ def main(argv, prepare, signature, operands_hash):
         )
         record.update(mode="per-op", samples=samples)
     else:
+        samples = None
         med, lo, hi, reps, count, batches, offsets = measure_batched(rot, warm, seed)
         record.update(mode="batched", reps=reps, batches=batches, offsets=offsets)
+    if os.environ.get("BENCH_VTIME") == "1":
+        record["vtime"] = vtimes(prepare, k, rot.fresh, rot.ops, samples)
     print(timing_line(record))
     print(
         "TIME|%.9g|%s|%.9g|%.9g|%d|%d"

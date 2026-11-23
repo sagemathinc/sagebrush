@@ -107,6 +107,26 @@ def parse_timing(text: str) -> dict | None:
         )
     else:
         ok = False
+    # (the per-variant pass, when asked for: one entry per variant, in order)
+    if ok and "vtime" in t:
+        vt = t["vtime"]
+        ok = (
+            isinstance(vt, list)
+            and len(vt) == k
+            and all(
+                isinstance(e, dict)
+                and e.get("v") == i
+                and all(num(e.get(f)) for f in ("seconds", "min", "max"))
+                and e["min"] <= e["seconds"] <= e["max"]
+                and all(
+                    isinstance(e.get(f), int)
+                    and not isinstance(e.get(f), bool)
+                    and e[f] >= 1
+                    for f in ("reps", "samples")
+                )
+                for i, e in enumerate(vt)
+            )
+        )
     return t if ok else None
 
 
@@ -420,7 +440,11 @@ class Cap:
 
 
 def run_child(
-    cmd: list[str], timeout: float, threads: int = 1, cap: Cap | None = None
+    cmd: list[str],
+    timeout: float,
+    threads: int = 1,
+    cap: Cap | None = None,
+    extra_env: dict | None = None,
 ) -> dict:
     """Run cmd in its own process group with `threads`-thread settings (and,
     with a cap, in its own capped cgroup); its output, exit status, wall
@@ -432,6 +456,7 @@ def run_child(
     exception propagates."""
     env = dict(os.environ, **{k: str(threads) for k in SINGLE_THREAD})
     env["BENCH_THREADS"] = str(threads)
+    env.update(extra_env or {})
     memory = None
     with tempfile.TemporaryFile() as out:
         # (the output file first, then the cgroup: from here on every way
@@ -886,12 +911,27 @@ def adapter(backend: str, row: dict) -> str:
     }[backend]
 
 
+# The targets the engine's cost estimates are calibrated on: their timed
+# runs also time each variant on its own (protocol 5's per-variant pass).
+# The references (Magma, FLINT) need no calibration and skip it.
+VTIME_TARGETS = ("user", "native", "native-host", "wasm")
+
+
+def wants_vtime(backend: str, row: dict) -> bool:
+    return backend in VTIME_TARGETS and row.get("calibration", True) is not False
+
+
 def invoke(
     backend: str, row: dict, n: int, mode: str, timeout: float, k: int = 1
 ) -> dict:
     cmd = command(backend, row, n, mode, k)
     s0 = cpu_times()
-    r = run_child(cmd, timeout, THREADS if backend.endswith("-n") else 1, CAP)
+    extra = (
+        {"BENCH_VTIME": "1"}
+        if mode in ("time", "time-fresh") and wants_vtime(backend, row)
+        else None
+    )
+    r = run_child(cmd, timeout, THREADS if backend.endswith("-n") else 1, CAP, extra)
     r["steal"] = max_steal(s0, cpu_times())
     # (Magma 2.18 wraps long lines with backslash-newline)
     text = r.pop("output").replace("\\\n", "")
@@ -921,6 +961,8 @@ def invoke(
         timing = parse_timing(text)
         if timing is not None:
             r["timing"] = timing
+            if "vtime" in timing:
+                r["vtime"] = timing["vtime"]
     return r
 
 

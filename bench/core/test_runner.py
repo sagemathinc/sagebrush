@@ -730,6 +730,105 @@ class Protocol5(unittest.TestCase):
         )
         self.assertIsNone(run.parse_timing("TIME|1|s|1|1|1|1"))
 
+    def test_without_the_flag_there_is_no_per_variant_pass(self):
+        t, _ = self.run_driver(0.01)
+        self.assertNotIn("vtime", t)
+
+    def test_each_variant_is_timed_on_its_own(self):
+        # (variant v sleeps (v + 1) ms: the per-variant medians keep that
+        # order, which the cycled sample cannot show)
+        code = (
+            "import sys, time; sys.path.insert(0, %r); import common\n"
+            "common.TARGET = 0.02\n"
+            "def prepare(v):\n"
+            "    return lambda: time.sleep((v + 1) / 1000.0)\n"
+            "common.main(['x', 'case', '1', 'time', '3'], prepare, lambda a: 's', lambda: 0)\n"
+        ) % str(run.HERE / "drivers")
+        for mode in ("batched", "per-op"):
+            with self.subTest(mode=mode):
+                r = subprocess.run(
+                    [sys.executable, "-c", code],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                    env=dict(os.environ, BENCH_VTIME="1", BENCH_TIMING=mode),
+                )
+                self.assertEqual(r.returncode, 0, r.stderr)
+                t = run.parse_timing(r.stdout)
+                vt = t["vtime"]
+                self.assertEqual([e["v"] for e in vt], [0, 1, 2])
+                secs = [e["seconds"] for e in vt]
+                self.assertEqual(secs, sorted(secs))
+                self.assertGreater(secs[2], 2 * secs[0])
+                for e in vt:
+                    self.assertGreaterEqual(e["reps"] * e["seconds"], 0.015)
+                    self.assertEqual(e["samples"], 3)
+
+    def test_a_slow_variant_reuses_its_per_op_samples(self):
+        sys.path.insert(0, str(run.HERE / "drivers"))
+        import common as c
+
+        calls = []
+
+        def prepare(v):
+            calls.append(v)
+            return lambda: None
+
+        vt = c.vtimes(prepare, 2, True, None, [[0.5, 0.3, 0.4], [0.6, 0.7, 0.9]])
+        self.assertEqual(calls, [])
+        self.assertEqual(
+            [(e["seconds"], e["min"], e["max"], e["reps"]) for e in vt],
+            [(0.4, 0.3, 0.5, 1), (0.7, 0.6, 0.9, 1)],
+        )
+
+    def test_malformed_per_variant_records_are_dropped(self):
+        e = lambda v, s=1.0: {  # noqa: E731
+            "v": v,
+            "seconds": s,
+            "min": s,
+            "max": s,
+            "reps": 2,
+            "samples": 3,
+        }
+        good = {
+            "granularity": 1e-7,
+            "threshold": 1e-3,
+            "seed": 0,
+            "k": 2,
+            "mode": "per-op",
+            "samples": [[1.0], [2.0]],
+            "vtime": [e(0), e(1, 2.0)],
+        }
+        line = lambda d: "TIMING|" + json.dumps(d)  # noqa: E731
+        self.assertEqual(run.parse_timing(line(good)), good)
+        for bad in (
+            [e(0)],
+            [e(1), e(0)],
+            [e(0), dict(e(1), min=3.0)],
+            [e(0), dict(e(1), reps=True)],
+            [e(0), dict(e(1), samples=0)],
+            [e(0), dict(e(1), seconds="x")],
+            "x",
+        ):
+            with self.subTest(bad=bad):
+                self.assertIsNone(run.parse_timing(line(dict(good, vtime=bad))))
+
+    def test_only_calibrated_targets_get_the_per_variant_pass(self):
+        row = {"id": "r"}
+        self.assertTrue(
+            all(
+                run.wants_vtime(b, row)
+                for b in ("user", "native", "native-host", "wasm")
+            )
+        )
+        self.assertFalse(
+            any(
+                run.wants_vtime(b, row)
+                for b in ("magma", "flint", "flint-n", "native-n")
+            )
+        )
+        self.assertFalse(run.wants_vtime("native", {"id": "r", "calibration": False}))
+
 
 class Installed(unittest.TestCase):
     """dist_files against a real venv with a hand-installed distribution."""
