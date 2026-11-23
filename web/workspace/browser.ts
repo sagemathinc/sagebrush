@@ -1,7 +1,7 @@
 // The file browser (design/workspace-files.md §4): the workspace's tree, in
 // both pages: a sidebar (on a phone, a full-screen sheet).  Folders open and
 // close; an icon for each kind; Recent at the top; a search; each row's ⋯
-// (Open, Open in a new tab, Rename, Duplicate, Download, Copy path, Move to
+// (Open, Open in a new tab (a new window in the app), Rename, Duplicate, Download, Copy path, Move to
 // Trash); New (notebook, board, folder) and Upload; files dropped on a
 // folder are uploaded there; Trash, with Restore and, for the person alone,
 // Delete forever and Empty Trash.  Opening is the page's (host.open).
@@ -37,8 +37,10 @@ export type BrowserHost = {
   /** The document open in the page, if any: known by its id, wherever it is
    * moved to meanwhile (here, or in another tab). */
   current?: () => { kind: "notebook" | "board"; ref: string } | undefined;
-  /** Open an entry: in this page, or in a new tab. */
+  /** Open an entry: in this page, or in a new tab (in the desktop app, a new window: `windows`). */
   open(e: Entry, how: "here" | "tab"): void;
+  /** The desktop app (#1541): "tab" opens a window of the app's own, so the menu says "Open in a new window". */
+  windows?: boolean;
   /** A file the page opens in an editor of its own rather than the file preview (the board page: a .tex file in the
    * LaTeX editor, on the notebook page's /?tex=); true if it took the file. (The notebook page's own hook, __sbTex,
    * is web/latex/boot.ts's.) */
@@ -290,6 +292,8 @@ export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): vo
   /** "Export all current files (.zip)": the Storage panel, its export started (File ▸ Download ▸ Everything) */ exportAll(): void };
 
 export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser {
+  // (the desktop app, #1541: "tab" opens a window of the app's own; the page says so, or the app's markers do)
+  const inApp = host.windows ?? ((globalThis as any).__SB_DESKTOP_APP__ === true && !!(globalThis as any).__TAURI__);
   style();
   const w = host.ws;
   let entries: Entry[] = [], trashView = false, query = "", toast: { text: string; undo?: () => unknown; sticky?: boolean; error?: boolean; label?: string } | null = null;
@@ -721,7 +725,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     }
     const r = tree.querySelector<HTMLElement>(`.frow[data-path="${CSS.escape(e.path)}"]`) ?? at;
     const items: ([string, () => void, string?] | "-")[] = [];
-    if (e.kind === "notebook" || e.kind === "board") items.push(["Open", () => host.open(e, "here")], ["Open in a new tab", () => host.open(e, "tab")], "-");
+    if (e.kind === "notebook" || e.kind === "board") items.push(["Open", () => host.open(e, "here")], [inApp ? "Open in a new window" : "Open in a new tab", () => host.open(e, "tab")], "-");
     // (a file it recognises: opened as what it can be, a converted copy made beside it; the original stays; a .md
     //  by its first 4 KiB, read in at most 300 ms, else by its name: a Jupytext MyST one is a notebook)
     const as = e.kind === "file" && host.openAs ? openableAsFile(nameOf(e.path), /\.md$/i.test(e.path) ? await fileHead(w, e.path, LIMITS.maxBoardBytes) : null) : null;

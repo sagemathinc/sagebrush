@@ -27,6 +27,8 @@ mod disk;
 mod engine;
 #[cfg(desktop)]
 mod windows;
+#[cfg(desktop)]
+mod leave;
 // (the agent the app hosts, desktop only: its owned child and bundle check, for the agents page's launcher, which
 //  comes next; until then nothing calls it but its tests)
 #[cfg(desktop)]
@@ -43,10 +45,14 @@ const SHELL_WORKER_CSP: &str = "default-src 'none'; script-src 'self' blob:; con
 struct Pending(Mutex<Vec<String>>);
 
 // (on the desktop, each granted (disk.rs grant): the page gets {grant, name, path}, never a path it can use; a file
-// that can't be granted is said and left out)
+// that can't be granted is said and left out.  The first window's only (#1541): a window opened later never opens again
+// what the app was handed)
 #[cfg(desktop)]
 #[tauri::command]
-fn startup_files(app: tauri::AppHandle, state: tauri::State<Pending>) -> Vec<serde_json::Value> {
+fn startup_files(app: tauri::AppHandle, webview: tauri::Webview, state: tauri::State<Pending>) -> Vec<serde_json::Value> {
+    if webview.label() != "main" {
+        return vec![];
+    }
     let files: Vec<String> = state.0.lock().unwrap().drain(..).collect();
     files.iter().filter_map(|p| disk::grant(&app, std::path::Path::new(p)).map_err(|e| eprintln!("[app] {p}: {e}")).ok()).collect()
 }
@@ -274,48 +280,70 @@ fn selftest_persist() -> Option<String> {
     std::env::var("SAGEBRUSH_APP_PERSIST").ok().filter(|s| !s.is_empty() && std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some())
 }
 
-// Quitting (desktop): the person's quit, or the window's close, is held and the page asked ("sb-quit") to write
-// what it hasn't yet to disk (web/workspace/disk-mirror.ts drainOnQuit), which then quits (app_quit_now), after
-// asking the person if that takes long.  A page that doesn't answer within QUIT_ANSWER (app_quit_hold: it's
-// draining) is taken to have nothing it can write, and the app quits.  The self-test's own exits (app.exit with a
-// code) aren't held.
+// Closing a window and quitting (desktop, #1541): the person's close of a window, or quit, is held and the pages
+// asked to write what they haven't yet to disk (web/workspace/disk-mirror.ts drainOnQuit): one window's close asks
+// that window ("sb-close"), destroyed once it is done; the last window's close, or quit, asks every window ("sb-quit"),
+// and the app exits once each is done (leave.rs decides, from their answers).  The self-test's own exits (app.exit with
+// a code) aren't held.
 #[cfg(desktop)]
-static QUIT_OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static EXITING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 #[cfg(desktop)]
-static QUIT_HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-#[cfg(desktop)]
-const QUIT_ANSWER: std::time::Duration = std::time::Duration::from_secs(3);
+struct Leaving(Mutex<leave::Leave>);
 
 #[cfg(desktop)]
-fn ask_quit(app: &tauri::AppHandle) {
-    if app.emit("sb-quit", ()).is_err() {
-        QUIT_OK.store(true, std::sync::atomic::Ordering::SeqCst);
-        app.exit(0);
-        return;
-    }
-    let app = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(QUIT_ANSWER);
-        if !QUIT_HELD.load(std::sync::atomic::Ordering::SeqCst) {
-            QUIT_OK.store(true, std::sync::atomic::Ordering::SeqCst);
-            app.exit(0);
+fn window_labels(app: &tauri::AppHandle) -> Vec<String> {
+    app.webview_windows().keys().cloned().collect()
+}
+/// What leave.rs decided, done (never under its lock: a window destroyed here tells it so, on this thread).
+#[cfg(desktop)]
+fn leave_do(app: &tauri::AppHandle, acts: Vec<leave::Act>) {
+    for a in acts {
+        match a {
+            leave::Act::Exit => {
+                EXITING.store(true, std::sync::atomic::Ordering::SeqCst);
+                app.exit(0);
+            }
+            leave::Act::Destroy(label) => {
+                if let Some(w) = app.get_webview_window(&label) {
+                    let _ = w.destroy();
+                }
+            }
+            leave::Act::AskQuit(_) => {
+                let _ = app.emit("sb-quit", ());
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(leave::ANSWER);
+                    let acts = app.state::<Leaving>().0.lock().unwrap().quit_timeout();
+                    leave_do(&app, acts);
+                });
+            }
+            leave::Act::AskClose(label) => {
+                let _ = app.emit("sb-close", serde_json::json!({ "label": label }));
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(leave::ANSWER);
+                    let acts = app.state::<Leaving>().0.lock().unwrap().close_timeout(&label);
+                    leave_do(&app, acts);
+                });
+            }
         }
-    });
+    }
 }
 
-/// The page is writing what it has to disk before the app quits.
+/// The asking window is writing what it has to disk before it goes.
 #[cfg(desktop)]
 #[tauri::command]
-fn app_quit_hold() {
-    QUIT_HELD.store(true, std::sync::atomic::Ordering::SeqCst);
+fn app_quit_hold(webview: tauri::Webview, leaving: tauri::State<Leaving>) {
+    leaving.0.lock().unwrap().hold(webview.label());
 }
 
-/// The page has written what it has (or the person chose to quit anyway): quit.
+/// The asking window has written what it has (or the person chose to go anyway): it goes, and the app with it if it
+/// was quitting and every window is done.
 #[cfg(desktop)]
 #[tauri::command]
-fn app_quit_now(app: tauri::AppHandle) {
-    QUIT_OK.store(true, std::sync::atomic::Ordering::SeqCst);
-    app.exit(0);
+fn app_quit_now(app: tauri::AppHandle, webview: tauri::Webview) {
+    let acts = app.state::<Leaving>().0.lock().unwrap().done(webview.label());
+    leave_do(&app, acts);
 }
 
 /// A window of the app's page (the first, "main", and on the desktop those after it, windows.rs): it loads only this
@@ -355,7 +383,7 @@ fn page_window<'a, M: Manager<tauri::Wry>>(app: &'a M, label: &str, url: tauri::
 // the page's commands: the engine's on the desktop too
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, windows::window_open, windows::window_claim, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_write, disk::grants_read, disk::grants_write, app_quit_hold, app_quit_now]
+    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, windows::window_open, windows::window_claim, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_write, disk::settings_read, disk::grants_read, disk::grants_write, app_quit_hold, app_quit_now]
 }
 #[cfg(mobile)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
@@ -387,7 +415,7 @@ pub fn run() {
     let builder = builder.manage(engine::Engine::default());
     // (the windows after the first, and which document each shows, windows.rs)
     #[cfg(desktop)]
-    let builder = builder.manage(windows::Docs::default()).manage(windows::NextWindow::default());
+    let builder = builder.manage(windows::Docs::default()).manage(windows::NextWindow::default()).manage(Leaving(Mutex::new(leave::Leave::default())));
     // (the paths of the app's own page files, as serve_page answers them: "/index.html", "/board/board.js")
     let context = tauri::generate_context!();
     let files: std::collections::HashSet<String> = context
@@ -441,13 +469,15 @@ pub fn run() {
             // (a window closed or the app quit by the person: held until the page has written its changes to disk)
             #[cfg(desktop)]
             match &_event {
-                tauri::RunEvent::ExitRequested { api, code: None, .. } if !QUIT_OK.load(std::sync::atomic::Ordering::SeqCst) => {
+                tauri::RunEvent::ExitRequested { api, code: None, .. } if !EXITING.load(std::sync::atomic::Ordering::SeqCst) => {
                     api.prevent_exit();
-                    ask_quit(_app);
+                    let acts = _app.state::<Leaving>().0.lock().unwrap().quit(window_labels(_app));
+                    leave_do(_app, acts);
                 }
-                tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::CloseRequested { api, .. }, .. } if !QUIT_OK.load(std::sync::atomic::Ordering::SeqCst) => {
+                tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::CloseRequested { api, .. }, .. } if !EXITING.load(std::sync::atomic::Ordering::SeqCst) => {
                     api.prevent_close();
-                    ask_quit(_app);
+                    let acts = _app.state::<Leaving>().0.lock().unwrap().close(label, window_labels(_app));
+                    leave_do(_app, acts);
                 }
                 _ => {}
             }
@@ -456,6 +486,8 @@ pub fn run() {
             if let tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } = &_event {
                 _app.state::<engine::Engine>().stop_window(label);
                 windows::closed(_app, label);
+                let acts = _app.state::<Leaving>().0.lock().unwrap().destroyed(label);
+                leave_do(_app, acts);
             }
             #[cfg(desktop)]
             if let tauri::RunEvent::Exit = _event {
@@ -475,7 +507,16 @@ pub fn run() {
                 #[cfg(target_os = "ios")]
                 let sent = files.clone();
                 _app.state::<Pending>().0.lock().unwrap().extend(files.iter().cloned());
-                let _ = _app.emit("open-files", sent);
+                // (to one window (#1541): the focused one, else the first, else any; each page listens for every
+                // window's events, and opens only what is sent to it)
+                #[cfg(target_os = "ios")]
+                let to = Some("main".to_string());
+                #[cfg(target_os = "macos")]
+                let to = {
+                    let ws = _app.webview_windows();
+                    ws.iter().find(|(_, w)| w.is_focused().unwrap_or(false)).map(|(l, _)| l.clone()).or_else(|| ws.contains_key("main").then(|| "main".to_string())).or_else(|| ws.keys().next().cloned())
+                };
+                let _ = _app.emit("open-files", serde_json::json!({ "to": to, "files": sent }));
             }
         });
 }

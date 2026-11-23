@@ -187,13 +187,42 @@ pub fn settings_script(app: &tauri::AppHandle) -> String {
 /// (settings.json that couldn't be read nor set aside: not written over this launch)
 static SETTINGS_BLOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// settings.json's settings now: none if there is no settings.json; an error if it isn't the app's settings (another
+/// program's: never written over).
+fn settings_now(dir: &std::path::Path) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    Ok(read_small(dir, "settings.json", SETTINGS_MAX as u64)?.map(|s| settings_of(&s)).transpose()?.unwrap_or_default())
+}
+/// The app's windows each change some settings (#1541): a window's change is its keys alone (`set`, `remove`), merged
+/// into settings.json as it is, one change at a time, so no window writes back another's settings as they were.
+static SETTINGS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+fn settings_change(dir: &std::path::Path, set: serde_json::Map<String, serde_json::Value>, remove: &[String]) -> Result<(), String> {
+    let _held = SETTINGS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cur = settings_now(dir)?;
+    for k in remove {
+        cur.remove(k);
+    }
+    cur.extend(set);
+    let json = serde_json::Value::Object(cur).to_string();
+    settings_of(&json)?;
+    write_small(dir, "settings.json", &json)
+}
+
+/// The asking window's change of the settings (settings-init.js): its keys' new values and the keys it removed; the
+/// other windows are told, to read them again (settings_read).
 #[tauri::command]
-pub fn settings_write(app: tauri::AppHandle, json: String) -> Result<(), String> {
+pub fn settings_write(app: tauri::AppHandle, webview: tauri::Webview, set: serde_json::Map<String, serde_json::Value>, remove: Vec<String>) -> Result<(), String> {
     if SETTINGS_BLOCKED.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("settings.json couldn't be read when Sagebrush started, so it isn't written over".into());
     }
-    settings_of(&json)?;
-    write_small(&open_root(&data_dir(&app)?)?, "settings.json", &json)
+    settings_change(&open_root(&data_dir(&app)?)?, set, &remove)?;
+    told(&app, &webview, "sb-settings-changed");
+    Ok(())
+}
+
+/// The settings as settings.json has them now, for a window another one's change was told to.
+#[tauri::command]
+pub fn settings_read(app: tauri::AppHandle) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    settings_now(&open_root(&data_dir(&app)?)?)
 }
 
 /// The page's file permissions kept across launches, in grants.json beside settings.json: the record permissions.js
@@ -241,6 +270,36 @@ pub fn grants_write(app: tauri::AppHandle, webview: tauri::Webview, json: String
     grants_swap(&open_root(&data_dir(&app)?)?, &json, &expect)?;
     told(&app, &webview, "sb-grants-changed");
     Ok(())
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use serde_json::json;
+
+    #[test]
+    fn a_window_s_change_is_its_keys_alone() {
+        let dir = std::env::temp_dir().join(format!("sb-settings-change-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let obj = |v: serde_json::Value| v.as_object().unwrap().clone();
+        let now = || super::settings_now(&dir).unwrap();
+        // (none yet: a change makes it)
+        super::settings_change(&dir, obj(json!({ "sagebrush-theme": "dark" })), &[]).unwrap();
+        // (another window changes another key: the first's stays, as it is, not as that window last read it)
+        super::settings_change(&dir, obj(json!({ "sagebrush-files-sort": "name" })), &[]).unwrap();
+        assert_eq!(serde_json::Value::Object(now()), json!({ "sagebrush-theme": "dark", "sagebrush-files-sort": "name" }));
+        // (a removal removes its key alone)
+        super::settings_change(&dir, obj(json!({})), &["sagebrush-theme".into()]).unwrap();
+        assert_eq!(serde_json::Value::Object(now()), json!({ "sagebrush-files-sort": "name" }));
+        // (a key that isn't one of the app's settings: refused, nothing written)
+        assert!(super::settings_change(&dir, obj(json!({ "not-a-setting": "x" })), &[]).is_err());
+        assert_eq!(serde_json::Value::Object(now()), json!({ "sagebrush-files-sort": "name" }));
+        // (settings.json made by another program, not the app's: never written over)
+        std::fs::write(dir.join("settings.json"), "not json").unwrap();
+        assert!(super::settings_change(&dir, obj(json!({ "sagebrush-theme": "dark" })), &[]).is_err());
+        assert_eq!(std::fs::read_to_string(dir.join("settings.json")).unwrap(), "not json");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(test)]
