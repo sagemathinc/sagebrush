@@ -2234,6 +2234,13 @@ class FFMatrix:
                 return NotImplemented
             c = F(o)
         n = len(self._rows)
+        k = _complex_kind(c)
+        if c == 0 and k is not None and not k[0] and n == self._ncols:
+            # (an MPFR complex 0, CC(0), over a real matrix: Sage solves in CC,
+            # where 0 solves X*M = 0 even for a singular M; CDF(0) over RDF is
+            # numpy's solve, and its LinAlgError, as Sage)
+            _admit_size(c.parent(), n, n)
+            return FFMatrix(c.parent(), [[c.parent().zero()] * n for _ in range(n)], n)
         if type(self._base).__name__ == "RealDoubleField_":
             if n != self._ncols:
                 raise TypeError("unsupported operand parent(s) for /: '%s' and '%s'" % (_sa().parent(o), self.parent()))

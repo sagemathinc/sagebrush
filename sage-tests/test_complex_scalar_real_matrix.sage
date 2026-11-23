@@ -9,6 +9,8 @@ def show(label, f):
 A = matrix(RDF, [[1, 2], [3, 4]])
 R = matrix(RR, [[1, 2], [3, 4]])
 N = matrix(RDF, [[1, 2, 3], [4, 5, 6]])
+S = matrix(RDF, [[1, 2], [2, 4]])
+SR_ = matrix(RR, [[1, 2], [2, 4]])
 for c, cn in [(CDF(1, 2), "CDF(1, 2)"), (CC(1, 2), "CC(1, 2)"), (CDF(0), "CDF(0)"), (CC(0), "CC(0)"), (complex(1, 2), "complex"), (CDF(-0.5, 3), "CDF(-0.5, 3)")]:
     for M, mn in [(A, "RDF"), (R, "RR")]:
         if cn != "complex":
@@ -20,6 +22,14 @@ for c, cn in [(CDF(1, 2), "CDF(1, 2)"), (CC(1, 2), "CC(1, 2)"), (CDF(0), "CDF(0)
     show(cn + " * N", lambda: c * N)
     if cn != "complex":
         show(cn + " / N", lambda: c / N)
+# a complex 0 over a singular real matrix: CC's 0 solves X*M = 0 (Sage solves in CC); CDF's is numpy's error
+for c, cn in [(CC(0), "CC(0)"), (CDF(0), "CDF(0)"), (ComplexField(100)(0), "C100(0)")]:
+    show(cn + " / singular RDF", lambda: c / S)
+    show(cn + " / singular RR", lambda: c / SR_)
+# a real MPFR 0 over an RR matrix: the zero matrix (no signed zeros), singular or not
+for M, mn in [(R, "RR"), (SR_, "singular RR")]:
+    show("RR(0) / " + mn, lambda: RR(0) / M)
+    show("RealField(100)(0) / " + mn, lambda: RealField(100)(0) / M)
 for M, mn in [(A, "RDF"), (R, "RR")]:
     show(mn + " / CDF(1, 2)", lambda: M / CDF(1, 2))
     show(mn + " / CC(1, 2)", lambda: M / CC(1, 2))
