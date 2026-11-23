@@ -109,7 +109,9 @@ export class DelegateTasks {
   // (what the page shows changed: while the switch is on, the list kept as it is now)
   private changed() {
     if (this.keepAt && this.state() === "on") {
-      try { this.keepAt.storage.setItem(this.keepAt.key, JSON.stringify({ v: 1, tasks: this.tasks.slice(0, DELEGATE_LIMITS.kept).map((t) => t.entry) })); } catch { /* (no room: the last one kept stays) */ }
+      // (each entry as the agent lists it: an interrupted task with its reason and code, so the kept list says why too)
+      const kept = (t: DelegateTask) => (t.entry.status === "interrupted" ? { ...t.entry, ...(t.reason !== undefined ? { reason: t.reason } : {}), ...(t.code !== undefined ? { reason_code: t.code } : {}) } : t.entry);
+      try { this.keepAt.storage.setItem(this.keepAt.key, JSON.stringify({ v: 1, tasks: this.tasks.slice(0, DELEGATE_LIMITS.kept).map(kept) })); } catch { /* (no room: the last one kept stays) */ }
     }
     this.o.changed();
   }
