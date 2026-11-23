@@ -7,6 +7,7 @@
 // merge_id, as the agent's: the same request gets the same answer, another one with that merge_id is refused. Controls for the rows: `hold`
 // (methods left unanswered until `release`), `fail` (methods answered with an error code), `pageSize` (tasks.get's events per answer).
 import { blobId } from "../workspace/tasks-schema.ts";
+import { memoryHost } from "./test-memory-host.mjs";
 
 const enc = new TextEncoder();
 const hex = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => b.toString(16).padStart(2, "0")).join("");
@@ -53,6 +54,12 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
   };
   const refuse = (id, code, message = code) => send({ jsonrpc: "2.0", id, error: { code: -32000, message, data: { code } } });
   const answer = (id, result) => send({ jsonrpc: "2.0", id, result });
+  // (agent memory v1, for a host whose features list memory.1: test-memory-host.mjs; H.memory.turnEvent sends a memory
+  //  event on a conversation's turn, as the agent's turns carry them)
+  H.refuse = refuse;
+  H.answer = answer;
+  H.memory = features.includes("memory.1") ? memoryHost(H) : null;
+  H.turnEvent = (conversation, turn_id, event) => send({ jsonrpc: "2.0", method: "turn.event", params: { conversation, turn_id, event } });
   function task(m) {
     const p = m.params ?? {}, t = H.tasks.get(p.task);
     switch (m.method) {
@@ -147,7 +154,7 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
     setTimeout(() => { if (calls.delete(id)) reject(new Error("no answer to " + method)); }, ms);
   });
   /** Answer the held requests now, as if they had just come. */
-  H.release = () => { for (const m of H.held.splice(0)) (m.method === "chat.brief" ? brief(m) : task(m)); };
+  H.release = () => { for (const m of H.held.splice(0)) (m.method === "chat.brief" ? brief(m) : m.method.startsWith("memory.") ? H.memory.handle(m) : task(m)); };
   H.srv = Bun.serve({
     port: 0, hostname: "127.0.0.1",
     fetch(req, srv) { return srv.upgrade(req) ? undefined : new Response("no", { status: 400 }); },
@@ -157,6 +164,7 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
         const m = JSON.parse(String(data));
         H.got.push(m);
         if (m.method === undefined && calls.has(m.id)) { calls.get(m.id)(m); calls.delete(m.id); return; }
+        if (m.method === "page.features") return void (H.pageFeatures = Array.isArray(m.params?.features) ? m.params.features : []);
         if (m.method === "hello") return answer(m.id, { protocol: 1, agent: { name: "Claude Code", client: "claude-code", version: "2.0" }, wants: { write: true, run: false }, session, features });
         if (m.method === "grant.changed") {
           const g = Array.isArray(m.params?.folders) ? m.params : null;
@@ -171,6 +179,13 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
           const i = H.held.findIndex((x) => x.method === "chat.brief" && x.params?.conversation === m.params?.conversation);
           if (i >= 0) refuse(H.held.splice(i, 1)[0].id, "stopped", "cancelled");
           return;
+        }
+        if (typeof m.method === "string" && m.method.startsWith("memory.")) {
+          // (both sides must offer memory.1, and the grant must hold memory, as the agent checks at every call)
+          if (!H.memory || !H.pageFeatures?.includes("memory.1")) return refuse(m.id, "forbidden");
+          if (H.hold.has(m.method)) return void H.held.push(m);
+          if (H.fail.has(m.method)) return refuse(m.id, H.fail.get(m.method));
+          return H.memory.handle(m);
         }
         if (typeof m.method !== "string" || !m.method.startsWith("tasks.")) return;
         if (H.hold.has(m.method)) return void H.held.push(m);
