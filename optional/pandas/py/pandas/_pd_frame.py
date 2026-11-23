@@ -21,6 +21,7 @@ from . import _pd_sort as S
 from . import _pd_reshape as RS
 from . import _pd_combine as CB
 from . import _pd_info as INF
+from . import _pd_stats as ST
 
 __all__ = ["DataFrame"]
 
@@ -752,6 +753,54 @@ class DataFrame(object):
         cols.append(CB.join_columns([self._pd_cols[j] for j in value_js]) if k else Column("float64", np.array([], dtype=np.float64)))
         index = default_index(n * k) if ignore_index else self._pd_index._pd_take(list(range(n)) * k)
         return DataFrame._pd_new(cols, Index(names), index)
+
+    def describe(self, percentiles=None, include=None, exclude=None):
+        """Series.describe of each numeric column (or of every column when
+        none is numeric, or include='all', or those include/exclude select),
+        side by side: the rows of the shortest first (count, unique, top,
+        freq before mean, std, ...), NaN where a column has no such row."""
+        qs = ST.refine_percentiles(percentiles)
+        if not self._pd_cols:
+            raise ValueError("Cannot describe a DataFrame without columns")
+        dtypes = [c.dtype for c in self._pd_cols]
+        every = list(range(len(dtypes)))
+        if include is None and exclude is None:
+            keep = [j for j, d in enumerate(dtypes) if ST.is_numeric(d) or d is DT] or every
+        elif isinstance(include, str) and include == "all":
+            if exclude is not None:
+                raise ValueError("exclude must be None when include is 'all'")
+            keep = every
+        else:
+            keep = ST.select_columns(dtypes, include, exclude)
+            if not keep:
+                raise ValueError("No columns match the specified include or exclude data types")
+        labels = ST.format_percentiles(qs)
+        descs = [ST.describe_column(self._pd_cols[j], qs, labels, "DataFrame.describe") for j in keep]
+        names = []
+        for d in sorted(descs, key=lambda d: len(d[0])):
+            for x in d[0]:
+                if x not in names:
+                    names.append(x)
+        cols = []
+        for (nm, values, forced), j in zip(descs, keep):
+            got = dict(zip(nm, values))
+            row = [got[x] if x in got else float("nan") for x in names]
+            cols.append(ST.describe_values(row, forced, ST.is_numeric(dtypes[j])))
+        return DataFrame._pd_new(cols, self._pd_columns._pd_take(keep), Index(names))
+
+    def corr(self, method="pearson", min_periods=1, numeric_only=False):
+        """Pearson's correlation of each pair of columns over the rows where
+        both are finite (pandas' nancorr, see _pd_stats): NaN for a constant
+        column or fewer than min_periods rows. Columns convert as
+        to_numpy(dtype=float) does; numeric_only keeps the numbers and bools."""
+        ST.check_method(method, "DataFrame.corr")
+        js = [j for j, c in enumerate(self._pd_cols) if not numeric_only or c.dtype in INTS or c.dtype in ("float64", "bool")]
+        mat = ST.float_columns([self._pd_cols[j] for j in js], "DataFrame.corr")
+        minp = 1 if min_periods is None else int(min_periods)
+        out = ST.callable_corr(mat, method, minp) if callable(method) else ST.nancorr(mat, minp)
+        labels = self._pd_columns._pd_take(js)
+        cols = [Column("float64", np.array([out[i][j] for i in range(len(js))], dtype=np.float64)) for j in range(len(js))]
+        return DataFrame._pd_new(cols, labels, labels.copy())
 
     def memory_usage(self, index=True, deep=False):
         """The bytes pandas counts for each column (and the index, first,

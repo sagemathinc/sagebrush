@@ -106,8 +106,8 @@
 !! NotImplementedError: pandas.DataFrame.groupby is not in Sagebrush's pandas 0.x subset
 == name.DataFrame.merge
 !! NotImplementedError: pandas.DataFrame.merge is not in Sagebrush's pandas 0.x subset
-== name.DataFrame.describe
-!! NotImplementedError: pandas.DataFrame.describe is not in Sagebrush's pandas 0.x subset
+== name.DataFrame.cov
+!! NotImplementedError: pandas.DataFrame.cov is not in Sagebrush's pandas 0.x subset
 == name.DataFrame.rank
 !! NotImplementedError: pandas.DataFrame.rank is not in Sagebrush's pandas 0.x subset
 == name.DataFrame.query
@@ -222,6 +222,24 @@
 !! NotImplementedError: pandas.Series.to_numpy(dtype=) of str, object or datetime columns to a numeric dtype (pandas converts an object array) is not in Sagebrush's pandas 0.x subset
 == reshape.to_numpy-kwargs
 !! NotImplementedError: pandas.Series.to_numpy(**kwargs) is not in Sagebrush's pandas 0.x subset
+== stats.describe-datetime
+!! NotImplementedError: pandas.DataFrame.describe of a datetime64[us] column is not in Sagebrush's pandas 0.x subset
+== stats.series-describe-datetime
+!! NotImplementedError: pandas.Series.describe of a datetime64[us] column is not in Sagebrush's pandas 0.x subset
+== stats.describe-include-unknown
+!! NotImplementedError: pandas.DataFrame.describe(include=, exclude=) with 'timedelta' is not in Sagebrush's pandas 0.x subset
+== stats.corr-spearman
+!! NotImplementedError: pandas.DataFrame.corr(method='spearman') (a rank correlation) is not in Sagebrush's pandas 0.x subset
+== stats.corr-kendall
+!! NotImplementedError: pandas.DataFrame.corr(method='kendall') (a rank correlation) is not in Sagebrush's pandas 0.x subset
+== stats.series-corr-spearman
+!! NotImplementedError: pandas.Series.corr(method='spearman') (a rank correlation) is not in Sagebrush's pandas 0.x subset
+== stats.corr-datetime
+!! NotImplementedError: pandas.DataFrame.corr of a datetime64[us] column is not in Sagebrush's pandas 0.x subset
+== stats.series-corr-frame
+!! NotImplementedError: pandas.Series.corr of a DataFrame is not in Sagebrush's pandas 0.x subset
+== stats.series-corr-repeated-labels
+!! NotImplementedError: pandas.Series.corr of Series with repeated labels is not in Sagebrush's pandas 0.x subset
 == op.series-add
 !! NotImplementedError: pandas.Series.__add__ (arithmetic) is not in Sagebrush's pandas 0.x subset
 == op.series-radd

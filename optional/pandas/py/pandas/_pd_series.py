@@ -18,6 +18,7 @@ from . import _pd_sort as S
 from . import _pd_reshape as RS
 from . import _pd_combine as CB
 from . import _pd_info as INF
+from . import _pd_stats as ST
 
 __all__ = ["Series"]
 
@@ -632,6 +633,39 @@ class Series(object):
             self._pd_col, self._pd_index = out._pd_col, out._pd_index
             return None
         return out
+
+    def describe(self, percentiles=None, include=None, exclude=None):
+        """count, mean, std, min, the percentiles and max of a numeric
+        Series (float64); count, unique, top and freq of any other (see
+        _pd_stats)."""
+        qs = ST.refine_percentiles(percentiles)
+        if include is not None or exclude is not None:
+            import warnings
+            from .errors import Pandas4Warning
+            warnings.warn("The 'include' and 'exclude' arguments are deprecated for Series.describe and will be removed "
+                          "in a future version. These arguments have no effect on Series and will be removed.",
+                          Pandas4Warning, stacklevel=2)
+        names, values, forced = ST.describe_column(self._pd_col, qs, ST.format_percentiles(qs), "Series.describe")
+        return Series._pd_new(ST.describe_values(values, forced, ST.is_numeric(self._pd_col.dtype)), Index(names), self._pd_name)
+
+    def corr(self, other, method="pearson", min_periods=None):
+        """Pearson's correlation with other over the labels both have and the
+        rows where both are present (see _pd_stats.series_corr); NaN with
+        fewer than min_periods of them."""
+        if not isinstance(other, Series):
+            raise _unsupported("Series.corr of a %s" % type(other).__name__)
+        a, b = self._pd_col, other._pd_col
+        if not self._pd_index.equals(other._pd_index):
+            if not self._pd_index.is_unique or not other._pd_index.is_unique:
+                raise _unsupported("Series.corr of Series with repeated labels")
+            labels = [lab for lab in self._pd_index.tolist() if lab in other._pd_index]
+            a = a.take([self._pd_index._pd_positions(lab) for lab in labels])
+            b = b.take([other._pd_index._pd_positions(lab) for lab in labels])
+        if not len(a):
+            return float("nan")
+        x, y = ST.float_columns([a, b], "Series.corr")
+        ST.check_method(method, "Series.corr")
+        return ST.series_corr(x, y, method, min_periods)
 
     def memory_usage(self, index=True, deep=False):
         """The bytes pandas counts for the values (and the index); see

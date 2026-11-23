@@ -157,9 +157,9 @@
       "reason": "pandas.DataFrame.merge is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
-      "case": "name.DataFrame.describe",
-      "message": "pandas.DataFrame.describe is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas.DataFrame.describe is outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "case": "name.DataFrame.cov",
+      "message": "pandas.DataFrame.cov is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.DataFrame.cov is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
       "case": "name.DataFrame.rank",
@@ -805,6 +805,51 @@
       "case": "reshape.to_numpy-kwargs",
       "message": "pandas.Series.to_numpy(**kwargs) is not in Sagebrush's pandas 0.x subset",
       "reason": "Series.to_numpy passes other keywords to an extension array's own to_numpy, which this subset doesn't have; it raises before any work"
+    },
+    {
+      "case": "stats.describe-datetime",
+      "message": "pandas.DataFrame.describe of a datetime64[us] column is not in Sagebrush's pandas 0.x subset",
+      "reason": "describe of a datetime column gives Timestamps for mean and the percentiles, which this subset doesn't compute yet; it raises before any column is described"
+    },
+    {
+      "case": "stats.series-describe-datetime",
+      "message": "pandas.Series.describe of a datetime64[us] column is not in Sagebrush's pandas 0.x subset",
+      "reason": "describe of a datetime column gives Timestamps for mean and the percentiles, which this subset doesn't compute yet; it raises before any work"
+    },
+    {
+      "case": "stats.describe-include-unknown",
+      "message": "pandas.DataFrame.describe(include=, exclude=) with 'timedelta' is not in Sagebrush's pandas 0.x subset",
+      "reason": "include= and exclude= take select_dtypes' common spellings here (number, object, str, bool, integer, floating, datetime, category and the subset's dtypes); pandas takes any dtype spelling, and others raise before any work"
+    },
+    {
+      "case": "stats.corr-spearman",
+      "message": "pandas.DataFrame.corr(method='spearman') (a rank correlation) is not in Sagebrush's pandas 0.x subset",
+      "reason": "Spearman's correlation ranks the values with pandas' own rank routine, which this subset doesn't have yet; it raises before any work"
+    },
+    {
+      "case": "stats.corr-kendall",
+      "message": "pandas.DataFrame.corr(method='kendall') (a rank correlation) is not in Sagebrush's pandas 0.x subset",
+      "reason": "Kendall's tau counts concordant pairs with pandas' own routine, which this subset doesn't have yet; it raises before any work"
+    },
+    {
+      "case": "stats.series-corr-spearman",
+      "message": "pandas.Series.corr(method='spearman') (a rank correlation) is not in Sagebrush's pandas 0.x subset",
+      "reason": "Series.corr with Spearman's method uses scipy's spearmanr, which isn't in Sagebrush; it raises once the two Series are aligned"
+    },
+    {
+      "case": "stats.corr-datetime",
+      "message": "pandas.DataFrame.corr of a datetime64[us] column is not in Sagebrush's pandas 0.x subset",
+      "reason": "corr of a datetime column correlates the times as numbers in pandas; this subset leaves datetime columns out of numeric work; it raises before any work"
+    },
+    {
+      "case": "stats.series-corr-frame",
+      "message": "pandas.Series.corr of a DataFrame is not in Sagebrush's pandas 0.x subset",
+      "reason": "Series.corr of a DataFrame isn't a pandas form either (pandas fails inside with numpy's shape error); Sagebrush says so plainly before any work"
+    },
+    {
+      "case": "stats.series-corr-repeated-labels",
+      "message": "pandas.Series.corr of Series with repeated labels is not in Sagebrush's pandas 0.x subset",
+      "reason": "Series.corr aligns the two Series on their labels; with a repeated label pandas' join repeats rows, which this subset doesn't do; it raises before any work"
     }
   ]
 }

@@ -69,7 +69,7 @@ case("frame.ragged-rows", lambda: pd.DataFrame([[1, 2], [3]]))
 # names outside the subset
 for name in ["NA", "merge", "crosstab", "Timedelta", "Categorical", "MultiIndex", "read_parquet", "get_dummies"]:
     case("name.pd." + name, lambda name=name: getattr(pd, name))
-for name in ["groupby", "merge", "describe", "rank", "query", "pivot_table", "nlargest", "plot", "nsmallest", "value_counts", "to_csv", "where"]:
+for name in ["groupby", "merge", "cov", "rank", "query", "pivot_table", "nlargest", "plot", "nsmallest", "value_counts", "to_csv", "where"]:
     case("name.DataFrame." + name, lambda name=name: getattr(df, name))
 for name in ["str", "rolling", "groupby", "mode", "rank", "map", "nlargest", "plot", "nunique", "quantile"]:
     case("name.Series." + name, lambda name=name: getattr(s, name))
@@ -117,6 +117,17 @@ case("reshape.frame-to_numpy-str-to-float", lambda: dfs.to_numpy(dtype=float))
 case("reshape.to_numpy-str-to-float", lambda: pd.Series(["1.5"]).to_numpy(dtype=float))
 case("reshape.to_numpy-datetime-to-int", lambda: sdt.to_numpy(dtype="int64"))
 case("reshape.to_numpy-kwargs", lambda: s.to_numpy(foo=1))
+
+# describe and corr's refusals: datetime columns, rank correlations, and the forms outside the subset
+case("stats.describe-datetime", lambda: pd.DataFrame({"t": sdt, "a": [1, 2]}).describe())
+case("stats.series-describe-datetime", lambda: sdt.describe())
+case("stats.describe-include-unknown", lambda: df.describe(include=["timedelta"]))
+case("stats.corr-spearman", lambda: df.corr(method="spearman"))
+case("stats.corr-kendall", lambda: df.corr(method="kendall"))
+case("stats.series-corr-spearman", lambda: s.corr(s, method="spearman"))
+case("stats.corr-datetime", lambda: pd.DataFrame({"t": sdt, "a": [1.0, 2.0]}).corr())
+case("stats.series-corr-frame", lambda: s.corr(df))
+case("stats.series-corr-repeated-labels", lambda: pd.Series([1.0, 2.0], index=[0, 0]).corr(pd.Series([1.0, 2.0])))
 
 # arithmetic and frame comparisons (M2)
 case("op.series-add", lambda: s + 1)
