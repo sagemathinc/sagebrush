@@ -1440,7 +1440,19 @@ def nanargmin(a, axis=None):
 
 
 def median(a, axis=None, out=None, overwrite_input=False, keepdims=False):
-    return quantile(a, 0.5, axis=axis, keepdims=keepdims)
+    # (as NumPy's _median: the mean of the middle element, or of the two middle ones, so an integer array gives
+    # float64 and a float array keeps its type; a NaN in a slice makes its median NaN)
+    a = asarray(a)
+    ax = 0 if axis is None else axis % a.ndim
+    s = moveaxis(sort(a.ravel() if axis is None else a, axis=ax), ax, -1)
+    n = s.shape[-1]
+    k = n // 2
+    r = asarray(mean(s[..., k:k + 1] if n % 2 else s[..., _builtins.max(k - 1, 0):k + 1], axis=-1))
+    if n and s.dtype.kind in "fc":
+        r = where(isnan(s[..., -1]), s[..., -1], r)
+    if keepdims:
+        r = r.reshape((1,) * a.ndim) if axis is None else expand_dims(r, ax)
+    return r if r.ndim else r[()]
 
 
 def nanmedian(a, axis=None, out=None, overwrite_input=False, keepdims=False):
@@ -1457,6 +1469,13 @@ def quantile(a, q, axis=None, out=None, overwrite_input=False, method="linear", 
         a, axis = a.ravel(), 0
     s = moveaxis(sort(a, axis=axis), axis, -1)
     n = s.shape[-1]
+    # (the result's dtype, as NumPy's NEP 50 promotion gives it: a float array keeps its float type for a q given as
+    # a Python number; a NumPy or array q promotes with it; integers interpolate in float64)
+    dt = a.dtype if a.dtype.kind == "f" else dtype(float64)
+    if not (isinstance(q, (int, float)) and not isinstance(q, (bool, generic))):
+        dt = result_type(dt, asarray(q).dtype)
+    # (numbers in that dtype; anything else as before, which refuses it as NumPy's arithmetic does)
+    cast = (lambda v: v.astype(dt)) if a.dtype.kind in "biuf" else _floats
     qs = _floats(q)
     vals = []
     for qq in qs.ravel().tolist():
@@ -1470,10 +1489,10 @@ def quantile(a, q, axis=None, out=None, overwrite_input=False, method="linear", 
         lo = int(_math.floor(virtual))
         hi = _builtins.min(lo + 1, n - 1)
         if method == "midpoint":
-            vals.append((_floats(s[..., lo]) + s[..., hi]) / 2)
+            vals.append((cast(s[..., lo]) + cast(s[..., hi])) / 2)
             continue
         t = virtual - lo
-        av, bv = _floats(s[..., lo]), _floats(s[..., hi])
+        av, bv = cast(s[..., lo]), cast(s[..., hi])
         diff_b_a = bv - av
         vals.append(where(t >= 0.5, bv - diff_b_a * (1 - t), av + diff_b_a * t))  # NumPy's _lerp
     res = array(vals) if qs.ndim else asarray(vals[0])
@@ -1485,7 +1504,9 @@ def quantile(a, q, axis=None, out=None, overwrite_input=False, method="linear", 
 
 
 def percentile(a, q, axis=None, out=None, overwrite_input=False, method="linear", keepdims=False):
-    return quantile(a, _floats(q) / 100, axis=axis, method=method, keepdims=keepdims)
+    # (a q given as a Python number stays one, so the result keeps the array's float type, as NumPy's)
+    weak = isinstance(q, (int, float)) and not isinstance(q, (bool, generic))
+    return quantile(a, q / 100 if weak else _floats(q) / 100, axis=axis, method=method, keepdims=keepdims)
 
 
 def average(a, axis=None, weights=None, returned=False, *, keepdims=False):
