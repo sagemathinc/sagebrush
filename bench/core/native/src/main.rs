@@ -88,7 +88,8 @@ fn run<T, F: FnMut() -> T>(mode: &str, variants: usize, mut build: impl FnMut(us
     let offset = |j: usize| ((seed as u128 * 1_000_003 + j as u128 * 7919) % variants as u128) as usize;
     let per = warm / variants as f64;
     let head = format!("\"granularity\":{:e},\"threshold\":{:e},\"seed\":{},\"k\":{}", g, threshold, seed, variants);
-    let (med, lo, hi, k, count) = if forced == "per-op" || (forced == "auto" && per >= threshold) {
+    let mut per_op_samples: Option<Vec<Vec<f64>>> = None;
+    let (record, med, lo, hi, k, count) = if forced == "per-op" || (forced == "auto" && per >= threshold) {
         let rotations = if per <= 2.0 { 5 } else { 3 };
         let mut samples: Vec<Vec<f64>> = vec![Vec::with_capacity(rotations); variants];
         for r in 0..rotations {
@@ -103,8 +104,9 @@ fn run<T, F: FnMut() -> T>(mode: &str, variants: usize, mut build: impl FnMut(us
         let mut means: Vec<f64> = (0..rotations).map(|r| samples.iter().map(|s| s[r]).sum::<f64>() / variants as f64).collect();
         means.sort_by(|x, y| x.partial_cmp(y).unwrap());
         let rows: Vec<String> = samples.iter().map(|s| format!("[{}]", s.iter().map(|x| format!("{:e}", x)).collect::<Vec<_>>().join(","))).collect();
-        println!("TIMING|{{{},\"mode\":\"per-op\",\"samples\":[{}]}}", head, rows.join(","));
-        (means[rotations / 2], means[0], means[rotations - 1], variants, rotations)
+        let record = format!("{{{},\"mode\":\"per-op\",\"samples\":[{}]", head, rows.join(","));
+        per_op_samples = Some(samples);
+        (record, means[rotations / 2], means[0], means[rotations - 1], variants, rotations)
     } else {
         let mut reps = |start: usize, k: usize| {
             let mut total = 0.0;
@@ -131,15 +133,60 @@ fn run<T, F: FnMut() -> T>(mode: &str, variants: usize, mut build: impl FnMut(us
         let batches: Vec<f64> = offsets.iter().map(|&o| reps(o, k) / k as f64).collect();
         let mut sorted = batches.clone();
         sorted.sort_by(|x, y| x.partial_cmp(y).unwrap());
-        println!(
-            "TIMING|{{{},\"mode\":\"batched\",\"reps\":{},\"batches\":[{}],\"offsets\":[{}]}}",
+        let record = format!(
+            "{{{},\"mode\":\"batched\",\"reps\":{},\"batches\":[{}],\"offsets\":[{}]",
             head,
             k,
             batches.iter().map(|x| format!("{:e}", x)).collect::<Vec<_>>().join(","),
             offsets.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")
         );
-        (sorted[count / 2], sorted[0], sorted[count - 1], k, count)
+        (record, sorted[count / 2], sorted[0], sorted[count - 1], k, count)
     };
+    // (the per-variant pass, BENCH_VTIME=1 on the calibrated targets: each
+    // variant on its own, its per-op samples when one operation takes at
+    // least TARGET, else repetitions calibrated to TARGET and 3 samples)
+    let vtime = if std::env::var("BENCH_VTIME").as_deref() == Ok("1") {
+        let mut entries = Vec::with_capacity(variants);
+        for (v, op) in ops.iter_mut().enumerate() {
+            let reused = per_op_samples.as_ref().map(|s| s[v].clone()).filter(|s| s.iter().all(|&x| x >= TARGET));
+            let (mut xs, reps) = match reused {
+                Some(s) => (s, 1usize),
+                None => {
+                    let mut timed = |n: usize| {
+                        let started = Instant::now();
+                        for _ in 0..n {
+                            std::hint::black_box(op());
+                        }
+                        started.elapsed().as_secs_f64()
+                    };
+                    let one = timed(1);
+                    let (mut n, mut t) = if one >= TARGET { (1usize, one) } else {
+                        let n = if one > 0.0 { ((TARGET * 1.2 / one) as usize + 1).max(1) } else { 2 };
+                        (n, timed(n))
+                    };
+                    while t < TARGET && n < 1 << 24 {
+                        n = if t <= 0.0 { 2 * n } else { (2 * n).max((16 * n).min((n as f64 * TARGET * 1.2 / t) as usize + 1)) };
+                        t = timed(n);
+                    }
+                    ((0..3).map(|_| timed(n) / n as f64).collect(), n)
+                }
+            };
+            xs.sort_by(|x, y| x.partial_cmp(y).unwrap());
+            entries.push(format!(
+                "{{\"v\":{},\"seconds\":{:e},\"min\":{:e},\"max\":{:e},\"reps\":{},\"samples\":{}}}",
+                v,
+                xs[xs.len() / 2],
+                xs[0],
+                xs[xs.len() - 1],
+                reps,
+                xs.len()
+            ));
+        }
+        format!(",\"vtime\":[{}]", entries.join(","))
+    } else {
+        String::new()
+    };
+    println!("TIMING|{}{}}}", record, vtime);
     let joined = sigs.join(";");
     let combined = format!("{}:{}", variants, hash_u64(&joined.bytes().map(u64::from).collect::<Vec<_>>()));
     println!("TIME|{:.9e}|{}|{:.9e}|{:.9e}|{}|{}", med, combined, lo, hi, k, count);
