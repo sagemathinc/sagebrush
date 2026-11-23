@@ -47,14 +47,15 @@ export function memoryHost(H, { now = () => Date.now() } = {}) {
     if (M.secret && [f.name, f.description, f.body].some((x) => x.includes(M.secret))) return "secret";
     return null;
   };
-  // (idempotent by decision_id: the same exact request, the same answer)
+  // (idempotent by decision_id, as §6.1's merge_id: each id keeps its request and its answer, whatever it was; the same
+  //  exact request gets the same answer again, another request under that id is refused conflict)
   const once = (id, p, f) => {
     if (!HEX32.test(p.decision_id ?? "")) return { error: "bad_request" };
     const key = JSON.stringify(p);
     const prior = M.ledger.get(p.decision_id);
     if (prior) return prior.key === key ? prior.result : { error: "conflict" };
     const result = f();
-    if (!result.error) M.ledger.set(p.decision_id, { key, result });
+    M.ledger.set(p.decision_id, { key, result });
     return result;
   };
   const commit = () => ++M.commits;

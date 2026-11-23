@@ -124,6 +124,19 @@ export interface MemoryCard {
   note?: string;
 }
 
+/** JSON.stringify's replacer for a chat as kept in this browser: every memory card without its text. A note's text is
+ *  never stored by the page (it stays in this tab's memory while the card is open); after a reload an open card shows
+ *  without it, and can only be dismissed. */
+export function withoutNoteText(this: unknown, key: string, value: unknown): unknown {
+  if (key !== "memory" || (this as { kind?: unknown } | null)?.kind !== "turn" || !value || typeof value !== "object") return value;
+  const out: Record<string, MemoryCard> = {};
+  for (const [k, c] of Object.entries(value as Record<string, MemoryCard>)) {
+    const { body: _b, ...proposal } = c.proposal;
+    out[k] = { ...c, proposal };
+  }
+  return out;
+}
+
 export interface Turn {
   kind: "turn";
   turn_id: string;

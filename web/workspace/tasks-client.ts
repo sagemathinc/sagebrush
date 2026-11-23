@@ -50,7 +50,7 @@ export class TaskClient {
    * "too_large" (the message over TASK_REQUESTS.frameBytes or the connection's bound), "timeout". */
   request(method: string, params: Record<string, unknown>, o: { timeoutMs?: number } = {}): Promise<unknown> {
     const no = (code: string, why: string) => Promise.reject(new AgentError(code, why));
-    if (this.p.link) return no("unavailable", "Delegate works only with an agent on this computer for now");
+    if (this.p.link) return no("unavailable", method.startsWith("memory.") ? "memory isn't available over this connection yet" : "Delegate works only with an agent on this computer for now");
     if (this.p.state !== "granted") return no("closed", "the agent isn't connected");
     // (agent memory v1, §7.1: its own gate, not Delegate's: the agent offers memory.1, and the grant holds memory)
     if (method.startsWith("memory.")) {

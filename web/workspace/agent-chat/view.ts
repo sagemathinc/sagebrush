@@ -17,26 +17,36 @@ export interface TurnHooks {
   md(src: string): string;
   /** agent memory v1: a proposed note's card, Save, Edit or Dismiss, by its pending id and the turn it was shown in;
    *  and where a scope is, in the person's words. Without these the card shows, with no actions */
-  memory?(pending: string, action: "save" | "edit" | "dismiss", turn: string): void;
+  memory?(pending: string, action: "save" | "edit" | "dismiss", turn: string, revision: number): void;
   scopeName?(scope: "own" | { tag: string }): string;
+  /** whether this thread's agent is the one connected now: only its cards take a decision */
+  memoryLive?(): boolean;
 }
 
+/** A note's expiry in words: a day, or never (a date past what a Date holds says only "later"). */
+export function expiresText(expires: number | null): string {
+  if (expires === null) return "never expires";
+  const d = new Date(expires);
+  return Number.isNaN(d.getTime()) ? "expires later" : `expires ${d.toISOString().slice(0, 10)}`;
+}
 const MEMORY_OUTCOME: Record<string, string> = { saved: "Saved to your notes", dismissed: "Not saved", stale: "Not saved: it changed or the agent's access did" };
 // (a proposed note: its text as text, never Markdown, so a note can't fetch or link anything; Save, Edit and Dismiss
 //  while it is open and the turn's agent is here, else how it ended)
 function memoryCardHtml(card: NonNullable<Turn["memory"]>[string], turn: Turn, h: TurnHooks): string {
   const pr = card.proposal;
   const where = h.scopeName ? h.scopeName(pr.scope) : pr.scope === "own" ? "this agent's own notes" : "a tag's notes";
-  const open = !card.outcome && !turn.away && !!h.memory;
-  const when = pr.expires === null ? "never expires" : `expires ${new Date(pr.expires).toISOString().slice(0, 10)}`;
+  const open = !card.outcome && !turn.away && !!h.memory && (h.memoryLive?.() ?? true);
+  // (its text is in this tab only: after a reload an open card has none, and can only be dismissed)
+  const text = pr.body !== undefined;
   return (
-    `<div class="memory-card ${cls(card.outcome ?? "open", ["open", "saved", "dismissed", "stale"])}" data-memory="${esc(pr.pending)}">` +
+    `<div class="memory-card ${cls(card.outcome ?? "open", ["open", "saved", "dismissed", "stale"])}" data-memory="${esc(pr.pending)}" data-revision="${pr.revision}">` +
     `<div class="mem-title">${pr.op === "edit" ? "Change this note?" : "Remember this?"} <b>${esc(pr.name)}</b></div>` +
-    `<div class="mem-where">In ${esc(where)} · ${esc(when)}</div>` +
+    `<div class="mem-where">In ${esc(where)} · ${esc(expiresText(pr.expires))}</div>` +
     `<div class="mem-desc">${esc(pr.description)}</div>` +
-    (pr.body !== undefined ? `<pre class="mem-body">${esc(pr.body)}</pre>` : "") +
+    (text ? `<pre class="mem-body">${esc(pr.body!)}</pre>` : "") +
+    (open && !text && !card.outcome ? `<div class="mem-gone">Its text isn't kept after a reload. Dismiss it, or ask the agent to propose it again.</div>` : "") +
     (open
-      ? `<div class="mem-actions"><button data-mem="save">Save</button><button data-mem="edit">Edit…</button><button data-mem="dismiss">Dismiss</button></div>`
+      ? `<div class="mem-actions">${text ? `<button data-mem="save">Save</button><button data-mem="edit">Edit…</button>` : ""}<button data-mem="dismiss">Dismiss</button></div>`
       : `<div class="mem-state">${card.outcome ? MEMORY_OUTCOME[card.outcome] : "Not decided"}</div>`) +
     `</div>`
   );
@@ -130,7 +140,8 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
   // (agent memory v1: a card's buttons; and the notes this turn read, by name, under the agent's, as text)
   for (const b of div.querySelectorAll<HTMLButtonElement>("[data-mem]")) {
     const card = b.closest<HTMLElement>("[data-memory]")!;
-    b.onclick = () => h.memory?.(card.dataset.memory!, b.dataset.mem as "save" | "edit" | "dismiss", turn.turn_id);
+    // (the revision the person sees: a later one replaces the card, and a click on this one names this one)
+    b.onclick = () => h.memory?.(card.dataset.memory!, b.dataset.mem as "save" | "edit" | "dismiss", turn.turn_id, Number(card.dataset.revision));
   }
   if (turn.used?.length) {
     const used = document.createElement("div");

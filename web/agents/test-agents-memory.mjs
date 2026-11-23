@@ -25,10 +25,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let server;
 const sitePort = await startServe(() => (server = spawn("python3", [join(here, "..", "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] }))).port;
 const site = `http://127.0.0.1:${sitePort}`;
-const H = delegateHost({ features: ["delegate.1", "chat.resume", "memory.1"] });
+const H = delegateHost({ features: ["delegate.1", "chat.resume", "memory.1"], log: "aaaa1111" });
 const B = await browser();
 const TAG = "abcdefghijklmnopqrstuvwxya";
-const H2 = delegateHost({ features: ["delegate.1", "chat.resume", "memory.1"] });
+const H2 = delegateHost({ features: ["delegate.1", "chat.resume", "memory.1"], log: "bbbb2222" });
 // (Connect, then Allow: with memory ticked (own notes and the tag), or not)
 async function pair(P, host, memory) {
   await P.navigate(`${site}/agents/?pair=123-456&port=${host.port}`);
@@ -84,8 +84,10 @@ try {
   const before = (await card()).n;
   send({ type: "memory_proposal", pending: "f".repeat(32), revision: 1, op: "new", scope: { tag: "NOT-A-TAG" }, name: "bad", description: "d", body: "b", expires: null });
   send({ type: "memory_proposal", pending: "e".repeat(32), revision: 1, op: "new", scope: "own", name: "bad", description: "d", body: "b", expires: null, extra: 1 });
+  send({ type: "memory_proposal", pending: "d".repeat(32), revision: 1, op: "new", scope: "own", name: "far", description: "d", body: "b", expires: Number.MAX_SAFE_INTEGER });
   await sleep(600);
-  ok((await card()).n === before, "M10: a proposal that isn't as §7.4 has it (a bad tag, an unknown field) shows no card", (await card()).n);
+  ok((await card()).n === before, "M10: a proposal that isn't as §7.4 has it (a bad tag, an unknown field, an expiry past year 9999) shows no card", (await card()).n);
+  ok(P.errors.length === 0, "M10: and the chat still draws", P.errors);
 
   // ======================================================================== M3: Save
   await P.ev(`([...document.querySelectorAll('[data-memory] button')].find((b) => b.textContent === 'Save').click(), true)`);
@@ -106,6 +108,8 @@ try {
     await P.ev(`([...document.querySelectorAll('[data-memory]')].at(-1).querySelector('[data-mem=dismiss]').click(), true)`);
     await P.until(`/Not saved/.test([...document.querySelectorAll('[data-memory]')].at(-1).querySelector('.mem-state')?.textContent ?? '')`, 10000).catch(() => {});
     ok(!H.memory.pending.has(pr4.pending) && ![...H.memory.notes.values()].some((n) => n.name === "draft"), "M4: Dismiss saves nothing, and the proposal is gone");
+    const c4 = await card();
+    ok(c4.state === "Not saved" && c4.body === null, "M4: the card says Not saved, and its text leaves the chat", c4);
     // ======================================================================== M5: Edit…
     H.memory.propose(send, { name: "style", description: "proof style", body: "Explain proofs first." });
     await P.until(`document.querySelectorAll('[data-memory]').length >= 3`, 10000);
@@ -122,20 +126,52 @@ try {
     await P.ev(`([...document.querySelectorAll('[data-memory]')].at(-1).querySelector('[data-mem=save]').click(), true)`);
     await P.until(`/changed/.test([...document.querySelectorAll('[data-memory]')].at(-1).querySelector('.mem-state')?.textContent ?? '')`, 10000).catch(() => {});
     ok(/Not saved: it changed/.test((await card()).state ?? ""), "M6: a card the agent moved past is stale, and says so", (await card()).state);
-    // ======================================================================== M7: secret, M8: full
+    // ======================================================================== M7: secret, then Edit… saves
+    const lastCard = `[...document.querySelectorAll('[data-memory]')].at(-1)`;
+    const clickLast = (what) => P.ev(`(${lastCard}.querySelector('[data-mem=${what}]').click(), true)`);
+    const toastText = () => P.ev(`document.querySelector('#toast')?.textContent ?? ''`);
     H.memory.secret = "sk-live-";
-    H.memory.propose(send, { name: "key", description: "an api key", body: "sk-live-123456" });
+    H.memory.propose(send, { name: "key", description: "an api key", body: "use sk-live-123456 here" });
     await P.until(`document.querySelectorAll('[data-memory]').length >= 5`, 10000);
-    await P.ev(`([...document.querySelectorAll('[data-memory]')].at(-1).querySelector('[data-mem=save]').click(), true)`);
+    await clickLast("save");
     await P.until(`/looks like it holds a secret/.test(document.querySelector('#toast')?.textContent ?? '')`, 10000).catch(() => {});
-    const t7 = await P.ev(`document.querySelector('#toast')?.textContent ?? ''`);
+    const t7 = await toastText();
     ok(/looks like it holds a secret/.test(t7) && !t7.includes("sk-live") && (await card()).buttons.includes("Save"), "M7: a secret is refused in the page's words, without echoing it; the card stays open", t7);
+    const id7 = H.got.filter((m) => m.method === "memory.save").at(-1)?.params?.decision_id;
+    await clickLast("edit");
+    await P.until(`!!document.querySelector('dialog.memory-edit[open]')`, 5000);
+    await P.ev(`(() => { const d = document.querySelector('dialog.memory-edit[open]'); d.querySelector('[name=body]').value = 'use the key from the keychain'; [...d.querySelectorAll('button')].find((b) => b.textContent === 'Save').click(); return true; })()`);
+    await P.until(`/Saved to your notes/.test(${lastCard}.querySelector('.mem-state')?.textContent ?? '')`, 10000).catch(() => {});
+    const m7 = H.got.filter((m) => m.method === "memory.save").at(-1)?.params;
+    ok([...H.memory.notes.values()].some((n) => n.name === "key" && n.body === "use the key from the keychain") && m7?.decision_id !== id7, "M7: after a refusal, Edit… without the secret saves, under a new decision id", m7);
     H.memory.secret = null;
+    // ======================================================================== M8: full, then the same Save once there is room
+    H.memory.propose(send, { name: "big", description: "a long one", body: "a lot of text" });
+    await P.until(`document.querySelectorAll('[data-memory]').length >= 6`, 10000);
     H.memory.full = true;
-    await P.ev(`([...document.querySelectorAll('[data-memory]')].at(-1).querySelector('[data-mem=save]').click(), true)`);
+    await clickLast("save");
     await P.until(`/Your notes are full/.test(document.querySelector('#toast')?.textContent ?? '')`, 10000).catch(() => {});
-    ok(/Your notes are full/.test(await P.ev(`document.querySelector('#toast')?.textContent ?? ''`)), "M8: a full store is said so");
+    ok(/Your notes are full/.test(await toastText()) && (await card()).buttons.includes("Save"), "M8: a full store is said so, and the card stays open");
+    const id8 = H.got.filter((m) => m.method === "memory.save").at(-1)?.params?.decision_id;
     H.memory.full = false;
+    await clickLast("save");
+    await P.until(`/Saved to your notes/.test(${lastCard}.querySelector('.mem-state')?.textContent ?? '')`, 10000).catch(() => {});
+    const id8b = H.got.filter((m) => m.method === "memory.save").at(-1)?.params?.decision_id;
+    ok([...H.memory.notes.values()].some((n) => n.name === "big") && id8b !== id8, "M8: once there is room, Save again saves (a new decision id: the agent keeps each id's answer)", { id8, id8b });
+    // ======================================================================== M11: the agent's own end of a card
+    const pr11 = H.memory.propose(send, { name: "elsewhere", description: "decided elsewhere", body: "ELSEWHERE-TEXT" });
+    await P.until(`document.querySelectorAll('[data-memory]').length >= 7`, 10000);
+    H.memory.pending.delete(pr11.pending);
+    send({ type: "memory_decided", pending: pr11.pending, outcome: "dismissed" });
+    await P.until(`/Not saved/.test(${lastCard}.querySelector('.mem-state')?.textContent ?? '')`, 10000).catch(() => {});
+    const c11 = await card();
+    ok(c11.state === "Not saved" && c11.body === null && !c11.buttons.length, "M11: memory_decided from the agent ends the card, and its text leaves the chat", c11);
+    // ======================================================================== M13: no note's text is kept in this browser
+    H.memory.propose(send, { name: "later", description: "left open", body: "LATER-TEXT" });
+    await P.until(`document.querySelectorAll('[data-memory]').length >= 8`, 10000);
+    await sleep(700); // (the chat is kept 300 ms after a change)
+    const kept = await P.ev(`localStorage.getItem('sagebrush-agents-preview-v1') ?? ''`);
+    ok(kept.includes("left open") && !/LATER-TEXT|ELSEWHERE-TEXT|keychain|a lot of text|Explain proofs/.test(kept), "M13: the kept chat has the cards but none of their text, an open card's included");
   }
   send({ type: "turn_finished", outcome: "completed" });
   ok(P.errors.length === 0, "no page errors", P.errors);
@@ -147,6 +183,9 @@ try {
   await pair(P2, H2, false);
   for (const t = Date.now(); !H2.pageFeatures && Date.now() - t < 5000; ) await sleep(50);
   ok(H2.grant?.memory === undefined, "M12: Allow without the memory choice grants no memory", H2.grant);
+  // (a chat of its own: this tab opens on the first agent's, kept)
+  await P2.ev(`(document.querySelector('#new').click(), true)`);
+  await sleep(300);
   await P2.draft("hello");
   await P2.ev(`(document.querySelector('#send').click(), true)`);
   for (const t = Date.now(); !H2.got.some((m) => m.method === "chat.message") && Date.now() - t < 10000; ) await sleep(50);
@@ -163,6 +202,10 @@ try {
   const t12 = await P2.ev(`document.querySelector('#toast')?.textContent ?? ''`);
   ok(!H2.got.some((m) => m.method === "memory.save") && /Memory isn't turned on for this agent/.test(t12), "M12: with no memory grant on the page's side, Save sends nothing and says so", t12);
   send2({ type: "turn_finished", outcome: "completed" });
+  // (M13/M14: this tab reads the kept chat: the first agent's open card is there without its text, and takes no
+  //  decision here, where another agent is connected)
+  const later = await P2.ev(`(async () => { for (const el of document.querySelectorAll('#threads .thread:not(.mirror)')) { el.click(); await new Promise((r) => setTimeout(r, 150)); const c = [...document.querySelectorAll('[data-memory]')].find((x) => /left open/.test(x.textContent)); if (c) return { body: c.querySelector('.mem-body')?.textContent ?? null, buttons: [...c.querySelectorAll('button')].map((b) => b.textContent), text: c.textContent }; } return null; })()`);
+  ok(later && later.body === null && !/LATER-TEXT/.test(later.text) && later.buttons.length === 0, "M14: another tab shows the first agent's open card without its text, and with no decision while another agent is connected", later);
   ok(P2.errors.length === 0, "no page errors (second agent)", P2.errors);
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));

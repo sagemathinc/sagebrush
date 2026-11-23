@@ -13,7 +13,7 @@ import "../workspace/pair-link";
 import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
 import { colorBlock } from "./code-color";
-import { runningTurn, type Artifact, type Thread, type Turn, type UserEntry } from "../workspace/agent-chat/events";
+import { runningTurn, withoutNoteText, type Artifact, type Thread, type Turn, type UserEntry } from "../workspace/agent-chat/events";
 import { ChatSession } from "../workspace/agent-chat/session";
 import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, diffHtml, mirrorSectionNode } from "../workspace/agent-chat/view";
 import { Mirror, MIRROR_COPY, mirrorTitle, type RemoteConversation, type Section } from "../workspace/agent-chat/mirror";
@@ -116,7 +116,7 @@ function flushDrafts() {
     try {
       // (and the chat shown here as the one shown: the person is in this tab; the record's own would undo a switch
       //  whose save comes before this write)
-      localStorage.setItem(STORE, JSON.stringify(record ? { ...record, threads: [...record.threads, ...missing], current: state.current } : state));
+      localStorage.setItem(STORE, JSON.stringify(record ? { ...record, threads: [...record.threads, ...missing], current: state.current } : state, withoutNoteText));
       for (const t of missing) stored!.add(t.id);
     } catch {}
   }
@@ -139,7 +139,7 @@ addEventListener("pagehide", () => {
   flushDrafts();
   if (storeWaiting) {
     try {
-      localStorage.setItem(STORE, JSON.stringify(state));
+      localStorage.setItem(STORE, JSON.stringify(state, withoutNoteText));
     } catch {}
   }
 });
@@ -182,7 +182,7 @@ const session = new ChatSession({
     saveTimer = window.setTimeout(() => {
       storeWaiting = false;
       try {
-        localStorage.setItem(STORE, JSON.stringify(s));
+        localStorage.setItem(STORE, JSON.stringify(s, withoutNoteText));
       } catch {} // (storage full: the chats stay here, kept at the next save that fits)
     }, 300);
   },
@@ -415,7 +415,7 @@ function renderThread() {
   for (const entry of thread.entries) {
     const eid = entry.kind === "user" ? entry.id : entry.turn_id;
     seen.add(eid);
-    const key = entry.kind === "user" ? `${entry.mode}|${entry.receipt ?? ""}|${!!entry.settled}` : JSON.stringify([entry.parts, entry.tools, entry.attention, entry.state, entry.error, !!entry.away, entry.memory, entry.used]);
+    const key = entry.kind === "user" ? `${entry.mode}|${entry.receipt ?? ""}|${!!entry.settled}` : JSON.stringify([entry.parts, entry.tools, entry.attention, entry.state, entry.error, !!entry.away, entry.memory, entry.used, entry.memory ? memoryLive(thread) : null]);
     let r = rendered.get(eid);
     if (!r || r.key !== key) {
       const node = entry.kind === "user" ? userNode(entry) : turnNode(thread, entry);
@@ -448,13 +448,19 @@ const memory = memoryHooks({
   changed: () => { save(); renderThread(); },
   toast: (t, ms) => toast(t, ms),
   tagName,
+  live: (t) => memoryLive(t),
 });
+// (a thread's memory cards take a decision only while its agent, the same run of it, is the one connected)
+function memoryLive(thread: Thread): boolean {
+  return session.live() && thread.agent_instance === pairing?.hello?.log?.instance;
+}
 function turnNode(thread: Thread, turn: Turn): HTMLElement {
   const node = viewTurnNode(thread, turn, {
     answer: (att, approve, turnId, instance) => answer(thread, att, approve, turnId, instance),
     openArtifact: (id) => { openArtifact = id; renderArtifacts(); },
     md,
     ...memory,
+    memoryLive: () => memoryLive(thread),
   });
   return withCopy(node, async () => turnMarkdown(thread, turn, { agent: agentName(), link: await fileLinks(thread) }));
 }

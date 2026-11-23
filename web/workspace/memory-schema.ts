@@ -35,7 +35,10 @@ const description = (v: unknown, what: string) => {
   const s = text(v, MEMORY_LIMITS.description * 4, what);
   return s.length >= 1 && s.length <= MEMORY_LIMITS.description && !/[\r\n]/.test(s) ? s : bad(`${what} isn't one line of 1 to ${MEMORY_LIMITS.description} characters`);
 };
-const expires = (v: unknown, what: string) => (v === null ? null : int(v, 0, what));
+// (a time: ms since the epoch, within what a Date holds and a card can draw: up to the last moment of year 9999)
+export const TIME_MAX = 253402300799999;
+const time = (v: unknown, what: string) => (int(v, 0, what) <= TIME_MAX ? (v as number) : bad(`${what} is past year 9999`));
+const expires = (v: unknown, what: string) => (v === null ? null : time(v, what));
 
 export type Scope = "own" | { tag: string };
 export function scope(v: unknown, what = "scope"): Scope {
@@ -52,7 +55,7 @@ export type NoteEntry = { note: string; scope: Scope; name: string; description:
 function entry(v: unknown, what: string): NoteEntry {
   const o = keys(v, ["note", "scope", "name", "description", "bytes", "revision", "modified", "expires", "state", "proposed_by"], what);
   const state = (NOTE_STATES as readonly unknown[]).includes(o.state) ? (o.state as NoteState) : bad(`${what}.state isn't a note state`);
-  return { note: hex32(o.note, `${what}.note`), scope: scope(o.scope, `${what}.scope`), name: name(o.name, `${what}.name`), description: description(o.description, `${what}.description`), bytes: int(o.bytes, 0, `${what}.bytes`), revision: int(o.revision, 1, `${what}.revision`), modified: int(o.modified, 0, `${what}.modified`), expires: expires(o.expires, `${what}.expires`), state, proposed_by: text(o.proposed_by, 80, `${what}.proposed_by`) };
+  return { note: hex32(o.note, `${what}.note`), scope: scope(o.scope, `${what}.scope`), name: name(o.name, `${what}.name`), description: description(o.description, `${what}.description`), bytes: int(o.bytes, 0, `${what}.bytes`), revision: int(o.revision, 1, `${what}.revision`), modified: time(o.modified, `${what}.modified`), expires: expires(o.expires, `${what}.expires`), state, proposed_by: text(o.proposed_by, 80, `${what}.proposed_by`) };
 }
 export type Note = Omit<NoteEntry, "bytes" | "proposed_by"> & { body: string };
 const saved = (v: unknown, what: string) => {

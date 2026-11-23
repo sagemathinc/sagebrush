@@ -49,14 +49,15 @@ try {
   }
   ok(P.errors.length === 0, "no page errors", P.errors);
 
-  // ---- agent memory v1 (§7.1): the dialog's "Notes it may use", only where the page has its memory client (here its
-  // loopback stand-in, window.__sbMemoryTags) and the agent's hello offers memory.1; off until ticked; its tags the
-  // page's own, their ids in the grant, ascending
+  // ---- agent memory v1 (§7.1): the dialog's "Notes it may use", where the page has its memory client (the Agents page
+  // does: memory-ui.ts) and the agent's hello offers memory.1; off until ticked; its tags the page's own (kept in this
+  // browser, memory-tags.ts: by name), their ids in the grant, ascending. A page without the client shows no choice:
+  // test-agent-pair.mjs M-3
   const T1 = "a".repeat(25) + "a", T2 = "b".repeat(25) + "e";
-  const dialogFor = async (features, standIn) => {
+  const dialogFor = async (features, tags) => {
     const Hm = delegateHost({ features });
     const Q = await B.tab();
-    if (standIn) await Q.send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__sbMemoryTags = () => [{ id: ${JSON.stringify(T2)}, name: "beta" }, { id: ${JSON.stringify(T1)}, name: "alpha" }];` });
+    if (tags) await Q.send("Page.addScriptToEvaluateOnNewDocument", { source: `try { localStorage.setItem("sb-memory-tags-v1", ${JSON.stringify(JSON.stringify([{ id: T2, name: "beta" }, { id: T1, name: "alpha" }]))}); } catch {}` });
     await Q.navigate(`${site}/agents/?pair=123-456&port=${Hm.port}`);
     await Q.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect')`, 30000);
     await Q.ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect').click()`);
@@ -66,7 +67,7 @@ try {
   {
     const { Hm, Q, mem } = await dialogFor(["memory.1", "chat.resume"], true);
     const m0 = await mem();
-    ok(m0 && m0.own === false && m0.tags.length === 2 && m0.tags.every((t) => t.disabled && !t.checked) && m0.tags.map((t) => t.name).join() === "beta,alpha", "MG-1: with the page's memory client and an agent that offers memory.1: the choice is shown, off; the tags (the page's own list) can't be ticked until its own notes are", m0);
+    ok(m0 && m0.own === false && m0.tags.length === 2 && m0.tags.every((t) => t.disabled && !t.checked) && m0.tags.map((t) => t.name).join() === "alpha,beta", "MG-1: with the page's memory client and an agent that offers memory.1: the choice is shown, off; the tags (the page's own list) can't be ticked until its own notes are", m0);
     await Q.ev(`(() => { const m = [...document.querySelectorAll('.sbag-box')].at(-1).querySelector('.memory'); const own = m.querySelector('input[name=memory-own]'); own.click(); m.querySelector('input[data-tag=${JSON.stringify(T1)}]').click(); m.querySelector('input[data-tag=${JSON.stringify(T2)}]').click(); return true; })()`);
     await Q.ev(`[...[...document.querySelectorAll('.sbag-box')].at(-1).querySelectorAll('button.primary')].pop().click()`);
     await Q.until(`document.querySelector('#connect').textContent === 'Connected'`, 15000);
@@ -82,9 +83,9 @@ try {
     ok(Hm.grant && !("memory" in Hm.grant), "MG-2: the choice left off: the grant has no memory (memory stays off)", Hm.grant);
     Hm.stop();
   }
-  for (const [why, features, standIn] of [["agent-without", ["chat.resume"], true], ["page-without", ["memory.1", "chat.resume"], false]]) {
-    const { Hm, mem } = await dialogFor(features, standIn);
-    ok((await mem()) === null, `MG-3.${why}: no memory choice where ${why === "agent-without" ? "the agent's hello lacks memory.1" : "the page has no memory client"}`);
+  {
+    const { Hm, mem } = await dialogFor(["chat.resume"], true);
+    ok((await mem()) === null, "MG-3.agent-without: no memory choice where the agent's hello lacks memory.1");
     Hm.stop();
   }
 } catch (e) {
