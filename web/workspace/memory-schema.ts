@@ -3,6 +3,7 @@
 // its listed keys, each value its rule, and each memory turn event exactly its fields; anything else is refused
 // (MemoryShapeError), never shown. Limits are UTF-8 bytes with the metadata (name, description and scope count with
 // the body). Note text is data: the page shows it as plain text only.
+import { validTagId } from "./agent-tags";
 
 export class MemoryShapeError extends Error {}
 const bad = (m: string): never => { throw new MemoryShapeError(m); };
@@ -14,8 +15,6 @@ export const NOTE_STATES = ["ok", "expired", "outside_edit", "invalid"] as const
 export type NoteState = (typeof NOTE_STATES)[number];
 
 const HEX32 = /^[0-9a-f]{32}$/;
-// (a tag id, lane D's frozen format; to come from web/workspace/agent-tags.ts once that lands)
-const TAG = /^[a-z2-7]{25}[aeimquy4]$/;
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const enc = new TextEncoder();
 const bytes = (s: string) => enc.encode(s).length;
@@ -42,7 +41,7 @@ export type Scope = "own" | { tag: string };
 export function scope(v: unknown, what = "scope"): Scope {
   if (v === "own") return "own";
   const o = keys(v, ["tag"], what);
-  return typeof o.tag === "string" && TAG.test(o.tag) ? { tag: o.tag } : bad(`${what}.tag isn't a tag id`);
+  return typeof o.tag === "string" && validTagId(o.tag) ? { tag: o.tag } : bad(`${what}.tag isn't a tag id`);
 }
 const scopeText = (s: Scope) => (s === "own" ? "own" : s.tag);
 // (the note's size as the agent counts it: name, description, scope and body together)

@@ -8,8 +8,8 @@
 //     words: secret, full, forbidden.
 //   - "Used notes" under the agent's name lists the notes the turn read.
 //   - Memory events never reach the log mirror.
-// The grant's memory field and page.features' memory.1 come with the grant PR (agents-ui); the rows that need them
-// say so and fail, never skip, until it is in this build.
+//   - The grant dialog offers the agent's own notes and this browser's tags by name; Allow grants exactly those ids.
+//     Without that grant the page refuses Save itself and sends nothing.
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/agents/test-agents-memory.mjs
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -28,23 +28,31 @@ const site = `http://127.0.0.1:${sitePort}`;
 const H = delegateHost({ features: ["delegate.1", "chat.resume", "memory.1"] });
 const B = await browser();
 const TAG = "abcdefghijklmnopqrstuvwxya";
-try {
-  const P = await B.tab();
-  await P.navigate(`${site}/agents/?pair=123-456&port=${H.port}`);
+const H2 = delegateHost({ features: ["delegate.1", "chat.resume", "memory.1"] });
+// (Connect, then Allow: with memory ticked (own notes and the tag), or not)
+async function pair(P, host, memory) {
+  await P.navigate(`${site}/agents/?pair=123-456&port=${host.port}`);
+  await P.ev(`(localStorage.setItem('sb-memory-tags-v1', JSON.stringify([{ id: ${JSON.stringify(TAG)}, name: 'algebra' }, { id: 'NOT-A-TAG', name: 'bad' }])), true)`);
   await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect')`, 30000);
   await P.ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect').click()`);
   await P.until(`[...document.querySelectorAll('.sbag-box h2')].some((h) => h.textContent === 'Allow this agent?')`, 30000);
+  const offered = await P.ev(`(() => { const m = [...document.querySelectorAll('.sbag-box')].at(-1).querySelector('.memory'); return m ? { text: m.textContent, tags: [...m.querySelectorAll('input[data-tag]')].map((i) => i.dataset.tag) } : null; })()`);
+  if (memory) await P.ev(`(() => { const d = [...document.querySelectorAll('.sbag-box')].at(-1); const own = d.querySelector('input[name=memory-own]'); own.click(); d.querySelector('input[data-tag=${TAG}]').click(); return true; })()`);
   await P.ev(`(() => { const d = [...document.querySelectorAll('.sbag-box')].at(-1); d.querySelector('button.primary').click(); return true; })()`);
   await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
+  return offered;
+}
+try {
+  const P = await B.tab();
+  const offered = await pair(P, H, true);
+  ok(offered?.tags?.length === 1 && offered.tags[0] === TAG && /algebra/.test(offered.text), "M0: the grant dialog offers own notes and this browser's tags by name (a malformed kept tag is dropped)", offered);
+  for (const t = Date.now(); !H.grant?.memory && Date.now() - t < 5000; ) await sleep(50);
+  ok(JSON.stringify(H.grant?.memory) === JSON.stringify({ tags: [TAG] }) && !!H.pageFeatures?.includes("memory.1"), "M0: Allow grants own notes and exactly that tag, and the page says memory.1", { memory: H.grant?.memory, features: H.pageFeatures });
   await P.draft("remember my notation");
   await P.ev(`(document.querySelector('#send').click(), true)`);
   for (const t = Date.now(); !H.got.some((m) => m.method === "chat.message") && Date.now() - t < 10000; ) await sleep(50);
   const conversation = H.got.find((m) => m.method === "chat.message")?.params?.conversation;
   ok(!!conversation, "the person's message reached the agent");
-  const pageGrant = () => H.grant?.memory !== undefined;
-  // (until the grant PR: the stand-in's own grant holds memory, as the agent's would, so it answers; the page's gate
-  //  is what the rows below exercise)
-  H.grant = { ...(H.grant ?? {}), memory: H.grant?.memory ?? { tags: [TAG] } };
   const turn = "t-mem";
   const send = (event) => H.turnEvent(conversation, turn, event);
   send({ type: "turn_started" });
@@ -79,17 +87,11 @@ try {
   await sleep(600);
   ok((await card()).n === before, "M10: a proposal that isn't as §7.4 has it (a bad tag, an unknown field) shows no card", (await card()).n);
 
-  // ======================================================================== M12 (or M3..): Save
+  // ======================================================================== M3: Save
   await P.ev(`([...document.querySelectorAll('[data-memory] button')].find((b) => b.textContent === 'Save').click(), true)`);
   await sleep(800);
   const saveSent = H.got.filter((m) => m.method === "memory.save");
-  if (!H.pageFeatures?.includes("memory.1")) {
-    // (this build's page has no memory grant yet: the page refuses Save itself, in its words, and sends nothing)
-    const t = await P.ev(`document.querySelector('#toast')?.textContent ?? ''`);
-    ok(saveSent.length === 0 && /Memory isn't turned on for this agent/.test(t), "M12: with no memory grant on the page's side, Save sends nothing and says so", { saveSent: saveSent.length, t });
-    ok(false, "M3..M8 (Save, Edit…, Dismiss, stale, secret, full) wait on the grant PR's memory field and page.features memory.1 (agents-ui)");
-  } else {
-    // ======================================================================== M3: Save
+  {
     await P.until(`/Saved to your notes/.test(document.querySelector('[data-memory] .mem-state')?.textContent ?? '')`, 10000).catch(() => {});
     const m3 = saveSent.at(-1)?.params;
     const c3 = await card();
@@ -137,11 +139,37 @@ try {
   }
   send({ type: "turn_finished", outcome: "completed" });
   ok(P.errors.length === 0, "no page errors", P.errors);
+
+  // ======================================================================== M12: no memory in the grant
+  // (another agent, allowed without memory: its proposal still shows, but Save is refused by the page itself, in its
+  //  words, and nothing is sent; the stand-in's own grant holds memory, so only the page's gate stands between)
+  const P2 = await B.tab();
+  await pair(P2, H2, false);
+  for (const t = Date.now(); !H2.pageFeatures && Date.now() - t < 5000; ) await sleep(50);
+  ok(H2.grant?.memory === undefined, "M12: Allow without the memory choice grants no memory", H2.grant);
+  await P2.draft("hello");
+  await P2.ev(`(document.querySelector('#send').click(), true)`);
+  for (const t = Date.now(); !H2.got.some((m) => m.method === "chat.message") && Date.now() - t < 10000; ) await sleep(50);
+  const conv2 = H2.got.find((m) => m.method === "chat.message")?.params?.conversation;
+  H2.grant = { ...(H2.grant ?? {}), memory: { tags: [] } };
+  const send2 = (event) => H2.turnEvent(conv2, "t-mem2", event);
+  send2({ type: "turn_started" });
+  H2.memory.propose(send2, { name: "nope", description: "d", body: "b" });
+  // (this tab shares the kept chat with the first: its card is the one named "nope")
+  const nope = `[...document.querySelectorAll('[data-memory]')].find((c) => /nope/.test(c.textContent))`;
+  await P2.until(`!!${nope}`, 10000);
+  await P2.ev(`([...${nope}.querySelectorAll('button')].find((b) => b.textContent === 'Save').click(), true)`);
+  await P2.until(`/Memory isn't turned on for this agent/.test(document.querySelector('#toast')?.textContent ?? '')`, 5000).catch(() => {});
+  const t12 = await P2.ev(`document.querySelector('#toast')?.textContent ?? ''`);
+  ok(!H2.got.some((m) => m.method === "memory.save") && /Memory isn't turned on for this agent/.test(t12), "M12: with no memory grant on the page's side, Save sends nothing and says so", t12);
+  send2({ type: "turn_finished", outcome: "completed" });
+  ok(P2.errors.length === 0, "no page errors (second agent)", P2.errors);
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));
 } finally {
   await B.close();
   H.stop();
+  H2.stop();
   server.kill();
 }
 console.log(failures ? `${failures} FAILED` : "all passed");

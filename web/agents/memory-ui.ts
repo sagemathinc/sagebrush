@@ -4,6 +4,7 @@
 // nothing on the model's word. Edit… opens the card's text, place and expiry for the person to change, then saves that.
 // Each answer is checked closed (memory-schema.ts) before the card changes; a refusal is said in the page's words.
 import type { AgentPairing } from "../workspace/agent-pair";
+import { grantMemory } from "../workspace/agent-grant";
 import { TaskClient } from "../workspace/tasks-client";
 import { MEMORY_RESULTS, type Scope } from "../workspace/memory-schema";
 import type { MemoryCard, Thread, Turn } from "../workspace/agent-chat/events";
@@ -84,7 +85,7 @@ export function memoryHooks(host: MemoryUiHost) {
     const f = find(pending), p = host.pairing();
     if (!f || f.card.outcome || !p || f.card.proposal.body === undefined) return;
     const pr = f.card.proposal;
-    const tags = ((p.grant as { memory?: { tags?: readonly string[] } } | null)?.memory?.tags ?? []).slice();
+    const tags = (grantMemory(p.grant)?.tags ?? []).slice();
     const dlg = document.createElement("dialog");
     dlg.className = "memory-edit";
     const field = <K extends keyof HTMLElementTagNameMap>(tag: K, label: string, set: (el: HTMLElementTagNameMap[K]) => void) => {

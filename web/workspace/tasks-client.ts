@@ -10,6 +10,7 @@
 // The grant's delegate:true (the Agents page's switch, AgentPairing.setDelegate) is checked here before each request,
 // and by the agent always. Not here: §2.5's schema of each result, which every caller checks before any use.
 import { AgentError, type AgentPairing } from "./agent-pair";
+import { grantMemory } from "./agent-grant";
 import { MEMORY_FEATURE, MEMORY_METHODS } from "./memory-schema";
 
 export const DELEGATE_FEATURE = "delegate.1";
@@ -54,7 +55,7 @@ export class TaskClient {
     // (agent memory v1, §7.1: its own gate, not Delegate's: the agent offers memory.1, and the grant holds memory)
     if (method.startsWith("memory.")) {
       if (!this.p.hello?.features?.includes(MEMORY_FEATURE)) return no("forbidden", "this agent doesn't offer memory");
-      if (!(this.p.grant as { memory?: unknown } | null)?.memory) return no("forbidden", "memory isn't turned on for this agent");
+      if (!grantMemory(this.p.grant)) return no("forbidden", "memory isn't turned on for this agent");
       if (!MEMORY_METHODS.includes(method)) return no("bad_request", "not a memory request");
       return this.send(method, params, o);
     }
