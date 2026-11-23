@@ -17,7 +17,7 @@
 // - A proposal's files (ProposalSource): only the proposal commit named and its base, each file's bytes checked against
 //   the blob id tasks.diff gave for that path at that commit (its git blob id, recomputed here).
 import { AgentError, type AgentPairing } from "../workspace/agent-pair";
-import { BRIEF_FEATURE, DELEGATE_FEATURE, TaskClient } from "../workspace/tasks-client";
+import { BRIEF_FEATURE, DELEGATE_FEATURE, RUN_FEATURE, TaskClient } from "../workspace/tasks-client";
 import { TASK_LIMITS, TASK_RESULTS, blobId, briefResult, contentBytes, taskEntry, taskLog, taskNotice, type DiffFile, type TaskEntry, type TaskEvent, type TaskLogEntry, type TaskResult } from "../workspace/tasks-schema";
 import type { MergedParams } from "./delegate-merge";
 import { apply, newThread, type Thread, type TurnEvent } from "../workspace/agent-chat/events";
@@ -30,8 +30,9 @@ export type DelegateTask = {
   /** its chat turn events, as a chat thread; `applied_seq` is the task's seq of the last event taken */
   thread: Thread;
   proposal: { round: number; base: string; commit: string; files: DiffFile[] } | null;
-  /** the last task_status's reason, if it gave one */
+  /** the last task_status's reason, if it gave one, and its code (why it was interrupted, #1621) */
   reason?: string;
+  code?: string;
   /** events this page refused, skipped */
   skipped: number;
   /** whether its thread has been read from the agent (tasks.get); until then only its chip moves */
@@ -45,6 +46,8 @@ export const DELEGATE_LIMITS = Object.freeze({ briefMs: 70_000, pages: 1000, clo
 
 export const DELEGATE_TEXT = {
   chip: { working: "Working", question: "Question", proposal: "Proposal ready", merged: "Merged", closed: "Closed", failed: "Failed", interrupted: "Interrupted" } as Record<string, string>,
+  // (an interrupted task's chip by why it stopped, where the agent says (#1621): never "Interrupted" unless it was)
+  stopped: { no_proposal: "Ended without a proposal", unproposable: "Couldn't propose", stopped: "Stopped", switched_off: "Stopped: Delegate turned off", limit: "Stopped at a limit", failed: "Ended with an error", restarted: "Stopped: the agent restarted" } as Record<string, string>,
   turningOff: "Delegate is turning off",
   off: "Delegate tasks aren't turned on for this agent",
   changed: "The proposal changed while you were reading it",
@@ -53,6 +56,9 @@ export const DELEGATE_TEXT = {
   noteEmpty: "Write what you'd like changed first",
   noteLong: "The note is too long: at most 16 KB",
   askMoved: "The task has moved on since this proposal: open its latest proposal",
+  noteOld: "This agent can't take a note with Resume: it needs sagebrush-agent 0.8.13 or later. Resume the task without a note, or update the agent.",
+  notWorking: "The task isn't working any more: nothing was stopped",
+  notInterrupted: "The task isn't stopped: there's nothing to resume",
   docLong: (path: string) => `${path} is too large to send with your note (at most 4 MB)`,
 } as const;
 
@@ -68,8 +74,9 @@ export async function currentOf(files: readonly { path: string; change: string }
   return out;
 }
 
-/** A task's chip: its status, or Question while it works waiting for an answer. */
-export const chipOf = (e: TaskEntry) => DELEGATE_TEXT.chip[e.status === "working" && e.question ? "question" : e.status];
+/** A task's chip: its status, or Question while it works waiting for an answer; an interrupted one by why it stopped,
+ * where the agent says (`code`, else its entry's reason_code; an unknown code or none: Interrupted). */
+export const chipOf = (e: TaskEntry, code = e.reason_code) => (e.status === "interrupted" && code && Object.hasOwn(DELEGATE_TEXT.stopped, code) ? DELEGATE_TEXT.stopped[code] : DELEGATE_TEXT.chip[e.status === "working" && e.question ? "question" : e.status]);
 
 export class DelegateTasks {
   /** the tasks, newest first */
@@ -102,7 +109,9 @@ export class DelegateTasks {
   // (what the page shows changed: while the switch is on, the list kept as it is now)
   private changed() {
     if (this.keepAt && this.state() === "on") {
-      try { this.keepAt.storage.setItem(this.keepAt.key, JSON.stringify({ v: 1, tasks: this.tasks.slice(0, DELEGATE_LIMITS.kept).map((t) => t.entry) })); } catch { /* (no room: the last one kept stays) */ }
+      // (each entry as the agent lists it: an interrupted task with its reason and code, so the kept list says why too)
+      const kept = (t: DelegateTask) => (t.entry.status === "interrupted" ? { ...t.entry, ...(t.reason !== undefined ? { reason: t.reason } : {}), ...(t.code !== undefined ? { reason_code: t.code } : {}) } : t.entry);
+      try { this.keepAt.storage.setItem(this.keepAt.key, JSON.stringify({ v: 1, tasks: this.tasks.slice(0, DELEGATE_LIMITS.kept).map(kept) })); } catch { /* (no room: the last one kept stays) */ }
     }
     this.o.changed();
   }
@@ -229,6 +238,59 @@ export class DelegateTasks {
     return r;
   }
 
+  /** Whether a task may run code on this agent (its hello lists delegate.run: 0.8.13 and later, only where a task's
+   * notebooks can run), with the switch on. */
+  runsOffered(): boolean { return this.state() === "on" && !!this.p?.hello?.features?.includes(RUN_FEATURE); }
+  /** Whether this agent takes a note with Resume (sagebrush-agent 0.8.13 and later, by its hello's version), with the
+   * switch on; an older one refuses the note (bad_request), said as noteOld. */
+  notesOffered(): boolean {
+    const v = /^(\d+)\.(\d+)\.(\d+)/.exec(this.p?.hello?.agent.version ?? "");
+    return this.state() === "on" && !!v && [+v[1], +v[2], +v[3]].reduce((c, x, i) => (c !== 0 ? c : x - [0, 8, 13][i]), 0) >= 0;
+  }
+
+  /** Stop a working task (tasks.stop): its turn and its run stop, and it is interrupted (its chip at once). Only with the
+   * switch on, only a task working now. */
+  async stop(id: string): Promise<string> {
+    const s = this.state();
+    if (s !== "on") throw new AgentError("forbidden", s === "turning-off" ? DELEGATE_TEXT.turningOff : DELEGATE_TEXT.off);
+    if (this.task(id)?.entry.status !== "working") throw new AgentError("stale", DELEGATE_TEXT.notWorking);
+    const r = TASK_RESULTS["tasks.stop"](await this.client().request("tasks.stop", { task: id }));
+    const now = this.task(id);
+    // (its status at once; why it stopped comes with the agent's own event, so nothing older is shown meanwhile)
+    if (now) { now.entry = { ...now.entry, status: r.status as TaskEntry["status"], question: false }; now.reason = undefined; now.code = undefined; this.o.changed(); }
+    void this.refresh().catch(() => {});
+    return r.status;
+  }
+  /** Resume an interrupted task (tasks.resume), with the person's note for its next turn if `note` is given: trimmed,
+   * not empty, at most noteBytes, and only to an agent that takes one (notesOffered; one that refuses it anyway,
+   * bad_request, is said as noteOld). Only with the switch on; its chip moves on at once. */
+  async resume(id: string, note?: string): Promise<string> {
+    const s = this.state();
+    if (s !== "on") throw new AgentError("forbidden", s === "turning-off" ? DELEGATE_TEXT.turningOff : DELEGATE_TEXT.off);
+    if (this.task(id)?.entry.status !== "interrupted") throw new AgentError("stale", DELEGATE_TEXT.notInterrupted);
+    let params: { task: string; note?: string } = { task: id };
+    if (note !== undefined) {
+      const n = note.trim();
+      if (!n) throw new AgentError("bad_request", DELEGATE_TEXT.noteEmpty);
+      if (new TextEncoder().encode(n).length > DELEGATE_LIMITS.noteBytes) throw new AgentError("too_large", DELEGATE_TEXT.noteLong);
+      if (!this.notesOffered()) throw new AgentError("unsupported", DELEGATE_TEXT.noteOld);
+      params = { task: id, note: n };
+    }
+    let r: { status: string };
+    try {
+      r = TASK_RESULTS["tasks.resume"](await this.client().request("tasks.resume", params));
+    } catch (e) {
+      if (note !== undefined && e instanceof AgentError && e.code === "bad_request") throw new AgentError("unsupported", DELEGATE_TEXT.noteOld);
+      throw e;
+    }
+    const now = this.task(id);
+    // (working again at once: why it had stopped no longer applies, so its reason and code go with the status, as the
+    //  agent's own working event would take them; a refused Resume threw above and keeps them)
+    if (now) { now.entry = { ...now.entry, status: r.status as TaskEntry["status"], question: false }; now.reason = undefined; now.code = undefined; this.o.changed(); }
+    void this.refresh().catch(() => {});
+    return r.status;
+  }
+
   /** Whether this agent drafts briefs (its hello lists chat.brief), with the switch on. */
   briefOffered(): boolean { return this.state() === "on" && !!this.p?.hello?.features?.includes(BRIEF_FEATURE); }
 
@@ -340,30 +402,39 @@ export class DelegateTasks {
 }
 
 function fresh(entry: TaskEntry): DelegateTask {
-  return { entry: { ...entry }, thread: newThread("task:" + entry.task, entry.title), proposal: null, skipped: 0, loaded: false, turn: null };
+  const { reason, reason_code, ...rest } = entry;
+  return { entry: rest, thread: newThread("task:" + entry.task, entry.title), proposal: null, skipped: 0, loaded: false, turn: null, ...(reason !== undefined ? { reason } : {}), ...(reason_code !== undefined ? { code: reason_code } : {}) };
 }
 
 // (a task's chip, its entry, moves only forward: one rule for its events, tasks.list and tasks.get. The entry's seq is
 //  the seq of what the chip says. Above it, `next` replaces the status and the rest; at it, only what is missing is
 //  filled in; below it, the chip doesn't change. A status's reason and a proposal's files are filled in from an older
 //  event too, when it names what the chip already says: the log read when a task is opened, after its list entry)
-type Extra = { reason?: string; proposal?: DelegateTask["proposal"] };
-function chip(t: DelegateTask, seq: number, next: Partial<TaskEntry>, more: Extra = {}) {
+type Extra = { reason?: string; code?: string; proposal?: DelegateTask["proposal"] };
+function chip(t: DelegateTask, seq: number, entry: Partial<TaskEntry>, more: Extra = {}) {
+  // (an entry's own reason and code (tasks.list, tasks.get) are the chip's extras, never its fields)
+  const { reason, reason_code, ...next } = entry;
+  if (reason !== undefined && more.reason === undefined) more = { ...more, reason };
+  if (reason_code !== undefined && more.code === undefined) more = { ...more, code: reason_code };
   const was = t.entry;
   if (seq > was.seq) {
     t.entry = { ...was, ...next, seq };
-    if (next.status !== undefined && next.status !== was.status) t.reason = more.reason;
-    else if (more.reason !== undefined) t.reason = more.reason;
+    if (next.status !== undefined && next.status !== was.status) { t.reason = more.reason; t.code = more.code; }
+    else {
+      if (more.reason !== undefined) t.reason = more.reason;
+      if (more.code !== undefined) t.code = more.code;
+    }
     if (more.proposal) t.proposal = more.proposal;
     return;
   }
   if (seq === was.seq && was.proposal === null && next.proposal) t.entry = { ...was, proposal: next.proposal, round: next.round ?? was.round };
   if (more.reason !== undefined && t.reason === undefined && next.status === t.entry.status) t.reason = more.reason;
+  if (more.code !== undefined && t.code === undefined && next.status === t.entry.status) t.code = more.code;
   if (more.proposal && more.proposal.commit === t.entry.proposal && t.proposal?.commit !== more.proposal.commit) t.proposal = more.proposal;
 }
 // (a task's own event on its chip: task_status and proposal)
 function chipOfEvent(t: DelegateTask, e: TaskEvent, seq: number) {
-  if (e.type === "task_status") chip(t, seq, { status: e.status, ...(e.status === "working" ? {} : { question: false }) }, { reason: e.reason });
+  if (e.type === "task_status") chip(t, seq, { status: e.status, ...(e.status === "working" ? {} : { question: false }) }, { reason: e.reason, code: e.code });
   else if (e.type === "proposal") chip(t, seq, { round: e.round, proposal: e.commit }, { proposal: { round: e.round, base: e.base, commit: e.commit, files: e.files } });
 }
 
