@@ -81,7 +81,8 @@ console.log('PASS: required workflow triggers and aggregate failure/skip guards'
   const step = ci.jobs['size-gate'].steps.find(s => s.id === 'track');
   assert.ok(step, "size-gate's \"a track pull?\" step");
   const stub = mkdtempSync(join(tmpdir(), 'gh-stub-'));
-  writeFileSync(join(stub, 'gh'), '#!/bin/sh\nprintf "%s\\n" $STUB_LABELS\n', { mode: 0o755 });
+  // (gh api ... --jq '[.[].name]': the queued pull request's names as one JSON array)
+  writeFileSync(join(stub, 'gh'), '#!/bin/sh\nprintf "%s\\n" "$STUB_NAMES"\n', { mode: 0o755 });
   const pull = (env) => {
     const out = join(stub, 'out');
     writeFileSync(out, '');
@@ -90,14 +91,21 @@ console.log('PASS: required workflow triggers and aggregate failure/skip guards'
     return readFileSync(out, 'utf8').trim();
   };
   const QREF = 'refs/heads/gh-readonly-queue/master/pr-1697-0123456789abcdef0123456789abcdef01234567';
-  for (const [labels, want] of [['track-pull', true], ['size-accepted', true], ['full-ci,size-accepted', true], ['size-accepted,track-pull', true],
-    ['', false], ['full-ci', false], ['size-accepted-x', false], ['x-size-accepted', false], ['track-pulls', false], ['size accepted', false]]) {
-    assert.equal(pull({ EVENT: 'pull_request', LABELS: labels }), `pull=${want}`, `a pull request labelled ${JSON.stringify(labels)}`);
-    assert.equal(pull({ EVENT: 'merge_group', QUEUE_REF: QREF, STUB_LABELS: labels.replace(/,/g, ' ') }), `pull=${want}`, `a queued pull request labelled ${JSON.stringify(labels)}`);
+  // (each row: the label names, as the pull request has them and as the queue reads them; the same verdict both ways.
+  // A name that contains a comma, a space or a newline around an excusing label is one other label: astra4b's hold)
+  for (const [labels, want] of [[['track-pull'], true], [['size-accepted'], true], [['full-ci', 'size-accepted'], true], [['size-accepted', 'track-pull'], true],
+    [[], false], [['full-ci'], false], [['size-accepted-x'], false], [['x-size-accepted'], false], [['track-pulls'], false], [['size accepted'], false],
+    [['x,size-accepted'], false], [['x,track-pull'], false], [['size-accepted,x'], false], [['track-pull,size-accepted'], false],
+    [['x size-accepted'], false], [['x\nsize-accepted'], false], [['x\ntrack-pull'], false], [[' size-accepted'], false], [['Size-Accepted'], false]]) {
+    const names = JSON.stringify(labels);
+    // (toJSON's form: pretty-printed, as GitHub renders it)
+    assert.equal(pull({ EVENT: 'pull_request', LABELS: JSON.stringify(labels, null, 2) }), `pull=${want}`, `a pull request labelled ${names}`);
+    assert.equal(pull({ EVENT: 'merge_group', QUEUE_REF: QREF, STUB_NAMES: names }), `pull=${want}`, `a queued pull request labelled ${names}`);
   }
-  // (a push, or a queue ref that names no pull request, is never excused)
-  assert.equal(pull({ EVENT: 'push', LABELS: 'size-accepted' }), 'pull=false');
-  assert.equal(pull({ EVENT: 'merge_group', QUEUE_REF: 'refs/heads/other', STUB_LABELS: 'size-accepted' }), 'pull=false');
+  // (a push (toJSON of no pull request: null), or a queue ref that names no pull request, is never excused)
+  assert.equal(pull({ EVENT: 'push', LABELS: 'null' }), 'pull=false');
+  assert.equal(pull({ EVENT: 'pull_request', LABELS: 'null' }), 'pull=false');
+  assert.equal(pull({ EVENT: 'merge_group', QUEUE_REF: 'refs/heads/other', STUB_NAMES: '["size-accepted"]' }), 'pull=false');
   rmSync(stub, { recursive: true, force: true });
   console.log('PASS: the size gate excuses growth only for the track-pull or size-accepted label (pull request and queue)');
 }

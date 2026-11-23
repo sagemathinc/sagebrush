@@ -519,15 +519,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          # (the names as a JSON array, matched element by element: a label named "x,size-accepted" is not size-accepted)
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           QUEUE_REF: ${{ github.event.merge_group.head_ref }}
         run: |
           pull=false
+          excused='(. // []) | any(.[]; . == "track-pull" or . == "size-accepted")'
           if [ "$EVENT" = pull_request ]; then
-            case ",$LABELS," in *,track-pull,* | *,size-accepted,*) pull=true ;; esac
+            if printf '%s' "$LABELS" | jq -e "$excused" > /dev/null; then pull=true; fi
           elif [ "$EVENT" = merge_group ]; then
             n=$(printf '%s' "$QUEUE_REF" | sed -n 's#^refs/heads/gh-readonly-queue/[^/]*/pr-\([0-9][0-9]*\)-.*#\1#p')
-            if [ -n "$n" ] && gh api "repos/$GITHUB_REPOSITORY/issues/$n/labels" --jq '.[].name' | grep -qxE 'track-pull|size-accepted'; then pull=true; fi
+            if [ -n "$n" ] && gh api "repos/$GITHUB_REPOSITORY/issues/$n/labels" --jq '[.[].name]' | jq -e "$excused" > /dev/null; then pull=true; fi
           fi
           echo "track pull: $pull"
           echo "pull=$pull" >> "$GITHUB_OUTPUT"
