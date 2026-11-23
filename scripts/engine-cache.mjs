@@ -127,17 +127,22 @@ function store(root, key, cache) {
   }
   const commit = gitIn(root)(["rev-parse", "HEAD"]).trim();
   writeJsonAtomic(join(tmp, "manifest.json"), { key, commit, modules });
+  const dest = join(cache, key);
+  // (an entry that isn't intact is replaced; an intact one another checkout stored first is kept, and installed)
+  if (existsSync(dest) && !entryModules(dest)) rmSync(dest, { recursive: true, force: true });
   try {
-    renameSync(tmp, join(cache, key));
+    renameSync(tmp, dest);
   } catch {
-    rmSync(tmp, { recursive: true, force: true }); // (another checkout stored the same key first)
+    rmSync(tmp, { recursive: true, force: true });
   }
+  const stored = entryModules(dest);
+  if (!stored) throw new Error(`engine-cache: the cache entry ${dest} isn't intact after storing it`);
   const entries = readdirSync(cache)
     .filter((n) => /^[0-9a-f]{64}$/.test(n))
     .map((n) => ({ n, t: statSync(join(cache, n)).mtimeMs }))
     .sort((a, b) => b.t - a.t);
-  for (const { n } of entries.slice(KEEP)) rmSync(join(cache, n), { recursive: true, force: true });
-  return { commit, modules };
+  for (const { n } of entries.slice(KEEP)) if (n !== key) rmSync(join(cache, n), { recursive: true, force: true });
+  return stored;
 }
 
 const fetchPinned = (root, env) =>

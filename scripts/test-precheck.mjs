@@ -76,6 +76,9 @@ try {
   ok(readFileSync(join(repo, "wasm", MODULES[0]), "utf8") === `${MODULES[0]} build 1\n`, "the cache's copy is the build's bytes");
   writeFileSync(join(cache, sourceKey(repo, F).key, MODULES[1]), "tampered\n");
   ok(ensure({ root: repo, env: F, ...stubs }) === "built" && calls.build === 2, "a cache entry whose bytes don't match its manifest is rebuilt, never installed");
+  ok(check({ root: repo, env: F }).ok, "after the rebuild, wasm/ is this tree's engine");
+  ok(MODULES.every((name) => readFileSync(join(repo, "wasm", name), "utf8") === `${name} build 2\n`), "the rebuild's bytes are installed, not the corrupt entry's");
+  ok(ensure({ root: repo, env: F, ...stubs }) === "cached" && calls.build === 2 && check({ root: repo, env: F }).ok, "the repaired entry is reused");
 
   // the source: engine edits, committed or not
   writeFileSync(join(repo, "engine", "web", "src", "lib.rs"), "pub fn f() { g() }\n");
