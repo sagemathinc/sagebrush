@@ -30,6 +30,16 @@
 //!   region is NOT counted (the documented limit; a test shows it).  The
 //!   metered kernels are single-threaded; a future parallel caller sums
 //!   per-thread counts at its join.
+//! - Process-wide caches are not charged: bigint's prime search (each
+//!   prime found once per process, about 1,400 modular products for a
+//!   62-bit prime) and the transforms' tables (an N-point table at most
+//!   16 N + 512 word operations, `sagebrush_bigint::ntt::table_work`).
+//!   Charging them would make a run's units depend on what ran earlier in
+//!   the process; their work is bounded by the distinct primes and table
+//!   sizes ever used.  The table builds poll, so a process's first run of
+//!   an operation can make more Stop checks than a later run with the same
+//!   units: a test that compares check counts runs the operation once
+//!   first (the Smith form's progress tests do).
 //! - Progress: at the kernels' existing Stop polls (every 2^16 units), the
 //!   outermost region's running difference is published to its
 //!   [`Progress`] cell, which another thread (the UI, the host) can read.
