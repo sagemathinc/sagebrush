@@ -252,7 +252,8 @@ sample data files that come with MATLAB.
 
 **Not yet:**
 - `classdef`, tables, `datetime` and `categorical`;
-- stiff ODE solvers (`ode15s`, `ode23s`);
+- ODE solvers other than `ode45` and `ode23`: `ode113`, `ode78`, `ode89`,
+  and the stiff `ode15s` and `ode23s`;
 - lighting in 3-D.
 
 Speed has not been benchmarked: vectorized code runs on Sagebrush's numpy,
