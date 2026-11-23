@@ -1309,7 +1309,8 @@ try {
 
     // TC1: a running cell: the × asks; a second click while it asks changes nothing; Cancel keeps the run and the tab
     const S = "/notes/tab-slow.ipynb";
-    await call("workspace.create", { path: S, content: docFor(S, [{ code: "import time\nfor i in range(600):\n    time.sleep(0.05)" }]), mode: "python" });
+    // (each run prints a token of its own first: a new run is told from the one before by it)
+    await call("workspace.create", { path: S, content: docFor(S, [{ code: "import time, random\nprint('run', random.random())\nfor i in range(600):\n    time.sleep(0.05)" }]), mode: "python" });
     await openNotebook(S);
     const sid = await shownId();
     await ev(`${cellJs(0)}.querySelector('.runb').click()`);
@@ -1337,13 +1338,18 @@ try {
     await openNotebook(S);
     await ev(`${cellJs(0)}.querySelector('.runb').click()`);
     await until(`/· running/.test(document.querySelector('#artifacts .tab.on')?.textContent ?? '')`, 120000);
+    // (the run's number: a run admitted after the Stop is a new one, with the next number)
+    const runNo = () => ev(`(${cellJs(0)}?.querySelector('.out')?.textContent ?? '').match(/run [0-9.]+/)?.[0] ?? ''`);
+    await until(`/run [0-9.]+/.test(${cellJs(0)}?.querySelector('.out')?.textContent ?? '')`, 30000).catch(() => {});
+    const n0 = await runNo();
     await x(sid);
     await until(`document.querySelector('#close-running').open`, 5000);
     // (Stop, then at once the cell run again: as an agent's run admitted after the answer)
     await ev(`(document.querySelector('#close-running').close('stop'), setTimeout(() => ${cellJs(0)}.querySelector('.runb').click(), 30), true)`);
     await until(`/started running again/.test(document.querySelector('#toast')?.textContent ?? '')`, 15000).catch(() => {});
-    const t3 = { toast: await ev(`document.querySelector('#toast')?.textContent ?? ''`), tab: await hasTab(sid), running: await running() };
-    ok(/started running again/.test(t3.toast) && t3.tab && t3.running && !(await closedNow()).includes(sid), "TC3: a run started after the person's Stop keeps the tab open, running, and says so", t3);
+    await until(`((${cellJs(0)}?.querySelector('.out')?.textContent ?? '').match(/run [0-9.]+/)?.[0] ?? '') !== ${JSON.stringify(n0)} && /run [0-9.]+/.test(${cellJs(0)}?.querySelector('.out')?.textContent ?? '')`, 15000).catch(() => {});
+    const t3 = { toast: await ev(`document.querySelector('#toast')?.textContent ?? ''`), tab: await hasTab(sid), running: await running(), n0, n1: await runNo() };
+    ok(/started running again/.test(t3.toast) && t3.tab && t3.running && !!t3.n0 && !!t3.n1 && t3.n1 !== t3.n0 && !(await closedNow()).includes(sid), "TC3: a run started after the person's Stop keeps the tab open, running, and says so", t3);
     // (then closed for good: Stop and close again, nothing restarting it)
     await x(sid);
     await until(`document.querySelector('#close-running').open`, 5000);

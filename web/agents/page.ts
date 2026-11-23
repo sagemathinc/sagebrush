@@ -688,6 +688,8 @@ async function closeTab(threadId: string, id: string) {
         if (current().id === threadId) { openArtifact = id; renderArtifacts(); }
         return;
       }
+      // (another host in its place meanwhile (the artifact opened again): that one stays, and so does its tab)
+      if (hosts.has(k) && hosts.get(k) !== h) return;
     }
     // (the keyboard's place, as it is now that the saving is done and before anything is taken away: on the tab shown
     //  next, or the chat's All artifacts once the pane closes, if it was in the pane; elsewhere, it stays put)
