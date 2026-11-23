@@ -189,7 +189,7 @@ try {
   await P.ev(`([...document.querySelector('dialog.memory-edit[open]').querySelectorAll('button')].find((b) => b.textContent === 'Save').click(), true)`);
   await P.until(`!document.querySelector('dialog.memory-edit[open]')`, 5000).catch(() => {});
   const e8 = sent(H, "memory.edit").at(-1);
-  ok(/couldn't be read/.test(msg8) && e8.decision_id !== m8.params.decision_id && H.memory.notes.get(nAlg.note).body === "Rings are commutative, with 1, always.", "V8: an Edit answer that can't be read keeps the dialog and says so; Save again is a new request, and saves", { msg8, first: m8.params.decision_id, again: e8.decision_id });
+  ok(/the note behind this is shown as it is now, and Save again sends only what still differs/.test(msg8) && e8.decision_id !== m8.params.decision_id && H.memory.notes.get(nAlg.note).body === "Rings are commutative, with 1, always.", "V8: an Edit answer that can't be read keeps the dialog and says so; Save again is a new request, and saves", { msg8, first: m8.params.decision_id, again: e8.decision_id });
   // (while a Save is out, Cancel and Escape wait; and an unreadable answer to an Edit that did go through: Save again
   //  finds nothing left to send, and closes)
   await P.until(`document.querySelector('#memory-view .memory-open:not([hidden])')?.dataset.note === ${JSON.stringify(nAlg.note)}`, 5000);
@@ -198,10 +198,10 @@ try {
   H.hold.add("memory.edit");
   await P.ev(`(() => { const d = document.querySelector('dialog.memory-edit[open]'); d.querySelector('[name=body]').value = 'Went through.'; [...d.querySelectorAll('button')].find((b) => b.textContent === 'Save').click(); return true; })()`);
   for (const t = Date.now(); !H.held.length && Date.now() - t < 5000; ) await sleep(50);
-  await P.ev(`([...document.querySelector('dialog.memory-edit[open]').querySelectorAll('button')].find((b) => b.textContent === 'Cancel').click(), true)`);
+  const cancelOff = await P.ev(`[...document.querySelector('dialog.memory-edit[open]').querySelectorAll('button')].find((b) => b.textContent === 'Cancel').disabled`);
   await P.ev(`(document.querySelector('dialog.memory-edit[open]').dispatchEvent(new Event('cancel', { cancelable: true })), true)`);
   await sleep(200);
-  ok(await P.ev(`!!document.querySelector('dialog.memory-edit[open]')`), "V8: while a Save is out, Cancel and Escape wait for its answer");
+  ok(cancelOff && await P.ev(`!!document.querySelector('dialog.memory-edit[open]')`), "V8: while a Save is out, Cancel is off and Escape waits for its answer");
   const m8b = H.held.splice(0)[0];
   H.hold.delete("memory.edit");
   const nb = H.memory.notes.get(nAlg.note);
@@ -212,6 +212,21 @@ try {
   await P.ev(`([...document.querySelector('dialog.memory-edit[open]').querySelectorAll('button')].find((b) => b.textContent === 'Save').click(), true)`);
   await P.until(`!document.querySelector('dialog.memory-edit[open]')`, 5000).catch(() => {});
   ok(sent(H, "memory.edit").length === edits8 && !(await P.ev(`!!document.querySelector('dialog.memory-edit[open]')`)), "V8: an unreadable answer to an Edit that went through: Save again has nothing left to send, and closes");
+  // (the dialog closed anyway while a Save was out (a browser may let a second Escape through): its refusal is still
+  //  said, and the note's buttons are free again)
+  await P.until(`document.querySelector('#memory-view .memory-open:not([hidden])')?.dataset.note === ${JSON.stringify(nAlg.note)}`, 5000);
+  await P.ev(`(document.querySelector('#memory-view [data-act=edit]').click(), true)`);
+  await P.until(`!!document.querySelector('dialog.memory-edit[open]')`, 5000);
+  H.hold.add("memory.edit");
+  await P.ev(`(() => { const d = document.querySelector('dialog.memory-edit[open]'); d.querySelector('[name=name]').value = 'plots'; [...d.querySelectorAll('button')].find((b) => b.textContent === 'Save').click(); return true; })()`);
+  for (const t = Date.now(); !H.held.length && Date.now() - t < 5000; ) await sleep(50);
+  await P.ev(`(document.querySelector('dialog.memory-edit[open]').close(), true)`);
+  const m8c = H.held.splice(0)[0];
+  H.hold.delete("memory.edit");
+  H.refuse(m8c.id, "conflict");
+  await P.until(`/already there/.test(document.querySelector('#toast')?.textContent ?? '')`, 5000).catch(() => {});
+  await P.until(`!!document.querySelector('#memory-view [data-act=delete]:not([disabled])')`, 5000).catch(() => {});
+  ok(/already there/.test(await toast(P)) && (await P.ev(`!!document.querySelector('#memory-view [data-act=delete]:not([disabled])')`)), "V8: a dialog closed while its Save was out: the refusal is still said, and the note's buttons are free again", await toast(P));
 
   // ======================================================================== V9: Delete
   // (first its answer can't be read: the id is kept, and Delete again sends the very same request)

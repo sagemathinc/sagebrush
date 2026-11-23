@@ -240,10 +240,10 @@ export function mountMemoryView(h: MemoryViewHost) {
     decisions.set(note, { key, id: decision_id, ...(kept?.renew ? { renew: kept.renew } : {}) });
     try {
       const r = MEMORY_RESULTS[method](await request(method, { note, ...params, decision_id }));
-      decisions.delete(note);
+      if (decisions.get(note)?.id === decision_id) decisions.delete(note); // (only its own: a newer one's stays)
       return r;
     } catch (e) {
-      if (!lost(e)) decisions.delete(note);
+      if (!lost(e) && decisions.get(note)?.id === decision_id) decisions.delete(note);
       throw e;
     }
   }
@@ -416,10 +416,18 @@ export function mountMemoryView(h: MemoryViewHost) {
         dlg.close();
         await after(n.note, r.note, VIEW_COPY.saved, at);
       } catch (e) {
-        // (a reset closed the dialog meanwhile: nothing else moves)
-        if (g !== gen || !dialogs.has(dlg)) return;
+        // (a reset meanwhile: nothing of it here)
+        if (g !== gen) return;
         busy.delete(n.note);
         const code = (e as { code?: string })?.code;
+        // (the dialog closed anyway (a browser may let Escape through): said as the note's other changes are, and the
+        //  note shown again if the person is still on it)
+        if (!dialogs.has(dlg)) {
+          const still = open && shownNote?.note === n.note;
+          if (unreadable(e)) { decisions.delete(n.note); h.toast(VIEW_COPY.unreadDecision, 8000); if (still) void openNote(n.note); else render(); }
+          else { refused(e); if (still && code === "stale") void openNote(n.note); else if (still && code === "not_found") toList(); else render(); }
+          return;
+        }
         if (code === "stale" || unreadable(e)) {
           // (changed at the agent, or an answer that couldn't be read (it may have gone through; asking again would get
           //  the same answer): the dialog stays with the person's text, and the note behind it is read again. A field
