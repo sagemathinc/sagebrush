@@ -2360,6 +2360,9 @@ def _ivec(arg, n, pos, grow):
         # (NaN fails f >= 1, and +-Inf is refused before the conversion to integers)
         if f.size and not np.all((f >= 1) & (f == np.floor(f)) & (f != np.inf)):
             raise _bad_index(pos)
+        # (past the end before the conversion to integers: v([1 1e19]) is MATLAB's out-of-range error, not int64's)
+        if f.size and not grow and np.max(f) > n:
+            raise _oob(pos, n)
         idx = f.astype(np.int64) - 1
     else:
         if f.size and np.any(f < 1):

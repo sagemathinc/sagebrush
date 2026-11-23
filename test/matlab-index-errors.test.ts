@@ -51,9 +51,11 @@ const ROWS: [string, string, string][] = [
   ["c0", "c = {1,2}; a = c{0};", "MATLAB:badsubscript|Array indices must be positive integers or logical values."],
   ["cnan", "c = {1,2}; a = c{NaN};", "MATLAB:badsubscript|Array indices must be positive integers or logical values."],
   ["cp0", "c = {1,2}; a = c(0);", "MATLAB:badsubscript|Array indices must be positive integers or logical values."],
+  ["vbig2", "a = v([1 1e19]);", "MATLAB:badsubscript|Index exceeds the number of array elements. Index must not exceed 3."],
+  ["mbig2", "a = m(1,[1 1e19]);", "MATLAB:badsubscript|Index in position 2 exceeds array bounds. Index must not exceed 2."],
 ];
 
-test("every bad or out-of-range subscript raises MATLAB's identifier and message (37 rows recorded from MATLAB R2026b)", () => {
+test("every bad or out-of-range subscript raises MATLAB's identifier and message (39 rows recorded from MATLAB R2026b)", () => {
   const dir = mkdtempSync(join(tmpdir(), "sb-index-errors-"));
   const lines = ROWS.map(([name, code]) =>
     `v = [1 2 3]; m = magic(2); try, ${code} fprintf('${name}|OK\\n'); catch err, fprintf('${name}|%s|%s\\n', err.identifier, err.message); end`);
