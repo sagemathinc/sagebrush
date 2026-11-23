@@ -5076,7 +5076,7 @@ def _ziv_checked(name):
         finally:
             _ziv_depth[0] -= 1
 
-    checked.__name__, checked.__doc__ = raw.__name__, raw.__doc__
+    checked.__name__, checked.__doc__, checked.__wrapped__ = raw.__name__, raw.__doc__, raw
     return checked
 
 
