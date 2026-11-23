@@ -2405,6 +2405,8 @@ def _itemsize(x):
         return 2
     if t is complex:
         return 16
+    if t is bool:
+        return 1
     return 8
 
 
@@ -2417,12 +2419,10 @@ def _refuse_huge(dims, itemsize):
 
 
 def _refuse_huge_growth(dims, cur, v):
-    """the 2^48-byte refusal for an assignment that grows cur: the result has cur's class (an int8 array stays int8
-    whatever is assigned into it), made complex by a complex right side"""
-    isz = _itemsize(cur) if type(cur) in (np.ndarray, Char) else _itemsize(v)
-    if type(cur) is np.ndarray and cur.dtype.kind == "f" and (type(v) is complex or (type(v) is np.ndarray and v.dtype.kind == "c")):
-        isz *= 2
-    _refuse_huge(dims, isz)
+    """the 2^48-byte refusal for an assignment that grows cur, sized by cur's class before any conversion, as MATLAB
+    R2026b sizes it (an int8 array stays int8 whatever is assigned into it; x(2^44) = 1i for a double x is 2^47
+    bytes, not refused here)"""
+    _refuse_huge(dims, _itemsize(cur) if type(cur) in (np.ndarray, Char) else _itemsize(v))
 
 
 def _del_oob(pos, n):
@@ -7064,8 +7064,9 @@ def repmat_(x, *args):
             raise _err("repmat: a result of %d elements is not supported in Sagebrush: at most %d for a %s array." % (total, _REPMAT_OBJECT_MAX, class_(x)))
     else:
         size = _arr(x).dtype.itemsize
-        # (MATLAB's own refusal first, at 2^48 bytes; below it, Sagebrush's bound)
-        _refuse_huge((total,), size)
+        # (MATLAB's own refusal first, at 2^48 bytes of MATLAB's storage: a char is 2 bytes there, whatever its
+        # backing array's dtype; below it, Sagebrush's bound on the real bytes)
+        _refuse_huge((total,), _itemsize(x))
         if total * size > _REPMAT_BYTES_MAX:
             raise _err("repmat: a result of %d elements (%d bytes) is not supported in Sagebrush: at most %d bytes." % (total, total * size, _REPMAT_BYTES_MAX))
     if 0 in r or 0 in d:

@@ -88,9 +88,12 @@ const ROWS: [string, string, string][] = [
   ["z45", "z = zeros(2^45,1);", "MATLAB:pmaxsize|Requested array exceeds the maximum possible variable size."],
   ["o2", "x = ones(2^24,2^24);", "MATLAB:pmaxsize|Requested array exceeds the maximum possible variable size."],
   ["cat", "a = zeros(2^20,1); b = repmat(a, 2^25, 1);", "MATLAB:pmaxsize|Requested array exceeds the maximum possible variable size."],
+  ["cs", "x = 1i; x(2^44) = 1;", "MATLAB:pmaxsize|Requested array exceeds the maximum possible variable size."],
+  ["rc47", "x = repmat('a', 2^47, 1);", "MATLAB:pmaxsize|Requested array exceeds the maximum possible variable size."],
+  ["rcx", "x = repmat(1i, 2^44, 1);", "MATLAB:pmaxsize|Requested array exceeds the maximum possible variable size."],
 ];
 
-test("every bad or out-of-range subscript raises MATLAB's identifier and message (70 rows: MATLAB R2026b's errors, and integer-class assignments MATLAB accepts)", () => {
+test("every bad or out-of-range subscript raises MATLAB's identifier and message (73 rows: MATLAB R2026b's errors, and integer-class assignments MATLAB accepts)", () => {
   const dir = mkdtempSync(join(tmpdir(), "sb-index-errors-"));
   const lines = ROWS.map(([name, code]) =>
     `v = [1 2 3]; m = magic(2); try, ${code} fprintf('${name}|OK\\n'); catch err, fprintf('${name}|%s|%s\\n', err.identifier, err.message); end`);
@@ -100,4 +103,18 @@ test("every bad or out-of-range subscript raises MATLAB's identifier and message
   const got = r.stdout.trim().split("\n");
   assert.equal(got.length, ROWS.length, r.stdout);
   ROWS.forEach(([name, , want], i) => assert.equal(got[i], `${name}|${want}`, name));
+});
+
+test("below 2^48 bytes in MATLAB's storage, no pmaxsize: a char counts 2 bytes, and growth is sized by the array's class", () => {
+  // (MATLAB R2026b gives its machine-specific array-size preference error for these, which names the machine's setting;
+  // Sagebrush leaves them to its own bounds, so only the identifier pmaxsize is ruled out)
+  const dir = mkdtempSync(join(tmpdir(), "sb-index-errors-"));
+  const cases = ["x = repmat('a', 2^45, 1);", "x = repmat('a', 2^47-1, 1);", "x = [1 2]; x(2^44) = 1i;", "x = single(1); x(2^45) = 1i;"];
+  writeFileSync(join(dir, "main.m"), cases.map((c, i) =>
+    `try, ${c} fprintf('${i}|OK\\n'); catch err, fprintf('${i}|%s\\n', err.identifier); end`).join("\n") + "\n");
+  const r = spawnSync(process.execPath, [cli, "--matlab", "main.m"], { cwd: dir, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const got = r.stdout.trim().split("\n");
+  assert.equal(got.length, cases.length, r.stdout);
+  got.forEach((line, i) => assert.notEqual(line, `${i}|MATLAB:pmaxsize`, cases[i]));
 });
