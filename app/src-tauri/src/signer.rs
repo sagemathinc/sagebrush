@@ -64,6 +64,12 @@ pub fn open(app: &tauri::AppHandle) -> Result<(), String> {
         let _ = w.set_focus();
         return Ok(());
     }
+    // (the native gate, immediately before the window is made: part 3's native signing commands check it again, each
+    //  time, and refuse native signing if it fails or has changed)
+    match crate::device_key::native_tier() {
+        Ok(()) => eprintln!("[signer] native tier: yes"),
+        Err(why) => eprintln!("[signer] native tier: no ({why})"),
+    }
     let c = control();
     let page = if c.as_deref() == Some("csp-off") { PAGE_NO_CSP } else { PAGE };
     let guard_off = c.as_deref() == Some("guard-off");

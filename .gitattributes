@@ -1,2 +1,4 @@
 # A curated package's overlay (scripts/pypi-import.mjs) is a unified diff: its blank context lines are a single space
 packages/pypi-*/overlay.patch -whitespace
+# The fleet vectors the app checks against are a byte-pinned copy (its sha256 is in src/fleet_sig_tests.rs): never converted
+app/src-tauri/tests/fleet-fixtures.json eol=lf

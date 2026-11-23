@@ -468,6 +468,9 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync +
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // (the self-test's tier probe: prints whether this build may enroll as native, then exits, before any window)
+    #[cfg(desktop)]
+    device_key::tier_probe();
     let args: Vec<String> = std::env::args()
         .skip(1)
         .filter(|a| !a.starts_with('-'))
