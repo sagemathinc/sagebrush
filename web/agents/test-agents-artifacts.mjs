@@ -1346,10 +1346,10 @@ try {
     await until(`document.querySelector('#close-running').open`, 5000);
     // (Stop, then at once the cell run again: as an agent's run admitted after the answer)
     await ev(`(document.querySelector('#close-running').close('stop'), setTimeout(() => ${cellJs(0)}.querySelector('.runb').click(), 30), true)`);
-    await until(`/started running again/.test(document.querySelector('#toast')?.textContent ?? '')`, 15000).catch(() => {});
+    await until(`/is still running/.test(document.querySelector('#toast')?.textContent ?? '')`, 15000).catch(() => {});
     await until(`((${cellJs(0)}?.querySelector('.out')?.textContent ?? '').match(/run [0-9.]+/)?.[0] ?? '') !== ${JSON.stringify(n0)} && /run [0-9.]+/.test(${cellJs(0)}?.querySelector('.out')?.textContent ?? '')`, 15000).catch(() => {});
     const t3 = { toast: await ev(`document.querySelector('#toast')?.textContent ?? ''`), tab: await hasTab(sid), running: await running(), n0, n1: await runNo() };
-    ok(/started running again/.test(t3.toast) && t3.tab && t3.running && !!t3.n0 && !!t3.n1 && t3.n1 !== t3.n0 && !(await closedNow()).includes(sid), "TC3: a run started after the person's Stop keeps the tab open, running, and says so", t3);
+    ok(/is still running/.test(t3.toast) && t3.tab && t3.running && !!t3.n0 && !!t3.n1 && t3.n1 !== t3.n0 && !(await closedNow()).includes(sid), "TC3: a run started after the person's Stop keeps the tab open, running, and says so", t3);
     // (then closed for good: Stop and close again, nothing restarting it)
     await x(sid);
     await until(`document.querySelector('#close-running').open`, 5000);

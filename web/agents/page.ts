@@ -652,7 +652,7 @@ function reopenTab(t: Thread, id: string) {
 // (a second click while one close asks or saves changes nothing: the host's release is shared, each step checks the
 //  host is still this one, and a tab closed twice is closed once)
 const STOP_WAIT_MS = 5000;
-const TAB_COPY = { stillRunning: "A cell started running again in this notebook, so its tab stays open." } as const;
+const TAB_COPY = { stillRunning: "A cell is still running in this notebook, so its tab stays open." } as const;
 async function closeTab(threadId: string, id: string) {
   if (current().id !== threadId) return;
   const k = hostKey(threadId, id);
@@ -660,8 +660,8 @@ async function closeTab(threadId: string, id: string) {
     const h = hosts.get(k);
     if (h?.nb?.isRunning()) {
       if (!(await mayStopRunning([[k, h]]))) return;
-      // (Stop and close: the interrupt lands, at most a few seconds; a run still going after it (one started after
-      //  the person's answer, an agent's) keeps the tab open, said: it isn't stopped or closed without being asked)
+      // (Stop and close: the interrupt lands, at most a few seconds; a cell still running after that (one started after
+      //  the person's answer, say an agent's, or one slow to stop) keeps the tab open, said: nothing is closed under it)
       for (const t = Date.now(); h.nb?.isRunning() && Date.now() - t < STOP_WAIT_MS; ) await new Promise((r) => setTimeout(r, 50));
       // (and a moment more: the notebook counts a cell queued or running as it is drawn, a beat after, so a run asked
       //  for just after the stop is counted before it is judged)
