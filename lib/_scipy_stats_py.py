@@ -536,6 +536,11 @@ class BootstrapResult:
             self.confidence_interval, self.bootstrap_distribution, self.standard_error)
 
 
+class AxisError(ValueError, IndexError):
+    """NumPy's numpy.exceptions.AxisError, which SciPy raises for an axis a sample lacks (a ValueError and an
+    IndexError, as NumPy's; Sagebrush's numpy has no numpy.exceptions yet)"""
+
+
 class DegenerateDataWarning(RuntimeWarning):
     """SciPy's warning for data a method can't use (scipy.stats.DegenerateDataWarning)"""
 
@@ -602,6 +607,11 @@ def bootstrap(data, statistic, *, n_resamples=9999, batch=None, vectorized=None,
     if n_samples == 0:
         raise ValueError("`data` must contain at least one sample.")
     samples = [np.asarray(s) for s in data]
+    for s in samples:
+        if not -s.ndim <= axis_int < s.ndim:
+            # (SciPy's: NumPy's AxisError, from a sample without that axis, a number among them, as when an
+            #  array is passed where a tuple of samples belongs)
+            raise AxisError("`axis` is out of bounds for array of dimension %d" % s.ndim)
     if any(s.dtype.kind not in "biuf" for s in samples):
         samples = [np.asarray(s, dtype=float) for s in samples]
     # (broadcast all but the axis, as SciPy's _broadcast_arrays with axis)

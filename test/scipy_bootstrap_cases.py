@@ -30,8 +30,10 @@ CASES = [
     ("cl-90-less", "out = res(stats.bootstrap((X,), np.mean, n_resamples=499, rng=10, confidence_level=0.9, alternative='less'))"),
     ("greater-percentile", "out = res(stats.bootstrap((X,), np.mean, n_resamples=499, rng=11, alternative='greater', method='percentile'))"),
     ("batch", "out = res(stats.bootstrap((X,), np.mean, n_resamples=500, rng=12, batch=128))"),
-    ("axis-2d", "M = np.vstack([X, Y]); out = res(stats.bootstrap((M,), np.mean, n_resamples=199, rng=13, axis=1))"),
-    ("axis-0-columns", "M = np.column_stack([X, Y]); out = res(stats.bootstrap((M,), np.mean, n_resamples=199, rng=14, axis=0))"),
+    # (2-D data: the whole distribution recorded, each value compared, since its hash may differ, NumPy summing a
+    #  strided resample in another order)
+    ("axis-2d", "M = np.vstack([X, Y]); r = stats.bootstrap((M,), np.mean, n_resamples=199, rng=13, axis=1); out = res(r) + [np.asarray(r.bootstrap_distribution, dtype=float).ravel().tolist()]"),
+    ("axis-0-columns", "M = np.column_stack([X, Y]); r = stats.bootstrap((M,), np.mean, n_resamples=199, rng=14, axis=0); out = res(r) + [np.asarray(r.bootstrap_distribution, dtype=float).ravel().tolist()]"),
     ("reuse-result", "r = stats.bootstrap((X,), np.mean, n_resamples=200, rng=15); out = res(stats.bootstrap((X,), np.mean, n_resamples=100, rng=16, bootstrap_result=r))"),
     ("reuse-zero-new", "r = stats.bootstrap((X,), np.mean, n_resamples=200, rng=17); out = res(stats.bootstrap((X,), np.mean, n_resamples=0, rng=18, bootstrap_result=r, method='percentile', confidence_level=0.8))"),
     ("list-data", "out = res(stats.bootstrap(([1, 2, 3, 4, 6, 9],), np.mean, n_resamples=199, rng=19))"),
@@ -42,6 +44,7 @@ CASES = [
     ("err-alternative", "try:\n    stats.bootstrap((X,), np.mean, rng=0, alternative='up')\nexcept ValueError as e:\n    m = str(e)\n    out = [m[:m.index('{')], sorted(m[m.index('{') + 1:-1].split(', '))]"),
     ("err-nresamples", "stats.bootstrap((X,), np.mean, rng=0, n_resamples=-1); out = 0"),
     ("err-paired-len", "stats.bootstrap((X, Y[:5]), lambda a, b, axis=-1: np.mean(a, axis=axis), rng=0, paired=True); out = 0"),
+    ("err-array-not-tuple", "try:\n    stats.bootstrap(X, np.mean, rng=0)\nexcept ValueError as e:\n    out = [type(e).__name__, isinstance(e, IndexError), str(e)]"),
     ("err-zero", "stats.bootstrap((X,), np.mean, rng=0, n_resamples=0); out = 0"),
     # (degenerate: NumPy's own 0/0 RuntimeWarning left out, SciPy's warning kept)
     ("degenerate", "import warnings\nwith warnings.catch_warnings(record=True) as w:\n    warnings.simplefilter('always')\n    r = stats.bootstrap((np.ones(6),), np.mean, n_resamples=50, rng=21)\nw = [x for x in w if type(x.message).__name__ != 'RuntimeWarning']\nout = res(r) + [[type(x.message).__name__ for x in w], [str(x.message)[:60] for x in w]]"),
