@@ -679,13 +679,45 @@ function mimeValue(v: any): string | null {
   if (v instanceof Obj.PyBytes) return base64(v.a.subarray(0, v.n));
   return F.str(v);
 }
+// (a display's metadata, as Jupyter's: a PNG's width and height to show it at, say; JSON, through Python's json)
+function metadataOf(md: any): Record<string, unknown> | null {
+  if (!(md instanceof Obj.PyDict) || !O.toArray(md).length) return null;
+  try {
+    return JSON.parse(F.str(Obj.callObj(Obj.getattr(M.importModule("json"), "dumps"), [md])));
+  } catch {
+    return null;
+  }
+}
+/** The bundle's metadata, keyed by MIME type (Jupyter's display metadata), when it has any: a property of the bundle
+ * that isn't one of its keys, so a host that shows only the data sees the bundle as before. */
+export function bundleMetadata(b: Record<string, string>): Record<string, unknown> | undefined {
+  return (b as any)[META];
+}
+const META = Symbol("metadata");
+/** The line a figure left to be said under it (lib/_graphics.py InlineFigure: shown as a PNG, and why), written once
+ * its display is: a host calls this after it shows a value's bundle. */
+export function sayNote(): void {
+  const n = B.builtins.__sagebrush_note__;
+  if (n === undefined || n === null) return;
+  delete B.builtins.__sagebrush_note__;
+  B.stdout.write(F.str(n) + "\n");
+  B.stdout.flush();
+}
 export function mimeBundle(v: any): Record<string, string> | null {
   if (v === null || Obj.isType(v)) return null;
+  // (a line left by a figure whose display didn't happen is dropped: only this bundle's own is said, sayNote)
+  delete B.builtins.__sagebrush_note__;
   const out: Record<string, string> = {};
+  const meta: Record<string, unknown> = {};
   const mb = Obj.getattr(v, "_repr_mimebundle_", null);
   if (mb !== null) {
     let r = Obj.callObj(mb, []);
-    if (r !== null && !(r instanceof Obj.PyDict)) r = O.toArray(r)[0]; // (data, metadata)
+    if (r !== null && !(r instanceof Obj.PyDict)) {
+      // (data, metadata), the metadata keyed by MIME type
+      const [data, md] = O.toArray(r);
+      Object.assign(meta, metadataOf(md) ?? {});
+      r = data;
+    }
     if (r instanceof Obj.PyDict) {
       for (const k of O.toArray(r)) {
         const s = mimeValue(O.getitem(r, k));
@@ -697,10 +729,21 @@ export function mimeBundle(v: any): Record<string, string> | null {
     if (mime in out) continue;
     const f = Obj.getattr(v, method, null);
     if (f === null) continue;
-    const s = mimeValue(Obj.callObj(f, []));
+    let r = Obj.callObj(f, []);
+    // (IPython's (data, metadata) from a _repr_*_ method: the metadata is this MIME type's)
+    if (r !== null && Obj.typeOf(r) === T.tuple && O.toArray(r).length === 2) {
+      const [data, md] = O.toArray(r);
+      const m = metadataOf(md);
+      if (m) meta[mime] = m;
+      r = data;
+    }
+    const s = mimeValue(r);
     if (s !== null) out[mime] = s;
   }
-  return Object.keys(out).length ? out : null;
+  if (!Object.keys(out).length) return null;
+  for (const k of Object.keys(meta)) if (!(k in out)) delete meta[k];
+  if (Object.keys(meta).length) (out as any)[META] = meta;
+  return out;
 }
 // Show v richly if the host can, else print its repr; true if shown richly.
 // A Python function's parameters as the compiler bound them, (args,
@@ -737,7 +780,10 @@ function displayValue(v: any): boolean {
     if (b !== null) {
       b["text/plain"] ??= displayText(v);
       B.stdout.flush();
-      if (host.display(b)) return true;
+      if (host.display(b)) {
+        sayNote();
+        return true;
+      }
     }
   }
   B.stdout.write(displayText(v) + "\n");
@@ -757,8 +803,9 @@ B.builtins.__pyjs_host__ = Obj.builtin((op: any, ...args: any[]) => {
 // page: R.host.input(prompt) gives the line typed, without its newline; null
 // at the end of input; {interrupted: true} if a Stop came while it waited);
 // the prompt and the line are then written as output, as Jupyter shows them.
-// With no such host: the prompt written, then EOFError, as CPython's with no
-// stdin.
+// With no such host: the prompt written, then a line of stdin when it is a
+// pipe or a file (R.stdinInput), not echoed, as CPython's with a redirected
+// stdin; else, or at its end, EOFError, as CPython's with no stdin.
 B.builtins.input = Obj.builtin((...args: any[]) => {
   if (args.length > 1) raise(T.TypeError, `input expected at most 1 argument, got ${args.length}`);
   const prompt = args.length ? String(F.str(args[0])) : "";
@@ -766,7 +813,9 @@ B.builtins.input = Obj.builtin((...args: any[]) => {
   if (typeof ask !== "function") {
     if (prompt) B.stdout.write(prompt);
     B.stdout.flush();
-    return raise(T.EOFError, "EOF when reading a line");
+    const line = R.stdinInput === true ? B.stdinReadline() : "";
+    if (line === "") return raise(T.EOFError, "EOF when reading a line");
+    return line.endsWith("\n") ? line.slice(0, -1) : line;
   }
   B.stdout.flush();
   const line = ask(prompt);
@@ -1412,6 +1461,8 @@ export const R: any = {
   annotIn: (s: any, i: number) => O.truth(O.contains(s, i)),
   /** Set by an embedding (the browser worker): display(bundle) -> shown?, and other hooks. */
   host: null,
+  /** Set by an embedding whose program's stdin is a pipe or a file (the CLI's): input() reads its lines. */
+  stdinInput: false,
   INTR,
   interrupted,
   // live progress (design-estimates-progress r4 §6): R.progress.snapshot()
@@ -1518,6 +1569,7 @@ export const R: any = {
   importStar: M.importStar,
   resolveRelative: M.resolveRelative,
   sysModules: M.sysModules,
+  IMPORT_NAME: M.IMPORT_NAME,
   importEpoch: M.importEpoch,
   loader: M.loader,
   newModule: Ty.newModule,

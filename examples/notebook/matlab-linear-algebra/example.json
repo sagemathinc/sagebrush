@@ -1,0 +1,16 @@
+{
+ "title": "Linear algebra (MATLAB)",
+ "summary": "Solving systems, factorizations, eigenmodes of a chain of springs, least squares and low-rank approximation by the SVD.",
+ "tags": [
+  "linear algebra",
+  "plots"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "matlab",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

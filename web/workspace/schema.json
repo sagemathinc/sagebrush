@@ -41,7 +41,7 @@
       }
     },
     "workspace.stat": {
-      "description": "One entry, or null.",
+      "description": "One entry, or null. An entry with a page of its own (a notebook, a board, a .tex or code file) has url: its address on the person's Sagebrush site, a link to give them.",
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",

@@ -1,0 +1,45 @@
+=== python-mode vs CPython: x = (1,
+    x = (1,
+        ^
+SyntaxError: '(' was never closed
+sb rc=1
+    x = (1,
+        ^
+SyntaxError: '(' was never closed
+cpy rc=1
+=== python-mode vs CPython: 1/0
+  File "<string>", line 1, in <module>
+    1/0
+ZeroDivisionError: division by zero
+sb rc=1
+    1/0
+    ~^~
+ZeroDivisionError: division by zero
+cpy rc=1
+=== python-mode vs CPython: import nosuchmod
+  File "<string>", line 1, in <module>
+    import nosuchmod
+ModuleNotFoundError: No module named 'nosuchmod'
+sb rc=1
+  File "<string>", line 1, in <module>
+    import nosuchmod
+ModuleNotFoundError: No module named 'nosuchmod'
+cpy rc=1
+=== python-mode vs CPython: def f(:
+    def f(:
+          ^
+SyntaxError: invalid syntax
+sb rc=1
+    def f(:
+          ^
+SyntaxError: invalid syntax
+cpy rc=1
+=== python-mode vs CPython: print(1
+    print(1
+         ^
+SyntaxError: '(' was never closed
+sb rc=1
+    print(1
+         ^
+SyntaxError: '(' was never closed
+cpy rc=1

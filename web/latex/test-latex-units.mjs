@@ -6,6 +6,7 @@
 import { openBytes, encodeText, EDIT_MAX } from "./save.ts";
 import { imageCandidates, graphicsPathOf, notFoundWhy, relativePath, sniffImage, admitImageBytes, IMAGE_BOUNDS } from "./images.ts";
 import { splitChunk, PIECE_MAX, CHUNK_MAX, bytes, weight, tooLargeProblem } from "./split.ts";
+import { watchdog, WATCHDOG_MS, LATE_MS } from "./watchdog.ts";
 import { autoClose } from "./envclose.ts";
 import { tokenizeLine } from "./highlight.ts";
 import { latexOn, latexHereFor, desktopApp, APP_NO_RUN } from "./boot.ts";
@@ -14,7 +15,7 @@ import { readFileSync } from "node:fs";
 import { RenderGate } from "./gate.ts";
 import { boxClass } from "./boxclass.mjs";
 import { previewHost } from "./preview-host.mjs";
-import { EXAMPLES } from "./examples.ts";
+import { EXAMPLES } from "../../scripts/latex-examples.mjs";
 import { makeAnchor, locate } from "./comments.ts";
 import { Engine, withBeamer, once, declaresBeamer } from "./engine/pipeline.mjs";
 import { coldRun, incremental } from "./engine/incremental-demo.mjs";
@@ -139,6 +140,37 @@ check("split-over-2MiB-placeholder", (() => { const t = splitChunk('<div class="
   check("split-weight", weight('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') === bytes('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') - "data:abc".length && weight("src=\"data:zz\" text") === bytes("src=\"data:zz\" text"), null);
 }
 check("split-small-unchanged", splitChunk('<div class="p">hi</div>')[0] === '<div class="p">hi</div>', null);
+
+// ---- watchdog.ts (issue 619): the preview's watchdog judges the worker by the page's time; a timer the page's own
+// blocking made late waits once more (LATE_MS) for a reply already queued, then the worker is hung. A fake clock: `run`
+// moves time on, firing what is due; `block` moves it on with nothing run (the main thread blocked), then fires
+{
+  const fake = () => { let t = 0, n = 0; const due = new Map();
+    const c = { now: () => t, set: (f, ms) => { const h = ++n; due.set(h, { at: t + ms, f }); return h; }, clear: (h) => due.delete(h) };
+    const fire = () => { for (;;) { const next = [...due.entries()].filter(([, d]) => d.at <= t).sort((a, b) => a[1].at - b[1].at)[0]; if (!next) return; due.delete(next[0]); next[1].f(); } };
+    return { c, run: (ms) => { const end = t + ms; for (;;) { const next = [...due.values()].filter((d) => d.at <= end).sort((a, b) => a.at - b.at)[0]; if (!next) { t = end; return; } t = next.at; fire(); } }, block: (ms) => { t += ms; fire(); }, pending: () => due.size };
+  };
+  // (on time: hung at WATCHDOG_MS, not before)
+  { const k = fake(), d = watchdog({ clock: k.c }); let hung = 0; d.start(() => hung++);
+    k.run(WATCHDOG_MS - 1); const before = hung; k.run(1);
+    check("watchdog-on-time-hung", before === 0 && hung === 1 && k.pending() === 0, { before, hung }); }
+  // (the page blocked past the due time: not hung then; a reply in the grace stops it, never hung)
+  { const k = fake(), d = watchdog({ clock: k.c }); let hung = 0; d.start(() => hung++);
+    k.block(WATCHDOG_MS + 5000); const at = hung; d.stop(); k.run(10 * LATE_MS);
+    check("watchdog-late-waits-for-a-queued-reply", at === 0 && hung === 0 && k.pending() === 0, { at, hung }); }
+  // (late, and no reply in the grace: hung after it, once)
+  { const k = fake(), d = watchdog({ clock: k.c }); let hung = 0; d.start(() => hung++);
+    k.block(WATCHDOG_MS + 5000); const at = hung; k.run(LATE_MS);
+    check("watchdog-late-then-hung", at === 0 && hung === 1 && k.pending() === 0, { at, hung }); }
+  // (one grace only: blocked again past it, hung)
+  { const k = fake(), d = watchdog({ clock: k.c }); let hung = 0; d.start(() => hung++);
+    k.block(WATCHDOG_MS + 5000); k.block(LATE_MS + 5000);
+    check("watchdog-one-grace-only", hung === 1 && k.pending() === 0, { hung }); }
+  // (a little late, within LATE_MS: on time; stop() and a new start: only the new request's)
+  { const k = fake(), d = watchdog({ clock: k.c }); let a = 0, b = 0; d.start(() => a++); k.block(WATCHDOG_MS + LATE_MS - 1);
+    d.start(() => b++); d.stop(); k.run(2 * WATCHDOG_MS);
+    check("watchdog-slightly-late-hung-and-stop", a === 1 && b === 0 && k.pending() === 0, { a, b }); }
+}
 
 // ---- highlight.ts: the tokenizer's states
 const run = (line, st) => { const g = tokenizeLine(line, st); const toks = []; for (;;) { const r = g.next(); if (r.done) return { toks, end: r.value }; toks.push(r.value); } };
@@ -855,14 +887,14 @@ check("off-cli-and-phone", !latexHereFor("127.0.0.1", false, SITE) && !latexHere
 check("site-unchanged", latexHereFor("sagebrush.space", false, SITE) && latexHereFor("dev.sagebrush.space", false, SITE) && !latexHereFor("sagebrush.space.evil", false, SITE), null);
 check("app-run-why", /desktop app/.test(APP_NO_RUN) && /sagebrush\.space/.test(APP_NO_RUN), APP_NO_RUN);
 // (the app self-test's LaTeX checks, web/notebook/selftest-latex.js: none outside the desktop app, so a phone's report has
-// none; in it, its three rows, named as the desktop report's judge requires them, app/selftest/android-report.py DESKTOP)
+// none; in it, its four rows, named as the desktop report's judge requires them, app/selftest/android-report.py DESKTOP)
 const judgeNames = [...(/DESKTOP = \[([\s\S]*?)\]/.exec(readFileSync(new URL("../../app/selftest/android-report.py", import.meta.url), "utf8"))?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]);
 check("selftest-latex-phone-none", (await latexChecks({ desktop: false, on: true, menu: null, ws: null })).length === 0 && (await latexChecks({ on: true, menu: null, ws: null })).length === 0, null);
 const deskRows = await latexChecks({ desktop: true, on: false, menu: null, ws: null });
-check("selftest-latex-desktop-rows", deskRows.length === 3 && deskRows.every((r, i) => r[0] === LATEX_CHECKS[i] && r[1] === false), deskRows);
-check("selftest-latex-names-are-the-judge's", judgeNames.length === 3 && JSON.stringify(judgeNames) === JSON.stringify(LATEX_CHECKS), judgeNames);
+check("selftest-latex-desktop-rows", deskRows.length === 4 && deskRows.every((r, i) => r[0] === LATEX_CHECKS[i] && r[1] === false), deskRows);
+check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.stringify(judgeNames) === JSON.stringify(LATEX_CHECKS), judgeNames);
 
-// ---- the examples (examples.ts; William, Oct 29: "good tests to illustrate the breadth of editor support"): each one
+// ---- the examples (the corpus's, scripts/latex-examples.mjs; William, Oct 29: "good tests to illustrate the breadth of editor support"): each one
 // rendered by the pipeline the page uses, and its result recorded (one line each): it renders (outcome ok), with no
 // command unknown to the preview and no "not finished" note, its key text shown, and what it can't do said in the
 // document itself (sagetex: its code items found, not run; pythontex: the "not run" chip; tikz: the placeholder);
@@ -1063,6 +1095,23 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 3 && JSON.st
   // (and every scratch folder of the CLI goes through it: no direct rmSync of the profile or a run's folder left)
   const src = (await import("node:fs")).readFileSync(new URL("../../src/latex-cli.ts", import.meta.url), "utf8");
   check("cli-remove-temp-used", !/rmSync\((tmp|profile)\b/.test(src) && (src.match(/removeTemp\((tmp|profile)\)/g) || []).length === 3, src.match(/rmSync\([a-z]+/g));
+}
+
+// ---- SageTeX's code arguments: read from the file, the code is the source between the braces (a backslash, a ~ or a
+// run of spaces in it is Sage's), its line ends joined with one space; from a macro, the inline subset's rules still
+{
+  const sd = (b, pre = "") => "\\documentclass{article}\n\\usepackage{sagetex}\n" + pre + "\\begin{document}\n" + b + "\n\\end{document}\n";
+  const its = (src) => new Engine().update(src).sageItems.map((x) => (x.err ? { mode: x.mode, err: x.err, name: x.name } : { mode: x.mode, code: x.code }));
+  const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  // (an agent's document, as it wrote it: a label with \sin in a Python string, and the call over three lines)
+  const plot = its(sd("$f'(x) = \\sage{diff(sin(x^2), x)}$.\n\\begin{center}\n\\sageplot[width=0.9\\textwidth]{plot(sin(x^2), (x,\n-2*pi, 2*pi), axes_labels=['$x$', '$\\sin(x^2)$'],\n  gridlines=True)}\n\\end{center}"));
+  check("sagetex-source-args-plot", eq(plot, [{ mode: "sage", code: "diff(sin(x^2), x)" }, { mode: "plot", code: "plot(sin(x^2), (x, -2*pi, 2*pi), axes_labels=['$x$', '$\\sin(x^2)$'], gridlines=True)" }]), plot);
+  const kinds = its(sd("$\\sage{print('a\\nb')}$ $\\sage{'a  b'}$ $\\sage{~5}$ $\\sage{1 +\n   2}$ \\sage{\\left}"));
+  check("sagetex-source-args-escapes-spaces-tilde-lines", eq(kinds.map((x) => x.code), ["print('a\\nb')", "'a  b'", "~5", "1 + 2", "\\left"]), kinds);
+  // (where the text and TeX's reading could differ: a % comment, and an argument a macro made, keep the subset's rules)
+  const pct = its(sd("$\\sage{7 % 3}$\n\n$\\sage{1}$"));
+  const mac = its(sd("$\\x$", "\\newcommand{\\x}{\\sage{1+\\foo}}\n"));
+  check("sagetex-source-args-comment-and-macro-keep-the-subset", pct[0].err === "par" && pct[1].code === "1" && eq(mac, [{ mode: "sage", err: "cs", name: "foo" }]), { pct, mac });
 }
 
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);

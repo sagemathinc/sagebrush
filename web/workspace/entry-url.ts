@@ -2,11 +2,11 @@
 // notebook page (/?nb=<ref>), a board on the board page (/board/?doc=local:<ref>), a .tex file in the LaTeX editor
 // (/?tex=<fid>), a code or text file on its page (/?code=<fid>, web/code/url.ts).  Null for an entry with no page of its
 // own (a folder, a data file), and for one without the id its page needs.
-import type { Entry } from "./api";
 import { codeUrl } from "../code/url";
 import { langOf } from "../code/langs";
 
-export function entryUrl(e: Pick<Entry, "kind" | "path" | "ref" | "fid">): string | null {
+// (the fields it reads, not api.ts's Entry: the agent pairing (agent-pair.ts) uses it without the workspace's module)
+export function entryUrl(e: { kind: string; path: string; ref?: string | null; fid?: string | null }): string | null {
   if (e.kind === "notebook") return e.ref ? "/?nb=" + encodeURIComponent(e.ref) : null;
   if (e.kind === "board") return e.ref ? "/board/?doc=local:" + encodeURIComponent(e.ref) : null;
   if (e.kind !== "file" || !e.fid) return null;

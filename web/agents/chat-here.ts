@@ -18,6 +18,10 @@ export const RUNNER_COPY = {
 };
 /** How long a computer's agent has to say it's ready (agent.ready) after the leg's hello: its process starting. */
 export const READY_MS = 30_000;
+/** A computer whose runner isn't connected yet (its leg unreachable): Chat here waits for it this long, trying again
+ * every RETRY_MS, as a runner just started takes a few seconds to reach the relay. */
+export const WAIT_MS = 60_000;
+export const RETRY_MS = 2_000;
 
 type Runner = { remote_id: string; name: string };
 type End = { kind: string; why: string };
@@ -26,6 +30,8 @@ export type ChatHereHost = {
   list(): Promise<{ available: boolean; runners: Runner[] }>;
   open(r: Runner): Promise<{ link: AgentLink; ended: End | null }>;
   onConnecting(r: Runner): void;
+  /** its runner isn't connected yet: waiting for it */
+  onWaiting(r: Runner): void;
   onFailed(r: Runner, e: End): void;
 };
 /** What it needs of the page's pairing (agent-ui.ts's mountAgentPairing). */
@@ -48,8 +54,16 @@ export function chatHere(host: ChatHereHost, ui: () => Ui | null) {
     const mine = ++attempt;
     host.onConnecting(r);
     let opened: { link: AgentLink; ended: End | null };
-    try { opened = await host.open(r); } catch (e) { if (mine === attempt) host.onFailed(r, { kind: "lost", why: String((e as Error)?.message ?? e) }); return; }
-    if (mine !== attempt || u.live()) { opened.link.close(); return; }
+    const deadline = Date.now() + WAIT_MS;
+    for (;;) {
+      try { opened = await host.open(r); } catch (e) { if (mine === attempt) host.onFailed(r, { kind: "lost", why: String((e as Error)?.message ?? e) }); return; }
+      if (mine !== attempt || u.live()) { opened.link.close(); return; }
+      // (its runner not connected yet: wait for it, as a person who just started it clicks at once)
+      if (opened.ended?.kind !== "unreachable" || Date.now() + RETRY_MS > deadline) break;
+      host.onWaiting(r);
+      await new Promise((res) => setTimeout(res, RETRY_MS));
+      if (mine !== attempt || u.live()) return;
+    }
     if (opened.ended) return host.onFailed(r, opened.ended);
     const p = u.adopt(opened.link, r.name);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -80,6 +94,8 @@ export function chatHere(host: ChatHereHost, ui: () => Ui | null) {
         sec.append(el("div", { className: "runner" }, el("span", { textContent: r.name }), b));
       }
     }, (e) => {
+      // (a site without computers, a local one: no section at all, nothing a person there could do about it)
+      if ((e as { absent?: boolean })?.absent) return void sec.remove();
       status.textContent = RUNNER_COPY.failed(String((e as Error)?.message ?? e));
       // (signed out: the site's own sign-in, back to this page after)
       if ((e as { signedOut?: boolean })?.signedOut) sec.append(el("a", { className: "sign-in", href: `/auth/login?return=${encodeURIComponent(location.pathname + location.search)}`, textContent: RUNNER_COPY.signIn }));

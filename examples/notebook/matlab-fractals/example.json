@@ -1,0 +1,16 @@
+{
+ "title": "Fractals (MATLAB)",
+ "summary": "The Mandelbrot and Julia sets by escape time, the Barnsley fern, and the logistic map's road to chaos.",
+ "tags": [
+  "plots",
+  "programming"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "matlab",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

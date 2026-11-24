@@ -6,7 +6,9 @@
 // current worker with older precompiled library code).
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
+// (a path relative to a folder, with "/" on every system: the embedded library's keys, the build id's input)
+const rel = (from, to) => relative(from, to).split(sep).join("/");
 
 /** The library's files, by path relative to lib/ (no __pycache__). */
 export function libFiles(root) {
@@ -16,7 +18,7 @@ export function libFiles(root) {
       const p = join(dir, f);
       if (statSync(p).isDirectory()) {
         if (f !== "__pycache__") walk(p);
-      } else if (f.endsWith(".py")) lib[relative(join(root, "lib"), p)] = readFileSync(p, "utf8");
+      } else if (f.endsWith(".py")) lib[rel(join(root, "lib"), p)] = readFileSync(p, "utf8");
     }
   };
   walk(join(root, "lib"));
@@ -29,7 +31,7 @@ export function buildId(root, lib = libFiles(root)) {
     for (const f of readdirSync(dir).sort()) {
       const p = join(dir, f);
       if (statSync(p).isDirectory()) walkSrc(p);
-      else if (f.endsWith(".ts")) hash.update(relative(root, p) + "\0" + readFileSync(p, "utf8") + "\0");
+      else if (f.endsWith(".ts")) hash.update(rel(root, p) + "\0" + readFileSync(p, "utf8") + "\0");
     }
   };
   walkSrc(join(root, "src"));
