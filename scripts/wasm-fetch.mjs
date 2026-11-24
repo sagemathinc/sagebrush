@@ -1,4 +1,4 @@
-// Get the four WebAssembly modules that wasm/pins.json names (design/wasm-artifacts.md, section 6).
+// Get the five WebAssembly modules that wasm/pins.json names (design/wasm-artifacts.md, section 6).
 // For each module: keep wasm/<module> if it already matches its pin; otherwise copy it from the
 // user cache, or download it from https://get.sagebrush.space/wasm/sha256/<sha256>.wasm.  Every
 // byte is checked (exact length, then sha256) before anything else sees it.

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // size-base's fail-closed acquisition of a base commit's WebAssembly modules.  Published pins are fetched normally.
-// Only when every fetch failure is an HTTP 404 is the base commit built from its own source; all four resulting
+// Only when every fetch failure is an HTTP 404 is the base commit built from its own source; all five resulting
 // modules must then match that base's pins exactly.  Network errors, corrupt objects and build/pin mismatches fail.
 // On a track (scripts/pin-policy.mjs: a pull request into track/*, a push or dispatch on it) the base's pin can lag
 // its engine (the pin moves only with the track's pull into master), so its published modules may not be its

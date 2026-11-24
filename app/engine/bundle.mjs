@@ -28,7 +28,7 @@ export const NODE = {
   "linux-x64": { file: "node-v24.21.0-linux-x64.tar.xz", sha256: "fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6", triple: "x86_64-unknown-linux-gnu" },
 };
 // the interpreter's files, from app/dist
-const ROOT_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-nd.wasm", "sagebrush-mp.wasm", "lib", "pkg", "pkgset", "pkgmeta"];
+const ROOT_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-nd.wasm", "sagebrush-mp.wasm", "sagebrush-skltree.wasm", "lib", "pkg", "pkgset", "pkgmeta"];
 const ENGINE_FILES = ["frames.mjs", "files.mjs", "serve.mjs", "thread.mjs", "main.mjs"];
 
 const here = fileURLToPath(new URL(".", import.meta.url));

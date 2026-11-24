@@ -1,4 +1,4 @@
-// The four WebAssembly modules in wasm/ and their pins (design/wasm-artifacts.md).
+// The five WebAssembly modules in wasm/ and their pins (design/wasm-artifacts.md).
 // wasm/pins.json holds each module's sha256 and exact length; bytes match a pin
 // when both are equal.  This module reads the pins, says what state each file
 // in wasm/ is in, and checks a run's modules against its mode:
@@ -16,12 +16,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-export const MODULES = ["sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-mp.wasm", "sagebrush-nd.wasm"];
+export const MODULES = ["sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-mp.wasm", "sagebrush-nd.wasm", "sagebrush-skltree.wasm"];
 export const BUILDERS = {
   "sagebrush-engine.wasm": "node scripts/build-engine.mjs",
   "sagebrush-raster.wasm": "node scripts/build-engine.mjs (or scripts/build-raster.mjs)",
   "sagebrush-mp.wasm": "node scripts/build-mp.mjs",
   "sagebrush-nd.wasm": "node scripts/build-engine.mjs (or scripts/build-nd.mjs)",
+  "sagebrush-skltree.wasm": "node scripts/build-engine.mjs (or scripts/build-skltree.mjs)",
 };
 const MAX_BYTES = 64 << 20; // no module comes near this; a pin above it is a mistake
 
@@ -31,7 +32,7 @@ export const modulePath = (name, root = ROOT) => join(root, "wasm", name);
 const stampPath = (root) => join(root, "wasm", ".installed.json");
 const sidecarPath = (name, root) => join(root, "wasm", `${name}.local.json`);
 
-// pins.json: {"v": 1, "modules": {<name>: {"sha256": <64 hex>, "bytes": <n>}}}, exactly the four names
+// pins.json: {"v": 1, "modules": {<name>: {"sha256": <64 hex>, "bytes": <n>}}}, exactly the five names
 export function parsePins(text) {
   let doc;
   try {
@@ -122,7 +123,7 @@ export function runMode(env = process.env) {
   return "pinned";
 }
 
-// Check all four modules for a run in `mode`, immediately before reading them.  Returns
+// Check all five modules for a run in `mode`, immediately before reading them.  Returns
 // one line per module for the run's log; throws, naming every module that fails.
 export function checkModules({ root = ROOT, mode = runMode(), pins = loadPins(root) } = {}) {
   const lines = [], errors = [];
@@ -140,7 +141,7 @@ export function checkModules({ root = ROOT, mode = runMode(), pins = loadPins(ro
 }
 
 // pins.json against the modules committed at a git revision (the blobs, not the working tree).
-// The set rule: all four committed -> each is compared with its pin; none committed -> nothing to
+// The set rule: all five committed -> each is compared with its pin; none committed -> nothing to
 // compare (after the modules stop being committed); one to three committed -> a failure naming the
 // missing ones.  Any git failure (not a repository, an unknown revision, a read error) throws.
 export function committedMismatches({ root = ROOT, rev = "HEAD", pins = loadPins(root) } = {}) {
