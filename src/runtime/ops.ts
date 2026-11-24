@@ -2662,7 +2662,7 @@ function bytearraySetSlice(o: PyByteArray, k: PySlice, v: any) {
 export function arrSet(o: any[], k: any, v: any): void {
   if (typeof k === "number" && k >= 0 && k < o.length && isInt(k)) o[k] = v;
   else if (k instanceof PySlice) setSlice(o, k, v);
-  else o[seqIndex(k, o.length, "list assignment")] = v;
+  else o[seqIndexIn(seqIndexRaw(k, "list"), o.length, "list assignment")] = v;
 }
 
 export function setitem(o: any, k: any, v: any): void {
@@ -2682,7 +2682,7 @@ export function setitem(o: any, k: any, v: any): void {
       return;
     }
     if (k instanceof PySlice) return setSlice(o, k, v);
-    o[seqIndex(k, o.length, "list assignment")] = v;
+    o[seqIndexIn(seqIndexRaw(k, "list"), o.length, "list assignment")] = v;
     return;
   }
   if (o instanceof PyDict && o.$cls === T.dict) {
@@ -2789,7 +2789,7 @@ export function arrDel(o: any[], k: any): void {
       }
       return;
     }
-    o.splice(seqIndex(k, o.length, "list assignment"), 1);
+    o.splice(seqIndexIn(seqIndexRaw(k, "list"), o.length, "list assignment"), 1);
     return;
   }
 }
