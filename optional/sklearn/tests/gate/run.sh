@@ -8,9 +8,12 @@
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../../../.." && pwd)
+# (PKGSET and VENV are paths as the caller gave them: resolved against the caller's directory before the cd)
+CALLER=$(pwd)
+abs() { case "$1" in /*) printf '%s\n' "$1" ;; *) printf '%s\n' "$CALLER/$1" ;; esac; }
 cd "$HERE"
 if [ "${1:-}" = "--record" ]; then
-  VENV="${2:?usage: run.sh --record VENV}"
+  VENV=$(abs "${2:?usage: run.sh --record VENV}")
   ENV_NOW=$(mktemp)
   trap 'rm -f "$ENV_NOW"' EXIT
   "$VENV/bin/python" -I - > "$ENV_NOW" <<'PYEOF'
@@ -27,7 +30,7 @@ PYEOF
   echo "gate: recorded test_gate.out ($(wc -l < test_gate.out) lines)"
   exit 0
 fi
-PKGSET="${1:?usage: run.sh PKGSET   (or run.sh --record VENV)}"
+PKGSET=$(abs "${1:?usage: run.sh PKGSET   (or run.sh --record VENV)}")
 GOT=$(mktemp)
 trap 'rm -f "$GOT"' EXIT
 node "$ROOT/build/cli/pyjs.cjs" --pkgset "$PKGSET" test_gate.py > "$GOT"
