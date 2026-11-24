@@ -4,6 +4,8 @@ test/ffmat-echelon-bin.test.ts runs them in pyjs (build/cli/pyjs.cjs --sage
 THIS CASE) and engine/py/test_ech_bin.py in CPython (python3 THIS CASE).
 Each case prints "ok CASE ..." lines and raises on a failure.
 
+    lazy       the binary route's module is imported on demand, by the
+               first GF(p) echelon (run first: nothing else imported it)
     route      past the JSON route's 1024 envelope, every caller takes the
                binary op at its actual shape ([A | B] and [A | I] packed, no
                augmented list), counted at the call
@@ -53,6 +55,31 @@ import sagebrush._engine as EN
 
 PYJS = hasattr(sys, "_sagebrush_heap_used")
 CASE = sys.argv[1]
+
+
+def case_lazy():
+    """The binary route's module (lib/_sage_ffmat_bin.py) is imported on
+    demand: not with _sage_ffmat (which Magma mode imports at its start),
+    nor by a product or by an echelon with the route off; then by the first
+    GF(p) echelon, which takes the route."""
+    gone = lambda: "_sage_ffmat_bin" not in sys.modules
+    assert gone(), "imported with _sage_ffmat"
+    M = matrix(GF(7), [[1, 2], [3, 4]])
+    assert M * vector(GF(7), [1, 1]) == vector(GF(7), [3, 0]) and gone(), "imported by a product"
+    FM._ECH_BIN_ENABLED = False
+    try:
+        assert M.rank() == 2 and gone(), "imported with the route off"
+    finally:
+        FM._ECH_BIN_ENABLED = True
+    assert M.rank() == 2 and not gone(), "not imported by the first echelon"
+    print("ok lazy imported by the first GF(p) echelon only", flush=True)
+
+
+if CASE == "lazy":
+    case_lazy()
+    sys.exit(0)
+
+import _sage_ffmat_bin as FB  # noqa: E402
 P63 = 9223372036854775783
 KIB, MIB = 1024, 1 << 20
 
@@ -60,8 +87,8 @@ KIB, MIB = 1024, 1 << 20
 
 CALLS = []  # (rows, cols, want_rows) of each binary call
 ROUTES = []  # (rows, cols, want_rows, out) of each admission asked
-_bin_call = FM._ech_bin_call
-_bin_route = FM._ech_bin_route
+_bin_call = FB._ech_bin_call
+_bin_route = FB._ech_bin_route
 
 
 def _counting_call(rowsrc, base, r, c, p, want_rows):
@@ -74,8 +101,8 @@ def _probing_route(base, r, c, want_rows, out, out_of=None):
     return _bin_route(base, r, c, want_rows, out, out_of)
 
 
-FM._ech_bin_call = _counting_call
-FM._ech_bin_route = _probing_route
+FB._ech_bin_call = _counting_call
+FB._ech_bin_route = _probing_route
 
 
 def calls(f):
@@ -223,7 +250,7 @@ def case_json():
 def case_probe():
     F = GF(32003)
     A = rank_r(F, 40, 70, 20)
-    cost = FM._ech_out_cost
+    cost = FB._ech_out_cost
 
     def probe(f):
         del ROUTES[:]
@@ -240,12 +267,12 @@ def case_probe():
     assert probe(lambda: S.solve_right(b)) == [(30, 31, True, cost(F, 1, 30))]
     assert probe(S.inverse) == [(30, 60, True, cost(F, 30, 30))]
     r = probe(A.right_kernel)
-    assert r[0] == (40, 70, True, FM._ech_kernel_out(40, 70)), r[0]
+    assert r[0] == (40, 70, True, FB._ech_kernel_out(40, 70)), r[0]
     # (the worst rank, not the actual one: max k (c - k) over k <= min(r, c),
     # W in its chunks, and the pivot flags, a bytearray of c)
-    out = lambda w, c: FM._ech_words_cost(w) + c + FM._ECH_HDR
-    assert FM._ech_kernel_out(40, 70) == out(35 * 35, 70) and FM._ech_kernel_out(600, 600) == out(300 * 300, 600)
-    assert FM._ech_kernel_out(5, 100) == out(5 * 95, 100) and FM._ech_kernel_out(7, 7) == out(3 * 4, 7)
+    out = lambda w, c: FB._ech_words_cost(w) + c + FB._ECH_HDR
+    assert FB._ech_kernel_out(40, 70) == out(35 * 35, 70) and FB._ech_kernel_out(600, 600) == out(300 * 300, 600)
+    assert FB._ech_kernel_out(5, 100) == out(5 * 95, 100) and FB._ech_kernel_out(7, 7) == out(3 * 4, 7)
     ok("each caller's shape, want_rows and G; rank/det/pivots charge no rows")
 
 
@@ -255,7 +282,7 @@ def preflight_calls(F):
     S = rand_matrix(F, 50, 50, 33)
     B = matrix(F, 50, 3, list(range(150)))
     b = vector(F, list(range(50)))
-    cost = FM._ech_out_cost
+    cost = FB._ech_out_cost
     return [
         ("rank 1x4096", (1, 4096, False, 0), row.rank),
         ("rank 4096x1", (4096, 1, False, 0), col.rank),
@@ -270,7 +297,7 @@ def preflight_calls(F):
 def case_preflight():
     F = GF(32003)
     for label, (r, c, rows, out), call in preflight_calls(F):
-        n = FM._ech_need(r, c, rows, out)
+        n = FB._ech_need(r, c, rows, out)
         want = python_path(lambda: outcome(call))
         v, s = with_figure(FM._HEAP_SHARE * n, lambda: calls(lambda: outcome(call)))
         assert s == [(r, c, rows)] and v == want, (label, s)
@@ -282,22 +309,22 @@ def case_preflight():
             assert e.need_bytes == n and e.limit_bytes == n - 1, (label, e.need_bytes, e.limit_bytes)
             assert "%d x %d" % (r, c) in str(e) and "At most about" in str(e) and e.fits >= 0, (label, str(e))
             # (what fits, fits)
-            assert FM._ech_need(e.fits, e.fits, rows, 0 if not rows else 0) <= n - 1
+            assert FB._ech_need(e.fits, e.fits, rows, 0 if not rows else 0) <= n - 1
         ok(label, "need", n, "routed at need, the memory error at need - 1 (no call, no Python path)")
 
 
 def case_frame():
     F = GF(32003)
     A = rand_matrix(F, 1100, 3, 41)
-    q = FM._ech_request_len(1100, 3)
+    q = FB._ech_request_len(1100, 3)
     want = python_path(A.rank)
-    FM._SBW1_FRAME_CAP = q
+    FB._SBW1_FRAME_CAP = q
     try:
         assert calls(A.rank) == (want, [(1100, 3, False)])
-        FM._SBW1_FRAME_CAP = q - 1
+        FB._SBW1_FRAME_CAP = q - 1
         assert calls(A.rank) == (want, []), "a frame-only non-fit keeps the Python path"
     finally:
-        FM._SBW1_FRAME_CAP = None
+        FB._SBW1_FRAME_CAP = None
     ok("Q", q, "binary at the frame cap, the Python path one byte past it")
 
 
@@ -365,10 +392,10 @@ def case_kernel():
     # first call but not the basis
     A = rank_r(F, 8, 512, 2)
     c, k = 512, 2
-    need1 = FM._ech_need(8, c, True, FM._ech_kernel_out(8, c))
-    need2 = FM._ech_kernel_need2(F, k, c)
+    need1 = FB._ech_need(8, c, True, FB._ech_kernel_out(8, c))
+    need2 = FB._ech_kernel_need2(F, k, c)
     # (the basis's own echelon, the second call, has its own need)
-    need3 = FM._ech_need(c - k, c, True, FM._ech_out_cost(F, c - k, c))
+    need3 = FB._ech_need(c - k, c, True, FB._ech_out_cost(F, c - k, c))
     assert need1 < need2
     for fig, admitted in ((FM._HEAP_SHARE * max(need2, need3), True), (FM._HEAP_SHARE * need2 - 1, False)):
         try:
@@ -415,7 +442,7 @@ def case_mem():
     VmRSS of the first run within need plus the wasm instance's
     reservation (outside the heap, but resident)."""
     F = GF(P63)
-    cost = FM._ech_out_cost
+    cost = FB._ech_out_cost
     shapes = [
         ("rank 1x65536", 1, 1 << 16, False, lambda M: M.rank()),
         ("rank 65536x1", 1 << 16, 1, False, lambda M: M.rank()),
@@ -427,8 +454,8 @@ def case_mem():
     for label, r, c, rows, op in shapes:
         e = r * c
         M = rand_matrix(F, r, c, 71, big=True)
-        n = FM._ech_need(r, c, rows, cost(F, r, c) if rows else 0)
-        engine = FM._ech_engine_reservation(r, c, rows)
+        n = FB._ech_need(r, c, rows, cost(F, r, c) if rows else 0)
+        engine = FB._ech_engine_reservation(r, c, rows)
         with Peak() as h:
             v = op(M)
         del v
@@ -441,7 +468,7 @@ def case_mem():
             traced = tracemalloc.get_traced_memory()[1]
             tracemalloc.stop()
             del v
-            py = FM._ech_need(r, c, rows, cost(F, r, c) if rows else 0, python_only=True)
+            py = FB._ech_need(r, c, rows, cost(F, r, c) if rows else 0, python_only=True)
             extra = " traced %d (%.2f of the Python share %d)" % (traced, traced / py, py)
             assert 8 * e <= traced <= py, (label, traced, py)
         print("   ", label, "VmHWM-VmRSS", h.hwm, "need", n, "(%.2f)" % (h.hwm / n) + extra, flush=True)
@@ -491,9 +518,9 @@ def case_kernelmem():
     import tracemalloc
     import weakref
     F = GF(P63)
-    cost = FM._ech_out_cost
+    cost = FB._ech_out_cost
     replies = []
-    real_reply, real_admit = FM._EchReply, FM._admit_size
+    real_reply, real_admit = FB._EchReply, FM._admit_size
 
     class Watched(real_reply):
         def __init__(self, pieces):
@@ -504,12 +531,12 @@ def case_kernelmem():
         # (the kernel's second check calls _admit_size just before the basis)
         assert all(w() is None for w in replies), "the reply is still alive at the basis's admission"
         return real_admit(base, m, n, factor)
-    FM._EchReply, FM._admit_size = Watched, admit
+    FB._EchReply, FM._admit_size = Watched, admit
     try:
         for c in (1 << 16, 1 << 18):
             A = rand_matrix(F, 1, c, 91, big=True)
-            n1 = FM._ech_need(1, c, True, FM._ech_kernel_out(1, c))
-            py1 = FM._ech_need(1, c, True, FM._ech_kernel_out(1, c), python_only=True)
+            n1 = FB._ech_need(1, c, True, FB._ech_kernel_out(1, c))
+            py1 = FB._ech_need(1, c, True, FB._ech_kernel_out(1, c), python_only=True)
             del replies[:]
             gc.collect()
             tracemalloc.start()
@@ -527,9 +554,9 @@ def case_kernelmem():
         n = 200
         A = rank_r(F, n, n, n // 2, 92)
         k = n // 2
-        needs = [FM._ech_need(n, n, True, FM._ech_kernel_out(n, n), python_only=True),
-                 FM._ech_kernel_need2(F, k, n),
-                 FM._ech_need(n - k, n, True, cost(F, n - k, n), python_only=True)]
+        needs = [FB._ech_need(n, n, True, FB._ech_kernel_out(n, n), python_only=True),
+                 FB._ech_kernel_need2(F, k, n),
+                 FB._ech_need(n - k, n, True, cost(F, n - k, n), python_only=True)]
         del replies[:]
         tracemalloc.start()
         tracemalloc.reset_peak()
@@ -540,7 +567,7 @@ def case_kernelmem():
         print("    kernel %dx%d rank %d: traced %d, the admissions %r" % (n, n, k, traced, needs), flush=True)
         assert traced <= max(needs), (traced, needs)
     finally:
-        FM._EchReply, FM._admit_size = real_reply, real_admit
+        FB._EchReply, FM._admit_size = real_reply, real_admit
     ok("wide kernels within the first admission up to the second check; the reply dead before the basis")
 
 
@@ -601,10 +628,10 @@ def case_cops():
     BOUND_MS = 50
     CALL_BOUND_MS = 125
     from sagebrush._engine import call_bin
-    e = (FM._ech_frame_cap() - 100) // 8
+    e = (FB._ech_frame_cap() - 100) // 8
     rows, cols = e // 1024, 1024
     e = rows * cols
-    q = FM._ech_request_len(rows, cols)
+    q = FB._ech_request_len(rows, cols)
     results = {}
 
     def timed(f):
@@ -617,8 +644,8 @@ def case_cops():
 
     # 1. pack: _ech_pack against the old words array and join
     src = lambda: (itertools.repeat(P63 - 2, cols) for _ in range(rows))
-    dur = timed(lambda: FM._ech_pack(src(), rows, cols, P63, 3))
-    results["pack"] = stop_latency(lambda: FM._ech_pack(src(), rows, cols, P63, 3), delays(dur))
+    dur = timed(lambda: FB._ech_pack(src(), rows, cols, P63, 3))
+    results["pack"] = stop_latency(lambda: FB._ech_pack(src(), rows, cols, P63, 3), delays(dur))
 
     def old_pack():
         w = array.array("Q", [0]) * e
@@ -628,12 +655,12 @@ def case_cops():
 
     # 2. the request into the binding: a frame-cap list of pieces (a zero
     # E-word matrix: the engine refuses nothing, the reply has its rows)
-    zero = bytes(FM._ECH_PIECE)
+    zero = bytes(FB._ECH_PIECE)
     le = lambda x, n: x.to_bytes(n, "little")
     head = b"".join([b"SBW1", le(12, 4), b"nmod_echelon", le(3, 4), FM._ff._sbw1_u641(array.array("Q", (P63,))),
                      le(24 + 8 * e, 4), b"MAT1", le(rows, 4), le(cols, 4), b"U641", le(e, 8)])
     body = 8 * e
-    pieces = [head] + [zero] * (body // FM._ECH_PIECE) + ([bytes(body % FM._ECH_PIECE)] if body % FM._ECH_PIECE else [])
+    pieces = [head] + [zero] * (body // FB._ECH_PIECE) + ([bytes(body % FB._ECH_PIECE)] if body % FB._ECH_PIECE else [])
     pieces.append(FM._ff._sbw1_u641(array.array("Q", (3,))))
     assert sum(len(b) for b in pieces) == q
     t = time.perf_counter()
@@ -656,14 +683,14 @@ def case_cops():
 
     # 3. the parse: the reply's runs against one frombytes of the rows
     def parse():
-        rd = FM._EchReply(list(reply))
+        rd = FB._EchReply(list(reply))
         rd.take(10)
         rd.words(rd.u641())
         rd.u641()
         rd.words(1)
         rd.u641()
         n = 0
-        for _, _, v in FM._ech_row_runs(rd, rows, cols):
+        for _, _, v in FB._ech_row_runs(rd, rows, cols):
             n += len(v)
         assert n == e
     dur = timed(parse)

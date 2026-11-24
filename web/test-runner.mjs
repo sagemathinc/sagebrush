@@ -386,13 +386,14 @@ try {
   ok(f === "274177 * 67280421310721", "Sage mode and the engine work, with no network in the runner: " + f);
   // (finite-field matrices, lib/_sage_ffmat.py, are their own chunk, mod-sage-ffmat: Sage's start fetches none of it,
   // and the first matrix over GF(p) fetches exactly that group, once, its own imports (_sage_ff) being in Sage's start
-  // group already; the expected line is SageMath 10.9's output of the same statement)
+  // group already; its first echelon (the rank) then fetches the binary route's, mod-sage-ffmat-bin, once; the
+  // expected line is SageMath 10.9's output of the same statement)
   const ffmatFetches = () => libFetched.filter((g) => g === "mod-sage-ffmat").length;
   ok(ffmatFetches() === 0, "Sage's start fetches no mod-sage-ffmat: " + JSON.stringify(libFetched));
   const fetchedBefore = libFetched.length;
   const ffm = (await run("M = matrix(GF(7), [[1, 2], [3, 4]]); print(M * vector(GF(7), [1, 1]), M.rank())")).trim();
-  ok(ffm === "(3, 0) 2" && JSON.stringify(libFetched.slice(fetchedBefore)) === JSON.stringify(["mod-sage-ffmat"]),
-    "a matrix over GF(p) fetches exactly mod-sage-ffmat, once, and gives Sage's answer: " + JSON.stringify([ffm, libFetched.slice(fetchedBefore)]));
+  ok(ffm === "(3, 0) 2" && JSON.stringify(libFetched.slice(fetchedBefore)) === JSON.stringify(["mod-sage-ffmat", "mod-sage-ffmat-bin"]),
+    "a matrix over GF(p) fetches exactly mod-sage-ffmat, then its echelon mod-sage-ffmat-bin, each once, and gives Sage's answer: " + JSON.stringify([ffm, libFetched.slice(fetchedBefore)]));
   // (a package's module, packages/cremona-small: its chunk through the frame,
   // checked against the registry, src/compile.ts)
   const ec = (await run("EllipticCurve('11a1').ainvs()")).trim();
