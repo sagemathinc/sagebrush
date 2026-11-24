@@ -1,7 +1,8 @@
-// File > Examples… and New > From an example… on the notebook and board pages: the gallery's panel (panel.ts, the lazy
-// chunk sagebrush-examples-panel.js) where this site serves it and its catalog (/examples/index.json); false where it
-// doesn't (the CLI's `sagebrush notebook` and the desktop app carry neither), and the page shows its own list as
-// before.  No import of panel.ts here: the chunk is fetched only when chosen.
+// File > Examples… and New > From an example… on the notebook, board, code and LaTeX pages: the gallery's panel
+// (panel.ts, the lazy chunk sagebrush-examples-panel.js), the only list of examples, where this site serves it and its
+// catalog (/examples/index.json: the site, and the desktop app's app/dist); false where it doesn't, or where there is no
+// workspace to copy into, and the page says the examples aren't available.  No import of panel.ts here: the chunk is
+// fetched only when chosen.
 import type { Entry, Workspace } from "../workspace/api";
 
 /** The gallery panel opened (resolving once it shows), or false when this site has no gallery. */

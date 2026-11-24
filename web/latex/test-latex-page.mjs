@@ -26,6 +26,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
 import { boxClass } from "./boxclass.mjs";
+import { EXAMPLES } from "../../scripts/latex-examples.mjs";
 import * as C from "./comments-core.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
@@ -75,6 +76,23 @@ ws.onmessage = (ev) => {
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 1500)); return r.result?.value; };
 const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
+// (the Navigation API's traversals made late, as a slow browser's (the U8 rows): traversal i (1, 2, ...) lands, or is
+//  refused if i is in `refused`, once the test opens its gate (window.__open(i)) if i is in `gated`, else 300 ms after
+//  it starts. window.__late counts them, window.__inflight those not settled, window.__opened the gates opened. A row
+//  then acts where it means to (a traversal still held, or landed and settled), not at a time a slow run passes:
+//  issue 1571)
+const lateTraversals = `((gated, refused = []) => { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v);
+  const gates = new Map(); window.__late = 0; window.__inflight = 0; window.__opened = [];
+  window.__open = (i) => { window.__opened.push(i); gates.get(i)?.(); };
+  v.traverseTo = (k, o) => { const i = ++window.__late; window.__inflight++;
+    const go = new Promise((r) => { if (!gated.includes(i)) setTimeout(r, 300); else if (window.__opened.includes(i)) r(); else gates.set(i, r); });
+    const committed = refused.includes(i) ? go.then(() => { throw new Error("test: the traverse refused"); }) : go;
+    const finished = refused.includes(i) ? committed : go.then(() => orig(k, o).finished);
+    committed.catch(() => {}); finished.catch(() => {}).finally(() => window.__inflight--);
+    return { committed, finished }; };
+  window.__navRestore = () => { delete v.traverseTo; }; return true; })`;
+// (no traversal of the page's own in flight, nor the browser's)
+const settled = `window.__inflight === 0 && !window.navigation?.transition`;
 // (navigation by document identity: the outgoing document is marked first, and a navigation is done only once a
 // document WITHOUT the mark is loaded, so a check can never pass on the page being left)
 // Both THROW on failure (the mark not acknowledged by the page; no new document in time), so nothing that depends on
@@ -93,6 +111,10 @@ let sectionChecks = 0;
 const LIST = process.env.LATEX_PAGE_LIST === "1";
 const check = (ok, what, detail) => { checks++; if (LIST) console.log("CHECK", what); if (!ok) { fails.push(what); console.log("FAIL", what, detail === undefined ? "" : JSON.stringify(detail).slice(0, 500)); } };
 const W = "window.sagebrush?.workspace";
+// (in a page script: until A's close has written the row's mark, its last write released, at most 10 s: the person's
+//  Back that a row takes once A's close is released is taken then, not after a fixed 50 ms that a slow write outlasts:
+//  issue 1571)
+const closeWritten = (mark) => `for (let i = 0; i < 400; i++) { const r = await ${W}.read("/sw/a.tex").catch(() => null); if (r && new TextDecoder().decode(r.content).includes(${JSON.stringify(mark)})) break; await new Promise((r) => setTimeout(r, 25)); }`;
 const latexFetches = () => requests.filter((u) => /sagebrush-latex/.test(u));
 const bytesOf = (p) => ev(`${W}.read(${JSON.stringify(p)}).then((r) => Array.from(r.content))`);
 const mk = (p, arr) => ev(`${W}.create(${JSON.stringify(p)}, { content: new Uint8Array(${JSON.stringify(arr)}) }).then((e) => e.fid)`);
@@ -128,13 +150,16 @@ try {
   // centre is the button itself), and each makes a .tex and opens it in the editor
   {
     await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
-    const reach = (sel, text) => ev(`(() => {
+    // (measured once the cross-document view transition a navigation starts has ended: while it runs, the page under it
+    // takes no input and elementFromPoint finds the root)
+    const settled = () => until(`(() => { try { return !document.documentElement.matches(":active-view-transition"); } catch { return true; } })()`, 3000);
+    const reach = async (sel, text) => (await settled(), ev(`(() => {
       const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((x) => x.firstChild?.textContent === ${JSON.stringify(text)});
       if (!b) return { found: false, items: [...document.querySelectorAll(${JSON.stringify(sel)})].map((x) => x.textContent) };
       b.scrollIntoView({ block: "center" });
       const r = b.getBoundingClientRect(), at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
       return { found: true, inView: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth, top: at === b || b.contains(at), at: at ? at.tagName + "#" + at.id + "." + at.className + " " + (at.textContent ?? "").slice(0, 40) : null, w: innerWidth, h: innerHeight };
-    })()`);
+    })()`));
     const madeAs = async (p) => (await fresh(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000)) && ev(`${W}.stat(${JSON.stringify(p)}).then((e) => !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid)`);
     await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
     await go(base + "?latex=1"); await until(`!!${W}`, 60000);
@@ -160,72 +185,34 @@ try {
       "phone: File > New offers LaTeX document, in the file panel's order (U0), File and the item in view and not covered", { fb, items, mr });
     await mark(); await ev(`([...document.querySelectorAll('.fmgroup[aria-label="New"] button')].find((b) => b.textContent === "LaTeX document").click(), true)`);
     check(await madeAs("/Untitled (2).tex"), "phone: File > New > LaTeX document: /Untitled (2).tex made and opened in the editor");
-    // the editor's File > New > From an example… (U0: "Examples…" replaces "LaTeX example", William Nov 2), on
-    // a site without the examples gallery (this test's server: web/examples/open.ts finds no catalog): the LaTeX
-    // examples' own list fits the phone (10 large buttons, the dialog within the width, each button reachable), and the
-    // figure example opens with its image (a folder of its own, plot.png beside it)
+    // the editor's File > New > From an example… on a phone, on a site without the examples gallery (this test's
+    // server: web/examples/open.ts finds no catalog): the item fits and is reachable; chosen, an alert says the examples
+    // aren't available here, and no list of the editor's own is shown (the gallery's panel is the only one)
     await ev(`(document.querySelector(".tex-filebtn").click(), true)`);
     await until(`!!document.querySelector('.tex-filemenu .fmgroup[aria-label="New"]')`, 10000);
     await ev(`(document.querySelector('.tex-filemenu button[data-group="new"]').click(), true)`);
     const exItem = await reach('.tex-filemenu .fmgroup[aria-label="New"] button', "Examples…");
-    // (the examples are a chunk of their own, sagebrush-latex-examples.js: not fetched before their list is asked for)
-    const exAsks = () => requests.filter((u) => /sagebrush-latex-examples\.js/.test(u)).length, exBefore = exAsks();
+    const d0 = dialogText.length;
     await ev(`(document.querySelector('.tex-filemenu [data-item="fromExample"]').click(), true)`);
-    const listed2 = await until(`document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length === 10`, 20000);
-    check(exBefore === 0 && exAsks() === 1, "phone: the examples' chunk fetched once, by their list, and not before", { exBefore, after: exAsks() });
-    const dlg = listed2 && await ev(`(() => { const d = document.querySelector("dialog.sb-tex-examples"), r = d.getBoundingClientRect(), bs = [...d.querySelectorAll("button[data-example]")];
-      const last = bs[bs.length - 1]; last.scrollIntoView({ block: "center" }); const lr = last.getBoundingClientRect(), at = document.elementFromPoint(lr.left + lr.width / 2, lr.top + lr.height / 2);
-      return { menuHidden: document.querySelector(".tex-filemenu").hidden, left: r.left, right: r.right, w: innerWidth, n: bs.length, minH: Math.min(...bs.map((b) => b.getBoundingClientRect().height)), lastReach: at === last || last.contains(at) }; })()`);
-    check(exItem.found && exItem.inView && exItem.top && listed2 && dlg.menuHidden && dlg.left >= 0 && dlg.right <= dlg.w && dlg.n === 10 && dlg.minH >= 44 && dlg.lastReach,
-      "phone: the editor's File > New > From an example…: the File menu closed, the list of 10 fits the screen, every button at least 44 px and reachable", { exItem, dlg });
-    // (in the editor, another .tex opens in place, its URL pushed: no new document)
-    await ev(`(document.querySelector('dialog.sb-tex-examples button[data-example="figure"]').click(), true)`);
-    const figOk = await until(`${W}.stat("/LaTeX examples/Figure with an image/figure.tex").then((e) => !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid && !!document.querySelector(".tex-page .tex-src"))`, 20000);
-    const figImg = figOk && await until(`[...document.querySelectorAll(".tex-preview img.graphic")].some((i) => i.src.startsWith("blob:"))`, 20000);
-    check(figOk && figImg && await ev(`${W}.stat("/LaTeX examples/Figure with an image/plot.png").then((e) => e?.kind === "file")`), "phone: the figure example: its folder made, figure.tex opened, plot.png beside it and shown in the preview");
+    const said = await (async () => { for (let i = 0; i < 100 && dialogText.length === d0; i++) await sleep(100); return dialogText.slice(d0); })();
+    check(exItem.found && exItem.inView && exItem.top && said.length === 1 && said[0] === "The examples aren't available here." && !(await ev(`!!document.querySelector("dialog.sb-tex-examples, dialog.sb-examples[open]")`)),
+      "phone: the editor's File > New > From an example… without the gallery: the item reachable; an alert says the examples aren't available here, no list", { exItem, said });
     await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
     await send("Emulation.clearDeviceMetricsOverride");
   }
-  // ---- the examples' chunk fails to load (grader #685 E1, E2, E4): the first request for it refused (the Fetch
-  // domain), the editor's File > New > From an example… says so in an alert, and the list isn't shown; asked again, the
-  // list loads, by a new URL (?try=2: the browser keeps a failed module import for its URL), so a failure is never cached
+  // ---- the examples gallery from the LaTeX editor
   {
     await go(base + "?latex=1"); await until(`!!${W}`, 60000);
     await open(await ev(`${W}.stat("/Untitled.tex").then((e) => e.fid)`));
-    let refused = 0;
-    onPaused = (p) => { if (!refused++) send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionFailed" }); else send("Fetch.continueRequest", { requestId: p.requestId }); };
-    await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-examples.js*" }] });
-    const exUrls = () => requests.filter((u) => /sagebrush-latex-examples\.js/.test(u));
     const askExamples = async () => {
       await ev(`(document.querySelector(".tex-filebtn").click(), true)`);
       await until(`!!document.querySelector('.tex-filemenu .fmgroup[aria-label="New"]')`, 10000);
       await ev(`(document.querySelector('.tex-filemenu button[data-group="new"]').click(), true)`);
       await ev(`(document.querySelector('.tex-filemenu [data-item="fromExample"]').click(), true)`);
     };
-    const r0 = exUrls().length, d0 = dialogText.length;
-    await askExamples();
-    const said = await (async () => { for (let i = 0; i < 100 && dialogText.length === d0; i++) await sleep(100); return dialogText.slice(d0); })();
-    const fail = { refused, said, listed: await ev(`!!document.querySelector("dialog.sb-tex-examples[open]")`), urls: exUrls().slice(r0) };
-    check(refused === 1 && said.length === 1 && said[0] === "The examples couldn't be loaded. Check the network, then try again." && !fail.listed && fail.urls.length === 1 && !/\?try=/.test(fail.urls[0]),
-      "the examples' chunk refused: an alert says so (check the network, try again), no list", fail);
-    await askExamples();
-    const again = { listed: await until(`document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length === 10`, 20000), urls: exUrls().slice(r0), alerts: dialogText.length - d0 };
-    check(again.listed && again.urls.length === 2 && /sagebrush-latex-examples\.js\?try=2$/.test(again.urls[1]) && again.alerts === 1,
-      "…asked again: the list of 10, loaded by a new URL (?try=2), no second alert", again);
-    // (and once loaded, kept: asked a third time, the same 10 with no new request for the chunk; grader #685 E3,
-    //  loadExamples() not memoized would ask by ?try=3)
-    await ev(`(document.querySelector("dialog.sb-tex-examples[open]")?.close(), true)`);
-    await askExamples();
-    const kept = { listed: await until(`document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length === 10`, 20000) };
-    await sleep(300);
-    Object.assign(kept, { urls: exUrls().slice(r0), ids: await ev(`[...document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]")].map((b) => b.dataset.example).join()`) });
-    check(kept.listed && kept.urls.length === 2 && !kept.urls.some((u) => /\?try=3/.test(u)) && kept.ids.split(",").length === 10,
-      "…asked a third time, once loaded: the same 10, the chunk not fetched again", kept);
-    await send("Fetch.disable"); onPaused = null;
-    await ev(`(document.querySelector("dialog.sb-tex-examples[open]")?.close(), true)`);
     // a site with the examples gallery (its catalog stubbed: one LaTeX document, one notebook): the editor's File ▸
     // Examples… and New ▸ From an example… open the gallery's panel, on LaTeX first, as the notebook and board pages
-    // open it on theirs (#759), not the LaTeX examples' own list
+    // open it on theirs
     await ev(`(() => { const f0 = window.__sbFetch0 ??= window.fetch; window.fetch = (u, o) => new URL(String(u?.url ?? u), location.href).pathname === "/examples/index.json" ? Promise.resolve(new Response(JSON.stringify({ examples: [{ id: "latex/stub", kind: "latex", title: "Stub LaTeX", summary: "" }, { id: "notebook/stub", kind: "notebook", title: "Stub notebook", summary: "" }] }), { headers: { "content-type": "application/json" } })) : f0(u, o); return 1; })()`);
     const galleryOn = `!!document.querySelector("dialog.sb-examples[open]") && !document.querySelector("dialog.sb-tex-examples[open]") && (() => { const t = [...document.querySelectorAll("dialog.sb-examples [role=option]")].map((b) => b.textContent); return t.some((x) => x.includes("Stub LaTeX")) && !t.some((x) => x.includes("Stub notebook")); })()`;
     const closeGallery = `(() => { [...document.querySelectorAll("dialog.sb-examples button")].find((b) => b.textContent === "Close")?.click(); return 1; })()`;
@@ -265,15 +252,20 @@ try {
     const at = await ev(`(async () => { const fid = new URLSearchParams(location.search).get("tex"); return { url: location.pathname + location.search, path: (await ${W}.list("/", { recursive: true })).find((e) => e.fid === fid)?.path ?? null }; })()`).catch((e) => String(e));
     check(listed && opened && at?.path === "/Examples/Stub LaTeX/stub.tex", "the notebook page's File ▸ Examples…, a LaTeX example's Open a copy: the copy opens in the LaTeX editor", at);
   }
-  // ---- every example opened in the editor (made by the page module's makeExample, as the list does; the test's
-  // workspace handle has create, not the page's createByPerson): each renders in the preview,
+  // ---- every LaTeX example of the corpus opened in the editor (its files made in a folder of its own, as a copy from the
+  // gallery is: scripts/latex-examples.mjs reads them): each renders in the preview,
   // with nothing shown as unsupported (gray tags; the SageTeX and PythonTeX "not run" chips are expected), recorded
   {
     await go(base + "?latex=1"); await until(`!!${W}`, 60000);
-    const ids = await ev(`import("/sagebrush-latex.js").then(async (x) => (await x.loadExamples()).map((e) => e.id))`);
+    const ids = EXAMPLES.map((e) => e.id);
     const rec = [];
-    for (const id of ids) {
-      const fidEx = await ev(`import("/sagebrush-latex.js").then(async (x) => (await x.makeExample({ stat: (p) => ${W}.stat(p), mkdir: (p) => ${W}.mkdir(p), createByPerson: (p, o) => ${W}.create(p, o) }, (await x.loadExamples()).find((e) => e.id === ${JSON.stringify(id)}))).fid)`);
+    for (const ex of EXAMPLES) {
+      const id = ex.id;
+      let fidEx = null;
+      for (const [name, text, b64] of ex.files) {
+        const fid = await mk(`/LaTeX examples/${ex.title}/${name}`, Array.from(b64 ? Buffer.from(text, "base64") : new TextEncoder().encode(text)));
+        fidEx ??= fid;
+      }
       await open(fidEx);
       const shown = await until(`(() => { const P = document.querySelector(".tex-preview"); return !!P && P.textContent.length > 80; })()`, 30000);
       await sleep(400);
@@ -297,8 +289,9 @@ try {
     const nm = await ev(`(async () => { document.querySelector(".tex-filebtn").click(); await new Promise((r) => setTimeout(r, 50)); document.querySelector('.tex-filemenu button[data-group="new"]').click();
       const items = [...document.querySelectorAll('.tex-filemenu .fmgroup[aria-label="New"] button')].map((b) => b.dataset.item);
       document.querySelector('.tex-filemenu [data-item="fromExample"]').click(); await new Promise((r) => setTimeout(r, 300));
-      const n = document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length; document.querySelector("dialog.sb-tex-examples")?.close(); return { items, n, closed: document.querySelector(".tex-filemenu").hidden }; })()`);
-    check(JSON.stringify(nm.items) === JSON.stringify(["newNotebook", "newBoard", "newLatex", "newFolder", "fromExample"]) && nm.n === 10 && nm.closed, "B1 + U0: from a LaTeX file, File > New has every editor's items in the file panel's order, and From an example… opens the LaTeX examples", nm);
+      return { items, closed: document.querySelector(".tex-filemenu").hidden }; })()`);
+    nm.said = dialogText.at(-1);
+    check(JSON.stringify(nm.items) === JSON.stringify(["newNotebook", "newBoard", "newLatex", "newFolder", "fromExample"]) && nm.said === "The examples aren't available here." && nm.closed, "B1 + U0: from a LaTeX file, File > New has every editor's items in the file panel's order, and From an example… goes to the gallery (here, without one: said)", nm);
     const sel = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
     await until(`!!document.querySelector(${sel("/sw/b.tex")}) || (document.querySelector('.frow[data-path="/sw"]')?.click(), false)`, 20000);
     const sw = await ev(`(async () => {
@@ -421,10 +414,14 @@ try {
       await watchB();
       await ev(`(() => { window.__hold = new Promise((r) => (window.__rel = r)); window.__sbTexSaveWrite = () => window.__hold; return true; })()`);
       await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += "% clicked back to A\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
-      await ev(`(history.forward(), true)`); await sleep(400);
+      // (each step taken once the last has happened, not after a fixed time: the URL B's; the history back on A's
+      //  entry; A's write released, A editable again with its edit written, however slow the storage: issue 1571)
+      await ev(`(history.forward(), true)`); await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)}`, 10000);
       const urlB = await ev(`new URLSearchParams(location.search).get("tex")`);
-      await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await sleep(600);
-      await ev(`(window.__rel(), true)`); await sleep(1500);
+      await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`);
+      await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)} && history.state && history.state.sbTex === 0`, 10000);
+      await ev(`(window.__rel(), true)`);
+      await until(`!!document.querySelector(".tex-src") && !document.querySelector(".tex-src").readOnly && ${W}.read("/sw/a.tex").then((r) => new TextDecoder().decode(r.content).includes("% clicked back to A"))`, 60000); await sleep(1500);
       const s3 = await endState(), file3 = await aText();
       const entry = await ev(`({ at: history.state && history.state.sbTex })`);
       check(urlB === fb && s3.url === fa && entry.at === 0 && s3.title === "a.tex" && s3.a && s3.ro === false && s3.src.includes("% clicked back to A") && file3.includes("% clicked back to A") && s3.pages === 1 && !s3.sawB && s3.kept,
@@ -543,7 +540,7 @@ try {
       }
       // (4) (astra U8-SWITCH-6) ...a newer Back while a return is already under way: C, A, B on the history after A's
       // entry 0 (C 1, A 2, B 3), A shown; the switch to B decided (A's close held), A asked for again (its traverse
-      // late), A's close released at once, and 50 ms later Back two entries, to C, before that return lands: C opens,
+      // late, held), A's close released, and once it has written, Back two entries, to C, before that return lands: C opens,
       // editable, on its entry, and stays (the late return to A, when it lands, is taken back: its target fenced); A
       // never opened again; B never shown; A's edit written
       {
@@ -551,84 +548,88 @@ try {
         await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
         await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await shownIs(fa); await sleep(300);
         await watchX(fb); await holdClose(mark);
-        const nav = await ev(`(() => { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v);
-          v.traverseTo = (k, o) => { window.__late = (window.__late ?? 0) + 1; const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
-          window.__navRestore = () => { delete v.traverseTo; }; window.__late = 0; return true; })()`);
+        const nav = await ev(`${lateTraversals}([1])`);
         await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
         const held = await until(`window.__k >= 2`, 10000);
         const went = await ev(`(async () => {
           const url = new URLSearchParams(location.search).get("tex"), at = history.state && history.state.sbTex;
           window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel();
-          await new Promise((r) => setTimeout(r, 50));
+          ${closeWritten(mark)}
           // (the return still under way when Back is taken: not back on A's entry yet)
           const pending = new URLSearchParams(location.search).get("tex") !== ${JSON.stringify(fa)};
           history.go(-2);
           return { url, at, pending }; })()`);
+        // (Back on C, the late return still held: it lands now, and is taken back)
+        went.onC = await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fc)} && window.__opened.length === 0`, 10000);
+        await ev(`(window.__open(1), true)`); await until(settled, 20000);
         await shownIs(fc); await sleep(1800);
         const s = await stateOf(fc), fA = await textOf(fa), late = await ev(`window.__late`);
         await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`); await writesWork();
-        check(nav && held && went && went.url === fb && went.at === 3 && went.pending && late >= 1 && s.url === fc && s.at === 1 && s.title === "c.tex" && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
+        check(nav && held && went && went.url === fb && went.at === 3 && went.pending && went.onC && late >= 1 && s.url === fc && s.at === 1 && s.title === "c.tex" && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
           "U8-SWITCH-6 (Navigation API, the return late): Back to C while the return to A is under way: C opens, editable, on its entry, and stays; A not reopened; B never shown; A's edit written", { nav, held, went, late, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
         // (back on A, entry 0)
         await ev(`(history.back(), true)`); await shownIs(fa); await sleep(500);
       }
-      // (5) (astra U8-SWITCH-7) ...as (4), then the person's own Forward, back to A: before the late return lands (at
-      // 100 ms) and after it (at 900 ms). Either way A opens, editable, on its entry, and stays: only the superseded
-      // return's own traversal is taken back, never a Back or Forward to the same entry. A's edit written
-      for (const fwdAt of [100, 900]) {
-        const mark = `% forward to A at ${fwdAt}`;
+      // (5) (astra U8-SWITCH-7) ...as (4), then the person's own Forward, back to A: before the late return lands and
+      // after it. Either way A opens, editable, on its entry, and stays: only the superseded return's own traversal is
+      // taken back, never a Back or Forward to the same entry. A's edit written. (The late return waits on a gate the
+      // test opens, not a 300 ms timer: Forward is taken while it is still held, or once it has landed and every
+      // traversal after it (the fence's take-back) has settled, however slow the run: issue 1571)
+      for (const when of ["before", "after"]) {
+        const mark = `% forward to A ${when} the late return`;
         await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
         await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await shownIs(fa); await sleep(300);
         await watchX(fb); await holdClose(mark);
-        const nav = await ev(`(() => { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v);
-          v.traverseTo = (k, o) => { window.__late = (window.__late ?? 0) + 1; const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
-          window.__navRestore = () => { delete v.traverseTo; }; window.__late = 0; return true; })()`);
+        const nav = await ev(`${lateTraversals}([1])`);
         await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
         const held = await until(`window.__k >= 2`, 10000);
         const went = await ev(`(async () => {
           window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel();
-          await new Promise((r) => setTimeout(r, 50));
+          ${closeWritten(mark)}
           const pending = new URLSearchParams(location.search).get("tex") !== ${JSON.stringify(fa)};
           history.go(-2);
-          await new Promise((r) => setTimeout(r, ${fwdAt - 50}));
-          const onC = new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fc)};
-          history.forward();
-          return { pending, onC }; })()`);
-        await shownIs(fa); await sleep(1800);
+          return { pending }; })()`);
+        const onC = await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fc)} && window.__late >= 1`, 10000);
+        if (when === "after") { await ev(`(window.__open(1), true)`); await until(settled, 20000); }
+        // (before: the late return still held when Forward is taken; after: it landed, and nothing in flight)
+        went.onC = onC && (await ev(when === "before" ? `window.__opened.length === 0` : `window.__opened.length === 1 && ${settled}`));
+        await ev(`(history.forward(), true)`);
+        if (when === "before") { await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 10000); await ev(`(window.__open(1), true)`); }
+        await until(settled, 20000); await shownIs(fa); await sleep(1800);
         const s = await stateOf(fa), fA = await textOf(fa), late = await ev(`window.__late`);
         await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`); await writesWork();
         check(nav && held && went && went.pending && went.onC && late >= 1 && s.url === fa && s.at === 2 && s.title === "a.tex" && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
-          `U8-SWITCH-7 (Navigation API, the return late; Back to C at 50 ms, then Forward to A at ${fwdAt} ms${fwdAt < 300 ? ", before the late return lands" : ", after it"}): A opens, editable, on its entry, and stays; B never shown; A's edit written`, { nav, held, went, late, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+          `U8-SWITCH-7 (Navigation API, the return late; Back to C once A's close has written, then Forward to A ${when === "before" ? "before the late return lands" : "after it, its take-back settled"}): A opens, editable, on its entry, and stays; B never shown; A's edit written`, { nav, held, went, late, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
         // (back on A, entry 0: two entries back)
         await ev(`(history.go(-2), true)`); await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)} && history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
       }
       // (6) (daybreak3 DB3-U8-SWITCH-7) ...as (4), with an unrelated pop before the late return lands: A 0, C 1, C#f 2,
-      // A 3, B 4; Back three entries to C at 50 ms, then Forward to C#f (C's own fragment entry) at 100 ms; the late
-      // return, landing on A at 300 ms, is still taken back: C stays, on C#f, its entry
+      // A 3, B 4; Back three entries to C once A's close has written, then Forward to C#f (C's own fragment entry), both
+      // while the late return is held; the return, landing on A after them, is still taken back: C stays, on C#f, its entry
       {
         const mark = "% an unrelated pop first";
         await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
         await ev(`(location.hash = "#f", true)`); await until(`location.hash === "#f" && history.state && history.state.sbTex === 2`, 10000);
         await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await shownIs(fa); await sleep(300);
         await watchX(fb); await holdClose(mark);
-        const nav = await ev(`(() => { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v);
-          v.traverseTo = (k, o) => { window.__late = (window.__late ?? 0) + 1; const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
-          window.__navRestore = () => { delete v.traverseTo; }; window.__late = 0; return true; })()`);
+        const nav = await ev(`${lateTraversals}([1])`);
         await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
         const held = await until(`window.__k >= 2`, 10000);
         const went = await ev(`(async () => {
           const at = history.state && history.state.sbTex;
           window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel();
-          await new Promise((r) => setTimeout(r, 50));
+          ${closeWritten(mark)}
           history.go(-3);
-          await new Promise((r) => setTimeout(r, 50));
-          const onC = new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fc)} && location.hash === "";
-          history.forward();
-          return { at, onC }; })()`);
+          return { at }; })()`);
+        // (Back on C, then Forward to C#f, both before the late return lands: it is held until then)
+        went.onC = await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fc)} && location.hash === "" && window.__opened.length === 0`, 10000);
+        await ev(`(history.forward(), true)`);
+        went.onF = await until(`location.hash === "#f" && window.__opened.length === 0`, 10000);
+        await ev(`(window.__open(1), true)`); await until(settled, 20000);
         await shownIs(fc); await sleep(1800);
         const s = await stateOf(fc), fA = await textOf(fa), late = await ev(`window.__late`), hash = await ev(`location.hash`);
         await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`); await writesWork();
-        check(nav && held && went && went.at === 4 && went.onC && late >= 2 && s.url === fc && hash === "#f" && s.at === 2 && s.title === "c.tex" && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
+        check(nav && held && went && went.at === 4 && went.onC && went.onF && late >= 2 && s.url === fc && hash === "#f" && s.at === 2 && s.title === "c.tex" && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
           "U8-SWITCH-7 (an unrelated pop first: Back to C, then Forward to C's own fragment entry, before the late return lands): the late return is still taken back; C stays, on C#f, its entry; A not reopened; B never shown; A's edit written", { nav, held, went, late, hash, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
         // (back on A, entry 0: two entries back)
         await ev(`(history.go(-2), true)`); await shownIs(fa); await until(`history.state && history.state.sbTex === 0 && location.hash === ""`, 20000); await sleep(500);
@@ -802,14 +803,17 @@ try {
         // (false, or what the save state says instead)
         return (await saveStateIs(/^Saved/, 20000)) || await ev(`"save: " + (document.querySelector(".tex-savestate")?.textContent ?? "none") + "; ro: " + document.querySelector(".tex-src")?.readOnly`);
       };
-      // (the Navigation API's traverseTo, its first call made late (300 ms), the others as they are; or, hidden, the
-      //  same for history.go: a return whose traversal is slow, a newer one after it not)
-      const lateFirst = (withNav) => ev(`(() => { window.__late = 0;
+      // (the Navigation API's traverseTo, its first call made late, the others as they are; or, hidden, the same for
+      //  history.go: a return whose traversal is slow, a newer one after it not. Late until the test lets it go
+      //  (window.__open()), once the row has done what it does while that return is under way: issue 1571)
+      const lateFirst = (withNav) => ev(`(() => { window.__late = 0; window.__opened = false; let gate = null;
+        window.__open = () => { window.__opened = true; gate?.(); };
+        const held = () => new Promise((r) => { if (window.__opened) r(); else gate = r; });
         if (${withNav}) { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v);
-          v.traverseTo = (k, o) => { if (window.__late++) return orig(k, o); const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
+          v.traverseTo = (k, o) => { if (window.__late++) return orig(k, o); const late = held(); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
           window.__navRestore = () => { delete v.traverseTo; }; return true; }
         const was = window.navigation; Object.defineProperty(window, "navigation", { configurable: true, get: () => undefined });
-        history.go = (d) => { if (window.__late++) return History.prototype.go.call(history, d); setTimeout(() => History.prototype.go.call(history, d), 300); };
+        history.go = (d) => { if (window.__late++) return History.prototype.go.call(history, d); held().then(() => History.prototype.go.call(history, d)); };
         window.__navRestore = () => { delete history.go; Object.defineProperty(window, "navigation", { configurable: true, get: () => was }); }; return true; })()`);
       // (14) (grader V6, V7) a newer Back during a return that a file waits for: A 0, C 1, C#f 2, A 3, A shown, its
       // write failing. Back to C#f declined (the return's traversal late); B asked for and accepted, so B waits for that
@@ -832,11 +836,13 @@ try {
           const asked2 = window.__asks.length, stillPending = new URLSearchParams(location.search).get("tex") !== ${JSON.stringify(fa)};
           history.back();
           return { pending, accepted, asked2, stillPending }; })()`);
-        await until(`window.__asks.length >= 3`, 10000); await sleep(1500);
+        // (the newer Back taken and C asked about, declined: the late return lets go now)
+        await until(`window.__asks.length >= 3`, 10000); went.heldThrough = await ev(`!window.__opened`);
+        await ev(`(window.__open(), true)`); await until(`!window.navigation?.transition`, 20000); await sleep(1500);
         const s = await stateOf(fa), asks = await ev(`window.__asks`), lates = await ev(`window.__late`);
         await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`);
         const saved = await saveAgain(), fA = await textOf(fa);
-        check(failed && late && asked1 && went && went.pending && went.accepted === true && went.asked2 === 2 && went.stillPending && lates >= 2
+        check(failed && late && asked1 && went && went.pending && went.accepted === true && went.asked2 === 2 && went.stillPending && went.heldThrough && lates >= 2
           && asks.length === 3 && asks[2] === fc && s.url === fa && s.at === 3 && s.title === "a.tex" && s.shows && s.ro === false && s.src.includes(mark) && s.pages === 1 && !s.saw && s.kept && saved === true && fA.includes(mark),
           `U8-RETURN (grader V6, V7; ${withNav ? "Navigation API" : "no Navigation API: history.go"}, the first return late): B waiting for a return, then a newer Back to C, declined: B never opens, C is asked about, not opened; A stays, editable, on its entry`, { failed, late, asked1, went, lates, asks, s: { ...s, src: s.src.slice(-30) }, saved, fileA: fA.slice(-30) });
         // (back on A, entry 0: three entries back)
@@ -868,7 +874,7 @@ try {
         await ev(`(window.__answer = true, history.go(-2), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500); await ev(`(window.__answer = false, true)`);
       }
       // (16) (grader W8; astra R16-FENCE-1, -2) the fence's take-back during a decided switch: A 0, B 1, C 2, A 3, A
-      // shown, its write failing; every traversal 300 ms late. Back to C declined; Back again, to B, accepted: that
+      // shown, its write failing; every traversal late. Back to C declined; Back again, to B, accepted: that
       // return superseded, B's mount waiting on A's close (its last write held). The stale return lands on A 3 and
       // the fence takes the history back to B 1, where the person went. Then, by variant:
       // - C: C asked for during the take-back, A's close released: C opens on the entry after B's; B never shown;
@@ -900,20 +906,25 @@ try {
         await ev(`(() => { window.__hold = new Promise((r) => (window.__rel = r)); window.__k = 0;
           window.__sbTexSaveWrite = () => { if (window.__asks.length >= 2) { window.__k++; return window.__hold; } throw new Error("test: the write failed"); };
           window.__log = []; let last = ""; window.__logT = setInterval(() => { const t = document.title + " @" + new URLSearchParams(location.search).get("tex") + "/" + (history.state && history.state.sbTex); if (t !== last) window.__log.push(last = t); }, 5); return true; })()`);
-        // (every traversal late; the fence's own, the second, refused if asked; the entries hidden if asked, from the
-        //  second Back on, so the take-back finds its entry gone)
-        const late = await ev(`(() => { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v), entries = v.entries.bind(v); window.__late = 0; window.__noEntries = false;
-          v.traverseTo = (k, o) => { window.__late++;
-            if (${!!v.refuse} && window.__late === 2) { const f = new Promise((_, rej) => setTimeout(() => rej(new Error("test: the traverse refused")), 300)); f.catch(() => {}); return { committed: f, finished: f }; }
-            const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
+        // (every traversal late, the first two held until the row's point: the return after Back to C was declined, until
+        //  the second Back has been taken (that return superseded); the fence's own take-back, before what the row does
+        //  "during the take-back", after what it does once it has landed, and refused then if asked. The entries hidden
+        //  if asked, from the second Back on, so the take-back finds its entry gone)
+        const late = await ev(`(() => { if (!${lateTraversals}([1, 2], ${v.refuse ? "[2]" : "[]"})) return false; const v = window.navigation, entries = v.entries.bind(v), restore = window.__navRestore; window.__noEntries = false;
           v.entries = () => window.__noEntries ? [] : entries();
-          window.__navRestore = () => { delete v.traverseTo; delete v.entries; }; return true; })()`);
+          window.__navRestore = () => { restore(); delete v.entries; }; return true; })()`);
         await ev(`(history.back(), true)`);
         const asked1 = await until(`window.__asks.length >= 1`, 10000);
         await ev(`(window.__noEntries = ${!!v.missing}, history.back(), true)`);
         const held = await until(`window.__k >= 1`, 10000);
-        // (the stale return landed on A 3 and the take-back started: its traversal the second; the entry gone: none)
+        // (the second Back taken and accepted, the return to A still held: it lands now, superseded)
+        const superseded = await ev(`window.__asks.length === 2 && window.__opened.length === 0`);
+        await ev(`(window.__open(1), true)`);
+        // (the stale return landed on A 3 and the take-back started: its traversal the second; the entry gone: none.
+        //  Refused then A, and the entry gone: B's entry pushed again first, so the take-back's end is let through)
+        if (v.missing || v.fallback) await ev(`(window.__open(2), true)`);
         const fenced = v.missing || v.fallback ? await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)} && history.state && history.state.sbTex === 4`, 5000) : await until(`window.__late >= 2`, 5000);
+        if (v.landed) await ev(`(window.__open(2), true)`);
         const onB = v.landed ? await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)}`, 5000) : true;
         const mid = await ev(`(async () => { const out = { url: new URLSearchParams(location.search).get("tex"), at: history.state && history.state.sbTex };
           if (${JSON.stringify(v.ask ?? "")} === "C") out.accepted = window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} });
@@ -921,7 +932,10 @@ try {
           if (${JSON.stringify(v.back ?? "")} === "before") { history.back(); await new Promise((r) => setTimeout(r, 150)); }
           window.__rel();
           if (${JSON.stringify(v.back ?? "")} === "after") { await new Promise((r) => setTimeout(r, 50)); history.back(); }
-          out.len = history.length; return out; })()`);
+          out.len = history.length; out.held = !window.__opened.includes(2); return out; })()`);
+        // (what the row does during the take-back done: the take-back lands, or is refused, now; then everything settled)
+        if (!mid.held) mid.held = !!(v.landed || v.missing || v.fallback);
+        await ev(`(window.__open(2), true)`); await until(settled, 20000);
         const opened = await shownIs(v.shown); await sleep(1500);
         const s = await stateOf(v.shown), asks = await ev(`window.__asks`), len = await ev(`history.length`), log = await ev(`(clearInterval(window.__logT), window.__log)`);
         await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`);
@@ -934,13 +948,13 @@ try {
         // (B, the decided switch's file, never under another file's URL (astra R16-FENCE-1); a superseded take-back's
         //  own landing can show the file shown under its entry until the fence takes it back, as in U8-SWITCH-6)
         const wrongUrl = log.filter((t) => t.startsWith("b.tex") && !t.includes("@" + fb + "/"));
-        check(failed && late && asked1 && held && fenced && onB && (v.ask ? mid.accepted === true : true) && asks.length === 2 && opened
+        check(failed && late && asked1 && held && superseded && fenced && onB && mid.held && (v.ask ? mid.accepted === true : true) && asks.length === 2 && opened
           && s.url === v.shown && s.at === v.at && s.title === name[v.shown] && s.ro === false && s.pages === 1 && s.kept && s.shows && wrongUrl.length === 0
           && (v.shown !== fb ? !s.saw && !log.some((t) => t.startsWith("b.tex")) : true) && (then === "refused after back" ? len === mid.len : true)
           && (v.probe ? probe.ok && probe.url === fb && probe.at === 1 && probe.title === "b.tex" && probe.len === len : true)
           && (v.after ? after.ok && after.url === fc && after.at === v.at + 1 && after.title === "c.tex" : true) && saved === true && fA.includes(mark),
           `U8-RETURN (grader W8, astra R16-FENCE; Navigation API, its traversals late): the fence's take-back during a decided switch, then ${then}: ${name[v.shown]} opens, editable, on entry ${v.at}, its URL; no file under another's URL${v.after ? "; the return over, a file asked for then opens" : ""}; A's edit written`,
-          { then, s: { ...s, src: s.src.slice(-30) }, wrongUrl, after, probe, saved, fileA: fA.slice(-30), failed, late, asked1, held, fenced, onB, mid, len, opened, asks, log });
+          { then, s: { ...s, src: s.src.slice(-30) }, wrongUrl, after, probe, saved, fileA: fA.slice(-30), failed, late, asked1, held, superseded, fenced, onB, mid, len, opened, asks, log });
         // (back on A, entry 0)
         await ev(`(history.go(-(history.state && history.state.sbTex || 0)), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
       }
@@ -1002,7 +1016,7 @@ try {
           window.__navRestore = () => { delete v.traverseTo; }; return true; })()`);
         await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
         const held = await until(`window.__k >= 2`, 10000);
-        await ev(`(async () => { window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel(); await new Promise((r) => setTimeout(r, 50)); history.go(-2); return 1; })()`);
+        await ev(`(async () => { window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel(); ${closeWritten(mark)} history.go(-2); return 1; })()`);
         const onC = await shownIs(fc);
         // (the held return released: it lands, stale, and the take-back starts: the second traversal)
         await ev(`(window.__land(), true)`);
@@ -1286,20 +1300,33 @@ try {
       const still = new TextDecoder().decode(new Uint8Array(await bytesOf("/cm/bad.tex.comments.json")));
       check(shownErr && refused && still === "{ this is not json", "comments: an invalid comments file is shown as unreadable, a comment over it refused with the draft kept, the file untouched", { shownErr, refused, still });
     }
-    // (7) LC-T5 / LC-T2: retries exhausted end to end: another writer on every attempt; after 5 conflicts, "busy", the
-    // draft kept in the composer, nothing of it in the file
+    // (7) LC-T5 / LC-T2: another writer on every attempt; the attempt cap OR the operation's deadline ends in
+    // "busy", the draft kept, nothing of it in the file. The core unit separately requires exactly five fast attempts.
     {
       await open(ftex);
       await until(`/Comments \\(\\d+\\)/.test(document.querySelector(".tex-comments")?.textContent ?? "")`, 20000);
       await ev(`(() => { window.__writes = 0; window.__sbTexCommentsWrite = async () => { window.__writes++; const r = await ${W}.read(${J(SIDE)}); await ${W}.write(${J(SIDE)}, r.content, { base: r.entry.rev ?? 0 }); }; return true; })()`);
       await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("A middle"); t.focus(); t.setSelectionRange(i, i + 8); return true; })()`);
       await send("Input.dispatchKeyEvent", { type: "keyDown", key: "m", code: "KeyM", modifiers: 3, windowsVirtualKeyCode: 77 });
+      // Observe completion in the browser, not when the host next polls: a delayed CDP response must not make
+      // premature busy look like deadline exhaustion. Start at the send click, before the operation starts.
+      await ev(`(() => { const timing = window.__conflictTiming = { start: null, end: null };
+        const start = (e) => { if (e.target.closest(".sb-cm-compose .sb-cm-send") && timing.start === null) timing.start = performance.now(); };
+        const observer = new MutationObserver(() => { if (timing.start !== null && timing.end === null && /kept changing/.test(document.querySelector(".sb-cm-compose .sb-cm-err")?.textContent ?? "")) timing.end = performance.now(); });
+        document.addEventListener("click", start, true); observer.observe(document.body, { subtree: true, childList: true, characterData: true });
+        window.__stopConflicts = () => { observer.disconnect(); document.removeEventListener("click", start, true); }; return true; })()`);
       await post("never lands");
       const busy = await until(`/kept changing/.test(document.querySelector(".sb-cm-compose .sb-cm-err")?.textContent ?? "") && document.querySelector(".sb-cm-compose textarea")?.value === "never lands"`, 20000);
-      const writes = await ev(`window.__writes`);
-      await ev(`(delete window.__sbTexCommentsWrite, true)`);
+      const { writes, elapsed } = await ev(`(() => { const { start, end } = window.__conflictTiming; return { writes: window.__writes, elapsed: start === null || end === null ? null : end - start }; })()`);
+      await ev(`(window.__stopConflicts(), delete window.__stopConflicts, delete window.__conflictTiming, delete window.__sbTexCommentsWrite, true)`);
       const dx = await sideDoc();
-      check(busy && writes === 5 && !dx.threads.some((t) => t.messages.some((m) => m.text.value === "never lands")), "comments: on a conflict every attempt, five attempts then busy, the draft kept, nothing written", { busy, writes });
+      // The core also stops before sleeping if the next jittered backoff would reach the deadline.
+      // Use this attempt's maximum permitted backoff, not the largest backoff of any attempt.
+      const backoff = writes > 0 && writes < C.LIMITS.attempts ? Math.round(C.LIMITS.backoffMs[writes - 1] * 1.25) : 0;
+      check(busy && Number.isInteger(writes) && writes >= 0 && writes <= C.LIMITS.attempts && elapsed !== null &&
+        (writes === C.LIMITS.attempts || elapsed + backoff >= C.LIMITS.deadlineMs) &&
+        !dx.threads.some((t) => t.messages.some((m) => m.text.value === "never lands")),
+        "comments: on a conflict every attempt, the attempt cap or deadline then busy, the draft kept, nothing written", { busy, writes, elapsed, backoff });
     }
     // (8) PR 316's bounds on re-finding and drawing, measured and printed: slices at most 8 ms up to 256 KiB and 32 ms
     // up to 2 MiB (the source limit); drawing and the list bounded by what is near the view (300 and 2,000 threads);
@@ -1628,6 +1655,22 @@ try {
   const mOn = await middle("?latex=1");
   check(mOn.rows && nothing(mOn["/mid.csv"]), "flag on: a middle-click on a non-.tex file does nothing (no preview here, no tab)", mOn);
   check(mOn.rows && mOn["/mid.tex"] && mOn["/mid.tex"].opened.length === 1 && mOn["/mid.tex"].opened[0].includes("?tex=" + midFid) && !mOn["/mid.tex"].preview && mOn["/mid.tex"].here, "flag on: a middle-click on a .tex file opens the editor in a new tab only", mOn);
+  // ---- a code file clicked in the file panel while a .tex is open (William, Nov 21): its own page (/?code=<fid>), as
+  // from a notebook, never the data-file preview over the editor; left by the LaTeX page's way out, its edit written
+  {
+    const pyFid = await mk("/from-tex.py", enc("print(1)\n")), texFid = await mk("/from-tex.tex", enc(DOC));
+    await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
+    await open(texFid);
+    const sel = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
+    const rows = await until(`!!document.querySelector(${sel("/from-tex.py")})`, 20000);
+    await ev(`(() => { const s = document.querySelector(".tex-src"); s.focus(); s.setSelectionRange(s.value.length, s.value.length); document.execCommand("insertText", false, "% typed before leaving\\n"); return 1; })()`);
+    if (rows) await ev(`(document.querySelector(${sel("/from-tex.py")}).click(), true)`);
+    const moved = rows && await until(`new URLSearchParams(location.search).get("code") === ${JSON.stringify(pyFid)} && !!window.sagebrush?.code`, 30000);
+    const preview = await ev(`!!document.querySelector(".sbfprev")`);
+    const written = await ev(`${W}.read("/from-tex.tex").then((r) => new TextDecoder().decode(r.content).includes("% typed before leaving"))`);
+    check(moved && !preview && written, "a .py clicked in the file panel with a .tex open: the code page (/?code=), not the preview; the .tex's edit written first", { rows, moved, preview, written });
+    await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
+  }
   // ---- U1 (William, Nov 2 evening): with a BOARD open, a .tex file clicked in the file panel did nothing. It opens the
   // LaTeX editor (the notebook page's /?tex=<fid>): a click here, the board left the way any open leaves it; a
   // middle-click in a new tab; any other file still its preview, the board kept
@@ -1775,7 +1818,6 @@ try {
   check(latexFetches().some((u) => /sagebrush-latex\.js/.test(u)) && latexFetches().some((u) => /sagebrush-latex-worker\.js/.test(u)), "the page and its worker fetched now", latexFetches());
   // (grader's #966 TESTS966-1: a browser without WebMCP (navigator.modelContext) never fetches the agent tools' chunk)
   check(!(await ev(`"modelContext" in navigator`)) && !latexFetches().some((u) => /sagebrush-latex-tools\.js/.test(u)), "…and not the agent tools' chunk: this browser has no WebMCP", latexFetches());
-  check(!latexFetches().some((u) => /sagebrush-latex-examples\.js/.test(u)), "…and not the examples' chunk: opening a .tex doesn't fetch it", latexFetches());
   const rev0 = await ev(`${W}.stat("/t/doc.tex").then((e) => e.rev ?? 0)`);
   await send("Runtime.evaluate", { expression: `document.querySelector(".tex-src").focus()` });
   await ctrlS();
@@ -2612,7 +2654,8 @@ try {
   // A7: leaving the page right after an edit, within its save delay (the two-device audit: the edit was in neither the
   // file nor the other device): a notebook clicked in the files waits for the edit's write, held here, and goes once it
   // is written, the edit in the file; a write that fails asks first, and No keeps the page and the text
-  const readUx = () => ev(`${W}.read("/t/ux.tex").then((r) => new TextDecoder().decode(r.content), (e) => "ERR " + (e?.message ?? e))`);
+  // (the workspace of the page shown: the notebook page's, or the LaTeX page's own (__sbTexWs, the test build's))
+  const readUx = async () => { await until(`!!(window.sagebrush?.workspace ?? window.__sbTexWs)`, 15000); return ev(`(window.sagebrush?.workspace ?? window.__sbTexWs)?.read("/t/ux.tex").then((r) => new TextDecoder().decode(r.content), (e) => "ERR " + (e?.message ?? e)) ?? "no workspace"`); };
   const typeEnd = async (text) => { await ev(`(() => { const t = document.querySelector(".tex-src"); t.focus(); t.setSelectionRange(t.value.length, t.value.length); return 1; })()`); await send("Input.insertText", { text }); };
   {
     await open(fu); await until(`!!${rowOf("/uxnb.ipynb")}`, 15000);
@@ -2640,6 +2683,44 @@ try {
     // (the write let succeed again and saved, so nothing is left to ask about)
     await ev(`(delete window.__sbTexSaveWrite, true)`); await ctrlS(); await savedNow();
     check((await readUx()).endsWith("% refused leave"), "A7: …then saved with Ctrl+S: the edit in the file");
+  }
+  // A7: every way out of the page waits for an edit's write, held here, and goes once it is written, the edit in the
+  // file: with the Navigation API, the page's own reload and replace; without it (a browser that has none, as Safari
+  // before it, or a WebView), a notebook and a board from the files beside it, and the File menu's New notebook and New
+  // board. (A code file clicked there opens its preview, in place: no way out) (A reload by the browser itself can't be held by a page: not here)
+  {
+    const nbRef7 = await ev(`${W}.list("/").then((l) => l.find((e) => e.path === "/uxnb.ipynb")?.ref ?? null)`);
+    await ev(`${W}.create("/uxboard.board.json").then(() => 1)`);
+    const heldExit = async (what, act, gone, noNav, readFrom = null) => {
+      await open(fu); await until(`!!${rowOf("/uxnb.ipynb")} && !!${rowOf("/uxboard.board.json")}`, 15000);
+      const api = await ev(`!!window.navigation`);
+      await ev(`(() => { window.__heldW = 0; window.__hold = new Promise((r) => (window.__rel = r)); window.__sbTexSaveWrite = () => (window.__heldW++, window.__hold); return true; })()`);
+      const tag = "% " + what;
+      await typeEnd(tag);
+      await mark();
+      await ev(act);
+      await sleep(1500);
+      const waiting = await ev(`({ page: !!document.querySelector(".tex-page"), url: location.search, held: window.__heldW, ro: document.querySelector(".tex-src")?.readOnly })`).catch((e) => ({ gone: String(e).slice(0, 80) }));
+      check(api === !noNav && waiting.page === true && /tex=/.test(waiting.url) && waiting.held >= 1 && waiting.ro === true, `A7${noNav ? " (no Navigation API)" : ""}: ${what} right after an edit, its write held: the page waits, held read-only`, { api, ...waiting });
+      await ev(`(window.__rel?.(), true)`).catch(() => {});
+      const went = await fresh(gone, 30000).catch(() => false);
+      // (a page with no workspace of its own, the agents page: the file read back from the editor's page)
+      if (went && readFrom) await go(readFrom);
+      const bytes = went ? await readUx() : "";
+      check(went && bytes.endsWith(tag), `A7${noNav ? " (no Navigation API)" : ""}: …${what}, the write let go: gone, and the edit is in the file`, { went, url: went ? await ev(`location.pathname + location.search`) : null, tail: bytes.slice(-40) });
+    };
+    const notTex = `!document.querySelector(".tex-page") && !!${W}`;
+    await heldExit("the page's own reload", `(location.reload(), true)`, `!!document.querySelector(".tex-page .tex-src") && !!window.__sbTexWs`, false);
+    await heldExit("the page's own replace", `(location.replace("/?nb=" + ${JSON.stringify(nbRef7)}), true)`, notTex, false);
+    const hide = await send("Page.addScriptToEvaluateOnNewDocument", { source: "try { Object.defineProperty(window, 'navigation', { value: undefined, configurable: true }); } catch {}" });
+    await heldExit("a notebook clicked in the files", `(${rowOf("/uxnb.ipynb")}.click(), true)`, notTex, true);
+    await heldExit("a board clicked in the files", `(${rowOf("/uxboard.board.json")}.click(), true)`, `/board/.test(location.pathname)`, true);
+    await heldExit("the File menu's New notebook", `(document.querySelector('.tex-filemenu [data-f="texnb"]').click(), true)`, notTex, true);
+    await heldExit("the File menu's New board", `(document.querySelector('.tex-filemenu [data-f="texboard"]').click(), true)`, `/board/.test(location.pathname)`, true);
+    // (the page's home link, a plain click; and the files' Agents… (the hosting page's way out by its board path))
+    await heldExit("the Sagebrush home link", `(document.querySelector(".tex-page .tex-home").click(), true)`, `location.search.startsWith("?home") && !document.querySelector(".tex-page")`, true);
+    await heldExit("the files' Agents…", `(document.querySelector("#wssidebar .sbfiles .fagents").click(), true)`, `/agents/.test(location.pathname)`, true, base + "?latex=1");
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: hide.identifier });
   }
   await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
   // A2: an unclosed formula ends at a blank line: shown with a note, the rest of the document rendered as text
@@ -3044,10 +3125,121 @@ try {
       const run = i("tex-run"); return { run, toggle: i("tex-toggle"), file: i("tex-filebtn"), label: h[run]?.textContent ?? null, hidden: h[run]?.hidden ?? null }; })()`);
     check(bar.run >= 0 && bar.label === "Run" && bar.hidden === false && bar.run === bar.toggle + 1 && (bar.file < 0 || bar.file < bar.run),
       "Run: in the toolbar, right after the preview toggle (after File ▾ where there is one), shown for a document with SageTeX code", bar);
+    // the view (William, Nov 18: hide the source, one click): Source | Both | PDF, each a button of the toggle, remembered
+    // for this file in this browser; a file with none kept opens with both on a wide page, the source on a narrow one
+    {
+      const vis = () => ev(`(() => { const s = (c) => getComputedStyle(document.querySelector(c)).display !== "none";
+        const m = document.querySelector(".tex-main").getBoundingClientRect().width, r = document.querySelector(".tex-right").getBoundingClientRect().width;
+        return { view: document.querySelector(".tex-page").dataset.view, src: s(".tex-left"), doc: s(".tex-right"), full: r >= m - 2, both: s('.tex-view [data-view="both"]'),
+          pressed: [...document.querySelectorAll(".tex-view button")].map((b) => b.dataset.view + ":" + b.getAttribute("aria-pressed")).join() }; })()`);
+      const pick = (v) => ev(`(document.querySelector('.tex-view [data-view="${v}"]').click(), true)`);
+      const v0 = await vis();
+      check(v0.view === "both" && v0.src && v0.doc && !v0.full && v0.pressed === "source:false,both:true,pdf:false", "view: a file with none kept opens with both on a wide page, Both pressed", v0);
+      await pick("pdf");
+      const v1 = await vis();
+      check(v1.view === "pdf" && !v1.src && v1.doc && v1.full && v1.pressed === "source:false,both:false,pdf:true", "view: PDF shows the document alone, the page's width", v1);
+      await open(fr);
+      const v2 = await vis();
+      const fo = await mk("/t/view-other.tex", enc("\\documentclass{article}\n\\begin{document}\nOther.\n\\end{document}\n"));
+      await open(fo);
+      const v3 = await vis();
+      await pick("source");
+      const v4 = await vis();
+      check(v2.view === "pdf" && v3.view === "both" && v4.view === "source" && v4.src && !v4.doc, "view: kept for this file (reopened: PDF), another file its own (both, then Source shows the source alone)", { v2, v3, v4 });
+      await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+      const fn = await mk("/t/view-new.tex", enc("\\documentclass{article}\n\\begin{document}\nNew.\n\\end{document}\n"));
+      await open(fn);
+      const v5 = await vis();
+      await open(fr);
+      const v6 = await vis();
+      await send("Emulation.clearDeviceMetricsOverride");
+      check(v5.view === "source" && v5.src && !v5.doc && !v5.both && v6.view === "pdf" && !v6.src && v6.doc, "view: on a phone, a file with none kept opens with the source, Both isn't offered, and a kept PDF shows the document", { v5, v6 });
+      await open(fr);
+      await pick("both");
+    }
     // (never on open: no runner frame, no worker script for it, no results file, after the preview has rendered)
     await sleep(1500);
     const onOpen = { runner: requests.slice(n0).filter((u) => /\/runner\/|sagebrush-worker\.js/.test(u)), frames: await ev(`document.querySelectorAll("iframe[sandbox]").length`), results: await resultsOf("/t/run.tex"), chips: await ev(`document.querySelectorAll(".tex-preview .sagechip").length`) };
     check(onOpen.runner.length === 0 && onOpen.frames === 0 && onOpen.results === null && onOpen.chips >= 2, "Run: nothing runs on open (no runner, no worker, no results file; the items show as not run)", onOpen);
+    // (in the editor, where Run is, a code item not run yet says how to run it; the published page,
+    //  examples and the CLI, with no Run, keep "not run": sagetex.mjs RUN_HINT)
+    const hint = await ev(`[...document.querySelectorAll(".tex-preview .sagechip.s-notrun")].map((c) => c.textContent)`);
+    check(hint.some((t) => /^(Sage|Python|Magma) item \d+: not run yet \(press Run or Shift\+Enter\)$/.test(t)) && !hint.some((t) => /item \d+: not run$/.test(t)), "Run: an item not run yet says \"not run yet (press Run or Shift+Enter)\" in the editor", hint);
+    // embedded (?embed=1: the Agents page's pane frames the editor; the page's frame-ancestors 'self' admits this site's
+    // own frames only): the document alone, no Files, home, title, File menu, Agent or Share, no pairing of its own (the
+    // agent chunk never fetched, though this browser remembers a grant), and the pane's may-close answered by the
+    // frame's leave guard: at once with nothing pending, and only once a held write is written
+    {
+      const hdr = await ev(`fetch("/").then((r) => ({ csp: r.headers.get("content-security-policy") ?? "", xfo: r.headers.get("x-frame-options") }))`);
+      check(/frame-ancestors 'self'/.test(hdr.csp) && hdr.xfo === "SAMEORIGIN", "embed: the editor's page may be framed by this site's own pages only (frame-ancestors 'self', X-Frame-Options SAMEORIGIN)", hdr);
+      const fe = await mk("/t/embed.tex", enc("\\documentclass{article}\n\\begin{document}\nEmbedded.\n\\end{document}\n"));
+      // (a grant this browser remembers: put through the editor page's own workspace, the test build's __sbTexWs)
+      await ev(`window.__sbTexWs.putAgentGrant("embedtest", { id: "embedtest", folders: ["/"], write: true, run: true, expires: null })`);
+      await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+      const n0 = requests.length;
+      await ev(`(() => { const f = document.createElement("iframe"); f.id = "sbembed"; f.style.cssText = "position:fixed;left:0;top:0;width:1000px;height:700px;z-index:99999;border:0;background:#fff"; f.src = "/?tex=${fe}&latex=1&embed=1"; document.body.append(f); return true; })()`);
+      const D = `document.getElementById("sbembed").contentDocument`;
+      await until(`!!${D}?.querySelector(".tex-page .tex-preview")?.textContent.includes("Embedded")`, 30000);
+      await sleep(1500);
+      const st = await ev(`(() => { const d = ${D}; const gone = (c) => { const e = d.querySelector(c); return !e || e.hidden || getComputedStyle(e).display === "none"; };
+        return { view: d.querySelector(".tex-page").dataset.view, back: gone(".tex-back"), home: gone(".tex-home"), title: gone(".tex-title"), file: gone(".tex-filebtn"), agent: gone(".tex-agent"), share: gone(".tex-sharebtn"),
+          left: d.querySelector(".tex-page").getBoundingClientRect().left, focusInside: document.activeElement?.id === "sbembed" }; })()`);
+      const agentFetched = requests.slice(n0).filter((u) => /sagebrush-latex-agent/.test(u));
+      check(st.view === "pdf" && st.back && st.home && st.title && st.file && st.agent && st.share && st.left === 0 && !st.focusInside && agentFetched.length === 0,
+        "embed: the frame shows the document alone, without Files, home, title, File, Agent or Share, takes no focus, and starts no pairing (no agent chunk, a grant remembered)", { st, agentFetched });
+      const ask = (id) => ev(`new Promise((res) => { const f = document.getElementById("sbembed"); const h = (e) => { if (e.source === f.contentWindow && e.data?.t === "may-close" && e.data.id === ${JSON.stringify(id)}) { removeEventListener("message", h); res(e.data); } }; addEventListener("message", h); f.contentWindow.postMessage({ t: "may-close", id: ${JSON.stringify(id)} }, location.origin); setTimeout(() => res(null), 15000); })`);
+      const a1 = await ask("q1");
+      check(a1?.ok === true, "embed: the pane's may-close, nothing pending: answered ok at once", a1);
+      // (a may-close that isn't its parent's: from a frame beside it of this origin (the wrong source), and from a
+      //  sandboxed frame, whose origin is opaque (the wrong origin); each posted by code in that frame (a CDP isolated
+      //  world there), so the message's source is that frame. Neither is answered; the parent's next one still is.
+      //  The parent of another origin can't be made here: frame-ancestors 'self' refuses it, as checked above)
+      {
+        await ev(`(() => { window.__stray = []; addEventListener("message", (e) => { if (e.data?.t === "may-close") window.__stray.push(e.data.id); });
+          for (const [nm, sb] of [["sbsib", null], ["sbnull", "allow-scripts"]]) { const f = document.createElement("iframe"); f.name = nm; if (sb) f.setAttribute("sandbox", sb); f.onload = () => (f.dataset.loaded = "1"); f.src = "/manifest.webmanifest"; document.body.append(f); } return true; })()`);
+        await until(`[...document.querySelectorAll("iframe[name^=sb]")].every((f) => f.dataset.loaded === "1")`, 15000);
+        const inFrame = async (name, expression) => {
+          const t = await send("Page.getFrameTree");
+          const find = (x) => x.frame.name === name ? x.frame : (x.childFrames ?? []).map(find).find(Boolean);
+          const f = find(t.frameTree);
+          if (f) {
+            const w = await send("Page.createIsolatedWorld", { frameId: f.id, worldName: "sbtest" });
+            return (await send("Runtime.evaluate", { expression, contextId: w.executionContextId, returnByValue: true })).result?.value;
+          }
+          // (out of the page's process, as Chrome puts a sandboxed frame: its own target, evaluated in its session)
+          const ti = (await send("Target.getTargets")).targetInfos.find((x) => x.type === "iframe" && /manifest\.webmanifest/.test(x.url));
+          if (!ti) return "no frame target";
+          const { sessionId } = await send("Target.attachToTarget", { targetId: ti.targetId, flatten: true });
+          const r = await new Promise((res) => { const id = ++n; waiting.set(id, res); ws.send(JSON.stringify({ id, sessionId, method: "Runtime.evaluate", params: { expression, returnByValue: true } })); });
+          await send("Target.detachFromTarget", { sessionId });
+          return r?.result?.value ?? JSON.stringify(r).slice(0, 300);
+        };
+        const sib = await inFrame("sbsib", `(parent.document.getElementById("sbembed").contentWindow.postMessage({ t: "may-close", id: "s1" }, location.origin), self.origin)`);
+        const opaque = await inFrame("sbnull", `(() => { for (let i = 0; i < parent.frames.length; i++) parent.frames[i].postMessage({ t: "may-close", id: "o1" }, "*"); return self.origin; })()`);
+        await sleep(2000);
+        const stray = await ev(`window.__stray.slice()`);
+        const a0 = await ask("q0");
+        check(sib === new URL(base).origin && opaque === "null" && !stray.includes("s1") && !stray.includes("o1") && a0?.ok === true,
+          "embed: a may-close from a frame beside it (this origin, not its parent) or from an opaque origin is ignored, unanswered; its parent's is answered", { sib, opaque, stray, a0 });
+        await ev(`(document.querySelectorAll("iframe[name^=sb]").forEach((f) => f.remove()), true)`);
+      }
+      // (a held write: typed in the frame's source, the answer waits for it, then ok)
+      const F = `document.getElementById("sbembed").contentWindow`;
+      await ev(`(() => { const w = ${F}; w.__hold = new Promise((r) => (w.__rel = r)); w.__sbTexSaveWrite = () => w.__hold; w.document.querySelector('.tex-view [data-view="source"]').click(); const t = w.document.querySelector(".tex-src"); t.focus(); t.setRangeText(" Typed.", t.value.length, t.value.length, "end"); t.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+      await sleep(1200);
+      let a2 = null;
+      const p2 = ask("q2").then((r) => (a2 = r));
+      await sleep(2500);
+      const early = a2;
+      await ev(`(${F}.__rel(), delete ${F}.__sbTexSaveWrite, true)`);
+      await p2;
+      const bytes = await ev(`${W}.read("/t/embed.tex").then((r) => new TextDecoder().decode(r.content))`);
+      check(early === null && a2?.ok === true && /Typed\./.test(bytes), "embed: with a write held, the may-close answer waits for it, then ok, the edit in the file", { early, a2, bytes: bytes.slice(-40) });
+      await ev(`(document.getElementById("sbembed").remove(), true)`);
+      await open(fr);
+      await until(`!!window.__sbTexWs`, 20000);
+      await ev(`window.__sbTexWs.putAgentGrant("embedtest", null)`);
+    }
     // (Run's code is a chunk of its own, /sagebrush-latex-run.js (daybreak2, #551's group cap): not fetched by the editor's
     //  load or by any document opened so far, Run shown or not; the first Run fetches it once, later Runs not again)
     const runChunk = () => byId.filter((x) => /\/sagebrush-latex-run\.js(\?|$)/.test(x.url));
@@ -3084,6 +3276,59 @@ try {
     await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
     const ranAgain = await statusIs(/Ran 5 SageTeX items in [0-9.]+ s$/, 60000);
     check(ranAgain && runChunk().length === 2, "Run's chunk: a second Run on the page uses the one fetched, not fetched again", { ranAgain, fetched: runChunk().length });
+    // (a .tex the paired agent made runs once by itself when it is shown (decided Nov 19 2026, workspace/
+    //  agent-made-tex.ts): shown at a revision with code not run yet, unedited, the editor asks the pairing's page over
+    //  the site's channel, once for that revision; it runs only on the yes to its own question, and only if it still
+    //  shows that revision unedited; asked again when the pairing says its agent made the revision shown. Here this
+    //  page plays the pairing's (its side: test-agent-pair.mjs), the editor in a frame of it, as the Agents page's pane)
+    {
+      const TXT = (x) => `\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\nMade: $\\sage{${x}}$.\n\\end{document}\n`;
+      const fa = await mk("/t/made.tex", enc(TXT("6*7"))), fb = await mk("/t/made-b.tex", enc(TXT("5*5")));
+      await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+      await ev(`(window.__asks = [], window.__bc = new BroadcastChannel("sagebrush-agent-made"), window.__bc.onmessage = (e) => { if (e.data?.t === "tex-may-run" && !("ok" in e.data)) window.__asks.push(e.data); }, true)`);
+      const frame = (fid) => ev(`(() => { document.getElementById("sbmade")?.remove(); const f = document.createElement("iframe"); f.id = "sbmade"; f.style.cssText = "position:fixed;left:0;top:0;width:1000px;height:700px;z-index:99999;border:0;background:#fff"; f.src = "/?tex=${fid}&latex=1&embed=1"; document.body.append(f); return true; })()`);
+      const D = `document.getElementById("sbmade").contentDocument`;
+      const asks = () => ev(`window.__asks.slice()`);
+      const say = (m) => ev(`(window.__bc.postMessage(${JSON.stringify(m)}), true)`);
+      // (any sign of a Run within 8 s: its button no longer "Run" (Starting Sage…, Running…) or a "Ran …" said)
+      const runs = () => until(`(() => { const d = ${D}; return d.querySelector(".tex-head .tex-run")?.textContent !== "Run" || /Ran /.test(d.querySelector(".tex-status")?.textContent ?? ""); })()`, 8000);
+      const fstate = () => ev(`({ status: ${D}.querySelector(".tex-status")?.textContent ?? "", pdf: ${D}.querySelector(".tex-preview")?.textContent.replace(/\\s+/g, " ").slice(0, 120) ?? "" })`);
+      await frame(fa);
+      await until(`!!${D}?.querySelector(".tex-page .tex-preview")?.textContent.includes("Made")`, 30000);
+      const r1 = await runs();
+      const a1 = await asks();
+      check(a1.length === 1 && a1[0].fid === fa && a1[0].rev === 0 && /^[0-9a-f-]{36}$/.test(a1[0].id), "agent-made: shown with code not run yet, unedited, the editor asks once, for this file at its revision", a1);
+      const s1 = await fstate();
+      check(!r1 && (await resultsOf("/t/made.tex")) === null, "agent-made: no answer, nothing runs", s1);
+      await say({ t: "tex-may-run", id: "not-its-question", ok: true });
+      const r2 = await runs();
+      const s2 = await fstate();
+      check(!r2 && (await resultsOf("/t/made.tex")) === null, "agent-made: a yes to another question: nothing runs", s2);
+      await say({ t: "tex-made", fid: fa, rev: 0 });
+      await until(`window.__asks.length === 2`, 5000);
+      const a2 = await asks();
+      check(a2.length === 2 && a2[1].fid === fa && a2[1].rev === 0 && a2[1].id !== a2[0].id, "agent-made: the pairing says its agent made this revision: the editor asks again", a2);
+      await say({ t: "tex-may-run", id: a2[1]?.id, ok: true });
+      const ran = await until(`/Ran 1 SageTeX item/.test(${D}.querySelector(".tex-status")?.textContent ?? "")`, 120000);
+      await sleep(800);
+      const s3 = await fstate(), res = await resultsOf("/t/made.tex");
+      check(ran && /Made: ?42/.test(s3.pdf) && typeof res === "string", "agent-made: the yes to its question: its own Run runs it, the result in the PDF, saved as a Run's", { s3, res: res?.slice(0, 80) });
+      await say({ t: "tex-made", fid: fa, rev: 0 });
+      await say({ t: "tex-made", fid: fb, rev: 0 });
+      await sleep(1500);
+      check((await asks()).length === 2, "agent-made: once it has run, or for another file, nothing is asked", await asks());
+      // (an edit after the question: the yes runs nothing)
+      await frame(fb);
+      await until(`!!${D}?.querySelector(".tex-page .tex-preview")?.textContent.includes("Made")`, 30000);
+      await until(`window.__asks.length === 3`, 5000);
+      const qb = (await asks())[2];
+      await ev(`(() => { const d = ${D}; d.querySelector('.tex-view [data-view="source"]').click(); const t = d.querySelector(".tex-src"); t.setRangeText("% mine\\n", t.value.length, t.value.length, "end"); t.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+      await say({ t: "tex-may-run", id: qb?.id, ok: true });
+      const r4 = await runs();
+      const s4 = await fstate();
+      check(qb?.fid === fb && !r4 && (await resultsOf("/t/made-b.tex")) === null, "agent-made: edited after it asked, the yes runs nothing", { qb, s4 });
+      await ev(`(document.getElementById("sbmade").remove(), window.__bc.close(), true)`);
+    }
     // (PythonTeX, step (a): \py and pycode run by the same Run, as Python; their results read back by the worker's
     //  PythonTeX chunk (sagebrush-latex-pythontex.js; when it is fetched, only for a result to read back, is pinned in
     //  test-latex-pythontex.mjs: the page doesn't see the worker's own requests). The Run button says what it runs
@@ -3099,6 +3344,97 @@ try {
       check(title === "Run the document's Python code in this browser: Shift+Enter" && ranPy && shown,
         "PythonTeX: Run runs \\py and pycode; their results read back where they stand (pycode's \\textbf bold), no item left not run; the Run button says it runs PythonTeX",
         { title, ranPy, shown, html: await ev(`document.querySelector(".tex-preview").innerHTML.slice(0, 1500)`) });
+      // (L5, Nov 10: the code a sageblock shows is coloured as the notebook colours it: hl.ts, its own chunk,
+      //  fetched only once a preview has such a block; drawn as text and fixed-class spans, never as HTML; refused, the
+      //  code stays plain; a render while it is on its way is coloured once it comes; many blocks, a few at a time)
+      {
+        const blockDoc = (b) => "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n" + b + "\\end{document}\n";
+        const block = (code) => "\\begin{sageblock}\n" + code + "\n\\end{sageblock}\n";
+        const CODE = "for k in range(3):\n    s = '<b>&amp;</b>' < 2  # not HTML";
+        const hlFetched = () => requests.filter((u) => /sagebrush-latex-hl\.js/.test(u)).length;
+        const PRE = `document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock")`;
+        // (no block: never fetched)
+        requests.length = 0;
+        await open(await mk("/t/hl-none.tex", enc(blockDoc("No block here: $\\sage{1+1}$.\n"))));
+        await until(`(document.querySelector(".tex-preview")?.textContent ?? "").includes("No block here")`, 20000);
+        await sleep(800);
+        check(hlFetched() === 0, "L5: a preview without a code block never fetches the highlighting chunk", { fetched: hlFetched() });
+        // (a block: coloured, its text the same, nothing in it parsed as HTML; the chunk fetched once)
+        const fhl = await mk("/t/hl.tex", enc(blockDoc(block(CODE))));
+        requests.length = 0;
+        await open(fhl);
+        const coloured = await until(`!!${PRE}?.matches("[data-hl]") && !!${PRE}.querySelector(".hk")`, 20000);
+        const shown = await ev(`(() => { const p = ${PRE}; return { text: p?.textContent, tags: [...new Set([...(p?.querySelectorAll("*") ?? [])].map((e) => e.tagName + "." + e.className))] }; })()`);
+        check(coloured && shown.text?.trim() === CODE && shown.tags.length > 0 && shown.tags.every((t) => /^SPAN\.h[a-z]$/.test(t)) && hlFetched() === 1,
+          "L5: a sageblock's code is coloured, its text the same and none of it HTML (no <b> from '<b>&amp;</b>'); the chunk fetched once", { coloured, shown, fetched: hlFetched() });
+        // (a Magma block beside a Sage one: the Sage one coloured, the Magma one left plain, as its comments and strings
+        //  aren't Sage's)
+        await open(await mk("/t/hl-magma.tex", enc(blockDoc(block("x = 1  # sage") + "\\begin{magmablock}\nx := 'a'; // it's Magma\n\\end{magmablock}\n"))));
+        const bothShown = await until(`!!document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock[data-hl]") && !!document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock.magma")`, 20000);
+        await sleep(800);
+        const magmaPre = await ev(`(() => { const p = document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock.magma"); return p && { hl: p.hasAttribute("data-hl"), spans: p.querySelectorAll("span").length, text: p.textContent }; })()`);
+        check(bothShown && magmaPre && !magmaPre.hl && magmaPre.spans === 0 && magmaPre.text.includes("// it's Magma"), "L5: a Magma block stays plain beside a coloured Sage block", magmaPre);
+        // (many blocks: all coloured, a few at a time: no long task on a timing box; reported on a build box)
+        await ev(watchLt);
+        await typeInto(blockDoc(Array.from({ length: 300 }, (_, k) => block("for i in range(" + k + "):\n    x = i * " + k + "  # block " + k)).join("\n")));
+        const allDone = await until(`document.querySelectorAll(".tex-preview .ch:not([hidden]) pre.sageblock").length === 300 && document.querySelectorAll(".tex-preview .ch:not([hidden]) pre.sageblock:not([data-hl])").length === 0`, 30000);
+        const ltHl = await ev(`window.__lt`);
+        check(allDone, "L5: 300 blocks: all coloured", { allDone, n: await ev(`document.querySelectorAll(".tex-preview .ch:not([hidden]) pre.sageblock[data-hl]").length`) });
+        if (BOX === "timing") check(ltHl.every((d) => d <= 50), "L5: 300 blocks coloured with no long task over 50 ms (a timing box)", ltHl);
+        else console.log("timing, reported, not gated (a build box): long tasks while 300 blocks were coloured (ms):", JSON.stringify(ltHl));
+        await typeInto(blockDoc(block(CODE)));
+        await savedNow(10000);
+        // (refused: the code stays plain, with no error. The cache off for this and the next row, so the chunk is asked
+        //  for over the network each time, where the Fetch domain sees it, not taken from the memory cache)
+        await send("Network.setCacheDisabled", { cacheDisabled: true });
+        const e0 = errors.length;
+        onPaused = (p) => { send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionFailed" }); };
+        await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-hl.js*" }] });
+        await open(fhl);
+        await until(`!!${PRE}`, 20000);
+        await sleep(1500);
+        const plain = await ev(`(() => { const p = ${PRE}; return { spans: p.querySelectorAll("span").length, text: p.textContent }; })()`);
+        await send("Fetch.disable"); onPaused = null;
+        check(plain.spans === 0 && plain.text.trim() === CODE && errors.length === e0, "L5: the highlighting chunk refused: the code stays plain, and no error", { plain, errors: errors.slice(e0) });
+        // (renders while the chunk is on its way (astra's SEC on #1009): 20 of them make one wait and one queue, and once
+        //  it comes the newest render's block is the one coloured)
+        let held = null;
+        onPaused = (p) => { held = p.requestId; };
+        await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-hl.js*" }] });
+        await open(fhl);
+        await until(`!!${PRE}`, 20000);
+        for (let i = 0; i < 100 && !held; i++) await sleep(100);
+        for (let i = 1; i <= 20; i++) { await typeInto(blockDoc(block(CODE + "\nn = " + i))); await sleep(60); }
+        const rerendered = await until(`(${PRE}?.textContent ?? "").includes("n = 20")`, 20000);
+        if (held) await send("Fetch.continueRequest", { requestId: held });
+        const late = await until(`(() => { const p = ${PRE}; return !!p && p.textContent.includes("n = 20") && !!p.querySelector(".hn"); })()`, 20000);
+        await sleep(300);
+        const queues = await ev(`window.__sbHlCalls ?? 0`);
+        await send("Fetch.disable"); onPaused = null;
+        check(!!held && rerendered && late && queues === 1 && errors.length === e0, "L5: 20 renders while the chunk is on its way: one call to colour once it comes, and the newest block coloured", { held: !!held, rerendered, late, queues, errors: errors.slice(e0) });
+        await typeInto(blockDoc(block(CODE)));
+        await savedNow(10000);
+        // (the page goes to another file while the chunk is on its way: the first file's wait colours nothing; the other's
+        //  block is coloured by its own)
+        const fother = await mk("/t/hl-other.tex", enc(blockDoc(block("OTHER = 1"))));
+        held = null;
+        onPaused = (p) => { held = p.requestId; };
+        await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-hl.js*" }] });
+        await open(fhl);
+        await until(`!!${PRE}`, 20000);
+        for (let i = 0; i < 100 && !held; i++) await sleep(100);
+        await ev(`(window.__sbTex({ path: "/t/hl-other.tex", fid: ${JSON.stringify(fother)} }), 1)`);
+        await until(`(${PRE}?.textContent ?? "").includes("OTHER")`, 20000);
+        if (held) await send("Fetch.continueRequest", { requestId: held });
+        const otherDone = await until(`!!${PRE}?.querySelector(".hn")`, 20000);
+        await sleep(300);
+        const queues2 = await ev(`window.__sbHlCalls ?? 0`);
+        await send("Fetch.disable"); onPaused = null;
+        await send("Network.setCacheDisabled", { cacheDisabled: false });
+        check(!!held && otherDone && queues2 === 1 && errors.length === e0, "L5: the page leaves a file while the chunk is on its way: the left file's wait colours nothing, the new one's block is coloured", { held: !!held, otherDone, queues2, errors: errors.slice(e0) });
+        await typeInto(blockDoc(block(CODE)));
+        await savedNow(10000);
+      }
       // (William's L3, Nov 10: Shift+Enter moved the preview by a page, Follow off: the place the person looks at keeps its
       //  place. Twelve sageblocks, each losing its "not run" chip as the Run's results come; the person looks at the
       //  seventh's code, near the top of the preview, so the groups replaced are the ones in view, which the browser's

@@ -12,7 +12,7 @@ import { join, relative, resolve } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
 import { buildFailure, closeChrome, bounded, track, unlessEnding, inFlight } from "./test-board-journal-lib.mjs";
 // (the example boards are the corpus's, examples/board/<slug>/: file name -> path)
-import { boardFiles } from "../examples/legacy.ts";
+import { boardFiles } from "../examples/boards.ts";
 const EXAMPLES = new Map(boardFiles());
 
 const here = new URL(".", import.meta.url).pathname;

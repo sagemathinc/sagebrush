@@ -16,7 +16,7 @@
 
 import { createHmac, randomUUID } from "crypto";
 import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, realpathSync, statSync, copyFileSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, resolve } from "path";
 import { homedir } from "os";
 import { Worker, parentPort, workerData } from "worker_threads";
 import { sessionLimits, startLimits } from "./limits";
@@ -28,7 +28,7 @@ import { oneLine } from "./terminal-text";
 import { needsMore, completeIn, ipythonSyntax } from "./interactive";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
-import { mimeBundle } from "./runtime/index";
+import { mimeBundle, bundleMetadata, sayNote } from "./runtime/index";
 import { requestCtrlC } from "./runtime/interrupt";
 import { typeName } from "./runtime/object";
 import { exitStatus } from "./notebook-session";
@@ -51,14 +51,16 @@ function jupyterDataDir(args: string[]): string {
   if (i >= 0) {
     const p = args[i + 1];
     if (!p) throw new Error("--prefix needs a directory");
-    return join(p, "share", "jupyter");
+    // (absolute: kernel.json names the files installed under it, and Jupyter
+    // starts the kernel from wherever it is running, not from here)
+    return join(resolve(p), "share", "jupyter");
   }
   if (args.includes("--sys-prefix")) {
     const p = process.env.CONDA_PREFIX || process.env.VIRTUAL_ENV;
     if (!p) throw new Error("--sys-prefix: activate a conda or virtual environment first (or use --prefix DIR)");
     return join(p, "share", "jupyter");
   }
-  if (process.env.JUPYTER_DATA_DIR) return process.env.JUPYTER_DATA_DIR;
+  if (process.env.JUPYTER_DATA_DIR) return resolve(process.env.JUPYTER_DATA_DIR);
   if (process.platform === "darwin") return join(homedir(), "Library", "Jupyter");
   if (process.platform === "win32") return join(process.env.APPDATA || join(homedir(), "AppData", "Roaming"), "jupyter");
   return join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "jupyter");
@@ -105,9 +107,17 @@ function modes(args: string[]): Mode[] {
 
 const LOGO = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="18.75" fill="#AE472A"/><path fill="#FADEB6" d="M14.5 63.4 16.5 61.8 18.8 59.8 25.3 58.4 26.3 56 27.4 54 28.6 52 30.2 50 32.8 48 33.3 43.3 43.5 43.3 43.5 48.6 45.7 48.6 45.7 45 47.3 45 47.3 49.2 47.9 50 49.6 52 43 54.2 37.1 56 34.4 58 31.2 60 29.6 62 28.9 63.4Z"/><path fill="#FADEB6" d="M55.6 63.4 57 62 59.7 60 63.6 58.6 64 55.2 67.7 55.2 67.7 51 68.2 49.6 69.6 49.6 70.4 51 70.4 55 71 56 72 58 76.9 60 79.6 62 81.6 63.4Z"/><path fill="#FADEB6" d="M58 39.5C57.7 40.7 58 44.7 57.6 46.5 57.2 48.3 56.9 49.1 55.6 50.2 54.3 51.4 52.5 52.1 50 53.4 47.5 54.7 42.6 56.8 40.4 58.2 38.2 59.6 36.6 60.7 36.7 62 36.8 63.3 38.6 64.7 41.2 66 43.8 67.3 50.3 68.7 52.4 69.9 54.5 71.1 54.9 72.2 53.8 73.4 52.6 74.6 49.2 75.6 45.5 77 41.8 78.4 34.9 80.6 31.5 82 28.1 83.4 25.4 84.7 25.3 85.4 25.2 86.2 27.7 86.2 31 86.5 34.3 86.8 40.2 87.7 45 87.5 49.8 87.3 55.7 86.4 60 85.2 64.3 84 68.4 82.3 70.6 80.6 72.8 78.9 73.4 76.8 73.3 75 73.2 73.2 72.4 71.5 70 70 67.6 68.5 62.7 67.2 59 66 55.3 64.8 50.2 63.7 48 62.6 45.8 61.5 45.2 60.8 45.9 59.6 46.6 58.4 49.9 56.7 52 55.2 54.1 53.7 57.1 52.3 58.4 50.6 59.7 48.9 59.5 46.9 59.7 45 59.9 43.1 59.7 40.4 59.4 39.5 59.1 38.6 58.3 38.3 58 39.5Z"/><path fill="#BAC49E" d="M59.2 40.8C54.5 36 54.8 28.5 60 24 65 19.6 72 17.5 79.3 13.4 79 21 77.5 28.5 71.5 33.6 67 37.4 62.5 39.3 59.9 40.8Z"/><path fill="#AE472A" d="M57.7 37C57.3 31 62 26.2 72.6 22.3 66 26.6 61.6 31.2 59.5 36.8Z"/></svg>`;
 
+/** How a kernel's figures are shown (lib/_graphics.py figures): its --figures */
+export const FIGURE_MODES = ["auto", "svg", "png", "both"];
+
 export function installKernel(args: string[], uninstall = false): number {
   try {
-    const base = join(jupyterDataDir(args), "kernels");
+    const f = args.indexOf("--figures");
+    const figures = f >= 0 ? args[f + 1] : null;
+    if (figures !== null && !FIGURE_MODES.includes(figures)) throw new Error(`--figures must be ${FIGURE_MODES.join(", ")}, not ${figures}`);
+    // Jupyter starts in the notebook's directory, not the installer's.
+    // In particular the copied bundle in argv must never stay relative.
+    const base = resolve(jupyterDataDir(args), "kernels");
     for (const mode of modes(args)) {
       const spec = SPECS[mode];
       const dir = join(base, spec.dir);
@@ -126,7 +136,7 @@ export function installKernel(args: string[], uninstall = false): number {
         run = [process.execPath, join(dir, "sagebrush.cjs")];
       }
       const kernel = {
-        argv: [...run, "--jupyter-kernel", "{connection_file}", "--mode", mode],
+        argv: [...run, "--jupyter-kernel", "{connection_file}", "--mode", mode, ...(figures ? ["--figures", figures] : [])],
         display_name: spec.display,
         language: spec.language,
         interrupt_mode: "message",
@@ -155,7 +165,7 @@ interface Msg {
   content: any;
 }
 
-export async function runKernel(connectionFile: string, mode: Mode, pkgset: string | null = null): Promise<void> {
+export async function runKernel(connectionFile: string, mode: Mode, pkgset: string | null = null, figures: string | null = null): Promise<void> {
   // The optional package set (src/pkgcache.ts): fetched and checked before the kernel starts, so a set that can't be
   // had stops it with the reason, as `sagebrush --pkgset` stops a run; the worker then reads it from the cache.  (A
   // relative file stays the same file: a cell's os.chdir moves only Python's working folder, never the process's.)
@@ -222,7 +232,7 @@ export async function runKernel(connectionFile: string, mode: Mode, pkgset: stri
 
   const startWorker = () => {
     const entry = require.main?.filename ?? process.argv[1];
-    worker = new Worker(entry, { workerData: { sagebrushKernel: mode, sagebrushLimits: sessionLimits(), sagebrushPkgset: pkgset }, stdout: false, stderr: false });
+    worker = new Worker(entry, { workerData: { sagebrushKernel: mode, sagebrushLimits: sessionLimits(), sagebrushPkgset: pkgset, sagebrushFigures: figures }, stdout: false, stderr: false });
     workerReady = new Promise((res) => {
       worker.on("message", (m: any) => {
         // (the worker could not set itself up, e.g. a restart's package set gone since the kernel started: said as a
@@ -240,8 +250,8 @@ export async function runKernel(connectionFile: string, mode: Mode, pkgset: stri
         }
         if (current && m.id === current.id) {
           if (m.stream && !current.silent) send(iopub, "stream", { name: m.stream, text: m.text }, current.msg);
-          else if (m.display && !current.silent) send(iopub, "display_data", { data: m.display, metadata: {}, transient: {} }, current.msg);
-          else if (m.result && !current.silent) send(iopub, "execute_result", { execution_count: current.count, data: m.result, metadata: {} }, current.msg);
+          else if (m.display && !current.silent) send(iopub, "display_data", { data: m.display, metadata: m.metadata ?? {}, transient: {} }, current.msg);
+          else if (m.result && !current.silent) send(iopub, "execute_result", { execution_count: current.count, data: m.result, metadata: m.metadata ?? {} }, current.msg);
           else if (m.clear && !current.silent) send(iopub, "clear_output", { wait: false }, current.msg);
           else if (m.error) {
             current.error = true;
@@ -465,6 +475,7 @@ export function interactNote(spec: any): string {
 
 export function kernelWorker(mode: Mode) {
   const port = parentPort!;
+  const figureMode: string | null = typeof workerData?.sagebrushFigures === "string" ? workerData.sagebrushFigures : null;
   let current: number | null = null;
   let currentCount: number | null = null;
   let currentSilent = false;
@@ -512,12 +523,15 @@ export function kernelWorker(mode: Mode) {
     // (a Python notebook: a value shown as IPython shows it, src/runtime/index.ts
     // displayText; Sage's, Magma's and MATLAB's keep the repr, as SageMath's shell does)
     ipython: mode === "python",
+    // (how figures are shown, unless the notebook's code says otherwise (lib/_graphics.py figures): the kernel's
+    // --figures, or SAGEBRUSH_FIGURES; else "auto")
+    figures: () => figureMode,
     // (MATLAB: a function file, name.m, found on the path, as Python)
     ...matlabHostOps(),
     display(bundle: Record<string, string>) {
       if (current === null) return false;
       flush();
-      port.postMessage({ id: current, display: bundle });
+      port.postMessage({ id: current, display: bundle, metadata: bundleMetadata(bundle) });
       return true;
     },
     clear_output() {
@@ -598,7 +612,8 @@ export function kernelWorker(mode: Mode) {
         const b = mimeBundle(v) ?? {};
         b["text/plain"] ??= R.displayText(v);
         flush();
-        if (current !== null) port.postMessage({ id: current, result: b });
+        if (current !== null) port.postMessage({ id: current, result: b, metadata: bundleMetadata(b) });
+        sayNote();
       }
       return null;
     };

@@ -2340,7 +2340,7 @@ class FFMatrix:
         p = _engine_prime(self._base)
         if p and 0 < n <= _ENGINE_CHARPOLY_MAX_N:
             # in Rust (engine/arith nmod_mat: Krylov or Hessenberg)
-            from sagebrush._engine import call
+            from _sagebrush_lib._engine import call
             rows = ";".join(",".join(str(int(x)) for x in r) for r in self._rows)
             c = call("nmod_charpoly", m=rows, p=str(p), wire="csv").split(",")
             return R([self._base(int(t)) for t in c])
@@ -2578,7 +2578,7 @@ def _engine_echelon_transport(rows, ncols, p, want_rows):
     determinant factor as an int, the reply's rows text or None).  No
     field element is made here; each text is dropped as soon as the next
     one exists."""
-    from sagebrush._engine import call_text
+    from _sagebrush_lib._engine import call_text
     flag = "true" if want_rows else "false"
     # one join: parts is [prefix, row 0, ";", row 1, ..., suffix], so the
     # matrix text is never a separate string (digits only: nothing to

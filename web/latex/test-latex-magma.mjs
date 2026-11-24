@@ -39,8 +39,9 @@ const checked = (src, vals = []) => {
 }
 // ---- \magma's argument: the \py form of refusals; an unterminated block's text names its own environment
 {
-  const cs = S(doc("A \\magma{\\foo + 1}."))[0], par = S(doc("A \\magma{1 +\n\n2}."))[0], un = S(doc("\\begin{magmablock}\nx := 1;"))[0];
-  check("refusal: a TeX command inside \\magma{}", whyRejected(cs) === "this preview supports only plain Magma expressions inside \\magma{}: \\foo is a TeX command: not run", whyRejected(cs));
+  const cs = S(doc("A \\m.", "\\newcommand{\\m}{\\magma{\\foo + 1}}\n"))[0], own = S(doc("A \\magma{A \\ B}."))[0], par = S(doc("A \\magma{1 +\n\n2}."))[0], un = S(doc("\\begin{magmablock}\nx := 1;"))[0];
+  check("refusal: a TeX command inside \\magma{} that a macro made", whyRejected(cs) === "this preview supports only plain Magma expressions inside \\magma{}: \\foo is a TeX command: not run", whyRejected(cs));
+  check("\\magma{} read from the file: its source, a backslash (Magma's set difference) and all", own.code === "A \\ B" && !own.err, own);
   check("refusal: a blank line inside \\magma{} (the % is TeX's, so \\py's words)", whyRejected(par) === "the argument runs past a blank line (a % starts a comment in TeX): not run", whyRejected(par));
   check("refusal: an unterminated magmablock says no \\end{magmablock}", whyRejected(un) === "no \\end{magmablock}: not run", whyRejected(un));
 }
@@ -49,7 +50,7 @@ const checked = (src, vals = []) => {
   const src = doc("A \\magma{2+3}. M $n = \\magma{n}$.\n\\begin{magmablock}\nM := Matrix(2, [1,2,3,4]);\nM;\n\\end{magmablock}\n\\begin{magmasilent}\nn := 7;\n\\end{magmasilent}\nTwo: \\magma{M}. Odd: \\magma{\"$x_1 & {y}\"}.");
   const r = show(src, ["5\n", "7\n", "[1 2]\n[3 4]\n", "", "[1 2]\n[3 4]\n", "$x_1 & {y}\n"]), h = html(r);
   check("show: \\magma{} inline, as Magma printed it, in monospace", h.includes('<code class="magmaout">5</code>'), h.slice(0, 600));
-  check("show: magmablock's code, then what Magma printed, as text", h.includes('<pre class="verbatim code sageblock">M := Matrix(2, [1,2,3,4]);\nM;</pre><pre class="verbatim code magmaout">[1 2]\n[3 4]</pre>'), h);
+  check("show: magmablock's code, then what Magma printed, as text", h.includes('<pre class="verbatim code sageblock magma">M := Matrix(2, [1,2,3,4]);\nM;</pre><pre class="verbatim code magmaout">[1 2]\n[3 4]</pre>'), h);
   check("show: magmasilent shows nothing", !/y := 1|n := 7/.test(unesc(h.replace(/<[^>]+>/g, ""))), h);
   check("show: \\magma{} of a value printing on several lines is an error saying to use magmablock", unesc(h).includes("Magma item 5: error: " + ONE_LINE), h);
   check("show: Magma's text with TeX's specials stays text (no math, no command)", h.includes('<code class="magmaout">$x_1 &amp; {y}</code>'), h);

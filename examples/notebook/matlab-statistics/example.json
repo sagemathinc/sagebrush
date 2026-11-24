@@ -1,0 +1,17 @@
+{
+ "title": "Statistics and data (MATLAB)",
+ "summary": "Summary statistics, missing values, moving windows, histograms, z-scores, correlation and a fitted line.",
+ "tags": [
+  "data",
+  "statistics",
+  "plots"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "matlab",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

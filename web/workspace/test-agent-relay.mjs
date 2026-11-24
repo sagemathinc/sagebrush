@@ -151,6 +151,30 @@ const note = (n, text = "x") => JSON.stringify({ jsonrpc: "2.0", method: "chat.m
   ok(Object.values(leg.counters()).every((v) => v === 0), `after a failed hello: no timers, listeners or queue (${JSON.stringify(leg.counters())})`);
 }
 
+// ---- a leg the relay never took (it refuses the upgrade while the computer's runner isn't connected, and a browser
+// sees only a close, 1006): unreachable, apart from a leg that opened and then closed in its hello (refused)
+{
+  // (closed, 1006 with no reason, before it ever opens: as Chromium reports a refused upgrade)
+  class Refused503 {
+    constructor(url) { this.url = url; this.readyState = 0; this.l = {}; this.bufferedAmount = 0; queueMicrotask(() => { this.readyState = 3; this.emit("close", { code: 1006, reason: "" }); }); }
+    addEventListener(t, f) { (this.l[t] ??= []).push(f); }
+    emit(t, e) { for (const f of this.l[t] ?? []) f(e); }
+    send() { throw new Error("send on a closed socket"); }
+    close() {}
+  }
+  const key = await legKey();
+  const leg = new AgentLeg({ remoteId: RID, url: "wss://x", key, WebSocket: Refused503 }).start();
+  await until(() => leg.state === "closed", "unreachable");
+  ok(leg.ended.kind === "unreachable" && leg.ended.why === "", "a leg the relay never took (closed 1006 before it opened): unreachable, not refused");
+  ok(Object.values(leg.counters()).every((v) => v === 0), `…and nothing left of it (${JSON.stringify(leg.counters())})`);
+  const leg2 = new AgentLeg({ remoteId: RID, url: "wss://x", key, WebSocket: FakeWS }).start();
+  const ws2 = FakeWS.last;
+  await tick(5);
+  ws2.peerClose(1006, "");
+  await until(() => leg2.state === "closed", "closed in its hello");
+  ok(leg2.ended.kind === "refused" && leg2.ended.why === "the computer refused the connection", "a leg that opened and then closed in its hello: refused, as before");
+}
+
 // ---- the agent's kind: asked by name, the answer naming it and the kinds offered
 {
   const kinds = { agent: "codex", agents: ["claude", "codex"] };
@@ -343,7 +367,7 @@ const note = (n, text = "x") => JSON.stringify({ jsonrpc: "2.0", method: "chat.m
 // ---- the pairing over a link: agent.ready pairs; nothing before it; an old leg's messages reach nothing
 const ws0 = { forAgent: () => ({}), stat: async () => null, agentGrants: async () => ({}), putAgentGrant: async () => {} };
 const pairOn = (leg) => new AgentPairing(0, { link: leg, computer: "laptop" }, { verbsFor: () => ({ list: async () => [], stat: async () => null, read: async () => ({ entry: { path: "/a", kind: "file" }, content: "hi", rev: 1 }) }), store: ws0, trashEntry: async () => null, page: { origin: "https://x", path: "/agents/" } });
-const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", params: { agent: { name: "Claude", client: "claude-agent-sdk", version: "0.4.0" }, features: ["notebook.edit", "permission.digest"], child } });
+const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", params: { agent: { name: "Claude", client: "claude-agent-sdk", version: "0.4.0" }, features: ["notebook.edit", "permission.digest", "run.context", "edit.turn", "other"], child } });
 {
   const { leg, ws, runner } = await openLeg();
   const p = pairOn(leg);
@@ -357,12 +381,14 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   const p = pairOn(leg);
   ws.recv(ready());
   const h = await p.paired();
-  ok(p.state === "paired" && h.child === "child-1" && h.agent.name === "Claude" && h.features.includes("permission.digest"), "agent.ready pairs: the agent, its features and its child");
+  ok(p.state === "paired" && h.child === "child-1" && h.agent.name === "Claude" && h.features.includes("permission.digest") && h.features.includes("run.context") && h.features.includes("edit.turn") && !h.features.includes("other"), "agent.ready pairs: the agent, its features (those the page knows) and its child");
   ws.recv({ jsonrpc: "2.0", id: "s1", method: "workspace.read", params: { path: "/a" } });
   await until(() => runner.forwarded.length === 1, "the refusal");
   ok(/not granted|grant/.test(JSON.parse(runner.forwarded[0]).error?.message ?? ""), "before the person's grant, a call is refused (nothing of the workspace read)");
   await p.allow({ folders: ["/"], write: false, expires: null }, false);
-  await until(() => runner.forwarded.some((m) => JSON.parse(m).method === "page.features"), "the grant told");
+  // (both sent by allow(), the page's features first since the grant's order changed: waited for together, not one then
+  //  a look at what the other has reached by then)
+  await until(() => runner.forwarded.some((m) => JSON.parse(m).method === "page.features") && runner.forwarded.some((m) => JSON.parse(m).method === "grant.changed"), "the grant told");
   const n = runner.forwarded.length;
   ok(runner.forwarded.slice(1, n).some((m) => JSON.parse(m).method === "grant.changed") && runner.forwarded.some((m) => JSON.parse(m).method === "page.features" && JSON.parse(m).params.features.includes("permission.digest")), "the grant is told, and permission.digest among the page's features");
   ws.recv({ jsonrpc: "2.0", id: "s2", method: "workspace.read", params: { path: "/a" } });

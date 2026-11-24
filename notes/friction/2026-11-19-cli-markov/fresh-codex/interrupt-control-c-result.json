@@ -1,0 +1,16 @@
+{
+  "command": [
+    "npx",
+    "--yes",
+    "sagebrush@0.10.1",
+    "--sage",
+    "-q"
+  ],
+  "events": [],
+  "setup_output": "saved_matrix = matrix(QQ, [[1/2,1/3],[0,1]]); saved_marker = 1729; print('READY')\r\r\nREADY\r\n",
+  "alive_before_interrupt": true,
+  "status": "failed",
+  "error": "TIMEOUT: Timeout exceeded.\n<pexpect.pty_spawn.spawn object at 0x79b949d6bb60>\ncommand: /opt/cocalc/bin/npx\nargs: [b'/opt/cocalc/bin/npx', b'--yes', b'sagebrush@0.10.1', b'--sage', b'-q']\nbuffer (last 100 chars): 'sum(i*i for i in range(1000000000))\\r\\r\\n'\nbefore (last 100 chars): 'sum(i*i for i in range(1000000000))\\r\\r\\n'\nafter: <class 'pexpect.exceptions.TIMEOUT'>\nmatch: None\nmatch_index: None\nexitstatus: None\nflag_eof: False\npid: 1535592\nchild_fd: 6\nclosed: False\ntimeout: 8\ndelimiter: <class 'pexpect.exceptions.EOF'>\nlogfile: None\nlogfile_read: <_io.TextIOWrapper name='interrupt-transcript.log' mode='w' encoding='UTF-8'>\nlogfile_send: None\nmaxread: 2000\nignorecase: False\nsearchwindowsize: None\ndelaybeforesend: 0.05\ndelayafterclose: 0.1\ndelayafterterminate: 0.1\nsearcher: searcher_re:\n    0: re.compile('sage: ')",
+  "exitstatus": null,
+  "signalstatus": 15
+}

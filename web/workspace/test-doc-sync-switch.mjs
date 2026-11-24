@@ -13,7 +13,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hasSite, SITE_GENERATED_ROOTS } from "../site-dir.mts";
-import { DOC_SYNC_ORIGINS, DOC_SYNC_NOTE, DOC_SYNC_RELOAD, docSyncOrigin, docSyncAvailable, docSyncSelfHosted, docSyncAllowed, untilAllowed, enableDocSync, followDocSync, docSyncChannel } from "./doc-sync-switch.ts";
+import { DOC_SYNC_ORIGINS, SYNC_CONFIRM_DOCS, SYNC_CONFIRM_FILES_ONLY, SYNC_CONFIRM_MAYBE, syncConfirmDocs, selfHostedAnswer, DOC_SYNC_RELOAD, docSyncOrigin, docSyncAvailable, docSyncSelfHosted, docSyncAllowed, untilAllowed, enableDocSync, followDocSync, docSyncChannel } from "./doc-sync-switch.ts";
 
 const here = dirname(fileURLToPath(import.meta.url)), web = join(here, "..");
 const results = [];
@@ -128,10 +128,42 @@ for (const o of ["", "null"]) await docSyncAllowed({ origin: o, fetch: async () 
 check(opaqueAsked === 0, "an empty or opaque (\"null\") origin asks nothing");
 check((await docSyncSelfHosted(SELF, async () => reply())) === true && (await docSyncSelfHosted(SELF, async () => reply({ body: { available: true, public_url: SELF + "/" } }))) === false, "docSyncSelfHosted: its own exact origin yes, a trailing slash no");
 
-// (William's M9: each sentence as the code does it: merged, not "the later change is kept"; history from the first sync,
-// on every device; no snapshot or cleared history as a cause; no "lasting" and no DEV/PROD line; boards said not to sync)
-const note = DOC_SYNC_NOTE.join("\n");
-check(/Not peer-to-peer/.test(note) && /Outputs never leave this browser/.test(note) && /the edits are merged/.test(note) && /since the notebook first synced, on every device/.test(note) && /Boards don't sync yet/.test(note) && /Clearing TimeTravel isn't available yet for a synced notebook/.test(note) && /If a notebook can't sync .*the Sync panel says so, and its changes stay in this browser/.test(note) && !/later change is kept|snapshot|cleared history|lasting|dev\.sagebrush\.space|separate sites|DEV only/.test(note), "the Sync panel's note says what sync is (your devices and Sagebrush's server), no outputs, edits merged, history from the first sync on every device, boards not synced; and none of the old claims (the later change kept, a snapshot or a cleared history as a cause, the activation lasting, the two sites, 'DEV only')");
+// (the Turn on sync confirmation, before sync is on, says the same of notebooks and boards as the note: no "later step")
+const panelSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "sync-panel.ts"), "utf8");
+check(/notebooks' code and text sync too, but not their outputs/.test(SYNC_CONFIRM_DOCS) && /their contents don't sync yet/.test(SYNC_CONFIRM_DOCS) && /their contents don't sync on this site/.test(SYNC_CONFIRM_FILES_ONLY) && /syncConfirmDocs\(location\.origin, f\)/.test(panelSrc) && /\$\{docs\}/.test(panelSrc) && !/later step/.test(panelSrc), "the Turn on sync confirmation says what syncs of notebooks and boards, and nothing of a later step");
+// (said by the origin: notebooks' contents only where they sync, DEV's and PROD's own origins with no request, or a
+// self-hosted site whose own status names it; anywhere else, only files)
+{
+  let asked = 0;
+  const no = async () => { asked++; return reply({ status: 404 }); };
+  check((await syncConfirmDocs(DOC_SYNC_ORIGINS[0], no)) === SYNC_CONFIRM_DOCS && (await syncConfirmDocs(DOC_SYNC_ORIGINS[1], no)) === SYNC_CONFIRM_DOCS && asked === 0, "the confirmation on DEV's and PROD's origins: notebooks' contents sync (nothing asked)");
+  check((await syncConfirmDocs("http://other.localhost:9", no)) === SYNC_CONFIRM_MAYBE, "…on another origin whose status route isn't there (404): it can't be told, so it says they may sync");
+  check((await syncConfirmDocs(SELF, async () => reply())) === SYNC_CONFIRM_DOCS, "…on a self-hosted site whose own status names it: notebooks' contents sync");
+  check((await syncConfirmDocs(SELF, async () => reply({ body: { available: true, state: "active" } }))) === SYNC_CONFIRM_FILES_ONLY, "…on a site whose status is available but doesn't name it (every sync server today): only files sync");
+  check((await syncConfirmDocs(SELF, async () => { throw new TypeError("network"); })) === SYNC_CONFIRM_MAYBE, "…a status request that fails: never files only, it says they may sync");
+  const t0 = Date.now(), hung = await syncConfirmDocs(SELF, () => new Promise(() => {}), DOC_SYNC_ORIGINS, 50);
+  check(hung === SYNC_CONFIRM_MAYBE && Date.now() - t0 < 2000, "…a status request that never answers: after its time, that they may sync");
+  check(/may also sync, depending on this site's server/.test(SYNC_CONFIRM_MAYBE) && /outputs never/.test(SYNC_CONFIRM_MAYBE) && !/don't sync on this site/.test(SYNC_CONFIRM_MAYBE), "…said without promising either way, outputs never");
+  // (the regression: a probe that fails at the confirmation, then answers: notebook sync turns on after all, which the
+  // conservative sentence allowed for)
+  let up = false;
+  const flaky = async () => { if (!up) throw new TypeError("network"); return reply(); };
+  check((await syncConfirmDocs(SELF, flaky)) === SYNC_CONFIRM_MAYBE, "…a probe that fails: the conservative sentence");
+  up = true;
+  check((await docSyncAllowed({ origin: SELF, fetch: flaky, clientRunning: async () => true }, [])) === true, "…then it recovers: notebook sync's own check says yes");
+  // (a definite-looking "not available" for this origin can change: never files only)
+  let later = false;
+  const flaky2 = async () => (later ? reply() : reply({ body: { available: false, reason: "cocalc_unreachable", public_url: SELF } }));
+  check((await syncConfirmDocs(SELF, flaky2)) === SYNC_CONFIRM_MAYBE, "…this origin's status says not available for now: the conservative sentence, never files only");
+  later = true;
+  check((await docSyncAllowed({ origin: SELF, fetch: flaky2, clientRunning: async () => true }, [])) === true, "…then available: notebook sync's own check says yes");
+  // (the three answers, and docSyncSelfHosted unchanged: "yes" only)
+  const answer = (o) => selfHostedAnswer(SELF, async () => reply(o));
+  check((await answer()) === "yes", "selfHostedAnswer: this origin's public_url, available: yes");
+  check((await answer({ body: { available: true } })) === "no" && (await answer({ body: { available: true, public_url: "http://other.localhost:1" } })) === "no", "selfHostedAnswer: no public_url, or another origin's: no");
+  check((await answer({ body: { available: false, public_url: SELF } })) === "unknown" && (await answer({ status: 503 })) === "unknown" && (await answer({ body: null })) === "unknown", "selfHostedAnswer: this origin's but not available, a failure, no JSON: unknown");
+  check((await docSyncSelfHosted(SELF, async () => reply({ body: { available: true } }))) === false && (await docSyncSelfHosted(SELF, async () => reply({ body: { available: false, public_url: SELF } }))) === false && (await docSyncSelfHosted(SELF, async () => reply())) === true, "docSyncSelfHosted is selfHostedAnswer's yes");
+}
 
 // ---- from the sources: no reachable override
 const files = [];

@@ -50,6 +50,20 @@ const kh = turnNode({ ...newThread("k", "k"), entries: [keptTurn] }, keptTurn, h
 check(!bad(kh) && /class="attention other"/.test(kh) && /0 tokens/.test(kh), "a kept prompt with a hostile state, usage not a number: class other, 0 tokens", kh.slice(0, 400));
 const u = userNode({ kind: "user", id: "u", mode: HOSTILE, text: "hi" }, hooks.md);
 check(u.className === "user other", "a kept message with a hostile mode: class other", u.className);
+// (a steer's line: what the agent said became of it; a hostile receipt or reason is never written into the page)
+{
+  const tag = (e) => userNode({ kind: "user", id: "s", mode: "steer", text: "go", ...e }, hooks.md).innerHTML.match(/<div class="tag">(.*?)<\/div>/)?.[1];
+  check(tag({}) === "Steering: Claude reads it at its next step", "a steer, no receipt yet: steering", tag({}));
+  check(tag({ receipt: "delivered" }) === "Delivered to the running turn", "delivered", tag({ receipt: "delivered" }));
+  check(tag({ receipt: "queued", receipt_reason: "ended" }) === "Queued, runs next: the turn ended first", "queued, the turn ended first");
+  check(tag({ receipt: "queued", receipt_reason: "codex" }) === "Queued, runs next: this agent takes it after the turn", "queued, Codex");
+  check(tag({ receipt: "queued", receipt_reason: HOSTILE }) === "Queued, runs next" && tag({ receipt: HOSTILE }) === "Steering: Claude reads it at its next step", "a hostile receipt or reason: fixed words only");
+  check(userNode({ kind: "user", id: "s", mode: "steer", text: "go" }, hooks.md).className === "user steer", "class steer");
+  check(tag({ receipt: "rejected" }) === "Not delivered: the agent dropped it when the turn ended", "rejected: fixed words", tag({ receipt: "rejected" }));
+  check(tag({ receipt: "rejected", receipt_reason: "busy" }) === "Not delivered: the agent had too many messages waiting" && tag({ receipt: "rejected", receipt_reason: HOSTILE }) === "Not delivered: the agent dropped it when the turn ended", "rejected (busy), and a hostile reason: fixed words only");
+  check(tag({ settled: true }) === "Sent during the turn" && tag({ receipt: "steering", settled: true }) === "Sent during the turn", "settled without a final receipt: Sent during the turn");
+  check(tag({ receipt: "delivered", settled: true }) === "Delivered to the running turn" && tag({ receipt: "queued", settled: true }).startsWith("Queued"), "settled never hides a receipt that says what became of it");
+}
 
 // ---- an agent's ids are keys, never a prototype's (daybreak3's E932-1): "__proto__" and "constructor" as a tool's call
 // and a prompt's id, in a turn made here and in one kept from before (an ordinary object, as JSON.parse makes it)
@@ -155,6 +169,62 @@ check(u.className === "user other", "a kept message with a hostile mode: class o
   ge({ type: "turn_finished", outcome: "completed" });
   const gh = turnNode(g, gt, hooks).innerHTML;
   check(!/-0\.0 s|-5\.0 s|Infinity|NaN/.test(gh) && !bad(gh), "…and none of them is drawn (no -0.0 s, no Infinity s)", gh.slice(0, 300));
+}
+
+// ---- W3: turn_info, the model and thinking level under the agent's name: only as reported, each field as last said,
+// nothing before the first, nothing from another turn, every value checked again and escaped
+{
+  const th = newThread("ti", "T");
+  let n = 0;
+  const te = (turn_id, e) => apply(th, { seq: ++n, turn_id, ...e }, 1000);
+  te("i1", { type: "turn_started" });
+  const info = (id) => { const d = turnNode(th, th.entries.find((e) => e.kind === "turn" && e.turn_id === id), hooks).innerHTML; return /<div class="who-info">([^<]*)<\/div>/.exec(d)?.[1] ?? null; };
+  check(info("i1") === null, "W3: nothing shown before the first turn_info");
+  te("i1", { type: "turn_info", model: "claude-opus-5-5" });
+  check(info("i1") === "claude-opus-5-5", "W3: the model, as the agent gave it (no name mapping)", info("i1"));
+  te("i1", { type: "turn_info", effort: "high" });
+  check(info("i1") === "claude-opus-5-5 · thinking: high", "W3: an effort later in the turn joins the model", info("i1"));
+  te("i1", { type: "turn_info", effort: "low" });
+  check(info("i1") === "claude-opus-5-5 · thinking: low", "W3: a changed effort replaces it", info("i1"));
+  te("i1", { type: "turn_info", model: HOSTILE, effort: "Very High" });
+  check(info("i1") === "claude-opus-5-5 · thinking: low", "W3: malformed fields change nothing", info("i1"));
+  te("i2", { type: "turn_started" });
+  check(info("i2") === null, "W3: a new turn shows nothing until its own turn_info (nothing carried over)");
+  te("i2", { type: "turn_info", effort: "medium" });
+  check(info("i2") === "thinking: medium", "W3: an effort alone, without a model", info("i2"));
+  te("i2", { type: "turn_info", model: "claude-opus-5-5[1m]" });
+  check(info("i2") === "claude-opus-5-5[1m] · thinking: medium", "W3: a model id with a context suffix, as given", info("i2"));
+  te("i2", { type: "turn_finished", outcome: "completed" });
+  te("i2", { type: "turn_info", effort: "max" });
+  check(info("i2") === "claude-opus-5-5[1m] · thinking: medium", "W3: nothing said after the turn's end changes it", info("i2"));
+  // (a thread kept from before, with a hostile info in storage: escaped where drawn)
+  const kept = th.entries.find((e) => e.kind === "turn" && e.turn_id === "i2");
+  kept.info = { model: HOSTILE };
+  check(!bad(turnNode(th, kept, hooks).innerHTML) && info("i2") === null, "W3: a malformed stored info is checked again and not drawn");
+}
+
+
+// ---- #1789: a thinking block whose text isn't shown streams deltas with none: no "Thinking" disclosure until some
+// text comes; one kept from before (an empty part) draws nothing either
+{
+  const th = newThread("t-th", "T");
+  let n = 0;
+  const e = (x) => apply(th, { seq: ++n, turn_id: "k1", ...x }, 1000);
+  e({ type: "turn_started" });
+  e({ type: "thinking_delta", text: "" });
+  e({ type: "thinking_delta", text: "" });
+  e({ type: "thinking_delta", text: "  " });
+  const turn = th.entries.find((x) => x.kind === "turn");
+  check(!turn.parts.some((p) => p.kind === "thinking") && !/Thinking/.test(turnNode(th, turn, hooks).innerHTML), "#1789: thinking deltas with no text make no part and no Thinking disclosure", turn.parts);
+  e({ type: "thinking_delta", text: "Let me look at the files." });
+  e({ type: "thinking_delta", text: " Then plot." });
+  const html = turnNode(th, turn, hooks).innerHTML;
+  check(/<details class="thinking"><summary>Thinking<\/summary><div>Let me look at the files\. Then plot\.<\/div><\/details>/.test(html), "#1789: once text comes, the disclosure shows it", html);
+  const kept = newThread("t-th2", "T");
+  apply(kept, { seq: 1, turn_id: "k2", type: "turn_started" }, 1000);
+  const kt = kept.entries.find((x) => x.kind === "turn");
+  kt.parts.push({ kind: "thinking", text: "" });
+  check(!/Thinking/.test(turnNode(kept, kt, hooks).innerHTML), "#1789: an empty thinking part kept from before draws nothing", turnNode(kept, kt, hooks).innerHTML);
 }
 
 const failed = results.filter(([ok]) => !ok);

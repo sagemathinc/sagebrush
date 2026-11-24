@@ -11,8 +11,9 @@ import { mathExtensions } from "./markdown-math";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, existsSync, copyFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const here = dirname(new URL(import.meta.url).pathname);
+const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const SITE = "https://sagebrush.space";
 const REPO = "https://github.com/sagemathinc/sagebrush/blob/master";
