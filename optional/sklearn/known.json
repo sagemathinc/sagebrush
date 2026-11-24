@@ -127,9 +127,44 @@
       "reason": "the members share one copy of the data in Sagebrush's decision-tree kernel; bagging other estimators isn't ported yet"
     },
     {
-      "case": "bagging.random-forest",
-      "printed": "!! NotImplementedError: sklearn.ensemble.RandomForestClassifier is not in Sagebrush's sklearn 0.x subset",
-      "reason": "the random forests come in a later step; sklearn.ensemble has BaggingClassifier and BaggingRegressor so far"
+      "case": "bagging.extra-trees",
+      "printed": "!! NotImplementedError: sklearn.ensemble.ExtraTreesClassifier is not in Sagebrush's sklearn 0.x subset",
+      "reason": "the extra trees need the random splitter (tree.splitter-random); sklearn.ensemble has the bagging and random-forest estimators so far"
+    },
+    {
+      "case": "forest.warm_start",
+      "printed": "!! NotImplementedError: sklearn.ensemble.RandomForestClassifier(warm_start=True) is not in Sagebrush's sklearn 0.x subset (adding trees to a fitted forest isn't)",
+      "reason": "warm_start adds trees to a fitted forest, continuing its seed stream; it isn't ported yet, and warm_start=False, the default, is"
+    },
+    {
+      "case": "forest.max_leaf_nodes",
+      "printed": "!! NotImplementedError: sklearn.ensemble.RandomForestClassifier(max_leaf_nodes=...) is not in Sagebrush's sklearn 0.x subset (the best-first builder isn't; max_leaf_nodes=None is)",
+      "reason": "as tree.max_leaf_nodes, for the forest's trees"
+    },
+    {
+      "case": "forest.ccp_alpha",
+      "printed": "!! NotImplementedError: sklearn.ensemble.RandomForestRegressor(ccp_alpha=...) is not in Sagebrush's sklearn 0.x subset (minimal cost-complexity pruning isn't; ccp_alpha=0.0 is)",
+      "reason": "as tree.ccp_alpha, for the forest's trees"
+    },
+    {
+      "case": "forest.monotonic_cst",
+      "printed": "!! NotImplementedError: sklearn.ensemble.RandomForestClassifier(monotonic_cst=...) is not in Sagebrush's sklearn 0.x subset (monotonicity constraints aren't)",
+      "reason": "as tree.monotonic_cst, for the forest's trees"
+    },
+    {
+      "case": "forest.absolute_error",
+      "printed": "!! NotImplementedError: sklearn.ensemble.RandomForestRegressor(criterion='absolute_error') is not in Sagebrush's sklearn 0.x subset (the squared_error criterion is)",
+      "reason": "as tree.absolute_error, for the forest's trees (poisson too)"
+    },
+    {
+      "case": "forest.decision_path",
+      "printed": "!! NotImplementedError: sklearn.ensemble.RandomForestClassifier.decision_path is not in Sagebrush's sklearn 0.x subset (it returns a scipy sparse matrix)",
+      "reason": "as tree.decision_path: a scipy CSR matrix; apply gives each tree's leaves"
+    },
+    {
+      "case": "forest.multilabel-oob",
+      "printed": "!! NotImplementedError: sklearn.metrics with multilabel-indicator targets is not in Sagebrush's sklearn 0.x subset",
+      "reason": "the out-of-bag score of a forest on several binary outputs is accuracy_score on multilabel-indicator targets, which Sagebrush's metrics refuse (they're sparse in scikit-learn); the forest's trees and oob_decision_function_ are computed first, and other targets' out-of-bag scores work"
     }
   ],
   "tolerances": [

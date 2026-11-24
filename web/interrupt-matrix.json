@@ -262,6 +262,27 @@
    "status": "case"
   },
   {
+   "id": "SK2",
+   "transport": "skltree:forest",
+   "owner": "decision trees (sklearn)",
+   "mode": "python",
+   "s0": 10000,
+   "smin": 1000,
+   "smax": 300000,
+   "grow": {
+    "kind": "scale",
+    "p": 1
+   },
+   "leak_measure": "heap+external",
+   "hosts": [
+    "cli"
+   ],
+   "setup": "import numpy as np\nfrom sagebrush import skltree\n_g = np.random.RandomState(0)\nX = _g.rand(S, 16).astype(np.float32)\ny = np.floor(X[:, :2].astype(np.float64).sum(axis=1, keepdims=True) * 2)\n_ds = skltree.dataset(X, y)",
+   "target": "for _k in range(30):\n    _rs = np.random.RandomState(_k)\n    _w = np.bincount(_rs.randint(0, S, S), minlength=S).astype(np.float64)\n    _t = skltree.fit(_ds, _w, n_classes=[4], criterion=\"gini\", max_features=4, seed=_k + 1)\n_ds.release()",
+   "probe": "_d2 = skltree.dataset(np.array([[0.0], [1.0]], dtype=np.float32), np.array([[0.0], [1.0]]))\nassert skltree.fit(_d2, n_classes=[2], criterion=\"gini\", max_features=1, seed=1)[\"node_count\"] == 3\n_d2.release()",
+   "status": "case"
+  },
+  {
    "id": "SK3",
    "transport": "skltree:bagging",
    "owner": "decision trees (sklearn)",

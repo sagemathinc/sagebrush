@@ -56,6 +56,13 @@ CASES = [
          setup="import numpy as np\nfrom sagebrush import skltree\n_g = np.random.RandomState(0)\nX = _g.rand(S, 8).astype(np.float32)\ny = (X @ np.arange(1.0, 9.0) + _g.rand(S))[:, None]",
          target="_ds = skltree.dataset(X, y)\n_t = skltree.fit(_ds, criterion=\"squared_error\", max_features=8, seed=1)\n_ds.release()",
          probe="_d2 = skltree.dataset(np.array([[0.0], [1.0]], dtype=np.float32), np.array([[0.0], [1.0]]))\nassert skltree.fit(_d2, n_classes=[2], criterion=\"gini\", max_features=1, seed=1)[\"node_count\"] == 3\n_d2.release()"),
+    # SK2: a random forest's tree loop (the kernel's dataset shared, each tree's bootstrap counts as its weights,
+    # max_features below n_features; Stop within a tree's fit and between trees)
+    dict(id="SK2", transport="skltree:forest", owner="decision trees (sklearn)", mode="python", s0=10_000, smin=1_000, smax=300_000,
+         grow=dict(kind="scale", p=1), leak_measure="heap+external", hosts=["cli"],
+         setup="import numpy as np\nfrom sagebrush import skltree\n_g = np.random.RandomState(0)\nX = _g.rand(S, 16).astype(np.float32)\ny = np.floor(X[:, :2].astype(np.float64).sum(axis=1, keepdims=True) * 2)\n_ds = skltree.dataset(X, y)",
+         target="for _k in range(30):\n    _rs = np.random.RandomState(_k)\n    _w = np.bincount(_rs.randint(0, S, S), minlength=S).astype(np.float64)\n    _t = skltree.fit(_ds, _w, n_classes=[4], criterion=\"gini\", max_features=4, seed=_k + 1)\n_ds.release()",
+         probe="_d2 = skltree.dataset(np.array([[0.0], [1.0]], dtype=np.float32), np.array([[0.0], [1.0]]))\nassert skltree.fit(_d2, n_classes=[2], criterion=\"gini\", max_features=1, seed=1)[\"node_count\"] == 3\n_d2.release()"),
     # SK3: bagging's member loop (the kernel's dataset shared, a bootstrap's counts as each member's weights; the
     # members' fits between Python's polls)
     dict(id="SK3", transport="skltree:bagging", owner="decision trees (sklearn)", mode="python", s0=20_000, smin=2_000, smax=400_000,

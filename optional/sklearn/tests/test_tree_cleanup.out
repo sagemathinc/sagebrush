@@ -22,3 +22,11 @@ True
 ('injected failure in the third member', 3, True)
 == bagging.failure-own-columns
 ('injected failure in the third member', 3, True)
+== forest.classifier
+True
+== forest.balanced_subsample-oob
+True
+== forest.regressor
+True
+== forest.failure
+('injected failure in the third tree', 3, True)

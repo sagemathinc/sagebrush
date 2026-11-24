@@ -68,4 +68,16 @@ from sklearn.dummy import DummyClassifier
 
 case("bagging.warm_start", lambda: BaggingClassifier(warm_start=True).fit(Xt, yt))
 case("bagging.estimator", lambda: BaggingClassifier(DummyClassifier()).fit(Xt, yt))
-case("bagging.random-forest", lambda: __import__("sklearn.ensemble", fromlist=["RandomForestClassifier"]).RandomForestClassifier)
+case("bagging.extra-trees", lambda: __import__("sklearn.ensemble", fromlist=["ExtraTreesClassifier"]).ExtraTreesClassifier)
+
+# (step P6: what the random forests refuse)
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+
+case("forest.warm_start", lambda: RandomForestClassifier(warm_start=True).fit(Xt, yt))
+case("forest.max_leaf_nodes", lambda: RandomForestClassifier(max_leaf_nodes=3).fit(Xt, yt))
+case("forest.ccp_alpha", lambda: RandomForestRegressor(ccp_alpha=0.1).fit(Xt, yt))
+case("forest.monotonic_cst", lambda: RandomForestClassifier(monotonic_cst=[1, 0]).fit(Xt, yt))
+case("forest.absolute_error", lambda: RandomForestRegressor(criterion="absolute_error").fit(Xt, yt))
+case("forest.decision_path", lambda: RandomForestClassifier(n_estimators=2).fit(Xt, yt).decision_path(Xt))
+case("forest.multilabel-oob", lambda: RandomForestClassifier(n_estimators=10, oob_score=True, random_state=0).fit(
+    [[0.0, 1.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0], [0.5, 0.5], [0.2, 0.9]] * 3, [[0, 1], [1, 0], [1, 1], [0, 0], [1, 0], [0, 1]] * 3))
