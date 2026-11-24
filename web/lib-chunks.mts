@@ -105,6 +105,10 @@ export function groupOf(path: string, sets: Record<string, Set<string>>): string
   // (elliptic curves over GF(p), imported only by EllipticCurve() over a
   // finite field: its own group, so sage-more's users don't fetch it)
   if (top === "_sage_ec_ff") return "mod-sage-ec-ff";
+  // (GF(p) echelon's binary route, imported by the first echelon over a
+  // prime field, after mod-sage-ffmat: its own group, so the starts that
+  // load mod-sage-ffmat (Magma's) don't fetch it)
+  if (top === "_sage_ffmat_bin") return "mod-sage-ffmat-bin";
   if (/^_?sage/.test(top)) return "sage-more";
   // (live data's small modules, imported together: fredapi and its bridge, and yfinance's refusal; one group,
   // design-data-access r3.1)

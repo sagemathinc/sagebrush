@@ -61,7 +61,7 @@ function binaryEchelon(): boolean {
 }
 
 for (const [c, full] of [
-  ["route", false], ["correct", false], ["json", false], ["probe", false], ["preflight", false],
+  ["lazy", false], ["route", false], ["correct", false], ["json", false], ["probe", false], ["preflight", false],
   ["frame", false], ["outcomes", false], ["kernel", false], ["types", false], ["kernelmem", false], ["mem", true], ["cops", true],
 ] as const) {
   test(`GF(p) echelon, the binary route in pyjs: ${c}`, (t) => {

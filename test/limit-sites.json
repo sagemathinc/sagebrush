@@ -12829,7 +12829,7 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "lib/_sage_ffmat.py :: _ech_bin_call :: reservation refused (Cap) is the memory error, a protocol or invariant #0": {
+ "lib/_sage_ffmat_bin.py :: _ech_bin_call :: reservation refused (Cap) is the memory error, a protocol or invariant #0": {
   "class": "2",
   "disposition": {
    "2": {
@@ -12839,7 +12839,7 @@
   "owner": "linear algebra/runtime memory",
   "reason": "the binary echelon's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
  },
- "lib/_sage_ffmat.py :: _ech_bin_route :: binary entry point present, the request within the frame cap and the #0": {
+ "lib/_sage_ffmat_bin.py :: _ech_bin_route :: binary entry point present, the request within the frame cap and the #0": {
   "class": "2",
   "disposition": {
    "2": {
@@ -12849,7 +12849,7 @@
   "owner": "linear algebra/runtime memory",
   "reason": "the binary echelon's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
  },
- "lib/_sage_ffmat.py :: _ech_bin_route :: host's need (_ech_need) within its budget.  None for another field, an #0": {
+ "lib/_sage_ffmat_bin.py :: _ech_bin_route :: host's need (_ech_need) within its budget.  None for another field, an #0": {
   "class": "2",
   "disposition": {
    "2": {
@@ -12859,7 +12859,7 @@
   "owner": "linear algebra/runtime memory",
   "reason": "the binary echelon's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
  },
- "lib/_sage_ffmat.py :: _ech_bound :: return (_echelon_transport_figure or _heap_budget)() // _HEAP_SHARE #0": {
+ "lib/_sage_ffmat_bin.py :: _ech_bound :: return (_fm._echelon_transport_figure or _fm._heap_budget)() // _fm._HEAP_SHARE #0": {
   "class": "2",
   "disposition": {
    "2": {
