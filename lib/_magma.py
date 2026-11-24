@@ -9175,7 +9175,7 @@ def Eltseq(x):
     if isinstance(x, _MNFElt):
         # (its rational coefficients on 1, a, ..., a^(d-1), in the
         # rationals as Magma's)
-        c = list(x._c)
+        c = x.parent()._to_user(x._c)
         c += [0] * (x.parent().degree() - len(c))
         return MSeq([_qelt(_Fraction(q)) for q in c], _QQ)
     if isinstance(x, MSeq) and isinstance(x.universe, _MVectorSpace):
@@ -9642,8 +9642,8 @@ class _MNFElt(_snf.NumberFieldElement):
     __slots__ = ()
 
     def __repr__(self):
-        # Magma: a common denominator in front, 1/2*(b^2 + b)
-        c = self._c
+        # Magma: a common denominator in front, 1/2*(b^2 + b) (on the generator's powers)
+        c = self._K._to_user(self._c)
         d = 1
         for x in c:
             d = d * x.denominator // _math.gcd(d, x.denominator)
@@ -9662,15 +9662,23 @@ class _MNumberField(_snf.NumberField_absolute):
     _magma_block = True
 
     def __init__(self, f, quadratic=False, irreducible=False):
-        # (Magma mode prints and converts on the defining polynomial itself: a field the core keeps through a
-        # scaled model, one of a rational or non-monic polynomial, is refused here as before, until Magma mode
-        # maps its coordinates)
-        c, _ = _snf._int_coeffs(f)
-        if any(_Fraction(a).denominator != 1 for a in c):
-            raise NotImplementedError("defining polynomials must have integer coefficients")
-        if not c or c[-1] != 1:
-            raise NotImplementedError("defining polynomials must be monic (for now)")
         super().__init__(f, "$.1", irreducible=irreducible)
+        # (as Magma 2.18-5 has it: a polynomial over the rationals defines the field made monic, NumberField(3*x^2
+        # + 1) is x^2 + 1/3; one over the integers is kept as given, 2*y^2 - 3; either way the generator is its
+        # root, which the core's coordinates are on)
+        over_z = getattr(getattr(f, "parent", lambda: None)(), "base_ring", lambda: None)() is _sp.ZZ
+        if not over_z and self._uf[-1] != 1:
+            self._uf = tuple(_Fraction(a) / _Fraction(self._uf[-1]) for a in self._uf)
+        # (the primitive integral polynomial of the field's: its equation order's, whose discriminant is
+        # Discriminant(K); 3*x^2 + 1 for x^2 + 1/3)
+        L = 1
+        for a in self._uf:
+            L = L * _Fraction(a).denominator // _math.gcd(L, _Fraction(a).denominator)
+        zf = [int(_Fraction(a) * L) for a in self._uf]
+        g = 0
+        for a in zf:
+            g = _math.gcd(g, a)
+        self._zf = [a // g for a in zf] if not over_z else [int(a) for a in self._uf]
         self._quadratic = quadratic
         self._order = None
         self._fring = getattr(f, "_ring", None)  # the defining polynomial's ring
@@ -9709,7 +9717,7 @@ class _MNumberField(_snf.NumberField_absolute):
             # (which could factor s again)
             s = -int(self._f[0])
             return s if s % 4 == 1 else 4 * s
-        return _m_num(self.polynomial().discriminant())
+        return _m_num(_sp.PolynomialRing_(_sp.QQ, "x")(self._zf).discriminant())
 
     def _magma_coerce(self, x):
         try:
@@ -9722,7 +9730,7 @@ class _MNumberField(_snf.NumberField_absolute):
 
     def __repr__(self):
         kind = "Quadratic Field" if self._quadratic else "Number Field"
-        return "%s with defining polynomial %s over the Rational Field" % (kind, _snf._repr_poly(self._f, self._fvar()))
+        return "%s with defining polynomial %s over the Rational Field" % (kind, _snf._repr_poly(self._uf, self._fvar()))
 
     def _maximal_order(self):
         if self._order is None:
@@ -9739,8 +9747,9 @@ class _MOrder:
 
     def __repr__(self):
         K = self.K
-        f = _snf._repr_poly(K._f, K._var)
-        if K._nfdata()["index"] == 1:
+        f = _snf._repr_poly(K._zf, K._var)
+        # (a non-monic polynomial's equation order isn't the maximal order, as Magma has it)
+        if K._zf[-1] == 1 and K._nfdata()["index"] == 1:
             return "Maximal Equation Order with defining polynomial %s over its ground order" % f
         return "Maximal Order of Equation Order with defining polynomial %s over its ground order" % f
 
@@ -11727,7 +11736,7 @@ def _iso_result(b):
 
 def _quadratic_disc(K):
     """The discriminant of a degree 2 field's defining polynomial, a rational."""
-    c = [_Fraction(_m_num(x)) for x in list(K._f)[:3]]
+    c = [_Fraction(_m_num(x)) for x in list(K._uf)[:3]]
     return c[1] * c[1] - 4 * c[0] * c[2]
 
 
