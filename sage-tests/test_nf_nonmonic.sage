@@ -28,3 +28,13 @@ print(N, d^2, N.discriminant(), N.integral_basis(), (d + 1)^3)
 P.<e> = NumberField(x^3 - 2/27)
 print(P, e^3, P.discriminant(), P.integral_basis(), e.minpoly())
 print(P.maximal_order().basis(), (3*e).is_integral())
+# Polynomials over these fields (factor, gcd, roots), the maximal order's generators and name, and the primes above
+# small p (norm, ramification index, residue degree, integral generators), which go through the field's model
+for f in [x^2 - 1/2, 3*x^2 + 1, 2*x^3 - 1/2*x + 5, x^3 - 2/27, 4*x^2 + 2*x + 1]:
+    K = NumberField(f, 'a'); a = K.gen()
+    S.<y> = K[]
+    print(f, "|", K.maximal_order())
+    print((y^2 - a^2).factor(), "|", gcd(y^2 - a^2, y - a), "|", (y^2 - a^2).roots())
+    print((y^3 - a^3).factor(), "|", (y^2 + y*a).roots(), "|", gcd((y - a)*(y + 1), (y - a)*(y - 1)))
+    for p in [2, 3, 5, 7]:
+        print(p, [(q.norm(), q.ramification_index(), q.residue_class_degree(), all(K(z).is_integral() for z in q.gens())) for q in K.primes_above(p)])

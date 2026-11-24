@@ -8049,6 +8049,11 @@
   "class": "3",
   "owner": "number fields"
  },
+ "lib/_sage_nf.py :: Order.__repr__ :: name = \"Maximal Order\" #0": {
+  "class": "none",
+  "owner": "Sage compatibility",
+  "reason": "the word Maximal (the maximal order's name as Sage prints it), not a limit: nothing is refused"
+ },
  "lib/_sage_numfun.py :: prime_pi_plot :: \"\"\"A plot of prime_pi(x) for xmin <= x <= xmax: a step line, with the #0": {
   "class": "none",
   "owner": "sagebrush-sage2",
