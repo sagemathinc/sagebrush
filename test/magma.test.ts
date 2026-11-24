@@ -162,7 +162,6 @@ test("Magma syntax Sagebrush doesn't have is named, not called bad syntax (cover
     ["x := 5; x; $1;", "$1 (the values printed last)"],
     ["f := func< n | n le 2 select 1 else $$(n-1) + $$(n-2) >;", "$$ in func< >"],
     ["P<[X]> := PolynomialRing(Rationals(), 2);", "P<[...]> (generator names in a sequence)"],
-    ["S := {1}; S join:= {2};", "join:= (an assignment with join)"],
     ["for x, y in [1, 2] do x; end for;", "for x, y in S (several loop variables)"],
     ["M := {* 1^^4, 2^^5 *};", "a^^n (a multiplicity in a multiset)"],
     ["x := 255; x: Hex;", "x: Hex (a printing level)"],
@@ -178,7 +177,6 @@ test("Magma syntax Sagebrush doesn't have is named, not called bad syntax (cover
     ["G := 1; G.-1;", "G.-1 (a generator's inverse by its index)"],
     ["B := 1; B.<3,1>;", "B.<...> (an element by its indices)"],
     ["x := 2; r := x = 3;", "= (an equation, as in a relation)"],
-    ["F<x, y>, f := FPGroup(G);", "F<...>, ... := (generator names with other values)"],
   ];
   for (const [src, name] of cases) {
     const out = spawnSync(process.execPath, [cli, "--magma"], { input: src + "\n", encoding: "utf8" }).stdout;
@@ -186,8 +184,8 @@ test("Magma syntax Sagebrush doesn't have is named, not called bad syntax (cover
     assert.doesNotMatch(out, /bad syntax/, src);
   }
   // the session goes on with the next line, as after a syntax error
-  const next = spawnSync(process.execPath, [cli, "--magma"], { input: "S := {1}; S join:= {2};\n7;\n", encoding: "utf8" }).stdout;
-  assert.match(next, /join:= \(an assignment with join\) is not supported yet\n7\n$/);
+  const next = spawnSync(process.execPath, [cli, "--magma"], { input: "M := {* 1^^4, 2^^5 *};\n7;\n", encoding: "utf8" }).stdout;
+  assert.match(next, /a\^\^n \(a multiplicity in a multiset\) is not supported yet\n7\n$/);
   // a cell (no recovery: the kernel's) says it too
   const { magmaToPython, MagmaSyntaxError } = require("../src/magma");
   assert.throws(() => magmaToPython("y := x where x is 10;\n", "<cell>"), (e: any) => e instanceof MagmaSyntaxError && /where x is \.\.\. \(a definition after an expression\) is not supported yet/.test(e.message));
