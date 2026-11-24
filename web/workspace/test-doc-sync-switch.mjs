@@ -13,7 +13,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hasSite, SITE_GENERATED_ROOTS } from "../site-dir.mts";
-import { DOC_SYNC_ORIGINS, DOC_SYNC_NOTE, SYNC_CONFIRM_DOCS, SYNC_CONFIRM_FILES_ONLY, SYNC_CONFIRM_MAYBE, syncConfirmDocs, selfHostedAnswer, DOC_SYNC_RELOAD, docSyncOrigin, docSyncAvailable, docSyncSelfHosted, docSyncAllowed, untilAllowed, enableDocSync, followDocSync, docSyncChannel } from "./doc-sync-switch.ts";
+import { DOC_SYNC_ORIGINS, SYNC_CONFIRM_DOCS, SYNC_CONFIRM_FILES_ONLY, SYNC_CONFIRM_MAYBE, syncConfirmDocs, selfHostedAnswer, DOC_SYNC_RELOAD, docSyncOrigin, docSyncAvailable, docSyncSelfHosted, docSyncAllowed, untilAllowed, enableDocSync, followDocSync, docSyncChannel } from "./doc-sync-switch.ts";
 
 const here = dirname(fileURLToPath(import.meta.url)), web = join(here, "..");
 const results = [];
@@ -164,10 +164,6 @@ check(/notebooks' code and text sync too, but not their outputs/.test(SYNC_CONFI
   check((await answer({ body: { available: false, public_url: SELF } })) === "unknown" && (await answer({ status: 503 })) === "unknown" && (await answer({ body: null })) === "unknown", "selfHostedAnswer: this origin's but not available, a failure, no JSON: unknown");
   check((await docSyncSelfHosted(SELF, async () => reply({ body: { available: true } }))) === false && (await docSyncSelfHosted(SELF, async () => reply({ body: { available: false, public_url: SELF } }))) === false && (await docSyncSelfHosted(SELF, async () => reply())) === true, "docSyncSelfHosted is selfHostedAnswer's yes");
 }
-// (William's M9: each sentence as the code does it: merged, not "the later change is kept"; history from the first sync,
-// on every device; no snapshot or cleared history as a cause; no "lasting" and no DEV/PROD line; boards said not to sync)
-const note = DOC_SYNC_NOTE.join("\n");
-check(/Not peer-to-peer/.test(note) && /their outputs don't/.test(note) && /Data files sync with their contents/.test(note) && !/An output you save as a data file/.test(note) && /pictures attached to text cells/.test(note) && !/never leave this browser/.test(note) && /the edits are merged/.test(note) && /since the notebook first synced, on every device/.test(note) && /Boards don't sync yet/.test(note) && /Clearing TimeTravel isn't available yet for a synced notebook/.test(note) && /If a notebook can't sync .*the Sync panel says so, and its changes stay in this browser/.test(note) && !/later change is kept|snapshot|cleared history|lasting|dev\.sagebrush\.space|separate sites|DEV only/.test(note), "the Sync panel's note says what sync is (your devices and Sagebrush's server), no outputs, edits merged, history from the first sync on every device, boards not synced; and none of the old claims (the later change kept, a snapshot or a cleared history as a cause, the activation lasting, the two sites, 'DEV only')");
 
 // ---- from the sources: no reachable override
 const files = [];

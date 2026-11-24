@@ -1,0 +1,68 @@
+3
+1
+{ 1, 2, 3 }
+{ 2, 3 }
+{ 3 }
+{ 4 }
+false
+true
+false
+ab
+[ 3, 2, 9 ]
+
+>> y mod:= 0;
+     ^
+Runtime error in 'mod:=': Division by zero
+
+
+>> y div:= 0;
+     ^
+Runtime error in 'div:=': Division by zero
+
+
+>> z div:= 2;
+     ^
+Runtime error in 'div:=': Bad argument types
+
+
+>> T join:= 2;
+     ^
+Runtime error in 'join:=': Bad argument types
+
+
+>> T diff:= [1];
+     ^
+Runtime error in 'diff:=': Bad argument types
+
+
+>> c and:= 1;
+     ^
+Runtime error in 'and:=': Bad argument types
+
+
+>> c xor:= [1];
+     ^
+Runtime error in 'xor:=': Bad argument types
+
+
+>> u cat:= 2;
+     ^
+Runtime error in 'cat:=': Bad argument types
+
+
+>> y div := 2;
+         ^
+User error: bad syntax
+
+>> y eq:= 5;
+       ^
+User error: bad syntax
+
+>> y cmpeq:= 7;
+          ^
+User error: bad syntax
+
+>> T subset:= {1};
+           ^
+User error: bad syntax
+end
