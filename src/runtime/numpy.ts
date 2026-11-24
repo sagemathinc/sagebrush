@@ -1957,6 +1957,33 @@ function pairwise32(d: any, off: number, n: number, st: number): number {
   return f32(pairwise32(d, off, n2, st) + pairwise32(d, off + n2 * st, n - n2, st));
 }
 
+// One part (real or imaginary) of NumPy's complex pairwise sum
+// (CDOUBLE_pairwise_sum, loops_utils.h.src): it counts the two parts' scalars
+// together, so in elements its blocks are half the real sum's: fewer than 4
+// added in turn, up to 64 in 4 accumulators, more split at a multiple of 4.
+// `r` rounds each addition (Math.fround for complex64).
+function pairwiseCplxPart(d: any, off: number, n: number, st: number, r: (x: number) => number): number {
+  if (n < 4) {
+    let res = -0;
+    for (let i = 0; i < n; i++) res = r(res + d[off + i * st]);
+    return res;
+  }
+  if (n <= 64) {
+    const a = [d[off], d[off + st], d[off + 2 * st], d[off + 3 * st]];
+    let i = 4;
+    for (; i < n - (n % 4); i += 4) for (let j = 0; j < 4; j++) a[j] = r(a[j] + d[off + (i + j) * st]);
+    let res = r(r(a[0] + a[1]) + r(a[2] + a[3]));
+    for (; i < n; i++) res = r(res + d[off + i * st]);
+    return res;
+  }
+  const n2 = n - (n % 8);
+  const h = n2 / 2;
+  return r(pairwiseCplxPart(d, off, h, st, r) + pairwiseCplxPart(d, off + h * st, n - h, st, r));
+}
+const same = (x: number) => x;
+const pairwiseCplx = (d: any, off: number, n: number, st: number) => pairwiseCplxPart(d, off, n, st, same);
+const pairwiseCplx32 = (d: any, off: number, n: number, st: number) => pairwiseCplxPart(d, off, n, st, f32);
+
 // pairwise() of (d[i] - m)^2: var's sum of squared deviations with NumPy's
 // bits (it computes a - mean, squares in place and sums pairwise) and no
 // temporary array.
@@ -1992,6 +2019,172 @@ function pairwiseSqDev(d: any, off: number, n: number, m: number): number {
   let n2 = Math.floor(n / 2);
   n2 -= n2 % 8;
   return pairwiseSqDev(d, off, n2, m) + pairwiseSqDev(d, off + n2, n - n2, m);
+}
+
+// The order NumPy's add-reduce visits a float array in, so a sum of a
+// transposed, F-ordered, strided or reversed array has NumPy's bits (as its
+// iterator does: numpy/_core/src/multiarray/nditer_constr.c, nditer_api.c,
+// umath/reduction.c):
+// - the axes sorted by the input's |stride|, smallest innermost (a stable
+//   insertion sort; a stride of 0 compares with nothing), never flipped (the
+//   reduction asks for NPY_ITER_DONT_NEGATE_STRIDES);
+// - the output laid out in that order (kept axes contiguous, reduced ones 0);
+// - adjacent axes merged where both stay contiguous;
+// - a core of the innermost dims chosen by the buffered iterator's cost (an
+//   8192-element buffer, grown without limit when nothing needs copying);
+// - its inner loop: a run into one output element summed pairwise, a run over
+//   output elements added element by element.
+type RDim = { n: number; s: number; o: number };
+const NPY_BUFSIZE = 8192;
+function reducePlan(shape: number[], strides: number[], red: Set<number>) {
+  // (innermost first; length-1 axes take no part)
+  let dims: RDim[] = [];
+  for (let i = shape.length - 1; i >= 0; i--) if (shape[i] !== 1) dims.push({ n: shape[i], s: strides[i], o: red.has(i) ? 0 : -1 - i });
+  for (let i0 = 1; i0 < dims.length; i0++) {
+    const d0 = dims[i0];
+    let ipos = i0;
+    for (let i1 = i0 - 1; i1 >= 0; i1--) {
+      const s1 = dims[i1].s;
+      if (d0.s === 0 || s1 === 0) continue;
+      if (Math.abs(s1) <= Math.abs(d0.s)) break;
+      ipos = i1;
+    }
+    if (ipos !== i0) {
+      dims.splice(i0, 1);
+      dims.splice(ipos, 0, d0);
+    }
+  }
+  // the output, in iteration order; each kept axis's stride in it
+  const oStride: number[] = shape.map(() => 0);
+  let o = 1;
+  for (const d of dims) {
+    if (d.o === 0) continue;
+    oStride[-1 - d.o] = o;
+    d.o = o;
+    o *= d.n;
+  }
+  const merged: RDim[] = [];
+  for (const d of dims) {
+    const c = merged[merged.length - 1];
+    if (c && c.s * c.n === d.s && c.o * c.n === d.o) c.n *= d.n;
+    else merged.push({ ...d });
+  }
+  dims = merged;
+  // the core: npyiter_find_buffering_setup (GROWINNER; no operand is cast)
+  const single = [1, 1];
+  let outerReduce = 0, cost = 1, size = dims.length ? dims[0].n : 1;
+  let bestDim = 0, bestCost = cost, bestSize = size, bestCore = 1;
+  for (let idim = 1; idim < dims.length; idim++) {
+    if (outerReduce) break;
+    if (size >= NPY_BUFSIZE && cost > 1) break;
+    const prev = dims[idim - 1], cur = dims[idim];
+    for (const k of ["o", "s"] as const) {
+      const iop = k === "o" ? 0 : 1;
+      if (single[iop] === idim) {
+        if (prev[k] * prev.n === cur[k]) {
+          single[iop]++;
+          continue;
+        }
+        cost++;
+      }
+      if (iop === 0 && (cur.o === 0 || prev.o === 0)) outerReduce = idim;
+    }
+    const core = size;
+    size *= cur.n;
+    const bufsize = size > NPY_BUFSIZE && cost > 1 ? NPY_BUFSIZE : size;
+    if (cost * bestSize <= bestCost * bufsize) {
+      bestCost = cost;
+      bestCore = core;
+      bestSize = size;
+      bestDim = idim;
+    }
+  }
+  const usingReduce = outerReduce > 0 && bestDim === outerReduce;
+  let mustBuffer = false;
+  for (const k of ["o", "s"] as const) {
+    const iop = k === "o" ? 0 : 1;
+    const isReduceOp = usingReduce && (iop === 0 || single[iop] === bestDim || (dims[outerReduce][k] === 0 && single[iop] <= bestDim));
+    if (!(single[iop] + (isReduceOp ? 1 : 0) > bestDim)) mustBuffer = true;
+  }
+  if (mustBuffer && NPY_BUFSIZE < bestSize) bestSize = bestCore * Math.floor(NPY_BUFSIZE / bestCore);
+  return { dims, oStride, outN: o, bestDim, core: bestCore, bufsize: bestSize, usingReduce, singleIn: single[1] > bestDim };
+}
+
+// A float sum over `red` in NumPy's order (reducePlan): out in C order.
+function reduceInNumpyOrder(a: NDArray, red: Set<number>, out: NDArray, rt: DType, init: number, fold: (acc: number, x: number) => number, inner: (d: any, off: number, n: number, st: number) => number): void {
+  const p = reducePlan(a.shape, a.strides, red);
+  const d = a.data, dims = p.dims;
+  const acc = new Float64Array(p.outN).fill(init);
+  const lo = dims.slice(0, p.bestDim + 1), hi = dims.slice(p.bestDim + 1);
+  const sweep = lo.reduce((n, x) => n * x.n, 1);
+  const at = (f: number, k: "s" | "o") => {
+    let r = 0;
+    for (const x of lo) {
+      r += (f % x.n) * x[k];
+      f = Math.floor(f / x.n);
+    }
+    return r;
+  };
+  // (a run into one output element that isn't one stride is copied first, as
+  // into NumPy's buffer, whose size the plan has kept to 8192 elements)
+  const pairRuns = lo[0].o === 0;
+  const bufN = pairRuns && !p.singleIn ? (p.usingReduce ? p.core : Math.min(p.bufsize, sweep)) : 0;
+  admitWork(bufN * rt.itemsize, "the reduction");
+  const buf = rt === D.float32 ? new Float32Array(bufN) : new Float64Array(bufN);
+  // the run's elements in order, each its input and output offset (an odometer over the core's dims)
+  const idx = new Array(lo.length).fill(0);
+  const walk = (inBase: number, outBase: number, start: number, count: number, f: (i: number, p: number, q: number) => void) => {
+    for (let j = 0, r = start; j < lo.length; j++) {
+      idx[j] = r % lo[j].n;
+      r = Math.floor(r / lo[j].n);
+    }
+    let p = inBase + at(start, "s"), q = outBase + at(start, "o");
+    for (let i = 0; i < count; i++) {
+      f(i, p, q);
+      // (Stop, every 1024 elements)
+      if ((i & 1023) === 1023) O.pollInterrupt();
+      for (let j = 0; j < lo.length; j++) {
+        p += lo[j].s;
+        q += lo[j].o;
+        if (++idx[j] < lo[j].n) break;
+        p -= lo[j].s * lo[j].n;
+        q -= lo[j].o * lo[j].n;
+        idx[j] = 0;
+      }
+    }
+  };
+  const call = (inBase: number, outBase: number, start: number, count: number) => {
+    if (pairRuns) {
+      // (the output stays put over the run: one pairwise sum into it)
+      const o0 = outBase + at(start, "o");
+      let v: number;
+      if (bufN === 0) v = inner(d, inBase + at(start, "s"), count, lo[0].s);
+      else {
+        walk(inBase, outBase, start, count, (i, p) => (buf[i] = d[p]));
+        v = inner(buf, 0, count, 1);
+      }
+      acc[o0] = fold(acc[o0], v);
+    } else walk(inBase, outBase, start, count, (_, p, q) => (acc[q] = fold(acc[q], d[p])));
+  };
+  // (the dims above the core, outermost first, the innermost of them fastest)
+  const hiR = hi.slice().reverse();
+  loop1(hiR.map((x) => x.n), hiR.map((x) => x.s), a.offset, (inBase, k) => {
+    let outBase = 0;
+    for (let j = hiR.length - 1, r = k; j >= 0; j--) {
+      outBase += (r % hiR[j].n) * hiR[j].o;
+      r = Math.floor(r / hiR[j].n);
+    }
+    for (let pos = 0; pos < sweep; ) {
+      const t = Math.min(p.bufsize, sweep - pos);
+      if (p.usingReduce && Math.floor(t / p.core) > 1) for (let r = 0; r < Math.floor(t / p.core); r++) call(inBase, outBase, pos + r * p.core, p.core);
+      else call(inBase, outBase, pos, t);
+      pos += t;
+    }
+  });
+  // (the output laid out C order)
+  const kept = a.shape.map((_, i) => i).filter((i) => !red.has(i));
+  const od = out.data;
+  loop1(kept.map((i) => a.shape[i]), kept.map((i) => p.oStride[i]), 0, (q, k) => (od[k] = castNum(rt, acc[q])));
 }
 
 // Reduce `a` over `axes` with fold(acc, x) from init; `inner` reduces a run of
@@ -2030,17 +2223,17 @@ function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
     out.data[0] = castNum(rt, fold(init, inner(d, a.offset, rn, 1)));
     return keepdims ? reshape(out, a.shape.map((n, i) => (ax.includes(i) ? 1 : n))) : out;
   }
-  const usePairwise = inner && red.length >= 1 && red[red.length - 1] === nd - 1 && (red.length === 1 || a.isC());
-  loop1(outShape, kstr, a.offset, (base, k) => {
-    let acc = init;
-    if (usePairwise && red.length === 1) acc = fold(acc, inner!(d, base, rn, rstr[0]));
-    else if (usePairwise && a.isC() && red.length === nd) acc = fold(acc, inner!(d, base, rn, 1));
-    else if (inner && red.length === 1) {
-      // over an outer axis NumPy adds slice by slice: sequentially
-      for (let i = 0, p = base; i < rn; i++, p += rstr[0]) acc = fold(acc, d[p]);
-    } else loop1(rshape, rstr, base, (p) => (acc = fold(acc, d[p])));
-    out.data[k] = castNum(rt, acc);
-  });
+  // any other float sum: in NumPy's own order (a transposed, F-ordered,
+  // strided or reversed array included)
+  if (inner) {
+    if (a.size > 0) reduceInNumpyOrder(a, new Set(red), out, rt, init, fold, inner);
+    else out.data.fill(castNum(rt, init));
+  } else
+    loop1(outShape, kstr, a.offset, (base, k) => {
+      let acc = init;
+      loop1(rshape, rstr, base, (p) => (acc = fold(acc, d[p])));
+      out.data[k] = castNum(rt, acc);
+    });
   if (keepdims) {
     const ks = a.shape.map((n, i) => (ax.includes(i) ? 1 : n));
     return reshape(out, ks);
@@ -2060,7 +2253,9 @@ function sumType(dt: DType): DType {
   return dt;
 }
 
-function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null): any {
+// (`cplxPart`: `a` is the real or imaginary part of a complex array, summed in
+// the blocks of NumPy's complex pairwise sum)
+function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null, cplxPart = false): any {
   const rt = dtype !== null ? toDtype(dtype) : sumType(a.dt);
   const axs = axesArg(axis, a.ndim);
   const outN = axs === null ? 1 : prod(a.shape.filter((_, i) => !axs.includes(i)));
@@ -2070,7 +2265,7 @@ function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null): any {
     // LIMIT-PR56-1; the parts are views, not copies)
     admitWork(outN * (2 * (8 + 8) + 16), "sum");
     const re = realPart(a), im = imagPart(a);
-    const r = sum(re, axis, keepdims), i = sum(im, axis, keepdims);
+    const r = sum(re, axis, keepdims, null, true), i = sum(im, axis, keepdims, null, true);
     return combineComplex(r, i, rt.cplx ? rt : a.dt);
   }
   // (a float sum of another dtype sums a converted copy: that copy, the
@@ -2078,10 +2273,10 @@ function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null): any {
   const widen = rt !== a.dt && rt.kind === "f";
   admitWork((widen ? a.size * rt.itemsize : 0) + outN * (rt.itemsize + 8), "sum");
   const src = widen ? copy(a, rt) : a;
-  if (rt === D.float32) return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, 0, (x, y) => f32(x + y), pairwise32), axis, keepdims);
+  if (rt === D.float32) return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, 0, (x, y) => f32(x + y), cplxPart ? pairwiseCplx32 : pairwise32), axis, keepdims);
   // (int64: each partial sum checked, as wideExact)
   const add = isWide(rt) ? (x: number, y: number) => wideExact(rt, "add", x + y, x, y) : (x: number, y: number) => x + y;
-  return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, 0, add, rt.kind === "f" ? pairwise : undefined), axis, keepdims);
+  return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, 0, add, rt.kind === "f" ? (cplxPart ? pairwiseCplx : pairwise) : undefined), axis, keepdims);
 }
 // The product of a complex array (or of one into a complex dtype) over the
 // axes: each output element the product of its reduced elements, one at a

@@ -34,8 +34,14 @@ pass, and CI runs them.
     inputs in float16, which Sagebrush refuses (see float16 below).
 - **Arithmetic:** NumPy 2 promotion, with Python scalars "weak" (NEP 50),
   and OverflowError for out-of-range Python ints. Float sums use NumPy's
-  pairwise summation, so they agree to the last bit. `mean`, `var` and `std`
-  follow NumPy's formulas.
+  pairwise summation (its complex one for complex arrays), in the order
+  NumPy's iterator visits the array, so they agree to the last bit for a
+  transposed, F-ordered, strided or reversed array too
+  (`numpy-tests/test_reduce_order.py`). `mean`, `var` and `std` follow
+  NumPy's formulas. One gap remains: an operation's result (`a + 1`,
+  `astype`) is laid out in C order, where NumPy keeps an F-ordered or
+  transposed input's layout, so a sum of such a result, and `var` and `std`
+  of such an input, can differ from NumPy's in the last bits.
 - **Random:** NumPy's exact streams.
   - `np.random.seed` and `RandomState`: MT19937 with NumPy's legacy seeding,
     53-bit doubles, polar-method normals, masked-rejection integers, and
