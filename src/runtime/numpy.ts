@@ -1370,9 +1370,20 @@ function cdiv(a: number, b: number, c: number, d: number): [number, number] {
   const rat = c / d, scl = 1 / (d + c * rat);
   return [(a * rat + b) * scl, (b * rat - a) * scl];
 }
-// NumPy's cmul: the product as written, no fused multiply-add (npy_cpow's powers, and the folds of
-// cumprod and of prod along the contiguous axis)
-const cmul = (ar: number, ai: number, br: number, bi: number): [number, number] => [ar * br - ai * bi, ar * bi + ai * br];
+// NumPy's cmul: the product as written, no fused multiply-add (scalarmath's complex128 product, npy_cpow's
+// powers, and the folds of cumprod and of prod along the contiguous axis); a NaN part as scalarmath's on x86,
+// each step's first NaN operand in its order (nanOf below), not the engine's choice, which can vary
+function cmul(ar: number, ai: number, br: number, bi: number): [number, number] {
+  let p = ar * br, q = ai * bi, s = ar * bi, t = ai * br;
+  if (p !== p) p = nanOf(ar, br);
+  if (q !== q) q = nanOf(bi, ai);
+  if (s !== s) s = nanOf(ar, bi);
+  if (t !== t) t = nanOf(br, ai);
+  let re = p - q, im = s + t;
+  if (re !== re) re = nanOf(p, q);
+  if (im !== im) im = nanOf(s, t);
+  return [re, im];
+}
 // ... and in float32, each product and sum rounded (complex64)
 const fr = Math.fround;
 const cmul32 = (ar: number, ai: number, br: number, bi: number): [number, number] => [
@@ -1381,14 +1392,31 @@ const cmul32 = (ar: number, ai: number, br: number, bi: number): [number, number
 ];
 // NumPy's elementwise complex multiply loop (multiply, square, prod across an outer axis): each part one fused
 // multiply-add, re = fma(ar, br, -(ai*bi)) and im = fma(ar, bi, ai*br), rounded once (to float32 for complex64)
+// A NaN part as that loop's on x86 (the reference's): its NaN operand, unchanged (the subtracted one too),
+// else x86's default NaN, its sign set; so complex(0, nan) * (1+0j) has real part +nan, as NumPy's. (Of two
+// NaN operands of different signs NumPy's choice depends on the element's place in its SIMD loop and on the
+// CPU; this takes its main loop's on x86-64, ar first, then b's part, then the product.)
 function cmulFma(ar: number, ai: number, br: number, bi: number): [number, number] {
-  return [fma(ar, br, -(ai * bi)), fma(ar, bi, ai * br)];
+  let t = ai * bi, u = ai * br;
+  if (t !== t) t = nanOf(bi, ai);
+  if (u !== u) u = nanOf(br, ai);
+  let re = fma(ar, br, -t), im = fma(ar, bi, u);
+  if (re !== re) re = nanOf(ar, br, t);
+  if (im !== im) im = nanOf(ar, bi, u);
+  return [re, im];
 }
 // (the operands as complex64 first: a Python complex is one by NEP 50's rules)
 function cmulFma32(ar: number, ai: number, br: number, bi: number): [number, number] {
   ar = fr(ar), ai = fr(ai), br = fr(br), bi = fr(bi);
-  return [fmaf(ar, br, -fr(ai * bi)), fmaf(ar, bi, fr(ai * br))];
+  let t = fr(ai * bi), u = fr(ai * br);
+  if (t !== t) t = nanOf(bi, ai);
+  if (u !== u) u = nanOf(br, ai);
+  let re = fmaf(ar, br, -t), im = fmaf(ar, bi, u);
+  if (re !== re) re = nanOf(ar, br, t);
+  if (im !== im) im = nanOf(ar, bi, u);
+  return [re, im];
 }
+const nanOf = (x: number, y: number, z = 0) => (x !== x ? x : y !== y ? y : z !== z ? z : X86_NAN);
 // complex64 division: NumPy's loop (Smith's algorithm, as cdiv) with every operation rounded to float32
 function cdiv32(a: number, b: number, c: number, d: number): [number, number] {
   a = fr(a), b = fr(b), c = fr(c), d = fr(d);
@@ -1617,7 +1645,8 @@ function stridedKernel(op: string): any {
 // and shape (out C-contiguous from its start and sharing no memory with the
 // operands unless it is one of them, laid out alike): else undefined, before
 // anything is computed.
-export function binary(op: string, x: any, y: any, out: NDArray | null = null, tryOut = false): any {
+// (scalarMath: an operator on two scalars, NumPy's scalarmath, whose complex128 product is the plain formula)
+export function binary(op: string, x: any, y: any, out: NDArray | null = null, tryOut = false, scalarMath = false): any {
   const spec = BIN[op];
   if (out) outWritable(out);
   const A = operand(x), B = operand(y);
@@ -1680,7 +1709,7 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
   const ad = a.data, bd = b.data, od = res.data, ost = res.strides, oo = res.offset;
   const contigOut = res.isC() && oo === 0;
   if (ct.cplx) {
-    const fc = rt === D.complex64 && spec.c32 ? spec.c32 : spec.c;
+    const fc = scalarMath && op === "multiply" && rt === D.complex128 ? cmul : rt === D.complex64 && spec.c32 ? spec.c32 : spec.c;
     if (!fc) return raise(T.TypeError, `ufunc '${op}' not supported for complex input`);
     const ac = a.dt.cplx, bc = b.dt.cplx;
     loop2(shape, sa, a.offset, sb, b.offset, (p, q, k) => {
@@ -1735,6 +1764,8 @@ function withSign(x: number, negative: number): number {
   SIGN_W[1] = (SIGN_W[1] & 0x7fffffff) | (negative << 31);
   return SIGN_F[0];
 }
+// (x86's default NaN, for nanOf: its sign set, where the engine keeps one)
+const X86_NAN = NAN_SIGN_KEPT ? withSign(NaN, 1) : NaN;
 
 type Un = (x: number) => number;
 type CUn = (re: number, im: number) => [number, number];
@@ -4213,7 +4244,7 @@ newBuiltinModule("_numpy", (m) => {
     const r = unary(op, x);
     return x instanceof NDArray ? r : r.ndim === 0 ? pyScalarOf(r.dt, r.data, 0) : r;
   });
-  fn("binary", (op: string, x: any, y: any) => {
+  fn("binary", (op: string, x: any, y: any, operator = false) => {
     // two real scalars (np.float64(1.5) + 2 ...): compute directly
     if (!(x instanceof NDArray) && !(y instanceof NDArray)) {
       // (a string array: its comparisons, a flipped one for a string on the left; else refused)
@@ -4234,8 +4265,9 @@ newBuiltinModule("_numpy", (m) => {
         }
       }
     }
-    const r = binary(op, x, y);
-    return isArrayLike(x) || isArrayLike(y) ? r : pyScalarOf(r.dt, r.data, 0);
+    const arr = isArrayLike(x) || isArrayLike(y);
+    const r = binary(op, x, y, null, false, operator && !arr);
+    return arr ? r : pyScalarOf(r.dt, r.data, 0);
   });
   fn("sum", (a: any, axis: any = null, keepdims: any = false, dtype: any = null) => sum(asarray(a), opt(axis), !!keepdims, opt(dtype)));
   // sum((a - m)**2) over a whole C-contiguous float64 array, or None

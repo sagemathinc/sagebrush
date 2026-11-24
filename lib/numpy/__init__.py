@@ -151,7 +151,7 @@ def _binop(name, rev=False):
     def f(self, other):
         if not isinstance(other, (int, float, complex, ndarray, generic)):
             return NotImplemented
-        return _np.binary(name, other, self) if rev else _np.binary(name, self, other)
+        return _np.binary(name, other, self, True) if rev else _np.binary(name, self, other, True)
     f.__name__ = name
     return f
 
