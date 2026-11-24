@@ -479,5 +479,141 @@
     ],
     "status": "partial",
     "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.hlines",
+    "kind": "method",
+    "signature": "(self, y, xmin, xmax, colors=None, linestyles='solid', *, label='', data=None, **kwargs)",
+    "summary": "Horizontal lines at each y from xmin to xmax (data coordinates): a LineCollection.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nax.plot([0, 4], [0, 2], label='price')\nlc = ax.hlines([0.5, 1.5], 0, 4, colors='r', linestyles='dashed', label='levels')\nprint(len(lc.get_segments()))\nax.legend()\nplt.show()",
+        "expected": "2\n[figure 1: Plot: line \"price\" through 2 points, line \"levels\" through 2 points, line through 2 points; x from -0.2 to 4.2, y from -0.1 to 2.1]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Each segment is drawn as a line and the first carries the legend entry; of LineCollection's methods, get_segments, get_colors, get_linewidth, get_label and the setters of color, line width, line style, alpha, label and visibility are there. Keywords other than linewidth(s), alpha, visible and how it is layered are NotImplementedError.",
+      "data= is not supported.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.vlines",
+    "kind": "method",
+    "signature": "(self, x, ymin, ymax, colors=None, linestyles='solid', *, label='', data=None, **kwargs)",
+    "summary": "Vertical lines at each x from ymin to ymax (data coordinates): a LineCollection.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nlc = ax.vlines([1, 2, 3], 0, [1, 4, 9], colors=['g', 'b'])\nprint([s.tolist() for s in lc.get_segments()][0])\nplt.show()",
+        "expected": "[[1.0, 0.0], [1.0, 1.0]]\n[figure 1: Plot: line through 2 points, line through 2 points, line through 2 points; x from 0.9 to 3.1, y from -0.45 to 9.45]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Each segment is drawn as a line and the first carries the legend entry; of LineCollection's methods, get_segments, get_colors, get_linewidth, get_label and the setters of color, line width, line style, alpha, label and visibility are there. Keywords other than linewidth(s), alpha, visible and how it is layered are NotImplementedError.",
+      "data= is not supported.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.pyplot.hlines",
+    "kind": "function",
+    "signature": "(y, xmin, xmax, colors=None, linestyles='solid', *, label='', data=None, **kwargs)",
+    "summary": "Horizontal lines at each y from xmin to xmax in the current Axes: a LineCollection.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nplt.plot([0, 10], [0, 1])\nplt.hlines(0.5, 0, 10, colors='gray', linestyles='dotted')\nplt.show()",
+        "expected": "[figure 1: Plot: line through 2 points, line through 2 points; x from -0.5 to 10.5, y from -0.05 to 1.05]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Each segment is drawn as a line and the first carries the legend entry; of LineCollection's methods, get_segments, get_colors, get_linewidth, get_label and the setters of color, line width, line style, alpha, label and visibility are there. Keywords other than linewidth(s), alpha, visible and how it is layered are NotImplementedError.",
+      "data= is not supported.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.pyplot.vlines",
+    "kind": "function",
+    "signature": "(x, ymin, ymax, colors=None, linestyles='solid', *, label='', data=None, **kwargs)",
+    "summary": "Vertical lines at each x from ymin to ymax in the current Axes: a LineCollection.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nplt.plot([0, 10], [0, 1])\nplt.vlines([2, 8], 0, 1, colors='k')\nplt.show()",
+        "expected": "[figure 1: Plot: line through 2 points, line through 2 points, line through 2 points; x from -0.5 to 10.5, y from -0.05 to 1.05]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "Each segment is drawn as a line and the first carries the legend entry; of LineCollection's methods, get_segments, get_colors, get_linewidth, get_label and the setters of color, line width, line style, alpha, label and visibility are there. Keywords other than linewidth(s), alpha, visible and how it is layered are NotImplementedError.",
+      "data= is not supported.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.twinx",
+    "kind": "method",
+    "signature": "(self, axes_class=None, *, delta_zorder=0.0, **kwargs)",
+    "summary": "Axes in the same box sharing this x axis, with their y axis on the right: two scales on one plot.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nax.plot([1, 2, 3], [1, 4, 9])\nax.set_ylabel('price')\nax2 = ax.twinx()\nax2.plot([1, 2, 3], [100, 50, 10], color='g')\nax2.set_ylabel('volume')\nprint(len(fig.axes), ax2.get_xlim() == ax.get_xlim())\nplt.show()",
+        "expected": "2 True\n[figure 1: Plot: line through 3 points; x from 0.9 to 3.1, y (price) from 0.6 to 9.4; right y axis: line through 3 points; x from 0.9 to 3.1, y (volume) from 5.5 to 104.5]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "The twin has its own color cycle and y axis, drawn on the right in its host's box; the x axis (limits, scale and ticks) is the host's, autoscaled over the data of both, as Matplotlib's. axes_class= and delta_zorder= are not supported.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.pyplot.twinx",
+    "kind": "function",
+    "signature": "(ax=None)",
+    "summary": "Axes sharing the x axis of ax (the current Axes), their y axis on the right.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nplt.plot([0, 1, 2], [0, 1, 4])\nright = plt.twinx()\nright.plot([0, 1, 2], [10, 5, 0], color='r')\nprint(plt.gca() is right)\nplt.show()",
+        "expected": "True\n[figure 1: Plot: line through 3 points; x from -0.1 to 2.1, y from -0.2 to 4.2; right y axis: line through 3 points; x from -0.1 to 2.1, y from -0.5 to 10.5]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "As Axes.twinx: the twin becomes the current Axes.",
+      "Draws an SVG figure; a catalog example shows it as its description, [figure N: ...] (catalog/SCHEMA.md), where Matplotlib draws a picture."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.get_legend",
+    "kind": "method",
+    "signature": "(self)",
+    "summary": "The Legend legend() made for these Axes, or None.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nprint(ax.get_legend())\nax.plot([0, 1], label='a')\nleg = ax.legend(title='Series')\nprint(leg is ax.get_legend(), leg.get_title().get_text(), [t.get_text() for t in leg.get_texts()])\nplt.close(fig)",
+        "expected": "None\nTrue Series ['a']\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "The Legend has get_title, set_title, get_texts, set_visible, get_visible and remove."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
   }
 ]

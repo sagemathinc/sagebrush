@@ -651,14 +651,14 @@ class Points(Primitive):
         o = self.options
         return _markers(P, self.xs, self.ys, o.get("marker", "o"), o.get("size", 3.5),
                         o.get("colors") or to_color(o.get("color"), "#1f77b4"), o.get("alpha"),
-                        o.get("sizes"), to_color(o.get("edgecolor")))
+                        o.get("sizes"), to_color(o.get("edgecolor")), o.get("edgewidth"))
 
     def describe(self):
         n = len(self.xs)
         return "%d point%s%s" % (n, "" if n == 1 else "s", _label(self))
 
 
-def _markers(P, xs, ys, marker, r, color, alpha, sizes=None, edge=None):
+def _markers(P, xs, ys, marker, r, color, alpha, sizes=None, edge=None, edgewidth=None):
     out = []
     many = isinstance(color, list)
     for i, (x, y) in enumerate(zip(xs, ys)):
@@ -668,7 +668,7 @@ def _markers(P, xs, ys, marker, r, color, alpha, sizes=None, edge=None):
         px, py = p
         rr = sizes[i] if sizes is not None else r
         c = color[i % len(color)] if many else color
-        out.append(_marker(marker, px, py, rr, c, edge))
+        out.append(_marker(marker, px, py, rr, c, edge, edgewidth))
     if not out:
         return ""
     a = ' opacity="%s"' % _fmt(alpha) if alpha is not None else ""
@@ -688,7 +688,7 @@ def pixel_size(u):
     return old
 
 
-def _marker(m, x, y, r, color, edge=None):
+def _marker(m, x, y, r, color, edge=None, edgewidth=None):
     c = _esc(color)
     if m == ",":
         # matplotlib's pixel marker: the one pixel of the picture that the point
@@ -700,7 +700,7 @@ def _marker(m, x, y, r, color, edge=None):
         u = _PIXEL
         return '<rect x="%.9g" y="%.9g" width="%.9g" height="%.9g" fill="%s"/>' % (
             math.floor(x / u + 1e-6) * u, math.floor(y / u + 1e-6) * u, u, u, c)
-    st = ' stroke="%s" stroke-width="0.8"' % _esc(edge) if edge else ""
+    st = ' stroke="%s" stroke-width="%s"' % (_esc(edge), "0.8" if edgewidth is None else _fmt(edgewidth)) if edge else ""
     X, Y, R = _fmt(x), _fmt(y), _fmt(r)
     if m in ("o", ".", None, True, "circle"):
         if m == ".":
@@ -1381,6 +1381,10 @@ class Panel:
             if xs and ys:
                 bb = (min(xs), max(xs), min(ys), max(ys))
         xlo, xhi, ylo, yhi = bb if bb else (None, None, None, None)
+        xd = o.get("x_data")  # (an x axis shared with other panels: their data too)
+        if xd is not None:
+            xlo = xd[0] if xlo is None else min(xlo, xd[0])
+            xhi = xd[1] if xhi is None else max(xhi, xd[1])
         m = o.get("margins", 0.0)
         # (matplotlib's autoscaling of a linear axis: a degenerate range
         # widened by 5%, then the margins; an axis without data is 0 to 1)
@@ -1492,6 +1496,12 @@ class Panel:
         top = 10 + (tts + 8 if title else 0) + sub_h
         bottom = (ts * 1.75 + (ls * 1.3 + 4 if xlabel else 6)) if show_axes else 8
         right = 14
+        for tw in o.get("twin_room") or ():
+            # (a twin's y axis on the right: room for its tick labels and label)
+            g = tw.ranges(max(w - 70, 50), max(h - top - bottom, 50))
+            tyt = tw.ticks(g[2], g[3], g[5], tw.options.get("yticks"), tw.options.get("yticklabels"), max(3, int(h / 70)), "y")
+            room = (max([len(_strip_tags(t)) for _, t in tyt] + [1]) * ts * 0.61 + 10 if tyt else 4) + (ls + 6 if tw.options.get("ylabel") else 0)
+            right = max(right, room)
         guess = self.ranges(max(w - 70, 50), max(h - top - bottom, 50))
         yt = self.ticks(guess[2], guess[3], guess[5], o.get("yticks"), o.get("yticklabels"), max(3, int(h / 70)), "y")
         lw = max([len(_strip_tags(s)) for _, s in yt] + [1]) * ts * 0.61 + 10 if yt else 4
@@ -1516,13 +1526,24 @@ class Panel:
                 top += (ph - yr * k) / 2
                 pw, ph = xr * k, yr * k
         xlo, xhi, ylo, yhi, xlog, ylog = self.ranges(pw, ph)
-        P = _Placed(x + left, y + top, pw, ph, xlo, xhi, ylo, yhi, xlog, ylog)
+        H = getattr(getattr(self, "_host_panel", None), "_placed", None) if o.get("twin_host") else None
+        if H is not None:
+            # (a twin: its host's box and x axis, its own y axis)
+            pw, ph, xlo, xhi, xlog = H.w, H.h, H.xlo, H.xhi, H.xlog
+            r = self.ranges(pw, ph)
+            ylo, yhi, ylog = r[2], r[3], r[5]
+            P = _Placed(H.left, H.top, pw, ph, xlo, xhi, ylo, yhi, xlog, ylog)
+        else:
+            P = _Placed(x + left, y + top, pw, ph, xlo, xhi, ylo, yhi, xlog, ylog)
+        self._placed = P
         P.markup = o.get("markup")
         P.fig = getattr(self, "_fig", None) or (x + w, y + h)  # (the figure's size, for figure coordinates)
         # Sage's axes carry more ticks than matplotlib's frame
         dx, dy = (85, 55) if frame else (60, 45)
         xt = self.ticks(xlo, xhi, xlog, o.get("xticks"), o.get("xticklabels"), max(3, int(pw / dx)))
         yt = self.ticks(ylo, yhi, ylog, o.get("yticks"), o.get("yticklabels"), max(3, int(ph / dy)), "y")
+        if H is not None:
+            xt = []  # (the host draws the shared x axis)
 
         out = ['<g class="sb-panel" data-xr="%r %r" data-yr="%r %r" data-box="%s %s %s %s"%s%s>' % (
             xlo, xhi, ylo, yhi, _fmt(P.left), _fmt(P.top), _fmt(pw), _fmt(ph),
@@ -1679,26 +1700,43 @@ class Panel:
             items = list(o["legend_entries"])
         else:
             items = [(p, p.legend()) for p in self.primitives if p.legend()]
-        if not items:
+        title = o.get("legend_title")
+        if not items and not title:
             return ""
         mk = o.get("markup")
-        w = max(len(mk.plain(s) if mk else str(s)) for _, s in items) * 6.6 + 40
-        h = len(items) * 18 + 8
+        th = 18 if title else 0  # (a title's line above the entries)
+        w = max([len(mk.plain(s) if mk else str(s)) * 6.6 + 40 for _, s in items] + ([len(str(title)) * 6.6 + 16] if title else []))
+        h = len(items) * 18 + 8 + th
         loc = o.get("legend_loc") or "upper right"
         if isinstance(loc, int):
             loc = LEGEND_LOCS[loc] if 1 <= loc < len(LEGEND_LOCS) else "upper right"
-        if isinstance(loc, tuple):  # (its lower left corner at axes fractions)
+        anchor = o.get("legend_anchor")
+        if anchor is not None and not isinstance(loc, tuple):
+            # (bbox_to_anchor: the legend's loc corner or side at that point, or within that box (x, y, width,
+            # height), in axes fractions, borderaxespad inside it, as matplotlib's; outside the axes as well)
+            bx, bw = P.left + anchor[0] * P.w, (anchor[2] * P.w if len(anchor) == 4 else 0.0)
+            bh = anchor[3] * P.h if len(anchor) == 4 else 0.0
+            by = P.top + (1 - anchor[1]) * P.h - bh
+            pad = o.get("legend_pad", 0.5 * 10 * 100 / 72)
+            lx = bx + pad if "left" in loc else bx + bw - w - pad if "right" in loc else bx + (bw - w) / 2
+            ly = by + pad if "upper" in loc else by + bh - h - pad if "lower" in loc else by + (bh - h) / 2
+        elif isinstance(loc, tuple):  # (its lower left corner at axes fractions)
             lx, ly = P.left + loc[0] * P.w, P.top + (1 - loc[1]) * P.h - h
         else:
             # (the legend centred on the axes in the directions its loc
             # doesn't name: "center right" is halfway up, "upper center"
             # halfway across)
-            lx = P.left + 8 if "left" in loc else P.left + P.w - w - 8 if "right" in loc else P.left + (P.w - w) / 2
-            ly = P.top + P.h - h - 8 if "lower" in loc else P.top + 8 if "upper" in loc else P.top + (P.h - h) / 2
+            pad = o.get("legend_pad", 8)
+            lx = P.left + pad if "left" in loc else P.left + P.w - w - pad if "right" in loc else P.left + (P.w - w) / 2
+            ly = P.top + P.h - h - pad if "lower" in loc else P.top + pad if "upper" in loc else P.top + (P.h - h) / 2
+        self._legend_box = (lx, ly, w, h)  # (render_svg widens the figure to a legend outside it)
         out = ['<g class="sb-legend"><rect x="%s" y="%s" width="%s" height="%s" rx="3" style="fill: var(--sb-legend-bg, #fff)" fill-opacity="0.85" stroke="currentColor" stroke-opacity="0.25"/>' % (
             _fmt(lx), _fmt(ly), _fmt(w), _fmt(h))]
+        if title:
+            out.append('<text x="%s" y="%s" text-anchor="middle" dominant-baseline="middle" font-size="11">%s</text>' % (
+                _fmt(lx + w / 2), _fmt(ly + 13), mk.svg(str(title), 11) if mk else _rich(str(title))))
         for i, (p, s) in enumerate(items):
-            cy = ly + 13 + i * 18
+            cy = ly + 13 + th + i * 18
             c = _esc(to_color(p.options.get("color"), "#1f77b4"))
             if p.options.get("hidden"):
                 pass  # (an artist not drawn: its text, no swatch)
@@ -1776,32 +1814,47 @@ def render_frame(panels, width=640, height=480, title=None, markup=None):
     width, height = float(width), float(height)
     top = 30 if title else 0
     body, descs = [], []
+    hosts = {}  # (a twin's description goes with its host's)
     for panel, (fx, fy, fw, fh) in panels:
         panel._fig = (width, height)
+        panel._legend_box = None
         if panel.options.get("exact"):
             s, d = panel.svg(fx * width, top + fy * (height - top), fw * width, fh * (height - top))
         else:
             s, d = panel.svg(fx * width + 4, top + fy * (height - top) + 2, fw * width - 8, fh * (height - top) - 4)
         body.append(s)
-        descs.append(d)
+        host = getattr(panel, "_host_panel", None)
+        if host is not None and id(host) in hosts:
+            descs[hosts[id(host)]] += "; right y axis: " + d
+        else:
+            hosts[id(panel)] = len(descs)
+            descs.append(d)
     if title:
         body.insert(0, '<text x="%s" y="20" text-anchor="middle" font-size="15" font-weight="600">%s</text>' % (
             _fmt(width / 2), markup.svg(title, 15) if markup else _rich(title)))
-    kind = "Plot" if len(panels) == 1 else "Figure with %d plots" % len(panels)
+    kind = "Plot" if len(descs) == 1 else "Figure with %d plots" % len(descs)
     desc = kind + (' "%s"' % (markup.plain(title) if markup else title) if title else "") + ": " + " | ".join(descs)
     return "".join(body), desc
 
 
-def _svg_open(width, height, desc, cls="sb-plot", extra=""):
-    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %s %s" width="%s" height="%s" role="img" aria-label="%s" '
+def _svg_open(width, height, desc, cls="sb-plot", extra="", x0=0.0, y0=0.0):
+    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="%s %s %s %s" width="%s" height="%s" role="img" aria-label="%s" '
             'font-family="system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="currentColor" class="%s"%s>'
-            '<title>%s</title>') % (_fmt(width), _fmt(height), _fmt(width), _fmt(height), _esc(desc), cls, extra, _esc(desc))
+            '<title>%s</title>') % (_fmt(x0), _fmt(y0), _fmt(width), _fmt(height), _fmt(width), _fmt(height), _esc(desc), cls, extra, _esc(desc))
 
 
-def render_svg(panels, width=640, height=480, title=None, markup=None):
-    """SVG for panels laid out as [(panel, (fx, fy, fw, fh)), ...] in fractions of the figure."""
+def render_svg(panels, width=640, height=480, title=None, markup=None, grow=False):
+    """SVG for panels laid out as [(panel, (fx, fy, fw, fh)), ...] in fractions of the figure. With grow, a
+    legend placed outside the figure (bbox_to_anchor) widens it to show the legend, as a notebook's inline
+    figure (bbox_inches="tight") does; without, it is cut off at the figure's edge, as savefig's."""
     body, desc = render_frame(panels, width, height, title, markup)
-    return _svg_open(float(width), float(height), desc) + body + "</svg>"
+    x0, y0, x1, y1 = 0.0, 0.0, float(width), float(height)
+    for panel, _ in panels:
+        b = getattr(panel, "_legend_box", None) if grow else None
+        if b is not None:
+            x0, y0 = min(x0, b[0] - 4), min(y0, b[1] - 4)
+            x1, y1 = max(x1, b[0] + b[2] + 4), max(y1, b[1] + b[3] + 4)
+    return _svg_open(x1 - x0, y1 - y0, desc, x0=x0, y0=y0) + body + "</svg>"
 
 
 def render_animation(frames, width=640, height=480, delay=200, iterations=0):
