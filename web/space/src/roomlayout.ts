@@ -4,15 +4,23 @@
 // call it (the barycenter rule, a few sweeps), so the arrows cross less.  A wide level wraps into rows behind it.
 // Imports hang in a column on the left wall; what has no links at all waits on a shelf below.  Writes each node's
 // `position` (and `position2d`, the same without depth).
-import { sizeOf } from "./sizes.js";
+import { sizeOf } from "./sizes.ts";
+import { checkSpace } from "./read.ts";
+
+// (how many layouts were begun: the tests' sentinel that a refused room is never laid out)
+export const laid = { rooms: 0 };
 
 export function layered(nodes, edges) {
+  laid.rooms++;
+  // (every room is laid out here, whatever made it (a folder's, a file's, a class's): checked whole first, as any space
+  //  is, so none over the viewer's limits is laid out)
+  checkSpace({ format: "sagebrush-space", nodes, edges });
   const main = nodes.filter((n) => n.kind !== "import" && !n.shelf);
   const ids = new Set(main.map((n) => n.id));
-  const out = new Map(main.map((n) => [n.id, []])), inn = new Map(main.map((n) => [n.id, []]));
+  const out = new Map<any, any[]>(main.map((n) => [n.id, []])), inn = new Map<any, any[]>(main.map((n) => [n.id, []]));
   for (const e of edges) if (ids.has(e.from) && ids.has(e.to) && e.from !== e.to) { out.get(e.from).push(e.to); inn.get(e.to).push(e.from); }
   // (circles: Tarjan's strongly connected components, iteratively)
-  const comp = new Map(), index = new Map(), low = new Map(), stack = [], on = new Set();
+  const comp = new Map<any, number>(), index = new Map<any, number>(), low = new Map<any, number>(), stack: any[] = [], on = new Set<any>();
   let counter = 0, ncomp = 0;
   for (const root of main) {
     if (index.has(root.id)) continue;
@@ -38,12 +46,12 @@ export function layered(nodes, edges) {
     }
   }
   // (each component's level: the longest path down to it from something nothing calls)
-  const cout = Array.from({ length: ncomp }, () => new Set()), indeg = new Array(ncomp).fill(0);
+  const cout = Array.from({ length: ncomp }, () => new Set<number>()), indeg = new Array(ncomp).fill(0);
   for (const [v, ws] of out) for (const w of ws) {
     const a = comp.get(v), b = comp.get(w);
     if (a !== b && !cout[a].has(b)) { cout[a].add(b); indeg[b]++; }
   }
-  const depth = new Array(ncomp).fill(0), queue = [];
+  const depth = new Array(ncomp).fill(0), queue: number[] = [];
   for (let c = 0; c < ncomp; c++) if (!indeg[c]) queue.push(c);
   while (queue.length) {
     const c = queue.shift();
@@ -62,7 +70,7 @@ export function layered(nodes, edges) {
     for (const l of order) {
       const L = layers[l];
       if (!L || (down && l === 0)) continue;
-      const key = new Map(L.map((n) => [n.id, bary(n, down ? inn.get(n.id) : out.get(n.id))]));
+      const key = new Map<any, number>(L.map((n) => [n.id, bary(n, down ? inn.get(n.id) : out.get(n.id))]));
       L.sort((a, b) => key.get(a.id) - key.get(b.id));
       rerank();
     }

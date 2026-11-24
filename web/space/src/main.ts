@@ -8,28 +8,43 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 // (notes: the site's own Markdown, web/markdown.ts: raw HTML limited to formatting, no pictures from other sites, and
 //  math marked for KaTeX; a space is the agent's or anyone's text, shown on the site's origin)
 import { render as markdown } from "../../markdown.ts";
-import { layout } from "./layout.js";
-import { texToText } from "./tex.js";
-import { highlight, editor, codeRuns } from "./code.js";
-import { run, interrupt, sceneObject, SCENE } from "./run.js";
-import { sizeOf } from "./sizes.js";
-import { treeRoom, resolveImport } from "./treeroom.js";
+import { layout } from "./layout.ts";
+import { texToText } from "./tex.ts";
+import { drawCode, editor, codeRuns } from "./code.ts";
+import { run, interrupt, sceneObject, SCENE } from "./run.ts";
+import { sizeOf } from "./sizes.ts";
+import { treeRoom, resolveImport } from "./treeroom.ts";
+import { checkSpace, readText, sameSite, utf8Bytes, ROOM_TEXT } from "./read.ts";
+import { EDIT, keepEdit } from "./keep.ts";
+import { groundPlan, placedOnGround, moundFor, supportAt as blockAt, EYE, SIGN, STEP } from "./ground.ts";
 // (the languages whose files are entered: by their names; each parser loaded the first time one of its files is)
 const CODE = { py: "python", sage: "python", js: "js", mjs: "js", cjs: "js", jsx: "js", ts: "js", mts: "js", cts: "js", tsx: "js" };
 const codeOf = (p) => CODE[/\.([a-z]+)$/i.exec(String(p))?.[1]?.toLowerCase()] ?? null;
-// (a file's room by its language; at most ROOM_TEXT of text is parsed, so a long file's parse can't hold the page)
-const ROOM_TEXT = 1 << 20;
+// (a file's room by its language; at most ROOM_TEXT bytes of text (UTF-8) are parsed, so a long file's parse can't hold
+//  the page)
 async function codeRoom(text, path, scope = null, lang = null) {
-  if (text.length > ROOM_TEXT) throw new Error("it's too long to enter here");
+  if (utf8Bytes(text) > ROOM_TEXT) throw new Error("it's too long to enter here");
   const k = codeOf(path) ?? (lang === "sage" || lang === "python" ? "python" : null);
-  if (k === "js") { const { jsRoom } = await import("./jsroom.js"); return checkSpace(jsRoom(text, { path, scope })); }
-  const { pythonRoom } = await import("./pyroom.js");
+  if (k === "js") { const { jsRoom } = await import("./jsroom.ts"); return checkSpace(jsRoom(text, { path, scope })); }
+  const { pythonRoom } = await import("./pyroom.ts");
   return checkSpace(pythonRoom(text, { path, sage: /\.sage$/.test(path) || lang === "sage", scope: scope?.[0] ?? null }));
 }
-import { checkSpace, readText, sameSite } from "./read.js";
-import { EDIT, keepEdit } from "./keep.js";
-import { groundPlan, placedOnGround, moundFor, supportAt as blockAt, EYE, SIGN, STEP } from "./ground.js";
-const $ = (s) => document.querySelector(s);
+// The viewer's own root (its page's one [data-space3d] element) and its parts, each found once inside the root by its
+// name (data-c): nothing is looked up in the rest of the document, so another page's #dims or #status is never ours.
+const root = document.querySelector<HTMLElement>("[data-space3d]");
+if (!root) throw new Error("the 3D view needs its root element ([data-space3d])");
+const part = <T extends HTMLElement = HTMLElement>(name: string): T => {
+  const el = root.querySelector<T>(`[data-c="${name}"]`);
+  if (!el) throw new Error(`the 3D view's page lacks its part "${name}"`);
+  return el;
+};
+const ui = {
+  view: part("view"), panel: part("panel"), title: part("title"), back: part<HTMLButtonElement>("back"), fwd: part<HTMLButtonElement>("fwd"),
+  home: part<HTMLButtonElement>("home"), move: part<HTMLButtonElement>("move"), dims: part<HTMLButtonElement>("dims"), fs: part<HTMLButtonElement>("fs"),
+  runall: part<HTMLButtonElement>("runall"), theme: part<HTMLButtonElement>("theme"), fold: part<HTMLButtonElement>("fold"), helpbtn: part<HTMLButtonElement>("helpbtn"),
+  space: part<HTMLSelectElement>("space"), tour: part<HTMLSelectElement>("tour"), q: part<HTMLInputElement>("q"), results: part<HTMLUListElement>("results"),
+  hover: part("hover"), status: part("status"), overlay: part("overlay"), tourpill: part("tourpill"), fade: part("fade"), helpcard: part("helpcard"),
+};
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
@@ -38,7 +53,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
-$("#view").appendChild(renderer.domElement);
+ui.view.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 // the theme: light (a white space), or dark; Auto follows the system (prefers-color-scheme)
 const THEMES = {
@@ -51,7 +66,7 @@ const darkQuery = matchMedia("(prefers-color-scheme: dark)");
 let themeSetting = (() => { try { const v = localStorage.getItem("space3d:theme"); return ["light", "dark"].includes(v) ? v : "auto"; } catch { return "auto"; } })();
 const themeName = () => (themeSetting === "auto" ? (darkQuery.matches ? "dark" : "light") : themeSetting);
 let T = THEMES[themeName()];
-document.documentElement.dataset.theme = themeName();
+root.dataset.theme = themeName();
 scene.background = new THREE.Color(T.bg);
 scene.fog = new THREE.Fog(T.bg, 60, 400);
 const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 5000);
@@ -679,8 +694,8 @@ function positionsOf(nodes, edges, d) {
 //  an agent), so the camera, the selection and Back stay as they are)
 // (`opts.room`: a room being entered or left (rooms.js below): Back's history is kept, and `opts.P` gives the places
 //  the space had, so a room left is as it was)
-async function load(name, data = null, again = false, opts = {}) {
-  $("#status").textContent = "loading " + name + "…";
+async function load(name, data = null, again = false, opts: { room?: boolean; P?: Float64Array | null } = {}) {
+  ui.status.textContent = "loading " + name + "…";
   let next = checkSpace(data ?? JSON.parse(await readText(sameSite(name, { space: true }))));
   // (a space carrying a whole tree instead of objects: its top directory's room)
   // (and the room made from it, checked the same way: treeroom.js refuses a folder over the limits before laying it out)
@@ -690,7 +705,7 @@ async function load(name, data = null, again = false, opts = {}) {
   if (again && scopes.length && !opts.room) {
     if (tour && tour.space === scopes[0].space) { const t = toursOf(next).find((x) => x.title === tour.t.title); if (t) { tour.space = next; tour.t = t; } else tour = null; }
     scopes[0].space = next; scopes[0].P = null;
-    $("#status").textContent = "the space was written again: Back out of the rooms to see it";
+    ui.status.textContent = "the space was written again: Back out of the rooms to see it";
     return;
   }
   const view = again && space ? { pos: camera.position.clone(), target: controls.target.clone(), sel: selected } : null;
@@ -755,9 +770,9 @@ async function load(name, data = null, again = false, opts = {}) {
   renderTours();
   document.title = (space.title ?? name) + " · 3D view";
   crumbs();
-  $("#status").textContent = `${nodes.length} objects, ${pairs.length} links · ${r3.laid ? "laid out in " + Math.round(performance.now() - t0) + " ms" : "at their saved places"}`;
+  ui.status.textContent = `${nodes.length} objects, ${pairs.length} links · ${r3.laid ? "laid out in " + Math.round(performance.now() - t0) + " ms" : "at their saved places"}`;
   if (!view || selected === null) closeOverlay();
-  else if (!$("#overlay").hidden) showOverlay(nodes.find((n) => n.id === selected));
+  else if (!ui.overlay.hidden) showOverlay(nodes.find((n) => n.id === selected));
 }
 
 // the camera: everything in view
@@ -837,8 +852,8 @@ function pushView() {
   navButtons();
 }
 function navButtons() {
-  $("#back").disabled = !history.length;
-  $("#fwd").disabled = !future.length;
+  ui.back.disabled = !history.length;
+  ui.fwd.disabled = !future.length;
 }
 function flyToView(to, toT, ms = 900) {
   flight = { from: camera.position.clone(), fromT: controls.target.clone(), to, toT, t0: performance.now(), ms };
@@ -896,9 +911,9 @@ function stepFlight(now) {
   const u = Math.max(0, Math.min(1, (now - flight.t0) / flight.ms)), e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
   // (walking: a blink: dark, there, light again; then standing where it left you)
   if (deskWalk && flight.ms > 1) {
-    $("#fade").style.opacity = String(u < 0.5 ? u * 2 : (1 - u) * 2);
+    ui.fade.style.opacity = String(u < 0.5 ? u * 2 : (1 - u) * 2);
     if (u >= 0.5 && !flight.jumped) { camera.position.copy(flight.to); controls.target.copy(flight.toT); flight.jumped = true; land(); }
-    if (u >= 1) { $("#fade").style.opacity = "0"; flight = null; }
+    if (u >= 1) { ui.fade.style.opacity = "0"; flight = null; }
     return;
   }
   // (an arc: up and over, so a long flight passes above the space instead of through it)
@@ -907,17 +922,17 @@ function stepFlight(now) {
   controls.target.lerpVectors(flight.fromT, flight.toT, e);
   if (u >= 1) { flight = null; if (deskWalk) land(); }
 }
-$("#back").onclick = back;
-$("#fwd").onclick = forward;
-$("#home").onclick = () => space && frame(positions, true);
+ui.back.onclick = back;
+ui.fwd.onclick = forward;
+ui.home.onclick = () => space && frame(positions, true);
 
 // Ground / Float: the space on the ground (ground.js), or floating in the air as it was laid out; the objects move from
 // one to the other
 let morph = null;
 function layoutButton() {
-  $("#dims").hidden = space?.layout === "floating";
-  $("#dims").textContent = onGround() ? "Float" : "Ground";
-  $("#dims").title = onGround() ? "Float the space in the air, as laid out in 3D" : "Stand the space on the ground: a room as a grandstand, anything else on the floor";
+  ui.dims.hidden = space?.layout === "floating";
+  ui.dims.textContent = onGround() ? "Float" : "Ground";
+  ui.dims.title = onGround() ? "Float the space in the air, as laid out in 3D" : "Stand the space on the ground: a room as a grandstand, anything else on the floor";
 }
 function setGround(on) {
   if (!space || on === onGround() || space.layout === "floating") return;
@@ -930,7 +945,7 @@ function setGround(on) {
   layoutButton();
   placePosts();
 }
-$("#dims").onclick = () => setGround(!onGround());
+ui.dims.onclick = () => setGround(!onGround());
 function stepMorph(now) {
   if (!morph) return;
   const u = Math.max(0, Math.min(1, (now - morph.t0) / morph.ms)), e = u * u * (3 - 2 * u);
@@ -966,7 +981,7 @@ renderer.domElement.addEventListener("pointermove", (ev) => {
     hovered = nd;
     if (hovered) setGlow(hovered, 0.25);
     renderer.domElement.style.cursor = nd ? "pointer" : "";
-    $("#hover").textContent = nd ? nd.title : "";
+    ui.hover.textContent = nd ? nd.title : "";
   }
 });
 renderer.domElement.addEventListener("pointerdown", (ev) => (down = [ev.clientX, ev.clientY]));
@@ -976,7 +991,7 @@ renderer.domElement.addEventListener("pointerup", (ev) => {
   const nd = pick(ev);
   if (nd) { openOverlay(nd); return; }
   // (a click beside the open drawer closes it, and only that; walking, a click on the floor goes there)
-  if (!$("#overlay").hidden) { closeOverlay(); return; }
+  if (!ui.overlay.hidden) { closeOverlay(); return; }
   closeOverlay();
   const p = deskWalk && !xr.presenting && floorAt(ev);
   if (p) goToFloor(p);
@@ -1011,7 +1026,7 @@ function setSelected(id) {
 }
 function selectionOf(id) {
   const nd = id === null ? null : space?.nodes.find((n) => n.id === id);
-  return nd ? { id: nd.id, kind: nd.kind, title: nd.title, group: nd.group ?? null, space: $("#space").value,
+  return nd ? { id: nd.id, kind: nd.kind, title: nd.title, group: nd.group ?? null, space: ui.space.value,
     ...(scopes.length ? { room: roomPath() } : {}), ...(nd.path ? { path: nd.path } : {}), ...(nd.start ? { lines: [nd.start, nd.end] } : {}) } : null;
 }
 
@@ -1039,14 +1054,18 @@ function showOverlay(nd) {
   else if (nd.kind === "import" && space.tree) body += `<div class="hint noroom">It isn't in the repository (the standard library, or a package from elsewhere).</div>`;
   // (what it is for, before what it says)
   if (nd.summary) body += `<div class="summary md">${markdown(String(nd.summary), { remote: false })}</div>`;
+  // (the code the drawer shows: drawn into its <code> as text, by the one highlighter, once the drawer is built)
+  let codeShown: string | null = null;
   if (nd.kind === "dir") body += `<div class="label">Inside</div><pre class="code">${esc(nd.text ?? "")}</pre>`;
   else if (ROOM_KINDS.has(nd.kind)) {
+    codeShown = String(nd.text ?? "");
     body += `<div class="meta">${esc([nd.lang, nd.start ? `lines ${nd.start}–${nd.end}` : "", space.room?.path].filter(Boolean).join(" · "))}</div>` +
-      `<pre class="code hljs"><code>${highlight(String(nd.text ?? ""), nd.lang ?? "")}</code></pre>` +
+      `<pre class="code"><code></code></pre>` +
       (nd.kind === "import" && nd.names?.length ? `<div class="hint">Names it brings in: ${esc(nd.names.join(", "))}</div>` : "");
   } else if (nd.cell) {
+    codeShown = String(nd.text ?? "");
     body += `<div class="meta">${esc([nd.lang, space.room?.path].filter(Boolean).join(" · "))}</div>` +
-      `<pre class="code hljs"><code>${highlight(String(nd.text ?? ""), nd.lang ?? "")}</code></pre>` +
+      `<pre class="code"><code></code></pre>` +
       `<div class="label">Output, as the notebook last showed it</div><div class="output">${outputHtml(nd)}</div>`;
   } else if (nd.kind === "note") body += `<div class="md">${markdown(String(nd.text ?? ""), { remote: false })}</div>`;
   else if (runnable(nd)) {
@@ -1059,33 +1078,36 @@ function showOverlay(nd) {
     // (a file whose text is elsewhere (`src`): fetched now, and the drawer drawn again when it comes)
     const pending = nd.src && !nd._full;
     // (only if it is still this object, in this space: ids repeat from room to room)
-    const still = () => selected === nd.id && space.nodes.includes(nd) && !$("#overlay").hidden;
+    const still = () => selected === nd.id && space.nodes.includes(nd) && !ui.overlay.hidden;
     if (pending) fullText(nd).then(() => { if (still()) showOverlay(nd); }, (e) => {
-      const h = $("#overlay .fetching");
+      const h = ui.overlay.querySelector<HTMLElement>(".fetching");
       if (h && still()) h.textContent = "couldn't fetch its text: " + (e?.message ?? e);
     });
     const shown = String(nd.text ?? "").split("\n"), cut = shown.length > MAX_SHOWN;
+    if (!(pending && !nd.text)) codeShown = cut ? shown.slice(0, MAX_SHOWN).join("\n") : String(nd.text ?? "");
     body += `<div class="meta">${esc(nd.lang ?? "")}${Number(nd.lines) > 0 ? " · " + Number(nd.lines) + " lines" : ""}</div>` +
       (pending && !nd.text ? `<div class="hint fetching">fetching its text…</div>` :
-        `<pre class="code hljs"><code>${highlight(cut ? shown.slice(0, MAX_SHOWN).join("\n") : String(nd.text ?? ""), nd.lang ?? "")}</code></pre>`) +
+        `<pre class="code"><code></code></pre>`) +
       (cut ? `<div class="hint">(its first ${MAX_SHOWN} lines of ${shown.length})</div>` : !pending && shownLines(nd) < Number(nd.lines) ? `<div class="hint">(its first ${shownLines(nd)} lines of ${Number(nd.lines)})</div>` : "");
   }
   const links = (label, list) => list.length ? `<div class="label">${label} (${list.length})</div><ul class="links">${list.map((m) => `<li><a href="#" data-i="${space.nodes.indexOf(m)}">${esc(m.title)}</a></li>`).join("")}</ul>` : "";
   const [outL, inL] = linkLabels(nd);
-  $("#overlay").innerHTML = `<div class="grip" title="Drag to resize"></div><button class="close" title="Close (Esc)">×</button><h2>${esc(nd.title)}</h2>${body}${links(outL, nd._out)}${links(inL, nd._in)}`;
-  if (space.room) linkNames($("#overlay pre.code code"), nd);
-  const eb = $("#overlay .enter");
+  ui.overlay.innerHTML = `<div class="grip" title="Drag to resize"></div><button class="close" title="Close (Esc)">×</button><h2>${esc(nd.title)}</h2>${body}${links(outL, nd._out)}${links(inL, nd._in)}`;
+  const codeEl = ui.overlay.querySelector<HTMLElement>("pre.code code");
+  if (codeEl && codeShown !== null) drawCode(codeEl, codeShown, nd.lang);
+  if (space.room) linkNames(codeEl, nd);
+  const eb = ui.overlay.querySelector<HTMLElement>(".enter");
   if (eb) eb.onclick = () => enterRoom(nd);
-  grip($("#overlay .grip"));
+  grip(ui.overlay.querySelector<HTMLElement>(".grip"));
   if (runnable(nd)) mountRunner(nd);
-  typeset($("#overlay"));
-  $("#overlay").hidden = false;
-  document.body.classList.add("reading");
-  $("#overlay").scrollTop = 0;
+  typeset(ui.overlay);
+  ui.overlay.hidden = false;
+  root.classList.add("reading");
+  ui.overlay.scrollTop = 0;
   viewOffset();
-  $("#overlay .close").onclick = closeOverlay;
-  for (const a of $("#overlay").querySelectorAll("a[data-i]")) a.onclick = (e) => { e.preventDefault(); openOverlay(space.nodes[+a.dataset.i]); };
-  for (const b of $("#overlay").querySelectorAll("button[data-tour]")) b.onclick = () => (b.dataset.tour === "end" ? endTour() : tourStep(+b.dataset.tour));
+  ui.overlay.querySelector<HTMLElement>(".close").onclick = closeOverlay;
+  for (const a of ui.overlay.querySelectorAll<HTMLElement>("a[data-i]")) a.onclick = (e) => { e.preventDefault(); openOverlay(space.nodes[+a.dataset.i]); };
+  for (const b of ui.overlay.querySelectorAll<HTMLElement>("button[data-tour]")) b.onclick = () => (b.dataset.tour === "end" ? endTour() : tourStep(+b.dataset.tour));
   setSelected(nd.id);
   if (runningNode === nd) runState(nd, "running…", true);
 }
@@ -1128,11 +1150,11 @@ function endTour() {
   tour = null;
   renderTours();
   tourPill();
-  if (selected !== null && !$("#overlay").hidden) showOverlay(space.nodes.find((n) => n.id === selected));
+  if (selected !== null && !ui.overlay.hidden) showOverlay(space.nodes.find((n) => n.id === selected));
 }
 function renderTours() {
   tourPill();
-  const sel = $("#tour"), ts = toursOf(tour ? tour.space : space);
+  const sel = ui.tour, ts = toursOf(tour ? tour.space : space);
   sel.hidden = !ts.length;
   sel.innerHTML = `<option value="">${tour ? "On a tour: " + esc(tour.t.title ?? "") : "Guided tours…"}</option>` +
     ts.map((t, k) => `<option value="${k}">${esc(t.title ?? "Tour " + (k + 1))} (${t.steps.length} stops)</option>`).join("") +
@@ -1140,18 +1162,18 @@ function renderTours() {
 }
 // (while on a tour, away from its stop (another object, a room): a pill says where the tour is, and goes back to it)
 function tourPill() {
-  const el = $("#tourpill");
+  const el = ui.tourpill;
   if (!el) return;
   const st = tour && tour.t.steps[tour.i];
-  const atStop = !!st && space === tour.space && selected === st.node && !$("#overlay").hidden;
+  const atStop = !!st && space === tour.space && selected === st.node && !ui.overlay.hidden;
   el.hidden = !tour || atStop || tour.i < 0;
   if (el.hidden) return;
   el.innerHTML = `<span>On a tour: ${esc(tour.t.title ?? "Tour")} · stop ${tour.i + 1} of ${tour.t.steps.length}</span>` +
     `<button data-t="0" title="Back to the tour's stop">Back to the tour</button><button data-t="1" title="The next stop (N)">Next ▶</button><button data-t="end" title="End the tour">✕</button>`;
-  for (const b of el.querySelectorAll("button")) b.onclick = () => (b.dataset.t === "end" ? endTour() : tourStep(+b.dataset.t));
+  for (const b of el.querySelectorAll<HTMLElement>("button")) b.onclick = () => (b.dataset.t === "end" ? endTour() : tourStep(+b.dataset.t));
 }
-$("#tour").onchange = () => {
-  const v = $("#tour").value;
+ui.tour.onchange = () => {
+  const v = ui.tour.value;
   if (v === "end") endTour();
   else if (v !== "") startTour(toursOf(tour ? tour.space : space)[+v]);
   else renderTours();
@@ -1168,12 +1190,12 @@ function typeset(el) {
 }
 const shownLines = (nd) => String(nd.text ?? "").split("\n").length;
 const isBase64 = (s) => typeof s === "string" && /^[A-Za-z0-9+/]*={0,2}$/.test(s);
-function closeOverlay() { $("#overlay").hidden = true; document.body.classList.remove("reading"); viewOffset(); if (space) setSelected(null); tourPill(); }
+function closeOverlay() { ui.overlay.hidden = true; root.classList.remove("reading"); viewOffset(); if (space) setSelected(null); tourPill(); }
 // (while the overlay covers the right of the screen, the view is shifted so what it is about stays in the free part)
 // (on a phone the overlay is a sheet along the bottom: the view is shifted up instead)
 const phone = matchMedia("(max-width: 700px)");
 function viewOffset() {
-  const r = $("#overlay").hidden ? null : $("#overlay").getBoundingClientRect();
+  const r = ui.overlay.hidden ? null : ui.overlay.getBoundingClientRect();
   if (r && phone.matches) camera.setViewOffset(innerWidth, innerHeight, 0, (r.height + 8) / 2, innerWidth, innerHeight);
   else if (r) camera.setViewOffset(innerWidth, innerHeight, (r.width + 12) / 2, 0, innerWidth, innerHeight);
   else camera.clearViewOffset();
@@ -1227,7 +1249,7 @@ function enterKind(nd) {
 // (the JS import resolver: set when its module first loads, enterRoom)
 let jsResolve = null;
 async function loadResolvers() {
-  if (codeOf(String(space?.room?.path ?? "")) === "js" && !jsResolve) jsResolve = (await import("./jsroom.js")).resolveJs;
+  if (codeOf(String(space?.room?.path ?? "")) === "js" && !jsResolve) jsResolve = (await import("./jsroom.ts")).resolveJs;
 }
 // (a file's whole text: from its `src` (a file of this site), once; the faces drawn again with it)
 const fetched = new Map();
@@ -1274,7 +1296,7 @@ async function enterRoom(nd) {
   const k = enterKind(nd);
   if (!k || entering) return false;
   entering = true;
-  $("#status").textContent = "entering " + shortTitle(nd) + "…";
+  ui.status.textContent = "entering " + shortTitle(nd) + "…";
   const from = space, P = P3 ? Float64Array.from(P3) : null;
   let pushed = false;
   try {
@@ -1290,7 +1312,7 @@ async function enterRoom(nd) {
     pushed = true;
     await load(spaceName, room, false, { room: true });
     await loadResolvers();
-    if (!$("#overlay").hidden && selected !== null) showOverlay(space.nodes.find((n) => n.id === selected));
+    if (!ui.overlay.hidden && selected !== null) showOverlay(space.nodes.find((n) => n.id === selected));
     xr.roomChanged();
     focusNode = room._focus ? space.nodes.find((n) => n.name === room._focus) ?? null : null;
     if (focusNode && !xr.presenting) openOverlay(focusNode);
@@ -1303,7 +1325,7 @@ async function enterRoom(nd) {
       if (k2 >= 0) history.length = k2;
       try { await load(spaceName, from, false, { room: true, P }); } catch {}
     }
-    $("#status").textContent = "couldn't enter " + shortTitle(nd) + ": " + (e?.message ?? e);
+    ui.status.textContent = "couldn't enter " + shortTitle(nd) + ": " + (e?.message ?? e);
     return false;
   } finally {
     entering = false;
@@ -1343,9 +1365,9 @@ const roomPath = () => [...scopes.map((s) => labelOf(s.space)), labelOf(space)].
 // (the title: the rooms you are in, each a link back out to it)
 function crumbs() {
   const all = [...scopes.map((s) => s.space), space];
-  $("#title").innerHTML = all.map((s, k) => (k < all.length - 1 ? `<a href="#" data-k="${k}">${esc(labelOf(s))}</a>` : `<span>${esc(labelOf(s))}</span>`)).join(" › ");
-  $("#title").title = space.summary ? texToText(space.summary) : "";
-  for (const a of $("#title").querySelectorAll("a[data-k]")) a.onclick = (e) => { e.preventDefault(); leaveTo(+a.dataset.k); };
+  ui.title.innerHTML = all.map((s, k) => (k < all.length - 1 ? `<a href="#" data-k="${k}">${esc(labelOf(s))}</a>` : `<span>${esc(labelOf(s))}</span>`)).join(" › ");
+  ui.title.title = space.summary ? texToText(space.summary) : "";
+  for (const a of ui.title.querySelectorAll<HTMLElement>("a[data-k]")) a.onclick = (e) => { e.preventDefault(); leaveTo(+a.dataset.k); };
 }
 // (in a room's code: each name of another object in it a link there; not inside strings and comments)
 function linkNames(code, nd) {
@@ -1363,7 +1385,7 @@ function linkNames(code, nd) {
   const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT), texts = [];
   while (walker.nextNode()) texts.push(walker.currentNode);
   for (const t of texts) {
-    if (t.parentElement.closest(".hljs-string, .hljs-comment")) continue;
+    if (t.parentElement.closest(".hs, .hc")) continue;
     const s = t.nodeValue, frag = document.createDocumentFragment();
     let at = 0, any = false;
     for (const m of s.matchAll(re)) {
@@ -1393,9 +1415,9 @@ function outputHtml(nd) {
   return h || `<p class="hint">Not run yet.</p>`;
 }
 function mountRunner(nd) {
-  const box = $("#overlay"), out = box.querySelector(".output"), state = box.querySelector(".runstate");
-  const mode = box.querySelector(".mode"), runB = box.querySelector(".run"), stopB = box.querySelector(".stop");
-  const ed = editor(box.querySelector(".code-edit"), {
+  const box = ui.overlay, out = box.querySelector<HTMLElement>(".output"), state = box.querySelector<HTMLElement>(".runstate");
+  const mode = box.querySelector<HTMLSelectElement>(".mode"), runB = box.querySelector<HTMLElement>(".run"), stopB = box.querySelector<HTMLElement>(".stop");
+  const ed = editor(box.querySelector<HTMLElement>(".code-edit"), {
     value: nd.text ?? "", lang: mode.value,
     onRun: () => go(),
     onChange: (v) => { nd.text = v; save(nd); },
@@ -1411,13 +1433,13 @@ function mountRunner(nd) {
 // Running an object's code: its output, figure and 3D plot kept on it, its face drawn again, and the overlay (when it
 // shows this object) following along. The overlay's Run and Run all both come here.
 let runningNode = null;
-const shownRunner = (nd) => (!$("#overlay").hidden && selected === nd.id && $("#overlay .runbar") ? $("#overlay") : null);
+const shownRunner = (nd) => (!ui.overlay.hidden && selected === nd.id && ui.overlay.querySelector<HTMLElement>(".runbar") ? ui.overlay : null);
 function runState(nd, text, busy) {
   const box = shownRunner(nd);
   if (!box) return;
-  box.querySelector(".runstate").textContent = text;
-  box.querySelector(".run").disabled = busy;
-  box.querySelector(".stop").hidden = !busy;
+  box.querySelector<HTMLElement>(".runstate").textContent = text;
+  box.querySelector<HTMLButtonElement>(".run").disabled = busy;
+  box.querySelector<HTMLElement>(".stop").hidden = !busy;
 }
 async function runNode(nd) {
   const mode = RUNS.includes(nd.lang) ? nd.lang : nd.kind === "plot3d" ? "sage" : "python";
@@ -1427,7 +1449,7 @@ async function runNode(nd) {
   try {
     const r = await run(String(nd.text ?? ""), mode, {
       start: () => runState(nd, "running…", true),
-      update: (r) => { const box = shownRunner(nd); if (box) box.querySelector(".output").innerHTML = liveHtml(r); },
+      update: (r) => { const box = shownRunner(nd); if (box) box.querySelector<HTMLElement>(".output").innerHTML = liveHtml(r); },
     });
     nd.output = r.out.replace(/\s+$/, "") + (r.stopped ? (r.out ? "\n" : "") + r.stopped : "");
     nd.outputError = r.error;
@@ -1444,13 +1466,13 @@ async function runNode(nd) {
       o.userData.tex = []; o.userData.level = -1;
     }
     const box = shownRunner(nd);
-    if (box) box.querySelector(".output").innerHTML = outputHtml(nd);
+    if (box) box.querySelector<HTMLElement>(".output").innerHTML = outputHtml(nd);
     runState(nd, (r.error ? "failed" : "done") + ` in ${Math.round(performance.now() - t0)} ms`, false);
     save(nd);
     return { ok: !r.error && !r.stopped, stopped: !!r.stopped };
   } catch (e) {
     const box = shownRunner(nd);
-    if (box) box.querySelector(".output").innerHTML = `<pre class="out err">${esc("couldn't start Sagebrush's engine: " + (e?.message ?? e))}</pre>`;
+    if (box) box.querySelector<HTMLElement>(".output").innerHTML = `<pre class="out err">${esc("couldn't start Sagebrush's engine: " + (e?.message ?? e))}</pre>`;
     runState(nd, "", false);
     return { ok: false, stopped: false, failed: true };
   } finally {
@@ -1461,18 +1483,18 @@ async function runNode(nd) {
 // Run all: every object with code, in the space's order, one after another (one engine, as a notebook's cells);
 // the button stops it
 let runAll = null;
-$("#runall").onclick = async () => {
+ui.runall.onclick = async () => {
   if (runAll) { runAll.stop = true; interrupt(); return; }
   if (!space) return;
   const todo = space.nodes.filter(runnable);
-  if (!todo.length) { $("#status").textContent = "nothing here has code to run"; return; }
+  if (!todo.length) { ui.status.textContent = "nothing here has code to run"; return; }
   runAll = { stop: false };
-  const btn = $("#runall");
+  const btn = ui.runall;
   let done = 0, failed = 0;
   for (const [i, nd] of todo.entries()) {
     if (runAll.stop) break;
     btn.textContent = `Stop (${i + 1} of ${todo.length})`;
-    $("#status").textContent = `running ${i + 1} of ${todo.length}: ${nd.title}`;
+    ui.status.textContent = `running ${i + 1} of ${todo.length}: ${nd.title}`;
     const r = await runNode(nd);
     // (the one Stop interrupted is stopped, not failed)
     if (runAll.stop) break;
@@ -1482,7 +1504,7 @@ $("#runall").onclick = async () => {
   const stopped = runAll.stop;
   runAll = null;
   btn.textContent = "Run all";
-  $("#status").textContent = (stopped ? `stopped after ${done + failed} of ${todo.length}` : `ran ${done + failed} of ${todo.length}`) + (failed ? `, ${failed} failed` : "");
+  ui.status.textContent = (stopped ? `stopped after ${done + failed} of ${todo.length}` : `ran ${done + failed} of ${todo.length}`) + (failed ? `, ${failed} failed` : "");
 };
 
 function liveHtml(r) {
@@ -1500,7 +1522,7 @@ function liveHtml(r) {
 // the file wins and the copy is dropped. The code itself is kept only if it was really edited here.
 const KEEP = ["lang", "output", "outputError", "svg", "png", "scene"];
 // (kept by keep.js: in this browser, on this site, within its byte limits)
-const keyOf = (nd) => `${EDIT}${$("#space").value}:${nd.id}`;
+const keyOf = (nd) => `${EDIT}${ui.space.value}:${nd.id}`;
 const fileText = (nd) => (nd._file ? nd._file.text : String(nd.text ?? ""));
 function save(nd) {
   const edited = String(nd.text ?? "") !== fileText(nd);
@@ -1527,15 +1549,15 @@ function grip(el) {
     e.preventDefault();
     const move = (ev) => {
       const w = Math.min(innerWidth - 80, Math.max(320, innerWidth - ev.clientX - 12));
-      $("#overlay").style.width = w + "px";
+      ui.overlay.style.width = w + "px";
       viewOffset();
     };
-    const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); try { localStorage.setItem("space3d:overlay-width", $("#overlay").style.width); } catch {} };
+    const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); try { localStorage.setItem("space3d:overlay-width", ui.overlay.style.width); } catch {} };
     addEventListener("pointermove", move);
     addEventListener("pointerup", up);
   };
 }
-try { const w = localStorage.getItem("space3d:overlay-width"); if (w) $("#overlay").style.width = w; } catch {}
+try { const w = localStorage.getItem("space3d:overlay-width"); if (w) ui.overlay.style.width = w; } catch {}
 
 // the theme: Auto, Light, Dark (kept for the next visit); a change redraws the faces and labels in its colors
 function applyTheme() {
@@ -1543,8 +1565,8 @@ function applyTheme() {
   T = THEMES[name];
   paintGround();
   paintTerraces();
-  document.documentElement.dataset.theme = name;
-  $("#theme").textContent = "Theme: " + themeSetting[0].toUpperCase() + themeSetting.slice(1);
+  root.dataset.theme = name;
+  ui.theme.textContent = "Theme: " + themeSetting[0].toUpperCase() + themeSetting.slice(1);
   scene.background.set(T.bg);
   scene.fog.color.set(T.bg);
   edgeColors();
@@ -1557,7 +1579,7 @@ function applyTheme() {
   if (space) for (const nd of space.nodes) setGlow(nd, 0);
   if (space) buildLandmarks();
 }
-$("#theme").onclick = () => {
+ui.theme.onclick = () => {
   // (Auto, then the other theme than the system's, then the system's own, then Auto again: the first click changes it)
   const other = darkQuery.matches ? "light" : "dark", own = darkQuery.matches ? "dark" : "light";
   themeSetting = themeSetting === "auto" ? other : themeSetting === other ? own : "auto";
@@ -1569,28 +1591,28 @@ applyTheme();
 
 // the controls folded away to the title and Back (a phone starts so; kept for the next visit)
 function setFold(on) {
-  document.body.classList.toggle("folded", on);
-  $("#fold").textContent = on ? "▾" : "▴";
-  $("#fold").title = on ? "Show the controls" : "Hide the controls";
-  $("#fold").setAttribute("aria-expanded", String(!on));
+  root.classList.toggle("folded", on);
+  ui.fold.textContent = on ? "▾" : "▴";
+  ui.fold.title = on ? "Show the controls" : "Hide the controls";
+  ui.fold.setAttribute("aria-expanded", String(!on));
 }
 {
   let pref = null;
   try { pref = localStorage.getItem("space3d:folded"); } catch {}
   setFold(pref === null ? phone.matches : pref === "1");
 }
-$("#fold").onclick = () => {
-  const on = !document.body.classList.contains("folded");
+ui.fold.onclick = () => {
+  const on = !root.classList.contains("folded");
   setFold(on);
   try { localStorage.setItem("space3d:folded", on ? "1" : "0"); } catch {}
 };
 // full screen
-$("#fs").onclick = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {});
-document.addEventListener("fullscreenchange", () => { $("#fs").textContent = document.fullscreenElement ? "Exit full screen" : "Full screen"; });
+ui.fs.onclick = () => (document.fullscreenElement ? document.exitFullscreen() : root.requestFullscreen()).catch(() => {});
+document.addEventListener("fullscreenchange", () => { ui.fs.textContent = document.fullscreenElement ? "Exit full screen" : "Full screen"; });
 // flying with the keyboard: W/S or Up/Down forward and back, A/D or Left/Right sideways, E/Q up and down (Shift:
 // faster), while held; the camera and what it looks at move together, so the view keeps its direction
-const held = new Set();
-const FLY = { w: [0, 0, 1], arrowup: [0, 0, 1], s: [0, 0, -1], arrowdown: [0, 0, -1], a: [-1, 0, 0], arrowleft: [-1, 0, 0],
+const held = new Set<string>();
+const FLY: Record<string, number[]> = { w: [0, 0, 1], arrowup: [0, 0, 1], s: [0, 0, -1], arrowdown: [0, 0, -1], a: [-1, 0, 0], arrowleft: [-1, 0, 0],
   d: [1, 0, 0], arrowright: [1, 0, 0], e: [0, 1, 0], q: [0, -1, 0] };
 const typing = () => /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? "");
 addEventListener("keyup", (e) => held.delete(e.key.toLowerCase()));
@@ -1618,15 +1640,15 @@ function stepFly(now) {
   flight = null;
 }
 addEventListener("keydown", (e) => {
-  if (typing()) { if (e.key === "Escape") document.activeElement.blur(); return; }
+  if (typing()) { if (e.key === "Escape") (document.activeElement as HTMLElement | null)?.blur(); return; }
   const k = e.key.toLowerCase();
   if (!e.altKey && !e.ctrlKey && !e.metaKey && (FLY[k] || k === "shift")) { held.add(k); if (FLY[k]) e.preventDefault(); return; }
   // (Esc with nothing open, in a frame the page opened over itself (Open in 3D): the page closes it)
   if (e.key === "Escape" && helpShown) showHelp(false);
-  else if (e.key === "Escape" && $("#overlay").hidden && embedded) window.parent.postMessage({ sagebrush: "space-close", version: 1 }, location.origin);
+  else if (e.key === "Escape" && ui.overlay.hidden && embedded) window.parent.postMessage({ sagebrush: "space-close", version: 1 }, location.origin);
   else if (e.key === "Escape") closeOverlay();
-  else if (e.key === "Enter" && selected !== null && !$("#overlay").hidden && !/^(A|BUTTON)$/.test(document.activeElement?.tagName ?? "")) { const nd = space.nodes.find((n) => n.id === selected); if (enterKind(nd)) enterRoom(nd); }
-  else if (e.key === "/") { e.preventDefault(); $("#q").focus(); }
+  else if (e.key === "Enter" && selected !== null && !ui.overlay.hidden && !/^(A|BUTTON)$/.test(document.activeElement?.tagName ?? "")) { const nd = space.nodes.find((n) => n.id === selected); if (enterKind(nd)) enterRoom(nd); }
+  else if (e.key === "/") { e.preventDefault(); ui.q.focus(); }
   else if (e.key === "b" || e.key === "B" || e.key === "Backspace" || (e.altKey && e.key === "ArrowLeft")) back();
   else if (e.key === "f" || e.key === "F" || (e.altKey && e.key === "ArrowRight")) forward();
   else if (e.key === "h" || e.key === "H") space && frame(positions, true);
@@ -1666,8 +1688,8 @@ function setDeskWalk(on) {
   controls.enabled = !deskWalk && !xr.presenting;
   controls.enableDamping = !deskWalk; // (no orbit left drifting while you look around)
   floorMark.visible = false;
-  $("#move").textContent = deskWalk ? "Walking (G)" : "Flying (G)";
-  $("#move").title = deskWalk ? "Walking on the floor: drag to look, W A S D to walk, Space to jump, click the floor to go there. G: fly instead" : "Flying: drag to turn around, scroll to zoom, W A S D and E Q to fly. G: walk instead";
+  ui.move.textContent = deskWalk ? "Walking (G)" : "Flying (G)";
+  ui.move.title = deskWalk ? "Walking on the floor: drag to look, W A S D to walk, Space to jump, click the floor to go there. G: fly instead" : "Flying: drag to turn around, scroll to zoom, W A S D and E Q to fly. G: walk instead";
   if (deskWalk) land();
 }
 // (looking around: a drag turns your head, about where you stand)
@@ -1755,8 +1777,8 @@ function buildIndex() {
   search();
 }
 function search() {
-  const q = $("#q").value.trim().toLowerCase();
-  const ul = $("#results");
+  const q = ui.q.value.trim().toLowerCase();
+  const ul = ui.results;
   if (!q || !space) { ul.innerHTML = ""; return; }
   const words = q.split(/\s+/);
   const hits = docs.filter((d) => words.every((w) => d.all.includes(w)))
@@ -1768,9 +1790,9 @@ function search() {
     const snip = k >= 0 ? text.slice(Math.max(0, k - 30), k + 60).replace(/\s+/g, " ") : "";
     return `<li data-i="${h.i}"><b>${esc(nd.title)}</b><span>${esc(snip)}</span></li>`;
   }).join("") || "<li class='none'>nothing found</li>";
-  for (const li of ul.querySelectorAll("li[data-i]")) li.onclick = () => openOverlay(space.nodes[+li.dataset.i]);
+  for (const li of ul.querySelectorAll<HTMLElement>("li[data-i]")) li.onclick = () => openOverlay(space.nodes[+li.dataset.i]);
 }
-$("#q").addEventListener("input", search);
+ui.q.addEventListener("input", search);
 
 // ---------------------------------------------------------------- which space
 // (?embed=1: shown in a frame by a page of this site (the agents chat's artifact pane), which sends the space, and
@@ -1778,7 +1800,7 @@ $("#q").addEventListener("input", search);
 //  to it as "space-select")
 const embedded = new URLSearchParams(location.search).has("embed") && window.parent !== window;
 function embed() {
-  document.body.classList.add("embed");
+  root.classList.add("embed");
   let current = null;
   addEventListener("message", (e) => {
     const m = e.data;
@@ -1786,7 +1808,7 @@ function embed() {
     if (m.sagebrush !== "space-load") return;
     const name = String(m.name ?? "space");
     const again = name === current;
-    if (!again) $("#space").innerHTML = `<option selected>${esc(name)}</option>`;
+    if (!again) ui.space.innerHTML = `<option selected>${esc(name)}</option>`;
     current = name;
     load(name, m.space, again).then(() => {
       if (!again && typeof m.selected === "string") setTimeout(() => window.space3d.select(m.selected), 300);
@@ -1798,7 +1820,7 @@ async function start() {
   if (embedded) return embed();
   const list = await (await fetch("spaces.json")).json().catch(() => []);
   const want = new URLSearchParams(location.search).get("space") ?? (list.includes("intro.space.json") ? "intro.space.json" : list[0]);
-  const sel = $("#space");
+  const sel = ui.space;
   sel.innerHTML = list.map((f) => `<option${f === want ? " selected" : ""}>${esc(f)}</option>`).join("");
   sel.onchange = () => { window.history.replaceState(null, "", "?space=" + encodeURIComponent(sel.value)); load(sel.value).catch(fail); };
   // (#sel=ID: that object selected, as an agent or a link left it)
@@ -1806,20 +1828,20 @@ async function start() {
   await load(want);
   if (wantSel) setTimeout(() => window.space3d.select(decodeURIComponent(wantSel)), 300);
 }
-function fail(e) { $("#status").textContent = "couldn't load: " + (e?.message ?? e); }
+function fail(e) { ui.status.textContent = "couldn't load: " + (e?.message ?? e); }
 start().catch(fail);
 
 // ---------------------------------------------------------------- a headset: none here yet
 // (what the rest of the page asks of one: never presenting)
-const xr = { presenting: false, step() {}, roomChanged() {} };
+const xr = { presenting: false, step(_dt: number) {}, roomChanged() {} };
 // (walking or flying, as kept)
 setDeskWalk(deskWalk);
-$("#move").onclick = () => setDeskWalk(!deskWalk);
+ui.move.onclick = () => setDeskWalk(!deskWalk);
 // (the help card: how to move, and the keys)
 let helpShown = false;
-function showHelp(on) { helpShown = !!on; $("#helpcard").hidden = !helpShown; }
-$("#helpbtn").onclick = () => showHelp(!helpShown);
-$("#helpcard .close").onclick = () => showHelp(false);
+function showHelp(on) { helpShown = !!on; ui.helpcard.hidden = !helpShown; }
+ui.helpbtn.onclick = () => showHelp(!helpShown);
+ui.helpcard.querySelector<HTMLElement>(".close").onclick = () => showHelp(false);
 let lastTick = performance.now();
 function tick(now) {
   const dt = Math.max(0, Math.min(0.1, (now - lastTick) / 1000));
@@ -1829,7 +1851,7 @@ function tick(now) {
     stepFlight(now);
     if (deskWalk) { if (!flight && !morph) stepWalk(dt); lastFly = now; } else stepFly(now);
     // (no blink under way (cancelled by a look, a step, a switch): no darkness either)
-    if (!(deskWalk && flight?.ms > 1)) $("#fade").style.opacity = "0";
+    if (!(deskWalk && flight?.ms > 1)) ui.fade.style.opacity = "0";
     controls.update();
   }
   stepMorph(now);
@@ -1861,3 +1883,6 @@ window.space3d = {
   get walking() { return deskWalk; },
   get feet() { return feetY(); },
 };
+
+// (the page's API, for an agent driving it and for tests)
+declare global { interface Window { space3d: any } }

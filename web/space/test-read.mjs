@@ -1,5 +1,5 @@
 // ci: web-browser/space order=5
-// What the viewer reads, and how much (src/read.js), in Node against a server of its own: a space and a file's text
+// What the viewer reads, and how much (src/read.ts), in Node against a server of its own: a space and a file's text
 // come from this site only (another origin, a user in the URL, or a space not named .space.json is refused), a
 // redirect is never followed, and an answer over the limit is refused, by its length or as it arrives. A space is
 // checked whole: its depth, values, strings, objects, links and tree.
@@ -20,9 +20,10 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${server.address().port}/space/`;
 globalThis.location = new URL(base);
-const { LIMITS, checkSpace, jsonSize, readText, sameSite, utf8Bytes } = await import("./src/read.js");
-const { treeRoom } = await import("./src/treeroom.js");
-const { KEPT, EDIT, keepEdit } = await import("./src/keep.js");
+const { LIMITS, checkSpace, jsonSize, readText, sameSite, utf8Bytes } = await import("./src/read.ts");
+const { treeRoom } = await import("./src/treeroom.ts");
+const { KEPT, EDIT, keepEdit } = await import("./src/keep.ts");
+const { layered } = await import("./src/roomlayout.ts");
 
 try {
   // ---- where from
@@ -79,6 +80,17 @@ try {
   ok(treeRoom(flat(LIMITS.nodes + 1, "sub/"), "").nodes.length === 1, "while the folder above it, one entry, is made");
   const linked = flat(150); linked.imports = []; for (let i = 0; i < 150; i++) for (let j = 0; j < 150; j++) if (i !== j) linked.imports.push([i, j]);
   ok(await refuses(() => treeRoom(linked, ""), /more than 20000 links/), "a room whose links (from its tree's imports) are over the limit is refused");
+
+  // ---- every room is checked whole before it is laid out (roomlayout.js layered): a refused one is never laid out
+  const parts = (n, extra = {}) => Array.from({ length: n }, (_, i) => ({ id: "n" + i, kind: "fn", title: "f" + i, ...extra }));
+  { const nodes = parts(LIMITS.nodes); layered(nodes, []);
+    ok(nodes.every((n) => Array.isArray(n.position)), `a room of ${LIMITS.nodes} parts is laid out (each given a position)`); }
+  { const nodes = parts(LIMITS.nodes + 1);
+    ok(await refuses(() => layered(nodes, []), /more than 4000 objects/) && nodes.every((n) => n.position === undefined), "one part more: refused before any is laid out (none has a position)"); }
+  { const nodes = parts(10, { text: "t".repeat(1 << 20) });
+    ok(await refuses(() => layered(nodes, []), /too large/) && nodes.every((n) => n.position === undefined), "a room whose parts are 10 MiB in all: refused before layout too"); }
+  { const nodes = parts(200), edges = []; for (let i = 0; i < 200; i++) for (let j = 0; j < 200; j++) if (i !== j && edges.length <= LIMITS.edges) edges.push({ from: "n" + i, to: "n" + j });
+    ok(await refuses(() => layered(nodes, edges), /links/) && nodes.every((n) => n.position === undefined), "and one with more links than a space may have"); }
 
   // ---- what is kept in this browser: bytes in UTF-8, the oldest dropped before a write, never over the limits
   const store = () => { const m = new Map(); return { m, get length() { return m.size; }, key: (k) => [...m.keys()][k] ?? null, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) }; };

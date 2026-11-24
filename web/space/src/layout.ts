@@ -10,7 +10,7 @@ function rng(seed) {
 
 export function layout(nodes, edges, { dims = 3, iterations = 360, seed = 7, spacing = 5 } = {}) {
   const n = nodes.length;
-  const index = new Map(nodes.map((nd, i) => [nd.id, i]));
+  const index = new Map<any, number>(nodes.map((nd, i) => [nd.id, i]));
   const P = new Float64Array(n * 3);
   const fixed = new Uint8Array(n);
   const rand = rng(seed);

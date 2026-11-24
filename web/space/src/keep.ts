@@ -2,7 +2,7 @@
 // and what its last run showed, per space and object. Bounded in bytes (UTF-8, the key and the value): at most
 // KEPT.entries copies and KEPT.bytes in all, the oldest dropped first, before anything is written; a copy over
 // KEPT.entry is kept without its figures, and not at all if still over. `storage`: localStorage, or a stand-in.
-import { utf8Bytes } from "./read.js";
+import { utf8Bytes } from "./read.ts";
 
 export const KEPT = { entries: 200, bytes: 4 << 20, entry: 256 << 10 };
 export const EDIT = "space3d:edit:";

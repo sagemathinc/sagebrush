@@ -4,7 +4,7 @@
 // the file, resolveJs).  Links: calls, the names each refers to (a type's too), `this.m()` in a class's room.
 //   jsRoom(text, { path, scope })  -> a sagebrush-space (scope: [a class's id], for its room)
 import { parse } from "@babel/parser";
-import { buildRoom } from "./coderoom.js";
+import { buildRoom } from "./coderoom.ts";
 
 const SKIP = new Set(["_exp", "loc", "start", "end", "extra", "range", "leadingComments", "trailingComments", "innerComments", "comments", "tokens"]);
 // every node under `n`, with its parent and the key it is under
@@ -61,13 +61,14 @@ const sig = (name, params) => {
 };
 const isFn = (n) => n && (n.type === "ArrowFunctionExpression" || n.type === "FunctionExpression");
 
-export function parseJs(text, path) {
+// (the tree is walked by its nodes' type names, as Babel documents them, so it is typed loosely here)
+export function parseJs(text: string, path: string): any {
   const ts = /\.(ts|mts|cts|tsx)$/.test(path), jsx = /\.(jsx|tsx)$/.test(path) || /\.js$/.test(path);
-  const opts = { sourceType: "unambiguous", allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, allowImportExportEverywhere: true,
+  const opts: any = { sourceType: "unambiguous", allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, allowImportExportEverywhere: true,
     plugins: [...(ts ? ["typescript"] : []), ...(jsx ? ["jsx"] : []), "decorators-legacy"] };
   try { return parse(text, opts); } catch (e) {
     // (a file the strict parse refuses: once more, keeping what parses, with the first error said)
-    try { const t = parse(text, { ...opts, errorRecovery: true }); t.recovered = String(e?.message ?? e); return t; } catch { throw new Error(`it doesn't parse: ${e?.message ?? e}`); }
+    try { const t: any = parse(text, { ...opts, errorRecovery: true }); t.recovered = String(e?.message ?? e); return t; } catch { throw new Error(`it doesn't parse: ${e?.message ?? e}`); }
   }
 }
 

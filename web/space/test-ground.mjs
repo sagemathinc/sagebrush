@@ -1,5 +1,5 @@
 // ci: web-browser/space order=10 chrome
-// The ground (src/ground.js), in headless Chromium against the built site: a room stands on the floor as a grandstand:
+// The ground (src/ground.ts), in headless Chromium against the built site: a room stands on the floor as a grandstand:
 // every object on its post above what is under it, none overlapping; W walks up its stairs; a terrace's side stops you;
 // going to an object you stand in front of it, on the ground; Float lifts the space into the air and Ground brings it back.
 //   (after a site build: space/build-alpha.sh, or node build.mjs --site ../web/dist)   node space/test-ground.mjs
@@ -43,7 +43,7 @@ const files = execFileSync("git", ["ls-files"], { cwd: join(here, "..", ".."), e
 const firsts = [...new Map(files.map(([p], k) => [p.split("/")[0], k])).values()].slice(0, 12);
 const tree = { name: "sagebrush", commit: "", base: "/", files, imports: firsts.slice(1).map((k, i) => [firsts[i], k]) };
 await send("Page.navigate", { url: `http://127.0.0.1:${port}/space/?space=intro.space.json` });
-ok(await until(`/objects/.test(document.querySelector('#status')?.textContent ?? '')`, 30000), "the space loads");
+ok(await until(`/objects/.test(document.querySelector('[data-c="status"]')?.textContent ?? '')`, 30000), "the space loads");
 await ev(`space3d.load(${JSON.stringify({ format: "sagebrush-space", version: 1, title: "sagebrush", tree })}, "sagebrush.space.json").then(() => true)`);
 ok(await until(`space3d.space?.room?.kind === "dir"`, 30000), "a repository's tree: its top folder's room");
 await sleep(1200);
@@ -91,16 +91,16 @@ await key("Escape"); await key("Escape", false);
 // (Float, and Ground again)
 await ev(`space3d.setGround(false)`);
 ok(await until(`!space3d.grounded && !space3d.objects[0].userData.post[0].visible && space3d.floorY < 0`, 4000), "Float: the space in the air, without terraces or posts");
-ok(await ev(`document.querySelector('#dims').textContent === 'Ground'`), "and the button says Ground");
+ok(await ev(`document.querySelector('[data-c="dims"]').textContent === 'Ground'`), "and the button says Ground");
 await sleep(1500);
 await ev(`space3d.setGround(true)`);
 ok(await until(`space3d.grounded && space3d.floorY === 0 && space3d.objects.some((o) => o.userData.post[0].visible)`, 4000), "Ground: back on the ground");
 // (a space that isn't a room: flat on the floor, no terraces)
-await ev(`(() => { const s = document.querySelector('#space'); s.value = 'intro.space.json'; s.onchange(); return true; })()`);
+await ev(`(() => { const s = document.querySelector('[data-c="space"]'); s.value = 'intro.space.json'; s.onchange(); return true; })()`);
 ok(await until(`space3d.space?.title === ${JSON.stringify(JSON.parse(readFileSync(join(here, "examples", "intro.space.json"), "utf8")).title)} && space3d.terraces === 0`, 10000), "another space: flat on the floor");
 ok(await ev(`space3d.objects.every((o) => o.position.y - o.children[0].geometry.parameters.height / 2 > 0.5)`), "everything above the floor");
 // (a mound under an object placed high, with a slope up from its front: ground.js)
-const { moundFor, supportAt } = await import("./src/ground.js");
+const { moundFor, supportAt } = await import("./src/ground.ts");
 const mound = moundFor({ kind: "code", size: [4, 4, 0.2] }, [0, 10, 0]);
 const at = (z) => supportAt(mound, 0, z);
 ok(mound.length === 2 && Math.abs(at(-1) - 3) < 1e-9 && at(20) === 0 && at(5) > 0 && at(5) < 3 && at(4) > at(6), "an object placed high stands on a mound, with a slope up to it", mound);

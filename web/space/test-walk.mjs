@@ -37,9 +37,9 @@ const key = async (k, down = true, extra = {}) => send("Input.dispatchKeyEvent",
 await send("Runtime.enable");
 await send("Emulation.setDeviceMetricsOverride", { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
 await send("Page.navigate", { url: `http://127.0.0.1:${port}/space/?space=intro.space.json` });
-ok(await until(`/objects/.test(document.querySelector('#status')?.textContent ?? '')`, 30000), "the space loads");
+ok(await until(`/objects/.test(document.querySelector('[data-c="status"]')?.textContent ?? '')`, 30000), "the space loads");
 await sleep(1200);
-ok((await ev(`space3d.walking`)) === (await ev(`matchMedia("(pointer: fine)").matches`)), "walking is the default with a mouse, flying without one (headless: none)", await ev(`document.querySelector('#move').textContent`));
+ok((await ev(`space3d.walking`)) === (await ev(`matchMedia("(pointer: fine)").matches`)), "walking is the default with a mouse, flying without one (headless: none)", await ev(`document.querySelector('[data-c="move"]').textContent`));
 if (!(await ev(`space3d.walking`))) { await key("g"); await key("g", false); }
 ok(await ev(`space3d.walking`), "G turns walking on");
 const P = () => ev(`space3d.camera.position.toArray().map((x) => +x.toFixed(2))`);
@@ -75,9 +75,9 @@ ok((await ev(`space3d.walking`)) === false && (await ev(`space3d.controls.enable
 await key("g"); await key("g", false);
 ok((await ev(`space3d.walking`)) === true, "and G walks again");
 await key("?"); await key("?", false);
-ok(await ev(`!document.querySelector('#helpcard').hidden`), "? shows the help");
+ok(await ev(`!document.querySelector('[data-c="helpcard"]').hidden`), "? shows the help");
 await key("Escape"); await key("Escape", false);
-ok(await ev(`document.querySelector('#helpcard').hidden`), "and Esc closes it");
+ok(await ev(`document.querySelector('[data-c="helpcard"]').hidden`), "and Esc closes it");
 ok(errors.length === 0, "no page errors", errors.slice(0, 3));
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);

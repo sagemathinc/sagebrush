@@ -6,7 +6,8 @@
 //   pythonRoom(text, { path, sage, scope })  -> a sagebrush-space (scope: a class's name, for that class's room)
 import { parse } from "../../../pyparse/src/index.ts";
 import { preparse } from "../../../src/sagepre.ts";
-import { layered } from "./roomlayout.js";
+import { layered } from "./roomlayout.ts";
+import { checkSpace, utf8Bytes, ROOM_TEXT } from "./read.ts";
 
 const isDef = (s) => s?._type === "FunctionDef" || s?._type === "AsyncFunctionDef";
 const docOf = (body) => {
@@ -48,7 +49,7 @@ function walk(n, visit) {
 // what a stretch of code refers to: names it reads, `X.attr` pairs, which of them it calls, and the names it binds
 // itself (a function's parameters and locals shadow the file's names)
 function refsOf(nodes) {
-  const loads = new Set(), attrs = new Set(), calls = new Set(), binds = new Set();
+  const loads = new Set<string>(), attrs = new Set<string>(), calls = new Set<string>(), binds = new Set<string>();
   walk(nodes, (n) => {
     if (n._type === "Name") {
       if (n.ctx?._type === "Store" || n.ctx?._type === "Del") binds.add(n.id); else loads.add(n.id);
@@ -79,8 +80,12 @@ function flat(body) {
 const containsDef = (s) => [s.body, s.orelse, s.finalbody, ...(s.handlers ?? []).map((h) => h.body)].some((b) => (b ?? []).some((x) => isDef(x) || x._type === "ClassDef" || x._type === "Import" || x._type === "ImportFrom"));
 
 export function parsePython(text, { sage = false } = {}) {
+  // (Sage's preparser lengthens a file ([1..n] becomes ellipsis_range(1,Ellipsis,n)): what is parsed is held to
+  //  ROOM_TEXT too)
+  const code = sage ? preparse(text) : text;
+  if (utf8Bytes(code) > ROOM_TEXT) throw new Error("it's too long to enter here");
   try {
-    return parse(sage ? preparse(text) : text, "exec", { sage });
+    return parse(code, "exec", { sage });
   } catch (e) {
     const i = e?.info;
     throw new Error(i ? `${i.type}: ${i.msg} (line ${i.lineno})` : String(e?.message ?? e));
@@ -198,7 +203,7 @@ export function pythonRoom(text, { path = "", sage = /\.sage$/.test(path), scope
   }
   for (const nd of nodes) { delete nd._ast; delete nd._stmts; }
   const room = { kind: "file", path, lang, labels: ["imports", "not linked here"] };
-  return finish({ title: path || "a file", summary: firstPara(moduleDoc), room, nodes, edges, src });
+  return finish({ title: path || "a file", summary: firstPara(moduleDoc), room, nodes, edges });
 }
 
 function classRoom(tree, name, { path, lang, startOf, sliceOf }) {
@@ -268,9 +273,12 @@ function finish({ title, summary, room, nodes, edges }) {
     if (nd.kind !== "import" && !edges.some((e) => e.from === nd.id || e.to === nd.id)) nd.shelf = true;
     if (nd.kind === "import") nd.lines = Math.max(1, nd.text.split("\n").length);
   }
+  // (checked whole before it is laid out, so a room over the limits never is, and again after: positions add bytes)
+  const space = { format: "sagebrush-space", version: 1, title, summary, room, directed: true, nodes, edges };
+  checkSpace(space);
   layered(nodes, edges);
   for (const nd of nodes) if (nd.shelf) nd.group = "not linked here";
-  return { format: "sagebrush-space", version: 1, title, summary, room, directed: true, nodes, edges };
+  return checkSpace(space);
 }
 
 // A notebook cell's names (nbroom.js): what it defines at its top level (assignments, loops' and with's targets,

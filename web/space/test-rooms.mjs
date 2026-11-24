@@ -62,7 +62,7 @@ ok((await leave()) && (await leave()) && (await room()) === "project › geometr
 // ---- an import leads to the file it names: relative (from .shapes) and absolute (geometry.report)
 ok(await enter("p:geometry/report.py"), "another file");
 const rel = await idOf(`(n) => n.kind === "import" && /shapes/.test(n.title)`);
-ok(!!rel && await ev(`(() => { space3d.select(${JSON.stringify(rel)}); return /Go there/.test(document.querySelector('#overlay .enter')?.textContent ?? ''); })()`), "its relative import offers Go there", rel);
+ok(!!rel && await ev(`(() => { space3d.select(${JSON.stringify(rel)}); return /Go there/.test(document.querySelector('[data-c="overlay"] .enter')?.textContent ?? ''); })()`), "its relative import offers Go there", rel);
 ok(await enter(rel) && /shapes\.py$/.test(await room()), "and goes through to that file's room", await room());
 await leave(); await leave(); await leave();
 ok((await room()) === null, "out to the top", await room());
@@ -83,7 +83,25 @@ ok(utilTitles.some((t) => t.startsWith("range")) && utilTitles.some((t) => t.sta
 // ---- a file too long to parse here: not entered, and said
 const long = { format: "sagebrush-space", version: 1, nodes: [{ id: "long", kind: "file", title: "long.py", path: "long.py", lang: "python", text: "x = 1\n".repeat(200000), lines: 200000 }] };
 await ev(`space3d.load(${JSON.stringify(long)}, "long.space.json").then(() => true)`);
-ok((await ev(`space3d.enter("long")`)) === false && /too long to enter/.test(await ev(`document.querySelector('#status').textContent`)), "a file of 1.2 MB isn't parsed: not entered, and said", await ev(`document.querySelector('#status').textContent`));
+ok((await ev(`space3d.enter("long")`)) === false && /too long to enter/.test(await ev(`document.querySelector('[data-c="status"]').textContent`)), "a file of 1.2 MB isn't parsed: not entered, and said", await ev(`document.querySelector('[data-c="status"]').textContent`));
+
+// ---- the parse cap is in bytes (UTF-8): 400,000 € in a comment are 1.2 MB, though fewer than 1 Mi characters
+const euro = { format: "sagebrush-space", version: 1, nodes: [{ id: "euro", kind: "file", title: "euro.py", path: "euro.py", lang: "python", text: "# " + "€".repeat(400000) + "\nx = 1\n", lines: 2 }] };
+await ev(`space3d.load(${JSON.stringify(euro)}, "euro.space.json").then(() => true)`);
+ok((await ev(`space3d.enter("euro")`)) === false && /too long to enter/.test(await ev(`document.querySelector('[data-c="status"]').textContent`)), "a file of 1.2 MB in UTF-8 (400,000 characters) isn't parsed either", await ev(`document.querySelector('[data-c="status"]').textContent`));
+
+// ---- the parse cap, exactly: 1 MiB in UTF-8 is parsed, one byte more isn't (a comment of € and a line of code)
+const atCap = (pad) => ({ format: "sagebrush-space", version: 1, nodes: [{ id: "cap", kind: "file", title: "cap.py", path: "cap.py", lang: "python", text: "#" + "a".repeat(pad) + "€".repeat(349522) + "\nx = 1\n", lines: 2 }] });
+await ev(`space3d.load(${JSON.stringify(atCap(2))}, "cap.space.json").then(() => true)`);
+ok((await ev(`space3d.enter("cap")`)) === true, "a file of exactly 1 MiB in UTF-8 (1,048,576 bytes, mostly €) is entered", await ev(`document.querySelector('[data-c="status"]').textContent`));
+await ev(`space3d.leave()`);
+await ev(`space3d.load(${JSON.stringify(atCap(3))}, "cap1.space.json").then(() => true)`);
+ok((await ev(`space3d.enter("cap")`)) === false && /too long to enter/.test(await ev(`document.querySelector('[data-c="status"]').textContent`)), "one byte more isn't", await ev(`document.querySelector('[data-c="status"]').textContent`));
+
+// ---- a room over the limits isn't laid out, whatever made it: a file of 4,001 functions
+const many = { format: "sagebrush-space", version: 1, nodes: [{ id: "many", kind: "file", title: "many.py", path: "many.py", lang: "python", text: Array.from({ length: 4001 }, (_, i) => `def f${i}():\n    pass\n`).join(""), lines: 8002 }] };
+await ev(`space3d.load(${JSON.stringify(many)}, "many.space.json").then(() => true)`);
+ok((await ev(`space3d.enter("many")`)) === false && /more than 4000 objects/.test(await ev(`document.querySelector('[data-c="status"]').textContent`)), "a file of 4,001 functions: its room isn't laid out, and that is said", await ev(`document.querySelector('[data-c="status"]').textContent`));
 
 ok(errors.length === 0, "no page errors", errors.slice(0, 3));
 console.log(failures ? `${failures} FAILED` : "all passed");

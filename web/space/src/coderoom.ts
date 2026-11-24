@@ -8,7 +8,8 @@
 //   links (more: [to, kind]) }.  A portal: { id, title, locals (the names it binds here), imported, start, end }.
 // `self`: in a container's room (a class, an impl block), the words that name the container ("this", "self",
 // "Self", its type's name): `this.m()`, `self.m()` and `Self::m()` link to its member m.
-import { layered } from "./roomlayout.js";
+import { layered } from "./roomlayout.ts";
+import { checkSpace } from "./read.ts";
 
 const firstPara = (doc) => {
   const p = String(doc ?? "").trim().split(/\n\s*\n/)[0].replace(/\s+/g, " ").trim();
@@ -54,8 +55,8 @@ export function buildRoom({ entities, portals = [], text, lang, path, title, sum
   };
   const selfWords = new Set(self ?? []);
   for (const e of entities) {
-    const r = e.refs ?? {}, own = new Set(e.own ?? []);
-    const calls = new Set(r.calls ?? []);
+    const r: any = e.refs ?? {}, own = new Set(e.own ?? []);
+    const calls = new Set<string>(r.calls ?? []);
     for (const n of r.names ?? []) if (!own.has(n)) link(e.id, named.get(n), calls.has(n) ? "calls" : "uses");
     for (const c of calls) {
       const parts = c.split(/::|\./);
@@ -77,7 +78,10 @@ export function buildRoom({ entities, portals = [], text, lang, path, title, sum
     for (const [to, kind] of e.links ?? []) link(e.id, named.get(to) ?? (ids.has(to) ? to : null), kind);
   }
   for (const nd of nodes) if (nd.kind !== "import" && !edges.some((x) => x.from === nd.id || x.to === nd.id)) nd.shelf = true;
+  // (checked whole before it is laid out, so a room over the limits never is, and again after: positions add bytes)
+  const space = { format: "sagebrush-space", version: 1, title, summary: firstPara(summary), room: { ...room, labels: ["imports", "not linked here"] }, directed: true, nodes, edges };
+  checkSpace(space);
   layered(nodes, edges);
   for (const nd of nodes) if (nd.shelf) nd.group = "not linked here";
-  return { format: "sagebrush-space", version: 1, title, summary: firstPara(summary), room: { ...room, labels: ["imports", "not linked here"] }, directed: true, nodes, edges };
+  return checkSpace(space);
 }
