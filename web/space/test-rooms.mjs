@@ -57,7 +57,14 @@ ok(["class Circle", "class Square", "total_area(shapes)", "math"].every((t) => s
 ok(await enter(await idOf(`(n) => n.title === "class Circle"`)), "a class is entered");
 const circle = await titles();
 ok(["area", "scaled", "__init__"].every((m) => circle.some((t) => t.startsWith(m))), "its room: its methods", circle);
-ok((await leave()) && (await leave()) && (await room()) === "project › geometry/", "Back out, room by room", await room());
+ok((await leave()) && (await room()) === "project › geometry/ › shapes.py", "Back out of the class", await room());
+// (Back to a room that has links: drawn again as it was, not refused: drawing it linked its objects to each other)
+const linked = await ev(`({ ids: space3d.space.nodes.map((n) => n.id).sort().join(), edges: space3d.space.edges.length })`);
+ok(linked.edges > 0, "the file's room has links", linked);
+ok(await enter(await idOf(`(n) => n.title === "class Circle"`)) && (await leave()), "a class entered again, and left");
+await sleep(300);
+ok((await ev(`space3d.space.nodes.map((n) => n.id).sort().join()`)) === linked.ids && !/couldn't load/.test(await ev(`document.querySelector('[data-c="status"]').textContent`)), "Back to it shows it again", await ev(`document.querySelector('[data-c="status"]').textContent`));
+ok((await leave()) && (await room()) === "project › geometry/", "Back out, room by room", await room());
 
 // ---- an import leads to the file it names: relative (from .shapes) and absolute (geometry.report)
 ok(await enter("p:geometry/report.py"), "another file");
@@ -115,6 +122,14 @@ ok((await ev(`space3d.enter("jseuro")`)) === false && /too long to enter/.test(a
 const many = { format: "sagebrush-space", version: 1, nodes: [{ id: "many", kind: "file", title: "many.py", path: "many.py", lang: "python", text: Array.from({ length: 4001 }, (_, i) => `def f${i}():\n    pass\n`).join(""), lines: 8002 }] };
 await ev(`space3d.load(${JSON.stringify(many)}, "many.space.json").then(() => true)`);
 ok((await ev(`space3d.enter("many")`)) === false && /more than 4000 objects/.test(await ev(`document.querySelector('[data-c="status"]').textContent`)), "a file of 4,001 functions: its room isn't laid out, and that is said", await ev(`document.querySelector('[data-c="status"]').textContent`));
+
+// ---- what Back skips is only its own: a space from outside is checked, whatever it carries, and so is the viewer's own
+//      drawn space handed back through the page's API (linked to itself by its drawing, it is refused)
+const deep = { format: "sagebrush-space", version: 1, shown: true, opts: { shown: true, room: true }, nodes: [{ id: "a", kind: "note", title: "a", x: JSON.parse("[".repeat(30) + "]".repeat(30)) }] };
+ok(/nested too deeply/.test(await ev(`space3d.load(${JSON.stringify(deep)}, "deep.space.json").then(() => "loaded", (e) => String(e?.message ?? e))`)), "a space given with shown: true (and an opts of its own) is checked, and refused when it nests too deeply");
+const two = { format: "sagebrush-space", version: 1, directed: true, nodes: [{ id: "a", kind: "note", title: "a" }, { id: "b", kind: "note", title: "b" }], edges: [{ from: "a", to: "b" }] };
+ok((await ev(`space3d.load(${JSON.stringify(two)}, "two.space.json").then(() => space3d.space.edges.length)`)) === 1, "a space with a link is drawn");
+ok(/nested too deeply/.test(await ev(`space3d.load(space3d.space, "again.space.json").then(() => "loaded", (e) => String(e?.message ?? e))`)), "the viewer's own drawn space, given through the page's API, is checked too");
 
 ok(errors.length === 0, "no page errors", errors.slice(0, 3));
 console.log(failures ? `${failures} FAILED` : "all passed");

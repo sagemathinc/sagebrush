@@ -693,10 +693,13 @@ function positionsOf(nodes, edges, d) {
 // (`data`: the space itself, as the page around an embedded one sends it; `again`: the same space written again (by
 //  an agent), so the camera, the selection and Back stay as they are)
 // (`opts.room`: a room being entered or left (rooms.js below): Back's history is kept, and `opts.P` gives the places
-//  the space had, so a room left is as it was)
-async function load(name, data = null, again = false, opts: { room?: boolean; P?: Float64Array | null } = {}) {
+//  the space had, so a room left is as it was; `opts.shown`: Back to a space of its own stack (leaveRoom only), which
+//  isn't checked again when it is that very object, one this viewer checked and drew (`drawn`): drawing it linked its
+//  objects to each other (_in, _out), so it would fail the check. Any other space, from anywhere, is checked)
+const drawn = new WeakSet<object>();
+async function load(name, data = null, again = false, opts: { room?: boolean; P?: Float64Array | null; shown?: boolean } = {}) {
   ui.status.textContent = "loading " + name + "…";
-  let next = checkSpace(data ?? JSON.parse(await readText(sameSite(name, { space: true }))));
+  let next = opts.shown === true && data !== null && drawn.has(data) ? data : checkSpace(data ?? JSON.parse(await readText(sameSite(name, { space: true }))));
   // (a space carrying a whole tree instead of objects: its top directory's room)
   // (and the room made from it, checked the same way: treeroom.js refuses a folder over the limits before laying it out)
   if (next?.format === "sagebrush-space" && next.tree && !next.nodes?.length) next = checkSpace({ ...treeRoom(next.tree, ""), title: next.title ?? next.tree.name, summary: next.summary });
@@ -716,6 +719,7 @@ async function load(name, data = null, again = false, opts: { room?: boolean; P?
     if (t) { tour.space = next; tour.t = t; } else tour = null;
   }
   space = next;
+  drawn.add(space);
   clear();
   const nodes = space.nodes, index = new Map(nodes.map((n, i) => [n.id, i]));
   restore(nodes);
@@ -1341,7 +1345,7 @@ function leaveRoom() {
   if (k >= 0) history.length = k;
   future.length = 0;
   // (given the space itself, load runs to its end at once)
-  load(spaceName, s.space, false, { room: true, P: s.P }).catch(fail);
+  load(spaceName, s.space, false, { room: true, P: s.P, shown: true }).catch(fail);
   xr.roomChanged();
   return v ?? { pos: camera.position.clone(), target: controls.target.clone(), sel: null };
 }
