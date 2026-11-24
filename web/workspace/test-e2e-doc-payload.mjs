@@ -72,11 +72,14 @@ const PAYLOAD = s8(J({ patch: [[1, "hello"]], snapshot: null, version: 3 }));
     "empty client": { ...PLACE, client: "" },
     "NUL in the id": { ...PLACE, patchId: "a\0b" },
     "empty parent": { ...PLACE, parents: [""] },
+    "a hole in the parents": { ...PLACE, parents: new Array(1) },
+    "a parent not a string": { ...PLACE, parents: [7] },
     "no account": { ...PLACE, account: undefined },
   };
   const got = Object.fromEntries(Object.entries(bad).map(([k, p]) => [k, code(() => m.patchHead(p))]));
   ok(Object.values(got).every((v) => v === "bad_form"), "H-3: a header is refused (bad_form) for more than 8 parents, parents not a list, a number that isn't a whole number below 2^53, or a name that's empty, missing or holds NUL", got);
-  ok(m.PARENTS_MAX === (await import(join(here, "..", "sync-protocol", "protocol.ts"))).LIMITS.patchParents, "H-3: the header's parent bound is the protocol's");
+  const { LIMITS } = await import(join(here, "..", "sync-protocol", "protocol.ts"));
+  ok(m.PARENTS_MAX === LIMITS.patchParents && m.PATCH_SLICE_MAX === LIMITS.patchBytes, "H-3: the header's parent bound and a sealed patch's bound are the protocol's (patchParents, patchBytes)", [m.PARENTS_MAX, m.PATCH_SLICE_MAX]);
 }
 
 // ---- the page: e2e/ bundled for Chromium
@@ -150,17 +153,33 @@ try {
     ok(Object.keys(r).length === 20 && wrong.length === 0, `P-3: a patch opens only where it was sealed: ${Object.keys(r).length} moves and damages are each refused (bad_form): another account, document, document epoch, key generation, key epoch, client, cseq or patch id, its parents changed, reordered, cut or added to, another CEK, a flipped bit in the seal id, ciphertext or tag, a byte cut or added, a presence message, and an unsealed payload`, wrong);
   }
   {
+    // (the bounds: a sealed patch is at most the protocol's inline-patch limit, so its payload is that less the seal id
+    // and the tag; both checked at the exact edge, and an oversized slice refused before any digest or decryption)
     const r = await P.ev(`(async () => {
-      const k = await cek(${K}), place = ${PL};
-      return {
-        big: await code(() => e2e.sealPatch(k, place, new Uint8Array(e2e.CHUNK + 1))),
-        chunk: (await e2e.sealPatch(k, place, new Uint8Array(e2e.CHUNK))).length,
+      const k = await cek(${K}), place = ${PL}, max = e2e.PATCH_PAYLOAD_MAX;
+      const len = async (f) => { try { return (await f()).length; } catch (e) { return e?.code ?? String(e?.message ?? e); } };
+      const atMax = await e2e.sealPatch(k, place, new Uint8Array(max)).catch((e) => null);
+      const out = {
+        consts: [e2e.PATCH_SLICE_MAX, max, e2e.PRESENCE_PAYLOAD_MAX],
+        sealMax: atMax ? atMax.length : "refused", openMax: atMax ? await len(() => e2e.openPatch(k, place, atMax)) : "refused",
+        sealOver: await code(() => e2e.sealPatch(k, place, new Uint8Array(max + 1))),
+        presenceOverPatch: await len(async () => e2e.openPresence(k, ${PR}, await e2e.sealPresence(k, ${PR}, new Uint8Array(max + 1)))),
         short: await code(() => e2e.openPatch(k, place, new Uint8Array(47))),
         notBytes: await code(() => e2e.sealPatch(k, place, "text")),
         badPlace: await code(() => e2e.sealPatch(k, { ...place, cseq: -1 }, new Uint8Array(1))),
       };
+      // (one byte over: counted crypto calls show it's refused before any digest or decryption)
+      const s = crypto.subtle, calls = { digest: 0, decrypt: 0, deriveKey: 0 };
+      for (const m of Object.keys(calls)) { const f = s[m].bind(s); s[m] = (...a) => { calls[m]++; return f(...a); }; }
+      out.openOver = await code(() => e2e.openPatch(k, place, new Uint8Array(max + 32 + 16 + 1)));
+      out.callsOver = { ...calls };
+      return out;
     })()`);
-    ok(r.big === "limit" && r.chunk === 32 + (1 << 20) + 16, "P-4: a payload is at most one chunk (1 MiB): one byte more is refused (limit)", r);
+    ok(J(r.consts) === J([256 * 1024, 256 * 1024 - 48, 1 << 20]), "P-4: a sealed patch's bound is the protocol's inline-patch limit (256 KiB), so its payload's is 256 KiB less the seal id and tag; presence keeps its own (one chunk, for now)", r.consts);
+    ok(r.sealMax === 256 * 1024 && r.openMax === 256 * 1024 - 48, "P-4: a payload of exactly the bound seals to a slice of exactly 256 KiB, which the server admits, and opens", [r.sealMax, r.openMax]);
+    ok(r.sealOver === "limit", "P-4: one byte more is refused when sealing (limit)", r.sealOver);
+    ok(r.openOver === "limit" && J(r.callsOver) === J({ digest: 0, decrypt: 0, deriveKey: 0 }), "P-4: a slice one byte over 256 KiB is refused when opening (limit), before any digest, key derivation or decryption", [r.openOver, r.callsOver]);
+    ok(r.presenceOverPatch === 256 * 1024 - 47, "P-4: a presence message one byte over the patch bound still seals and opens: it doesn't inherit the patch's bound", r.presenceOverPatch);
     ok(r.short === "bad_form" && r.notBytes === "bad_form" && r.badPlace === "bad_form", "P-4: a slice shorter than a seal id and a tag, a payload that isn't bytes, and a malformed place are refused (bad_form)", r);
   }
 

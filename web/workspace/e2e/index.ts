@@ -11,5 +11,5 @@ export { hpke } from "./hpke.ts";
 export type { Recipient } from "./hpke.ts";
 export { FLOOR_MESSAGE, checkFloor } from "./floor.ts";
 export type { Floor } from "./floor.ts";
-export { PAYLOAD_CODEC, PARENTS_MAX, SEAL_ID, patchHead, presenceHead, sealPatch, openPatch, sealPresence, openPresence } from "./doc-payload.ts";
+export { PAYLOAD_CODEC, PARENTS_MAX, SEAL_ID, PATCH_SLICE_MAX, PATCH_PAYLOAD_MAX, PRESENCE_PAYLOAD_MAX, patchHead, presenceHead, sealPatch, openPatch, sealPresence, openPresence } from "./doc-payload.ts";
 export type { PatchPlace, PresencePlace } from "./doc-payload.ts";
