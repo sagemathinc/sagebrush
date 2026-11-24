@@ -692,6 +692,8 @@
  "lib/_sage_matrix.py: _ff_base_of :: call :: sum(1 for x in xs if not isinstance(x, (list, tuple)))": 1,
  "lib/_sage_matrix.py: _ff_base_of :: comprehension :: xs": 1,
  "lib/_sage_matrix.py: _ff_base_of :: loop :: xs": 1,
+ "lib/_sage_matrix.py: _hypot_rn :: call :: max(0, 60 - n.bit_length() // 2)": 1,
+ "lib/_sage_matrix.py: _hypot_rn :: call :: max(da, db)": 1,
  "lib/_sage_matrix.py: _identity_rows :: call :: range(m)": 2,
  "lib/_sage_matrix.py: _identity_rows :: comprehension :: range(m)": 2,
  "lib/_sage_matrix.py: _int_dims :: call :: enumerate(args)": 1,
