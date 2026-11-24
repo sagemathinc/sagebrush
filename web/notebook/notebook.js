@@ -2856,6 +2856,8 @@ export function createNotebook(root, opts = {}) {
       //  is waited for too, until a wait ends with every image it refers to settled)
       //  (always one pass at least: it reads each held image again, so what is exported is what the workspace has now)
       for (let first = true; ; first = false) {
+        // (the notebook destroyed meanwhile: nothing more is read)
+        if (imageUrls.disposed) return;
         const paths = referencedPaths(snapshot());
         if (!first && paths.every((p) => imageUrls.settled(p))) return;
         await imageUrls.ready(paths);

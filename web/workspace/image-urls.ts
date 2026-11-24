@@ -25,6 +25,8 @@ export class ImageUrls {
   private floor = 0;
   // (how many clear()s: ready() waits again only after one)
   private clears = 0;
+  /** true once dispose()d: nothing is read or held any more, ever (the document's page or pane is gone) */
+  disposed = false;
   private version = (p: string) => this.ver.get(p) ?? this.floor;
   private letGo(p: string) {
     this.ver.set(p, ++this.counter);
@@ -35,6 +37,7 @@ export class ImageUrls {
   }
   constructor(private read: (path: string) => Promise<Uint8Array | null>, private changed: () => void) {}
   url(path: string): Shown | null {
+    if (this.disposed) return null;
     const u = this.urls.get(path);
     if (u === undefined && !this.loading.has(path)) void this.load(path);
     return u?.shown ?? null;
@@ -86,7 +89,7 @@ export class ImageUrls {
     if (redraw) this.changed();
   }
   load(path: string): Promise<void> {
-    if (this.urls.has(path)) return Promise.resolve();
+    if (this.disposed || this.urls.has(path)) return Promise.resolve();
     const going = this.loading.get(path);
     if (going) return going;
     if (filePathOf({ [FILE_KEY]: path }) !== path) { this.urls.set(path, null); return Promise.resolve(); }
@@ -107,6 +110,7 @@ export class ImageUrls {
     return p;
   }
   private hold(path: string, u: Uint8Array) {
+    if (this.disposed) return;
     const type = u.length <= IMAGE_BYTES_MAX ? imageType(u) : null;
     if (!type) { this.urls.set(path, null); return; }
     const size = imageSizeOf(type.mime, u);
@@ -132,5 +136,5 @@ export class ImageUrls {
     this.floor = ++this.counter;
     this.ver.clear();
   }
-  dispose() { this.clear(); }
+  dispose() { this.disposed = true; this.clear(); }
 }

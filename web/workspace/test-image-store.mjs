@@ -207,6 +207,21 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   ok(!early && U.bytes(p) !== null, "ready(): switched back and forth five times, it waits for the last read, and the image is held", { early, reads: releases.length });
   U.dispose();
 }
+// ---- dispose() is final: a read on its way is dropped, and nothing is read or held afterwards
+{
+  const real = new Uint8Array(64).fill(7); real.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]);
+  const releases = [];
+  let reads = 0;
+  const U = new ImageUrls(() => { reads++; return new Promise((r) => releases.push(() => r(real))); }, () => {});
+  const p = "/Attachments/nb-d/z.png";
+  const r = U.ready([p]);
+  U.dispose();
+  releases[0]();
+  await r;
+  void U.ready([p]); void U.load(p); U.put("/Attachments/nb-d/w.png", real);
+  await new Promise((res) => setTimeout(res, 5));
+  ok(U.disposed && reads === 1 && U.bytes(p) === null && U.url(p) === null && U.bytes("/Attachments/nb-d/w.png") === null, "dispose() is final: the read on its way dropped, nothing read or held afterwards", { reads });
+}
 // ---- an attachment named "__proto__" survives import and export
 {
   const S = store();
