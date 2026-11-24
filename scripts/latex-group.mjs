@@ -104,7 +104,10 @@ export const LATEX_LAZY = {
 // (252,517 raw / 84,516 gzip: Nov 21 2026, the editor's own list of examples gone (the gallery's panel the only one):
 //  252,453 / 84,452 measured on the shipped build of its merge with master 68280840, with bun 1.4.4 and node 24.21.0,
 //  + 64)
-export const LATEX_CAPS = { raw: 252517, gzip: 84516 };
+// (252,626 raw / 84,557 gzip: Nov 24 2026, a block that fits is never "too large", the size said the one over the limit
+//  (web/latex/split.ts): 252,562 / 84,493 measured on the shipped build of its merge with master 065c0251, with bun 1.4.4 and
+//  node 24.21.0, + 64)
+export const LATEX_CAPS = { raw: 252626, gzip: 84557 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
