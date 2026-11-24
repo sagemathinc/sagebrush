@@ -3,7 +3,7 @@
 // takes images (workspace.image) reads it as one (agent-pair.ts's imageOut). Only PNG, JPEG, GIF and WebP, judged by
 // their bytes, and at most IMAGE_BYTES_MAX, the most an agent may see; never written over another file (create, which
 // refuses a taken path), and counted in the workspace's own limits like any file made there.
-import { IMAGE_BYTES_MAX, isRaster } from "../workspace/agent-pair";
+import { IMAGE_BYTES_MAX, isRaster } from "../workspace/image-store";
 
 export const ATTACH_ROOT = "/Attachments";
 /** At most this many images from one paste or drop. */
