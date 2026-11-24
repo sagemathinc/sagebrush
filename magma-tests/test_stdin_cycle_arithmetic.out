@@ -1,0 +1,46 @@
+Id(G)
+(1, 3, 2)
+(1, 3, 2)
+(1, 2)
+(1, 3)
+(1, 2, 3)
+(2, 3)
+(1, 2, 3)
+Symmetric group G acting on a set of cardinality 3
+Order = 6 = 2 * 3
+(2, 3)
+
+>> G!((1,4)^2);
+      ^
+Runtime error in elt< ... >: Bad arguments to cycle or commutator construction
+
+(2, 3)
+(1, 3)(2, 4)
+(1, 3, 2)
+
+>> (1,2)^2;
+   ^
+Runtime error in elt< ... >: No permutation group context in which to create 
+cycle
+
+(2, 3)
+
+>> 1/b;
+    ^
+Runtime error in '/': Bad argument types
+Argument types given: RngIntElt, GrpPermElt
+
+
+>> b/1;
+    ^
+Runtime error in '/': Bad argument types
+Argument types given: GrpPermElt, RngIntElt
+
+
+>> b/(1/2);
+    ^
+Runtime error in '/': Bad argument types
+Argument types given: GrpPermElt, FldRatElt
+
+Id(G)
+end

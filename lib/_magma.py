@@ -146,7 +146,7 @@ def _report(e, line, col):
     if isinstance(e, SystemExit):
         raise e
     # (no permutation group's context outlives the statement an error ends: _ctx_enter's)
-    _CYCLE_CTX[0] = 0
+    del _CYCLE_CTX[:]
     m = _re.match(r"name '([A-Za-z_][A-Za-z0-9_]*)' is not defined", str(e)) if isinstance(e, NameError) else None
     if m:
         # Magma rejects a statement that uses an undeclared identifier
@@ -589,23 +589,36 @@ class _MCycle(MTuple):
     def __call__(self, *args):
         # (1, 2)(3, 4): a product of cycles, for G!(1, 2)(3, 4) (the
         # translator reads the next one as a call)
-        return _MCycles([self, _MCycle(args)])
+        out = _MCycles([self, _MCycle(args)])
+        out._grp, out._pos = getattr(self, "_grp", None), getattr(self, "_pos", None)
+        return out
 
 
-# How many permutation groups' contexts the running code is in: G!x evaluates x in G's (_coerce_ctx), so that a
-# cycle written there, or in a function it calls, can be made (G := Sym(3); f := func<| (1, 2)>; G!f(); is (1, 2))
-_CYCLE_CTX = [0]
+# The permutation groups whose contexts the running code is in, innermost last: G!x evaluates x in G's
+# (_coerce_ctx), so that a cycle written there, or in a function it calls, can be made (G := Sym(3); f := func<|
+# (1, 2)>; G!f(); is (1, 2)), as an element of G when arithmetic meets it (_cyc_value)
+_CYCLE_CTX = []
+
+
+def _cyc_value(x):
+    """x, or the element of its context's group when x is a cycle (or a
+    product of cycles) made in one: in G!((1, 2)^2) the cycle is G's, as
+    Magma makes it (Id(G)); a cycle G doesn't have is Magma's error at its
+    "(" (G!((1, 4)^2) in Sym(3))."""
+    if isinstance(x, (_MCycle, _MCycles)) and getattr(x, "_grp", None) is not None:
+        return _coerce(x._grp, x, getattr(x, "_pos", None))
+    return x
 
 
 def _coerce_ctx(R, x, pos=None):
     """R!x, x (a function of no arguments) evaluated in R's context when R
     is a permutation group."""
     if isinstance(R, (_MSymGroup, _MDihedralGroup)):
-        _CYCLE_CTX[0] += 1
+        _CYCLE_CTX.append(R)
         try:
             x = x()
         finally:
-            _CYCLE_CTX[0] -= 1
+            _CYCLE_CTX.pop()
     else:
         x = x()
     return _coerce(R, x, pos)
@@ -624,14 +637,14 @@ def _ctx_enter(R):
     catches one and continues mid-statement must restore _CYCLE_CTX
     itself."""
     if isinstance(R, (_MSymGroup, _MDihedralGroup)):
-        _CYCLE_CTX[0] += 1
+        _CYCLE_CTX.append(R)
     return R
 
 
 def _coerce_after(R, x, pos=None):
     """R!x, x evaluated in R's context (_ctx_enter), which is left now."""
     if isinstance(R, (_MSymGroup, _MDihedralGroup)):
-        _CYCLE_CTX[0] -= 1
+        _CYCLE_CTX.pop()
     return _coerce(R, x, pos)
 
 
@@ -648,9 +661,10 @@ def _cycle(items, pos=None):
         raise MagmaError("No constructor provided for this type of object", None, True, pos)
     if t != "RngIntElt":
         raise MagmaError("Bad arguments", "elt< ... >", True, pos)
-    if not _CYCLE_CTX[0]:
+    if not _CYCLE_CTX:
         raise MagmaError("No permutation group context in which to create cycle", "elt< ... >", True, pos)
     c = _MCycle(items)
+    c._grp = _CYCLE_CTX[-1]
     c._pos = pos  # (said at its "(" when the group finds it bad: G!(1, 4) in Sym(3))
     return c
 
@@ -660,7 +674,9 @@ class _MCycles(list):
     coercion takes one."""
 
     def __call__(self, *args):
-        return _MCycles(list(self) + [_MCycle(args)])
+        out = _MCycles(list(self) + [_MCycle(args)])
+        out._grp, out._pos = getattr(self, "_grp", None), getattr(self, "_pos", None)
+        return out
 
     def __repr__(self):
         raise MagmaError("a product of cycles outside G!( ... ) is not supported yet")
@@ -2927,6 +2943,7 @@ def _sub(a, b, pos=None, op="-"):
 def _mul(a, b, pos=None, op="*"):
     if type(a) is int and type(b) is int:
         return a * b
+    a, b = _cyc_value(a), _cyc_value(b)
     if type(a) is str and type(b) is str:
         return a + b  # Magma's * joins strings
     if isinstance(a, _MFunRatElt) or isinstance(b, _MFunRatElt):
@@ -2965,6 +2982,12 @@ def _neg(a, pos=None):
 def _div(a, b, pos=None, op="/"):
     if _int(a) and _int(b):
         return _intdiv(a, b)
+    a, b = _cyc_value(a), _cyc_value(b)
+    if isinstance(a, _MPerm) or isinstance(b, _MPerm):
+        # (g/h is g*h^-1, as Magma's; with anything but a permutation, its "Bad argument types")
+        if isinstance(a, _MPerm) and isinstance(b, _MPerm):
+            return a * b._inverse()
+        raise _bad_types(op, (a, b), pos)
     if isinstance(a, _MFunRatElt) or isinstance(b, _MFunRatElt):
         return _fun_binary("/", a, b, pos)
     _arith(op, (a, b), pos)
@@ -3015,6 +3038,7 @@ def _pow(a, b, pos=None, op="^"):
         if b < 0:
             return _intdiv(1, a ** -b)
         return a ** b
+    a, b = _cyc_value(a), _cyc_value(b)
     if type(a) is str and type(b) is int:
         # Magma's s^n repeats a string
         if b < 0:
