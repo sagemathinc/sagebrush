@@ -1,0 +1,16 @@
+{
+ "title": "Sparse matrices (MATLAB)",
+ "summary": "Building sparse matrices, the 2-D Laplacian with kron and delsq, Poisson's equation by backslash, eigs, and conjugate gradients by hand.",
+ "tags": [
+  "linear algebra",
+  "plots"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "matlab",
+ "author": "Sagebrush",
+ "license": "MIT"
+}
