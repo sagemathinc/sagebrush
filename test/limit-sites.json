@@ -15856,5 +15856,15 @@
   "class": "coverage",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "interp3 and slice refuse the interpolation methods Sagebrush doesn't implement (makima, and next and previous, which MATLAB's interp3 page doesn't list): an unsupported option, not a cap"
+ },
+ "lib/_matlab.py :: _refuse_made :: \"become unresponsive.\" % (\"x\".join(str(int(k)) for k in dims), need / 2 ** 30), \"MATLAB:array:SizeLimitExceeded\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "MATLAB's own refusal at its default 5 GB array-size preference (MATLAB:array:SizeLimitExceeded, as R2026b raises it for a constructor or a numeric array's growth); the census matches 'exceeds' and 'maximum' in MATLAB's message"
+ },
+ "lib/_matlab.py :: _refuse_made :: raise _err(\"Requested %s (%.1fGB) array exceeds maximum array size preference (5.0GB) and might cause MATLAB to \" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "MATLAB's own refusal at its default 5 GB array-size preference (MATLAB:array:SizeLimitExceeded, as R2026b raises it for a constructor or a numeric array's growth); the census matches 'exceeds' and 'maximum' in MATLAB's message"
  }
 }

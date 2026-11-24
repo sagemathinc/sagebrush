@@ -2418,6 +2418,22 @@ def _refuse_huge(dims, itemsize):
         raise _err("Requested array exceeds the maximum possible variable size.", "MATLAB:pmaxsize")
 
 
+# MATLAB's default array-size preference (Preferences > Workspace), 5 GB: a constructor asked for more is refused
+_SIZE_PREFERENCE_BYTES = 5 * 2 ** 30
+
+
+def _refuse_made(dims, itemsize, shown=None):
+    """a request for an array (zeros, ones, rand, eye, blanks, cell and the like, or an assignment growing a numeric,
+    char or logical array) as MATLAB R2026b refuses it before allocating: at 2^48 bytes or more (_refuse_huge), and at
+    MATLAB's default 5 GB array-size preference or more, the message naming the size (shown, else dims)"""
+    _refuse_huge(dims, itemsize)
+    need = _prod(dims) * itemsize
+    if need >= _SIZE_PREFERENCE_BYTES:
+        dims = shown or dims
+        raise _err("Requested %s (%.1fGB) array exceeds maximum array size preference (5.0GB) and might cause MATLAB to "
+                   "become unresponsive." % ("x".join(str(int(k)) for k in dims), need / 2 ** 30), "MATLAB:array:SizeLimitExceeded")
+
+
 # the bytes Sagebrush spends on one element of a cell array made with empty elements (measured on node: about
 # 430, the empty double each holds and its place in the list)
 _CELL_ELEMENT_BYTES = 512
@@ -2446,17 +2462,19 @@ def _admit_cells(n):
     _matlab_ledger.Ledger(what, "one array", rec=rec).reserve(need, "cells")
 
 
-def _refuse_huge_growth(dims, cur, v):
-    """the 2^48-byte refusal for an assignment that grows cur, sized by cur's class before any conversion, as MATLAB
-    R2026b sizes it (an int8 array stays int8 whatever is assigned into it; x(2^44) = 1i for a double x is 2^47
-    bytes, not refused here); a cell grown that far is out of memory instead (x{2^45} = 1 and x{2^48-1} = 1 are
-    MATLAB:nomem in R2026b)"""
+def _refuse_huge_growth(dims, cur, v, linear=False):
+    """the refusals for an assignment that grows cur, sized by cur's class before any conversion, as MATLAB R2026b
+    sizes them (an int8 array stays int8 whatever is assigned into it; x(2^44) = 1i for a double x is 2^47 bytes):
+    2^48 bytes, then the 5 GB preference (_refuse_made), a linear index's growth named as N-by-1 in the message, as
+    MATLAB names it; a cell grown past 2^48 bytes is out of memory instead (x{2^45} = 1 and x{2^48-1} = 1 are
+    MATLAB:nomem in R2026b), and below that admitted against this host's memory"""
     if type(cur) is Cell:
         if _prod(dims) * 8 >= 2 ** 48:
             raise MemoryError()
         _admit_cells(_prod(dims))
         return
-    _refuse_huge(dims, _itemsize(cur) if type(cur) in (np.ndarray, Char) else _itemsize(v))
+    _refuse_made(dims, _itemsize(cur) if type(cur) in (np.ndarray, Char) else _itemsize(v),
+                 (_prod(dims), 1) if linear else None)
 
 
 def _del_oob(pos, n):
@@ -3068,7 +3086,7 @@ def _assign_paren(cur, args, v, brace=False):
     dims = _dims(cur)
     nd = _grow_dims(dims, args, vd)
     if tuple(nd) != tuple(dims):
-        _refuse_huge_growth(nd, cur, v)
+        _refuse_huge_growth(nd, cur, v, len(args) == 1)
         cur = _resize(cur, nd)
         dims = _dims(cur)
     pos, out = _positions(dims, args)
@@ -4403,7 +4421,7 @@ def _cls_bytes(cls):
 
 def _filled(dims, value, cls):
     cls = cls or "double"
-    _refuse_huge(dims, _cls_bytes(cls))
+    _refuse_made(dims, _cls_bytes(cls))
     if cls == "double":
         return _box(np.full(_stored(dims), value, dtype=np.float64))
     if cls == "single":
@@ -4566,7 +4584,7 @@ def eye_(*args):
     d, cls = _dimsarg(args, "eye")
     if len(d) > 2:
         raise _err("N-dimensional arrays are not supported.")
-    _refuse_huge(d, _cls_bytes(cls))
+    _refuse_made(d, _cls_bytes(cls))
     m = np.eye(d[0], d[1])
     return _as_like(_finish(_contig(m.T), cls or "double"), _like_proto(args))
 
@@ -4724,7 +4742,7 @@ def _rand_class(args, fname, classes):
 @_bs("rand")
 def rand_(*args):
     d, cls = _rand_class(args, "rand", ("double", "single"))
-    _refuse_huge(d, _cls_bytes(cls))
+    _refuse_made(d, _cls_bytes(cls))
     n = _prod(d)
     v = _rng[0].random_sample(n) if n else np.zeros(0)
     return _finish(np.asarray(v, dtype=np.float64).reshape(_stored(d)), cls or "double")
@@ -4733,7 +4751,7 @@ def rand_(*args):
 @_bs("randn")
 def randn_(*args):
     d, cls = _rand_class(args, "randn", ("double", "single"))
-    _refuse_huge(d, _cls_bytes(cls))
+    _refuse_made(d, _cls_bytes(cls))
     n = _prod(d)
     v = _randn(n) if n else np.zeros(0)
     return _finish(np.asarray(v, dtype=np.float64).reshape(_stored(d)), cls or "double")
@@ -4753,7 +4771,7 @@ def randi_(r, *args):
     top = 2.0 ** 24 if cls == "single" else 2.0 ** 53
     if abs(lo) > top or abs(hi) > top:
         raise _err("randi: the range [%d %d] is past the integers %s holds exactly: not supported in Sagebrush." % (lo, hi, "single" if cls == "single" else "a double"))
-    _refuse_huge(d, _cls_bytes(cls))
+    _refuse_made(d, _cls_bytes(cls))
     n = _prod(d)
     u = _rng[0].random_sample(n) if n else np.zeros(0)
     v = lo + np.floor(u * (hi - lo + 1))
@@ -9074,7 +9092,7 @@ def deblank_(x):
 @_bs("blanks")
 def blanks_(n):
     n = _int_arg(n)
-    _refuse_huge((1, n), 2)
+    _refuse_made((1, n), 2)
     return Char(" " * n)
 
 
@@ -9762,7 +9780,7 @@ def cell_(*args):
         raise _err("cell takes sizes only: a text argument is not supported.")
     d, _ = _dimsarg(args, "cell")
     # (MATLAB's refusal at 2^48 bytes, 8 per element as MATLAB R2026b counts a cell's; below it, this host's memory)
-    _refuse_huge(d, 8)
+    _refuse_made(d, 8)
     _admit_cells(_prod(d))
     return Cell([_empty_double() for _ in range(_prod(d))], d)
 
