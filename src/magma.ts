@@ -612,6 +612,9 @@ class Parser {
   // - a nested rule's or function's own reads don't count in the
   //   enclosing order, but its snapshot of a name imports it ("s").
   private capturing = 0;
+  // the scope depth (capturing) of each quantifier with witnesses parsed so far: its code binds names with :=
+  // (quantifier) in that scope, which a lambda would make its own (the "!" operand's lazy evaluation checks it)
+  private witnessDepths: number[] = [];
   private ruleDepth = 0; // map rules being parsed (capturing counts functions too)
   private uses: { name: string; bound: boolean; kind: "r" | "a" | "s" | "w" | "p" | "l" | "d"; tok?: Tok; done?: boolean; res?: string; post?: string }[] = [];
   private assigned: string[] = [];
@@ -1539,7 +1542,14 @@ class Parser {
         e = `_m._getattr(${e}, ${f.code}, (${f.line}, ${f.col}))`;
       } else if (this.at("!")) {
         const t = this.next();
-        e = `_m._coerce(${e}, ${this.unary()}, (${t.line}, ${t.col}))`;
+        const w0 = this.witnessDepths.length, depth = this.capturing;
+        const x = this.unary();
+        // (x is evaluated in S's context, so that G!(1, 2) and a function G!f() calls make cycles: in a lambda; an
+        // operand that binds names in its own scope, a quantifier's witnesses (exists(w){ ... }, recorded as parsed
+        // with their depth, witnessDepths; not one inside a function or rule it makes, which binds there), in place
+        // between _ctx_enter and _coerce_after, as a lambda would make the names its own)
+        const binds = this.witnessDepths.slice(w0).some((d) => d === depth);
+        e = binds ? `_m._coerce_after(_m._ctx_enter(${e}), ${x}, (${t.line}, ${t.col}))` : `_m._coerce_ctx(${e}, lambda: ${x}, (${t.line}, ${t.col}))`;
       } else if (this.at("@")) {
         this.next();
         e = `_m._apply(${this.unary()}, ${e})`;
@@ -1573,14 +1583,16 @@ class Parser {
       if (!fn) this.fail("$$ outside a function");
       return fn.name;
     }
-    if (this.eat("(")) {
+    if (this.at("(")) {
+      const lp = this.next();
       const e = this.expr();
       if (this.eat(",")) {
-        // (a, b): Magma has no tuples in parentheses, but allow it as a tuple
+        // (a, b): a cycle, made only in a permutation group's context (G!(1, 2), _m._coerce_ctx), as Magma's;
+        // elsewhere Magma's error, said at the "("
         const rest = [e, this.expr()];
         while (this.eat(",")) rest.push(this.expr());
         this.expect(")");
-        return `_m.MTuple([${rest.join(", ")}])`;
+        return `_m._cycle([${rest.join(", ")}], (${lp.line}, ${lp.col}))`;
       }
       this.expect(")");
       // ((f(2)); is all of f(2)'s values, as f(2); is)
@@ -1880,6 +1892,7 @@ class Parser {
     if (!wit.length) return `${kw === "exists" ? "any" : "all"}(${test} ${loops})`;
     // the first witness (in a 1-tuple, so that any value is one), assigned
     // with := in the expression, only when there is one
+    this.witnessDepths.push(this.capturing);
     const t = this.fresh();
     const found = `(${t} := _m._witness(((${head},) ${loops} if ${kw === "exists" ? test : `not ${test}`})))`;
     const names = wit.map((w) => pyName(w.v));
