@@ -340,7 +340,26 @@ class Series(object):
             raise _unsupported("%s of Series with other, repeated labels" % owner)
         from . import _pd_combine as CB
         labels = CB.join_labels([self._pd_index, other._pd_index], "outer", True)
-        return self._pd_reindex(labels)._pd_col, other._pd_reindex(labels)._pd_col, labels, name
+        return self._pd_aligned(labels), other._pd_aligned(labels), labels, name
+
+    def _pd_aligned(self, labels):
+        """The column at labels (pandas' reindex for arithmetic): a float
+        column keeps its dtype (float32 too) with NaN at labels it hasn't;
+        others as _pd_reindex gives them."""
+        if self._pd_col.dtype not in FLOATS:
+            return self._pd_reindex(labels)._pd_col
+        positions = []
+        for lab in labels.tolist():
+            try:
+                positions.append(self._pd_index._pd_positions(lab))
+            except KeyError:
+                positions.append(None)
+        v = self._pd_col._pd_values
+        out = np.full(len(positions), np.nan, dtype=self._pd_col.dtype)
+        for k, p in enumerate(positions):
+            if p is not None:
+                out[k] = v[p]
+        return Column(self._pd_col.dtype, out)
 
     def _pd_arith(self, other, op, reflected=False, fill_value=None):
         from . import _pd_arith as A

@@ -647,3 +647,18 @@ dtype: uint8
 a     1.0
 b    12.0
 dtype: float64
+== float32-misaligned-add.exact
+[nan, 0.5]
+== float32-misaligned-add.dtype
+dtype('float32')
+== float32-misaligned-fill.exact
+[0.20000000298023224, 0.5]
+== float32-misaligned-mul-fill.exact
+[0.30000001192092896, 0.06000000238418579]
+== float32-misaligned-float64
+dtype('float64')
+== int8-misaligned-fill
+
+0    0.0
+1   -3.0
+dtype: float64
