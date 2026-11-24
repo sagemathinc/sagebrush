@@ -164,7 +164,7 @@
     {
       "case": "forest.multilabel-oob",
       "printed": "!! NotImplementedError: sklearn.metrics with multilabel-indicator targets is not in Sagebrush's sklearn 0.x subset",
-      "reason": "the out-of-bag score of a forest on several binary outputs is accuracy_score on multilabel-indicator targets, which Sagebrush's metrics refuse (they're sparse in scikit-learn); the forest's trees and oob_decision_function_ are computed first, and other targets' out-of-bag scores work"
+      "reason": "the out-of-bag score of a forest on several binary outputs is accuracy_score on multilabel-indicator targets, a target format Sagebrush's metrics don't support yet; the forest's trees and oob_decision_function_ are computed first, and other targets' out-of-bag scores work"
     }
   ],
   "tolerances": [
