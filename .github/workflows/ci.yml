@@ -119,13 +119,14 @@ jobs:
         name: classify changed paths and select the tier
         env:
           CI_QUEUE_TESTED: ${{ steps.queue.outputs.queue_tested }}
-          # (PR CI light: William's repository switch, off unless exactly "true"; scripts/ci-paths.mjs prLight)
-          CI_PR_LIGHT: ${{ vars.PR_CI_LIGHT }}
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
           CI_PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
           # (a dispatch's long input: the long tier, scripts/ci-paths.mjs)
           CI_LONG: ${{ inputs.long }}
-        run: node scripts/ci-paths.mjs >> "$GITHUB_OUTPUT"
+        # (PR CI light: the checked-in switch .github/pr-ci-light, its first line without spaces, off unless exactly
+        # "true"; a file in the checkout, not a repository variable, so a pull request from a fork reads it too.
+        # William, Nov 23 2026; scripts/ci-paths.mjs prLight)
+        run: CI_PR_LIGHT="$(head -n 1 .github/pr-ci-light 2>/dev/null | tr -d ' \t\r')" node scripts/ci-paths.mjs >> "$GITHUB_OUTPUT"
 
   # (the limits census alone, in seconds and with no build: it must run on an
   # engine-only pull request too, whose node suites are path-skipped)
