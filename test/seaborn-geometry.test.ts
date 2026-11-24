@@ -45,7 +45,9 @@ function compare(want: any, got: any, path: string, bad: string[]) {
     return;
   }
   if (typeof want === "number" && typeof got === "number") {
-    if (Math.abs(want - got) <= 1e-9 * Math.max(1, Math.abs(want))) return;
+    // (a pairplot diagonal's density curves, compared whole, more tightly: 1e-12, absolute below magnitude 1)
+    const tol = /\.curves\[/.test(path) ? 1e-12 : 1e-9;
+    if (Math.abs(want - got) <= tol * Math.max(1, Math.abs(want))) return;
     // (a color channel: equal as drawn, a byte)
     if (/\.(face|edge|color)\b|\.texts\[/.test(path) && Math.round(want * 255) === Math.round(got * 255)) return;
   } else if (want === got) return;

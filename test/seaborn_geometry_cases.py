@@ -98,17 +98,24 @@ def pair(g):
             r.append({"coll": [{k: v for k, v in coll(c).items() if k in ("offsets", "face", "sizes")} for c in a.collections
                                if type(c).__name__ == "PathCollection" and len(c.get_offsets())],
                       "lim": [float(v) for v in a.get_xlim() + a.get_ylim()],
+                      # (whether the cell shows x and y tick labels: their values follow the layout, seaborn's tight one)
+                      "ticklabels": [any(t.get_visible() and t.get_text() for t in a.get_xticklabels()),
+                                     any(t.get_visible() and t.get_text() for t in a.get_yticklabels())],
                       "xlabel": a.get_xlabel() if a.xaxis.label.get_visible() else "",
                       "ylabel": a.get_ylabel() if a.yaxis.label.get_visible() else ""})
         cells.append(r)
     diag = []
     for a in (g.diag_axes if g.diag_axes is not None else []):
         ps = [p for p in a.patches if rect(p) != [0.0, 0.0, 0.0, 0.0]]
-        diag.append({"rects": [rect(p) for p in ps],
-                     "curves": [[round(float(v), 9) for v in np.asarray(c.get_paths()[0].vertices, dtype=float)[202:402][::-1][::25, 1]]
+        # (each density whole: its 200 x and y values, the curve along the fill's top edge)
+        diag.append({"rects": [rect(p) for p in ps], "axis": bool(a.axison),
+                     "lim": [float(v) for v in a.get_xlim() + a.get_ylim()],
+                     "curves": [np.asarray(c.get_paths()[0].vertices, dtype=float)[202:402][::-1].T.tolist()
                                 for c in a.collections if type(c).__name__ == "FillBetweenPolyCollection"]})
+    leg = getattr(g, "_legend", None)
     return {"shape": list(g.axes.shape), "cells": cells, "diag": diag,
-            "legend": [t.get_text() for t in g._legend.get_texts()] if getattr(g, "_legend", None) else None}
+            "legend": [t.get_text() for t in leg.get_texts()] if leg else None,
+            "legend_title": leg.get_title().get_text() if leg else None}
 def bars(ax):
     ps = [p for p in ax.patches if rect(p) != [0.0, 0.0, 0.0, 0.0]]  # (not the legend's empty handles)
     return {"rects": [rect(p) for p in ps], "face": [[float(v) for v in p.get_facecolor()] for p in ps],
@@ -196,15 +203,20 @@ def pair(g):
                 continue
             r.append({"coll": [{k: v for k, v in coll(p).items() if k in ("offsets", "face", "sizes")} for p in _kind(a, "Points") if p.xs],
                       "lim": [float(v) for v in tuple(a.get_xlim()) + tuple(a.get_ylim())],
+                      "ticklabels": [any(t.get_text() for t in a.get_xticklabels()),
+                                     any(t.get_text() for t in a.get_yticklabels())],
                       "xlabel": a.get_xlabel(), "ylabel": a.get_ylabel()})
         cells.append(r)
     diag = []
     for a in g.diag_axes:
         rs = [list(r) for p in _kind(a, "Rects") for r in p.rects]
-        diag.append({"rects": rs, "curves": [[round(float(v), 9) for v in p.ys[::25]] for p in _kind(a, "Line")]})
+        diag.append({"rects": rs, "axis": a._opts.get("axes", True) is not False,
+                     "lim": [float(v) for v in tuple(a.get_xlim()) + tuple(a.get_ylim())],
+                     "curves": [[[float(v) for v in p.xs], [float(v) for v in p.ys]] for p in _kind(a, "Line")]})
     leg = g._legend
     return {"shape": list(g.axes.shape), "cells": cells, "diag": diag,
-            "legend": [s for _, s in leg._opts.get("legend_entries", [])] if leg is not None else None}
+            "legend": [s for _, s in leg._opts.get("legend_entries", [])] if leg is not None else None,
+            "legend_title": (leg._opts.get("legend_title") or "") if leg is not None else None}
 def scat(ax):
     return {"coll": [coll(p) for p in _kind(ax, "Points")], "frame": frame(ax), "legend": legend(ax)}
 '''
