@@ -712,6 +712,21 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   for (const [name, body, ok] of longs) { const h = doc("\\documentclass{article}\n\\newcounter{foo}\n", body); check(name, ok(h), h.slice(0, 700)); }
 }
 
+// ---- amsart's front matter and a bibliography with author-year labels (as an arXiv paper's): \title[short]{long} and
+// \author[short]{long} show the long form only; the labels' column as wide as its widest label; a \cite note typeset
+{
+  setKatex((src) => '<span class="KI">' + src.replace(/[&<>]/g, "") + "</span>");
+  const h = new Engine().update("\\documentclass{amsart}\n\\title[Short T]{Long title}\n\\author[N. K.]{Narasimha K}\n\\begin{document}\n\\maketitle\nSee \\cite[\\S B]{Nek12} and \\cite[p.~3, $x^2$]{BM03}.\n\\begin{thebibliography}{abcd999}\n\\bibitem[BM03]{BM03} Baba.\n\\bibitem[Nek12]{Nek12} Nekov.\n\\end{thebibliography}\n\\end{document}\n").chunks.join("");
+  check("amsart-title-short-form", h.includes("Long title") && h.includes("Narasimha K") && !h.includes("Short T") && !h.includes("N. K.") && !h.includes('class="title">[') && !h.includes('class="auth">['), h.slice(0, 600));
+  const pad = /<ol class="bib" style="padding-left:(\d+\.\d+)em">/.exec(h);
+  check("bib-label-column-widest", pad && +pad[1] >= 3.5, /<ol class="bib"[^>]*>/.exec(h)?.[0]);
+  const see = h.slice(h.indexOf("See"), h.indexOf("See") + 600);
+  check("cite-note-typeset", see.includes("Nek12</a>, §B]") && see.includes('p.\u00a03, <span class="KI">x^2</span>]') && !see.includes("\\S"), see);
+  // (a numeric bibliography keeps the page's own column)
+  const hn = new Engine().update("\\documentclass{article}\n\\begin{document}\n\\cite{a}\n\\begin{thebibliography}{9}\n\\bibitem{a} A.\n\\end{thebibliography}\n\\end{document}\n").chunks.join("");
+  check("bib-label-column-numeric", /<ol class="bib">/.test(hn), /<ol class="bib"[^>]*>/.exec(hn)?.[0]);
+}
+
 // ---- source position markers: each main-file line is marked at most once (a resume inside an \input that a main
 // line started in the middle; the main file read again)
 {

@@ -100,6 +100,8 @@ function styleOpen(s) {
   if (!cls.length && !s.color) return null;
   return "<span" + (cls.length ? ' class="' + cls.join(" ") + '"' : "") + (s.color ? ' style="color:' + s.color + '"' : "") + ">";
 }
+// (a bibliography label's width in em, roughly a serif font's: wide for capitals, narrow for brackets; errs wide)
+function labelEm(t) { let w = 0.56 + 0.5; for (const c of String(t)) w += /[A-Z]/.test(c) ? 0.75 : /[a-z0-9]/.test(c) ? 0.52 : 0.4; return w; }
 function typo(s) {   // TeX's ligatures for text (not typewriter)
   return s.replace(/!`/g, "¡").replace(/\?`/g, "¿").replace(/---/g, "—").replace(/--/g, "–").replace(/``/g, "“").replace(/''/g, "”")
     .replace(/`/g, "‘").replace(/'/g, "’");
@@ -830,16 +832,19 @@ class Renderer {
   }
   arrayEnv(n, ctx, flow) { flow.html(this.math("\\begin{array}" + this.mathStr(n.kids) + "\\end{array}", false), ctx.st); }
   bibliography(n, ctx, flow) {
-    const [, j] = this.arg(n.kids, -1);
+    const [w, j] = this.arg(n.kids, -1);
     const kids = n.kids.slice(j + 1);
     flow.block('<h2 class="bibhead">' + (this.book ? "Bibliography" : "References") + "</h2>");
     const b = flow.open("ol", ' class="bib"');
-    let li = null;
+    // (the labels' column as wide as the widest label, or the {widest} argument's, as LaTeX sizes it: the page's 2.6em
+    //  unless a label needs more, as [BM03] does)
+    let li = null, widest = labelEm(this.str(w).trim());
     for (let i = 0; i < kids.length; i++) {
       if (this.csName(kids[i]) === "bibitem") {
         const [o, j1] = this.opt(kids, i); const [k, j2] = this.arg(kids, j1);
         if (li) flow.close(li);
         const key = this.str(k).trim(); const num = ++this.bibN; const lab = o ? this.inline(o, ctx) : String(num);
+        widest = Math.max(widest, labelEm(o ? this.str(o) : String(num)));
         this.bib.set(key, { lab, id: "bib-" + num });
         li = flow.open("li", ' id="bib-' + num + '"', '<span class="biblab">[' + lab + "]</span> ");
         i = j2; continue;
@@ -848,6 +853,7 @@ class Renderer {
       this.walk(kids.slice(start, end), ctx, flow); i = end - 1;
     }
     if (li) flow.close(li);
+    if (widest > 2.6) b.attrs += ' style="padding-left:' + widest.toFixed(2) + 'em"';
     flow.close(b);
   }
 
@@ -857,10 +863,27 @@ class Renderer {
     flow.html(P.render(), ctx.st);
   }
 
+  amsShort(nodes, i) { return /^ams(art|book|proc)$/.test(this.cls || "") ? this.opt(nodes, i) : [null, i]; }
+  // (a citation's note, \cite[\S B]{key}: its text with TeX's text symbols, ties and dashes, its $...$ as math)
+  noteHtml(s, plain) {
+    let out = "";
+    const parts = String(s).split(/(\$[^$]*\$)/);
+    for (const p of parts) {
+      if (/^\$[^$]*\$$/.test(p)) { out += plain ? p.slice(1, -1) : this.math(p.slice(1, -1), false); continue; }
+      const t = p.replace(/\\([A-Za-z]+) ?|\\(.)|[{}]|~/g, (m, name, sym) => {
+        if (m === "~") return "\u00a0";
+        if (m === "{" || m === "}") return "";
+        const k = name ?? sym;
+        return Object.hasOwn(TEXT_SYMBOLS, k) ? TEXT_SYMBOLS[k] : m;
+      });
+      out += plain ? typo(t) : esc(typo(t));
+    }
+    return out;
+  }
   resolveRef(r, plain) {
     if (r.cmd === "cite" || r.cmd === "citep" || r.cmd === "citet") {
       const parts = r.key.split(",").map((k) => k.trim()).filter(Boolean).map((k) => { const b = this.bib.get(k); return b ? (plain ? b.lab : '<a href="#' + b.id + '">' + b.lab + "</a>") : (plain ? "?" : '<span class="missing">' + esc(k) + "</span>"); });
-      return "[" + parts.join(", ") + (r.opt ? ", " + esc(r.opt) : "") + "]";
+      return "[" + parts.join(", ") + (r.opt ? ", " + this.noteHtml(r.opt, plain) : "") + "]";
     }
     if (r.cmd === "cref" || r.cmd === "Cref") return this.cref(r, plain);
     const L = this.labels.get(r.key);
@@ -1060,9 +1083,12 @@ const CMDS = {
   LaTeXe: function (nodes, i, ctx, flow) { flow.html('<span class="latex">L<span class="a">a</span>T<span class="e">e</span>X&thinsp;2<sub>&epsilon;</sub></span>', ctx.st); return i; },
   TeX: function (nodes, i, ctx, flow) { flow.html('<span class="latex">T<span class="e">e</span>X</span>', ctx.st); return i; },
   BibTeX: function (nodes, i, ctx, flow) { flow.html('<span class="sc">Bib</span><span class="latex">T<span class="e">e</span>X</span>', ctx.st); return i; },
-  title: function (nodes, i, ctx) { const [a, j] = this.arg(nodes, i); [this.meta.title, this.metaSage.title] = this.captured(() => this.inline(a, ctx)); return j; },
+  // (\title[short]{long} and \author[short]{long} in the AMS classes, amsart's: the short form is for running heads,
+  //  not shown. In another class TeX reads the [ as the argument, as here)
+  title: function (nodes, i, ctx) { const [, j0] = this.amsShort(nodes, i); const [a, j] = this.arg(nodes, j0); [this.meta.title, this.metaSage.title] = this.captured(() => this.inline(a, ctx)); return j; },
   author: function (nodes, i, ctx) {
-    const [a, j] = this.arg(nodes, i);
+    const [, j0] = this.amsShort(nodes, i);
+    const [a, j] = this.arg(nodes, j0);
     const parts = [[]]; for (const x of a) { if (this.csName(x) === "and") parts.push([]); else parts[parts.length - 1].push(x); }
     [this.meta.author, this.metaSage.author] = this.captured(() => parts.map((p) => '<span class="auth">' + this.inline(p, ctx) + "</span>").join("")); return j;
   },
