@@ -4312,7 +4312,8 @@ class ComplexNumberMP:
             # (the imaginary part as it prints, its sign with it: -infinity*I, as Sage)
             return repr(im) + "*I"
         si = repr(abs(im)) + "*I"
-        return "%r %s %s" % (re, "-" if im._m < 0 else "+", si)
+        # (" - " for a negative imaginary part, -infinity too, as Sage's y < 0)
+        return "%r %s %s" % (re, "-" if im._m < 0 or im._special == "-inf" else "+", si)
 
     __str__ = __repr__
 
