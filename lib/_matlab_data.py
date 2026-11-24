@@ -815,6 +815,9 @@ def quantile_(x, p, *rest):
 # ------------------------------------------------------------------ moving statistics
 
 def _window(k):
+    # (a window is one or two numbers: anything larger is refused before it is read, so that no copy of it is made)
+    if _m._numel(k) not in (1, 2):
+        raise _err("Window length must be a finite, positive scalar or a 2-element vector of nonnegative values.")
     K = _vec(k).real
     if K.size == 1:
         v = float(K[0])

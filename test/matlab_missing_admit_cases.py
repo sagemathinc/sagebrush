@@ -108,3 +108,31 @@ finally:
 assert M._dims(r1[1]) == (1, 1) and M._dims(r2[0]) == (1, 3), (M._dims(r1[1]), M._dims(r2[0]))
 assert charges and max(charges) < 2048, charges
 ok("rmmissing and fillmissing: a dimension far past the array's last costs nothing (dim 1e15, charges under 2 KB)")
+
+# (a malformed window is refused before it is read: a 2,000,000-element single window or a 1,000,000-element int8 one
+# is never converted, so no copy of it is made before the refusal; a sentinel in place of the window's conversion is
+# never reached)
+Big = M._B["single"].call(1, [N._un_nd(np.ones((1, 2000000)))])
+Big8 = M._B["int8"].call(1, [N._un_nd(np.ones((1, 1000000)))])
+saved = D._vec
+
+
+def no_copy(*a, **k):
+    raise Reached()
+D._vec = no_copy
+try:
+    for name, f in (("fillmissing movmean", lambda: D.fillmissing_(2, 1.0, C("movmean"), Big)),
+                    ("fillmissing movmedian", lambda: D.fillmissing_(2, 1.0, C("movmedian"), Big)),
+                    ("fillmissing int8 window", lambda: D.fillmissing_(2, 1.0, C("movmedian"), Big8)),
+                    ("movmean", lambda: M._B["movmean"].call(1, [1.0, Big])),
+                    ("movmedian int8 window", lambda: M._B["movmedian"].call(1, [1.0, Big8]))):
+        try:
+            f()
+            assert False, name
+        except Reached:
+            assert False, name + ": the window was read before it was refused"
+        except M.MatlabError as e:
+            assert "Window length" in str(e), (name, str(e))
+finally:
+    D._vec = saved
+ok("a malformed window (2,000,000 single, 1,000,000 int8) is refused before it is read (no copy made)")

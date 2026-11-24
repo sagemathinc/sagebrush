@@ -242,5 +242,5 @@ test("rmmissing and fillmissing admitted before their copies are made (test/matl
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const lines = r.stdout.trim().split("\n");
   assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
-  assert.equal(lines.length, 4, r.stdout);
+  assert.equal(lines.length, 5, r.stdout);
 });
