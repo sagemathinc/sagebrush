@@ -1,0 +1,117 @@
+Mapping from: Integer Ring to Rational Field
+3
+Rational Field
+3
+Integer Ring
+Rational Field
+Map
+2
+3
+[ 1, 2 ]
+{ 1, 2 }
+
+>> f(1/2);
+    ^
+Runtime error in map application: Could not coerce into map's domain
+
+
+>> f("a");
+    ^
+Runtime error in map application: Could not coerce into map's domain
+
+
+>> f(true);
+    ^
+Runtime error in map application: Could not coerce into map's domain
+
+2
+Integer Ring
+
+>> (1/2) @@ f;
+         ^
+Runtime error in '@@': Application of map failed
+
+true
+true
+1
+true
+false
+true
+false
+false
+2
+
+>> f eq map<Integers() -> Rationals() | n :-> n>;
+     ^
+Runtime error in 'eq': Cannot test equality for those maps
+
+
+>> f eq 3;
+     ^
+Runtime error in 'eq': Bad argument types
+Argument types given: Map[RngInt, FldRat], RngIntElt
+
+
+>> u([[1, 2], [3]]);
+    ^
+Runtime error in map application: Element is not in the domain of the map
+
+
+>> u(["a"]);
+    ^
+Runtime error in map application: Element is not in the domain of the map
+
+
+>> u([1/2]);
+    ^
+Runtime error in map application: Element is not in the domain of the map
+
+
+>> u({{1}});
+    ^
+Runtime error in map application: Element is not in the domain of the map
+
+[]
+{ 1 }
+
+>> cz([1/2]);
+     ^
+Runtime error in map application: Element is not in the domain of the map
+
+[ 1, 2 ]
+Mapping from: Rational Field to Integer Ring
+2
+Integer Ring
+
+>> g(1/2);
+    ^
+Runtime error in map application: Application of map failed
+
+Mapping from: Integer Ring to RngUPol: P
+5
+Univariate Polynomial Ring in x over Integer Ring
+Mapping from: Integer Ring to GF(7)
+3
+3
+Mapping from: Integer Ring to Integer Ring
+Mapping from: [ 1, 2 ] to Integer Ring
+1
+
+>> Coercion(Integers(), "abc");
+           ^
+Runtime error in 'Coercion': Bad argument types
+Argument types given: RngInt, MonStgElt
+
+
+>> Coercion(3, Integers());
+           ^
+Runtime error in 'Coercion': Bad argument types
+Argument types given: RngIntElt, RngInt
+
+
+>> Coercion(Integers());
+           ^
+Runtime error in 'Coercion': Bad argument types
+Argument types given: RngInt
+
+end

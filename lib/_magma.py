@@ -2328,6 +2328,63 @@ def Codomain(f):
     return f.cod
 
 
+class _MCoercionMap(MMap):
+    """Coercion(D, C): the map x :-> C!(D!x), as Magma 2.18-5's (checked
+    against it): an argument D doesn't take is "Could not coerce into
+    map's domain", an image C doesn't is "Application of map failed"; a
+    preimage is D!y; a sequence or set is mapped element by element; two
+    with the same domain and codomain are equal."""
+
+    def __init__(self, dom, cod):
+        MMap.__init__(self, dom, cod, rule=lambda x: x)
+
+    def __repr__(self):
+        # (a finite field no global variable holds is GF(q) here, as Magma's, and as _MExtMap's)
+        name = lambda S: _gf_name(S) if isinstance(S, _MFinField) and _global_name(S) is None else _struct_name(S)
+        return "Mapping from: %s to %s" % (name(self.dom), name(self.cod))
+
+    @staticmethod
+    def _into(S, x):
+        if isinstance(S, (MSeq, MSet, MRange)):
+            if not _in(x, S):
+                raise MagmaError("not an element")
+            return x
+        return _coerce(S, x)
+
+    def __call__(self, x):
+        if isinstance(x, (MSeq, MSet)):
+            # (element by element, one level deep, as Magma's: an element the map doesn't take, at either step, is
+            # "Element is not in the domain of the map" there, a sequence or set in it too)
+            ys = []
+            for y in x:
+                try:
+                    ys.append(self._into(self.cod, self._into(self.dom, y)))
+                except MagmaError:
+                    raise MagmaError("Element is not in the domain of the map", "map application")
+            return MSeq(ys) if isinstance(x, MSeq) else _set(ys)
+        try:
+            y = self._into(self.dom, x)
+        except MagmaError:
+            raise MagmaError("Could not coerce into map's domain", "map application")
+        try:
+            return self._into(self.cod, y)
+        except MagmaError:
+            raise MagmaError("Application of map failed", "map application")
+
+    def _preimage(self, y, where):
+        try:
+            return self._into(self.dom, y)
+        except MagmaError:
+            raise MagmaError("Application of map failed", where)
+
+    def __eq__(self, o):
+        return isinstance(o, _MCoercionMap) and _eq(self.dom, o.dom) and _eq(self.cod, o.cod)
+
+    def __hash__(self):
+        # (one value for the class, consistent with __eq__: {f, g} of two equal ones is one map, as Magma's)
+        return hash(_MCoercionMap)
+
+
 def Inverse(f):
     """The inverse of a map (applying it needs an inverse rule)."""
     if isinstance(f, MMap):
@@ -3306,6 +3363,10 @@ def _eq(a, b, pos=None, op="eq"):
     if ka == "map":
         if a is b:
             return True
+        if isinstance(a, _MCoercionMap) and isinstance(b, _MCoercionMap):
+            # (two coercion maps are equal when their domains and codomains are, as Magma's; with another map, Magma
+            # can't test it)
+            return a == b
         raise MagmaError("Cannot test equality for those maps", "'%s'" % op, True, pos)
     if ka == "tup":
         # tuples of one length whose entries compare
@@ -7427,7 +7488,7 @@ def Sqrt(x):
 # calls being made, innermost last: an argument's call has returned before
 # its caller's is entered, so a nested or repeated call is told apart.
 _CALL_POS_NAMES = frozenset((
-    "ChangeRing CharacteristicPolynomial DefiningPolynomial Embed Generator Identity IsSubfield "
+    "ChangeRing CharacteristicPolynomial Coercion DefiningPolynomial Embed Generator Identity IsSubfield "
     "MinimalPolynomial Norm PrimeField Root RootsInSplittingField Solution Submatrix Subsets Sym Trace Vector").split())
 _CALLPOS = []
 
@@ -7437,6 +7498,11 @@ def _call(pos, f, *args, **kw):
     _CALLPOS.append((pos, getattr(f, "__name__", None)))
     try:
         return f(*args, **kw)
+    except MagmaError as e:
+        if isinstance(f, _MCoercionMap):
+            # (a coercion map's application error is said at the call's "(", as Magma's)
+            e.pos = e.pos or pos
+        raise
     finally:
         _CALLPOS.pop()
 
@@ -7620,6 +7686,13 @@ def _cr_source_ok(X):
         return True
     ring = X if isinstance(X, _sp.PolynomialRing_) else getattr(X, "_ring", None)
     return type(ring) in (_sp.PolynomialRing_, _MPolyRingZQ) and (ring._base is _sp.ZZ or ring._base is _sp.QQ)
+
+
+@_signature("Coercion", "Str", "Str", ret="Map")
+def _coercion(D, C):
+    """The coercion map from D to C (Magma's Coercion; it is made whether or
+    not C takes D's elements, as Magma's is)."""
+    return _MCoercionMap(D, C)
 
 
 @_signature("ChangeRing", "RngUPol", "Rng", ret="RngUPol")

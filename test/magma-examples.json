@@ -214,6 +214,8 @@
   "PrimeField": "> PrimeField(GF(16));\nFinite field of size 2",
   "Root": "> K<b> := GF(16);\n> Root(b, 7);\nb^13",
   "RootsInSplittingField": "> P<x> := PolynomialRing(GF(5));\n> RootsInSplittingField(x^2 + 2);\n[ <$.1^9, 1>, <$.1^21, 1> ]\nFinite field of size 5^2",
-  "Trace(FldFinElt, FldFin)": "> K<b> := GF(16); F<a> := GF(4);\n> Trace(b, F);\n1"
+  "Trace(FldFinElt, FldFin)": "> K<b> := GF(16); F<a> := GF(4);\n> Trace(b, F);\n1",
+  "Coercion": "> f := Coercion(Integers(), Rationals());\n> f;\nMapping from: Integer Ring to Rational Field\n> f(3);\n3",
+  "Coercion(Str, Str)": "> Coercion(Integers(), GF(7))(10);\n3"
  }
 }
