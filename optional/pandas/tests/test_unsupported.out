@@ -160,6 +160,12 @@
 !! NotImplementedError: pandas: astype of float values beyond int32's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset
 == cast.astype-float-beyond-int64
 !! NotImplementedError: pandas: astype of float values beyond int64's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset
+== cast.astype-float-below-int8
+!! NotImplementedError: pandas: astype of float values beyond int8's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset
+== cast.astype-float32-below-int32
+!! NotImplementedError: pandas: astype of float values beyond int32's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset
+== cast.astype-float-beyond-uint8
+!! NotImplementedError: pandas: astype of float values beyond uint8's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset
 == d1.astype-errors
 !! NotImplementedError: pandas.Series.astype(errors=, a dict) is not in Sagebrush's pandas 0.x subset
 == d1.small-int-from-values

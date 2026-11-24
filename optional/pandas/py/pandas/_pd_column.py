@@ -244,6 +244,11 @@ def _str_of(v):
     return str(v)
 
 
+def _scalar_any(mask):
+    r = mask.any()
+    return r[()] if isinstance(r, np.ndarray) else r
+
+
 def astype_column(col, dtype):
     """col as dtype (a new column), with pandas 3.1's rules: a float with NaN
     or infinity to an integer raises IntCastingNaNError, a float to an integer
@@ -269,6 +274,9 @@ def astype_column(col, dtype):
         if want in INTS and d in FLOATS:
             if len(v) and not bool(np.isfinite(v).all()):
                 raise IntCastingNaNError("Cannot convert non-finite values (NA or inf) to integer. Replace or remove non-finite values or cast to an integer type that supports these values (e.g. 'Int64')")
+            # (a negative float to an unsigned type: pandas' own ValueError, before the range)
+            if want.startswith("u") and len(v) and bool(_scalar_any(v < 0)):
+                raise ValueError("Cannot losslessly cast from %s to %s" % (d, want))
             # (a float beyond the integer type's range: numpy's cast is undefined (INT_MIN on x86), so it's refused
             # rather than given another value)
             info = np.iinfo(want)

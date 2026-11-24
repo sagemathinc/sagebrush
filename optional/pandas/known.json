@@ -689,12 +689,27 @@
     {
       "case": "cast.astype-float-beyond-int32",
       "message": "pandas: astype of float values beyond int32's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset",
-      "reason": "a float beyond the integer type's range has no defined numpy cast (pandas gives INT_MIN with a RuntimeWarning on x86); Sagebrush refuses it rather than give another value"
+      "reason": "above int32's range numpy's float-to-int cast is undefined (pandas gives INT32_MIN on x86, silently); Sagebrush refuses it rather than give another value"
     },
     {
       "case": "cast.astype-float-beyond-int64",
       "message": "pandas: astype of float values beyond int64's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset",
-      "reason": "a float beyond the integer type's range has no defined numpy cast (pandas gives INT_MIN with a RuntimeWarning on x86); Sagebrush refuses it rather than give another value"
+      "reason": "above int64's range numpy's float-to-int cast is undefined (pandas gives INT64_MIN on x86, with a RuntimeWarning); Sagebrush refuses it rather than give another value"
+    },
+    {
+      "case": "cast.astype-float-below-int8",
+      "message": "pandas: astype of float values beyond int8's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset",
+      "reason": "below int8's range numpy's float-to-int cast is undefined (pandas gives 56 for -200.0 on x86, silently); Sagebrush refuses it rather than give another value"
+    },
+    {
+      "case": "cast.astype-float32-below-int32",
+      "message": "pandas: astype of float values beyond int32's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset",
+      "reason": "below int32's range numpy's float-to-int cast is undefined (pandas gives INT32_MIN on x86, silently); Sagebrush refuses it rather than give another value"
+    },
+    {
+      "case": "cast.astype-float-beyond-uint8",
+      "message": "pandas: astype of float values beyond uint8's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset",
+      "reason": "above uint8's range numpy's float-to-int cast is undefined (pandas gives 44 for 300.0 on x86, silently); Sagebrush refuses it rather than give another value. A negative float to an unsigned type is pandas' own ValueError, which Sagebrush matches (test_astype)"
     },
     {
       "case": "d1.astype-errors",

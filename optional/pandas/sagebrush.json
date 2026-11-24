@@ -39,7 +39,7 @@
   "private_prefix": "_pd_",
   "files": {
     "py/pandas/__init__.py": "387987894828f9a95fa26bb6ec20fe890f2ac2b1e6158ef0dadb9ac9a40e4234",
-    "py/pandas/_pd_column.py": "aa473f7d72b8f3f2a6dd45624538ff3b885ec29b6daac9244aa37868124b33eb",
+    "py/pandas/_pd_column.py": "595138a468af0360b529df4b2d130d564b772e27bf042646b0eb8e8d4903960a",
     "py/pandas/_pd_combine.py": "8f02240807c83fa49469cab90e797e711c1557ba90f1a16c9bb0c2223eecf854",
     "py/pandas/_pd_csv.py": "f1c431d762be303c0d726eebb92f5693a6ae256883bd4de798027cace0d1e9bb",
     "py/pandas/_pd_datetime.py": "2ee719585e6236d9737d7a4e5d193c797e43ae72d6b97cc18440d1c1a489f8c0",
