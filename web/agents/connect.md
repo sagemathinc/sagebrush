@@ -69,13 +69,14 @@ If you clicked Block by mistake: click the icon at the left of the address bar, 
 ### What it touches
 
 - **On your computer:** one Node process under your account. It works in an empty temporary folder, loads none of your Claude settings or MCP servers, and listens on 127.0.0.1 only. It accepts only sagebrush.space, the preview site and any `--origin` you add, only with the one-time code (used once, valid 5 minutes), and one page at a time.
-- **What Claude can use:** no shell and none of your computer's files. Its file tools are the Sagebrush workspace's, and the page checks each call against the folders you allowed. Each web search or fetch asks you first in the chat, and so does each move, rename or removal of a file. It can write a notebook. On pages that offer branches it can also make its own branch and ask you to review it; only you accept its changes. It runs code only while "May run code" is on, and then in Sagebrush's sandbox in your browser, never on this computer; otherwise you run a notebook's cells.
+- **What Claude can use:** no shell and none of your computer's files. Its file tools are the Sagebrush workspace's, and the page checks each call against the folders you allowed. Each web search or fetch asks you first in the chat, and so does each move, rename or removal of a file. It can write a notebook. On pages that offer branches it can also make its own branch and ask you to review it; only you accept its changes. In a chat, it runs code only while "May run code" is on, and then in Sagebrush's sandbox in your browser, never on this computer; otherwise you run a notebook's cells.
+- **Delegate tasks (optional):** with **Delegate** on in the Agents page, a task works on its own copy of the documents you choose, kept on this computer in `~/.sagebrush/tasks`, and proposes its changes back to you. Your workspace changes only when you **Merge**. With **May run code** ticked for the task, on Linux and macOS, it runs that copy's notebooks on this computer, confined to the task's folder, with no network.
 - **Network:** the program talks to Anthropic, with your Claude login. Your conversation goes to Anthropic.
 - **On disk:** while it runs, each conversation's transcript is saved under `~/.claude/projects/`, as Claude Code does, including the contents of files Claude read. Ctrl+C stops it and deletes this run's transcripts and its temporary folder; if it can't, it says what's left. If the program is killed or crashes, the transcripts stay until you delete them.
 
 ### With a sandboxed Claude Code
 
-It works: it's a separate program and never uses your Claude Code session, sandbox settings or MCP configuration. It needs the program itself to reach Anthropic, and your browser to reach 127.0.0.1. If a policy on your computer blocks programs' outbound network, it can't work. Option 3's math tools need no outbound network once installed; option 5 might also work.
+It works: it's a separate program and never uses your Claude Code session, sandbox settings or MCP configuration. It needs the program itself to reach Anthropic, and your browser to reach 127.0.0.1. If a policy on your computer blocks programs' outbound network, it can't work. Option 3's math tools need no outbound network once installed.
 
 ### Not yet
 
