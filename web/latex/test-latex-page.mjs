@@ -2701,7 +2701,11 @@ try {
     //  within a tenth, centred in it)
     const lines = [...span.querySelectorAll(".tikz-n > span")];
     for (const l of lines) {
-      const lr = l.getBoundingClientRect(), k = l.querySelector(".katex-html")?.getBoundingClientRect();
+      // (KaTeX's text box: its base boxes, .katex-html's children, inline-blocks as tall as their struts; .katex-html
+      //  itself is an inline span, its rectangle its font's content area, taller than the text)
+      const bs = [...l.querySelectorAll(".katex-html > *")].map((b) => b.getBoundingClientRect());
+      const lr = l.getBoundingClientRect(), k = bs.length ? { top: Math.min(...bs.map((b) => b.top)), left: Math.min(...bs.map((b) => b.left)), right: Math.max(...bs.map((b) => b.right)) } : null;
+      if (k) k.width = k.right - k.left;
       if (!k || Math.abs(k.top - lr.top) > 1 || Math.abs(k.width - lr.width) > 0.1 * lr.width || Math.abs((k.left + k.right) / 2 - (lr.left + lr.right) / 2) > 1) out.push(["node text", k && [k.top, k.width, k.left], [lr.top, lr.width, lr.left]]);
     }
     return { n: paths.length, refs: refs.length, lines: lines.length, out };
