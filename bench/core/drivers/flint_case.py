@@ -105,6 +105,47 @@ def dense_poly(size, kind, v):
     return out + [1]
 
 
+SMITH_P = 1000003
+
+
+def smith_hard_rows(size, v):
+    """The hard Smith family: U diag(1, p, ..., p) V with p = 1000003, U and
+    V unimodular (unit lower times unit upper triangular, off-diagonal
+    entries in [-2^16, 2^16] from a 64-bit LCG), so its Smith form is known
+    and its divisors are large.  The same in every driver."""
+    state = [987654321 + 7919 * v]
+
+    def rnd():
+        state[0] = (6364136223846793005 * state[0] + 1442695040888963407) % (1 << 64)
+        return (state[0] >> 33) % 131073 - 65536
+
+    def unimodular():
+        lo = [
+            [1 if i == j else (rnd() if j < i else 0) for j in range(size)]
+            for i in range(size)
+        ]
+        up = [[1 if i == j else 0 for j in range(size)] for i in range(size)]
+        for i in range(size):
+            for j in range(i + 1, size):
+                up[i][j] = rnd()
+        return [
+            [
+                sum(lo[i][k] * up[k][j] for k in range(min(i, j) + 1))
+                for j in range(size)
+            ]
+            for i in range(size)
+        ]
+
+    u, w = unimodular(), unimodular()
+    ud = [
+        [u[i][j] * (1 if j == 0 else SMITH_P) for j in range(size)] for i in range(size)
+    ]
+    return [
+        [sum(ud[i][k] * w[k][j] for k in range(size)) for j in range(size)]
+        for i in range(size)
+    ]
+
+
 def fppoly(size, salt):
     return [((i * i * salt + 3 * i + 1) % P) for i in range(size)]
 
@@ -207,7 +248,8 @@ def prepare(v):
             if case_id.startswith("mat_fp_")
             else "q"
         )
-        rows = det_rows(kind, n, v)
+        hard = case_id.endswith("_hard")
+        rows = smith_hard_rows(n, v) if hard else det_rows(kind, n, v)
         A = (
             flint.fmpz_mat(rows)
             if kind == "z"
@@ -215,7 +257,7 @@ def prepare(v):
             if kind == "fp"
             else flint.fmpq_mat(rows)
         )
-        op = case_id.rsplit("_", 1)[1]
+        op = case_id.removesuffix("_hard").rsplit("_", 1)[1]
         entries = [int(x) if kind == "fp" else x for x in flatten(A)]
         operands(entries)
         if op == "det":
@@ -251,7 +293,11 @@ def signature(answer):
         cs = list(answer)
         return "%d:%d" % (len(cs) - 1, seq_hash(cs))
     if case_id.startswith("mat_"):
-        op = "rank" if "_rank_" in case_id else case_id.rsplit("_", 1)[1]
+        op = (
+            "rank"
+            if "_rank_" in case_id
+            else case_id.removesuffix("_hard").rsplit("_", 1)[1]
+        )
         if op in ("det", "rank"):
             return str(answer)
         if op == "charpoly":

@@ -93,6 +93,47 @@ def dense_poly(size: int, kind: str, v: int) -> list[int]:
     return out + [1]
 
 
+SMITH_P = 1000003
+
+
+def smith_hard_rows(size, v):
+    """The hard Smith family: U diag(1, p, ..., p) V with p = 1000003, U and
+    V unimodular (unit lower times unit upper triangular, off-diagonal
+    entries in [-2^16, 2^16] from a 64-bit LCG), so its Smith form is known
+    and its divisors are large.  The same in every driver."""
+    state = [987654321 + 7919 * v]
+
+    def rnd():
+        state[0] = (6364136223846793005 * state[0] + 1442695040888963407) % (1 << 64)
+        return (state[0] >> 33) % 131073 - 65536
+
+    def unimodular():
+        lo = [
+            [1 if i == j else (rnd() if j < i else 0) for j in range(size)]
+            for i in range(size)
+        ]
+        up = [[1 if i == j else 0 for j in range(size)] for i in range(size)]
+        for i in range(size):
+            for j in range(i + 1, size):
+                up[i][j] = rnd()
+        return [
+            [
+                sum(lo[i][k] * up[k][j] for k in range(min(i, j) + 1))
+                for j in range(size)
+            ]
+            for i in range(size)
+        ]
+
+    u, w = unimodular(), unimodular()
+    ud = [
+        [u[i][j] * (1 if j == 0 else SMITH_P) for j in range(size)] for i in range(size)
+    ]
+    return [
+        [sum(ud[i][k] * w[k][j] for k in range(size)) for j in range(size)]
+        for i in range(size)
+    ]
+
+
 def fppoly(size: int, salt: int) -> list[int]:
     return trim([(i * i * salt + 3 * i + 1) % P for i in range(size)])
 
@@ -294,6 +335,8 @@ def operands(row: str, n: int, v: int) -> list[int]:
         return dense_poly(n, "fp", v)
     if row == "poly_z_factor_dense":
         return dense_poly(n, "z", v)
+    if row.endswith("_hard"):
+        return [x for r in smith_hard_rows(n, v) for x in r]
     if row.startswith("mat_") and "_rank_" in row:
         return rank_entries(row, n, v)
     if row.startswith("mat_"):

@@ -669,6 +669,21 @@
    "variants": 8,
    "input_hash": "201144882"
   },
+  "mat_z_elementary_divisors_hard:l": {
+   "n": 100,
+   "variants": 4,
+   "input_hash": "870992852"
+  },
+  "mat_z_elementary_divisors_hard:m": {
+   "n": 60,
+   "variants": 4,
+   "input_hash": "416957991"
+  },
+  "mat_z_elementary_divisors_hard:s": {
+   "n": 30,
+   "variants": 4,
+   "input_hash": "470661165"
+  },
   "mat_z_rank:c0": {
    "n": 114,
    "variants": 8,
@@ -718,6 +733,21 @@
    "input_hash": "223634763",
    "n": 848,
    "variants": 8
+  },
+  "mat_z_smith_hard:l": {
+   "n": 100,
+   "variants": 4,
+   "input_hash": "870992852"
+  },
+  "mat_z_smith_hard:m": {
+   "n": 60,
+   "variants": 4,
+   "input_hash": "416957991"
+  },
+  "mat_z_smith_hard:s": {
+   "n": 30,
+   "variants": 4,
+   "input_hash": "470661165"
   },
   "poly_fp_factor_dense:l": {
    "n": 500,

@@ -38,6 +38,29 @@ function PowMod(a, e, m)
 end function;
 
 // Variant v: entry (i, j) from the node i + 1 + v (1-based i, j).
+// The hard Smith family (drivers/sagebrush_case.py's smith_hard_rows):
+// U diag(1, p, ..., p) V, p = 1000003, U and V unit lower times unit upper
+// triangular with LCG entries in [-2^16, 2^16], drawn in the same order.
+function SmithHard(k, v)
+    s := 987654321 + 7919*v;
+    Unimodular := function(k, s)
+        lo := IdentityMatrix(Integers(), k); up := IdentityMatrix(Integers(), k);
+        for i in [2..k] do for j in [1..i-1] do
+            s := (6364136223846793005*s + 1442695040888963407) mod 2^64;
+            lo[i,j] := (s div 2^33) mod 131073 - 65536;
+        end for; end for;
+        for i in [1..k-1] do for j in [i+1..k] do
+            s := (6364136223846793005*s + 1442695040888963407) mod 2^64;
+            up[i,j] := (s div 2^33) mod 131073 - 65536;
+        end for; end for;
+        return lo*up, s;
+    end function;
+    U, s := Unimodular(k, s);
+    W, s := Unimodular(k, s);
+    D := DiagonalMatrix(Integers(), [1] cat [1000003 : i in [2..k]]);
+    return U*D*W;
+end function;
+
 function ZMat(k, v)
     return Matrix(Integers(), k, k, [ (PowMod(i+1+v,j+2,1000003)-500001) : i,j in [1..k] ]);
 end function;
@@ -171,8 +194,9 @@ function Build(case_id, n, v)
         if case_id eq "poly_fp_factor" then pf:=x^n-1; end if;
         if case_id eq "poly_fp_factor_dense" then pf:=DensePoly(n,1,v,R); end if;
         ops := case_id in {"poly_fp_factor","poly_fp_factor_dense"} select Coefficients(pf) else Coefficients(pa) cat Coefficients(pb);
-    elif case_id in {"mat_z_det","mat_z_rank","mat_z_hnf","mat_z_smith","mat_z_charpoly","mat_z_elementary_divisors"} then
-        A:=ZMat(n,v); ops := Eltseq(A);
+    elif case_id in {"mat_z_det","mat_z_rank","mat_z_hnf","mat_z_smith","mat_z_charpoly","mat_z_elementary_divisors","mat_z_smith_hard","mat_z_elementary_divisors_hard"} then
+        A := case_id in {"mat_z_smith_hard","mat_z_elementary_divisors_hard"} select SmithHard(n,v) else ZMat(n,v);
+        ops := Eltseq(A);
     elif case_id in {"mat_fp_det","mat_fp_rank","mat_fp_solve","mat_fp_charpoly"} then
         A:=FpMat(n,v); ops := Eltseq(A);
         if case_id eq "mat_fp_solve" then w:=Vector(BaseRing(A),[i:i in [1..n]]); ops := ops cat Eltseq(w); end if;
@@ -209,8 +233,8 @@ function DoOp(case_id, S)
     elif case_id in {"mat_z_det","mat_fp_det","mat_q_det"} then return Determinant(A);
     elif case_id in {"mat_z_rank","mat_fp_rank","mat_q_rank","mat_z_rank_wide","mat_z_rank_def","mat_z_rank_def_p","mat_q_rank_wide","mat_q_rank_def","mat_q_rank_def_p"} then return Rank(A);
     elif case_id eq "mat_z_hnf" then return HermiteForm(A);
-    elif case_id eq "mat_z_smith" then return SmithForm(A);
-    elif case_id eq "mat_z_elementary_divisors" then return ElementaryDivisors(A);
+    elif case_id in {"mat_z_smith","mat_z_smith_hard"} then return SmithForm(A);
+    elif case_id in {"mat_z_elementary_divisors","mat_z_elementary_divisors_hard"} then return ElementaryDivisors(A);
     elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_q_charpoly"} then return CharacteristicPolynomial(A);
     elif case_id in {"mat_fp_solve","mat_q_solve"} then return Solution(Transpose(A),v);
     elif case_id in {"groebner_cyclic","groebner_katsura"} then return GroebnerBasis(I);
@@ -236,9 +260,9 @@ function Sig(case_id, n, answer)
         return Sprint(answer);
     elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_q_charpoly"} then
         return IntegerToString(Degree(answer)) cat ":" cat IntegerToString(SeqHash(Coefficients(answer)));
-    elif case_id eq "mat_z_smith" then
+    elif case_id in {"mat_z_smith","mat_z_smith_hard"} then
         return IntegerToString(n) cat ":" cat IntegerToString(SeqHash([Abs(answer[i,i]):i in [1..n]]));
-    elif case_id eq "mat_z_elementary_divisors" then
+    elif case_id in {"mat_z_elementary_divisors","mat_z_elementary_divisors_hard"} then
         // (the nonzero divisors only: padded with zeros to n, as the others)
         d := [Integers()| Abs(z) : z in answer] cat [Integers()| 0 : i in [1..n-#answer]];
         return IntegerToString(n) cat ":" cat IntegerToString(SeqHash(d));

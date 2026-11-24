@@ -904,6 +904,66 @@
    "calibration_note": "provisional calibration sizes (doubling n; no level-A fit yet): re-fit after the first run"
   },
   {
+   "id": "mat_z_smith_hard",
+   "item": "la2",
+   "category": "linear algebra over Z",
+   "label": "Smith form with transforms, large known divisors",
+   "sizes": {
+    "s": {
+     "n": 30,
+     "timeout": 300
+    },
+    "m": {
+     "n": 60,
+     "timeout": 600
+    },
+    "l": {
+     "n": 100,
+     "timeout": 1800
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": false
+   },
+   "compares": "with transforms",
+   "variants": 4,
+   "input_note": "U diag(1, p, ..., p) V, p = 1000003, U and V random unimodular: the Smith form is known and its divisors are large (the big-integer route)"
+  },
+  {
+   "id": "mat_z_elementary_divisors_hard",
+   "item": "la2",
+   "category": "linear algebra over Z",
+   "label": "elementary divisors, large known divisors",
+   "sizes": {
+    "s": {
+     "n": 30,
+     "timeout": 300
+    },
+    "m": {
+     "n": 60,
+     "timeout": 600
+    },
+    "l": {
+     "n": 100,
+     "timeout": 1800
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": "python"
+   },
+   "compares": "diagonal",
+   "variants": 4,
+   "input_note": "U diag(1, p, ..., p) V, p = 1000003, U and V random unimodular: the Smith form is known and its divisors are large (the big-integer route)"
+  },
+  {
    "id": "mat_z_charpoly",
    "item": "la2",
    "category": "linear algebra over Z",

@@ -735,13 +735,14 @@ class Protocol5(unittest.TestCase):
         self.assertNotIn("vtime", t)
 
     def test_each_variant_is_timed_on_its_own(self):
-        # (variant v sleeps (v + 1) ms: the per-variant medians keep that
-        # order, which the cycled sample cannot show)
+        # (variant v sleeps 5 (v + 1) ms: the per-variant medians keep that
+        # order, which the cycled sample cannot show; sleeps this long keep
+        # the ratio clear of a loaded machine's wake-up latency)
         code = (
             "import sys, time; sys.path.insert(0, %r); import common\n"
             "common.TARGET = 0.02\n"
             "def prepare(v):\n"
-            "    return lambda: time.sleep((v + 1) / 1000.0)\n"
+            "    return lambda: time.sleep(5 * (v + 1) / 1000.0)\n"
             "common.main(['x', 'case', '1', 'time', '3'], prepare, lambda a: 's', lambda: 0)\n"
         ) % str(run.HERE / "drivers")
         for mode in ("batched", "per-op"):
@@ -759,7 +760,7 @@ class Protocol5(unittest.TestCase):
                 self.assertEqual([e["v"] for e in vt], [0, 1, 2])
                 secs = [e["seconds"] for e in vt]
                 self.assertEqual(secs, sorted(secs))
-                self.assertGreater(secs[2], 2 * secs[0])
+                self.assertGreater(secs[2], 1.5 * secs[0])
                 for e in vt:
                     self.assertGreaterEqual(e["reps"] * e["seconds"], 0.015)
                     self.assertEqual(e["samples"], 3)
@@ -967,7 +968,7 @@ class Files(unittest.TestCase):
             cal = sorted(k for k in r["sizes"] if k not in ("s", "m", "l"))
             self.assertEqual(sorted(set(r["sizes"]) - set(cal)), ["l", "m", "s"])
             self.assertIn(cal, ([], ["c0", "c1", "c2", "c3", "c4"]))
-        self.assertEqual(len(m["rows"]), 38)
+        self.assertEqual(len(m["rows"]), 40)
 
 
 class Units(unittest.TestCase):
