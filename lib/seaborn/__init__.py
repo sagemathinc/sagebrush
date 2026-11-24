@@ -1382,7 +1382,8 @@ def load_dataset(name, cache=True, data_home=None, **kws):
     it: from seaborn's data repository online, <name>.csv.  Sagebrush's Python reaches the network only
     through the folder's data snapshot (urllib.request), so a dataset that isn't in it raises URLError saying
     the download couldn't be made.  seaborn also makes some columns ordered categoricals (tips' day, for
-    one); here they stay strings, so plots order those levels as they first appear."""
+    one).  Here the columns stay strings; when the returned frame is plotted, Sagebrush applies seaborn's
+    ordered levels for tips, titanic, diamonds and exercise."""
     if _is_frame(name):
         raise TypeError("This function accepts only strings (the name of an example dataset). You passed a pandas "
                         "DataFrame. If you have your own dataset, it is not necessary to use this function before "
