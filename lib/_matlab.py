@@ -4490,8 +4490,19 @@ def _cls_bytes(cls):
     return {"double": 8, "single": 4, "logical": 1}.get(cls) or (np.dtype(_INTS[cls][0]).itemsize if cls in _INTS else 8)
 
 
-def _filled(dims, value, cls):
+def _filled(dims, value, cls, like=None):
+    """an array of dims filled with value, of class cls, made complex as the prototype like is (zeros(...,
+    'like', 1i)): made in its final type at once, inside _made, so the admission counts the complex result and nothing
+    is converted after it"""
     cls = cls or "double"
+    cplx = cls in ("double", "single") and like is not None and _isnumlike(like) and _arr(like).dtype.kind == "c"
+    if cplx:
+        dt = np.complex64 if cls == "single" else np.complex128
+        with _made(dims, 2 * _cls_bytes(cls)):
+            a = np.full(_stored(dims), value, dtype=dt)
+            # (complex, even with no imaginary part, as a prototype's complexity is kept: not _box, which makes such
+            # results real as arithmetic does)
+            return complex(a.reshape(-1)[0]) if a.size == 1 and dt is np.complex128 else _canon(a)
     with _made(dims, _cls_bytes(cls)):
         if cls == "double":
             return _box(np.full(_stored(dims), value, dtype=np.float64))
@@ -4530,13 +4541,13 @@ def _as_like(r, p):
 @_bs("zeros")
 def zeros_(*args):
     d, cls = _dimsarg(args, "zeros")
-    return _as_like(_filled(d, 0, cls), _like_proto(args))
+    return _filled(d, 0, cls, _like_proto(args))
 
 
 @_bs("ones")
 def ones_(*args):
     d, cls = _dimsarg(args, "ones")
-    return _as_like(_filled(d, 1, cls), _like_proto(args))
+    return _filled(d, 1, cls, _like_proto(args))
 
 
 @_bs("true")
@@ -4580,7 +4591,7 @@ def eps_(*args):
         e = _math.frexp(x)[1]
         return _math.ldexp(1.0, e - 53)
     d, cls = _dimsarg(args, "eps")
-    return _as_like(_filled(d, 2.220446049250313e-16 if cls != "single" else 1.1920929e-07, cls), _like_proto(args))
+    return _filled(d, 2.220446049250313e-16 if cls != "single" else 1.1920929e-07, cls, _like_proto(args))
 
 
 @_bs("i", "j")
@@ -4594,7 +4605,7 @@ def _float_limit(name, a, dbl, sgl):
     d, cls = _dimsarg(a, name)
     if cls not in (None, "double", "single"):
         raise _err("%s: the class must be 'double' or 'single'." % name)
-    return _as_like(_filled(d, sgl if cls == "single" else dbl, cls), _like_proto(a))
+    return _filled(d, sgl if cls == "single" else dbl, cls, _like_proto(a))
 
 
 @_bs("realmax")
@@ -4655,8 +4666,10 @@ def eye_(*args):
     d, cls = _dimsarg(args, "eye")
     if len(d) > 2:
         raise _err("N-dimensional arrays are not supported.")
-    # (the identity in double, its transpose, and the class's copy)
-    with _made(d, _cls_bytes(cls), native=8, copies=3):
+    # (the identity in double, its transpose, and the class's copy; and a complex prototype's complex copy, 16 bytes)
+    p = _like_proto(args)
+    cplx = p is not None and _isnumlike(p) and _arr(p).dtype.kind == "c"
+    with _made(d, _cls_bytes(cls) * (2 if cplx else 1), native=8, copies=5 if cplx else 3):
         m = np.eye(d[0], d[1])
         return _as_like(_finish(_contig(m.T), cls or "double"), _like_proto(args))
 
@@ -9169,9 +9182,11 @@ def deblank_(x):
 @_bs("blanks")
 def blanks_(n):
     n = _int_arg(n)
-    # (the text, and its character codes)
-    with _made((1, n), 2, copies=2):
-        return Char(" " * n)
+    # (its character codes, made at once as a double array: no text or list of codes first)
+    if n <= 0:
+        return Char("")
+    with _made((1, n), 2, native=8):
+        return Char(np.full((n, 1), 32.0))
 
 
 @_bs("newline")

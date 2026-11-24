@@ -76,6 +76,21 @@ assert attempt(lambda: M.cell_(float(2 ** 20), 1.0), "_empty_double") == "MATLAB
 assert attempt(lambda: M.eye_(10.0), "np.eye") == "reached"
 ok("eye, rand, blanks and cell: refused before anything is made; small ones admitted")
 
+# -- the charge is the real result's: a complex 'like' prototype's 16 bytes per element (the real 8 would admit
+# 2^23 elements, 64 MB, under the 100 MB allowance), blanks' 8-byte character codes (2 bytes would admit 2^24)
+assert attempt(lambda: M.zeros_(float(2 ** 23), 1.0, M.Char("like"), 1j), "np.full") == "MATLAB:nomem"
+assert attempt(lambda: M.ones_(float(2 ** 23), 1.0, M.Char("like"), 1j), "np.full") == "MATLAB:nomem"
+assert attempt(lambda: M.zeros_(float(2 ** 22), 1.0, M.Char("like"), 1j), "np.full") == "reached"  # 64 MB
+assert attempt(lambda: M.blanks_(float(2 ** 24)), "np.full") == "MATLAB:nomem"
+assert attempt(lambda: M.blanks_(float(2 ** 23)), "np.full") == "reached"  # 64 MB
+v = M.zeros_(2.0, 2.0, M.Char("like"), 1j)
+assert M._arr(v).dtype == np.complex128 and M.class_(v) == "double" and not M.isreal_(v)
+assert M._arr(M.zeros_(2.0, 2.0, M.Char("like"), M._finish(np.array([[1j]]), "single"))).dtype == np.complex64
+b3 = M.blanks_(3.0)
+assert M.class_(b3) == "char" and M._arr(b3).reshape(-1).tolist() == [32.0, 32.0, 32.0] and M._dims(b3) == (1, 3)
+assert M._dims(M.blanks_(0.0)) == (0, 0)
+ok("charges are the results': complex 'like' at 16 bytes per element, blanks' codes at 8; their values as before")
+
 # -- the colon range: refused before its values are computed; a for loop's range is never made
 assert attempt(lambda: M.colon(1.0, float(2 ** 24)), "np.arange") == "MATLAB:nomem"
 assert attempt(lambda: M.colon(1.0, float(2 ** 31)), "np.arange") == "MATLAB:array:SizeLimitExceeded"

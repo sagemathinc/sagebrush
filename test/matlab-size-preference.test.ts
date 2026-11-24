@@ -99,5 +99,5 @@ test("arrays admitted against the host's memory before they are made: constructo
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const lines = r.stdout.trim().split("\n");
   assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
-  assert.equal(lines.length, 7, r.stdout);
+  assert.equal(lines.length, 8, r.stdout);
 });
