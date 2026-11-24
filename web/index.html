@@ -2492,6 +2492,8 @@ function filesPrompt(doc, generation, path, changed, what, ask = null) {
     return say(changed ? "This notebook's permissions changed while it ran. Run the cell again." : `This change to ${shown(name)} is allowed now. Run the cell again to ${done} (the notebook's variables are cleared).`, ["fbok"]);
   }
   if (perms.deniedWrite(doc, path)) { ask?.reply(null); return; } // (Don't allow: silent for the rest of the session)
+  // (the app's grants set aside while its permissions file can't be read: refused, saying why, nothing to allow)
+  if (perms.suspended()) { ask?.reply(null); fbReq = { open: false }; return say(perms.suspended(), ["fbok"]); }
   const req = { open: true, id: ++fbSeq, doc, generation, path, folder, trees: now.join("\n"), rev: revOf(doc), armedAt: performance.now() + FB_ARM, pressed: null, ask: ask ? { ...ask, claimed: false } : null };
   fbReq = req;
   if (folder === "/") return say(`This notebook is trying to ${doing} ${shown(name)} at the top of ${whereIs("/")}. To allow that, use File > Permissions…`, ["fbperms", "fbdeny"]);
@@ -2554,7 +2556,7 @@ function filesShown() {
   const only = current.id && !on ? perms.writeTrees(current.id) : [];
   const fp = document.getElementById("filesperm"); // (the Permissions panel's)
   if (fp) fp.textContent = on ? "Don't allow file changes" : "Allow file changes anywhere";
-  $("#permsfiles").textContent = !current.id ? "" : on ? "Allowed: this notebook's code may change your files." : only.length ? `Allowed only in ${only.join(", ")}: this notebook's code can't change files anywhere else.` : "Not allowed: this notebook's code can't change your files.";
+  $("#permsfiles").textContent = !current.id ? "" : perms.suspended() ? perms.suspended() : on ? "Allowed: this notebook's code may change your files." : only.length ? `Allowed only in ${only.join(", ")}: this notebook's code can't change files anywhere else.` : "Not allowed: this notebook's code can't change your files.";
   $("#permsfor").textContent = current.id ? `For "${docName()}".` : "";
   if (on && !filesBarEl.hidden) filesBar(false);
 }
@@ -3648,7 +3650,15 @@ const texEmbedded = (() => { const q = new URLSearchParams(location.search); ret
 const latexHere = typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && latexHereFor(location.hostname, desktopApp());
 // (the editor's Run sandbox and Share on this page, for latexBoot and the app self-test's mount alike: no Share on the
 //  CLI's page or in the app, which can't publish (the editor's Share says why); no sandbox in the app, RUNNER)
-const texSandbox = () => (RUNNER ? { WorkerKernel, RunnerWorker } : null);
+// (the desktop app has no runner frame: its LaTeX Run's interpreter is the app's engine, as its notebooks' is (#1540),
+// the page's own worker where the engine doesn't start; Run tells it first that it may change no file (run-core.mjs),
+// as it tells the runner's)
+class AppTexWorker {
+  constructor(_runnerUrl, { name = "" } = {}) {
+    return new NativeWorker(TAURI.core, { name, fallback: () => new Worker("sagebrush-worker.js", { type: "module", name }) });
+  }
+}
+const texSandbox = () => (RUNNER ? { WorkerKernel, RunnerWorker } : desktopApp() ? { WorkerKernel, RunnerWorker: AppTexWorker } : null);
 const texShare = LOCAL || TAURI ? null : (doc) => void openTalkShare(doc);
 // (the app has no share server at its own origin, so a share couldn't be checked or made there: File ▸ Share… is
 //  disabled, saying where to share instead, the header's Share follows it, and Share folder… and Your shares… aren't
@@ -3797,6 +3807,21 @@ window.sagebrushAnchorShare = anchorShare;
 // (a document opened from the File menu (Recent, Open…, an example's copy): a notebook here, a board on its page; a
 // .tex in the LaTeX editor where it's on (web/latex/boot.ts), another file in its preview, as openPath has it)
 function openEntry(e, how = "here") {
+  if (TAURI && desktopApp() && how === "here" && (e.kind === "notebook" || e.kind === "board")) return void claimHere(e).then((yes) => yes && openEntryHere(e, how));
+  openEntryHere(e, how);
+}
+// (the desktop app's windows, #1541: a notebook or board is open in one window at a time; opening one another window
+// shows brings that window to the front instead (app/src-tauri/src/windows.rs window_claim).  Whether to open it here:
+// always, but in the app)
+async function claimHere(e) {
+  if (!(TAURI && desktopApp()) || !e?.path) return true;
+  try {
+    if ((await TAURI.core.invoke("window_claim", { doc: e.path })) == null) return true;
+    announce(statusEl.textContent = `${e.path} is open in another window.`);
+    return false;
+  } catch (err) { console.warn("window:", err); return true; }
+}
+function openEntryHere(e, how) {
   if (e.kind === "file") {
     if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && globalThis.__sbTex) { saveNow(); if (globalThis.__sbTex(e, how === "tab")) return; }
     return void wsNow().then((w) => w && openPreview(w, e, { say: (t) => (savedEl.textContent = t), fail: (x) => (savedEl.textContent = String(x?.message ?? x)) }));
@@ -5048,8 +5073,27 @@ const wsReady = (async () => {
     // made in another tab is)
     if (TAURI && desktopApp() && diskMirror) try {
       const d = await desktopModule(), invoke = (c, a) => TAURI.core.invoke(c, a);
-      if (await d.restoreGrants(w, invoke)) { for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); } if (current.id) filesShown(); }
-      grantsKept = d.keepGrants(w, invoke, (f) => perms.onChange(f));
+      // (one queue for this page's reads and writes of grants.json, each merged with what it last saw: grants-file.ts)
+      const grantsFile = d.grantsSync(w, invoke);
+      if (await grantsFile.restore()) { for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); } if (current.id) filesShown(); }
+      grantsKept = d.keepGrants(w, invoke, (f) => perms.onChange(f), undefined, undefined, grantsFile);
+      // (another window of the app wrote grants.json, #1541: merged in, so what it took back is gone here too)
+      const me = window.__TAURI_INTERNALS__?.metadata?.currentWebview?.label;
+      // (one that can't be read: every grant here set aside until it can, tried again every 5 s: grants-file.ts
+      // reconcileGrants)
+      let again = null;
+      const reconcile = async () => {
+        clearTimeout(again);
+        again = null;
+        try {
+          const r = await d.reconcileGrants(grantsFile, perms);
+          if (r.changed) { for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); } if (fbReq?.doc !== undefined) filesBar(false); if (current.id) filesShown(); }
+          // (this page's own changes grants.json hasn't yet: written, over what was just merged)
+          if (r.ahead) grantsKept.changed();
+          if (r.failed) again = setTimeout(reconcile, 5000);
+        } catch (e) { console.warn("grants.json:", e); }
+      };
+      TAURI.event.listen("sb-grants-changed", (ev) => { if (me && ev?.payload?.from !== me) void reconcile(); }).catch((e) => console.warn("grants.json:", e));
       // (in the quit's and the leave's barrier, as the settings' flush is: disk-mirror.ts keepAll)
       window.__sbGrantsFlush = () => grantsKept.flush();
     } catch (e) { console.warn("grants.json:", e); }
@@ -5529,27 +5573,32 @@ function wsShowFiles(on) {
   wsFilesBtn.setAttribute("aria-pressed", String(on));
   try { localStorage.setItem("sagebrush-files-sidebar", on ? "1" : "0"); } catch {}
   if (on && !wsBrowser && ws) {
+    const openHere = (e, how) => {
+      const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
+      if (how === "tab") return void window.open(url, "_blank", "noopener");
+      if (e.kind === "notebook" && !codePageUp) {
+        saveNow();
+        // (on a phone the files cover the page: out of the way of what was
+        // opened; not opened, they stay, saying why: LIMIT-900-2)
+        openId(e.ref).then(() => {
+          wsTrackCurrent();
+          if (matchMedia("(max-width: 640px)").matches) wsShowFiles(false);
+        }, sayNotLeft);
+      }
+      else if (codePageUp) leaveCodePage(url);
+      // (by this page's way out: the LaTeX editor's edit written first, if its page is up; the disk in the app)
+      else { saveNow(); void leaveTo(url); }
+    };
     wsBrowser = mountBrowser(wsSidebar, {
       ws,
       // (Agents…: the agents page once this notebook is saved, as the board is opened; not saved, it stays, saying why.
       // Not in the desktop app, which has no agents page yet (#1542): no Agents… and no Files | Agents switch there)
       ...(desktopApp() ? {} : { agents: () => void toBoard("/agents/", "the agents page") }),
       current: () => (current.kind === "browser" && current.id ? { kind: "notebook", ref: current.id } : undefined),
+      // (in the app, a notebook or board another window shows: that window to the front instead, claimHere)
       open(e, how) {
-        const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
-        if (how === "tab") return void window.open(url, "_blank", "noopener");
-        if (e.kind === "notebook" && !codePageUp) {
-          saveNow();
-          // (on a phone the files cover the page: out of the way of what was
-          // opened; not opened, they stay, saying why: LIMIT-900-2)
-          openId(e.ref).then(() => {
-            wsTrackCurrent();
-            if (matchMedia("(max-width: 640px)").matches) wsShowFiles(false);
-          }, sayNotLeft);
-        }
-        else if (codePageUp) leaveCodePage(url);
-        // (by this page's way out: the LaTeX editor's edit written first, if its page is up; the disk in the app)
-        else { saveNow(); void leaveTo(url); }
+        if (TAURI && desktopApp() && how !== "tab" && (e.kind === "notebook" || e.kind === "board")) return void claimHere(e).then((yes) => yes && openHere(e, how));
+        openHere(e, how);
       },
       upload: (files, folder) => uploadHere(files, folder),
       openAs: (e, as) => openAs(e, as),
@@ -5728,6 +5777,19 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // (?nb=ID: that notebook of this browser's, from the file browser in another tab or page)
   const nbParam = new URLSearchParams(location.search).get("nb");
   if (nbParam && /^[\w-]{1,64}$/.test(nbParam)) { last = nbParam; history.replaceState(null, "", location.pathname + location.hash); }
+  // (?wsopen=<workspace path>, the desktop app only: a document in a window the app opened for it (#1541,
+  // windows.rs window_open), named by its path, since each window's workspace, and so its ids, are its own; a
+  // notebook opened here, anything else once the page is up; one another window shows brings that one forward)
+  const wsOpen = TAURI && desktopApp() ? new URLSearchParams(location.search).get("wsopen") : null;
+  if (wsOpen) {
+    history.replaceState(null, "", location.pathname + location.hash);
+    try {
+      const w = await wsReady, e = w && wsOpen.startsWith("/") ? await w.stat(wsOpen) : null;
+      if (!e || e.kind === "folder") statusEl.textContent = `${wsOpen} isn't in your files.`;
+      else if (e.kind === "notebook") { if (await claimHere(e)) last = e.ref; }
+      else setTimeout(() => openEntry(e), 0);
+    } catch (err) { console.warn("wsopen:", err); }
+  }
   // ?open=URL of a notebook (.ipynb, .py, ...) and file=URL (repeatable) of
   // data it reads: fetched into the browser's files, then opened (nothing runs until the person runs it: Run all)
   const qs = new URLSearchParams(location.search), remote = qs.get("open");
@@ -5914,8 +5976,10 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     // (a quit, or the window closed: the notebook's save, the settings and every change on disk first)
     if (desktopApp()) desktopModule().then((d) => d.drainOnQuit({ mirror: () => diskMirror, invoke: (c, a) => TAURI.core.invoke(c, a), listen: (ev, f) => TAURI.event.listen(ev, f), freeze: () => nb.setReadOnly(true), flushEditor: () => nb.saved() })).catch((e) => console.warn("quit:", e));
     const persist = st && desktopApp() && await TAURI.core.invoke("selftest_persist");
-    if (persist) desktopModule().then((d) => d.persistProbe(persist, { ws: () => wsReady.then(() => ws), mirror: () => diskMirror, invoke: (c, a) => TAURI.core.invoke(c, a), grant: (doc, folder) => perms.grant(doc, "write", folder).ok, trees: (doc) => perms.writeTrees(doc), grantsSaved: () => grantsKept?.flush() }));
-    else if (st) selftest(st);
+    // (a window after the first runs a self-test only as the two-window probe's second window, persist-probe.ts)
+    const later = (window.__TAURI_INTERNALS__?.metadata?.currentWebview?.label ?? "main") !== "main";
+    if (persist && (!later || persist.startsWith("windows:"))) desktopModule().then((d) => d.persistProbe(persist, { ws: () => wsReady.then(() => ws), mirror: () => diskMirror, invoke: (c, a) => TAURI.core.invoke(c, a), grant: (doc, folder) => perms.grant(doc, "write", folder).ok, trees: (doc) => perms.writeTrees(doc), grantsSaved: () => grantsKept?.flush() }));
+    else if (st && !later) selftest(st);
   }
   // (however the start ends, an error included, Share stops waiting for it)
 })().finally(() => booted());

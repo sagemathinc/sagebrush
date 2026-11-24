@@ -215,6 +215,18 @@ try {
   check(!!unlisted && await until(`${W}.list("/Trash").then((l) => l.some((e) => e.kind === "notebook" && e.ref === ${JSON.stringify(lost)}))`), "Delete of a notebook missing from the index: listed again, then to Trash: " + JSON.stringify(unlisted));
   check(await ev(`new Promise((ok, no) => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => { const db = r.result, g = db.transaction("notebooks").objectStore("notebooks").get(${JSON.stringify(lost)}); g.onsuccess = () => { db.close(); ok(!!g.result); }; g.onerror = () => no(g.error); }; })`), "…its contents kept");
   check(dialogs.slice(asked).every((d) => !/from this browser/.test(d.message)) && dialogs.slice(asked).some((d) => /to Trash/.test(d.message)), "…asked to move it to Trash, never to delete it for good: " + JSON.stringify(dialogs.slice(asked).map((d) => d.message)));
+  // a notice said while the board's first load is still on its way (File ▸ Examples… on a site without them) stays,
+  // until the next edit: the load, landing after it, doesn't put its own caption back over it (the page's test hold
+  // on its first load, loopback only; then the first load awaited, not polled for)
+  const hold = await send("Page.addScriptToEvaluateOnNewDocument", { source: "window.__sbTestHoldLoad = new Promise((r) => (window.__sbReleaseLoad = r));" });
+  await go(base + "board/?new=python");
+  const held = await until(`window.__sbTestLoadHeld === true && !!document.querySelector("[data-sbb=filemenu] [data-item=examples]:not([disabled])")`, 60000);
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: hold.identifier });
+  check(held, "(the board's first load held)");
+  await ev(`(() => { document.querySelector("[data-sbb=filemenu] [data-item=examples]").click(); return 1; })()`);
+  const saidHeld = await until(`/The examples aren't available here\\./.test(document.querySelector("[data-sbb=say]")?.textContent ?? "")`);
+  await ev("(window.__sbReleaseLoad(), 1)");
+  check(saidHeld && (await ev(`window.sagebrush.board.opened().then((shown) => shown && /The examples aren't available here\\./.test(document.querySelector("[data-sbb=say]")?.textContent ?? ""))`)), "the board page: a notice said before its first load landed is still there after it (File ▸ Examples… without the gallery)");
   // the board page: the same menu; New ▸ Notebook from there
   await go(base + "board/?new=python");
   // (the board's document loaded, not only the board: snapshot() is there at once, its doc once the store's load is
