@@ -1,7 +1,7 @@
 """Write py/sklearn/_sk_names.py: scikit-learn's public modules and the public names of each, from the oracle, so a
 name outside Sagebrush's sklearn subset raises NotImplementedError rather than AttributeError.
 
-    /scratch/numeric-review/sk/venv/bin/python -I optional/sklearn/tests/gen-names.py > optional/sklearn/py/sklearn/_sk_names.py
+    $VENV/bin/python -I optional/sklearn/tests/gen-names.py > optional/sklearn/py/sklearn/_sk_names.py
 """
 import importlib
 import sklearn
