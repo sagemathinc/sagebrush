@@ -1,3 +1,5 @@
+import zlib
+
 import numpy as np
 
 # sum and mean of non-C-contiguous arrays add in NumPy's own order (its iterator: axes by
@@ -12,7 +14,12 @@ def data(n, seed):
 
 
 def show(*xs):
-    print(" ".join(np.asarray(x).astype(np.float64).ravel()[:6].tobytes().hex()[:96] + "/" + str(np.asarray(x).shape) for x in xs))
+    # each result: its first six values' bytes (readable in a diff), the CRC-32 of all its values' bytes, and its shape
+    out = []
+    for x in xs:
+        v = np.ascontiguousarray(np.asarray(x).astype(np.float64)).ravel()
+        out.append(v[:6].tobytes().hex() + "/" + format(zlib.crc32(v.tobytes()), "08x") + "/" + str(np.asarray(x).shape))
+    print(" ".join(out))
 
 
 # the issue's repro: a transposed view, along each axis and in full
