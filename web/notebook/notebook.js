@@ -2428,6 +2428,8 @@ export function createNotebook(root, opts = {}) {
   }
   // Show a document, replacing what is there.
   function load(doc) {
+    // (another document, or this one again: the images held for the last one let go, read again as shown)
+    imageUrls?.clear();
     loading = true;
     shown = { synced: null, remoteSeen: 0 }; // (another document: its own)
     leftChanged();

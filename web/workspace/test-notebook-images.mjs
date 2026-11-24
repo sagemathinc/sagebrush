@@ -106,6 +106,25 @@ try {
   await P.until(`[...document.querySelectorAll("#cells .mdout img")].filter((i) => i.getAttribute("src").startsWith("blob:")).length === 2`, 10000).catch(() => {});
   ok((await P.ev(`[...document.querySelectorAll("#cells .mdout img")].filter((i) => i.getAttribute("src").startsWith("blob:")).length`)) === 2, "N5: the imported notebook shows its two raster images from files");
 
+  // ---- N7: an image over the page's pixel budget (9000 px wide): saved and exported, but not drawn
+  const big = `(() => { const u = new Uint8Array(64).fill(7); u.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0x23, 0x28, 0, 0, 0, 10]); return u; })()`;
+  const at7 = await P.ev(`(() => { const c = ${NB}.addCell("", null, false, "markdown"); return ${NB}.cells().indexOf(c); })()`);
+  await give(at7, `[[${big}, "big.png", "image/png"]]`);
+  await P.until(`/attachment:/.test(${NB}.cells()[${at7}].ta.value)`, 10000).catch(() => {});
+  await P.ev(`(${NB}.run(${NB}.cells()[${at7}]), true)`).catch(() => {});
+  await sleep(1000);
+  const shown7 = await P.ev(`(() => { const c = ${NB}.cells()[${at7}]; return { img: !!c.md.querySelector("img"), name: /attachment:([^)]+)\\)/.exec(c.ta.value)?.[1] }; })()`);
+  const ex7 = JSON.parse(await P.ev(`${T}.exportIpynb()`));
+  const embedded7 = ex7.cells.some((c) => c.attachments?.[shown7.name]?.["image/png"]);
+  ok(shown7.name && !shown7.img && embedded7, "N7: an image over the pixel budget (9000 px wide): not drawn, but saved and exported", { shown7, embedded7 });
+
+  // ---- N8: an export after the file changed in the workspace embeds what the workspace has now
+  const p8 = await P.ev(`(() => { const c = ${NB}.cells()[${at7}]; return Object.values(c.attachments)[0]["sagebrush/file"]; })()`);
+  await P.ev(`(async () => { const u = new Uint8Array(64).fill(5); u.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]); await ${W}.write(${J(p8)}, u); return true; })()`);
+  const ex8 = JSON.parse(await P.ev(`${T}.exportIpynb()`));
+  const b8 = ex8.cells.map((c) => c.attachments?.[shown7.name]?.["image/png"]).find(Boolean);
+  ok(b8 && Buffer.from(b8, "base64")[40] === 5, "N8: the file changed in the workspace: Download embeds its new bytes, not the ones held before");
+
   // ---- N6: an ill-formed reference: missing, never read
   await P.ev(`(() => { window.__reads = []; const w = ${W}; const r = w.read.bind(w); w.read = (p, ...a) => { window.__reads.push(p); return r(p, ...a); }; return true; })()`);
   await P.ev(`(() => { const c = ${NB}.addCell("![x](attachment:x.png)", null, false, "markdown"); c.attachments = { "x.png": { "sagebrush/file": "/private/notes.png" } }; ${NB}.run(c); return true; })()`);

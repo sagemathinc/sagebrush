@@ -105,7 +105,34 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   ok(J(referencedPaths(doc)) === J(["/Attachments/nb-x/a.png", "/Attachments/nb-x/b.png", "/Attachments/nb-x/c.png"]), "the paths a notebook refers to");
   const e = embedAttachmentsWith(doc, (p) => U.bytes(p));
   ok(e.missing.join() === "c.png" && Object.keys(e.doc.cells[0].attachments).join() === "a.png,b.png", "export from held bytes: both images embedded (the one not drawn too); the non-image left out and listed", e.missing);
+  // (ready() reads again: a changed file's new bytes, a deleted one gone, a restored one back)
+  const other = new Uint8Array(real); other[40] = 9;
+  files.set("/Attachments/nb-x/a.png", other);
+  files.delete("/Attachments/nb-x/b.png");
+  files.set("/Attachments/nb-x/none.png", real);
+  const before = changes;
+  await U.ready(["/Attachments/nb-x/a.png", "/Attachments/nb-x/b.png", "/Attachments/nb-x/none.png"]);
+  ok(U.bytes("/Attachments/nb-x/a.png")?.[40] === 9 && U.bytes("/Attachments/nb-x/b.png") === null && U.bytes("/Attachments/nb-x/none.png")?.length === 64 && changes > before, "ready() reads again: a changed file's new bytes, a deleted one gone, a restored one found; the page told to draw again");
+  U.clear();
+  ok(U.bytes("/Attachments/nb-x/a.png") === null, "clear() lets every image go");
   U.dispose();
+}
+// ---- an attachment named "__proto__" survives import and export
+{
+  const S = store();
+  const doc = JSON.parse('{"cells":[{"type":"markdown","code":"![p](attachment:__proto__)","attachments":{"__proto__":{"image/png":"' + toBase64(bytes(PNG)) + '"}}}]}');
+  const x = await extractAttachments(doc, (u) => saveImage(S.create, "/Attachments/nb-p", u));
+  const xa = x.doc.cells[0].attachments;
+  ok(x.extracted === 1 && Object.hasOwn(xa, "__proto__") && filePathOf(xa["__proto__"]), "import: an attachment named __proto__ is extracted like any other");
+  const e = await embedAttachments(x.doc, S.read);
+  ok(JSON.stringify(e.doc.cells[0].attachments) === JSON.stringify(doc.cells[0].attachments), "export: and embedded back, the same", e.doc.cells[0].attachments);
+}
+// ---- the board's content-addressed names: "i" + 64 hex
+{
+  const T = store();
+  const name = "i" + "ab".repeat(32);
+  const r = await saveImage(T.create, "/Attachments/board-1", bytes(PNG), { name, read: T.read });
+  ok(r.path === `/Attachments/board-1/${name}.png` && filePathOf({ [FILE_KEY]: r.path }) === r.path, "a 65-character content name (i + SHA-256 hex) is saved, and its path is a valid reference");
 }
 
 console.log(failures ? `${failures} FAILED` : "test-image-store: all passed");

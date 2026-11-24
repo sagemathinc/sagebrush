@@ -39,6 +39,8 @@ export function imageType(u: Uint8Array): ImageType | null {
 export const isRaster = (u: Uint8Array): boolean => imageType(u) !== null;
 
 const PLAIN = /^[A-Za-z0-9_-]{1,64}$/;
+// (a content-addressed file name: the board's "i" + 64 hex fits)
+const NAME = /^[A-Za-z0-9_-]{1,80}$/;
 /** The folder for one place's images, if its id can be a folder name as it is (else null: nothing is saved): a chat's
  * `/Attachments/<id>` (as the agents page has always used), a notebook's `/Attachments/nb-<ref>`, a board's
  * `/Attachments/board-<id>`. */
@@ -87,7 +89,7 @@ export async function saveImage(create: (path: string, bytes: Uint8Array) => Pro
   if (bytes.length > max) return { refused: "tooBig" };
   const type = imageType(bytes);
   if (!type) return { refused: "notImage" };
-  if (o.name !== undefined && (!PLAIN.test(o.name) || !o.read)) return { refused: "other" };
+  if (o.name !== undefined && (!NAME.test(o.name) || !o.read)) return { refused: "other" };
   const path = `${folder}/${o.name ?? randomName()}.${type.ext}`;
   try { await create(path, bytes); } catch (e) {
     const r = refusalOf(e);
@@ -178,7 +180,8 @@ export function embedAttachmentsWith<D extends { cells?: Cell[] }>(doc: D, get: 
   const cells: Cell[] = [];
   for (const c of doc.cells!) {
     if (!isMarkdown(c) || !c.attachments || !Object.values(c.attachments).some(isFileEntry)) { cells.push(c); continue; }
-    const att: Record<string, unknown> = {};
+    // (a dictionary with no prototype: an attachment may be named "__proto__")
+    const att: Record<string, unknown> = Object.create(null);
     for (const [name, a] of Object.entries(c.attachments)) {
       if (!isFileEntry(a)) { att[name] = a; continue; }
       const p = filePathOf(a);
@@ -214,7 +217,7 @@ export async function extractAttachments<D extends { cells?: Cell[] }>(doc: D, s
   const cells: Cell[] = [];
   for (const c of doc.cells) {
     if (!isMarkdown(c) || !c.attachments || typeof c.attachments !== "object") { cells.push(c); continue; }
-    const att: Record<string, unknown> = {};
+    const att: Record<string, unknown> = Object.create(null);
     let changed = false;
     for (const [name, a] of Object.entries(c.attachments)) {
       att[name] = a;
@@ -264,9 +267,25 @@ export class ImageUrls {
     if (this.urls.has(path) || filePathOf({ [FILE_KEY]: path }) !== path) return;
     this.hold(path, u);
   }
-  /** Every one of `paths` loaded (or found missing), for an export that is about to embed them. */
+  /** Every one of `paths` read again from the workspace (or found missing), for an export that is about to embed them:
+   * what was held is replaced when its bytes changed or it went, and one missing before is found if it came back, so an
+   * export embeds what the workspace has now, as Export all and a push do. */
   async ready(paths: string[]): Promise<void> {
-    await Promise.all(paths.map((p) => this.load(p)));
+    let redraw = false;
+    await Promise.all(paths.map(async (p) => {
+      // (one not held yet is read now by load: no second read)
+      const fresh = !this.urls.has(p) && !this.loading.has(p);
+      await this.load(p);
+      if (fresh || filePathOf({ [FILE_KEY]: p }) !== p) return;
+      const now = await this.read(p).catch(() => null);
+      const had = this.urls.get(p);
+      if (had && now && sameBytes(had.bytes, now)) return;
+      if (!had && !now) return;
+      if (had?.shown) URL.revokeObjectURL(had.shown.url);
+      if (now) this.hold(p, now); else this.urls.set(p, null);
+      redraw = true;
+    }));
+    if (redraw) this.changed();
   }
   load(path: string): Promise<void> {
     if (this.urls.has(path)) return Promise.resolve();
@@ -297,6 +316,8 @@ export class ImageUrls {
     if (u?.shown) URL.revokeObjectURL(u.shown.url);
     this.urls.delete(path);
   }
+  /** Let go of every image (another document shown): their URLs revoked and their bytes dropped. */
+  clear() { this.dispose(); }
   dispose() {
     for (const u of this.urls.values()) if (u?.shown) URL.revokeObjectURL(u.shown.url);
     this.urls.clear();
