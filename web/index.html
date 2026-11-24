@@ -1580,8 +1580,10 @@ const handover = writerHandover({
 // shown (the notebook re-checks the bytes). Refusals said in the status line, in the page's words.
 function notebookImages() {
   return {
-    save: async (bytes) => {
-      const folder = current.kind === "browser" && current.id && ws ? imageFolder("nb", current.id) : null;
+    // (the notebook shown as the paste happens: its images go to its own folder, even if another is opened meanwhile)
+    place: () => (current.kind === "browser" ? current.id : null),
+    save: async (bytes, id) => {
+      const folder = id && ws ? imageFolder("nb", id) : null;
       if (!folder) return { refused: "noPlace" };
       return saveImage((p, b) => ws.createByPerson(p, { content: b }), folder, bytes);
     },

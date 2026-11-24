@@ -134,6 +134,27 @@ try {
   const b9 = dl?.text ? JSON.parse(dl.text).cells.map((c) => c.attachments?.[shown7.name]?.["image/png"]).find(Boolean) : null;
   ok(/\.ipynb$/.test(dl?.name ?? "") && b9 && Buffer.from(b9, "base64")[40] === 4, "N9: File > Download writes the .ipynb with the image's current bytes embedded", dl && { name: dl.name });
 
+  // ---- N10: a paste still being saved when another notebook is opened: the image goes to the notebook it was pasted
+  //  into (its folder), and nothing is put into the one now shown
+  const refA = await P.ev(`${T}.ref()`);
+  const atA = await P.ev(`(() => { const c = ${NB}.addCell("A", null, false, "markdown"); return ${NB}.cells().indexOf(c); })()`);
+  await sleep(700);
+  const otherRef = made?.ref === refA ? ref : made?.ref;
+  await P.ev(`(() => { window.__release = null; navigator.locks.request("sagebrush-workspace", { mode: "exclusive" }, () => new Promise((r) => (window.__release = r))); return true; })()`);
+  await P.until(`typeof window.__release === "function"`);
+  await give(atA, `[[${PNG_JS}, "late.png", "image/png"]]`);
+  await sleep(300);
+  await P.ev(`window.sagebrush.open(${J(otherRef)})`).catch(() => {});
+  await sleep(300);
+  await P.ev(`(window.__release(), true)`);
+  await P.until(`${T}.ref() === ${J(otherRef)}`, 15000).catch(() => {});
+  await sleep(1500);
+  const shownRef = await P.ev(`${T}.ref()`);
+  const inShown = await P.ev(`${NB}.cells().some((c) => /late|attachment:[0-9a-f]{24}/.test(c.ta.value) && c.attachments && Object.values(c.attachments).some((a) => a["sagebrush/file"]?.includes(${J(refA)})))`);
+  const otherFolder = await P.ev(`(async () => (await ${W}.list(${J(`/Attachments/nb-${otherRef}`)}).catch(() => [])).length)()`);
+  const otherBefore = 2; // (the imported notebook's PNG and GIF, N5)
+  ok(shownRef === otherRef && !inShown && otherFolder === otherBefore, "N10: a paste saved after another notebook was opened: nothing put into the notebook now shown, nothing in its folder", { shownRef, otherRef, inShown, otherFolder });
+
   // ---- N6: an ill-formed reference: missing, never read
   await P.ev(`(() => { window.__reads = []; const w = ${W}; const r = w.read.bind(w); w.read = (p, ...a) => { window.__reads.push(p); return r(p, ...a); }; return true; })()`);
   await P.ev(`(() => { const c = ${NB}.addCell("![x](attachment:x.png)", null, false, "markdown"); c.attachments = { "x.png": { "sagebrush/file": "/private/notes.png" } }; ${NB}.run(c); return true; })()`);

@@ -116,6 +116,8 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   const before = changes;
   await U.ready(["/Attachments/nb-x/a.png", "/Attachments/nb-x/b.png", "/Attachments/nb-x/none.png"]);
   ok(U.bytes("/Attachments/nb-x/a.png")?.[40] === 9 && U.bytes("/Attachments/nb-x/b.png") === null && U.bytes("/Attachments/nb-x/none.png")?.length === 64 && changes > before, "ready() reads again: a changed file's new bytes, a deleted one gone, a restored one found; the page told to draw again");
+  U.retain(["/Attachments/nb-x/a.png"]);
+  ok(U.bytes("/Attachments/nb-x/a.png") !== null && U.bytes("/Attachments/nb-x/none.png") === null && U.bytes("/Attachments/nb-x/d.png") === null, "retain() lets go of the images no cell refers to, keeps the rest");
   U.clear();
   ok(U.bytes("/Attachments/nb-x/a.png") === null, "clear() lets every image go");
   U.dispose();

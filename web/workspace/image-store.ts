@@ -323,6 +323,12 @@ export class ImageUrls {
     if (u?.shown) URL.revokeObjectURL(u.shown.url);
     this.urls.delete(path);
   }
+  /** Let go of the images not among `paths` (those no cell refers to any more): their URLs revoked, their bytes
+   * dropped, so pasting and deleting images doesn't keep them all. */
+  retain(paths: string[]) {
+    const keep = new Set(paths);
+    for (const [p, u] of this.urls) if (!keep.has(p)) { if (u?.shown) URL.revokeObjectURL(u.shown.url); this.urls.delete(p); }
+  }
   /** Let go of every image (another document shown): their URLs revoked and their bytes dropped, and any read still on
    * its way dropped when it arrives. */
   clear() { this.gen++; this.loading.clear(); this.dispose(); }

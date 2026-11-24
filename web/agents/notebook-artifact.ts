@@ -664,6 +664,7 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
     // (images in its Markdown cells kept as workspace files, #1872: shown from the workspace, and a pasted or dropped
     //  one saved in this notebook's own folder, /Attachments/nb-<its ref>, as on the notebook page)
     const images = {
+      place: () => path,
       save: async (bytes: Uint8Array) => {
         const e = await ws.stat(path).catch(() => null);
         const folder = e?.kind === "notebook" && typeof e.ref === "string" ? imageFolder("nb", e.ref) : null;
