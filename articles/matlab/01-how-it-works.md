@@ -109,12 +109,13 @@ naively. Sagebrush grows such arrays into a buffer that doubles, as a
 Python list does.
 
 **Array size.** As in MATLAB, a request for an array of $2^{48}$ bytes or
-more is refused (`MATLAB:pmaxsize`), and so is one of 5 GB or more
-(`MATLAB:array:SizeLimitExceeded`), before anything is allocated. The
-second is MATLAB's array-size preference ("Limit the maximum array size"),
-on by default in MATLAB, and so on in Sagebrush too. Sagebrush has no
-switch for it yet. Below 5 GB an array is admitted against the host's
-memory, and a request that doesn't fit is out of memory (`MATLAB:nomem`).
+more is refused (`MATLAB:pmaxsize`) before anything is allocated. Below
+that, an array is made if the host's memory allows it, so Sagebrush sets no
+size limit of its own. When an array of 5 GB or more doesn't fit, the error
+carries the identifier and message MATLAB gives for its default array-size
+preference (`MATLAB:array:SizeLimitExceeded`), so code written to catch
+that still works. A smaller array that doesn't fit is out of memory
+(`MATLAB:nomem`).
 
 **Classes.**
 - Character vectors, `string` arrays, cells, structs and function handles
