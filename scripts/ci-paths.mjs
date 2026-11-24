@@ -498,5 +498,11 @@ if (prLight) {
   outputs.size_inputs = checksRan;
 }
 outputs.pr_light = prLight;
+// The desktop app's build in app.yml (its page, then Linux, macOS and Windows: about 27 job-minutes) under PR CI light:
+// a light pull request builds it only when it changes the app itself (app/, the pins it bundles, app.yml); its merge
+// group always builds it, on all three, and gates the merge.  Every other run builds it as before.  (CI job cuts, cut
+// 4b, William Nov 24 2026: 344 of 383 job-minutes an hour of pull requests' app builds touched no app/ file)
+const appBuildPaths = [/^app\//, /^wasm\/pins\.json$/, /^\.github\/workflows\/app\.yml$/];
+outputs.app_build = !prLight || matches(appBuildPaths);
 for (const [key, value] of Object.entries(outputs)) console.log(`${key}=${value}`);
 console.error(`ci paths (${event}, ${files.length} files): ${JSON.stringify(outputs)}`);
