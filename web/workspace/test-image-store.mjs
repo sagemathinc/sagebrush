@@ -3,9 +3,10 @@
 // attachment form that refers to a file (and fails closed), data: URLs, and a notebook's embed on export and extract
 // on import, round trip included.
 //   bun web/workspace/test-image-store.mjs
-import { IMAGE_BYTES_MAX, FILE_KEY, imageType, imageFolder, saveImage, filePathOf, isFileEntry, fromBase64, toBase64, toDataUrl, fromDataUrl, embedAttachments, extractAttachments, refusalOf } from "./image-store.ts";
+import { IMAGE_BYTES_MAX, FILE_KEY, ImageUrls, referencedPaths, embedAttachmentsWith, imageType, imageFolder, saveImage, filePathOf, isFileEntry, fromBase64, toBase64, toDataUrl, fromDataUrl, embedAttachments, extractAttachments, refusalOf } from "./image-store.ts";
 
 let failures = 0;
+const J = JSON.stringify;
 const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 600) : "")); if (!c) failures++; };
 const ascii = (s) => [...s].map((c) => c.charCodeAt(0));
 const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -82,6 +83,29 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   ok(asked === 0 && ev.missing.join() === "e.png", "export: an ill-formed reference is never read, only listed as missing");
   const plain = { cells: [{ type: "markdown", code: "x" }] };
   ok((await embedAttachments(plain, S.read)).doc === plain && (await extractAttachments(plain, () => { throw new Error("no"); })).doc === plain, "a notebook with nothing to do is returned as it is");
+}
+
+// ---- ImageUrls: shown when its size can be read; its checked bytes kept for export either way
+{
+  const real = new Uint8Array(64).fill(7); real.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]);
+  const noSize = bytes(PNG); // (a PNG signature with no IHDR: its size can't be read)
+  const files = new Map([["/Attachments/nb-x/a.png", real], ["/Attachments/nb-x/b.png", noSize], ["/Attachments/nb-x/c.png", new TextEncoder().encode("text")]]);
+  const reads = [];
+  let changes = 0;
+  const U = new ImageUrls(async (p) => { reads.push(p); return files.get(p) ?? null; }, () => changes++);
+  await U.ready(["/Attachments/nb-x/a.png", "/Attachments/nb-x/b.png", "/Attachments/nb-x/c.png", "/Attachments/nb-x/none.png", "/private/x.png"]);
+  const a = U.url("/Attachments/nb-x/a.png");
+  ok(a && a.url.startsWith("blob:") && a.w === 3 && a.h === 2 && U.bytes("/Attachments/nb-x/a.png")?.length === 64, "a readable image: a blob: URL with its size, and its bytes");
+  ok(U.url("/Attachments/nb-x/b.png") === null && U.bytes("/Attachments/nb-x/b.png")?.length === 64, "an image whose size can't be read: not drawn, but its bytes kept for export");
+  ok(U.bytes("/Attachments/nb-x/c.png") === null && U.bytes("/Attachments/nb-x/none.png") === null, "not an image, or missing: nothing");
+  ok(!reads.includes("/private/x.png") && reads.length === 4, "a path outside /Attachments is never read", reads);
+  U.put("/Attachments/nb-x/d.png", real);
+  ok(U.bytes("/Attachments/nb-x/d.png")?.length === 64 && !reads.includes("/Attachments/nb-x/d.png"), "an image saved just now is held without reading it back");
+  const doc = { cells: [{ type: "markdown", code: "x", attachments: { "a.png": { [FILE_KEY]: "/Attachments/nb-x/a.png" }, "b.png": { [FILE_KEY]: "/Attachments/nb-x/b.png" }, "c.png": { [FILE_KEY]: "/Attachments/nb-x/c.png" } } }] };
+  ok(J(referencedPaths(doc)) === J(["/Attachments/nb-x/a.png", "/Attachments/nb-x/b.png", "/Attachments/nb-x/c.png"]), "the paths a notebook refers to");
+  const e = embedAttachmentsWith(doc, (p) => U.bytes(p));
+  ok(e.missing.join() === "c.png" && Object.keys(e.doc.cells[0].attachments).join() === "a.png,b.png", "export from held bytes: both images embedded (the one not drawn too); the non-image left out and listed", e.missing);
+  U.dispose();
 }
 
 console.log(failures ? `${failures} FAILED` : "test-image-store: all passed");

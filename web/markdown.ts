@@ -21,6 +21,8 @@ export interface Options {
   remote?: boolean | "click";
   // the document's pictures' pixels (image-size.ts), counting its data: pictures
   pixels?: PixelBudget;
+  // a cell attachment that refers to a workspace image file: its blob: URL and size once loaded (safe-html.ts)
+  fileImage?: (path: string) => { url: string; w: number; h: number } | null;
   // a Jupytext MyST notebook's directives and roles (web/myst, loaded only for one): an extension given render()
   // itself for its bodies, with these same options one level deeper (`depth`), and the inline renderer for titles
   myst?: MystHook;

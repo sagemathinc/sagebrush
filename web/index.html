@@ -842,6 +842,7 @@ import { renderFileMenu, fileMenuKey, menuGroup } from "./workspace/filemenu.ts"
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
 import { openGallery } from "./examples/open.ts";
 import { uploadFiles, openableAsFile, blobHead, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
+import { embedAttachments, imageFolder, saveImage } from "./workspace/image-store.ts";
 import { BUNDLE, readBundle, keepBundle, bundleContents } from "./notebook/bundle.js";
 import { startAll, startAllSummary, journalStartOf } from "./notebook/start-all.js";
 // (the terminal, plan-bash-shell r8c step 6: a preview, shown on preview/DEV hosts only, below; its module,
@@ -1574,7 +1575,39 @@ const handover = writerHandover({
   shownDoc: () => (nb.store ? nb.snapshot() : null),
   replaceDoc: (doc) => nb.replace(doc),
 });
-const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, onExplicitRun: () => { if (current.id) kernels.get(current.id)?.rotateIfWidened?.(); }, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook() });
+// Images in this notebook's Markdown cells (#1872): saved in the workspace under /Attachments/nb-<its ref>, by the
+// person's own exclusive create; only a workspace notebook has a place for them. Read back from the workspace to be
+// shown (the notebook re-checks the bytes). Refusals said in the status line, in the page's words.
+function notebookImages() {
+  return {
+    save: async (bytes) => {
+      const folder = current.kind === "browser" && current.id && ws ? imageFolder("nb", current.id) : null;
+      if (!folder) return { refused: "noPlace" };
+      return saveImage((p, b) => ws.createByPerson(p, { content: b }), folder, bytes);
+    },
+    read: async (path) => {
+      if (!ws) return null;
+      const r = await ws.read(path).catch(() => null);
+      return r?.content instanceof Uint8Array ? r.content : null;
+    },
+    say: (text) => { statusEl.textContent = text; },
+  };
+}
+// The open notebook as it leaves this browser (Download, the download dialog, Share): its file images embedded as
+// Jupyter's base64 attachments, from the bytes the notebook holds (nb.imagesReady() first); any that couldn't be are
+// said, and left out.
+function notebookForExport() {
+  const r = nb.embedImages({ ...nb.snapshot(), name: docName() });
+  if (r.missing.length) statusEl.textContent = IMAGES_LEFT_OUT(r.missing.length);
+  return r.doc;
+}
+const IMAGES_LEFT_OUT = (n) => `${n} image${n === 1 ? "" : "s"} couldn't be included: ${n === 1 ? "its file is" : "their files are"} missing or no longer an image.`;
+// A workspace file's bytes, for embedding another notebook's images (a folder share)
+const readImageFile = async (path) => {
+  const r = ws ? await ws.read(path).catch(() => null) : null;
+  return r?.content instanceof Uint8Array ? r.content : null;
+};
+const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, onExplicitRun: () => { if (current.id) kernels.get(current.id)?.rotateIfWidened?.(); }, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook(), images: notebookImages() });
 // Where this browser's reader was in each notebook (design/view-state.md):
 // the top cell and its offset resist reflow; the fraction is a fallback if
 // that cell was deleted, and the selected cell comes back when it still
@@ -1712,6 +1745,13 @@ window.sagebrush = {
   get trashTest() { return trashTest; },
   /** Open a notebook of this browser by id (switching to its interpreter). */
   open: (id) => openId(id),
+  // (tests: images in Markdown cells, #1872: the notebook shown's ref, its .ipynb as Download writes it, and an
+  //  .ipynb brought in through Upload's own path)
+  imagesTest: {
+    ref: () => (current.kind === "browser" ? current.id : null),
+    exportIpynb: async () => { await nb.imagesReady(); return notebookFileText(notebookForExport()); },
+    importIpynb: (name, text) => uploadFiles(ws, [new File([text], name)], "/", { maxBytes: LIMITS.maxFileBytes, docMaxBytes: LIMITS.maxBoardBytes, mode: "python" }),
+  },
 };
 const isSage = () => nb.mode === "sage";
 const isMagma = () => nb.mode === "magma";
@@ -2855,6 +2895,8 @@ async function openShare() {
   if (TAURI) return;
   // (while uploading, Share only shows the dialog again, with the upload's own state: UI-B1)
   if (shareDialog.busy) return void shareDialog.open();
+  // (the notebook's images loaded first, so what the dialog shares has them embedded)
+  await nb.imagesReady();
   const t = ++shareOpens;
   const view = { rendered: false };
   $("#sharelinkdone").textContent = "";
@@ -3185,7 +3227,8 @@ async function openFolderShare(e, talk = null) {
       if (!now || now.kind !== "notebook" || now.ref !== f.ref) throw new Error(`${f.path.replace(/^\/+/, "")} changed; share the folder again`);
       const d = await w.contents(now);
       if (!d || typeof d !== "object") throw new Error(`${f.path.replace(/^\/+/, "")} can't be read`);
-      return d;
+      // (a share is an export: its file images embedded, as Download's are; any missing are left out)
+      return (await embedAttachments(d, readImageFile)).doc;
     },
     notebookText: (doc) => toIpynb(doc),
     saveOpen: talk ? talk.saveOpen : async () => { saveNow(); await nb.saved(); },
@@ -3284,7 +3327,7 @@ const shareDialog = createShareDialog({
   dlg: shareDlg,
   allFiles: () => shareTest.allFiles,
   published: () => { if (shareTest.lagPublished) return null; const id = nb?.snapshot?.().share_id; return id ? new URL("/s/" + id, location.href).href : null; },
-  notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(toIpynb({ ...nb.snapshot(), name: docName() })) }),
+  notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(toIpynb(notebookForExport())) }),
   // (its edit history, for "Include edit history": every version up to now, as a .sbreplay (notebook/bundle.js's
   // format) with no files of its own (the share's are its files), recorded again by one anonymous writer
   // (history.js publishedHistory); null: none here)
@@ -3473,7 +3516,7 @@ const dlCaps = () => downloadTest.caps ?? DL_CAPS;
 const downloadDialog = createDownloadDialog({
   ...pickHost,
   dlg: $("#dldepsdlg"),
-  notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(notebookFileText({ ...nb.snapshot(), name: docName() })) }),
+  notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(notebookFileText(notebookForExport())) }),
   readFile: (f) => storedFileBytes(f, "download again"),
   // (at the click: the download checks the notebook after it, so a path can't outlive a rename or a switch)
   notebookPath: async () => {
@@ -4076,7 +4119,7 @@ fileMenu.addEventListener("click", async (e) => {
     }
     // (the whole workspace as one .zip: the Files sidebar's export, the sidebar shown (sim run 11, X05))
     case "allzip": if (!wsBrowser) wsShowFiles(true); wsBrowser?.exportAll(); break;
-    case "ipynb": download(fileBase() + ".ipynb", notebookFileText({ ...nb.snapshot(), name: docName() })); break;
+    case "ipynb": void nb.imagesReady().then(() => download(fileBase() + ".ipynb", notebookFileText(notebookForExport()))); break;
     case "py": download(fileBase() + (isSage() ? ".sage" : isMagma() || isMatlab() ? ".m" : ".py"), toScript(nb.snapshot()), isMagma() || isMatlab() ? "text/plain" : "text/x-python"); break;
     case "marimo": {
       // (each cell's arguments and return values: the names it reads and defines)
@@ -4088,6 +4131,7 @@ fileMenu.addEventListener("click", async (e) => {
     }
     case "withfiles": {
       saveNow();
+      await nb.imagesReady();
       await downloadDialog.open();
       break;
     }

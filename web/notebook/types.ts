@@ -97,6 +97,10 @@ export interface Notebook {
   setInput(cell: any, text: string): void;
   load(doc: NotebookDoc): void;
   snapshot(): NotebookDoc;
+  /** Every image file the Markdown cells refer to, loaded: before an export (#1872). */
+  imagesReady(): Promise<void>;
+  /** A document with its file images embedded for export, and the attachment names that couldn't be. */
+  embedImages<D extends { cells?: unknown[] }>(doc: D): { doc: D; missing: string[] };
   applyRemote(doc: NotebookDoc): void;
   /** Every change so far saved: resolves once every save asked for is done; rejects with why, if the last one failed. */
   saved(): Promise<void>;

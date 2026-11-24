@@ -10,6 +10,7 @@
 //   - export embeds those files back as Jupyter's {mime: base64} (embedAttachments), so other clients show them;
 //   - import extracts Jupyter's inline images to files (extractAttachments), so cells stay light.
 // No DOM here except Blob and URL in ImageUrls, which the page that shows images makes.
+import { imageSizeOf } from "../image-size";
 
 export const ATTACH_ROOT = "/Attachments";
 /** The most an image may be, in bytes: what an agent may see (its base64 at most 5,000,000 characters). */
@@ -47,6 +48,17 @@ export function imageFolder(kind: "chat" | "nb" | "board", id: string): string |
 }
 
 export type Refusal = "notImage" | "tooBig" | "exists" | "limit" | "storage" | "other";
+/** At most this many images from one paste or drop. */
+export const IMAGES_AT_ONCE = 8;
+/** What a page says when an image isn't added (COPY's; never an error's own text). */
+export const IMAGE_COPY = {
+  tooMany: `At most ${IMAGES_AT_ONCE} images at once.`,
+  noPlace: "This notebook isn't in this browser's workspace, so images can't be added to it.",
+  refused: (r: Refusal | "read", size?: number): string =>
+    r === "notImage" ? "Only PNG, JPEG, GIF and WebP images can be added."
+    : r === "tooBig" ? `That image is ${((size ?? 0) / 1e6).toFixed(1)} MB: images can be at most ${IMAGE_BYTES_MAX / 1e6} MB.`
+    : `The image wasn't saved: ${r === "exists" ? "a file with its name is already there." : r === "limit" ? "the workspace is at one of its limits." : r === "storage" ? "this browser's storage refused it." : r === "read" ? "it couldn't be read." : "something went wrong."}`,
+} as const;
 /** A refused create's reason, by the workspace's own error code only (an error's text could carry anything). */
 export function refusalOf(e: unknown): Refusal {
   const c = (e as { code?: unknown } | null)?.code;
@@ -147,21 +159,30 @@ export function toBase64(u: Uint8Array): string {
 type Cell = { type?: string; cell_type?: string; attachments?: Record<string, unknown> | null; [k: string]: unknown };
 const isMarkdown = (c: Cell) => (c?.type ?? c?.cell_type) === "markdown";
 
-/** A notebook document with every file-referring attachment embedded as Jupyter's {mime: base64}, for an export that
- * leaves this browser (Download, Export all, a share): `read` gives a workspace file's bytes (or null). An entry whose
- * file is missing, unreadable, over the cap or not a raster image is left out, and its name listed in `missing`; an
- * ill-formed entry of our key is left out too. Nothing else changes; the document given isn't modified. */
-export async function embedAttachments<D extends { cells?: Cell[] }>(doc: D, read: (path: string) => Promise<Uint8Array | null>): Promise<{ doc: D; missing: string[] }> {
+const needsEmbed = (doc: { cells?: Cell[] }) => Array.isArray(doc?.cells) && doc.cells.some((c) => isMarkdown(c) && !!c.attachments && Object.values(c.attachments).some(isFileEntry));
+/** The workspace paths a notebook's attachments refer to (well-formed ones only). */
+export function referencedPaths(doc: { cells?: Cell[] }): string[] {
+  const out = new Set<string>();
+  for (const c of Array.isArray(doc?.cells) ? doc.cells : []) {
+    if (!isMarkdown(c) || !c.attachments) continue;
+    for (const a of Object.values(c.attachments)) { const p = filePathOf(a); if (p) out.add(p); }
+  }
+  return [...out];
+}
+
+/** embedAttachments with the files' bytes already at hand (`get`, synchronous): for a page that holds the bytes of the
+ * images it shows (the open notebook's Download and share, whose hooks are synchronous). */
+export function embedAttachmentsWith<D extends { cells?: Cell[] }>(doc: D, get: (path: string) => Uint8Array | null): { doc: D; missing: string[] } {
   const missing: string[] = [];
-  if (!Array.isArray(doc?.cells) || !doc.cells.some((c) => isMarkdown(c) && c.attachments && Object.values(c.attachments).some(isFileEntry))) return { doc, missing };
+  if (!needsEmbed(doc)) return { doc, missing };
   const cells: Cell[] = [];
-  for (const c of doc.cells) {
+  for (const c of doc.cells!) {
     if (!isMarkdown(c) || !c.attachments || !Object.values(c.attachments).some(isFileEntry)) { cells.push(c); continue; }
     const att: Record<string, unknown> = {};
     for (const [name, a] of Object.entries(c.attachments)) {
       if (!isFileEntry(a)) { att[name] = a; continue; }
       const p = filePathOf(a);
-      const u = p ? await read(p).catch(() => null) : null;
+      const u = p ? get(p) : null;
       const type = u && u.length <= IMAGE_BYTES_MAX ? imageType(u) : null;
       if (!u || !type) { missing.push(name); continue; }
       att[name] = { [type.mime]: toBase64(u) };
@@ -169,6 +190,18 @@ export async function embedAttachments<D extends { cells?: Cell[] }>(doc: D, rea
     cells.push({ ...c, attachments: Object.keys(att).length ? att : null });
   }
   return { doc: { ...doc, cells }, missing };
+}
+
+/** A notebook document with every file-referring attachment embedded as Jupyter's {mime: base64}, for an export that
+ * leaves this browser (Download, Export all, a share, a push): `read` gives a workspace file's bytes (or null). An entry
+ * whose file is missing, unreadable, over the cap or not a raster image is left out, and its name listed in `missing`;
+ * an ill-formed entry of our key is left out too, and never read. Nothing else changes; the document given isn't
+ * modified. */
+export async function embedAttachments<D extends { cells?: Cell[] }>(doc: D, read: (path: string) => Promise<Uint8Array | null>): Promise<{ doc: D; missing: string[] }> {
+  if (!needsEmbed(doc)) return { doc, missing: [] };
+  const got = new Map<string, Uint8Array | null>();
+  for (const p of referencedPaths(doc)) got.set(p, await read(p).catch(() => null));
+  return embedAttachmentsWith(doc, (p) => got.get(p) ?? null);
 }
 
 /** A notebook document whose Markdown cells' inline raster images (Jupyter's {mime: base64}) are saved as workspace
@@ -205,39 +238,67 @@ export async function extractAttachments<D extends { cells?: Cell[] }>(doc: D, s
 
 // ---- showing them
 
+/** A file image ready to show: its blob: URL and its size (read from its header, for the page's pixel budget). */
+export type Shown = { url: string; w: number; h: number };
+/** an image file held: what can be shown (null when its size can't be read from its header: not drawn), and its
+ *  checked bytes, which an export embeds either way */
+type Held = { shown: Shown | null; bytes: Uint8Array };
 /** blob: URLs for image files, for a page that shows them: `url(path)` is synchronous (null until loaded), `load(path)`
  * reads the file, checks it again by its bytes and the cap, and makes its URL once; `changed` is called when one
  * arrives, so the page can draw again. Only paths filePathOf accepts are read. */
 export class ImageUrls {
-  private urls = new Map<string, string | null>();
-  private loading = new Set<string>();
+  private urls = new Map<string, Held | null>();
+  private loading = new Map<string, Promise<void>>();
   constructor(private read: (path: string) => Promise<Uint8Array | null>, private changed: () => void) {}
-  url(path: string): string | null {
+  url(path: string): Shown | null {
     const u = this.urls.get(path);
     if (u === undefined && !this.loading.has(path)) void this.load(path);
-    return u ?? null;
+    return u?.shown ?? null;
   }
-  async load(path: string): Promise<void> {
-    if (this.urls.has(path) || this.loading.has(path)) return;
-    if (filePathOf({ [FILE_KEY]: path }) !== path) { this.urls.set(path, null); return; }
-    this.loading.add(path);
-    try {
-      const u = await this.read(path).catch(() => null);
-      const type = u && u.length <= IMAGE_BYTES_MAX ? imageType(u) : null;
-      this.urls.set(path, u && type ? URL.createObjectURL(new Blob([u as BlobPart], { type: type.mime })) : null);
-    } finally {
-      this.loading.delete(path);
-    }
-    this.changed();
+  /** The bytes of a loaded image (checked as when it was loaded), for an export: null if not loaded or not an image. */
+  bytes(path: string): Uint8Array | null {
+    return this.urls.get(path)?.bytes ?? null;
+  }
+  /** An image saved just now: its bytes are known, so it needn't be read back. */
+  put(path: string, u: Uint8Array) {
+    if (this.urls.has(path) || filePathOf({ [FILE_KEY]: path }) !== path) return;
+    this.hold(path, u);
+  }
+  /** Every one of `paths` loaded (or found missing), for an export that is about to embed them. */
+  async ready(paths: string[]): Promise<void> {
+    await Promise.all(paths.map((p) => this.load(p)));
+  }
+  load(path: string): Promise<void> {
+    if (this.urls.has(path)) return Promise.resolve();
+    const going = this.loading.get(path);
+    if (going) return going;
+    if (filePathOf({ [FILE_KEY]: path }) !== path) { this.urls.set(path, null); return Promise.resolve(); }
+    const p = (async () => {
+      try {
+        const u = await this.read(path).catch(() => null);
+        if (u) this.hold(path, u); else this.urls.set(path, null);
+      } finally {
+        this.loading.delete(path);
+      }
+      this.changed();
+    })();
+    this.loading.set(path, p);
+    return p;
+  }
+  private hold(path: string, u: Uint8Array) {
+    const type = u.length <= IMAGE_BYTES_MAX ? imageType(u) : null;
+    if (!type) { this.urls.set(path, null); return; }
+    const size = imageSizeOf(type.mime, u);
+    this.urls.set(path, { shown: size ? { url: URL.createObjectURL(new Blob([u as BlobPart], { type: type.mime })), ...size } : null, bytes: u });
   }
   /** Forget a path (its file changed or went), so it is read again when next shown. */
   forget(path: string) {
     const u = this.urls.get(path);
-    if (u) URL.revokeObjectURL(u);
+    if (u?.shown) URL.revokeObjectURL(u.shown.url);
     this.urls.delete(path);
   }
   dispose() {
-    for (const u of this.urls.values()) if (u) URL.revokeObjectURL(u);
+    for (const u of this.urls.values()) if (u?.shown) URL.revokeObjectURL(u.shown.url);
     this.urls.clear();
   }
 }

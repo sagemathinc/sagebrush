@@ -15,6 +15,7 @@ import type { Workspace, Entry } from "./api";
 import { freePath, join, nameOf, openableAs, parentOf, safeName, splitExt, uploadAs, type DocKind } from "./paths";
 import { formatError, isBoard } from "../board/doc";
 import { cellId, fromFile } from "../notebook/ipynb.js";
+import { extractAttachments, imageFolder, saveImage } from "./image-store";
 // (the 4 KiB rule only, which imports nothing: the reader, web/notebook/myst.js, is given as `myst` by the notebook
 // page, so the board page doesn't carry it: plan-myst-notebooks-p2 r2 §11.3)
 import { HEAD_BYTES, TEXT, isMystHead } from "../notebook/myst-head.js";
@@ -95,6 +96,25 @@ export const UPLOAD_FILES = 10_000;
 const NAMED = 20;
 
 /** `files` uploaded into `folder` by the rule above. */
+/** A notebook just brought into the workspace (an upload, or a .ipynb opened as one): its Markdown cells' inline
+ * raster images (Jupyter's base64 attachments) saved as files in its own folder, /Attachments/nb-<its ref>, and the
+ * cells referring to those instead, written once over the revision just made (#1872, image-store.ts). Best effort:
+ * anything that fails leaves the notebook as it was made, its images inline, so nothing is lost. */
+export async function extractNotebookImages(ws: Workspace, e: Entry): Promise<number> {
+  if (e.kind !== "notebook" || typeof e.ref !== "string") return 0;
+  const folder = imageFolder("nb", e.ref);
+  if (!folder) return 0;
+  try {
+    const r = await ws.read(e.path);
+    const x = await extractAttachments(r.content as any, (u) => saveImage((p, b) => ws.create(p, { content: b }), folder, u));
+    if (!x.extracted) return 0;
+    await ws.write(e.path, x.doc, { base: r.rev, expect: { kind: e.kind, fid: e.fid, created: e.created, ref: e.ref } });
+    return x.extracted;
+  } catch {
+    return 0;
+  }
+}
+
 export async function uploadFiles(ws: Workspace, all: File[], folder: string, o: UploadOptions): Promise<UploadResult> {
   const out: UploadResult = { made: [], kept: [], refused: [] };
   let unnamed = 0;
@@ -132,6 +152,8 @@ export async function uploadFiles(ws: Workspace, all: File[], folder: string, o:
       const e = await ws.create(p, { content: doc });
       taken.add(p);
       out.made.push(e);
+      // (an uploaded .ipynb's inline images, to files: a notebook with history (a replay) is kept as it came)
+      if (as === "notebook") await extractNotebookImages(ws, e);
       if (keep) await keep(e.ref!).catch((err) => refuse(`${name}: its history (${message(err)})`));
     } catch (err) {
       refuse(`${name} (${message(err)})`);
@@ -209,6 +231,7 @@ export async function convertCopy(ws: Workspace, entry: Entry, as: DocKind, o: {
   const p = freePath(folder, splitExt(name)[0], as === "board" ? ".board.json" : ".ipynb", (x) => taken.has(x));
   if (!p) throw new Error("no free name beside it");
   const made = await ws.create(p, { content: doc });
+  if (as === "notebook") await extractNotebookImages(ws, made);
   if (myst) o.said?.(earlier ? "The .md changed since your last copy, so this is a new copy; your earlier one is kept." : `Opened a notebook copy of "${name}" beside it. The .md isn't changed.`);
   return made;
 }

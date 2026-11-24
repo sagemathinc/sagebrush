@@ -7,6 +7,7 @@ import type { Entry, Workspace } from "../workspace/api";
 import type { BoardDoc } from "../board/doc";
 import { Images } from "../board/images";
 import { boardFileText, notebookFileText } from "../workspace/file-bytes";
+import { embedAttachments } from "../workspace/image-store";
 import { AUTO_MS, GIT_BRANCH, MAX_FILE, branchFor, excluded, parseRepo, signature, stripOutputs } from "./rules";
 import { uploadFiles } from "../workspace/upload";
 import { freePath, join, safeName } from "../workspace/paths";
@@ -96,7 +97,11 @@ async function pushNow(w: Workspace, host: GitpushHost, o: { repo: string; folde
         skipped.push({ path: e.path, why: "not on this device yet" }); keep.push(rel); continue;
       }
       let b: Uint8Array;
-      if (e.kind === "notebook") b = enc.encode(notebookFileText(stripOutputs(content)));
+      // (a notebook's Markdown images kept as files (#1872): embedded, as Download's are, so the pushed .ipynb shows them)
+      if (e.kind === "notebook") b = enc.encode(notebookFileText(stripOutputs((await embedAttachments(content, async (p) => {
+        const f = await w.read(p).catch(() => null);
+        return f?.content instanceof Uint8Array ? f.content : null;
+      })).doc)));
       else if (e.kind === "board") { const images = new Images(); try { b = enc.encode(await boardFileText(content as BoardDoc, images)); } finally { images.dispose(); } }
       else if (content instanceof Uint8Array) b = content.slice();
       else if (content instanceof ArrayBuffer) b = new Uint8Array(content.slice(0));
