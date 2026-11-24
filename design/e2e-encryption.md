@@ -182,7 +182,8 @@ RFC 9180's base mode doesn't authenticate the sender and doesn't prevent replay.
   - that every field names itself and the object it expects;
   - the expiry.
 
-  So a valid wrapper can't be replayed, or moved between accounts, shares, recovery and epoch delivery.
+  So a valid wrapper can't be replayed in another context, or moved between accounts, shares, recovery and epoch delivery.
+- **An exact replay in the same context isn't stopped by the binding** (SEC). It is made harmless by the unique id each context carries (object, share, proposal, ticket): applying it again is idempotent, and where an effect isn't naturally idempotent (importing a share, applying a proposal), the recipient records the ids it has accepted and refuses a repeat.
 
 ## 4. Sync: what becomes opaque
 
