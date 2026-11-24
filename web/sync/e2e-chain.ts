@@ -226,6 +226,11 @@ export class E2EStore {
   }
 
   /** The head row: seq, hash, current epoch and current devices (null: no chain). */
+  /** The stored head, for what is sealed under it (sealed ops, e2e PR 5b): null before the chain's genesis. */
+  current(): { seq: number; hash: string } | null {
+    const h = this.headRow();
+    return h ? { seq: h.seq, hash: h.head } : null;
+  }
   private headRow(): { seq: number; head: string; epoch: number; devices: string[] } | null {
     if (this.sql.exec("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'e2e_head'").toArray().length === 0) return null;
     const r = this.sql.exec("SELECT seq, head, epoch, devices FROM e2e_head WHERE id = 1").toArray()[0] as Row | undefined;

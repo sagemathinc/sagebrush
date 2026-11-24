@@ -12,7 +12,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import {
-  SyncError, LIMITS, RECHECK_MS, PIN_MS, VERSION, Bucket, checkBatch, checkHead, checkOp, clientOf, fields, has, isDevice, isDocId, isNat,
+  SyncError, LIMITS, RECHECK_MS, PIN_MS, VERSION, Bucket, checkBatch, checkHead, checkOp, checkSealedOp, isChainHead, toB64, clientOf, fields, has, isDevice, isDocId, isNat,
   parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, same, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
 } from "../sync-protocol/protocol.ts";
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
@@ -43,7 +43,7 @@ interface Attachment {
 const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)",
   "CREATE TABLE IF NOT EXISTS devices (device TEXT PRIMARY KEY, name TEXT, created INTEGER, last_seen INTEGER, session_hash TEXT, next_dseq INTEGER NOT NULL)",
-  "CREATE TABLE IF NOT EXISTS ops (seq INTEGER PRIMARY KEY, device TEXT NOT NULL, dseq INTEGER NOT NULL, t INTEGER, by TEXT, op TEXT, path TEXT, \"to\" TEXT, kind TEXT, ref TEXT, fid TEXT, sha256 TEXT, size INTEGER, base TEXT, recv INTEGER, parent TEXT, UNIQUE (device, dseq))",
+  "CREATE TABLE IF NOT EXISTS ops (seq INTEGER PRIMARY KEY, device TEXT NOT NULL, dseq INTEGER NOT NULL, t INTEGER, by TEXT, op TEXT, path TEXT, \"to\" TEXT, kind TEXT, ref TEXT, fid TEXT, sha256 TEXT, size INTEGER, base TEXT, recv INTEGER, parent TEXT, env TEXT, head TEXT, adds TEXT, releases TEXT, UNIQUE (device, dseq))",
   "CREATE TABLE IF NOT EXISTS refused (device TEXT NOT NULL, dseq INTEGER NOT NULL, code TEXT NOT NULL, PRIMARY KEY (device, dseq))",
   "CREATE TABLE IF NOT EXISTS docs (doc TEXT PRIMARY KEY, kind TEXT NOT NULL, created INTEGER, bytes INTEGER NOT NULL DEFAULT 0, epoch INTEGER NOT NULL DEFAULT 1, head_seq INTEGER NOT NULL DEFAULT 0, deleted INTEGER)",
   "CREATE TABLE IF NOT EXISTS holdings (sha256 TEXT PRIMARY KEY, key TEXT NOT NULL, size INTEGER NOT NULL, refs INTEGER NOT NULL DEFAULT 0, created INTEGER, ct_sha256 TEXT)",
@@ -168,6 +168,12 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       // (an object made before an op column existed gains it: §3's `parent`, Oct 20)
       if (this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'ops'") && !this.sql.exec("PRAGMA table_info(ops)").toArray().some((c) => (c as Row).name === "parent")) {
         this.sql.exec("ALTER TABLE ops ADD COLUMN parent TEXT");
+      }
+      // (an object made before sealed ops gains their columns, e2e PR 5b: the envelope (base64), the key chain's head it
+      // was sealed under, and the blob references it adds and releases (JSON lists); a plaintext op has them NULL)
+      if (this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'ops'")) {
+        const have = new Set(this.sql.exec("PRAGMA table_info(ops)").toArray().map((c) => String((c as Row).name)));
+        for (const c of ["env", "head", "adds", "releases"]) if (!have.has(c)) this.sql.exec(`ALTER TABLE ops ADD COLUMN ${c} TEXT`);
       }
       // (an object made before blobs had a ciphertext hash gains the column: e2e PR 3a; its old rows keep NULL, read as
       // ct = the address they were checked against, and every new row has one)
@@ -433,6 +439,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       // (the agents' index follows the ops just accepted, in its own transaction: it can fail, never the ops, 1a2)
       this.indexLive();
       send(ws, { t: "ack", req, ops: acked });
+    } else if (t === "sops") {
+      fields(m, ["t", "req", "ops"], "sops");
+      const acked = this.sealedOps(att, dev, m.ops);
+      send(ws, { t: "ack", req, ops: acked });
     } else if (t === "pull_index") {
       fields(m, ["t", "req", "after"], "pull_index");
       if (!isNat(m.after)) throw new SyncError("invalid", "after");
@@ -552,13 +562,84 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     });
   }
 
+  /**
+   * Sealed ops from one device (design/e2e-encryption.md §4; e2e PR 5b), decided as ops() decides plaintext ones: in
+   * dseq order with no gaps, once each, a refusal kept with its code.  The server reads only each one's form, the key
+   * chain's head it was sealed under, and its blob references.  The head is the current one, checked for the whole
+   * message before any is decided: a device that sealed under an older head (one a removal may have ended) re-seals and
+   * sends the same dseqs again, so none is spent on a refusal.  Every address an op adds must be held, and gains a
+   * reference; every address it releases must be held with a reference to give back (the refs are all the server
+   * counts: an op's own contents never are).
+   */
+  /** The sealed log's cap (LIMITS.sealedLog; lowered by a test). */
+  private sealedCap: number = LIMITS.sealedLog;
+  private sealedOps(att: Attachment, device: string, list: unknown): ({ dseq: number; seq: number } | { dseq: number; code: string })[] {
+    this.admit(att.account, true);
+    const head = this.e2e(att.account).current();
+    if (!head) throw new SyncError("conflict", "this account has no key chain yet", { reason: "no_chain" });
+    if (!Array.isArray(list) || list.length === 0) throw new SyncError("invalid", "ops");
+    if (list.length > LIMITS.opsPerMessage) throw new SyncError("limit", "too many ops", { limit: "ops_per_message", max: LIMITS.opsPerMessage });
+    const wait = this.opsRate.take(list.length);
+    if (wait) throw new SyncError("rate", "too many ops", { retry_after: wait });
+    return this.ctx.storage.transactionSync(() => {
+      let next = Number(this.one("SELECT next_dseq FROM devices WHERE device = ?", device)!.next_dseq);
+      // (the log's cap, for the whole message: a full log spends no dseq either; checkpoints (5e) make room)
+      const kept = Number(this.get("sealed_ops") ?? 0);
+      if (kept + list.length > this.sealedCap) throw new SyncError("limit", "this account's sealed log is full", { limit: "sealed_log", max: this.sealedCap });
+      // (the head, for the whole message, before anything is decided: a stale one spends no dseq)
+      for (const raw of list) {
+        const h = (raw as { dseq?: unknown; head?: unknown })?.head, d = (raw as { dseq?: unknown })?.dseq;
+        if (isNat(d) && d >= next && isChainHead(h) && h !== head.hash) throw new SyncError("conflict", "sealed under another key chain head: seal again under the current one", { reason: "stale_head", head });
+      }
+      const out: ({ dseq: number; seq: number } | { dseq: number; code: string })[] = [];
+      const refusedCount = () => Number(this.one("SELECT COUNT(*) AS n FROM refused WHERE device = ?", device)!.n);
+      for (const raw of list) {
+        const dseq = (raw as { dseq?: unknown })?.dseq;
+        if (!isNat(dseq) || dseq < 1) throw new SyncError("invalid", "op: dseq");
+        if (dseq < next) {
+          const r = this.one("SELECT seq FROM ops WHERE device = ? AND dseq = ?", device, dseq);
+          const f = r ? undefined : this.one("SELECT code FROM refused WHERE device = ? AND dseq = ?", device, dseq);
+          out.push(r ? { dseq, seq: Number(r.seq) } : { dseq, code: String(f?.code ?? "invalid") });
+          continue;
+        }
+        if (dseq > next) throw new SyncError("order", "a gap in this device's ops", { next_dseq: next });
+        try {
+          const op = checkSealedOp(raw);
+          for (const a of op.adds) if (!this.held(a)) throw new SyncError("missing", "upload the blob before the op that names it", { sha256: a });
+          for (const a of op.releases) {
+            const h = this.one("SELECT refs FROM holdings WHERE sha256 = ?", a);
+            if (!h || Number(h.refs) < 1) throw new SyncError("invalid", "a release of a reference that isn't held", { sha256: a });
+          }
+          this.sql.exec(
+            "INSERT INTO ops (device, dseq, recv, size, env, head, adds, releases) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            device, dseq, Date.now(), op.env.length, toB64(op.env), op.head, JSON.stringify(op.adds), JSON.stringify(op.releases),
+          );
+          out.push({ dseq, seq: Number(this.one("SELECT last_insert_rowid() AS n")!.n) });
+          this.set("sealed_ops", Number(this.get("sealed_ops") ?? 0) + 1);
+          for (const a of op.adds) this.sql.exec("UPDATE holdings SET refs = refs + 1 WHERE sha256 = ?", a);
+          for (const a of op.releases) this.sql.exec("UPDATE holdings SET refs = refs - 1 WHERE sha256 = ?", a);
+        } catch (e) {
+          if (!(e instanceof SyncError)) throw e;
+          if (refusedCount() >= LIMITS.refusalsPerDevice) throw new SyncError("invalid", "too many refused ops: rebuild from the server's log");
+          this.sql.exec("INSERT INTO refused (device, dseq, code) VALUES (?, ?, ?)", device, dseq, e.code);
+          out.push({ dseq, code: e.code });
+        }
+        next++;
+        this.sql.exec("UPDATE devices SET next_dseq = ? WHERE device = ?", next, device);
+      }
+      return out;
+    });
+  }
+
   /** The log after `after`, a page at a time (§5.2, §8). */
   private index(after: number): { ops: Row[]; more: boolean } {
-    const rows = this.sql.exec('SELECT seq, device, dseq, t, by, op, path, "to", kind, ref, fid, sha256, size, base, parent FROM ops WHERE seq > ? ORDER BY seq LIMIT ?', after, LIMITS.indexPage + 1).toArray() as Row[];
+    const rows = this.sql.exec('SELECT seq, device, dseq, t, by, op, path, "to", kind, ref, fid, sha256, size, base, parent, env, head, adds, releases FROM ops WHERE seq > ? ORDER BY seq LIMIT ?', after, LIMITS.indexPage + 1).toArray() as Row[];
     const ops: Row[] = [];
     let bytes = 0;
     for (const r of rows.slice(0, LIMITS.indexPage)) {
-      const o = Object.fromEntries(Object.entries(r).filter(([, v]) => v !== null));
+      const o: Record<string, unknown> = Object.fromEntries(Object.entries(r).filter(([, v]) => v !== null));
+      // (a sealed op: its references as the lists they were sent as)
+      for (const k of ["adds", "releases"]) if (typeof o[k] === "string") o[k] = JSON.parse(o[k] as string);
       const n = JSON.stringify(o).length;
       if (ops.length > 0 && bytes + n > LIMITS.indexPageBytes) return { ops, more: true };
       bytes += n;
@@ -2437,8 +2518,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Tests only: shift the mailbox's clock, and count the E2E rows. */
-  async testE2E(a: { shift?: number; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number } }): Promise<Record<string, number> | null> {
+  async testE2E(a: { sealedCap?: number; shift?: number; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number } }): Promise<Record<string, number> | null> {
     if (!testMode(this.env)) return null;
+    if (a.sealedCap !== undefined) this.sealedCap = a.sealedCap;
     if (a.shift !== undefined) this.e2eShift = a.shift;
     if (a.failCommit !== undefined) this.e2eFailCommit = a.failCommit;
     if (a.hold !== undefined) this.e2eHold = a.hold;
@@ -2860,6 +2942,12 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const b = this.ixBounds;
     let ents = Number(this.get("ix_n_entries") ?? 0), gone = Number(this.get("ix_n_gone") ?? 0), cursor = Number(this.get("ix_cursor"));
     for (const r of rows) {
+      // (a sealed op, e2e PR 5b: the server can't read it, so it never enters the agents' index; its place is passed)
+      if (r.op === null || r.op === undefined) {
+        cursor = Number(r.seq);
+        done.n++;
+        continue;
+      }
       const res = applyOp(this.sql, SyncAccount.opOf(r), budget());
       ents += res.entries;
       gone += res.gone;
