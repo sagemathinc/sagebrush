@@ -4381,13 +4381,42 @@ def _cc(o):
 
 
 def _cc_div(a, b):
-    """a / b in CC: by zero NaN + NaN*I, as Sage's CC (Python's complex raised)."""
+    """a / b in CC, as Sage's _div_: n = c^2 + d^2, p = c/n, q = d/n, then
+    (p a + q b) + (p b - q a) I, each step rounded (not Python's complex
+    division, which scales and rounds differently).  By zero NaN + NaN*I,
+    as Sage's.  On tame operands with tame p and q each step is a double
+    operation that rounds as MPFR does; otherwise the 53-bit MP field does
+    it, and an infinite or NaN operand too (a step's 0 in the doubles is a
+    tiny number there, and 0 * infinity NaN where Sage's is infinite)."""
+    (x, y), (c, d) = (a.real, a.imag), (b.real, b.imag)
     if b == 0:
         return ComplexNumber(float("nan"), float("nan"))
-    r = a / b
-    if (_cc_tame(a) and _cc_tame(b) and _cc_quot_kept(r, a, b)) or not _cc_finite(a, b):
-        return ComplexNumber(r)
-    return _cc_slow("/", a, b)
+    if not (_cc_tame(a) and _cc_tame(b)):
+        return _cc_slow("/", a, b)
+    n = c * c + d * d
+    p, q = c / n, d / n
+    if not _cc_tame(complex(p, q)) or (p == 0 and c != 0) or (q == 0 and d != 0):
+        # (a quotient that may have underflowed, to 0 too)
+        return _cc_slow("/", a, b)
+    return ComplexNumber(p * x + q * y, p * y - q * x)
+
+
+def _cc_inv(z):
+    """1/z in CC as a complex, as Sage's __invert__: m = a^2 + b^2, then
+    a/m and -b/m, each rounded (0 gives NaN + NaN*I); None when a step may
+    have left the normal doubles, or a part is infinite or NaN (the MP field
+    does it then)."""
+    a, b = z.real, z.imag
+    if not _cc_tame(z):
+        return None
+    m = a * a + b * b
+    if m == 0:
+        return complex(float("nan"), float("nan"))
+    r = complex(a / m, -b / m)
+    if not _cc_tame(r) or (r.real == 0 and a != 0) or (r.imag == 0 and b != 0):
+        # (a quotient that may have underflowed, to 0 too)
+        return None
+    return r
 
 
 # CC past the doubles.  Sage's CC is MPFR at 53 bits, whose exponents reach
@@ -4453,15 +4482,12 @@ def _cc_ipow(z, n):
     if not _cc_tame(z):
         return None
     if n < 0:
-        a, b = z.real, z.imag
-        m = a * a + b * b
-        if m == 0:
-            # (Sage's 1/0: 0/0 in each part)
-            return ComplexNumber(float("nan"), float("nan"))
-        apow = complex(a / m, -b / m)
-        if not _cc_tame(apow) or (apow.real == 0 and a != 0) or (apow.imag == 0 and b != 0):
-            # (a quotient that may have underflowed, to 0 too)
+        apow = _cc_inv(z)
+        if apow is None:
             return None
+        if apow != apow:
+            # (Sage's 1/0: 0/0 in each part)
+            return ComplexNumber(apow)
         n = -n
     else:
         apow = z
@@ -4492,6 +4518,8 @@ def _cc_slow(op, a, b):
     import _sage_real
     C = _sage_real._cc_mp()
     x = C(a)
+    if op == "~":
+        return _sage_real._cc_from_mp(~x)
     if op == "^":
         y = int(b) if isinstance(b, int) or type(b).__name__ == "Integer" else C(complex(b))
         v = x ** y
@@ -4540,6 +4568,68 @@ def _cc_pow(z, e, rev=False):
             raise OverflowError("complex exponentiation")
         return ComplexNumber(r)
     return _cc_slow("r^" if rev else "^", z, e)
+
+
+def _hypot_rn(x, y):
+    """sqrt(x^2 + y^2) for doubles x and y, correctly rounded (MPFR's
+    mpfr_hypot, which Sage's CC sqrt uses; math.hypot is not guaranteed
+    correctly rounded): the exact sum of squares in integers, its integer
+    square root, and round to nearest even on 53 bits.  x and y finite,
+    their result a normal double.
+    """
+    import math
+    na, da = abs(x).as_integer_ratio()
+    nb, db = abs(y).as_integer_ratio()
+    d = max(da, db)
+    # (|z| = sqrt(n) / d, d a power of two)
+    n = (na * (d // da)) ** 2 + (nb * (d // db)) ** 2
+    if n == 0:
+        return 0.0
+    e = max(0, 60 - n.bit_length() // 2)
+    m = n << (2 * e)
+    r = math.isqrt(m)
+    sticky = r * r != m
+    drop = r.bit_length() - 53
+    q, rem = divmod(r, 1 << drop)
+    half = 1 << (drop - 1)
+    if rem > half or (rem == half and (sticky or q & 1)):
+        q += 1
+    return math.ldexp(float(q), drop - e - (d.bit_length() - 1))
+
+
+def _cc_sqrt(z):
+    """The square root of the element z of CC, as Sage's ComplexNumber.sqrt
+    (MPFR's steps): on the real line sqrt(x), or sqrt(-x) I for x < 0; else
+    a = sqrt((|z| + x)/2), b = y/a/2, from -z where x < 0 and |y| < |x| (no
+    cancellation), |z| correctly rounded.  On tame parts each step is a
+    normal double operation that rounds as MPFR does, and an infinite or NaN
+    part takes the same steps; otherwise the 53-bit MP field does it (a
+    part past the doubles refused)."""
+    import math
+    z = complex(z)
+    x, y = z.real, z.imag
+    finite = _isfinite(z)
+    if finite and not _cc_tame(z):
+        import _sage_real
+        return _sage_real._cc_from_mp(_sage_real._cc_mp()(z).sqrt())
+    if y == 0:
+        # (Sage's branch on the real line: sqrt(-0.0) is -0.0, and a NaN x
+        # is NaN with an imaginary part +0.0, MPFR's sign test failing)
+        if x >= 0 or x != x:
+            return ComplexNumber(math.sqrt(x), 0.0)
+        return ComplexNumber(0.0, math.sqrt(-x))
+    avoid = x < 0 and abs(y) < abs(x)
+    # (an infinite or NaN part: the same steps in the doubles, whose special
+    # values are MPFR's; hypot of an infinity is +infinity, NaN or not)
+    a2 = _hypot_rn(x, y) if finite else math.hypot(x, y)
+    a2 = ((a2 - x) if avoid else (a2 + x)) / 2
+    re = math.sqrt(a2)
+    im = y / re / 2
+    if avoid:
+        re, im = im, re
+        if y < 0:
+            re, im = -re, -im
+    return ComplexNumber(re, im)
 
 
 class ComplexNumber(complex):
@@ -4736,29 +4826,49 @@ class ComplexNumber(complex):
         return _sa().RealNumber(self.imag)
 
     def abs(self):
-        """The absolute value.
+        """The absolute value, as Sage's: sqrt(RN(RN(a^2) + RN(b^2))), each
+        step rounded (not hypot's correctly rounded |z|).
 
         EXAMPLES::
 
-            sage: CC(3, 4).abs()
-            5.00000000000000
+            sage: CC(3, 4).abs(), abs(CC(1, 2))
+            (5.00000000000000, 2.23606797749979)
 
         Past the doubles, Sage's value (in RR, which holds it)::
 
             sage: CC(2^1023, 2^1023).abs(), CC(2^-1074, 2^-1074).abs()
             (1.27116100615365e308, 6.98714337051313e-324)
         """
+        import math
         z = complex(self)
-        try:
-            r = abs(z)
-        except OverflowError:
-            r = None
-        if r is not None and (_NORMAL_MIN <= r < _INF or z == 0 or not _cc_finite(z)):
-            return _sa().RealNumber(r)
-        # (Sage's abs, sqrt(RN(a^2) + RN(b^2)), with MPFR's exponents)
+        a, b = z.real, z.imag
+        if _cc_tame(z) or not _cc_finite(z):
+            # (tame parts: their squares and sum are normal doubles or 0, and
+            # IEEE's square root is correctly rounded, as MPFR's; an infinite
+            # or NaN part: IEEE's values are MPFR's)
+            return _sa().RealNumber(math.sqrt(a * a + b * b))
+        # (Sage's abs with MPFR's exponents)
         import _sage_real
         import _sage_lang
         return _sage_lang._rr_from_mp(_sage_real._cc_mp()(z).abs())
+
+    __abs__ = abs
+
+    def sqrt(self, all=False):
+        """The principal square root, as Sage's: an exact 0 real part on the
+        negative real axis; with all, both roots, [r, -r] (only [0] for 0).
+
+        EXAMPLES::
+
+            sage: CC(-4, 0).sqrt(), CC(3, 4).sqrt()
+            (2.00000000000000*I, 2.00000000000000 + 1.00000000000000*I)
+            sage: CC(-4, 0).sqrt(all=True), CC(0).sqrt(all=True)
+            ([2.00000000000000*I, -2.00000000000000*I], [0.000000000000000])
+        """
+        r = _cc_sqrt(self)
+        if not all:
+            return r
+        return [r] if r == 0 else [r, -r]
 
     def log(self, base=None):
         """The principal logarithm, log|z| + arg(z) I with -pi < arg(z) <= pi
@@ -4854,7 +4964,10 @@ class ComplexNumber(complex):
         return _cc_div(c, complex(self))
 
     def __invert__(self):
-        return _cc_div(1, complex(self))
+        # (Sage's __invert__, not 1/self: their zeros' signs differ)
+        z = complex(self)
+        r = _cc_inv(z)
+        return ComplexNumber(r) if r is not None else _cc_slow("~", z, None)
 
     def __neg__(self):
         return ComplexNumber(-complex(self))
@@ -4971,13 +5084,18 @@ class ComplexField_:
 
     prec = precision
 
-    def __call__(self, re=0, im=0):
+    def __call__(self, re=0, im=None):
         """A complex number from a number or real and imaginary parts.
 
         EXAMPLES::
 
             sage: CC(1/2), CC(1, -1)
             (0.500000000000000, 1.00000000000000 - 1.00000000000000*I)
+
+        A complex number keeps its parts, a -0.0 too::
+
+            sage: float(CC(CC(1, -0.0)).imag()), float(CC(complex(1, -0.0)).imag())
+            (-0.0, -0.0)
             sage: CC('1e400')  # sagebrush only (Sage: 1.00000000000000e400)
             Traceback (most recent call last):
             ...
@@ -4987,6 +5105,9 @@ class ComplexField_:
             ...
             NotImplementedError: CC('1e-400j'): complex numbers beyond the range of doubles are not available in sagebrush yet
         """
+        one = im is None
+        if one:
+            im = 0
         for x in (re, im):
             if isinstance(x, str) and "_" in x:
                 # (Python's complex() accepts digit separators, Sage does
@@ -4995,7 +5116,12 @@ class ComplexField_:
         # (re + im i by parts: complex(im) * 1j made a NaN or infinite
         # imaginary part NaN + NaN j, spoiling the real part)
         a, b = complex(re), complex(im)
-        z = complex(a.real - b.imag if b.imag else a.real, a.imag + b.real if a.imag else b.real)
+        if one:
+            # (one number: its own parts, a -0.0 imaginary part too; a plain
+            # complex, not the argument itself when it is an element of CDF)
+            z = complex(a.real, a.imag)
+        else:
+            z = complex(a.real - b.imag if b.imag else a.real, a.imag + b.real if a.imag else b.real)
         # (CC's numbers are doubles: CC('1e400') was +infinity, CC('1e-400') 0)
         for x in (re, im):
             if _beyond_doubles(x):
