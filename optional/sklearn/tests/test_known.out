@@ -15,7 +15,7 @@
 == unique
 True
 == count
-(12, 12)
+(23, 23)
 == missing
 []
 == extra

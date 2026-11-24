@@ -22,3 +22,25 @@ dtype('<U2')
 !! NotImplementedError: sklearn.pipeline.Pipeline(memory=...) is not in Sagebrush's sklearn 0.x subset
 == pipeline.routing
 !! NotImplementedError: sklearn's metadata routing is not in Sagebrush's sklearn 0.x subset
+== tree.splitter-random
+!! NotImplementedError: sklearn.tree.DecisionTreeClassifier(splitter='random') is not in Sagebrush's sklearn 0.x subset (only the best splitter is)
+== tree.max_leaf_nodes
+!! NotImplementedError: sklearn.tree.DecisionTreeClassifier(max_leaf_nodes=...) is not in Sagebrush's sklearn 0.x subset (the best-first builder isn't; max_leaf_nodes=None is)
+== tree.ccp_alpha
+!! NotImplementedError: sklearn.tree.DecisionTreeRegressor(ccp_alpha=...) is not in Sagebrush's sklearn 0.x subset (minimal cost-complexity pruning isn't; ccp_alpha=0.0 is)
+== tree.monotonic_cst
+!! NotImplementedError: sklearn.tree.DecisionTreeClassifier(monotonic_cst=...) is not in Sagebrush's sklearn 0.x subset (monotonicity constraints aren't)
+== tree.absolute_error
+!! NotImplementedError: sklearn.tree.DecisionTreeRegressor(criterion='absolute_error') is not in Sagebrush's sklearn 0.x subset (the squared_error criterion is)
+== tree.poisson
+!! NotImplementedError: sklearn.tree.DecisionTreeRegressor(criterion='poisson') is not in Sagebrush's sklearn 0.x subset (the squared_error criterion is)
+== tree.decision_path
+!! NotImplementedError: sklearn.tree.DecisionTreeClassifier.decision_path is not in Sagebrush's sklearn 0.x subset (it returns a scipy sparse matrix)
+== tree.pruning_path
+!! NotImplementedError: sklearn.tree.DecisionTreeClassifier.cost_complexity_pruning_path is not in Sagebrush's sklearn 0.x subset (minimal cost-complexity pruning isn't)
+== tree.extra-tree
+!! NotImplementedError: sklearn.tree.ExtraTreeClassifier is not in Sagebrush's sklearn 0.x subset
+== tree.export_text
+!! NotImplementedError: sklearn.tree.export_text is not in Sagebrush's sklearn 0.x subset
+== tree.tree-class
+'sklearn.tree'

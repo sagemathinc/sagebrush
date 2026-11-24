@@ -44,3 +44,20 @@ def routing():
 
 
 case("pipeline.routing", routing)
+
+# (step P3b: what the decision trees refuse)
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+
+Xt = [[0.0, 1.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0]]
+yt = [0, 1, 1, 0]
+case("tree.splitter-random", lambda: DecisionTreeClassifier(splitter="random").fit(Xt, yt))
+case("tree.max_leaf_nodes", lambda: DecisionTreeClassifier(max_leaf_nodes=3).fit(Xt, yt))
+case("tree.ccp_alpha", lambda: DecisionTreeRegressor(ccp_alpha=0.1).fit(Xt, yt))
+case("tree.monotonic_cst", lambda: DecisionTreeClassifier(monotonic_cst=[1, 0]).fit(Xt, yt))
+case("tree.absolute_error", lambda: DecisionTreeRegressor(criterion="absolute_error").fit(Xt, yt))
+case("tree.poisson", lambda: DecisionTreeRegressor(criterion="poisson").fit(Xt, yt))
+case("tree.decision_path", lambda: DecisionTreeClassifier().fit(Xt, yt).decision_path(Xt))
+case("tree.pruning_path", lambda: DecisionTreeClassifier().cost_complexity_pruning_path(Xt, yt))
+case("tree.extra-tree", lambda: __import__("sklearn.tree", fromlist=["ExtraTreeClassifier"]).ExtraTreeClassifier)
+case("tree.export_text", lambda: __import__("sklearn.tree", fromlist=["export_text"]).export_text)
+case("tree.tree-class", lambda: type(DecisionTreeClassifier().fit(Xt, yt).tree_).__module__)

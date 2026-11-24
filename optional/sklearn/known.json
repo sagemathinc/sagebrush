@@ -60,6 +60,61 @@
       "case": "pipeline.routing",
       "printed": "!! NotImplementedError: sklearn's metadata routing is not in Sagebrush's sklearn 0.x subset",
       "reason": "metadata routing (enable_metadata_routing=True) is not in the subset; with it off, parameters pass to steps by stepname__parameter, as in scikit-learn"
+    },
+    {
+      "case": "tree.splitter-random",
+      "printed": "!! NotImplementedError: sklearn.tree.DecisionTreeClassifier(splitter='random') is not in Sagebrush's sklearn 0.x subset (only the best splitter is)",
+      "reason": "the random splitter (extra trees' thresholds) isn't ported yet; splitter='best', the default, grows scikit-learn's trees to the bit"
+    },
+    {
+      "case": "tree.max_leaf_nodes",
+      "printed": "!! NotImplementedError: sklearn.tree.DecisionTreeClassifier(max_leaf_nodes=...) is not in Sagebrush's sklearn 0.x subset (the best-first builder isn't; max_leaf_nodes=None is)",
+      "reason": "max_leaf_nodes switches scikit-learn to its best-first builder, which isn't ported yet; the depth-first builder (max_leaf_nodes=None) is"
+    },
+    {
+      "case": "tree.ccp_alpha",
+      "printed": "!! NotImplementedError: sklearn.tree.DecisionTreeRegressor(ccp_alpha=...) is not in Sagebrush's sklearn 0.x subset (minimal cost-complexity pruning isn't; ccp_alpha=0.0 is)",
+      "reason": "minimal cost-complexity pruning isn't ported yet; with ccp_alpha=0.0, the default, scikit-learn doesn't prune either"
+    },
+    {
+      "case": "tree.monotonic_cst",
+      "printed": "!! NotImplementedError: sklearn.tree.DecisionTreeClassifier(monotonic_cst=...) is not in Sagebrush's sklearn 0.x subset (monotonicity constraints aren't)",
+      "reason": "monotonicity constraints change the splitter's and builder's bounds, which aren't ported yet"
+    },
+    {
+      "case": "tree.absolute_error",
+      "printed": "!! NotImplementedError: sklearn.tree.DecisionTreeRegressor(criterion='absolute_error') is not in Sagebrush's sklearn 0.x subset (the squared_error criterion is)",
+      "reason": "only the squared_error regression criterion is ported (and gini, entropy and log_loss for classifiers)"
+    },
+    {
+      "case": "tree.poisson",
+      "printed": "!! NotImplementedError: sklearn.tree.DecisionTreeRegressor(criterion='poisson') is not in Sagebrush's sklearn 0.x subset (the squared_error criterion is)",
+      "reason": "as tree.absolute_error"
+    },
+    {
+      "case": "tree.decision_path",
+      "printed": "!! NotImplementedError: sklearn.tree.DecisionTreeClassifier.decision_path is not in Sagebrush's sklearn 0.x subset (it returns a scipy sparse matrix)",
+      "reason": "decision_path returns a scipy CSR matrix, and Sagebrush has no scipy.sparse; apply gives each sample's leaf"
+    },
+    {
+      "case": "tree.pruning_path",
+      "printed": "!! NotImplementedError: sklearn.tree.DecisionTreeClassifier.cost_complexity_pruning_path is not in Sagebrush's sklearn 0.x subset (minimal cost-complexity pruning isn't)",
+      "reason": "as tree.ccp_alpha"
+    },
+    {
+      "case": "tree.extra-tree",
+      "printed": "!! NotImplementedError: sklearn.tree.ExtraTreeClassifier is not in Sagebrush's sklearn 0.x subset",
+      "reason": "the extra trees need the random splitter (tree.splitter-random)"
+    },
+    {
+      "case": "tree.export_text",
+      "printed": "!! NotImplementedError: sklearn.tree.export_text is not in Sagebrush's sklearn 0.x subset",
+      "reason": "the export and plotting functions (export_text, export_graphviz, plot_tree) aren't ported yet"
+    },
+    {
+      "case": "tree.tree-class",
+      "printed": "'sklearn.tree'",
+      "reason": "tree_ is a Python class in sklearn.tree with the same attributes and methods (scikit-learn's is the compiled sklearn.tree._tree.Tree); its arrays are separate arrays rather than views of one structured array, which Sagebrush's numpy doesn't have"
     }
   ],
   "tolerances": [

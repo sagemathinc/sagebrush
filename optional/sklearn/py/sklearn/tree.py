@@ -258,7 +258,7 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator):
             self.n_classes_ = np.array(self.n_classes_, dtype=np.intp)
 
         # (y is an ndarray here: np.atleast_1d made it one)
-        if y.dtype != np.float64 or not y.flags.contiguous:
+        if y.dtype != np.float64 or not y.flags["C_CONTIGUOUS"]:
             y = np.ascontiguousarray(y, dtype=np.float64)
 
         max_depth = np.iinfo(np.int32).max if self.max_depth is None else self.max_depth
@@ -331,7 +331,9 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator):
                 min_samples_split=int(min_samples_split),
                 min_samples_leaf=int(min_samples_leaf),
                 min_weight_leaf=float(min_weight_leaf),
-                max_features=int(max_features),
+                # (more than n_features visits every feature, as n_features does: the splitter's loop ends
+                # once every feature is visited; the kernel takes at most n_features)
+                max_features=min(int(max_features), self.n_features_in_),
                 min_impurity_decrease=float(self.min_impurity_decrease),
                 seed=int(seed),
             )
