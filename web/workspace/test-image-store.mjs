@@ -166,6 +166,26 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   ok(U.bytes("/Attachments/nb-r/c.png") === null && readsOf === 1, "ready(): an image let go right after ready() was called isn't brought back, nor read again", readsOf);
   U.dispose();
 }
+// ---- ready() across clear() and the same paths loaded again (A, then B, then A again): it returns only once each path
+//  is settled in the current generation, not when the stale reads end
+{
+  const real = new Uint8Array(64).fill(7); real.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]);
+  const releases = [];
+  const U = new ImageUrls(() => new Promise((r) => releases.push(() => r(real))), () => {});
+  const p = "/Attachments/nb-ab/x.png";
+  const r = U.ready([p]);
+  U.clear();
+  void U.load(p);
+  let done = false;
+  void r.then(() => (done = true));
+  releases[0]();
+  await new Promise((res) => setTimeout(res, 10));
+  const early = done;
+  releases[1]();
+  await r;
+  ok(!early && U.bytes(p) !== null, "ready(): after a clear() and a reload of the same path, it waits for the new read, and the image is held", { early });
+  U.dispose();
+}
 // ---- an attachment named "__proto__" survives import and export
 {
   const S = store();

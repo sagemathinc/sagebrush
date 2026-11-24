@@ -19,6 +19,8 @@ export class ImageUrls {
   // (each path's version, bumped when it is let go (retain, clear): a read still on its way for it is dropped when it
   //  arrives, so nothing let go comes back)
   private ver = new Map<string, number>();
+  // (how many clear()s: ready() passes again only after one)
+  private clears = 0;
   private version = (p: string) => this.ver.get(p) ?? 0;
   private letGo(p: string) {
     this.ver.set(p, this.version(p) + 1);
@@ -46,6 +48,18 @@ export class ImageUrls {
    * what was held is replaced when its bytes changed or it went, and one missing before is found if it came back, so an
    * export embeds what the workspace has now, as Export all and a push do. */
   async ready(paths: string[]): Promise<void> {
+    // (waits that a clear() made stale (another document shown, then perhaps this one again): see below)
+    const clears = this.clears;
+    await this.pass(paths);
+    // (a clear() meanwhile: only the reads the document shown now has started for these same paths are waited for,
+    //  never new ones, so the document before gets nothing loaded again)
+    for (let i = 0; i < 3 && clears !== this.clears; i++) {
+      const pending = paths.map((p) => this.loading.get(p)).filter((x): x is Promise<void> => !!x);
+      if (!pending.length) return;
+      await Promise.all(pending);
+    }
+  }
+  private async pass(paths: string[]): Promise<void> {
     let redraw = false;
     await Promise.all(paths.map(async (p) => {
       // (one not held yet is read now by load: no second read)
@@ -102,6 +116,6 @@ export class ImageUrls {
   }
   /** Let go of every image (another document shown): their URLs revoked and their bytes dropped, and any read still on
    * its way dropped when it arrives. */
-  clear() { for (const p of [...this.urls.keys(), ...this.loading.keys()]) this.letGo(p); }
+  clear() { this.clears++; for (const p of [...this.urls.keys(), ...this.loading.keys()]) this.letGo(p); }
   dispose() { this.clear(); }
 }

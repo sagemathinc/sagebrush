@@ -4124,11 +4124,13 @@ fileMenu.addEventListener("click", async (e) => {
     // (the whole workspace as one .zip: the Files sidebar's export, the sidebar shown (sim run 11, X05))
     case "allzip": if (!wsBrowser) wsShowFiles(true); wsBrowser?.exportAll(); break;
     case "ipynb": {
-      // (its images read again, then written: only if the same notebook is still shown, else said, nothing written)
-      const was = current.id;
-      void nb.imagesReady().then(() => {
+      // (the notebook as it is now, its name with it, then its images read from the workspace for exactly that
+      //  snapshot (not the page's held ones), then written; if another notebook was opened meanwhile, said, nothing written)
+      const was = current.id, doc = { ...nb.snapshot(), name: docName() }, name = fileBase() + ".ipynb";
+      void embedAttachments(doc, readImageFile).then((r) => {
         if (current.id !== was) { statusEl.textContent = "Another notebook was opened before the download was ready: download again."; return; }
-        download(fileBase() + ".ipynb", notebookFileText(notebookForExport()));
+        if (r.missing.length) statusEl.textContent = IMAGES_LEFT_OUT(r.missing.length);
+        download(name, notebookFileText(r.doc));
       });
       break;
     }
