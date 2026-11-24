@@ -1,0 +1,11 @@
+[package]
+name = "sagebrush-glibm"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "glibc's log and pow (ARM optimized-routines, as glibc's x86-64 FMA build computes them), ported operation for operation: the one copy every Sagebrush wasm module that needs CPython's float bits links (moved from engine/mp)"
+
+# (no dependencies)
+
+[lints]
+workspace = true

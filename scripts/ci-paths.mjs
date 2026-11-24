@@ -83,9 +83,9 @@ const fullTierPaths = [
   /^web\/share\//, /^web\/share-client\//, /^web\/csp(?:-policy)?\.m?ts$/, /^web\/safe-html\.ts$/,
   // (the account at the top right, which reads the share dialog's first check: the share dialog's suite, below)
   /^web\/workspace\/account\.ts$/,
-  // (the hosted service's sharing, remotes, log mirror and support Worker, MS-RSL: their suites run only in web-sync's
-  // full-tier shards; and the mirror's format, which its Worker validates uploads with)
-  /^web\/cloud\/share\//, /^web\/cloud\/remote\//, /^web\/cloud\/mirror\//, /^web\/cloud\/support\//,
+  // (the hosted service's sharing, remotes, log mirror, LTI tool and support Worker, MS-RSL: their suites run only in
+  // web-sync's full-tier shards; and the mirror's format, which its Worker validates uploads with)
+  /^web\/cloud\/share\//, /^web\/cloud\/remote\//, /^web\/cloud\/mirror\//, /^web\/cloud\/lti\//, /^web\/cloud\/support\//,
   /^web\/workspace\/agent-chat\/mirror-format\.ts$/,
   // data loss: save, Trash, export, purge, and the workspace's store and its migrations
   /^web\/workspace\/[^/]*(?:trash|export|purge|save)[^/]*$/, /^web\/workspace\/export\//,
@@ -367,6 +367,8 @@ const webAreas = {
   board: [/^web\/board\//, /^web\/graph\//, /^web\/board-[^/]+$/, /^examples\/board\//, /^packages\/sagebrush-board\//],
   shell: [/^web\/shell\//],
   workspace: [/^web\/workspace\//],
+  // (a space in 3D, /space/: the viewer and its suites; its page loads nothing of the others')
+  space: [/^web\/space\//],
   // (the engine and its suite: checks only, no browser group)
   "app-engine": [/^app\/engine\//, /^web\/test-app-engine\.mjs$/],
 };
@@ -393,6 +395,7 @@ const webGroups = [
   ["board-unit", webRuntime || inArea("board") || inArea("workspace") || suiteGroups.has("board-unit")],
   ["terminal", webRuntime || inArea("shell") || suiteGroups.has("terminal")],
   ["remote-preview", webRuntime || suiteGroups.has("remote-preview")],
+  ["space", webRuntime || inArea("space") || suiteGroups.has("space")],
 ].filter(([, selected]) => web && selected).map(([group]) => group);
 // (the web-browser jobs: the selected groups packed into at most three, the CI capacity ruling, Nov 22 2026, the org's 60
 // concurrent jobs; 13 before, most of each its setup.  A job runs its groups in this order, every one even after one
@@ -400,7 +403,7 @@ const webGroups = [
 // web/dist with the bash set.  Every group is in exactly one job: test/ci-paths.test.ts)
 export const WEB_BUCKETS = [
   ["board", ["board-a", "board-b", "board-c", "board-unit", "preload"]],
-  ["notebook", ["notebook", "remote-preview", "terminal"]],
+  ["notebook", ["notebook", "remote-preview", "space", "terminal"]],
   ["latex", ["latex"]],
 ];
 const webMatrix = WEB_BUCKETS
@@ -442,8 +445,9 @@ const outputs = {
   long,
   // (mpmath's suite: the core backend always; the Python backend, a rollback path, the long tier's)
   mpmath_backends: JSON.stringify(long ? ["sagebrush", "python"] : ["sagebrush"]),
-  // (web-sync's shards: the share dialog's part 2, its big listing and upload leaks, the long tier's)
-  web_sync_shards: JSON.stringify(["core", "client", "pwa", ...(long ? ["share-dialog-2"] : [])]),
+  // (web-sync's shards: lti and lti-b, the hosted LTI tool's suites, web-sync.8 and .9; the share dialog's part 2, its
+  // big listing and upload leaks, the long tier's)
+  web_sync_shards: JSON.stringify(["core", "client", "pwa", "lti", "lti-b", ...(long ? ["share-dialog-2"] : [])]),
   wasm_build: wasmBuild,
   engine_cpython: engineCpython,
   webkit,
@@ -480,8 +484,9 @@ if (queueTested) {
   Object.assign(outputs, { web_groups: "[]", web_matrix: "[]", examples_ids: "[]", examples_matrix: "[]", slow_scope: "" });
 }
 outputs.queue_tested = queueTested;
-// PR CI light (the repository variable PR_CI_LIGHT, exactly "true", set by William while the merge queue is starved of
-// runners; ci.yml's changes job passes it as CI_PR_LIGHT): a pull request runs only checks and the size gate (with its
+// PR CI light (the checked-in switch .github/pr-ci-light, exactly "true", set by William while the merge queue is starved
+// of runners; ci.yml's changes job passes its first line as CI_PR_LIGHT, a file so that a fork's pull request reads it
+// too): a pull request runs only checks and the size gate (with its
 // size-base), as an ordinary pull request does when checks runs, and the modules' build when it needs one; every other
 // suite is left to its merge_group run, which is the full tier and gates the merge.  Never a queue group, a push, the
 // schedule or a dispatch; and a pull request labelled full-ci still runs everything it selected.  (@sagebrush's go,

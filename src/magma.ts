@@ -59,6 +59,10 @@ export const KEYWORDS = new Set(
 const OPS = [":->", "@@", "+:=", "-:=", "*:=", "/:=", "^:=", ":=", "..", "->", "{@", "@}", "{*", "*}", "$$", "<", ">", "(", ")", "[", "]", "{", "}",
   ",", ";", ":", "|", "#", "&", "~", "+", "-", "*", "/", "^", ".", "!", "`", "@", "=", "\\"];
 
+// The keywords whose assignment form Magma has, x div:= 2 (Magma 2.18-5; not eq:=, cmpeq:= or subset:=)
+const OPA_KW = new Set(["cat", "div", "mod", "join", "meet", "diff", "sdiff", "and", "or", "xor"]);
+const OPAS = ["+:=", "-:=", "*:=", "/:=", "^:=", ...[...OPA_KW].map((k) => k + ":=")];
+
 export function lex(src: string): Tok[] {
   const out: Tok[] = [];
   let i = 0, line = 1, col = 1;
@@ -82,6 +86,23 @@ export function lex(src: string): Tok[] {
     if (/[0-9]/.test(c)) {
       let j = i;
       while (j < n && /[0-9]/.test(src[j])) j++;
+      // hexadecimal, 0x1f (as Magma 2.18-5 reads it: ONE digit, any digit, which is ignored, then a lower-case x and
+      // hexadecimal digits of either case; 1x5 is 5 too): the integer, in decimal; digits and an x that aren't one
+      // (0x, 0xg, 10x5, 01x5) are Magma's "Invalid hexadecimal integer", at the x
+      if (src[j] === "x") {
+        let k = j + 1;
+        while (k < n && /[0-9a-fA-F]/.test(src[k])) k++;
+        if (j === i + 1 && k > j + 1) {
+          out.push({ t: "num", v: BigInt("0x" + src.slice(j + 1, k)).toString(), line: L, col: C });
+          adv(k - i);
+          continue;
+        }
+        out.push({ t: "num", v: src.slice(i, j).replace(/^0+(?=\d)/, ""), line: L, col: C });
+        adv(j - i);
+        out.push({ t: "bad", v: "x", line, col, msg: "Invalid hexadecimal integer" });
+        adv(1);
+        continue;
+      }
       let real = false;
       // 1.5 (but not 1..5) and 1e10
       if (src[j] === "." && /[0-9]/.test(src[j + 1] ?? "")) {
@@ -94,7 +115,8 @@ export function lex(src: string): Tok[] {
         j += 2;
         while (j < n && /[0-9]/.test(src[j])) j++;
       }
-      out.push({ t: real ? "real" : "num", v: src.slice(i, j), line: L, col: C });
+      // (an integer without its leading zeros: 007 is 7 in Magma, and not a Python literal)
+      out.push({ t: real ? "real" : "num", v: real ? src.slice(i, j) : src.slice(i, j).replace(/^0+(?=\d)/, ""), line: L, col: C });
       adv(j - i);
       continue;
     }
@@ -102,6 +124,12 @@ export function lex(src: string): Tok[] {
       let j = i;
       while (j < n && /[A-Za-z0-9_]/.test(src[j])) j++;
       const w = src.slice(i, j);
+      // div:= and the other keyword assignments, one token as Magma reads them (div := is its bad syntax)
+      if (OPA_KW.has(w) && src.startsWith(":=", j)) {
+        out.push({ t: "op", v: w + ":=", line: L, col: C });
+        adv(j + 2 - i);
+        continue;
+      }
       out.push({ t: KEYWORDS.has(w) ? "kw" : "id", v: w, line: L, col: C });
       adv(j - i);
       continue;
@@ -136,7 +164,6 @@ export function lex(src: string): Tok[] {
       adv(j + 1 - i);
       continue;
     }
-    if (src.startsWith("cat:=", i)) { out.push({ t: "op", v: "cat:=", line: L, col: C }); adv(5); continue; }
     const op = OPS.find((o) => src.startsWith(o, i));
     if (!op) {
       // reported by the parser when it reaches it, so that the statements
@@ -185,8 +212,9 @@ export const pyName = (s: string) => (PYKW.has(s) || PY_BUILTINS.has(s) || s.sta
  * (lib/_magma.py's _CALL_POS_NAMES, which a test keeps equal): their calls
  * are emitted as _m._call((line, col), f, args), so that a repeated or
  * nested call is told apart. */
-export const CALL_POS = new Set(("ChangeRing CharacteristicPolynomial DefiningPolynomial Embed Generator Identity IsSubfield " +
-  "MinimalPolynomial Norm PrimeField Root RootsInSplittingField Solution Submatrix Subsets Sym Trace Vector").split(" "));
+export const CALL_POS = new Set(("ChangeRing CharacteristicPolynomial DefiningPolynomial Embed Generator Identity Integral IsSubfield " +
+  "MinimalPolynomial Norm Normalise Normalize PrimeField Root RootsInSplittingField Solution SquarefreeFactorization " +
+  "Submatrix Subsets Sym Trace Vector").split(" "));
 /** The Magma name of a Python name made by pyName. */
 const magmaName = (py: string) => (py.endsWith("_") && pyName(py.slice(0, -1)) === py ? py.slice(0, -1) : py);
 
@@ -342,7 +370,6 @@ class Parser {
       if (a.v === "$" && b.t === "num" && !operandBefore) return found("$1 (the values printed last)");
       if (a.v === "$$" && T.slice(from, k).some((x) => x.v === "func")) return found("$$ in func< >");
       if (a.t === "id" && b.v === "<" && c.v === "[") return found(`${a.v}<[...]> (generator names in a sequence)`);
-      if (a.t === "kw" && ["join", "meet", "cat", "diff", "sdiff", "div", "mod", "and", "or", "xor"].includes(a.v) && b.v === ":=") return found(`${a.v}:= (an assignment with ${a.v})`);
       if (a.v === "for" && b.t === "id" && c.v === ",") return found("for x, y in S (several loop variables)");
       if (a.v === "load" && a.t === "id" && k === from) return found("load (Magma's library files)");
       if (a.v === "for" && b.t === "id" && c.v === "in") {
@@ -353,12 +380,6 @@ class Parser {
           else if (")]}>".includes(T[q].v)) depth--;
           else if (T[q].v === "," && depth === 0) return found("for i in S, j in T (several loops in one for)");
         }
-      }
-      if (a.t === "id" && b.v === "<" && k === from) {
-        // S<y>, h := f(...): generator names, and other values
-        let q = k + 2;
-        while (q < T.length && T[q].v !== ">" && T[q].v !== ";") q++;
-        if (T[q]?.v === ">" && T[q + 1]?.v === ",") return found(`${a.v}<...>, ... := (generator names with other values)`);
       }
       if (a.v === "." && (b.v === "-" || b.v === "<") && k > from && T[k - 1].t === "id") return found(b.v === "-" ? `${T[k - 1].v}.-1 (a generator's inverse by its index)` : `${T[k - 1].v}.<...> (an element by its indices)`);
       if (a.v === "=" && a.t === "op") return found("= (an equation, as in a relation)");
@@ -836,7 +857,7 @@ class Parser {
         this.next();
         return this.assign(lhs);
       }
-      const opa = ["+:=", "-:=", "*:=", "/:=", "^:=", "cat:="].find((o) => this.at(o));
+      const opa = OPAS.find((o) => this.at(o));
       if (opa && lhs.length === 1) {
         const ot = this.next();
         const e = this.expr();
@@ -848,7 +869,9 @@ class Parser {
         // an error points at the operator and is named after it ('+:=')
         const at = `(${ot.line}, ${ot.col}), ${JSON.stringify(opa)}`;
         const helper = { "+": "_add", "-": "_sub", "*": "_mul", "/": "_div", "^": "_pow" }[op];
-        const val = helper ? `_m.${helper}(${cur}, ${e}, ${at})` : `_m._cat(${cur}, ${e})`;
+        // (the keyword ones through _opassign, which names their errors after the assignment, 'div:=')
+        const kw: Record<string, string> = { cat: "_cat", div: "_idiv", mod: "_mod", join: "_join", meet: "_meet", diff: "_diff", sdiff: "_sdiff", and: "_and", or: "_or", xor: "_xor" };
+        const val = helper ? `_m.${helper}(${cur}, ${e}, ${at})` : `_m._opassign(_m.${kw[op]}, ${cur}, ${e}, ${at})`;
         this.store(target, val);
         return;
       }
@@ -873,7 +896,11 @@ class Parser {
       if (names.length === 1) this.store(names[0], `_m._ref1(${tmp})`);
       else names.forEach((r, k) => this.store(r, `_m._refk(${tmp}, ${k})`));
     } else {
-      this.emit(`_m._show_values(${this.all(e.code)})`);
+      // (a call that is the whole statement, f(3);, names its bad argument types after the application, '@', as
+      // Magma 2.18-5 does: _m._call_bare)
+      const whole = this.calls.get(e.code);
+      const code = whole?.startsWith("_m._call(") ? "_m._call_bare(" + whole.slice("_m._call(".length) : this.all(e.code);
+      this.emit(`_m._show_values(${code})`);
     }
   }
 
@@ -901,7 +928,7 @@ class Parser {
       out.push(t);
       if (!this.eat(",")) break;
     }
-    if (!this.at(":=") && !["+:=", "-:=", "*:=", "/:=", "^:=", "cat:="].some((o) => this.at(o))) { this.i = save; return null; }
+    if (!this.at(":=") && !OPAS.some((o) => this.at(o))) { this.i = save; return null; }
     return out;
   }
 
@@ -919,7 +946,8 @@ class Parser {
         gens.push(this.next().v);
         if (!this.eat(",")) break;
       }
-      if (this.eat(">") && this.at(":=")) return { kind: "gens", py: pyName(name), gens: gens.map(pyName), names: gens, read: pyName(name) };
+      // (and in a multiple assignment, G<g>, m := ext<F | 3>, the values at their places)
+      if (this.eat(">") && (this.at(":=") || this.at(","))) return { kind: "gens", py: pyName(name), gens: gens.map(pyName), names: gens, read: pyName(name) };
       this.i = save;
       return null;
     }
@@ -975,13 +1003,9 @@ class Parser {
     const op = this.toks[this.i - 1];
     // R<x> := PolynomialRing(...)
     if (lhs.length === 1 && lhs[0].kind === "gens") {
-      const g = lhs[0];
       const e = this.expr();
       this.expect(";");
-      this.declareGlobal(g.py);
-      this.emit(`${g.py} = _m._first(${e})`);
-      this.emit(`_m._assign_gen_names(${g.py}, ${JSON.stringify(g.names)})`);
-      g.gens!.forEach((x, k) => { this.declareGlobal(x); this.emit(`${x} = _m._gen(${g.py}, ${k + 1})`); });
+      this.nameGens(lhs[0], `_m._first(${e})`);
       return;
     }
     const e = this.exprStatement();
@@ -994,11 +1018,20 @@ class Parser {
     this.emit(`${tmp} = _m._values(${this.all(e.code)}, ${lhs.length}, (${op.line}, ${op.col}))`);
     lhs.forEach((t, k) => {
       if (t.py === "_m_discard") return;
+      if (t.kind === "gens") return this.nameGens(t, `${tmp}[${k}]`);
       if (t.kind !== "name") return this.store(t, `_m._present(${tmp}[${k}])`);
       // a missing return value (return x, _;) leaves the variable unassigned
       this.store(t, `${tmp}[${k}]`);
       this.emit(`if ${t.py} is _m._NOVAL: del ${t.py}`);
     });
+  }
+
+  /** R<x, ...> bound to value (its code), and its generators named x, ... */
+  nameGens(g: Target, value: string) {
+    this.declareGlobal(g.py);
+    this.emit(`${g.py} = ${value}`);
+    this.emit(`_m._assign_gen_names(${g.py}, ${JSON.stringify(g.names)})`);
+    g.gens!.forEach((x, k) => { this.declareGlobal(x); this.emit(`${x} = _m._gen(${g.py}, ${k + 1})`); });
   }
 
   // ---- control
@@ -1408,15 +1441,44 @@ class Parser {
   }
 
   mulExpr(): string {
+    const i0 = this.i;
     const first = this.unary();
+    const i1 = this.i;
     const steps: Parameters<Parser["chain"]>[1] = [];
     while (this.at("*") || this.at("/") || this.at("div") || this.at("mod") || this.at("meet")) {
       const t = this.next();
       const f = `_m.${{ "*": "_mul", "/": "_div", div: "_idiv", mod: "_mod", meet: "_meet" }[t.v]}`;
+      const r0 = this.i;
       const r = this.unary(), pos = `(${t.line}, ${t.col})`;
+      if (t.v === "/" && !steps.length) this.zeroDenominator(i0, i1, r0, this.i);
       steps.push({ nest: (l) => `${f}(${l}, ${r}, ${pos})`, op: f, r, pos });
     }
     return this.chain(first, steps);
+  }
+
+  /** An integer literal over a literal zero is refused as Magma reads the statement, before it runs (Magma 2.18-5:
+   * `1/0`, `-(1)/0`, `1/(0)`, `1/--0`, `(-1)/(-(0))`, even in a function never called), "Illegal zero
+   * denominator" at the zero; anything computed (`1/+0`, `(1+1)/0`, `1/(0+0)`, `x/0`) divides when it runs.  The
+   * tokens of each operand: [from, to). */
+  zeroDenominator(a0: number, a1: number, b0: number, b1: number) {
+    // (a literal: any mix of ( and unary - before the digits, the )s balancing the (s after them)
+    const literal = (from: number, to: number) => {
+      const T = this.toks.slice(from, to), op = (x: Tok | undefined, v: string) => x?.t === "op" && x.v === v;
+      let k = 0, open = 0;
+      while (op(T[k], "(") || op(T[k], "-")) open += op(T[k++], "(") ? 1 : 0;
+      const n = T[k];
+      if (n?.t !== "num" || T.length !== k + 1 + open || !T.slice(k + 1).every((x) => op(x, ")"))) return null;
+      // (the caret at its first token after the leading parentheses: the minus of -0, (-0) or -(0))
+      let at = 0;
+      while (op(T[at], "(")) at++;
+      return { zero: /^0+$/.test(n.v), at: T[at] };
+    };
+    // (Magma reads one token past the zero first: one that can't follow it, an identifier, a number, a string, . or
+    // $, is its bad syntax there instead, as in 1/0 x and 1/0X5, which is 0 and X5)
+    const ahead = this.toks[b1];
+    if (["id", "num", "real", "str", "bad"].includes(ahead.t) || (ahead.t === "op" && [".", "$", "$$"].includes(ahead.v))) return;
+    const a = literal(a0, a1), b = literal(b0, b1);
+    if (a && b?.zero) throw new MagmaSyntaxError("Illegal zero denominator", b.at.line, b.at.col, true);
   }
 
   unary(): string {
@@ -1470,8 +1532,10 @@ class Parser {
   }
 
   postfix(): string {
-    const head = this.peek();
+    const head = this.peek(), h0 = this.i;
     let e = this.primary();
+    // (the callee just a name, its one token: in a function body its read is a placeholder, or the function's own)
+    const oneName = head.t === "id" && this.i === h0 + 1;
     // (a call of an intrinsic that says its errors at its call's "(", by
     // its name or through a variable or parameter that may hold one:
     // _m._call tells the runtime which call it is, nested or repeated; in a
@@ -1498,7 +1562,10 @@ class Parser {
         // are references (_m._refcall), as AssignNames checks them
         if (a.refs.length) e = `_m._refcall(${e}, [${a.refPos.join(", ")}], ${a.code})`;
         else {
-          const call = located && links === 1 ? `_m._call((${lp.line}, ${lp.col}), ${e}${a.code ? ", " + a.code : ""})` : `${e}(${a.code})`;
+          // (a callee that isn't a name, 2(3), (f)(x), g()(3), goes through _m._call too, which refuses a value
+          // that isn't a function at its "(", as Magma does)
+          const named = oneName && links === 1;
+          const call = (located && links === 1) || !named ? `_m._call((${lp.line}, ${lp.col}), ${e}${a.code ? ", " + a.code : ""})` : `${e}(${a.code})`;
           e = `_m._first(${call})`;
           this.calls.set(e, call);
         }

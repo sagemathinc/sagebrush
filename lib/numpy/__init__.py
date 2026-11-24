@@ -1440,7 +1440,23 @@ def nanargmin(a, axis=None):
 
 
 def median(a, axis=None, out=None, overwrite_input=False, keepdims=False):
-    return quantile(a, 0.5, axis=axis, keepdims=keepdims)
+    # (as NumPy's _median: the mean of the middle element, or of the two middle ones, so an integer array gives
+    # float64 and a float array keeps its type; a NaN in a slice makes its median NaN)
+    a = asarray(a)
+    if axis is None:
+        ax, s = 0, sort(a.ravel())
+    else:
+        # (sort checks the axis first, with NumPy's AxisError; then it is a valid index)
+        s = moveaxis(sort(a, axis=axis), axis, -1)
+        ax = axis % a.ndim
+    n = s.shape[-1]
+    k = n // 2
+    r = asarray(mean(s[..., k:k + 1] if n % 2 else s[..., _builtins.max(k - 1, 0):k + 1], axis=-1))
+    if n and s.dtype.kind in "fc":
+        r = where(isnan(s[..., -1]), s[..., -1], r)
+    if keepdims:
+        r = r.reshape((1,) * a.ndim) if axis is None else expand_dims(r, ax)
+    return r if r.ndim else r[()]
 
 
 def nanmedian(a, axis=None, out=None, overwrite_input=False, keepdims=False):
@@ -1489,11 +1505,16 @@ def _quantile(a, qa, weak_q, axis, method, keepdims, out_of_range):
             gamma = asarray(0.0 if virtual % 1 == 0 else 0.5, dtype=asarray(virtual).dtype)[()]
         else:
             gamma = virtual - floor(virtual)
-        if weak_q:
-            gamma = float(gamma)
         prev, nxt = s[..., lo], s[..., hi]
         diff_b_a = nxt - prev
-        vals.append(nxt - diff_b_a * (1 - gamma) if gamma >= 0.5 else prev + diff_b_a * gamma)  # NumPy's _lerp
+        if weak_q:
+            # (a Python float weight, as NumPy makes gamma: weak, so for float32 data it and 1 - gamma are rounded to
+            # float32 before the loop, as NEP 50 casts a weak scalar; the arithmetic then stays float32)
+            g = float(gamma)
+            w, w1 = (float32(g), float32(1 - g)) if asarray(diff_b_a).dtype == float32 else (g, 1 - g)
+        else:
+            w, w1 = gamma, 1 - gamma
+        vals.append(nxt - diff_b_a * w1 if gamma >= 0.5 else prev + diff_b_a * w)  # NumPy's _lerp
     res = array(vals) if qa.ndim else asarray(vals[0])
     if qa.ndim:
         res = res.reshape(qa.shape + res.shape[1:])

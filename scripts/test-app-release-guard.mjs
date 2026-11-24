@@ -13,7 +13,9 @@
 // on the tauri and cargo steps after it; the app is stapled (until its ticket
 // validates) before the disk image is made from it (a stub xcrun); and the
 // engine Node's entitlement check is run on true, false and absent entitlements
-// (a stub codesign).
+// (a stub codesign).  And the two hand-run checks: signing-check (the Mac
+// secrets) and windows-signing-check (Windows signing, its own environment,
+// the OIDC token for its job alone, a throwaway probe signed and kept 1 day).
 //
 //   node scripts/test-app-release-guard.mjs
 import { readFileSync } from "node:fs";
@@ -283,6 +285,127 @@ if (jit) {
       ok(got === runs, `signing-check, ${what}: ${runs ? "runs" : "never runs"} (the condition says ${got})`);
     }
   }
+}
+// The Windows signing check (.github/workflows/windows-signing-check.yml): run by hand only, asked to sign, from
+// master on this repository, in an environment of its own that no other workflow names; the OIDC token granted to
+// that job alone; the throwaway executable built before the sign-in, signed only with the Azure CLI sign-in (no cache,
+// no environment credential), checked, and kept 1 day; every action pinned to a commit.
+{
+  const wf = (f) => readFileSync(join(root, ".github", "workflows", f), "utf8");
+  const ws = wf("windows-signing-check.yml");
+  const on = /^on:\n([\s\S]*?)(?=^\S)/m.exec(ws)?.[1] ?? "";
+  ok(/^  workflow_dispatch:\s*$/m.test(on) && on.split("\n").filter((l) => /^  \S/.test(l)).length === 1, "windows-signing-check runs only by hand (workflow_dispatch alone)");
+  ok(/^      sign_windows:\n        description: .+\n        type: boolean\n        default: false$/m.test(on), "windows-signing-check's sign_windows input is a boolean, false unless asked");
+  const check = /^  check:\n([\s\S]*?)(?=^  [A-Za-z0-9_-]+:\n|(?![\s\S]))/m.exec(ws)?.[1] ?? "";
+  ok((ws.match(/^  [A-Za-z0-9_-]+:\n/gm) ?? []).filter((l) => !/^  (workflow_dispatch|contents|check):/.test(l)).length === 0, "windows-signing-check has one job, check");
+  ok(/^    environment: sagebrush-signing-windows$/m.test(check), "windows-signing-check uses the sagebrush-signing-windows environment");
+  const others = ["app.yml", "signing-check.yml", "ci.yml"].filter((f) => { try { return /sagebrush-signing-windows|AZURE_(TENANT|CLIENT|SUBSCRIPTION)_ID|ARTIFACT_SIGNING_/.test(wf(f)); } catch { return false; } });
+  ok(others.length === 0, `no other workflow names the Windows environment or its names (${others.join(", ") || "none"})`);
+  ok(/^    environment: sagebrush-signing$/m.test(check) === false, "windows-signing-check never names the Mac environment");
+  // (the token: id-token: write once, in the job, never at the workflow's top)
+  const top = /^permissions:\n((?:  .+\n)+)/m.exec(ws)?.[1] ?? "";
+  ok(/^  contents: read$/m.test(top) && !/id-token/.test(top), "windows-signing-check's workflow permissions are contents: read alone");
+  ok((ws.match(/id-token: write/g) ?? []).length === 1 && /^    permissions:\n      contents: read\n      id-token: write$/m.test(check), "id-token: write is granted to the check job alone");
+  const wsIf = /^    if: (.+)$/m.exec(check)?.[1];
+  ok(!!wsIf, "windows-signing-check's job has an if: on one line");
+  if (wsIf) {
+    for (const [what, event_name, ref, repository, inputs, runs] of [
+      ["a dispatch from master asking to sign", "workflow_dispatch", "refs/heads/master", REPO, { sign_windows: true }, true],
+      ["a dispatch from master not asking", "workflow_dispatch", "refs/heads/master", REPO, { sign_windows: false }, false],
+      ["a dispatch from master with no input", "workflow_dispatch", "refs/heads/master", REPO, {}, false],
+      ["a dispatch from a branch", "workflow_dispatch", "refs/heads/track/math", REPO, { sign_windows: true }, false],
+      ["a dispatch from a branch named master-ish", "workflow_dispatch", "refs/heads/master2", REPO, { sign_windows: true }, false],
+      ["a dispatch from a tag", "workflow_dispatch", "refs/tags/app-v0.4.0", REPO, { sign_windows: true }, false],
+      ["a fork's dispatch from master", "workflow_dispatch", "refs/heads/master", "someone/sagebrush", { sign_windows: true }, false],
+      ["a push to master", "push", "refs/heads/master", REPO, { sign_windows: true }, false],
+      ["a pull request", "pull_request", "refs/pull/1/merge", REPO, { sign_windows: true }, false],
+    ]) {
+      let got;
+      try { got = jobIf(wsIf, { github: { event_name, ref, repository }, inputs, needs: {}, cancelled: false, upstream: [] }); } catch (e) { ok(false, `windows-signing-check, ${what}: ${e.message}`); continue; }
+      ok(Boolean(got) === runs, `windows-signing-check, ${what}: ${runs ? "runs" : "never runs"} (the condition says ${got})`);
+    }
+  }
+  // (the steps, in order)
+  const at = (re) => check.search(re);
+  const build = at(/name: Build the throwaway executable/), login = at(/uses: azure\/login@/), sign = at(/uses: azure\/artifact-signing-action@/), verify = at(/name: Check the signature and its timestamp/), upload = at(/uses: actions\/upload-artifact@/);
+  ok(build >= 0 && login > build && sign > login && verify > sign && upload > verify, "build the probe, then sign in, sign, check, keep (in that order)");
+  const uses = check.match(/uses: \S+/g) ?? [];
+  ok(uses.length === 3 && uses.every((u) => /^uses: [A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}$/.test(u)), `every action is pinned to a commit (${uses.join("; ")})`);
+  const signStep = check.slice(sign, verify);
+  ok(/cache-dependencies: false/.test(signStep) && /exclude-environment-credential: true/.test(signStep) && /exclude-azure-cli-credential: false/.test(signStep), "the sign step uses the Azure CLI sign-in alone, with no cache");
+  ok(/timestamp-rfc3161: http:\/\/timestamp\.acs\.microsoft\.com/.test(signStep), "the signature is timestamped (RFC 3161)");
+  // (the sign-in is tenant-level: the identity's one role is on the certificate profile, so it sees no subscription,
+  //  and a subscription-id would make azure/login fail with "No subscriptions found" (the first real run, Nov 24))
+  const loginStep = check.slice(login, sign);
+  ok(/^\s+allow-no-subscriptions: true$/m.test(loginStep) && !/subscription-id|AZURE_SUBSCRIPTION_ID/.test(ws), "the sign-in allows no subscription and names none");
+  ok(/files: \$\{\{ runner\.temp \}\}\\probe\\sagebrush-signing-probe\.exe/.test(signStep) && !/files-folder|files-catalog/.test(signStep), "the sign step signs the throwaway probe alone");
+  const verifyStep = check.slice(verify, upload);
+  ok(/verify \/pa \/all/.test(verifyStep) && /Get-AuthenticodeSignature/.test(verifyStep) && /TimeStamperCertificate/.test(verifyStep), "the check runs signtool verify /pa /all and Get-AuthenticodeSignature, timestamp included");
+  // (each required postcondition, as the exact line that checks it and counts its failure, in order, and the step
+  //  failing on any count: so a check replaced by if ($true), or dropped, or no longer counted, fails here)
+  const lines = verifyStep.split("\n").map((l) => l.trim()).filter((l) => l && l !== "-" && !l.startsWith("#"));
+  const must = [
+    "$fails = 0",
+    "& $signtool.FullName verify /pa /all /v $exe | Out-Null",
+    'if ($LASTEXITCODE -eq 0) { "PASS  signtool verify /pa /all" } else { "FAIL  signtool verify /pa /all (exit $LASTEXITCODE)"; $fails++ }',
+    "$s = Get-AuthenticodeSignature $exe",
+    `if ($s.Status -eq 'Valid') { "PASS  Get-AuthenticodeSignature: Valid" } else { "FAIL  Get-AuthenticodeSignature: $($s.Status)"; $fails++ }`,
+    'if ($s.TimeStamperCertificate) { "PASS  the signature is timestamped" } else { "FAIL  the signature has no timestamp"; $fails++ }',
+    "$subject = if ($s.SignerCertificate) { $s.SignerCertificate.Subject } else { '' }",
+    `if (($subject -cmatch $OrgPattern) -and ([regex]::Matches($subject, $AnyOrg).Count -eq 1)) { "PASS  the signer is SageMath, Inc." } else { "FAIL  the signer isn't SageMath, Inc."; $fails++ }`,
+    "if ($fails) { exit 1 }",
+  ];
+  let from = 0;
+  for (const m of must) {
+    const i = lines.indexOf(m, from);
+    ok(i >= 0, `the check step has, in order: ${m}`);
+    if (i >= 0) from = i + 1;
+  }
+  ok(lines[lines.length - 1] === "if ($fails) { exit 1 }", "the check step ends by failing on any failed check");
+  ok(lines[lines.indexOf("& $signtool.FullName verify /pa /all /v $exe | Out-Null") + 1]?.startsWith("if ($LASTEXITCODE -eq 0)"), "signtool's exit code is read right after it runs");
+  ok(lines.filter((l) => /\$fails\s*=/.test(l)).length === 1 && lines.filter((l) => l.includes('"FAIL ')).every((l) => /\$fails\+\+ \}$|exit 1 \}$/.test(l)), "every FAIL counts (or exits), and $fails is set only once, to 0");
+  ok(!/if \(\$true\)|-or \$true|\| Out-Null; \$LASTEXITCODE = 0/.test(verifyStep), "no check is short-circuited");
+  // (the signer's organization: the step's own two patterns (.NET regex, in the subset JavaScript reads the same:
+  //  groups, alternation, anchors, escapes), run over the subject forms .NET writes and near misses; the check passes
+  //  when the first matches, case-sensitively, and the second matches exactly once)
+  const orgPat = /^\s+\$OrgPattern = '([^']*)'$/m.exec(verifyStep)?.[1];
+  const anyPat = /^\s+\$AnyOrg = '([^']*)'$/m.exec(verifyStep)?.[1];
+  ok(!!orgPat && !!anyPat && /\$subject -cmatch \$OrgPattern/.test(verifyStep) && /\[regex\]::Matches\(\$subject, \$AnyOrg\)\.Count -eq 1/.test(verifyStep), "the signer check uses $OrgPattern (case-sensitive) and exactly one O attribute");
+  ok(!/Subject -match|Subject -like|-imatch/.test(verifyStep), "no loose subject match is left");
+  if (orgPat && anyPat) {
+    ok(/^[\w\s(?:^|),="\\.$]+$/.test(orgPat + anyPat) && !/[*+{}[\]]/.test(orgPat + anyPat), "the patterns use only the regex subset both engines read alike");
+    const org = new RegExp(orgPat), any = new RegExp(anyPat, "g");
+    const signer = (subject) => org.test(subject) && (subject.match(any) ?? []).length === 1;
+    for (const [subject, passes] of [
+      ['CN="SageMath, Inc.", O="SageMath, Inc.", L=Seattle, S=Washington, C=US', true],
+      ['O="SageMath, Inc."', true],
+      ['C=US, O="SageMath, Inc."', true],
+      ['O="SageMath, Inc.", C=US', true],
+      ["CN=x, O=SageMath\\, Inc., C=US", true],
+      ['O="SageMath, Inc. Evil", C=US', false],
+      ['O="SageMath, Inc.evil", C=US', false],
+      ["O=SageMath, Inc.evil, C=US", false],
+      ["O=SageMath, Inc., C=US", false],
+      ['O="Evil SageMath, Inc.", C=US', false],
+      ['O="XSageMath, Inc.", C=US', false],
+      ['O="SageMath, Inc., C=US', false],
+      ['O=SageMath, Inc.", C=US', false],
+      ['O="sagemath, inc.", C=US', false],
+      ['o="SageMath, Inc.", C=US', false],
+      ['XO="SageMath, Inc.", C=US', false],
+      ['XO="SageMath, Inc.", O="Evil", C=US', false],
+      ["O=SageMath\\, Inc.evil, C=US", false],
+      ["O=SageMath\\, Inc. Evil", false],
+      ['CN="SageMath, Inc.", C=US', false],
+      ['O="SageMath, Inc.", O="Evil", C=US', false],
+      ['O="Evil", O="SageMath, Inc.", C=US', false],
+      ['CN="a, O=""SageMath, Inc."", b", O="Evil"', false],
+      ["", false],
+    ]) ok(signer(subject) === passes, `the signer check ${passes ? "accepts" : "refuses"} ${JSON.stringify(subject)}`);
+  }
+  const up = check.slice(upload);
+  ok(/retention-days: 1$/m.test(up) && !/app\/|bundle|\.msi|setup/i.test(up), "the signed probe alone is kept, 1 day");
+  ok(!/gh release|softprops|action-gh-release|releases/.test(ws), "windows-signing-check makes no release");
 }
 // The signed disk image is kept 1 day as an artifact: in a public repository any signed-in GitHub user can download
 // it (design/native-desktop.md §6.3).
