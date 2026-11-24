@@ -120,3 +120,17 @@ array([[3, 4, 5],
 True
 == index-names-on-array
 !! ValueError: Specifying the columns using strings is only supported for dataframes.
+== resample-weighted-one
+array([2, 2, 2, 2])
+== resample-weighted
+array([3, 5, 3, 3, 5, 5, 2, 3])
+== resample-weighted-two-arrays
+[array([[0, 1],
+       [6, 7],
+       [6, 7],
+       [6, 7],
+       [8, 9]]), ['a', 'd', 'd', 'd', 'e']]
+== resample-weighted-noreplace
+!! NotImplementedError: Resampling with sample_weight is only implemented for replace=True.
+== resample-weighted-length
+!! ValueError: sample_weight.shape == (2,), expected (4,)!

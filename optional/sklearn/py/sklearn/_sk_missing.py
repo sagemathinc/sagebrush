@@ -8,3 +8,8 @@ def missing(module, name):
     if name in MODULES.get(module, ()):
         raise NotImplementedError("%s.%s is not in Sagebrush's sklearn 0.x subset" % (module, name))
     raise AttributeError("module %r has no attribute %r" % (module, name))
+
+
+def module_names(module):
+    """The public names scikit-learn 1.9.1's module has."""
+    return MODULES.get(module, ())

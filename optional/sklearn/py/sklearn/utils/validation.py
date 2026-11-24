@@ -316,6 +316,11 @@ def check_array(array, accept_sparse=False, *, accept_large_sparse=True, dtype="
     if copy and array is array_orig:
         array = np.array(array, dtype=dtype, order=order, copy=True)
 
+    if force_writeable and not array.flags.writeable:
+        # (a read-only input, such as a pandas frame's values, when a writeable output is asked for: a copy, so that
+        # the caller's data is never changed)
+        array = np.array(array, copy=True)
+
     if ensure_min_samples > 0:
         n_samples = _num_samples(array)
         if n_samples < ensure_min_samples:
