@@ -1390,6 +1390,20 @@ const cmul32 = (ar: number, ai: number, br: number, bi: number): [number, number
   fr(fr(ar * br) - fr(ai * bi)),
   fr(fr(ar * bi) + fr(ai * br)),
 ];
+// ... and scalarmath's complex64 product: the plain formula with each product and sum rounded to float32, a NaN
+// part chosen as cmul's
+function cmulScalar32(ar: number, ai: number, br: number, bi: number): [number, number] {
+  ar = fr(ar), ai = fr(ai), br = fr(br), bi = fr(bi);
+  let p = fr(ar * br), q = fr(ai * bi), s = fr(ar * bi), t = fr(ai * br);
+  if (p !== p) p = nanOf(ar, br);
+  if (q !== q) q = nanOf(bi, ai);
+  if (s !== s) s = nanOf(ar, bi);
+  if (t !== t) t = nanOf(br, ai);
+  let re = fr(p - q), im = fr(s + t);
+  if (re !== re) re = nanOf(p, q);
+  if (im !== im) im = nanOf(s, t);
+  return [re, im];
+}
 // NumPy's elementwise complex multiply loop (multiply, square, prod across an outer axis): each part one fused
 // multiply-add, re = fma(ar, br, -(ai*bi)) and im = fma(ar, bi, ai*br), rounded once (to float32 for complex64)
 // A NaN part as that loop's on x86 (the reference's): its NaN operand, unchanged (the subtracted one too),
@@ -1645,7 +1659,7 @@ function stridedKernel(op: string): any {
 // and shape (out C-contiguous from its start and sharing no memory with the
 // operands unless it is one of them, laid out alike): else undefined, before
 // anything is computed.
-// (scalarMath: an operator on two scalars, NumPy's scalarmath, whose complex128 product is the plain formula)
+// (scalarMath: an operator on two scalars, NumPy's scalarmath, whose complex product is the plain formula)
 export function binary(op: string, x: any, y: any, out: NDArray | null = null, tryOut = false, scalarMath = false): any {
   const spec = BIN[op];
   if (out) outWritable(out);
@@ -1709,7 +1723,7 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
   const ad = a.data, bd = b.data, od = res.data, ost = res.strides, oo = res.offset;
   const contigOut = res.isC() && oo === 0;
   if (ct.cplx) {
-    const fc = scalarMath && op === "multiply" && rt === D.complex128 ? cmul : rt === D.complex64 && spec.c32 ? spec.c32 : spec.c;
+    const fc = scalarMath && op === "multiply" && rt.cplx ? (rt === D.complex64 ? cmulScalar32 : cmul) : rt === D.complex64 && spec.c32 ? spec.c32 : spec.c;
     if (!fc) return raise(T.TypeError, `ufunc '${op}' not supported for complex input`);
     const ac = a.dt.cplx, bc = b.dt.cplx;
     loop2(shape, sa, a.offset, sb, b.offset, (p, q, k) => {

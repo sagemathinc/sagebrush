@@ -74,8 +74,9 @@ with np.errstate(all="ignore"):
         show(name, f)
 
 # NumPy's scalarmath: an operator on two scalars (np.complex128 ones, an indexed element, a Python complex) is
-# the plain formula, not the loop's fused multiply-adds; a 0-d array or np.multiply is the loop. The count of
-# products where the two differ shows the values tell them apart.
+# the plain formula, not the loop's fused multiply-adds (for complex64 each product and sum rounded to float32);
+# a 0-d array or np.multiply is the loop. The count of products where the two differ shows the values tell
+# them apart.
 sa = ((rs.randn(200) + 1j * rs.randn(200))).astype(np.complex128)
 sb = ((rs.randn(200) + 1j * rs.randn(200))).astype(np.complex128)
 loop = sa * sb
@@ -86,10 +87,17 @@ for name, f in [("scalar s*s", lambda i: np.complex128(complex(sa[i])) * np.comp
                 ("loop multiply(s, s)", lambda i: np.multiply(sa[i], sb[i]))]:
     show(name, lambda f=f: [f(i) for i in range(200)])
     print(name, "differs from the loop at", sum(complex(f(i)) != complex(loop[i]) for i in range(200)))
+sa32, sb32 = sa.astype(np.complex64), sb.astype(np.complex64)
+loop32 = sa32 * sb32
+for name, f in [("complex64 scalar a[i]*b[i]", lambda i: sa32[i] * sb32[i]),
+                ("complex64 scalar s*s", lambda i: np.complex64(complex(sa32[i])) * np.complex64(complex(sb32[i]))),
+                ("complex64 loop multiply(s, s)", lambda i: np.multiply(sa32[i], sb32[i]))]:
+    show(name, lambda f=f: np.array([f(i) for i in range(200)], np.complex64))
+    print(name, "differs from the loop at", sum(complex(f(i)) != complex(loop32[i]) for i in range(200)))
 
 # A NaN part's sign, as NumPy's on x86 (the raw bytes, which hx above does not show): complex(0, nan) * (1+0j)
 # has real part +nan; and the products over a grid of signed zeros, infinities and NaNs of either sign, hashed
-# over the raw bytes: in scalarmath (complex128) all of them; in the loop (both dtypes) those where each part's
+# over the raw bytes: in scalarmath (both dtypes) all of them; in the loop (both dtypes) those where each part's
 # step has at most one NaN operand (of two, of different signs, NumPy's choice depends on the element's place
 # in its SIMD loop and on the CPU).
 for dt in (np.complex128, np.complex64):
@@ -98,6 +106,13 @@ for dt in (np.complex128, np.complex64):
         print(dt.__name__, "complex(0, nan)*(1+0j)", name, r.tobytes().hex(), np.signbit(r.real), np.signbit(r.imag))
 r = np.complex128(complex(0, np.nan)) * np.complex128(1 + 0j)
 print("complex128 scalar complex(0, nan)*(1+0j)", np.array([r]).tobytes().hex(), np.signbit(r.real), np.signbit(r.imag))
+with np.errstate(all="ignore"):
+    r = np.complex64(0) * np.complex64(complex(np.inf, np.nan))
+    r2 = np.array([0], np.complex64)[0] * np.array([complex(np.inf, np.nan)], np.complex64)[0]
+    r3 = np.multiply(np.complex64(0), np.complex64(complex(np.inf, np.nan)))
+print("complex64 indexed 0*complex(inf, nan)", np.array([r2], np.complex64).tobytes().hex(), np.signbit(r2.real), np.signbit(r2.imag))
+print("complex64 multiply(s, s) 0*complex(inf, nan)", np.array([r3], np.complex64).tobytes().hex(), np.signbit(r3.real), np.signbit(r3.imag))
+print("complex64 scalar 0*complex(inf, nan)", np.array([r], np.complex64).tobytes().hex(), np.signbit(r.real), np.signbit(r.imag))
 V = [0.0, -0.0, 1.0, -1.0, np.inf, -np.inf, np.nan, -np.nan, 2.5]
 G = list(itertools.product(V, repeat=4))
 gr, gi = np.array([complex(g[0], g[1]) for g in G]), np.array([complex(g[2], g[3]) for g in G])
@@ -110,6 +125,8 @@ with np.errstate(all="ignore"):
     for dt in (np.complex128, np.complex64):
         print(dt.__name__, "special grid loop", hashlib.sha256((gr.astype(dt) * gi.astype(dt))[one].tobytes()).hexdigest()[:16])
     print("complex128 special grid scalarmath", hashlib.sha256(np.array([gr[i] * gi[i] for i in range(6561)]).tobytes()).hexdigest()[:16])
+    gr32, gi32 = gr.astype(np.complex64), gi.astype(np.complex64)
+    print("complex64 special grid scalarmath", hashlib.sha256(np.array([gr32[i] * gi32[i] for i in range(6561)], np.complex64).tobytes()).hexdigest()[:16])
 
 # The stated divergence: complex64 with a negative-stride operand is NumPy's plain float32 loop (its scalar
 # fallback), where Sagebrush keeps the fused multiply-add of every other layout. Each part's gap from the fused
