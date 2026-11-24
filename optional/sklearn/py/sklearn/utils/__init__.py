@@ -1,5 +1,5 @@
 """Various utilities to help with development (scikit-learn 1.9.1's sklearn.utils): Bunch, the input checks,
-resample and shuffle, the batch generators and the estimator tags. Other names of sklearn.utils raise
+the class weights, resample and shuffle, the batch generators and the estimator tags. Other names of sklearn.utils raise
 NotImplementedError: they are not in Sagebrush's sklearn 0.x subset."""
 
 from .._sk_missing import missing as _sk_missing
@@ -7,6 +7,7 @@ from .._sk_tags import ClassifierTags, InputTags, RegressorTags, Tags, TargetTag
 from ..exceptions import DataConversionWarning
 from ._sk_param import check_int_at_least
 from ._sk_indexing import _safe_indexing, resample, shuffle
+from .class_weight import compute_class_weight, compute_sample_weight
 from .validation import (
     as_float_array,
     assert_all_finite,
@@ -36,6 +37,8 @@ __all__ = [
     "check_random_state",
     "check_scalar",
     "column_or_1d",
+    "compute_class_weight",
+    "compute_sample_weight",
     "gen_batches",
     "gen_even_slices",
     "get_tags",

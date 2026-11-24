@@ -9,7 +9,7 @@ dtype('<U2')
 == missing.svm
 !! NotImplementedError: sklearn.svm.SVC is not in Sagebrush's sklearn 0.x subset
 == missing.utils
-!! NotImplementedError: sklearn.utils.compute_class_weight is not in Sagebrush's sklearn 0.x subset
+!! NotImplementedError: sklearn.utils.murmurhash3_32 is not in Sagebrush's sklearn 0.x subset
 == missing.unknown
 !! AttributeError: module 'sklearn.utils' has no attribute 'no_such_name'
 == dummy.stratified

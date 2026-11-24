@@ -20,7 +20,7 @@ case("text.series", lambda: check_array(pd.Series(["x", "y"]), ensure_2d=False, 
 case("feature-names.dtype", lambda: Fits().fit(pd.DataFrame({"a": [1.0], "bc": [2.0]})).feature_names_in_.dtype)
 # (names outside the subset: one class, one function, one submodule's name)
 case("missing.svm", lambda: __import__("sklearn.svm", fromlist=["SVC"]).SVC)
-case("missing.utils", lambda: __import__("sklearn.utils", fromlist=["compute_class_weight"]).compute_class_weight)
+case("missing.utils", lambda: __import__("sklearn.utils", fromlist=["murmurhash3_32"]).murmurhash3_32)
 case("missing.unknown", lambda: __import__("sklearn.utils", fromlist=["no_such_name"]).no_such_name)
 
 # (step 3b: what the dummy estimators, the scaler and pipelines refuse)

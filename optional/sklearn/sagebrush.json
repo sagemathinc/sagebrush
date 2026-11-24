@@ -69,6 +69,7 @@
       "sklearn.utils._sk_indexing",
       "sklearn.utils._sk_param",
       "sklearn.utils._sk_stats",
+      "sklearn.utils.class_weight",
       "sklearn.utils.multiclass",
       "sklearn.utils.validation"
     ]
@@ -132,13 +133,14 @@
     "py/sklearn/random_projection.py": "ecbe2ab02e1820a7b73c252cdd84cbaa4b90bb50f6a9043d88c7830de217fb9c",
     "py/sklearn/semi_supervised.py": "b7f809ad8399dc547953eb7092e97bc13020676191e9b455ca6a919158dfad07",
     "py/sklearn/svm.py": "250c0848f0e1d0cc940d1d166c2a793b1a4f6d027ed71dc8434fcb7204c83d3b",
-    "py/sklearn/tree.py": "7a38506afb8534dffa40030163f0c540e7f50ef0251940494a545f3ec2fbcfea",
-    "py/sklearn/utils/__init__.py": "be0d9c5effb3a98dffafde2b486a96cc4d5850360b6c5c355687a4333967ff0b",
+    "py/sklearn/tree.py": "b503a4228eadbd1527ab37cd6fc1e931ad60e4bac97f96f90b420145f88af535",
+    "py/sklearn/utils/__init__.py": "ed00eb082942f7d74cb4e78384c240774d00df53e21479284f14068be3888dab",
     "py/sklearn/utils/_sk_available_if.py": "3eb81d5c172faaa3be4961be5581949ac0f76ee5ce1a1b90f6b57b8dc45d94db",
     "py/sklearn/utils/_sk_extmath.py": "7ead010638965c153ee7bb9066b330db0e11e6846801feaf2445e203d464c70d",
     "py/sklearn/utils/_sk_indexing.py": "d858173ebbd0426066666fa9e840b271d3f16957d846b1f270585ddbae1cffb5",
     "py/sklearn/utils/_sk_param.py": "300a61ff51391087f87236ff4eeadabb485ac837b839066e512d4de111f9b3b3",
     "py/sklearn/utils/_sk_stats.py": "b6a56655a2d52acd8b5fe86a3dcd403145082202989d8d75f2c180a3a1182536",
+    "py/sklearn/utils/class_weight.py": "8c902d9384d3e8a9b1887ff73f73efca42fe38499b30cb6214842e44096f697d",
     "py/sklearn/utils/multiclass.py": "bd647cdf04de425fbe041004921ea8901368bc56b5bd72f8fdc6a00734a8c853",
     "py/sklearn/utils/validation.py": "3ce4a37a0a9d02af87930f68eef6f29e181f437e904db8eed26e841e11618ee7"
   }

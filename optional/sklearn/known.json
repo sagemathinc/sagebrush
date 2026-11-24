@@ -28,7 +28,7 @@
     },
     {
       "case": "missing.utils",
-      "printed": "!! NotImplementedError: sklearn.utils.compute_class_weight is not in Sagebrush's sklearn 0.x subset",
+      "printed": "!! NotImplementedError: sklearn.utils.murmurhash3_32 is not in Sagebrush's sklearn 0.x subset",
       "reason": "as missing.svm, for a function"
     },
     {
