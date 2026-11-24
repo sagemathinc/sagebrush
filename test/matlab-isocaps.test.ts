@@ -159,10 +159,36 @@ test("contour lines drawn open: the SVG's paths unclosed, the interactive view's
   assert.ok(lines.every((o: any) => o.pos.every((v: number) => Number.isFinite(v))));
 });
 
+test("a patch cut by NaN into two open runs: exactly their two segments, no closing edge, no bridge across the NaN", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  await s.handle({
+    id: 1,
+    code: "patch('XData', [0 1 NaN 4 5]', 'YData', [0 0 NaN 1 1]', 'ZData', [0 0 NaN 0 0]', 'FaceColor', 'none', 'EdgeColor', 'r'); view(3)",
+    matlab: true,
+  });
+  const shown = msgs.find((m) => m.id === 1 && m.display)?.display;
+  // (the SVG: one path a run, each a move and one line, unclosed; none from the first run's end to the second's start)
+  const paths = [...shown["image/svg+xml"].matchAll(/<path d="(M[^"]*)" fill="none"[^>]*stroke="(#[0-9a-f]{6})"/g)].filter((m) => m[2] === "#ff0000");
+  assert.equal(paths.length, 2, "red paths: " + paths.map((m) => m[1]).join(" ; "));
+  for (const m of paths) assert.match(m[1], /^M[^MLZ]*L[^MLZ]*$/, "one open segment: " + m[1]);
+  // (the interactive view: the two segments (0,0,0)-(1,0,0) and (4,1,0)-(5,1,0), each once, nothing else)
+  const scene = JSON.parse(shown["application/vnd.sagebrush.scene3d+json"]);
+  const pos = scene.objects.filter((o: any) => o.type === "lines" && o.color === "#ff0000").flatMap((o: any) => o.pos);
+  const segs: string[] = [];
+  for (let k = 0; k < pos.length; k += 6) {
+    const a = pos.slice(k, k + 3).join(","), b = pos.slice(k + 3, k + 6).join(",");
+    segs.push([a, b].sort().join(" "));
+  }
+  assert.deepEqual(segs.sort(), ["0,0,0 1,0,0", "4,1,0 5,1,0"]);
+});
+
 test("isocaps and contourslice admitted before their copies are made; isosurface's fan never lays a triangle in a cube's face (test/matlab_cap_admit_cases.py)", () => {
   const r = spawnSync(process.execPath, [cli, join(__dirname, "..", "..", "test", "matlab_cap_admit_cases.py")], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const lines = r.stdout.trim().split("\n");
   assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
-  assert.equal(lines.length, 3, r.stdout);
+  assert.equal(lines.length, 9, r.stdout);
 });

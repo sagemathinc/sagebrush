@@ -1028,6 +1028,8 @@ def _interp_axes(grids, V, qs, method, extrap, seq=None):
                 acc = acc + _keys(ts[k] - (o - 1)) * conv(level - 1, fixed[:k] + [ii[k] + o] + fixed[k + 1:])
             return acc
         out[inside] = conv(n - 1, [None] * n)
+        # (conv refers to itself: unbound, so that its arrays are freed now, not when a cycle is collected)
+        del conv
     else:
         qi = [q[inside] for q in qs]
         lo, hi, t = [], [], []
@@ -1056,6 +1058,8 @@ def _interp_axes(grids, V, qs, method, extrap, seq=None):
                 b = corner(level - 1, fixed[:k] + [hi[k]] + fixed[k + 1:])
                 return (1 - t[k]) * a + t[k] * b
             out[inside] = corner(n - 1, [None] * n)
+            # (as conv above)
+            del corner
     if extrap is not None:
         out[~inside] = extrap
     return out
@@ -1521,6 +1525,85 @@ _CAPS = {}
 _CAP_PLANES = {"xmin": (1, 0), "xmax": (1, 1), "ymin": (0, 0), "ymax": (0, 1), "zmin": (2, 0), "zmax": (2, 1)}
 
 
+# (the most one boundary cell's work takes in _cap_plane: its corners' classes and case, and for a cell with
+# faces its corners' and edges' ids and its faces; measured at up to 461 bytes, for a checkerboard's caps below
+# the level, four triangles a cell)
+_CAP_CELL = 560
+
+
+def _cap_plane(V, iso, axis, side, cases, width, below):
+    """one boundary plane's faces for isocaps_mesh, as a (k, 3) array of items: grid points' ids (below the
+    number of points) and edges' (that number plus isosurface's edge id); None when it has none.  Only what is
+    returned outlives the call"""
+    m, n, p = V.shape
+    shape = (m, n, p)
+    npts, nx, ny = m * n * p, m * (n - 1) * p, (m - 1) * n * p
+    u, v = [a for a in range(3) if a != axis]
+    s = 0 if side == 0 else shape[axis] - 1
+    nv = shape[v] - 1
+    at = [slice(None), slice(None), slice(None)]
+    at[axis] = s
+    W = V[tuple(at)]
+    # (the case by the corners above the level, as isosurface classifies them; a non-finite corner is never
+    # above, and its faces are dropped by isocaps_mesh.  Corners counterclockwise in (u, v): (0,0) (1,0) (1,1) (0,1))
+    case = np.zeros((shape[u] - 1, nv), dtype=np.int64)
+    with np.errstate(invalid="ignore"):
+        for bit, w in enumerate((W[:-1, :-1], W[1:, :-1], W[1:, 1:], W[:-1, 1:])):
+            case |= ((w > iso) & np.isfinite(w)).astype(np.int64) << bit
+    case = case.reshape(-1)
+    # (the plane's faces are wound as isosurface's: their normals, in the grid's own axes (x the column, y the
+    # row, z the page), toward the values above the level; so into the volume for the caps above it, out of it
+    # for those below.  The square's corners go counterclockwise about the u-v normal; reversed when that
+    # points the other way)
+    e = [np.zeros(3), np.zeros(3)]
+    e[0][[1, 0, 2][u]] = 1.0
+    e[1][[1, 0, 2][v]] = 1.0
+    into = 1.0 if side == 0 else -1.0
+    reverse = np.cross(e[0], e[1])[[1, 0, 2][axis]] * into * (-1.0 if below else 1.0) < 0
+    table = np.full((16, width, 3), -1, dtype=np.int64)
+    ntri = np.zeros(16, dtype=np.int64)
+    for k, polys in enumerate(cases):
+        tris = []
+        for poly in polys:
+            ats = [c if kind == "c" else 4 + c for kind, c in poly]
+            tris += [(ats[0], ats[t + 1], ats[t]) if reverse else (ats[0], ats[t], ats[t + 1]) for t in range(1, len(ats) - 1)]
+        ntri[k] = len(tris)
+        if tris:
+            table[k, :len(tris)] = tris
+    sel = np.flatnonzero(ntri[case] > 0)
+    if not sel.size:
+        return None
+    case = case[sel]
+    cu, cv = sel // nv, sel % nv
+    del sel
+
+    def where(du, dv):
+        idx = [s, s, s]
+        idx[u], idx[v] = cu + du, cv + dv
+        return idx
+    # (each cell's items: its four corners' ids, then its four edges' as isosurface numbers them, from the edge's
+    # lower corner; edge k joins corners k and k + 1)
+    items = np.empty((case.size, 8), dtype=np.int64)
+    for k, (du, dv) in enumerate(((0, 0), (1, 0), (1, 1), (0, 1))):
+        i, j, l = where(du, dv)
+        items[:, k] = i + m * (j + n * l)
+    for k, (du, dv, along) in enumerate(((0, 0, u), (1, 0, v), (0, 1, u), (0, 0, v))):
+        i, j, l = where(du, dv)
+        if along == 1:
+            g = i + m * (j + (n - 1) * l)
+        elif along == 0:
+            g = nx + i + (m - 1) * (j + n * l)
+        else:
+            g = nx + ny + i + m * (j + n * l)
+        items[:, 4 + k] = npts + g
+    del cu, cv
+    T = table[case]
+    keep = np.arange(width)[None, :] < ntri[case][:, None]
+    del case
+    rows = np.repeat(np.arange(items.shape[0]), width).reshape(-1, width)[keep]
+    return items.reshape(-1)[rows.reshape(-1, 1) * 8 + T[keep]]
+
+
 def isocaps_mesh(x, y, z, V, iso, below=False, planes=("xmin", "xmax", "ymin", "ymax", "zmin", "zmax"), held=0):
     """the caps of the isosurface V == iso on the volume's boundary planes (V in MATLAB's index order: rows y,
     columns x, pages z): (faces, vertices, colors), faces triangles of 1-based indices wound as isosurface's are
@@ -1543,73 +1626,19 @@ def isocaps_mesh(x, y, z, V, iso, below=False, planes=("xmin", "xmax", "ymin", "
     for q in planes:
         axis, side = _CAP_PLANES[q]
         u, v = [a for a in range(3) if a != axis]
-        s = 0 if side == 0 else shape[axis] - 1
-        nu, nv = shape[u] - 1, shape[v] - 1
-        # (admitted before the plane's arrays are made, with the copies held and the faces found so far: each cell's
-        # corners, edges, values and case, about 320 bytes)
-        _m._admit_bytes(held + sum(a.nbytes for a in ids_all) + nu * nv * 320, "isocaps of a %dx%dx%d volume" % (m, n, p))
-        cu, cv = np.meshgrid(np.arange(nu), np.arange(nv), indexing="ij")
-        cu, cv = cu.reshape(-1), cv.reshape(-1)
-
-        def point(du, dv):
-            idx = [None, None, None]
-            idx[axis] = np.full(cu.shape, s)
-            idx[u], idx[v] = cu + du, cv + dv
-            return idx
-        corners = [point(0, 0), point(1, 0), point(1, 1), point(0, 1)]
-        vals = [V[c[0], c[1], c[2]] for c in corners]
-        # (the case by the corners above the level, as isosurface classifies them; a non-finite corner is never
-        # above, and its faces are dropped below)
-        with np.errstate(invalid="ignore"):
-            ins = [(w > iso) & np.isfinite(w) for w in vals]
-        case = ins[0].astype(np.int64) | ins[1] << 1 | ins[2] << 2 | ins[3] << 3
-        # (the plane's faces are wound as isosurface's: their normals, in the grid's own axes (x the column, y the
-        # row, z the page), toward the values above the level; so into the volume for the caps above it, out of it
-        # for those below.  The square's corners go counterclockwise about the u-v normal; reversed when that
-        # points the other way)
-        e = [np.zeros(3), np.zeros(3)]
-        e[0][[1, 0, 2][u]] = 1.0
-        e[1][[1, 0, 2][v]] = 1.0
-        into = 1.0 if side == 0 else -1.0
-        reverse = np.cross(e[0], e[1])[[1, 0, 2][axis]] * into * (-1.0 if below else 1.0) < 0
-        pid = [c[0] + m * (c[1] + n * c[2]) for c in corners]
-        # (each edge's id as isosurface numbers it, from its lower corner)
-        eid = []
-        for k in range(4):
-            a, b = corners[k], corners[(k + 1) % 4]
-            lo = [np.minimum(a[t], b[t]) for t in range(3)]
-            along = u if k in (0, 2) else v
-            if along == 1:
-                g = lo[0] + m * (lo[1] + (n - 1) * lo[2])
-            elif along == 0:
-                g = nx + lo[0] + (m - 1) * (lo[1] + n * lo[2])
-            else:
-                g = nx + ny + lo[0] + m * (lo[1] + n * lo[2])
-            eid.append(npts + g)
-        items = np.stack(pid + eid, axis=1)
-        table = np.full((16, width, 3), -1, dtype=np.int64)
-        ntri = np.zeros(16, dtype=np.int64)
-        for k, polys in enumerate(cases):
-            tris = []
-            for poly in polys:
-                at = [c if kind == "c" else 4 + c for kind, c in poly]
-                tris += [(at[0], at[t + 1], at[t]) if reverse else (at[0], at[t], at[t + 1]) for t in range(1, len(at) - 1)]
-            ntri[k] = len(tris)
-            if tris:
-                table[k, :len(tris)] = tris
-        sel = np.flatnonzero(ntri[case] > 0)
-        if not sel.size:
-            continue
-        T = table[case[sel]]
-        keep = np.arange(width)[None, :] < ntri[case[sel]][:, None]
-        rows = np.repeat(sel, width).reshape(sel.size, width)[keep]
-        ids_all.append(items.reshape(-1)[rows.reshape(-1, 1) * 8 + T[keep]])
+        # (admitted before the plane's arrays are made, with the copies held and the faces found so far; the
+        # plane's own work is freed before the next plane's admission)
+        _m._admit_bytes(held + sum(a.nbytes for a in ids_all) + (shape[u] - 1) * (shape[v] - 1) * _CAP_CELL + (64 << 10),
+                        "isocaps of a %dx%dx%d volume" % (m, n, p))
+        got = _cap_plane(V, iso, axis, side, cases, width, below)
+        if got is not None:
+            ids_all.append(got)
     if not ids_all:
         return empty
-    # (and the faces' arrays: each corner's point, value and place, and the sort that merges the points, about 240
-    # bytes)
+    # (and the faces' arrays: each corner's point, value and place, and the sort that merges the points, measured at
+    # up to 234 bytes, for a checkerboard's caps; the planes' work is freed by now)
     corners = sum(a.size for a in ids_all)
-    _m._admit_bytes(held + corners * 248, "isocaps of %d faces" % (corners // 3))
+    _m._admit_bytes(held + corners * 288, "isocaps of %d faces" % (corners // 3))
     G = np.concatenate(ids_all)
     # (a face with a corner at a non-finite value, or on an edge to one, is dropped)
     flat = G.reshape(-1)

@@ -1926,9 +1926,10 @@ def _grid_xy(X, Y, m, n):
     return GX, GY
 
 
-def contour_lines(X, Y, Z, levels):
+def contour_lines(X, Y, Z, levels, admit=None):
     """[(level, xs, ys)]: marching squares on the grid, each line traced end to end
-    (a closed line repeats its first point at the end, as MATLAB's contour matrix does)"""
+    (a closed line repeats its first point at the end, as MATLAB's contour matrix does); admit, when given, is
+    called before each level's work with the number of points found so far"""
     Zm = _m._mat(Z)
     if Zm.dtype.kind == "c":
         Zm = Zm.real
@@ -1939,6 +1940,9 @@ def contour_lines(X, Y, Z, levels):
     GX, GY = _grid_xy(X, Y, m, n)
     out = []
     for L in levels:
+        if admit is not None:
+            admit(sum(len(xs) for _, xs, _ in out))
+
         def point(e):
             kind, i, j = e
             i2, j2 = (i, j + 1) if kind == "h" else (i + 1, j)
@@ -2346,6 +2350,33 @@ def isocaps_(nargout, args):
     return out[:nargout]
 
 
+# (contourslice's memory, measured in CPython: a level kept, and each of a list given while it is read, deduplicated and
+# sorted; each point of a plane, its grids, V there and the contouring's lists of them (measured at up to 100 bytes);
+# each cell's work for one level, its crossings' links and traced lines (up to 1004); each point of a line found (up to
+# 190), and of its patch (72), and each patch (3,800))
+_CS_LEVEL_ITEM = 64
+_CS_LEVEL_GIVEN = 160
+_CS_PLANE_POINT = 200
+_CS_CELL_LEVEL = 1200
+_CS_LINE_POINT = 240
+_CS_PATCH_POINT = 96
+_CS_PATCH = 4800
+
+
+def _cs_interp_bytes(shape, nq, method):
+    """the most interp_volume's work takes for nq queries in a volume of this shape (measured: linear and nearest up
+    to 172 bytes a query; cubic, the volume extended by a point at each end twice over, 2.07 times its doubles; a
+    spline, each axis's weights for its grid and for the queries, up to 1.6 times 8 (m + n + p) a query).  'cubic'
+    becomes a spline on a grid that isn't uniform, so it is charged as both"""
+    m, n, p = shape
+    b = nq * 240
+    if method == "cubic":
+        b += 24 * (m + 2) * (n + 2) * (p + 2)
+    if method in ("cubic", "spline"):
+        b += 200 * (m * m + n * n + p * p) + 16 * nq * (m + n + p)
+    return b
+
+
 @_fn("contourslice")
 def contourslice_(nargout, args):
     """contourslice(X, Y, Z, V, Sx, Sy, Sz[, levels][, method]), contourslice(V, Sx, Sy, Sz, ...): contour lines on
@@ -2370,37 +2401,61 @@ def contourslice_(nargout, args):
     if any(_m._numel(a) and not _m._isvec(a) for a in planes_args):
         raise _m._err("contourslice: the planes' positions must be vectors; contours on a surface given by matrices Xi, "
                       "Yi and Zi are not supported in Sagebrush.")
-    _iso_admit(vol, None, 16, "contourslice of a volume of %s points" % "x".join(str(k) for k in _m._dims(vol[-1])))
+    # (admitted before any copy: V's copy, and its finite values' mask and copy for its range; the positions' copies)
+    what = "contourslice of a volume of %s points" % "x".join(str(k) for k in _m._dims(vol[-1]))
+    held = _iso_admit(vol, None, 12, what, 8 * sum(_m._numel(a) for a in planes_args))
     x, y, z, V = _iso_volume(vol, "contourslice")
     finite = V[np.isfinite(V)]
-    L = _levels(_colvec([float(finite.min()), float(finite.max())]) if finite.size else np.zeros((0, 1)), levels)
-    pieces = []
-    for k in _m._farr(planes_args[0]).reshape(-1):
-        A, B = np.meshgrid(y, z, indexing="ij")
-        pieces.append((A, B, lambda a, b, k=float(k): (np.full(a.shape, k), a, b)))
-    for k in _m._farr(planes_args[1]).reshape(-1):
-        A, B = np.meshgrid(x, z, indexing="ij")
-        pieces.append((A, B, lambda a, b, k=float(k): (a, np.full(a.shape, k), b)))
-    for k in _m._farr(planes_args[2]).reshape(-1):
-        A, B = np.meshgrid(x, y, indexing="ij")
-        pieces.append((A, B, lambda a, b, k=float(k): (a, b, np.full(a.shape, k))))
+    span = [float(finite.min()), float(finite.max())] if finite.size else []
+    del finite
+    # (the levels, admitted before they are made: a list given is read, deduplicated and sorted, a count made)
+    count, given = 0, levels is not None and _m._numel(levels) > 1
+    if given:
+        count = _m._numel(levels)
+    elif levels is not None and _m._numel(levels) and math.isfinite(_f(levels)) and _f(levels) > 0:
+        count = int(_f(levels))
+    _m._admit_bytes(held + count * (_CS_LEVEL_GIVEN if given else _CS_LEVEL_ITEM) + (128 << 10), "contourslice's %d levels" % count)
+    L = _levels(_colvec(span) if span else np.zeros((0, 1)), levels)
+    held += len(L) * _CS_LEVEL_ITEM
     view3 = not ax.holding()
     ax.newplot()
     objs = []
-    for A, B, lift in pieces:
-        XP, YP, ZP = lift(A, B)
-        C = _mn.interp_volume(x, y, z, V, XP.reshape(-1), YP.reshape(-1), ZP.reshape(-1), method).reshape(A.shape)
-        for level, us, vs in contour_lines(_m._unmat(A), _m._unmat(B), _m._unmat(C), L):
-            a = np.array(list(us) + [np.nan])
-            b = np.array(list(vs) + [np.nan])
-            px, py, pz = lift(a, b)
-            px, py, pz = (np.where(np.isnan(a), np.nan, t) for t in (px, py, pz))
-            c = np.full((a.size, 1), float(level))
-            p = Patch(ax, FaceColor=_m.Char("none"), EdgeColor=_m.Char("flat"), CData=_m._unmat(c),
-                      FaceVertexCData=_m._unmat(c))
-            p.props["XData"], p.props["YData"] = _m._unmat(px.reshape(-1, 1)), _m._unmat(py.reshape(-1, 1))
-            p.set_prop("ZData", _m._unmat(pz.reshape(-1, 1)))
-            objs.append(p)
+    # (what the lines made so far keep: their patches)
+    kept = 0
+    for axis, ks in enumerate(_m._farr(a).reshape(-1) for a in planes_args):
+        a, b = [(y, z), (x, z), (x, y)][axis]
+        npts, cells = a.size * b.size, max(a.size - 1, 0) * max(b.size - 1, 0)
+        for k in ks:
+            k = float(k)
+            # (one plane at a time, admitted before it is made: its grids, V interpolated there and the contouring's
+            # copies of them; then before each level the level's work and its lines, with the lines found so far)
+            base = held + kept + npts * _CS_PLANE_POINT + _cs_interp_bytes(V.shape, npts, method) + (64 << 10)
+            plane = "contourslice's plane of %dx%d points" % (a.size, b.size)
+            _m._admit_bytes(base, plane)
+            A, B = np.meshgrid(a, b, indexing="ij")
+            K = np.full(A.shape, k)
+            XP, YP, ZP = [(K, A, B), (A, K, B), (A, B, K)][axis]
+            C = _mn.interp_volume(x, y, z, V, XP.reshape(-1), YP.reshape(-1), ZP.reshape(-1), method).reshape(A.shape)
+            del XP, YP, ZP, K
+            lines = contour_lines(_m._unmat(A), _m._unmat(B), _m._unmat(C), L,
+                                  lambda found: _m._admit_bytes(base + found * _CS_LINE_POINT + cells * _CS_CELL_LEVEL, plane))
+            del A, B, C
+            # (then the lines' patches, before they are made)
+            found = sum(len(us) + 1 for _, us, _ in lines)
+            _m._admit_bytes(base + found * (_CS_LINE_POINT + _CS_PATCH_POINT) + len(lines) * _CS_PATCH, plane)
+            for level, us, vs in lines:
+                u_ = np.array(list(us) + [np.nan])
+                v_ = np.array(list(vs) + [np.nan])
+                K = np.where(np.isnan(u_), np.nan, k)
+                px, py, pz = [(K, u_, v_), (u_, K, v_), (u_, v_, K)][axis]
+                c = np.full((u_.size, 1), float(level))
+                p = Patch(ax, FaceColor=_m.Char("none"), EdgeColor=_m.Char("flat"), CData=_m._unmat(c),
+                          FaceVertexCData=_m._unmat(c))
+                p.props["XData"], p.props["YData"] = _m._unmat(px.reshape(-1, 1)), _m._unmat(py.reshape(-1, 1))
+                p.set_prop("ZData", _m._unmat(pz.reshape(-1, 1)))
+                objs.append(p)
+            kept += found * _CS_PATCH_POINT + len(lines) * _CS_PATCH
+            del lines
     if view3:
         ax.props["View"] = np.array([[-37.5], [30.0]])
     return _harr(objs) if nargout else None
