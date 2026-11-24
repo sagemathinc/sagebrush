@@ -162,10 +162,10 @@ def walk():
 # (an internal failure is not a refusal: words of JavaScript in an error)
 JS = re.compile(r"of undefined|undefined is|is not a function|Cannot read prop|internal error|RangeError|SyntaxError|ReferenceError")
 # Differences that aren't about strings: arguments NumPy checks and Sagebrush doesn't yet (an
-# array's order=, nan_to_num's copy=, lexsort's axis=), the same for numeric arrays, with no
+# array's order= in copy, nan_to_num's copy=, lexsort's axis=), the same for numeric arrays, with no
 # wrong answer; longlong's arrays, int64 here, shown without NumPy's dtype=int64; and a 0-d
 # array's format with a spec, the same text, a str where CPython's str.__format__ returns the np.str_
-ALLOW = re.compile(r"^f (copy|ravel|nan_to_num|lexsort)\((letters|digits)\)\('(pair|number)'\)$|^f longlong\(digits\)\('plain'\)$"
+ALLOW = re.compile(r"^f (copy|nan_to_num|lexsort)\((letters|digits)\)\('(pair|number)'\)$|^f longlong\(digits\)\('plain'\)$"
                    r"|^m __format__\(one\)\('s'\)$")
 
 if REAL and "--write" in sys.argv:
