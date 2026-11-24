@@ -171,7 +171,7 @@ WebCrypto's AES-GCM takes whole buffers, so a large object is sealed in fixed, b
 ### 3.4 Wrapping keys: HPKE bound to its context (SEC)
 
 RFC 9180's base mode doesn't authenticate the sender and doesn't prevent replay. So every wrapped key (an epoch secret for a device or the recovery key, a share's `SK`, a proposal's key, a support bundle's key) is used only inside a signed context:
-- **HPKE's `info`** is a domain-separated, canonical encoding of the wrapper's whole context:
+- **HPKE's `info`** is a domain-separated, canonical encoding of the wrapper's whole context, including its wrapper id:
   - the protocol and version, and the purpose (epoch delivery, recovery, share, proposal, support);
   - the sender's account and signing-key id;
   - the recipient's account and key id (a device, the recovery key, or an inbox key);
@@ -183,7 +183,9 @@ RFC 9180's base mode doesn't authenticate the sender and doesn't prevent replay.
   - the expiry.
 
   So a valid wrapper can't be replayed in another context, or moved between accounts, shares, recovery and epoch delivery.
-- **An exact replay in the same context isn't stopped by the binding** (SEC). It is made harmless by the unique id each context carries (object, share, proposal, ticket): applying it again is idempotent, and where an effect isn't naturally idempotent (importing a share, applying a proposal), the recipient records the ids it has accepted and refuses a repeat.
+- **An exact replay in the same context isn't stopped by the binding** (SEC). So every wrapper also carries a unique **wrapper id** (128 random bits), inside both the canonical `info` and the outer signature.
+  - Recipients record the wrapper ids they have processed, and refuse a repeat. That covers epoch and recovery delivery, shares, proposals and support bundles.
+  - Each action is idempotent too (installing an epoch secret, importing a share, applying a proposal), so a repeat that slipped past the record would change nothing.
 
 ## 4. Sync: what becomes opaque
 
