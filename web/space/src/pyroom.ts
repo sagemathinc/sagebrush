@@ -79,9 +79,14 @@ function flat(body) {
 }
 const containsDef = (s) => [s.body, s.orelse, s.finalbody, ...(s.handlers ?? []).map((h) => h.body)].some((b) => (b ?? []).some((x) => isDef(x) || x._type === "ClassDef" || x._type === "Import" || x._type === "ImportFrom"));
 
+// (Sage's preparser rewrites each `..` range by scanning the file around it again, so its time grows as the number of
+//  `..` times the file's length: a Sage file whose product is over this isn't preparsed, and isn't entered. A
+//  temporary bound, until the preparser rewrites ranges in one pass)
+export const ELLIPSIS_BUDGET = 5e7;
 export function parsePython(text, { sage = false } = {}) {
-  // (Sage's preparser lengthens a file ([1..n] becomes ellipsis_range(1,Ellipsis,n)): what is parsed is held to
-  //  ROOM_TEXT too)
+  if (sage && (text.split("..").length - 1) * utf8Bytes(text) > ELLIPSIS_BUDGET) throw new Error("it's too long to enter here");
+  // (Sage's preparser lengthens a file (R.<x> = QQ[] becomes R = QQ[('x',)]; (x,) = R._first_ngens(1)): what is
+  //  parsed is held to ROOM_TEXT too)
   const code = sage ? preparse(text) : text;
   if (utf8Bytes(code) > ROOM_TEXT) throw new Error("it's too long to enter here");
   try {

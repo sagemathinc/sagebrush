@@ -98,6 +98,19 @@ await ev(`space3d.leave()`);
 await ev(`space3d.load(${JSON.stringify(atCap(3))}, "cap1.space.json").then(() => true)`);
 ok((await ev(`space3d.enter("cap")`)) === false && /too long to enter/.test(await ev(`document.querySelector('[data-c="status"]').textContent`)), "one byte more isn't", await ev(`document.querySelector('[data-c="status"]').textContent`));
 
+// ---- the same cap for JavaScript, which has no preparser to catch a long file later: 1 MiB in UTF-8 exactly is
+//      entered, one byte more isn't, nor a comment of 400,000 € (1.2 MB)
+const jsFile = (id, text) => ({ format: "sagebrush-space", version: 1, nodes: [{ id, kind: "file", title: id + ".js", path: id + ".js", lang: "javascript", text, lines: 2 }] });
+const jsAt = (extra) => { const tail = "\nfunction f() {}\n", euros = 349000; return "//" + "€".repeat(euros) + "a".repeat((1 << 20) - 2 - 3 * euros - tail.length + extra) + tail; };
+ok(Buffer.byteLength(jsAt(0)) === 1 << 20 && Buffer.byteLength(jsAt(1)) === (1 << 20) + 1, "the JavaScript samples: 1,048,576 bytes, and one more");
+await ev(`space3d.load(${JSON.stringify(jsFile("jscap", jsAt(0)))}, "jscap.space.json").then(() => true)`);
+ok((await ev(`space3d.enter("jscap")`)) === true, "a JavaScript file of exactly 1 MiB in UTF-8 (mostly €) is entered", await ev(`document.querySelector('[data-c="status"]').textContent`));
+await ev(`space3d.leave()`);
+await ev(`space3d.load(${JSON.stringify(jsFile("jscap", jsAt(1)))}, "jscap1.space.json").then(() => true)`);
+ok((await ev(`space3d.enter("jscap")`)) === false && /too long to enter/.test(await ev(`document.querySelector('[data-c="status"]').textContent`)), "one byte more isn't", await ev(`document.querySelector('[data-c="status"]').textContent`));
+await ev(`space3d.load(${JSON.stringify(jsFile("jseuro", "//" + "€".repeat(400000) + "\nfunction f() {}\n"))}, "jseuro.space.json").then(() => true)`);
+ok((await ev(`space3d.enter("jseuro")`)) === false && /too long to enter/.test(await ev(`document.querySelector('[data-c="status"]').textContent`)), "a JavaScript file of 400,000 € (1.2 MB, fewer characters) isn't either", await ev(`document.querySelector('[data-c="status"]').textContent`));
+
 // ---- a room over the limits isn't laid out, whatever made it: a file of 4,001 functions
 const many = { format: "sagebrush-space", version: 1, nodes: [{ id: "many", kind: "file", title: "many.py", path: "many.py", lang: "python", text: Array.from({ length: 4001 }, (_, i) => `def f${i}():\n    pass\n`).join(""), lines: 8002 }] };
 await ev(`space3d.load(${JSON.stringify(many)}, "many.space.json").then(() => true)`);
