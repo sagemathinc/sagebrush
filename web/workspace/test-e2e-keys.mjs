@@ -1,7 +1,7 @@
 // ci: web-runner order=600 runner=bun
 // E2E PR 2a: the key chain, epochs and keyrings, the recovery code, proofs of possession and epoch wrappers
 // (design/e2e-encryption.md §2, §2.1, §2.2, §3.4, §11.1, §11.2), on the platform's WebCrypto through the fleet core's
-// backend. HPKE is web/workspace/e2e/test-hpke-double.mjs until PR 1's hpke object lands.
+// backend. HPKE is web/workspace/e2e/hpke-double.mjs until PR 1's hpke object lands.
 //   bun web/workspace/test-e2e-keys.mjs
 import { useCrypto } from "./fleet/core/crypto.mjs";
 import { webCrypto } from "./fleet/core/webcrypto.mjs";
@@ -9,7 +9,7 @@ import { b64, newId, random, unb64, enc } from "./fleet/core/bytes.mjs";
 import { canonText, parseCanonical } from "./fleet/core/canonical.mjs";
 import { keyFromSeed } from "./fleet/core/ed25519.mjs";
 import * as E from "./e2e/core/index.mjs";
-import { hpkeDouble as hpke } from "./e2e/test-hpke-double.mjs";
+import { hpkeDouble as hpke } from "./e2e/hpke-double.mjs";
 
 useCrypto(webCrypto());
 
