@@ -4666,17 +4666,21 @@ def eye_(*args):
     d, cls = _dimsarg(args, "eye")
     if len(d) > 2:
         raise _err("N-dimensional arrays are not supported.")
-    # (made in storage order, eye(n, m) being eye(m, n) transposed, and in its final type: a complex prototype's
-    # complex identity at once; otherwise the double identity, and the class's copy when the class isn't double)
+    # (made in storage order, eye(n, m) being eye(m, n) transposed, and in its final type at once: a complex
+    # prototype's complex identity, or the class's own; its entries are exactly 0 and 1, so nothing is converted
+    # or rounded after it, and the result is the only array made)
     p = _like_proto(args)
     cplx = cls in (None, "double", "single") and p is not None and _isnumlike(p) and _arr(p).dtype.kind == "c"
+    cls = cls or "double"
     if cplx:
         dt = np.complex64 if cls == "single" else np.complex128
-        with _made(d, 2 * _cls_bytes(cls)):
-            a = np.eye(d[1], d[0], dtype=dt)
+    else:
+        dt = {"double": np.float64, "single": np.float32, "logical": np.bool_}.get(cls) or _INTS[cls][0]
+    with _made(d, (2 if cplx else 1) * _cls_bytes(cls)):
+        a = np.eye(d[1], d[0], dtype=dt)
+        if cplx:
             return complex(a.reshape(-1)[0]) if a.size == 1 and dt is np.complex128 else _canon(a)
-    with _made(d, _cls_bytes(cls), native=8, copies=1 if cls in (None, "double") else 2):
-        return _finish(np.eye(d[1], d[0]), cls or "double")
+        return _box(a) if cls in ("double", "logical") else _canon(a)
 
 
 # MATLAB's default generator: the Mersenne twister seeded with 5489, its

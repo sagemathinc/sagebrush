@@ -90,6 +90,30 @@ assert attempt(lambda: M.eye_(float(2 ** 11), float(2 ** 11), M.Char("like"), 1j
 e = M.eye_(2.0, 3.0, M.Char("like"), 1j)
 assert M._arr(e).dtype == np.complex128 and M._dims(e) == (2, 3) and M._arr(e).T.tolist() == [[1, 0, 0], [0, 1, 0]]
 assert M._arr(M.eye_(3.0, 2.0)).T.tolist() == [[1, 0], [0, 1], [0, 0]] and M.class_(M.eye_(2.0, M.Char("int8"))) == "int8"
+# (an integer or logical eye is made in its class at once, 1 byte per element for int8: 2^27 elements, 128 MB,
+# refused; 2^26, 64 MB, admitted)
+assert attempt(lambda: M.eye_(float(2 ** 14), float(2 ** 13), M.Char("int8")), "np.eye") == "MATLAB:nomem"
+assert attempt(lambda: M.eye_(float(2 ** 13), float(2 ** 13), M.Char("int8")), "np.eye") == "reached"
+# (and the charge is eye's real peak: for each class the identity is the only array made, by one np.eye call in
+# its final dtype, admitted at its own bytes; nothing is converted or rounded after it, which for an integer class
+# would make several double-sized arrays)
+charged, made = [], []
+saved = M._admit_bytes, np.eye, M._finish, M._int_round
+eye = np.eye
+M._admit_bytes = lambda need, what: charged.append(need)
+np.eye = lambda *a, **k: made.append(eye(*a, **k)) or made[-1]
+M._finish = M._int_round = sentinel
+try:
+    for cls in ["double", "single", "logical", "int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64"]:
+        for like in ([None, 1j] if cls in ("double", "single") else [None]):
+            args = (6.0, 4.0) + ((M.Char("like"), saved[2](np.array([[like]]), cls)) if like else (M.Char(cls),))
+            charged.clear()
+            made.clear()
+            r = M.eye_(*args)
+            assert M.class_(r) == cls and M._dims(r) == (6, 4) and M._arr(r).T.astype(float).trace() == 4, cls
+            assert len(made) == 1 and made[0].dtype == M._arr(r).dtype and charged == [M._arr(r).nbytes], (cls, like, charged)
+finally:
+    M._admit_bytes, np.eye, M._finish, M._int_round = saved
 v = M.zeros_(2.0, 2.0, M.Char("like"), 1j)
 assert M._arr(v).dtype == np.complex128 and M.class_(v) == "double" and not M.isreal_(v)
 assert M._arr(M.zeros_(2.0, 2.0, M.Char("like"), M._finish(np.array([[1j]]), "single"))).dtype == np.complex64
