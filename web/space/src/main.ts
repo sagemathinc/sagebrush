@@ -1075,8 +1075,9 @@ function showOverlay(nd) {
       `<div class="code-edit"></div><p class="hint kept">Your edits and runs here are kept in this browser, on this site.</p><div class="label">Output</div><div class="output">${outputHtml(nd)}</div>` +
       (nd.kind === "plot3d" || nd.scene ? `<p class="hint">A 3D plot is a real object in the space: drag to turn around it. Edit its code and run it to change it.</p>` : "");
   } else {
-    // (a file whose text is elsewhere (`src`): fetched now, and the drawer drawn again when it comes)
-    const pending = nd.src && !nd._full;
+    // (a file whose text is elsewhere (`src`): fetched now, and the drawer drawn again when it comes; not a notebook's
+    //  or a board's, which are read only when entered)
+    const pending = nd.src && !nd._full && nd.doc !== "notebook" && nd.doc !== "board";
     // (only if it is still this object, in this space: ids repeat from room to room)
     const still = () => selected === nd.id && space.nodes.includes(nd) && !ui.overlay.hidden;
     if (pending) fullText(nd).then(() => { if (still()) showOverlay(nd); }, (e) => {

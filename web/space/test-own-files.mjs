@@ -181,8 +181,9 @@ ok(many?.read === 2000 && many.refused === 10 && /too many files read/.test(many
 // ---- how the page reads for the view: one read at a time, each within what the opening has left, none after Close.
 //      (The workspace's reads counted: its class's readUpTo and read, wrapped)
 await ev(`(async () => {
-  const m = await import(new URL("/sagebrush-space3d.js", location.href).href), n = (window.__reads = { calls: 0, now: 0, max: 0, paths: [] });
-  m.SPACE3D_TESTING.reading = (p, d) => { if (d > 0) { n.calls++; n.now++; n.max = Math.max(n.max, n.now); n.paths.push(p); } else n.now--; };
+  const m = await import(new URL("/sagebrush-space3d.js", location.href).href), n = (window.__reads = { calls: 0, now: 0, max: 0, paths: [], hows: [], copies: [] });
+  m.SPACE3D_TESTING.reading = (p, d, how) => { if (d > 0) { n.calls++; n.now++; n.max = Math.max(n.max, n.now); n.paths.push(p); n.hows.push([p, how?.method ?? null, how?.cap ?? null]); } else n.now--; };
+  m.SPACE3D_TESTING.copying = (p) => { n.copies.push(p); };
   return true;
 })()`);
 const reopen = async (folder = FOLDER_MORE) => {
@@ -232,9 +233,14 @@ await ev(`(async () => {
   await w.create("/scan/huge.ipynb", { content: { cells: [{ id: "a", code: "#".repeat(5 << 20) }] }, mode: "python" });
   await w.create("/scan/small.ipynb", { content: { cells: [{ id: "a", code: "x = 1\\ny = 2" }] }, mode: "python" });
   await w.create("/scan/many.py", { content: Array.from({ length: 300 }, (_, i) => "import m" + i).join("\\n") + "\\n" });
-  // (lines.txt, listed at 2 bytes, is 2 MiB by the time the scan reads it)
+  // (lines.txt, listed at 2 bytes, is 2 MiB by the time the scan reads it; grow.txt, 5 MiB when the view asks for it)
+  await w.create("/scan/grow.txt", { content: "x\\n" });
   const m = await import(new URL("/sagebrush-space3d.js", location.href).href), count = m.SPACE3D_TESTING.reading;
-  m.SPACE3D_TESTING.reading = async (p, d) => { if (d > 0 && p === "/scan/lines.txt") await w.write(p, "x\\n".repeat(1 << 20)); return count?.(p, d); };
+  m.SPACE3D_TESTING.reading = async (p, d, how) => {
+    if (d > 0 && p === "/scan/lines.txt") await w.write(p, "x\\n".repeat(1 << 20));
+    if (d > 0 && p === "/scan/grow.txt" && window.__grow) await w.write(p, "x".repeat(5 << 20));
+    return count?.(p, d, how);
+  };
   return true;
 })()`, 60000);
 await until(`!!document.querySelector('#wssidebar .frow[data-path="/scan"]')`, 10000);
@@ -242,9 +248,55 @@ const SCAN_MORE = `[...(document.querySelector('#wssidebar .frow[data-path="/sca
 ok(await reopen(SCAN_MORE), "the scan folder opens");
 const tree = await ev(`(() => { const t = ${F}.space3d.space.tree ?? ${F}.space3d.space._tree; const f = Object.fromEntries((t?.files ?? []).map((x) => [x[0], x[1]])); return { f, imports: (t?.pyimports?.["many.py"] ?? []).length }; })()`);
 ok(tree.f["lines.txt"] === 1, "a file listed at 2 bytes but 2 MiB when it is read isn't read whole: its length is its listed size's, not its 1,048,576 lines", tree.f["lines.txt"]);
-ok(tree.f["big.ipynb"] === 40 && tree.f["small.ipynb"] === 3, "a notebook over 1 MiB keeps its kind's length; a small one is counted", [tree.f["big.ipynb"], tree.f["small.ipynb"]]);
+const scanNb = await ev(`window.__reads.hows.filter((h) => h[0].endsWith(".ipynb"))`);
+ok(tree.f["big.ipynb"] === 40 && tree.f["small.ipynb"] === 40 && scanNb.length === 0, "the scan reads no notebook: each keeps its kind's length", { lengths: [tree.f["big.ipynb"], tree.f["small.ipynb"]], scanNb });
 ok(tree.imports === 200, "a file's imports: 200 kept of 300", tree.imports);
-ok(/too large to read here \(over 4\.0 MiB\)/.test((await askMany("huge.ipynb", 1, 33000))[0]), "a notebook over 4 MiB, asked for, is refused before anything of it is sent", (await askMany("huge.ipynb", 1, 33001))[0]);
+// (read-size probes, through the hook: how each read was made, and which notebooks were copied)
+const hows = (p) => ev(`window.__reads.hows.filter((h) => h[0] === ${JSON.stringify(p)})`);
+const lh = await hows("/scan/lines.txt");
+ok(lh.length >= 1 && lh.every((h) => h[1] === "readUpTo" && h[2] === 1 << 20), "the scan read lines.txt with its bytes capped at 1 MiB (readUpTo), never whole", lh);
+await ev(`(window.__reads.copies = [], true)`);
+const hugeSaid = (await askMany("huge.ipynb", 1, 33000))[0];
+ok(/this notebook exceeds the 3D view's limits/.test(hugeSaid) && !(await ev(`window.__reads.copies.includes("/scan/huge.ipynb")`)), "a notebook over 4 MiB, asked for, is refused before any of it is copied", hugeSaid);
+ok((await askMany("small.ipynb", 1, 33002))[0] === "read" && (await ev(`window.__reads.copies.includes("/scan/small.ipynb")`)), "a small one is copied and sent (the probe sees copies)");
+await ev(`(window.__reads.hows = [], window.__grow = true, true)`);
+const grew = (await askMany("grow.txt", 1, 33003))[0];
+await ev(`(window.__grow = false, true)`);
+const gh = await hows("/scan/grow.txt");
+ok(/too large to read here \(over 4\.0 MiB\)/.test(grew) && gh.length === 1 && gh[0][1] === "readUpTo" && gh[0][2] === 4 << 20, "a file grown to 5 MiB after the scan, asked for: read with its bytes capped at 4 MiB (readUpTo), refused, never read whole", { grew, gh });
+
+// (a notebook is read only when entered: selected, its drawer doesn't fetch it)
+await ev(`(window.__reads.hows = [], ${F}.space3d.select("p:small.ipynb"), true)`);
+await sleep(1500);
+ok((await ev(`window.__reads.hows.filter((h) => h[0].endsWith(".ipynb")).length`)) === 0 && (await ev(`${F}.space3d.selection?.id`)) === "p:small.ipynb", "a notebook selected isn't read: only entering it reads it");
+// (one notebook read at a time in the page, across openings: two more openings of the folder each ask for a notebook;
+//  the first is held at its read, and the second doesn't begin until it is done)
+await ev(`(async () => {
+  const m = await import(new URL("/sagebrush-space3d.js", location.href).href), prev = m.SPACE3D_TESTING.reading;
+  const nb = (window.__nb = { now: 0, max: 0, starts: 0 });
+  window.__nbGate = new Promise((r) => (window.__nbOpen = r));
+  m.SPACE3D_TESTING.reading = async (p, d, how) => {
+    if (p.endsWith(".ipynb")) { if (d > 0) { nb.starts++; nb.now++; nb.max = Math.max(nb.max, nb.now); await window.__nbGate; } else nb.now--; }
+    return prev?.(p, d, how);
+  };
+  void m.openIn3D(window.sagebrush.workspace, "/scan");
+  void m.openIn3D(window.sagebrush.workspace, "/scan");
+  return true;
+})()`);
+ok(await until(`[...document.querySelectorAll('iframe[src*="/space/"]')].slice(-2).every((f) => f.contentWindow?.space3d?.space?.nodes?.length >= 1) && document.querySelectorAll('iframe[src*="/space/"]').length === 3`, 30000), "two more openings of the folder");
+await ev(`(window.__nbAns = [], [...document.querySelectorAll('iframe[src*="/space/"]')].slice(-2).forEach((f) => f.contentWindow.addEventListener("message", (e) => { if (e.data?.sagebrush === "space-file" && (e.data.id === 34000 || e.data.id === 34001)) window.__nbAns.push(e.data.error ?? "read"); })), true)`);
+// (each asks from its own frame, as the viewer would: in the two newest frames' own contexts)
+const main = contexts[0]?.auxData?.frameId, frameCtx = [];
+for (const c of [...contexts].reverse()) if (c.auxData?.isDefault && c.auxData.frameId !== main && !frameCtx.some((x) => x.auxData.frameId === c.auxData.frameId)) frameCtx.push(c);
+for (const [i, c] of frameCtx.slice(0, 2).entries())
+  await send("Runtime.evaluate", { contextId: c.id, expression: `(window.parent.postMessage({ sagebrush: "space-read", version: 1, id: ${34000 + i}, path: "small.ipynb" }, location.origin), true)`, returnByValue: true });
+await sleep(1500);
+const heldNb = await ev(`({ ...window.__nb })`);
+await ev(`(window.__nbOpen(), true)`);
+const answered = await until(`window.__nbAns.length === 2`, 15000);
+const doneNb = await ev(`({ ...window.__nb, ans: window.__nbAns })`);
+ok(answered && heldNb.starts === 1 && doneNb.starts === 2 && doneNb.max === 1 && doneNb.ans.length === 2 && doneNb.ans.every((x) => x === "read"), "two openings each asking for a notebook: one read at a time (the second waits for the first, held)", { heldNb, doneNb });
+await ev(`([...document.querySelectorAll("[role=dialog]")].slice(-2).forEach((d) => [...d.querySelectorAll("button")].find((b) => b.textContent.includes("Close"))?.click()), true)`);
 
 // ---- Close
 await ev(`[...document.querySelectorAll("button")].find((b) => b.textContent.includes("Close") && b.closest("[role=dialog]"))?.click(), true`);

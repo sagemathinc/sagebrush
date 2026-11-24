@@ -26,13 +26,34 @@ export const SPACE3D_LIMITS = {
 const NB_WALK = { values: LIMITS.values, depth: LIMITS.depth, string: LIMITS.string };
 // (for the browser tests only, set by a script of this site's own origin, which could read and write the files itself
 //  anyway: `reading`, told when each of this module's reads of the workspace begins (+1, awaited, so a test can change
-//  the file just before it is read) and ends (-1), so a test can count them and see how many run at once; `beforeSelectionWrite`, a pause just before a selection is written, once
+//  the file just before it is read; with how it is read: readUpTo and its cap, or read) and ends (-1), so a test can
+//  count them, see how many run at once and that each is bounded; `copying`, told just before a notebook sent to the
+//  view is copied (its cells mapped and serialized), so a test can see an oversized one refused before that; `beforeSelectionWrite`, a pause just before a selection is written, once
 //  its text and revision are taken, so a test can write the file meanwhile and see the write refused on the old
 //  revision and made again on the new)
-export const SPACE3D_TESTING: { reading: null | ((path: string, d: 1 | -1) => void | Promise<void>); beforeSelectionWrite: null | (() => Promise<void>) } = { reading: null, beforeSelectionWrite: null };
-const reading = async <T>(path: string, f: () => Promise<T>): Promise<T> => {
-  await SPACE3D_TESTING.reading?.(path, 1);
-  try { return await f(); } finally { SPACE3D_TESTING.reading?.(path, -1); }
+type How = { method: "readUpTo"; cap: number } | { method: "read" };
+export const SPACE3D_TESTING: {
+  reading: null | ((path: string, d: 1 | -1, how?: How) => void | Promise<void>);
+  copying: null | ((path: string) => void);
+  beforeSelectionWrite: null | (() => Promise<void>);
+} = { reading: null, copying: null, beforeSelectionWrite: null };
+// (a read of the workspace: a data file's bytes capped (readUpTo), or a document (read), told to the tests' hook)
+const readCapped = async (ws: Workspace, path: string, cap: number) => {
+  await SPACE3D_TESTING.reading?.(path, 1, { method: "readUpTo", cap });
+  try { return await ws.readUpTo(path, cap); } finally { SPACE3D_TESTING.reading?.(path, -1); }
+};
+// (one notebook read at a time in this page, whichever view asks: held from the read through its walk and its copy
+//  or refusal, so no second notebook is read while one is still unchecked. A notebook's record is read whole (the
+//  workspace keeps no size for it), as the notebook page does when it opens one; only when the person enters it)
+let notebookSlot: Promise<unknown> = Promise.resolve();
+const oneNotebookAtATime = <T>(f: () => Promise<T>): Promise<T> => {
+  const run = notebookSlot.then(f);
+  notebookSlot = run.catch(() => {});
+  return run;
+};
+const readDoc = async (ws: Workspace, path: string) => {
+  await SPACE3D_TESTING.reading?.(path, 1, { method: "read" });
+  try { return await ws.read(path); } finally { SPACE3D_TESTING.reading?.(path, -1); }
 };
 const MiB = (n: number) => `${(n / 2 ** 20).toFixed(1)} MiB`;
 // (from X import a, b; from X import (a,\n b); import a.b, c)
@@ -117,7 +138,8 @@ export async function openIn3D(ws: Workspace, folder: string): Promise<void> {
     });
     const todo = entries.map((_, k) => k).filter((k) => {
       const e = entries[k];
-      return (e.kind === "file" && TEXT.test(e.path) && (e.size ?? 0) <= SPACE3D_LIMITS.lengthBytes) || e.kind === "notebook";
+      // (text files only: a notebook keeps its kind's length, as nothing bounds its record before it is read whole)
+      return e.kind === "file" && TEXT.test(e.path) && (e.size ?? 0) <= SPACE3D_LIMITS.lengthBytes;
     }).slice(0, SPACE3D_LIMITS.lengths);
     // (the space, checked whole as the viewer will check it, before it is sent: else nothing is sent, and that is said)
     const ship = () => {
@@ -138,13 +160,8 @@ export async function openIn3D(ws: Workspace, folder: string): Promise<void> {
         reserved += SPACE3D_LIMITS.lengthBytes;
         let used = SPACE3D_LIMITS.lengthBytes;
         try {
-          if (e.kind === "notebook") {
-            const r = await reading(e.path, () => ws.read(e.path));
-            used = jsonSizeWithin(r.content, { ...NB_WALK, bytes: SPACE3D_LIMITS.lengthBytes });
-            const cells = Array.isArray(r.content?.cells) ? (r.content.cells as unknown[]) : [];
-            files[k][1] = Math.max(1, cells.reduce((s: number, c) => s + lineCount(String((c as { code?: unknown } | null)?.code ?? "")) + 1, 0));
-          } else {
-            const r = await reading(e.path, () => ws.readUpTo(e.path, SPACE3D_LIMITS.lengthBytes));
+          {
+            const r = await readCapped(ws, e.path, SPACE3D_LIMITS.lengthBytes);
             used = r.content.byteLength;
             const t = decode(r.content);
             files[k][1] = lineCount(t);
@@ -178,18 +195,27 @@ export async function openIn3D(ws: Workspace, folder: string): Promise<void> {
       let text: string;
       if (entry.kind === "notebook") {
         // (a notebook: walked within the cap before anything of it is copied; then its language and cells (code,
-        //  kind, outputs), for its room)
-        const r = await reading(entry.path, () => ws.read(entry.path));
-        if (!alive) return;
-        try { jsonSizeWithin(r.content, { ...NB_WALK, bytes: cap }); } catch { return over(); }
-        const raw = Array.isArray(r.content?.cells) ? (r.content.cells as unknown[]) : [];
-        const cells = raw.filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
-          .map((c) => ({ id: c.id, type: c.type ?? "code", code: String(c.code ?? ""), outputs: Array.isArray(c.outputs) ? c.outputs : [] }));
-        text = JSON.stringify({ format: "sagebrush-notebook-cells", mode: r.content?.mode ?? "python", cells });
+        //  kind, outputs), for its room; all of it in the page's one notebook slot)
+        const got = await oneNotebookAtATime(async (): Promise<{ text?: string; error?: string } | null> => {
+          if (!alive) return null;
+          const r = await readDoc(ws, entry.path);
+          if (!alive) return null;
+          // (past any of the walk's limits (its bytes, values, nesting or a text's length): which one, the walk
+          //  doesn't say, so the reply names none)
+          try { jsonSizeWithin(r.content, { ...NB_WALK, bytes: cap }); } catch { return { error: "this notebook exceeds the 3D view's limits" }; }
+          SPACE3D_TESTING.copying?.(entry.path);
+          const raw = Array.isArray(r.content?.cells) ? (r.content.cells as unknown[]) : [];
+          const cells = raw.filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
+            .map((c) => ({ id: c.id, type: c.type ?? "code", code: String(c.code ?? ""), outputs: Array.isArray(c.outputs) ? c.outputs : [] }));
+          return { text: JSON.stringify({ format: "sagebrush-notebook-cells", mode: r.content?.mode ?? "python", cells }) };
+        });
+        if (!got) return;
+        if (got.error !== undefined) return reply({ error: got.error });
+        text = got.text!;
       } else {
         // (the file as it is now, its bytes capped: one that grew since it was listed isn't read whole)
         let r;
-        try { r = await reading(entry.path, () => ws.readUpTo(entry.path, cap)); } catch (err) { if ((err as { code?: string }).code === "limit") return over(); throw err; }
+        try { r = await readCapped(ws, entry.path, cap); } catch (err) { if ((err as { code?: string }).code === "limit") return over(); throw err; }
         text = decode(r.content);
       }
       if (!alive) return;
@@ -253,7 +279,7 @@ export function mountSpace(ws: Workspace, path: string, el: HTMLElement): SpaceH
   // (the file as it is now, its bytes capped at what a space may be: a larger one isn't read whole, nor parsed)
   const reread = async () => {
     let r;
-    try { r = await ws.readUpTo(path, LIMITS.bytes); } catch (err) {
+    try { r = await readCapped(ws, path, LIMITS.bytes); } catch (err) {
       if ((err as { code?: string }).code !== "limit") throw err;
       space = null;
       return say(`Too large to show (over ${LIMITS.bytes / 2 ** 20} MiB)`);

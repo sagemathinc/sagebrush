@@ -61,13 +61,18 @@ function jsonStringBytes(s) {
   return n;
 }
 // (a value's size as compact JSON, in UTF-8 bytes: every string, number, true, false and null, and every bracket,
-//  brace, comma and colon; anything JSON can't hold counted as null, an over-count at most. Within `lim`, or it throws)
+//  brace, comma and colon; anything JSON can't hold counted as null, an over-count at most. Within `lim`, or it throws.
+//  Walked lazily, one frame for each array or object open: an array's length is checked against the values and bytes
+//  left before any of it is read, and an object's keys are taken one at a time (for…in), so nothing past the first limit
+//  passed is read, and nothing grows with the value's size but the frames, at most lim.depth of them)
 function measure(root, lim) {
   let values = 0, bytes = 0;
-  const stack = [[root, 0]];
-  while (stack.length) {
-    const [v, d] = stack.pop();
-    if (++values > lim.values) throw new Error("the space is too large to show here");
+  const big = () => new Error("the space is too large to show here");
+  type Frame = { a: unknown[]; i: number; d: number } | { o: object; keys: Generator<string>; first: boolean; d: number };
+  const frames: Frame[] = [];
+  function* ownKeys(o: object) { for (const k in o) if (Object.prototype.hasOwnProperty.call(o, k)) yield k; }
+  const visit = (v, d) => {
+    if (++values > lim.values) throw big();
     if (d > lim.depth) throw new Error("the space is nested too deeply");
     if (typeof v === "string") {
       if (v.length > lim.string) throw new Error("a text in the space is too long");
@@ -76,15 +81,31 @@ function measure(root, lim) {
     else if (typeof v === "boolean") bytes += v ? 4 : 5;
     else if (v && typeof v === "object") {
       if (Array.isArray(v)) {
+        // (each element is a value, and each but the first a comma: known before any element is read)
+        if (values + v.length > lim.values) throw big();
         bytes += 2 + Math.max(0, v.length - 1);
-        for (const x of v) stack.push([x, d + 1]);
+        frames.push({ a: v, i: 0, d });
       } else {
-        const keys = Object.keys(v);
-        bytes += 2 + Math.max(0, keys.length - 1);
-        for (const k of keys) { bytes += jsonStringBytes(k) + 1; stack.push([v[k], d + 1]); }
+        bytes += 2;
+        frames.push({ o: v, keys: ownKeys(v), first: true, d });
       }
     } else bytes += 4; // (null, and what JSON writes as null)
-    if (bytes > lim.bytes) throw new Error("the space is too large to show here");
+    if (bytes > lim.bytes) throw big();
+  };
+  visit(root, 0);
+  while (frames.length) {
+    const f = frames[frames.length - 1];
+    if ("a" in f) {
+      if (f.i >= f.a.length) { frames.pop(); continue; }
+      visit(f.a[f.i++], f.d + 1);
+    } else {
+      const k = f.keys.next();
+      if (k.done) { frames.pop(); continue; }
+      bytes += jsonStringBytes(k.value) + 1 + (f.first ? 0 : 1);
+      f.first = false;
+      if (bytes > lim.bytes) throw big();
+      visit(f.o[k.value], f.d + 1);
+    }
   }
   return bytes;
 }

@@ -15258,14 +15258,6 @@
   "owner": "document checkpoints, client (@sagebrush-sync-docs)",
   "reason": "A measurement only: the most a checkpoint decision held at the points between calls, for tests; it refuses nothing."
  },
- "web/workspace/space3d.ts :: make :: return (e.kind === \"file\" && TEXT.test(e.path) && (e.size ?? 0) <= SPACE3D_LIMITS.lengthBytes) || e.kind === \"notebook\"; #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the 3D view's hooks (@sagebrush-space)",
-  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 files of up to 1 MiB) and what the view may then read through it (a file of 4 MiB, per opening 2,000 files and 64 MiB, a path of 4,096), a folder of 50,000 files, a space of 8 MiB shown in the Agents chat: they protect the page"
- },
  "web/workspace/space3d.ts ::  :: const NB_WALK = { values: LIMITS.values, depth: LIMITS.depth, string: LIMITS.string }; #0": {
   "class": "1",
   "disposition": {
@@ -15286,6 +15278,22 @@
   "class": "none",
   "owner": "the 3D view's hooks (@sagebrush-space)",
   "reason": "names the limits it imports, refusing nothing itself"
+ },
+ "web/workspace/space3d.ts ::  :: type How = { method: \"readUpTo\"; cap: number } | { method: \"read\" }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: make :: return e.kind === \"file\" && TEXT.test(e.path) && (e.size ?? 0) <= SPACE3D_LIMITS.lengthBytes; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
  },
  "web/workspace/space3d.ts :: make :: }).slice(0, SPACE3D_LIMITS.lengths); #0": {
   "class": "1",
@@ -15320,6 +15328,30 @@
   "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
  },
  "web/workspace/space3d.ts :: pyImports :: if (out.length >= SPACE3D_LIMITS.imports) break; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: readCapped :: await SPACE3D_TESTING.reading?.(path, 1, { method: \"readUpTo\", cap }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: readCapped :: const readCapped = async (ws: Workspace, path: string, cap: number) => { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: readCapped :: try { return await ws.readUpTo(path, cap); } finally { SPACE3D_TESTING.reading?.(path, -1); } #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -15375,7 +15407,7 @@
   "owner": "the 3D view's hooks (@sagebrush-space)",
   "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
  },
- "web/workspace/space3d.ts :: reread :: try { r = await ws.readUpTo(path, LIMITS.bytes); } catch (err) { #0": {
+ "web/workspace/space3d.ts :: serve :: const cap = Math.min(SPACE3D_LIMITS.file, room), over = () => reply({ error: cap < SPACE3D_LIMITS.file ? \"too much read in this view: close it and open it again\" : `it's too large to read here (over ${MiB(cap)})` }); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -15383,7 +15415,7 @@
   "owner": "the 3D view's hooks (@sagebrush-space)",
   "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
  },
- "web/workspace/space3d.ts :: serve :: const cap = Math.min(SPACE3D_LIMITS.file, room), over = () => reply({ error: cap < SPACE3D_LIMITS.file ? \"too much read in this view: close it and open it again\" : `it's too large to read here (over ${MiB(cap)})` }); #0": {
+ "web/workspace/space3d.ts :: reread :: try { r = await readCapped(ws, path, LIMITS.bytes); } catch (err) { #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -15407,7 +15439,7 @@
   "owner": "the 3D view's hooks (@sagebrush-space)",
   "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
  },
- "web/workspace/space3d.ts :: serve :: try { jsonSizeWithin(r.content, { ...NB_WALK, bytes: cap }); } catch { return over(); } #0": {
+ "web/workspace/space3d.ts :: serve :: try { jsonSizeWithin(r.content, { ...NB_WALK, bytes: cap }); } catch { return { error: \"this notebook exceeds the 3D view's limits\" }; } #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -15415,7 +15447,7 @@
   "owner": "the 3D view's hooks (@sagebrush-space)",
   "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
  },
- "web/workspace/space3d.ts :: serve :: try { r = await reading(entry.path, () => ws.readUpTo(entry.path, cap)); } catch (err) { if ((err as { code?: string }).code === \"limit\") return over(); throw err; } #0": {
+ "web/workspace/space3d.ts :: serve :: try { r = await readCapped(ws, entry.path, cap); } catch (err) { if ((err as { code?: string }).code === \"limit\") return over(); throw err; } #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -15439,7 +15471,7 @@
   "owner": "the 3D view's hooks (@sagebrush-space)",
   "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
  },
- "web/workspace/space3d.ts :: worker :: const r = await reading(e.path, () => ws.readUpTo(e.path, SPACE3D_LIMITS.lengthBytes)); #0": {
+ "web/workspace/space3d.ts :: worker :: const r = await readCapped(ws, e.path, SPACE3D_LIMITS.lengthBytes); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -15480,14 +15512,6 @@
   "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
  },
  "web/workspace/space3d.ts :: worker :: reserved -= SPACE3D_LIMITS.lengthBytes - Math.min(used, SPACE3D_LIMITS.lengthBytes); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the 3D view's hooks (@sagebrush-space)",
-  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
- },
- "web/workspace/space3d.ts :: worker :: used = jsonSizeWithin(r.content, { ...NB_WALK, bytes: SPACE3D_LIMITS.lengthBytes }); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"

@@ -222,11 +222,19 @@ const bigPath = "/huge.space.json";
   ok(made?.result?.value === "made", "a 9 MiB .space.json is made in another tab", made);
   c2.close();
 }
+await ev(`(async () => {
+  const m = await import(new URL("/sagebrush-space3d.js", location.href).href);
+  window.__hows = [];
+  m.SPACE3D_TESTING.reading = (p, d, how) => { if (d > 0) window.__hows.push([p, how?.method ?? null, how?.cap ?? null]); };
+  return true;
+})()`);
 const t2 = `t${++turnN}`;
 event(t2, { type: "turn_started" });
 event(t2, { type: "artifact", id: bigPath, kind: "code", lang: "json", title: "huge.space.json", path: bigPath, body: "" });
 event(t2, { type: "turn_finished", outcome: "completed" });
 ok(await until(`/Too large to show \\(over 8 MiB\\)/.test(document.querySelector('#artifacts .pane-host:not([hidden]) .file-path')?.textContent ?? '')`, 20000).catch(() => false), "a 9 MiB .space.json: too large to show, and not read whole");
+const sh = await ev(`window.__hows.filter((h) => h[0] === ${JSON.stringify(bigPath)})`);
+ok(sh.length >= 1 && sh.every((h) => h[1] === "readUpTo" && h[2] === 8 << 20), "the .space.json is read with its bytes capped at 8 MiB (readUpTo), never whole", sh);
 
 // ---- the pane reads no files for the view
 const refused = await inFrame(`new Promise((res) => { const h = (e) => { if (e.data?.sagebrush === "space-file" && e.data.id === 7001) { removeEventListener("message", h); res(e.data.error ?? "read"); } };
