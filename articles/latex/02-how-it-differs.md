@@ -63,7 +63,7 @@ each one with its line.
 | biblatex: `\autocite`, `\textcite`, `\parencite`, `\footcite`; natbib: `\citeauthor`, `\citeyear` | a grey chip, then the key as text |
 | babel and csquotes: `\selectlanguage`, `\foreignlanguage`, `otherlanguage`, `\enquote` | a grey chip or a plain box; the text itself is shown |
 | `subfigure`, `subequations`, `algorithm`, `algorithmic`, `tcolorbox`, `mdframed`, `framed`, `landscape` | a plain box with the content |
-| TikZ pictures using `\clip`, `matrix`, `pic`, `edge`, `plot`, decorations or a pgfplots `axis`: `tikzpicture` | a placeholder naming what isn't drawn yet. TikZ's paths (lines, curves, circles and arcs, grids, arrows), styles, transforms, `\foreach` and nodes (the text in a picture, its anchors and placement) are drawn |
+| TikZ pictures that clip, or use matrices, pics, edges, plots, decorations or a pgfplots axis: `tikzpicture` | a placeholder naming what isn't drawn yet. TikZ's paths (lines, curves, circles and arcs, grids, arrows), styles, transforms, `\foreach` and nodes (the text in a picture, its anchors and placement) are drawn |
 | BibTeX and biber: `\bibliography` with a `.bib` file | the line "[bibliography from refs.bib: BibTeX is not run]", and `\cite` shows the key in brackets, [knuth84] |
 | PythonTeX's other commands and environments (pyc, pys, pyb, pyconsole, pysub, pyverbatim, and the families other than py) | the code as written, or a "not run" mark where its results would go |
 
