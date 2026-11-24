@@ -3328,6 +3328,7 @@ const shareDialog = createShareDialog({
   allFiles: () => shareTest.allFiles,
   published: () => { if (shareTest.lagPublished) return null; const id = nb?.snapshot?.().share_id; return id ? new URL("/s/" + id, location.href).href : null; },
   notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(toIpynb(notebookForExport())) }),
+  prepareNotebook: () => nb.imagesReady(),
   // (its edit history, for "Include edit history": every version up to now, as a .sbreplay (notebook/bundle.js's
   // format) with no files of its own (the share's are its files), recorded again by one anonymous writer
   // (history.js publishedHistory); null: none here)
@@ -3517,6 +3518,7 @@ const downloadDialog = createDownloadDialog({
   ...pickHost,
   dlg: $("#dldepsdlg"),
   notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(notebookFileText(notebookForExport())) }),
+  prepareNotebook: () => nb.imagesReady(),
   readFile: (f) => storedFileBytes(f, "download again"),
   // (at the click: the download checks the notebook after it, so a path can't outlive a rename or a switch)
   notebookPath: async () => {
@@ -4119,7 +4121,15 @@ fileMenu.addEventListener("click", async (e) => {
     }
     // (the whole workspace as one .zip: the Files sidebar's export, the sidebar shown (sim run 11, X05))
     case "allzip": if (!wsBrowser) wsShowFiles(true); wsBrowser?.exportAll(); break;
-    case "ipynb": void nb.imagesReady().then(() => download(fileBase() + ".ipynb", notebookFileText(notebookForExport()))); break;
+    case "ipynb": {
+      // (its images read again, then written: only if the same notebook is still shown, else said, nothing written)
+      const was = current.id;
+      void nb.imagesReady().then(() => {
+        if (current.id !== was) { statusEl.textContent = "Another notebook was opened before the download was ready: download again."; return; }
+        download(fileBase() + ".ipynb", notebookFileText(notebookForExport()));
+      });
+      break;
+    }
     case "py": download(fileBase() + (isSage() ? ".sage" : isMagma() || isMatlab() ? ".m" : ".py"), toScript(nb.snapshot()), isMagma() || isMatlab() ? "text/plain" : "text/x-python"); break;
     case "marimo": {
       // (each cell's arguments and return values: the names it reads and defines)

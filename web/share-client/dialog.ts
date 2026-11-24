@@ -18,6 +18,9 @@ export interface ShareDialogHost extends Omit<PickerHost, "notebook"> {
   dlg: HTMLDialogElement;
   /** the notebook: its file name in the share, and its bytes */
   notebook: () => { path: string; data: Uint8Array };
+  /** made ready just before the notebook is taken for a share: its images read again (#1872), so what is shared is
+   * what the workspace has now; none: nothing to do */
+  prepareNotebook?: () => Promise<void>;
   /** one file's bytes at upload; throws if it is no longer the file listed (fid) */
   readFile: (f: { path: string; fid?: string }) => Promise<Uint8Array>;
   upload: (o: { files: LazyFile[]; title: string; license: string; author: string }, progress: (done: number, total: number) => void) => Promise<{ url: string; again: boolean; frozen?: string; version?: string }>;
@@ -229,7 +232,12 @@ export function createShareDialog(h: ShareDialogHost) {
       out.textContent = "The notebook changed since Share was opened: open Share again.";
       return;
     }
-    // (the notebook as it is now, bounded like any file, CORR-172-ASTRA-3)
+    // (its images read again first, then the notebook as it is now, bounded like any file, CORR-172-ASTRA-3)
+    await h.prepareNotebook?.();
+    if (!picker.mine()) {
+      out.textContent = "The notebook changed since Share was opened: open Share again.";
+      return;
+    }
     const nb = h.notebook();
     const max = h.bounds().maxFileBytes;
     if (max !== undefined && nb.data.length > max) {

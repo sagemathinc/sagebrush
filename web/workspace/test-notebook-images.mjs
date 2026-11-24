@@ -125,6 +125,15 @@ try {
   const b8 = ex8.cells.map((c) => c.attachments?.[shown7.name]?.["image/png"]).find(Boolean);
   ok(b8 && Buffer.from(b8, "base64")[40] === 5, "N8: the file changed in the workspace: Download embeds its new bytes, not the ones held before");
 
+  // ---- N9: the real File > Download: captured as the page writes it, after the file changed again
+  await P.ev(`(async () => { const u = new Uint8Array(64).fill(4); u.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]); await ${W}.write(${J(p8)}, u); return true; })()`);
+  await P.ev(`(() => { window.__dl = null; const click = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { if (this.download) { window.__dl = { name: this.download, href: this.href }; fetch(this.href).then((r) => r.text()).then((t) => (window.__dl.text = t)); return; } return click.call(this); }; return true; })()`);
+  await P.ev(`(document.querySelector('[data-f="ipynb"]').click(), true)`);
+  await P.until(`!!window.__dl?.text`, 10000).catch(() => {});
+  const dl = await P.ev(`window.__dl`);
+  const b9 = dl?.text ? JSON.parse(dl.text).cells.map((c) => c.attachments?.[shown7.name]?.["image/png"]).find(Boolean) : null;
+  ok(/\.ipynb$/.test(dl?.name ?? "") && b9 && Buffer.from(b9, "base64")[40] === 4, "N9: File > Download writes the .ipynb with the image's current bytes embedded", dl && { name: dl.name });
+
   // ---- N6: an ill-formed reference: missing, never read
   await P.ev(`(() => { window.__reads = []; const w = ${W}; const r = w.read.bind(w); w.read = (p, ...a) => { window.__reads.push(p); return r(p, ...a); }; return true; })()`);
   await P.ev(`(() => { const c = ${NB}.addCell("![x](attachment:x.png)", null, false, "markdown"); c.attachments = { "x.png": { "sagebrush/file": "/private/notes.png" } }; ${NB}.run(c); return true; })()`);

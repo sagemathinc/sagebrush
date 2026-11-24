@@ -15,6 +15,8 @@ export interface DownloadDialogHost extends Omit<PickerHost, "notebook"> {
   dlg: HTMLDialogElement;
   /** the notebook: its file name, and its Download bytes */
   notebook: () => { path: string; data: Uint8Array };
+  /** made ready just before the notebook is taken: its images read again (#1872); none: nothing to do */
+  prepareNotebook?: () => Promise<void>;
   /** its workspace path now, without the leading /, or null (not in the workspace): looked up at the click */
   notebookPath: () => Promise<string | null>;
   /** one file's bytes; throws if it is no longer the file listed (fid) */
@@ -44,6 +46,11 @@ export function createDownloadDialog(h: DownloadDialogHost) {
 
   btn.addEventListener("click", async () => {
     if (!picker.selection || busy) return;
+    if (!picker.mine()) {
+      out.textContent = "The notebook changed since this was opened: open it again.";
+      return;
+    }
+    await h.prepareNotebook?.();
     if (!picker.mine()) {
       out.textContent = "The notebook changed since this was opened: open it again.";
       return;

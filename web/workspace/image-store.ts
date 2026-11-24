@@ -252,6 +252,8 @@ type Held = { shown: Shown | null; bytes: Uint8Array };
 export class ImageUrls {
   private urls = new Map<string, Held | null>();
   private loading = new Map<string, Promise<void>>();
+  // (bumped by clear(): a read still on its way for the document before is dropped when it arrives)
+  private gen = 0;
   constructor(private read: (path: string) => Promise<Uint8Array | null>, private changed: () => void) {}
   url(path: string): Shown | null {
     const u = this.urls.get(path);
@@ -271,6 +273,7 @@ export class ImageUrls {
    * what was held is replaced when its bytes changed or it went, and one missing before is found if it came back, so an
    * export embeds what the workspace has now, as Export all and a push do. */
   async ready(paths: string[]): Promise<void> {
+    const gen = this.gen;
     let redraw = false;
     await Promise.all(paths.map(async (p) => {
       // (one not held yet is read now by load: no second read)
@@ -278,6 +281,7 @@ export class ImageUrls {
       await this.load(p);
       if (fresh || filePathOf({ [FILE_KEY]: p }) !== p) return;
       const now = await this.read(p).catch(() => null);
+      if (gen !== this.gen) return;
       const had = this.urls.get(p);
       if (had && now && sameBytes(had.bytes, now)) return;
       if (!had && !now) return;
@@ -292,13 +296,16 @@ export class ImageUrls {
     const going = this.loading.get(path);
     if (going) return going;
     if (filePathOf({ [FILE_KEY]: path }) !== path) { this.urls.set(path, null); return Promise.resolve(); }
+    const gen = this.gen;
     const p = (async () => {
+      let u: Uint8Array | null = null;
       try {
-        const u = await this.read(path).catch(() => null);
-        if (u) this.hold(path, u); else this.urls.set(path, null);
+        u = await this.read(path).catch(() => null);
       } finally {
-        this.loading.delete(path);
+        if (this.loading.get(path) === p) this.loading.delete(path);
       }
+      if (gen !== this.gen) return;
+      if (u) this.hold(path, u); else this.urls.set(path, null);
       this.changed();
     })();
     this.loading.set(path, p);
@@ -316,8 +323,9 @@ export class ImageUrls {
     if (u?.shown) URL.revokeObjectURL(u.shown.url);
     this.urls.delete(path);
   }
-  /** Let go of every image (another document shown): their URLs revoked and their bytes dropped. */
-  clear() { this.dispose(); }
+  /** Let go of every image (another document shown): their URLs revoked and their bytes dropped, and any read still on
+   * its way dropped when it arrives. */
+  clear() { this.gen++; this.loading.clear(); this.dispose(); }
   dispose() {
     for (const u of this.urls.values()) if (u?.shown) URL.revokeObjectURL(u.shown.url);
     this.urls.clear();

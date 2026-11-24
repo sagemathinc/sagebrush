@@ -120,6 +120,20 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   ok(U.bytes("/Attachments/nb-x/a.png") === null, "clear() lets every image go");
   U.dispose();
 }
+// ---- a read still on its way when another document loads (clear()) is dropped when it arrives
+{
+  const real = new Uint8Array(64).fill(7); real.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]);
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const U = new ImageUrls(async () => { await gate; return real; }, () => {});
+  const loading = U.load("/Attachments/nb-a/x.png");
+  const readying = U.ready(["/Attachments/nb-a/y.png"]);
+  U.clear();
+  release();
+  await loading; await readying;
+  ok(U.bytes("/Attachments/nb-a/x.png") === null && U.bytes("/Attachments/nb-a/y.png") === null && U.url("/Attachments/nb-a/x.png") === null, "reads that arrive after clear() (another document shown) aren't kept");
+  U.dispose();
+}
 // ---- an attachment named "__proto__" survives import and export
 {
   const S = store();
