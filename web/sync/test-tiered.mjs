@@ -168,12 +168,12 @@ async function signIn(id, origin = SITE) {
   return r.headers.getSetCookie().map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
 }
 const post = (s, path, body, origin = SITE) => at(origin, path, { method: "POST", headers: { cookie: s, origin, "content-type": "application/json" }, body: JSON.stringify(body) });
-const put = (s, bytes) => at(SITE, `/api/sync/v1/blob/${sha(bytes)}`, { method: "PUT", headers: { cookie: s, origin: SITE, "content-type": "application/octet-stream" }, body: bytes });
+const put = (s, bytes) => at(SITE, `/api/sync/v1/blob/${sha(bytes)}`, { method: "PUT", headers: { cookie: s, origin: SITE, "content-type": "application/octet-stream", "x-sb-ct-sha256": sha(bytes) }, body: bytes });
 const get = (s, path, origin = SITE) => at(origin, path, { headers: { cookie: s, origin } });
 const gate = (name, on) => at(SITE, `/__test/gate?name=${name}&on=${on ? 1 : 0}`);
 const register = (s, m) => post(s, "/api/sync/v1/manifest", { manifest: m });
 const verify = (s, h) => post(s, `/api/sync/v1/manifest/${h}/verify`, {});
-const check = async (s, hashes) => (await post(s, "/api/sync/v1/blobs/check", { blobs: hashes.map((h) => ({ sha256: h, size: 1 })) })).json();
+const check = async (s, hashes) => (await post(s, "/api/sync/v1/blobs/check", { blobs: hashes.map((h) => ({ sha256: h, ct_sha256: h, size: 1 })) })).json();
 async function account(id) {
   const ns = await mf.getDurableObjectNamespace("SYNC_ACCOUNT", "on");
   const hash = createHash("sha256").update("sagebrush-account\n" + id).digest("hex");
@@ -245,7 +245,7 @@ await section("the switch off", async () => {
   ok(r.status === 404, "with SYNC_TIERED unbound, POST /manifest is a 404");
   ok((await get(s, "/api/sync/v1/manifest/" + "a".repeat(64), "https://off.test")).status === 404, "and GET /manifest/<sha> too");
   ok((await post(s, `/api/sync/v1/manifest/${"a".repeat(64)}/verify`, {}, "https://off.test")).status === 404, "and verify too");
-  const c = await (await post(s, "/api/sync/v1/blobs/check", { blobs: [{ sha256: "a".repeat(64), size: 1 }] }, "https://off.test")).json();
+  const c = await (await post(s, "/api/sync/v1/blobs/check", { blobs: [{ sha256: "a".repeat(64), ct_sha256: "a".repeat(64), size: 1 }] }, "https://off.test")).json();
   ok(JSON.stringify(c) === JSON.stringify({ missing: ["a".repeat(64)] }), "and blobs/check's answer is unchanged: " + JSON.stringify(c));
 });
 
