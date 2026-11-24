@@ -24,7 +24,8 @@ Each section below gives the options, a recommendation, and what it costs. §10 
 
 - **Setting up sync** creates the account's keys on that device and shows a **recovery code** once. The person must confirm they kept it, by typing back part of it, before sync starts.
 - **Adding a device** is done from a device that is already set up: scan a QR code or compare a short code, as when pairing a phone. Without such a device, the person enters the recovery code.
-- **If every device and the recovery code are lost, the data is gone.** Nobody can recover it: not Sagebrush, not CoCalc, not support. The setup screen says this in one sentence, and Settings says it again next to "Show recovery code".
+- **If every device and the recovery code are lost, the data is gone.** Nobody can recover it: not Sagebrush, not CoCalc, not support. The setup screen says this in one sentence, and Settings says it again.
+- **Sagebrush never stores the recovery code.** Settings shows "Recovery is set up" and offers **Replace recovery code**. "Show recovery code" exists only on a device where the person chose, at setup, to keep a locally wrapped copy, and the screen says that device holds it.
 - **Removing a device** (lost or sold) stops it from reading anything written afterwards. It can't make it forget what it already downloaded. The dialog says so.
 - **A browser can lose its keys on its own:** site data cleared, or storage evicted (Safari's 7-day rule for sites not visited). The page then asks to set the browser up again, from another device or the recovery code. Nothing is lost as long as one of those exists. The desktop app, or a second device, makes this rare.
 
@@ -37,6 +38,9 @@ Each section below gives the options, a recommendation, and what it costs. §10 
   - **In the desktop app:** the OS keychain (macOS Keychain, Windows Credential Manager, Secret Service), through the Tauri app and the small `keyring` crate. The app has no keychain access yet.
 - **The recovery key:** a 32-byte seed, shown once as the recovery code. Domain-separated derivations give a recovery X25519 key and a recovery Ed25519 key, and only their public halves are stored.
   - **No password-derived escrow:** a password could be guessed offline, and a 256-bit seed can't.
+  - **The seed is never stored by Sagebrush** (§1).
+  - **Replacing the recovery code** makes a new recovery key, re-wraps every epoch that recovery may need to it, and records the replacement in the chain.
+    - **The limit:** an old code can't be made to forget epochs it could already open. The server deletes the old wrapped copies, but a malicious server or a copy taken earlier could keep them.
 - **Epochs:** each epoch `e` has a random 32-byte secret `S[e]`. It is HPKE-wrapped to every current device's X25519 key **and** to the recovery X25519 key, and the wrapped copies are stored next to the key chain.
   - So the recovery code can always open the latest epoch the server shows it, with no stored copy encrypted under the code itself.
   - **From `S[e]`,** HKDF-SHA256 derives, each under its own label:
@@ -44,7 +48,10 @@ Each section below gives the options, a recommendation, and what it costs. §10 
     - the address key `K_addr[e]` (§3.3);
     - the blob key `K_blob[e]` (§3.3);
     - the key that wraps per-object content keys, `K_wrap[e]`.
-- **The inbox key pair** (X25519, for receiving shares and proposals, §5) is random and long-lived. It's kept wrapped under `K_wrap[e]` and is not re-derived each epoch, so removing a device doesn't change the key that senders have pinned. It is rotated only by explicit request, or after a compromise.
+- **The inbox key pair** (X25519, for receiving shares and proposals, §5) is random, kept wrapped under `K_wrap[e]`.
+  - **Removing a device rotates it automatically** (SEC). A removed device knew the old private key, and could otherwise open every future share sent to the unchanged public key.
+  - The new inbox public key is published in a signed chain entry. Senders that pinned the account's chain accept it as continuity, verified through the chain, not as a first-use key.
+  - **The limit:** anything already sent to the old inbox key stays readable by the removed device.
 - **The key chain:** an append-only, signed log of the account's devices and epochs. It reuses the structure the fleet protocol already has and SEC has already reviewed (sagebrush-agent's lib/fleet/core: genesis, add with the new device's countersignature, remove, recover, rotate recovery).
   - The server stores the chain and can't forge it.
   - Each device pins the head it last verified, and refuses a chain that rolls back or forks from it.
@@ -95,7 +102,7 @@ WebCrypto's AES-GCM takes whole buffers, so a large object is sealed in fixed, b
 - **Chunks:** 1 MiB of compressed bytes each.
 - **The nonce:**
   - for a document or snapshot, a random 64-bit prefix per object, plus a big-endian u32 chunk index;
-  - for a blob, the synthetic nonce of §3.3.
+  - for a blob, a per-chunk key with a fixed nonce (§3.3).
 - **AAD binds:**
   - the protocol and version;
   - the account, the object and its version;
@@ -105,6 +112,7 @@ WebCrypto's AES-GCM takes whole buffers, so a large object is sealed in fixed, b
   So chunks can't be reordered, dropped, cut short or moved to another object.
 - **Decompression is bounded** after authentication: an output-size and ratio limit, so a hostile blob can't exhaust memory.
 - **This aligns with the chunked-files work** (the sync client's plan): the manifest of chunks is itself an encrypted object.
+- **Chunk boundaries must not fingerprint content:** content-defined chunking (1 to 8 MiB today) would reveal a sequence of chunk sizes that identifies a known file, even with every chunk encrypted. So chunking is either keyed (the gear table derived from `K_blob[e]`) or fixed-size (the sync client's point; SEC to choose).
 
 ### 3.3 Blob addresses and dedup within an account
 
@@ -112,14 +120,15 @@ WebCrypto's AES-GCM takes whole buffers, so a large object is sealed in fixed, b
 - **At the wire boundary, one function:** `wireAddress(sha) = HMAC-SHA256(K_addr[e], "sagebrush.blob.v1" ‖ sha)` (the sync client's proposal).
   - The server keys holdings by that address.
   - It checks the uploaded ciphertext's declared `ct_sha256`.
-- **Deterministic blob encryption** (SEC): the blob's key is `K = HKDF(K_blob[e], "sagebrush.blob.key.v1" ‖ sha)`.
-  - **Why deterministic:** any device holding the epoch derives it from the plaintext's hash. Two devices racing to upload the same file produce compatible ciphertext, and a later device needs no "winning key" from anyone.
-  - **A random key per upload** would need a serialized key registry, which is more complex and race-prone.
-  - **The nonce is synthetic (SIV-style):** each chunk's nonce is `HMAC(K', compressed chunk ‖ chunk index)`, truncated to 96 bits, with `K'` derived from `K` under its own label.
-    - Identical compressed bytes give identical ciphertext, which dedups.
-    - If two compressors ever differ, the nonces differ too, so a key never meets two different plaintexts under one nonce.
-    - This holds even if compression isn't perfectly canonical. Compression is still pinned (one implementation and level), so dedup stays good.
-  - **The invariant, with a mutation test:** a nonce is never reused under one key for different bytes.
+- **Deterministic blob encryption** (SEC): any device holding the epoch derives a blob's keys from the plaintext's hash, so two devices racing to upload the same file produce the same ciphertext, and no "winning key" has to be found. A random key per upload would need a serialized key registry, which is more complex and race-prone.
+  - **The codec is pinned and is part of the blob's format:** one compressor implementation and version, deterministic by construction.
+    - It is our own vendored implementation, not the browser's CompressionStream, whose output can differ between browsers and versions.
+    - Changing the codec bumps the format version, and with it the key derivation.
+  - **Each chunk gets its own key:** `K_chunk = HKDF(K_blob[e], "sagebrush.blob.v1" ‖ sha ‖ codec ‖ chunk index)`.
+    - The nonce is fixed (zero). That's safe only because each key encrypts exactly one chunk: the pinned codec makes the compressed chunk a function of `(sha, codec, index)`.
+    - AAD binds the codec, the address, the chunk's index, the chunk count, and the plain and compressed lengths.
+  - **The invariant:** a chunk key is used for one chunk's bytes only. It rests on the codec being deterministic, which the blob format's tests check across engines (the same input gives byte-identical output). A mutation test checks the derivation's inputs, not collision-freedom.
+  - **Two codec versions at one address:** they derive different keys, and the envelope names its codec, so any device can open whichever version the server holds. The first upload for an address is kept, and a device that sees an older codec there re-encrypts only if asked.
 - **Releasing blobs safely** (SEC): the refs that signed envelopes add and release must not let a stale, concurrent client free a blob that is still referenced elsewhere.
   - So physical deletion waits for a grace window **and** a signed, client-made compaction checkpoint covering the release.
   - Until those exist, r1 defers physical garbage collection: released blobs are kept and counted. That is the simplest safe start, and its cost is bounded by the quota.
@@ -139,10 +148,19 @@ WebCrypto's AES-GCM takes whole buffers, so a large object is sealed in fixed, b
 | Blob names | plaintext SHA-256 | `wireAddress` (§3.3) |
 | Quota | holding and document sizes | ciphertext bytes, as now (quota already uses sizes only) |
 | Agent scope, `list`/`stat` | the server's derived index | a device acting for the agent (§6) |
+| Grants and the access log | each grant's scope paths, and every agent call's paths, in plaintext (account.ts `grants.scopes`, `access_log.paths`) | scopes sealed to the devices, which enforce them; the server keeps only the grant id, token hash, tag, rates and expiry. The access log is written by the answering device, encrypted (or with paths HMACed under `K_index[e]`) |
 | Version retention, Trash | refcounts from the derived index | explicit client ops; the server counts the refs each envelope adds and releases |
 
 **What changes in the server:**
 - `checkOp` becomes form-only. The server still checks the signature, `dseq` order, envelope size, and that every added ref is a held blob.
+- **Clients verify too, not just the server** (SEC). Each client checks every op it applies:
+  - its signature;
+  - that its device was authorized at that point in the key chain;
+  - its epoch;
+  - its `dseq` and the previous envelope's hash;
+  - the commitments to its ciphertext and refs.
+
+  A server that skips its own checks can't slip an op past a client.
 - `indexApply` and the derived index (entries.ts) leave the Worker. The index bounds become log caps.
 - **Rejection must be deterministic:** a rule every client applies identically, with a fuzz test that two clients reducing the same log always agree, as they already must.
 - **A new device** starts from a client-made, encrypted **index snapshot** at a `seq`, plus the sealed ops after it, so the server can drop older ops.
@@ -192,14 +210,14 @@ Size padding to buckets would hide exact sizes, at a storage cost: §10 Q5.
 - **Support bundles:**
   - the person picks the files from an explicit manifest;
   - the client encrypts them to a **per-ticket support X25519 key**;
-  - the bundle has an expiry and can be revoked;
+  - the bundle has an expiry and can be revoked. **The limit:** expiry and revocation stop future downloads only. Support may keep plaintext or keys it already received, as with a removed device;
   - support decrypts it in its own tool. There is no ambient access.
 
 ### 5.1 Live collaboration is replaced
 
 design/workspace-files.md §7.9 and "Phase 3: collaboration" (one document written by several accounts, editors and viewers, presence), and sync-server.md's `acl(account, role)` for phase 3, contradict "never a shared live document".
 
-None of it is built: documents' access lists are owner-only (the sync documents' owner). The designs are rewritten as copy plus proposals (§7, PR 0).
+None of it is built: documents' access lists are owner-only today. The designs are rewritten as copy plus proposals (§7, PR 0).
 
 ## 6. Agents
 
@@ -225,10 +243,10 @@ None of it is built: documents' access lists are owner-only (the sync documents'
 | 0 | docs and the decision | rewrite workspace-files §7.4 and §7.9, sync-server §10, agent-endpoint §4 and §9, web/docs/storage.md and sharing.md, and PRODUCT.md; remove phase-3 live collaboration (the sync documents' owner offers to draft these) |
 | 1 | crypto core in web | port the fleet core's HPKE, strict Ed25519 and fixtures (shared with the page's fleet verifier); add the chunked AEAD (§3.2), the HKDF labels, an `@hpke/core` interop test, and the browser-floor check |
 | 2 | keys and devices | epochs, device enrollment (QR or short code), the recovery code, the key chain, and the Settings UI. The desktop app gains `keyring`. No sync change |
-| 3 | blobs | `wireAddress`; pinned compression, then deterministic chunked AEAD with synthetic nonces; server holdings keyed by address, checking `ct_sha256`; physical GC deferred (§3.3) |
-| 3b | document payloads | patches, snapshots and outputs encrypted, with the outputs table keyed opaquely. Small: doc.ts never parses a body (moved ahead of sealed ops, as the sync documents' owner recommends) |
-| 4 | sealed ops | sealed, signed op envelopes with visible ref adds and releases. The Worker loses `indexApply` and entries.ts, gains log caps, and keeps a form-only `checkOp`. Client-side index snapshots; retention and Trash as client ops; the two-client agreement fuzz test |
-| 5 | the agent endpoint | relay to an online device; Autonomous VMs, the CLI and the desktop app as devices |
+| 3 | blobs | `wireAddress`; the pinned codec, then deterministic chunked AEAD with per-chunk keys; holdings, pins and chunk manifests (`files`) keyed by address, checking `ct_sha256`; physical GC deferred (§3.3) |
+| 4 | document payloads | patches, snapshots and outputs encrypted, with the outputs table keyed opaquely. Small: doc.ts never parses a body (moved ahead of sealed ops, as the sync documents' owner recommends) |
+| 5 | sealed ops | sealed, signed op envelopes with visible ref adds and releases. The Worker loses `indexApply` and entries.ts, gains log caps, and keeps a form-only `checkOp`. Client-side index snapshots; retention and Trash as client ops; the two-client agreement fuzz test |
+| 6 | the agent endpoint | relay to an online device; Autonomous VMs, the CLI and the desktop app as devices; grant scopes sealed to devices, and the access log written by devices |
 | 7 | chunked files | encrypted chunk manifests (with the chunked-files work) |
 | 8 | shares | private shares, link-fragment shares, proposals, the key directory and its warnings; decrypt-and-publish into the existing collections |
 | 9 | support bundles | per-ticket key, with expiry |
