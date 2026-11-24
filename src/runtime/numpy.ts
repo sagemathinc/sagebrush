@@ -667,12 +667,14 @@ function seqItems(x: any): any[] {
 function discover(x: any, depth: number, shape: number[] & { leaf?: number }, kinds: { dt: DType | null }, shapeOnly = false) {
   if (x instanceof NDArray) {
     const s = x.shape;
+    if (depth + s.length > OBJ_MAXDIMS) tooDeep();
     for (let i = 0; i < s.length; i++) setDim(shape, depth + i, s[i]);
     kinds.dt = kinds.dt ? promote(kinds.dt, x.dt) : x.dt;
     return;
   }
   if (isSeq(x)) {
     if (protocolSeq(x)) throw PROTOCOL;
+    if (depth >= OBJ_MAXDIMS) tooDeep();
     const items = seqItems(x);
     setDim(shape, depth, items.length);
     for (const it of items) discover(it, depth + 1, shape, kinds, shapeOnly);
@@ -701,6 +703,11 @@ function discover(x: any, depth: number, shape: number[] & { leaf?: number }, ki
     kinds.dt = kinds.dt ? promote(kinds.dt, D.float64) : D.float64;
     return;
   }
+  // (a Python int that neither int64 nor uint64 holds: an object array, as NumPy's discovery)
+  if (w.big !== undefined && w.dt === null && (w.big > 18446744073709551615n || w.big < -9223372036854775808n)) {
+    (kinds as { big?: bigint }).big ??= w.big;
+    throw OBJS;
+  }
   const dt = scalarDtype(w);
   kinds.dt = kinds.dt ? promoteScalar(kinds.dt, dt, w) : dt;
 }
@@ -716,6 +723,12 @@ function setDim(shape: number[] & { leaf?: number }, d: number, n: number) {
   if (shape.leaf !== undefined && d >= shape.leaf) inhomogeneous(shape.leaf, shape);
 }
 // (NumPy's message names the shape detected up to the inhomogeneous axis)
+// (NumPy's NPY_MAXDIMS: data nested deeper, a list that contains itself among them, is refused when the
+// dtype is discovered; an object dtype keeps what lies deeper as elements, objFromPy)
+const OBJ_MAXDIMS = 64;
+function tooDeep(): never {
+  return raise(T.ValueError, `setting an array element with a sequence. The requested array would exceed the maximum number of dimension of ${OBJ_MAXDIMS}.`);
+}
 function inhomogeneous(d: number, shape: number[]): never {
   const dims = shape.slice(0, d);
   const shown = `(${dims.join(", ")}${dims.length === 1 ? "," : ""})`;
@@ -950,7 +963,10 @@ export function fromPy(x: any, dtype: any = null, copyKw: any = undefined, strOK
   // (a non-number among the elements: an object array for a caller that takes one, as NumPy's; else NumPy's
   // error for a number expected)
   const objs = (): NDArray => {
-    if (strOK && !given) return objFromPy(x) as any;
+    if (strOK && !given) return objFromPy(x, true) as any;
+    // (only numbers, one of them an int too large for int64: the error a numeric caller had before)
+    const big = (kinds as { big?: bigint }).big;
+    if (big !== undefined && firstNonNumber(x) === undefined) raise(T.OverflowError, `Python integer ${big} out of bounds for int64`);
     return raise(T.TypeError, `float() argument must be a string or a real number, not '${typeName(firstNonNumber(x))}'`);
   };
   const strs = (): NDArray => {
@@ -3812,11 +3828,19 @@ function elemObj(a: any, p: number): any {
 // the deepest one where every item at each depth is a list or tuple (or an
 // array) of the same length; what lies below is an element as it is (a
 // ragged list stays a list). A string is an element, never a sequence.
-function objFromPy(x: any): ObjArray {
+function objFromPy(x: any, discovered = false): ObjArray {
   const shape: number[] = [];
   let level: any[] = [x];
+  // (at most NumPy's NPY_MAXDIMS = 64 dimensions: with an object dtype given, what lies deeper stays an
+  // element, so a list that contains itself ends; Stop is polled once a level)
   for (;;) {
     if (level.length === 0) break;
+    if (shape.length >= OBJ_MAXDIMS) {
+      // (data whose dtype was discovered, not given: deeper sequences are refused, as NumPy's)
+      if (discovered && level.some((v) => (anyArray(v) ? v.ndim > 0 : isSeq(v) && !strLike(v)))) tooDeep();
+      break;
+    }
+    O.pollInterrupt();
     let n = -1;
     let ok = true;
     for (const v of level) {
@@ -3830,7 +3854,12 @@ function objFromPy(x: any): ObjArray {
       }
       n = len;
     }
-    if (!ok) break;
+    if (!ok) {
+      // (a discovered dtype: ragged data is NumPy's inhomogeneous-shape error; a given object dtype keeps its
+      // differing sequences as elements)
+      if (discovered && level.some((v) => (anyArray(v) ? v.ndim > 0 : isSeq(v) && !strLike(v)))) inhomogeneous(shape.length, shape);
+      break;
+    }
     shape.push(n);
     const next: any[] = [];
     for (const v of level) {
@@ -3895,7 +3924,7 @@ function objAstype(a: ObjArray, dtype: any): ObjArray | StrArray | NDArray {
 // an operand of an object array's operation as an object array: one already,
 // another array's elements, or any Python value (a sequence as np.array(x,
 // dtype=object) makes it; anything else a 0-d element)
-const objOperand = (v: any): ObjArray => (v instanceof ObjArray ? v : v instanceof NDArray || v instanceof StrArray ? toObj(v) : objFromPy(v));
+const objOperand = (v: any): ObjArray => (v instanceof ObjArray ? v : v instanceof NDArray || v instanceof StrArray ? toObj(v) : objFromPy(v, true));
 
 function objGetitem(a: ObjArray, key: any): any {
   const r = resolveIndex(NO(a), key);
@@ -3917,8 +3946,10 @@ function objSetitem(a: ObjArray, key: any, value: any) {
     a.data[r.view.offset] = value instanceof ObjArray && value.ndim === 0 ? value.data[value.offset] : value;
     return;
   }
-  let src = objOperand(value);
+  // (the value converted with the target's object dtype, as NumPy's: ragged or deep sequences stay elements)
+  let src = value instanceof ObjArray ? value : value instanceof NDArray || value instanceof StrArray ? toObj(value) : objFromPy(value);
   if (src.data === a.data) src = objCopy(src);
+  src = objInto(src, "view" in r ? r.view.shape : r.shape);
   const d = a.data, sd = src.data;
   if ("view" in r) {
     const v = r.view;
@@ -3958,19 +3989,121 @@ const objCompareOut = (op: string, a: ObjArray, o: any, flip = false): any => {
 function objLess(x: any, y: any): boolean {
   return O.truth(O.lt(x, y));
 }
-function objSort(a: ObjArray, axis: number, arg: boolean): NDArray | ObjArray {
+// NumPy's comparison of two objects (OBJECT_compare): -1 when x < y, else 1 when x > y, else 0
+function objCmp(x: any, y: any): number {
+  return objLess(x, y) ? -1 : O.truth(O.richCompare(x, y, "__gt__")) ? 1 : 0;
+}
+// NumPy's default sort of objects (npy_quicksort and npy_aquicksort, numpy/_core/src/npysort/
+// quicksort_generic.cpp, BSD-3-Clause): an introsort, median of three, insertion sort for 16 or fewer, a
+// heapsort where the partitions go too deep. Not stable, so equal elements (1, 1.0, True) come out in
+// NumPy's order only by following it step by step. With idx, the indices are sorted by v[idx[i]] and v
+// stays; without it, v itself is sorted.
+const OBJ_QS_SMALL = 15;
+function objQuick(v: any[], idx: number[] | null) {
+  const n = idx ? idx.length : v.length;
+  const at = idx ? (i: number) => v[idx[i]] : (i: number) => v[i];
+  const t: any[] = idx ?? v;
+  const swap = (i: number, j: number) => {
+    const s = t[i];
+    t[i] = t[j];
+    t[j] = s;
+  };
+  let pl = 0, pr = n - 1;
+  const stack: number[] = [], depth: number[] = [];
+  let cdepth = msb(n) * 2;
+  for (;;) {
+    if (cdepth < 0) objHeap(t, at, pl, pr - pl + 1);
+    else {
+      while (pr - pl > OBJ_QS_SMALL) {
+        O.pollInterrupt();
+        const pm = pl + ((pr - pl) >> 1);
+        if (objCmp(at(pm), at(pl)) < 0) swap(pm, pl);
+        if (objCmp(at(pr), at(pm)) < 0) swap(pr, pm);
+        if (objCmp(at(pm), at(pl)) < 0) swap(pm, pl);
+        const vp = at(pm);
+        let pi = pl, pj = pr - 1;
+        swap(pm, pj);
+        for (;;) {
+          do ++pi;
+          while (objCmp(at(pi), vp) < 0 && pi < pj);
+          do --pj;
+          while (objCmp(vp, at(pj)) < 0 && pi < pj);
+          if (pi >= pj) break;
+          swap(pi, pj);
+        }
+        swap(pi, pr - 1);
+        // (the larger partition onto the stack)
+        if (pi - pl < pr - pi) {
+          stack.push(pi + 1, pr);
+          pr = pi - 1;
+        } else {
+          stack.push(pl, pi - 1);
+          pl = pi + 1;
+        }
+        depth.push(--cdepth);
+      }
+      for (let pi = pl + 1; pi <= pr; pi++) {
+        const ti = t[pi], vp = at(pi);
+        let pj = pi;
+        while (pj > pl && objCmp(vp, at(pj - 1)) < 0) {
+          t[pj] = t[pj - 1];
+          pj--;
+        }
+        t[pj] = ti;
+      }
+    }
+    if (stack.length === 0) break;
+    pr = stack.pop()!;
+    pl = stack.pop()!;
+    cdepth = depth.pop()!;
+  }
+}
+// (npy_heapsort / npy_aheapsort on t[start .. start + n), 1-based as theirs; at(i) reads t[i]'s element)
+function objHeap(t: any[], at: (i: number) => any, start: number, n: number) {
+  const b = start - 1;
+  const sift = (l: number, m: number) => {
+    const tmp = t[b + l], tv = at(b + l);
+    let i = l, j = l << 1;
+    while (j <= m) {
+      if (j < m && objCmp(at(b + j), at(b + j + 1)) < 0) j++;
+      if (objCmp(tv, at(b + j)) < 0) {
+        t[b + i] = t[b + j];
+        i = j;
+        j += j;
+      } else break;
+    }
+    t[b + i] = tmp;
+  };
+  for (let l = n >> 1; l > 0; l--) sift(l, n);
+  for (; n > 1; ) {
+    const tmp = t[b + n];
+    t[b + n] = t[b + 1];
+    t[b + 1] = tmp;
+    n -= 1;
+    sift(1, n);
+  }
+}
+// (the index of the highest set bit, npy_get_msb)
+function msb(n: number): number {
+  let d = 0;
+  while ((n = Math.floor(n / 2)) > 0) d++;
+  return d;
+}
+function objSort(a: ObjArray, axis: number, arg: boolean, stable = false): NDArray | ObjArray {
   admitWork(a.size * (arg ? 24 : 16), arg ? "argsort" : "sort");
   const t = moveAxisToEnd(NO(a), axis);
   const n = t.shape[t.ndim - 1], st = t.strides[t.ndim - 1];
   const out: any = arg ? empty(t.shape, D.int64) : objEmpty(t.shape);
   const vals = new Array(n), idx = new Array(n);
-  const cmp = (i: number, j: number) => (objLess(vals[i], vals[j]) ? -1 : objLess(vals[j], vals[i]) ? 1 : i - j);
+  // (a stable sort: by NumPy's comparison, ties by position, as any stable sort orders them)
+  const cmp = (i: number, j: number) => objCmp(vals[i], vals[j]) || i - j;
   loop1(t.shape.slice(0, -1), t.strides.slice(0, -1), t.offset, (base, k) => {
     for (let i = 0; i < n; i++) {
       vals[i] = t.data[base + i * st];
       idx[i] = i;
     }
-    idx.sort(cmp);
+    if (stable) idx.sort(cmp);
+    else objQuick(vals, idx);
     for (let i = 0; i < n; i++) out.data[k * n + i] = arg ? idx[i] : vals[idx[i]];
   });
   const order = a.shape.map((_, i) => i).filter((i) => i !== axis);
@@ -4012,9 +4145,29 @@ function objConcat(arrs: any[], axis: number): ObjArray {
   return out;
 }
 // (an object array of a shape, every element v)
+// (src made ready to broadcast into shape, as NumPy's copyto and setitem: its leading length-1 axes beyond
+// the target's dropped, and NumPy's error when the rest doesn't broadcast)
+function objInto(src: ObjArray, shape: number[]): ObjArray {
+  let ss = src.shape, st = src.strides;
+  while (ss.length > shape.length && ss[0] === 1) {
+    ss = ss.slice(1);
+    st = st.slice(1);
+  }
+  const off = shape.length - ss.length;
+  const tup = (s: number[]) => `(${s.join(", ")}${s.length === 1 ? "," : ""})`;
+  if (off < 0 || ss.some((n, i) => n !== 1 && n !== shape[off + i])) raise(T.ValueError, `could not broadcast input array from shape ${tup(src.shape)} into shape ${tup(shape)}`);
+  return ss === src.shape ? src : objView(new NDArray(src.dt as unknown as DType, src.data as any, ss, st, src.offset, (src.base ?? src) as unknown as NDArray));
+}
+// (np.full with an object dtype: a sequence or array fill is converted as np.asarray converts it, then
+// broadcast into the shape, NumPy's copyto; any other fill is every element)
 function objFull(shape: number[], v: any): ObjArray {
   const a = objEmpty(shape);
-  a.data.fill(v);
+  if (!anyArray(v) && !(isSeq(v) && !strLike(v))) {
+    a.data.fill(v);
+    return a;
+  }
+  const src = objInto(objOperand(v), shape), sd = src.data;
+  loop2(shape, cStrides(shape), 0, bstrides(NO(src), shape), src.offset, (k, q) => (a.data[k] = sd[q]));
   return a;
 }
 // (the first element that is no number and no string, for NumPy's error where numbers are needed)
@@ -4382,6 +4535,11 @@ newBuiltinModule("_numpy", (m) => {
   fn("full", (shape: any, value: any, dtype: any = null) => {
     // (an object dtype, or a value no number or string is, such as None: every element that value)
     if (objSpec(dtype) || (dtype === null && !anyArray(value) && !isSeq(value) && pyScalar(value) === null && !strLike(value))) return objFull(shapeArg(shape), value);
+    // (a sequence whose discovered dtype is object, such as [None, 1]: that object array, broadcast)
+    if (dtype === null && isSeq(value) && !strLike(value)) {
+      const r: any = fromPy(value, null, undefined, true);
+      if (r instanceof ObjArray) return objFull(shapeArg(shape), r);
+    }
     const sd = dtype !== null ? strSpec(dtype) : null;
     if (sd !== null || (dtype === null && strArg(value))) return strFull(shapeArg(shape), value, sd);
     if (strArg(value)) {
@@ -4724,15 +4882,15 @@ newBuiltinModule("_numpy", (m) => {
     });
     return out;
   });
-  fn("sort", (a: any, axis: any = -1) => {
-    if (a instanceof ObjArray) return axis === null ? objSort(objReshape(a, [a.size]), 0, false) : objSort(a, normAxis(Number(axis), a.ndim), false);
+  fn("sort", (a: any, axis: any = -1, stable: any = false) => {
+    if (a instanceof ObjArray) return axis === null ? objSort(objReshape(a, [a.size]), 0, false, O.truth(stable)) : objSort(a, normAxis(Number(axis), a.ndim), false, O.truth(stable));
     if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, false) : strSort(a, normAxis(Number(axis), a.ndim), false);
     const x = asarray(a);
     if (axis === null) return sortAxis(ravel(x), 0, false);
     return sortAxis(x, normAxis(Number(axis), x.ndim), false);
   });
-  fn("argsort", (a: any, axis: any = -1) => {
-    if (a instanceof ObjArray) return axis === null ? objSort(objReshape(a, [a.size]), 0, true) : objSort(a, normAxis(Number(axis), a.ndim), true);
+  fn("argsort", (a: any, axis: any = -1, stable: any = false) => {
+    if (a instanceof ObjArray) return axis === null ? objSort(objReshape(a, [a.size]), 0, true, O.truth(stable)) : objSort(a, normAxis(Number(axis), a.ndim), true, O.truth(stable));
     if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, true) : strSort(a, normAxis(Number(axis), a.ndim), true);
     const x = asarray(a);
     if (axis === null) return sortAxis(ravel(x), 0, true);
@@ -4742,6 +4900,8 @@ newBuiltinModule("_numpy", (m) => {
     // (a Python scalar is weak, NEP 50: np.result_type(1, 'i1') is int8)
     let r: DType | null = null;
     const weak: Weak[] = [];
+    // (an object array or the object dtype among them: object, as NumPy's)
+    if (xs.some((x) => x instanceof ObjArray || objSpec(x))) return OBJ_DT;
     for (const x of xs) {
       const dt = x instanceof DType ? x : x instanceof NDArray ? x.dt : (() => { try { return toDtype(x); } catch (e) { if (typeof x === "string" || Obj.isinstance(e, T.NotImplementedError)) throw e; // (float16, longdouble: refused, not float64; an unknown name: TypeError)
  const w = pyScalar(x); if (w && !w.dt) { weak.push(w); return null; } return w ? scalarDtype(w) : D.float64; } })();

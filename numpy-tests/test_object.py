@@ -80,3 +80,133 @@ for name, f in [
     ("object_-0d", lambda: np.object_(np.array(3))), ("object_-ragged", lambda: np.object_([[1], [2, 3]])), ("object_-type", lambda: np.dtype(object).type is np.object_),
 ]:
     show(name, f)
+
+
+# nesting deeper than NumPy's 64 dimensions: with dtype=object what lies deeper stays an element (a list that
+# contains itself included); without a dtype, or as an operand, it is NumPy's error
+def nest(d, leaf=0):
+    x = leaf
+    for _ in range(d):
+        x = [x]
+    return x
+
+
+rec = []
+rec.append(rec)
+
+
+def deep(x):
+    return (x.shape == (1,) * x.ndim, x.ndim, type(x[(0,) * x.ndim]).__name__)
+
+
+for name, f in [
+    ("deep-recursive", lambda: (deep(np.array(rec, dtype=object)), np.array(rec, dtype=object)[(0,) * 64] is rec)),
+    ("deep-63", lambda: deep(np.array(nest(63), dtype=object))), ("deep-64", lambda: deep(np.array(nest(64), dtype=object))),
+    ("deep-65", lambda: deep(np.array(nest(65), dtype=object))), ("deep-100", lambda: (deep(np.array(nest(100), dtype=object)), len(repr(np.array(nest(100), dtype=object)[(0,) * 64])))),
+    ("deep-pair", lambda: np.array([nest(70), nest(70)], dtype=object).shape[:3]), ("deep-asarray", lambda: np.asarray(rec, dtype=object).ndim),
+    ("deep-nodtype-int", lambda: np.array(nest(70))), ("deep-nodtype-recursive", lambda: np.array(rec)), ("deep-nodtype-none", lambda: np.array(nest(70, None))),
+    ("deep-nodtype-none-64", lambda: deep(np.array(nest(64, None)))), ("deep-nodtype-str", lambda: np.array(nest(70, "a"))),
+    ("deep-eq", lambda: np.array([1, 2], dtype=object) == nest(70)), ("deep-where", lambda: np.where([True], np.array([1], dtype=object), [rec])),
+    ("deep-concat", lambda: np.concatenate([np.array([1], dtype=object), [rec]])), ("deep-eq-63", lambda: (np.array([1], dtype=object) == nest(63, None)).ndim),
+    # ragged data: an element with an object dtype given, NumPy's inhomogeneous-shape error without one
+    ("ragged-none", lambda: np.array([None, [0]])), ("ragged-none-2d", lambda: np.array([[None, 1], [2]])),
+    ("ragged-deeper", lambda: np.array([[None, [1]], [2, 3]])), ("ragged-array", lambda: np.array([None, np.arange(2)])),
+    ("ragged-eq", lambda: np.array([1, 2], dtype=object) == [None, [1]]), ("ragged-given", lambda: np.array([None, [0]], dtype=object)),
+]:
+    show(name, f)
+
+# sort's tie order: NumPy's default sort of objects is an introsort (not stable), so equal elements of
+# different types (0, 0.0, False) come out in its order; kind="stable" keeps positions
+rs = np.random.RandomState(1)
+ties = np.array([[0, 0.0, False, 1, 1.0, True, 2, 2.0][i] for i in rs.randint(0, 8, 60)], dtype=object)
+kinds = lambda r: "".join(type(v).__name__[0] for v in r.tolist())
+for name, f in [
+    ("ties-sort", lambda: kinds(np.sort(ties))), ("ties-argsort", lambda: np.argsort(ties).tolist()),
+    ("ties-heapsort", lambda: np.argsort(ties, kind="heapsort").tolist()), ("ties-stable", lambda: np.argsort(ties, kind="stable").tolist()),
+    ("ties-mergesort", lambda: np.argsort(ties, kind="mergesort").tolist()), ("ties-stable-kw", lambda: np.argsort(ties, stable=True).tolist()),
+    ("ties-method", lambda: (lambda c: (c.sort(), kinds(c))[1])(ties.copy())), ("ties-method-stable", lambda: (lambda c: (c.sort(kind="stable"), kinds(c))[1])(ties.copy())),
+    ("ties-argsort-method", lambda: ties.argsort().tolist()[:20]), ("ties-2d", lambda: (np.argsort(ties.reshape(6, 10), axis=0).tolist(), np.argsort(ties.reshape(6, 10), axis=1).tolist())),
+    ("ties-small", lambda: np.argsort(ties[:16]).tolist()), ("ties-17", lambda: np.argsort(ties[:17]).tolist()),
+    ("ties-nan", lambda: kinds(np.sort(np.array([1, float("nan"), 0.5, 1.0, True, float("nan"), 0] * 5, dtype=object)))),
+    ("ties-unique", lambda: kinds(np.unique(ties))), ("ties-unique-index", lambda: (lambda u: (kinds(u[0]), u[1].tolist()))(np.unique(ties, return_index=True))),
+    ("ties-unique-inverse", lambda: (lambda u: (kinds(u[0]), u[1].tolist()))(np.unique(ties, return_inverse=True))),
+    ("ties-unique-counts", lambda: (lambda u: (kinds(u[0]), u[1].tolist()))(np.unique(ties, return_counts=True))),
+]:
+    show(name, f)
+
+
+# McIlroy's adversary (values decided as they are compared) drives the sort as deep as it goes, into its
+# heapsort fallback; the log of every comparison call shows the same steps as NumPy's
+class Adversary:
+    __slots__ = ("i",)
+
+    def __init__(self, i):
+        self.i = i
+
+    def __lt__(self, o):
+        return adversary("lt", self.i, o.i) < 0
+
+    def __gt__(self, o):
+        return adversary("gt", self.i, o.i) > 0
+
+
+def adversary(op, x, y):
+    st = state
+    st["log"].append((op, x, y))
+    val = st["val"]
+    if x not in val and y not in val:
+        val[x if x == st["cand"] else y] = st["solid"]
+        st["solid"] += 1
+    if x not in val:
+        st["cand"] = x
+    elif y not in val:
+        st["cand"] = y
+    return val.get(x, st["gas"]) - val.get(y, st["gas"])
+
+
+def adversary_run(n, arg):
+    global state
+    state = {"gas": n, "val": {}, "cand": None, "solid": 0, "log": []}
+    a = np.empty(n, dtype=object)
+    for i in range(n):
+        a[i] = Adversary(i)
+    r = np.argsort(a).tolist() if arg else [k.i for k in np.sort(a).tolist()]
+    log = state["log"]
+    return len(log), sum((k + 1) * (x * 7 + y * 3 + (op == "gt")) for k, (op, x, y) in enumerate(log)) % 1000003, r[:12]
+
+
+for n in (20, 300):
+    show("adversary-argsort-%d" % n, lambda: adversary_run(n, True))
+    show("adversary-sort-%d" % n, lambda: adversary_run(n, False))
+
+# np.full with a sequence fill (broadcast elementwise), count_nonzero by truth, result_type with object,
+# Python ints beyond int64 and uint64 (an object array), and setitem with the target's object dtype
+cnz = np.empty(7, dtype=object)
+cnz[:] = [0, None, 1, "a", "", [], 0.0]
+for name, f in [
+    ("full-list", lambda: np.full(2, [1, 2], dtype=object)), ("full-2d", lambda: np.full((2, 2), [1, 2], dtype=object)),
+    ("full-tuple", lambda: np.full(3, (7,), dtype=object)), ("full-ragged", lambda: np.full(2, [1, [2]], dtype=object)),
+    ("full-bad", lambda: np.full(3, [1, 2], dtype=object)), ("full-none-list", lambda: np.full(2, [None, 1])),
+    ("full-array", lambda: np.full((2, 2), np.array([1.5, 2]), dtype=object)), ("full-str", lambda: np.full(2, "ab", dtype=object)),
+    ("full-nested", lambda: np.full(2, [[1, 2]], dtype=object)), ("full-0d", lambda: np.full((), [1], dtype=object)),
+    ("full-recursive", lambda: np.full(1, rec, dtype=object)),
+    ("count_nonzero", lambda: np.count_nonzero(cnz)), ("count_nonzero-none", lambda: np.count_nonzero(np.array([None, None], dtype=object))),
+    ("count_nonzero-axis", lambda: np.count_nonzero(np.array([[0, 1], [None, "x"]], dtype=object), axis=0)),
+    ("count_nonzero-keepdims", lambda: np.count_nonzero(np.array([[0, 1], [None, "x"]], dtype=object), axis=1, keepdims=True)),
+    ("result_type-float32", lambda: np.result_type(np.array([1], dtype=object), np.float32)),
+    ("result_type-int8", lambda: np.result_type(np.array([1], dtype=object), np.int8)), ("result_type-dtype", lambda: np.result_type(object, np.float64)),
+    ("result_type-weak", lambda: np.result_type(np.array([1], dtype=object), 1)), ("result_type-str", lambda: np.result_type(np.array([1], dtype=object), "U3")),
+    ("result_type-alone", lambda: np.result_type(np.array([None]))), ("promote_types", lambda: np.promote_types(object, np.float64)),
+    ("promote_types-str", lambda: np.promote_types("O", "U2")), ("can_cast-from", lambda: np.can_cast(object, np.float64)), ("can_cast-to", lambda: np.can_cast(np.float64, object)),
+    ("bigint", lambda: np.array([2**80, 1])), ("bigint-negative", lambda: np.array([-2**70])), ("bigint-past-uint64", lambda: np.array([2**64])),
+    ("bigint-below-int64", lambda: np.array([-2**63 - 1])), ("int64-min", lambda: np.array([-2**63])), ("bigint-float", lambda: np.array([2**80, 1.5])),
+    ("bigint-bool", lambda: np.array([2**80, True])), ("bigint-str", lambda: np.array([2**80, "a"])), ("bigint-2d", lambda: np.array([[2**80], [1]])),
+    ("bigint-0d", lambda: np.array(2**80)), ("bigint-asarray", lambda: np.asarray([2**100])), ("bigint-complex", lambda: np.array([2**80, 1j])),
+    ("bigint-none", lambda: np.array([2**80, None])), ("bigint-eq", lambda: np.array([1, 2]) == 2**80), ("bigint-tolist", lambda: np.array([2**80]).tolist()),
+    ("set-mixed", lambda: cnz), ("set-ragged", lambda: (lambda a: (a.__setitem__(slice(None), [[1], [2, 3]]), a)[1])(np.empty(2, dtype=object))),
+    ("set-ragged-bad", lambda: (lambda a: (a.__setitem__(slice(None), [[1], [2, 3]]), a)[1])(np.empty(3, dtype=object))),
+    ("set-one-list", lambda: (lambda a: (a.__setitem__(0, [1, 2]), a)[1])(np.empty(2, dtype=object))),
+    ("set-recursive", lambda: (lambda a: (a.__setitem__(slice(None), rec), a.shape, a[0] is rec)[1:])(np.empty(1, dtype=object))),
+    ("set-2d", lambda: (lambda a: (a.__setitem__(slice(None), [[1, [2]], [3, 4]]), a)[1])(np.empty((2, 2), dtype=object))),
+]:
+    show(name, f)

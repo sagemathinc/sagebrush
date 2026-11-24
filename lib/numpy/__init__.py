@@ -350,8 +350,8 @@ _np.register_str(str_)
 
 
 class object_(generic):
-    """NumPy's scalar type of the object dtype (np.dtype(object).type): np.object_(x) is x itself,
-    or an object array of it when x is a sequence or an array."""
+    """NumPy's scalar type of the object dtype (np.dtype(object).type): np.object_(x) is x itself; a sequence or a
+    nonzero-dimensional array gives an object array, and a 0-d array gives its element."""
 
     def __new__(cls, value=None):
         a = asarray(value, dtype=object)
@@ -1380,7 +1380,11 @@ cumulative_prod = cumprod
 
 
 def count_nonzero(a, axis=None, *, keepdims=False):
-    return sum(asarray(a) != 0, axis=axis, keepdims=keepdims)
+    a = asarray(a)
+    # (an object array's elements count by their truth, bool() of each, as NumPy's)
+    if a.dtype.kind == "O":
+        a = a.astype(bool)
+    return sum(a != 0, axis=axis, keepdims=keepdims)
 
 
 def _nanfill(a, value):
@@ -1932,12 +1936,17 @@ def argwhere(a):
     return stack(nz, axis=1) if nz else zeros((0, 0), int64)
 
 
+def _stable(kind, stable):
+    # (a stable sort asked for: only an object array's default sort differs from it, NumPy's introsort)
+    return bool(stable) or kind in ("stable", "mergesort")
+
+
 def sort(a, axis=-1, kind=None, order=None, *, stable=None):
-    return _np.sort(asarray(a), axis)
+    return _np.sort(asarray(a), axis, _stable(kind, stable))
 
 
 def argsort(a, axis=-1, kind=None, order=None, *, stable=None):
-    return _np.argsort(asarray(a), axis)
+    return _np.argsort(asarray(a), axis, _stable(kind, stable))
 
 
 def lexsort(keys, axis=-1):
@@ -1965,7 +1974,8 @@ def unique(ar, return_index=False, return_inverse=False, return_counts=False, ax
     if not (return_index or return_inverse or return_counts) and asarray(ar).dtype.kind != "c":
         return _np.unique1d(ar)
     a = asarray(ar).ravel()
-    order = argsort(a)
+    # (as NumPy's: a stable sort when the first indices are asked for, its default sort otherwise)
+    order = argsort(a, kind="stable" if return_index else None)
     s = a[order]
     if s.size == 0:
         flags = zeros(0, bool_)
@@ -2827,10 +2837,10 @@ def _m_astype(self, dtype, order="K", casting="unsafe", subok=True, copy=True):
     return _np.astype(self, dtype)
 
 
-def _m_sort(self, axis=-1, kind=None, order=None):
+def _m_sort(self, axis=-1, kind=None, order=None, *, stable=None):
     if not self.flags.writeable:
         raise ValueError("sort array is read-only")
-    self[...] = sort(self, axis)
+    self[...] = sort(self, axis, kind, stable=stable)
 
 
 def _m_round(self, decimals=0, out=None):
@@ -2929,8 +2939,8 @@ def _m_any(self, axis=None, out=None, keepdims=False, *, where=True):
     return any(self, axis, out, keepdims)
 
 
-def _m_argsort(self, axis=-1, kind=None, order=None):
-    return argsort(self, axis)
+def _m_argsort(self, axis=-1, kind=None, order=None, *, stable=None):
+    return argsort(self, axis, kind, stable=stable)
 
 
 def _m_flatten(self, order="C"):

@@ -3462,7 +3462,7 @@
     "name": "numpy.object_",
     "kind": "class",
     "signature": "(value=None)",
-    "summary": "NumPy's scalar type of the object dtype (dtype('O')): np.object_(x) is x itself, or an object array of x when x is a sequence or an array.",
+    "summary": "The object dtype's scalar type: np.object_(x) is x; a sequence or nonzero-dimensional array gives an object array, a 0-d array its element.",
     "examples": [
       {
         "code": "np.array(['a', 1, None], dtype=object)",
@@ -3478,7 +3478,7 @@
       }
     ],
     "differs": [
-      "Object arrays have creation, astype, shape and indexing, comparisons, sort, unique, where and printing; arithmetic and the other ufuncs on them raise NotImplementedError.",
+      "Object arrays have creation, astype, shape and indexing, comparisons, sort, unique, where and printing, as the recorded cases check against NumPy; arithmetic, reductions and the other ufuncs on them raise NotImplementedError.",
       "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",
