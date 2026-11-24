@@ -9,8 +9,8 @@ import { join } from "node:path";
 // What Sagebrush's seaborn draws, compared with what seaborn 0.13.2 draws for the same cases
 // (test/seaborn_geometry_cases.py; seaborn's side recorded by test/seaborn_oracle_gen.py into
 // test/seaborn-oracle.json): the points, bars, cells and lines, their colors, sizes and edges, the axes'
-// limits, ticks and labels, and the legends' entries.  Numbers agree to 1e-9 relative; colors to the byte
-// they are drawn as.
+// limits, ticks and labels, and the legends' titles and entries.  Numbers agree within 1e-9 absolute for
+// magnitudes below 1 and 1e-9 relative otherwise; colors to the byte they are drawn as.
 const ROOT = join(__dirname, "..", "..");
 const CLI = join(__dirname, "..", "src", "cli.js");
 const oracle: Record<string, any> = JSON.parse(readFileSync(join(ROOT, "test", "seaborn-oracle.json"), "utf8")).rows;
