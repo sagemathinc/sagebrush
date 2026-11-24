@@ -771,3 +771,182 @@ dtype: float64
 1   -inf
 2    NaN
 dtype: float64
+== range-floordiv-method
+(0    inf
+1   -3.0
+2    0.0
+dtype: float64, [('Pandas4Warning', 'Operation with range is deprecated. In a future version these will be treated as scalar-like. To retain the old behavior, explicitly wrap in a Series instead.')])
+== range-floordiv-operator
+(0    inf
+1   -3.0
+2    0.0
+dtype: float64, [('Pandas4Warning', 'Operation with range is deprecated. In a future version these will be treated as scalar-like. To retain the old behavior, explicitly wrap in a Series instead.')])
+== range-add
+(0    3
+1   -2
+2    2
+dtype: int64, [('Pandas4Warning', 'Operation with range is deprecated. In a future version these will be treated as scalar-like. To retain the old behavior, explicitly wrap in a Series instead.')])
+== range-rsub
+(0   -3
+1    4
+2    2
+dtype: int64, [('Pandas4Warning', 'Operation with range is deprecated. In a future version these will be treated as scalar-like. To retain the old behavior, explicitly wrap in a Series instead.')])
+== range-rsub-method
+(0   -3
+1    4
+2    2
+dtype: int64, [('Pandas4Warning', 'Operation with range is deprecated. In a future version these will be treated as scalar-like. To retain the old behavior, explicitly wrap in a Series instead.')])
+== range-mod-method
+(0    NaN
+1    0.0
+2    0.0
+dtype: float64, [('Pandas4Warning', 'Operation with range is deprecated. In a future version these will be treated as scalar-like. To retain the old behavior, explicitly wrap in a Series instead.')])
+== range-float-mul
+(0    1.5
+1   -4.0
+2    0.0
+dtype: float64, [('Pandas4Warning', 'Operation with range is deprecated. In a future version these will be treated as scalar-like. To retain the old behavior, explicitly wrap in a Series instead.')])
+== tuple-add-warns
+(0    4
+1   -1
+2    3
+dtype: int64, [('Pandas4Warning', 'Operation with tuple is deprecated. In a future version these will be treated as scalar-like. To retain the old behavior, explicitly wrap in a Series instead.')])
+== list-add-no-warning
+(0    4
+1   -1
+2    3
+dtype: int64, [])
+== zerodim-floordiv-method
+
+0    inf
+1   -inf
+2    NaN
+dtype: float64
+== zerodim-floordiv-operator
+
+0    inf
+1   -inf
+2    NaN
+dtype: float64
+== zerodim-mod
+
+0   NaN
+1   NaN
+2   NaN
+dtype: float64
+== zerodim-divmod
+(0    inf
+1   -inf
+2    NaN
+dtype: float64, 0   NaN
+1   NaN
+2   NaN
+dtype: float64)
+== zerodim-int-add
+
+0    5
+1   -1
+2    2
+dtype: int64
+== zerodim-float-add
+
+0    5.5
+1   -0.5
+2    2.5
+dtype: float64
+== zerodim-float32-weak
+
+0    4.0
+1    4.5
+2    5.5
+dtype: float32
+== zerodim-float32-int64
+
+0    2.5
+1    3.0
+2    4.0
+dtype: float32
+== zerodim-int8-overflow
+!! OverflowError: Python integer 300 out of bounds for int8
+== zerodim-int8
+
+0    4
+dtype: int8
+== zerodim-bool
+
+0    4
+1   -2
+2    1
+dtype: int64
+== zerodim-rsub-method
+
+0   -1
+1    5
+2    2
+dtype: int64
+== zerodim-fill
+
+0    5
+1   -1
+2    2
+dtype: int64
+== length-method-short
+!! ValueError: Lengths must be equal
+== length-method-long
+!! ValueError: Lengths must be equal
+== length-method-fill
+!! ValueError: Lengths must be equal
+== length-method-ndarray
+!! ValueError: Lengths must be equal
+== length-method-range
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== length-operator
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== length-operator-ndarray
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== length-operator-reflected
+!! ValueError: operands could not be broadcast together with shapes (2,) (3,) 
+== length-operator-empty
+!! ValueError: operands could not be broadcast together with shapes (3,) (0,) 
+== length-operator-index
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== range-rfloordiv-method
+(0    NaN
+1    inf
+2    inf
+dtype: float64, [('Pandas4Warning', 'Operation with range is deprecated. In a future version these will be treated as scalar-like. To retain the old behavior, explicitly wrap in a Series instead.')])
+== range-fill
+(0    3
+1   -2
+2    2
+dtype: int64, [('Pandas4Warning', 'Operation with range is deprecated. In a future version these will be treated as scalar-like. To retain the old behavior, explicitly wrap in a Series instead.')])
+== length-method-range-fill
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== tuple-floordiv-method
+(0    0
+1    0
+2    0
+dtype: int64, [('Pandas4Warning', 'Series.floordiv with a tuple is deprecated and will be treated as scalar-like in a future version. Explicitly wrap in a numpy array instead.')])
+== length-method-tuple
+!! ValueError: Lengths must be equal
+== index-floordiv-method
+
+0    inf
+1   -inf
+2    NaN
+dtype: float64
+== index-mod-method
+
+0   NaN
+1   NaN
+2   NaN
+dtype: float64
+== length-method-index
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== tuple-method-names
+!! ValueError: Integers to negative integer powers are not allowed.
+== tuple-operator-reflected
+(0   -2
+1    5
+2    3
+dtype: int64, [('Pandas4Warning', 'Operation with tuple is deprecated. In a future version these will be treated as scalar-like. To retain the old behavior, explicitly wrap in a Series instead.')])

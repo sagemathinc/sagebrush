@@ -149,3 +149,60 @@ t("method-rfloordiv-zero-list", lambda: pd.Series([0, 0, 0]).rfloordiv([3, -3, 0
 t("method-float-floordiv-zero-list", lambda: pd.Series([3.0, -3.0, 0.0]).floordiv([0.0, -0.0, 0.0]).tolist())
 t("method-floordiv-zero-numpy-scalar", lambda: iz.floordiv(np.int64(0)))
 t("operator-floordiv-zero-list", lambda: iz // [0, 0, 0])
+
+# A range computes as its list, and a range or a tuple warns as pandas 3.1 does; a 0-d array is its value, a weak
+# scalar (masked as a scalar is); the named methods check a list-like's length ("Lengths must be equal"), the
+# operators leave it to numpy's broadcast (the reflected one naming the shapes the other way round).
+import warnings
+
+
+def warned(fn):
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        v = fn()
+    return v, [(x.category.__name__, str(x.message)) for x in w]
+
+
+t("range-floordiv-method", lambda: warned(lambda: iz.floordiv(range(3))))
+t("range-floordiv-operator", lambda: warned(lambda: iz // range(3)))
+t("range-add", lambda: warned(lambda: iz + range(3)))
+t("range-rsub", lambda: warned(lambda: range(3) - iz))
+t("range-rsub-method", lambda: warned(lambda: iz.rsub(range(3))))
+t("range-mod-method", lambda: warned(lambda: iz.mod(range(3))))
+t("range-float-mul", lambda: warned(lambda: pd.Series([1.5, -2.0, 0.0]) * range(1, 4)))
+t("tuple-add-warns", lambda: warned(lambda: iz + (1, 2, 3)))
+t("list-add-no-warning", lambda: warned(lambda: iz + [1, 2, 3]))
+t("zerodim-floordiv-method", lambda: iz.floordiv(np.array(0)))
+t("zerodim-floordiv-operator", lambda: iz // np.array(0))
+t("zerodim-mod", lambda: iz % np.array(0))
+t("zerodim-divmod", lambda: divmod(iz, np.array(0)))
+t("zerodim-int-add", lambda: iz + np.array(2))
+t("zerodim-float-add", lambda: iz + np.array(2.5))
+t("zerodim-float32-weak", lambda: pd.Series(np.array([1.5, 2, 3], dtype="float32")) + np.array(2.5))
+t("zerodim-float32-int64", lambda: pd.Series(np.array([1.5, 2, 3], dtype="float32")) + np.array(1))
+t("zerodim-int8-overflow", lambda: pd.Series([1]).astype("int8") + np.array(300))
+t("zerodim-int8", lambda: pd.Series([1]).astype("int8") + np.array(3))
+t("zerodim-bool", lambda: iz + np.array(True))
+t("zerodim-rsub-method", lambda: iz.rsub(np.array(2)))
+t("zerodim-fill", lambda: iz.add(np.array(2), fill_value=0))
+t("length-method-short", lambda: iz.floordiv([1, 2]))
+t("length-method-long", lambda: iz.add([1, 2, 3, 4]))
+t("length-method-fill", lambda: iz.add([1, 2], fill_value=0))
+t("length-method-ndarray", lambda: iz.mul(np.array([1, 2])))
+t("length-method-range", lambda: warned(lambda: iz.sub(range(2))))
+t("length-operator", lambda: iz // [1, 2])
+t("length-operator-ndarray", lambda: iz + np.array([1, 2]))
+t("length-operator-reflected", lambda: [1, 2] - iz)
+t("length-operator-empty", lambda: iz + [])
+t("length-operator-index", lambda: iz + pd.Index([1, 2]))
+t("range-rfloordiv-method", lambda: warned(lambda: pd.Series([0, 0, 0]).rfloordiv(range(3))))
+t("range-fill", lambda: warned(lambda: iz.add(range(3), fill_value=0)))
+t("length-method-range-fill", lambda: warned(lambda: iz.add(range(2), fill_value=0)))
+t("tuple-floordiv-method", lambda: warned(lambda: iz.floordiv((0, 0, 0))))
+t("length-method-tuple", lambda: warned(lambda: iz.floordiv((1, 2))))
+t("index-floordiv-method", lambda: iz.floordiv(pd.Index([0, 0, 0])))
+t("index-mod-method", lambda: iz.mod(pd.Index([0, 0, 0])))
+t("length-method-index", lambda: iz.add(pd.Index([1, 2])))
+t("tuple-method-names", lambda: [warned(lambda: getattr(iz, m)((1, 2, 3)))[1][0][1].split(" with")[0]
+                                 for m in ["add", "subtract", "rsub", "multiply", "div", "rdiv", "rfloordiv", "rmod", "rpow"]])
+t("tuple-operator-reflected", lambda: warned(lambda: (1, 2, 3) - iz))

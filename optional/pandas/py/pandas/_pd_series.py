@@ -365,7 +365,14 @@ class Series(object):
     def _pd_arith(self, other, op, reflected=False, fill_value=None, method=False):
         from . import _pd_arith as A
         owner = "Series.%s" % (("r" if reflected else "") + op)
+        other = A.operand(other, owner, method)
+        # (pandas' flex methods take a Series, list, tuple or array argument through their own path: its length
+        # checked first, and numpy's op without the zero division masks; a range, an Index, a scalar (a 0-d array
+        # too) and the operators keep the operator's path, numpy's broadcast message and the masks)
+        flex = method and isinstance(other, (Series, list, tuple, np.ndarray))
         left, right, index, name = self._pd_operand(other, owner)
+        if flex and not isinstance(other, Series) and len(right) != len(left):
+            raise ValueError("Lengths must be equal")
         if fill_value is not None and isinstance(right, Column):
             # (fill_value where one side is missing and the other isn't, each column keeping its dtype)
             lm, rm = left.isna().tolist(), right.isna().tolist()
@@ -373,9 +380,7 @@ class Series(object):
             right = RS.fill_positions(right, dict((p, fill_value) for p, (a, b) in enumerate(zip(lm, rm)) if b and not a))
         elif fill_value is not None:
             left = RS.fill_column(left, fill_value)
-        # (pandas' flex methods with a list-like argument, a Series, list or array, apply numpy's op without its
-        # zero division masks; the operators and a scalar argument, a numpy one too, keep them)
-        mask_zero = not (method and isinstance(right, (Column, list, tuple, np.ndarray)))
+        mask_zero = not flex
         return Series._pd_new(A.binary(left, right, op, reflected, owner, mask_zero), index, name)
 
     def __add__(self, other):

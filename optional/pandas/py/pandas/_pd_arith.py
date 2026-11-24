@@ -69,16 +69,40 @@ def _weak_dtype(d, v):
     return d if d in FLOATS else "float64"
 
 
-def _right_values(right, n):
+def operand(other, owner, method):
+    """The other operand as the arithmetic takes it: a 0-d array as its
+    value (pandas' item_from_zerodim); a range or a tuple with pandas 3.1's
+    Pandas4Warning (_right_values takes them as lists)."""
+    if isinstance(other, (range, tuple)):
+        import warnings
+        from .errors import Pandas4Warning
+        if method and isinstance(other, tuple):
+            # (a named method's own wording, e.g. Series.sub for subtract)
+            msg = ("%s with a tuple is deprecated and will be treated as scalar-like in a future version. Explicitly "
+                   "wrap in a numpy array instead." % owner)
+        else:
+            msg = ("Operation with %s is deprecated. In a future version these will be treated as scalar-like. To "
+                   "retain the old behavior, explicitly wrap in a Series instead." % type(other).__name__)
+        warnings.warn(msg, Pandas4Warning, stacklevel=4)
+        return other
+    if isinstance(other, np.ndarray) and other.ndim == 0:
+        return other.item()
+    return other
+
+
+def _right_values(right, n, reflected=False):
     """The other operand as (kind, values): 'col' with a Column, 'weak' with
     a Python number, 'scalar' with a numpy scalar, 'obj' with any other
     scalar."""
     if isinstance(right, Column):
         return "col", right
+    if isinstance(right, range):
+        right = list(right)
     if isinstance(right, (list, tuple, np.ndarray)):
         col = column_from(right) if not isinstance(right, np.ndarray) else column_from(right.copy())
         if len(col) != n:
-            raise ValueError("operands could not be broadcast together with shapes (%d,) (%d,) " % (n, len(col)))
+            shapes = (len(col), n) if reflected else (n, len(col))
+            raise ValueError("operands could not be broadcast together with shapes (%d,) (%d,) " % shapes)
         return "col", col
     if isinstance(right, (np.bool_, np.integer, np.floating)):
         # (pandas takes a numpy number as its Python value: a weak scalar, as a Python number is)
@@ -188,7 +212,7 @@ def binary(col, right, op, reflected, owner, mask_zero=True):
     // and % by 0 as numpy gives them (pandas' flex methods with a list-like)."""
     d = col.dtype
     n = len(col)
-    kind, rv = _right_values(right, n)
+    kind, rv = _right_values(right, n, reflected)
     if d == "object" or (kind == "col" and rv.dtype == "object"):
         # (pandas masks missing values out of an object column's arithmetic; not in the subset)
         raise _unsupported("%s of an object column" % owner)
