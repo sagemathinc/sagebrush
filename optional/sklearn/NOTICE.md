@@ -24,6 +24,8 @@ Parts of this package are ported from scikit-learn 1.9.1 (https://github.com/sci
 - **`py/sklearn/utils/_sk_stats.py`:** `_weighted_percentile`, from `sklearn/utils/stats.py`.
 - **`py/sklearn/utils/multiclass.py`:** from `sklearn/utils/multiclass.py`.
 - **`py/sklearn/datasets/__init__.py`:** the loaders, from `sklearn/datasets/_base.py`.
+- **`py/sklearn/tree.py`:** DecisionTreeClassifier, DecisionTreeRegressor and `BaseDecisionTree`, from `sklearn/tree/_classes.py`; the `Tree` class's attributes, `apply`'s and `predict`'s checks and `compute_feature_importances`'s normalization, from `sklearn/tree/_tree.pyx`. The trees themselves are grown by Sagebrush's decision-tree kernel, whose scikit-learn notice is in Sagebrush's own NOTICE.md.
+- **`py/sklearn/utils/class_weight.py`:** from `sklearn/utils/class_weight.py`.
 - **`py/sklearn/datasets/_sk_data_*.py`:** scikit-learn's bundled data files and their descriptions (`sklearn/datasets/data/`, `sklearn/datasets/descr/`), embedded by `tests/gen-data.py`. Each file's docstring gives the sha256 of the data file it embeds.
 
 **Names:** `py/sklearn/_sk_names.py` lists scikit-learn 1.9.1's public names, taken from the oracle's modules by `tests/gen-names.py`, so that a name outside the subset raises NotImplementedError.

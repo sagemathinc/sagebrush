@@ -49,6 +49,18 @@ CASES = [
          setup="import tempfile, os\n_d = tempfile.mkdtemp()\nP = sum(polygon([(0, 0), (1, 0.1 * (j % 10)), (1, 1), (0.1 * (j % 7), 1)], alpha=0.02) for j in range(S))",
          target="P.save(os.path.join(_d, 'big.png'), figsize=40, dpi=100)",
          probe="line([(0, 0), (1, 1)]).save(os.path.join(_d, 'small.png'), figsize=1, dpi=100)\nassert os.path.getsize(os.path.join(_d, 'small.png')) > 0"),
+    # the decision-tree kernel (sklearn-trees r3 §6): SK1 a dataset's copy and a tree's fit on large X (the kernel's
+    # own polls, engine/skltree work::tick), SK4 apply on many rows (src/runtime/skltree.ts, polled every 4096 steps)
+    dict(id="SK1", transport="wasm:skltree.ts", owner="decision trees (sklearn)", mode="python", s0=200_000, smin=20_000, smax=2_000_000,
+         grow=dict(kind="scale", p=1), leak_measure="heap+external", hosts=["cli"],
+         setup="import numpy as np\nfrom sagebrush import skltree\n_g = np.random.RandomState(0)\nX = _g.rand(S, 8).astype(np.float32)\ny = (X @ np.arange(1.0, 9.0) + _g.rand(S))[:, None]",
+         target="_ds = skltree.dataset(X, y)\n_t = skltree.fit(_ds, criterion=\"squared_error\", max_features=8, seed=1)\n_ds.release()",
+         probe="_d2 = skltree.dataset(np.array([[0.0], [1.0]], dtype=np.float32), np.array([[0.0], [1.0]]))\nassert skltree.fit(_d2, n_classes=[2], criterion=\"gini\", max_features=1, seed=1)[\"node_count\"] == 3\n_d2.release()"),
+    dict(id="SK4", transport="skltree:apply", owner="decision trees (sklearn)", mode="python", s0=4_000_000, smin=400_000, smax=30_000_000,
+         grow=dict(kind="scale", p=1), leak_measure="heap+external", hosts=["cli"],
+         setup="import numpy as np\nfrom sagebrush import skltree\n_g = np.random.RandomState(0)\n_X = _g.rand(50000, 2).astype(np.float32)\n_d = skltree.dataset(_X, (_X[:, 0] * 3 + _X[:, 1] + _g.rand(50000))[:, None])\n_t = skltree.fit(_d, criterion=\"squared_error\", max_features=2, seed=1)\n_d.release()\nXq = _g.rand(S, 2).astype(np.float32)",
+         target="_l = skltree.apply(_t, Xq)",
+         probe="_d2 = skltree.dataset(np.array([[0.0], [1.0]], dtype=np.float32), np.array([[0.0], [1.0]]))\nassert skltree.fit(_d2, n_classes=[2], criterion=\"gini\", max_features=1, seed=1)[\"node_count\"] == 3\n_d2.release()"),
 ]
 for c in CASES:
     c.setdefault("hosts", ["cli", "prompt", "browser"] if c["id"] in ("P1", "E2") else ["cli", "prompt"])
