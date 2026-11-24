@@ -13615,7 +13615,7 @@
    }
   },
   "owner": "python (@sagebrush-python)",
-  "reason": "an object array's admission: at most V8's largest JavaScript array (2**27 items), which its references are held in, with the array admission's MemoryError, before anything is allocated (objEmpty and the discovery walk's levels)"
+  "reason": "an object array's admission: Sagebrush caps object arrays at 2**27 elements, in addition to the array and heap admission limits; a larger request raises the array admission's MemoryError, before anything is allocated (objEmpty and the discovery walk's levels)"
  },
  "src/runtime/numpy.ts :: admitWork :: if (bytes <= ARRAY_LIMITS.bytes) return; #0": {
   "class": "2",
@@ -13730,7 +13730,7 @@
    }
   },
   "owner": "python (@sagebrush-python)",
-  "reason": "an object array's admission: at most V8's largest JavaScript array (2**27 items), which its references are held in, with the array admission's MemoryError, before anything is allocated (objEmpty and the discovery walk's levels)"
+  "reason": "an object array's admission: Sagebrush caps object arrays at 2**27 elements, in addition to the array and heap admission limits; a larger request raises the array admission's MemoryError, before anything is allocated (objEmpty and the discovery walk's levels)"
  },
  "src/runtime/numpy.ts :: prod :: export const ARRAY_LIMITS = { elements: 2 ** 32, bytes: 2 ** 32 }; #0": {
   "class": "2",

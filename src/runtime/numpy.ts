@@ -3829,8 +3829,8 @@ function objSpec(x: any): boolean {
   if (x === T.object || (objScalarType !== null && x === objScalarType)) return true;
   return typeof x === "string" && (x === "O" || x === "|O" || x === "=O" || x === "<O" || x === "object" || x === "object_" || x === "O8");
 }
-// (an object array's admission: the array admission, and at most V8's largest JavaScript array, about 2**27
-// items, which its references are held in, with the same MemoryError: past it no host can make one)
+// (an object array's admission: Sagebrush caps object arrays at 2**27 elements, in addition to the array and
+// heap admission limits; a larger request raises the same MemoryError as the array admission's)
 const OBJ_MAX_ITEMS = 2 ** 27;
 // (the discovery walk's memory per item of a level: its reference in the level's JS array (8 bytes), its flag
 // (1), its slot in the result's references at the end (8), and V8's holey-array and growth overhead. Measured
