@@ -181,6 +181,7 @@ builtins/test_mkpp_ppval.m
 builtins/test_mod_zero_divisor.m
 builtins/test_nan_function.m
 builtins/test_nested_end_indexing.m
+builtins/test_normalize.m
 builtins/test_num2cell.m
 builtins/test_num2str_large_int.m
 builtins/test_ode23.m

@@ -15933,5 +15933,65 @@
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'max' in MATLAB's names of the volume's boundary planes ('xmax', 'ymax', 'zmax'), which isocaps takes as options; the line names or lists those planes, it is not a limit"
+ },
+ "lib/_matlab_data.py :: _col_median :: hi = _m._take_along(S, np.maximum(n // 2, 0).reshape(1, -1), 0)[0] #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'maximum' in np.maximum, which keeps a sorted column's median or quantile index at least 0 or 1 (an empty column's); not a limit"
+ },
+ "lib/_matlab_data.py :: _col_median :: lo = _m._take_along(S, np.maximum((n - 1) // 2, 0).reshape(1, -1), 0)[0] #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'maximum' in np.maximum, which keeps a sorted column's median or quantile index at least 0 or 1 (an empty column's); not a limit"
+ },
+ "lib/_matlab_data.py :: _col_quantile :: lo = np.clip(np.floor(t).astype(np.int64), 1, np.maximum(n - 1, 1)) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'maximum' in np.maximum, which keeps a sorted column's median or quantile index at least 0 or 1 (an empty column's); not a limit"
+ },
+ "lib/_matlab_data.py :: _col_std :: v = ss / np.maximum(n - 1, 1).astype(ss.dtype) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: np.maximum(n - 1, 1) is the standard deviation's divisor, n - 1 and at least 1 (one value gives 0); not a limit"
+ },
+ "lib/_matlab_data.py :: rescale_ :: \"\"\"R = rescale(A, l, u, 'InputMin', m, 'InputMax', M): A's elements scaled linearly to [l, u] (0 and 1 by default) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's argument names ('InputMax', 'OutMinGreaterThanOutMax') and in rescale's description; the line names an argument, it is not a limit"
+ },
+ "lib/_matlab_data.py :: rescale_ :: \"MATLAB:rescale:OutMinGreaterThanOutMax\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's argument names ('InputMax', 'OutMinGreaterThanOutMax') and in rescale's description; the line names an argument, it is not a limit"
+ },
+ "lib/_matlab_data.py :: rescale_ :: Mx = _real_data(_md(opts[\"inputmax\"]), \"rescale\", \"in its bounds\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's argument names ('InputMax', 'OutMinGreaterThanOutMax') and in rescale's description; the line names an argument, it is not a limit"
+ },
+ "lib/_matlab_data.py :: rescale_ :: R = np.where(np.isnan(R), R, np.minimum(np.maximum(R, lo), hi)) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: rescale's results held to the interval [l, u], MATLAB's clipping of the data to [InputMin, InputMax]; not a limit"
+ },
+ "lib/_matlab_data.py :: rescale_ :: if \"inputmax\" in opts: #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's argument names ('InputMax', 'OutMinGreaterThanOutMax') and in rescale's description; the line names an argument, it is not a limit"
+ },
+ "lib/_matlab_data.py :: rescale_ :: if key not in (\"inputmin\", \"inputmax\") or not args: #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's argument names ('InputMax', 'OutMinGreaterThanOutMax') and in rescale's description; the line names an argument, it is not a limit"
+ },
+ "lib/_matlab_data.py :: rescale_ :: raise _err(\"rescale: the name-value arguments are 'InputMin' and 'InputMax'.\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's argument names ('InputMax', 'OutMinGreaterThanOutMax') and in rescale's description; the line names an argument, it is not a limit"
+ },
+ "lib/_matlab_data.py :: rescale_ :: sc = np.maximum(np.abs(m), np.abs(Mx)) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the extrema's largest magnitude, which scales a range that overflows; not a limit"
  }
 }

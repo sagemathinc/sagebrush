@@ -296,6 +296,46 @@
     ]
   },
   {
+    "name": "normalize",
+    "kind": "function",
+    "signature": "N = normalize(A)\nN = normalize(A, dim)\nN = normalize(___, method)\nN = normalize(___, method, methodtype)\nN = normalize(___, 'center', centertype, 'scale', scaletype)\n[N, C, S] = normalize(___)",
+    "summary": "Data centered and scaled along a dimension: z-scores by default, or by a norm, a range, a center or a scale.",
+    "doc": "The default dimension is the first whose size isn't 1. NaN values are left out of the statistics and stay NaN. Methods: 'zscore' (mean 0, standard deviation 1; 'robust': median 0, median absolute deviation 1, as MATLAB computes it), 'norm' (p-norm 1; p is 2 by default, any positive number or Inf), 'scale' ('std', 'mad', 'first', 'iqr' or a numeric scale), 'range' (to [a b], [0 1] by default; constant data gives a), 'center' ('mean', 'median' or a numeric center), 'medianiqr' (median 0, interquartile range 1), and 'center' with 'scale'. `N = (A - C) ./ S`. A must be double or single; single data is computed in single.",
+    "examples": [
+      {
+        "code": "normalize(1:5)",
+        "expected": "\nans =\n\n   -1.2649   -0.6325         0    0.6325    1.2649\n\n"
+      },
+      {
+        "code": "normalize(1:5, 'range')",
+        "expected": "\nans =\n\n         0    0.2500    0.5000    0.7500    1.0000\n\n"
+      },
+      {
+        "code": "[N, C, S] = normalize(magic(3))",
+        "expected": "\nN =\n\n    1.1339   -1.0000    0.3780\n   -0.7559         0    0.7559\n   -0.3780    1.0000   -1.1339\n\n\nC =\n\n     5     5     5\n\n\nS =\n\n    2.6458    4.0000    2.6458\n\n"
+      },
+      {
+        "code": "normalize([1 2 10], 'center', 'median', 'scale', 'mad')",
+        "expected": "\nans =\n\n    -1     0     8\n\n"
+      }
+    ],
+    "differs": [
+      "Tables are not supported, so neither are 'DataVariables' and 'ReplaceValues'.",
+      "Median, MAD and interquartile range refuse complex data."
+    ],
+    "status": "partial",
+    "see_also": [
+      "zscore",
+      "rescale",
+      "mean",
+      "std",
+      "median"
+    ],
+    "tags": [
+      "statistics"
+    ]
+  },
+  {
     "name": "prod",
     "kind": "function",
     "signature": "B = prod(A)\nB = prod(A, dim)\nB = prod(A, vecdim)\nB = prod(A, 'all')\nB = prod(___, outtype)\nB = prod(___, nanflag)",
@@ -327,6 +367,40 @@
     ],
     "tags": [
       "reductions"
+    ]
+  },
+  {
+    "name": "rescale",
+    "kind": "function",
+    "signature": "R = rescale(A)\nR = rescale(A, l, u)\nR = rescale(___, 'InputMin', m, 'InputMax', M)",
+    "summary": "Data scaled linearly to the interval [0, 1], or [l, u], by the extrema of the whole array or given ones.",
+    "doc": "`R = l + (A - m) ./ (M - m) .* (u - l)`, where m and M are the minimum and maximum of A's elements (NaN aside) unless 'InputMin' and 'InputMax' give them; elements outside [m, M] are first set to m or M. l, u, m and M may be arrays compatible with A: a row applies by column, a column by row. Constant data gives l, or NaN when [l, u] holds an infinity. single data gives single, all else double.",
+    "examples": [
+      {
+        "code": "rescale([1 2 3 4 5])",
+        "expected": "\nans =\n\n         0    0.2500    0.5000    0.7500    1.0000\n\n"
+      },
+      {
+        "code": "rescale([1 10; 3 20], -1, 1)",
+        "expected": "\nans =\n\n   -1.0000   -0.0526\n   -0.7895    1.0000\n\n"
+      },
+      {
+        "code": "rescale([1 2 3 4 5], 'InputMin', 2, 'InputMax', 4)",
+        "expected": "\nans =\n\n         0         0    0.5000    1.0000    1.0000\n\n"
+      }
+    ],
+    "differs": [
+      "Where [l, u] isn't [0, 1], or the range overflows, results can differ from MATLAB's by about eps * max(|l|, |u|) (at most 1.14 times that in the recorded rows), because MATLAB's exact order of operations isn't recorded."
+    ],
+    "status": "full",
+    "see_also": [
+      "normalize",
+      "min",
+      "max",
+      "bounds"
+    ],
+    "tags": [
+      "statistics"
     ]
   },
   {

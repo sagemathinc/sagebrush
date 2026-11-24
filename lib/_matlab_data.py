@@ -696,6 +696,338 @@ def zscore_(nargout, X, flag=None, dim=None):
     return [_out(Z, cls), _out(mu, cls), _out(sigma, cls)]
 
 
+# ------------------------------------------------------------------ rescale, normalize
+
+# (the most rescale and normalize hold at once for each element: the data's float copy, its sorted copy and masks, and
+# the result with its temporaries, measured in CPython at up to 50 bytes for real data and 58 for complex; and for each
+# vector normalize normalizes: its count, statistics, C and S, up to 73 bytes beyond the elements' 96, measured for
+# an empty array of 100,000 columns and for single rows)
+_PREP_ELEMENT = 96
+_PREP_VECTOR = 128
+
+
+def _prep_admit(x, what, *others, vectors=0):
+    """rescale's and normalize's work admitted before any copy of x is made, with the float copies of others and
+    the per-vector work of vectors vectors"""
+    _m._admit_bytes(_m._numel(x) * _PREP_ELEMENT + vectors * _PREP_VECTOR + 16 * sum(_m._numel(o) for o in others),
+                    "%s of %d elements" % (what, _m._numel(x)))
+
+
+def _real_data(M, fname, why):
+    if np.iscomplexobj(M):
+        raise _err("%s: complex data is not supported %s." % (fname, why))
+    return M
+
+
+def _colstats(F):
+    """for each column of F (L-by-R) its values that are not NaN: their count, and their sorted copy with NaN last"""
+    ok = ~np.isnan(F)
+    return ok, ok.sum(axis=0), np.sort(F, axis=0)
+
+
+def _col_quantile(S, n, p):
+    """the p quantile (0..1) of each column's n sorted values (prctile's rule, as _quantiles)"""
+    R = S.shape[1]
+    out = np.full(R, _math.nan)
+    if not R or not S.shape[0]:
+        return out
+    t = n * p + 0.5
+    lo = np.clip(np.floor(t).astype(np.int64), 1, np.maximum(n - 1, 1))
+    f = np.clip(t - lo, 0.0, 1.0)
+    a = _m._take_along(S, (lo - 1).reshape(1, -1), 0)[0]
+    b = _m._take_along(S, np.minimum(lo, S.shape[0] - 1).reshape(1, -1), 0)[0]
+    with np.errstate(invalid="ignore"):
+        q = a + f * (b - a)
+    q = np.where(n == 1, S[0], q)
+    return np.where(n == 0, _math.nan, q)
+
+
+def _col_median(S, n):
+    """each column's median of its n sorted values (median's own rule: the middle one, or the mean of the two)"""
+    R = S.shape[1]
+    if not R or not S.shape[0]:
+        return np.full(R, _math.nan)
+    lo = _m._take_along(S, np.maximum((n - 1) // 2, 0).reshape(1, -1), 0)[0]
+    hi = _m._take_along(S, np.maximum(n // 2, 0).reshape(1, -1), 0)[0]
+    with np.errstate(invalid="ignore"):
+        med = np.where(n % 2 == 1, lo, _m._median_middle(lo, hi))
+    return np.where(n == 0, _math.nan, med)
+
+
+def _col_mean(F, ok, n):
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.where(ok, F, 0).sum(axis=0) / n.astype(F.real.dtype)
+
+
+def _col_std(F, ok, n, mean):
+    """the standard deviation normalized by n - 1 (0 for one value), NaN omitted"""
+    d = np.where(ok, F - mean, 0)
+    ss = (d * np.conj(d)).real.sum(axis=0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        v = ss / np.maximum(n - 1, 1).astype(ss.dtype)
+    return np.where(n == 0, _math.nan, np.sqrt(v))
+
+
+@_bi("rescale")
+def rescale_(nargout, A, *args):
+    """R = rescale(A, l, u, 'InputMin', m, 'InputMax', M): A's elements scaled linearly to [l, u] (0 and 1 by default)
+    by the least and greatest of A's elements (NaN aside) unless given, results held to [l, u]; l, u, m and M
+    compatible with A (a row: by column, a column: by row); constant data gives l, or NaN when [l, u] holds an
+    infinity (MATLAB's rescale page), and an infinite extremum NaN everywhere.  single data gives single, all else
+    double"""
+    args = list(args)
+    bounds = []
+    while args and not _istext(args[0]):
+        bounds.append(args.pop(0))
+    if len(bounds) == 1:
+        raise _err("rescale: give both the lower bound l and the upper bound u.")
+    if len(bounds) > 2:
+        raise _err("Too many input arguments.")
+    opts = {}
+    while args:
+        name = args.pop(0)
+        key = _text(name).lower() if _istext(name) else None
+        if key not in ("inputmin", "inputmax") or not args:
+            raise _err("rescale: the name-value arguments are 'InputMin' and 'InputMax'.")
+        opts[key] = args.pop(0)
+    for v in bounds + list(opts.values()):
+        if _istext(v) or not _m._isnumlike(v):
+            raise _err("rescale: the bounds must be numeric.")
+    _prep_admit(A, "rescale", *(bounds + list(opts.values())))
+    if np.iscomplexobj(_m._arr(A)) if _m._isnumlike(A) else True:
+        raise _err("First argument must be a real numeric or logical array.", "MATLAB:rescale:InvalidA")
+    M = _md(A)
+    with np.errstate(invalid="ignore"):
+        fin = M[~np.isnan(M)]
+    lo, hi = (_real_data(_md(b), "rescale", "in its bounds") for b in bounds) if bounds else (np.zeros((1, 1)), np.ones((1, 1)))
+    if "inputmin" in opts:
+        m = _real_data(_md(opts["inputmin"]), "rescale", "in its bounds")
+    else:
+        m = np.full((1, 1), fin.min() if fin.size else _math.nan)
+    if "inputmax" in opts:
+        Mx = _real_data(_md(opts["inputmax"]), "rescale", "in its bounds")
+    else:
+        Mx = np.full((1, 1), fin.max() if fin.size else _math.nan)
+    try:
+        shape = np.broadcast_shapes(*(t.shape + (1,) * (M.ndim - t.ndim) if t.ndim < M.ndim else t.shape for t in (M, lo, hi, m, Mx)))
+    except ValueError:
+        raise _err("rescale: the bounds must be compatible with the size of A.")
+    if tuple(shape) != M.shape:
+        raise _err("rescale: the bounds must be compatible with the size of A.")
+    if np.any(lo > hi):
+        raise _err("Lower bound argument must be less than or equal to the upper bound argument.",
+                   "MATLAB:rescale:OutMinGreaterThanOutMax")
+    with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+        # (elements outside [m, M] are held to [l, u] at the end, which is the page's setting them to m or M first)
+        X = M
+        # (the range's width over the data's, times each element's distance from the minimum, then held to [l, u]: of the
+        # forms tried, the one closest to MATLAB's results (observed MATLAB R2026b, 2026-11-24); a range so narrow that
+        # its reciprocal overflows gives NaN at the minimum and u elsewhere, as MATLAB's)
+        R = lo + (X - m) * ((hi - lo) / (Mx - m))
+        # (an interval so wide that u - l overflows, as [-1e308, 1e308]: its half-width, doubled at the end)
+        wide = np.isinf(hi - lo) & np.isfinite(lo) & np.isfinite(hi)
+        if np.any(wide):
+            R = np.where(wide, lo + (X - m) * ((hi / 2 - lo / 2) / (Mx - m)) * 2, R)
+        R = np.where(np.isnan(R), R, np.minimum(np.maximum(R, lo), hi))
+        # (where the range overflows, as for [-1e308 1e308], scaled by the extrema's largest magnitude first; an
+        # infinite extremum makes every element NaN, as MATLAB's do, observed MATLAB R2026b, 2026-11-24)
+        big = np.isinf(Mx - m) & np.isfinite(m) & np.isfinite(Mx)
+        if np.any(big):
+            sc = np.maximum(np.abs(m), np.abs(Mx))
+            R = np.where(big, lo + (X / sc - m / sc) / (Mx / sc - m / sc) * (hi - lo), R)
+        R = np.where(np.isinf(m) | np.isinf(Mx), _math.nan, R)
+        flat = (Mx == m) & ~np.isnan(M)
+        R = np.where(flat, np.where(np.isinf(lo) | np.isinf(hi), _math.nan, lo + np.zeros(R.shape)), R)
+    return _out(np.broadcast_to(R, M.shape), _cls(A))
+
+
+_NORMALIZE_METHODS = ("zscore", "norm", "scale", "range", "center", "medianiqr")
+_NORMALIZE_BAD_METHOD = "Normalization method must be 'zscore', 'norm', 'center', 'scale', 'range', or 'medianiqr'."
+
+
+def _normalize_args(args):
+    """(axis or None, method, its type, center type, scale type) of normalize's arguments after A"""
+    args = list(args)
+    axis = None
+    if args and not _istext(args[0]):
+        axis = _dim_value(args.pop(0))
+    method, mtype, center, scale = "zscore", None, None, None
+    if args:
+        if not _istext(args[0]):
+            raise _err(_NORMALIZE_BAD_METHOD, "MATLAB:normalize:InvalidMethod")
+        method = _text(args.pop(0)).lower()
+        if method in ("datavariables", "replacevalues"):
+            raise _err("normalize: '%s' applies to tables, which Sagebrush does not have." % method)
+        if method not in _NORMALIZE_METHODS:
+            raise _err(_NORMALIZE_BAD_METHOD, "MATLAB:normalize:InvalidMethod")
+        if args and method != "medianiqr" and not (_istext(args[0]) and _text(args[0]).lower() in ("center", "scale")):
+            mtype = args.pop(0)
+        if method in ("center", "scale"):
+            if method == "center":
+                center = mtype
+            else:
+                scale = mtype
+            if args and _istext(args[0]) and _text(args[0]).lower() in ("center", "scale"):
+                other = _text(args.pop(0)).lower()
+                if other == method:
+                    raise _err("normalize: give 'center' and 'scale' once each.")
+                t = args.pop(0) if args else None
+                if other == "center":
+                    center = t
+                else:
+                    scale = t
+                method = "centerscale"
+    if args:
+        raise _err("normalize: too many arguments, or an option Sagebrush does not support.")
+    return axis, method, mtype, center, scale
+
+
+def _type_text(t, allowed, what):
+    s = (t if isinstance(t, str) else _text(t)).lower()
+    if s not in allowed:
+        raise _err("normalize: the %s type must be %s." % (what, " or ".join("'%s'" % a for a in allowed)))
+    return s
+
+
+@_bi("normalize")
+def normalize_(nargout, A, *args):
+    """[N, C, S] = normalize(A, dim, method, methodtype), normalize(A, ..., 'center', c, 'scale', s): A centered and
+    scaled along dim (the first dimension not 1 by default), N = (A - C) ./ S, NaN values ignored in the statistics,
+    as MATLAB's normalize page describes: 'zscore' (mean 0 and standard deviation 1; 'robust': mean 0 and median
+    absolute deviation 1), 'norm' (p-norm 1, p = 2 by default, Inf or -Inf for the largest or smallest magnitude),
+    'scale' ('std', 'mad', 'first', 'iqr' or numeric), 'range' (to [a, b], [0 1] by default; constant data gives
+    a), 'center' ('mean', 'median' or numeric), 'medianiqr' (median 0 and interquartile range 1), and 'center' with
+    'scale'.  single data gives single, all else double"""
+    if _m.class_(A) not in ("double", "single"):
+        raise _err("Invalid data type. First argument must be of type double, single, table, or timetable.",
+                   "MATLAB:normalize:InvalidFirstInput")
+    axis, method, mtype, center, scale = _normalize_args(args)
+    # (the vectors normalized, from A's size alone: every element of its other dimensions, even when the dimension
+    # normalized is empty or 1)
+    dims = list(_m._dims(A))
+    if axis is None:
+        axis = _first_dim(tuple(dims))
+    # (a dimension past A's last is 1, as every one after it is: the first of them stands for all, so that a huge dim
+    # costs nothing)
+    axis = min(axis, len(dims))
+    dims += [1] * (axis + 1 - len(dims))
+    _prep_admit(A, "normalize", *(a for a in args if not _istext(a)), vectors=_m._prod(dims[:axis] + dims[axis + 1:]))
+    M = _md(A)
+    if _m.class_(A) == "single":
+        # (single data in single throughout, as MATLAB computes it, observed MATLAB R2026b, 2026-11-24)
+        M = M.astype(np.complex64 if np.iscomplexobj(M) else np.float32)
+    F, how = _to_front(M, axis)
+    L, R = F.shape
+    ok, n, S = _colstats(F) if not np.iscomplexobj(F) else (~np.isnan(F), (~np.isnan(F)).sum(axis=0), None)
+
+    def needs_real(why):
+        if np.iscomplexobj(F):
+            raise _err("normalize: complex data is not supported with %s." % why)
+
+    def stat(kind):
+        if kind == "mean":
+            return _col_mean(F, ok, n)
+        if kind == "std":
+            return _col_std(F, ok, n, _col_mean(F, ok, n))
+        needs_real("'%s'" % kind)
+        if kind == "median":
+            return _col_median(S, n)
+        if kind == "mad":
+            med = _col_median(S, n)
+            D = np.abs(F - med)
+            okd, nd, SD = _colstats(D)
+            return _col_median(SD, nd)
+        if kind == "iqr":
+            return _col_quantile(S, n, 0.75) - _col_quantile(S, n, 0.25)
+        if kind == "first":
+            return F[0] if L else np.full(R, _math.nan)
+        raise AssertionError(kind)
+
+    def numeric(t, what):
+        if _istext(t) or not _m._isnumlike(t):
+            raise _err("normalize: the %s type must be text or numeric." % what)
+        V = _md(t)
+        V, _ = _to_front(V, axis)
+        if V.shape[0] != 1 or V.shape[1] not in (1, R):
+            raise _err("normalize: a numeric %s must have one value for each vector normalized, or one for all." % what)
+        return np.broadcast_to(V[0], (R,))
+
+    zero, one = np.zeros(R, dtype=F.real.dtype), np.ones(R, dtype=F.real.dtype)
+    rng = None
+    if method == "zscore":
+        t = "std" if mtype is None else (_text(mtype).lower() if _istext(mtype) else None)
+        if t not in ("std", "robust"):
+            raise _err("The zscore type must be 'std' or 'robust'.", "MATLAB:normalize:InvalidZscoreType")
+        # ('robust': median 0 and median absolute deviation 1, observed MATLAB R2026b, 2026-11-24, where the page says
+        # mean 0)
+        C, Sc = (stat("mean"), stat("std")) if t == "std" else (stat("median"), stat("mad"))
+    elif method == "norm":
+        p = 2.0 if mtype is None else (_scalar(mtype) if not _istext(mtype) and _m._numel(mtype) == 1 else None)
+        if p is None or _math.isnan(p) or not p > 0:
+            raise _err("The norm must be a positive real scalar or Inf.", "MATLAB:normalize:InvalidNormType")
+        Aab = np.where(ok, np.abs(F), _math.nan)
+        with np.errstate(invalid="ignore", over="ignore", divide="ignore"):
+            if p == _math.inf:
+                Sc = np.where(n > 0, np.where(ok, np.abs(F), -_math.inf).max(axis=0) if L else zero, 0.0)
+            else:
+                Sc = np.where(ok, Aab, 0) ** p
+                Sc = Sc.sum(axis=0) ** (1 / p)
+        C = zero
+    elif method == "scale":
+        t = _m.Char("std") if scale is None else scale
+        C = zero
+        Sc = stat(_type_text(t, ("std", "mad", "first", "iqr"), "scale")) if _istext(t) else numeric(t, "scale")
+    elif method == "center":
+        t = _m.Char("mean") if center is None else center
+        C = stat(_type_text(t, ("mean", "median"), "center")) if _istext(t) else numeric(t, "center")
+        Sc = one
+    elif method == "centerscale":
+        tc = _m.Char("mean") if center is None else center
+        ts = _m.Char("std") if scale is None else scale
+        C = stat(_type_text(tc, ("mean", "median"), "center")) if _istext(tc) else numeric(tc, "center")
+        Sc = stat(_type_text(ts, ("std", "mad", "first", "iqr"), "scale")) if _istext(ts) else numeric(ts, "scale")
+    elif method == "medianiqr":
+        C, Sc = stat("median"), stat("iqr")
+    else:  # range
+        needs_real("'range'")
+        ab = np.array([0.0, 1.0]) if mtype is None else (_vec(mtype).real if not _istext(mtype) else None)
+        if ab is None or ab.size != 2 or not ab[0] < ab[1]:
+            raise _err("The range interval must be a real vector containing two elements with increasing values.",
+                       "MATLAB:normalize:InvalidRangeType")
+        a, b = float(ab[0]), float(ab[1])
+        with np.errstate(invalid="ignore"):
+            lo = np.where(ok, F, _math.inf).min(axis=0) if L else np.full(R, _math.nan)
+            hi = np.where(ok, F, -_math.inf).max(axis=0) if L else np.full(R, _math.nan)
+        lo, hi = np.where(n == 0, _math.nan, lo), np.where(n == 0, _math.nan, hi)
+        rng = (a, b, lo, hi)
+    with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+        if rng is not None:
+            a, b, lo, hi = rng
+            # (the page's formula, a + (A - min) / (max - min) * (b - a); constant data gives a, or NaN when [a, b] holds
+            # an infinity; C and S such that N = (A - C) ./ S, S 1 for constant data)
+            flat = hi == lo
+            N = a + (F - lo) / (hi - lo) * (b - a)
+            const = _math.nan if _math.isinf(a) or _math.isinf(b) else a
+            N = np.where(flat & ~np.isnan(F), const, N)
+            Sc = np.where(flat, 1.0, (hi - lo) / (b - a))
+            C = np.where(flat, lo - const, lo - a * Sc)
+        else:
+            D = F - C
+            if np.iscomplexobj(D) and not np.iscomplexobj(Sc):
+                # (a complex value over a real scale: each part divided, as MATLAB's results show)
+                N = np.zeros(D.shape, dtype=D.dtype)
+                N.real = D.real / Sc
+                N.imag = D.imag / Sc
+            else:
+                N = D / Sc
+    cls = _cls(A)
+    Nout = _out(_from_front(N, how), cls)
+    if nargout <= 1:
+        return Nout
+    shape_c = lambda v: _out(_from_front(np.asarray(v, dtype=N.dtype if np.iscomplexobj(v) else float).reshape(1, -1), how), cls)
+    return [Nout, shape_c(C), shape_c(Sc)][:max(nargout, 1)]
+
+
 # ------------------------------------------------------------------ maxk, mink
 
 def _topk(which):
