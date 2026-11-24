@@ -155,6 +155,24 @@ try {
   const otherBefore = 2; // (the imported notebook's PNG and GIF, N5)
   ok(shownRef === otherRef && !inShown && otherFolder === otherBefore, "N10: a paste saved after another notebook was opened: nothing put into the notebook now shown, nothing in its folder", { shownRef, otherRef, inShown, otherFolder });
 
+  // ---- N10b: another notebook opened while the pasted file is still being read: nothing saved anywhere
+  await P.ev(`window.sagebrush.open(${J(refA)})`).catch(() => {});
+  await P.until(`${T}.ref() === ${J(refA)}`, 15000).catch(() => {});
+  await sleep(800);
+  const atB = await P.ev(`(() => { const c = ${NB}.addCell("B", null, false, "markdown"); return ${NB}.cells().indexOf(c); })()`);
+  const countA = async () => P.ev(`(async () => (await ${W}.list(${J(`/Attachments/nb-${refA}`)}).catch(() => [])).length)()`);
+  const countO = async () => P.ev(`(async () => (await ${W}.list(${J(`/Attachments/nb-${otherRef}`)}).catch(() => [])).length)()`);
+  const a0 = await countA(), o0 = await countO();
+  await P.ev(`(() => { const ab = Blob.prototype.arrayBuffer; Blob.prototype.arrayBuffer = function () { const self = this; Blob.prototype.arrayBuffer = ab; return new Promise((r) => (window.__abRelease = () => r(ab.call(self)))); }; return true; })()`);
+  await give(atB, `[[${PNG_JS}, "slow.png", "image/png"]]`);
+  await P.until(`typeof window.__abRelease === "function"`, 5000).catch(() => {});
+  await P.ev(`window.sagebrush.open(${J(otherRef)})`).catch(() => {});
+  await P.until(`${T}.ref() === ${J(otherRef)}`, 15000).catch(() => {});
+  await P.ev(`(window.__abRelease?.(), true)`);
+  await sleep(1500);
+  const a1 = await countA(), o1 = await countO();
+  ok(a1 === a0 && o1 === o0, "N10b: another notebook opened while the file was read: nothing saved, in either notebook's folder", { a0, a1, o0, o1 });
+
   // ---- N6: an ill-formed reference: missing, never read
   await P.ev(`(() => { window.__reads = []; const w = ${W}; const r = w.read.bind(w); w.read = (p, ...a) => { window.__reads.push(p); return r(p, ...a); }; return true; })()`);
   await P.ev(`(() => { const c = ${NB}.addCell("![x](attachment:x.png)", null, false, "markdown"); c.attachments = { "x.png": { "sagebrush/file": "/private/notes.png" } }; ${NB}.run(c); return true; })()`);

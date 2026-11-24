@@ -176,11 +176,11 @@ const KEYS_HTML = `<form method="dialog"><b>Keyboard shortcuts</b><button aria-l
  * @param {(name: string) => string | undefined} [opts.assetUrl] the URL of one of them, if not under assetBase (a blob: in a downloaded file)
  * @param {boolean} [opts.readOnly]
  * @param {() => Promise<object | null>} [opts.mystBook] a MyST notebook's book (the workspace page's: web/workspace/book-cap.ts)
- * @param {{ place(): unknown, save(bytes: Uint8Array, place: unknown): Promise<{ path: string } | { refused: string }>, read(path: string): Promise<Uint8Array | null>, say(text: string): void }} [opts.images]
+ * @param {{ save(bytes: Uint8Array): Promise<{ path: string } | { refused: string }>, read(path: string): Promise<Uint8Array | null>, say(text: string): void }} [opts.images]
  *   images in Markdown cells kept as workspace files (#1872, web/workspace/image-store.ts): the host saves a pasted or
  *   dropped image and reads one to show it; none: pasting files does nothing, and such attachments show as missing.
- *   place(): where the document shown keeps its images, taken as the paste happens and given to save(), so an image
- *   is saved for the document it was pasted into
+ *   save() takes the document shown when it is called, which addImages calls only while the cell pasted into is
+ *   still shown (another document loaded takes its cells out)
  * @returns {import("./types").Notebook}
  */
 export function createNotebook(root, opts = {}) {
@@ -198,8 +198,6 @@ export function createNotebook(root, opts = {}) {
   const images = opts.images ?? null;
   const imageUrls = images ? new ImageUrls(images.read, () => redrawImages()) : null;
   const fileImage = imageUrls ? (p) => imageUrls.url(p) : undefined;
-  // (which document is shown: load() counts it, so a paste still in progress when another one loads stops there)
-  let docGen = 0;
   const hasFileImages = (cell) => cell.type === "markdown" && !!cell.attachments && Object.values(cell.attachments).some(isFileEntry);
   function redrawImages() {
     for (const cell of cells()) {
@@ -1900,21 +1898,22 @@ export function createNotebook(root, opts = {}) {
     const files = dt ? [...dt.files] : [];
     if (!files.length) return;
     if (!(e.type === "paste" && dt.getData("text/plain"))) { e.preventDefault(); e.stopPropagation(); }
-    // (bound to the document shown now: its place, and its generation)
-    void addImages(cell, files, images.place?.(), docGen);
+    void addImages(cell, files);
   }
-  async function addImages(cell, files, place, gen) {
+  async function addImages(cell, files) {
     if (files.length > IMAGES_AT_ONCE) return images.say(IMAGE_COPY.tooMany);
     const lines = [];
-    const still = () => gen === docGen && cell.el.isConnected && cell.type === "markdown";
+    // (the cell pasted into still shown, still Markdown: another document loaded takes it out of the page)
+    const still = () => cell.el.isConnected && cell.type === "markdown";
     for (const f of files) {
       // (the size first, from the file itself: nothing over the cap is read)
       if (f.size > IMAGE_BYTES_MAX) { images.say(IMAGE_COPY.refused("tooBig", f.size)); continue; }
       let u;
       try { u = new Uint8Array(await f.arrayBuffer()); } catch { images.say(IMAGE_COPY.refused("read")); continue; }
-      // (another document shown meanwhile, or this cell gone: nothing more saved, nothing put anywhere)
+      // (another document shown meanwhile, or this cell gone: nothing more saved, nothing put anywhere; checked just
+      //  before save, with no wait between, so save() sees the document the paste was made in)
       if (!still()) return;
-      const r = await images.save(u, place);
+      const r = await images.save(u);
       if (!still()) return;
       if (!r || !("path" in r)) { images.say(r?.refused === "noPlace" ? IMAGE_COPY.noPlace : IMAGE_COPY.refused(r?.refused ?? "other", u.length)); continue; }
       const name = r.path.slice(r.path.lastIndexOf("/") + 1);
@@ -2440,7 +2439,6 @@ export function createNotebook(root, opts = {}) {
   // Show a document, replacing what is there.
   function load(doc) {
     // (another document, or this one again: the images held for the last one let go, read again as shown)
-    docGen++;
     imageUrls?.clear();
     loading = true;
     shown = { synced: null, remoteSeen: 0 }; // (another document: its own)
