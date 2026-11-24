@@ -76,6 +76,24 @@ for name, f, low in (("empty", lambda: D.rmmissing_(2, E, 1.0), 20 * MB),
     assert attempt(f) == "reached", name
 ok("rmmissing and fillmissing: vectors' and a long vector's work counted before any copy (low host: nomem)")
 
+# (rmmissing's bookkeeping for each slice along the dimension, its counts, TF and index, counted before any copy: an
+# empty 300000-by-0 array along its first dimension, by default and given, and a 0-by-300000 along the second, 300,000
+# slices at 128 bytes, refused under 8 MB; and fillmissing's moving median, each element's window sorted: a row of
+# 1,000 with a window of 1,000, and of 1e9, cut to the data's length, refused under 8 MB and 40 MB)
+Tall = N._un_nd(np.zeros((300000, 0)))
+Wide = N._un_nd(np.zeros((0, 300000)))
+Row1k = N._un_nd(np.concatenate([[np.nan], np.ones(999)]).reshape(1, -1))
+for name, f, low, high in (("tall default", lambda: D.rmmissing_(2, Tall), 8 * MB, 100 * MB),
+                           ("tall dim 1", lambda: D.rmmissing_(2, Tall, 1.0), 8 * MB, 100 * MB),
+                           ("wide dim 2", lambda: D.rmmissing_(2, Wide, 2.0), 8 * MB, 100 * MB),
+                           ("movmedian 1000", lambda: D.fillmissing_(2, Row1k, C("movmedian"), 1000.0), 8 * MB, 100 * MB),
+                           ("movmedian 1e9", lambda: D.fillmissing_(2, Row1k, C("movmedian"), 1e9), 40 * MB, 200 * MB)):
+    stand_in(low)
+    assert attempt(f) == "MATLAB:nomem", name
+    stand_in(high)
+    assert attempt(f) == "reached", name
+ok("rmmissing's slices and fillmissing's moving-median windows counted before any copy (low host: nomem)")
+
 # (a dimension far past A's last is 1: no work in proportion to it, before the admission or after it. Along dimension
 # 1e15 any list or shape padded out to it can't even be made; the charges stay under 2 KB)
 charges = []

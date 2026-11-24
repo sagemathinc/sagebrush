@@ -139,7 +139,8 @@
     ],
     "differs": [
       "Not supported: 'makima', 'knn', a fill function with a gap window, 'SamplePoints' with a moving window, and tables ('DataVariables', 'ReplaceValues').",
-      "Not yet checked against MATLAB, which leaves these open: 'nearest' breaks a tie toward the next value; 'linear', 'spline' and 'pchip' fill nothing with fewer than two known values; a fill that finds no value (as 'previous' before the first known one) leaves NaN and is not marked in TF; integer data filled through MissingLocations is filled in double and rounded to its class."
+      "Not yet checked against MATLAB, which leaves these open: 'nearest' breaks a tie toward the next value; 'linear', 'spline' and 'pchip' fill nothing with fewer than two known values; a fill that finds no value (as 'previous' before the first known one) leaves NaN and is not marked in TF.",
+      "Also not yet checked: integer data filled through MissingLocations is filled in double and rounded to its class; MaxGap measures a leading or trailing gap from the end sample, so a single missing value at an end is always filled; the refusals' identifiers and messages are Sagebrush's."
     ],
     "status": "partial",
     "see_also": [
@@ -455,7 +456,8 @@
       }
     ],
     "differs": [
-      "Tables are not supported ('DataVariables')."
+      "Tables are not supported ('DataVariables').",
+      "Not yet checked against MATLAB: a dimension past the array's last is 1, so rmmissing([1 NaN], 3) removes the one slice and gives a 1-by-2-by-0 array; the refusals' identifiers and messages are Sagebrush's."
     ],
     "status": "partial",
     "see_also": [

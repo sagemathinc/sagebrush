@@ -97,6 +97,8 @@ test("fillmissing: each method inside and at the ends, ties, a constant, moving 
     P("movmean", "fillmissing([1 NaN 3 NaN NaN 6 7 NaN], 'movmean', 3)"),
     P("movmeanbf", "fillmissing([1 NaN 3 NaN NaN 6 7 NaN], 'movmean', [2 0])"),
     P("movmedian", "fillmissing([1 NaN 3 NaN NaN 6 7 NaN], 'movmedian', 3)"),
+    P("movhuge", "fillmissing([1 NaN 3 NaN 10], 'movmedian', 1e9)"),
+    P("movwhole", "fillmissing([1 NaN 3 NaN 10], 'movmedian', 9)"),
     P("page", "fillmissing([1 3 NaN 4 NaN NaN 5], 'previous')"),
     "[F, TF] = fillmissing(x, 'previous'); fprintf('tf|%s|%s\\n', mat2str(TF), class(TF));",
     "[F, TF] = fillmissing(x, 'linear', 'EndValues', 'none'); fprintf('tfnone|%s\\n', mat2str(TF));",
@@ -124,6 +126,9 @@ test("fillmissing: each method inside and at the ends, ties, a constant, moving 
   // ([b f] = [2 0]: the two before and this one)
   same(got, "movmeanbf", [1, 1, 3, 3, 3, 6, 7, 6.5]);
   same(got, "movmedian", [1, 2, 3, 3, 6, 6, 7, 7]);
+  // (a window longer than the data is cut at its ends: every window holds all of it, median 3)
+  same(got, "movhuge", [1, 3, 3, 3, 10]);
+  same(got, "movwhole", [1, 3, 3, 3, 10]);
   same(got, "page", [1, 3, 3, 4, 4, 4, 5]);
   // (TF: the entries filled; the leading NaN, with nothing before it, stays and isn't marked)
   assert.deepEqual(field(got, "tf"), ["[false false true true false true false true true]", "logical"]);
@@ -201,10 +206,41 @@ test("fillmissing: EndValues, MaxGap, SamplePoints, dimensions, classes, complex
   assert.match(field(got, "table")[0], /tables/);
 });
 
+test("fillmissing on complex data: each part filled as that part alone, an infinite part never touching the other", () => {
+  const got = run([
+    "A = complex([1 NaN 3], [Inf NaN Inf]); [F, T] = fillmissing(A, 'linear');",
+    "fprintf('a|%.17g|%.17g|%d\\n', real(F(2)), imag(F(2)), T(2));",
+    "B = complex([1 NaN 3 5], [2 NaN 4 Inf]); C = complex([1 NaN Inf 5], [2 NaN 4 6]);",
+    "for m = {'linear', 'spline', 'pchip', 'nearest', 'previous', 'next', 'mean'}",
+    "  d = {B, C}; tag = 'BC';",
+    "  for k = 1:2",
+    "    X = d{k}; F = fillmissing(X, m{1}); L = isnan(X);",
+    "    fprintf('%s_%s|%d|%d\\n', m{1}, tag(k), isequaln(real(F), fillmissing(real(X), m{1}, 'MissingLocations', L)), isequaln(imag(F), fillmissing(imag(X), m{1}, 'MissingLocations', L)));",
+    "  end",
+    "end",
+    "F = fillmissing(B, 'movmean', 3); L = isnan(B); fprintf('movmean_B|%d|%d\\n', isequaln(real(F), fillmissing(real(B), 'movmean', 3, 'MissingLocations', L)), isequaln(imag(F), fillmissing(imag(B), 'movmean', 3, 'MissingLocations', L)));",
+    "F = fillmissing(B, 'spline'); fprintf('splinevals|%.17g|%.17g\\n', real(F(2)), imag(F(2)));",
+    "F = fillmissing(B, 'mean'); fprintf('meanvals|%.17g|%.17g\\n', real(F(2)), imag(F(2)));",
+    "F = fillmissing(B, 'constant', 7 - 2i); fprintf('const|%.17g|%.17g\\n', real(F(2)), imag(F(2)));",
+    "try, fillmissing(B, 'median'), catch e, fprintf('median|%s\\n', e.message), end",
+  ]);
+  // (the real parts 1 _ 3 give 2; the imaginary parts Inf _ Inf give Inf - Inf, NaN: still missing, so not marked)
+  assert.deepEqual(field(got, "a"), ["2", "NaN", "0"]);
+  // (every method, with an infinite imaginary part (B) and an infinite real part (C): each part as filled alone)
+  for (const m of ["linear", "spline", "pchip", "nearest", "previous", "next", "mean"])
+    for (const k of ["B", "C"]) assert.deepEqual(field(got, `${m}_${k}`), ["1", "1"], `${m}_${k}`);
+  assert.deepEqual(field(got, "movmean_B"), ["1", "1"]);
+  // (B's real parts 1 _ 3 5 are finite: the spline's 2 and the mean 3, whatever the imaginary part's Inf does)
+  assert.ok(Number.isFinite(Number(field(got, "splinevals")[0])), "spline real part");
+  assert.deepEqual(field(got, "meanvals"), ["3", "Inf"]);
+  assert.deepEqual(field(got, "const"), ["7", "-2"]);
+  assert.match(field(got, "median")[0], /complex data is not supported with 'median'/);
+});
+
 test("rmmissing and fillmissing admitted before their copies are made (test/matlab_missing_admit_cases.py)", () => {
   const r = spawnSync(process.execPath, [cli, join(__dirname, "..", "..", "test", "matlab_missing_admit_cases.py")], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const lines = r.stdout.trim().split("\n");
   assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
-  assert.equal(lines.length, 3, r.stdout);
+  assert.equal(lines.length, 4, r.stdout);
 });

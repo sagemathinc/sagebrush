@@ -427,18 +427,22 @@ def corrcoef_(nargout, x, *args):
 _MISSING_ELEMENT = 96
 _MISSING_VECTOR = 128
 _MISSING_FILL = 768
+# (a moving median's work: each window's values for each element, and their sorted copy)
+_MOV_CELL = 40
 
 
-def _missing_admit(A, what, axis, *others, fill=True):
+def _missing_admit(A, what, axis, *others, fill=True, slices=False, extra=0):
     """the work admitted before any copy of A: its elements, its vectors along axis (axis None: the first dimension
-    not 1), one vector's fill when fill, and others' float copies"""
+    not 1), one vector's fill when fill, each slice's bookkeeping when slices (rmmissing's counts, TF and index),
+    extra bytes, and others' float copies"""
     dims = list(_m._dims(A))
     if axis is None:
         axis = _first_dim(tuple(dims))
     dims += [1] * (axis + 1 - len(dims))
     L, R = dims[axis], _m._prod(dims[:axis] + dims[axis + 1:])
     _m._admit_bytes(_m._numel(A) * _MISSING_ELEMENT + R * _MISSING_VECTOR + (L * _MISSING_FILL if fill else 0)
-                    + 16 * sum(_m._numel(o) for o in others), "%s of %d elements" % (what, _m._numel(A)))
+                    + (L * _MISSING_VECTOR if slices else 0) + extra + 16 * sum(_m._numel(o) for o in others),
+                    "%s of %d elements" % (what, _m._numel(A)))
 
 
 def _standard_missing(A):
@@ -499,7 +503,7 @@ def rmmissing_(nargout, A, *args):
         # (a dimension past A's last is 1, as every one after it is: the first of them stands for all, so that a huge
         # dim costs nothing)
         dim = min(dim, len(_m._dims(A)))
-    _missing_admit(A, "rmmissing", dim, fill=False)
+    _missing_admit(A, "rmmissing", dim, fill=False, slices=True)
     miss = _missing_locations(A, loc)
     d = list(_m._dims(A))
     axis = _first_dim(tuple(d)) if dim is None else dim
@@ -520,8 +524,27 @@ _FILL_METHODS = ("constant", "previous", "next", "nearest", "linear", "spline", 
                  "movmean", "movmedian")
 
 
+def _part(v, k):
+    """a complex fill value's real (k 0) or imaginary (k 1) part; a real value is its own real part, imaginary 0"""
+    if isinstance(v, (complex, np.complexfloating)) or (isinstance(v, np.ndarray) and v.dtype.kind == "c"):
+        return v.real if k == 0 else v.imag
+    if isinstance(v, (int, float, np.floating, np.integer)) and not isinstance(v, bool):
+        return v if k == 0 else 0.0
+    return v
+
+
 def _fill_vector(x, miss, t, method, param, endv, maxgap):
-    """one vector x filled where miss is true, at sample points t: (the filled vector, which entries were filled)"""
+    """one vector x filled where miss is true, at sample points t: (the filled vector, which entries were filled);
+    complex data by parts, each filled as real data and put together without arithmetic, so that a part that isn't
+    finite never touches the other"""
+    if np.iscomplexobj(x):
+        re, _ = _fill_vector(np.array(x.real), miss, t, method, _part(param, 0), _part(endv, 0), maxgap)
+        im, _ = _fill_vector(np.array(x.imag), miss, t, method, _part(param, 1), _part(endv, 1), maxgap)
+        z = np.zeros(x.shape, dtype=np.complex128)
+        z.real = re
+        z.imag = im
+        # (an entry still NaN in either part isn't filled)
+        return z, miss & ~np.isnan(z.real) & ~np.isnan(z.imag)
     n = x.size
     known = ~miss
     ki = np.flatnonzero(known)
@@ -563,14 +586,10 @@ def _fill_vector(x, miss, t, method, param, endv, maxgap):
     def interp(kind):
         if ki.size < 2:
             return np.full(n, _math.nan, dtype=x.dtype)
-        # (interp1's own interpolation, with its own extrapolation: each part of complex data alone)
-        parts = [x.real, x.imag] if np.iscomplexobj(x) else [x]
-        res = []
-        for part in parts:
-            r = _m._B["interp1"].call(1, [_m._box(t[ki].reshape(-1, 1)), _m._box(part[ki].reshape(-1, 1)),
-                                         _m._box(t.reshape(-1, 1)), _m.Char(kind), _m.Char("extrap")])
-            res.append(_m._farr(r).reshape(-1))
-        return res[0] + 1j * res[1] if len(res) == 2 else res[0]
+        # (interp1's own interpolation, with its own extrapolation; real data only, complex data comes by parts)
+        r = _m._B["interp1"].call(1, [_m._box(t[ki].reshape(-1, 1)), _m._box(x[ki].reshape(-1, 1)),
+                                     _m._box(t.reshape(-1, 1)), _m.Char(kind), _m.Char("extrap")])
+        return _m._farr(r).reshape(-1)
 
     if method == "constant":
         vals = np.broadcast_to(np.asarray(param, dtype=x.dtype), (n,))
@@ -672,7 +691,18 @@ def fillmissing_(nargout, A, *args):
     if dim is not None:
         # (a dimension past A's last is 1: as rmmissing)
         dim = min(dim, len(_m._dims(A)))
-    _missing_admit(A, "fillmissing", dim, *(o for o in (param, sp, loc) if o is not None and not _istext(o)))
+    wins, extra = None, 0
+    if method in ("movmean", "movmedian"):
+        kb, kf = _window(param)
+        dims = list(_m._dims(A))
+        ax = _first_dim(tuple(dims)) if dim is None else dim
+        Lw = dims[ax] if ax < len(dims) else 1
+        # (a window reaching past the data's ends is cut there anyway, so it is never longer than the data: the same
+        # result, with a moving median's work, each element's window sorted, bounded by the data's length)
+        wins = (min(kb, max(Lw - 1, 0)), min(kf, max(Lw - 1, 0)))
+        if method == "movmedian":
+            extra = (wins[0] + wins[1] + 1) * Lw * _MOV_CELL
+    _missing_admit(A, "fillmissing", dim, *(o for o in (param, sp, loc) if o is not None and not _istext(o)), extra=extra)
     miss = _missing_locations(A, loc)
     cls = _m.class_(A)
     M = _md(A)
@@ -690,6 +720,9 @@ def fillmissing_(nargout, A, *args):
         t = _vec(sp).real.astype(np.float64)
         if t.size != L or np.any(np.isnan(t)) or (t.size > 1 and not np.all(np.diff(t) > 0)):
             raise _err("SamplePoints must be a sorted vector of unique values, one for each entry along the dimension.")
+    if np.iscomplexobj(F) and method in ("median", "mode", "movmedian"):
+        # (MATLAB orders complex values by magnitude for a median or mode: not a fill by parts)
+        raise _err("fillmissing: complex data is not supported with '%s' in Sagebrush." % method)
     if method == "constant":
         if _istext(param) or not _m._isnumlike(param):
             raise _err("fillmissing: the constant must be numeric.")
@@ -697,8 +730,6 @@ def fillmissing_(nargout, A, *args):
         if cv.size not in (1, R):
             raise _err("fillmissing: the constant must be a scalar, or have one value for each vector filled.")
         consts = np.broadcast_to(cv, (R,))
-    elif method in ("movmean", "movmedian"):
-        wins = _window(param)
     out = F.copy()
     tf = np.zeros(F.shape, dtype=bool)
     for c in range(R):

@@ -16078,5 +16078,15 @@
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'max' in MATLAB's 'MaxGap', fillmissing's own argument that leaves wider gaps unfilled, as MATLAB's page describes; not a Sagebrush limit"
+ },
+ "lib/_matlab_data.py :: _fill_vector :: im, _ = _fill_vector(np.array(x.imag), miss, t, method, _part(param, 1), _part(endv, 1), maxgap) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxgap, MATLAB's 'MaxGap' argument passed on to each part of complex data; not a Sagebrush limit"
+ },
+ "lib/_matlab_data.py :: _fill_vector :: re, _ = _fill_vector(np.array(x.real), miss, t, method, _part(param, 0), _part(endv, 0), maxgap) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxgap, MATLAB's 'MaxGap' argument passed on to each part of complex data; not a Sagebrush limit"
  }
 }
