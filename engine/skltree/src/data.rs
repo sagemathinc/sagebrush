@@ -34,6 +34,12 @@ pub enum Error {
     State = -7,
     /// A mask entry is neither 0 nor 1 (detail: 0, column).
     Mask = -8,
+    /// A fit's parameters are out of range (max_features, min_samples_*, n_classes for the outputs).
+    Params = -9,
+    /// A classifier's y holds something other than a class index of its output (detail: row, output).
+    Labels = -10,
+    /// A sample weight isn't finite (detail: row), or every weight is zero.
+    Weights = -11,
 }
 
 /// One dataset: n samples of f features (X, row-major float32), their
@@ -57,10 +63,13 @@ impl Dataset {
     }
 }
 
-/// The instance's datasets, by handle.
+/// The instance's datasets, buffers (a fit's weights and class counts, copied in) and fitted trees (until copied
+/// out), by handle.  Handles come from one counter, never reused.
 #[derive(Debug, Default)]
 pub struct Table {
     sets: BTreeMap<u32, Dataset>,
+    bufs: BTreeMap<u32, Vec<f64>>,
+    trees: BTreeMap<u32, (crate::tree::Tree, Vec<f64>)>,
     next: u32,
     /// A failure's detail: (row, column or output).
     pub detail: (u64, u64),
@@ -79,6 +88,45 @@ fn zeros<T: Copy + Default>(len: usize) -> Result<Vec<T>, Error> {
 }
 
 impl Table {
+    fn next_handle(&mut self) -> Result<u32, Error> {
+        // (a handle is returned as a positive i32)
+        let h = self.next.checked_add(1).filter(|&h| h <= i32::MAX as u32).ok_or(Error::Handle)?;
+        self.next = h;
+        Ok(h)
+    }
+
+    /// A buffer of `len` float64 zeros (allocated fallibly, filled in polled chunks): its handle.
+    pub fn buffer(&mut self, len: usize) -> Result<u32, Error> {
+        len.checked_mul(8).ok_or(Error::Shape)?;
+        let v = zeros::<f64>(len)?;
+        let h = self.next_handle()?;
+        self.bufs.insert(h, v);
+        Ok(h)
+    }
+
+    pub fn buffer_mut(&mut self, h: u32) -> Result<&mut Vec<f64>, Error> {
+        self.bufs.get_mut(&h).ok_or(Error::Handle)
+    }
+
+    pub fn buffer_take(&mut self, h: u32) -> Result<Vec<f64>, Error> {
+        self.bufs.remove(&h).ok_or(Error::Handle)
+    }
+
+    /// Keep a fitted tree and its raw importances until the host has copied them out: its handle.
+    pub fn put_tree(&mut self, tree: crate::tree::Tree, importances: Vec<f64>) -> Result<u32, Error> {
+        let h = self.next_handle()?;
+        self.trees.insert(h, (tree, importances));
+        Ok(h)
+    }
+
+    pub fn tree(&self, h: u32) -> Result<&(crate::tree::Tree, Vec<f64>), Error> {
+        self.trees.get(&h).ok_or(Error::Handle)
+    }
+
+    pub fn release_tree(&mut self, h: u32) -> bool {
+        self.trees.remove(&h).is_some()
+    }
+
     /// Make an open dataset of n samples, f features and `outputs` outputs
     /// (with a mask when `masked`): its handle (at least 1).
     pub fn create(&mut self, n: usize, f: usize, outputs: usize, masked: bool) -> Result<u32, Error> {
@@ -90,12 +138,10 @@ impl Table {
         // (and their byte counts: a buffer's bytes must fit usize too)
         nx.checked_mul(4).ok_or(Error::Shape)?;
         ny.checked_mul(8).ok_or(Error::Shape)?;
-        // (a handle is returned as a positive i32)
-        let handle = self.next.checked_add(1).filter(|&h| h <= i32::MAX as u32).ok_or(Error::Handle)?;
         let x = zeros::<f32>(nx)?;
         let y = zeros::<f64>(ny)?;
         let mask = if masked { Some(zeros::<u8>(f)?) } else { None };
-        self.next = handle;
+        let handle = self.next_handle()?;
         self.sets.insert(handle, Dataset { n, f, outputs, x, y, mask, sealed: false });
         Ok(handle)
     }
@@ -176,9 +222,10 @@ impl Table {
         self.sets.remove(&h).is_some()
     }
 
-    /// The bytes every live dataset holds (for the host's tests).
+    /// The bytes every live dataset, buffer and tree holds (for the host's tests).
     pub fn live_bytes(&self) -> usize {
-        self.sets.values().map(Dataset::bytes).sum()
+        let trees: usize = self.trees.values().map(|(t, imp)| t.bytes() + imp.capacity() * 8).sum();
+        self.sets.values().map(Dataset::bytes).sum::<usize>() + self.bufs.values().map(|b| b.capacity() * 8).sum::<usize>() + trees
     }
 }
 

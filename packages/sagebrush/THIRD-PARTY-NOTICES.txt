@@ -322,14 +322,18 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### scikit-learn (BSD 3-Clause)
 
-`engine/skltree` (`src/rng.rs`, `src/sort.rs`, `src/partition.rs`, and the
-tree code that builds on them) ports scikit-learn 1.9.1's C-level tree code
-line by line, to preserve scikit-learn's random draws, sorting order and
-dense-partitioning behavior for the decision-tree kernel: the XorShift `our_rand_r`
-and `rand_int` (`sklearn/utils/_random.pxd`, `sklearn/tree/_utils.pyx`),
-`simultaneous_sort` (`sklearn/utils/_sorting.pyx`) and the dense partitioner
-(`sklearn/tree/_partitioner.pyx`).  Each ported file names the files and
-functions it follows.
+`engine/skltree` (`src/rng.rs`, `src/sort.rs`, `src/partition.rs`,
+`src/criterion.rs`, `src/splitter.rs`, `src/tree.rs`) ports scikit-learn
+1.9.1's C-level tree code line by line, to preserve scikit-learn's random
+draws, sorting order, dense partitioning, split criteria and tree building
+for the decision-tree kernel: the XorShift `our_rand_r` and `rand_int`
+(`sklearn/utils/_random.pxd`, `sklearn/tree/_utils.pyx`), `simultaneous_sort`
+(`sklearn/utils/_sorting.pyx`), the dense partitioner
+(`sklearn/tree/_partitioner.pyx`), the Gini, entropy and squared-error
+criteria (`sklearn/tree/_criterion.pyx`), the best splitter
+(`sklearn/tree/_splitter.pyx`), and the depth-first builder, `apply` and the
+feature importances (`sklearn/tree/_tree.pyx`).  Each ported file names the
+files and functions it follows.
 
 ```
 BSD 3-Clause License

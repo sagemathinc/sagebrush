@@ -202,3 +202,101 @@ test("addresses at or above 2 GiB: the module's signed i32 results are read unsi
   // (the signed offset itself is what threw before the fix)
   assert.throws(() => new Float32Array(buffer, SIGNED, 6), RangeError);
 });
+
+test("fit: refusals of what Python passes (labels, weights, parameters, a stale dataset, a malformed tree)", () => {
+  run(`
+X = np.arange(12, dtype=np.float32).reshape(6, 2)
+y = np.array([[0.0], [1.0], [1.0], [2.0], [0.0], [1.0]])
+ds = skltree.dataset(X, y)
+kw = dict(criterion="gini", max_features=2, seed=1)
+assert "row 3, output 0" in raises(ValueError, lambda: skltree.fit(ds, n_classes=[2], **kw))
+assert "n_classes" in raises(ValueError, lambda: skltree.fit(ds, n_classes=[3, 3], **kw))
+assert "finite" in raises(ValueError, lambda: skltree.fit(ds, np.array([1.0, np.nan, 1, 1, 1, 1]), n_classes=[3], **kw))
+assert "finite" in raises(ValueError, lambda: skltree.fit(ds, np.zeros(6), n_classes=[3], **kw))
+assert "6 expected" in raises(ValueError, lambda: skltree.fit(ds, np.ones(5), n_classes=[3], **kw))
+assert "out of range" in raises(ValueError, lambda: skltree.fit(ds, n_classes=[3], criterion="gini", max_features=3, seed=1))
+assert "criterion" in raises(ValueError, lambda: skltree.fit(ds, n_classes=[3], criterion="poisson", max_features=2, seed=1))
+t = skltree.fit(ds, n_classes=[3], **kw)
+assert t["node_count"] >= 3 and t["value"].shape == (t["node_count"], 1, 3)
+assert list(skltree.apply(t, X)) == list(skltree.apply(t, X))
+# a tree whose arrays don't form a tree is refused, not walked out of bounds
+bad = dict(t)
+bad["children_left"] = t["children_left"].copy()
+bad["children_left"][0] = 0
+assert "form a tree" in raises(ValueError, lambda: skltree.apply(bad, X))
+bad["feature"] = t["feature"].copy()
+bad["children_left"] = t["children_left"]
+bad["feature"][0] = 9
+assert "form a tree" in raises(ValueError, lambda: skltree.apply(bad, X))
+ds.release()
+assert "released" in raises(ValueError, lambda: skltree.fit(ds, n_classes=[3], **kw))
+`);
+});
+
+test("fit: admitted before anything is made (refused with the memory unchanged), and growing within what it was charged", () => {
+  run(`
+X = np.zeros((2000, 8), dtype=np.float32)
+X[:, 0] = np.arange(2000)
+y = (np.arange(2000) % 4).astype(np.float64)[:, None]
+ds = skltree.dataset(X, y)
+s = st()
+_skltree._test_bound(s["mem"] + s["debt"] + 2 * 65536)
+msg = raises(MemoryError, lambda: skltree.fit(ds, n_classes=[4], criterion="gini", max_features=8, seed=3))
+assert "Fitting a tree on 2000 samples by 8 features" in msg, msg
+assert st()["mem"] == s["mem"] and st()["n"] == s["n"]
+_skltree._test_bound(None)
+before = st()["mem"]
+t = skltree.fit(ds, n_classes=[4], criterion="entropy", max_features=8, seed=3)
+# (charged: the fit's bound, page-rounded, plus a page an allocation)
+assert st()["mem"] - before <= (-(-(2000 * 32 + 8 * 16 + 4 * 24 + 2002 * 64 + 3999 * (57 + 32) + 64 + 8 * 2005) // 65536) + 24) * 65536
+assert t["node_count"] > 1
+# and the tree in the module is released after its copy out: the live bytes are the dataset's
+assert st()["live"] == 2000 * 8 * 4 + 2000 * 8
+ds.release()
+`);
+});
+
+test("Stop between a fit's buffer copies: a KeyboardInterrupt, and no buffer left behind", () => {
+  // (Ctrl-C at the weights' 5th copy poll: X and y are 13 chunks each first)
+  const restore = armCopyPoll(13 + 13 + 5, false);
+  try {
+    run(`
+n = 50000
+X = np.zeros((n, 1), dtype=np.float32)
+y = (np.arange(n) % 3).astype(np.float64)[:, None]
+ds = skltree.dataset(X, y)
+s = st()
+raises(KeyboardInterrupt, lambda: skltree.fit(ds, np.ones(n), n_classes=[3], criterion="gini", max_features=1, seed=1))
+t = st()
+assert t["live"] == s["live"] and t["gen"] == s["gen"] and ds.usable, (s, t)
+ds.release()
+`);
+  } finally {
+    restore();
+  }
+});
+
+test("Stop inside the kernel's fit: a KeyboardInterrupt, the instance retired, the next fit in a fresh one", () => {
+  // (Ctrl-C requested at the class counts' copy poll, the last before the kernel's fit, and left pending, so the
+  // fit is what sees it and traps: X and y are 50000 elements each, 13 chunks of 4096, the weights 13 more, the
+  // counts 1: the 40th poll)
+  const restore = armCopyPoll(13 + 13 + 13 + 1, true);
+  try {
+    run(`
+n = 50000
+X = np.zeros((n, 1), dtype=np.float32)
+X[:, 0] = np.arange(n) % 997
+y = (np.arange(n) % 3).astype(np.float64)[:, None]
+ds = skltree.dataset(X, y)
+s = st()
+raises(KeyboardInterrupt, lambda: skltree.fit(ds, np.ones(n), n_classes=[3], criterion="gini", max_features=1, seed=1))
+t = st()
+assert t["mem"] == 0 and t["n"] == 0 and t["debt"] >= s["mem"], (s, t)
+assert not ds.usable
+d2 = skltree.dataset(X[:100].copy(), y[:100].copy())
+assert skltree.fit(d2, n_classes=[3], criterion="gini", max_features=1, seed=1)["node_count"] > 1
+`);
+  } finally {
+    restore();
+  }
+});

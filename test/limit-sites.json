@@ -3768,13 +3768,13 @@
   "owner": "raster/image I/O",
   "row": "inv-31"
  },
- "engine/skltree/src/data.rs :: create :: let handle = self.next.checked_add(1).filter(|&h| h <= i32::MAX as u32).ok_or(Error::Handle)?; #0": {
+ "engine/skltree/src/data.rs :: next_handle :: let h = self.next.checked_add(1).filter(|&h| h <= i32::MAX as u32).ok_or(Error::Handle)?; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
-  "reason": "the kernel's ABI returns a dataset handle as a positive i32 (2^31 - 1 datasets per instance, never reused); a protocol bound, not a cap on any computation"
+  "reason": "the kernel's ABI: a handle as a positive i32, and a fit's parameters inside scikit-learn's own ranges (Python validates them first with scikit-learn's messages); a protocol check, not a cap on any computation"
  },
  "engine/skltree/src/data.rs :: shapes_are_checked_before_anything_is_allocated :: assert_eq!(t.create(1, 1, usize::MAX / 8 + 1, false), Err(Error::Shape)); #0": {
   "class": "none",
@@ -3790,6 +3790,129 @@
   "class": "none",
   "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
   "reason": "test inputs past usize's byte counts, and the exactness bound of the retired debt's sum; refuse nothing themselves"
+ },
+ "engine/skltree/src/fit.rs ::  :: pub max_depth: u64, #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/fit.rs ::  :: pub max_features: usize, #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/fit.rs :: a_fit_checks_what_python_resolved :: assert_eq!(fit(d, None, &[3], &FitParams { max_features: 2, ..params(Kind::Gini) }, &mut det).unwrap_err(), Error::Params); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/fit.rs :: fit :: if p.max_features == 0 || p.max_features > d.f || p.min_samples_leaf == 0 || p.min_samples_split < 2 || !p.min_weight_leaf.is_finite() || !p.min_impurity_decrease.is_finite() { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "the kernel's ABI: a handle as a positive i32, and a fit's parameters inside scikit-learn's own ranges (Python validates them first with scikit-learn's messages); a protocol check, not a cap on any computation"
+ },
+ "engine/skltree/src/fit.rs :: fit :: let mut splitter = Splitter::new(input, d.n, criterion, p.max_features, p.min_samples_leaf, p.min_weight_leaf, p.seed)?; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/fit.rs :: fit :: let params = Params { max_depth: p.max_depth, min_samples_split: p.min_samples_split, min_samples_leaf: p.min_samples_leaf, min_weight_leaf: p.min_weight_leaf, min_impurity_decrease: p.min_impurity_decrease }; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/fit.rs :: fit_bytes :: let nodes = crate::tree::node_bound(usize::try_from(n).ok()?, max_depth, usize::try_from(min_samples_leaf).ok()?) as u64; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "skltree-footprint"
+   }
+  },
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "a fit's admitted memory: its bytes bound (fit_bytes, from node_bound: the most nodes a tree on n samples can have under max_depth and min_samples_leaf) charged page-rounded against the kernel's footprint bound B before the fit; MemoryError through memoryGuard (design note sklearn-trees r3 section 6)"
+ },
+ "engine/skltree/src/fit.rs :: fit_bytes :: let stack = (max_depth.min(n) + 2).checked_mul(64)?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "skltree-footprint"
+   }
+  },
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "a fit's admitted memory: its bytes bound (fit_bytes, from node_bound: the most nodes a tree on n samples can have under max_depth and min_samples_leaf) charged page-rounded against the kernel's footprint bound B before the fit; MemoryError through memoryGuard (design note sklearn-trees r3 section 6)"
+ },
+ "engine/skltree/src/fit.rs :: fit_bytes :: pub fn fit_bytes(n: u64, f: u64, n_outputs: u64, stride: u64, max_depth: u64, min_samples_leaf: u64) -> Option<u64> { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "skltree-footprint"
+   }
+  },
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "a fit's admitted memory: its bytes bound (fit_bytes, from node_bound: the most nodes a tree on n samples can have under max_depth and min_samples_leaf) charged page-rounded against the kernel's footprint bound B before the fit; MemoryError through memoryGuard (design note sklearn-trees r3 section 6)"
+ },
+ "engine/skltree/src/fit.rs :: params :: FitParams { kind, max_depth: 1 << 31, min_samples_split: 2, min_samples_leaf: 1, min_weight_leaf: 0.0, max_features: 1, min_impurity_decrease: 0.0, seed: 1 } #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/fit.rs :: the_admitted_bytes_bound_what_a_fit_holds :: assert!(fit_bytes(u64::MAX / 2, 3, 1, 1, 10, 1).is_none()); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/fit.rs :: the_admitted_bytes_bound_what_a_fit_holds :: let b = fit_bytes(1000, 10, 1, 3, u64::from(u32::MAX), 1).unwrap(); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/oracle_tests.rs :: every_tree_matches_scikit_learn :: const NAMES: [&str; 11] = [\"children_left\", \"children_right\", \"feature\", \"threshold\", \"impurity\", \"n_node_samples\", \"weighted_n_node_samples\", \"missing_go_to_left\", \"value\", \"importances\", \"apply\"]; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/oracle_tests.rs :: every_tree_matches_scikit_learn :: diff.push(\"max_depth\"); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/oracle_tests.rs :: every_tree_matches_scikit_learn :: i8s(&tree.children_left), i8s(&tree.children_right), i8s(&tree.feature), f8s(&tree.threshold), f8s(&tree.impurity), #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/oracle_tests.rs :: every_tree_matches_scikit_learn :: if tree.max_depth != max_depth_seen { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/oracle_tests.rs :: every_tree_matches_scikit_learn :: let (node_count, max_depth_seen): (usize, i64) = (c[13].parse().unwrap(), c[14].parse().unwrap()); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/oracle_tests.rs :: every_tree_matches_scikit_learn :: let max_depth: u64 = c[5].parse().unwrap(); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/oracle_tests.rs :: every_tree_matches_scikit_learn :: let max_features: usize = c[9].parse().unwrap(); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/oracle_tests.rs :: every_tree_matches_scikit_learn :: let mut sp = Splitter::new(input, *n, crit, max_features, msl, mwl, seed).unwrap(); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/oracle_tests.rs :: every_tree_matches_scikit_learn :: let tree = build(input, &mut sp, &Params { max_depth, min_samples_split: mss, min_samples_leaf: msl, min_weight_leaf: mwl, min_impurity_decrease: mid }).unwrap(); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
  },
  "engine/skltree/src/partition.rs :: partition_samples_final :: let go_to_left = if current_value.is_nan() { missing_go_to_left } else { f64::from(current_value) <= threshold }; #0": {
   "class": "none",
@@ -3910,6 +4033,206 @@
   "class": "none",
   "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
   "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/splitter.rs ::  :: pub threshold: f64, #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/splitter.rs :: new :: SplitRecord { feature: 0, pos: start_pos, threshold: 0.0, improvement: f64::NEG_INFINITY, impurity_left: f64::INFINITY, impurity_right: f64::INFINITY, missing_go_to_left: false } #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/splitter.rs :: new :: max_features, #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/splitter.rs :: new :: pub fn new(input: Inputs, n: usize, criterion: Criterion, max_features: usize, min_samples_leaf: usize, min_weight_leaf: f64, seed: u32) -> Result<Self, Error> { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/splitter.rs :: new :: pub max_features: usize, #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/splitter.rs :: node_split :: current.threshold = if p == end_non_missing && !missing_go_to_left { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/splitter.rs :: node_split :: self.part.partition_samples_final(input.x, input.f, best.threshold, best.feature, best.missing_go_to_left); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/splitter.rs :: node_split :: while f_i > n_total_constants && (n_visited_features < self.max_features || n_visited_features <= n_found_constants + n_drawn_constants) { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/tree.rs ::  :: pub max_depth: i64, #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/tree.rs ::  :: pub threshold: Vec<f64>, #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/tree.rs :: add_node :: pub max_depth: u64, #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/tree.rs :: add_node :: self.threshold.push(TREE_UNDEFINED as f64); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/tree.rs :: add_node :: self.threshold.push(split.threshold); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/tree.rs :: apply :: } else if f64::from(v) <= tree.threshold[node] { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/tree.rs :: build :: if r.depth as i64 > max_depth_seen { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/tree.rs :: build :: let capacity = node_bound(splitter.n_samples, p.max_depth, p.min_samples_leaf); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "skltree-footprint"
+   }
+  },
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "a fit's admitted memory: its bytes bound (fit_bytes, from node_bound: the most nodes a tree on n samples can have under max_depth and min_samples_leaf) charged page-rounded against the kernel's footprint bound B before the fit; MemoryError through memoryGuard (design note sklearn-trees r3 section 6)"
+ },
+ "engine/skltree/src/tree.rs :: build :: let mut is_leaf = r.depth >= p.max_depth #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/tree.rs :: build :: let mut max_depth_seen: i64 = -1; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/tree.rs :: build :: max_depth_seen = r.depth as i64; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/tree.rs :: build :: reserve(&mut stack, (p.max_depth.min(splitter.n_samples as u64) as usize).saturating_add(2).min(capacity + 1))?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "skltree-footprint"
+   }
+  },
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "a fit's admitted memory: its bytes bound (fit_bytes, from node_bound: the most nodes a tree on n samples can have under max_depth and min_samples_leaf) charged page-rounded against the kernel's footprint bound B before the fit; MemoryError through memoryGuard (design note sklearn-trees r3 section 6)"
+ },
+ "engine/skltree/src/tree.rs :: build :: tree.max_depth = max_depth_seen; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/tree.rs :: bytes :: 8 * (self.children_left.capacity() + self.children_right.capacity() + self.feature.capacity() + self.threshold.capacity() + self.impurity.capacity() + self.n_node_samples.capacity() + self.weighted_n_node_samples.capacity() + self.value.capacity()) + self.missing_go_to_left.capacity() #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/tree.rs :: node_bound :: bound = bound.min((1usize << (max_depth + 1)) - 1); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "skltree-footprint"
+   }
+  },
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "a fit's admitted memory: its bytes bound (fit_bytes, from node_bound: the most nodes a tree on n samples can have under max_depth and min_samples_leaf) charged page-rounded against the kernel's footprint bound B before the fit; MemoryError through memoryGuard (design note sklearn-trees r3 section 6)"
+ },
+ "engine/skltree/src/tree.rs :: node_bound :: if max_depth < 62 { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "skltree-footprint"
+   }
+  },
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "a fit's admitted memory: its bytes bound (fit_bytes, from node_bound: the most nodes a tree on n samples can have under max_depth and min_samples_leaf) charged page-rounded against the kernel's footprint bound B before the fit; MemoryError through memoryGuard (design note sklearn-trees r3 section 6)"
+ },
+ "engine/skltree/src/tree.rs :: node_bound :: pub fn node_bound(n_eff: usize, max_depth: u64, min_samples_leaf: usize) -> usize { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "skltree-footprint"
+   }
+  },
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "a fit's admitted memory: its bytes bound (fit_bytes, from node_bound: the most nodes a tree on n samples can have under max_depth and min_samples_leaf) charged page-rounded against the kernel's footprint bound B before the fit; MemoryError through memoryGuard (design note sklearn-trees r3 section 6)"
+ },
+ "engine/skltree/src/tree.rs :: with_capacity :: reserve(&mut t.threshold, capacity)?; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/wasm.rs :: skt_fit :: max_depth: int(max_depth)?, #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/wasm.rs :: skt_fit :: max_features: int(max_features)? as usize, #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/wasm.rs :: skt_fit :: pub extern \"C\" fn skt_fit(ds: u32, sw: u32, classes: u32, kind: u32, max_depth: f64, min_samples_split: f64, min_samples_leaf: f64, min_weight_leaf: f64, max_features: f64, min_impurity_decrease: f64, seed: u32) -> i32 { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/wasm.rs :: skt_fit_bytes :: (|| crate::fit::fit_bytes(int(n)?, int(f)?, int(n_outputs)?, int(stride)?, int(max_depth)?, int(min_samples_leaf)?))().map_or(-1.0, |b| b as f64) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "skltree-footprint"
+   }
+  },
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "a fit's admitted memory: its bytes bound (fit_bytes, from node_bound: the most nodes a tree on n samples can have under max_depth and min_samples_leaf) charged page-rounded against the kernel's footprint bound B before the fit; MemoryError through memoryGuard (design note sklearn-trees r3 section 6)"
+ },
+ "engine/skltree/src/wasm.rs :: skt_fit_bytes :: pub extern \"C\" fn skt_fit_bytes(n: f64, f: f64, n_outputs: f64, stride: f64, max_depth: f64, min_samples_leaf: f64) -> f64 { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "skltree-footprint"
+   }
+  },
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "a fit's admitted memory: its bytes bound (fit_bytes, from node_bound: the most nodes a tree on n samples can have under max_depth and min_samples_leaf) charged page-rounded against the kernel's footprint bound B before the fit; MemoryError through memoryGuard (design note sklearn-trees r3 section 6)"
+ },
+ "engine/skltree/src/wasm.rs :: skt_tree_array :: 3 => tree.threshold.as_ptr() as usize, #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "engine/skltree/src/wasm.rs :: skt_tree_info :: 1 => tree.max_depth as f64, #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
  },
  "engine/sym/src/definite.rs :: endpoints :: .or_else(|_| crate::limit::try_limit(&crate::rewrite::simplify_log(big_f), x, pt, dir)) #0": {
   "class": "none",
@@ -13970,7 +14293,7 @@
   "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
   "reason": "the decision-tree kernel's footprint bound B = min(4 GiB, ARRAY_LIMITS.bytes, the engine's E), retired debt included (fails closed on an inexact sum): MemoryError through memoryGuard before anything is made (design note sklearn-trees r3 section 6)"
  },
- "src/runtime/skltree.ts ::  :: import { ARRAY_LIMITS, NDArray } from \"./numpy\"; #0": {
+ "src/runtime/skltree.ts ::  :: import { ARRAY_LIMITS, NDArray, empty, toDtype } from \"./numpy\"; #0": {
   "class": "2",
   "disposition": {
    "2": {
@@ -13978,7 +14301,42 @@
    }
   },
   "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
-  "reason": "the decision-tree kernel's footprint bound B = min(4 GiB, ARRAY_LIMITS.bytes, the engine's E), retired debt included (fails closed on an inexact sum): MemoryError through memoryGuard before anything is made (design note sklearn-trees r3 section 6)"
+  "reason": "a fit's admitted memory: its bytes bound (fit_bytes, from node_bound: the most nodes a tree on n samples can have under max_depth and min_samples_leaf) charged page-rounded against the kernel's footprint bound B before the fit; MemoryError through memoryGuard (design note sklearn-trees r3 section 6)"
+ },
+ "src/runtime/skltree.ts :: apply :: const F = storage(arrayArg(\"feature\", feature, [\"int64\"], 1, \"(node_count,)\")), T = storage(arrayArg(\"threshold\", threshold, [\"float64\"], 1, \"(node_count,)\")); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "src/runtime/skltree.ts :: apply :: function apply(left: any, right: any, feature: any, threshold: any, mgl: any, X: any): any { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "src/runtime/skltree.ts :: fit :: function fit(token: any, sampleWeight: any, nClasses: any, criterion: any, maxDepth: any, minSamplesSplit: any, minSamplesLeaf: any, minWeightLeaf: any, maxFeatures: any, minImpurityDecrease: any, seed: any): any { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "src/runtime/skltree.ts :: floats :: Obj.dictSet(d, \"max_depth\", maxDepth); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "src/runtime/skltree.ts :: floats :: Obj.dictSet(d, \"threshold\", floats(3, [nodes])); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "src/runtime/skltree.ts :: num :: const md = maxDepth === null || maxDepth === undefined ? 2 ** 31 - 1 : num(maxDepth); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "src/runtime/skltree.ts :: num :: const t = guarded(k, what, () => k.skt_fit(key.h, sw, cls, kind, md, num(minSamplesSplit), num(minSamplesLeaf), num(minWeightLeaf), num(maxFeatures), num(minImpurityDecrease), num(seed) >>> 0)); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
  },
  "src/runtime/skltree.ts :: skltreeBound :: const arr = BigInt(ARRAY_LIMITS.bytes), e = moduleAllowance(); #0": {
   "class": "2",
@@ -13989,6 +14347,36 @@
   },
   "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
   "reason": "the decision-tree kernel's footprint bound B = min(4 GiB, ARRAY_LIMITS.bytes, the engine's E), retired debt included (fails closed on an inexact sum): MemoryError through memoryGuard before anything is made (design note sklearn-trees r3 section 6)"
+ },
+ "src/runtime/skltree.ts :: state :: m.apply = Obj.builtin(apply, \"apply\", Obj.sig([\"children_left\", \"children_right\", \"feature\", \"threshold\", \"missing_go_to_left\", \"X\"])); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "src/runtime/skltree.ts :: state :: m.fit = Obj.builtin(fit, \"fit\", Obj.sig([\"dataset\", \"sample_weight\", \"n_classes\", \"criterion\", \"max_depth\", \"min_samples_split\", \"min_samples_leaf\", \"min_weight_leaf\", \"max_features\", \"min_impurity_decrease\", \"seed\"])); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "src/runtime/skltree.ts :: toNum :: skt_fit(ds: number, sw: number, classes: number, kind: number, maxDepth: number, minSamplesSplit: number, minSamplesLeaf: number, minWeightLeaf: number, maxFeatures: number, minImpurityDecrease: number, seed: number): number; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
+ },
+ "src/runtime/skltree.ts :: toNum :: skt_fit_bytes(n: number, f: number, nOutputs: number, stride: number, maxDepth: number, minSamplesLeaf: number): number; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "skltree-footprint"
+   }
+  },
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "a fit's admitted memory: its bytes bound (fit_bytes, from node_bound: the most nodes a tree on n samples can have under max_depth and min_samples_leaf) charged page-rounded against the kernel's footprint bound B before the fit; MemoryError through memoryGuard (design note sklearn-trees r3 section 6)"
+ },
+ "src/runtime/skltree.ts :: treeOut :: const nodes = k.skt_tree_info(t, 0), maxDepth = k.skt_tree_info(t, 1), o = k.skt_tree_info(t, 2), stride = k.skt_tree_info(t, 3), f = k.skt_tree_info(t, 4); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters and arrays by their names (max_depth, max_features, threshold) and their tests: the reference's own logic, ported line by line; nothing here refuses anything"
  },
  "src/runtime/types.ts :: flush :: if (size > MAX_STR) raise(T.MemoryError); #0": {
   "class": "2",

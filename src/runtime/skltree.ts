@@ -31,8 +31,12 @@ import * as O from "./ops";
 import { memoryGuard, newBuiltinModule } from "./modules";
 import { INTR, INTR_CTRL_C } from "./interrupt";
 import { initialMemory, moduleAllowance } from "./engine";
-import { ARRAY_LIMITS, NDArray } from "./numpy";
+import { ARRAY_LIMITS, NDArray, empty, toDtype } from "./numpy";
 import { RetiredDebt } from "./retired-debt";
+import { floatCall } from "./types";
+
+// a Python number (int, bool, float, a numpy scalar) as a JS number
+const toNum = (v: any): number => O.fv(v) ?? (O.fv(floatCall(v)) as number);
 
 interface Kernel {
   memory: WebAssembly.Memory;
@@ -45,6 +49,14 @@ interface Kernel {
   skt_detail_row(): number;
   skt_detail_col(): number;
   skt_live_bytes(): number;
+  skt_buffer_new(len: number): number;
+  skt_buffer_ptr(h: number): number;
+  skt_buffer_release(h: number): number;
+  skt_fit(ds: number, sw: number, classes: number, kind: number, maxDepth: number, minSamplesSplit: number, minSamplesLeaf: number, minWeightLeaf: number, maxFeatures: number, minImpurityDecrease: number, seed: number): number;
+  skt_tree_info(h: number, what: number): number;
+  skt_tree_array(h: number, which: number): number;
+  skt_tree_release(h: number): number;
+  skt_fit_bytes(n: number, f: number, nOutputs: number, stride: number, maxDepth: number, minSamplesLeaf: number): number;
   skt_begin(pages: number): void;
   skt_last_refusal(): number;
 }
@@ -70,12 +82,15 @@ let gen = 0;
 // the live instance's datasets: handle -> bytes
 const live = new Map<number, number>();
 const debt = new RetiredDebt();
-// the JS bytes this module holds (staging, a copy out in flight): none in this part
-const held = 0;
+// the JS bytes this module holds: a fitted tree's arrays while they are copied out, until numpy owns them
+let held = 0;
 
 interface Key {
   gen: number;
   h: number;
+  n: number;
+  f: number;
+  o: number;
 }
 // the tokens dataset() returned (an object() each: unforgeable), and their datasets
 const tokens = new WeakMap<object, Key>();
@@ -116,8 +131,9 @@ function check(what: string, committed: number, grow: bigint) {
   if (need > b) memoryGuard(what, need, b, WHO);
 }
 
-/** The pages a growth of `bytes` is charged: rounded up, plus the allocator's own rounding. */
-const pagesFor = (bytes: bigint): bigint => (bytes + BigInt(PAGE - 1)) / BigInt(PAGE) + BigInt(SLACK_PAGES);
+/** The pages a growth of `bytes` is charged: rounded up, plus the allocator's own rounding (a page an allocation
+ * for `allocations` of them, at least SLACK_PAGES). */
+const pagesFor = (bytes: bigint, allocations = SLACK_PAGES): bigint => (bytes + BigInt(PAGE - 1)) / BigInt(PAGE) + BigInt(Math.max(SLACK_PAGES, allocations));
 
 function kernel(): Kernel {
   if (K) return K;
@@ -147,8 +163,8 @@ function retire() {
 }
 
 /** Admit a growth of `bytes` in the live instance and bound its heap to exactly what was charged. */
-function admit(k: Kernel, what: string, bytes: bigint) {
-  const pages = pagesFor(bytes);
+function admit(k: Kernel, what: string, bytes: bigint, allocations = SLACK_PAGES) {
+  const pages = pagesFor(bytes, allocations);
   check(what, k.memory.buffer.byteLength, pages * BigInt(PAGE));
   k.skt_begin(Number(pages));
 }
@@ -272,7 +288,7 @@ function dataset(X: any, y: any, mask: any = null): any {
   }
   live.set(h, Number(bytes));
   const token = Obj.callObj(Obj.T.object, []);
-  const key = { gen, h };
+  const key = { gen, h, n, f, o };
   tokens.set(token, key);
   finalizer?.register(token, key, token);
   return token;
@@ -287,6 +303,153 @@ function release(token: any): null {
   finalizer?.unregister(token);
   releaseKey(key);
   return null;
+}
+
+/** A token's key when its dataset is usable; else the call's ValueError. */
+function usableKey(token: any): Key {
+  const key = token !== null && typeof token === "object" ? tokens.get(token) : undefined;
+  if (key === undefined || K === null || key.gen !== gen || !live.has(key.h))
+    return Obj.raise(Obj.T.ValueError, "this dataset can't be used: it was released, or a Stop retired the decision-tree kernel it lived in");
+  return key;
+}
+
+const KINDS: Record<string, number> = { gini: 0, entropy: 1, log_loss: 1, squared_error: 2 };
+// (a fit's allocations, for the allocator's rounding: the weights' and counts' buffers, the splitter's five, the
+// criterion's three, the stack, the tree's nine arrays, the importances, the table's node)
+const FIT_ALLOCATIONS = 24;
+
+/** A float64 copy of a 1-D array or list of numbers, in a buffer of the kernel's: its handle (0 for None). */
+function bufferIn(k: Kernel, what: string, values: any, len: number): number {
+  if (values === null || values === undefined) return 0;
+  const src: Float64Array = values instanceof NDArray ? Float64Array.from(storage(values)) : Float64Array.from(O.toArray(values).map((v: any) => toNum(v)));
+  if (src.length !== len) Obj.raise(Obj.T.ValueError, `${what} has ${src.length} entries; ${len} expected`);
+  const h = guarded(k, what, () => k.skt_buffer_new(len));
+  if (h < 0) refused(k, what);
+  try {
+    copyIn(new Float64Array(k.memory.buffer, at(k.skt_buffer_ptr(h)), len), src);
+  } catch (e) {
+    // (a Stop between chunks: the buffer goes with the call)
+    if (K === k) k.skt_buffer_release(h);
+    throw e;
+  }
+  return h;
+}
+
+/** Copy a fitted tree's arrays out as numpy arrays (the int64 ones exact: every value is far below 2**53). */
+function treeOut(k: Kernel, t: number): any {
+  const nodes = k.skt_tree_info(t, 0), maxDepth = k.skt_tree_info(t, 1), o = k.skt_tree_info(t, 2), stride = k.skt_tree_info(t, 3), f = k.skt_tree_info(t, 4);
+  // (the copies out are held by this module until numpy owns them: charged with the tree still in the module)
+  const jsBytes = nodes * (8 * 7 + 1) + nodes * o * stride * 8 + f * 8;
+  check("A fitted tree's copy out", k.memory.buffer.byteLength, BigInt(jsBytes));
+  held += jsBytes;
+  try {
+    const b = k.memory.buffer;
+    const ints = (which: number) => {
+      const a = empty([nodes], toDtype("int64")), src = new BigInt64Array(b, at(k.skt_tree_array(t, which)), nodes);
+      for (let i = 0; i < nodes; i++) {
+        a.data[i] = Number(src[i]);
+        if ((i & 4095) === 4095) O.pollInterrupt();
+      }
+      return a;
+    };
+    const floats = (which: number, shape: number[]) => {
+      const a = empty(shape, toDtype("float64"));
+      copyIn(a.data, new Float64Array(b, at(k.skt_tree_array(t, which)), a.size));
+      return a;
+    };
+    const mgl = empty([nodes], toDtype("uint8"));
+    copyIn(mgl.data, new Uint8Array(b, at(k.skt_tree_array(t, 7)), nodes));
+    const d = new Obj.PyDict();
+    Obj.dictSet(d, "children_left", ints(0));
+    Obj.dictSet(d, "children_right", ints(1));
+    Obj.dictSet(d, "feature", ints(2));
+    Obj.dictSet(d, "threshold", floats(3, [nodes]));
+    Obj.dictSet(d, "impurity", floats(4, [nodes]));
+    Obj.dictSet(d, "n_node_samples", ints(5));
+    Obj.dictSet(d, "weighted_n_node_samples", floats(6, [nodes]));
+    Obj.dictSet(d, "missing_go_to_left", mgl);
+    Obj.dictSet(d, "value", floats(8, [nodes, o, stride]));
+    Obj.dictSet(d, "importances", floats(9, [f]));
+    Obj.dictSet(d, "node_count", nodes);
+    Obj.dictSet(d, "max_depth", maxDepth);
+    return d;
+  } finally {
+    // (numpy owns the arrays now: they leave this module's count)
+    held -= jsBytes;
+  }
+}
+
+const FIT_ERRORS: Record<number, string> = {
+  [-9]: "the tree's parameters are out of range",
+  [-1]: "the tree's sizes overflow",
+};
+
+/** Fit one tree on a dataset: the tree's arrays, as `tree_` holds them, and the raw importances. */
+function fit(token: any, sampleWeight: any, nClasses: any, criterion: any, maxDepth: any, minSamplesSplit: any, minSamplesLeaf: any, minWeightLeaf: any, maxFeatures: any, minImpurityDecrease: any, seed: any): any {
+  const key = usableKey(token);
+  const kind = KINDS[String(criterion)];
+  if (kind === undefined) Obj.raise(Obj.T.ValueError, `criterion must be one of gini, entropy, log_loss or squared_error, not ${String(criterion)}`);
+  const num = (v: any) => (v === null || v === undefined ? NaN : toNum(v));
+  const classes: number[] | null = kind === 2 ? null : O.toArray(nClasses).map((v: any) => toNum(v));
+  if (classes !== null && classes.length !== key.o) Obj.raise(Obj.T.ValueError, `n_classes has ${classes.length} entries; y has ${key.o} outputs`);
+  const stride = classes === null ? 1 : Math.max(...classes);
+  const md = maxDepth === null || maxDepth === undefined ? 2 ** 31 - 1 : num(maxDepth);
+  const what = `Fitting a tree on ${key.n} samples by ${key.f} features`;
+  const k = K!;
+  const fb = k.skt_fit_bytes(key.n, key.f, key.o, stride, md, num(minSamplesLeaf));
+  if (fb < 0) memoryGuard(what, 2n ** 64n, skltreeBound(), WHO);
+  admit(k, what, BigInt(fb) + 8n * BigInt(key.n + key.o), FIT_ALLOCATIONS);
+  const sw = bufferIn(k, "sample_weight", sampleWeight, key.n);
+  let cls = 0;
+  try {
+    cls = classes === null ? 0 : bufferIn(k, "n_classes", classes, key.o);
+  } catch (e) {
+    // (the weights' buffer goes with the call: skt_fit, which consumes the buffers, wasn't reached)
+    if (K === k && sw) k.skt_buffer_release(sw);
+    throw e;
+  }
+  const t = guarded(k, what, () => k.skt_fit(key.h, sw, cls, kind, md, num(minSamplesSplit), num(minSamplesLeaf), num(minWeightLeaf), num(maxFeatures), num(minImpurityDecrease), num(seed) >>> 0));
+  if (t < 0) {
+    if (t === -2) refused(k, what);
+    const row = k.skt_detail_row(), col = k.skt_detail_col();
+    if (t === -10) Obj.raise(Obj.T.ValueError, `y holds something other than a class index in row ${row}, output ${col}`);
+    if (t === -11) Obj.raise(Obj.T.ValueError, "sample_weight holds a value that isn't finite, or every weight is zero");
+    Obj.raise(t in FIT_ERRORS ? Obj.T.ValueError : Obj.T.SystemError, FIT_ERRORS[t] ?? `the decision-tree kernel refused the fit (${t})`);
+  }
+  try {
+    return treeOut(k, t);
+  } finally {
+    if (K === k) k.skt_tree_release(t);
+  }
+}
+
+/** apply(children_left, children_right, feature, threshold, missing_go_to_left, X): each row's leaf, as
+ * scikit-learn's Tree._apply_dense: the float32 value (a JS number: widened to float64, exactly) compared `<=`
+ * with the float64 threshold; NaN follows missing_go_to_left. */
+function apply(left: any, right: any, feature: any, threshold: any, mgl: any, X: any): any {
+  const x = arrayArg("X", X, ["float32"], 2, "(n_samples, n_features)");
+  const L = storage(arrayArg("children_left", left, ["int64"], 1, "(node_count,)")), R = storage(arrayArg("children_right", right, ["int64"], 1, "(node_count,)"));
+  const F = storage(arrayArg("feature", feature, ["int64"], 1, "(node_count,)")), T = storage(arrayArg("threshold", threshold, ["float64"], 1, "(node_count,)"));
+  const M = storage(arrayArg("missing_go_to_left", mgl, ["uint8"], 1, "(node_count,)"));
+  const nodes = L.length;
+  if (R.length !== nodes || F.length !== nodes || T.length !== nodes || M.length !== nodes || nodes === 0) Obj.raise(Obj.T.ValueError, "the tree's arrays must have one entry a node");
+  const [m, f] = x.shape;
+  const xs = storage(x);
+  const out = empty([m], toDtype("int64"));
+  let steps = 0;
+  for (let i = 0; i < m; i++) {
+    let node = 0;
+    while (L[node] !== -1) {
+      const j = F[node];
+      // (a malformed tree can't send the walk outside its arrays)
+      if (!(j >= 0 && j < f) || !(L[node] > node && L[node] < nodes && R[node] > node && R[node] < nodes)) Obj.raise(Obj.T.ValueError, "the tree's arrays don't form a tree");
+      const v = xs[i * f + j];
+      node = v !== v ? (M[node] ? L[node] : R[node]) : v <= T[node] ? L[node] : R[node];
+      if ((++steps & 4095) === 0) O.pollInterrupt();
+    }
+    out.data[i] = node;
+  }
+  return out;
 }
 
 /** Whether a token's dataset is usable (live, in the live instance). */
@@ -305,6 +468,8 @@ newBuiltinModule("_skltree", (m) => {
   m.dataset = Obj.builtin(dataset, "dataset", Obj.sig(["X", "y", "missing_mask"]));
   m.release = Obj.builtin(release, "release");
   m.usable = Obj.builtin(usable, "usable");
+  m.fit = Obj.builtin(fit, "fit", Obj.sig(["dataset", "sample_weight", "n_classes", "criterion", "max_depth", "min_samples_split", "min_samples_leaf", "min_weight_leaf", "max_features", "min_impurity_decrease", "seed"]));
+  m.apply = Obj.builtin(apply, "apply", Obj.sig(["children_left", "children_right", "feature", "threshold", "missing_go_to_left", "X"]));
   m._state = Obj.builtin(state, "_state");
   m._test_bound = Obj.builtin((bytes: any) => ((testBound = bytes === null ? null : BigInt(bytes)), null), "_test_bound");
 });
