@@ -2,7 +2,9 @@
 // The agents page's resizable columns (William A1 + A10; the layout plan r3, PR 2): the chat list and the artifact
 // pane are dragged or moved with the keys, clamped so the chat keeps 420 px and the pane 320, re-clamped on a resize
 // and when the pane opens, kept in localStorage only in a valid shape, and left alone by the narrow overlay and full
-// screen. Copy chat and a message's Copy put Markdown on the clipboard (C-copy-*).
+// screen. Copy chat and a message's Copy put Markdown on the clipboard (C-copy-*). Switching between Files and Agents
+// moves no edge (#1808, M-*): the chat list is the files panel's width, its header row theirs, the top bar the files'
+// header's height, no banner above; the status's popover says what the banner said.
 // The scripted agent (no pairing) opens a code artifact ("plot a Fourier series"); notebooks are
 // test-agents-artifacts.mjs's (A10 there: opening a notebook leaves the pane width as it was).
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/agents/test-agents-layout.mjs
@@ -100,8 +102,8 @@ try {
   const key = async (k) => { for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: k, code: k }); await sleep(80); };
   const near = (a, b) => Math.abs(a - b) < 1;
 
-  // ---- the sidebar's clamps (1600 px, no pane: 180-480)
-  for (const [id, x, want] of [["L2-side-179", 179, 180], ["L2-side-180", 180, 180], ["L2-side-480", 480, 480], ["L2-side-481", 481, 480]]) {
+  // ---- the sidebar's clamps (1600 px, no pane: 200-640, the files panel's)
+  for (const [id, x, want] of [["L2-side-199", 199, 200], ["L2-side-200", 200, 200], ["L2-side-640", 640, 640], ["L2-side-641", 641, 640]]) {
     await fresh(1600);
     await drag("sep-side", x);
     const m = await w();
@@ -136,7 +138,7 @@ try {
     ok(id, near(m.pane, 320), `the pane dragged to ${pane} px is 320 px wide`, m);
   }
 
-  // ---- too narrow for 180 + 420 + 320 beside an open pane: the chat list collapses (910 px)
+  // ---- too narrow for 200 + 420 + 320 beside an open pane: the chat list collapses (910 px)
   await fresh(910);
   await openPane();
   {
@@ -152,12 +154,12 @@ try {
     const a = await w(), aa = await aria("sep-side");
     await key("ArrowLeft");
     const b = await w(), ba = await aria("sep-side");
-    ok("L2-key-arrows", near(a.side, 266) && aa.now === "266" && near(b.side, 250) && ba.now === "250", "the arrows move the chat list's edge 16 px, and aria-valuenow follows", { a, aa, b, ba });
+    ok("L2-key-arrows", near(a.side, 288) && aa.now === "288" && near(b.side, 272) && ba.now === "272", "the arrows move the chat list's edge 16 px, and aria-valuenow follows", { a, aa, b, ba });
     await key("Home");
     const h = await w(), ha = await aria("sep-side");
     await key("End");
     const e = await w(), ea = await aria("sep-side");
-    ok("L2-key-home-end", near(h.side, 180) && ha.now === "180" && near(e.side, 480) && ea.now === "480", "Home and End take the chat list to 180 and 480 px", { h, ha, e, ea });
+    ok("L2-key-home-end", near(h.side, 200) && ha.now === "200" && near(e.side, 640) && ea.now === "640", "Home and End take the chat list to 200 and 640 px", { h, ha, e, ea });
   }
   await fresh(1600);
   await openPane();
@@ -171,7 +173,7 @@ try {
   await openPane();
   {
     const m = await w(), ap = await aria("sep-pane");
-    ok("L2-aria-clamped", near(m.pane, 330) && ap.now === "330", "the default pane re-clamped to keep the chat at 420 px: aria-valuenow is the width shown (330)", { m, ap });
+    ok("L2-aria-clamped", near(m.pane, 320) && ap.now === "320" && m.chat >= 419.5, "the default pane re-clamped to keep the chat at 420 px: aria-valuenow is the width shown (320)", { m, ap });
   }
 
   // ---- pointer capture: a drag that ends far from the handle
@@ -214,7 +216,7 @@ try {
     await fresh(1600, { stored: raw });
     await openPane();
     const m = await w();
-    ok(id, near(m.side, 250) && near(m.pane, 736) && exceptions.length === 0, `stored ${raw}: the defaults (250, 736 px), no page exception`, { m, exceptions });
+    ok(id, near(m.side, 272) && near(m.pane, 736) && exceptions.length === 0, `stored ${raw}: the defaults (272, 736 px), no page exception`, { m, exceptions });
   }
   // (storage that throws for this key: the page mounts and the drag works)
   {
@@ -364,6 +366,73 @@ try {
     await ev(`document.querySelector('#send-now').click()`);
     const stopped = await until(`[...document.querySelectorAll('.status')].some((x) => x.textContent === 'Interrupted')`, 10000).then(() => true, () => false);
     ok("Q5-send-now", stopped, "Send now interrupts the turn and sends", await state());
+  }
+  // ---- Files <-> Agents (#1808): nothing moves. The same edge, header row, top bar height and wordmark in both modes,
+  //      switched by the switch itself, there and back; no banner above the Agents page
+  {
+    const FW = "sagebrush-files-width";
+    const filesShown = `!!document.querySelector('#wssidebar:not([hidden]) .sbfiles .fh .sb-mode') && !!document.querySelector('header .title')`;
+    const agentsShown = `document.readyState === 'complete' && !!document.querySelector('#editor .mb') && document.getElementById('sep-side').hasAttribute('aria-valuenow')`;
+    const r = (s) => `(() => { const b = document.querySelector(${JSON.stringify(s)})?.getBoundingClientRect(); return b ? [b.left, b.top, b.width, b.height].map(Math.round) : null; })()`;
+    const filesRects = async () => ({ edge: (await ev(r("#wssidebar")))?.[2], sw: await ev(r("#wssidebar .sb-mode")), toggle: await ev(r(".sb-files-toggle")), label: await ev(r(".sbfiles .fh > b")), top: (await ev(r("header")))?.[3], word: (await ev(r("header .title")))?.[0] });
+    const agentsRects = async () => ({ edge: (await ev(r("nav.side")))?.[2], sw: await ev(r("nav.side .sb-mode")), toggle: await ev(r("#sidetoggle")), label: await ev(r("nav.side .brand-name")), top: (await ev(r(".top")))?.[3], word: (await ev(r(".top .wordmark")))?.[0], sideTop: (await ev(r("nav.side")))?.[1], banner: await ev(`!!document.querySelector('#banner, .banner')`) });
+    const same = (f, a) => f.edge === a.edge && JSON.stringify(f.sw) === JSON.stringify(a.sw) && JSON.stringify(f.toggle) === JSON.stringify(a.toggle) && Math.abs(f.label[0] - a.label[0]) <= 1 && Math.abs((f.label[1] + f.label[3] / 2) - (a.label[1] + a.label[3] / 2)) <= 1 && f.top === a.top && f.word === a.word;
+    await fresh(1400);
+    await ev(`(localStorage.setItem("sagebrush-files-sidebar", "1"), true)`);
+    await send("Page.navigate", { url: `${origin}/` });
+    await until(filesShown, 60000);
+    await sleep(500);
+    const f0 = await filesRects();
+    await ev(`(document.querySelector('#wssidebar .sb-mode [data-mode="agents"]').click(), true)`);
+    await until(`location.pathname === '/agents/'`, 20000);
+    await until(agentsShown, 30000);
+    await sleep(500);
+    const a = await agentsRects();
+    ok("M-files-to-agents", same(f0, a) && a.edge === 272 && a.sideTop === 0 && !a.banner, "Files -> Agents by the switch: the panel's edge (272 px), the switch, the toggle, the panel's name, the top bar's height and the wordmark stay where they were; no banner", { f0, a });
+    await ev(`(document.querySelector('nav.side .sb-mode [data-mode="files"]').click(), true)`);
+    await until(`location.pathname === '/'`, 20000);
+    await until(filesShown, 60000);
+    await sleep(500);
+    const f1 = await filesRects();
+    ok("M-agents-to-files", JSON.stringify(f1) === JSON.stringify(f0), "and Agents -> Files puts the files back exactly as they were", { f0, f1 });
+
+    // (one width for both: a drag of the chat list's edge is the files' width; the files' width is the chat list's)
+    await fresh(1400);
+    await drag("sep-side", 360);
+    const kept = await ev(`localStorage.getItem(${JSON.stringify(FW)})`);
+    await ev(`(localStorage.setItem("sagebrush-files-sidebar", "1"), true)`);
+    await send("Page.navigate", { url: `${origin}/` });
+    await until(filesShown, 60000);
+    await sleep(500);
+    const fw = (await ev(r("#wssidebar")))?.[2];
+    ok("M-width-to-files", kept === "360" && fw === 360, "the chat list dragged to 360 px: the files open 360 px wide", { kept, fw });
+    await ev(`(localStorage.setItem(${JSON.stringify(FW)}, "300"), true)`);
+    await send("Page.navigate", { url: `${origin}/agents/` });
+    await until(agentsShown, 30000);
+    await sleep(300);
+    const aw = (await ev(r("nav.side")))?.[2];
+    ok("M-width-from-files", aw === 300, "the files' width (300 px) is the chat list's", { aw });
+    // (a width this page kept before they shared one, and none for the files yet: it stays, and becomes the files')
+    await fresh(1400, { stored: '{"side":330,"pane":600}' });
+    const mig = { side: (await ev(r("nav.side")))?.[2], files: await ev(`localStorage.getItem(${JSON.stringify(FW)})`) };
+    ok("M-width-migrated", mig.side === 330 && mig.files === "330", "a chat list width kept before (330 px) stays, and the files take it", mig);
+
+    // (the status's popover: what the banner said; the status opens it, Escape and a click elsewhere close it)
+    await fresh(1400);
+    const pop = () => ev(`(() => { const w = document.querySelector('#who'), i = document.querySelector('#who-info'); return { shown: !i.hidden && i.getBoundingClientRect().height > 0, expanded: w.getAttribute('aria-expanded'), text: i.textContent, focus: document.activeElement === w, below: i.getBoundingClientRect().top >= document.querySelector('.top').getBoundingClientRect().bottom }; })()`);
+    const p0 = await pop();
+    await ev(`(document.querySelector('#who').click(), true)`);
+    const p1 = await pop();
+    ok("M-popover-open", !p0.shown && p0.expanded === "false" && p1.shown && p1.expanded === "true" && p1.below && /scripted/.test(p1.text) && p1.text.endsWith("Chats are kept in this browser only."), "the status opens its popover, under the top bar: the scripted preview, and where the chats are kept", { p0, p1 });
+    await key("Escape");
+    const p2 = await pop();
+    ok("M-popover-escape", !p2.shown && p2.expanded === "false" && p2.focus, "Escape closes it, back to the status", p2);
+    await ev(`(document.querySelector('#who').click(), true)`);
+    const [lx, ly] = await ev(`(() => { const b = document.querySelector('#log').getBoundingClientRect(); return [b.left + b.width / 2, b.bottom - 40]; })()`);
+    for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: lx, y: ly, button: "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: 1 });
+    await sleep(100);
+    const p3 = await pop();
+    ok("M-popover-away", !p3.shown && p3.expanded === "false", "a click elsewhere closes it", p3);
   }
   console.log(`${checks - fails}/${checks} passed${fails ? "" : ", all passed"}`);
   code = fails ? 1 : 0;

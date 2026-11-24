@@ -246,7 +246,7 @@ const mirror = new Mirror({
   changed: () => {
     renderSidebar();
     renderMirrorSettings();
-    renderHeader(); // (the banner says where the chats are kept)
+    renderHeader(); // (the status's popover says where the chats are kept)
   },
 });
 /** The mirrored conversation shown instead of a thread of this browser's, or null. */
@@ -1898,7 +1898,7 @@ function whoText(who: HTMLElement, dot: string, name: string, small: string) {
   who.replaceChildren(d, ...(name ? [document.createTextNode(name + " ")] : []), s);
 }
 
-/** Where the chats are kept, for the banner: "mirrored" only while uploads are actually under way (mirror.ts). */
+/** Where the chats are kept, for the status's popover: "mirrored" only while uploads are actually under way (mirror.ts). */
 function keptWhere() {
   return mirror.keptLine();
 }
@@ -1922,7 +1922,7 @@ function renderHeader() {
   $("#connect").textContent = live() ? "Connected" : "Connect Claude";
   $("#stop").textContent = stopLabel(agentName());
   $("#connect").toggleAttribute("disabled", live());
-  $("#banner").innerHTML = live()
+  $("#who-info").innerHTML = live()
     ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; ${mirror.uploading() ? "chats are kept in this browser and mirrored to your Sagebrush account" : "chats are kept in this browser"}.`
     : connBar?.kind === "restoring"
     ? "Reconnecting to Claude on your computer…"
@@ -1933,6 +1933,20 @@ function renderHeader() {
     : `Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own ("Use your own Claude"). ${keptWhere()}`;
 }
 
+// (the status's popover, in place of the banner the page had (#1808: a banner in this mode only pushed everything down
+//  on switching from Files): the status opens it, and a click elsewhere, Escape or the status again closes it)
+{
+  const who = $("#who"), info = $("#who-info");
+  const show = (on: boolean) => {
+    info.hidden = !on;
+    who.setAttribute("aria-expanded", String(on));
+    if (on) info.style.left = `${who.offsetLeft}px`;
+  };
+  who.addEventListener("click", () => show(info.hidden));
+  addEventListener("pointerdown", (e) => { if (!info.hidden && !who.contains(e.target as Node) && !info.contains(e.target as Node)) show(false); }, true);
+  // (first, and taken: Escape that closes it doesn't also stop a running turn or leave full screen)
+  addEventListener("keydown", (e) => { if (e.key === "Escape" && !info.hidden) { e.preventDefault(); show(false); who.focus(); } }, true);
+}
 renderHeader();
 openArtifact = current().artifacts.at(-1)?.id ?? null;
 mountLayout();

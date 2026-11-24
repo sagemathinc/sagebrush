@@ -412,9 +412,9 @@ export async function runA14({ site, ok, want = () => true }) {
     await P.send("Page.reload", {});
     let connectedAt = null;
     while (Date.now() - t0 < 10000) {
-      const s = await P.ev(`(() => ({ who: document.querySelector('#who')?.textContent ?? '', banner: document.querySelector('#banner')?.textContent ?? '', alert: document.querySelector('#conn-alert')?.textContent ?? '', status: document.querySelector('#conn-status')?.textContent ?? '', connected: document.querySelector('#connect')?.textContent === 'Connected', ready: document.readyState === 'complete' && !!window.__a14seen }))()`).catch(() => null);
+      const s = await P.ev(`(() => ({ who: document.querySelector('#who')?.textContent ?? '', info: document.querySelector('#who-info')?.textContent ?? '', alert: document.querySelector('#conn-alert')?.textContent ?? '', status: document.querySelector('#conn-status')?.textContent ?? '', connected: document.querySelector('#connect')?.textContent === 'Connected', ready: document.readyState === 'complete' && !!window.__a14seen }))()`).catch(() => null);
       if (s?.ready) {
-        if (/scripted/.test(s.who + s.banner)) seen.demo = true;
+        if (/scripted/.test(s.who + s.info)) seen.demo = true;
         if (s.alert) seen.other.push(s.alert);
         if (s.status) seen.status.add(s.status);
         if (s.connected && A.grants().length > grants) { connectedAt = Date.now() - t0; break; }
