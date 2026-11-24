@@ -1325,22 +1325,25 @@ def _mc_cases():
 _MC = []
 
 
-def isosurface_mesh(x, y, z, V, iso, C=None, share=True):
+def isosurface_mesh(x, y, z, V, iso, C=None, share=True, held=0):
     """the isosurface V == iso of V on the grid vectors x, y, z (V in MATLAB's index order: rows follow y,
     columns x, pages z): (faces, vertices, colors), faces an F-by-3 array of 1-based vertex indices, the
     vertices on the grid's edges where V crosses iso (linearly between the two corners), each edge's one
     vertex shared by the faces around it unless share is false; colors C interpolated there the same way.
-    A face with a corner on an edge to a NaN or infinite value is dropped"""
+    A face with a corner on an edge to a NaN or infinite value is dropped.  held: the bytes the caller keeps
+    alive meanwhile (its copies of V and C), counted in each admission"""
     if not _MC:
         _MC.extend(_mc_cases())
     m, n, p = V.shape
     empty = (np.zeros((0, 3)), np.zeros((0, 3)), np.zeros((0, 1)))
     if m < 2 or n < 2 or p < 2:
         return empty
-    # (admitted before anything is made: each cell's case and its copies, about 32 bytes)
-    _m._admit_bytes((m - 1) * (n - 1) * (p - 1) * 32, "An isosurface of a %dx%dx%d volume" % (m, n, p))
+    # (admitted before anything is made: each point's inside flag and the two comparisons it is made of, each cell's
+    # case and its copies, about 32 bytes)
+    _m._admit_bytes(held + 3 * m * n * p + (m - 1) * (n - 1) * (p - 1) * 32, "An isosurface of a %dx%dx%d volume" % (m, n, p))
     with np.errstate(invalid="ignore"):
-        inside = V > iso
+        # (a NaN or infinite corner is never inside: an infinite one is taken as a NaN, its faces dropped below)
+        inside = (V > iso) & np.isfinite(V)
     case = np.zeros((m - 1, n - 1, p - 1), dtype=np.int64)
     for c in range(8):
         sl = (slice((c >> 1) & 1, (c >> 1 & 1) + m - 1), slice(c & 1, (c & 1) + n - 1), slice((c >> 2) & 1, (c >> 2 & 1) + p - 1))
@@ -1357,9 +1360,10 @@ def isosurface_mesh(x, y, z, V, iso, C=None, share=True):
         if t:
             table[k, :len(t)] = t
     cs = flat[cells]
-    # (and the faces' arrays: each corner's edge, its corners' indices and values, its point, and the sort that
-    # merges the points, about 240 bytes)
-    _m._admit_bytes(int(ntri[cs].sum()) * 3 * 240 + cells.size * 12 * 8, "An isosurface of %d faces" % int(ntri[cs].sum()))
+    # (and the faces' arrays, with the cases still held: each corner's edge, its corners' indices and values, its
+    # point, and the sort that merges the points, about 240 bytes; each cut cell's 12 edges)
+    _m._admit_bytes(held + m * n * p + case.size * 16 + int(ntri[cs].sum()) * 3 * 240 + cells.size * 12 * 8 * 2,
+                    "An isosurface of %d faces" % int(ntri[cs].sum()))
     i = cells % (m - 1)
     j = (cells // (m - 1)) % (n - 1)
     k = cells // ((m - 1) * (n - 1))
@@ -1380,8 +1384,8 @@ def isosurface_mesh(x, y, z, V, iso, C=None, share=True):
     rows = np.repeat(np.arange(cells.size), width).reshape(cells.size, width)[keep]
     G = gid.reshape(-1)[rows.reshape(-1, 1) * 12 + T[keep]]
     if not np.isfinite(V).all():
-        # (a NaN corner is not inside; a face with a corner on an edge to it is dropped, as MATLAB drops them; an
-        # infinite one likewise, where MATLAB gives NaN vertices instead)
+        # (a face with a corner on an edge to a NaN corner is dropped, as MATLAB drops them; to an infinite one
+        # likewise, where MATLAB gives NaN vertices instead)
         G = G[np.isfinite(_edge_values(G.reshape(-1), V, nx, ny)).reshape(G.shape).all(axis=1)]
         if not G.size:
             return empty

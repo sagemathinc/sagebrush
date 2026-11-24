@@ -33,7 +33,7 @@
     "kind": "function",
     "signature": "fv = isosurface(X, Y, Z, V, isovalue)\nfv = isosurface(V, isovalue)\nfvc = isosurface(___, colors)\n[f, v] = isosurface(___)\n[f, v, c] = isosurface(___)\nisosurface(___)\nisosurface(___, 'noshare')",
     "summary": "The surface where a 3-D volume takes a given value, as faces and vertices for patch.",
-    "doc": "Marching cubes on V's grid: each vertex lies on a grid edge where V crosses isovalue, linearly between the edge's two values; faces are triangles (an F-by-3 array of indices into the N-by-3 vertices), wound so that their normals point toward higher values. Vertices are shared between faces, and a face whose corners meet at one point (where V equals isovalue at a grid point) is left out; with 'noshare', each face has its own three vertices and none is left out. Without X, Y and Z the vertices are in index units (x the column). colors, an array of V's size, is interpolated at the vertices (facevertexcdata). Cells next to a NaN in V have no faces. With no output, the surface is drawn as a patch in the current axes. Pass the result to patch, then camlight and lighting gouraud to see its shape.",
+    "doc": "Marching cubes on V's grid: each vertex lies on a grid edge where V crosses isovalue, linearly between the edge's two values; faces are triangles (an F-by-3 array of indices into the N-by-3 vertices), wound so that their normals point toward higher values. Vertices are shared between faces, and a face whose corners meet at one point (where V equals isovalue at a grid point) is left out; with 'noshare', each face has its own three vertices and none is left out. Without X, Y and Z the vertices are in index units (x the column). colors, an array of V's size, is interpolated at the vertices (facevertexcdata). A face with a corner on a grid edge to a NaN in V is left out. With no output, the surface is drawn as a patch in the current axes. Pass the result to patch, then camlight and lighting gouraud to see its shape.",
     "examples": [
       {
         "code": "[x, y, z] = meshgrid(-2:0.25:2); V = x.^2 + y.^2 + z.^2;\nfv = isosurface(x, y, z, V, 1);\nsize(fv.faces), size(fv.vertices)",
@@ -47,7 +47,7 @@
     "differs": [
       "The isovalue is required: MATLAB picks one when it is left out, by a rule it does not document.",
       "Faces are not in MATLAB's order, and where a cell's polygon can be cut into triangles along other diagonals the cut is Sagebrush's own: the vertices, counts and topology are MATLAB's, but area and volume can differ slightly where cells are ambiguous.",
-      "An Inf in V is treated as a NaN (its cells have no faces), where MATLAB gives NaN vertices."
+      "An Inf or -Inf in V is treated as a NaN (the faces with a corner on an edge to it are left out), where MATLAB gives NaN vertices."
     ],
     "status": "partial",
     "see_also": [

@@ -1,16 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 // isosurface against MATLAB R2026b: the counts, topology, areas, signed volumes and vertex sets below were printed
 // by MATLAB for the same volumes (meshgrid(-2:0.25:2), seven fields). Faces' and vertices' order, and how a cell's
-// polygon is cut into triangles, are Sagebrush's own (the agreed criterion): so the counts, Euler characteristic,
-// boundary edges, the vertex sets (to 2 ulp) and, where every cell is cut the same way, area and volume are exact;
-// on the torus and the gyroid, area to 1e-4 and the signed volume to 2e-3 of area times the grid step (an open
-// surface's signed volume cancels, so it is measured against the area the cuts can move).
+// polygon is cut into triangles, are Sagebrush's own (the agreed criterion). So on all seven the counts, Euler
+// characteristic and boundary edges are exact; four (sphere, torus, gyroid, saddle) are compared vertex by vertex
+// with MATLAB's sorted vertices (test/matlab-isosurface-vertices.json), each coordinate to 2 ulp at the grid's scale
+// (ulp(2)); the other three are pinned by their statistics, MATLAB's coordinates for them not having been recorded.
+// Where every cell is cut the same way, area and volume are exact; on the torus and the gyroid, area to 1e-4 and the
+// signed volume to 2e-3 of area times the grid step (an open surface's signed volume cancels, so it is measured
+// against the area the cuts can move).
 
 const cli = join(__dirname, "..", "src", "cli.js");
 
@@ -42,7 +45,7 @@ const VOLUMES = [
 
 // (each volume's faces and vertices measured: counts, distinct vertices, Euler characteristic, boundary and
 // non-manifold edges, collapsed faces, directed edges used twice (a face wound against its neighbor), the
-// largest |V - iso| at a vertex, area, signed volume, and two weighted sums of the vertices' coordinates)
+// largest |V - iso| at a vertex, area and signed volume)
 const STATS = [
   "for c = 1:numel(C)",
   "  nm = C{c}{1}; V = C{c}{2}; iv = C{c}{3};",
@@ -52,14 +55,13 @@ const STATS = [
   "  D = [f(:,[1 2]); f(:,[2 3]); f(:,[3 1])]; E = sort(D, 2);",
   "  [ue, ~, ic] = unique(E, 'rows'); cnt = accumarray(ic, 1);",
   "  err = max(abs(interp3(x, y, z, V, v(:,1), v(:,2), v(:,3)) - iv));",
-  "  fprintf('%s|%d|%d|%d|%d|%d|%d|%d|%d|%.3g|%.15g|%.15g|%.17g|%.17g\\n', nm, size(f,1), size(v,1), size(unique(v,'rows'),1), ...",
+  "  fprintf('%s|%d|%d|%d|%d|%d|%d|%d|%d|%.3g|%.15g|%.15g\\n', nm, size(f,1), size(v,1), size(unique(v,'rows'),1), ...",
   "    size(v,1) - size(ue,1) + size(f,1), sum(cnt==1), sum(cnt>2), sum(ar==0), size(D,1) - size(unique(D,'rows'),1), err, ...",
-  "    0.5*sum(ar), sum(dot(a, cross(b, cc, 2), 2))/6, sum(abs(v)*[1;2;3]), sum(v.^2*[1;2;3]));",
+  "    0.5*sum(ar), sum(dot(a, cross(b, cc, 2), 2))/6);",
   "end",
 ];
 
-// MATLAB R2026b's: faces, vertices, Euler characteristic, boundary edges, area, signed volume; then the vertex
-// sets' sums (|x| + 2|y| + 3|z| and x^2 + 2y^2 + 3z^2) where they were printed
+// MATLAB R2026b's: faces, vertices, Euler characteristic, boundary edges, area, signed volume
 const MATLAB_ROWS: Record<string, [number, number, number, number, number, number]> = {
   sphere: [536, 270, 2, 0, 12.2330695870547, 3.99146031746032],
   sphere_off: [776, 390, 2, 0, 16.0089338918708, 5.98633076442378],
@@ -69,16 +71,10 @@ const MATLAB_ROWS: Record<string, [number, number, number, number, number, numbe
   clipped: [296, 240, 8, 168, 5.55720133823765, 5.54436577886282],
   gridval: [1136, 570, 2, 0, 24.8006267679523, 11.5687381917654],
 };
-const MATLAB_SUMS: Record<string, [number, number]> = {
-  sphere: [817.25714285714287, 533.08789115646255],
-  torus: [959.10736379959292, 728.1729321052602],
-  gyroid: [11863.736289111288, 16928.129082879648],
-  saddle: [3597.8255510204081, 4931.8351584062502],
-};
 // (the volumes whose cells Sagebrush cuts into other triangles than MATLAB's)
 const RECUT = new Set(["torus", "gyroid"]);
 
-test("isosurface: MATLAB's counts, topology, vertex sets, areas and signed volumes on seven volumes; each face wound as its neighbors", () => {
+test("isosurface: MATLAB's counts, topology, areas and signed volumes on seven volumes (sphere_off, clipped and gridval by these statistics alone); each face wound as its neighbors", () => {
   const got = run([...VOLUMES, ...STATS]);
   for (const [nm, [nf, nv, euler, bnd, area, vol]] of Object.entries(MATLAB_ROWS)) {
     const g = field(got, nm).map(Number);
@@ -92,117 +88,29 @@ test("isosurface: MATLAB's counts, topology, vertex sets, areas and signed volum
       assert.ok(Math.abs(garea / area - 1) <= 1e-13, `${nm}: area ${garea} vs ${area}`);
       assert.ok(Math.abs(gvol / vol - 1) <= 1e-12, `${nm}: volume ${gvol} vs ${vol}`);
     }
-    if (MATLAB_SUMS[nm]) {
-      const [s1, s2] = MATLAB_SUMS[nm];
-      assert.ok(Math.abs(g[11] / s1 - 1) <= 1e-14 && Math.abs(g[12] / s2 - 1) <= 1e-14, `${nm}: vertex sums ${g[11]} ${g[12]} vs ${s1} ${s2}`);
-    }
   }
 });
 
-// MATLAB R2026b's sphere (x^2 + y^2 + z^2 = 1 on meshgrid(-2:0.25:2)): its 270 vertices, sorted
-const SPHERE = [
-  "-1 0 0", "-0.96428571428571419 -0.25 0", "-0.96428571428571419 0 -0.25",
-  "-0.96428571428571419 0 0.25", "-0.96428571428571419 0.25 0", "-0.9285714285714286 -0.25 -0.25",
-  "-0.9285714285714286 -0.25 0.25", "-0.9285714285714286 0.25 -0.25", "-0.9285714285714286 0.25 0.25",
-  "-0.85714285714285721 -0.5 0", "-0.85714285714285721 0 -0.5", "-0.85714285714285721 0 0.5",
-  "-0.85714285714285721 0.5 0", "-0.8214285714285714 -0.5 -0.25", "-0.8214285714285714 -0.5 0.25",
-  "-0.8214285714285714 -0.25 -0.5", "-0.8214285714285714 -0.25 0.5", "-0.8214285714285714 0.25 -0.5",
-  "-0.8214285714285714 0.25 0.5", "-0.8214285714285714 0.5 -0.25", "-0.8214285714285714 0.5 0.25",
-  "-0.75 -0.64999999999999991 0", "-0.75 -0.60000000000000009 -0.25", "-0.75 -0.60000000000000009 0.25",
-  "-0.75 -0.5 -0.41666666666666674", "-0.75 -0.5 0.41666666666666652", "-0.75 -0.41666666666666674 -0.5",
-  "-0.75 -0.41666666666666674 0.5", "-0.75 -0.25 -0.60000000000000009", "-0.75 -0.25 0.60000000000000009",
-  "-0.75 0 -0.64999999999999991", "-0.75 0 0.64999999999999991", "-0.75 0.25 -0.60000000000000009",
-  "-0.75 0.25 0.60000000000000009", "-0.75 0.41666666666666652 -0.5", "-0.75 0.41666666666666652 0.5",
-  "-0.75 0.5 -0.41666666666666674", "-0.75 0.5 0.41666666666666652", "-0.75 0.60000000000000009 -0.25",
-  "-0.75 0.60000000000000009 0.25", "-0.75 0.64999999999999991 0", "-0.69999999999999996 -0.5 -0.5",
-  "-0.69999999999999996 -0.5 0.5", "-0.69999999999999996 0.5 -0.5", "-0.69999999999999996 0.5 0.5",
-  "-0.64999999999999991 -0.75 0", "-0.64999999999999991 0 -0.75", "-0.64999999999999991 0 0.75",
-  "-0.64999999999999991 0.75 0", "-0.60000000000000009 -0.75 -0.25", "-0.60000000000000009 -0.75 0.25",
-  "-0.60000000000000009 -0.25 -0.75", "-0.60000000000000009 -0.25 0.75", "-0.60000000000000009 0.25 -0.75",
-  "-0.60000000000000009 0.25 0.75", "-0.60000000000000009 0.75 -0.25", "-0.60000000000000009 0.75 0.25",
-  "-0.5 -0.85714285714285721 0", "-0.5 -0.8214285714285714 -0.25", "-0.5 -0.8214285714285714 0.25",
-  "-0.5 -0.75 -0.41666666666666674", "-0.5 -0.75 0.41666666666666652", "-0.5 -0.69999999999999996 -0.5",
-  "-0.5 -0.69999999999999996 0.5", "-0.5 -0.5 -0.69999999999999996", "-0.5 -0.5 0.70000000000000018",
-  "-0.5 -0.41666666666666674 -0.75", "-0.5 -0.41666666666666674 0.75", "-0.5 -0.25 -0.8214285714285714",
-  "-0.5 -0.25 0.82142857142857162", "-0.5 0 -0.85714285714285721", "-0.5 0 0.85714285714285721",
-  "-0.5 0.25 -0.8214285714285714", "-0.5 0.25 0.82142857142857162", "-0.5 0.41666666666666652 -0.75",
-  "-0.5 0.41666666666666652 0.75", "-0.5 0.5 -0.69999999999999996", "-0.5 0.5 0.70000000000000018",
-  "-0.5 0.70000000000000018 -0.5", "-0.5 0.70000000000000018 0.5", "-0.5 0.75 -0.41666666666666674",
-  "-0.5 0.75 0.41666666666666652", "-0.5 0.82142857142857162 -0.25", "-0.5 0.82142857142857162 0.25",
-  "-0.5 0.85714285714285721 0", "-0.41666666666666674 -0.75 -0.5", "-0.41666666666666674 -0.75 0.5",
-  "-0.41666666666666674 -0.5 -0.75", "-0.41666666666666674 -0.5 0.75", "-0.41666666666666674 0.5 -0.75",
-  "-0.41666666666666674 0.5 0.75", "-0.41666666666666674 0.75 -0.5", "-0.41666666666666674 0.75 0.5",
-  "-0.25 -0.96428571428571419 0", "-0.25 -0.9285714285714286 -0.25", "-0.25 -0.9285714285714286 0.25",
-  "-0.25 -0.8214285714285714 -0.5", "-0.25 -0.8214285714285714 0.5", "-0.25 -0.75 -0.60000000000000009",
-  "-0.25 -0.75 0.60000000000000009", "-0.25 -0.60000000000000009 -0.75", "-0.25 -0.60000000000000009 0.75",
-  "-0.25 -0.5 -0.8214285714285714", "-0.25 -0.5 0.82142857142857162", "-0.25 -0.25 -0.9285714285714286",
-  "-0.25 -0.25 0.92857142857142838", "-0.25 0 -0.96428571428571419", "-0.25 0 0.96428571428571441",
-  "-0.25 0.25 -0.9285714285714286", "-0.25 0.25 0.92857142857142838", "-0.25 0.5 -0.8214285714285714",
-  "-0.25 0.5 0.82142857142857162", "-0.25 0.60000000000000009 -0.75", "-0.25 0.60000000000000009 0.75",
-  "-0.25 0.75 -0.60000000000000009", "-0.25 0.75 0.60000000000000009", "-0.25 0.82142857142857162 -0.5",
-  "-0.25 0.82142857142857162 0.5", "-0.25 0.92857142857142838 -0.25", "-0.25 0.92857142857142838 0.25",
-  "-0.25 0.96428571428571441 0", "0 -1 0", "0 -0.96428571428571419 -0.25",
-  "0 -0.96428571428571419 0.25", "0 -0.85714285714285721 -0.5", "0 -0.85714285714285721 0.5",
-  "0 -0.75 -0.64999999999999991", "0 -0.75 0.64999999999999991", "0 -0.64999999999999991 -0.75",
-  "0 -0.64999999999999991 0.75", "0 -0.5 -0.85714285714285721", "0 -0.5 0.85714285714285721",
-  "0 -0.25 -0.96428571428571419", "0 -0.25 0.96428571428571441", "0 0 -1",
-  "0 0 1", "0 0.25 -0.96428571428571419", "0 0.25 0.96428571428571441",
-  "0 0.5 -0.85714285714285721", "0 0.5 0.85714285714285721", "0 0.64999999999999991 -0.75",
-  "0 0.64999999999999991 0.75", "0 0.75 -0.64999999999999991", "0 0.75 0.64999999999999991",
-  "0 0.85714285714285721 -0.5", "0 0.85714285714285721 0.5", "0 0.96428571428571441 -0.25",
-  "0 0.96428571428571441 0.25", "0 1 0", "0.25 -0.96428571428571419 0",
-  "0.25 -0.9285714285714286 -0.25", "0.25 -0.9285714285714286 0.25", "0.25 -0.8214285714285714 -0.5",
-  "0.25 -0.8214285714285714 0.5", "0.25 -0.75 -0.60000000000000009", "0.25 -0.75 0.60000000000000009",
-  "0.25 -0.60000000000000009 -0.75", "0.25 -0.60000000000000009 0.75", "0.25 -0.5 -0.8214285714285714",
-  "0.25 -0.5 0.82142857142857162", "0.25 -0.25 -0.9285714285714286", "0.25 -0.25 0.92857142857142838",
-  "0.25 0 -0.96428571428571419", "0.25 0 0.96428571428571441", "0.25 0.25 -0.9285714285714286",
-  "0.25 0.25 0.92857142857142838", "0.25 0.5 -0.8214285714285714", "0.25 0.5 0.82142857142857162",
-  "0.25 0.60000000000000009 -0.75", "0.25 0.60000000000000009 0.75", "0.25 0.75 -0.60000000000000009",
-  "0.25 0.75 0.60000000000000009", "0.25 0.82142857142857162 -0.5", "0.25 0.82142857142857162 0.5",
-  "0.25 0.92857142857142838 -0.25", "0.25 0.92857142857142838 0.25", "0.25 0.96428571428571441 0",
-  "0.41666666666666652 -0.75 -0.5", "0.41666666666666652 -0.75 0.5", "0.41666666666666652 -0.5 -0.75",
-  "0.41666666666666652 -0.5 0.75", "0.41666666666666652 0.5 -0.75", "0.41666666666666652 0.5 0.75",
-  "0.41666666666666652 0.75 -0.5", "0.41666666666666652 0.75 0.5", "0.5 -0.85714285714285721 0",
-  "0.5 -0.8214285714285714 -0.25", "0.5 -0.8214285714285714 0.25", "0.5 -0.75 -0.41666666666666674",
-  "0.5 -0.75 0.41666666666666652", "0.5 -0.69999999999999996 -0.5", "0.5 -0.69999999999999996 0.5",
-  "0.5 -0.5 -0.69999999999999996", "0.5 -0.5 0.70000000000000018", "0.5 -0.41666666666666674 -0.75",
-  "0.5 -0.41666666666666674 0.75", "0.5 -0.25 -0.8214285714285714", "0.5 -0.25 0.82142857142857162",
-  "0.5 0 -0.85714285714285721", "0.5 0 0.85714285714285721", "0.5 0.25 -0.8214285714285714",
-  "0.5 0.25 0.82142857142857162", "0.5 0.41666666666666652 -0.75", "0.5 0.41666666666666652 0.75",
-  "0.5 0.5 -0.69999999999999996", "0.5 0.5 0.70000000000000018", "0.5 0.70000000000000018 -0.5",
-  "0.5 0.70000000000000018 0.5", "0.5 0.75 -0.41666666666666674", "0.5 0.75 0.41666666666666652",
-  "0.5 0.82142857142857162 -0.25", "0.5 0.82142857142857162 0.25", "0.5 0.85714285714285721 0",
-  "0.60000000000000009 -0.75 -0.25", "0.60000000000000009 -0.75 0.25", "0.60000000000000009 -0.25 -0.75",
-  "0.60000000000000009 -0.25 0.75", "0.60000000000000009 0.25 -0.75", "0.60000000000000009 0.25 0.75",
-  "0.60000000000000009 0.75 -0.25", "0.60000000000000009 0.75 0.25", "0.64999999999999991 -0.75 0",
-  "0.64999999999999991 0 -0.75", "0.64999999999999991 0 0.75", "0.64999999999999991 0.75 0",
-  "0.70000000000000018 -0.5 -0.5", "0.70000000000000018 -0.5 0.5", "0.70000000000000018 0.5 -0.5",
-  "0.70000000000000018 0.5 0.5", "0.75 -0.64999999999999991 0", "0.75 -0.60000000000000009 -0.25",
-  "0.75 -0.60000000000000009 0.25", "0.75 -0.5 -0.41666666666666674", "0.75 -0.5 0.41666666666666652",
-  "0.75 -0.41666666666666674 -0.5", "0.75 -0.41666666666666674 0.5", "0.75 -0.25 -0.60000000000000009",
-  "0.75 -0.25 0.60000000000000009", "0.75 0 -0.64999999999999991", "0.75 0 0.64999999999999991",
-  "0.75 0.25 -0.60000000000000009", "0.75 0.25 0.60000000000000009", "0.75 0.41666666666666652 -0.5",
-  "0.75 0.41666666666666652 0.5", "0.75 0.5 -0.41666666666666674", "0.75 0.5 0.41666666666666652",
-  "0.75 0.60000000000000009 -0.25", "0.75 0.60000000000000009 0.25", "0.75 0.64999999999999991 0",
-  "0.82142857142857162 -0.5 -0.25", "0.82142857142857162 -0.5 0.25", "0.82142857142857162 -0.25 -0.5",
-  "0.82142857142857162 -0.25 0.5", "0.82142857142857162 0.25 -0.5", "0.82142857142857162 0.25 0.5",
-  "0.82142857142857162 0.5 -0.25", "0.82142857142857162 0.5 0.25", "0.85714285714285721 -0.5 0",
-  "0.85714285714285721 0 -0.5", "0.85714285714285721 0 0.5", "0.85714285714285721 0.5 0",
-  "0.92857142857142838 -0.25 -0.25", "0.92857142857142838 -0.25 0.25", "0.92857142857142838 0.25 -0.25",
-  "0.92857142857142838 0.25 0.25", "0.96428571428571441 -0.25 0", "0.96428571428571441 0 -0.25",
-  "0.96428571428571441 0 0.25", "0.96428571428571441 0.25 0", "1 0 0",];
-
-test("isosurface: the sphere's vertices are MATLAB's, each coordinate to 2 ulp", () => {
+test("isosurface: the vertex sets of four volumes (sphere, torus, gyroid, saddle) are MATLAB's, each coordinate to 2 ulp(2)", () => {
+  const want: Record<string, string[]> = JSON.parse(readFileSync(join(__dirname, "..", "..", "test", "matlab-isosurface-vertices.json"), "utf8")).volumes;
   const got = run([
-    "[x, y, z] = meshgrid(-2:0.25:2);",
-    "[~, v] = isosurface(x, y, z, x.^2+y.^2+z.^2, 1); v = sortrows(v);",
-    "for i = 1:size(v,1), fprintf('V%d|%.17g %.17g %.17g\\n', i, v(i,1), v(i,2), v(i,3)); end",
+    ...VOLUMES,
+    "for c = [1 3 4 5]",
+    "  [~, v] = isosurface(x, y, z, C{c}{2}, C{c}{3}); v = sortrows(v);",
+    "  for i = 1:size(v,1), fprintf('%s%d|%.17g %.17g %.17g\\n', C{c}{1}, i, v(i,1), v(i,2), v(i,3)); end",
+    "  fprintf('%s|%d\\n', C{c}{1}, size(v,1));",
+    "end",
   ]);
-  SPHERE.forEach((row, i) => {
-    const want = row.split(" ").map(Number);
-    const g = field(got, "V" + (i + 1))[0].split(" ").map(Number);
-    want.forEach((w, k) => assert.ok(Math.abs(g[k] - w) <= 2 * Number.EPSILON * Math.max(1, Math.abs(w)), `vertex ${i + 1}: ${g} vs ${want}`));
-  });
+  // (2 ulp at the grid's scale: the coordinates are at most 2 in magnitude, and v0 + t (v1 - v0) rounds at that scale)
+  const tol = 2 * 2 * Number.EPSILON;
+  for (const [nm, rows] of Object.entries(want)) {
+    assert.equal(Number(field(got, nm)[0]), rows.length, nm + ": vertex count");
+    rows.forEach((row, i) => {
+      const w = row.split(" ").map(Number);
+      const g = field(got, nm + (i + 1))[0].split(" ").map(Number);
+      w.forEach((t, k) => assert.ok(Math.abs(g[k] - t) <= tol, `${nm} vertex ${i + 1}: ${g} vs ${w}`));
+    });
+  }
 });
 
 test("isosurface: MATLAB's forms and edge cases (no grid, [f, v], 'noshare', NaN, no surface, an anisotropic grid, colors); refusals", () => {
@@ -214,7 +122,8 @@ test("isosurface: MATLAB's forms and edge cases (no grid, [f, v], 'noshare', NaN
     "ar = sqrt(sum(cross(b-a, cc-a, 2).^2, 2)); fprintf('noshare|%d|%d|%d|%.15g\\n', size(f,1), size(v,1), sum(ar==0), 0.5*sum(ar));",
     "W = V; W(9,9,9) = NaN; s = isosurface(x, y, z, W, 1); fprintf('nan|%d|%d\\n', size(s.faces,1), size(s.vertices,1));",
     "W = V; W(9,9,5) = NaN; s = isosurface(x, y, z, W, 1); fprintf('nanS|%d|%d|%d\\n', size(s.faces,1), size(s.vertices,1), any(isnan(s.vertices(:))));",
-    "W = V; W(9,9,5) = Inf; s = isosurface(x, y, z, W, 1); fprintf('infS|%d|%d|%d\\n', size(s.faces,1), size(s.vertices,1), any(isnan(s.vertices(:))));",
+    "W = V; W(9,9,5) = NaN; n = isosurface(x, y, z, W, 1); W(9,9,5) = Inf; p = isosurface(x, y, z, W, 1); W(9,9,5) = -Inf; m = isosurface(x, y, z, W, 1);",
+    "fprintf('infS|%d|%d|%d|%d\\n', size(p.faces,1), size(p.vertices,1), isequal(p, n), isequal(m, n));",
     "s = isosurface(x, y, z, V, 100); fprintf('none|%s|%s|%s\\n', class(s.faces), mat2str(size(s.faces)), mat2str(size(s.vertices)));",
     "[xs, ys, zs] = meshgrid(-2:0.5:2, -1:0.25:1, -2:1:2); s = isosurface(xs, ys, zs, xs.^2+ys.^2+zs.^2, 1);",
     "fprintf('aniso|%d|%d\\n', size(s.faces,1), size(s.vertices,1));",
@@ -233,9 +142,9 @@ test("isosurface: MATLAB's forms and edge cases (no grid, [f, v], 'noshare', NaN
   assert.deepEqual(field(got, "nanS"), ["529", "269", "0"]);
   assert.deepEqual(field(got, "none"), ["double", "[0 0]", "[0 0]"]);
   assert.deepEqual(field(got, "aniso"), ["120", "62"]);
-  // (an Inf is treated as a NaN: MATLAB gives 536 faces and 299 vertices, NaN ones among them, a documented
-  // difference)
-  assert.deepEqual(field(got, "infS"), ["530", "269", "0"]);
+  // (an Inf or a -Inf is treated as a NaN: the same faces and vertices as the NaN row's, in the same order; MATLAB
+  // gives 536 faces and 299 vertices with an Inf, NaN ones among them, a documented difference)
+  assert.deepEqual(field(got, "infS"), ["529", "269", "1", "1"]);
   assert.deepEqual(field(got, "colors"), ["[270 1]", "0", "faces vertices facevertexcdata"]);
   assert.match(field(got, "defiso")[0], /give the isovalue/);
   assert.equal(field(got, "twod")[0], "V must be a 3-D array.");
@@ -301,4 +210,12 @@ test("isosurface drawn: the interactive view's mesh (lit with a light, smooth fo
   assert.deepEqual([...fills(1)], ["#ff0000"]);
   assert.ok(fills(2).size > 50, "lit faces: " + fills(2).size + " colors");
   assert.deepEqual([...fills(4)], ["#ff0000"]);
+});
+
+test("isosurface, isonormals and a patch's view admitted before their copies are made: stand-in hosts and sentinels, nothing large allocated (test/matlab_iso_admit_cases.py)", () => {
+  const r = spawnSync(process.execPath, [cli, join(__dirname, "..", "..", "test", "matlab_iso_admit_cases.py")], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const lines = r.stdout.trim().split("\n");
+  assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
+  assert.equal(lines.length, 5, r.stdout);
 });

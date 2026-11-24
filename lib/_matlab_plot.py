@@ -576,6 +576,28 @@ class Patch(GObj):
         self.props["Vertices"] = _m._unmat(np.column_stack(cols))
         self.props["Faces"] = _m._unmat(np.arange(1.0, X.size + 1).reshape(X.shape[1], X.shape[0]))
 
+    def used(self, corners_allowed=None):
+        """(faces, vertices, rows) for drawing: faces an nf-by-k float array of 0-based indices into vertices (NaN
+        where a face has fewer corners), vertices only the rows the faces use (rows, their indices in Vertices), so
+        that unused vertices are never copied; None when there is nothing to draw, False when the faces' corners
+        (counted from Faces' size, before anything is copied) are more than corners_allowed"""
+        df, dv = _m._dims(self.props["Faces"]), _m._dims(self.props["Vertices"])
+        if len(df) != 2 or len(dv) != 2 or 0 in df or dv[0] == 0 or dv[1] not in (2, 3):
+            return None
+        if corners_allowed is not None and df[0] * df[1] > corners_allowed:
+            return False
+        F = np.asarray(_m._mat(self.props["Faces"]), dtype=float)
+        ok = F == F
+        if not ok.any() or np.nanmax(F) > dv[0] or np.nanmin(F) < 1:
+            return None
+        idx = np.where(ok, F, 1.0).astype(np.int64) - 1
+        rows = np.sort(idx[ok])
+        keep = np.ones(rows.size, dtype=bool)
+        keep[1:] = rows[1:] != rows[:-1]
+        rows = rows[keep]
+        Fl = np.where(ok, np.searchsorted(rows, idx).astype(float), np.nan)
+        return Fl, _value_rows(self.props["Vertices"], rows), rows
+
     def fv(self):
         """(faces, vertices) as float arrays, faces 1-based; (None, None) when there are none"""
         F, Vt = _m._mat(self.props["Faces"]), _m._mat(self.props["Vertices"])
@@ -601,6 +623,14 @@ class Patch(GObj):
             return None
         v = [x for x in C.reshape(-1).tolist() if x == x]
         return (min(v), max(v)) if v else None
+
+
+def _value_rows(v, rows):
+    """rows of a MATLAB matrix value as a float array, copying only those rows"""
+    if type(v) is np.ndarray and v.ndim == 2:
+        # (stored transposed: a row of the matrix is a column here)
+        return np.asarray(v[:, rows].T, dtype=float)
+    return np.asarray(_m._mat(v), dtype=float)[rows]
 
 
 class Light(GObj):
@@ -2124,20 +2154,44 @@ def slice_(nargout, args):
     return _harr(objs)
 
 
-def _iso_volume(args, fname):
-    """(x, y, z, V, rest) from isosurface's or isonormals' (X, Y, Z, V, ...) or (V, ...): the volume given with
-    its grid when the fourth argument is a 3-D array"""
-    import _matlab_numeric as _mn
+def _iso_split(args):
+    """(volume arguments, the rest) of isosurface's or isonormals' (X, Y, Z, V, ...) or (V, ...), V checked 3-D;
+    nothing is copied"""
     if not args:
         raise _m._err("Not enough input arguments.")
     full = len(args) >= 4 and not _m._istext(args[3]) and len(_m._dims(args[3])) == 3
     if len(_m._dims(args[3] if full else args[0])) != 3:
         raise _m._err("V must be a 3-D array.")
-    if full:
-        x, y, z, V, _ = _mn.volume_args(list(args[:4]) + [0.0, 0.0, 0.0], fname)
-        return x, y, z, V, list(args[4:])
-    x, y, z, V, _ = _mn.volume_args([args[0], 0.0, 0.0, 0.0], fname)
-    return x, y, z, V, list(args[1:])
+    return (list(args[:4]), list(args[4:])) if full else (list(args[:1]), list(args[1:]))
+
+
+def _copy_bytes(v):
+    """the bytes of v's float copy in MATLAB's index order, and of the conversion before it when v isn't double"""
+    n = _m._numel(v) * 8
+    return n, (0 if type(v) is np.ndarray and v.dtype == np.float64 else n)
+
+
+def _iso_volume(vol, fname):
+    """(x, y, z, V) from the volume arguments _iso_split gave"""
+    import _matlab_numeric as _mn
+    x, y, z, V, _ = _mn.volume_args(vol + [0.0, 0.0, 0.0], fname)
+    return x, y, z, V
+
+
+def _iso_admit(vol, colors, per_point, what, extra=0):
+    """admitted before any copy is made: V's copy (and colors'), kept throughout, with the largest of the
+    conversions (one at a time: V's, colors', a full grid array's, each its copy and maybe a conversion
+    before it) and per_point bytes of work for each of V's points, and extra bytes; returns the bytes kept"""
+    held, peak = 0, 0
+    for v in [vol[-1]] + ([colors] if colors is not None else []):
+        c, conv = _copy_bytes(v)
+        held += c
+        peak = max(peak, c + conv)
+    for G in vol[:-1]:
+        if sum(1 for k in _m._dims(G) if k != 1) > 1:
+            peak = max(peak, sum(_copy_bytes(G)))
+    _m._admit_bytes(held + max(peak, _m._numel(vol[-1]) * per_point) + extra, what)
+    return held
 
 
 @_fn("isosurface")
@@ -2154,19 +2208,20 @@ def isosurface_(nargout, args):
             share = False
         elif t != "verbose":
             raise _m._err("Invalid option '%s': isosurface's options are 'noshare' and 'verbose'." % t)
-    x, y, z, V, rest = _iso_volume(args, "isosurface")
+    vol, rest = _iso_split(args)
     if not rest:
         raise _m._err("isosurface: give the isovalue. MATLAB chooses one when it is left out, by a rule it does not "
                       "document, so Sagebrush needs it.")
     if len(rest) > 2:
         raise _m._err("Too many input arguments.")
     iso = _m._real_scalar(rest[0], "isovalue")
-    C = None
-    if len(rest) == 2:
-        C = _mn._nd(rest[1])
-        if C.shape != V.shape:
-            raise _m._err("The colors array must be the same size as V.")
-    F, P, cols = _mn.isosurface_mesh(x, y, z, V, iso, C, share)
+    colors = rest[1] if len(rest) == 2 else None
+    if colors is not None and tuple(_m._dims(colors)) != tuple(_m._dims(vol[-1])):
+        raise _m._err("The colors array must be the same size as V.")
+    held = _iso_admit(vol, colors, 0, "An isosurface's volume of %s points" % "x".join(str(k) for k in _m._dims(vol[-1])))
+    x, y, z, V = _iso_volume(vol, "isosurface")
+    C = _mn._nd(colors) if colors is not None else None
+    F, P, cols = _mn.isosurface_mesh(x, y, z, V, iso, C, share, held)
     if not F.size:
         # (no surface: 0-by-0 faces and vertices, as MATLAB gives)
         F, P, cols = np.zeros((0, 0)), np.zeros((0, 0)), np.zeros((0, 0))
@@ -2204,15 +2259,26 @@ def isonormals_(nargout, args):
         if _m._text(args.pop()).lower() != "negate":
             raise _m._err("isonormals' option is 'negate'.")
         negate = True
-    x, y, z, V, rest = _iso_volume(args, "isonormals")
+    vol, rest = _iso_split(args)
     if len(rest) != 1:
         raise _m._err("Not enough input arguments." if not rest else "Too many input arguments.")
     target = rest[0]
-    Pv = _m._mat(target.props["Vertices"]) if isinstance(target, Patch) else _m._mat(target)
-    if Pv.size and (Pv.ndim != 2 or Pv.shape[1] != 3):
+    src = target.props["Vertices"] if isinstance(target, Patch) else target
+    d = _m._dims(src)
+    if _m._numel(src) and (len(d) != 2 or d[1] != 3):
         raise _m._err("The vertices must be an N-by-3 array.")
-    G = gradient_(3, _mn._un_nd(V), _m._unmat(x.reshape(1, -1)), _m._unmat(y.reshape(-1, 1)), _m._unmat(z.reshape(-1, 1)))
-    N = np.column_stack([_mn.interp_volume(x, y, z, _mn._nd(g), Pv[:, 0], Pv[:, 1], Pv[:, 2]) for g in G]) if Pv.size else np.zeros((0, 3))
+    if not _m._numel(src):
+        # (no vertices: no normals, and nothing of the volume is made)
+        N = np.zeros((0, 3))
+    else:
+        # (admitted first: V's copy, the copy gradient takes, its three gradients and their scratch, each one's copy
+        # for the interpolation and the interpolation's own, about 80 bytes a point; and the vertices' work)
+        _iso_admit(vol, None, 80, "isonormals of a volume of %s points" % "x".join(str(k) for k in _m._dims(vol[-1])),
+                   d[0] * 3 * 8 * 8)
+        x, y, z, V = _iso_volume(vol, "isonormals")
+        Pv = _m._mat(src)
+        G = gradient_(3, _mn._un_nd(V), _m._unmat(x.reshape(1, -1)), _m._unmat(y.reshape(-1, 1)), _m._unmat(z.reshape(-1, 1)))
+        N = np.column_stack([_mn.interp_volume(x, y, z, _mn._nd(g), Pv[:, 0], Pv[:, 1], Pv[:, 2]) for g in G])
     with np.errstate(invalid="ignore", divide="ignore"):
         N = N / np.sqrt((N * N).sum(axis=1, keepdims=True))
     if negate:
@@ -3213,8 +3279,8 @@ def _draw_axes(ax, mx, mfig):
             _draw_scatter(c, mx, label, cmap, clim)
         elif isinstance(c, Patch):
             fc = c.props["FaceColor"]
-            F, _ = c.fv()
-            if F is not None and (F.shape[0] > 1 or _m._istext(fc) and _m._text(fc).lower() in ("flat", "interp")):
+            df = _m._dims(c.props["Faces"])
+            if len(df) == 2 and 0 not in df and (df[0] > 1 or _m._istext(fc) and _m._text(fc).lower() in ("flat", "interp")):
                 # (several faces, or colors from color data: each face, flat, in data coordinates)
                 faces = _patch_faces(c, lambda x, y, z: (x, _fy(y), 0.0), cmap, clim)
                 if faces:
@@ -3814,21 +3880,23 @@ def _surface_faces(c, proj, cmap, clim, shade=None):
     return out
 
 
-def _patch_colors(c, which, cmap, clim, nf, nv):
-    """a patch's face (which: "Face") or edge colors: (mode, colors), mode None (not drawn), "fixed" (colors one
-    RGB), "flat" (an RGB for each face) or "interp" (an RGB for each vertex), from its FaceColor or EdgeColor and
-    FaceVertexCData (colormapped values, or RGB rows)"""
+def _patch_colors(c, which, cmap, clim, nf, nv, rows):
+    """a patch's face (which: "Face") or edge colors: (mode, colors, per_face), mode None (not drawn), "fixed"
+    (colors one RGB), "flat" or "interp", colors an RGB for each face (per_face) or for each of the used vertices
+    (rows), from its FaceColor or EdgeColor and FaceVertexCData (colormapped values, or RGB rows)"""
     v = c.props[which + "Color"]
     mode = _m._text(v).lower() if _m._istext(v) else None
     if mode == "none":
-        return None, None
+        return None, None, False
     if mode not in ("flat", "interp"):
-        return "fixed", _rgbof(v)
-    C = _m._mat(c.props["FaceVertexCData"]) if _m._numel(c.props["FaceVertexCData"]) else np.zeros((0, 1))
-    C = np.asarray(C, dtype=float).reshape(C.shape[0], -1) if C.size else np.zeros((0, 1))
-    if C.shape[0] not in (nf, nv) or C.shape[1] not in (1, 3):
+        return "fixed", _rgbof(v), False
+    D = c.props["FaceVertexCData"]
+    d = _m._dims(D)
+    if len(d) != 2 or d[0] not in (nf, nv) or d[1] not in (1, 3) or not _m._isnumlike(D):
         # (no usable color data: MATLAB draws nothing)
-        return None, None
+        return None, None, False
+    # (a color each face, or each vertex: only the used vertices' rows)
+    C = _value_rows(D, np.arange(nf) if d[0] == nf and (mode == "flat" or d[0] != nv) else rows)
     if C.shape[1] == 3:
         rgb = [tuple(min(1.0, max(0.0, t)) for t in r) for r in C.tolist()]
     else:
@@ -3838,7 +3906,8 @@ def _patch_colors(c, which, cmap, clim, nf, nv):
         else:
             lo, hi = (clim[0], clim[1]) if len(clim) == 2 else (0.0, 1.0)
             rgb = [tuple(M[k]) if k is not None else None for k in (_cindex(t, lo, hi, len(M)) for t in C[:, 0].tolist())]
-    return ("flat" if C.shape[0] == nf and mode == "flat" else "interp" if C.shape[0] == nv else "flat"), rgb
+    # (a color each face when there is one each face; with as many faces as vertices, each face's for 'flat')
+    return mode, rgb, d[0] == nf and (mode == "flat" or d[0] != nv)
 
 
 def _lights(ax):
@@ -3892,40 +3961,46 @@ def _shader(ax, proj, c):
     return shade
 
 
+def _pick_color(mode, cols, per_face, f, idx):
+    """face f's color (corners idx, among the used vertices): one color, the face's own, its first vertex's
+    ('flat'), or the mean of its vertices' ('interp'); None where a color is missing"""
+    if mode == "fixed" or mode is None:
+        return cols
+    if per_face:
+        return cols[f]
+    if mode == "flat":
+        return cols[idx[0]]
+    cs = [cols[i] for i in idx]
+    if any(t is None for t in cs):
+        return None
+    return tuple(sum(t[k] for t in cs) / len(cs) for k in range(3))
+
+
 def _patch_faces(c, proj, cmap, clim, shade=None):
     """a Patch's faces as (depth, points, fill, edge), each face's corners in order (NaN-padded faces cut short),
     colored as FaceColor and EdgeColor say ('flat': the face's color data, or its first vertex's; 'interp': the
-    mean of its vertices'), lit by shade"""
-    F, Vt = c.fv()
-    if F is None:
+    mean of its vertices'), lit by shade; only the vertices the faces use are read"""
+    u = c.used()
+    if not u:
         return []
-    nf, nv = F.shape[0], Vt.shape[0]
-    fmode, fcol = _patch_colors(c, "Face", cmap, clim, nf, nv)
-    emode, ecol = _patch_colors(c, "Edge", cmap, clim, nf, nv)
+    F, Vt, rows = u
+    nf, nv = F.shape[0], _m._dims(c.props["Vertices"])[0]
+    fmode, fcol, fper = _patch_colors(c, "Face", cmap, clim, nf, nv, rows)
+    emode, ecol, eper = _patch_colors(c, "Edge", cmap, clim, nf, nv, rows)
     if fmode is None and emode is None:
         return []
-    V3 = Vt if Vt.shape[1] == 3 else np.column_stack([Vt, np.zeros(nv)])
+    V3 = Vt if Vt.shape[1] == 3 else np.column_stack([Vt, np.zeros(Vt.shape[0])])
     P = [proj(*r) for r in V3.tolist()]
-
-    def pick(mode, cols, f, idx):
-        if mode == "fixed":
-            return cols
-        if mode == "flat":
-            return cols[f] if len(cols) == nf else cols[idx[0]]
-        cs = [cols[i] for i in idx]
-        if any(t is None for t in cs):
-            return None
-        return tuple(sum(t[k] for t in cs) / len(cs) for k in range(3))
     out = []
     for f, row in enumerate(F.tolist()):
-        idx = [int(t) - 1 for t in row if t == t]
+        idx = [int(t) for t in row if t == t]
         if len(idx) < 2:
             continue
         vs = [P[i] for i in idx]
         if any(not (math.isfinite(v[0]) and math.isfinite(v[1])) for v in vs):
             continue
-        fill = pick(fmode, fcol, f, idx) if fmode else None
-        edge = pick(emode, ecol, f, idx) if emode else None
+        fill = _pick_color(fmode, fcol, fper, f, idx) if fmode else None
+        edge = _pick_color(emode, ecol, eper, f, idx) if emode else None
         if shade is not None and fill is not None and len(vs) >= 3:
             # (Newell's normal, in the view's frame)
             n = [0.0, 0.0, 0.0]
@@ -4248,33 +4323,34 @@ def _scene_surface(c, cmap, clim, objs, budget):
 def _scene_patch(c, cmap, clim, objs, budget, lit):
     """a Patch's faces (a mesh, each face fanned into triangles, its vertices shared when its colors are a
     vertex's or one color, so that gouraud lighting is smooth) and edges (lines), as FaceColor and EdgeColor
-    say; lit when the axes have a light and FaceLighting isn't none"""
-    F, Vt = c.fv()
-    if F is None:
+    say; lit when the axes have a light and FaceLighting isn't none.  Its share of the view's vertices, two a
+    corner, is checked from Faces' size before anything is copied, and only the vertices the faces use are
+    read"""
+    u = c.used(budget[0] // 2)
+    if u is None:
         return True
-    nf, nv = F.shape[0], Vt.shape[0]
-    V3 = Vt if Vt.shape[1] == 3 else np.column_stack([Vt, np.zeros(nv)])
-    rows = [[int(t) - 1 for t in r if t == t] for r in F.tolist()]
-    ok = [all(math.isfinite(v) for v in V3[i]) for i in range(nv)]
-    rows = [r for r in rows if len(r) >= 2 and all(ok[i] for i in r)]
-    corners = sum(len(r) for r in rows)
-    if 2 * corners > budget[0]:
+    if u is False:
         return False
+    F, Vt, used = u
+    nf, nv = F.shape[0], _m._dims(c.props["Vertices"])[0]
+    V3 = Vt if Vt.shape[1] == 3 else np.column_stack([Vt, np.zeros(Vt.shape[0])])
+    ok = np.isfinite(V3).all(axis=1).tolist()
+    # (each face's corners among the used vertices; None for a face not drawn)
+    rows = [[int(t) for t in r if t == t] for r in F.tolist()]
+    rows = [r if len(r) >= 2 and all(ok[i] for i in r) else None for r in rows]
+    corners = sum(len(r) for r in rows if r)
     budget[0] -= 2 * corners
-    fmode, fcol = _patch_colors(c, "Face", cmap, clim, nf, nv)
-    emode, ecol = _patch_colors(c, "Edge", cmap, clim, nf, nv)
+    fmode, fcol, fper = _patch_colors(c, "Face", cmap, clim, nf, nv, used)
+    emode, ecol, eper = _patch_colors(c, "Edge", cmap, clim, nf, nv, used)
     to255 = lambda t: [int(round(255 * max(0.0, min(1.0, float(u))))) for u in t]
     vert = lambda i: [_r5(float(v)) for v in V3[i]]
-    flat_rows = [r for r in rows if len(r) >= 3]
-    if fmode is not None and flat_rows:
+    faces = [(f, r) for f, r in enumerate(rows) if r and len(r) >= 3]
+    if fmode is not None and faces:
         pos, idx, col = [], [], []
-        if fmode == "flat":
+        if fper or fmode == "flat":
             # (a color each face: its corners its own)
-            for f, r in enumerate(F.tolist()):
-                r = [int(t) - 1 for t in r if t == t]
-                if len(r) < 3 or not all(ok[i] for i in r):
-                    continue
-                rgb = fcol[f] if len(fcol) == nf else fcol[r[0]]
+            for f, r in faces:
+                rgb = _pick_color(fmode, fcol, fper, f, r)
                 if rgb is None:
                     continue
                 b = len(pos) // 3
@@ -4283,12 +4359,12 @@ def _scene_patch(c, cmap, clim, objs, budget, lit):
                     col.extend(to255(rgb))
                 idx.extend(t for k in range(1, len(r) - 1) for t in (b, b + k, b + k + 1))
         else:
-            used = sorted(set(i for r in flat_rows for i in r))
-            at = {i: k for k, i in enumerate(used)}
-            for i in used:
+            drawn = sorted(set(i for _, r in faces for i in r))
+            at = {i: k for k, i in enumerate(drawn)}
+            for i in drawn:
                 pos.extend(vert(i))
                 col.extend(to255(fcol if fmode == "fixed" else fcol[i] or (0.0, 0.0, 0.0)))
-            idx = [at[t] for r in flat_rows for k in range(1, len(r) - 1) for t in (r[0], r[k], r[k + 1])]
+            idx = [at[t] for _, r in faces for k in range(1, len(r) - 1) for t in (r[0], r[k], r[k + 1])]
         if idx:
             alpha = c.props.get("FaceAlpha", 1.0)
             light = lit and _m._text(c.props.get("FaceLighting", _m.Char("flat"))).lower() != "none"
@@ -4303,11 +4379,13 @@ def _scene_patch(c, cmap, clim, objs, budget, lit):
         groups = {}
         seen = set()
         for f, r in enumerate(rows):
+            if not r:
+                continue
             for a, b in zip(r, r[1:] + r[:1]):
                 if (min(a, b), max(a, b)) in seen or a == b:
                     continue
                 seen.add((min(a, b), max(a, b)))
-                rgb = ecol if emode == "fixed" else (ecol[f] if emode == "flat" and len(ecol) == nf else ecol[a])
+                rgb = _pick_color(emode, ecol, eper, f, [a])
                 if rgb is not None:
                     groups.setdefault(_hex(rgb), []).extend(vert(a) + vert(b))
         w = float(_f(c.props.get("LineWidth", 0.5)))
