@@ -66,6 +66,10 @@ package threadpoolctl 3.8.0
 [([2, 3, 5], [0, 1, 4]), ([0, 1, 4], [2, 3, 5])]
 == skfold.appearance-order
 [([1, 3, 5], [0, 2, 4]), ([0, 2, 4], [1, 3, 5])]
+== skfold.appearance-unbalanced
+[([2, 3, 5, 6, 7, 8, 11, 12, 13, 14], [0, 1, 4, 9, 10]), ([0, 1, 3, 4, 7, 8, 9, 10, 13, 14], [2, 5, 6, 11, 12]), ([0, 1, 2, 4, 5, 6, 9, 10, 11, 12], [3, 7, 8, 13, 14])]
+== skfold.appearance-unbalanced-shuffle
+[([0, 1, 5, 6, 7, 8, 10, 11, 13, 14], [2, 3, 4, 9, 12]), ([1, 2, 3, 4, 7, 8, 9, 11, 12, 14], [0, 5, 6, 10, 13]), ([0, 2, 3, 4, 5, 6, 9, 10, 12, 13], [1, 7, 8, 11, 14])]
 == skfold.few-members
 ([([1, 2, 4, 5], [0, 3, 6]), ([0, 2, 3, 5, 6], [1, 4]), ([0, 1, 3, 4, 6], [2, 5])], [('UserWarning', 'The least populated class in y has only 1 members, which is less than n_splits=3.')])
 == skfold.too-few
