@@ -84,3 +84,17 @@ h23 = pd.Series(rng23.standard_normal(3000) * 10.0 ** rng23.randint(-2, 6, 3000)
 h23[::11] = np.nan
 case("wide-std.exact", lambda: h23.groupby(g23).std().tolist())
 case("wide-f32-std", lambda: h23.astype("float32").groupby(g23).std())
+
+# ddof as pandas' Cython takes it, a C integer: a float truncated toward 0, anything else a TypeError.
+d4 = pd.DataFrame({"k": [1, 1, 2, 2], "a": [1.0, 2.0, 3.0, 4.0], "n": [1, 2, 3, 5]})
+s4 = pd.Series([1.0, 2.0, 3.0, 4.0])
+for dd in [0.5, 1.5, 0.99, -0.5, -1, -1.5, True, np.float64(1.5), np.int64(1), 2.0]:
+    case("ddof-%r.series-var" % (dd,), lambda: s4.groupby(k4).var(ddof=dd).tolist())
+    case("ddof-%r.series-std" % (dd,), lambda: s4.groupby(k4).std(ddof=dd).tolist())
+    case("ddof-%r.frame-var" % (dd,), lambda: d4.groupby("k").var(ddof=dd).to_numpy().tolist())
+    case("ddof-%r.frame-std" % (dd,), lambda: d4.groupby("k").std(ddof=dd).to_numpy().tolist())
+    case("ddof-%r.frame-column-std" % (dd,), lambda: d4.groupby("k")["n"].std(ddof=dd).tolist())
+case("ddof-float32-half", lambda: f4(1.0, 2.0, 3.0, 4.0).groupby(k4).var(ddof=0.5))
+for dd in [1e20, 2 ** 70, float("nan"), float("inf"), "1", None, 1 + 0j]:
+    case("ddof-%r.series-var" % (dd,), lambda: s4.groupby(k4).var(ddof=dd))
+    case("ddof-%r.frame-std" % (dd,), lambda: d4.groupby("k").std(ddof=dd))

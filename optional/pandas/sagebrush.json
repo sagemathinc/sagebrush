@@ -49,7 +49,7 @@
     "py/pandas/_pd_dtypes.py": "b984d6b4a55d544f91cb62b4192bf1852d31a244688fb9b5bad63e7e28b5b3b6",
     "py/pandas/_pd_excel.py": "abf67e23f9349dbf7eb1d582e97a0e44c4032898507c402f234f91247a17a48f",
     "py/pandas/_pd_frame.py": "1fbd803d1319dcba933b1b8c3c0077be91eabccf61899385830441b22bc594e5",
-    "py/pandas/_pd_groupby.py": "0efeaff1008437499bfb7602e53f418c6036507dd7041a04b2451b522f2402b9",
+    "py/pandas/_pd_groupby.py": "58092f6704d114feb2c85e3c4ab186120503e2903822352c57039030d4f32f77",
     "py/pandas/_pd_index.py": "83e0361f3e5e9f016136cf521ac535294bf54f3451a69ae9e9f0055aacf2238f",
     "py/pandas/_pd_indexing.py": "a46e09faa83ed6007f00597f966b053936c3b3ff83d7a19019a88fbc63c365f7",
     "py/pandas/_pd_info.py": "dec6360d30af9691dde83b689cfa24495649076f8768f52e79ae1ee15faeb277",

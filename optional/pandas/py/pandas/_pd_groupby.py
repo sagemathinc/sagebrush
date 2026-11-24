@@ -260,11 +260,26 @@ def _spread_values(col, groups, op, owner, ddof, skipna):
     return res, f32 and op != "var"
 
 
+def _ddof(ddof):
+    # (pandas passes ddof to its Cython group_var as a C int64: an integer as it is, a float truncated toward 0,
+    # anything else a TypeError)
+    if isinstance(ddof, (bool, int, np.integer)):
+        v = int(ddof)
+    elif isinstance(ddof, (float, np.floating)):
+        v = int(float(ddof))
+    else:
+        raise TypeError("an integer is required")
+    if not -2 ** 63 <= v < 2 ** 63:
+        raise OverflowError("Python int too large to convert to C long")
+    return v
+
+
 def spread_columns(cols, groups, op, owner, ddof=1, skipna=True):
     """std, var or median of each column, as Columns. pandas computes a
     float32 column's std and median in float64, then casts its whole block
     (here: the columns given, all of the float32 ones) back to float32 only
     when every value fits (_fits32)."""
+    ddof = _ddof(ddof)
     done = [_spread_values(c, groups, op, owner, ddof, skipna) for c in cols]
     to32 = all(_fits32(res) for res, check in done if check)
     out = []

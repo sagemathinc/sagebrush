@@ -237,3 +237,136 @@ dtype('float32')
 7    27781.357322
 8    27813.731917
 dtype: float64
+== ddof-0.5.series-var
+[0.25, 0.25]
+== ddof-0.5.series-std
+[0.5, 0.5]
+== ddof-0.5.frame-var
+[[0.25, 0.25], [0.25, 1.0]]
+== ddof-0.5.frame-std
+[[0.5, 0.5], [0.5, 1.0]]
+== ddof-0.5.frame-column-std
+[0.5, 1.0]
+== ddof-1.5.series-var
+[0.5, 0.5]
+== ddof-1.5.series-std
+[0.7071067811865476, 0.7071067811865476]
+== ddof-1.5.frame-var
+[[0.5, 0.5], [0.5, 2.0]]
+== ddof-1.5.frame-std
+[[0.7071067811865476, 0.7071067811865476], [0.7071067811865476, 1.4142135623730951]]
+== ddof-1.5.frame-column-std
+[0.7071067811865476, 1.4142135623730951]
+== ddof-0.99.series-var
+[0.25, 0.25]
+== ddof-0.99.series-std
+[0.5, 0.5]
+== ddof-0.99.frame-var
+[[0.25, 0.25], [0.25, 1.0]]
+== ddof-0.99.frame-std
+[[0.5, 0.5], [0.5, 1.0]]
+== ddof-0.99.frame-column-std
+[0.5, 1.0]
+== ddof--0.5.series-var
+[0.25, 0.25]
+== ddof--0.5.series-std
+[0.5, 0.5]
+== ddof--0.5.frame-var
+[[0.25, 0.25], [0.25, 1.0]]
+== ddof--0.5.frame-std
+[[0.5, 0.5], [0.5, 1.0]]
+== ddof--0.5.frame-column-std
+[0.5, 1.0]
+== ddof--1.series-var
+[0.16666666666666666, 0.16666666666666666]
+== ddof--1.series-std
+[0.408248290463863, 0.408248290463863]
+== ddof--1.frame-var
+[[0.16666666666666666, 0.16666666666666666], [0.16666666666666666, 0.6666666666666666]]
+== ddof--1.frame-std
+[[0.408248290463863, 0.408248290463863], [0.408248290463863, 0.816496580927726]]
+== ddof--1.frame-column-std
+[0.408248290463863, 0.816496580927726]
+== ddof--1.5.series-var
+[0.16666666666666666, 0.16666666666666666]
+== ddof--1.5.series-std
+[0.408248290463863, 0.408248290463863]
+== ddof--1.5.frame-var
+[[0.16666666666666666, 0.16666666666666666], [0.16666666666666666, 0.6666666666666666]]
+== ddof--1.5.frame-std
+[[0.408248290463863, 0.408248290463863], [0.408248290463863, 0.816496580927726]]
+== ddof--1.5.frame-column-std
+[0.408248290463863, 0.816496580927726]
+== ddof-True.series-var
+[0.5, 0.5]
+== ddof-True.series-std
+[0.7071067811865476, 0.7071067811865476]
+== ddof-True.frame-var
+[[0.5, 0.5], [0.5, 2.0]]
+== ddof-True.frame-std
+[[0.7071067811865476, 0.7071067811865476], [0.7071067811865476, 1.4142135623730951]]
+== ddof-True.frame-column-std
+[0.7071067811865476, 1.4142135623730951]
+== ddof-np.float64(1.5).series-var
+[0.5, 0.5]
+== ddof-np.float64(1.5).series-std
+[0.7071067811865476, 0.7071067811865476]
+== ddof-np.float64(1.5).frame-var
+[[0.5, 0.5], [0.5, 2.0]]
+== ddof-np.float64(1.5).frame-std
+[[0.7071067811865476, 0.7071067811865476], [0.7071067811865476, 1.4142135623730951]]
+== ddof-np.float64(1.5).frame-column-std
+[0.7071067811865476, 1.4142135623730951]
+== ddof-np.int64(1).series-var
+[0.5, 0.5]
+== ddof-np.int64(1).series-std
+[0.7071067811865476, 0.7071067811865476]
+== ddof-np.int64(1).frame-var
+[[0.5, 0.5], [0.5, 2.0]]
+== ddof-np.int64(1).frame-std
+[[0.7071067811865476, 0.7071067811865476], [0.7071067811865476, 1.4142135623730951]]
+== ddof-np.int64(1).frame-column-std
+[0.7071067811865476, 1.4142135623730951]
+== ddof-2.0.series-var
+[nan, nan]
+== ddof-2.0.series-std
+[nan, nan]
+== ddof-2.0.frame-var
+[[nan, nan], [nan, nan]]
+== ddof-2.0.frame-std
+[[nan, nan], [nan, nan]]
+== ddof-2.0.frame-column-std
+[nan, nan]
+== ddof-float32-half
+
+1    0.25
+2    0.25
+dtype: float32
+== ddof-1e+20.series-var
+!! OverflowError: Python int too large to convert to C long
+== ddof-1e+20.frame-std
+!! OverflowError: Python int too large to convert to C long
+== ddof-1180591620717411303424.series-var
+!! OverflowError: Python int too large to convert to C long
+== ddof-1180591620717411303424.frame-std
+!! OverflowError: Python int too large to convert to C long
+== ddof-nan.series-var
+!! ValueError: cannot convert float NaN to integer
+== ddof-nan.frame-std
+!! ValueError: cannot convert float NaN to integer
+== ddof-inf.series-var
+!! OverflowError: cannot convert float infinity to integer
+== ddof-inf.frame-std
+!! OverflowError: cannot convert float infinity to integer
+== ddof-'1'.series-var
+!! TypeError: an integer is required
+== ddof-'1'.frame-std
+!! TypeError: an integer is required
+== ddof-None.series-var
+!! TypeError: an integer is required
+== ddof-None.frame-std
+!! TypeError: an integer is required
+== ddof-(1+0j).series-var
+!! TypeError: an integer is required
+== ddof-(1+0j).frame-std
+!! TypeError: an integer is required
