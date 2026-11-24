@@ -1,0 +1,14 @@
+== from-package
+['sklearn.datasets', 'sklearn.utils', 'sklearn.model_selection', 'sklearn.tree', 'sklearn.metrics']
+== attribute
+('sklearn.datasets', 'sklearn.utils.validation')
+== alias
+(True, 'sklearn.preprocessing')
+== full-name
+('sklearn.model_selection', 'load_iris')
+== unknown
+!! AttributeError: Module 'sklearn' has no attribute 'no_such_module'
+== unknown-from
+('ImportError', "cannot import name 'no_such_module' from 'sklearn'")
+== version-type
+'str'

@@ -112,3 +112,18 @@ case("predict-wrong-n", lambda: Fits2().fit([[1, 2], [3, 4]], [0, 1]).predict([[
 case("predict-ok", lambda: Fits2().fit([[1, 2], [3, 4]], [0, 1]).predict([[5, 6]]))
 case("predict-renamed", lambda: Fits2().fit(df, [0, 1]).predict(pd.DataFrame({"b": [1.0], "a": [2.0]})))
 case("predict-extra-name", lambda: Fits2().fit(df, [0, 1]).predict(pd.DataFrame({"a": [1.0], "b": [2.0], "c": [0.0]})))
+
+
+# force_writeable: a read-only input comes back as a writeable copy; a writeable one is not copied
+def read_only():
+    a = np.arange(6.0).reshape(2, 3)
+    a.flags.writeable = False
+    return a
+
+
+case("force-writeable", lambda: (lambda a: (lambda r: (r.flags.writeable, r is a, a.flags.writeable, r.tolist()))(check_array(a, force_writeable=True)))(read_only()))
+case("force-writeable-off", lambda: (lambda a: (lambda r: (r.flags.writeable, r is a))(check_array(a)))(read_only()))
+case("force-writeable-no-copy", lambda: (lambda a: check_array(a, force_writeable=True) is a)(np.arange(6.0).reshape(2, 3)))
+case("force-writeable-copy-too", lambda: (lambda a: (lambda r: (r.flags.writeable, r is a))(check_array(a, force_writeable=True, copy=True)))(read_only()))
+case("force-writeable-xy", lambda: (lambda a: (lambda r: (r[0].flags.writeable, r[0] is a))(check_X_y(a, [0, 1], force_writeable=True)))(read_only()))
+case("force-writeable-frame", lambda: (lambda r: (r.flags.writeable, r.tolist()))(check_array(pd.DataFrame({"a": [1.0, 2.0]}), force_writeable=True)))
