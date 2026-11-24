@@ -8,9 +8,10 @@
 //   bun web/latex/test-latex-tikz.mjs
 import katex from "katex";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { renderTikz, TikzError, evalMath, colorRgb, TIKZ_LIMITS } from "./engine/tikz.mjs";
 import { Engine } from "./engine/pipeline.mjs";
-import { setKatex, tikzLabel } from "./engine/render.mjs";
+import { setKatex, tikzLabel, charWidthRenders } from "./engine/render.mjs";
 setKatex(katex.renderToString, katex.__renderToHTMLTree);
 
 const results = [];
@@ -23,8 +24,8 @@ const draw = (src, opts = { label }, r = R()) => renderTikz(src, opts, r);
 const named = (src) => { try { draw(src); return null; } catch (e) { return e instanceof TikzError ? e.why : "NOT NAMED: " + e?.message; } };
 // a hostile case in its own process (tikz-case.mjs), killed at a real deadline: {why, ms}, ms the child's own time
 const CASE = new URL("./tikz-case.mjs", import.meta.url).pathname;
-const guarded = (src, limits) => {
-  const r = spawnSync(process.execPath, [CASE], { input: JSON.stringify({ src, limits }), timeout: 10000, killSignal: "SIGKILL", maxBuffer: 1 << 20, encoding: "utf8" });
+const guarded = (src, limits, label = false) => {
+  const r = spawnSync(process.execPath, [CASE], { input: JSON.stringify({ src, limits, label }), timeout: 10000, killSignal: "SIGKILL", maxBuffer: 1 << 20, encoding: "utf8" });
   if (r.error || r.signal) return { why: "KILLED at the deadline (" + (r.signal || r.error?.code) + ")", ms: 10000 };
   try { return JSON.parse(r.stdout); } catch { return { why: "NO RESULT: " + String(r.stderr).slice(-200), ms: 0 }; }
 };
@@ -245,6 +246,44 @@ section("nodes", () => {
   const ht = draw("\\node[text=red, font=\\small] at (0,0) {A};"), st = /<span style="position:absolute;left:([\d.]+)pt;top:([\d.]+)pt;width:([\d.]+)pt;[^"]*"><span class="katex" style="line-height:0;font-size:([\d.]+)pt">/.exec(ht);
   check("node-text-placed", /color:rgb\(255,0,0\)/.test(ht) && st && near(+st[1], 3.333, 0.02) && near(+st[2], 3.333, 0.02) && near(+st[3], 7.5 * 0.9 * 1.028, 0.02) && near(+st[4], 9, 0.02), st);
   // styles on every node, labels, and a node's text KaTeX can't typeset, named
+  // a node's extent within the canvas's bounds, not only its centre; node text typeset within its total, each distinct
+  // character's width once; labels of labels refused by construction (KaTeX's text in the child, under the deadline)
+  const ext = ["\\node[minimum width=1e300pt] {A};", "\\node[minimum height=1e300pt] {A};", "\\node[scale=1e290] {A};", "\\node[inner sep=1e300pt] {A};"].map((src) => guarded(src, undefined, true));
+  check("node-extent-bounded", ext.every((g) => /^a point farther than/.test(g.why ?? "") && g.ms <= 1500), ext);
+  const nt = guarded("\\foreach \\i in {1,...,1999} {\\node at (0,\\i/100) {" + "word ".repeat(330) + "};}", undefined, true);
+  // (20,000 distinct characters, in 30 nodes of 2,500 each, each typeset once for its width however often it is used)
+  const cjkOf = (g) => Array.from({ length: 2500 }, (_, k) => String.fromCodePoint(0x4e00 + g * 2500 + k)).join("");
+  const cj = guarded(Array.from({ length: 30 }, (_, k) => "\\node at (0," + k + ") {" + cjkOf(k % 8) + "};").join(" "), undefined, true);
+  const lab = guarded("[every node/.style={label=x}] \\node {A};", undefined, true);
+  // the node count exactly at its bound (drawn) and one past (named)
+  const nn = (n) => guarded("\\foreach \\i in {1,...," + n + "} \\node at (0,0) {};");
+  const n2 = [nn(TIKZ_LIMITS.NODES), nn(TIKZ_LIMITS.NODES + 1)];
+  check("node-count-exact", n2[0].why === null && /^more than 2000 nodes in a picture$/.test(n2[1].why ?? ""), n2);
+  // node text's HTML, UTF-8 bytes, metered before it is kept: exactly at the total and one byte past (the total lowered for
+  // the row, the HTML a stub of 3-byte or 4-byte characters); a picture whose labels would make far more stops at the total,
+  // the most HTML ever kept never past it; one line of text over 8 KiB refused before it is typeset
+  const lh = [];
+  for (const ch of ["中", "𝑥"]) for (const n of [3, 4]) {
+    const g = guarded(Array.from({ length: n }, () => "\\node at (0,0) {x};").join(" "), { LABEL_HTML: 3000 }, { stub: fill(1000, ch) });
+    lh.push([ch, n, g, n === 3 ? g.why === null : /^node text past/.test(g.why ?? "") && g.labelPeak <= 3000]);
+  }
+  const many = guarded("\\foreach \\i in {1,...,1999} \\node {$\\sum_{k=1}^{n} k^2 = \\frac{n(n+1)(2n+1)}{6}$};", undefined, true);
+  const longLine = guarded("\\node {" + "word ".repeat(1700) + "};", undefined, true);
+  check("label-html-bounded", lh.every((x) => x[3]) && /^node text past 1 MiB of HTML in a picture$/.test(many.why ?? "") && many.labelPeak <= TIKZ_LIMITS.LABEL_HTML && many.ms <= 1500
+    && /^a line of a node's text over 8 KiB$/.test(longLine.why ?? "") && longLine.ms <= 1500, [lh.map((x) => [x[0], x[1], x[2].why, x[2].labelPeak]), many, longLine]);
+  // each distinct character typeset once for its width, however often used: 6,000 new ones, three times each
+  const fresh = Array.from({ length: 6000 }, (_, k) => String.fromCodePoint(0x6000 + k)).join(""), r0 = charWidthRenders.n;
+  for (let k = 0; k < 3; k++) draw(Array.from({ length: 3 }, (_, q) => "\\node at (0," + q + ") {" + fresh.slice(q * 2000, q * 2000 + 2000) + "};").join(" "));
+  check("char-widths-once", charWidthRenders.n - r0 === 6000, charWidthRenders.n - r0);
+  // the picture's own size, UTF-8 bytes (node text a stub of 3-byte characters, so bytes aren't characters): exactly at
+  // the cap drawn, a byte under it refused
+  const stub = { stub: "中".repeat(2000) }, ss = "\\node at (0,0) {x}; \\node at (1,0) {y};";
+  const B = bytes(draw(ss, { label: () => ({ html: stub.stub, w: 5, h: 5, d: 0 }) }));
+  const sb = [guarded(ss, { SVG_BYTES: B }, stub), guarded(ss, { SVG_BYTES: B - 1 }, stub)];
+  check("svg-cap-bytes-exact", sb[0].why === null && /^a picture over/.test(sb[1].why ?? ""), [B, sb]);
+  check("node-text-bounded", /^node text past 256 KiB in a picture$/.test(nt.why ?? "") && nt.ms <= 1500 && cj.why === null && cj.ms <= 1500 && /^labels of labels/.test(lab.why ?? "") && lab.ms <= 1500, [nt, cj, lab]);
+  // (the layout tree KaTeX exports privately, which the sizes are read from: here, and as the LaTeX build's math module exports it)
+  check("katex-layout-tree-exported", typeof katex.__renderToHTMLTree === "function" && /export \{[^}]*__renderToHTMLTree[^}]*\} from "katex"/.test(readFileSync(new URL("./math-dev.ts", import.meta.url), "utf8")), null);
   check("every-node-style", near(box(draw("[every node/.style={draw}] \\node at (0,0) {A};"))[2], 7.28297, 0.02) && named("\\node {$\\notacommand x$};") === "a node's text KaTeX can't typeset: $\\notacommand x$", named("\\node {$\\notacommand x$};"));
 });
 

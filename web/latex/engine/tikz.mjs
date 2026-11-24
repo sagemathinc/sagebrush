@@ -31,6 +31,10 @@ export const TIKZ_LIMITS = {
   SVG_BYTES: 2 * 2 ** 20,  // the picture's SVG
   SRC_MAX: 256 * 1024,     // a picture's source, and one \foreach body once its variables are replaced: UTF-8 bytes
   NODES: 2000,             // nodes in one picture, labels included (each one's text typeset by KaTeX)
+  NODE_TEXT: 256 * 1024,   // UTF-8 bytes of node text typeset in one picture, all nodes together (typesetting costs far
+                           // more per byte than reading)
+  LABEL_TEXT: 8 * 1024,    // UTF-8 bytes of one line of a node's text, before it is typeset (so one render is small)
+  LABEL_HTML: 2 ** 20,     // UTF-8 bytes of the HTML of a picture's node text, all together, metered as each is made
   TIKZSET: 64 * 1024,      // the document's \tikzset styles, all together (kept by render.mjs): UTF-8 bytes
 };
 
@@ -257,7 +261,7 @@ class Picture {
     this.markers = new Map();
     this.nodes = new Map();           // node name -> its geometry (canvas pt): {shape, c, hw, hh | r | rx, ry, os, base, edges}
     this.nodeList = [];               // nodes as drawn: {nd, name, lines, color, size}
-    this.nodeCount = 0; this.lastNode = null;
+    this.nodeCount = 0; this.nodeText = 0; this.labelHtml = 0; this.lastNode = null;
   }
   addBox(b) { this.box = this.box ? [Math.min(this.box[0], b[0]), Math.min(this.box[1], b[1]), Math.max(this.box[2], b[2]), Math.max(this.box[3], b[3])] : b; }
   // (every text read, the source's and each expansion's, counted in UTF-8 bytes: a body read again for each item is work
@@ -810,9 +814,18 @@ class Picture {
     const coord = spec.coordinate || st.shape === "coordinate";
     // the text box: its lines, each typeset by KaTeX at the node's font, stacked a baseline skip apart (TeX's vbox)
     const f = st.fsize, skip = 12 * f * sc;
+    // (a label's own node with labels of its own, from every node/.style: each label a node with a label, without end,
+    //  as in TeX)
+    if (spec.isLabel && st.labels.length) fail("labels of labels (a label= that every node/.style gives a label's own node too)");
     const lines = coord ? [] : textLines(spec.text ?? "").filter((ln) => ln).map((ln) => {
+      const nb = utf8Len(ln);
+      if (nb > TIKZ_LIMITS.LABEL_TEXT) fail("a line of a node's text over " + TIKZ_LIMITS.LABEL_TEXT / 1024 + " KiB");
+      if ((this.nodeText += nb) > TIKZ_LIMITS.NODE_TEXT) fail("node text past " + TIKZ_LIMITS.NODE_TEXT / 1024 + " KiB in a picture");
       if (!this.opts.label) fail("a node's text needs the preview's renderer");
       const r = this.opts.label(ln, { family: st.family });
+      // (its HTML metered as it is made, before it is kept: the total never past LABEL_HTML)
+      if ((this.labelHtml += utf8Len(r.html)) > TIKZ_LIMITS.LABEL_HTML) fail("node text past " + TIKZ_LIMITS.LABEL_HTML / 2 ** 20 + " MiB of HTML in a picture");
+      if (this.trace) this.trace.labelPeak = Math.max(this.trace.labelPeak || 0, this.labelHtml);
       return { html: r.html, w: r.w * f * designWidth(f) * sc, h: r.h * f * sc, d: r.d * f * sc };
     }).filter((l) => l.html);
     const tw = Math.max(0, ...lines.map((l) => l.w));
@@ -846,6 +859,8 @@ class Picture {
     if (st.placeShift) p = [p[0] + st.placeShift[0], p[1] + st.placeShift[1]];
     const av = anchorVec(nd, st.anchor || "center");
     nd.c = checkPt([p[0] - av[0], p[1] - av[1]]);
+    // (its extent too, not only its centre: a minimum width or a scale can make a node of any size)
+    const bb = borderBox(nd); checkPt([bb[0], bb[1]]); checkPt([bb[2], bb[3]]);
     const name = spec.name || st.name;
     if (name) { this.nodes.set(name, nd); this.named.set(name, nd.c); }
     if (coord) return nd;
@@ -868,6 +883,7 @@ class Picture {
     let y = top - (lines[0]?.h ?? 0);
     for (const l of lines) {
       l.x = left + (st.align === "left" ? 0 : st.align === "right" ? tw - l.w : (tw - l.w) / 2); l.base = y; y -= skip;
+      checkPt([l.x, l.base]); checkPt([l.x + l.w, l.base + l.h]);
     }
     this.nodeList.push({ nd, name, lines, color: st.text ?? st.color, size: f * sc });
     // its labels: label=[options]where:text, a node of its own at this node's border, its anchor facing this one
@@ -879,7 +895,7 @@ class Picture {
       const dir = lm ? lm[1] : "above", text = lm ? lm[2] : t;
       const at = Object.hasOwn(AWAY, dir) ? AWAY[dir] : dir;
       const facing = Object.hasOwn(PLACES, dir) ? OPPOSITE[dir] : String(+dir + 180);
-      this.node({ opts: [...lo, "anchor=" + facing], name: null, at: null, text: unbrace(text) }, { ...st0, labels: [] }, { canvas: this.anchorPt(nd, at) });
+      this.node({ opts: [...lo, "anchor=" + facing], name: null, at: null, text: unbrace(text), isLabel: true }, { ...st0, labels: [] }, { canvas: this.anchorPt(nd, at) });
     }
     return nd;
   }
@@ -971,9 +987,12 @@ class Picture {
     }
     // (its own inline styles, no stylesheet: the picture's box as TeX's, on the baseline; strokes past it shown. data-box:
     //  that box in TeX's coordinates, pt, x0 y0 x1 y1, for the tests and a later on-page correction)
-    const out = '<span class="tikz" data-box="' + [x0, y0, x1, y1].map(fmtNum).join(" ") + '" style="display:inline-block;position:relative;vertical-align:baseline;width:' + fmtNum(W) + "pt;height:" + fmtNum(H) + 'pt"><svg width="' + fmtNum(W) + 'pt" height="' + fmtNum(H) + 'pt" viewBox="0 0 ' + fmtNum(W) + " " + fmtNum(H) + '" style="display:block;overflow:visible">' +
-      (defs ? "<defs>" + defs + "</defs>" : "") + body + "</svg>" + texts + "</span>";
-    if (out.length > TIKZ_LIMITS.SVG_BYTES) fail("a picture over " + TIKZ_LIMITS.SVG_BYTES / 2 ** 20 + " MiB of SVG");
+    const head = '<span class="tikz" data-box="' + [x0, y0, x1, y1].map(fmtNum).join(" ") + '" style="display:inline-block;position:relative;vertical-align:baseline;width:' + fmtNum(W) + "pt;height:" + fmtNum(H) + 'pt"><svg width="' + fmtNum(W) + 'pt" height="' + fmtNum(H) + 'pt" viewBox="0 0 ' + fmtNum(W) + " " + fmtNum(H) + '" style="display:block;overflow:visible">' +
+      "";
+    // (the picture's size, UTF-8 bytes, from its parts before they are joined)
+    const size = utf8Len(head) + (defs ? 13 + utf8Len(defs) : 0) + utf8Len(body) + 6 + utf8Len(texts) + 7;
+    if (size > TIKZ_LIMITS.SVG_BYTES) fail("a picture over " + TIKZ_LIMITS.SVG_BYTES / 2 ** 20 + " MiB of SVG");
+    const out = head + (defs ? "<defs>" + defs + "</defs>" : "") + body + "</svg>" + texts + "</span>";
     return out;
   }
 }

@@ -28,6 +28,8 @@ const runOpts = (opts, cli, cwd, ...a) => new Promise((res) => {
 });
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 900)); };
+// (the CLI's KaTeX exports its layout tree, a private export the sizes of TikZ nodes' text are read from)
+check("cli-katex-layout-tree", /renderToHTMLTree/.test(readFileSync(new URL("../../build/cli/sagebrush-latex.cjs", import.meta.url).pathname, "utf8")), null);
 const dir = mkdtempSync(join(tmpdir(), "sb-latex-cli-"));
 
 const TALK = String.raw`\documentclass[aspectratio=169]{beamer}

@@ -193,6 +193,8 @@ class Flow {
 const FAMILY = { bold: "textbf", italic: "textit", sans: "textsf", mono: "texttt" };
 const SIZE_CLASS = [0, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.2, 1.44, 1.728, 2.074, 2.488];
 const CHAR_W = new Map();
+/** (how many characters charWidth has typeset alone: each distinct one once, while kept; for the tests) */
+export const charWidthRenders = { n: 0 };
 export function tikzLabel(text, font = {}, macros = {}, macroSig = "", stats = { katexErrors: 0, katexErrorSamples: [], katexWarnings: 0 }) {
   const fam = FAMILY[font.family] || "text";
   let src = "", i = 0, buf = "";
@@ -250,12 +252,16 @@ function charWidth(c, cls) {
   let w = CHAR_W.get(key);
   if (w === undefined) {
     const esc1 = /[#$%&_{}]/.test(c) ? "\\" + c : c === "\\" ? "\\textbackslash " : c === "^" ? "\\textasciicircum " : c === "~" ? "\\textasciitilde " : c;
+    charWidthRenders.n++;
     try {
       const t = renderToHTMLTree(fam === "mathnormal" ? esc1 : "\\" + (fam.startsWith("math") ? fam : fam === "text" ? "text" : fam) + "{" + esc1 + "}", { throwOnError: true, strict: "ignore" });
       w = treeWidth(t);
     } catch { w = 0; }
     if (!(w > 0)) w = 0.6;   // (a character KaTeX has no metrics for: an estimate that errs large)
-    if (CHAR_W.size < 4096) CHAR_W.set(key, w);
+    // (every character kept, so each distinct one is typeset once: a picture's are at most its NODE_TEXT; cleared when
+    //  large, between documents' worth)
+    if (CHAR_W.size >= 200000) CHAR_W.clear();
+    CHAR_W.set(key, w);
   }
   return w;
 }
