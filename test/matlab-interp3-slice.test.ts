@@ -280,6 +280,36 @@ test("single data: linear and nearest interpolation in single, as MATLAB R2026b 
   for (const want of EXACT_SINGLE) assert.equal(got.get(want.split("|")[0]), want);
 });
 
+// (MATLAB R2026b's rows for single queries, a single grid, the implicit grid, a complex single V and more points,
+// recorded 2026-11-24: one rule fits every value, each step in single, and a complex V's real and imaginary parts
+// each interpolated so)
+const PROGRAM_SINGLE_2 = [
+  "[X,Y] = meshgrid(0:4, 0:3); V = sin(1.7*X + 0.3).*cos(0.9*Y - 0.2) + X.*Y/7;",
+  "xq = mod((1:25)*0.6180339887498949,1)*4; yq = mod((1:25)*0.7548776662466927,1)*3;",
+  "r = interp2(X,Y,single(V),single(xq(1:8)),single(yq(1:8))); fprintf('q32|%s|%s\\n', class(r), sprintf('%.9g ', r));",
+  "r = interp2(single(X),single(Y),single(V),xq(1:8),yq(1:8)); fprintf('g32|%s|%s\\n', class(r), sprintf('%.9g ', r));",
+  "r = interp2(single(V),xq(1:8)+1,yq(1:8)+1); fprintf('impl|%s|%s\\n', class(r), sprintf('%.9g ', r));",
+  "r = interp2(X,Y,single(V + 1i*V.'.'),xq(1:8),yq(1:8)); fprintf('cplx|%s|%s\\n', class(r), sprintf('%.9g ', [real(r) imag(r)]));",
+  "r = interp2(X,Y,single(V),xq(9:25),yq(9:25)); fprintf('more|%s|%s\\n', class(r), sprintf('%.9g ', r));",
+  "[Xs,Ys,Zs] = meshgrid(0:4, 0:3, 0:5); Vs = sin(1.7*Xs + 0.3).*cos(0.9*Ys - 0.2) + exp(0.31*Zs)./(1 + Xs.^2);",
+  "W = single(Vs + 1i*cos(Vs)); a = interp3(Xs,Ys,Zs,W,xq(1:10),yq(1:10),mod((1:10)*0.5698402909980532,1)*5);",
+  "re = interp3(Xs,Ys,Zs,real(W),xq(1:10),yq(1:10),mod((1:10)*0.5698402909980532,1)*5); im = interp3(Xs,Ys,Zs,imag(W),xq(1:10),yq(1:10),mod((1:10)*0.5698402909980532,1)*5);",
+  "fprintf('i3cplx|%s|%d|%d|%d\\n', class(a), isreal(a), isequal(real(a), re), isequal(imag(a), im));",
+];
+const EXACT_SINGLE_2 = [
+  "q32|single|0.950269043 0.507833898 0.268167824 -0.341626316 -0.0243383981 0.424304157 0.533658385 0.439589739 ",
+  "g32|single|0.950269103 0.507833898 0.268167853 -0.341626316 -0.0243384168 0.424304187 0.533658326 0.43958962 ",
+  "impl|single|0.950269103 0.507833898 0.268167853 -0.341626316 -0.0243384168 0.424304187 0.533658326 0.43958962 ",
+  "cplx|single|0.950269103 0.507833898 0.268167853 -0.341626316 -0.0243384168 0.424304187 0.533658326 0.43958962 0.950269103 0.507833898 0.268167853 -0.341626316 -0.0243384168 0.424304187 0.533658326 0.43958962 ",
+  "more|single|0.956474662 0.355427921 0.0375576168 -0.00404506549 -0.0922347903 0.496553332 0.760223925 0.174153686 0.94543761 0.221001834 -0.132275864 0.309915304 1.15405822 0.551279545 0.70613873 -0.0818696022 0.798492491 ",
+  "i3cplx|single|0|1|1",
+];
+
+test("single data, complex single data and single queries: MATLAB R2026b's rows to the bit, and interp3's complex parts", () => {
+  const got = run(PROGRAM_SINGLE_2);
+  for (const want of EXACT_SINGLE_2) assert.equal(got.get(want.split("|")[0]), want);
+});
+
 test("query coordinates of single and double mixed: MATLAB R2026b's error, for interp3 and interp2 (#1835)", () => {
   const got = run([
     "[X,Y,Z] = meshgrid(0:4, 0:3, 0:5); V = X + Y + Z;",
