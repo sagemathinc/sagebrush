@@ -7570,15 +7570,13 @@ def _ff_poly(K, coeffs):
 # matrices and the other structures Magma's ChangeRing takes.
 
 def _cr_ring(R):
-    """Magma's univariate polynomial ring over R (Z, Q or a finite field)."""
+    """Magma's univariate polynomial ring over R (Z, Q or a finite field):
+    the session's own, PolynomialRing(R), as Magma 2.18-5's (P<x> :=
+    PolynomialRing(Rationals()); S := ChangeRing(P, Integers()); S eq
+    PolynomialRing(Integers()) is true, and S.1 prints as S.1)."""
     if isinstance(R, _MFinField):
         return _ffpoly_ring(R)
-    key = _fun_base_key(R)
-    S = _FUN_POLY_BY_BASE.get(key)
-    if S is None:
-        S = _sp.PolynomialRing_(_sp.ZZ if R is _ZZ else _sp.QQ, "$.1")
-        _fun_remember_poly(key, S)
-    return S
+    return PolynomialRing(R)
 
 
 def _cr_base(R):

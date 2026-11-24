@@ -1,0 +1,17 @@
+Univariate Polynomial Ring over Integer Ring
+S.1
+Mapping from: RngUPol: P to RngUPol: S
+true
+S.1
+S.1 + 1
+S.1^2 + 1
+Univariate Polynomial Ring over Integer Ring
+Univariate Polynomial Ring in y over Integer Ring
+y^2 + 1
+Univariate Polynomial Ring in y over Integer Ring
+Univariate Polynomial Ring in x over Rational Field
+true
+x
+x^2 + 1
+$.1^2 + 1
+end
