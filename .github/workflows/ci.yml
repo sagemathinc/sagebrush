@@ -73,6 +73,7 @@ jobs:
       web_share: ${{ steps.paths.outputs.web_share }}
       census: ${{ steps.paths.outputs.census }}
       unsafe_sweep: ${{ steps.paths.outputs.unsafe_sweep }}
+      kernels_fresh: ${{ steps.paths.outputs.kernels_fresh }}
       slow_tests: ${{ steps.paths.outputs.slow_tests }}
       slow_scope: ${{ steps.paths.outputs.slow_scope }}
       size_inputs: ${{ steps.paths.outputs.size_inputs }}
@@ -1610,6 +1611,29 @@ jobs:
           if grep -q ' rc=[1-9]' "$RUNNER_TEMP/sweep/timings.txt"; then tail -20 "$RUNNER_TEMP"/sweep/*.err; exit 1; fi
           node scripts/unsafe-inventory.mjs --check --compiler "$RUNNER_TEMP"/sweep/host-default.json "$RUNNER_TEMP"/sweep/host-features.json "$RUNNER_TEMP"/sweep/wasm.json "$RUNNER_TEMP"/sweep/windows.json --metadata "$RUNNER_TEMP/sweep/metadata.json"
 
+
+  # The numpy kernels (kernels/, kernels/relaxed/) are committed as base64 in src/runtime/kernels_wasm.ts so that
+  # building sagebrush needs no Rust: built again here on kernels/rust-toolchain.toml's toolchain, and the committed
+  # file must equal the fresh build (scripts/build-kernels.mjs --check), whenever their inputs change.
+  kernels-fresh:
+    needs: changes
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.kernels_fresh == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      # (kernels/rust-toolchain.toml's toolchain, installed explicitly from the file, as the clippy job does)
+      - name: the numpy kernels' committed build is a fresh one (scripts/build-kernels.mjs --check)
+        run: |
+          (cd kernels && rustup toolchain install && rustup show active-toolchain)
+          node scripts/build-kernels.mjs --check
+
   # The four WebAssembly modules, built once for the jobs that read wasm/ (design/wasm-artifacts.md section 4): on a
   # pull request that changes what they're built from or how they're handled (scripts/ci-paths.mjs, wasm_build), and
   # on every other event.  Uploaded with their manifest (this run, this commit) as wasm-modules-<sha>; the readers
@@ -2176,6 +2200,7 @@ jobs:
       - engine-cpython
       - engine-clippy
       - engine-unsafe-sweep
+      - kernels-fresh
       - webkit
       - examples
       - examples-census
@@ -2202,7 +2227,7 @@ jobs:
             ${{ needs.engine-node.result }} ${{ needs.engine-language.result }}
             ${{ needs.engine-modes.result }}
             ${{ needs.engine-cpython.result }}
-            ${{ needs.engine-clippy.result }} ${{ needs.engine-unsafe-sweep.result }}
+            ${{ needs.engine-clippy.result }} ${{ needs.engine-unsafe-sweep.result }} ${{ needs.kernels-fresh.result }}
             ${{ needs.examples.result }} ${{ needs.examples-census.result }}
             ${{ needs.webkit.result }}
             ${{ needs.export-controls.result }} ${{ needs.lookalike-controls.result }}

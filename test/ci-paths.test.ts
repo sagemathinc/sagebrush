@@ -542,6 +542,17 @@ test("the unsafe boundary's routes: every build input the scanner reads selects 
     assert.equal(classify([f]).unsafe_sweep, "false", f);
 });
 
+test("kernels_fresh: the numpy kernels' inputs, their committed build, the build script and the workflow select the freshness check; nothing else does", () => {
+  for (const f of ["kernels/src/libm.rs", "kernels/Cargo.toml", "kernels/Cargo.lock", "kernels/rust-toolchain.toml", "kernels/relaxed/src/lib.rs",
+    "kernels/relaxed/Cargo.toml", "scripts/build-kernels.mjs", "src/runtime/kernels_wasm.ts", ".github/workflows/ci.yml"])
+    assert.equal(classify([f]).kernels_fresh, "true", f);
+  for (const f of ["src/runtime/kernels.ts", "src/runtime/numpy.ts", "engine/nd/src/micro.rs", "scripts/build-engine.mjs", "design/plan.md", "newdir/unknown.xyz"])
+    assert.equal(classify([f]).kernels_fresh, "false", f);
+  // (every full run checks it: a queue group, a master push)
+  assert.equal(classify(["design/plan.md"], "", { GITHUB_EVENT_NAME: "merge_group", GITHUB_REF: "refs/heads/gh-readonly-queue/master/x" }).kernels_fresh, "true");
+  assert.equal(classify(["design/plan.md"], "", { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" }).kernels_fresh, "true");
+});
+
 test("the full tier on a pull request: the full-ci label, or a sync, sharing, security or data-loss path (CI speed plan option 2)", () => {
   // one path of each class selects the full tier, and with it every suite, the WebKit job included
   for (const f of [

@@ -347,6 +347,11 @@ const unsafeSweepPaths = [
   /^\.github\/workflows\/ci\.yml$/,
 ];
 const unsafeSweep = full || matches(unsafeSweepPaths);
+// The numpy kernels' freshness (kernels-fresh: build-kernels.mjs --check): the committed base64 in
+// src/runtime/kernels_wasm.ts against a fresh build, whenever what it is built from or with changes, or
+// the file itself, and on every full run.
+const kernelsFreshPaths = [/^kernels\//, /^scripts\/build-kernels\.mjs$/, /^src\/runtime\/kernels_wasm\.ts$/, /^\.github\/workflows\/ci\.yml$/];
+const kernelsFresh = full || matches(kernelsFreshPaths);
 // The engine's full passes (engine-node, engine-language, engine-modes: the Node, language and mode suites again, on the
 // engine built in this run): every master or track/** integration push, a pull request whose changes rebuild the engine (wasm_build), and the
 // long tier.  Another pull request's engine is byte-identical to the published pin its ordinary suites already ran on,
@@ -455,6 +460,7 @@ const outputs = {
   web_share: webShare,
   census,
   unsafe_sweep: unsafeSweep,
+  kernels_fresh: kernelsFresh,
   slow_tests: slowTests,
   slow_scope: slowScope,
   // (the size comparison's own inputs: never docs-only)
@@ -476,7 +482,7 @@ const outputs = {
 const queueTested = event === "push" && ref === "refs/heads/master" && process.env.CI_QUEUE_TESTED === "true";
 if (queueTested) {
   for (const key of ["full", "node", "web", "modes", "engine_smoke", "engine_full", "engine_cpython", "webkit", "web_runner", "web_export",
-    "web_lookalike", "web_share", "census", "unsafe_sweep", "slow_tests", "size_inputs"]) outputs[key] = false;
+    "web_lookalike", "web_share", "census", "unsafe_sweep", "kernels_fresh", "slow_tests", "size_inputs"]) outputs[key] = false;
   Object.assign(outputs, { web_groups: "[]", web_matrix: "[]", examples_ids: "[]", examples_matrix: "[]", slow_scope: "" });
 }
 outputs.queue_tested = queueTested;
@@ -490,7 +496,7 @@ const prLight = event === "pull_request" && process.env.CI_PR_LIGHT === "true" &
 if (prLight) {
   const checksRan = outputs.node === true || outputs.web === true || outputs.size_inputs === true;
   for (const key of ["full", "node", "web", "modes", "engine_smoke", "engine_full", "engine_cpython", "webkit", "web_runner", "web_export",
-    "web_lookalike", "web_share", "census", "unsafe_sweep", "slow_tests"]) outputs[key] = false;
+    "web_lookalike", "web_share", "census", "unsafe_sweep", "kernels_fresh", "slow_tests"]) outputs[key] = false;
   Object.assign(outputs, { web_groups: "[]", web_matrix: "[]", examples_ids: "[]", examples_matrix: "[]", slow_scope: "" });
   // (checks and size-base run on size_inputs; where checks would have run, they still do, and the gate measures)
   outputs.size_inputs = checksRan;

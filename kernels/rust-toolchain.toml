@@ -1,0 +1,10 @@
+# The exact Rust toolchain that builds the numpy kernels (kernels/ and kernels/relaxed/), embedded as
+# base64 in src/runtime/kernels_wasm.ts by scripts/build-kernels.mjs.  CI's kernels-fresh job builds
+# them again and fails if the committed file differs (build-kernels.mjs --check), so a fresh build must
+# be byte for byte the same: bumping this is a deliberate pull request that also commits the rebuilt
+# file.  The same toolchain as engine/rust-toolchain.toml's.  rustup reads this file for every cargo
+# command under kernels/, local builds included.
+[toolchain]
+channel = "1.99.1"
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"
