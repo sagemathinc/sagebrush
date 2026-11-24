@@ -1,8 +1,8 @@
 #!/bin/bash
 # Regenerate the oracle outputs of optional/sklearn/tests:
-#   bash optional/sklearn/tests/gen-oracle.sh [VENV]
-# VENV defaults to /scratch/numeric-review/sk/venv, the numeric review's
-# CPython venv with scikit-learn 1.9.1 (tests/ORACLE.md records it).
+#   bash optional/sklearn/tests/gen-oracle.sh VENV     (or with $VENV set)
+# VENV is a venv with scikit-learn 1.9.1 whose interpreter and packages are
+# exactly those tests/oracle-env.txt records (tests/ORACLE.md).
 #
 # It refuses (exit 1, nothing written) unless the oracle reports exactly the
 # pinned environment, tests/oracle-env.txt. Then, for each test_*.py not listed
@@ -11,7 +11,12 @@
 # that stdout alone, which `optional-packages.mjs test` compares with Sagebrush's.
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
-PY="${1:-/scratch/numeric-review/sk/venv}/bin/python"
+VENV="${1:-${VENV:-}}"
+if [ -z "$VENV" ]; then
+  echo "usage: bash optional/sklearn/tests/gen-oracle.sh VENV   (a venv with scikit-learn 1.9.1; or set \$VENV)" >&2
+  exit 2
+fi
+PY="$VENV/bin/python"
 ENV_NOW=$(mktemp)
 trap 'rm -f "$ENV_NOW"' EXIT
 "$PY" -I - > "$ENV_NOW" <<'PYEOF'
