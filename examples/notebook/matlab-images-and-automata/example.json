@@ -1,0 +1,16 @@
+{
+ "title": "Images and cellular automata (MATLAB)",
+ "summary": "A matrix as an image, blurring and edge detection with conv2, Conway's Game of Life and a glider, and the one-dimensional rule 30.",
+ "tags": [
+  "plots",
+  "programming"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "matlab",
+ "author": "Sagebrush",
+ "license": "MIT"
+}
