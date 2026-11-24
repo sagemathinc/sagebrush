@@ -172,10 +172,79 @@ ok(await until(`(${F})?.space3d?.space?.nodes?.length >= 4`, 30000), "opened aga
 const many = await inFrame(`(async () => {
   const one = (rid) => new Promise((res) => { const h = (e) => { if (e.data?.sagebrush === "space-file" && e.data.id === rid) { removeEventListener("message", h); res(e.data.error ?? "read"); } };
     addEventListener("message", h); window.parent.postMessage({ sagebrush: "space-read", version: 1, id: rid, path: "b.py" }, location.origin); });
-  const out = await Promise.all(Array.from({ length: 2010 }, (_, k) => one(20000 + k)));
+  const out = [];
+  for (let b = 0; b < 2010; b += 50) out.push(...(await Promise.all(Array.from({ length: Math.min(50, 2010 - b) }, (_, k) => one(20000 + b + k)))));
   return { read: out.filter((x) => x === "read").length, refused: out.filter((x) => x.includes("too many files read")).length, last: out.at(-1) };
 })()`, 120000);
 ok(many?.read === 2000 && many.refused === 10 && /too many files read/.test(many.last), "a new opening reads 2,000 files, and is told so after that", many);
+
+// ---- how the page reads for the view: one read at a time, each within what the opening has left, none after Close.
+//      (The workspace's reads counted: its class's readUpTo and read, wrapped)
+await ev(`(async () => {
+  const m = await import(new URL("/sagebrush-space3d.js", location.href).href), n = (window.__reads = { calls: 0, now: 0, max: 0, paths: [] });
+  m.SPACE3D_TESTING.reading = (p, d) => { if (d > 0) { n.calls++; n.now++; n.max = Math.max(n.max, n.now); n.paths.push(p); } else n.now--; };
+  return true;
+})()`);
+const reopen = async (folder = FOLDER_MORE) => {
+  await ev(`[...document.querySelectorAll("button")].find((b) => b.textContent.includes("Close") && b.closest("[role=dialog]"))?.click(), true`);
+  await until(`!document.querySelector('iframe[src*="/space/"]')`, 3000);
+  await ev(`(async () => { ${folder}.click(); await new Promise((r) => setTimeout(r, 300)); [...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent.trim().startsWith("Open")).click(); return 1; })()`);
+  return until(`(${F})?.space3d?.space?.nodes?.length >= 1 && !/reading the folder/.test([...document.querySelectorAll("[role=dialog] span")].map((x) => x.textContent).join())`, 60000);
+};
+const askMany = (path, n, base) => inFrame(`(async () => {
+  const one = (rid) => new Promise((res) => { const h = (e) => { if (e.data?.sagebrush === "space-file" && e.data.id === rid) { removeEventListener("message", h); res(e.data.error ?? "read"); } };
+    addEventListener("message", h); window.parent.postMessage({ sagebrush: "space-read", version: 1, id: rid, path: ${JSON.stringify(path)} }, location.origin); });
+  return Promise.all(Array.from({ length: ${n} }, (_, k) => one(${base} + k)));
+})()`, 120000);
+ok(await reopen(), "opened again, for the reading rows");
+await ev(`(window.__reads.calls = 0, window.__reads.max = 0, window.__reads.paths = [], true)`);
+const burst = await askMany("b.py", 100, 30000);
+const rd = await ev(`window.__reads`);
+const told = burst.filter((x) => /too many files asked for at once/.test(x)).length;
+ok(rd.calls > 0, "the counter sees the view's reads", rd.calls);
+ok(rd.max === 1 && burst.filter((x) => x === "read").length + told === 100 && told > 0, "100 asked at once: read one at a time, those past the 64 waiting told to try again", { max: rd.max, told });
+// (the opening's 64 MiB, reserved before each read: sixteen files of exactly 4 MiB, then the seventeenth isn't read at all)
+await ev(`window.sagebrush.workspace.create("/proj/four.txt", { content: "x".repeat(4 << 20) }).then(() => true)`, 60000);
+ok(await reopen(), "opened again, for the bytes row");
+await ev(`(window.__reads.calls = 0, window.__reads.paths = [], true)`);
+const sixteen = [];
+for (let k = 0; k < 17; k++) sixteen.push((await askMany("four.txt", 1, 31000 + k))[0]);
+const fourReads = await ev(`window.__reads.paths.filter((p) => p.endsWith("four.txt")).length`);
+ok(sixteen.slice(0, 16).every((x) => x === "read") && /too much read in this view/.test(sixteen[16]) && fourReads === 16, "16 files of 4 MiB fill the opening's 64 MiB; the 17th is refused before it is read", { last: sixteen[16], fourReads });
+// (Close with reads waiting: none of them is read after it)
+ok(await reopen(), "opened again, for the Close row");
+await ev(`(window.__reads.paths = [], true)`);
+void inFrame(`(() => { for (let k = 0; k < 30; k++) window.parent.postMessage({ sagebrush: "space-read", version: 1, id: 32000 + k, path: "four.txt" }, location.origin); return true; })()`);
+await until(`window.__reads.paths.filter((p) => p.endsWith("four.txt")).length >= 1`, 10000);
+await ev(`[...document.querySelectorAll("button")].find((b) => b.textContent.includes("Close") && b.closest("[role=dialog]"))?.click(), true`);
+const atClose = await ev(`window.__reads.paths.filter((p) => p.endsWith("four.txt")).length`);
+await sleep(3000);
+const afterClose = await ev(`window.__reads.paths.filter((p) => p.endsWith("four.txt")).length`);
+ok(afterClose <= atClose + 1 && afterClose < 30, "Close with 30 reads waiting: no more of them are read", { atClose, afterClose });
+
+// ---- the folder's scan, within its own bounds: a file read as it is now (its listed size understated: not read
+//      whole), a notebook over 1 MiB (its length from its kind), a file's imports kept to 200
+await ev(`(async () => {
+  const w = window.sagebrush.workspace;
+  await w.mkdir("/scan");
+  await w.create("/scan/lines.txt", { content: "x\\n" });
+  await w.create("/scan/big.ipynb", { content: { cells: [{ id: "a", code: "x = 1\\n" + "#".repeat(3 << 19) }] }, mode: "python" });
+  await w.create("/scan/huge.ipynb", { content: { cells: [{ id: "a", code: "#".repeat(5 << 20) }] }, mode: "python" });
+  await w.create("/scan/small.ipynb", { content: { cells: [{ id: "a", code: "x = 1\\ny = 2" }] }, mode: "python" });
+  await w.create("/scan/many.py", { content: Array.from({ length: 300 }, (_, i) => "import m" + i).join("\\n") + "\\n" });
+  // (lines.txt, listed at 2 bytes, is 2 MiB by the time the scan reads it)
+  const m = await import(new URL("/sagebrush-space3d.js", location.href).href), count = m.SPACE3D_TESTING.reading;
+  m.SPACE3D_TESTING.reading = async (p, d) => { if (d > 0 && p === "/scan/lines.txt") await w.write(p, "x\\n".repeat(1 << 20)); return count?.(p, d); };
+  return true;
+})()`, 60000);
+await until(`!!document.querySelector('#wssidebar .frow[data-path="/scan"]')`, 10000);
+const SCAN_MORE = `[...(document.querySelector('#wssidebar .frow[data-path="/scan"]')?.querySelectorAll("button") ?? [])].find((b) => b.textContent.trim() === "⋯")`;
+ok(await reopen(SCAN_MORE), "the scan folder opens");
+const tree = await ev(`(() => { const t = ${F}.space3d.space.tree ?? ${F}.space3d.space._tree; const f = Object.fromEntries((t?.files ?? []).map((x) => [x[0], x[1]])); return { f, imports: (t?.pyimports?.["many.py"] ?? []).length }; })()`);
+ok(tree.f["lines.txt"] === 1, "a file listed at 2 bytes but 2 MiB when it is read isn't read whole: its length is its listed size's, not its 1,048,576 lines", tree.f["lines.txt"]);
+ok(tree.f["big.ipynb"] === 40 && tree.f["small.ipynb"] === 3, "a notebook over 1 MiB keeps its kind's length; a small one is counted", [tree.f["big.ipynb"], tree.f["small.ipynb"]]);
+ok(tree.imports === 200, "a file's imports: 200 kept of 300", tree.imports);
+ok(/too large to read here \(over 4\.0 MiB\)/.test((await askMany("huge.ipynb", 1, 33000))[0]), "a notebook over 4 MiB, asked for, is refused before anything of it is sent", (await askMany("huge.ipynb", 1, 33001))[0]);
 
 // ---- Close
 await ev(`[...document.querySelectorAll("button")].find((b) => b.textContent.includes("Close") && b.closest("[role=dialog]"))?.click(), true`);

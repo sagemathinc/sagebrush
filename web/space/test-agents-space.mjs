@@ -186,6 +186,48 @@ await sleep(2000);
 const after = JSON.parse(textOf(await call("workspace.read", { path })));
 ok(after.nodes.some((x) => x.id === "later") && after.selected === pick.id, "the agent's newer write is kept, and the selection is on it", { selected: after.selected, n: after.nodes.length });
 
+// ---- a selection held just before its write, the agent writing meanwhile: the write on the old revision is refused,
+//      the file read again, and the selection put on the agent's newer text
+await ev(`(async () => {
+  const m = await import(new URL("/sagebrush-space3d.js", location.href).href);
+  window.__held = false;
+  m.SPACE3D_TESTING.beforeSelectionWrite = () => new Promise((r) => { window.__held = true; window.__release = () => { m.SPACE3D_TESTING.beforeSelectionWrite = null; r(); }; });
+  return true;
+})()`);
+const read4 = await call("workspace.read", { path });
+const held = space.nodes.find((x) => x.kind === "note").id;
+await post({ id: held });
+await until(`window.__held === true`, 10000);
+const fourth = { ...JSON.parse(textOf(read4)), nodes: [...JSON.parse(textOf(read4)).nodes, { id: "newer", kind: "note", title: "Written while the selection waited" }] };
+await call("workspace.write", { path, content: { text: JSON.stringify(fourth, null, 1) }, base: read4.rev });
+await until(`(${W}).space.nodes.some((x) => x.id === "newer")`, 10000);
+await ev(`(window.__release(), true)`);
+await sleep(2000);
+const after4 = JSON.parse(textOf(await call("workspace.read", { path })));
+ok(after4.nodes.some((x) => x.id === "newer") && after4.selected === held, "a selection written on an old revision is refused, and made again on the agent's newer text, which is kept", { selected: after4.selected, newer: after4.nodes.some((x) => x.id === "newer") });
+
+// ---- a .space.json larger than a space may be isn't read whole: the pane says so
+//      (written by the person, in another tab: an agent's write is at most 8 MiB a call)
+const bigPath = "/huge.space.json";
+{
+  const tab = await fetch(`http://127.0.0.1:${cdpPort}/json/new?${encodeURIComponent(site + "/")}`, { method: "PUT" }).then((r) => r.json());
+  const c2 = new WebSocket(tab.webSocketDebuggerUrl);
+  await new Promise((r) => (c2.onopen = r));
+  let k = 0;
+  const w2 = new Map();
+  c2.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && w2.has(m.id)) { w2.get(m.id)(m.result ?? m.error); w2.delete(m.id); } };
+  const ev2 = (expression) => Promise.race([new Promise((r) => { const id = ++k; w2.set(id, r); c2.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } })); }), sleep(30000).then(() => ({ timeout: true }))]);
+  for (let t0 = Date.now(); Date.now() - t0 < 30000; await sleep(200)) if ((await ev2(`!!window.sagebrush?.workspace`))?.result?.value) break;
+  const made = await ev2(`window.sagebrush.workspace.create(${JSON.stringify(bigPath)}, { content: JSON.stringify({ format: "sagebrush-space", version: 1, nodes: [{ id: "a", kind: "note", title: "a", text: "x".repeat(9 << 20) }] }) }).then(() => "made", (e) => String(e))`);
+  ok(made?.result?.value === "made", "a 9 MiB .space.json is made in another tab", made);
+  c2.close();
+}
+const t2 = `t${++turnN}`;
+event(t2, { type: "turn_started" });
+event(t2, { type: "artifact", id: bigPath, kind: "code", lang: "json", title: "huge.space.json", path: bigPath, body: "" });
+event(t2, { type: "turn_finished", outcome: "completed" });
+ok(await until(`/Too large to show \\(over 8 MiB\\)/.test(document.querySelector('#artifacts .pane-host:not([hidden]) .file-path')?.textContent ?? '')`, 20000).catch(() => false), "a 9 MiB .space.json: too large to show, and not read whole");
+
 // ---- the pane reads no files for the view
 const refused = await inFrame(`new Promise((res) => { const h = (e) => { if (e.data?.sagebrush === "space-file" && e.data.id === 7001) { removeEventListener("message", h); res(e.data.error ?? "read"); } };
   addEventListener("message", h); window.parent.postMessage({ sagebrush: "space-read", version: 1, id: 7001, path: "intro.space.json" }, location.origin);

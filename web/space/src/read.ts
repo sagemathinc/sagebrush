@@ -90,6 +90,9 @@ function measure(root, lim) {
 }
 // (the size of a value as compact JSON, in UTF-8 bytes, as measure counts it: for tests)
 export const jsonSize = (v) => measure(v, { values: Infinity, depth: Infinity, string: Infinity, bytes: Infinity });
+// (a value's size as compact JSON, walked within limits ({ values, depth, string, bytes }): it stops, throwing, at the
+//  first one passed, so a value too large is never walked whole; for what the page around the view reads for it)
+export const jsonSizeWithin = (v, lim: { values: number; depth: number; string: number; bytes: number }) => measure(v, lim);
 // (a space, checked whole, wherever it came from (a URL, the page around, the page's API): a JSON value within the
 //  limits, its size as compact JSON LIMITS.bytes at most (UTF-8: every value and every structural byte), of the
 //  format, with at most LIMITS.nodes objects)

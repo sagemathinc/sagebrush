@@ -9,7 +9,10 @@
 import { cellNames, ELLIPSIS_BUDGET } from "./pyroom.ts";
 import { layered } from "./roomlayout.ts";
 import { SCENE } from "./run.ts";
-import { checkSpace, utf8Bytes, ROOM_TEXT } from "./read.ts";
+import { checkSpace, utf8Bytes, ROOM_TEXT, LIMITS } from "./read.ts";
+
+// (how many cells were given to the parser: the tests' sentinel that a notebook refused is refused before any is)
+export const parsed = { cells: 0 };
 
 const joinText = (t) => (Array.isArray(t) ? t.join("") : String(t ?? ""));
 // (a cell's outputs as an object keeps them: its text, an error, its last figure, a 3D scene)
@@ -36,15 +39,19 @@ const firstLine = (code) => (String(code).split("\n").find((l) => l.trim() && !/
 
 export function notebookRoom(nb, { path = "" } = {}) {
   const mode = String(nb.mode ?? "python"), parses = mode === "python" || mode === "sage";
-  const cells = (Array.isArray(nb.cells) ? nb.cells : []).filter((c) => c && typeof c === "object");
-  // (all its code together, and Sage's work on its ranges, within a file's room's limits: else it isn't entered)
+  // (admitted before anything of it is parsed, its outputs read or laid out: at most as many cells as a space may have
+  //  objects, and all its code together, and Sage's work on its ranges, within a file's room's limits; the count
+  //  stops at the first cell past them)
+  const all = Array.isArray(nb.cells) ? nb.cells : [];
+  if (all.length > LIMITS.nodes) throw new Error(`it has more than ${LIMITS.nodes} cells`);
+  const cells = all.filter((c) => c && typeof c === "object");
   let bytes = 0, work = 0;
   for (const c of cells) {
     const code = String(c.code ?? ""), n = utf8Bytes(code);
     bytes += n;
     if (mode === "sage") work += (code.split("..").length - 1) * n;
+    if (bytes > ROOM_TEXT || work > ELLIPSIS_BUDGET) throw new Error("it's too long to enter here");
   }
-  if (bytes > ROOM_TEXT || work > ELLIPSIS_BUDGET) throw new Error("it's too long to enter here");
   const nodes = [], edges = [], definer = new Map(); // (a name -> the last cell so far that defines it)
   let n = 0, pendingNote = null;
   const used = new Set();
@@ -63,6 +70,7 @@ export function notebookRoom(nb, { path = "" } = {}) {
     }
     n++;
     const code = String(c.code ?? "");
+    if (parses) parsed.cells++;
     const names = parses ? cellNames(code, { sage: mode === "sage" }) : null;
     const first = firstLine(code);
     const nd: any = { id, kind: "code", cell: true, lang: mode, title: `[${n}] ${first.length > 48 ? first.slice(0, 45) + "…" : first || "(empty)"}`,

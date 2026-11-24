@@ -10,13 +10,31 @@
 // Every message is checked: from the frame's own window, of this origin, version 1.
 import type { Entry, Workspace } from "./api";
 import { TRASH, nameOf, within } from "./paths";
-import { LIMITS, utf8Bytes } from "../space/src/read.ts";
+import { LIMITS, checkSpace, jsonSizeWithin, utf8Bytes } from "../space/src/read.ts";
 
 // (text files whose lines are counted, and whose imports are read; others get a length from their size)
 const TEXT = /\.(py|sage|pyx|ts|mts|tsx|js|mjs|rs|m|magma|md|txt|tex|bib|json|toml|ya?ml|sh|html|css|csv|gp|g|jl|r|c|h|cc|cpp|hpp|space\.json)$/i;
-// (what Open in 3D reads to draw a folder, and what the viewer may then ask for: the files read for their lengths,
-//  the largest of them; the largest file sent, and per opening, the files and bytes sent in all; a path's length)
-export const SPACE3D_LIMITS = { lengths: 2000, lengthBytes: 1 << 20, file: 4 << 20, reads: 2000, bytes: 64 << 20, path: 4096 };
+// (what Open in 3D reads to draw a folder, and what the viewer may then ask for. To draw it: the files read for their
+//  lengths, the largest of them (a text file's bytes, or a notebook's size as JSON, when it is read), and all they
+//  come to; a file's imports kept, and all of them. Then: the largest file sent, and per opening, the files and bytes
+//  sent in all, and the reads waiting (they are read one at a time); a path's length)
+export const SPACE3D_LIMITS = {
+  lengths: 2000, lengthBytes: 1 << 20, lengthsBytes: 64 << 20, imports: 200, importsAll: 20000, importName: 256,
+  file: 4 << 20, reads: 2000, bytes: 64 << 20, waiting: 64, path: 4096,
+};
+// (a notebook as read, walked within these before anything of it is copied: its values, depth and each text)
+const NB_WALK = { values: LIMITS.values, depth: LIMITS.depth, string: LIMITS.string };
+// (for the browser tests only, set by a script of this site's own origin, which could read and write the files itself
+//  anyway: `reading`, told when each of this module's reads of the workspace begins (+1, awaited, so a test can change
+//  the file just before it is read) and ends (-1), so a test can count them and see how many run at once; `beforeSelectionWrite`, a pause just before a selection is written, once
+//  its text and revision are taken, so a test can write the file meanwhile and see the write refused on the old
+//  revision and made again on the new)
+export const SPACE3D_TESTING: { reading: null | ((path: string, d: 1 | -1) => void | Promise<void>); beforeSelectionWrite: null | (() => Promise<void>) } = { reading: null, beforeSelectionWrite: null };
+const reading = async <T>(path: string, f: () => Promise<T>): Promise<T> => {
+  await SPACE3D_TESTING.reading?.(path, 1);
+  try { return await f(); } finally { SPACE3D_TESTING.reading?.(path, -1); }
+};
+const MiB = (n: number) => `${(n / 2 ** 20).toFixed(1)} MiB`;
 // (from X import a, b; from X import (a,\n b); import a.b, c)
 const PYIMP = /^[ \t]*(?:from[ \t]+(\.*[\w.]*)[ \t]+import[ \t]+(?:\(([^)]*)\)|([\w., \t*]+))|import[ \t]+([\w., \t]+))/gm;
 
@@ -30,13 +48,15 @@ const frameOf = (title: string) => {
   return frame;
 };
 
-/** A Python file's imports, as [module, ...names taken from it] (resolved to files by the viewer). */
+/** A Python file's imports, as [module, ...names taken from it] (resolved to files by the viewer): at most
+ *  SPACE3D_LIMITS.imports of them, names of at most SPACE3D_LIMITS.importName characters (longer ones are left out). */
 function pyImports(text: string): string[][] {
-  const out: string[][] = [];
+  const out: string[][] = [], ok = (n: string) => n.length <= SPACE3D_LIMITS.importName;
   for (const m of text.matchAll(PYIMP)) {
-    if (m[4]) { for (const name of m[4].split(",")) { const mod = name.trim().split(/\s+/)[0]; if (mod) out.push([mod]); } continue; }
-    const names = (m[2] ?? m[3] ?? "").replace(/#.*$/gm, "").split(",").map((s) => s.trim().split(/\s+/)[0]).filter((s) => s && s !== "*");
-    out.push([m[1], ...names]);
+    if (out.length >= SPACE3D_LIMITS.imports) break;
+    if (m[4]) { for (const name of m[4].split(",")) { const mod = name.trim().split(/\s+/)[0]; if (mod && ok(mod) && out.length < SPACE3D_LIMITS.imports) out.push([mod]); } continue; }
+    const names = (m[2] ?? m[3] ?? "").replace(/#.*$/gm, "").split(",").map((s) => s.trim().split(/\s+/)[0]).filter((s) => s && s !== "*" && ok(s)).slice(0, SPACE3D_LIMITS.imports);
+    if (ok(m[1])) out.push([m[1], ...names]);
   }
   return out;
 }
@@ -99,65 +119,103 @@ export async function openIn3D(ws: Workspace, folder: string): Promise<void> {
       const e = entries[k];
       return (e.kind === "file" && TEXT.test(e.path) && (e.size ?? 0) <= SPACE3D_LIMITS.lengthBytes) || e.kind === "notebook";
     }).slice(0, SPACE3D_LIMITS.lengths);
-    if (todo.length > 100) { space = make(); send(); }
-    let next = 0, read = 0;
+    // (the space, checked whole as the viewer will check it, before it is sent: else nothing is sent, and that is said)
+    const ship = () => {
+      const s = make();
+      try { checkSpace(s); } catch (err) { state.textContent = `this folder is too large to show: ${(err as Error).message}`; return false; }
+      space = s;
+      send();
+      return true;
+    };
+    if (todo.length > 100 && !ship()) return;
+    // (eight at a time; each read's largest size reserved from the reading's total before it starts, and a file read
+    //  as it is now, its bytes capped (readUpTo), so one that grew since it was listed isn't read whole)
+    let next = 0, read = 0, reserved = 0, imports = 0;
     const worker = async () => {
       while (alive && next < todo.length) {
+        if (reserved + SPACE3D_LIMITS.lengthBytes > SPACE3D_LIMITS.lengthsBytes) break;
         const k = todo[next++], e = entries[k];
+        reserved += SPACE3D_LIMITS.lengthBytes;
+        let used = SPACE3D_LIMITS.lengthBytes;
         try {
-          const r = await ws.read(e.path);
           if (e.kind === "notebook") {
+            const r = await reading(e.path, () => ws.read(e.path));
+            used = jsonSizeWithin(r.content, { ...NB_WALK, bytes: SPACE3D_LIMITS.lengthBytes });
             const cells = Array.isArray(r.content?.cells) ? (r.content.cells as unknown[]) : [];
             files[k][1] = Math.max(1, cells.reduce((s: number, c) => s + lineCount(String((c as { code?: unknown } | null)?.code ?? "")) + 1, 0));
           } else {
+            const r = await reading(e.path, () => ws.readUpTo(e.path, SPACE3D_LIMITS.lengthBytes));
+            used = r.content.byteLength;
             const t = decode(r.content);
             files[k][1] = lineCount(t);
-            if (/\.(py|sage)$/i.test(e.path)) pyimports[files[k][0]] = pyImports(t);
+            if (/\.(py|sage)$/i.test(e.path) && imports < SPACE3D_LIMITS.importsAll) {
+              const found = pyImports(t).slice(0, SPACE3D_LIMITS.importsAll - imports);
+              imports += found.length;
+              pyimports[files[k][0]] = found;
+            }
           }
-        } catch { /* (its contents aren't in this browser: its size will do) */ }
+        } catch { /* (its contents aren't in this browser, or are too large now: its size will do) */ }
+        reserved -= SPACE3D_LIMITS.lengthBytes - Math.min(used, SPACE3D_LIMITS.lengthBytes);
         if (++read % 50 === 0) state.textContent = `reading the folder… ${read} of ${todo.length} files`;
       }
     };
     await Promise.all(Array.from({ length: 8 }, worker));
-    if (!alive) return;
-    space = make();
+    if (!alive || !ship()) return;
     state.textContent = files.length ? "" : "this folder has no files";
-    send();
   })().catch((e) => { if (alive) state.textContent = `couldn't read the folder: ${String((e as Error)?.message ?? e)}`; });
 
   // ---- the viewer's messages: ready (send it the tree), close, and a file's contents (only one of the tree's, within
-  //      this opening's totals)
-  let reads = 0, sent = 0;
-  const onMessage = async (e: MessageEvent) => {
+  //      this opening's totals). Reads are served one at a time, at most SPACE3D_LIMITS.waiting of them waiting; each
+  //      reserves what is left of the opening's bytes before it starts (none left: refused, nothing read), and a view
+  //      closed meanwhile reads and answers nothing more
+  let reads = 0, sent = 0, waiting = 0, queue: Promise<void> = Promise.resolve();
+  const serve = async (m: { id: number }, entry: Entry, reply: (x: { text?: string; error?: string }) => void) => {
+    if (!alive) return;
+    const room = SPACE3D_LIMITS.bytes - sent;
+    if (room <= 0) return reply({ error: "too much read in this view: close it and open it again" });
+    const cap = Math.min(SPACE3D_LIMITS.file, room), over = () => reply({ error: cap < SPACE3D_LIMITS.file ? "too much read in this view: close it and open it again" : `it's too large to read here (over ${MiB(cap)})` });
+    try {
+      let text: string;
+      if (entry.kind === "notebook") {
+        // (a notebook: walked within the cap before anything of it is copied; then its language and cells (code,
+        //  kind, outputs), for its room)
+        const r = await reading(entry.path, () => ws.read(entry.path));
+        if (!alive) return;
+        try { jsonSizeWithin(r.content, { ...NB_WALK, bytes: cap }); } catch { return over(); }
+        const raw = Array.isArray(r.content?.cells) ? (r.content.cells as unknown[]) : [];
+        const cells = raw.filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
+          .map((c) => ({ id: c.id, type: c.type ?? "code", code: String(c.code ?? ""), outputs: Array.isArray(c.outputs) ? c.outputs : [] }));
+        text = JSON.stringify({ format: "sagebrush-notebook-cells", mode: r.content?.mode ?? "python", cells });
+      } else {
+        // (the file as it is now, its bytes capped: one that grew since it was listed isn't read whole)
+        let r;
+        try { r = await reading(entry.path, () => ws.readUpTo(entry.path, cap)); } catch (err) { if ((err as { code?: string }).code === "limit") return over(); throw err; }
+        text = decode(r.content);
+      }
+      if (!alive) return;
+      const n = utf8Bytes(text);
+      if (n > cap) return over();
+      sent += n;
+      reply({ text });
+    } catch (err) {
+      reply({ error: String((err as Error)?.message ?? err).slice(0, 300) });
+    }
+  };
+  const onMessage = (e: MessageEvent) => {
     const m = e.data;
     if (e.source !== frame.contentWindow || e.origin !== location.origin || m?.version !== 1) return;
     if (m.sagebrush === "space-ready") { ready = true; send(); return; }
     if (m.sagebrush === "space-close") { done(); return; }
     if (m.sagebrush !== "space-read" || typeof m.path !== "string" || !Number.isSafeInteger(m.id)) return;
-    const reply = (x: { text?: string; error?: string }) => frame.contentWindow?.postMessage({ sagebrush: "space-file", version: 1, id: m.id, ...x }, location.origin);
+    const reply = (x: { text?: string; error?: string }) => { if (alive) frame.contentWindow?.postMessage({ sagebrush: "space-file", version: 1, id: m.id, ...x }, location.origin); };
     // (a path exactly as the tree listed it: nothing else is looked up, so no other spelling of a path reaches a file)
     const entry = m.path.length <= SPACE3D_LIMITS.path ? allowed.get(m.path) : undefined;
     if (!entry) return reply({ error: "not a file of this folder" });
     if (entry.kind === "board") return reply({ error: "a board has no room yet" });
-    if (entry.kind === "file" && (entry.size ?? 0) > SPACE3D_LIMITS.file) return reply({ error: `it's too large to read here (${Math.round((entry.size ?? 0) / 2 ** 20)} MB)` });
+    if (waiting >= SPACE3D_LIMITS.waiting) return reply({ error: "too many files asked for at once: try again" });
     if (++reads > SPACE3D_LIMITS.reads) return reply({ error: "too many files read in this view: close it and open it again" });
-    try {
-      const r = await ws.read(entry.path);
-      let text: string;
-      if (entry.kind === "notebook") {
-        // (a notebook: its language and cells (code, kind, outputs), for its room)
-        const raw = Array.isArray(r.content?.cells) ? (r.content.cells as unknown[]) : [];
-        const cells = raw.filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
-          .map((c) => ({ id: c.id, type: c.type ?? "code", code: String(c.code ?? ""), outputs: Array.isArray(c.outputs) ? c.outputs : [] }));
-        text = JSON.stringify({ format: "sagebrush-notebook-cells", mode: r.content?.mode ?? "python", cells });
-      } else text = decode(r.content);
-      const n = utf8Bytes(text);
-      if (n > SPACE3D_LIMITS.file) return reply({ error: `it's too large to read here (${Math.round(n / 2 ** 20)} MB)` });
-      if ((sent += n) > SPACE3D_LIMITS.bytes) return reply({ error: "too much read in this view: close it and open it again" });
-      reply({ text });
-    } catch (err) {
-      reply({ error: String((err as Error)?.message ?? err) });
-    }
+    waiting++;
+    queue = queue.then(() => serve(m, entry, reply)).finally(() => { waiting--; });
   };
   addEventListener("message", onMessage);
 }
@@ -192,14 +250,19 @@ export function mountSpace(ws: Workspace, path: string, el: HTMLElement): SpaceH
     shown = body(space);
     frame.contentWindow?.postMessage({ sagebrush: "space-load", version: 1, name: path, space, selected: space.selected ?? null }, location.origin);
   };
+  // (the file as it is now, its bytes capped at what a space may be: a larger one isn't read whole, nor parsed)
   const reread = async () => {
-    const r = await ws.read(path);
-    if (!alive || r.rev === rev) return;
-    rev = r.rev;
-    fid = (r.entry as { fid?: string }).fid;
+    let r;
+    try { r = await ws.readUpTo(path, LIMITS.bytes); } catch (err) {
+      if ((err as { code?: string }).code !== "limit") throw err;
+      space = null;
+      return say(`Too large to show (over ${LIMITS.bytes / 2 ** 20} MiB)`);
+    }
+    const now = r.entry.rev ?? -1;
+    if (!alive || now === rev) return;
+    rev = now;
+    fid = r.entry.fid;
     text = decode(r.content);
-    // (a file larger than a space may be isn't parsed here: the viewer would refuse it)
-    if (utf8Bytes(text) > LIMITS.bytes) { space = null; return say(`Too large to show (over ${LIMITS.bytes / 2 ** 20} MiB)`); }
     try {
       const s = JSON.parse(text);
       if (!s || typeof s !== "object" || Array.isArray(s)) throw new Error("it isn't an object");
@@ -222,10 +285,13 @@ export function mountSpace(ws: Workspace, path: string, el: HTMLElement): SpaceH
   let timer = 0, want: string | null = null;
   const writeSelection = async (tries = 2): Promise<void> => {
     if (!alive || !space || (space.selected ?? null) === want || !selectable(want)) return;
-    const next = { ...space, selected: want };
+    // (the text and its revision taken together: the write is on that revision, whatever was read since)
+    const next = { ...space, selected: want }, base = rev, baseFid = fid;
     const value = JSON.stringify(next, null, 1);
+    await SPACE3D_TESTING.beforeSelectionWrite?.();
+    if (!alive) return;
     try {
-      const r = await ws.write(path, value, { base: rev, ...(fid ? { fid } : {}) });
+      const r = await ws.write(path, value, { base, ...(baseFid ? { fid: baseFid } : {}) });
       rev = r.rev;
       text = value;
       space = next;
