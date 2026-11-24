@@ -284,19 +284,26 @@ export function checkOp(v: unknown): Op {
 
 // ---- sealed ops (design/e2e-encryption.md §4, §4.1; e2e PR 5b): an index op as the server sees it under end-to-end
 // encryption.  The op is ciphertext the server never opens: it checks the envelope's form and size, the device's order,
-// the key chain's head the op was sealed under (the current one, so a device removed from the chain can't append), and
-// the blob references the op adds and releases, which are all it counts.
+// the key chain's head the op was sealed under (the current one), the signature of a device current in that chain over
+// the op's place, envelope and references (so a device removed from the chain, or a session that isn't an E2E device,
+// can't append or move a reference), and the references the op adds and releases, which are all it counts.
 
 /** The key chain's head: the SHA-256 of its last entry, as unpadded base64url (43 characters). */
 const CHAIN_HEAD = /^[A-Za-z0-9_-]{43}$/;
 export const isChainHead = (s: unknown): s is string => typeof s === "string" && CHAIN_HEAD.test(s);
 
-/** A sealed op: its device order, the chain head it was sealed under, its envelope, and its visible blob references. */
-export interface SealedOp { dseq: number; head: string; env: Uint8Array; adds: string[]; releases: string[] }
+/** An E2E device's id in the key chain (26 base32 characters, web/workspace/fleet/core/bytes.mjs isId). */
+const E2E_ID = /^[a-z2-7]{25}[aeimquy4]$/;
+/** An Ed25519 signature: 64 bytes as unpadded base64url (86 characters). */
+const SIG = /^[A-Za-z0-9_-]{86}$/;
+
+/** A sealed op: its device order, the chain head it was sealed under, its envelope, its visible blob references, and
+ * the E2E device that signed it (web/workspace/e2e/sealed-op.mjs says what is signed). */
+export interface SealedOp { dseq: number; head: string; env: Uint8Array; adds: string[]; releases: string[]; signer: string; sig: string }
 
 /** One sealed op, checked: its form only (the server can't read it). */
 export function checkSealedOp(v: unknown): SealedOp {
-  const o = fields(v, ["dseq", "head", "env", "adds", "releases"], "sealed op");
+  const o = fields(v, ["dseq", "head", "env", "adds", "releases", "signer", "sig"], "sealed op");
   if (!isNat(o.dseq) || o.dseq < 1) throw invalid("sealed op: dseq is a positive integer");
   if (!isChainHead(o.head)) throw invalid("sealed op: head is the key chain's head, 43 base64url characters");
   const env = fromB64(o.env, LIMITS.sealedOpBytes, "sealed_op_bytes");
@@ -308,7 +315,9 @@ export function checkSealedOp(v: unknown): SealedOp {
     if (new Set(x).size !== x.length) throw invalid(`sealed op: ${what} names an address twice`);
     return x as string[];
   };
-  return { dseq: o.dseq, head: o.head, env, adds: refs(o.adds, "adds"), releases: refs(o.releases, "releases") };
+  if (typeof o.signer !== "string" || !E2E_ID.test(o.signer)) throw invalid("sealed op: signer is an E2E device's id");
+  if (typeof o.sig !== "string" || !SIG.test(o.sig)) throw invalid("sealed op: sig is an Ed25519 signature, 86 base64url characters");
+  return { dseq: o.dseq, head: o.head, env, adds: refs(o.adds, "adds"), releases: refs(o.releases, "releases"), signer: o.signer, sig: o.sig };
 }
 
 // ---- batches (§4.1, §5.3)

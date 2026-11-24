@@ -307,11 +307,6 @@ export class E2EStore {
   }
 
   /** The head row: seq, hash, current epoch and current devices (null: no chain). */
-  /** The stored head, for what is sealed under it (sealed ops, e2e PR 5b): null before the chain's genesis. */
-  current(): { seq: number; hash: string } | null {
-    const h = this.headRow();
-    return h ? { seq: h.seq, hash: h.head } : null;
-  }
   private headRow(): { seq: number; head: string; epoch: number; devices: string[]; base: number; generation: string; recovery_sign: string; recovery_key: string } | null {
     if (this.sql.exec("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'e2e_head'").toArray().length === 0) return null;
     const r = this.sql.exec("SELECT seq, head, epoch, devices, base, generation, recovery_sign, recovery_key FROM e2e_head WHERE id = 1").toArray()[0] as Row | undefined;
@@ -395,5 +390,21 @@ export class E2EStore {
     if (this.sql.exec("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'e2e_mailbox'").toArray().length === 0) return null;
     const r = this.sql.exec("SELECT msg, expires FROM e2e_mailbox WHERE session = ? AND phase = ? AND expires > ?", session, phase, now).toArray()[0] as Row | undefined;
     return r ? { msg: r.msg as string, expires: Number(r.expires) } : null;
+  }
+
+  /** The stored head, for what is sealed under it (sealed ops, e2e PR 5b): null before the chain's genesis. */
+  current(): { seq: number; hash: string; generation: string } | null {
+    const h = this.headRow();
+    return h ? { seq: h.seq, hash: h.head, generation: h.generation } : null;
+  }
+  /** The E2E account id these are made for. */
+  get account(): string {
+    return this.ctx.account;
+  }
+  /** The Ed25519 key of `id` if it is a current (not removed) device at the stored head, else null (sealed ops). */
+  async currentSigner(id: string): Promise<Uint8Array | null> {
+    const st = await this.state();
+    const d = st?.devices.get(id) as { removed: number | null; sign?: unknown } | undefined;
+    return d && d.removed === null && d.sign instanceof Uint8Array ? d.sign : null;
   }
 }

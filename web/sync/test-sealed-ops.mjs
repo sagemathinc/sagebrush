@@ -1,8 +1,8 @@
 // ci: web-sync.2 order=76
 // Sealed ops on the sync server (design/e2e-encryption.md §4, §4.1; e2e PR 5b), in Miniflare with real Durable
 // Objects (SQLite): an index op the server can't read, decided in its device's order, sealed under the key chain's
-// current head (made here with the E2E core, as a device makes it), and counted only by the blob references it adds and
-// releases.  Behind SYNC_E2E, DEV only.
+// current head and signed by a device current in that chain (both made here with the E2E core, as a device makes
+// them), and counted only by the blob references it adds and releases.  Behind SYNC_E2E, DEV only.
 //
 //   node web/sync/test-sealed-ops.mjs
 import { readdirSync, readFileSync } from "node:fs";
@@ -16,6 +16,7 @@ import { useCrypto, webCrypto } from "../workspace/fleet/core/index.mjs";
 import { keyFromSeed } from "../workspace/fleet/core/ed25519.mjs";
 import { b64, idOfBytes, newId, random } from "../workspace/fleet/core/bytes.mjs";
 import * as E from "../workspace/e2e/core/index.mjs";
+import { sealedOpMessage } from "../workspace/e2e/sealed-op.mjs";
 import { hpkeDouble as hpke } from "../workspace/e2e/hpke-double.mjs";
 
 useCrypto(webCrypto());
@@ -87,7 +88,9 @@ const objectOf = async (id) => {
   const ns = await mf.getDurableObjectNamespace("SYNC_ACCOUNT", "on");
   return ns.get(ns.idFromName("acct:" + hashOf(id)));
 };
-const seam = async (id, v) => (await at(SITE, "/__test/e2e?account=" + id, { method: "POST", body: JSON.stringify(v) })).json();
+const seamAll = async (id, v) => (await at(SITE, "/__test/e2e?account=" + id, { method: "POST", body: JSON.stringify(v) })).json();
+// (the E2E tables' row counts only; seamAll also has the store's work counters)
+const seam = async (id, v) => { const r = await seamAll(id, v); return r && Object.fromEntries(Object.entries(r).filter(([k]) => k.startsWith("e2e_"))); };
 async function until(f, ms = 15_000) {
   for (const t = Date.now(); Date.now() - t < ms; ) {
     if (await f()) return true;
@@ -117,8 +120,8 @@ function account(id) {
     const S = E.newEpochSecret();
     let keyring = null, ring = null;
     if (n > 0) {
-      ring = await E.sealKeyring({ S, account: ctx.account, n, suite: 1, prev: state.head, secrets: new Map(W.secrets) });
-      keyring = { hash: ring.hash, epochs: [...ring.epochs] };
+      ring = await E.sealKeyring({ S, account: ctx.account, meta: { epoch: n, generation: W.nextGeneration ?? state.generation, suite: 1, prev: state.head, prev_ring: state.epoch.keyring?.hash ?? "" }, secret: W.secrets.get(n - 1) });
+      keyring = { hash: ring.hash };
     }
     return { n, S, ring, epoch: { n, suite: 1, commit: await E.epochCommit(S, ctx.account, n), keyring } };
   };
@@ -170,6 +173,25 @@ function account(id) {
     for (const r of who) wrappers.push(text(await E.wrapEpoch({ hpke, state: next, ctx, sender: nd, recipient: r, n: ep.n, S: ep.S })));
     return { body: { entry: text(entry), keyring: b64(ep.ring.bytes), wrappers }, next, nd, rk2, ep };
   };
+  /** The person's reset: under the current recovery key, a new device and recovery key, a fresh generation, the next
+   * epoch; wrappers to the new device and the new recovery key, made by the new device. */
+  W.reset = async (state, opts = {}) => {
+    const nd = await W.device("recovered");
+    const rk2 = await E.recoveryKeys(E.newRecoverySeed(), ctx.account);
+    const generation = newId();
+    W.nextGeneration = generation;
+    const ep = await W.epoch(state);
+    W.nextGeneration = null;
+    const body = E.nextBody(state, ctx, "reset", { generation, device: nd.rec, recovery: { sign: b64(rk2.sign.raw), kem: b64(rk2.kem.publicRaw) }, epoch: ep.epoch, min_suite: 1, ...(opts.body ?? {}) });
+    const key = opts.signWith ?? W.rk.sign;
+    const signer = opts.signer ?? E.recoverySigner(ctx.account, key);
+    const entry = await E.sealEntry(signer, body, key, { device: nd.sign, recovery: rk2.sign });
+    let next = null;
+    try { next = (await E.applyChainEntry(state, entry, ctx)).state; } catch { /* (refused ones are posted anyway) */ }
+    const wrappers = [];
+    if (next) for (const r of [{ kind: "device", id: nd.id }, { kind: "recovery", id: ctx.account }]) wrappers.push(text(await E.wrapEpoch({ hpke, state: next, ctx, sender: nd, recipient: r, n: ep.n, S: ep.S })));
+    return { body: { entry: text(entry), keyring: b64(ep.ring.bytes), wrappers }, next, nd, rk2, ep, generation };
+  };
   return W;
 }
 
@@ -209,106 +231,159 @@ async function hello(s, device) {
   await s.next((m) => m.t === "index");
   return w;
 }
-const sealed = (dseq, head, extra = {}) => ({ dseq, head, env: Buffer.from(random(48)).toString("base64"), ...extra });
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 const putBlob = (s, bytes) => at(SITE, `/api/sync/v1/blob/${sha(bytes)}`, { method: "PUT", headers: { cookie: s, origin: SITE, "content-type": "application/octet-stream", "x-sb-ct-sha256": sha(bytes) }, body: bytes });
+/** A sealed op as a device makes it: an envelope (random bytes: the server never reads it), signed by E2E device `d`
+ * of `W` under chain state `st`, for sync device `sdev` at `dseq`. */
+async function signed(W, d, st, sdev, dseq, extra = {}) {
+  const env = random(48), adds = extra.adds ?? [], releases = extra.releases ?? [];
+  const msg = await sealedOpMessage({ account: W.ctx.account, generation: st.generation, head: st.head, device: sdev, dseq, env, adds, releases, signer: d.id });
+  return { dseq, head: st.head, env: Buffer.from(env).toString("base64"), adds, releases, signer: d.id, sig: b64(await d.sign.sign(msg)) };
+}
+const noSig = (op) => ({ ...op, sig: "A".repeat(86) });
 
 await section("no key chain: sealed ops are refused for the whole message", async () => {
   const s = await enabled(N);
   const ws = await socket(s);
   const w = await hello(ws, "sealed-dev-n001");
-  const a = await ws.ask({ t: "sops", ops: [sealed(w.next_dseq, "A".repeat(43))] });
+  const op = { dseq: w.next_dseq, head: "A".repeat(43), env: "AAAA", signer: "a".repeat(26), sig: "A".repeat(86) };
+  const a = await ws.ask({ t: "sops", ops: [op] });
   ok(a?.code === "conflict" && a.detail?.reason === "no_chain", "before the chain's genesis: conflict, no_chain: " + JSON.stringify(a));
-  const again = await ws.ask({ t: "sops", ops: [sealed(w.next_dseq, "A".repeat(43))] });
+  const again = await ws.ask({ t: "sops", ops: [op] });
   ok(again?.code === "conflict", "and no dseq was spent (the same one is refused the same way)");
   ws.ws.close();
 });
 
-await section("sealed ops: accepted under the current head, and served in the log as they came", async () => {
+await section("sealed ops: signed by a current device, under the current head", async () => {
   const s = await enabled(A);
   const W = account(A);
   const g = await W.genesis();
   ok((await post(s, A, "/api/sync/v1/e2e/chain", g.body)).status === 201, "(genesis)");
+  const d = g.d;
+  let st = g.next;
   const ws = await socket(s);
-  const w = await hello(ws, "sealed-dev-a001");
-  const one = sealed(w.next_dseq, g.next.head), two = sealed(w.next_dseq + 1, g.next.head);
+  const dev = "sealed-dev-a001";
+  const w = await hello(ws, dev);
+  let n = w.next_dseq;
+  const acct = await objectOf(A);
+  const logRows = async () => (await ws.ask({ t: "pull_index", after: 0 }))?.ops?.length ?? -1;
+
+  const one = await signed(W, d, st, dev, n), two = await signed(W, d, st, dev, n + 1);
   const a = await ws.ask({ t: "sops", ops: [one, two] });
-  ok(a?.t === "ack" && a.ops?.length === 2 && a.ops.every((o) => Number.isInteger(o.seq)), "two sealed ops under the current head: accepted: " + JSON.stringify(a));
+  ok(a?.t === "ack" && a.ops?.length === 2 && a.ops.every((o) => Number.isInteger(o.seq)), "two signed ops under the current head: accepted: " + JSON.stringify(a));
   const resend = await ws.ask({ t: "sops", ops: [one] });
   ok(resend?.ops?.[0]?.seq === a.ops[0].seq, "a resend is answered with its seq, once");
   const ix = await ws.ask({ t: "pull_index", after: 0 });
-  const mine = ix?.ops?.filter((o) => o.device === "sealed-dev-a001");
-  ok(mine?.length === 2 && mine[0].env === one.env && mine[0].head === g.next.head && JSON.stringify(mine[0].adds) === "[]" && mine[0].op === undefined && mine[0].path === undefined,
+  const mine = ix?.ops?.filter((o) => o.device === dev);
+  ok(mine?.length === 2 && mine[0].env === one.env && mine[0].head === st.head && JSON.stringify(mine[0].adds) === "[]" && mine[0].op === undefined && mine[0].path === undefined,
     "the log serves each as it came: its envelope, head and references, and nothing the server can read: " + JSON.stringify(mine?.[0]));
+  n += 2;
 
-  // (the chain moves: an op sealed under the old head is refused for the whole message, spending no dseq)
-  const ad = await W.add(g.next, g.d);
+  // (signatures: refused for the whole message, spending no dseq and changing nothing)
+  const before = await logRows();
+  const good = await signed(W, d, st, dev, n);
+  const forged = async (op, what) => {
+    const r = await ws.ask({ t: "sops", ops: [op] });
+    ok(r?.code === "forbidden" && (await logRows()) === before, `${what}: forbidden, nothing stored: ` + JSON.stringify(r));
+  };
+  await forged(noSig(good), "a signature that isn't one");
+  await forged({ ...good, signer: newId() }, "a signer that isn't a device of the chain");
+  await forged({ ...good, env: Buffer.from(random(48)).toString("base64") }, "another envelope under the signature");
+  await forged({ ...good, adds: ["0".repeat(64)] }, "references added that weren't signed");
+  await forged({ ...good, releases: ["0".repeat(64)] }, "references released that weren't signed");
+  await forged(await (async () => { const o = await signed(W, d, st, dev, n + 5); return { ...o, dseq: n }; })(), "a signature made for another dseq");
+  await forged(await signed(W, d, st, "sealed-dev-other1", n), "a signature made for another sync device");
+  const second = await ws.ask({ t: "sops", ops: [good, noSig(await signed(W, d, st, dev, n + 1))] });
+  ok(second?.code === "forbidden" && second.detail?.dseq === n + 1 && (await logRows()) === before, "a signed op, then a forged one: the whole message forbidden, naming the forged dseq; nothing stored: " + JSON.stringify(second));
+  const ok1 = await ws.ask({ t: "sops", ops: [good] });
+  ok(Number.isInteger(ok1?.ops?.[0]?.seq), "the untampered op, the same dseq: accepted (none was spent)");
+  n += 1;
+
+  // (the mixed message: a current-head op followed by a stale-head one is refused whole)
+  const ad = await W.add(st, d);
   ok((await post(s, A, "/api/sync/v1/e2e/chain", ad.body)).status === 201, "(a device added: the head moves)");
-  const next = w.next_dseq + 2;
-  const stale = await ws.ask({ t: "sops", ops: [sealed(next, g.next.head)] });
-  ok(stale?.code === "conflict" && stale.detail?.reason === "stale_head" && stale.detail.head?.hash === ad.next.head, "sealed under the old head: conflict, stale_head, naming the current one: " + JSON.stringify(stale));
-  const fresh = await ws.ask({ t: "sops", ops: [sealed(next, ad.next.head)] });
-  ok(Number.isInteger(fresh?.ops?.[0]?.seq), "re-sealed under the current head, the same dseq: accepted");
-  // (after a removal, an op sealed before it is refused the same way)
-  const rm = await W.remove(ad.next, g.d, ad.nd);
-  ok((await post(s, A, "/api/sync/v1/e2e/chain", rm.body)).status === 201, "(the new device removed)");
-  const afterRemoval = await ws.ask({ t: "sops", ops: [sealed(next + 1, ad.next.head)] });
-  ok(afterRemoval?.code === "conflict" && afterRemoval.detail?.reason === "stale_head", "an op sealed before a removal: refused");
+  const old = st;
+  st = ad.next;
+  const rowsMixed = await logRows();
+  const mixed = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n), await signed(W, d, old, dev, n + 1)] });
+  ok(mixed?.code === "conflict" && mixed.detail?.reason === "stale_head" && (await logRows()) === rowsMixed, "[current head, stale head]: the whole message refused, stale_head, nothing stored: " + JSON.stringify(mixed));
+  const staleAlone = await ws.ask({ t: "sops", ops: [await signed(W, d, old, dev, n)] });
+  ok(staleAlone?.code === "conflict" && staleAlone.detail?.reason === "stale_head" && staleAlone.detail.head?.hash === st.head, "an op under the old head: stale_head, naming the current one");
+  const reused = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n)] });
+  ok(Number.isInteger(reused?.ops?.[0]?.seq), "re-sealed under the current head, the same dseq: accepted");
+  n += 1;
 
-  // (form: each refused alone, its dseq spent as a refusal, the next decided)
-  let d = next + 1;
-  const h = rm.next.head;
-  const form = await ws.ask({ t: "sops", ops: [
-    { dseq: d, head: h, env: "", adds: [], releases: [] },
-    { dseq: d + 1, head: h, env: Buffer.alloc((64 << 10) + 1).toString("base64") },
-    { dseq: d + 2, head: h, env: "AAAA", adds: ["0".repeat(64), "0".repeat(64)] },
-    { dseq: d + 3, head: "not a head", env: "AAAA" },
-    { dseq: d + 4, head: h, env: "AAAA", path: "/plain.txt" },
-    { dseq: d + 5, head: h, env: "AAAA", adds: Array.from({ length: 65 }, (_, i) => i.toString(16).padStart(64, "0")) },
-    sealed(d + 6, h),
-  ] });
-  const codes = form?.ops?.map((o) => o.code ?? "ok");
-  ok(JSON.stringify(codes) === JSON.stringify(["invalid", "limit", "invalid", "invalid", "invalid", "limit", "ok"]),
-    "an empty envelope, one over 64 KiB, an address twice, a malformed head, a plaintext field, 65 references: each refused; the next accepted: " + JSON.stringify(codes));
-  d += 7;
-
-  // (references: an add must be held, and gains one; a release must have one to give back)
+  // (another current device may release a reference the first one added)
   const blob = Buffer.from("sealed ops' blob");
   ok((await putBlob(s, blob)).status === 201, "(a blob held)");
-  const acct = await objectOf(A);
   const refs = async () => (await acct.inspect({ sha256: sha(blob) }))?.refs;
-  const r1 = await ws.ask({ t: "sops", ops: [sealed(d, h, { adds: [sha(blob)] })] });
+  const r1 = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n, { adds: [sha(blob)] })] });
   ok(Number.isInteger(r1?.ops?.[0]?.seq) && (await refs()) === 1, "an op adding a held blob: accepted, one reference");
-  const missing = await ws.ask({ t: "sops", ops: [sealed(d + 1, h, { adds: ["e".repeat(64)] })] });
+  const missing = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n + 1, { adds: ["e".repeat(64)] })] });
   ok(missing?.ops?.[0]?.code === "missing", "an op adding a blob not held: refused, missing");
-  const r2 = await ws.ask({ t: "sops", ops: [sealed(d + 2, h, { releases: [sha(blob)] })] });
-  ok(Number.isInteger(r2?.ops?.[0]?.seq) && (await refs()) === 0, "an op releasing it: accepted, the reference given back");
-  const r3 = await ws.ask({ t: "sops", ops: [sealed(d + 3, h, { releases: [sha(blob)] })] });
+  const phone = ad.nd;
+  const r2 = await ws.ask({ t: "sops", ops: [await signed(W, phone, st, dev, n + 2, { releases: [sha(blob)] })] });
+  ok(Number.isInteger(r2?.ops?.[0]?.seq) && (await refs()) === 0, "another current device releases it: accepted, the reference given back");
+  const r3 = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n + 3, { releases: [sha(blob)] })] });
   ok(r3?.ops?.[0]?.code === "invalid" && (await refs()) === 0, "releasing it again, with no reference left: refused, and nothing changes");
-  d += 4;
+  n += 4;
 
-  // (the log's cap: a message that would pass it is refused whole, spending no dseq)
+  // (a removed device: the head is public, so it can seal under the new one, but its signature no longer counts)
+  const rm = await W.remove(st, d, phone);
+  ok((await post(s, A, "/api/sync/v1/e2e/chain", rm.body)).status === 201, "(the phone removed: the head moves again)");
+  st = rm.next;
+  const rowsRm = await logRows();
+  const gone = await ws.ask({ t: "sops", ops: [await signed(W, phone, st, dev, n)] });
+  ok(gone?.code === "forbidden" && (await logRows()) === rowsRm, "the removed device, signing under the new head: forbidden, nothing stored: " + JSON.stringify(gone));
+  const prior = await ws.ask({ t: "sops", ops: [await signed(W, d, old, dev, n)] });
+  ok(prior?.code === "conflict" && prior.detail?.reason === "stale_head", "an op sealed before the removal: refused, stale_head");
+
+  // (form: each refused alone, its dseq spent as a refusal, the next decided)
+  const h = st.head;
+  const form = await ws.ask({ t: "sops", ops: [
+    { dseq: n, head: h, env: "", adds: [], releases: [], signer: d.id, sig: "A".repeat(86) },
+    { dseq: n + 1, head: h, env: Buffer.alloc((64 << 10) + 1).toString("base64"), signer: d.id, sig: "A".repeat(86) },
+    { dseq: n + 2, head: h, env: "AAAA", adds: ["0".repeat(64), "0".repeat(64)], signer: d.id, sig: "A".repeat(86) },
+    { dseq: n + 3, head: "not a head", env: "AAAA", signer: d.id, sig: "A".repeat(86) },
+    { dseq: n + 4, head: h, env: "AAAA", path: "/plain.txt", signer: d.id, sig: "A".repeat(86) },
+    { dseq: n + 5, head: h, env: "AAAA", adds: Array.from({ length: 65 }, (_, i) => i.toString(16).padStart(64, "0")), signer: d.id, sig: "A".repeat(86) },
+    { dseq: n + 6, head: h, env: "AAAA" },
+    await signed(W, d, st, dev, n + 7),
+  ] });
+  const codes = form?.ops?.map((o) => o.code ?? "ok");
+  ok(JSON.stringify(codes) === JSON.stringify(["invalid", "limit", "invalid", "invalid", "invalid", "limit", "invalid", "ok"]),
+    "an empty envelope, one over 64 KiB, an address twice, a malformed head, a plaintext field, 65 references, no signer: each refused; the next accepted: " + JSON.stringify(codes));
+  n += 8;
+
+  // (the log's cap counts new ops only: a lost ack's retry at a full log is still answered with its seq)
   const kept = (await ws.ask({ t: "pull_index", after: 0 }))?.ops?.filter((o) => o.env !== undefined).length;
   await seam(A, { sealedCap: kept + 1 });
-  const full = await ws.ask({ t: "sops", ops: [sealed(d, h), sealed(d + 1, h)] });
-  ok(full?.code === "limit" && full.detail?.limit === "sealed_log", "two ops past the sealed log's cap: refused whole, limit sealed_log: " + JSON.stringify(full));
-  const fits = await ws.ask({ t: "sops", ops: [sealed(d, h)] });
-  ok(Number.isInteger(fits?.ops?.[0]?.seq), "one that fits: accepted, with the same dseq (none was spent)");
+  const fill = await signed(W, d, st, dev, n);
+  const filled = await ws.ask({ t: "sops", ops: [fill] });
+  ok(Number.isInteger(filled?.ops?.[0]?.seq), "(the last place in the log taken)");
+  const retry = await ws.ask({ t: "sops", ops: [fill] });
+  ok(retry?.ops?.[0]?.seq === filled.ops[0].seq, "at exactly the cap, the lost ack's retry: its seq, not limit: " + JSON.stringify(retry));
+  const over = await signed(W, d, st, dev, n + 1);
+  const full = await ws.ask({ t: "sops", ops: [fill, over] });
+  ok(full?.code === "limit" && full.detail?.limit === "sealed_log", "a retry with one new op past the cap: refused whole, limit sealed_log: " + JSON.stringify(full));
+  await seam(A, { sealedCap: kept + 2 });
+  const mixedRetry = await ws.ask({ t: "sops", ops: [fill, over] });
+  ok(mixedRetry?.ops?.[0]?.seq === filled.ops[0].seq && Number.isInteger(mixedRetry?.ops?.[1]?.seq), "with room for the new one: the old one answered with its seq, the new one accepted, the same dseq");
   await seam(A, { sealedCap: 1_000_000 });
-  d += 1;
+  n += 2;
 
-  // (the agents' index passes sealed ops by: a plaintext op after them is indexed, and the cursor reaches the log's end)
-  const plain = await ws.ask({ t: "ops", ops: [{ dseq: d, t: Date.now(), by: "person", op: "mkdir", path: "/after-sealed", kind: "folder", fid: "00000000000005b1" }] });
+  // (the agents' index passes sealed ops by: built through a plaintext op after them, to the log's end)
+  const plain = await ws.ask({ t: "ops", ops: [{ dseq: n, t: Date.now(), by: "person", op: "mkdir", path: "/after-sealed", kind: "folder", fid: "00000000000005b1" }] });
   ok(Number.isInteger(plain?.ops?.[0]?.seq), "(a plaintext op after the sealed ones)");
   const rb = await at(SITE, "/api/sync/v1/index/rebuild", { method: "POST", headers: { cookie: s, origin: SITE, "content-type": "application/json" }, body: "{}" });
   ok(rb.status === 200, "(the agents' index rebuilt from the first op)");
-  let st = null;
+  let ixs = null;
   for (let k = 0; k < 40; k++) {
-    st = await acct.testIndex({ step: true });
-    if (st?.state === "ready") break;
+    ixs = await acct.testIndex({ step: true });
+    if (ixs?.state === "ready") break;
     await new Promise((r) => setTimeout(r, 50));
   }
-  ok(st?.state === "ready" && st.cursor === st.max && st.max === plain.ops[0].seq, "the agents' index is built past the sealed ops, through the plaintext op after them, to the log's end: " + JSON.stringify(st));
+  ok(ixs?.state === "ready" && ixs.cursor === ixs.max && ixs.max === plain.ops[0].seq, "the agents' index is built past the sealed ops, through the plaintext op after them, to the log's end: " + JSON.stringify(ixs));
   ws.ws.close();
 });
 
@@ -320,14 +395,14 @@ await section("read-only, and the switch off", async () => {
   const ws = await socket(s);
   const w = await hello(ws, "sealed-dev-r001");
   await (await objectOf(R)).testAgent({ readonly: true });
-  const ro = await ws.ask({ t: "sops", ops: [sealed(w.next_dseq, g.next.head)] });
+  const ro = await ws.ask({ t: "sops", ops: [await signed(W, g.d, g.next, "sealed-dev-r001", w.next_dseq)] });
   ok(ro?.code === "readonly", "a read-only account takes no sealed ops (they are content, unlike the key chain's own writes): " + JSON.stringify(ro));
   ws.ws.close();
   const so = await signIn(A, "https://off.test");
   await at("https://off.test", "/api/sync/v1/enable", { method: "POST", headers: { cookie: so, origin: "https://off.test", "content-type": "application/json" }, body: "{}" });
   const off = await socket(so, "https://off.test");
   const wo = off.status === 101 ? await hello(off, "sealed-dev-o001") : null;
-  const o = wo ? await off.ask({ t: "sops", ops: [sealed(wo.next_dseq, "A".repeat(43))] }) : null;
+  const o = wo ? await off.ask({ t: "sops", ops: [{ dseq: wo.next_dseq, head: "A".repeat(43), env: "AAAA", signer: "a".repeat(26), sig: "A".repeat(86) }] }) : null;
   ok(o?.code === "forbidden", "with SYNC_E2E off: forbidden: " + JSON.stringify(o));
   if (off.ws) off.ws.close();
 });

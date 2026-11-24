@@ -12,12 +12,15 @@
 
 import { DurableObject } from "cloudflare:workers";
 import {
-  SyncError, LIMITS, RECHECK_MS, PIN_MS, VERSION, Bucket, checkBatch, checkHead, checkOp, checkSealedOp, isChainHead, toB64, clientOf, fields, has, isDevice, isDocId, isNat,
+  SyncError, LIMITS, RECHECK_MS, PIN_MS, VERSION, Bucket, checkBatch, checkHead, checkOp, checkSealedOp, isChainHead, toB64, clientOf, type SealedOp, fields, has, isDevice, isDocId, isNat,
   parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, same, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
 } from "../sync-protocol/protocol.ts";
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
 import { agentOn, allowed, e2eOn, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
 import { E2E, E2E_KEEP, E2EStore, e2eAccount, e2eAud } from "./e2e-chain.ts";
+import { sealedOpMessage } from "../workspace/e2e/sealed-op.mjs";
+import { verifyStrict } from "../workspace/fleet/core/ed25519.mjs";
+import { unb64 } from "../workspace/fleet/core/bytes.mjs";
 import { AGENT, GRANT_ID, READS, SCOPED, VERBS, checkAgentName, checkScopes, inScope, makeToken, newGrantId, newSecret, secretHash, type Scope } from "./agent-token.ts";
 import { TRASH, normPath, within } from "../workspace/paths.ts";
 import { checkCall } from "../workspace/agent-schema.ts";
@@ -443,7 +446,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       send(ws, { t: "ack", req, ops: acked });
     } else if (t === "sops") {
       fields(m, ["t", "req", "ops"], "sops");
-      const acked = this.sealedOps(att, dev, m.ops);
+      const acked = await this.sealedOps(att, dev, m.ops);
       send(ws, { t: "ack", req, ops: acked });
     } else if (t === "pull_index") {
       fields(m, ["t", "req", "after"], "pull_index");
@@ -564,35 +567,73 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     });
   }
 
-  /**
-   * Sealed ops from one device (design/e2e-encryption.md §4; e2e PR 5b), decided as ops() decides plaintext ones: in
-   * dseq order with no gaps, once each, a refusal kept with its code.  The server reads only each one's form, the key
-   * chain's head it was sealed under, and its blob references.  The head is the current one, checked for the whole
-   * message before any is decided: a device that sealed under an older head (one a removal may have ended) re-seals and
-   * sends the same dseqs again, so none is spent on a refusal.  Every address an op adds must be held, and gains a
-   * reference; every address it releases must be held with a reference to give back (the refs are all the server
-   * counts: an op's own contents never are).
-   */
   /** The sealed log's cap (LIMITS.sealedLog; lowered by a test). */
   private sealedCap: number = LIMITS.sealedLog;
-  private sealedOps(att: Attachment, device: string, list: unknown): ({ dseq: number; seq: number } | { dseq: number; code: string })[] {
+  /**
+   * Sealed ops from one device (design/e2e-encryption.md §4, §4.1; e2e PR 5b), decided as ops() decides plaintext ones:
+   * in dseq order with no gaps, once each, a refusal kept with its code.  The server reads only each op's form, the key
+   * chain's head it was sealed under, the signature over it, and its blob references.
+   *
+   * Before anything is decided, for the whole message (so none of these spends a dseq):
+   * - the head must be the chain's current one: a device that sealed under an older head re-seals and sends the same
+   *   dseqs again;
+   * - every new op must be signed by a device current in that chain, over its place, envelope and references
+   *   (web/workspace/e2e/sealed-op.mjs): the head is public, so the signature is what keeps a removed device, or a
+   *   session that is no E2E device, from appending or moving a reference;
+   * - the new ops must fit the log's cap (resends don't count).
+   * The signatures are checked before the transaction, and the transaction checks that the head and the device's next
+   * dseq are still the ones they were checked against.  Then each op: every address it adds must be held, and gains a
+   * reference; every address it releases must be held with a reference to give back.
+   */
+  private async sealedOps(att: Attachment, device: string, list: unknown): Promise<({ dseq: number; seq: number } | { dseq: number; code: string })[]> {
     this.admit(att.account, true);
-    const head = this.e2e(att.account).current();
+    const store = this.e2e(att.account);
+    const head = store.current();
     if (!head) throw new SyncError("conflict", "this account has no key chain yet", { reason: "no_chain" });
     if (!Array.isArray(list) || list.length === 0) throw new SyncError("invalid", "ops");
     if (list.length > LIMITS.opsPerMessage) throw new SyncError("limit", "too many ops", { limit: "ops_per_message", max: LIMITS.opsPerMessage });
     const wait = this.opsRate.take(list.length);
     if (wait) throw new SyncError("rate", "too many ops", { retry_after: wait });
+    const next0 = Number(this.one("SELECT next_dseq FROM devices WHERE device = ?", device)!.next_dseq);
+    const fresh = (raw: unknown, next: number) => {
+      const d = (raw as { dseq?: unknown })?.dseq;
+      return isNat(d) && d >= next;
+    };
+    const stale = (next: number, now: { hash: string }) => {
+      for (const raw of list) {
+        const h = (raw as { head?: unknown })?.head;
+        if (fresh(raw, next) && isChainHead(h) && h !== now.hash) throw new SyncError("conflict", "sealed under another key chain head: seal again under the current one", { reason: "stale_head", head: now });
+      }
+    };
+    stale(next0, head);
+    // (each new op's signature, by a device current in the chain at this head: a well-formed op that isn't is refused
+    // for the whole message; a malformed one is left to its own refusal below)
+    for (const raw of list) {
+      if (!fresh(raw, next0)) continue;
+      let op: SealedOp;
+      try {
+        op = checkSealedOp(raw);
+      } catch {
+        continue;
+      }
+      const key = await store.currentSigner(op.signer);
+      const msg = await sealedOpMessage({ account: store.account, generation: head.generation, head: head.hash, device, dseq: op.dseq, env: op.env, adds: op.adds, releases: op.releases, signer: op.signer });
+      if (!key || !(await verifyStrict(key, msg, unb64(op.sig, 64)))) {
+        throw new SyncError("forbidden", "a sealed op not signed by a current device of this account's key chain", { dseq: op.dseq, signer: op.signer });
+      }
+    }
     return this.ctx.storage.transactionSync(() => {
       let next = Number(this.one("SELECT next_dseq FROM devices WHERE device = ?", device)!.next_dseq);
-      // (the log's cap, for the whole message: a full log spends no dseq either; checkpoints (5e) make room)
-      const kept = Number(this.get("sealed_ops") ?? 0);
-      if (kept + list.length > this.sealedCap) throw new SyncError("limit", "this account's sealed log is full", { limit: "sealed_log", max: this.sealedCap });
-      // (the head, for the whole message, before anything is decided: a stale one spends no dseq)
-      for (const raw of list) {
-        const h = (raw as { dseq?: unknown; head?: unknown })?.head, d = (raw as { dseq?: unknown })?.dseq;
-        if (isNat(d) && d >= next && isChainHead(h) && h !== head.hash) throw new SyncError("conflict", "sealed under another key chain head: seal again under the current one", { reason: "stale_head", head });
+      // (what was checked is still so: the head (a removal during the checks would change it), and this device's order)
+      const now = store.current();
+      if (!now || now.hash !== head.hash || now.generation !== head.generation) {
+        throw new SyncError("conflict", "the key chain moved; seal again under its current head", { reason: "stale_head", head: now });
       }
+      if (next !== next0) throw new SyncError("busy", "this device's ops moved meanwhile; send again", { retry_after: 0 });
+      // (the log's cap, for the new ops only: a resend at a full log is still answered with its seq)
+      const added = list.filter((raw) => fresh(raw, next)).length;
+      const kept = Number(this.get("sealed_ops") ?? 0);
+      if (added > 0 && kept + added > this.sealedCap) throw new SyncError("limit", "this account's sealed log is full", { limit: "sealed_log", max: this.sealedCap });
       const out: ({ dseq: number; seq: number } | { dseq: number; code: string })[] = [];
       const refusedCount = () => Number(this.one("SELECT COUNT(*) AS n FROM refused WHERE device = ?", device)!.n);
       for (const raw of list) {
