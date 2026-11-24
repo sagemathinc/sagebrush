@@ -653,13 +653,18 @@ class Protocol5(unittest.TestCase):
     """drivers/common.py's TIMING record, and run.py's parse of it."""
 
     def run_driver(self, ms, k=4, env=None):
-        # (a stand-in driver: variant v takes ms milliseconds of sleep)
+        # (a stand-in driver: variant v takes ms milliseconds of sleep, or,
+        # with ms None, does nothing: a fast operation even on a loaded
+        # machine, where a short sleep wakes milliseconds late)
+        body = (
+            "lambda: None" if ms is None else "lambda: time.sleep(%r)" % (ms / 1000.0)
+        )
         code = (
             "import sys, time; sys.path.insert(0, %r); import common\n"
             "def prepare(v):\n"
-            "    return lambda: time.sleep(%r)\n"
+            "    return %s\n"
             "common.main(['x', 'case', '1', 'time', '%d'], prepare, lambda a: 's', lambda: 0)\n"
-        ) % (str(run.HERE / "drivers"), ms / 1000.0, k)
+        ) % (str(run.HERE / "drivers"), body, k)
         r = subprocess.run(
             [sys.executable, "-c", code],
             capture_output=True,
@@ -680,7 +685,7 @@ class Protocol5(unittest.TestCase):
         self.assertIn("TIME|", out)
 
     def test_a_fast_operation_is_batched_from_seeded_offsets(self):
-        t, _ = self.run_driver(0.01, env={"BENCH_SEED": "3"})
+        t, _ = self.run_driver(None, env={"BENCH_SEED": "3"})
         self.assertEqual(t["mode"], "batched")
         sys.path.insert(0, str(run.HERE / "drivers"))
         import common as c
@@ -758,11 +763,17 @@ class Protocol5(unittest.TestCase):
                 t = run.parse_timing(r.stdout)
                 vt = t["vtime"]
                 self.assertEqual([e["v"] for e in vt], [0, 1, 2])
-                secs = [e["seconds"] for e in vt]
-                self.assertEqual(secs, sorted(secs))
-                self.assertGreater(secs[2], 1.5 * secs[0])
+                # (the fastest sample: a sleep never ends early, so variant
+                # 2's is at least 15 ms; medians can swap on a loaded machine)
+                lows = [e["min"] for e in vt]
+                self.assertGreaterEqual(lows[2], 0.015)
+                self.assertGreater(lows[2], lows[0])
                 for e in vt:
-                    self.assertGreaterEqual(e["reps"] * e["seconds"], 0.015)
+                    # (a sample lasts TARGET, unless one operation's warm-up
+                    # alone took that long: then one repetition per sample)
+                    self.assertTrue(
+                        e["reps"] == 1 or e["reps"] * e["seconds"] >= 0.015, e
+                    )
                     self.assertEqual(e["samples"], 3)
 
     def test_a_slow_variant_reuses_its_per_op_samples(self):
