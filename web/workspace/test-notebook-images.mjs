@@ -25,8 +25,12 @@ let server;
 const sitePort = await startServe(() => (server = spawn("python3", [join(here, "..", "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] }))).port;
 const site = `http://127.0.0.1:${sitePort}`;
 const B = await browser();
-const PNG_JS = `(() => { const u = new Uint8Array(64).fill(7); u.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]); return u; })()`;
-const PNG = (() => { const u = new Uint8Array(64).fill(7); u.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]); return u; })();
+// (a real 3x2 PNG, so a drawn image can be decoded: its pixels, not only its header)
+const PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAEElEQVR4nGM4IScHQQxwFgBBAAYZPEVBlgAAAABJRU5ErkJggg==";
+const PNG_JS = `Uint8Array.from(atob("${PNG_B64}"), (c) => c.charCodeAt(0))`;
+const PNG = new Uint8Array(Buffer.from(PNG_B64, "base64"));
+/** whether every <img> matched by `sel` decodes, and their natural widths */
+const decoded = (P, sel) => P.ev(`Promise.all([...document.querySelectorAll(${JSON.stringify(sel)})].map((i) => i.decode().then(() => i.naturalWidth, () => 0)))`);
 const b64 = (u) => Buffer.from(u).toString("base64");
 const NB = "window.sagebrush.notebook", T = "window.sagebrush.imagesTest", W = "window.sagebrush.workspace";
 try {
@@ -62,7 +66,8 @@ try {
   await P.ev(`(${NB}.run(${cellJs}), true)`).catch(() => {});
   await P.until(`!!${cellJs}.md.querySelector('img[src^="blob:"]')`, 10000).catch(() => {});
   const img = await P.ev(`(() => { const i = ${cellJs}.md.querySelector("img"); return i ? { src: i.getAttribute("src").slice(0, 5), alt: i.alt } : ${cellJs}.md.innerHTML.slice(0, 200); })()`);
-  ok(img?.src === "blob:" && img.alt === "image", "N2: the cell shows it, from a blob: URL", img);
+  const w2 = await P.ev(`(() => { const i = ${cellJs}.md.querySelector("img"); return i ? i.decode().then(() => [i.naturalWidth, i.naturalHeight], () => null) : null; })()`);
+  ok(img?.src === "blob:" && img.alt === "image" && J(w2) === J([3, 2]), "N2: the cell shows it, from a blob: URL, and it decodes as the 3x2 image pasted", { img, w2 });
 
   // ---- N3: Download embeds it
   await sleep(500);
@@ -85,8 +90,8 @@ try {
   ok(!took4c && (await P.ev(`${NB}.cells()[${codeAt}].ta.value`)) === "x = 1" && !(await P.ev(`${NB}.cells()[${codeAt}].attachments`)), "N4: a code cell takes no image");
 
   // ---- N5: import an .ipynb with attachments, then export it again
-  // (a real 2x1 GIF: screen, one frame, its pixels, the trailer)
-  const gif = Buffer.concat([Buffer.from("GIF89a"), Buffer.from([2, 0, 1, 0, 0, 0, 0, 0x2c, 0, 0, 0, 0, 2, 0, 1, 0, 0, 2, 2, 0x44, 0x01, 0, 0x3b])]);
+  // (a real 1x1 GIF)
+  const gif = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
   const svg = { "image/svg+xml": Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>").toString("base64") };
   const src = { cells: [
     { cell_type: "markdown", id: "m1", metadata: {}, source: ["![p](attachment:p.png) ![g](attachment:g.gif) ![s](attachment:s.svg)"], attachments: { "p.png": { "image/png": b64(PNG) }, "g.gif": { "image/gif": gif.toString("base64") }, "s.svg": svg } },
@@ -104,7 +109,8 @@ try {
   const back = JSON.parse(await P.ev(`${T}.exportIpynb()`));
   ok(J(back.cells[0].attachments) === J(src.cells[0].attachments) && [].concat(back.cells[0].source).join("") === src.cells[0].source[0], "N5: exported again: the same attachments, byte for byte, and the same source (round trip)", back.cells[0].attachments);
   await P.until(`[...document.querySelectorAll("#cells .mdout img")].filter((i) => i.getAttribute("src").startsWith("blob:")).length === 2`, 10000).catch(() => {});
-  ok((await P.ev(`[...document.querySelectorAll("#cells .mdout img")].filter((i) => i.getAttribute("src").startsWith("blob:")).length`)) === 2, "N5: the imported notebook shows its two raster images from files");
+  const w5 = await decoded(P, '#cells .mdout img[src^="blob:"]');
+  ok(J(w5) === J([3, 1]), "N5: the imported notebook shows its two raster images from files, and both decode (3 and 1 pixels wide)", w5);
 
   // ---- N7: an image over the page's pixel budget (9000 px wide): saved and exported, but not drawn
   const big = `(() => { const u = new Uint8Array(64).fill(7); u.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0x23, 0x28, 0, 0, 0, 10]); return u; })()`;

@@ -705,7 +705,7 @@ try {
     await openNotebook(path);
     const ref = await refOf(path);
     const paste = () => ev(`(() => {
-      const u = new Uint8Array(64).fill(7); u.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]);
+      const u = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAEElEQVR4nGM4IScHQQxwFgBBAAYZPEVBlgAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
       const dt = new DataTransfer(); dt.items.add(new File([u], "p.png", { type: "image/png" }));
       const e = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
       ${cellJs(0)}.dispatchEvent(e);
@@ -717,7 +717,8 @@ try {
     const text = await ev(`${cellJs(0)}.cell?.ta?.value ?? ''`);
     const listed = await listOf(ref);
     await until(`!!${cellJs(0)}.querySelector('.mdout img[src^="blob:"]')`, 10000).catch(() => {});
-    const drawn = await ev(`!!${cellJs(0)}.querySelector('.mdout img[src^="blob:"]')`);
+    // (drawn, and decoded: the real 3x2 PNG pasted, not only an element)
+    const drawn = await ev(`(() => { const i = ${cellJs(0)}.querySelector('.mdout img[src^="blob:"]'); return i ? i.decode().then(() => i.naturalWidth === 3 && i.naturalHeight === 2, () => false) : false; })()`);
     ok(took && /!\[image\]\(attachment:[0-9a-f]{24}\.png\)/.test(text) && listed.length === 1 && listed[0].startsWith(`/Attachments/nb-${ref}/`) && drawn, "a pasted image in the pane's notebook: saved in that notebook's own folder (by its ref), referred to and drawn", { took, text, listed, drawn });
     const blobSrc = await ev(`${cellJs(0)}.querySelector('.mdout img')?.getAttribute('src') ?? ''`);
     // (renamed away, and another notebook made at its old path: the pane keeps the one it mounted, frozen; a paste
