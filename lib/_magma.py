@@ -2352,16 +2352,20 @@ class _MCoercionMap(MMap):
         return _coerce(S, x)
 
     def __call__(self, x):
+        if isinstance(x, MSet) and x.kind == "multi":
+            # (Magma's for a multiset)
+            raise MagmaError("Could not coerce into map's domain", "map application")
         if isinstance(x, (MSeq, MSet)):
             # (element by element, one level deep, as Magma's: an element the map doesn't take, at either step, is
-            # "Element is not in the domain of the map" there, a sequence or set in it too)
+            # "Element is not in the domain of the map" there, a sequence or set in it too; a sequence, set or
+            # indexed set of the images, in its order)
             ys = []
             for y in x:
                 try:
                     ys.append(self._into(self.cod, self._into(self.dom, y)))
                 except MagmaError:
                     raise MagmaError("Element is not in the domain of the map", "map application")
-            return MSeq(ys) if isinstance(x, MSeq) else _set(ys)
+            return MSeq(ys) if isinstance(x, MSeq) else _iset(ys) if x.kind == "indexed" else _set(ys)
         try:
             y = self._into(self.dom, x)
         except MagmaError:
