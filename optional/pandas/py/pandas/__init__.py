@@ -25,6 +25,7 @@ __all__ = [
 def __getattr__(name):
     from ._pd_names import PANDAS
     if name in PANDAS:
-        from ._pd_errors import unsupported_name
-        raise unsupported_name(name)
+        # (the builtin NotImplementedError, not the one that is also an AttributeError: `from pandas import name`
+        # turns an AttributeError into a bare ImportError, losing the message)
+        raise NotImplementedError("pandas.%s is not in Sagebrush's pandas 0.x subset" % name)
     raise AttributeError("module 'pandas' has no attribute '%s'" % name)
