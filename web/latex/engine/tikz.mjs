@@ -1,11 +1,13 @@
-// TikZ in the preview: a tikzpicture's paths drawn as SVG. One entry point, renderTikz(src, opts, R):
+// TikZ in the preview: a tikzpicture's paths and nodes drawn as SVG and HTML. One entry point, renderTikz(src, opts, R):
 // `src` the picture's source (its [options] first), as the renderer's str() gives it; R the renderer, of which only
-// problem() and the document's colours (R.colors) and id counter (R.idn) are used. The subset: \draw, \fill,
+// problem() and the document's colours (R.colors) and id counter (R.idn) are used, and opts.label, the renderer's typesetting
+// of a node's text (KaTeX's HTML and its size). The subset: \draw, \fill,
 // \filldraw, \path, \coordinate, \foreach, scope, \tikzset and .style; coordinates (x,y) with or without units, polar
 // (a:r), named, + and ++, the calc library's ($(A)!t!(B)$) and ($(A)+(B)$); --, |-, -|, rectangle, circle, ellipse,
 // arc, to[out,in] and bend, .. controls .., cycle, grid; colours (xcolor's names and mixes), line widths, dash
-// patterns, opacity, rounded corners, arrows; scale, shift, rotate, applied as TikZ applies them. Anything else (nodes
-// among them, for now) is a placeholder naming what stopped it, never a partial picture.
+// patterns, opacity, rounded corners, arrows; scale, shift, rotate, applied as TikZ applies them; nodes (\node, node and
+// coordinate on a path): shapes, separations, anchors, placement, labels, lines stopping at their borders. Anything else
+// is a placeholder naming what stopped it, never a partial picture.
 // Everything is bounded (TIKZ_LIMITS): the expansion of \foreach bodies and styles, path segments, grid lines, the
 // math evaluator's depth and length, coordinates' size and the SVG's bytes.
 // Geometry: the picture's user space is TeX points (1 cm = 72.27/2.54 pt), y up; a path is lines and cubic Béziers in

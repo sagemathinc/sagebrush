@@ -167,7 +167,7 @@ section("safety", () => {
 const lastPoints = (h) => { const [x0, , , y1] = box(h), ds = [...h.matchAll(/ d="([^"]+)"/g)]; return [...ds[ds.length - 1][1].matchAll(/(-?[\d.]+),(-?[\d.]+)/g)].map((m) => [+m[1] + x0, y1 - +m[2]]); };
 const centre = (h, n) => new RegExp('data-name="' + n + '" data-c="([^"]+)"').exec(h)[1].split(" ").map(Number);
 section("nodes", () => {
-  // [name, source, TeX's x0 y0 x1 y1]: the text's box is KaTeX's metrics, which are TeX's own fonts' (Computer Modern);
+  // [name, source, TeX's x0 y0 x1 y1]: the text's box is KaTeX's metrics (its fonts are Computer Modern-based);
   // TeX kerns some letters and sets inline math with its own spacing, which KaTeX's widths don't: those four within 0.15
   const NODE_TEX = [
   ["n-empty", "\\node at (0,0) {};", [-3.33298, -3.33298, 3.33298, 3.33298]],

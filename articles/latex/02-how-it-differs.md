@@ -84,7 +84,7 @@ is dropped, and biblatex's `\printbibliography` shows nothing.
 | Floats | placed by TeX (`[t]`, `[h]`, ...) | where they are written |
 | References | after a second run | at once |
 | Bibliography | from BibTeX or biber | only `thebibliography` written in the document |
-| Pictures | TikZ and pgfplots drawn | TikZ's paths and nodes drawn, a node's text in KaTeX's fonts (TeX's Computer Modern) and sized from their metrics; pgfplots as a placeholder |
+| Pictures | TikZ and pgfplots drawn | TikZ's paths and nodes drawn, a node's text in KaTeX's Computer Modern-based fonts, sized from KaTeX's layout metrics; pgfplots as a placeholder |
 | Speed | about 0.5 to 20 s to remake the PDF after an edit | about 25 to 260 ms from a keystroke to the preview ([benchmark](01-how-it-works.md)) |
 
 ## SageTeX and @interact

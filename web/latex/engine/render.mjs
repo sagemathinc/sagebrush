@@ -187,7 +187,7 @@ class Flow {
 
 // ------------------------------------------------------------------ TikZ node text (for tikz.mjs: opts.label)
 // A node's text, one line of it, as KaTeX's HTML and its size in pt at 10pt (TeX's text box: width, height, depth):
-// text as \text{...} in the node's family (KaTeX's fonts are Computer Modern, TeX's own), $...$ as math. The size is
+// text as \text{...} in the node's family (KaTeX's fonts are Computer Modern-based, as TeX's are), $...$ as math. The size is
 // read from KaTeX's layout tree: each symbol's advance width (a run of text KaTeX merged into one symbol, character by
 // character), the spaces it puts between atoms, a script's or a fraction's widest row, scaled by its size class.
 const FAMILY = { bold: "textbf", italic: "textit", sans: "textsf", mono: "texttt" };

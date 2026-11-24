@@ -35,4 +35,4 @@ number) and `table.md`.
 
 The pictures were written for this benchmark. They are paths, styles,
 transforms and `\foreach` (T01–T40), and nodes: text, anchors, placement, labels, lines between nodes
-(N01–N12). A node's text is KaTeX's, in the same Computer Modern fonts TeX uses; its box comes from their metrics.
+(N01–N12). A node's text is KaTeX's, in KaTeX's Computer Modern-based fonts; its box comes from KaTeX's layout metrics.
