@@ -10,7 +10,7 @@
 // What this host gives the board:
 // - store: the document from the address (or the file), and this browser's
 //   edits of it, kept in localStorage per source until Revert;
-// - images: pictures in this browser's IndexedDB (images.ts);
+// - images: pictures as workspace files, or in this browser's IndexedDB (images.ts);
 // - outputs: slow code items' outputs, kept between visits (outcache.ts);
 // - code: the notebook's engine (code.ts), Python in the runner, an
 //   opaque-origin sandboxed frame (?runner=0 on a loopback host: a plain worker);
@@ -48,6 +48,7 @@ import { boardFromText, fromMermaid } from "./mermaid";
 import { localFollow } from "./local-follow";
 import { embedded, engineRef, exportHtml, fileOutputs } from "./export";
 import { Images } from "./images";
+import { boardPictureFiles, copyBoardPictures } from "../workspace/board-pictures";
 import { BoardHistory, type HistoryModule } from "./history";
 import { BoardRecordStore, boardKind, journalId } from "./journal";
 import { canon, boardMerge3 } from "./merge";
@@ -303,6 +304,8 @@ async function makeInWorkspace(w: Workspace, d: BoardDoc, here: boolean, signal?
   const opts = { content: d, mode: d.mode ?? "python", signal };
   const src = as.copyOf ? await w.pathOf("board", as.copyOf).then((q) => (q ? w.stat(q) : undefined)).catch(() => undefined) : undefined;
   const e = as.person ? await w.createByPerson(p, opts) : src ? await w.createCopyOf(src, p, opts) : await w.create(p, opts);
+  // (a copy's pictures: copied to its own folder, made as the copy was)
+  if (as.copyOf && e.ref && d.images) await copyBoardPictures(w, as.copyOf, e.ref, Object.keys(d.images), (q, content) => (src ? w.createCopyOf(src, q, { content }) : w.create(q, { content })));
   if (here) try { localStorage.setItem(hereKey(e.ref!), "1"); } catch {}
   return e.ref!;
 }
@@ -1466,8 +1469,8 @@ const host: BoardHost = {
       return id;
     },
   },
-  // pictures: kept in this browser by name
-  images: new Images(),
+  // pictures, by name: a workspace board's as its files (/Attachments/board-<id>), else kept in this browser
+  images: new Images(local && ws ? boardPictureFiles(ws, source.slice(6), { save: true }) : null),
   // slow code items' outputs, kept in this browser (outcache.ts); in an
   // exported file, those it carries (and what runs, until the page closes)
   outputs: bench ? undefined : file ? new MemoryOutputCache(carriedOutputs(fileOutputs())) : new IdbOutputCache(OWN_ENGINE?.id),

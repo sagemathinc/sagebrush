@@ -28,6 +28,7 @@
 import { TRASH, kindOf, nameOf, parentOf, splitExt, within } from "./paths";
 import { notebookFileText, boardFileText } from "./file-bytes";
 import { Images } from "../board/images";
+import { boardPictureFiles } from "./board-pictures";
 
 export type DiskStat = { path: string; dir: boolean; size: number; mtime: number; sha256?: string | null };
 /** What the page expects a file to be (disk.rs Expect). */
@@ -202,7 +203,7 @@ export async function fileBytes(ws: any, p: string): Promise<Uint8Array | null> 
   const { entry, content } = await ws.read(p);
   if (entry.kind === "notebook") return enc.encode(notebookFileText(content));
   if (entry.kind === "board") {
-    const images = new Images();
+    const images = new Images(boardPictureFiles(ws, entry.ref));
     try { return enc.encode(await boardFileText(content, images)); } finally { images.dispose(); }
   }
   if (entry.kind === "file") return content instanceof Uint8Array ? content : typeof content === "string" ? enc.encode(content) : new Uint8Array(content);

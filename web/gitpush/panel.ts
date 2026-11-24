@@ -6,6 +6,7 @@
 import type { Entry, Workspace } from "../workspace/api";
 import type { BoardDoc } from "../board/doc";
 import { Images } from "../board/images";
+import { boardPictureFiles } from "../workspace/board-pictures";
 import { boardFileText, notebookFileText } from "../workspace/file-bytes";
 import { embedAttachments } from "../workspace/image-store";
 import { AUTO_MS, GIT_BRANCH, MAX_FILE, branchFor, excluded, parseRepo, signature, stripOutputs } from "./rules";
@@ -102,7 +103,7 @@ async function pushNow(w: Workspace, host: GitpushHost, o: { repo: string; folde
         const f = await w.read(p).catch(() => null);
         return f?.content instanceof Uint8Array ? f.content : null;
       })).doc)));
-      else if (e.kind === "board") { const images = new Images(); try { b = enc.encode(await boardFileText(content as BoardDoc, images)); } finally { images.dispose(); } }
+      else if (e.kind === "board") { const images = new Images(boardPictureFiles(w, e.ref)); try { b = enc.encode(await boardFileText(content as BoardDoc, images)); } finally { images.dispose(); } }
       else if (content instanceof Uint8Array) b = content.slice();
       else if (content instanceof ArrayBuffer) b = new Uint8Array(content.slice(0));
       else if (ArrayBuffer.isView(content)) b = new Uint8Array(content.buffer.slice(content.byteOffset, content.byteOffset + content.byteLength));

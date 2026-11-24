@@ -1,13 +1,17 @@
 // Pictures on a board (design/board.md, "Images").  A note shows one by its
 // name (`image`); the document's `images` gives each one's size.  Their
-// bytes are kept apart from the document, in this browser's IndexedDB, named
-// by a hash of their content, so that undo, saving and laying out never copy
-// them.  A board leaving the browser (Download, Copy, an exported HTML file)
-// carries them in `images`, as data: URLs, and opening one puts them back.
+// bytes are kept apart from the document, named by a hash of their content,
+// so that undo, saving and laying out never copy them: a workspace board's
+// raster pictures as workspace files, in /Attachments/board-<id>/ (#1872, so
+// the workspace's other devices have them too), anything else in this
+// browser's IndexedDB.  A board leaving the browser (Download, Copy, an
+// exported HTML file) carries them in `images`, as data: URLs, and opening
+// one puts them back.
 
 import type { BoardDoc, DocNode, DocNote } from "./doc";
 import { PixelBudget, SVG_MAX_BYTES, pictureSize, pictureUrl, svgDataUrl, svgSize, svgText } from "../image-size";
 import { openDb } from "./idb-open";
+import { IMAGE_BYTES_MAX, imageType, saveImage } from "../workspace/image-store";
 
 /** A note (a code item too), as doc.ts's isNote says it, with its type narrowed here (a type-only import: doc.ts isn't
  * loaded by this module). */
@@ -187,9 +191,25 @@ export interface ImageStore {
   inline(d: BoardDoc): Promise<BoardDoc>;
 }
 
+/** A workspace board's picture files (web/workspace/board-pictures.ts): its folder, and the workspace's reads; with
+ * `create` (the workspace's exclusive create), pictures are also saved there. */
+export interface PictureFiles {
+  folder: string;
+  /** the paths in the folder (none if it isn't there) */
+  list(): Promise<string[]>;
+  /** a file's bytes, or null */
+  read(path: string): Promise<Uint8Array | null>;
+  create?: (path: string, bytes: Uint8Array) => Promise<unknown>;
+}
+/** A picture file's name in its folder: "<name>.<raster extension>" (image-store.ts's saveImage names them so). */
+const FILE_NAME = /^([A-Za-z0-9_-]{1,64})\.(png|jpg|gif|webp)$/;
+
 export class Images {
   private urls = new Map<string, string>();
   private blobs = new Map<string, Blob>();
+
+  /** `files`: a workspace board's picture files; without them (no workspace, an exported file), this browser's alone. */
+  constructor(private files: PictureFiles | null = null) {}
 
   /** Lets every picture go, their object URLs revoked (an Images made for one use, as the export's per board). */
   dispose(): void {
@@ -208,9 +228,36 @@ export class Images {
     const name = await nameOf(blob);
     if (!this.urls.has(name)) {
       this.remember(name, blob);
-      await idb("readwrite", (s) => s.put(blob, name));
+      if (!(await this.toFile(name, blob))) await idb("readwrite", (s) => s.put(blob, name));
     }
     return name;
+  }
+  /** Save a picture as the board's file (raster only: an SVG stays in this browser); whether it is one now. */
+  private async toFile(name: string, blob: Blob): Promise<boolean> {
+    const f = this.files;
+    if (!f?.create || blob.type === "image/svg+xml") return false;
+    const r = await saveImage(f.create, f.folder, new Uint8Array(await blob.arrayBuffer()), { name, read: f.read }).catch(() => ({ refused: "other" as const }));
+    if ("path" in r) return true;
+    console.warn(`board: a picture kept in this browser only (${r.refused})`);
+    return false;
+  }
+  /** A picture file's bytes as a picture, if they are a raster image within the cap and `name` is their own (content)
+   * name: else nothing (a file put there by another name than its content's is not shown as that picture). */
+  private async fromFile(name: string, path: string): Promise<Blob | undefined> {
+    const u = await this.files!.read(path).catch(() => null);
+    const type = u && u.length <= IMAGE_BYTES_MAX ? imageType(u) : null;
+    if (!u || !type) return undefined;
+    const blob = new Blob([u as BlobPart], { type: type.mime });
+    return (await nameOf(blob)) === name ? blob : undefined;
+  }
+  /** The board's picture files, by name. */
+  private async filesByName(): Promise<Map<string, string>> {
+    const m = new Map<string, string>();
+    for (const p of await this.files!.list().catch(() => [] as string[])) {
+      const f = FILE_NAME.exec(p.slice(p.lastIndexOf("/") + 1));
+      if (f && p === `${this.files!.folder}/${f[0]}` && !m.has(f[1])) m.set(f[1], p);
+    }
+    return m;
   }
   private remember(name: string, blob: Blob) {
     this.blobs.set(name, blob);
@@ -234,12 +281,21 @@ export class Images {
     return this.blobs.get(name);
   }
 
-  /** Have these pictures ready to show (from IndexedDB). */
+  /** Have these pictures ready to show (the board's files, else this browser's IndexedDB). */
   async ensure(names: Iterable<string>): Promise<void> {
     const missing = [...new Set(names)].filter((n) => !this.urls.has(n));
+    if (!missing.length) return;
+    const files = this.files ? await this.filesByName() : null;
     await Promise.all(missing.map(async (n) => {
+      const p = files?.get(n);
+      const f = p ? await this.fromFile(n, p) : undefined;
+      if (f) { if (!this.urls.has(n)) this.remember(n, f); return; }
       const b = await idb<Blob>("readonly", (s) => s.get(n));
-      if (b instanceof Blob && !this.urls.has(n)) this.remember(n, b);
+      if (!(b instanceof Blob) || this.urls.has(n)) return;
+      this.remember(n, b);
+      // (a picture kept before in this browser only: saved as the board's file now, so its other devices have it;
+      // this browser's copy stays)
+      if (files) await this.toFile(n, b);
     }));
   }
 
