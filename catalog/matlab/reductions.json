@@ -390,7 +390,7 @@
       }
     ],
     "differs": [
-      "The last digit or two can differ from MATLAB's when [l, u] isn't [0, 1] or the range overflows (MATLAB's exact order of operations isn't recorded yet)."
+      "Where [l, u] isn't [0, 1], or the range overflows, results can differ from MATLAB's by about eps * max(|l|, |u|) (at most 1.14 times that in the recorded rows), because MATLAB's exact order of operations isn't recorded."
     ],
     "status": "full",
     "see_also": [

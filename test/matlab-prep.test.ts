@@ -5,8 +5,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-// rescale and normalize. MATLAB's own outputs for the cases its pages leave open aren't recorded yet (the oracle job
-// is queued), so these rows check the pages' formulas and examples, the identity N = (A - C) ./ S, NaN left out of the
+// rescale and normalize, against MATLAB R2026b's own outputs (recorded 2026-11-24, the oracle's p5 and p7 programs,
+// whose rows are below), and the pages' formulas and examples, the identity N = (A - C) ./ S, NaN left out of the
 // statistics, the dimensions, the classes, constant data, and the refusals.
 
 const cli = join(__dirname, "..", "src", "cli.js");
@@ -211,8 +211,8 @@ test("rescale: the page's formula, clipping to InputMin and InputMax, bounds by 
 
 // (MATLAB R2026b's output for the program below, recorded 2026-11-24 on MATLAB Online, every row in its own try; the
 // open cases of MATLAB's pages: NaN, Inf, empty, classes, constant data, C and S, refusals. All match to the digit but
-// two of rescale's, whose last digits differ: r_round, with [l, u] = [-3, 7], within 4 units in the last place, and
-// r_big at 1e308, within 2^-53)
+// two of rescale's: r_round, with [l, u] = [-3, 7], and r_big at 1e308, within 1.15 eps max(|l|, |u|), the bound
+// the catalog states (MATLAB's exact order of operations isn't known))
 const PROGRAM_P5 = [
   "format long g",
   "show = @(name, x) fprintf('%s|%s|%s|%s|%s\\n', name, class(x), mat2str(size(x)), sprintf('%.17g ', real(double(x))), sprintf('%.17g ', imag(double(x))));",
@@ -310,7 +310,13 @@ const MATLAB_P5 = [
   "n_badtype|MATLAB:normalize:InvalidZscoreType|The zscore type must be 'std' or 'robust'.",
   "n_badmethod|MATLAB:normalize:InvalidMethod|Normalization method must be 'zscore', 'norm', 'center', 'scale', 'range', or 'medianiqr'."
 ];
-const NEAR_P5: Record<string, number> = { r_round: 4 * 4.440892098500626e-16, r_big: 1.1102230246251565e-16 };
+// (each row's interval's largest magnitude, max(|l|, |u|); the bound 1.15 eps times it, absolute)
+const EPS = 2.220446049250313e-16;
+const NEAR_P5: Record<string, number> = { r_round: 7, r_big: 1 };
+const within = (g: number[], w: number[], scale: number, what: string) => {
+  assert.equal(g.length, w.length, what);
+  g.forEach((v, k) => assert.ok(Math.abs(v - w[k]) <= 1.15 * EPS * scale, `${what}[${k}]: ${v} against MATLAB's ${w[k]}`));
+};
 
 test("rescale and normalize against MATLAB R2026b's rows, to the digit", () => {
   const got = run(PROGRAM_P5);
@@ -321,14 +327,14 @@ test("rescale and normalize against MATLAB R2026b's rows, to the digit", () => {
     const g = line.split("|").map((f) => f.trim()), w = want.split("|").map((f) => f.trim());
     if (id in NEAR_P5) {
       assert.deepEqual(g.slice(0, 3), w.slice(0, 3), id);
-      close(nums(g[3]), nums(w[3]), NEAR_P5[id], id);
+      within(nums(g[3]), nums(w[3]), NEAR_P5[id], id);
     } else assert.deepEqual(g, w, id);
   }
 });
 
 // (MATLAB R2026b's rescale on inputs that separate its steps, recorded 2026-11-24. Its exact order of operations isn't
-// known: the rows marked here differ in their last digits, within 8 units in the last place of the interval's
-// largest magnitude; the rest match to the digit)
+// known: the rows marked here differ from MATLAB's by at most 1.15 eps max(|l|, |u|), absolute, the bound the catalog
+// states; the rest match to the digit)
 const PROGRAM_P7 = [
   "format long g",
   "show = @(name, x) fprintf('%s|%s|%s|%s\\n', name, class(x), mat2str(size(x)), sprintf('%.17g ', x));",
@@ -385,7 +391,7 @@ const MATLAB_P7 = [
   "h_shift|double|[1 4]|0 1 0.20000000000000001 0.20000000000000001",
   "i_eq_lu|double|[1 3]|5 5 5"
 ];
-const NEAR_P7 = new Set(["a_m3_7", "a_m3_0", "b_m3_7", "d01", "d_m3_7", "d_half", "e_neg"]);
+const NEAR_P7: Record<string, number> = { a_m3_7: 7, a_m3_0: 3, b_m3_7: 7, d01: 1, d_m3_7: 7, d_half: 1, e_neg: 1 };
 
 test("rescale's arithmetic against MATLAB R2026b's rows", () => {
   const got = run(PROGRAM_P7);
@@ -394,9 +400,9 @@ test("rescale's arithmetic against MATLAB R2026b's rows", () => {
     const line = got.get(id);
     assert.ok(line, id + ": no row");
     const g = line.split("|").map((f) => f.trim()), w = want.split("|").map((f) => f.trim());
-    if (NEAR_P7.has(id)) {
+    if (id in NEAR_P7) {
       assert.deepEqual(g.slice(0, 3), w.slice(0, 3), id);
-      close(nums(g[3]), nums(w[3]), 8 * 2.220446049250313e-16 * 7, id);
+      within(nums(g[3]), nums(w[3]), NEAR_P7[id], id);
     } else assert.deepEqual(g, w, id);
   }
 });
@@ -406,5 +412,5 @@ test("rescale and normalize admitted before their copies are made (test/matlab_p
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const lines = r.stdout.trim().split("\n");
   assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
-  assert.equal(lines.length, 2, r.stdout);
+  assert.equal(lines.length, 3, r.stdout);
 });

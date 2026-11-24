@@ -69,3 +69,16 @@ stand_in(20 * MB)
 assert attempt(lambda: D.rescale_(1, A)) == "reached"
 assert attempt(lambda: D.rescale_(1, A, A, B, C("InputMin"), A, C("InputMax"), B)) == "MATLAB:nomem"
 ok("rescale: its bounds' copies counted with the data (low host: nomem)")
+
+# (normalize's per-vector work counted from A's size before any copy: an empty array of 300,000 columns normalized
+# along its empty dimension, and a row of 100,000 along its dimension of 1, each one vector a column with its
+# statistics, C and S; measured peaks 21.9 MB and 12.4 MB, charged 38.4 MB and 22.4 MB)
+E = N._un_nd(np.ones((0, 300000)))
+Row = N._un_nd(np.ones((1, 100000)))
+for name, f, low in (("empty", lambda: D.normalize_(3, E, 1.0, C("zscore"), C("std")), 8 * MB),
+                     ("row robust", lambda: D.normalize_(3, Row, 1.0, C("zscore"), C("robust")), 10 * MB)):
+    stand_in(low)
+    assert attempt(f) == "MATLAB:nomem", name
+    stand_in(100 * MB)
+    assert attempt(f) == "reached", name
+ok("normalize: its vectors' work counted before any copy (an empty 0-by-300000 array, a 1-by-100000 row: low host nomem)")

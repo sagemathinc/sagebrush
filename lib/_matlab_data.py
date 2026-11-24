@@ -699,13 +699,17 @@ def zscore_(nargout, X, flag=None, dim=None):
 # ------------------------------------------------------------------ rescale, normalize
 
 # (the most rescale and normalize hold at once for each element: the data's float copy, its sorted copy and masks, and
-# the result with its temporaries, measured in CPython at up to 50 bytes for real data and 58 for complex)
+# the result with its temporaries, measured in CPython at up to 50 bytes for real data and 58 for complex; and for each
+# vector normalize normalizes: its count, statistics, C and S, up to 73 bytes beyond the elements' 96, measured for
+# an empty array of 100,000 columns and for single rows)
 _PREP_ELEMENT = 96
+_PREP_VECTOR = 128
 
 
-def _prep_admit(x, what, *others):
-    """rescale's and normalize's work admitted before any copy of x is made, with the float copies of others"""
-    _m._admit_bytes(_m._numel(x) * _PREP_ELEMENT + 16 * sum(_m._numel(o) for o in others),
+def _prep_admit(x, what, *others, vectors=0):
+    """rescale's and normalize's work admitted before any copy of x is made, with the float copies of others and
+    the per-vector work of vectors vectors"""
+    _m._admit_bytes(_m._numel(x) * _PREP_ELEMENT + vectors * _PREP_VECTOR + 16 * sum(_m._numel(o) for o in others),
                     "%s of %d elements" % (what, _m._numel(x)))
 
 
@@ -898,13 +902,17 @@ def normalize_(nargout, A, *args):
         raise _err("Invalid data type. First argument must be of type double, single, table, or timetable.",
                    "MATLAB:normalize:InvalidFirstInput")
     axis, method, mtype, center, scale = _normalize_args(args)
-    _prep_admit(A, "normalize", *(a for a in args if not _istext(a)))
+    # (the vectors normalized, from A's size alone: every element of its other dimensions, even when the dimension
+    # normalized is empty or 1)
+    dims = list(_m._dims(A))
+    if axis is None:
+        axis = _first_dim(tuple(dims))
+    dims += [1] * (axis + 1 - len(dims))
+    _prep_admit(A, "normalize", *(a for a in args if not _istext(a)), vectors=_m._prod(dims[:axis] + dims[axis + 1:]))
     M = _md(A)
     if _m.class_(A) == "single":
         # (single data in single throughout, as MATLAB computes it, observed MATLAB R2026b, 2026-11-24)
         M = M.astype(np.complex64 if np.iscomplexobj(M) else np.float32)
-    if axis is None:
-        axis = _first_dim(M.shape)
     F, how = _to_front(M, axis)
     L, R = F.shape
     ok, n, S = _colstats(F) if not np.iscomplexobj(F) else (~np.isnan(F), (~np.isnan(F)).sum(axis=0), None)
