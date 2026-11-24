@@ -1,0 +1,110 @@
+
+>> 2/1 cat [1];
+       ^
+Runtime error in 'cat': Bad argument types
+Argument types given: RngIntElt, SeqEnum[RngIntElt]
+
+
+>> x := 4; x/2 cat [1];
+               ^
+Runtime error in 'cat': Bad argument types
+Argument types given: RngIntElt, SeqEnum[RngIntElt]
+
+
+>> (1/2)*2 cat [1];
+           ^
+Runtime error in 'cat': Bad argument types
+Argument types given: RngIntElt, SeqEnum[RngIntElt]
+
+
+>> (1/2) + 2 cat [1];
+             ^
+Runtime error in 'cat': Bad argument types
+Argument types given: RngIntElt, SeqEnum[RngIntElt]
+
+
+>> (1/2) - 2 cat [1];
+             ^
+Runtime error in 'cat': Bad argument types
+Argument types given: RngIntElt, SeqEnum[RngIntElt]
+
+
+>> (3/2) div 1 cat [1];
+               ^
+Runtime error in 'cat': Bad argument types
+Argument types given: RngIntElt, SeqEnum[RngIntElt]
+
+
+>> x mod 2 cat [1];
+           ^
+Runtime error in 'cat': Bad argument types
+Argument types given: RngIntElt, SeqEnum[RngIntElt]
+
+
+>> {1} meet {2} cat [1];
+                ^
+Runtime error in 'cat': Bad argument types
+Argument types given: SetEnum[RngIntElt], SeqEnum[RngIntElt]
+
+
+>> 2 cat [1] * (1/2);
+     ^
+Runtime error in 'cat': Bad argument types
+Argument types given: RngIntElt, SeqEnum[RngIntElt]
+
+
+>> (1/2) cat [1] + 2;
+         ^
+Runtime error in 'cat': Bad argument types
+Argument types given: FldRatElt, SeqEnum[RngIntElt]
+
+
+>> 1/0 cat [1];
+       ^
+Runtime error in 'cat': Bad argument types
+Argument types given: RngIntElt, SeqEnum[RngIntElt]
+
+
+>> 1/0 cat "a";
+       ^
+Runtime error in 'cat': Bad argument types
+Argument types given: RngIntElt, MonStgElt
+
+
+>> "a" cat 1/0;
+       ^
+Runtime error in 'cat': Bad argument types
+Argument types given: MonStgElt, RngIntElt
+
+
+>> 1/(0) cat [1];
+         ^
+Runtime error in 'cat': Bad argument types
+Argument types given: RngIntElt, SeqEnum[RngIntElt]
+
+xyy
+
+>> -[1] cat [2];
+   ^
+Runtime error in '-': Bad argument types
+Argument types given: SeqEnum[RngIntElt]
+
+
+>> #[1] cat [2];
+        ^
+Runtime error in 'cat': Bad argument types
+Argument types given: RngIntElt, SeqEnum[RngIntElt]
+
+
+>> 2^[1] cat [2];
+    ^
+Runtime error in '^': Bad argument types
+Argument types given: RngIntElt, SeqEnum[RngIntElt]
+
+[ 1, 2, 3 ]
+true
+abc
+[ 1, 2, 3 ]
+[ 1, 2 ]
+[ 1, 2, 3 ]
+end
