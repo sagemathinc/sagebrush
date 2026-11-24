@@ -918,6 +918,15 @@ test("a master push the merge queue already tested (CI_QUEUE_TESTED): every test
   assert.equal(classify(["src/x.ts"], "", { CI_QUEUE_TESTED: "true" }).queue_tested, "false");
 });
 
+test("latex_budget: a pull request changing the LaTeX group's inputs keeps web-artifacts, light or not; nothing else does", () => {
+  for (const files of [["web/latex/split.ts"], ["scripts/latex-group.mjs"], ["web/workspace/paths.ts"], ["web/build.ts"]]) {
+    assert.equal(classify(files).latex_budget, "true", files.join());
+    assert.equal(classify(files, "", { CI_PR_LIGHT: "true" }).latex_budget, "true", files.join());
+  }
+  for (const files of [["web/latex/test-latex-units.mjs"], ["web/board/x.ts"], ["design/x.md"]]) assert.equal(classify(files).latex_budget, "false", files.join());
+  assert.equal(classify(["web/latex/split.ts"], "", { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" }).latex_budget, "false");
+});
+
 test("PR CI light (CI_PR_LIGHT exactly \"true\"): a pull request keeps only checks' and the size gate's inputs and the modules' build", () => {
   const files = ["src/compile.ts", "web/notebook/x.ts", "engine/poly/src/lib.rs", "magma-tests/x.m"];
   const off = classify(files);

@@ -191,6 +191,27 @@ for (const files of [["src/compile.ts"], ["web/notebook/x.ts"], ["engine/poly/sr
     assert.deepEqual(label, pr(files, { CI_PR_LABELS: "full-ci" }));
     n += 5;
   }
+  // (a change to the LaTeX group's inputs keeps web-artifacts, whose suite checks the group's caps, even when light:
+  // #1702, Nov 24 2026; and only that job beyond the light set)
+  for (const files of [["web/latex/split.ts"], ["scripts/latex-group.mjs"], ["web/latex/core/x.ts", "src/compile.ts"], ["pnpm-lock.yaml"]]) {
+    const on = pr(files, { CI_PR_LIGHT: "true" }), off = pr(files);
+    assert.equal(on.latex_budget, "true", files.join());
+    assert.ok(runSet(on, PR).has("web-artifacts"), `${files.join()}: light keeps web-artifacts`);
+    assert.ok(runSet(off, PR).has("web-artifacts"), `${files.join()}: not light, the full tier runs it as before`);
+    const base = pr(files.filter((f) => f === "src/compile.ts").length ? ["src/compile.ts"] : ["design/x.md"], { CI_PR_LIGHT: "true" });
+    assert.deepEqual([...runSet(on, PR)].filter((j) => !runSet(base, PR).has(j) && j !== "web-artifacts" && j !== "wasm-modules" && !["checks", "size-base", "size-gate"].includes(j)), [], `${files.join()}: nothing else beyond the light set`);
+    n += 4;
+  }
+  // (and a change outside them doesn't: the light set as before)
+  for (const files of [["web/board/x.ts"], ["web/latex/test-latex-units.mjs"], ["src/compile.ts"]]) {
+    const on = pr(files, { CI_PR_LIGHT: "true" });
+    assert.equal(on.latex_budget, "false", files.join());
+    assert.ok(!runSet(on, PR).has("web-artifacts"), `${files.join()}: light, no web-artifacts`);
+    n += 2;
+  }
+  // (latex_budget is a pull request's only: a queue group and a push follow the full tier, as before)
+  for (const event of ["merge_group", "push"]) assert.equal(paths(event, ["web/latex/split.ts"]).latex_budget, "false", event);
+  n += 2;
   // (a docs-only pull request: light changes nothing it runs)
   assert.deepEqual([...runSet(pr(["design/x.md"], { CI_PR_LIGHT: "true" }), PR)].sort(), [...runSet(pr(["design/x.md"]), PR)].sort());
   // (never a queue group, a push or a track push: the full set, whatever the switch says)
