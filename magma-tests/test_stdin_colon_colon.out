@@ -1,0 +1,54 @@
+
+>> print 1 :: 2;
+           ^
+User error: bad syntax
+
+>> x := 1 :: 2;
+          ^
+User error: bad syntax
+
+>> 1 ::;
+     ^
+User error: bad syntax
+
+>> x :: y;
+     ^
+User error: bad syntax
+
+>> print [1 :: 2];
+            ^
+User error: bad syntax
+
+>> x := [1, 2 :: 3];
+              ^
+User error: bad syntax
+
+>> x := <1 :: 2>;
+           ^
+User error: bad syntax
+
+>> print 1 :: Magma;
+           ^
+User error: bad syntax
+1
+
+>> a ::= 1;
+     ^
+User error: bad syntax
+
+>> x := 1 ::= 2;
+          ^
+User error: bad syntax
+
+>> z := 1; y := z::2;
+                 ^
+User error: bad syntax
+
+>> print 1/0 :: 2;
+             ^
+User error: bad syntax
+
+>> 1/0 :: 2;
+       ^
+User error: bad syntax
+end

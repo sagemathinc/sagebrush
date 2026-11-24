@@ -21,6 +21,15 @@ test("a statement's ';' may be left off at the end of a line or of the input", (
   assert.throws(() => magmaToPython("a := 10 b := 5;"), MagmaSyntaxError);
 });
 
+test("a parameter's type, x :: RngIntElt, is read and dropped, written as :: or as two :s (a Sagebrush extension)", () => {
+  // (Magma 2.18-5 takes a parameter's type only in an intrinsic's signature; :: is one token, as Magma's lexer has it)
+  const plain = py("function f(x) return x; end function;");
+  assert.equal(py("function f(x :: RngIntElt) return x; end function;"), plain);
+  assert.equal(py("function f(x : : RngIntElt) return x; end function;"), plain);
+  assert.equal(py("f := func<x :: RngIntElt | x>;"), py("f := func<x | x>;"));
+  assert.equal(py("procedure p(~x :: SeqEnum, y :: RngIntElt) x := [y]; end procedure;"), py("procedure p(~x, y) x := [y]; end procedure;"));
+});
+
 test("syntax errors: a file runs up to the first one, a session drops the line and goes on", () => {
   const src = "x := 1;\ny := (2 + ; x;\nx + 1;\nz := 3 $ 4;\nx + 2;\n";
   // without recovery nothing runs, as before

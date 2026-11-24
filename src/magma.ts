@@ -56,7 +56,7 @@ export const KEYWORDS = new Set(
 );
 
 // longest first
-const OPS = [":->", "@@", "+:=", "-:=", "*:=", "/:=", "^:=", ":=", "..", "->", "{@", "@}", "{*", "*}", "$$", "<", ">", "(", ")", "[", "]", "{", "}",
+const OPS = [":->", "@@", "+:=", "-:=", "*:=", "/:=", "^:=", ":=", "::", "..", "->", "{@", "@}", "{*", "*}", "$$", "<", ">", "(", ")", "[", "]", "{", "}",
   ",", ";", ":", "|", "#", "&", "~", "+", "-", "*", "/", "^", ".", "!", "`", "@", "=", "\\"];
 
 // The keywords whose assignment form Magma has, x div:= 2 (Magma 2.18-5; not eq:=, cmpeq:= or subset:=)
@@ -65,7 +65,7 @@ const OPAS = ["+:=", "-:=", "*:=", "/:=", "^:=", ...[...OPA_KW].map((k) => k + "
 
 // After a literal zero denominator (Parser.zeroDenominator): the operators that start or bind an operand of their
 // own, which Magma doesn't take as continuing the expression, and the keywords it does (Magma 2.18-5, each checked)
-const ZERO_NOT_AFTER = new Set(["(", "[", "{", "{@", "{*", ".", "$", "$$", "#", "!", "@", "@@", "~", "&", "`", "\\"]);
+const ZERO_NOT_AFTER = new Set(["(", "[", "{", "{@", "{*", ".", "$", "$$", "#", "!", "@", "@@", "~", "&", "`", "\\", "::"]);
 const ZERO_KW_AFTER = new Set(("eq ne lt le gt ge in notin subset notsubset cmpeq cmpne div mod and or xor join meet diff sdiff " +
   "then do to by select else where").split(" "));
 
@@ -170,7 +170,8 @@ export function lex(src: string): Tok[] {
       adv(j + 1 - i);
       continue;
     }
-    const op = OPS.find((o) => src.startsWith(o, i));
+    // (:: is one token, as Magma's: print 1 :: 2; is bad syntax at its first colon; but ::= is : and :=, as before)
+    const op = OPS.find((o) => src.startsWith(o, i) && !(o === "::" && src[i + 2] === "="));
     if (!op) {
       // reported by the parser when it reaches it, so that the statements
       // before it still run (Magma parses one statement at a time)
@@ -1206,8 +1207,10 @@ class Parser {
       do {
         const ref = this.eat("~");
         const name = pyName(this.ident());
-        // typed parameters: x :: RngIntElt
-        if (this.at(":") && this.at(":", 1)) { this.next(); this.next(); this.ident(); }
+        // typed parameters: x :: RngIntElt (a Sagebrush extension: Magma 2.18-5 takes them only in an intrinsic's
+        // signature), written as one token or as two :s
+        if (this.eat("::")) this.ident();
+        else if (this.at(":") && this.at(":", 1)) { this.next(); this.next(); this.ident(); }
         py.push(name);
         if (ref) refs.push(name);
       } while (this.eat(","));
@@ -1482,11 +1485,10 @@ class Parser {
     // operator, a closer or separator, or one of the keywords below (Magma 2.18-5, each checked); anything else,
     // as in 1/0 x, 1/0 true, 1/0 is 1 and 1/0X5 (which is 0 and X5), is its bad syntax there instead.  The
     // operators that start or bind an operand of their own, ( [ { . $ # ! @ ~ ::, aren't followers here)
-    // (= is a follower, as Magma reads 1/0 = 1; :: is two :s here)
-    const ahead = this.toks[b1], after = this.toks[b1 + 1];
+    // (= is a follower, as Magma reads 1/0 = 1)
+    const ahead = this.toks[b1];
     const follows = ahead.t === "op" ? !ZERO_NOT_AFTER.has(ahead.v) : ahead.t === "kw" && ZERO_KW_AFTER.has(ahead.v);
-    const colons = ahead.v === ":" && after?.v === ":" && after.line === ahead.line && after.col === ahead.col + 1;
-    if (!follows || colons) return;
+    if (!follows) return;
     const a = literal(a0, a1), b = literal(b0, b1);
     if (a && b?.zero) throw new MagmaSyntaxError("Illegal zero denominator", b.at.line, b.at.col, true);
   }
