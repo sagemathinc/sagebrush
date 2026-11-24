@@ -14232,7 +14232,7 @@
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
- "web/latex/engine/tikz.mjs :: X :: if (size > TIKZ_LIMITS.SVG_BYTES) fail(\"a picture over \" + TIKZ_LIMITS.SVG_BYTES / 2 ** 20 + \" MiB of SVG\"); #0": {
+ "web/latex/engine/tikz.mjs :: X :: if (size > TIKZ_LIMITS.SVG_BYTES) fail(\"a picture over \" + TIKZ_LIMITS.SVG_BYTES / 2 ** 20 + \" MiB of rendered output\"); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
