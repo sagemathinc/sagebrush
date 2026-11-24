@@ -465,7 +465,14 @@ William asked for this review because a mistake found later, with millions of fi
 - **Rotation is per epoch:** each epoch's chain entry names its suite (§2). A new suite starts at the next epoch, which any device can start: everything written afterwards uses it, and old data stays readable under its own suite.
   - Moving old data to a new suite is the explicit compaction of §11.2.
 - **Rotating the long-lived keys themselves** (SEC): a suite change can't rotate device, recovery or inbox keys by naming a version.
-  - **Cross-certification:** each device makes its new key pair (a new KEM key, or a new signing key). The old key signs a chain entry naming the new one, and the new key countersigns it. The recovery key and inbox key rotate the same way, under the chain's authority rules (§2.1).
+  - **Signing keys rotate by cross-certification:** a device makes its new Ed25519 key. The old signing key signs a chain entry naming the new one, and the new key countersigns it.
+  - **KEM keys can't sign** (SEC), so a new X25519 or ML-KEM key is bound through the signing chain:
+    - the device's current signing key signs a chain entry naming the new KEM key;
+    - **proof of possession** is separate. An existing device encapsulates a fresh challenge to the new KEM key, and the new key's holder returns a MAC over the entry under the decapsulated secret. The entry records that confirmation.
+  - **Who authorizes each:**
+    - a device's own keys: that device;
+    - **the recovery key:** a current device, under "Replace recovery code" (§2). The new recovery signing key countersigns, and the new recovery KEM key is proven as above;
+    - **the inbox key:** any current device (§2.1). Its KEM key is proven as above.
   - **A monotone policy:** the chain records the account's **minimum writer suite**. It can only rise. A client refuses to accept any new epoch, wrapper or entry below it, and refuses to write below it.
     - A downgrade can't be served, since the policy is in the signed chain that clients pin.
     - Withholding the upgrade entry ("freezing" a client) is bounded like any other withholding (§4.1, §8).
@@ -492,7 +499,16 @@ William asked for this review because a mistake found later, with millions of fi
 - **Explicit compaction, kept for when it's wanted** (SEC): for example after a suspected compromise, or to move old data to a new suite. It moves content off old epochs, at O(N + B) cost (entries plus bytes):
   - **a blob moves** to a new address and new keys under the current epoch: download, decrypt, re-encrypt, upload. The index entries naming it are updated by signed compare-and-swap ops, and the old blob is released;
   - **each step is idempotent and resumable,** keyed by the blob's old address. A crash resumes at the first blob still on the old epoch;
-  - **old keys are kept until a signed checkpoint proves coverage.** Before an epoch's secret is dropped from the keyring, a signed **coverage manifest** must enumerate every live reference to that epoch, by kind: index entries, retained versions, Trash, document CEK wraps, document snapshots and histories, index pages, share pins, support bundles, pending sealed ops, and the inbox key's wrapper. It must show each one moved or released. Devices verify the manifest before the keyring drops the secret;
+  - **old keys are kept until a signed checkpoint proves coverage** (SEC). Before an epoch's secret is dropped from the keyring, a **coverage manifest** must account for every live reference to that epoch.
+    - **Paged:** a million references can't fit in one signed object (64 KiB), so the manifest is a tree of encrypted pages. Its root is signed and bound to a checkpoint, and records per-kind counts and key ranges, so any page can be verified alone.
+    - **The kinds:** index entries, retained versions, Trash, document CEK wraps, document snapshots and histories, index pages, share pins, support bundles and the inbox key's wrapper.
+    - **Each reference ends in one of three states:**
+      - moved to the current epoch;
+      - released;
+      - **independently decryptable without `S[e]`:** a share or support bundle that holds the blob's exported `K_file` or its own wrapper, and stays pinned.
+    - **Pending, unsent local ops aren't enumerated:** they're local state, not the server's. They are re-sealed under the current head at send time (§7, PR 5), or refused.
+    - **Tests:** a mutation per kind (a reference omitted from the manifest) must stop the drop.
+    - Devices verify the manifest's root and its counts before the keyring drops the secret.
   - **the limit, unchanged:** compaction protects old data only from someone who never had its old keys or ciphertext. **It isn't unlinkability either:** the server saw the old and new blobs, their sizes and the ref graph, and can link them.
 - **What other devices see:** the keyring arrives with the epoch's chain entry. Old ops, entries and blobs keep their epoch, and an op sealed under an epoch older than the authorizing head is refused by §4.1's rule.
 
