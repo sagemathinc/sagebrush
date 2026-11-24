@@ -222,8 +222,102 @@ fn batch64(m: &Modulus) -> usize {
     }
 }
 
+/// How many products of reduced residues fit in a u64 sum that already
+/// holds a residue (a fold's result, below n), for a modulus below 2^32:
+/// b with b (n - 1)^2 + (n - 1) <= 2^64 - 1, at least 1 for every such n
+/// (n (n - 1) < 2^64); 0 above 2^32.
+fn fold64(m: &Modulus) -> usize {
+    if m.n > 1 << 32 {
+        return 0;
+    }
+    let q = m.n - 1;
+    if q == 0 {
+        1 << 30
+    } else {
+        ((u64::MAX - q) / (q * q)) as usize
+    }
+    .min(1 << 30)
+}
+
+/// The least [`fold64`] at which a row update folds its u64 sums (reduces
+/// them every fold64 products) rather than sum in u128: one constant for
+/// every target, so the route, and the work it counts, depend on the
+/// modulus and the shape alone.  Measured: from fold64 = 4 the elimination
+/// runs about 2.5 times faster natively and 3 to 5 times in wasm32; at
+/// fold64 = 1 (primes above about 2^31.2), a reduction after every product,
+/// the gain is within the builds' noise natively and 7% in wasm32, for
+/// fifteen times the reductions, so those primes keep the u128 sums.
+const FOLD_MIN: usize = 2;
+
+/// Whether the modulus' u64 sums fold (a modulus below 2^32 whose
+/// [`fold64`] reaches [`FOLD_MIN`]).
+fn folding(m: &Modulus) -> bool {
+    batch64(m) > 0 && fold64(m) >= FOLD_MIN
+}
+
+/// Whether a sum of `terms` products of residues takes the u64 route: in
+/// one u64 sum ([`batch64`]), or folding every [`fold64`] products.
+///
+/// The work it counts is the u128 route's (normalized): its products as
+/// MulSchool, and one ModArith reduction per sum as one u128 batch would
+/// (batch_len >= batch64 products); the folds' reductions are part of the
+/// product accumulation, never counted on their own, so the faster route
+/// never charges more than the u128 sums of the same block.
+fn u64_route(m: &Modulus, terms: usize) -> bool {
+    terms <= batch64(m) || (folding(m) && !test_hooks::no_fold())
+}
+
+/// For the unit tests only: the same elimination without folding (the u128
+/// sums past batch64: the route before folding), to compare the counted
+/// units.
+#[cfg(test)]
+mod test_hooks {
+    thread_local!(static NO_FOLD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+    pub(super) fn no_fold() -> bool {
+        NO_FOLD.with(|c| c.get())
+    }
+    pub(super) fn set_no_fold(v: bool) {
+        NO_FOLD.with(|c| c.set(v));
+    }
+    thread_local!(static FOLDS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) });
+    /// The raw fold passes (a diagnostic: never counted as work units).
+    pub(super) fn fold_done() {
+        FOLDS.with(|c| c.set(c.get() + 1));
+    }
+    pub(super) fn folds_done() -> u64 {
+        FOLDS.with(|c| c.get())
+    }
+    pub(super) fn reset_folds() {
+        FOLDS.with(|c| c.set(0));
+    }
+
+}
+#[cfg(not(test))]
+mod test_hooks {
+    #[inline(always)]
+    pub(super) fn no_fold() -> bool {
+        false
+    }
+    #[inline(always)]
+    pub(super) fn fold_done() {}
+}
+
+/// The folds of a u64 sum of `terms` products: the first [`batch64`] of
+/// them in the empty sum, then [`fold64`] after each fold.  A diagnostic
+/// (the tests' and the timings' raw count): folds are never counted as
+/// work units (see [`u64_route`]).
+#[cfg(test)]
+fn folds(m: &Modulus, terms: usize) -> usize {
+    let b64 = batch64(m);
+    if terms <= b64 {
+        0
+    } else {
+        (terms - b64).div_ceil(fold64(m))
+    }
+}
+
 /// The sums of a row update: u128, or u64 when the products are of 32-bit
-/// residues and few enough to fit (see [`batch64`]).
+/// residues and few enough to fit (see [`batch64`]), or folded.
 struct Acc {
     w: Vec<u128>,
     s: Vec<u64>,
@@ -311,24 +405,39 @@ pub(crate) fn block_of(m: &Modulus) -> usize {
 #[allow(clippy::too_many_arguments)]
 fn update_row<'a, F: Fn(usize) -> &'a [u64]>(row: &mut [u64], from: usize, blk: &[usize], src: F, m: &Modulus, batch: usize, acc: &mut Acc, poll: &mut Poll) {
     let len = row.len() - from;
-    if blk.len() <= batch64(m) {
-        // one u64 sum per entry: the same products and reductions as one
-        // u128 batch (batch_len >= batch64), so the same counts
+    if u64_route(m, blk.len()) {
+        // one u64 sum per entry: within batch64 products, the same products
+        // and reductions as one u128 batch (batch_len >= batch64); past it,
+        // the sums reduced (folded) every fold64 products.  Counted as the
+        // u128 route's (u64_route): the folds are not counted
         let acc = &mut acc.s[..len];
         acc.iter_mut().for_each(|x| *x = 0);
+        let pinv = u64::MAX / m.n;
+        let (mut limit, bf) = (batch64(m), fold64(m));
         let mut cnt = 0;
+        let mut seg = 0;
         for (t, &ct) in blk.iter().enumerate() {
             let f = row[ct];
             if f == 0 {
                 continue;
             }
+            if seg == limit {
+                for a in acc.iter_mut() {
+                    *a = reduce32(*a, m.n, pinv);
+                }
+                test_hooks::fold_done();
+                (seg, limit) = (0, bf);
+            }
+            debug_assert!(seg < limit);
+            // (each sum leaves room for one more product)
+            debug_assert!(acc.iter().all(|&a| a <= u64::MAX - (m.n - 1) * (m.n - 1)));
             axpy32(acc, &src(t)[from..], f);
             cnt += 1;
+            seg += 1;
         }
         poll.count(Family::MulSchool, (cnt * len) as u64);
         poll.count(Family::ModArith, len as u64);
         poll.count(Family::Move, len as u64);
-        let pinv = u64::MAX / m.n;
         for (x, &a) in row[from..].iter_mut().zip(acc.iter()) {
             *x = sub_reduce32(*x, a, m.n, pinv);
         }
@@ -569,13 +678,23 @@ impl Mat {
             if !blk.is_empty() {
                 poll.count(Family::MulSchool, ((rows - r) * blk.len()) as u64);
                 poll.count(Family::ModArith, reductions(rows - r, blk.len(), batch) as u64);
-                if blk.len() <= batch64(&m) {
-                    // (one u64 sum per entry, as in update_row)
+                if u64_route(&m, blk.len()) {
+                    // (one u64 sum per entry, folded as in update_row, and
+                    // counted as the u128 route's above)
                     let pinv = u64::MAX / m.n;
+                    let (b64, bf) = (batch64(&m), fold64(&m));
                     for i in r..rows {
                         let mut s = 0u64;
+                        let (mut seg, mut limit) = (0, b64);
                         for (t, &ct) in blk.iter().enumerate() {
+                            if seg == limit {
+                                s = reduce32(s, m.n, pinv);
+                                test_hooks::fold_done();
+                                (seg, limit) = (0, bf);
+                            }
+                            debug_assert!(s <= u64::MAX - (m.n - 1) * (m.n - 1));
                             s += (self.d[i * cols + ct] as u32 as u64) * (self.d[(block_start + t) * cols + col] as u32 as u64);
+                            seg += 1;
                         }
                         self.d[i * cols + col] = sub_reduce32(self.d[i * cols + col], s, m.n, pinv);
                     }
@@ -1284,9 +1403,260 @@ mod tests {
         }
     }
 
+    /// The largest prime whose fold64 is at least k (k <= 16): by bisection
+    /// on the monotone fold64, then the previous prime.
+    fn last_folding(k: usize) -> u64 {
+        use crate::nmod::prev_prime;
+        let (mut lo, mut hi) = (3u64, 1u64 << 32);
+        while hi - lo > 1 {
+            let mid = lo + (hi - lo) / 2;
+            if fold64(&Modulus::new(mid)) >= k {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        prev_prime(lo + 1)
+    }
+
+    /// The least prime above n.
+    fn next_prime(n: u64) -> u64 {
+        (n + 1..).find(|&x| crate::nmod::is_prime(x)).unwrap()
+    }
+
+    /// Gauss-Jordan elimination entry by entry with the modulus' own
+    /// operations: the reduced form, the pivots and the determinant.
+    fn reference_echelon(a: &Mat) -> (Mat, Vec<usize>, u64) {
+        let m = a.m;
+        let mut e = a.clone();
+        let (mut piv, mut det, mut r) = (vec![], 1 % m.n, 0);
+        for c in 0..e.cols {
+            let Some(pr) = (r..e.rows).find(|&i| e.get(i, c) != 0) else { continue };
+            if pr != r {
+                for j in 0..e.cols {
+                    let (x, y) = (e.get(r, j), e.get(pr, j));
+                    e.set(r, j, y);
+                    e.set(pr, j, x);
+                }
+                det = m.neg(det);
+            }
+            let pv = e.get(r, c);
+            det = m.mul(det, pv);
+            let inv = m.inv(pv).unwrap();
+            for j in 0..e.cols {
+                let v = m.mul(e.get(r, j), inv);
+                e.set(r, j, v);
+            }
+            for i in 0..e.rows {
+                let f = e.get(i, c);
+                if i != r && f != 0 {
+                    for j in 0..e.cols {
+                        let v = m.sub(e.get(i, j), m.mul(f, e.get(r, j)));
+                        e.set(i, j, v);
+                    }
+                }
+            }
+            piv.push(c);
+            r += 1;
+            if r == e.rows {
+                break;
+            }
+        }
+        if r < e.rows || e.rows != e.cols {
+            det = 0;
+        }
+        (e, piv, det)
+    }
+
+    /// fold64: b products added to a residue fit a u64 sum and b + 1 may
+    /// not, at least 1 below 2^32, 0 above; and the primes where it steps.
+    #[test]
+    fn the_fold_fits_a_u64() {
+        for p in [3u64, 65537, (1 << 30) + 3, (1 << 31) - 1, 3 * (1 << 30) + 1, (1 << 32) - 5, last_folding(2), last_folding(16)] {
+            let m = Modulus::new(p);
+            let (b, q) = (fold64(&m) as u128, p as u128 - 1);
+            assert!(b >= 1 && b * q * q + q <= u64::MAX as u128, "p {}", p);
+            assert!(b == 1 << 30 || (b + 1) * q * q + q > u64::MAX as u128, "p {}", p);
+            assert!(fold64(&m) <= batch64(&m).max(1), "p {}", p);
+        }
+        assert_eq!(fold64(&Modulus::new((1 << 32) + 15)), 0);
+        for k in 2..=16 {
+            let p = last_folding(k);
+            assert!(fold64(&Modulus::new(p)) >= k && fold64(&Modulus::new(next_prime(p))) < k, "k {}", k);
+        }
+    }
+
+    /// update_row (on the u64 route where it applies), against the sums in u128, for blocks of
+    /// fold64, fold64 + 1, 2 fold64 + 1, 16 and 32 factors, with entries
+    /// p - 1 - {0, 1, 2} (the largest products) and random ones, some
+    /// factors zero; and the reductions it counts, one row's per fold.
+    #[test]
+    fn update_row_folds_exactly() {
+        use crate::cost::{tallied, Family};
+        let mut s = 29u64;
+        let ps = [(1u64 << 30) + 3, (1 << 31) - 1, 3 * (1 << 30) + 1, (1 << 32) - 5];
+        for p in ps {
+            let m = Modulus::new(p);
+            let bf = fold64(&m);
+            for k in [bf, bf + 1, 2 * bf + 1, 16, 32] {
+                for big in [true, false] {
+                    let len = 50;
+                    let ent = |s: &mut u64| if big { p - 1 - rng(s) % 3 } else { rng(s) % p };
+                    let srcs: Vec<Vec<u64>> = (0..k).map(|_| (0..len).map(|_| ent(&mut s)).collect()).collect();
+                    let mut row: Vec<u64> = (0..len).map(|_| ent(&mut s)).collect();
+                    // (the factors in columns len - k.. of the row, a few zero)
+                    let from = 0;
+                    let blk: Vec<usize> = (0..k).map(|t| t).collect();
+                    let mut fac: Vec<u64> = (0..k).map(|_| ent(&mut s)).collect();
+                    if !big {
+                        fac[0] = 0;
+                    }
+                    let want: Vec<u64> = (0..len)
+                        .map(|j| {
+                            let t = (0..k).fold(0u128, |a, t| (a + fac[t] as u128 * srcs[t][j] as u128) % p as u128) as u64;
+                            m.sub(row[j], t)
+                        })
+                        .collect();
+                    // (update_row reads the factors from the row's block columns)
+                    let mut full: Vec<u64> = fac.clone();
+                    full.extend_from_slice(&row);
+                    let srcs_full: Vec<Vec<u64>> = srcs.iter().map(|r| { let mut v = vec![0; k]; v.extend_from_slice(r); v }).collect();
+                    let mut acc = Acc::new(k + len);
+                    let before = tallied().get(Family::ModArith);
+                    {
+                        let mut poll = Poll::new();
+                        update_row(&mut full, k + from, &blk, |t| &srcs_full[t][..], &m, batch_len(&m), &mut acc, &mut poll);
+                    }
+                    let counted = tallied().get(Family::ModArith).wrapping_sub(before);
+                    row = full[k..].to_vec();
+                    assert_eq!(row, want, "p {} k {} big {}", p, k, big);
+                    let nz = fac.iter().filter(|&&f| f != 0).count();
+                    // (normalized: the u128 route's reductions, one per batch,
+                    // whatever the folds; the raw folds a diagnostic)
+                    let want_red = nz / batch_len(&m) + 1;
+                    assert_eq!(counted as usize, len * want_red, "p {} k {} big {}", p, k, big);
+                }
+            }
+        }
+    }
+
+    /// The counted units (normalized, see u64_route): per family, the
+    /// folding elimination counts exactly what the route before folding
+    /// (the u128 sums past batch64, the same blocks) counts, and gives the
+    /// same results; and it does fold (the raw fold count, a diagnostic).
+    /// At folding primes and at primes that don't fold (below 2^30, the
+    /// fold64 = 1 ones, above 2^32); dense, sparse, zero-row, rank-deficient,
+    /// square, wide and tall.
+    #[test]
+    fn folding_counts_the_same_units() {
+        use crate::cost::{metered, Family, Meter};
+        let run = |a: &Mat, no_fold: bool| {
+            test_hooks::set_no_fold(no_fold);
+            test_hooks::reset_folds();
+            let mut meter = Meter::accounting(u64::MAX);
+            let mut e = a.clone();
+            let r = metered(&mut meter, || e.echelon(true, true));
+            let folded = test_hooks::folds_done();
+            test_hooks::set_no_fold(false);
+            assert_eq!(meter.units().total(), Some(meter.used()));
+            let u: Vec<u64> = [Family::MulSchool, Family::ModArith, Family::Move].iter().map(|&f| meter.units().get(f)).collect();
+            (e, r, u, folded)
+        };
+        let mut s = 41u64;
+        for p in [65537u64, 1_000_000_007, (1 << 30) + 3, (1 << 31) - 1, (1 << 32) - 5, (1 << 32) + 15] {
+            let m = Modulus::new(p);
+            for (r, c) in [(48usize, 48usize), (32, 96), (40, 90), (90, 40), (120, 120)] {
+                let dense = rand_mat(r, c, m, &mut s);
+                let mut sparse = dense.clone();
+                for (k, x) in sparse.d.iter_mut().enumerate() {
+                    if k % 5 != 0 {
+                        *x = 0;
+                    }
+                }
+                let mut zero_rows = dense.clone();
+                for i in (0..r).step_by(3) {
+                    for j in 0..c {
+                        zero_rows.set(i, j, 0);
+                    }
+                }
+                let mut low = dense.clone();
+                for i in r / 3..r {
+                    for j in 0..c {
+                        let v = m.add(low.get(i % (r / 3), j), low.get(i - 1, j));
+                        low.set(i, j, v);
+                    }
+                }
+                for (name, a) in [("dense", dense), ("sparse", sparse), ("zero rows", zero_rows), ("low rank", low)] {
+                    let new = run(&a, false);
+                    let old = run(&a, true);
+                    assert_eq!((&new.0, &new.1), (&old.0, &old.1), "results p {} {}x{} {}", p, r, c, name);
+                    assert_eq!(new.2, old.2, "units p {} {}x{} {}", p, r, c, name);
+                    assert_eq!(old.3, 0, "no folds without folding");
+                    // (a 16-pivot block folds at these primes once a row has
+                    // more nonzero factors than batch64: dense ones do)
+                    if folding(&m) && batch64(&m) < 16 && name == "dense" {
+                        assert!(new.3 > 0, "folded, p {} {}x{}", p, r, c);
+                    }
+                    if !folding(&m) {
+                        assert_eq!(new.3, 0, "nothing folds, p {}", p);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The folding u64 route against the reference elimination, exactly,
+    /// at the primes where fold64 steps (each side of 1..=16) and below
+    /// 2^32: random, low-rank, all-(p - 1) and sparse matrices, wide enough
+    /// that the blocks of 16 pivots fold.
+    #[test]
+    fn folded_sums_match_the_reference() {
+        let mut s = 17u64;
+        let mut ps = vec![(1u64 << 32) - 5, (1 << 31) - 1, (1 << 30) + 3];
+        for k in [1, 2, 3, 4, 8, 15, 16] {
+            let p = last_folding(k);
+            ps.push(p);
+            ps.push(next_prime(p));
+        }
+        for p in ps {
+            let m = Modulus::new(p);
+            assert_eq!(u64_route(&m, 16), p <= last_folding(FOLD_MIN), "p {}", p);
+            for (r, c) in [(40usize, 40usize), (33, 70), (70, 33)] {
+                let rand = rand_mat(r, c, m, &mut s);
+                let mut low = rand.clone();
+                for i in r / 2..r {
+                    for j in 0..c {
+                        let v = m.add(low.get(i - r / 2, j), m.mul(low.get(i - 1, j), p - 1));
+                        low.set(i, j, v);
+                    }
+                }
+                let full = Mat { rows: r, cols: c, m, d: vec![p - 1; r * c] };
+                let mut sparse = rand.clone();
+                for (k, x) in sparse.d.iter_mut().enumerate() {
+                    if k % 3 != 0 {
+                        *x = 0;
+                    }
+                }
+                for a in [rand, low, full, sparse] {
+                    let (want, wpiv, wdet) = reference_echelon(&a);
+                    let mut e = a.clone();
+                    let (piv, det) = e.echelon(true, true);
+                    assert_eq!((&e, &piv), (&want, &wpiv), "p {} {}x{}", p, r, c);
+                    // (echelon's factor is the determinant at full rank)
+                    if r == c && piv.len() == r {
+                        assert_eq!(det, wdet, "det p {} {}x{}", p, r, c);
+                    }
+                    if r == c {
+                        assert_eq!(a.det(), wdet, "det() p {} {}x{}", p, r, c);
+                    }
+                }
+            }
+        }
+    }
+
     /// The u64 sums at their edges: primes on both sides of block 32
-    /// (batch64 >= 32), of the u64 row updates (batch64 >= 16) and of
-    /// 32-bit residues, products whose inner length is batch64 (the
+    /// (batch64 >= 32), of the whole-block u64 row updates (batch64 >= 16)
+    /// and of 32-bit residues, products whose inner length is batch64 (the
     /// largest u64 sum) or one more (the u128 route), all of p - 1, and
     /// the two routes of solve.
     #[test]
