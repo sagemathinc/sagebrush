@@ -109,6 +109,8 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "E := EllipticCurve([0, w]);",
     "CremonaReference(EllipticCurve([0, 0, 0, 0, 1000003]));",
     "Integers(F);",
+    "Normalize(w); Integral(w + 1);",
+    "SquarefreeFactorization(PolynomialRing(GF(5)).1^2);",
     "SetSeed(1);",
     "Random(1, 4);",
     "Universe({ {1} });",
@@ -129,6 +131,9 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "Runtime error in 'HeckePolynomial': HeckePolynomial of a",
     "Runtime error in 'EllipticCurve': EllipticCurve with a coefficient in a FldNumElt is not supported yet",
     "Runtime error: not supported yet: this curve is not in sagebrush's table",
+    "Runtime error in 'Normalize': Normalize of this argument is not supported yet (only of a polynomial over the integers or the rationals)",
+    "Runtime error in 'Integral': Integral of this argument is not supported yet (only of a polynomial over the integers or the rationals)",
+    "Runtime error in 'SquarefreeFactorization': SquarefreeFactorization of a polynomial over a finite field (or its ring) is not supported yet",
     "User error: 'SetSeed' is a Magma intrinsic not implemented in Sagebrush",
     "Runtime error in 'Random': Random after SetSeed or GetSeed is not supported yet",
     "Runtime error in 'Universe': Universe of this SetEnum is not supported yet",
@@ -2573,7 +2578,7 @@ test("an intrinsic's errors are said at the \"(\" of a call through a parameter,
   assert.ok(r.stdout.trimEnd().endsWith("55"), r.stdout);
   // a function defined by name is the user's own: its calls are not wrapped
   assert.doesNotMatch(magmaToPython("function g(n) return n; end function;\ng(1);"), /_m\._call\(/);
-  assert.match(magmaToPython("f := ChangeRing;\nf(1, 2);"), /_m\._call\(\(2, 2\), f, 1, 2\)/);
+  assert.match(magmaToPython("f := ChangeRing;\nf(1, 2);"), /_m\._call(_bare)?\(\(2, 2\), f, 1, 2\)/);
 });
 
 test("a call is located by the binding in scope at it: an optional parameter is, a named function is not, whatever other functions bind (astra's CORR-ALIAS105-1/2)", () => {
@@ -2615,5 +2620,5 @@ test("a call is located by the binding in scope at it: an optional parameter is,
   assert.deepEqual(call("function fib(n) return n le 1 select n else fib(n - 1) + fib(n - 2); end function;\nfib(10);\n"), ["    _m._show_values(fib(10))"]);
   assert.doesNotMatch(magmaToPython("function fib(n) return n le 1 select n else fib(n - 1) + fib(n - 2); end function;\nfib(10);\n"), /_m\._call\(/);
   // a variable assigned a named function's name later is a variable again
-  assert.match(magmaToPython("function g(n) return n; end function;\ng := ChangeRing;\ng(1, 2);\n"), /_m\._call\(\(3, 2\), g, 1, 2\)/);
+  assert.match(magmaToPython("function g(n) return n; end function;\ng := ChangeRing;\ng(1, 2);\n"), /_m\._call(_bare)?\(\(3, 2\), g, 1, 2\)/);
 });
