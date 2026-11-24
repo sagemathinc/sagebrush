@@ -206,3 +206,17 @@ t("length-method-index", lambda: iz.add(pd.Index([1, 2])))
 t("tuple-method-names", lambda: [warned(lambda: getattr(iz, m)((1, 2, 3)))[1][0][1].split(" with")[0]
                                  for m in ["add", "subtract", "rsub", "multiply", "div", "rdiv", "rfloordiv", "rmod", "rpow"]])
 t("tuple-operator-reflected", lambda: warned(lambda: (1, 2, 3) - iz))
+
+# fill_value with a list, tuple or array (a named method's own path: either side filled where only it is missing),
+# with a range (this Series filled), and with a missing scalar (replaced by fill_value; this Series' missing stay).
+fn3 = pd.Series([1.0, np.nan, np.nan])
+t("fill-list-both-sides", lambda: fn3.add([np.nan, 1.0, np.nan], fill_value=0))
+t("fill-ndarray-both-sides", lambda: fn3.add(np.array([np.nan, 1.0, np.nan]), fill_value=0))
+t("fill-tuple-both-sides", lambda: warned(lambda: fn3.add((np.nan, 1.0, np.nan), fill_value=0)))
+t("fill-list-reflected", lambda: fn3.rsub([np.nan, 1.0, np.nan], fill_value=10))
+t("fill-list-int", lambda: pd.Series([1, 2]).add([np.nan, 1.0], fill_value=5))
+t("fill-range-left-only", lambda: warned(lambda: pd.Series([1.0, np.nan]).add(range(2), fill_value=5)))
+t("fill-nan-scalar", lambda: fn3.add(np.nan, fill_value=0))
+t("fill-none-scalar", lambda: fn3.add(None, fill_value=0))
+t("fill-nan-scalar-floordiv", lambda: pd.Series([3.0, np.nan]).floordiv(np.nan, fill_value=0))
+t("fill-scalar", lambda: fn3.add(2, fill_value=0))

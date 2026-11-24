@@ -373,13 +373,20 @@ class Series(object):
         left, right, index, name = self._pd_operand(other, owner)
         if flex and not isinstance(other, Series) and len(right) != len(left):
             raise ValueError("Lengths must be equal")
+        if fill_value is not None and flex and not isinstance(right, Column):
+            # (pandas' flex path makes a list, tuple or array a Series first, so fill_value fills either side)
+            right = column_from(right.copy() if isinstance(right, np.ndarray) else list(right))
         if fill_value is not None and isinstance(right, Column):
             # (fill_value where one side is missing and the other isn't, each column keeping its dtype)
             lm, rm = left.isna().tolist(), right.isna().tolist()
             left = RS.fill_positions(left, dict((p, fill_value) for p, (a, b) in enumerate(zip(lm, rm)) if a and not b))
             right = RS.fill_positions(right, dict((p, fill_value) for p, (a, b) in enumerate(zip(lm, rm)) if b and not a))
         elif fill_value is not None:
-            left = RS.fill_column(left, fill_value)
+            if not isinstance(right, (list, tuple, range, np.ndarray)) and is_missing(right):
+                # (pandas: a missing scalar is replaced by fill_value, and this Series' own missing values stay)
+                right = fill_value
+            else:
+                left = RS.fill_column(left, fill_value)
         mask_zero = not flex
         return Series._pd_new(A.binary(left, right, op, reflected, owner, mask_zero), index, name)
 
