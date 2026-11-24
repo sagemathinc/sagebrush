@@ -394,19 +394,6 @@
     ]
   },
   {
-    "name": "normalize",
-    "kind": "function",
-    "signature": "N = normalize(A)",
-    "summary": "Data scaled to have mean 0 and standard deviation 1, or by another method.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "(A - mean(A, 'omitnan')) ./ std(A, 'omitnan') for a vector, or the columns of a matrix: normalize computes the statistics without NaN elements, which stay NaN.",
-    "tags": [
-      "statistics"
-    ]
-  },
-  {
     "name": "now",
     "kind": "function",
     "signature": "t = now",
@@ -482,19 +469,6 @@
     "alternative": "load reads a numeric text file, whitespace- or comma-separated (M = load('data.csv')); for other text, fopen with fgetl, strsplit and str2double; in Python mode, numpy.loadtxt.",
     "tags": [
       "files"
-    ]
-  },
-  {
-    "name": "rescale",
-    "kind": "function",
-    "signature": "R = rescale(A)",
-    "summary": "Data scaled linearly to the interval [0, 1], or another interval.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "(A - min(A(:))) ./ (max(A(:)) - min(A(:))) for an array that isn't constant (rescale scales by the extrema of the whole array; for [1 10; 3 20] that is [0 9/19; 2/19 1]).",
-    "tags": [
-      "statistics"
     ]
   },
   {
