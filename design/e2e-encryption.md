@@ -359,7 +359,13 @@ Assignment files launched from a school's LMS (LTI) aren't end-to-end encrypted.
   - the grant token, its tag and its rates stay on the server;
   - **every verb relays to an online device** of the person's (an open tab, the desktop app or an Autonomous VM), which decrypts, checks scope (`inScope`, and the Trash visibility rule for grants, `trashVisible`) and answers, as runs are designed to (agent-endpoint.md §6; not built yet);
   - the document verbs aren't built yet (only `list` and `stat` answer today, from the derived index), so nothing is lost by making them relay-only from the start;
-  - with no device online, the endpoint queues the request opaquely and answers "waiting for one of your devices". It never decrypts.
+  - **the request and the answer travel end to end** between the agent and the answering device, never in plaintext through the server:
+    - **at pairing, the agent makes its own X25519 static key.** The pairing code the person types into their device carries a hash of it, so the device learns the agent's real key. The device's signed grant names that key, with the grant's scope and expiry. So the grant is the key's certification, and revoking or expiring the grant revokes the key;
+    - **each request runs Noise_IK_25519_AESGCM_SHA256** (§6.2's suite and test vectors) between the agent and an online device, through the relay. The device checks that the agent's static key is the one a current, unexpired grant names. The agent checks that the device's static key is current in the account's chain;
+    - **the Noise prologue binds** "sagebrush.agent.v1", the account, the grant id, the agent's and the device's static keys, the chain head each side verified, and a fresh session id;
+    - **what the agent trusts:** the grant comes with the chain head its device signed at. The agent pins that head, and refuses a later chain that rolls back or forks from it. Before pairing it has nothing to check against: first use, as for any new device (§2.1);
+    - **what the relay still sees:** which grant talks to which device, when, and how much. Not the paths, the content or the answers;
+  - with no device online, the endpoint answers "waiting for one of your devices", and the agent sends the request again when one is. It never decrypts, and it holds no request content.
 ### 6.1 Autonomous VM custody (SEC)
 
 An Autonomous VM is a full account device, so whoever controls the VM controls its keys: the cloud provider, a root compromise, a disk snapshot, or a clone of its image. They can take its device keys and every epoch secret it holds.
