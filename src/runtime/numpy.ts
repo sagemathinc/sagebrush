@@ -227,6 +227,12 @@ const scalarDtype = (w: Weak): DType => w.dt ?? { b: D.bool, i: D.int64, f: D.fl
 
 // ------------------------------------------------------------------ ndarray
 
+// NumPy's NPY_MAXDIMS: no array has more dimensions, each way of making one refusing with its own message
+const MAX_DIMS = 64;
+function tooManyDims(n: number): never {
+  return raise(T.ValueError, `maximum supported dimension for an ndarray is currently ${MAX_DIMS}, found ${n}`) as never;
+}
+
 export class NDArray {
   constructor(
     public dt: DType,
@@ -235,7 +241,9 @@ export class NDArray {
     public strides: number[],
     public offset = 0,
     public base: NDArray | null = null,
-  ) {}
+  ) {
+    if (shape.length > MAX_DIMS) tooManyDims(shape.length);
+  }
   // read-only (broadcast_to's views, and views of them; flags.writeable =
   // False): writes raise
   ro = false;
@@ -658,6 +666,10 @@ function seqItems(x: any): any[] {
   return Array.isArray(x) ? x : O.toArray(x);
 }
 
+function nestedTooDeep(): never {
+  return raise(T.ValueError, `setting an array element with a sequence. The requested array would exceed the maximum number of dimension of ${MAX_DIMS}.`) as never;
+}
+
 // Shape and dtype of nested Python data. (shapeOnly: a dtype was given, so
 // an element is converted once, by fill, through that dtype's protocol
 // alone, as NumPy's: no other numeric protocol called here first, astra
@@ -665,12 +677,14 @@ function seqItems(x: any): any[] {
 function discover(x: any, depth: number, shape: number[] & { leaf?: number }, kinds: { dt: DType | null }, shapeOnly = false) {
   if (x instanceof NDArray) {
     const s = x.shape;
+    if (depth + s.length > MAX_DIMS) nestedTooDeep();
     for (let i = 0; i < s.length; i++) setDim(shape, depth + i, s[i]);
     kinds.dt = kinds.dt ? promote(kinds.dt, x.dt) : x.dt;
     return;
   }
   if (isSeq(x)) {
     if (protocolSeq(x)) throw PROTOCOL;
+    if (depth >= MAX_DIMS) nestedTooDeep();
     const items = seqItems(x);
     setDim(shape, depth, items.length);
     for (const it of items) discover(it, depth + 1, shape, kinds, shapeOnly);
@@ -1041,6 +1055,10 @@ function resolveIndex(a: NDArray, key: any): IndexResult {
   if (items.reduce((s, k) => s + consumes(k), 0) > a.ndim) {
     raise(T.IndexError, `too many indices for array: array is ${a.ndim}-dimensional, but ${items.reduce((s, k) => s + consumes(k), 0)} were indexed`);
   }
+  // (the result's dimensions, counted as NumPy's prepare_index counts them before indexing: the array's, less
+  // those an integer or an index array takes, plus each newaxis)
+  const resultDims = a.ndim - items.reduce((s, k) => s + (k instanceof O.PySlice || k === null ? 0 : consumes(k)), 0) + items.filter((k) => k === null).length;
+  if (resultDims > MAX_DIMS) raise(T.IndexError, `number of dimensions must be within [0, ${MAX_DIMS}], indexing result would have ${resultDims}`);
   // advanced indices: arrays and lists of ints or bools
   items = items.map((k) => (Array.isArray(k) && !(k as any).$t ? fromPy(k) : k));
   items = items.map((k) => (Array.isArray(k) && (k as any).$t ? fromPy(k) : k));
@@ -3310,7 +3328,9 @@ export class StrArray {
     public strides: number[],
     public offset = 0,
     public base: StrArray | null = null,
-  ) {}
+  ) {
+    if (shape.length > MAX_DIMS) tooManyDims(shape.length);
+  }
 }
 export interface StrArray {
   readonly size: number;
@@ -3972,6 +3992,7 @@ newBuiltinModule("_numpy", (m) => {
     if (obj instanceof StrArray) r = dtype === null ? (copyFlag === false ? obj : strCopy(obj)) : strAstype(obj, dtype);
     else if (obj instanceof NDArray && dtype !== null && strSpec(dtype) !== null) r = numToStr(obj, strSpec(dtype)!);
     else r = obj instanceof NDArray ? (copyFlag === false && (dtype === null || toDtype(dtype) === obj.dt) ? obj : copy(obj, dtype === null ? obj.dt : toDtype(dtype))) : fromPy(obj, dtype, copyFlag, true);
+    if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`);
     while (r.ndim < Number(ndmin)) r = rs(r, [1, ...r.shape]);
     return r;
   });
