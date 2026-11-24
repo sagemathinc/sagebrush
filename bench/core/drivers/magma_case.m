@@ -86,6 +86,20 @@ function ZPoly(k, salt, R)
     return R![ ((i*i*salt + 3*i + 1) mod 1000003)-500001 : i in [0..k-1] ];
 end function;
 
+// The dense factoring rows' input (bench/core/drivers/sagebrush_case.py's
+// dense_poly): monic of degree n, coefficients from a 64-bit LCG, residues
+// mod 65537 (k = 1) or integers in [-1000, 1000] (k = 2).
+function DensePoly(n, k, v, R)
+    s := 1000003*k + 7919*v + 12345; c := [];
+    for i in [1..n] do
+        s := (6364136223846793005*s + 1442695040888963407) mod 2^64;
+        r := s div 2^33;
+        Append(~c, k eq 1 select r mod 65537 else (r mod 2001) - 1000);
+    end for;
+    Append(~c, 1);
+    return R!c;
+end function;
+
 function FpPoly(k, salt, R)
     return R![ ((i*i*salt + 3*i + 1) mod 65537) : i in [0..k-1] ];
 end function;
@@ -142,19 +156,21 @@ function Build(case_id, n, v)
         a := 2^n - 2^(n div 3) + 123456789 + v*1000003;
         b := 2^(n-1) + 2^(n div 2) + 987654321 + v*998244353;
         ops := [a, b];
-    elif case_id in {"poly_z_mul","poly_z_gcd","poly_z_factor","poly_z_factor_product"} then
+    elif case_id in {"poly_z_mul","poly_z_gcd","poly_z_factor","poly_z_factor_product","poly_z_factor_dense"} then
         R<x> := PolynomialRing(Integers());
         if case_id eq "poly_z_mul" then pa:=ZPoly(n,11+6*v,R); pb:=ZPoly(n,17+6*v,R); end if;
         if case_id eq "poly_z_gcd" then g:=ZPoly(n div 2,5+6*v,R); pa:=g*ZPoly(n,11+6*v,R); pb:=g*ZPoly(n,17+6*v,R); end if;
         if case_id eq "poly_z_factor" then pf:=x^n-1; end if;
         if case_id eq "poly_z_factor_product" then pf:=ZFactorProduct(n,R,v); end if;
+        if case_id eq "poly_z_factor_dense" then pf:=DensePoly(n,2,v,R); end if;
         ops := case_id in {"poly_z_mul","poly_z_gcd"} select Coefficients(pa) cat Coefficients(pb) else Coefficients(pf);
-    elif case_id in {"poly_fp_mul","poly_fp_gcd","poly_fp_factor"} then
+    elif case_id in {"poly_fp_mul","poly_fp_gcd","poly_fp_factor","poly_fp_factor_dense"} then
         R<x> := PolynomialRing(GF(65537));
         if case_id eq "poly_fp_mul" then pa:=FpPoly(n,11+6*v,R); pb:=FpPoly(n,17+6*v,R); end if;
         if case_id eq "poly_fp_gcd" then g:=FpPoly(n div 2,5+6*v,R); pa:=g*FpPoly(n,11+6*v,R); pb:=g*FpPoly(n,17+6*v,R); end if;
         if case_id eq "poly_fp_factor" then pf:=x^n-1; end if;
-        ops := case_id eq "poly_fp_factor" select Coefficients(pf) else Coefficients(pa) cat Coefficients(pb);
+        if case_id eq "poly_fp_factor_dense" then pf:=DensePoly(n,1,v,R); end if;
+        ops := case_id in {"poly_fp_factor","poly_fp_factor_dense"} select Coefficients(pf) else Coefficients(pa) cat Coefficients(pb);
     elif case_id in {"mat_z_det","mat_z_rank","mat_z_hnf","mat_z_smith","mat_z_charpoly"} then
         A:=ZMat(n,v); ops := Eltseq(A);
     elif case_id in {"mat_fp_det","mat_fp_rank","mat_fp_solve","mat_fp_charpoly"} then
@@ -189,7 +205,7 @@ function DoOp(case_id, S)
     elif case_id eq "bigint_gcd" then return GCD(a*1000003,b*1000003);
     elif case_id in {"poly_z_mul","poly_fp_mul"} then return pa*pb;
     elif case_id in {"poly_z_gcd","poly_fp_gcd"} then return GCD(pa,pb);
-    elif case_id in {"poly_z_factor","poly_z_factor_product","poly_fp_factor"} then return Factorization(pf);
+    elif case_id in {"poly_z_factor","poly_z_factor_product","poly_fp_factor","poly_z_factor_dense","poly_fp_factor_dense"} then return Factorization(pf);
     elif case_id in {"mat_z_det","mat_fp_det","mat_q_det"} then return Determinant(A);
     elif case_id in {"mat_z_rank","mat_fp_rank","mat_q_rank","mat_z_rank_wide","mat_z_rank_def","mat_z_rank_def_p","mat_q_rank_wide","mat_q_rank_def","mat_q_rank_def_p"} then return Rank(A);
     elif case_id eq "mat_z_hnf" then return HermiteForm(A);
@@ -211,7 +227,7 @@ function Sig(case_id, n, answer)
         return IntegerToString(Ilog2(answer)+1) cat ":" cat IntegerToString(answer mod HMOD);
     elif case_id in {"poly_z_mul","poly_z_gcd","poly_fp_mul","poly_fp_gcd"} then
         return IntegerToString(Degree(answer)) cat ":" cat IntegerToString(SeqHash(Coefficients(answer)));
-    elif case_id in {"poly_z_factor","poly_z_factor_product","poly_fp_factor"} then
+    elif case_id in {"poly_z_factor","poly_z_factor_product","poly_fp_factor","poly_z_factor_dense","poly_fp_factor_dense"} then
         items := [<Degree(z[1]),z[2],SeqHash(Coefficients(z[1]))>:z in answer]; Sort(~items);
         flat := &cat [[z[1],z[2],z[3]]:z in items];
         return IntegerToString(#items) cat ":" cat IntegerToString(SeqHash(flat));

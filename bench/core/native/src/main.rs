@@ -219,6 +219,22 @@ fn run<T, F: FnMut() -> T>(mode: &str, variants: usize, mut build: impl FnMut(us
     println!("TIME|{:.9e}|{}|{:.9e}|{:.9e}|{}|{}", med, combined, lo, hi, k, count);
 }
 
+/// The dense factoring rows' input (drivers/sagebrush_case.py's dense_poly):
+/// monic of degree n, coefficients from a 64-bit LCG, residues mod 65537
+/// (fp) or integers in [-1000, 1000].
+fn dense_poly(n: usize, fp: bool, v: usize) -> Vec<i64> {
+    let mut s: u64 = 1_000_003 * if fp { 1 } else { 2 } + 7919 * v as u64 + 12345;
+    let mut out: Vec<i64> = (0..n)
+        .map(|_| {
+            s = s.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            let r = s >> 33;
+            if fp { (r % 65537) as i64 } else { (r % 2001) as i64 - 1000 }
+        })
+        .collect();
+    out.push(1);
+    out
+}
+
 fn fppoly(n: usize, salt: u64) -> Vec<u64> {
     (0..n as u64).map(|i| (i * i * salt + 3 * i + 1) % P).collect()
 }
@@ -342,6 +358,16 @@ fn main() {
             fp[n] = 1;
             (hash_u64(&fp), move || sagebrush_poly::factor_mod(&f, P))
         }, |r| factor_sig(r, |c: &Vec<u64>| ((c.len() - 1) as u64, hash_u64(c)))),
+        "poly_fp_factor_dense" => run(&mode, variants, |v| {
+            let c = dense_poly(n, true, v);
+            let f: Vec<BigInt> = c.iter().map(|&x| BigInt::from(x)).collect();
+            let fp: Vec<u64> = c.iter().map(|&x| x as u64).collect();
+            (hash_u64(&fp), move || sagebrush_poly::factor_mod(&f, P))
+        }, |r| factor_sig(r, |c: &Vec<u64>| ((c.len() - 1) as u64, hash_u64(c)))),
+        "poly_z_factor_dense" => run(&mode, variants, |v| {
+            let f: Vec<BigInt> = dense_poly(n, false, v).into_iter().map(BigInt::from).collect();
+            (hash_big(&f), move || sagebrush_poly::factor(&f))
+        }, |r| factor_sig(&r.1, |c: &Vec<BigInt>| ((c.len() - 1) as u64, hash_big(c)))),
         "poly_z_mul" => run(&mode, variants, |v| {
             let (a, b) = (zpoly_in(n, salt(11, v) as i64), zpoly_in(n, salt(17, v) as i64));
             (hash_big(&[a.clone(), b.clone()].concat()), move || zpoly::mul(&a, &b))

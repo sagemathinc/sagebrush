@@ -120,6 +120,21 @@ def zpoly(size, salt):
     return [((i * i * salt + 3 * i + 1) % 1000003) - 500001 for i in range(size)]
 
 
+def dense_poly(size, kind, v):
+    """The dense factoring rows' input: a monic polynomial of degree size,
+    its coefficients from a 64-bit LCG (not a polynomial in i, whose
+    generating function would be structured), residues mod 65537 (kind
+    "fp") or integers in [-1000, 1000] (kind "z"); the same in every
+    driver."""
+    s = 1000003 * (1 if kind == "fp" else 2) + 7919 * v + 12345
+    out = []
+    for _ in range(size):
+        s = (6364136223846793005 * s + 1442695040888963407) % (1 << 64)
+        r = s >> 33
+        out.append(r % 65537 if kind == "fp" else r % 2001 - 1000)
+    return out + [1]
+
+
 def fppoly(size, salt):
     return [((i * i * salt + 3 * i + 1) % 65537) for i in range(size)]
 
@@ -183,6 +198,10 @@ def prepare(v):
             f = x**n - 1
             operands(coeffs(f))
             return lambda: f.factor()
+        if case_id == "poly_z_factor_dense":
+            f = R(dense_poly(n, "z", v))
+            operands(coeffs(f))
+            return lambda: f.factor()
         f = R(1)
         for i in range(1, n + 1):
             f *= x**2 + (i + 1) * x + (i * i + i + 1 + v)
@@ -205,7 +224,7 @@ def prepare(v):
             ga, gb = g * a, g * b
             operands(coeffs(ga), coeffs(gb))
             return lambda: ga.gcd(gb)
-        f = x**n - 1
+        f = R(dense_poly(n, "fp", v)) if case_id == "poly_fp_factor_dense" else x**n - 1
         operands(coeffs(f))
         return lambda: f.factor()
     if case_id.startswith("mat_") and "_rank_" in case_id:

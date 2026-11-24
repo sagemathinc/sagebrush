@@ -78,6 +78,21 @@ def zpoly(size: int, salt: int) -> list[int]:
     return trim([((i * i * salt + 3 * i + 1) % 1000003) - 500001 for i in range(size)])
 
 
+def dense_poly(size: int, kind: str, v: int) -> list[int]:
+    """The dense factoring rows' input: a monic polynomial of degree size,
+    its coefficients from a 64-bit LCG (not a polynomial in i, whose
+    generating function would be structured), residues mod 65537 (kind
+    "fp") or integers in [-1000, 1000] (kind "z"); the same in every
+    driver."""
+    s = 1000003 * (1 if kind == "fp" else 2) + 7919 * v + 12345
+    out = []
+    for _ in range(size):
+        s = (6364136223846793005 * s + 1442695040888963407) % (1 << 64)
+        r = s >> 33
+        out.append(r % 65537 if kind == "fp" else r % 2001 - 1000)
+    return out + [1]
+
+
 def fppoly(size: int, salt: int) -> list[int]:
     return trim([(i * i * salt + 3 * i + 1) % P for i in range(size)])
 
@@ -275,6 +290,10 @@ def operands(row: str, n: int, v: int) -> list[int]:
         return ga + gb
     if row == "poly_fp_factor":
         return [P - 1] + [0] * (n - 1) + [1]
+    if row == "poly_fp_factor_dense":
+        return dense_poly(n, "fp", v)
+    if row == "poly_z_factor_dense":
+        return dense_poly(n, "z", v)
     if row.startswith("mat_") and "_rank_" in row:
         return rank_entries(row, n, v)
     if row.startswith("mat_"):

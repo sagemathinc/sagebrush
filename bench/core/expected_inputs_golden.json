@@ -679,6 +679,21 @@
    "n": 848,
    "variants": 8
   },
+  "poly_fp_factor_dense:l": {
+   "n": 500,
+   "variants": 8,
+   "input_hash": "168856292"
+  },
+  "poly_fp_factor_dense:m": {
+   "n": 120,
+   "variants": 8,
+   "input_hash": "264466984"
+  },
+  "poly_fp_factor_dense:s": {
+   "n": 60,
+   "variants": 8,
+   "input_hash": "720978558"
+  },
   "poly_fp_mul:c0": {
    "n": 5096,
    "variants": 8,
@@ -703,6 +718,21 @@
    "n": 2921707,
    "variants": 8,
    "input_hash": "260180386"
+  },
+  "poly_z_factor_dense:l": {
+   "n": 240,
+   "variants": 8,
+   "input_hash": "329404630"
+  },
+  "poly_z_factor_dense:m": {
+   "n": 120,
+   "variants": 8,
+   "input_hash": "486551508"
+  },
+  "poly_z_factor_dense:s": {
+   "n": 60,
+   "variants": 8,
+   "input_hash": "9479822"
   },
   "poly_z_mul:c0": {
    "n": 4917,

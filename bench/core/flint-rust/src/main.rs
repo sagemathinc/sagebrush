@@ -154,6 +154,22 @@ fn zpoly(n: usize, salt: i64) -> Vec<BigInt> {
         .collect()
 }
 
+/// The dense factoring rows' input (drivers/sagebrush_case.py's dense_poly):
+/// monic of degree n, coefficients from a 64-bit LCG, residues mod 65537
+/// (fp) or integers in [-1000, 1000].
+fn dense_poly(n: usize, fp: bool, v: usize) -> Vec<i64> {
+    let mut s: u64 = 1_000_003 * if fp { 1 } else { 2 } + 7919 * v as u64 + 12345;
+    let mut out: Vec<i64> = (0..n)
+        .map(|_| {
+            s = s.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            let r = s >> 33;
+            if fp { (r % 65537) as i64 } else { (r % 2001) as i64 - 1000 }
+        })
+        .collect();
+    out.push(1);
+    out
+}
+
 fn mul_plain(a: &[BigInt], b: &[BigInt]) -> Vec<BigInt> {
     let mut out = vec![BigInt::from(0); a.len() + b.len() - 1];
     for (i, x) in a.iter().enumerate() {
@@ -293,8 +309,10 @@ fn main() {
             let (a, b) = (FPoly::new(&ga), FPoly::new(&gb));
             ([ga, gb].concat(), move || a.gcd(&b).coeffs())
         }, poly_sig),
-        "poly_z_factor" | "poly_z_factor_product" => run(&mode, variants, |v| {
-            let f = if case_id == "poly_z_factor" {
+        "poly_z_factor" | "poly_z_factor_product" | "poly_z_factor_dense" => run(&mode, variants, |v| {
+            let f = if case_id == "poly_z_factor_dense" {
+                dense_poly(n, false, v).into_iter().map(BigInt::from).collect()
+            } else if case_id == "poly_z_factor" {
                 let mut coefficients = vec![BigInt::from(0); n + 1];
                 coefficients[0] = BigInt::from(-1);
                 coefficients[n] = BigInt::from(1);
