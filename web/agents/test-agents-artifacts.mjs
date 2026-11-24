@@ -2997,6 +2997,59 @@ try {
         await A.close();
         await send("Page.bringToFront");
       }
+      // J15, J16: the pane still holds the notebook's writer lock but can't save it (a close's first step, freeze, alone:
+      // __sbTestPaneFreeze), frozen while a whole write is held at the pane's prepare (J15) or after its ready, at the
+      // commit (J16). The pane answers "lost" each time: nothing replaced, shown or saved by it, and the write ends not
+      // confirmed (no ok). Once the pane is closed and its lock let go, the same write is saved directly.
+      for (const [name, stage] of [["J15", "prepare"], ["J16", "commit"]]) {
+        const path = `/notes/whole-frozen-${stage}.ipynb`;
+        await call("workspace.create", { path, content: docFor(path, [{ code: "f = 1" }]), mode: "python" });
+        const ref = await refOf(path);
+        await send("Page.bringToFront");
+        await openNotebook(path, { finish: false, turn });
+        const writes = await until(`document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly === false`, 10000).catch(() => false);
+        const A = await tab(`${site}/`);
+        const aReady = await A.until(`!!window.__sbTestWs`, 30000);
+        await send("Page.bringToFront");
+        // (the revision the write is made from, read as the agent reads it, once the pane's own first save under the
+        // journal is made: the record unchanged for 2 s)
+        let last = -1, since = Date.now();
+        for (const t0 = Date.now(); Date.now() - t0 < 15000 && Date.now() - since < 2000; await sleep(200)) {
+          const r = (await record(ref))?.rev ?? -1;
+          if (r !== last) { last = r; since = Date.now(); }
+        }
+        const rec0 = await record(ref), base = (await call("workspace.read", { path })).rev;
+        const doc = JSON.stringify({ cells: [{ cell_type: "code", source: "f = 2  # whole", metadata: {}, outputs: [] }] });
+        const start = (base) => A.ev(`(window.__wres = null, window.__sbTestWs.write(${JSON.stringify(path)}, ${doc}, { base: ${base} }).then(() => ({ ok: true }), (e) => ({ ok: false, code: e?.code ?? null, msg: String(e?.message ?? e) })).then((r) => (window.__wres = r)), 1)`);
+        const result = async () => (await A.until(`window.__wres !== null`, 60000)) ? await A.ev(`window.__wres`) : { ok: false, code: "timeout" };
+        // (the pane's side held once, at `stage`; every stage it reaches recorded)
+        await ev(`(() => { window.__wstages = []; window.__wheld = null; window.__sbTestWritePause = (s) => { window.__wstages.push(s); if (s === ${JSON.stringify(stage)} && !window.__wheld) return new Promise((r) => { window.__wheld = s; window.__wresume = r; }); return null; }; return 1; })()`);
+        await start(base);
+        const held = await until(`window.__wheld === ${JSON.stringify(stage)}`, 15000).catch(() => false);
+        await ev(`(window.__sbTestPaneFreeze(), 1)`);
+        const frozen = await ev(`document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly === true`);
+        await ev(`(window.__wresume?.(), 1)`);
+        const res = await result();
+        const stages = await ev(`window.__wstages`);
+        const pane = await ev(`[...document.querySelectorAll('${PANE} .nb-root .cell textarea')].map((t) => t.value)`);
+        const rec1 = await record(ref);
+        await ev(`(window.__sbTestWritePause = null, window.__wresume = null, 1)`);
+        ok(writes && aReady && held && frozen && !res.ok && res.code === "busy" && /couldn't confirm/.test(res.msg ?? "") && !stages.includes("wrote") && JSON.stringify(pane) === JSON.stringify(["f = 1"]) && rec1?.rev === base && rec1?.cells?.[0]?.code === "f = 1",
+          `${name}: the pane frozen (still holding the writer lock) while a whole write was held at its ${stage}: answered lost, nothing replaced, shown or saved by the pane, and the write not confirmed`,
+          { writes, aReady, held, frozen, res, stages, pane, base, rec0rev: rec0?.rev, rec: rec1 && { rev: rec1.rev, cells: rec1.cells?.map((c) => c.code) } });
+        // (the pane closed: its writer lock let go, so the write goes straight to the record)
+        await ev(`document.querySelector('#close')?.click()`);
+        const closed = await until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => false);
+        const free = await until(`navigator.locks.query().then((q) => !q.held.some((l) => l.name.endsWith(${JSON.stringify(ref)})))`, 15000).catch(() => false);
+        await start(base);
+        const res2 = await result();
+        const rec2 = await record(ref);
+        ok(closed && free && res2.ok && rec2?.cells?.[0]?.code === "f = 2  # whole" && rec2.rev > base,
+          `${name}: …once the pane is closed and its lock let go, the same write is saved`,
+          { closed, free, res2, rec: rec2 && { rev: rec2.rev, cells: rec2.cells?.map((c) => c.code) } });
+        await A.close();
+        await send("Page.bringToFront");
+      }
     } finally {
       for (const x of tabs) await x.close().catch(() => {});
       if (fence0) await putRecord(fence0);

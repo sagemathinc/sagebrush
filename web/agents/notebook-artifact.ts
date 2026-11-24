@@ -689,6 +689,9 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       controlsOf = hist.pageControls;
       // (tests, loopback pages only: this pane's journal store, to put it in a hand-over's state, test-agents-artifacts.mjs J10)
       if (/^(127\.0\.0\.1|localhost)$/.test(location.hostname)) (globalThis as any).__sbTestPaneJournal = () => jstore;
+      // (tests, loopback pages only: a close's first step alone (freeze), so the pane holds the writer lock while it can't
+      // save the notebook; test-agents-artifacts.mjs J15, J16)
+      if (/^(127\.0\.0\.1|localhost)$/.test(location.hostname)) (globalThis as any).__sbTestPaneFreeze = () => { if (nb) freeze(nb); };
     }
     const inner = jstore ?? new mod.IdbStore(guarded, ref);
     stored = () => inner.loadRecord();
