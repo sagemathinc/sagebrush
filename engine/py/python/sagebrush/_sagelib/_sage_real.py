@@ -4089,6 +4089,24 @@ class ComplexField_:
         return ComplexNumberMP(self, R(x), R(0))
 
 
+def _cc_complex(z):
+    """complex(z) for a 53-bit field's arithmetic (CC's, which holds
+    doubles), z a number of ComplexField(p) or RealField(p): refused when a
+    part rounded to 53 bits is outside the doubles' normal range, where
+    Sage's CC (MPFR's exponents) holds it and a double doesn't (1e400 would
+    be +infinity, 1e-320 lose bits)."""
+    parts = (z._re, z._im) if isinstance(z, ComplexNumberMP) else (z,)
+    for x in parts:
+        if x._special or not x._m:
+            continue
+        m, e = _round_int(x._m, x._e, 53, "RNDN")
+        t = e + abs(m).bit_length()
+        if t > 1024 or t - 1 < -1022:
+            raise NotImplementedError("a %s number beyond the double range with a 53-bit number is not available in sagebrush yet"
+                                      % ("ComplexField(p)" if isinstance(z, ComplexNumberMP) else "RealField(p)"))
+    return complex(z) if isinstance(z, ComplexNumberMP) else complex(float(z), 0.0)
+
+
 def _sgn(x):
     """-1, 0 or 1 for a RealNumberMP (0 for a zero or NaN), as mpfr_sgn."""
     if x._special:
@@ -4351,7 +4369,7 @@ class ComplexNumberMP:
         if t == "ComplexNumber" or t == "RealDoubleElement" or isinstance(o, float) or (
                 isinstance(o, RealNumberMP) and o._R._prec == 53):
             import _sage_matrix
-            return _sage_matrix.ComplexNumber(complex(self))
+            return _sage_matrix.ComplexNumber(_cc_complex(self))
         if isinstance(o, complex):
             return complex(self)
         return None

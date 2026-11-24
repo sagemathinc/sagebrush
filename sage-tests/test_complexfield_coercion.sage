@@ -15,3 +15,7 @@ for p in [20, 100]:
                     print("C%d %s %s %s | %s | %s" % (p, order, opn, nm, v, par))
                 except Exception as e:
                     print("C%d %s %s %s | ERR %s" % (p, order, opn, nm, type(e).__name__))
+# (at the edges of the doubles' normal range, inside it: CC's values)
+for z in [ComplexField(100)(2^-1022, 1), ComplexField(100)(2^1023, 1), ComplexField(100)(1, -2^-1022)]:
+    for o in [RR(1), CC(1, 1), RDF(1), CDF(1, 1)]:
+        print(z + o, (z + o).parent(), o + z, (o + z).parent())

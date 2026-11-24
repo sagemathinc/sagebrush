@@ -13737,6 +13737,11 @@
   "owner": "real/complex arithmetic",
   "row": "inv-17"
  },
+ "lib/_sage_real.py :: _cc_complex :: raise NotImplementedError(\"a %s number beyond the double range with a 53-bit number is not available in sagebrush yet\" #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a RealField(p) or ComplexField(p) number meeting a 53-bit one in CC, with a part past the doubles' normal range: sagebrush's CC holds doubles where Sage's holds MPFR's exponents, so it is refused as not available, never an infinity or lost bits; not a resource cap"
+ },
  "lib/_sage_real.py :: _cc_of :: raise NotImplementedError(\"%s + %s*I in CC, past the double range, is not available in sagebrush yet\" % (re, im)) #0": {
   "class": "coverage",
   "owner": "Sage kernel",

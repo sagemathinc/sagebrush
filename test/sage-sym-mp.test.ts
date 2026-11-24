@@ -36,6 +36,11 @@ test("RealField(p) numbers in symbolic expressions: complex, infinite and undefi
     "arccosh(SR(R('inf')))", "tanh(SR(R('inf')))", "exp(SR(R('-inf')))", "gamma(SR(R(0)))", "factorial(SR(R(-2)))",
     "exp(SR(R(10)**40))", "exp(SR(-R(2)**70))", "gamma(SR(ComplexField(100)(1, 2)))", "arcsin(SR(ComplexField(100)(1, 2)))",
     "SR(ComplexField(100)(1, 2))**(10**6)", "exp(SR(ComplexField(100)(10**40, 1)))",
+    // (a ComplexField(p) number meeting a 53-bit one in CC, beyond the doubles: Sage's CC holds it, sagebrush's doesn't;
+    // exact parts, as eval reads a literal 1e400 as Python's float)
+    "ComplexField(100)(QQ(10)**400, 0) + RR(1)", "ComplexField(100)(QQ(10)**400, 0) * RR(1)", "ComplexField(100)(2**2000, 2**-2000) * CC(1, 1)",
+    "ComplexField(100)(QQ(10)**-320, 1) + RR(1)", "ComplexField(100)(1, QQ(10)**-330) + RR(1)", "CC(1, 1) + ComplexField(100)(QQ(10)**400, 0)",
+    "RDF(3) * ComplexField(100)(QQ(10)**-320, 1)", "RealField(100)(QQ(10)**400) * CC(1, 1)",
   ];
   const src = ["R = RealField(100)", "for s in " + JSON.stringify(cases) + ":", "    try:", "        print(s, eval(s))",
     "    except NotImplementedError as _err:", "        print(s, 'refused:', _err)", "print(arcsin(SR(R('nan'))))"].join("\n");
@@ -44,6 +49,31 @@ test("RealField(p) numbers in symbolic expressions: complex, infinite and undefi
   assert.equal(lines.length, cases.length + 1, out);
   cases.forEach((c, i) => assert.ok(lines[i].startsWith(c + " refused: ") && lines[i].endsWith(" is not available in sagebrush yet"), lines[i]));
   assert.equal(lines[cases.length], "arcsin(NaN)");
+});
+
+// A ComplexField(p) number meeting a 53-bit one in CC with a part past the doubles' normal range (rounded to 53 bits:
+// 2^1024 and the tie that rounds to it, below the smallest normal, a subnormal, an underflow), in either part, either
+// sign, either side, is refused: Sage's CC holds it (MPFR's exponents), sagebrush's CC of doubles doesn't, and a double
+// would be infinite or lose bits.  The values just inside are Sage's: sage-tests/test_complexfield_range.sage.
+test("ComplexField(p) numbers meeting CC beyond the doubles' range: refused", () => {
+  const src = [
+    "C = ComplexField(100)",
+    "MAXD = (2 - QQ(2)^-52) * 2^1023",
+    "vals = [MAXD + QQ(2)^970, QQ(2)^1024, QQ(2)^-1022 - QQ(2)^-1076 - QQ(2)^-1110, QQ(2)^-1074, QQ(2)^-1075, QQ(2)^-1100]",
+    "n = r = 0",
+    "for v in vals:",
+    "    for sgn in [1, -1]:",
+    "        for z in [C(sgn * v, 1), C(1, sgn * v)]:",
+    "            for f in [lambda: z + RR(1), lambda: CC(1, 1) * z, lambda: RDF(1) + z, lambda: z * RDF(2), lambda: RR(1) - z]:",
+    "                n += 1",
+    "                try:",
+    "                    print('NOT REFUSED', f())",
+    "                except NotImplementedError as _err:",
+    "                    r += 'beyond the double range' in str(_err) and str(_err).endswith('not available in sagebrush yet')",
+    "print(n, r)",
+  ].join("\n");
+  const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "--sage", "-c", src], { encoding: "utf8", timeout: 120000 });
+  assert.equal(out, "120 120\n");
 });
 
 // The canonical order is total with NaN, -0 and +0 among the numbers (a sort of

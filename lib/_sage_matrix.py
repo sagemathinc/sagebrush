@@ -4221,6 +4221,10 @@ def _cc(o):
         from _sage_lang import _RealBig as _RR_BIG
     if isinstance(o, _RR_BIG):
         raise NotImplementedError("CC arithmetic with %s, an element of RR past the double range, is not available in sagebrush yet (CC holds doubles)" % (o,))
+    if type(o).__name__ in ("ComplexNumberMP", "RealNumberMP"):
+        # (a finer field's number comes into CC: refused beyond the doubles)
+        import _sage_real
+        return _sage_real._cc_complex(o)
     return complex(o)
 
 

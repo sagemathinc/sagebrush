@@ -222,3 +222,15 @@ C100 zo / C200 | -1.5000000000000000000000000000 + 1.500000000000000000000000000
 C100 oz / C200 | -0.33333333333333333333333333333 - 0.33333333333333333333333333333*I | Complex Field with 100 bits of precision
 C100 zo - C200 | 0.66666666666666666666666666667 + 3.0000000000000000000000000000*I | Complex Field with 100 bits of precision
 C100 oz - C200 | -0.66666666666666666666666666667 - 3.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+1.00000000000000 + 1.00000000000000*I Complex Field with 53 bits of precision 1.00000000000000 + 1.00000000000000*I Complex Field with 53 bits of precision
+1.00000000000000 + 2.00000000000000*I Complex Field with 53 bits of precision 1.00000000000000 + 2.00000000000000*I Complex Field with 53 bits of precision
+1.00000000000000 + 1.00000000000000*I Complex Field with 53 bits of precision 1.00000000000000 + 1.00000000000000*I Complex Field with 53 bits of precision
+1.0 + 2.0*I Complex Double Field 1.0 + 2.0*I Complex Double Field
+8.98846567431158e307 + 1.00000000000000*I Complex Field with 53 bits of precision 8.98846567431158e307 + 1.00000000000000*I Complex Field with 53 bits of precision
+8.98846567431158e307 + 2.00000000000000*I Complex Field with 53 bits of precision 8.98846567431158e307 + 2.00000000000000*I Complex Field with 53 bits of precision
+8.98846567431158e307 + 1.00000000000000*I Complex Field with 53 bits of precision 8.98846567431158e307 + 1.00000000000000*I Complex Field with 53 bits of precision
+8.98846567431158e+307 + 2.0*I Complex Double Field 8.98846567431158e+307 + 2.0*I Complex Double Field
+2.00000000000000 - 2.22507385850720e-308*I Complex Field with 53 bits of precision 2.00000000000000 - 2.22507385850720e-308*I Complex Field with 53 bits of precision
+2.00000000000000 + 1.00000000000000*I Complex Field with 53 bits of precision 2.00000000000000 + 1.00000000000000*I Complex Field with 53 bits of precision
+2.00000000000000 - 2.22507385850720e-308*I Complex Field with 53 bits of precision 2.00000000000000 - 2.22507385850720e-308*I Complex Field with 53 bits of precision
+2.0 + 1.0*I Complex Double Field 2.0 + 1.0*I Complex Double Field
