@@ -48,7 +48,7 @@ Each section below gives the options, a recommendation, and what it costs. §10 
   - **Replacing the recovery code** makes a new recovery key, re-wraps every epoch that recovery may need to it, and records the replacement in the chain. New epochs are wrapped only to the current recovery key.
   - **The recovery code is as powerful as a device.** If it may have been exposed, the person replaces it. Settings says so.
     - **The limit:** an old code can't be made to forget epochs it could already open. The server deletes the old wrapped copies, but a malicious server or a copy taken earlier could keep them.
-- **Epochs:** each epoch `e` has a random 32-byte secret `S[e]`. It is HPKE-wrapped to every current device's X25519 key **and** to the recovery X25519 key, and the wrapped copies are stored next to the key chain.
+- **Epochs:** each epoch `e` has a random 32-byte secret `S[e]`, and its chain entry names its **suite**: the KEM, AEAD, KDF, signature, codec and label version used for everything written in it (§11.1). It is HPKE-wrapped to every current device's X25519 key **and** to the recovery X25519 key, and the wrapped copies are stored next to the key chain.
   - So the recovery code can always open the latest epoch the server shows it, with no stored copy encrypted under the code itself.
   - **From `S[e]`,** HKDF-SHA256 derives, each under its own label:
     - the index key `K_index[e]`;
@@ -87,7 +87,7 @@ Each section below gives the options, a recommendation, and what it costs. §10 
 ### 2.2 Removing a device
 
 - **A removal is a chain entry, then a new epoch** `e+1`: a fresh `S[e+1]`, wrapped to the remaining devices and the recovery key, with a new address key.
-- **New writes use the new epoch.** Old objects keep their keys unless the person asks for a background re-encryption.
+- **New writes use the new epoch.** The live epochs are bounded by retiring old ones, which carries their keys forward in the index with no blob re-upload (§11.2). Old objects keep their keys unless the person asks for a background re-encryption.
 - **The limit, stated plainly:** a removed device keeps whatever it decrypted or downloaded before.
 - **A malicious server can show an old epoch.** It could show a recovering device an old chain, and so an old epoch, unless that device already holds a checkpoint (§8).
 
@@ -165,11 +165,14 @@ WebCrypto's AES-GCM takes whole buffers, so a large object is sealed in fixed, b
       The whole file is compressed once and split afterwards, so a chunk has no plaintext length of its own. The blob's manifest binds the same totals, signed.
   - **The invariant:** a chunk key is used for one chunk's bytes only. It rests on the codec being deterministic, which the blob format's tests check across engines (the same input gives byte-identical output). A mutation test checks the derivation's inputs, not collision-freedom.
   - **Two codec versions at one address:** they derive different keys, and the envelope names its codec, so any device can open whichever version the server holds. The first upload for an address is kept, and a device that sees an older codec there re-encrypts only if asked.
+- **The index carries each blob's key** (§11.2): a sealed index entry holds the blob's address, codec and `K_file`. So a device reads any blob from the index alone, whatever epoch wrote it, and an old epoch's secret is needed only until its entries are carried forward.
+  - **Dedup across epochs, within the account:** the device keeps plaintext hashes locally. A file whose hash its index already knows references the existing blob, under the entry's recorded address and `K_file`, instead of re-uploading it. The server sees that reference, as it sees the ref graph already.
+  - Only bytes that the index no longer names (deleted, then released) are uploaded again under the current epoch.
 - **Releasing blobs safely** (SEC): the refs that signed envelopes add and release must not let a stale, concurrent client free a blob that is still referenced elsewhere.
   - So physical deletion waits for a grace window **and** a signed, client-made compaction checkpoint covering the release.
   - Until those exist, r1 defers physical garbage collection: released blobs are kept and counted. That is the simplest safe start, and its cost is bounded by the quota.
 - **What the server learns:** equality of plaintext within one account and one epoch, never across accounts.
-  - A new epoch gets a new `K_addr`, so dedup across epochs is deliberately lost (SEC).
+  - A new epoch gets a new `K_addr` (SEC), so a removed device can't test the addresses of new uploads. Dedup across epochs comes back only through the index's own hashes (above).
 - **Hashing compressed bytes instead** (SEC's variant) was considered. Plaintext is used because two browsers' compressors can differ, which would break dedup without adding privacy. SEC to confirm.
 - **The cost:** cross-account dedup is lost, measured in §9.
 
@@ -375,7 +378,7 @@ An Autonomous VM is a full account device, so whoever controls the VM controls i
 | 2 | keys and devices | epochs, device enrollment (QR or short code), the recovery code, the key chain, and the Settings UI. The desktop app gains `keyring`. No sync change |
 | 3 | blobs | `wireAddress`; the pinned codec, then deterministic chunked AEAD with per-chunk keys; every table keyed by address instead of plaintext sha256 (holdings, pins, `files`, doc.ts `releases`, account.ts `reservations` and `finalized`; `ops.sha256` until PR 5 seals it), checking `ct_sha256`; physical GC deferred (§3.3) |
 | 4 | document payloads | patches and the Clear-history root encrypted, and presence `state` sealed (sync carries no outputs). Small: doc.ts never parses a body (moved ahead of sealed ops, as the sync documents' owner recommends) |
-| 5 | sealed ops | sealed, signed op envelopes with visible ref adds and releases. The Worker loses `indexApply` and entries.ts, gains log caps, and keeps a form-only `checkOp`. Client-side index snapshots; retention and Trash as client ops; the two-client agreement fuzz test |
+| 5 | sealed ops | sealed, signed op envelopes with visible ref adds and releases. The Worker loses `indexApply` and entries.ts, gains log caps, and keeps a form-only `checkOp`. Client-side index snapshots, paged and carrying each blob's key (§11.4, §3.3); retention and Trash as client ops; the two-client agreement fuzz test |
 | 6 | the agent endpoint | relay to an online device; Autonomous VMs, the CLI and the desktop app as devices; grant scopes sealed to devices, and the access log written by devices |
 | 7 | chunked files | encrypted chunk manifests (with the chunked-files work) |
 | 8 | shares | private shares, link-fragment shares, proposals, the key directory and its warnings; decrypt-and-publish into the existing collections |
@@ -443,6 +446,96 @@ With a handful of DEV accounts, cross-account dedup is likely tiny. The measurem
 8. **Agent logs:** are they private synced data, and so under end-to-end encryption too? Today their mirror uses a server-held key.
 9. **The relay to your own computers** (today "encrypted on the way but not end to end"): bring it under end-to-end encryption too?
 10. **Class work (§5.2):** is the class store, readable by the server and filed under (course, assignment, student), with no sync or recovery code and submission through LTI AGS, the right exception? Who may read it beyond the instructor and graders, and for how long is it kept? (This must be answered before any class-store code is built.)
+11. **Post-quantum (§11.1):** accept X25519 now, with a hybrid suite in a later epoch when WebCrypto has ML-KEM (recommended), or ship a hybrid KEM sooner as a small library?
+
+
+## 11. Scale and later change (millions of files)
+
+William asked for this review because a mistake found later, with millions of files per account, would be costly. Each finding is either fixed in the design or stated as a limit.
+
+### 11.1 Crypto agility: no flag day
+
+- **Everything is versioned:** every envelope (`v`, `alg`), key wrapper (HPKE suite ids in `info`), derivation (the `…v1` in every HKDF label), codec, chunk format, canonical encoding and checkpoint names its version.
+  - A client refuses a version it doesn't know.
+  - A new version is added beside the old, never in its place, and old ones stay readable.
+- **Rotation is per epoch:** each epoch's chain entry names its suite (§2). A new suite starts at the next epoch, which any device can start: everything written afterwards uses it, and old data stays readable under its own suite.
+  - Moving old data to a new suite is the carry-forward of §11.2 for keys and wrappers, and full re-encryption for content.
+- **Post-quantum, stated as a limit:**
+  - X25519 (in HPKE and in device and inbox keys) can be broken by a future quantum computer. Ciphertext stored today, epoch secrets wrapped to X25519 included, could then be opened by whoever kept a copy.
+  - AES-256 and HMAC-SHA256 hold up.
+  - WebCrypto has no ML-KEM yet. A hybrid suite (X25519 + ML-KEM, for example X-Wing) comes in a later epoch through this agility, and protects only what is written after it.
+  - Whether to ship a hybrid KEM sooner, as a library, is §10 Q11.
+
+### 11.2 The epoch cap (William's question)
+
+**Recommendation: a soft cap of 10 live epochs, kept by retiring the oldest epoch in the background, and made cheap by the key-carrying index (§3.3).**
+- **What an epoch costs while it's live:**
+  - one 80-byte wrap per device and one for the recovery key;
+  - every device and every recovery must hold its secret;
+  - every device add and every recovery replacement re-wraps every live epoch.
+  - With no cap, after years of device changes, those costs grow with the account's history. Each one is small, but nothing bounds them.
+- **What moving the oldest epoch forward costs:**
+
+  | Object | Under the old epoch | Moving it forward |
+  | --- | --- | --- |
+  | Blobs (the bulk of the data) | address from `K_addr[e]`, key `K_file` from `K_blob[e]` | **nothing moves.** The blob stays at its address with its ciphertext; the index entry already carries its address, codec and `K_file` |
+  | Documents | random CEK, wrapped under `K_wrap[e]` | re-wrap each CEK under the current epoch: 80 bytes each |
+  | Index entries | sealed under `K_index[e]` | re-sealed in the next index snapshot, which happens anyway |
+  | Shares already sent | carry their files' `K_file`s, not epoch keys | nothing (their pins keep the blobs) |
+
+  So retirement re-uploads no blob bytes, and re-encrypts no content. With a million entries, it's one re-sealed index snapshot (§11.4) and one re-wrap per document.
+- **The order:**
+  1. a device writes a new index snapshot, under the current epoch, that carries every entry of the old epoch;
+  2. it re-wraps the old epoch's document CEKs;
+  3. it signs a chain entry, "epoch e retired at checkpoint c".
+  - After that entry, the old secret is no longer wrapped to new devices or to a replaced recovery key.
+- **Crash safety and resuming:**
+  - each step is idempotent and checkpointed. A crash resumes from the last committed snapshot page or re-wrap;
+  - the retirement entry is written only after verifying that the snapshot covers every entry, and every document of the epoch is re-wrapped;
+  - until then, nothing changes for anyone.
+- **What other devices see:** before the retirement entry, the old snapshot and epoch, both valid. After it, the new snapshot.
+  - **An op sealed under a retired epoch is refused:** epochs change only with chain entries, and §4.1's rule already refuses ops bound to an old head. The writing device rebases it under the current epoch.
+  - Devices keep the old secret locally until they've processed the retirement.
+- **Recovery:**
+  - a recovery key needs only the live epochs, since retired ones' keys live in the index;
+  - a recovery-code replacement re-wraps at most 10 epochs;
+  - a retirement and a replacement are ordered by the chain like any two entries.
+- **The limit, unchanged:** retirement isn't re-encryption. Anyone who held a retired epoch's secret, or a blob's `K_file`, can still open that blob's old ciphertext. Protecting old data from a removed device takes full re-encryption (§11.3).
+
+### 11.3 Every rotation at a million objects
+
+| Operation | Cost | Bounded by |
+| --- | --- | --- |
+| Add a device | one wrap per live epoch (at most 10) | the cap |
+| Remove a device | a new epoch: one wrap per remaining device, plus recovery; the inbox key rotates | devices |
+| Replace the recovery code | one wrap per live epoch | the cap |
+| Retire an epoch | one re-sealed index snapshot plus a re-wrap per document; no blob bytes | index size (§11.4) |
+| Rotate a suite | the next epoch; old data as it is | — |
+| Full re-encryption (on request only) | download, decrypt, re-encrypt and upload every byte: O(data size), and roughly double the storage until the old copies are released | the person's choice; it runs throttled and resumable, one blob at a time |
+
+### 11.4 Index size and sync cost
+
+- **The size:** at a million entries, an index entry is about 200 bytes (path, address, `K_file`, codec, size, times, ids), so roughly 200 MB of plaintext index, maybe a third of that compressed.
+- **A single sealed snapshot doesn't scale:** every change, and every retirement, would re-upload all of it, and a new device would download all of it before showing anything.
+- **Fixed in the design: the index snapshot is paged, as a tree of encrypted pages** (about 1 MiB each, keyed by path order).
+  - The snapshot's root is bound in the checkpoint (§4.1). A change re-seals only the pages it touches, plus their path to the root.
+  - A new device fetches the root and the pages it needs first, so a phone needn't fetch every page.
+  - Page sizes are padded to the page size, so pages don't reveal folder sizes.
+  - The paged index is designed in the sealed-ops PR. Its first tests include a million entries.
+- **The local index:** IndexedDB at a million entries is workable on desktops. Phones keep a partial index, through the same pages.
+
+### 11.5 Limits that could force a migration later
+
+| Limit | Value | Assessment |
+| --- | --- | --- |
+| Chunk index | u32 of 1 MiB chunks: 4 PiB per file | ample |
+| Chunk format | whole-file compression, then fixed chunks: reading part of a large file decompresses from its start | a later codec version can add restart points, through §11.1 |
+| Sequence numbers (`seq`, `dseq`) | safe integers, 2^53 | ample |
+| Signed structure size | canonical bytes up to 64 KiB per signed object (the fleet rule) | op batches stay below it; index pages and snapshots are blobs, not signed objects |
+| Log growth | the log root is a running hash, and ops before the latest snapshot are dropped | bounded by snapshot frequency |
+| Live epochs | soft cap 10 (§11.2) | bounded |
+| Wrapper ids, addresses, keys | 128 and 256 bits | ample |
+| X25519 against quantum attacks | §11.1 | **the one limit agility can't fix for data already stored**: §10 Q11 |
 
 ---
 
