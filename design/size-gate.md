@@ -51,6 +51,19 @@ Two notes on the bundles:
   content limit lets the installer grow by up to the same 256,000 bytes per change.
   For an installer of tens of MB, that was accepted.
 
+### Track pulls
+
+A track's pull into master (`track/math`, `track/numeric`, ...) sums every pull
+request that landed on the track, and each of those already passed this
+backstop against the track. So a pull request with the **`track-pull`** label
+is measured and reported as usual, but growth over the backstop doesn't fail
+it: the step prints a warning, and the merger reads every row of the table
+before merging. Only growth is excused: missing or mismatched records, another
+recipe or toolchain still fail closed. In the merge
+queue the label is read from the queued pull request (`gh-readonly-queue/.../pr-N-...`),
+so a track pull goes into the queue alone. Only the merger applies the label,
+only to a track's pull into master (decided by William, Nov 22 2026).
+
 There are no stored budgets, growth markers, tightness rules, epochs, or
 old-toolchain migration builds. No allowance is carried forward or refilled.
 

@@ -19,8 +19,13 @@ const CEILING_RAW = 96 * 1024, CEILING_GZIP = 32 * 1024;
 //  recursion, the list's bounds, Markdown as text) 48,848 / 18,820 locally; measured by CI (bun 1.4.4, Node 24.21.0's
 //  gzip -9) at 73ac2518: 48,876 / 18,552; + 64. Nov 21 2026: the Delegate proposal view joins the chunk
 //  (proposal-view.ts, and the diff renderers it shares with the review page, moved to diff-render.ts): 52,620 / 19,806
-//  with bun 1.4.4 and Node 24.21.0's gzip -9; + 64)
-const CAP_RAW = 52684, CAP_GZIP = 19870;
+//  with bun 1.4.4 and Node 24.21.0's gzip -9; + 64. Nov 22 2026: a proposal's .tex rendered under its diff (the
+//  LaTeX page module's read-only preview, As proposed and Before; proposal-view.ts): 53,985 / 20,312 on master
+//  b56e23d5, with bun 1.4.4 and Node 24.21.0's gzip -9; + 64. Nov 22 2026: a proposal's .md rendered by the host
+//  page's Markdown renderer, a text file shown as text, "Diff only" for code and boards, the rendered section shared
+//  by .tex and .md (proposal-view.ts): 54,554 / 20,530 on master 881d80a8 (53,980 / 20,314 without it), with bun
+//  1.4.4 and Node 24.21.0's gzip -9; + 64)
+const CAP_RAW = 54618, CAP_GZIP = 20594;
 // (the reviewed inputs, relative to web/: the entry and what it imports; the board's canonical text comes with
 //  review-actions.ts's canonical bytes (branch-canon.ts), which an accept of a board needs)
 const INPUTS = [

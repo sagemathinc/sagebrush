@@ -104,7 +104,9 @@ export const LATEX_LAZY = {
 // (252,517 raw / 84,516 gzip: Nov 21 2026, the editor's own list of examples gone (the gallery's panel the only one):
 //  252,453 / 84,452 measured on the shipped build of its merge with master 68280840, with bun 1.4.4 and node 24.21.0,
 //  + 64)
-export const LATEX_CAPS = { raw: 252517, gzip: 84516 };
+// (252,762 raw / 84,654 gzip: Nov 23 2026, the preview's watchdog not counting the page's own blocking (watchdog.ts):
+//  252,698 / 84,590 measured on the shipped build of master 881d80a8 with it, with bun 1.4.4 and node 24.21.0, + 64)
+export const LATEX_CAPS = { raw: 252762, gzip: 84654 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -199,7 +201,10 @@ export const LATEX_LAZY_CAPS = {
   // (64,345 / 22,064: Nov 21 2026, the Delegate switch (protocol §6.2: the grant's delegate, sent with every grant
   //  change, setDelegate, a kept grant stored without it; agent-pair.ts), measured on the shipped build of the head,
   //  on master c411fca4, bun 1.4.4 and node 24.21.0: 64,281 / 22,000, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 64345, gzip: 22064 },
+  // (65,566 / 22,526: Nov 22 2026, A1 (#1546): the agent's access as an icon in the composer's footer row, its CSS (a
+  //  masked shield and the footer rules) in the pairing's chunk (agent-ui.ts), measured on the shipped build of the head
+  //  on master e4c0b8c0 with bun 1.4.4 and node 24.21.0: 65,502 / 22,462, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 67404, gzip: 23063 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the

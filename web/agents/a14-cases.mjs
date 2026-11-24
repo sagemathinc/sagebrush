@@ -27,6 +27,7 @@ export const COPY = {
   discarded: "Claude's earlier connection was for another page or workspace, so it needs a new code.",
   unusable: "This page's earlier connection to Claude couldn't be used, so it needs a new code.",
   kept: "Claude was connected to this page earlier.",
+  elsewhere: "Claude is connected to another page. Use that page, or close it and Reconnect here.",
   hint: "Not connected: Connect Claude to send",
 };
 
@@ -35,15 +36,16 @@ export const COPY = {
 // checked against it; a refused hello answered, then the socket closed (:192-193); chats by conversation. Unlike it,
 // the code here stays valid (it's single use there, :188): the cases that pair again use the same one.
 export function fakeAgent({ name = "Claude", client = "claude-agent-sdk" } = {}) {
-  const A = { secret: randomBytes(32).toString("base64url"), live: new Set(), rejected: 0, upgrades: 0, hellos: 0, notes: [], resume: new Map(), silent: false, port: 0, server: null, pending: new Map(), n: 0, page: null, delay: 0 };
+  const A = { secret: randomBytes(32).toString("base64url"), live: new Set(), rejected: 0, upgrades: 0, hellos: 0, notes: [], resume: new Map(), silent: false, port: 0, server: null, pending: new Map(), n: 0, page: null, delay: 0, busyHello: false, busied: 0, hold: false };
   const start = (port) => {
     A.server = Bun.serve({
       port,
       hostname: "127.0.0.1",
       fetch(req, srv) {
         if (new URL(req.url).pathname !== "/sagebrush") return new Response("not here", { status: 404 });
-        // (as sagebrush-agent 0.3.0's verifyClient, lib/server.mjs:136 at cc11a8a: 409 while a page is PAIRED)
-        if (A.page) { A.rejected++; return new Response("already paired", { status: 409 }); }
+        // (as sagebrush-agent 0.3.0's verifyClient, lib/server.mjs:136 at cc11a8a: 409 while a page is PAIRED; with
+        //  A.busyHello, as 0.8.12: let in, and refused at its hello as busy)
+        if (A.page && !A.busyHello) { A.rejected++; return new Response("already paired", { status: 409 }); }
         return srv.upgrade(req) ? undefined : new Response("no", { status: 400 });
       },
       websocket: {
@@ -54,6 +56,11 @@ export function fakeAgent({ name = "Claude", client = "claude-agent-sdk" } = {})
             A.hellos++;
             if (A.silent) return; // (the 10 s bound: an agent that never answers)
             const p = m.params ?? {};
+            if (A.busyHello && A.page && A.page !== ws) {
+              A.busied++;
+              ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: "refused", data: { code: "refused", reason: "busy", message: "another page is paired with this agent" } } }));
+              return void ws.close(1008, "refused");
+            }
             const good = typeof p.code === "string" ? p.code === "123456" : p.session === A.secret;
             if (!good) {
               // (and the socket closed, as sagebrush-agent does after a refused hello: a new code can then connect)
@@ -73,7 +80,8 @@ export function fakeAgent({ name = "Claude", client = "claude-agent-sdk" } = {})
               const c = m.params.conversation;
               if (!A.resume.has(c)) A.resume.set(c, "resume-" + randomBytes(4).toString("hex"));
               const turn_id = "t-" + randomBytes(4).toString("hex");
-              for (const event of [{ type: "turn_started" }, { type: "text", text: "ok" }, { type: "turn_finished", outcome: "completed" }]) ws.send(JSON.stringify({ jsonrpc: "2.0", method: "turn.event", params: { conversation: c, turn_id, event } }));
+              // (A.hold: the turn starts and stays running, as a long one does)
+              for (const event of A.hold ? [{ type: "turn_started" }] : [{ type: "turn_started" }, { type: "text", text: "ok" }, { type: "turn_finished", outcome: "completed" }]) ws.send(JSON.stringify({ jsonrpc: "2.0", method: "turn.event", params: { conversation: c, turn_id, event } }));
             }
           }
         },
@@ -102,6 +110,8 @@ export function fakeAgent({ name = "Claude", client = "claude-agent-sdk" } = {})
     setTimeout(() => { if (A.pending.has(id)) { A.pending.delete(id); resolve({ timeout: true }); } }, ms);
   });
   A.stop = () => { A.server.stop(true); A.live.clear(); A.page = null; };
+  /** Started again on the same port, the same session (the agent back, as after its machine woke). */
+  A.restart = () => start(A.port);
   /** sagebrush-agent forgot this page's session (as after a restart): a new secret, the chats' context gone. */
   A.forget = () => { A.secret = randomBytes(32).toString("base64url"); A.resume.clear(); };
   /** The page's socket closed by the agent's side (an involuntary loss for the page). */
@@ -235,7 +245,7 @@ export async function browser() {
   }
 }
 
-async function attach(B, targetId, { clock = false } = {}) {
+async function attach(B, targetId, { clock = false, retry = false } = {}) {
   const { sessionId } = await B.send("Target.attachToTarget", { targetId, flatten: true });
   const P = { B, targetId, sessionId, loads: 0, console: [], errors: [] };
   B.handlers.add((m) => {
@@ -249,6 +259,9 @@ async function attach(B, targetId, { clock = false } = {}) {
   await P.send("Runtime.enable");
   await P.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   if (clock) await P.send("Page.addScriptToEvaluateOnNewDocument", { source: CLOCK });
+  // (#1620: a loss is tried again by itself; the cases that follow it by hand, [Reconnect], turn that off, loopback only)
+  if (!retry) await P.send("Page.addScriptToEvaluateOnNewDocument", { source: `try { localStorage.setItem("__sbnoretry", "1"); } catch {}` });
+  else await P.send("Page.addScriptToEvaluateOnNewDocument", { source: `try { localStorage.removeItem("__sbnoretry"); } catch {}` });
   await P.send("Page.addScriptToEvaluateOnNewDocument", { source: WITNESS });
   // (the stage log only on request (A14_STAGES=1): it wraps the very calls it watches, so the default runs are unwrapped)
   if (process.env.A14_STAGES === "1") await P.send("Page.addScriptToEvaluateOnNewDocument", { source: STAGES });
@@ -278,9 +291,13 @@ async function attach(B, targetId, { clock = false } = {}) {
   };
   /** Text in the composer, typed (the editor's textarea comes on a click into its block). */
   P.draft = async (text) => {
-    if (!(await P.ev(`!!document.querySelector('#editor textarea')`))) {
-      const [x, y] = await P.ev(`(() => { const r = document.querySelector('#editor .mb-block').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
-      for (const type of ["mousePressed", "mouseReleased"]) await P.send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+    // (found in one step: the page may give the composer its textarea by itself between a look and a click (its boot
+    //  focuses the composer, so the block it would click is gone); then there is nothing to click)
+    for (const end = Date.now() + WAIT_MS; Date.now() < end; ) {
+      const at = await P.ev(`(() => { if (document.querySelector('#editor textarea')) return "typing"; const b = document.querySelector('#editor .mb-block'); if (!b) return null; const r = b.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+      if (at === "typing") break;
+      if (at) for (const type of ["mousePressed", "mouseReleased"]) await P.send("Input.dispatchMouseEvent", { type, x: at[0], y: at[1], button: "left", clickCount: 1 });
+      await P.until(`!!document.querySelector('#editor textarea')`, 2000).catch(() => {});
     }
     await P.until(`!!document.querySelector('#editor textarea')`);
     await P.ev(`document.querySelector('#editor textarea').focus()`);
@@ -1136,4 +1153,134 @@ export async function runA14({ site, ok, want = () => true }) {
       ok(!seen.has("body") && [...seen].every((a) => a === "conn-act") && end === "conn-act" && bar.status === COPY.merged, `${id}: from Enter on [Reconnect] through its failure (${down === "stopped" ? "a closed port" : "an agent that never answers, 10 s"}), focus never falls to body; it stays on the button`, { seen: [...seen], end, bar });
     });
   }
+
+  // ======================================================================== #1620: coming back never needs the terminal
+  // R1: a loss while the page stays (the agent's side closed the socket): reconnected by itself, no click, the same grant
+  await run("A14-R1", async (B, A) => {
+    const P = await B.tab({ retry: true });
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    const g1 = A.grants().at(-1), n0 = A.grants().length, h0 = A.hellos;
+    await A.kick();
+    await P.until(`document.querySelector('#conn-alert').textContent === ${JSON.stringify(COPY.lost)}`);
+    const t = Date.now();
+    await P.until(`document.querySelector('#connect').textContent === 'Connected' && !document.querySelector('#conn-bar').classList.contains('on')`, 15000);
+    const g2 = await A.newGrant(n0);
+    ok(A.hellos === h0 + 1 && canon(g2) === canon(g1) && Date.now() - t < 5000 && (await P.ev(`document.querySelectorAll('.sbag-dlg').length`)) === 0, "A14-R1: a connection lost while the page stays is taken up again by itself: one hello, no click, no dialog, the same grant", { hellos: A.hellos - h0, ms: Date.now() - t, g1: canon(g1), g2: canon(g2) });
+  });
+  // R2: the agent restarted meanwhile (its session forgotten): one attempt, refused, said as such; then no more tries
+  await run("A14-R2", async (B, A) => {
+    const P = await B.tab({ retry: true });
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    A.forget();
+    const h0 = A.hellos;
+    await A.kick();
+    await P.until(`document.querySelector('#conn-status').textContent === ${JSON.stringify(COPY.refused)}`, 15000);
+    const quiet = await A.quiet(5000), bar = await P.bar();
+    ok(A.hellos === h0 + 1 && quiet && bar.act === "Connect" && !(await P.connected()), "A14-R2: a session the agent no longer holds: one automatic attempt, the refused copy with [Connect], and no attempt after it", { hellos: A.hellos - h0, quiet, bar });
+  });
+  // R3: the agent gone a while (nothing listens), then back on its port: tried again with backoff, unseen, and
+  // reconnected by itself once it is back; until then the loss stays said, [Reconnect] there
+  await run("A14-R3", async (B, A) => {
+    const P = await B.tab({ retry: true });
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    const n0 = A.grants().length;
+    A.stop();
+    await P.until(`document.querySelector('#conn-alert').textContent === ${JSON.stringify(COPY.lost)}`);
+    await sleep(4000);
+    const during = await P.bar();
+    A.restart();
+    const h0 = A.hellos;
+    await P.until(`document.querySelector('#connect').textContent === 'Connected'`, 40000);
+    ok(during.alert === COPY.lost && during.act === "Reconnect" && A.hellos >= h0 + 1 && A.grants().length > n0, "A14-R3: the agent stopped, then back on its port: the loss stays said with [Reconnect] while it is away, and the page reconnects by itself once it is back", { during, hellos: A.hellos - h0 });
+  });
+  // R4 (ruled Nov 22 2026, SEC's bound): a grant for an hour, the page left for 20 minutes (fixed clock), then back:
+  // silent, as the grant still lasts; past its own end: discarded, never extended
+  await run("A14-R4", async (B, A) => {
+    const T = 1_900_000_000_000;
+    const P = await B.tab({ clock: true });
+    await P.clock(site, T);
+    await pair(P, A, site, "3600000");
+    await chat(P, A);
+    const g1 = A.grants().at(-1), n0 = A.grants().length;
+    await P.ev(`(localStorage.setItem('__sbclockNext', '${T + 20 * 60000}'), true)`);
+    await P.send("Page.navigate", { url: "about:blank" });
+    await sleep(500);
+    const h0 = A.hellos;
+    await P.navigate(`${site}/agents/`);
+    const seen = await P.seen();
+    await P.until(`document.querySelector('#connect').textContent === 'Connected'`, 20000);
+    const g2 = await A.newGrant(n0);
+    ok(seen.present && seen.now - seen.leftAt === 20 * 60000 && A.hellos === h0 + 1 && canon(g2) === canon(g1) && g2?.expires === g1?.expires, "A14-R4: an hour's grant, back after 20 minutes: reconnected by itself, the same grant, its end unchanged", { age: seen.now - seen.leftAt, hellos: A.hellos - h0, g1: canon(g1), g2: canon(g2) });
+    await P.ev(`(localStorage.setItem('__sbclockNext', '${g1.expires}'), true)`);
+    await P.send("Page.navigate", { url: "about:blank" });
+    await sleep(500);
+    const h1 = A.hellos;
+    await P.navigate(`${site}/agents/`);
+    await P.until(`document.querySelector('#conn-status').textContent !== ''`);
+    const quiet = await A.quiet(3000);
+    ok(quiet && A.hellos === h1 && !(await P.connected()), "A14-R4: back as that grant ends: no attempt, nothing reconnects (never extended)", { quiet, bar: await P.bar() });
+  });
+  // R5 (0.8.12's busy): another page has the agent when this one tries again: "connected to another page", with
+  // [Reconnect], never a request for a code
+  await run("A14-R5", async (B, A) => {
+    const P = await B.tab();
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    A.busyHello = true;
+    await A.kick();
+    const other = new WebSocket(`ws://127.0.0.1:${A.port}/sagebrush`);
+    await new Promise((r, j) => { other.onopen = r; other.onerror = j; });
+    other.send(JSON.stringify({ jsonrpc: "2.0", id: "p1", method: "hello", params: { protocol: 1, code: "123456", page: { origin: "http://127.0.0.1", path: "/other/" } } }));
+    for (const t = Date.now(); !A.page && Date.now() - t < 5000; ) await sleep(20);
+    await P.until(`document.querySelector('#conn-alert').textContent === ${JSON.stringify(COPY.lost)}`);
+    await P.ev(`document.querySelector('#conn-act').click()`);
+    await P.until(`document.querySelector('#conn-status').textContent !== ''`);
+    const bar = await P.bar(), text = await P.ev(`document.body.innerText`);
+    ok(A.busied >= 1 && bar.status === COPY.elsewhere && bar.act === "Reconnect" && !/new code/.test(text) && other.readyState === 1, "A14-R5: refused as busy (another page paired): the page says Claude is connected to another page, offers [Reconnect], and asks for no code; the other page keeps the agent", { busied: A.busied, bar });
+    other.close();
+  });
+  // R6: Files with no turn running opens in this tab, and coming back reconnects by itself
+  await run("A14-R6", async (B, A) => {
+    const P = await B.tab();
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    const targets0 = (await B.send("Target.getTargets")).targetInfos.filter((t) => t.type === "page").length;
+    await P.ev(`(document.querySelector('#files-big').click(), true)`, { userGesture: true });
+    await P.until(`location.pathname === '/' && document.readyState === 'complete'`, 30000);
+    await sleep(1500);
+    const here = await P.ev(`location.pathname`), targets1 = (await B.send("Target.getTargets")).targetInfos.filter((t) => t.type === "page").length;
+    const h0 = A.hellos;
+    await P.navigate(`${site}/agents/`);
+    await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
+    ok(here === "/" && targets1 === targets0 && A.hellos === h0 + 1, "A14-R6: Files with no turn running opens in this tab, and the way back reconnects by itself", { here, targets0, targets1, hellos: A.hellos - h0 });
+  });
+  // R7: Files while a turn runs opens a tab of its own; Agents there goes back to this tab (that tab closes), never a
+  // second Agents page beside it; this page stays connected throughout
+  await run("A14-R7", async (B, A) => {
+    const P = await B.tab();
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    A.hold = true;
+    await P.ev(`document.querySelector('#new').click()`);
+    await P.until(`!!document.querySelector('[data-try]')?.offsetParent`);
+    await P.ev(`document.querySelector('[data-try]').click()`);
+    await P.until(`!document.querySelector('#stop').hidden`);
+    const before = new Set((await B.send("Target.getTargets")).targetInfos.map((t) => t.targetId));
+    const h0 = A.hellos, u0 = A.upgrades;
+    await P.ev(`(document.querySelector('#files-big').click(), true)`, { userGesture: true });
+    let info = null;
+    for (let t = Date.now(); !info && Date.now() - t < 10000; await sleep(100)) info = (await B.send("Target.getTargets")).targetInfos.find((t) => t.type === "page" && !before.has(t.targetId)) ?? null;
+    if (!info) throw new Error("no Files tab opened");
+    const Q = await B.attach(info.targetId);
+    await Q.until(`location.pathname === '/' && document.readyState === 'complete'`, 30000);
+    await Q.until(`!!document.querySelector('.sb-mode [data-mode="agents"]')`, 90000).catch(async (e) => { throw new Error(e.message + " the Files tab: " + JSON.stringify(await Q.ev(`(async () => ({ href: location.href, side: document.getElementById('wssidebar')?.hidden, pref: localStorage.getItem('sagebrush-files-sidebar'), modes: document.querySelectorAll('.sb-mode').length, status: document.getElementById('status')?.textContent?.slice(0, 200), ws: !!window.sagebrush?.workspace, body: document.body.innerText.slice(0, 300), locks: await navigator.locks.query().then((q) => JSON.stringify(q).slice(0, 400)) }))()`))); });
+    const name = await Q.ev(`window.name`);
+    await Q.ev(`(document.querySelector('.sb-mode [data-mode="agents"]').click(), true)`, { userGesture: true }).catch(() => null);
+    let gone = false;
+    for (let t = Date.now(); !gone && Date.now() - t < 10000; await sleep(100)) gone = !(await B.send("Target.getTargets")).targetInfos.some((t) => t.targetId === info.targetId);
+    ok(name === "sb-files-from-agents" && gone && A.hellos === h0 && A.upgrades === u0 && (await P.connected()) && (await P.ev(`location.pathname`)) === "/agents/", "A14-R7: Files while a turn runs opens its own tab; Agents there closes that tab, back to this one, with no second Agents page (no new connection), this page connected throughout", { name, gone, hellos: A.hellos - h0, upgrades: A.upgrades - u0 });
+  });
 }

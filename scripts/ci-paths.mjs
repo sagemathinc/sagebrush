@@ -83,9 +83,10 @@ const fullTierPaths = [
   /^web\/share\//, /^web\/share-client\//, /^web\/csp(?:-policy)?\.m?ts$/, /^web\/safe-html\.ts$/,
   // (the account at the top right, which reads the share dialog's first check: the share dialog's suite, below)
   /^web\/workspace\/account\.ts$/,
-  // (the hosted service's sharing, remotes and log mirror, MS-RSL: their suites run only in web-sync's full-tier shards;
-  // and the mirror's format, which its Worker validates uploads with)
-  /^web\/cloud\/share\//, /^web\/cloud\/remote\//, /^web\/cloud\/mirror\//, /^web\/workspace\/agent-chat\/mirror-format\.ts$/,
+  // (the hosted service's sharing, remotes, log mirror, LTI tool and support Worker, MS-RSL: their suites run only in
+  // web-sync's full-tier shards; and the mirror's format, which its Worker validates uploads with)
+  /^web\/cloud\/share\//, /^web\/cloud\/remote\//, /^web\/cloud\/mirror\//, /^web\/cloud\/lti\//, /^web\/cloud\/support\//,
+  /^web\/workspace\/agent-chat\/mirror-format\.ts$/,
   // data loss: save, Trash, export, purge, and the workspace's store and its migrations
   /^web\/workspace\/[^/]*(?:trash|export|purge|save)[^/]*$/, /^web\/workspace\/export\//,
   /^web\/workspace\/(?:db|migrate|migrator|file-bytes)\.ts$/,
@@ -174,6 +175,13 @@ const docsPaths = [
   /^CONTRIBUTING(?:\.[^/]*)?$/,
   /^SECURITY(?:\.[^/]*)?$/,
   /^LICENSE(?:[-.][^/]*)?$/,
+  // (the other top-level prose (not NOTICE.md, which the notices' and imports' scripts read and the packages ship),
+  // docs/'s own pages (not docs/schemas/, which lib/sagebrush/records.py and
+  // test/records.test.ts read) and the friction notes: read by no code, only named in comments, as
+  // test/ci-paths.test.ts checks; the CI capacity ruling, Nov 22 2026, item 2)
+  /^(?:DEVELOPMENT|DOCTESTS|NUMPY|PLAN|PLOTTING|PRODUCT|SECURITY-MODEL)\.md$/,
+  /^docs\/[^/]+\.md$/,
+  /^notes\//,
 ];
 const docsOnly = !full && every(docsPaths);
 
@@ -199,7 +207,10 @@ const runtimePaths = [
 ];
 // (the app's engine subprocess, app/engine/, is the page's worker on a pipe: its suite, web/test-app-engine.mjs, runs
 // in checks; app/ is otherwise the app workflow's alone)
-const webPaths = [/^web\//, /^examples\//, /^packages\/sagebrush-board\//, /^app\/engine\//];
+// (the site's articles and blog: the site's build reads them, web/build-articles.ts and web/build-blog.ts, and
+// scripts/architecture-article.mjs, in checks; web's core, not the unknown-path fallback, which ran the engine's
+// jobs too: the CI capacity ruling, Nov 22 2026, item 2)
+const webPaths = [/^web\//, /^examples\//, /^packages\/sagebrush-board\//, /^app\/engine\//, /^articles\//, /^blog\//];
 const modePaths = [
   /^sage-tests\//, /^magma-tests\//, /^matlab-tests\//,
   /^numpy-tests\//, /^scipy-tests\//, /^pypi-tests\//, /^bench\/mpmath\//,
@@ -256,6 +267,8 @@ const webkitPaths = [
   // (which browsers run code in the sandboxed runner, and the headers that let Firefox load it: its Firefox leg,
   // web/share/test-runner-engines.mjs)
   /^web\/notebook\/runner-(?:browser|worker)\.js$/, /^web\/csp(?:-policy)?\.m?ts$/, /^web\/share\/test-runner-engines\.mjs$/,
+  // (the LaTeX source pane's textarea and the lines behind it, wrapping alike in WebKit)
+  /^web\/latex\/(?:editor|style|highlight|component)\.ts$/, /^web\/latex\/test-latex-webkit-wrap\.mjs$/,
 ];
 const appPaths = [/^app\//, /^\.github\/workflows\/app\.yml$/];
 // Optional packages (optional/<name>/, plan-modular-packages-r4 §7): their
@@ -296,7 +309,10 @@ const engineSmoke = full || workflowOrBuild || engineChange || fallback;
 // a dispatch and the schedule have no file list)
 // (and a pull request into a track always builds: a track's pin lags its engine until the track's pull into master
 // (scripts/pin-policy.mjs), so the published modules its pins name may not be its engine)
-const wasmBuild = event !== "pull_request" || fallback || onTrack(runRefs(process.env)) || files.some((file) => wasmBuildPaths.some((p) => p.test(file)));
+// (the CPython package's own Python, enginePythonOnlyPaths, is in no module: engine/py is its own crate, not one of
+// the four builds (engine/web, engine/nd, engine/raster, engine/mp); the CI capacity ruling, Nov 22 2026, item 2)
+const wasmBuild = event !== "pull_request" || fallback || onTrack(runRefs(process.env)) ||
+  files.some((file) => wasmBuildPaths.some((p) => p.test(file)) && !enginePythonOnlyPaths.some((p) => p.test(file)));
 const engineCpython = full || workflowOrBuild || matches(cpythonPaths) || fallback;
 const webkit = event === "merge_group" || event === "workflow_dispatch" || event === "schedule" ||
   (event === "pull_request" && (fullTier || matches(webkitPaths) || fallback));
@@ -336,7 +352,7 @@ const unsafeSweep = full || matches(unsafeSweepPaths);
 // long tier.  Another pull request's engine is byte-identical to the published pin its ordinary suites already ran on,
 // so the pass would repeat them.  engine-wasm, which they need, still runs where it did (engine_smoke: the engine's
 // changes, the full tier and a pull request touching the engine's runtime, src/runtime/); a pull request's passes only
-// where it runs (the CPython package's own Python sets wasm_build, but builds no engine engine-wasm would test).
+// where it runs (the modules' fetcher sets wasm_build, but builds no engine engine-wasm would test).
 const engineRuntime = full || matches([/^src\/runtime\//]);
 const engineFull = event === "merge_group" || long || integrationPush || (event === "pull_request" && wasmBuild && (engineSmoke || engineRuntime));
 
@@ -378,21 +394,24 @@ const webGroups = [
   ["terminal", webRuntime || inArea("shell") || suiteGroups.has("terminal")],
   ["remote-preview", webRuntime || suiteGroups.has("remote-preview")],
 ].filter(([, selected]) => web && selected).map(([group]) => group);
-const webMatrix = webGroups.flatMap((group) => {
-  const total = group === "notebook" || group === "remote-preview" ? 3 : 1;
-  return Array.from({ length: total }, (_, i) => ({
-    name: total === 1 ? group : `${group}-${i + 1}-of-${total}`,
-    group,
-    shard: i + 1,
-    total,
-  }));
-});
+// (the web-browser jobs: the selected groups packed into at most three, the CI capacity ruling, Nov 22 2026, the org's 60
+// concurrent jobs; 13 before, most of each its setup.  A job runs its groups in this order, every one even after one
+// failed.  latex is alone: its build has the editor on loopback hosts.  terminal is last in its job: it rebuilds
+// web/dist with the bash set.  Every group is in exactly one job: test/ci-paths.test.ts)
+export const WEB_BUCKETS = [
+  ["board", ["board-a", "board-b", "board-c", "board-unit", "preload"]],
+  ["notebook", ["notebook", "remote-preview", "terminal"]],
+  ["latex", ["latex"]],
+];
+const webMatrix = WEB_BUCKETS
+  .map(([name, groups]) => ({ name, groups: groups.filter((g) => webGroups.includes(g)).join(" ") }))
+  .filter((job) => job.groups);
 // (web-runner: the runner, the workspace, the board frame and the notebook's merges)
 const webRunner = web && (webRuntime || inArea("board") || inArea("workspace") || suiteJobs.has("web-runner"));
 const webWorkspace = web && (allWeb || inArea("workspace"));
 const webExport = webWorkspace || (web && suiteJobs.has("web-export"));
 const webLookalike = webWorkspace || (web && suiteJobs.has("web-lookalike"));
-// The share dialog's browser suite (web-sync.3, about 8.5 min alone, its own web-sync shard): in the full tier, but on a
+// The share dialog's browser suite (web-sync.3, about 8.5 min, in web-sync's client shard): in the full tier, but on a
 // pull request only when it changes sharing (web/share/, web/share-client/, web/cloud/share/, the suites among them) or the
 // account at the top right (web/workspace/account.ts, which reads the same first check as Share), or has the full-ci
 // label; a master push, the schedule and a dispatch always run it (grader's web-sync CI-time plan, Nov 9: PR CI <= 10 min)
@@ -423,8 +442,9 @@ const outputs = {
   long,
   // (mpmath's suite: the core backend always; the Python backend, a rollback path, the long tier's)
   mpmath_backends: JSON.stringify(long ? ["sagebrush", "python"] : ["sagebrush"]),
-  // (web-sync's shards: the share dialog's part 2, its big listing and upload leaks, the long tier's)
-  web_sync_shards: JSON.stringify(["core", "client", "moves", "pwa", "share-dialog", ...(long ? ["share-dialog-2"] : [])]),
+  // (web-sync's shards: lti and lti-b, the hosted LTI tool's suites, web-sync.8 and .9; the share dialog's part 2, its
+  // big listing and upload leaks, the long tier's)
+  web_sync_shards: JSON.stringify(["core", "client", "pwa", "lti", "lti-b", ...(long ? ["share-dialog-2"] : [])]),
   wasm_build: wasmBuild,
   engine_cpython: engineCpython,
   webkit,
@@ -445,9 +465,37 @@ const outputs = {
   size_inputs: event === "workflow_dispatch" || event === "schedule" || gateInputs(files).length > 0 ||
     (onTrack(runRefs(process.env)) && files.some((file) => enginePaths.some((p) => p.test(file)))),
   files: files.length,
-  // (the examples job: the ids it runs and its shard matrix, at most 16 examples a shard (SHARD_MAX); plan U7 section 2)
+  // (the examples job: the ids it runs and its shard matrix, at most 64 examples a shard (SHARD_MAX); plan U7 section 2)
   examples_ids: JSON.stringify(exampleSelection),
   examples_matrix: JSON.stringify(Array.from({ length: shardCount(exampleSelection.length) }, (_, i) => i + 1)),
 };
+// A master push of the very commit the merge queue's run tested and passed (scripts/ci-queue-tested.mjs, which sets
+// CI_QUEUE_TESTED in ci.yml's changes job): that run was the full tier on this exact commit, so no test runs again.
+// Only what a push alone does still runs: the modules' build and their publication (wasm_build, which a push always
+// sets), the size gate's docs-only record and the ci summary.  Every other selection is off, whatever it was (the CI
+// capacity ruling's second cut, Nov 22 2026; test/ci-paths.test.ts checks each output).
+const queueTested = event === "push" && ref === "refs/heads/master" && process.env.CI_QUEUE_TESTED === "true";
+if (queueTested) {
+  for (const key of ["full", "node", "web", "modes", "engine_smoke", "engine_full", "engine_cpython", "webkit", "web_runner", "web_export",
+    "web_lookalike", "web_share", "census", "unsafe_sweep", "slow_tests", "size_inputs"]) outputs[key] = false;
+  Object.assign(outputs, { web_groups: "[]", web_matrix: "[]", examples_ids: "[]", examples_matrix: "[]", slow_scope: "" });
+}
+outputs.queue_tested = queueTested;
+// PR CI light (the repository variable PR_CI_LIGHT, exactly "true", set by William while the merge queue is starved of
+// runners; ci.yml's changes job passes it as CI_PR_LIGHT): a pull request runs only checks and the size gate (with its
+// size-base), as an ordinary pull request does when checks runs, and the modules' build when it needs one; every other
+// suite is left to its merge_group run, which is the full tier and gates the merge.  Never a queue group, a push, the
+// schedule or a dispatch; and a pull request labelled full-ci still runs everything it selected.  (@sagebrush's go,
+// Nov 23 2026: 44 of 53 running jobs were pull requests', and the merge queue had none)
+const prLight = event === "pull_request" && process.env.CI_PR_LIGHT === "true" && !labels.includes("full-ci");
+if (prLight) {
+  const checksRan = outputs.node === true || outputs.web === true || outputs.size_inputs === true;
+  for (const key of ["full", "node", "web", "modes", "engine_smoke", "engine_full", "engine_cpython", "webkit", "web_runner", "web_export",
+    "web_lookalike", "web_share", "census", "unsafe_sweep", "slow_tests"]) outputs[key] = false;
+  Object.assign(outputs, { web_groups: "[]", web_matrix: "[]", examples_ids: "[]", examples_matrix: "[]", slow_scope: "" });
+  // (checks and size-base run on size_inputs; where checks would have run, they still do, and the gate measures)
+  outputs.size_inputs = checksRan;
+}
+outputs.pr_light = prLight;
 for (const [key, value] of Object.entries(outputs)) console.log(`${key}=${value}`);
 console.error(`ci paths (${event}, ${files.length} files): ${JSON.stringify(outputs)}`);

@@ -12,7 +12,10 @@
 import "../workspace/pair-link";
 import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
-import { colorBlock } from "./code-color";
+import { blockLang, colorBlock } from "./code-color";
+import { drawTokens, tokensOf } from "../code/tokens";
+import { langOf } from "../code/langs";
+import { modeKey, modeOf, rememberMode, type DocMode } from "../doc-mode";
 import { runningTurn, type Artifact, type Thread, type Turn, type UserEntry } from "../workspace/agent-chat/events";
 import { ChatSession } from "../workspace/agent-chat/session";
 import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, diffHtml, mirrorSectionNode } from "../workspace/agent-chat/view";
@@ -35,12 +38,14 @@ import { mountComposer, renderComposerState, stopLabel } from "../workspace/agen
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
-import { filesIcon, modeSwitch } from "../workspace/mode-switch";
+import { filesIcon, modeSwitch, answerAgentsLive, FILES_TAB } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
 import { entryUrl } from "../workspace/entry-url";
 import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-chat/transcript";
 import { DelegateTasks } from "./delegate";
 import { mountDelegate } from "./delegate-ui";
+import { ownClaudeCommand } from "./own-claude";
+import { workspaceIO } from "./delegate-merge";
 import { toIpynb } from "../notebook/ipynb.js";
 import { mountVersionStamp } from "../version";
 
@@ -56,16 +61,88 @@ const LATEX_URL = new URL("../sagebrush-latex.js", import.meta.url).href;
 const STORE = "sagebrush-agents-preview-v1";
 // (the log mirror's cursors, by conversation: local and non-secret, M2)
 const MIRROR_CURSORS = "sagebrush-agents-mirror-v1";
-// (Open in Sagebrush: the file's own page, as the File menu opens it (web/workspace/entry-url.ts), by the entry's id,
-// found when the link is drawn; hidden for a file with no page of its own)
-function openFull(path: string): HTMLAnchorElement {
-  const a = Object.assign(document.createElement("a"), { className: "open-full", target: "_blank", rel: "noopener", textContent: "Open in Sagebrush", hidden: true });
-  void workspace?.stat(path).then((e) => {
-    const url = e && entryUrl(e);
-    if (url) Object.assign(a, { href: url, hidden: false });
-  }, () => {});
-  return a;
+// The composer's draft, by chat, in this browser (as CoCalc keeps one, #1615): kept as it is typed, back when its chat is
+// shown again (after another chat, Files or a reload), gone once sent. One localStorage record; each chat's draft is
+// written alone into the record as read then, so another tab's drafts of other chats stay. Bounded, so the chats' own
+// record has room: a draft over DRAFT_MAX isn't kept, a chat no longer stored loses its draft, and over DRAFTS_MAX in
+// all the other chats' longest drafts go first, whether written before or waiting now. Both are measured as stored
+// (JSON, its escapes counted). Best effort: storage that is full or unavailable keeps nothing new.
+const DRAFTS = "sagebrush-agents-drafts-v1";
+const DRAFT_MAX = 64 * 1024;
+const DRAFTS_MAX = 512 * 1024;
+function readDrafts(): Record<string, string> {
+  const d: Record<string, string> = Object.create(null);
+  try {
+    const v = JSON.parse(localStorage.getItem(DRAFTS) ?? "{}");
+    if (v && typeof v === "object" && !Array.isArray(v)) for (const [k, t] of Object.entries(v)) if (typeof t === "string") d[k] = t;
+  } catch {}
+  return d;
 }
+// (drafts not written yet: a refused write keeps them here, so a chat shows its own again and the next write retries)
+const draftsPending = new Map<string, string>();
+let draftTimer = 0;
+function flushDrafts() {
+  clearTimeout(draftTimer);
+  draftTimer = 0;
+  if (!draftsPending.size) return;
+  const d = readDrafts();
+  for (const [id, t] of draftsPending) {
+    if (!t.trim()) delete d[id];
+    else if (JSON.stringify(t).length <= DRAFT_MAX) d[id] = t;
+    // (over the limit: the last copy within it stays)
+  }
+  // (the chats as stored (another tab's newer ones too), and this tab's)
+  let stored: Set<string> | null = null;
+  let record: { threads: Thread[] } | null = null;
+  try {
+    const v = JSON.parse(localStorage.getItem(STORE) ?? "null");
+    if (v && Array.isArray(v.threads)) record = v;
+    stored = new Set(record ? record.threads.map((t) => t?.id) : []);
+  } catch {}
+  // (a chat with a draft is stored too: a first visit's chat isn't until something happens in it, and its draft would
+  //  come back to no chat. Added to the record as stored, not this tab's chats written over it, which would undo
+  //  another tab's newer)
+  const missing = stored ? state.threads.filter((t) => draftsPending.has(t.id) && !stored!.has(t.id)) : [];
+  if (missing.length) {
+    try {
+      // (and the chat shown here as the one shown: the person is in this tab; the record's own would undo a switch
+      //  whose save comes before this write)
+      localStorage.setItem(STORE, JSON.stringify(record ? { ...record, threads: [...record.threads, ...missing], current: state.current } : state));
+      for (const t of missing) stored!.add(t.id);
+    } catch {}
+  }
+  if (stored) for (const id of Object.keys(d)) if (!stored.has(id) && !state.threads.some((t) => t.id === id)) delete d[id];
+  // (the composer's chat keeps its draft (at most DRAFT_MAX, well under DRAFTS_MAX); the others longest first, then by
+  //  id, so the same drafts always go)
+  const others = Object.keys(d)
+    .filter((id) => id !== draftOf)
+    .sort((a, b) => d[b].length - d[a].length || (a < b ? -1 : a > b ? 1 : 0));
+  while (others.length && JSON.stringify(d).length > DRAFTS_MAX) delete d[others.shift()!];
+  try {
+    localStorage.setItem(DRAFTS, JSON.stringify(d));
+    draftsPending.clear();
+  } catch {} // (refused: still waiting, in draftsPending, written with the next draft's write)
+}
+// (here, before anything the page waits for: a page left, even while it still opens, keeps its draft, and the chats and
+//  the no-demo marker if their save is still waiting (a reload within save()'s 300 ms would lose them); only then, so
+//  a tab left idle never writes its chats over another tab's newer ones)
+addEventListener("pagehide", () => {
+  flushDrafts();
+  if (storeWaiting) {
+    try {
+      localStorage.setItem(STORE, JSON.stringify(state));
+    } catch {}
+  }
+});
+let storeWaiting = false;
+function putDraft(id: string, text: string, now = false) {
+  draftsPending.set(id, text);
+  if (now) return flushDrafts();
+  clearTimeout(draftTimer);
+  draftTimer = window.setTimeout(flushDrafts, 300);
+}
+/** The chat whose draft the composer holds (null until the composer is up). */
+let draftOf: string | null = null;
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;
 
@@ -92,7 +169,13 @@ const session = new ChatSession({
   },
   store(s) {
     clearTimeout(saveTimer);
-    saveTimer = window.setTimeout(() => localStorage.setItem(STORE, JSON.stringify(s)), 300);
+    storeWaiting = true;
+    saveTimer = window.setTimeout(() => {
+      storeWaiting = false;
+      try {
+        localStorage.setItem(STORE, JSON.stringify(s));
+      } catch {} // (storage full: the chats stay here, kept at the next save that fits)
+    }, 300);
   },
   pairing: () => pairing,
   demo: (prompt, emit) => startFakeTurn(prompt, emit, speed()),
@@ -201,6 +284,7 @@ function submit(mode: UserEntry["mode"]) {
   if (!session.submit(editor.value, mode)) return;
   if (mode !== "note") void mirror.kick(current().id);
   editor.value = "";
+  putDraft(draftOf || current().id, "", true);
   renderAll();
   scrollToEnd(true);
 }
@@ -579,10 +663,23 @@ function renderArtifacts() {
     const refocus = had ? (had.dataset.tab !== undefined ? `[data-tab="${CSS.escape(had.dataset.tab)}"]` : had.id ? `#${had.id}` : null) : null;
     head.innerHTML =
       `<div class="tabs">${tabs}</div>` +
+      `<a class="open-full" id="open-main" target="_blank" rel="noopener" hidden title="Open in Sagebrush, in a new tab">Open ↗</a>` +
       `<button class="icon" id="copy" title="Copy">⧉</button>` +
       `<button class="icon" id="full" title="${fullscreen ? "Exit full screen" : "Full screen"}">${fullscreen ? "⤡" : "⤢"}</button>` +
       `<button class="icon" id="close" title="Close">✕</button>`;
     for (const t of head.querySelectorAll<HTMLButtonElement>("[data-tab]")) t.onclick = () => ((openArtifact = t.dataset.tab!), renderArtifacts());
+    // (Open: the artifact's file on its own page in Sagebrush, as the File menu opens it (web/workspace/entry-url.ts), in a
+    //  new tab, so this page and its agent stay; found by the file's id when the head is drawn, and none for a file
+    //  with no page of its own, #1614)
+    const open = $<HTMLAnchorElement>("#open-main", head);
+    if (a.path && workspace)
+      void workspace.stat(a.path).then((e) => {
+        const url = e && entryUrl(e);
+        if (url && open.isConnected) {
+          Object.assign(open, { href: url, hidden: false });
+          open.setAttribute("aria-label", `Open ${a.title} in Sagebrush (a new tab)`);
+        }
+      }, () => {});
     $("#full", head).onclick = () => ((fullscreen = !fullscreen), renderArtifacts());
     $("#close", head).onclick = async () => {
       if (!(await mayClosePane(thread.id)) || current().id !== thread.id) return;
@@ -630,7 +727,6 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
   if (a.kind === "notebook" && a.path && workspace) {
     h.el.innerHTML = `<div class="file-path">${esc(a.path)} <span class="saved"></span> </div><div class="file-body"></div>`;
     const saved = $(".saved", h.el);
-    $(".file-path", h.el).append(openFull(a.path));
     const ui: NotebookUi = {
       saved: (t) => (saved.textContent = t),
       // (kept with this host, shown when it is the host shown: a hidden notebook's warning waits for it)
@@ -698,7 +794,7 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
   if (a.path && workspace && __SB_LATEX__ && __SB_LATEX_HOSTS__.includes(location.hostname) && /\.tex$/i.test(a.path)) {
     const head = document.createElement("div"), body = document.createElement("div");
     head.className = "file-path";
-    head.append(a.path + " ", openFull(a.path));
+    head.append(a.path);
     body.className = "file-body";
     h.el.replaceChildren(head, body);
     const f = mountTexFrame(a.path, body);
@@ -751,8 +847,13 @@ async function keepFileCopy(path: string, text: string, signal?: AbortSignal): P
 }
 type Released = { ok: true } | { ok: false; why: string };
 type FileHost = { text: () => string; flush: () => Promise<void>; release: () => Promise<Released>; dispose: () => Promise<void>; download: () => { name: string; text: string; type: string } | null };
+// (a code or text file's colours, as the code page's (web/code/tokens.ts): up to this many characters; plain above)
+const FILE_COLOR_MAX = 256 * 1024;
 function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost {
   const path = a.path!;
+  // (✎ Edit / View, before the status: shown for a code or text file, below)
+  const toggle = Object.assign(document.createElement("button"), { type: "button", className: "mode-toggle", hidden: true });
+  saved.before(toggle);
   let alive = true;
   let open = true; // (this host's writer: closed at release, after which no write of its is admitted, ART-C4)
   let rev = -1; // (the revision the shown text is based on: known before anything is written)
@@ -773,12 +874,14 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
     clearTimeout(timer);
     const value = latest(); // (the text as it is now: what this write writes, whenever its turn comes)
     inflight = inflight.then(async () => {
-      if (!open || stopped || rev < 0 || value === savedText) return;
+      if (!open || stopped || rev < 0) return;
+      // (nothing new to write: said as saved once the text shown is the file's, so no "Saving…" stays, #1617)
+      if (value === savedText) return void (latest() === savedText && guard === "open" && say("Saved"));
       try {
         const r = await workspace!.write(path, value, { base: rev, ...(fid ? { fid } : {}), admit });
         rev = r.rev;
         savedText = value;
-        say(latest() === value ? "Saved" : "Editing…");
+        if (guard === "open") say(latest() === value ? "Saved" : "Saving…");
       } catch (e) {
         if (!open) return; // (closed meanwhile: refused by design)
         stopped = true;
@@ -791,15 +894,13 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
   const changed = (value: string) => {
     if (!alive) return;
     text = value;
-    say("Editing…");
+    // (not over why a write failed (nothing more is written from here), nor over Closing…)
+    if (!stopped && guard === "open") say("Saving…");
     clearTimeout(timer);
     timer = window.setTimeout(() => void write(), 700);
   };
   say("Loading…");
   const tex = /\.tex$/i.test(path);
-  // (the file in Sagebrush, on its own page: a code or text file's (/?code=), a .tex file's where this build has no
-  //  LaTeX editor here; a file with no page of its own gets no link, openFull)
-  if (!tex || !__SB_LATEX__) saved.after(" ", openFull(path));
   type Latex = { mountEditor?: (root: HTMLElement, o: { text: string; onChange?(t: string): void; layout?: "split" | "preview" }) => { getText(): string; destroy(): void } };
   const latexMod: Promise<Latex | null> = tex && __SB_LATEX__ ? import(/* @vite-ignore */ LATEX_URL).catch(() => null) : Promise.resolve(null);
   // (the file as it is now: the agent may have written it again since this artifact)
@@ -833,13 +934,60 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
         latest = () => ed.getText();
         destroyEditor = () => ed.destroy();
       } else {
-        const ta = document.createElement("textarea");
-        ta.className = "code-edit";
-        ta.spellcheck = false;
-        ta.value = text;
-        ta.oninput = () => changed(ta.value);
-        box.append(ta);
-        latest = () => ta.value;
+        // (code and text: in colour by its language, read only, with ✎ Edit to write in it here, the colours behind the
+        //  text as it is typed; opened as the person last left this file, View by default, as the code page opens it
+        //  (web/doc-mode.ts), #1618)
+        const lang = langOf(path) ?? blockLang(text, /\.([^./]+)$/.exec(path)?.[1] ?? "");
+        const paint = (el: HTMLElement, t: string) => (t.length <= FILE_COLOR_MAX ? drawTokens(el, tokensOf(t, lang)) : (el.textContent = t));
+        const key = fid ? modeKey("file", fid) : null;
+        let mode: DocMode = key ? modeOf(key) : "view";
+        const view = Object.assign(document.createElement("pre"), { className: "code code-view" });
+        const wrap = Object.assign(document.createElement("div"), { className: "code-wrap" });
+        const hl = Object.assign(document.createElement("pre"), { className: "code code-hl" });
+        hl.setAttribute("aria-hidden", "true");
+        const ta = Object.assign(document.createElement("textarea"), { className: "code-edit", spellcheck: false, wrap: "off" });
+        ta.setAttribute("aria-label", path);
+        wrap.append(hl, ta);
+        // (the colours end where the field's text does, short of its scrollbars, and scroll with it)
+        const fit = () => {
+          hl.style.right = `${ta.offsetWidth - ta.clientWidth}px`;
+          hl.style.bottom = `${ta.offsetHeight - ta.clientHeight}px`;
+          hl.scrollTop = ta.scrollTop;
+          hl.scrollLeft = ta.scrollLeft;
+        };
+        ta.oninput = () => {
+          paint(hl, ta.value + "\n");
+          fit();
+          changed(ta.value);
+        };
+        ta.onscroll = fit;
+        // (and again when the field's size changes: a tab shown, full screen, the window)
+        new ResizeObserver(fit).observe(ta);
+        const show = () => {
+          // (its label says what it does: no aria-pressed beside it, which would say the opposite)
+          toggle.textContent = mode === "edit" ? "View" : "✎ Edit";
+          toggle.title = mode === "edit" ? "Back to reading it" : "Edit it here (saved as you type)";
+          if (mode === "edit") {
+            ta.value = text;
+            paint(hl, text + "\n");
+            box.replaceChildren(wrap);
+            fit();
+          } else {
+            paint(view, text);
+            box.replaceChildren(view);
+          }
+        };
+        toggle.hidden = false;
+        toggle.onclick = () => {
+          // (not while the pane closes: its text is frozen then)
+          if (guard !== "open") return;
+          mode = mode === "edit" ? "view" : "edit";
+          if (key) rememberMode(key, mode);
+          show();
+          if (mode === "edit") ta.focus();
+        };
+        latest = () => (mode === "edit" ? ta.value : text);
+        show();
       }
     },
     () => {
@@ -978,6 +1126,7 @@ function mountTexFrame(path: string, box: HTMLElement): FileHost {
 }
 
 function renderComposer() {
+  showDraft();
   renderComposerState(isRunning(current()), queues.get(current().id)?.length ?? 0, session.isAway(current()), session.canSteer(current()));
   renderConn();
 }
@@ -1027,6 +1176,7 @@ const CONN = {
   discarded: "Claude's earlier connection was for another page or workspace, so it needs a new code.",
   unusable: "This page's earlier connection to Claude couldn't be used, so it needs a new code.",
   kept: "Claude was connected to this page earlier.",
+  elsewhere: "Claude is connected to another page. Use that page, or close it and Reconnect here.",
 };
 let connBar: ConnBar | null = null;
 let connShown = false; // (the bar's ×: hidden until the next change)
@@ -1160,7 +1310,24 @@ function toast(text: string, ms = 1500) {
 // ---------------------------------------------------------------------------
 // The page
 
-const editor = mountComposer({ submit, stop: () => interrupt(current()), render: md, typeset: (el) => typeset(el) });
+const editor = mountComposer({
+  submit,
+  stop: () => interrupt(current()),
+  render: md,
+  typeset: (el) => typeset(el),
+  changed: (v) => { if (draftOf) putDraft(draftOf, v); },
+});
+/** The chat shown's draft in the composer, when another chat's was there. */
+function showDraft() {
+  const id = current().id;
+  if (draftOf === null || draftOf === id) return;
+  draftOf = id;
+  editor.value = draftsPending.get(id) ?? readDrafts()[id] ?? "";
+}
+// (the chat shown's draft at once, as the composer comes up: the page's first render waits for the workspace, and by
+//  then the person may have typed)
+draftOf = "";
+showDraft();
 // (Delegate, for an agent on this computer that offers it: delegate.ts's tasks, drawn by delegate-ui.ts)
 const delegateTasks = new DelegateTasks({ changed: () => delegateUi?.render() });
 const delegateUi = mountDelegate({
@@ -1169,7 +1336,9 @@ const delegateUi = mountDelegate({
   mayRun: () => pairing?.grant?.run === true,
   openPath: () => current().artifacts.find((x) => x.id === openArtifact)?.path ?? null,
   draft: () => editor.value,
-  clearDraft: () => { editor.value = ""; },
+  // (the Pair chat shown, once something has been said in it: a brief is drafted from it, the agent saying if it can't)
+  conversation: () => { const t = current(); return t.entries.some((e) => e.kind === "turn" || e.kind === "user") ? t.id : null; },
+  clearDraft: () => { editor.value = ""; putDraft(draftOf || current().id, "", true); },
   // (a workspace document as the task's copy starts from it: a notebook's .ipynb text, a text file's text; its path as
   //  the protocol has it, relative)
   async readDoc(path) {
@@ -1189,24 +1358,33 @@ const delegateUi = mountDelegate({
     if (!on) renderAll();
   },
   site: new URL("../", import.meta.url),
+  // (a proposal's .tex rendered under its diff, where this page has the LaTeX editor, as an artifact's .tex is)
+  latex: __SB_LATEX__ && __SB_LATEX_HOSTS__.includes(location.hostname) ? () => import(/* @vite-ignore */ LATEX_URL) : null,
+  // (a proposal's .md rendered under its diff with this page's own Markdown renderer, the chat's: safe HTML, remote
+  //  pictures click-to-load)
+  markdown: md,
   toast,
+  // (Merge: this browser's workspace, and the agent's record of it)
+  merge: workspaceIO(() => workspace, (task, params) => delegateTasks.merged(task, params), /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? async (op, path) => { if (typeof (window as any).__mergeSeam === "function") await (window as any).__mergeSeam(op, path); } : undefined),
+  session: sessionStorage,
 });
 // (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with
 //  its files, as the file panel's switch opens this page; William, Nov 12)
 { const sw = modeSwitch("agents"), brand = document.querySelector<HTMLElement>("nav.side .brand"); sw.style.marginLeft = "auto"; if (brand) { brand.style.whiteSpace = "nowrap"; brand.append(sw); } const f = sw.querySelector<HTMLButtonElement>('[data-mode="files"]'); if (f) f.onclick = () => void toFiles(); }
-// (to the files: the notebook page with its file browser shown.  With an agent connected or connecting, in a new tab:
-//  leaving would end this page's connection, and a page that comes back by navigating can't take it up again (only a
-//  reload can), so the agent's turn would be lost.  This page, its chat and the agent stay as they are.  Else the
-//  thread is left as New chat leaves it (mayLeaveThread): its files' pending edits saved, a running cell stopped only
-//  if the person says so; refused, this page stays and nothing is changed.  Admitted, the browser's own choice to show
-//  the files is set, then the page left)
+// (to the files: the notebook page with its file browser shown, in this tab: coming back reconnects the agent by itself
+//  while its grant lasts (#1620, agent-pair.ts reloadDecision).  Only while an agent's turn runs here, in a new tab, so
+//  the turn's work in this page goes on; that tab is named so its way back to Agents returns here (mode-switch.ts
+//  backToAgentsTab) rather than opening a second Agents page the agent would refuse.  Else the thread is left as New
+//  chat leaves it (mayLeaveThread): its files' pending edits saved, a running cell stopped only if the person says so;
+//  refused, this page stays and nothing is changed.  Admitted, the browser's own choice to show the files is set, then
+//  the page left)
 let leaving = false;
 async function toFiles() {
-  if (pairing && pairing.state !== "closed") {
+  if (pairing && pairing.state !== "closed" && state.threads.some((t) => isRunning(t))) {
     try { localStorage.setItem("sagebrush-files-sidebar", "1"); } catch {}
     // (opened in the click itself, so the browser allows it; refused anyway, this page stays and says so)
     const w = window.open("/", "_blank");
-    if (w) w.opener = null;
+    if (w) { w.name = FILES_TAB; w.opener = null; }
     else toast("Your browser blocked the new tab for Files. Allow pop-ups for this site, or open it in a new tab yourself.", 6000);
     return;
   }
@@ -1510,6 +1688,10 @@ const agentRuns = (ws: Workspace) => agentRunsFor(ws as any, {
 // (the current pairing's listener for the agent's messages, removed when another pairing replaces it)
 let offAgent: (() => void) | null = null;
 function mountPairing(ws: Workspace) {
+  // (Delegate's last task list, kept in this browser for this workspace: shown while the agent isn't connected, #1622)
+  let kept: Storage | null = null;
+  try { kept = localStorage; } catch { kept = null; }
+  delegateTasks.keepIn(kept, `sb-delegate-tasks-v1:${ws.identity.workspace}`);
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
     runVerbs: runVerbsFor(agentRuns(ws)),
@@ -1590,6 +1772,8 @@ function mountPairing(ws: Workspace) {
   });
 }
 if (workspace) mountPairing(workspace);
+// (a Files tab this page opened asks whether its agent is still connected here, to come back to this tab: #1620)
+answerAgentsLive(() => pairing?.state === "granted");
 // (the person's review of an agent's branches: in a dialog, its chunk fetched at the first click)
 $("#review").onclick = () => { if (workspace) void openReviewDialog(workspace.reviewHost(), new URL("../", import.meta.url)); };
 // (the storage message's [Retry]: the open again, then the pairing, as a load would; never `disabled` while it runs)
@@ -1615,11 +1799,10 @@ $("#ws-retry").onclick = async () => {
     renderHeader();
   }
 };
-addEventListener("pagehide", () => {
-  // (the chats, and the no-demo marker, kept now: a reload within save()'s 300 ms would lose them)
-  if (saveTimer) localStorage.setItem(STORE, JSON.stringify(state));
-});
 $("#howto").onclick = () => ($("#help").hidden = !$("#help").hidden);
+// (the help box's command for this site: the release's line, with --origin where the agent doesn't trust this page's
+//  origin by default, as on a DEV or preview site (#1604))
+{ const pre = document.querySelector<HTMLElement>("#help pre"); if (pre) pre.textContent = ownClaudeCommand(pre.textContent?.trim() ?? "", location.origin); }
 
 // ---- the log mirror's settings (design §5): the switch, what it means, the storage line; turning it off deletes
 let mirrorConfirm = false;

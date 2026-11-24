@@ -6,11 +6,15 @@
 //     pane, editable), where it runs (this computer), and May run code (only if the grant may, frozen at Start);
 //   - the Tasks list under the chats, each with its chip;
 //   - a task's view in place of the chat: its status, its thread (the agent's turns), and its proposal's card, which
-//     opens the proposal view (the review chunk's) in a dialog. Merge, Close and Ask for changes come with UI-4.
+//     opens the proposal view (the review chunk's) in a dialog, with its actions: Merge (delegate-merge.ts: each
+//     conflict picked first; an incomplete one said on the task's chip, and a kept one finished after a reload),
+//     Close, and Ask for changes (S3 P2: a note, with the person's current versions of the task's own files, back to
+//     the same task; its next round replaces the one shown, in place).
 // Shown only for an agent on this computer whose hello offers delegate.1: nothing changes for any other.
 import type { Thread, Turn } from "../workspace/agent-chat/events";
 import { AgentError } from "../workspace/agent-pair";
-import { chipOf, type DelegateDoc, type DelegateTasks } from "./delegate";
+import { chipOf, currentOf, DELEGATE_LIMITS, DELEGATE_TEXT, type DelegateDoc, type DelegateTasks } from "./delegate";
+import { MergeError, clearPicks, closeRest, isDone, loadPicks, mergedParams, newRecord, prepare, recordOf, revise, run, savePicks, unpicked, unresolved, type FileMerge, type MergeIO, type MergeRecord, type Picks, type Pinned } from "./delegate-merge";
 
 export const DELEGATE_UI_TEXT = {
   switchOn: "Delegate: on",
@@ -23,19 +27,49 @@ export const DELEGATE_UI_TEXT = {
   alsoClose: (n: number) => `Also close ${n === 1 ? "my running task" : `my ${n} running tasks`} for good`,
   closeFailed: (n: number) => `Delegate is off. ${n === 1 ? "One task" : `${n} tasks`} couldn't be closed.`,
   sheetTitle: "Delegate a task",
+  drafting: "Drafting a brief from this chat…",
+  stopDrafting: "Stop drafting",
+  briefBusy: "The agent is busy: wait a moment and open Delegate… again, or write the task yourself.",
+  briefUnavailable: "This chat can't draft a brief: write the task yourself.",
+  briefStopped: "Drafting stopped: write the task yourself.",
+  briefFailed: "Couldn't draft a brief: write the task yourself.",
   where: "This computer",
   whereNote: "The task's copy and its runs stay on this computer.",
   run: "May run code",
   runNote: "Fixed for this task once it starts.",
   runNotGranted: "Your grant to this agent doesn't allow running code.",
+  runsUnavailable: "Running code in a delegated task isn't available yet.",
   noDocs: "No documents: add a path, or open a file in the pane first.",
   start: "Start",
   starting: "Starting…",
   tasks: "Tasks",
+  steer: "Stop and tell Claude…",
+  steerSend: "Stop and send",
+  steerNote: "What should Claude know? When you choose Stop and send, the task stops, then resumes with this note.",
+  resume: "Resume",
+  resumeNote: "Resume with a note…",
+  resumeNoteHint: "What should Claude know when it carries on?",
+  stopping: "Stopping…",
+  resuming: "Resuming…",
+  cancel: "Cancel",
+  away: "Agent not connected: these are the tasks it had when the page last heard from it.",
   skipped: (n: number) => (n === 1 ? "One event of this task couldn't be shown here." : `${n} events of this task couldn't be shown here.`),
   proposal: (n: number, base: string, commit: string) => `Proposal: ${n === 1 ? "1 file" : `${n} files`} changed · base ${base.slice(0, 7)} · proposal ${commit.slice(0, 7)}`,
-  laterActions: "Merge and Ask for changes come in the next update.",
   merge: "Merge",
+  merging: "Merging…",
+  mergeFailed: "Couldn't merge.",
+  pickAll: (n: number) => `Pick a side for ${n === 1 ? "the conflict" : `each of the ${n} conflicts`}, then Merge.`,
+  picksDropped: (paths: string[]) => `Your picks for ${paths.join(", ")} were made against another version: pick again.`,
+  yours: "Yours",
+  keepMine: "Keep mine",
+  take: (agent: string) => `Take ${agent}'s`,
+  incomplete: "Merge incomplete",
+  incompleteBody: (paths: string[]) => `${paths.length === 1 ? "This file" : "These files"} couldn't be merged: ${paths.join(", ")}. Each changed, or couldn't be read or written, while the merge was written. Merge again to merge ${paths.length === 1 ? "it" : "them"} as ${paths.length === 1 ? "it is" : "they are"} now, or close what's left. The files already written stay as they are.`,
+  closeRest: "Close what's left",
+  merged: "Merged: your files have the changes.",
+  mergedPart: (written: string[], left: string[]) => `Recorded. ${written.length ? `Merged: ${written.join(", ")}.` : "Nothing was merged."} Left as they were: ${left.join(", ")}.`,
+  notRecorded: (m: string) => `The agent didn't record this decision: ${m}. Files already written keep their changes.`,
+  notRecordedYet: "The agent hasn't recorded this decision yet. Files already written keep their changes. Merge again to try again.",
   ask: "Ask for changes",
   closeTask: "Close",
   closeTitle: "Close this proposal?",
@@ -45,6 +79,14 @@ export const DELEGATE_UI_TEXT = {
   closeTaskFailed: "Couldn't close the task.",
   stale: "The task moved on since you opened this: here it is as it is now.",
   newRound: (n: number) => `A new proposal (round ${n}) replaces the one you were reading.`,
+  askLabel: "What should change?",
+  askPlaceholder: "For example: call the section Findings, and keep the plot's colors.",
+  askFiles: (paths: string[]) => (paths.length ? `When available, your current versions of these files go with your note: ${paths.join(", ")}. A file that can't be read here is left out, and the task uses its own copy of it.` : "No current versions go with your note: the task works from its own copy."),
+  askSend: "Send to the task",
+  askSending: "Sending…",
+  askLoading: "The proposal is still being read: try again in a moment.",
+  askStale: "The task moved on since you opened this: it's read again, and your note is kept to send again.",
+  askSent: (round: number) => `Asked. The task is working on round ${round + 1}; it appears here when it's ready.`,
   unreadable: "Couldn't read this task from the agent.",
   back: "← Back to chats",
 } as const;
@@ -63,16 +105,81 @@ export type DelegateHost = {
   draft: () => string;
   clearDraft: () => void;
   readDoc: (path: string) => Promise<DelegateDoc>;
+  /** the Pair chat shown, as the agent knows it (its conversation id), if it has one: what a brief is drafted from */
+  conversation?: () => string | null;
   turnNode: (thread: Thread, turn: Turn) => HTMLElement;
   /** the task view shown (true) or gone (false): the page hides or shows its chat */
   shown: (on: boolean) => void;
   site: URL;
+  /** the LaTeX page module, where this page has the LaTeX editor: a proposal's .tex shown rendered (none: its diff only) */
+  latex?: (() => Promise<any>) | null;
+  /** the page's Markdown renderer (the chat's: safe HTML, remote pictures click-to-load): a proposal's .md shown
+   *  rendered (none: its diff only) */
+  markdown?: ((src: string) => string) | null;
   toast: (text: string, ms?: number) => void;
+  /** Merge's workspace and agent (delegate-merge.ts workspaceIO); without it, Merge stays off */
+  merge?: MergeIO;
+  /** where conflict picks are kept for the session (sessionStorage) */
+  session?: Storage;
 };
 
 export function mountDelegate(h: DelegateHost) {
   const T = DELEGATE_UI_TEXT, D = h.tasks;
   let open: string | null = null, readErr = false;
+
+  // ---- Merge's decisions kept on this device (delegate-merge.ts): one at a time per task; a kept one finished when its
+  //      task is listed (after a crash or a reload), and what is left of an incomplete one said on its chip
+  const busyMerge = new Map<string, Promise<unknown>>();
+  const one = <R>(task: string, f: () => Promise<R>): Promise<R> => {
+    const run = (busyMerge.get(task) ?? Promise.resolve()).catch(() => {}).then(f);
+    busyMerge.set(task, run);
+    return run.finally(() => { if (busyMerge.get(task) === run) busyMerge.delete(task); });
+  };
+  const incomplete = new Set<string>(), looked = new Set<string>();
+  // (what is under way on each task, whoever started it: a Merge (or its recovery, or Close what's left), an Ask for
+  //  changes or a Close, one at a time. Kept here, not in a dialog, so a dialog closed and opened again while one runs
+  //  still waits for it; each action takes it when it starts and gives it back when it ends, and every dialog's
+  //  actions are drawn from it)
+  const underway = new Map<string, "merge" | "ask" | "close">();
+  const begin = (task: string, op: "merge" | "ask" | "close") => { if (underway.has(task)) return false; underway.set(task, op); render(); return true; };
+  const end = (task: string, op: "merge" | "ask" | "close") => { if (underway.get(task) !== op) return; underway.delete(task); render(); };
+  /** tasks.merged from the record, then the record forgotten: true, or what to say. A refusal that won't change on a
+   * retry (stale, final, conflict) forgets it too; any other failure keeps it, to try again. */
+  async function recordMerge(task: string, rec: MergeRecord): Promise<true | string> {
+    try {
+      await D.merged(task, await mergedParams(rec));
+    } catch (err) {
+      const code = (err as AgentError)?.code;
+      if (code !== "stale" && code !== "final" && code !== "conflict") return T.notRecordedYet;
+      await h.merge!.save(task, null);
+      incomplete.delete(task);
+      return T.notRecorded((err as Error).message);
+    }
+    await h.merge!.save(task, null);
+    if (h.session) clearPicks(h.session, task);
+    incomplete.delete(task);
+    render();
+    return true;
+  }
+  function recover(task: string) {
+    const io = h.merge;
+    if (!io || looked.has(task)) return;
+    looked.add(task);
+    void one(task, async () => {
+      // (another action under way on this task: looked at again on a later listing)
+      if (!begin(task, "merge")) { looked.delete(task); return; }
+      try {
+        const rec = recordOf(await io.load(task), task);
+        if (!rec) return;
+        const after = await run(io, rec);
+        if (isDone(after)) { if ((await recordMerge(task, after)) !== true) incomplete.add(task); }
+        else incomplete.add(task);
+        render();
+      } finally {
+        end(task, "merge");
+      }
+    }).catch(() => { looked.delete(task); });
+  }
 
   // (the switch, in the header; Delegate…, beside Send; the Tasks list, under the chats; the task's view, in place of
   //  the chat)
@@ -85,6 +192,9 @@ export function mountDelegate(h: DelegateHost) {
   document.querySelector("#threads")?.after(side);
   const view = el("section", { id: "task-view", hidden: true, ariaLabel: "Task" });
   document.querySelector("main .composer-wrap")?.before(view);
+
+  // (Ask for changes' unsent note, kept per task in this browser)
+  const noteKey = (task: string) => `sb-delegate-ask-v1:${task}`;
 
   function confirmDialog(title: string, body: string, ok: string, extra?: HTMLElement): Promise<boolean> {
     const dlg = el("dialog", { className: "delegate-dlg" });
@@ -141,7 +251,10 @@ export function mountDelegate(h: DelegateHost) {
     if (here) addDoc(here);
     const more = el("input", { id: "delegate-add", placeholder: "Add a path, e.g. work/notes.ipynb" });
     more.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); addDoc(more.value); more.value = ""; } };
-    const run = el("input", { type: "checkbox", id: "delegate-run", disabled: !h.mayRun() });
+    // (#1612, ruled Nov 22 2026: off, and said, unless the agent runs a task's code (its delegate.run); there it starts as
+    //  the thread's own May run code, the grant's)
+    const runs = D.runsOffered(), mayRun = runs && h.mayRun();
+    const run = el("input", { type: "checkbox", id: "delegate-run", disabled: !mayRun, checked: mayRun });
     const msg = el("p", { className: "msg", role: "alert" });
     const start = el("button", { type: "submit", className: "primary", textContent: T.start });
     const dlg = el("dialog", { className: "delegate-dlg sheet", ariaLabel: T.sheetTitle });
@@ -151,15 +264,46 @@ export function mountDelegate(h: DelegateHost) {
       el("label", {}, "Title", title),
       el("div", { className: "field" }, el("span", {}, "Documents"), docs, more),
       el("div", { className: "field" }, el("span", {}, "Where"), el("label", {}, el("input", { type: "radio", checked: true, name: "where" }), " ", T.where), el("small", { textContent: T.whereNote })),
-      el("div", { className: "field" }, el("label", {}, run, " ", T.run), el("small", { textContent: h.mayRun() ? T.runNote : T.runNotGranted })),
+      el("div", { className: "field" }, el("label", {}, run, " ", T.run), el("small", { textContent: !runs ? T.runsUnavailable : h.mayRun() ? T.runNote : T.runNotGranted })),
       msg,
       el("menu", {}, el("button", { type: "button", value: "cancel", textContent: "Cancel", onclick: () => dlg.close() }), " ", start));
+    // (a brief drafted by the agent from the Pair chat shown (chat.brief): only when it drafts them, there is such a
+    //  chat, and nothing was typed in the composer, which stays the task as before. While it drafts, the task and its
+    //  title wait, read only, and Start is off; Stop drafting, or closing the sheet, cancels it, and a late result is
+    //  dropped. A refusal says so in words of the page's own, and the box is left to the person)
+    const conv = h.conversation?.() ?? null;
+    let drafting = false;
+    const stop = el("button", { type: "button", className: "link", textContent: T.stopDrafting });
+    const draftLine = el("p", { className: "st brief-drafting", hidden: true, role: "status" }, el("span", { textContent: T.drafting }), " ", stop);
+    form.insertBefore(draftLine, form.querySelector("label"));
+    const drafted = (on: boolean) => {
+      drafting = on;
+      prompt.readOnly = title.readOnly = on;
+      on ? start.setAttribute("aria-disabled", "true") : start.removeAttribute("aria-disabled");
+      draftLine.hidden = !on;
+    };
+    stop.onclick = () => { if (!drafting || !conv) return; D.cancelBrief(conv); drafted(false); msg.textContent = T.briefStopped; };
+    if (conv && !h.draft().trim() && D.briefOffered()) {
+      drafted(true);
+      D.brief(conv).then((r) => {
+        if (!drafting || !dlg.isConnected) return;
+        prompt.value = r.brief;
+        title.value = r.title;
+        drafted(false);
+      }, (err) => {
+        if (!drafting || !dlg.isConnected) return;
+        drafted(false);
+        const code = (err as AgentError)?.code;
+        msg.textContent = code === "busy" ? T.briefBusy : code === "unavailable" || code === "not_found" ? T.briefUnavailable : code === "stopped" ? T.briefStopped : T.briefFailed;
+      });
+    }
     dlg.append(form);
     document.body.append(dlg);
-    dlg.addEventListener("close", () => dlg.remove(), { once: true });
+    dlg.addEventListener("close", () => { if (drafting && conv) D.cancelBrief(conv); drafting = false; dlg.remove(); }, { once: true });
     dlg.showModal();
     form.onsubmit = async (e) => {
       e.preventDefault();
+      if (drafting) return;
       if (more.value.trim()) { addDoc(more.value); more.value = ""; }
       const paths = [...docs.querySelectorAll("li")].map((li) => li.dataset.path!);
       if (D.state() !== "on") { msg.textContent = D.state() === "turning-off" ? "Delegate is turning off." : "Delegate is off."; return; }
@@ -205,17 +349,19 @@ export function mountDelegate(h: DelegateHost) {
     dlg.append(el("button", { type: "button", className: "x", ariaLabel: "Close", textContent: "×", onclick: () => dlg.close() }), panel);
     document.body.append(dlg);
     dlg.showModal();
-    let pv: { close(): void; refresh(): void } | null = null, src: ReturnType<typeof D.source> | null = null, busy = false;
-    // (its actions, at the proposal's foot: Close now; Merge and Ask for changes in the next steps)
+    let pv: { close(): void; refresh(): void } | null = null, src: ReturnType<typeof D.source> | null = null;
+    // (its actions, at the proposal's foot: Merge, Ask for changes and Close)
     const act = (key: string, label: string) => { const b = el("button", { type: "button", textContent: label }); b.dataset.act = key; return b; };
     const merge = act("merge", T.merge), ask = act("ask", T.ask), closeBtn = act("close", T.closeTask);
     const status = el("p", { className: "st", role: "status" });
-    const later = el("p", { className: "st", textContent: T.laterActions });
     // (Ask for changes' own block goes in askSlot, under the actions, for the commit shown (me.commit) and its files
     //  (src.seen().files))
     const askSlot = el("div", { className: "ask-slot" });
-    const bar = el("div", { className: "proposal-actions" }, el("div", { className: "row" }, merge, ask, closeBtn), status, askSlot, later);
-    for (const b of [merge, ask]) { b.setAttribute("aria-disabled", "true"); b.title = T.laterActions; }
+    // (Merge's conflicts, to pick, and what is left of an incomplete merge)
+    const mergeSlot = el("div", { className: "merge-slot" });
+    const bar = el("div", { className: "proposal-actions" }, el("div", { className: "row" }, merge, ask, closeBtn), status, mergeSlot, askSlot);
+    // (the files as last merged for picking, and the picks)
+    let plans: FileMerge[] | null = null, picks: Record<string, Picks> = {};
     const me = { id, commit, sync: () => {} };
     shown = me;
     dlg.addEventListener("close", () => { pv?.close(); dlg.remove(); if (shown === me) shown = null; }, { once: true });
@@ -223,25 +369,145 @@ export function mountDelegate(h: DelegateHost) {
     if (!dlg.isConnected) return;
     const mount = (c: string) => {
       pv?.close();
+      plans = null;
+      picks = {};
+      mergeSlot.replaceChildren();
       me.commit = c;
+      // (a new round: any Ask for changes block was the old round's)
+      askSlot.replaceChildren();
       src = D.source(id, c);
-      pv = mod.openProposal(src, panel, { notebook: () => import(new URL("sagebrush-notebook.js", h.site).href), actions: bar });
+      pv = mod.openProposal(src, panel, { notebook: () => import(new URL("sagebrush-notebook.js", h.site).href), latex: h.latex ?? null, markdown: h.markdown ?? null, actions: bar });
     };
     // (the task as it is now: a newer round replaces the one shown, in place; Close only while it is a proposal)
     me.sync = () => {
       const t = D.task(id);
       const next = t?.proposal?.commit;
       if (next && next !== me.commit && t?.entry.status === "proposal") { mount(next); status.textContent = T.newRound(t.entry.round); }
-      const can = !busy && D.state() === "on" && t?.entry.status === "proposal" && t.proposal?.commit === me.commit;
-      can ? closeBtn.removeAttribute("aria-disabled") : closeBtn.setAttribute("aria-disabled", "true");
+      // (anything under way on this task, started from this dialog or another, keeps every action off)
+      const can = !underway.has(id) && D.state() === "on" && t?.entry.status === "proposal" && t.proposal?.commit === me.commit;
+      for (const b of [closeBtn, ask]) can ? b.removeAttribute("aria-disabled") : b.setAttribute("aria-disabled", "true");
+      // (Merge: as Close, and only once every conflict shown is picked)
+      const canMerge = can && !!h.merge && !(plans && unpicked(plans, picks).length);
+      canMerge ? merge.removeAttribute("aria-disabled") : merge.setAttribute("aria-disabled", "true");
+    };
+    // (the conflicts of the files as merged, each with its two sides and a pick; the picks kept for the session)
+    const drawConflicts = (pin: Pinned) => {
+      const agent = h.agent();
+      mergeSlot.replaceChildren(...(plans ?? []).filter((f) => f.conflicts.length).map((f) => el("div", { className: "conflicts" },
+        el("h4", {}, el("code", { textContent: f.path })),
+        ...f.conflicts.map((c) => {
+          const side = (p: "mine" | "theirs", label: string, text: string) => {
+            const b = el("button", { type: "button", textContent: label });
+            b.dataset.pick = p;
+            b.setAttribute("aria-pressed", String(picks[f.path]?.[c.id] === p));
+            b.onclick = () => {
+              (picks[f.path] ??= {})[c.id] = p;
+              if (h.session) savePicks(h.session, pin, plans ?? [], picks);
+              drawConflicts(pin);
+              const left = plans ? unpicked(plans, picks).length : 0;
+              status.textContent = left ? T.pickAll(left) : "";
+              me.sync();
+            };
+            return el("div", { className: "side" }, el("pre", { textContent: text }), b);
+          };
+          const row = el("div", { className: "conflict" }, el("p", { textContent: c.label }),
+            el("div", { className: "sides" }, side("mine", c.mineLabel ?? T.keepMine, `${T.yours}:\n${c.mine}`), side("theirs", c.theirsLabel ?? T.take(agent), `${agent}:\n${c.theirs}`)));
+          row.dataset.conflict = c.id;
+          return row;
+        }))));
+    };
+    const fail = (err: unknown) => {
+      // (the proposal changed while it was read: read again, nothing written)
+      if ((err as AgentError)?.code === "stale") { status.textContent = T.stale; pv?.refresh(); }
+      else status.textContent = `${T.mergeFailed} ${(err as Error)?.message ?? ""}`.trim();
+    };
+    // (the decision written: recorded by the agent, then forgotten here; or what is left of it shown)
+    const finish = async (rec: MergeRecord) => {
+      if (!isDone(rec)) {
+        const left = unresolved(rec).map((f) => f.path);
+        status.textContent = T.incomplete;
+        const rest = el("button", { type: "button", textContent: T.closeRest });
+        rest.dataset.act = "close-rest";
+        rest.onclick = async () => {
+          if (!begin(id, "merge")) return;
+          try { const r = closeRest(rec); await h.merge!.save(id, r); await finish(r); } finally { end(id, "merge"); }
+        };
+        mergeSlot.replaceChildren(el("p", { className: "incomplete", textContent: T.incompleteBody(left) }), rest);
+        incomplete.add(id);
+        render();
+        return;
+      }
+      const ok = await recordMerge(id, rec);
+      // (what was written said as it is: all of it, or the files merged and those closed unchanged)
+      const left = rec.files.filter((f) => f.closed).map((f) => f.path);
+      if (ok === true) { dlg.close(); h.toast(left.length ? T.mergedPart(rec.files.filter((f) => f.state === "written").map((f) => f.path), left) : T.merged, left.length ? 6000 : undefined); }
+      else status.textContent = ok;
+    };
+    merge.onclick = async () => {
+      if (merge.getAttribute("aria-disabled") === "true" || !h.merge || !src) return;
+      const seen = src.seen();
+      if (!seen) return;
+      const io = h.merge, pin: Pinned = { task: id, base: seen.base, proposal: seen.commit, seq: seen.seq, files: seen.files };
+      // (taken for the task, checked here when used: another action under way, from any dialog, and nothing starts)
+      if (!begin(id, "merge")) return;
+      status.textContent = T.merging;
+      try {
+        await one(id, async () => {
+          let rec = recordOf(await io.load(id), id);
+          // (a record of another proposal: the task moved on, and the agent won't record it)
+          if (rec && rec.proposal !== pin.proposal) { await io.save(id, null); rec = null; }
+          if (rec && isDone(rec)) return finish(rec);
+          // (the person's files read now; then the files of an incomplete merge merged again, or all)
+          const fresh = await prepare(io, src!, pin, rec ? unresolved(rec).map((f) => f.path) : undefined);
+          const kept = h.session ? loadPicks(h.session, pin, fresh) : { picks, dropped: [] };
+          plans = fresh;
+          picks = kept.picks;
+          const left = unpicked(fresh, picks).length;
+          if (left) {
+            drawConflicts(pin);
+            status.textContent = (kept.dropped.length ? T.picksDropped(kept.dropped) + " " : "") + T.pickAll(left);
+            return;
+          }
+          mergeSlot.replaceChildren();
+          rec = rec ? revise(rec, fresh, picks) : newRecord(pin, fresh, picks);
+          // (the decision kept before anything is written)
+          await io.save(id, rec);
+          rec = await run(io, rec);
+          plans = null;
+          await finish(rec);
+        });
+      } catch (err) {
+        fail(err);
+      } finally {
+        end(id, "merge");
+      }
+    };
+    // (Ask for changes: its block opens under the actions, for the commit shown; pressed again, it closes, the note kept)
+    ask.onclick = () => {
+      if (ask.getAttribute("aria-disabled") === "true") return;
+      // (only once the proposal has been read: its files say what goes with the note)
+      if (!src?.seen()) { status.textContent = T.askLoading; return; }
+      const b = askSlot.querySelector<HTMLElement>(".ask-block");
+      if (b) { b.hidden = !b.hidden; if (!b.hidden) b.querySelector("textarea")?.focus(); return; }
+      const block = askBlock(id, me.commit, () => src?.seen() ?? null, {
+        // (Send takes the task's action, right after may() asked, in the same step: nothing else starts meanwhile)
+        busy: (on) => { if (on) begin(id, "ask"); else end(id, "ask"); },
+        // (Send only while Ask for changes is: nothing else under way on the task, from any dialog, nor the task moved on)
+        may: () => !underway.has(id) && ask.getAttribute("aria-disabled") !== "true",
+        // (the task moved on since the proposal was read: read again (a new seq), the note kept, to send again)
+        stale: () => { status.textContent = T.askStale; pv?.refresh(); },
+      });
+      askSlot.replaceChildren(block);
+      block.hidden = false;
+      block.querySelector("textarea")?.focus();
     };
     closeBtn.onclick = async () => {
       if (closeBtn.getAttribute("aria-disabled") === "true") return;
       const seen = src?.seen();
       if (!seen) return;
       if (!(await confirmDialog(T.closeTitle, T.closeBody, T.closeOk))) return;
-      busy = true;
-      me.sync();
+      // (checked again once confirmed: something may have started while the question was open)
+      if (!begin(id, "close")) return;
       try {
         await D.close(id, me.commit, seen.seq);
         dlg.close();
@@ -251,12 +517,112 @@ export function mountDelegate(h: DelegateHost) {
         if ((err as AgentError)?.code === "stale") { status.textContent = T.stale; pv?.refresh(); }
         else status.textContent = `${T.closeTaskFailed} ${(err as Error)?.message ?? ""}`.trim();
       } finally {
-        busy = false;
-        me.sync();
+        end(id, "close");
       }
     };
     mount(commit);
     me.sync();
+  }
+
+  // (Ask for changes, S3 P2: under the proposal's actions, the note and what goes with it; the unsent note kept per task
+  //  in this browser (UI r3.2 §2), cleared once sent. `files` is the proposal's diff, read by the view)
+  function askBlock(task: string, commit: string, seen: () => { seq: number; files: readonly { path: string; change: string }[] } | null, on: { busy(b: boolean): void; may(): boolean; stale(): void }): HTMLElement {
+    const files = () => seen()?.files ?? [];
+    const box = el("textarea", { id: "delegate-note", rows: 4, placeholder: T.askPlaceholder, ariaLabel: T.askLabel });
+    try { box.value = localStorage.getItem(noteKey(task)) ?? ""; } catch { /* (no storage: nothing kept) */ }
+    box.oninput = () => { try { box.value.trim() ? localStorage.setItem(noteKey(task), box.value) : localStorage.removeItem(noteKey(task)); } catch { /* (no storage) */ } };
+    const own = () => files().filter((f) => f.change !== "added").map((f) => f.path);
+    const which = el("p", { className: "st ask-files", textContent: T.askFiles(own()) });
+    const msg = el("p", { className: "msg", role: "alert" });
+    const send = el("button", { type: "button", className: "primary", textContent: T.askSend });
+    const block = el("div", { className: "ask-block", hidden: true }, el("label", { htmlFor: "delegate-note", textContent: T.askLabel }), box, which, msg, send);
+    send.onclick = async () => {
+      if (send.getAttribute("aria-disabled") === "true") return;
+      msg.textContent = "";
+      if (new TextEncoder().encode(box.value.trim()).length > DELEGATE_LIMITS.noteBytes || !box.value.trim()) {
+        msg.textContent = box.value.trim() ? DELEGATE_TEXT.noteLong : DELEGATE_TEXT.noteEmpty;
+        return;
+      }
+      if (!on.may()) { msg.textContent = DELEGATE_TEXT.askMoved; return; }
+      send.setAttribute("aria-disabled", "true");
+      send.textContent = T.askSending;
+      // (the note can't change while it is being sent: what was sent is what was there)
+      box.readOnly = true;
+      // (what is sent: the kept note goes after it only if it is still this, never a newer draft written meanwhile, in a
+      //  dialog opened again)
+      const sent = box.value;
+      on.busy(true);
+      try {
+        const at = seen();
+        if (!at) throw new AgentError("stale", DELEGATE_TEXT.askMoved);
+        const current: DelegateDoc[] = await currentOf(at.files, h.readDoc);
+        const r = await D.ask(task, { proposal: commit, seq: at.seq, note: box.value, current });
+        try { if (localStorage.getItem(noteKey(task)) === sent) localStorage.removeItem(noteKey(task)); } catch { /* (no storage) */ }
+        block.replaceChildren(el("p", { className: "st asked", textContent: T.askSent(r.round) }));
+      } catch (e) {
+        if (e instanceof AgentError && e.code === "stale") on.stale();
+        msg.textContent = e instanceof AgentError || e instanceof Error ? e.message : String(e);
+        send.removeAttribute("aria-disabled");
+        send.textContent = T.askSend;
+        box.readOnly = false;
+      } finally {
+        on.busy(false);
+      }
+    };
+    return block;
+  }
+
+  // ---- Stop and tell Claude… (a working task) and Resume (an interrupted one), with a note for its next turn
+  //      (tasks.stop, then tasks.resume {task, note}): one box for the task shown, kept while it is, so what is typed
+  //      survives the view being drawn again; one action at a time
+  let steer: { task: string; box: HTMLElement; note: HTMLTextAreaElement; form: HTMLElement; send: HTMLButtonElement; msg: HTMLElement; stopB: HTMLButtonElement; resumeB: HTMLButtonElement; noteB: HTMLButtonElement; mode: "stop" | "resume"; busy: boolean } | null = null;
+  function steerBox(id: string) {
+    if (steer?.task === id) return steer;
+    const note = el("textarea", { id: "delegate-steer-note", rows: 3 }) as HTMLTextAreaElement;
+    const send = el("button", { type: "button", className: "primary" }) as HTMLButtonElement;
+    const cancel = el("button", { type: "button", textContent: T.cancel }) as HTMLButtonElement;
+    const msg = el("p", { className: "msg", role: "alert" });
+    const form = el("div", { className: "steer-form", hidden: true }, note, el("div", { className: "row" }, cancel, " ", send));
+    const stopB = el("button", { type: "button", id: "delegate-steer", textContent: T.steer }) as HTMLButtonElement;
+    const resumeB = el("button", { type: "button", id: "delegate-resume", textContent: T.resume }) as HTMLButtonElement;
+    const noteB = el("button", { type: "button", id: "delegate-resume-note", textContent: T.resumeNote }) as HTMLButtonElement;
+    const s = { task: id, box: el("div", { className: "steer" }, el("div", { className: "row" }, stopB, " ", resumeB, " ", noteB), form, msg), note, form, send, msg, stopB, resumeB, noteB, mode: "stop" as "stop" | "resume", busy: false };
+    const openForm = (mode: "stop" | "resume") => { s.mode = mode; s.msg.textContent = ""; form.hidden = false; render(); note.focus(); };
+    stopB.onclick = () => openForm("stop");
+    noteB.onclick = () => openForm("resume");
+    cancel.onclick = () => { form.hidden = true; s.msg.textContent = ""; render(); };
+    const act = async (f: () => Promise<unknown>) => {
+      if (s.busy) return;
+      s.busy = true;
+      s.msg.textContent = "";
+      render();
+      try { await f(); } catch (err) { s.msg.textContent = (err as Error)?.message ?? String(err); } finally { s.busy = false; render(); }
+    };
+    resumeB.onclick = () => void act(() => D.resume(id));
+    send.onclick = () => void act(async () => {
+      const text = note.value;
+      if (!text.trim()) throw new Error(DELEGATE_TEXT.noteEmpty);
+      if (s.mode === "stop" && D.task(id)?.entry.status === "working") await D.stop(id);
+      await D.resume(id, text);
+      note.value = "";
+      form.hidden = true;
+    });
+    steer = s;
+    return s;
+  }
+  function steerFor(id: string, status: string): HTMLElement | null {
+    if (D.state() !== "on" || (status !== "working" && status !== "interrupted" && !(steer?.task === id && steer.busy))) return null;
+    const s = steerBox(id), working = status === "working";
+    // (a working task: Stop and tell Claude…; an interrupted one: Resume, and Resume with a note… where the agent takes
+    //  notes; the box's send says what it will do; everything waits while one action runs)
+    s.stopB.hidden = !working || !D.notesOffered() || !s.form.hidden;
+    s.resumeB.hidden = working || !s.form.hidden;
+    s.noteB.hidden = working || !D.notesOffered() || !s.form.hidden;
+    s.send.textContent = s.busy ? (s.mode === "stop" && working ? T.stopping : T.resuming) : s.mode === "stop" && working ? T.steerSend : T.resume;
+    s.note.placeholder = s.mode === "stop" ? T.steerNote : T.resumeNoteHint;
+    for (const b of [s.stopB, s.resumeB, s.noteB, s.send]) s.busy ? b.setAttribute("aria-disabled", "true") : b.removeAttribute("aria-disabled");
+    s.note.readOnly = s.busy;
+    return s.box;
   }
 
   function render() {
@@ -267,9 +633,22 @@ export function mountDelegate(h: DelegateHost) {
     sw.setAttribute("aria-pressed", String(s === "on"));
     btn.hidden = !offered;
     s === "turning-off" ? btn.setAttribute("aria-disabled", "true") : btn.removeAttribute("aria-disabled");
-    side.hidden = !(s === "on" || s === "turning-off") || !D.tasks.length;
+    // (the agent not connected: its last list, marked, with nothing to open until it is back: #1622)
+    const last = s === "unoffered" ? D.lastKnown() : [];
+    side.hidden = (!(s === "on" || s === "turning-off") || !D.tasks.length) && !last.length;
+    side.classList.toggle("away", !!last.length);
+    if (last.length) {
+      list.replaceChildren(el("p", { className: "away-note", textContent: T.away }), ...last.map((e) => el("div", { className: "thread task away" }, el("span", { className: "t", textContent: e.title }), el("span", { className: `chip ${e.status}${e.question ? " question" : ""}`, textContent: chipOf(e) }))));
+      if (open !== null) close();
+      view.hidden = true;
+      return;
+    }
+    if (s === "on") for (const t of D.tasks) if (t.entry.status === "proposal") recover(t.entry.task);
+    const chipText = (t: (typeof D.tasks)[number]) => (t.entry.status === "proposal" && incomplete.has(t.entry.task) ? T.incomplete : chipOf(t.entry, t.code));
+    // (a task that's done can't be asked again: its kept note goes)
+    for (const t of D.tasks) if (t.entry.status === "closed" || t.entry.status === "merged") { try { if (localStorage.getItem(noteKey(t.entry.task)) !== null) localStorage.removeItem(noteKey(t.entry.task)); } catch { /* (no storage) */ } }
     list.replaceChildren(...D.tasks.map((t) => {
-      const b = el("button", { type: "button", className: "thread task" + (t.entry.task === open ? " on" : "") }, el("span", { className: "t", textContent: t.entry.title }), el("span", { className: `chip ${t.entry.status}${t.entry.question ? " question" : ""}`, textContent: chipOf(t.entry) }));
+      const b = el("button", { type: "button", className: "thread task" + (t.entry.task === open ? " on" : "") }, el("span", { className: "t", textContent: t.entry.title }), el("span", { className: `chip ${t.entry.status}${t.entry.question ? " question" : ""}`, textContent: chipText(t) }));
       b.dataset.task = t.entry.task;
       b.onclick = () => show(t.entry.task);
       return b;
@@ -282,9 +661,11 @@ export function mountDelegate(h: DelegateHost) {
     }
     view.hidden = false;
     const back = el("button", { type: "button", className: "link", textContent: T.back, onclick: () => close() });
-    const head = el("div", { className: "task-head" }, back, el("h2", { textContent: t.entry.title }), el("span", { className: `chip ${t.entry.status}`, textContent: chipOf(t.entry) }));
+    const head = el("div", { className: "task-head" }, back, el("h2", { textContent: t.entry.title }), el("span", { className: `chip ${t.entry.status}`, textContent: chipText(t) }));
     const parts: Node[] = [head];
     if (t.reason) parts.push(el("p", { className: "reason", textContent: t.reason }));
+    const sb = steerFor(t.entry.task, t.entry.status);
+    if (sb) parts.push(sb);
     if (readErr) parts.push(el("p", { className: "msg", role: "alert", textContent: T.unreadable }));
     for (const e of t.thread.entries) if (e.kind === "turn") parts.push(h.turnNode(t.thread, e));
     if (t.skipped) parts.push(el("p", { className: "skipped", textContent: T.skipped(t.skipped) }));

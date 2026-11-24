@@ -4,6 +4,8 @@
 // (web/workspace/db.ts).  Shown once; nothing else on the page changes, so
 // what is on screen can still be read and copied.
 
+import { clause } from "./witness";
+
 const ID = "sagebrush-reload-notice";
 
 export const RELOAD_TEXT = "Sagebrush was updated in another tab, so this page can't read or save your files any more. Reload it to go on; what you see here stays until you do.";
@@ -79,7 +81,10 @@ export function showLossNotice(w: { durability: any; witnessDown?: { local?: str
   const doc = (globalThis as any).document as Document | undefined;
   const d = w.durability;
   if (!doc?.body || !d) return null;
-  const down = Object.values(w.witnessDown ?? {}).filter(Boolean).join("; ");
+  // (a record that can't be written counts only when neither can be: either one alone still tells a loss, and WebKit's
+  // OPFS record never can be written (Safari's, and the Mac app's web view))
+  const wd = w.witnessDown ?? {};
+  const down = wd.local && wd.opfs ? [wd.local, wd.opfs].map(clause).join("; ") : "";
   const loss = d.state === "confirmed" || d.state === "suspected";
   // (a loss that can't be detected here: from the open, or a witness that couldn't be written since, a first save's included)
   const info = d.state === "unknown" ? d.why : d.state === "resetting" || d.state === "purging" ? d.state : d.unavailable || down || "";
@@ -98,7 +103,7 @@ export function showLossNotice(w: { durability: any; witnessDown?: { local?: str
     d.state === "confirmed" ? `This browser's copy of your workspace was lost (${d.why}).${wit ? ` It had ${wit.entries} entries when last recorded, ${when}.` : ""} Nothing can be changed until you choose.`
     : d.state === "suspected" ? `Some recent changes to your workspace are missing from this browser (${d.why}).${wit ? ` Last recorded ${when}.` : ""} Nothing can be changed until you choose.`
     : d.state === "resetting" || d.state === "purging" ? `This browser's workspace is being reset: ${w.resetRemoved ?? 0} records removed so far. Nothing can be changed until it is done.`
-    : `A lost workspace can't be detected in this browser (${info}).`;
+    : `A lost workspace can't be detected in this browser: ${clause(info)}.`;
   box.append(msg);
   const button = (text: string, onClick: () => unknown, sbb: string) => {
     const b = doc.createElement("button");

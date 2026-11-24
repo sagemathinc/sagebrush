@@ -285,15 +285,19 @@ async function cases() {
 
   // ---- 8b. a quit's whole sequence under its deadline: the editor's save or the settings held, or failing: the person
   // asks, each counted; a page left the same way stays
-  for (const [what, editor, settings] of [
+  for (const [what, editor, settings, grants] of [
     ["the editor's save held", () => new Promise(() => {}), null],
     ["the editor's save failing", () => Promise.reject(new Error("the notebook's store refused it")), null],
     ["the settings held", null, () => new Promise(() => {})],
     ["the settings failing", null, () => Promise.reject(new Error("settings disk full"))],
+    // (the file permissions, grants.json: grants-file.ts keepGrants's flush, held unfinished or failing)
+    ["the file permissions held", null, null, () => new Promise(() => {})],
+    ["the file permissions failing", null, null, () => Promise.reject(new Error("grants.json: disk full"))],
   ]) {
     const disk = memDisk(), ws = await launch(), m = mirror(ws, disk);
-    const was = window.__sbSettingsFlush;
+    const was = window.__sbSettingsFlush, wasGrants = window.__sbGrantsFlush;
     window.__sbSettingsFlush = settings ?? (async () => {});
+    window.__sbGrantsFlush = grants ?? (async () => {});
     const { calls, done } = await quit({ m, flushEditor: editor ?? undefined, timeoutMs: 200 });
     await tick(500);
     const box = document.querySelector("#sb-quitting")?.textContent ?? "";
@@ -304,8 +308,10 @@ async function cases() {
     document.getElementById("sb-quitting")?.remove();
     const left = await W.beforeLeave(m, editor ?? undefined, 200);
     check(!left && /Not saved yet/.test(document.getElementById("sb-disk-banner")?.textContent ?? ""), `leaving the page with ${what}: refused, said on the banner`);
+    if (grants) check(/the file permissions: /.test(box), `...the quit names the file permissions: ${box.slice(0, 160)}`);
     W.diskBanner().set("error", null);
     window.__sbSettingsFlush = was;
+    window.__sbGrantsFlush = wasGrants;
     m.close();
   }
 

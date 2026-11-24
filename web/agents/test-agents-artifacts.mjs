@@ -286,6 +286,15 @@ const putRecord = (rec) => ev(`${IDB}.put(${JSON.stringify(rec)})`);
 const refOf = (path, salt = "") => ev(`${IDB}.byCell(${JSON.stringify(tagOf(path + salt) + "0")})`);
 
 const PANE = "#artifacts .pane-host:not([hidden])";
+// (the pane's head: its tabs, Open, Copy, full screen, Close)
+const HEAD = "#artifacts .pane-head";
+// (a code or text file opens in View, in colour: ✎ Edit makes it the textarea it is edited in, as the person clicks it,
+//  #1618)
+async function editHere() {
+  await until(`!!document.querySelector('${PANE} .file-path .mode-toggle:not([hidden])')`, 30000);
+  await ev(`(() => { const b = document.querySelector('${PANE} .file-path .mode-toggle'); if (b.textContent !== 'View') b.click(); return true; })()`);
+  await until(`!!document.querySelector('${PANE} textarea.code-edit')`);
+}
 const cellJs = (i) => `document.querySelectorAll('${PANE} .nb-root .cell')[${i}]`;
 const shown = () => ev(`[...document.querySelectorAll('${PANE} .nb-root .cell textarea')].map((t) => t.value)`);
 const outs = () => ev(`[...document.querySelectorAll('#artifacts .nb-root .cell .out')].map((o) => o.textContent).join('|')`);
@@ -597,7 +606,8 @@ try {
     const quick = async (path, click, word) => {
       await call("workspace.create", { path, content: { text: "old\n" } });
       await artifactTurn(path);
-      await until(`document.querySelector('${PANE} .file-path')?.textContent.startsWith(${JSON.stringify(path + " ")}) && !!document.querySelector('${PANE} .file-body textarea')`, 30000);
+      await until(`document.querySelector('${PANE} .file-path')?.textContent.startsWith(${JSON.stringify(path + " ")})`, 30000);
+      await editHere();
       await ev(`(() => { const t = document.querySelector('${PANE} .file-body textarea'); t.focus(); t.setSelectionRange(t.value.length, t.value.length); })()`);
       await send("Input.insertText", { text: word });
       await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`);
@@ -643,8 +653,8 @@ try {
     const path = "/notes/linked.ipynb";
     await call("workspace.create", { path, content: docFor(path, [{ code: "print('LINKED-CELL')" }]), mode: "python" });
     await openNotebook(path);
-    await until(`!!document.querySelector('${PANE} .file-path .open-full:not([hidden])')`);
-    const ref = await refOf(path), href = await ev(`document.querySelector('${PANE} .file-path .open-full').getAttribute('href')`);
+    await until(`!!document.querySelector('${HEAD} a.open-full:not([hidden])')`);
+    const ref = await refOf(path), href = await ev(`document.querySelector('${HEAD} a.open-full').getAttribute('href')`);
     ok(href === "/?nb=" + encodeURIComponent(ref), "Open in Sagebrush names the notebook's own page, /?nb=<its id>", { href, ref });
     const status = await ev(`fetch(${JSON.stringify(href)}).then((r) => r.status)`);
     ok(status === 200, "that address answers 200", status);
@@ -656,8 +666,8 @@ try {
     // (a code file the agent wrote: its link is its own page, /?code=<fid>, and that page shows the file)
     await call("workspace.create", { path: "/notes/linked.py", content: { text: "print('LINKED-CODE')\n" } });
     await artifactTurn("/notes/linked.py");
-    await until(`document.querySelector('${PANE} .file-path')?.textContent.startsWith("/notes/linked.py ") && !!document.querySelector('${PANE} .file-path .open-full:not([hidden])')`, 30000);
-    const codeHref = await ev(`document.querySelector('${PANE} .file-path .open-full').getAttribute('href')`);
+    await until(`document.querySelector('${PANE} .file-path')?.textContent.startsWith("/notes/linked.py ") && !!document.querySelector('${HEAD} a.open-full:not([hidden])')`, 30000);
+    const codeHref = await ev(`document.querySelector('${HEAD} a.open-full').getAttribute('href')`);
     ok(/^\/\?code=[0-9a-f]+$/.test(codeHref), "a code file's Open in Sagebrush names its own page, /?code=<its id>", codeHref);
     await send("Page.navigate", { url: site + codeHref });
     await until(`document.body.innerText.includes("LINKED-CODE")`, 30000);
@@ -673,8 +683,7 @@ try {
     await ev(`${cellJs(1)}.querySelector('.runb').click()`);
     await until(`/42/.test(${cellJs(1)}.querySelector('.out')?.textContent ?? '')`, 120000);
     await typeInto(0, "  # edited");
-    await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 5000).catch(() => {});
-    await sleep(800);
+    ok(await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000), "the person's edit reports a successful save before it is read back");
     const r = await call("workspace.read", { path });
     const c = r.content.json.cells;
     ok(c[0].code === "a = 1  # edited" && JSON.stringify(c[1].outputs ?? []).includes("42"), "the person's edit and the output are saved (read back through Workspace.read)", c);
@@ -683,7 +692,7 @@ try {
     const rec = await record(ref);
     await putRecord({ ...rec, rev: rec.rev + 1, cells: rec.cells.map((x, i) => (i === 2 ? { ...x, code: "b = 2  # theirs" } : x)) });
     await typeInto(0, " again");
-    await sleep(2000);
+    ok(await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000), "the edit after an outside change reports a successful save before reload");
     const after = await record(ref);
     const codes = after.cells.map((x) => x.code);
     ok(codes[0] === "a = 1  # edited again" && codes[2] === "b = 2  # theirs", "a save never goes over a change made since its base: both are kept (the store's compare and swap)", codes);
@@ -737,6 +746,7 @@ try {
     const draft = "/notes/selfrun-draft.txt";
     await call("workspace.create", { path: draft, content: { text: "mine" } });
     await artifactTurn(draft, { finish: false, turn: t3 });
+    await editHere();
     // (the person in it: they type in its text; found and focused in one step, retried, as the pane may render it
     //  again between a look and a focus)
     await until(`(() => { const t = document.querySelector('${PANE} textarea'); t?.focus(); return !!t && document.activeElement === t; })()`);
@@ -784,7 +794,7 @@ try {
     const draft = "/notes/pr-draft.txt";
     await call("workspace.create", { path: draft, content: { text: "mine" } });
     await artifactTurn(draft, { finish: false, turn: t1 });
-    const drafted = await until(`document.querySelector('#artifacts .tab.on')?.dataset.tab === ${JSON.stringify(draft)} && !!document.querySelector('${PANE} textarea')`, 15000).catch(() => false);
+    const drafted = await until(`document.querySelector('#artifacts .tab.on')?.dataset.tab === ${JSON.stringify(draft)}`, 15000).then(editHere).then(() => true, () => false);
     ok(drafted, "(PR3: the agent's draft shown in the pane)", await ev(`document.querySelector('#artifacts .tab.on')?.dataset.tab ?? null`));
     await ev(`(document.querySelector('${PANE} textarea')?.focus(), true)`);
     await send("Input.insertText", { text: " typed" });
@@ -1468,7 +1478,7 @@ try {
     await artifactTurn(path);
     await until(`!!document.querySelector('${PANE} .file-body')`, 10000);
     await sleep(2500);
-    const got = await ev(`({ editor: !!document.querySelector('${PANE} .tex-embed') || !!document.querySelector('${PANE} iframe.tex-frame')?.contentDocument?.querySelector('.tex-page'), text: !!document.querySelector('${PANE} textarea.code-edit'), open: !!document.querySelector('${PANE} a.open-full') })`);
+    const got = await ev(`({ editor: !!document.querySelector('${PANE} .tex-embed') || !!document.querySelector('${PANE} iframe.tex-frame')?.contentDocument?.querySelector('.tex-page'), text: !!document.querySelector('${PANE} textarea.code-edit, ${PANE} pre.code-view'), open: !!document.querySelector('${HEAD} a.open-full:not([hidden])') })`);
     const asked = requested.slice(before).some((u) => u.includes("sagebrush-latex.js"));
     if (LATEX) ok(got.editor && !got.text && asked, `a .tex artifact opens in the LaTeX editor (this build has it${TEXFRAME ? ": its own page, framed" : ""})`, { got, asked });
     else ok(!got.editor && got.text && got.open && !asked, "a .tex artifact is its source, with Open in Sagebrush, and no LaTeX module is asked for (this build has none)", { got, asked });
@@ -1497,7 +1507,7 @@ try {
     const tf1 = await ev(`(() => { const f = ${FR}, d = f.contentDocument, pg = d.querySelector('.tex-page'), gone = (c) => { const e = d.querySelector(c); return !e || e.hidden || getComputedStyle(e).display === 'none'; };
       return { src: f.getAttribute('src'), frames: document.querySelectorAll('#artifacts iframe.tex-frame').length, view: pg.dataset.view, back: gone('.tex-back'), home: gone('.tex-home'), file: gone('.tex-filebtn'), agent: gone('.tex-agent'), share: gone('.tex-sharebtn'),
         focusKept: document.activeElement === window.__fe && document.activeElement !== f, box: Math.round(f.getBoundingClientRect().height),
-        full: document.querySelector('${PANE} a.open-full')?.getAttribute('href') ?? null }; })()`);
+        full: document.querySelector('${HEAD} a.open-full')?.getAttribute('href') ?? null }; })()`);
     const agentChunk = requested.slice(n0).filter((u) => /sagebrush-latex-agent/.test(u));
     ok(before === 0 && /^\/\?tex=[^&]+&latex=1&embed=1$/.test(tf1.src) && tf1.frames === 1 && tf1.view === "pdf" && tf1.back && tf1.home && tf1.file && tf1.agent && tf1.share && tf1.focusKept && tf1.box > 200 && agentChunk.length === 0 && tf1.full === tf1.src.replace("&latex=1&embed=1", ""),
       "TF1: a .tex artifact is the LaTeX editor's page framed (embed=1), made when its tab is shown: the PDF alone, no bar, Agent or pairing of its own (its chunk never fetched), the composer's focus kept; Open in Sagebrush is the editor's own page", { before, tf1, agentChunk });
@@ -1543,6 +1553,58 @@ try {
       await ev(`document.querySelector('#close').click()`);
       await until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
     }
+  }
+
+  // ======================================================================== LaTeX: the framed editor, not the files
+  // (TF6, QA on DEV: a .tex artifact showed the workspace's Files sidebar instead of the editor. The framed page is the
+  //  notebook page, which shows its files where the person keeps them shown (or has more than one notebook or board),
+  //  and in a pane narrower than 641 px they cover the page. Embedded, the frame is the editor alone: with the files
+  //  kept shown, the sidebar stays hidden, the point at the frame's middle is the editor's, and the person's own
+  //  choice (shown) is kept for the notebook page; TF6b and TF6c: the other ways the page shows them, a file dragged
+  //  over it and its early script before the workspace opens, in a full-screen pane)
+  if (want("texfiles") && TEXFRAME) {
+    const T = "/notes/files-kept.tex";
+    const FR = `document.querySelector('${PANE} iframe.tex-frame')`;
+    const FD = `${FR}.contentDocument`;
+    await ev(`(localStorage.setItem('sagebrush-files-sidebar', '1'), true)`);
+    for (const n of ["a", "b"]) await call("workspace.create", { path: `/notes/kept-${n}.ipynb`, content: docFor(`/notes/kept-${n}.ipynb`, [{ code: "x = 1" }]), mode: "python" });
+    await call("workspace.create", { path: T, content: { text: "\\documentclass{article}\n\\begin{document}\nKept in view.\n\\end{document}\n" } });
+    await artifactTurn(T);
+    await until(`!!${FD}?.querySelector('.tex-page .tex-preview')?.textContent.includes('Kept in view')`, 60000).catch(() => {});
+    // (the notebook page's files are drawn once its workspace is open: time for them to have come, if they would)
+    await sleep(2500);
+    const tf6 = await ev(`(() => { const f = ${FR}, d = f?.contentDocument; if (!d) return null; const sb = d.getElementById('wssidebar'), r = f.getBoundingClientRect();
+      const at = d.elementFromPoint(r.width / 2, r.height / 2);
+      return { width: Math.round(r.width), sidebar: !!sb && !sb.hidden && getComputedStyle(sb).display !== 'none', wsfiles: d.body.classList.contains('wsfiles'), atEditor: !!at?.closest('.tex-page'), at: at ? at.tagName + '.' + at.className : null, pref: localStorage.getItem('sagebrush-files-sidebar') }; })()`);
+    ok(tf6 && !tf6.sidebar && !tf6.wsfiles && tf6.atEditor && tf6.pref === "1",
+      "TF6: a .tex artifact is the editor, not the workspace's files: with the files kept shown (and more than one notebook), the framed page shows no Files sidebar, the frame's middle is the editor, and the person's choice to show them is kept", tf6);
+    // (TF6b: a file dragged over the pane, which on the notebook page shows the files to drop it in: in the frame they
+    //  stay hidden, and the person's choice (hidden, this time) isn't written)
+    const files = `(() => { const d = ${FD}, sb = d.getElementById('wssidebar'); return { sidebar: !!sb && !sb.hidden && getComputedStyle(sb).display !== 'none', wsfiles: d.body.classList.contains('wsfiles') }; })()`;
+    await ev(`(localStorage.setItem('sagebrush-files-sidebar', '0'), true)`);
+    await ev(`(() => { const w = ${FR}.contentWindow, dt = new w.DataTransfer(); dt.items.add(new w.File(['x'], 'dropped.txt', { type: 'text/plain' })); w.document.querySelector('.tex-page').dispatchEvent(new w.DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true })); return true; })()`);
+    await sleep(500);
+    const tf6b = { ...(await ev(files)), pref: await ev(`localStorage.getItem('sagebrush-files-sidebar')`) };
+    ok(!tf6b.sidebar && !tf6b.wsfiles && tf6b.pref === "0", "TF6b: a file dragged over the framed editor shows no Files sidebar there, and the person's choice (hidden) isn't written", tf6b);
+    // (TF6c: the pane full screen, wider than 640 px, the files kept shown: the page's early script, which shows them
+    //  before the workspace opens, leaves them hidden in the frame too: the frame reloaded and watched from its first
+    //  moment (a watcher put in the new document before any of its scripts, which notes every change that shows them),
+    //  then once its workspace is open)
+    await ev(`(localStorage.setItem('sagebrush-files-sidebar', '1'), document.querySelector('#full').click(), true)`);
+    await sleep(800);
+    const watch = await send("Page.addScriptToEvaluateOnNewDocument", { source: `if (/[?&]embed=1/.test(location.search)) { window.__tf6c = { watched: false, files: 0 }; new MutationObserver(() => { const b = document.body, sb = document.getElementById('wssidebar'); if (b) window.__tf6c.watched = true; if (b?.classList.contains('wsfiles') || (sb && !sb.hidden)) window.__tf6c.files++; }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'hidden'] }); }` });
+    await ev(`(${FR}.contentWindow.location.reload(), true)`);
+    await sleep(500);
+    await until(`!!${FD}?.querySelector('.tex-page .tex-preview')?.textContent.includes('Kept in view')`, 60000).catch(() => {});
+    await sleep(2500);
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: watch.identifier });
+    const tf6c = { width: await ev(`Math.round(${FR}.getBoundingClientRect().width)`), early: await ev(`${FR}.contentWindow.__tf6c ?? null`), after: await ev(files), pref: await ev(`localStorage.getItem('sagebrush-files-sidebar')`) };
+    ok(tf6c.width > 640 && tf6c.early?.watched && tf6c.early.files === 0 && !tf6c.after.sidebar && !tf6c.after.wsfiles && tf6c.pref === "1",
+      "TF6c: the pane full screen (wider than 640 px), the files kept shown: the framed editor shows no Files sidebar before its workspace opens nor after, and the choice is kept", tf6c);
+    await ev(`(document.querySelector('#full')?.click(), true)`);
+    await ev(`(localStorage.removeItem('sagebrush-files-sidebar'), true)`);
+    await ev(`document.querySelector('#close').click()`);
+    await until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
   }
 
   // ======================================================================== LaTeX: the editor fills its pane (A4, A8)
@@ -1920,6 +1982,7 @@ try {
     const P = "/notes/f.py";
     await call("workspace.create", { path: P, content: { text: "a = 1\n" } });
     await artifactTurn(P);
+    await editHere();
     await until(`!!document.querySelector('${PANE} textarea.code-edit') && document.querySelector('${PANE} .saved').textContent === 'Saved'`);
     await ev(`(() => { const t = document.querySelector('${PANE} textarea.code-edit'); t.focus(); t.setSelectionRange(t.value.length, t.value.length); })()`);
     await send("Input.insertText", { text: "# mine\n" });
@@ -1941,6 +2004,7 @@ try {
     const R = "/notes/r.py";
     await call("workspace.create", { path: R, content: { text: "old\n" } });
     await artifactTurn(R);
+    await editHere();
     await until(`!!document.querySelector('${PANE} textarea.code-edit') && document.querySelector('${PANE} .saved').textContent === 'Saved'`);
     const revOld = (await call("workspace.read", { path: R })).rev;
     await call("workspace.rename", { from: R, to: "/notes/r-old.py" });
@@ -1961,6 +2025,7 @@ try {
       await call("workspace.create", { path: Q, content: { text: "q = 1\n" } });
       await artifactTurn(Q);
       const box = latex ? `${PANE} .tex-left textarea` : `${PANE} textarea.code-edit`;
+      if (!latex) await editHere();
       await until(`!!document.querySelector('${box}') && document.querySelector('${PANE} .saved').textContent === 'Saved'`, 20000);
       await lockWorkspace();
       const type = async (t) => {
@@ -1995,6 +2060,7 @@ try {
       await call("workspace.create", { path: Q, content: { text: "f = 1\n" } });
       await artifactTurn(Q);
       const box = latex ? `${PANE} .tex-left textarea` : `${PANE} textarea.code-edit`;
+      if (!latex) await editHere();
       await until(`!!document.querySelector('${box}') && document.querySelector('${PANE} .saved').textContent === 'Saved'`, 20000);
       await lockWorkspace();
       const type = async (t) => {
@@ -2372,19 +2438,39 @@ try {
       const later = await rec(path);
       ok(!res.ok && /nothing changed/.test(res.msg) && same(now, before) && same(later, before) && (await shown())[0] === "x = 1", "E18: an apply that throws midway is put back: nothing saved, no version, during or after", { res, rev: [before.rev, now.rev, later.rev] });
     }
-    // E16b (closing): refused, nothing changed (under sync's journal an edit is applied: the "journal-live" section)
+    // E16b (closing): refused, nothing changed (under sync's journal an edit is applied: the "journal-live" section).
+    // (the person's own change, not yet saved (the workspace held), so the close has something to keep and waits for
+    //  the workspace: an edit then comes while the pane closes. A close with nothing unsaved goes at once: E16c)
     {
       const { path, ids } = await mk();
       await open(path);
       const r = await readOf(path);
       const before = await rec(path);
       await lockWorkspace();
+      await typeInto(1, "  # mine");
       await ev(`document.querySelector('#close').click()`);
       await sleep(300);
       const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 9" }] });
       await ev(`window.__release()`);
       await sleep(500);
-      ok(!res.ok && /closing|isn't saved here/.test(res.msg) && same(await rec(path), before), "E16b: an edit of a notebook while its pane closes is refused, nothing changed", res);
+      // (the edit refused and nothing of it saved; the person's own change, saved by the close once the workspace is
+      //  free, is theirs)
+      const after16 = await rec(path);
+      ok(!res.ok && /closing|isn't saved here/.test(res.msg) && after16.cells[0].code === before.cells[0].code && after16.cells[0].code !== "x = 9", "E16b: an edit of a notebook while its pane closes is refused, nothing of it saved", { res, cell0: after16.cells[0].code });
+      await until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
+    }
+    // E16c (#1611): a notebook the agent wrote (in its own form: each cell's type, its count as a number), shown and
+    // closed with nothing changed: it closes at once, and nothing is kept as a copy beside it
+    {
+      const { path } = await mk();
+      await open(path);
+      await sleep(1000);
+      const t0 = Date.now();
+      await ev(`document.querySelector('#close').click()`);
+      const gone = await until(`!document.body.classList.contains('has-artifact')`, 15000).then(() => true, () => false);
+      const ms = Date.now() - t0;
+      const names = await call("workspace.list", { folder: "/notes" }).then((x) => (x.entries ?? x).map((e) => e.path), (e) => ["list: " + e.message]);
+      ok(gone && ms < 3000 && !names.some((p) => p.startsWith(path.replace(/\.ipynb$/, " (copy")) ), "E16c: a notebook the agent wrote, closed with nothing changed: it closes at once, no copy kept beside it", { gone, ms, copies: names.filter((p) => p.includes("(copy")) });
     }
     // E30, E31 (#957 r2, E2 / P3-SEC-3): a notebook in the agent's own branch. The branches' check is taken after the
     // pane's waits and its lock held through the apply (seen held there), then let go for the save; outside /Branches no
@@ -2447,7 +2533,7 @@ try {
       await lose(how);
       if (w === "W2") await ev(`window.__release()`);
       const res = await pending;
-      await sleep(900);
+      if (w === "W2") ok(await untilSaved(), `E21-W2${how}: the person's text saved after the workspace lock was released`);
       const after = await rec(path);
       const agentNone = !after.cells.some((c) => /AGENT/.test(c.code ?? ""));
       const name = how === "c" ? "E21c" : `E21-${w}${how}`;
@@ -2539,7 +2625,7 @@ try {
       const draft = "/notes/draft.txt";
       await call("workspace.create", { path: draft, content: { text: "abcdef" } }).catch(() => null);
       await artifactTurn(draft, { finish: false, turn });
-      await until(`!!document.querySelector('${PANE} textarea')`);
+      await editHere();
       // (A, the draft's textarea, tagged when focused: E28's person moves A's caret in A itself, wherever the pane is)
       const focusDraft = () => ev(`(() => { const t = document.querySelector('${PANE} textarea'); t.dataset.sbA = "1"; t.focus(); t.setSelectionRange(3, 3); return true; })()`);
       const state = () => ev(`(() => { const t = document.activeElement; return { tab: document.querySelector('#artifacts .tab.on')?.dataset.tab, tag: t?.tagName, inDraft: !!t?.closest('${PANE}') && t?.tagName === 'TEXTAREA', caret: t?.selectionStart }; })()`);
@@ -2853,6 +2939,36 @@ try {
           "J11: with a notebook tab the journal's writer, the pane follows it, and the agent's run from the chat is today's run: its result, not stopped", { ready, follows, bar, r, writer0, pane: await ev(`[document.querySelector('#artifacts .tab.on')?.dataset.tab ?? null, document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly ?? null, document.querySelector('${PANE} .nb-root .cell .out')?.textContent ?? null]`), tab: await P.ev(`[${NB}.store.readOnly ?? null, !!${NB}.store.ready, document.querySelector("#cells .cell .out")?.textContent ?? null]`) });
         event(tj, { type: "turn_finished", outcome: "completed" });
         await P.close();
+      }
+      // J12: a notebook the agent made in its turn (run once by itself, a plot in it), a cell added and run in its next
+      // turn, then its chat left: the pane closes with nothing unsaved, so nothing is kept as a copy beside it, though
+      // the journal's record carries what the pane's content hasn't (the versions it is: at, from, proof)
+      {
+        await converse();
+        const path = "/notes/live-plots.ipynb";
+        const plot = (ys) => `import matplotlib.pyplot as plt\nplt.plot([1, 2, 3], ${ys})\nplt.show()`;
+        const t1 = `t${++turnN}`;
+        event(t1, { type: "turn_started" });
+        await sleep(300);
+        await call("workspace.create", { path, content: docFor(path, [{ code: "print('J12', 12)" }, { code: plot("[1, 4, 9]") }]), mode: "python" });
+        const ran = await until(`!!document.querySelector('${PANE} .nb-root .cell .out img, ${PANE} .nb-root .cell .out svg')`, 180000).catch(() => false);
+        await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000).catch(() => {});
+        await sleep(1500);
+        event(t1, { type: "turn_finished", outcome: "completed" });
+        const t2 = `t${++turnN}`;
+        event(t2, { type: "turn_started" });
+        const r = await readOf(path);
+        const added = await call("notebook.edit", { conversation: conv, path, ref: r.ref, base: r.base, was: r.was, turn_id: t2, insert: [{ source: plot("[9, 4, 1]"), after: r.cells.at(-1).id }] }).then(() => true, (e) => e.code ?? e.message);
+        const run2 = await runIn(path, t2).then((x) => x?.ended, (e) => "refused: " + (e.code ?? e.message));
+        await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000).catch(() => {});
+        await sleep(1500);
+        event(t2, { type: "turn_finished", outcome: "completed" });
+        const rec = await record(await refOf(path));
+        const versions = !!(rec?.at || rec?.from);
+        await converse();
+        await sleep(2500);
+        const names = await call("workspace.list", { folder: "/notes" }).then((x) => (x.entries ?? x).map((e) => e.path), (e) => ["list: " + e.message]);
+        ok(ran && added === true && run2 === "done" && versions && names.includes(path) && !names.some((p) => p.startsWith("/notes/live-plots (copy")), "J12: under sync's journal, a notebook the agent made and ran (a plot, then a next turn's cell and run), its chat left: no copy kept beside it", { ran, added, run2, versions, cells: rec?.cells?.length, names: names.filter((p) => p.includes("live-plots")) });
       }
     } finally {
       for (const x of tabs) await x.close().catch(() => {});

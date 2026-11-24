@@ -66,7 +66,7 @@ try {
     for (const ch of "x = 1") {
       await send("Input.insertText", { text: ch });
       seen.push({ after: "key " + J(ch), ...(await ev(PLACE)) });
-      ok(await until(`document.getElementById("saved").textContent.trim() !== ""`, 15000), `${layout}: ${J(ch)} typed, then saved`);
+      ok(await until(`/^saved(?:\\s|$)/i.test(document.getElementById("saved").textContent.trim())`, 15000), `${layout}: ${J(ch)} typed, then saved successfully`);
       seen.push({ after: "saved", ...(await ev(PLACE)) });
     }
     const moved = seen.filter((p) => p.header !== first.header || p.cell !== first.cell || p.y !== first.y);

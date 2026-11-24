@@ -53,7 +53,8 @@ REPORTED = [
 DESKTOP = [
     "the LaTeX editor is on in the desktop app",
     "a .tex opens in the editor and renders",
-    "Share, Agent and Run say what the app doesn't offer",
+    "Share and Agent say what the app doesn't offer",
+    "Run runs a SageTeX item in the app",
 ]
 # (the board page and the app's 404s in the desktop app, web/notebook/selftest-board.js: required with --desktop only)
 DESKTOP_BOARD = [
@@ -63,9 +64,11 @@ DESKTOP_BOARD = [
 ]
 # (the desktop app's files from the computer by its grants only, web/index.html selftest: required with --desktop only)
 DESKTOP_FILES = [
+    "a notebook runs before it may change files, its write refused",
     "a grant the app didn't make reaches nothing",
     "a name outside the notebook's folder is refused",
     "the page has no fs plugin",
+    "Share isn't offered in the app",
 ]
 # (none is a prefix of another)
 INFO = [

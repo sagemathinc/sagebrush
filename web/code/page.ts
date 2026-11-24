@@ -55,6 +55,7 @@ body.sbft .code-page .code-home { display: inline; }
 .code-page .code-close { background: none; border: 0; font-size: 18px; line-height: 1; padding: 2px 6px; border-radius: 5px; color: #555; cursor: pointer; }
 .code-page .code-close:hover { background: #e8eaed; color: #222; }
 .code-page .code-bar { background: #fff4d6; border-bottom: 1px solid #e3c96b; padding: 6px 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.code-page .code-bar[hidden] { display: none; }
 .code-page .code-note { padding: 16px; color: #444; }
 .code-page .code-body { flex: 1; overflow: auto; display: flex; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; tab-size: 4; }
 .code-page .code-ln { margin: 0; padding: 10px 8px 10px 12px; text-align: right; color: #999; user-select: none; background: #fafafa; border-right: 1px solid #eee; white-space: pre; font: inherit; }

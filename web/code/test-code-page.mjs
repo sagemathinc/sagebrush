@@ -104,6 +104,9 @@ try {
   await ev(`(() => { document.querySelector('#wssidebar .frow[data-path="/demo.py"]').click(); return 1; })()`);
   check(await until(`/[?&]code=[\\w-]+/.test(location.search) && !!${C} && ${C}.path === "/demo.py"`, 30000), "Files: a .py file opens its own page (/?code=<fid>), not the preview");
   check(!(await ev(`!!document.querySelector(".sbfprev")`)), "…no data-file preview over it");
+  // (its bar, for a save it couldn't make, hidden until then: no empty strip of it under the toolbar)
+  const barShown = await ev(`(() => { const b = document.querySelector(".code-page .code-bar"); return b ? { hidden: b.hidden, height: b.offsetHeight } : null; })()`);
+  check(barShown && barShown.hidden && barShown.height === 0, "…its bar for an unsaved edit not shown while there is none (no empty yellow strip under the toolbar): " + JSON.stringify(barShown));
 
   // leaving the code page: a notebook clicked in Files opens on its own page, never loaded hidden under the code
   // page; and its ✕ goes back to the notebook page
