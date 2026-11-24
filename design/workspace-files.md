@@ -475,7 +475,7 @@ It is made of objects that each serve one account or one document, so it grows b
     - class work launched from a school's LMS, in a class store the server can read (e2e-encryption.md §5.2). No class-store code is built before its readers and retention are decided, and its launch-replay and isolation gates are in place.
   - **Later, not in the first version:** a post-quantum suite, added in a new epoch through crypto agility (e2e-encryption.md §11.1).
 - **Deleting:**
-  - **"Delete my synced data"** removes everything of the account's from the server, by the same path as the purge in design/sharing.md "Deleting".
+  - **"Delete my synced data"** removes the account's synced workspace content from the server, by the same path as the purge in design/sharing.md "Deleting".
   - **Under end-to-end encryption, it keeps the account's key identity** (a SEC ruling): the key chain, the current keyring and its current wrappers, with each device's name and public key. Deleting the CoCalc account removes them (design/e2e-encryption.md §2).
   - Turning sync off on one device leaves the server copy and the device's copy each in place.
   - Signing out on a shared computer offers to remove this device's local copy, as a separate choice.
