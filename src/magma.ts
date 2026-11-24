@@ -1408,12 +1408,12 @@ class Parser {
   }
 
   cmpExpr(): string {
-    const l = this.catExpr();
+    const l = this.addExpr();
     const ops: Record<string, string> = { eq: "_eq", ne: "_ne", lt: "_lt", le: "_le", gt: "_gt", ge: "_ge", in: "_in", notin: "_notin", subset: "_subset", notsubset: "_notsubset", cmpeq: "_cmpeq", cmpne: "_cmpne" };
     const t = this.peek();
     if (t.t === "kw" && ops[t.v]) {
       this.next();
-      const r = this.catExpr();
+      const r = this.addExpr();
       // eq, ne, in and notin refuse values of different kinds, pointing at
       // the operator
       if (t.v !== "cmpeq" && t.v !== "cmpne") return `_m.${ops[t.v]}(${l}, ${r}, (${t.line}, ${t.col}))`;
@@ -1423,12 +1423,14 @@ class Parser {
     return l;
   }
 
+  // (cat binds tighter than * / div mod meet and + - join, looser than ^ and the unary operators, as Magma 2.18-5
+  // reads it: 2/1 cat [1] is 2/(1 cat [1]), (1/2) + 2 cat [1] is (1/2) + (2 cat [1]))
   catExpr(): string {
-    const first = this.addExpr();
+    const first = this.unary();
     const steps: Parameters<Parser["chain"]>[1] = [];
     while (this.at("cat")) {
       const t = this.next();
-      const r = this.addExpr(), pos = `(${t.line}, ${t.col})`;
+      const r = this.unary(), pos = `(${t.line}, ${t.col})`;
       steps.push({ nest: (l) => `_m._cat(${l}, ${r}, ${pos})`, op: "_m._cat", r, pos });
     }
     return this.chain(first, steps);
@@ -1451,14 +1453,14 @@ class Parser {
 
   mulExpr(): string {
     const i0 = this.i;
-    const first = this.unary();
+    const first = this.catExpr();
     const i1 = this.i;
     const steps: Parameters<Parser["chain"]>[1] = [];
     while (this.at("*") || this.at("/") || this.at("div") || this.at("mod") || this.at("meet")) {
       const t = this.next();
       const f = `_m.${{ "*": "_mul", "/": "_div", div: "_idiv", mod: "_mod", meet: "_meet" }[t.v]}`;
       const r0 = this.i;
-      const r = this.unary(), pos = `(${t.line}, ${t.col})`;
+      const r = this.catExpr(), pos = `(${t.line}, ${t.col})`;
       if (t.v === "/" && !steps.length) this.zeroDenominator(i0, i1, r0, this.i);
       steps.push({ nest: (l) => `${f}(${l}, ${r}, ${pos})`, op: f, r, pos });
     }
