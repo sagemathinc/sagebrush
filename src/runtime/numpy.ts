@@ -4354,12 +4354,24 @@ newBuiltinModule("_numpy", (m) => {
     if (strArg(x)) return strUnique(strOperand(x));
     const a = asarray(x);
     const s = copy(ravel(a));
+    // (0.0 and -0.0 are equal, so one stands for both: the first one in the array, as NumPy's stable path
+    // (return_index) keeps; NumPy's plain path keeps whichever its SIMD sort leaves first, which varies with the
+    // CPU. The sort below puts -0.0 first, so the first zero's sign is found before it)
+    let zero = 0;
+    if (a.dt.kind === "f") {
+      const o = s.data;
+      for (let i = 0; i < o.length; i++)
+        if (o[i] === 0) {
+          zero = o[i];
+          break;
+        }
+    }
     if (!(s.data instanceof Float64Array && wasmSort(s.data))) s.data.sort();
     const d = s.data, n = d.length;
     let m = 0;
     for (let i = 0; i < n; i++) {
       const v = d[i];
-      if (m === 0 || !(v === d[m - 1] || (v !== v && d[m - 1] !== d[m - 1]))) d[m++] = v;
+      if (m === 0 || !(v === d[m - 1] || (v !== v && d[m - 1] !== d[m - 1]))) d[m++] = v === 0 ? zero : v;
     }
     const out = empty([m], a.dt);
     out.data.set(d.subarray(0, m));

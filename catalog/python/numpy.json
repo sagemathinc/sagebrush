@@ -2762,6 +2762,7 @@
     "differs": [
       "Does not accept the argument sorted, which NumPy 2.5.1 has (a TypeError).",
       "With signed zeros in rows that compare equal, unique(axis=k) without return_index keeps the first occurrence's zeros, where NumPy's unstable sort may keep another's; the values compare equal, and counts, inverse and return_index all match.",
+      "Likewise without an axis: of 0.0 and -0.0, the first one in the array is kept, as NumPy's return_index path keeps it; NumPy's plain path keeps whichever its SIMD sort leaves first, which varies with the CPU. The values compare equal, and counts, inverse and return_index all match.",
       "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",

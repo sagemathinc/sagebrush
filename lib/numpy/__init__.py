@@ -1993,7 +1993,8 @@ def unique(ar, return_index=False, return_inverse=False, return_counts=False, ax
             raise IndexError(f"axis {axis} is out of bounds for array of dimension {ar.ndim}")
         if ar.ndim != 1:
             return _unique_axis(ar, ax % ar.ndim, return_index, return_inverse, return_counts)
-    if not (return_index or return_inverse or return_counts) and asarray(ar).dtype.kind != "c":
+    # (the runtime's plain path merges NaNs, so equal_nan=False, each NaN kept, takes the path below)
+    if not (return_index or return_inverse or return_counts) and asarray(ar).dtype.kind != "c" and equal_nan:
         return _np.unique1d(ar)
     a = asarray(ar).ravel()
     order = argsort(a)
