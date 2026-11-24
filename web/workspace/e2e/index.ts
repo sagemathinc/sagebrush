@@ -5,6 +5,8 @@ export { CODEC, ADDRESS, deriveEpochKeys, wireAddress, fileKey, chunkKey } from 
 export type { EpochKeys } from "./keys.ts";
 export { CHUNK, TAG, KINDS, chunkCount, sealObject, openObject, sealBlob, openBlob } from "./chunks.ts";
 export type { ObjectHeader, BlobHeader, Inflate, Limits } from "./chunks.ts";
+export { CODECS, pinnedCodec } from "./codecs.ts";
+export type { PinnedCodec } from "./codecs.ts";
 export { hpke } from "./hpke.ts";
 export type { Recipient } from "./hpke.ts";
 export { FLOOR_MESSAGE, checkFloor } from "./floor.ts";

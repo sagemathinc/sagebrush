@@ -32,10 +32,26 @@ export function u64(n: number): Uint8Array {
 /** A field: its byte length as a u32, then its bytes. */
 export const field = (b: Uint8Array): Uint8Array<ArrayBuffer> => concat(u32(b.length), b);
 
-// (an account, object, version or other name: a non-empty string of at most 256 UTF-8 bytes, no NUL)
+// (an account, object, version or other name: a non-empty, well-formed string of at most 256 UTF-8 bytes, no NUL.
+//  Well-formed: TextEncoder writes any lone surrogate as U+FFFD, so two different strings would name the same thing)
 const NAME_MAX = 256;
+
+/** Whether a string is well-formed UTF-16: every high surrogate followed by a low one, every low one preceded by one. */
+export function wellFormed(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 0xdc00 && c <= 0xdfff) return false; // (a low surrogate not consumed as the second half of a pair)
+    if (c >= 0xd800 && c <= 0xdbff) {
+      const d = i + 1 < s.length ? s.charCodeAt(i + 1) : -1;
+      if (!(d >= 0xdc00 && d <= 0xdfff)) return false;
+      i++;
+    }
+  }
+  return true;
+}
 export function name(s: unknown, what: string): Uint8Array {
   if (typeof s !== "string" || s.length === 0 || s.includes("\0")) refuse("bad_form", `${what} is a non-empty string`);
+  if (!wellFormed(s as string)) refuse("bad_form", `${what} is well-formed Unicode (no lone surrogate)`);
   const b = utf8(s as string);
   if (b.length > NAME_MAX) refuse("bad_form", `${what} is at most ${NAME_MAX} bytes`);
   return field(b);

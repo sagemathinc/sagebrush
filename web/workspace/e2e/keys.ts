@@ -36,6 +36,18 @@ export type EpochKeys = Readonly<{
   wrap: CryptoKey;
 }>;
 
+// (every bundle deriveEpochKeys made, with what it was made from: sealing takes the account and key handles from here,
+//  so a copy with another account, or one mixing two bundles' handles, is no bundle at all)
+type Minted = Readonly<{ account: string; n: number; addr: CryptoKey; blob: CryptoKey }>;
+const MINTED = new WeakMap<object, Minted>();
+
+/** What deriveEpochKeys made `keys` from; refused (bad_form) for anything it didn't make itself. */
+export function mintedEpoch(keys: unknown): Minted {
+  const m = keys !== null && typeof keys === "object" ? MINTED.get(keys) : undefined;
+  if (!m) refuse("bad_form", "not an epoch's keys as deriveEpochKeys made them");
+  return m as Minted;
+}
+
 const epochInfo = (label: string, account: string, n: number) => concat(utf8(label), name(account, "the account"), u64(n));
 
 /** One epoch's keys from its 32-byte secret S[e]. Nothing returned can give S back, and none is extractable. */
@@ -49,7 +61,9 @@ export async function deriveEpochKeys(S: Uint8Array, account: string, n: number)
   const bits = new Uint8Array(await subtle().deriveBits(hkdf(epochInfo(LABELS.epochBlob, account, n)), base, 256));
   let blob: CryptoKey;
   try { blob = await subtle().importKey("raw", bits, "HKDF", false, ["deriveBits"]); } finally { bits.fill(0); }
-  return Object.freeze({ n, account, addr, blob, index: await aes(LABELS.epochIndex), wrap: await aes(LABELS.epochWrap) });
+  const keys: EpochKeys = Object.freeze({ n, account, addr, blob, index: await aes(LABELS.epochIndex), wrap: await aes(LABELS.epochWrap) });
+  MINTED.set(keys, Object.freeze({ account, n, addr, blob }));
+  return keys;
 }
 
 /** A blob's address on the wire (§3.3), from its plaintext SHA-256: "a1:" and 64 hex digits. */

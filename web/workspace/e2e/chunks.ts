@@ -5,7 +5,13 @@
 //   a document, snapshot or index snapshot: its random content key (CEK); the nonce is a random 64-bit prefix for the
 //     object, then u32(chunk index)
 //   a blob: one key per chunk (keys.ts chunkKey, from the file key) and a zero nonce: deterministic, so two devices
-//     uploading the same file make the same bytes
+//     uploading the same file make the same bytes. A zero nonce is safe only while each chunk key encrypts one byte
+//     string, so sealBlob owns that: it takes the epoch's keys, the SHA-256, the plaintext and a pinned codec's NAME
+//     (codecs.ts: a frozen registry; no caller-supplied implementation), checks the plaintext is the file that
+//     SHA-256 names, compresses it with that codec, and derives the address, the file key and every AAD field from
+//     (epoch, sha, codec); the epoch is one deriveEpochKeys made (keys.ts mintedEpoch: a copy with another account,
+//     or mixing two epochs' handles, is refused). So one file key is used for one byte string: sha fixes the plaintext, and the registered
+//     codec is a deterministic function of it (each codec's determinism is its admission test, codecs.ts).
 //
 // The AAD binds the label (the protocol and its version), the account, the object (kind, id and version; a blob's
 // address), the codec, both total lengths, the chunk count, the chunk's index and its length. So chunks can't be
@@ -13,10 +19,14 @@
 //
 // Opening authenticates every chunk first; only then is the codec's inflate called, bounded by the declared length,
 // a ratio and a ceiling, and its output must be exactly the declared length (§3.2: a hostile object can't exhaust
-// memory). Refusals are bad_form (doesn't open, or not this shape) or limit (over a bound).
+// memory). Every plaintext buffer opening makes (each decrypted chunk, and the assembled compressed bytes) is cleared
+// before it returns or throws; sealing works on a copy of its input, cleared the same way. Refusals are bad_form
+// (doesn't open, or not this shape) or limit (over a bound).
 import { LABELS } from "./labels.ts";
-import { ADDRESS, chunkKey, codecBytes } from "./keys.ts";
-import { buf, concat, field, name, refuse, u32, u64, utf8 } from "./bytes.ts";
+import { ADDRESS, chunkKey, codecBytes, fileKey, mintedEpoch, wireAddress } from "./keys.ts";
+import { pinnedCodec } from "./codecs.ts";
+import type { EpochKeys } from "./keys.ts";
+import { buf, bytes32, concat, field, name, refuse, u32, u64, utf8 } from "./bytes.ts";
 
 export const CHUNK = 1 << 20;
 export const TAG = 16;
@@ -81,9 +91,11 @@ function sealable(h: { compressedLength: number }, compressed: Uint8Array) {
 function openable(h: { compressedLength: number }, chunks: readonly Uint8Array[]): number {
   const count = chunkCount(h.compressedLength);
   if (!Array.isArray(chunks) || chunks.length !== count) refuse("bad_form", "not the declared number of chunks");
-  chunks.forEach((c, i) => {
+  // (every index, holes included: a sparse array's missing chunk is refused here, not met later as undefined)
+  for (let i = 0; i < count; i++) {
+    const c = chunks[i];
     if (!(c instanceof Uint8Array) || c.length !== lengthOf(h.compressedLength, count, i) + TAG) refuse("bad_form", "a chunk isn't its declared length");
-  });
+  }
   return count;
 }
 
@@ -94,24 +106,48 @@ function bounded(h: { plaintextLength: number; compressedLength: number }, limit
   if (h.plaintextLength > Math.max(h.compressedLength, 1) * maxRatio) refuse("limit", "the object inflates more than the ratio allows");
 }
 
-async function inflated(compressed: Uint8Array, h: { plaintextLength: number }, inflate: Inflate): Promise<Uint8Array> {
+// Decrypt every chunk into one buffer, then inflate it. Each decrypted chunk is cleared once copied, and the assembled
+// buffer in every outcome (an inflate that hands back a view of it gets a copy first).
+async function assemble(h: { plaintextLength: number; compressedLength: number }, chunks: readonly Uint8Array[], count: number,
+  decrypt: (i: number, length: number) => Promise<ArrayBuffer>, inflate: Inflate): Promise<Uint8Array> {
   if (typeof inflate !== "function") refuse("bad_form", "opening needs the codec's inflate");
-  const out = await inflate(compressed, h.plaintextLength);
-  if (!(out instanceof Uint8Array) || out.length !== h.plaintextLength) refuse("bad_form", "the inflated bytes aren't the declared length");
-  return out;
+  const compressed = new Uint8Array(h.compressedLength);
+  try {
+    for (let i = 0; i < count; i++) {
+      let pt: Uint8Array;
+      try {
+        pt = new Uint8Array(await decrypt(i, chunks[i].length - TAG));
+      } catch {
+        refuse("bad_form", "a chunk doesn't open under this key and header");
+      }
+      try { compressed.set(pt, i * CHUNK); } finally { pt.fill(0); }
+    }
+    const out = await inflate(compressed, h.plaintextLength);
+    if (!(out instanceof Uint8Array) || out.length !== h.plaintextLength) refuse("bad_form", "the inflated bytes aren't the declared length");
+    return out.buffer === compressed.buffer ? out.slice() : out;
+  } finally {
+    compressed.fill(0);
+  }
 }
+
+const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
 
 /** Seal a document, snapshot or index snapshot under its CEK: a fresh nonce prefix and the chunks. */
 export async function sealObject(cek: CryptoKey, h: ObjectHeader, compressed: Uint8Array): Promise<{ prefix: Uint8Array; chunks: Uint8Array[] }> {
   const head = objectHead(h);
   sealable(h, compressed);
-  const count = chunkCount(h.compressedLength), prefix = globalThis.crypto.getRandomValues(new Uint8Array(PREFIX));
-  const chunks: Uint8Array[] = [];
-  for (let i = 0; i < count; i++) {
-    const pt = compressed.subarray(i * CHUNK, i * CHUNK + lengthOf(h.compressedLength, count, i));
-    chunks.push(new Uint8Array(await subtle().encrypt(gcm(concat(prefix, u32(i)), chunkAad(head, count, i, pt.length)), cek, buf(pt))));
+  const bytes = compressed.slice(); // (a copy before any await: the caller's buffer may change meanwhile)
+  try {
+    const count = chunkCount(h.compressedLength), prefix = globalThis.crypto.getRandomValues(new Uint8Array(PREFIX));
+    const chunks: Uint8Array[] = [];
+    for (let i = 0; i < count; i++) {
+      const pt = bytes.subarray(i * CHUNK, i * CHUNK + lengthOf(h.compressedLength, count, i));
+      chunks.push(new Uint8Array(await subtle().encrypt(gcm(concat(prefix, u32(i)), chunkAad(head, count, i, pt.length)), cek, buf(pt))));
+    }
+    return { prefix, chunks };
+  } finally {
+    bytes.fill(0);
   }
-  return { prefix, chunks };
 }
 
 /** Open what sealObject made: every chunk authenticated, then inflated within the limits. */
@@ -121,31 +157,41 @@ export async function openObject(cek: CryptoKey, h: ObjectHeader, sealed: { pref
   const { prefix, chunks } = sealed ?? ({} as typeof sealed);
   if (!(prefix instanceof Uint8Array) || prefix.length !== PREFIX) refuse("bad_form", "a nonce prefix is 8 bytes");
   const count = openable(h, chunks);
-  const compressed = new Uint8Array(h.compressedLength);
-  for (let i = 0; i < count; i++) {
-    const length = chunks[i].length - TAG;
-    let pt: ArrayBuffer;
-    try {
-      pt = await subtle().decrypt(gcm(concat(prefix, u32(i)), chunkAad(head, count, i, length)), cek, buf(chunks[i]));
-    } catch {
-      refuse("bad_form", "a chunk doesn't open under this key and header");
-    }
-    compressed.set(new Uint8Array(pt), i * CHUNK);
-  }
-  return inflated(compressed, h, inflate);
+  return assemble(h, chunks, count, (i, length) => subtle().decrypt(gcm(concat(prefix, u32(i)), chunkAad(head, count, i, length)), cek, buf(chunks[i])), inflate);
 }
 
-/** Seal a blob under its file key: the same file key, header and bytes always give the same chunks. */
-export async function sealBlob(kFile: Uint8Array, h: BlobHeader, compressed: Uint8Array): Promise<Uint8Array[]> {
-  const head = blobHead(h);
-  sealable(h, compressed);
-  const count = chunkCount(h.compressedLength);
-  const chunks: Uint8Array[] = [];
-  for (let i = 0; i < count; i++) {
-    const pt = compressed.subarray(i * CHUNK, i * CHUNK + lengthOf(h.compressedLength, count, i));
-    chunks.push(new Uint8Array(await subtle().encrypt(gcm(ZERO_NONCE, chunkAad(head, count, i, pt.length)), await chunkKey(kFile, i), buf(pt))));
+/**
+ * Seal a file as a blob of the epoch: its header (account, address, codec, lengths) and chunks. `sha` must be the
+ * plaintext's SHA-256, and `codec` a name codecs.ts pins. The same epoch, file and codec always give the same blob.
+ */
+export async function sealBlob(keys: EpochKeys, sha: Uint8Array, plaintext: Uint8Array, codec: string): Promise<{ header: BlobHeader; chunks: Uint8Array[] }> {
+  // (the account and key handles come from what deriveEpochKeys recorded, never from the object's own fields)
+  const epoch = mintedEpoch(keys);
+  const digest = bytes32(sha, "a blob's SHA-256").slice();
+  if (!(plaintext instanceof Uint8Array)) refuse("bad_form", "a blob's plaintext is bytes");
+  codecBytes(codec);
+  const pinned = pinnedCodec(codec);
+  // (copies before any await: neither buffer of the caller can change what is hashed, compressed or sealed)
+  const pt = plaintext.slice();
+  let compressed: Uint8Array | undefined, kFile: Uint8Array | undefined;
+  try {
+    if (!same(new Uint8Array(await subtle().digest("SHA-256", buf(pt))), digest)) refuse("bad_form", "the plaintext isn't the file its SHA-256 names");
+    compressed = pinned.deflate(pt);
+    const header: BlobHeader = Object.freeze({
+      account: epoch.account, address: await wireAddress(epoch.addr, digest), codec,
+      plaintextLength: pt.length, compressedLength: compressed.length,
+    });
+    const head = blobHead(header), count = chunkCount(header.compressedLength);
+    kFile = await fileKey(epoch.blob, digest, codec);
+    const chunks: Uint8Array[] = [];
+    for (let i = 0; i < count; i++) {
+      const piece = compressed.subarray(i * CHUNK, i * CHUNK + lengthOf(header.compressedLength, count, i));
+      chunks.push(new Uint8Array(await subtle().encrypt(gcm(ZERO_NONCE, chunkAad(head, count, i, piece.length)), await chunkKey(kFile, i), buf(piece))));
+    }
+    return { header, chunks };
+  } finally {
+    for (const x of [pt, compressed, kFile]) if (x instanceof Uint8Array) x.fill(0);
   }
-  return chunks;
 }
 
 /** Open what sealBlob made: every chunk authenticated, then inflated within the limits. */
@@ -153,16 +199,5 @@ export async function openBlob(kFile: Uint8Array, h: BlobHeader, chunks: readonl
   const head = blobHead(h);
   bounded(h, limits);
   const count = openable(h, chunks);
-  const compressed = new Uint8Array(h.compressedLength);
-  for (let i = 0; i < count; i++) {
-    const length = chunks[i].length - TAG;
-    let pt: ArrayBuffer;
-    try {
-      pt = await subtle().decrypt(gcm(ZERO_NONCE, chunkAad(head, count, i, length)), await chunkKey(kFile, i), buf(chunks[i]));
-    } catch {
-      refuse("bad_form", "a chunk doesn't open under this key and header");
-    }
-    compressed.set(new Uint8Array(pt), i * CHUNK);
-  }
-  return inflated(compressed, h, inflate);
+  return assemble(h, chunks, count, async (i, length) => subtle().decrypt(gcm(ZERO_NONCE, chunkAad(head, count, i, length)), await chunkKey(kFile, i), buf(chunks[i])), inflate);
 }
