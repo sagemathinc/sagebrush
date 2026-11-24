@@ -86,3 +86,14 @@ bits("z0pow", lambda: CC(0, 0)^2.5)
 bits("z0c", lambda: CC(0, 0)^CC(2, 1))
 bits("p0", lambda: CC(float("nan"), 1)^0)
 bits("hugeexp", lambda: CC(2, 0)^(10^30))
+
+# sqrt is Sage's sqrt, not the power z^0.5 (NaN at 0); odd powers whose
+# square leaves the doubles while the power is in range
+bits("sqrt0", lambda: sqrt(CC(0, 0)))
+bits("sqrt-0", lambda: sqrt(CC(-0.0, 0)))
+bits("sqrt4", lambda: sqrt(CC(4, 0)))
+bits("sqrt12", lambda: sqrt(CC(1, 2)))
+bits("sqrtsub", lambda: sqrt(CC(2^-1074, 0)))
+bits("p300", lambda: CC(2^300, 1)^3)
+bits("p-300", lambda: CC(2^-300, 3)^3)
+bits("pm300", lambda: CC(2^300, 2^290)^-3)

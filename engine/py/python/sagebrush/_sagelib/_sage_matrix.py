@@ -4308,8 +4308,8 @@ def _cc_ipow(z, n):
             # (Sage's 1/0: 0/0 in each part)
             return ComplexNumber(float("nan"), float("nan"))
         apow = complex(a / m, -b / m)
-        if not _cc_tame(apow):
-            # (a quotient that may have underflowed)
+        if not _cc_tame(apow) or (apow.real == 0 and a != 0) or (apow.imag == 0 and b != 0):
+            # (a quotient that may have underflowed, to 0 too)
             return None
         n = -n
     else:
@@ -4322,10 +4322,13 @@ def _cc_ipow(z, n):
     res = apow
     n >>= 1
     while n:
-        if not (_cc_tame(apow) and _cc_tame(res)):
+        # (the operands of each multiplication, checked just before it)
+        if not _cc_tame(apow):
             return None
         apow = apow * apow
         if n & 1:
+            if not (_cc_tame(apow) and _cc_tame(res)):
+                return None
             res = apow * res
         n >>= 1
     return ComplexNumber(res)
@@ -4451,6 +4454,38 @@ class ComplexNumber(complex):
         Traceback (most recent call last):
         ...
         NotImplementedError: 6.52530446799852e-55 + 2.00875142464325e-343*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+
+    Each step of an integer power is checked, not only its result (an odd
+    power squares past the doubles, then multiplies back), and so is 1/z::
+
+        sage: CC(2^400, 0)^3  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 1.72184794563858e361 in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(2^-400, 0)^3  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 5.80771375621750e-362 in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(2^400, 0)^-3  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 5.80771375621750e-362 in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(2^400, 1)^3  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 1.72184794563858e361 + 2.00040432986396e241*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(0, 2^400)^3  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: -1.72184794563858e361*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(2^-375, 2^465)^-1  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 1.43171197843571e-393 - 1.04966814180736e-140*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: sqrt(CC(4, 2^-1074))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 2.00000000000000 + 1.23516411460312e-324*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
     """
 
     def _latex_(self):
