@@ -6,12 +6,13 @@
 // The keyring's construction is §11.2's: K_ring[n] = HKDF(S[n], "sagebrush.keyring.v1"), used for this one keyring;
 // AES-256-GCM with a fresh random 96-bit nonce; AAD binding the account, the epoch, the suite and format version, the
 // predecessor chain entry's hash and the ordered list of included epochs; the signed entry commits the SHA-256 of the
-// whole ciphertext (nonce, ciphertext and tag), and the decrypted list must equal the AAD's.
+// whole ciphertext (nonce, ciphertext and tag). The plaintext is binary: the secrets, 32 bytes each, in the AAD's
+// order, so its length is exactly 32 times the list's, and every buffer that held a secret is zeroed (no secret ever
+// becomes a string). On opening, each secret must match its own epoch's signed commitment.
 
-import { b64, enc, random, sha256b64, unb64 } from "../../fleet/core/bytes.mjs";
-import { canonText, parseCanonical } from "../../fleet/core/canonical.mjs";
+import { b64, random, sha256b64 } from "../../fleet/core/bytes.mjs";
 import { crypto } from "../../fleet/core/crypto.mjs";
-import { LABELS, SALT, aadOf, exactKeys, fail, info, knownSuite, subtle } from "./base.mjs";
+import { LABELS, SALT, aadOf, fail, info, knownSuite, subtle } from "./base.mjs";
 
 const FORMAT = 1;
 
@@ -21,7 +22,12 @@ export const newEpochSecret = () => random(32);
 /** The commitment to S[n] that its chain entry carries (base64url, 32 bytes). Reveals nothing about S[n]. */
 export async function epochCommit(S, account, n) {
   if (!(S instanceof Uint8Array) || S.length !== 32) fail("bad_form", "an epoch secret is 32 bytes");
-  return b64(await crypto().hkdf(S, SALT, info(LABELS.epochCommit, account, n), 32));
+  const c = await crypto().hkdf(S, SALT, info(LABELS.epochCommit, account, n), 32);
+  try {
+    return b64(c);
+  } finally {
+    c.fill(0);
+  }
 }
 
 /** The keyring's AAD (§11.2). */
@@ -50,14 +56,14 @@ export async function sealKeyring({ S, account, n, suite, prev, secrets }) {
   if (!knownSuite(suite)) fail("bad_suite", "an unknown suite");
   const epochs = [...secrets.keys()].sort((a, b) => a - b);
   checkList(epochs, n);
-  const body = { epochs, secrets: epochs.map((e) => {
-    const s = secrets.get(e);
-    if (!(s instanceof Uint8Array) || s.length !== 32) fail("bad_form", "an epoch secret is 32 bytes");
-    return b64(s);
-  }) };
-  const plain = enc(canonText(body));
-  const nonce = random(12);
+  const plain = new Uint8Array(32 * epochs.length);
   try {
+    epochs.forEach((e, i) => {
+      const s = secrets.get(e);
+      if (!(s instanceof Uint8Array) || s.length !== 32) fail("bad_form", "an epoch secret is 32 bytes");
+      plain.set(s, 32 * i);
+    });
+    const nonce = random(12);
     const ct = new Uint8Array(await subtle().encrypt({ name: "AES-GCM", iv: nonce, additionalData: ringAad(account, n, suite, prev, epochs) },
       await ringKey(S, account, n, "encrypt"), plain));
     const bytes = new Uint8Array(12 + ct.length);
@@ -70,12 +76,13 @@ export async function sealKeyring({ S, account, n, suite, prev, secrets }) {
 }
 
 /**
- * Open epoch n's keyring: `hash` and `epochs` are what its signed chain entry says. The hash is checked before any
- * decryption; the decrypted list must equal the signed one. Returns a Map from epoch to its 32-byte secret.
+ * Open epoch n's keyring. `hash` and `epochs` are what its signed chain entry says, and `commits` maps each carried
+ * epoch to its own signed commitment. The hash is checked before any decryption, the length against the list, and
+ * every secret against its commitment. Returns a Map from epoch to its 32-byte secret (the caller zeroes them).
  */
-export async function openKeyring({ S, account, n, suite, prev, hash, epochs, bytes }) {
+export async function openKeyring({ S, account, n, suite, prev, hash, epochs, commits, bytes }) {
   checkList(epochs, n);
-  if (!(bytes instanceof Uint8Array) || bytes.length < 12 + 16 || (await sha256b64(bytes)) !== hash) fail("bad_keyring", "not this epoch's keyring");
+  if (!(bytes instanceof Uint8Array) || bytes.length !== 12 + 32 * epochs.length + 16 || (await sha256b64(bytes)) !== hash) fail("bad_keyring", "not this epoch's keyring");
   let plain;
   try {
     plain = new Uint8Array(await subtle().decrypt({ name: "AES-GCM", iv: bytes.subarray(0, 12), additionalData: ringAad(account, n, suite, prev, epochs) },
@@ -83,11 +90,18 @@ export async function openKeyring({ S, account, n, suite, prev, hash, epochs, by
   } catch {
     fail("bad_keyring", "not this epoch's keyring");
   }
+  const out = new Map();
   try {
-    const body = parseCanonical(plain);
-    if (!exactKeys(body, ["epochs", "secrets"]) || !Array.isArray(body.secrets) || canonText(body.epochs) !== canonText(epochs) || body.secrets.length !== epochs.length)
-      fail("bad_keyring", "not this epoch's keyring");
-    return new Map(epochs.map((e, i) => [e, unb64(body.secrets[i], 32)]));
+    if (plain.length !== 32 * epochs.length) fail("bad_keyring", "not this epoch's keyring");
+    for (const [i, e] of epochs.entries()) {
+      const s = plain.slice(32 * i, 32 * i + 32);
+      out.set(e, s);
+      if (typeof commits?.get !== "function" || (await epochCommit(s, account, e)) !== commits.get(e)) fail("bad_keyring", "a secret that isn't its epoch's");
+    }
+    return out;
+  } catch (err) {
+    for (const s of out.values()) s.fill(0);
+    throw err;
   } finally {
     plain.fill(0);
   }

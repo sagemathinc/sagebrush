@@ -3,9 +3,10 @@
 // tests). HPKE is passed in (PR 1's hpke object), never imported here.
 
 export { E2EError, LABELS, SUITES, knownSuite, AUDIENCES } from "./base.mjs";
-export { checkKemPublic, newKem, kemFromSeed } from "./x25519.mjs";
+export { checkKemPublic, newKem } from "./x25519.mjs";
+export { kemFromSeed, ed25519FromSeed } from "./seeded.mjs";
 export { CODE_LENGTH, newRecoverySeed, codeOfSeed, showCode, seedOfCode, recoveryKeys } from "./recovery.mjs";
 export { newEpochSecret, epochCommit, sealKeyring, openKeyring } from "./keyring.mjs";
 export { preEntryHash, challenge, respond, checkResponse } from "./pop.mjs";
 export { TYPE as CHAIN_TYPE, DEVICE_KINDS, apply as applyChainEntry, replay as replayChain, checkPin, currentDevice, epochAt, nextBody, deviceSigner, recoverySigner, sealEntry } from "./chain.mjs";
-export { TYPE as WRAP_TYPE, wrapEpoch, openWrapper } from "./wrap.mjs";
+export { TYPE as WRAP_TYPE, contextOf, wrapEpoch, verifyWrapper, openWrapper, checkTransition, openRecovery } from "./wrap.mjs";

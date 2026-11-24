@@ -23,8 +23,10 @@
 // Genesis and recover carry none: there the device signing the entry made every new key itself, so a challenge it
 // answers to itself would prove nothing more than the entry's own signatures.
 //
-// Each change is one entry, so a crash leaves either the old chain or the new one, never half of a change (a removal
-// and its new epoch, or a recovery's device, code and epoch, land together).
+// Each change is one entry: a removal and its new epoch, or a recovery's device, code and epoch, are signed together.
+// What travels with an entry (its keyring, the wrappers of its epoch secret) is checked by checkTransition (wrap.mjs);
+// making the entry and its package visible together, durably, is the store's job (the server, and each device's
+// store), and nothing publishes an entry without them.
 //
 // Not here, by design: the inbox key and its rotation (shares, after launch), and rotating a device's own keys
 // (§11.1's cross-certification) and compaction's dropping of old epochs (§11.2): each comes with its own entry type.
@@ -215,9 +217,13 @@ export async function replay(entries, ctx, pin = null) {
   return state;
 }
 
-/** Refuse a state that doesn't extend `pin`. */
+const PIN_HASH = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
+
+/** Refuse a state that doesn't extend `pin` ({ seq, hash } exactly: a safe non-negative seq, a canonical hash). */
 export function checkPin(state, pin) {
-  if (!pin) return;
+  if (pin === null || pin === undefined) return;
+  if (!exactKeys(pin, ["seq", "hash"]) || !Number.isSafeInteger(pin.seq) || pin.seq < 0 || typeof pin.hash !== "string" || !PIN_HASH.test(pin.hash))
+    fail("bad_form", "not a chain position");
   if (pin.seq > state.seq) fail("chain_fork", "a rollback");
   if (state.hashes[pin.seq] !== pin.hash) fail("chain_fork", "a fork");
 }

@@ -45,9 +45,15 @@ export async function respond(hpke, recipient, encap, pre) {
   }
 }
 
-/** The challenger's check of the holder's MAC: true or a refusal. */
+/** The challenger's check of the holder's MAC: true or a refusal. It consumes `secret`: zeroed either way. */
 export async function checkResponse(secret, encap, pre, answer) {
-  const want = await mac(secret, pre, encap);
-  if (!sameBytes(want, answer instanceof Uint8Array ? answer : unb64(answer, 32))) fail("bad_pop", "the new key's proof of possession failed");
-  return true;
+  let want;
+  try {
+    want = await mac(secret, pre, encap);
+    if (!sameBytes(want, answer instanceof Uint8Array ? answer : unb64(answer, 32))) fail("bad_pop", "the new key's proof of possession failed");
+    return true;
+  } finally {
+    secret.fill(0);
+    want?.fill(0);
+  }
 }

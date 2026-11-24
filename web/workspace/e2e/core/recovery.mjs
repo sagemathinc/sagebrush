@@ -4,13 +4,12 @@
 // halves go in the key chain.
 //
 // A wrong, truncated or mistyped code fails the same way as any other wrong code: `recovery_failed`, with no hint of
-// which check failed (§2, SEC checklist).
+// which check failed (§2, SEC checklist). openRecovery (wrap.mjs) is the one boundary a recovery goes through.
 
 import { enc, random } from "../../fleet/core/bytes.mjs";
 import { crypto } from "../../fleet/core/crypto.mjs";
-import { keyFromSeed } from "../../fleet/core/ed25519.mjs";
 import { LABELS, fail } from "./base.mjs";
-import { kemFromSeed } from "./x25519.mjs";
+import { ed25519FromSeed, kemFromSeed } from "./seeded.mjs";
 
 const B32 = "abcdefghijklmnopqrstuvwxyz234567";
 export const CODE_LENGTH = 52; // (256 bits in 5-bit characters: 51 full characters, then 1 bit and 4 zero bits)
@@ -60,7 +59,7 @@ export async function recoveryKeys(seed, account) {
   const s = await derive(LABELS.recoverySign);
   const k = await derive(LABELS.recoveryKem);
   try {
-    return Object.freeze({ sign: await keyFromSeed(s), kem: await kemFromSeed(k) });
+    return Object.freeze({ sign: await ed25519FromSeed(s), kem: await kemFromSeed(k) });
   } finally {
     s.fill(0);
     k.fill(0);
