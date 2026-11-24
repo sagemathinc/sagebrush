@@ -170,7 +170,8 @@ WebCrypto's AES-GCM takes whole buffers, so a large object is sealed in fixed, b
   - Only bytes that the index no longer names (deleted, then released) are uploaded again under the current epoch.
 - **Releasing blobs safely** (SEC): the refs that signed envelopes add and release must not let a stale, concurrent client free a blob that is still referenced elsewhere.
   - So physical deletion waits for a grace window **and** a signed, client-made compaction checkpoint covering the release.
-  - Until those exist, r1 defers physical garbage collection: released blobs are kept and counted. That is the simplest safe start, and its cost is bounded by the quota.
+  - Until those exist, physical garbage collection of file blobs is deferred: released blobs are kept and counted. That is the simplest safe start, and its cost is bounded by the quota.
+  - **Index pages are the exception, and its first user:** a page belongs to the checkpoint that wrote it, and is freed once a newer signed checkpoint covers it and the grace window has passed. That lands with the paged index (PR 5), since otherwise every re-sealed page would grow the quota with no bound (§11.4).
 - **What the server learns:** equality of plaintext within one account and one epoch, never across accounts.
   - A new epoch gets a new `K_addr` (SEC), so a removed device can't test the addresses of new uploads. Dedup across epochs comes back only through the index's own hashes (above).
 - **Hashing compressed bytes instead** (SEC's variant) was considered. Plaintext is used because two browsers' compressors can differ, which would break dedup without adding privacy. SEC to confirm.
@@ -479,7 +480,7 @@ William asked for this review because a mistake found later, with millions of fi
   | Object | Under the old epoch | Moving it forward |
   | --- | --- | --- |
   | Blobs (the bulk of the data) | address from `K_addr[e]`, key `K_file` from `K_blob[e]` | **nothing moves.** The blob stays at its address with its ciphertext; the index entry already carries its address, codec and `K_file` |
-  | Documents | random CEK, wrapped under `K_wrap[e]` | re-wrap each CEK under the current epoch: 80 bytes each |
+  | Documents | random CEK, wrapped inside the document's sealed index entry, with its key epoch | re-wrapped in the same re-sealed index snapshot: no step of its own, and the document object never learns of a retirement |
   | Index entries | sealed under `K_index[e]` | re-sealed in the next index snapshot, which happens anyway |
   | Shares already sent | carry their files' `K_file`s, not epoch keys | nothing (their pins keep the blobs) |
 
@@ -487,17 +488,17 @@ William asked for this review because a mistake found later, with millions of fi
   - **It never re-keys the index entry by entry.** At today's rate of 2,000 ops a minute, a million per-entry ops would take over 8 hours. The index moves as one client-made snapshot at a checkpoint (§4.1), which costs its size in upload, not a million ops. With a million entries, it's one re-sealed index snapshot (§11.4) and one re-wrap per document.
 - **The order:**
   1. a device writes a new index snapshot, under the current epoch, that carries every entry of the old epoch;
-  2. it re-wraps the old epoch's document CEKs;
+  2. (the document CEKs are re-wrapped by step 1, since their wraps live in the index entries);
   3. it signs a chain entry, "epoch e retired at checkpoint c".
   - After that entry, the old secret is no longer wrapped to new devices or to a replaced recovery key.
 - **Crash safety and resuming:**
   - each step is idempotent and checkpointed. A crash resumes from the last committed snapshot page or re-wrap;
-  - the retirement entry is written only after verifying that the snapshot covers every entry, and every document of the epoch is re-wrapped;
+  - the retirement entry is written only after verifying that the snapshot covers every entry of the epoch, document entries and their CEKs included;
   - until then, nothing changes for anyone.
 - **What other devices see:** before the retirement entry, the old snapshot and epoch, both valid. After it, the new snapshot.
   - The index switches at one checkpoint `seq`. A device older than that takes the new snapshot, as the index's tombstone checkpoint already works.
-  - Documents switch one by one: each re-wrap is its own idempotent step.
-  - **A document's key epoch is a new field.** It isn't the document's existing `epoch`, which counts "Clear history". Reusing that would make a key move look to clients like a cleared history.
+  - Documents switch with the index, at the same checkpoint. Their CEK wraps are in their index entries, so the document object and its history are untouched, and the server sees no per-document retirement.
+  - **A document's key epoch is a new field in its sealed index entry.** It isn't the document object's existing `epoch`, which counts "Clear history". Reusing that would make a key move look to clients like a cleared history.
   - **An op sealed under a retired epoch is refused:** epochs change only with chain entries, and §4.1's rule already refuses ops bound to an old head. The writing device rebases it under the current epoch.
   - Devices keep the old secret locally until they've processed the retirement.
 - **Recovery:**
@@ -513,7 +514,7 @@ William asked for this review because a mistake found later, with millions of fi
 | Add a device | one wrap per live epoch (at most 10) | the cap |
 | Remove a device | a new epoch: one wrap per remaining device, plus recovery; the inbox key rotates | devices |
 | Replace the recovery code | one wrap per live epoch | the cap |
-| Retire an epoch | one re-sealed index snapshot plus a re-wrap per document; no blob bytes | index size (§11.4) |
+| Retire an epoch | one re-sealed index snapshot (document CEKs included); no blob bytes | index size (§11.4) |
 | Rotate a suite | the next epoch; old data as it is | — |
 | Full re-encryption (on request only) | download, decrypt, re-encrypt and upload every byte: O(data size), and roughly double the storage until the old copies are released | the person's choice; it runs throttled and resumable, one blob at a time |
 
@@ -525,6 +526,8 @@ William asked for this review because a mistake found later, with millions of fi
   - The snapshot's root is bound in the checkpoint (§4.1). A change re-seals only the pages it touches, plus their path to the root.
   - A new device fetches the root and the pages it needs first, so a phone needn't fetch every page.
   - Page sizes are padded to the page size, so pages don't reveal folder sizes.
+  - **Superseded pages are freed** by checkpoint-ordered GC (§3.3), so index churn doesn't grow the quota.
+  - **A snapshot cadence:** a new snapshot is written after 10,000 ops or 4 MiB of sealed log since the last one, or at a retirement. Small edits ride the sealed op log, and don't each re-seal 1 MiB pages.
   - The paged index is designed in the sealed-ops PR. Its first tests include a million entries.
 - **The local index:** IndexedDB at a million entries is workable on desktops. Phones keep a partial index, through the same pages.
 
@@ -538,7 +541,7 @@ William asked for this review because a mistake found later, with millions of fi
 | Chunk index | u32 of 1 MiB chunks: 4 PiB per file | ample |
 | Chunk format | whole-file compression, then fixed chunks: reading part of a large file decompresses from its start | a later codec version can add restart points, through §11.1 |
 | Sequence numbers (`seq`, `dseq`) | safe integers, 2^53 | ample |
-| Signed structure size | canonical bytes up to 64 KiB per signed object (the fleet rule) | op batches stay below it; index pages and snapshots are blobs, not signed objects |
+| Signed structure size | canonical bytes up to 64 KiB per signed object (the fleet rule) | **each sealed op is signed on its own**, as §4's table has it; a message of up to 500 ops is transport, not one signed object. Index pages and snapshots are blobs, not signed objects |
 | Log growth | the log root is a running hash, and ops before the latest snapshot are dropped | bounded by snapshot frequency |
 | Live epochs | soft cap 10 (§11.2) | bounded |
 | Wrapper ids, addresses, keys | 128 and 256 bits | ample |
