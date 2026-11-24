@@ -28,6 +28,7 @@ import { createdRunner } from "../workspace/agent-made";
 import { runVerbsFor } from "../workspace/run-holder";
 import { agentRunsFor } from "../workspace/agent-runs";
 import type { PageRun } from "../workspace/run-verbs";
+import type { SpaceHost } from "../workspace/space3d";
 import { createPermissions } from "../notebook/permissions.js";
 import * as gitBranches from "../workspace/git-branch";
 import { openReviewDialog, showWhenBranches } from "../workspace/review/open-dialog";
@@ -57,6 +58,10 @@ void mountVersionStamp(document.getElementById("sbversion"));
 declare const __SB_LATEX__: boolean | undefined;
 declare const __SB_LATEX_HOSTS__: string[];
 const LATEX_URL = new URL("../sagebrush-latex.js", import.meta.url).href;
+// (the 3D view, in builds that have it and on its listed hosts, matched exactly: web/build.ts's SPACE_DEFINE, DEV only for
+//  now; its code is a chunk of its own, fetched when a .space.json is shown)
+declare const __SB_SPACE__: boolean | undefined;
+declare const __SB_SPACE_HOSTS__: string[];
 
 const STORE = "sagebrush-agents-preview-v1";
 // (the log mirror's cursors, by conversation: local and non-secret, M2)
@@ -785,6 +790,19 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
     let json: string | null = null;
     void ws.read(path).then((r) => { json = JSON.stringify(r.content, null, 2); }, () => {});
     h.copy = () => json ?? src.textContent ?? "";
+    keepFocus();
+    return;
+  }
+  // (a .space.json, where this build and host offer the 3D view: the viewer in a frame, following the file as the agent
+  //  writes it, and the person's selection written back to it; web/workspace/space3d.ts's mountSpace)
+  if (__SB_SPACE__ && a.path && workspace && __SB_SPACE_HOSTS__.includes(location.hostname) && /\.space\.json$/i.test(a.path)) {
+    const ws = workspace, path = a.path;
+    let m: SpaceHost | null = null, gone = false;
+    h.copy = () => m?.copy() ?? "";
+    h.dispose = async () => { gone = true; await m?.dispose(); };
+    void (import(new URL("../sagebrush-space3d.js", import.meta.url).href) as Promise<typeof import("../workspace/space3d")>).then(
+      (mod) => { if (!gone) m = mod.mountSpace(ws, path, h.el); },
+      (e) => { if (!gone) h.el.replaceChildren(`Couldn't load the 3D view: ${String(e?.message ?? e)}`); });
     keepFocus();
     return;
   }
