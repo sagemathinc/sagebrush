@@ -991,7 +991,7 @@ class Picture {
       "";
     // (the picture's size, UTF-8 bytes, from its parts before they are joined)
     const size = utf8Len(head) + (defs ? 13 + utf8Len(defs) : 0) + utf8Len(body) + 6 + utf8Len(texts) + 7;
-    if (size > TIKZ_LIMITS.SVG_BYTES) fail("a picture over " + TIKZ_LIMITS.SVG_BYTES / 2 ** 20 + " MiB of SVG");
+    if (size > TIKZ_LIMITS.SVG_BYTES) fail("a picture over " + TIKZ_LIMITS.SVG_BYTES / 2 ** 20 + " MiB of rendered output");
     const out = head + (defs ? "<defs>" + defs + "</defs>" : "") + body + "</svg>" + texts + "</span>";
     return out;
   }

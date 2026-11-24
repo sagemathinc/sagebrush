@@ -391,7 +391,7 @@ section("bounds", () => {
   check("scope-depth-exact", sd[0].why === null && /^scopes inside scopes more than 32 deep$/.test(sd[1].why) && sd.every((g) => g.ms <= 1500), sd);
   // the SVG's own cap, which the others keep a real picture under: met with the cap lowered for this row
   const sv = [guarded("\\foreach \\x in {1,...,10} \\draw (0,0) -- (\\x,1);", { SVG_BYTES: 2000 }), guarded("\\foreach \\x in {1,...,200} \\draw (0,0) -- (\\x,1);", { SVG_BYTES: 2000 })];
-  check("svg-cap", sv[0].why === null && /^a picture over .* MiB of SVG$/.test(sv[1].why), sv);
+  check("svg-cap", sv[0].why === null && /^a picture over .* MiB of rendered output$/.test(sv[1].why), sv);
   check("float-loops-end", fl.every((g) => g.why === null && g.ms <= 1500), fl);
   // an item's $ is text, not a replacement pattern ($& would be the variable itself)
   check("foreach-item-literal", named("\\foreach \\c in {$&} {\\draw[\\c] (0,0) -- (1,0);}") === "an option the preview doesn't draw: $&", named("\\foreach \\c in {$&} {\\draw[\\c] (0,0) -- (1,0);}"));
