@@ -720,7 +720,15 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
 - **Only the owner writes a document.** The access list's editors and viewers, planned for live collaboration, are dropped: another person gets an encrypted copy, and proposes changes back (design/workspace-files.md §7.9).
 - **Outputs** aren't synced (William, Oct 26), so §4.8's outputs map and the `outputs` message aren't built.
 
-**What the server still sees** is listed in e2e-encryption.md §4: the account hash, devices, sizes and timing, each document's kind and patch graph, and blob equality within one account. **The limits,** said plainly in e2e-encryption.md §8: a malicious server can withhold or roll back data, though it can't forge or read it; and a page served by a compromised origin can use the keys while it is open.
+**What the server still sees** is listed in e2e-encryption.md §4: the account hash and device ids, sizes, timing and access patterns, each document's kind and patch graph (ids, parents, ordering), blob equality within one account, which shares exist between which accounts, and each account's public keys and key chain.
+
+**The limits,** said plainly in e2e-encryption.md §8:
+- a malicious server can omit, delay or roll back data, or show devices different histories, though it can't forge or read it;
+- a page served by a compromised or compelled origin can use the keys while it is open;
+- another person's keys are trusted at first use, with a loud warning if they change, so a substitution at first use isn't caught;
+- **post-quantum:** X25519 isn't, so ciphertext kept today could be opened by a future quantum computer. A hybrid suite comes in a later epoch, through crypto agility (e2e-encryption.md §11.1), not in the first version.
+
+**No migration:** sync is DEV-only, so DEV's synced data is wiped and its devices re-enrolled at the cutover. Plaintext data is never converted.
 
 ## 11. The flag, and what is deployed
 

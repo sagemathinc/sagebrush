@@ -63,7 +63,7 @@ With sync on, your notebooks and data files sync between your own browsers and d
 
 **Decided, before sync opens to everyone:** sync, the relay to your own computers, and agents' conversation logs kept on the server become end-to-end encrypted. There will be one mode, with no setting to turn it off:
 
-- **Only your devices hold the keys.** The server stores what they send, but can't read your files, notebooks or their names. It still sees how much you store, when your devices sync, and which device sent what.
+- **Only your devices hold the keys.** The server stores what they send, but can't read your files, notebooks or their names. It still sees how much you store, when your devices sync, which device sent what, and whom you share with.
 - **A recovery code,** shown once when you set sync up, is the only way back in without one of your devices. Nobody stores it: not Sagebrush, and not your devices. **If you lose every device and the recovery code, your synced data is gone,** and nobody can recover it, not Sagebrush and not support.
 - **A browser can lose its keys** when its site data is cleared. It then asks to be set up again, from another of your devices or with the recovery code.
 - **Removing a lost device** stops it reading anything synced afterwards. It can't make it forget what it already had.

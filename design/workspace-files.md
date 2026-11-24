@@ -469,7 +469,11 @@ It is made of objects that each serve one account or one document, so it grows b
   - **Only the person's devices hold the keys.** The server stores and orders ciphertext. It can't read paths, names or content, though it still sees metadata: sizes, timing, and which device wrote what (e2e-encryption.md §4).
   - **The cost, said plainly:** if every device and the recovery code are lost, the data is gone. Nobody can recover it, not Sagebrush, not CoCalc, not support (e2e-encryption.md §1).
   - **What made the switch cheap:** the server already treats patches, snapshots and file bytes as opaque payloads in an envelope, and names blobs in one function, which now keys them with the account's secret instead of a plain SHA-256.
-  - **The exceptions are explicit,** and the product names them when they apply: publishing publicly (design/sharing.md), a support bundle the person chooses to send, and class work launched from a school's LMS (e2e-encryption.md §0 and §5.2).
+  - **The exceptions are explicit,** and the product names them when they apply, each with its own threat model (e2e-encryption.md §8):
+    - publishing publicly (design/sharing.md): anyone can read what is published;
+    - a support bundle the person chooses to send, to a per-ticket key;
+    - class work launched from a school's LMS, in a class store the server can read (e2e-encryption.md §5.2). No class-store code is built before its readers and retention are decided, and its launch-replay and isolation gates are in place.
+  - **Later, not in the first version:** a post-quantum suite, added in a new epoch through crypto agility (e2e-encryption.md §11.1).
 - **Deleting:**
   - **"Delete my synced data"** removes everything of the account's from the server, by the same path as the purge in design/sharing.md "Deleting".
   - Turning sync off on one device leaves the server copy and the device's copy each in place.
@@ -532,6 +536,7 @@ The service scales by adding objects. Its limits per object, from Cloudflare's p
 
 **Sending a copy:**
 - The sender shares a snapshot of a file or folder with a person. It's an encrypted copy for that recipient: only their devices can open it.
+- The recipient's public key is trusted at first use, with its fingerprint shown. A later change is a loud warning that can't be clicked through without comparing fingerprints. This can't catch a substitution at first use (e2e-encryption.md §5).
 - In the recipient's workspace it appears under **Shared with you**, alongside read-only collections (design/sharing.md). **Copy to my workspace** imports it under their own keys, all in their browser.
 - A **link share** keeps its key in the URL's fragment, which browsers never send to the server. Anyone who has the link can open it, so revoking it stops future downloads only.
 - A newer snapshot of the same files is a new version of the share, chained to the last one.
