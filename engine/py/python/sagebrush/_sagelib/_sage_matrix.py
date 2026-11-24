@@ -4434,8 +4434,11 @@ def _cc_sqrt(z):
         import _sage_real
         return _sage_real._cc_from_mp(_sage_real._cc_mp()(z).sqrt())
     if y == 0:
-        # (Sage's branch on the real line: sqrt(-0.0) is -0.0)
-        return ComplexNumber(math.sqrt(x), 0.0) if x >= 0 else ComplexNumber(0.0, math.sqrt(-x))
+        # (Sage's branch on the real line: sqrt(-0.0) is -0.0, and a NaN x
+        # is NaN with an imaginary part +0.0, MPFR's sign test failing)
+        if x >= 0 or x != x:
+            return ComplexNumber(math.sqrt(x), 0.0)
+        return ComplexNumber(0.0, math.sqrt(-x))
     avoid = x < 0 and abs(y) < abs(x)
     # (an infinite or NaN part: the same steps in the doubles, whose special
     # values are MPFR's; hypot of an infinity is +infinity, NaN or not)
@@ -4667,6 +4670,22 @@ class ComplexNumber(complex):
         import _sage_real
         import _sage_lang
         return _sage_lang._rr_from_mp(_sage_real._cc_mp()(z).abs())
+
+    def sqrt(self, all=False):
+        """The principal square root, as Sage's: an exact 0 real part on the
+        negative real axis; with all, both roots, [r, -r] (only [0] for 0).
+
+        EXAMPLES::
+
+            sage: CC(-4, 0).sqrt(), CC(3, 4).sqrt()
+            (2.00000000000000*I, 2.00000000000000 + 1.00000000000000*I)
+            sage: CC(-4, 0).sqrt(all=True), CC(0).sqrt(all=True)
+            ([2.00000000000000*I, -2.00000000000000*I], [0.000000000000000])
+        """
+        r = _cc_sqrt(self)
+        if not all:
+            return r
+        return [r] if r == 0 else [r, -r]
 
     def log(self, base=None):
         """The principal logarithm, log|z| + arg(z) I with -pi < arg(z) <= pi

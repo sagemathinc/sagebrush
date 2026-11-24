@@ -87,3 +87,15 @@ rows = [
 for a, b in rows:
     v = sqrt(CC(a, b))
     print(float(v.real()).hex(), float(v.imag()).hex(), "|", v)
+
+# NaN on the real line: NaN with an imaginary part +0.0, either sign of 0
+for b in (0.0, -0.0):
+    v = sqrt(CC(float("nan"), b))
+    print(float(v.real()).hex(), float(v.imag()).hex(), "|", v)
+
+# the method, and both roots with all=True: [r, -r], or [0] for 0
+def h(v):
+    return float(v.real()).hex() + " " + float(v.imag()).hex()
+for a, b in [(-4.0, 0.0), (0.0, 0.0), (-0.0, 0.0), (3.0, 4.0), (0.0, -2.0), (float("nan"), 0.0), (float("nan"), -0.0), (float("inf"), 0.0), (-3.0, -4.0), (2.0^1023, 2.0^1023)]:
+    z = CC(a, b)
+    print(h(z.sqrt()), "|", [h(t) for t in z.sqrt(all=True)], "|", z.sqrt(all=True))
