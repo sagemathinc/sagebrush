@@ -3648,7 +3648,15 @@ const texEmbedded = (() => { const q = new URLSearchParams(location.search); ret
 const latexHere = typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && latexHereFor(location.hostname, desktopApp());
 // (the editor's Run sandbox and Share on this page, for latexBoot and the app self-test's mount alike: no Share on the
 //  CLI's page or in the app, which can't publish (the editor's Share says why); no sandbox in the app, RUNNER)
-const texSandbox = () => (RUNNER ? { WorkerKernel, RunnerWorker } : null);
+// (the desktop app has no runner frame: its LaTeX Run's interpreter is the app's engine, as its notebooks' is (#1540),
+// the page's own worker where the engine doesn't start; Run tells it first that it may change no file (run-core.mjs),
+// as it tells the runner's)
+class AppTexWorker {
+  constructor(_runnerUrl, { name = "" } = {}) {
+    return new NativeWorker(TAURI.core, { name, fallback: () => new Worker("sagebrush-worker.js", { type: "module", name }) });
+  }
+}
+const texSandbox = () => (RUNNER ? { WorkerKernel, RunnerWorker } : desktopApp() ? { WorkerKernel, RunnerWorker: AppTexWorker } : null);
 const texShare = LOCAL || TAURI ? null : (doc) => void openTalkShare(doc);
 // (the app has no share server at its own origin, so a share couldn't be checked or made there: File ▸ Share… is
 //  disabled, saying where to share instead, the header's Share follows it, and Share folder… and Your shares… aren't
