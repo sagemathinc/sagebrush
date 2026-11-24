@@ -63,6 +63,12 @@ const OPS = [":->", "@@", "+:=", "-:=", "*:=", "/:=", "^:=", ":=", "..", "->", "
 const OPA_KW = new Set(["cat", "div", "mod", "join", "meet", "diff", "sdiff", "and", "or", "xor"]);
 const OPAS = ["+:=", "-:=", "*:=", "/:=", "^:=", ...[...OPA_KW].map((k) => k + ":=")];
 
+// After a literal zero denominator (Parser.zeroDenominator): the operators that start or bind an operand of their
+// own, which Magma doesn't take as continuing the expression, and the keywords it does (Magma 2.18-5, each checked)
+const ZERO_NOT_AFTER = new Set(["(", "[", "{", "{@", "{*", ".", "$", "$$", "#", "!", "@", "@@", "~", "&", "`", "\\"]);
+const ZERO_KW_AFTER = new Set(("eq ne lt le gt ge in notin subset notsubset cmpeq cmpne div mod and or xor join meet diff sdiff " +
+  "then do to by select else where").split(" "));
+
 export function lex(src: string): Tok[] {
   const out: Tok[] = [];
   let i = 0, line = 1, col = 1;
@@ -1473,10 +1479,15 @@ class Parser {
       while (op(T[at], "(")) at++;
       return { zero: /^0+$/.test(n.v), at: T[at] };
     };
-    // (Magma reads one token past the zero first: one that can't follow it, an identifier, a number, a string, . or
-    // $, is its bad syntax there instead, as in 1/0 x and 1/0X5, which is 0 and X5)
-    const ahead = this.toks[b1];
-    if (["id", "num", "real", "str", "bad"].includes(ahead.t) || (ahead.t === "op" && [".", "$", "$$"].includes(ahead.v))) return;
+    // (Magma reads one token past the zero first, and refuses only if that token can continue the expression: an
+    // operator, a closer or separator, or one of the keywords below (Magma 2.18-5, each checked); anything else,
+    // as in 1/0 x, 1/0 true, 1/0 is 1 and 1/0X5 (which is 0 and X5), is its bad syntax there instead.  The
+    // operators that start or bind an operand of their own, ( [ { . $ # ! @ ~ ::, aren't followers here)
+    // (= is a follower, as Magma reads 1/0 = 1; :: is two :s here)
+    const ahead = this.toks[b1], after = this.toks[b1 + 1];
+    const follows = ahead.t === "op" ? !ZERO_NOT_AFTER.has(ahead.v) : ahead.t === "kw" && ZERO_KW_AFTER.has(ahead.v);
+    const colons = ahead.v === ":" && after?.v === ":" && after.line === ahead.line && after.col === ahead.col + 1;
+    if (!follows || colons) return;
     const a = literal(a0, a1), b = literal(b0, b1);
     if (a && b?.zero) throw new MagmaSyntaxError("Illegal zero denominator", b.at.line, b.at.col, true);
   }
