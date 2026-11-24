@@ -174,3 +174,15 @@ Feature names must be in the same order as they were in fit.
 Feature names unseen at fit time:
 - c
 
+== force-writeable
+(True, False, False, [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]])
+== force-writeable-off
+(False, True)
+== force-writeable-no-copy
+True
+== force-writeable-copy-too
+(True, False)
+== force-writeable-xy
+(True, False)
+== force-writeable-frame
+(True, [[1.0], [2.0]])
