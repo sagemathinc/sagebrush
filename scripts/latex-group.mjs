@@ -104,10 +104,11 @@ export const LATEX_LAZY = {
 // (252,517 raw / 84,516 gzip: Nov 21 2026, the editor's own list of examples gone (the gallery's panel the only one):
 //  252,453 / 84,452 measured on the shipped build of its merge with master 68280840, with bun 1.4.4 and node 24.21.0,
 //  + 64)
-// (253,200 raw / 84,814 gzip: Nov 24 2026, amsart's \title[short] and \author[short], a bibliography's label column
-//  as wide as its widest label, a \cite note typeset: 253,136 / 84,750 measured on the shipped build of the branch from
-//  master 962f11b1, with bun 1.4.4 and node 24.21.0, + 64)
-export const LATEX_CAPS = { raw: 253200, gzip: 84814 };
+// (255,460 raw / 85,476 gzip: Nov 24 2026, amsart's front matter (every author, the abstract after the title, the first
+//  page's notes, the addresses at the end, \title[short] and \author[short]), a bibliography's label column as wide as its
+//  widest label, a \cite note typeset: 255,396 / 85,412 measured on the shipped build of its merge with master 48dd0389,
+//  with bun 1.4.4 and node 24.21.0, + 64)
+export const LATEX_CAPS = { raw: 255460, gzip: 85476 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
