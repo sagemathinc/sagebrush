@@ -3042,7 +3042,7 @@ def _ech_bin_call(rowsrc, base, r, c, p, want_rows):
     failure RuntimeError, a domain failure ValueError; a Stop is
     KeyboardInterrupt, never retried."""
     pieces = _ech_pack(rowsrc, r, c, p, 3 if want_rows else 0)
-    from sagebrush._engine import call_bin
+    from _sagebrush_lib._engine import call_bin
     try:
         reply = call_bin(pieces)
     except TypeError:
