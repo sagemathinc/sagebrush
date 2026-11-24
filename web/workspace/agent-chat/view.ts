@@ -1,7 +1,7 @@
 // The agents chat's turn view (web/agents, and the chat panel to come): a person's message and an agent's turn as DOM
 // nodes, its tool calls, permission prompts and artifact cards, as the Agents page has always drawn them. What a click
 // does (answering a prompt, opening an artifact) and how Markdown is rendered are the caller's, passed in.
-import { ATTENTION_STATES, TOOL_STATUSES, count, langOf, own, type Artifact, type Attention, type Thread, type ToolCall, type Turn, type UserEntry } from "./events";
+import { ATTENTION_STATES, TOOL_STATUSES, count, errorLine, langOf, own, type Artifact, type Attention, type Thread, type ToolCall, type Turn, type UserEntry } from "./events";
 import { MIRROR_COPY, present, reasonText, type InertBlock, type InertPart, type Section } from "./mirror";
 
 // (a class name from a known set only, whatever the thread holds: a stored thread from before apply checked it included)
@@ -71,7 +71,7 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
       if (a) parts.push(`<button class="artifact-card" data-artifact="${esc(a.id)}"><span class="ai">${artifactIcon(a)}</span><span><b>${esc(a.title)}</b><small>${artifactLabel(a)} · click to open</small></span></button>`);
     }
   }
-  if (turn.error) parts.push(`<div class="turn-error">Error: ${esc(turn.error.message)}</div>`);
+  if (turn.error) parts.push(`<div class="turn-error">${esc(errorLine(turn.error.code, turn.error.message))}</div>`);
   const status =
     turn.outcome === "interrupted"
       ? `<div class="status">Interrupted</div>`
@@ -169,7 +169,7 @@ function inertPart(p: InertPart): HTMLElement {
   }
   if (p.k === "approval") return el("div", "mirror-approval", `⚠ ${p.title ?? p.kind}: ${p.state === "approved" ? "Allowed" : p.state === "denied" ? "Denied" : "No answer"}`);
   if (p.k === "artifact") return el("div", "mirror-artifact", `${p.title ?? ARTIFACT_WORD[p.kind] ?? "Artifact"} · ${ARTIFACT_WORD[p.kind] ?? "Artifact"}`);
-  return el("div", "turn-error", `Error: ${p.code}`);
+  return el("div", "turn-error", errorLine(p.code, p.code));
 }
 
 function inertBlock(b: InertBlock, agent: string): HTMLElement {
