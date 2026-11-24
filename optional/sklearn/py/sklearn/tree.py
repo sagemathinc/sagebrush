@@ -1,5 +1,5 @@
 """Decision trees, from scikit-learn 1.9.1's sklearn/tree/_classes.py: DecisionTreeClassifier and
-DecisionTreeRegressor, with the same trees as scikit-learn's to the bit. What scikit-learn's _fit decides in
+DecisionTreeRegressor, on dense X and dense targets. What scikit-learn's _fit decides in
 Python (the validated input, the encoded classes, the class weights, the resolved parameters and the splitter's
 seed) is decided here, on Sagebrush's numpy; the tree is grown by Sagebrush's decision-tree kernel
 (sagebrush.skltree), a line-by-line port of scikit-learn's criteria, best splitter and depth-first builder.

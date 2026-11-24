@@ -64,7 +64,7 @@
     {
       "case": "tree.splitter-random",
       "printed": "!! NotImplementedError: sklearn.tree.DecisionTreeClassifier(splitter='random') is not in Sagebrush's sklearn 0.x subset (only the best splitter is)",
-      "reason": "the random splitter (extra trees' thresholds) isn't ported yet; splitter='best', the default, grows scikit-learn's trees to the bit"
+      "reason": "the random splitter (extra trees' thresholds) isn't ported yet; splitter='best', the default, is (the oracle tests compare all nine node arrays of 66 best-splitter trees byte for byte with scikit-learn 1.9.1; all match)"
     },
     {
       "case": "tree.max_leaf_nodes",
@@ -114,7 +114,7 @@
     {
       "case": "tree.tree-class",
       "printed": "'sklearn.tree'",
-      "reason": "tree_ is a Python class in sklearn.tree with the same attributes and methods (scikit-learn's is the compiled sklearn.tree._tree.Tree); its arrays are separate arrays rather than views of one structured array, which Sagebrush's numpy doesn't have"
+      "reason": "tree_ is a Python class in sklearn.tree (scikit-learn's is the compiled sklearn.tree._tree.Tree) with these of its attributes and methods: node_count, capacity, max_depth, n_leaves, n_features, n_outputs, n_classes, max_n_classes, the nine node arrays, apply, predict and compute_feature_importances; decision_path is refused (tree.decision_path). Its arrays are separate arrays rather than views of one structured array, which Sagebrush's numpy doesn't have"
     }
   ],
   "tolerances": [
