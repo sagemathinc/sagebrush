@@ -2313,14 +2313,14 @@ test("perms and xcorr are made within their limits, and refused past them", () =
   const { spawnSync } = require("node:child_process");
   const tryIt = (e: string) => `try, x = ${e}; disp(mat2str(size(x))), catch err, m = err.message; disp(['refused: ' m(1:min(numel(m), 24))]), end`;
   const code = [
-    tryIt("perms(1:8)"), tryIt("perms(int8(1:9))"), tryIt("perms('abcdefghi')"), tryIt("perms(1:9)"), tryIt("perms(1:1e6)"),
+    tryIt("perms(1:8)"), tryIt("perms(int8(1:9))"), tryIt("perms('abcdefghi')"), tryIt("perms(1:9)"), tryIt("perms(1:1e5)"),
     tryIt("xcorr([1 2], 499999)"), tryIt("xcorr([1 2], 500000)"), tryIt("xcorr([], [], 1e9)"), tryIt("xcorr(ones(1, 3000))"), tryIt("xcorr(ones(1, 4000))"),
   ].join("\n");
   const r = spawnSync(process.execPath, [MATLAB_HEAP, require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
     { encoding: "utf8", timeout: 120000 });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.stdout.split("\n").map((s: string) => s.trim()).filter((s: string) => s !== ""), [
-    "[40320 8]", "[362880 9]", "refused: perms of 9 elements is n", "refused: perms of 9 elements is n", "refused: perms of 1000000 element",
+    "[40320 8]", "[362880 9]", "refused: perms of 9 elements is n", "refused: perms of 9 elements is n", "refused: perms of 100000 elements",
     "[1 999999]", "refused: xcorr at 1000001 lags is", "refused: xcorr of empty vectors i", "[1 5999]", "refused: xcorr of vectors of 4000"]);
 });
 

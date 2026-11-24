@@ -93,3 +93,11 @@ test("the preference's boundary, driven directly so nothing is allocated: a refu
   assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
   assert.equal(lines.length, 5, r.stdout);
 });
+
+test("arrays admitted against the host's memory before they are made: constructors, colon, growth; stand-in hosts, nothing allocated (test/matlab_host_admit_cases.py; #1956, #1960)", () => {
+  const r = spawnSync(process.execPath, [cli, join(__dirname, "..", "..", "test", "matlab_host_admit_cases.py")], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const lines = r.stdout.trim().split("\n");
+  assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
+  assert.equal(lines.length, 7, r.stdout);
+});

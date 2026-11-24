@@ -1,6 +1,6 @@
 # MATLAB mode's cell arrays admitted before they are made (#1783): _matlab._admit_cells against a stand-in
 # capacity record, so nothing large is ever allocated.  Measured: the Ledger's allowance; unmeasured (no
-# memory figure, or one without the JS domains): the fixed bound _CELL_UNMEASURED_MAX_BYTES; below the small-need
+# memory figure, or one without the JS domains): the fixed bound _UNMEASURED_MAX_BYTES; below the small-need
 # floor: no record read at all.  Run by test/matlab-index-errors.test.ts; each check prints one "ok ..." line.
 import sys
 import types
@@ -50,10 +50,10 @@ ok("below the small-need floor nothing is read or refused")
 # -- unmeasured hosts: no figure, or a figure without the JS domains
 for rec, label in (({"bytes": None}, "no memory figure"), ({"bytes": 8 << 30, "domains": ["host"]}, "a figure without the JS domains")):
     cap = stand_in(rec)
-    limit = M._CELL_UNMEASURED_MAX_BYTES // E
+    limit = M._UNMEASURED_MAX_BYTES // E
     assert refused(limit) is None, label
     e = refused(limit + 1)
-    assert e is not None and e.fixed and e.limit_bytes == M._CELL_UNMEASURED_MAX_BYTES and e.need_bytes == (limit + 1) * E, label
+    assert e is not None and e.fixed and e.limit_bytes == M._UNMEASURED_MAX_BYTES and e.need_bytes == (limit + 1) * E, label
     e = refused(2 ** 44)
     assert e is not None and e.need_bytes == 2 ** 44 * E, label
     ok("unmeasured (%s): admitted up to the fixed bound, refused past it" % label)
