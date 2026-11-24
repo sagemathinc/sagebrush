@@ -2761,6 +2761,7 @@
     ],
     "differs": [
       "Does not accept the argument sorted, which NumPy 2.5.1 has (a TypeError).",
+      "With signed zeros in rows that compare equal, unique(axis=k) without return_index keeps the first occurrence's zeros, where NumPy's unstable sort may keep another's; the values compare equal, and counts, inverse and return_index all match.",
       "Checked against NumPy 2.5.1 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",

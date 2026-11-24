@@ -1985,12 +1985,14 @@ def _unique_axis(ar, axis, return_index, return_inverse, return_counts):
 
 
 def unique(ar, return_index=False, return_inverse=False, return_counts=False, axis=None, *, equal_nan=True):
-    if axis is not None and asarray(ar).ndim != 1:
+    if axis is not None:
+        # (the axis checked first, a 1-D array's too, as NumPy's; a 1-D array then takes the plain path)
         ar = asarray(ar)
         ax = _operator.index(axis)
         if not -ar.ndim <= ax < ar.ndim:
             raise IndexError(f"axis {axis} is out of bounds for array of dimension {ar.ndim}")
-        return _unique_axis(ar, ax % ar.ndim, return_index, return_inverse, return_counts)
+        if ar.ndim != 1:
+            return _unique_axis(ar, ax % ar.ndim, return_index, return_inverse, return_counts)
     if not (return_index or return_inverse or return_counts) and asarray(ar).dtype.kind != "c":
         return _np.unique1d(ar)
     a = asarray(ar).ravel()

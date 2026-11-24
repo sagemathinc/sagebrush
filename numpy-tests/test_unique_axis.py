@@ -57,10 +57,28 @@ for ax in (0, 1):
     u, i, v, n = np.unique(big, axis=ax, return_index=True, return_inverse=True, return_counts=True)
     print("big", ax, u.shape, zlib.crc32(np.ascontiguousarray(u).tobytes()), zlib.crc32(i.tobytes()), zlib.crc32(v.tobytes()), zlib.crc32(n.tobytes()))
 
-# an axis out of range: an IndexError (NumPy's AxisError is one) with NumPy's message
-for ax in (2, -3):
+# an axis out of range: an IndexError (NumPy's AxisError is one) with NumPy's message; a 1-d array's axis is
+# checked too, before its plain path, and a 0-d array has no axis at all
+for name, arr, ax in [("2-d", a, 2), ("2-d", a, -3), ("1-d", [3, 1, 3], 1), ("1-d", [3, 1, 3], 2), ("1-d", [3, 1, 3], -2),
+                      ("1-d with extras", np.array([3.0, 1.0]), 1), ("0-d", np.float64(2.0), 0)]:
     try:
-        np.unique(a, axis=ax)
-        print("axis", ax, "no error")
+        r = np.unique(arr, axis=ax, return_counts=name.endswith("extras"))
+        print(name, "axis", ax, "no error", r)
     except IndexError as e:
-        print("axis", ax, "IndexError:", e)
+        print(name, "axis", ax, "IndexError:", e)
+
+# signed zeros in rows that compare equal, past insertion-sort sizes: the distinct rows, counts and inverse are
+# NumPy's; with return_index, the kept rows are NumPy's too (its stable sort). Without return_index NumPy's sort is
+# unstable and may keep another member's zeros: Sagebrush keeps the first occurrence's, a stated divergence, so
+# that line is checked against Sagebrush's own rule (each kept row is the first occurrence's bits) and printed
+# the same under NumPy
+REAL = not hasattr(np, "_np")  # (Sagebrush's numpy has its core module as _np)
+rs = np.random.RandomState(9)
+B = np.round(rs.standard_normal((2000, 2)), 0)
+B[::7, 0] = -0.0
+u = np.unique(B, axis=0)
+ui, idx, inv, cnt = np.unique(B, axis=0, return_index=True, return_inverse=True, return_counts=True)
+print("signed zeros", u.shape, np.array_equal(u, ui), zlib.crc32(idx.tobytes()), zlib.crc32(inv.tobytes()), zlib.crc32(cnt.tobytes()))
+print("signed zeros with return_index: the kept rows' bits", zlib.crc32(np.ascontiguousarray(ui).tobytes()), np.array_equal(np.signbit(ui), np.signbit(B[idx])))
+first = REAL or (np.array_equal(np.signbit(u), np.signbit(B[idx])) and np.array_equal(np.signbit(np.unique(B, axis=0, return_counts=True)[0]), np.signbit(B[idx])))
+print("signed zeros without return_index: each kept row is the first occurrence's (Sagebrush; NumPy may keep another's)", first)
