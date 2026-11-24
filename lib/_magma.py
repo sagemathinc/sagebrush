@@ -615,7 +615,14 @@ def _ctx_enter(R):
     """R, its context entered when it is a permutation group: _coerce_ctx's
     form for an operand evaluated in place (one that binds names, as
     exists(w){ ... } does), which _coerce_after leaves; an error in the
-    operand ends the statement, where _report clears the context."""
+    operand ends the statement, where _report clears the context.
+
+    This relies on an invariant: no code here catches a MagmaError raised
+    while user code is evaluated and goes on within the statement (the
+    catches that don't re-raise are equality helpers, and Magma mode
+    refuses try/catch), so every error ends its statement.  Code that
+    catches one and continues mid-statement must restore _CYCLE_CTX
+    itself."""
     if isinstance(R, (_MSymGroup, _MDihedralGroup)):
         _CYCLE_CTX[0] += 1
     return R
