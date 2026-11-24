@@ -91,6 +91,23 @@ export function lex(src: string): Tok[] {
     if (/[0-9]/.test(c)) {
       let j = i;
       while (j < n && /[0-9]/.test(src[j])) j++;
+      // hexadecimal, 0x1f (as Magma 2.18-5 reads it: ONE digit, any digit, which is ignored, then a lower-case x and
+      // hexadecimal digits of either case; 1x5 is 5 too): the integer, in decimal; digits and an x that aren't one
+      // (0x, 0xg, 10x5, 01x5) are Magma's "Invalid hexadecimal integer", at the x
+      if (src[j] === "x") {
+        let k = j + 1;
+        while (k < n && /[0-9a-fA-F]/.test(src[k])) k++;
+        if (j === i + 1 && k > j + 1) {
+          out.push({ t: "num", v: BigInt("0x" + src.slice(j + 1, k)).toString(), line: L, col: C });
+          adv(k - i);
+          continue;
+        }
+        out.push({ t: "num", v: src.slice(i, j).replace(/^0+(?=\d)/, ""), line: L, col: C });
+        adv(j - i);
+        out.push({ t: "bad", v: "x", line, col, msg: "Invalid hexadecimal integer" });
+        adv(1);
+        continue;
+      }
       let real = false;
       // a real, as Magma 2.18-5 reads it: 1.5, and 1. with no digits after the point (12., 1.e5), but not 1..5 (a
       // range); then an exponent, e or E, which must have digits after its sign (1e5, 1.5E-2): else Magma's "Real
@@ -114,7 +131,8 @@ export function lex(src: string): Tok[] {
         j = k;
         while (j < n && /[0-9]/.test(src[j])) j++;
       }
-      out.push({ t: real ? "real" : "num", v: realText(src.slice(i, j), real), line: L, col: C });
+      // (an integer without its leading zeros: 007 is 7 in Magma, and not a Python literal)
+      out.push({ t: real ? "real" : "num", v: real ? realText(src.slice(i, j), true) : src.slice(i, j).replace(/^0+(?=\d)/, ""), line: L, col: C });
       adv(j - i);
       continue;
     }
@@ -893,7 +911,11 @@ class Parser {
       if (names.length === 1) this.store(names[0], `_m._ref1(${tmp})`);
       else names.forEach((r, k) => this.store(r, `_m._refk(${tmp}, ${k})`));
     } else {
-      this.emit(`_m._show_values(${this.all(e.code)})`);
+      // (a call that is the whole statement, f(3);, names its bad argument types after the application, '@', as
+      // Magma 2.18-5 does: _m._call_bare)
+      const whole = this.calls.get(e.code);
+      const code = whole?.startsWith("_m._call(") ? "_m._call_bare(" + whole.slice("_m._call(".length) : this.all(e.code);
+      this.emit(`_m._show_values(${code})`);
     }
   }
 
@@ -1525,8 +1547,10 @@ class Parser {
   }
 
   postfix(): string {
-    const head = this.peek();
+    const head = this.peek(), h0 = this.i;
     let e = this.primary();
+    // (the callee just a name, its one token: in a function body its read is a placeholder, or the function's own)
+    const oneName = head.t === "id" && this.i === h0 + 1;
     // (a call of an intrinsic that says its errors at its call's "(", by
     // its name or through a variable or parameter that may hold one:
     // _m._call tells the runtime which call it is, nested or repeated; in a
@@ -1553,7 +1577,10 @@ class Parser {
         // are references (_m._refcall), as AssignNames checks them
         if (a.refs.length) e = `_m._refcall(${e}, [${a.refPos.join(", ")}], ${a.code})`;
         else {
-          const call = located && links === 1 ? `_m._call((${lp.line}, ${lp.col}), ${e}${a.code ? ", " + a.code : ""})` : `${e}(${a.code})`;
+          // (a callee that isn't a name, 2(3), (f)(x), g()(3), goes through _m._call too, which refuses a value
+          // that isn't a function at its "(", as Magma does)
+          const named = oneName && links === 1;
+          const call = (located && links === 1) || !named ? `_m._call((${lp.line}, ${lp.col}), ${e}${a.code ? ", " + a.code : ""})` : `${e}(${a.code})`;
           e = `_m._first(${call})`;
           this.calls.set(e, call);
         }

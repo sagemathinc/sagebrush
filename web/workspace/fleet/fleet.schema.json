@@ -1,0 +1,1722 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sagebrush.org/schema/fleet/1",
+  "title": "Sagebrush fleet protocol v1 (O6/O7 r2.3)",
+  "$comment": "Frozen design: agent-autonomous-schemas.md r2.3, sha256 db905c9d72ba5d4e18620d3267ea9214992d3a82c735289dda4088970dddc7e3. Bodies by type name in $defs (sb.<name>.v1). The browser-session body is O11's and the four audit bodies are daybreak3's: imported by exact revision, absent here until then. Validate with lib/fleet/schema.mjs (closed subset).",
+  "$defs": {
+    "agent_or_all": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/id"
+        },
+        {
+          "const": "all"
+        }
+      ]
+    },
+    "alg": {
+      "const": "ed25519"
+    },
+    "approval": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "approval",
+            "at_ms",
+            "aud",
+            "auth_time_ms",
+            "chain_seq",
+            "fleet",
+            "kind",
+            "not_after_ms",
+            "requester",
+            "subject",
+            "subject_hash"
+          ],
+          "properties": {
+            "fleet": {
+              "$ref": "#/$defs/id"
+            },
+            "aud": {
+              "$ref": "#/$defs/aud"
+            },
+            "approval": {
+              "$ref": "#/$defs/id"
+            },
+            "subject_hash": {
+              "$ref": "#/$defs/b64_32"
+            },
+            "chain_seq": {
+              "$ref": "#/$defs/count"
+            },
+            "at_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "not_after_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "auth_time_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "kind": {
+              "const": "host-pair"
+            },
+            "subject": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "enc_key",
+                "fingerprint",
+                "host",
+                "name",
+                "sign_key"
+              ],
+              "properties": {
+                "host": {
+                  "$ref": "#/$defs/id"
+                },
+                "sign_key": {
+                  "$ref": "#/$defs/b64_32"
+                },
+                "enc_key": {
+                  "$ref": "#/$defs/b64_32"
+                },
+                "fingerprint": {
+                  "$ref": "#/$defs/b64_32"
+                },
+                "name": {
+                  "$ref": "#/$defs/name"
+                }
+              }
+            },
+            "requester": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "pairing"
+              ],
+              "properties": {
+                "pairing": {
+                  "$ref": "#/$defs/id"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "approval",
+            "at_ms",
+            "aud",
+            "auth_time_ms",
+            "chain_seq",
+            "fleet",
+            "gen",
+            "kind",
+            "life",
+            "not_after_ms",
+            "question",
+            "requester",
+            "subject",
+            "subject_hash"
+          ],
+          "properties": {
+            "fleet": {
+              "$ref": "#/$defs/id"
+            },
+            "aud": {
+              "$ref": "#/$defs/aud"
+            },
+            "approval": {
+              "$ref": "#/$defs/id"
+            },
+            "subject_hash": {
+              "$ref": "#/$defs/b64_32"
+            },
+            "chain_seq": {
+              "$ref": "#/$defs/count"
+            },
+            "at_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "not_after_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "auth_time_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "kind": {
+              "const": "spend"
+            },
+            "subject": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent",
+                "amount_cents",
+                "currency",
+                "payee",
+                "purpose_code"
+              ],
+              "properties": {
+                "agent": {
+                  "$ref": "#/$defs/id"
+                },
+                "amount_cents": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "currency": {
+                  "type": "string",
+                  "pattern": "^[A-Z]{3}$"
+                },
+                "purpose_code": {
+                  "$ref": "#/$defs/purpose_code"
+                },
+                "payee": {
+                  "$ref": "#/$defs/payee"
+                }
+              }
+            },
+            "requester": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent",
+                "host"
+              ],
+              "properties": {
+                "host": {
+                  "$ref": "#/$defs/id"
+                },
+                "agent": {
+                  "$ref": "#/$defs/id"
+                }
+              }
+            },
+            "gen": {
+              "$ref": "#/$defs/gen"
+            },
+            "life": {
+              "$ref": "#/$defs/count"
+            },
+            "question": {
+              "$ref": "#/$defs/id"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "approval",
+            "at_ms",
+            "aud",
+            "auth_time_ms",
+            "chain_seq",
+            "fleet",
+            "gen",
+            "kind",
+            "life",
+            "not_after_ms",
+            "question",
+            "requester",
+            "subject",
+            "subject_hash"
+          ],
+          "properties": {
+            "fleet": {
+              "$ref": "#/$defs/id"
+            },
+            "aud": {
+              "$ref": "#/$defs/aud"
+            },
+            "approval": {
+              "$ref": "#/$defs/id"
+            },
+            "subject_hash": {
+              "$ref": "#/$defs/b64_32"
+            },
+            "chain_seq": {
+              "$ref": "#/$defs/count"
+            },
+            "at_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "not_after_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "auth_time_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "kind": {
+              "const": "public-action"
+            },
+            "subject": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "action",
+                "agent",
+                "payload_hash",
+                "target"
+              ],
+              "properties": {
+                "agent": {
+                  "$ref": "#/$defs/id"
+                },
+                "action": {
+                  "$ref": "#/$defs/name"
+                },
+                "target": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "payload_hash": {
+                  "$ref": "#/$defs/b64_32"
+                }
+              }
+            },
+            "requester": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent",
+                "host"
+              ],
+              "properties": {
+                "host": {
+                  "$ref": "#/$defs/id"
+                },
+                "agent": {
+                  "$ref": "#/$defs/id"
+                }
+              }
+            },
+            "gen": {
+              "$ref": "#/$defs/gen"
+            },
+            "life": {
+              "$ref": "#/$defs/count"
+            },
+            "question": {
+              "$ref": "#/$defs/id"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "approval",
+            "at_ms",
+            "aud",
+            "auth_time_ms",
+            "chain_seq",
+            "fleet",
+            "gen",
+            "kind",
+            "life",
+            "not_after_ms",
+            "question",
+            "requester",
+            "subject",
+            "subject_hash"
+          ],
+          "properties": {
+            "fleet": {
+              "$ref": "#/$defs/id"
+            },
+            "aud": {
+              "$ref": "#/$defs/aud"
+            },
+            "approval": {
+              "$ref": "#/$defs/id"
+            },
+            "subject_hash": {
+              "$ref": "#/$defs/b64_32"
+            },
+            "chain_seq": {
+              "$ref": "#/$defs/count"
+            },
+            "at_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "not_after_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "auth_time_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "kind": {
+              "const": "delete-outside"
+            },
+            "subject": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent",
+                "count",
+                "host",
+                "paths_hash"
+              ],
+              "properties": {
+                "agent": {
+                  "$ref": "#/$defs/id"
+                },
+                "host": {
+                  "$ref": "#/$defs/id"
+                },
+                "paths_hash": {
+                  "$ref": "#/$defs/b64_32"
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000
+                }
+              }
+            },
+            "requester": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent",
+                "host"
+              ],
+              "properties": {
+                "host": {
+                  "$ref": "#/$defs/id"
+                },
+                "agent": {
+                  "$ref": "#/$defs/id"
+                }
+              }
+            },
+            "gen": {
+              "$ref": "#/$defs/gen"
+            },
+            "life": {
+              "$ref": "#/$defs/count"
+            },
+            "question": {
+              "$ref": "#/$defs/id"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "approval",
+            "at_ms",
+            "aud",
+            "auth_time_ms",
+            "chain_seq",
+            "fleet",
+            "gen",
+            "kind",
+            "life",
+            "not_after_ms",
+            "question",
+            "requester",
+            "subject",
+            "subject_hash"
+          ],
+          "properties": {
+            "fleet": {
+              "$ref": "#/$defs/id"
+            },
+            "aud": {
+              "$ref": "#/$defs/aud"
+            },
+            "approval": {
+              "$ref": "#/$defs/id"
+            },
+            "subject_hash": {
+              "$ref": "#/$defs/b64_32"
+            },
+            "chain_seq": {
+              "$ref": "#/$defs/count"
+            },
+            "at_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "not_after_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "auth_time_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "kind": {
+              "const": "outward"
+            },
+            "subject": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent",
+                "args_hash",
+                "op"
+              ],
+              "properties": {
+                "agent": {
+                  "$ref": "#/$defs/id"
+                },
+                "op": {
+                  "$ref": "#/$defs/name"
+                },
+                "args_hash": {
+                  "$ref": "#/$defs/b64_32"
+                }
+              }
+            },
+            "requester": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent",
+                "host"
+              ],
+              "properties": {
+                "host": {
+                  "$ref": "#/$defs/id"
+                },
+                "agent": {
+                  "$ref": "#/$defs/id"
+                }
+              }
+            },
+            "gen": {
+              "$ref": "#/$defs/gen"
+            },
+            "life": {
+              "$ref": "#/$defs/count"
+            },
+            "question": {
+              "$ref": "#/$defs/id"
+            }
+          }
+        }
+      ],
+      "$comment": "§4. subject_hash = SHA-256 of canon(subject), checked by the verifier; gen/life/question bind agent-requested approvals."
+    },
+    "aud": {
+      "enum": [
+        "https://sagebrush.space",
+        "https://dev.sagebrush.space"
+      ]
+    },
+    "b64": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]*$",
+      "maxLength": 21868,
+      "$comment": "variable-length base64url (ciphertext); canonical form is checked by the decoder."
+    },
+    "b64_16": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{21}[AQgw]$",
+      "$comment": "16 bytes, canonical base64url (§1.2): 22 characters, the last with zero pad bits."
+    },
+    "b64_32": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+      "$comment": "32 bytes: 43 characters, zero pad bits. Keys and SHA-256 values."
+    },
+    "b64_64": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$",
+      "$comment": "64 bytes: 86 characters, zero pad bits. Signatures."
+    },
+    "cap_plaintext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent",
+        "cap",
+        "gen",
+        "not_after_ms",
+        "token",
+        "v"
+      ],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "token": {
+          "type": "string",
+          "pattern": "^sbc1\\.",
+          "maxLength": 256
+        },
+        "cap": {
+          "$ref": "#/$defs/id"
+        },
+        "agent": {
+          "$ref": "#/$defs/id"
+        },
+        "gen": {
+          "$ref": "#/$defs/gen"
+        },
+        "not_after_ms": {
+          "$ref": "#/$defs/ms"
+        }
+      },
+      "$comment": "§5.2: the sealed capability-mint plaintext, carrying the full token."
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {},
+      "$comment": "config_schema 1 is grader's (host r2 §6.1), imported by exact revision when host r2-final clears. Until then only the empty object passes (§3.2)."
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alg",
+        "id",
+        "key",
+        "name",
+        "tier"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "alg": {
+          "$ref": "#/$defs/alg"
+        },
+        "key": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "name": {
+          "$ref": "#/$defs/device_name"
+        },
+        "tier": {
+          "$ref": "#/$defs/tier"
+        }
+      }
+    },
+    "device-chain": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "at_ms",
+            "aud",
+            "auth_time_ms",
+            "device",
+            "fleet",
+            "op",
+            "prev",
+            "recovery_key",
+            "seq"
+          ],
+          "properties": {
+            "fleet": {
+              "$ref": "#/$defs/id"
+            },
+            "aud": {
+              "$ref": "#/$defs/aud"
+            },
+            "seq": {
+              "$ref": "#/$defs/count"
+            },
+            "prev": {
+              "type": "string",
+              "pattern": "^(|[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])$"
+            },
+            "at_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "auth_time_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "op": {
+              "const": "genesis"
+            },
+            "device": {
+              "$ref": "#/$defs/device"
+            },
+            "recovery_key": {
+              "$ref": "#/$defs/recovery_key"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "at_ms",
+            "aud",
+            "auth_time_ms",
+            "device",
+            "fleet",
+            "op",
+            "prev",
+            "seq"
+          ],
+          "properties": {
+            "fleet": {
+              "$ref": "#/$defs/id"
+            },
+            "aud": {
+              "$ref": "#/$defs/aud"
+            },
+            "seq": {
+              "$ref": "#/$defs/count"
+            },
+            "prev": {
+              "type": "string",
+              "pattern": "^(|[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])$"
+            },
+            "at_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "auth_time_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "op": {
+              "const": "add"
+            },
+            "device": {
+              "$ref": "#/$defs/device"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "at_ms",
+            "aud",
+            "auth_time_ms",
+            "fleet",
+            "op",
+            "prev",
+            "regrants",
+            "remove",
+            "seq"
+          ],
+          "properties": {
+            "fleet": {
+              "$ref": "#/$defs/id"
+            },
+            "aud": {
+              "$ref": "#/$defs/aud"
+            },
+            "seq": {
+              "$ref": "#/$defs/count"
+            },
+            "prev": {
+              "type": "string",
+              "pattern": "^(|[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])$"
+            },
+            "at_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "auth_time_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "op": {
+              "const": "remove"
+            },
+            "remove": {
+              "$ref": "#/$defs/id"
+            },
+            "regrants": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/regrant"
+              },
+              "maxItems": 64
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "at_ms",
+            "aud",
+            "auth_time_ms",
+            "device",
+            "fleet",
+            "op",
+            "prev",
+            "recovery_key",
+            "seq"
+          ],
+          "properties": {
+            "fleet": {
+              "$ref": "#/$defs/id"
+            },
+            "aud": {
+              "$ref": "#/$defs/aud"
+            },
+            "seq": {
+              "$ref": "#/$defs/count"
+            },
+            "prev": {
+              "type": "string",
+              "pattern": "^(|[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])$"
+            },
+            "at_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "auth_time_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "op": {
+              "const": "recover"
+            },
+            "device": {
+              "$ref": "#/$defs/device"
+            },
+            "recovery_key": {
+              "$ref": "#/$defs/recovery_key"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "at_ms",
+            "aud",
+            "auth_time_ms",
+            "fleet",
+            "op",
+            "prev",
+            "recovery_key",
+            "seq"
+          ],
+          "properties": {
+            "fleet": {
+              "$ref": "#/$defs/id"
+            },
+            "aud": {
+              "$ref": "#/$defs/aud"
+            },
+            "seq": {
+              "$ref": "#/$defs/count"
+            },
+            "prev": {
+              "type": "string",
+              "pattern": "^(|[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])$"
+            },
+            "at_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "auth_time_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "op": {
+              "const": "rotate-recovery"
+            },
+            "recovery_key": {
+              "$ref": "#/$defs/recovery_key"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "at_ms",
+            "aud",
+            "auth_time_ms",
+            "fleet",
+            "op",
+            "prev",
+            "seq",
+            "service_key"
+          ],
+          "properties": {
+            "fleet": {
+              "$ref": "#/$defs/id"
+            },
+            "aud": {
+              "$ref": "#/$defs/aud"
+            },
+            "seq": {
+              "$ref": "#/$defs/count"
+            },
+            "prev": {
+              "type": "string",
+              "pattern": "^(|[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])$"
+            },
+            "at_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "auth_time_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "op": {
+              "const": "service-key"
+            },
+            "service_key": {
+              "$ref": "#/$defs/service_key"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "at_ms",
+            "aud",
+            "auth_time_ms",
+            "fleet",
+            "op",
+            "policy",
+            "prev",
+            "seq"
+          ],
+          "properties": {
+            "fleet": {
+              "$ref": "#/$defs/id"
+            },
+            "aud": {
+              "$ref": "#/$defs/aud"
+            },
+            "seq": {
+              "$ref": "#/$defs/count"
+            },
+            "prev": {
+              "type": "string",
+              "pattern": "^(|[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])$"
+            },
+            "at_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "auth_time_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "op": {
+              "const": "policy"
+            },
+            "policy": {
+              "$ref": "#/$defs/policy"
+            }
+          }
+        }
+      ],
+      "$comment": "§2.1. Who may sign each op (tiers, recovery key, the predecessor rule) is checked by the verifier, not the schema."
+    },
+    "device_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "body",
+        "sig",
+        "signer",
+        "type",
+        "v"
+      ],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "type": {
+          "type": "string",
+          "pattern": "^sb\\.[a-z-]+\\.v[0-9]+$"
+        },
+        "signer": {
+          "$ref": "#/$defs/signer"
+        },
+        "body": {
+          "type": "object"
+        },
+        "sig": {
+          "$ref": "#/$defs/b64_64"
+        }
+      }
+    },
+    "gen": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "grant-ack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at_ms",
+        "aud",
+        "fleet",
+        "gen",
+        "host",
+        "narrowed",
+        "restarted"
+      ],
+      "properties": {
+        "fleet": {
+          "$ref": "#/$defs/id"
+        },
+        "aud": {
+          "$ref": "#/$defs/aud"
+        },
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "gen": {
+          "$ref": "#/$defs/gen"
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms"
+        },
+        "narrowed": {
+          "type": "boolean"
+        },
+        "restarted": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "maxItems": 64,
+          "uniqueItems": true
+        }
+      }
+    },
+    "grant_agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent",
+        "broker",
+        "client",
+        "config",
+        "config_schema",
+        "name",
+        "root",
+        "spend_cap_cents",
+        "tags",
+        "workspace"
+      ],
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "client": {
+          "enum": [
+            "claude",
+            "codex"
+          ]
+        },
+        "root": {
+          "type": "boolean"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "workspace": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scope"
+          },
+          "maxItems": 32,
+          "minItems": 1
+        },
+        "broker": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/right"
+          },
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "spend_cap_cents": {
+          "$ref": "#/$defs/count"
+        },
+        "config_schema": {
+          "const": 1
+        },
+        "config": {
+          "$ref": "#/$defs/config"
+        }
+      }
+    },
+    "grant_tag": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "tag"
+      ],
+      "properties": {
+        "tag": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "$ref": "#/$defs/name"
+        }
+      }
+    },
+    "host-cert": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at_ms",
+        "aud",
+        "chain_seq",
+        "enc_key",
+        "fingerprint",
+        "fleet",
+        "host",
+        "name",
+        "sign_key"
+      ],
+      "properties": {
+        "fleet": {
+          "$ref": "#/$defs/id"
+        },
+        "aud": {
+          "$ref": "#/$defs/aud"
+        },
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "sign_key": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "enc_key": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "chain_seq": {
+          "$ref": "#/$defs/count"
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms"
+        }
+      },
+      "$comment": "§3.1. fingerprint is the full SHA-256 value, recomputed by every verifier and refused if it differs."
+    },
+    "host-grant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agents",
+        "at_ms",
+        "aud",
+        "auth_time_ms",
+        "cert",
+        "chain_seq",
+        "fleet",
+        "gen",
+        "host",
+        "not_after_ms",
+        "not_before_ms",
+        "offline",
+        "subscriptions",
+        "tags"
+      ],
+      "properties": {
+        "fleet": {
+          "$ref": "#/$defs/id"
+        },
+        "aud": {
+          "$ref": "#/$defs/aud"
+        },
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "gen": {
+          "$ref": "#/$defs/gen"
+        },
+        "cert": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "chain_seq": {
+          "$ref": "#/$defs/count"
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms"
+        },
+        "not_before_ms": {
+          "$ref": "#/$defs/ms"
+        },
+        "not_after_ms": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ms"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "no_expiry_ack": {
+          "const": true
+        },
+        "auth_time_ms": {
+          "$ref": "#/$defs/ms"
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/grant_agent"
+          },
+          "maxItems": 64
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/grant_tag"
+          },
+          "maxItems": 64
+        },
+        "subscriptions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/subscription"
+          },
+          "maxItems": 16
+        },
+        "offline": {
+          "$ref": "#/$defs/offline"
+        }
+      },
+      "$comment": "§3.2. Cross-field rules (no_expiry_ack exactly when not_after_ms is null, tags and use consistent, uniqueness) are the verifier's."
+    },
+    "host-op": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent",
+        "at_ms",
+        "aud",
+        "chain_seq",
+        "fleet",
+        "gen",
+        "host",
+        "not_after_ms",
+        "op",
+        "op_id"
+      ],
+      "properties": {
+        "fleet": {
+          "$ref": "#/$defs/id"
+        },
+        "aud": {
+          "$ref": "#/$defs/aud"
+        },
+        "op_id": {
+          "$ref": "#/$defs/id"
+        },
+        "op": {
+          "enum": [
+            "pause",
+            "stop",
+            "revoke-caps",
+            "resume",
+            "delete"
+          ]
+        },
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "agent": {
+          "$ref": "#/$defs/agent_or_all"
+        },
+        "gen": {
+          "$ref": "#/$defs/gen"
+        },
+        "chain_seq": {
+          "$ref": "#/$defs/count"
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms"
+        },
+        "not_after_ms": {
+          "$ref": "#/$defs/ms"
+        }
+      }
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z2-7]{25}[aeimquy4]$",
+      "minLength": 26,
+      "maxLength": 26,
+      "$comment": "r2.3 §1.1: 128 random bits and 2 zero bits, lowercase base32. The same grammar as schema/tags.schema.json $defs.id."
+    },
+    "ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+      "minLength": 1,
+      "maxLength": 32,
+      "not": {
+        "enum": [
+          "own",
+          "con",
+          "prn",
+          "aux",
+          "nul",
+          "com1",
+          "com2",
+          "com3",
+          "com4",
+          "com5",
+          "com6",
+          "com7",
+          "com8",
+          "com9",
+          "lpt1",
+          "lpt2",
+          "lpt3",
+          "lpt4",
+          "lpt5",
+          "lpt6",
+          "lpt7",
+          "lpt8",
+          "lpt9"
+        ]
+      },
+      "$comment": "Display names of tags and agents: exactly agent #23's tag-name grammar (§1.1)."
+    },
+    "offline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "horizon_s",
+        "revocation_check_s"
+      ],
+      "properties": {
+        "revocation_check_s": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "horizon_s": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2592000
+        }
+      }
+    },
+    "package_plaintext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issued_ms",
+        "provider",
+        "purpose",
+        "secret",
+        "v"
+      ],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "provider": {
+          "enum": [
+            "claude",
+            "codex"
+          ]
+        },
+        "purpose": {
+          "enum": [
+            "claude-setup-token",
+            "codex-refresh-home",
+            "codex-access-token"
+          ]
+        },
+        "secret": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "issued_ms": {
+          "$ref": "#/$defs/ms"
+        }
+      }
+    },
+    "payee": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "provider",
+            "sagebrush"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/name"
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "require_native_for_widening"
+      ],
+      "properties": {
+        "require_native_for_widening": {
+          "type": "boolean"
+        }
+      }
+    },
+    "purpose_code": {
+      "enum": [
+        "provider-usage",
+        "cloud-compute",
+        "cloud-storage",
+        "other"
+      ],
+      "$comment": "v1 closed list; display strings are in schema/fleet/purpose-codes.json. A new code is a schema change, reviewed."
+    },
+    "recovery_key": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alg",
+        "key"
+      ],
+      "properties": {
+        "alg": {
+          "$ref": "#/$defs/alg"
+        },
+        "key": {
+          "$ref": "#/$defs/b64_32"
+        }
+      }
+    },
+    "regrant": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "gen",
+            "host",
+            "kind",
+            "sha256"
+          ],
+          "properties": {
+            "kind": {
+              "const": "grant"
+            },
+            "host": {
+              "$ref": "#/$defs/id"
+            },
+            "gen": {
+              "$ref": "#/$defs/gen"
+            },
+            "sha256": {
+              "$ref": "#/$defs/b64_32"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "host",
+            "kind",
+            "sha256"
+          ],
+          "properties": {
+            "kind": {
+              "const": "cert"
+            },
+            "host": {
+              "$ref": "#/$defs/id"
+            },
+            "sha256": {
+              "$ref": "#/$defs/b64_32"
+            }
+          }
+        }
+      ]
+    },
+    "revocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at_ms",
+        "aud",
+        "chain_seq",
+        "fleet",
+        "gen",
+        "host",
+        "id",
+        "what"
+      ],
+      "properties": {
+        "fleet": {
+          "$ref": "#/$defs/id"
+        },
+        "aud": {
+          "$ref": "#/$defs/aud"
+        },
+        "what": {
+          "enum": [
+            "host",
+            "agent",
+            "package"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "gen": {
+          "$ref": "#/$defs/gen"
+        },
+        "chain_seq": {
+          "$ref": "#/$defs/count"
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms"
+        },
+        "reason": {
+          "$ref": "#/$defs/text200"
+        }
+      }
+    },
+    "right": {
+      "enum": [
+        "claude-subscription",
+        "codex-access-token",
+        "messages",
+        "memory",
+        "workspace"
+      ]
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "access",
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^/",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "access": {
+          "enum": [
+            "read",
+            "write"
+          ]
+        }
+      },
+      "$comment": "The endpoint's scope; the service normalizes it with normPath and refuses /.agents (§3.2)."
+    },
+    "sealed-package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at_ms",
+        "aud",
+        "chain_seq",
+        "ct",
+        "enc",
+        "enc_key",
+        "fingerprint",
+        "fleet",
+        "gen",
+        "host",
+        "not_after_ms",
+        "package",
+        "provider",
+        "purpose",
+        "sub"
+      ],
+      "properties": {
+        "fleet": {
+          "$ref": "#/$defs/id"
+        },
+        "aud": {
+          "$ref": "#/$defs/aud"
+        },
+        "package": {
+          "$ref": "#/$defs/id"
+        },
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "enc_key": {
+          "$ref": "#/$defs/b64_16"
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "sub": {
+          "$ref": "#/$defs/id"
+        },
+        "provider": {
+          "enum": [
+            "claude",
+            "codex"
+          ]
+        },
+        "purpose": {
+          "enum": [
+            "claude-setup-token",
+            "codex-refresh-home",
+            "codex-access-token"
+          ]
+        },
+        "gen": {
+          "$ref": "#/$defs/gen"
+        },
+        "chain_seq": {
+          "$ref": "#/$defs/count"
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms"
+        },
+        "not_after_ms": {
+          "$ref": "#/$defs/ms"
+        },
+        "enc": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "ct": {
+          "$ref": "#/$defs/b64"
+        }
+      },
+      "$comment": "§7. enc_key is the recipient's X25519 key id; enc is HPKE's 32-byte encapsulated key; ct is the AEAD output (at most 16 KiB of plaintext plus the 16-byte tag)."
+    },
+    "service_key": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alg",
+        "id",
+        "key"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "alg": {
+          "$ref": "#/$defs/alg"
+        },
+        "key": {
+          "$ref": "#/$defs/b64_32"
+        }
+      }
+    },
+    "signer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alg",
+        "id",
+        "key",
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "device",
+            "host",
+            "recovery",
+            "service"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "alg": {
+          "$ref": "#/$defs/alg"
+        },
+        "key": {
+          "$ref": "#/$defs/b64_16"
+        }
+      }
+    },
+    "subscription": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "home",
+        "provider",
+        "sub",
+        "use"
+      ],
+      "properties": {
+        "sub": {
+          "$ref": "#/$defs/id"
+        },
+        "provider": {
+          "enum": [
+            "claude",
+            "codex"
+          ]
+        },
+        "use": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "home": {
+          "type": "boolean"
+        }
+      }
+    },
+    "text200": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "tier": {
+      "enum": [
+        "native",
+        "browser"
+      ]
+    }
+  }
+}
