@@ -464,8 +464,13 @@ class Axes:
         if s is not None and not isinstance(s, (int, float)):
             sizes = [math.sqrt(float(v)) * PT / 2 for v in _list(s)]
         r = math.sqrt(36 if s is None or sizes is not None else float(s)) * PT / 2
+        # (linewidths: the markers' edge width in points, one for all; the edge drawn when edgecolors are given)
+        lw = kw.get("linewidths", kw.get("linewidth", kw.get("lw")))
+        if lw is not None and not isinstance(lw, (int, float)):
+            lw = _list(lw)[0]
         p = Points(xs, ys, marker=marker, size=r, sizes=sizes, color=col, colors=colors, alpha=alpha,
-                   label=label, edgecolor=to_color(edgecolors) if edgecolors not in (None, "none", "face") else None)
+                   label=label, edgecolor=to_color(edgecolors) if edgecolors not in (None, "none", "face") else None,
+                   edgewidth=None if lw is None else float(lw) * PT)
         art = _Artist(self._add(p), "collections.PathCollection")
         if clim is not None:
             # (colored by values: a mappable, for colorbar)
@@ -482,10 +487,12 @@ class Axes:
             self._opts["xticklabels"] = xs
             xs = list(range(len(xs)))
         bs = _list(bottom) if bottom is not None and not isinstance(bottom, (int, float)) else [bottom or 0] * len(xs)
+        # (width: one for every bar, or one per bar, as matplotlib's)
+        wd = _list(width) if not isinstance(width, (int, float)) else [width] * len(xs)
         rects = []
-        for xi, h, b in zip(xs, hs, bs):
-            x0 = float(xi) - width / 2 if align == "center" else float(xi)
-            rects.append((x0, b, width, h) if h >= 0 else (x0, b + h, width, -h))
+        for xi, h, b, w in zip(xs, hs, bs, wd):
+            x0 = float(xi) - w / 2 if align == "center" else float(xi)
+            rects.append((x0, b, w, h) if h >= 0 else (x0, b + h, w, -h))
         colors = [to_color(c) for c in color] if isinstance(color, (list, tuple)) and color and not isinstance(color[0], (int, float)) else None
         col = colors[0] if colors else self._color(color, True)
         if alpha is not None:
@@ -897,6 +904,14 @@ class Axes:
         if (fontsize or kw.get("size")) is not None:
             self._opts["label_size"] = _size_px(fontsize or kw.get("size"), 10)
 
+    def get_xlabel(self):
+        """The x axis' label ("" when it has none)."""
+        return self._opts.get("xlabel", "")
+
+    def get_ylabel(self):
+        """The y axis' label ("" when it has none)."""
+        return self._opts.get("ylabel", "")
+
     def set_ylabel(self, s, fontsize=None, labelpad=None, **kw):
         self._opts["ylabel"] = str(s)
         if (fontsize or kw.get("size")) is not None:
@@ -1172,8 +1187,25 @@ class Axes:
             entries = [(p, str(s)) for (p, _), s in zip(self._legend_handles(), labels)]
         else:
             entries = [(p, str(s)) for p, s in self._legend_handles() if s is not None and not str(s).startswith("_")]
+        anchor, pad, title = kw.pop("bbox_to_anchor", None), kw.pop("borderaxespad", None), kw.pop("title", None)
         if kw:
             raise NotImplementedError("legend(): %s not supported by sagebrush's matplotlib" % ", ".join(sorted(kw)))
+        if anchor is not None:
+            # (bbox_to_anchor: a point (x, y) or a box (x, y, width, height), in axes fractions)
+            a = [float(v) for v in (anchor.bounds if hasattr(anchor, "bounds") else anchor)]
+            if len(a) not in (2, 4):
+                raise ValueError("Invalid bbox: %r" % (anchor,))
+            self._opts["legend_anchor"] = tuple(a)
+        else:
+            self._opts.pop("legend_anchor", None)
+        if pad is not None:
+            self._opts["legend_pad"] = float(pad) * 10 * PT  # (in font sizes: the legend's 10 points)
+        else:
+            self._opts.pop("legend_pad", None)
+        if title is not None:
+            self._opts["legend_title"] = str(title)
+        else:
+            self._opts.pop("legend_title", None)
         self._opts["legend"] = True
         self._opts["legend_entries"] = entries
         if loc is not None:
@@ -1459,8 +1491,9 @@ class Figure:
         """This figure as one animation frame: (SVG body, description)."""
         return render_frame(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle, getattr(self, "_markup", None))
 
-    def _svg(self, background=True):
-        svg = render_svg(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle, getattr(self, "_markup", None))
+    def _svg(self, background=True, grow=True):
+        # (grow: a legend outside the figure widens it, as a notebook's inline figure; savefig's doesn't)
+        svg = render_svg(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle, getattr(self, "_markup", None), grow)
         # (a facecolor the program gave, or set in rcParams, colors the
         # figure as matplotlib's; otherwise it is the page's background)
         if background and self._facecolor_given:
@@ -1538,7 +1571,7 @@ class Figure:
             if metadata is not None:
                 raise NotImplementedError("savefig: metadata for SVG is not implemented in Sagebrush")
             # (savefig's own background: the one asked for, or none)
-            svg = self._svg(background=False)
+            svg = self._svg(background=False, grow=False)
             if given and background != "none":
                 svg = _svg_background(svg, background, self._size[0] * 100, self._size[1] * 100)
             _write(fname, svg, text=True)
@@ -1551,7 +1584,7 @@ class Figure:
         # (the pixel marker ',' is one pixel of this PNG: 100 / dpi SVG units)
         old = _pixel_size(100.0 / dpi) if dpi > 0 and math.isfinite(dpi) else None
         try:
-            svg = self._svg(background=False)
+            svg = self._svg(background=False, grow=False)
         finally:
             if old is not None:
                 _pixel_size(old)
