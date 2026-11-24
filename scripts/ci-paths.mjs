@@ -481,8 +481,9 @@ if (queueTested) {
   Object.assign(outputs, { web_groups: "[]", web_matrix: "[]", examples_ids: "[]", examples_matrix: "[]", slow_scope: "" });
 }
 outputs.queue_tested = queueTested;
-// PR CI light (the repository variable PR_CI_LIGHT, exactly "true", set by William while the merge queue is starved of
-// runners; ci.yml's changes job passes it as CI_PR_LIGHT): a pull request runs only checks and the size gate (with its
+// PR CI light (the checked-in switch .github/pr-ci-light, exactly "true", set by William while the merge queue is starved
+// of runners; ci.yml's changes job passes its first line as CI_PR_LIGHT, a file so that a fork's pull request reads it
+// too): a pull request runs only checks and the size gate (with its
 // size-base), as an ordinary pull request does when checks runs, and the modules' build when it needs one; every other
 // suite is left to its merge_group run, which is the full tier and gates the merge.  Never a queue group, a push, the
 // schedule or a dispatch; and a pull request labelled full-ci still runs everything it selected.  (@sagebrush's go,

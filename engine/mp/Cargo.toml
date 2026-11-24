@@ -16,6 +16,8 @@ crate-type = ["cdylib", "rlib"]
 sagebrush-interrupt = { path = "../interrupt", features = ["wasm-host"] }
 # The engines' one big-integer implementation (dashu, the NTT)
 sagebrush-bigint = { path = "../bigint" }
+# glibc's log and pow, the core's float parameter choices (engine/glibm)
+sagebrush-glibm = { path = "../glibm" }
 dashu-int = { git = "https://github.com/sagemathinc/dashu", rev = "2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f" }
 dashu-base = { git = "https://github.com/sagemathinc/dashu", rev = "2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f" }
 

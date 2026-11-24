@@ -6526,6 +6526,73 @@ def Derivative(f, k=1):
     return f
 
 
+def _zq_poly(f):
+    """Whether f is a polynomial over the integers or the rationals."""
+    return isinstance(f, _sp.Polynomial) and f._ring._base in (_sp.ZZ, _sp.QQ)
+
+
+def _zq_refuse(name, f):
+    """The error for an argument of Integral, Normalize or
+    SquarefreeFactorization that is not a polynomial over Z or Q: Magma's
+    for those it has no signature for, else Sagebrush's."""
+    if isinstance(f, (bool, int, _Fraction, MSeq, _MFunRatElt)):
+        return _bad_types(name, [f], _located(name))
+    return MagmaError("%s of this argument is not supported yet (only of a polynomial over the integers or the rationals)" % name,
+                      "'%s'" % name, True, _located(name))
+
+
+def _zq_error(name, msg):
+    """Magma's refusal of an argument, pointed at the call's "(" as Magma's."""
+    return MagmaError(msg, "'%s'" % name, True, _located(name))
+
+
+def Integral(f):
+    """The integral of a polynomial over the rationals, with constant term 0."""
+    if isinstance(f, _MFFPoly):
+        raise _zq_error("Integral", "Coefficient ring must have characteristic 0")
+    if not _zq_poly(f):
+        raise _zq_refuse("Integral", f)
+    if f._ring._base is _sp.ZZ:
+        raise _zq_error("Integral", "Coefficient ring of argument 1 is not a field")
+    return f.integral()
+
+
+def Normalize(f):
+    """A polynomial over the rationals made monic, over the integers with a
+    positive leading coefficient (0 stays 0)."""
+    if not _zq_poly(f):
+        raise _zq_refuse("Normalize", f)
+    if f.is_zero():
+        return f
+    if f._ring._base is _sp.QQ:
+        return f.monic()
+    return -f if f.leading_coefficient() < 0 else f
+
+
+Normalise = Normalize
+
+
+def SquarefreeFactorization(f):
+    """[<g_i, i>]: one square-free factor for each multiplicity i, as Magma's:
+    over the rationals monic; over the integers primitive with a positive
+    leading coefficient, after the content's primes of multiplicity i."""
+    if not _zq_poly(f):
+        raise _zq_refuse("SquarefreeFactorization", f)
+    if f.is_zero():
+        raise _zq_error("SquarefreeFactorization", "Argument 1 is not non-zero")
+    F = f.squarefree_decomposition()
+    R = f._ring
+    if R._base is _sp.QQ:
+        return MSeq(MTuple([g.monic(), e]) for g, e in F)
+    c = abs(int(F.unit()))
+    primes = _sa.factor(c) if c > 1 else []
+    out = []
+    for e in sorted(set([e for _, e in primes] + [e for _, e in F])):
+        out += [MTuple([R(p), e]) for p, k in sorted(primes) if k == e]
+        out += [MTuple([g, e]) for g, k in F if k == e]
+    return MSeq(out)
+
+
 def Discriminant(f):
     if hasattr(f, "_magma_discriminant"):
         return f._magma_discriminant()
@@ -7505,18 +7572,56 @@ def Sqrt(x):
 # calls being made, innermost last: an argument's call has returned before
 # its caller's is entered, so a nested or repeated call is told apart.
 _CALL_POS_NAMES = frozenset((
-    "ChangeRing CharacteristicPolynomial DefiningPolynomial Embed Generator Identity IsSubfield "
-    "MinimalPolynomial Norm PrimeField Root RootsInSplittingField Solution Submatrix Subsets Sym Trace Vector").split())
+    "ChangeRing CharacteristicPolynomial DefiningPolynomial Embed Generator Identity Integral IsSubfield "
+    "MinimalPolynomial Norm Normalise Normalize PrimeField Root RootsInSplittingField Solution SquarefreeFactorization "
+    "Submatrix Subsets Sym Trace Vector").split())
 _CALLPOS = []
 
 
 def _call(pos, f, *args, **kw):
-    """f(*args, **kw), made at pos (the "(" of the call in the source)."""
+    """f(*args, **kw), made at pos (the "(" of the call in the source).  Only
+    what Magma can call is called: a function or procedure (the user's or an
+    intrinsic), a map, and a tuple as a product of cycles, (1, 2)(3, 4)
+    (_magma_callable); anything else (an integer, a sequence, a matrix, a
+    structure, a polynomial: Magma's map application isn't defined for it) is
+    refused there, in Magma 2.18-5's words: with one argument "Bad argument
+    types" and its types (the argument's, then the value's), else "Attempting
+    to call something that is not callable"."""
+    if not _magma_callable(f):
+        if len(args) == 1 and not kw:
+            raise MagmaError("Bad argument types\nArgument types given: %s, %s" % (_ext_type(args[0]), _ext_type(f)), None, True, pos)
+        raise MagmaError("Attempting to call something that is not callable", None, True, pos)
     _CALLPOS.append((pos, getattr(f, "__name__", None)))
     try:
         return f(*args, **kw)
     finally:
         _CALLPOS.pop()
+
+
+# (what Magma can call: functions, Python's and builtins, bound methods, classes (intrinsics made as classes),
+# forward cells, maps, and tuples and their products as cycles)
+_CALLABLE_TYPES = (type(lambda: 0), type(len), type(_Cell("f").get), type, _Cell, _CellCall, MMap, MTuple, _MCycles)
+
+
+def _magma_callable(f):
+    return isinstance(f, _CALLABLE_TYPES)
+
+
+def _call_bare(pos, f, *args, **kw):
+    """_call, the call being a whole expression statement, f(3);, where Magma
+    2.18-5 names its errors: "Runtime error in '@': Bad argument types", and
+    "Runtime error in procedure call: Attempting to call something that is
+    not callable" (inside anything else, no name)."""
+    try:
+        return _call(pos, f, *args, **kw)
+    except MagmaError as e:
+        if e.pos == pos and e.where is None:
+            if str(e).startswith("Bad argument types"):
+                e.where = "'@'"
+            elif str(e) == "Attempting to call something that is not callable":
+                # (with no empty line after it, as Magma's)
+                e.where, e.blank = "procedure call", False
+        raise
 
 
 def _located(name):
@@ -11185,6 +11290,7 @@ _FF_SIGS = {
     "Factorization": _P1, "Factorisation": _P1,
     "Coefficient": lambda a: len(a) == 2 and isinstance(a[0], _MFFPoly) and _int(a[1]),
     "Derivative": lambda a: 1 <= len(a) <= 2 and isinstance(a[0], _MFFPoly) and (len(a) == 1 or _int(a[1])),
+    "Integral": _P1,  # (refused in Magma's words: the characteristic is not 0)
     "Evaluate": lambda a: (len(a) == 2 and isinstance(a[0], _MFFPoly) and (isinstance(a[1], _MFFPoly) or _held(1) is None)) or None,
     "Roots": lambda a: (1 <= len(a) <= 2 and isinstance(a[0], _MFFPoly) and (len(a) == 1 or _held(1) is None)) or None,
     "Quotrem": _ff_poly_or_scalars,

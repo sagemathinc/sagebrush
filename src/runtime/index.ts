@@ -803,8 +803,9 @@ B.builtins.__pyjs_host__ = Obj.builtin((op: any, ...args: any[]) => {
 // page: R.host.input(prompt) gives the line typed, without its newline; null
 // at the end of input; {interrupted: true} if a Stop came while it waited);
 // the prompt and the line are then written as output, as Jupyter shows them.
-// With no such host: the prompt written, then EOFError, as CPython's with no
-// stdin.
+// With no such host: the prompt written, then a line of stdin when it is a
+// pipe or a file (R.stdinInput), not echoed, as CPython's with a redirected
+// stdin; else, or at its end, EOFError, as CPython's with no stdin.
 B.builtins.input = Obj.builtin((...args: any[]) => {
   if (args.length > 1) raise(T.TypeError, `input expected at most 1 argument, got ${args.length}`);
   const prompt = args.length ? String(F.str(args[0])) : "";
@@ -812,7 +813,9 @@ B.builtins.input = Obj.builtin((...args: any[]) => {
   if (typeof ask !== "function") {
     if (prompt) B.stdout.write(prompt);
     B.stdout.flush();
-    return raise(T.EOFError, "EOF when reading a line");
+    const line = R.stdinInput === true ? B.stdinReadline() : "";
+    if (line === "") return raise(T.EOFError, "EOF when reading a line");
+    return line.endsWith("\n") ? line.slice(0, -1) : line;
   }
   B.stdout.flush();
   const line = ask(prompt);
@@ -1458,6 +1461,8 @@ export const R: any = {
   annotIn: (s: any, i: number) => O.truth(O.contains(s, i)),
   /** Set by an embedding (the browser worker): display(bundle) -> shown?, and other hooks. */
   host: null,
+  /** Set by an embedding whose program's stdin is a pipe or a file (the CLI's): input() reads its lines. */
+  stdinInput: false,
   INTR,
   interrupted,
   // live progress (design-estimates-progress r4 §6): R.progress.snapshot()
