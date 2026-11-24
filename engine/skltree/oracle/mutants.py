@@ -15,6 +15,10 @@ MUTANTS = [
     ("XorShift >> 16", "skltree/src/rng.rs", "*seed ^= *seed >> 17;", "*seed ^= *seed >> 16;"),
     ("no DEFAULT_SEED for 0", "skltree/src/rng.rs", "    if *seed == 0 {\n        *seed = DEFAULT_SEED;\n    }\n    *seed ^=", "    *seed ^="),
     ("modulo 2^31 - 1", "skltree/src/rng.rs", "*seed % (RAND_R_MAX + 1)", "*seed % RAND_R_MAX"),
+    ("FEATURE_THRESHOLD = 0", "skltree/src/partition.rs", "pub const FEATURE_THRESHOLD: f32 = 1e-7;", "pub const FEATURE_THRESHOLD: f32 = 0.0;"),
+    ("FEATURE_THRESHOLD added in float64", "skltree/src/partition.rs", "while p < end_non_missing && self.feature_values[p] <= self.feature_values[p - 1] + FEATURE_THRESHOLD {", "while p < end_non_missing && f64::from(self.feature_values[p]) <= f64::from(self.feature_values[p - 1]) + 1e-7 {"),
+    ("the final partition compared in float32", "skltree/src/partition.rs", "f64::from(current_value) <= threshold }", "current_value <= threshold as f32 }"),
+    ("the missing tail reversed", "skltree/src/partition.rs", "        t.finish();\n        let n = self.end - self.start - n_missing;", "        t.finish();\n        self.samples[self.end - n_missing..self.end].reverse();\n        let n = self.end - self.start - n_missing;"),
     ("swap_array_slices as rotate_right", "skltree/src/partition.rs", "    let n_rev = end - start - n;\n", "    let n_rev = end - start - n;\n    if n_rev > 0 && n > 0 { array[start..end].rotate_right(n); return; }\n"),
 ]
 

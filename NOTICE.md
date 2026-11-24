@@ -307,8 +307,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 `engine/skltree` (`src/rng.rs`, `src/sort.rs`, `src/partition.rs`, and the
 tree code that builds on them) ports scikit-learn 1.9.1's C-level tree code
-line by line, so that Sagebrush's decision trees, forests and bagging
-ensembles have the same bits as scikit-learn's: the XorShift `our_rand_r`
+line by line, to preserve scikit-learn's random draws, sorting order and
+dense-partitioning behavior for the decision-tree kernel: the XorShift `our_rand_r`
 and `rand_int` (`sklearn/utils/_random.pxd`, `sklearn/tree/_utils.pyx`),
 `simultaneous_sort` (`sklearn/utils/_sorting.pyx`) and the dense partitioner
 (`sklearn/tree/_partitioner.pyx`).  Each ported file names the files and

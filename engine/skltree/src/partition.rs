@@ -207,17 +207,38 @@ mod tests {
         p.sort_samples_and_feature_values(&x, 1, 0, Some(&[1]));
         assert_eq!(p.n_missing, 2);
         assert_eq!(&p.feature_values[..4], &[0.5, 1.0, 2.0, 3.0]);
-        // (the loop: i=0 keeps 0; i=1 is NaN and swaps with 5 (4 being NaN was skipped from the right first), so the
-        // missing ones end as [.., 1, 4] in that order)
-        let mut tail = p.samples[4..].to_vec();
-        tail.sort_unstable();
-        assert_eq!(tail, vec![1, 4]);
+        // (the reference's loop, traced: i=0 keeps sample 0; i=1 finds NaN and swaps with the right end, sample 5, so
+        // sample 1 goes to position 5; then the right end, sample 4, is NaN and is passed over; so the missing tail is
+        // exactly [4, 1], in that order: the criteria sum it in this order when missing values go left)
+        assert_eq!(&p.samples[4..], &[4, 1]);
         assert_eq!(&p.samples[..4], &[5, 2, 3, 0]);
         // with no mask, the same values are copied as they are (no NaN expected)
         let y = [3.0, 1.0, 2.0];
         let mut q = part(&y, 0, 3);
         q.sort_samples_and_feature_values(&y, 1, 0, None);
         assert_eq!((&q.feature_values[..3], &q.samples[..3], q.n_missing), (&[1.0, 2.0, 3.0][..], &[1, 2, 0][..], 0));
+    }
+
+    #[test]
+    fn feature_threshold_is_a_float32_addition() {
+        let _g = crate::work::tests_serial();
+        // 1.0 and the next float32 are a tie only because 1.0f32 + 1e-7f32 rounds up to 1.0 + EPSILON (in float64,
+        // 1.0 + 1e-7 is below it; with no threshold they are two values)
+        let e = f32::EPSILON;
+        let walk = |x: &[f32]| {
+            let mut p = part(x, 0, x.len());
+            p.sort_samples_and_feature_values(x, 1, 0, None);
+            let (mut seen, mut at) = (vec![], p.start);
+            while at < p.end {
+                let (prev, next) = p.next_p(at, false);
+                seen.push((prev, next));
+                at = next;
+            }
+            seen
+        };
+        assert_eq!(walk(&[1.0, 1.0 + e, 2.0]), vec![(1, 2), (2, 3)]);
+        // and ties chain: (1 + EPSILON) + 1e-7 rounds up to 1 + 2 EPSILON in float32, so all three are one value
+        assert_eq!(walk(&[1.0, 1.0 + e, 1.0 + 2.0 * e, 2.0]), vec![(2, 3), (3, 4)]);
     }
 
     #[test]
@@ -251,6 +272,19 @@ mod tests {
         }
         // second pass: the missing ones on the left, candidates among the rest, then the end
         assert_eq!(seen, vec![(3, 4), (5, 6), (6, 7)]);
+    }
+
+    #[test]
+    fn the_final_partition_widens_x_to_float64() {
+        let _g = crate::work::tests_serial();
+        // a float64 threshold just below an exact float32 value: in float64 the value is above it (right); compared
+        // in float32 the threshold would round back up to the value (left)
+        let x = [0.1f32, 0.0];
+        let t = f64::from(0.1f32) - 1e-10;
+        assert_eq!(t as f32, 0.1f32);
+        let mut p = part(&x, 0, 2);
+        p.partition_samples_final(&x, 1, t, 0, false);
+        assert_eq!(&p.samples[..2], &[1, 0]);
     }
 
     #[test]
