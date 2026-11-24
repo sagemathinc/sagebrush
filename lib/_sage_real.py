@@ -4687,7 +4687,7 @@ class ComplexNumberMP:
         EXAMPLES::
 
             sage: ComplexField(30)(1, 1).tan()
-            0.27175259 + 1.0839234*I
+            0.27175258 + 1.0839233*I
         """
         sh, ch, sq = self._sh_ch(self._im)
         a = self._re
@@ -4701,7 +4701,7 @@ class ComplexNumberMP:
         EXAMPLES::
 
             sage: ComplexField(30)(1, 1).sinh()
-            0.63496392 + 1.2984576*I
+            0.63496391 + 1.2984576*I
         """
         sh, ch, _ = self._sh_ch(self._re)
         b = self._im
@@ -4726,7 +4726,7 @@ class ComplexNumberMP:
         EXAMPLES::
 
             sage: ComplexField(30)(1, 1).tanh()
-            1.0839234 + 0.27175259*I
+            1.0839233 + 0.27175258*I
         """
         sh, ch, sq = self._sh_ch(self._re)
         b = self._im
@@ -4760,7 +4760,7 @@ class ComplexNumberMP:
         EXAMPLES::
 
             sage: ComplexField(30)(1, 1).csc()
-            0.62151801 - 0.30393100*I
+            0.62151802 - 0.30393100*I
         """
         return ~self.sin()
 
@@ -4790,7 +4790,7 @@ class ComplexNumberMP:
         EXAMPLES::
 
             sage: ComplexField(30)(1, 1).csch()
-            0.30393100 - 0.62151801*I
+            0.30393100 - 0.62151802*I
         """
         return ~self.sinh()
 
