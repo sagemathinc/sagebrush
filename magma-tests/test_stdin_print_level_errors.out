@@ -1,0 +1,60 @@
+
+>> print 1 : Foo;
+             ^
+User error: Bad print level "Foo"
+
+>> print 1 : foo;
+             ^
+User error: Bad print level "foo"
+
+>> print 1 : TeX;
+             ^
+User error: Bad print level "TeX"
+
+>> print 1 : MAGMA;
+             ^
+User error: Bad print level "MAGMA"
+
+>> x := 3; print x : Foo;
+                     ^
+User error: Bad print level "Foo"
+
+>> print 1, 2 : Foo;
+                ^
+User error: Bad print level "Foo"
+a
+
+>> print "a"; print 1 : Sage;
+                        ^
+User error: Bad print level "Sage"
+1
+1
+1
+1
+1
+1
+
+>> print 1 : : Magma;
+             ^
+User error: bad syntax
+
+>> print 1 : Magma : Foo;
+                   ^
+User error: bad syntax
+
+>> print 1 : 2;
+             ^
+User error: bad syntax
+
+>> x := 1 : Magma;
+          ^
+User error: bad syntax
+
+>> f := func<x | x : Magma>;
+                   ^
+User error: bad syntax
+
+>> printf "%o", 1 : Magma;
+                  ^
+User error: bad syntax
+end

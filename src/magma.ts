@@ -55,6 +55,9 @@ export const KEYWORDS = new Set(
     "intrinsic time eval declare clear").split(" "),
 );
 
+// print x : Level, the levels Magma 2.18-5 knows (another name is its "Bad print level")
+const PRINT_LEVELS = new Set(["Default", "Minimal", "Maximal", "Magma", "Hex", "Latex", "Debug"]);
+
 // longest first
 const OPS = [":->", "@@", "+:=", "-:=", "*:=", "/:=", "^:=", ":=", "..", "->", "{@", "@}", "{*", "*}", "$$", "<", ">", "(", ")", "[", "]", "{", "}",
   ",", ";", ":", "|", "#", "&", "~", "+", "-", "*", "/", "^", ".", "!", "`", "@", "=", "\\"];
@@ -359,6 +362,20 @@ class Parser {
    * the tokens of a statement up to its syntax error, and where: said
    * "not supported yet" rather than "bad syntax", which would say the code
    * is wrong (the coverage run's 254 Handbook programs). */
+  /** Whether the tokens [from, k) are an expression statement's value, as in Magma's x : Magma; (not a print, an
+   * assignment or anything inside brackets). */
+  levelStatement(from: number, k: number): boolean {
+    const T = this.toks;
+    if (["print", "printf", "vprint"].includes(T[from].v)) return false;
+    let depth = 0;
+    for (let q = from; q < k; q++) {
+      if ("([{<".includes(T[q].v) || T[q].v === "{@" || T[q].v === "{*") depth++;
+      else if (")]}>".includes(T[q].v) || T[q].v === "@}" || T[q].v === "*}") depth--;
+      else if (depth === 0 && (T[q].v === ":=" || T[q].v === ":")) return false;
+    }
+    return depth === 0;
+  }
+
   unsupported(from: number, to: number): { name: string; tok: Tok } | null {
     const T = this.toks, end = Math.min(to + 1, T.length - 1);
     const next = (a: Tok, b: Tok) => b.line === a.line && b.col === a.col + a.v.length;
@@ -384,7 +401,8 @@ class Parser {
       if (a.v === "." && (b.v === "-" || b.v === "<") && k > from && T[k - 1].t === "id") return found(b.v === "-" ? `${T[k - 1].v}.-1 (a generator's inverse by its index)` : `${T[k - 1].v}.<...> (an element by its indices)`);
       if (a.v === "=" && a.t === "op") return found("= (an equation, as in a relation)");
       if (a.v === "^" && b.v === "^" && next(a, b)) return found("a^^n (a multiplicity in a multiset)");
-      if (a.v === ":" && b.t === "id" && ["Hex", "Magma", "Maximal", "Minimal", "Default"].includes(b.v)) return found(`x: ${b.v} (a printing level)`);
+      // (x: Magma as a statement of its own, which Magma prints; anywhere else, x := 1 : Magma, : : Magma, it's bad syntax)
+      if (a.v === ":" && b.t === "id" && PRINT_LEVELS.has(b.v) && c.v === ";" && this.levelStatement(from, k)) return found(`x: ${b.v} (a printing level)`);
       if (a.v === "where" && a.t === "kw") return found("where x is ... (a definition after an expression)");
       if (a.v === "eval" && a.t === "kw") return found("eval");
       if (a.t === "id" && (a.v === "try" || a.v === "catch")) return found("try ... catch");
@@ -1157,8 +1175,12 @@ class Parser {
   printList(kind: "print" | "vprint") {
     const vals = [this.expr()];
     while (this.eat(",")) vals.push(this.expr());
-    // print x: Magma level; print x: Maximal etc. are ignored
-    if (this.eat(":")) this.ident();
+    // print x: Magma level; print x: Maximal etc. are ignored; a name that isn't a level is Magma's error at it
+    if (this.eat(":")) {
+      const t = this.peek();
+      const level = this.ident();
+      if (!PRINT_LEVELS.has(level)) throw new MagmaSyntaxError(`Bad print level "${level}"`, t.line, t.col, true);
+    }
     this.expect(";");
     // (each value's all, as for a, b; at a statement)
     this.emit(`_m._print_line(_m._flat([${vals.map((v) => this.all(v)).join(", ")}]))`);
