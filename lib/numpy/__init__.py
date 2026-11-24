@@ -1546,19 +1546,26 @@ def size(a, axis=None):
     return a.size if axis is None else a.shape[axis]
 
 
-def _reshape_order(order):
-    # (NumPy's order argument for reshaping: 'C', 'F' or 'A', in either case, as str or bytes; None is 'C')
+def _order(order):
+    # (NumPy's order argument: 'C', 'F', 'A' or 'K', in either case, as str or bytes; None is 'C')
     if order is None:
         return "C"
     if isinstance(order, bytes):
         order = order.decode("latin-1")
     if not isinstance(order, str):
-        raise TypeError("order must be str, not %s" % type(order).__name__)
+        t = type(order)
+        raise TypeError("order must be str, not %s" % (t.__name__ if t.__module__ == "builtins" else t.__module__ + "." + t.__name__))
     o = order.upper()
+    if o not in ("C", "F", "A", "K"):
+        raise ValueError("order must be one of 'C', 'F', 'A', or 'K' (got %r)" % order)
+    return o
+
+
+def _reshape_order(order):
+    # (for reshaping 'C', 'F' or 'A')
+    o = _order(order)
     if o == "K":
         raise ValueError("order 'K' is not permitted for reshaping")
-    if o not in ("C", "F", "A"):
-        raise ValueError("order must be one of 'C', 'F', 'A', or 'K' (got %r)" % order)
     return o
 
 
@@ -1571,15 +1578,55 @@ def _reshape(a, shape, order="C", copy=None):
 
 
 def reshape(a, shape=None, order="C", *, newshape=None, copy=None):
-    return _reshape(asarray(a), _shape(shape if shape is not None else newshape), order, copy)
+    # (newshape=, NumPy 1's name for shape, kept in the signature but refused as NumPy 2.5 refuses it)
+    if newshape is not None:
+        raise TypeError("reshape() got an unexpected keyword argument 'newshape'")
+    return _reshape(asarray(a), shape, order, copy)
 
 
 def _m_reshape(self, *shape, order="C", copy=None):
     return _reshape(self, shape[0] if len(shape) == 1 else shape, order, copy)
 
 
+def _keep_order(strides):
+    # The axes, outermost first, in the order NumPy's iterator walks an array for order 'K': an insertion sort
+    # from the innermost axis by |stride|, the smaller inner, that stops at the first axis not to pass and
+    # passes over a zero stride (a broadcast axis), which orders against no other; a negative stride keeps
+    # its direction
+    it = list(range(len(strides)))[::-1]
+    for i0 in range(1, len(it)):
+        ax, pos = it[i0], i0
+        for i1 in range(i0 - 1, -1, -1):
+            s0, s1 = strides[ax], strides[it[i1]]
+            if s0 == 0 or s1 == 0:
+                continue
+            if abs(s1) <= abs(s0):
+                break
+            pos = i1
+        it.insert(pos, it.pop(i0))
+    return it[::-1]
+
+
+def _ravel(a, order, copy):
+    # NumPy's ravel: a view where the array is contiguous in the order, else a copy in it; 'A' is 'F' for a
+    # Fortran-ordered array (F- and not C-contiguous), 'K' the order of the elements in memory
+    o = _order(order)
+    if o == "A":
+        o = "F" if a.flags.f_contiguous and not a.flags.c_contiguous else "C"
+    if o == "K":
+        if not a.flags.c_contiguous:
+            a = a.transpose(_keep_order(a.strides))
+        o = "C"
+    if not copy and (a.flags.c_contiguous if o == "C" else a.flags.f_contiguous):
+        return _np.reshape(a, (-1,), o, 0)
+    # (a copy: a new array of its own, no base, as NumPy's)
+    r = empty(a.size, a.dtype)
+    _np.reshape(r, a.shape, o, 0)[...] = a
+    return r
+
+
 def ravel(a, order="C"):
-    return _np.ravel(asarray(a))
+    return _ravel(asarray(a), order, False)
 
 
 def transpose(a, axes=None):
@@ -2950,11 +2997,11 @@ def _m_argsort(self, axis=-1, kind=None, order=None):
 
 
 def _m_flatten(self, order="C"):
-    return _np.copy(_np.ravel(self))
+    return _ravel(self, order, True)
 
 
 def _m_ravel(self, order="C"):
-    return _np.ravel(self)
+    return _ravel(self, order, False)
 
 
 def frombuffer(buffer, dtype=float, count=-1, offset=0):
