@@ -1000,6 +1000,36 @@
       "case": "groupby.level-other",
       "message": "pandas.DataFrame.groupby(level=) other than the index itself is not in Sagebrush's pandas 0.x subset",
       "reason": "level= other than the index itself needs a MultiIndex, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "reach.index-asarray-str",
+      "message": "pandas.numpy.asarray(Index) of str labels (Index.to_numpy() gives its '<U' array) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas gives an object array of the labels; Sagebrush's numpy can't take a string array from __array__ yet (Index.to_numpy() gives a '<U' array); it raises before any work"
+    },
+    {
+      "case": "reach.index-asarray-dtype",
+      "message": "pandas.numpy.asarray(Index, dtype=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "numpy.asarray of an Index with a dtype is outside the subset (Index.to_numpy(dtype=) converts); it raises before any work"
+    },
+    {
+      "case": "reach.any-datetime",
+      "message": "pandas.Series.any of a datetime64[us] column is not in Sagebrush's pandas 0.x subset",
+      "reason": "any/all of datetimes test them against zero in pandas, which needs numpy's datetime64; it raises before any work"
+    },
+    {
+      "case": "reach.frame-any-axis1",
+      "message": "pandas.DataFrame.any(axis=, **kwargs) is not in Sagebrush's pandas 0.x subset",
+      "reason": "any/all along rows (axis=1) or over the whole frame (axis=None) are outside the subset; they raise before any work"
+    },
+    {
+      "case": "reach.series-all-bool-only",
+      "message": "pandas.Series.all(axis=, bool_only=, **kwargs) is not in Sagebrush's pandas 0.x subset",
+      "reason": "bool_only= is a frame's column selection; on a Series it is outside the subset; it raises before any work"
+    },
+    {
+      "case": "reach.take-kwargs",
+      "message": "pandas.Series.take(**kwargs) is not in Sagebrush's pandas 0.x subset",
+      "reason": "take's extra keywords (is_copy and others pandas has deprecated or removed) are outside the subset; it raises before any work"
     }
   ],
   "value_divergences": [

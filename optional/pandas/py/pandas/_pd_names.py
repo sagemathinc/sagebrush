@@ -27,7 +27,7 @@ PANDAS = frozenset([
 ])
 
 SERIES = frozenset([
-    'T', 'abs', 'add', 'add_prefix', 'add_suffix', 'agg', 'aggregate', 'align', 'all', 'any',
+    'T', 'abs', 'add', 'add_prefix', 'add_suffix', 'agg', 'aggregate', 'align', 
     'argmax', 'argmin', 'argsort', 'array', 'asfreq', 'asof', 'at',
     'at_time', 'attrs', 'autocorr', 'axes', 'between', 'between_time', 'bfill', 'case_when',
     'cat', 'clip', 'combine', 'combine_first', 'compare', 'convert_dtypes', 'copy', 
@@ -46,7 +46,7 @@ SERIES = frozenset([
     'resample', 'rfloordiv', 'rmod', 'rmul', 'rolling', 'round', 'rpow', 'rsub',
     'rtruediv', 'sample', 'searchsorted', 'sem', 'set_axis', 'set_flags', 'shape', 'shift',
     'size', 'skew', 'sort_index', 'sparse', 'squeeze', 'std', 'str', 'struct',
-    'sub', 'subtract', 'sum', 'swaplevel', 'tail', 'take', 'to_clipboard', 'to_csv', 'to_dict',
+    'sub', 'subtract', 'sum', 'swaplevel', 'tail', 'to_clipboard', 'to_csv', 'to_dict',
     'to_excel', 'to_frame', 'to_hdf', 'to_json', 'to_latex', 'to_list', 'to_markdown',
     'to_numpy', 'to_period', 'to_pickle', 'to_sql', 'to_string', 'to_timestamp', 'to_xarray',
     'tolist', 'transform', 'transpose', 'truediv', 'truncate', 'tz_convert', 'tz_localize',
@@ -54,7 +54,7 @@ SERIES = frozenset([
 ])
 
 DATAFRAME = frozenset([
-    'T', 'abs', 'add', 'add_prefix', 'add_suffix', 'agg', 'aggregate', 'align', 'all', 'any',
+    'T', 'abs', 'add', 'add_prefix', 'add_suffix', 'agg', 'aggregate', 'align', 
     'asfreq', 'asof', 'assign', 'at', 'at_time', 'attrs', 'axes',
     'between_time', 'bfill', 'boxplot', 'clip', 'columns', 'combine', 'combine_first',
     'compare', 'convert_dtypes', 'copy', 'corrwith', 'count', 'cov', 'cummax', 'cummin',
@@ -73,7 +73,7 @@ DATAFRAME = frozenset([
     'rmul', 'rolling', 'round', 'rpow', 'rsub', 'rtruediv', 'sample', 'select', 'select_dtypes',
     'sem', 'set_axis', 'set_flags', 'set_index', 'shape', 'shift', 'size', 'skew', 'sort_index',
     'sparse', 'squeeze', 'stack', 'std', 'style', 'sub', 'subtract', 'sum',
-    'swaplevel', 'tail', 'take', 'to_clipboard', 'to_csv', 'to_dict', 'to_excel', 'to_feather',
+    'swaplevel', 'tail', 'to_clipboard', 'to_csv', 'to_dict', 'to_excel', 'to_feather',
     'to_hdf', 'to_html', 'to_iceberg', 'to_json', 'to_latex', 'to_markdown', 'to_numpy',
     'to_orc', 'to_parquet', 'to_period', 'to_pickle', 'to_records', 'to_sql', 'to_stata',
     'to_string', 'to_timestamp', 'to_xarray', 'to_xml', 'transform', 'transpose', 'truediv',
@@ -83,7 +83,7 @@ DATAFRAME = frozenset([
 
 INDEX = frozenset([
     'T', 'all', 'any', 'append', 'argmax', 'argmin', 'argsort', 'array', 'asof', 'asof_locs',
-    'astype', 'copy', 'delete', 'diff', 'difference', 'drop', 'drop_duplicates', 'droplevel',
+    'copy', 'delete', 'diff', 'difference', 'drop', 'drop_duplicates', 'droplevel',
     'dropna', 'dtype', 'duplicated', 'empty', 'equals', 'factorize', 'fillna', 'from_range',
     'get_indexer', 'get_indexer_for', 'get_indexer_non_unique', 'get_level_values', 'get_loc',
     'get_slice_bound', 'groupby', 'has_duplicates', 'hasnans', 'identical', 'infer_objects',
@@ -93,6 +93,6 @@ INDEX = frozenset([
     'notnull', 'nunique', 'putmask', 'ravel', 'reindex', 'rename', 'repeat', 'replace', 'round',
     'searchsorted', 'set_names', 'shape', 'shift', 'size', 'slice_indexer', 'slice_locs',
     'sort_values', 'sortlevel', 'start', 'step', 'stop', 'str', 'symmetric_difference', 'take',
-    'to_flat_index', 'to_frame', 'to_list', 'to_numpy', 'to_series', 'tolist', 'transpose',
+    'to_flat_index', 'to_frame', 'to_list', 'to_series', 'tolist', 'transpose',
     'union', 'unique', 'value_counts', 'values', 'view', 'where',
 ])

@@ -23,7 +23,7 @@ import numpy as np
 from ._pd_column import Column
 from ._pd_dtypes import STR, INTS, is_missing
 
-__all__ = ["check_args", "reduce_column", "compare", "logical"]
+__all__ = ["check_args", "reduce_column", "truth_column", "compare", "logical"]
 
 
 def _unsupported(what):
@@ -47,6 +47,22 @@ def _scalar(x):
 
 _INT_SCALARS = {"int64": np.int64, "int32": np.int32, "int16": np.int16, "int8": np.int8,
                 "uint32": np.uint32, "uint16": np.uint16, "uint8": np.uint8}
+
+
+def truth_column(col, op, skipna):
+    """Series.any / Series.all: each value's truth (numbers: nonzero; str
+    and object: Python's), missing values skipped (or True with
+    skipna=False, as NaN is), an np.bool_ as pandas gives."""
+    from ._pd_datetime import DT
+    if col.dtype is DT:
+        raise _unsupported("Series.%s of a datetime64[us] column" % op)
+    vals = col.tolist()
+    miss = col.isna().tolist()
+    if skipna:
+        truths = [bool(v) for v, m in zip(vals, miss) if not m]
+    else:
+        truths = [True if m else bool(v) for v, m in zip(vals, miss)]
+    return np.bool_(any(truths) if op == "any" else all(truths))
 
 
 def reduce_column(col, op, skipna):

@@ -282,6 +282,18 @@
 !! NotImplementedError: pandas.SeriesGroupBy.sum of a datetime64[us] column is not in Sagebrush's pandas 0.x subset
 == groupby.level-other
 !! NotImplementedError: pandas.DataFrame.groupby(level=) other than the index itself is not in Sagebrush's pandas 0.x subset
+== reach.index-asarray-str
+!! NotImplementedError: pandas.numpy.asarray(Index) of str labels (Index.to_numpy() gives its '<U' array) is not in Sagebrush's pandas 0.x subset
+== reach.index-asarray-dtype
+!! NotImplementedError: pandas.numpy.asarray(Index, dtype=) is not in Sagebrush's pandas 0.x subset
+== reach.any-datetime
+!! NotImplementedError: pandas.Series.any of a datetime64[us] column is not in Sagebrush's pandas 0.x subset
+== reach.frame-any-axis1
+!! NotImplementedError: pandas.DataFrame.any(axis=, **kwargs) is not in Sagebrush's pandas 0.x subset
+== reach.series-all-bool-only
+!! NotImplementedError: pandas.Series.all(axis=, bool_only=, **kwargs) is not in Sagebrush's pandas 0.x subset
+== reach.take-kwargs
+!! NotImplementedError: pandas.Series.take(**kwargs) is not in Sagebrush's pandas 0.x subset
 == op.series-add
 !! NotImplementedError: pandas.Series.__add__ (arithmetic) is not in Sagebrush's pandas 0.x subset
 == op.series-radd

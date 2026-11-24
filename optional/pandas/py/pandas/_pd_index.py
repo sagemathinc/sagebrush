@@ -79,6 +79,35 @@ class Index(object):
     def tolist(self):
         return self._pd_column().tolist()
 
+    def _pd_as_series(self):
+        from ._pd_series import Series
+        return Series._pd_new(self._pd_column(), default_index(len(self)), self.name)
+
+    def to_numpy(self, dtype=None, copy=False, na_value=None, **kwargs):
+        """The labels as a numpy array, as Series.to_numpy gives a column's
+        (a str Index gives a '<U' array: Sagebrush's numpy has no object
+        dtype yet)."""
+        if kwargs:
+            raise NotImplementedError("pandas.Index.to_numpy(**kwargs) is not in Sagebrush's pandas 0.x subset")
+        s = self._pd_as_series()
+        return s.to_numpy(dtype=dtype, copy=copy) if na_value is None else s.to_numpy(dtype=dtype, copy=copy, na_value=na_value)
+
+    def __array__(self, dtype=None, copy=None):
+        from ._pd_series import _export
+        from ._pd_dtypes import STR
+        if dtype is not None:
+            raise NotImplementedError("pandas.numpy.asarray(Index, dtype=) is not in Sagebrush's pandas 0.x subset")
+        col = self._pd_column()
+        if col.dtype is STR:
+            # (Sagebrush's numpy can't take a string array from __array__ yet; to_numpy() gives one)
+            raise NotImplementedError("pandas.numpy.asarray(Index) of str labels (Index.to_numpy() gives its '<U' array) is not in Sagebrush's pandas 0.x subset")
+        return _export(col, "numpy.asarray(Index)")
+
+    def astype(self, dtype, copy=True):
+        """The labels converted to dtype, as Series.astype converts a column."""
+        from ._pd_column import astype_column
+        return Index(astype_column(self._pd_column(), dtype), name=self.name)
+
     def to_list(self):
         return self.tolist()
 

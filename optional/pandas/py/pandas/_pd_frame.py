@@ -11,7 +11,7 @@ from ._pd_column import Column, column_from, set_values
 from ._pd_dtypes import STR, INTS, FLOATS, infer, is_missing, resolve_dtype
 from ._pd_index import Index, RangeIndex, default_index, ensure_index
 from ._pd_series import Series, _astype, _broadcast, _head_positions, _tail_positions, _sample_positions, dtype_object, diff_column, \
-    with_na_value, export_as, is_int_target
+    with_na_value, export_as, is_int_target, take_positions
 from ._pd_datetime import DT, to_us
 from .errors import _INPLACE, inplace_given
 from . import _pd_indexing as X
@@ -419,6 +419,32 @@ class DataFrame(object):
 
     def count(self, axis=None, numeric_only=False):
         return self._pd_reduce("count", axis, True, numeric_only, {})
+
+    def _pd_truth(self, op, axis, bool_only, skipna, kwargs):
+        if kwargs or axis not in (0, "index"):
+            raise _unsupported("DataFrame.%s(axis=, **kwargs)" % op)
+        js = [j for j, c in enumerate(self._pd_cols) if not bool_only or c.dtype == "bool"]
+        vals = [bool(R.truth_column(self._pd_cols[j], op, skipna)) for j in js]
+        return Series._pd_new(Column("bool", np.array(vals, dtype=bool)), self._pd_columns._pd_take(js))
+
+    def any(self, *, axis=0, bool_only=False, skipna=True, **kwargs):
+        """Whether any value of each column is true: a bool Series."""
+        return self._pd_truth("any", axis, bool_only, skipna, kwargs)
+
+    def all(self, *, axis=0, bool_only=False, skipna=True, **kwargs):
+        """Whether every value of each column is true: a bool Series."""
+        return self._pd_truth("all", axis, bool_only, skipna, kwargs)
+
+    def take(self, indices, axis=0, **kwargs):
+        """The rows (axis=0) or columns (axis=1) at positions indices
+        (negative from the end), labels kept."""
+        if kwargs:
+            raise _unsupported("DataFrame.take(**kwargs)")
+        if axis in (0, "index", "rows"):
+            return self._pd_take_rows(take_positions(indices, len(self)))
+        if axis in (1, "columns"):
+            return self._pd_take_cols(take_positions(indices, len(self._pd_cols)))
+        raise ValueError("No axis named %s for object type DataFrame" % (axis,))
 
     # --- selection ---------------------------------------------------------
 

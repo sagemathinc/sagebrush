@@ -242,6 +242,27 @@ class Series(object):
     def count(self):
         return R.reduce_column(self._pd_col, "count", True)
 
+    def any(self, *, axis=0, bool_only=False, skipna=True, **kwargs):
+        """Whether any value is true (see _pd_reduce.truth_column)."""
+        if kwargs or axis not in (0, "index", None) or bool_only:
+            raise _unsupported("Series.any(axis=, bool_only=, **kwargs)")
+        return R.truth_column(self._pd_col, "any", skipna)
+
+    def all(self, *, axis=0, bool_only=False, skipna=True, **kwargs):
+        """Whether every value is true (see _pd_reduce.truth_column)."""
+        if kwargs or axis not in (0, "index", None) or bool_only:
+            raise _unsupported("Series.all(axis=, bool_only=, **kwargs)")
+        return R.truth_column(self._pd_col, "all", skipna)
+
+    def take(self, indices, axis=0, **kwargs):
+        """The rows at positions indices (negative from the end), labels
+        kept."""
+        if kwargs:
+            raise _unsupported("Series.take(**kwargs)")
+        if axis not in (0, "index", "rows"):
+            raise ValueError("No axis named %s for object type Series" % (axis,))
+        return self._pd_take(take_positions(indices, len(self)))
+
     # --- comparisons (for boolean masks) -----------------------------------
 
     def _pd_compare(self, other, op):
@@ -754,6 +775,25 @@ def _export(col, what, readonly=True):
     if readonly:
         a.flags.writeable = False
     return a
+
+
+def take_positions(indices, n):
+    """take's positions: numbers as integers (a float truncated), negative
+    ones from the end, each within n (pandas' IndexError otherwise)."""
+    from ._pd_index import Index
+    if isinstance(indices, (Series, Index)):
+        indices = indices.tolist()
+    vals = indices.tolist() if isinstance(indices, np.ndarray) else list(indices) if isinstance(indices, (list, tuple, range)) else [indices]
+    out = []
+    for i in vals:
+        # (numbers as numpy's intp: a float truncates, as pandas' ensure_platform_int casts it)
+        if not isinstance(i, (int, float, np.integer, np.floating, np.bool_)) or (isinstance(i, (float, np.floating)) and i != i):
+            raise IndexError("arrays used as indices must be of integer (or boolean) type")
+        i = int(i)
+        if i < -n or i >= n:
+            raise IndexError("indices are out-of-bounds")
+        out.append(i + n if i < 0 else i)
+    return out
 
 
 def with_na_value(col, na_value):
