@@ -629,6 +629,46 @@
    "variants": 8,
    "input_hash": "342325696"
   },
+  "mat_z_elementary_divisors:c0": {
+   "n": 12,
+   "variants": 8,
+   "input_hash": "201144882"
+  },
+  "mat_z_elementary_divisors:c1": {
+   "n": 24,
+   "variants": 8,
+   "input_hash": "215860605"
+  },
+  "mat_z_elementary_divisors:c2": {
+   "n": 48,
+   "variants": 8,
+   "input_hash": "365423674"
+  },
+  "mat_z_elementary_divisors:c3": {
+   "n": 96,
+   "variants": 8,
+   "input_hash": "943473195"
+  },
+  "mat_z_elementary_divisors:c4": {
+   "n": 192,
+   "variants": 8,
+   "input_hash": "802334827"
+  },
+  "mat_z_elementary_divisors:l": {
+   "n": 60,
+   "variants": 1,
+   "input_hash": "548784494"
+  },
+  "mat_z_elementary_divisors:m": {
+   "n": 24,
+   "variants": 8,
+   "input_hash": "215860605"
+  },
+  "mat_z_elementary_divisors:s": {
+   "n": 12,
+   "variants": 8,
+   "input_hash": "201144882"
+  },
   "mat_z_rank:c0": {
    "n": 114,
    "variants": 8,

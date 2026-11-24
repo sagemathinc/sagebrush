@@ -967,7 +967,7 @@ class Files(unittest.TestCase):
             cal = sorted(k for k in r["sizes"] if k not in ("s", "m", "l"))
             self.assertEqual(sorted(set(r["sizes"]) - set(cal)), ["l", "m", "s"])
             self.assertIn(cal, ([], ["c0", "c1", "c2", "c3", "c4"]))
-        self.assertEqual(len(m["rows"]), 37)
+        self.assertEqual(len(m["rows"]), 38)
 
 
 class Units(unittest.TestCase):

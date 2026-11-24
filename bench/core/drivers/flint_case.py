@@ -226,7 +226,7 @@ def prepare(v):
             return lambda: A.charpoly()
         if op == "hnf":
             return lambda: A.hnf()
-        if op == "smith":
+        if op in ("smith", "divisors"):
             return lambda: A.snf()
         b_rows = [[i + 1] for i in range(n)]
         b = flint.nmod_mat(b_rows, P) if kind == "fp" else flint.fmpq_mat(b_rows)
@@ -257,7 +257,7 @@ def signature(answer):
         if op == "charpoly":
             cs = list(answer)
             return "%d:%d" % (len(cs) - 1, seq_hash(cs))
-        if op == "smith":
+        if op in ("smith", "divisors"):
             return "%d:%d" % (n, seq_hash(abs(int(answer[i, i])) for i in range(n)))
         return "%d:%d" % (n, seq_hash(flatten(answer)))
     raise ValueError(case_id)

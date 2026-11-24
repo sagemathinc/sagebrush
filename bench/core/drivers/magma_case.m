@@ -171,7 +171,7 @@ function Build(case_id, n, v)
         if case_id eq "poly_fp_factor" then pf:=x^n-1; end if;
         if case_id eq "poly_fp_factor_dense" then pf:=DensePoly(n,1,v,R); end if;
         ops := case_id in {"poly_fp_factor","poly_fp_factor_dense"} select Coefficients(pf) else Coefficients(pa) cat Coefficients(pb);
-    elif case_id in {"mat_z_det","mat_z_rank","mat_z_hnf","mat_z_smith","mat_z_charpoly"} then
+    elif case_id in {"mat_z_det","mat_z_rank","mat_z_hnf","mat_z_smith","mat_z_charpoly","mat_z_elementary_divisors"} then
         A:=ZMat(n,v); ops := Eltseq(A);
     elif case_id in {"mat_fp_det","mat_fp_rank","mat_fp_solve","mat_fp_charpoly"} then
         A:=FpMat(n,v); ops := Eltseq(A);
@@ -210,6 +210,7 @@ function DoOp(case_id, S)
     elif case_id in {"mat_z_rank","mat_fp_rank","mat_q_rank","mat_z_rank_wide","mat_z_rank_def","mat_z_rank_def_p","mat_q_rank_wide","mat_q_rank_def","mat_q_rank_def_p"} then return Rank(A);
     elif case_id eq "mat_z_hnf" then return HermiteForm(A);
     elif case_id eq "mat_z_smith" then return SmithForm(A);
+    elif case_id eq "mat_z_elementary_divisors" then return ElementaryDivisors(A);
     elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_q_charpoly"} then return CharacteristicPolynomial(A);
     elif case_id in {"mat_fp_solve","mat_q_solve"} then return Solution(Transpose(A),v);
     elif case_id in {"groebner_cyclic","groebner_katsura"} then return GroebnerBasis(I);
@@ -237,6 +238,10 @@ function Sig(case_id, n, answer)
         return IntegerToString(Degree(answer)) cat ":" cat IntegerToString(SeqHash(Coefficients(answer)));
     elif case_id eq "mat_z_smith" then
         return IntegerToString(n) cat ":" cat IntegerToString(SeqHash([Abs(answer[i,i]):i in [1..n]]));
+    elif case_id eq "mat_z_elementary_divisors" then
+        // (the nonzero divisors only: padded with zeros to n, as the others)
+        d := [Integers()| Abs(z) : z in answer] cat [Integers()| 0 : i in [1..n-#answer]];
+        return IntegerToString(n) cat ":" cat IntegerToString(SeqHash(d));
     elif case_id in {"mat_z_hnf","mat_fp_solve","mat_q_solve"} then
         return IntegerToString(n) cat ":" cat IntegerToString(SeqHash(Eltseq(answer)));
     elif case_id in {"groebner_cyclic","groebner_katsura"} then

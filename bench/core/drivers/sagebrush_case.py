@@ -252,6 +252,8 @@ def prepare(v):
             return lambda: A.hermite_form()
         if op == "smith":
             return lambda: A.smith_form()[0]
+        if op == "divisors":
+            return lambda: A.elementary_divisors()
         if op == "solve":
             b = vector(ring, [i + 1 for i in range(n)])
             operands(A.list(), list(b))
@@ -306,6 +308,11 @@ def signature(answer):
         if op == "smith":
             diagonal = [abs(int(answer[i, i])) for i in range(n)]
             return "%d:%d" % (n, seq_hash(diagonal))
+        if op == "divisors":
+            # (the diagonal, as the Smith form's signature: padded with
+            # zeros to n, since some systems list only the nonzero ones)
+            d = [abs(int(x)) for x in answer]
+            return "%d:%d" % (n, seq_hash(d + [0] * (n - len(d))))
         return "%d:%d" % (
             n,
             matrix_hash(answer if hasattr(answer, "list") else matrix(answer)),

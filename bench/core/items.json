@@ -847,8 +847,61 @@
     "user": "sage-mode",
     "native": false,
     "magma": true,
+    "flint": false
+   },
+   "compares": "with transforms",
+   "compares_note": "FLINT's snf gives the diagonal only, so it is compared on mat_z_elementary_divisors instead"
+  },
+  {
+   "id": "mat_z_elementary_divisors",
+   "item": "la2",
+   "category": "linear algebra over Z",
+   "label": "elementary divisors (the Smith form's diagonal)",
+   "sizes": {
+    "s": {
+     "n": 12,
+     "timeout": 120
+    },
+    "m": {
+     "n": 24,
+     "timeout": 300
+    },
+    "l": {
+     "n": 60,
+     "timeout": 900,
+     "variants": 1,
+     "variants_note": "one Sage-mode operation takes about 2 minutes here, so repeating it can't warm anything"
+    },
+    "c0": {
+     "n": 12,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 24,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 48,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 96,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 192,
+     "timeout": 600
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
     "flint": "python"
-   }
+   },
+   "compares": "diagonal",
+   "calibration_note": "provisional calibration sizes (doubling n; no level-A fit yet): re-fit after the first run"
   },
   {
    "id": "mat_z_charpoly",
