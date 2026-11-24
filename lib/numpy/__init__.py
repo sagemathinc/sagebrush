@@ -327,12 +327,41 @@ class complex64(complex, complexfloating):
     __slots__ = ()
     __hash__ = complex.__hash__
 
+    # (its value is complex64's: each part the float32 nearest, as NumPy stores it; written with float32's
+    # shortest digits, as NumPy prints one)
+    def __new__(cls, *args):
+        if len(args) == 1 and isinstance(args[0], (list, tuple, ndarray)):
+            return asarray(args[0], complex64)
+        c = complex(*args)
+        return complex.__new__(cls, _f32(c.real), _f32(c.imag))
+
+    # (its parts are float32 scalars, as NumPy's)
+    real = property(lambda self: float32(complex.real.__get__(self)))
+    imag = property(lambda self: float32(complex.imag.__get__(self)))
+
+    def conjugate(self):
+        return complex64(complex.conjugate(self))
+
     def __repr__(self):
-        r = complex.__repr__(self)
-        return "np.complex64(%s)" % (r[1:-1] if r.startswith("(") else r)
+        return "np.complex64(%s)" % _c64text(self)
 
     def __str__(self):
-        return complex.__repr__(self)
+        return _c64text(self, True)
+
+
+def _c64text(z, paren=False):
+    # (CPython's complex repr, with each part as float32 prints: "0.1+0.2j", "-0j", "(1+2j)" in str)
+    re, im = z.real, z.imag
+
+    def f(x):
+        t = _np.format_f32(x)
+        return t[:-2] if t.endswith(".0") else t  # (a complex's parts are written without ".0", as CPython's)
+
+    if re == 0 and _math.copysign(1.0, re) > 0:
+        return f(im) + "j"
+    s = f(im)
+    body = "%s%s%sj" % (f(re), "" if s.startswith("-") or s.startswith("+") else "+", s)
+    return "(%s)" % body if paren else body
 
 
 True_ = bool_(True)
