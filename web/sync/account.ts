@@ -2401,7 +2401,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Tests only: shift the mailbox's clock, and count the E2E rows. */
-  async testE2E(a: { shift?: number; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number }; corrupt?: "state_hash" | "hash"; keyrings?: "drop-last" | "swap-last" }): Promise<Record<string, number> | null> {
+  async testE2E(a: { shift?: number; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number }; corrupt?: "state_hash" | "hash"; keyrings?: "drop-last" | "swap-last" | "stray-first" }): Promise<Record<string, number> | null> {
     if (!testMode(this.env)) return null;
     if (a.shift !== undefined) this.e2eShift = a.shift;
     if (a.failCommit !== undefined) this.e2eFailCommit = a.failCommit;
@@ -2409,6 +2409,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (a.bounds !== undefined && this.e2eStore) Object.assign(this.e2eStore.bounds, a.bounds);
     // (a stored keyring row lost, or replaced by other bytes under their own hash, as a storage fault would leave it)
     if (a.keyrings === "drop-last") this.sql.exec("DELETE FROM e2e_keyrings WHERE epoch = (SELECT MAX(epoch) FROM e2e_keyrings)");
+    // (a stray row before epoch 1, as a damaged store might hold)
+    if (a.keyrings === "stray-first") this.sql.exec("INSERT INTO e2e_keyrings (epoch, generation, suite, prev, prev_ring, hash, bytes) VALUES (0, 'x', 1, 'x', '', 'x', randomblob(60))");
     if (a.keyrings === "swap-last") this.sql.exec("UPDATE e2e_keyrings SET bytes = randomblob(60), hash = 'x' WHERE epoch = (SELECT MAX(epoch) FROM e2e_keyrings)");
     if (a.corrupt === "state_hash" || a.corrupt === "hash") this.sql.exec(`UPDATE e2e_checkpoint SET ${a.corrupt} = 'x' WHERE id = 1`);
     const out: Record<string, number> = {};
