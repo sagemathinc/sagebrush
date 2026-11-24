@@ -490,6 +490,41 @@ try {
     ok(J(r["sealBlob leaves its inputs"]) === J([true, true]), "Z-3: sealBlob works on its own copies and leaves the caller's plaintext and sha as they were", r["sealBlob leaves its inputs"]);
   }
 
+  {
+    // (sealing and opening take only a CEK importCek made: refused before any randomness or crypto otherwise)
+    const r = await P.ev(`(async () => {
+      const cek = await e2e.importCek(unhx(${J(CEK.toString("hex"))})), oh = { ...${J(objH)}, plaintextLength: 5, compressedLength: 5 };
+      const o = await e2e.sealObject(cek, oh, big(5)), L = { maxPlaintext: 64, maxCompressed: 64, maxRatio: 1 }, id = (c) => c.slice();
+      const raw = unhx(${J(CEK.toString("hex"))}), s = crypto.subtle;
+      const others = {
+        broadHkdf: await s.importKey("raw", raw, "HKDF", false, ["deriveBits", "deriveKey"]),
+        hkdfDeriveBits: await s.importKey("raw", raw, "HKDF", false, ["deriveBits"]), aesGcm: await s.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]),
+        hmac: await s.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]), notAKey: { type: "secret", algorithm: { name: "HKDF" }, extractable: false, usages: ["deriveKey"] },
+        none: undefined,
+      };
+      const work = { random: 0, derive: 0, encrypt: 0, decrypt: 0 };
+      const real = { gr: crypto.getRandomValues, dk: s.deriveKey, en: s.encrypt, de: s.decrypt };
+      crypto.getRandomValues = function (b) { work.random++; return real.gr.call(this, b); };
+      s.deriveKey = function (...a) { work.derive++; return real.dk.apply(this, a); };
+      s.encrypt = function (...a) { work.encrypt++; return real.en.apply(this, a); };
+      s.decrypt = function (...a) { work.decrypt++; return real.de.apply(this, a); };
+      const out = {};
+      try {
+        for (const [k, key] of Object.entries(others)) out[k] = [await code(() => e2e.sealObject(key, oh, big(5))), await code(() => e2e.openObject(key, oh, o, id, L))];
+        out.work = { ...work };
+        out.own = [await code(() => e2e.openObject(cek, oh, o, id, L)), work.derive > 0];
+        // (the same bytes imported elsewhere with the same shape, as a structured clone of a CEK would be, open too)
+        out.sameShape = await code(async () => e2e.openObject(await s.importKey("raw", raw, "HKDF", false, ["deriveKey"]), oh, o, id, L));
+      } finally { crypto.getRandomValues = real.gr; s.deriveKey = real.dk; s.encrypt = real.en; s.decrypt = real.de; }
+      return out;
+    })()`);
+    const { work, own, sameShape, ...cases } = r;
+    const wrong = Object.entries(cases).filter(([, v]) => J(v) !== J(["bad_form", "bad_form"]));
+    ok(Object.keys(cases).length === 6 && wrong.length === 0, "K-6: sealing and opening refuse (bad_form) any key that isn't a CEK's shape (a secret HKDF key, not extractable, for deriveKey only): an HKDF key that also derives bits, HKDF for deriveBits, AES-GCM, HMAC, a look-alike object, none", wrong);
+    ok(J(work) === J({ random: 0, derive: 0, encrypt: 0, decrypt: 0 }), "K-6: and before any randomness, derivation or encryption", work);
+    ok(J(own) === J(["ok", true]) && sameShape === "ok", "K-6: (importCek's key opens, deriving its sealing's key; so does a key of the same shape, as a structured clone would be)", [own, sameShape]);
+  }
+
   // ---- D: bounded inflating, after authentication
   {
     const r = await P.ev(`(async () => {

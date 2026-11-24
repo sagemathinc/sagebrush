@@ -81,9 +81,19 @@ function objectFields(h: ObjectHeader): Uint8Array {
   return concat(name(h.account, "the account"), field(utf8(h.kind)), name(h.object, "the object"), name(h.version, "the version"), totals(h));
 }
 
-/** A content key (CEK) from its 32 raw bytes: an HKDF key, not extractable (the caller clears the bytes). */
+/** A content key (CEK) from its 32 raw bytes: an HKDF key, not extractable, for deriveKey only (the caller clears the bytes). */
 export function importCek(raw: Uint8Array): Promise<CryptoKey> {
   return subtle().importKey("raw", buf(bytes32(raw, "a content key")), "HKDF", false, ["deriveKey"]);
+}
+
+// (a CEK is what importCek makes, or a structured clone of it: a secret HKDF key, not extractable, whose one use is
+//  deriveKey. Anything else, a key that also derives bits included, is refused before any randomness or crypto)
+function cekShape(cek: unknown): CryptoKey {
+  const k = cek as CryptoKey;
+  if (!(cek instanceof CryptoKey) || k.type !== "secret" || k.algorithm?.name !== "HKDF" || k.extractable !== false || k.usages.length !== 1 || k.usages[0] !== "deriveKey") {
+    refuse("bad_form", "a content key is a secret HKDF key, not extractable, for deriveKey only");
+  }
+  return k;
 }
 
 // (one sealing's own key: HKDF(CEK, label ‖ fields ‖ seal id), AES-256-GCM, not extractable)
@@ -150,6 +160,7 @@ const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every(
 
 /** Seal a document, snapshot or index snapshot under its CEK (importCek): a fresh 32-byte seal id and the chunks. */
 export async function sealObject(cek: CryptoKey, h: ObjectHeader, compressed: Uint8Array): Promise<{ sealId: Uint8Array; chunks: Uint8Array[] }> {
+  cekShape(cek);
   const fields = objectFields(h);
   sealable(h, compressed);
   const bytes = compressed.slice(); // (a copy before any await: the caller's buffer may change meanwhile)
@@ -169,6 +180,7 @@ export async function sealObject(cek: CryptoKey, h: ObjectHeader, compressed: Ui
 
 /** Open what sealObject made: every chunk authenticated, then inflated within the limits. */
 export async function openObject(cek: CryptoKey, h: ObjectHeader, sealed: { sealId: Uint8Array; chunks: readonly Uint8Array[] }, inflate: Inflate, limits: Limits): Promise<Uint8Array> {
+  cekShape(cek);
   const fields = objectFields(h);
   bounded(h, limits);
   const { sealId, chunks } = sealed ?? ({} as typeof sealed);
