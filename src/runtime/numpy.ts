@@ -1001,9 +1001,15 @@ export function tolist(a: NDArray): any {
 
 // ------------------------------------------------------------------ indexing
 
-function normAxis(ax: number, nd: number): number {
+// NumPy's AxisError (numpy.exceptions, a ValueError and an IndexError), which the numpy
+// package hands over as it loads (set_axis_error); before that, an IndexError
+let axisError: any = null;
+function normAxis(ax: number, nd: number, prefix: string | null = null): number {
   const a = ax < 0 ? ax + nd : ax;
-  if (a < 0 || a >= nd || !Number.isInteger(a)) raise(T.AxisError ?? T.IndexError, `axis ${ax} is out of bounds for array of dimension ${nd}`);
+  if (a < 0 || a >= nd || !Number.isInteger(a)) {
+    if (axisError) throw Obj.markRaised(Obj.callObj(axisError, [ax, nd, prefix]));
+    raise(T.IndexError, `${prefix === null ? "" : prefix + ": "}axis ${ax} is out of bounds for array of dimension ${nd}`);
+  }
   return a;
 }
 
@@ -2050,7 +2056,12 @@ function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
 
 function axesArg(axis: any, nd: number): number[] | null {
   if (axis === null || axis === undefined) return null;
-  if (Array.isArray(axis)) return axis.map((x) => normAxis(intNum(x), nd));
+  if (Array.isArray(axis)) {
+    const axes = axis.map((x) => normAxis(intNum(x), nd));
+    // (an axis named twice, as NumPy's reductions: refused)
+    if (new Set(axes).size !== axes.length) raise(T.ValueError, "duplicate value in 'axis'");
+    return axes;
+  }
   return [normAxis(intNum(axis), nd)];
 }
 
@@ -3938,7 +3949,7 @@ newBuiltinModule("_numpy", (m) => {
   M("transpose", (a: NDArray, ...axes: any[]) => tr(a, axes.length === 0 || (axes.length === 1 && axes[0] === null) ? null : shapeArg(axes.length === 1 ? axes[0] : tuple(axes))));
   M("swapaxes", (a: NDArray, x: any, y: any) => {
     const order = a.shape.map((_, i) => i);
-    const i = normAxis(Number(x), a.ndim), j = normAxis(Number(y), a.ndim);
+    const i = normAxis(Number(x), a.ndim, "axis1"), j = normAxis(Number(y), a.ndim, "axis2");
     [order[i], order[j]] = [order[j], order[i]];
     return tr(a, order);
   });
@@ -4414,6 +4425,7 @@ newBuiltinModule("_numpy", (m) => {
     return null;
   });
   // (lib/numpy's set_printoptions validates and passes every option)
+  fn("set_axis_error", (cls: any) => ((axisError = cls), null));
   fn("set_printoptions", (precision: any, threshold: any, edgeitems: any, linewidth: any, suppress: any, sign: any, floatmode: any, nanstr: any, infstr: any, fb: any, fi: any, ff: any, fc: any, fU: any, overrideRepr: any) => {
     printopts.precision = Number(precision);
     printopts.threshold = Number(threshold);
