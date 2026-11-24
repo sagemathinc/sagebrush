@@ -7,8 +7,9 @@
 //  - images: only names in the caller's allowlist map (opts.images), never a document-supplied URL;
 //  - no eval / new Function anywhere.
 // KaTeX's renderToString is given by the host (setKatex): on the site, the shared sagebrush-math.js's copy
-let renderToString = null;
-export function setKatex(f) { renderToString = f; }
+let renderToString = null, renderToHTMLTree = null;
+// (renderToHTMLTree, optional: KaTeX's layout, read for the sizes of TikZ node text; without it they are estimated)
+export function setKatex(f, tree) { renderToString = f; renderToHTMLTree = tree || null; }
 import { CAT, isCs, catOf, codeOf, depthOf } from "./demo-machine.mjs";
 import { TEXT_SYMBOLS, ACCENTS, SIZES, COLORS } from "./symbols.mjs";
 import { renderTikz, TikzError, TIKZ_LIMITS, utf8Len } from "./tikz.mjs";
@@ -182,6 +183,82 @@ class Flow {
     return this.root.items;
   }
   inlineHtml() { return this.finish().join(""); }
+}
+
+// ------------------------------------------------------------------ TikZ node text (for tikz.mjs: opts.label)
+// A node's text, one line of it, as KaTeX's HTML and its size in pt at 10pt (TeX's text box: width, height, depth):
+// text as \text{...} in the node's family (KaTeX's fonts are Computer Modern, TeX's own), $...$ as math. The size is
+// read from KaTeX's layout tree: each symbol's advance width (a run of text KaTeX merged into one symbol, character by
+// character), the spaces it puts between atoms, a script's or a fraction's widest row, scaled by its size class.
+const FAMILY = { bold: "textbf", italic: "textit", sans: "textsf", mono: "texttt" };
+const SIZE_CLASS = [0, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.2, 1.44, 1.728, 2.074, 2.488];
+/** TeX's smaller fonts are drawn wider than 10pt scaled down (cmr7, cmr5...: their own design sizes): the width ratio,
+ *  from the digits' widths, for a font `f` of 10pt (KaTeX draws 10pt scaled, so its boxes are the narrower ones). */
+export function designWidth(f) { return f >= 1 ? 1 : f >= 0.9 ? 1.028 : f >= 0.8 ? 1.063 : f >= 0.7 ? 1.163 : f >= 0.6 ? 1.25 : 1.39; }
+const CHAR_W = new Map();
+export function tikzLabel(text, font = {}, macros = {}, macroSig = "", stats = { katexErrors: 0, katexErrorSamples: [], katexWarnings: 0 }) {
+  const fam = FAMILY[font.family] || "text";
+  let src = "", i = 0, buf = "";
+  const flushText = () => { if (buf.trim()) src += "\\" + fam + "{" + buf + "}"; else if (buf) src += "\\ "; buf = ""; };
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "\\" && i + 1 < text.length) { buf += c + text[i + 1]; i += 2; continue; }
+    if (c === "$") {
+      const j = text.indexOf("$", i + 1);
+      if (j < 0) throw new TikzError("a node's text with a $ not closed");
+      flushText(); src += "{" + text.slice(i + 1, j) + "}"; i = j + 1; continue;
+    }
+    buf += c; i++;
+  }
+  flushText();
+  if (!src) return { html: "", w: 0, h: 0, d: 0 };
+  const html = texMath(src, false, macros, macroSig, stats);
+  if (html.includes("katex-error")) throw new TikzError("a node's text KaTeX can't typeset: " + text.slice(0, 60));
+  if (!renderToHTMLTree) {
+    // (no layout tree: an estimate that errs large, half an em a character, a full line's height and depth)
+    return { html, w: 5.5 * [...text.replace(/[$\\{}]/g, "")].length, h: 7.5, d: 2.5 };
+  }
+  let tree;
+  try { tree = renderToHTMLTree(src, { displayMode: false, throwOnError: true, trust: false, maxSize: 20, maxExpand: 1000, strict: "ignore", macros: Object.assign({}, macros) }); }
+  catch { throw new TikzError("a node's text KaTeX can't typeset: " + text.slice(0, 60)); }
+  return { html, w: 10 * treeWidth(tree), h: 10 * Math.max(0, tree.height), d: 10 * Math.max(0, tree.depth) };
+}
+const em = (v) => (typeof v === "string" && /em$/.test(v) ? parseFloat(v) || 0 : 0);
+function treeWidth(n, depth = 0) {
+  if (!n || depth > 60) return 0;
+  const cls = n.classes || [];
+  if (cls.includes("katex-mathml")) return 0;
+  const st = n.style || {};
+  let w;
+  if (typeof n.text === "string") {
+    const chars = [...n.text];
+    w = chars.length <= 1 ? n.width || 0 : chars.reduce((a, c) => a + charWidth(c, cls), 0);
+  } else {
+    const kids = (n.children || []).map((k) => treeWidth(k, depth + 1));
+    w = cls.includes("vlist") ? Math.max(0, ...kids) : kids.reduce((a, b) => a + b, 0);
+    const reset = cls.find((c) => /^reset-size\d+$/.test(c)), size = cls.find((c) => /^size\d+$/.test(c));
+    if (reset && size) { const f = SIZE_CLASS[+size.slice(4)] / SIZE_CLASS[+reset.slice(10)]; w *= f * (f < 1 ? designWidth(f) : 1); }
+  }
+  if (cls.includes("nulldelimiter")) w += 0.12;
+  w = Math.max(w, em(st.width), em(st.minWidth));
+  return w + em(st.marginLeft) + em(st.marginRight) + em(st.paddingLeft) + em(st.paddingRight);
+}
+// (one character's width in a run KaTeX merged: rendered alone in the run's font, kept)
+function charWidth(c, cls) {
+  if (c === " " || c === "\u00a0") return 0.3333;
+  const fam = ["textbf", "textit", "textsf", "texttt", "mathbf", "mathit"].find((f) => cls.includes(f)) || (cls.includes("mathnormal") ? "mathnormal" : "text");
+  const key = fam + c;
+  let w = CHAR_W.get(key);
+  if (w === undefined) {
+    const esc1 = /[#$%&_{}]/.test(c) ? "\\" + c : c === "\\" ? "\\textbackslash " : c === "^" ? "\\textasciicircum " : c === "~" ? "\\textasciitilde " : c;
+    try {
+      const t = renderToHTMLTree(fam === "mathnormal" ? esc1 : "\\" + (fam.startsWith("math") ? fam : fam === "text" ? "text" : fam) + "{" + esc1 + "}", { throwOnError: true, strict: "ignore" });
+      w = treeWidth(t);
+    } catch { w = 0; }
+    if (!(w > 0)) w = 0.6;   // (a character KaTeX has no metrics for: an estimate that errs large)
+    if (CHAR_W.size < 4096) CHAR_W.set(key, w);
+  }
+  return w;
 }
 
 // ------------------------------------------------------------------ KaTeX
@@ -647,7 +724,7 @@ class Renderer {
       case "tikzpicture": {
         // (TikZ's drawing: tikz.mjs: paths, styles, transforms, \foreach; what it doesn't draw, a placeholder
         //  naming it, and check's problem says it)
-        try { flow.html(renderTikz(this.tikzStr(n.kids), { styles: this.tikzStyles || "" }, this), c2.st); }
+        try { flow.html(renderTikz(this.tikzStr(n.kids), { styles: this.tikzStyles || "", label: (t, f) => tikzLabel(t, f, this.macros, this.macroSig, this.stats) }, this), c2.st); }
         catch (e) {
           if (!(e instanceof TikzError)) throw e;
           this.problem("not-rendered", "tikzpicture (" + e.why + ")");
