@@ -242,8 +242,8 @@ section("nodes", () => {
   check("edges-stop-at-borders", near(le[0][0], 7.28297, 0.05) && near(le[0][1], 7.28297 / 3, 0.05) && near(Math.hypot(le[1][0] - bc[0], le[1][1] - bc[1]), 9.817, 0.05) && near(le[1][0], bc[0] - (9.817 * bc[0]) / u, 0.05)
     && /data-name="A"[^>]*data-edges="2"/.test(he) && /data-name="B"[^>]*data-edges="2"/.test(he), [le, he.match(/data-edges="[^"]*"/g)]);
   // its text: a line where TeX's text box is, at the node's size, in its text colour as rgb(); KaTeX's line-height 0
-  const ht = draw("\\node[text=red, font=\\small] at (0,0) {A};"), st = /<span style="position:absolute;left:([\d.]+)pt;top:([\d.]+)pt;width:([\d.]+)pt;[^"]*font-size:([\d.]+)pt">/.exec(ht);
-  check("node-text-placed", /color:rgb\(255,0,0\)/.test(ht) && st && near(+st[1], 3.333, 0.02) && near(+st[2], 3.333, 0.02) && near(+st[3], 7.5 * 0.9 * 1.028, 0.02) && near(+st[4], 9 / 1.21, 0.02), st);
+  const ht = draw("\\node[text=red, font=\\small] at (0,0) {A};"), st = /<span style="position:absolute;left:([\d.]+)pt;top:([\d.]+)pt;width:([\d.]+)pt;[^"]*"><span class="katex" style="line-height:0;font-size:([\d.]+)pt">/.exec(ht);
+  check("node-text-placed", /color:rgb\(255,0,0\)/.test(ht) && st && near(+st[1], 3.333, 0.02) && near(+st[2], 3.333, 0.02) && near(+st[3], 7.5 * 0.9 * 1.028, 0.02) && near(+st[4], 9, 0.02), st);
   // styles on every node, labels, and a node's text KaTeX can't typeset, named
   check("every-node-style", near(box(draw("[every node/.style={draw}] \\node at (0,0) {A};"))[2], 7.28297, 0.02) && named("\\node {$\\notacommand x$};") === "a node's text KaTeX can't typeset: $\\notacommand x$", named("\\node {$\\notacommand x$};"));
 });
@@ -377,7 +377,7 @@ section("engine", () => {
   // a node through the engine: its text typeset by KaTeX (the renderer's own label), its data on the page
   const r5 = new Engine().update(doc("\\begin{tikzpicture}\\node[draw] (A) {$x^2$}; \\draw[->] (A) -- (2,0);\\end{tikzpicture}"));
   const h5 = r5.chunks.join("");
-  check("engine-node-drawn", /class="tikz-n" data-name="A" data-c="[^"]+" data-box="[^"]+" data-edges="1"/.test(h5) && /class="katex" style="line-height:0"/.test(h5) && !(r5.problems || []).length, [h5.slice(0, 300), r5.problems]);
+  check("engine-node-drawn", /class="tikz-n" data-name="A" data-c="[^"]+" data-box="[^"]+" data-edges="1"/.test(h5) && /class="katex" style="line-height:0;font-size:10pt"/.test(h5) && !(r5.problems || []).length, [h5.slice(0, 300), r5.problems]);
   // through the engine: an environment inside a picture is named (pgfplots' axis), and calc's $...$ reaches tikz.mjs
   const r3 = new Engine().update(doc("\\begin{tikzpicture}\\begin{axis}\\addplot {x^2};\\end{axis}\\end{tikzpicture}\n\n\\begin{tikzpicture}\\coordinate (A) at (0,0); \\coordinate (B) at (2,2); \\draw (A) -- ($(A)!0.5!(B)$);\\end{tikzpicture}"));
   const h3 = r3.chunks.join("");

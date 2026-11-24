@@ -953,16 +953,17 @@ class Picture {
     }
     // (each node: a span holding its data, the centre, its border's box and the paths that end at it, in TeX's
     //  coordinates, pt, and its text, each line where TeX puts it: its left and the top of its box, KaTeX's HTML at the
-    //  node's size (KaTeX's em is 1.21 of its parent's font), centred in the width the metrics give, overflowing both
-    //  sides if a browser draws it wider. line-height 0: the line's box is KaTeX's struts, the text box itself)
+    //  node's size, set on KaTeX's own element (so no stylesheet's .katex size applies), centred in the width the
+    //  metrics give, overflowing both sides if a browser draws it wider. line-height 0: the line's box is KaTeX's struts,
+    //  the text box itself)
     let texts = "";
     for (const n of this.nodeList) {
       const nd = n.nd, bb = borderBox(nd);
       texts += '<span class="tikz-n" data-name="' + (n.name || "") + '" data-c="' + nd.c.map(fmtNum).join(" ") + '" data-box="' + bb.map(fmtNum).join(" ") +
         '" data-edges="' + nd.edges.join(" ") + '" style="position:absolute;left:0;top:0;color:' + n.color + '">';
       for (const l of n.lines) {
-        texts += '<span style="position:absolute;left:' + X(l.x) + "pt;top:" + Y(l.base + l.h) + "pt;width:" + fmtNum(l.w) + "pt;display:flex;justify-content:center;line-height:0;white-space:nowrap;font-size:" +
-          fmtNum((10 * n.size) / 1.21) + 'pt">' + l.html.replace('<span class="katex">', '<span class="katex" style="line-height:0">') + "</span>";
+        texts += '<span style="position:absolute;left:' + X(l.x) + "pt;top:" + Y(l.base + l.h) + "pt;width:" + fmtNum(l.w) + "pt;display:flex;justify-content:center;line-height:0;white-space:nowrap" + '">' +
+          l.html.replace('<span class="katex">', '<span class="katex" style="line-height:0;font-size:' + fmtNum(10 * n.size) + 'pt">') + "</span>";
       }
       texts += "</span>";
     }
