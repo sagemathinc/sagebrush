@@ -28,7 +28,9 @@ const epochKey = (S, label, account, n) => hkdf(S, Buffer.concat([s8(label), fld
 const count = (len) => Math.max(1, Math.ceil(len / MiB));
 const piece = (len, i) => (i < count(len) - 1 ? MiB : len - MiB * (count(len) - 1));
 const totalsAad = (h) => Buffer.concat([fld(s8(h.codec)), u64(h.plaintextLength), u64(h.compressedLength)]);
-const objectAad = (h, i) => Buffer.concat([s8("sagebrush.e2e.object.chunk.aad.v1"), fld(s8(h.account)), fld(s8(h.kind)), fld(s8(h.object)), fld(s8(h.version)), totalsAad(h), u32(count(h.compressedLength)), u32(i), u32(piece(h.compressedLength, i))]);
+const objectFields = (h) => Buffer.concat([fld(s8(h.account)), fld(s8(h.kind)), fld(s8(h.object)), fld(s8(h.version)), totalsAad(h)]);
+const objectKey = (cek, h, sealId) => hkdf(cek, Buffer.concat([s8("sagebrush.e2e.object.key.v1"), objectFields(h), sealId]));
+const objectAad = (h, sealId, i) => Buffer.concat([s8("sagebrush.e2e.object.chunk.aad.v1"), objectFields(h), sealId, u32(count(h.compressedLength)), u32(i), u32(piece(h.compressedLength, i))]);
 const blobAad = (h, i) => Buffer.concat([s8("sagebrush.e2e.blob.chunk.aad.v1"), fld(s8(h.account)), fld(s8(h.address)), totalsAad(h), u32(count(h.compressedLength)), u32(i), u32(piece(h.compressedLength, i))]);
 const sliceOf = (bytes, len, i) => bytes.subarray(i * MiB, i * MiB + piece(len, i));
 
@@ -135,6 +137,16 @@ try {
     const fr = {};
     for (const [name, c] of Object.entries(fakes)) fr[name] = await P.ev(`e2e.checkFloor(${c}).then((r) => ({ ...r }))`);
     ok(Object.entries(fr).every(([name, r]) => r.ok === false && J(r.missing) === J([name])), "F-3: a constant X25519 shared secret, an HMAC of zeros, a fake AES-GCM that appends 16 zero bytes, and an Ed25519 private key that exports anyway each fail the floor (RFC 7748, RFC 4231 and the GCM specification's known answers; the export is attempted)", fr);
+    // (an AES-GCM that encrypts correctly but opens under the AAD it was sealed with, whatever it is given: it passes the
+    //  known answer and fails only because a changed AAD isn't refused)
+    const aadIgnored = fake(`if (k === "decrypt") return async (a, key, d) => a.name === "AES-GCM" && new Uint8Array(a.additionalData).length === 21 ? s.decrypt({ ...a, additionalData: new Uint8Array(a.additionalData).subarray(0, 20) }, key, d) : s.decrypt(a, key, d);`);
+    const ai = await P.ev(`e2e.checkFloor(${aadIgnored}).then((r) => ({ ...r }))`);
+    // (a browser that hands back generated private keys marked extractable, though exporting them fails: the flag itself fails the floor)
+    const flagOnly = fake(`if (k === "generateKey") return async (a, x, u) => s.generateKey(a, true, u);
+        if (k === "exportKey") return async (f, key) => { if (key.type === "private") throw new DOMException("InvalidAccessError"); return s.exportKey(f, key); };`);
+    const fo = await P.ev(`e2e.checkFloor(${flagOnly}).then((r) => ({ ...r }))`);
+    ok(fo.ok === false && J(fo.missing) === J(["x25519", "ed25519"]), "F-3: private keys marked extractable fail the floor even when an export of them fails", fo);
+    ok(ai.ok === false && J(ai.missing) === J(["aesGcm"]), "F-3: an AES-GCM that passes the known answer but opens a changed AAD fails the floor (the refusal is checked on its own)", ai);
     const nw = await P.ev(`e2e.checkFloor({}).then((r) => ({ ...r }))`);
     ok(nw.ok === false && J(nw.missing) === J(["webcrypto"]), "F-2: no WebCrypto at all (an insecure origin) fails the floor", nw);
   }
@@ -251,7 +263,7 @@ try {
       return {
         refused: {
           otherBytes: await code(() => e2e.sealBlob(k, s, q, "store.1")), unpinned: await code(() => e2e.sealBlob(k, s, p, "zstd.1")),
-          inherited: await code(() => e2e.sealBlob(k, s, p, "toString")), anImplementation: await code(() => e2e.sealBlob(k, s, p, { name: "store.1", deflate: (x) => x })),
+          inherited: await code(() => e2e.sealBlob(k, s, p, "constructor")), inheritedPinned: await code(() => e2e.pinnedCodec("constructor")), anImplementation: await code(() => e2e.sealBlob(k, s, p, { name: "store.1", deflate: (x) => x })),
           badName: await code(() => e2e.sealBlob(k, s, p, "STORE")), noKeys: await code(() => e2e.sealBlob({}, s, p, "store.1")),
           shaShort: await code(() => e2e.sealBlob(k, s.subarray(1), p, "store.1")), notPlain: await code(() => e2e.sealBlob(k, s, [...p], "store.1")),
           forgedAccount: await code(() => e2e.sealBlob({ ...k, account: "acct-2" }, s, p, "store.1")), frozenCopy: await code(() => e2e.sealBlob(Object.freeze({ ...k }), s, p, "store.1")),
@@ -263,14 +275,16 @@ try {
         registry: [Object.isFrozen(C), Object.keys(C), "evil" in C, Object.isFrozen(C["store.1"])],
       };
     })()`);
-    ok(Object.values(r.refused).every((v) => v === "bad_form") && Object.keys(r.refused).length === 11, "B-3: sealBlob refuses a plaintext its SHA-256 doesn't name (a second byte string under one file key), a codec name this build doesn't pin (an inherited property's name too), a codec implementation instead of a name, an ill-formed name, no epoch keys, a short sha, a plaintext that isn't bytes, and epoch keys deriveEpochKeys didn't make: a copy with another account, a frozen copy, one mixing two epochs' handles", r.refused);
+    ok(Object.values(r.refused).every((v) => v === "bad_form") && Object.keys(r.refused).length === 12, "B-3: sealBlob refuses a plaintext its SHA-256 doesn't name (a second byte string under one file key), a codec name this build doesn't pin (an inherited property's name too: constructor, a well-formed codec name), a codec implementation instead of a name, an ill-formed name, no epoch keys, a short sha, a plaintext that isn't bytes, and epoch keys deriveEpochKeys didn't make: a copy with another account, a frozen copy, one mixing two epochs' handles", r.refused);
     ok(J(r.genuineOther) === J(["acct-2", true]), "B-3: (another account's own keys seal under that account, at another address)", r.genuineOther);
     ok(r.snapshot, "B-3: it works on copies: changing the caller's plaintext and sha right after the call still gives the clean blob");
     ok(r.otherFile, "B-3: another file is another address (and so another file key)");
     ok(J(r.registry) === J([true, ["store.1"], false, true]), "B-4: the codec registry is frozen, holds only store.1 here, and nothing can be added to it", r.registry);
   }
   {
-    // (the admission gate: every pinned codec has its determinism row here; a codec joining codecs.ts without one fails)
+    // (the admission gate: every pinned codec has its determinism row here; a codec joining codecs.ts without one fails.
+    //  store.1's compressed length is its plaintext length, so a compressing codec's row must also check sealBlob's
+    //  header keeps the two lengths apart: until then a swap of them can't be seen)
     const DETERMINISM_ROWS = ["store.1"];
     const r = await P.ev(`(async () => {
       const out = {};
@@ -292,20 +306,21 @@ try {
   const objH = { account: "acct-1", kind: "snapshot", object: "doc-9", version: "v3", codec: "zstd.1", plaintextLength: 4 * MiB, compressedLength: BIG };
   {
     const r = await P.ev(`(async () => {
-      const cek = await crypto.subtle.importKey("raw", unhx(${J(CEK.toString("hex"))}), "AES-GCM", false, ["encrypt", "decrypt"]);
+      const cek = await e2e.importCek(unhx(${J(CEK.toString("hex"))}));
       const a = await e2e.sealObject(cek, ${J(objH)}, big(${BIG})), b = await e2e.sealObject(cek, ${J(objH)}, big(${BIG}));
-      return { prefix: hx(a.prefix), chunks: a.chunks.map(hx), prefix2: hx(b.prefix) };
+      return { sealId: hx(a.sealId), chunks: a.chunks.map(hx), sealId2: hx(b.sealId), chunks2: b.chunks.map(hx), cek: [cek.extractable, cek.algorithm.name, [...cek.usages].join()] };
     })()`);
-    const prefix = Buffer.from(r.prefix, "hex");
-    const want = Array.from({ length: count(BIG) }, (_, i) => gcm(CEK, Buffer.concat([prefix, u32(i)]), objectAad(objH, i), sliceOf(big, BIG, i)).toString("hex"));
-    ok(prefix.length === 8 && r.chunks.length === 3 && r.chunks.every((c, i) => c === want[i]), "O-1: each object chunk is AES-256-GCM under the CEK, nonce = the object's 64-bit prefix ‖ u32(index), and an AAD binding label, account, kind, object, version, codec, totals, count, index and length (the oracle's bytes)");
-    ok(r.prefix !== r.prefix2, "O-1: each sealing draws a fresh random prefix", [r.prefix, r.prefix2]);
+    const sealId = Buffer.from(r.sealId, "hex"), k = objectKey(CEK, objH, sealId);
+    const want = Array.from({ length: count(BIG) }, (_, i) => gcm(k, Buffer.concat([Buffer.alloc(8), u32(i)]), objectAad(objH, sealId, i), sliceOf(big, BIG, i)).toString("hex"));
+    ok(sealId.length === 32 && r.chunks.length === 3 && r.chunks.every((c, i) => c === want[i]), "O-1: each object chunk is AES-256-GCM under K_object = HKDF(CEK, label ‖ header fields ‖ seal id), nonce 0^64 ‖ u32(index), and an AAD binding label, account, kind, object, version, codec, totals, seal id, count, index and length (the oracle's bytes)");
+    ok(r.sealId !== r.sealId2 && r.chunks.every((c, i) => c !== r.chunks2[i]), "O-1: each sealing draws a fresh 32-byte seal id, so the same bytes seal differently", [r.sealId, r.sealId2]);
+    ok(J(r.cek) === J([false, "HKDF", "deriveKey"]), "O-1: importCek gives an HKDF key that isn't extractable and only derives keys", r.cek);
   }
   {
     // (round trips at the chunk boundaries, with an identity inflate: plaintext = compressed)
     const sizes = [0, 1, MiB - 1, MiB, MiB + 1, 2 * MiB + 3];
     const r = await P.ev(`(async () => {
-      const cek = await crypto.subtle.importKey("raw", unhx(${J(CEK.toString("hex"))}), "AES-GCM", false, ["encrypt", "decrypt"]);
+      const cek = await e2e.importCek(unhx(${J(CEK.toString("hex"))}));
       const L = { maxPlaintext: 64 << 20, maxCompressed: 64 << 20, maxRatio: 1 };
       const out = [];
       for (const n of ${J(sizes)}) {
@@ -323,8 +338,8 @@ try {
   // ---- T: tampering, for objects and blobs alike: each is refused, and the inflate is never called
   {
     const r = await P.ev(`(async () => {
-      const cek = await crypto.subtle.importKey("raw", unhx(${J(CEK.toString("hex"))}), "AES-GCM", false, ["encrypt", "decrypt"]);
-      const cek2 = await crypto.subtle.importKey("raw", new Uint8Array(32).fill(0x43), "AES-GCM", false, ["encrypt", "decrypt"]);
+      const cek = await e2e.importCek(unhx(${J(CEK.toString("hex"))}));
+      const cek2 = await e2e.importCek(new Uint8Array(32).fill(0x43));
       const B0 = await blob(big(${BIG})), kf = B0.kf, bh = B0.header, b = B0.chunks, kf2 = kf.slice(); kf2[0] ^= 1;
       const L = { maxPlaintext: 64 << 20, maxCompressed: 64 << 20, maxRatio: 8 };
       let calls = 0; const inflate = (c, max) => { calls++; return new Uint8Array(max); };
@@ -342,12 +357,12 @@ try {
         ["compressedLength", { ...h, compressedLength: h.compressedLength - 1 }], ...extra.map(([k, v]) => [k, { ...h, [k]: v }]),
       ]);
       const out = { object: {}, blob: {} };
-      for (const [k, cs] of Object.entries(chunkCases(o.chunks))) out.object["chunks: " + k] = await code(() => e2e.openObject(cek, oh, { prefix: o.prefix, chunks: cs }, inflate, L));
+      for (const [k, cs] of Object.entries(chunkCases(o.chunks))) out.object["chunks: " + k] = await code(() => e2e.openObject(cek, oh, { sealId: o.sealId, chunks: cs }, inflate, L));
       for (const [k, h] of Object.entries(headerCases(oh, [["kind", "document"], ["object", "doc-8"], ["version", "v4"]]))) out.object["header: " + k] = await code(() => e2e.openObject(cek, h, o, inflate, L));
-      const p = o.prefix.slice(); p[7] ^= 1;
-      out.object["prefix changed"] = await code(() => e2e.openObject(cek, oh, { prefix: p, chunks: o.chunks }, inflate, L));
-      out.object["prefix short"] = await code(() => e2e.openObject(cek, oh, { prefix: o.prefix.subarray(1), chunks: o.chunks }, inflate, L));
-      out.object["a chunk of another sealing"] = await code(() => e2e.openObject(cek, oh, { prefix: o.prefix, chunks: [o.chunks[0], o2.chunks[1], o.chunks[2]] }, inflate, L));
+      const p = o.sealId.slice(); p[31] ^= 1;
+      out.object["seal id changed"] = await code(() => e2e.openObject(cek, oh, { sealId: p, chunks: o.chunks }, inflate, L));
+      out.object["seal id short"] = await code(() => e2e.openObject(cek, oh, { sealId: o.sealId.subarray(1), chunks: o.chunks }, inflate, L));
+      out.object["a chunk of another sealing"] = await code(() => e2e.openObject(cek, oh, { sealId: o.sealId, chunks: [o.chunks[0], o2.chunks[1], o.chunks[2]] }, inflate, L));
       out.object["another CEK"] = await code(() => e2e.openObject(cek2, oh, o, inflate, L));
       for (const [k, cs] of Object.entries(chunkCases(b))) out.blob["chunks: " + k] = await code(() => e2e.openBlob(kf, bh, cs, inflate, L));
       for (const [k, h] of Object.entries(headerCases(bh, [["address", "a1:" + "cd".repeat(32)]]))) out.blob["header: " + k] = await code(() => e2e.openBlob(kf, h, b, inflate, L));
@@ -360,7 +375,7 @@ try {
     })()`);
     const { calls, intact, ...groups } = r;
     const wrong = Object.entries(groups).flatMap(([g, cs]) => Object.entries(cs).filter(([, v]) => v !== "bad_form").map(([k, v]) => `${g} ${k}: ${v}`));
-    ok(wrong.length === 0 && Object.keys(groups.object).length === 23 && Object.keys(groups.blob).length === 18, `T-1: every tampering is refused (bad_form): ${Object.keys(groups.object).length} object cases (a flipped byte or tag; chunks swapped, dropped, added, repeated, cut short, longer; a header field changed; the prefix; a chunk of another sealing; another CEK) and ${Object.keys(groups.blob).length} blob cases`, wrong);
+    ok(wrong.length === 0 && Object.keys(groups.object).length === 23 && Object.keys(groups.blob).length === 18, `T-1: every tampering is refused (bad_form): ${Object.keys(groups.object).length} object cases (a flipped byte or tag; chunks swapped, dropped, added, repeated, cut short, longer; a header field changed; the seal id; a chunk of another sealing; another CEK) and ${Object.keys(groups.blob).length} blob cases`, wrong);
     ok(calls === 0, "T-2: the inflate was never called for a refused object (authentication first)", calls);
     ok(J(intact) === J(["ok", "ok", 2]), "T-2: (and the untouched ones open, calling it once each)", intact);
   }
@@ -368,7 +383,7 @@ try {
   {
     // (a wrong shape is refused before anything is decrypted: no work, and no memory, for a chunk of the wrong size)
     const r = await P.ev(`(async () => {
-      const cek = await crypto.subtle.importKey("raw", unhx(${J(CEK.toString("hex"))}), "AES-GCM", false, ["encrypt", "decrypt"]);
+      const cek = await e2e.importCek(unhx(${J(CEK.toString("hex"))}));
       const L = { maxPlaintext: 64 << 20, maxCompressed: 64 << 20, maxRatio: 8 };
       let inflates = 0; const inflate = (c, max) => { inflates++; return new Uint8Array(max); };
       const oh = ${J(objH)};
@@ -380,9 +395,10 @@ try {
       try {
         const hole = (cs, i) => { const a = [...cs]; delete a[i]; return a; };
         const shapes = (cs) => ({ dropped: cs.slice(0, 2), added: [...cs, cs[2]], cutShort: [cs[0], cs[1], cs[2].subarray(1)], longer: [cs[0], cs[1], new Uint8Array(cs[2].length + 1)], firstShort: [cs[0].subarray(1), cs[1], cs[2]], holeMiddle: hole(cs, 1), holeLast: hole(cs, 2), undefinedMiddle: [cs[0], undefined, cs[2]] });
-        for (const [k, cs] of Object.entries(shapes(o.chunks))) out["object " + k] = [await code(() => e2e.openObject(cek, oh, { prefix: o.prefix, chunks: cs }, inflate, L)), decrypts, inflates];
-        out["object prefix short"] = [await code(() => e2e.openObject(cek, oh, { prefix: o.prefix.subarray(1), chunks: o.chunks }, inflate, L)), decrypts, inflates];
+        for (const [k, cs] of Object.entries(shapes(o.chunks))) out["object " + k] = [await code(() => e2e.openObject(cek, oh, { sealId: o.sealId, chunks: cs }, inflate, L)), decrypts, inflates];
+        out["object seal id short"] = [await code(() => e2e.openObject(cek, oh, { sealId: o.sealId.subarray(1), chunks: o.chunks }, inflate, L)), decrypts, inflates];
         for (const [k, cs] of Object.entries(shapes(b))) out["blob " + k] = [await code(() => e2e.openBlob(kf, bh, cs, inflate, L)), decrypts, inflates];
+        for (const [k, address] of [["address a2:", "a2:" + bh.address.slice(3)], ["address upper-case", bh.address.toUpperCase().replace("A1:", "a1:")], ["address short", bh.address.slice(0, -1)]]) out["blob " + k] = [await code(() => e2e.openBlob(kf, { ...bh, address }, b, inflate, L)), decrypts, inflates];
         out.holes = [1 in shapes(o.chunks).holeMiddle, 2 in shapes(o.chunks).holeLast, shapes(o.chunks).holeMiddle.length];
       } finally { crypto.subtle.decrypt = real; }
       return out;
@@ -390,14 +406,14 @@ try {
     const { holes, ...shapes } = r;
     const wrong = Object.entries(shapes).filter(([, v]) => J(v) !== J(["bad_form", 0, 0]));
     ok(J(holes) === J([false, false, 3]), "T-3: (the sparse arrays really have holes, and keep their length)", holes);
-    ok(Object.keys(shapes).length === 17 && wrong.length === 0, "T-3: a wrong number of chunks, a chunk of the wrong length, a hole or undefined in the middle or at the end, or a short prefix is refused (bad_form) before any chunk is decrypted or anything inflated", wrong);
+    ok(Object.keys(shapes).length === 20 && wrong.length === 0, "T-3: a wrong number of chunks, a chunk of the wrong length, a hole or undefined in the middle or at the end, a short seal id, or a blob address that isn't a1: and 64 lower-case hex digits is refused (bad_form) before any chunk is decrypted or anything inflated", wrong);
   }
 
   {
     // (two names that TextEncoder writes alike, U+D800 and U+D801 alone both becoming U+FFFD, can't stand for each
     //  other: an ill-formed name is refused wherever a key, an object or a blob is named)
     const r = await P.ev(`(async () => {
-      const cek = await crypto.subtle.importKey("raw", unhx(${J(CEK.toString("hex"))}), "AES-GCM", false, ["encrypt", "decrypt"]);
+      const cek = await e2e.importCek(unhx(${J(CEK.toString("hex"))}));
       const L = { maxPlaintext: 64, maxCompressed: 64, maxRatio: 1 }, id = (c) => c.slice();
       const a = String.fromCharCode(0xd800), b = String.fromCharCode(0xd801);
       const same = hx(new TextEncoder().encode(a)) === hx(new TextEncoder().encode(b));
@@ -421,7 +437,7 @@ try {
   //      the outcome; sealing works on copies and clears them, and leaves the caller's buffers as they were
   {
     const r = await P.ev(`(async () => {
-      const cek = await crypto.subtle.importKey("raw", unhx(${J(CEK.toString("hex"))}), "AES-GCM", false, ["encrypt", "decrypt"]);
+      const cek = await e2e.importCek(unhx(${J(CEK.toString("hex"))}));
       const L = { maxPlaintext: 64 << 20, maxCompressed: 64 << 20, maxRatio: 1 }, n = ${BIG}, bytes = big(n), oh = { ...${J(objH)}, plaintextLength: n, compressedLength: n };
       const before = hx(bytes);
       const o = await e2e.sealObject(cek, oh, bytes), B0 = await blob(bytes);
@@ -432,7 +448,7 @@ try {
       const flip = (cs) => cs.map((c, j) => { if (j !== cs.length - 1) return c; const d = c.slice(); d[0] ^= 1; return d; });
       const out = { sealedLeft };
       try {
-        const opens = { object: (cs, f) => e2e.openObject(cek, oh, { prefix: o.prefix, chunks: cs }, f, L), blob: (cs, f) => e2e.openBlob(B0.kf, B0.header, cs, f, L) };
+        const opens = { object: (cs, f) => e2e.openObject(cek, oh, { sealId: o.sealId, chunks: cs }, f, L), blob: (cs, f) => e2e.openBlob(B0.kf, B0.header, cs, f, L) };
         for (const [kind, open] of Object.entries(opens)) {
           const cs = kind === "object" ? o.chunks : B0.chunks;
           let c = null;
@@ -452,6 +468,16 @@ try {
       const plain = big(100), s100 = await sha(plain), k = await keys();
       await e2e.sealBlob(k, s100, plain, "store.1");
       out["sealBlob leaves its inputs"] = [hx(plain) === hx(big(100)), hx(s100) === hx(await sha(big(100)))];
+      // (its own copy of the plaintext, caught as WebCrypto hashes it: cleared after a seal, and after a refused one)
+      const realDigest = crypto.subtle.digest; let hashed = [];
+      crypto.subtle.digest = function (alg, data) { hashed.push(data); return realDigest.call(this, alg, data); };
+      try {
+        await e2e.sealBlob(k, s100, plain, "store.1");
+        const afterSeal = [hashed.length, hashed.every(zero)];
+        hashed = []; const other = big(100); other[0] ^= 1;
+        const refused = await code(() => e2e.sealBlob(k, s100, other, "store.1"));
+        out["sealBlob clears its copy"] = [...afterSeal, refused, hashed.length, hashed.every(zero), hx(other) !== hx(big(100))];
+      } finally { crypto.subtle.digest = realDigest; }
       return out;
     })()`);
     ok(r.sealedLeft, "Z-1: sealing an object or a blob leaves the caller's bytes as they were");
@@ -460,13 +486,14 @@ try {
       ok(J(r[kind + " last chunk forged"]) === J(["bad_form", 2, true, null]), `Z-2: a${kind === "object" ? "n" : ""} ${kind} whose last chunk is forged: the 2 chunks decrypted before it are cleared, and nothing is inflated`, r[kind + " last chunk forged"]);
       ok(J(r[kind + " inflate throws"]) === J(["codec failed", 3, true, true]) && J(r[kind + " inflate short"]) === J(["bad_form", 3, true, true]), `Z-2: when a${kind === "object" ? "n" : ""} ${kind}'s inflate throws or comes up short, the chunks and the assembled bytes are cleared too`, [r[kind + " inflate throws"], r[kind + " inflate short"]]);
     }
+    ok(J(r["sealBlob clears its copy"]) === J([1, true, "bad_form", 1, true, true]), "Z-3: sealBlob clears its own copy of the plaintext after a seal, and after one refused because the plaintext isn't the sha's (the caller's buffer is untouched)", r["sealBlob clears its copy"]);
     ok(J(r["sealBlob leaves its inputs"]) === J([true, true]), "Z-3: sealBlob works on its own copies and leaves the caller's plaintext and sha as they were", r["sealBlob leaves its inputs"]);
   }
 
   // ---- D: bounded inflating, after authentication
   {
     const r = await P.ev(`(async () => {
-      const cek = await crypto.subtle.importKey("raw", unhx(${J(CEK.toString("hex"))}), "AES-GCM", false, ["encrypt", "decrypt"]);
+      const cek = await e2e.importCek(unhx(${J(CEK.toString("hex"))}));
       const oh = { ...${J(objH)}, plaintextLength: 1000, compressedLength: 10 };
       const o = await e2e.sealObject(cek, oh, big(10));
       const B0 = await blob(big(10)), kf = B0.kf, bh = B0.header, b = B0.chunks;
@@ -503,7 +530,7 @@ try {
   // ---- S: sealing refuses what it can't seal
   {
     const r = await P.ev(`(async () => {
-      const cek = await crypto.subtle.importKey("raw", unhx(${J(CEK.toString("hex"))}), "AES-GCM", false, ["encrypt", "decrypt"]);
+      const cek = await e2e.importCek(unhx(${J(CEK.toString("hex"))}));
       const k = await keys(), s10 = await sha(big(10)), oh = { ...${J(objH)}, compressedLength: 10 };
       return [
         await code(() => e2e.sealObject(cek, oh, big(9))), await code(() => e2e.sealObject(cek, oh, [...big(10)])), await code(() => e2e.sealObject(cek, { ...oh, plaintextLength: -1 }, big(10))),

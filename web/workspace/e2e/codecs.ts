@@ -5,7 +5,8 @@
 // and nowhere else, and the registry is frozen: a caller can't hand it an implementation.
 //
 // "store.1" stores the bytes as they are (deterministic by construction). A compressing codec joins this table with
-// its own vendored implementation, and test-e2e-crypto.mjs admits no name without its determinism row.
+// its own vendored implementation, and test-e2e-crypto.mjs admits no name without its determinism row (which must also
+// show sealBlob's header keeping the plaintext and compressed lengths apart: store.1's are equal).
 import { refuse } from "./bytes.ts";
 
 export type PinnedCodec = Readonly<{

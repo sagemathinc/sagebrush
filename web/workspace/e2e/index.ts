@@ -3,7 +3,7 @@
 export { LABELS } from "./labels.ts";
 export { CODEC, ADDRESS, deriveEpochKeys, wireAddress, fileKey, chunkKey } from "./keys.ts";
 export type { EpochKeys } from "./keys.ts";
-export { CHUNK, TAG, KINDS, chunkCount, sealObject, openObject, sealBlob, openBlob } from "./chunks.ts";
+export { CHUNK, TAG, KINDS, chunkCount, importCek, sealObject, openObject, sealBlob, openBlob } from "./chunks.ts";
 export type { ObjectHeader, BlobHeader, Inflate, Limits } from "./chunks.ts";
 export { CODECS, pinnedCodec } from "./codecs.ts";
 export type { PinnedCodec } from "./codecs.ts";

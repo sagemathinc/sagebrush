@@ -13,7 +13,8 @@ export const LABELS = Object.freeze({
   blobFile: "sagebrush.blob.file.v1",
   blobChunk: "sagebrush.blob.chunk.v1",
   blobChunkAad: "sagebrush.e2e.blob.chunk.aad.v1",
-  // ---- a document's, snapshot's or index snapshot's chunks (§3.2): the AAD (chunks.ts)
+  // ---- a document's, snapshot's or index snapshot's chunks (§3.2): the per-sealing key, and the AAD (chunks.ts)
+  objectKey: "sagebrush.e2e.object.key.v1",
   objectChunkAad: "sagebrush.e2e.object.chunk.aad.v1",
   // ---- the key chain's (keys and devices, §11.1 and §11.2): here so that one table covers every label
   keyring: "sagebrush.keyring.v1",

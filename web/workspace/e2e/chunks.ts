@@ -2,8 +2,10 @@
 // pinned codec, and the compressed stream is cut into chunks of exactly 1 MiB (the last one shorter; an empty object
 // is one empty chunk, so it still has a tag). Each chunk is AES-256-GCM with a 16-byte tag.
 //
-//   a document, snapshot or index snapshot: its random content key (CEK); the nonce is a random 64-bit prefix for the
-//     object, then u32(chunk index)
+//   a document, snapshot or index snapshot: under its random content key (CEK, an HKDF key: importCek), each sealing
+//     draws a fresh 256-bit seal id and uses its own key K_object = HKDF(CEK, LABELS.objectKey ‖ fields(header) ‖
+//     seal id), with the nonce 0^64 ‖ u32(chunk index). So a CEK can seal any number of times without a nonce budget
+//     (no random nonce shared across sealings), and the seal id is bound in every chunk's AAD too
 //   a blob: one key per chunk (keys.ts chunkKey, from the file key) and a zero nonce: deterministic, so two devices
 //     uploading the same file make the same bytes. A zero nonce is safe only while each chunk key encrypts one byte
 //     string, so sealBlob owns that: it takes the epoch's keys, the SHA-256, the plaintext and a pinned codec's NAME
@@ -13,8 +15,8 @@
 //     or mixing two epochs' handles, is refused). So one file key is used for one byte string: sha fixes the plaintext, and the registered
 //     codec is a deterministic function of it (each codec's determinism is its admission test, codecs.ts).
 //
-// The AAD binds the label (the protocol and its version), the account, the object (kind, id and version; a blob's
-// address), the codec, both total lengths, the chunk count, the chunk's index and its length. So chunks can't be
+// The AAD binds the label (the protocol and its version), the account, the object (kind, id and version, and the seal
+// id; a blob's address), the codec, both total lengths, the chunk count, the chunk's index and its length. So chunks can't be
 // reordered, dropped, cut short, added or moved to another object.
 //
 // Opening authenticates every chunk first; only then is the codec's inflate called, bounded by the declared length,
@@ -30,8 +32,10 @@ import { buf, bytes32, concat, field, name, refuse, u32, u64, utf8 } from "./byt
 
 export const CHUNK = 1 << 20;
 export const TAG = 16;
-const PREFIX = 8;
+const SEAL_ID = 32;
 const ZERO_NONCE = new Uint8Array(12);
+// (the nonce of chunk i under a per-sealing key: 0^64 ‖ u32(i))
+const indexNonce = (i: number) => concat(new Uint8Array(8), u32(i));
 const subtle = (): SubtleCrypto => globalThis.crypto.subtle;
 const gcm = (iv: Uint8Array, additionalData: Uint8Array) => ({ name: "AES-GCM", iv, additionalData, tagLength: 128 });
 
@@ -71,9 +75,21 @@ function totals(h: { codec: string; plaintextLength: number; compressedLength: n
   return concat(field(codecBytes(h.codec)), u64(h.plaintextLength), u64(h.compressedLength));
 }
 
-function objectHead(h: ObjectHeader): Uint8Array {
+// (an object header's canonical fields: what both its key and every chunk's AAD bind)
+function objectFields(h: ObjectHeader): Uint8Array {
   if (!KINDS.includes(h?.kind)) refuse("bad_form", "an object is a document, a snapshot or an index snapshot");
-  return concat(utf8(LABELS.objectChunkAad), name(h.account, "the account"), field(utf8(h.kind)), name(h.object, "the object"), name(h.version, "the version"), totals(h));
+  return concat(name(h.account, "the account"), field(utf8(h.kind)), name(h.object, "the object"), name(h.version, "the version"), totals(h));
+}
+
+/** A content key (CEK) from its 32 raw bytes: an HKDF key, not extractable (the caller clears the bytes). */
+export function importCek(raw: Uint8Array): Promise<CryptoKey> {
+  return subtle().importKey("raw", buf(bytes32(raw, "a content key")), "HKDF", false, ["deriveKey"]);
+}
+
+// (one sealing's own key: HKDF(CEK, label ‖ fields ‖ seal id), AES-256-GCM, not extractable)
+function objectKey(cek: CryptoKey, fields: Uint8Array, sealId: Uint8Array): Promise<CryptoKey> {
+  const info = concat(utf8(LABELS.objectKey), fields, sealId);
+  return subtle().deriveKey({ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info }, cek, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
 }
 
 function blobHead(h: BlobHeader): Uint8Array {
@@ -132,32 +148,34 @@ async function assemble(h: { plaintextLength: number; compressedLength: number }
 
 const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
 
-/** Seal a document, snapshot or index snapshot under its CEK: a fresh nonce prefix and the chunks. */
-export async function sealObject(cek: CryptoKey, h: ObjectHeader, compressed: Uint8Array): Promise<{ prefix: Uint8Array; chunks: Uint8Array[] }> {
-  const head = objectHead(h);
+/** Seal a document, snapshot or index snapshot under its CEK (importCek): a fresh 32-byte seal id and the chunks. */
+export async function sealObject(cek: CryptoKey, h: ObjectHeader, compressed: Uint8Array): Promise<{ sealId: Uint8Array; chunks: Uint8Array[] }> {
+  const fields = objectFields(h);
   sealable(h, compressed);
   const bytes = compressed.slice(); // (a copy before any await: the caller's buffer may change meanwhile)
   try {
-    const count = chunkCount(h.compressedLength), prefix = globalThis.crypto.getRandomValues(new Uint8Array(PREFIX));
+    const count = chunkCount(h.compressedLength), sealId = globalThis.crypto.getRandomValues(new Uint8Array(SEAL_ID));
+    const key = await objectKey(cek, fields, sealId), head = concat(utf8(LABELS.objectChunkAad), fields, sealId);
     const chunks: Uint8Array[] = [];
     for (let i = 0; i < count; i++) {
       const pt = bytes.subarray(i * CHUNK, i * CHUNK + lengthOf(h.compressedLength, count, i));
-      chunks.push(new Uint8Array(await subtle().encrypt(gcm(concat(prefix, u32(i)), chunkAad(head, count, i, pt.length)), cek, buf(pt))));
+      chunks.push(new Uint8Array(await subtle().encrypt(gcm(indexNonce(i), chunkAad(head, count, i, pt.length)), key, buf(pt))));
     }
-    return { prefix, chunks };
+    return { sealId, chunks };
   } finally {
     bytes.fill(0);
   }
 }
 
 /** Open what sealObject made: every chunk authenticated, then inflated within the limits. */
-export async function openObject(cek: CryptoKey, h: ObjectHeader, sealed: { prefix: Uint8Array; chunks: readonly Uint8Array[] }, inflate: Inflate, limits: Limits): Promise<Uint8Array> {
-  const head = objectHead(h);
+export async function openObject(cek: CryptoKey, h: ObjectHeader, sealed: { sealId: Uint8Array; chunks: readonly Uint8Array[] }, inflate: Inflate, limits: Limits): Promise<Uint8Array> {
+  const fields = objectFields(h);
   bounded(h, limits);
-  const { prefix, chunks } = sealed ?? ({} as typeof sealed);
-  if (!(prefix instanceof Uint8Array) || prefix.length !== PREFIX) refuse("bad_form", "a nonce prefix is 8 bytes");
+  const { sealId, chunks } = sealed ?? ({} as typeof sealed);
+  if (!(sealId instanceof Uint8Array) || sealId.length !== SEAL_ID) refuse("bad_form", "a seal id is 32 bytes");
   const count = openable(h, chunks);
-  return assemble(h, chunks, count, (i, length) => subtle().decrypt(gcm(concat(prefix, u32(i)), chunkAad(head, count, i, length)), cek, buf(chunks[i])), inflate);
+  const key = await objectKey(cek, fields, sealId), head = concat(utf8(LABELS.objectChunkAad), fields, sealId);
+  return assemble(h, chunks, count, (i, length) => subtle().decrypt(gcm(indexNonce(i), chunkAad(head, count, i, length)), key, buf(chunks[i])), inflate);
 }
 
 /**
