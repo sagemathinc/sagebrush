@@ -4,7 +4,10 @@
 #     runs test_gate.py under the built CLI with the package set PKGSET (scripts/optional-packages.mjs build --out
 #     DIR --pre prints its name: DIR/pkgset/<S>.json) and compares its output with test_gate.out;
 #   bash optional/sklearn/tests/gate/run.sh --record VENV
-#     records test_gate.out from scikit-learn 1.9.1 in VENV, which must report exactly tests/oracle-env.txt.
+#     records test_gate.out from scikit-learn 1.9.1 in VENV, which must report exactly tests/oracle-env.txt;
+#   bash optional/sklearn/tests/gate/run.sh --paths PATH...
+#     prints each PATH as run.sh resolves it (against the caller's directory), failing if one doesn't exist.
+# PKGSET, VENV and PATH may be relative to the caller's directory.
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../../../.." && pwd)
@@ -12,6 +15,15 @@ ROOT=$(cd "$HERE/../../../.." && pwd)
 CALLER=$(pwd)
 abs() { case "$1" in /*) printf '%s\n' "$1" ;; *) printf '%s\n' "$CALLER/$1" ;; esac; }
 cd "$HERE"
+if [ "${1:-}" = "--paths" ]; then
+  # (the paths as run.sh resolves them, each checked to exist: test-run-paths.sh's control)
+  for p in "${@:2}"; do
+    r=$(abs "$p")
+    [ -e "$r" ] || { echo "gate: $p resolves to $r, which doesn't exist" >&2; exit 1; }
+    echo "$r"
+  done
+  exit 0
+fi
 if [ "${1:-}" = "--record" ]; then
   VENV=$(abs "${2:?usage: run.sh --record VENV}")
   ENV_NOW=$(mktemp)
