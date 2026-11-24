@@ -347,6 +347,45 @@ let state, A, B, C, seed, rec, e0, e1;
   ok(privateExports === 0, "seeded: no private key is ever exported while deriving them");
 }
 
+// ---- custody: buffers that held secrets are zeroed, and seeded private keys are imported non-extractable
+{
+  const subtle = globalThis.crypto.subtle;
+  const spy = (name, wrap) => { const o = subtle[name]; subtle[name] = function (...a) { return wrap(o.bind(this), ...a); }; return () => { subtle[name] = o; }; };
+  const zero = (b) => b && new Uint8Array(b.buffer ?? b, b.byteOffset ?? 0, b.byteLength).every((x) => x === 0);
+  const S = E.newEpochSecret(), s0 = E.newEpochSecret(), prev = b64(random(32));
+  // (sealKeyring: the plaintext it hands AES-GCM)
+  let sealed = null;
+  let undo = spy("encrypt", (f, alg, key, data) => { sealed = data; return f(alg, key, data); });
+  let ring;
+  try { ring = await E.sealKeyring({ S, account: ctx.account, n: 1, suite: 1, prev, secrets: new Map([[0, s0]]) }); } finally { undo(); }
+  ok(sealed?.length === 32 && zero(sealed), "custody: sealKeyring zeroes its plaintext");
+  // (openKeyring: the decrypted plaintext, on success and on a failed commitment check)
+  const commits = new Map([[0, await E.epochCommit(s0, ctx.account, 0)]]);
+  const args = { S, account: ctx.account, n: 1, suite: 1, prev, hash: ring.hash, epochs: [0], bytes: ring.bytes };
+  for (const [what, cm] of [["success", commits], ["a failed commitment", new Map([[0, b64(random(32))]])]]) {
+    let opened = null;
+    undo = spy("decrypt", async (f, ...a) => (opened = await f(...a)));
+    try { await E.openKeyring({ ...args, commits: cm }); } catch { /* (the failure case) */ } finally { undo(); }
+    ok(opened?.byteLength === 32 && zero(opened), `custody: openKeyring zeroes its decrypted plaintext after ${what}`);
+  }
+  // (checkResponse: the MAC it computes, on success and failure)
+  const nd = await newDevice("z");
+  const pre = await E.preEntryHash({ op: "add", device: nd.rec, pop: null });
+  for (const [what, right] of [["success", true], ["failure", false]]) {
+    const ch = await E.challenge(hpke, nd.kem.publicRaw, pre);
+    const answer = right ? await E.respond(hpke, nd.kem, ch.enc, pre) : new Uint8Array(32);
+    let want = null;
+    undo = spy("sign", async (f, alg, ...a) => { const r = await f(alg, ...a); if ((alg?.name ?? alg) === "HMAC") want = r; return r; });
+    try { await E.checkResponse(ch.secret, ch.enc, pre, answer); } catch { /* (the failure case) */ } finally { undo(); }
+    ok(want?.byteLength === 32 && zero(want), `custody: checkResponse zeroes the MAC it computed after ${what}`);
+  }
+  // (seeded keys: every private key imported while deriving them is non-extractable, on its own, export or not)
+  const imported = [];
+  undo = spy("importKey", async (f, fmt, ...a) => { const k = await f(fmt, ...a); if (fmt === "pkcs8") imported.push(k); return k; });
+  try { await E.ed25519FromSeed(random(32)); await E.kemFromSeed(random(32)); } finally { undo(); }
+  ok(imported.length >= 3 && imported.every((k) => k.type === "private" && k.extractable === false), "custody: every seeded private key is imported non-extractable");
+}
+
 // ---- transition packages: an entry, its keyring and its wrappers, checked together before publishing
 {
   const P = await newDevice("p"), Q = await newDevice("q"), R = await newDevice("r");
