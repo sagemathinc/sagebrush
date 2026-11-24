@@ -131,8 +131,27 @@ def _fill_zeros(y, out):
     return out
 
 
-def _numeric_op(op, x, y, d):
-    """op of two numpy arrays already of dtype d (the result's dtype class)."""
+def _unmasked(op, x, y, out, d):
+    # (numpy's own // and % where the divisor is 0, as pandas' flex methods with a Series argument give them: an
+    # integer result 0, a float // the true division's signed infinity or NaN, a float % NaN; the dtype kept)
+    zero = [p for p, b in enumerate(y.tolist()) if b == 0]
+    if not zero:
+        return out
+    if d in FLOATS:
+        xs, ys = x.tolist(), y.tolist()
+        with np.errstate(all="ignore"):
+            for p in zero:
+                out[p] = (np.array([xs[p]], dtype=d) / np.array([ys[p]], dtype=d))[0] if op == "floordiv" else np.nan
+        return out
+    for p in zero:
+        out[p] = 0
+    return out
+
+
+def _numeric_op(op, x, y, d, mask_zero=True):
+    """op of two numpy arrays already of dtype d (the result's dtype class);
+    mask_zero=False leaves // and % by 0 to numpy (pandas' flex methods
+    with a Series argument)."""
     if op == "truediv":
         # (numpy's true division: an integer one in float64; a zero divisor gives its signed infinity or NaN)
         xf, yf = (x, y) if d in FLOATS else (x.astype(np.float64), y.astype(np.float64))
@@ -142,6 +161,8 @@ def _numeric_op(op, x, y, d):
         one = np.ones(len(y), dtype=d)
         safe = np.where(y == 0, one, y)
         out = (x // safe) if op == "floordiv" else (x % safe)
+        if not mask_zero:
+            return _unmasked(op, x, y, out, d)
         return _mask_zero_div_zero(x, y, out) if op == "floordiv" else _fill_zeros(y, out)
     if op == "pow" and d in INTS and bool(_scalar((y < 0).any())):
         raise ValueError("Integers to negative integer powers are not allowed.")
@@ -161,9 +182,10 @@ def _bool_bool(op, x, y):
     raise NotImplementedError("operator '%s' not implemented for bool dtypes" % op)
 
 
-def binary(col, right, op, reflected, owner):
+def binary(col, right, op, reflected, owner, mask_zero=True):
     """col <op> right (right <op> col when reflected): a Column. right is a
-    Column (already aligned), a list or array, or a scalar."""
+    Column (already aligned), a list or array, or a scalar. mask_zero=False:
+    // and % by 0 as numpy gives them (pandas' flex methods with a Series)."""
     d = col.dtype
     n = len(col)
     kind, rv = _right_values(right, n)
@@ -195,7 +217,7 @@ def binary(col, right, op, reflected, owner):
         if res_d == "bool":
             out = _bool_bool(op, x, y)
             return out if isinstance(out, Column) else Column("bool", out)
-        out = _numeric_op(op, x, y, res_d)
+        out = _numeric_op(op, x, y, res_d, mask_zero)
         out_d = str(out.dtype)
         return Column(out_d, out)
     # (str, object, and mixes: Python's operators value by value, a missing value staying missing)

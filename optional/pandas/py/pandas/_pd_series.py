@@ -361,7 +361,7 @@ class Series(object):
                 out[k] = v[p]
         return Column(self._pd_col.dtype, out)
 
-    def _pd_arith(self, other, op, reflected=False, fill_value=None):
+    def _pd_arith(self, other, op, reflected=False, fill_value=None, method=False):
         from . import _pd_arith as A
         owner = "Series.%s" % (("r" if reflected else "") + op)
         left, right, index, name = self._pd_operand(other, owner)
@@ -372,7 +372,10 @@ class Series(object):
             right = RS.fill_positions(right, dict((p, fill_value) for p, (a, b) in enumerate(zip(lm, rm)) if b and not a))
         elif fill_value is not None:
             left = RS.fill_column(left, fill_value)
-        return Series._pd_new(A.binary(left, right, op, reflected, owner), index, name)
+        # (pandas' flex methods with a Series argument apply numpy's op to the aligned arrays, without its zero
+        # division masks; the operators and a scalar argument keep them)
+        mask_zero = not (method and isinstance(other, Series))
+        return Series._pd_new(A.binary(left, right, op, reflected, owner, mask_zero), index, name)
 
     def __add__(self, other):
         return self._pd_arith(other, "add")
@@ -446,97 +449,97 @@ class Series(object):
     def add(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.add(level=, axis=)")
-        return self._pd_arith(other, "add", False, fill_value)
+        return self._pd_arith(other, "add", False, fill_value, method=True)
 
     def sub(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.sub(level=, axis=)")
-        return self._pd_arith(other, "sub", False, fill_value)
+        return self._pd_arith(other, "sub", False, fill_value, method=True)
 
     def subtract(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.subtract(level=, axis=)")
-        return self._pd_arith(other, "sub", False, fill_value)
+        return self._pd_arith(other, "sub", False, fill_value, method=True)
 
     def mul(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.mul(level=, axis=)")
-        return self._pd_arith(other, "mul", False, fill_value)
+        return self._pd_arith(other, "mul", False, fill_value, method=True)
 
     def multiply(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.multiply(level=, axis=)")
-        return self._pd_arith(other, "mul", False, fill_value)
+        return self._pd_arith(other, "mul", False, fill_value, method=True)
 
     def truediv(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.truediv(level=, axis=)")
-        return self._pd_arith(other, "truediv", False, fill_value)
+        return self._pd_arith(other, "truediv", False, fill_value, method=True)
 
     def div(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.div(level=, axis=)")
-        return self._pd_arith(other, "truediv", False, fill_value)
+        return self._pd_arith(other, "truediv", False, fill_value, method=True)
 
     def divide(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.divide(level=, axis=)")
-        return self._pd_arith(other, "truediv", False, fill_value)
+        return self._pd_arith(other, "truediv", False, fill_value, method=True)
 
     def floordiv(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.floordiv(level=, axis=)")
-        return self._pd_arith(other, "floordiv", False, fill_value)
+        return self._pd_arith(other, "floordiv", False, fill_value, method=True)
 
     def mod(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.mod(level=, axis=)")
-        return self._pd_arith(other, "mod", False, fill_value)
+        return self._pd_arith(other, "mod", False, fill_value, method=True)
 
     def pow(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.pow(level=, axis=)")
-        return self._pd_arith(other, "pow", False, fill_value)
+        return self._pd_arith(other, "pow", False, fill_value, method=True)
 
     def radd(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.radd(level=, axis=)")
-        return self._pd_arith(other, "add", True, fill_value)
+        return self._pd_arith(other, "add", True, fill_value, method=True)
 
     def rsub(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.rsub(level=, axis=)")
-        return self._pd_arith(other, "sub", True, fill_value)
+        return self._pd_arith(other, "sub", True, fill_value, method=True)
 
     def rmul(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.rmul(level=, axis=)")
-        return self._pd_arith(other, "mul", True, fill_value)
+        return self._pd_arith(other, "mul", True, fill_value, method=True)
 
     def rtruediv(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.rtruediv(level=, axis=)")
-        return self._pd_arith(other, "truediv", True, fill_value)
+        return self._pd_arith(other, "truediv", True, fill_value, method=True)
 
     def rdiv(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.rdiv(level=, axis=)")
-        return self._pd_arith(other, "truediv", True, fill_value)
+        return self._pd_arith(other, "truediv", True, fill_value, method=True)
 
     def rfloordiv(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.rfloordiv(level=, axis=)")
-        return self._pd_arith(other, "floordiv", True, fill_value)
+        return self._pd_arith(other, "floordiv", True, fill_value, method=True)
 
     def rmod(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.rmod(level=, axis=)")
-        return self._pd_arith(other, "mod", True, fill_value)
+        return self._pd_arith(other, "mod", True, fill_value, method=True)
 
     def rpow(self, other, level=None, fill_value=None, axis=0):
         if level is not None or axis not in (0, "index", "rows"):
             raise _unsupported("Series.rpow(level=, axis=)")
-        return self._pd_arith(other, "pow", True, fill_value)
+        return self._pd_arith(other, "pow", True, fill_value, method=True)
 
     def __getattr__(self, name):
         if name == "dt":

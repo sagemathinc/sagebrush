@@ -680,3 +680,50 @@ dtype('float64')
 0    0.0
 1   -3.0
 dtype: float64
+== method-floordiv-zero-series
+
+0    0
+1    0
+2    0
+dtype: int64
+== method-mod-zero-series
+
+0    0
+1    0
+2    0
+dtype: int64
+== method-rfloordiv-zero-series
+
+0    0
+1    0
+2    0
+dtype: int64
+== method-floordiv-zero-series-fill
+
+0    0
+1    0
+2    0
+dtype: int64
+== method-floordiv-zero-scalar
+
+0    inf
+1   -inf
+2    NaN
+dtype: float64
+== operator-floordiv-zero-series
+
+0    inf
+1   -inf
+2    NaN
+dtype: float64
+== method-float-floordiv-zero-series
+[inf, inf, nan]
+== method-float-mod-zero-series
+[nan, nan]
+== method-float32-floordiv-fill
+
+0    0.0
+1    inf
+dtype: float32
+== method-float32-floordiv-series.dtype
+dtype('float32')
