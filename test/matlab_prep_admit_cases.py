@@ -82,3 +82,18 @@ for name, f, low in (("empty", lambda: D.normalize_(3, E, 1.0, C("zscore"), C("s
     stand_in(100 * MB)
     assert attempt(f) == "reached", name
 ok("normalize: its vectors' work counted before any copy (an empty 0-by-300000 array, a 1-by-100000 row: low host nomem)")
+
+# (a dimension far past A's last is 1, so normalize along it costs no more than along the next one: no work in
+# proportion to the dimension, before the admission or after it. Along dimension 1e15 any list or shape padded out
+# to it can't even be made (Python refuses it at once); a scalar is its own vector, and the charges stay under 2 KB)
+charges = []
+real_admit = M._admit_bytes
+M._admit_bytes = lambda b, what="": charges.append(b)
+try:
+    r = D.normalize_(3, 1.0, 1e15, C("center"))
+    r2 = D.normalize_(1, N._un_nd(np.arange(6.0).reshape(2, 3)), 1e15, C("center"))
+finally:
+    M._admit_bytes = real_admit
+assert M._dims(r[0]) == (1, 1) and M._dims(r[1]) == (1, 1) and M._dims(r2) == (2, 3), (M._dims(r[0]), M._dims(r2))
+assert charges and max(charges) < 2048, charges
+ok("normalize: a dimension far past the array's last costs nothing (dim 1e15: no padding, charges under 2 KB)")

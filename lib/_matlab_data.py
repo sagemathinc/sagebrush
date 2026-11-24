@@ -907,6 +907,9 @@ def normalize_(nargout, A, *args):
     dims = list(_m._dims(A))
     if axis is None:
         axis = _first_dim(tuple(dims))
+    # (a dimension past A's last is 1, as every one after it is: the first of them stands for all, so that a huge dim
+    # costs nothing)
+    axis = min(axis, len(dims))
     dims += [1] * (axis + 1 - len(dims))
     _prep_admit(A, "normalize", *(a for a in args if not _istext(a)), vectors=_m._prod(dims[:axis] + dims[axis + 1:]))
     M = _md(A)

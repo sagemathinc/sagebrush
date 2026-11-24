@@ -412,5 +412,5 @@ test("rescale and normalize admitted before their copies are made (test/matlab_p
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const lines = r.stdout.trim().split("\n");
   assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
-  assert.equal(lines.length, 3, r.stdout);
+  assert.equal(lines.length, 4, r.stdout);
 });
