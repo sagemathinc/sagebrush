@@ -295,6 +295,11 @@ const PROGRAM_SINGLE_2 = [
   "W = single(Vs + 1i*cos(Vs)); a = interp3(Xs,Ys,Zs,W,xq(1:10),yq(1:10),mod((1:10)*0.5698402909980532,1)*5);",
   "re = interp3(Xs,Ys,Zs,real(W),xq(1:10),yq(1:10),mod((1:10)*0.5698402909980532,1)*5); im = interp3(Xs,Ys,Zs,imag(W),xq(1:10),yq(1:10),mod((1:10)*0.5698402909980532,1)*5);",
   "fprintf('i3cplx|%s|%d|%d|%d\\n', class(a), isreal(a), isequal(real(a), re), isequal(imag(a), im));",
+  "% (an infinite part stays in its own part: the finite one is never touched by it)",
+  "Vi = complex(single(ones(4)), single(Inf(4))); Vr = complex(single(Inf(4)), single(ones(4)));",
+  "a = interp2(Vi, 2.5, 2.25); b = interp2(Vr, 2.5, 2.25); fprintf('i2inf|%s|%g|%g|%s|%g|%g\\n', class(a), real(a), imag(a), class(b), real(b), imag(b));",
+  "Vi3 = complex(single(ones(3,3,3)), single(Inf(3,3,3))); Vr3 = complex(single(Inf(3,3,3)), single(ones(3,3,3)));",
+  "a = interp3(Vi3, 1.5, 2.25, 2.5); b = interp3(Vr3, 1.5, 2.25, 2.5); fprintf('i3inf|%s|%g|%g|%s|%g|%g\\n', class(a), real(a), imag(a), class(b), real(b), imag(b));",
 ];
 const EXACT_SINGLE_2 = [
   "q32|single|0.950269043 0.507833898 0.268167824 -0.341626316 -0.0243383981 0.424304157 0.533658385 0.439589739 ",
@@ -303,6 +308,8 @@ const EXACT_SINGLE_2 = [
   "cplx|single|0.950269103 0.507833898 0.268167853 -0.341626316 -0.0243384168 0.424304187 0.533658326 0.43958962 0.950269103 0.507833898 0.268167853 -0.341626316 -0.0243384168 0.424304187 0.533658326 0.43958962 ",
   "more|single|0.956474662 0.355427921 0.0375576168 -0.00404506549 -0.0922347903 0.496553332 0.760223925 0.174153686 0.94543761 0.221001834 -0.132275864 0.309915304 1.15405822 0.551279545 0.70613873 -0.0818696022 0.798492491 ",
   "i3cplx|single|0|1|1",
+  "i2inf|single|1|Inf|single|Inf|1",
+  "i3inf|single|1|Inf|single|Inf|1",
 ];
 
 test("single data, complex single data and single queries: MATLAB R2026b's rows to the bit, and interp3's complex parts", () => {
