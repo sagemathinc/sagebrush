@@ -74,7 +74,7 @@ for f in (lambda: st.levy_stable.pdf(1.0, 1.5, 0), lambda: st.levy_stable.cdf(1.
 test("scipy.stats: the samplers whose numpy.random method Sagebrush lacks raise NotImplementedError, after rvs's own checks (daybreak3's B1)", () => {
   const out = py(`
 import scipy.stats as st
-for name, args in (("t", (3,)), ("f", (2, 5)), ("chi2", (4,)), ("cauchy", ()), ("binom", (10, 0.3))):
+for name, args in (("t", (3,)), ("f", (2, 5)), ("chi2", (4,)), ("cauchy", ())):
     try:
         # (the default random_state: NumPy's global stream, daybreak3's R1)
         getattr(st, name).rvs(*args, size=2)
@@ -91,7 +91,6 @@ except ValueError as e:
     "f NotImplementedError scipy.stats.f.rvs is not in Sagebrush yet",
     "chi2 NotImplementedError scipy.stats.chi2.rvs is not in Sagebrush yet",
     "cauchy NotImplementedError scipy.stats.cauchy.rvs is not in Sagebrush yet",
-    "binom NotImplementedError scipy.stats.binom.rvs is not in Sagebrush yet",
     "t invalid df: ValueError Domain error in arguments",
     "",
   ].join("\n"));
