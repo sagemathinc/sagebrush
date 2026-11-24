@@ -49,10 +49,11 @@ export class ImageUrls {
     let redraw = false;
     await Promise.all(paths.map(async (p) => {
       // (one not held yet is read now by load: no second read)
+      // (its version taken before any wait: let go across either wait, nothing of it is kept)
+      const v = this.version(p);
       const fresh = !this.urls.has(p) && !this.loading.has(p);
       await this.load(p);
-      if (fresh || filePathOf({ [FILE_KEY]: p }) !== p) return;
-      const v = this.version(p);
+      if (fresh || v !== this.version(p) || filePathOf({ [FILE_KEY]: p }) !== p) return;
       const now = await this.read(p).catch(() => null);
       if (v !== this.version(p)) return;
       const had = this.urls.get(p);

@@ -157,6 +157,13 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   U.retain([]);
   release(); await r;
   ok(U.bytes("/Attachments/nb-r/b.png") === null, "ready(): its read again, arriving after the image was let go, isn't kept");
+  // (held already; let go between ready()'s first wait (the settled load) and its read again)
+  hold = false;
+  await U.load("/Attachments/nb-r/c.png");
+  const r2 = U.ready(["/Attachments/nb-r/c.png"]);
+  U.retain([]);
+  await r2;
+  ok(U.bytes("/Attachments/nb-r/c.png") === null, "ready(): an image let go right after ready() was called, before its read again, isn't brought back");
   U.dispose();
 }
 // ---- an attachment named "__proto__" survives import and export
