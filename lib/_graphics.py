@@ -675,8 +675,31 @@ def _markers(P, xs, ys, marker, r, color, alpha, sizes=None, edge=None):
     return "<g%s>%s</g>" % (a, "".join(out))
 
 
+# The size of one pixel of the picture being drawn, in SVG units (100 to the
+# inch): 1 for an SVG, 100 / dpi while savefig draws a PNG (pixel_size).
+_PIXEL = 1.0
+
+
+def pixel_size(u):
+    """Sets the size of a pixel of the picture being drawn, in SVG units, for
+    matplotlib's pixel marker ','; returns the size it had."""
+    global _PIXEL
+    old, _PIXEL = _PIXEL, float(u)
+    return old
+
+
 def _marker(m, x, y, r, color, edge=None):
     c = _esc(color)
+    if m == ",":
+        # matplotlib's pixel marker: the one pixel of the picture that the point
+        # is in, whatever the marker's size, and filled whole: its edges are on
+        # the pixel's edges, written in full (at 300 dpi a pixel is 1/3 unit).
+        # A point on a pixels' edge (the centre of a pixel at 100 dpi, drawn at
+        # 200) takes the pixel after it, the same for each such point, also when
+        # rounding put it a hair before the edge.
+        u = _PIXEL
+        return '<rect x="%.9g" y="%.9g" width="%.9g" height="%.9g" fill="%s"/>' % (
+            math.floor(x / u + 1e-6) * u, math.floor(y / u + 1e-6) * u, u, u, c)
     st = ' stroke="%s" stroke-width="0.8"' % _esc(edge) if edge else ""
     X, Y, R = _fmt(x), _fmt(y), _fmt(r)
     if m in ("o", ".", None, True, "circle"):
@@ -1608,6 +1631,8 @@ class Panel:
             tick.append("M%s %sv%s" % (_fmt(p[0]), _fmt(ax_y), "4" if frame else "3"))
             if skip_x is not None and abs(v - skip_x) < 1e-12:
                 continue
+            if o.get("xtick_labels") is False:  # (matplotlib's labelbottom=False: the tick, no label)
+                continue
             ly = (P.top + P.h if frame else min(max(ax_y, P.top), P.top + P.h)) + ts * 1.43
             if xrot:
                 # (turned as matplotlib's default rotation_mode places it:
@@ -1631,6 +1656,8 @@ class Panel:
                 continue
             ytick.append("M%s %sh%s" % (_fmt(ax_x), _fmt(p[1]), "-4" if frame else "-3"))
             if skip_y is not None and abs(v - skip_y) < 1e-12:
+                continue
+            if o.get("ytick_labels") is False:  # (labelleft=False)
                 continue
             lx = (P.left if frame else min(max(ax_x, P.left), P.left + P.w)) - 6
             ylabels.append('<text x="%s" y="%s" text-anchor="end" dominant-baseline="middle">%s</text>' % (_fmt(lx), _fmt(p[1]), s))
