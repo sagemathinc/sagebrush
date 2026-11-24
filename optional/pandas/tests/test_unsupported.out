@@ -299,7 +299,7 @@
 == arith.repeated-labels
 !! NotImplementedError: pandas.Series.add of Series with other, repeated labels is not in Sagebrush's pandas 0.x subset
 == arith.with-frame
-!! NotImplementedError: pandas.Series.add with a DataFrame (a frame result) is not in Sagebrush's pandas 0.x subset
+!! NotImplementedError: pandas.DataFrame.radd with a Series whose labels aren't the frame's columns (pandas' added all-missing columns) is not in Sagebrush's pandas 0.x subset
 == arith.datetime
 !! NotImplementedError: pandas.Series.sub of a datetime64[us] column (Timedelta arithmetic) is not in Sagebrush's pandas 0.x subset
 == arith.level
@@ -318,10 +318,22 @@
 !! NotImplementedError: pandas.Series.add of an object column is not in Sagebrush's pandas 0.x subset
 == arith.object-neg
 !! NotImplementedError: pandas.Series.__neg__ of an object column is not in Sagebrush's pandas 0.x subset
-== op.frame-add
-!! NotImplementedError: pandas.DataFrame.__add__ (arithmetic) is not in Sagebrush's pandas 0.x subset
 == op.frame-gt
 !! NotImplementedError: pandas.DataFrame.__gt__ (comparison) is not in Sagebrush's pandas 0.x subset
+== frame-arith.other-columns
+!! NotImplementedError: pandas.DataFrame.add of frames with different columns (pandas' added all-missing columns take a dtype from its internal blocks) is not in Sagebrush's pandas 0.x subset
+== frame-arith.series-other-labels
+!! NotImplementedError: pandas.DataFrame.add with a Series whose labels aren't the frame's columns (pandas' added all-missing columns) is not in Sagebrush's pandas 0.x subset
+== frame-arith.repeated-columns
+!! NotImplementedError: pandas.DataFrame.add of a frame with repeated column labels is not in Sagebrush's pandas 0.x subset
+== frame-arith.level
+!! NotImplementedError: pandas.DataFrame.add(level=) (a MultiIndex) is not in Sagebrush's pandas 0.x subset
+== frame-arith.3d
+!! NotImplementedError: pandas.DataFrame.add with a 3-dimensional array is not in Sagebrush's pandas 0.x subset
+== frame-arith.matmul
+!! NotImplementedError: pandas.DataFrame.__matmul__ (a matrix product) is not in Sagebrush's pandas 0.x subset
+== frame-arith.object-row
+!! NotImplementedError: pandas.DataFrame.add with a row of object values is not in Sagebrush's pandas 0.x subset
 == param.Series.sum-min_count
 !! NotImplementedError: pandas.Series.sum(min_count=) is not in Sagebrush's pandas 0.x subset
 == param.Series.sum-axis

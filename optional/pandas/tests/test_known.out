@@ -9,7 +9,7 @@
 == unique
 True
 == count
-(214, 214)
+(220, 220)
 == missing
 []
 == extra
@@ -33,6 +33,6 @@ True
 == oracle-and-sagebrush-only
 []
 == neither
-[]
+['test_frame_arith.py']
 == oracle-without-test
 []

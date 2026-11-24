@@ -268,8 +268,8 @@
     },
     {
       "case": "arith.with-frame",
-      "message": "pandas.Series.add with a DataFrame (a frame result) is not in Sagebrush's pandas 0.x subset",
-      "reason": "a Series with a DataFrame aligns the Series' labels with the frame's columns into a frame, outside the subset's Series arithmetic; it raises before any work"
+      "message": "pandas.DataFrame.radd with a Series whose labels aren't the frame's columns (pandas' added all-missing columns) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a Series with a frame is the frame's arithmetic, the Series lined up with the columns; here its labels (0, 1) aren't the frame's columns, so pandas adds all-missing columns with its block-dependent dtype; it raises before any work"
     },
     {
       "case": "arith.datetime",
@@ -317,9 +317,39 @@
       "reason": "arithmetic on an object column masks its missing values out in pandas (Series([1, None], dtype=object) + 1 gives [2, nan] as object); the subset refuses object columns here rather than give another dtype or an error, as it does for object columns elsewhere; it raises before any work"
     },
     {
-      "case": "op.frame-add",
-      "message": "pandas.DataFrame.__add__ (arithmetic) is not in Sagebrush's pandas 0.x subset",
-      "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"
+      "case": "frame-arith.other-columns",
+      "message": "pandas.DataFrame.add of frames with different columns (pandas' added all-missing columns take a dtype from its internal blocks) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas computes two frames whose column sets differ on their shared columns and then adds the others as all-missing columns, whose dtype depends on its internal blocks (float32 after a float32 result, float64 after an int64, str or bool one); Sagebrush's frame has no blocks, so it raises before any work rather than guess the dtype"
+    },
+    {
+      "case": "frame-arith.series-other-labels",
+      "message": "pandas.DataFrame.add with a Series whose labels aren't the frame's columns (pandas' added all-missing columns) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a Series with labels that aren't the frame's columns adds all-missing columns, with pandas' block-dependent dtype as for two frames with different columns; it raises before any work"
+    },
+    {
+      "case": "frame-arith.repeated-columns",
+      "message": "pandas.DataFrame.add of a frame with repeated column labels is not in Sagebrush's pandas 0.x subset",
+      "reason": "matching columns by label needs unique labels; pandas lines repeated labels up by position within each label, which isn't in the subset; it raises before any work (a scalar, list-like or array works with repeated labels)"
+    },
+    {
+      "case": "frame-arith.level",
+      "message": "pandas.DataFrame.add(level=) (a MultiIndex) is not in Sagebrush's pandas 0.x subset",
+      "reason": "level= broadcasts across a MultiIndex level, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "frame-arith.3d",
+      "message": "pandas.DataFrame.add with a 3-dimensional array is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas can't take arrays of more than two dimensions either (its message differs); it raises before any work"
+    },
+    {
+      "case": "frame-arith.matmul",
+      "message": "pandas.DataFrame.__matmul__ (a matrix product) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a frame's matrix product (@, dot) isn't in the subset yet; it raises before any work"
+    },
+    {
+      "case": "frame-arith.object-row",
+      "message": "pandas.DataFrame.add with a row of object values is not in Sagebrush's pandas 0.x subset",
+      "reason": "a row of mixed values is an object Series in pandas, and object columns aren't in the subset's arithmetic; it raises before any work"
     },
     {
       "case": "op.frame-gt",

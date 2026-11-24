@@ -364,6 +364,10 @@ class Series(object):
 
     def _pd_arith(self, other, op, reflected=False, fill_value=None, method=False):
         from . import _pd_arith as A
+        from ._pd_frame import DataFrame
+        if isinstance(other, DataFrame) and not method:
+            # (an operator with a frame is the frame's: Python then calls its reflected operator)
+            return NotImplemented
         owner = "Series.%s" % (("r" if reflected else "") + op)
         other = A.operand(other, owner, method)
         # (pandas' flex methods take a Series, list, tuple or array argument through their own path: its length
@@ -433,9 +437,15 @@ class Series(object):
         return self._pd_arith(other, "pow", True)
 
     def __divmod__(self, other):
+        from ._pd_frame import DataFrame
+        if isinstance(other, DataFrame):
+            return NotImplemented
         return self._pd_arith(other, "floordiv"), self._pd_arith(other, "mod")
 
     def __rdivmod__(self, other):
+        from ._pd_frame import DataFrame
+        if isinstance(other, DataFrame):
+            return NotImplemented
         return self._pd_arith(other, "floordiv", True), self._pd_arith(other, "mod", True)
 
     def __matmul__(self, other):

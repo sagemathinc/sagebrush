@@ -863,69 +863,226 @@ class DataFrame(object):
                 raise unsupported_name("DataFrame.%s" % name)
         raise AttributeError("'DataFrame' object has no attribute '%s'" % name)
 
-    # (arithmetic is M2's: every operator raises NotImplementedError)
+    # --- arithmetic (_pd_frame_arith) ---------------------------------------
+
     def __add__(self, other):
-        raise _unsupported("DataFrame.__add__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "add")
 
     def __radd__(self, other):
-        raise _unsupported("DataFrame.__radd__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "add", True)
 
     def __sub__(self, other):
-        raise _unsupported("DataFrame.__sub__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "sub")
 
     def __rsub__(self, other):
-        raise _unsupported("DataFrame.__rsub__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "sub", True)
 
     def __mul__(self, other):
-        raise _unsupported("DataFrame.__mul__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "mul")
 
     def __rmul__(self, other):
-        raise _unsupported("DataFrame.__rmul__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "mul", True)
 
     def __truediv__(self, other):
-        raise _unsupported("DataFrame.__truediv__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "truediv")
 
     def __rtruediv__(self, other):
-        raise _unsupported("DataFrame.__rtruediv__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "truediv", True)
 
     def __floordiv__(self, other):
-        raise _unsupported("DataFrame.__floordiv__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "floordiv")
 
     def __rfloordiv__(self, other):
-        raise _unsupported("DataFrame.__rfloordiv__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "floordiv", True)
 
     def __mod__(self, other):
-        raise _unsupported("DataFrame.__mod__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "mod")
 
     def __rmod__(self, other):
-        raise _unsupported("DataFrame.__rmod__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "mod", True)
 
     def __pow__(self, other):
-        raise _unsupported("DataFrame.__pow__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "pow")
 
     def __rpow__(self, other):
-        raise _unsupported("DataFrame.__rpow__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "pow", True)
 
     def __matmul__(self, other):
-        raise _unsupported("DataFrame.__matmul__ (arithmetic)")
+        raise _unsupported("DataFrame.__matmul__ (a matrix product)")
 
     def __rmatmul__(self, other):
-        raise _unsupported("DataFrame.__rmatmul__ (arithmetic)")
+        raise _unsupported("DataFrame.__rmatmul__ (a matrix product)")
 
     def __divmod__(self, other):
-        raise _unsupported("DataFrame.__divmod__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "floordiv"), FA.binary(self, other, "mod")
 
     def __rdivmod__(self, other):
-        raise _unsupported("DataFrame.__rdivmod__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "floordiv", True), FA.binary(self, other, "mod", True)
 
     def __neg__(self):
-        raise _unsupported("DataFrame.__neg__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.unary(self, "neg")
 
     def __pos__(self):
-        raise _unsupported("DataFrame.__pos__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.unary(self, "pos")
 
     def __abs__(self):
-        raise _unsupported("DataFrame.__abs__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.unary(self, "abs")
+
+    def abs(self):
+        """Each value's absolute value."""
+        return self.__abs__()
+
+    def add(self, other, axis="columns", level=None, fill_value=None):
+        """Named add: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "add", False, fill_value, axis, level, True)
+
+    def sub(self, other, axis="columns", level=None, fill_value=None):
+        """Named sub: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "sub", False, fill_value, axis, level, True)
+
+    def subtract(self, other, axis="columns", level=None, fill_value=None):
+        """Named sub: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "sub", False, fill_value, axis, level, True)
+
+    def mul(self, other, axis="columns", level=None, fill_value=None):
+        """Named mul: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "mul", False, fill_value, axis, level, True)
+
+    def multiply(self, other, axis="columns", level=None, fill_value=None):
+        """Named mul: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "mul", False, fill_value, axis, level, True)
+
+    def truediv(self, other, axis="columns", level=None, fill_value=None):
+        """Named truediv: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "truediv", False, fill_value, axis, level, True)
+
+    def div(self, other, axis="columns", level=None, fill_value=None):
+        """Named truediv: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "truediv", False, fill_value, axis, level, True)
+
+    def divide(self, other, axis="columns", level=None, fill_value=None):
+        """Named truediv: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "truediv", False, fill_value, axis, level, True)
+
+    def floordiv(self, other, axis="columns", level=None, fill_value=None):
+        """Named floordiv: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "floordiv", False, fill_value, axis, level, True)
+
+    def mod(self, other, axis="columns", level=None, fill_value=None):
+        """Named mod: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "mod", False, fill_value, axis, level, True)
+
+    def pow(self, other, axis="columns", level=None, fill_value=None):
+        """Named pow: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "pow", False, fill_value, axis, level, True)
+
+    def radd(self, other, axis="columns", level=None, fill_value=None):
+        """Named radd: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "add", True, fill_value, axis, level, True)
+
+    def rsub(self, other, axis="columns", level=None, fill_value=None):
+        """Named rsub: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "sub", True, fill_value, axis, level, True)
+
+    def rmul(self, other, axis="columns", level=None, fill_value=None):
+        """Named rmul: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "mul", True, fill_value, axis, level, True)
+
+    def rtruediv(self, other, axis="columns", level=None, fill_value=None):
+        """Named rtruediv: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "truediv", True, fill_value, axis, level, True)
+
+    def rdiv(self, other, axis="columns", level=None, fill_value=None):
+        """Named rtruediv: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "truediv", True, fill_value, axis, level, True)
+
+    def rfloordiv(self, other, axis="columns", level=None, fill_value=None):
+        """Named rfloordiv: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "floordiv", True, fill_value, axis, level, True)
+
+    def rmod(self, other, axis="columns", level=None, fill_value=None):
+        """Named rmod: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "mod", True, fill_value, axis, level, True)
+
+    def rpow(self, other, axis="columns", level=None, fill_value=None):
+        """Named rpow: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "pow", True, fill_value, axis, level, True)
 
     # (comparisons of frames are M2's too)
     def __eq__(self, other):
