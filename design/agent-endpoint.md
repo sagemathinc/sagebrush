@@ -64,11 +64,15 @@ grants(
    - meanwhile the agent polls `POST /api/agent/v1/pair/<pair_id>` with its `poll_secret`, and receives the token once, after approval;
    - a pairing expires after 10 minutes, and gives its token only once, to the holder of `poll_secret`.
 
-   **Pairing is the one route before any account, so its bounds are all stated** (LIMIT-D817-2). Its records are a D1 table, `pairings(pair_id, code_hash, poll_hash, ip_hash, wants, state, created, expires, polls, last_poll, account, grant)`, written when a pairing is made, approved and collected. It is never written on an edit.
+   **Under end-to-end encryption** (design/e2e-encryption.md §6), the server must not learn the agent's name or the paths it asks for, so the request's contents travel sealed:
+   - the agent sends `{sealed_wants}` in place of `{agent, wants}`: its name, `scopes` and `run_code`, encrypted so that only the page that approves can read them. One way is a key the agent puts in the pairing URL's fragment (`…/agents/pair#k=…`), which browsers never send to the server, as link shares do (e2e-encryption.md §5). The exact construction is settled with §4's open item, together with the agent's own key;
+   - **the approving page** decrypts the request, normalizes every path with `normPath`, applies the membership's `scopes_per_grant`, lets the person narrow it, and makes the grant with its sealed fields (§1);
+   - **the server** stores and bounds only opaque, structural things: the size of `sealed_wants`, the counts, the rates and the expiry below. It never runs `normPath` on a path or counts scopes.
+
+   **Pairing is the one route before any account, so its bounds are all stated** (LIMIT-D817-2). Its records are a D1 table, `pairings(pair_id, code_hash, poll_hash, ip_hash, sealed_wants, state, created, expires, polls, last_poll, account, grant)`, written when a pairing is made, approved and collected. It is never written on an edit, and `sealed_wants` is ciphertext.
    - **The request:**
      - at most 4 KiB of JSON;
-     - `agent` at most 64 characters;
-     - `wants.scopes` must fit the structural 4 KiB request and every path is checked by `normPath`; on approval, the account applies its membership's `scopes_per_grant` and the person may narrow the request.
+     - `sealed_wants` must fit the structural 4 KiB request. The approving page checks what is inside it: `agent` at most 64 characters, every path by `normPath`, and the membership's `scopes_per_grant`; the person may narrow the request.
      - Anything else is refused with 400 before any write.
    - **Making one:**
      - the IP limit first (Cloudflare's rate-limiting binding, 10 an hour per IP);
@@ -285,10 +289,12 @@ Every check and reservation precedes its write. For a batch, admission reserves 
 The panel of §8.7 talks to a person's cocalc.ai agents through CoCalc's Agent Network. This needs work on the CoCalc side, which @sagebrush-auth designs with the cocalc.ai agent team in its own short note. Its outline:
 
 - **The sender is the person, through their Sagebrush page.** CoCalc gets a new OAuth scope, `agents:message`, which the person approves at sign-in. The Sagebrush server uses the token from that scope to send as the person: never as an agent, and never on its own.
+- **A message to a cocalc.ai agent leaves end-to-end encryption, by the person's choice:** CoCalc and that agent read it, as any message sent to a third party's agent is read. The panel says so. Under end-to-end encryption the Sagebrush server still mustn't read it on the way: how the page's message reaches CoCalc without the Sagebrush server reading it is open, with §4's item.
 - **Addressing:** `cocalc agent destinations` for the person's account, shown in the panel.
 - **The flow:**
   - a message the person types becomes a CoCalc Agent Network message from the person's account to that agent, with `reply_to: sagebrush:<chat document>`;
-  - the agent's reply comes back through the Sagebrush server, which writes it into the `.chat` document as a patch credited to `agent:<name>`;
+  - the agent's reply comes back through the Sagebrush server, **which relays it opaquely to an online, trusted device of the person's** (§4). That device checks it against the grant and the conversation, credits it to `agent:<name>`, and seals and signs it as a patch on the `.chat` document. The server never makes a patch itself, since it can't read or write the document;
+  - with no device online, the reply waits, queued opaquely, and lands when one comes online;
   - so it is on every device, and in TimeTravel.
 - **The agent's access to the workspace** is an ordinary grant (§1), made through pairing, which the adapter starts and the person approves.
 - **What stays the same:**
@@ -300,7 +306,7 @@ The panel of §8.7 talks to a person's cocalc.ai agents through CoCalc's Agent N
 In Miniflare, with the sync server's harness:
 
 - **Before authentication:** a fresh, made-up account hash on every request, a bad tag, and a malformed token each get 401 from the Worker, create no object and write no row; the IP limit stops a flood.
-- **Pairing:** an oversized body is refused before any write; a fourth pending pairing from one IP, a full site, polling faster than 5 s (`slow_down`), more than 150 polls, and expired rows are each handled as §2 says; no failure path shows a token.
+- **Pairing:** an oversized body is refused before any write; the approving page refuses a request whose sealed contents fail `normPath`, exceed 64 characters of name, or exceed `scopes_per_grant`; a fourth pending pairing from one IP, a full site, polling faster than 5 s (`slow_down`), more than 150 polls, and expired rows are each handled as §2 says; no failure path shows a token.
 - **Reading:** a grant's URL debits at issue and works once; parallel and overlapping range requests on it give at most one success.
 - **Document writes:** a competing append between the read and the write gives `conflict`; a revoke while the write is delayed either finds it committed (and logged) or refuses it.
 - **Grants, on the server:**
@@ -308,7 +314,7 @@ In Miniflare, with the sync server's harness:
   - a revoke, or a change to the grant, while a write is running prevents the write: an op or admission naming an old `gen` is refused;
   - revoking closes the grant's sockets;
   - a pairing is used once, by the holder of its secret only, and a wrong code fails 5 times and then the pairing ends;
-  - **nothing the server stores or logs holds a path, a scope or a code hash:** every request, relay message and log row is checked for them.
+  - **nothing the server stores or logs holds a path, a scope, an agent's name or a code hash:** every request, relay message and log row is checked for them, and so are a pairing's request, its D1 row and its approval, and the adapter's relayed replies.
 - **Scope, on the answering device:**
   - `/Algebra` doesn't cover `/Algebra2`;
   - `..`, `.`, `//` and other spellings normalize to the same path, or are refused;
