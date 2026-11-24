@@ -25,6 +25,7 @@ import { ND_MATMUL_MIN, ndMatmul, useNd } from "./nd";
 import * as FD from "./fdlibm";
 import { nativeHost } from "./heap";
 import * as CR from "./crmath";
+import { fma, fmaf } from "./fma";
 
 const { T, raise, tuple, typeName, NotImplemented } = Obj;
 
@@ -1323,14 +1324,15 @@ function fdivmod(a: number, b: number): [number, number] {
   return [floordiv, mod];
 }
 
-const BIN: Record<string, { f: Bin; c?: CBin; out?: "bool" | "float"; int?: Bin; noBool?: boolean }> = Obj.table({
+// (c32: the complex64 loop where it differs from computing in double and rounding the result once)
+const BIN: Record<string, { f: Bin; c?: CBin; c32?: CBin; out?: "bool" | "float"; int?: Bin; noBool?: boolean }> = Obj.table({
   add: { f: (x, y) => x + y, c: (a, b, c, d) => [a + c, b + d] },
   subtract: { f: (x, y) => x - y, c: (a, b, c, d) => [a - c, b - d], noBool: true },
-  multiply: { f: (x, y) => x * y, c: (a, b, c, d) => [a * c - b * d, a * d + b * c] },
-  true_divide: { f: (x, y) => x / y, out: "float", c: cdiv },
+  multiply: { f: (x, y) => x * y, c: cmulFma, c32: cmulFma32 },
+  true_divide: { f: (x, y) => x / y, out: "float", c: cdiv, c32: cdiv32 },
   floor_divide: { f: (x, y) => fdivmod(x, y)[0], int: (x, y) => (y === 0 ? 0 : Math.floor(x / y)) },
   remainder: { f: (x, y) => fdivmod(x, y)[1], int: (x, y) => (y === 0 ? 0 : x - Math.floor(x / y) * y) },
-  power: { f: glibcPow, c: cpow, int: ipow },
+  power: { f: glibcPow, c: cpow, c32: cpow32, int: ipow },
   maximum: { f: (x, y) => (x !== x || y !== y ? NaN : Math.max(x, y)) },
   minimum: { f: (x, y) => (x !== x || y !== y ? NaN : Math.min(x, y)) },
   fmax: { f: (x, y) => (x !== x ? y : y !== y ? x : Math.max(x, y)) },
@@ -1368,8 +1370,79 @@ function cdiv(a: number, b: number, c: number, d: number): [number, number] {
   const rat = c / d, scl = 1 / (d + c * rat);
   return [(a * rat + b) * scl, (b * rat - a) * scl];
 }
-// NumPy's cmul: the product as written, no fused multiply-add
-const cmul = (ar: number, ai: number, br: number, bi: number): [number, number] => [ar * br - ai * bi, ar * bi + ai * br];
+// NumPy's cmul: the product as written, no fused multiply-add (scalarmath's complex128 product, npy_cpow's
+// powers, and the folds of cumprod and of prod along the contiguous axis); a NaN part as scalarmath's on x86,
+// each step's first NaN operand in its order (nanOf below), not the engine's choice, which can vary
+function cmul(ar: number, ai: number, br: number, bi: number): [number, number] {
+  let p = ar * br, q = ai * bi, s = ar * bi, t = ai * br;
+  if (p !== p) p = nanOf(ar, br);
+  if (q !== q) q = nanOf(bi, ai);
+  if (s !== s) s = nanOf(ar, bi);
+  if (t !== t) t = nanOf(br, ai);
+  let re = p - q, im = s + t;
+  if (re !== re) re = nanOf(p, q);
+  if (im !== im) im = nanOf(s, t);
+  return [re, im];
+}
+// ... and in float32, each product and sum rounded (complex64)
+const fr = Math.fround;
+const cmul32 = (ar: number, ai: number, br: number, bi: number): [number, number] => [
+  fr(fr(ar * br) - fr(ai * bi)),
+  fr(fr(ar * bi) + fr(ai * br)),
+];
+// ... and scalarmath's complex64 product: the plain formula with each product and sum rounded to float32, a NaN
+// part chosen as cmul's
+function cmulScalar32(ar: number, ai: number, br: number, bi: number): [number, number] {
+  ar = fr(ar), ai = fr(ai), br = fr(br), bi = fr(bi);
+  let p = fr(ar * br), q = fr(ai * bi), s = fr(ar * bi), t = fr(ai * br);
+  if (p !== p) p = nanOf(ar, br);
+  if (q !== q) q = nanOf(bi, ai);
+  if (s !== s) s = nanOf(ar, bi);
+  if (t !== t) t = nanOf(br, ai);
+  let re = fr(p - q), im = fr(s + t);
+  if (re !== re) re = nanOf(p, q);
+  if (im !== im) im = nanOf(s, t);
+  return [re, im];
+}
+// NumPy's elementwise complex multiply loop (multiply, square, prod across an outer axis): each part one fused
+// multiply-add, re = fma(ar, br, -(ai*bi)) and im = fma(ar, bi, ai*br), rounded once (to float32 for complex64)
+// A NaN part as that loop's on x86 (the reference's): its NaN operand, unchanged (the subtracted one too),
+// else x86's default NaN, its sign set; so complex(0, nan) * (1+0j) has real part +nan, as NumPy's. (Of two
+// NaN operands of different signs NumPy's choice depends on the element's place in its SIMD loop and on the
+// CPU; this takes its main loop's on x86-64, ar first, then b's part, then the product.)
+function cmulFma(ar: number, ai: number, br: number, bi: number): [number, number] {
+  let t = ai * bi, u = ai * br;
+  if (t !== t) t = nanOf(bi, ai);
+  if (u !== u) u = nanOf(br, ai);
+  let re = fma(ar, br, -t), im = fma(ar, bi, u);
+  if (re !== re) re = nanOf(ar, br, t);
+  if (im !== im) im = nanOf(ar, bi, u);
+  return [re, im];
+}
+// (the operands as complex64 first: a Python complex is one by NEP 50's rules)
+function cmulFma32(ar: number, ai: number, br: number, bi: number): [number, number] {
+  ar = fr(ar), ai = fr(ai), br = fr(br), bi = fr(bi);
+  let t = fr(ai * bi), u = fr(ai * br);
+  if (t !== t) t = nanOf(bi, ai);
+  if (u !== u) u = nanOf(br, ai);
+  let re = fmaf(ar, br, -t), im = fmaf(ar, bi, u);
+  if (re !== re) re = nanOf(ar, br, t);
+  if (im !== im) im = nanOf(ar, bi, u);
+  return [re, im];
+}
+const nanOf = (x: number, y: number, z = 0) => (x !== x ? x : y !== y ? y : z !== z ? z : X86_NAN);
+// complex64 division: NumPy's loop (Smith's algorithm, as cdiv) with every operation rounded to float32
+function cdiv32(a: number, b: number, c: number, d: number): [number, number] {
+  a = fr(a), b = fr(b), c = fr(c), d = fr(d);
+  const ac = Math.abs(c), ad = Math.abs(d);
+  if (ac >= ad) {
+    if (ac === 0 && ad === 0) return [fr(a / ac), fr(b / ad)];
+    const rat = fr(d / c), scl = fr(1 / fr(c + fr(d * rat)));
+    return [fr(fr(a + fr(b * rat)) * scl), fr(fr(b - fr(a * rat)) * scl)];
+  }
+  const rat = fr(c / d), scl = fr(1 / fr(d + fr(c * rat)));
+  return [fr(fr(fr(a * rat) + b) * scl), fr(fr(fr(b * rat) - a) * scl)];
+}
 // a ** b as NumPy's npy_cpow (npymath/npy_math_complex.c.src): 0 ** b is 0
 // for b with a positive real part, else NaN; an integer exponent below 100
 // in magnitude by its unrolled 1, 2 and 3 (which keep infinities and signed
@@ -1401,6 +1474,31 @@ function cpow(a: number, b: number, c: number, d: number): [number, number] {
   const mr = glibcExp(c * logr - d * th), ang = d * logr + c * th;
   return [mr * FD.cos(ang), mr * FD.sin(ang)];
 }
+// npy_cpowf: cpow in float32, each step rounded (its powers by cmul32, a negative one by cdiv32); exponents
+// other than small integers as cpow, rounded
+function cpow32(a: number, b: number, c: number, d: number): [number, number] {
+  a = fr(a), b = fr(b), c = fr(c), d = fr(d);
+  if (c === 0 && d === 0) return [1, 0];
+  if (a === 0 && b === 0) return c > 0 ? [0, 0] : [NaN, NaN];
+  if (d === 0 && Number.isInteger(c) && c > -100 && c < 100) {
+    if (c === 1) return [a, b];
+    if (c === 2) return cmul32(a, b, a, b);
+    if (c === 3) {
+      const [sr, si] = cmul32(a, b, a, b);
+      return cmul32(a, b, sr, si);
+    }
+    let n = Math.abs(c), mask = 1, rr = 1, ri = 0, pr = a, pi = b;
+    for (;;) {
+      if (n & mask) [rr, ri] = cmul32(rr, ri, pr, pi);
+      mask <<= 1;
+      if (n < mask) break;
+      [pr, pi] = cmul32(pr, pi, pr, pi);
+    }
+    return c < 0 ? cdiv32(1, 0, rr, ri) : [rr, ri];
+  }
+  const [r, i] = cpow(a, b, c, d);
+  return [fr(r), fr(i)];
+}
 // 1 / z as NumPy's complex reciprocal loop (umath/loops.c.src), which is
 // not cdiv(1, z): the larger part's ratio, and 1 / d and -r / d
 // a ** o and a **= o as NumPy's array_power (multiarray/number.c,
@@ -1424,6 +1522,16 @@ function crecip(a: number, b: number): [number, number] {
   }
   const r = a / b, d = a * r + b;
   return [r / d, -1 / d];
+}
+// ... in float32, each operation rounded (complex64)
+function crecip32(a: number, b: number): [number, number] {
+  a = fr(a), b = fr(b);
+  if (Math.abs(b) <= Math.abs(a)) {
+    const r = fr(b / a), d = fr(a + fr(b * r));
+    return [fr(1 / d), fr(-r / d)];
+  }
+  const r = fr(a / b), d = fr(fr(a * r) + b);
+  return [fr(r / d), fr(-1 / d)];
 }
 function ipow(x: number, y: number): number {
   if (y < 0) raise(T.ValueError, "Integers to negative integer powers are not allowed.");
@@ -1551,7 +1659,8 @@ function stridedKernel(op: string): any {
 // and shape (out C-contiguous from its start and sharing no memory with the
 // operands unless it is one of them, laid out alike): else undefined, before
 // anything is computed.
-export function binary(op: string, x: any, y: any, out: NDArray | null = null, tryOut = false): any {
+// (scalarMath: an operator on two scalars, NumPy's scalarmath, whose complex product is the plain formula)
+export function binary(op: string, x: any, y: any, out: NDArray | null = null, tryOut = false, scalarMath = false): any {
   const spec = BIN[op];
   if (out) outWritable(out);
   const A = operand(x), B = operand(y);
@@ -1614,7 +1723,7 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
   const ad = a.data, bd = b.data, od = res.data, ost = res.strides, oo = res.offset;
   const contigOut = res.isC() && oo === 0;
   if (ct.cplx) {
-    const fc = spec.c;
+    const fc = scalarMath && op === "multiply" && rt.cplx ? (rt === D.complex64 ? cmulScalar32 : cmul) : rt === D.complex64 && spec.c32 ? spec.c32 : spec.c;
     if (!fc) return raise(T.TypeError, `ufunc '${op}' not supported for complex input`);
     const ac = a.dt.cplx, bc = b.dt.cplx;
     loop2(shape, sa, a.offset, sb, b.offset, (p, q, k) => {
@@ -1669,17 +1778,18 @@ function withSign(x: number, negative: number): number {
   SIGN_W[1] = (SIGN_W[1] & 0x7fffffff) | (negative << 31);
   return SIGN_F[0];
 }
+// (x86's default NaN, for nanOf: its sign set, where the engine keeps one)
+const X86_NAN = NAN_SIGN_KEPT ? withSign(NaN, 1) : NaN;
 
 type Un = (x: number) => number;
 type CUn = (re: number, im: number) => [number, number];
-const UN: Record<string, { f: Un; c?: CUn; float?: boolean; keepInt?: boolean; out?: "bool" }> = Obj.table({
+const UN: Record<string, { f: Un; c?: CUn; c32?: CUn; float?: boolean; keepInt?: boolean; out?: "bool" }> = Obj.table({
   negative: { f: (x) => -x, c: (a, b) => [-a, -b], keepInt: true },
   positive: { f: (x) => x, c: (a, b) => [a, b], keepInt: true },
   absolute: { f: Math.abs, keepInt: true },
   sign: { f: (x) => (x !== x ? NaN : x > 0 ? 1 : x < 0 ? -1 : 0), keepInt: true },
-  // (complex: NumPy's loop as written, a a - b b and a b + b a; on hardware
-  // with fused multiply-add NumPy's SIMD loop fuses them, in the last bit)
-  square: { f: (x) => x * x, c: (a, b) => [a * a - b * b, a * b + b * a], keepInt: true },
+  // (complex: NumPy's elementwise multiply of z by itself, each part a fused multiply-add)
+  square: { f: (x) => x * x, c: (a, b) => cmulFma(a, b, a, b), c32: (a, b) => cmulFma32(a, b, a, b), keepInt: true },
   sqrt: { f: Math.sqrt, c: csqrt, float: true },
   cbrt: { f: FD.cbrt, float: true },
   // (a real argument keeps its zero imaginary part: exp(inf+0j) = inf+0j)
@@ -1710,7 +1820,7 @@ const UN: Record<string, { f: Un; c?: CUn; float?: boolean; keepInt?: boolean; o
   trunc: { f: Math.trunc, keepInt: true },
   rint: { f: roundHalfEven, float: true }, // (of ints: float16, float32 or float64, as NumPy's)
   fabs: { f: Math.abs, float: true },
-  reciprocal: { f: (x) => 1 / x, c: crecip, keepInt: true },
+  reciprocal: { f: (x) => 1 / x, c: crecip, c32: crecip32, keepInt: true },
   isnan: { f: (x) => +(x !== x), out: "bool", c: (a, b) => [+(a !== a || b !== b), 0] },
   isinf: { f: (x) => +(x === Infinity || x === -Infinity), out: "bool" },
   isfinite: { f: (x) => +Number.isFinite(x), out: "bool", c: (a, b) => [+(Number.isFinite(a) && Number.isFinite(b)), 0] },
@@ -1873,7 +1983,7 @@ function unaryRaw(op: string, x: any): any {
   const out = empty(a.shape, rt);
   const od = out.data, ad = a.data;
   if (a.dt.cplx) {
-    const fc = spec.c;
+    const fc = rt === D.complex64 && spec.c32 ? spec.c32 : spec.c;
     if (!fc) return raise(T.TypeError, `ufunc '${op}' not supported for complex input`);
     loop1(a.shape, a.strides, a.offset, (p, k) => {
       const r = fc(ad[2 * p], ad[2 * p + 1]);
@@ -2103,6 +2213,11 @@ function complexProd(a: NDArray, axes: number[] | null, keepdims: boolean, rt: D
   const outShape = keep.map((i) => a.shape[i]);
   const out = empty(outShape, rt);
   const f32 = rt === D.complex64;
+  // (NumPy's loop: across an outer axis the elementwise multiply, fused multiply-adds; along the axis
+  // innermost in memory, the smallest stride, its reduce loop, plain products in a left fold)
+  let inner = -1;
+  for (let i = 0; i < nd; i++) if (a.shape[i] > 1 && (inner < 0 || Math.abs(a.strides[i]) < Math.abs(a.strides[inner]))) inner = i;
+  const mulc = inner >= 0 && !ax.includes(inner) ? (f32 ? cmulFma32 : cmulFma) : f32 ? cmul32 : cmul;
   const cin = a.dt.cplx, d = a.data, o = out.data;
   const val = (p: number): [number, number] => {
     const xr = cin ? d[2 * p] : d[p], xi = cin ? d[2 * p + 1] : 0;
@@ -2121,8 +2236,7 @@ function complexProd(a: NDArray, axes: number[] | null, keepdims: boolean, rt: D
         first = false;
         return;
       }
-      [re, im] = [re * xr - im * xi, re * xi + im * xr];
-      if (f32) [re, im] = [Math.fround(re), Math.fround(im)];
+      [re, im] = mulc(re, im, xr, xi);
     });
     o[2 * r] = re;
     o[2 * r + 1] = im;
@@ -2367,7 +2481,7 @@ function cumulative(a: NDArray, axis: any, isProd: boolean, dtype: any): NDArray
       for (let i = 0; i < n; i++) {
         const s = p + i * st, xr = cin ? t.data[2 * s] : t.data[s], xi = cin ? t.data[2 * s + 1] : 0;
         if (i === 0) [re, im] = [xr, xi];
-        else if (isProd) [re, im] = [re * xr - im * xi, re * xi + im * xr];
+        else if (isProd) [re, im] = f32 ? cmul32(re, im, xr, xi) : cmul(re, im, xr, xi);
         else [re, im] = [re + xr, im + xi];
         if (f32) [re, im] = [Math.fround(re), Math.fround(im)];
         const d = q + i * ost;
@@ -4144,7 +4258,7 @@ newBuiltinModule("_numpy", (m) => {
     const r = unary(op, x);
     return x instanceof NDArray ? r : r.ndim === 0 ? pyScalarOf(r.dt, r.data, 0) : r;
   });
-  fn("binary", (op: string, x: any, y: any) => {
+  fn("binary", (op: string, x: any, y: any, operator = false) => {
     // two real scalars (np.float64(1.5) + 2 ...): compute directly
     if (!(x instanceof NDArray) && !(y instanceof NDArray)) {
       // (a string array: its comparisons, a flipped one for a string on the left; else refused)
@@ -4165,8 +4279,9 @@ newBuiltinModule("_numpy", (m) => {
         }
       }
     }
-    const r = binary(op, x, y);
-    return isArrayLike(x) || isArrayLike(y) ? r : pyScalarOf(r.dt, r.data, 0);
+    const arr = isArrayLike(x) || isArrayLike(y);
+    const r = binary(op, x, y, null, false, operator && !arr);
+    return arr ? r : pyScalarOf(r.dt, r.data, 0);
   });
   fn("sum", (a: any, axis: any = null, keepdims: any = false, dtype: any = null) => sum(asarray(a), opt(axis), !!keepdims, opt(dtype)));
   // sum((a - m)**2) over a whole C-contiguous float64 array, or None

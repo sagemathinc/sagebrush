@@ -2468,7 +2468,7 @@ test("a matrix product with an Inf or NaN is refused (dense, sparse, mixed and m
     "[Inf 2;3 4]", "[1 0;0 1]", "[0.5 0;0 0.25]", "[37 54;81 118]", "[1 2;3 4]", "[Inf 2]", "[1 0]", "[0 0 0;0 0 0]", "[0 2]",
     "1", "1", "1", "[7 10;15 22]", "[1 0;0 1]", refused, refused, refused, refused, refused,
     "A negative matrix power of values that include Inf or NaN is not supported in Sagebrush: it is inv(A), whose result for them is not certified.",
-    "1", "1", "1", "1", refused, refused, "single", "[37 54;81 118]", refused, "-2.6367796834847468e-16 -4.163336342344337e-16", "0.11100000888109207", "single 1.0000001192092896", "single", "1", "1"]);
+    "1", "1", "1", "1", refused, refused, "single", "[37 54;81 118]", refused, "0 0", "0.11100000888109207", "single 1.0000001192092896", "single", "1", "1"]);
 });
 
 test("inv, \\ and / refuse values that include Inf or NaN (no certified answer for them); scalars and finite systems are unchanged; isequaln compares complex parts with NaN equal to NaN", () => {
