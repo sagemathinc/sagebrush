@@ -256,3 +256,39 @@ test("the methods Sagebrush lacks are refused with an identifier", () => {
   assert.equal(got.get("next"), "next|Sagebrush:interp3:unsupportedMethod|interp3: the 'next' method is not supported in Sagebrush.");
   assert.equal(got.get("slmak"), "slmak|Sagebrush:slice:unsupportedMethod|slice: the 'makima' method is not supported in Sagebrush.");
 });
+
+const PROGRAM_SINGLE = [
+  "[X,Y] = meshgrid(0:4, 0:3); V = sin(1.7*X + 0.3).*cos(0.9*Y - 0.2) + X.*Y/7;",
+  "xq = mod((1:25)*0.6180339887498949,1)*4; yq = mod((1:25)*0.7548776662466927,1)*3;",
+  "P = @(s, v) fprintf('%s|%s\\n', s, sprintf('%.17g ', v));",
+  "try, r = interp2(X,Y,single(V),xq(1:5),yq(1:5)); fprintf('i2sgl|%s|%s\\n', class(r), sprintf('%.9g ', r)); catch e, fprintf('i2sgl|ERR|%s|%s\\n', e.identifier, e.message); end",
+  "[Xs,Ys,Zs] = meshgrid(0:4, 0:3, 0:5); Vs = sin(1.7*Xs + 0.3).*cos(0.9*Ys - 0.2) + exp(0.31*Zs)./(1 + Xs.^2);",
+  "xq3 = mod((1:10)*0.6180339887498949,1)*4; yq3 = mod((1:10)*0.7548776662466927,1)*3; zq3 = mod((1:10)*0.5698402909980532,1)*5;",
+  "for m = {'linear','nearest'}",
+  "  try, r = interp3(Xs,Ys,Zs,single(Vs),xq3,yq3,zq3,m{1}); fprintf('a5sgl_%s|%s|%s\\n', m{1}, class(r), sprintf('%.9g ', r)); catch e, fprintf('a5sgl_%s|ERR|%s|%s\\n', m{1}, e.identifier, e.message); end",
+  "end"
+];
+const EXACT_SINGLE = [
+  "i2sgl|single|0.950269103 0.507833898 0.268167853 -0.341626316 -0.0243384168 ",
+  "a5sgl_linear|single|0.522159219 0.963387012 0.132484138 0.00675389543 2.94162154 0.00622008555 2.27093101 0.539294541 0.407171726 2.09587216 ",
+  "a5sgl_nearest|single|0.522372782 0.6551615 -0.245481536 -0.246589676 3.44698453 0.208457157 3.0512042 0.86352694 0.288155973 1.24070358 "
+];
+
+test("single data: linear and nearest interpolation in single, as MATLAB R2026b computes them, to the bit (#1834)", () => {
+  // (t is the double fraction rounded to single, then each step (1 - t) a + t b in single; MATLAB's rows)
+  const got = run(PROGRAM_SINGLE);
+  for (const want of EXACT_SINGLE) assert.equal(got.get(want.split("|")[0]), want);
+});
+
+test("query coordinates of single and double mixed: MATLAB R2026b's error, for interp3 and interp2 (#1835)", () => {
+  const got = run([
+    "[X,Y,Z] = meshgrid(0:4, 0:3, 0:5); V = X + Y + Z;",
+    "try, r = interp3(X,Y,Z,V,single([0.5 1.5]),[1 2],[1 2]); fprintf('a5sglq|%s\\n', class(r)); catch e, fprintf('a5sglq|ERR|%s|%s\\n', e.identifier, e.message); end",
+    "try, r = interp2(X(:,:,1),Y(:,:,1),V(:,:,1),[0.5 1.5],single([1 2])); fprintf('i2q|%s\\n', class(r)); catch e, fprintf('i2q|ERR|%s|%s\\n', e.identifier, e.message); end",
+    "r = interp3(X,Y,Z,V,single([0.5 1.5]),single([1 2]),single([1 2])); fprintf('a5sq|%s\\n', class(r));",
+  ]);
+  const err = "ERR|MATLAB:griddedInterpolant:QueryOfMixedDataTypesErrId|All query coordinates must have the same type. Query coordinates must be of type double or single.";
+  assert.equal(got.get("a5sglq"), `a5sglq|${err}`);
+  assert.equal(got.get("i2q"), `i2q|${err}`);
+  assert.equal(got.get("a5sq"), "a5sq|double");
+});
