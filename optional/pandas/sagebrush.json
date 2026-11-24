@@ -52,7 +52,7 @@
     "py/pandas/_pd_errors.py": "f6a701574ff07e1ed3d753802443953629ec93417de0fe38c06a03fd87e60453",
     "py/pandas/_pd_excel.py": "abf67e23f9349dbf7eb1d582e97a0e44c4032898507c402f234f91247a17a48f",
     "py/pandas/_pd_frame.py": "edf47e63b026a9c686cb0e9972b06af3baa672943d1b479cb1a4012e974d1354",
-    "py/pandas/_pd_frame_arith.py": "e733c8b784c7a93c23b9fdd0c6a06fee03c268d0010c11eb4b1778a1287f3fc8",
+    "py/pandas/_pd_frame_arith.py": "2f2b3ec6c870912b6cf4d20a5fe42f692f3a4974ad609e1f445d16c1217a7ecc",
     "py/pandas/_pd_groupby.py": "c5c0105fa63061091e649c60d14a3eae6e80a507d32da6b8baca6bedb086e766",
     "py/pandas/_pd_index.py": "2c24d91eb2de81d701b6cfc370f746df2bc977635f4a4d131633cd121d9096b7",
     "py/pandas/_pd_indexing.py": "a46e09faa83ed6007f00597f966b053936c3b3ff83d7a19019a88fbc63c365f7",

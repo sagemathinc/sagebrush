@@ -35,6 +35,9 @@ def _unsupported(what):
 
 
 def _axis(axis):
+    if axis is None:
+        # (pandas' default: the columns)
+        return 1
     if axis in (0, "index", "rows"):
         return 0
     if axis in (1, "columns"):
@@ -114,6 +117,11 @@ def binary(f, other, op, reflected=False, fill_value=None, axis="columns", level
         return _with_frame(f, other, op, reflected, fill_value, owner)
     if isinstance(other, Series):
         if ax == 0:
+            if not k:
+                # (no columns to carry the alignment: the rows are still the sorted union, as in pandas)
+                from . import _pd_combine as CB
+                rows = CB.join_labels([f._pd_index, other._pd_index], "outer", True)
+                return _frame([], f._pd_columns.copy(), f._pd_index.copy() if rows is None else rows)
             return _apply(f, op, reflected, fill_value, [other] * k)
         _unique_columns(f, owner)
         if not other._pd_index.equals(f._pd_columns):

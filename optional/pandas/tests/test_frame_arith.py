@@ -136,3 +136,12 @@ t("fill-scalar-reflected", lambda: dn.rsub(10, fill_value=1))
 t("fill-int-frame", lambda: pd.DataFrame({"a": [1, 2]}).add(pd.DataFrame({"a": [np.nan, 1.0]}), fill_value=5))
 t("fill-frame-pow-both-missing", lambda: dn.pow(pd.DataFrame({"a": [np.nan, 2.0], "b": [np.nan, np.nan]}), fill_value=0))
 t("fill-row-rpow-both-missing", lambda: dn.rpow([np.nan, 2.0], fill_value=0))
+
+# no columns: the rows still align with a Series on axis='index'; axis=None is the columns
+t("no-columns-series-rows", lambda: pd.DataFrame(index=[2, 0]).add(pd.Series([1, 2], index=[0, 3]), axis=0))
+case("no-columns-series-rows.index", lambda: pd.DataFrame(index=[2, 0]).add(pd.Series([1, 2], index=[0, 3]), axis=0).index.tolist())
+case("no-columns-series-rows-permuted.index", lambda: pd.DataFrame(index=[2, 0]).add(pd.Series([1, 2], index=[0, 2]), axis=0).index.tolist())
+case("no-columns-series-rows-same.index", lambda: pd.DataFrame(index=[2, 0]).add(pd.Series([1, 2], index=[2, 0]), axis=0).index.tolist())
+case("no-columns-frame.index", lambda: (pd.DataFrame(index=[2, 0]) + pd.DataFrame(index=[5])).index.tolist())
+t("axis-none-scalar", lambda: pd.DataFrame({"a": [1, 2]}).add(1, axis=None))
+t("axis-none-series", lambda: pd.DataFrame({"a": [1, 2], "b": [3, 4]}).add(pd.Series({"a": 10, "b": 20}), axis=None))
