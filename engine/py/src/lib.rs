@@ -533,6 +533,11 @@ fn mpoly_call<'py>(py: Python<'py>, request: Vec<u8>) -> PyResult<Bound<'py, pyo
 /// for signals, when it takes its request in pieces.
 const BIN_CHUNK: usize = 1 << 20;
 
+/// The most pieces a binary request may come in (the Sage-mode echelon's
+/// are at most a frame of 64 KiB pieces, about 2^12): the bookkeeping of
+/// the pieces' references stays bounded (8 bytes each).
+const BIN_MAX_PIECES: usize = 1 << 16;
+
 /// A binary call (SBW1, engine/wire), shared with the WebAssembly build
 /// (sb_bin_call): the reply, `ok` or `er` in band.
 ///
@@ -562,14 +567,29 @@ fn call_bin<'py>(py: Python<'py>, request: &Bound<'py, PyAny>) -> PyResult<Bound
     let Ok(list) = request.cast::<PyList>() else {
         return Err(PyTypeError::new_err("call_bin takes bytes, or a list of bytes pieces"));
     };
-    // (the pieces held first, each a bytes: a signal handler run between
-    // the copy's runs can't change what is copied)
-    let mut pieces: Vec<Bound<'py, PyBytes>> = Vec::with_capacity(list.len());
+    // (before anything is allocated: the pieces' count, their kind and
+    // their summed size, with checked arithmetic, against the frame cap; a
+    // request past it is refused here, never assembled, whatever pieces it
+    // is made of, the same bytes object repeated included)
+    if list.len() > BIN_MAX_PIECES {
+        return Err(PyValueError::new_err(format!("call_bin: a request in more than {} pieces", BIN_MAX_PIECES)));
+    }
     let mut total = 0usize;
     for item in list.iter() {
-        let b = item.cast_into::<PyBytes>().map_err(|_| PyTypeError::new_err("call_bin: every piece must be bytes"))?;
-        total = total.checked_add(b.as_bytes().len()).ok_or_else(|| PyMemoryError::new_err("call_bin: a request too large"))?;
-        pieces.push(b);
+        let b = item.cast::<PyBytes>().map_err(|_| PyTypeError::new_err("call_bin: every piece must be bytes"))?;
+        total = total.checked_add(b.as_bytes().len()).ok_or_else(|| PyValueError::new_err("call_bin: a request past the frame cap"))?;
+    }
+    if total > sagebrush_web::bin_ops::FRAME_CAP {
+        return Err(PyValueError::new_err(format!("call_bin: a request of {} bytes, past the frame cap of {}", total, sagebrush_web::bin_ops::FRAME_CAP)));
+    }
+    // (then the pieces held, each a bytes: a signal handler run between the
+    // copy's runs can't change what is copied)
+    let mut pieces: Vec<Bound<'py, PyBytes>> = Vec::with_capacity(list.len());
+    for item in list.iter() {
+        pieces.push(item.cast_into::<PyBytes>().map_err(|_| PyTypeError::new_err("call_bin: every piece must be bytes"))?);
+    }
+    if pieces.iter().map(|b| b.as_bytes().len()).sum::<usize>() != total {
+        return Err(PyRuntimeError::new_err("call_bin: the request's pieces changed while checked"));
     }
     let mut req: Vec<u8> = Vec::new();
     req.try_reserve_exact(total).map_err(|_| PyMemoryError::new_err("call_bin: the request's buffer could not be allocated"))?;

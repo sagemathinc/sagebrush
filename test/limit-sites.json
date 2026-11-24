@@ -2700,6 +2700,16 @@
   "owner": "engine arith (kernel metering)",
   "reason": "test code: the work estimate's models in u64 at sizes past 32 bits (saturation and zero-factor checks of size_product and a model); refuses nothing itself"
  },
+ "engine/arith/tests/nmod_fill_stop.rs :: a_stop_in_the_zero_fill_charges_the_runs_done :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: an accounting meter with no bound, for the zero fill's Move under a Stop; refuses nothing itself"
+ },
+ "engine/arith/tests/nmod_fill_stop.rs :: a_stop_in_the_zero_fill_charges_the_runs_done :: let mut whole = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: an accounting meter with no bound, for the zero fill's Move under a Stop; refuses nothing itself"
+ },
  "engine/arith/tests/nmod_poll_count.rs :: metering_polls_stop_at_least_as_often :: let mut full = Meter::accounting(u64::MAX); #0": {
   "class": "none",
   "owner": "engine arith (kernel metering)",
@@ -7777,10 +7787,29 @@
   "owner": "the primes engine (li, prime_pi, zeta zeros)",
   "reason": "a unit test's inputs; refuses nothing"
  },
- "engine/py/src/lib.rs :: call_bin :: total = total.checked_add(b.as_bytes().len()).ok_or_else(|| PyMemoryError::new_err(\"call_bin: a request too large\"))?; #0": {
-  "class": "none",
+ "engine/py/src/lib.rs :: call_bin :: if list.len() > BIN_MAX_PIECES { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
   "owner": "engine binary transport (sagebrush-wire)",
-  "reason": "the binding's sum of the request's pieces, checked: an overflow of usize (no request the frame cap admits reaches it) is a MemoryError, before any copy; refuses nothing a fitting request needs"
+  "reason": "the binary pieces transport (both hosts), before any allocation: at most 2^16 pieces, summed size within the frame cap; the echelon sends about 2^12 pieces at most and keeps its memory-admitted Python path past the cap, so no computation is limited"
+ },
+ "engine/py/src/lib.rs :: call_bin :: return Err(PyValueError::new_err(format!(\"call_bin: a request in more than {} pieces\", BIN_MAX_PIECES))); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the binary pieces transport (both hosts), before any allocation: at most 2^16 pieces, summed size within the frame cap; the echelon sends about 2^12 pieces at most and keeps its memory-admitted Python path past the cap, so no computation is limited"
+ },
+ "engine/py/src/lib.rs :: call_bin :: return Err(PyValueError::new_err(format!(\"call_bin: a request of {} bytes, past the frame cap of {}\", total, sagebrush_web::bin_ops::FRAME_CAP))); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the binary pieces transport (both hosts), before any allocation: at most 2^16 pieces, summed size within the frame cap; the echelon sends about 2^12 pieces at most and keeps its memory-admitted Python path past the cap, so no computation is limited"
  },
  "engine/py/src/lib.rs :: raster_render :: const RASTER_MAX_FILE_BYTES: usize = 256 << 20; #0": {
   "class": "1+2",
@@ -18179,19 +18208,19 @@
  },
  "src/notebook-session.ts ::  :: const MAX_ABOVE = 4096; #0": {
   "class": "1",
-  "owner": "notebook/kernel",
-  "reason": "a reactive run's list of the cells above it (for _, __, ___): a protocol guard on a message field; only the first three that showed a value are used, so a page longer than this still binds correctly unless 4096 cells above showed nothing",
   "disposition": {
    "1": "shared"
-  }
+  },
+  "owner": "notebook/kernel",
+  "reason": "a reactive run's list of the cells above it (for _, __, ___): a protocol guard on a message field; only the first three that showed a value are used, so a page longer than this still binds correctly unless 4096 cells above showed nothing"
  },
  "src/notebook-session.ts :: aboveOf :: return m.above.filter((k: unknown): k is string => typeof k === \"string\" && /^[A-Za-z0-9]{1,128}$/.test(k)).slice(0, MAX_ABOVE); #0": {
   "class": "1",
-  "owner": "notebook/kernel",
-  "reason": "applies the cap above (MAX_ABOVE)",
   "disposition": {
    "1": "shared"
-  }
+  },
+  "owner": "notebook/kernel",
+  "reason": "applies the cap above (MAX_ABOVE)"
  },
  "src/pkgcache.ts ::  :: export const CACHE_LIMITS = Object.freeze({ bytes: 1024 * 1024 * 1024, entries: 256, staleMs: 60 * 60 * 1000, lockMs: 10 * 60 * 1000, adminLockMs: 5000, cleanPerRun: 100 }); #0": {
   "class": "1",
@@ -18826,6 +18855,30 @@
  "src/runtime/engine.ts :: addPending :: if (retiredSum + p.bytes > MAX_SAFE) overflow = fault = true; #0": {
   "class": "2",
   "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "src/runtime/engine.ts :: admitPieces :: if (pieces.length > BIN_MAX_PIECES) throw new BinRequestRefused(`a request in more than ${BIN_MAX_PIECES} pieces`); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the binary pieces transport (both hosts), before any allocation: at most 2^16 pieces, summed size within the frame cap; the echelon sends about 2^12 pieces at most and keeps its memory-admitted Python path past the cap, so no computation is limited"
+ },
+ "src/runtime/engine.ts :: admitPieces :: if (total > BIN_FRAME_CAP) throw new BinRequestRefused(`a request past the frame cap of ${BIN_FRAME_CAP} bytes`); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the binary pieces transport (both hosts), before any allocation: at most 2^16 pieces, summed size within the frame cap; the echelon sends about 2^12 pieces at most and keeps its memory-admitted Python path past the cap, so no computation is limited"
+ },
+ "src/runtime/engine.ts :: binCall :: export const BIN_MAX_PIECES = 1 << 16; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the binary pieces transport (both hosts), before any allocation: at most 2^16 pieces, summed size within the frame cap; the echelon sends about 2^12 pieces at most and keeps its memory-admitted Python path past the cap, so no computation is limited"
  },
  "src/runtime/engine.ts :: createInstance :: const SHARE_MAX_AGE_MS = 250, WASM_CEILING = 2 ** 32; #0": {
   "class": "2",
@@ -21383,5 +21436,21 @@
   },
   "owner": "3D viewer (@sagebrush-space)",
   "reason": "the 3D viewer's source, embedded for Jupyter's HTML: its LIMITS on what an untrusted saved scene may draw (checkScene, counted after expansion) protect the page, which keeps the static picture and says why; no computation is refused"
+ },
+ "engine/py/src/lib.rs :: call_bin :: total = total.checked_add(b.as_bytes().len()).ok_or_else(|| PyValueError::new_err(\"call_bin: a request past the frame cap\"))?; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the binary pieces transport (both hosts), before any allocation: at most 2^16 pieces, summed size within the frame cap; the echelon sends about 2^12 pieces at most and keeps its memory-admitted Python path past the cap, so no computation is limited"
+ },
+ "engine/py/src/lib.rs :: mpoly_call :: const BIN_MAX_PIECES: usize = 1 << 16; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the binary pieces transport (both hosts), before any allocation: at most 2^16 pieces, summed size within the frame cap; the echelon sends about 2^12 pieces at most and keeps its memory-admitted Python path past the cap, so no computation is limited"
  }
 }

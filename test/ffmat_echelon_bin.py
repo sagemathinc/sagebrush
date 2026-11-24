@@ -25,6 +25,7 @@ Each case prints "ok CASE ..." lines and raises on a failure.
                basis together)
     mem        the measured peaks (Linux) within the predicate's need, at
                1 x c, r x 1 and square shapes, with and without rows
+    types      the binary call's argument contract, in both runtimes
     kernelmem  the kernel's admissions against its measured extraction and
                basis, and the reply dead before the basis
     cops       Stop during each frame-sized step at the frame cap (CPython),
@@ -209,7 +210,9 @@ def case_correct():
 def case_json():
     for p in (7, 32003, P63):
         F = GF(p)
-        for A in (rand_matrix(F, 300, 301, 21), rank_r(F, 200, 260, 90, 22), rand_matrix(F, 1, 1000, 23), rand_matrix(F, 1000, 1, 24)):
+        # (1 x 600 and 600 x 1: their kernel bases fit pyjs's declared 1 GiB
+        # heap; 1 x 1000's 999 x 1000 basis is refused there)
+        for A in (rand_matrix(F, 300, 301, 21), rank_r(F, 200, 260, 90, 22), rand_matrix(F, 1, 600, 23), rand_matrix(F, 600, 1, 24)):
             for op in ("rank", "echelon_form", "pivots", "right_kernel"):
                 a, s = calls(lambda: outcome(getattr(A, op)))
                 b = json_route(lambda: outcome(getattr(A, op)))
@@ -355,7 +358,8 @@ def case_kernel():
     F = GF(32003)
     kernel_check(rank_r(F, 200, 200, 100), 100)
     kernel_check(rand_matrix(F, 200, 200, 61), 0)
-    kernel_check(rank_r(F, 8, 1024, 2), 1022)
+    # (8 x 600: its 598 x 600 basis fits pyjs's declared 1 GiB heap)
+    kernel_check(rank_r(F, 8, 600, 2), 598)
     kernel_check(matrix(F, 1, 512), 512)
     # the second check, W and the basis together: a figure that admits the
     # first call but not the basis
@@ -445,6 +449,32 @@ def case_mem():
         assert h.hwm <= bound, (label, h.hwm, bound)
         del M
     ok("the measured peaks within the predicate's need")
+
+
+def case_types():
+    """The binary call's argument contract, the same in both runtimes: bytes
+    (one reply), a list of bytes pieces (a list of pieces); a tuple, a
+    bytearray, a memoryview or a list with another piece is a TypeError;
+    a pieces request past the frame cap, or in too many pieces, a
+    ValueError before anything is assembled."""
+    req = b"SBW1" + (12).to_bytes(4, "little") + b"nmod_poly_xx"
+    assert isinstance(EN.call_bin(req), bytes)
+    r = EN.call_bin([req[:5], req[5:]])
+    assert isinstance(r, list) and all(isinstance(b, bytes) for b in r) and b"".join(r)[:6] == b"SBW1er", r
+    for arg in ((req,), bytearray(req), memoryview(req), [req[:5], bytearray(req[5:])], [req[:5], 7]):
+        try:
+            EN.call_bin(arg)
+            raise AssertionError("accepted: %s" % type(arg).__name__)
+        except TypeError:
+            pass
+    one = bytes(1 << 20)
+    for arg in ([one] * 257, [one] * 256 + [b"x"], [b""] * ((1 << 16) + 1)):
+        try:
+            EN.call_bin(arg)
+            raise AssertionError("past the cap accepted")
+        except ValueError:
+            pass
+    ok("bytes and lists of bytes; tuples, bytearrays, memoryviews and mixed lists TypeError; past the cap ValueError")
 
 
 def case_kernelmem():
@@ -563,7 +593,7 @@ def case_cops():
     whole buffer in one C operation, as before) must miss the same bound:
     the measurement sees one uninterruptible copy of that size."""
     if PYJS:
-        ok("skipped in pyjs: its copies into and out of the engine are chunked by construction (src/runtime/engine.ts binCallPieces); test/ffmat-echelon-bin.test.ts times them")
+        ok("skipped in pyjs: its copies into and out of the engine (src/runtime/engine.ts binCallPieces) are tested at the frame cap by test/ffmat-echelon-bin-copy.test.ts, a Ctrl-C after one run each way and each omission mutant copying the whole frame")
         return
     import array
     import itertools
@@ -690,7 +720,7 @@ def case_interrupt():
 
 CASES = {
     "route": case_route, "correct": case_correct, "json": case_json, "probe": case_probe, "preflight": case_preflight,
-    "frame": case_frame, "outcomes": case_outcomes, "kernel": case_kernel, "kernelmem": case_kernelmem, "mem": case_mem, "cops": case_cops,
+    "frame": case_frame, "outcomes": case_outcomes, "kernel": case_kernel, "types": case_types, "kernelmem": case_kernelmem, "mem": case_mem, "cops": case_cops,
     "interrupt": case_interrupt,
 }
 if CASE == "mem" and not LINUX:

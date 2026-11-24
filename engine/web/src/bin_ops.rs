@@ -296,6 +296,9 @@ fn run_with(req: &[u8], frame_cap: usize) -> Result<Vec<u8>, WireError> {
 
 // ---------------------------------------------------------------- echelon
 
+/// The frame cap, for the hosts' checks before they assemble a request.
+pub const FRAME_CAP: usize = wire::FRAME_CAP;
+
 const ECHELON: &str = "nmod_echelon";
 
 /// The words the echelon's scan, decode and reply handle between two Stop

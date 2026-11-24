@@ -16,7 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CASES = os.path.join(HERE, "..", "..", "test", "ffmat_echelon_bin.py")
 
 bad = 0
-for case in ["route", "correct", "json", "probe", "preflight", "frame", "outcomes", "kernel", "kernelmem", "mem", "cops"]:
+for case in ["route", "correct", "json", "probe", "preflight", "frame", "outcomes", "kernel", "types", "kernelmem", "mem", "cops"]:
     t = time.time()
     p = subprocess.run([sys.executable, CASES, case], capture_output=True, text=True, timeout=1800)
     good = p.returncode == 0 and ("\nok %s " % case) in "\n" + p.stdout
