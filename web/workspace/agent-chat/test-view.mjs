@@ -229,6 +229,29 @@ check(u.className === "user other", "a kept message with a hostile mode: class o
   check(errorLine("claude_login_expired", "claude_login_expired") === EXPIRED && errorLine("is_error", "is_error") === "Error: is_error", "SI-5: a mirrored turn's error (its code only) says the same", null);
 }
 
+// ---- #1789: a thinking block whose text isn't shown streams deltas with none: no "Thinking" disclosure until some
+// text comes; one kept from before (an empty part) draws nothing either
+{
+  const th = newThread("t-th", "T");
+  let n = 0;
+  const e = (x) => apply(th, { seq: ++n, turn_id: "k1", ...x }, 1000);
+  e({ type: "turn_started" });
+  e({ type: "thinking_delta", text: "" });
+  e({ type: "thinking_delta", text: "" });
+  e({ type: "thinking_delta", text: "  " });
+  const turn = th.entries.find((x) => x.kind === "turn");
+  check(!turn.parts.some((p) => p.kind === "thinking") && !/Thinking/.test(turnNode(th, turn, hooks).innerHTML), "#1789: thinking deltas with no text make no part and no Thinking disclosure", turn.parts);
+  e({ type: "thinking_delta", text: "Let me look at the files." });
+  e({ type: "thinking_delta", text: " Then plot." });
+  const html = turnNode(th, turn, hooks).innerHTML;
+  check(/<details class="thinking"><summary>Thinking<\/summary><div>Let me look at the files\. Then plot\.<\/div><\/details>/.test(html), "#1789: once text comes, the disclosure shows it", html);
+  const kept = newThread("t-th2", "T");
+  apply(kept, { seq: 1, turn_id: "k2", type: "turn_started" }, 1000);
+  const kt = kept.entries.find((x) => x.kind === "turn");
+  kt.parts.push({ kind: "thinking", text: "" });
+  check(!/Thinking/.test(turnNode(kept, kt, hooks).innerHTML), "#1789: an empty thinking part kept from before draws nothing", turnNode(kept, kt, hooks).innerHTML);
+}
+
 const failed = results.filter(([ok]) => !ok);
 if (failed.length) { console.log(`FAIL: ${failed.length} of ${results.length}`); process.exit(1); }
 console.log(`ok: the agents chat's view and its checks, ${results.length} checks`);

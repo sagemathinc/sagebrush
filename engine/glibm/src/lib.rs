@@ -8,8 +8,12 @@
 //! arithmetic (x ** 0.5, x ** -0.5, math.log, prec ** 0.35), so these must
 //! give CPython's bits for the core to give mpmath's results; the core has
 //! this one copy for every target (@sagebrush's ruling: no platform libm).
+//!
+//! Its own crate (moved unchanged from engine/mp, which re-exports it as
+//! `glibm`), so that every wasm module that needs glibc's bits links this one
+//! copy: the multiprecision core, and the decision-tree kernel's entropy.  Not
+//! no_std: `f64::mul_add` needs std on the pinned toolchain.
 
-#[path = "glibm_tables.rs"]
 mod tables;
 use tables::*;
 

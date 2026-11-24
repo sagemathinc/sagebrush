@@ -238,7 +238,8 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
     }
     case "thinking_delta":
       if (last?.kind === "thinking") last.text += e.text;
-      else turn.parts.push({ kind: "thinking", text: e.text });
+      // (a thinking block whose text isn't shown streams deltas with none: no part until some text comes, #1789)
+      else if (e.text.trim()) turn.parts.push({ kind: "thinking", text: e.text });
       break;
     case "tool_call_started":
       put(turn.tools, e.call, { call: e.call, tool: e.tool, name: e.name, summary: webSummary(e.name, e.summary), status: "running", output: "" });

@@ -46,6 +46,8 @@ matplotlib.axes.Axes.set_ylim
 matplotlib.axes.Axes.set_yscale
 matplotlib.axes.Axes.set_yticklabels
 matplotlib.axes.Axes.set_yticks
+matplotlib.axes.Axes.sharex
+matplotlib.axes.Axes.sharey
 matplotlib.axes.Axes.stem
 matplotlib.axes.Axes.step
 matplotlib.axes.Axes.text
