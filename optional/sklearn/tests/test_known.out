@@ -5,7 +5,7 @@
 == tolerance-text
 []
 == tolerances
-['sklearn.metrics.accuracy_score(normalize=False, sample_weight=...)']
+['sklearn.metrics.accuracy_score(normalize=False, sample_weight=...)', 'sklearn.preprocessing.StandardScaler fit and partial_fit with sample_weight (mean_, var_, scale_ and the transform)']
 == no-test-exempted
 []
 == entry-fields

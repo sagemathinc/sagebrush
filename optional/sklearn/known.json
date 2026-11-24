@@ -67,6 +67,11 @@
       "function": "sklearn.metrics.accuracy_score(normalize=False, sample_weight=...)",
       "rule": "relative 1e-12 of the exactly rounded sum (math.fsum), enforced by test_metrics' acc.weighted-count-tolerance row; observed differences from scikit-learn are a few float64 ulps (4 in the review case)",
       "reason": "it is np.dot(score, sample_weight), and Sagebrush's np.dot doesn't reproduce OpenBLAS's ddot summation order (ruled: results through np.dot or @ may differ from scikit-learn by a few ulps; everything else is bit-exact)"
+    },
+    {
+      "function": "sklearn.preprocessing.StandardScaler fit and partial_fit with sample_weight (mean_, var_, scale_ and the transform)",
+      "rule": "relative 1e-12 of the exactly rounded sums (math.fsum), enforced by test_preprocessing's weighted-tolerance row on 1000 random weighted samples; the small weighted rows match scikit-learn to the bit",
+      "reason": "the weighted sums are np.matmul(sample_weight, X), as in scikit-learn's _incremental_mean_and_var, and Sagebrush's matmul doesn't reproduce OpenBLAS's summation order (ruled: results through np.dot or @ may differ from scikit-learn by a few ulps; everything else is bit-exact)"
     }
   ]
 }
