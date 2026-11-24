@@ -119,26 +119,28 @@ run is ended, including what earlier steps of the same job left in the backgroun
 processes go. A later `continue-on-error` step that relied on such a background process won't have it here.
 
 `build-all.sh` first isn't needed: each job builds what it needs, as in CI. The jobs, in the order they run, with
-their times here:
+their times here, measured before CI's jobs were regrouped on Nov 22 2026 (`ci.yml` now also has the Linux jobs
+`sprig`, `web-export`, `web-lookalike`, `web-sync-ops`, `web-runner-sync`, `web-artifacts`, `mpmath-suite`,
+`engine-clippy`, `examples` and `examples-census`, which this table doesn't list yet):
 
 | job | what it runs | time |
 |---|---|---|
 | `changes` | the tier a change needs; core imports no server code | 0.0 min |
 | `census` | the limits census and the limits sweep's manifest | 0.3 min |
-| `node-tests` (8 shards) | the Node tests (`dist/test`, `target`) | 24.0 min |
-| `language-node` (6 shards) | the Magma and MATLAB case tests under Node | 23.2 min |
+| `node-tests` (2 shards) | the Node tests (`dist/test`, `target`) | 24.0 min |
+| `language-node` (2 shards) | the Magma and MATLAB case tests under Node | 23.2 min |
 | `checks` | security, bundles, generated files and web assets; the size record; the npm package metrics; Mermaid | 3.9 min |
 | `web-sync` | sharing, sync, the engines and the PWA, in Chrome | 22.2 min |
 | `web-runner` | the runner, the workspace and the board frame, in Chrome | 11.8 min (8 cores; below) |
 | `interrupt-matrix` | Stop and Ctrl-C across hosts and modes (CI's set) | 6.5 min |
-| `web-browser` (5 groups) | the notebook's and the boards' browser suites | 40.6 min |
+| `web-browser` (board, notebook, latex) | the notebook's and the boards' browser suites | 40.6 min |
 | `conformance` (Node, Deno, Bun) | the catalog's examples and coverage | 1.5 min |
 | `modes` (4 groups) | the Sage, Magma and MATLAB, numeric and other modes | 7.3 min |
 | `engine-rust` | `cargo test` over the engine's workspace | 5.6 min |
 | `engine-unsafe-sweep` | the unsafe boundary's compiler sweep | 0.4 min |
 | `engine-wasm` | a fresh WebAssembly engine, built and smoke-tested | 1.3 min |
-| `engine-node` (8 shards) | the Node tests on that fresh engine | 24.8 min |
-| `engine-language` (6 shards) | the Magma and MATLAB tests on it | 24.2 min |
+| `engine-node` (2 shards) | the Node tests on that fresh engine | 24.8 min |
+| `engine-language` (2 shards) | the Magma and MATLAB tests on it | 24.2 min |
 | `engine-modes` | Sage, calculus, Magma and MATLAB on it | 4.2 min |
 | `engine-cpython` | the CPython extension, audit regressions, MCP and Sage | 4.3 min (warm; below) |
 
@@ -160,7 +162,12 @@ in `wasm/`, not a fresh one.
 
 - `size-base` and `size-gate`: the growth gate, which needs the base's size record from GitHub;
 - `ci`: the aggregate of the others;
+- `wasm-modules` and `wasm-publish`: the modules handed to the other jobs as the run's artifact, and publishing them to
+  the release bucket (here every job reads `wasm/` as it is);
+- `export-controls` and `lookalike-controls`, the long tier's jobs: run them with `scripts/test-all.sh --long`;
 - `webkit`: it installs Playwright's WebKit with `sudo apt`. Run it with `scripts/test-all.sh --webkit` where that's fine;
+- `engine-nd-neon` (macOS on Apple silicon: the NEON kernel of `engine/nd`) and `windows-smoke` (Windows): they
+  need those machines;
 - the other workflows:
   - `app.yml`: the desktop app on macOS, Windows and Linux, with its self-test;
   - `pypi.yml`: the wheels on five platforms, and Python 3.10 and 3.11;
