@@ -102,8 +102,8 @@
 !! NotImplementedError: pandas.read_parquet is not in Sagebrush's pandas 0.x subset
 == name.pd.get_dummies
 !! NotImplementedError: pandas.get_dummies is not in Sagebrush's pandas 0.x subset
-== name.DataFrame.groupby
-!! NotImplementedError: pandas.DataFrame.groupby is not in Sagebrush's pandas 0.x subset
+== name.DataFrame.pivot
+!! NotImplementedError: pandas.DataFrame.pivot is not in Sagebrush's pandas 0.x subset
 == name.DataFrame.merge
 !! NotImplementedError: pandas.DataFrame.merge is not in Sagebrush's pandas 0.x subset
 == name.DataFrame.cov
@@ -130,8 +130,8 @@
 !! NotImplementedError: pandas.Series.str is not in Sagebrush's pandas 0.x subset
 == name.Series.rolling
 !! NotImplementedError: pandas.Series.rolling is not in Sagebrush's pandas 0.x subset
-== name.Series.groupby
-!! NotImplementedError: pandas.Series.groupby is not in Sagebrush's pandas 0.x subset
+== name.Series.cumsum
+!! NotImplementedError: pandas.Series.cumsum is not in Sagebrush's pandas 0.x subset
 == name.Series.mode
 !! NotImplementedError: pandas.Series.mode is not in Sagebrush's pandas 0.x subset
 == name.Series.rank
@@ -250,6 +250,38 @@
 !! NotImplementedError: pandas.Series.corr of a DataFrame is not in Sagebrush's pandas 0.x subset
 == stats.series-corr-repeated-labels
 !! NotImplementedError: pandas.Series.corr of Series with repeated labels is not in Sagebrush's pandas 0.x subset
+== groupby.several-keys
+!! NotImplementedError: pandas.DataFrame.groupby by several keys (a MultiIndex) is not in Sagebrush's pandas 0.x subset
+== groupby.frame-agg-list
+!! NotImplementedError: pandas.DataFrameGroupBy.agg(a list) (MultiIndex columns) is not in Sagebrush's pandas 0.x subset
+== groupby.agg-dict-of-lists
+!! NotImplementedError: pandas.DataFrameGroupBy.agg(a dict of lists) (MultiIndex columns) is not in Sagebrush's pandas 0.x subset
+== groupby.transform
+!! NotImplementedError: pandas.SeriesGroupBy.transform is not in Sagebrush's pandas 0.x subset
+== groupby.apply
+!! NotImplementedError: pandas.SeriesGroupBy.apply is not in Sagebrush's pandas 0.x subset
+== groupby.std
+!! NotImplementedError: pandas.SeriesGroupBy.std is not in Sagebrush's pandas 0.x subset
+== groupby.frame-median
+!! NotImplementedError: pandas.DataFrameGroupBy.median is not in Sagebrush's pandas 0.x subset
+== groupby.agg-name-outside
+!! NotImplementedError: pandas.SeriesGroupBy.agg('median') is not in Sagebrush's pandas 0.x subset
+== groupby.by-function
+!! NotImplementedError: pandas.DataFrame.groupby by a builtin_function_or_method is not in Sagebrush's pandas 0.x subset
+== groupby.observed
+!! NotImplementedError: pandas.DataFrame.groupby(observed=, group_keys=) is not in Sagebrush's pandas 0.x subset
+== groupby.series-other-labels
+!! NotImplementedError: pandas.Series.groupby by a Series with other labels is not in Sagebrush's pandas 0.x subset
+== groupby.mixed-keys
+!! NotImplementedError: pandas.groupby of keys of mixed types (pandas sorts them its own way) is not in Sagebrush's pandas 0.x subset
+== groupby.uint8-sum-beyond
+!! NotImplementedError: pandas.groupby sum of uint8 beyond its range (pandas gives uint64) is not in Sagebrush's pandas 0.x subset
+== groupby.uint8-sum-beyond-sorted
+!! NotImplementedError: pandas.groupby sum of uint8 beyond its range (pandas gives uint64) is not in Sagebrush's pandas 0.x subset
+== groupby.datetime-sum
+!! NotImplementedError: pandas.SeriesGroupBy.sum of a datetime64[us] column is not in Sagebrush's pandas 0.x subset
+== groupby.level-other
+!! NotImplementedError: pandas.DataFrame.groupby(level=) other than the index itself is not in Sagebrush's pandas 0.x subset
 == op.series-add
 !! NotImplementedError: pandas.Series.__add__ (arithmetic) is not in Sagebrush's pandas 0.x subset
 == op.series-radd

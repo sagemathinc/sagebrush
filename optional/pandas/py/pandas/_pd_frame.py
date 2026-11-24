@@ -806,6 +806,12 @@ class DataFrame(object):
         cols = [Column("float64", np.array([out[i][j] for i in range(len(js))], dtype=np.float64)) for j in range(len(js))]
         return DataFrame._pd_new(cols, labels, labels.copy())
 
+    def groupby(self, by=None, level=None, *, as_index=True, sort=True, group_keys=True, observed=True, dropna=True):
+        """The frame grouped by one key (a column label, a Series of the same
+        labels, a list of keys, or the index); see _pd_groupby."""
+        from ._pd_groupby import group_frame
+        return group_frame(self, by, level, as_index, sort, group_keys, observed, dropna)
+
     def memory_usage(self, index=True, deep=False):
         """The bytes pandas counts for each column (and the index, first,
         labelled 'Index'): a Series of int64; see _pd_info."""

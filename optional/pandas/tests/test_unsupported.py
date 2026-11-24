@@ -69,9 +69,9 @@ case("frame.ragged-rows", lambda: pd.DataFrame([[1, 2], [3]]))
 # names outside the subset
 for name in ["NA", "merge", "crosstab", "Timedelta", "Categorical", "MultiIndex", "read_parquet", "get_dummies"]:
     case("name.pd." + name, lambda name=name: getattr(pd, name))
-for name in ["groupby", "merge", "cov", "rank", "query", "pivot_table", "nlargest", "plot", "nsmallest", "value_counts", "to_csv", "where"]:
+for name in ["pivot", "merge", "cov", "rank", "query", "pivot_table", "nlargest", "plot", "nsmallest", "value_counts", "to_csv", "where"]:
     case("name.DataFrame." + name, lambda name=name: getattr(df, name))
-for name in ["str", "rolling", "groupby", "mode", "rank", "map", "nlargest", "plot", "nunique", "quantile"]:
+for name in ["str", "rolling", "cumsum", "mode", "rank", "map", "nlargest", "plot", "nunique", "quantile"]:
     case("name.Series." + name, lambda name=name: getattr(s, name))
 case("name.Index.sort_values", lambda: getattr(pd.Index([1]), "sort_values"))
 case("name.pd.unknown-is-AttributeError", lambda: getattr(pd, "no_such_name"))
@@ -133,6 +133,25 @@ case("stats.series-corr-spearman", lambda: s.corr(s, method="spearman"))
 case("stats.corr-datetime", lambda: pd.DataFrame({"t": sdt, "a": [1.0, 2.0]}).corr())
 case("stats.series-corr-frame", lambda: s.corr(df))
 case("stats.series-corr-repeated-labels", lambda: pd.Series([1.0, 2.0], index=[0, 0]).corr(pd.Series([1.0, 2.0])))
+
+# groupby's refusals: several keys and lists of functions need a MultiIndex; the methods outside the subset
+gdf = pd.DataFrame({"k": ["a", "a", "b"], "j": [1, 2, 1], "n": [1, 2, 3]})
+case("groupby.several-keys", lambda: gdf.groupby(["k", "j"]))
+case("groupby.frame-agg-list", lambda: gdf.groupby("k").agg(["sum", "mean"]))
+case("groupby.agg-dict-of-lists", lambda: gdf.groupby("k").agg({"n": ["sum", "max"]}))
+case("groupby.transform", lambda: gdf.groupby("k")["n"].transform("mean"))
+case("groupby.apply", lambda: gdf.groupby("k")["n"].apply(lambda v: v.sum()))
+case("groupby.std", lambda: gdf.groupby("k")["n"].std())
+case("groupby.frame-median", lambda: gdf.groupby("k").median())
+case("groupby.agg-name-outside", lambda: gdf.groupby("k")["n"].agg("median"))
+case("groupby.by-function", lambda: gdf.groupby(len))
+case("groupby.observed", lambda: gdf.groupby("k", observed=False))
+case("groupby.series-other-labels", lambda: gdf["n"].groupby(pd.Series(["a", "b", "a"], index=[5, 6, 7])))
+case("groupby.mixed-keys", lambda: pd.Series([1, 2, 3]).groupby(pd.Series(["a", 1, "a"], dtype=object)).sum())
+case("groupby.uint8-sum-beyond", lambda: pd.Series([200, 100, 200]).astype("uint8").groupby(pd.Series([0, 1, 0])).sum())
+case("groupby.uint8-sum-beyond-sorted", lambda: pd.Series([200, 200, 5]).astype("uint8").groupby(pd.Series([0, 0, 1])).sum())
+case("groupby.datetime-sum", lambda: pd.Series(pd.to_datetime(["2020-01-01", "2020-01-02"])).groupby(pd.Series([0, 0])).sum())
+case("groupby.level-other", lambda: gdf.groupby(level=1))
 
 # arithmetic and frame comparisons (M2)
 case("op.series-add", lambda: s + 1)

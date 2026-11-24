@@ -667,6 +667,12 @@ class Series(object):
         ST.check_method(method, "Series.corr")
         return ST.series_corr(x, y, method, min_periods)
 
+    def groupby(self, by=None, level=None, *, as_index=True, sort=True, group_keys=True, observed=True, dropna=True):
+        """The Series grouped by one key (a Series of the same labels, a list
+        of keys, or the index with level=0); see _pd_groupby."""
+        from ._pd_groupby import group_series
+        return group_series(self, by, level, as_index, sort, group_keys, observed, dropna)
+
     def memory_usage(self, index=True, deep=False):
         """The bytes pandas counts for the values (and the index); see
         _pd_info."""
