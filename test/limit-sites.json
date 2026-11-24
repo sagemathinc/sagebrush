@@ -11668,7 +11668,7 @@
  "src/magma.ts :: constructor :: const PRINT_LEVELS = new Set([\"Default\", \"Minimal\", \"Maximal\", \"Magma\", \"Hex\", \"Latex\", \"Debug\"]); #0": {
   "class": "none",
   "owner": "Magma compatibility",
-  "reason": "the word Maximal (the print level's name) and an existing parse helper's line under a new neighbour, not a limit: nothing is refused"
+  "reason": "the word Maximal (the print level's name), not a limit: nothing is refused"
  },
  "src/magma.ts :: constructor :: export const MAX_NESTING = 100, MAX_PY_NEST = 50, MAX_PY_BLOCKS = 90, CHAIN_FLAT = 32, MAX_OPS = 2000; #0": {
   "class": "1",
@@ -11685,11 +11685,6 @@
   },
   "owner": "Magma translator",
   "reason": "the Magma translator's parser protection: a statement past the parser's budget, past what the engine compiles (brackets with indentation, indentation alone), or with an operator chain past its cap is refused in words, never a host stack overflow or Python error"
- },
- "src/magma.ts :: levelStatement :: unsupported(from: number, to: number): { name: string; tok: Tok } | null { #0": {
-  "class": "none",
-  "owner": "Magma compatibility",
-  "reason": "the word Maximal (the print level's name) and an existing parse helper's line under a new neighbour, not a limit: nothing is refused"
  },
  "src/magma.ts :: postfix :: if ((this.at(\"(\") || this.at(\"[\")) && ++links > MAX_CHAIN) { #0": {
   "class": "2",

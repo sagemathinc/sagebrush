@@ -19,4 +19,16 @@ print 1 : 2;
 x := 1 : Magma;
 f := func<x | x : Magma>;
 printf "%o", 1 : Magma;
+// a reserved word is no level's name; a statement a keyword begins takes no level; an expression statement does
+print 1 : default;
+print 1 : try;
+print 1 : load;
+print 1 : fi;
+print 1 : when;
+f := function() return 1 : Magma; end function;
+assert 1 : Magma;
+error 1 : Magma;
+x : Bogus;
+x := 2; x : Foo;
+1 + 1 : default;
 print "end";
