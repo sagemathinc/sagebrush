@@ -16,13 +16,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CASES = os.path.join(HERE, "..", "..", "test", "ffmat_echelon_bin.py")
 
 bad = 0
-for case in ["route", "correct", "json", "probe", "preflight", "frame", "outcomes", "kernel", "mem"]:
+for case in ["route", "correct", "json", "probe", "preflight", "frame", "outcomes", "kernel", "mem", "cops"]:
     t = time.time()
     p = subprocess.run([sys.executable, CASES, case], capture_output=True, text=True, timeout=1800)
     good = p.returncode == 0 and ("\nok %s " % case) in "\n" + p.stdout
     bad += not good
     print("%-10s %s  (%.1f s)" % (case, "ok" if good else "FAIL", time.time() - t))
-    if not good or case == "mem":
+    if not good or case in ("mem", "cops"):
         print("    " + (p.stdout.strip() + ("\n" + p.stderr.strip()[-2000:] if not good else "")).replace("\n", "\n    "))
 
 # the binding borrows a bytes request (no copy) and takes nothing else: a

@@ -62,7 +62,7 @@ function binaryEchelon(): boolean {
 
 for (const [c, full] of [
   ["route", false], ["correct", false], ["json", false], ["probe", false], ["preflight", false],
-  ["frame", false], ["outcomes", false], ["kernel", false], ["mem", true],
+  ["frame", false], ["outcomes", false], ["kernel", false], ["mem", true], ["cops", true],
 ] as const) {
   test(`GF(p) echelon, the binary route in pyjs: ${c}`, (t) => {
     if (!binaryEchelon()) return t.skip("this engine build predates the binary nmod_echelon");
@@ -71,7 +71,7 @@ for (const [c, full] of [
     assert.ifError(r.error);
     assert.equal(r.status, 0, (r.stdout + r.stderr).slice(-2000));
     assert.match(r.stdout, new RegExp(`^ok ${c} `, "m"));
-    if (c === "mem") console.log(r.stdout.trim());
+    if (c === "mem" || c === "cops") console.log(r.stdout.trim());
   });
 }
 

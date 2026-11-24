@@ -25,6 +25,8 @@ Each case prints "ok CASE ..." lines and raises on a failure.
                basis together)
     mem        the measured peaks (Linux) within the predicate's need, at
                1 x c, r x 1 and square shapes, with and without rows
+    cops       the route's uninterruptible C operations at their actual
+               maximum size (the frame cap), within the Stop bound
     interrupt [DIR]
                prints "ready" (and creates DIR/ready) just before a long
                binary elimination for the harness to interrupt
@@ -440,6 +442,47 @@ def case_mem():
     ok("the measured peaks within the predicate's need")
 
 
+def case_cops():
+    """The route's uninterruptible C operations, each at its actual maximum
+    size (a request at the frame cap: E = (2^28 - 100) / 8 words), timed
+    (the worst of three runs) against the interrupt harness's Stop bound
+    (web/interrupt-classify.mjs STOP_BOUND_MS): the words' allocation, the
+    frame's join, a reply-sized bytes copy (the binding's copy of the
+    reply, PyBytes::new / pyjs's slice) and the rows' frombytes.  A Stop
+    raised during one is seen once it returns."""
+    import array
+    import time
+    bound_ms = 250
+    e = (FM._ech_frame_cap() - 100) // 8
+    worst = {}
+
+    def timed(name, f):
+        for _ in range(3):
+            t = time.perf_counter()
+            x = f()
+            ms = (time.perf_counter() - t) * 1e3
+            del x
+            worst[name] = max(worst.get(name, 0), ms)
+    w = array.array("Q", [0]) * e
+    timed("words", lambda: array.array("Q", [0]) * e)
+    timed("join", lambda: b"".join([b"h" * 76, memoryview(w).cast("B"), b"t" * 24]))
+    req = b"".join([b"h" * 76, memoryview(w).cast("B"), b"t" * 24])
+    del w
+    timed("reply copy", lambda: bytes(memoryview(req)[1:]))
+
+    def fb():
+        a = array.array("Q")
+        a.frombytes(memoryview(req)[76:76 + 8 * e])
+        return a
+    timed("frombytes", fb)
+    del req
+    for name, ms in worst.items():
+        print("   ", name, "%.0f ms" % ms, "(bound %d ms)" % bound_ms, flush=True)
+    late = {k: round(v) for k, v in worst.items() if v > bound_ms}
+    assert not late, "past the Stop bound at the frame cap: %r" % late
+    ok("each C operation at the frame cap within %d ms" % bound_ms, {k: round(v) for k, v in worst.items()})
+
+
 def case_interrupt():
     F = GF(P63)
     A = rand_matrix(F, 2048, 2048, 81, big=True)
@@ -465,7 +508,8 @@ def case_interrupt():
 
 CASES = {
     "route": case_route, "correct": case_correct, "json": case_json, "probe": case_probe, "preflight": case_preflight,
-    "frame": case_frame, "outcomes": case_outcomes, "kernel": case_kernel, "mem": case_mem, "interrupt": case_interrupt,
+    "frame": case_frame, "outcomes": case_outcomes, "kernel": case_kernel, "mem": case_mem, "cops": case_cops,
+    "interrupt": case_interrupt,
 }
 if CASE == "mem" and not LINUX:
     ok("skipped: no /proc/self/clear_refs (Linux only)")
