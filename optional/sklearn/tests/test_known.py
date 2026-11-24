@@ -18,6 +18,11 @@ for line in open("test_unsupported.out").read().split("\n"):
         cur = None
 
 case("keys", lambda: sorted(known))
+# (results through np.dot, whose summation order isn't OpenBLAS's: each named, with its tolerance and reason)
+tol = known.get("tolerances", [])
+case("tolerance-fields", lambda: [t.get("function") for t in tol if sorted(t) != ["function", "reason", "rule"]])
+case("tolerance-text", lambda: [t["function"] for t in tol if not all(isinstance(t[k], str) and t[k].strip() for k in t)])
+case("tolerances", lambda: [t["function"] for t in tol])
 case("no-test-exempted", lambda: known["tests"])
 case("entry-fields", lambda: [d.get("case") for d in div if sorted(d) != ["case", "printed", "reason"]])
 case("entry-text", lambda: [d["case"] for d in div if not all(isinstance(d[k], str) and d[k].strip() for k in d)])
