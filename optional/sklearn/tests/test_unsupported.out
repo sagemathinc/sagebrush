@@ -44,3 +44,9 @@ dtype('<U2')
 !! NotImplementedError: sklearn.tree.export_text is not in Sagebrush's sklearn 0.x subset
 == tree.tree-class
 'sklearn.tree'
+== bagging.warm_start
+!! NotImplementedError: sklearn.ensemble.BaggingClassifier(warm_start=True) is not in Sagebrush's sklearn 0.x subset (adding members to a fitted ensemble isn't)
+== bagging.estimator
+!! NotImplementedError: sklearn.ensemble.BaggingClassifier(estimator=DummyClassifier(...)) is not in Sagebrush's sklearn 0.x subset (only decision trees are bagged: estimator=None, DecisionTreeClassifier or DecisionTreeRegressor)
+== bagging.random-forest
+!! NotImplementedError: sklearn.ensemble.RandomForestClassifier is not in Sagebrush's sklearn 0.x subset

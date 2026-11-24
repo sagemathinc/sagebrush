@@ -61,3 +61,11 @@ case("tree.pruning_path", lambda: DecisionTreeClassifier().cost_complexity_pruni
 case("tree.extra-tree", lambda: __import__("sklearn.tree", fromlist=["ExtraTreeClassifier"]).ExtraTreeClassifier)
 case("tree.export_text", lambda: __import__("sklearn.tree", fromlist=["export_text"]).export_text)
 case("tree.tree-class", lambda: type(DecisionTreeClassifier().fit(Xt, yt).tree_).__module__)
+
+# (step P5: what bagging refuses)
+from sklearn.ensemble import BaggingClassifier, BaggingRegressor
+from sklearn.dummy import DummyClassifier
+
+case("bagging.warm_start", lambda: BaggingClassifier(warm_start=True).fit(Xt, yt))
+case("bagging.estimator", lambda: BaggingClassifier(DummyClassifier()).fit(Xt, yt))
+case("bagging.random-forest", lambda: __import__("sklearn.ensemble", fromlist=["RandomForestClassifier"]).RandomForestClassifier)

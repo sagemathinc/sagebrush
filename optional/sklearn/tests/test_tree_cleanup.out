@@ -12,3 +12,13 @@ True
 ("injected fit failure after the dataset's copy", True)
 == fit.after-failure
 True
+== bagging.shared
+True
+== bagging.own-columns
+True
+== bagging.regressor-oob
+True
+== bagging.failure-shared
+('injected failure in the third member', 3, True)
+== bagging.failure-own-columns
+('injected failure in the third member', 3, True)

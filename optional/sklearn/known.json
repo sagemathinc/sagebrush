@@ -115,6 +115,21 @@
       "case": "tree.tree-class",
       "printed": "'sklearn.tree'",
       "reason": "tree_ is a Python class in sklearn.tree (scikit-learn's is the compiled sklearn.tree._tree.Tree) with these of its attributes and methods: node_count, capacity, max_depth, n_leaves, n_features, n_outputs, n_classes, max_n_classes, the nine node arrays, apply, predict and compute_feature_importances; decision_path is refused (tree.decision_path). Its arrays are separate arrays rather than views of one structured array, which Sagebrush's numpy doesn't have"
+    },
+    {
+      "case": "bagging.warm_start",
+      "printed": "!! NotImplementedError: sklearn.ensemble.BaggingClassifier(warm_start=True) is not in Sagebrush's sklearn 0.x subset (adding members to a fitted ensemble isn't)",
+      "reason": "warm_start adds members to a fitted ensemble, continuing its seed stream; it isn't ported yet, and warm_start=False, the default, is"
+    },
+    {
+      "case": "bagging.estimator",
+      "printed": "!! NotImplementedError: sklearn.ensemble.BaggingClassifier(estimator=DummyClassifier(...)) is not in Sagebrush's sklearn 0.x subset (only decision trees are bagged: estimator=None, DecisionTreeClassifier or DecisionTreeRegressor)",
+      "reason": "the members share one copy of the data in Sagebrush's decision-tree kernel; bagging other estimators isn't ported yet"
+    },
+    {
+      "case": "bagging.random-forest",
+      "printed": "!! NotImplementedError: sklearn.ensemble.RandomForestClassifier is not in Sagebrush's sklearn 0.x subset",
+      "reason": "the random forests come in a later step; sklearn.ensemble has BaggingClassifier and BaggingRegressor so far"
     }
   ],
   "tolerances": [
