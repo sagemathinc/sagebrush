@@ -38,12 +38,15 @@ ok(imageFolder("chat", "abc") === "/Attachments/abc" && imageFolder("nb", "u-1")
   const other = await saveImage(T.create, "/Attachments/board-1", bytes(PNG, 64, 9), { name: "iabc", read: T.read });
   ok(a.path === "/Attachments/board-1/iabc.png" && again.path === a.path && other.refused === "exists" && T.files.size === 1, "a content-addressed name: the same bytes again is the same file (success); other bytes there are refused", { a, again, other });
   ok((await saveImage(T.create, "/Attachments/board-1", bytes(PNG), { name: "../x", read: T.read })).refused === "other" && (await saveImage(T.create, "/Attachments/board-1", bytes(PNG), { name: "ok" })).refused === "other", "a name must be plain, and comes with read");
+  let threw = false, rr;
+  try { rr = await saveImage(async () => { throw Object.assign(new Error("x"), { code: "exists" }); }, "/Attachments/nb-x", bytes(PNG)); } catch { threw = true; }
+  ok(!threw && rr?.refused === "exists", "a random name already taken: refused as exists (only a content-addressed name compares bytes)");
   ok(refusalOf({ code: "limit" }) === "limit" && refusalOf({ code: "toString" }) === "other" && refusalOf(new Error("x")) === "other", "refusals by code only");
 }
 
 // ---- the file-referring attachment, failing closed
 ok(filePathOf({ [FILE_KEY]: "/Attachments/nb-x/ab12.png" }) === "/Attachments/nb-x/ab12.png", "a well-formed reference");
-const bad = [{ [FILE_KEY]: "/Attachments/nb-x/../../secret.png" }, { [FILE_KEY]: "/private/a.png" }, { [FILE_KEY]: "/Attachments/a.png" }, { [FILE_KEY]: "/Attachments/nb-x/a/b.png" }, { [FILE_KEY]: "/Attachments/nb-x/a.svg" }, { [FILE_KEY]: "/Attachments/nb-x/.a.png" }, { [FILE_KEY]: 7 }, { [FILE_KEY]: "/Attachments/nb-x/a.png", extra: 1 }, { "image/png": "AAAA" }, null, [], "x"];
+const bad = [{ [FILE_KEY]: "/Attachments/nb-x/../../secret.png" }, { [FILE_KEY]: "/private/a.png" }, { [FILE_KEY]: "/private/notes/a.png" }, { [FILE_KEY]: "/attachments/nb-x/a.png" }, { [FILE_KEY]: "/Attachments/a.png" }, { [FILE_KEY]: "/Attachments/nb-x/a/b.png" }, { [FILE_KEY]: "/Attachments/nb-x/a.svg" }, { [FILE_KEY]: "/Attachments/nb-x/.a.png" }, { [FILE_KEY]: 7 }, { [FILE_KEY]: "/Attachments/nb-x/a.png", extra: 1 }, { "image/png": "AAAA" }, null, [], "x"];
 ok(bad.every((b) => filePathOf(b) === null), "ill-formed references are refused: traversal, outside /Attachments, wrong depth, not raster, hidden, not a string, extra keys", bad.filter((b) => filePathOf(b) !== null));
 ok(isFileEntry({ [FILE_KEY]: 1 }) && !isFileEntry({ "image/png": "x" }), "an entry of our key is ours even when ill-formed");
 
