@@ -59,6 +59,11 @@ export const KEYWORDS = new Set(
 const OPS = [":->", "@@", "+:=", "-:=", "*:=", "/:=", "^:=", ":=", "..", "->", "{@", "@}", "{*", "*}", "$$", "<", ">", "(", ")", "[", "]", "{", "}",
   ",", ";", ":", "|", "#", "&", "~", "+", "-", "*", "/", "^", ".", "!", "`", "@", "=", "\\"];
 
+// A real literal's text as Python reads it: 1. as 1.0, 1.e5 as 1.0e5
+function realText(t: string, real: boolean): string {
+  return real ? t.replace(/\.(?=[eE]|$)/, ".0") : t;
+}
+
 // The keywords whose assignment form Magma has, x div:= 2 (Magma 2.18-5; not eq:=, cmpeq:= or subset:=)
 const OPA_KW = new Set(["cat", "div", "mod", "join", "meet", "diff", "sdiff", "and", "or", "xor"]);
 const OPAS = ["+:=", "-:=", "*:=", "/:=", "^:=", ...[...OPA_KW].map((k) => k + ":=")];
@@ -110,19 +115,30 @@ export function lex(src: string): Tok[] {
         continue;
       }
       let real = false;
-      // 1.5 (but not 1..5) and 1e10
-      if (src[j] === "." && /[0-9]/.test(src[j + 1] ?? "")) {
+      // a real, as Magma 2.18-5 reads it: 1.5, and 1. with no digits after the point (12., 1.e5), but not 1..5 (a
+      // range); then an exponent, e or E, which must have digits after its sign (1e5, 1.5E-2): else Magma's "Real
+      // literal has no digits after exponent indicator", just after the e (1e;, 1.ex)
+      if (src[j] === "." && src[j + 1] !== ".") {
         real = true;
         j++;
         while (j < n && /[0-9]/.test(src[j])) j++;
       }
-      if ((src[j] === "e" || src[j] === "E") && /[0-9+-]/.test(src[j + 1] ?? "") && (real || /[0-9]/.test(src[j + 1]) || /[0-9]/.test(src[j + 2] ?? ""))) {
+      if (src[j] === "e" || src[j] === "E") {
+        let k = j + 1;
+        if (src[k] === "+" || src[k] === "-") k++;
+        if (!/[0-9]/.test(src[k] ?? "")) {
+          out.push({ t: real ? "real" : "num", v: realText(src.slice(i, j), real), line: L, col: C });
+          adv(j + 1 - i);
+          out.push({ t: "bad", v: src.slice(j + 1, k) || "e", line, col, msg: "Real literal has no digits after exponent indicator" });
+          adv(k - j - 1);
+          continue;
+        }
         real = true;
-        j += 2;
+        j = k;
         while (j < n && /[0-9]/.test(src[j])) j++;
       }
       // (an integer without its leading zeros: 007 is 7 in Magma, and not a Python literal)
-      out.push({ t: real ? "real" : "num", v: real ? src.slice(i, j) : src.slice(i, j).replace(/^0+(?=\d)/, ""), line: L, col: C });
+      out.push({ t: real ? "real" : "num", v: real ? realText(src.slice(i, j), true) : src.slice(i, j).replace(/^0+(?=\d)/, ""), line: L, col: C });
       adv(j - i);
       continue;
     }
