@@ -2437,7 +2437,9 @@ class RealNumberMP:
         if self._m <= 0:
             if self._m == 0:
                 return RealNumberMP(R, 0, 0, "-inf")
-            return ComplexField(R._prec)(self).log() if base is None else ComplexField(R._prec)(self).log() / R(base).log()
+            # (as Sage: the complex number's log, to the base by dividing each
+            # part by the base's log)
+            return ComplexField(R._prec)(self).log(base)
         # log(1 + d) is about d: fixed point needs -log2|d| more bits for the
         # relative precision (log(1 + 2^-75) to 100 bits)
         E = self._e + self._m.bit_length()
@@ -4087,6 +4089,145 @@ class ComplexField_:
         return ComplexNumberMP(self, R(x), R(0))
 
 
+def _sgn(x):
+    """-1, 0 or 1 for a RealNumberMP (0 for a zero or NaN), as mpfr_sgn."""
+    if x._special:
+        return {"+inf": 1, "-inf": -1}.get(x._special, 0)
+    return (x._m > 0) - (x._m < 0)
+
+
+def _hypot_cr(x, y):
+    """sqrt(x^2 + y^2) correctly rounded in x's field (mpfr_hypot): from the
+    exact sum of squares, an integer square root and a sticky bit; an
+    infinite part gives +infinity, else a NaN NaN."""
+    R = x._R
+    if x._special or y._special:
+        if "+inf" in (x._special, y._special) or "-inf" in (x._special, y._special):
+            return RealNumberMP(R, 0, 0, "+inf")
+        return x._nan()
+    if not x._m or not y._m:
+        return R(abs(y if not x._m else x))
+    tx, ty = x._e + abs(x._m).bit_length(), y._e + abs(y._m).bit_length()
+    p = R._prec
+    if abs(tx - ty) > p + 2:
+        # (the smaller part's square is below half an ulp of the larger one's:
+        # the larger one, exactly)
+        return R(abs(x if tx > ty else y))
+    e = min(x._e, y._e)
+    N = (abs(x._m) << (x._e - e)) ** 2 + (abs(y._m) << (y._e - e)) ** 2
+    shift = max(0, 2 * p + 4 - N.bit_length())
+    shift += shift % 2
+    q = math.isqrt(N << shift)
+    mm = 2 * q + (0 if q * q == N << shift else 1)
+    m, ee = _round_q(mm, 1, p, R._rnd, e - shift // 2 - 1)
+    return RealNumberMP(R, m, ee)
+
+
+def _atan2_cr(y, x):
+    """atan2(y, x) correctly rounded in y's field, as mpfr_atan2: its signed
+    zeros and infinities (atan2(+-0, -0) is +-pi, atan2(+-oo, -oo) +-3pi/4),
+    otherwise arctan(y/x), +-pi for x < 0, by Ziv's strategy."""
+    R = y._R
+    if y._special == "nan" or x._special == "nan":
+        return y._nan()
+    sy = -1 if (y._special == "-inf" or (not y._special and (y._m < 0 or (not y._m and y._neg)))) else 1
+    xneg = x._special == "-inf" or (not x._special and (x._m < 0 or (not x._m and x._neg)))
+
+    def mult(k, d):
+        # sy k pi / d, correctly rounded
+        _ziv_depth[0] += 1
+        try:
+            return _ziv_eval(R, lambda F: F.pi() * (sy * k) / d)
+        finally:
+            _ziv_depth[0] -= 1
+    if not y._special and not y._m:
+        # (+-0: +-0 for x >= +0, +-pi for x <= -0)
+        return mult(1, 1) if xneg else RealNumberMP(R, 0, 0, None, sy < 0)
+    if y._special:
+        if x._special == "+inf":
+            return mult(1, 4)
+        if x._special == "-inf":
+            return mult(3, 4)
+        return mult(1, 2)
+    if x._special:
+        return mult(1, 1) if xneg else RealNumberMP(R, 0, 0, None, sy < 0)
+    if not x._m:
+        return mult(1, 2)
+
+    def f(F):
+        a = (F(y) / F(x)).arctan()
+        if xneg:
+            a = a + F.pi() if sy > 0 else a - F.pi()
+        return a
+    _ziv_depth[0] += 1
+    try:
+        return _ziv_eval(R, f)
+    finally:
+        _ziv_depth[0] -= 1
+
+
+def _cexp_cr(z):
+    """e^z for z of ComplexField(p), each part correctly rounded: e^a cos b
+    and e^a sin b, by Ziv's strategy (each factor correctly rounded in the
+    working field, so the product is within 3 units of its last place).
+    A zero part is +0.  (Sage's symbolic ring evaluates exp with Arb's
+    balls at p + 15 bits, rounding their midpoints: the same parts but
+    within the ball's radius of a rounding boundary.)"""
+    C = z._C
+    R = C._R
+    a, b = z._re, z._im
+
+    def part(trig):
+        _ziv_depth[0] += 1
+        try:
+            v = _ziv_eval(R, lambda F: F(a).exp() * getattr(F(b), trig)())
+        finally:
+            _ziv_depth[0] -= 1
+        return R(0) if not v._special and not v._m else v
+    return ComplexNumberMP(C, part("cos"), part("sin"))
+
+
+def _log_abs_cr(a, b, R):
+    """log(sqrt(a^2 + b^2)) correctly rounded in R, from the exact sum of
+    squares s: log(s)/2 at W bits, its error bound, W doubled until both
+    ends round alike (s != 1 is rational, so the value is no rounding
+    boundary).  Near s = 1 the working precision starts above -log2|s - 1|,
+    so the logarithm's cancellation is paid for."""
+    s = a._q() ** 2 + b._q() ** 2
+    if s == 1:
+        return R(0)
+    d = abs(s - 1)
+    k = max(0, d.denominator.bit_length() - d.numerator.bit_length() + 2) if d < _F(1, 2) else 0
+    W = R._prec + 40 + k
+    while True:
+        if W > 64 * (R._prec + 40 + k):
+            raise NotImplementedError("log|z| correctly rounded to %d bits is not decided in sagebrush yet" % R._prec)
+        F = RealField(W)
+        v = F(s).log()
+        q = v._q()
+        # (F(s) within 2^-W relative: log moves by at most 2^(1-W); the
+        # logarithm's own rounding 2^-W relative)
+        E = _F(1, 1 << (W - 2)) * max(1, abs(q))
+        lo, hi = R((q - E) / 2), R((q + E) / 2)
+        if lo == hi:
+            return R(0) if not lo._m else lo
+        W *= 2
+
+
+def _clog_cr(z):
+    """log z for z of ComplexField(p), each part correctly rounded: log|z|
+    and arg z in (-pi, pi], a zero imaginary part counted +0 (Arb's, as
+    Sage's symbolic ring computes log: its balls have no signed zero)."""
+    C = z._C
+    R = C._R
+    a, b = z._re, z._im
+    if not b._special and not b._m:
+        b = R(0)
+    if not a._special and not a._m:
+        a = R(0)
+    return ComplexNumberMP(C, _log_abs_cr(a, b, R), _atan2_cr(b, a))
+
+
 class ComplexNumberMP:
     """A complex number of a ComplexField(prec).
 
@@ -4195,11 +4336,30 @@ class ComplexNumberMP:
         except (TypeError, ValueError):
             return None
 
-    def __add__(self, o):
+    def _pair(self, o):
+        """(self, o) in their common field, the coarser one, as Sage's
+        coercion meets them (a real of RealField(q) as a number of
+        ComplexField(q)); None if o is no number."""
+        if isinstance(o, RealNumberMP) and o._R._prec != 53:
+            o = ComplexNumberMP(ComplexField(o._R._prec), o, o._R(0))
         o = self._c(o)
         if o is None:
+            return None
+        p, q = self._C._prec, o._C._prec
+        if p == q:
+            return self, o
+        if p < q:
+            R = self._C._R
+            return self, ComplexNumberMP(self._C, R(o._re), R(o._im))
+        R = o._C._R
+        return ComplexNumberMP(o._C, R(self._re), R(self._im)), o
+
+    def __add__(self, o):
+        t = self._pair(o)
+        if t is None:
             return NotImplemented
-        return ComplexNumberMP(self._C, self._re + o._re, self._im + o._im)
+        x, o = t
+        return ComplexNumberMP(x._C, x._re + o._re, x._im + o._im)
 
     __radd__ = __add__
 
@@ -4207,38 +4367,75 @@ class ComplexNumberMP:
         return ComplexNumberMP(self._C, -self._re, -self._im)
 
     def __sub__(self, o):
-        o = self._c(o)
-        if o is None:
+        t = self._pair(o)
+        if t is None:
             return NotImplemented
-        return ComplexNumberMP(self._C, self._re - o._re, self._im - o._im)
+        x, o = t
+        return ComplexNumberMP(x._C, x._re - o._re, x._im - o._im)
 
     def __rsub__(self, o):
         return (-self) + o
 
+    # The arithmetic and functions below are Sage's ComplexNumber's
+    # (complex_mpfr.pyx): each step one MPFR operation of the field, rounded
+    # to nearest, in Sage's order, so the last bits are Sage's (a product or
+    # quotient is not correctly rounded).  The _x_ versions at the end compute
+    # at 20 more bits and round once: the symbolic evaluator's (_ev), whose
+    # intermediate values they stay.
+
     def __mul__(self, o):
-        o = self._c(o)
-        if o is None:
+        """The product, as Sage's _mul_: (RN(ac) - RN(bd)) + (RN(ad) + RN(bc))*I.
+
+        EXAMPLES::
+
+            sage: C = ComplexField(100); C(1, 2) * C(3, -4)
+            11.000000000000000000000000000 + 2.0000000000000000000000000000*I
+        """
+        t = self._pair(o)
+        if t is None:
             return NotImplemented
-        H = RealField(self._C._prec + 20)
-        a, b, c, d = H(self._re), H(self._im), H(o._re), H(o._im)
-        R = self._C._R
-        return ComplexNumberMP(self._C, R(a * c - b * d), R(a * d + b * c))
+        x, o = t
+        a, b, c, d = x._re, x._im, o._re, o._im
+        return ComplexNumberMP(x._C, a * c - b * d, a * d + b * c)
 
     __rmul__ = __mul__
 
     def __truediv__(self, o):
-        o = self._c(o)
-        if o is None:
+        """The quotient, as Sage's _div_: n = RN(RN(c^2) + RN(d^2)), then
+        RN(c/n), RN(d/n) and the products.
+
+        EXAMPLES::
+
+            sage: C = ComplexField(100); C(1, 2) / C(3, -4)
+            -0.20000000000000000000000000000 + 0.40000000000000000000000000000*I
+        """
+        t = self._pair(o)
+        if t is None:
             return NotImplemented
-        H = RealField(self._C._prec + 20)
-        a, b, c, d = H(self._re), H(self._im), H(o._re), H(o._im)
+        x, o = t
+        a, b, c, d = x._re, x._im, o._re, o._im
         n = c * c + d * d
-        R = self._C._R
-        return ComplexNumberMP(self._C, R((a * c + b * d) / n), R((b * c - a * d) / n))
+        p, q = c / n, d / n
+        return ComplexNumberMP(x._C, p * a + q * b, p * b - q * a)
 
     def __rtruediv__(self, o):
-        c = self._c(o)
-        return NotImplemented if c is None else c / self
+        t = self._pair(o)
+        if t is None:
+            return NotImplemented
+        x, o = t
+        return o / x
+
+    def __invert__(self):
+        """1/self, as Sage's __invert__ (0 gives NaN + NaN*I).
+
+        EXAMPLES::
+
+            sage: ~ComplexField(100)(1, 2)
+            0.20000000000000000000000000000 - 0.40000000000000000000000000000*I
+        """
+        a, b = self._re, self._im
+        n = a * a + b * b
+        return ComplexNumberMP(self._C, a / n, (-b) / n)
 
     def __eq__(self, o):
         if getattr(o, "_is_ffmatrix", False):
@@ -4254,21 +4451,21 @@ class ComplexNumberMP:
         return not (self._re.is_zero() and self._im.is_zero())
 
     def abs(self):
-        """The absolute value.
+        """The absolute value, as Sage's: sqrt(RN(RN(a^2) + RN(b^2))), each
+        step rounded (not always the correctly rounded |z|).
 
         EXAMPLES::
 
             sage: ComplexField(30)(3, 4).abs()
             5.0000000
         """
-        H = RealField(self._C._prec + 20)
-        a, b = H(self._re), H(self._im)
-        return self._C._R((a * a + b * b).sqrt())
+        a, b = self._re, self._im
+        return (a * a + b * b).sqrt()
 
     __abs__ = abs
 
     def norm(self):
-        """|self|^2.
+        """|self|^2, as Sage's: RN(RN(a^2) + RN(b^2)).
 
         EXAMPLES::
 
@@ -4278,14 +4475,15 @@ class ComplexNumberMP:
         return self._re * self._re + self._im * self._im
 
     def arg(self):
-        """The argument in (-pi, pi].
+        """The argument in (-pi, pi], atan2(imag, real) correctly rounded
+        (MPFR's mpfr_atan2, as Sage).
 
         EXAMPLES::
 
             sage: ComplexField(30)(0, 1).arg()
             1.5707963
         """
-        return self._im._arctan2(self._re)
+        return _atan2_cr(self._im, self._re)
 
     argument = arg
 
@@ -4300,102 +4498,326 @@ class ComplexNumberMP:
         return ComplexNumberMP(self._C, self._re, -self._im)
 
     def sqrt(self, all=False):
-        """The principal square root.
+        """The principal square root, as Sage computes it: a real one's
+        root; otherwise a = sqrt((|z| + x)/2) (|z| correctly rounded, mpfr's
+        hypot) and b = y/(2a), from -z near the negative real axis.
 
         EXAMPLES::
 
             sage: ComplexField(30)(-4).sqrt(), ComplexField(30)(0, 2).sqrt()
             (2.0000000*I, 1.0000000 + 1.0000000*I)
         """
-        H = RealField(self._C._prec + 20)
-        a, b = H(self._re), H(self._im)
-        if b.is_zero():
-            if a._m >= 0:
-                r = ComplexNumberMP(self._C, self._C._R(a.sqrt()), self._C._R(0))
+        R = self._C._R
+        x, y = self._re, self._im
+        if y.is_zero():
+            if x._special == "nan" or x._special == "+inf" or (not x._special and x._m >= 0):
+                r = ComplexNumberMP(self._C, x.sqrt(), R(0))
             else:
-                r = ComplexNumberMP(self._C, self._C._R(0), self._C._R((-a).sqrt()))
-        else:
-            m = (a * a + b * b).sqrt()
-            x = ((m + a) / 2).sqrt()
-            y = ((m - a) / 2).sqrt()
-            if b._m < 0:
-                y = -y
-            r = ComplexNumberMP(self._C, self._C._R(x), self._C._R(y))
+                r = ComplexNumberMP(self._C, R(0), (-x).sqrt())
+            return ([r, -r] if r else [r]) if all else r
+        avoid = _sgn(x) < 0 and abs(y) < abs(x)
+        a2 = _hypot_cr(x, y)
+        a2 = (a2 - x if avoid else a2 + x) / 2
+        re = a2.sqrt()
+        im = y / re / 2
+        if avoid:
+            re, im = im, re
+            if _sgn(y) < 0:
+                re, im = -re, -im
+        r = ComplexNumberMP(self._C, re, im)
         return [r, -r] if all else r
 
     def exp(self):
-        """e^self.
+        """e^self, as Sage's: r = RN(e^a), then RN(cos(b) r) + RN(sin(b) r)*I.
 
         EXAMPLES::
 
             sage: ComplexField(100)(0, 1).exp()
             0.54030230586813971740093660744 + 0.84147098480789650665250232163*I
         """
-        H = RealField(self._C._prec + 20)
-        r = H(self._re).exp()
-        b = H(self._im)
-        R = self._C._R
-        return ComplexNumberMP(self._C, R(r * b.cos()), R(r * b.sin()))
+        r = self._re.exp()
+        return ComplexNumberMP(self._C, self._im.cos() * r, self._im.sin() * r)
 
-    def log(self):
-        """The principal logarithm.
+    def log(self, base=None):
+        """The principal logarithm, as Sage's: log(abs(self)) + arg(self)*I
+        (abs as Sage computes it, then its logarithm, both rounded); a NaN
+        part gives NaN + NaN*I.
 
         EXAMPLES::
 
             sage: ComplexField(30)(-1).log()
             3.1415927*I
         """
-        H = RealField(self._C._prec + 20)
-        a, b = H(self._re), H(self._im)
-        R = self._C._R
-        return ComplexNumberMP(self._C, R((a * a + b * b).log() / 2), R(b._arctan2(a)))
+        if self._re._special == "nan":
+            return ComplexNumberMP(self._C, self._re, self._re)
+        if self._im._special == "nan":
+            return ComplexNumberMP(self._C, self._im, self._im)
+        theta = self.arg()
+        rho = self.abs()
+        if base is None:
+            return ComplexNumberMP(self._C, rho.log(), theta)
+        lb = self._C._R(base).log()
+        return ComplexNumberMP(self._C, rho.log() / lb, theta / lb)
 
     def __pow__(self, n, mod=None):
+        """self^n: for an integer n Sage's generic_power (1/self first for
+        n < 0, then the powers self^(2^i) from the lowest set bit, each
+        multiplied in as apow * res); otherwise exp(log(self) n), as Sage.
+
+        EXAMPLES::
+
+            sage: C = ComplexField(100); C(1, 2)^3, C(1, 2)^-2
+            (-11.000000000000000000000000000 - 2.0000000000000000000000000000*I, -0.12000000000000000000000000000 - 0.16000000000000000000000000000*I)
+        """
         C = self._C
         if isinstance(n, int) or type(n).__name__ == "Integer" or (isinstance(n, _F) and n.denominator == 1):
             n = int(n)
-            if n < 0:
-                return 1 / (self ** (-n))
-            r = C(1)
-            b = self
-            while n:
-                if n & 1:
-                    r = r * b
+            if n == 0:
+                return C(1)
+            apow = ~self if n < 0 else self
+            n = abs(n)
+            while not n & 1:
+                apow = apow * apow
                 n >>= 1
-                if n:
-                    b = b * b
-            return r
-        if not self:
-            return C(0)
-        w = n if isinstance(n, ComplexNumberMP) else C(n)
-        return (w * self.log()).exp()
+            res = apow
+            n >>= 1
+            while n:
+                apow = apow * apow
+                if n & 1:
+                    res = apow * res
+                n >>= 1
+            return res
+        return (self.log() * n).exp()
 
     def __rpow__(self, b):
         return self._C(b) ** self
 
+    def _sh_ch(self, t):
+        """(sinh t, sqrt(RN(sinh(t)^2) + 1)) rounded as Sage's trigonometric
+        functions compute them, and RN(sinh(t)^2)."""
+        sh = t.sinh()
+        sq = sh * sh
+        return sh, (sq + 1).sqrt(), sq
+
     def sin(self):
-        """The sine.
+        """The sine, as Sage's: cosh(b) sin(a) + sinh(b) cos(a)*I, with
+        cosh(b) = sqrt(sinh(b)^2 + 1), each step rounded.
 
         EXAMPLES::
 
             sage: ComplexField(30)(0, 1).sin()
             1.1752012*I
         """
-        H = RealField(self._C._prec + 20)
-        a, b = H(self._re), H(self._im)
-        R = self._C._R
-        return ComplexNumberMP(self._C, R(a.sin() * b.cosh()), R(a.cos() * b.sinh()))
+        sh, ch, _ = self._sh_ch(self._im)
+        a = self._re
+        return ComplexNumberMP(self._C, a.sin() * ch, a.cos() * sh)
 
     def cos(self):
-        """The cosine.
+        """The cosine, as Sage's: cosh(b) cos(a) - sinh(b) sin(a)*I.
 
         EXAMPLES::
 
             sage: ComplexField(30)(0, 1).cos()
             1.5430806
         """
+        sh, ch, _ = self._sh_ch(self._im)
+        a = self._re
+        return ComplexNumberMP(self._C, a.cos() * ch, a.sin() * -sh)
+
+    def tan(self):
+        """The tangent, as Sage's: (cos(a) sin(a) + cosh(b) sinh(b)*I) /
+        (sinh(b)^2 + cos(a)^2).
+
+        EXAMPLES::
+
+            sage: ComplexField(30)(1, 1).tan()
+            0.27175259 + 1.0839234*I
+        """
+        sh, ch, sq = self._sh_ch(self._im)
+        a = self._re
+        s, c = a.sin(), a.cos()
+        d = sq + c * c
+        return ComplexNumberMP(self._C, c * s / d, ch * sh / d)
+
+    def sinh(self):
+        """The hyperbolic sine, as Sage's: sinh(a) cos(b) + cosh(a) sin(b)*I.
+
+        EXAMPLES::
+
+            sage: ComplexField(30)(1, 1).sinh()
+            0.63496392 + 1.2984576*I
+        """
+        sh, ch, _ = self._sh_ch(self._re)
+        b = self._im
+        return ComplexNumberMP(self._C, b.cos() * sh, b.sin() * ch)
+
+    def cosh(self):
+        """The hyperbolic cosine, as Sage's: cosh(a) cos(b) + sinh(a) sin(b)*I.
+
+        EXAMPLES::
+
+            sage: ComplexField(30)(1, 1).cosh()
+            0.83373003 + 0.98889771*I
+        """
+        sh, ch, _ = self._sh_ch(self._re)
+        b = self._im
+        return ComplexNumberMP(self._C, b.cos() * ch, b.sin() * sh)
+
+    def tanh(self):
+        """The hyperbolic tangent, as Sage's: (cosh(a) sinh(a) + cos(b) sin(b)*I)
+        / (sinh(a)^2 + cos(b)^2).
+
+        EXAMPLES::
+
+            sage: ComplexField(30)(1, 1).tanh()
+            1.0839234 + 0.27175259*I
+        """
+        sh, ch, sq = self._sh_ch(self._re)
+        b = self._im
+        s, c = b.sin(), b.cos()
+        d = sq + c * c
+        return ComplexNumberMP(self._C, ch * sh / d, c * s / d)
+
+    def cot(self):
+        """1/tan, as Sage's.
+
+        EXAMPLES::
+
+            sage: ComplexField(30)(1, 1).cot()
+            0.21762156 - 0.86801414*I
+        """
+        return ~self.tan()
+
+    def sec(self):
+        """1/cos, as Sage's.
+
+        EXAMPLES::
+
+            sage: ComplexField(30)(1, 1).sec()
+            0.49833703 + 0.59108384*I
+        """
+        return ~self.cos()
+
+    def csc(self):
+        """1/sin, as Sage's.
+
+        EXAMPLES::
+
+            sage: ComplexField(30)(1, 1).csc()
+            0.62151801 - 0.30393100*I
+        """
+        return ~self.sin()
+
+    def coth(self):
+        """1/tanh, as Sage's.
+
+        EXAMPLES::
+
+            sage: ComplexField(30)(1, 1).coth()
+            0.86801414 - 0.21762156*I
+        """
+        return ~self.tanh()
+
+    def sech(self):
+        """1/cosh, as Sage's.
+
+        EXAMPLES::
+
+            sage: ComplexField(30)(1, 1).sech()
+            0.49833703 - 0.59108384*I
+        """
+        return ~self.cosh()
+
+    def csch(self):
+        """1/sinh, as Sage's.
+
+        EXAMPLES::
+
+            sage: ComplexField(30)(1, 1).csch()
+            0.30393100 - 0.62151801*I
+        """
+        return ~self.sinh()
+
+    # ---- at 20 more bits, rounded once: the symbolic evaluator's (_ev)
+
+    def _x_parts(self, o=None):
         H = RealField(self._C._prec + 20)
-        a, b = H(self._re), H(self._im)
+        if o is None:
+            return H, H(self._re), H(self._im)
+        return H, H(self._re), H(self._im), H(o._re), H(o._im)
+
+    def _x_mul(self, o):
+        o = self._c(o)
+        H, a, b, c, d = self._x_parts(o)
+        R = self._C._R
+        return ComplexNumberMP(self._C, R(a * c - b * d), R(a * d + b * c))
+
+    def _x_div(self, o):
+        o = self._c(o)
+        H, a, b, c, d = self._x_parts(o)
+        n = c * c + d * d
+        R = self._C._R
+        return ComplexNumberMP(self._C, R((a * c + b * d) / n), R((b * c - a * d) / n))
+
+    def _x_abs(self):
+        H, a, b = self._x_parts()
+        return self._C._R((a * a + b * b).sqrt())
+
+    def _x_sqrt(self):
+        H, a, b = self._x_parts()
+        R = self._C._R
+        if b.is_zero():
+            if a._m >= 0:
+                return ComplexNumberMP(self._C, R(a.sqrt()), R(0))
+            return ComplexNumberMP(self._C, R(0), R((-a).sqrt()))
+        m = (a * a + b * b).sqrt()
+        x = ((m + a) / 2).sqrt()
+        y = ((m - a) / 2).sqrt()
+        if b._m < 0:
+            y = -y
+        return ComplexNumberMP(self._C, R(x), R(y))
+
+    def _x_exp(self):
+        H, a, b = self._x_parts()
+        r = a.exp()
+        R = self._C._R
+        return ComplexNumberMP(self._C, R(r * b.cos()), R(r * b.sin()))
+
+    def _x_log(self):
+        H, a, b = self._x_parts()
+        R = self._C._R
+        return ComplexNumberMP(self._C, R((a * a + b * b).log() / 2), R(b._arctan2(a)))
+
+    def _x_pow(self, n):
+        C = self._C
+        if isinstance(n, int) or type(n).__name__ == "Integer" or (isinstance(n, _F) and n.denominator == 1):
+            n = int(n)
+            if n < 0:
+                return C(1)._x_div(self._x_pow(-n))
+            r = C(1)
+            b = self
+            while n:
+                if n & 1:
+                    r = r._x_mul(b)
+                n >>= 1
+                if n:
+                    b = b._x_mul(b)
+            return r
+        if not self:
+            return C(0)
+        w = n if isinstance(n, ComplexNumberMP) else C(n)
+        return w._x_mul(self._x_log())._x_exp()
+
+    def _x_arg(self):
+        return self._im._arctan2(self._re)
+
+    def _x_sin(self):
+        H, a, b = self._x_parts()
+        R = self._C._R
+        return ComplexNumberMP(self._C, R(a.sin() * b.cosh()), R(a.cos() * b.sinh()))
+
+    def _x_cos(self):
+        H, a, b = self._x_parts()
         R = self._C._R
         return ComplexNumberMP(self._C, R(a.cos() * b.cosh()), R(-(a.sin() * b.sinh())))
 
@@ -4449,6 +4871,13 @@ def _cplx(v, prec):
     return ComplexNumberMP(C, v, v._R(0))
 
 
+_X_FUNS = {"sqrt": "_x_sqrt", "exp": "_x_exp", "log": "_x_log", "sin": "_x_sin", "cos": "_x_cos", "arg": "_x_arg",
+           "argument": "_x_arg"}
+# (ComplexNumberMP's methods the evaluator has no version of: Sage's, new with
+# them, are the methods' only)
+_NO_X_FUNS = ("tan", "cot", "sec", "csc", "sinh", "cosh", "tanh", "coth", "sech", "csch")
+
+
 def _ev(s, R, prec):
     import _sage_expr
     e = _sage_expr._bare(s)
@@ -4460,6 +4889,10 @@ def _ev(s, R, prec):
     if tag == "mp":
         # a real of RealField(p): rounded into R
         return R(_sage_expr._py_number(s))
+    if tag == "mpc":
+        # a number of ComplexField(p): each part rounded into R
+        v = _sage_expr._py_number(s)
+        return ComplexNumberMP(ComplexField_(prec), R(v._re), R(v._im))
     if tag == "float":
         # (its IEEE bits; "re,im" for a complex double: log(CC(0)) is CC's -infinity)
         parts = s[1:].rstrip(";").split(",")
@@ -4497,7 +4930,7 @@ def _ev(s, R, prec):
     if tag == "mul":
         r = args[0]
         for a in args[1:]:
-            r = (_cplx(r, prec) * _cplx(a, prec)) if cx else r * a
+            r = _cplx(r, prec)._x_mul(_cplx(a, prec)) if cx else r * a
         return _simplify(r)
     if tag == "pow":
         b, x = args
@@ -4519,8 +4952,8 @@ def _ev(s, R, prec):
                         return b ** R(q)
             if b._m >= 0:
                 return b ** x
-            return _simplify(_cplx(b, prec) ** _cplx(x, prec))
-        return _simplify(_cplx(b, prec) ** _cplx(x, prec))
+            return _simplify(_cplx(b, prec)._x_pow(_cplx(x, prec)))
+        return _simplify(_cplx(b, prec)._x_pow(_cplx(x, prec)))
     if tag.startswith("fun:"):
         name = tag[4:]
         a = args[0]
@@ -4535,9 +4968,11 @@ def _ev(s, R, prec):
         if name == "log_gamma" and a < 0:
             raise NotImplementedError("log_gamma of a negative real at more than 53 bits is not available in sagebrush yet")
         if name in ("abs",):
-            return a.abs() if isinstance(a, ComplexNumberMP) else abs(a)
+            return a._x_abs() if isinstance(a, ComplexNumberMP) else abs(a)
         if isinstance(a, ComplexNumberMP):
-            f = getattr(a, name, None)
+            # (the evaluator's own versions, at 20 more bits: Sage's
+            # step-by-step ones are the operators' and methods')
+            f = getattr(a, _X_FUNS.get(name, name), None) if name not in _NO_X_FUNS else None
             if f is None:
                 raise TypeError("cannot evaluate %s numerically" % name)
             return _simplify(f())

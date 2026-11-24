@@ -14,15 +14,28 @@ test("RealField(p) numbers in symbolic expressions: parity with RealNumberMP", (
   assert.equal(out, "checked 5153 refused 77 bad 0\n");
 });
 
-// A value off the real line, an infinity or a pole (Sage's is in
-// ComplexField(p), the second part of the work, or a symbolic infinity or NaN)
-// is refused, never a wrong number; a call of NaN stays as it is, as Sage's.
+// ComplexField(p) numbers likewise: each sum, product, quotient and integer
+// power with numbers of other precisions, reals, rationals and Gaussian
+// rationals gives exactly ComplexNumberMP's (test/sym_mpc_parity.sage), Sage's
+// ComplexNumber's operations, each step rounded (against Sage itself:
+// sage-tests/test_sym_complexfield.sage and test_complexfield_ops.sage).
+test("ComplexField(p) numbers in symbolic expressions: parity with ComplexNumberMP", () => {
+  const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "--sage", TEST + "sym_mpc_parity.sage"], { encoding: "utf8", timeout: 300000 });
+  assert.equal(out, "checked 7473 refused 27 bad 0\n");
+});
+
+// A value Sage computes with what sagebrush doesn't have yet (the inverse
+// functions off the real line, gamma at a pole), an infinity, or a value past
+// the exponents an expression holds is refused, never a wrong number; a call
+// of NaN stays as it is, as Sage's.  (The complex values of reals, log(-2),
+// sqrt(-2), (-2)^(1/3), 2*I, and the functions at a zero, log(0) and cot(0)
+// among them, are values now: sage-tests/test_sym_complexfield.sage.)
 test("RealField(p) numbers in symbolic expressions: complex, infinite and undefined values refused", () => {
   const cases = [
-    "arcsin(SR(R(2)))", "arccos(SR(R(-3)))", "arccosh(SR(R(0.5)))", "arctanh(SR(R(2)))", "log(SR(R(-2)))",
-    "sqrt(SR(R(-2)))", "SR(R(-2))**(1/3)", "SR(R(2))*I", "log(SR(R(0)))", "log(SR(R(-0.0)))", "arctanh(SR(R(1)))",
+    "arcsin(SR(R(2)))", "arccos(SR(R(-3)))", "arccosh(SR(R(0.5)))", "arctanh(SR(R(2)))", "arctanh(SR(R(1)))",
     "arccosh(SR(R('inf')))", "tanh(SR(R('inf')))", "exp(SR(R('-inf')))", "gamma(SR(R(0)))", "factorial(SR(R(-2)))",
-    "cot(SR(R(0)))", "csc(SR(R(0)))", "exp(SR(R(10)**40))", "exp(SR(-R(2)**70))",
+    "exp(SR(R(10)**40))", "exp(SR(-R(2)**70))", "gamma(SR(ComplexField(100)(1, 2)))", "arcsin(SR(ComplexField(100)(1, 2)))",
+    "SR(ComplexField(100)(1, 2))**(10**6)", "exp(SR(ComplexField(100)(10**40, 1)))",
   ];
   const src = ["R = RealField(100)", "for s in " + JSON.stringify(cases) + ":", "    try:", "        print(s, eval(s))",
     "    except NotImplementedError as _err:", "        print(s, 'refused:', _err)", "print(arcsin(SR(R('nan'))))"].join("\n");

@@ -12045,10 +12045,20 @@
   "owner": "Sage kernel (@sagebrush-sage2)",
   "reason": "laplace/inverse_laplace: no rule for this input; the public function returns it unevaluated, as Sage does (an unsupported case, not a cap)"
  },
+ "lib/_sage_expr.py :: _mp_call_value :: or NotImplementedError.\"\"\" #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a docstring naming the error a function raises; refuses nothing"
+ },
  "lib/_sage_expr.py :: _mp_call_value :: raise NotImplementedError(\"%s of a real number of RealField(%d) with a complex, infinite, undefined \" #0": {
   "class": "coverage",
   "owner": "sage kernel (@sagebrush-sage2)",
   "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
+ },
+ "lib/_sage_expr.py :: _mp_call_value :: raise NotImplementedError(\"%s of a real number of RealField(%d) with an infinite or undefined complex value \" #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "ComplexField(p) numbers in symbolic expressions: a case not represented yet (a function Sage computes with Arb or PARI, an infinite or undefined value, a part past 2^+-4096, an element of CC past the doubles), refused as not available, never a wrong value; not a resource cap"
  },
  "lib/_sage_expr.py :: _mp_call_value :: raise NotImplementedError(\"%s of a real number of RealField(p) with a double or a complex number \" #0": {
   "class": "coverage",
@@ -12059,11 +12069,6 @@
   "class": "coverage",
   "owner": "sage kernel (@sagebrush-sage2)",
   "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
- },
- "lib/_sage_expr.py :: _mp_call_value :: with a real of RealField(p) among them, or NotImplementedError.\"\"\" #0": {
-  "class": "none",
-  "owner": "sage kernel (@sagebrush-sage2)",
-  "reason": "a docstring naming the error a function raises; refuses nothing"
  },
  "lib/_sage_expr.py :: _mp_s :: \"symbolic expression is not available in sagebrush yet\" % (v, _MP_MAX_EXP, _MP_MAX_EXP + 1)) #0": {
   "class": "coverage",
@@ -12094,6 +12099,26 @@
   "class": "coverage",
   "owner": "sage kernel (@sagebrush-sage2)",
   "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
+ },
+ "lib/_sage_expr.py :: _mpc_call_value :: of RealField(p) with an exact complex one), or NotImplementedError. #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a docstring naming the error a function raises; refuses nothing"
+ },
+ "lib/_sage_expr.py :: _mpc_call_value :: raise NotImplementedError(\"%s of a complex number of ComplexField(%d) with an infinite or undefined value in a \" #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "ComplexField(p) numbers in symbolic expressions: a case not represented yet (a function Sage computes with Arb or PARI, an infinite or undefined value, a part past 2^+-4096, an element of CC past the doubles), refused as not available, never a wrong value; not a resource cap"
+ },
+ "lib/_sage_expr.py :: _mpc_call_value :: unavailable = NotImplementedError(\"%s of a complex number of ComplexField(%d) in a symbolic expression is not \" #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "ComplexField(p) numbers in symbolic expressions: a case not represented yet (a function Sage computes with Arb or PARI, an infinite or undefined value, a part past 2^+-4096, an element of CC past the doubles), refused as not available, never a wrong value; not a resource cap"
+ },
+ "lib/_sage_expr.py :: _mpc_s :: raise NotImplementedError(\"%s, an element of CC past the double range, has no symbolic form in sagebrush yet\" % (v,)) #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "ComplexField(p) numbers in symbolic expressions: a case not represented yet (a function Sage computes with Arb or PARI, an infinite or undefined value, a part past 2^+-4096, an element of CC past the doubles), refused as not available, never a wrong value; not a resource cap"
  },
  "lib/_sage_expr.py :: _sum_signed_rational :: if sum(n for _, _, n, _ in shifts) > _SUM_SHIFT_LIMIT: # past the work limit: unevaluated #0": {
   "class": "coverage",
@@ -13716,6 +13741,11 @@
   "class": "coverage",
   "owner": "Sage kernel",
   "reason": "a complex value past the doubles: CC's numbers are doubles in Sagebrush, so a log_gamma whose part leaves them is refused rather than given as an infinity (an unsupported case, not a cap)"
+ },
+ "lib/_sage_real.py :: _log_abs_cr :: raise NotImplementedError(\"log|z| correctly rounded to %d bits is not decided in sagebrush yet\" % R._prec) #0": {
+  "class": "coverage",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "fail-closed Ziv check of log|z| for a complex z: a value whose correct rounding is not decided by 64 times the starting working precision is refused, never guessed; not a resource cap"
  },
  "lib/_sage_real.py :: _log_gamma_neg :: raise NotImplementedError(\"log_gamma(%s) correctly rounded to %d bits is not decided within %d bits in sagebrush yet\" % (x, p, W)) #0": {
   "class": "coverage",

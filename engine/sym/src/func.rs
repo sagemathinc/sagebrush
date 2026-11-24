@@ -160,7 +160,7 @@ pub fn eval(f: Fun, args: Vec<Expr>) -> Expr {
     // the identities of a real (abs, conjugate, real and imaginary parts)
     // are the engine's
     if args.iter().any(|a| a.is_mp()) && args.iter().all(|a| a.is_num()) {
-        let nan = args.iter().any(|a| a.as_num().and_then(|n| n.as_mp()).is_some_and(|m| m.sp == crate::mpnum::Sp::NaN));
+        let nan = args.iter().any(|a| a.as_num().is_some_and(|n| n.mp_nan()));
         if !nan && matches!(f, Fun::Abs | Fun::Conjugate | Fun::RealPart | Fun::ImagPart) {
             if let Some(v) = exact(&f, &args) {
                 return v;
@@ -443,6 +443,8 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
                     // (a float is float_eval's, which eval runs first)
                     Num::Float(..) => return None,
                     Num::Mp(m) => num(Num::mp(if m.signbit() { m.neg() } else { (**m).clone() })),
+                    // (Sage's abs_c, the front end's: mp_calls)
+                    Num::Mpc(_) => return None,
                 });
             }
             if let Kind::Fun(Fun::Abs, _) = &x.kind {
@@ -600,6 +602,10 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
                 // (a float is float_eval's, which eval runs first)
                 Num::Float(..) => return None,
                 Num::Mp(_) => n.clone(),
+                // (a zero imaginary part: the number itself, as Sage's real
+                // numeric)
+                Num::Mpc(z) if z.im.is_zero() => n.clone(),
+                Num::Mpc(z) => Num::mpc(z.conjugate()),
             }))
         }
         Fun::RealPart => {
@@ -608,6 +614,10 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
                 Num::Exact(a, _) => Num::rat(a.clone()),
                 Num::Float(a, _, k) => Num::Float(*a, 0.0, k.to_real()),
                 Num::Mp(_) => n.clone(),
+                // (an element of RealField(p), as Sage's real(); with a zero
+                // imaginary part the number itself, as Sage's real numeric)
+                Num::Mpc(z) if z.im.is_zero() => n.clone(),
+                Num::Mpc(z) => Num::mp(z.re.clone()),
             }))
         }
         Fun::ImagPart => {
@@ -617,6 +627,9 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
                 Num::Float(_, b, k) => Num::Float(*b, 0.0, k.to_real()),
                 // (an exact 0, as Sage: imag_part(SR(RealField(100)(2))) is 0)
                 Num::Mp(_) => Num::zero(),
+                // (the exact 0 for a zero one, as Sage's real numeric)
+                Num::Mpc(z) if z.im.is_zero() => Num::zero(),
+                Num::Mpc(z) => Num::mp(z.im.clone()),
             }))
         }
         Fun::Arg => {
