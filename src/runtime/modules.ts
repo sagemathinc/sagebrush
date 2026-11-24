@@ -441,16 +441,18 @@ newBuiltinModule("sys", (m) => {
   // budgets that must scale with it (a matrix over a field is refused
   // before it is built, not by the heap running out): heapLimit()
   m._sagebrush_heap_limit = heapLimit();
-  // the live heap now, in bytes: V8's used_heap_size after a full
-  // collection (before one it counts garbage too, and varied by 25 MB from
-  // run to run), for a budget taken from what is free rather than from the
-  // whole limit (lib/_magma.py's comprehension limit, which calls it once).
-  // None where the host has no V8 heap statistics or can't collect (the
-  // browser, Bun, Deno)
+  // the live heap now, in bytes: V8's used_heap_size after two full
+  // collections (before one it counts garbage too, and varied by 25 MB from
+  // run to run; after one it still held 0.7 to 2.1 MB that a second frees,
+  // and its run-to-run spread was 1.3 MB against 0.3 MB after two, with
+  // rare 7-8 MB outliers: a load heap over its budget in CI), for a budget
+  // taken from what is free rather than from the whole limit (lib/_magma.py's
+  // comprehension limit, which calls it once).  None where the host has no
+  // V8 heap statistics or can't collect (the browser, Bun, Deno)
   m._sagebrush_heap_used = builtin(() => {
     try {
-      // (Node only, and only where the collection ran: gc.ts)
-      if (!fullGc()) return null;
+      // (Node only, and only where the collections ran: gc.ts)
+      if (!fullGc() || !fullGc()) return null;
       const v8 = (globalThis as any).process.getBuiltinModule("node:v8");
       const n = v8.getHeapStatistics().used_heap_size;
       return typeof n === "number" && n > 0 ? Math.floor(n) : null;
@@ -459,7 +461,7 @@ newBuiltinModule("sys", (m) => {
     }
   }, "_sagebrush_heap_used");
   // the external memory now (ArrayBuffer backing stores: bytes, typed arrays), in bytes, read
-  // without a collection of its own: right after _sagebrush_heap_used() (its full collection),
+  // without a collection of its own: right after _sagebrush_heap_used() (its full collections),
   // the two are the live total (the interrupt matrix's leak measure, web/test-interrupt-matrix.mjs).
   // None where the host has neither figure (the browser, Bun, Deno)
   m._sagebrush_heap_external = builtin(() => {

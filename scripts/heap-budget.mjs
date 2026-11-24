@@ -3,7 +3,7 @@
 // once it has loaded, before a script runs.  What is left is the script's,
 // and lib/_magma.py's comprehension bound _COLLECT_MAX is taken from it:
 // (96 MiB - used, rounded up to a MiB) / _COLLECT_COST, used being V8's
-// used_heap_size after a full collection at the end of _magma's import
+// used_heap_size after two full collections at the end of _magma's import
 // (_magma._COLLECT_USED).  Every feature that loads with Magma mode grows
 // it a little (F2's finite fields: about 0.5 MB), so it is checked here,
 // like the core's bytes in size-budget.json:
