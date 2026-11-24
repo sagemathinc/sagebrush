@@ -737,6 +737,10 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   // (a numeric bibliography keeps the page's own column)
   const hn = new Engine().update("\\documentclass{article}\n\\begin{document}\n\\cite{a}\n\\begin{thebibliography}{9}\n\\bibitem{a} A.\n\\end{thebibliography}\n\\end{document}\n").chunks.join("");
   check("bib-label-column-numeric", /<ol class="bib">/.test(hn), /<ol class="bib"[^>]*>/.exec(hn)?.[0]);
+  // (the {widest} argument alone widens it: {abcd999} with numeric labels)
+  const hw = new Engine().update("\\documentclass{article}\n\\begin{document}\n\\cite{a}\n\\begin{thebibliography}{abcd999}\n\\bibitem{a} A.\n\\end{thebibliography}\n\\end{document}\n").chunks.join("");
+  const pw = /<ol class="bib" style="padding-left:(\d+\.\d+)em">/.exec(hw);
+  check("bib-label-column-widest-argument", pw && +pw[1] >= 4.5, /<ol class="bib"[^>]*>/.exec(hw)?.[0]);
 }
 
 // ---- source position markers: each main-file line is marked at most once (a resume inside an \input that a main
