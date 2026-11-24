@@ -1,13 +1,14 @@
 // Build the Sagebrush engines (engine/web: modular symbols, a_p, ...) for
 // wasm32 and write wasm/sagebrush-engine.wasm (and engine/nd's wasm/sagebrush-nd.wasm, scripts/build-nd.mjs, the PNG module's
-// wasm/sagebrush-raster.wasm, scripts/build-raster.mjs, and the multiprecision core's wasm/sagebrush-mp.wasm,
-// scripts/build-mp.mjs).  Their sha256 and length are pinned in wasm/pins.json, and the published
+// wasm/sagebrush-raster.wasm, scripts/build-raster.mjs, the multiprecision core's wasm/sagebrush-mp.wasm,
+// scripts/build-mp.mjs, and the decision-tree kernel's wasm/sagebrush-skltree.wasm, scripts/build-skltree.mjs).  Their sha256 and length are pinned in wasm/pins.json, and the published
 // modules are fetched by those pins (scripts/wasm-fetch.mjs), so building sagebrush does not need Rust.  Run: node scripts/build-engine.mjs
 import { execFileSync } from "node:child_process";
 import { installWasm } from "./install-engine-wasm.mjs";
 import { buildNd } from "./build-nd.mjs";
 import { buildRaster } from "./build-raster.mjs";
 import { buildMp } from "./build-mp.mjs";
+import { buildSkltree } from "./build-skltree.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
@@ -29,3 +30,5 @@ console.log(`nd: ${buildNd(join(target, "nd"))} bytes`);
 console.log(`raster: ${buildRaster(join(target, "raster"))} bytes`);
 // (and the multiprecision core, engine/mp, likewise held to its source)
 console.log(`mp: ${buildMp(join(target, "mp"))} bytes`);
+// (and the decision-tree kernel, engine/skltree, likewise held to its source)
+console.log(`skltree: ${buildSkltree(join(target, "skltree"))} bytes`);

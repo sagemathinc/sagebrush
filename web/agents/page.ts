@@ -12,7 +12,10 @@
 import "../workspace/pair-link";
 import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
-import { colorBlock } from "./code-color";
+import { blockLang, colorBlock } from "./code-color";
+import { drawTokens, tokensOf } from "../code/tokens";
+import { langOf } from "../code/langs";
+import { modeKey, modeOf, rememberMode, type DocMode } from "../doc-mode";
 import { runningTurn, type Artifact, type Thread, type Turn, type UserEntry } from "../workspace/agent-chat/events";
 import { ChatSession } from "../workspace/agent-chat/session";
 import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, diffHtml, mirrorSectionNode } from "../workspace/agent-chat/view";
@@ -58,16 +61,6 @@ const LATEX_URL = new URL("../sagebrush-latex.js", import.meta.url).href;
 const STORE = "sagebrush-agents-preview-v1";
 // (the log mirror's cursors, by conversation: local and non-secret, M2)
 const MIRROR_CURSORS = "sagebrush-agents-mirror-v1";
-// (Open in Sagebrush: the file's own page, as the File menu opens it (web/workspace/entry-url.ts), by the entry's id,
-// found when the link is drawn; hidden for a file with no page of its own)
-function openFull(path: string): HTMLAnchorElement {
-  const a = Object.assign(document.createElement("a"), { className: "open-full", target: "_blank", rel: "noopener", textContent: "Open in Sagebrush", hidden: true });
-  void workspace?.stat(path).then((e) => {
-    const url = e && entryUrl(e);
-    if (url) Object.assign(a, { href: url, hidden: false });
-  }, () => {});
-  return a;
-}
 // The composer's draft, by chat, in this browser (as CoCalc keeps one, #1615): kept as it is typed, back when its chat is
 // shown again (after another chat, Files or a reload), gone once sent. One localStorage record; each chat's draft is
 // written alone into the record as read then, so another tab's drafts of other chats stay. Bounded, so the chats' own
@@ -670,10 +663,23 @@ function renderArtifacts() {
     const refocus = had ? (had.dataset.tab !== undefined ? `[data-tab="${CSS.escape(had.dataset.tab)}"]` : had.id ? `#${had.id}` : null) : null;
     head.innerHTML =
       `<div class="tabs">${tabs}</div>` +
+      `<a class="open-full" id="open-main" target="_blank" rel="noopener" hidden title="Open in Sagebrush, in a new tab">Open ↗</a>` +
       `<button class="icon" id="copy" title="Copy">⧉</button>` +
       `<button class="icon" id="full" title="${fullscreen ? "Exit full screen" : "Full screen"}">${fullscreen ? "⤡" : "⤢"}</button>` +
       `<button class="icon" id="close" title="Close">✕</button>`;
     for (const t of head.querySelectorAll<HTMLButtonElement>("[data-tab]")) t.onclick = () => ((openArtifact = t.dataset.tab!), renderArtifacts());
+    // (Open: the artifact's file on its own page in Sagebrush, as the File menu opens it (web/workspace/entry-url.ts), in a
+    //  new tab, so this page and its agent stay; found by the file's id when the head is drawn, and none for a file
+    //  with no page of its own, #1614)
+    const open = $<HTMLAnchorElement>("#open-main", head);
+    if (a.path && workspace)
+      void workspace.stat(a.path).then((e) => {
+        const url = e && entryUrl(e);
+        if (url && open.isConnected) {
+          Object.assign(open, { href: url, hidden: false });
+          open.setAttribute("aria-label", `Open ${a.title} in Sagebrush (a new tab)`);
+        }
+      }, () => {});
     $("#full", head).onclick = () => ((fullscreen = !fullscreen), renderArtifacts());
     $("#close", head).onclick = async () => {
       if (!(await mayClosePane(thread.id)) || current().id !== thread.id) return;
@@ -721,7 +727,6 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
   if (a.kind === "notebook" && a.path && workspace) {
     h.el.innerHTML = `<div class="file-path">${esc(a.path)} <span class="saved"></span> </div><div class="file-body"></div>`;
     const saved = $(".saved", h.el);
-    $(".file-path", h.el).append(openFull(a.path));
     const ui: NotebookUi = {
       saved: (t) => (saved.textContent = t),
       // (kept with this host, shown when it is the host shown: a hidden notebook's warning waits for it)
@@ -789,7 +794,7 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
   if (a.path && workspace && __SB_LATEX__ && __SB_LATEX_HOSTS__.includes(location.hostname) && /\.tex$/i.test(a.path)) {
     const head = document.createElement("div"), body = document.createElement("div");
     head.className = "file-path";
-    head.append(a.path + " ", openFull(a.path));
+    head.append(a.path);
     body.className = "file-body";
     h.el.replaceChildren(head, body);
     const f = mountTexFrame(a.path, body);
@@ -842,8 +847,13 @@ async function keepFileCopy(path: string, text: string, signal?: AbortSignal): P
 }
 type Released = { ok: true } | { ok: false; why: string };
 type FileHost = { text: () => string; flush: () => Promise<void>; release: () => Promise<Released>; dispose: () => Promise<void>; download: () => { name: string; text: string; type: string } | null };
+// (a code or text file's colours, as the code page's (web/code/tokens.ts): up to this many characters; plain above)
+const FILE_COLOR_MAX = 256 * 1024;
 function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost {
   const path = a.path!;
+  // (✎ Edit / View, before the status: shown for a code or text file, below)
+  const toggle = Object.assign(document.createElement("button"), { type: "button", className: "mode-toggle", hidden: true });
+  saved.before(toggle);
   let alive = true;
   let open = true; // (this host's writer: closed at release, after which no write of its is admitted, ART-C4)
   let rev = -1; // (the revision the shown text is based on: known before anything is written)
@@ -891,9 +901,6 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
   };
   say("Loading…");
   const tex = /\.tex$/i.test(path);
-  // (the file in Sagebrush, on its own page: a code or text file's (/?code=), a .tex file's where this build has no
-  //  LaTeX editor here; a file with no page of its own gets no link, openFull)
-  if (!tex || !__SB_LATEX__) saved.after(" ", openFull(path));
   type Latex = { mountEditor?: (root: HTMLElement, o: { text: string; onChange?(t: string): void; layout?: "split" | "preview" }) => { getText(): string; destroy(): void } };
   const latexMod: Promise<Latex | null> = tex && __SB_LATEX__ ? import(/* @vite-ignore */ LATEX_URL).catch(() => null) : Promise.resolve(null);
   // (the file as it is now: the agent may have written it again since this artifact)
@@ -927,13 +934,60 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
         latest = () => ed.getText();
         destroyEditor = () => ed.destroy();
       } else {
-        const ta = document.createElement("textarea");
-        ta.className = "code-edit";
-        ta.spellcheck = false;
-        ta.value = text;
-        ta.oninput = () => changed(ta.value);
-        box.append(ta);
-        latest = () => ta.value;
+        // (code and text: in colour by its language, read only, with ✎ Edit to write in it here, the colours behind the
+        //  text as it is typed; opened as the person last left this file, View by default, as the code page opens it
+        //  (web/doc-mode.ts), #1618)
+        const lang = langOf(path) ?? blockLang(text, /\.([^./]+)$/.exec(path)?.[1] ?? "");
+        const paint = (el: HTMLElement, t: string) => (t.length <= FILE_COLOR_MAX ? drawTokens(el, tokensOf(t, lang)) : (el.textContent = t));
+        const key = fid ? modeKey("file", fid) : null;
+        let mode: DocMode = key ? modeOf(key) : "view";
+        const view = Object.assign(document.createElement("pre"), { className: "code code-view" });
+        const wrap = Object.assign(document.createElement("div"), { className: "code-wrap" });
+        const hl = Object.assign(document.createElement("pre"), { className: "code code-hl" });
+        hl.setAttribute("aria-hidden", "true");
+        const ta = Object.assign(document.createElement("textarea"), { className: "code-edit", spellcheck: false, wrap: "off" });
+        ta.setAttribute("aria-label", path);
+        wrap.append(hl, ta);
+        // (the colours end where the field's text does, short of its scrollbars, and scroll with it)
+        const fit = () => {
+          hl.style.right = `${ta.offsetWidth - ta.clientWidth}px`;
+          hl.style.bottom = `${ta.offsetHeight - ta.clientHeight}px`;
+          hl.scrollTop = ta.scrollTop;
+          hl.scrollLeft = ta.scrollLeft;
+        };
+        ta.oninput = () => {
+          paint(hl, ta.value + "\n");
+          fit();
+          changed(ta.value);
+        };
+        ta.onscroll = fit;
+        // (and again when the field's size changes: a tab shown, full screen, the window)
+        new ResizeObserver(fit).observe(ta);
+        const show = () => {
+          // (its label says what it does: no aria-pressed beside it, which would say the opposite)
+          toggle.textContent = mode === "edit" ? "View" : "✎ Edit";
+          toggle.title = mode === "edit" ? "Back to reading it" : "Edit it here (saved as you type)";
+          if (mode === "edit") {
+            ta.value = text;
+            paint(hl, text + "\n");
+            box.replaceChildren(wrap);
+            fit();
+          } else {
+            paint(view, text);
+            box.replaceChildren(view);
+          }
+        };
+        toggle.hidden = false;
+        toggle.onclick = () => {
+          // (not while the pane closes: its text is frozen then)
+          if (guard !== "open") return;
+          mode = mode === "edit" ? "view" : "edit";
+          if (key) rememberMode(key, mode);
+          show();
+          if (mode === "edit") ta.focus();
+        };
+        latest = () => (mode === "edit" ? ta.value : text);
+        show();
       }
     },
     () => {

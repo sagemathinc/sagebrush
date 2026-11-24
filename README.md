@@ -411,7 +411,7 @@ is `pnpm-lock.yaml`; `npm ci` does not apply) and bun:
 
 ```sh
 pnpm install --frozen-lockfile        # seconds with a warm store
-node scripts/wasm-fetch.mjs           # the four WebAssembly modules wasm/pins.json names (or build them: next line)
+node scripts/wasm-fetch.mjs           # the five WebAssembly modules wasm/pins.json names (or build them: next line)
 node scripts/build-engine.mjs         # the Rust engine as WebAssembly (35 s on 16 cores)
 pnpm run build:cli                    # build/cli/pyjs.cjs, the single-file CLI (a few seconds)
 bun web/build.ts                      # the notebook page in web/dist (about 17 s)

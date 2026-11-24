@@ -1,0 +1,72 @@
+"""engine/skltree's primitive mutation controls (run: python3 -I engine/skltree/oracle/mutants.py): each mutant must make `cargo test -p sagebrush-skltree` fail; the file is restored after."""
+import subprocess, sys
+
+import os
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+MUTANTS = [
+    ("insertion below 17, not 16 (2-way)", "skltree/src/sort.rs", "fn introsort_2way<T: Value>(values: &mut [T], indices: &mut [usize], mut lo: usize, mut n: usize, mut maxd: i64) {\n    while n > 15 {", "fn introsort_2way<T: Value>(values: &mut [T], indices: &mut [usize], mut lo: usize, mut n: usize, mut maxd: i64) {\n    while n > 16 {"),
+    ("insertion below 17, not 16 (3-way)", "skltree/src/sort.rs", "fn introsort_3way<T: Value>(values: &mut [T], indices: &mut [usize], mut lo: usize, mut n: usize, mut maxd: i64) {\n    while n > 15 {", "fn introsort_3way<T: Value>(values: &mut [T], indices: &mut [usize], mut lo: usize, mut n: usize, mut maxd: i64) {\n    while n > 16 {"),
+    ("2-way where 3-way is asked", "skltree/src/sort.rs", "    if use_three_way_partition {\n        introsort_3way", "    if !use_three_way_partition {\n        introsort_3way"),
+    ("a stable sort", "skltree/src/sort.rs", "    if n == 0 {\n        return;\n    }\n    // (`maxd", "    if n == 0 {\n        return;\n    }\n    if use_three_way_partition {\n        let mut p: Vec<(T, usize)> = values[..n].iter().copied().zip(indices[..n].iter().copied()).collect();\n        p.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());\n        for (k, (v, i)) in p.into_iter().enumerate() {\n            values[k] = v;\n            indices[k] = i;\n        }\n        return;\n    }\n    // (`maxd"),
+    ("depth limit one deeper", "skltree/src/sort.rs", "let maxd = 2 * i64::from(", "let maxd = 1 + 2 * i64::from("),
+    ("median3 at (n - 1) / 2", "skltree/src/sort.rs", "let (a, b, c) = (values[lo], values[lo + n / 2], values[lo + n - 1]);", "let (a, b, c) = (values[lo], values[lo + (n - 1) / 2], values[lo + n - 1]);"),
+    ("inplace_median3's last swap skipped", "skltree/src/sort.rs", "        swap(values, indices, lo + n - 1, lo + pivot_idx);\n        if values[lo] > values[lo + n - 1] {\n            swap(values, indices, lo, lo + n - 1);\n        }", "        swap(values, indices, lo + n - 1, lo + pivot_idx);"),
+    ("heapsort's sift with <= (ties move)", "skltree/src/sort.rs", "if child < end && values[lo + maxind] < values[lo + child] {", "if child < end && values[lo + maxind] <= values[lo + child] {"),
+    ("XorShift >> 16", "skltree/src/rng.rs", "*seed ^= *seed >> 17;", "*seed ^= *seed >> 16;"),
+    ("no DEFAULT_SEED for 0", "skltree/src/rng.rs", "    if *seed == 0 {\n        *seed = DEFAULT_SEED;\n    }\n    *seed ^=", "    *seed ^="),
+    ("modulo 2^31 - 1", "skltree/src/rng.rs", "*seed % (RAND_R_MAX + 1)", "*seed % RAND_R_MAX"),
+    ("FEATURE_THRESHOLD = 0", "skltree/src/partition.rs", "pub const FEATURE_THRESHOLD: f32 = 1e-7;", "pub const FEATURE_THRESHOLD: f32 = 0.0;"),
+    ("FEATURE_THRESHOLD added in float64", "skltree/src/partition.rs", "while p < end_non_missing && self.feature_values[p] <= self.feature_values[p - 1] + FEATURE_THRESHOLD {", "while p < end_non_missing && f64::from(self.feature_values[p]) <= f64::from(self.feature_values[p - 1]) + 1e-7 {"),
+    ("the final partition compared in float32", "skltree/src/partition.rs", "f64::from(current_value) <= threshold }", "current_value <= threshold as f32 }"),
+    ("the missing tail reversed", "skltree/src/partition.rs", "        t.finish();\n        let n = self.end - self.start - n_missing;", "        t.finish();\n        self.samples[self.end - n_missing..self.end].reverse();\n        let n = self.end - self.start - n_missing;"),
+    ("N1: entropy without the empty-class guard", "skltree/src/criterion.rs", "                        if count > 0.0 {\n                            let count_k = count / weight;\n                            total -= count_k * log(count_k);\n                        }", "                        {\n                            let count_k = count / weight;\n                            total -= count_k * log(count_k);\n                        }"),
+    ("N2: the split's children from the search-time sums", "skltree/src/splitter.rs", "            self.criterion.reset();\n            self.criterion.update(y, sw, &self.part.samples, best.pos);\n            let (impurity_left", "            let (impurity_left"),
+    ("N3: samples sorted at node entry", "skltree/src/splitter.rs", "        self.start = start;\n        self.end = end;\n        self.criterion.init(", "        self.start = start;\n        self.end = end;\n        self.part.samples[start..end].sort_unstable();\n        self.criterion.init("),
+    ("N4: missing_go_to_left by >=", "skltree/src/splitter.rs", "{ n_left > n_right }", "{ n_left >= n_right }"),
+    (">= on the proxy improvement", "skltree/src/splitter.rs", "if current_proxy_improvement > best_proxy_improvement {", "if current_proxy_improvement >= best_proxy_improvement {"),
+    ("the threshold in float32", "skltree/src/splitter.rs", "f64::from(fv[p_prev]) / 2.0 + f64::from(fv[p]) / 2.0", "f64::from(fv[p_prev] / 2.0 + fv[p] / 2.0)"),
+    ("the MSE proxy negated", "skltree/src/criterion.rs", "proxy_left / self.weighted_n_left + proxy_right / self.weighted_n_right", "-(proxy_left / self.weighted_n_left + proxy_right / self.weighted_n_right)"),
+    ("update always forward", "skltree/src/criterion.rs", "if new_pos - pos <= self.end - new_pos {", "if pos <= new_pos {"),
+    ("Gini as (sq / w) / w", "skltree/src/criterion.rs", "total += 1.0 - sq_count / (weight * weight);", "total += 1.0 - sq_count / weight / weight;"),
+    ("the left child pushed first", "skltree/src/tree.rs", "            stack.push(StackRecord { start: split.pos, end: r.end,", "            stack.push(StackRecord { start: r.start, end: split.pos, depth: r.depth + 1, parent: node_id as i64, is_left: true, impurity: split.impurity_left, n_constant_features: parent_record.n_constant_features });\n            stack.push(StackRecord { start: split.pos, end: r.end,"),
+    ("no EPSILON in the pure-node test", "skltree/src/tree.rs", "is_leaf = is_leaf || parent_record.impurity <= EPSILON;", "is_leaf = is_leaf || parent_record.impurity <= 0.0;"),
+    ("the constant features not restored", "skltree/src/splitter.rs", "        self.features[..n_known_constants].copy_from_slice(&self.constant_features[..n_known_constants]);\n", ""),
+    ("apply compared in float32", "skltree/src/tree.rs", "} else if f64::from(v) <= tree.threshold[node] {", "} else if v <= tree.threshold[node] as f32 {"),
+    ("all samples kept (zero weights too)", "skltree/src/splitter.rs", "                Some(sw) if sw[i] != 0.0 => samples.push(i),", "                Some(_) => samples.push(i),"),
+    ("swap_array_slices as rotate_right", "skltree/src/partition.rs", "    let n_rev = end - start - n;\n", "    let n_rev = end - start - n;\n    if n_rev > 0 && n > 0 { array[start..end].rotate_right(n); return; }\n"),
+]
+
+
+def run():
+    r = subprocess.run(["cargo", "test", "-q", "-p", "sagebrush-skltree"], cwd=ROOT, capture_output=True, text=True)
+    return r.returncode, r.stdout + r.stderr
+
+
+rc, _ = run()
+assert rc == 0, "the unmutated tests must pass first"
+fails = 0
+for name, path, old, new in MUTANTS:
+    p = f"{ROOT}/{path}"
+    src = open(p).read()
+    if src.count(old) != 1:
+        print(f"SETUP {name}: the text to mutate occurs {src.count(old)} times")
+        fails += 1
+        continue
+    open(p, "w").write(src.replace(old, new))
+    try:
+        rc, out = run()
+    finally:
+        open(p, "w").write(src)
+    red = [l for l in out.splitlines() if l.endswith("FAILED") or "--- FAILED" in l]
+    if rc == 0:
+        fails += 1
+        print(f"SURVIVED {name}")
+    elif "error[" in out and not red:
+        fails += 1
+        print(f"NO-BUILD {name}: {[l for l in out.splitlines() if 'error' in l][:2]}")
+    else:
+        print(f"killed   {name}: {', '.join(sorted(set(l.split()[0] for l in red)))[:200]}")
+rc, _ = run()
+assert rc == 0, "restored tests must pass"
+print("all killed" if fails == 0 else f"{fails} not killed")
+sys.exit(1 if fails else 0)

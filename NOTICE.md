@@ -303,6 +303,53 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
+### scikit-learn (BSD 3-Clause)
+
+`engine/skltree` (`src/rng.rs`, `src/sort.rs`, `src/partition.rs`,
+`src/criterion.rs`, `src/splitter.rs`, `src/tree.rs`) ports scikit-learn
+1.9.1's C-level tree code line by line, to preserve scikit-learn's random
+draws, sorting order, dense partitioning, split criteria and tree building
+for the decision-tree kernel: the XorShift `our_rand_r` and `rand_int`
+(`sklearn/utils/_random.pxd`, `sklearn/tree/_utils.pyx`), `simultaneous_sort`
+(`sklearn/utils/_sorting.pyx`), the dense partitioner
+(`sklearn/tree/_partitioner.pyx`), the Gini, entropy and squared-error
+criteria (`sklearn/tree/_criterion.pyx`), the best splitter
+(`sklearn/tree/_splitter.pyx`), and the depth-first builder, `apply` and the
+feature importances (`sklearn/tree/_tree.pyx`).  Each ported file names the
+files and functions it follows.
+
+```
+BSD 3-Clause License
+
+Copyright (c) 2007-2026 The scikit-learn developers.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of the copyright holder nor the names of its
+  contributors may be used to endorse or promote products derived from
+  this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
 ### xsf (BSD 3-Clause, SciPy's special-function library)
 
 `lib/scipy/special.py` ports two functions of xsf
