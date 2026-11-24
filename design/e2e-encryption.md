@@ -320,12 +320,18 @@ None of the cross-account part is built: documents' access lists are owner-only 
 
 Assignment files launched from a school's LMS (LTI) aren't end-to-end encrypted. The school is the data controller for them, as it is for any LMS submission, and FERPA may require the school to be able to get at a student's work.
 - **The class store:** the files live in a store the server can read, filed under (course, assignment, student).
-- **Identity comes from the LTI launch.** There is no sync and no recovery code for class work.
+- **Identity comes from the LTI launch, and only from it** (SEC):
+  - the (course, assignment, student) tuple is derived only from the verified launch's immutable claims: the platform and deployment, the context, the resource link and the learner's subject;
+  - **access:** a learner reaches only their own rows; an instructor or grader reaches only the rows of the context and resource the launch names; any other tuple is refused;
+  - only an authenticated launch enters class mode, which stays labelled for as long as the file is open. **A file is never silently moved out of end-to-end encryption.**
+- There is no sync and no recovery code for class work.
 - **Saving and resuming:** partial work saves to the class store. Relaunching the assignment from the LMS on another computer resumes it.
 - **Submitting** sends the grade, or a link, back through LTI Assignment and Grade Services. The instructor and graders read the file in the class store.
+  - **Delivery is bound** to the verified platform, deployment, context, resource link and learner.
+  - **A link requires authentication.** It's never a durable bearer URL to plaintext.
 - **Said plainly:** the editor shows that a file is class work and is not end-to-end encrypted.
 - **A copy into the student's own files** is the student's, and is end-to-end encrypted like anything else they own.
-- **The threat model differs:** a breach, an insider or a legal demand can read class-store files, as with the LMS itself (§8).
+- **The threat model differs:** a breach, an insider or a legal demand can read class-store files, as with the LMS itself. **The server, or an insider, can also alter, delete or roll back class work, and could change a grade it sends through AGS.** Nothing in this design detects that (§8).
 
 ## 6. Agents
 
@@ -381,7 +387,7 @@ Each PR gets SEC review, rows and mutants. PRs 0, 1 and 2 can start at once. The
 | **A malicious server** (changed Worker code) | metadata | omit, delay, roll back, or show devices different histories (equivocation); withhold an inbox rotation from senders, up to the record's validity (§2) | forge or alter ops, chain entries or shares, since they are signed |
 | **A malicious origin serving the web app** | everything a page can read | ship JavaScript that uses the keys while the page is open, and sends plaintext away | — this is the limit of end-to-end encryption in any web app |
 | A stolen unlocked device | what that device can decrypt | act as the person until it's removed | read what is written after its removal |
-| A breach, an insider or a legal demand, for class work (§5.2) | the class-store files themselves | read them, as with an LMS submission | — this is the stated exception |
+| A breach, an insider or a legal demand, for class work (§5.2) | the class-store files themselves | read them, as with an LMS submission; the server or an insider can also alter, delete or roll back them, and change a grade sent through AGS | — this is the stated exception |
 | Every device and the recovery code lost | — | — | the person's data can't be recovered by anyone |
 
 **Integrity, plainly (SEC):**
