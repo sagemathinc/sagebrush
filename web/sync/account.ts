@@ -569,6 +569,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
 
   /** The sealed log's cap (LIMITS.sealedLog; lowered by a test). */
   private sealedCap: number = LIMITS.sealedLog;
+  /** Tests only: a hold between a sealed message's checks and its commit (ms). */
+  private sealedHold = 0;
   /**
    * Sealed ops from one device (design/e2e-encryption.md §4, §4.1; e2e PR 5b), decided as ops() decides plaintext ones:
    * in dseq order with no gaps, once each, a refusal kept with its code.  The server reads only each op's form, the key
@@ -595,6 +597,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const wait = this.opsRate.take(list.length);
     if (wait) throw new SyncError("rate", "too many ops", { retry_after: wait });
     const next0 = Number(this.one("SELECT next_dseq FROM devices WHERE device = ?", device)!.next_dseq);
+    // (this sync incarnation: "Delete my synced data" ends it while the key chain stays, so it is signed, and the
+    // commit requires it unchanged)
+    const gen = Number(this.get("generation"));
     const fresh = (raw: unknown, next: number) => {
       const d = (raw as { dseq?: unknown })?.dseq;
       return isNat(d) && d >= next;
@@ -617,14 +622,20 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         continue;
       }
       const key = await store.currentSigner(op.signer);
-      const msg = await sealedOpMessage({ account: store.account, generation: head.generation, head: head.hash, device, dseq: op.dseq, env: op.env, adds: op.adds, releases: op.releases, signer: op.signer });
+      const msg = await sealedOpMessage({ account: store.account, syncGeneration: gen, chainGeneration: head.generation, head: head.hash, device, dseq: op.dseq, env: op.env, adds: op.adds, releases: op.releases, signer: op.signer });
       if (!key || !(await verifyStrict(key, msg, unb64(op.sig, 64)))) {
         throw new SyncError("forbidden", "a sealed op not signed by a current device of this account's key chain", { dseq: op.dseq, signer: op.signer });
       }
     }
+    // (tests only: held between the checks and the commit, as a slow verification would be)
+    if (testMode(this.env) && this.sealedHold > 0) await new Promise((r) => setTimeout(r, this.sealedHold));
     return this.ctx.storage.transactionSync(() => {
+      // (what was checked is still so: this account takes writes, in the same sync generation (a deletion, or one that
+      // finished and was followed by turning sync on again, ends what the checks were for), the head (a removal during
+      // the checks would change it), and this device's order)
+      this.admit(att.account, true);
+      if (Number(this.get("generation")) !== gen) throw new SyncError("conflict", "this account's sync changed meanwhile", { reason: "generation" });
       let next = Number(this.one("SELECT next_dseq FROM devices WHERE device = ?", device)!.next_dseq);
-      // (what was checked is still so: the head (a removal during the checks would change it), and this device's order)
       const now = store.current();
       if (!now || now.hash !== head.hash || now.generation !== head.generation) {
         throw new SyncError("conflict", "the key chain moved; seal again under its current head", { reason: "stale_head", head: now });
@@ -2583,9 +2594,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Tests only: shift the mailbox's clock, and count the E2E rows. */
-  async testE2E(a: { sealedCap?: number; shift?: number; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number }; corrupt?: "state_hash" | "hash"; keyrings?: "drop-last" | "swap-last" | "stray-first" }): Promise<Record<string, number> | null> {
+  async testE2E(a: { sealedCap?: number; sealedHold?: number; shift?: number; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number }; corrupt?: "state_hash" | "hash"; keyrings?: "drop-last" | "swap-last" | "stray-first" }): Promise<Record<string, number> | null> {
     if (!testMode(this.env)) return null;
     if (a.sealedCap !== undefined) this.sealedCap = a.sealedCap;
+    if (a.sealedHold !== undefined) this.sealedHold = a.sealedHold;
     if (a.shift !== undefined) this.e2eShift = a.shift;
     if (a.failCommit !== undefined) this.e2eFailCommit = a.failCommit;
     if (a.hold !== undefined) this.e2eHold = a.hold;

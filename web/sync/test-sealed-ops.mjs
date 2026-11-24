@@ -48,6 +48,7 @@ const PURGE_KEY = "purge-key";
 const A = "5ea1ed00-0001-4e2e-8e2e-e2e2e2e2e201"; // the main account
 const N = "5ea1ed00-0002-4e2e-8e2e-e2e2e2e2e202"; // no key chain yet
 const R = "5ea1ed00-0003-4e2e-8e2e-e2e2e2e2e203"; // read-only
+const P = "5ea1ed00-0004-4e2e-8e2e-e2e2e2e2e204"; // the sync generation: deleting the synced data, and after
 const SITE = "https://sagebrush.test";
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
@@ -56,7 +57,7 @@ const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled:
 const cocalc = async () => Response.json(plan);
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
 const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } } });
-const listed = [A, N, R].join(",");
+const listed = [A, N, R, P].join(",");
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_E2E: "1", SYNC_AGENT: "1", GRANT_TAG_KEY: "grant-tag-key", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("4101") },
@@ -234,13 +235,24 @@ async function hello(s, device) {
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 const putBlob = (s, bytes) => at(SITE, `/api/sync/v1/blob/${sha(bytes)}`, { method: "PUT", headers: { cookie: s, origin: SITE, "content-type": "application/octet-stream", "x-sb-ct-sha256": sha(bytes) }, body: bytes });
 /** A sealed op as a device makes it: an envelope (random bytes: the server never reads it), signed by E2E device `d`
- * of `W` under chain state `st`, for sync device `sdev` at `dseq`. */
+ * of `W` under chain state `st`, for sync device `sdev` at `dseq`, in sync generation `extra.gen` (1 unless said). */
 async function signed(W, d, st, sdev, dseq, extra = {}) {
   const env = random(48), adds = extra.adds ?? [], releases = extra.releases ?? [];
-  const msg = await sealedOpMessage({ account: W.ctx.account, generation: st.generation, head: st.head, device: sdev, dseq, env, adds, releases, signer: d.id });
+  const msg = await sealedOpMessage({ account: W.ctx.account, syncGeneration: extra.gen ?? 1, chainGeneration: st.generation, head: st.head, device: sdev, dseq, env, adds, releases, signer: d.id });
   return { dseq, head: st.head, env: Buffer.from(env).toString("base64"), adds, releases, signer: d.id, sig: b64(await d.sign.sign(msg)) };
 }
 const noSig = (op) => ({ ...op, sig: "A".repeat(86) });
+
+await section("what a device signs: a fixed vector, written out by hand", async () => {
+  // (independent of the encoder: the domain and the canonical body are literal text here, keys in order, and the
+  // envelope's hash and the whole message's hash are pinned; only sealedOpMessage itself is under test)
+  const op = { account: "acct-fixture", syncGeneration: 3, chainGeneration: "gen-fixture", head: "A".repeat(43), device: "sync-device-fixture", dseq: 7, env: new Uint8Array([1, 2, 3]), adds: ["a".repeat(64)], releases: ["b".repeat(64)], signer: "a".repeat(26) };
+  const body = '{"account":"acct-fixture","adds":["' + "a".repeat(64) + '"],"chain_generation":"gen-fixture","device":"sync-device-fixture","dseq":7,"env":"A5BYxvLAy0ksUzsKTRTvd8wPeKvMztUofYShogEc-4E","head":"' + "A".repeat(43) + '","releases":["' + "b".repeat(64) + '"],"signer":"' + "a".repeat(26) + '","sync_generation":3}';
+  const want = Buffer.from("sagebrush.e2e.sealed-op.v1\n" + body, "utf8");
+  const got = Buffer.from(await sealedOpMessage(op));
+  ok(got.equals(want), "the signed bytes are exactly the domain, a newline and the canonical body: " + got.toString("utf8").slice(0, 120));
+  ok(createHash("sha256").update(got).digest("hex") === "22ce4fad31c32ba833b0ea7f44cadb4160dfb8c452f87a23213df21bb297ecf5", "and their SHA-256 is the pinned one");
+});
 
 await section("no key chain: sealed ops are refused for the whole message", async () => {
   const s = await enabled(N);
@@ -385,6 +397,48 @@ await section("sealed ops: signed by a current device, under the current head", 
   }
   ok(ixs?.state === "ready" && ixs.cursor === ixs.max && ixs.max === plain.ops[0].seq, "the agents' index is built past the sealed ops, through the plaintext op after them, to the log's end: " + JSON.stringify(ixs));
   ws.ws.close();
+});
+
+await section("the sync generation: an op in flight when the synced data is deleted, and a replay after", async () => {
+  const s = await enabled(P);
+  const W = account(P);
+  const g = await W.genesis();
+  ok((await post(s, P, "/api/sync/v1/e2e/chain", g.body)).status === 201, "(genesis)");
+  const dev = "sealed-dev-p001";
+  const ws = await socket(s);
+  const w = await hello(ws, dev);
+  const gen1 = (await db.prepare("SELECT generation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(P)).first())?.generation;
+  ok(gen1 === 1, "(sync generation 1)");
+  // (a signed op held between its checks and its commit; meanwhile the synced data is deleted, sync is turned on
+  // again (generation 2) and the same sync device comes back at the same dseq: the held op must not land there)
+  const held = await signed(W, g.d, g.next, dev, w.next_dseq, { gen: 1 });
+  await seam(P, { sealedHold: 12_000 });
+  const sent = Date.now();
+  const pending = ws.ask({ t: "sops", ops: [held] });
+  await new Promise((r) => setTimeout(r, 200));
+  const del = await at(SITE, "/api/sync/v1/delete", { method: "POST", headers: { cookie: s, origin: SITE, "content-type": "application/json" }, body: JSON.stringify({ confirm: "delete", generation: gen1 }) });
+  ok(del.status === 202, "(the synced data's deletion starts while the op is held)");
+  const acct = await objectOf(P);
+  ok(await until(async () => { await acct.wakeNow().catch(() => {}); return (await acct.lifecycle())?.state === null; }, 8_000), "(the deletion finishes, still within the hold)");
+  const s2 = await enabled(P);
+  const gen2 = (await db.prepare("SELECT generation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(P)).first())?.generation;
+  ok(gen2 === 2, "(sync generation 2)");
+  const ws2 = await socket(s2);
+  const w2 = await hello(ws2, dev);
+  ok(w2.next_dseq === held.dseq, `(the same sync device is back at the same dseq, ${w2.next_dseq}, before the held op's commit)`);
+  const ans = await pending;
+  // (until the hold is over and the held op's commit has run, whichever way it went)
+  await new Promise((r) => setTimeout(r, Math.max(0, sent + 13_000 - Date.now())));
+  await seam(P, { sealedHold: 0 });
+  const log2 = (await ws2.ask({ t: "pull_index", after: 0 }))?.ops ?? [];
+  ok(!Number.isInteger(ans?.ops?.[0]?.seq) && log2.every((o) => o.env !== held.env), "the held op lands in neither generation: refused at its commit, generation 2's log without it: " + JSON.stringify({ ans, log2: log2.length }));
+  try { ws.ws.close(); } catch {}
+  // (the exact generation-1 op, replayed in generation 2 at the same device and dseq; then a fresh signature)
+  const replay = await ws2.ask({ t: "sops", ops: [held] });
+  ok(replay?.code === "forbidden", "generation 1's exact signed op, replayed in generation 2 at the same device and dseq: forbidden: " + JSON.stringify(replay));
+  const fresh = await ws2.ask({ t: "sops", ops: [await signed(W, g.d, g.next, dev, w2.next_dseq, { gen: 2 })] });
+  ok(Number.isInteger(fresh?.ops?.[0]?.seq), "a fresh generation-2 signature at that dseq: accepted");
+  ws2.ws.close();
 });
 
 await section("read-only, and the switch off", async () => {
