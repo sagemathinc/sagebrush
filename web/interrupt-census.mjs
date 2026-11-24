@@ -1,6 +1,7 @@
 // The interrupt matrix's census (plan-interrupt-harness r4 §5), read from source:
 // - every exported engine entry point: engineCall's dispatch (engine/web/src/lib.rs), symCall's
-//   ops (engine/sym/src/api.rs), mpCall's ops (engine/mpoly/src/lib.rs `call`), and the
+//   ops (engine/sym/src/api.rs), mpCall's ops (engine/mpoly/src/lib.rs `call`), binCall's ops
+//   (engine/web/src/bin_ops.rs, the binary SBW1 entry point), and the
 //   WebAssembly modules the runtime instantiates, with whether each reads the interrupt flag;
 // - fingerprints the matrix must be updated for: the compiler's loop back-edge check (src/emit.ts:
 //   the emitted INTR_CHECK and every site that emits it), the runtime's poll sites per file, the
@@ -45,6 +46,12 @@ export function census() {
   // (symCall dispatches from `call` into helpers in the same file, so the whole file is read)
   const symCall = matchKeys(read("engine/sym/src/api.rs"));
   const mpCall = matchKeys(fnBody(read("engine/mpoly/src/lib.rs"), "call"));
+  // (the binary entry point's ops, engine/web/src/bin_ops.rs: its table's rows and the echelon's name)
+  const binSrc = read("engine/web/src/bin_ops.rs");
+  const binCall = uniq([
+    ...[...binSrc.matchAll(/BinOp \{ name: "([a-z_0-9]+)"/g)].map((m) => m[1]),
+    ...[...binSrc.matchAll(/^const ECHELON: &str = "([a-z_0-9]+)";/gm)].map((m) => m[1]),
+  ]);
   const runtime = readdirSync(join(ROOT, "src/runtime")).filter((f) => f.endsWith(".ts")).sort();
   const wasmModules = runtime
     .filter((f) => /WebAssembly\.(instantiate|Module|Instance)/.test(read(`src/runtime/${f}`)))
@@ -65,7 +72,7 @@ export function census() {
   const emitSites = emit.split("\n").map((l) => l.trim()).filter((l) => /\bINTR_CHECK\b/.test(l) && !/^const INTR_CHECK =/.test(l));
   const backedges = { check, valid: check != null && (Number(/INTR\[0\]\s*&\s*(\d+)\b/.exec(check)?.[1]) & 1) === 1 && /\binterrupted\(\)/.test(check), sites: emitSites.length, sha: sha(emitSites) };
   return {
-    transports: { engineCall, symCall, mpCall, wasmModules },
+    transports: { engineCall, symCall, mpCall, binCall, wasmModules },
     fingerprints: {
       backedges,
       pollSites,
