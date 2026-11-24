@@ -130,6 +130,9 @@ try {
       const name = [...who.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim()), rg = document.createRange(), t = name.textContent, i0 = t.length - t.trimStart().length; rg.setStart(name, i0); rg.setEnd(name, i0 + t.trim().length); const nr = rg.getBoundingClientRect();
       return { name: name.textContent.trim(), nameRight: nr.right, whoRight: w.right, smallRight: s.right, smallW: s.width, clip: cs.clipPath, display: cs.display, visibility: cs.visibility, smallText: sm.textContent }; })()`);
     const whole = l.smallW > 1 && l.smallRight <= l.whoRight + 0.5, hidden = l.smallW <= 1 && l.clip !== "none" && l.display !== "none" && l.visibility === "visible";
+    const cv = await ev(`(() => { const w = document.querySelector('#who'), a = getComputedStyle(w, '::after'), r = w.getBoundingClientRect(), top = document.querySelector('.top').getBoundingClientRect();
+      return { content: a.content, pos: a.position, right: a.right, pad: getComputedStyle(w).paddingRight, whoRight: r.right, howLeft: document.querySelector('#howto').getBoundingClientRect().left, topRight: top.right }; })()`);
+    ok("M-chevron-narrow", cv.content === '""' && cv.pos === "absolute" && parseFloat(cv.right) + 5 < parseFloat(cv.pad) && cv.whoRight <= cv.howLeft + 1 && cv.whoRight <= cv.topRight, "with the chat at 420 px the status's chevron is still drawn, in the status's own right padding, before the next button", cv);
     ok("L2-header-label", (whole || hidden) && l.nameRight <= l.whoRight + 0.5 && l.smallText.trim() !== "", "with the chat at 420 px the agent's name is whole, and the where-it-runs label is either whole or visually hidden (still read by screen readers), never cut", l);
   }
   for (const [id, pane] of [["L2-pane-319", 319], ["L2-pane-320", 320]]) {
@@ -424,7 +427,16 @@ try {
     await ev(`(document.querySelector('#who').click(), true)`);
     const p1 = await pop();
     ok("M-popover-open", !p0.shown && p0.expanded === "false" && p1.shown && p1.expanded === "true" && p1.below && /scripted/.test(p1.text) && p1.text.endsWith("Chats are kept in this browser only."), "the status opens its popover, under the top bar: the scripted preview, and where the chats are kept", { p0, p1 });
+    // (the chevron: always there, pointing down at rest and up while open, and still there when the status's children
+    //  are replaced, as whoText replaces them)
+    const chev = () => ev(`(() => { const a = getComputedStyle(document.querySelector('#who'), '::after'); return { content: a.content, w: a.width, border: a.borderRightWidth, transform: a.transform }; })()`);
+    const cOpen = await chev();
+    ok("M-chevron", p1.shown && cOpen.content === '""' && cOpen.w === "5px" && parseFloat(cOpen.border) > 0, "the status shows a small chevron (a pseudo-element, no text)", cOpen);
     await key("Escape");
+    const cRest = await chev();
+    await ev(`(document.querySelector('#who').replaceChildren(document.createTextNode('Claude on laptop')), true)`);
+    const cNew = await chev();
+    ok("M-chevron-states", cRest.content === '""' && cRest.transform !== cOpen.transform && cNew.content === '""' && cNew.transform === cRest.transform, "it points another way while the popover is open, and stays when the status's text is replaced", { cOpen, cRest, cNew });
     const p2 = await pop();
     ok("M-popover-escape", !p2.shown && p2.expanded === "false" && p2.focus, "Escape closes it, back to the status", p2);
     await ev(`(document.querySelector('#who').click(), true)`);
@@ -433,6 +445,29 @@ try {
     await sleep(100);
     const p3 = await pop();
     ok("M-popover-away", !p3.shown && p3.expanded === "false", "a click elsewhere closes it", p3);
+
+    // (it stays inside the window and the top bar: on a phone, after a resize while open, and beside a pane with the chat
+    //  at its 420 px; where it fits, right under the status, the control)
+    const place = () => ev(`(() => { const i = document.querySelector('#who-info').getBoundingClientRect(), w = document.querySelector('#who').getBoundingClientRect(), t = document.querySelector('.top').getBoundingClientRect();
+      return { left: Math.round(i.left), right: Math.round(i.right), whoLeft: Math.round(w.left), topLeft: Math.round(t.left), topRight: Math.round(t.right), vw: innerWidth, scroll: document.documentElement.scrollWidth, shown: !document.querySelector('#who-info').hidden }; })()`);
+    const inside = (q) => q.shown && q.left >= q.topLeft && q.right <= q.topRight && q.right <= q.vw && q.scroll <= q.vw;
+    await ev(`(document.querySelector('#who').click(), true)`);
+    const wide = await place();
+    ok("M-popover-fits", inside(wide) && wide.left === wide.whoLeft, "at 1400 px it opens right under the status (the control)", wide);
+    await size(390);
+    await sleep(400);
+    const resized = await place();
+    ok("M-popover-resize", inside(resized), "resized to 390 px while open: still inside the window, no sideways scroll", resized);
+    await fresh(390);
+    await ev(`(document.querySelector('#who').click(), true)`);
+    const phone = await place();
+    ok("M-popover-390", inside(phone), "opened at 390 px: inside the window, no sideways scroll", phone);
+    await fresh(1600);
+    await openPane();
+    await drag("sep-pane", 1600 - 931);
+    await ev(`(document.querySelector('#who').click(), true)`);
+    const tight = await place();
+    ok("M-popover-tight", inside(tight) && (await w()).chat < 421, "beside a pane, the chat at 420 px: inside the top bar", tight);
   }
   console.log(`${checks - fails}/${checks} passed${fails ? "" : ", all passed"}`);
   code = fails ? 1 : 0;
