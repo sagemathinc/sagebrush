@@ -16,6 +16,20 @@ Runtime error in elt< ... >: Bad arguments to cycle or commutator construction
 
 (2, 3)
 (1, 3)(2, 4)
+Id(D)
+(1, 2)(3, 4)
+(1, 2)(3, 4)
+Id(D)
+
+>> D!((1,5)^2);
+      ^
+Runtime error in elt< ... >: Bad arguments to cycle or commutator construction
+
+
+>> G := Sym(3); H := Sym(4); H!(G!((1,4)^2));
+                                   ^
+Runtime error in elt< ... >: Bad arguments to cycle or commutator construction
+
 (1, 3, 2)
 
 >> (1,2)^2;

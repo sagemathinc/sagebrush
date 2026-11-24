@@ -601,12 +601,14 @@ _CYCLE_CTX = []
 
 
 def _cyc_value(x):
-    """x, or the element of its context's group when x is a cycle (or a
-    product of cycles) made in one: in G!((1, 2)^2) the cycle is G's, as
-    Magma makes it (Id(G)); a cycle G doesn't have is Magma's error at its
-    "(" (G!((1, 4)^2) in Sym(3))."""
+    """x, or the permutation it is when x is a cycle (or a product of cycles)
+    made in a group's context: an element of Sym(n), n that group's degree,
+    as Magma makes it, so that the arithmetic is in Sym(n) and only G!x's
+    result is coerced into G (D!((1, 2)*(3, 4)) in DihedralGroup(4) is
+    (1, 2)(3, 4), D!((1, 2)*(1, 3)) Illegal coercion at the !); a point past
+    n is Magma's error at the cycle's "(" (G!((1, 4)^2) in Sym(3))."""
     if isinstance(x, (_MCycle, _MCycles)) and getattr(x, "_grp", None) is not None:
-        return _coerce(x._grp, x, getattr(x, "_pos", None))
+        return _coerce(_MSymGroup(x._grp.n), x, getattr(x, "_pos", None))
     return x
 
 
@@ -11401,10 +11403,11 @@ class _MSymGroup:
 
     def _magma_coerce(self, x):
         if isinstance(x, _MPerm):
-            if x.G == self:
+            if x.G is self:
                 return x
             if x.G.n == self.n:
-                return _MPerm(self, x.images)  # (a dihedral group's, of degree n)
+                # (a dihedral group's, of degree n, or an equal Sym(n)'s: G!((1, 2)^2) is G's identity, Id(G))
+                return _MPerm(self, x.images)
             raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", True)
         if isinstance(x, (MSeq, MRange)):
             # G![images]: the permutation i -> images[i], integers only
