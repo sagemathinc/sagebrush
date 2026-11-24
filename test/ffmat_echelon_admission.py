@@ -38,6 +38,10 @@ except NameError:
 import _sage_ffmat as FM
 import sagebrush._engine as EN
 
+# (these are the JSON route's cases, kept for an engine without the binary
+# entry point; the binary route's are test/ffmat_echelon_bin.py)
+FM._ECH_BIN_ENABLED = False
+
 PYJS = hasattr(sys, "_sagebrush_heap_used")
 CASE = sys.argv[1]
 P63 = 9223372036854775783  # the largest prime below 2^63: 19-digit entries

@@ -6,6 +6,7 @@ polynomials, multiplicative orders, subspaces.  Gaussian elimination over
 the field; printed as Sage prints them."""
 
 import json as _json
+import sys as _sys
 import random as _random
 
 import _sage_ff as _ff
@@ -1424,6 +1425,15 @@ def _echelon(rows, base, ncols, want_rows=True):
     """(reduced row echelon form, pivot columns, determinant factor) by
     Gauss-Jordan elimination over the field; the form is None when
     want_rows is false and the engine computed the rest."""
+    nrows = len(rows)
+    p = _ech_bin_route(base, nrows, ncols, want_rows, _ech_out_cost(base, nrows, ncols) if want_rows else 0)
+    if p:
+        res = _ech_bin_call(rows, base, nrows, ncols, p, want_rows)
+        if res is not None:
+            piv, d, words = res
+            m = _ech_rows(words, base, nrows, ncols) if want_rows else None
+            del words
+            return m, piv, _ff._elt(base, d)
     p = _engine_echelon_route(base, len(rows), ncols)
     if p:
         return _engine_echelon(rows, base, ncols, p, want_rows)
@@ -2113,6 +2123,16 @@ class FFMatrix:
         if x is not None:
             return x  # ([self | I] and its echelon form, n x 2n)
         one, zero = self._base.one(), self._base.zero()
+        base = self._base
+        p = _ech_bin_route(base, n, 2 * n, True, _ech_out_cost(base, n, n), lambda m: _ech_out_cost(base, m, m)) if n else None
+        res = _ech_bin_call((list(r) + [1 if i == j else 0 for j in range(n)] for i, r in enumerate(self._rows)), base, n, 2 * n, p, True) if p else None
+        if res is not None:
+            piv, _, words = res
+            if piv[:n] != list(range(n)) if len(piv) >= n else True:
+                raise ZeroDivisionError("input matrix must be nonsingular")
+            x = _ech_rows(words, base, n, 2 * n, n, 2 * n)
+            del words
+            return FFMatrix(base, x, n)
         aug = [r + [one if i == j else zero for j in range(n)] for i, r in enumerate(self._rows)]
         m, piv, d = _echelon(aug, self._base, 2 * n)
         if piv[:n] != list(range(n)) if len(piv) >= n else True:
@@ -2121,6 +2141,11 @@ class FFMatrix:
 
     def _kernel_basis(self):
         """A basis of {x : self x = 0} (echelonized), as lists."""
+        r, c, base = self.nrows(), self._ncols, self._base
+        p = _ech_bin_route(base, r, c, True, _ech_kernel_out(r, c), lambda n: _ech_kernel_out(n, n))
+        res = _ech_bin_call(self._rows, base, r, c, p, True) if p else None
+        if res is not None:
+            return self._kernel_basis_words(*res)
         m, piv, d = _echelon(self._rows, self._base, self._ncols)
         free = [j for j in range(self._ncols) if j not in piv]
         # (a kernel basis can be bigger than the matrix: 1 x n has n - 1
@@ -2137,6 +2162,49 @@ class FFMatrix:
         if not basis:
             return []
         em, _, _ = _echelon(basis, self._base, self._ncols)
+        return [r for r in em if any(r)]
+
+    def _kernel_basis_words(self, piv, d, words):
+        """_kernel_basis from the binary echelon's reply: only the
+        coefficient block W (k x (c - k) words: m[i][f] for the pivot rows i
+        and the free columns f) is kept from the rows; then an exact check
+        of W and the basis together before the basis is
+        built, a row at a time; then its own echelon."""
+        import array
+        c, base = self._ncols, self._base
+        k = len(piv)
+        is_piv = bytearray(c)
+        for col in piv:
+            is_piv[col] = 1
+        free = [j for j in range(c) if not is_piv[j]]
+        nf = len(free)
+        w = array.array("Q", [0]) * (k * nf)
+        for i in range(k):
+            row = words[i * c:(i + 1) * c]
+            w[i * nf:(i + 1) * nf] = array.array("Q", [row[f] for f in free])
+            del row
+        del words
+        # (W, the basis being built, one row's temporaries, the pivot flags
+        # and the free list, through the basis's lifetime)
+        need = 8 * k * nf + _ech_out_cost(base, nf, c) + (_ECH_INT_COST + 8) * c + c + (_ECH_INT_COST + 8) * nf + 4 * _ECH_HDR + _ECH_SLACK
+        bound = _ech_bound()
+        if need > bound:
+            raise _ech_refuse(base, nf, c, need, bound, True, lambda n: _ech_out_cost(base, n, n),
+                              "A kernel basis of %d vectors of %d entries over %r" % (nf, c, base))
+        _admit_size(base, nf, c)
+        if not free:
+            return []
+        one, zero = base.one(), base.zero()
+        elt = _ff._elt
+        basis = []
+        for t, f in enumerate(free):
+            v = [zero] * c
+            v[f] = one
+            for i, col in enumerate(piv):
+                v[col] = -elt(base, w[i * nf + t])
+            basis.append(v)
+        del w
+        em, _, _ = _echelon(basis, base, c)
         return [r for r in em if any(r)]
 
     def right_kernel(self):
@@ -2232,6 +2300,23 @@ class FFMatrix:
         if isinstance(b, FFMatrix):
             _admit_size(self._base, self._ncols, b.ncols())
             n, k = self._ncols, b.ncols()
+            base = self._base
+            out_of = lambda m: _ech_out_cost(base, m, k)
+            p = _ech_bin_route(base, self.nrows(), n + k, True, _ech_out_cost(base, n, k), out_of) if k else None
+            res = _ech_bin_call((list(r) + list(br) for r, br in zip(self._rows, b._rows)), base, self.nrows(), n + k, p, True) if p else None
+            if res is not None:
+                # all right-hand sides in one [A | B], packed a row at a
+                # time: a pivot in any of B's columns means that column has
+                # no solution; X is read from the pivot rows' B words only
+                piv, _, words = res
+                if piv and piv[-1] >= n:
+                    raise ValueError("matrix equation has no solutions")
+                zero, c = base.zero(), n + k
+                x = [[zero] * k for _ in range(n)]
+                for i, col in enumerate(piv):
+                    x[col] = [_ff._elt(base, t) for t in words[i * c + n:(i + 1) * c]]
+                del words
+                return FFMatrix(base, x, k)
             if k and _engine_echelon_route(self._base, self.nrows(), n + k):
                 # all right-hand sides in one [A | B] (in Rust): a pivot in
                 # any of B's columns means that column has no solution
@@ -2247,6 +2332,18 @@ class FFMatrix:
             cols = [self.solve_right(c) for c in b.columns()]
             return FFMatrix(self._base, [[c[i] for c in cols] for i in range(self._ncols)], len(cols))
         b = [self._base(x) for x in b]
+        n = self._ncols
+        p = _ech_bin_route(self._base, self.nrows(), n + 1, True, _ech_out_cost(self._base, 1, n), lambda m: _ech_out_cost(self._base, 1, m))
+        res = _ech_bin_call((r + [bi] for r, bi in zip(self._rows, b)), self._base, self.nrows(), n + 1, p, True) if p else None
+        if res is not None:
+            piv, _, words = res
+            if n in piv:
+                raise ValueError("matrix equation has no solutions")
+            x = [self._base.zero()] * n
+            for i, col in enumerate(piv):
+                x[col] = _ff._elt(self._base, words[i * (n + 1) + n])
+            del words
+            return FFVector(self._base, x)
         aug = [r + [bi] for r, bi in zip(self._rows, b)]
         m, piv, d = _echelon(aug, self._base, self._ncols + 1)
         if self._ncols in piv:
@@ -2623,6 +2720,221 @@ def _engine_echelon(rows, base, ncols, p, want_rows):
     m = _echelon_rows(text, base) if want_rows else None
     del text
     return m, piv, _ff._elt(base, d)
+
+
+# ---- the binary route (engine/web bin_ops.rs nmod_echelon, SBW1): any
+# shape whose request fits the frame cap, admitted from its shape alone by
+# _ech_need below before anything is packed; see _ech_bin_route
+
+# bytes of a Python int below 2^63 with its list slot (CPython: the int
+# object, at most 36 bytes, and the 8-byte pointer); pyjs measured
+# (engine/py/test_ech_bin.py and test/ech-bin.test.ts pin it from above)
+_ECH_INT_COST = 96 if _sys.implementation.name == "pyjs" else 44
+# a list's or array's fixed header (L), and the predicate's fixed slack
+_ECH_HDR = 64
+_ECH_SLACK = 256 * 1024
+# the engine's own reservation terms (bin_ops.rs echelon_reservation, at a
+# 64-bit usize: CPython's extension); pyjs's engine memory is the wasm
+# instance's, outside this budget
+_ECH_ENGINE_SLACK = 4096
+# the binding's copies of the request in this budget: CPython's extension
+# (engine/py call_bin) 1 while it copies; pyjs copies into the wasm
+# instance's memory, outside the heap
+_ECH_BINDING_COPIES = 0 if _sys.implementation.name == "pyjs" else 1
+# (tests: the frame cap; None: SBW1's, 2^28)
+_SBW1_FRAME_CAP = None
+# (tests: False keeps every matrix off the binary route, for the JSON
+# route's own cases, test/ffmat_echelon_admission.py)
+_ECH_BIN_ENABLED = True
+
+
+def _ech_frame_cap():
+    return _SBW1_FRAME_CAP if _SBW1_FRAME_CAP is not None else 1 << 28
+
+
+def _ech_request_len(r, c):
+    """nmod_echelon's request bytes (bin_ops.rs echelon_request_len)."""
+    return 100 + 8 * r * c
+
+
+def _ech_reply_len(r, c, k, want_rows):
+    """nmod_echelon's reply bytes for k pivots (bin_ops.rs
+    echelon_reply_len)."""
+    return 50 + 8 * k + (16 + 8 * r * c if want_rows else 0)
+
+
+def _ech_engine_reservation(r, c, want_rows):
+    """The engine's reservation (bin_ops.rs echelon_reservation, usize 8)."""
+    k = min(r, c)
+    return 8 * r * c + 32 * c + 16 * k + 8 * 32 + _ech_reply_len(r, c, k, want_rows) + _ECH_ENGINE_SLACK
+
+
+def _ech_list_cost(n):
+    """A list of n slots built by appends (a comprehension): its header and
+    its slots at CPython's growth bound, n + n / 8 + 6 rounded up."""
+    return _ECH_HDR + 8 * (n + n // 8 + 8)
+
+
+def _ech_out_cost(base, r_o, c_o):
+    """The bytes of an r_o x c_o result as rows of elements over base: the
+    elements (_entry_cost, the contract _admit_size uses), and the outer and
+    row lists twice over (the rows built from the reply, then the result's
+    constructor's copy of them, FFMatrix and FFVector, which shares the
+    elements but not the lists)."""
+    lists = _ech_list_cost(r_o) + r_o * _ech_list_cost(c_o)
+    return 2 * lists + r_o * c_o * _entry_cost(base)
+
+
+def _ech_need(r, c, want_rows, out, python_only=False):
+    """The host's peak for one binary echelon of an r x c matrix whose
+    caller builds out bytes of result from the reply (the phases P1 to P6
+    beyond the caller's input: pack, frame, call, reply, parse, build), plus
+    the fixed slack.
+    With python_only, the Python objects' share alone (no engine
+    reservation and no binding copy: what tracemalloc sees)."""
+    e, k = r * c, min(r, c)
+    iota, hdr = _ECH_INT_COST, _ECH_HDR
+    q = _ech_request_len(r, c)
+    p = _ech_reply_len(r, c, k, want_rows)
+    rows = 8 * e if want_rows else 0
+    # (CPython: the engine's reservation is in this budget; pyjs: the wasm
+    # instance's)
+    engine = 0 if _sys.implementation.name == "pyjs" or python_only else _ech_engine_reservation(r, c, want_rows)
+    copies = 0 if python_only else _ECH_BINDING_COPIES
+    row_tmp = (iota + 8) * c + 2 * hdr
+    phases = (
+        8 * e + row_tmp,                       # P1: the words and one row's ints
+        8 * e + q,                             # P2: the words and the frame
+        q + copies * q + engine,               # P3: the call
+        q + 2 * p,                             # P4: the reply and its copy
+        p + rows + iota * k + 2 * hdr,         # P5: the parse and the pivots
+        rows + row_tmp + out,                  # P6: the result, a row at a time
+    )
+    return max(phases) + _ECH_SLACK
+
+
+def _ech_bound():
+    return (_echelon_transport_figure or _heap_budget)() // _HEAP_SHARE
+
+
+def _ech_fits(want_rows, out_of, bound):
+    """The largest square side n whose binary echelon fits bound (out_of(n):
+    its caller's result bytes), by bisection on the monotone need."""
+    lo, hi = 0, 1
+    while _ech_need(hi, hi, want_rows, out_of(hi)) <= bound and hi < 1 << 20:
+        hi *= 2
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if _ech_need(mid, mid, want_rows, out_of(mid)) <= bound:
+            lo = mid
+        else:
+            hi = mid
+    return lo
+
+
+def _ech_refuse(base, r, c, need, bound, want_rows, out_of, what=None):
+    """The memory refusal of a binary echelon (a SagebrushMemoryError, never
+    retried): its shape, need and bound, and the largest square that fits."""
+    import _memguard
+    n = _ech_fits(want_rows, out_of, bound)
+    e = _memguard.memory_guard(what or ("The echelon form of a %d x %d matrix over %r" % (r, c, base)), need, bound, "one matrix")
+    e.fits = n
+    # (on the line with the need and the allowance, before the remedies)
+    lines = e.args[0].split("\n")
+    i = next((j for j, t in enumerate(lines) if "needs about" in t), len(lines) - 1)
+    lines[i] += " At most about a %d x %d matrix fits here." % (n, n)
+    e.args = ("\n".join(lines),) + e.args[1:]
+    return e
+
+
+def _ech_bin_route(base, r, c, want_rows, out, out_of=None):
+    """p when the binary nmod_echelon takes an r x c matrix over base whose
+    caller builds out bytes of result: a prime field below 2^63, the
+    binary entry point present, the request within the frame cap and the
+    host's need (_ech_need) within its budget.  None for another field, an
+    engine without the entry point or a frame-only non-fit (the callers'
+    other paths, under their own admission).  A proved memory non-fit raises
+    the memory error (never the Python path)."""
+    if not _ECH_BIN_ENABLED or not isinstance(base, _ff.IntegerModRing_) or r < 1 or c < 1:
+        return None
+    p = _engine_prime(base)
+    if not p or not _ff._SBW1_LE:
+        return None
+    if r >= 1 << 32 or c >= 1 << 32 or _ech_request_len(r, c) > _ech_frame_cap():
+        return None
+    need = _ech_need(r, c, want_rows, out)
+    bound = _ech_bound()
+    if need > bound:
+        raise _ech_refuse(base, r, c, need, bound, want_rows, out_of or (lambda n: _ech_out_cost(base, n, n) if want_rows else 0))
+    return p
+
+
+def _ech_bin_call(rowsrc, base, r, c, p, want_rows):
+    """One binary echelon of the r x c matrix whose rows rowsrc yields (each
+    an iterable of c elements over base, or ints in [0, p)): (pivots, the
+    determinant factor as an int, the rows as an array('Q') or None), or None
+    when the engine predates the op (the caller's other path).  The words
+    are packed one row at a time (no augmented list is built); each buffer
+    is dropped as soon as the next one exists.  The engine's refusals map by
+    code: its reservation refused (Cap) is the memory error, a protocol or
+    invariant failure RuntimeError, a domain failure ValueError; a Stop is
+    KeyboardInterrupt, never retried."""
+    import array
+    e = r * c
+    words = array.array("Q", [0]) * e
+    i = 0
+    for row in rowsrc:
+        words[i:i + c] = array.array("Q", [int(x) for x in row])
+        i += c
+    if i != e:
+        raise RuntimeError("Sagebrush: the matrix's rows do not have %d entries" % c)
+    flags = 3 if want_rows else 0
+    head = b"".join([b"SBW1", (12).to_bytes(4, "little"), b"nmod_echelon", (3).to_bytes(4, "little"),
+                     _ff._sbw1_u641(array.array("Q", (p,))),
+                     (24 + 8 * e).to_bytes(4, "little"), b"MAT1", r.to_bytes(4, "little"), c.to_bytes(4, "little"),
+                     b"U641", e.to_bytes(8, "little")])
+    req = b"".join([head, memoryview(words).cast("B"), _ff._sbw1_u641(array.array("Q", (flags,)))])
+    if len(req) != _ech_request_len(r, c):
+        raise RuntimeError("Sagebrush: an nmod_echelon request of the wrong length")
+    del words, head
+    from sagebrush._engine import call_bin
+    reply = call_bin(req)
+    del req
+    if reply is None:
+        return None
+    err, res = _ff._sbw1_parse(reply)
+    del reply
+    if err is not None:
+        code, _, text = err
+        if code in (2, 3):
+            # (an engine without the op: the caller's other path)
+            return None
+        if code == 7:
+            import _memguard
+            raise _memguard.memory_guard("The echelon form of a %d x %d matrix over %r" % (r, c, base),
+                                         _ech_engine_reservation(r, c, want_rows), 0, "one matrix",
+                                         unmeasured="the engine's memory ledger refused its reservation")
+        raise (ValueError if code == 6 else RuntimeError)("Sagebrush engine: nmod_echelon: %s" % text)
+    if len(res) != (3 if want_rows else 2) or len(res[1]) != 1 or (want_rows and len(res[2]) != e):
+        raise RuntimeError("Sagebrush engine: a malformed nmod_echelon reply")
+    return [int(t) for t in res[0]], int(res[1][0]), (res[2] if want_rows else None)
+
+
+def _ech_rows(words, base, r, c, lo=0, hi=None):
+    """Columns lo..hi of the rows of an r x c array('Q') as rows of elements
+    over base, one row's slice at a time."""
+    hi = c if hi is None else hi
+    elt = _ff._elt
+    return [[elt(base, x) for x in words[i * c + lo:i * c + hi]] for i in range(r)]
+
+
+def _ech_kernel_out(r, c):
+    """The first kernel call's result bytes: the coefficient block W of k x
+    (c - k) words at the worst rank k <= min(r, c) (k (c - k) is concave,
+    largest at floor(c / 2), and the next integer checked too)."""
+    kap = min(r, c)
+    k = min(kap, c // 2)
+    return 8 * max(k * (c - k), (k + 1) * (c - k - 1) if k + 1 <= kap else 0)
 
 
 def _hessenberg(a, base):

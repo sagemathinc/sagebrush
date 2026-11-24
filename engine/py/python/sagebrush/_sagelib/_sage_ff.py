@@ -1204,6 +1204,14 @@ def _sbw1_reply(r):
     Every field is checked against the bytes present, each result must be
     exactly its declared words, and nothing may follow the last result: a
     truncated or padded reply is an error, never a value."""
+    return _sbw1_parse(r, raising=True)[1]
+
+
+def _sbw1_parse(r, raising=False):
+    """(error, results) of an SBW1 reply: error None and the U641 results
+    as arrays('Q'), or error (code, offset, text) and results None (with
+    raising, an error record raises as _sbw1_reply's do).  A malformed
+    reply raises RuntimeError either way."""
     r = memoryview(r)
     n = len(r)
 
@@ -1223,6 +1231,8 @@ def _sbw1_reply(r):
         if tl > 256 or 18 + tl != n:
             raise bad("an error record of the wrong length")
         text = bytes(r[18:18 + tl]).decode("ascii", "replace")
+        if not raising:
+            return (code, u(8, 8), text), None
         # (code 8: a failed proved invariant, an engine bug)
         raise (RuntimeError if code == 8 else ValueError)(text)
     if kind != b"ok":
@@ -1242,7 +1252,7 @@ def _sbw1_reply(r):
         i += m
     if i != n:
         raise bad("trailing bytes")
-    return out
+    return None, out
 
 
 def _engine_bin(op, p, *polys):
