@@ -42,7 +42,8 @@ test("cusp_hecke_matrix in WebAssembly: matrices, units and statistics", () => {
   assert.equal(h.stats.e, 1);
   assert.deepEqual(h.stats.rejected, { dimension: 0, degree: 0, separation: 0, minor: 0 });
   const h11 = hecke(e, 11, 2, 2, 4);
-  assert.deepEqual(h11.units.map(Number), [97, 0, 47, 0, 12, 149, 1198, 0, 0, 0]);
+  // (its Div includes the binomial factoring route's two divisor-enumeration units)
+  assert.deepEqual(h11.units.map(Number), [97, 0, 49, 0, 12, 149, 1198, 0, 0, 0]);
   assert.deepEqual([h11.matrix, h11.den], [[["-2"]], "1"]);
   // a square factor: 36 = 6^2, e = lambda(6) = 2
   const h36 = hecke(e, 36, 2, 5, 14);

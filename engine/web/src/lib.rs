@@ -63,6 +63,7 @@ pub extern "C" fn sb_reply_len() -> usize {
 fn new_run() {
     sagebrush_interrupt::progress::reset_frames();
     sagebrush_arith::smith::progress::reset();
+    sagebrush_poly::reset_binomial_units();
 }
 
 #[no_mangle]

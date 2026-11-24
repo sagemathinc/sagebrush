@@ -5024,9 +5024,24 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/poly/src/binomial.rs :: cyclotomics :: let o = spend(b, Family::AddSub, (a.len() as u64).checked_add(e).and_then(|l| l.checked_mul(limbs(maxbits(&a) + 1))))?; #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "reason": "the word max or MAX (an operand's maxbits, or u64::MAX as a test meter's allowance), not a limit: the route's work is bounded by the factoring budget it debits"
+ },
+ "engine/poly/src/binomial.rs :: cyclotomics :: let o = spend(b, Family::AddSub, l.checked_mul(limbs(maxbits(&a) + clog2(l.div_ceil(e) + 1))))?; #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "reason": "the word max or MAX (an operand's maxbits, or u64::MAX as a test meter's allowance), not a limit: the route's work is bounded by the factoring budget it debits"
+ },
  "engine/poly/src/binomial.rs :: fold_minus :: (if s == u64::MAX { 0 } else { s }, if s48 == M48 { 0 } else { s48 }) #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial.rs :: fold_passes :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "reason": "the word MAX or unlimited in a test or test hook (an accounting meter's u64::MAX allowance, an unlimited budget for the fold passes alone), not a limit: nothing is refused"
  },
  "engine/poly/src/binomial.rs :: not_a_power :: fn not_a_power(b: &Budget, n: &BigInt, l: u64) -> FResult<bool> { #0": {
   "class": "none",
@@ -5055,6 +5070,11 @@
  "engine/poly/src/binomial.rs :: prefilter_plan :: let trial = WITNESS_K.checked_mul(pmax.sqrt() + 1)?; #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial.rs :: spend :: fn spend(b: &Budget, f: Family, units: Option<u64>) -> FResult<Owed> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "reason": "the route's debit helper, not a limit: it charges the factoring budget (whose limits are registered at the budget) and counts the same units for the tally"
  },
  "engine/poly/src/binomial.rs :: stage_b :: let (work, out_bytes, scratch, costs) = ledger().ok_or_else(|| b.refuse(\"work (overflow)\", u64::MAX, b.work_left()))?; #0": {
   "class": "3",
@@ -5122,6 +5142,15 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/poly/src/binomial_tests.rs :: a_refused_certificate_step_counts_nothing :: let b = Budget::default(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: a_refused_certificate_step_counts_nothing :: let mut meter = sagebrush_arith::cost::Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "reason": "the word max or MAX (an operand's maxbits, or u64::MAX as a test meter's allowance), not a limit: the route's work is bounded by the factoring budget it debits"
+ },
  "engine/poly/src/binomial_tests.rs :: ledger_audit_at :: let b = Budget::unlimited(); #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
@@ -5169,6 +5198,11 @@
  "engine/poly/src/binomial_tests.rs :: the_residue_proof_folds_each_coefficient_once :: let b = Budget::unlimited(); #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/binomial_tests.rs :: units_reach_the_tally :: let mut meter = sagebrush_arith::cost::Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "reason": "the word max or MAX (an operand's maxbits, or u64::MAX as a test meter's allowance), not a limit: the route's work is bounded by the factoring budget it debits"
  },
  "engine/poly/src/budget.rs :: default :: Budget::default_with(sagebrush_interrupt::memory_share()) #0": {
   "class": "2",
@@ -7605,6 +7639,26 @@
  "engine/poly/src/vanhoeij.rs :: x_dividing_the_residual_is_an_internal_error :: let e = fault::with(fault::SKIP_PREPASS, || crate::try_factor_with(&x_s4(), &Budget::default())).unwrap_err(); #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/tests/binomial_units.rs ::  :: use sagebrush_poly::{binomial_testing, reset_binomial_units, try_factor_with, Budget}; #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "reason": "the word MAX or unlimited in a test or test hook (an accounting meter's u64::MAX allowance, an unlimited budget for the fold passes alone), not a limit: nothing is refused"
+ },
+ "engine/poly/tests/binomial_units.rs :: a_stop_charges_only_finished_steps_and_a_traps_counts_are_reset :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "reason": "the word MAX or unlimited in a test or test hook (an accounting meter's u64::MAX allowance, an unlimited budget for the fold passes alone), not a limit: nothing is refused"
+ },
+ "engine/poly/tests/binomial_units.rs :: units :: let _ = metered(&mut meter, || sagebrush_interrupt::catch(|| try_factor_with(f, &Budget::default()).map(|x| x.1.len()))); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "reason": "the word MAX or unlimited in a test or test hook (an accounting meter's u64::MAX allowance, an unlimited budget for the fold passes alone), not a limit: nothing is refused"
+ },
+ "engine/poly/tests/binomial_units.rs :: units :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "reason": "the word MAX or unlimited in a test or test hook (an accounting meter's u64::MAX allowance, an unlimited budget for the fold passes alone), not a limit: nothing is refused"
  },
  "engine/poly/tests/memory_share.rs ::  :: use sagebrush_poly::{try_factor, try_factor_with, with_default_limits, Budget, Limits, MemorySource}; #0": {
   "class": "none",
