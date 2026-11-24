@@ -2,8 +2,9 @@ import numpy as np
 import numpy.exceptions
 from numpy.exceptions import AxisError, ComplexWarning, DTypePromotionError, ModuleDeprecationWarning, RankWarning, TooHardError, VisibleDeprecationWarning
 
-# numpy.exceptions.AxisError: what an axis out of range raises, everywhere an axis is taken; both a ValueError and
-# an IndexError, with the axis and the number of dimensions; and an axis named twice refused as NumPy refuses it
+# numpy.exceptions.AxisError: what the listed axis-validation paths raise for an axis out of range (trapezoid keeps
+# NumPy's plain IndexError); both a ValueError and an IndexError, with the axis and the number of dimensions; and an
+# axis named twice refused as NumPy refuses it
 
 print(hasattr(np, "AxisError"), np.exceptions is __import__("numpy.exceptions").exceptions, AxisError.__module__)
 print([c.__name__ for c in AxisError.__mro__], issubclass(AxisError, ValueError), issubclass(AxisError, IndexError))

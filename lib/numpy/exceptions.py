@@ -1,7 +1,7 @@
 """numpy.exceptions: NumPy's exceptions and warnings, as NumPy defines them (numpy/exceptions.py).
 
-AxisError is what an axis out of range raises, everywhere an axis is taken: both a ValueError
-and an IndexError, with the axis and the number of dimensions as attributes.
+AxisError is what the axis-validation paths raise for an axis out of range, as NumPy's do: both a
+ValueError and an IndexError, with the axis and the number of dimensions as attributes.
 """
 
 # (NumPy's __all__; its RankWarning is here too, outside __all__, as in NumPy)
