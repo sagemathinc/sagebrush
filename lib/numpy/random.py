@@ -37,17 +37,15 @@ def _size(size):
         return None
     if isinstance(size, (tuple, list)):
         return [_dim(d) for d in size]
-    if isinstance(size, (bool, _np.bool_)) or not _isindex(size):
-        raise TypeError(f"expected a sequence of integers or a single integer, got '{size}'")
-    return [_nonneg_dim(_operator.index(size))]
-
-
-def _isindex(x):
-    try:
-        _operator.index(x)
-        return True
-    except TypeError:
-        return False
+    # (__index__ read once, as NumPy reads it)
+    if not isinstance(size, (bool, _np.bool_)):
+        try:
+            n = _operator.index(size)
+        except TypeError:
+            n = None
+        if n is not None:
+            return [_nonneg_dim(n)]
+    raise TypeError(f"expected a sequence of integers or a single integer, got '{size}'")
 
 
 def _sz(*args):

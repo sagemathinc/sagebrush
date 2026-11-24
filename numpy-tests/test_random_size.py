@@ -57,3 +57,21 @@ for name, f in [
     ("negative.tuple", lambda: r.random_sample((2, -1))),
 ]:
     show(name, f)
+
+
+class Size:
+    """A size whose __index__ counts its calls: NumPy reads it once."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def __index__(self):
+        self.calls += 1
+        return 2 if self.calls == 1 else 3
+
+
+r2 = np.random.RandomState(5)
+s = Size()
+show("stateful-index", lambda: (r2.random_sample(s).shape, s.calls, r2.random_sample()))
+s2 = Size()
+show("stateful-index-randint", lambda: (r2.randint(9, size=s2).shape, s2.calls))

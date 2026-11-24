@@ -45,3 +45,20 @@ for name, f in [
     ("bool-median", lambda: np.median(np.array([True, False, True]))),
 ]:
     show(name, f)
+# (an axis out of range: NumPy's message, an IndexError; NumPy's AxisError is also a ValueError, which
+# Sagebrush's numpy doesn't have yet)
+for name, f in [
+    ("median-axis-2", lambda: np.median(np.arange(6.).reshape(2, 3), axis=2)),
+    ("median-axis-minus3", lambda: np.median(np.arange(6.).reshape(2, 3), axis=-3)),
+    ("median-axis-3", lambda: np.median(np.arange(6.).reshape(2, 3), axis=3)),
+    ("median-1d-axis1", lambda: np.median(np.arange(3.), axis=1)),
+    ("quantile-axis-2", lambda: np.quantile(np.arange(6.).reshape(2, 3), 0.5, axis=2)),
+]:
+    try:
+        print(name, f())
+    except IndexError as e:
+        print(name, "!! IndexError-like", e)
+show("median-axis-minus1", lambda: np.median(np.arange(6.).reshape(2, 3), axis=-1))
+show("percentile-axis-list-q", lambda: np.percentile(m, [12.5, 90], axis=1))
+show("quantile-list-q-float32", lambda: np.quantile(e, [0.1, 0.33, 0.9]))
+show("quantile-array-q-midpoint", lambda: np.quantile(e, np.array([0.3]), method="midpoint"))

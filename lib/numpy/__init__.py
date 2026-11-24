@@ -1443,8 +1443,12 @@ def median(a, axis=None, out=None, overwrite_input=False, keepdims=False):
     # (as NumPy's _median: the mean of the middle element, or of the two middle ones, so an integer array gives
     # float64 and a float array keeps its type; a NaN in a slice makes its median NaN)
     a = asarray(a)
-    ax = 0 if axis is None else axis % a.ndim
-    s = moveaxis(sort(a.ravel() if axis is None else a, axis=ax), ax, -1)
+    if axis is None:
+        ax, s = 0, sort(a.ravel())
+    else:
+        # (sort checks the axis first, with NumPy's AxisError; then it is a valid index)
+        s = moveaxis(sort(a, axis=axis), axis, -1)
+        ax = axis % a.ndim
     n = s.shape[-1]
     k = n // 2
     r = asarray(mean(s[..., k:k + 1] if n % 2 else s[..., _builtins.max(k - 1, 0):k + 1], axis=-1))
@@ -1474,8 +1478,9 @@ def quantile(a, q, axis=None, out=None, overwrite_input=False, method="linear", 
     dt = a.dtype if a.dtype.kind == "f" else dtype(float64)
     if not (isinstance(q, (int, float)) and not isinstance(q, (bool, generic))):
         dt = result_type(dt, asarray(q).dtype)
-    # (numbers in that dtype; anything else as before, which refuses it as NumPy's arithmetic does)
-    cast = (lambda v: v.astype(dt)) if a.dtype.kind in "biuf" else _floats
+    # (the neighbours in their own float type, as NumPy's _lerp takes them, so b - a is computed there; integers
+    # as float64; anything else as before, which refuses it as NumPy's arithmetic does)
+    cast = (lambda v: v) if a.dtype.kind == "f" else (lambda v: v.astype(float64)) if a.dtype.kind in "biu" else _floats
     qs = _floats(q)
     vals = []
     for qq in qs.ravel().tolist():
@@ -1494,7 +1499,10 @@ def quantile(a, q, axis=None, out=None, overwrite_input=False, method="linear", 
         t = virtual - lo
         av, bv = cast(s[..., lo]), cast(s[..., hi])
         diff_b_a = bv - av
-        vals.append(where(t >= 0.5, bv - diff_b_a * (1 - t), av + diff_b_a * t))  # NumPy's _lerp
+        # (NumPy's _lerp, its weights in the result's float type: a Python float rounded to float32 for a float32
+        # loop, as NumPy casts it; float64 for a NumPy or array q, which promotes the float32 neighbours)
+        w, w1 = (float32(t), float32(1 - t)) if dt == float32 else (float64(t), float64(1 - t))
+        vals.append(where(t >= 0.5, bv - diff_b_a * w1, av + diff_b_a * w))
     res = array(vals) if qs.ndim else asarray(vals[0])
     if qs.ndim:
         res = res.reshape(qs.shape + res.shape[1:])
