@@ -45,7 +45,7 @@ from _matlab_ledger import Ledger, _record
 # bytes per entry (r6 section 2.2's c_idx, c_bool, c_val, c_re, c_ptr,
 # c_pyint, and the per-array and per-list objects): the typed arrays' are
 # their itemsizes; the JS-heap objects' are the worst measured on the CLI
-# (sys._sagebrush_heap_used after a full collection; provisional: the
+# (sys._sagebrush_heap_used after full collections; provisional: the
 # project's host, until M1b's VM run) times 1.25, rounded up: an ndarray
 # 427 bytes, a list pointer 9.62 (Node 24), a large Python int 10.4
 C_IDX, C_BOOL, C_RE, C_CPLX, C_PTR, C_PYINT = 8, 1, 8, 16, 13, 14
