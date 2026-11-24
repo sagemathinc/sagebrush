@@ -783,17 +783,32 @@ def take_positions(indices, n):
     from ._pd_index import Index
     if isinstance(indices, (Series, Index)):
         indices = indices.tolist()
-    vals = indices.tolist() if isinstance(indices, np.ndarray) else list(indices) if isinstance(indices, (list, tuple, range)) else [indices]
+    if isinstance(indices, np.ndarray):
+        vals = indices.tolist()
+    elif isinstance(indices, (list, tuple, range)):
+        vals = list(indices)
+    else:
+        # (a scalar: pandas casts it with numpy, whose 0-d result has no length)
+        _intp(indices)
+        raise TypeError("len() of unsized object")
     out = []
     for i in vals:
-        # (numbers as numpy's intp: a float truncates, as pandas' ensure_platform_int casts it)
-        if not isinstance(i, (int, float, np.integer, np.floating, np.bool_)) or (isinstance(i, (float, np.floating)) and i != i):
-            raise IndexError("arrays used as indices must be of integer (or boolean) type")
-        i = int(i)
+        i = _intp(i)
         if i < -n or i >= n:
             raise IndexError("indices are out-of-bounds")
         out.append(i + n if i < 0 else i)
     return out
+
+
+def _intp(v):
+    # (one position as numpy's cast to intp: a float truncates, NaN and None are int()'s errors)
+    if v is None:
+        raise TypeError("int() argument must be a string, a bytes-like object or a real number, not 'NoneType'")
+    if isinstance(v, (float, np.floating)) and v != v:
+        raise ValueError("cannot convert float NaN to integer")
+    if isinstance(v, (str, bool, int, float, np.integer, np.floating, np.bool_)):
+        return int(v)
+    raise TypeError("int() argument must be a string, a bytes-like object or a real number, not '%s'" % type(v).__name__)
 
 
 def with_na_value(col, na_value):

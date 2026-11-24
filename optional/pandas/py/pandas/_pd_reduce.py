@@ -51,8 +51,9 @@ _INT_SCALARS = {"int64": np.int64, "int32": np.int32, "int16": np.int16, "int8":
 
 def truth_column(col, op, skipna):
     """Series.any / Series.all: each value's truth (numbers: nonzero; str
-    and object: Python's), missing values skipped (or True with
-    skipna=False, as NaN is), an np.bool_ as pandas gives."""
+    and object: Python's), missing values skipped; with skipna=False every
+    value is Python's bool of it, as pandas (None is False, NaN True), an
+    np.bool_ as pandas gives."""
     from ._pd_datetime import DT
     if col.dtype is DT:
         raise _unsupported("Series.%s of a datetime64[us] column" % op)
@@ -61,7 +62,7 @@ def truth_column(col, op, skipna):
     if skipna:
         truths = [bool(v) for v, m in zip(vals, miss) if not m]
     else:
-        truths = [True if m else bool(v) for v, m in zip(vals, miss)]
+        truths = [bool(v) for v in vals]
     return np.bool_(any(truths) if op == "any" else all(truths))
 
 

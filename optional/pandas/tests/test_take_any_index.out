@@ -38,6 +38,25 @@
 Empty DataFrame
 Columns: [a, b, c]
 Index: []
+== take-scalar
+'raises TypeError'
+== take-scalar-bool
+'raises TypeError'
+== take-scalar-np-int
+'raises TypeError'
+== take-frame-scalar
+'raises TypeError'
+== take-none
+!! TypeError: int() argument must be a string, a bytes-like object or a real number, not 'NoneType'
+== take-nan
+!! ValueError: cannot convert float NaN to integer
+== take-str
+!! ValueError: invalid literal for int() with base 10: 'a'
+== take-tuple
+
+p    1.5
+q    NaN
+Name: v, dtype: float64
 == take-range-index
 RangeIndex(start=3, stop=-1, step=-2)
 == take-series
@@ -79,6 +98,32 @@ np.False_
 np.True_
 == any-float32
 np.True_
+== any-object-none-kept
+np.False_
+== all-object-none-kept
+np.False_
+== all-object-str-none-kept
+np.False_
+== all-object-nan-kept
+np.True_
+== any-object-nan-kept
+np.True_
+== all-object-none-skipped
+np.True_
+== all-object-zero-none-kept
+np.False_
+== all-str-missing-kept
+np.True_
+== frame-all-none-nan-kept
+
+o    False
+n     True
+dtype: bool
+== frame-any-none-nan-kept
+
+o    True
+n    True
+dtype: bool
 == frame-any
 
 a    True

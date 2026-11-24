@@ -9,6 +9,14 @@ df = pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", None], "c": [0.5, np.nan, 2.0
 s = pd.Series([1.5, np.nan, 3.0], index=["p", "q", "r"], name="v")
 
 
+def error_type(f):
+    try:
+        f()
+    except Exception as e:
+        return "raises " + type(e).__name__
+    return "no error"
+
+
 def arr(a):
     return (str(a.dtype), a.tolist(), a.shape)
 
@@ -22,6 +30,16 @@ case("take-out-of-bounds", lambda: df.take([5]))
 case("take-out-of-bounds-negative", lambda: df.take([-4]))
 case("take-float", lambda: df.take([0.5]))
 case("take-empty", lambda: df.take([]))
+# (a scalar has no length to take: the error's type is pandas', its text pandas-internal and version-dependent)
+case("take-scalar", lambda: error_type(lambda: s.take(1)))
+case("take-scalar-bool", lambda: error_type(lambda: s.take(True)))
+case("take-scalar-np-int", lambda: error_type(lambda: s.take(np.int64(1))))
+case("take-frame-scalar", lambda: error_type(lambda: pd.DataFrame({"a": [1, 2]}).take(1)))
+case("take-none", lambda: s.take(None))
+case("take-nan", lambda: s.take([np.nan]))
+case("take-str", lambda: df.take(["a"]))
+case("take-tuple", lambda: s.take((0, 1)))
+
 case("take-range-index", lambda: pd.DataFrame({"a": [1, 2, 3, 4]}).take([3, 1]).index)
 case("take-series", lambda: s.take(np.array([1, 0])))
 case("take-series-axis", lambda: s.take([0], axis=1))
@@ -39,6 +57,16 @@ case("any-str", lambda: pd.Series(["", "a"]).any())
 case("all-str", lambda: pd.Series(["", "a"]).all())
 case("all-str-missing", lambda: pd.Series(["a", None]).all())
 case("any-float32", lambda: pd.Series([0.0, 0.5], dtype="float32").any())
+case("any-object-none-kept", lambda: pd.Series([None], dtype=object).any(skipna=False))
+case("all-object-none-kept", lambda: pd.Series([None], dtype=object).all(skipna=False))
+case("all-object-str-none-kept", lambda: pd.Series(["x", None], dtype=object).all(skipna=False))
+case("all-object-nan-kept", lambda: pd.Series(["x", np.nan], dtype=object).all(skipna=False))
+case("any-object-nan-kept", lambda: pd.Series([np.nan], dtype=object).any(skipna=False))
+case("all-object-none-skipped", lambda: pd.Series([None], dtype=object).all())
+case("all-object-zero-none-kept", lambda: pd.Series([0, None], dtype=object).all(skipna=False))
+case("all-str-missing-kept", lambda: pd.Series(["a", None], dtype="str").all(skipna=False))
+case("frame-all-none-nan-kept", lambda: pd.DataFrame({"o": pd.Series([None, "x"], dtype=object), "n": pd.Series([np.nan, "x"], dtype=object)}).all(skipna=False))
+case("frame-any-none-nan-kept", lambda: pd.DataFrame({"o": pd.Series([None, "x"], dtype=object), "n": pd.Series([np.nan, "x"], dtype=object)}).any(skipna=False))
 case("frame-any", lambda: df.any())
 case("frame-all", lambda: df.all())
 case("frame-all-numbers", lambda: df[["a", "c"]].all())
