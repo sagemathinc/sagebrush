@@ -379,18 +379,25 @@ An Autonomous VM is a full account device, so whoever controls the VM controls i
 - **Under E2E:**
   - each conversation's mirror gets a random CEK, wrapped under the current epoch like a document's (§3.1), and recorded in the sealed index;
   - **segments are sealed by the writing device,** which must be an enrolled device (the page, the desktop app, the CLI or an Autonomous VM, §6). The server stores and serves opaque segments, as it does document batches;
-  - the segment format keeps its header as AAD (version, the conversation's locator, the segment id, both ranges, the previous segment's digest). The key id now names the epoch and the CEK, and the nonce is random per segment, since the key is the device's and not the server's;
+  - the segment format keeps its header as AAD (version, the conversation's locator, the segment id, both ranges, the previous segment's digest). The visible key id names the epoch and the **CEK id**, never the CEK itself;
+  - **a key per segment, not a shared nonce space** (SEC): `K_seg = HKDF(CEK, "sagebrush.logseg.v1" || canonical segment id)`, with a fixed nonce, as for blob chunks (§3.3). The canonical segment id is the conversation locator, the writer's device id and its sequence number, so two writers or two segments never share a key, and no random-nonce bound is needed;
+  - **each segment is signed by its writer** (SEC), since a CEK alone would let a removed device that kept it forge later segments. The signature covers the protocol, the account, the conversation's locator, the writer's device id, the authorizing chain head and epoch, a **conversation sequence number** that rises by one per segment, the previous segment's digest and the ciphertext's hash;
+  - **readers verify** that the writer is a current device at the authorizing head, that the epoch isn't older than that head's (§4.1's rule), and that the sequence and previous digest continue the chain. Two different segments with the same sequence number or previous digest are a fork: readers refuse both branches past the fork point, as for sealed ops, and show the conversation as forked;
+  - **after a device removal,** the next segment starts a new CEK under the new epoch, so a removed device can neither read later segments nor sign them;
   - **the server-held key-encryption key is retired.** Existing DEV mirrors are wiped with the other synced data at the cutover (Q1).
+  - **tests:** a reused segment id under one CEK, or a header edited after sealing, must fail to decrypt or verify.
 - **What the server still sees:** each segment's size and timing, and the header fields kept visible for ordering: the conversation locator, the segment id and the ranges. They're listed with §4's metadata.
 - **What's lost:** anything that read logs on the server (search, previews) runs on a device instead.
 
 **The relay to your own computers goes end to end** (decided, Q9).
 - **Today:** a computer connected with `sagebrush remote login` registers a public key with the server. Its terminal and agent traffic passes through Sagebrush's relay, encrypted to the server but not end to end. So the relay sees what you type, what the computer prints, and what an agent reads and writes there.
 - **Under E2E:**
-  - **the connected computer becomes a device:** its key is certified in the account's key chain (§2) at `sagebrush remote login`, not only registered with the server;
-  - **page and computer run a Noise_IK handshake through the relay,** with the device keys from the chain, the same construction the fleet's browser channel already uses and SEC has reviewed;
-  - the relay forwards opaque Noise messages. It never holds a session key;
-  - the page refuses a computer whose key isn't in the chain, and a key change is a chain entry, never a silent server-side update.
+  - **the connected computer becomes a device, through the ordinary add-device ceremony** (§2): `sagebrush remote login` shows a QR or short code that a current device confirms, or takes the recovery code. Server registration alone never makes a computer trusted. Its chain entry gives it the role "computer" and a dedicated Noise static key, separate from its HPKE key. Its epoch secret is wrapped to it only if it also syncs files;
+  - **page and computer run Noise_IK_25519_AESGCM_SHA256 through the relay** (SEC). The fleet channel's Noise_IK uses ChaCha20-Poly1305, which WebCrypto lacks, and runs only in Node, so the page can't reuse it as is. The AES-GCM suite runs on WebCrypto's X25519, AES-GCM and SHA-256, with no new dependency. The handshake pattern and its tests are ported from the fleet channel; the suite is pinned in the protocol version;
+  - **both ends verify the current chain:** the page checks that the selected computer's static key is current, and the computer checks that the page's is. Either refuses a removed device;
+  - **the Noise prologue is canonical** and binds "sagebrush.remote.v1", the account, both device ids and static public keys with their roles (page as initiator, computer as responder), the computer the person selected, the chain head each side verified, and a fresh session id. A mismatch on either side fails the handshake;
+  - the relay forwards opaque Noise messages. It never holds a session key. A key change is a chain entry, never a silent server-side update;
+  - **the rollback limit:** a server can show either end an older valid chain head, where a removed device is still current. Each end refuses a head older than its last verified checkpoint (§4.1), so this only works against an end that hasn't yet seen the removal; it's §2.1's fork limit.
 - **What the relay still sees:** which page talks to which computer, when, and how much (message sizes and timing). Not the content.
 - **Agents through the relay** (agent endpoint, §6) ride the same Noise session, so the relay never sees their reads and writes either.
 
@@ -498,10 +505,13 @@ William asked for this review because a mistake found later, with millions of fi
   - **Signing keys rotate by cross-certification:** a device makes its new Ed25519 key. The old signing key signs a chain entry naming the new one, and the new key countersigns it.
   - **KEM keys can't sign** (SEC), so a new X25519 or ML-KEM key is bound through the signing chain:
     - the device's current signing key signs a chain entry naming the new KEM key;
-    - **proof of possession** is separate. An existing device encapsulates a fresh challenge to the new KEM key, and the new key's holder returns a MAC over the entry under the decapsulated secret. The entry records that confirmation.
+    - **proof of possession** is separate, and not circular:
+      - the **pre-entry hash** is the hash of the entry's body without its signatures or proof: protocol, account, predecessor hash, the key's owner and role, and the new public key;
+      - the challenger (a current device) HPKE-encapsulates to the new KEM key, with `info` = "sagebrush.kem-pop.v1" and the pre-entry hash. The holder decapsulates and returns `MAC = HMAC(export(ss, "pop"), pre-entry hash || enc)`;
+      - the challenger checks the MAC. The final entry carries `enc` and the MAC, and its signatures cover the pre-entry hash, `enc` and the MAC. Other devices verify the signatures; only the challenger could check the MAC itself.
   - **Who authorizes each:**
     - a device's own keys: that device;
-    - **the recovery key:** a current device, under "Replace recovery code" (§2). The recovery key is a seed-derived X25519 key only, with no signing key: the current device's signing key signs the entry, and the new recovery private key, held transiently on that device before the code is shown and discarded, proves possession with the same challenge and MAC;
+    - **the recovery key** has both halves (§2): an Ed25519 key, which alone may sign a recovery (§2.1), and an X25519 key that epochs are wrapped to. Replacing it ("Replace recovery code") is authorized by a current device's signature. The new recovery Ed25519 key countersigns the entry, and the new recovery X25519 key proves possession as above, with that device as challenger. Both new private halves exist only transiently on that device, before the code is shown and discarded;
     - **the inbox key:** any current device (§2.1). Its KEM key is proven as above.
   - **A monotone policy:** the chain records the account's **minimum writer suite**. It can only rise. A client refuses to accept any new epoch, wrapper or entry below it, and refuses to write below it.
     - A downgrade can't be served, since the policy is in the signed chain that clients pin.
