@@ -1,5 +1,98 @@
 [
   {
+    "name": "bitcmp",
+    "kind": "function",
+    "signature": "cmp = bitcmp(A)\ncmp = bitcmp(A, assumedtype)",
+    "summary": "The bitwise complement of integers in their class: an unsigned one's is the class's maximum less it, a signed one's -A - 1.",
+    "doc": "A is an integer array, or a double array read as 'uint64' unless assumedtype names another integer class (its values must then be integers in that class's range). For an integer A, assumedtype must be its own class.",
+    "examples": [
+      {
+        "code": "bitcmp(int8(-11))",
+        "expected": "\nans =\n\n  int8\n\n   10\n\n"
+      },
+      {
+        "code": "bitcmp(64, 'uint8')",
+        "expected": "\nans =\n\n   191\n\n"
+      }
+    ],
+    "differs": [
+      "64-bit integer values of magnitude 2^53 or more are refused, as for int64 and uint64 elsewhere in Sagebrush; a double read as 'uint64' is exact up to flintmax and the nearest double beyond.",
+      "Not yet checked against MATLAB: single and logical input are refused; the refusals' identifiers and messages are Sagebrush's."
+    ],
+    "status": "partial",
+    "see_also": [
+      "bitget",
+      "bitset",
+      "bitxor"
+    ],
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "bitget",
+    "kind": "function",
+    "signature": "b = bitget(A, bit)\nb = bitget(A, bit, assumedtype)",
+    "summary": "The bit at a position (1 the least significant) of each integer, as 0 or 1 in A's class.",
+    "doc": "A is an integer array, or a double array read as 'uint64' unless assumedtype names another integer class (its values must then be integers in that class's range; a signed class is read in two's complement). For an integer A, assumedtype must be its own class. bit runs from 1 to the class's width.",
+    "examples": [
+      {
+        "code": "bitget(intmax('int8'), 8:-1:1)",
+        "expected": "\nans =\n\n  1×8 int8 row vector\n\n   0   1   1   1   1   1   1   1\n\n"
+      },
+      {
+        "code": "bitget(-29, 8:-1:1, 'int8')",
+        "expected": "\nans =\n\n     1     1     1     0     0     0     1     1\n\n"
+      }
+    ],
+    "differs": [
+      "64-bit integer values of magnitude 2^53 or more are refused, as for int64 and uint64 elsewhere in Sagebrush; a double read as 'uint64' is exact up to flintmax and the nearest double beyond.",
+      "Not yet checked against MATLAB, which leaves these open: A and bit (and V) must be the same size or scalars (no implicit expansion); single and logical input are refused; the refusals' identifiers and messages are Sagebrush's."
+    ],
+    "status": "partial",
+    "see_also": [
+      "bitset",
+      "bitcmp",
+      "bitand",
+      "bitshift",
+      "dec2bin"
+    ],
+    "tags": [
+      "integers"
+    ]
+  },
+  {
+    "name": "bitset",
+    "kind": "function",
+    "signature": "C = bitset(A, bit)\nC = bitset(A, bit, V)\nC = bitset(A, bit, assumedtype)\nC = bitset(A, bit, V, assumedtype)",
+    "summary": "Integers with the bit at a position set to 1, or to V (0 when V is 0, 1 otherwise), in A's class.",
+    "doc": "A is an integer array, or a double array read as 'uint64' unless assumedtype names another integer class (its values must then be integers in that class's range; a signed class is in two's complement). bit runs from 1 to the class's width.",
+    "examples": [
+      {
+        "code": "bitset(4, 4:6)",
+        "expected": "\nans =\n\n    12    20    36\n\n"
+      },
+      {
+        "code": "bitset(0, 2:6, [1 0 0 1 1], 'int8')",
+        "expected": "\nans =\n\n     2     0     0    16    32\n\n"
+      }
+    ],
+    "differs": [
+      "64-bit integer values of magnitude 2^53 or more are refused, as for int64 and uint64 elsewhere in Sagebrush; a double read as 'uint64' is exact up to flintmax and the nearest double beyond.",
+      "Not yet checked against MATLAB, which leaves these open: A and bit (and V) must be the same size or scalars (no implicit expansion); single and logical input are refused; the refusals' identifiers and messages are Sagebrush's."
+    ],
+    "status": "partial",
+    "see_also": [
+      "bitget",
+      "bitcmp",
+      "bitor",
+      "bitshift"
+    ],
+    "tags": [
+      "integers"
+    ]
+  },
+  {
     "name": "int64",
     "kind": "function",
     "signature": "Y = int64(X)",
