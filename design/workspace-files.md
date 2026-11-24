@@ -476,6 +476,7 @@ It is made of objects that each serve one account or one document, so it grows b
   - **Later, not in the first version:** a post-quantum suite, added in a new epoch through crypto agility (e2e-encryption.md §11.1).
 - **Deleting:**
   - **"Delete my synced data"** removes everything of the account's from the server, by the same path as the purge in design/sharing.md "Deleting".
+  - **Under end-to-end encryption, it keeps the account's key identity** (a SEC ruling): the key chain, the current keyring and its current wrappers, with each device's name and public key. Deleting the CoCalc account removes them (design/e2e-encryption.md §2).
   - Turning sync off on one device leaves the server copy and the device's copy each in place.
   - Signing out on a shared computer offers to remove this device's local copy, as a separate choice.
 - **When the account may no longer sync** (its plan no longer includes sync; decided Oct 19, wording Oct 25: a membership ending to a tier that still includes sync, such as free, doesn't end sync):
