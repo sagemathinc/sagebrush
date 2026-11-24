@@ -28,6 +28,17 @@ def outcome(made, refuse=True):
     return None
 
 
+# (a stand-in host with room for anything, so only the stand-in refusal decides: the admission, #1960, passes)
+import sys
+import types
+import _matlab_sparse as sp
+cap = types.ModuleType("_capacity")
+cap.capacity = lambda: {"bytes": 1 << 50, "domains": ["js-heap", "js-arraybuffer"]}
+cap.effective_guard_bytes = lambda r: 1 << 50
+sp._capacity = cap
+sys.modules["_capacity"] = cap
+sys.modules.pop("_matlab_ledger", None)
+
 assert M._SIZE_PREFERENCE_BYTES == P
 
 # -- int8 (1 byte each): a refusal at 5 GB exactly is MATLAB's; one byte less stays out of memory

@@ -1553,26 +1553,24 @@ def _scalar(v, what="value"):
     raise _err("Expected a numeric %s, not %s." % (what, class_(v)))
 
 
-def _colon_values(a, d, b):
-    """a:d:b.  This is the original implementation, unchanged, and its
-    details were not taken from a published source.  One part is consistent
-    with MATLAB's observed output: the second half of the elements is
-    counted back from the end point ((0:0.1:0.5)(4) is exactly 0.3 in
-    MATLAB, where 0 + 3*0.1 is 0.30000000000000004).  The count's tolerance
-    (2 eps max(|a|, |b|)), snapping the last element to b within it, and the
-    exact middle element (a + last)/2 are not sourced and need not be
-    MATLAB's"""
+def _colon_plan(a, d, b):
+    """a:d:b's elements, described: ("list", values) for an empty, NaN or single-element range, ("int", a, d, n)
+    for integer a and d (element k is a + k d, k = 0..n), or ("sym", a, d, n, last). This is the original
+    implementation, unchanged, and its details were not taken from a published source. One part is consistent
+    with MATLAB's observed output: the second half of the elements is counted back from the end point
+    ((0:0.1:0.5)(4) is exactly 0.3 in MATLAB, where 0 + 3*0.1 is 0.30000000000000004). The count's tolerance
+    (2 eps max(|a|, |b|)), snapping the last element to b within it, and the exact middle element (a + last)/2 are
+    not sourced and need not be MATLAB's"""
     if a != a or d != d or b != b:
-        return [_math.nan]
+        return ("list", [_math.nan])
     if d == 0 or (a < b and d < 0) or (b < a and d > 0):
-        return []
+        return ("list", [])
     if _math.isinf(a) or _math.isinf(b) or _math.isinf(d):
         if _math.isinf(d) and not _math.isinf(a):
-            return [a]
+            return ("list", [a])
         raise _err("Maximum variable size allowed by the program is exceeded.")
     if a == _math.floor(a) and d == _math.floor(d):
-        n = int(_math.floor((b - a) / d))
-        return [a + k * d for k in range(n + 1)]
+        return ("int", a, d, int(_math.floor((b - a) / d)))
     tol = 2.0 * 2.220446049250313e-16 * max(abs(a), abs(b))
     n = int(round((b - a) / d))
     sig = 1.0 if d > 0 else -1.0
@@ -1581,14 +1579,58 @@ def _colon_values(a, d, b):
     last = a + n * d
     if abs(last - b) <= tol:
         last = b
-    v = [0.0] * (n + 1)
+    return ("sym", a, d, n, last)
+
+
+def _colon_iter(a, d, b):
+    """a:d:b's elements one by one, for a for loop: nothing of the range is made"""
+    plan = _colon_plan(a, d, b)
+    if plan[0] == "list":
+        yield from plan[1]
+        return
+    if plan[0] == "int":
+        _, a, d, n = plan
+        for k in range(n + 1):
+            yield a + k * d
+        return
+    _, a, d, n, last = plan
     half = n // 2
-    for k in range(half + 1):
-        v[k] = a + k * d
-        v[n - k] = last - k * d
-    if n % 2 == 0:
-        v[half] = (a + last) / 2
-    return v
+    for k in range(n + 1):
+        if n % 2 == 0 and k == half:
+            yield (a + last) / 2
+        elif k <= half:
+            yield a + k * d
+        else:
+            yield last - (n - k) * d
+
+
+def _colon_array(a, d, b):
+    """a:d:b's elements as a float64 vector, made under _made: admitted against the host's memory first (the vector,
+    and for a non-integer step the half-length vectors it is computed from), and refused at 5 GB or more as MATLAB
+    refuses it; computed in place, each element as _colon_iter gives it"""
+    plan = _colon_plan(a, d, b)
+    if plan[0] == "list":
+        return np.array(plan[1], dtype=np.float64)
+    n = plan[3]
+    if plan[0] == "int":
+        with _made((1, n + 1), 8):
+            v = np.arange(n + 1, dtype=np.float64)
+            v *= plan[2]
+            v += plan[1]
+            return v
+    _, a, d, n, last = plan
+    half = n // 2
+    with _made((1, n + 1), 8, copies=2):
+        v = np.empty(n + 1, dtype=np.float64)
+        # (the first half a + k d, k = 0..half; the second counted back from the end, last - k d)
+        k = np.arange(half + 1, dtype=np.float64)
+        k *= d
+        np.add(k, a, out=v[:half + 1])
+        np.subtract(last, k, out=k)
+        v[n - half:][::-1] = k
+        if n % 2 == 0:
+            v[half] = (a + last) / 2
+        return v
 
 
 def colon(a, b, c=None):
@@ -1607,13 +1649,13 @@ def colon(a, b, c=None):
     if not ischar and (type(start) is Char or type(stop) is Char):
         # (colon's page lists char operands but not the class of a mixed range)
         raise _err("A colon range with one char end point and one numeric one is not supported in Sagebrush; convert with double().")
-    vals = _colon_values(_scalar(start), _scalar(step), _scalar(stop))
-    arr = np.array(vals, dtype=np.float64).reshape((len(vals), 1))
+    vals = _colon_array(_scalar(start), _scalar(step), _scalar(stop))
+    arr = vals.reshape((vals.size, 1))
     if ischar:
         return Char(arr)
     if cls != "double":
         return _finish(arr, cls)
-    return _box(arr) if len(vals) == 1 else arr
+    return _box(arr) if vals.size == 1 else arr
 
 
 def frange(a, b):
@@ -1626,12 +1668,11 @@ def frange(a, b):
         if b == _math.inf:
             raise _err("Maximum variable size allowed by the program is exceeded.")
         return map(float, range(int(a), int(_math.floor(b)) + 1)) if b >= a else iter(())
-    return iter(_colon_values(a, 1.0, b))
+    return _colon_iter(a, 1.0, b)
 
 
 def frange3(a, d, b):
-    for x in _colon_values(_scalar(a), _scalar(d), _scalar(b)):
-        yield x
+    yield from _colon_iter(_scalar(a), _scalar(d), _scalar(b))
 
 
 def columns(v):
@@ -2429,48 +2470,62 @@ class _made:
     MATLAB's 2^48-byte refusal first (_refuse_huge); then an out-of-memory refusal of a request of 5 GB or more is
     reported as MATLAB's array-size-preference error, its message naming the size (shown, else dims) as MATLAB does"""
 
-    def __init__(self, dims, itemsize, shown=None):
+    def __init__(self, dims, itemsize, shown=None, native=None, copies=1):
         _refuse_huge(dims, itemsize)
         self.need = _prod(dims) * itemsize
         self.dims = shown or dims
+        # (what making it takes here: Sagebrush's own bytes per element, times the buffers alive at once)
+        self.host = _prod(dims) * (native or itemsize) * copies
 
     def __enter__(self):
+        # (admitted against this host's memory before anything is made)
+        try:
+            _admit_bytes(self.host, "An array of %s elements" % "x".join(str(int(k)) for k in self.dims))
+        except MemoryError as e:
+            self._report(MemoryError, e)
+            raise
         return self
 
-    def __exit__(self, kind, e, tb):
+    def _report(self, kind, e):
         if kind is not None and issubclass(kind, MemoryError) and self.need >= _SIZE_PREFERENCE_BYTES:
             raise _err("Requested %s (%.1fGB) array exceeds maximum array size preference (5.0GB) and might cause MATLAB "
                        "to become unresponsive." % ("x".join(str(int(k)) for k in self.dims), self.need / 2 ** 30),
                        "MATLAB:array:SizeLimitExceeded")
+
+    def __exit__(self, kind, e, tb):
+        self._report(kind, e)
         return False
 
 
 # the bytes Sagebrush spends on one element of a cell array made with empty elements (measured on node: about
 # 430, the empty double each holds and its place in the list)
 _CELL_ELEMENT_BYTES = 512
-# where this host's memory can't be measured (the browser today), the most a cell array's estimated memory may be:
-# 2 GiB, about 4 million elements at _CELL_ELEMENT_BYTES, matching the legacy full-array cap for doubles
+# where this host's memory can't be measured (the browser today), the most an array's estimated memory may be: 2 GiB
+# (for a cell array about 4 million elements at _CELL_ELEMENT_BYTES), matching the legacy full-array cap for doubles
 # ((1 << 28) x 8 bytes, _matlab_sparse._legacy_full_arr) and half the 4 GiB wasm32 ceiling; not a guarantee that
 # the host has that memory free (a measured host is admitted by the Ledger instead)
-_CELL_UNMEASURED_MAX_BYTES = 1 << 31
+_UNMEASURED_MAX_BYTES = 1 << 31
+
+
+def _admit_bytes(need, what):
+    """need bytes for one array admitted before anything is made, against this host's memory, or against the fixed
+    bound where it can't be measured: the memory guard's refusal (a MemoryError: MATLAB:nomem, MATLAB's out of
+    memory) when it would not fit; below the small-need floor nothing is read"""
+    if need <= _sp.SMALL_NEED:
+        return
+    rec = _sp._capacity_record()
+    if _sp.unmeasured_reason(rec) is not None:
+        if need > _UNMEASURED_MAX_BYTES:
+            from _memguard import memory_guard
+            raise memory_guard(what, need, _UNMEASURED_MAX_BYTES, "one array", record=rec, fixed=True)
+        return
+    import _matlab_ledger
+    _matlab_ledger.Ledger(what, "one array", rec=rec).reserve(need, "array")
 
 
 def _admit_cells(n):
-    """a cell array of n elements admitted before any is made, against this host's memory, or against the
-    fixed bound where it can't be measured: the memory guard's refusal (MATLAB:nomem, MATLAB's out of memory)
-    when it would not fit"""
-    need = n * _CELL_ELEMENT_BYTES
-    if need <= _sp.SMALL_NEED:
-        return
-    what = "A cell array of %d elements" % n
-    rec = _sp._capacity_record()
-    if _sp.unmeasured_reason(rec) is not None:
-        if need > _CELL_UNMEASURED_MAX_BYTES:
-            from _memguard import memory_guard
-            raise memory_guard(what, need, _CELL_UNMEASURED_MAX_BYTES, "one array", record=rec, fixed=True)
-        return
-    import _matlab_ledger
-    _matlab_ledger.Ledger(what, "one array", rec=rec).reserve(need, "cells")
+    """a cell array of n elements admitted before any is made (_admit_bytes, at Sagebrush's bytes per element)"""
+    _admit_bytes(n * _CELL_ELEMENT_BYTES, "A cell array of %d elements" % n)
 
 
 def _refuse_huge_growth(dims, cur, v, linear=False):
@@ -2485,7 +2540,8 @@ def _refuse_huge_growth(dims, cur, v, linear=False):
             raise MemoryError()
         _admit_cells(_prod(dims))
         return None
-    return _made(dims, _itemsize(cur) if type(cur) in (np.ndarray, Char) else _itemsize(v), (_prod(dims), 1) if linear else None)
+    return _made(dims, _itemsize(cur) if type(cur) in (np.ndarray, Char) else _itemsize(v), (_prod(dims), 1) if linear else None,
+                 native=_arr(cur).dtype.itemsize if type(cur) in (np.ndarray, Char) else None)
 
 
 def _del_oob(pos, n):
@@ -4434,8 +4490,19 @@ def _cls_bytes(cls):
     return {"double": 8, "single": 4, "logical": 1}.get(cls) or (np.dtype(_INTS[cls][0]).itemsize if cls in _INTS else 8)
 
 
-def _filled(dims, value, cls):
+def _filled(dims, value, cls, like=None):
+    """an array of dims filled with value, of class cls, made complex as the prototype like is (zeros(...,
+    'like', 1i)): made in its final type at once, inside _made, so the admission counts the complex result and nothing
+    is converted after it"""
     cls = cls or "double"
+    cplx = cls in ("double", "single") and like is not None and _isnumlike(like) and _arr(like).dtype.kind == "c"
+    if cplx:
+        dt = np.complex64 if cls == "single" else np.complex128
+        with _made(dims, 2 * _cls_bytes(cls)):
+            a = np.full(_stored(dims), value, dtype=dt)
+            # (complex, even with no imaginary part, as a prototype's complexity is kept: not _box, which makes such
+            # results real as arithmetic does)
+            return complex(a.reshape(-1)[0]) if a.size == 1 and dt is np.complex128 else _canon(a)
     with _made(dims, _cls_bytes(cls)):
         if cls == "double":
             return _box(np.full(_stored(dims), value, dtype=np.float64))
@@ -4474,13 +4541,13 @@ def _as_like(r, p):
 @_bs("zeros")
 def zeros_(*args):
     d, cls = _dimsarg(args, "zeros")
-    return _as_like(_filled(d, 0, cls), _like_proto(args))
+    return _filled(d, 0, cls, _like_proto(args))
 
 
 @_bs("ones")
 def ones_(*args):
     d, cls = _dimsarg(args, "ones")
-    return _as_like(_filled(d, 1, cls), _like_proto(args))
+    return _filled(d, 1, cls, _like_proto(args))
 
 
 @_bs("true")
@@ -4524,7 +4591,7 @@ def eps_(*args):
         e = _math.frexp(x)[1]
         return _math.ldexp(1.0, e - 53)
     d, cls = _dimsarg(args, "eps")
-    return _as_like(_filled(d, 2.220446049250313e-16 if cls != "single" else 1.1920929e-07, cls), _like_proto(args))
+    return _filled(d, 2.220446049250313e-16 if cls != "single" else 1.1920929e-07, cls, _like_proto(args))
 
 
 @_bs("i", "j")
@@ -4538,7 +4605,7 @@ def _float_limit(name, a, dbl, sgl):
     d, cls = _dimsarg(a, name)
     if cls not in (None, "double", "single"):
         raise _err("%s: the class must be 'double' or 'single'." % name)
-    return _as_like(_filled(d, sgl if cls == "single" else dbl, cls), _like_proto(a))
+    return _filled(d, sgl if cls == "single" else dbl, cls, _like_proto(a))
 
 
 @_bs("realmax")
@@ -4599,9 +4666,21 @@ def eye_(*args):
     d, cls = _dimsarg(args, "eye")
     if len(d) > 2:
         raise _err("N-dimensional arrays are not supported.")
-    with _made(d, _cls_bytes(cls)):
-        m = np.eye(d[0], d[1])
-        return _as_like(_finish(_contig(m.T), cls or "double"), _like_proto(args))
+    # (made in storage order, eye(n, m) being eye(m, n) transposed, and in its final type at once: a complex
+    # prototype's complex identity, or the class's own; its entries are exactly 0 and 1, so nothing is converted
+    # or rounded after it, and the result is the only array made)
+    p = _like_proto(args)
+    cplx = cls in (None, "double", "single") and p is not None and _isnumlike(p) and _arr(p).dtype.kind == "c"
+    cls = cls or "double"
+    if cplx:
+        dt = np.complex64 if cls == "single" else np.complex128
+    else:
+        dt = {"double": np.float64, "single": np.float32, "logical": np.bool_}.get(cls) or _INTS[cls][0]
+    with _made(d, (2 if cplx else 1) * _cls_bytes(cls)):
+        a = np.eye(d[1], d[0], dtype=dt)
+        if cplx:
+            return complex(a.reshape(-1)[0]) if a.size == 1 and dt is np.complex128 else _canon(a)
+        return _box(a) if cls in ("double", "logical") else _canon(a)
 
 
 # MATLAB's default generator: the Mersenne twister seeded with 5489, its
@@ -4757,7 +4836,8 @@ def _rand_class(args, fname, classes):
 @_bs("rand")
 def rand_(*args):
     d, cls = _rand_class(args, "rand", ("double", "single"))
-    with _made(d, _cls_bytes(cls)):
+    # (the samples in double and the class's copy)
+    with _made(d, _cls_bytes(cls), native=8, copies=2):
         n = _prod(d)
         v = _rng[0].random_sample(n) if n else np.zeros(0)
         return _finish(np.asarray(v, dtype=np.float64).reshape(_stored(d)), cls or "double")
@@ -4766,7 +4846,8 @@ def rand_(*args):
 @_bs("randn")
 def randn_(*args):
     d, cls = _rand_class(args, "randn", ("double", "single"))
-    with _made(d, _cls_bytes(cls)):
+    # (the ziggurat's two words per sample, the samples in double and the class's copy)
+    with _made(d, _cls_bytes(cls), native=8, copies=3):
         n = _prod(d)
         v = _randn(n) if n else np.zeros(0)
         return _finish(np.asarray(v, dtype=np.float64).reshape(_stored(d)), cls or "double")
@@ -4786,7 +4867,8 @@ def randi_(r, *args):
     top = 2.0 ** 24 if cls == "single" else 2.0 ** 53
     if abs(lo) > top or abs(hi) > top:
         raise _err("randi: the range [%d %d] is past the integers %s holds exactly: not supported in Sagebrush." % (lo, hi, "single" if cls == "single" else "a double"))
-    with _made(d, _cls_bytes(cls)):
+    # (the uniform samples, their scaled floor, the integers in double and the class's copy)
+    with _made(d, _cls_bytes(cls), native=8, copies=4):
         n = _prod(d)
         u = _rng[0].random_sample(n) if n else np.zeros(0)
         v = lo + np.floor(u * (hi - lo + 1))
@@ -4846,10 +4928,12 @@ def linspace_(a, b, n=100.0):
         return _finish(np.zeros((0, 1), dtype=np.complex128 if cplx else np.float64), cls)
     if n == 1:
         return _finish(np.array([[x2]]), cls)
-    h = (x2 - x1) / (n - 1)
-    y = x1 + np.arange(n, dtype=np.float64) * h
-    y[-1] = x2
-    return _finish(y.reshape((n, 1)), cls)
+    # (admitted first: the index vector, the points and the class's copy)
+    with _made((1, n), (16 if cplx else 8) // (2 if cls == "single" else 1), native=16 if cplx else 8, copies=3):
+        h = (x2 - x1) / (n - 1)
+        y = x1 + np.arange(n, dtype=np.float64) * h
+        y[-1] = x2
+        return _finish(y.reshape((n, 1)), cls)
 
 
 @_bs("logspace")
@@ -9107,8 +9191,11 @@ def deblank_(x):
 @_bs("blanks")
 def blanks_(n):
     n = _int_arg(n)
-    with _made((1, n), 2):
-        return Char(" " * n)
+    # (its character codes, made at once as a double array: no text or list of codes first)
+    if n <= 0:
+        return Char("")
+    with _made((1, n), 2, native=8):
+        return Char(np.full((n, 1), 32.0))
 
 
 @_bs("newline")
@@ -9795,8 +9882,8 @@ def cell_(*args):
         raise _err("cell takes sizes only: a text argument is not supported.")
     d, _ = _dimsarg(args, "cell")
     # (MATLAB's refusal at 2^48 bytes, 8 per element as MATLAB R2026b counts a cell's; below it, this host's memory)
-    with _made(d, 8):
-        _admit_cells(_prod(d))
+    # (MATLAB counts 8 bytes per element; Sagebrush spends _CELL_ELEMENT_BYTES)
+    with _made(d, 8, native=_CELL_ELEMENT_BYTES):
         return Cell([_empty_double() for _ in range(_prod(d))], d)
 
 
