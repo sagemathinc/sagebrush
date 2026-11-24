@@ -179,3 +179,30 @@ python3 web/serve.py 8765                          # serve web/dist on http://12
 (cd engine && cargo test -p sagebrush-<crate>)     # one engine crate
 scripts/test-all.sh --only checks                  # the bundle, size and generated-file checks
 ```
+
+## Before sending a head: the precheck
+
+```sh
+node scripts/precheck.mjs            # CI's quick gates and the tests the branch touches: a few minutes
+node scripts/precheck.mjs --quick    # only the gates that need no build: about a minute
+node scripts/precheck.mjs --full     # also the long census suites (limits, catalog)
+```
+
+It runs, with ci.yml's own commands, the checks a change most often fails on CI: the limits census, the unsafe
+inventory, test discovery, the generated files and docs index (`sync-python-package.sh --check`), the Core API
+surface, the interrupt census and the rest of the `checks` job's quick gates, and every test file the branch
+touches. It runs them all and reports every failure at once. An author runs it before sending a head, and a
+reviewer runs it first. A track gets it with its pull of master, which brings the workflow lines it checks
+against; before that, a copy of `scripts/precheck.mjs` and `scripts/engine-cache.mjs` runs there and skips the gates
+the track's own CI doesn't have yet. When CI fails on a gate this could have run, add the gate to `STEPS` in
+`scripts/precheck.mjs` with ci.yml's command: `scripts/test-precheck.mjs` holds each such step to a line of a
+workflow.
+
+Its engine is the tree's own: `node scripts/engine-cache.mjs` fetches the pinned modules when the engine's source
+is master's, and otherwise copies the build of that exact source (engine/ and its build scripts, committed or
+not) from a cache shared by every checkout on the machine, building it only the first time.
+`node scripts/engine-cache.mjs --check` fails when `wasm/` is not this tree's engine, so a test never runs a stale
+or borrowed module.
+
+A meter review breaks every charge site in turn, with `scripts/meter-mutants.py`: the standard mutants (charge
+before the work, a dropped count, a dropped poll, a dropped preflight) are in its header.
