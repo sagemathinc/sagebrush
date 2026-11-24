@@ -3531,6 +3531,17 @@ def sqrt(x):
 
         sage: sqrt(16), sqrt(9/4), sqrt(2), sqrt(2.0)
         (4, 3/2, sqrt(2), 1.41421356237310)
+
+    Of an element of CC, Sage's sqrt: an exact 0 real part on the negative
+    real axis, |z| correctly rounded (here the bounds of its rounding, in
+    exact fractions)::
+
+        sage: sqrt(CC(-4, 0)), sqrt(CC(-3, 4)), sqrt(CC(0, 0))
+        (2.00000000000000*I, 1.00000000000000 + 2.00000000000000*I, 0.000000000000000)
+        sage: import random, math; from fractions import Fraction as F; from _sage_matrix import _hypot_rn  # sagebrush only
+        sage: random.seed(1); xs = [(math.ldexp(random.uniform(1, 2), random.randint(-60, 60)), math.ldexp(random.uniform(1, 2), random.randint(-60, 60))) for i in range(1000)]  # sagebrush only
+        sage: all((F(h) - F(math.ulp(h)) / 2) ** 2 <= F(x) ** 2 + F(y) ** 2 <= (F(h) + F(math.ulp(h)) / 2) ** 2 for x, y in xs for h in [_hypot_rn(x, y)])  # sagebrush only
+        True
     """
     if isinstance(x, float):
         if isinstance(x, _RealBig):
@@ -3546,10 +3557,10 @@ def sqrt(x):
             return CC(0, _math.sqrt(-x))
         return RealNumber(_math.sqrt(x))
     if type(x).__name__ == "ComplexNumber":
-        # (an element of CC: Sage's sqrt, not its power z^0.5 (NaN at 0); the
-        # double root, checked as CC's functions are, past the doubles too)
-        from _sage_expr import _cc_function
-        return _cc_function("sqrt", (x,), CC(complex(x) ** 0.5))
+        # (an element of CC: Sage's sqrt, step by step, not its power z^0.5,
+        # which is exp(log(z)/2) and NaN at 0)
+        from _sage_matrix import _cc_sqrt
+        return _cc_sqrt(x)
     if isinstance(x, complex):
         return CC(x ** 0.5)
     if isinstance(x, int) and x >= 0:
