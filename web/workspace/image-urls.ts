@@ -18,12 +18,16 @@ export class ImageUrls {
   private loading = new Map<string, Promise<void>>();
   // (each path's version, bumped when it is let go (retain, clear): a read still on its way for it is dropped when it
   //  arrives, so nothing let go comes back)
+  //  Versions come from one rising counter, and clear() starts a new floor and forgets the map, so the map holds only
+  //  the paths of the document shown, and every version from before a clear() is below every one after it.)
   private ver = new Map<string, number>();
-  // (how many clear()s: ready() passes again only after one)
+  private counter = 0;
+  private floor = 0;
+  // (how many clear()s: ready() waits again only after one)
   private clears = 0;
-  private version = (p: string) => this.ver.get(p) ?? 0;
+  private version = (p: string) => this.ver.get(p) ?? this.floor;
   private letGo(p: string) {
-    this.ver.set(p, this.version(p) + 1);
+    this.ver.set(p, ++this.counter);
     const u = this.urls.get(p);
     if (u?.shown) URL.revokeObjectURL(u.shown.url);
     this.urls.delete(p);
@@ -49,11 +53,13 @@ export class ImageUrls {
    * export embeds what the workspace has now, as Export all and a push do. */
   async ready(paths: string[]): Promise<void> {
     // (waits that a clear() made stale (another document shown, then perhaps this one again): see below)
-    const clears = this.clears;
+    let clears = this.clears;
     await this.pass(paths);
     // (a clear() meanwhile: only the reads the document shown now has started for these same paths are waited for,
-    //  never new ones, so the document before gets nothing loaded again)
-    for (let i = 0; i < 3 && clears !== this.clears; i++) {
+    //  never new ones, so the document before gets nothing loaded again; again after each further clear(), however
+    //  many, until one wait passes with none)
+    while (clears !== this.clears) {
+      clears = this.clears;
       const pending = paths.map((p) => this.loading.get(p)).filter((x): x is Promise<void> => !!x);
       if (!pending.length) return;
       await Promise.all(pending);
@@ -116,6 +122,11 @@ export class ImageUrls {
   }
   /** Let go of every image (another document shown): their URLs revoked and their bytes dropped, and any read still on
    * its way dropped when it arrives. */
-  clear() { this.clears++; for (const p of [...this.urls.keys(), ...this.loading.keys()]) this.letGo(p); }
+  clear() {
+    this.clears++;
+    for (const p of [...this.urls.keys(), ...this.loading.keys()]) this.letGo(p);
+    this.floor = ++this.counter;
+    this.ver.clear();
+  }
   dispose() { this.clear(); }
 }

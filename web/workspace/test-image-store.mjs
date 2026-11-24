@@ -186,6 +186,27 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   ok(!early && U.bytes(p) !== null, "ready(): after a clear() and a reload of the same path, it waits for the new read, and the image is held", { early });
   U.dispose();
 }
+// ---- the same, switched back and forth five times while ready() waits: it returns only once the last read is in
+{
+  const real = new Uint8Array(64).fill(7); real.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]);
+  const releases = [];
+  const U = new ImageUrls(() => new Promise((r) => releases.push(() => r(real))), () => {});
+  const p = "/Attachments/nb-ab/y.png";
+  const r = U.ready([p]);
+  let done = false;
+  void r.then(() => (done = true));
+  for (let k = 0; k < 5; k++) {
+    U.clear();
+    void U.load(p);
+    releases[k]();
+    await new Promise((res) => setTimeout(res, 5));
+  }
+  const early = done;
+  releases[5]();
+  await r;
+  ok(!early && U.bytes(p) !== null, "ready(): switched back and forth five times, it waits for the last read, and the image is held", { early, reads: releases.length });
+  U.dispose();
+}
 // ---- an attachment named "__proto__" survives import and export
 {
   const S = store();
