@@ -690,6 +690,16 @@ jobs:
         if: matrix.shard == 'share-dialog-2' && needs.changes.outputs.web_share == 'true'
         timeout-minutes: 20
         run: node scripts/web-tests.mjs run web-sync.7
+      # (the hosted LTI tool, MS-RSL, in two shards of about 5 min each, as its two jobs were in the cloud repository's CI:
+      # the tool and checkpoints part 1; checkpoints part 2 and grading)
+      - name: the LTI tool and its content, part 1 (web-sync.8)
+        if: matrix.shard == 'lti'
+        timeout-minutes: 20
+        run: node scripts/web-tests.mjs run web-sync.8
+      - name: the LTI tool's content, part 2, and grading (web-sync.9)
+        if: matrix.shard == 'lti-b'
+        timeout-minutes: 20
+        run: node scripts/web-tests.mjs run web-sync.9
 
   # "Export all current files (.zip)" (E1): its browser test.  The scale test's CI pass, the controls (each rule
   # undone in a copy of the chunk, its named check failing) and the campaign check run in the long tier (export-controls).

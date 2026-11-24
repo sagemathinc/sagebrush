@@ -1,0 +1,12 @@
+Finite field of size 2^6
+g 1
+Mapping from: FldFin: F to FldFin: G
+true true true
+h Finite field of size 2^4
+Finite field of size 2^6
+Mapping from: FldFin: F to FldFin: G
+
+In file "test_error_gen_names_multiple_assign.m", line 15, column 9:
+>> K<k>, p := 5;
+           ^
+Runtime error in :=: Expected to assign 2 value(s) but only computed 1 value(s)
