@@ -23,7 +23,7 @@ True
 == printed
 []
 == sagebrush-only
-['test_known.py', 'test_unsupported.py', 'test_version.py']
+['test_known.py', 'test_tree_cleanup.py', 'test_unsupported.py', 'test_version.py']
 == sagebrush-only-unknown
 []
 == oracle-and-sagebrush-only

@@ -1,0 +1,14 @@
+== fit.classifier
+True
+== fit.classifier-weights
+True
+== fit.regressor
+True
+== fit.two-outputs
+True
+== fit.many
+True
+== fit.failure
+("injected fit failure after the dataset's copy", True)
+== fit.after-failure
+True

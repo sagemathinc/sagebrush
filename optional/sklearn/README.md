@@ -23,7 +23,7 @@ Every other scikit-learn name raises `NotImplementedError("... is not in Sagebru
 `tests/test_*.py` run under the built CLI with the package set (`node scripts/optional-packages.mjs test --pkgset ...`). Each is compared with its `.out`:
 
 - **scikit-learn's own output** (`tests/oracle/`, recorded by `tests/gen-oracle.sh` in the environment `tests/oracle-env.txt`; `tests/ORACLE.md`) for every other test;
-- **Sagebrush's output** for the tests listed in `tests/sagebrush-only.txt`, where the oracle can't speak: `test_unsupported`, `test_version` and `test_known` (which checks `known.json`, and that every test is either in that list or has an oracle output, never both).
+- **Sagebrush's output** for the tests listed in `tests/sagebrush-only.txt`, where the oracle can't speak: `test_unsupported`, `test_version`, `test_tree_cleanup` (the decision-tree kernel's copy of the data is released after every fit, failed ones included) and `test_known` (which checks `known.json`, and that every test is either in that list or has an oracle output, never both).
 
 After changing a file under `py/`, run `python3 -I tests/gen-manifest.py optional/sklearn` to update `sagebrush.json`.
 

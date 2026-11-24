@@ -4,3 +4,4 @@
 test_known.py
 test_unsupported.py
 test_version.py
+test_tree_cleanup.py
