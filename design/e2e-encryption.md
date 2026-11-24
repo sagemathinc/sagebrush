@@ -331,6 +331,12 @@ Assignment files launched from a school's LMS (LTI) aren't end-to-end encrypted.
   - **A link requires authentication.** It's never a durable bearer URL to plaintext.
 - **Said plainly:** the editor shows that a file is class work and is not end-to-end encrypted.
 - **A copy into the student's own files** is the student's, and is end-to-end encrypted like anything else they own.
+- **Gates before any build** (SEC):
+  - launch replay prevention: each launch's nonce is used once, within its validity;
+  - tenant and course isolation: no row is reachable across platforms, deployments or contexts;
+  - deletion and retention enforced, by the rules §10 Q10 sets.
+
+  Q10 (who may read, and how long the store keeps it) must be answered before any class-store code is built.
 - **The threat model differs:** a breach, an insider or a legal demand can read class-store files, as with the LMS itself. **The server, or an insider, can also alter, delete or roll back class work, and could change a grade it sends through AGS.** Nothing in this design detects that (§8).
 
 ## 6. Agents
@@ -436,7 +442,7 @@ With a handful of DEV accounts, cross-account dedup is likely tiny. The measurem
 7. **Link previews:** encrypted link shares show the generic card, with no title. Is that acceptable?
 8. **Agent logs:** are they private synced data, and so under end-to-end encryption too? Today their mirror uses a server-held key.
 9. **The relay to your own computers** (today "encrypted on the way but not end to end"): bring it under end-to-end encryption too?
-10. **Class work (§5.2):** is the class store, readable by the server and filed under (course, assignment, student), with no sync or recovery code and submission through LTI AGS, the right exception? Who may read it beyond the instructor and graders, and for how long is it kept?
+10. **Class work (§5.2):** is the class store, readable by the server and filed under (course, assignment, student), with no sync or recovery code and submission through LTI AGS, the right exception? Who may read it beyond the instructor and graders, and for how long is it kept? (This must be answered before any class-store code is built.)
 
 ---
 
