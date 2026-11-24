@@ -17,7 +17,7 @@ Sagebrush's pandas 0.x (plan-pandas r7, M1): a subset of pandas 3.1.0's API, in 
 - **Exporting str data:** `to_numpy()` and `.values` of a str column or of a frame of only str columns, and `unique()` of a str Series, give a `'<U'` numpy array where pandas gives an object array (or its StringArray): Sagebrush's numpy has no object dtype yet. Missing values in str data, a frame mixing str with other columns, and `numpy.asarray` of str data are refused. `tests/test_str_export.py` states what Sagebrush gives.
 - **Times (PR A of the xlsx/time-series design):** naive `datetime64[us]` columns and `DatetimeIndex`, `Timestamp`, `NaT` and `to_datetime` (ISO dates and times, M/D/YYYY, YYYYMMDD, a `format` of `%Y %m %d %H %M %S %y %f`, numbers with a `unit` and `origin`; a list's format inferred from its first string, as pandas 3.1). Also `.dt.year/.month/.day/.hour/.minute/.second/.strftime`, an index's `.year/.month/.day/.strftime`, `Series/DataFrame.diff(periods)`, `dropna(how, thresh, subset, inplace)`, and `DataFrame.set_index(label)`. Sagebrush's numpy has no `datetime64` yet, so a datetime column is int64 microseconds inside the package: its `.values`/`.to_numpy()` raise NotImplementedError rather than give another type, as do `Timedelta`, timezones, nanosecond results, and times outside the years 1685–2255 (where those microseconds stop being exact).
 
-Everything outside the subset raises `NotImplementedError("... is not in Sagebrush's pandas 0.x subset")` before doing any work. `tests/test_unsupported.py` lists each such form, and `known.json` gives the reason for each one.
+Everything outside the subset raises `NotImplementedError("... is not in Sagebrush's pandas 0.x subset")` before doing any work. `tests/test_unsupported.py` lists each such form, and `known.json` gives the reason for each one. `known.json`'s `value_divergences` also name the few ruled places where a value differs from pandas without a refusal (today one: a groupby sum or mean over a frame with a float column added after construction, which can take a different summation path; `tests/test_groupby_blocks.py` pins it).
 
 ## Limits
 
@@ -28,7 +28,7 @@ When the engine's limit `pandas.decoded_bytes` is finite (grading sets it; it is
 `tests/test_*.py` run under the built CLI with the package set (`node scripts/optional-packages.mjs test --pkgset ...`). Each is compared with its `.out`:
 
 - **pandas' own output** (`tests/oracle/`, recorded by `tests/gen-oracle.sh` in the environment `tests/oracle-env.txt`) for every other test;
-- **Sagebrush's output** for the tests listed in `tests/sagebrush-only.txt`, where the oracle can't speak: `test_unsupported`, `test_repr_escape`, `test_budget`, `test_budget_map`, `test_budget_order` and `test_known` (which checks `known.json`, and that every test is either in that list or has an oracle output, never both). `tests/gen-oracle.sh` skips that list.
+- **Sagebrush's output** for the tests listed in `tests/sagebrush-only.txt`, where the oracle can't speak: `test_unsupported`, `test_repr_escape`, `test_budget`, `test_budget_map`, `test_budget_order`, `test_read_excel_budget`, `test_read_excel_limits`, `test_str_export`, `test_groupby_blocks` and `test_known` (which checks `known.json`, and that every test is either in that list or has an oracle output, never both). `tests/gen-oracle.sh` skips that list.
 
 A test with a `test_<name>.limits.json` beside it runs under those limits.
 

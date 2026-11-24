@@ -1001,5 +1001,12 @@
       "message": "pandas.DataFrame.groupby(level=) other than the index itself is not in Sagebrush's pandas 0.x subset",
       "reason": "level= other than the index itself needs a MultiIndex, which isn't in the subset; it raises before any work"
     }
+  ],
+  "value_divergences": [
+    {
+      "case": "blocks.added-nan-col",
+      "where": "DataFrameGroupBy sum and mean of a frame in which a float column was added after construction (df['x'] = ..., assign, insert), with the rows already in group order; tests/test_groupby_blocks.py pins Sagebrush's values (pandas gives x sums 0.0 and 0.0 there and means 0.0, Sagebrush sums 1.0 and means 0.25)",
+      "reason": "the summation path can differ when a float column was added after construction (df['x'] = ..., assign, insert). On ordinary data that's a few ulps; on data with cancellation the sum can differ by the rounding error of the larger terms (e.g. 0 against 1 for [1e100, 1, -1e100, 1]). pandas picks its path per internal block of columns, and an added column is its own block until pandas consolidates; Sagebrush's frame treats a frame's columns of one float dtype as one block, as the constructor and read_csv make them (ruled a documented divergence)"
+    }
   ]
 }

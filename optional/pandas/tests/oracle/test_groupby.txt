@@ -450,6 +450,10 @@ c    6.0
 Name: x, dtype: float32
 == float32-sum.exact
 [100000000.0]
+== float32-kahan-sum.exact
+[2.0, 9.0]
+== float32-kahan-mean.exact
+[0.4000000059604645, 9.0]
 == kahan.exact
 [1.0, 1.0]
 == kahan-mean.exact
