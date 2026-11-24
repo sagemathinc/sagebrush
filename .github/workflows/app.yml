@@ -250,8 +250,11 @@ jobs:
       # (each self-test step bounded: the job's 40 min let a hung self-test hold its runner and the merge queue's entry
       # 32 min, Nov 23 2026.  Linux: 25 green runs took at most 7.9 min and failing ones ended by themselves within 12.4
       # (run.mjs bounds its main run at 6 min): 15.  macOS and Windows: at most 3.8 min green: 10)
+      # (the unstripped AppImage's self-test only on master and track pushes, a dispatch and the schedule: on a pull request
+      # and in the merge queue the stripped AppImage's below, which is what ships, is the one Linux self-test.  6.6 min
+      # each; CI job cuts, cut 2, William Nov 24 2026)
       - name: self-test (Linux, in a virtual display)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
         timeout-minutes: 15
         run: xvfb-run -a node app/selftest/run.mjs ${{ matrix.exe }}
       # GTK's TIFF loader brings libtiff and libjbig (GPL-2+): removed, and
