@@ -1812,8 +1812,25 @@ def rot90(m, k=1, axes=(0, 1)):
     return flip(swapaxes(m, a0, a1), a1)
 
 
+def _shape_text(s):
+    # (a shape as NumPy's C messages print it: "(2,3)", "(3,)")
+    return "(" + ",".join(str(n) for n in s) + ("," if len(s) == 1 else "") + ")"
+
+
 def broadcast_to(array, shape, subok=False):
-    return _np.broadcast_to(asarray(array), _shape(shape))
+    a, target = asarray(array), _shape(shape)
+    # (NumPy's own refusals, in its order, #1908: its _broadcast_to's, then its iterator's, not the ufuncs')
+    if not target and a.shape:
+        raise ValueError("cannot broadcast a non-scalar to a scalar array")
+    if _builtins.any(n < 0 for n in target):
+        raise ValueError("all elements of broadcast shape must be non-negative")
+    if a.ndim > len(target):
+        raise ValueError("input operand has more dimensions than allowed by the axis remapping")
+    for n, t in zip(a.shape[::-1], target[::-1]):
+        if n != 1 and n != t:
+            raise ValueError("operands could not be broadcast together with remapped shapes [original->remapped]: %s  and "
+                             "requested shape %s" % (_shape_text(a.shape), _shape_text(target)))
+    return _np.broadcast_to(a, target)
 
 
 def broadcast_arrays(*args, subok=False):
@@ -1822,7 +1839,26 @@ def broadcast_arrays(*args, subok=False):
 
 
 def broadcast_shapes(*args):
-    return _np.broadcast_shapes(*[_shape(s) for s in args])
+    shapes = [_shape(s) for s in args]
+    # (NumPy makes an empty array of each shape first)
+    if _builtins.any(n < 0 for s in shapes for n in s):
+        raise ValueError("negative dimensions are not allowed")
+    # (NumPy's message where shapes don't broadcast, #1908: its broadcast iterator walks the result's dimensions from
+    # the first, and in each the arguments in order, and names the first that disagrees and the one that set that
+    # dimension's size)
+    nd = _builtins.max([len(s) for s in shapes], default=0)
+    for i in range(nd):
+        size, src = 1, None
+        for j, s in enumerate(shapes):
+            k = i + len(s) - nd
+            if k < 0 or s[k] == 1:
+                continue
+            if size == 1:
+                size, src = s[k], j
+            elif s[k] != size:
+                raise ValueError("shape mismatch: objects cannot be broadcast to a single shape.  Mismatch is between arg "
+                                 "%d with shape %s and arg %d with shape %s." % (src, tuple(shapes[src]), j, tuple(s)))
+    return _np.broadcast_shapes(*shapes)
 
 
 def append(arr, values, axis=None):

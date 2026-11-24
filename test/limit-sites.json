@@ -13609,6 +13609,11 @@
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
  },
+ "src/runtime/numpy.ts :: cumulative :: if (axis !== null && axis !== undefined) normAxis(intNum(axis), a.ndim); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; it refuses an axis out of bounds for a 0-d array viewed as one element, as NumPy's cumsum"
+ },
  "src/runtime/numpy.ts :: itemIndex :: if (typeof x === \"bigint\" && (x > I64MAX || x < I64MIN)) raise(T.OverflowError, \"Python int too large to convert to C long\"); #0": {
   "class": "none",
   "owner": "NumPy shim",
