@@ -94,4 +94,7 @@ print Z.1/0;
 1/0x0 true;
 x := 1/0x00;
 h := 1; h div:= 1/0x0;
+// = after the zero continues the expression, as Magma reads it
+print 1/0 = 1;
+x := [1/0 = 1];
 print "end";

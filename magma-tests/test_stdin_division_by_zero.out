@@ -350,4 +350,12 @@ User error: Illegal zero denominator
 >> h := 1; h div:= 1/0x0;
                      ^
 User error: Illegal zero denominator
+
+>> print 1/0 = 1;
+           ^
+User error: Illegal zero denominator
+
+>> x := [1/0 = 1];
+           ^
+User error: Illegal zero denominator
 end
