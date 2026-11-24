@@ -9508,7 +9508,8 @@ class _MNFElt(_snf.NumberFieldElement):
 
 class _MNumberField(_snf.NumberField_absolute):
     _element_class = _MNFElt
-    _magma_block = True
+    # (not a block: after other values it prints on their line, print 1, K; is "1 Quadratic Field with ...", as
+    # Magma 2.18-5 prints it; a value after it starts a new line, as after any structure)
 
     def __init__(self, f, quadratic=False, irreducible=False):
         super().__init__(f, "$.1", irreducible=irreducible)
@@ -10096,9 +10097,10 @@ def MinimalPolynomial(x, sub=None):
     if sub is not None:
         raise MagmaError("MinimalPolynomial of these arguments is not supported yet", "'MinimalPolynomial'")
     if isinstance(x, _snf.NumberFieldElement):
+        # (in the session's ring over the rationals, as Magma 2.18-5's: P<y> := PolynomialRing(Rationals()); then
+        # MinimalPolynomial(w) prints as y^2 + 3)
         f = x.minpoly()
-        R = _sp.PolynomialRing_(_sp.QQ, "$.1")
-        return R(f.list())
+        return PolynomialRing(_QQ)(f.list())
     raise MagmaError("MinimalPolynomial: bad argument")
 
 
