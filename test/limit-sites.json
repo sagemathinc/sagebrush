@@ -7777,6 +7777,11 @@
   "owner": "the primes engine (li, prime_pi, zeta zeros)",
   "reason": "a unit test's inputs; refuses nothing"
  },
+ "engine/py/src/lib.rs :: call_bin :: total = total.checked_add(b.as_bytes().len()).ok_or_else(|| PyMemoryError::new_err(\"call_bin: a request too large\"))?; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the binding's sum of the request's pieces, checked: an overflow of usize (no request the frame cap admits reaches it) is a MemoryError, before any copy; refuses nothing a fitting request needs"
+ },
  "engine/py/src/lib.rs :: raster_render :: const RASTER_MAX_FILE_BYTES: usize = 256 << 20; #0": {
   "class": "1+2",
   "owner": "raster/image I/O",
@@ -12795,7 +12800,7 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "lib/_sage_ffmat.py :: _ech_bin_call :: code: its reservation refused (Cap) is the memory error, a protocol or #0": {
+ "lib/_sage_ffmat.py :: _ech_bin_call :: reservation refused (Cap) is the memory error, a protocol or invariant #0": {
   "class": "2",
   "disposition": {
    "2": {

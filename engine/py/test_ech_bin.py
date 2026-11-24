@@ -16,20 +16,23 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CASES = os.path.join(HERE, "..", "..", "test", "ffmat_echelon_bin.py")
 
 bad = 0
-for case in ["route", "correct", "json", "probe", "preflight", "frame", "outcomes", "kernel", "mem", "cops"]:
+for case in ["route", "correct", "json", "probe", "preflight", "frame", "outcomes", "kernel", "kernelmem", "mem", "cops"]:
     t = time.time()
     p = subprocess.run([sys.executable, CASES, case], capture_output=True, text=True, timeout=1800)
     good = p.returncode == 0 and ("\nok %s " % case) in "\n" + p.stdout
     bad += not good
     print("%-10s %s  (%.1f s)" % (case, "ok" if good else "FAIL", time.time() - t))
-    if not good or case in ("mem", "cops"):
+    if not good or case in ("mem", "cops", "kernelmem"):
         print("    " + (p.stdout.strip() + ("\n" + p.stderr.strip()[-2000:] if not good else "")).replace("\n", "\n    "))
 
-# the binding borrows a bytes request (no copy) and takes nothing else: a
-# bytearray or memoryview is a TypeError, never a silent copy
+# the binding borrows a bytes request (no copy), or copies a list of bytes
+# pieces with checks for signals; anything else (a bytearray, a memoryview,
+# a list with another piece) is a TypeError, never a borrow of a mutable
+# buffer
 import sagebrush._engine as EN
 req = b"SBW1" + (12).to_bytes(4, "little") + b"nmod_poly_xx"
-for arg in (bytearray(req), memoryview(req)):
+assert isinstance(EN.call_bin([req[:5], req[5:]]), list)
+for arg in (bytearray(req), memoryview(req), [req[:5], bytearray(req[5:])]):
     try:
         EN.call_bin(arg)
         good = False

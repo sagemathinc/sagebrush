@@ -25,8 +25,10 @@ Each case prints "ok CASE ..." lines and raises on a failure.
                basis together)
     mem        the measured peaks (Linux) within the predicate's need, at
                1 x c, r x 1 and square shapes, with and without rows
-    cops       the route's uninterruptible C operations at their actual
-               maximum size (the frame cap), within the Stop bound
+    kernelmem  the kernel's admissions against its measured extraction and
+               basis, and the reply dead before the basis
+    cops       Stop during each frame-sized step at the frame cap (CPython),
+               each single-copy mutant missing the same bound
     interrupt [DIR]
                prints "ready" (and creates DIR/ready) just before a long
                binary elimination for the harness to interrupt
@@ -236,9 +238,11 @@ def case_probe():
     assert probe(S.inverse) == [(30, 60, True, cost(F, 30, 30))]
     r = probe(A.right_kernel)
     assert r[0] == (40, 70, True, FM._ech_kernel_out(40, 70)), r[0]
-    # (the worst rank, not the actual one: max k (c - k) over k <= min(r, c))
-    assert FM._ech_kernel_out(40, 70) == 8 * 35 * 35 and FM._ech_kernel_out(600, 600) == 8 * 300 * 300
-    assert FM._ech_kernel_out(5, 100) == 8 * 5 * 95 and FM._ech_kernel_out(7, 7) == 8 * 3 * 4
+    # (the worst rank, not the actual one: max k (c - k) over k <= min(r, c),
+    # W in its chunks, and the pivot flags, a bytearray of c)
+    out = lambda w, c: FM._ech_words_cost(w) + c + FM._ECH_HDR
+    assert FM._ech_kernel_out(40, 70) == out(35 * 35, 70) and FM._ech_kernel_out(600, 600) == out(300 * 300, 600)
+    assert FM._ech_kernel_out(5, 100) == out(5 * 95, 100) and FM._ech_kernel_out(7, 7) == out(3 * 4, 7)
     ok("each caller's shape, want_rows and G; rank/det/pivots charge no rows")
 
 
@@ -308,9 +312,10 @@ def case_outcomes():
     def fake(reply):
         def f(req):
             n[0] += 1
+            assert isinstance(req, list), "the route sends its request in pieces"
             if isinstance(reply, BaseException):
                 raise reply
-            return reply
+            return [reply] if isinstance(reply, bytes) else reply
         return f
     try:
         for label, reply, expect in [
@@ -330,13 +335,13 @@ def case_outcomes():
             except expect:
                 pass
             assert n[0] == 1, (label, "called", n[0])
-        for label, reply in [("Header", er(2)), ("Op", er(3)), ("no entry point", None)]:
+        for label, reply in [("Header", er(2)), ("Op", er(3)), ("no entry point", None), ("a bytes-only binding", TypeError("takes bytes"))]:
             n[0] = 0
             EN.call_bin = fake(reply)
             assert A.rank() == want and n[0] == 1, (label, n[0])
     finally:
         EN.call_bin = real
-    ok("Cap: the memory error; Frame/Count/Schema/Internal: RuntimeError; Domain: ValueError; a KeyboardInterrupt propagates; each called once; Header/Op/None: the other paths")
+    ok("Cap: the memory error; Frame/Count/Schema/Internal: RuntimeError; Domain: ValueError; a KeyboardInterrupt propagates; each called once; Header/Op/None/a bytes-only binding: the other paths")
 
 
 def kernel_check(A, dim):
@@ -357,7 +362,7 @@ def case_kernel():
     A = rank_r(F, 8, 512, 2)
     c, k = 512, 2
     need1 = FM._ech_need(8, c, True, FM._ech_kernel_out(8, c))
-    need2 = 8 * k * (c - k) + FM._ech_out_cost(F, c - k, c) + (FM._ECH_INT_COST + 8) * c + c + (FM._ECH_INT_COST + 8) * (c - k) + 4 * FM._ECH_HDR + FM._ECH_SLACK
+    need2 = FM._ech_kernel_need2(F, k, c)
     # (the basis's own echelon, the second call, has its own need)
     need3 = FM._ech_need(c - k, c, True, FM._ech_out_cost(F, c - k, c))
     assert need1 < need2
@@ -442,45 +447,222 @@ def case_mem():
     ok("the measured peaks within the predicate's need")
 
 
-def case_cops():
-    """The route's uninterruptible C operations, each at its actual maximum
-    size (a request at the frame cap: E = (2^28 - 100) / 8 words), timed
-    (the worst of three runs) against the interrupt harness's Stop bound
-    (web/interrupt-classify.mjs STOP_BOUND_MS): the words' allocation, the
-    frame's join, a reply-sized bytes copy (the binding's copy of the
-    reply, PyBytes::new / pyjs's slice) and the rows' frombytes.  A Stop
-    raised during one is seen once it returns."""
-    import array
+def case_kernelmem():
+    """The kernel's first admission against its extraction (CPython,
+    tracemalloc): wide kernels of non-small entries, whose basis the second
+    check refuses, peak (up to the refusal) within the first call's Python
+    share; a rank n / 2 square's whole call within the largest of its three
+    admissions; and the reply dead (a weakref) before the basis is admitted
+    (its second check) or built."""
+    if PYJS:
+        ok("skipped in pyjs (tracemalloc and weakref timing are CPython's)")
+        return
+    import gc
+    import tracemalloc
+    import weakref
+    F = GF(P63)
+    cost = FM._ech_out_cost
+    replies = []
+    real_reply, real_admit = FM._EchReply, FM._admit_size
+
+    class Watched(real_reply):
+        def __init__(self, pieces):
+            real_reply.__init__(self, pieces)
+            replies.append(weakref.ref(self))
+
+    def admit(base, m, n, factor=1):
+        # (the kernel's second check calls _admit_size just before the basis)
+        assert all(w() is None for w in replies), "the reply is still alive at the basis's admission"
+        return real_admit(base, m, n, factor)
+    FM._EchReply, FM._admit_size = Watched, admit
+    try:
+        for c in (1 << 16, 1 << 18):
+            A = rand_matrix(F, 1, c, 91, big=True)
+            n1 = FM._ech_need(1, c, True, FM._ech_kernel_out(1, c))
+            py1 = FM._ech_need(1, c, True, FM._ech_kernel_out(1, c), python_only=True)
+            del replies[:]
+            gc.collect()
+            tracemalloc.start()
+            tracemalloc.reset_peak()
+            try:
+                with_figure(FM._HEAP_SHARE * n1, lambda: A._kernel_basis())
+                raise AssertionError("1 x %d: the basis was admitted" % c)
+            except _memguard.SagebrushMemoryError as e:
+                assert "kernel basis" in str(e), str(e)
+            traced = tracemalloc.get_traced_memory()[1]
+            tracemalloc.stop()
+            print("    kernel 1x%d: traced %d up to the second check, the first admission's Python share %d (%.2f)" % (c, traced, py1, traced / py1), flush=True)
+            assert traced <= py1, (c, traced, py1)
+            assert replies and all(w() is None for w in replies)
+        n = 200
+        A = rank_r(F, n, n, n // 2, 92)
+        k = n // 2
+        needs = [FM._ech_need(n, n, True, FM._ech_kernel_out(n, n), python_only=True),
+                 FM._ech_kernel_need2(F, k, n),
+                 FM._ech_need(n - k, n, True, cost(F, n - k, n), python_only=True)]
+        del replies[:]
+        tracemalloc.start()
+        tracemalloc.reset_peak()
+        K = A._kernel_basis()
+        traced = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+        assert len(K) == n - k
+        print("    kernel %dx%d rank %d: traced %d, the admissions %r" % (n, n, k, traced, needs), flush=True)
+        assert traced <= max(needs), (traced, needs)
+    finally:
+        FM._EchReply, FM._admit_size = real_reply, real_admit
+    ok("wide kernels within the first admission up to the second check; the reply dead before the basis")
+
+
+def stop_latency(step, delays, need=3):
+    """The worst time from a SIGINT, sent after each delay into step(), to
+    its KeyboardInterrupt (step() run once per delay).  The signal comes
+    from a helper process (no thread or lock in this one, which an
+    asynchronous KeyboardInterrupt could leave held), which reports when it
+    sent it; a delay the step outlasts is skipped (the helper stopped, a
+    stray signal drained), and at least `need` delays must land."""
+    import signal
+    import subprocess
     import time
-    bound_ms = 250
+    worst, landed = 0.0, 0
+    for d in delays:
+        helper = subprocess.Popen([sys.executable, "-c",
+                                   "import os, sys, time\ntime.sleep(%r)\nt = time.time()\nos.kill(%d, %d)\nprint(repr(t), flush=True)" % (d, os.getpid(), int(signal.SIGINT))],
+                                  stdout=subprocess.PIPE, text=True)
+        caught = None
+        try:
+            step()
+        except KeyboardInterrupt:
+            caught = time.time()
+        while True:
+            # (the helper may still send: stop it, then drain its signal)
+            try:
+                if caught is None:
+                    helper.terminate()
+                out = helper.communicate()[0]
+                time.sleep(0.3)
+                break
+            except KeyboardInterrupt:
+                continue
+        sent = float(out) if out.strip() else None
+        if caught is not None and sent is not None:
+            worst = max(worst, caught - sent)
+            landed += 1
+    assert landed >= need, "only %d of %d signals landed inside the step" % (landed, len(delays))
+    return worst * 1e3
+
+
+def case_cops():
+    """Stop during each frame-sized step of the route at its actual maximum
+    size (a request at the frame cap, E = (2^28 - 100) / 8 words), CPython:
+    a SIGINT sent at several points into the step, and the worst time to its
+    KeyboardInterrupt, against a bound of BOUND_MS (a fifth of the interrupt
+    harness's 250 ms Stop bound, web/interrupt-classify.mjs: one run of a
+    chunk and a check), and for the whole engine call CALL_BOUND_MS (half
+    of it: the release of its frame-sized buffers after a Stop is added).  Each step's single-copy version (the mutant: the
+    whole buffer in one C operation, as before) must miss the same bound:
+    the measurement sees one uninterruptible copy of that size."""
+    if PYJS:
+        ok("skipped in pyjs: its copies into and out of the engine are chunked by construction (src/runtime/engine.ts binCallPieces); test/ffmat-echelon-bin.test.ts times them")
+        return
+    import array
+    import itertools
+    import time
+    BOUND_MS = 50
+    CALL_BOUND_MS = 125
+    from sagebrush._engine import call_bin
     e = (FM._ech_frame_cap() - 100) // 8
-    worst = {}
+    rows, cols = e // 1024, 1024
+    e = rows * cols
+    q = FM._ech_request_len(rows, cols)
+    results = {}
 
-    def timed(name, f):
-        for _ in range(3):
-            t = time.perf_counter()
-            x = f()
-            ms = (time.perf_counter() - t) * 1e3
-            del x
-            worst[name] = max(worst.get(name, 0), ms)
-    w = array.array("Q", [0]) * e
-    timed("words", lambda: array.array("Q", [0]) * e)
-    timed("join", lambda: b"".join([b"h" * 76, memoryview(w).cast("B"), b"t" * 24]))
-    req = b"".join([b"h" * 76, memoryview(w).cast("B"), b"t" * 24])
-    del w
-    timed("reply copy", lambda: bytes(memoryview(req)[1:]))
+    def timed(f):
+        t = time.perf_counter()
+        f()
+        return time.perf_counter() - t
 
-    def fb():
+    def delays(total, k=5):
+        return [total * (i + 1) / (k + 2) for i in range(k)]
+
+    # 1. pack: _ech_pack against the old words array and join
+    src = lambda: (itertools.repeat(P63 - 2, cols) for _ in range(rows))
+    dur = timed(lambda: FM._ech_pack(src(), rows, cols, P63, 3))
+    results["pack"] = stop_latency(lambda: FM._ech_pack(src(), rows, cols, P63, 3), delays(dur))
+
+    def old_pack():
+        w = array.array("Q", [0]) * e
+        return b"".join([b"h" * 76, memoryview(w).cast("B"), b"t" * 24])
+    dur = timed(old_pack)
+    results["pack (mutant: words + join)"] = stop_latency(old_pack, [0.05, 0.1] + delays(dur, 3))
+
+    # 2. the request into the binding: a frame-cap list of pieces (a zero
+    # E-word matrix: the engine refuses nothing, the reply has its rows)
+    zero = bytes(FM._ECH_PIECE)
+    le = lambda x, n: x.to_bytes(n, "little")
+    head = b"".join([b"SBW1", le(12, 4), b"nmod_echelon", le(3, 4), FM._ff._sbw1_u641(array.array("Q", (P63,))),
+                     le(24 + 8 * e, 4), b"MAT1", le(rows, 4), le(cols, 4), b"U641", le(e, 8)])
+    body = 8 * e
+    pieces = [head] + [zero] * (body // FM._ECH_PIECE) + ([bytes(body % FM._ECH_PIECE)] if body % FM._ECH_PIECE else [])
+    pieces.append(FM._ff._sbw1_u641(array.array("Q", (3,))))
+    assert sum(len(b) for b in pieces) == q
+    t = time.perf_counter()
+    reply = call_bin(pieces)
+    dur = time.perf_counter() - t
+    assert isinstance(reply, list) and reply[0][:6] == b"SBW1ok", reply[0][:40]
+    results["call (copy in, engine, reply out)"] = stop_latency(lambda: call_bin(pieces), delays(dur, 8))
+
+    def old_copy_in():
+        return b"".join(pieces)
+    dur = timed(old_copy_in)
+    results["copy in (mutant: one copy)"] = stop_latency(old_copy_in, [0.05, 0.1] + delays(dur, 3))
+    one = b"".join(pieces)
+    del pieces
+    t = time.perf_counter()
+    call_bin(one)
+    dur = time.perf_counter() - t
+    results["reply out (mutant: one bytes)"] = stop_latency(lambda: call_bin(one), delays(dur, 10))
+    del one
+
+    # 3. the parse: the reply's runs against one frombytes of the rows
+    def parse():
+        rd = FM._EchReply(list(reply))
+        rd.take(10)
+        rd.words(rd.u641())
+        rd.u641()
+        rd.words(1)
+        rd.u641()
+        n = 0
+        for _, _, v in FM._ech_row_runs(rd, rows, cols):
+            n += len(v)
+        assert n == e
+    dur = timed(parse)
+    results["parse"] = stop_latency(parse, delays(dur))
+    flat = b"".join(reply)
+
+    def old_parse():
         a = array.array("Q")
-        a.frombytes(memoryview(req)[76:76 + 8 * e])
+        # (the rows payload: after the header, no pivots and the det, at 66)
+        a.frombytes(memoryview(flat)[66:66 + 8 * e])
         return a
-    timed("frombytes", fb)
-    del req
-    for name, ms in worst.items():
-        print("   ", name, "%.0f ms" % ms, "(bound %d ms)" % bound_ms, flush=True)
-    late = {k: round(v) for k, v in worst.items() if v > bound_ms}
-    assert not late, "past the Stop bound at the frame cap: %r" % late
-    ok("each C operation at the frame cap within %d ms" % bound_ms, {k: round(v) for k, v in worst.items()})
+    dur = timed(old_parse)
+    results["parse (mutant: one frombytes)"] = stop_latency(old_parse, [0.05, 0.1] + delays(dur, 3))
+    del flat, reply
+
+    # (the whole call's bound adds the release of its frame-sized buffers
+    # after a Stop in the engine: the request's copy, the decoded matrix and
+    # the reply, each one free of up to 2^28 bytes, about 25 ms each on the
+    # project machine; the steps' bound is one run of a chunk and a check)
+    bound = lambda name: CALL_BOUND_MS if name.startswith("call") else BOUND_MS
+    for name, ms in results.items():
+        print("   ", name, "worst %.1f ms" % ms, "(bound %d ms)" % bound(name), flush=True)
+    for name, ms in results.items():
+        if "mutant" in name:
+            # (a single copy of the frame is seen past one chunk's bound)
+            assert ms > BOUND_MS, "%s: %.1f ms, within %d ms: the measurement can't see a single copy" % (name, ms, BOUND_MS)
+        else:
+            assert ms <= bound(name), "%s: %.1f ms after the Stop" % (name, ms)
+    ok("each step at the frame cap within %d ms of a Stop and the whole call within %d ms; each single-copy mutant past %d ms" % (BOUND_MS, CALL_BOUND_MS, BOUND_MS))
 
 
 def case_interrupt():
@@ -508,7 +690,7 @@ def case_interrupt():
 
 CASES = {
     "route": case_route, "correct": case_correct, "json": case_json, "probe": case_probe, "preflight": case_preflight,
-    "frame": case_frame, "outcomes": case_outcomes, "kernel": case_kernel, "mem": case_mem, "cops": case_cops,
+    "frame": case_frame, "outcomes": case_outcomes, "kernel": case_kernel, "kernelmem": case_kernelmem, "mem": case_mem, "cops": case_cops,
     "interrupt": case_interrupt,
 }
 if CASE == "mem" and not LINUX:

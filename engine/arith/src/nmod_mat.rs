@@ -649,8 +649,14 @@ impl Mat {
         // rows r.. are zero (every column was processed or no rows remain)
         if !keep {
             poll.count(Family::Move, ((rows - r) * cols) as u64);
-            for x in self.d[r * cols..].iter_mut() {
-                *x = 0;
+            // (in runs of 2^16 words with a Stop check between two runs:
+            // below a low rank this is nearly the whole matrix; a fill of
+            // one run checks nothing more than before)
+            for (i, part) in self.d[r * cols..].chunks_mut(1 << 16).enumerate() {
+                if i > 0 {
+                    sagebrush_interrupt::check_coarse();
+                }
+                part.fill(0);
             }
         }
         drop(phase);

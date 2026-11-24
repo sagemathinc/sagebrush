@@ -529,18 +529,73 @@ fn mpoly_call<'py>(py: Python<'py>, request: Vec<u8>) -> PyResult<Bound<'py, pyo
     Ok(pyo3::types::PyBytes::new(py, &r))
 }
 
+/// The run of bytes the binary call copies or answers between two checks
+/// for signals, when it takes its request in pieces.
+const BIN_CHUNK: usize = 1 << 20;
+
 /// A binary call (SBW1, engine/wire), shared with the WebAssembly build
-/// (sb_bin_call): the reply bytes, `ok` or `er` in band.
-/// The request is borrowed from the caller's `bytes`, not copied: PyO3 gives
-/// a `bytes` argument as a slice of its buffer, valid while the argument is
-/// alive (for the whole call).  Sound with the GIL released in `guarded`:
-/// a `bytes` object is immutable, so no other thread can change the slice.
-/// Only `bytes` is accepted (a `bytearray` or `memoryview` is a TypeError,
-/// as PyO3 extracts neither as `&[u8]`).
+/// (sb_bin_call): the reply, `ok` or `er` in band.
+///
+/// - A `bytes` request is borrowed, not copied: PyO3 gives a `bytes`
+///   argument as a slice of its buffer, valid while the argument is alive
+///   (for the whole call), and sound with the GIL released in `guarded`, as
+///   a `bytes` object is immutable.  The reply is one `bytes`.
+/// - A `list` of `bytes` pieces (the Sage-mode echelon's frame-sized
+///   requests) is copied into one owned buffer with the GIL held, in runs of
+///   [`BIN_CHUNK`] bytes with a check for signals after each (a pending
+///   Ctrl-C is a KeyboardInterrupt, before the engine runs); only then is
+///   the GIL released, the engine running on the owned buffer.  The reply is
+///   a list of `bytes` pieces of at most [`BIN_CHUNK`] bytes, made with a
+///   check for signals after each: no copy of a frame-sized buffer is ever
+///   one uninterruptible step.
+/// - Anything else (a `bytearray`, a `memoryview`) is a TypeError: no
+///   mutable buffer is ever borrowed across the GIL's release.
 #[pyfunction]
-fn call_bin<'py>(py: Python<'py>, request: &[u8]) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
-    let r = guarded(py, move || sagebrush_web::bin_ops::call_bin(request))?;
-    Ok(pyo3::types::PyBytes::new(py, &r))
+fn call_bin<'py>(py: Python<'py>, request: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    use pyo3::exceptions::{PyMemoryError, PyRuntimeError, PyTypeError};
+    use pyo3::types::{PyBytes, PyList};
+    if let Ok(b) = request.cast::<PyBytes>() {
+        let req = b.as_bytes();
+        let r = guarded(py, move || sagebrush_web::bin_ops::call_bin(req))?;
+        return Ok(PyBytes::new(py, &r).into_any());
+    }
+    let Ok(list) = request.cast::<PyList>() else {
+        return Err(PyTypeError::new_err("call_bin takes bytes, or a list of bytes pieces"));
+    };
+    // (the pieces held first, each a bytes: a signal handler run between
+    // the copy's runs can't change what is copied)
+    let mut pieces: Vec<Bound<'py, PyBytes>> = Vec::with_capacity(list.len());
+    let mut total = 0usize;
+    for item in list.iter() {
+        let b = item.cast_into::<PyBytes>().map_err(|_| PyTypeError::new_err("call_bin: every piece must be bytes"))?;
+        total = total.checked_add(b.as_bytes().len()).ok_or_else(|| PyMemoryError::new_err("call_bin: a request too large"))?;
+        pieces.push(b);
+    }
+    let mut req: Vec<u8> = Vec::new();
+    req.try_reserve_exact(total).map_err(|_| PyMemoryError::new_err("call_bin: the request's buffer could not be allocated"))?;
+    let mut since = 0usize;
+    for b in &pieces {
+        for part in b.as_bytes().chunks(BIN_CHUNK) {
+            req.extend_from_slice(part);
+            since += part.len();
+            if since >= BIN_CHUNK {
+                py.check_signals()?;
+                since = 0;
+            }
+        }
+    }
+    drop(pieces);
+    if req.len() != total {
+        return Err(PyRuntimeError::new_err("call_bin: the request's pieces changed while copied"));
+    }
+    py.check_signals()?;
+    let r = guarded(py, move || sagebrush_web::bin_ops::call_bin(&req))?;
+    let out = PyList::empty(py);
+    for part in r.chunks(BIN_CHUNK) {
+        out.append(PyBytes::new(py, part))?;
+        py.check_signals()?;
+    }
+    Ok(out.into_any())
 }
 
 /// A PNG call's failure as the browser's _sbraster raises it

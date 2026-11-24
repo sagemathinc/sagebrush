@@ -712,6 +712,64 @@ export function binCall(req: Uint8Array): Uint8Array | null {
   return new Uint8Array(e.memory.buffer, r, e.sb_reply_len()).slice();
 }
 
+// The run of bytes binCallPieces copies into or out of the engine's memory
+// between two checks for Ctrl-C.
+const BIN_CHUNK = 1 << 20;
+
+/** binCall with the request in pieces and the reply in pieces of at most
+ *  BIN_CHUNK bytes (the Sage-mode echelon's frame-sized calls): neither copy
+ *  is one step, and a pending Ctrl-C is seen after each run (before the
+ *  engine runs, or after its reply: the builtin's catch raises it as
+ *  KeyboardInterrupt).  null when the engine predates the entry point. */
+export function binCallPieces(pieces: Uint8Array[]): Uint8Array[] | null {
+  const e = engine();
+  if (!e.sb_bin_call) return null;
+  pushShare(e);
+  let total = 0;
+  for (const a of pieces) total += a.length;
+  const p = e.sb_alloc(total);
+  try {
+    let at = 0;
+    let since = 0;
+    for (const a of pieces) {
+      for (let i = 0; i < a.length; i += BIN_CHUNK) {
+        const part = a.subarray(i, Math.min(a.length, i + BIN_CHUNK));
+        new Uint8Array(e.memory.buffer, p + at, part.length).set(part);
+        at += part.length;
+        since += part.length;
+        if (since >= BIN_CHUNK) {
+          since = 0;
+          if (INTR[0] & INTR_CTRL_C) throw new Error("interrupted while copying the request");
+        }
+      }
+    }
+  } catch (err) {
+    e.sb_free(p, total);
+    throw err;
+  }
+  let r: number;
+  inCall++;
+  try {
+    r = e.sb_bin_call(p, total);
+  } catch (err) {
+    // an interrupt (or a bug) trapped: retire the instance
+    inCall--;
+    retire(e);
+    callEnded(true);
+    throw err;
+  }
+  inCall--;
+  callEnded(false);
+  e.sb_free(p, total);
+  const len = e.sb_reply_len();
+  const out: Uint8Array[] = [];
+  for (let i = 0; i < len; i += BIN_CHUNK) {
+    out.push(new Uint8Array(e.memory.buffer, r + i, Math.min(BIN_CHUNK, len - i)).slice());
+    if (INTR[0] & INTR_CTRL_C) throw new Error("interrupted while copying the reply");
+  }
+  return out;
+}
+
 // A Stop traps the engine, the instance is retired, and a new one is created
 // (admitted) on the next call; the old one's memory (tens of MB after an F4
 // matrix) is freed only by V8's next major collection, so a run of Stops
@@ -905,9 +963,18 @@ newBuiltinModule("_sbengine", (m) => {
   }, "mp");
   // None: the engine predates the binary entry point
   m.bin = Obj.builtin((req: any) => {
+    // (bytes: one reply; a list of bytes pieces: binCallPieces, the reply in
+    // pieces; anything else, a bytearray included, a TypeError)
+    const bytesOf = (x: any): Uint8Array =>
+      x instanceof Obj.PyBytes && !(x instanceof Obj.PyByteArray) ? x.a.subarray(0, x.n) : Obj.raise(Obj.T.TypeError, "bin takes bytes, or a list of bytes pieces");
+    const pieces = Array.isArray(req) ? req.map(bytesOf) : null;
+    const a = pieces === null ? bytesOf(req) : null;
     try {
-      const a = req instanceof Obj.PyBytes ? req.a.subarray(0, req.n) : new Uint8Array(0);
-      const r = binCall(a);
+      if (pieces !== null) {
+        const r = binCallPieces(pieces);
+        return r === null ? null : r.map((b) => new Obj.PyBytes(b));
+      }
+      const r = binCall(a!);
       return r === null ? null : new Obj.PyBytes(r);
     } catch (err: any) {
       return engineError(err);
