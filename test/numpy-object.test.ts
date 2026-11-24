@@ -215,6 +215,31 @@ test("object arrays: the views and values taken from arrays inside the data are 
   ]);
 });
 
+// (a range makes a new int for each item, unlike a list, whose items exist: each is charged from the range's
+// endpoints before it is made. On a host that gives 64 MiB with 12 MiB shown free, 16384 ints of 8193 bits,
+// about 17 MB, are refused; 100 of them are made)
+test("object arrays: the ints a range makes are admitted before they are made (12 MiB of 64 shown free)", { timeout: 60_000 }, () => {
+  const code = [
+    "globalThis.__SAGEBRUSH_MEMORY__ = 64 * 2 ** 20;",
+    `const C = require(${JSON.stringify(__dirname + "/../src/compile.js")});`,
+    `const H = require(${JSON.stringify(__dirname + "/../src/runtime/heap.js")});`,
+    "Promise.resolve(C.initParser && C.initParser()).then(() => {",
+    "  C.R.importModule('sys').path.push(C.libDir());",
+    "  C.execModule('import numpy as np\\n', '<warm>', '__main__');",
+    "  H.heapProbe.used = () => H.heapLimit() - 12 * 2 ** 20;",
+    "  H.heapProbe.collect = () => false;",
+    "  const out = [];",
+    "  for (const n of [16384, 100]) {",
+    "    try { C.execModule(`import numpy as np\\nimport __main__\\n__main__._r = np.array(range(2**8192, 2**8192 + ${n}), dtype=object).shape\\n`, '<m>', '__main__'); out.push('made'); }",
+    "    catch (e) { out.push(C.R.formatException(e).trim().split('\\n').pop().split(' needs ')[0]); }",
+    "  }",
+    "  console.log(JSON.stringify(out));",
+    "});",
+  ].join("\n");
+  const r = JSON.parse(execFileSync(process.execPath, ["-e", code], { encoding: "utf8" }).trim());
+  assert.deepEqual(r, ["MemoryError: making an object array of shape (16384,) from nested data", "made"]);
+});
+
 // (a range is never made into a list to find its length: range(2**40) is refused by its length, with the
 // element limit lowered to 16; ranges inside the data are made into items only after their level is admitted)
 test("object arrays: a range's length is read without making its items", { timeout: 60_000 }, async () => {

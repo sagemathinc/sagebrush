@@ -13627,6 +13627,11 @@
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
  },
+ "src/runtime/numpy.ts :: big :: if (m <= Number.MAX_SAFE_INTEGER) return 16; #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "the heap a range's item takes, estimated for its admission (a number up to 2**53 is a 16-byte heap number, a larger one a BigInt); it refuses nothing itself"
+ },
  "src/runtime/numpy.ts :: cutArray :: if (shape.length >= OBJ_MAXDIMS) { #0": {
   "class": "none",
   "owner": "python",

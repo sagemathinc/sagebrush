@@ -3923,7 +3923,7 @@ function objFromPy(x: any, discovered = false): ObjArray {
     let ok = true;
     // (the views the next level makes, of arrays with two dimensions or more, and the values it takes from
     // one-dimensional arrays: counted before it is built)
-    let views = 0, values = 0;
+    let views = 0, values = 0, rangeBytes = 0;
     for (let k = 0; k < level.length; k++) {
       poll();
       const v = level[k];
@@ -3933,8 +3933,10 @@ function objFromPy(x: any, discovered = false): ObjArray {
         len = v.ndim === 0 ? -1 : v.shape[0];
         if (v.ndim > 1) views += len;
         else if (v.ndim === 1) values += len;
-      } else if (isSeq(v) && !strLike(v)) len = seqLen(v);
-      else len = -1;
+      } else if (isSeq(v) && !strLike(v)) {
+        len = seqLen(v);
+        if (!Array.isArray(v)) rangeBytes += len * rangeItemBytes(v);
+      } else len = -1;
       if (len < 0 || (n >= 0 && len !== n)) {
         ok = false;
         break;
@@ -3952,11 +3954,11 @@ function objFromPy(x: any, discovered = false): ObjArray {
     // (the next level has as many items as the array so far has elements: admitted as an object array before
     // it is built, so shared sublists, [x, x] nested, can't grow the walk past it; and the walk's own memory
     // with it, through the heap's admission: this level and the next alive together, OBJ_WALK_ITEM_BYTES an
-    // item, OBJ_VIEW_BYTES for each view of an array it makes and OBJ_VALUE_BYTES for each value it takes from
-    // one. A range's items are made here, after it)
+    // item, OBJ_VIEW_BYTES for each view of an array it makes, OBJ_VALUE_BYTES for each value it takes from
+    // one, and each new int a range makes (rangeItemBytes). A range's items are made here, after it)
     const count = prod(shape);
     admitObjects(shape);
-    admitHeap(OBJ_WALK_ITEM_BYTES * (level.length + count) + OBJ_VIEW_BYTES * views + OBJ_VALUE_BYTES * values, `making an object array of shape (${shape.join(", ")}${shape.length === 1 ? "," : ""}) from nested data`);
+    admitHeap(OBJ_WALK_ITEM_BYTES * (level.length + count) + OBJ_VIEW_BYTES * views + OBJ_VALUE_BYTES * values + rangeBytes, `making an object array of shape (${shape.join(", ")}${shape.length === 1 ? "," : ""}) from nested data`);
     const next: any[] = new Array(count), nextIn = new Uint8Array(count);
     let at = 0;
     for (const v of level) {
@@ -3999,6 +4001,25 @@ function objFromPy(x: any, discovered = false): ObjArray {
 // (a list's or a range's length, never making a range's items: range(2**40) is refused by its length)
 function seqLen(v: any): number {
   return Array.isArray(v) ? v.length : Number(v.length);
+}
+// (the heap each item of a range takes when it is made, bounded from its endpoints: a list's items already
+// exist, but a range makes a new int for each. Measured Nov 24 2026 on Node 24 after a full GC, 16384 items:
+// a BigInt is 16 bytes and 8 for each 64 bits (1040 at 8192 bits, 24 at 64), charged as 24 and 8 a digit; a
+// number past V8's small integers (2**30) is a 16-byte heap number; a small one takes nothing)
+function rangeItemBytes(r: any): number {
+  const n = seqLen(r);
+  if (n === 0) return 0;
+  const big = (x: bigint) => (x < 0n ? -x : x);
+  if (typeof r.start === "bigint") {
+    const last = r.start + BigInt(n - 1) * r.step;
+    const m = big(r.start) > big(last) ? big(r.start) : big(last);
+    // (bits bounded by the hex digits, never below the true length)
+    return 24 + 8 * Math.ceil((m.toString(16).length * 4) / 64);
+  }
+  const m = Math.max(Math.abs(r.start), Math.abs(r.start + (n - 1) * r.step));
+  if (m <= 2 ** 30) return 0;
+  if (m <= Number.MAX_SAFE_INTEGER) return 16;
+  return 24 + 8 * Math.ceil(Math.log2(m + 1) / 64 + 1);
 }
 // (a range's items into out from at, polled: each as the int its iteration gives)
 function rangeInto(r: any, out: any[], at: number, poll: () => void): number {
