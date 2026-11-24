@@ -207,8 +207,8 @@ check(u.className === "user other", "a kept message with a hostile mode: class o
 //      them; Claude Code's own text, with its advice about a long-lived token, never drawn. Any other error as before
 {
   const RAW = "Failed to authenticate: this login reached its time limit and cannot be renewed. Run `claude auth login` to sign in again, or use `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN for unattended jobs";
-  const EXPIRED = "Your Claude sign-in expired. In your terminal, run `claude auth login`, then send your message again.";
-  const NOT_IN = "Claude Code isn't signed in on this computer. Install Claude Code (https://code.claude.com/docs/en/setup), run `claude auth login` once in a terminal, then send your message again.";
+  const EXPIRED = "Your Claude sign-in expired. On the computer running your agent, run `claude auth login` in a terminal, then send your message again.";
+  const NOT_IN = "Claude Code isn't signed in on the computer running your agent. There, run `claude auth login` in a terminal, then send your message again.";
   const drawn = (code, message) => {
     const th = newThread("s-" + code, "S");
     apply(th, { seq: 1, turn_id: "s1", type: "turn_started" }, 1000);

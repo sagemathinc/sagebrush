@@ -183,10 +183,11 @@ export const own = <T,>(rec: Record<string, T> | undefined, k: string): T | unde
 
 // A Claude sign-in failure: the agent's closed reasons for it, said in the page's own words whatever text came with
 // them, so Claude Code's own text (with its advice about a long-lived token) is never what the page shows (#1804). The
-// one next step is `claude auth login`.
+// one next step is `claude auth login`, on the computer running the agent (where Claude Code runs; this page may be
+// on another device).
 const SIGN_IN_WORDS: Readonly<Record<string, string>> = Object.freeze({
-  claude_login_expired: "Your Claude sign-in expired. In your terminal, run `claude auth login`, then send your message again.",
-  claude_not_signed_in: "Claude Code isn't signed in on this computer. Install Claude Code (https://code.claude.com/docs/en/setup), run `claude auth login` once in a terminal, then send your message again.",
+  claude_login_expired: "Your Claude sign-in expired. On the computer running your agent, run `claude auth login` in a terminal, then send your message again.",
+  claude_not_signed_in: "Claude Code isn't signed in on the computer running your agent. There, run `claude auth login` in a terminal, then send your message again.",
 });
 /** A turn's error as the page says it: a sign-in reason in the page's words alone, any other as "Error: " and its text. */
 export const errorLine = (code: string, message: string): string => own(SIGN_IN_WORDS, code) ?? `Error: ${message}`;
