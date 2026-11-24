@@ -15,9 +15,10 @@ export const TIKZ_LIMITS = {
   ITEMS: 20000,            // path segments in one picture
   EXPAND: 10000,           // \foreach body expansions in one picture, all loops together
   FOREACH_DEPTH: 4,        // \foreach inside \foreach
-  LEX_TEXT: 4 * 2 ** 20,   // characters read in one picture: its source and every \foreach body as expanded, together
+  LEX_TEXT: 4 * 2 ** 20,   // UTF-8 bytes read in one picture, all together: its source, and each \foreach body as it is
+                           // scanned for each variable and then read
   SCOPE_DEPTH: 32,         // a scope inside a scope
-  OPTION_TEXT: 1000000,    // options and styles applied in one picture, all together: their characters, and 32 for
+  OPTION_TEXT: 1000000,    // options and styles applied in one picture, all together: their UTF-8 bytes, and 32 for
                            // each list (a style naming styles many times over is work that grows with each level, not
                            // only with the depth)
   STYLE_DEPTH: 8,          // a .style naming another style, naming another...
@@ -26,8 +27,8 @@ export const TIKZ_LIMITS = {
   EXPR_DEPTH: 40,          // nesting of one math expression
   COORD_MAX: 2845275.6,    // |x|, |y| in pt (1000 m): past it, a named problem, not an SVG of that size
   SVG_BYTES: 2 * 2 ** 20,  // the picture's SVG
-  SRC_MAX: 256 * 1024,     // a picture's source
-  TIKZSET: 64 * 1024,      // the document's \tikzset styles, all together (kept by render.mjs)
+  SRC_MAX: 256 * 1024,     // a picture's source, and one \foreach body once its variables are replaced: UTF-8 bytes
+  TIKZSET: 64 * 1024,      // the document's \tikzset styles, all together (kept by render.mjs): UTF-8 bytes
 };
 
 const PT_PER_CM = 72.27 / 2.54;
@@ -81,6 +82,19 @@ function lex(src) {
   }
   return out;
 }
+/** A string's length in UTF-8 bytes, counted (never encoded): an unpaired surrogate as U+FFFD's 3. */
+export function utf8Len(s) {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c < 0xdc00 && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { n += 4; i++; }
+    else n += 3;
+  }
+  return n;
+}
+const MORE_TEXT = () => "more than " + TIKZ_LIMITS.LEX_TEXT / 2 ** 20 + " MiB of picture text read, \\foreach bodies expanded included";
 // (the end of the {group} starting at j, or -1)
 function skipGroup(s, j) {
   let d = 0;
@@ -237,9 +251,14 @@ class Picture {
     this.box = null;                  // the bounding box in canvas pt
     this.markers = new Map();
   }
-  // (every text read, the source's and each expansion's, counted: a body read again for each item is work again; the
-  //  bound is checked in foreach, before an expansion is made)
-  lex(text) { this.lexed += text.length; return lex(text); }
+  // (every text read, the source's and each expansion's, counted in UTF-8 bytes: a body read again for each item is work
+  //  again. foreach checks an expansion's size before it is made; this check is the backstop)
+  lex(text) {
+    const n = utf8Len(text);
+    if (this.lexed + n > TIKZ_LIMITS.LEX_TEXT) fail(MORE_TEXT());
+    this.lexed += n;
+    return lex(text);
+  }
   count(n = 1) { if ((this.items += n) > TIKZ_LIMITS.ITEMS) fail("more than " + TIKZ_LIMITS.ITEMS + " path segments"); }
 
   // ---- state: a scope's transform and style
@@ -250,7 +269,7 @@ class Picture {
   // the options of a scope or path, applied left to right to a copy of `st`
   options(text, st, depth = 0) {
     if (depth > TIKZ_LIMITS.STYLE_DEPTH) fail("styles naming styles more than " + TIKZ_LIMITS.STYLE_DEPTH + " deep (a style that names itself?)");
-    if ((this.optionText += text.length + 32) > TIKZ_LIMITS.OPTION_TEXT) fail("options and styles past " + TIKZ_LIMITS.OPTION_TEXT + " characters applied in all (styles naming styles many times over?)");
+    if ((this.optionText += utf8Len(text) + 32) > TIKZ_LIMITS.OPTION_TEXT) fail("options and styles past " + TIKZ_LIMITS.OPTION_TEXT + " bytes applied in all (styles naming styles many times over?)");
     for (const o of splitOptions(text)) this.option(o, st, depth);
     return st;
   }
@@ -448,16 +467,22 @@ class Picture {
     if (toks[i]?.t === "g") { body = toks[i].v; next = i + 1; }
     else { const end = bodyEnd(toks, i, hi); body = srcOf(toks.slice(i, end + 1)); next = end + 1; }
     const res = vars.map((v) => new RegExp("\\\\" + v.replace(/[^A-Za-z@]/g, (c) => "\\" + c) + "(?![A-Za-z@])", "g"));
-    const uses = res.map((re) => (body.match(re) || []).length);
+    const varBytes = vars.map((v) => utf8Len("\\" + v));
     for (const item of list) {
       if (++this.expansions > TIKZ_LIMITS.EXPAND) fail("\\foreach bodies expanded more than " + TIKZ_LIMITS.EXPAND + " times");
       const vals = splitSlash(item, vars.length);
-      // (its size before it is made: each use of a variable replaced by its value)
-      const size = body.length + vals.reduce((n, v, q) => n + uses[q] * v.length, 0);
-      if (size > TIKZ_LIMITS.SRC_MAX) fail("a \\foreach body over " + TIKZ_LIMITS.SRC_MAX / 1024 + " KiB once its variables are replaced");
-      if (this.lexed + size > TIKZ_LIMITS.LEX_TEXT) fail("more than " + TIKZ_LIMITS.LEX_TEXT / 2 ** 20 + " MiB of picture text read, \\foreach bodies expanded included");
-      let text = body;
-      res.forEach((re, q) => { text = text.replace(re, () => vals[q]); });
+      // (each variable replaced in turn, as TeX would: a value naming a later variable is expanded too. Before each
+      //  replacement, its result's size, from the text as it is now, in UTF-8 bytes: so no text over SRC_MAX is ever
+      //  made. Each text scanned counts as read; lex() checks the total before the expansion is read)
+      let text = body, size = utf8Len(body);
+      for (let q = 0; q < res.length; q++) {
+        this.lexed += size;
+        const uses = (text.match(res[q]) || []).length;
+        if (!uses) continue;
+        const next = size + uses * (utf8Len(vals[q]) - varBytes[q]);
+        if (next > TIKZ_LIMITS.SRC_MAX) fail("a \\foreach body over " + TIKZ_LIMITS.SRC_MAX / 1024 + " KiB once its variables are replaced");
+        text = text.replace(res[q], () => vals[q]); size = next;
+      }
       this.run(this.lex(text), st, depth + 1, 0, undefined, sdepth);
     }
     return next;
@@ -830,7 +855,7 @@ function markerSvg(id, tip, color, lw) {
 /** The picture's SVG (in a span.tikz), or throws TikzError naming what the preview doesn't draw. `styles`: the
  * document's \tikzset text so far. */
 export function renderTikz(src, opts, R) {
-  if (src.length > TIKZ_LIMITS.SRC_MAX) throw new TikzError("a picture over " + TIKZ_LIMITS.SRC_MAX / 1024 + " KiB of source");
+  if (utf8Len(src) > TIKZ_LIMITS.SRC_MAX) throw new TikzError("a picture over " + TIKZ_LIMITS.SRC_MAX / 1024 + " KiB of source");
   const P = new Picture(R, opts);
   let html;
   try {

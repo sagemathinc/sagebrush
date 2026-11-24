@@ -11,7 +11,7 @@ let renderToString = null;
 export function setKatex(f) { renderToString = f; }
 import { CAT, isCs, catOf, codeOf, depthOf } from "./demo-machine.mjs";
 import { TEXT_SYMBOLS, ACCENTS, SIZES, COLORS } from "./symbols.mjs";
-import { renderTikz, TikzError, TIKZ_LIMITS } from "./tikz.mjs";
+import { renderTikz, TikzError, TIKZ_LIMITS, utf8Len } from "./tikz.mjs";
 import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected, staleTitle, STALE_TITLE, isPy, isMagma, isNonSage } from "./sagetex.mjs";
 
 // ------------------------------------------------------------------ helpers
@@ -1184,8 +1184,8 @@ const CMDS = {
   color: function (nodes, i, ctx) { const [o, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); const c = this.colorOf(this.str(a).trim(), o ? this.str(o) : null); if (c) ctx.st.color = c; return j; },
   textcolor: function (nodes, i, ctx, flow) { const [o, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); const [b, j2] = this.arg(nodes, j); const c = this.colorOf(this.str(a).trim(), o ? this.str(o) : null); const c2 = Object.assign({}, ctx, { st: Object.assign({}, ctx.st, c ? { color: c } : {}) }); this.walk(b, c2, flow); return j2; },
   colorbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); const [b, j2] = this.arg(nodes, j); const c = this.colorOf(this.str(a).trim(), null); flow.html('<span class="cbox"' + (c ? ' style="background:' + c + '"' : "") + ">" + this.inline(b, ctx) + "</span>", ctx.st); return j2; },
-  // (TikZ's styles for the document's pictures, kept for tikz.mjs; at most TIKZ_LIMITS.TIKZSET characters of them)
-  tikzset: function (nodes, i) { const [a, j] = this.arg(nodes, i); const t = this.str(a); if ((this.tikzStyles || "").length + t.length <= TIKZ_LIMITS.TIKZSET) this.tikzStyles = (this.tikzStyles ? this.tikzStyles + "," : "") + t; else this.problem("not-rendered", "\\tikzset past " + TIKZ_LIMITS.TIKZSET + " characters"); return j; },
+  // (TikZ's styles for the document's pictures, kept for tikz.mjs; at most TIKZ_LIMITS.TIKZSET bytes of them, in UTF-8)
+  tikzset: function (nodes, i) { const [a, j] = this.arg(nodes, i); const t = this.str(a); const n = (this.tikzStyles ? this.tikzBytes + 1 : 0) + utf8Len(t); if (n <= TIKZ_LIMITS.TIKZSET) { this.tikzStyles = (this.tikzStyles ? this.tikzStyles + "," : "") + t; this.tikzBytes = n; } else this.problem("not-rendered", "\\tikzset past " + TIKZ_LIMITS.TIKZSET / 1024 + " KiB"); return j; },
   definecolor: function (nodes, i) { const [a, j] = this.arg(nodes, i); const [m, j2] = this.arg(nodes, j); const [v, j3] = this.arg(nodes, j2); const c = this.parseColor(this.str(m).trim(), this.str(v)); if (c) this.colors[this.str(a).trim()] = c; return j3; },
   newtheorem: function (nodes, i, ctx) {
     const [star, j0] = this.star(nodes, i);

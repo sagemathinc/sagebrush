@@ -7,6 +7,7 @@
 // engine's use of it (drawn, or a placeholder naming what it doesn't draw, and check's problem).
 //   bun web/latex/test-latex-tikz.mjs
 import katex from "katex";
+import { spawnSync } from "node:child_process";
 import { renderTikz, TikzError, evalMath, colorRgb, TIKZ_LIMITS } from "./engine/tikz.mjs";
 import { Engine } from "./engine/pipeline.mjs";
 import { setKatex } from "./engine/render.mjs";
@@ -19,6 +20,16 @@ const section = (name, fn) => { try { fn(); } catch (e) { check(name + " (crashe
 const R = () => ({ colors: {}, idn: 0 });
 const draw = (src, opts = {}, r = R()) => renderTikz(src, opts, r);
 const named = (src) => { try { draw(src); return null; } catch (e) { return e instanceof TikzError ? e.why : "NOT NAMED: " + e?.message; } };
+// a hostile case in its own process (tikz-case.mjs), killed at a real deadline: {why, ms}, ms the child's own time
+const CASE = new URL("./tikz-case.mjs", import.meta.url).pathname;
+const guarded = (src, limits) => {
+  const r = spawnSync(process.execPath, [CASE], { input: JSON.stringify({ src, limits }), timeout: 10000, killSignal: "SIGKILL", maxBuffer: 1 << 20, encoding: "utf8" });
+  if (r.error || r.signal) return { why: "KILLED at the deadline (" + (r.signal || r.error?.code) + ")", ms: 10000 };
+  try { return JSON.parse(r.stdout); } catch { return { why: "NO RESULT: " + String(r.stderr).slice(-200), ms: 0 }; }
+};
+// (a string of exactly n UTF-8 bytes: ch as often as fits, then ASCII; measured by Buffer, not by the code under test)
+const bytes = (s) => Buffer.byteLength(s, "utf8");
+const fill = (n, ch) => { const k = Math.floor(n / bytes(ch)); return ch.repeat(k) + "a".repeat(n - k * bytes(ch)); };
 const box = (h) => /data-box="([^"]+)"/.exec(h)[1].split(" ").map(Number);
 // the path's points, canvas pt, y up (the SVG's d has them y down, from the box's top left)
 const points = (h) => { const [x0, , , y1] = box(h); return [.../d="([^"]+)"/.exec(h)[1].matchAll(/(-?[\d.]+),(-?[\d.]+)/g)].map((m) => [+m[1] + x0, y1 - +m[2]]); };
@@ -161,7 +172,11 @@ section("bounds", () => {
     "\\foreach chained past its depth": Array.from({ length: 8000 }, (_, k) => "\\foreach \\v" + k.toString(26).replace(/./g, (c) => String.fromCharCode(97 + parseInt(c, 26))) + " in {1} ").join("") + "\\draw (0,0) -- (1,0);",
     "scopes nested past their depth": "\\begin{scope}".repeat(9000) + "\\draw (0,0) -- (1,0);" + "\\end{scope}".repeat(9000),
     "styles fanning out": "[a/.style={red}" + "bcdefgh".split("").map((c, k) => ", " + c + "/.style={" + Array(10).fill("abcdefg"[k]).join(",") + "}").join("") + "] \\draw[h] (0,0) -- (1,1);",
-    "a \\foreach body grown past the source's size": "\\foreach \\x in {" + Array(5000).fill(1).join(",") + "} {" + "\\x".repeat(100000) + "}",
+    "a \\foreach body grown past the source's size": "\\foreach \\x in {" + Array(5000).fill(111).join(",") + "} {" + "\\x".repeat(100000) + "}",
+    // (a value naming a later variable: each replacement checked on the text as it is then, three reviewers' probes)
+    "a later variable in a value (1)": "\\foreach \\x/\\y in {" + "\\y".repeat(1000) + "/" + "1".repeat(1000) + "} {" + "\\x".repeat(100) + "}",
+    "a later variable in a value (2)": "\\foreach \\a/\\b in {" + "\\b".repeat(300) + "/" + "red ".repeat(300).trim() + "} {\\draw[\\a](0,0)--(1,1);}",
+    "a later variable in a value (3)": "\\foreach \\a/\\b in {\\b/" + "Z".repeat(100) + "} {" + "\\a ".repeat(10000) + "}",
     "picture text read past its total": "\\foreach \\x in {1,...,9999} {%" + "c".repeat(200000) + "\n}",
     "a range that never ends": "\\foreach \\a in {1,0,...,5} \\draw (0,0) -- (1,0);",
     "a grid past its lines": "\\draw[step=0.001] (0,0) grid (10,10);",
@@ -190,7 +205,9 @@ section("bounds", () => {
     "a style naming itself": /^styles naming styles more than 8 deep/, "two styles naming each other": /^styles naming styles more than 8 deep/,
     "\\foreach nested past its depth": /^\\foreach inside \\foreach more than 4 deep$/, "\\foreach chained past its depth": /^\\foreach inside \\foreach more than 4 deep$/, "\\foreach bodies past their total": /^\\foreach bodies expanded more than 10000 times$/,
     "a \\foreach range past its total": /^a \\foreach range of more than 10000 items$/, "a range that never ends": /^a \\foreach range that never ends$/,
-    "scopes nested past their depth": /^scopes inside scopes more than 32 deep$/, "styles fanning out": /^options and styles past 1000000 characters applied in all/,
+    "scopes nested past their depth": /^scopes inside scopes more than 32 deep$/, "styles fanning out": /^options and styles past 1000000 bytes applied in all/,
+    "a later variable in a value (1)": /^a \\foreach body over 256 KiB once its variables are replaced$/, "a later variable in a value (2)": /^a \\foreach body over 256 KiB once its variables are replaced$/,
+    "a later variable in a value (3)": /^a \\foreach body over 256 KiB once its variables are replaced$/,
     "a \\foreach body grown past the source's size": /^a \\foreach body over 256 KiB once its variables are replaced$/, "picture text read past its total": /^more than 4 MiB of picture text read/,
     "a grid past its lines": /^a grid of more than 2000 lines$/, "a grid step of 0": /^a grid with a step of 0$/, "a point too far": /^a point farther than/,
     "an expression too long": /^an expression over 400 characters$/, "an expression too deep": /^an expression nested over 40 deep$/, "division by 0": /^division by 0$/,
@@ -199,32 +216,48 @@ section("bounds", () => {
     "an unknown command": /^\\frobnicate isn't drawn/, "an unknown option": /: wiggly$/, "a node": /^\\node: nodes aren't drawn by the preview yet$/,
     "\\clip": /^\\clip isn't drawn/, "an axis inside": /^the axis environment inside a picture/, "a picture past its source size": /^a picture over 256 KiB/, "an empty picture": /^an empty picture$/,
   };
+  // (each in its own process, killed at 10 s; each must also finish its own work within 1.5 s)
   const slow = [];
-  const unnamed = Object.entries(cases).map(([k, s]) => { const t = Date.now(), w = named(s); if (Date.now() - t > 1500) slow.push([k, Date.now() - t]); return [k, w]; }).filter(([k, w]) => w === null || !why[k]?.test(w));
+  const unnamed = Object.entries(cases).map(([k, s]) => { const g = guarded(s); if (g.ms > 1500) slow.push([k, g.ms]); return [k, g.why]; }).filter(([k, w]) => w === null || !why[k]?.test(w));
   check("bounds-each-quick", slow.length === 0, slow);
+  // the byte caps, in UTF-8, each exactly at its limit and one byte past, with a 3-byte (BMP) and a 4-byte (astral) character
+  const byteRows = [];
+  for (const ch of ["中", "𝑥"]) {
+    // the source
+    const pre = "\\draw (0,0) -- (1,0); %", srcOf = (n) => pre + fill(n - bytes(pre), ch);
+    byteRows.push(["source " + ch, guarded(srcOf(TIKZ_LIMITS.SRC_MAX)), guarded(srcOf(TIKZ_LIMITS.SRC_MAX + 1)), /^a picture over 256 KiB of source$/]);
+    // one expansion: its body with \x four times, each replaced by a 48,000-byte value
+    const V = fill(48000, ch), head = "%" + "\\x".repeat(4), tail = "\n\\draw (0,0) -- (1,0);";
+    const expOf = (n) => "\\foreach \\x in {" + V + "} {" + head + fill(n - 4 * (bytes(V) - 2) - bytes(head + tail), ch) + tail + "}";
+    byteRows.push(["expansion " + ch, guarded(expOf(TIKZ_LIMITS.SRC_MAX)), guarded(expOf(TIKZ_LIMITS.SRC_MAX + 1)), /^a \\foreach body over 256 KiB once its variables are replaced$/]);
+    // all text read: the source, then 20 expansions of a 99,000-byte body, each scanned for \x and then read
+    const B = "%" + fill(99000 - 2, ch) + "\n", loop = "\\foreach \\x in {1,...,20} {" + B + "}";
+    const allOf = (n) => { const left = n - 20 * 2 * bytes(B), p = "\\draw (0,0) -- (1,0); %"; return p + fill(left - bytes(p) - 1 - bytes(loop), ch) + "\n" + loop; };
+    byteRows.push(["all text " + ch, guarded(allOf(TIKZ_LIMITS.LEX_TEXT)), guarded(allOf(TIKZ_LIMITS.LEX_TEXT + 1)), /^more than 4 MiB of picture text read/]);
+  }
+  check("byte-caps-exact", byteRows.every(([, at, past, re]) => at.why === null && re.test(past.why ?? "") && at.ms <= 1500 && past.ms <= 1500), byteRows.map(([k, a, b]) => [k, a, b]));
   // float loops that count their steps: a range at 2^53, where x + 1 is x, and an arc at 1e20 degrees, both drawn
-  const t1 = Date.now(), fl = [named("\\foreach \\x in {9007199254740992,...,9007199254740994} {\\draw (0,0) -- (1,0);}"), named("\\draw (0,0) arc[start angle=1e20, delta angle=20000, radius=1];")];
+  const fl = [guarded("\\foreach \\x in {9007199254740992,...,9007199254740994} {\\draw (0,0) -- (1,0);}"), guarded("\\draw (0,0) arc[start angle=1e20, delta angle=20000, radius=1];")];
   // an arc's angles brought near 0 first: one starting at 360 * 2^45 degrees is the one starting at 0
   const far = box(draw("\\draw (0,0) arc[start angle=12666373951979520, delta angle=90, radius=1];")), near0 = box(draw("\\draw (0,0) arc[start angle=0, delta angle=90, radius=1];"));
   check("arc-far-angles", far.every((v, q) => Math.abs(v - near0[q]) <= 0.05), [far, near0]);
   // the scope depth exactly (32 scopes drawn) and one past it (33, named), at once
   const nest = (n) => "\\begin{scope}".repeat(n) + "\\draw (0,0) -- (1,0);" + "\\end{scope}".repeat(n);
-  const t2 = Date.now(), sd = [named(nest(TIKZ_LIMITS.SCOPE_DEPTH)), named(nest(TIKZ_LIMITS.SCOPE_DEPTH + 1))];
-  check("scope-depth-exact", sd[0] === null && /^scopes inside scopes more than 32 deep$/.test(sd[1]) && Date.now() - t2 < 1500, sd);
+  const sd = [guarded(nest(TIKZ_LIMITS.SCOPE_DEPTH)), guarded(nest(TIKZ_LIMITS.SCOPE_DEPTH + 1))];
+  check("scope-depth-exact", sd[0].why === null && /^scopes inside scopes more than 32 deep$/.test(sd[1].why) && sd.every((g) => g.ms <= 1500), sd);
   // the SVG's own cap, which the others keep a real picture under: met with the cap lowered for this row
-  const svgCap = TIKZ_LIMITS.SVG_BYTES;
-  let sv; try { TIKZ_LIMITS.SVG_BYTES = 2000; sv = [named("\\foreach \\x in {1,...,10} \\draw (0,0) -- (\\x,1);"), named("\\foreach \\x in {1,...,200} \\draw (0,0) -- (\\x,1);")]; } finally { TIKZ_LIMITS.SVG_BYTES = svgCap; }
-  check("svg-cap", sv[0] === null && /^a picture over .* MiB of SVG$/.test(sv[1]), sv);
-  check("float-loops-end", fl.every((w) => w === null) && Date.now() - t1 < 1500, [fl, Date.now() - t1]);
+  const sv = [guarded("\\foreach \\x in {1,...,10} \\draw (0,0) -- (\\x,1);", { SVG_BYTES: 2000 }), guarded("\\foreach \\x in {1,...,200} \\draw (0,0) -- (\\x,1);", { SVG_BYTES: 2000 })];
+  check("svg-cap", sv[0].why === null && /^a picture over .* MiB of SVG$/.test(sv[1].why), sv);
+  check("float-loops-end", fl.every((g) => g.why === null && g.ms <= 1500), fl);
   // an item's $ is text, not a replacement pattern ($& would be the variable itself)
   check("foreach-item-literal", named("\\foreach \\c in {$&} {\\draw[\\c] (0,0) -- (1,0);}") === "an option the preview doesn't draw: $&", named("\\foreach \\c in {$&} {\\draw[\\c] (0,0) -- (1,0);}"));
   // any other error in a picture (here the renderer's colours throwing) is the picture's named problem
   let other; try { renderTikz("\\draw[mine] (0,0) -- (1,0);", {}, { get colors() { throw new RangeError("x"); }, idn: 0 }); } catch (e) { other = e; }
   check("other-errors-named", other instanceof TikzError && /couldn't draw \(too large\)/.test(other.why), String(other));
   check("bounds-and-malformed-named", unnamed.length === 0, unnamed);
-  check("bounds-quick", Date.now() - t0 < 5000, Date.now() - t0);
-  const segs = named("\\foreach \\a in {1,...,1000} \\foreach \\b in {1,...,9} \\draw (0,0) -- (1,0) -- (2,0) -- (3,0);");
-  check("bound-segments", /path segments|expanded more than/.test(segs ?? ""), segs);
+  check("bounds-quick", Date.now() - t0 < 60000, Date.now() - t0);
+  const segs = guarded("\\foreach \\a in {1,...,1000} \\foreach \\b in {1,...,9} \\draw (0,0) -- (1,0) -- (2,0) -- (3,0);");
+  check("bound-segments", /path segments|expanded more than/.test(segs.why ?? "") && segs.ms <= 1500, segs);
 });
 
 // ---- in the engine: drawn, styles from \tikzset, a placeholder naming what it doesn't draw, check's problem; marker ids
@@ -241,9 +274,13 @@ section("engine", () => {
   const h3 = r3.chunks.join("");
   check("engine-environments-and-calc", /\[tikzpicture: the axis environment inside a picture/.test(h3) && (h3.match(/class="tikz"/g) || []).length === 1, [h3.match(/\[tikzpicture: [^\]]*\]/g), r3.problems]);
   // the document's \\tikzset, at most TIKZ_LIMITS.TIKZSET characters kept: past it, check's problem and the style not kept
-  const big = "\\tikzset{pad/.style={" + "thin,".repeat(TIKZ_LIMITS.TIKZSET / 5) + "thin}}\n\\tikzset{mine/.style={red}}\n";
-  const r4 = new Engine().update(doc(big + "\\begin{tikzpicture}\\draw[mine] (0,0) -- (1,0);\\end{tikzpicture}"));
-  check("tikzset-cap", (r4.problems || []).some((p) => p.kind === "not-rendered" && /^\\tikzset past 65536 characters$/.test(p.name)), r4.problems);
+  const ts = [];
+  for (const ch of ["中", "𝑥"]) for (const n of [TIKZ_LIMITS.TIKZSET, TIKZ_LIMITS.TIKZSET + 1]) {
+    const t = "pad/.style={" + fill(n - bytes("pad/.style={}"), ch) + "}";
+    const r4 = new Engine().update(doc("\\tikzset{" + t + "}\n\\begin{tikzpicture}\\draw (0,0) -- (1,0);\\end{tikzpicture}"));
+    ts.push([ch, n, (r4.problems || []).some((p) => p.kind === "not-rendered" && p.name === "\\tikzset past 64 KiB")]);
+  }
+  check("tikzset-cap", ts.every(([, n, refused]) => refused === (n > TIKZ_LIMITS.TIKZSET)), ts);
   // two pictures with arrows: each marker id once, every reference to one that exists; after an edit, still so
   const e = new Engine(), pic = "\\begin{tikzpicture}\\draw[->] (0,0) -- (1,0); \\draw[-Stealth, red] (0,1) -- (1,1);\\end{tikzpicture}\n";
   const ids = (h) => { const defs = [...h.matchAll(/<marker id="([^"]+)"/g)].map((m) => m[1]), refs = [...h.matchAll(/url\(#([^)]+)\)/g)].map((m) => m[1]); return { defs, refs, ok: defs.length === new Set(defs).size && refs.every((r) => defs.includes(r)) && defs.length >= 4 }; };
