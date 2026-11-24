@@ -46,7 +46,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "Contour 2-D cuts of the volume, one subplot per cut: contour(X(:,:,k), Y(:,:,k), V(:,:,k), levels) for the plane Z = Z(1,1,k), or contour(squeeze(Y(:,k,:)), squeeze(Z(:,k,:)), squeeze(V(:,k,:)), levels) for the plane X = X(1,k,1). slice(X, Y, Z, V, xslice, yslice, zslice) draws the same planes colored by V.",
+    "alternative": "Contour 2-D cuts of the volume, one subplot per cut: contour(X(:,:,k), Y(:,:,k), V(:,:,k), levels) for the plane Z = Z(1,1,k), or contour(squeeze(Y(:,k,:)), squeeze(Z(:,k,:)), squeeze(V(:,k,:)), levels) for the plane X = X(1,k,1). slice(X, Y, Z, V, xslice, yslice, zslice) draws the same planes colored by V. isosurface(X, Y, Z, V, level) draws the level itself in 3-D.",
     "tags": [
       "plots"
     ]
@@ -375,33 +375,7 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "isosurface isn't in Sagebrush yet either. slice(X, Y, Z, V, xslice, yslice, zslice) draws planes through the volume colored by V; shading interp and colorbar make them easier to read. A scatter3 of every point of the volume is too crowded to read.",
-    "tags": [
-      "plots"
-    ]
-  },
-  {
-    "name": "isonormals",
-    "kind": "function",
-    "signature": "isonormals(X, Y, Z, V, p)",
-    "summary": "Sets an isosurface patch's vertex normals from the volume's gradient.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "isosurface isn't in Sagebrush yet either. slice(X, Y, Z, V, xslice, yslice, zslice) draws planes through the volume colored by V; shading interp and colorbar make them easier to read. A scatter3 of every point of the volume is too crowded to read.",
-    "tags": [
-      "plots"
-    ]
-  },
-  {
-    "name": "isosurface",
-    "kind": "function",
-    "signature": "fv = isosurface(X, Y, Z, V, isovalue)",
-    "summary": "The surface where a 3-D volume takes a given value, as faces and vertices for patch.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "slice(X, Y, Z, V, xslice, yslice, zslice) draws planes through the volume colored by V; shading interp and colorbar make them easier to read. A scatter3 of every point of the volume is too crowded to read. For the level itself, contour 2-D cuts: contour(X(:,:,k), Y(:,:,k), V(:,:,k), [isovalue isovalue]) for a few k, one subplot each.",
+    "alternative": "Without caps, an isosurface that meets the volume's boundary is open there. slice(X, Y, Z, V, xslice, yslice, zslice) at the boundary planes shows V there, colored; or pad V with a layer of values below the isovalue on every side (and extend X, Y and Z to match) so that isosurface closes the surface itself.",
     "tags": [
       "plots"
     ]

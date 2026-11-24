@@ -523,15 +523,127 @@ class Area(Line):
 
 
 class Patch(GObj):
+    """polygons: Faces (a row of vertex indices each, NaN-padded) into Vertices (a row of x, y[, z] each), or the
+    same as XData, YData and ZData (a column of corners each face); setting either keeps the other in step"""
     _mclass = "matlab.graphics.primitive.Patch"
     TYPE = "patch"
 
     def defaults(self):
-        return {"XData": np.zeros((0, 1)), "YData": np.zeros((0, 1)), "FaceColor": _rgb_value(COLOR_ORDER[0]),
-                "EdgeColor": _rgb_value((0, 0, 0)), "FaceAlpha": 1.0, "DisplayName": _m.Char(""), "LineWidth": 0.5}
+        return {"XData": np.zeros((0, 1)), "YData": np.zeros((0, 1)), "ZData": np.zeros((0, 0)), "Faces": np.zeros((0, 0)),
+                "Vertices": np.zeros((0, 0)), "FaceVertexCData": np.zeros((0, 0)), "CData": np.zeros((0, 0)),
+                "CDataMapping": _m.Char("scaled"), "FaceColor": _rgb_value(COLOR_ORDER[0]), "EdgeColor": _rgb_value((0, 0, 0)),
+                "FaceAlpha": 1.0, "DisplayName": _m.Char(""), "LineWidth": 0.5, "LineStyle": _m.Char("-"),
+                "FaceLighting": _m.Char("flat"), "BackFaceLighting": _m.Char("reverselit"), "AmbientStrength": 0.3,
+                "DiffuseStrength": 0.6, "SpecularStrength": 0.9, "SpecularExponent": 10.0, "VertexNormals": np.zeros((0, 0))}
+
+    def set_prop(self, k, value):
+        GObj.set_prop(self, k, value)
+        if k in ("Faces", "Vertices"):
+            self._sync_xyz()
+        elif k in ("XData", "YData", "ZData"):
+            self._sync_fv()
+
+    def _sync_xyz(self):
+        """XData, YData and ZData from Faces and Vertices: each face's corners down a column, a face with fewer
+        corners than the widest padded with its last vertex's"""
+        F, Vt = self.fv()
+        if F is None:
+            return
+        Fz = np.array(F)
+        for r in Fz:
+            # (a NaN-padded face repeats its last corner)
+            good = [t for t in r if t == t]
+            r[len(good):] = good[-1] if good else np.nan
+        idx = np.nan_to_num(Fz, nan=1.0).astype(np.int64) - 1
+        cols = []
+        for a in range(Vt.shape[1]):
+            M = Vt[:, a][idx].T
+            M[np.isnan(Fz.T)] = np.nan
+            cols.append(M)
+        self.props["XData"], self.props["YData"] = _m._unmat(cols[0]), _m._unmat(cols[1])
+        self.props["ZData"] = _m._unmat(cols[2]) if len(cols) > 2 else np.zeros((0, 0))
+
+    def _sync_fv(self):
+        """Faces and Vertices from XData, YData and ZData: the corners in order, a face a column"""
+        X, Y = _m._mat(self.props["XData"]), _m._mat(self.props["YData"])
+        Zd = self.props["ZData"]
+        if X.size == 0 or X.shape != Y.shape:
+            return
+        X, Y = X.reshape(X.shape[0], -1), Y.reshape(Y.shape[0], -1)
+        cols = [X.T.reshape(-1), Y.T.reshape(-1)]
+        if _m._numel(Zd) == X.size:
+            cols.append(_m._mat(Zd).reshape(X.shape).T.reshape(-1))
+        self.props["Vertices"] = _m._unmat(np.column_stack(cols))
+        self.props["Faces"] = _m._unmat(np.arange(1.0, X.size + 1).reshape(X.shape[1], X.shape[0]))
+
+    def used(self, corners_allowed=None):
+        """(faces, vertices, rows) for drawing: faces an nf-by-k float array of 0-based indices into vertices (NaN
+        where a face has fewer corners), vertices only the rows the faces use (rows, their indices in Vertices), so
+        that unused vertices are never copied; None when there is nothing to draw, False when the faces' corners
+        (counted from Faces' size, before anything is copied) are more than corners_allowed"""
+        df, dv = _m._dims(self.props["Faces"]), _m._dims(self.props["Vertices"])
+        if len(df) != 2 or len(dv) != 2 or 0 in df or dv[0] == 0 or dv[1] not in (2, 3):
+            return None
+        if corners_allowed is not None and df[0] * df[1] > corners_allowed:
+            return False
+        F = np.asarray(_m._mat(self.props["Faces"]), dtype=float)
+        ok = F == F
+        if not ok.any() or np.nanmax(F) > dv[0] or np.nanmin(F) < 1:
+            return None
+        idx = np.where(ok, F, 1.0).astype(np.int64) - 1
+        rows = np.sort(idx[ok])
+        keep = np.ones(rows.size, dtype=bool)
+        keep[1:] = rows[1:] != rows[:-1]
+        rows = rows[keep]
+        Fl = np.where(ok, np.searchsorted(rows, idx).astype(float), np.nan)
+        return Fl, _value_rows(self.props["Vertices"], rows), rows
+
+    def fv(self):
+        """(faces, vertices) as float arrays, faces 1-based; (None, None) when there are none"""
+        F, Vt = _m._mat(self.props["Faces"]), _m._mat(self.props["Vertices"])
+        if F.size == 0 or Vt.size == 0 or Vt.ndim != 2 or Vt.shape[1] not in (2, 3):
+            return None, None
+        F = np.asarray(F, dtype=float).reshape(F.shape[0], -1)
+        if np.nanmax(F) > Vt.shape[0] or np.nanmin(F) < 1:
+            return None, None
+        return F, np.asarray(Vt, dtype=float)
 
     def extent(self, axis):
-        return Line.extent(self, axis) if axis in "xy" else None
+        if axis == "z":
+            v = [x for x in _vec(self.props["ZData"]) if x == x and abs(x) != math.inf]
+            return (min(v), max(v)) if v else None
+        return Line.extent(self, axis)
+
+    def crange(self):
+        fc = self.props["FaceColor"]
+        if not (_m._istext(fc) and _m._text(fc).lower() in ("flat", "interp")) or _m._text(self.props["CDataMapping"]) != "scaled":
+            return None
+        C = _m._mat(self.props["FaceVertexCData"])
+        if C.ndim != 2 or C.shape[1] != 1:
+            return None
+        v = [x for x in C.reshape(-1).tolist() if x == x]
+        return (min(v), max(v)) if v else None
+
+
+def _value_rows(v, rows):
+    """rows of a MATLAB matrix value as a float array, copying only those rows"""
+    if type(v) is np.ndarray and v.ndim == 2:
+        # (stored transposed: a row of the matrix is a column here)
+        return np.asarray(v[:, rows].T, dtype=float)
+    return np.asarray(_m._mat(v), dtype=float)[rows]
+
+
+class Light(GObj):
+    """a light: infinitely far in the direction of Position from the axes' center, or ('local') at Position"""
+    _mclass = "matlab.graphics.primitive.Light"
+    TYPE = "light"
+
+    def defaults(self):
+        return {"Position": np.array([[1.0], [0.0], [1.0]]), "Color": _rgb_value((1, 1, 1)), "Style": _m.Char("infinite"),
+                "Visible": _m.Char("on")}
+
+    def extent(self, axis):
+        return None
 
 
 class Scatter(GObj):
@@ -1623,13 +1735,61 @@ def errorbar_(nargout, args):
     return eb
 
 
-@_fn("fill", "patch")
+@_fn("patch")
+def patch_(nargout, args):
+    """patch(X, Y, C), patch(X, Y, Z, C), patch(S) (the structure's fields as property names and values, as an
+    isosurface's are), patch('Faces', F, 'Vertices', V, ...): each column of X, Y and Z a face; C a color name or
+    RGB triple (FaceColor), a value for each face ('flat') or each vertex ('interp'), or RGB rows of either"""
+    ax, args = _axes_arg(list(args))
+    if len(args) >= 1 and type(args[0]) is _m.Struct and _m._numel(args[0]) == 1:
+        d = args[0].a[0]
+        args = [v for f in args[0].fields for v in (_m.Char(f), d[f])] + list(args[1:])
+    # (the numbers first, then a color if what follows them is odd in count, then names and values)
+    k = next((i for i, a in enumerate(args) if _m._istext(a)), len(args))
+    pos, rest = list(args[:k]), list(args[k:])
+    if len(rest) % 2:
+        pos.append(rest.pop(0))
+    props = {_m._text(rest[i]): rest[i + 1] for i in range(0, len(rest), 2)}
+    if len(pos) not in (0, 3, 4):
+        raise _m._err("Not enough input arguments." if len(pos) < 3 else "Too many input arguments.")
+    p = Patch(ax)
+    if pos:
+        xyz = pos[:-1]
+        if len({_m._dims(t) if not _m._isvec(t) else (_m._numel(t),) for t in xyz}) != 1:
+            raise _m._err("Vectors must be the same length.")
+        cols = [_m._mat(t).reshape(-1, 1) if _m._isvec(t) else _m._mat(t) for t in xyz]
+        p.props["XData"], p.props["YData"] = _m._unmat(cols[0]), _m._unmat(cols[1])
+        p.set_prop("ZData", _m._unmat(cols[2]) if len(cols) > 2 else np.zeros((0, 0)))
+        _patch_color(p, pos[-1], cols[0].shape)
+    _apply(p, props)
+    return p
+
+
+def _patch_color(p, c, shape):
+    """a patch's color argument: a color (its FaceColor), or color data, a value or RGB row for each face (a
+    flat face) or each vertex (interpolated), as FaceVertexCData"""
+    nv, nf = shape
+    if _m._istext(c) or _m._numel(c) == 3 and len(_m._dims(c)) == 2 and nf != 3 and nv * nf != 3:
+        p.props["FaceColor"] = _rgb_value(_color(c))
+        return
+    d = _m._dims(c)
+    C = np.asarray(_m._farr(c), dtype=float).reshape(-1)
+    if len(d) == 3 and d[2] == 3:
+        rows = C.reshape(3, -1).T
+    elif C.size in (nf, nv * nf):
+        rows = C.reshape(-1, 1)
+    else:
+        raise _m._err("Color data must be a color, a value for each face or vertex, or RGB triples for each.")
+    if rows.shape[0] not in (nf, nv * nf):
+        raise _m._err("Color data must be a color, a value for each face or vertex, or RGB triples for each.")
+    p.props["CData"] = _m.cp(c)
+    p.props["FaceVertexCData"] = _m._unmat(rows)
+    p.props["FaceColor"] = _m.Char("flat" if rows.shape[0] == nf else "interp")
+
+
+@_fn("fill")
 def fill_(nargout, args):
     ax = gca()
-    if len(args) == 1 and type(args[0]) is _m.Struct and _m._numel(args[0]) == 1:
-        # (patch(S): the structure's fields as property names and values, as patch's page shows)
-        d = args[0].a[0]
-        args = [v for f in args[0].fields for v in (_m.Char(f), d[f])]
     pos, props = _split_props(args, 2)
     if len(pos) == 0 and props:
         p = Patch(ax)
@@ -1992,6 +2152,235 @@ def slice_(nargout, args):
     if view3:
         ax.props["View"] = np.array([[-37.5], [30.0]])
     return _harr(objs)
+
+
+def _iso_split(args):
+    """(volume arguments, the rest) of isosurface's or isonormals' (X, Y, Z, V, ...) or (V, ...), V checked 3-D;
+    nothing is copied"""
+    if not args:
+        raise _m._err("Not enough input arguments.")
+    full = len(args) >= 4 and not _m._istext(args[3]) and len(_m._dims(args[3])) == 3
+    if len(_m._dims(args[3] if full else args[0])) != 3:
+        raise _m._err("V must be a 3-D array.")
+    return (list(args[:4]), list(args[4:])) if full else (list(args[:1]), list(args[1:]))
+
+
+def _copy_bytes(v):
+    """the bytes of v's float copy in MATLAB's index order, and of the conversion before it when v isn't double"""
+    n = _m._numel(v) * 8
+    return n, (0 if type(v) is np.ndarray and v.dtype == np.float64 else n)
+
+
+def _iso_volume(vol, fname):
+    """(x, y, z, V) from the volume arguments _iso_split gave"""
+    import _matlab_numeric as _mn
+    x, y, z, V, _ = _mn.volume_args(vol + [0.0, 0.0, 0.0], fname)
+    return x, y, z, V
+
+
+def _iso_admit(vol, colors, per_point, what, extra=0):
+    """admitted before any copy is made: V's copy (and colors'), and the grid's coordinate vectors, kept
+    throughout, with the largest of the conversions (one at a time: V's, colors', a full grid array's) and
+    per_point bytes of work for each of V's points, and extra bytes; returns the bytes kept.  A full grid array
+    (volume_args' _grid_vec) is converted twice when it isn't double (_farr, then _nd's), copied, and compared
+    with its own first line for the meshgrid check, a flag a point, all while the earlier vectors are kept"""
+    held, peak = 0, 0
+    for v in [vol[-1]] + ([colors] if colors is not None else []):
+        c, conv = _copy_bytes(v)
+        held += c
+        peak = max(peak, c + conv)
+    # (the three coordinate vectors, each copied once from its grid argument)
+    held += 2 * 8 * sum(_m._dims(vol[-1])[:3])
+    for G in vol[:-1]:
+        if sum(1 for k in _m._dims(G) if k != 1) > 1:
+            c, conv = _copy_bytes(G)
+            # (the comparison's flags and its reduction's, a byte a point each)
+            peak = max(peak, c + 2 * conv + 2 * _m._numel(G))
+    # (and the interpreter's own small allocations meanwhile, measured at about 35 KB)
+    _m._admit_bytes(held + max(peak, _m._numel(vol[-1]) * per_point) + extra + (64 << 10), what)
+    return held
+
+
+@_fn("isosurface")
+def isosurface_(nargout, args):
+    """isosurface(X, Y, Z, V, isovalue[, colors][, 'noshare'][, 'verbose']), isosurface(V, isovalue, ...): the
+    surface where V is isovalue (lib/_matlab_numeric.isosurface_mesh), as a structure of faces and vertices (and
+    facevertexcdata, colors there), as [f, v[, c]], or drawn as a patch"""
+    import _matlab_numeric as _mn
+    args = list(args)
+    share = True
+    while args and _m._istext(args[-1]):
+        t = _m._text(args.pop()).lower()
+        if t == "noshare":
+            share = False
+        elif t != "verbose":
+            raise _m._err("Invalid option '%s': isosurface's options are 'noshare' and 'verbose'." % t)
+    vol, rest = _iso_split(args)
+    if not rest:
+        raise _m._err("isosurface: give the isovalue. MATLAB chooses one when it is left out, by a rule it does not "
+                      "document, so Sagebrush needs it.")
+    if len(rest) > 2:
+        raise _m._err("Too many input arguments.")
+    iso = _m._real_scalar(rest[0], "isovalue")
+    colors = rest[1] if len(rest) == 2 else None
+    if colors is not None and tuple(_m._dims(colors)) != tuple(_m._dims(vol[-1])):
+        raise _m._err("The colors array must be the same size as V.")
+    held = _iso_admit(vol, colors, 0, "An isosurface's volume of %s points" % "x".join(str(k) for k in _m._dims(vol[-1])))
+    x, y, z, V = _iso_volume(vol, "isosurface")
+    C = _mn._nd(colors) if colors is not None else None
+    F, P, cols = _mn.isosurface_mesh(x, y, z, V, iso, C, share, held)
+    if not F.size:
+        # (no surface: 0-by-0 faces and vertices, as MATLAB gives)
+        F, P, cols = np.zeros((0, 0)), np.zeros((0, 0)), np.zeros((0, 0))
+    if nargout == 0:
+        ax = gca()
+        view3 = not ax.holding()
+        ax.newplot()
+        p = Patch(ax, FaceColor=_m.Char("flat") if C is not None else _rgb_value(COLOR_ORDER[0]), EdgeColor=_m.Char("none"))
+        p.mset("Faces", _m._unmat(F))
+        p.mset("Vertices", _m._unmat(P))
+        if C is not None:
+            p.props["FaceVertexCData"] = _m._unmat(cols)
+            p.props["FaceColor"] = _m.Char("interp")
+        if view3:
+            ax.props["View"] = np.array([[-37.5], [30.0]])
+        return None
+    fv = {"faces": _m._unmat(F), "vertices": _m._unmat(P)}
+    if C is not None:
+        fv["facevertexcdata"] = _m._unmat(cols)
+    if nargout == 1:
+        return _m._struct1(fv)
+    return list(fv.values())[:nargout]
+
+
+@_fn("isonormals")
+def isonormals_(nargout, args):
+    """isonormals(X, Y, Z, V, vertices|p[, 'negate']), isonormals(V, ...): V's gradient (MATLAB's gradient: central
+    differences inside, one-sided at the ends) at each vertex, linearly interpolated, made unit length; with a
+    patch and no output, its VertexNormals"""
+    import _matlab_numeric as _mn
+    from _matlab_data import gradient_
+    args = list(args)
+    negate = False
+    if args and _m._istext(args[-1]):
+        if _m._text(args.pop()).lower() != "negate":
+            raise _m._err("isonormals' option is 'negate'.")
+        negate = True
+    vol, rest = _iso_split(args)
+    if len(rest) != 1:
+        raise _m._err("Not enough input arguments." if not rest else "Too many input arguments.")
+    target = rest[0]
+    src = target.props["Vertices"] if isinstance(target, Patch) else target
+    d = _m._dims(src)
+    if _m._numel(src) and (len(d) != 2 or d[1] != 3):
+        raise _m._err("The vertices must be an N-by-3 array.")
+    if not _m._numel(src):
+        # (no vertices: no normals, and nothing of the volume is made)
+        N = np.zeros((0, 3))
+    else:
+        # (admitted first: V's copy, the copy gradient takes, its three gradients and their scratch, each one's copy
+        # for the interpolation and the interpolation's own, about 80 bytes a point; and the vertices' work)
+        _iso_admit(vol, None, 80, "isonormals of a volume of %s points" % "x".join(str(k) for k in _m._dims(vol[-1])),
+                   d[0] * 3 * 8 * 8)
+        x, y, z, V = _iso_volume(vol, "isonormals")
+        Pv = _m._mat(src)
+        G = gradient_(3, _mn._un_nd(V), _m._unmat(x.reshape(1, -1)), _m._unmat(y.reshape(-1, 1)), _m._unmat(z.reshape(-1, 1)))
+        N = np.column_stack([_mn.interp_volume(x, y, z, _mn._nd(g), Pv[:, 0], Pv[:, 1], Pv[:, 2]) for g in G])
+    with np.errstate(invalid="ignore", divide="ignore"):
+        N = N / np.sqrt((N * N).sum(axis=1, keepdims=True))
+    if negate:
+        N = -N
+    if nargout == 0 and isinstance(target, Patch):
+        target.mset("VertexNormals", _m._unmat(N))
+        return None
+    return _m._unmat(N)
+
+
+def _view_dir_to_data(ax, d):
+    """a direction in the view's frame (x right, y up, z toward the viewer) as a direction in data units"""
+    proj = _Proj(ax)
+    T = proj.T
+    u = [sum(T[r][c] * d[r] for r in range(3)) for c in range(3)]
+    return [u[i] / proj.size[i] * proj.spans[i] for i in range(3)]
+
+
+@_fn("camlight")
+def camlight_(nargout, args):
+    """camlight, camlight right|left|headlight, camlight(az, el)[, style]: a light placed from the camera,
+    turned az degrees right and el up (right: 30 and 30; left: -30 and 30; headlight: at the camera)"""
+    ax, args = _axes_arg(list(args))
+    if args and isinstance(args[0], Light):
+        lt, args = args[0], list(args[1:])
+    else:
+        lt = None
+    style = "local"
+    if args and _m._istext(args[-1]) and _m._text(args[-1]).lower() in ("local", "infinite"):
+        style = _m._text(args.pop()).lower()
+    az, el = 30.0, 30.0
+    if args and _m._istext(args[0]):
+        t = _m._text(args[0]).lower()
+        if t not in ("right", "left", "headlight"):
+            raise _m._err("camlight: unknown position '%s'." % t)
+        az, el = {"right": (30.0, 30.0), "left": (-30.0, 30.0), "headlight": (0.0, 0.0)}[t]
+    elif len(args) >= 2:
+        az, el = _f(args[0]), _f(args[1])
+    a, e = math.radians(az), math.radians(el)
+    d = _view_dir_to_data(ax, [math.sin(a) * math.cos(e), math.sin(e), math.cos(a) * math.cos(e)])
+    lim = [_vec(ax.get_prop(k + "Lim")) for k in "XYZ"]
+    mid = [(l[0] + l[1]) / 2 for l in lim]
+    pos = _colvec([mid[i] + 10 * d[i] for i in range(3)])
+    if lt is None:
+        lt = Light(ax)
+    lt.props.update({"Position": pos, "Style": _m.Char(style)})
+    lt.touch()
+    return lt if nargout else None
+
+
+@_fn("light")
+def light_(nargout, args):
+    ax, args = _axes_arg(list(args))
+    lt = Light(ax)
+    _apply(lt, _split_props(args)[1])
+    return lt
+
+
+@_fn("lighting")
+def lighting_(nargout, args):
+    """lighting flat|gouraud|none: the faces' (and edges') lighting of the axes' surfaces and patches"""
+    ax, args = _axes_arg(list(args))
+    t = _m._text(args[0]).lower() if args else "flat"
+    if t not in ("flat", "gouraud", "none"):
+        raise _m._err("lighting: the method is flat, gouraud or none.")
+    for c in ax.children:
+        if isinstance(c, (Surface, Patch)):
+            c.props["FaceLighting"] = _m.Char(t)
+            c.touch()
+
+
+# (material's named reflectances: ambient, diffuse, specular strength and exponent)
+_MATERIALS = {"shiny": (0.3, 0.6, 0.9, 20.0), "dull": (0.3, 0.8, 0.0, 10.0), "metal": (0.3, 0.3, 1.0, 25.0),
+              "default": (0.3, 0.6, 0.9, 10.0)}
+
+
+@_fn("material")
+def material_(nargout, args):
+    ax, args = _axes_arg(list(args))
+    if not args:
+        return None
+    if _m._istext(args[0]):
+        t = _m._text(args[0]).lower()
+        if t not in _MATERIALS:
+            raise _m._err("material: the name is shiny, dull, metal or default.")
+        ka, kd, ks, n = _MATERIALS[t]
+    else:
+        v = _vec(args[0])
+        ka, kd, ks, n = (v + [None] * 4)[:4]
+    for c in ax.children:
+        if isinstance(c, (Surface, Patch)):
+            for k, val in zip(("AmbientStrength", "DiffuseStrength", "SpecularStrength", "SpecularExponent"), (ka, kd, ks, n)):
+                if val is not None:
+                    c.props[k] = float(val)
+            c.touch()
 
 
 @_fn("pcolor")
@@ -2440,7 +2829,7 @@ def drawnow_(nargout, args):
     flush()
 
 
-for _k in ("rotate3d", "zoom", "pan", "linkaxes", "camlight", "lighting", "material", "light"):
+for _k in ("rotate3d", "zoom", "pan", "linkaxes"):
     _FUNCS[_k] = lambda nargout, args: None
 
 
@@ -2897,6 +3286,14 @@ def _draw_axes(ax, mx, mfig):
             _draw_scatter(c, mx, label, cmap, clim)
         elif isinstance(c, Patch):
             fc = c.props["FaceColor"]
+            df = _m._dims(c.props["Faces"])
+            if len(df) == 2 and 0 not in df and (df[0] > 1 or _m._istext(fc) and _m._text(fc).lower() in ("flat", "interp")):
+                # (several faces, or colors from color data: each face, flat, in data coordinates)
+                faces = _patch_faces(c, lambda x, y, z: (x, _fy(y), 0.0), cmap, clim)
+                if faces:
+                    mx._add(_Faces([f[1:] for f in faces], thickness=0.5,
+                                   alpha=_f(c.props["FaceAlpha"]) if _m._isnumlike(c.props["FaceAlpha"]) else None))
+                continue
             col = _hex(_rgbof(fc)) if not (_m._istext(fc) and _m._text(fc) == "none") else None
             xs = _vec(c.props["XData"])
             ys = _vec(c.props["YData"])
@@ -3445,10 +3842,10 @@ def _cindex(v, lo, hi, m):
     return min(m - 1, max(0, int(math.floor((v - lo) / (hi - lo) * m)))) if hi > lo else m // 2
 
 
-def _surface_faces(c, proj, cmap, clim):
+def _surface_faces(c, proj, cmap, clim, shade=None):
     """a Surface's faces as (depth, points, fill, edge): its grid's quadrilaterals,
     colored as FaceColor and EdgeColor say ('flat': the face's first vertex's CData,
-    'interp': their mean, approximately)"""
+    'interp': their mean, approximately), lit by shade"""
     Zm = _m._mat(c.props["ZData"])
     m, n = Zm.shape
     if m < 2 or n < 2:
@@ -3481,7 +3878,148 @@ def _surface_faces(c, proj, cmap, clim):
             edge = col if emode in ("flat", "interp") else efix
             if fill is None and edge is None:
                 continue
+            if shade is not None and fill is not None:
+                # (the normal: the cross product of the quadrilateral's diagonals, in the view's frame)
+                nrm = [(vs[2][(k + 1) % 3] - vs[0][(k + 1) % 3]) * (vs[3][(k + 2) % 3] - vs[1][(k + 2) % 3])
+                       - (vs[2][(k + 2) % 3] - vs[0][(k + 2) % 3]) * (vs[3][(k + 1) % 3] - vs[1][(k + 1) % 3]) for k in range(3)]
+                fill = _hex(shade(tuple(int(fill[i:i + 2], 16) / 255 for i in (1, 3, 5)), nrm))
             out.append(((vs[0][2] + vs[1][2] + vs[2][2] + vs[3][2]) / 4, [(v[0], v[1]) for v in vs], fill, edge))
+    return out
+
+
+def _patch_colors(c, which, cmap, clim, nf, nv, rows):
+    """a patch's face (which: "Face") or edge colors: (mode, colors, per_face), mode None (not drawn), "fixed"
+    (colors one RGB), "flat" or "interp", colors an RGB for each face (per_face) or for each of the used vertices
+    (rows), from its FaceColor or EdgeColor and FaceVertexCData (colormapped values, or RGB rows)"""
+    v = c.props[which + "Color"]
+    mode = _m._text(v).lower() if _m._istext(v) else None
+    if mode == "none":
+        return None, None, False
+    if mode not in ("flat", "interp"):
+        return "fixed", _rgbof(v), False
+    D = c.props["FaceVertexCData"]
+    d = _m._dims(D)
+    if len(d) != 2 or d[0] not in (nf, nv) or d[1] not in (1, 3) or not _m._isnumlike(D):
+        # (no usable color data: MATLAB draws nothing)
+        return None, None, False
+    # (a color each face, or each vertex: only the used vertices' rows)
+    C = _value_rows(D, np.arange(nf) if d[0] == nf and (mode == "flat" or d[0] != nv) else rows)
+    if C.shape[1] == 3:
+        rgb = [tuple(min(1.0, max(0.0, t)) for t in r) for r in C.tolist()]
+    else:
+        M = cmap.M
+        if _m._text(c.props["CDataMapping"]) == "direct":
+            rgb = [tuple(M[min(len(M) - 1, max(0, int(math.floor(t)) - 1))]) if t == t else None for t in C[:, 0].tolist()]
+        else:
+            lo, hi = (clim[0], clim[1]) if len(clim) == 2 else (0.0, 1.0)
+            rgb = [tuple(M[k]) if k is not None else None for k in (_cindex(t, lo, hi, len(M)) for t in C[:, 0].tolist())]
+    # (a color each face when there is one each face; with as many faces as vertices, each face's for 'flat')
+    return mode, rgb, d[0] == nf and (mode == "flat" or d[0] != nv)
+
+
+def _lights(ax):
+    """the axes' visible lights' directions in data units (toward the light) and colors"""
+    out = []
+    lim = [_vec(ax.get_prop(k + "Lim")) for k in "XYZ"]
+    mid = [(l[0] + l[1]) / 2 for l in lim]
+    for c in ax.children:
+        if isinstance(c, Light) and c.valid and _m._text(c.props["Visible"]) != "off":
+            p = (_vec(c.props["Position"]) + [0.0, 0.0, 0.0])[:3]
+            d = [p[i] - mid[i] for i in range(3)] if _m._text(c.props["Style"]) == "local" else p
+            out.append((d, _rgbof(c.props["Color"]) or (1.0, 1.0, 1.0)))
+    return out
+
+
+def _shader(ax, proj, c):
+    """a function (rgb, normal in the view's frame) -> lit rgb for c's faces, or None when it is unlit (no
+    lights, or FaceLighting none): ambient, diffuse and specular light (MATLAB's reflectance model), the face
+    turned toward the viewer when BackFaceLighting is reverselit (the default)"""
+    lights = _lights(ax)
+    if not lights or _m._text(c.props.get("FaceLighting", _m.Char("flat"))).lower() == "none":
+        return None
+    o = proj(*[(l[0] + l[1]) / 2 for l in proj.lim])
+    dirs = []
+    for d, col in lights:
+        q = proj(*[(proj.lim[i][0] + proj.lim[i][1]) / 2 + d[i] for i in range(3)])
+        v = [q[i] - o[i] for i in range(3)]
+        r = math.sqrt(sum(t * t for t in v)) or 1.0
+        dirs.append(([t / r for t in v], col))
+    ka, kd, ks = (float(_f(c.props.get(k, dv))) for k, dv in (("AmbientStrength", 0.3), ("DiffuseStrength", 0.6), ("SpecularStrength", 0.9)))
+    ne = float(_f(c.props.get("SpecularExponent", 10.0)))
+    flip = _m._text(c.props.get("BackFaceLighting", _m.Char("reverselit"))).lower() != "unlit"
+
+    def shade(rgb, n):
+        r = math.sqrt(sum(t * t for t in n))
+        if not r or rgb is None:
+            return rgb
+        n = [t / r for t in n]
+        if flip and n[2] < 0:
+            n = [-t for t in n]
+        out = [ka * t for t in rgb]
+        for l, lc in dirs:
+            nl = sum(a * b for a, b in zip(n, l))
+            if nl <= 0:
+                continue
+            # (the reflection of the light about the normal, against the view direction (0, 0, 1))
+            rz = 2 * nl * n[2] - l[2]
+            sp = ks * max(0.0, rz) ** ne
+            out = [out[i] + kd * nl * rgb[i] * lc[i] + sp * lc[i] for i in range(3)]
+        return tuple(min(1.0, max(0.0, t)) for t in out)
+    return shade
+
+
+def _pick_color(mode, cols, per_face, f, idx):
+    """face f's color (corners idx, among the used vertices): one color, the face's own, its first vertex's
+    ('flat'), or the mean of its vertices' ('interp'); None where a color is missing"""
+    if mode == "fixed" or mode is None:
+        return cols
+    if per_face:
+        return cols[f]
+    if mode == "flat":
+        return cols[idx[0]]
+    cs = [cols[i] for i in idx]
+    if any(t is None for t in cs):
+        return None
+    return tuple(sum(t[k] for t in cs) / len(cs) for k in range(3))
+
+
+def _patch_faces(c, proj, cmap, clim, shade=None):
+    """a Patch's faces as (depth, points, fill, edge), each face's corners in order (NaN-padded faces cut short),
+    colored as FaceColor and EdgeColor say ('flat': the face's color data, or its first vertex's; 'interp': the
+    mean of its vertices'), lit by shade; only the vertices the faces use are read"""
+    u = c.used()
+    if not u:
+        return []
+    F, Vt, rows = u
+    nf, nv = F.shape[0], _m._dims(c.props["Vertices"])[0]
+    fmode, fcol, fper = _patch_colors(c, "Face", cmap, clim, nf, nv, rows)
+    emode, ecol, eper = _patch_colors(c, "Edge", cmap, clim, nf, nv, rows)
+    if fmode is None and emode is None:
+        return []
+    V3 = Vt if Vt.shape[1] == 3 else np.column_stack([Vt, np.zeros(Vt.shape[0])])
+    P = [proj(*r) for r in V3.tolist()]
+    out = []
+    for f, row in enumerate(F.tolist()):
+        idx = [int(t) for t in row if t == t]
+        if len(idx) < 2:
+            continue
+        vs = [P[i] for i in idx]
+        if any(not (math.isfinite(v[0]) and math.isfinite(v[1])) for v in vs):
+            continue
+        fill = _pick_color(fmode, fcol, fper, f, idx) if fmode else None
+        edge = _pick_color(emode, ecol, eper, f, idx) if emode else None
+        if shade is not None and fill is not None and len(vs) >= 3:
+            # (Newell's normal, in the view's frame)
+            n = [0.0, 0.0, 0.0]
+            for a, b in zip(vs, vs[1:] + vs[:1]):
+                n[0] += (a[1] - b[1]) * (a[2] + b[2])
+                n[1] += (a[2] - b[2]) * (a[0] + b[0])
+                n[2] += (a[0] - b[0]) * (a[1] + b[1])
+            fill = shade(fill, n)
+        if fill is None and edge is None:
+            continue
+        out.append((sum(v[2] for v in vs) / len(vs), [(v[0], v[1]) for v in vs], _hex(fill) if fill is not None else None,
+                    _hex(edge) if edge is not None else None))
     return out
 
 
@@ -3542,8 +4080,12 @@ def _draw_axes3d(ax, mx, mfig, cmap, clim):
     # the surfaces' faces, far to near
     faces = []
     for c in ax.children:
-        if isinstance(c, Surface) and c.valid and _m._text(c.props.get("Visible", _m.Char("on"))) != "off":
-            faces += _surface_faces(c, proj, cmap, clim)
+        if not c.valid or _m._text(c.props.get("Visible", _m.Char("on"))) == "off":
+            continue
+        if isinstance(c, Surface):
+            faces += _surface_faces(c, proj, cmap, clim, _shader(ax, proj, c))
+        elif isinstance(c, Patch):
+            faces += _patch_faces(c, proj, cmap, clim, _shader(ax, proj, c))
     faces.sort(key=lambda f: f[0])
     if faces:
         mx._add(_Faces([f[1:] for f in faces]))
@@ -3555,7 +4097,7 @@ def _draw_axes3d(ax, mx, mfig, cmap, clim):
         if not c.valid or _m._text(c.props.get("Visible", _m.Char("on"))) == "off":
             continue
         label = _tex(ax.legend, _m._text(c.props.get("DisplayName", _m.Char("")))) if id(c) in shown else None
-        if isinstance(c, Surface):
+        if isinstance(c, (Surface, Patch)):
             if label:
                 mx._add(_LegendSwatch(label, *_surface_swatch(c, cmap, clim)))
             continue
@@ -3785,6 +4327,80 @@ def _scene_surface(c, cmap, clim, objs, budget):
     return True
 
 
+def _scene_patch(c, cmap, clim, objs, budget, lit):
+    """a Patch's faces (a mesh, each face fanned into triangles, its vertices shared when its colors are a
+    vertex's or one color, so that gouraud lighting is smooth) and edges (lines), as FaceColor and EdgeColor
+    say; lit when the axes have a light and FaceLighting isn't none.  Its share of the view's vertices, two a
+    corner, is checked from Faces' size before anything is copied, and only the vertices the faces use are
+    read"""
+    u = c.used(budget[0] // 2)
+    if u is None:
+        return True
+    if u is False:
+        return False
+    F, Vt, used = u
+    nf, nv = F.shape[0], _m._dims(c.props["Vertices"])[0]
+    V3 = Vt if Vt.shape[1] == 3 else np.column_stack([Vt, np.zeros(Vt.shape[0])])
+    ok = np.isfinite(V3).all(axis=1).tolist()
+    # (each face's corners among the used vertices; None for a face not drawn)
+    rows = [[int(t) for t in r if t == t] for r in F.tolist()]
+    rows = [r if len(r) >= 2 and all(ok[i] for i in r) else None for r in rows]
+    corners = sum(len(r) for r in rows if r)
+    budget[0] -= 2 * corners
+    fmode, fcol, fper = _patch_colors(c, "Face", cmap, clim, nf, nv, used)
+    emode, ecol, eper = _patch_colors(c, "Edge", cmap, clim, nf, nv, used)
+    to255 = lambda t: [int(round(255 * max(0.0, min(1.0, float(u))))) for u in t]
+    vert = lambda i: [_r5(float(v)) for v in V3[i]]
+    faces = [(f, r) for f, r in enumerate(rows) if r and len(r) >= 3]
+    if fmode is not None and faces:
+        pos, idx, col = [], [], []
+        if fper or fmode == "flat":
+            # (a color each face: its corners its own)
+            for f, r in faces:
+                rgb = _pick_color(fmode, fcol, fper, f, r)
+                if rgb is None:
+                    continue
+                b = len(pos) // 3
+                for i in r:
+                    pos.extend(vert(i))
+                    col.extend(to255(rgb))
+                idx.extend(t for k in range(1, len(r) - 1) for t in (b, b + k, b + k + 1))
+        else:
+            drawn = sorted(set(i for _, r in faces for i in r))
+            at = {i: k for k, i in enumerate(drawn)}
+            for i in drawn:
+                pos.extend(vert(i))
+                col.extend(to255(fcol if fmode == "fixed" else fcol[i] or (0.0, 0.0, 0.0)))
+            idx = [at[t] for _, r in faces for k in range(1, len(r) - 1) for t in (r[0], r[k], r[k + 1])]
+        if idx:
+            alpha = c.props.get("FaceAlpha", 1.0)
+            light = lit and _m._text(c.props.get("FaceLighting", _m.Char("flat"))).lower() != "none"
+            o = {"type": "mesh", "pos": pos, "idx": idx, "colors": col, "color": "#000000", "lit": bool(light),
+                 "opacity": float(_f(alpha)) if not _m._istext(alpha) else 1.0}
+            if light and _m._text(c.props.get("FaceLighting", _m.Char("flat"))).lower() == "flat":
+                o["flat"] = True
+            if emode is not None:
+                o["offset"] = True
+            objs.append(o)
+    if emode is not None:
+        groups = {}
+        seen = set()
+        for f, r in enumerate(rows):
+            if not r:
+                continue
+            for a, b in zip(r, r[1:] + r[:1]):
+                if (min(a, b), max(a, b)) in seen or a == b:
+                    continue
+                seen.add((min(a, b), max(a, b)))
+                rgb = _pick_color(emode, ecol, eper, f, [a])
+                if rgb is not None:
+                    groups.setdefault(_hex(rgb), []).extend(vert(a) + vert(b))
+        w = float(_f(c.props.get("LineWidth", 0.5)))
+        for h, pos in groups.items():
+            objs.append({"type": "lines", "pos": pos, "color": h, "width": min(w, 1.0)})
+    return True
+
+
 def _scene_line(c, objs):
     xs, ys = _vec(c.props["XData"]), _vec(c.props["YData"])
     zs = _vec(c.props["ZData"]) if _m._numel(c.props["ZData"]) else [0.0] * len(xs)
@@ -3864,11 +4480,23 @@ def figure_scene(fig):
     proj = _Proj(ax)
     objs = []
     budget = [_SCENE_MAX_VERTICES]
+    lit = bool(_lights(ax))
     for c in ax.children:
-        if not c.valid or _m._text(c.props.get("Visible", _m.Char("on"))) == "off":
+        if not c.valid or _m._text(c.props.get("Visible", _m.Char("on"))) == "off" or isinstance(c, Light):
             continue
         if isinstance(c, Surface):
+            k = len(objs)
             if not _scene_surface(c, cmap, clim, objs, budget):
+                return None
+            if lit and _m._text(c.props.get("FaceLighting", _m.Char("flat"))).lower() != "none":
+                # (with a light, the surface's faces are lit: smooth for gouraud, else flat)
+                for o in objs[k:]:
+                    if o["type"] == "mesh":
+                        o["lit"] = True
+                        if _m._text(c.props.get("FaceLighting", _m.Char("flat"))).lower() == "flat":
+                            o["flat"] = True
+        elif isinstance(c, Patch):
+            if not _scene_patch(c, cmap, clim, objs, budget, lit):
                 return None
         elif type(c) is Stem and _m._numel(c.props["ZData"]):
             _scene_stem(c, objs)
