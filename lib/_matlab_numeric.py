@@ -875,16 +875,20 @@ def interp2_(*args):
             with np.errstate(invalid="ignore", divide="ignore"):
                 tx = np.where(i1 > i, (xq - x[i]) / (x[i1] - x[i]), 0.0)
                 ty = np.where(j1 > j, (yq - y[j]) / (y[j1] - y[j]), 0.0)
-            if single and V.dtype.kind == "f":
-                # (single data in single, as MATLAB computes it: t rounded to single, then each step)
-                W = V.astype(np.float32)
+            if single:
+                # (single data in single, as MATLAB computes it: t rounded to single, then each step; complex data's
+                # real and imaginary parts each so, observed MATLAB R2026b, 2026-11-24)
                 tx, ty = tx.astype(np.float32), ty.astype(np.float32)
-                r0 = (1 - tx) * W[j, i] + tx * W[j, i1]
-                r1 = (1 - tx) * W[j1, i] + tx * W[j1, i1]
+
+                def lerp(W):
+                    r0 = (1 - tx) * W[j, i] + tx * W[j, i1]
+                    r1 = (1 - tx) * W[j1, i] + tx * W[j1, i1]
+                    return (1 - ty) * r0 + ty * r1
+                res = _by_parts(V, lerp)
             else:
                 r0 = (1 - tx) * V[j, i] + tx * V[j, i1]
                 r1 = (1 - tx) * V[j1, i] + tx * V[j1, i1]
-            res = (1 - ty) * r0 + ty * r1
+                res = (1 - ty) * r0 + ty * r1
         out[inside] = res[inside]
     out[~inside] = _math.nan if extrap is None else extrap
     r = _unmat(out.reshape(shape))
@@ -984,6 +988,17 @@ def _spline_weights(g, q):
     return np.array(_ppval(br, C, dim, q).T)
 
 
+def _by_parts(V, f):
+    """f of single data V, a complex V's real and imaginary parts each in single, put together without arithmetic"""
+    if V.dtype.kind != "c":
+        return f(V.astype(np.float32))
+    re, im = f(V.real.astype(np.float32)), f(V.imag.astype(np.float32))
+    z = np.zeros(re.shape, dtype=np.complex64)
+    z.real = re
+    z.imag = im
+    return z
+
+
 def _interp_axes(grids, V, qs, method, extrap, seq=None):
     """V (in MATLAB's index order) on the increasing grid vectors grids[k] along axis k, at the query
     coordinates qs[k] (flat, one per axis): linear, nearest, cubic or spline, along the axes
@@ -1046,18 +1061,19 @@ def _interp_axes(grids, V, qs, method, extrap, seq=None):
             out[inside] = V[idx]
         else:
             # (one axis at a time, in seq's order: each step (1 - t) a + t b between two values, as MATLAB rounds it)
-            if V.dtype == np.float32:
-                # (single data in single, as MATLAB computes it: t rounded to single, then each step)
+            if V.dtype in (np.float32, np.complex64):
+                # (single data in single, as MATLAB computes it: t rounded to single, then each step; complex data's
+                # real and imaginary parts each so, observed MATLAB R2026b, 2026-11-24)
                 t = [tk.astype(np.float32) for tk in t]
 
-            def corner(level, fixed):
+            def corner(W, level, fixed):
                 if level < 0:
-                    return V[tuple(fixed)]
+                    return W[tuple(fixed)]
                 k = seq[level]
-                a = corner(level - 1, fixed[:k] + [lo[k]] + fixed[k + 1:])
-                b = corner(level - 1, fixed[:k] + [hi[k]] + fixed[k + 1:])
+                a = corner(W, level - 1, fixed[:k] + [lo[k]] + fixed[k + 1:])
+                b = corner(W, level - 1, fixed[:k] + [hi[k]] + fixed[k + 1:])
                 return (1 - t[k]) * a + t[k] * b
-            out[inside] = corner(n - 1, [None] * n)
+            out[inside] = _by_parts(V, lambda W: corner(W, n - 1, [None] * n)) if V.dtype == np.complex64 else corner(V, n - 1, [None] * n)
             # (as conv above)
             del corner
     if extrap is not None:
@@ -1183,13 +1199,14 @@ def interp3_(*args):
     shape = Xq.shape
     qs = [Yq.reshape(-1), Xq.reshape(-1), Zq.reshape(-1)]
     method = _cubic_or_else(grids, method)
-    if method == "linear" and _m.class_(args[3] if len(args) == 7 else args[0]) == "single":
-        # (single data's linear interpolation in single, as MATLAB computes it)
-        V = V.astype(np.float32)
+    single = _m.class_(args[3] if len(args) == 7 else args[0]) == "single"
+    if method == "linear" and single:
+        # (single data's linear interpolation in single, as MATLAB computes it; complex data stays complex)
+        V = V.astype(np.complex64 if V.dtype.kind == "c" else np.float32)
     out = _interp_axes(grids, V, qs, method, extrap)
     r = _un_nd(out.reshape(shape))
-    if _m.class_(args[3] if len(args) == 7 else args[0]) == "single":
-        return _m._canon(_arr(r).astype(np.float32))
+    if single:
+        return _m._canon(_arr(r).astype(np.complex64 if np.iscomplexobj(out) else np.float32))
     return r
 
 
