@@ -116,7 +116,7 @@ test("the site's articles and blog are web's core: the web jobs and checks, not 
     const o = classify([f]);
     assert.deepEqual(suites(o), { node: "true", web: "true", modes: "false", engine_smoke: "false", docs_only: "false" }, f);
     assert.deepEqual([o.wasm_build, o.engine_full, o.engine_cpython, o.unsafe_sweep], ["false", "false", "false", "false"], f);
-    assert.deepEqual(JSON.parse(o.web_groups).length, 9, f);
+    assert.deepEqual(JSON.parse(o.web_groups).length, 10, f);
   }
 });
 
@@ -413,14 +413,14 @@ test("the long tier: the nightly schedule and a dispatch with long set; never a 
   for (const o of longRuns) {
     assert.equal(o.long, "true");
     assert.deepEqual(JSON.parse(o.mpmath_backends), ["sagebrush", "python"]);
-    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "pwa", "share-dialog-2"]);
+    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "pwa", "lti", "lti-b", "share-dialog-2"]);
     assert.equal(o.slow_tests, "true");
     assert.equal(o.slow_scope, "1");
   }
   for (const o of notLong) {
     assert.equal(o.long, "false", JSON.stringify(o));
     assert.deepEqual(JSON.parse(o.mpmath_backends), ["sagebrush"]);
-    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "pwa"]);
+    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "pwa", "lti", "lti-b"]);
     assert.equal(o.slow_tests, "false");
     assert.equal(o.slow_scope, "");
   }
@@ -549,7 +549,7 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
     "web/workspace/doc-sync.ts", "web/notebook/sync-rows.js", "web/notebook/db-merge3.ts", "web/board/syncdb.ts",
     "web/share/files.ts", "web/share-client/upload.ts", "web/csp.ts", "web/csp-policy.mts", "web/safe-html.ts",
     "web/cloud/share/server.ts", "web/cloud/share/migrations/0009_remotes.sql", "web/cloud/remote/relay.ts",
-    "web/cloud/mirror/account.ts", "web/cloud/support/support.ts", "web/workspace/agent-chat/mirror-format.ts",
+    "web/cloud/mirror/account.ts", "web/cloud/lti/launch.ts", "web/cloud/support/support.ts", "web/workspace/agent-chat/mirror-format.ts",
     "web/workspace/export/run.ts", "web/workspace/db.ts", "web/workspace/api.ts", "web/workspace/migrate.ts", "web/board/export.ts",
     "web/latex/save.ts", "scripts/check-export-size.mjs",
     // (the LaTeX group's inputs: its ceiling is checked only in the full tier's web-artifacts)
@@ -582,7 +582,7 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
 });
 
 test("the web jobs by area (CI speed plan option 7): a change inside one area runs that area's suites", () => {
-  const ALL = ["notebook", "preload", "latex", "board-a", "board-b", "board-c", "board-unit", "terminal", "remote-preview"];
+  const ALL = ["notebook", "preload", "latex", "board-a", "board-b", "board-c", "board-unit", "terminal", "remote-preview", "space"];
   const pick = (files: string[]) => {
     const o = classify(files);
     return { groups: JSON.parse(o.web_groups), runner: o.web_runner, export: o.web_export, lookalike: o.web_lookalike };
@@ -595,6 +595,10 @@ test("the web jobs by area (CI speed plan option 7): a change inside one area ru
   for (const f of ["examples/notebook/welcome/main.ipynb", "examples/latex/article/article.tex"]) assert.deepEqual(pick([f]).groups, ALL, f);
   // the terminal panel: its group alone
   assert.deepEqual(pick(["web/shell/panel.ts"]), { groups: ["terminal"], runner: "false", export: "false", lookalike: "false" });
+  // a space in 3D (web/space): its group alone (its page loads nothing of the others')
+  for (const f of ["web/space/src/main.js", "web/space/test-walk.mjs", "web/space/examples/intro.space.json"]) {
+    assert.deepEqual(pick([f]), { groups: ["space"], runner: "false", export: "false", lookalike: "false" }, f);
+  }
   // the workspace: web-runner, the export and lookalike jobs, and board-unit (the export's measure and reminder units)
   assert.deepEqual(pick(["web/workspace/browser.ts"]), { groups: ["board-unit"], runner: "true", export: "true", lookalike: "true" });
   // two areas: their union
@@ -697,7 +701,7 @@ test("a changed suite runs on its own pull request: its `// ci:` job, and the fu
   const matrix = JSON.parse(classify(["web/index.html"]).web_matrix);
   assert.deepEqual(matrix, [
     { name: "board", groups: "board-a board-b board-c board-unit preload" },
-    { name: "notebook", groups: "notebook remote-preview terminal" },
+    { name: "notebook", groups: "notebook remote-preview space terminal" },
     { name: "latex", groups: "latex" },
   ]);
   const all = JSON.parse(classify(["web/index.html"]).web_groups);

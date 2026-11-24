@@ -33,6 +33,12 @@
    Colab); a spinning ring (and Stop) while it runs */
 .sbnb .cell .runb { position: absolute; top: 4px; right: 8px; width: 28px; height: 28px; padding: 0; border-radius: 50%; font-size: 11px; line-height: 1; visibility: hidden; }
 .sbnb .cell:hover .runb, .sbnb .cell.active .runb, .sbnb .cell.running .runb, .sbnb .cell.queued .runb { visibility: visible; }
+/* its caption, under it (clear of the running ring), so it is never an unlabeled icon (William, #1549): Run, Show for
+   a Markdown cell being written (its title's "Show the text"), or Stop while the cell runs or waits;
+   part of the button (its accessible name stays its aria-label), shown and hidden with it */
+.sbnb .cell .runb::after { content: "Run"; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 3px; font: 600 9.5px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--muted); white-space: nowrap; pointer-events: none; }
+.sbnb .cell.markdown .runb::after { content: "Show"; }
+.sbnb .cell.running .runb::after, .sbnb .cell.queued .runb::after { content: "Stop"; }
 .sbnb .cell:hover .n, .sbnb .cell.active .n, .sbnb .cell.running .n, .sbnb .cell.queued .n { visibility: hidden; }
 /* one cell's controls at a time: while the mouse is over another cell, the
    active cell's toolbar and run button give way (a running cell keeps its ring) */

@@ -12,15 +12,19 @@
 import "../workspace/pair-link";
 import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
-import { colorBlock } from "./code-color";
+import { blockLang, colorBlock } from "./code-color";
+import { drawTokens, tokensOf } from "../code/tokens";
+import { langOf } from "../code/langs";
+import { modeKey, modeOf, rememberMode, type DocMode } from "../doc-mode";
 import { runningTurn, type Artifact, type Thread, type Turn, type UserEntry } from "../workspace/agent-chat/events";
 import { ChatSession } from "../workspace/agent-chat/session";
 import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, artifactLabel, diffHtml, mirrorSectionNode } from "../workspace/agent-chat/view";
 import { Mirror, MIRROR_COPY, mirrorTitle, type RemoteConversation, type Section } from "../workspace/agent-chat/mirror";
+import { mountDictation } from "./dictation";
 import { startFakeTurn } from "./fake-agent";
 import { AgentError, RELOAD_KEY, type AgentPairing, type Created, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
-import { mountAgentPairing, type RestoreState } from "../workspace/agent-ui";
+import { mountAgentPairing, RELEASED, type RestoreState } from "../workspace/agent-ui";
 import { createdRunner } from "../workspace/agent-made";
 import { runVerbsFor } from "../workspace/run-holder";
 import { agentRunsFor } from "../workspace/agent-runs";
@@ -35,7 +39,7 @@ import { mountComposer, renderComposerState, stopLabel } from "../workspace/agen
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
-import { filesIcon, modeSwitch, answerAgentsLive, FILES_TAB } from "../workspace/mode-switch";
+import { filesIcon, modeSwitch, answerAgentsLive, agentsTabLive, agentsTabRemembered, releaseAgentsTab, FILES_TAB } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
 import { entryUrl } from "../workspace/entry-url";
 import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-chat/transcript";
@@ -58,16 +62,6 @@ const LATEX_URL = new URL("../sagebrush-latex.js", import.meta.url).href;
 const STORE = "sagebrush-agents-preview-v1";
 // (the log mirror's cursors, by conversation: local and non-secret, M2)
 const MIRROR_CURSORS = "sagebrush-agents-mirror-v1";
-// (Open in Sagebrush: the file's own page, as the File menu opens it (web/workspace/entry-url.ts), by the entry's id,
-// found when the link is drawn; hidden for a file with no page of its own)
-function openFull(path: string): HTMLAnchorElement {
-  const a = Object.assign(document.createElement("a"), { className: "open-full", target: "_blank", rel: "noopener", textContent: "Open in Sagebrush", hidden: true });
-  void workspace?.stat(path).then((e) => {
-    const url = e && entryUrl(e);
-    if (url) Object.assign(a, { href: url, hidden: false });
-  }, () => {});
-  return a;
-}
 // The composer's draft, by chat, in this browser (as CoCalc keeps one, #1615): kept as it is typed, back when its chat is
 // shown again (after another chat, Files or a reload), gone once sent. One localStorage record; each chat's draft is
 // written alone into the record as read then, so another tab's drafts of other chats stay. Bounded, so the chats' own
@@ -289,6 +283,8 @@ function submit(mode: UserEntry["mode"]) {
   // (a mirrored conversation is read-only: nothing is sent from it)
   if (mirrorOpen) return;
   // (not connected, in a chat the demo may not answer: Send is inert and the draft stays, A14 C1; a note still posts)
+  // (dictating stops as the message or note goes, its words heard so far in it: none is added after it)
+  dictation.finish();
   if (!session.submit(editor.value, mode)) return;
   if (mode !== "note") void mirror.kick(current().id);
   editor.value = "";
@@ -791,6 +787,7 @@ function renderArtifacts() {
     head.innerHTML =
       `<div class="tabs">${tabs}</div>` +
       `<button class="icon" id="all-arts" title="All artifacts in this chat">☰</button>` +
+      `<a class="open-full" id="open-main" target="_blank" rel="noopener" hidden title="Open in Sagebrush, in a new tab">Open ↗</a>` +
       `<button class="icon" id="copy" title="Copy">⧉</button>` +
       `<button class="icon" id="full" title="${fullscreen ? "Exit full screen" : "Full screen"}">${fullscreen ? "⤡" : "⤢"}</button>` +
       `<button class="icon" id="close" title="Close">✕</button>`;
@@ -802,6 +799,18 @@ function renderArtifacts() {
     }
     for (const x of head.querySelectorAll<HTMLButtonElement>("[data-close]")) x.onclick = () => void closeTab(thread.id, x.dataset.close!);
     $("#all-arts", head).onclick = () => artifactBrowser();
+    // (Open: the artifact's file on its own page in Sagebrush, as the File menu opens it (web/workspace/entry-url.ts), in a
+    //  new tab, so this page and its agent stay; found by the file's id when the head is drawn, and none for a file
+    //  with no page of its own, #1614)
+    const open = $<HTMLAnchorElement>("#open-main", head);
+    if (a.path && workspace)
+      void workspace.stat(a.path).then((e) => {
+        const url = e && entryUrl(e);
+        if (url && open.isConnected) {
+          Object.assign(open, { href: url, hidden: false });
+          open.setAttribute("aria-label", `Open ${a.title} in Sagebrush (a new tab)`);
+        }
+      }, () => {});
     $("#full", head).onclick = () => ((fullscreen = !fullscreen), renderArtifacts());
     $("#close", head).onclick = async () => {
       if (!(await mayClosePane(thread.id)) || current().id !== thread.id) return;
@@ -849,7 +858,6 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
   if (a.kind === "notebook" && a.path && workspace) {
     h.el.innerHTML = `<div class="file-path">${esc(a.path)} <span class="saved"></span> </div><div class="file-body"></div>`;
     const saved = $(".saved", h.el);
-    $(".file-path", h.el).append(openFull(a.path));
     const ui: NotebookUi = {
       saved: (t) => (saved.textContent = t),
       // (kept with this host, shown when it is the host shown: a hidden notebook's warning waits for it)
@@ -917,7 +925,7 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
   if (a.path && workspace && __SB_LATEX__ && __SB_LATEX_HOSTS__.includes(location.hostname) && /\.tex$/i.test(a.path)) {
     const head = document.createElement("div"), body = document.createElement("div");
     head.className = "file-path";
-    head.append(a.path + " ", openFull(a.path));
+    head.append(a.path);
     body.className = "file-body";
     h.el.replaceChildren(head, body);
     const f = mountTexFrame(a.path, body);
@@ -970,8 +978,13 @@ async function keepFileCopy(path: string, text: string, signal?: AbortSignal): P
 }
 type Released = { ok: true } | { ok: false; why: string };
 type FileHost = { text: () => string; flush: () => Promise<void>; release: () => Promise<Released>; dispose: () => Promise<void>; download: () => { name: string; text: string; type: string } | null };
+// (a code or text file's colours, as the code page's (web/code/tokens.ts): up to this many characters; plain above)
+const FILE_COLOR_MAX = 256 * 1024;
 function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost {
   const path = a.path!;
+  // (✎ Edit / View, before the status: shown for a code or text file, below)
+  const toggle = Object.assign(document.createElement("button"), { type: "button", className: "mode-toggle", hidden: true });
+  saved.before(toggle);
   let alive = true;
   let open = true; // (this host's writer: closed at release, after which no write of its is admitted, ART-C4)
   let rev = -1; // (the revision the shown text is based on: known before anything is written)
@@ -1019,9 +1032,6 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
   };
   say("Loading…");
   const tex = /\.tex$/i.test(path);
-  // (the file in Sagebrush, on its own page: a code or text file's (/?code=), a .tex file's where this build has no
-  //  LaTeX editor here; a file with no page of its own gets no link, openFull)
-  if (!tex || !__SB_LATEX__) saved.after(" ", openFull(path));
   type Latex = { mountEditor?: (root: HTMLElement, o: { text: string; onChange?(t: string): void; layout?: "split" | "preview" }) => { getText(): string; destroy(): void } };
   const latexMod: Promise<Latex | null> = tex && __SB_LATEX__ ? import(/* @vite-ignore */ LATEX_URL).catch(() => null) : Promise.resolve(null);
   // (the file as it is now: the agent may have written it again since this artifact)
@@ -1055,13 +1065,60 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
         latest = () => ed.getText();
         destroyEditor = () => ed.destroy();
       } else {
-        const ta = document.createElement("textarea");
-        ta.className = "code-edit";
-        ta.spellcheck = false;
-        ta.value = text;
-        ta.oninput = () => changed(ta.value);
-        box.append(ta);
-        latest = () => ta.value;
+        // (code and text: in colour by its language, read only, with ✎ Edit to write in it here, the colours behind the
+        //  text as it is typed; opened as the person last left this file, View by default, as the code page opens it
+        //  (web/doc-mode.ts), #1618)
+        const lang = langOf(path) ?? blockLang(text, /\.([^./]+)$/.exec(path)?.[1] ?? "");
+        const paint = (el: HTMLElement, t: string) => (t.length <= FILE_COLOR_MAX ? drawTokens(el, tokensOf(t, lang)) : (el.textContent = t));
+        const key = fid ? modeKey("file", fid) : null;
+        let mode: DocMode = key ? modeOf(key) : "view";
+        const view = Object.assign(document.createElement("pre"), { className: "code code-view" });
+        const wrap = Object.assign(document.createElement("div"), { className: "code-wrap" });
+        const hl = Object.assign(document.createElement("pre"), { className: "code code-hl" });
+        hl.setAttribute("aria-hidden", "true");
+        const ta = Object.assign(document.createElement("textarea"), { className: "code-edit", spellcheck: false, wrap: "off" });
+        ta.setAttribute("aria-label", path);
+        wrap.append(hl, ta);
+        // (the colours end where the field's text does, short of its scrollbars, and scroll with it)
+        const fit = () => {
+          hl.style.right = `${ta.offsetWidth - ta.clientWidth}px`;
+          hl.style.bottom = `${ta.offsetHeight - ta.clientHeight}px`;
+          hl.scrollTop = ta.scrollTop;
+          hl.scrollLeft = ta.scrollLeft;
+        };
+        ta.oninput = () => {
+          paint(hl, ta.value + "\n");
+          fit();
+          changed(ta.value);
+        };
+        ta.onscroll = fit;
+        // (and again when the field's size changes: a tab shown, full screen, the window)
+        new ResizeObserver(fit).observe(ta);
+        const show = () => {
+          // (its label says what it does: no aria-pressed beside it, which would say the opposite)
+          toggle.textContent = mode === "edit" ? "View" : "✎ Edit";
+          toggle.title = mode === "edit" ? "Back to reading it" : "Edit it here (saved as you type)";
+          if (mode === "edit") {
+            ta.value = text;
+            paint(hl, text + "\n");
+            box.replaceChildren(wrap);
+            fit();
+          } else {
+            paint(view, text);
+            box.replaceChildren(view);
+          }
+        };
+        toggle.hidden = false;
+        toggle.onclick = () => {
+          // (not while the pane closes: its text is frozen then)
+          if (guard !== "open") return;
+          mode = mode === "edit" ? "view" : "edit";
+          if (key) rememberMode(key, mode);
+          show();
+          if (mode === "edit") ta.focus();
+        };
+        latest = () => (mode === "edit" ? ta.value : text);
+        show();
       }
     },
     () => {
@@ -1213,10 +1270,12 @@ function renderComposer() {
 const marked = (t: Thread) => session.marked(t);
 // (connected on this page, or a reload record found: a chat made since isn't the demo's either)
 let connectedHere = false;
-const mayDemo = (t: Thread) => !marked(t) && !connectedHere;
+// (another Agents tab of this browser has the agent, as it answers "live": this one isn't the demo meanwhile, #1688)
+let otherTabLive = false;
+const mayDemo = (t: Thread) => !marked(t) && !connectedHere && !otherTabLive;
 const inert = (t: Thread) => !live() && !mayDemo(t);
 
-type ConnBar = { kind: keyof typeof CONN | "runner"; text?: string; alert: boolean; action: "reconnect" | "connect" | null };
+type ConnBar = { kind: keyof typeof CONN | "runner"; text?: string; alert: boolean; action: "reconnect" | "connect" | "here" | null };
 const connText = (b: ConnBar) => b.text ?? (b.kind === "runner" ? "" : CONN[b.kind]);
 // (an agent on one of your computers: the words, word for word as reviewed)
 const NOT_SENT = {
@@ -1241,6 +1300,9 @@ function runnerBar(computer: string, e: LegEnd | { kind: string; why: string }):
 // (an attempt to one of your computers, between Chat here and its agent.ready: the header's "Connecting to …")
 let connectingTo: string | null = null;
 let waitingFor = false; // (its runner not connected yet: the header says it waits)
+// (another Agents tab of this browser has the agent: the agent serves one page at a time, so this one can't connect while
+//  that one is; and it prints a new link only once that page goes: #1550)
+const OTHER_TAB = "Claude is connected in another tab of this browser. Use that tab, or close it and Connect here with the new link sagebrush-agent prints.";
 const CONN = {
   lost: "Claude disconnected. Your chats are kept; Claude keeps their context while sagebrush-agent runs.",
   restoring: "Reconnecting to Claude…",
@@ -1251,6 +1313,11 @@ const CONN = {
   unusable: "This page's earlier connection to Claude couldn't be used, so it needs a new code.",
   kept: "Claude was connected to this page earlier.",
   elsewhere: "Claude is connected to another page. Use that page, or close it and Reconnect here.",
+  otherTab: OTHER_TAB,
+  // ("Use Claude here", #1550: the tab that let go says only that it was asked, never that another tab connected: the
+  //  channel proves no such thing; and the tab that asked, when its attempt didn't connect)
+  released: "This tab let go of Claude because another tab of this browser asked for it. Your chats here are kept.",
+  notHere: "Claude couldn't be connected here with your remembered access. Your chats and draft are kept; try again, or Connect with a new link.",
 };
 let connBar: ConnBar | null = null;
 let connShown = false; // (the bar's ×: hidden until the next change)
@@ -1289,7 +1356,7 @@ function renderConn() {
   act.hidden = !b?.action;
   for (const btn of [act, hact]) {
     const mine = reconnecting && busyBtn === btn;
-    setText(btn, mine ? "Reconnecting…" : action === "connect" ? "Connect" : "Reconnect");
+    setText(btn, mine ? (action === "here" ? "Connecting…" : "Reconnecting…") : action === "connect" ? "Connect" : action === "here" ? "Use Claude here" : "Reconnect");
     mine ? btn.setAttribute("aria-busy", "true") : btn.removeAttribute("aria-busy");
     reconnecting || rememberBusy ? btn.setAttribute("aria-disabled", "true") : btn.removeAttribute("aria-disabled");
   }
@@ -1326,6 +1393,7 @@ async function doAct(btn: HTMLElement) {
     connectFrom = btn;
     return agentUi.connect("", "", btn);
   }
+  if (connBar?.action === "here") return useHere(btn);
   reconnecting = true;
   busyBtn = btn;
   renderConn();
@@ -1336,6 +1404,36 @@ async function doAct(btn: HTMLElement) {
     busyBtn = null;
     renderConn();
   }
+}
+/** "Use Claude here" (#1550; SEC move-connection r1 option A): only on the person's click, both conditions asked
+ * again first (another tab's connection is local and remembered; a remembered grant in force here); then the other tab
+ * asked to let go, and this one connected with the remembered access as "Use remembered access" does: its grant
+ * exactly, no new Allow, waiting a bounded while for the other tab's socket to close. Nothing is said connected
+ * until it is; a failure leaves the chats and the draft as they are and says so. */
+async function useHere(btn: HTMLElement) {
+  if (!agentUi) return;
+  reconnecting = true;
+  busyBtn = btn;
+  renderConn();
+  let asked = false, g: Kept["grant"] | null = null;
+  try {
+    // (asked again at the click: either gone meanwhile, nothing is sent and the bar is drawn again from what is true now)
+    if ((await agentUi.remembered()) && (await agentsTabRemembered())) {
+      asked = true;
+      releaseAgentsTab();
+      g = await agentUi.useRemembered().catch(() => null);
+    }
+  } finally {
+    reconnecting = false;
+    busyBtn = null;
+  }
+  if (g) {
+    setText($("#who-status"), `connected with remembered access: ${grantScope(g)}`);
+    setConn(null);
+  } else if (live()) setConn(null);
+  else if (!asked) await checkOtherTab();
+  else setConn({ kind: "notHere", alert: true, action: "connect" });
+  renderHeader();
 }
 $("#conn-act").onclick = () => void doAct($("#conn-act"));
 $("#send-hint-act").onclick = () => void doAct($("#send-hint-act"));
@@ -1391,10 +1489,25 @@ const editor = mountComposer({
   typeset: (el) => typeset(el),
   changed: (v) => { if (draftOf) putDraft(draftOf, v); },
 });
+// (dictation into the draft, #1791: a mic by Send where the browser turns speech into text)
+const dictation = mountDictation({
+  before: $("#send"),
+  conversation: () => draftOf || current().id,
+  // (the words heard, at the end of the draft of the chat they were spoken for: the composer's if it is shown)
+  append: (conv, text) => {
+    const join = (a: string) => (!a ? text : /\s$/.test(a) ? a + text : a + " " + text);
+    if ((draftOf || current().id) === conv) {
+      editor.value = join(editor.value);
+      putDraft(conv, editor.value);
+    } else putDraft(conv, join(draftsPending.get(conv) ?? readDrafts()[conv] ?? ""), true);
+  },
+  toast: (t, ms) => toast(t, ms),
+});
 /** The chat shown's draft in the composer, when another chat's was there. */
 function showDraft() {
   const id = current().id;
   if (draftOf === null || draftOf === id) return;
+  dictation.finish(); // (dictating belongs to the chat it started in: it stops, its words in that chat's draft)
   draftOf = id;
   editor.value = draftsPending.get(id) ?? readDrafts()[id] ?? "";
 }
@@ -1434,6 +1547,9 @@ const delegateUi = mountDelegate({
   site: new URL("../", import.meta.url),
   // (a proposal's .tex rendered under its diff, where this page has the LaTeX editor, as an artifact's .tex is)
   latex: __SB_LATEX__ && __SB_LATEX_HOSTS__.includes(location.hostname) ? () => import(/* @vite-ignore */ LATEX_URL) : null,
+  // (a proposal's .md rendered under its diff with this page's own Markdown renderer, the chat's: safe HTML, remote
+  //  pictures click-to-load)
+  markdown: md,
   toast,
   // (Merge: this browser's workspace, and the agent's record of it)
   merge: workspaceIO(() => workspace, (task, params) => delegateTasks.merged(task, params), /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? async (op, path) => { if (typeof (window as any).__mergeSeam === "function") await (window as any).__mergeSeam(op, path); } : undefined),
@@ -1765,6 +1881,8 @@ function mountPairing(ws: Workspace) {
   delegateTasks.keepIn(kept, `sb-delegate-tasks-v1:${ws.identity.workspace}`);
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
+    // (the Connect dialog says so while another tab of this browser has the agent, #1550)
+    otherTab: () => (otherTabLive ? OTHER_TAB : null),
     runVerbs: runVerbsFor(agentRuns(ws)),
     button: $("#connect"),
     notebookEdit: editNotebook,
@@ -1826,7 +1944,11 @@ function mountPairing(ws: Workspace) {
         if (p.state === "closed" && pairing === p && granted && !p.link) {
           // (a connection that was in force ended: the person's Revoke says nothing more; an expiry or a loss, the bar)
           const why = p.closeReason;
-          if (why === "revoked by the person") setConn(null);
+          if (why === RELEASED) {
+            // (let go for another tab: said as asked, the remembered access offered again, nothing tried by itself)
+            setConn({ kind: "released", alert: false, action: "connect" });
+            void agentUi?.remembered().then((g) => { rememberedGrant = g; renderConn(); });
+          } else if (why === "revoked by the person") setConn(null);
           else if (why === "the grant expired") setConn({ kind: "expired", alert: true, action: "connect" });
           else setConn({ kind: "lost", alert: true, action: agentUi?.canReconnect ? "reconnect" : "connect" });
         }
@@ -1844,7 +1966,37 @@ function mountPairing(ws: Workspace) {
 }
 if (workspace) mountPairing(workspace);
 // (a Files tab this page opened asks whether its agent is still connected here, to come back to this tab: #1620)
-answerAgentsLive(() => pairing?.state === "granted");
+answerAgentsLive(() => pairing?.state === "granted", {
+  // ("Use Claude here" in another tab: this page's connection, if local and remembered, may be asked to let go; that
+  //  is all a message on the channel can do, #1550)
+  remembered: () => !!agentUi?.releasable(),
+  release: () => void agentUi?.release(),
+});
+// (and asks the same of the others: while another Agents tab has the agent and this one has none, the bar says so, and
+//  goes once that tab no longer does; asked at load, each time this tab is shown again, and every few seconds while
+//  the bar says so, #1550)
+let otherTabTimer = 0;
+async function checkOtherTab() {
+  const mine = !!pairing && pairing.state !== "closed";
+  const was = otherTabLive;
+  // (not while "Use Claude here" runs: its own end says what happened)
+  if (reconnecting) return;
+  otherTabLive = !mine && (await agentsTabLive());
+  // (the header, the banner and Send follow: not the scripted demo while that tab has Claude, #1688)
+  if (otherTabLive !== was) { renderHeader(); renderComposer(); }
+  // ("Use Claude here" offered only while that tab's connection is local and remembered and a remembered grant is in
+  //  force here: else Connect, as before)
+  const here = otherTabLive && (await agentsTabRemembered()) && !!(await agentUi?.remembered().catch(() => null));
+  if (otherTabLive && (!connBar || connBar.kind === "kept" || connBar.kind === "otherTab" || connBar.kind === "released")) {
+    const action = here ? "here" : "connect";
+    if (connBar?.kind !== "otherTab" || connBar.action !== action) setConn({ kind: "otherTab", alert: false, action });
+  }
+  else if (!otherTabLive && connBar?.kind === "otherTab") setConn(null);
+  clearTimeout(otherTabTimer);
+  if (connBar?.kind === "otherTab") otherTabTimer = window.setTimeout(() => void checkOtherTab(), 3000);
+}
+void checkOtherTab();
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") void checkOtherTab(); });
 // (the person's review of an agent's branches: in a dialog, its chunk fetched at the first click)
 $("#review").onclick = () => { if (workspace) void openReviewDialog(workspace.reviewHost(), new URL("../", import.meta.url)); };
 // (the storage message's [Retry]: the open again, then the pairing, as a load would; never `disabled` while it runs)
@@ -1985,12 +2137,14 @@ function renderHeader() {
     whoText(who, "wait", "", waitingFor ? RUNNER.waiting(connectingTo) : RUNNER.connecting(connectingTo));
   } else if (pairing && pairing.state === "paired") {
     whoText(who, "wait", agentName(), "waiting: allow it in the dialog");
+  } else if (otherTabLive) {
+    whoText(who, "", "Claude", "in another tab");
   } else if (inert(current())) {
     who.innerHTML = `<span class="conn"></span>Claude <small>not connected</small>`;
   } else {
     who.innerHTML = `<span class="conn demo"></span>Claude <small>scripted demo</small>`;
   }
-  for (const el of document.querySelectorAll<HTMLElement>("#editor [data-placeholder]")) el.dataset.placeholder = `Message ${agentName()}…  (Shift+Enter to send)`;
+  for (const el of document.querySelectorAll<HTMLElement>("#editor [data-placeholder]")) el.dataset.placeholder = `Message ${agentName()}…`;
   $("#connect").textContent = live() ? "Connected" : "Connect Claude";
   $("#stop").textContent = stopLabel(agentName());
   $("#connect").toggleAttribute("disabled", live());
