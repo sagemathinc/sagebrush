@@ -1325,7 +1325,6 @@ def lineplot(data=None, *, x=None, y=None, hue=None, size=None, style=None, unit
             cols = color_palette(palette, len(lev))
             series = [(str(k), [a for a, kk in zip(xl, keys) if kk == k], [b for b, kk in zip(yl, keys) if kk == k],
                        cols[j]) for j, k in enumerate(lev)]
-    rng = _np.random.default_rng(seed)
     for lab, xl, yl, gcol in series:
         col = _rgb(kwargs["color"]) if "color" in kwargs else gcol if gcol is not None else ax._color(None)
         pts = [(float(a), float(b)) for a, b in zip(xl, yl) if a is not None and b is not None and b == b]
@@ -1334,30 +1333,22 @@ def lineplot(data=None, *, x=None, y=None, hue=None, size=None, style=None, unit
             byx.setdefault(a, []).append(b)
         xs = sorted(byx) if sort else list(byx)
         agg = estimator is not None and any(len(byx[a]) > 1 for a in xs)
-        ys = [sum(byx[a]) / len(byx[a]) for a in xs] if agg else [byx[a][0] for a in xs] if not pts or all(
+        # (each x's estimate and error bar as barplot's, seaborn's one aggregator for both: the same numbers; with
+        #  sort, seaborn sorts the data by x and then y first, so a group's values, which the bootstrap resamples,
+        #  are in increasing order)
+        if sort:
+            for a in byx:
+                byx[a].sort()
+        ys = [_estimate(byx[a], estimator) for a in xs] if agg else [byx[a][0] for a in xs] if not pts or all(
             len(byx[a]) == 1 for a in xs) else [b for _, b in pts]
         if not agg and len(xs) != len(pts):
             xs = [a for a, _ in pts]
         if agg and errorbar is not None:
             lo, hi = [], []
-            for a in xs:
-                vals = _np.array(byx[a])
-                if len(vals) < 2:
-                    lo.append(float(vals[0]))
-                    hi.append(float(vals[0]))
-                    continue
-                kind = errorbar[0] if isinstance(errorbar, tuple) else errorbar
-                if kind == "sd":
-                    m, s = float(vals.mean()), float(vals.std(ddof=1))
-                    k = errorbar[1] if isinstance(errorbar, tuple) else 1
-                    lo.append(m - k * s)
-                    hi.append(m + k * s)
-                else:
-                    level = errorbar[1] if isinstance(errorbar, tuple) else 95
-                    boots = vals[rng.integers(0, len(vals), (n_boot, len(vals)))].mean(axis=1)
-                    a_, b_ = _np.percentile(boots, [50 - level / 2, 50 + level / 2]).tolist()
-                    lo.append(a_)
-                    hi.append(b_)
+            for a, e in zip(xs, ys):
+                iv = _interval(byx[a], e, errorbar, estimator, n_boot, seed)
+                lo.append(e if iv is None else iv[0])
+                hi.append(e if iv is None else iv[1])
             ax.fill_between(xs, lo, hi, color=col, alpha=0.2)
         o = {k: v for k, v in kwargs.items() if k not in ("color", "label")}
         ax.plot(xs, ys, color=col, label=lab if lab is not None else kwargs.get("label"), **o)
