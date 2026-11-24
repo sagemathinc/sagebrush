@@ -10,15 +10,16 @@ import katex from "katex";
 import { spawnSync } from "node:child_process";
 import { renderTikz, TikzError, evalMath, colorRgb, TIKZ_LIMITS } from "./engine/tikz.mjs";
 import { Engine } from "./engine/pipeline.mjs";
-import { setKatex } from "./engine/render.mjs";
-setKatex(katex.renderToString);
+import { setKatex, tikzLabel } from "./engine/render.mjs";
+setKatex(katex.renderToString, katex.__renderToHTMLTree);
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 600)); };
 // (a section that throws fails as a row of its own, named, rather than stopping the file: so a broken branch names its row)
 const section = (name, fn) => { try { fn(); } catch (e) { check(name + " (crashed)", false, String(e?.stack ?? e).slice(0, 300)); } };
 const R = () => ({ colors: {}, idn: 0 });
-const draw = (src, opts = {}, r = R()) => renderTikz(src, opts, r);
+const label = (t, f) => tikzLabel(t, f);
+const draw = (src, opts = { label }, r = R()) => renderTikz(src, opts, r);
 const named = (src) => { try { draw(src); return null; } catch (e) { return e instanceof TikzError ? e.why : "NOT NAMED: " + e?.message; } };
 // a hostile case in its own process (tikz-case.mjs), killed at a real deadline: {why, ms}, ms the child's own time
 const CASE = new URL("./tikz-case.mjs", import.meta.url).pathname;
@@ -161,6 +162,81 @@ section("safety", () => {
 });
 
 // ---- bounds and malformed input: each a named problem (TikzError), never a partial picture, NaN, or unbounded work
+// ---- nodes: their boxes as TeX's (pdflatex, pgf 3.1.11a, TeX Live 2025, as the paths'), their anchors and placement,
+// their text, and what they don't do
+const lastPoints = (h) => { const [x0, , , y1] = box(h), ds = [...h.matchAll(/ d="([^"]+)"/g)]; return [...ds[ds.length - 1][1].matchAll(/(-?[\d.]+),(-?[\d.]+)/g)].map((m) => [+m[1] + x0, y1 - +m[2]]); };
+const centre = (h, n) => new RegExp('data-name="' + n + '" data-c="([^"]+)"').exec(h)[1].split(" ").map(Number);
+section("nodes", () => {
+  // [name, source, TeX's x0 y0 x1 y1]: the text's box is KaTeX's metrics, which are TeX's own fonts' (Computer Modern);
+  // TeX kerns some letters and sets inline math with its own spacing, which KaTeX's widths don't: those three within 0.15
+  const NODE_TEX = [
+  ["n-empty", "\\node at (0,0) {};", [-3.33298, -3.33298, 3.33298, 3.33298]],
+  ["n-x", "\\node at (0,0) {$x$};", [-6.19061, -5.48575, 6.19061, 5.48575]],
+  ["n-A", "\\node at (0,0) {A};", [-7.08298, -6.74963, 7.08298, 6.74963]],
+  ["n-drawA", "\\node[draw] at (0,0) {A};", [-7.28297, -6.94963, 7.28297, 6.94963]],
+  ["n-circ", "\\node[draw,circle] at (0,0) {A};", [-9.94853, -9.94853, 9.94853, 9.94853]],
+  ["n-isep0", "\\node[draw,inner sep=0pt] at (0,0) {A};", [-3.95, -3.61665, 3.95, 3.61665]],
+  ["n-minw", "\\node[draw,minimum width=2cm] at (0,0) {A};", [-28.65274, -6.94963, 28.65274, 6.94963]],
+  ["n-west", "\\node[anchor=west] at (1,0) {Ab};", [28.65274, -6.80519, 48.37427, 6.80519]],
+  ["n-above", "\\draw (0,0) -- (2,0) node[above] {A};", [-0.2, -0.2, 63.98846, 13.69926]],
+  ["n-mid", "\\draw (0,0) -- (2,0) node[midway,below] {$y$};", [-0.2, -13.11592, 57.10548, 0.2]],
+  ["n-scale2", "\\node[scale=2] at (0,0) {A};", [-14.16595, -13.49927, 14.16595, 13.49927]],
+  ["n-small", "\\node[font=\\small] at (0,0) {A};", [-6.801, -6.40796, 6.801, 6.40796]],
+  ["n-unscaled", "\\draw[scale=3] (0,0) node[draw] {A} -- (1,0);", [-7.28297, -6.94963, 85.55823, 6.94963]],
+  ["n-math", "\\node[draw] at (0,0) {$x^2+y^2=1$};", [-28.78522, -8.57521, 28.78522, 8.57521]],
+  ["n-edge", "\\node[draw] (A) at (0,0) {A}; \\node[draw,circle] (B) at (3,1) {B}; \\draw[->] (A) -- (B);", [-7.28297, -6.94963, 95.17517, 38.26968]],
+  ["n-text", "\\node at (0,0) {Hello world};", [-28.34691, -6.80519, 28.34691, 6.80519]],
+  ["n-label", "\\node[draw,label=above:$x$] at (0,0) {A};", [-7.28297, -6.94963, 7.28297, 18.12112]],
+  ["n-of", "\\node[draw] (A) at (0,0) {A}; \\node[draw,right=of A] (B) {B};", [-7.28297, -6.94963, 49.88501, 6.94963]],
+  ["n-rightof", "\\node[draw] (A) at (0,0) {A}; \\node[draw,right of=A] (B) {B};", [-7.28297, -6.94963, 35.52739, 6.94963]],
+  ["s-scalepos", "\\node[scale=2] at (1,0) {};", [21.78679, -6.66595, 35.1187, 6.66595]],
+  ["s-xshift", "\\node[xshift=1cm] at (1,0) {};", [53.57251, -3.33298, 60.23846, 3.33298]],
+  ["s-diag", "\\node[draw] (A) at (0,0) {A}; \\node[draw,above right=of A] (B) {B};", [-7.28297, -6.94963, 49.88501, 49.30164]],
+  ["s-lines", "\\node[draw,align=center] at (0,0) {A\\\\Ab};", [-10.06076, -12.94963, 10.06076, 12.94963]],
+  ["s-ellipse", "\\node[draw,ellipse] at (0,0) {A};", [-10.21684, -9.74542, 10.21684, 9.74542]],
+  ["s-scopescale", "\\begin{scope}[scale=2] \\node[draw] at (1,0) {A}; \\end{scope}", [49.62251, -6.94963, 64.18846, 6.94963]],
+  ["s-pathcolor", "\\draw[red] (0,0) -- (1,0) node[right] {A};", [-0.2, -6.74963, 42.8187, 6.74963]],
+  ["s-pos", "\\draw (0,0) -- (2,2) node[pos=0.25,left] {A};", [-0.2, -0.2, 57.10548, 57.10548]],
+  ["s-curve", "\\draw (0,0) .. controls (0,2) and (2,2) .. (2,0) node[midway,above] {A};", [-0.2, -0.2, 57.10548, 57.10548]],
+  ["s-tobend", "\\node[draw,circle] (A) at (0,0) {A}; \\node[draw,circle] (B) at (3,0) {B}; \\draw (A) to[bend left] (B);", [-9.94853, -9.94853, 95.17517, 18.45808]],
+  ["s-hello", "\\node[draw] at (0,0) {Hello, world!};", [-31.32469, -7.97742, 31.32469, 7.97742]],
+  ["s-bf", "\\node[font=\\bfseries] at (0,0) {Ab};", [-10.8746, -6.80519, 10.8746, 6.80519]],
+  ["m-x1", "\\node[inner sep=0pt] at (0,0) {$x_1$};", [-5.1007, -2.90276, 5.1007, 2.90276]],
+  ["m-frac", "\\node[inner sep=0pt] at (0,0) {$\\frac{a}{b}$};", [-3.36882, -5.1998, 3.36882, 5.1998]],
+  ["m-sqrt", "\\node[inner sep=0pt] at (0,0) {$\\sqrt{x}$};", [-7.0243, -5.19998, 7.0243, 5.19998]],
+  ];
+  const LOOSE = new Set(["n-math", "n-text", "s-hello"]);
+  const bad = [];
+  for (const [name, src, t] of NODE_TEX) {
+    let b; try { b = box(draw(src)); } catch (e) { bad.push([name, e.why ?? e.message]); continue; }
+    const dd = Math.max(...b.map((v, q) => Math.abs(v - t[q])));
+    if (!(dd <= (LOOSE.has(name) ? 0.15 : 0.05))) bad.push([name, b, t, +dd.toFixed(3)]);
+  }
+  check("node-tex-boxes", bad.length === 0 && NODE_TEX.length === 34, bad);
+  // anchors as TeX puts them (pdflatex's \pgfpointanchor): a line from one to another, its ends read back
+  const two = "\\node[draw] (A) at (0,0) {A}; \\node[draw,circle] (B) at (3,1) {B};";
+  const ends = [["A.north", "A.east", [0, 6.94963], [7.28297, 0]], ["A.base", "B.north", [0, -3.41666], [85.35823, 38.26968]], ["B.north east", "B.west", [92.29985, 35.39436], [75.54129, 28.45274]]]
+    .map(([a, b, pa, pb]) => { const lp = lastPoints(draw(two + "\\draw (" + a + ") -- (" + b + ");")); return [a, b, lp, near(lp[0][0], pa[0], 0.05) && near(lp[0][1], pa[1], 0.05) && near(lp[1][0], pb[0], 0.05) && near(lp[1][1], pb[1], 0.05)]; });
+  check("node-anchors-as-tex", ends.every((e) => e[3]), ends.filter((e) => !e[3]));
+  // placed as TeX places them: right=of A (positioning), right of=A (the old form), above right=of A
+  const pl = [["\\node[draw] (A) at (0,0) {A}; \\node[draw,right=of A] (B) {B};", [42.81036, 0]], ["\\node[draw] (A) at (0,0) {A}; \\node[draw,right of=A] (B) {B};", [28.45274, 0]],
+    ["\\node[draw] (A) at (0,0) {A}; \\node[draw,above right=of A] (B) {B};", [42.81036, 42.352]]].map(([src, c]) => [src, centre(draw(src), "B"), c]);
+  check("node-positions-as-tex", pl.every(([, got, c]) => near(got[0], c[0], 0.05) && near(got[1], c[1], 0.05)), pl);
+  // nodes aren't scaled with their picture (TikZ's default): a scope's scale moves a node, its own scale= sizes it
+  const us = draw("\\begin{scope}[scale=2] \\node[draw] (A) at (1,0) {A}; \\end{scope} \\node[scale=2] (B) at (0,2) {B};");
+  const ub = (n) => new RegExp('data-name="' + n + '" data-c="[^"]+" data-box="([^"]+)"').exec(us)[1].split(" ").map(Number);
+  check("nodes-unscaled-by-default", near(centre(us, "A")[0], 2 * CM) && near(ub("A")[2] - ub("A")[0], 2 * 7.08298, 0.05) && near(ub("B")[2] - ub("B")[0], 2 * 2 * (3.54167 + 3.333), 0.1), [centre(us, "A"), ub("A"), ub("B")]);
+  // a line between nodes stops at their borders (outer sep included), toward the other's centre; data-edges names it
+  const he = draw(two + "\\draw (A) -- (B);"), le = lastPoints(he), bc = [3 * CM, CM], u = Math.hypot(bc[0], bc[1]);
+  check("edges-stop-at-borders", near(le[0][0], 7.28297, 0.05) && near(le[0][1], 7.28297 / 3, 0.05) && near(Math.hypot(le[1][0] - bc[0], le[1][1] - bc[1]), 9.817, 0.05) && near(le[1][0], bc[0] - (9.817 * bc[0]) / u, 0.05)
+    && /data-name="A"[^>]*data-edges="2"/.test(he) && /data-name="B"[^>]*data-edges="2"/.test(he), [le, he.match(/data-edges="[^"]*"/g)]);
+  // its text: a line where TeX's text box is, at the node's size, in its text colour as rgb(); KaTeX's line-height 0
+  const ht = draw("\\node[text=red, font=\\small] at (0,0) {A};"), st = /<span style="position:absolute;left:([\d.]+)pt;top:([\d.]+)pt;width:([\d.]+)pt;[^"]*font-size:([\d.]+)pt">/.exec(ht);
+  check("node-text-placed", /color:rgb\(255,0,0\)/.test(ht) && st && near(+st[1], 3.333, 0.02) && near(+st[2], 3.333, 0.02) && near(+st[3], 7.5 * 0.9 * 1.028, 0.02) && near(+st[4], 9 / 1.21, 0.02), st);
+  // styles on every node, labels, and a node's text KaTeX can't typeset, named
+  check("every-node-style", near(box(draw("[every node/.style={draw}] \\node at (0,0) {A};"))[2], 7.28297, 0.02) && named("\\node {$\\notacommand x$};") === "a node's text KaTeX can't typeset: $\\notacommand x$", named("\\node {$\\notacommand x$};"));
+});
+
 section("bounds", () => {
   const t0 = Date.now();
   const cases = {
@@ -194,7 +270,13 @@ section("bounds", () => {
     "an unbalanced (": "\\draw (0,0 -- (1,0);",
     "an unknown command": "\\frobnicate (0,0);",
     "an unknown option": "\\draw[wiggly] (0,0) -- (1,0);",
-    "a node": "\\node at (0,0) {A};",
+    "a node's text width": "\\node[text width=2cm] {};",
+    "too many nodes": "\\foreach \\i in {1,...,2001} \\node at (0,0) {};",
+    "an anchor unknown": "\\node (A) {}; \\draw (A.top) -- (1,0);",
+    "a node not defined": "\\node[right=of Z] {};",
+    "a font unknown": "\\node[font=\\Tiny] {};",
+    "a turned node": "\\node[rotate=30] {};",
+    "a node turned with its picture": "\\begin{scope}[rotate=30, transform shape] \\node {}; \\end{scope}",
     "\\clip": "\\clip (0,0) rectangle (1,1);",
     "an axis inside": "\\begin{axis} \\end{axis}",
     "a picture past its source size": "\\draw (0,0) -- (1,0);" + " ".repeat(TIKZ_LIMITS.SRC_MAX),
@@ -213,7 +295,9 @@ section("bounds", () => {
     "an expression too long": /^an expression over 400 characters$/, "an expression too deep": /^an expression nested over 40 deep$/, "division by 0": /^division by 0$/,
     "sqrt of a negative": /^sqrt of a negative number/, "tan(90)": /^tan\(90\) is infinite$/, "ln(0)": /^ln of 0$/, "overflow": /^a value too large/,
     "a scale of 0 then a named point": /flattens the picture/, "a command without its ;": /without its ;$/, "an unbalanced (": /^an unbalanced \(/,
-    "an unknown command": /^\\frobnicate isn't drawn/, "an unknown option": /: wiggly$/, "a node": /^\\node: nodes aren't drawn by the preview yet$/,
+    "an unknown command": /^\\frobnicate isn't drawn/, "an unknown option": /: wiggly$/, "a node's text width": /^a node's text width isn't drawn by the preview yet$/,
+    "too many nodes": /^more than 2000 nodes in a picture$/, "an anchor unknown": /^an anchor the preview doesn't know: top$/, "a node not defined": /^a node not defined before it is used: \(Z\)$/,
+    "a font unknown": /^a font the preview doesn't set: \\Tiny$/, "a turned node": /^a turned or stretched node isn't drawn by the preview yet$/, "a node turned with its picture": /\(transform shape\)/,
     "\\clip": /^\\clip isn't drawn/, "an axis inside": /^the axis environment inside a picture/, "a picture past its source size": /^a picture over 256 KiB/, "an empty picture": /^an empty picture$/,
   };
   // (each in its own process, killed at 10 s; each must also finish its own work within 1.5 s)
@@ -276,9 +360,13 @@ section("engine", () => {
   const r1 = new Engine().update(doc("\\begin{tikzpicture}[scale=2]\n\\draw[mine] (0,0) circle (1);\n\\end{tikzpicture}", "\\tikzset{mine/.style={blue, thick}}\n"));
   const h1 = r1.chunks.join("");
   check("engine-drawn-with-tikzset", /class="tikz"/.test(h1) && /stroke="rgb\(0,0,255\)"/.test(h1) && !(r1.problems || []).some((p) => /tikz/.test(p.name)), r1.problems);
-  const r2 = new Engine().update(doc("\\begin{tikzpicture}\n\\draw (0,0) -- (1,1) node[right] {x};\n\\end{tikzpicture}"));
+  const r2 = new Engine().update(doc("\\begin{tikzpicture}\n\\draw (0,0) -- (1,1) node[right, text width=2cm] {x};\n\\end{tikzpicture}"));
   const h2 = r2.chunks.join("");
-  check("engine-placeholder-named", !/class="tikz"/.test(h2) && /\[tikzpicture: a node on a path: nodes aren(?:'|&#39;)t drawn by the preview yet\]/.test(h2) && (r2.problems || []).some((p) => p.kind === "not-rendered" && /node/.test(p.name)), r2.problems);
+  check("engine-placeholder-named", !/class="tikz"/.test(h2) && /\[tikzpicture: a node(?:'|&#39;)s text width isn(?:'|&#39;)t drawn by the preview yet\]/.test(h2) && (r2.problems || []).some((p) => p.kind === "not-rendered" && /text width/.test(p.name)), r2.problems);
+  // a node through the engine: its text typeset by KaTeX (the renderer's own label), its data on the page
+  const r5 = new Engine().update(doc("\\begin{tikzpicture}\\node[draw] (A) {$x^2$}; \\draw[->] (A) -- (2,0);\\end{tikzpicture}"));
+  const h5 = r5.chunks.join("");
+  check("engine-node-drawn", /class="tikz-n" data-name="A" data-c="[^"]+" data-box="[^"]+" data-edges="1"/.test(h5) && /class="katex" style="line-height:0"/.test(h5) && !(r5.problems || []).length, [h5.slice(0, 300), r5.problems]);
   // through the engine: an environment inside a picture is named (pgfplots' axis), and calc's $...$ reaches tikz.mjs
   const r3 = new Engine().update(doc("\\begin{tikzpicture}\\begin{axis}\\addplot {x^2};\\end{axis}\\end{tikzpicture}\n\n\\begin{tikzpicture}\\coordinate (A) at (0,0); \\coordinate (B) at (2,2); \\draw (A) -- ($(A)!0.5!(B)$);\\end{tikzpicture}"));
   const h3 = r3.chunks.join("");

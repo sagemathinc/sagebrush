@@ -12,7 +12,7 @@ let renderToString = null, renderToHTMLTree = null;
 export function setKatex(f, tree) { renderToString = f; renderToHTMLTree = tree || null; }
 import { CAT, isCs, catOf, codeOf, depthOf } from "./demo-machine.mjs";
 import { TEXT_SYMBOLS, ACCENTS, SIZES, COLORS } from "./symbols.mjs";
-import { renderTikz, TikzError, TIKZ_LIMITS, utf8Len } from "./tikz.mjs";
+import { renderTikz, TikzError, TIKZ_LIMITS, utf8Len, designWidth } from "./tikz.mjs";
 import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected, staleTitle, STALE_TITLE, isPy, isMagma, isNonSage } from "./sagetex.mjs";
 
 // ------------------------------------------------------------------ helpers
@@ -192,9 +192,6 @@ class Flow {
 // character), the spaces it puts between atoms, a script's or a fraction's widest row, scaled by its size class.
 const FAMILY = { bold: "textbf", italic: "textit", sans: "textsf", mono: "texttt" };
 const SIZE_CLASS = [0, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.2, 1.44, 1.728, 2.074, 2.488];
-/** TeX's smaller fonts are drawn wider than 10pt scaled down (cmr7, cmr5...: their own design sizes): the width ratio,
- *  from the digits' widths, for a font `f` of 10pt (KaTeX draws 10pt scaled, so its boxes are the narrower ones). */
-export function designWidth(f) { return f >= 1 ? 1 : f >= 0.9 ? 1.028 : f >= 0.8 ? 1.063 : f >= 0.7 ? 1.163 : f >= 0.6 ? 1.25 : 1.39; }
 const CHAR_W = new Map();
 export function tikzLabel(text, font = {}, macros = {}, macroSig = "", stats = { katexErrors: 0, katexErrorSamples: [], katexWarnings: 0 }) {
   const fam = FAMILY[font.family] || "text";

@@ -27,7 +27,7 @@ import { checkResult, checkText, type CheckResult, type ImageReport } from "../w
 import { applyStep } from "../web/latex/overlay";
 import { splitChunk, tooLargeProblem } from "../web/latex/split";
 
-setKatex(katex.renderToString);
+setKatex(katex.renderToString, (katex as any).__renderToHTMLTree);
 // (beamer's code: in the browser a chunk the worker fetches when a document needs it; here, always)
 installBeamer(beamerCode);
 installPythontex(pythontexCode);

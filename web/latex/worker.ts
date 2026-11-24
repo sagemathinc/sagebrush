@@ -5,7 +5,7 @@
 // Out: {doc, rev, ok, items: [{g, h}], groups, pos, imageRefs, inputRefs, stats, check} or {doc, rev, ok: false, error}
 //   items: every piece in order; g: the index of the chunk it came from (a group is replaced as one unit).
 //   pos: per group, the source offset where it begins (-1: none known), for keeping source and preview in sync.
-// KaTeX's renderToString comes from the site's shared sagebrush-math.js, imported once (no copy of KaTeX here).
+// KaTeX's renderToString and layout tree come from the site's shared sagebrush-math.js, imported once (no copy of KaTeX here).
 import "./engine/shim.mjs";
 import { Engine, withBeamer, withPythontex, installPythontex, once, declaresBeamer } from "./engine/pipeline.mjs";
 import { setKatex, installBeamer } from "./engine/render.mjs";
@@ -19,7 +19,7 @@ const TOO_LARGE = '<div class="bounderr">This document is too large for the prot
 let eng: any = null;
 // (the page's included files, kept from the last message that had them: inputs.ts)
 let inputs: { docPath: string; known: Map<string, Known>; version: number } | null = null;
-const ready = import(/* @vite-ignore */ new URL("sagebrush-math.js", self.location.href).href).then((m: any) => setKatex(m.renderToString));
+const ready = import(/* @vite-ignore */ new URL("sagebrush-math.js", self.location.href).href).then((m: any) => setKatex(m.renderToString, m.__renderToHTMLTree));
 // (beamer's code, engine/beamer.mjs: a chunk of its own beside this worker (same origin, the same dist/ as the worker
 //  itself), fetched once, when a render first says it needs it; a failed fetch stays failed until a reload)
 const loadBeamer = once(() => import(/* @vite-ignore */ new URL("sagebrush-latex-beamer.js", self.location.href).href).then(installBeamer));
