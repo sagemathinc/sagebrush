@@ -625,10 +625,35 @@
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
  },
+ "engine/arith/src/nmod_mat.rs :: batch64 :: ((u64::MAX / sq) as usize).min(1 << 30) #0": {
+  "class": "none",
+  "owner": "engine arithmetic (dense matrices mod p)",
+  "reason": "u64 sums of 32-bit residues: how many products fit a u64 (batch64) and Barrett's reciprocal floor((2^64 - 1) / n) for reducing them; values, not caps; refuses nothing"
+ },
+ "engine/arith/src/nmod_mat.rs :: echelon_impl :: let pinv = u64::MAX / m.n; #0": {
+  "class": "none",
+  "owner": "engine arithmetic (dense matrices mod p)",
+  "reason": "u64 sums of 32-bit residues: how many products fit a u64 (batch64) and Barrett's reciprocal floor((2^64 - 1) / n) for reducing them; values, not caps; refuses nothing"
+ },
+ "engine/arith/src/nmod_mat.rs :: mul :: let pinv = u64::MAX / m.n; #0": {
+  "class": "none",
+  "owner": "engine arithmetic (dense matrices mod p)",
+  "reason": "u64 sums of 32-bit residues: how many products fit a u64 (batch64) and Barrett's reciprocal floor((2^64 - 1) / n) for reducing them; values, not caps; refuses nothing"
+ },
+ "engine/arith/src/nmod_mat.rs :: solve_vec :: let (b64, pinv) = (batch64(&m), u64::MAX / m.n); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (dense matrices mod p)",
+  "reason": "u64 sums of 32-bit residues: how many products fit a u64 (batch64) and Barrett's reciprocal floor((2^64 - 1) / n) for reducing them; values, not caps; refuses nothing"
+ },
  "engine/arith/src/nmod_mat.rs :: the_accumulation_block_fits_a_u128 :: for p in [2u64, 3, 65537, (1 << 32) - 5, (1 << 40) + 15, (1 << 62) - 57, (1 << 63) + 29, u64::MAX - 58] { #0": {
   "class": "none",
   "owner": "engine arith (modular composition)",
   "reason": "test code: modular composition against Horner at nmod's word sizes up to the largest modulus, its work bound's overflow refusals, and the matrix product's accumulation block; refuses nothing itself"
+ },
+ "engine/arith/src/nmod_mat.rs :: update_row :: let pinv = u64::MAX / m.n; #0": {
+  "class": "none",
+  "owner": "engine arithmetic (dense matrices mod p)",
+  "reason": "u64 sums of 32-bit residues: how many products fit a u64 (batch64) and Barrett's reciprocal floor((2^64 - 1) / n) for reducing them; values, not caps; refuses nothing"
  },
  "engine/arith/src/nmod_poly.rs :: barrett_reduction_edges :: let mut xs: Vec<u64> = vec![0, 1, n - 1, n, n + 1, 2 * n - 1, u64::MAX, u64::MAX - 1, u64::MAX - n]; #0": {
   "class": "none",

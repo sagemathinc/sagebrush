@@ -157,7 +157,9 @@ fn metering_polls_stop_at_least_as_often() {
             // copy, as performed)
             let pin = match route {
                 np::ComposeRoute::Streamed => (88, 72, 10),
-                np::ComposeRoute::Blocked => (208, 214, 40),
+                // (C's product at p = 65537 sums in u64: no transposed
+                // copy of B, whose fill and copy were 2 k n = 80 more)
+                np::ComposeRoute::Blocked => (208, 134, 40),
             };
             assert_eq!((first.get(Family::MulSchool), first.get(Family::Move), first.get(Family::ModArith)), pin, "compose {:?}: {:?}", route, first.0);
             let mut k = 1;

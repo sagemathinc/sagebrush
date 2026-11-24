@@ -75,11 +75,12 @@ fn LEFT_DENSITY(r: usize) -> f64 {
     ((1 + 2) as f64 / r.max(1) as f64).min(1.0)
 }
 
-/// The batch length of the word primes' echelons (their products summed
-/// in u128).
-fn word_batch() -> usize {
+/// The units of a word prime's echelon of a rows x cols matrix (its
+/// products summed in u128).
+fn word_echelon(rows: usize, cols: usize) -> [u64; crate::cost::FAMILIES] {
     let p = crate::nmod::Primes::new().next().expect("a prime");
-    crate::nmod_mat::batch_of(&crate::nmod::Modulus::new(p))
+    let m = crate::nmod::Modulus::new(p);
+    crate::nmod_mat::echelon_units_dense(rows, cols, crate::nmod_mat::batch_of(&m), crate::nmod_mat::block_of(&m))
 }
 
 /// One ring operation lin(s, x, u, y) at a modulus of `le` limbs, x of
@@ -439,7 +440,7 @@ pub fn route3_terms(z: &Route3Sizes, c: &Constants) -> Vec<(String, Units)> {
     prof.0[Family::ModArith as usize] = size_product(&[m, n, z.la]);
     let (lo, hi) = (m.min(n), m.max(n));
     if lo > 0 {
-        prof.add_saturating(&Units(crate::nmod_mat::echelon_units_dense(lo, hi, word_batch())));
+        prof.add_saturating(&Units(word_echelon(lo, hi)));
     }
     if z.cols.is_some() {
         prof.0[mv] = prof.0[mv].saturating_add(size_product(&[r, n, z.la]));
@@ -540,12 +541,12 @@ pub fn failed_pass_model(n: usize, h: f64, red: u64, norms: &Units) -> Units {
         return u;
     }
     times(&mut u, 2, norms);
-    let mut aug = Units(crate::nmod_mat::echelon_units_dense(n, 2 * n, word_batch()));
+    let mut aug = Units(word_echelon(n, 2 * n));
     aug.0[Family::ModArith as usize] = aug.0[Family::ModArith as usize].saturating_add(red);
     aug.0[Family::Move as usize] = aug.0[Family::Move as usize].saturating_add(size_product(&[n, n, 3]));
     times(&mut u, 2, &aug);
     let primes = ((h.max(0.0) + 2.0) / 61.9).ceil().max(1.0) as u64;
-    let mut det = Units(crate::nmod_mat::echelon_units_dense(n, n, word_batch()));
+    let mut det = Units(word_echelon(n, n));
     det.0[Family::ModArith as usize] = det.0[Family::ModArith as usize].saturating_add(red + 3);
     times(&mut u, primes, &det);
     times(&mut u, primes, &bigmul_units(primes as usize, 1));

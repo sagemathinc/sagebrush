@@ -1495,17 +1495,18 @@ pub fn inverse_model_sizes(n: usize, h: f64, red: u64, norms: &Units, lx: usize,
     let pc = primes.len() as u64;
     let n2 = size_product(&[n, n]);
     // (the echelon's count depends on the prime only through its batch
-    // length: one count per distinct batch, times its primes)
-    let mut batches: Vec<(usize, u64)> = vec![];
+    // length and block: one count per distinct pair, times its primes)
+    let mut batches: Vec<((usize, usize), u64)> = vec![];
     for &p in &primes {
-        let b = crate::nmod_mat::batch_of(&Modulus::new(p));
+        let m = Modulus::new(p);
+        let b = (crate::nmod_mat::batch_of(&m), crate::nmod_mat::block_of(&m));
         match batches.iter_mut().find(|(x, _)| *x == b) {
             Some((_, c)) => *c += 1,
             None => batches.push((b, 1)),
         }
     }
-    for (b, c) in batches {
-        let e = crate::nmod_mat::echelon_units_dense(n, 2 * n, b);
+    for ((b, k), c) in batches {
+        let e = crate::nmod_mat::echelon_units_dense(n, 2 * n, b, k);
         for (x, y) in u.0.iter_mut().zip(e) {
             *x = x.saturating_add(y.saturating_mul(c));
         }

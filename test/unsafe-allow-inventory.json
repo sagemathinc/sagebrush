@@ -89,6 +89,18 @@
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par, wire) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it forwards allocator calls to System/dlmalloc/the inner allocator and updates its own counters. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
+   "file": "engine/arith/src/nmod_mat.rs",
+   "item": "fn axpy32",
+   "hash": "ad64d86e40bb6436ed2d7c01ed7209bc92347739419e45d89303b090ae810a36",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par, wire) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it calls an AVX2-compiled copy of a safe kernel, only after is_x86_feature_detected!(\"avx2\"), on its own numeric slices (u64 sums of 32-bit residue products). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/arith/src/nmod_mat.rs",
+   "item": "fn axpy32_avx2",
+   "hash": "cbcd4de5e52111be8b301358105b84168ae59040bc63a1abbccc9a3ca08fb8ca",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par, wire) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it is the AVX2-compiled copy of a safe kernel (its body is the safe generic axpy on its own numeric slices), called only by axpy32 after is_x86_feature_detected!(\"avx2\"). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
    "file": "engine/arith/src/spelim.rs",
    "item": "fn dense_axpy",
    "hash": "29f1da413f5072001e6a33c69c0ad5e47da678884d98dbbc15fc8c24a753be60",

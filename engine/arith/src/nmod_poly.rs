@@ -831,7 +831,7 @@ impl PolyModulus {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ComposeRoute {
     /// C as one dense product, then Horner over its rows (peak: B, the
-    /// product's transposed copy of it and C).
+    /// product's transposed copy of it, or a row below 2^32, and C).
     Blocked,
     /// Each row C_j = A_j B computed just before its Horner step (peak: B
     /// and O(n)).
@@ -1210,8 +1210,9 @@ pub const fn compose_work(lf: usize, lg: usize, lh: usize) -> Option<u64> {
 /// own transients, by route (n = lf - 1; (k, r) = [`compose_shape`]):
 /// - both: the powers' matrix B (k n); h reduced, the power being computed
 ///   or h^k, the running value and a row (4 n); a block (k);
-/// - the blocked route also: the product's transposed copy of B (k n),
-///   g's blocks A (r k) and the product C (r n).
+/// - the blocked route also: the product's transposed copy of B (k n; a
+///   modulus below 2^32 needs one row of n instead), g's blocks A (r k)
+///   and the product C (r n).
 pub const fn compose_words(lf: usize, lg: usize, route: ComposeRoute) -> Option<u64> {
     if lf <= 1 || lg <= 1 {
         return (lf as u64).checked_add(1);
