@@ -25,6 +25,20 @@ for case in ["route", "correct", "json", "probe", "preflight", "frame", "outcome
     if not good or case == "mem":
         print("    " + (p.stdout.strip() + ("\n" + p.stderr.strip()[-2000:] if not good else "")).replace("\n", "\n    "))
 
+# the binding borrows a bytes request (no copy) and takes nothing else: a
+# bytearray or memoryview is a TypeError, never a silent copy
+import sagebrush._engine as EN
+req = b"SBW1" + (12).to_bytes(4, "little") + b"nmod_poly_xx"
+for arg in (bytearray(req), memoryview(req)):
+    try:
+        EN.call_bin(arg)
+        good = False
+    except TypeError:
+        good = True
+    bad += not good
+    print("%-10s %s  call_bin(%s)" % ("binding", "ok" if good else "FAIL", type(arg).__name__))
+assert EN.call_bin(req)[:6] == b"SBW1er"
+
 if sys.platform != "win32":
     c = subprocess.Popen([sys.executable, CASES, "interrupt"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     assert c.stdout.readline().strip() == "ready"  # (the request is built: the engine runs next)

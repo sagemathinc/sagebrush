@@ -531,9 +531,15 @@ fn mpoly_call<'py>(py: Python<'py>, request: Vec<u8>) -> PyResult<Bound<'py, pyo
 
 /// A binary call (SBW1, engine/wire), shared with the WebAssembly build
 /// (sb_bin_call): the reply bytes, `ok` or `er` in band.
+/// The request is borrowed from the caller's `bytes`, not copied: PyO3 gives
+/// a `bytes` argument as a slice of its buffer, valid while the argument is
+/// alive (for the whole call).  Sound with the GIL released in `guarded`:
+/// a `bytes` object is immutable, so no other thread can change the slice.
+/// Only `bytes` is accepted (a `bytearray` or `memoryview` is a TypeError,
+/// as PyO3 extracts neither as `&[u8]`).
 #[pyfunction]
-fn call_bin<'py>(py: Python<'py>, request: Vec<u8>) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
-    let r = guarded(py, move || sagebrush_web::bin_ops::call_bin(&request))?;
+fn call_bin<'py>(py: Python<'py>, request: &[u8]) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
+    let r = guarded(py, move || sagebrush_web::bin_ops::call_bin(request))?;
     Ok(pyo3::types::PyBytes::new(py, &r))
 }
 

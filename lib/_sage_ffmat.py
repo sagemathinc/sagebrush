@@ -2737,10 +2737,10 @@ _ECH_SLACK = 256 * 1024
 # 64-bit usize: CPython's extension); pyjs's engine memory is the wasm
 # instance's, outside this budget
 _ECH_ENGINE_SLACK = 4096
-# the binding's copies of the request in this budget: CPython's extension
-# (engine/py call_bin) 1 while it copies; pyjs copies into the wasm
-# instance's memory, outside the heap
-_ECH_BINDING_COPIES = 0 if _sys.implementation.name == "pyjs" else 1
+# the binding's copies of the request in this budget: none (CPython's
+# extension borrows the request's bytes, engine/py call_bin; pyjs copies
+# into the wasm instance's memory, outside the heap)
+_ECH_BINDING_COPIES = 0
 # (tests: the frame cap; None: SBW1's, 2^28)
 _SBW1_FRAME_CAP = None
 # (tests: False keeps every matrix off the binary route, for the JSON
