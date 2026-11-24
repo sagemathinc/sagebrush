@@ -19,7 +19,7 @@ let failures = 0;
 const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 600) : "")); if (!c) failures++; };
 
 // ---- the mirror: the upstream commit and each file's sha256 there (a new upstream version means new pins, reviewed)
-const UPSTREAM = "87a59a3ccd41d16e3765147624813084c88f8db3";
+const UPSTREAM = "be457222b855e511c62b7bec58acc751770f90dc";
 const PINS = {
   "core/bytes.mjs": ["lib/fleet/core/bytes.mjs", "be5c199fcadf375336c49dae692fce6af96644af6f98b11161a4fb0d65eaaf6b"],
   "core/canon.mjs": ["lib/fleet/core/canon.mjs", "d9b7831f6772f6010689ecb74a8727280470e8e1437a2166fc0fd6b1728f08e8"],
@@ -29,8 +29,8 @@ const PINS = {
   "core/crypto.mjs": ["lib/fleet/core/crypto.mjs", "34d85de82f75c4bbae276d7fb24fddce0b8fd576825298fbe452535db12557b4"],
   "core/ed25519.mjs": ["lib/fleet/core/ed25519.mjs", "63420ae7dd5f17d159e56bc3a0ad91a3e96269a7eedf56196da2599a3a05c4ad"],
   "core/envelope.mjs": ["lib/fleet/core/envelope.mjs", "415d31991e6e5c11d61ebdf94d4c61ca1d813f2479746ad2099d17489c315842"],
-  "core/hpke.mjs": ["lib/fleet/core/hpke.mjs", "f078320d9cdbc30373356101fdd05a0470e2c53a7500a59f9dafd35e2ed3630a"],
-  "core/index.mjs": ["lib/fleet/core/index.mjs", "cea774ace5cd45be55e10679acfc6a0820b6188b175ff248d5545121f6ce6cf7"],
+  "core/hpke.mjs": ["lib/fleet/core/hpke.mjs", "38d2ac452098e275b423a8530fb62c2cc113c6f4493cbefa397aa92dd40bf6d1"],
+  "core/index.mjs": ["lib/fleet/core/index.mjs", "06467859381d651bfd49f43047df13b63d765a23b2326fa33b5a5398abbbd95c"],
   "core/recovery.mjs": ["lib/fleet/core/recovery.mjs", "a636cdaab732d71eeb24c241cd6f0c61b5d1634bafd5992675976083e36a90ff"],
   "core/relay.mjs": ["lib/fleet/core/relay.mjs", "e48ee81fc34e0e9a2fd3c60304a80c424ccb07046764a92861cacb597b606cdd"],
   "core/request.mjs": ["lib/fleet/core/request.mjs", "004c275e22bb893d8f59192a18d8cb7d8ad21bdf040ebe4920bd940051615636"],
@@ -44,7 +44,7 @@ const PINS = {
   "fleet-fixtures.json": ["test/fixtures/fleet-fixtures.json", "044b55d36e7b38e618e87e3f2ef8b09c23b882aa6d792847940078e254cfee02"],
   "fleet-hpke-fixtures.json": ["test/fixtures/fleet-hpke-fixtures.json", "2e73d694e466c5faacc3137358a9a33a04d650af82498c9fb277f9beba24e567"],
   "hpke-x25519-sha256-aes256gcm.json": ["test/fixtures/hpke-x25519-sha256-aes256gcm.json", "054c8e53704afdc91aae501f96ee964828c78fd4581e5894d21593b93a066d8e"],
-  "fleet-fixture-cases.mjs": ["test/fleet-fixture-cases.mjs", "5cef40437c796bb098d2a052f8a504615b9ddb80da2e0b64540a47eef14fb235"],
+  "fleet-fixture-cases.mjs": ["test/fleet-fixture-cases.mjs", "b057effe372b976a27914c7734d4014ddd18f6eeb16e99e2b7139bb42dd1fd37"],
 };
 const OWN = ["install.ts"]; // (the page's own file in fleet/; everything else there is upstream's)
 const sha = (b) => createHash("sha256").update(b).digest("hex");
@@ -114,7 +114,7 @@ const settle = async (P, before) => { for (const t = Date.now(); P.loads === bef
 const page = async () => { const P = await B.tab(); const n = P.loads; await P.send("Page.navigate", { url: site + "/" }); await settle(P, n); return P; };
 const err = (P, expr) => P.ev(`(async () => { try { await (${expr}); return null; } catch (e) { return String(e?.message ?? e); } })()`);
 // (the count is pinned so a group of cases that stopped running shows up, not only a case that fails)
-const CASES = 91, HPKE_VECTOR = 257, HPKE_CASES = 34;
+const CASES = 91, HPKE_VECTOR = 260, HPKE_CASES = 34;
 try {
   {
     const P = await page();
@@ -151,7 +151,7 @@ try {
     //  encryption sealed and opened in sequence, and every case of the agent's sealed-package and capability vectors)
     const P = await page();
     const v = await P.ev(`fc.checkHpkeVector(fc.fleetCore(), HV).then((r) => ({ n: r.n, bad: r.bad }))`);
-    ok(v.n === HPKE_VECTOR && v.bad.length === 0, `C-6: RFC 9180's vector for DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, AES-256-GCM agrees in Chromium (${HPKE_VECTOR} encryptions, both key pairs, enc)`, v);
+    ok(v.n === HPKE_VECTOR && v.bad.length === 0, `C-6: RFC 9180's vector for DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, AES-256-GCM agrees in Chromium (${HPKE_VECTOR - 3} encryptions and 3 exports, both key pairs, enc)`, v);
     const f = await P.ev(`fc.checkHpkeFixtures(fc.fleetCore(), HF).then((r) => ({ n: r.n, bad: r.bad }))`);
     ok(f.n === HPKE_CASES && f.bad.length === 0, `C-6: all ${HPKE_CASES} of the agent's HPKE cases agree in Chromium (key ids, sealed packages, capability mints)`, f);
   }

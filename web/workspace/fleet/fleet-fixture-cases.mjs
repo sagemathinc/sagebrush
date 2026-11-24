@@ -53,7 +53,8 @@ export async function checkFixtures(core, F) {
 }
 
 // The RFC 9180 known-answer vector for r2.3 §7's suite (test/fixtures/hpke-x25519-sha256-aes256gcm.json), through one
-// loaded core: both derived key pairs, the encapsulated key, and every encryption sealed and opened in sequence.
+// loaded core: both derived key pairs, the encapsulated key, every encryption sealed and opened in sequence, and every
+// exported secret from both sides (after the encryptions: an export doesn't depend on the sequence) and single-shot.
 export async function checkHpkeVector(core, V) {
   const hex = (h) => Uint8Array.from(h.match(/../g) ?? [], (x) => parseInt(x, 16));
   const toHex = (b) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
@@ -67,6 +68,15 @@ export async function checkHpkeVector(core, V) {
   for (const [i, e] of V.encryptions.entries()) {
     if (toHex(await S.seal(hex(e.aad), hex(e.pt))) !== e.ct) bad.push(`seal ${i}`);
     if (toHex(await O.open(hex(e.aad), hex(e.ct))) !== e.pt) bad.push(`open ${i}`);
+    n++;
+  }
+  for (const [i, x] of V.exports.entries()) {
+    const ctx = hex(x.exporter_context);
+    if (toHex(await S.export(ctx, x.L)) !== x.exported_value) bad.push(`sender export ${i}`);
+    if (toHex(await O.export(ctx, x.L)) !== x.exported_value) bad.push(`recipient export ${i}`);
+    const one = await core.hpkeSendExport(R.raw, hex(V.info), ctx, x.L, E);
+    if (toHex(one.enc) !== V.enc || toHex(one.secret) !== x.exported_value) bad.push(`sendExport ${i}`);
+    if (toHex(await core.hpkeReceiveExport(R, hex(V.enc), hex(V.info), ctx, x.L)) !== x.exported_value) bad.push(`receiveExport ${i}`);
     n++;
   }
   // overlapping calls on one context (ruled): the first runs, any other started while it is pending is refused
