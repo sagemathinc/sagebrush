@@ -15843,5 +15843,10 @@
   },
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "cell arrays where the host's memory can't be measured (the browser today): at most 2 GiB estimated, the legacy full-array cap for doubles and half the wasm32 4 GiB; past it memory_guard (fixed), MATLAB:nomem; measured hosts use the Ledger"
+ },
+ "lib/_matlab_numeric.py :: interp_method :: raise _err(\"%s: the '%s' method is not supported in Sagebrush.\" % (fname, method), \"Sagebrush:%s:unsupportedMethod\" % fname) #0": {
+  "class": "coverage",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "interp3 and slice refuse the interpolation methods Sagebrush doesn't implement (makima, and next and previous, which MATLAB's interp3 page doesn't list): an unsupported option, not a cap"
  }
 }

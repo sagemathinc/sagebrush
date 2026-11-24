@@ -101,6 +101,47 @@
     ]
   },
   {
+    "name": "interp3",
+    "kind": "function",
+    "signature": "Vq = interp3(X, Y, Z, V, Xq, Yq, Zq)\nVq = interp3(V, Xq, Yq, Zq)\nVq = interp3(V)\nVq = interp3(V, k)\nVq = interp3(___, method)\nVq = interp3(___, method, extrapval)",
+    "summary": "Interpolates a 3-D volume V, given on a meshgrid grid, at query points: linear by default, or nearest, cubic or spline.",
+    "doc": "X, Y and Z are meshgrid arrays the size of V, or grid vectors; each increasing or decreasing. With V alone the grid is 1:n along each dimension, and interp3(V, k) refines it k times (2^k-1 points between neighbours). Outside the grid the result is NaN, or extrapval when given; 'spline' extrapolates unless given extrapval. 'cubic' is cubic convolution on a uniformly spaced grid; as in MATLAB, with a warning, it is 'spline' on another grid and 'linear' with fewer than 3 points in a dimension, and 'pchip' is 'linear'. Query vectors of different orientations are used as a grid, as meshgrid makes it.",
+    "examples": [
+      {
+        "code": "[X, Y, Z] = meshgrid(1:3); V = X + 10*Y + 100*Z;\ninterp3(X, Y, Z, V, 1.5, 2.5, 2)",
+        "expected": "\nans =\n\n  226.5000\n\n"
+      },
+      {
+        "code": "[X, Y, Z] = meshgrid(1:3); V = X + 10*Y + 100*Z;\ninterp3(V, [1.2 2.8], [1 1], [3 3], 'nearest')",
+        "expected": "\nans =\n\n   311   313\n\n"
+      },
+      {
+        "code": "[X, Y, Z] = meshgrid(1:3); V = X + 10*Y + 100*Z;\ninterp3(X, Y, Z, V, 4, 1, 1)",
+        "expected": "\nans =\n\n   NaN\n\n"
+      },
+      {
+        "code": "[X, Y, Z] = meshgrid(1:3); V = X + 10*Y + 100*Z;\ninterp3(X, Y, Z, V, 4, 1, 1, 'linear', 0)",
+        "expected": "\nans =\n\n     0\n\n"
+      }
+    ],
+    "differs": [
+      "The 'makima' method is refused, and so are 'next' and 'previous', which MATLAB's interp3 page doesn't list.",
+      "'cubic' and 'spline' results can differ from MATLAB's in the last digits (up to about 1e-13); 'linear' and 'nearest' match MATLAB's to the bit.",
+      "With single data the result is single, computed in double and then rounded, so it can differ from MATLAB's by a unit in the last place.",
+      "Query coordinates of mixed types (single and double) are accepted; MATLAB refuses them."
+    ],
+    "status": "partial",
+    "see_also": [
+      "interp1",
+      "interp2",
+      "slice",
+      "meshgrid"
+    ],
+    "tags": [
+      "interpolation"
+    ]
+  },
+  {
     "name": "ode45",
     "kind": "function",
     "signature": "[t, y] = ode45(odefun, tspan, y0)\n[t, y] = ode45(odefun, tspan, y0, options)\n[t, y, te, ye, ie] = ode45(odefun, tspan, y0, options)\nsol = ode45(___)",

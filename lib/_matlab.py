@@ -13141,7 +13141,7 @@ _PLOT_FNS = ("figure gcf gca groot clf cla close hold ishold subplot plot plot3 
              "isgraphics ishandle ishghandle shg refresh rotate3d zoom pan linkaxes daspect pbaspect "
              "parula jet hot gray cool spring summer autumn winter bone copper pink hsv turbo lines tiledlayout nexttile peaks "
              "sphere cylinder contourc clabel scatter3 stem3 pcolor shading axes colororder findobj fplot quiver "
-             "histcounts discretize zticks zticklabels camlight lighting material light").split()
+             "histcounts discretize zticks zticklabels camlight lighting material light slice").split()
 for _n in _PLOT_FNS:
     _B[_n] = _lazy_plot(_n)
 

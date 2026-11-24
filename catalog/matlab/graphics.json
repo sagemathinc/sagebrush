@@ -1,0 +1,31 @@
+[
+  {
+    "name": "slice",
+    "kind": "function",
+    "signature": "slice(X, Y, Z, V, xslice, yslice, zslice)\nslice(V, xslice, yslice, zslice)\nslice(X, Y, Z, V, Xi, Yi, Zi)\nslice(___, method)\nh = slice(___)",
+    "summary": "Draws planes through a 3-D volume, colored by the volume's values.",
+    "doc": "Each value of xslice is the plane x = xslice(k), and likewise for yslice and zslice ([] for none); the surfaces come in that order, x-planes first. Each plane is a surface on the volume's grid lines, colored by V interpolated there as interp3 does it (method 'linear', the default, 'nearest', 'cubic' or 'spline'); a plane outside the volume is all NaN. Matrices Xi, Yi and Zi of one size give one surface through those points instead. shading interp and colorbar make the planes easier to read.",
+    "examples": [
+      {
+        "code": "[X, Y, Z] = meshgrid(-2:0.5:2); V = X .* exp(-X.^2 - Y.^2 - Z.^2);\nslice(X, Y, Z, V, [-1.2 0.8], 2, [-2 0])",
+        "expected": ""
+      },
+      {
+        "code": "[X, Y, Z] = meshgrid(-2:2, -1:1, 0:3); V = X + 10*Z;\nh = slice(X, Y, Z, V, 0.5, [], []);\nh.CData",
+        "expected": "\nans =\n\n    0.5000   10.5000   20.5000   30.5000\n    0.5000   10.5000   20.5000   30.5000\n    0.5000   10.5000   20.5000   30.5000\n\n"
+      }
+    ],
+    "differs": [
+      "The 'makima' method is refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "interp3",
+      "surf",
+      "contour"
+    ],
+    "tags": [
+      "plots"
+    ]
+  }
+]
