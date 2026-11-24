@@ -3115,6 +3115,27 @@ function arrayText1(a: NDArray, sep: string, prefix: string, suffix: string): st
   const lineWidth = printopts.linewidth - suffix.length;
   const nextLinePrefix = " " + " ".repeat(prefix.length);
   const extend = (st: { s: string; line: string }, word: string, width: number, hanging: string) => {
+    // (a word of several lines, an object element's repr such as an array's: _extendLine_pretty, each further
+    // line indented to where its first began, and the last padded to the widest)
+    const words = word.split("\n");
+    if (words.length > 1) {
+      const widest = Math.max(...words.map((w) => w.length));
+      let indent: string;
+      if (st.line.length + widest > width && st.line.length > hanging.length) {
+        st.s += st.line.trimEnd() + "\n";
+        st.line = hanging + words[0];
+        indent = hanging;
+      } else {
+        indent = " ".repeat(st.line.length);
+        st.line += words[0];
+      }
+      for (const w of words.slice(1)) {
+        st.s += st.line.trimEnd() + "\n";
+        st.line = indent + w;
+      }
+      st.line += " ".repeat(widest - words[words.length - 1].length);
+      return;
+    }
     let wrap = st.line.length + word.length > width;
     if (st.line.length <= hanging.length) wrap = false; // wrapping would not help
     if (wrap) {
@@ -3831,6 +3852,13 @@ function elemObj(a: any, p: number): any {
 function objFromPy(x: any, discovered = false): ObjArray {
   const shape: number[] = [];
   let level: any[] = [x];
+  // (which of level's items are parts of an array the walk went into: one left with dimensions of its own
+  // where the walk stops, NumPy assigns that whole array into its place, broadcasting, which isn't here yet)
+  let inArr: boolean[] = [false];
+  const cutArray = () => {
+    if (level.some((v, i) => inArr[i] && anyArray(v) && v.ndim > 0))
+      raise(T.NotImplementedError, "this operation on object arrays is not supported by sagebrush's numpy yet (an array inside the data whose dimensions don't all fit the result's: NumPy assigns it whole, broadcasting)");
+  };
   // (at most NumPy's NPY_MAXDIMS = 64 dimensions: with an object dtype given, what lies deeper stays an
   // element, so a list that contains itself ends; Stop is polled once a level)
   for (;;) {
@@ -3838,12 +3866,15 @@ function objFromPy(x: any, discovered = false): ObjArray {
     if (shape.length >= OBJ_MAXDIMS) {
       // (data whose dtype was discovered, not given: deeper sequences are refused, as NumPy's)
       if (discovered && level.some((v) => (anyArray(v) ? v.ndim > 0 : isSeq(v) && !strLike(v)))) tooDeep();
+      cutArray();
       break;
     }
     O.pollInterrupt();
     let n = -1;
     let ok = true;
+    let polled = 0;
     for (const v of level) {
+      if ((++polled & 4095) === 0) O.pollInterrupt();
       let len: number;
       if (anyArray(v)) len = v.ndim === 0 ? -1 : v.shape[0];
       else if (isSeq(v) && !strLike(v)) len = seqItems(v).length;
@@ -3858,15 +3889,29 @@ function objFromPy(x: any, discovered = false): ObjArray {
       // (a discovered dtype: ragged data is NumPy's inhomogeneous-shape error; a given object dtype keeps its
       // differing sequences as elements)
       if (discovered && level.some((v) => (anyArray(v) ? v.ndim > 0 : isSeq(v) && !strLike(v)))) inhomogeneous(shape.length, shape);
+      cutArray();
       break;
     }
     shape.push(n);
-    const next: any[] = [];
+    // (the next level has as many items as the array so far has elements: admitted before it is built, so
+    // shared sublists, [x, x] nested, can't grow the walk past the array admission; Stop polled as it goes)
+    admitArray(shape, OBJ_DT as unknown as DType);
+    const next: any[] = [], nextIn: boolean[] = [];
     for (const v of level) {
-      if (anyArray(v)) for (let i = 0; i < v.shape[0]; i++) next.push(arrayItem(v, i));
-      else for (const it of seqItems(v)) next.push(it);
+      if ((++polled & 4095) === 0) O.pollInterrupt();
+      if (anyArray(v))
+        for (let i = 0; i < v.shape[0]; i++) {
+          next.push(arrayItem(v, i));
+          nextIn.push(true);
+        }
+      else
+        for (const it of seqItems(v)) {
+          next.push(it);
+          nextIn.push(false);
+        }
     }
     level = next;
+    inArr = nextIn;
     if (n === 0) break;
   }
   const out = objEmpty(shape);
@@ -3994,7 +4039,7 @@ function objCmp(x: any, y: any): number {
   return objLess(x, y) ? -1 : O.truth(O.richCompare(x, y, "__gt__")) ? 1 : 0;
 }
 // NumPy's default sort of objects (npy_quicksort and npy_aquicksort, numpy/_core/src/npysort/
-// quicksort_generic.cpp, BSD-3-Clause): an introsort, median of three, insertion sort for 16 or fewer, a
+// quicksort_generic.cpp; Copyright (c) 2005-2025, NumPy Developers, BSD-3-Clause, see NOTICE.md): an introsort, median of three, insertion sort for 16 or fewer, a
 // heapsort where the partitions go too deep. Not stable, so equal elements (1, 1.0, True) come out in
 // NumPy's order only by following it step by step. With idx, the indices are sorted by v[idx[i]] and v
 // stays; without it, v itself is sorted.
@@ -4058,7 +4103,8 @@ function objQuick(v: any[], idx: number[] | null) {
     cdepth = depth.pop()!;
   }
 }
-// (npy_heapsort / npy_aheapsort on t[start .. start + n), 1-based as theirs; at(i) reads t[i]'s element)
+// (npy_heapsort / npy_aheapsort, numpy/_core/src/npysort/heapsort.cpp, NumPy's BSD-3-Clause, see NOTICE.md:
+// on t[start .. start + n), 1-based as theirs; at(i) reads t[i]'s element)
 function objHeap(t: any[], at: (i: number) => any, start: number, n: number) {
   const b = start - 1;
   const sift = (l: number, m: number) => {

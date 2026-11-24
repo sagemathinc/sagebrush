@@ -210,3 +210,28 @@ for name, f in [
     ("set-2d", lambda: (lambda a: (a.__setitem__(slice(None), [[1, [2]], [3, 4]]), a)[1])(np.empty((2, 2), dtype=object))),
 ]:
     show(name, f)
+
+# arrays inside the data that fit the result's shape, or that stay whole elements (a ragged level at them)
+z = np.zeros
+for name, f in [
+    ("arrays-ragged", lambda: np.array([z(2), z(3)], dtype=object)), ("arrays-ragged-2d", lambda: np.array([z((2, 2)), z((3, 2))], dtype=object)),
+    ("arrays-and-scalar", lambda: np.array([z(1), 5], dtype=object)), ("list-and-array", lambda: np.array([[1, 2], z(3)], dtype=object)),
+    ("array-and-ragged-list", lambda: np.array([z(2), [1, [2]]], dtype=object)), ("arrays-fit", lambda: np.array([z((2, 2)), z((2, 2))], dtype=object).shape),
+    ("array-63-in-list", lambda: (lambda a: (a.__setitem__(Ellipsis, "e"), np.array([a], dtype=object).ndim)[1])(np.empty((1,) * 62 + (2,), dtype=object))),
+]:
+    show(name, f)
+
+
+# an element whose repr has several lines (an array): each further line indented to where it began, as NumPy's
+def holding(*vs):
+    a = np.empty(len(vs), dtype=object)
+    for i, v in enumerate(vs):
+        a[i] = v
+    return a
+
+
+for name, f in [
+    ("repr-arrays", lambda: holding(np.zeros((3, 3)), 1, "a")), ("str-arrays", lambda: str(holding(np.arange(30).reshape(3, 10), np.arange(4)))),
+    ("repr-arrays-wrap", lambda: holding(*[np.zeros((2, 2))] * 6)),
+]:
+    show(name, f)
