@@ -413,14 +413,14 @@ test("the long tier: the nightly schedule and a dispatch with long set; never a 
   for (const o of longRuns) {
     assert.equal(o.long, "true");
     assert.deepEqual(JSON.parse(o.mpmath_backends), ["sagebrush", "python"]);
-    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "pwa", "share-dialog-2"]);
+    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "pwa", "lti", "lti-b", "share-dialog-2"]);
     assert.equal(o.slow_tests, "true");
     assert.equal(o.slow_scope, "1");
   }
   for (const o of notLong) {
     assert.equal(o.long, "false", JSON.stringify(o));
     assert.deepEqual(JSON.parse(o.mpmath_backends), ["sagebrush"]);
-    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "pwa"]);
+    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "pwa", "lti", "lti-b"]);
     assert.equal(o.slow_tests, "false");
     assert.equal(o.slow_scope, "");
   }
@@ -549,7 +549,7 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
     "web/workspace/doc-sync.ts", "web/notebook/sync-rows.js", "web/notebook/db-merge3.ts", "web/board/syncdb.ts",
     "web/share/files.ts", "web/share-client/upload.ts", "web/csp.ts", "web/csp-policy.mts", "web/safe-html.ts",
     "web/cloud/share/server.ts", "web/cloud/share/migrations/0009_remotes.sql", "web/cloud/remote/relay.ts",
-    "web/cloud/mirror/account.ts", "web/cloud/support/support.ts", "web/workspace/agent-chat/mirror-format.ts",
+    "web/cloud/mirror/account.ts", "web/cloud/lti/launch.ts", "web/cloud/support/support.ts", "web/workspace/agent-chat/mirror-format.ts",
     "web/workspace/export/run.ts", "web/workspace/db.ts", "web/workspace/api.ts", "web/workspace/migrate.ts", "web/board/export.ts",
     "web/latex/save.ts", "scripts/check-export-size.mjs",
     // (the LaTeX group's inputs: its ceiling is checked only in the full tier's web-artifacts)
@@ -916,4 +916,23 @@ test("a master push the merge queue already tested (CI_QUEUE_TESTED): every test
   // (only a master push: a track push, the queue's own run, a pull request ignore it)
   assert.equal(classify(["src/x.ts"], "", { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/track/math", CI_QUEUE_TESTED: "true" }).full, "true");
   assert.equal(classify(["src/x.ts"], "", { CI_QUEUE_TESTED: "true" }).queue_tested, "false");
+});
+
+test("PR CI light (CI_PR_LIGHT exactly \"true\"): a pull request keeps only checks' and the size gate's inputs and the modules' build", () => {
+  const files = ["src/compile.ts", "web/notebook/x.ts", "engine/poly/src/lib.rs", "magma-tests/x.m"];
+  const off = classify(files);
+  const on = classify(files, "", { CI_PR_LIGHT: "true" });
+  assert.equal(on.pr_light, "true");
+  assert.equal(off.pr_light, "false");
+  // (on: every selection off but the size inputs, which run checks, size-base and the measured gate, and the build)
+  const kept = new Set(["size_inputs", "wasm_build", "pr_light", "queue_tested", "mpmath_backends", "web_sync_shards", "files", "docs_only", "app_only", "optional_only", "long"]);
+  for (const [k, v] of Object.entries(on)) if (!kept.has(k)) assert.ok(v === "false" || v === "[]" || v === "", `${k}=${v}`);
+  assert.deepEqual([on.size_inputs, on.wasm_build], ["true", off.wasm_build]);
+  // (off: unset, "false", "1" or "TRUE" are no switch)
+  for (const v of ["false", "1", "TRUE", ""]) assert.deepEqual(classify(files, "", { CI_PR_LIGHT: v }), off, String(v));
+  // (a full-ci label, a queue group or a push ignores it)
+  assert.equal(classify(files, "full-ci", { CI_PR_LIGHT: "true" }).full, "true");
+  assert.equal(classify(files, "", { CI_PR_LIGHT: "true", GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" }).full, "true");
+  // (a docs-only change runs no checks either way)
+  assert.equal(classify(["design/x.md"], "", { CI_PR_LIGHT: "true" }).size_inputs, classify(["design/x.md"]).size_inputs);
 });

@@ -630,6 +630,11 @@
   "web/workspace/persist-probe.ts :: on :: f.srcdoc = probe; #0": {
    "kind": "host",
    "owner": "host"
+  },
+  "web/workspace/review/proposal-view.ts :: say :: if (md) await rendered(body, a, b, stale, \"md-rendered\", async () => md, (render, el, t) => { el.innerHTML = render(t); return null; }); #0": {
+   "kind": "rich",
+   "owner": "phase-5",
+   "readers": []
   }
  }
 }

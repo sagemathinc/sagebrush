@@ -73,7 +73,7 @@ src/dataflow.ts), cells form a dependency graph, as in marimo
 - Running a cell first runs its stale ancestors, then reruns what depends on
   it, in graph order with ties in page order.
 - Cells run automatically only within the budget (`setBudget(ms)`, default
-  2 s; `Infinity` is marimo's autorun, 0 its lazy mode). The rest are left
+  10 s; `Infinity` is marimo's autorun, 0 its lazy mode). The rest are left
   stale and say why.
 - A name read by other cells has one defining cell. Second definitions and
   cycles are errors on the cells (#1477's relaxation: names nobody reads may
