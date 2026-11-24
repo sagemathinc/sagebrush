@@ -46,6 +46,92 @@ for meth in ("sum", "prod", "max", "min", "argmax", "argmin", "any", "all", "cum
     for ax in (0, -1, 1):
         show(f"z.{meth} axis={ax!r}", lambda: getattr(z, meth)(axis=ax))
 
+# argmax and argmin with keepdims: a 0-d array's result is the scalar, as NumPy's
+o = np.array([[1.0, 5.0, 2.0], [7.0, 0.0, 3.0]])
+show("np.argmax keepdims 0", lambda: np.argmax(z, axis=0, keepdims=True))
+show("np.argmin keepdims -1", lambda: np.argmin(z, axis=-1, keepdims=True))
+show("z.argmax keepdims", lambda: z.argmax(axis=0, keepdims=True))
+show("np.argmax keepdims 2d", lambda: np.argmax(o, axis=1, keepdims=True))
+show("np.argmin keepdims 2d", lambda: np.argmin(o, axis=0, keepdims=True))
+
+# mean, std and var refuse an axis out of bounds with NumPy's text, a 0-d array's 0 and -1 included
+for name in ("mean", "std", "var"):
+    f = getattr(np, name)
+    for ax in (0, -1, (0,)):
+        show(f"np.{name} axis={ax!r}", lambda: f(z, axis=ax))
+    show(f"np.{name} 2d axis=2", lambda: f(o, axis=2))
+    show(f"np.{name} 2d axis=(0, -3)", lambda: f(o, axis=(0, -3)))
+    show(f"np.{name} 2d axis=(0, -1)", lambda: f(o, axis=(0, -1)))
+show("z.mean axis=0", lambda: z.mean(axis=0))
+show("np.mean axis=np.True_", lambda: np.mean(np.ones(3), axis=np.True_))
+show("np.mean axis=False", lambda: np.mean(np.ones(3), axis=False))
+show("np.var axis=1.0", lambda: np.var(o, axis=1.0))
+show("np.std axis=np.int64(1)", lambda: np.std(o, axis=np.int64(1)))
+
+# nanmean, nanstd and nanvar of ints and bools: NumPy's mean, std and var (no NaN to skip), so a 0-d axis is refused
+for name in ("nanmean", "nanstd", "nanvar"):
+    f = getattr(np, name)
+    for arr, t in ((zi, "int"), (zb, "bool")):
+        show(f"np.{name} {t} axis=0", lambda: f(arr, axis=0))
+        show(f"np.{name} {t} axis=-1", lambda: f(arr, axis=-1))
+    show(f"np.{name} int 2d axis=0", lambda: f(np.array([[1, 2], [3, 5]]), axis=0))
+    show(f"np.{name} int dtype float32", lambda: f(np.array([1, 2, 4]), dtype=np.float32))
+    show(f"np.{name} bool", lambda: f(np.array([True, False, True])))
+show("np.nanvar int ddof", lambda: np.nanvar(np.array([1, 2, 4]), ddof=1))
+show("np.nanmean int keepdims", lambda: np.nanmean(np.array([[1, 2]]), axis=1, keepdims=True))
+
+
+def into_out(tag, f, out):
+    # (out holds the result, and is what's returned, as NumPy's)
+    try:
+        r = f(out)
+        print(tag, np.asarray(out).tolist(), r is out)
+    except Exception as e:
+        print(tag, "EXC", type(e).__name__, e)
+
+
+for name in ("nanmean", "nanvar", "nanstd"):
+    f = getattr(np, name)
+    for arr, t in ((np.array([1, 5]), "int"), (np.array([1.0, 5.0, np.nan]), "float")):
+        into_out(f"np.{name} {t} out", lambda out: f(arr, out=out), np.zeros(()))
+    into_out(f"np.{name} float out axis=1", lambda out: f(np.array([[1.0, 5.0], [2.0, np.nan]]), axis=1, out=out),
+             np.zeros(2))
+
+# nanargmax and nanargmin refuse a slice of NaNs alone
+zn = np.array(float("nan"))
+for name in ("nanargmax", "nanargmin"):
+    f = getattr(np, name)
+    show(f"np.{name} nan axis=0", lambda: f(zn, axis=0))
+    show(f"np.{name} nan", lambda: f(zn))
+    show(f"np.{name} all nan", lambda: f(np.array([np.nan, np.nan])))
+    show(f"np.{name} a row of nan", lambda: f(np.array([[np.nan, np.nan], [1.0, 2.0]]), axis=1))
+    show(f"np.{name} some nan", lambda: f(np.array([[np.nan, 3.0], [1.0, 2.0]]), axis=1))
+    show(f"np.{name} int", lambda: f(np.array([3, 1])))
+    show(f"np.{name} complex nan", lambda: f(np.array([complex(np.nan, 0), 1j])))
+    show(f"np.{name} empty", lambda: f(np.empty(0)))
+    show(f"np.{name} empty (0, 2) axis=0", lambda: f(np.empty((0, 2)), axis=0))
+    show(f"np.{name} empty (2, 0) axis=0", lambda: f(np.empty((2, 0)), axis=0))
+
+# a ufunc's accumulate refuses a 0-d array
+show("np.add.accumulate", lambda: np.add.accumulate(z))
+show("np.add.accumulate axis=0", lambda: np.add.accumulate(z, axis=0))
+show("np.multiply.accumulate", lambda: np.multiply.accumulate(zi, axis=0))
+show("np.maximum.accumulate", lambda: np.maximum.accumulate(z, axis=0))
+show("np.add.accumulate out", lambda: np.add.accumulate(z, axis=0, out=np.zeros(1)))
+show("np.add.accumulate python scalar", lambda: np.add.accumulate(2.5))
+show("np.add.reduce axis=0", lambda: np.add.reduce(z, axis=0))
+
+# a bool axis, Python's or NumPy's, is refused, on arrays of any dimension
+for name in ("sum", "prod", "max", "any", "argmax", "argmin", "cumsum", "cumprod", "nansum"):
+    f = getattr(np, name)
+    show(f"np.{name} axis=False", lambda: f(np.ones(3), axis=False))
+    show(f"np.{name} 0-d axis=True", lambda: f(z, axis=True))
+    show(f"np.{name} axis=np.True_", lambda: f(np.ones(3), axis=np.True_))
+for name in ("sum", "prod", "max", "any", "nansum"):
+    show(f"np.{name} axis=(0, False)", lambda: getattr(np, name)(np.ones((2, 2)), axis=(0, False)))
+show("z.sum axis=False", lambda: z.sum(axis=False))
+show("np.add.reduce axis=False", lambda: np.add.reduce(np.ones(3), axis=False))
+
 # broadcast refusals: NumPy's own message
 show("broadcast_shapes 2", lambda: np.broadcast_shapes((3,), (2,)))
 show("broadcast_shapes 3", lambda: np.broadcast_shapes((1, 3), (5, 1), (4,)))

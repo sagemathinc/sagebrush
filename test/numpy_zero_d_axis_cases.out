@@ -172,6 +172,127 @@ z.cumsum axis=1 EXC IndexError axis 1 is out of bounds for array of dimension 1
 z.cumprod axis=0 ndarray float64 (1,) [3.0]
 z.cumprod axis=-1 ndarray float64 (1,) [3.0]
 z.cumprod axis=1 EXC IndexError axis 1 is out of bounds for array of dimension 1
+np.argmax keepdims 0 int64 int64 () [0]
+np.argmin keepdims -1 int64 int64 () [0]
+z.argmax keepdims int64 int64 () [0]
+np.argmax keepdims 2d ndarray int64 (2, 1) [1, 0]
+np.argmin keepdims 2d ndarray int64 (1, 3) [0, 1, 0]
+np.mean axis=0 EXC IndexError axis 0 is out of bounds for array of dimension 0
+np.mean axis=-1 EXC IndexError axis -1 is out of bounds for array of dimension 0
+np.mean axis=(0,) EXC IndexError axis 0 is out of bounds for array of dimension 0
+np.mean 2d axis=2 EXC IndexError axis 2 is out of bounds for array of dimension 2
+np.mean 2d axis=(0, -3) EXC IndexError axis -3 is out of bounds for array of dimension 2
+np.mean 2d axis=(0, -1) float64 float64 () [3.0]
+np.std axis=0 EXC IndexError axis 0 is out of bounds for array of dimension 0
+np.std axis=-1 EXC IndexError axis -1 is out of bounds for array of dimension 0
+np.std axis=(0,) EXC IndexError axis 0 is out of bounds for array of dimension 0
+np.std 2d axis=2 EXC IndexError axis 2 is out of bounds for array of dimension 2
+np.std 2d axis=(0, -3) EXC IndexError axis -3 is out of bounds for array of dimension 2
+np.std 2d axis=(0, -1) float64 float64 () [2.3804761428476167]
+np.var axis=0 EXC IndexError axis 0 is out of bounds for array of dimension 0
+np.var axis=-1 EXC IndexError axis -1 is out of bounds for array of dimension 0
+np.var axis=(0,) EXC IndexError axis 0 is out of bounds for array of dimension 0
+np.var 2d axis=2 EXC IndexError axis 2 is out of bounds for array of dimension 2
+np.var 2d axis=(0, -3) EXC IndexError axis -3 is out of bounds for array of dimension 2
+np.var 2d axis=(0, -1) float64 float64 () [5.666666666666667]
+z.mean axis=0 EXC IndexError axis 0 is out of bounds for array of dimension 0
+np.mean axis=np.True_ EXC TypeError 'numpy.bool' object cannot be interpreted as an integer
+np.mean axis=False EXC TypeError an integer is required
+np.var axis=1.0 EXC TypeError integer argument expected, got float
+np.std axis=np.int64(1) ndarray float64 (2,) [1.699673171197595, 2.8674417556808756]
+np.nanmean int axis=0 EXC IndexError axis 0 is out of bounds for array of dimension 0
+np.nanmean int axis=-1 EXC IndexError axis -1 is out of bounds for array of dimension 0
+np.nanmean bool axis=0 EXC IndexError axis 0 is out of bounds for array of dimension 0
+np.nanmean bool axis=-1 EXC IndexError axis -1 is out of bounds for array of dimension 0
+np.nanmean int 2d axis=0 ndarray float64 (2,) [2.0, 3.5]
+np.nanmean int dtype float32 float32 float32 () [2.3333332538604736]
+np.nanmean bool float64 float64 () [0.6666666666666666]
+np.nanstd int axis=0 EXC IndexError axis 0 is out of bounds for array of dimension 0
+np.nanstd int axis=-1 EXC IndexError axis -1 is out of bounds for array of dimension 0
+np.nanstd bool axis=0 EXC IndexError axis 0 is out of bounds for array of dimension 0
+np.nanstd bool axis=-1 EXC IndexError axis -1 is out of bounds for array of dimension 0
+np.nanstd int 2d axis=0 ndarray float64 (2,) [1.0, 1.5]
+np.nanstd int dtype float32 float32 float32 () [1.247219204902649]
+np.nanstd bool float64 float64 () [0.4714045207910317]
+np.nanvar int axis=0 EXC IndexError axis 0 is out of bounds for array of dimension 0
+np.nanvar int axis=-1 EXC IndexError axis -1 is out of bounds for array of dimension 0
+np.nanvar bool axis=0 EXC IndexError axis 0 is out of bounds for array of dimension 0
+np.nanvar bool axis=-1 EXC IndexError axis -1 is out of bounds for array of dimension 0
+np.nanvar int 2d axis=0 ndarray float64 (2,) [1.0, 2.25]
+np.nanvar int dtype float32 float32 float32 () [1.5555557012557983]
+np.nanvar bool float64 float64 () [0.22222222222222224]
+np.nanvar int ddof float64 float64 () [2.333333333333333]
+np.nanmean int keepdims ndarray float64 (1, 1) [1.5]
+np.nanmean int out 3.0 True
+np.nanmean float out 3.0 True
+np.nanmean float out axis=1 [3.0, 2.0] True
+np.nanvar int out 4.0 True
+np.nanvar float out 4.0 True
+np.nanvar float out axis=1 [4.0, 0.0] True
+np.nanstd int out 2.0 True
+np.nanstd float out 2.0 True
+np.nanstd float out axis=1 [2.0, 0.0] True
+np.nanargmax nan axis=0 EXC ValueError All-NaN slice encountered
+np.nanargmax nan EXC ValueError All-NaN slice encountered
+np.nanargmax all nan EXC ValueError All-NaN slice encountered
+np.nanargmax a row of nan EXC ValueError All-NaN slice encountered
+np.nanargmax some nan ndarray int64 (2,) [1, 1]
+np.nanargmax int int64 int64 () [0]
+np.nanargmax complex nan int64 int64 () [1]
+np.nanargmax empty EXC ValueError attempt to get argmax of an empty sequence
+np.nanargmax empty (0, 2) axis=0 EXC ValueError attempt to get argmax of an empty sequence
+np.nanargmax empty (2, 0) axis=0 ndarray int64 (0,) []
+np.nanargmin nan axis=0 EXC ValueError All-NaN slice encountered
+np.nanargmin nan EXC ValueError All-NaN slice encountered
+np.nanargmin all nan EXC ValueError All-NaN slice encountered
+np.nanargmin a row of nan EXC ValueError All-NaN slice encountered
+np.nanargmin some nan ndarray int64 (2,) [1, 0]
+np.nanargmin int int64 int64 () [1]
+np.nanargmin complex nan int64 int64 () [1]
+np.nanargmin empty EXC ValueError attempt to get argmin of an empty sequence
+np.nanargmin empty (0, 2) axis=0 EXC ValueError attempt to get argmin of an empty sequence
+np.nanargmin empty (2, 0) axis=0 ndarray int64 (0,) []
+np.add.accumulate EXC TypeError cannot accumulate on a scalar
+np.add.accumulate axis=0 EXC TypeError cannot accumulate on a scalar
+np.multiply.accumulate EXC TypeError cannot accumulate on a scalar
+np.maximum.accumulate EXC TypeError cannot accumulate on a scalar
+np.add.accumulate out EXC TypeError cannot accumulate on a scalar
+np.add.accumulate python scalar EXC TypeError cannot accumulate on a scalar
+np.add.reduce axis=0 float64 float64 () [3.0]
+np.sum axis=False EXC TypeError an integer is required
+np.sum 0-d axis=True EXC TypeError an integer is required
+np.sum axis=np.True_ EXC TypeError an integer is required
+np.prod axis=False EXC TypeError an integer is required
+np.prod 0-d axis=True EXC TypeError an integer is required
+np.prod axis=np.True_ EXC TypeError an integer is required
+np.max axis=False EXC TypeError an integer is required
+np.max 0-d axis=True EXC TypeError an integer is required
+np.max axis=np.True_ EXC TypeError an integer is required
+np.any axis=False EXC TypeError an integer is required
+np.any 0-d axis=True EXC TypeError an integer is required
+np.any axis=np.True_ EXC TypeError an integer is required
+np.argmax axis=False EXC TypeError an integer is required for the axis
+np.argmax 0-d axis=True EXC TypeError an integer is required for the axis
+np.argmax axis=np.True_ EXC TypeError an integer is required for the axis
+np.argmin axis=False EXC TypeError an integer is required for the axis
+np.argmin 0-d axis=True EXC TypeError an integer is required for the axis
+np.argmin axis=np.True_ EXC TypeError an integer is required for the axis
+np.cumsum axis=False EXC TypeError an integer is required for the axis
+np.cumsum 0-d axis=True EXC TypeError an integer is required for the axis
+np.cumsum axis=np.True_ EXC TypeError an integer is required for the axis
+np.cumprod axis=False EXC TypeError an integer is required for the axis
+np.cumprod 0-d axis=True EXC TypeError an integer is required for the axis
+np.cumprod axis=np.True_ EXC TypeError an integer is required for the axis
+np.nansum axis=False EXC TypeError an integer is required
+np.nansum 0-d axis=True EXC TypeError an integer is required
+np.nansum axis=np.True_ EXC TypeError an integer is required
+np.sum axis=(0, False) EXC TypeError an integer is required
+np.prod axis=(0, False) EXC TypeError an integer is required
+np.max axis=(0, False) EXC TypeError an integer is required
+np.any axis=(0, False) EXC TypeError an integer is required
+np.nansum axis=(0, False) EXC TypeError an integer is required
+z.sum axis=False EXC TypeError an integer is required
+np.add.reduce axis=False EXC TypeError an integer is required
 broadcast_shapes 2 EXC ValueError shape mismatch: objects cannot be broadcast to a single shape.  Mismatch is between arg 0 with shape (3,) and arg 1 with shape (2,).
 broadcast_shapes 3 EXC ValueError shape mismatch: objects cannot be broadcast to a single shape.  Mismatch is between arg 0 with shape (1, 3) and arg 2 with shape (4,).
 broadcast_shapes 3 ok tuple int64 (2,) [5, 3]
