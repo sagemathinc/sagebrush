@@ -49,6 +49,8 @@ const B = "e2e2e2e2-0002-4e2e-8e2e-e2e2e2e2e202"; // another account
 const P = "e2e2e2e2-0003-4e2e-8e2e-e2e2e2e2e203"; // a sync-data purge, then a CoCalc purge
 const M = "e2e2e2e2-0004-4e2e-8e2e-e2e2e2e2e204"; // the mailbox
 const R = "e2e2e2e2-0005-4e2e-8e2e-e2e2e2e2e205"; // read-only
+const C = "e2e2e2e2-0006-4e2e-8e2e-e2e2e2e2e206"; // the length bound
+const U = "e2e2e2e2-0007-4e2e-8e2e-e2e2e2e2e207"; // UTF-8 pages
 const SITE = "https://sagebrush.test";
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
@@ -57,7 +59,7 @@ const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled:
 const cocalc = async () => Response.json(plan);
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
 const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } } });
-const listed = [A, B, P, M, R].join(",");
+const listed = [A, B, P, M, R, C, U].join(",");
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_E2E: "1", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("4101") },
@@ -160,6 +162,18 @@ function account(id) {
     const p = await W.pack(state, entry, by, [...left.map((d) => ({ kind: "device", id: d.id })), { kind: "recovery", id: ctx.account }], ep.S, ep.n, ep.ring);
     return { ...p, ep, left };
   };
+  W.recover = async (state) => {
+    const nd = await W.device("new laptop");
+    const rk2 = await E.recoveryKeys(E.newRecoverySeed(), ctx.account);
+    const ep = await W.epoch(state);
+    const body = E.nextBody(state, ctx, "recover", { device: nd.rec, recovery: { sign: b64(rk2.sign.raw), kem: b64(rk2.kem.publicRaw) }, epoch: ep.epoch });
+    const entry = await E.sealEntry(E.recoverySigner(ctx.account, W.rk.sign), body, W.rk.sign, { device: nd.sign, recovery: rk2.sign });
+    const next = (await E.applyChainEntry(state, entry, ctx)).state;
+    const who = [...[...next.devices.values()].filter((d) => d.removed === null).map((d) => ({ kind: "device", id: d.id })), { kind: "recovery", id: ctx.account }];
+    const wrappers = [];
+    for (const r of who) wrappers.push(text(await E.wrapEpoch({ hpke, state: next, ctx, sender: nd, recipient: r, n: ep.n, S: ep.S })));
+    return { body: { entry: text(entry), keyring: b64(ep.ring.bytes), wrappers }, next, nd, rk2, ep };
+  };
   return W;
 }
 
@@ -207,6 +221,7 @@ await section("the chain: genesis, add, remove", async () => {
   const stale = await WA.add(g.next, g.d);
   const sr = await answer(await post(sA, A, "/api/sync/v1/e2e/chain", stale.body));
   ok(sr.status === 409 && sr.reason === "chain_fork" && !JSON.stringify(sr).includes(stale.body.entry.slice(0, 40)), "an append on an old head is refused as stale (409), with no payload in the answer");
+  ok(JSON.stringify(sr.head) === JSON.stringify({ seq: add.next.seq, hash: add.next.head }), "and it carries the current head, exactly { seq, hash }");
 
   // remove the phone: a new epoch, its keyring, wrappers to the laptop and recovery
   const rm = await WA.remove(stA, g.d, add.nd);
@@ -262,6 +277,8 @@ await section("concurrency and restart", async () => {
   const st = both.map((r) => r.status).sort();
   const lost = await answer(both.find((r) => r.status !== 201) ?? both[1]);
   ok(st.join() === "201,409" && lost.reason === "chain_fork", "two appends checked on one head at once: the transaction's own head check stores one and refuses the other as stale: " + st.join());
+  const headNow = (await answer(await get(sA, A, "/api/sync/v1/e2e/chain"))).head;
+  ok(JSON.stringify(lost.head) === JSON.stringify({ seq: headNow.seq, hash: headNow.hash }), "the transaction's stale refusal carries the current head in the same { seq, hash } shape");
   const won = both[0].status === 201 ? x : y;
   stA = won.next;
   WA.secrets.set(won.ep.n, won.ep.S);
@@ -305,6 +322,72 @@ await section("concurrency and restart", async () => {
   WA.devices.push(ad4.nd);
   const page = await answer(await get(sA, A, "/api/sync/v1/e2e/chain?from=3"));
   ok(page.from === 3 && page.entries.length === stA.seq - 2, "a page from a position");
+});
+
+await section("the length bound keeps room for removal and recovery", async () => {
+  const s = await enabled(C);
+  const W = account(C);
+  ok((await get(s, C, "/api/sync/v1/e2e/chain")).status === 200, "(the store is made)");
+  await seam(C, { bounds: { entries: 4, reserve: 3 } });
+  const g = await W.genesis();
+  ok((await post(s, C, "/api/sync/v1/e2e/chain", g.body)).status === 201, "(genesis, entry 0)");
+  let st = g.next;
+  const extra = [];
+  for (let i = 0; i < 3; i++) {
+    const ad = await W.add(st, g.d);
+    ok((await post(s, C, "/api/sync/v1/e2e/chain", ad.body)).status === 201, `(an add, entry ${i + 1})`);
+    st = ad.next;
+    W.devices.push(ad.nd);
+    extra.push(ad.nd);
+  }
+  const over = await W.add(st, g.d);
+  const r = await answer(await post(s, C, "/api/sync/v1/e2e/chain", over.body));
+  ok(r.status === 413 && r.max === 4, "at the bound, an ordinary transition (an add) is refused: " + r.status);
+  const rm = await W.remove(st, g.d, extra[0]);
+  ok((await post(s, C, "/api/sync/v1/e2e/chain", rm.body)).status === 201, "a removal still goes in, into the reserve");
+  st = rm.next;
+  W.devices = rm.left;
+  W.secrets.set(rm.ep.n, rm.ep.S);
+  const rc = await W.recover(st);
+  ok((await post(s, C, "/api/sync/v1/e2e/chain", rc.body)).status === 201, "and so does a recovery");
+  st = rc.next;
+  W.devices.push(rc.nd);
+  W.secrets.set(rc.ep.n, rc.ep.S);
+  W.rk = rc.rk2;
+  const rm2 = await W.remove(st, rc.nd, extra[1]);
+  ok((await post(s, C, "/api/sync/v1/e2e/chain", rm2.body)).status === 201, "another removal fills the reserve's last place");
+  st = rm2.next;
+  W.devices = rm2.left;
+  W.secrets.set(rm2.ep.n, rm2.ep.S);
+  const rm3 = await W.remove(st, rc.nd, extra[2]);
+  const hard = await answer(await post(s, C, "/api/sync/v1/e2e/chain", rm3.body));
+  ok(hard.status === 413 && hard.max === 7, "past the reserve, nothing goes in, not even a removal: " + hard.status);
+});
+
+await section("pages are bounded in UTF-8 bytes", async () => {
+  const s = await enabled(U);
+  const W = account(U);
+  ok((await get(s, U, "/api/sync/v1/e2e/chain")).status === 200, "(the store is made)");
+  const g = await W.genesis();
+  ok((await post(s, U, "/api/sync/v1/e2e/chain", g.body)).status === 201, "(genesis)");
+  // (a device named in three-byte characters: its entry's UTF-8 is longer than its string)
+  const nd = await W.device("€".repeat(60));
+  const draft = E.nextBody(g.next, W.ctx, "add", { device: nd.rec, pop: null });
+  const pre = await E.preEntryHash(draft);
+  const chg = await E.challenge(hpke, nd.kem.publicRaw, pre);
+  const mac = await E.respond(hpke, nd.kem, chg.enc, pre);
+  await E.checkResponse(chg.secret, chg.enc, pre, mac);
+  const entry = await E.sealEntry(g.d.signer, { ...draft, pop: { enc: b64(chg.enc), mac: b64(mac) } }, g.d.sign, { device: nd.sign });
+  const p = await W.pack(g.next, entry, g.d, [{ kind: "device", id: nd.id }], W.secrets.get(0), 0);
+  ok((await post(s, U, "/api/sync/v1/e2e/chain", p.body)).status === 201, "(an add naming a device in multibyte characters)");
+  const all = (await answer(await get(s, U, "/api/sync/v1/e2e/chain"))).entries;
+  const chars = all[0].length + all[1].length, bytes = Buffer.byteLength(all[0]) + Buffer.byteLength(all[1]);
+  ok(bytes > chars, "(the two entries' UTF-8 is longer than their strings)");
+  await seam(U, { bounds: { pageBytes: chars } });
+  const page = await answer(await get(s, U, "/api/sync/v1/e2e/chain"));
+  ok(page.entries.length === 1, "a page bound between the strings' length and their UTF-8 bytes holds one entry, not two: " + page.entries.length);
+  await seam(U, { bounds: { pageBytes: bytes } });
+  ok((await answer(await get(s, U, "/api/sync/v1/e2e/chain"))).entries.length === 2, "and at their UTF-8 bytes, both");
 });
 
 await section("read-only accounts still change their chain", async () => {

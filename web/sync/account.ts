@@ -2383,11 +2383,12 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Tests only: shift the mailbox's clock, and count the E2E rows. */
-  async testE2E(a: { shift?: number; failCommit?: boolean; hold?: number }): Promise<Record<string, number> | null> {
+  async testE2E(a: { shift?: number; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number } }): Promise<Record<string, number> | null> {
     if (!testMode(this.env)) return null;
     if (a.shift !== undefined) this.e2eShift = a.shift;
     if (a.failCommit !== undefined) this.e2eFailCommit = a.failCommit;
     if (a.hold !== undefined) this.e2eHold = a.hold;
+    if (a.bounds !== undefined && this.e2eStore) Object.assign(this.e2eStore.bounds, a.bounds);
     const out: Record<string, number> = {};
     for (const t of ["e2e_chain", "e2e_keyrings", "e2e_wrappers", "e2e_head", "e2e_mailbox"]) {
       const there = this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = ?", t);

@@ -42,6 +42,10 @@ export const E2E = Object.freeze({
   pageBytes: 1 << 20,
   /** entries in one account's chain: every append replays it (cached), so it is bounded */
   entries: 1024,
+  /** past `entries`, room kept for removals and recoveries only: a compromised device that fills the chain with
+   * ordinary transitions can't block the person's own removal or recovery (it can only remove, at most the current
+   * devices, out of these) */
+  reserve: 64,
   /** devices current at once, so an append's package stays bounded */
   devices: 48,
   /** one mailbox message */
@@ -124,6 +128,8 @@ function refused(e: unknown, code: "invalid" | "conflict" = "invalid"): never {
  */
 export class E2EStore {
   private cache: { seq: number; state: State } | null = null;
+  /** the bounds this store applies (tests lower them through the object's seam) */
+  bounds = { entries: E2E.entries, reserve: E2E.reserve, pageBytes: E2E.pageBytes };
   /** `pause` runs between an append's checks and its transaction: a test seam that lets another append in between. */
   constructor(private sql: Sql, private transaction: <T>(f: () => T) => T, private ctx: Ctx, private pause: () => Promise<void> = async () => {}) {}
 
@@ -162,15 +168,21 @@ export class E2EStore {
       if (typeof a.keyring !== "string" || a.keyring.length > Math.ceil((E2E.keyringBytes * 4) / 3)) throw new SyncError("invalid", "a keyring is base64url, at most 256 KiB");
       keyring = unb64(a.keyring);
     }
-    if (this.storedSeq() + 1 >= E2E.entries) throw new SyncError("limit", "the key chain is at its length bound", { max: E2E.entries });
+    // (the hard bound, before any work: nothing ever goes past entries + reserve)
+    if (this.storedSeq() + 1 >= this.bounds.entries + this.bounds.reserve) throw new SyncError("limit", "the key chain is at its length bound", { max: this.bounds.entries + this.bounds.reserve });
     const before = await this.state();
     const at = before ? before.seq : -1;
     let next: State;
     try {
       next = (await E.checkTransition({ state: before, ctx: this.ctx, entry: utf8(a.entry), keyring, wrappers: (wrappers as string[]).map(utf8) })) as State;
     } catch (e) {
+      // (stale: the answer carries the current head, the same shape as the transaction's own stale refusal)
+      if ((e as { code?: unknown })?.code === "chain_fork") this.stale();
       refused(e);
     }
+    // (past the ordinary bound, only a verified removal or recovery goes on, into the reserve)
+    const op = (JSON.parse(a.entry) as { body: { op: string } }).body.op;
+    if (next.seq >= this.bounds.entries && op !== "remove" && op !== "recover") throw new SyncError("limit", "the key chain is at its length bound: only removing a device or recovering goes on", { max: this.bounds.entries });
     if ([...next.devices.values()].filter((d) => d.removed === null).length > E2E.devices) throw new SyncError("limit", "too many devices", { max: E2E.devices });
     await this.pause();
     const parsed = (wrappers as string[]).map((w) => JSON.parse(w).body as { id: string; recipient: { kind: string; id: string }; epoch: number });
@@ -179,7 +191,7 @@ export class E2EStore {
       out = this.transaction(() => {
       for (const s of E2E_SCHEMA) this.sql.exec(s);
       // (the head checked against is still the stored one: another append in between makes this one stale)
-      if (this.storedSeq() !== at) throw new SyncError("conflict", "the key chain moved; read it and try again", { reason: "chain_fork", seq: this.storedSeq() });
+      if (this.storedSeq() !== at) this.stale();
       this.sql.exec("INSERT INTO e2e_chain (seq, entry, head) VALUES (?, ?, ?)", next.seq, a.entry, next.head);
       if (keyring) this.sql.exec("INSERT INTO e2e_keyrings (epoch, seq, bytes) VALUES (?, ?, ?)", next.epoch.n, next.seq, keyring);
       // (only the current epoch's wrappers and keyring are kept: a new epoch retires the older ones, and a new wrapper
@@ -207,6 +219,12 @@ export class E2EStore {
     return out;
   }
 
+  /** A stale append's refusal: `conflict`, reason chain_fork, and the current head (or null), never a payload. */
+  private stale(): never {
+    const h = this.headRow();
+    throw new SyncError("conflict", "the key chain moved; read it and try again", { reason: "chain_fork", head: h ? { seq: h.seq, hash: h.head } : null });
+  }
+
   /** The head row: seq, hash, current epoch and current devices (null: no chain). */
   private headRow(): { seq: number; head: string; epoch: number; devices: string[] } | null {
     if (this.sql.exec("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'e2e_head'").toArray().length === 0) return null;
@@ -223,8 +241,8 @@ export class E2EStore {
     const rows: Row[] = [];
     let bytes = 0;
     for (const r of all) {
-      bytes += (r.entry as string).length;
-      if (rows.length && bytes > E2E.pageBytes) break;
+      bytes += utf8(r.entry as string).length;
+      if (rows.length && bytes > this.bounds.pageBytes) break;
       rows.push(r);
     }
     const h = this.headRow();
