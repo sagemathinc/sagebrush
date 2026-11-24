@@ -161,12 +161,12 @@ grants(...), access_log(...)                         (design/agent-endpoint.md)
 - The server gives each op it accepts a `seq` of its own. **The server's order is the order of the log:** every device applies the ops in `seq` order, so all of them reach the same index.
 - **One reducer.** The conflict rules of §7.2 (the later rename wins; an edit after a delete brings the file back out of Trash; a second new file at a path becomes `name (2)`) are one pure function, `reduce(entries, op) -> entries'`. It lives in `web/workspace/sync-reduce.ts` and is used by the client and by the server, with one test suite, so they can't disagree.
 - `t` is the device's clock, shown to the person, and never used for order.
-- The server keeps `entries`, the result, because it needs paths: for quota, for an agent's scope (design/agent-endpoint.md), and to answer `list` while every device is closed. §10 says what this means for end-to-end encryption.
+- The server keeps `entries`, the result, because it needs paths: for quota, for an agent's scope (design/agent-endpoint.md), and to answer `list` while every device is closed. **Superseded by end-to-end encryption** (§10): index ops are sealed, the server keeps no `entries`, and an agent's requests are answered by an online device of the person's.
 - **Checked when applied:** the path (`normPath`'s rules, with the same tests as the client), the kind, the size, and that a referenced blob is held (`refs` + 1 in the same transaction) or a document is the account's. An op that fails a check is refused with its code, and is never in the log. The ops after it still apply, each as the reducer would apply it if the refused op had never been sent (a rename of a path that isn't there changes nothing). The client then takes the server's log as the truth, and rebuilds its index from it.
 
 **Data files' versions (§2.5): the device's own versions stay on the device** in phase 1 (@sagebrush-board): they aren't uploaded. **The server keeps versions of its own:**
 - An overwrite the server sees (a `write` that replaces a data file's `sha256`) keeps the old blob as a version, in the same transaction.
-- Without this, the old blob would lose its last reference and be deleted. An agent's overwrite through the endpoint, while every device is closed, would then lose bytes, which §8.3 rules out.
+- Without this, the old blob would lose its last reference and be deleted. An agent's overwrite through the endpoint would then lose bytes, which §8.3 rules out. **Under end-to-end encryption** (§10), the server can't see an overwrite, so the device that writes, one answering for an agent included, sends the retention op itself.
 - Overwrites made between two syncs on one device have their versions only on that device.
 - The client's retention rules apply, in the reducer: the latest 20, none older than 30 days, and all together at most `sync.version_bytes`. Versions count against the quota.
 - If storage is too full to keep the previous version, the `write` is refused with `storage_full`, as on the client (§13).
@@ -264,6 +264,8 @@ A grant's write spans two objects: the account object holds the grant, and the d
 - **the change is complete** when every fence is acknowledged, or at most 60 seconds later, when every admission it cancelled has expired. The panel shows "Revoking…" until then.
 - **So no write admitted before a revoke can commit after the revoke completes,** and none can be admitted after the revoke's transaction.
 - **A lost answer** is settled the same way as a pin (§4.3): after `expires`, by asking the document object.
+
+**Under end-to-end encryption** (§10, design/agent-endpoint.md §3), the account object can't read a scope or a path. So admission checks only that the grant is live and that the write names its current `gen`; any change to the grant (a revoke, a narrowed scope, `run_code` turned off) raises `gen` and cancels pending admissions by the fence above, unchanged. The scope itself is checked by the device that answers, and a rename that takes a document out of scope is caught by every device's reducer, which refuses the agent's later ops there alike. The access log's row is written by that device, encrypted.
 
 ### 4.6 The epoch: "Clear history" keeps the document (CORR-D81-6)
 

@@ -512,7 +512,7 @@ It is made of objects that each serve one account or one document, so it grows b
 
 - **Phase 1: backup.** One device uploads continuously and any device can restore. This covers "my laptop can die".
 - **Phase 2: sync.** Several devices edit, with live pushes and merges. This covers "my laptop is at home".
-- **There is no phase 3.** Live collaboration, where several accounts write one document, was planned here. It contradicts end-to-end encryption's "never a shared live document", and none of it was built. Working with another person is copy plus proposals instead (§7.9).
+- **There is no phase 3.** Live collaboration, where several accounts write one document, was planned here. It contradicts the chosen policy, never a shared live document (William, Nov 23), and none of it was built. Working with another person is copy plus proposals instead (§7.9).
 - Both phases use the same objects and logs. Phase 1 is phase 2 with only one writing device, so nothing is thrown away.
 
 ### 7.8 Scale
@@ -549,7 +549,7 @@ The service scales by adding objects. Its limits per object, from Cloudflare's p
 
 **Presence** remains among one person's own devices (the same notebook open on a laptop and a phone). It rides on the document's socket, sealed like the document, and is never stored.
 
-**Not in scope:** shared running state (one interpreter that two people drive), and a live document two accounts edit at once. Both need a server that can read the document, which is what cocalc.ai projects provide.
+**Not in scope:** shared running state (one interpreter that two people drive), and a live document two accounts edit at once. Both are outside this product's chosen model; cocalc.ai projects are the place for shared live work.
 
 ### 7.10 Security
 
@@ -742,9 +742,10 @@ The index of step 1 (§2.2) is this API. It is written once (`web/workspace/api.
    - Driving a page by CDP stays for headless automation only: it would need the person's profile run with a debugging port, which is itself an attack surface. (Proposed by @sagebrush-python, Oct 19.)
    - The wire protocol is `design/workspace-agent-protocol.md`.
    - **With sync,** they talk to the sync service directly (surface 3).
-3. **Anywhere, with sync:** an authenticated agent endpoint on the sync service (§7.3).
-   - Each verb becomes an operation on the account object or patches on a document object, credited to the agent.
-   - This lets cocalc.ai agents, or Claude Code and Codex running anywhere, work in a person's workspace while every device of theirs is closed.
+3. **Anywhere, with sync:** an authenticated agent endpoint on the sync service (§7.3), which relays (design/agent-endpoint.md §4).
+   - Under end-to-end encryption the server can't read the workspace, so it admits a request only by the grant's token, rate and expiry, and forwards it opaquely to an online, trusted device of the person's: an open tab, the desktop app, the sagebrush CLI or an Autonomous VM.
+   - That device checks the grant's sealed scope, does the verb through this API, and makes the signed, sealed ops or patches, credited to the agent.
+   - This lets cocalc.ai agents, or Claude Code and Codex running anywhere, work in a person's workspace without a page open, as long as one of the person's devices is online. When none is, the request waits ("waiting for one of your devices"); the server never answers it from its own copy.
 
 ### 8.3 What can actually go wrong, and what closes it
 
@@ -801,7 +802,7 @@ Each needs **either an explicit confirmation from the person at the time, or a s
   - **may run code**, or not (§8.3);
   - an expiry, and a rate limit.
 - **The token** is held by the account object, which stores only its hash. Revoking it takes effect immediately and closes the agent's sockets.
-- **Every request** is checked against the grant, and logged in the account object: time, agent, verb, path.
+- **Every request** is checked against the grant, and logged: time, agent, verb, path. Under end-to-end encryption, the server checks only the token, rate, expiry and revocation; the person's device that answers checks the scope and writes the log row, encrypted (design/agent-endpoint.md §3, §8).
 - **An "Agents with access" panel,** in the Sync panel and in the file browser's ⋯, lists every grant with its scope and last use, its log, and Revoke.
 - A file an agent can see shows a small marker in the browser.
 - **The rule from the start of §8 holds here:** nothing leaves the device unless sync is on and a grant exists. An in-page agent (surface 1) is the exception only because it *is* the person's own page.
@@ -822,7 +823,7 @@ Each needs **either an explicit confirmation from the person at the time, or a s
   - The page carries out each tool call and checks it against the grant the person gave the conversation.
   - What it makes lands as ordinary files and boards in the workspace, credited to it.
 - **Without sync,** its tool calls are relayed through the page that has the panel open.
-- **With sync,** it can use the agent endpoint and keep working on a long task while the page is closed. It still can't run code then (§8.3).
+- **With sync,** it can use the agent endpoint and keep working on a long task while the page is closed, as long as another of the person's devices is online to answer (surface 3 in §8.2). With all of them offline, it waits. It still can't run code without an open page (§8.3).
 
 ### 8.6 Handing off to and from cocalc.ai
 

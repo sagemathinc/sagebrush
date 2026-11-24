@@ -21,14 +21,17 @@ grants(
   id            12 base32 chars, random
   agent         the agent's name as the person sees it ("Claude Code on laptop", "cocalc: number-theory/claude")
   token_hash    SHA-256 of the token's secret
-  scopes        JSON: [{path, access: "read" | "write"}], up to the membership's `scopes_per_grant`;
-                under end-to-end encryption, sealed to the person's devices, which enforce them (§4)
+  scopes        JSON: [{path, access: "read" | "write"}], up to the membership's `scopes_per_grant`
   run_code      0 | 1           "may run code" (§6)
   outward       JSON: the outward actions granted beforehand, [] by default (§5)
   rate          JSON: optional person-chosen reductions to this grant's membership limits (§7)
   created, expires, last_used, revoked, revoked_reason
 )
 ```
+
+**Under end-to-end encryption** (design/e2e-encryption.md §4, §6), the grant is split:
+- **sealed to the person's devices,** which alone read and enforce them: `agent`, `scopes`, `run_code` and `outward`;
+- **kept by the server,** to admit and limit requests without reading anything: `id`, `token_hash` and its tag, `rate`, `created`, `expires`, `last_used`, `revoked`, and its `gen` (design/sync-server.md §4.5), which rises with every change to the grant, a narrowed scope included.
 
 - **Scope** is a list of folders or files, each read or read-and-write.
   - A path covers itself and everything under it, matched on whole segments, so `/Algebra` doesn't cover `/Algebra2`.
@@ -106,18 +109,20 @@ grants(
 
 **At the Worker, before any object:** the IP's pre-authentication limit, and then the token's form and tag (§2).
 
-**Then every request, in this order, inside the account object:**
+**Then, in the account object: admission only.** Under end-to-end encryption the server can't read a path, a scope or a document, so it checks only what it holds (§1):
 1. The grant exists, isn't revoked or expired, its secret matches, and the account is `active` (or `readonly`, for reads). On dev, the account must also be in `SYNC_ACCOUNTS` (design/sync-server.md §11).
 2. The grant's rate limits, and then the account's (§7).
-3. The verb's paths are inside the scope, with the access the verb needs (read, or write). Under end-to-end encryption, the device that answers checks this, since only it can read the sealed scopes and the paths (§4).
-4. The verb runs.
-   - **A write to the index** (an op) is one transaction in the account object. The grant is checked again in it, so a revoke that lands while the request runs prevents the write.
-   - **A write to a document** is admitted, and then fenced if it must be (design/sync-server.md §4.5):
-     - the account object checks the grant and scope, and records an admission, in one transaction;
-     - the document object commits it only if it isn't fenced and hasn't expired (60 seconds);
-     - a revoke, a narrowed scope or a rename out of scope cancels pending admissions, and completes only once they are fenced or expired.
-     - So no write admitted before a revoke commits after the revoke completes.
-5. A row is written to the access log (§8), in the same transaction as the write or the admission. A document write's row is then marked `committed` or `refused` when its answer comes.
+3. The request goes, opaquely, to an online device of the person's (§4), with the grant's id and current `gen`. With none online, it waits (§4).
+
+**On the answering device, which decides everything about content:**
+4. The verb's paths are inside the grant's sealed scope, with the access the verb needs (read, or write); an outward action is granted beforehand or confirmed (§5); a run is the agent's own code (§6).
+5. The verb runs through the workspace API. A write becomes ops or patches that the device seals and signs, credited to the agent and naming the grant's id and the `gen` it checked.
+6. The device writes the access log's row, encrypted (§8).
+
+**Revoking, and fences, without reading a path:**
+- **A write to the index** (an op) is accepted by the account object only if its grant is live and the `gen` it names is the grant's current one, in the op's own transaction. So a revoke, or any change to the grant, that lands while the request runs prevents the write.
+- **A write to a document** is admitted, and then fenced if it must be (design/sync-server.md §4.5): the account object records an admission for the grant's id and `gen`; the document object commits it only if it isn't fenced and hasn't expired (60 seconds); a revoke or a change to the grant cancels pending admissions, and completes only once they are fenced or expired. So no write admitted before a revoke commits after the revoke completes.
+- **A rename out of scope** is the person's own op, which the server can't see the meaning of. It is caught where the paths are known: every device reduces the log in the same order, and an agent's op whose path is outside its grant's scope at that point in the log is refused by every device alike, as any op is under the deterministic reducer (design/e2e-encryption.md §4).
 
 **What a refusal says:**
 - 401 `unauthorized`: no such grant, a wrong secret, or expired or revoked. The answer never says which;
@@ -136,6 +141,7 @@ grants(
 - **Where it goes:** an online device of the person's: an open tab, the desktop app, the sagebrush CLI or an Autonomous VM. Each is a full trusted device in the account's key chain, able to read everything the account holds: a grant limits what the agent does, not what that device can read (decided: no per-folder keys). The account object picks one, as it picks a page for a run (§6), and forwards the request opaquely.
 - **What the device does:** it decrypts, checks the grant's scope (`inScope`, and the Trash visibility rule for grants, `trashVisible`), does the verb through the workspace API, and answers. The grant's scopes are sealed to the person's devices: the server keeps only the grant's id, token hash, tag, rates and expiry.
 - **With no device online,** the endpoint answers "waiting for one of your devices" and queues the request opaquely. It never decrypts.
+- **Open, for the endpoint's own design with SEC:** how the request and the answer travel end to end between the agent and the answering device, so that the server relays only ciphertext in both directions. For example, a key the agent presents at pairing, which the person's device certifies. Until that is settled, the endpoint isn't built beyond DEV's `list` and `stat`.
 - **Today, on DEV:** only `list` and `stat` are built, and they answer from the server's derived index (`entries`, design/sync-server.md §3). That index goes away when index ops are sealed, and these two verbs move to the relay with the rest. The other verbs answer `not_built`, so nothing is lost by making them relay-only from the start.
 
 | Verb | Access | What the device does |
@@ -180,6 +186,7 @@ Each needs either a scope granted beforehand, or the person's confirmation at th
   - the agent can wait for the answer on its socket;
   - a confirmation applies to that one action, with exactly those arguments, for 10 minutes. With no page open, it waits until one opens, or until it expires.
 - **Granting is never pre-grantable.** No grant can make or change grants, its own included.
+- **Under end-to-end encryption,** `outward` is sealed with the scope, so the answering device checks it, and asks for and checks the confirmation. The server only relays the request and the person's answer, opaquely.
 
 ## 6. Running code
 
@@ -188,18 +195,18 @@ Each needs either a scope granted beforehand, or the person's confirmation at th
 - **`run` needs `run_code`** on the grant, and write access to the document.
 - **The relay:**
   - the account object picks a page that is connected on the account socket, says it accepts relayed runs (it has the document's interpreter available), and has had the person's input within the last 12 hours;
-  - it sends the page `{t: "run", run_id, grant, agent, path, target, code_sha256}`;
+  - it sends the page `{t: "run", run_id, grant, version}` and the request, sealed: the path, the target and `code_sha256` are inside it, never visible to the server;
   - with no such page, it answers 409 `no_page`, and never queues a run.
-- **The page checks again before running,** from its own copy of the grant, which it gets over the account socket:
+- **The page decides,** from the grant's sealed fields, which it reads as any device does:
   - the grant still allows running in that path;
   - **the code is the agent's own** (§8.3, "code that agent wrote"): the cell's or note's current input was last changed by a patch authored by this grant's agent, and its SHA-256 is `code_sha256`. Code that another person or agent last changed is not this agent's to run. The agent can rewrite it, which makes it the agent's own, credited to it and visible in TimeTravel;
   - the run happens in the runner, never in the fallback worker (§8.3, danger 2). If the runner isn't available, it is refused with `runner_unavailable`.
 - **The person sees it:** a running indicator naming the agent, with Stop, and an entry in the conversation or the document's history.
-- **The result** is the run's outputs, bounded as the page bounds them (design/security.md rules 1-4). It goes back through the account object to the agent, and is logged with the code's hash.
+- **The result** is the run's outputs, bounded as the page bounds them (design/security.md rules 1-4). It goes back through the account object to the agent, sealed (§4's open point), and the page logs it, with the code's hash, in the encrypted access log (§8).
 - **Revoking reaches a running run** (§8.9 question 3):
   - turning off `run_code`, or revoking the grant, sends `{t: "grant", id, run_code: false}` or `{t: "revoked", grant}` to every page of the account;
   - a page stops that grant's runs at once, by the runner's Stop;
-  - a page that missed the message refuses at its next check, because every relayed run carries the grant's state from the account object, which is the only source of truth.
+  - a page that missed the message refuses at its next check, because every relayed run carries the grant's current `gen` from the account object, and a page with an older copy of the grant fetches it first.
 
 ## 7. Limits, sizes and rates
 
@@ -225,8 +232,8 @@ Every check and reservation precedes its write. For a batch, admission reserves 
 
 ## 8. The access log
 
-- **One row per request,** in the account object: time, grant, agent, verb, path (or paths), result, bytes, and for a run, the code's SHA-256. A request's arguments and contents are never logged.
-- **Under end-to-end encryption, the answering device writes the row, encrypted,** since only it knows the paths. The server keeps the row as ciphertext, with its time and size (design/e2e-encryption.md §4).
+- **One row per request, written by the answering device, encrypted:** time, grant, agent, verb, path (or paths), result, bytes, and for a run, the code's SHA-256. A request's arguments and contents are never logged.
+- **The server keeps the row as ciphertext,** with only its time, size and grant id visible (design/e2e-encryption.md §4). It never holds a path or a code hash.
 - **Kept for 7 days, and at most 100,000 rows per account. The oldest go first.** Age and count are independent host bounds, so sustained traffic can evict a younger row at the count cap. Append and cleanup are bounded. Retention is not a membership field or tier benefit, so zero and downgrade cannot trigger separate early trimming.
 - **Who may read it:** the person, in "Agents with access", per grant or all together. An agent can't read the log, its own entries included.
 - **It is the person's data.** It is deleted with their synced data, by "Delete my synced data" and by the purge (design/sync-server.md §7). Sagebrush's operators have no view of it.
@@ -296,27 +303,28 @@ In Miniflare, with the sync server's harness:
 - **Pairing:** an oversized body is refused before any write; a fourth pending pairing from one IP, a full site, polling faster than 5 s (`slow_down`), more than 150 polls, and expired rows are each handled as §2 says; no failure path shows a token.
 - **Reading:** a grant's URL debits at issue and works once; parallel and overlapping range requests on it give at most one success.
 - **Document writes:** a competing append between the read and the write gives `conflict`; a revoke while the write is delayed either finds it committed (and logged) or refuses it.
-- **Grants:**
+- **Grants, on the server:**
   - a token for another account, a wrong secret, an expired grant and a revoked grant each give the same 401;
-  - a revoke while a write is running prevents the write;
+  - a revoke, or a change to the grant, while a write is running prevents the write: an op or admission naming an old `gen` is refused;
   - revoking closes the grant's sockets;
-  - a pairing is used once, by the holder of its secret only, and a wrong code fails 5 times and then the pairing ends.
-- **Scope:**
+  - a pairing is used once, by the holder of its secret only, and a wrong code fails 5 times and then the pairing ends;
+  - **nothing the server stores or logs holds a path, a scope or a code hash:** every request, relay message and log row is checked for them.
+- **Scope, on the answering device:**
   - `/Algebra` doesn't cover `/Algebra2`;
   - `..`, `.`, `//` and other spellings normalize to the same path, or are refused;
-  - a rename out of scope is refused;
+  - an agent's op after a rename out of its scope is refused by every device alike;
   - Trash shows only what came from the scope.
 - **Person-only verbs** (emptying Trash, clearing a history, dropping versions, granting, deleting synced data) are refused for every grant.
-- **Outward actions** need a confirmation, or a scope given beforehand. A confirmation covers exactly one action, with those arguments.
+- **Outward actions** need a confirmation, or a scope given beforehand, checked by the device. A confirmation covers exactly one action, with those arguments.
 - **Runs:**
   - refused without `run_code`, without a page, and for code the agent didn't last change;
   - refused when the runner isn't there;
   - stopped when the grant is revoked.
 - **Limits:** each row of §7, at the limit and one over.
-- **The log:** a row for each request; never the token or the contents; trimmed oldest-first at 7 days and 100,000 rows.
+- **The log:** a row for each request, encrypted by the device; never the token or the contents; trimmed oldest-first at 7 days and 100,000 rows.
 - **Mutations,** each caught by a test:
-  - the scope check;
-  - the recheck inside the write's transaction;
+  - the device's scope check;
+  - the server's grant-`gen` check inside the write's transaction;
   - the constant-time comparison (removing the hash);
   - the run's author check;
   - the `Origin` refusal;

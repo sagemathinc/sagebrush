@@ -66,9 +66,9 @@ With sync on, your notebooks and data files sync between your own browsers and d
 - **Only your devices hold the keys.** The server stores what they send, but can't read your files, notebooks or their names. It still sees how much you store, when your devices sync, which device sent what, and whom you share with.
 - **A recovery code,** shown once when you set sync up, is the only way back in without one of your devices. Nobody stores it: not Sagebrush, and not your devices. **If you lose every device and the recovery code, your synced data is gone,** and nobody can recover it, not Sagebrush and not support.
 - **A browser can lose its keys** when its site data is cleared. It then asks to be set up again, from another of your devices or with the recovery code.
-- **Removing a lost device** stops it reading anything synced afterwards. It can't make it forget what it already had.
+- **Removing a lost device** stops it reading what your devices write afterwards, under new keys. It can't make it forget what it already had. A share someone sends you can lag behind: their Sagebrush may use your previous key for up to 30 days, until it fetches the new one.
 - **The limit of any web page:** a page served by a compromised or compelled server could use the keys while it's open. The desktop app has the stronger guarantee, because its signed builds don't come from the server.
-- **Exceptions are explicit:** a link you publish is public, and anyone, the server included, can read it ([Sharing](sharing#publish)); a support bundle is only what you choose to send; and class work opened from a school's course site stays readable by the school, and the editor says so.
+- **Exceptions are explicit:** a link you publish is public, and anyone, the server included, can read it ([Sharing](sharing#publish)); a support bundle is only what you choose to send; and class work opened from a school's course site stays readable by the course's instructors and graders, and the editor says so. Who else may read class work, and how long it's kept, will be decided before that part is built.
 
 The design is in Sagebrush's source, in design/e2e-encryption.md.
 

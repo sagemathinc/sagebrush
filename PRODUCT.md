@@ -41,7 +41,7 @@ One document at a time, in one small, uniform frame. We keep polishing it toward
 
 - **Your work starts on your device.** By default, notebooks run in your browser or the app, and nothing is uploaded to run them.
 - **Sync will be end-to-end encrypted, as the only mode,** before it opens to everyone: only your devices hold the keys, and Sagebrush's server stores what it can't read. A recovery code, shown once, is the only way back without one of your devices; lose both, and the data is gone. The relay to your own computers and agents' logs are covered too.
-- **Exceptions are explicit and named:** publishing a link is public; a support bundle is only what you choose to send; class work from a school's course site stays readable by the school. See [Storage](https://sagebrush.space/docs/storage#encryption).
+- **Exceptions are explicit and named:** publishing a link is public; a support bundle is only what you choose to send; class work from a school's course site stays readable by the course's instructors and graders, with any other readers and how long it's kept decided before that part is built. See [Storage](https://sagebrush.space/docs/storage#encryption).
 
 ## Safety
 
