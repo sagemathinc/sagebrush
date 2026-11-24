@@ -15813,5 +15813,35 @@
   },
   "owner": "matlab",
   "reason": "repmat's fixed result caps (8 MiB numeric, 200,000 objects), refused with MATLAB's size-preference identifier until the memory guard admits repmat's result (FU-B16-4)"
+ },
+ "lib/_matlab.py ::  :: _CELL_UNMEASURED_MAX_BYTES = 1 << 31 #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "cell arrays where the host's memory can't be measured (the browser today): at most 2 GiB estimated, the legacy full-array cap for doubles and half the wasm32 4 GiB; past it memory_guard (fixed), MATLAB:nomem; measured hosts use the Ledger"
+ },
+ "lib/_matlab.py :: _admit_cells :: if need > _CELL_UNMEASURED_MAX_BYTES: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "cell arrays where the host's memory can't be measured (the browser today): at most 2 GiB estimated, the legacy full-array cap for doubles and half the wasm32 4 GiB; past it memory_guard (fixed), MATLAB:nomem; measured hosts use the Ledger"
+ },
+ "lib/_matlab.py :: _admit_cells :: raise memory_guard(what, need, _CELL_UNMEASURED_MAX_BYTES, \"one array\", record=rec, fixed=True) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "cell arrays where the host's memory can't be measured (the browser today): at most 2 GiB estimated, the legacy full-array cap for doubles and half the wasm32 4 GiB; past it memory_guard (fixed), MATLAB:nomem; measured hosts use the Ledger"
  }
 }
