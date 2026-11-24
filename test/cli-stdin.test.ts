@@ -33,6 +33,12 @@ test("a prompt (-i) on piped input runs every line, writes its last prompt, and 
     [["--sage", "-q", "-i"], "x = 1\nprint(x)\n", "sage: sage: 1\nsage: "],
     [["--magma", "-q", "-i"], "x := 1;\nprint x;\n", "> > 1\n> "],
     [["--matlab", "-q", "-i"], "x = 1;\ndisp(x)\n", ">> >>      1\n>> "],
+    // (and input that ends in the middle of a statement: the continuation prompt is the one written, an empty one
+    // in Magma and MATLAB)
+    [["-q", "-i"], "if True:\n", ">>> ... "],
+    [["--sage", "-q", "-i"], "if True:\n", "sage: ....: "],
+    [["--magma", "-q", "-i"], "x := (1 +\n", "> "],
+    [["--matlab", "-q", "-i"], "if true\n", ">> "],
   ];
   for (const [args, input, out] of cases) {
     const r = run(args, input);
