@@ -195,7 +195,7 @@ Each needs either a scope granted beforehand, or the person's confirmation at th
 - **`run` needs `run_code`** on the grant, and write access to the document.
 - **The relay:**
   - the account object picks a page that is connected on the account socket, says it accepts relayed runs (it has the document's interpreter available), and has had the person's input within the last 12 hours;
-  - it sends the page `{t: "run", run_id, grant, version}` and the request, sealed: the path, the target and `code_sha256` are inside it, never visible to the server;
+  - it sends the page `{t: "run", run_id, grant, gen}` and the request, sealed: the path, the target and `code_sha256` are inside it, never visible to the server;
   - with no such page, it answers 409 `no_page`, and never queues a run.
 - **The page decides,** from the grant's sealed fields, which it reads as any device does:
   - the grant still allows running in that path;
