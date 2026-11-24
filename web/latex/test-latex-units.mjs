@@ -731,7 +731,7 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   check("amsart-front-matter", (tb.match(/class="auth"/g) || []).length === 2 && tb.includes("Ann One") && tb.includes("Bo Two") && tb.indexOf("Abs text.") > tb.indexOf('class="title"')
     && (fm.match(/Abs text\./g) || []).length === 1 && tb.includes("2010 Mathematics Subject Classification.</i> Primary 11F30") && tb.includes("Key words and phrases.</i> forms, twists")
     && !tb.includes('class="date"') && fm.indexOf('class="amsaddr"') > fm.indexOf("Body.") && end.indexOf("Dept.") < end.indexOf("ann@x.org") && end.indexOf("ann@x.org") < end.indexOf("Dept.\u00a0Two") && end.indexOf("Dept.\u00a0Two") < end.indexOf("bo@y.org"), [tb.slice(0, 500), end.slice(0, 400)]);
-  // (in another class, TeX's own: the last \author is the author, the abstract where it is written, the date shown)
+  // (in the article class, TeX's own: the last \author is the author, the abstract where it is written, the date shown)
   const ar = new Engine().update("\\documentclass{article}\n\\title{T}\n\\author{Ann One}\n\\author{Bo Two}\n\\begin{document}\n\\begin{abstract}Abs text.\\end{abstract}\n\\maketitle\nBody.\n\\end{document}\n").chunks.join("");
   check("article-front-matter-unchanged", !ar.includes("Ann One") && ar.includes("Bo Two") && ar.indexOf("Abs text.") < ar.indexOf('class="titleblock"') && ar.includes('class="date"'), ar.slice(0, 500));
   // (a numeric bibliography keeps the page's own column)

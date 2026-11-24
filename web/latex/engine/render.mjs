@@ -1114,14 +1114,14 @@ const CMDS = {
   TeX: function (nodes, i, ctx, flow) { flow.html('<span class="latex">T<span class="e">e</span>X</span>', ctx.st); return i; },
   BibTeX: function (nodes, i, ctx, flow) { flow.html('<span class="sc">Bib</span><span class="latex">T<span class="e">e</span>X</span>', ctx.st); return i; },
   // (\title[short]{long} and \author[short]{long} in the AMS classes, amsart's: the short form is for running heads,
-  //  not shown. In another class TeX reads the [ as the argument, as here)
+  //  not shown. In the article class TeX reads the [ as the argument, as here; this handling is the AMS classes' only)
   title: function (nodes, i, ctx) { const [, j0] = this.amsShort(nodes, i); const [a, j] = this.arg(nodes, j0); [this.meta.title, this.metaSage.title] = this.captured(() => this.inline(a, ctx)); return j; },
   author: function (nodes, i, ctx) {
     const [, j0] = this.amsShort(nodes, i);
     const [a, j] = this.arg(nodes, j0);
     const parts = [[]]; for (const x of a) { if (this.csName(x) === "and") parts.push([]); else parts[parts.length - 1].push(x); }
     const [h, keys] = this.captured(() => parts.map((p) => '<span class="auth">' + this.inline(p, ctx) + "</span>").join(""));
-    // (in the AMS classes each \author adds one, as amsart's do; elsewhere the last one is the author, as TeX's is)
+    // (in the AMS classes each \author adds one, as amsart's do; in the article class the last one is the author, as TeX's is)
     if (this.ams() && this.meta.author) { this.meta.author += h; this.metaSage.author = [...this.metaSage.author, ...keys]; }
     else { this.meta.author = h; this.metaSage.author = keys; }
     this.meta.authN = (this.ams() ? this.meta.authN ?? 0 : 0) + 1;
