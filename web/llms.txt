@@ -103,6 +103,12 @@ The rule for the libraries Sagebrush rewrites:
 - `npx sagebrush@0.10.3 board check FILE` checks a `.board.json` before anyone opens it (the format, ids, edges, pictures, questions) and runs its code items, reporting every problem at once; `board render FILE -o board.svg` draws it.
 - `npx sagebrush@0.10.3 board open FILE` shows a board in the browser on this computer, as /board/ does, read only, and shows it again in place each time FILE changes (a version that isn't a board leaves the last good one shown, with what is wrong). It listens on 127.0.0.1 only, and nothing of the board is uploaded.
 
+## Jupyter kernel (and notebooks run headless)
+
+- `npx sagebrush@0.10.3 --install-jupyter-kernel --mode all` registers the kernels `sagebrush` (Sage), `sagebrush-python`, `sagebrush-magma` and `sagebrush-matlab` for Jupyter (the Sagebrush kernel itself needs no Python). It installs in your user's Jupyter directory, or `--prefix DIR`, `--sys-prefix` or `--user`. Check with `jupyter kernelspec list`. The installer copies the command line next to each `kernel.json`, so a kernel installed with npx keeps working.
+- Run a notebook without a browser: `jupyter nbconvert --to notebook --execute --ExecutePreprocessor.kernel_name=sagebrush-python nb.ipynb --output out.ipynb`. Add `--allow-errors` to keep going past a failing cell. `out.ipynb` is nbformat JSON: each cell's printed output (`stream`), values (`execute_result`), figures (`display_data`) and exceptions (`error`, with `ename`, `evalue` and `traceback`).
+- Figures: by default each is an SVG, or a PNG when its SVG would be over 1 MiB (a plot of a few hundred thousand points), with a line under it saying so. `sagebrush.figures("png")` makes every figure a PNG for the rest of the session, which keeps a notebook of large plots small. The other choices are `"svg"`, `"both"` and `"auto"`; `%config InlineBackend.figure_format = "png"` does the same. To set it for the kernel, install with `--figures png`.
+
 ## MCP server (for AI agents)
 
 - Every way a person connects an agent to Sagebrush, in full (what each needs, what it touches, what isn't there yet): [/agents/connect.md](/agents/connect.md). The page for people, /agents/connect/, gives only the two choices and one command each.

@@ -581,7 +581,7 @@ def _estimate(line):
     f = value(names[0])
     for n in names[1:]:
         f = getattr(f, n)
-    import sagebrush
+    import _sagebrush_lib as sagebrush
     return sagebrush.estimate(f, *args, **kwds)
 
 

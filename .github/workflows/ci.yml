@@ -45,7 +45,12 @@ jobs:
   changes:
     if: github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != ''
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # (actions: read, only to find this commit's merge_group run: scripts/ci-queue-tested.mjs)
+    permissions:
+      contents: read
+      actions: read
     outputs:
+      queue_tested: ${{ steps.paths.outputs.queue_tested }}
       full: ${{ steps.paths.outputs.full }}
       docs_only: ${{ steps.paths.outputs.docs_only }}
       app_only: ${{ steps.paths.outputs.app_only }}
@@ -96,9 +101,19 @@ jobs:
       # workflow runs, fails here, in the job every run has)
       - name: test discovery (scripts/web-tests.mjs check)
         run: node scripts/web-tests.mjs check
+      # (a master push of the very commit the merge queue's run already tested and passed: its tests aren't run again,
+      # only what a push alone does; any doubt is a full run.  The CI capacity ruling's second cut, Nov 22 2026)
+      - id: queue
+        name: was this exact commit tested by the merge queue?
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci-queue-tested.mjs >> "$GITHUB_OUTPUT"
       - id: paths
         name: classify changed paths and select the tier
         env:
+          CI_QUEUE_TESTED: ${{ steps.queue.outputs.queue_tested }}
+          # (PR CI light: William's repository switch, off unless exactly "true"; scripts/ci-paths.mjs prLight)
+          CI_PR_LIGHT: ${{ vars.PR_CI_LIGHT }}
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
           CI_PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
           # (a dispatch's long input: the long tier, scripts/ci-paths.mjs)
@@ -248,8 +263,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # (1 shard: the CI capacity ruling, Nov 22 2026; test-name-shard 1/1 selects every case)
-        shard: [1]
+        # (2 shards: the CI capacity ruling, Nov 22 2026, took 4 to 1, but one shard took 28 min, the merge queue's
+        # longest job; its second cut, the same day, made it 2.  test-name-shard K/2 selects each case exactly once)
+        shard: [1, 2]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
     steps:
@@ -274,13 +290,13 @@ jobs:
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install scipy==1.18.1 numpy==2.5.1
       - run: pnpm install --frozen-lockfile && pnpm run build
-      - name: Magma and MATLAB Node tests, case shard ${{ matrix.shard }}/1
+      - name: Magma and MATLAB Node tests, case shard ${{ matrix.shard }}/2
         env:
           SAGEBRUSH_TIME_SCALE: "2"
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
-          node scripts/test-name-shard.mjs test/magma.test.ts dist/test/magma.test.js ${{ matrix.shard }}/1
-          node scripts/test-name-shard.mjs test/matlab.test.ts dist/test/matlab.test.js ${{ matrix.shard }}/1
+          node scripts/test-name-shard.mjs test/magma.test.ts dist/test/magma.test.js ${{ matrix.shard }}/2
+          node scripts/test-name-shard.mjs test/matlab.test.ts dist/test/matlab.test.js ${{ matrix.shard }}/2
 
   checks:
     needs: [changes, wasm-modules]
@@ -486,7 +502,7 @@ jobs:
     if: always() && (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
-    # (pull-requests: read, only to read the track-pull label of a queued pull request)
+    # (pull-requests: read, only to read the track-pull or size-accepted label of a queued pull request)
     permissions:
       contents: read
       pull-requests: read
@@ -512,20 +528,24 @@ jobs:
       # the track already passed this backstop against the track, and the pull sums them. With
       # the track-pull label the table is still measured and reported, but growth over the
       # backstop doesn't fail it; the merger reads every row. Missing records still fail closed.
+      # The size-accepted label is the same excuse for any pull request whose growth @sagebrush accepted after the
+      # size checklist (@sagebrush's ruling, Nov 23 2026, #1697); only he applies it.
       - name: a track pull?
         id: track
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          # (the names as a JSON array, matched element by element: a label named "x,size-accepted" is not size-accepted)
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           QUEUE_REF: ${{ github.event.merge_group.head_ref }}
         run: |
           pull=false
+          excused='(. // []) | any(.[]; . == "track-pull" or . == "size-accepted")'
           if [ "$EVENT" = pull_request ]; then
-            case ",$LABELS," in *,track-pull,*) pull=true ;; esac
+            if printf '%s' "$LABELS" | jq -e "$excused" > /dev/null; then pull=true; fi
           elif [ "$EVENT" = merge_group ]; then
             n=$(printf '%s' "$QUEUE_REF" | sed -n 's#^refs/heads/gh-readonly-queue/[^/]*/pr-\([0-9][0-9]*\)-.*#\1#p')
-            if [ -n "$n" ] && gh api "repos/$GITHUB_REPOSITORY/issues/$n/labels" --jq '.[].name' | grep -qx track-pull; then pull=true; fi
+            if [ -n "$n" ] && gh api "repos/$GITHUB_REPOSITORY/issues/$n/labels" --jq '[.[].name]' | jq -e "$excused" > /dev/null; then pull=true; fi
           fi
           echo "track pull: $pull"
           echo "pull=$pull" >> "$GITHUB_OUTPUT"
@@ -552,7 +572,7 @@ jobs:
               # (only growth is excused: a record, recipe or toolchain problem still fails)
               if [ "$TRACK_PULL" = true ] && node -e 'const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.exit(r.rows.length > 0 && r.problems.length > 0 && r.problems.every((p) => /: growth \+\d+ exceeds \d+ bytes/.test(p)) ? 0 : 1)' "$RUNNER_TEMP/size-records/size-gate.json"; then
                 echo "::warning::a track pull: growth over the backstop is reported, not enforced; the merger reads every row"
-                echo "**A track pull (track-pull label): the rows above are reported, not enforced. The merger reads every row.**" >> "$GITHUB_STEP_SUMMARY"
+                echo "**A track pull or accepted size (track-pull or size-accepted label): the rows above are reported, not enforced. The merger reads every row.**" >> "$GITHUB_STEP_SUMMARY"
               else
                 exit 1
               fi
@@ -674,6 +694,16 @@ jobs:
         if: matrix.shard == 'share-dialog-2' && needs.changes.outputs.web_share == 'true'
         timeout-minutes: 20
         run: node scripts/web-tests.mjs run web-sync.7
+      # (the hosted LTI tool, MS-RSL, in two shards of about 5 min each, as its two jobs were in the cloud repository's CI:
+      # the tool and checkpoints part 1; checkpoints part 2 and grading)
+      - name: the LTI tool and its content, part 1 (web-sync.8)
+        if: matrix.shard == 'lti'
+        timeout-minutes: 20
+        run: node scripts/web-tests.mjs run web-sync.8
+      - name: the LTI tool's content, part 2, and grading (web-sync.9)
+        if: matrix.shard == 'lti-b'
+        timeout-minutes: 20
+        run: node scripts/web-tests.mjs run web-sync.9
 
   # "Export all current files (.zip)" (E1): its browser test.  The scale test's CI pass, the controls (each rule
   # undone in a copy of the chunk, its named check failing) and the campaign check run in the long tier (export-controls).
