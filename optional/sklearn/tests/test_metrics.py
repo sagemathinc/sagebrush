@@ -187,3 +187,21 @@ for name, fn in [("r2", r2_score), ("mse", mean_squared_error), ("rmse", root_me
 # zero_division=np.nan: the averages skip the NaN entries (_nanaverage), unweighted and weighted
 for avg in ("macro", "weighted"):
     case("prfs.nan-skipped.%s" % avg, caught(lambda: hx(precision_recall_fscore_support([0, 1, 1, 2], [0, 0, 0, 0], labels=[0, 1, 2, 3], average=avg, zero_division=np.nan))))
+
+# the stated tolerance (known.json's tolerances): weighted, unnormalized accuracy is np.dot(score, w),
+# whose summation order differs; it is held to relative 1e-12 of the exactly rounded sum (math.fsum)
+import math
+
+rs_tol = np.random.RandomState(11)
+y_tol = rs_tol.randint(0, 3, 1000)
+p_tol = np.where(rs_tol.rand(1000) < 0.8, y_tol, rs_tol.randint(0, 3, 1000))
+w_tol = rs_tol.rand(1000) * 10
+
+
+def within_tolerance():
+    got = accuracy_score(y_tol, p_tol, normalize=False, sample_weight=w_tol)
+    exact = math.fsum(w for w, a, b in zip(w_tol.tolist(), y_tol.tolist(), p_tol.tolist()) if a == b)
+    return abs(got - exact) <= 1e-12 * abs(exact)
+
+
+case("acc.weighted-count-tolerance", within_tolerance)
