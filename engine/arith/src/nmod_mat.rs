@@ -552,7 +552,9 @@ impl Mat {
         let m = self.m;
         let (rows, cols) = (self.rows, self.cols);
         let batch = batch_len(&m);
-        let mut pivots: Vec<usize> = vec![];
+        // (at most min(rows, cols) pivots: one allocation of exactly that,
+        // the bound the binary echelon's reservation counts)
+        let mut pivots: Vec<usize> = Vec::with_capacity(rows.min(cols));
         let mut det = 1 % m.n;
         let mut r = 0;
         let mut block_start = 0; // first pivot row of the pending block
