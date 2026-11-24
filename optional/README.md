@@ -39,7 +39,7 @@ Optional packages are **reviewed first-party code**. `scripts/optional-packages.
 - the public names in `core-api-surface.json` (modules, their names and their public types' members, with the level each appeared at);
 - the documented protocols (`_repr_html_`, `__array__`, the number and sequence dunders, …);
 - its own names;
-- the public names of the packages it `requires`, at their exact ids: the modules their manifests list, and those modules' public names. Their private modules and names, and any change to them, are findings no declaration waives; so is importing any module of a package it doesn't require at that exact id.
+- the public names of the packages it `requires`, at their exact ids: the modules their manifests list, and those modules' public names. Their private modules and names, and any change to them, are findings no declaration waives; so is importing any module of a package it doesn't require at that exact id. A required package's module object may be used only as the base of an attribute (`pd.DataFrame`): bound to another name, passed, returned or stored, it's a hard finding. A name bound from a required package's names, through assignment, destructuring, `for`, `with`, a comprehension or `:=`, counts as that package's: changing its attributes or reading its private names is hard too. In a package that requires another, a private name on anything but `self` or `cls` that isn't the package's own prefix is always hard. The lint follows a required package's names through the bindings above, not into a function they're passed to: a public attribute changed through a parameter is left to the review every optional package gets as first-party code.
 
 **Banned whatever their arguments:**
 - reflection and dynamic import (`importlib`, `__import__`, `builtins`, `eval`/`exec`/`compile`, `getattr`/`setattr`/`hasattr`/`vars`/`dir`, `__dict__`, `sys.modules`), and aliases of them;
@@ -48,7 +48,7 @@ Optional packages are **reviewed first-party code**. `scripts/optional-packages.
 
 A package-private attribute on anything but `self`/`cls` starts with the package's `private_prefix`.
 
-A reviewed exception is one entry in `contract-declarations.json`: `{file, line, construct, target, reason}`, plus, for a dynamic access, `access` (the core name it reaches) and `call` (the parameter names it passes). A `reference` to a core name outside the Core API is waived the same way, one exact line and target. A declared access counts as a use of `access`, at the level of the parameters in `call`. Without `call`, it takes that name's highest parameter level.
+A reviewed exception is one entry in `contract-declarations.json`: `{file, line, construct, target, reason}`, plus, for a dynamic access, `access` (the core name it reaches) and `call` (the parameter names it passes). A `reference` to a core name outside the Core API is waived the same way, by one exact file, line and target: a reference declaration names its target, and one without a target waives nothing. A declared access counts as a use of `access`, at the level of the parameters in `call`. Without `call`, it takes that name's highest parameter level.
 
 **The lint computes the package's `core_req`:** the highest level its uses need, including the levels of the parameters its calls pass. An older engine refuses a set that needs more.
 

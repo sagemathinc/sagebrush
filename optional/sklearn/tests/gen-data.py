@@ -2,7 +2,7 @@
 iris, breast_cancer and digits, embedded as Python string literals (an optional package's Python modules are what
 every host loads). CSV text as it is; digits' gzip bytes as base64. Run with the oracle's scikit-learn installed:
 
-    /scratch/numeric-review/sk/venv/bin/python -I optional/sklearn/tests/gen-data.py optional/sklearn/py/sklearn/datasets
+    $VENV/bin/python -I optional/sklearn/tests/gen-data.py optional/sklearn/py/sklearn/datasets
 """
 import base64
 import hashlib
