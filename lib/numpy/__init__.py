@@ -1459,7 +1459,8 @@ def _quantile(a, qa, weak_q, axis, method, keepdims, out_of_range):
     # (NumPy's _quantile, step for step, so the result's dtype and bits are NumPy's: the virtual index (n-1)*q in q's
     # own dtype (a float32 q gives a float32 index, #1866), gamma its fractional part in that dtype (a Python float when
     # q was a Python int or float: weak, so float32 data stays float32), method="midpoint"'s gamma 0 where the index is
-    # an integer and 0.5 elsewhere (#1866), then NumPy's _lerp in the data's own dtype)
+    # an integer and 0.5 elsewhere (#1866), then NumPy's _lerp with its dtype promotion: a weak q keeps float32 data
+    # float32, a strong float64 q promotes the result)
     a = asarray(a)
     if axis is None:
         a, axis = a.ravel(), 0
