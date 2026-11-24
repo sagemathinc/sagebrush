@@ -173,7 +173,7 @@ const get = (s, path, origin = SITE) => at(origin, path, { headers: { cookie: s,
 const gate = (name, on) => at(SITE, `/__test/gate?name=${name}&on=${on ? 1 : 0}`);
 const register = (s, m) => post(s, "/api/sync/v1/manifest", { manifest: m });
 const verify = (s, h) => post(s, `/api/sync/v1/manifest/${h}/verify`, {});
-const check = async (s, hashes) => (await post(s, "/api/sync/v1/blobs/check", { blobs: hashes.map((h) => ({ sha256: h, ct_sha256: h, size: 1 })) })).json();
+const check = async (s, hashes) => (await post(s, "/api/sync/v1/blobs/check", { blobs: hashes.map((h) => (typeof h === "string" ? { sha256: h, ct_sha256: h, size: 1 } : h)) })).json();
 async function account(id) {
   const ns = await mf.getDurableObjectNamespace("SYNC_ACCOUNT", "on");
   const hash = createHash("sha256").update("sagebrush-account\n" + id).digest("hex");
@@ -294,13 +294,19 @@ await section("register and verify a file", async () => {
   const hr = await held;
   b = await hr.json();
   ok(hr.status === 200 && b.state === "verified" && b.position === 2, "the verification streams both chunks and verifies: " + JSON.stringify(b));
-  c = await check(sa, [f.sha256]);
+  // (e2e PR 3a: a verified file is held as its address, ct = address and its size; only exactly that is present)
+  const exact = { sha256: f.sha256, ct_sha256: f.sha256, size: f.bytes.length }, heldF = exact;
+  c = await check(sa, [exact]);
   ok(JSON.stringify(c) === JSON.stringify({ missing: [] }), "blobs/check: a verified file isn't missing (the client skips the upload)");
+  c = await check(sa, [{ ...exact, ct_sha256: "e".repeat(64) }, { ...exact, size: exact.size + 1 }]);
+  ok(c.missing?.length === 0 && c.conflicts?.length === 2 && c.conflicts.every((h) => JSON.stringify(h) === JSON.stringify(heldF)), "blobs/check: a verified file with another ct, or another size, is a conflict naming what is held: " + JSON.stringify(c));
   const gm = await get(sa, "/api/sync/v1/manifest/" + f.sha256);
   ok(gm.status === 200 && canonical((await gm.json()).manifest) === canonical(f.manifest), "GET /manifest answers the manifest once verified");
   op = await ws.create(f.sha256, f.bytes.length);
   t = await acct.testFiles({ sha256: f.sha256 });
   ok(Number.isInteger(op.seq) && t.row.state === "live" && t.row.refs === 1, "an op naming the verified file is accepted; the row is live, with one reference");
+  c = await check(sa, [exact, { ...exact, ct_sha256: "e".repeat(64) }, { ...exact, size: exact.size - 1 }]);
+  ok(c.missing?.length === 0 && c.conflicts?.length === 2 && c.conflicts.every((h) => JSON.stringify(h) === JSON.stringify(heldF)), "blobs/check: a live file exactly is present; with another ct, or another size, a conflict: " + JSON.stringify(c));
   ok((await verify(sa, f.sha256).then((r) => r.json())).state === "live", "a verified row isn't verified again");
   ws.close();
 });

@@ -571,6 +571,10 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   ok(r.status === 409 && rj.error === "conflict" && JSON.stringify(rj.held) === JSON.stringify({ sha256: addr, ct_sha256: sha(one), size: 1 }), "other bytes at a held address: 409 conflict naming what is held: " + JSON.stringify(rj));
   i = await acctA.inspect({ sha256: addr });
   ok(i?.used === 12_001, "…nothing stored for the conflict: its reservation came back (" + i?.used + ")");
+  const sizeOnly = await acctA.reserve({ account: A, sha256: addr, ct_sha256: sha(one), size: 2 });
+  ok(sizeOnly.error?.code === "conflict" && JSON.stringify(sizeOnly.error.detail?.held) === JSON.stringify({ sha256: addr, ct_sha256: sha(one), size: 1 }), "a reservation at a held address with its ct but another size: a conflict, never \"have\": " + JSON.stringify(sizeOnly));
+  i = await acctA.inspect({ sha256: addr });
+  ok(i?.used === 12_001 && i.reservations === 0, "…and it reserved nothing: usage and reservations unchanged (" + JSON.stringify({ used: i?.used, reservations: i?.reservations }) + ")");
   r = await post(sa, "/api/sync/v1/blobs/check", { blobs: [{ sha256: addr, ct_sha256: sha(two), size: 1 }, { sha256: addr, ct_sha256: sha(one), size: 2 }, { sha256: addr, ct_sha256: sha(one), size: 1 }] });
   rj = await r.json();
   ok(r.status === 200 && rj.missing.length === 0 && rj.conflicts?.length === 2, "check: held as other bytes or another size is a conflict, never present or missing: " + JSON.stringify(rj));
