@@ -1,6 +1,6 @@
 # End-to-end encryption for private synced data
 
-*Status: draft design r2, for William's decision, with SEC review. r2 adds William's principle (Nov 23) and the class-work exception (§5.2); his answers to the other questions in §10 are folded in as they come. Nothing here is built. Sync, sharing and the agent endpoint are DEV-only, and no paying customer has data yet, which is why this is being decided now.*
+*Status: draft design r2, with SEC review. William's decisions (Nov 23 2026) are in §10; only the post-quantum question (Q11) is open. Nothing here is built. Sync, sharing and the agent endpoint are DEV-only, and no paying customer has data yet.*
 
 ## 0. The decision
 
@@ -22,8 +22,11 @@ Already decided or approved by William:
 - public publishing is an explicit decrypt-and-publish step;
 - support works only from a snapshot bundle the person chooses to send. Nobody looks at anything directly;
 - files are compressed before they are encrypted. Dedup works within an account through keyed blob names. Cross-account dedup is lost.
+- (Nov 23) DEV synced data is wiped at the cutover; the recovery code is the only recovery; agents and Autonomous VMs are full trusted devices, with no per-folder keys; no size padding; TOFU key warnings in v1; the generic preview card for encrypted links;
+- (Nov 23) agent logs and the relay to your own computers are end to end too (§6.2);
+- (Nov 23) the browser's limit is accepted, and signed releases with a public log are planned (§8).
 
-Each section below gives the options, a recommendation, and what it costs. §10 lists the questions only William can answer.
+Each section below gives the options, a recommendation, and what it costs. §10 records William's decisions.
 
 ## 1. What the person sees (the honest version)
 
@@ -73,7 +76,7 @@ Each section below gives the options, a recommendation, and what it costs. §10 
   - a key held by CoCalc or Sagebrush (that's (a) again);
   - social or threshold recovery.
 
-  A passkey with the WebAuthn PRF extension as an extra unlock factor is §10 Q2.
+  **No passkey as an extra unlock factor** (decided, §10 Q2): the recovery code is the only recovery.
 
 ### 2.1 Key-chain authority (SEC)
 
@@ -275,7 +278,7 @@ An encrypted index doesn't hide these correlations.
 
 **Admin views** after the switch show account and billing data and sizes. They never show titles, paths or content of private data (the sync documents' owner).
 
-Size padding to buckets would hide exact sizes, at a storage cost: §10 Q5.
+Sizes aren't padded to buckets (decided, §10 Q5): exact ciphertext sizes stay visible, and the threat model says so.
 
 ## 5. Shares, proposals, public publishing, support
 
@@ -293,7 +296,7 @@ Size padding to buckets would hide exact sizes, at a storage cost: §10 Q5.
   - **The page clears the key at once,** before any other app work: it imports the fragment key, then removes it from the address bar and history (`history.replaceState`).
   - The page loads no third-party resources, and no analytics or crash report carries its URL.
   - **Anyone who copied the link keeps the capability.** Revoking stops future retrieval from the server; it can't erase a downloaded key or plaintext.
-  - An encrypted link share's preview is the generic card, because the server doesn't know the title (§10 Q7).
+  - An encrypted link share's preview is the generic card, because the server doesn't know the title (decided, §10 Q7).
 - **Proposals:**
   - **The format:** a canonical, signed envelope `{proposal id, target owner and inbox-key id, share or snapshot id, base manifest hash, result manifest hash, expiry, ops}`, with the ops bounded in size. It is encrypted and wrapped to the owner's inbox key (§3.4).
   - **Checks:** the owner's client verifies the proposer's signature against their currently pinned chain before showing the proposal, and refuses it once expired.
@@ -302,7 +305,7 @@ Size padding to buckets would hide exact sizes, at a storage cost: §10 Q5.
   - **TOFU:** a sender pins them at first use and shows their fingerprint (20 base32 characters, as the fleet's).
   - **A change** is a loud warning that can't be clicked through without comparing fingerprints.
   - **Inbox records expire after 30 days,** and a sender refuses an expired one. That bounds, but doesn't remove, the window in which a withheld rotation sends a new share to a removed device's old key (§2).
-  - **The limit:** TOFU can't stop a substitution at first use. Transparency comes later: §10 Q6.
+  - **The limit:** TOFU can't stop a substitution at first use. TOFU with loud warnings is v1, and a transparency log or device gossip comes later (decided, §10 Q6).
 - **Grading is class work, not a share between people:** an LTI-launched assignment lives in the class store, and its grade or link goes back through the LMS (§5.2).
 - **Public publishing is an explicit step:** "Publish publicly" decrypts on the device and writes **separate plaintext objects**, which is today's collections, unchanged. They are never the private holdings, and never made from synced server bytes. The dialog says that anyone, including the server, can read them. D1's `versions.title` is written only for public shares.
 - **Support bundles:**
@@ -340,7 +343,7 @@ Assignment files launched from a school's LMS (LTI) aren't end-to-end encrypted.
 - **Gates before any build** (SEC):
   - launch replay prevention: each launch's nonce is used once, within its validity;
   - tenant and course isolation: no row is reachable across platforms, deployments or contexts;
-  - deletion and retention enforced, by the rules §10 Q10 sets.
+  - deletion and retention enforced, by rules set before any class-store build (§10 item 11).
 
   Q10 (who may read, and how long the store keeps it) must be answered before any class-store code is built.
 - **The threat model differs:** a breach, an insider or a legal demand can read class-store files, as with the LMS itself. **The server, or an insider, can also alter, delete or roll back class work, and could change a grade it sends through AGS.** Nothing in this design detects that (§8).
@@ -351,7 +354,7 @@ Assignment files launched from a school's LMS (LTI) aren't end-to-end encrypted.
 - **The person's own agents on their own computer** (the sagebrush CLI, the MCP adapter, the desktop app) also become devices.
 - **Scope is about behavior, not confidentiality** (SEC). A device holding `S[e]` can read every object in that epoch.
   - A grant's scope is enforced by the device acting for the agent: it controls what the agent does, not what that device could read.
-  - Hiding files from an agent cryptographically would need per-folder keys, with no index key on that VM: §10 Q4.
+  - **No per-folder keys** (decided, §10 Q4: "it's already complicated enough"): agents are full trusted devices in v1.
 - **The agent endpoint** (design/agent-endpoint.md), for an agent holding only a grant token:
   - the grant token, its tag and its rates stay on the server;
   - **every verb relays to an online device** of the person's (an open tab, the desktop app or an Autonomous VM), which decrypts, checks scope (`inScope`, and the Trash visibility rule for grants, `trashVisible`) and answers, as runs are designed to (agent-endpoint.md §6; not built yet);
@@ -367,12 +370,33 @@ An Autonomous VM is a full account device, so whoever controls the VM controls i
   - Only concurrent, divergent use is detected: two envelopes from one device with the same `dseq` or previous hash. Clients refuse that fork, the device is removed, and its signing key is never accepted again.
   - Unique enrollment prevents deliberate reuse of an image. It can't make a snapshot or a clone harmless.
 
-- **Agent logs:** the cloud agent-log mirror (web/cloud/mirror) is encrypted under a key held in a Worker secret, so the server can read it. Whether agent logs count as private synced data is §10 Q8.
-- **The relay to one of your computers:** web/docs/storage.md tells users it is "encrypted on the way but not end to end". Whether E2E covers it too is §10 Q9.
+- **Agent logs and the relay to your own computers** are under end-to-end encryption too (decided, §10 Q8 and Q9): §6.2.
+
+### 6.2 Agent logs and the relay to your own computers (decided, §10 Q8 and Q9)
+
+**Agent logs are private synced data** (William: "make sure the encryption plan fully addresses agent logs, and also Sagebrush remote proxying").
+- **Today:** the log mirror (web/cloud/mirror) seals each segment under an account data key that is wrapped by a key-encryption key held in a Worker secret. So the server can read every log.
+- **Under E2E:**
+  - each conversation's mirror gets a random CEK, wrapped under the current epoch like a document's (§3.1), and recorded in the sealed index;
+  - **segments are sealed by the writing device,** which must be an enrolled device (the page, the desktop app, the CLI or an Autonomous VM, §6). The server stores and serves opaque segments, as it does document batches;
+  - the segment format keeps its header as AAD (version, the conversation's locator, the segment id, both ranges, the previous segment's digest). The key id now names the epoch and the CEK, and the nonce is random per segment, since the key is the device's and not the server's;
+  - **the server-held key-encryption key is retired.** Existing DEV mirrors are wiped with the other synced data at the cutover (Q1).
+- **What the server still sees:** each segment's size and timing, and the header fields kept visible for ordering: the conversation locator, the segment id and the ranges. They're listed with §4's metadata.
+- **What's lost:** anything that read logs on the server (search, previews) runs on a device instead.
+
+**The relay to your own computers goes end to end** (decided, Q9).
+- **Today:** a computer connected with `sagebrush remote login` registers a public key with the server. Its terminal and agent traffic passes through Sagebrush's relay, encrypted to the server but not end to end. So the relay sees what you type, what the computer prints, and what an agent reads and writes there.
+- **Under E2E:**
+  - **the connected computer becomes a device:** its key is certified in the account's key chain (§2) at `sagebrush remote login`, not only registered with the server;
+  - **page and computer run a Noise_IK handshake through the relay,** with the device keys from the chain, the same construction the fleet's browser channel already uses and SEC has reviewed;
+  - the relay forwards opaque Noise messages. It never holds a session key;
+  - the page refuses a computer whose key isn't in the chain, and a key change is a chain entry, never a silent server-side update.
+- **What the relay still sees:** which page talks to which computer, when, and how much (message sizes and timing). Not the content.
+- **Agents through the relay** (agent endpoint, §6) ride the same Noise session, so the relay never sees their reads and writes either.
 
 ## 7. Migration and the order of PRs
 
-**Recommendation: wipe DEV synced data and re-enroll** at the cutover, since sync is DEV-only. A shadow migration is the fallback if William wants DEV data kept (§10 Q1): upload a v2 copy, verify the ciphertext inventory, cut over atomically, then refuse plaintext.
+**Decided (§10 Q1): DEV synced data is wiped and re-enrolled** at the cutover, since sync is DEV-only. There is no migration.
 
 | # | PR | What it changes |
 | --- | --- | --- |
@@ -386,7 +410,9 @@ An Autonomous VM is a full account device, so whoever controls the VM controls i
 | 7 | chunked files | encrypted chunk manifests (with the chunked-files work) |
 | 8 | shares | private shares, link-fragment shares, proposals, the key directory and its warnings; decrypt-and-publish into the existing collections |
 | 9 | support bundles | per-ticket key, with expiry |
+| 9b | agent logs and the relay | mirror segments sealed by devices under per-conversation CEKs, the Worker KEK retired; connected computers certified in the chain; Noise_IK through the relay |
 | 10 | the cutover | the server refuses plaintext ops and unkeyed addresses; a check that no table column or log line holds a plaintext sha256; DEV is wiped and re-enrolled |
+| 11 | signed releases | a release manifest signed with a release key, a public append-only log, and checks in the desktop app (its own design) |
 
 Each PR gets SEC review, rows and mutants. PRs 0, 1 and 2 can start at once. The sync PRs follow the sync owners' order: small, already-opaque payloads first, then the big sealed-index change.
 
@@ -418,7 +444,10 @@ TOFU with loud key-change warnings is the v1 answer. Transparency or device goss
 - **Protected:** browser E2E protects stored data against a breach, an insider, or a demand for the service-side copies.
 - **Not protected:** a page served by a compromised or compelled origin can use the keys while it's open, and send plaintext away. Non-extractable keys prevent exporting the raw key; they don't prevent using it, by such a page or by XSS.
 - **The desktop app** runs signed builds that the server doesn't serve. It has the stronger boundary, and the design says so.
-- **For the web:** signed releases with a public log, or a verifier extension, are possible later (§10 Q3).
+- **Signed releases with a public log are planned** (decided, §10 Q3; William is "very interested"):
+  - every web release's files are hashed into a release manifest, signed with a release key and appended to a public, append-only log;
+  - the desktop app, and a verifier extension, can check that the page they run is a logged release;
+  - it narrows the malicious-origin limit for people who check, without removing it for those who don't. It gets its own design, listed as PR 11 in §7.
 
 ## 9. Cost: measuring the dedup loss on DEV
 
@@ -435,22 +464,23 @@ This needs DEV read access, and aggregate numbers only:
 
 With a handful of DEV accounts, cross-account dedup is likely tiny. The measurement mostly sizes compression's gain and confirms that nothing depends on global dedup.
 
-## 10. Questions for William
+## 10. Decisions (William, Nov 23 2026)
 
-1. **One mode: decided.** William, Nov 23 2026: "Yes, approve E2E as the one mode." (The question of wiping DEV synced data at the cutover, recommended in §7, stays open with the build plan.)
-2. **Recovery:** the recovery code only (recommended), or also a passkey (WebAuthn PRF) as an extra way to unlock? A synced passkey puts recovery in Apple's or Google's hands.
-3. **The browser's limit (§8):** accept it, and recommend the desktop app for the strongest guarantee? Also plan signed releases with a public log?
-4. **Agents:**
-   - Autonomous VMs and agents as full trusted devices, with scope enforced only by the acting device (recommended for v1)?
-   - or per-folder keys now, so a grant is cryptographically limited to its folders, at the cost of a split index and more complex sharing?
-5. **Sizes:** pad ciphertext to size buckets, to hide exact file sizes, at a storage cost? Recommended: no in v1, and the threat model says so.
-6. **Key transparency:** TOFU with loud change warnings in v1 (recommended), with a transparency log or device gossip later?
-7. **Link previews:** encrypted link shares show the generic card, with no title. Is that acceptable?
-8. **Agent logs:** are they private synced data, and so under end-to-end encryption too? Today their mirror uses a server-held key.
-9. **The relay to your own computers** (today "encrypted on the way but not end to end"): bring it under end-to-end encryption too?
-10. **Class work (§5.2):** is the class store, readable by the server and filed under (course, assignment, student), with no sync or recovery code and submission through LTI AGS, the right exception? Who may read it beyond the instructor and graders, and for how long is it kept? (This must be answered before any class-store code is built.)
-11. **Post-quantum (§11.1):** accept X25519 now, with a hybrid suite in a later epoch when WebCrypto has ML-KEM (recommended), or ship a hybrid KEM sooner as a small library?
+1. **One mode:** "Yes, approve E2E as the one mode."
+2. **DEV data:** wipe synced data and re-enroll at the cutover; no migration (§7).
+3. **Recovery:** the recovery code only; no passkey (§2).
+4. **The browser's limit (§8):** accepted, and the desktop app is recommended for the strongest guarantee. Signed releases with a public log are planned: "yes, yes and I'm very interested in signed releases" (§8, PR 11).
+5. **Agents:** Autonomous VMs and agents are full trusted devices, with scope enforced by the acting device. No per-folder keys: "no; it's already complicated enough" (§6).
+6. **Sizes:** no padding to size buckets (§4).
+7. **Key transparency:** the recommendation, TOFU with loud change warnings in v1, and a transparency log or device gossip later (§5).
+8. **Link previews:** encrypted link shares show the generic card (§5).
+9. **Agent logs:** under end-to-end encryption, with Sagebrush remote proxying fully addressed (§6.2).
+10. **The relay to your own computers:** under end-to-end encryption (§6.2).
+11. **Class work (§5.2):** the exception is decided. Who may read class work beyond instructors and graders, and how long it's kept, must be set before any class-store code is built.
 
+**Open:**
+
+12. **Post-quantum (§11.1):** accept X25519 now, with a hybrid suite in a later epoch when WebCrypto has ML-KEM (recommended), or ship a hybrid KEM sooner as a small library?
 
 ## 11. Scale and later change (millions of files)
 
@@ -471,7 +501,7 @@ William asked for this review because a mistake found later, with millions of fi
     - **proof of possession** is separate. An existing device encapsulates a fresh challenge to the new KEM key, and the new key's holder returns a MAC over the entry under the decapsulated secret. The entry records that confirmation.
   - **Who authorizes each:**
     - a device's own keys: that device;
-    - **the recovery key:** a current device, under "Replace recovery code" (§2). The new recovery signing key countersigns, and the new recovery KEM key is proven as above;
+    - **the recovery key:** a current device, under "Replace recovery code" (§2). The recovery key is a seed-derived X25519 key only, with no signing key: the current device's signing key signs the entry, and the new recovery private key, held transiently on that device before the code is shown and discarded, proves possession with the same challenge and MAC;
     - **the inbox key:** any current device (§2.1). Its KEM key is proven as above.
   - **A monotone policy:** the chain records the account's **minimum writer suite**. It can only rise. A client refuses to accept any new epoch, wrapper or entry below it, and refuses to write below it.
     - A downgrade can't be served, since the policy is in the signed chain that clients pin.
@@ -482,7 +512,7 @@ William asked for this review because a mistake found later, with millions of fi
   - X25519 (in HPKE and in device and inbox keys) can be broken by a future quantum computer. Ciphertext stored today, epoch secrets wrapped to X25519 included, could then be opened by whoever kept a copy.
   - AES-256 and HMAC-SHA256 hold up.
   - WebCrypto has no ML-KEM yet. A hybrid suite (X25519 + ML-KEM, for example X-Wing) comes in a later epoch through this agility, and protects only what is written after it.
-  - Whether to ship a hybrid KEM sooner, as a library, is §10 Q11.
+  - Whether to ship a hybrid KEM sooner, as a library, is §10 Q12.
 
 ### 11.2 Many epochs: a keyring, not a cap (William's question)
 
@@ -490,6 +520,11 @@ William asked for this review because a mistake found later, with millions of fi
 - **Why not a cap:** a device removal starts a new epoch at once, and must never wait for a background job. So a cap of 10 could only be a target, and any cost claim of "at most 10" would be false. A low hard cap would block security rotations, and that can't be allowed.
 - **The keyring:**
   - when epoch `e+1` starts, its signed chain entry comes with a **keyring**: `S[0..e]`, the earlier epochs' secrets (32 bytes each), encrypted under `S[e+1]`. **The keyring's hash is committed in that signed chain entry, and so in its checkpoint**, so a device refuses any other keyring for that epoch;
+  - **the construction** (SEC):
+    - `K_ring[e+1] = HKDF(S[e+1], "sagebrush.keyring.v1")`, a key used for this one keyring only;
+    - AES-256-GCM with a fresh random 96-bit nonce;
+    - AAD: the account id, the epoch `e+1`, the suite and format version, the predecessor chain entry's hash, and the ordered list of the epoch ids it includes;
+    - the signed entry commits the hash of the whole ciphertext (nonce, ciphertext and tag), and a device checks that the decrypted list matches the AAD's;
   - devices and the recovery key are wrapped only `S[e+1]`. A device reading an old object opens the keyring, then uses that epoch's keys as written: addresses, blob keys, CEK wraps and sealed entries are all unchanged;
   - a removed device never gets `S[e+1]`, so it can't open the new keyring. It still holds whatever epoch secrets it had before, which is §2.2's unchanged limit.
 - **What it costs:**
@@ -505,7 +540,7 @@ William asked for this review because a mistake found later, with millions of fi
     - **Each reference ends in one of three states:**
       - moved to the current epoch;
       - released;
-      - **independently decryptable without `S[e]`:** a share or support bundle that holds the blob's exported `K_file` or its own wrapper, and stays pinned.
+      - **independently decryptable without `S[e]`:** a completed share or support export holds the blob's exported `K_file` or its own wrapper, so it's a terminal external key, not a reference to `S[e]`. Only live pins are covered: the manifest lists the blobs those exports still pin, so they aren't released.
     - **Pending, unsent local ops aren't enumerated:** they're local state, not the server's. They are re-sealed under the current head at send time (§7, PR 5), or refused.
     - **Tests:** a mutation per kind (a reference omitted from the manifest) must stop the drop.
     - Devices verify the manifest's root and its counts before the keyring drops the secret.
@@ -550,7 +585,7 @@ William asked for this review because a mistake found later, with millions of fi
 | Log growth | the log root is a running hash, and ops before the latest snapshot are dropped | bounded by snapshot frequency |
 | Epochs | no hard cap; the keyring grows 32 bytes per epoch (§11.2) | bounded by device removals; compaction is explicit |
 | Wrapper ids, addresses, keys | 128 and 256 bits | ample |
-| X25519 against quantum attacks | §11.1 | **the one limit agility can't fix for data already stored**: §10 Q11 |
+| X25519 against quantum attacks | §11.1 | **the one limit agility can't fix for data already stored**: §10 Q12 |
 
 ---
 
