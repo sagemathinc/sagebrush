@@ -4,6 +4,7 @@ raises NotImplementedError naming it (_sk_names lists scikit-learn's)."""
 
 from ._sk_config import config_context, get_config, set_config
 from ._sk_missing import missing as _sk_missing
+from ._sk_missing import module_names as _sk_module_names
 from .base import clone
 
 __version__ = "0.1.0"
@@ -57,124 +58,128 @@ __all__ = [
 
 
 def __getattr__(name):
-    # (a submodule, loaded at its first use)
+    # (a submodule, loaded at its first use: imported by its full name, so the import system binds it here before it
+    # is read, never through this function again)
     if name == 'base':
-        from . import base
-        return base
+        import sklearn.base
+        return sklearn.base
     if name == 'calibration':
-        from . import calibration
-        return calibration
+        import sklearn.calibration
+        return sklearn.calibration
     if name == 'callback':
-        from . import callback
-        return callback
+        import sklearn.callback
+        return sklearn.callback
     if name == 'cluster':
-        from . import cluster
-        return cluster
+        import sklearn.cluster
+        return sklearn.cluster
     if name == 'compose':
-        from . import compose
-        return compose
+        import sklearn.compose
+        return sklearn.compose
     if name == 'covariance':
-        from . import covariance
-        return covariance
+        import sklearn.covariance
+        return sklearn.covariance
     if name == 'cross_decomposition':
-        from . import cross_decomposition
-        return cross_decomposition
+        import sklearn.cross_decomposition
+        return sklearn.cross_decomposition
     if name == 'datasets':
-        from . import datasets
-        return datasets
+        import sklearn.datasets
+        return sklearn.datasets
     if name == 'decomposition':
-        from . import decomposition
-        return decomposition
+        import sklearn.decomposition
+        return sklearn.decomposition
     if name == 'discriminant_analysis':
-        from . import discriminant_analysis
-        return discriminant_analysis
+        import sklearn.discriminant_analysis
+        return sklearn.discriminant_analysis
     if name == 'dummy':
-        from . import dummy
-        return dummy
+        import sklearn.dummy
+        return sklearn.dummy
     if name == 'ensemble':
-        from . import ensemble
-        return ensemble
+        import sklearn.ensemble
+        return sklearn.ensemble
     if name == 'exceptions':
-        from . import exceptions
-        return exceptions
+        import sklearn.exceptions
+        return sklearn.exceptions
     if name == 'feature_extraction':
-        from . import feature_extraction
-        return feature_extraction
+        import sklearn.feature_extraction
+        return sklearn.feature_extraction
     if name == 'feature_selection':
-        from . import feature_selection
-        return feature_selection
+        import sklearn.feature_selection
+        return sklearn.feature_selection
     if name == 'frozen':
-        from . import frozen
-        return frozen
+        import sklearn.frozen
+        return sklearn.frozen
     if name == 'gaussian_process':
-        from . import gaussian_process
-        return gaussian_process
+        import sklearn.gaussian_process
+        return sklearn.gaussian_process
     if name == 'impute':
-        from . import impute
-        return impute
+        import sklearn.impute
+        return sklearn.impute
     if name == 'inspection':
-        from . import inspection
-        return inspection
+        import sklearn.inspection
+        return sklearn.inspection
     if name == 'isotonic':
-        from . import isotonic
-        return isotonic
+        import sklearn.isotonic
+        return sklearn.isotonic
     if name == 'kernel_approximation':
-        from . import kernel_approximation
-        return kernel_approximation
+        import sklearn.kernel_approximation
+        return sklearn.kernel_approximation
     if name == 'kernel_ridge':
-        from . import kernel_ridge
-        return kernel_ridge
+        import sklearn.kernel_ridge
+        return sklearn.kernel_ridge
     if name == 'linear_model':
-        from . import linear_model
-        return linear_model
+        import sklearn.linear_model
+        return sklearn.linear_model
     if name == 'manifold':
-        from . import manifold
-        return manifold
+        import sklearn.manifold
+        return sklearn.manifold
     if name == 'metrics':
-        from . import metrics
-        return metrics
+        import sklearn.metrics
+        return sklearn.metrics
     if name == 'mixture':
-        from . import mixture
-        return mixture
+        import sklearn.mixture
+        return sklearn.mixture
     if name == 'model_selection':
-        from . import model_selection
-        return model_selection
+        import sklearn.model_selection
+        return sklearn.model_selection
     if name == 'multiclass':
-        from . import multiclass
-        return multiclass
+        import sklearn.multiclass
+        return sklearn.multiclass
     if name == 'multioutput':
-        from . import multioutput
-        return multioutput
+        import sklearn.multioutput
+        return sklearn.multioutput
     if name == 'naive_bayes':
-        from . import naive_bayes
-        return naive_bayes
+        import sklearn.naive_bayes
+        return sklearn.naive_bayes
     if name == 'neighbors':
-        from . import neighbors
-        return neighbors
+        import sklearn.neighbors
+        return sklearn.neighbors
     if name == 'neural_network':
-        from . import neural_network
-        return neural_network
+        import sklearn.neural_network
+        return sklearn.neural_network
     if name == 'pipeline':
-        from . import pipeline
-        return pipeline
+        import sklearn.pipeline
+        return sklearn.pipeline
     if name == 'preprocessing':
-        from . import preprocessing
-        return preprocessing
+        import sklearn.preprocessing
+        return sklearn.preprocessing
     if name == 'random_projection':
-        from . import random_projection
-        return random_projection
+        import sklearn.random_projection
+        return sklearn.random_projection
     if name == 'semi_supervised':
-        from . import semi_supervised
-        return semi_supervised
+        import sklearn.semi_supervised
+        return sklearn.semi_supervised
     if name == 'svm':
-        from . import svm
-        return svm
+        import sklearn.svm
+        return sklearn.svm
     if name == 'tree':
-        from . import tree
-        return tree
+        import sklearn.tree
+        return sklearn.tree
     if name == 'utils':
-        from . import utils
-        return utils
+        import sklearn.utils
+        return sklearn.utils
+    if name not in _sk_module_names("sklearn"):
+        # (scikit-learn's own message for a name it doesn't have)
+        raise AttributeError(f"Module 'sklearn' has no attribute '{name}'")
     return _sk_missing("sklearn", name)
 
 
