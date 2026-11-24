@@ -233,7 +233,7 @@ RFC 9180's base mode doesn't authenticate the sender and doesn't prevent replay.
   - the ciphertext hash, the visible refs and all AAD.
 
   A log that doesn't extend its checkpoint's root is refused as a fork. That holds even at the same length, which a highest-`seq` check alone would miss.
-- **Removed devices** (SEC): each op commits to the exact key-chain head it was made at. A client refuses an op bound to a head from before a device's removal if that op appears in the log after the removal.
+- **Removed devices** (SEC): each op commits to the exact key-chain head that authorized it. Once a removal is in the chain, the server and every client refuse an op authorized at a head from before the removal, even if it is validly signed and its device's `dseq` is next.
   - **The limit:** a malicious server can withhold a signed tail or fork made before the removal from a client that has no later checkpoint. It is detected only once that client sees a checkpoint past it.
 
 **What the server still sees (metadata):**
@@ -293,7 +293,12 @@ Size padding to buckets would hide exact sizes, at a storage cost: §10 Q5.
 - **Public publishing is an explicit step:** "Publish publicly" decrypts on the device and writes **separate plaintext objects**, which is today's collections, unchanged. They are never the private holdings, and never made from synced server bytes. The dialog says that anyone, including the server, can read them. D1's `versions.title` is written only for public shares.
 - **Support bundles:**
   - the person picks the files from an explicit manifest;
-  - the client encrypts them to a **per-ticket support X25519 key**;
+  - the client encrypts them to a **per-ticket support X25519 key**, which must itself be authenticated (SEC):
+    - a **support root public key** is pinned in the client's code (and in the signed desktop app);
+    - each ticket's key comes in a record signed by that root, binding the ticket id, key id, purpose ("support bundle") and expiry;
+    - the client refuses a key without a valid record, and binds the record through HPKE's `info` and the signed envelope (§3.4).
+
+    So a changed Worker can't substitute its own key and turn a support export into exfiltration. On the web, a compelled origin could still serve a client with another pinned root: §8's limit applies here too;
   - the bundle has an expiry and can be revoked. **The limit:** expiry and revocation stop future downloads, and the key's use through the service's own protocol. They don't stop a support recipient who already decrypted or kept the bundle, just as removal doesn't stop a removed device;
   - support decrypts it in its own tool. There is no ambient access.
 
@@ -321,7 +326,9 @@ An Autonomous VM is a full account device, so whoever controls the VM controls i
 - **Unique enrollment:** each VM enrolls with keys made on that VM. An enrolled image is never cloned or reused. The agent's provisioning makes a fresh VM enroll afresh.
 - **Unattended custody:** a VM runs with no person present, so its keys can't wait for a human to unlock them. That's the tradeoff of running an agent unattended, and the enrollment dialog says so.
 - **Deleting a VM removes it from the chain** (a new epoch). Removal protects only later epochs.
-- **A cloned signing key** shows up as two envelopes from one device with the same `dseq` or previous hash. Clients refuse the fork. The device is then removed, and its signing key is never accepted again.
+- **A cloned key can't be made harmless.** Whoever holds a copy of the VM's signing key can read the log's head, continue its sequence, and make valid ops as the VM until the VM is removed. That's not detectable as a fork.
+  - Only concurrent, divergent use is detected: two envelopes from one device with the same `dseq` or previous hash. Clients refuse that fork, the device is removed, and its signing key is never accepted again.
+  - Unique enrollment prevents deliberate reuse of an image. It can't make a snapshot or a clone harmless.
 
 - **Agent logs:** the cloud agent-log mirror (web/cloud/mirror) is encrypted under a key held in a Worker secret, so the server can read it. Whether agent logs count as private synced data is §10 Q8.
 - **The relay to one of your computers:** web/docs/storage.md tells users it is "encrypted on the way but not end to end". Whether E2E covers it too is §10 Q9.
