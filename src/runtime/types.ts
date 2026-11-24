@@ -3243,10 +3243,17 @@ method(bytearray, "extend", (b: PyByteArray, x: any) => {
   b.n += add.length;
   return null;
 });
-method(bytearray, "pop", (b: PyByteArray) => {
+method(bytearray, "pop", (b: PyByteArray, i: any = -1) => {
+  // (bytearray.pop(index=-1), as CPython's: the index converted first, then the empty and range checks)
+  let j = Number(O.index(i));
   if (b.n === 0) raise(T.IndexError, "pop from empty bytearray");
+  if (j < 0) j += b.n;
+  if (j < 0 || j >= b.n) raise(T.IndexError, "pop index out of range");
   checkResizable(b);
-  return b.a[--b.n];
+  const v = b.a[j];
+  b.a.copyWithin(j, j + 1, b.n);
+  b.n--;
+  return v;
 });
 
 // ------------------------------------------------------------------ iterators
