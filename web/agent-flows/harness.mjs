@@ -337,7 +337,7 @@ async function chatSurface(site, page) {
             return void ws.close(1008, "refused");
           }
           A.live = ws;
-          ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude", client: "claude-agent-sdk", version: "0.8.17" }, wants: { folders: ["/"], write: true, run: true }, features: ["notebook.edit", "run.context", "edit.turn"], ...(typeof p.code === "string" ? { session: A.secret } : {}) } }));
+          ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude", client: "claude-agent-sdk", version: "0.8.18" }, wants: { folders: ["/"], write: true, run: true }, features: ["notebook.edit", "run.context", "edit.turn"], ...(typeof p.code === "string" ? { session: A.secret } : {}) } }));
         } else if (m.id && A.pending.has(m.id)) {
           A.pending.get(m.id)(m);
           A.pending.delete(m.id);
@@ -364,13 +364,13 @@ async function chatSurface(site, page) {
     if (!name.startsWith("workspace_")) return { text: "no such tool here: " + name, structured: null, isError: true };
     const callId = "c" + ++A.n, t0 = Date.now();
     if (A.turn) event({ type: "tool_call_started", call: callId, tool: "tool", name, summary: args.path ?? "" });
-    // (run.context, as sagebrush-agent 0.8.17 does where the page offers it: a run says its chat and turn after the
+    // (run.context, as sagebrush-agent 0.8.18 does where the page offers it: a run says its chat and turn after the
     //  model's arguments)
     const runs = ["workspace_run_notebook", "workspace_run_file", "workspace_latex_build"].includes(name);
     const ctx = runs && A.turn && A.features?.includes("run.context") ? { conversation: A.turn.conversation, turn_id: A.turn.id } : {};
-    // (workspace_edit_notebook, as sagebrush-agent 0.8.17 makes it where the page offers notebook.edit: from a read held
+    // (workspace_edit_notebook, as sagebrush-agent 0.8.18 makes it where the page offers notebook.edit: from a read held
     //  here, by its revision, with the read's ref and the hash of each cell it names; refused without such a read. Where
-    //  the page offers edit.turn too, the edit says the turn it comes from, turn_id, as 0.8.17's does)
+    //  the page offers edit.turn too, the edit says the turn it comes from, turn_id, as 0.8.18's does)
     let method = "workspace." + name.slice("workspace_".length), params = { ...args, ...ctx };
     if (name === "workspace_edit_notebook") {
       const read = A.reads.get(args.path)?.get(args.base);
@@ -393,7 +393,7 @@ async function chatSurface(site, page) {
       const p = args.path;
       if (!error && typeof p === "string" && (name === "workspace_create" || name === "workspace_write")) {
         const json = args.content?.json;
-        // (sagebrush-agent 0.8.17's artifactKind: a .board.json as a board, shown with its Open)
+        // (sagebrush-agent 0.8.18's artifactKind: a .board.json as a board, shown with its Open)
         if (/\.board\.json$/i.test(p)) event({ type: "artifact", id: p, kind: "board", title: p.split("/").pop(), path: p, body: args.content?.text ?? (json ? JSON.stringify(json) : "") });
         else if (json || p.endsWith(".ipynb")) event({ type: "artifact", id: p, kind: "notebook", title: p.split("/").pop(), path: p, body: `${json?.cells?.length ?? 0} cells (${args.mode ?? json?.mode ?? "python"})` });
         // (sagebrush-agent's artifactKind: Markdown as markdown, anything else as code in its extension's language)
