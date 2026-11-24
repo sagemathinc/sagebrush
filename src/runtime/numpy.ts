@@ -1890,6 +1890,9 @@ function unaryRaw(op: string, x: any): any {
       && wasmSinCos(op === "cos", CR.SINCOS_TABLE, ad as Float64Array, a.offset, a.size, od as Float64Array, op === "cos" ? CR.cos : CR.sin)) return out;
   if (UN_EXPR[op] && a.ndim > 0 && a.size > 0) {
     unaryKernel(op, a.isC())(ad, a.offset, a.strides, a.shape, od, a.size);
+    // (an integer has no -0: -v at 0 is -0, which an int64 array would keep
+    // and give back as -0.0, so 1 / x would be -inf)
+    if (op === "negative" && rt.isInt && rt.ctor === Float64Array) for (let k = 0; k < a.size; k++) od[k] += 0;
     return out;
   }
   const f = op === "reciprocal" && rt.isInt ? (x: number) => (x === 0 ? 0 : Math.trunc(1 / x)) : spec.f;
