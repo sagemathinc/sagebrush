@@ -25,7 +25,7 @@ Each section below gives the options, a recommendation, and what it costs. §10 
 - **Setting up sync** creates the account's keys on that device and shows a **recovery code** once. The person must confirm they kept it, by typing back part of it, before sync starts.
 - **Adding a device** is done from a device that is already set up: scan a QR code or compare a short code, as when pairing a phone. Without such a device, the person enters the recovery code.
 - **If every device and the recovery code are lost, the data is gone.** Nobody can recover it: not Sagebrush, not CoCalc, not support. The setup screen says this in one sentence, and Settings says it again.
-- **Sagebrush never stores the recovery code.** Settings shows "Recovery is set up" and offers **Replace recovery code**. "Show recovery code" exists only on a device where the person chose, at setup, to keep a locally wrapped copy, and the screen says that device holds it.
+- **The service never stores the recovery code.** Settings shows "Recovery is set up" and offers **Replace recovery code**. "Show recovery code" exists only on a device where the person chose, at setup, to keep a locally wrapped copy, and the screen says that device holds it.
 - **Removing a device** (lost or sold) stops it from reading anything written afterwards. It can't make it forget what it already downloaded. The dialog says so.
 - **A browser can lose its keys on its own:** site data cleared, or storage evicted (Safari's 7-day rule for sites not visited). The page then asks to set the browser up again, from another device or the recovery code. Nothing is lost as long as one of those exists. The desktop app, or a second device, makes this rare.
 
@@ -38,7 +38,7 @@ Each section below gives the options, a recommendation, and what it costs. §10 
   - **In the desktop app:** the OS keychain (macOS Keychain, Windows Credential Manager, Secret Service), through the Tauri app and the small `keyring` crate. The app has no keychain access yet.
 - **The recovery key:** a 32-byte seed, shown once as the recovery code. Domain-separated derivations give a recovery X25519 key and a recovery Ed25519 key, and only their public halves are stored.
   - **No password-derived escrow:** a password could be guessed offline, and a 256-bit seed can't.
-  - **The seed is never stored by Sagebrush** (§1).
+  - **The service never stores the seed** (§1). Only a device the person opted in keeps a locally wrapped copy.
   - **Replacing the recovery code** makes a new recovery key, re-wraps every epoch that recovery may need to it, and records the replacement in the chain.
     - **The limit:** an old code can't be made to forget epochs it could already open. The server deletes the old wrapped copies, but a malicious server or a copy taken earlier could keep them.
 - **Epochs:** each epoch `e` has a random 32-byte secret `S[e]`. It is HPKE-wrapped to every current device's X25519 key **and** to the recovery X25519 key, and the wrapped copies are stored next to the key chain.
@@ -51,7 +51,12 @@ Each section below gives the options, a recommendation, and what it costs. §10 
 - **The inbox key pair** (X25519, for receiving shares and proposals, §5) is random, kept wrapped under `K_wrap[e]`.
   - **Removing a device rotates it automatically** (SEC). A removed device knew the old private key, and could otherwise open every future share sent to the unchanged public key.
   - The new inbox public key is published in a signed chain entry. Senders that pinned the account's chain accept it as continuity, verified through the chain, not as a first-use key.
-  - **The limit:** anything already sent to the old inbox key stays readable by the removed device.
+  - **The inbox record has bounded validity** (30 days, renewed automatically by any of the account's devices). A sender refuses an expired record and fetches a fresh one.
+  - **The limit, stated plainly** (SEC): the chain proves continuity, not freshness.
+    - Anything already sent to the old inbox key stays readable by the removed device.
+    - A share sent after the removal, by a sender that hasn't yet learned of the rotation, is readable by it too, until that record expires.
+    - A malicious server can withhold the rotation from a sender to stretch that window, up to the record's validity.
+    - **Revocation is not instant for shares.** The account's own writes under the new epoch are protected at once.
 - **The key chain:** an append-only, signed log of the account's devices and epochs. It reuses the structure the fleet protocol already has and SEC has already reviewed (sagebrush-agent's lib/fleet/core: genesis, add with the new device's countersignature, remove, recover, rotate recovery).
   - The server stores the chain and can't forge it.
   - Each device pins the head it last verified, and refuses a chain that rolls back or forks from it.
@@ -112,7 +117,12 @@ WebCrypto's AES-GCM takes whole buffers, so a large object is sealed in fixed, b
   So chunks can't be reordered, dropped, cut short or moved to another object.
 - **Decompression is bounded** after authentication: an output-size and ratio limit, so a hostile blob can't exhaust memory.
 - **This aligns with the chunked-files work** (the sync client's plan): the manifest of chunks is itself an encrypted object.
-- **Chunk boundaries must not fingerprint content:** content-defined chunking (1 to 8 MiB today) would reveal a sequence of chunk sizes that identifies a known file, even with every chunk encrypted. So chunking is either keyed (the gear table derived from `K_blob[e]`) or fixed-size (the sync client's point; SEC to choose).
+- **Chunk boundaries must not fingerprint content:** content-defined chunking (1 to 8 MiB today) would reveal a sequence of chunk sizes that identifies a known file, even with every chunk encrypted.
+  - **Recommendation for v1: fixed-size chunks** (SEC): the whole file is compressed with the pinned codec, and the compressed stream is split into chunks of exactly 1 MiB (the last one shorter).
+    - The server then learns only the total compressed length.
+    - Compressing each plaintext chunk separately would leak every chunk's compressibility, which is itself a fingerprint.
+    - This matches the streaming construction, and keeps keyed chunking's implementation and proof out of the cutover.
+  - Keyed content-defined chunking (the gear table derived from `K_blob[e]`) can come later, as a measured optimization for dedup across small edits.
 
 ### 3.3 Blob addresses and dedup within an account
 
@@ -205,6 +215,7 @@ Size padding to buckets would hide exact sizes, at a storage cost: §10 Q5.
 - **The public-key directory:** each account publishes its inbox and signing public keys, signed under its key chain.
   - **TOFU:** a sender pins them at first use and shows their fingerprint (20 base32 characters, as the fleet's).
   - **A change** is a loud warning that can't be clicked through without comparing fingerprints.
+  - **Inbox records expire after 30 days,** and a sender refuses an expired one. That bounds, but doesn't remove, the window in which a withheld rotation sends a new share to a removed device's old key (§2).
   - **The limit:** TOFU can't stop a substitution at first use. Transparency comes later: §10 Q6.
 - **Public publishing is an explicit step:** "Publish publicly" decrypts on the device and writes **separate plaintext objects**, which is today's collections, unchanged. They are never the private holdings, and never made from synced server bytes. The dialog says that anyone, including the server, can read them. D1's `versions.title` is written only for public shares.
 - **Support bundles:**
@@ -260,7 +271,7 @@ Each PR gets SEC review, rows and mutants. PRs 0, 1 and 2 can start at once. The
 | --- | --- | --- | --- |
 | A breach of storage (R2, Durable Objects, backups) | metadata (§4) | nothing useful without keys | read content, paths or names |
 | An insider at Sagebrush or Cloudflare, or a legal demand | metadata; that shares exist, and their sizes | delete or withhold data | read content, or produce plaintext for a court |
-| **A malicious server** (changed Worker code) | metadata | omit, delay, roll back, or show devices different histories (equivocation) | forge or alter ops, chain entries or shares, since they are signed |
+| **A malicious server** (changed Worker code) | metadata | omit, delay, roll back, or show devices different histories (equivocation); withhold an inbox rotation from senders, up to the record's validity (§2) | forge or alter ops, chain entries or shares, since they are signed |
 | **A malicious origin serving the web app** | everything a page can read | ship JavaScript that uses the keys while the page is open, and sends plaintext away | — this is the limit of end-to-end encryption in any web app |
 | A stolen unlocked device | what that device can decrypt | act as the person until it's removed | read what is written after its removal |
 | Every device and the recovery code lost | — | — | the person's data can't be recovered by anyone |
