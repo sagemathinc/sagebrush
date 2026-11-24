@@ -1,0 +1,34 @@
+max | 1.79769313486232e308 | Complex Field with 53 bits of precision
+True
+max- | -1.79769313486232e308 + 1.00000000000000*I | Complex Field with 53 bits of precision
+sub1074 | 4.94065645841247e-324 + 5.29395592033938e-23*I | Complex Field with 53 bits of precision
+True
+tiny* | 4.94065645841247e-324 + 4.94065645841247e-324*I | Complex Field with 53 bits of precision
+invbig | 5.56268464626800e-309 - 5.56268464626800e-309*I | Complex Field with 53 bits of precision
+True
+sum | 1.34826985114674e308 + 3.00000000000000*I | Complex Field with 53 bits of precision
+mul | 8.45271249817064e270 + 1.07150860718627e301*I | Complex Field with 53 bits of precision
+mulflt | 8.98846567431158e307 + 2.16614819853189e127*I | Complex Field with 53 bits of precision
+div | 1.20000000000000 + 0.400000000000000*I | Complex Field with 53 bits of precision
+div2 | 4.81983973020577e-181 - 1.00000000000000*I | Complex Field with 53 bits of precision
+div3 | 1.40158175773354e196 + 1.24485467066430e181*I | Complex Field with 53 bits of precision
+pow1023 | 8.98846567431158e307 | Complex Field with 53 bits of precision
+pow-1074 | 4.94065645841247e-324 | Complex Field with 53 bits of precision
+True
+rpow | 1.27116100615365e308 | Complex Field with 53 bits of precision
+rpow2 | 1.79769313486227e308 | Complex Field with 53 bits of precision
+abs1 | 6.98714337051313e-324 | Real Field with 53 bits of precision
+abs2 | 1.27116100615365e308 | Real Field with 53 bits of precision
+abs3 | 1.90674150923047e308 | Real Field with 53 bits of precision
+cosh | 1.32320911892102e308 + 7.22872436250562e307*I | Complex Field with 53 bits of precision
+sinh | 1.32320911892102e308 + 7.22872436250562e307*I | Complex Field with 53 bits of precision
+exp | 1.45238512289929e308 + 7.93441608851964e307*I | Complex Field with 53 bits of precision
+exp2 | 1.60513379967388e308 + 8.76888591294264e307*I | Complex Field with 53 bits of precision
+exp3 | 1.78707851464692e-308 + 2.78320988327593e-308*I | Complex Field with 53 bits of precision
+sinh0 | 0.841470984807897*I | Complex Field with 53 bits of precision
+inf* | +infinity + NaN*I | Complex Field with 53 bits of precision
+inf+ | NaN + 2.00000000000000*I | Complex Field with 53 bits of precision
+div0 | NaN + NaN*I | Complex Field with 53 bits of precision
+nan | NaN + NaN*I | Complex Field with 53 bits of precision
+cancel | 2.00000000000000 | Complex Field with 53 bits of precision
+cancel/ | 1.00000000000000 | Complex Field with 53 bits of precision

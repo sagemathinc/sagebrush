@@ -3504,6 +3504,44 @@ def _rr_function(name, args, numeric):
                               % (name, ", ".join(map(str, args))))
 
 
+def _cc_function(name, args, r):
+    """The value of name(*args), some of them elements of CC, whose double
+    value is r: r where its parts are Sage's range (normal doubles; a zero
+    when an argument has a zero part; anything for an infinite or NaN
+    argument), else Sage's value (the method of the 53-bit MP complex
+    field, MPFR's exponents and all) as an element of CC, or
+    NotImplementedError past the doubles, never a double's infinity or
+    zero."""
+    parts = []
+    for a in args:
+        z = complex(a)
+        parts += [z.real, z.imag]
+    if not all(abs(t) < _INF for t in parts):
+        return r
+    if isinstance(r, complex):
+        # (complex's own parts: CC's .real is a callable real)
+        v = complex.__complex__(r)
+        vs = [v.real, v.imag]
+    elif isinstance(r, float) and getattr(r, "_mp", None) is None:
+        vs = [float.__float__(r)]
+    else:
+        # (an element of RR past the doubles holds its value already)
+        return r
+    zero_ok = any(t == 0 for t in parts)
+    if all(_NORMAL_MIN <= abs(t) < _INF or (t == 0 and zero_ok) for t in vs):
+        return r
+    import _sage_real
+    f = getattr(_sage_real.ComplexNumberMP, name, None) if len(args) == 1 else None
+    if f is None:
+        raise NotImplementedError("%s(%s): the value in CC, past the double range, is not available in sagebrush yet"
+                                  % (name, ", ".join(map(str, args))))
+    v = f(_sage_real._cc_mp()(args[0]))
+    if isinstance(v, _sage_real.RealNumberMP):
+        import _sage_lang
+        return _sage_lang._rr_from_mp(v)
+    return _sage_real._cc_from_mp(v)
+
+
 def _function(name, numeric=None, cnumeric=None):
     """A Sage function: numerical on floats, exact or symbolic otherwise
     (sin(0) = 0, sin(pi/6) = 1/2, sin(1) stays sin(1))."""
@@ -3530,6 +3568,8 @@ def _function(name, numeric=None, cnumeric=None):
                         return _rr_function(name, args, numeric)
                     return _RealNumber(r)
             r = _one("fun", name, *[_to_s(a) for a in args]).n()
+            if any(type(a).__name__ == "ComplexNumber" for a in args):
+                return _cc_function(name, args, r)
             return r
         if len(args) == 1 and not kw and type(args[0]).__name__ in ("RealNumberMP", "ComplexNumberMP"):
             # an element of RealField(p) alone: its own method, in its field

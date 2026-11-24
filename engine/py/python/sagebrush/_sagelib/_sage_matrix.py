@@ -5,6 +5,7 @@ prints them.  The exact linear algebra is the Rust engine's (sagebrush.linalg:
 multimodular and p-adic, certified; sagebrush.nf for the lattice algorithms).
 Dense; entries are Python ints or Sage Rationals."""
 
+import cmath as _cmath
 import sys as _sys
 from fractions import Fraction as _F
 
@@ -4232,7 +4233,112 @@ def _cc_div(a, b):
     """a / b in CC: by zero NaN + NaN*I, as Sage's CC (Python's complex raised)."""
     if b == 0:
         return ComplexNumber(float("nan"), float("nan"))
-    return ComplexNumber(a / b)
+    r = a / b
+    if (_cc_tame(a) and _cc_tame(b) and _cc_quot_kept(r, a, b)) or not _cc_finite(a, b):
+        return ComplexNumber(r)
+    return _cc_slow("/", a, b)
+
+
+# CC past the doubles.  Sage's CC is MPFR at 53 bits, whose exponents reach
+# 2^62; a ComplexNumber holds two doubles, which round as MPFR does only
+# inside the normal doubles (2^-1022 to 2^1024).  An operation whose double
+# result may have left them (a part that overflowed, underflowed or is
+# subnormal) is done again in the 53-bit MP complex field, step by step as
+# Sage's CC does it: a ComplexNumber when each part is a double, else
+# NotImplementedError, never a double's infinity or zero.  An infinite or
+# NaN operand keeps the double result, as before.
+_NORMAL_MIN, _INF = 2.2250738585072014e-308, float("inf")
+_isfinite = _cmath.isfinite
+# (the parts of a product of two tame numbers, and their sums, are normal
+# doubles or exact: the products are within 2^-1020..2^1020)
+_TAME_LO, _TAME_HI = 2.0 ** -510, 2.0 ** 510
+# (a result part at least this far above 2^-1022 is MPFR's even when a
+# product inside it underflowed: the error is below half its ulp)
+_KEPT_LO = 2.0 ** -969
+
+
+def _cc_tame(z):
+    """Whether each part of the complex z is 0 or within 2^-510..2^510."""
+    x, y = abs(z.real), abs(z.imag)
+    return (x == 0 or _TAME_LO <= x <= _TAME_HI) and (y == 0 or _TAME_LO <= y <= _TAME_HI)
+
+
+def _cc_finite(*zs):
+    """Whether each part of each complex z is finite."""
+    return all(map(_isfinite, zs))
+
+
+def _cc_quot_kept(r, a, b):
+    """Whether the parts of the double quotient r = a / b of tame numbers
+    are Sage's range: normal doubles, or zeros whose products in Sage's
+    formula ((ac + bd) / n, (bc - ad) / n) are all zero."""
+    re, im = abs(r.real), abs(r.imag)
+    if _NORMAL_MIN <= re < _INF and _NORMAL_MIN <= im < _INF:
+        return True
+    (p, q), (c, d) = (a.real, a.imag), (b.real, b.imag)
+    return (_NORMAL_MIN <= re < _INF or (re == 0 and (p == 0 or c == 0) and (q == 0 or d == 0))) and \
+        (_NORMAL_MIN <= im < _INF or (im == 0 and (q == 0 or c == 0) and (p == 0 or d == 0)))
+
+
+def _cc_pow_kept(r, z):
+    """Whether the parts of the double power r of z are Sage's range: each
+    0 or at least 2^-969, finite, and not both 0 for a nonzero z."""
+    x, y = abs(r.real), abs(r.imag)
+    return (x == 0 or _KEPT_LO <= x < _INF) and (y == 0 or _KEPT_LO <= y < _INF) and (x or y or z == 0)
+
+
+def _cc_slow(op, a, b):
+    """a op b (complex numbers, or an exponent b) in Sage's CC, the 53-bit
+    MP complex field: a ComplexNumber, or NotImplementedError past the
+    doubles."""
+    import _sage_real
+    C = _sage_real._cc_mp()
+    x = C(a)
+    if op == "^":
+        y = int(b) if isinstance(b, int) or type(b).__name__ == "Integer" else C(complex(b))
+        v = x ** y
+    elif op == "r^":
+        v = C(complex(b)) ** x
+    else:
+        y = C(b)
+        v = x + y if op == "+" else x - y if op == "-" else x * y if op == "*" else x / y
+    return _sage_real._cc_from_mp(v)
+
+
+def _cc_sum(r, a, b, op):
+    """The sum or difference r = a op b in CC: a subnormal or zero sum of
+    doubles is exact, so only an overflow is done again."""
+    if _isfinite(r) or not _cc_finite(a, b):
+        return ComplexNumber(r)
+    return _cc_slow(op, a, b)
+
+
+def _cc_mul(a, b):
+    """a * b in CC."""
+    r = a * b
+    if (_cc_tame(a) and _cc_tame(b)) or not _cc_finite(a, b):
+        return ComplexNumber(r)
+    return _cc_slow("*", a, b)
+
+
+def _cc_pow(z, e, rev=False):
+    """z ** e in CC (e ** z for rev), z and e complex, or e an integer."""
+    try:
+        r = e ** z if rev else z ** e
+    except OverflowError:
+        r = None
+    if r is not None and _cc_pow_kept(r, e if rev else z):
+        return ComplexNumber(r)
+    try:
+        ce = complex(e)
+    except OverflowError:
+        # (an integer exponent past the doubles: as before)
+        ce = None
+    if ce is None or not _cc_finite(z, ce):
+        if r is None:
+            raise OverflowError("complex exponentiation")
+        return ComplexNumber(r)
+    return _cc_slow("r^" if rev else "^", z, e)
 
 
 class ComplexNumber(complex):
@@ -4244,6 +4350,32 @@ class ComplexNumber(complex):
         1.00000000000000 + 2.00000000000000*I
         sage: z * z, z.abs(), z.real(), z.imag()
         (-3.00000000000000 + 4.00000000000000*I, 2.23606797749979, 1.00000000000000, 2.00000000000000)
+
+    Sage's CC has MPFR's exponents.  Where its value is a double and the
+    doubles' arithmetic leaves them on the way, the value is Sage's::
+
+        sage: ~CC(2^1023, 2^1023), exp(CC(709.8, 0.5))
+        (5.56268464626800e-309 - 5.56268464626800e-309*I, 1.60513379967388e308 + 8.76888591294264e307*I)
+
+    Past the doubles, an error, never a double's infinity or zero (Sage
+    has these values)::
+
+        sage: CC(2^1023, 1) * 4  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 3.59538626972463e308 + 4.00000000000000*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(2, 0)^-1075  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 2.47032822920623e-324 in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: exp(CC(1000, 1))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 1.06443396562763e434 + 1.65775768045351e434*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(2^-600, 0) * CC(2^-600, 0)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 5.80771375621750e-362 in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
     """
 
     def _latex_(self):
@@ -4349,8 +4481,23 @@ class ComplexNumber(complex):
 
             sage: CC(3, 4).abs()
             5.00000000000000
+
+        Past the doubles, Sage's value (in RR, which holds it)::
+
+            sage: CC(2^1023, 2^1023).abs(), CC(2^-1074, 2^-1074).abs()
+            (1.27116100615365e308, 6.98714337051313e-324)
         """
-        return _sa().RealNumber(abs(complex(self)))
+        z = complex(self)
+        try:
+            r = abs(z)
+        except OverflowError:
+            r = None
+        if r is not None and (_NORMAL_MIN <= r < _INF or z == 0 or not _cc_finite(z)):
+            return _sa().RealNumber(r)
+        # (Sage's abs, sqrt(RN(a^2) + RN(b^2)), with MPFR's exponents)
+        import _sage_real
+        import _sage_lang
+        return _sage_lang._rr_from_mp(_sage_real._cc_mp()(z).abs())
 
     def log(self, base=None):
         """The principal logarithm, log|z| + arg(z) I with -pi < arg(z) <= pi
@@ -4399,7 +4546,7 @@ class ComplexNumber(complex):
         c = _cc_or_none(o)
         if c is None:
             return NotImplemented
-        return ComplexNumber(complex(self) + c)
+        return _cc_sum(complex(self) + c, complex(self), c, "+")
 
     __radd__ = __add__
 
@@ -4409,7 +4556,7 @@ class ComplexNumber(complex):
         c = _cc_or_none(o)
         if c is None:
             return NotImplemented
-        return ComplexNumber(complex(self) - c)
+        return _cc_sum(complex(self) - c, complex(self), c, "-")
 
     def __rsub__(self, o):
         if getattr(o, "_is_ffmatrix", False):
@@ -4417,7 +4564,7 @@ class ComplexNumber(complex):
         c = _cc_or_none(o)
         if c is None:
             return NotImplemented
-        return ComplexNumber(c - complex(self))
+        return _cc_sum(c - complex(self), c, complex(self), "-")
 
     def __mul__(self, o):
         if getattr(o, "_is_ffmatrix", False):
@@ -4425,7 +4572,7 @@ class ComplexNumber(complex):
         c = _cc_or_none(o)
         if c is None:
             return NotImplemented
-        return ComplexNumber(complex(self) * c)
+        return _cc_mul(complex(self), c)
 
     __rmul__ = __mul__
 
@@ -4462,7 +4609,7 @@ class ComplexNumber(complex):
             # (Sage's power is in the coarser complex field: not available,
             # refused as before rather than rounded into CC, CORR-C9B-1)
             raise TypeError("unable to convert %r to a real number" % complex(self))
-        return ComplexNumber(complex(self) ** e)
+        return _cc_pow(complex(self), e)
 
     def __float__(self):
         # (as Sage: NaN for a NaN real part, the real part for a zero
@@ -4476,7 +4623,7 @@ class ComplexNumber(complex):
         raise TypeError("can't convert complex to int; use int(abs(z))")
 
     def __rpow__(self, b):
-        return ComplexNumber(_cc(b) ** complex(self))
+        return _cc_pow(complex(self), _cc(b), rev=True)
 
     def __eq__(self, o):
         # (an element of RR past the doubles compares by its value: its
