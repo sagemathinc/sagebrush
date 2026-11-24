@@ -1,0 +1,44 @@
+== clf.iris.tree.0
+{'trees': 1, 'arrays': 'c2909828dc0acae7', 'classes': '7b36b57ac44bbed5', 'node_counts': 'c5e34af8836bde16', 'predict': 'c1f255e4540a6464', 'proba': '6d931a56ba4d3191', 'apply': 'afcdaea296187c7a', 'importances': '6565ef7eee30fb8d'}
+== clf.iris.tree.perturbed
+{'trees': 1, 'arrays': 'ea9541514d5c7a87', 'classes': '7b36b57ac44bbed5', 'node_counts': '642175951dc354b7', 'predict': 'c1f255e4540a6464', 'proba': '6d931a56ba4d3191', 'apply': '2031ea43dbc86d84', 'importances': '619e550450c31aa3'}
+== clf.iris.bagging50.0
+{'trees': 50, 'arrays': 'e5cad2238b29637f', 'classes': '7ea97ffb28dd4621', 'node_counts': '1f56886f56b30ddc', 'predict': 'c1f255e4540a6464', 'proba': '3f3b6c7f5324413c', 'samples': 'c1c7c67543353bd2', 'features': '7c2f0358d32dad64'}
+== clf.iris.bagging50.perturbed
+{'trees': 50, 'arrays': '46626a9b38f148c8', 'classes': '7ea97ffb28dd4621', 'node_counts': 'ce2072e96e1b046d', 'predict': 'c1f255e4540a6464', 'proba': '2b755c79c2b3d2b9', 'samples': 'c1c7c67543353bd2', 'features': '7c2f0358d32dad64'}
+== clf.iris.forest100.0
+{'trees': 100, 'arrays': '3340d1ec2d6522aa', 'classes': '2dadeab9e509a0af', 'node_counts': '7f74fff26099cf5d', 'predict': 'c1f255e4540a6464', 'proba': '1edb4a122eafe4ed', 'samples': 'cc9297acfde0fbe8', 'apply': '357b3f325b9358f6', 'importances': '8fffa431b7920716'}
+== clf.iris.forest100.perturbed
+{'trees': 100, 'arrays': 'c5de9b3d53b0fabc', 'classes': '2dadeab9e509a0af', 'node_counts': '8143cd2b8232bf74', 'predict': 'c1f255e4540a6464', 'proba': '7d712b27d47885f4', 'samples': 'cc9297acfde0fbe8', 'apply': 'a5f4c421835dd4de', 'importances': 'aa86f92eb432e873'}
+== clf.iris.forest50.0
+{'trees': 50, 'arrays': '08e7be0e5d1606dc', 'classes': 'c90ce6e4c144bad7', 'node_counts': '3af2ce891f312ce4', 'predict': 'c1f255e4540a6464', 'proba': 'efd7aa6397ef4bc6', 'samples': '9f4a5ef90fa3a6f8', 'apply': '3f6c9273896faa94', 'importances': 'e974a99e4b0d61c0'}
+== clf.iris.forest50.perturbed
+{'trees': 50, 'arrays': 'bd66bd725aa884f6', 'classes': 'c90ce6e4c144bad7', 'node_counts': '4b8f39390a4669b3', 'predict': 'c1f255e4540a6464', 'proba': '41a0839f0c960667', 'samples': '9f4a5ef90fa3a6f8', 'apply': '7138a79f02db25f9', 'importances': '48962a15be960bdd'}
+== clf.wine.tree.0
+{'trees': 1, 'arrays': 'f2c98bef74317c0a', 'classes': '7b36b57ac44bbed5', 'node_counts': '5341ed2986a7cde6', 'predict': '0ffc1bd54945d117', 'proba': '6f75faa5b989d6a0', 'apply': '466d3c98aa079cff', 'importances': '34c58a0ac7b5aa44'}
+== clf.wine.tree.perturbed
+{'trees': 1, 'arrays': '80760237f8aa5560', 'classes': '7b36b57ac44bbed5', 'node_counts': '642175951dc354b7', 'predict': '0ffc1bd54945d117', 'proba': '6f75faa5b989d6a0', 'apply': 'f4d5c608f43f7dc5', 'importances': '7e8b4daafcb9de03'}
+== clf.wine.bagging50.0
+{'trees': 50, 'arrays': '97aa9cff82abc82c', 'classes': '7ea97ffb28dd4621', 'node_counts': '05f9b91d1b799676', 'predict': '0ffc1bd54945d117', 'proba': 'bc942f0981692b80', 'samples': '4866da943a4381d3', 'features': 'd00ad1109dc08f17'}
+== clf.wine.bagging50.perturbed
+{'trees': 50, 'arrays': 'af4c76df7559cb33', 'classes': '7ea97ffb28dd4621', 'node_counts': 'df92f59265db8af8', 'predict': '0ffc1bd54945d117', 'proba': '9f6c401371439a98', 'samples': '4866da943a4381d3', 'features': 'd00ad1109dc08f17'}
+== clf.wine.forest100.0
+{'trees': 100, 'arrays': '1967e96be5f13663', 'classes': '2dadeab9e509a0af', 'node_counts': '38fb355d11b49956', 'predict': '0ffc1bd54945d117', 'proba': '451c60bfbb388c23', 'samples': 'c7e5cf85351aba6e', 'apply': 'a497484bdecc6ea9', 'importances': 'c3e4737a8e141b05'}
+== clf.wine.forest100.perturbed
+{'trees': 100, 'arrays': '88b9ad573f7ccc9f', 'classes': '2dadeab9e509a0af', 'node_counts': '48e5b4b89f54a781', 'predict': '0ffc1bd54945d117', 'proba': '6149b2f5fdf56b6e', 'samples': 'c7e5cf85351aba6e', 'apply': 'a691957228735731', 'importances': '26cd14fce11490e1'}
+== clf.wine.forest50.0
+{'trees': 50, 'arrays': 'd1597cca7798fa86', 'classes': 'c90ce6e4c144bad7', 'node_counts': '96321ccc50373b31', 'predict': '0ffc1bd54945d117', 'proba': '0945b9b73ad739fe', 'samples': 'fd5bda25c84d27fc', 'apply': 'e4f4e9b37c77b16c', 'importances': '6fefcadf2e935769'}
+== clf.wine.forest50.perturbed
+{'trees': 50, 'arrays': '0facf249627fb8c8', 'classes': 'c90ce6e4c144bad7', 'node_counts': 'f1f5de45afc3963e', 'predict': '0ffc1bd54945d117', 'proba': 'eba7881c226cbe88', 'samples': 'fd5bda25c84d27fc', 'apply': 'd56fc614d86f0986', 'importances': '9442554048301b16'}
+== reg.wine.tree.0
+{'trees': 1, 'arrays': 'afc656c698033c48', 'classes': 'e3b0c44298fc1c14', 'node_counts': '00bc1b3e78129452', 'predict': 'c8f37958cccd04c0', 'apply': '795b04a92b5c3d56', 'importances': 'e7bd05ab681e5d10'}
+== reg.wine.tree.perturbed
+{'trees': 1, 'arrays': 'c0e81c32cc5e99c1', 'classes': 'e3b0c44298fc1c14', 'node_counts': '7f34b03f5c02b88b', 'predict': 'c8f37958cccd04c0', 'apply': '79dd7aec549dddc6', 'importances': 'b58f97b1857fef67'}
+== reg.wine.bagging.0
+{'trees': 10, 'arrays': '3d5dede359560092', 'classes': 'e3b0c44298fc1c14', 'node_counts': '71c1ddfd04b42c04', 'predict': '5bc8eaa72a9f46c0', 'samples': 'b17dbaf6fdedbed9', 'features': 'a013093b79116913'}
+== reg.wine.bagging.perturbed
+{'trees': 10, 'arrays': '810aa4993ea2626c', 'classes': 'e3b0c44298fc1c14', 'node_counts': '2f4cc027a21a1c07', 'predict': '87b9ef37d2b5762b', 'samples': 'b17dbaf6fdedbed9', 'features': 'a013093b79116913'}
+== reg.wine.forest.0
+{'trees': 100, 'arrays': '59ad085e50367083', 'classes': 'e3b0c44298fc1c14', 'node_counts': 'eb9594c27f135e1d', 'predict': '87abc658bd975c71', 'samples': 'c7e5cf85351aba6e', 'apply': 'c1e5f377dd9a5108', 'importances': 'a3d179b02369bdc1'}
+== reg.wine.forest.perturbed
+{'trees': 100, 'arrays': 'dd448bd021d4a491', 'classes': 'e3b0c44298fc1c14', 'node_counts': '352637511b970c61', 'predict': '26138a0281f3ac78', 'samples': 'c7e5cf85351aba6e', 'apply': 'dc3bb8ba2104ee04', 'importances': '5a58b81ccdadf2a4'}

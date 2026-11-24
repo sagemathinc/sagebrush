@@ -1,3 +1,5 @@
+== lazy.import
+True
 == fit.classifier
 True
 == fit.classifier-weights
@@ -30,3 +32,9 @@ True
 True
 == forest.failure
 ('injected failure in the third tree', 3, True)
+== stop.forest
+('KeyboardInterrupt', 3, True)
+== stop.bagging
+('KeyboardInterrupt', 3, True)
+== stop.then-fit
+True
