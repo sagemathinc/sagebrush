@@ -73,7 +73,8 @@ At that size, reconstruction was everything: 37 of 41 s. Two fixes:
   reconstructs numbers as large as the modulus, and the old rule tried
   after every batch, 146 times.
 - **CRT by a product tree from 64 primes**, $O(M(k)\log k)$ per value
-  instead of Garner's $O(k^2)$.
+  instead of Garner's $O(k^2)$ (since replaced by the explicit CRT of
+  `sagebrush-arith`).
 
 Katsura-7 went from 41 s to 7.6 s on 16 threads, and 31 s on one. On one
 core, the fastest implementation we measured takes 17–22 s.

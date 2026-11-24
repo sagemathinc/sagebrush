@@ -1300,20 +1300,33 @@ try {
       const still = new TextDecoder().decode(new Uint8Array(await bytesOf("/cm/bad.tex.comments.json")));
       check(shownErr && refused && still === "{ this is not json", "comments: an invalid comments file is shown as unreadable, a comment over it refused with the draft kept, the file untouched", { shownErr, refused, still });
     }
-    // (7) LC-T5 / LC-T2: retries exhausted end to end: another writer on every attempt; after 5 conflicts, "busy", the
-    // draft kept in the composer, nothing of it in the file
+    // (7) LC-T5 / LC-T2: another writer on every attempt; the attempt cap OR the operation's deadline ends in
+    // "busy", the draft kept, nothing of it in the file. The core unit separately requires exactly five fast attempts.
     {
       await open(ftex);
       await until(`/Comments \\(\\d+\\)/.test(document.querySelector(".tex-comments")?.textContent ?? "")`, 20000);
       await ev(`(() => { window.__writes = 0; window.__sbTexCommentsWrite = async () => { window.__writes++; const r = await ${W}.read(${J(SIDE)}); await ${W}.write(${J(SIDE)}, r.content, { base: r.entry.rev ?? 0 }); }; return true; })()`);
       await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("A middle"); t.focus(); t.setSelectionRange(i, i + 8); return true; })()`);
       await send("Input.dispatchKeyEvent", { type: "keyDown", key: "m", code: "KeyM", modifiers: 3, windowsVirtualKeyCode: 77 });
+      // Observe completion in the browser, not when the host next polls: a delayed CDP response must not make
+      // premature busy look like deadline exhaustion. Start at the send click, before the operation starts.
+      await ev(`(() => { const timing = window.__conflictTiming = { start: null, end: null };
+        const start = (e) => { if (e.target.closest(".sb-cm-compose .sb-cm-send") && timing.start === null) timing.start = performance.now(); };
+        const observer = new MutationObserver(() => { if (timing.start !== null && timing.end === null && /kept changing/.test(document.querySelector(".sb-cm-compose .sb-cm-err")?.textContent ?? "")) timing.end = performance.now(); });
+        document.addEventListener("click", start, true); observer.observe(document.body, { subtree: true, childList: true, characterData: true });
+        window.__stopConflicts = () => { observer.disconnect(); document.removeEventListener("click", start, true); }; return true; })()`);
       await post("never lands");
       const busy = await until(`/kept changing/.test(document.querySelector(".sb-cm-compose .sb-cm-err")?.textContent ?? "") && document.querySelector(".sb-cm-compose textarea")?.value === "never lands"`, 20000);
-      const writes = await ev(`window.__writes`);
-      await ev(`(delete window.__sbTexCommentsWrite, true)`);
+      const { writes, elapsed } = await ev(`(() => { const { start, end } = window.__conflictTiming; return { writes: window.__writes, elapsed: start === null || end === null ? null : end - start }; })()`);
+      await ev(`(window.__stopConflicts(), delete window.__stopConflicts, delete window.__conflictTiming, delete window.__sbTexCommentsWrite, true)`);
       const dx = await sideDoc();
-      check(busy && writes === 5 && !dx.threads.some((t) => t.messages.some((m) => m.text.value === "never lands")), "comments: on a conflict every attempt, five attempts then busy, the draft kept, nothing written", { busy, writes });
+      // The core also stops before sleeping if the next jittered backoff would reach the deadline.
+      // Use this attempt's maximum permitted backoff, not the largest backoff of any attempt.
+      const backoff = writes > 0 && writes < C.LIMITS.attempts ? Math.round(C.LIMITS.backoffMs[writes - 1] * 1.25) : 0;
+      check(busy && Number.isInteger(writes) && writes >= 0 && writes <= C.LIMITS.attempts && elapsed !== null &&
+        (writes === C.LIMITS.attempts || elapsed + backoff >= C.LIMITS.deadlineMs) &&
+        !dx.threads.some((t) => t.messages.some((m) => m.text.value === "never lands")),
+        "comments: on a conflict every attempt, the attempt cap or deadline then busy, the draft kept, nothing written", { busy, writes, elapsed, backoff });
     }
     // (8) PR 316's bounds on re-finding and drawing, measured and printed: slices at most 8 ms up to 256 KiB and 32 ms
     // up to 2 MiB (the source limit); drawing and the list bounded by what is near the view (300 and 2,000 threads);

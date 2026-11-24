@@ -109,6 +109,8 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "E := EllipticCurve([0, w]);",
     "CremonaReference(EllipticCurve([0, 0, 0, 0, 1000003]));",
     "Integers(F);",
+    "Normalize(w); Integral(w + 1);",
+    "SquarefreeFactorization(PolynomialRing(GF(5)).1^2);",
     "SetSeed(1);",
     "Random(1, 4);",
     "Universe({ {1} });",
@@ -129,6 +131,9 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "Runtime error in 'HeckePolynomial': HeckePolynomial of a",
     "Runtime error in 'EllipticCurve': EllipticCurve with a coefficient in a FldNumElt is not supported yet",
     "Runtime error: not supported yet: this curve is not in sagebrush's table",
+    "Runtime error in 'Normalize': Normalize of this argument is not supported yet (only of a polynomial over the integers or the rationals)",
+    "Runtime error in 'Integral': Integral of this argument is not supported yet (only of a polynomial over the integers or the rationals)",
+    "Runtime error in 'SquarefreeFactorization': SquarefreeFactorization of a polynomial over a finite field (or its ring) is not supported yet",
     "User error: 'SetSeed' is a Magma intrinsic not implemented in Sagebrush",
     "Runtime error in 'Random': Random after SetSeed or GetSeed is not supported yet",
     "Runtime error in 'Universe': Universe of this SetEnum is not supported yet",
@@ -162,7 +167,6 @@ test("Magma syntax Sagebrush doesn't have is named, not called bad syntax (cover
     ["x := 5; x; $1;", "$1 (the values printed last)"],
     ["f := func< n | n le 2 select 1 else $$(n-1) + $$(n-2) >;", "$$ in func< >"],
     ["P<[X]> := PolynomialRing(Rationals(), 2);", "P<[...]> (generator names in a sequence)"],
-    ["S := {1}; S join:= {2};", "join:= (an assignment with join)"],
     ["for x, y in [1, 2] do x; end for;", "for x, y in S (several loop variables)"],
     ["M := {* 1^^4, 2^^5 *};", "a^^n (a multiplicity in a multiset)"],
     ["x := 255; x: Hex;", "x: Hex (a printing level)"],
@@ -178,7 +182,6 @@ test("Magma syntax Sagebrush doesn't have is named, not called bad syntax (cover
     ["G := 1; G.-1;", "G.-1 (a generator's inverse by its index)"],
     ["B := 1; B.<3,1>;", "B.<...> (an element by its indices)"],
     ["x := 2; r := x = 3;", "= (an equation, as in a relation)"],
-    ["F<x, y>, f := FPGroup(G);", "F<...>, ... := (generator names with other values)"],
   ];
   for (const [src, name] of cases) {
     const out = spawnSync(process.execPath, [cli, "--magma"], { input: src + "\n", encoding: "utf8" }).stdout;
@@ -186,8 +189,8 @@ test("Magma syntax Sagebrush doesn't have is named, not called bad syntax (cover
     assert.doesNotMatch(out, /bad syntax/, src);
   }
   // the session goes on with the next line, as after a syntax error
-  const next = spawnSync(process.execPath, [cli, "--magma"], { input: "S := {1}; S join:= {2};\n7;\n", encoding: "utf8" }).stdout;
-  assert.match(next, /join:= \(an assignment with join\) is not supported yet\n7\n$/);
+  const next = spawnSync(process.execPath, [cli, "--magma"], { input: "M := {* 1^^4, 2^^5 *};\n7;\n", encoding: "utf8" }).stdout;
+  assert.match(next, /a\^\^n \(a multiplicity in a multiset\) is not supported yet\n7\n$/);
   // a cell (no recovery: the kernel's) says it too
   const { magmaToPython, MagmaSyntaxError } = require("../src/magma");
   assert.throws(() => magmaToPython("y := x where x is 10;\n", "<cell>"), (e: any) => e instanceof MagmaSyntaxError && /where x is \.\.\. \(a definition after an expression\) is not supported yet/.test(e.message));
@@ -2575,7 +2578,7 @@ test("an intrinsic's errors are said at the \"(\" of a call through a parameter,
   assert.ok(r.stdout.trimEnd().endsWith("55"), r.stdout);
   // a function defined by name is the user's own: its calls are not wrapped
   assert.doesNotMatch(magmaToPython("function g(n) return n; end function;\ng(1);"), /_m\._call\(/);
-  assert.match(magmaToPython("f := ChangeRing;\nf(1, 2);"), /_m\._call\(\(2, 2\), f, 1, 2\)/);
+  assert.match(magmaToPython("f := ChangeRing;\nf(1, 2);"), /_m\._call(_bare)?\(\(2, 2\), f, 1, 2\)/);
 });
 
 test("a call is located by the binding in scope at it: an optional parameter is, a named function is not, whatever other functions bind (astra's CORR-ALIAS105-1/2)", () => {
@@ -2617,5 +2620,5 @@ test("a call is located by the binding in scope at it: an optional parameter is,
   assert.deepEqual(call("function fib(n) return n le 1 select n else fib(n - 1) + fib(n - 2); end function;\nfib(10);\n"), ["    _m._show_values(fib(10))"]);
   assert.doesNotMatch(magmaToPython("function fib(n) return n le 1 select n else fib(n - 1) + fib(n - 2); end function;\nfib(10);\n"), /_m\._call\(/);
   // a variable assigned a named function's name later is a variable again
-  assert.match(magmaToPython("function g(n) return n; end function;\ng := ChangeRing;\ng(1, 2);\n"), /_m\._call\(\(3, 2\), g, 1, 2\)/);
+  assert.match(magmaToPython("function g(n) return n; end function;\ng := ChangeRing;\ng(1, 2);\n"), /_m\._call(_bare)?\(\(3, 2\), g, 1, 2\)/);
 });
