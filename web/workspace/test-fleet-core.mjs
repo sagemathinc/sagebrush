@@ -18,7 +18,7 @@ let failures = 0;
 const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 600) : "")); if (!c) failures++; };
 
 // ---- the mirror: the upstream commit and each file's sha256 there (a new upstream version means new pins, reviewed)
-const UPSTREAM = "2311c35a9796e6378c3409863f651aef5b381d96";
+const UPSTREAM = "2d4870a5932f01ebdb156f18547f909bd37e6ed5";
 const PINS = {
   "core/bytes.mjs": ["lib/fleet/core/bytes.mjs", "be5c199fcadf375336c49dae692fce6af96644af6f98b11161a4fb0d65eaaf6b"],
   "core/canon.mjs": ["lib/fleet/core/canon.mjs", "d9b7831f6772f6010689ecb74a8727280470e8e1437a2166fc0fd6b1728f08e8"],
@@ -40,10 +40,10 @@ const PINS = {
   "core/webcrypto.mjs": ["lib/fleet/core/webcrypto.mjs", "82f5b25fcd77710fa75f18c65df00dbea5be223315ff4f32308f3164acb0e61b"],
   "fleet.schema.json": ["schema/fleet/fleet.schema.json", "6f4ada49b3dc7708423309eeda60520eb4d915e8889b422a32b7c6578cc2730c"],
   "reasons.json": ["schema/fleet/reasons.json", "0dff469bdd8157ac4515d18f7fab299e233e5454966a13236f43dfae90875dd1"],
-  "fleet-fixtures.json": ["test/fixtures/fleet-fixtures.json", "560fe3fdbfe463bca22e60fe773928a716bb24f45cf0bfc91003c61442702d80"],
+  "fleet-fixtures.json": ["test/fixtures/fleet-fixtures.json", "044b55d36e7b38e618e87e3f2ef8b09c23b882aa6d792847940078e254cfee02"],
   "fleet-hpke-fixtures.json": ["test/fixtures/fleet-hpke-fixtures.json", "2e73d694e466c5faacc3137358a9a33a04d650af82498c9fb277f9beba24e567"],
   "hpke-x25519-sha256-aes256gcm.json": ["test/fixtures/hpke-x25519-sha256-aes256gcm.json", "054c8e53704afdc91aae501f96ee964828c78fd4581e5894d21593b93a066d8e"],
-  "fleet-fixture-cases.mjs": ["test/fleet-fixture-cases.mjs", "4680b39dc785c84cd020865ce666ca4434338a6eefea029d8c3284fde5666017"],
+  "fleet-fixture-cases.mjs": ["test/fleet-fixture-cases.mjs", "5cef40437c796bb098d2a052f8a504615b9ddb80da2e0b64540a47eef14fb235"],
 };
 const OWN = ["install.ts"]; // (the page's own file in fleet/; everything else there is upstream's)
 const sha = (b) => createHash("sha256").update(b).digest("hex");
@@ -114,12 +114,12 @@ const settle = async (P, before) => { for (const t = Date.now(); P.loads === bef
 const page = async () => { const P = await B.tab(); const n = P.loads; await P.send("Page.navigate", { url: site + "/" }); await settle(P, n); return P; };
 const err = (P, expr) => P.ev(`(async () => { try { await (${expr}); return null; } catch (e) { return String(e?.message ?? e); } })()`);
 // (the count is pinned so a group of cases that stopped running shows up, not only a case that fails)
-const CASES = 84, HPKE_VECTOR = 257, HPKE_CASES = 34;
+const CASES = 91, HPKE_VECTOR = 257, HPKE_CASES = 34;
 try {
   {
     const P = await page();
     const r = await P.ev(`fc.checkFixtures(fc.fleetCore(), F).then((r) => ({ n: r.n, bad: r.bad }))`);
-    ok(r.n === CASES && r.bad.length === 0, `C-1: all ${CASES} of the agent's fixture cases agree in Chromium (canonical, base64url, ids, ed25519, chain, service keys, envelopes, grants, host ops, approvals)`, r);
+    ok(r.n === CASES && r.bad.length === 0, `C-1: all ${CASES} of the agent's fixture cases agree in Chromium (canonical, base64url, ids, ed25519, chain, service keys, envelopes, grants, grant acks, host ops, approvals)`, r);
     // (the small-order forgery: R = identity and S = 0 under a small-order key. Chromium's own verify may accept it;
     //  the core refuses it before WebCrypto is asked. The platform's answer is printed, not asserted: it may change)
     const so = await P.ev(`(async () => { const c = F.ed25519.find((c) => /small-order/.test(c.name)); const core = fc.fleetCore(); const k = core.unb64(c.public, 32), m = core.unb64(c.msg_b64), s = core.unb64(c.sig, 64);

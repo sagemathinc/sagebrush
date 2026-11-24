@@ -93,3 +93,11 @@ export async function verifyHostCert(ctx: FleetCtx, chain: Chain, cert: string):
 export async function verifyGrant(ctx: FleetCtx, chain: Chain, cert: HostCert, grant: string, current: CurrentGrant | null, now: number): Promise<unknown> {
   return fleetCore().verifyGrant(utf8(grant), { aud: ctx.aud, fleet: ctx.fleet, chain, cert, current: current ?? undefined, now });
 }
+
+/**
+ * A host's acknowledgement of a grant (sb.grant-ack.v1, §3.3), verified against the host's certificate: signed by that
+ * host, about that host, and not ahead of `currentGen`, the generation of the grant this page holds for it.
+ */
+export async function verifyGrantAck(ctx: FleetCtx, cert: HostCert, ack: string, currentGen: number): Promise<unknown> {
+  return fleetCore().verifyGrantAck(utf8(ack), { aud: ctx.aud, fleet: ctx.fleet, cert, currentGen });
+}

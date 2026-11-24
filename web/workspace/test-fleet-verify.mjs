@@ -1,8 +1,8 @@
 // ci: web-runner order=354 runner=bun chrome
 // What the page verifies about an Autonomous fleet (fleet-verify.ts; app pairing r4 §2, F7, F8), in headless Chromium
 // with real WebCrypto and IndexedDB: the chain against this browser's pin (the pin moves only after the whole chain
-// verified; a fork or a rollback is recorded for good), a host's certificate and the grants, on the agent's own
-// fixtures. Each case starts from a reset device, since the fixtures share one fleet.
+// verified; a fork or a rollback is recorded for good), a host's certificate, the grants and the host's acks of them,
+// on the agent's own fixtures. Each case starts from a reset device, since the fixtures share one fleet.
 //   CHROME=google-chrome bun web/workspace/test-fleet-verify.mjs
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -94,6 +94,9 @@ try {
     const g = await P.ev(`(async () => { const bad = []; for (const c of F.objects.grants) { const cur = c.current && { gen: c.current.gen, bytes: new TextEncoder().encode(c.current.bytes), body: JSON.parse(c.current.bytes).body };
       let got; try { await m.fv.verifyGrant(${CTX}, CH, CERT, c.bytes, cur ?? null, F.now_ms); got = "ok"; } catch (e) { got = e?.code ?? String(e); } if (got !== c.expect) bad.push({ name: c.name, got, expect: c.expect }); } return { n: F.objects.grants.length, bad }; })()`);
     ok(g.n === 11 && g.bad.length === 0, `V-8: all ${g.n} of the agent's grant cases get the fixtures' answer through verifyGrant`, g);
+    const a = await P.ev(`(async () => { const bad = []; for (const c of F.objects.grant_acks) {
+      let got; try { await m.fv.verifyGrantAck(${CTX}, CERT, c.bytes, c.current_gen); got = "ok"; } catch (e) { got = e?.code ?? String(e); } if (got !== c.expect) bad.push({ name: c.name, got, expect: c.expect }); } return { n: F.objects.grant_acks.length, bad, refused: F.objects.grant_acks.filter((c) => c.expect !== "ok").length }; })()`);
+    ok(a.n === 7 && a.refused === 5 && a.bad.length === 0, `V-16: all ${a.n} of the agent's grant-ack cases (${a.refused} refused) get the fixtures' answer through verifyGrantAck`, a);
   }
   // ---- when this browser can't store the pin or the fork mark: storage_failed, never a fork it didn't record
   // (IDBObjectStore.put made to throw QuotaExceededError, or to drop the write silently; restored afterwards)
@@ -173,7 +176,7 @@ try {
   {
     const P = await page();
     const names = await P.ev(`Object.keys(m.fv).sort().join()`);
-    ok(names === "PinMoved,StorageFailed,syncChain,verifyGrant,verifyHostCert", "S-1: the module exports verification only: syncChain, verifyHostCert, verifyGrant (and its errors StorageFailed, PinMoved)", names);
+    ok(names === "PinMoved,StorageFailed,syncChain,verifyGrant,verifyGrantAck,verifyHostCert", "S-1: the module exports verification only: syncChain, verifyHostCert, verifyGrant, verifyGrantAck (and its errors StorageFailed, PinMoved)", names);
   }
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));

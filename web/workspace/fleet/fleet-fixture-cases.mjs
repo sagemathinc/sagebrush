@@ -42,6 +42,9 @@ export async function checkFixtures(core, F) {
     const got = await result(() => core.verifyHostOp(enc(c.bytes), { ...ctx, chain: st, host: F.ids.host, currentGen: c.current_gen, now: F.now_ms, seenOp: () => false }));
     check("host_ops", c.name, got, c.expect);
   }
+  for (const c of O.grant_acks) {
+    check("grant_acks", c.name, await result(() => core.verifyGrantAck(enc(c.bytes), { ...ctx, cert, currentGen: c.current_gen })), c.expect);
+  }
   for (const c of O.approvals) {
     const got = await result(() => core.verifyApproval(enc(c.bytes), { ...ctx, chain: st, now: F.now_ms, expect: c.expect_op, current: c.current, used: (a) => c.used.includes(a) }));
     check("approvals", c.name, got, c.expect);
