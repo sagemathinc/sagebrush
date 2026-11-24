@@ -12,6 +12,7 @@ TIPS = pd.DataFrame({
     "tip": [1.5, 3.0, 2.25, 5.0, 2.0, 1.0, 4.5, 3.5, 2.75, 4.0, 2.5, 3.25],
     "size": [2, 3, 2, 4, 2, 1, 4, 3, 2, 4, 2, 3],
 })
+LINE = pd.DataFrame({"x": [1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3], "y": [0.3, 1.7, 2.2, 5.0, 4.1, 3.3, 2.0, 1.1, 7.0, 6.1, 6.9]})
 '''
 
 ORACLE_PRELUDE = r'''
@@ -66,11 +67,26 @@ def heat(ax):
     arr = np.ma.asarray(q.get_array()).ravel()
     keep = ~np.ma.getmaskarray(arr)
     face = rgba(q.cmap(q.norm(arr)))
+    # (each drawn cell's rectangle, row by row: a masked cell isn't drawn, so it isn't listed)
+    co = np.asarray(q.get_coordinates(), dtype=float)
+    nr, nc = co.shape[0] - 1, co.shape[1] - 1
+    cells = [[float(co[i, j, 0]), float(co[i, j, 1]), float(co[i + 1, j + 1, 0] - co[i, j, 0]),
+              float(co[i + 1, j + 1, 1] - co[i, j, 1])] for i in range(nr) for j in range(nc)]
     return {"values": [float(v) for v, k in zip(arr.filled(np.nan), keep) if k], "clim": [float(v) for v in q.get_clim()],
+            "cells": [c for c, k in zip(cells, keep) if k],
             "face": [f for f, k in zip(face, keep) if k], "frame": frame(ax), "naxes": len(ax.figure.axes),
             "texts": [[t.get_text(), float(t.get_position()[0]), float(t.get_position()[1]),
                        [float(v) for v in matplotlib.colors.to_rgba(t.get_color())]] for t in ax.texts],
             "edge": rgba(q.get_edgecolors()) if float(np.max(q.get_linewidths())) > 0 else []}
+def band(ax):
+    out = []
+    for c in ax.collections:
+        v = np.asarray(c.get_paths()[0].vertices, dtype=float)
+        d = {}
+        for x, y in v.tolist():
+            d.setdefault(x, []).append(y)
+        out.append(sorted([x, min(ys), max(ys)] for x, ys in d.items()))
+    return {"band": out, "line": [[float(v) for v in l.get_ydata()] for l in ax.lines]}
 def pair(g):
     cells = []
     for row in g.axes:
@@ -156,12 +172,20 @@ def heat(ax):
     cells = sorted(zip(r.rects, r.options["colors"]), key=lambda t: (t[0][1], t[0][0]))
     vals = None
     texts = [[t.string, t.x, t.y, _rgba(t.options.get("color"))] for t in _kind(ax, "Text")]
-    return {"face": [_rgba(c) for _, c in cells], "frame": frame(ax),
+    return {"cells": [list(r) for r, _ in cells], "face": [_rgba(c) for _, c in cells], "frame": frame(ax),
             "naxes": len(ax.figure.axes), "texts": texts, "edge": [_rgba(r.options["edgecolor"])] if r.options.get("edgecolor") else []}
 def bars(ax):
     h = histgeom(ax)
     return {"rects": h["rects"], "face": h["face"], "lines": [{k: l[k] for k in ("x", "y", "color", "lw")} for l in linegeom(ax)["lines"]],
             "frame": frame(ax), "legend": legend(ax)}
+def band(ax):
+    out = []
+    for p in _kind(ax, "Polygon"):
+        d = {}
+        for x, y in zip(p.xs, p.ys):
+            d.setdefault(float(x), []).append(float(y))
+        out.append(sorted([x, min(ys), max(ys)] for x, ys in d.items()))
+    return {"band": out, "line": [[float(v) for v in p.ys] for p in _kind(ax, "Line")]}
 def pair(g):
     cells = []
     for row in g.axes:
@@ -219,6 +243,26 @@ out = linegeom(ax)
 ax = sns.lineplot(x=[1.0, 2.0, 3.0], y=[1.0, 4.0, 9.0], label="squares", marker="s")
 sns.lineplot(x=[1.0, 2.0, 3.0], y=[1.0, 2.0, 3.0], label="identity", ax=ax)
 out = linegeom(ax)
+'''),
+    ('line-band-ci-s0', r'''
+ax = sns.lineplot(data=LINE, x="x", y="y", seed=0)
+out = band(ax)
+'''),
+    ('line-band-ci-s7-odd', r'''
+ax = sns.lineplot(data=LINE, x="x", y="y", seed=7, n_boot=200)
+out = band(ax)
+'''),
+    ('line-band-sd', r'''
+ax = sns.lineplot(data=LINE, x="x", y="y", errorbar="sd")
+out = band(ax)
+'''),
+    ('line-band-se', r'''
+ax = sns.lineplot(data=LINE, x="x", y="y", errorbar="se")
+out = band(ax)
+'''),
+    ('line-band-pi50', r'''
+ax = sns.lineplot(data=LINE, x="x", y="y", errorbar=("pi", 50))
+out = band(ax)
 '''),
     ('hist-x', r'''
 ax = sns.histplot(data=TIPS, x="bill")
