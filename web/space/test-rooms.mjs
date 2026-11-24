@@ -64,6 +64,24 @@ ok(linked.edges > 0, "the file's room has links", linked);
 ok(await enter(await idOf(`(n) => n.title === "class Circle"`)) && (await leave()), "a class entered again, and left");
 await sleep(300);
 ok((await ev(`space3d.space.nodes.map((n) => n.id).sort().join()`)) === linked.ids && !/couldn't load/.test(await ev(`document.querySelector('[data-c="status"]').textContent`)), "Back to it shows it again", await ev(`document.querySelector('[data-c="status"]').textContent`));
+// (Back checks the space it comes back to, as any space: one changed past the limits while you were in a room, through
+//  the page's API, which hands out the live space, is refused, and you stay where you are)
+const status = () => ev(`document.querySelector('[data-c="status"]').textContent`);
+await ev(`(window.__outer = space3d.space, true)`);
+const circleId = await idOf(`(n) => n.title === "class Circle"`);
+ok(await enter(circleId), "a class entered, its file's space kept by the page");
+await ev(`(window.__outer.nodes[0].deep = JSON.parse("[".repeat(30) + "]".repeat(30)), true)`);
+await leave();
+await sleep(300);
+ok(/nested too deeply/.test(await status()) && (await room()) === "project › geometry/ › shapes.py › class Circle", "made too deep meanwhile: Back refuses it, and you stay in the class", [await status(), await room()]);
+await ev(`(delete window.__outer.nodes[0].deep, window.__outer.nodes.push(...Array.from({ length: 4000 }, (_, i) => ({ id: "x" + i, kind: "note", title: "x" }))), true)`);
+await leave();
+await sleep(300);
+ok(/more than 4000 objects/.test(await status()) && (await room()) === "project › geometry/ › shapes.py › class Circle", "given 4,000 objects more meanwhile: refused too", [await status(), await room()]);
+await ev(`(window.__outer.nodes.length = 4, true)`);
+ok((await leave()) && (await room()) === "project › geometry/ › shapes.py", "put right: Back takes you out", await room());
+await sleep(300);
+ok((await ev(`space3d.space.nodes.map((n) => n.id).sort().join()`)) === linked.ids, "and shows the file's room again");
 ok((await leave()) && (await room()) === "project › geometry/", "Back out, room by room", await room());
 
 // ---- an import leads to the file it names: relative (from .shapes) and absolute (geometry.report)
@@ -122,14 +140,6 @@ ok((await ev(`space3d.enter("jseuro")`)) === false && /too long to enter/.test(a
 const many = { format: "sagebrush-space", version: 1, nodes: [{ id: "many", kind: "file", title: "many.py", path: "many.py", lang: "python", text: Array.from({ length: 4001 }, (_, i) => `def f${i}():\n    pass\n`).join(""), lines: 8002 }] };
 await ev(`space3d.load(${JSON.stringify(many)}, "many.space.json").then(() => true)`);
 ok((await ev(`space3d.enter("many")`)) === false && /more than 4000 objects/.test(await ev(`document.querySelector('[data-c="status"]').textContent`)), "a file of 4,001 functions: its room isn't laid out, and that is said", await ev(`document.querySelector('[data-c="status"]').textContent`));
-
-// ---- what Back skips is only its own: a space from outside is checked, whatever it carries, and so is the viewer's own
-//      drawn space handed back through the page's API (linked to itself by its drawing, it is refused)
-const deep = { format: "sagebrush-space", version: 1, shown: true, opts: { shown: true, room: true }, nodes: [{ id: "a", kind: "note", title: "a", x: JSON.parse("[".repeat(30) + "]".repeat(30)) }] };
-ok(/nested too deeply/.test(await ev(`space3d.load(${JSON.stringify(deep)}, "deep.space.json").then(() => "loaded", (e) => String(e?.message ?? e))`)), "a space given with shown: true (and an opts of its own) is checked, and refused when it nests too deeply");
-const two = { format: "sagebrush-space", version: 1, directed: true, nodes: [{ id: "a", kind: "note", title: "a" }, { id: "b", kind: "note", title: "b" }], edges: [{ from: "a", to: "b" }] };
-ok((await ev(`space3d.load(${JSON.stringify(two)}, "two.space.json").then(() => space3d.space.edges.length)`)) === 1, "a space with a link is drawn");
-ok(/nested too deeply/.test(await ev(`space3d.load(space3d.space, "again.space.json").then(() => "loaded", (e) => String(e?.message ?? e))`)), "the viewer's own drawn space, given through the page's API, is checked too");
 
 ok(errors.length === 0, "no page errors", errors.slice(0, 3));
 console.log(failures ? `${failures} FAILED` : "all passed");
