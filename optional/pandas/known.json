@@ -1034,7 +1034,7 @@
     {
       "case": "groupby.std-engine",
       "message": "pandas.SeriesGroupBy.std(engine=, engine_kwargs=) is not in Sagebrush's pandas 0.x subset",
-      "reason": "engine= picks numba in pandas, which isn't in Sagebrush; it raises before any work"
+      "reason": "explicit engine selection and engine options are outside this subset, which uses its built-in implementation; it raises before any work"
     },
     {
       "case": "groupby.median-datetime",
@@ -1081,7 +1081,7 @@
     {
       "case": "blocks.added-f32-std",
       "where": "DataFrameGroupBy std and median of a frame with float32 columns, one of them added after construction (df['x'] = ..., assign, insert); tests/test_groupby_blocks.py pins Sagebrush's dtypes (pandas gives float32 for a and float64 for the added b there, Sagebrush float64 for both)",
-      "reason": "pandas computes a float32 column's groupby std and median in float64 and casts the result back to float32 only when every value of the block stays within 5e-4 of its float32 cast; an added column is its own block until pandas consolidates. Sagebrush's frame treats a frame's float32 columns as one block, as the constructor and read_csv make them, so one column whose result doesn't fit makes all of them float64. The values agree; only the dtype (and so float32 rounding) can differ"
+      "reason": "pandas computes a float32 column's groupby std and median in float64 and casts the result back to float32 only when every value of the block stays within 5e-4 (absolute) of its float32 cast; an added column is its own block until pandas consolidates. Sagebrush's frame treats a frame's float32 columns as one block, as the constructor and read_csv make them, so one column whose result doesn't fit makes all of them float64. Both compute the result in float64, but pandas can cast one column back to float32 while Sagebrush keeps both in float64. The returned dtypes and the values after rounding can therefore differ"
     }
   ]
 }

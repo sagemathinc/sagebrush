@@ -20,7 +20,8 @@ see _pd_license.py and NOTICE.md):
 - std and var are pandas' Welford update (var of float32 in float32
   arithmetic), median the middle value or the mean of the two middle ones;
   a float32 column's std and median run in float64 and come back float32
-  only when every value of its block fits within 5e-4 (_fits32).
+  only when every value of its block fits within 5e-4,
+  absolute (_fits32).
 Several keys need a MultiIndex, which isn't in the subset: they raise.
 """
 
@@ -229,7 +230,7 @@ def _median(values, positions, skipna):
 
 def _fits32(res):
     # (pandas' maybe_downcast_numeric for a float32 column's float64 result: float32 only if every value, cast,
-    # stays within 5e-4 of it, NaN matching NaN and an infinity its own sign)
+    # stays within 5e-4 of it (absolute), NaN matching NaN and an infinity its own sign)
     for r in res:
         c = _f32(r)
         if r != r:

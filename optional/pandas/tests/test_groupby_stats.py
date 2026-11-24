@@ -57,7 +57,7 @@ case("agg-named", lambda: pd.DataFrame({"k": k, "x": x}).groupby("k").agg(spread
 case("agg-dict", lambda: pd.DataFrame({"k": k, "x": x, "n": n}).groupby("k").agg({"x": "var", "n": "median"}))
 
 # A float32 column's std and median run in float64 and come back float32 only when every group's value, cast,
-# stays within 5e-4 (pandas decides over the frame's float32 block at once; agg with a dict, column by column).
+# stays within 5e-4, absolute (pandas decides over the frame's float32 block at once; agg with a dict, column by column).
 f4 = lambda *v: pd.Series(np.array(v, dtype=np.float32))
 k4 = pd.Series([1, 1, 2, 2])
 case("f32-std-fits.dtype", lambda: f4(0.0, 30001.0, 3.0, 5.0).groupby(k4).std().dtype)
