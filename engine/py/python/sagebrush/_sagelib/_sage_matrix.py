@@ -4280,11 +4280,55 @@ def _cc_quot_kept(r, a, b):
         (_NORMAL_MIN <= im < _INF or (im == 0 and (q == 0 or c == 0) and (p == 0 or d == 0)))
 
 
-def _cc_pow_kept(r, z):
-    """Whether the parts of the double power r of z are Sage's range: each
-    0 or at least 2^-969, finite, and not both 0 for a nonzero z."""
+def _cc_pow_kept(r, b, e):
+    """Whether the parts of the double power r = b ** e (e not an integer)
+    are Sage's, exp(log(b) e): each finite and at least 2^-969, or an
+    imaginary part that is exactly 0 in Sage's too (a positive real b to a
+    real e)."""
     x, y = abs(r.real), abs(r.imag)
-    return (x == 0 or _KEPT_LO <= x < _INF) and (y == 0 or _KEPT_LO <= y < _INF) and (x or y or z == 0)
+    return _KEPT_LO <= x < _INF and (_KEPT_LO <= y < _INF or (
+        y == 0 and b.imag == 0 and b.real > 0 and complex(e).imag == 0))
+
+
+def _cc_ipow(z, n):
+    """z ** n in CC for an integer n, as Sage's generic_power: 1/z first
+    for n < 0 (Sage's ~z: m = a^2 + b^2, then a/m and -b/m), then the
+    powers z^(2^i) from the lowest set bit, each multiplied in as apow *
+    res.  Each step is a double operation on tame operands, which rounds
+    as MPFR does; None when an operand is not tame (the 53-bit MP field
+    then does the whole power)."""
+    if n == 0:
+        return ComplexNumber(1.0, 0.0)
+    if not _cc_tame(z):
+        return None
+    if n < 0:
+        a, b = z.real, z.imag
+        m = a * a + b * b
+        if m == 0:
+            # (Sage's 1/0: 0/0 in each part)
+            return ComplexNumber(float("nan"), float("nan"))
+        apow = complex(a / m, -b / m)
+        if not _cc_tame(apow):
+            # (a quotient that may have underflowed)
+            return None
+        n = -n
+    else:
+        apow = z
+    while not n & 1:
+        if not _cc_tame(apow):
+            return None
+        apow = apow * apow
+        n >>= 1
+    res = apow
+    n >>= 1
+    while n:
+        if not (_cc_tame(apow) and _cc_tame(res)):
+            return None
+        apow = apow * apow
+        if n & 1:
+            res = apow * res
+        n >>= 1
+    return ComplexNumber(res)
 
 
 def _cc_slow(op, a, b):
@@ -4323,18 +4367,21 @@ def _cc_mul(a, b):
 
 def _cc_pow(z, e, rev=False):
     """z ** e in CC (e ** z for rev), z and e complex, or e an integer."""
+    if not rev and (isinstance(e, int) or type(e).__name__ == "Integer"):
+        n = int(e)
+        if not _isfinite(z):
+            # (an infinite or NaN z: the doubles' power, as before)
+            return ComplexNumber(z ** n)
+        r = _cc_ipow(z, n)
+        return r if r is not None else _cc_slow("^", z, n)
     try:
         r = e ** z if rev else z ** e
-    except OverflowError:
+    except (OverflowError, ZeroDivisionError):
         r = None
-    if r is not None and _cc_pow_kept(r, e if rev else z):
+    if r is not None and _cc_pow_kept(r, e if rev else z, z if rev else e):
         return ComplexNumber(r)
-    try:
-        ce = complex(e)
-    except OverflowError:
-        # (an integer exponent past the doubles: as before)
-        ce = None
-    if ce is None or not _cc_finite(z, ce):
+    ce = complex(e)
+    if not _cc_finite(z, ce):
         if r is None:
             raise OverflowError("complex exponentiation")
         return ComplexNumber(r)
@@ -4376,6 +4423,34 @@ class ComplexNumber(complex):
         Traceback (most recent call last):
         ...
         NotImplementedError: 5.80771375621750e-362 in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+
+    A part that is 0 in the doubles is kept only where it is an exact 0 in
+    Sage's value too (here the doubles lose a nonzero part)::
+
+        sage: exp(CC(-1000, 0))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 5.07595889754946e-435 in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(1/4, 2^-1074)^2  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 0.0625000000000000 + 2.47032822920623e-324*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(1/4, 2^-1074)^CC(2, 0)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 0.0625000000000000 + 2.47032822920623e-324*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(2^-60, 2^-1020)^2  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 7.52316384526264e-37 + 1.54395514325390e-325*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(2^-1020, 2^-60)^2  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: -7.52316384526264e-37 + 1.54395514325390e-325*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(2^-60, 2^-1020)^3  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 6.52530446799852e-55 + 2.00875142464325e-343*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
     """
 
     def _latex_(self):

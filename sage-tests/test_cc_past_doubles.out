@@ -32,3 +32,20 @@ div0 | NaN + NaN*I | Complex Field with 53 bits of precision
 nan | NaN + NaN*I | Complex Field with 53 bits of precision
 cancel | 2.00000000000000 | Complex Field with 53 bits of precision
 cancel/ | 1.00000000000000 | Complex Field with 53 bits of precision
+sin0 | 1.17520119364380*I | 0x0.0p+0 0x1.2cd9fc44eb982p+0
+sqrt4 | 2.00000000000000 | 0x1.0000000000000p+1 0x0.0p+0
+arccos2 | 1.31695789692482*I | Complex Field with 53 bits of precision
+arctan-i | -0.549306144334055*I | Complex Field with 53 bits of precision
+sq | 2.00000000000000 | 0x1.0000000000000p+1 0x0.0p+0
+sqn | 1.22464679914735e-16 + 2.00000000000000*I | 0x1.1a62633145c07p-53 0x1.0000000000000p+1
+neg | -0.125000000000000 | -0x1.0000000000000p-3 -0x0.0p+0
+negi | 0.125000000000000*I | -0x0.0p+0 0x1.0000000000000p-3
+p101 | 1.00994666402457 + 0.0204016568709368*I | 0x1.028bdd54b0989p+0 0x1.4e42c042df6eap-6
+p2046 | -8.98846567431158e307*I | -0x0.0p+0 -0x1.0000000000000p+1023
+pm7 | 0.0214280464416612 + 0.0486672669658397*I | 0x1.5f13bdabc85ccp-6 0x1.8eaea80020a02p-5
+pm1 | 0.0517241379310345 - 0.120689655172414*I | 0x1.a7b9611a7b961p-5 -0x1.ee58469ee5847p-4
+z0inv | NaN + NaN*I | nan nan
+z0pow | NaN + NaN*I | nan nan
+z0c | NaN + NaN*I | nan nan
+p0 | 1.00000000000000 | 0x1.0000000000000p+0 0x0.0p+0
+hugeexp | NaN + NaN*I | nan nan

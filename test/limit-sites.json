@@ -12030,7 +12030,7 @@
   "owner": "Sage kernel (@sagebrush-sage2)",
   "reason": "a docstring naming Maxima (Sage's simplify); it refuses nothing"
  },
- "lib/_sage_expr.py :: _cc_function :: NotImplementedError past the doubles, never a double's infinity or #0": {
+ "lib/_sage_expr.py :: _cc_function :: element of CC, or NotImplementedError past the doubles, never a #0": {
   "class": "coverage",
   "owner": "Sage kernel",
   "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
@@ -12748,6 +12748,21 @@
   "owner": "matrices/runtime memory",
   "row": "inv-8"
  },
+ "lib/_sage_matrix.py :: ComplexNumber :: NotImplementedError: -7.52316384526264e-37 + 1.54395514325390e-325*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
+ },
+ "lib/_sage_matrix.py :: ComplexNumber :: NotImplementedError: 0.0625000000000000 + 2.47032822920623e-324*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
+ },
+ "lib/_sage_matrix.py :: ComplexNumber :: NotImplementedError: 0.0625000000000000 + 2.47032822920623e-324*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #1": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
+ },
  "lib/_sage_matrix.py :: ComplexNumber :: NotImplementedError: 1.06443396562763e434 + 1.65775768045351e434*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
   "class": "coverage",
   "owner": "Sage kernel",
@@ -12763,7 +12778,22 @@
   "owner": "Sage kernel",
   "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
  },
+ "lib/_sage_matrix.py :: ComplexNumber :: NotImplementedError: 5.07595889754946e-435 in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
+ },
  "lib/_sage_matrix.py :: ComplexNumber :: NotImplementedError: 5.80771375621750e-362 in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
+ },
+ "lib/_sage_matrix.py :: ComplexNumber :: NotImplementedError: 6.52530446799852e-55 + 2.00875142464325e-343*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
+ },
+ "lib/_sage_matrix.py :: ComplexNumber :: NotImplementedError: 7.52316384526264e-37 + 1.54395514325390e-325*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
   "class": "coverage",
   "owner": "Sage kernel",
   "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"

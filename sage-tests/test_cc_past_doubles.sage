@@ -57,3 +57,32 @@ show("div0", lambda: CC(1, 1) / 0)
 show("nan", lambda: CC(float("nan"), 1) * CC(2^600, 2^600))
 show("cancel", lambda: CC(1, 1) * CC(1, -1))
 show("cancel/", lambda: CC(1, 1) / CC(1, 1))
+
+# zeros: kept where Sage's value has an exact 0 (a real argument of exp, the
+# imaginary axis of sin and cos, a real argument in arccos's or sqrt's
+# domain), and the powers as Sage's generic_power computes them, bit for bit
+def bits(label, f):
+    try:
+        v = f()
+    except Exception as e:
+        print(label, "|", type(e).__name__)
+        return
+    print(label, "|", v, "|", float(v.real()).hex(), float(v.imag()).hex())
+
+bits("sin0", lambda: sin(CC(0, 1)))
+bits("sqrt4", lambda: sqrt(CC(4, 0)))
+show("arccos2", lambda: CC(arccos(CC(2, 0))))
+show("arctan-i", lambda: CC(arctan(CC(0, -0.5))))
+bits("sq", lambda: CC(4, 0)^0.5)
+bits("sqn", lambda: CC(-4, 0)^0.5)
+bits("neg", lambda: CC(-2, 0)^-3)
+bits("negi", lambda: CC(0, 2)^-3)
+bits("p101", lambda: CC(1.0001, 0.0002)^101)
+bits("p2046", lambda: CC(1, 1)^2046)
+bits("pm7", lambda: CC(1.5, -0.25)^-7)
+bits("pm1", lambda: CC(3, 7)^-1)
+bits("z0inv", lambda: CC(0, 0)^-1)
+bits("z0pow", lambda: CC(0, 0)^2.5)
+bits("z0c", lambda: CC(0, 0)^CC(2, 1))
+bits("p0", lambda: CC(float("nan"), 1)^0)
+bits("hugeexp", lambda: CC(2, 0)^(10^30))

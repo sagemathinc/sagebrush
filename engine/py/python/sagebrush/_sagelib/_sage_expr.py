@@ -3504,14 +3504,32 @@ def _rr_function(name, args, numeric):
                               % (name, ", ".join(map(str, args))))
 
 
+# (the parts of Sage's values of these functions of CC that are an exact 0:
+# the imaginary part on the real line; on the imaginary axis, the real part
+# of the odd functions and the imaginary part of the even ones)
+_CC_REAL_ON_REALS = frozenset(("exp", "sin", "cos", "tan", "sinh", "cosh", "tanh", "cot", "sec", "csc", "coth",
+                               "sech", "csch", "arctan", "arcsinh"))
+_CC_IMAGINARY_ON_IMAGINARIES = frozenset(("sin", "tan", "sinh", "tanh", "cot", "csc", "coth", "csch", "arcsin"))
+_CC_REAL_ON_IMAGINARIES = frozenset(("cos", "cosh", "sec", "sech"))
+# (and on the part of the real line where the function is real)
+_CC_REAL_ON_DOMAIN = {"arcsin": lambda x: abs(x) <= 1, "arccos": lambda x: abs(x) <= 1,
+                      "arctanh": lambda x: abs(x) < 1, "arccosh": lambda x: x >= 1, "log": lambda x: x > 0,
+                      "sqrt": lambda x: x >= 0}
+# (an exact 0 real part on a stretch of an axis: on the imaginary axis,
+# lambda y; on the real line, lambda x)
+_CC_IMAGINARY_ON_AXIS = {"arctan": lambda y: abs(y) < 1, "arcsinh": lambda y: abs(y) <= 1,
+                         "arctanh": lambda y: abs(y) <= 1}
+_CC_IMAGINARY_ON_LINE = {"arccos": lambda x: x >= 1, "arccosh": lambda x: abs(x) <= 1}
+
+
 def _cc_function(name, args, r):
     """The value of name(*args), some of them elements of CC, whose double
-    value is r: r where its parts are Sage's range (normal doubles; a zero
-    when an argument has a zero part; anything for an infinite or NaN
-    argument), else Sage's value (the method of the 53-bit MP complex
-    field, MPFR's exponents and all) as an element of CC, or
-    NotImplementedError past the doubles, never a double's infinity or
-    zero."""
+    value is r: r where each part is Sage's (a normal double, or a 0 that
+    is an exact 0 in Sage's value too: _CC_REAL_ON_REALS and the others;
+    anything for an infinite or NaN argument), else Sage's value (the
+    method of the 53-bit MP complex field, MPFR's exponents and all) as an
+    element of CC, or NotImplementedError past the doubles, never a
+    double's infinity or zero."""
     parts = []
     for a in args:
         z = complex(a)
@@ -3521,14 +3539,23 @@ def _cc_function(name, args, r):
     if isinstance(r, complex):
         # (complex's own parts: CC's .real is a callable real)
         v = complex.__complex__(r)
-        vs = [v.real, v.imag]
+        re, im = v.real, v.imag
     elif isinstance(r, float) and getattr(r, "_mp", None) is None:
-        vs = [float.__float__(r)]
+        re, im = float.__float__(r), 0.0
     else:
         # (an element of RR past the doubles holds its value already)
         return r
-    zero_ok = any(t == 0 for t in parts)
-    if all(_NORMAL_MIN <= abs(t) < _INF or (t == 0 and zero_ok) for t in vs):
+    if len(args) == 1:
+        x, y = parts
+        on_axis, on_line = _CC_IMAGINARY_ON_AXIS.get(name), _CC_IMAGINARY_ON_LINE.get(name)
+        re0 = (x == 0 and (name in _CC_IMAGINARY_ON_IMAGINARIES or (on_axis is not None and on_axis(y)))) or (
+            y == 0 and on_line is not None and on_line(x))
+        dom = _CC_REAL_ON_DOMAIN.get(name)
+        im0 = (y == 0 and (name in _CC_REAL_ON_REALS or (dom is not None and dom(x)))) or (
+            x == 0 and name in _CC_REAL_ON_IMAGINARIES)
+    else:
+        re0 = im0 = False
+    if (_NORMAL_MIN <= abs(re) < _INF or (re == 0 and re0)) and (_NORMAL_MIN <= abs(im) < _INF or (im == 0 and im0)):
         return r
     import _sage_real
     f = getattr(_sage_real.ComplexNumberMP, name, None) if len(args) == 1 else None
