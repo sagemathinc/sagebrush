@@ -1408,15 +1408,44 @@ class Parser {
   }
 
   mulExpr(): string {
+    const i0 = this.i;
     const first = this.unary();
+    const i1 = this.i;
     const steps: Parameters<Parser["chain"]>[1] = [];
     while (this.at("*") || this.at("/") || this.at("div") || this.at("mod") || this.at("meet")) {
       const t = this.next();
       const f = `_m.${{ "*": "_mul", "/": "_div", div: "_idiv", mod: "_mod", meet: "_meet" }[t.v]}`;
+      const r0 = this.i;
       const r = this.unary(), pos = `(${t.line}, ${t.col})`;
+      if (t.v === "/" && !steps.length) this.zeroDenominator(i0, i1, r0, this.i);
       steps.push({ nest: (l) => `${f}(${l}, ${r}, ${pos})`, op: f, r, pos });
     }
     return this.chain(first, steps);
+  }
+
+  /** An integer literal over a literal zero is refused as Magma reads the statement, before it runs (Magma 2.18-5:
+   * `1/0`, `-(1)/0`, `1/(0)`, `1/--0`, `(-1)/(-(0))`, even in a function never called), "Illegal zero
+   * denominator" at the zero; anything computed (`1/+0`, `(1+1)/0`, `1/(0+0)`, `x/0`) divides when it runs.  The
+   * tokens of each operand: [from, to). */
+  zeroDenominator(a0: number, a1: number, b0: number, b1: number) {
+    // (a literal: any mix of ( and unary - before the digits, the )s balancing the (s after them)
+    const literal = (from: number, to: number) => {
+      const T = this.toks.slice(from, to), op = (x: Tok | undefined, v: string) => x?.t === "op" && x.v === v;
+      let k = 0, open = 0;
+      while (op(T[k], "(") || op(T[k], "-")) open += op(T[k++], "(") ? 1 : 0;
+      const n = T[k];
+      if (n?.t !== "num" || T.length !== k + 1 + open || !T.slice(k + 1).every((x) => op(x, ")"))) return null;
+      // (the caret at its first token after the leading parentheses: the minus of -0, (-0) or -(0))
+      let at = 0;
+      while (op(T[at], "(")) at++;
+      return { zero: /^0+$/.test(n.v), at: T[at] };
+    };
+    // (Magma reads one token past the zero first: one that can't follow it, an identifier, a number, a string, . or
+    // $, is its bad syntax there instead, as in 1/0 x and 1/0X5, which is 0 and X5)
+    const ahead = this.toks[b1];
+    if (["id", "num", "real", "str", "bad"].includes(ahead.t) || (ahead.t === "op" && [".", "$", "$$"].includes(ahead.v))) return;
+    const a = literal(a0, a1), b = literal(b0, b1);
+    if (a && b?.zero) throw new MagmaSyntaxError("Illegal zero denominator", b.at.line, b.at.col, true);
   }
 
   unary(): string {

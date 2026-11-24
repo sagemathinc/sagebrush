@@ -1177,7 +1177,7 @@ _ENGINE_POLY_MIN_WORK = 256
 def _engine_poly(f, p, a, b):
     """The engine's nmod_poly_<f> of coefficient lists a and b (IntegerMod
     elements, no trailing zeros, both nonzero) modulo p."""
-    from sagebrush._engine import call
+    from _sagebrush_lib._engine import call
     return call("nmod_poly_" + f, p=str(p), a=",".join(str(c._v) for c in a), b=",".join(str(c._v) for c in b))
 
 
@@ -4320,7 +4320,7 @@ class Polynomial_ff:
         if f.degree() == 0:
             items = []  # a nonzero constant: a unit, no irreducible factors
         elif isinstance(B, IntegerModRing_) and B._n < 2 ** 32:
-            from sagebrush._engine import call
+            from _sagebrush_lib._engine import call
             p = B._n
             res = call("factor_mod", f=[str(int(c)) for c in f._c], p=p)
             items = [(Polynomial_ff(self._ring, [_elt(B, int(c)) for c in g]), int(e)) for g, e in res]

@@ -874,12 +874,12 @@ check("off-cli-and-phone", !latexHereFor("127.0.0.1", false, SITE) && !latexHere
 check("site-unchanged", latexHereFor("sagebrush.space", false, SITE) && latexHereFor("dev.sagebrush.space", false, SITE) && !latexHereFor("sagebrush.space.evil", false, SITE), null);
 check("app-run-why", /desktop app/.test(APP_NO_RUN) && /sagebrush\.space/.test(APP_NO_RUN), APP_NO_RUN);
 // (the app self-test's LaTeX checks, web/notebook/selftest-latex.js: none outside the desktop app, so a phone's report has
-// none; in it, its three rows, named as the desktop report's judge requires them, app/selftest/android-report.py DESKTOP)
+// none; in it, its four rows, named as the desktop report's judge requires them, app/selftest/android-report.py DESKTOP)
 const judgeNames = [...(/DESKTOP = \[([\s\S]*?)\]/.exec(readFileSync(new URL("../../app/selftest/android-report.py", import.meta.url), "utf8"))?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]);
 check("selftest-latex-phone-none", (await latexChecks({ desktop: false, on: true, menu: null, ws: null })).length === 0 && (await latexChecks({ on: true, menu: null, ws: null })).length === 0, null);
 const deskRows = await latexChecks({ desktop: true, on: false, menu: null, ws: null });
-check("selftest-latex-desktop-rows", deskRows.length === 3 && deskRows.every((r, i) => r[0] === LATEX_CHECKS[i] && r[1] === false), deskRows);
-check("selftest-latex-names-are-the-judge's", judgeNames.length === 3 && JSON.stringify(judgeNames) === JSON.stringify(LATEX_CHECKS), judgeNames);
+check("selftest-latex-desktop-rows", deskRows.length === 4 && deskRows.every((r, i) => r[0] === LATEX_CHECKS[i] && r[1] === false), deskRows);
+check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.stringify(judgeNames) === JSON.stringify(LATEX_CHECKS), judgeNames);
 
 // ---- the examples (the corpus's, scripts/latex-examples.mjs; William, Oct 29: "good tests to illustrate the breadth of editor support"): each one
 // rendered by the pipeline the page uses, and its result recorded (one line each): it renders (outcome ok), with no

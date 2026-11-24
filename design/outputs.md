@@ -75,7 +75,7 @@ running it.
   until the interpreter restarts: their keys don't say where the widgets
   are.
 - **What is cached:** the full outputs of the cells whose time from root is
-  over the document's budget (2 s by default). These are the cells that would
+  over the document's budget (10 s by default). These are the cells that would
   not rerun by themselves on open.
   - An output over 16 MB is not cached (a big 3D mesh). As now, its picture
     is.

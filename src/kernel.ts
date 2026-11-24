@@ -16,7 +16,7 @@
 
 import { createHmac, randomUUID } from "crypto";
 import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, realpathSync, statSync, copyFileSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, resolve } from "path";
 import { homedir } from "os";
 import { Worker, parentPort, workerData } from "worker_threads";
 import { sessionLimits, startLimits } from "./limits";
@@ -113,7 +113,9 @@ export function installKernel(args: string[], uninstall = false): number {
     const f = args.indexOf("--figures");
     const figures = f >= 0 ? args[f + 1] : null;
     if (figures !== null && !FIGURE_MODES.includes(figures)) throw new Error(`--figures must be ${FIGURE_MODES.join(", ")}, not ${figures}`);
-    const base = join(jupyterDataDir(args), "kernels");
+    // Jupyter starts in the notebook's directory, not the installer's.
+    // In particular the copied bundle in argv must never stay relative.
+    const base = resolve(jupyterDataDir(args), "kernels");
     for (const mode of modes(args)) {
       const spec = SPECS[mode];
       const dir = join(base, spec.dir);
