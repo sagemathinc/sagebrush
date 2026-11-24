@@ -1440,8 +1440,23 @@ class Parser {
       const e = this.unary();
       return /^\d+$/.test(e) ? e : `_m._uplus(${e}, (${t.line}, ${t.col}))`;
     }
-    if (this.eat("#")) return `_m._card(${this.unary()})`;
+    if (this.eat("#")) {
+      // (#x^n is (#x)^n: tightOperand)
+      const c = `_m._card(${this.tightOperand()})`;
+      if (!this.at("^")) return c;
+      const t = this.next();
+      return `_m._pow(${c}, ${this.unary()}, (${t.line}, ${t.col}))`;
+    }
     return this.power();
+  }
+
+  /** The operand of S!x and of #x, as Magma 2.18-5 binds them: a postfix expression, not a power, so S!x^n is
+   * (S!x)^n (Integers()!2^-1 is 1/2, G!(1, 2)^2 is Id(G)) and #x^n is (#x)^n (#[1, 2, 3]^2 is 9); one that starts
+   * with a sign is a whole unary expression, power and all, as elsewhere (GF(7)!-3^2 is GF(7)!(-9)) */
+  tightOperand(): string {
+    // (a sign or # starts a unary expression: unary, whose # takes a tight operand in turn)
+    if (this.at("-") || this.at("+") || this.at("#")) return this.unary();
+    return this.postfix();
   }
 
   power(): string {
@@ -1543,7 +1558,7 @@ class Parser {
       } else if (this.at("!")) {
         const t = this.next();
         const w0 = this.witnessDepths.length, depth = this.capturing;
-        const x = this.unary();
+        const x = this.deeper(() => this.tightOperand());
         // (x is evaluated in S's context, so that G!(1, 2) and a function G!f() calls make cycles: in a lambda; an
         // operand that binds names in its own scope, a quantifier's witnesses (exists(w){ ... }, recorded as parsed
         // with their depth, witnessDepths; not one inside a function or rule it makes, which binds there), in place

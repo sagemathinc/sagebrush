@@ -309,7 +309,7 @@ test("the parser's recursion: every cycle passes a charge, and at most 12 calls 
   const src = readFileSync(join(__dirname, "../../src/magma.ts"), "utf8");
   const a = auditParser(src);
   assert.ok(a.longest.length <= 12, a.longest.join(" > "));
-  assert.equal(a.charged, 9);
+  assert.equal(a.charged, 10); // (the tenth: the operand of !, tightOperand)
   // (the audit itself: a charge taken away, or made beside the recursive call, is a cycle with none)
   for (const [from, to] of [
     ["const a = this.deeper(() => this.selectExpr());", "const a = this.selectExpr();"],
