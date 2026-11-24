@@ -15856,5 +15856,25 @@
   "class": "coverage",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "interp3 and slice refuse the interpolation methods Sagebrush doesn't implement (makima, and next and previous, which MATLAB's interp3 page doesn't list): an unsupported option, not a cap"
+ },
+ "lib/_matlab.py :: _made.__exit__ :: \"MATLAB:array:SizeLimitExceeded\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: a memory-guard or allocation refusal (MemoryError) of an array of 5 GB or more is reported with MATLAB's array-size-preference identifier and message instead of nomem"
+ },
+ "lib/_matlab.py :: _made.__exit__ :: raise _err(\"Requested %s (%.1fGB) array exceeds maximum array size preference (5.0GB) and might cause MATLAB \" #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: a memory-guard or allocation refusal (MemoryError) of an array of 5 GB or more is reported with MATLAB's array-size-preference identifier and message instead of nomem"
  }
 }

@@ -67,11 +67,11 @@ ok("measured: admitted up to the allowance, refused past it")
 
 # -- the refusal is MATLAB's out of memory, raised from cell and from growth, before anything is made
 cap = stand_in({"bytes": None})
-for name, call in (("cell(2^30, 1)", lambda: M.cell_(float(2 ** 30), 1.0)),
+for name, call in (("cell(2^26, 1)", lambda: M.cell_(float(2 ** 26), 1.0)),
                    ("x{2^30} = 1", lambda: M._refuse_huge_growth((1, 2 ** 30), M.Cell([1.0], (1, 1)), 1.0))):
     try:
         call()
         raise AssertionError("not refused: " + name)
     except MemoryError as e:
         assert M._identifier(e) == "MATLAB:nomem", name
-ok("cell(2^30, 1) and growth to 2^30 elements are refused (MATLAB:nomem) where memory can't be measured")
+ok("cell(2^26, 1) and growth to 2^30 elements are refused (MATLAB:nomem) where memory can't be measured")
