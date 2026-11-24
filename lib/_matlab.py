@@ -4666,12 +4666,17 @@ def eye_(*args):
     d, cls = _dimsarg(args, "eye")
     if len(d) > 2:
         raise _err("N-dimensional arrays are not supported.")
-    # (the identity in double, its transpose, and the class's copy; and a complex prototype's complex copy, 16 bytes)
+    # (made in storage order, eye(n, m) being eye(m, n) transposed, and in its final type: a complex prototype's
+    # complex identity at once; otherwise the double identity, and the class's copy when the class isn't double)
     p = _like_proto(args)
-    cplx = p is not None and _isnumlike(p) and _arr(p).dtype.kind == "c"
-    with _made(d, _cls_bytes(cls) * (2 if cplx else 1), native=8, copies=5 if cplx else 3):
-        m = np.eye(d[0], d[1])
-        return _as_like(_finish(_contig(m.T), cls or "double"), _like_proto(args))
+    cplx = cls in (None, "double", "single") and p is not None and _isnumlike(p) and _arr(p).dtype.kind == "c"
+    if cplx:
+        dt = np.complex64 if cls == "single" else np.complex128
+        with _made(d, 2 * _cls_bytes(cls)):
+            a = np.eye(d[1], d[0], dtype=dt)
+            return complex(a.reshape(-1)[0]) if a.size == 1 and dt is np.complex128 else _canon(a)
+    with _made(d, _cls_bytes(cls), native=8, copies=1 if cls in (None, "double") else 2):
+        return _finish(np.eye(d[1], d[0]), cls or "double")
 
 
 # MATLAB's default generator: the Mersenne twister seeded with 5489, its

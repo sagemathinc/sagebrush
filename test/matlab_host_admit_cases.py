@@ -83,6 +83,13 @@ assert attempt(lambda: M.ones_(float(2 ** 23), 1.0, M.Char("like"), 1j), "np.ful
 assert attempt(lambda: M.zeros_(float(2 ** 22), 1.0, M.Char("like"), 1j), "np.full") == "reached"  # 64 MB
 assert attempt(lambda: M.blanks_(float(2 ** 24)), "np.full") == "MATLAB:nomem"
 assert attempt(lambda: M.blanks_(float(2 ** 23)), "np.full") == "reached"  # 64 MB
+# (eye's complex identity is made at once, 16 bytes per element: 2^23 elements, 128 MB, refused; 2^22, 64 MB,
+# admitted, where a charge of 8 would admit 2^23)
+assert attempt(lambda: M.eye_(float(2 ** 12), float(2 ** 11), M.Char("like"), 1j), "np.eye") == "MATLAB:nomem"  # 2^23
+assert attempt(lambda: M.eye_(float(2 ** 11), float(2 ** 11), M.Char("like"), 1j), "np.eye") == "reached"  # 2^22
+e = M.eye_(2.0, 3.0, M.Char("like"), 1j)
+assert M._arr(e).dtype == np.complex128 and M._dims(e) == (2, 3) and M._arr(e).T.tolist() == [[1, 0, 0], [0, 1, 0]]
+assert M._arr(M.eye_(3.0, 2.0)).T.tolist() == [[1, 0], [0, 1], [0, 0]] and M.class_(M.eye_(2.0, M.Char("int8"))) == "int8"
 v = M.zeros_(2.0, 2.0, M.Char("like"), 1j)
 assert M._arr(v).dtype == np.complex128 and M.class_(v) == "double" and not M.isreal_(v)
 assert M._arr(M.zeros_(2.0, 2.0, M.Char("like"), M._finish(np.array([[1j]]), "single"))).dtype == np.complex64
