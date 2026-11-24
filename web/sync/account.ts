@@ -1813,8 +1813,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
           if (h.ct_sha256 !== ct || h.size !== size) conflicts.push(h);
           continue;
         }
-        const f = files ? this.one("SELECT state FROM files WHERE sha256 = ?", sha) : undefined;
-        if (f && f.state !== "verifying") continue;
+        const f = files ? this.one("SELECT state, size FROM files WHERE sha256 = ?", sha) : undefined;
+        if (f && f.state !== "verifying") {
+          // (a chunked file, verified or live: held as its address (which its verification checked the chunks' bytes
+          // make; ct = address, the bridge until end-to-end encryption) and its size, under the same exact rule)
+          const fh: Held = { sha256: sha, ct_sha256: sha, size: Number(f.size) };
+          if (fh.ct_sha256 !== ct || fh.size !== size) conflicts.push(fh);
+          continue;
+        }
         if (f) verifying.push(sha);
         missing.push(sha);
       }
