@@ -6,12 +6,13 @@
 import { spawnSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
 const opt = (n, d) => (args.includes(n) ? args[args.indexOf(n) + 1] : d);
 const python = opt("--python", "python3");
 const only = opt("--only", "");
-const root = resolve(new URL("..", import.meta.url).pathname);
+const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const dir = join(root, "bench/pyperformance");
 let files = readdirSync(dir).filter((f) => /^bm_.*\.py$/.test(f)).sort();
 if (only) files = files.filter((f) => only.split(",").some((o) => f.includes(o)));

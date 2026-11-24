@@ -15,7 +15,7 @@ import { spawn } from "node:child_process";
 import { seenOf, driver, runnable, parseOutput, statesOf, BLOCKED, tally, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
 import { Engine, installPythontex } from "./engine/pipeline.mjs";
 import * as pythontexCode from "./engine/pythontex.mjs";
-import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, staleOfSync, sha256hex, readComplete, DEPS_MAX, inlineHtml, blockHtml, mathPart } from "./engine/sagetex.mjs";
+import { itemKey, savedStates, stateOf, RUN_HINT, PRESENT_RUN_HINT, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, staleOfSync, sha256hex, readComplete, DEPS_MAX, inlineHtml, blockHtml, mathPart } from "./engine/sagetex.mjs";
 import { interactsOf, interactsHtml, INTERACT_LIMITS } from "./interact.ts";
 
 const results = [];
@@ -65,6 +65,12 @@ const item = (mode, code, extra = {}) => { const it = real(mode, code, extra); r
   const A = real("silent", "a = 3"), B = real("sage", "a^2"), P = real("plot", "plot(x^a)"), C = real("sage", "7");
   const saved = [ok(A), ok(B, { latex: "9" }), ok(P, { src: SVG }), ok(C, { latex: "7" })];
   const kinds = (st, its) => its.map((it, k) => stateOf(st, k, it).s);
+  // (a code item not run yet: in the editor, where Run is, it says how to run it; elsewhere just "not run")
+  {
+    const one = { mode: "sage", kind: "inline", code: "1+1" };
+    check("not run yet: the editor's hint where the page can run it, \"not run\" elsewhere", stateOf([], 0, one, true).msg === RUN_HINT && stateOf([], 0, one).msg === "not run" && stateOf([], 0, one, true).s === "notrun", [stateOf([], 0, one, true), stateOf([], 0, one)]);
+    check("the hints name what runs the code: Run or Shift+Enter in the editor, Shift+Enter alone while presenting", RUN_HINT.includes("Run or Shift+Enter") && PRESENT_RUN_HINT === "not run yet (press Shift+Enter)");
+  }
   const A2 = real("silent", "a = 4");
   const st1 = savedStates([A2, B, P, C], saved);
   check("stale: an item edited in place, and every one after it, keep their last values, stale", JSON.stringify(kinds(st1, [A2, B, P, C])) === JSON.stringify(["stale", "stale", "stale", "stale"]) && stateOf(st1, 1, B).latex === "9" && stateOf(st1, 2, P).src === SVG, st1);

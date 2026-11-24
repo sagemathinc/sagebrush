@@ -123,13 +123,17 @@ def show(obj, *more, **options):
         1 2/3
     """
     if not more:
-        if isinstance(obj, Graphics3d):
+        # (a picture is an instance of a plot module's class only once that
+        # module is loaded: show(1) doesn't load them)
+        p3, p2 = _sys0.modules.get("sage_plot3d"), _sys0.modules.get("sage_plot")
+        if p3 is not None and isinstance(obj, p3.Graphics3d):
             return obj.show(**options)
-        if isinstance(obj, (_Graphics2d, _GraphicsArray, _Animation)):
-            return _show2d(obj, **options)
+        if p2 is not None and isinstance(obj, (p2.Graphics, p2.GraphicsArray, p2.Animation)):
+            return p2.show(obj, **options)
         # (a picture-like object without a LaTeX form, a graph or a
         # polyhedron: its own rich display)
         if not hasattr(obj, "_latex_") and any(hasattr(obj, m) for m in _RICH_DISPLAY):
+            from sage_plot import show as _show2d
             return _show2d(obj, **options)
     from _sage_expr import show_typeset
     return show_typeset(obj, *more)
@@ -371,7 +375,7 @@ def timeit(stmt, number=0, repeat=3, globals=None, **kwds):
         # as Sage: the statement is Sage code, so 2^3 is 8 and 1/2 exact
         code = _b.__pyjs_compile_sage__(stmt, "<timeit>", "exec")
     else:
-        from sagebrush.preparse import preparse as _preparse
+        from _sagebrush_lib.preparse import preparse as _preparse
         code = compile(_preparse(stmt), "<timeit>", "exec")
     n = int(number) or 1
     if not number:
@@ -429,7 +433,7 @@ def sage_eval(source, locals=None, cmds="", preparse=True):
             return compile(code, "<sage_eval>", mode)
         if hasattr(_b, "__pyjs_compile_sage__"):
             return _b.__pyjs_compile_sage__(code, "<sage_eval>", mode)
-        from sagebrush.preparse import preparse as _preparse
+        from _sagebrush_lib.preparse import preparse as _preparse
         return compile(_preparse(code).strip(), "<sage_eval>", mode)
 
     # as Sage: the commands and the assignment of the expression's value
@@ -618,6 +622,35 @@ def _poly_var_name(var):
 _C_SPACE = {9: None, 10: None, 11: None, 12: None, 13: None, 32: None}
 
 
+def _str_preview(s, quote=True):
+    """A string (or bytes) for an error message: s itself (repr'd if quote)
+    up to 100 characters, as Sage prints it; past that its first 60
+    characters and its length, so a refusal of a megabyte string stays
+    short."""
+    if len(s) <= 100:
+        return repr(s) if quote else s
+    # (the preview's own text is capped: a byte or an escape is up to 10
+    # characters of repr)
+    head = (repr(s[:60]) if quote else str(s[:60]))[:100]
+    return "%s... (a string of %d characters)" % (head, len(s))
+
+
+def _gmp_part_ok(part):
+    """Whether a part of a rational's string keeps GMP's shape before its
+    spaces are dropped: no space between the minus and the number, nor
+    inside a 0x or 0b prefix ('- 3' and '-0 x10' are refused, as in Sage)."""
+    p = part.lstrip(" \t\n\v\f\r")
+    if p.startswith("-"):
+        p = p[1:]
+        if not p or p[0] in " \t\n\v\f\r":
+            return False
+    if p[:1] == "0":
+        q = p[1:].lstrip(" \t\n\v\f\r")
+        if q[:1] in ("x", "X", "b", "B") and p[1:2] not in ("x", "X", "b", "B"):
+            return False
+    return True
+
+
 def _rational_from_str(s, base):
     """(numerator, denominator) of a string as Sage reads a rational (GMP's
     rule; s a string or bytes): 'a' or 'a/b', ASCII spaces anywhere ignored,
@@ -640,18 +673,19 @@ def _rational_from_str(s, base):
         try:
             t = s.decode()
         except UnicodeDecodeError:
-            raise TypeError("unable to convert %r to a rational" % (s,)) from None
+            raise TypeError("unable to convert %s to a rational" % _str_preview(s)) from None
     # (only C's whitespace is ignored: a no-break space is refused)
+    raw = t.split("/")
     parts = t.translate(_C_SPACE).split("/")
     vals = []
-    if (b == 0 or 2 <= b <= 62) and len(parts) <= 2:
+    if (b == 0 or 2 <= b <= 62) and len(parts) <= 2 and all(_gmp_part_ok(r) for r in raw):
         for part in parts:
             v = _gmp_int(part, b)
             if v is None:
                 break
             vals.append(v)
     if len(vals) != len(parts) or (len(vals) == 2 and vals[1] == 0):
-        raise TypeError("unable to convert %r to a rational" % s)
+        raise TypeError("unable to convert %s to a rational" % _str_preview(s))
     return vals[0], (vals[1] if len(vals) == 2 else 1)
 
 
@@ -662,17 +696,33 @@ def _gmp_int(t, base):
     neg = t.startswith("-")
     if neg:
         t = t[1:]
+    prefixed = False
     if base == 0:
         if t[:2] in ("0x", "0X"):
-            t, base = t[2:], 16
+            t, base, prefixed = t[2:], 16, True
         elif t[:2] in ("0b", "0B"):
-            t, base = t[2:], 2
+            t, base, prefixed = t[2:], 2, True
         elif t[:1] == "0" and len(t) > 1:
             t, base = t[1:], 8
         else:
             base = 10
     if not t:
-        return None
+        # (a prefix's 0 is a digit: '0x' alone is 0, as GMP reads it)
+        return 0 if prefixed else None
+    if base <= 36:
+        # (int() reads the digits in C: digit by digit, a long string was
+        # quadratic; it takes the same letters and digits, either case)
+        if not (t.isascii() and t.isalnum()):
+            return None
+        if t[:1] == "0" and t[1:2].lower() == {16: "x", 2: "b", 8: "o"}.get(base):
+            # (int() would read Python's prefix in its own base; GMP reads
+            # no prefix in an explicit base: QQ('0x10', 16) is refused)
+            return None
+        try:
+            v = int(t, base)
+        except ValueError:
+            return None
+        return -v if neg else v
     v = 0
     for ch in t:
         o = ord(ch)
@@ -1838,7 +1888,7 @@ def _integer_from_str(s, base):
             return int(t, base or 10)
         except ValueError:
             pass
-    raise TypeError("unable to convert %r to an integer" % s)
+    raise TypeError("unable to convert %s to an integer" % _str_preview(s))
 
 
 def _integral_real(x):
@@ -1876,12 +1926,25 @@ def _QQ(x, d=None):
 
 
 def _QQ_exact(x, d=None):
-    """The exact rational x (or x/d); a real number's exact binary value."""
+    """The exact rational x (or x/d); a real number's exact binary value
+    (examples of strings in QQ's documentation)."""
+    if isinstance(x, (str, bytes)):
+        # (QQ(s) and QQ(s, base) read a string as Rational(s, base) does, as
+        # in Sage: GMP's rule; it was Fraction(s), which took '0.5' and gave
+        # QQ('3', 4) as 3/4)
+        n, dd = _rational_from_str(x, 0 if d is None else d)
+        return _q(_Fraction(n, dd))
     if d is not None and d == 0:
         raise ZeroDivisionError("rational division by zero")
+    if d is None and x is None:
+        # (QQ(None) is 0, as in Sage)
+        x = 0
     if d is None and hasattr(x, "_rational_"):
         x = x._rational_()
-    f = _Fraction(x) if d is None else _Fraction(x, d)
+    try:
+        f = _Fraction(x) if d is None else _Fraction(x, d)
+    except ValueError:
+        raise TypeError("unable to convert %r to a rational" % (x,))
     if type(f) is not _Fraction:
         f = _Fraction(f._numerator, f._denominator)
     return _q(f)
@@ -2502,7 +2565,7 @@ def factor(n, proof=None, **kwds):
         TypeError: factor(): deadline= is not available in this build
     """
     if kwds:
-        from sagebrush import records as _records
+        from _sagebrush_lib import records as _records
         _records.refuse_later_options("factor", kwds)
     if isinstance(n, (_Polynomial, _Expr)) or (not isinstance(n, (int, _Fraction)) and hasattr(n, "factor")):
         F = n.factor()
@@ -2528,7 +2591,7 @@ def factor(n, proof=None, **kwds):
             n //= p
     if n > 1 << 40:
         # the Rust engine (sagebrush.nf.factor_integer)
-        from sagebrush import nf as _nfmod
+        from _sagebrush_lib import nf as _nfmod
         for p, e in _nfmod.factor_integer(n):
             out[p] = out.get(p, 0) + e
     else:
@@ -4041,6 +4104,7 @@ class _ContinuedFractionReal:
         if not hasattr(self, "_aa"):
             if len(self._x._s) > _CF_MAX_EXPR_CHARS:
                 raise NotImplementedError("the continued fraction of an expression of more than %d characters" % _CF_MAX_EXPR_CHARS)
+            from _sage_qqbar import AA
             try:
                 a = AA(self._x)
                 self._aa = (a, [_Fraction(c) for c in a.minpoly().list()])
@@ -4124,6 +4188,7 @@ def _cf_quadratic(a, m):
         raise NotImplementedError("a quadratic irrational whose discriminant has more than %d bits" % _CF_MAX_DISC_BITS)
     # which root: a is above the midpoint -B/(2A) exactly when it is the
     # (-B + sqrt(D))/(2A) root with A > 0, or the other one with A < 0
+    from _sage_qqbar import AA
     above = a > AA(_q(_Fraction(-B, 2 * A)))
     P, Q = (-B, 2 * A) if above == (A > 0) else (B, -2 * A)
     r = _math.isqrt(D)
@@ -4188,7 +4253,7 @@ if _Integer is not None:
 
 # (sagebrush.poly.qclear accepts Sage's own Integer and Rational by exact type,
 # and the int a Rational's numerator() or denominator() returns)
-import sagebrush.poly as _sb_poly
+import _sagebrush_lib.poly as _sb_poly
 _sb_poly._QCLEAR_FRACTIONS.add(Rational)
 _sb_poly._QCLEAR_INTS.add(_CallableInt)
 if isinstance(Integer, type):

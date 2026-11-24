@@ -3039,7 +3039,7 @@ function objectBytes(x: any): Uint8Array {
   }
   return Uint8Array.from(out);
 }
-function toBytes(x: any, encoding: any = undefined, errors: any = undefined, array = false, reserve?: (n: number) => void): Uint8Array {
+function toBytes(x: any, encoding: any = undefined, errors: any = undefined, array = false, reserve?: (n: number) => void, tn?: string): Uint8Array {
   [encoding, errors] = codecArgs(array, encoding, errors);
   if (x !== undefined && typeof x !== "string" && isinstance(x, T.str)) x = unbox(x);
   if (typeof x !== "string") {
@@ -3054,10 +3054,27 @@ function toBytes(x: any, encoding: any = undefined, errors: any = undefined, arr
   }
   if (encoding !== undefined) raise(T.TypeError, typeof x === "string" ? "" : "encoding without a string argument");
   if (O.isPyInt(x)) {
-    if (typeof x === "bigint" || Number(x) > 2 ** 32) raise(T.OverflowError, "cannot fit 'int' into an index-sized integer");
-    if (Number(x) < 0) raise(T.ValueError, "negative count");
-    reserve?.(Number(x));
-    return new Uint8Array(Number(x));
+    // (CPython's own bounds only: past Py_ssize_t an OverflowError, and for
+    // bytes past it less a bytes object's header; else as many bytes as the
+    // host can allocate, a MemoryError saying so when it can't)
+    const n = typeof x === "bigint" ? x : BigInt(Number(x));
+    // (named by the object's own type, as CPython's PyNumber_AsSsize_t: an __index__ object's, an int subclass's)
+    if (n > 9223372036854775807n || n < -9223372036854775808n) raise(T.OverflowError, `cannot fit '${tn ?? typeName(x)}' into an index-sized integer`);
+    if (n < 0n) raise(T.ValueError, "negative count");
+    if (!array && n > 9223372036854775807n - 33n) raise(T.OverflowError, "byte string is too large");
+    const what = `${array ? "bytearray" : "bytes"}(${n})`;
+    if (n > 9007199254740991n) raise(T.MemoryError, `${what}: past JavaScript's limit of 2**53 - 1 bytes`);
+    reserve?.(Number(n));
+    try {
+      return new Uint8Array(Number(n));
+    } catch (e: any) {
+      // (the engine's own largest byte array, below JavaScript's limit: no memory ran out; else its refusal to allocate,
+      //  as V8's "Array buffer allocation failed" and other engines' words for it; never a call stack's RangeError,
+      //  which is a RecursionError (object.ts toPyExc))
+      if (e instanceof RangeError && /Invalid typed array length|invalid array length/i.test(e.message)) raise(T.MemoryError, `${what}: past the largest byte array this JavaScript engine makes`);
+      if (e instanceof RangeError && !/call stack/.test(e.message)) raise(T.MemoryError, `${what}: the computer couldn't give the ${n} bytes it needed`);
+      throw e;
+    }
   }
   const buf = O.bufferOf(x);
   if (buf !== undefined) return buf.slice();
@@ -3091,7 +3108,7 @@ function toBytes(x: any, encoding: any = undefined, errors: any = undefined, arr
       throw e;
     }
     if (n === undefined || (typeof n === "object" && "bad" in n)) raise(T.TypeError, `cannot convert '${typeName(x)}' object to bytes`);
-    return toBytes(n, undefined, undefined, array, reserve);
+    return toBytes(n, undefined, undefined, array, reserve, typeName(x));
   }
   const it = O.iter(x);
   const out: number[] = [];

@@ -13,8 +13,9 @@ import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { frameOptions, framePolicy, ghPolicy, pagePolicy, runnerPolicy, shellWorkerPolicy } from "./csp-policy.mts";
 import { FILES_RUNNER_SCRIPT } from "./notebook/files-runner.js";
+import { fileURLToPath } from "node:url";
 
-const here = dirname(new URL(import.meta.url).pathname);
+const here = dirname(fileURLToPath(import.meta.url));
 
 function pages(dir: string, rel = ""): string[] {
   const out: string[] = [];

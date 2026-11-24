@@ -1,6 +1,6 @@
 """End-to-end test of the Sagebrush Jupyter kernel with Jupyter's own client
 (jupyter_client, over pyzmq): signed messages, execution and results,
-streams, SVG display, errors, completion, is_complete, interrupts of Python
+streams, figures (SVG, or a sharp PNG with its size in the metadata), errors, completion, is_complete, interrupts of Python
 loops and of the engines, Magma, MATLAB and Python modes, and shutdown.
 
     pip install jupyter_client
@@ -92,7 +92,18 @@ r, m = run(kc, "t + 1")
 check("time prefix: the statement ran", [c["data"]["text/plain"] for c in of(m, "execute_result")] == ["1025"], m)
 r, m = run(kc, "x = var('x'); plot(sin(x), (x, 0, 3))")
 d = of(m, "display_data") + of(m, "execute_result")
-check("SVG display", any("image/svg+xml" in c["data"] for c in d), [list(c["data"]) for c in d])
+check("a figure shows as its SVG (auto)", any("image/svg+xml" in c["data"] and "image/png" not in c["data"] for c in d), [list(c["data"]) for c in d])
+r, m = run(kc, "import sagebrush\nsagebrush.figures('png')\nplot(cos(x), (x, 0, 3))")
+d = of(m, "display_data") + of(m, "execute_result")
+check("...as a PNG at twice the size with its size at once in the metadata, after sagebrush.figures('png')",
+      any("image/png" in c["data"] and c["metadata"] == {"image/png": {"width": 640, "height": 480}} for c in d), [(list(c["data"]), c["metadata"]) for c in d])
+run(kc, "sagebrush.figures('reset')")
+r, m = run(kc, "points([(random(), random()) for _ in range(30000)], size=1)")
+d = of(m, "display_data") + of(m, "execute_result")
+said = "".join(c["text"] for c in of(m, "stream"))
+check("...and auto shows a figure whose SVG would be over 1 MB as that PNG, saying so",
+      any("image/png" in c["data"] and "image/svg+xml" not in c["data"] and c["metadata"].get("image/png") for c in d) and said.startswith("Shown as a PNG: its SVG would be"),
+      ([(list(c["data"]), c["metadata"]) for c in d], said))
 # a big 3D scene goes to a page in .sagebrush/, shown in an iframe: the output
 # stays far under the front ends' output limits (CoCalc's is 1 MB per cell)
 big = tempfile.mkdtemp(prefix="sagebrush-k3d-")
@@ -237,7 +248,9 @@ r, m = run(kc, "y = undefined_thing + 1")
 e = of(m, "error")
 check("matlab error", r["status"] == "error" and e and e[0]["traceback"] == ["Unrecognized function or variable 'undefined_thing'."], (r, e))
 r, m = run(kc, "plot(1:3)")
-check("matlab figure", any("image/svg+xml" in c["data"] for c in of(m, "display_data")), [list(c["data"]) for c in of(m, "display_data")])
+check("matlab figure (SVG)", any("image/svg+xml" in c["data"] for c in of(m, "display_data")), [list(c["data"]) for c in of(m, "display_data")])
+r, m = run(kc, "sagebrush_figures('png');\nplot(1:3)")
+check("matlab figure as a PNG after sagebrush_figures('png')", any("image/png" in c["data"] and c["metadata"] == {"image/png": {"width": 560, "height": 420}} for c in of(m, "display_data")), [(list(c["data"]), c["metadata"]) for c in of(m, "display_data")])
 r, m = run(kc, "x = [1 2")
 e = of(m, "error")
 check("matlab syntax error", r["status"] == "error" and e and e[0]["ename"] == "MATLAB:syntax", (r, e))

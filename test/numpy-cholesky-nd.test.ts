@@ -190,7 +190,8 @@ test("a URL with no hash, or a malformed one, is never fetched: the session runs
   assert.deepEqual(c, { path: "typescript", why: "the numerics module could not be loaded (the numerics module fetched is not the one this page was built with)", fetches: 1 });
 });
 
-test("a module memory that can't grow is a MemoryError with its message, and the session goes on (grader N12)", async () => {
+// (engine cost policy r2: no room in the module's memory is not a refusal; the loop computes it. Was grader N12's MemoryError)
+test("a module memory that can't grow: the factor is computed in JavaScript, the same, and the session goes on", async () => {
   const { notebookSession } = require("../src/notebook-session");
   const s = notebookSession(() => {}, { captureStreams: true });
   await s.ready;
@@ -200,14 +201,14 @@ test("a module memory that can't grow is a MemoryError with its message, and the
     proto.grow = () => {
       throw new RangeError("WebAssembly.Memory.grow(): Maximum memory size exceeded");
     };
-    await s.handle({ id: 2, code: "try:\n    np.linalg.cholesky(B)\n    R = 'ran'\nexcept MemoryError as e:\n    R = str(e)" });
+    await s.handle({ id: 2, code: "try:\n    R = float(np.linalg.cholesky(B)[699, 699])\nexcept MemoryError as e:\n    R = str(e)" });
   } finally {
     proto.grow = grow;
   }
   await s.handle({ id: 3, code: "OK = float(np.linalg.cholesky(B)[0, 0])" });
   const main = require("../src/runtime/object").getattr(require("../src/runtime").R.importModule("__main__"), "__dict__");
   const v = (name: string) => require("../src/runtime/object").callObj(require("../src/runtime/object").getattr(main, "__getitem__"), [name]);
-  assert.equal(v("R"), "cholesky of a 700 x 700 matrix needs more working memory than WebAssembly can have here");
+  assert.equal(v("R"), Math.SQRT2);
   assert.equal(v("OK"), Math.SQRT2);
 });
 

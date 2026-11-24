@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { readdirSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import os from "node:os";
+import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => {
@@ -21,7 +22,7 @@ const show = Number(opt("--show", 20));
 const filter = opt("--filter", "");
 const report = opt("--report", "");
 const inputs = args.length ? args : ["upstream/micropython/basics", "test/py"];
-const root = resolve(new URL("..", import.meta.url).pathname);
+const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 let files = [];
 for (const p of inputs) {

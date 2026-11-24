@@ -195,6 +195,12 @@ export function lex(src: string): Tok[] {
     if (/[A-Za-z]/.test(c)) {
       let j = i;
       while (j < n && /[A-Za-z0-9_]/.test(src[j])) j++;
+      // (a reactive notebook's page-order scoping names a later definition of x xʹ2, U+02B9 and digits, a suffix no
+      // MATLAB name can have: src/rename-matlab.ts; the runtime shows it as x, lib/_matlab.py _written)
+      if (src[j] === "ʹ" && /[0-9]/.test(src[j + 1] ?? "")) {
+        j++;
+        while (j < n && /[0-9]/.test(src[j])) j++;
+      }
       const w = src.slice(i, j);
       if (KEYWORDS.has(w)) {
         if (w === "end" && argBlock && stmtStart) argBlock = false;
@@ -984,6 +990,9 @@ const PYKW = new Set(("False None True and as assert async await break class con
 
 /** a MATLAB name as a Python one (MATLAB names never start with _) */
 export const pyName = (s: string) => (PYKW.has(s) ? "_k_" + s : s);
+// (at the top level, a name in globals() is a workspace variable unless it is another language's: one engine
+// session runs Sage, Python and MATLAB in one namespace, so Python's norm or a module isn't MATLAB's (lib/_matlab.py foreign))
+const inWorkspace = (py: string) => `(${JSON.stringify(py)} in globals() and not _m.foreign(${py}))`;
 
 // ------------------------------------------------------------------ emitter
 
@@ -1486,7 +1495,7 @@ class Emitter {
       return;
     }
     const base = scope.globals.has(lv.name) ? this.varRead(lv.name, scope)
-      : scope.fn || scope.persistents.has(lv.name) ? name : `(${name} if ${JSON.stringify(name)} in globals() else None)`;
+      : scope.fn || scope.persistents.has(lv.name) ? name : `(${name} if ${inWorkspace(name)} else None)`;
     // x(i) = v and x(i, j) = v: the common cases, without the path
     const p0 = lv.path[0];
     if (lv.path.length === 1 && p0.k === "index" && !p0.brace && (p0.args.length === 1 || p0.args.length === 2) &&
@@ -1574,7 +1583,7 @@ class Emitter {
     if (scope.fn) return `_m.fn(${JSON.stringify(name)}${imp})`;
     const py = pyName(name);
     // (True: named at the top level, where a script found on the path can run)
-    return `(${py} if ${JSON.stringify(py)} in globals() else _m.fn(${JSON.stringify(name)}${imp || ", True"}))`;
+    return `(${py} if ${inWorkspace(py)} else _m.fn(${JSON.stringify(name)}${imp || ", True"}))`;
   }
 
   // -------- expressions
@@ -1614,7 +1623,7 @@ class Emitter {
           // again, as MATLAB's, so upper = 7; clear; upper('abc') works)
           if (this.mayClear && !scope.fn && !scope.anon && !scope.globals.has(e.name) && !this.fnNames.has(e.name)) {
             const py = pyName(e.name);
-            return `(${py} if ${JSON.stringify(py)} in globals() else _m.val(_m.fn(${JSON.stringify(e.name)}, True)))`;
+            return `(${py} if ${inWorkspace(py)} else _m.val(_m.fn(${JSON.stringify(e.name)}, True)))`;
           }
           return this.varRead(e.name, scope);
         }
@@ -1819,7 +1828,7 @@ class Emitter {
         inner.vars.add(n);
       } else if (!scope.fn && !this.fnNames.has(n)) {
         // (at the top level: a workspace variable now, else a function)
-        captured.push(`${pyName(n)}=(_m.cp(${pyName(n)}) if ${JSON.stringify(pyName(n))} in globals() else _m.NOVAR)`);
+        captured.push(`${pyName(n)}=(_m.cp(${pyName(n)}) if ${inWorkspace(pyName(n))} else _m.NOVAR)`);
         inner.vars.add(n);
         inner.caps!.add(n);
       }

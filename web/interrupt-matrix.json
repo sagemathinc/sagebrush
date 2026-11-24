@@ -26,12 +26,12 @@
   },
   "registries": {
    "magma": {
-    "count": 184,
-    "sha": "b17e39e27d2d7de5"
+    "count": 188,
+    "sha": "df37ab5bf261b5bd"
    },
    "matlab": {
-    "count": 263,
-    "sha": "878782c0cf97f799"
+    "count": 264,
+    "sha": "4478b682d95fb5b3"
    },
    "sage": {
     "count": 204,
@@ -39,8 +39,8 @@
    }
   },
   "libModules": {
-   "count": 180,
-   "sha": "5866b449e57a0ca8"
+   "count": 182,
+   "sha": "5828654118ab68cb"
   }
  },
  "entries": [

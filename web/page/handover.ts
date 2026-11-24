@@ -1,19 +1,23 @@
 // Focus takeover: the tab of this browser a person is using takes its document's writer lock at once, and the tab that
 // had it follows (read-only, still showing every change, saying nothing) until it is used again (web/journal/store.js:
 // writerLock's enqueue and passOn, the store's yieldLock).  One channel per document, named as its lock is:
-//   want {tab, at}: this tab was used (`at`: when) and doesn't write the document: the writer hands it over;
+//   want {tab, at, q?}: this tab was used (`at`: when) and doesn't write the document: the writer hands it over, once
+//     the want answers its question (`q`, below);
 //   writer {tab}: this tab writes it now (its want answered);
-//   who-wants: a writer back from being frozen or hidden: a used tab still waiting asks again (a want sent while it
-//     was frozen may never have reached it);
-//   bye {tab}: this tab is gone.
-// A tab granted the lock while another was used more recently and wants it passes it on at once (passOn), so the lock
-// goes to the tab in use, not to whichever was first in the lock's queue.  What is typed into the tab in use before it
+//   who-wants {q?}: a writer back from being frozen or hidden, or about to let go (`q`: its question's id): a used tab
+//     still waiting asks again, with that id (a want sent while it was frozen may never have reached it; the lock is
+//     let go only for a want that answers the writer's current question);
+//   bye {tab}: this tab is gone, or shows another document now.
+// A tab granted the lock while another was used more recently and wants it passes it on (passOn), once that want
+// answers its own question as below (up to 500 ms, the lock held and no tab writing meanwhile), so the lock goes to the tab in use, not to whichever was first in the lock's
+// queue.  What is typed into the tab in use before it
 // writes is kept, and typed again into the same place once it does: up to 5000 input actions, and of a paste its text only.
 // No input is dropped without a word: what is kept is typed in once its field can take it (the cell still read-only, or
 // not shown yet, as the takeover settles: typed in as soon as it can be); what never can be (its cell gone from the
 // document, another document shown, the takeover failed, no field to type it into, or past the 5000 kept) is counted,
 // and the page says how many input actions weren't applied.
 
+import { docValue, ENVELOPE } from "../workspace/notebook-form";
 /** What the page says of input made while this tab was taking over that wasn't applied (`n` input actions: a key, a
  * paste, a cursor move): not replayed into the document, not a storage failure. */
 export const inputNotApplied = (n: number) => `${n} input action${n === 1 ? "" : "s"} made here while this tab was taking over ${n === 1 ? "wasn't" : "weren't"} applied: enter that input again.`;
@@ -37,6 +41,11 @@ export type HandoverPage = {
   hasKey?(key: string): boolean;
   /** `n` more input actions couldn't be applied here: said by the page. */
   notApplied?(n: number): void;
+  /** The document shown, and the document `doc` shown in its place as a change made here (saved, recorded): what a
+   * whole write asked of this tab while it writes the document is made with (Workspace.write under sync's journal).
+   * Without them, this tab answers no such write. */
+  shownDoc?(): any;
+  replaceDoc?(doc: any): void;
 };
 
 // (what the person typed before this tab could write: text, a deletion, a cursor move or another key, kept in order,
@@ -48,6 +57,21 @@ type Op = ({ text: string } | { del: -1 | 1 } | { move: -1 | 1 } | { key: Keyboa
 // far at their places in the field's own text, to place a moved selection among them)
 type Shadow = { s: number; e: number; len: number; real: [number, number]; edits: { o: number; d: number }[] };
 
+/** The bounds of the whole writes a tab answers: requests kept (answered ones for WRITE_KEEP_MS), how long a `ready`
+ * waits for its commit, and a document's cells and size. */
+const WRITE_MAX = 64, WRITE_KEEP_MS = 60_000, READY_MS = 5000, DOC_CELLS = 10_000, DOC_CHARS = 32 * 2 ** 20;
+/** A document as a whole write gives it: {cells: [...]} of cells each {type?, code?, ...}, bounded. */
+function docOk(d: any): boolean {
+  if (!d || typeof d !== "object" || Array.isArray(d) || !Array.isArray(d.cells) || d.cells.length > DOC_CELLS) return false;
+  if (!d.cells.every((c: any) => c && typeof c === "object" && !Array.isArray(c) && (c.code === undefined || typeof c.code === "string") && (c.type === undefined || c.type === "code" || c.type === "markdown" || c.type === "raw"))) return false;
+  if (d.mode !== undefined && typeof d.mode !== "string") return false;
+  try { return JSON.stringify(d).length <= DOC_CHARS; } catch { return false; }
+}
+// (two documents equal as whole documents: every field but the store's envelope, each cell whole)
+const sameDoc = (a: any, b: any) => docValue(a) === docValue(b);
+// (a record as a document: the store's own fields left out)
+const plainDoc = (r: any) => { if (!r) return null; const { j: _j, hash: _h, unjournaled: _u, rev: _r, updated: _d, baseRev: _b, at: _a, from: _f, proof: _p, ...doc } = r; return doc; };
+
 export function writerHandover(page: HandoverPage) {
   const tab = Math.random().toString(36).slice(2);
   let store: any = null, ch: BroadcastChannel | null = null, lastUse = 0, wanting = false, handing = false, composing = false;
@@ -56,7 +80,7 @@ export function writerHandover(page: HandoverPage) {
   // want another tab's use overtook never takes the lock from the tab being typed in; it waits, its keys kept, until
   // this tab is used again (a later `at`) or the writer lets go)
   let reask: ReturnType<typeof setInterval> | null = null, lastPost = 0;
-  const want = () => { lastPost = Date.now(); post({ t: "want", tab, at: lastUse }); };
+  const want = (q?: string) => { lastPost = Date.now(); post({ t: "want", tab, at: lastUse, ...(q ? { q } : {}) }); };
   const startWanting = () => {
     if (wanting) return;
     wanting = true;
@@ -67,7 +91,10 @@ export function writerHandover(page: HandoverPage) {
   const stopWanting = () => { wanting = false; if (reask) clearInterval(reask); reask = null; };
   // (other tabs' wants not yet answered: tab -> when it was used (`at`) and when its want was last heard; and those this
   // tab already passed the lock on for)
-  const wants = new Map<string, { at: number; heard: number }>(), passed = new Set<string>();
+  // (`q`: the question the want answered, if it answered one)
+  const wants = new Map<string, { at: number; heard: number; q: string | null }>(), passed = new Set<string>();
+  // (each want heard, told to whoever waits for the answer to a question: asked again before letting go, below)
+  const onWant = new Set<() => void>();
   // (a want used later than this tab's own last use: only that one takes the lock from this tab; and only while it is
   // still being asked (heard in the last 2.5 s: one is asked again every second): a tab that died with a want left
   // can't hold the lock away for ever)
@@ -86,41 +113,82 @@ export function writerHandover(page: HandoverPage) {
     // (the same store shown again (showWriter after a load): a want heard while it was still loading answered now)
     if (st === store) { void handOver(); return 0; }
     if (store) store.passOn = null;
+    // (leaving this document: asks its writer to drop this tab's want, as for a tab gone; a writer paused or frozen
+    // meanwhile may not hear it, and its question below is what keeps the lock then)
+    post({ t: "bye", tab });
     ch?.close();
     const lost = buffer.length;
     ch = null; store = st; stopWanting(); stopWaiting(); buffer = []; shadows.clear(); wants.clear(); passed.clear();
     if (!st?.journaled || typeof BroadcastChannel !== "function") return lost;
     ch = new BroadcastChannel(st.kind.lockPrefix + st.id);
     ch.onmessage = (ev) => heard(ev.data);
-    st.passOn = () => {
-      // (a want is passed on for once)
-      for (const [t, w] of wants) if (later(w) && fresh(w) && !passed.has(t + w.at)) { passed.add(t + w.at); return true; }
+    // (granted the lock while another tab wants it: that want asked again first, as before letting go (the lock held
+    // meanwhile), and passed on only for a want that answers by id, and for once)
+    st.passOn = async () => {
+      if (confirming || !standing()) return false;
+      confirming = true;
+      let q: string | null = null;
+      try { q = await confirmed(); } finally { confirming = false; }
+      if (!q || store !== st) return false;
+      for (const [t, w] of wants) if (w.q === q && later(w) && fresh(w) && !passed.has(t + w.at)) { passed.add(t + w.at); return true; }
       return false;
     };
     return lost;
   }
   function heard(m: any) {
+    if (m && (m.t === "write" || m.t === "commit")) return void onWrite(m);
     if (!m || typeof m.tab !== "string" && m.t !== "who-wants") return;
-    if (m.t === "want" && typeof m.at === "number") { wants.set(m.tab, { at: m.at, heard: Date.now() }); void handOver(); }
+    // (a want that answers no question keeps the answer its tab gave before: the same tab, still wanting (each tab's
+    //  messages come in order, so it is newer than that answer), typed in again while this one saved; a tab that moved
+    //  on said bye, which forgets it)
+    if (m.t === "want" && typeof m.at === "number") { wants.set(m.tab, { at: m.at, heard: Date.now(), q: typeof m.q === "string" ? m.q : wants.get(m.tab)?.q ?? null }); for (const f of [...onWant]) f(); void handOver(); }
     else if (m.t === "writer" || m.t === "bye") wants.delete(m.tab);
-    else if (m.t === "who-wants" && wanting) want();
+    else if (m.t === "who-wants" && wanting) want(typeof m.q === "string" ? m.q : undefined);
   }
-  // (another tab wants it: everything typed here saved, then the lock let go; a want heard while this tab is still
-  // taking over is answered once it has (taken))
+  // (a want asked again before the lock is let go for it: who-wants posted with a new question id, and a want that
+  // answers it (the same id) within 500 ms, from a tab used later than this one.  A tab still waiting answers at once; a
+  // tab that moved on (another document shown) or is gone doesn't, and a want sent before the question (one queued
+  // while this writer was paused or frozen, delivered late) carries no answer to it: for wants answered by id, a tab
+  // that moved on never gets the lock.  Resolves the question's id once a want answers it, else null; either way the
+  // wants that didn't answer it are dropped, so none of them is a candidate any more)
+  let confirming = false;
+  // (a want answering question q: still here (no bye since), from a tab used later than this one, and fresh)
+  const answers = (q: string) => [...wants.values()].some((w) => w.q === q && later(w) && fresh(w));
+  const confirmed = () => new Promise<string | null>((done) => {
+    const q = Array.from(crypto.getRandomValues(new Uint32Array(2)), (x) => x.toString(16).padStart(8, "0")).join("");
+    const finish = (ok: boolean) => {
+      clearTimeout(timer); onWant.delete(check);
+      for (const [t, w] of wants) if (w.q !== q) wants.delete(t);
+      done(ok ? q : null);
+    };
+    const check = () => { if (answers(q)) finish(true); };
+    const timer = setTimeout(() => finish(answers(q)), 500);
+    onWant.add(check);
+    post({ t: "who-wants", q });
+  });
+  // (another tab wants it: the want asked again, everything typed here saved, then the lock let go, still only for a
+  // want answering that question: its tab gone meanwhile (a bye while this one saved), the lock is kept; a want heard
+  // while this tab is still taking over is answered once it has (taken))
   async function handOver() {
     const st = store;
-    if (!st || !writes() || handing || !standing()) return;
+    if (!st || !writes() || handing || confirming || !standing()) return;
+    confirming = true;
+    let q: string | null = null;
+    try { q = await confirmed(); } finally { confirming = false; }
+    if (!q || store !== st || !writes() || handing) return;
+    const asked = q;
+    if (!answers(asked)) return;
     handing = true;
     page.hold();
     let done = false;
     try {
-      // (asked again just before letting go, with nothing in between: this tab used meanwhile, later than every want,
-      // keeps the lock)
+      // (asked again just before letting go, with nothing in between: a want still answering this question, or the lock
+      // is kept (this tab used meanwhile, later than it, or its tab gone))
       done = await st.yieldLock(async () => {
         // (an unfinished composition (IME) ended first, so its text is in the cell: leaving the field commits it)
         if (composing) (document.activeElement as HTMLElement | null)?.blur?.();
         await page.quiesce();
-      }, standing);
+      }, () => answers(asked));
     } finally {
       handing = false;
     }
@@ -154,8 +222,12 @@ export function writerHandover(page: HandoverPage) {
     if (!mod && !e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) return { move: e.key === "ArrowLeft" ? -1 : 1 };
     return { key: { key: e.key, code: e.code, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey } };
   };
-  page.view.addEventListener("pointerdown", (ev) => { used(ev); }, true);
-  page.view.addEventListener("keydown", (ev) => {
+  // (every listener this handover adds, kept so dispose removes them all: a page may make one per document it shows
+  // and let it go, the agents chat's panes)
+  const listening: [EventTarget, string, EventListener, boolean][] = [];
+  const listen = (target: EventTarget, type: string, f: (ev: any) => void, capture = false) => { target.addEventListener(type, f, capture); listening.push([target, type, f, capture]); };
+  listen(page.view, "pointerdown", (ev) => { used(ev); }, true);
+  listen(page.view, "keydown", (ev: KeyboardEvent) => {
     if (!used(ev)) return;
     // (a cursor key before anything is typed moves the cursor where it is, read-only as the cell still is)
     const op = opOf(ev);
@@ -163,19 +235,19 @@ export function writerHandover(page: HandoverPage) {
     ev.preventDefault(); ev.stopImmediatePropagation();
     keep(op);
   }, true);
-  page.view.addEventListener("paste", (ev) => {
+  listen(page.view, "paste", (ev: ClipboardEvent) => {
     if (!used(ev)) return;
     ev.preventDefault(); ev.stopImmediatePropagation();
     const text = ev.clipboardData?.getData("text/plain") ?? "";
     if (text) keep({ text });
   }, true);
-  page.view.addEventListener("compositionstart", () => { composing = true; });
-  page.view.addEventListener("compositionend", () => { composing = false; });
+  listen(page.view, "compositionstart", () => { composing = true; });
+  listen(page.view, "compositionend", () => { composing = false; });
   // (back from being frozen, or shown again: a want sent meanwhile may not have arrived)
   const again = () => { if (writes()) post({ t: "who-wants" }); };
-  document.addEventListener("resume", again);
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") again(); });
-  addEventListener("pagehide", () => post({ t: "bye", tab }));
+  listen(document, "resume", again);
+  listen(document, "visibilitychange", () => { if (document.visibilityState === "visible") again(); });
+  listen(globalThis, "pagehide", () => post({ t: "bye", tab }));
 
   const fieldIn = (el: Element | null) => (el && page.view.contains(el) && (el.tagName === "TEXTAREA" || el.tagName === "INPUT") ? (el as HTMLTextAreaElement) : null);
   // (a selection in the field's own text, placed among the edits kept so far, and back)
@@ -269,6 +341,109 @@ export function writerHandover(page: HandoverPage) {
     }
     said();
   }
+  // A whole write of the document asked by a page of this browser (Workspace.write under sync's journal, design r3),
+  // made here while this tab writes it: one at a time, in two phases.  `write {req, ref, doc, base}`: what was typed
+  // here saved first, then the base checked against the record, and `ready` (nothing changed yet); `commit {req, ref}`
+  // (sent by the asking page once it checked the path and the grant again): the document shown and saved, and `wrote`.
+  // Every message is untrusted input, checked whole (its exact shape, sizes, this document); this tab's own checks as
+  // the writer (the lock held, loaded, no hand-over begun) made after every wait and right before the change; each
+  // request answered by one outcome, kept a while (bounded) and given again to a request asked again.  The asking page
+  // trusts no answer for an ok: it reads the record.
+  type Asked = { at: number; state: "preparing" | "ready" | "committing" | "done"; base: number | null; doc: any; rec?: any; readyAt?: number; outcome?: any };
+  const asked = new Map<string, Asked>();
+  let writing: Promise<unknown> = Promise.resolve();
+  const prune = () => {
+    const now = Date.now();
+    for (const [k, w] of asked) if (w.state === "done" && now - w.at > WRITE_KEEP_MS) asked.delete(k);
+    for (const [k, w] of asked) { if (asked.size <= WRITE_MAX) break; if (w.state === "done") asked.delete(k); }
+  };
+  const reqOk = (r: unknown) => typeof r === "string" && r.length > 0 && r.length <= 64;
+  const shape = (m: any, keys: string) => !!m && typeof m === "object" && !Array.isArray(m) && Object.keys(m).sort().join(",") === keys;
+  const holds = (st: any) => !!st && store === st && writes() && !st.yielding && !st.released && !handing;
+
+  // (tests: the holder held at `stage`, loopback pages only, test-notebook-write-journal.mjs)
+  const pause = async (stage: string, req: string) => {
+    const f = (globalThis as any).__sbTestWritePause;
+    if (typeof f === "function" && /^(127\.0\.0\.1|localhost)$/.test(location.hostname)) await f(stage, req);
+  };
+  function onWrite(m: any) {
+    const st = store;
+    if (!st || !page.shownDoc || !page.replaceDoc) return;
+    prune();
+    if (m.t === "write") {
+      if (!shape(m, "base,doc,ref,req,t") || !reqOk(m.req) || m.ref !== st.id || !(m.base === null || (Number.isSafeInteger(m.base) && m.base >= 0)) || !docOk(m.doc)) return;
+      const had = asked.get(m.req);
+      if (had) {
+        if (had.state === "done") post(had.outcome);
+        else if (had.state === "ready") post({ t: "ready", req: m.req });
+        return;
+      }
+      // (only the writer answers: a tab that follows leaves it to the one that writes)
+      if (!holds(st) || asked.size >= WRITE_MAX) return;
+      const w: Asked = { at: Date.now(), state: "preparing", base: m.base, doc: m.doc };
+      asked.set(m.req, w);
+      writing = writing.then(() => prepare(m.req, w, st), () => prepare(m.req, w, st));
+    } else {
+      if (!shape(m, "ref,req,t") || !reqOk(m.req) || m.ref !== st.id) return;
+      const w = asked.get(m.req);
+      if (!w) return;
+      if (w.state === "done") return void post(w.outcome);
+      if (w.state !== "ready" || Date.now() - (w.readyAt ?? 0) > READY_MS) return;
+      w.state = "committing";
+      writing = writing.then(() => commit(m.req, w, st), () => commit(m.req, w, st));
+    }
+  }
+  function end(req: string, w: Asked, outcome: any) {
+    w.state = "done"; w.outcome = outcome; w.doc = null; w.rec = null; w.at = Date.now();
+    post(outcome);
+    // ("lost": this tab no longer writes the document and did nothing: not kept, so the request asked again goes to the
+    // tab that writes it now, never answered "lost" again from here)
+    if (outcome.t === "lost") asked.delete(req);
+  }
+  async function prepare(req: string, w: Asked, st: any) {
+    if (!holds(st)) return end(req, w, { t: "lost", req });
+    try {
+      await page.quiesce();
+    } catch (e) {
+      return end(req, w, { t: "failed", req, why: `what was typed there couldn't be saved first (${String((e as Error)?.message ?? e).slice(0, 200)})` });
+    }
+    await pause("prepare", req);
+    if (!holds(st)) return end(req, w, { t: "lost", req });
+    const rec = await st.loadRecord().catch(() => null);
+    if (!holds(st)) return end(req, w, { t: "lost", req });
+    if (!rec) return end(req, w, { t: "failed", req, why: "its record couldn't be read" });
+    // (typed here since that save, or a base that isn't the record's revision: a conflict, with what is there now)
+    const shown = page.shownDoc!();
+    if (!sameDoc(shown, rec) || (w.base !== null && rec.rev !== w.base)) return end(req, w, { t: "conflict", req, current: plainDoc(rec) });
+    w.rec = rec; w.state = "ready"; w.readyAt = Date.now();
+    post({ t: "ready", req });
+    // (a commit that never comes: let go after READY_MS, nothing changed)
+    setTimeout(() => { if (w.state === "ready") end(req, w, { t: "lost", req }); }, READY_MS + 100);
+  }
+  async function commit(req: string, w: Asked, st: any) {
+    await pause("commit", req);
+    // (right before the change, with no wait in between: still this tab's to write, and nothing typed since `ready`)
+    if (!holds(st)) return end(req, w, { t: "lost", req });
+    // (the whole document shown still the record it got ready on: an output, a count, metadata changed since is a change)
+    const shown = page.shownDoc!();
+    if (!sameDoc(shown, w.rec)) return end(req, w, { t: "conflict", req, current: plainDoc(w.rec) });
+    // (a whole write: the notebook-level fields it doesn't name go, as a write with no holder leaves the record)
+    const gone = Object.fromEntries(Object.keys(shown).filter((k) => k !== "cells" && k !== "mode" && !ENVELOPE.includes(k) && !(k in w.doc)).map((k) => [k, undefined]));
+    page.replaceDoc!({ ...gone, ...w.doc, mode: w.doc.mode ?? w.rec.mode, rev: w.rec.rev });
+    // (the replacement's save, asked for by the notebook once its own loading step is done (two microtasks), then
+    // waited for: a hand-over that begins meanwhile waits for it too (its quiesce))
+    await Promise.resolve();
+    await Promise.resolve();
+    try {
+      await page.quiesce();
+    } catch (e) {
+      return end(req, w, { t: "failed", req, why: `the change couldn't be saved there (${String((e as Error)?.message ?? e).slice(0, 200)})` });
+    }
+    const rec = await st.loadRecord().catch(() => null);
+    await pause("wrote", req);
+    end(req, w, { t: "wrote", req, rev: rec?.rev ?? null });
+  }
+
   return {
     bind,
     /** This tab writes the document now (the takeover's reload done, the focus back where it was): said to the other
@@ -281,6 +456,21 @@ export function writerHandover(page: HandoverPage) {
       buffer = [];
       if (ops.length) replay(ops);
       void handOver();
+    },
+    /** Let go for good (the document's view closed for good): its channel, timers and every listener removed; the
+     * other tabs told this one is gone. */
+    dispose() {
+      post({ t: "bye", tab });
+      bind(null);
+      for (const [target, type, f, capture] of listening.splice(0)) target.removeEventListener(type, f, capture);
+    },
+    /** A use of this tab that isn't a key or a click here: an agent's edit, made for the person, in the agents chat's
+     * pane.  As a use now: a tab that follows asks for the lock, as when typed in. */
+    use() {
+      lastUse = Date.now();
+      if (!follows()) return;
+      if (!wanting) startWanting();
+      else want();
     },
     /** This tab's takeover failed (it couldn't be opened as the writer): the keys kept for it can never be typed in
      * here; how many, for the page to say. */

@@ -248,7 +248,9 @@ function session(host, c, s, delays, budget_ms = CAL_CAP_MS + G_MS * delays.leng
       end(why);
     };
     const onLine = (line) => {
-      const m = line.replace(/\r/g, "").match(/^(SETUP|ENTER|RET|KI|PROBE|STRAY|DONE|END|XSTART|XEND|PHASE)\b ?(\d+)? ?(.*)$/);
+      // (a Ctrl-C pressed while an input runs at the prompt is echoed by the terminal, "^C", before the program's
+      // next output, as at CPython's prompt: not part of the marker)
+      const m = line.replace(/\r/g, "").replace(/^(\^C)+/, "").match(/^(SETUP|ENTER|RET|KI|PROBE|STRAY|DONE|END|XSTART|XEND|PHASE)\b ?(\d+)? ?(.*)$/);
       if (!m) return;
       const [, mk, si, rest] = m;
       if (mk === "END") return finish("end");

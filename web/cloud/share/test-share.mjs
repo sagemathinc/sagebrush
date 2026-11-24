@@ -317,6 +317,19 @@ for (const ret of ["/\t/evil.example/proof", "/\n/evil.example/", "/\r/evil.exam
   const { cb } = await signIn(A, { ret: "/s/abc?x=1#y" });
   ok(cb.headers.get("location") === "/s/abc?x=1#y", "an ordinary return path is kept");
 }
+{
+  // (an account of its own: its sign-ins don't evict A's sessions, SESSIONS_MAX)
+  const R = "52525252-5252-4252-8252-525252525252";
+  const { r, cb } = await signIn(R, { ret: "/?share#m=sage&z=abc-_123" });
+  // (the sign-in's state cookie, its payload before the MAC: base64url JSON, whose `ret` is the return kept)
+  const oauth = (r.headers.getSetCookie().find((c) => c.startsWith("__Host-sb_oauth=")) ?? "").split(";")[0].slice("__Host-sb_oauth=".length);
+  const kept = JSON.parse(Buffer.from(oauth.split(".")[0], "base64url").toString("utf8")).ret;
+  ok(kept === "/?share" && cb.headers.get("location") === "/?share", `a quick link's cells in the return are dropped: not in the sign-in's cookie (${JSON.stringify(kept)}), nor in the redirect back`);
+  for (const [ret, want] of [["/?share#c=eyJ4", "/?share"], ["/docs/storage#leaves", "/docs/storage#leaves"], ["/#m=sage", "/#m=sage"]]) {
+    const { cb: c2 } = await signIn(R, { ret });
+    ok(c2.headers.get("location") === want, `the return ${ret}: ${want}`);
+  }
+}
 
 // ---- validation and limits
 {
@@ -865,6 +878,18 @@ async function purgeStatus(rid) {
     const a2 = await aged();
     const young = (await db.prepare("SELECT COUNT(*) AS n FROM upload_receipts WHERE owner = 'old-0' AND retired >= ?1").bind(t - 30 * 86400).first()).n;
     ok(a0 === 12_000 && a1 === 2000 && a2 === 0 && young === 5, `S10 12,000 receipts past their days: 10,000 removed by one run (20 pages of 500), the rest by the next; 5 younger ones stay (${a0} -> ${a1} -> ${a2}, young ${young})`);
+  }
+  // S12: the admin log's retention: a view past ADMIN_RECORD_DAYS (365) goes with its targets, in one run; a younger
+  // view and its targets stay
+  {
+    const t = Math.floor(Date.now() / 1000), old = t - 366 * 86400, young = t - 364 * 86400;
+    const view = async (at) => (await db.prepare("INSERT INTO admin_views (at, admin_id, view) VALUES (?1, 'adm', 'accounts') RETURNING id").bind(at).first()).id;
+    const v1 = await view(old), v2 = await view(young);
+    for (const [v, h] of [[v1, "h1"], [v1, "h2"], [v2, "h3"]]) await db.prepare("INSERT INTO admin_view_targets (view_id, target_hash) VALUES (?1, ?2)").bind(v, h).run();
+    await tick();
+    const views = (await db.prepare("SELECT id FROM admin_views WHERE id IN (?1, ?2) ORDER BY id").bind(v1, v2).all()).results.map((r) => r.id);
+    const targets = (await db.prepare("SELECT target_hash FROM admin_view_targets WHERE view_id IN (?1, ?2) ORDER BY target_hash").bind(v1, v2).all()).results.map((r) => r.target_hash);
+    ok(JSON.stringify(views) === JSON.stringify([v2]) && JSON.stringify(targets) === JSON.stringify(["h3"]), `S12 the admin log past 365 days goes with its targets; a younger view keeps its own (${JSON.stringify({ views, targets })})`);
   }
 
   // S11 (daybreak3's S2): a Worker rolled back to before this change (07b50cf5's share server, from git history),
