@@ -155,6 +155,102 @@ test("object arrays: at the default limits, 40 levels of shared lists are refuse
   assert.equal(out, "refused making an object array\n");
 });
 
+// (the scans of the last level, where the walk stops, poll Stop too: 65536 items, each read through a proxy
+// that asks for Stop at the 4096th item the ragged-data check looks at, stop within 4096 more items, with a
+// KeyboardInterrupt; the three terminal scans share that polled loop)
+test("object arrays: Stop interrupts the scan of the last level within 4096 items", () => {
+  const code = [
+    `const C = require(${JSON.stringify(__dirname + "/../src/compile.js")});`,
+    `const I = require(${JSON.stringify(__dirname + "/../src/runtime/interrupt.js")});`,
+    "Promise.resolve(C.initParser && C.initParser()).then(() => {",
+    "  C.R.importModule('sys').path.push(C.libDir());",
+    "  C.execModule('import numpy as np\\nclass E:\\n    pass\\nimport builtins\\nbuiltins._E = E\\n', '<warm>', '__main__');",
+    "  const B = C.R.importModule('builtins');",
+    "  let looks = 0, armed = false;",
+    "  const seen = new Set();",
+    "  const items = [];",
+    "  for (let i = 0; i < 65536; i++)",
+    "    items.push(new Proxy(C.R.callObj(B._E, []), { getPrototypeOf(t) { if (armed && !seen.has(t)) { seen.add(t); if (++looks === 4096) I.requestCtrlC(); } return Reflect.getPrototypeOf(t); } }));",
+    "  items.push([1]);",
+    "  B._items = items;",
+    "  B._arm = () => { armed = true; return null; };",
+    "  let caught = 'none';",
+    "  try { C.execModule('import numpy as np, builtins\\nbuiltins._arm()\\nnp.array(builtins._items)\\n', '<scan>', '__main__'); }",
+    "  catch (e) { caught = C.R.formatException(e).trim().split('\\n').pop(); }",
+    "  console.log(JSON.stringify({ after: looks - 4096, caught }));",
+    "});",
+  ].join("\n");
+  const r = JSON.parse(execFileSync(process.execPath, ["-e", code], { encoding: "utf8" }).trim());
+  assert.equal(r.caught, "KeyboardInterrupt");
+  assert.ok(r.after <= 4096, `${r.after} items looked at after Stop was asked for`);
+});
+
+// (arrays inside the data: the walk takes a one-dimensional array's elements as values (OBJ_VALUE_BYTES each)
+// and makes a view of each part of a larger one (OBJ_VIEW_BYTES each), both admitted before they are made: on a
+// host that gives 64 MiB, with the heap shown nearly full, 12 MiB free, a (262144, 2) array's 262144 views and a
+// 262144-element array's values are refused; a 1000-element array is made)
+test("object arrays: the views and values taken from arrays inside the data are admitted (12 MiB of 64 shown free)", { timeout: 60_000 }, () => {
+  const code = [
+    "globalThis.__SAGEBRUSH_MEMORY__ = 64 * 2 ** 20;",
+    `const C = require(${JSON.stringify(__dirname + "/../src/compile.js")});`,
+    `const H = require(${JSON.stringify(__dirname + "/../src/runtime/heap.js")});`,
+    "Promise.resolve(C.initParser && C.initParser()).then(() => {",
+    "  C.R.importModule('sys').path.push(C.libDir());",
+    "  C.execModule('import numpy as np, builtins\\nbuiltins._a2 = np.zeros((262144, 2))\\nbuiltins._a1 = np.zeros(262144)\\nbuiltins._small = np.zeros(1000)\\n', '<warm>', '__main__');",
+    "  H.heapProbe.used = () => H.heapLimit() - 12 * 2 ** 20;",
+    "  H.heapProbe.collect = () => false;",
+    "  const out = [];",
+    "  for (const x of ['a2', 'a1', 'small']) {",
+    "    try { C.execModule(`import numpy as np\\nimport __main__\\n__main__._r = np.array([_${x}], dtype=object).shape\\n`, '<m>', '__main__'); out.push('made'); }",
+    "    catch (e) { out.push(C.R.formatException(e).trim().split('\\n').pop().split(' needs ')[0]); }",
+    "  }",
+    "  console.log(JSON.stringify(out));",
+    "});",
+  ].join("\n");
+  const r = JSON.parse(execFileSync(process.execPath, ["-e", code], { encoding: "utf8" }).trim());
+  assert.deepEqual(r, [
+    "MemoryError: making an object array of shape (1, 262144) from nested data",
+    "MemoryError: making an object array of shape (1, 262144) from nested data",
+    "made",
+  ]);
+});
+
+// (a range is never made into a list to find its length: range(2**40) is refused by its length, with the
+// element limit lowered to 16; ranges inside the data are made into items only after their level is admitted)
+test("object arrays: a range's length is read without making its items", { timeout: 60_000 }, async () => {
+  const np = require("../src/runtime/numpy");
+  const ops = require("../src/runtime/ops");
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  let id = 0;
+  const run = async (code: string) => {
+    const n = ++id;
+    await s.handle({ id: n, code });
+    return msgs.filter((m) => m.id === n && m.stream).map((m) => m.text).join("");
+  };
+  await run("import numpy as np");
+  const saved = { ...np.ARRAY_LIMITS }, toArray = ops.toArray;
+  let made = 0;
+  try {
+    np.ARRAY_LIMITS.elements = 16;
+    ops.toArray = (x: any, ...rest: any[]) => {
+      if (x instanceof Object && x.constructor && /Range$/.test(x.constructor.name)) made++;
+      return toArray(x, ...rest);
+    };
+    const tryMake = (x: string) => run(`try:\n    print(np.array(${x}, dtype=object).tolist())\nexcept MemoryError as e:\n    print('refused')`);
+    assert.equal(await tryMake("range(2**40)"), "refused\n");
+    assert.equal(await tryMake("[range(2**40), range(2**40)]"), "refused\n");
+    assert.equal(await tryMake("range(2**70, 2**70 + 2**40)"), "refused\n");
+    assert.equal(await tryMake("[range(3), range(2, -4, -2)]"), "[[0, 1, 2], [2, 0, -2]]\n");
+    assert.equal(made, 0, "a range was made into a list");
+  } finally {
+    Object.assign(np.ARRAY_LIMITS, saved);
+    ops.toArray = toArray;
+  }
+});
+
 test("object arrays: the object dtype's itemsize, and the dtype kept by creation and astype", () => {
   const code = [
     "import numpy as np",

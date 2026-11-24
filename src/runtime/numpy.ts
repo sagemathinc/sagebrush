@@ -3838,6 +3838,14 @@ const OBJ_MAX_ITEMS = 2 ** 27;
 // peaked at 620 MB RSS against 149 MB with numpy imported and nothing made, about 29.4 bytes an element;
 // rounded up to 32, as ENGINE asked)
 const OBJ_WALK_ITEM_BYTES = 32;
+// (a view of an array the walk goes into, one of two dimensions or more: an NDArray and its shape and
+// strides arrays. Measured Nov 24 2026 on Node 24 (the CLI), heap after a full GC, 262144 row views of
+// a (262144, 2) and a (262144, 2, 1) float64 array: 469 to 473 bytes a view; rounded up to 512)
+const OBJ_VIEW_BYTES = 512;
+// (an element of a one-dimensional array the walk takes as its value: a new Python number, str or the like.
+// Measured the same way, np.array([np.zeros(262144)], dtype=object): 40.4 bytes an element retained, 8 of
+// them its reference in the result (charged by the array admission); 32 for the value)
+const OBJ_VALUE_BYTES = 32;
 function admitObjects(shape: number[]): void {
   admitArray(shape, OBJ_DT as unknown as DType);
   const n = prod(shape);
@@ -3877,17 +3885,27 @@ function elemObj(a: any, p: number): any {
 function objFromPy(x: any, discovered = false): ObjArray {
   const shape: number[] = [];
   let level: any[] = [x];
-  // (Stop is polled every 4096 items the walk reads or writes, in every loop: one wide list counts too)
+  // (Stop is polled every 4096 items the walk reads or writes, in every loop: one wide list counts too, and
+  // so do the scans of the last level)
   let polled = 0;
   const poll = () => {
     if ((++polled & 4095) === 0) O.pollInterrupt();
   };
-  // (which of level's items are parts of an array the walk went into: one left with dimensions of its own
-  // where the walk stops, NumPy assigns that whole array into its place, broadcasting, which isn't here yet)
+  // (what each of level's items is: 0 an item of the data; 1 a part of an array the walk went into, a view;
+  // 2 an element of an array, its value, which the walk never goes into. One left with dimensions of its own
+  // where the walk stops, NumPy assigns whole into its place, broadcasting, which isn't here yet)
   let inArr = new Uint8Array(1);
   inArr[0] = anyArray(x) ? 1 : 0;
+  const some = (f: (v: any, k: number) => boolean): boolean => {
+    for (let k = 0; k < level.length; k++) {
+      poll();
+      if (f(level[k], k)) return true;
+    }
+    return false;
+  };
+  const nested = (v: any, k: number) => inArr[k] !== 2 && (anyArray(v) ? v.ndim > 0 : isSeq(v) && !strLike(v));
   const cutArray = () => {
-    if (level.some((v, i) => inArr[i] && anyArray(v) && v.ndim > 0))
+    if (some((v, k) => inArr[k] === 1 && anyArray(v) && v.ndim > 0))
       raise(T.NotImplementedError, "this operation on object arrays is not supported by sagebrush's numpy yet (an array inside the data whose dimensions don't all fit the result's: NumPy assigns it whole, broadcasting)");
   };
   // (at most NumPy's NPY_MAXDIMS = 64 dimensions: with an object dtype given, what lies deeper stays an
@@ -3896,18 +3914,26 @@ function objFromPy(x: any, discovered = false): ObjArray {
     if (level.length === 0) break;
     if (shape.length >= OBJ_MAXDIMS) {
       // (data whose dtype was discovered, not given: deeper sequences are refused, as NumPy's)
-      if (discovered && level.some((v) => (anyArray(v) ? v.ndim > 0 : isSeq(v) && !strLike(v)))) tooDeep();
+      if (discovered && some(nested)) tooDeep();
       cutArray();
       break;
     }
     O.pollInterrupt();
     let n = -1;
     let ok = true;
-    for (const v of level) {
+    // (the views the next level makes, of arrays with two dimensions or more, and the values it takes from
+    // one-dimensional arrays: counted before it is built)
+    let views = 0, values = 0;
+    for (let k = 0; k < level.length; k++) {
       poll();
+      const v = level[k];
       let len: number;
-      if (anyArray(v)) len = v.ndim === 0 ? -1 : v.shape[0];
-      else if (isSeq(v) && !strLike(v)) len = seqItems(v).length;
+      if (inArr[k] === 2) len = -1;
+      else if (anyArray(v)) {
+        len = v.ndim === 0 ? -1 : v.shape[0];
+        if (v.ndim > 1) views += len;
+        else if (v.ndim === 1) values += len;
+      } else if (isSeq(v) && !strLike(v)) len = seqLen(v);
       else len = -1;
       if (len < 0 || (n >= 0 && len !== n)) {
         ok = false;
@@ -3918,33 +3944,41 @@ function objFromPy(x: any, discovered = false): ObjArray {
     if (!ok) {
       // (a discovered dtype: ragged data is NumPy's inhomogeneous-shape error; a given object dtype keeps its
       // differing sequences as elements)
-      if (discovered && level.some((v) => (anyArray(v) ? v.ndim > 0 : isSeq(v) && !strLike(v)))) inhomogeneous(shape.length, shape);
+      if (discovered && some(nested)) inhomogeneous(shape.length, shape);
       cutArray();
       break;
     }
     shape.push(n);
     // (the next level has as many items as the array so far has elements: admitted as an object array before
     // it is built, so shared sublists, [x, x] nested, can't grow the walk past it; and the walk's own memory
-    // with it, through the heap's admission: this level and the next alive together, OBJ_WALK_ITEM_BYTES an item)
+    // with it, through the heap's admission: this level and the next alive together, OBJ_WALK_ITEM_BYTES an
+    // item, OBJ_VIEW_BYTES for each view of an array it makes and OBJ_VALUE_BYTES for each value it takes from
+    // one. A range's items are made here, after it)
     const count = prod(shape);
     admitObjects(shape);
-    admitHeap(OBJ_WALK_ITEM_BYTES * (level.length + count), `making an object array of shape (${shape.join(", ")}${shape.length === 1 ? "," : ""}) from nested data`);
+    admitHeap(OBJ_WALK_ITEM_BYTES * (level.length + count) + OBJ_VIEW_BYTES * views + OBJ_VALUE_BYTES * values, `making an object array of shape (${shape.join(", ")}${shape.length === 1 ? "," : ""}) from nested data`);
     const next: any[] = new Array(count), nextIn = new Uint8Array(count);
     let at = 0;
     for (const v of level) {
-      if (anyArray(v))
+      if (anyArray(v)) {
+        // (a one-dimensional array's elements are taken as values, never as views; a larger one's parts are views)
+        const st = v.strides[0];
         for (let i = 0; i < v.shape[0]; i++) {
           poll();
-          nextIn[at] = 1;
-          next[at++] = arrayItem(v, i);
+          if (v.ndim === 1) {
+            nextIn[at] = 2;
+            next[at++] = elemObj(v, v.offset + i * st);
+          } else {
+            nextIn[at] = 1;
+            next[at++] = arrayItem(v, i);
+          }
         }
-      else {
-        const items = seqItems(v);
-        for (let i = 0; i < items.length; i++) {
-          if ((++polled & 4095) === 0) O.pollInterrupt();
-          next[at++] = items[i];
+      } else if (Array.isArray(v))
+        for (let i = 0; i < v.length; i++) {
+          poll();
+          next[at++] = v[i];
         }
-      }
+      else at = rangeInto(v, next, at, poll);
     }
     level = next;
     inArr = nextIn;
@@ -3957,10 +3991,28 @@ function objFromPy(x: any, discovered = false): ObjArray {
     for (let k = 0; k < level.length; k++) {
       poll();
       const v = level[k];
-      out.data[k] = inArr[k] && anyArray(v) && v.ndim === 0 ? elemObj(v, v.offset) : v;
+      out.data[k] = inArr[k] === 1 && anyArray(v) && v.ndim === 0 ? elemObj(v, v.offset) : v;
     }
   } else if (shape.length === 0) out.data[0] = x;
   return out;
+}
+// (a list's or a range's length, never making a range's items: range(2**40) is refused by its length)
+function seqLen(v: any): number {
+  return Array.isArray(v) ? v.length : Number(v.length);
+}
+// (a range's items into out from at, polled: each as the int its iteration gives)
+function rangeInto(r: any, out: any[], at: number, poll: () => void): number {
+  const n = seqLen(r);
+  if (typeof r.start === "bigint") for (let i = 0; i < n; i++) {
+    poll();
+    out[at++] = r.at(BigInt(i));
+  }
+  else for (let i = 0; i < n; i++) {
+    poll();
+    const v = r.start + i * r.step;
+    out[at++] = Number.isSafeInteger(v) ? v : O.normBig(BigInt(r.start) + BigInt(i) * BigInt(r.step));
+  }
+  return at;
 }
 // (an array's i-th item along its first axis: a view, 0-d at the last axis)
 function arrayItem(v: any, i: number): any {
