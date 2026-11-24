@@ -82,5 +82,7 @@ for name, f in [("moveaxis", lambda: np.moveaxis(a, 0, -1).shape), ("moveaxis tu
                 ("swapaxes", lambda: a.swapaxes(-1, 0).shape), ("sum (0, -1)", lambda: a.sum(axis=(0, -1))), ("median", lambda: np.median(a, axis=(0, 2))),
                 ("median keepdims", lambda: np.median(a, axis=(0, 2), keepdims=True)), ("quantile (1, 0)", lambda: np.quantile(a, [0.25, 0.5], axis=(1, 0))),
                 ("quantile keepdims", lambda: np.quantile(a, [0.25, 0.5], axis=(2, 0), keepdims=True)), ("percentile (0, -1)", lambda: np.percentile(a, 30, axis=(0, -1))),
-                ("median -1", lambda: np.median(a, axis=-1)), ("roll shift list, one axis", lambda: np.roll(m, [1, 2], axis=1))]:
+                ("median -1", lambda: np.median(a, axis=-1)), ("roll shift list, one axis", lambda: np.roll(m, [1, 2], axis=1)),
+                ("roll float shift", lambda: np.roll(m, 1.5, axis=1)), ("roll float shift, no axis", lambda: np.roll(m, 1.5)),
+                ("roll negative float shifts", lambda: np.roll(a, (np.float64(-1.7), 2.9), axis=(0, 2)))]:
     show(name, f)

@@ -1861,7 +1861,7 @@ def roll(a, shift, axis=None):
     axes = broadcast_to(array(axes, dtype=int64).reshape(ax_shape), both).ravel().tolist()
     total = {}
     for s, ax in zip(shifts, axes):
-        total[ax] = total.get(ax, 0) + _operator.index(s)
+        total[ax] = total.get(ax, 0) + int(s)  # (as NumPy's: a float shift truncated)
     for ax, s in total.items():
         n = a.shape[ax]
         if n == 0:
