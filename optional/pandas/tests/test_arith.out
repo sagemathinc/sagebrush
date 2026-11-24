@@ -987,3 +987,27 @@ dtype: float64
 1    2.0
 2    2.0
 dtype: float64
+== fill-list-pow-both-missing
+
+0    1.0
+1    0.0
+2    NaN
+dtype: float64
+== fill-list-rpow-both-missing
+
+0    0.0
+1    1.0
+2    NaN
+dtype: float64
+== fill-series-pow-both-missing
+
+0    1.0
+1    0.0
+2    NaN
+dtype: float64
+== fill-series-rpow-both-missing
+
+0    0.0
+1    1.0
+2    NaN
+dtype: float64
