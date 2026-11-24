@@ -37,6 +37,12 @@ One document at a time, in one small, uniform frame. We keep polishing it toward
 3. **Minimalism:** nothing on screen that the document doesn't need.
 4. **Usability with agents:** everything visible, checkable and safe for a person and an agent working together.
 
+## Privacy
+
+- **Your work starts on your device.** By default, notebooks run in your browser or the app, and nothing is uploaded to run them.
+- **Sync will be end-to-end encrypted, as the only mode,** before it opens to everyone: only your devices hold the keys, and Sagebrush's server stores what it can't read. A recovery code, shown once, is the only way back without one of your devices; lose both, and the data is gone. The relay to your own computers and agents' logs are covered too.
+- **Exceptions are explicit and named:** publishing a link is public; a support bundle is only what you choose to send; class work from a school's course site stays readable by the school. See [Storage](https://sagebrush.space/docs/storage#encryption).
+
 ## Safety
 
 - **TimeTravel and Trash** let you recover recent edits and deleted documents within their retention limits.

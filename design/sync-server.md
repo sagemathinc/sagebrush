@@ -6,6 +6,7 @@
 
 | Date | Commit | What changed for the client |
 |---|---|---|
+| Nov 24 | (this change, §10) | **End-to-end encryption is the one mode** (design/e2e-encryption.md). Payloads, snapshots and blobs become ciphertext, blob names become keyed addresses, index ops are sealed and signed by the device, presence is sealed, and only the owner writes a document. Nothing in this table's protocol is built for it yet: the PR order is e2e-encryption.md §7. |
 | Oct 19 | (this change, §6.2) | **After a membership ends**, the account's `state` is `readonly`: every write is refused with `readonly`, the socket gets an `error` `readonly` with `purge_after`, and reading, pulling and "Download all" keep working. `GET /api/share/me` has `sync_retention: {state, readonly_since, purge_after}` (ms). The Sync panel shows the help line in web/drafts/faq-sync.md, with `purge_after`'s date. A renewal before then makes the account `active` again. (§6.2) |
 | Oct 19 | (§6.1) | **One storage budget for sharing and sync.** `storage_full` now means the account's one `storage_bytes` is used, by sharing and sync together. A file upload stops at it. Document batches go on past it, into the ceiling (`max(storage_bytes / 10, 50 MB)`), and only then get `storage_full`. `GET /api/share/me` answers `usage`, the sum, and `usage_breakdown: {sharing_files, sharing_versions, sync_files, sync_documents}` (`sync_claim` in place of sync's lines if its account object can't be reached). A batch or upload can answer `busy` with `retry_after` while the budget can't be checked; retry it. (§6.1) |
 | Oct 19 | (CORR-02C-1) | Turning sync on answers `{state, generation}`, and `welcome` carries `generation` too. **"Delete my synced data" must name it:** `POST /api/sync/v1/delete {"confirm": "delete", "generation": g}`, from the latest `welcome` or enable answer. Without it the request gets 400. With another generation (a request sent before sync was turned off and on again) it answers 202 with `state: "stale"` and the current `generation`, and deletes nothing. Turning sync on can now also answer 409 `conflict` (it met another change) or 503 `busy` (D1 didn't answer). Both are safe to retry. (§7.1) |
@@ -42,7 +43,7 @@ This is the server side of design/workspace-files.md §7 (backup and sync) and �
 | **R2** (`sagebrush-share`, the same bucket) | `s/<account hash, 32 hex>/<random>` | Blob bytes, snapshots, archived patch segments, outputs, and daily exports |
 | **D1** (`sagebrush-share`, the same database) | — | Only what sharing already has: accounts, sessions, tombstones, purges. The sync service adds one table, `sync_accounts` (§9), written when sync is turned on and when it is purged, never on an edit. |
 
-**Why the document object's name includes the owner.** The document id is the client's own, made offline: a notebook's UUID, or a board's 12 random hex. If the name were the id alone, anyone who learned an id could claim it before the owner first synced it. With the owner in the name, two accounts can't name the same object, so the id can't be squatted. A shared document (§7.9, phase 3) is reached by naming its owner and its id. The object checks its access list.
+**Why the document object's name includes the owner.** The document id is the client's own, made offline: a notebook's UUID, or a board's 12 random hex. If the name were the id alone, anyone who learned an id could claim it before the owner first synced it. With the owner in the name, two accounts can't name the same object, so the id can't be squatted. Only its owner reaches it: there are no shared live documents (§10).
 
 **Why `s/` and not sharing's `a/`.** "Delete my shared data" sweeps `a/<hash>/`, and "Delete my synced data" sweeps `s/<hash>/`, so neither removes the other's bytes. Deleting the CoCalc account sweeps both (§9). Both prefixes use the same hash, the same bucket and the same upload checks (R2 refuses bytes that don't match their SHA-256).
 
@@ -108,8 +109,8 @@ This is the server side of design/workspace-files.md §7 (backup and sync) and �
 **Signing out** records the revoke before sharing deletes the session. If the revoke can't be recorded, the sign-out answers 503 and the session stays, rather than signing out while a socket could still write (CORR-6D6-2).
 
 **Access to a document is checked on every message** (CORR-D81-7):
-- The document object holds the access list itself (§4), so it checks the account's role on every batch, pull and presence message, without a call.
-- A change to the access list (removing a collaborator, or changing a role) happens in the document object. In the same request, it closes the sockets of every account that lost access, and downgrades the attachments of those whose role changed.
+- The document object holds its owner itself (§4), so it checks the account on every batch, pull and presence message, without a call.
+- Only the owner's account ever has access. Under end-to-end encryption no other account writes a document: another person gets an encrypted copy instead (design/e2e-encryption.md §5, design/workspace-files.md §7.9).
 - The 10-minute recheck is only for the D1 session behind a socket. It is never how access is enforced.
 
 **State-changing HTTP requests** follow sharing's rules: they must carry `Origin` equal to the site, and be JSON or a blob PUT.
@@ -180,7 +181,7 @@ grants(...), access_log(...)                         (design/agent-endpoint.md)
 
 ```
 meta(k, v)        owner_hash, owner_account, doc, kind, created, epoch, head_seq, bytes
-acl(account, role)                          owner; editors and viewers in phase 3
+acl(account, role)                          the owner only (no other account ever writes a document: §10)
 batches(seq INTEGER PRIMARY KEY, epoch, author, writer, device, recv,
         envs TEXT, body BLOB, blobs TEXT)   one row per batch: its checked envelopes, its payloads, its blobs
 clients(client PRIMARY KEY, writer, next_cseq)
@@ -293,7 +294,7 @@ Snapshots bound the replay for a new device (§7.2).
   - it uploads the snapshot as a blob, and registers `{at_seq, sha256, bytes}`;
   - the blob is pinned as a patch's blob is (§4.3);
   - the server checks only that `at_seq` is a batch of the current epoch, and that the blob is held.
-- **Who may make them:** only the owner's sessions, because a snapshot is trusted by every device that opens from it. In phase 3, a collaborator's snapshot would be a way to show the owner a document that differs from its history.
+- **Who may make them:** only the owner's sessions, because a snapshot is trusted by every device that opens from it.
 - **A snapshot never replaces history.** The batches stay (TimeTravel shows every version), and a device can always rebuild from the batches alone. "Rebuild from history" in the Sync panel does exactly that, and checks the result against the snapshot.
 - **When:** the client offers one after 500 batches or 4 MB of patches since the last snapshot. The server keeps the latest 3.
 
@@ -325,8 +326,8 @@ Version 1: JSON messages over WebSockets, plus HTTP for blobs and for the case w
   - It carries the index, the batches for documents nobody else has open, and the notifications that a document changed elsewhere.
   - It uses the hibernation API (§7.3).
 - **A document socket,** at `GET /api/sync/v1/doc/<owner>/<doc>?ticket=…` (upgrade). The ticket is used once (§2).
-  - It is opened only while another device or person also has the document open. The account object says when: it sends `watching`.
-  - Batches then go to it at once, not every 30 seconds, and presence rides on it without being stored (§7.9).
+  - It is opened only while another of the person's devices also has the document open. The account object says when: it sends `watching`.
+  - Batches then go to it at once, not every 30 seconds, and presence rides on it, sealed and never stored (design/workspace-files.md §7.9, §10).
 - **HTTP, for when a socket isn't open:** `POST /api/sync/v1/batch`, with the same body as a socket's `batch`.
   - This is for a page being hidden or closed (`fetch(…, {keepalive: true})`), and for an agent (design/agent-endpoint.md).
   - A keepalive request's body is at most 64 KiB, so the page sends what fits, and the rest goes when it opens again.
@@ -702,21 +703,24 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
 
 ## 10. Encryption
 
-**(a), as decided (§7.4):** R2 and Durable Object storage are encrypted at rest by Cloudflare.
+**End-to-end, as the one mode** (William, Nov 23: "Yes, approve E2E as the one mode"; design/workspace-files.md §7.4). This replaces (a), encryption at rest by Cloudflare, decided on Oct 18. The design, with its PR order, is design/e2e-encryption.md. This section says what it changes in the server above.
 
-**What keeps (b), end-to-end, possible later:**
-- **Opaque now:**
-  - patch payloads, snapshots, outputs and blob bytes are bytes to the server. What it does read is the graph: each patch's `cseq`, id, parents, size and blob references (§4.1), which hold no content;
-  - it never parses them, and nothing in this design needs it to;
-  - blob names come from one client function (§1).
-- **Not opaque now: the index.**
-  - Paths, kinds and sizes are visible to the server, because the server needs them for quota, for an agent's scope, and to answer an agent while every device is closed.
-  - Under (b), the index would be encrypted too. The cost:
-    - quota would count bytes only;
-    - an agent's scope would be checked only in the page;
-    - the agent endpoint (design/agent-endpoint.md) would work only with a key the person gives that agent, or through an open page.
-  - That is the real trade-off of (b), and it isn't hidden by this design.
-- **The agent endpoint's document verbs do parse documents** (design/agent-endpoint.md §4). They do so in their own module, never in the objects above. Under (b), they would need that key.
+**What stays as designed here,** because it was built to keep end-to-end possible:
+- patch payloads, snapshots and blob bytes are bytes to the server, which never parses them. They become ciphertext, under each document's or file's key (e2e-encryption.md §3.1);
+- what the server reads is the graph (§4.1): each patch's `cseq`, id, parents, size and blob references. That stays visible, as metadata;
+- blob names come from one client function (§1). It now keys them with the account's secret, so a holding's name is a keyed address, never a plain SHA-256 (e2e-encryption.md §3.3);
+- snapshots and "Clear history" roots are made by a client already (§4.6, §4.7).
+
+**What changes:**
+- **The index is sealed.** Index ops (path, kind, size, ids, hashes) are encrypted and signed by the device. The server sees each op's size and the blob references it adds and releases, and no longer derives an index of its own. So:
+  - quota counts bytes only, as it already does;
+  - retention and Trash become ops a device sends;
+  - an agent's scope is checked by a device of the person's, not by the server (design/agent-endpoint.md §4).
+- **Presence** is sealed under the document's key. The server relays it as it does now, and sees only its timing and size.
+- **Only the owner writes a document.** The access list's editors and viewers, planned for live collaboration, are dropped: another person gets an encrypted copy, and proposes changes back (design/workspace-files.md §7.9).
+- **Outputs** aren't synced (William, Oct 26), so §4.8's outputs map and the `outputs` message aren't built.
+
+**What the server still sees** is listed in e2e-encryption.md §4: the account hash, devices, sizes and timing, each document's kind and patch graph, and blob equality within one account. **The limits,** said plainly in e2e-encryption.md §8: a malicious server can withhold or roll back data, though it can't forge or read it; and a page served by a compromised origin can use the keys while it is open.
 
 ## 11. The flag, and what is deployed
 
@@ -761,7 +765,6 @@ The tests run in Miniflare, as `web/share/test-share.mjs` does, with Durable Obj
   - an expired session's socket can't write;
   - a revoke whose call failed is caught by the 10-minute check;
   - a ticket can't be used for another document, account or session, after it expires, twice, or after its session is revoked (astra's replay trace);
-  - a collaborator removed, or downgraded to viewer, can't send another batch, and their sockets close at once;
   - astra's race: an upgrade paused after `redeem`, the revoke completed, and then the attach resumed: the attach is refused. A fence that lands after an attach closes the socket;
   - socket leases: a lost close report frees its slot within 15 minutes. The counts are the live leases after an object is evicted.
 - **Before authentication:** a fresh, made-up account hash on every request, and tokens with a bad tag, create no object and no row, and are cut off by the IP limit.
@@ -810,7 +813,7 @@ Those about grants and agents are answered in full in design/agent-endpoint.md �
 4. **Rates and sizes:** §8 for sync. An agent has its own, smaller limits (design/agent-endpoint.md §7). An over-limit agent sees 429, with `retry_after` and which limit it hit.
 5. **The access log** is in the account object (design/agent-endpoint.md §8). It is deleted with the account's data.
 6. **The Inbox** is design/agent-endpoint.md §9.6. On this server, an Inbox item is an entry under `/Inbox/` with a flag that keeps it read-only until a person accepts it.
-7. **A collaborator's grant** never reaches the owner's files: a grant is checked against what its *granting* account may do, by the same access list (design/agent-endpoint.md §9.7).
+7. **Another person's grant** never reaches the owner's files: another person only ever holds an encrypted copy under their own keys, so their grant reaches only that copy (design/agent-endpoint.md §9.7).
 
 ## 14. Open questions
 

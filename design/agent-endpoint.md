@@ -2,10 +2,12 @@
 
 *Status: design, for review by astra (correctness), daybreak2 (limits) and William. Not built yet. When built, it stays behind the sync service's flag, which is off in production (design/sync-server.md §11).*
 
-This is design/workspace-files.md §8.2's third surface, "Anywhere, with sync", together with §8.4's grants and access log. With it, a person's own agent (Claude Code or Codex on any computer, or an agent in a cocalc.ai project) can work in their workspace through the workspace API's verbs while every device of theirs is closed. It is built on the sync server (design/sync-server.md), and the account object holds everything here.
+This is design/workspace-files.md §8.2's third surface, "Anywhere, with sync", together with §8.4's grants and access log. With it, a person's own agent (Claude Code or Codex on any computer, or an agent in a cocalc.ai project) can work in their workspace through the workspace API's verbs, without a page the agent drives. It is built on the sync server (design/sync-server.md), and the account object holds the grants, tokens, rates and access log.
+
+**Under end-to-end encryption** (decided Nov 23; design/e2e-encryption.md §6), the server can't read the workspace. So every verb is relayed to an online device of the person's, which decrypts, checks the grant's scope and answers (§4). With no device online, the agent is told to wait.
 
 **What it is not:**
-- **It runs no code.** A run is relayed to an open page of the person's, and happens there in the runner (§6). With no page open, a run is refused.
+- **It runs no code, and reads no data.** A run is relayed to an open page of the person's, and happens there in the runner (§6). Every other verb is relayed to a device too (§4).
 - **It is not the in-page surface** (`window.sagebrush.workspace`) and not the local MCP adapter. Those act with the page's authority (§9.2).
 
 ---
@@ -19,7 +21,8 @@ grants(
   id            12 base32 chars, random
   agent         the agent's name as the person sees it ("Claude Code on laptop", "cocalc: number-theory/claude")
   token_hash    SHA-256 of the token's secret
-  scopes        JSON: [{path, access: "read" | "write"}], up to the membership's `scopes_per_grant`
+  scopes        JSON: [{path, access: "read" | "write"}], up to the membership's `scopes_per_grant`;
+                under end-to-end encryption, sealed to the person's devices, which enforce them (§4)
   run_code      0 | 1           "may run code" (§6)
   outward       JSON: the outward actions granted beforehand, [] by default (§5)
   rate          JSON: optional person-chosen reductions to this grant's membership limits (§7)
@@ -106,7 +109,7 @@ grants(
 **Then every request, in this order, inside the account object:**
 1. The grant exists, isn't revoked or expired, its secret matches, and the account is `active` (or `readonly`, for reads). On dev, the account must also be in `SYNC_ACCOUNTS` (design/sync-server.md §11).
 2. The grant's rate limits, and then the account's (§7).
-3. The verb's paths are inside the scope, with the access the verb needs (read, or write).
+3. The verb's paths are inside the scope, with the access the verb needs (read, or write). Under end-to-end encryption, the device that answers checks this, since only it can read the sealed scopes and the paths (§4).
 4. The verb runs.
    - **A write to the index** (an op) is one transaction in the account object. The grant is checked again in it, so a revoke that lands while the request runs prevents the write.
    - **A write to a document** is admitted, and then fenced if it must be (design/sync-server.md §4.5):
@@ -129,26 +132,32 @@ grants(
 
 **The verbs are the workspace API's (§8.2), generated from its schema** (`web/workspace/schema.json`, made from the TypeScript types). The same schema generates the MCP tools, so the surfaces can't drift apart.
 
-| Verb | Access | How it is done on the server |
+**Every verb is relayed to a device** (design/e2e-encryption.md §6):
+- **Where it goes:** an online device of the person's: an open tab, the desktop app, the sagebrush CLI or an Autonomous VM. Each is a device in the account's key chain. The account object picks one, as it picks a page for a run (§6), and forwards the request opaquely.
+- **What the device does:** it decrypts, checks the grant's scope (`inScope`, and the Trash visibility rule for grants, `trashVisible`), does the verb through the workspace API, and answers. The grant's scopes are sealed to the person's devices: the server keeps only the grant's id, token hash, tag, rates and expiry.
+- **With no device online,** the endpoint answers "waiting for one of your devices" and queues the request opaquely. It never decrypts.
+- **Today, on DEV:** only `list` and `stat` are built, and they answer from the server's derived index (`entries`, design/sync-server.md §3). That index goes away when index ops are sealed, and these two verbs move to the relay with the rest. The other verbs answer `not_built`, so nothing is lost by making them relay-only from the start.
+
+| Verb | Access | What the device does |
 |---|---|---|
-| `list`, `stat` | read | from `entries` (design/sync-server.md §3), filtered to the scope |
-| `read` | read | a data file: a signed URL (design/sync-server.md §5.4). A document: its current value (below) |
+| `list`, `stat` | read | from its index, filtered to the scope |
+| `read` | read | a data file: its bytes, decrypted. A document: its current value (below) |
 | `write(path, content, {base})` | write | a data file: blob, then op, with compare-and-swap on its `sha256`. A document: a patch (below) |
 | `create`, `mkdir` | write (the parent) | an op, credited to `agent:<name>` |
 | `rename`, `duplicate` | write (both paths) | an op |
 | `remove`, `restore` | write | an op (to Trash and back) |
 | `history`, `version` | read | a document's batches; a data file's versions |
-| `watch(path)` | read | on the socket: the ops and `changed` within the scope |
+| `watch(path)` | read | the ops and `changed` within the scope, as the device sees them |
 | `run(path, cell or note)` | write and `run_code` | relayed to a page (§6) |
 | `chat.next`, `chat.reply` | the chat document's access | §8.7's remote adapter: messages are patches on a `.chat` document |
 | `files.batch` | each item's access | many small reads/writes/ops in one idempotent request (design/fs-sync-scale.md §2) |
 
 - **Not verbs:** emptying Trash, clearing a history, dropping versions, making or changing grants, deleting synced data. Only a person, from a session, may do these (§8.2, §8.3).
-- **Ops and patches from a grant are credited:** `by: "agent:<name>"`, device `grant:<id>`, and author `agent:<name>` on each patch. The server sets these from the grant, never from the request.
+- **Ops and patches from a grant are credited:** `by: "agent:<name>"`, device `grant:<id>`, and author `agent:<name>` on each patch. The device sets these from the grant, never from the request, and signs them as its own.
 
-**Documents on the server.** Notebooks, boards and chats are patchflow logs, opaque to the sync objects (design/sync-server.md §10). The agent endpoint is the one place that reads them:
-- `read` and `write` on a document run in the Worker, in `web/sync/agent-docs.ts`, which uses the same patchflow codecs as the pages (web/notebook/history.js, web/board/history.ts);
-- it reads the latest snapshot and the batches since (design/sync-server.md §5.2 `pull`), and computes the value;
+**Documents.** Notebooks, boards and chats are patchflow logs, ciphertext to the sync objects (design/sync-server.md §10). Only the person's devices read them:
+- `read` and `write` on a document use the same patchflow codecs as the pages (web/notebook/history.js, web/board/history.ts);
+- the device reads the latest snapshot and the batches since (design/sync-server.md §5.2 `pull`), and computes the value;
 - for `write`, it makes the patch from `base` to the new value, and sends it as a one-patch batch with `expect_head` set to the head it read (design/sync-server.md §4.4), from the grant's own patchflow client (`grant:<id>`), credited to the agent;
 - **its bounds:** `document_bytes` of value and `document_batches` since the snapshot, from the account's membership record (design/fs-sync-scale.md §1). Beyond either, it answers 413 `limit`, with the tier metadata of §7, and suggests opening the page;
 - **a write is compare-and-swap,** checked in the document object's transaction. If the document has moved past `base`, it answers `conflict` with the current revision, as the in-page API does. A resend after a lost answer gets the original `seq`, not a conflict.
@@ -217,6 +226,7 @@ Every check and reservation precedes its write. For a batch, admission reserves 
 ## 8. The access log
 
 - **One row per request,** in the account object: time, grant, agent, verb, path (or paths), result, bytes, and for a run, the code's SHA-256. A request's arguments and contents are never logged.
+- **Under end-to-end encryption, the answering device writes the row, encrypted,** since only it knows the paths. The server keeps the row as ciphertext, with its time and size (design/e2e-encryption.md §4).
 - **Kept for 7 days, and at most 100,000 rows per account. The oldest go first.** Age and count are independent host bounds, so sustained traffic can evict a younger row at the count cap. Append and cleanup are bounded. Retention is not a membership field or tier benefit, so zero and downgrade cannot trigger separate early trimming.
 - **Who may read it:** the person, in "Agents with access", per grant or all together. An agent can't read the log, its own entries included.
 - **It is the person's data.** It is deleted with their synced data, by "Delete my synced data" and by the purge (design/sync-server.md §7). Sagebrush's operators have no view of it.
@@ -247,7 +257,7 @@ Every check and reservation precedes its write. For a batch, admission reserves 
      - another person's edit never runs by itself;
      - an agent never runs code someone else last changed.
    - **Revoking a running run:** §6.
-   - **Retention:** a write that can't keep the previous version is refused, on the server as on the client (design/sync-server.md §13). Filling the quota on purpose therefore blocks writes, and loses nothing.
+   - **Retention:** a write that can't keep the previous version is refused by the device doing the write, which also sends the retention op, since under end-to-end encryption the server can't keep a version on its own (design/e2e-encryption.md §4). Filling the quota on purpose therefore blocks writes, and loses nothing.
 4. **Rates and sizes per verb:** §7. An over-limit agent sees 429 or 413, with which limit it hit and when to retry.
 5. **The access log:** 7 days and 100,000 rows. Readable by the person only (§8).
 6. **The Inbox.**
@@ -259,10 +269,9 @@ Every check and reservation precedes its write. For a batch, admission reserves 
    - **An item is a read-only entry under `/Inbox/`.** Its code never runs, as with a shared collection.
    - **Accepting it** moves it into the workspace as the person's own copy. Its origin (who sent it, when) is kept on the entry. It is still never run by itself: the person runs it.
    - **Declining it** deletes it.
-7. **A collaborator's grant and the owner's files.**
-   - A grant covers only what the granting account owns, or may edit as a collaborator. It is checked against the document object's access list for that account, every time.
-   - When an owner removes a collaborator, the collaborator's grants lose that document at once, because the next check fails.
-   - The owner sees, in the document's access list, which agents have reached it through a collaborator's grant. Each is listed with the collaborator who granted it, and the owner can remove that access.
+7. **Another person's grant and the owner's files.**
+   - **Settled by end-to-end encryption:** no other account ever writes or reads the owner's documents. Another person gets an encrypted copy under their own keys, and proposes changes back (design/workspace-files.md §7.9). Live collaboration, and with it collaborators' grants, was dropped (design/e2e-encryption.md §5.1).
+   - So a grant covers only what the granting account owns. Another person's grant reaches only their own copy, never the owner's files, and nothing has to be checked against an access list.
 
 ## 10. The cocalc.ai adapter (step 11), in outline
 

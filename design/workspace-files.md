@@ -413,12 +413,12 @@ Delete                     (to Trash)
 |---|---|---|
 | The workspace index (§2.2: paths, folders, Trash) | A small log of operations (create, rename or move, delete, restore), each with the device and time | Two renames of one file: the later one wins, and the other device's name is shown in that file's history. A delete on one device and an edit on another: the edit wins and the file comes back out of Trash. Two new files at one path: the second becomes `name (2)`. |
 | A notebook's or board's content | Its patch log, as TimeTravel keeps it now, sent and fetched patch by patch (idempotent by patch id) | Merged by patchflow: concurrent typing in a cell or a note merges by character. Nothing is lost, and every version from both devices is in TimeTravel. |
-| A notebook's outputs | Not in the history (history.js:8). They are sent as a snapshot of the latest outputs per cell, by hash | The latest run wins. Outputs can be recomputed. |
-| Data files and board pictures | By SHA-256, once each, as sharing's blobs | One path changed on two devices: the later one wins, and the other is kept as `name (conflict, <device>).ext`. Never dropped. |
+| A notebook's outputs | Not synced (William, Oct 26): they aren't in the history (history.js:8), and each device keeps its own | None. Outputs can be recomputed. |
+| Data files and board pictures | Encrypted, once each per account, named by a keyed address rather than a plain SHA-256 (design/e2e-encryption.md §3.3) | One path changed on two devices: the later one wins, and the other is kept as `name (conflict, <device>).ext`. Never dropped. |
 | Caches (outputs cache, remote boards) | Not synced | — |
 
 **Snapshots** bound the replay for a new device:
-- The server keeps a compacted snapshot of each document every so often. A phone opens a document from its snapshot plus the patches since.
+- A device makes a compacted, encrypted snapshot of each document every so often, and the server keeps it. A phone opens a document from its snapshot plus the patches since.
 - **"Clear history"** (IdbPatchStore.clear, stores.js:197) becomes a server operation when sync is on. Otherwise another device would send the history back.
 
 ### 7.3 The server
@@ -431,16 +431,16 @@ It is made of objects that each serve one account or one document, so it grows b
 
 | Part | What it holds | Why it scales |
 |---|---|---|
-| **An account object** (one Durable Object per account, SQLite inside) | The workspace index and its operation log, the account's file holdings (path to SHA-256), devices and their cursors, and the documents shared with the account | Everything one person does goes here. Nothing crosses accounts, so there is no global table that grows with every user's files. |
-| **A document object** (one Durable Object per synced notebook or board) | That document's patch log, its snapshots' R2 keys, and who may read or write it | Edits to a document are ordered in one place, which collaboration needs (§7.9). It is awake only while someone edits, so a million idle documents cost only their storage. |
-| **R2** | File bytes, pictures, snapshots and outputs, by SHA-256 under the account's prefix | Unbounded, and serving is free (no egress fees). |
+| **An account object** (one Durable Object per account, SQLite inside) | The workspace index's operation log, sealed by the devices (design/e2e-encryption.md §4), the account's file holdings by keyed address, and devices and their cursors | Everything one person does goes here. Nothing crosses accounts, so there is no global table that grows with every user's files. |
+| **A document object** (one Durable Object per synced notebook or board) | That document's patch log (ciphertext), and its owner | Edits to a document are ordered in one place, which the person's several devices need. It is awake only while someone edits, so a million idle documents cost only their storage. |
+| **R2** | File bytes, pictures and snapshots, as ciphertext under the account's prefix | Unbounded, and serving is free (no egress fees). |
 | **D1** (one database, as sharing has now) | Accounts, sessions, cached account limits, collections, purge records | Only small, per-account rows, written at sign-in, on a plan change or when sharing, never on an edit. |
 | **Workers** | The HTTP API, uploads, sign-in | Stateless. |
 
 **What follows for sharing** (design/sharing.md): its per-account file *holdings* move from D1 into the account object over time, so D1 stays small at any number of users. Collections keep their D1 rows: there are few of them, and they are public.
 
 **How devices talk to it:**
-- A device holds one WebSocket to its account object, and one more to each document it has open while another device or person also has it open.
+- A device holds one WebSocket to its account object, and one more to each document it has open while another of the person's devices also has it open.
 - **Otherwise it sends batches.** Patches made while nobody else is watching go up every ~30 seconds, and at once when the page is hidden or closed. A batch is one request and one stored row. Most of the time objects then hibernate (asleep and not billed) between batches.
 - **Every WebSocket uses Cloudflare's hibernation API.** A socket accepted without it keeps its object awake and billed for as long as it is open.
 
@@ -465,12 +465,11 @@ It is made of objects that each serve one account or one document, so it grows b
 ### 7.4 Privacy and accounts
 
 - **Private by default.** Synced data is never served on the user-content domain or to anyone else. Sharing remains a separate, explicit act.
-- **Encryption: (a), decided** (William, Oct 18). The two choices were:
-  - **(a)** Encrypted at rest by Cloudflare, as R2 is today. Account recovery is simple.
-  - **(b)** End-to-end, with a key only the person's devices hold. The server can't read anything, but a lost key means lost data unless the person kept a recovery code.
-  - **What keeps (b) possible later,** without building it now:
-    - the server treats patches, snapshots and file bytes as opaque payloads in an envelope (ids, sizes, parents, author), and never parses them;
-    - names for blobs are made in one function, which could later key them with the account's secret instead of a plain SHA-256.
+- **Encryption: end-to-end, the one mode, decided** (William, Nov 23: "Yes, approve E2E as the one mode"). It replaces the Oct 18 choice of (a), encryption at rest by Cloudflare. The design is design/e2e-encryption.md.
+  - **Only the person's devices hold the keys.** The server stores and orders ciphertext. It can't read paths, names or content, though it still sees metadata: sizes, timing, and which device wrote what (e2e-encryption.md §4).
+  - **The cost, said plainly:** if every device and the recovery code are lost, the data is gone. Nobody can recover it, not Sagebrush, not CoCalc, not support (e2e-encryption.md §1).
+  - **What made the switch cheap:** the server already treats patches, snapshots and file bytes as opaque payloads in an envelope, and names blobs in one function, which now keys them with the account's secret instead of a plain SHA-256.
+  - **The exceptions are explicit,** and the product names them when they apply: publishing publicly (design/sharing.md), a support bundle the person chooses to send, and class work launched from a school's LMS (e2e-encryption.md §0 and §5.2).
 - **Deleting:**
   - **"Delete my synced data"** removes everything of the account's from the server, by the same path as the purge in design/sharing.md "Deleting".
   - Turning sync off on one device leaves the server copy and the device's copy each in place.
@@ -509,8 +508,8 @@ It is made of objects that each serve one account or one document, so it grows b
 
 - **Phase 1: backup.** One device uploads continuously and any device can restore. This covers "my laptop can die".
 - **Phase 2: sync.** Several devices edit, with live pushes and merges. This covers "my laptop is at home".
-- **Phase 3: collaboration** (§7.9). Other people can be given access to a document or folder.
-- All three phases use the same objects and logs. Phase 1 is phase 2 with only one writing device, and phase 2 is phase 3 with only one person, so nothing is thrown away.
+- **There is no phase 3.** Live collaboration, where several accounts write one document, was planned here. It contradicts end-to-end encryption's "never a shared live document", and none of it was built. Working with another person is copy plus proposals instead (§7.9).
+- Both phases use the same objects and logs. Phase 1 is phase 2 with only one writing device, so nothing is thrown away.
 
 ### 7.8 Scale
 
@@ -527,39 +526,25 @@ The service scales by adding objects. Its limits per object, from Cloudflare's p
 
   Without them, objects stay awake and write a row per patch, which costs several times more.
 
-### 7.9 Collaboration: two people, one document
+### 7.9 Working with another person: copies and proposals
 
-**What William asked for (Oct 18):** two people edit the same notebook or board, and several seconds of lag is fine. Each person keeps their own runtime state, though a reactive notebook will often bring the two into agreement.
+**Decided (William, Nov 23):** sharing stays GitHub-like, and never a shared live document. Under end-to-end encryption (§7.4), each person's data is under keys only their own devices hold, so two accounts never write one document. This replaces the Oct 18 plan for two people editing one notebook or board live, which was never built: documents' access lists were only ever owner-only. The design is design/e2e-encryption.md §5.
 
-**This fits the model with no new mechanism:**
-- A shared document is a **document object** (§7.3) that more than one account may write.
-- Each person's devices send patches to it, and it orders them and passes them on.
-- patchflow merges concurrent edits, the same way two devices of one person are merged. This is also how CoCalc's documents are edited together.
-- **Lag:**
-  - when both people have the document open, both hold its socket, and edits arrive in about a second;
-  - when one of them isn't watching, the batching of §7.3 means up to ~30 seconds;
-  - either is within "several seconds".
+**Sending a copy:**
+- The sender shares a snapshot of a file or folder with a person. It's an encrypted copy for that recipient: only their devices can open it.
+- In the recipient's workspace it appears under **Shared with you**, alongside read-only collections (design/sharing.md). **Copy to my workspace** imports it under their own keys, all in their browser.
+- A **link share** keeps its key in the URL's fragment, which browsers never send to the server. Anyone who has the link can open it, so revoking it stops future downloads only.
+- A newer snapshot of the same files is a new version of the share, chained to the last one.
 
-**Who may do what:**
-- A document or folder has an **owner** (the account whose workspace and quota it is in), plus **editors** and **viewers**.
-- The owner invites people by their CoCalc account or email, or with a link that grants access only once signed in.
-- The document object checks the access list on every connection and request.
-- Revoking someone's access closes their sockets at once. Their devices keep the copy they already had, as with any download.
+**Proposing a change back:**
+- The recipient edits their copy. **Propose** sends the owner an encrypted, signed diff against the snapshot it started from.
+- The owner's browser checks it, merges it, and shows a per-file accept or reject before anything is kept. Agents' branches and Delegate tasks are already reviewed this way.
 
-**In the other person's workspace,** a shared document appears under **Shared with you**, alongside read-only collections (§5).
-- **Save a copy** forks it into their own workspace, with its history up to that point.
-- A shared *folder* also shares its data files, so `open("data/primes.csv")` reads the same bytes for both people.
+**Runtime state is each person's own,** as before: each browser runs its own interpreter, on its own copy. Nothing is shared but the files themselves.
 
-**Runtime state is each person's own,** as William asked:
-- Each browser runs its own interpreter.
-- **What is shared:** the document, meaning inputs, cell order, and a board's notes and layout.
-- **What is not shared:** variables, and running work.
-- **Outputs** are shown per person. Each person sees the outputs of their own runs. A cell they haven't run shows the latest output anyone saved, marked with who ran it and when. One person's run never overwrites the other's.
-- The reactive notebook brings the two together naturally: the same inputs give the same outputs. Where they don't (randomness, different files, timing), each person sees their own result.
+**Presence** remains among one person's own devices (the same notebook open on a laptop and a phone). It rides on the document's socket, sealed like the document, and is never stored.
 
-**Presence** (who else is here, and their cursor or selected cell) rides on the same socket. It is never stored, and costs nothing when the document is used alone.
-
-**Not in scope:** shared running state, meaning one interpreter that two people drive. This needs a server-side or relayed kernel, which is what cocalc.ai projects provide.
+**Not in scope:** shared running state (one interpreter that two people drive), and a live document two accounts edit at once. Both need a server that can read the document, which is what cocalc.ai projects provide.
 
 ### 7.10 Security
 
@@ -567,13 +552,13 @@ The service scales by adding objects. Its limits per object, from Cloudflare's p
 
 | Threat | Defence |
 |---|---|
-| Another account reading or writing my data | Every request names an account object or document object, and the object checks the session's `account_id` against its owner or access list. There is no endpoint that lists or reads by hash alone (as with sharing's `/c/<collection>/<sha256>`). File bytes are fetched through an object that has checked access, then streamed from R2. |
+| Another account reading or writing my data | Every request names an account object or document object, and the object checks the session's `account_id` against its owner. There is no endpoint that lists or reads by address alone (as with sharing's `/c/<collection>/<sha256>`). File bytes are fetched through an object that has checked access, then streamed from R2, and they are ciphertext that only my devices can open. |
 | A stolen or replayed session | Sharing's session: a random token in a `__Host-` cookie (HttpOnly, Secure, SameSite=Lax), stored only as its SHA-256. WebSocket upgrades check `Origin`, as state-changing requests already must. Devices can be listed and forgotten (§7.6), which ends their sessions. |
-| **A collaborator's code running in my browser.** This is the new risk. Today a person runs only their own code. With collaboration, another person's edit becomes code that my browser can run. | **Code always runs in the runner** (design/runner.md): an opaque-origin, sandboxed frame with no storage, no network and no cookies. Python that escapes into JavaScript there reaches nothing: not my workspace, not my session, not the network. This is already the default on the notebook page and boards. **Before collaboration ships,** it must be the only way code runs, and that is not yet true in Firefox and Safari (runner.md, remaining steps 4-5). |
-| A collaborator's edit running **without my say-so** | Autorun is the reactive notebook's default (design/reactive-notebook.md). **An edit from someone else never triggers a run.** The cells it changes are marked "changed by Ana, not run" until I run them, as a shared collection already behaves ("Opening a shared link never runs its code by itself"). The same rule applies to a board's code notes. |
-| A malicious or malformed patch, or a whole document | The server checks sizes, rates and the shape of each patch, and never runs anything. Every client treats remote documents as untrusted input. This is the class of the Oct 18 `__proto__` fixes (board-proto-ids, board-own-names): ids are only ever own-property keys. Outputs are already bounded and sanitized (design/security.md rules 1-4). |
+| **Another person's code running in my browser,** from a shared copy or a proposal (§7.9). | **Code always runs in the runner** (design/runner.md): an opaque-origin, sandboxed frame with no storage, no network and no cookies. Python that escapes into JavaScript there reaches nothing: not my workspace, not my session, not the network. This is already the default on the notebook page and boards. **Before shares and proposals ship,** it must be the only way code runs, and that is not yet true in Firefox and Safari (runner.md, remaining steps 4-5). |
+| Another person's edit running **without my say-so** | Autorun is the reactive notebook's default (design/reactive-notebook.md). **An edit from someone else never triggers a run:** not opening a shared copy, and not accepting a proposal. The cells it changes are marked "changed by Ana, not run" until I run them, as a shared collection already behaves ("Opening a shared link never runs its code by itself"). The same rule applies to a board's code notes. |
+| A malicious or malformed patch, or a whole document | The server checks sizes, rates and each envelope's form, and never runs anything; a patch's body is ciphertext it can't parse. Every client checks a patch's shape after decrypting it, and treats remote documents as untrusted input. This is the class of the Oct 18 `__proto__` fixes (board-proto-ids, board-own-names): ids are only ever own-property keys. Outputs are already bounded and sanitized (design/security.md rules 1-4). |
 | Using storage as free file hosting | Synced files are served only to accounts with access, as `private` attachments with `nosniff` and a `sandbox` CSP, the same as the configured files origin. Public sharing stays the separate, explicit act it is now. Quota is per membership. |
-| Cloudflare or an insider reading data | Encrypted at rest by Cloudflare. End-to-end encryption is not built now; the design keeps it possible (§7.4). With collaboration, it would mean per-document keys shared with each invitee, which is possible but means a lot more to get right, so it is not proposed for the first version. |
+| Cloudflare, an insider or a legal demand reading data | **End-to-end encryption** (§7.4, design/e2e-encryption.md): the stored copies are ciphertext, and only my devices hold the keys. What remains visible is metadata (sizes, timing, which device wrote). **The limit:** a web page served by a compromised or compelled origin can use the keys while it's open. The desktop app, whose signed builds the server doesn't serve, has the stronger boundary (e2e-encryption.md §8). |
 | Losing data (a bug, a bad deploy) | 30-day point-in-time recovery of every Durable Object's SQLite. Copies off Cloudflare, encrypted, as in sharing.md's Backups section. Trash. Nothing removed by quota pressure. |
 
 **The server's attack surface is small:** it stores, orders and relays, and never runs user code. All compute stays in each person's browser, inside the runner.
@@ -707,7 +692,7 @@ versions/<fid>.json      a data file's versions: [{id, at, size, sha256, author,
    - to remote agents, once sync exists.
 2. **A person can drive everything through their own agents, including running code** (William, Oct 18: "any model with agents that doesn't imagine the user being able to 100% drive something via agents is not sufficient").
    - Safety comes from knowing exactly what can go wrong, and closing each of those (§8.3). Holding agents back is not the method.
-3. **Agents are collaborators** (§7.9, §7.10).
+3. **Agents are visible participants** (§7.10, §8.3).
    - They show where they are.
    - Everything they change is credited to them, appears in TimeTravel, and can be undone, data files included (§2.5).
 4. **Outward actions are gated; local, reversible ones aren't.**
@@ -717,7 +702,7 @@ versions/<fid>.json      a data file's versions: [{id, at, size, sha256, author,
 6. **Access is granted, not assumed.**
    - An agent sees only what it was given, for a stated time, and the grant can be taken back at once.
    - Nothing leaves the device without sync turned on *and* a grant made.
-7. **The one hard rule: code from other people never runs by itself.** This covers collaborators, shared collections and Inbox items. No setting changes it.
+7. **The one hard rule: code from other people never runs by itself.** This covers shared copies, proposals, shared collections and Inbox items. No setting changes it.
 
 ### 8.2 The workspace API
 
@@ -801,7 +786,7 @@ Each needs **either an explicit confirmation from the person at the time, or a s
   - is credited to the agent;
   - is logged: time, agent, document, cell or note, and the hash of the code.
 - **A remote agent's runs** happen only in an open page of the person's, which shows them. The sync service has no compute; with no page open, cocalc.ai is the place for that (§8.6).
-- **The hard rule stands:** code from other *people* (collaborators, shared collections, Inbox items) never runs by itself. An agent's permission to run code covers only code that agent wrote. It never covers code someone else wrote, even when the agent passes it on.
+- **The hard rule stands:** code from other *people* (shared copies, proposals, shared collections, Inbox items) never runs by itself. An agent's permission to run code covers only code that agent wrote. It never covers code someone else wrote, even when the agent passes it on.
 
 ### 8.4 Access: granted, scoped, visible
 
@@ -865,7 +850,7 @@ Each needs **either an explicit confirmation from the person at the time, or a s
   - history in TimeTravel (one record per message, patchflow, as boards are);
   - versions, sync (§7) and search;
   - Trash.
-- **Each message is credited:** to the person, to `agent:<name>`, or to a collaborator. Reopening the board reopens its conversation.
+- **Each message is credited:** to the person, to `agent:<name>`, or, in a copy someone shared, to the other person who wrote it (`collaborator:<id>`). Reopening the board reopens its conversation.
 - **Several conversations about one document**, one per agent, are tabs in the panel.
 - **Format:** the records follow CoCalc's chat records where they can, so a conversation can go to cocalc.ai with the document (§8.6).
 
@@ -909,9 +894,9 @@ Each needs **either an explicit confirmation from the person at the time, or a s
 - **Only the person can instruct as the person.**
   - The author of a message is set by the page from the person's signed-in session and the adapter's pairing, never from anything in the text.
   - An adapter accepts instructions only from its paired page (Claude Code's docs require the same: gate on the sender).
-- **Everything else is content, labelled as such:** text inside documents, a collaborator's messages in a shared conversation, Inbox items and shared collections.
+- **Everything else is content, labelled as such:** text inside documents, another person's messages in a shared copy of a conversation, proposals, Inbox items and shared collections.
   - Adapters deliver it with its author (for a channel, as an attribute: `author="collaborator:…"`), and the agent's instructions say that only the person's messages are instructions.
-  - A collaborator can't send instructions to *my* agent: my agent's pairing and grant are mine.
+  - Another person can't send instructions to *my* agent: my agent's pairing and grant are mine.
 - **Limits stay with the grant:** the agent's grant bounds everything it does, however a message is phrased, and outward actions stay gated (§8.3, danger 3).
 - **Approvals relayed to the panel** (Claude Code's permission relay) come only from the paired page. They need the same sender check as messages, because whoever can answer can approve.
 
@@ -922,7 +907,7 @@ Each needs **either an explicit confirmation from the person at the time, or a s
 | Step 1 (the index) | `window.sagebrush.workspace`, its schema and tests |
 | The file browser and File menu | The same verbs in the page's agent API, documented in the page's llms.txt |
 | `sagebrush-mcp` | The verbs as MCP tools, through a driven page (before sync) |
-| Collaboration (§7.9) | Presence, crediting edits to agents, "not run" marking, undo by agent |
+| Shares and proposals (§7.9) | Presence among the person's devices, crediting edits to agents, "not run" marking, undo by agent |
 | Sync, phase 2 (§7.7) | Grants, the agent endpoint, the access log, the Agents with access panel |
 | The chat panel (§8.7) | The panel, conversations as documents, context with each message; the local adapter through `sagebrush-mcp` (Claude Code channels; `chat.next` for others) |
 | After that | The cocalc.ai adapter, the Ask agent, Send to Sagebrush, Open in cocalc.ai; the remote adapter with sync |
@@ -940,7 +925,7 @@ Each needs **either an explicit confirmation from the person at the time, or a s
 4. Rate limits and sizes per verb, and what an over-limit agent sees.
 5. How long the access log is kept, and who may read it.
 6. Inbox: who may send to whom, spam and size limits, and what accepting does.
-7. When a shared document is shared on with an agent: does a collaborator's grant reach the owner's files? *(Proposed: no. A grant covers only what the granting person owns or may edit, and the owner sees it.)*
+7. When a shared document is shared on with an agent: does a collaborator's grant reach the owner's files? *(Settled by end-to-end encryption: no. Another person only ever holds a copy under their own keys, so their grant can reach only their copy, never the owner's files.)*
 
 ---
 
@@ -961,7 +946,7 @@ Each step is a branch of its own, reviewed as usual, with pictures for William f
 7. **Shared collections as a read-only root.** This waits for the sharing pages.
 8. **Backup (§7.7, phase 1).** Server and protocol design go first, in their own design note, with security review (design/security.md) before any upload of private data.
 9. **Sync (§7.7, phase 2),** with agent grants and the agent endpoint (§8.4, §8.2), and the chat panel's remote adapter (§8.7).
-10. **Collaboration (§7.9),** with presence and attribution for agents (§8.3). It needs two things first: the runner as the only way code runs, in every browser (§7.10), and "remote edits never run by themselves" in the reactive notebook and on boards.
+10. **Shares and proposals (§7.9),** with attribution for agents (§8.3), under end-to-end encryption (design/e2e-encryption.md §5). It needs two things first: the runner as the only way code runs, in every browser (§7.10), and "remote edits never run by themselves" in the reactive notebook and on boards.
 11. **The cocalc.ai adapter, the Ask agent, and the handoffs with cocalc.ai** (§8.5, §8.6, §8.7). The adapter needs CoCalc's Agent Network to accept a person's page as a sender.
 12. **Export and import** (§7.11): the bundle format (documented and versioned), the browser's export in both modes, Import, and the UI. The server's export job is auth's half, from the account's objects and R2. Its tests include a round trip (export, import into an empty workspace, same files, same TimeTravel), and bundles that lie: a wrong hash, an oversized entry, a hostile path, a later version. Other tests:
 - the export's size bound holds for 400,000 tiny members with long names, and for incompressible data;
@@ -979,7 +964,7 @@ Steps 1 to 6 don't depend on sync. Step 1 includes `window.sagebrush.workspace` 
 **Where his answer differs from the default:**
 - **Two pages or one** (old question 6): **one page,** "to avoid confusion" (§5, step 5).
 - **The desktop app** (old question 7): the same storage as the browser. Medium term, the desktop app is about more RAM, CPU and native code. Later, optionally, a path for reading and writing outside the sandbox (§6.2).
-- **Encryption** (old question 11): **(a).** The design keeps end-to-end possible, but it isn't built now (§7.4).
+- **Encryption** (old question 11): **(a)** on Oct 18. **Superseded on Nov 23:** end-to-end encryption, as the one mode (§7.4, design/e2e-encryption.md).
 - **Phones** (old question 12): only what is opened or pinned. A native phone app later can fetch everything (§7.5).
 - **Agents:** "the plan COMPLETELY OMITS agents. We must have an agent strategy" (§8).
 
