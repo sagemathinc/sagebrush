@@ -153,12 +153,31 @@ function admit(k: Kernel, what: string, bytes: bigint) {
   k.skt_begin(Number(pages));
 }
 
+/** A wasm32 address as JS gets it (an i32 result, so SIGNED: from 2 GiB on it is negative), unsigned. */
+export const at = (p: number): number => p >>> 0;
+
+/** The pages the heap's bound last refused (wasmheap::Refusal's first u32), or 0.  (Exported for the tests.) */
+export function refusedPages(k: Pick<Kernel, "memory" | "skt_last_refusal">): number {
+  try {
+    return new Uint32Array(k.memory.buffer, at(k.skt_last_refusal()), 1)[0];
+  } catch {
+    return 0;
+  }
+}
+
+/** An open dataset's buffers in the module's memory: X, y and the mask (or null).  (Exported for the tests.) */
+export function datasetViews(k: Pick<Kernel, "memory" | "skt_dataset_x" | "skt_dataset_y" | "skt_dataset_mask">, h: number, n: number, f: number, o: number, masked: boolean) {
+  const b = k.memory.buffer;
+  return {
+    x: new Float32Array(b, at(k.skt_dataset_x(h)), n * f),
+    y: new Float64Array(b, at(k.skt_dataset_y(h)), n * o),
+    mask: masked ? new Uint8Array(b, at(k.skt_dataset_mask(h)), f) : null,
+  };
+}
+
 /** A refused growth (the heap's page bound), as the memory guard's MemoryError. */
 function refused(k: Kernel, what: string): never {
-  let need = 0;
-  try {
-    need = new Uint32Array(k.memory.buffer, k.skt_last_refusal(), 1)[0];
-  } catch {}
+  const need = refusedPages(k);
   return memoryGuard(what, BigInt(k.memory.buffer.byteLength) + BigInt(need) * BigInt(PAGE), skltreeBound(), WHO);
 }
 
@@ -169,10 +188,10 @@ function guarded<T>(k: Kernel, what: string, f: () => T): T {
     return f();
   } catch (e) {
     if (!(e instanceof Error)) throw e;
-    let need = 0;
-    try {
-      need = new Uint32Array(k.memory.buffer, k.skt_last_refusal(), 1)[0];
-    } catch {}
+    // (between a trap and retire() nothing may call an export that touches the dataset table: a trap skips Drop,
+    // so its RefCell may still be borrowed and any such call would trap again; skt_last_refusal reads only the
+    // heap's own state)
+    const need = refusedPages(k);
     retire();
     O.pollInterrupt();
     if (need > 0) memoryGuard(what, BigInt(need) * BigInt(PAGE), skltreeBound(), WHO);
@@ -233,9 +252,10 @@ function dataset(X: any, y: any, mask: any = null): any {
     Obj.raise(Obj.T.SystemError, `the decision-tree kernel refused a dataset (${h})`);
   }
   try {
-    copyIn(new Float32Array(k.memory.buffer, k.skt_dataset_x(h), n * f), storage(x));
-    copyIn(new Float64Array(k.memory.buffer, k.skt_dataset_y(h), n * o), storage(yy));
-    if (m) copyIn(new Uint8Array(k.memory.buffer, k.skt_dataset_mask(h), f), storage(m));
+    const v = datasetViews(k, h, n, f, o, m !== null);
+    copyIn(v.x, storage(x));
+    copyIn(v.y, storage(yy));
+    if (v.mask) copyIn(v.mask, storage(m!));
     const r = guarded(k, what, () => k.skt_dataset_seal(h));
     if (r < 0) {
       const row = k.skt_detail_row(), col = k.skt_detail_col();

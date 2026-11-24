@@ -175,3 +175,30 @@ fresh.release()
     restore();
   }
 });
+
+test("addresses at or above 2 GiB: the module's signed i32 results are read unsigned (views and the refusal)", () => {
+  const S = require(DIST + "/src/runtime/skltree.js");
+  // (2**31 + 64 as wasm32 returns it to JS: an i32, so negative)
+  const ADDR = 2 ** 31 + 64, SIGNED = ADDR | 0;
+  assert.equal(SIGNED, -2147483584);
+  assert.equal(S.at(SIGNED), 2147483712);
+  // (a memory just past 2 GiB: an ArrayBuffer the system commits only where it is written)
+  const buffer = new ArrayBuffer(2 ** 31 + 4096);
+  new Uint32Array(buffer, ADDR, 1)[0] = 7;
+  const stub = {
+    memory: { buffer },
+    skt_dataset_x: () => SIGNED,
+    skt_dataset_y: () => SIGNED + 64,
+    skt_dataset_mask: () => SIGNED + 256,
+    skt_last_refusal: () => SIGNED,
+  };
+  const v = S.datasetViews(stub, 1, 2, 3, 1, true);
+  assert.equal(v.x.byteOffset, 2147483712);
+  assert.equal(v.y.byteOffset, 2147483712 + 64);
+  assert.equal(v.mask.byteOffset, 2147483712 + 256);
+  assert.deepEqual([v.x.length, v.y.length, v.mask.length], [6, 2, 3]);
+  // the refused pages are read where the module put them, not lost to a RangeError
+  assert.equal(S.refusedPages(stub), 7);
+  // (the signed offset itself is what threw before the fix)
+  assert.throws(() => new Float32Array(buffer, SIGNED, 6), RangeError);
+});
