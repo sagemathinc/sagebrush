@@ -28,8 +28,8 @@ export type EpochKeys = Readonly<{
   account: string;
   /** HMAC-SHA256, sign only: blob wire addresses */
   addr: CryptoKey;
-  /** HKDF, deriveBits only: blob file keys */
-  blob: CryptoKey;
+  /** HKDF, deriveBits only: blob file keys (named blobKey: a `blob` property is a workspace blob reference) */
+  blobKey: CryptoKey;
   /** AES-256-GCM: the index's sealed ops and the content keys stored with them */
   index: CryptoKey;
   /** AES-256-GCM: the content keys of documents and snapshots, and the inbox key pair */
@@ -38,7 +38,7 @@ export type EpochKeys = Readonly<{
 
 // (every bundle deriveEpochKeys made, with what it was made from: sealing takes the account and key handles from here,
 //  so a copy with another account, or one mixing two bundles' handles, is no bundle at all)
-type Minted = Readonly<{ account: string; n: number; addr: CryptoKey; blob: CryptoKey }>;
+type Minted = Readonly<{ account: string; n: number; addr: CryptoKey; blobKey: CryptoKey }>;
 const MINTED = new WeakMap<object, Minted>();
 
 /** What deriveEpochKeys made `keys` from; refused (bad_form) for anything it didn't make itself. */
@@ -59,10 +59,10 @@ export async function deriveEpochKeys(S: Uint8Array, account: string, n: number)
   const addr = await subtle().deriveKey(hkdf(epochInfo(LABELS.epochAddr, account, n)), base, { name: "HMAC", hash: "SHA-256", length: 256 }, false, ["sign"]);
   // (WebCrypto derives no HKDF key directly: the bits, imported as one that isn't extractable, then cleared)
   const bits = new Uint8Array(await subtle().deriveBits(hkdf(epochInfo(LABELS.epochBlob, account, n)), base, 256));
-  let blob: CryptoKey;
-  try { blob = await subtle().importKey("raw", bits, "HKDF", false, ["deriveBits"]); } finally { bits.fill(0); }
-  const keys: EpochKeys = Object.freeze({ n, account, addr, blob, index: await aes(LABELS.epochIndex), wrap: await aes(LABELS.epochWrap) });
-  MINTED.set(keys, Object.freeze({ account, n, addr, blob }));
+  let blobKey: CryptoKey;
+  try { blobKey = await subtle().importKey("raw", bits, "HKDF", false, ["deriveBits"]); } finally { bits.fill(0); }
+  const keys: EpochKeys = Object.freeze({ n, account, addr, blobKey, index: await aes(LABELS.epochIndex), wrap: await aes(LABELS.epochWrap) });
+  MINTED.set(keys, Object.freeze({ account, n, addr, blobKey }));
   return keys;
 }
 

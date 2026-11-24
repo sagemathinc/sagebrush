@@ -80,7 +80,7 @@ window.msg = async (f) => { try { await f(); return "ok"; } catch (e) { return (
 window.code = async (f) => { try { await f(); return "ok"; } catch (e) { return e?.code ?? String(e?.message ?? e); } };
 window.sha = async (b) => new Uint8Array(await crypto.subtle.digest("SHA-256", b));
 window.keys = () => e2e.deriveEpochKeys(unhx("${S.toString("hex")}"), "acct-1", 7);
-window.blob = async (bytes, codec = "store.1") => { const k = await keys(), s = await sha(bytes), r = await e2e.sealBlob(k, s, bytes, codec); return { ...r, kf: await e2e.fileKey(k.blob, s, codec) }; };
+window.blob = async (bytes, codec = "store.1") => { const k = await keys(), s = await sha(bytes), r = await e2e.sealBlob(k, s, bytes, codec); return { ...r, kf: await e2e.fileKey(k.blobKey, s, codec) }; };
 window.ready = true;</script>`;
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (r) => {
   if (new URL(r.url).pathname === "/e2e.js") return new Response(js, { headers: { "content-type": "text/javascript" } });
@@ -157,13 +157,13 @@ try {
       const k = await e2e.deriveEpochKeys(unhx(${J(S.toString("hex"))}), "acct-1", 7);
       const z = new Uint8Array(16), iv = new Uint8Array(12);
       const enc = async (key) => hx(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, z));
-      const fk = await e2e.fileKey(k.blob, unhx(${J(SHA.toString("hex"))}), "zstd.1");
+      const fk = await e2e.fileKey(k.blobKey, unhx(${J(SHA.toString("hex"))}), "zstd.1");
       const ck = await e2e.chunkKey(fk, 5);
       return {
         address: await e2e.wireAddress(k.addr, unhx(${J(SHA.toString("hex"))})),
         index: await enc(k.index), wrap: await enc(k.wrap), file: hx(fk), chunk5: await enc(ck),
         frozen: Object.isFrozen(k), n: k.n, account: k.account,
-        keys: ["addr", "blob", "index", "wrap"].map((x) => [x, k[x].extractable, k[x].algorithm.name, [...k[x].usages].sort().join(",")]),
+        keys: ["addr", "blobKey", "index", "wrap"].map((x) => [x, k[x].extractable, k[x].algorithm.name, [...k[x].usages].sort().join(",")]),
         chunkKey: [ck.extractable, ck.algorithm.name, [...ck.usages].sort().join(",")],
       };
     })()`);
@@ -177,7 +177,7 @@ try {
     ok(r.file === kFile.toString("hex"), "K-1: K_file = HKDF(K_blob[e], label ‖ sha ‖ codec)");
     ok(r.chunk5 === zEnc(hkdf(kFile, Buffer.concat([s8("sagebrush.blob.chunk.v1"), u32(5)]))), "K-1: K_chunk = HKDF(K_file, label ‖ u32(index))");
     ok(r.frozen && r.n === 7 && r.account === "acct-1", "K-2: the epoch's keys come frozen, with their epoch and account");
-    ok(J(r.keys) === J([["addr", false, "HMAC", "sign"], ["blob", false, "HKDF", "deriveBits"], ["index", false, "AES-GCM", "decrypt,encrypt"], ["wrap", false, "AES-GCM", "decrypt,encrypt"]]), "K-2: no epoch key is extractable, and each has only its own use", r.keys);
+    ok(J(r.keys) === J([["addr", false, "HMAC", "sign"], ["blobKey", false, "HKDF", "deriveBits"], ["index", false, "AES-GCM", "decrypt,encrypt"], ["wrap", false, "AES-GCM", "decrypt,encrypt"]]), "K-2: no epoch key is extractable, and each has only its own use", r.keys);
     ok(J(r.chunkKey) === J([false, "AES-GCM", "decrypt,encrypt"]), "K-2: a chunk key isn't extractable", r.chunkKey);
     // (each input separates: another epoch, account, secret, sha or codec gives other keys)
     const sep = await P.ev(`(async () => {
@@ -188,7 +188,7 @@ try {
       return {
         base: await addr(S, "acct-1", 7), epoch: await addr(S, "acct-1", 8), account: await addr(S, "acct-2", 7), secret: await addr(S2, "acct-1", 7),
         sha: await e2e.wireAddress(k.addr, sha2),
-        files: [hx(await e2e.fileKey(k.blob, sha, "zstd.1")), hx(await e2e.fileKey(k.blob, sha, "zstd.2")), hx(await e2e.fileKey(k.blob, sha2, "zstd.1"))],
+        files: [hx(await e2e.fileKey(k.blobKey, sha, "zstd.1")), hx(await e2e.fileKey(k.blobKey, sha, "zstd.2")), hx(await e2e.fileKey(k.blobKey, sha2, "zstd.1"))],
       };
     })()`);
     ok(new Set([sep.base, sep.epoch, sep.account, sep.secret, sep.sha]).size === 5 && sep.files[0] === r.file && new Set(sep.files).size === 3, "K-3: another epoch, account, secret or sha gives another address; another codec or sha another file key", sep);
@@ -204,9 +204,9 @@ try {
         highLead: await code(() => e2e.deriveEpochKeys(S, String.fromCharCode(0xd83d) + "ab", 0)), highMiddle: await code(() => e2e.deriveEpochKeys(S, "a" + String.fromCharCode(0xd83d) + "b", 0)),
         highThenHigh: await code(() => e2e.deriveEpochKeys(S, String.fromCharCode(0xd83d, 0xd83d, 0xde00), 0)), lowTrail: await code(() => e2e.deriveEpochKeys(S, "ab" + String.fromCharCode(0xde00), 0)),
         lowMiddle: await code(() => e2e.deriveEpochKeys(S, "a" + String.fromCharCode(0xde00) + "b", 0)), pairs: await code(() => e2e.deriveEpochKeys(S, "\u{1F600}\u{10FFFF}\u{10000}", 0)),
-        shaShort: await code(() => e2e.wireAddress(k.addr, sha.subarray(1))), fileSha: await code(() => e2e.fileKey(k.blob, sha.subarray(1), "zstd.1")),
-        codecUpper: await code(() => e2e.fileKey(k.blob, sha, "Zstd")), codecEmpty: await code(() => e2e.fileKey(k.blob, sha, "")), codecLong: await code(() => e2e.fileKey(k.blob, sha, "z".repeat(33))),
-        codecMax: await code(() => e2e.fileKey(k.blob, sha, "z".repeat(32))), chunkNeg: await code(() => e2e.chunkKey(new Uint8Array(32), -1)), chunkBig: await code(() => e2e.chunkKey(new Uint8Array(32), 2 ** 32)),
+        shaShort: await code(() => e2e.wireAddress(k.addr, sha.subarray(1))), fileSha: await code(() => e2e.fileKey(k.blobKey, sha.subarray(1), "zstd.1")),
+        codecUpper: await code(() => e2e.fileKey(k.blobKey, sha, "Zstd")), codecEmpty: await code(() => e2e.fileKey(k.blobKey, sha, "")), codecLong: await code(() => e2e.fileKey(k.blobKey, sha, "z".repeat(33))),
+        codecMax: await code(() => e2e.fileKey(k.blobKey, sha, "z".repeat(32))), chunkNeg: await code(() => e2e.chunkKey(new Uint8Array(32), -1)), chunkBig: await code(() => e2e.chunkKey(new Uint8Array(32), 2 ** 32)),
         chunkMax: await code(() => e2e.chunkKey(new Uint8Array(32), 2 ** 32 - 1)), fileShort: await code(() => e2e.chunkKey(new Uint8Array(31), 0)),
       };
     })()`);
@@ -267,7 +267,7 @@ try {
           badName: await code(() => e2e.sealBlob(k, s, p, "STORE")), noKeys: await code(() => e2e.sealBlob({}, s, p, "store.1")),
           shaShort: await code(() => e2e.sealBlob(k, s.subarray(1), p, "store.1")), notPlain: await code(() => e2e.sealBlob(k, s, [...p], "store.1")),
           forgedAccount: await code(() => e2e.sealBlob({ ...k, account: "acct-2" }, s, p, "store.1")), frozenCopy: await code(() => e2e.sealBlob(Object.freeze({ ...k }), s, p, "store.1")),
-          mixed: await code(async () => e2e.sealBlob({ ...k, blob: (await e2e.deriveEpochKeys(unhx("${S.toString("hex")}"), "acct-2", 7)).blob }, s, p, "store.1")),
+          mixed: await code(async () => e2e.sealBlob({ ...k, blobKey: (await e2e.deriveEpochKeys(unhx("${S.toString("hex")}"), "acct-2", 7)).blobKey }, s, p, "store.1")),
         },
         genuineOther: await (async () => { const k2 = await e2e.deriveEpochKeys(unhx("${S.toString("hex")}"), "acct-2", 7), h2 = (await e2e.sealBlob(k2, s, p, "store.1")).header; return [h2.account, h2.address !== clean.header.address]; })(),
         snapshot: m.chunks.every((c, i) => hx(c) === hx(clean.chunks[i])) && m.header.address === clean.header.address,
@@ -499,13 +499,14 @@ try {
       const others = {
         broadHkdf: await s.importKey("raw", raw, "HKDF", false, ["deriveBits", "deriveKey"]),
         hkdfDeriveBits: await s.importKey("raw", raw, "HKDF", false, ["deriveBits"]), aesGcm: await s.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]),
-        hmac: await s.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]), notAKey: { type: "secret", algorithm: { name: "HKDF" }, extractable: false, usages: ["deriveKey"] },
+        hmac: await s.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]), pbkdf2: await s.importKey("raw", raw, "PBKDF2", false, ["deriveKey"]), notAKey: { type: "secret", algorithm: { name: "HKDF" }, extractable: false, usages: ["deriveKey"] },
         none: undefined,
       };
       const work = { random: 0, derive: 0, encrypt: 0, decrypt: 0 };
       const real = { gr: crypto.getRandomValues, dk: s.deriveKey, en: s.encrypt, de: s.decrypt };
       crypto.getRandomValues = function (b) { work.random++; return real.gr.call(this, b); };
-      s.deriveKey = function (...a) { work.derive++; return real.dk.apply(this, a); };
+      const derived = [];
+      s.deriveKey = function (...a) { work.derive++; return real.dk.apply(this, a).then((k) => { derived.push(k); return k; }); };
       s.encrypt = function (...a) { work.encrypt++; return real.en.apply(this, a); };
       s.decrypt = function (...a) { work.decrypt++; return real.de.apply(this, a); };
       const out = {};
@@ -513,15 +514,18 @@ try {
         for (const [k, key] of Object.entries(others)) out[k] = [await code(() => e2e.sealObject(key, oh, big(5))), await code(() => e2e.openObject(key, oh, o, id, L))];
         out.work = { ...work };
         out.own = [await code(() => e2e.openObject(cek, oh, o, id, L)), work.derive > 0];
+        await e2e.sealObject(cek, oh, big(5));
+        out.objectKeys = [derived.length, derived.every((k) => k.extractable === false && k.algorithm.name === "AES-GCM" && [...k.usages].sort().join() === "decrypt,encrypt")];
         // (the same bytes imported elsewhere with the same shape, as a structured clone of a CEK would be, open too)
         out.sameShape = await code(async () => e2e.openObject(await s.importKey("raw", raw, "HKDF", false, ["deriveKey"]), oh, o, id, L));
       } finally { crypto.getRandomValues = real.gr; s.deriveKey = real.dk; s.encrypt = real.en; s.decrypt = real.de; }
       return out;
     })()`);
-    const { work, own, sameShape, ...cases } = r;
+    const { work, own, sameShape, objectKeys, ...cases } = r;
     const wrong = Object.entries(cases).filter(([, v]) => J(v) !== J(["bad_form", "bad_form"]));
-    ok(Object.keys(cases).length === 6 && wrong.length === 0, "K-6: sealing and opening refuse (bad_form) any key that isn't a CEK's shape (a secret HKDF key, not extractable, for deriveKey only): an HKDF key that also derives bits, HKDF for deriveBits, AES-GCM, HMAC, a look-alike object, none", wrong);
+    ok(Object.keys(cases).length === 7 && wrong.length === 0, "K-6: sealing and opening refuse (bad_form) any key that isn't a CEK's shape (a secret HKDF key, not extractable, for deriveKey only): an HKDF key that also derives bits, HKDF for deriveBits, AES-GCM, HMAC, PBKDF2 (secret, not extractable, deriveKey only, but not HKDF), a look-alike object, none", wrong);
     ok(J(work) === J({ random: 0, derive: 0, encrypt: 0, decrypt: 0 }), "K-6: and before any randomness, derivation or encryption", work);
+    ok(J(objectKeys) === J([2, true]), "K-6: each sealing's and opening's own key is AES-GCM, not extractable, for encrypt and decrypt only", objectKeys);
     ok(J(own) === J(["ok", true]) && sameShape === "ok", "K-6: (importCek's key opens, deriving its sealing's key; so does a key of the same shape, as a structured clone would be)", [own, sameShape]);
   }
 

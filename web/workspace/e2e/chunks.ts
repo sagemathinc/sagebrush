@@ -212,7 +212,7 @@ export async function sealBlob(keys: EpochKeys, sha: Uint8Array, plaintext: Uint
       plaintextLength: pt.length, compressedLength: compressed.length,
     });
     const head = blobHead(header), count = chunkCount(header.compressedLength);
-    kFile = await fileKey(epoch.blob, digest, codec);
+    kFile = await fileKey(epoch.blobKey, digest, codec);
     const chunks: Uint8Array[] = [];
     for (let i = 0; i < count; i++) {
       const piece = compressed.subarray(i * CHUNK, i * CHUNK + lengthOf(header.compressedLength, count, i));
