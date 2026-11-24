@@ -79,7 +79,14 @@
   .top button#who { border: 0; background: none; padding: 4px 8px; margin-left: -8px; border-radius: 8px; font: inherit; font-weight: 600; color: inherit; cursor: pointer; }
   .top button#who:hover, .top button#who[aria-expanded="true"] { background: rgba(0, 0, 0, .06); }
   .top button#who:focus-visible { outline: 2px solid var(--accent2); outline-offset: 1px; }
-  #who-info { position: absolute; top: calc(100% + 4px); z-index: 40; width: max-content; max-width: min(440px, calc(100vw - 24px)); background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .14); padding: 10px 14px; font-size: 13.5px; line-height: 1.45; white-space: normal; }
+  /* (a small chevron after the status, always: it says the status opens something, before any hover and on touch. A
+     pseudo-element, so it stays whatever the status says (whoText replaces the button's children) and is no text to a
+     screen reader, which has aria-expanded; in the button's own right padding, so a name cut short never hides it;
+     pointing up while the popover is open) */
+  .top button#who { position: relative; padding-right: 22px; }
+  .top button#who::after { content: ""; position: absolute; right: 9px; top: calc(50% - 5px); width: 5px; height: 5px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; opacity: .55; transform: rotate(45deg); }
+  .top button#who[aria-expanded="true"]::after { top: calc(50% - 2px); transform: rotate(-135deg); }
+  #who-info { position: absolute; top: calc(100% + 4px); z-index: 40; width: max-content; max-width: min(440px, calc(100% - 16px)); background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .14); padding: 10px 14px; font-size: 13.5px; line-height: 1.45; white-space: normal; }
   #who-info[hidden] { display: none; }
   .top .wordmark { color: #4a6b49; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; text-decoration: none; margin-right: 6px; }
   body.side-hidden nav.side, body.side-hidden #sep-side { display: none !important; }

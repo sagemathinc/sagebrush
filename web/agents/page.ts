@@ -1940,12 +1940,19 @@ function renderHeader() {
 //  on switching from Files): the status opens it, and a click elsewhere, Escape or the status again closes it)
 {
   const who = $("#who"), info = $("#who-info");
+  // (under the status, as far left as it fits: kept inside the top bar, so a phone's narrow window never scrolls sideways;
+  //  placed again on a resize while it is open)
+  const place = () => {
+    const room = who.parentElement!.clientWidth;
+    info.style.left = `${Math.max(8, Math.min(who.offsetLeft, room - info.offsetWidth - 8))}px`;
+  };
   const show = (on: boolean) => {
     info.hidden = !on;
     who.setAttribute("aria-expanded", String(on));
-    if (on) info.style.left = `${who.offsetLeft}px`;
+    if (on) place();
   };
   who.addEventListener("click", () => show(info.hidden));
+  addEventListener("resize", () => { if (!info.hidden) place(); });
   addEventListener("pointerdown", (e) => { if (!info.hidden && !who.contains(e.target as Node) && !info.contains(e.target as Node)) show(false); }, true);
   // (first, and taken: Escape that closes it doesn't also stop a running turn or leave full screen)
   addEventListener("keydown", (e) => { if (e.key === "Escape" && !info.hidden) { e.preventDefault(); show(false); who.focus(); } }, true);
