@@ -4203,6 +4203,10 @@ def _cc_or_none(o):
         # (a symbolic expression takes the number into SR, as Sage: CC(1, 2)*SR(0)
         # is the symbolic 0, not CC's; complex() of it gave CC)
         return None
+    if type(o).__name__ in ("ComplexNumberMP", "RealNumberMP") and o.prec() < 53:
+        # (a coarser field's number: the operation is in that field, its own
+        # reflected one, as Sage's coercion: CC(1) + ComplexField(20)(1))
+        return None
     try:
         return _cc(o)
     except (TypeError, ValueError):

@@ -4336,6 +4336,26 @@ class ComplexNumberMP:
         except (TypeError, ValueError):
             return None
 
+    def _double(self, o):
+        """For p >= 53 against a 53-bit number (an element of RR, RDF, CC or
+        CDF, a float or a complex): self in the field they meet in, as Sage's
+        coercion: CDF against CDF, a Python complex against one, else CC;
+        None otherwise (for p < 53 o comes into ComplexField(p): _pair).
+        """
+        if self._C._prec < 53:
+            return None
+        t = type(o).__name__
+        if t == "ComplexDoubleElement":
+            import _sage_rdf
+            return _sage_rdf.CDF(complex(self))
+        if t == "ComplexNumber" or t == "RealDoubleElement" or isinstance(o, float) or (
+                isinstance(o, RealNumberMP) and o._R._prec == 53):
+            import _sage_matrix
+            return _sage_matrix.ComplexNumber(complex(self))
+        if isinstance(o, complex):
+            return complex(self)
+        return None
+
     def _pair(self, o):
         """(self, o) in their common field, the coarser one, as Sage's
         coercion meets them (a real of RealField(q) as a number of
@@ -4355,6 +4375,9 @@ class ComplexNumberMP:
         return ComplexNumberMP(o._C, R(self._re), R(self._im)), o
 
     def __add__(self, o):
+        d = self._double(o)
+        if d is not None:
+            return d + o
         t = self._pair(o)
         if t is None:
             return NotImplemented
@@ -4367,6 +4390,9 @@ class ComplexNumberMP:
         return ComplexNumberMP(self._C, -self._re, -self._im)
 
     def __sub__(self, o):
+        d = self._double(o)
+        if d is not None:
+            return d - o
         t = self._pair(o)
         if t is None:
             return NotImplemented
@@ -4374,6 +4400,9 @@ class ComplexNumberMP:
         return ComplexNumberMP(x._C, x._re - o._re, x._im - o._im)
 
     def __rsub__(self, o):
+        d = self._double(o)
+        if d is not None:
+            return o - d
         return (-self) + o
 
     # The arithmetic and functions below are Sage's ComplexNumber's
@@ -4391,6 +4420,9 @@ class ComplexNumberMP:
             sage: C = ComplexField(100); C(1, 2) * C(3, -4)
             11.000000000000000000000000000 + 2.0000000000000000000000000000*I
         """
+        d = self._double(o)
+        if d is not None:
+            return d * o
         t = self._pair(o)
         if t is None:
             return NotImplemented
@@ -4409,6 +4441,9 @@ class ComplexNumberMP:
             sage: C = ComplexField(100); C(1, 2) / C(3, -4)
             -0.20000000000000000000000000000 + 0.40000000000000000000000000000*I
         """
+        dd = self._double(o)
+        if dd is not None:
+            return dd / o
         t = self._pair(o)
         if t is None:
             return NotImplemented
@@ -4419,6 +4454,9 @@ class ComplexNumberMP:
         return ComplexNumberMP(x._C, p * a + q * b, p * b - q * a)
 
     def __rtruediv__(self, o):
+        d = self._double(o)
+        if d is not None:
+            return o / d
         t = self._pair(o)
         if t is None:
             return NotImplemented
