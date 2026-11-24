@@ -107,7 +107,7 @@ and in `check`. The kinds of problems it reports:
 |---|---|
 | `command`, `environment` | not supported: shown as written, marked |
 | `math` | KaTeX couldn't typeset a formula |
-| `not-rendered` | a picture the preview doesn't draw (TikZ with nodes, pgfplots): a placeholder naming what it needs |
+| `not-rendered` | a picture the preview doesn't draw (pgfplots, or a TikZ feature such as `\clip`): a placeholder naming what it needs |
 | `image`, `input` | a file not found, or outside the document's folder |
 | `code` | SageTeX or PythonTeX code not run |
 | `expansion` | the expander stopped at one of its bounds |
@@ -224,8 +224,8 @@ benchmark, with the main reason for each lower number:
   themes. With them, C3 rises to 0.828 and the example to 0.880. That
   change is in review.
 - **TikZ and pgfplots** weren't drawn in these runs: a picture was a
-  placeholder, and `check` said so. TikZ's paths are drawn now; text in
-  a picture (nodes) and pgfplots are not yet. The pgfplots manual's chapter also stops early, at one
+  placeholder, and `check` said so. TikZ's paths and nodes are drawn now;
+  pgfplots is not yet. The pgfplots manual's chapter also stops early, at one
   of the expander's bounds, inside the manual's own macro machinery.
 - ***The Not So Short Introduction to LaTeX*** uses many packages the
   preview doesn't know: `check` reports 380 commands and 120

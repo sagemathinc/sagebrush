@@ -569,15 +569,20 @@ class Picture {
       return [checkPt(p), k + 1, mode, nd];
     };
     const settle = (p, mode) => { if (mode !== 1) ref = p; };
+    // (nodes written inside an operation, -- node {x} (B): midway along the segment it makes, unless they say where)
+    let inlined = [];
+    const inline = (k) => { while (isWord(toks, k, "node")) { const [spec, j] = this.nodeSpec(toks, k + 4, toks.length, "node"); inlined.push(spec); k = j; } return k; };
+    const placeInline = () => { for (const spec of inlined) pending.push({ spec, cur, seg: lastSeg, sg: segs[segs.length - 1], mid: true }); inlined = []; };
     while (i < toks.length) {
       const tk = toks[i];
       const c = coordAt(i);
       if (c) { move(c[0], c[3]); settle(c[0], c[2]); i = c[1]; continue; }
       if (tk.t === "ch" && tk.v === "-" && toks[i + 1]?.t === "ch" && toks[i + 1].v === "-") {
         i += 2;
+        i = inline(i);
         if (isWord(toks, i, "cycle")) { segs.push(["Z"]); cur = ref = start; i += 5; this.count(); continue; }
         const q = coordAt(i); if (!q) fail("-- without the point after it");
-        line(q[0], q[3]); settle(q[0], q[2]); i = q[1]; continue;
+        line(q[0], q[3]); placeInline(); settle(q[0], q[2]); i = q[1]; continue;
       }
       if (tk.t === "ch" && (tk.v === "|" || tk.v === "-") && toks[i + 1]?.t === "ch" && (toks[i + 1].v === "-" || toks[i + 1].v === "|") && tk.v !== toks[i + 1].v) {
         const vfirst = tk.v === "|"; i += 2;
@@ -675,6 +680,7 @@ class Picture {
           }
           i++;
         }
+        i = inline(i);
         const q = coordAt(i); if (!q) fail("to without its point");
         const p = q[0];
         if (!cur) fail("to with nothing before it");
@@ -697,7 +703,7 @@ class Picture {
           const c2 = [s1[0] + dist * ui[0], s1[1] + dist * ui[1]];
           curve(c1, c2, p, q[3]);
         }
-        settle(p, q[2]); i = q[1]; continue;
+        placeInline(); settle(p, q[2]); i = q[1]; continue;
       }
       if (isWord(toks, i, "grid")) {
         i += 4;
@@ -720,7 +726,7 @@ class Picture {
       if (isWord(toks, i, "node") || isWord(toks, i, "coordinate")) {
         const kind = isWord(toks, i, "node") ? "node" : "coordinate";
         const [spec, j] = this.nodeSpec(toks, i + kind.length, toks.length, kind);
-        pending.push({ spec, cur, seg: lastSeg });
+        pending.push({ spec, cur, seg: lastSeg, sg: segs[segs.length - 1] });
         i = j; continue;
       }
       if (isWord(toks, i, "pic") || isWord(toks, i, "edge") || isWord(toks, i, "plot") || isWord(toks, i, "sin") || isWord(toks, i, "cos") || isWord(toks, i, "parabola")) {
@@ -729,13 +735,15 @@ class Picture {
       }
       fail("a path the preview can't read at " + JSON.stringify(srcOf(toks.slice(i, i + 4))));
     }
-    if (segs.length && (st.doDraw || st.doFill)) this.emit(this.clipEdges(segs, vnode, st.m), st);
+    const cut = segs.length ? this.clipEdges(segs, vnode, st.m) : segs;
+    if (segs.length && (st.doDraw || st.doFill)) this.emit(cut, st);
     // (the path's nodes after it, on top of it, as TikZ draws them)
     for (const pn of pending) this.node(pn.spec, st, { path: pn });
   }
 
   // ---- lines to and from a node's name stop at its border (its outer sep included), toward the other end
   clipEdges(segs, vnode, m) {
+    this.clipped = new Map();   // (a segment cut at a node's border -> its ends as cut: a node's pos is along the cut one)
     if (!vnode.size) return segs;
     const inv = inverse(m), C = (p) => apply(m, p), U = (q) => apply(inv, q);
     const out = [];
@@ -756,6 +764,7 @@ class Picture {
         endNode.edges.push(this.paths.length);
       }
       out.push(sg[0] === "L" ? ["L", b] : ["C", sg[1], sg[2], b]);
+      if (prevNode || endNode) { const a0 = out[out.length - 2][out[out.length - 2].length - 1]; this.clipped.set(sg, sg[0] === "L" ? ["L", a0, b] : ["C", a0, sg[1], sg[2], b]); }
       prev = end; prevNode = endNode;
     }
     return out;
@@ -827,7 +836,7 @@ class Picture {
       const pn = where.path;
       let u;
       if (pn.spec.at !== null) u = this.pointOf(pn.spec.at, st);
-      else if (st.pos !== null && pn.seg) u = segPoint(pn.seg, st.pos);
+      else if ((st.pos !== null || pn.mid) && pn.seg) u = segPoint(this.clipped?.get(pn.sg) || pn.seg, st.pos ?? 0.5);
       else if (pn.cur) u = pn.cur;
       else fail("a node on a path before its first point");
       p = apply(st.m, u);

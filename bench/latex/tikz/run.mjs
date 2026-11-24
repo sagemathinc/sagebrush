@@ -9,7 +9,7 @@
 // how dark they make it, isn't the drawing's error: pdftoppm draws a 0.4 pt line solid, Chrome spreads it); a picture
 // passes if its box does and its widened IoU is at least its `iou` in pictures.json (IOU_MIN without one).
 // Writes results.json and table.md.
-//   node bench/latex/tikz/run.mjs [--only T01,T02] [--out DIR] [--keep]   (CHROME, default chromium; pdflatex, pdftoppm)
+//   node bench/latex/tikz/run.mjs [--only T01,N01] [--pictures FILE] [--out DIR] [--keep]   (CHROME, default chromium; pdflatex, pdftoppm)
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

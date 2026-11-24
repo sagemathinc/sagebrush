@@ -230,6 +230,8 @@ function treeWidth(n, depth = 0) {
   if (typeof n.text === "string") {
     const chars = [...n.text];
     w = chars.length <= 1 ? n.width || 0 : chars.reduce((a, c) => a + charWidth(c, cls), 0);
+    // (a math letter's box includes its italic correction in TeX, as KaTeX's advance doesn't: errs wide before a subscript)
+    if (cls.includes("mathnormal") && n.italic > 0) w += n.italic;
   } else {
     const kids = (n.children || []).map((k) => treeWidth(k, depth + 1));
     w = cls.includes("vlist") ? Math.max(0, ...kids) : kids.reduce((a, b) => a + b, 0);

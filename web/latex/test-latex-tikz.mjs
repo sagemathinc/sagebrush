@@ -168,7 +168,7 @@ const lastPoints = (h) => { const [x0, , , y1] = box(h), ds = [...h.matchAll(/ d
 const centre = (h, n) => new RegExp('data-name="' + n + '" data-c="([^"]+)"').exec(h)[1].split(" ").map(Number);
 section("nodes", () => {
   // [name, source, TeX's x0 y0 x1 y1]: the text's box is KaTeX's metrics, which are TeX's own fonts' (Computer Modern);
-  // TeX kerns some letters and sets inline math with its own spacing, which KaTeX's widths don't: those three within 0.15
+  // TeX kerns some letters and sets inline math with its own spacing, which KaTeX's widths don't: those four within 0.15
   const NODE_TEX = [
   ["n-empty", "\\node at (0,0) {};", [-3.33298, -3.33298, 3.33298, 3.33298]],
   ["n-x", "\\node at (0,0) {$x$};", [-6.19061, -5.48575, 6.19061, 5.48575]],
@@ -204,15 +204,22 @@ section("nodes", () => {
   ["m-x1", "\\node[inner sep=0pt] at (0,0) {$x_1$};", [-5.1007, -2.90276, 5.1007, 2.90276]],
   ["m-frac", "\\node[inner sep=0pt] at (0,0) {$\\frac{a}{b}$};", [-3.36882, -5.1998, 3.36882, 5.1998]],
   ["m-sqrt", "\\node[inner sep=0pt] at (0,0) {$\\sqrt{x}$};", [-7.0243, -5.19998, 7.0243, 5.19998]],
+  ["q-bl", "\\node[below left] at (0,0) {$A$};", [-14.36595, -13.69926, -0.2, -0.2]],
+  ["q-br", "\\node[below right] at (0,0) {$B$};", [0.2, -13.69926, 14.95274, -0.2]],
+  ["q-C", "\\node at (0,0) {$C$};", [-7.26422, -6.74963, 7.26422, 6.74963]],
+  ["q-v1", "\\node at (0,0) {$v_1$};", [-7.99965, -6.23573, 7.99965, 6.23573]],
+  ["q-lab", "\\node[draw, circle, label=right:$v_3$] (c) at (0,0) {};", [-4.91386, -6.23573, 21.11316, 6.23573]],
+  ["q-mid", "\\node (A) at (0,0) {$A$}; \\node (B) at (2,0) {$B$}; \\draw[->] (A) -- node[above] {$f$} (B);", [-7.08298, -6.74963, 64.28186, 15.75484]],
+  ["q-midsz", "\\node[draw] (A) at (0,0) {Long text}; \\node[draw] (B) at (4,0) {$B$}; \\draw (A) -- node[above] {$f$} (B);", [-24.85246, -7.92184, 121.38734, 15.75484]],
   ];
-  const LOOSE = new Set(["n-math", "n-text", "s-hello"]);
+  const LOOSE = new Set(["n-math", "n-text", "s-hello", "q-lab"]);
   const bad = [];
   for (const [name, src, t] of NODE_TEX) {
     let b; try { b = box(draw(src)); } catch (e) { bad.push([name, e.why ?? e.message]); continue; }
     const dd = Math.max(...b.map((v, q) => Math.abs(v - t[q])));
     if (!(dd <= (LOOSE.has(name) ? 0.15 : 0.05))) bad.push([name, b, t, +dd.toFixed(3)]);
   }
-  check("node-tex-boxes", bad.length === 0 && NODE_TEX.length === 34, bad);
+  check("node-tex-boxes", bad.length === 0 && NODE_TEX.length === 41, bad);
   // anchors as TeX puts them (pdflatex's \pgfpointanchor): a line from one to another, its ends read back
   const two = "\\node[draw] (A) at (0,0) {A}; \\node[draw,circle] (B) at (3,1) {B};";
   const ends = [["A.north", "A.east", [0, 6.94963], [7.28297, 0]], ["A.base", "B.north", [0, -3.41666], [85.35823, 38.26968]], ["B.north east", "B.west", [92.29985, 35.39436], [75.54129, 28.45274]]]
