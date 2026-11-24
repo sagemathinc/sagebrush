@@ -114,6 +114,10 @@ export class ImageUrls {
   }
   /** Forget a path (its file changed or went), so it is read again when next shown. */
   forget(path: string) { this.letGo(path); }
+  /** Whether `path` is settled: held (an image or found not one), or never to be read (not a well-formed reference). */
+  settled(path: string): boolean {
+    return this.urls.has(path) || filePathOf({ [FILE_KEY]: path }) !== path;
+  }
   /** Let go of the images not among `paths` (those no cell refers to any more): their URLs revoked, their bytes
    * dropped, so pasting and deleting images doesn't keep them all. */
   retain(paths: string[]) {

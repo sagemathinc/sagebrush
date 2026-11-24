@@ -173,6 +173,26 @@ try {
   const a1 = await countA(), o1 = await countO();
   ok(a1 === a0 && o1 === o0, "N10b: another notebook opened while the file was read: nothing saved, in either notebook's folder", { a0, a1, o0, o1 });
 
+  // ---- N11: the notebook reloaded while an export prepares, now with an image at a path not referred to before: the
+  //  export waits for that one too, and embeds it
+  {
+    const doc = await P.ev(`${NB}.snapshot()`);
+    const extraPath = p8; // (a file that exists: N7's, rewritten by N9)
+    const reloaded = { ...doc, cells: [...doc.cells, { id: "n11", type: "markdown", code: "![n](attachment:n11.png)", attachments: { "n11.png": { "sagebrush/file": extraPath } } }] };
+    await P.ev(`${NB}.load(${J(doc)})`);
+    await sleep(300);
+    await P.ev(`${T}.holdReads()`);
+    await P.ev(`(() => { window.__ex = null; ${T}.exportIpynb().then((t) => (window.__ex = t)); return true; })()`);
+    await sleep(300);
+    await P.ev(`(${NB}.load(${J(reloaded)}), true)`);
+    await sleep(300);
+    await P.ev(`(window.__imagesGo(), true)`);
+    await P.until(`!!window.__ex`, 15000).catch(() => {});
+    const ex11 = JSON.parse((await P.ev(`window.__ex`)) ?? "{}");
+    const got11 = (ex11.cells ?? []).find((c) => c.id === "n11")?.attachments?.["n11.png"]?.["image/png"];
+    ok(!!got11, "N11: reloaded during an export's preparation, with an image at a new path: the export waits for it and embeds it", ex11.cells?.find((c) => c.id === "n11"));
+  }
+
   // ---- N6: an ill-formed reference: missing, never read
   await P.ev(`(() => { window.__reads = []; const w = ${W}; const r = w.read.bind(w); w.read = (p, ...a) => { window.__reads.push(p); return r(p, ...a); }; return true; })()`);
   await P.ev(`(() => { const c = ${NB}.addCell("![x](attachment:x.png)", null, false, "markdown"); c.attachments = { "x.png": { "sagebrush/file": "/private/notes.png" } }; ${NB}.run(c); return true; })()`);

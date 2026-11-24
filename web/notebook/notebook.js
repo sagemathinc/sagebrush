@@ -2850,7 +2850,17 @@ export function createNotebook(root, opts = {}) {
   const api = {
     root,
     /** Every image file this document's Markdown cells refer to, loaded (or found missing): before an export. */
-    imagesReady: () => (imageUrls ? imageUrls.ready(referencedPaths(snapshot())) : Promise.resolve()),
+    imagesReady: async () => {
+      if (!imageUrls) return;
+      // (the paths of the document as it is now, again after each wait: one reloaded meanwhile, or a new image in it,
+      //  is waited for too, until a wait ends with every image it refers to settled)
+      //  (always one pass at least: it reads each held image again, so what is exported is what the workspace has now)
+      for (let first = true; ; first = false) {
+        const paths = referencedPaths(snapshot());
+        if (!first && paths.every((p) => imageUrls.settled(p))) return;
+        await imageUrls.ready(paths);
+      }
+    },
     /** `doc` with its file images embedded as Jupyter's {mime: base64}, from the bytes loaded (imagesReady first), and
      * the names of any that couldn't be (image-store.ts embedAttachmentsWith): for an export that leaves this browser. */
     embedImages: (doc) => embedAttachmentsWith(doc, (p) => imageUrls?.bytes(p) ?? null),
@@ -2986,6 +2996,8 @@ export function createNotebook(root, opts = {}) {
     outputText, pictures, interacts, setInteract, saveOutputs, loadOutputs,
     destroy() {
       api.detach();
+      // (the images held for showing and exporting let go: their blob: URLs revoked, their bytes dropped)
+      imageUrls?.dispose();
       observer.disconnect();
       sizeObserver?.disconnect();
       removeEventListener("resize", resizeAll);

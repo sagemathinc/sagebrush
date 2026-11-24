@@ -719,6 +719,7 @@ try {
     await until(`!!${cellJs(0)}.querySelector('.mdout img[src^="blob:"]')`, 10000).catch(() => {});
     const drawn = await ev(`!!${cellJs(0)}.querySelector('.mdout img[src^="blob:"]')`);
     ok(took && /!\[image\]\(attachment:[0-9a-f]{24}\.png\)/.test(text) && listed.length === 1 && listed[0].startsWith(`/Attachments/nb-${ref}/`) && drawn, "a pasted image in the pane's notebook: saved in that notebook's own folder (by its ref), referred to and drawn", { took, text, listed, drawn });
+    const blobSrc = await ev(`${cellJs(0)}.querySelector('.mdout img')?.getAttribute('src') ?? ''`);
     // (renamed away, and another notebook made at its old path: the pane keeps the one it mounted, frozen; a paste
     //  then saves nothing, in neither notebook's folder)
     await call("workspace.rename", { from: path, to: "/notes/images-renamed.ipynb" });
@@ -729,6 +730,14 @@ try {
     await sleep(1000);
     const mine = await listOf(ref), theirs = await listOf(ref2);
     ok(mine.length === 1 && theirs.length === 0, "renamed away and replaced at its path: a paste in the pane saves nothing, in neither notebook's folder", { mine, theirs });
+    // (the pane closed: the images it held are let go, their blob: URLs revoked)
+    await ev(`(document.querySelector('#artifacts #close').click(), true)`);
+    await sleep(1500);
+    // (a frozen notebook that couldn't keep its content as a copy offers Close without keeping: taken)
+    await ev(`(() => { const b = [...document.querySelectorAll('#artifacts button')].find((x) => x.textContent === 'Close without keeping'); b?.click(); return !!b; })()`);
+    await until(`!document.querySelector('#artifacts .nb-artifact')`, 10000).catch(() => {});
+    const fetched = await ev(`fetch(${JSON.stringify("")} + ${JSON.stringify(blobSrc)}).then(() => "fetched", () => "revoked")`);
+    ok(/^blob:/.test(blobSrc) && fetched === "revoked", "the pane closed: the image's blob: URL is revoked", { blobSrc: blobSrc.slice(0, 5), fetched });
   }
 
   // ======================================================================== an agent's new notebook runs once by itself
