@@ -161,11 +161,14 @@ case("reach.frame-any-axis1", lambda: df.any(axis=1))
 case("reach.series-all-bool-only", lambda: s.all(bool_only=True))
 case("reach.take-kwargs", lambda: s.take([0], is_copy=False))
 
-# arithmetic and frame comparisons (M2)
-case("op.series-add", lambda: s + 1)
-case("op.series-radd", lambda: 1 + s)
-case("op.series-mul", lambda: s * s)
-case("op.series-neg", lambda: -s)
+# Series arithmetic outside the subset
+case("arith.repeated-labels", lambda: pd.Series([1, 2], index=["a", "a"]) + pd.Series([10], index=["a"]))
+case("arith.with-frame", lambda: s + df)
+case("arith.datetime", lambda: sdt - sdt)
+case("arith.level", lambda: s.add(s, level=0))
+case("arith.matmul", lambda: s @ s)
+
+# frame arithmetic and frame comparisons (M2)
 case("op.frame-add", lambda: df + 1)
 case("op.frame-gt", lambda: df > 0)
 

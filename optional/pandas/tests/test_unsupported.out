@@ -294,14 +294,16 @@
 !! NotImplementedError: pandas.Series.all(axis=, bool_only=, **kwargs) is not in Sagebrush's pandas 0.x subset
 == reach.take-kwargs
 !! NotImplementedError: pandas.Series.take(**kwargs) is not in Sagebrush's pandas 0.x subset
-== op.series-add
-!! NotImplementedError: pandas.Series.__add__ (arithmetic) is not in Sagebrush's pandas 0.x subset
-== op.series-radd
-!! NotImplementedError: pandas.Series.__radd__ (arithmetic) is not in Sagebrush's pandas 0.x subset
-== op.series-mul
-!! NotImplementedError: pandas.Series.__mul__ (arithmetic) is not in Sagebrush's pandas 0.x subset
-== op.series-neg
-!! NotImplementedError: pandas.Series.__neg__ (arithmetic) is not in Sagebrush's pandas 0.x subset
+== arith.repeated-labels
+!! NotImplementedError: pandas.Series.add of Series with other, repeated labels is not in Sagebrush's pandas 0.x subset
+== arith.with-frame
+!! NotImplementedError: pandas.Series.add with a DataFrame (a frame result) is not in Sagebrush's pandas 0.x subset
+== arith.datetime
+!! NotImplementedError: pandas.Series.sub of a datetime64[us] column (Timedelta arithmetic) is not in Sagebrush's pandas 0.x subset
+== arith.level
+!! NotImplementedError: pandas.Series.add(level=, axis=) is not in Sagebrush's pandas 0.x subset
+== arith.matmul
+!! NotImplementedError: pandas.Series.__matmul__ (a dot product) is not in Sagebrush's pandas 0.x subset
 == op.frame-add
 !! NotImplementedError: pandas.DataFrame.__add__ (arithmetic) is not in Sagebrush's pandas 0.x subset
 == op.frame-gt

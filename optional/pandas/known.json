@@ -262,24 +262,29 @@
       "reason": "pandas.Index.sort_values is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
-      "case": "op.series-add",
-      "message": "pandas.Series.__add__ (arithmetic) is not in Sagebrush's pandas 0.x subset",
-      "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"
+      "case": "arith.repeated-labels",
+      "message": "pandas.Series.add of Series with other, repeated labels is not in Sagebrush's pandas 0.x subset",
+      "reason": "two Series with other labels align first; with a repeated label pandas' join repeats rows, which this subset doesn't do; it raises before any work"
     },
     {
-      "case": "op.series-radd",
-      "message": "pandas.Series.__radd__ (arithmetic) is not in Sagebrush's pandas 0.x subset",
-      "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"
+      "case": "arith.with-frame",
+      "message": "pandas.Series.add with a DataFrame (a frame result) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a Series with a DataFrame aligns the Series' labels with the frame's columns into a frame, outside the subset's Series arithmetic; it raises before any work"
     },
     {
-      "case": "op.series-mul",
-      "message": "pandas.Series.__mul__ (arithmetic) is not in Sagebrush's pandas 0.x subset",
-      "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"
+      "case": "arith.datetime",
+      "message": "pandas.Series.sub of a datetime64[us] column (Timedelta arithmetic) is not in Sagebrush's pandas 0.x subset",
+      "reason": "arithmetic of datetimes gives Timedeltas in pandas, which aren't in the subset; it raises before any work"
     },
     {
-      "case": "op.series-neg",
-      "message": "pandas.Series.__neg__ (arithmetic) is not in Sagebrush's pandas 0.x subset",
-      "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"
+      "case": "arith.level",
+      "message": "pandas.Series.add(level=, axis=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "level= aligns on a MultiIndex level, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "arith.matmul",
+      "message": "pandas.Series.__matmul__ (a dot product) is not in Sagebrush's pandas 0.x subset",
+      "reason": "@ is a dot product, outside the subset's elementwise arithmetic; it raises before any work"
     },
     {
       "case": "op.frame-add",
