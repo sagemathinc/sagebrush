@@ -816,11 +816,13 @@ def interp2_(*args):
         step = 2.0 ** -k
         Xq, Yq = np.meshgrid(np.arange(1.0, n + step / 2, step), np.arange(1.0, m + step / 2, step))
     elif len(args) == 3:
+        _same_query_type(args[1:3])
         V = _mat(args[0])
         m, n = V.shape
         x, y = np.arange(1.0, n + 1), np.arange(1.0, m + 1)
         Xq, Yq = _mat(args[1]), _mat(args[2])
     else:
+        _same_query_type(args[3:5])
         Xa, Ya, V, Xq, Yq = _mat(args[0]), _mat(args[1]), _mat(args[2]), _mat(args[3]), _mat(args[4])
         x = Xa[0, :] if Xa.ndim == 2 and Xa.shape[0] > 1 and Xa.shape == V.shape else Xa.reshape(-1)
         y = Ya[:, 0] if Ya.ndim == 2 and Ya.shape[1] > 1 and Ya.shape == V.shape else Ya.reshape(-1)
@@ -873,13 +875,21 @@ def interp2_(*args):
             with np.errstate(invalid="ignore", divide="ignore"):
                 tx = np.where(i1 > i, (xq - x[i]) / (x[i1] - x[i]), 0.0)
                 ty = np.where(j1 > j, (yq - y[j]) / (y[j1] - y[j]), 0.0)
-            r0 = (1 - tx) * V[j, i] + tx * V[j, i1]
-            r1 = (1 - tx) * V[j1, i] + tx * V[j1, i1]
+            if single and V.dtype.kind == "f":
+                # (single data in single, as MATLAB computes it: t rounded to single, then each step)
+                W = V.astype(np.float32)
+                tx, ty = tx.astype(np.float32), ty.astype(np.float32)
+                r0 = (1 - tx) * W[j, i] + tx * W[j, i1]
+                r1 = (1 - tx) * W[j1, i] + tx * W[j1, i1]
+            else:
+                r0 = (1 - tx) * V[j, i] + tx * V[j, i1]
+                r1 = (1 - tx) * V[j1, i] + tx * V[j1, i1]
             res = (1 - ty) * r0 + ty * r1
         out[inside] = res[inside]
     out[~inside] = _math.nan if extrap is None else extrap
     r = _unmat(out.reshape(shape))
-    # (a single V gives a single result, as in MATLAB: computed in double here, then rounded)
+    # (a single V gives a single result, as in MATLAB: linear and nearest computed in single; cubic and spline in
+    # double, then rounded)
     return _m._canon(_arr(r).astype(np.float32 if out.dtype.kind != "c" else np.complex64)) if single else r
 
 
@@ -1034,6 +1044,10 @@ def _interp_axes(grids, V, qs, method, extrap, seq=None):
             out[inside] = V[idx]
         else:
             # (one axis at a time, in seq's order: each step (1 - t) a + t b between two values, as MATLAB rounds it)
+            if V.dtype == np.float32:
+                # (single data in single, as MATLAB computes it: t rounded to single, then each step)
+                t = [tk.astype(np.float32) for tk in t]
+
             def corner(level, fixed):
                 if level < 0:
                     return V[tuple(fixed)]
@@ -1045,6 +1059,14 @@ def _interp_axes(grids, V, qs, method, extrap, seq=None):
     if extrap is not None:
         out[~inside] = extrap
     return out
+
+
+def _same_query_type(qs):
+    """MATLAB's refusal of query coordinates of single and double mixed (griddedInterpolant's)"""
+    kinds = {_m.class_(q) for q in qs}
+    if "single" in kinds and "double" in kinds:
+        raise _err("All query coordinates must have the same type. Query coordinates must be of type double or single.",
+                   "MATLAB:griddedInterpolant:QueryOfMixedDataTypesErrId")
 
 
 def interp_method(m, fname):
@@ -1136,10 +1158,12 @@ def interp3_(*args):
         y, x, z = (np.arange(1.0, s + 1) for s in V.shape)
         Yq, Xq, Zq = np.meshgrid(*(np.arange(1.0, s + step / 2, step) for s in V.shape), indexing="ij")
     elif len(args) == 4:
+        _same_query_type(args[1:4])
         V = _nd(args[0])
         y, x, z = (np.arange(1.0, s + 1) for s in V.shape)
         Xq, Yq, Zq = _nd(args[1]), _nd(args[2]), _nd(args[3])
     elif len(args) == 7:
+        _same_query_type(args[4:7])
         x, y, z, V, q = volume_args(args, "interp3")
         Xq, Yq, Zq = (_nd(a) for a in q)
     else:
@@ -1154,7 +1178,11 @@ def interp3_(*args):
         raise _err("The query arrays must all be the same size.")
     shape = Xq.shape
     qs = [Yq.reshape(-1), Xq.reshape(-1), Zq.reshape(-1)]
-    out = _interp_axes(grids, V, qs, _cubic_or_else(grids, method), extrap)
+    method = _cubic_or_else(grids, method)
+    if method == "linear" and _m.class_(args[3] if len(args) == 7 else args[0]) == "single":
+        # (single data's linear interpolation in single, as MATLAB computes it)
+        V = V.astype(np.float32)
+    out = _interp_axes(grids, V, qs, method, extrap)
     r = _un_nd(out.reshape(shape))
     if _m.class_(args[3] if len(args) == 7 else args[0]) == "single":
         return _m._canon(_arr(r).astype(np.float32))
