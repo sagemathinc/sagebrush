@@ -1,12 +1,17 @@
 # End-to-end encryption for private synced data
 
-*Status: draft design r1, for William's decision, with SEC review. Nothing here is built. Sync, sharing and the agent endpoint are DEV-only, and no paying customer has data yet, which is why this is being decided now.*
+*Status: draft design r2, for William's decision, with SEC review. r2 adds William's principle (Nov 23) and the class-work exception (§5.2); his answers to the other questions in §10 are folded in as they come. Nothing here is built. Sync, sharing and the agent endpoint are DEV-only, and no paying customer has data yet, which is why this is being decided now.*
 
 ## 0. The decision
 
 Today private synced data is encrypted **at rest by Cloudflare** ((a), decided Oct 18: design/workspace-files.md §7.4, design/sync-server.md §10). The server, Cloudflare, an insider or a legal demand can read paths and content.
 
 **Proposal: switch, before any paying customer, to one mode: end-to-end encryption for all private synced data.** Only the person's devices hold the keys. The server stores and orders ciphertext. There is one mode, not two.
+
+**The principle** (William, Nov 23): "e2e by default; explicit exceptions for problems when e2e doesn't make sense." Every exception is listed here and in the product, and the editor says plainly when a file is under one:
+- **public publishing:** an explicit decrypt-and-publish step (§5);
+- **support bundles:** an explicit, per-ticket export (§5);
+- **class work:** assignment files launched from a school's LMS, in a class store the server can read (§5.2).
 
 Already decided or approved by William:
 - one mode, not both;
@@ -34,7 +39,7 @@ Each section below gives the options, a recommendation, and what it costs. §10 
 **Recommendation: per-epoch account secrets, certified per-device keys, and a recovery key that every epoch is also wrapped to.** This is SEC's recommended shape.
 
 - **Device keys:** each device has an X25519 key, to receive the epoch secret, and an Ed25519 key, to sign its ops and its key-chain entries.
-  - **In the browser:** non-extractable WebCrypto keys in IndexedDB. The client already keeps non-extractable keys there (web/workspace's agent relay).
+  - **In the browser:** non-extractable WebCrypto keys in IndexedDB. The client already makes non-extractable WebCrypto keys and refuses extractable ones (web/notebook/remote-client.js's DPoP P-256 key); keeping them in IndexedDB is new.
   - **In the desktop app:** the OS keychain (macOS Keychain, Windows Credential Manager, Secret Service), through the Tauri app and the small `keyring` crate. The app has no keychain access yet.
 - **The recovery key:** a 32-byte seed, shown once as the recovery code. Domain-separated derivations give a recovery X25519 key and a recovery Ed25519 key, and only their public halves are stored.
   - **No password-derived escrow:** a password could be guessed offline, and a 256-bit seed can't.
@@ -292,7 +297,7 @@ Size padding to buckets would hide exact sizes, at a storage cost: §10 Q5.
   - **A change** is a loud warning that can't be clicked through without comparing fingerprints.
   - **Inbox records expire after 30 days,** and a sender refuses an expired one. That bounds, but doesn't remove, the window in which a withheld rotation sends a new share to a removed device's old key (§2).
   - **The limit:** TOFU can't stop a substitution at first use. Transparency comes later: §10 Q6.
-- **Grading:** the LTI grading descriptor (cell ids and output blob references) goes to a grader, another party. So it is a share, under this section's rules.
+- **Grading is class work, not a share between people:** an LTI-launched assignment lives in the class store, and its grade or link goes back through the LMS (§5.2).
 - **Public publishing is an explicit step:** "Publish publicly" decrypts on the device and writes **separate plaintext objects**, which is today's collections, unchanged. They are never the private holdings, and never made from synced server bytes. The dialog says that anyone, including the server, can read them. D1's `versions.title` is written only for public shares.
 - **Support bundles:**
   - the person picks the files from an explicit manifest;
@@ -310,6 +315,17 @@ Size padding to buckets would hide exact sizes, at a storage cost: §10 Q5.
 design/workspace-files.md §7.9 and "Phase 3: collaboration" (one document written by several accounts, editors and viewers, presence), and sync-server.md's `acl(account, role)` for phase 3, contradict "never a shared live document".
 
 None of the cross-account part is built: documents' access lists are owner-only today. Presence among one's own devices is built, and is sealed in PR 4. The designs are rewritten as copy plus proposals (§7, PR 0).
+
+### 5.2 Class work: an explicit exception
+
+Assignment files launched from a school's LMS (LTI) aren't end-to-end encrypted. The school is the data controller for them, as it is for any LMS submission, and FERPA may require the school to be able to get at a student's work.
+- **The class store:** the files live in a store the server can read, filed under (course, assignment, student).
+- **Identity comes from the LTI launch.** There is no sync and no recovery code for class work.
+- **Saving and resuming:** partial work saves to the class store. Relaunching the assignment from the LMS on another computer resumes it.
+- **Submitting** sends the grade, or a link, back through LTI Assignment and Grade Services. The instructor and graders read the file in the class store.
+- **Said plainly:** the editor shows that a file is class work and is not end-to-end encrypted.
+- **A copy into the student's own files** is the student's, and is end-to-end encrypted like anything else they own.
+- **The threat model differs:** a breach, an insider or a legal demand can read class-store files, as with the LMS itself (§8).
 
 ## 6. Agents
 
@@ -365,6 +381,7 @@ Each PR gets SEC review, rows and mutants. PRs 0, 1 and 2 can start at once. The
 | **A malicious server** (changed Worker code) | metadata | omit, delay, roll back, or show devices different histories (equivocation); withhold an inbox rotation from senders, up to the record's validity (§2) | forge or alter ops, chain entries or shares, since they are signed |
 | **A malicious origin serving the web app** | everything a page can read | ship JavaScript that uses the keys while the page is open, and sends plaintext away | — this is the limit of end-to-end encryption in any web app |
 | A stolen unlocked device | what that device can decrypt | act as the person until it's removed | read what is written after its removal |
+| A breach, an insider or a legal demand, for class work (§5.2) | the class-store files themselves | read them, as with an LMS submission | — this is the stated exception |
 | Every device and the recovery code lost | — | — | the person's data can't be recovered by anyone |
 
 **Integrity, plainly (SEC):**
@@ -413,6 +430,7 @@ With a handful of DEV accounts, cross-account dedup is likely tiny. The measurem
 7. **Link previews:** encrypted link shares show the generic card, with no title. Is that acceptable?
 8. **Agent logs:** are they private synced data, and so under end-to-end encryption too? Today their mirror uses a server-held key.
 9. **The relay to your own computers** (today "encrypted on the way but not end to end"): bring it under end-to-end encryption too?
+10. **Class work (§5.2):** is the class store, readable by the server and filed under (course, assignment, student), with no sync or recovery code and submission through LTI AGS, the right exception? Who may read it beyond the instructor and graders, and for how long is it kept?
 
 ---
 
