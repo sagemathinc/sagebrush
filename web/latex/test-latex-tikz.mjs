@@ -235,6 +235,16 @@ section("bounds", () => {
     const allOf = (n) => { const left = n - 20 * 2 * bytes(B), p = "\\draw (0,0) -- (1,0); %"; return p + fill(left - bytes(p) - 1 - bytes(loop), ch) + "\n" + loop; };
     byteRows.push(["all text " + ch, guarded(allOf(TIKZ_LIMITS.LEX_TEXT)), guarded(allOf(TIKZ_LIMITS.LEX_TEXT + 1)), /^more than 4 MiB of picture text read/]);
   }
+  // the total read is checked before each scan and before each replacement is made, not only when the expansion is read:
+  // the most text read or about to be made at any point (the child's trace) never passes it. Many variables scanning a
+  // large body (one variable named 1,000 times; another 25,000 times over a body of failed matches), and a body each
+  // expansion makes again, near the total
+  const scanned = [
+    guarded("\\foreach " + Array(1000).fill("\\q").join("/") + " in {" + Array(1000).fill("1").join("/") + "} {%" + "x".repeat(150000) + "\n\\draw (0,0) -- (1,1);}"),
+    guarded("\\foreach " + Array(25000).fill("\\a").join("/") + " in {" + Array(25000).fill("1").join("/") + "} {%" + "\\aa".repeat(43000) + "\n}"),
+    guarded("\\draw (0,0) -- (1,0); \\foreach \\x in {1,...,30} {%" + "\\x".repeat(50000) + "\n}"),
+  ];
+  check("text-read-stops-at-total", scanned.every((g) => /^more than 4 MiB of picture text read/.test(g.why ?? "") && g.peak <= TIKZ_LIMITS.LEX_TEXT && g.ms <= 1500), scanned);
   check("byte-caps-exact", byteRows.every(([, at, past, re]) => at.why === null && re.test(past.why ?? "") && at.ms <= 1500 && past.ms <= 1500), byteRows.map(([k, a, b]) => [k, a, b]));
   // float loops that count their steps: a range at 2^53, where x + 1 is x, and an arc at 1e20 degrees, both drawn
   const fl = [guarded("\\foreach \\x in {9007199254740992,...,9007199254740994} {\\draw (0,0) -- (1,0);}"), guarded("\\draw (0,0) arc[start angle=1e20, delta angle=20000, radius=1];")];
