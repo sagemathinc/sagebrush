@@ -92,3 +92,27 @@ case("repr", lambda: repr(StandardScaler(with_mean=False)))
 case("set_output-default", lambda: repr(StandardScaler().set_output(transform="default")))
 case("param.copy", sorted_sets(lambda: StandardScaler(copy="yes").fit(A)))
 case("param.with_mean", sorted_sets(lambda: StandardScaler(with_mean=1).fit(A)))
+
+# the stated tolerance (known.json's tolerances): weighted statistics are np.matmul(sample_weight, X), whose
+# summation order differs; mean_ and var_ are held to relative 1e-12 of the exactly rounded sums (math.fsum)
+import math
+
+rs_tol = np.random.RandomState(12)
+X_tol = rs_tol.rand(1000, 3) * 10 + 1
+w_tol = rs_tol.rand(1000) * 5
+
+
+def within_tolerance():
+    s = StandardScaler().fit(X_tol, sample_weight=w_tol)
+    ws = w_tol.tolist()
+    W = math.fsum(ws)
+    ok = []
+    for j in range(3):
+        col = X_tol[:, j].tolist()
+        m = math.fsum(a * b for a, b in zip(ws, col)) / W
+        v = math.fsum(a * (b - m) ** 2 for a, b in zip(ws, col)) / W
+        ok.append(bool(abs(s.mean_[j] - m) <= 1e-12 * abs(m) and abs(s.var_[j] - v) <= 1e-12 * abs(v)))
+    return ok
+
+
+case("weighted-tolerance", within_tolerance)

@@ -90,3 +90,5 @@ Reshape your data either using array.reshape(-1, 1) if your data has a single fe
 !! InvalidParameterError: The 'copy' parameter of StandardScaler must be an instance of 'bool' or an instance of 'numpy.bool'. Got 'yes' instead.
 == param.with_mean
 !! InvalidParameterError: The 'with_mean' parameter of StandardScaler must be an instance of 'bool' or an instance of 'numpy.bool'. Got 1 instead.
+== weighted-tolerance
+[True, True, True]

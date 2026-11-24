@@ -1,7 +1,7 @@
 """Classification metrics, from scikit-learn 1.9.1's sklearn/metrics/_classification.py: accuracy_score,
 confusion_matrix, multilabel_confusion_matrix, precision_recall_fscore_support, precision_score, recall_score,
-f1_score, fbeta_score and classification_report, for binary and multiclass targets (multilabel indicator targets,
-which scikit-learn holds as sparse matrices, are not in Sagebrush's sklearn 0.x subset)."""
+f1_score, fbeta_score and classification_report, for binary and multiclass targets. Multilabel indicator targets are
+not supported yet."""
 
 import numbers
 import warnings
@@ -67,7 +67,7 @@ def _check_targets(y_true, y_pred, sample_weight=None):
         raise ValueError("{0} is not supported".format(y_type))
 
     if y_type == "multilabel-indicator":
-        # (scikit-learn holds these as sparse matrices)
+        # (multilabel indicator targets: not supported yet)
         raise NotImplementedError(
             "sklearn.metrics with multilabel-indicator targets is not in Sagebrush's sklearn 0.x subset")
 
