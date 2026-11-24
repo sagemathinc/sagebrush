@@ -1,0 +1,84 @@
+== module.hasattr
+False
+== module.getattr-default
+'default'
+== module.error
+('NotImplementedError', "pandas.pivot_table is not in Sagebrush's pandas 0.x subset")
+== module.both-bases
+(True, True)
+== module.missing-name
+(False, 'AttributeError')
+== module.present-name
+True
+== Series.hasattr
+False
+== Series.getattr-default
+'default'
+== Series.error
+('NotImplementedError', "pandas.Series.divmod is not in Sagebrush's pandas 0.x subset")
+== Series.both-bases
+(True, True)
+== Series.missing-name
+(False, 'AttributeError')
+== Series.present-name
+True
+== DataFrame.hasattr
+False
+== DataFrame.getattr-default
+'default'
+== DataFrame.error
+('NotImplementedError', "pandas.DataFrame.pivot_table is not in Sagebrush's pandas 0.x subset")
+== DataFrame.both-bases
+(True, True)
+== DataFrame.missing-name
+(False, 'AttributeError')
+== DataFrame.present-name
+True
+== Index.hasattr
+False
+== Index.getattr-default
+'default'
+== Index.error
+('NotImplementedError', "pandas.Index.map is not in Sagebrush's pandas 0.x subset")
+== Index.both-bases
+(True, True)
+== Index.missing-name
+(False, 'AttributeError')
+== Index.present-name
+True
+== SeriesGroupBy.hasattr
+False
+== SeriesGroupBy.getattr-default
+'default'
+== SeriesGroupBy.error
+('NotImplementedError', "pandas.SeriesGroupBy.prod is not in Sagebrush's pandas 0.x subset")
+== SeriesGroupBy.both-bases
+(True, True)
+== SeriesGroupBy.missing-name
+(False, 'AttributeError')
+== SeriesGroupBy.present-name
+True
+== DataFrameGroupBy.hasattr
+False
+== DataFrameGroupBy.getattr-default
+'default'
+== DataFrameGroupBy.error
+('NotImplementedError', "pandas.DataFrameGroupBy.prod is not in Sagebrush's pandas 0.x subset")
+== DataFrameGroupBy.both-bases
+(True, True)
+== DataFrameGroupBy.missing-name
+(False, 'AttributeError')
+== DataFrameGroupBy.present-name
+True
+== dt.hasattr
+False
+== dt.getattr-default
+'default'
+== dt.error
+('NotImplementedError', "pandas.Series.dt.dayofweek is not in Sagebrush's pandas 0.x subset")
+== dt.both-bases
+(True, True)
+== dt.missing-name
+(False, 'NotImplementedError')
+== argument-refusal
+(True, False)

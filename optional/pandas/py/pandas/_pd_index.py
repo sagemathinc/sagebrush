@@ -9,6 +9,7 @@ r7).
   read_csv budget charges it when built, r7 §E 1a.)
 """
 
+from ._pd_errors import unsupported_name
 from ._pd_column import Column, column_from
 from ._pd_dtypes import is_missing, infer
 from ._pd_datetime import DT, NAT_INT, as_us, is_time, Timestamp, NaT
@@ -216,7 +217,7 @@ class Index(object):
     def __getattr__(self, name):
         from ._pd_names import INDEX
         if not name.startswith("_") and name in INDEX:
-            raise NotImplementedError("pandas.%s.%s is not in Sagebrush's pandas 0.x subset" % (type(self).__name__, name))
+            raise unsupported_name("%s.%s" % (type(self).__name__, name))
         raise AttributeError("'%s' object has no attribute '%s'" % (type(self).__name__, name))
 
     __str__ = __repr__

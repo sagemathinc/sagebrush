@@ -29,6 +29,7 @@ import math
 
 import numpy as np
 
+from ._pd_errors import unsupported_name
 from ._pd_column import Column, column_from
 from ._pd_dtypes import STR, INTS, FLOATS, is_missing
 from ._pd_datetime import DT
@@ -406,7 +407,7 @@ class _GroupBy(object):
     def __getattr__(self, name):
         if not name.startswith("_"):
             if name in self._pd_names():
-                raise _unsupported("%s.%s" % (self._pd_kind, name))
+                raise unsupported_name("%s.%s" % (self._pd_kind, name))
         raise AttributeError("'%s' object has no attribute '%s'" % (self._pd_kind, name))
 
 

@@ -7,6 +7,7 @@ derived from a frame is an eager copy (Copy-on-Write, r7 §C3).
 
 import numpy as np
 
+from ._pd_errors import unsupported_name
 from ._pd_column import Column, column_from, set_values
 from ._pd_dtypes import STR, INTS, FLOATS, infer, is_missing, resolve_dtype
 from ._pd_index import Index, RangeIndex, default_index, ensure_index
@@ -859,7 +860,7 @@ class DataFrame(object):
                 return self[name]
             from ._pd_names import DATAFRAME
             if name in DATAFRAME:
-                raise _unsupported("DataFrame.%s" % name)
+                raise unsupported_name("DataFrame.%s" % name)
         raise AttributeError("'DataFrame' object has no attribute '%s'" % name)
 
     # (arithmetic is M2's: every operator raises NotImplementedError)

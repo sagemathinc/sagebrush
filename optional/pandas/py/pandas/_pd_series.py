@@ -6,6 +6,7 @@ derived from a Series is an eager copy (Copy-on-Write, r7 §C3).
 
 import numpy as np
 
+from ._pd_errors import unsupported_name
 from ._pd_column import Column, column_from, set_values, astype_column
 from ._pd_dtypes import STR, INTS, FLOATS, infer, is_missing, resolve_dtype
 from ._pd_datetime import DT, NaT, FIELDS
@@ -546,7 +547,7 @@ class Series(object):
             raise AttributeError("Can only use .dt accessor with datetimelike values")
         from ._pd_names import SERIES
         if name in SERIES:
-            raise _unsupported("Series.%s" % name)
+            raise unsupported_name("Series.%s" % name)
         raise AttributeError("'Series' object has no attribute '%s'" % name)
 
     # --- selection ---------------------------------------------------------
@@ -1151,4 +1152,4 @@ class _DatetimeProperties(object):
         return Series._pd_new(Column(STR, [float("nan") if t is NaT else t.strftime(date_format) for t in s._pd_col.tolist()]), s._pd_index.copy(), s._pd_name)
 
     def __getattr__(self, name):
-        raise _unsupported("Series.dt.%s" % name)
+        raise unsupported_name("Series.dt.%s" % name)
