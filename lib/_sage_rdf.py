@@ -913,6 +913,10 @@ class ComplexDoubleElement:
             # (a symbolic expression takes the number into SR, as Sage: CDF(1, 2)*SR(0)
             # is the symbolic 0)
             return None
+        if type(o).__name__ in ("ComplexNumberMP", "RealNumberMP") and o.prec() < 53:
+            # (a coarser field's number: the operation is in that field, its own
+            # reflected one, as Sage's coercion: CDF(1) + ComplexField(20)(1))
+            return None
         try:
             return complex(o)
         except (TypeError, ValueError):

@@ -88,6 +88,7 @@ fn re_im(u: &Expr, x: &str, a: &Expr, dir: Dir) -> Option<(Expr, Expr)> {
             crate::num::Num::Exact(re, im) => (qnum(re), qnum(im)),
             crate::num::Num::Float(re, im, _) => (float(re), float(im)),
             m @ crate::num::Num::Mp(_) => (num(m), zero()),
+            crate::num::Num::Mpc(z) => (num(crate::num::Num::mp(z.re.clone())), num(crate::num::Num::mp(z.im.clone()))),
         };
         p.push(mul(vec![re, r.clone()]));
         q.push(mul(vec![im, r]));

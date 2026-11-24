@@ -662,6 +662,19 @@ fn num_str(n: &Num) -> (String, u8) {
                 P_ATOM
             }
         }
+        // (as an element of CC: a pure imaginary one a product, 2.0000*I*x;
+        // a sum, a negative imaginary one or a signed exponent grouped)
+        Num::Mpc(z) => {
+            if z.re.is_zero() && !z.im.is_zero() && !s.starts_with('-') && !s[1..].contains(['+', '-']) {
+                P_MUL
+            } else if !z.im.is_zero() || z.re.sp == crate::mpnum::Sp::PosInf || s[1..].contains(['+', '-']) {
+                P_ADD
+            } else if s.starts_with('-') {
+                P_NEG
+            } else {
+                P_ATOM
+            }
+        }
     };
     (s, prec)
 }

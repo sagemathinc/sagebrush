@@ -80,6 +80,10 @@ fn enc(e: &Expr, s: &mut String) {
         Kind::Num(Num::Mp(x)) => {
             let _ = write!(s, "m{};", x.wire());
         }
+        // w: a number of ComplexField(p), p != 53 (its parts' wire forms)
+        Kind::Num(Num::Mpc(x)) => {
+            let _ = write!(s, "w{};", x.wire());
+        }
         Kind::Sym(n) => {
             let _ = write!(s, "s{}:{}", n.len(), n);
         }
@@ -231,6 +235,10 @@ impl<'a> Dec<'a> {
             b'm' => {
                 let h = self.until(b';');
                 raw(Kind::Num(Num::mp(crate::mpnum::Mp::from_wire(h).unwrap_or_else(|| bad()))))
+            }
+            b'w' => {
+                let h = self.until(b';');
+                raw(Kind::Num(Num::mpc(crate::mpnum::Mpc::from_wire(h).unwrap_or_else(|| bad()))))
             }
             b's' => raw(Kind::Sym(self.name().into())),
             b'c' => raw(Kind::Const(match self.next() {
@@ -406,6 +414,7 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
             let e = d(arg(0));
             let (tag, ch): (String, Vec<Expr>) = match &e.kind {
                 Kind::Num(Num::Mp(_)) => ("mp".into(), vec![]),
+                Kind::Num(Num::Mpc(_)) => ("mpc".into(), vec![]),
                 Kind::Num(n) => (if n.is_exact() { if n.is_real() { "rational" } else { "complex" } } else { "float" }.into(), vec![]),
                 Kind::Sym(_) => ("symbol".into(), vec![]),
                 Kind::Const(_) => ("constant".into(), vec![]),
@@ -429,6 +438,7 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
                 Some(Num::Float(x, y, k)) => vec!["f".into(), format!("{:e}", x), format!("{:e}", y), format!("{:?}", k)],
                 // (its wire form: the precision, then the value)
                 Some(Num::Mp(x)) => vec!["m".into(), x.wire()],
+                Some(Num::Mpc(x)) => vec!["w".into(), x.wire()],
                 None => vec!["".into()],
             }
         }
@@ -674,7 +684,7 @@ fn mp_calls(e: &Expr, out: &mut Vec<Expr>) {
         // (a symbolic function, a derivative, an integral or a limit stays as it is,
         // as Sage keeps f(0.5); so does a call with NaN, Sage's sin(NaN) and e^NaN)
         Kind::Fun(f, _) if matches!(f, Fun::User(_) | Fun::Deriv(..) | Fun::Integral | Fun::Limit) => false,
-        _ if ch.iter().any(|t| t.as_num().and_then(|n| n.as_mp()).is_some_and(|m| m.sp == crate::mpnum::Sp::NaN)) => false,
+        _ if ch.iter().any(|t| t.as_num().is_some_and(|n| n.mp_nan())) => false,
         Kind::Fun(..) => ch.iter().all(|t| t.is_num()) && ch.iter().any(|t| t.is_mp()),
         Kind::Pow(b, x) => (b.is_num() || b.is_const(Const::E)) && x.is_num() && (b.is_mp() || x.is_mp()),
         _ => false,
