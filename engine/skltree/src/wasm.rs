@@ -189,7 +189,13 @@ pub extern "C" fn skt_fit(ds: u32, sw: u32, classes: u32, kind: u32, max_depth: 
             };
             // (counts and sizes arrive as exact float64 integers)
             let int = |v: f64| if v >= 0.0 && v.fract() == 0.0 && v < 2f64.powi(53) { Ok(v as u64) } else { Err(Error::Params) };
-            let n_classes = counts.as_deref().unwrap_or(&[]).iter().map(|&c| int(c).map(|c| c as usize)).collect::<Result<Vec<_>, _>>()?;
+            // (fallibly: one entry an output, and y may be very wide)
+            let counts = counts.as_deref().unwrap_or(&[]);
+            let mut n_classes = Vec::new();
+            n_classes.try_reserve_exact(counts.len()).map_err(|_| Error::Memory)?;
+            for &c in counts {
+                n_classes.push(int(c)? as usize);
+            }
             let p = crate::fit::FitParams {
                 kind,
                 max_depth: int(max_depth)?,

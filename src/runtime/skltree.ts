@@ -392,7 +392,8 @@ function fit(token: any, sampleWeight: any, nClasses: any, criterion: any, maxDe
   const num = (v: any) => (v === null || v === undefined ? NaN : toNum(v));
   const classes: number[] | null = kind === 2 ? null : O.toArray(nClasses).map((v: any) => toNum(v));
   if (classes !== null && classes.length !== key.o) Obj.raise(Obj.T.ValueError, `n_classes has ${classes.length} entries; y has ${key.o} outputs`);
-  const stride = classes === null ? 1 : Math.max(...classes);
+  // (not Math.max(...classes): one argument an output overflows the stack for a very wide y)
+  const stride = classes === null ? 1 : classes.reduce((m, c) => Math.max(m, c), -Infinity);
   const md = maxDepth === null || maxDepth === undefined ? 2 ** 31 - 1 : num(maxDepth);
   const what = `Fitting a tree on ${key.n} samples by ${key.f} features`;
   const k = K!;

@@ -69,13 +69,14 @@ pub fn fit(d: &Dataset, sample_weight: Option<&[f64]>, n_classes: &[usize], p: &
     let mut splitter = Splitter::new(input, d.n, criterion, p.max_features, p.min_samples_leaf, p.min_weight_leaf, p.seed)?;
     let params = Params { max_depth: p.max_depth, min_samples_split: p.min_samples_split, min_samples_leaf: p.min_samples_leaf, min_weight_leaf: p.min_weight_leaf, min_impurity_decrease: p.min_impurity_decrease };
     let tree = build(input, &mut splitter, &params)?;
-    let imp = importances(&tree, d.f);
+    let imp = importances(&tree, d.f)?;
     Ok((tree, imp))
 }
 
 /// The bytes a fit may allocate beyond the dataset, for the host's admission: the weights' copy, the splitter's
-/// buffers, the criterion's sums, the builder's stack and the tree at its bound (each node 57 bytes of arrays and
-/// 8 a value), the importances.  An upper bound: n stands for the positive-weight samples.
+/// buffers, the criterion's sums, the class counts (one an output, twice: as the export reads them and the
+/// criterion's copy), the builder's stack and the tree at its bound (each node 57 bytes of arrays and 8 a value),
+/// the importances.  An upper bound: n stands for the positive-weight samples.  (usize counted at 8 bytes)
 pub fn fit_bytes(n: u64, f: u64, n_outputs: u64, stride: u64, max_depth: u64, min_samples_leaf: u64) -> Option<u64> {
     let s = n_outputs.checked_mul(stride)?;
     let nodes = crate::tree::node_bound(usize::try_from(n).ok()?, max_depth, usize::try_from(min_samples_leaf).ok()?) as u64;
@@ -83,7 +84,7 @@ pub fn fit_bytes(n: u64, f: u64, n_outputs: u64, stride: u64, max_depth: u64, mi
     let sw = n.checked_mul(8)?;
     // samples 8n, feature_values 4n, the swap buffers 8n + 4n
     let splitter = n.checked_mul(24)?.checked_add(f.checked_mul(16)?)?;
-    let criterion = s.checked_mul(24)?;
+    let criterion = s.checked_mul(24)?.checked_add(n_outputs.checked_mul(16)?)?;
     let stack = (max_depth.min(n) + 2).checked_mul(64)?;
     let tree = nodes.checked_mul(per_node)?;
     sw.checked_add(splitter)?.checked_add(criterion)?.checked_add(stack)?.checked_add(tree)?.checked_add(f.checked_mul(8)?)

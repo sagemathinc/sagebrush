@@ -215,8 +215,10 @@ pub fn apply(tree: &Tree, x: &[f32], f: usize, out: &mut [i64]) {
 /// `compute_feature_importances(normalize=False)` then the division by the root's weight: each split's weighted
 /// impurity decrease added to its feature in node order, each entry divided by the root's weighted_n_node_samples.
 /// (The normalization, `/ np.sum`, is Python's, on its numpy: NumPy's pairwise sum.)
-pub fn importances(tree: &Tree, n_features: usize) -> Vec<f64> {
-    let mut imp = vec![0.0; n_features];
+pub fn importances(tree: &Tree, n_features: usize) -> Result<Vec<f64>, Error> {
+    let mut imp = Vec::new();
+    reserve(&mut imp, n_features)?;
+    imp.resize(n_features, 0.0);
     let mut t = Ticker::default();
     for node in 0..tree.node_count() {
         if tree.children_left[node] != TREE_LEAF {
@@ -230,5 +232,5 @@ pub fn importances(tree: &Tree, n_features: usize) -> Vec<f64> {
         t.step();
     }
     t.finish();
-    imp
+    Ok(imp)
 }

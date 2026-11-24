@@ -3768,6 +3768,11 @@
   "owner": "raster/image I/O",
   "row": "inv-31"
  },
+ "engine/skltree/src/data.rs :: a_handle_of_one_kind_names_nothing_of_another :: let p = crate::fit::FitParams { kind: crate::criterion::Kind::Mse, max_depth: 1, min_samples_split: 2, min_samples_leaf: 1, min_weight_leaf: 0.0, max_features: 1, min_impurity_decrease: 0.0, seed: 1 }; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's tree parameters by their names (max_depth, max_features) in a handle-table test: a one-node tree to put in the table; nothing here refuses anything"
+ },
  "engine/skltree/src/data.rs :: next_handle :: let h = self.next.checked_add(1).filter(|&h| h <= i32::MAX as u32).ok_or(Error::Handle)?; #0": {
   "class": "1",
   "disposition": {

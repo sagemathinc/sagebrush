@@ -655,7 +655,7 @@
   {
    "file": "engine/skltree/src/wasm.rs",
    "item": "fn skt_fit",
-   "hash": "74465acd891405fa86805f9e6a713bc98217063d6e6506855d8680fdf500fcb2",
+   "hash": "cee587154ee90b4b59566f9e7063ba9a1afa8f9b464ef5975a706a7c9cd504cd",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset, buffer and tree tables, a buffer's or a tree array's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {

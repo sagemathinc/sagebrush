@@ -233,6 +233,18 @@ assert "released" in raises(ValueError, lambda: skltree.fit(ds, n_classes=[3], *
 `);
 });
 
+test("fit: a very wide y (200000 outputs) is fitted, not a stack overflow from its class counts", () => {
+  run(`
+o = 200000
+y = np.zeros((2, o))
+y[1, :] = 1.0
+ds = skltree.dataset(np.array([[0.0], [1.0]], dtype=np.float32), y)
+t = skltree.fit(ds, n_classes=[2] * o, criterion="gini", max_features=1, seed=1)
+assert t["node_count"] == 3 and t["value"].shape == (3, o, 2)
+ds.release()
+`);
+});
+
 test("fit: admitted before anything is made (refused with the memory unchanged), and growing within what it was charged", () => {
   run(`
 X = np.zeros((2000, 8), dtype=np.float32)
@@ -248,7 +260,7 @@ _skltree._test_bound(None)
 before = st()["mem"]
 t = skltree.fit(ds, n_classes=[4], criterion="entropy", max_features=8, seed=3)
 # (charged: the fit's bound, page-rounded, plus a page an allocation)
-assert st()["mem"] - before <= (-(-(2000 * 32 + 8 * 16 + 4 * 24 + 2002 * 64 + 3999 * (57 + 32) + 64 + 8 * 2005) // 65536) + 24) * 65536
+assert st()["mem"] - before <= (-(-(2000 * 32 + 8 * 16 + 4 * 24 + 16 + 2002 * 64 + 3999 * (57 + 32) + 64 + 8 * 2005) // 65536) + 24) * 65536
 assert t["node_count"] > 1
 # and the tree in the module is released after its copy out: the live bytes are the dataset's
 assert st()["live"] == 2000 * 8 * 4 + 2000 * 8
@@ -259,6 +271,26 @@ ds.release()
 test("Stop between a fit's buffer copies: a KeyboardInterrupt, and no buffer left behind", () => {
   // (Ctrl-C at the weights' 5th copy poll: X and y are 13 chunks each first)
   const restore = armCopyPoll(13 + 13 + 5, false);
+  try {
+    run(`
+n = 50000
+X = np.zeros((n, 1), dtype=np.float32)
+y = (np.arange(n) % 3).astype(np.float64)[:, None]
+ds = skltree.dataset(X, y)
+s = st()
+raises(KeyboardInterrupt, lambda: skltree.fit(ds, np.ones(n), n_classes=[3], criterion="gini", max_features=1, seed=1))
+t = st()
+assert t["live"] == s["live"] and t["gen"] == s["gen"] and ds.usable, (s, t)
+ds.release()
+`);
+  } finally {
+    restore();
+  }
+});
+
+test("Stop during the class counts' copy, after the weights' succeeded: a KeyboardInterrupt, and neither buffer left behind", () => {
+  // (Ctrl-C at the counts' one copy poll, the 40th: X, y and the weights are 13 chunks each first)
+  const restore = armCopyPoll(13 + 13 + 13 + 1, false);
   try {
     run(`
 n = 50000
