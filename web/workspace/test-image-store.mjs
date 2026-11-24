@@ -3,7 +3,8 @@
 // attachment form that refers to a file (and fails closed), data: URLs, and a notebook's embed on export and extract
 // on import, round trip included.
 //   bun web/workspace/test-image-store.mjs
-import { IMAGE_BYTES_MAX, FILE_KEY, ImageUrls, referencedPaths, embedAttachmentsWith, imageType, imageFolder, saveImage, filePathOf, isFileEntry, fromBase64, toBase64, toDataUrl, fromDataUrl, embedAttachments, extractAttachments, refusalOf } from "./image-store.ts";
+import { ImageUrls } from "./image-urls.ts";
+import { IMAGE_BYTES_MAX, FILE_KEY, referencedPaths, embedAttachmentsWith, imageType, imageFolder, saveImage, filePathOf, isFileEntry, fromBase64, toBase64, toDataUrl, fromDataUrl, embedAttachments, extractAttachments, refusalOf } from "./image-store.ts";
 
 let failures = 0;
 const J = JSON.stringify;
@@ -134,6 +135,28 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   release();
   await loading; await readying;
   ok(U.bytes("/Attachments/nb-a/x.png") === null && U.bytes("/Attachments/nb-a/y.png") === null && U.url("/Attachments/nb-a/x.png") === null, "reads that arrive after clear() (another document shown) aren't kept");
+  U.dispose();
+}
+// ---- a read still on its way when its image is let go (retain(): its cell deleted) is dropped when it arrives,
+//  for load() and for ready()'s second read alike
+{
+  const real = new Uint8Array(64).fill(7); real.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]);
+  let hold = false, release = () => {};
+  const read = async () => { if (hold) await new Promise((r) => (release = r)); return real; };
+  const U = new ImageUrls(read, () => {});
+  hold = true;
+  const l = U.load("/Attachments/nb-r/a.png");
+  U.retain([]);
+  release(); await l;
+  ok(U.bytes("/Attachments/nb-r/a.png") === null, "load(): a read that arrives after its image was let go (retain) isn't kept");
+  hold = false;
+  await U.load("/Attachments/nb-r/b.png");
+  hold = true;
+  const r = U.ready(["/Attachments/nb-r/b.png"]);
+  await new Promise((res) => setTimeout(res, 0));
+  U.retain([]);
+  release(); await r;
+  ok(U.bytes("/Attachments/nb-r/b.png") === null, "ready(): its read again, arriving after the image was let go, isn't kept");
   U.dispose();
 }
 // ---- an attachment named "__proto__" survives import and export

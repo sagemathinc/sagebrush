@@ -15,7 +15,8 @@
 // is embedded or fetched until a person clicks it.
 
 import { PixelBudget, dataUrl, imageSize, pictureKey } from "./image-size";
-import { filePathOf, isFileEntry, type Shown } from "./workspace/image-store";
+import { filePathOf, isFileEntry } from "./workspace/image-store";
+import type { Shown } from "./workspace/image-urls";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
