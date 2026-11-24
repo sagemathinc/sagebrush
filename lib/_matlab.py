@@ -12286,6 +12286,143 @@ def bitshift_n(nargout, a, k, assumedtype=None):
     return _box(r)
 
 
+# ------------------------------------------------------------------ bitget, bitset, bitcmp
+
+_BIT_TYPES = {"uint8": (8, False), "uint16": (16, False), "uint32": (32, False), "uint64": (64, False),
+              "int8": (8, True), "int16": (16, True), "int32": (32, True), "int64": (64, True)}
+# (the bytes bitget, bitset and bitcmp hold at once for each element: its value and stored bits as Python integers in
+# lists, the bit position, the result's list and its array; measured in CPython at up to 144 for bitset, counting A's
+# and the positions' elements)
+_BIT_ELEMENT = 256
+
+
+def _bit_type(fname, A, assumed):
+    """(the integer class A's bits are read in, whether A is double): an integer A's own class (assumedtype, if
+    given, must name it); a double A's assumedtype, 'uint64' by default, as the pages say"""
+    cls = class_(A)
+    if assumed is not None:
+        if not _istext(assumed) or _text(assumed).lower() not in _BIT_TYPES:
+            raise _err("%s: assumedtype must be 'uint8', 'uint16', 'uint32', 'uint64', 'int8', 'int16', 'int32' or "
+                       "'int64'." % fname)
+        assumed = _text(assumed).lower()
+    if cls in _BIT_TYPES:
+        if assumed is not None and assumed != cls:
+            raise _err("%s: for integer input, assumedtype must be its own class, '%s'." % (fname, cls))
+        return cls, False
+    if cls != "double":
+        raise _err("%s: the input must be an integer or double array, not %s." % (fname, cls))
+    return assumed or "uint64", True
+
+
+def _bit_patterns(fname, A, cls, from_double):
+    """A's values' stored bits in cls, as non-negative Python integers (two's complement for a signed class), in
+    MATLAB's element order, and A's dimensions"""
+    nb, signed = _BIT_TYPES[cls]
+    lo, hi = (-(1 << (nb - 1)), (1 << (nb - 1)) - 1) if signed else (0, (1 << nb) - 1)
+    if from_double:
+        D = _farr(A)
+        if D.dtype.kind == "c":
+            raise _err("%s: the input must be real." % fname)
+        vals = []
+        for x in D.reshape(-1).tolist():
+            if not (_math.isfinite(x) and x == _math.floor(x)) or not lo <= int(x) <= hi:
+                raise _err("%s: double input must hold integer values in the range of '%s', %d to %d." % (fname, cls, lo, hi))
+            vals.append(int(x))
+    else:
+        vals = [int(x) for x in _arr(A).reshape(-1).tolist()]
+    return [v & ((1 << nb) - 1) for v in vals], tuple(_dims(A))
+
+
+def _bit_value(u, cls):
+    """stored bits back to the class's value"""
+    nb, signed = _BIT_TYPES[cls]
+    return u - (1 << nb) if signed and u >> (nb - 1) else u
+
+
+def _bit_out(vals, dims, cls, from_double):
+    """the values, in MATLAB's element order, as an array of dims in A's class: a double (exact up to 2^53, the
+    nearest double beyond) for double input"""
+    r = np.array([float(v) for v in vals], dtype=np.float64).reshape(_stored(list(dims)))
+    return _box(r) if from_double else _finish(r, cls)
+
+
+def _bit_operands(fname, *xs):
+    """the result's dimensions and each operand's values in MATLAB's element order, repeated if scalar: all operands
+    the same size, or scalars"""
+    sizes = {d for d, v in xs if len(v) != 1}
+    if len(sizes) > 1:
+        raise _err("%s: the inputs must be the same size, or scalars." % fname)
+    dims = sizes.pop() if sizes else xs[0][0]
+    n = _prod(list(dims))
+    return dims, [v * n if len(v) == 1 else v for d, v in xs]
+
+
+def _bit_positions(fname, bit, nb):
+    """bit positions, 1 to the class's width, in MATLAB's element order, and their dimensions"""
+    if _istext(bit) or not _isnumlike(bit):
+        raise _err("%s: the bit position must be numeric." % fname)
+    B = _farr(bit)
+    out = []
+    for b in B.reshape(-1).tolist() if B.dtype.kind != "c" else [_math.nan]:
+        if not (_math.isfinite(b) and b == _math.floor(b) and 1 <= b <= nb):
+            raise _err("%s: the bit position must be an integer from 1 to %d." % (fname, nb))
+        out.append(int(b))
+    return out, tuple(_dims(bit))
+
+
+@_bi("bitget")
+def bitget_(nargout, A, bit, assumedtype=None):
+    """b = bitget(A, bit, assumedtype): A's bit at position bit (1 the least significant), 0 or 1 in A's class; a
+    double A read as 'uint64' unless assumedtype names another integer class (its values integers in its range, a
+    signed class in two's complement), as MATLAB's bitget page says"""
+    cls, from_double = _bit_type("bitget", A, assumedtype)
+    _admit_bytes((_numel(A) + _numel(bit)) * _BIT_ELEMENT, "bitget of %d elements" % max(_numel(A), _numel(bit)))
+    nb = _BIT_TYPES[cls][0]
+    U, ad = _bit_patterns("bitget", A, cls, from_double)
+    B, bd = _bit_positions("bitget", bit, nb)
+    dims, (U, B) = _bit_operands("bitget", (ad, U), (bd, B))
+    return _bit_out([(u >> (b - 1)) & 1 for u, b in zip(U, B)], dims, cls, from_double)
+
+
+@_bi("bitset")
+def bitset_(nargout, A, bit, *args):
+    """C = bitset(A, bit, V, assumedtype): A with the bit at position bit set to 1, or to V (0 if V is 0, else 1),
+    in A's class; a double A read as 'uint64' unless assumedtype names another integer class, as MATLAB's bitset
+    page says"""
+    args = list(args)
+    assumed = args.pop() if args and _istext(args[-1]) else None
+    if len(args) > 1:
+        raise _err("Too many input arguments.")
+    V = args[0] if args else None
+    cls, from_double = _bit_type("bitset", A, assumed)
+    _admit_bytes((_numel(A) + _numel(bit) + (_numel(V) if V is not None else 0)) * _BIT_ELEMENT,
+                 "bitset of %d elements" % max(_numel(A), _numel(bit)))
+    nb = _BIT_TYPES[cls][0]
+    U, ad = _bit_patterns("bitset", A, cls, from_double)
+    B, bd = _bit_positions("bitset", bit, nb)
+    if V is None:
+        Vs, vd = [True], (1, 1)
+    else:
+        if _istext(V) or not _isnumlike(V):
+            raise _err("bitset: the value must be numeric or logical.")
+        Vs, vd = [x != 0 for x in _farr(V).reshape(-1).tolist()], tuple(_dims(V))
+    dims, (U, B, Vs) = _bit_operands("bitset", (ad, U), (bd, B), (vd, Vs))
+    R = [u | (1 << (b - 1)) if v else u & ~(1 << (b - 1)) for u, b, v in zip(U, B, Vs)]
+    return _bit_out([_bit_value(r, cls) for r in R], dims, cls, from_double)
+
+
+@_bi("bitcmp")
+def bitcmp_(nargout, A, assumedtype=None):
+    """cmp = bitcmp(A, assumedtype): the bitwise complement of A's bits in its integer class (an unsigned value's
+    complement is the class's largest value less it; a signed one's, in two's complement, -A - 1); a double A read as
+    'uint64' unless assumedtype names another integer class, as MATLAB's bitcmp page says"""
+    cls, from_double = _bit_type("bitcmp", A, assumedtype)
+    _admit_bytes(_numel(A) * _BIT_ELEMENT, "bitcmp of %d elements" % _numel(A))
+    nb = _BIT_TYPES[cls][0]
+    U, ad = _bit_patterns("bitcmp", A, cls, from_double)
+    return _bit_out([_bit_value(~u & ((1 << nb) - 1), cls) for u in U], ad, cls, from_double)
+
+
 def _pchip_slopes(x, y):
     """Fritsch-Carlson slopes (the shape-preserving piecewise cubic)"""
     n = len(x)

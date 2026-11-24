@@ -114,6 +114,7 @@ builtins/test_angle_nan.m
 builtins/test_any_all_nd.m
 builtins/test_arrayfun_struct_array.m
 builtins/test_assert_nan.m
+builtins/test_bitget_bitset.m
 builtins/test_bitwise.m
 builtins/test_block_comment_syntax.m
 builtins/test_bsxfun_operators.m
