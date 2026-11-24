@@ -727,3 +727,47 @@ dtype: float64
 dtype: float32
 == method-float32-floordiv-series.dtype
 dtype('float32')
+== method-floordiv-zero-list
+
+0    0
+1    0
+2    0
+dtype: int64
+== method-floordiv-zero-ndarray
+
+0    0
+1    0
+2    0
+dtype: int64
+== method-mod-zero-list
+
+0    0
+1    0
+2    0
+dtype: int64
+== method-mod-zero-ndarray
+
+0    0
+1    0
+2    0
+dtype: int64
+== method-rfloordiv-zero-list
+
+0    0
+1    0
+2    0
+dtype: int64
+== method-float-floordiv-zero-list
+[inf, inf, nan]
+== method-floordiv-zero-numpy-scalar
+
+0    inf
+1   -inf
+2    NaN
+dtype: float64
+== operator-floordiv-zero-list
+
+0    inf
+1   -inf
+2    NaN
+dtype: float64

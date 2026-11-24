@@ -372,9 +372,9 @@ class Series(object):
             right = RS.fill_positions(right, dict((p, fill_value) for p, (a, b) in enumerate(zip(lm, rm)) if b and not a))
         elif fill_value is not None:
             left = RS.fill_column(left, fill_value)
-        # (pandas' flex methods with a Series argument apply numpy's op to the aligned arrays, without its zero
-        # division masks; the operators and a scalar argument keep them)
-        mask_zero = not (method and isinstance(other, Series))
+        # (pandas' flex methods with a list-like argument, a Series, list or array, apply numpy's op without its
+        # zero division masks; the operators and a scalar argument, a numpy one too, keep them)
+        mask_zero = not (method and isinstance(right, (Column, list, tuple, np.ndarray)))
         return Series._pd_new(A.binary(left, right, op, reflected, owner, mask_zero), index, name)
 
     def __add__(self, other):

@@ -132,7 +132,7 @@ def _fill_zeros(y, out):
 
 
 def _unmasked(op, x, y, out, d):
-    # (numpy's own // and % where the divisor is 0, as pandas' flex methods with a Series argument give them: an
+    # (numpy's own // and % where the divisor is 0, as pandas' flex methods with a list-like argument give them: an
     # integer result 0, a float // the true division's signed infinity or NaN, a float % NaN; the dtype kept)
     zero = [p for p, b in enumerate(y.tolist()) if b == 0]
     if not zero:
@@ -151,7 +151,7 @@ def _unmasked(op, x, y, out, d):
 def _numeric_op(op, x, y, d, mask_zero=True):
     """op of two numpy arrays already of dtype d (the result's dtype class);
     mask_zero=False leaves // and % by 0 to numpy (pandas' flex methods
-    with a Series argument)."""
+    with a list-like argument)."""
     if op == "truediv":
         # (numpy's true division: an integer one in float64; a zero divisor gives its signed infinity or NaN)
         xf, yf = (x, y) if d in FLOATS else (x.astype(np.float64), y.astype(np.float64))
@@ -185,7 +185,7 @@ def _bool_bool(op, x, y):
 def binary(col, right, op, reflected, owner, mask_zero=True):
     """col <op> right (right <op> col when reflected): a Column. right is a
     Column (already aligned), a list or array, or a scalar. mask_zero=False:
-    // and % by 0 as numpy gives them (pandas' flex methods with a Series)."""
+    // and % by 0 as numpy gives them (pandas' flex methods with a list-like)."""
     d = col.dtype
     n = len(col)
     kind, rv = _right_values(right, n)
