@@ -3545,6 +3545,11 @@ def sqrt(x):
         if x < 0:
             return CC(0, _math.sqrt(-x))
         return RealNumber(_math.sqrt(x))
+    if type(x).__name__ == "ComplexNumber":
+        # (an element of CC: Sage's sqrt, not its power z^0.5 (NaN at 0); the
+        # double root, checked as CC's functions are, past the doubles too)
+        from _sage_expr import _cc_function
+        return _cc_function("sqrt", (x,), CC(complex(x) ** 0.5))
     if isinstance(x, complex):
         return CC(x ** 0.5)
     if isinstance(x, int) and x >= 0:

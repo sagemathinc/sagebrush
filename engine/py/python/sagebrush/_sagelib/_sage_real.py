@@ -3752,6 +3752,36 @@ def _cc_of(p, re, im):
     return ComplexNumberMP(ComplexField(p), re, im)
 
 
+_CCMP = None
+
+
+def _cc_mp():
+    """The 53-bit MP complex field, its parts in RR's MP field: Sage's CC,
+    MPFR's exponents and all, for CC's values past the doubles."""
+    global _CCMP
+    if _CCMP is None:
+        import _sage_lang
+        _CCMP = ComplexField_(53)
+        _CCMP._R = _sage_lang._rr_mp()
+    return _CCMP
+
+
+def _cc_from_mp(v):
+    """The element of CC with the value of v (a number of _cc_mp()): a
+    ComplexNumber when each part is exactly a double (a zero, an infinity,
+    NaN, a normal double, a subnormal one with no bits under 2^-1074), else
+    NotImplementedError (a part past the doubles, which Sage's CC holds and
+    a ComplexNumber doesn't)."""
+    import _sage_matrix
+    fs = []
+    for x in (v._re, v._im):
+        f = float(x)
+        if not (x._special or not x._m or (abs(f) < math.inf and f != 0 and x._cmpq(f) == 0)):
+            raise NotImplementedError("%s in CC, past the double range, is not available in sagebrush yet (CC holds doubles)" % (v,))
+        fs.append(f)
+    return _sage_matrix.ComplexNumber(*fs)
+
+
 def _cc_log(re, im):
     """(log |z|, arg z), -pi < arg z <= pi, of z = re + im I (doubles, not
     NaN), as Sage's CC computes them (ComplexNumber.log, abs and argument):
