@@ -63,13 +63,21 @@ impl Dataset {
     }
 }
 
-/// The instance's datasets, buffers (a fit's weights and class counts, copied in) and fitted trees (until copied
-/// out), by handle.  Handles come from one counter, never reused.
+/// What a handle names: a dataset, a buffer (a fit's weights or class counts, copied in) or a fitted tree with its
+/// raw importances (until copied out).
+#[derive(Debug)]
+enum Item {
+    Set(Dataset),
+    Buf(Vec<f64>),
+    Tree(crate::tree::Tree, Vec<f64>),
+}
+
+/// The instance's datasets, buffers and fitted trees, by handle.  Handles come from one counter, never reused, and
+/// a handle of one kind names nothing of another ([`Error::Handle`]).  (One map, not one a kind: each map's code is
+/// generated again for its kind, and three were about 15 KB of the module.)
 #[derive(Debug, Default)]
 pub struct Table {
-    sets: BTreeMap<u32, Dataset>,
-    bufs: BTreeMap<u32, Vec<f64>>,
-    trees: BTreeMap<u32, (crate::tree::Tree, Vec<f64>)>,
+    items: BTreeMap<u32, Item>,
     next: u32,
     /// A failure's detail: (row, column or output).
     pub detail: (u64, u64),
@@ -88,6 +96,15 @@ fn zeros<T: Copy + Default>(len: usize) -> Result<Vec<T>, Error> {
 }
 
 impl Table {
+    /// Remove what `h` names if `kind` accepts it (a handle of another kind is left alone).
+    fn take(&mut self, h: u32, kind: fn(&Item) -> bool) -> Option<Item> {
+        if self.items.get(&h).is_some_and(kind) {
+            self.items.remove(&h)
+        } else {
+            None
+        }
+    }
+
     fn next_handle(&mut self) -> Result<u32, Error> {
         // (a handle is returned as a positive i32)
         let h = self.next.checked_add(1).filter(|&h| h <= i32::MAX as u32).ok_or(Error::Handle)?;
@@ -100,31 +117,40 @@ impl Table {
         len.checked_mul(8).ok_or(Error::Shape)?;
         let v = zeros::<f64>(len)?;
         let h = self.next_handle()?;
-        self.bufs.insert(h, v);
+        self.items.insert(h, Item::Buf(v));
         Ok(h)
     }
 
     pub fn buffer_mut(&mut self, h: u32) -> Result<&mut Vec<f64>, Error> {
-        self.bufs.get_mut(&h).ok_or(Error::Handle)
+        match self.items.get_mut(&h) {
+            Some(Item::Buf(b)) => Ok(b),
+            _ => Err(Error::Handle),
+        }
     }
 
     pub fn buffer_take(&mut self, h: u32) -> Result<Vec<f64>, Error> {
-        self.bufs.remove(&h).ok_or(Error::Handle)
+        match self.take(h, |i| matches!(i, Item::Buf(_))) {
+            Some(Item::Buf(b)) => Ok(b),
+            _ => Err(Error::Handle),
+        }
     }
 
     /// Keep a fitted tree and its raw importances until the host has copied them out: its handle.
     pub fn put_tree(&mut self, tree: crate::tree::Tree, importances: Vec<f64>) -> Result<u32, Error> {
         let h = self.next_handle()?;
-        self.trees.insert(h, (tree, importances));
+        self.items.insert(h, Item::Tree(tree, importances));
         Ok(h)
     }
 
-    pub fn tree(&self, h: u32) -> Result<&(crate::tree::Tree, Vec<f64>), Error> {
-        self.trees.get(&h).ok_or(Error::Handle)
+    pub fn tree(&self, h: u32) -> Result<(&crate::tree::Tree, &Vec<f64>), Error> {
+        match self.items.get(&h) {
+            Some(Item::Tree(t, imp)) => Ok((t, imp)),
+            _ => Err(Error::Handle),
+        }
     }
 
     pub fn release_tree(&mut self, h: u32) -> bool {
-        self.trees.remove(&h).is_some()
+        self.take(h, |i| matches!(i, Item::Tree(..))).is_some()
     }
 
     /// Make an open dataset of n samples, f features and `outputs` outputs
@@ -142,13 +168,15 @@ impl Table {
         let y = zeros::<f64>(ny)?;
         let mask = if masked { Some(zeros::<u8>(f)?) } else { None };
         let handle = self.next_handle()?;
-        self.sets.insert(handle, Dataset { n, f, outputs, x, y, mask, sealed: false });
+        self.items.insert(handle, Item::Set(Dataset { n, f, outputs, x, y, mask, sealed: false }));
         Ok(handle)
     }
 
     /// An open dataset, for the host's copy into its buffers.
     pub fn open(&mut self, h: u32) -> Result<&mut Dataset, Error> {
-        let d = self.sets.get_mut(&h).ok_or(Error::Handle)?;
+        let Some(Item::Set(d)) = self.items.get_mut(&h) else {
+            return Err(Error::Handle);
+        };
         if d.sealed {
             return Err(Error::State);
         }
@@ -157,7 +185,9 @@ impl Table {
 
     /// A sealed dataset, for the trees.
     pub fn get(&self, h: u32) -> Result<&Dataset, Error> {
-        let d = self.sets.get(&h).ok_or(Error::Handle)?;
+        let Some(Item::Set(d)) = self.items.get(&h) else {
+            return Err(Error::Handle);
+        };
         if !d.sealed {
             return Err(Error::State);
         }
@@ -174,7 +204,7 @@ impl Table {
         let r = self.check(h, &mut detail);
         self.detail = detail;
         r?;
-        self.sets.get_mut(&h).ok_or(Error::Handle)?.sealed = true;
+        self.open(h)?.sealed = true;
         Ok(())
     }
 
@@ -219,13 +249,19 @@ impl Table {
 
     /// Release a dataset: its memory back to the heap.  Whether it existed.
     pub fn release(&mut self, h: u32) -> bool {
-        self.sets.remove(&h).is_some()
+        self.take(h, |i| matches!(i, Item::Set(_))).is_some()
     }
 
     /// The bytes every live dataset, buffer and tree holds (for the host's tests).
     pub fn live_bytes(&self) -> usize {
-        let trees: usize = self.trees.values().map(|(t, imp)| t.bytes() + imp.capacity() * 8).sum();
-        self.sets.values().map(Dataset::bytes).sum::<usize>() + self.bufs.values().map(|b| b.capacity() * 8).sum::<usize>() + trees
+        self.items
+            .values()
+            .map(|item| match item {
+                Item::Set(d) => d.bytes(),
+                Item::Buf(b) => b.capacity() * 8,
+                Item::Tree(t, imp) => t.bytes() + imp.capacity() * 8,
+            })
+            .sum()
     }
 }
 
@@ -276,6 +312,39 @@ mod tests {
         // (handles are never reused)
         let h2 = t.create(1, 1, 1, false).unwrap();
         assert!(h2 > h);
+    }
+
+    #[test]
+    fn a_handle_of_one_kind_names_nothing_of_another() {
+        let _g = crate::work::tests_serial();
+        let mut t = Table::default();
+        let d = filled(&mut t, &[1.0, 2.0], &[0.0, 1.0], 2, 1, None);
+        let b = t.buffer(3).unwrap();
+        t.seal(d).unwrap();
+        let p = crate::fit::FitParams { kind: crate::criterion::Kind::Mse, max_depth: 1, min_samples_split: 2, min_samples_leaf: 1, min_weight_leaf: 0.0, max_features: 1, min_impurity_decrease: 0.0, seed: 1 };
+        let (tree, imp) = crate::fit::fit(t.get(d).unwrap(), None, &[], &p, &mut (0, 0)).unwrap();
+        let r = t.put_tree(tree, imp).unwrap();
+        let bytes = t.live_bytes();
+        for h in [b, r] {
+            assert_eq!(t.get(h).unwrap_err(), Error::Handle);
+            assert_eq!(t.open(h).unwrap_err(), Error::Handle);
+            assert_eq!(t.seal(h), Err(Error::Handle));
+            assert!(!t.release(h));
+        }
+        for h in [d, r] {
+            assert_eq!(t.buffer_mut(h).unwrap_err(), Error::Handle);
+            assert_eq!(t.buffer_take(h).unwrap_err(), Error::Handle);
+        }
+        for h in [d, b] {
+            assert_eq!(t.tree(h).unwrap_err(), Error::Handle);
+            assert!(!t.release_tree(h));
+        }
+        // (nothing was removed by the refused calls)
+        assert_eq!(t.live_bytes(), bytes);
+        assert_eq!(t.buffer_take(b).unwrap().len(), 3);
+        assert!(t.release_tree(r));
+        assert!(t.release(d));
+        assert_eq!(t.live_bytes(), 0);
     }
 
     #[test]

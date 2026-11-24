@@ -56,6 +56,18 @@ fn zeros(n: usize) -> Result<Vec<f64>, Error> {
     Ok(v)
 }
 
+/// Each output's class count (1 for a regressor's), copied fallibly: one entry an output, and y may be very wide.
+fn class_counts(kind: Kind, n_outputs: usize, n_classes: &[usize]) -> Result<Vec<usize>, Error> {
+    let mut v = Vec::new();
+    v.try_reserve_exact(n_outputs).map_err(|_| Error::Memory)?;
+    if kind == Kind::Mse {
+        v.extend(std::iter::repeat_n(1, n_outputs));
+    } else {
+        v.extend_from_slice(n_classes);
+    }
+    Ok(v)
+}
+
 impl Criterion {
     /// A classification criterion (Gini or Entropy) for `n_classes` per output, or a regression one (Mse, `n_classes`
     /// ignored) for `n_outputs`.
@@ -65,7 +77,7 @@ impl Criterion {
         Ok(Criterion {
             kind,
             n_outputs,
-            n_classes: if kind == Kind::Mse { vec![1; n_outputs] } else { n_classes.to_vec() },
+            n_classes: class_counts(kind, n_outputs, n_classes)?,
             stride,
             sum_total: zeros(n)?,
             sum_left: zeros(n)?,

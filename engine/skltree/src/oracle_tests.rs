@@ -282,7 +282,7 @@ fn every_tree_matches_scikit_learn() {
         let tree = build(input, &mut sp, &Params { max_depth, min_samples_split: mss, min_samples_leaf: msl, min_weight_leaf: mwl, min_impurity_decrease: mid }).unwrap();
         let mut leaves = vec![0i64; *n];
         apply(&tree, x, *nf, &mut leaves);
-        let imp = importances(&tree, *nf);
+        let imp = importances(&tree, *nf).unwrap();
         let i8s = |v: &[i64]| fnv_bytes(v, |x| x.to_le_bytes().to_vec());
         let f8s = |v: &[f64]| fnv_bytes(v, |x| x.to_le_bytes().to_vec());
         let got = [
