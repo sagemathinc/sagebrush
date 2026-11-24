@@ -3984,8 +3984,8 @@ const objCompareOut = (op: string, a: ObjArray, o: any, flip = false): any => {
   return r.ndim === 0 ? pyScalarOf(D.bool, r.data, 0) : r;
 };
 
-// sort and argsort along an axis, by the elements' <, stable (the next index
-// breaks a tie); an element that doesn't compare raises Python's TypeError
+// sort and argsort along an axis, by the elements' < and >: NumPy's introsort by default (not stable),
+// or stable when asked (the next index breaks a tie); an element that doesn't compare raises Python's TypeError
 function objLess(x: any, y: any): boolean {
   return O.truth(O.lt(x, y));
 }
