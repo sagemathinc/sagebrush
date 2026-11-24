@@ -58,6 +58,10 @@ case("skfold.iris-tied", lambda: split_digests(StratifiedKFold(4, shuffle=True, 
 case("skfold.strings", lambda: splits(StratifiedKFold(2), np.zeros(6), ["b", "a", "b", "a", "c", "c"]))
 case("skfold.str-series", lambda: splits(StratifiedKFold(2), np.zeros(6), pd.Series(["b", "a", "b", "a", "c", "c"])))
 case("skfold.appearance-order", lambda: splits(StratifiedKFold(2), np.zeros(6), [2, 2, 1, 1, 0, 0]))
+# (unbalanced classes in order of first appearance, not sorted: each fold's share follows that order)
+y_appear = [2] * 4 + [1] * 5 + [0] * 6
+case("skfold.appearance-unbalanced", lambda: splits(StratifiedKFold(3), np.zeros(15), y_appear))
+case("skfold.appearance-unbalanced-shuffle", lambda: splits(StratifiedKFold(3, shuffle=True, random_state=0), np.zeros(15), y_appear))
 case("skfold.few-members", caught(lambda: splits(StratifiedKFold(3), np.zeros(7), [0, 0, 0, 1, 1, 1, 2])))
 case("skfold.too-few", lambda: splits(StratifiedKFold(3), np.zeros(4), [0, 0, 1, 1]))
 case("skfold.continuous", lambda: splits(StratifiedKFold(2), np.zeros(4), [0.5, 1.5, 2.5, 3.5]))
