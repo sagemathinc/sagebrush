@@ -86,9 +86,12 @@ CLASSES = {"1", "2", "3", "1+2", "1+3", "2+3", "1+2+3", "coverage", "none"}
 # its work meter (the Budget and its charges): class 1, interim until #904's slice 2 (LIMITS on #913), never membership)
 # and the 3D view's rooms for Sage files (web/space/src/pyroom.ts): the preparser's work bound on a file's ranges
 # (ELLIPSIS_BUDGET, interim until the preparser rewrites ranges in one pass), which protects the page: class 1)
+# and the 3D view's hooks (web/workspace/space3d.ts): what Open in 3D reads to draw a folder and what the view may then
+# read through it, per opening (SPACE3D_LIMITS), a folder's files (LIMITS.files) and a selection's id: class 1)
 WEB = {"web/workspace/sync-ledger.ts", "web/notebook/text-overlap.ts", "web/stall-fetch.js", "web/workspace/checkpoint.ts", "web/latex/run-core.mjs",
        "web/latex/results-check.mjs", "web/output-shell/protocol.js", "web/output-shell/shell.js", "web/notebook/output-frames.js",
-       "web/sync/entries.ts", "web/space/src/pyroom.ts"}
+       "web/sync/entries.ts", "web/space/src/pyroom.ts",
+       "web/workspace/space3d.ts"}
 
 
 def short(key):

@@ -14,7 +14,7 @@ import { drawCode, editor, codeRuns } from "./code.ts";
 import { run, interrupt, sceneObject, SCENE } from "./run.ts";
 import { sizeOf } from "./sizes.ts";
 import { treeRoom, resolveImport } from "./treeroom.ts";
-import { checkSpace, readText, sameSite, utf8Bytes, ROOM_TEXT } from "./read.ts";
+import { checkSpace, readText, sameSite, utf8Bytes, ROOM_TEXT, LIMITS } from "./read.ts";
 import { EDIT, keepEdit } from "./keep.ts";
 import { groundPlan, placedOnGround, moundFor, supportAt as blockAt, EYE, SIGN, STEP } from "./ground.ts";
 // (the languages whose files are entered: by their names; each parser loaded the first time one of its files is)
@@ -1244,6 +1244,7 @@ function enterKind(nd) {
   if ((/\.(py|sage)$/.test(p) || (!/\.\w+$/.test(p) && (nd.lang === "python" || nd.lang === "sage"))) && whole) return "python";
   if (codeOf(p) && whole) return codeOf(p);
   if (/\.space\.json$/.test(p) && whole) return "space";
+  if (nd.doc === "notebook" && nd.src) return "notebook";
   return null;
 }
 // (the JS import resolver: set when its module first loads, enterRoom)
@@ -1251,21 +1252,54 @@ let jsResolve = null;
 async function loadResolvers() {
   if (codeOf(String(space?.room?.path ?? "")) === "js" && !jsResolve) jsResolve = (await import("./jsroom.ts")).resolveJs;
 }
-// (a file's whole text: from its `src` (a file of this site), once; the faces drawn again with it)
+// (a file's whole text: from its `src` (a file of this site, or of the person's workspace, which the page that opened
+//  this view reads for it), once; the faces drawn again with it)
 const fetched = new Map();
 async function fullText(nd) {
   if (!nd.src || nd._full) return String(nd.text ?? "");
-  const url = sameSite(nd.src);
-  if (!fetched.has(url.href)) fetched.set(url.href, readText(url));
+  const src = String(nd.src), mine = src.startsWith("workspace:");
+  const key = mine ? src : sameSite(src).href;
+  if (!fetched.has(key)) fetched.set(key, mine ? askPage(decodeURIComponent(src.slice("workspace:".length))) : readText(sameSite(src)));
   let text;
-  try { text = await fetched.get(url.href); } catch (e) { fetched.delete(url.href); throw e; }
+  try { text = await fetched.get(key); } catch (e) { fetched.delete(key); throw e; }
   nd.text = text; nd._full = true;
   const o = objects[space.nodes.indexOf(nd)];
   if (o) { for (const t of o.userData.tex) t?.dispose(); o.userData.tex = []; o.userData.level = -1; }
   return text;
 }
+// (a file of the person's workspace: asked of the page that opened this view (web/workspace/space3d.ts), by its path in
+//  the tree that page sent; the answer is a "space-file", of at most LIMITS.bytes, or the reason it can't be read)
+const asked = new Map<number, { resolve: (t: string) => void; reject: (e: Error) => void }>();
+let askSeq = 0;
+function askPage(path: string): Promise<string> {
+  if (!embedded) return Promise.reject(new Error("only the page that opened this view reads your files"));
+  return new Promise((resolve, reject) => {
+    const id = ++askSeq;
+    asked.set(id, { resolve, reject });
+    window.parent.postMessage({ sagebrush: "space-read", version: 1, id, path }, location.origin);
+    setTimeout(() => { if (asked.delete(id)) reject(new Error("the page didn't answer")); }, 60000);
+  });
+}
+function answered(m) {
+  const a = asked.get(m.id);
+  if (!a) return;
+  asked.delete(m.id);
+  if (typeof m.text !== "string") return a.reject(new Error(String(m.error ?? "couldn't read it").slice(0, 300)));
+  if (utf8Bytes(m.text) > LIMITS.bytes) return a.reject(new Error("it's too large to show here"));
+  a.resolve(m.text);
+}
 async function roomFor(nd, k) {
   if (k === "dir") return checkSpace(treeRoom(space.tree, nd.enter.path));
+  if (k === "notebook") {
+    // (a notebook of the workspace: its cells, as the page sent them)
+    let nb;
+    try { nb = JSON.parse(await fullText(nd)); } catch { throw new Error("it isn't a notebook"); }
+    if (nb?.format !== "sagebrush-notebook-cells" || !Array.isArray(nb.cells)) throw new Error("it isn't a notebook");
+    const { notebookRoom } = await import("./nbroom.ts");
+    const r = notebookRoom(nb, { path: String(nd.path ?? nd.title) });
+    if (space.tree) r.tree = space.tree;
+    return r;
+  }
   if (k === "import") {
     // (through the portal: the imported file's own room, its text read as any file's, from this site)
     const { path, sub } = importTarget(nd), tree = space.tree;
@@ -1808,6 +1842,7 @@ function embed() {
   addEventListener("message", (e) => {
     const m = e.data;
     if (e.source !== window.parent || e.origin !== location.origin || m?.version !== 1) return;
+    if (m.sagebrush === "space-file" && Number.isSafeInteger(m.id)) return answered(m);
     if (m.sagebrush !== "space-load") return;
     const name = String(m.name ?? "space");
     const again = name === current;
