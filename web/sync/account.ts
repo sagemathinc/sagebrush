@@ -125,6 +125,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private urls = new Bucket(LIMITS.urlsPerMinute, LIMITS.urlsPerMinute / 60);
   private e2eAppends = new Bucket(E2E.appendsPerMinute, E2E.appendsPerMinute / 60);
   private e2eMail = new Bucket(E2E.mailPerMinute, E2E.mailPerMinute / 60);
+  private e2eResets = new Bucket(E2E.resetsPerMinute, E2E.resetsPerMinute / 60);
   private e2eStore: E2EStore | null = null;
   /** tests only: the mailbox's clock, shifted (ms); and the next E2E write's transaction made to fail after its writes */
   private e2eShift = 0;
@@ -2331,11 +2332,21 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   async e2eAppend(a: { account: string; bind?: { account?: string; generation?: number }; entry: unknown; keyring?: unknown; wrappers?: unknown }): Promise<Result<{ seq: number; head: string }>> {
     return attemptAsync(async () => {
       const store = this.e2e(a.account, a.bind);
-      const wait = this.e2eAppends.take();
-      if (wait) throw new SyncError("rate", "too many key-chain changes; wait", { retry_after: wait });
-      return store.append(a);
+      // (a reset never draws on the appends' bucket, which a compromised device can drain: it is charged to its own
+      // bucket, and only once its recovery signature and package have verified)
+      let claimed: unknown = null;
+      try { claimed = typeof a.entry === "string" ? (JSON.parse(a.entry) as { body?: { op?: unknown } })?.body?.op : null; } catch { /* (the checks refuse it) */ }
+      if (claimed !== "reset") {
+        const wait = this.e2eAppends.take();
+        if (wait) throw new SyncError("rate", "too many key-chain changes; wait", { retry_after: wait });
+      }
+      return store.append(a, () => {
+        const wait = this.e2eResets.take();
+        if (wait) throw new SyncError("rate", "too many resets; wait", { retry_after: wait });
+      });
     });
   }
+
 
   /** A page of the chain. */
   async e2eChain(a: { account: string; bind?: { account?: string; generation?: number }; from: number }): Promise<Result<ReturnType<E2EStore["chain"]>>> {
@@ -2383,14 +2394,15 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Tests only: shift the mailbox's clock, and count the E2E rows. */
-  async testE2E(a: { shift?: number; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number } }): Promise<Record<string, number> | null> {
+  async testE2E(a: { shift?: number; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number }; corrupt?: "state_hash" | "hash" }): Promise<Record<string, number> | null> {
     if (!testMode(this.env)) return null;
     if (a.shift !== undefined) this.e2eShift = a.shift;
     if (a.failCommit !== undefined) this.e2eFailCommit = a.failCommit;
     if (a.hold !== undefined) this.e2eHold = a.hold;
     if (a.bounds !== undefined && this.e2eStore) Object.assign(this.e2eStore.bounds, a.bounds);
+    if (a.corrupt === "state_hash" || a.corrupt === "hash") this.sql.exec(`UPDATE e2e_checkpoint SET ${a.corrupt} = 'x' WHERE id = 1`);
     const out: Record<string, number> = {};
-    for (const t of ["e2e_chain", "e2e_keyrings", "e2e_wrappers", "e2e_head", "e2e_mailbox"]) {
+    for (const t of ["e2e_chain", "e2e_keyrings", "e2e_wrappers", "e2e_head", "e2e_checkpoint", "e2e_mailbox"]) {
       const there = this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = ?", t);
       out[t] = there ? Number(this.one(`SELECT COUNT(*) AS n FROM ${t}`)!.n) : -1;
     }

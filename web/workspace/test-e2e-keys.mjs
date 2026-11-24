@@ -31,15 +31,17 @@ async function newDevice(name, kind = "browser") {
 }
 const recRec = (r) => ({ sign: b64(r.sign.raw), kem: b64(r.kem.publicRaw) });
 
-/** A new epoch's fields (and its secret) for the entry after `state`. */
-async function nextEpoch(state, secrets, suite = 1) {
+/** A new epoch's fields (and its secret) for the entry after `state`: its keyring carries the current epoch's secret
+ * (`secrets` maps each epoch to its secret); `generation` is a reset's new one. */
+async function nextEpoch(state, secrets, suite = 1, generation = null) {
   const n = state ? state.epoch.n + 1 : 0;
   const S = E.newEpochSecret();
   const commit = await E.epochCommit(S, ctx.account, n);
   let keyring = null, ring = null;
   if (n > 0) {
-    ring = await E.sealKeyring({ S, account: ctx.account, n, suite, prev: state.head, secrets });
-    keyring = { hash: ring.hash, epochs: [...ring.epochs] };
+    const meta = { epoch: n, generation: generation ?? state.generation, suite, prev: state.head, prev_ring: state.epoch.keyring?.hash ?? "" };
+    ring = await E.sealKeyring({ S, account: ctx.account, meta, secret: secrets.get(n - 1) });
+    keyring = { hash: ring.hash };
   }
   return { S, ring, epoch: { n, suite, commit, keyring } };
 }
@@ -87,36 +89,43 @@ const apply = (s, bytes) => E.applyChainEntry(s, bytes, ctx).then((r) => r.state
   ok(!extractable && k.privateKey.extractable === false, "x25519: a device's private key is non-extractable");
 }
 
-// ---- keyrings and epoch commitments
+// ---- chained keyrings and epoch commitments
 {
-  const S = E.newEpochSecret(), s0 = E.newEpochSecret(), s1 = E.newEpochSecret();
-  const prev = b64(random(32));
-  const args = { S, account: ctx.account, n: 2, suite: 1, prev };
-  const r = await E.sealKeyring({ ...args, secrets: new Map([[1, s1], [0, s0]]) });
-  ok(canonText(r.epochs) === "[0,1]", "keyring: the epoch list is ordered");
-  const commits = new Map([[0, await E.epochCommit(s0, ctx.account, 0)], [1, await E.epochCommit(s1, ctx.account, 1)]]);
-  args.commits = commits;
-  const m = await E.openKeyring({ ...args, hash: r.hash, epochs: [0, 1], bytes: r.bytes });
-  ok(hex(m.get(0)) === hex(s0) && hex(m.get(1)) === hex(s1), "keyring: opens to the earlier secrets");
-  const r2 = await E.sealKeyring({ ...args, secrets: new Map([[0, s0], [1, s1]]) });
-  ok(hex(r.bytes.subarray(0, 12)) !== hex(r2.bytes.subarray(0, 12)), "keyring: a fresh nonce each time");
-  await refuses("bad_keyring", () => E.openKeyring({ ...args, hash: r.hash, epochs: [0, 1], bytes: r2.bytes }), "keyring: a valid keyring that isn't the signed one is refused");
-  const flip = r.bytes.slice(); flip[20] ^= 1;
-  await refuses("bad_keyring", () => E.openKeyring({ ...args, hash: r.hash, epochs: [0, 1], bytes: flip }), "keyring: a changed byte fails the signed hash");
-  for (const [k, v] of [["account", newId()], ["n", 3], ["prev", b64(random(32))], ["S", E.newEpochSecret()]])
-    await refuses("bad_keyring", () => E.openKeyring({ ...args, [k]: v, hash: r.hash, epochs: [0, 1], bytes: r.bytes }), `keyring: another ${k} doesn't open it`);
-  await refuses("bad_keyring", () => E.openKeyring({ ...args, hash: r.hash, epochs: [1], bytes: r.bytes }), "keyring: a different epoch list in the AAD doesn't open it");
-  await refuses("bad_keyring", () => E.openKeyring({ ...args, commits: new Map([[0, commits.get(0)], [1, commits.get(0)]]), hash: r.hash, epochs: [0, 1], bytes: r.bytes }), "keyring: a secret that doesn't match its own epoch's commitment");
-  await refuses("bad_keyring", () => E.openKeyring({ ...args, commits: undefined, hash: r.hash, epochs: [0, 1], bytes: r.bytes }), "keyring: no commitments, no secrets");
-  {
-    // (the plaintext is binary, 32 bytes per carried epoch: a keyring of 3 sealed and claimed as 2 fails before decryption)
-    ok(r.bytes.length === 12 + 64 + 16, "keyring: exactly 32 bytes per secret, plus nonce and tag");
-    const big = await E.sealKeyring({ S, account: ctx.account, n: 3, suite: 1, prev, secrets: new Map([[0, s0], [1, s1], [2, S]]) });
-    await refuses("bad_keyring", () => E.openKeyring({ S, account: ctx.account, n: 3, suite: 1, prev, commits, hash: big.hash, epochs: [0, 1], bytes: big.bytes }), "keyring: a length that isn't the list's is refused");
-  }
-  await refuses("bad_form", () => E.sealKeyring({ ...args, secrets: new Map([[2, s0]]) }), "keyring: can't carry its own epoch");
-  await refuses("bad_suite", () => E.sealKeyring({ ...args, suite: 2, secrets: new Map([[0, s0]]) }), "keyring: an unknown suite");
-  const c = await E.epochCommit(S, ctx.account, 2);
+  const gen = "g" + newId();
+  const S1 = E.newEpochSecret(), S2 = E.newEpochSecret(), S3 = E.newEpochSecret(), s0 = E.newEpochSecret();
+  const prevs = [null, b64(random(32)), b64(random(32)), b64(random(32))];
+  const r1 = await E.sealKeyring({ S: S1, account: ctx.account, meta: { epoch: 1, generation: gen, suite: 1, prev: prevs[1], prev_ring: "" }, secret: s0 });
+  const r2 = await E.sealKeyring({ S: S2, account: ctx.account, meta: { epoch: 2, generation: gen, suite: 1, prev: prevs[2], prev_ring: r1.hash }, secret: S1 });
+  const r3 = await E.sealKeyring({ S: S3, account: ctx.account, meta: { epoch: 3, generation: gen, suite: 1, prev: prevs[3], prev_ring: r2.hash }, secret: S2 });
+  ok(r1.bytes.length === 60 && r3.bytes.length === 60, "keyring: 60 bytes, whatever the epoch (one secret each)");
+  const row = (r) => ({ ...r.meta, bytes: r.bytes });
+  const o = await E.openKeyring({ S: S3, account: ctx.account, row: row(r3), expect: r3.hash });
+  ok(hex(o.secret) === hex(S2) && o.prevRing === r2.hash, "keyring: opens to the previous epoch's secret and the authenticated previous keyring hash");
+  const rr = await E.sealKeyring({ S: S3, account: ctx.account, meta: r3.meta, secret: S2 });
+  ok(hex(rr.bytes.subarray(0, 12)) !== hex(r3.bytes.subarray(0, 12)), "keyring: a fresh nonce each time");
+  await refuses("bad_keyring", () => E.openKeyring({ S: S3, account: ctx.account, row: row(rr), expect: r3.hash }), "keyring: a valid keyring that isn't the signed one is refused before decryption");
+  const flip = r3.bytes.slice(); flip[20] ^= 1;
+  const flipHash = await (await import("./fleet/core/bytes.mjs")).sha256b64(flip);
+  await refuses("bad_keyring", () => E.openKeyring({ S: S3, account: ctx.account, row: { ...r3.meta, bytes: flip }, expect: flipHash }), "keyring: a changed ciphertext under its own hash fails authentication");
+  for (const [k, v] of [["generation", "g" + newId()], ["epoch", 4], ["suite", 2], ["prev", b64(random(32))], ["prev_ring", r1.hash]])
+    await refuses("bad_keyring", () => E.openKeyring({ S: S3, account: ctx.account, row: { ...row(r3), [k]: v }, expect: r3.hash }), `keyring: another ${k} in its row doesn't open it`);
+  await refuses("bad_keyring", () => E.openKeyring({ S: S3, account: newId(), row: row(r3), expect: r3.hash }), "keyring: another account doesn't open it");
+  await refuses("bad_keyring", () => E.openKeyring({ S: S2, account: ctx.account, row: row(r3), expect: r3.hash }), "keyring: another epoch's secret doesn't open it");
+  await refuses("bad_keyring", () => E.sealKeyring({ S: S1, account: ctx.account, meta: { epoch: 2, generation: gen, suite: 1, prev: "x", prev_ring: "" }, secret: s0 }), "keyring: only epoch 1 has no previous keyring");
+  // walking back: three steps, the next expected hash only from the authenticated keyring
+  const rows = new Map([[1, row(r1)], [2, row(r2)], [3, row(r3)]]);
+  const commits = new Map([[0, await E.epochCommit(s0, ctx.account, 0)], [1, await E.epochCommit(S1, ctx.account, 1)], [2, await E.epochCommit(S2, ctx.account, 2)]]);
+  const kept = [];
+  const got = await E.walkBack({ S: S3, n: 3, expect: r3.hash, to: 0, account: ctx.account, row: async (k) => rows.get(k), commit: (k) => commits.get(k), keep: async (k, x) => kept.push([k, hex(x)]) });
+  ok(hex(got) === hex(s0) && kept.map(([k]) => k).join() === "2,1,0" && kept[0][1] === hex(S2), "walk: from epoch 3 back to epoch 0, keeping each verified secret");
+  await refuses("bad_keyring", () => E.walkBack({ S: S3, n: 3, expect: r3.hash, to: 0, account: ctx.account, row: async (k) => (k === 2 ? row(r1) : rows.get(k)) }), "walk: a swapped row stops it");
+  await refuses("bad_keyring", () => E.walkBack({ S: S3, n: 3, expect: r3.hash, to: 0, account: ctx.account, row: async (k) => (k === 1 ? undefined : rows.get(k)) }), "walk: a missing row stops it");
+  await refuses("bad_keyring", () => E.walkBack({ S: S3, n: 3, expect: r2.hash, to: 0, account: ctx.account, row: async (k) => rows.get(k) }), "walk: a start hash that isn't the signed one stops it");
+  await refuses("bad_keyring", () => E.walkBack({ S: S3, n: 3, expect: r3.hash, to: 0, account: ctx.account, row: async (k) => rows.get(k), commit: (k) => (k === 1 ? commits.get(0) : commits.get(k)) }), "walk: a secret that isn't its epoch's commitment stops it");
+  await refuses("limit", () => E.walkBack({ S: S3, n: 3, expect: r3.hash, to: 0, budget: 2, account: ctx.account, row: async (k) => rows.get(k) }), "walk: past its budget, refused before any step");
+  const ac = new AbortController(); ac.abort();
+  await refuses("aborted", () => E.walkBack({ S: S3, n: 3, expect: r3.hash, to: 0, account: ctx.account, row: async (k) => rows.get(k), signal: ac.signal }), "walk: cancellable");
+  const S = S3, c = await E.epochCommit(S, ctx.account, 2);
   ok(c !== (await E.epochCommit(S, ctx.account, 3)) && c !== (await E.epochCommit(S, newId(), 2)), "epoch commitment: binds the account and the epoch");
 }
 
@@ -167,12 +176,12 @@ let state, A, B, C, seed, rec, e0, e1;
   state = await apply(state, await addEntry(state, A, C));
   e1 = await nextEpoch(state, new Map([[0, e0.S]]));
   state = await apply(state, await E.sealEntry(A.signer, E.nextBody(state, ctx, "remove", { remove: C.id, epoch: e1.epoch }), A.sign));
-  ok(!E.currentDevice(state, C.id) && state.epoch.n === 1 && canonText(state.epoch.keyring.epochs) === "[0]", "chain: remove starts epoch 1 with a keyring of epoch 0");
+  ok(!E.currentDevice(state, C.id) && state.epoch.n === 1 && state.epoch.keyring.hash === e1.ring.hash, "chain: remove starts epoch 1, committing its keyring");
   const w1 = await E.wrapEpoch({ hpke, state, ctx, sender: A, recipient: { kind: "device", id: B.id }, n: 1, S: e1.S });
   const g1 = await E.openWrapper({ hpke, state, ctx, bytes: w1, me: { kind: "device", id: B.id, recipient: B.kem }, seen: isSeen });
   const commits = new Map(state.epochs.map((x) => [x.n, x.commit]));
-  const ring = await E.openKeyring({ S: g1.S, account: ctx.account, n: 1, suite: 1, prev: state.epoch.prev, hash: state.epoch.keyring.hash, epochs: state.epoch.keyring.epochs, commits, bytes: e1.ring.bytes });
-  ok(hex(ring.get(0)) === hex(e0.S), "keyring: a remaining device reaches epoch 0 through epoch 1's keyring");
+  const back = await E.walkBack({ S: g1.S, n: 1, expect: state.epoch.keyring.hash, to: 0, account: ctx.account, row: async () => ({ ...e1.ring.meta, bytes: e1.ring.bytes }), commit: (k) => commits.get(k) });
+  ok(hex(back) === hex(e0.S), "keyring: a remaining device reaches epoch 0 through epoch 1's keyring");
   await refuses("bad_epoch", () => E.wrapEpoch({ hpke, state, ctx, sender: A, recipient: { kind: "device", id: B.id }, n: 0, S: e0.S }), "wrap: only the current epoch is wrapped");
   await refuses("device_unknown", () => E.wrapEpoch({ hpke, state, ctx, sender: A, recipient: { kind: "device", id: C.id }, n: 1, S: e1.S }), "wrap: never to a removed device");
   await refuses("bad_epoch", () => E.wrapEpoch({ hpke, state, ctx, sender: A, recipient: { kind: "device", id: B.id }, n: 1, S: e0.S }), "wrap: a secret that isn't the epoch's commitment");
@@ -251,13 +260,16 @@ let state, A, B, C, seed, rec, e0, e1;
 
   // pins, forks and rollbacks
   ok(state.seq === before.seq + 1, "chain: the recovery is the next entry");
-  E.checkPin(state, { seq: 2, hash: state.hashes[2] });
+  const gn = state.generation;
+  ok(gn === state.hashes[0] && E.pinOf(state).generation === gn, "pin: the generation before any reset is the genesis entry's hash");
+  E.checkPin(state, { seq: 2, hash: state.hashes[2], generation: gn });
   ok(true, "pin: an earlier head on the chain is accepted");
-  await refuses("chain_fork", () => E.checkPin(state, { seq: 2, hash: b64(random(32)) }), "pin: another hash at the pinned position is a fork");
-  await refuses("chain_fork", () => E.checkPin(before, { seq: state.seq, hash: state.head }), "pin: a chain shorter than the pin is a rollback");
-  for (const [what, pin] of [["NaN seq", { seq: NaN, hash: undefined }], ["a string seq", { seq: "2", hash: state.hashes[2] }], ["a negative seq", { seq: -1, hash: state.hashes[0] }],
-    ["a fractional seq", { seq: 1.5, hash: state.hashes[1] }], ["no hash", { seq: 1 }], ["an extra field", { seq: 1, hash: state.hashes[1], x: 1 }], ["a malformed hash", { seq: 1, hash: state.hashes[1].slice(1) }],
-    ["a non-canonical hash", { seq: 1, hash: state.hashes[1].slice(0, 42) + "B" }], ["an array", [1, state.hashes[1]]]])
+  await refuses("chain_fork", () => E.checkPin(state, { seq: 2, hash: b64(random(32)), generation: gn }), "pin: another hash at the pinned position is a fork");
+  await refuses("chain_fork", () => E.checkPin(before, { seq: state.seq, hash: state.head, generation: gn }), "pin: a chain shorter than the pin is a rollback");
+  await refuses("chain_reset", () => E.checkPin(state, { seq: 2, hash: state.hashes[2], generation: newId() }), "pin: a pin of another generation means the chain was reset since");
+  for (const [what, pin] of [["NaN seq", { seq: NaN, hash: undefined, generation: gn }], ["a string seq", { seq: "2", hash: state.hashes[2], generation: gn }], ["a negative seq", { seq: -1, hash: state.hashes[0], generation: gn }],
+    ["a fractional seq", { seq: 1.5, hash: state.hashes[1], generation: gn }], ["no hash", { seq: 1, generation: gn }], ["an extra field", { seq: 1, hash: state.hashes[1], generation: gn, x: 1 }], ["a malformed hash", { seq: 1, hash: state.hashes[1].slice(1), generation: gn }],
+    ["a non-canonical hash", { seq: 1, hash: state.hashes[1].slice(0, 42) + "B", generation: gn }], ["no generation", { seq: 1, hash: state.hashes[1] }], ["an array", [1, state.hashes[1]]]])
     await refuses("bad_form", () => E.checkPin(state, pin), `pin: ${what} is refused before any comparison`);
 }
 
@@ -298,7 +310,7 @@ let state, A, B, C, seed, rec, e0, e1;
   const good = await nextEpoch(s2, new Map([[0, ep0.S], [1, epP.S]]));
   await bad({ ...good.epoch, n: 3 }, "bad_epoch", "a skipped number");
   await bad({ ...good.epoch, n: 1 }, "bad_epoch", "a repeated number");
-  await bad({ ...good.epoch, keyring: { ...good.epoch.keyring, epochs: [1] } }, "bad_keyring", "a keyring missing an earlier epoch");
+  await bad({ ...good.epoch, keyring: { ...good.epoch.keyring, epochs: [1] } }, "bad_form", "a keyring with fields beyond its hash");
   await bad({ ...good.epoch, suite: 2 }, "bad_suite", "an unknown suite");
   await bad({ ...good.epoch, keyring: null }, "bad_form", "no keyring after epoch 0");
   const s3 = await apply(s2, await E.sealEntry(P.signer, E.nextBody(s2, ctx, "epoch", { epoch: good.epoch }), P.sign));
@@ -352,22 +364,22 @@ let state, A, B, C, seed, rec, e0, e1;
   const subtle = globalThis.crypto.subtle;
   const spy = (name, wrap) => { const o = subtle[name]; subtle[name] = function (...a) { return wrap(o.bind(this), ...a); }; return () => { subtle[name] = o; }; };
   const zero = (b) => b && new Uint8Array(b.buffer ?? b, b.byteOffset ?? 0, b.byteLength).every((x) => x === 0);
-  const S = E.newEpochSecret(), s0 = E.newEpochSecret(), prev = b64(random(32));
-  // (sealKeyring: the plaintext it hands AES-GCM)
-  let sealed = null;
-  let undo = spy("encrypt", (f, alg, key, data) => { sealed = data; return f(alg, key, data); });
-  let ring;
-  try { ring = await E.sealKeyring({ S, account: ctx.account, n: 1, suite: 1, prev, secrets: new Map([[0, s0]]) }); } finally { undo(); }
-  ok(sealed?.length === 32 && zero(sealed), "custody: sealKeyring zeroes its plaintext");
-  // (openKeyring: the decrypted plaintext, on success and on a failed commitment check)
-  const commits = new Map([[0, await E.epochCommit(s0, ctx.account, 0)]]);
-  const args = { S, account: ctx.account, n: 1, suite: 1, prev, hash: ring.hash, epochs: [0], bytes: ring.bytes };
-  for (const [what, cm] of [["success", commits], ["a failed commitment", new Map([[0, b64(random(32))]])]]) {
-    let opened = null;
-    undo = spy("decrypt", async (f, ...a) => (opened = await f(...a)));
-    try { await E.openKeyring({ ...args, commits: cm }); } catch { /* (the failure case) */ } finally { undo(); }
-    ok(opened?.byteLength === 32 && zero(opened), `custody: openKeyring zeroes its decrypted plaintext after ${what}`);
+  // (walkBack: every intermediate secret it decrypted is zeroed, on success and on failure; only the result is handed out)
+  {
+    const gen = "g" + newId(), S1 = E.newEpochSecret(), S2 = E.newEpochSecret(), s0 = E.newEpochSecret();
+    const r1 = await E.sealKeyring({ S: S1, account: ctx.account, meta: { epoch: 1, generation: gen, suite: 1, prev: "a", prev_ring: "" }, secret: s0 });
+    const r2 = await E.sealKeyring({ S: S2, account: ctx.account, meta: { epoch: 2, generation: gen, suite: 1, prev: "b", prev_ring: r1.hash }, secret: S1 });
+    const rows = new Map([[1, { ...r1.meta, bytes: r1.bytes }], [2, { ...r2.meta, bytes: r2.bytes }]]);
+    for (const [what, commit] of [["success", () => undefined], ["a failed commitment", (k) => (k === 0 ? b64(random(32)) : undefined)]]) {
+      const opened = [];
+      const undo = spy("decrypt", async (f, ...a) => { const r = await f(...a); opened.push(r); return r; });
+      let out = null;
+      try { out = await E.walkBack({ S: S2, n: 2, expect: r2.hash, to: 0, account: ctx.account, row: async (k) => rows.get(k), commit }); } catch { /* (the failure case) */ } finally { undo(); }
+      const zeroed = opened.filter((b) => zero(b)).length;
+      ok(opened.length === 2 && zeroed === (out ? 1 : 2), `custody: walkBack zeroes every intermediate secret after ${what} (the result is the caller's)`);
+    }
   }
+  let undo;
   // (checkResponse: the MAC it computes, on success and failure)
   const nd = await newDevice("z");
   const pre = await E.preEntryHash({ op: "add", device: nd.rec, pop: null });
@@ -395,7 +407,7 @@ let state, A, B, C, seed, rec, e0, e1;
   const after = (await E.applyChainEntry(null, gen, ctx)).state;
   const wrapAll = async (st, S, n, sender, who) => Promise.all(who.map((r) => E.wrapEpoch({ hpke, state: st, ctx, sender, recipient: r, n, S })));
   const genW = await wrapAll(after, ep0.S, 0, P, [{ kind: "device", id: P.id }, { kind: "recovery", id: ctx.account }]);
-  let s = await E.checkTransition({ state: null, ctx, entry: gen, wrappers: genW });
+  let s = (await E.checkTransition({ state: null, ctx, entry: gen, wrappers: genW })).state;
   ok(s.seq === 0, "package: genesis with wrappers to its device and the recovery key");
   await refuses("bad_package", () => E.checkTransition({ state: null, ctx, entry: gen, wrappers: genW.slice(0, 1) }), "package: genesis without the recovery wrapper");
   await refuses("bad_package", () => E.checkTransition({ state: null, ctx, entry: gen, wrappers: genW, keyring: new Uint8Array(44) }), "package: a keyring where no epoch needs one");
@@ -405,16 +417,17 @@ let state, A, B, C, seed, rec, e0, e1;
     const st = (await E.applyChainEntry(s, add, ctx)).state;
     const w = await wrapAll(st, ep0.S, 0, P, [{ kind: "device", id: D.id }]);
     await refuses("bad_package", () => E.checkTransition({ state: s, ctx, entry: add, wrappers: [] }), "package: an add without the new device's wrapper");
-    s = await E.checkTransition({ state: s, ctx, entry: add, wrappers: w });
+    s = (await E.checkTransition({ state: s, ctx, entry: add, wrappers: w })).state;
   }
   const ep1 = await nextEpoch(s, new Map([[0, ep0.S]]));
   const rem = await E.sealEntry(P.signer, E.nextBody(s, ctx, "remove", { remove: R.id, epoch: ep1.epoch }), P.sign);
   const st1 = (await E.applyChainEntry(s, rem, ctx)).state;
   const full = await wrapAll(st1, ep1.S, 1, P, [{ kind: "device", id: P.id }, { kind: "device", id: Q.id }, { kind: "recovery", id: ctx.account }]);
   const pk = { state: s, ctx, entry: rem, keyring: ep1.ring.bytes, wrappers: full };
-  ok((await E.checkTransition(pk)).epoch.n === 1, "package: a removal with its keyring and a wrapper to every remaining device and recovery");
+  const tr = await E.checkTransition(pk);
+  ok(tr.state.epoch.n === 1 && tr.row.epoch === 1 && tr.row.prev_ring === "" && tr.row.generation === s.generation && tr.row.prev === s.head, "package: a removal with its keyring and a wrapper to every remaining device and recovery");
   await refuses("bad_package", () => E.checkTransition({ ...pk, keyring: null }), "package: a new epoch without its keyring");
-  const other = await E.sealKeyring({ S: ep1.S, account: ctx.account, n: 1, suite: 1, prev: s.head, secrets: new Map([[0, ep0.S]]) });
+  const other = await E.sealKeyring({ S: ep1.S, account: ctx.account, meta: ep1.ring.meta, secret: ep0.S });
   await refuses("bad_package", () => E.checkTransition({ ...pk, keyring: other.bytes }), "package: a keyring that isn't the committed one");
   for (let i = 0; i < 3; i++) await refuses("bad_package", () => E.checkTransition({ ...pk, wrappers: full.filter((_, j) => j !== i) }), `package: omitting required wrapper ${i + 1} of 3`);
   await refuses("bad_package", () => E.checkTransition({ ...pk, wrappers: [...full, full[0]] }), "package: a wrapper twice");
@@ -451,6 +464,93 @@ let state, A, B, C, seed, rec, e0, e1;
     try { await attempt(typed, w, seen); ok(false, `recovery: ${what} refused`); }
     catch (e) { ok(e.code === "recovery_failed" && e.message === "that recovery code doesn't open this account", `recovery: ${what} is the one uniform failure`); }
   }
+}
+
+// ---- the reset: a recovery-signed compaction to a new generation (no old device kept), and loading it under an anchor
+{
+  const enc8 = (b) => new TextDecoder().decode(b);
+  const P = await newDevice("p"), Q = await newDevice("q");
+  const seed = E.newRecoverySeed(), rk = await E.recoveryKeys(seed, ctx.account);
+  const sec = new Map();
+  const ep0 = await nextEpoch(null);
+  sec.set(0, ep0.S);
+  const gen = await E.sealEntry(P.signer, E.nextBody(null, ctx, "genesis", { device: P.rec, recovery: recRec(rk), epoch: ep0.epoch }), P.sign, { recovery: rk.sign });
+  let s = await apply(null, gen);
+  const entries = [gen];
+  const rows = new Map();
+  s = await apply(s, entries[entries.push(await addEntry(s, P, Q)) - 1]);
+  const ep1 = await nextEpoch(s, sec);
+  sec.set(1, ep1.S);
+  rows.set(1, { ...ep1.ring.meta, bytes: ep1.ring.bytes });
+  const e1 = await E.sealEntry(P.signer, E.nextBody(s, ctx, "epoch", { epoch: ep1.epoch }), P.sign);
+  entries.push(e1);
+  s = await apply(s, e1);
+  // (the reset: the recovery key signs; a new device and a new recovery key countersign; a fresh generation; the next epoch)
+  const D = await newDevice("recovered");
+  const rk2 = await E.recoveryKeys(E.newRecoverySeed(), ctx.account);
+  const generation = newId();
+  const ep2 = await nextEpoch(s, sec, 1, generation);
+  sec.set(2, ep2.S);
+  rows.set(2, { ...ep2.ring.meta, bytes: ep2.ring.bytes });
+  const body = E.nextBody(s, ctx, "reset", { generation, device: D.rec, recovery: recRec(rk2), epoch: ep2.epoch, min_suite: 1 });
+  const reset = await E.sealEntry(E.recoverySigner(ctx.account, rk.sign), body, rk.sign, { device: D.sign, recovery: rk2.sign });
+  const after = (await E.applyChainEntry(s, reset, ctx)).state;
+  ok(after.seq === s.seq + 1 && after.base === after.seq && after.generation === generation && after.devices.size === 1 && E.currentDevice(after, D.id) && after.recovery.signKey === rk2.sign.key && after.epoch.n === 2 && after.epochs.length === 1,
+    "reset: the next position, a new generation, the recovering device alone, the new recovery key and the next epoch");
+  ok(ep2.ring.meta.prev_ring === ep1.ring.hash && ep2.ring.meta.generation === generation, "reset: its keyring names the old generation's last keyring");
+  // the package: the keyring row and wrappers to exactly the new device and the new recovery key
+  const next = after;
+  const wD = await E.wrapEpoch({ hpke, state: next, ctx, sender: D, recipient: { kind: "device", id: D.id }, n: 2, S: ep2.S });
+  const wR = await E.wrapEpoch({ hpke, state: next, ctx, sender: D, recipient: { kind: "recovery", id: ctx.account }, n: 2, S: ep2.S });
+  const tr = await E.checkTransition({ state: s, ctx, entry: reset, keyring: ep2.ring.bytes, wrappers: [wD, wR] });
+  ok(tr.row.generation === generation && tr.row.prev_ring === ep1.ring.hash && tr.row.epoch === 2, "reset: the package checks, with the keyring row's metadata from the chain");
+  const wP = await E.wrapEpoch({ hpke, state: s, ctx, sender: P, recipient: { kind: "device", id: P.id }, n: 1, S: ep1.S });
+  await refuses("bad_package", () => E.checkTransition({ state: s, ctx, entry: reset, keyring: ep2.ring.bytes, wrappers: [wD] }), "reset: a package without the recovery key's wrapper");
+  await refuses("bad_form", () => E.checkTransition({ state: s, ctx, entry: reset, keyring: ep2.ring.bytes, wrappers: [wD, wR, wP] }), "reset: a package with an old-generation wrapper");
+  // refusals
+  await refuses("bad_signature", async () => apply(s, await E.sealEntry(P.signer, body, P.sign, { device: D.sign, recovery: rk2.sign })), "reset: a device can't sign one");
+  const rkOld = await E.recoveryKeys(E.newRecoverySeed(), ctx.account);
+  await refuses("bad_signature", async () => apply(s, await E.sealEntry(E.recoverySigner(ctx.account, rkOld.sign), body, rkOld.sign, { device: D.sign, recovery: rk2.sign })), "reset: not under another recovery key");
+  await refuses("bad_form", async () => apply(s, await E.sealEntry(E.recoverySigner(ctx.account, rk.sign), body, rk.sign, { device: D.sign })), "reset: not without the new recovery key's countersignature");
+  await refuses("bad_suite", async () => apply(s, await E.sealEntry(E.recoverySigner(ctx.account, rk.sign), { ...body, min_suite: 2 }, rk.sign, { device: D.sign, recovery: rk2.sign })), "reset: carries the minimum suite exactly");
+  await refuses("bad_form", async () => apply(s, await E.sealEntry(E.recoverySigner(ctx.account, rk.sign), { ...body, generation: "x" }, rk.sign, { device: D.sign, recovery: rk2.sign })), "reset: a generation that isn't a fresh id");
+  await refuses("chain_fork", async () => apply(s, await E.sealEntry(E.recoverySigner(ctx.account, rk.sign), { ...body, seq: body.seq + 1 }, rk.sign, { device: D.sign, recovery: rk2.sign })), "reset: only at the next position");
+  // loading the compacted chain [reset, ...] under an anchor
+  const anchor = { account: ctx.account, aud: ctx.aud, generation, seq: after.seq, hash: after.head };
+  const loaded = await E.loadAnchored(reset, ctx, anchor);
+  ok((await E.checkpointOf(loaded)).hash === (await E.checkpointOf(after)).hash, "anchor: the loaded checkpoint is the transition's state");
+  for (const k of ["account", "aud", "generation", "seq", "hash"])
+    await refuses("chain_unanchored", () => E.loadAnchored(reset, ctx, { ...anchor, [k]: k === "seq" ? anchor.seq + 1 : k === "aud" ? "https://sagebrush.space" : newId() }), `anchor: another ${k} refuses it`);
+  await refuses("chain_unanchored", () => E.replayFrom([reset], ctx), "anchor: a fresh client with no anchor refuses a compacted chain");
+  const stripped = parseCanonical(reset); delete stripped.co.recovery;
+  await refuses("bad_signature", () => E.loadAnchored(enc(canonText(stripped)), ctx, anchor), "anchor: a checkpoint without the new recovery key's countersignature");
+  // the code anchor: the typed code's recovery key is the chain's current one, and countersigned the reset
+  const viaCode = await E.replayFrom([reset], ctx, { anchor: { code: rk2 } });
+  ok(viaCode.head === after.head, "code: the current code anchors the compacted chain");
+  await refuses("chain_unanchored", () => E.replayFrom([reset], ctx, { anchor: { code: rk } }), "code: the old code doesn't");
+  {
+    // (a server-made reset naming the person's public recovery key, but without its countersignature, doesn't load)
+    const fakeDev = await newDevice("server's");
+    const fakeRk = await E.recoveryKeys(E.newRecoverySeed(), ctx.account);
+    const fb = { ...body, device: fakeDev.rec, recovery: recRec(rk2) };
+    const forged = await E.sealEntry(E.recoverySigner(ctx.account, fakeRk.sign), fb, fakeRk.sign, { device: fakeDev.sign, recovery: fakeRk.sign });
+    await refuses("bad_signature", () => E.replayFrom([forged], ctx, { anchor: { code: rk2 } }), "code: a forged checkpoint without the code key's countersignature");
+  }
+  // nothing from before the reset counts after it
+  const later = await E.wrapEpoch({ hpke, state: after, ctx, sender: D, recipient: { kind: "device", id: D.id }, n: 2, S: ep2.S });
+  ok((await E.openWrapper({ hpke, state: after, ctx, bytes: later, me: { kind: "device", id: D.id, recipient: D.kem }, seen: () => false })).n === 2, "(a new-generation wrapper opens)");
+  await refuses("bad_form", () => E.verifyWrapper(after, ctx, wP), "replay: a pre-reset wrapper is refused in the new generation");
+  await refuses("chain_fork", () => apply(after, entries[1]), "replay: a pre-reset entry (with its countersignature) is refused");
+  await refuses("chain_reset", () => E.checkPin(after, E.pinOf(s)), "replay: a pre-reset pin is refused as a reset");
+  // a walk across both generations, back to epoch 0
+  const back = await E.walkBack({ S: ep2.S, n: 2, expect: after.epoch.keyring.hash, to: 0, account: ctx.account, row: async (k) => rows.get(k), commit: (k) => (k === 2 ? after.epoch.commit : undefined) });
+  ok(hex(back) === hex(ep0.S), "walk: from the new generation back across the reset to epoch 0");
+  // and the chain goes on after it: an add in the new generation
+  const R = await newDevice("r");
+  const st2 = await apply(after, await addEntry(after, D, R));
+  ok(st2.seq === after.seq + 1 && E.currentDevice(st2, R.id), "reset: ordinary operations go on after it");
+  const reloaded = await E.replayFrom([reset, await addEntry(after, D, R)].slice(0, 1), ctx, { anchor });
+  ok(reloaded.head === after.head, "(the compacted chain replays from its anchor)");
 }
 
 // ---- labels: this PR's are distinct and versioned

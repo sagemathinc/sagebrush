@@ -51,6 +51,10 @@ const M = "e2e2e2e2-0004-4e2e-8e2e-e2e2e2e2e204"; // the mailbox
 const R = "e2e2e2e2-0005-4e2e-8e2e-e2e2e2e2e205"; // read-only
 const C = "e2e2e2e2-0006-4e2e-8e2e-e2e2e2e2e206"; // the length bound
 const U = "e2e2e2e2-0007-4e2e-8e2e-e2e2e2e2e207"; // UTF-8 pages
+const X = "e2e2e2e2-0008-4e2e-8e2e-e2e2e2e2e208"; // a reset at the hard bound
+const Y = "e2e2e2e2-0009-4e2e-8e2e-e2e2e2e2e209"; // a corrupted checkpoint hash
+const Z = "e2e2e2e2-000a-4e2e-8e2e-e2e2e2e2e20a"; // a corrupted checkpoint state hash
+const V = "e2e2e2e2-000b-4e2e-8e2e-e2e2e2e2e20b"; // the reset bucket
 const SITE = "https://sagebrush.test";
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
@@ -59,7 +63,7 @@ const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled:
 const cocalc = async () => Response.json(plan);
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
 const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } } });
-const listed = [A, B, P, M, R, C, U].join(",");
+const listed = [A, B, P, M, R, C, U, X, Y, Z, V].join(",");
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_E2E: "1", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("4101") },
@@ -121,8 +125,8 @@ function account(id) {
     const S = E.newEpochSecret();
     let keyring = null, ring = null;
     if (n > 0) {
-      ring = await E.sealKeyring({ S, account: ctx.account, n, suite: 1, prev: state.head, secrets: new Map(W.secrets) });
-      keyring = { hash: ring.hash, epochs: [...ring.epochs] };
+      ring = await E.sealKeyring({ S, account: ctx.account, meta: { epoch: n, generation: W.nextGeneration ?? state.generation, suite: 1, prev: state.head, prev_ring: state.epoch.keyring?.hash ?? "" }, secret: W.secrets.get(n - 1) });
+      keyring = { hash: ring.hash };
     }
     return { n, S, ring, epoch: { n, suite: 1, commit: await E.epochCommit(S, ctx.account, n), keyring } };
   };
@@ -173,6 +177,25 @@ function account(id) {
     const wrappers = [];
     for (const r of who) wrappers.push(text(await E.wrapEpoch({ hpke, state: next, ctx, sender: nd, recipient: r, n: ep.n, S: ep.S })));
     return { body: { entry: text(entry), keyring: b64(ep.ring.bytes), wrappers }, next, nd, rk2, ep };
+  };
+  /** The person's reset: under the current recovery key, a new device and recovery key, a fresh generation, the next
+   * epoch; wrappers to the new device and the new recovery key, made by the new device. */
+  W.reset = async (state, opts = {}) => {
+    const nd = await W.device("recovered");
+    const rk2 = await E.recoveryKeys(E.newRecoverySeed(), ctx.account);
+    const generation = newId();
+    W.nextGeneration = generation;
+    const ep = await W.epoch(state);
+    W.nextGeneration = null;
+    const body = E.nextBody(state, ctx, "reset", { generation, device: nd.rec, recovery: { sign: b64(rk2.sign.raw), kem: b64(rk2.kem.publicRaw) }, epoch: ep.epoch, min_suite: 1, ...(opts.body ?? {}) });
+    const key = opts.signWith ?? W.rk.sign;
+    const signer = opts.signer ?? E.recoverySigner(ctx.account, key);
+    const entry = await E.sealEntry(signer, body, key, { device: nd.sign, recovery: rk2.sign });
+    let next = null;
+    try { next = (await E.applyChainEntry(state, entry, ctx)).state; } catch { /* (refused ones are posted anyway) */ }
+    const wrappers = [];
+    if (next) for (const r of [{ kind: "device", id: nd.id }, { kind: "recovery", id: ctx.account }]) wrappers.push(text(await E.wrapEpoch({ hpke, state: next, ctx, sender: nd, recipient: r, n: ep.n, S: ep.S })));
+    return { body: { entry: text(entry), keyring: b64(ep.ring.bytes), wrappers }, next, nd, rk2, ep, generation };
   };
   return W;
 }
@@ -231,13 +254,13 @@ await section("the chain: genesis, add, remove", async () => {
   WA.secrets.set(1, rm.ep.S);
   WA.devices = rm.left;
   const k1 = await answer(await get(sA, A, "/api/sync/v1/e2e/keyring/1"));
-  ok(k1.status === 200 && k1.keyring === rm.body.keyring, "the current epoch's keyring");
+  ok(k1.status === 200 && k1.keyring === rm.body.keyring && k1.epoch === 1 && k1.prev_ring === "" && k1.generation === stA.generation, "the current epoch's keyring row, with its metadata");
   ok((await get(sA, A, "/api/sync/v1/e2e/keyring/2")).status === 404, "no keyring for an epoch that doesn't exist");
   ok((await get(sA, A, `/api/sync/v1/e2e/wrapper?kind=device&id=${add.nd.id}`)).status === 404, "the removed device has no wrapper any more");
   const wl = await answer(await get(sA, A, `/api/sync/v1/e2e/wrapper?kind=device&id=${g.d.id}`));
   ok(wl.epoch === 1 && wl.seq === 2, "the laptop's wrapper is the new epoch's");
   const rows = await seam(A, {});
-  ok(rows.e2e_wrappers === 2 && rows.e2e_keyrings === 1 && rows.e2e_chain === 3, "only the current epoch's wrappers (laptop, recovery) and keyring are kept: " + JSON.stringify(rows));
+  ok(rows.e2e_wrappers === 2 && rows.e2e_keyrings === 1 && rows.e2e_chain === 3, "only the current epoch's wrappers (laptop, recovery) are kept, and the one keyring: " + JSON.stringify(rows));
 });
 
 await section("refusals: another account, binding, form", async () => {
@@ -284,8 +307,10 @@ await section("concurrency and restart", async () => {
   WA.secrets.set(won.ep.n, won.ep.S);
   WA.devices = won.left;
   const rows = await seam(A, {});
-  ok(rows.e2e_keyrings === 1, "a second new epoch: only its own keyring is kept: " + rows.e2e_keyrings);
-  ok((await get(sA, A, "/api/sync/v1/e2e/keyring/1")).status === 404, "the earlier epoch's keyring isn't served");
+  ok(rows.e2e_keyrings === 2, "a second new epoch: every keyring is kept (chained keyrings): " + rows.e2e_keyrings);
+  const k1again = await answer(await get(sA, A, "/api/sync/v1/e2e/keyring/1"));
+  const k2 = await answer(await get(sA, A, "/api/sync/v1/e2e/keyring/2"));
+  ok(k1again.status === 200 && k2.prev_ring === createHash("sha256").update(Buffer.from(k1again.keyring, "base64url")).digest("base64url"), "the earlier epoch's keyring is served, and the next one names its hash");
   // (replacing the recovery code: its new wrapper replaces the old key's, for the same recipient)
   const rk2 = await E.recoveryKeys(E.newRecoverySeed(), WA.ctx.account);
   const draft = E.nextBody(stA, WA.ctx, "replace-recovery", { recovery: { sign: b64(rk2.sign.raw), kem: b64(rk2.kem.publicRaw) }, pop: null });
@@ -388,6 +413,128 @@ await section("pages are bounded in UTF-8 bytes", async () => {
   ok(page.entries.length === 1, "a page bound between the strings' length and their UTF-8 bytes holds one entry, not two: " + page.entries.length);
   await seam(U, { bounds: { pageBytes: bytes } });
   ok((await answer(await get(s, U, "/api/sync/v1/e2e/chain"))).entries.length === 2, "and at their UTF-8 bytes, both");
+});
+
+
+await section("a reset: recovery at the hard bound, compacting the chain", async () => {
+  const s = await enabled(X);
+  const W = account(X);
+  ok((await get(s, X, "/api/sync/v1/e2e/chain")).status === 200, "(the store is made)");
+  await seam(X, { bounds: { entries: 4, reserve: 2 } });
+  const g = await W.genesis();
+  ok((await post(s, X, "/api/sync/v1/e2e/chain", g.body)).status === 201, "(genesis)");
+  let st = g.next;
+  // (a compromised device fills the ordinary range with new epochs, then the reserve by removing its peers)
+  const bad = await W.add(st, g.d);
+  ok((await post(s, X, "/api/sync/v1/e2e/chain", bad.body)).status === 201, "(the compromised device, added)");
+  st = bad.next; W.devices.push(bad.nd);
+  const peer = await W.add(st, g.d);
+  ok((await post(s, X, "/api/sync/v1/e2e/chain", peer.body)).status === 201, "(a peer)");
+  st = peer.next; W.devices.push(peer.nd);
+  const ep = await W.epoch(st);
+  const epochEntry = await E.sealEntry(bad.nd.signer, E.nextBody(st, W.ctx, "epoch", { epoch: ep.epoch }), bad.nd.sign);
+  const pe = await W.pack(st, epochEntry, bad.nd, [...W.devices.map((d) => ({ kind: "device", id: d.id })), { kind: "recovery", id: W.ctx.account }], ep.S, ep.n, ep.ring);
+  ok((await post(s, X, "/api/sync/v1/e2e/chain", pe.body)).status === 201, "(an epoch transition by the compromised device: the ordinary range is full)");
+  st = pe.next; W.secrets.set(ep.n, ep.S);
+  for (const victim of [g.d, peer.nd]) {
+    const rm = await W.remove(st, bad.nd, victim);
+    ok((await post(s, X, "/api/sync/v1/e2e/chain", rm.body)).status === 201, "(it removes a peer, into the reserve)");
+    st = rm.next; W.devices = rm.left; W.secrets.set(rm.ep.n, rm.ep.S);
+  }
+  const last = await W.add(st, bad.nd);
+  ok((await post(s, X, "/api/sync/v1/e2e/chain", last.body)).status === 413, "the chain is at its hard bound: nothing ordinary goes in");
+  const before = await seam(X, {});
+  const head0 = (await answer(await get(s, X, "/api/sync/v1/e2e/chain"))).head;
+  // refusals at the hard bound, none of which changes storage
+  const same = async () => JSON.stringify(await seam(X, {})) === JSON.stringify(before);
+  const byDevice = await W.reset(st, { signWith: bad.nd.sign, signer: bad.nd.signer });
+  ok((await post(s, X, "/api/sync/v1/e2e/chain", byDevice.body)).status === 400 && (await same()), "a reset signed by a device is refused, nothing stored");
+  const oldRk = await E.recoveryKeys(E.newRecoverySeed(), W.ctx.account);
+  const byOld = await W.reset(st, { signWith: oldRk.sign });
+  ok((await post(s, X, "/api/sync/v1/e2e/chain", byOld.body)).status === 400 && (await same()), "a reset under another recovery key is refused, nothing stored");
+  const offBase = await W.reset(st, { body: { prev: g.next.head } });
+  ok((await post(s, X, "/api/sync/v1/e2e/chain", offBase.body)).status === 409 && (await same()), "a reset whose base isn't the stored head is refused, nothing stored");
+  const good = await W.reset(st);
+  ok((await post(s, X, "/api/sync/v1/e2e/chain", { ...good.body, keyring: null })).status === 400 && (await same()), "a torn reset (no keyring) is refused, nothing stored");
+  ok((await post(s, X, "/api/sync/v1/e2e/chain", { ...good.body, wrappers: good.body.wrappers.slice(0, 1) })).status === 400 && (await same()), "a torn reset (no recovery wrapper) is refused, nothing stored");
+  await seam(X, { failCommit: true });
+  const failed = await post(s, X, "/api/sync/v1/e2e/chain", good.body).catch(() => ({ status: 0 }));
+  ok((failed.status >= 500 || failed.status === 0) && (await same()), "a reset whose commit fails leaves the old full chain");
+  const r = await answer(await post(s, X, "/api/sync/v1/e2e/chain", good.body));
+  ok(r.status === 201 && r.seq === head0.seq + 1, "the valid reset commits at the hard bound, at the next logical position: " + r.status);
+  const rows = await seam(X, {});
+  ok(rows.e2e_chain === 1 && rows.e2e_keyrings === before.e2e_keyrings + 1 && rows.e2e_checkpoint === 1 && rows.e2e_wrappers === 2, "the chain is one entry; every keyring stays, plus the new one; a checkpoint is recorded: " + JSON.stringify(rows));
+  const ch = await answer(await get(s, X, "/api/sync/v1/e2e/chain"));
+  ok(ch.base === r.seq && ch.head.seq === r.seq && ch.entries.length === 1, "the kept chain starts at the reset (base), and positions go on");
+  st = good.next; W.devices = [good.nd]; W.rk = good.rk2; W.secrets.set(good.ep.n, good.ep.S);
+  // the old devices and their wrappers and entries are gone from the new generation
+  ok((await get(s, X, `/api/sync/v1/e2e/wrapper?kind=device&id=${bad.nd.id}`)).status === 404, "the compromised device has no wrapper (it isn't a device of the new generation)");
+  ok((await post(s, X, "/api/sync/v1/e2e/chain", last.body)).status === 409, "a pre-reset entry is refused in the new generation");
+  // the new device: its wrapper, then a walk across both generations back to epoch 0
+  const wd = await answer(await get(s, X, `/api/sync/v1/e2e/wrapper?kind=device&id=${good.nd.id}`));
+  const got = await E.openWrapper({ hpke, state: st, ctx: W.ctx, bytes: new TextEncoder().encode(wd.wrapper), me: { kind: "device", id: good.nd.id, recipient: good.nd.kem }, seen: () => false });
+  const rowOf = async (k) => { const x = await answer(await get(s, X, `/api/sync/v1/e2e/keyring/${k}`)); return { epoch: x.epoch, generation: x.generation, suite: x.suite, prev: x.prev, prev_ring: x.prev_ring, bytes: Uint8Array.from(Buffer.from(x.keyring, "base64url")) }; };
+  const s0 = await E.walkBack({ S: got.S, n: got.n, expect: st.epoch.keyring.hash, to: 0, account: W.ctx.account, row: rowOf });
+  ok(Buffer.from(s0).equals(Buffer.from(W.secrets.get(0))), "the recovered device walks back across the reset to epoch 0's secret (every old live secret retained)");
+  // ordinary operations go on
+  const R2 = await W.add(st, good.nd);
+  ok((await post(s, X, "/api/sync/v1/e2e/chain", R2.body)).status === 201, "after the reset, an ordinary add goes in again");
+  st = R2.next;
+  // a restart: the compacted chain is loaded under the recorded anchor and checkpoint
+  await (await objectOf(X)).crash().catch(() => {});
+  await until(async () => (await get(s, X, "/api/sync/v1/e2e/chain")).status === 200);
+  const R3 = await W.add(st, good.nd);
+  ok((await post(s, X, "/api/sync/v1/e2e/chain", R3.body)).status === 201, "after a restart, the compacted chain is rebuilt from its checkpoint and an append is checked against it");
+});
+
+await section("a reset never draws on the appends' bucket, and only verified resets spend their own", async () => {
+  const s = await enabled(V);
+  const W = account(V);
+  ok((await get(s, V, "/api/sync/v1/e2e/chain")).status === 200, "(the store is made)");
+  const g = await W.genesis();
+  ok((await post(s, V, "/api/sync/v1/e2e/chain", g.body)).status === 201, "(genesis)");
+  const junk = await W.add(g.next, g.d);
+  // (the appends' bucket drained, as a compromised device could)
+  for (let i = 0; i < 31; i++) await post(s, V, "/api/sync/v1/e2e/chain", { ...junk.body, wrappers: [] });
+  ok((await post(s, V, "/api/sync/v1/e2e/chain", junk.body)).status === 429, "(the appends' bucket is drained)");
+  // (five invalid resets: refused, and they spend nothing of the reset bucket, which holds four)
+  const oldRk = await E.recoveryKeys(E.newRecoverySeed(), W.ctx.account);
+  const byOld = await W.reset(g.next, { signWith: oldRk.sign });
+  for (let i = 0; i < 5; i++) ok((await post(s, V, "/api/sync/v1/e2e/chain", byOld.body)).status === 400, `(an invalid reset, refused ${i + 1})`);
+  const good = await W.reset(g.next);
+  ok((await post(s, V, "/api/sync/v1/e2e/chain", good.body)).status === 201, "the valid reset still commits: the drained appends' bucket and the invalid resets spent nothing it needs");
+  // (the reset bucket itself holds four verified resets a minute: three more go in, the fifth waits)
+  let st = good.next;
+  W.rk = good.rk2;
+  W.secrets.set(good.ep.n, good.ep.S);
+  for (let i = 0; i < 3; i++) {
+    const r = await W.reset(st);
+    ok((await post(s, V, "/api/sync/v1/e2e/chain", r.body)).status === 201, `(a verified reset, ${i + 2} of 4)`);
+    st = r.next; W.rk = r.rk2; W.secrets.set(r.ep.n, r.ep.S);
+  }
+  const fifth = await W.reset(st);
+  ok((await post(s, V, "/api/sync/v1/e2e/chain", fifth.body)).status === 429, "a fifth verified reset within the minute waits (the reset bucket is charged only by verified resets)");
+});
+
+await section("a corrupted checkpoint is refused after a restart", async () => {
+  for (const field of ["state_hash", "hash"]) {
+    const id = field === "hash" ? Y : Z;
+    const s = await enabled(id);
+    const W = account(id);
+    ok((await get(s, id, "/api/sync/v1/e2e/chain")).status === 200, "(the store is made)");
+    const g = await W.genesis();
+    ok((await post(s, id, "/api/sync/v1/e2e/chain", g.body)).status === 201, "(genesis)");
+    const rs = await W.reset(g.next);
+    ok((await post(s, id, "/api/sync/v1/e2e/chain", rs.body)).status === 201, "(a reset)");
+    W.secrets.set(rs.ep.n, rs.ep.S);
+    await seam(id, { corrupt: field });
+    await (await objectOf(id)).crash().catch(() => {});
+    await until(async () => (await get(s, id, "/api/sync/v1/e2e/chain")).status === 200);
+    W.devices = [rs.nd];
+    const ad = await W.add(rs.next, rs.nd);
+    const r = await answer(await post(s, id, "/api/sync/v1/e2e/chain", ad.body));
+    ok(r.status >= 400 && r.status !== 409 && r.error === "unavailable", `a checkpoint whose ${field} doesn't verify: the store refuses to build on it: ${r.status} ${r.error}`);
+  }
 });
 
 await section("read-only accounts still change their chain", async () => {
