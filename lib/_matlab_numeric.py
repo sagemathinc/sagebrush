@@ -1263,3 +1263,195 @@ def delsq_(nargout, g):
                     cols.append(int(G[a, b]) - 1)
                     vals.append(-1.0)
     return _sp.make(N, N, rows, cols, vals)
+
+
+# ------------------------------------------------------------------ isosurface (marching cubes)
+
+# A cube's corners are numbered by their offsets: bit 0 one step along x (a column), bit 1 along y (a row),
+# bit 2 along z (a page); its 12 edges join corners that differ in one bit.  Each corner is inside (its value
+# above the level) or not, and the surface crosses each edge whose two corners differ.  The triangles of
+# each of the 256 cases are worked out here, by walking the cube's faces rather than from a stored table:
+# around each face, counterclockwise as seen from outside the cube, every edge the walk enters the inside
+# by is joined to the next edge it leaves by.  On a face with two inside corners at opposite ends of a
+# diagonal that keeps them apart, and two cubes sharing a face join the same edges there, so the surface
+# has no cracks.  Each face's segments meet the next face's at the edge they share, closing into loops;
+# each loop is cut into triangles fanning from one of its edges, and all are wound the same way round.
+_CUBE_EDGES = [(a, a | b) for b in (1, 2, 4) for a in range(8) if not a & b]
+
+
+def _cube_faces():
+    """the cube's 6 faces, each its 4 corners counterclockwise as seen from outside"""
+    out = []
+    for axis in range(3):
+        u, v = (axis + 1) % 3, (axis + 2) % 3
+        for side in (0, 1):
+            ring = [(side << axis) | (a << u) | (b << v) for a, b in ((0, 0), (1, 0), (1, 1), (0, 1))]
+            out.append(ring if side else ring[::-1])
+    return out
+
+
+def _mc_cases():
+    """for each of the 256 cases (bit c set: corner c inside), its triangles as triples of cube edges"""
+    edge_of = {frozenset(e): k for k, e in enumerate(_CUBE_EDGES)}
+    faces = _cube_faces()
+    cases = []
+    for mask in range(256):
+        inside = [(mask >> c) & 1 for c in range(8)]
+        nxt = {}
+        for ring in faces:
+            cross = [(i, inside[ring[i]]) for i in range(4) if inside[ring[i]] != inside[ring[(i + 1) % 4]]]
+            for q, (i, leaving) in enumerate(cross):
+                if not leaving:
+                    # (entering the inside here: joined to the next edge, where the walk leaves it)
+                    j = cross[(q + 1) % len(cross)][0]
+                    nxt[edge_of[frozenset((ring[i], ring[(i + 1) % 4]))]] = edge_of[frozenset((ring[j], ring[(j + 1) % 4]))]
+        tris = []
+        while nxt:
+            # (each loop fans from the edge just before its highest-numbered one)
+            top = max(nxt)
+            loop = [top]
+            e = nxt.pop(top)
+            while e != top:
+                loop.append(e)
+                e = nxt.pop(e)
+            loop = loop[-1:] + loop[:-1]
+            # (wound so that the right-hand normal points out of the region below the level, as MATLAB's
+            # faces are: a closed surface around low values has a positive signed volume)
+            tris += [(loop[0], loop[t + 1], loop[t]) for t in range(1, len(loop) - 1)]
+        cases.append(tris)
+    return cases
+
+
+_MC = []
+
+
+def isosurface_mesh(x, y, z, V, iso, C=None, share=True):
+    """the isosurface V == iso of V on the grid vectors x, y, z (V in MATLAB's index order: rows follow y,
+    columns x, pages z): (faces, vertices, colors), faces an F-by-3 array of 1-based vertex indices, the
+    vertices on the grid's edges where V crosses iso (linearly between the two corners), each edge's one
+    vertex shared by the faces around it unless share is false; colors C interpolated there the same way.
+    A face with a corner on an edge to a NaN or infinite value is dropped"""
+    if not _MC:
+        _MC.extend(_mc_cases())
+    m, n, p = V.shape
+    empty = (np.zeros((0, 3)), np.zeros((0, 3)), np.zeros((0, 1)))
+    if m < 2 or n < 2 or p < 2:
+        return empty
+    # (admitted before anything is made: each cell's case and its copies, about 32 bytes)
+    _m._admit_bytes((m - 1) * (n - 1) * (p - 1) * 32, "An isosurface of a %dx%dx%d volume" % (m, n, p))
+    with np.errstate(invalid="ignore"):
+        inside = V > iso
+    case = np.zeros((m - 1, n - 1, p - 1), dtype=np.int64)
+    for c in range(8):
+        sl = (slice((c >> 1) & 1, (c >> 1 & 1) + m - 1), slice(c & 1, (c & 1) + n - 1), slice((c >> 2) & 1, (c >> 2 & 1) + p - 1))
+        case |= inside[sl].astype(np.int64) << c
+    # (the cells in MATLAB's order, rows fastest, then columns, then pages)
+    flat = np.ascontiguousarray(case.transpose(2, 1, 0)).reshape(-1)
+    cells = np.flatnonzero((flat > 0) & (flat < 255))
+    if not cells.size:
+        return empty
+    ntri = np.array([len(t) for t in _MC])
+    width = int(ntri.max())
+    table = np.full((256, width, 3), -1, dtype=np.int64)
+    for k, t in enumerate(_MC):
+        if t:
+            table[k, :len(t)] = t
+    cs = flat[cells]
+    # (and the faces' arrays: each corner's edge, its corners' indices and values, its point, and the sort that
+    # merges the points, about 240 bytes)
+    _m._admit_bytes(int(ntri[cs].sum()) * 3 * 240 + cells.size * 12 * 8, "An isosurface of %d faces" % int(ntri[cs].sum()))
+    i = cells % (m - 1)
+    j = (cells // (m - 1)) % (n - 1)
+    k = cells // ((m - 1) * (n - 1))
+    # (the grid's edges numbered x-edges first, then y, then z, each set in MATLAB's order)
+    nx, ny = m * (n - 1) * p, (m - 1) * n * p
+    gid = np.empty((cells.size, 12), dtype=np.int64)
+    for e, (a, b) in enumerate(_CUBE_EDGES):
+        di, dj, dk = i + ((a >> 1) & 1), j + (a & 1), k + ((a >> 2) & 1)
+        bit = a ^ b
+        if bit == 1:
+            gid[:, e] = di + m * (dj + (n - 1) * dk)
+        elif bit == 2:
+            gid[:, e] = nx + di + (m - 1) * (dj + n * dk)
+        else:
+            gid[:, e] = nx + ny + di + m * (dj + n * dk)
+    T = table[cs]
+    keep = np.arange(width)[None, :] < ntri[cs][:, None]
+    rows = np.repeat(np.arange(cells.size), width).reshape(cells.size, width)[keep]
+    G = gid.reshape(-1)[rows.reshape(-1, 1) * 12 + T[keep]]
+    if not np.isfinite(V).all():
+        # (a NaN corner is not inside; a face with a corner on an edge to it is dropped, as MATLAB drops them; an
+        # infinite one likewise, where MATLAB gives NaN vertices instead)
+        G = G[np.isfinite(_edge_values(G.reshape(-1), V, nx, ny)).reshape(G.shape).all(axis=1)]
+        if not G.size:
+            return empty
+    # (a vertex for each face's corner, merged below unless share is false)
+    edges = G.reshape(-1)
+    faces = np.arange(edges.size).reshape(G.shape)
+    # (each edge's two corners, and where between them V reaches iso)
+    ax = np.where(edges < nx, 0, np.where(edges < nx + ny, 1, 2))
+    r = edges - np.where(ax == 0, 0, np.where(ax == 1, nx, nx + ny))
+    cm = np.where(ax == 1, m - 1, m)
+    cn = np.where(ax == 0, n - 1, n)
+    ei, ej, ek = r % cm, (r // cm) % cn, r // (cm * cn)
+    fi, fj, fk = ei + (ax == 1), ej + (ax == 0), ek + (ax == 2)
+    v0, v1 = V[ei, ej, ek], V[fi, fj, fk]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        t = (iso - v0) / (v1 - v0)
+    xs, ys, zs = (np.asarray(g, dtype=float).reshape(-1) for g in (x, y, z))
+    P = np.column_stack([xs[ej] + t * (xs[fj] - xs[ej]), ys[ei] + t * (ys[fi] - ys[ei]), zs[ek] + t * (zs[fk] - zs[ek])])
+    cols = np.zeros((0, 1))
+    if C is not None:
+        c0, c1 = C[ei, ej, ek], C[fi, fj, fk]
+        cols = (c0 + t * (c1 - c0)).reshape(-1, 1)
+    if share:
+        # (one vertex for each point, the faces' corners on an edge, or edges meeting at a grid point whose value
+        # is the level; a face two of whose corners became one is dropped, so no face is collapsed)
+        keep, rows = _first_seen_rows(P)
+        P = P[keep]
+        cols = cols[keep] if C is not None else cols
+        faces = rows[faces]
+        faces = faces[(faces[:, 0] != faces[:, 1]) & (faces[:, 1] != faces[:, 2]) & (faces[:, 0] != faces[:, 2])]
+        used, faces = _first_seen(faces.reshape(-1))
+        faces = faces.reshape(-1, 3)
+        P = P[used]
+        cols = cols[used] if C is not None else cols
+    return (faces + 1).astype(float), P, cols
+
+
+def _edge_values(edges, V, nx, ny):
+    """the sum of V at each grid edge's two corners (not finite where either is not)"""
+    m, n, p = V.shape
+    ax = np.where(edges < nx, 0, np.where(edges < nx + ny, 1, 2))
+    r = edges - np.where(ax == 0, 0, np.where(ax == 1, nx, nx + ny))
+    cm, cn = np.where(ax == 1, m - 1, m), np.where(ax == 0, n - 1, n)
+    ei, ej, ek = r % cm, (r // cm) % cn, r // (cm * cn)
+    return V[ei, ej, ek] + V[ei + (ax == 1), ej + (ax == 0), ek + (ax == 2)]
+
+
+def _first_seen(ids):
+    """the distinct values of ids in the order they first appear, and each id's place among them"""
+    keep, rank = _first_seen_rows(np.asarray(ids).reshape(-1, 1))
+    return np.asarray(ids).reshape(-1)[keep], rank
+
+
+def _first_seen_rows(P):
+    """the rows of P to keep (each distinct row's first), and each row's place among them, in the order the
+    distinct rows first appear (a stable sort of the rows, each run of equal ones a group)"""
+    n = P.shape[0]
+    if not n:
+        return np.zeros(0, dtype=np.int64), np.zeros(0, dtype=np.int64)
+    P = P + 0 if P.dtype.kind in "iub" else P + 0.0
+    order = np.lexsort(tuple(P[:, c] for c in range(P.shape[1] - 1, -1, -1)))
+    S = P[order]
+    start = np.ones(n, dtype=bool)
+    start[1:] = (S[1:] != S[:-1]).any(axis=1)
+    group = np.cumsum(start) - 1
+    # (the sort is stable, so a group's first row in it is the first in P)
+    firsts = order[start]
+    seen = np.argsort(firsts, kind="stable")
+    rank_of_group = np.empty(seen.size, dtype=np.int64)
+    rank_of_group[seen] = np.arange(seen.size)
+    rank = np.empty(n, dtype=np.int64)
+    rank[order] = rank_of_group[group]
+    return firsts[seen], rank

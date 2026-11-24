@@ -2818,9 +2818,10 @@ test("str2num evaluates [text] as MATLAB does, in a workspace of its own: [] and
 
 test("3-D volume plots Sagebrush lacks are refused with a drawable alternative (#1801)", () => {
   const { execFileSync } = require("node:child_process");
-  // (isosurface and the rest raise MATLAB's undefined-function error with the catalog's alternative
-  // (catalog/matlab/absent.json), which names slice or contour; a plane of constant X as a surf colored by V draws too)
-  const names = ["isosurface", "isonormals", "isocaps", "contourslice"];
+  // (isocaps and contourslice raise MATLAB's undefined-function error with the catalog's alternative
+  // (catalog/matlab/absent.json), which names slice or contour; a plane of constant X as a surf colored by V draws too;
+  // isosurface and isonormals are in: test/matlab-isosurface.test.ts)
+  const names = ["isocaps", "contourslice"];
   const code = ["[X,Y,Z] = meshgrid(-2:2, -1:1, 0:3); V = X + 10*Z;"].concat(names.map((f) =>
     `try, ${f}(X,Y,Z,V,0,0,0); disp('ran'); catch e, disp([e.identifier ' | ' e.message]); end`), [
     "k = 3; h = surf(squeeze(X(:,k,:)), squeeze(Y(:,k,:)), squeeze(Z(:,k,:)), squeeze(V(:,k,:)));",

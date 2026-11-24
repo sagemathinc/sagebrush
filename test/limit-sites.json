@@ -15881,5 +15881,37 @@
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing beyond MATLAB: a colon range with an infinite end point, as MATLAB refuses it with this message; the census matches 'Maximum' in MATLAB's text"
+ },
+ "lib/_matlab_plot.py :: _scene_patch :: budget[0] -= 2 * corners #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "visualization/display",
+  "reason": "A patch's share of the 3-D viewer's vertex budget (_SCENE_MAX_VERTICES), as a surface's is: past it, the figure is shown as its SVG only."
+ },
+ "lib/_matlab_plot.py :: _scene_patch :: def _scene_patch(c, cmap, clim, objs, budget, lit): #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "visualization/display",
+  "reason": "A patch's share of the 3-D viewer's vertex budget (_SCENE_MAX_VERTICES), as a surface's is: past it, the figure is shown as its SVG only."
+ },
+ "lib/_matlab_plot.py :: _scene_patch :: if 2 * corners > budget[0]: #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "visualization/display",
+  "reason": "A patch's share of the 3-D viewer's vertex budget (_SCENE_MAX_VERTICES), as a surface's is: past it, the figure is shown as its SVG only."
+ },
+ "lib/_matlab_plot.py :: figure_scene :: if not _scene_patch(c, cmap, clim, objs, budget, lit): #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "visualization/display",
+  "reason": "A patch's share of the 3-D viewer's vertex budget (_SCENE_MAX_VERTICES), as a surface's is: past it, the figure is shown as its SVG only."
  }
 }
