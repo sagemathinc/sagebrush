@@ -3791,6 +3791,126 @@
   "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
   "reason": "test inputs past usize's byte counts, and the exactness bound of the retired debt's sum; refuse nothing themselves"
  },
+ "engine/skltree/src/partition.rs :: partition_samples_final :: let go_to_left = if current_value.is_nan() { missing_go_to_left } else { f64::from(current_value) <= threshold }; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/partition.rs :: partition_samples_final :: pub fn partition_samples_final(&mut self, x: &[f32], f: usize, threshold: f64, feature: usize, missing_go_to_left: bool) { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/rng.rs ::  :: pub const RAND_R_MAX: u32 = 2_147_483_647; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/rng.rs :: a_zero_state_is_the_default_seed_and_draws_stay_below_2_31 :: assert!(our_rand_r(&mut s) <= RAND_R_MAX); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/rng.rs :: a_zero_state_is_the_default_seed_and_draws_stay_below_2_31 :: let mut s = u32::MAX; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: introsort_2way :: fn introsort_2way<T: Value>(values: &mut [T], indices: &mut [usize], mut lo: usize, mut n: usize, mut maxd: i64) { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: introsort_2way :: if maxd <= 0 { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: introsort_2way :: introsort_2way(values, indices, lo, pivot_idx, maxd); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: introsort_2way :: maxd -= 1; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: introsort_3way :: fn introsort_3way<T: Value>(values: &mut [T], indices: &mut [usize], mut lo: usize, mut n: usize, mut maxd: i64) { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: introsort_3way :: if maxd <= 0 { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: introsort_3way :: introsort_3way(values, indices, lo, l, maxd); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: introsort_3way :: maxd -= 1; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: sift_down :: if child + 1 < end && values[lo + maxind] < values[lo + child + 1] { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: sift_down :: if child < end && values[lo + maxind] < values[lo + child] { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: sift_down :: if maxind == root { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: sift_down :: let mut maxind = root; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: sift_down :: maxind = child + 1; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: sift_down :: maxind = child; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: sift_down :: root = maxind; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: sift_down :: swap(values, indices, lo + root, lo + maxind); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: simultaneous_sort :: introsort_2way(values, indices, 0, n, maxd); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: simultaneous_sort :: introsort_3way(values, indices, 0, n, maxd); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: simultaneous_sort :: let maxd = 2 * i64::from(usize::BITS - 1 - n.leading_zeros()); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
  "engine/sym/src/definite.rs :: endpoints :: .or_else(|_| crate::limit::try_limit(&crate::rewrite::simplify_log(big_f), x, pt, dir)) #0": {
   "class": "none",
   "owner": "symbolic calculus (@sagebrush-matlab)",
