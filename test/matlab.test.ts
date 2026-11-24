@@ -2816,27 +2816,6 @@ test("str2num evaluates [text] as MATLAB does, in a workspace of its own: [] and
   ]);
 });
 
-test("3-D volume plots Sagebrush lacks are refused with a drawable alternative (#1801)", () => {
-  const { execFileSync } = require("node:child_process");
-  // (isocaps and contourslice raise MATLAB's undefined-function error with the catalog's alternative
-  // (catalog/matlab/absent.json), which names slice or contour; a plane of constant X as a surf colored by V draws too;
-  // isosurface and isonormals are in: test/matlab-isosurface.test.ts)
-  const names = ["isocaps", "contourslice"];
-  const code = ["[X,Y,Z] = meshgrid(-2:2, -1:1, 0:3); V = X + 10*Z;"].concat(names.map((f) =>
-    `try, ${f}(X,Y,Z,V,0,0,0); disp('ran'); catch e, disp([e.identifier ' | ' e.message]); end`), [
-    "k = 3; h = surf(squeeze(X(:,k,:)), squeeze(Y(:,k,:)), squeeze(Z(:,k,:)), squeeze(V(:,k,:)));",
-    "disp(mat2str(size(h.ZData))); disp(mat2str(h.XData(:)')); disp(mat2str(h.CData(1,:)))",
-  ]).join("\n");
-  const lines = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
-    { encoding: "utf8", timeout: 20000 }).trim().split("\n").map((s: string) => s.trim()).filter((s: string) => !/^(Figure|Plot|Saved|\(figures)/.test(s));
-  assert.equal(lines.length, names.length + 3, lines.join("\n"));
-  names.forEach((f, i) => {
-    assert.ok(lines[i].startsWith(`MATLAB:UndefinedFunction | Unrecognized function or variable '${f}'. ${f} is not in Sagebrush; instead: `), lines[i]);
-    assert.ok(/slice\(X, Y, Z, V|contour\(/.test(lines[i]), lines[i]);
-  });
-  assert.deepEqual(lines.slice(names.length), ["[3 4]", "[0 0 0 0 0 0 0 0 0 0 0 0]", "[0 10 20 30]"]);
-});
-
 test("histc counts along the requested dimension (MCF-32)", () => {
   const { execFileSync } = require("node:child_process");
   // Real MATLAB R2026b Update 1, frozen /scratch/matlab-tmp/mcf32/transcript.txt:

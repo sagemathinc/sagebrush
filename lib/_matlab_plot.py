@@ -615,8 +615,9 @@ class Patch(GObj):
         return Line.extent(self, axis)
 
     def crange(self):
-        fc = self.props["FaceColor"]
-        if not (_m._istext(fc) and _m._text(fc).lower() in ("flat", "interp")) or _m._text(self.props["CDataMapping"]) != "scaled":
+        # (color data sets the color limits when the faces or the edges are colored by it)
+        mapped = [_m._istext(v) and _m._text(v).lower() in ("flat", "interp") for v in (self.props["FaceColor"], self.props["EdgeColor"])]
+        if not any(mapped) or _m._text(self.props["CDataMapping"]) != "scaled":
             return None
         C = _m._mat(self.props["FaceVertexCData"])
         if C.ndim != 2 or C.shape[1] != 1:
@@ -2296,6 +2297,115 @@ def isonormals_(nargout, args):
     return _m._unmat(N)
 
 
+@_fn("isocaps")
+def isocaps_(nargout, args):
+    """isocaps(X, Y, Z, V, isovalue[, enclose][, whichplane]), isocaps(V, isovalue, ...): the faces that close
+    isosurface's surface where it meets the volume's boundary (lib/_matlab_numeric.isocaps_mesh), enclosing the
+    values above isovalue ('above', the default) or below it, on all six planes ('all') or one; as a structure of
+    faces, vertices and facevertexcdata (V there), as [f, v, c], or drawn as a patch"""
+    import _matlab_numeric as _mn
+    args = list(args)
+    below, planes = False, tuple(_mn._CAP_PLANES)
+    while args and _m._istext(args[-1]):
+        t = _m._text(args.pop()).lower()
+        if t in ("above", "below"):
+            below = t == "below"
+        elif t == "all":
+            planes = tuple(_mn._CAP_PLANES)
+        elif t in _mn._CAP_PLANES:
+            planes = (t,)
+        else:
+            raise _m._err("Invalid option '%s': isocaps' options are 'above', 'below', 'all', 'xmin', 'xmax', 'ymin', "
+                          "'ymax', 'zmin' and 'zmax'." % t)
+    vol, rest = _iso_split(args)
+    if not rest:
+        raise _m._err("isocaps: give the isovalue. MATLAB chooses one when it is left out, by a rule it does not "
+                      "document, so Sagebrush needs it.")
+    if len(rest) > 1:
+        raise _m._err("Too many input arguments.")
+    iso = _m._real_scalar(rest[0], "isovalue")
+    held = _iso_admit(vol, None, 0, "isocaps of a volume of %s points" % "x".join(str(k) for k in _m._dims(vol[-1])))
+    x, y, z, V = _iso_volume(vol, "isocaps")
+    F, P, C = _mn.isocaps_mesh(x, y, z, V, iso, below, planes, held)
+    if not F.size:
+        F, P, C = np.zeros((0, 0)), np.zeros((0, 0)), np.zeros((0, 0))
+    if nargout == 0:
+        ax = gca()
+        view3 = not ax.holding()
+        ax.newplot()
+        p = Patch(ax, FaceColor=_m.Char("interp"), EdgeColor=_m.Char("none"))
+        p.mset("Faces", _m._unmat(F))
+        p.mset("Vertices", _m._unmat(P))
+        p.props["FaceVertexCData"] = _m._unmat(C)
+        if view3:
+            ax.props["View"] = np.array([[-37.5], [30.0]])
+        return None
+    out = [_m._unmat(F), _m._unmat(P), _m._unmat(C)]
+    if nargout == 1:
+        return _m._struct1({"faces": out[0], "vertices": out[1], "facevertexcdata": out[2]})
+    return out[:nargout]
+
+
+@_fn("contourslice")
+def contourslice_(nargout, args):
+    """contourslice(X, Y, Z, V, Sx, Sy, Sz[, levels][, method]), contourslice(V, Sx, Sy, Sz, ...): contour lines on
+    the planes x = Sx(k), then y = Sy(k), then z = Sz(k), of V interpolated there as slice does (linear by default);
+    levels a count or the levels themselves ([v v] for the one level v), else chosen as contour chooses them from
+    V's range, the same on every plane.  Each line is a patch, its corners down XData, YData and ZData and closed
+    by a NaN, its edges colored by its level (CData), as MATLAB draws contour lines in 3-D"""
+    import _matlab_numeric as _mn
+    ax, args = _axes_arg(list(args))
+    method = "linear"
+    if args and _m._istext(args[-1]):
+        method = _mn.interp_method(args.pop(), "contourslice")
+    full = len(args) >= 7 and len(_m._dims(args[3])) == 3
+    nv = 4 if full else 1
+    if len(args) < nv + 3:
+        raise _m._err("Not enough input arguments.")
+    if len(args) > nv + 4:
+        raise _m._err("Too many input arguments.")
+    vol, planes_args, levels = list(args[:nv]), list(args[nv:nv + 3]), (args[nv + 3] if len(args) > nv + 3 else None)
+    if len(_m._dims(vol[-1])) != 3:
+        raise _m._err("V must be a 3-D array.")
+    if any(_m._numel(a) and not _m._isvec(a) for a in planes_args):
+        raise _m._err("contourslice: the planes' positions must be vectors; contours on a surface given by matrices Xi, "
+                      "Yi and Zi are not supported in Sagebrush.")
+    _iso_admit(vol, None, 16, "contourslice of a volume of %s points" % "x".join(str(k) for k in _m._dims(vol[-1])))
+    x, y, z, V = _iso_volume(vol, "contourslice")
+    finite = V[np.isfinite(V)]
+    L = _levels(_colvec([float(finite.min()), float(finite.max())]) if finite.size else np.zeros((0, 1)), levels)
+    pieces = []
+    for k in _m._farr(planes_args[0]).reshape(-1):
+        A, B = np.meshgrid(y, z, indexing="ij")
+        pieces.append((A, B, lambda a, b, k=float(k): (np.full(a.shape, k), a, b)))
+    for k in _m._farr(planes_args[1]).reshape(-1):
+        A, B = np.meshgrid(x, z, indexing="ij")
+        pieces.append((A, B, lambda a, b, k=float(k): (a, np.full(a.shape, k), b)))
+    for k in _m._farr(planes_args[2]).reshape(-1):
+        A, B = np.meshgrid(x, y, indexing="ij")
+        pieces.append((A, B, lambda a, b, k=float(k): (a, b, np.full(a.shape, k))))
+    view3 = not ax.holding()
+    ax.newplot()
+    objs = []
+    for A, B, lift in pieces:
+        XP, YP, ZP = lift(A, B)
+        C = _mn.interp_volume(x, y, z, V, XP.reshape(-1), YP.reshape(-1), ZP.reshape(-1), method).reshape(A.shape)
+        for level, us, vs in contour_lines(_m._unmat(A), _m._unmat(B), _m._unmat(C), L):
+            a = np.array(list(us) + [np.nan])
+            b = np.array(list(vs) + [np.nan])
+            px, py, pz = lift(a, b)
+            px, py, pz = (np.where(np.isnan(a), np.nan, t) for t in (px, py, pz))
+            c = np.full((a.size, 1), float(level))
+            p = Patch(ax, FaceColor=_m.Char("none"), EdgeColor=_m.Char("flat"), CData=_m._unmat(c),
+                      FaceVertexCData=_m._unmat(c))
+            p.props["XData"], p.props["YData"] = _m._unmat(px.reshape(-1, 1)), _m._unmat(py.reshape(-1, 1))
+            p.set_prop("ZData", _m._unmat(pz.reshape(-1, 1)))
+            objs.append(p)
+    if view3:
+        ax.props["View"] = np.array([[-37.5], [30.0]])
+    return _harr(objs) if nargout else None
+
+
 def _view_dir_to_data(ax, d):
     """a direction in the view's frame (x right, y up, z toward the viewer) as a direction in data units"""
     proj = _Proj(ax)
@@ -3766,7 +3876,8 @@ from _graphics import Primitive as _Primitive, _fmt as _gfmt, _esc as _gesc, Inl
 
 
 class _Faces(_Primitive):
-    """surface faces, drawn in the order given (far to near): [(points, fill, edge)]"""
+    """surface faces, drawn in the order given (far to near): [(points, fill, edge)], or (points, None, edge, True)
+    for an open line (a patch face cut by NaN corners: its edges only, not closed)"""
     kind = "polygon"
 
     def __init__(self, faces, what="surface", thickness=0.6, alpha=None):
@@ -3784,11 +3895,12 @@ class _Faces(_Primitive):
     def svg(self, P):
         out = []
         op = ' fill-opacity="%s"' % _gfmt(self.alpha) if self.alpha is not None and self.alpha < 1 else ""
-        for pts, fill, edge in self.faces:
+        for f in self.faces:
+            pts, fill, edge = f[:3]
             q = [P.map(x, y) for x, y in pts]
             if any(t is None for t in q):
                 continue
-            d = "M" + "L".join(_gfmt(x) + " " + _gfmt(y) for x, y in q) + "Z"
+            d = "M" + "L".join(_gfmt(x) + " " + _gfmt(y) for x, y in q) + ("" if len(f) > 3 and f[3] else "Z")
             # (a face without edges is stroked in its own color: no seams between faces)
             stroke = edge or (fill if not op else None)
             out.append('<path d="%s" fill="%s"%s%s/>' % (
@@ -4005,6 +4117,19 @@ def _patch_faces(c, proj, cmap, clim, shade=None):
             continue
         vs = [P[i] for i in idx]
         if any(not (math.isfinite(v[0]) and math.isfinite(v[1])) for v in vs):
+            # (NaN corners cut the face's outline: its finite runs drawn as open lines, edges only, as MATLAB draws
+            # a contour line's patch)
+            if emode is not None:
+                run = []
+                for i, v in zip(idx + [None], vs + [None]):
+                    if v is not None and math.isfinite(v[0]) and math.isfinite(v[1]):
+                        run.append(i)
+                        continue
+                    if len(run) >= 2:
+                        edge = _pick_color(emode, ecol, eper, f, run)
+                        if edge is not None:
+                            out.append((sum(P[i][2] for i in run) / len(run), [(P[i][0], P[i][1]) for i in run], None, _hex(edge), True))
+                    run = []
             continue
         fill = _pick_color(fmode, fcol, fper, f, idx) if fmode else None
         edge = _pick_color(emode, ecol, eper, f, idx) if emode else None
@@ -4343,9 +4468,9 @@ def _scene_patch(c, cmap, clim, objs, budget, lit):
     V3 = Vt if Vt.shape[1] == 3 else np.column_stack([Vt, np.zeros(Vt.shape[0])])
     ok = np.isfinite(V3).all(axis=1).tolist()
     # (each face's corners among the used vertices; None for a face not drawn)
-    rows = [[int(t) for t in r if t == t] for r in F.tolist()]
-    rows = [r if len(r) >= 2 and all(ok[i] for i in r) else None for r in rows]
-    corners = sum(len(r) for r in rows if r)
+    raw = [[int(t) for t in r if t == t] for r in F.tolist()]
+    rows = [r if len(r) >= 2 and all(ok[i] for i in r) else None for r in raw]
+    corners = sum(len(r) for r in raw)
     budget[0] -= 2 * corners
     fmode, fcol, fper = _patch_colors(c, "Face", cmap, clim, nf, nv, used)
     emode, ecol, eper = _patch_colors(c, "Edge", cmap, clim, nf, nv, used)
@@ -4385,10 +4510,13 @@ def _scene_patch(c, cmap, clim, objs, budget, lit):
     if emode is not None:
         groups = {}
         seen = set()
-        for f, r in enumerate(rows):
-            if not r:
-                continue
-            for a, b in zip(r, r[1:] + r[:1]):
+        for f, r in enumerate(raw):
+            if rows[f]:
+                pairs = list(zip(r, r[1:] + r[:1]))
+            else:
+                # (a face cut by NaN corners: its finite runs, open, as the SVG draws them)
+                pairs = [(a, b) for a, b in zip(r, r[1:]) if ok[a] and ok[b]]
+            for a, b in pairs:
                 if (min(a, b), max(a, b)) in seen or a == b:
                     continue
                 seen.add((min(a, b), max(a, b)))
