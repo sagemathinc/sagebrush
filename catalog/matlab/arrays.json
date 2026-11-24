@@ -252,7 +252,7 @@
     "kind": "function",
     "signature": "X = zeros(n)\nX = zeros(sz1, ..., szN)\nX = zeros(sz)\nX = zeros(___, typename)\nX = zeros(___, 'like', p)",
     "summary": "An array of zeros of a given size, double by default, or of a named class or the class, complexity and sparsity of a prototype.",
-    "doc": "`zeros(n)` is n-by-n; `zeros(m, n, ...)` and `zeros([m n ...])` give each dimension. A size of 0 or less gives an empty dimension; a size that isn't an integer is an error. `typename` is a numeric class name or `'logical'`; `'like', p` takes p's class, complexity and sparsity.",
+    "doc": "`zeros(n)` is n-by-n; `zeros(m, n, ...)` and `zeros([m n ...])` give each dimension. A size of 0 or less gives an empty dimension; a size that isn't an integer is an error. `typename` is a numeric class name or `'logical'`; `'like', p` takes p's class, complexity and sparsity. As in MATLAB, an array of 5 GB or more is refused with MATLAB:array:SizeLimitExceeded, before anything is allocated: this is MATLAB's array-size preference (\"Limit the maximum array size\"), on by default as in MATLAB, and Sagebrush has no switch for it yet. At 2^48 bytes or more the error is MATLAB:pmaxsize. The same holds for ones, cell, rand, eye and the other constructors, and for growing a numeric, char or logical array by assignment.",
     "examples": [
       {
         "code": "zeros(2, 3)",
