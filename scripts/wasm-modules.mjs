@@ -32,8 +32,17 @@ export const modulePath = (name, root = ROOT) => join(root, "wasm", name);
 const stampPath = (root) => join(root, "wasm", ".installed.json");
 const sidecarPath = (name, root) => join(root, "wasm", `${name}.local.json`);
 
-// pins.json: {"v": 1, "modules": {<name>: {"sha256": <64 hex>, "bytes": <n>}}}, exactly the five names
-export function parsePins(text) {
+// pins.json: {"v": 1, "modules": {<name>: {"sha256": <64 hex>, "bytes": <n>}}}, exactly the five names (or exactly
+// `modules`: another checkout's set, read by baseModules)
+// (a module named twice in pins.json's text: JSON.parse would keep the last silently)
+function duplicated(text) {
+  const seen = new Set(), twice = new Set();
+  for (const m of String(text).matchAll(/"(sagebrush-[A-Za-z0-9_.-]+\.wasm)"\s*:/g)) (seen.has(m[1]) ? twice : seen).add(m[1]);
+  return [...twice];
+}
+export function parsePins(text, modules = MODULES) {
+  const twice = duplicated(text);
+  if (twice.length) throw new Error(`wasm/pins.json names ${twice.join(", ")} more than once`);
   let doc;
   try {
     doc = JSON.parse(text);
@@ -42,8 +51,8 @@ export function parsePins(text) {
   }
   if (doc?.v !== 1 || typeof doc.modules !== "object" || doc.modules === null) throw new Error('wasm/pins.json: expected {"v": 1, "modules": {...}}');
   const names = Object.keys(doc.modules).sort();
-  if (JSON.stringify(names) !== JSON.stringify([...MODULES].sort())) throw new Error(`wasm/pins.json must pin exactly ${MODULES.join(", ")}; it has ${names.join(", ") || "none"}`);
-  for (const name of MODULES) {
+  if (JSON.stringify(names) !== JSON.stringify([...modules].sort())) throw new Error(`wasm/pins.json must pin exactly ${modules.join(", ")}; it has ${names.join(", ") || "none"}`);
+  for (const name of modules) {
     const p = doc.modules[name];
     if (typeof p?.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(p.sha256)) throw new Error(`wasm/pins.json: ${name} needs a sha256 of 64 lowercase hex digits`);
     if (!Number.isSafeInteger(p.bytes) || p.bytes <= 0 || p.bytes > MAX_BYTES) throw new Error(`wasm/pins.json: ${name} needs a byte count between 1 and ${MAX_BYTES}`);
@@ -51,7 +60,28 @@ export function parsePins(text) {
   }
   return doc.modules;
 }
-export const loadPins = (root = ROOT) => parsePins(readFileSync(pinsPath(root), "utf8"));
+export const loadPins = (root = ROOT, modules = MODULES) => parsePins(readFileSync(pinsPath(root), "utf8"), modules);
+// Another checkout's module set, from its own pins.json (the rule for size-base, which runs this checkout's
+// helper with --root at the base) (size-base runs this checkout's scripts on the base commit's
+// checkout, which may pin fewer modules: one added since has no pin there): its names in MODULES' order.  Fail
+// closed: each name must be one of MODULES, named once, the engine's among them, and nothing else; parsePins then checks the
+// pins themselves against exactly that set.
+export function baseModules(root) {
+  let doc, text;
+  try {
+    text = readFileSync(pinsPath(root), "utf8");
+    doc = JSON.parse(text);
+  } catch (e) {
+    throw new Error(`${pinsPath(root)}: ${e.message}`);
+  }
+  const twice = duplicated(text);
+  if (twice.length) throw new Error(`${pinsPath(root)} names ${twice.join(", ")} more than once`);
+  const names = doc?.modules !== null && typeof doc?.modules === "object" ? Object.keys(doc.modules) : [];
+  const unknown = names.filter((n) => !MODULES.includes(n));
+  if (unknown.length) throw new Error(`${pinsPath(root)} pins ${unknown.join(", ")}, which this checkout's scripts don't know`);
+  if (!names.includes(MODULES[0])) throw new Error(`${pinsPath(root)} doesn't pin ${MODULES[0]}`);
+  return MODULES.filter((n) => names.includes(n));
+}
 export function formatPins(modules) {
   const lines = MODULES.map((n, i) => `    ${JSON.stringify(n)}: { "sha256": ${JSON.stringify(modules[n].sha256)}, "bytes": ${modules[n].bytes} }${i < MODULES.length - 1 ? "," : ""}`);
   return `{\n  "v": 1,\n  "modules": {\n${lines.join("\n")}\n  }\n}\n`;
@@ -125,9 +155,9 @@ export function runMode(env = process.env) {
 
 // Check all five modules for a run in `mode`, immediately before reading them.  Returns
 // one line per module for the run's log; throws, naming every module that fails.
-export function checkModules({ root = ROOT, mode = runMode(), pins = loadPins(root) } = {}) {
+export function checkModules({ root = ROOT, mode = runMode(), modules = MODULES, pins = loadPins(root, modules) } = {}) {
   const lines = [], errors = [];
-  for (const name of MODULES) {
+  for (const name of modules) {
     const s = moduleState(name, pins[name], root);
     if (s.state === "pinned") lines.push(`${name}: pinned`);
     else if (s.state === "missing") errors.push(missingMessage(name));

@@ -147,8 +147,9 @@ async function pool(items, n, fn) {
 
 // Fetch every module that wasm/pins.json names.  Returns one {name, action} per module; throws
 // (after every module has been tried) naming each failure.
-export async function fetchModules({ root = ROOT, base = process.env.SAGEBRUSH_WASM_BASE || DEFAULT_BASE, cacheDir = defaultCacheDir(), offline = false, force = false, limits = LIMITS, log = (s) => console.log(s) } = {}) {
-  const pins = loadPins(root);
+// (`modules`: the set to fetch, by default this checkout's; size-base passes the base checkout's, baseModules)
+export async function fetchModules({ root = ROOT, base = process.env.SAGEBRUSH_WASM_BASE || DEFAULT_BASE, cacheDir = defaultCacheDir(), offline = false, force = false, limits = LIMITS, log = (s) => console.log(s), modules = MODULES } = {}) {
+  const pins = loadPins(root, modules);
   const baseUrl = /^[a-z]+:/.test(base) ? (base.endsWith("/") ? base : base + "/") : pathToFileURL(base).href + "/";
   mkdirSync(cacheDir, { recursive: true });
   removeStaleParts(cacheDir, Date.now(), limits.staleMs);
@@ -156,7 +157,7 @@ export async function fetchModules({ root = ROOT, base = process.env.SAGEBRUSH_W
   const timer = setTimeout(() => deadline.abort(new Error(`the whole run took more than ${limits.deadlineMs / 1000} s`)), limits.deadlineMs);
   const failures = [];
   try {
-    const results = await pool(MODULES, limits.parallel, async (name) => {
+    const results = await pool(modules, limits.parallel, async (name) => {
       const pin = pins[name];
       if (deadline.signal.aborted) {
         failures.push(`${name}: not started: ${deadline.signal.reason.message}`);
@@ -203,7 +204,7 @@ export async function fetchModules({ root = ROOT, base = process.env.SAGEBRUSH_W
       return { name, action };
     });
     for (const r of results) log(`${r.name}: ${r.action}`);
-    if (failures.length) throw new Error(`wasm-fetch: ${failures.length} of ${MODULES.length} modules failed:\n${failures.join("\n")}`);
+    if (failures.length) throw new Error(`wasm-fetch: ${failures.length} of ${modules.length} modules failed:\n${failures.join("\n")}`);
     return results;
   } finally {
     clearTimeout(timer);

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // size-base's fail-closed acquisition of a base commit's WebAssembly modules.  Published pins are fetched normally.
-// Only when every fetch failure is an HTTP 404 is the base commit built from its own source; all five resulting
-// modules must then match that base's pins exactly.  Network errors, corrupt objects and build/pin mismatches fail.
+// Only when every fetch failure is an HTTP 404 is the base commit built from its own source; all its resulting
+// modules must then match that base's pins exactly.  The base's module set is its own pins.json's (baseModules): a
+// module added since the base has no pin there, and isn't fetched, built or checked for it.  Network errors, corrupt objects and build/pin mismatches fail.
 // On a track (scripts/pin-policy.mjs: a pull request into track/*, a push or dispatch on it) the base's pin can lag
 // its engine (the pin moves only with the track's pull into master), so its published modules may not be its
 // engine at all: the base is always built from its own source, and the result is labelled pinned or fresh.
@@ -10,17 +11,20 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchModules } from "./wasm-fetch.mjs";
 import { existsSync } from "node:fs";
-import { checkModules, MODULES, ROOT, modulePath, writeSidecar } from "./wasm-modules.mjs";
+import { baseModules, checkModules, MODULES, ROOT, modulePath, writeSidecar } from "./wasm-modules.mjs";
 import { onTrack, runRefs } from "./pin-policy.mjs";
 
-const escaped = MODULES.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-const NOT_FOUND = new RegExp(`^(${escaped}): \\S+: 404(?:\\s|$)`);
+const notFound = (modules) => new RegExp(`^(${modules.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")}): \\S+: 404(?:\\s|$)`);
 
-export function unpublishedOnly(error) {
+// Whether a fetch of `modules` failed only by 404s: the header wasm-fetch.mjs writes for exactly that set (1 to
+// modules.length of them failed), then that many lines, each a 404 of a distinct one of them.
+export function unpublishedOnly(error, modules = MODULES) {
+  const NOT_FOUND = notFound(modules);
   const lines = String(error?.message ?? error).split("\n");
-  const header = /^wasm-fetch: ([1-4]) of 4 modules failed:$/.exec(lines[0]);
-  if (!header) return false;
+  const header = /^wasm-fetch: ([1-9][0-9]*) of ([1-9][0-9]*) modules failed:$/.exec(lines[0]);
+  if (!header || Number(header[2]) !== modules.length) return false;
   const count = Number(header[1]);
+  if (count > modules.length) return false;
   const failures = lines.slice(1);
   if (failures.length !== count || !failures.every((line) => NOT_FOUND.test(line))) return false;
   return new Set(failures.map((line) => NOT_FOUND.exec(line)[1])).size === count;
@@ -39,17 +43,20 @@ export async function fetchOrBuild({
   fetch = fetchModules,
   build = buildBase,
   check = checkModules,
-  mark = (root) => { for (const name of MODULES) if (existsSync(modulePath(name, root))) writeSidecar(name, root); },
+  mark = (root, modules) => { for (const name of modules) if (existsSync(modulePath(name, root))) writeSidecar(name, root); },
+  modulesOf = baseModules,
   log = (line) => console.log(line),
   env = process.env,
 } = {}) {
+  // (the base checkout's own set: its pins.json, fail closed)
+  const modules = modulesOf(root);
   if (onTrack(runRefs(env))) {
     log("a track's base: building it from its own source (its pin may lag its engine)");
     build(root);
     // (each module this build wrote gets its sidecar; then a module built here or a pinned one passes, and a
     // missing or unidentified one fails)
-    mark(root);
-    const lines = check({ root, mode: "local" });
+    mark(root, modules);
+    const lines = check({ root, mode: "local", modules });
     for (const line of lines) log(line);
     if (lines.every((line) => line.endsWith(": pinned"))) {
       log("base WebAssembly source build matches every pin");
@@ -59,14 +66,14 @@ export async function fetchOrBuild({
     return "built-fresh";
   }
   try {
-    await fetch({ root, log });
+    await fetch({ root, log, modules });
     return "fetched";
   } catch (error) {
-    if (!unpublishedOnly(error)) throw error;
+    if (!unpublishedOnly(error, modules)) throw error;
     log("::warning::a base WebAssembly pin is unpublished (404); building the base commit from source");
   }
   build(root);
-  const lines = check({ root, mode: "pinned" });
+  const lines = check({ root, mode: "pinned", modules });
   for (const line of lines) log(line);
   log("base WebAssembly source build matches every pin");
   return "built";
