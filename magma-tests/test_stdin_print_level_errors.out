@@ -66,6 +66,10 @@ User error: bad syntax
              ^
 User error: bad syntax
 
+>> print 1 : catch;
+             ^
+User error: bad syntax
+
 >> print 1 : load;
              ^
 User error: bad syntax

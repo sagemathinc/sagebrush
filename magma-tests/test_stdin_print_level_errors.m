@@ -22,6 +22,7 @@ printf "%o", 1 : Magma;
 // a reserved word is no level's name; a statement a keyword begins takes no level; an expression statement does
 print 1 : default;
 print 1 : try;
+print 1 : catch;
 print 1 : load;
 print 1 : fi;
 print 1 : when;

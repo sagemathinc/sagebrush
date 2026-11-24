@@ -400,7 +400,7 @@ class Parser {
       }
       if (a.v === "where" && a.t === "kw") return found("where x is ... (a definition after an expression)");
       if (a.v === "eval" && a.t === "kw") return found("eval");
-      if (a.t === "id" && ((a.v === "try" && k === from) || a.v === "catch")) return found("try ... catch");
+      if (a.t === "id" && (a.v === "try" || a.v === "catch") && k === from) return found("try ... catch");
       if (a.v === ".." && b.v === "." && next(a, b)) return found("... (a function with a variable number of arguments)");
       if (a.v === "case" && b.v === "<") return found("case< ... >");
       if (a.v === "." && b.t === "id" && k > from && (T[k - 1].t === "id" || T[k - 1].v === ")" || T[k - 1].v === "]")) return found(`${T[k - 1].v}.${b.v} (a generator by a variable's index)`);
