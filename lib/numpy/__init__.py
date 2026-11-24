@@ -349,6 +349,18 @@ _np.register_scalar("complex64", complex64)
 _np.register_str(str_)
 
 
+class object_(generic):
+    """NumPy's scalar type of the object dtype (np.dtype(object).type): np.object_(x) is x itself,
+    or an object array of it when x is a sequence or an array."""
+
+    def __new__(cls, value=None):
+        a = asarray(value, dtype=object)
+        return a.item() if a.ndim == 0 else a
+
+
+_np.register_object(object_)
+
+
 
 def _scalar_round(self, ndigits=None):
     """round() of a NumPy scalar: a Python int without ndigits, else the
@@ -559,7 +571,7 @@ def ones(shape, dtype=None, order="C", *, like=None):
 
 
 def empty(shape, dtype=float, order="C", *, like=None):
-    return _np.zeros(_shape(shape), dtype)
+    return _np.empty(_shape(shape), dtype)
 
 
 def full(shape, fill_value, dtype=None, order="C", *, like=None):
