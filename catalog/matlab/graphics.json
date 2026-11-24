@@ -22,7 +22,8 @@
     "see_also": [
       "interp3",
       "surf",
-      "contour"
+      "contour",
+      "contourslice"
     ],
     "tags": [
       "plots"
@@ -54,7 +55,8 @@
       "isonormals",
       "patch",
       "slice",
-      "camlight"
+      "camlight",
+      "isocaps"
     ],
     "tags": [
       "plots"
@@ -80,6 +82,58 @@
       "isosurface",
       "gradient",
       "patch"
+    ],
+    "tags": [
+      "plots"
+    ]
+  },
+  {
+    "name": "isocaps",
+    "kind": "function",
+    "signature": "fvc = isocaps(X, Y, Z, V, isovalue)\nfvc = isocaps(V, isovalue)\nfvc = isocaps(___, enclose)\nfvc = isocaps(___, whichplane)\n[f, v, c] = isocaps(___)\nisocaps(___)",
+    "summary": "The faces that close an isosurface where it meets the volume's boundary, colored by the volume's values.",
+    "doc": "On each boundary plane of the volume, the region where V is above isovalue ('above', the default) or below it ('below'), as triangles: the plane's grid points on that side and the points where V crosses isovalue on its edges, computed as isosurface computes them, so that the caps meet isosurface's surface edge for edge and the two together close the solid. whichplane is 'all' (the default) or one of 'xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax'. The result has faces, vertices and facevertexcdata (V at the vertices); with no output, it is drawn as a patch with interpolated colors. Draw it with patch(..., 'FaceColor', 'interp', 'EdgeColor', 'none') next to the isosurface's patch.",
+    "examples": [
+      {
+        "code": "[x, y, z] = meshgrid(-2:0.5:2); V = x.^2 + y.^2 + z.^2;\nfvc = isocaps(x, y, z, V, 5);\nsize(fvc.faces), [min(fvc.facevertexcdata) max(fvc.facevertexcdata)]",
+        "expected": "\nans =\n\n   696     3\n\n\nans =\n\n     5    12\n\n"
+      }
+    ],
+    "differs": [
+      "The isovalue is required: MATLAB picks one when it is left out, by a rule it does not document.",
+      "Faces and vertices are not in MATLAB's order, and the faces' winding (toward the higher values, as isosurface's) has not been checked against MATLAB yet."
+    ],
+    "status": "partial",
+    "see_also": [
+      "isosurface",
+      "patch",
+      "slice"
+    ],
+    "tags": [
+      "plots"
+    ]
+  },
+  {
+    "name": "contourslice",
+    "kind": "function",
+    "signature": "contourslice(X, Y, Z, V, Sx, Sy, Sz)\ncontourslice(V, Sx, Sy, Sz)\ncontourslice(___, n)\ncontourslice(___, levels)\ncontourslice(___, method)\nh = contourslice(___)",
+    "summary": "Contour lines on planes through a 3-D volume, colored by their levels.",
+    "doc": "Each value of Sx is the plane x = Sx(k), and likewise for Sy and Sz ([] for none), as slice's planes are; on each, V interpolated as interp3 does it (method 'linear', the default, 'nearest', 'cubic' or 'spline') is contoured. The levels: n of them evenly inside V's range, the vector levels ([v v] for the one level v), or by default as contour chooses them, from V's range, the same on every plane. Each line is a patch, its points down XData, YData and ZData and ended by a NaN, its edges colored by its level (EdgeColor 'flat', its CData the level).",
+    "examples": [
+      {
+        "code": "[x, y, z] = meshgrid(-2:0.5:2); V = x.^2 + y.^2 + z.^2;\nh = contourslice(x, y, z, V, 0, [], [-1 1], [1 2 3]);\nnumel(h), h(1).CData(1)",
+        "expected": "\nans =\n\n     7\n\n\nans =\n\n     1\n\n"
+      }
+    ],
+    "differs": [
+      "Contours on a surface given by matrices Xi, Yi and Zi are refused.",
+      "The default levels are contour's (Sagebrush's rule, which MATLAB doesn't document), and the lines' order and their patches' properties have not been checked against MATLAB yet."
+    ],
+    "status": "partial",
+    "see_also": [
+      "slice",
+      "contour",
+      "interp3"
     ],
     "tags": [
       "plots"

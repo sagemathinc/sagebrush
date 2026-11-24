@@ -39,19 +39,6 @@
     ]
   },
   {
-    "name": "contourslice",
-    "kind": "function",
-    "signature": "contourslice(X, Y, Z, V, xslice, yslice, zslice)",
-    "summary": "Contour lines on planes through a 3-D volume.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "Contour 2-D cuts of the volume, one subplot per cut: contour(X(:,:,k), Y(:,:,k), V(:,:,k), levels) for the plane Z = Z(1,1,k), or contour(squeeze(Y(:,k,:)), squeeze(Z(:,k,:)), squeeze(V(:,k,:)), levels) for the plane X = X(1,k,1). slice(X, Y, Z, V, xslice, yslice, zslice) draws the same planes colored by V. isosurface(X, Y, Z, V, level) draws the level itself in 3-D.",
-    "tags": [
-      "plots"
-    ]
-  },
-  {
     "name": "csvread",
     "kind": "function",
     "signature": "M = csvread(filename)",
@@ -365,19 +352,6 @@
     "alternative": "isnan for numeric arrays; cellfun(@isempty, C) for cell arrays of text.",
     "tags": [
       "data cleaning"
-    ]
-  },
-  {
-    "name": "isocaps",
-    "kind": "function",
-    "signature": "fvc = isocaps(X, Y, Z, V, isovalue)",
-    "summary": "The faces that close an isosurface where it meets the volume's boundary.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "Without caps, an isosurface that meets the volume's boundary is open there. slice(X, Y, Z, V, xslice, yslice, zslice) at the boundary planes shows V there, colored; or pad V with a layer of values below the isovalue on every side (and extend X, Y and Z to match) so that isosurface closes the surface itself.",
-    "tags": [
-      "plots"
     ]
   },
   {

@@ -15913,5 +15913,25 @@
   },
   "owner": "visualization/display",
   "reason": "A patch's share of the 3-D viewer's vertex budget (_SCENE_MAX_VERTICES), as a surface's is: past it, the figure is shown as its SVG only."
+ },
+ "lib/_matlab_numeric.py ::  :: _CAP_PLANES = {\"xmin\": (1, 0), \"xmax\": (1, 1), \"ymin\": (0, 0), \"ymax\": (0, 1), \"zmin\": (2, 0), \"zmax\": (2, 1)} #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's names of the volume's boundary planes ('xmax', 'ymax', 'zmax'), which isocaps takes as options; the line names or lists those planes, it is not a limit"
+ },
+ "lib/_matlab_numeric.py :: isocaps_mesh :: def isocaps_mesh(x, y, z, V, iso, below=False, planes=(\"xmin\", \"xmax\", \"ymin\", \"ymax\", \"zmin\", \"zmax\"), held=0): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's names of the volume's boundary planes ('xmax', 'ymax', 'zmax'), which isocaps takes as options; the line names or lists those planes, it is not a limit"
+ },
+ "lib/_matlab_plot.py :: isocaps_ :: \"'ymax', 'zmin' and 'zmax'.\" % t) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's names of the volume's boundary planes ('xmax', 'ymax', 'zmax'), which isocaps takes as options; the line names or lists those planes, it is not a limit"
+ },
+ "lib/_matlab_plot.py :: isocaps_ :: raise _m._err(\"Invalid option '%s': isocaps' options are 'above', 'below', 'all', 'xmin', 'xmax', 'ymin', \" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's names of the volume's boundary planes ('xmax', 'ymax', 'zmax'), which isocaps takes as options; the line names or lists those planes, it is not a limit"
  }
 }

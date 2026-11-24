@@ -1028,6 +1028,8 @@ def _interp_axes(grids, V, qs, method, extrap, seq=None):
                 acc = acc + _keys(ts[k] - (o - 1)) * conv(level - 1, fixed[:k] + [ii[k] + o] + fixed[k + 1:])
             return acc
         out[inside] = conv(n - 1, [None] * n)
+        # (conv refers to itself: unbound, so that its arrays are freed now, not when a cycle is collected)
+        del conv
     else:
         qi = [q[inside] for q in qs]
         lo, hi, t = [], [], []
@@ -1056,6 +1058,8 @@ def _interp_axes(grids, V, qs, method, extrap, seq=None):
                 b = corner(level - 1, fixed[:k] + [hi[k]] + fixed[k + 1:])
                 return (1 - t[k]) * a + t[k] * b
             out[inside] = corner(n - 1, [None] * n)
+            # (as conv above)
+            del corner
     if extrap is not None:
         out[~inside] = extrap
     return out
@@ -1294,6 +1298,8 @@ def _mc_cases():
     """for each of the 256 cases (bit c set: corner c inside), its triangles as triples of cube edges"""
     edge_of = {frozenset(e): k for k, e in enumerate(_CUBE_EDGES)}
     faces = _cube_faces()
+    # (the faces each edge is on, as bits)
+    on_face = [sum(1 << f for f, ring in enumerate(faces) if a in ring and b in ring) for a, b in _CUBE_EDGES]
     cases = []
     for mask in range(256):
         inside = [(mask >> c) & 1 for c in range(8)]
@@ -1315,6 +1321,14 @@ def _mc_cases():
                 loop.append(e)
                 e = nxt.pop(e)
             loop = loop[-1:] + loop[:-1]
+            # (unless one of its triangles would then lie in a face of the cube, three of its corners on that face,
+            # where the neighbouring cube's triangles would lie over it: then from the next edge round that leaves
+            # none there)
+            for turn in range(len(loop)):
+                fan = loop[turn:] + loop[:turn]
+                if not any(on_face[fan[0]] & on_face[fan[t]] & on_face[fan[t + 1]] for t in range(1, len(fan) - 1)):
+                    loop = fan
+                    break
             # (wound so that the right-hand normal points out of the region below the level, as MATLAB's
             # faces are: a closed surface around low values has a positive signed volume)
             tris += [(loop[0], loop[t + 1], loop[t]) for t in range(1, len(loop) - 1)]
@@ -1459,3 +1473,211 @@ def _first_seen_rows(P):
     rank = np.empty(n, dtype=np.int64)
     rank[order] = rank_of_group[group]
     return firsts[seen], rank
+
+
+# ------------------------------------------------------------------ isocaps
+
+# A boundary plane's square cells, corners numbered counterclockwise in the plane's (u, v) axes: 0 (0, 0), 1 (1, 0),
+# 2 (1, 1), 3 (0, 1); edge k joins corner k to corner k + 1.  A cell's cap is the part inside (above the level, or
+# below it): each run of inside corners around the square, with the edge points where the run starts and ends, is a
+# polygon.  Inside corners at the ends of a diagonal are kept apart, as isosurface's marching cubes keep them on a
+# cube's face, so the caps meet the isosurface edge for edge.
+def _cap_cases(below):
+    """for each of the 16 cases (bit c set: corner c above the level), the polygons of the part above it (below:
+    the part below), as lists of ("c", corner) and ("e", edge) items counterclockwise around the square.  Above:
+    each run of corners above, between the edge points where it starts and ends.  Below: what is left, every
+    corner below and every edge point in order, one polygon (on a square whose corners above are kept apart, the
+    hexagon between them); all its points are on the square's sides, so it is convex"""
+    cases = []
+    for mask in range(16):
+        up = [(mask >> c) & 1 for c in range(4)]
+        if below:
+            if all(up):
+                cases.append([])
+                continue
+            poly = []
+            for c in range(4):
+                if not up[c]:
+                    poly.append(("c", c))
+                if up[c] != up[(c + 1) % 4]:
+                    poly.append(("e", c))
+            cases.append([poly])
+            continue
+        if all(up):
+            cases.append([[("c", c) for c in range(4)]])
+            continue
+        polys = []
+        for c in range(4):
+            # (a run starts at a corner above whose predecessor is not)
+            if up[c] and not up[(c - 1) % 4]:
+                poly = [("e", (c - 1) % 4)]
+                k = c
+                while up[k]:
+                    poly.append(("c", k))
+                    k = (k + 1) % 4
+                poly.append(("e", (k - 1) % 4))
+                polys.append(poly)
+        cases.append(polys)
+    return cases
+
+
+_CAPS = {}
+_CAP_PLANES = {"xmin": (1, 0), "xmax": (1, 1), "ymin": (0, 0), "ymax": (0, 1), "zmin": (2, 0), "zmax": (2, 1)}
+
+
+# (the most one boundary cell's work takes in _cap_plane: its corners' classes and case, and for a cell with
+# faces its corners' and edges' ids and its faces; measured at up to 461 bytes, for a checkerboard's caps below
+# the level, four triangles a cell)
+_CAP_CELL = 560
+
+
+def _cap_plane(V, iso, axis, side, cases, width, below):
+    """one boundary plane's faces for isocaps_mesh, as a (k, 3) array of items: grid points' ids (below the
+    number of points) and edges' (that number plus isosurface's edge id); None when it has none.  Only what is
+    returned outlives the call"""
+    m, n, p = V.shape
+    shape = (m, n, p)
+    npts, nx, ny = m * n * p, m * (n - 1) * p, (m - 1) * n * p
+    u, v = [a for a in range(3) if a != axis]
+    s = 0 if side == 0 else shape[axis] - 1
+    nv = shape[v] - 1
+    at = [slice(None), slice(None), slice(None)]
+    at[axis] = s
+    W = V[tuple(at)]
+    # (the case by the corners above the level, as isosurface classifies them; a non-finite corner is never
+    # above, and its faces are dropped by isocaps_mesh.  Corners counterclockwise in (u, v): (0,0) (1,0) (1,1) (0,1))
+    case = np.zeros((shape[u] - 1, nv), dtype=np.int64)
+    with np.errstate(invalid="ignore"):
+        for bit, w in enumerate((W[:-1, :-1], W[1:, :-1], W[1:, 1:], W[:-1, 1:])):
+            case |= ((w > iso) & np.isfinite(w)).astype(np.int64) << bit
+    case = case.reshape(-1)
+    # (the plane's faces are wound as isosurface's: their normals, in the grid's own axes (x the column, y the
+    # row, z the page), toward the values above the level; so into the volume for the caps above it, out of it
+    # for those below.  The square's corners go counterclockwise about the u-v normal; reversed when that
+    # points the other way)
+    e = [np.zeros(3), np.zeros(3)]
+    e[0][[1, 0, 2][u]] = 1.0
+    e[1][[1, 0, 2][v]] = 1.0
+    into = 1.0 if side == 0 else -1.0
+    reverse = np.cross(e[0], e[1])[[1, 0, 2][axis]] * into * (-1.0 if below else 1.0) < 0
+    table = np.full((16, width, 3), -1, dtype=np.int64)
+    ntri = np.zeros(16, dtype=np.int64)
+    for k, polys in enumerate(cases):
+        tris = []
+        for poly in polys:
+            ats = [c if kind == "c" else 4 + c for kind, c in poly]
+            tris += [(ats[0], ats[t + 1], ats[t]) if reverse else (ats[0], ats[t], ats[t + 1]) for t in range(1, len(ats) - 1)]
+        ntri[k] = len(tris)
+        if tris:
+            table[k, :len(tris)] = tris
+    sel = np.flatnonzero(ntri[case] > 0)
+    if not sel.size:
+        return None
+    case = case[sel]
+    cu, cv = sel // nv, sel % nv
+    del sel
+
+    def where(du, dv):
+        idx = [s, s, s]
+        idx[u], idx[v] = cu + du, cv + dv
+        return idx
+    # (each cell's items: its four corners' ids, then its four edges' as isosurface numbers them, from the edge's
+    # lower corner; edge k joins corners k and k + 1)
+    items = np.empty((case.size, 8), dtype=np.int64)
+    for k, (du, dv) in enumerate(((0, 0), (1, 0), (1, 1), (0, 1))):
+        i, j, l = where(du, dv)
+        items[:, k] = i + m * (j + n * l)
+    for k, (du, dv, along) in enumerate(((0, 0, u), (1, 0, v), (0, 1, u), (0, 0, v))):
+        i, j, l = where(du, dv)
+        if along == 1:
+            g = i + m * (j + (n - 1) * l)
+        elif along == 0:
+            g = nx + i + (m - 1) * (j + n * l)
+        else:
+            g = nx + ny + i + m * (j + n * l)
+        items[:, 4 + k] = npts + g
+    del cu, cv
+    T = table[case]
+    keep = np.arange(width)[None, :] < ntri[case][:, None]
+    del case
+    rows = np.repeat(np.arange(items.shape[0]), width).reshape(-1, width)[keep]
+    return items.reshape(-1)[rows.reshape(-1, 1) * 8 + T[keep]]
+
+
+def isocaps_mesh(x, y, z, V, iso, below=False, planes=("xmin", "xmax", "ymin", "ymax", "zmin", "zmax"), held=0):
+    """the caps of the isosurface V == iso on the volume's boundary planes (V in MATLAB's index order: rows y,
+    columns x, pages z): (faces, vertices, colors), faces triangles of 1-based indices wound as isosurface's are
+    (normals toward higher values); vertices the boundary's grid points on the enclosed side (above iso, or below
+    it with below) and the edge points where V crosses iso, computed as isosurface computes them, so that the
+    caps' edges are the isosurface's; colors V at the vertices.  A face with a corner at, or on an edge to, a NaN
+    or infinite value is dropped.  held: the bytes the caller keeps alive meanwhile, counted in the admissions"""
+    if below not in _CAPS:
+        _CAPS[below] = _cap_cases(below)
+    cases = _CAPS[below]
+    m, n, p = V.shape
+    empty = (np.zeros((0, 3)), np.zeros((0, 3)), np.zeros((0, 1)))
+    if m < 2 or n < 2 or p < 2:
+        return empty
+    shape = (m, n, p)
+    nx, ny = m * (n - 1) * p, (m - 1) * n * p
+    npts = m * n * p
+    width = max(1, max(sum(len(poly) - 2 for poly in polys) for polys in cases))
+    ids_all = []
+    for q in planes:
+        axis, side = _CAP_PLANES[q]
+        u, v = [a for a in range(3) if a != axis]
+        # (admitted before the plane's arrays are made, with the copies held and the faces found so far; the
+        # plane's own work is freed before the next plane's admission)
+        _m._admit_bytes(held + sum(a.nbytes for a in ids_all) + (shape[u] - 1) * (shape[v] - 1) * _CAP_CELL + (64 << 10),
+                        "isocaps of a %dx%dx%d volume" % (m, n, p))
+        got = _cap_plane(V, iso, axis, side, cases, width, below)
+        if got is not None:
+            ids_all.append(got)
+    if not ids_all:
+        return empty
+    # (and the faces' arrays: each corner's point, value and place, and the sort that merges the points, measured at
+    # up to 234 bytes, for a checkerboard's caps; the planes' work is freed by now)
+    corners = sum(a.size for a in ids_all)
+    _m._admit_bytes(held + corners * 288, "isocaps of %d faces" % (corners // 3))
+    G = np.concatenate(ids_all)
+    # (a face with a corner at a non-finite value, or on an edge to one, is dropped)
+    flat = G.reshape(-1)
+    isp = flat < npts
+    fin = np.ones(flat.size, dtype=bool)
+    pi_ = flat[isp]
+    fin[isp] = np.isfinite(V[pi_ % m, (pi_ // m) % n, pi_ // (m * n)])
+    if (~isp).any():
+        fin[~isp] = np.isfinite(_edge_values(flat[~isp] - npts, V, nx, ny))
+    good = fin.reshape(G.shape).all(axis=1)
+    G = G[good]
+    if not G.size:
+        return empty
+    flat = G.reshape(-1)
+    isp = flat < npts
+    P = np.empty((flat.size, 3))
+    C = np.empty(flat.size)
+    xs, ys, zs = (np.asarray(g, dtype=float).reshape(-1) for g in (x, y, z))
+    pi_ = flat[isp]
+    i0, j0, k0 = pi_ % m, (pi_ // m) % n, pi_ // (m * n)
+    P[isp] = np.column_stack([xs[j0], ys[i0], zs[k0]])
+    C[isp] = V[i0, j0, k0]
+    edges = flat[~isp] - npts
+    if edges.size:
+        ax = np.where(edges < nx, 0, np.where(edges < nx + ny, 1, 2))
+        r = edges - np.where(ax == 0, 0, np.where(ax == 1, nx, nx + ny))
+        cm, cn = np.where(ax == 1, m - 1, m), np.where(ax == 0, n - 1, n)
+        ei, ej, ek = r % cm, (r // cm) % cn, r // (cm * cn)
+        fi, fj, fk = ei + (ax == 1), ej + (ax == 0), ek + (ax == 2)
+        v0, v1 = V[ei, ej, ek], V[fi, fj, fk]
+        with np.errstate(invalid="ignore", divide="ignore"):
+            t = (iso - v0) / (v1 - v0)
+        P[~isp] = np.column_stack([xs[ej] + t * (xs[fj] - xs[ej]), ys[ei] + t * (ys[fi] - ys[ei]), zs[ek] + t * (zs[fk] - zs[ek])])
+        C[~isp] = v0 + t * (v1 - v0)
+    faces = np.arange(flat.size).reshape(G.shape)
+    # (one vertex for each point; a face two of whose corners became one is dropped)
+    keepv, rowsv = _first_seen_rows(P)
+    P, C = P[keepv], C[keepv]
+    faces = rowsv[faces]
+    faces = faces[(faces[:, 0] != faces[:, 1]) & (faces[:, 1] != faces[:, 2]) & (faces[:, 0] != faces[:, 2])]
+    used, faces = _first_seen(faces.reshape(-1))
+    return (faces.reshape(-1, 3) + 1).astype(float), P[used], C[used].reshape(-1, 1)
