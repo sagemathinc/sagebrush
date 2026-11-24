@@ -1111,7 +1111,7 @@ def _own_size(v, memo, depth=0):
         return 1  # (_own refuses it for its depth)
     got = memo.get(id(v))
     if got is not None:
-        return got[1]
+        return got if type(got) is int else got[1]
     memo[id(v)] = (v, _OWN_CONTAINERS_MAX + 1)  # (in progress: a cycle is too many)
     # (a record, with its fields' dictionary, costs several times a small
     # sequence: it counts as _OWN_RECORD_WEIGHT, so that a refused copy
@@ -1123,7 +1123,10 @@ def _own_size(v, memo, depth=0):
             if n > _OWN_CONTAINERS_MAX:
                 break
     n = min(n, _OWN_CONTAINERS_MAX + 1)
-    memo[id(v)] = (v, n)
+    # (once counted, a part keeps only its count: every part is reachable from
+    # the value being copied while it is counted, so no id is reused, and a
+    # refused copy's count fits a 96 MB heap with the library loaded)
+    memo[id(v)] = n
     return n
 
 
