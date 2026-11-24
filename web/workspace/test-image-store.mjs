@@ -141,8 +141,8 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
 //  for load() and for ready()'s second read alike
 {
   const real = new Uint8Array(64).fill(7); real.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]);
-  let hold = false, release = () => {};
-  const read = async () => { if (hold) await new Promise((r) => (release = r)); return real; };
+  let hold = false, release = () => {}, readsOf = 0;
+  const read = async (p) => { if (p.endsWith("c.png")) readsOf++; if (hold) await new Promise((r) => (release = r)); return real; };
   const U = new ImageUrls(read, () => {});
   hold = true;
   const l = U.load("/Attachments/nb-r/a.png");
@@ -163,7 +163,7 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   const r2 = U.ready(["/Attachments/nb-r/c.png"]);
   U.retain([]);
   await r2;
-  ok(U.bytes("/Attachments/nb-r/c.png") === null, "ready(): an image let go right after ready() was called, before its read again, isn't brought back");
+  ok(U.bytes("/Attachments/nb-r/c.png") === null && readsOf === 1, "ready(): an image let go right after ready() was called isn't brought back, nor read again", readsOf);
   U.dispose();
 }
 // ---- an attachment named "__proto__" survives import and export
