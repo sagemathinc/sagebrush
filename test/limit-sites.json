@@ -14335,6 +14335,22 @@
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
+ "web/latex/engine/tikz.mjs :: foreach :: if (this.lexed + next > TIKZ_LIMITS.LEX_TEXT) fail(MORE_TEXT()); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: foreach :: if (this.lexed + size > TIKZ_LIMITS.LEX_TEXT) fail(MORE_TEXT()); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
  "web/latex/engine/tikz.mjs :: lex :: count(n = 1) { if ((this.items += n) > TIKZ_LIMITS.ITEMS) fail(\"more than \" + TIKZ_LIMITS.ITEMS + \" path segments\"); } #0": {
   "class": "1",
   "disposition": {

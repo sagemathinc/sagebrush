@@ -248,15 +248,18 @@ class Picture {
     this.named = new Map();           // coordinate name -> canvas point
     this.paths = [];                  // drawn paths: {d: [[cmd, pts...]], st}
     this.items = 0; this.expansions = 0; this.lexed = 0; this.optionText = 0;
+    // (a test's window on the work: opts.trace.peak, the most text read or about to be made at any point, in bytes)
+    this.trace = opts?.trace || null;
     this.box = null;                  // the bounding box in canvas pt
     this.markers = new Map();
   }
   // (every text read, the source's and each expansion's, counted in UTF-8 bytes: a body read again for each item is work
   //  again. foreach checks an expansion's size before it is made; this check is the backstop)
+  peak(n) { if (this.trace) this.trace.peak = Math.max(this.trace.peak || 0, n); }
   lex(text) {
     const n = utf8Len(text);
     if (this.lexed + n > TIKZ_LIMITS.LEX_TEXT) fail(MORE_TEXT());
-    this.lexed += n;
+    this.lexed += n; this.peak(this.lexed);
     return lex(text);
   }
   count(n = 1) { if ((this.items += n) > TIKZ_LIMITS.ITEMS) fail("more than " + TIKZ_LIMITS.ITEMS + " path segments"); }
@@ -471,16 +474,20 @@ class Picture {
     for (const item of list) {
       if (++this.expansions > TIKZ_LIMITS.EXPAND) fail("\\foreach bodies expanded more than " + TIKZ_LIMITS.EXPAND + " times");
       const vals = splitSlash(item, vars.length);
-      // (each variable replaced in turn, as TeX would: a value naming a later variable is expanded too. Before each
-      //  replacement, its result's size, from the text as it is now, in UTF-8 bytes: so no text over SRC_MAX is ever
-      //  made. Each text scanned counts as read; lex() checks the total before the expansion is read)
+      // (each variable replaced in turn, as TeX would: a value naming a later variable is expanded too. Each text
+      //  scanned counts as read, checked against the total before the scan. Before each replacement, its result's
+      //  size, from the text as it is now, in UTF-8 bytes: never over SRC_MAX, and never past what is left of the
+      //  total, so no text is made that couldn't be read. lex() checks again, as the backstop)
       let text = body, size = utf8Len(body);
       for (let q = 0; q < res.length; q++) {
-        this.lexed += size;
+        if (this.lexed + size > TIKZ_LIMITS.LEX_TEXT) fail(MORE_TEXT());
+        this.lexed += size; this.peak(this.lexed);
         const uses = (text.match(res[q]) || []).length;
         if (!uses) continue;
         const next = size + uses * (utf8Len(vals[q]) - varBytes[q]);
         if (next > TIKZ_LIMITS.SRC_MAX) fail("a \\foreach body over " + TIKZ_LIMITS.SRC_MAX / 1024 + " KiB once its variables are replaced");
+        if (this.lexed + next > TIKZ_LIMITS.LEX_TEXT) fail(MORE_TEXT());
+        this.peak(this.lexed + next);
         text = text.replace(res[q], () => vals[q]); size = next;
       }
       this.run(this.lex(text), st, depth + 1, 0, undefined, sdepth);
