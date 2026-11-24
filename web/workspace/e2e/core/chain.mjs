@@ -264,6 +264,19 @@ export async function loadAnchored(bytes, ctx, anchor) {
   return Object.freeze(next);
 }
 
+/**
+ * A claimed reset's cheap preflight, before any replay or package work: its form, and its outer signature by the
+ * account's current recovery key (`recovery`: { sign: 32-byte public key, signKey: its id }, as the store records it at
+ * the head). One Ed25519 check; anything else refuses here.
+ */
+export async function preflightReset(bytes, ctx, recovery) {
+  const p = parse(bytes, ctx);
+  if (p.type !== TYPE || p.body.op !== "reset" || p.signer.kind !== "recovery" || p.signer.id !== ctx.account || !recovery || p.signer.key !== recovery.signKey)
+    fail("bad_signature", "not signed by the current recovery key");
+  if (!(await verifyStrict(recovery.sign, p.signed, p.sig))) fail("bad_signature", "not signed by the current recovery key");
+  return true;
+}
+
 /** The canonical checkpoint a store keeps with a reset it committed, and its hash (checked again after a restart). */
 export async function checkpointOf(state) {
   const text = canonText({ v: 1, account: state.account, aud: state.aud, generation: state.generation, seq: state.base, hash: state.hashes[0], epoch: state.epoch.n, recovery: state.recovery.signKey, devices: [...state.devices.keys()].sort() });

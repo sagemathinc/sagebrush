@@ -8,5 +8,5 @@ export { kemFromSeed, ed25519FromSeed } from "./seeded.mjs";
 export { CODE_LENGTH, newRecoverySeed, codeOfSeed, showCode, seedOfCode, recoveryKeys } from "./recovery.mjs";
 export { newEpochSecret, epochCommit, checkRingMeta, sealKeyring, openKeyring, walkBack } from "./keyring.mjs";
 export { preEntryHash, challenge, respond, checkResponse } from "./pop.mjs";
-export { TYPE as CHAIN_TYPE, DEVICE_KINDS, apply as applyChainEntry, replay as replayChain, replayFrom, loadAnchored, checkpointOf, ringMeta, pinOf, checkPin, currentDevice, epochAt, nextBody, deviceSigner, recoverySigner, sealEntry } from "./chain.mjs";
+export { TYPE as CHAIN_TYPE, DEVICE_KINDS, apply as applyChainEntry, replay as replayChain, replayFrom, loadAnchored, preflightReset, checkpointOf, ringMeta, pinOf, checkPin, currentDevice, epochAt, nextBody, deviceSigner, recoverySigner, sealEntry } from "./chain.mjs";
 export { TYPE as WRAP_TYPE, contextOf, wrapEpoch, verifyWrapper, openWrapper, checkTransition, openRecovery } from "./wrap.mjs";

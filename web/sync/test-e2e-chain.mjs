@@ -55,6 +55,11 @@ const X = "e2e2e2e2-0008-4e2e-8e2e-e2e2e2e2e208"; // a reset at the hard bound
 const Y = "e2e2e2e2-0009-4e2e-8e2e-e2e2e2e2e209"; // a corrupted checkpoint hash
 const Z = "e2e2e2e2-000a-4e2e-8e2e-e2e2e2e2e20a"; // a corrupted checkpoint state hash
 const V = "e2e2e2e2-000b-4e2e-8e2e-e2e2e2e2e20b"; // the reset bucket
+const K1 = "e2e2e2e2-000c-4e2e-8e2e-e2e2e2e2e20c"; // a missing stored keyring
+const K2 = "e2e2e2e2-000d-4e2e-8e2e-e2e2e2e2e20d"; // a replaced stored keyring
+const K3 = "e2e2e2e2-000e-4e2e-8e2e-e2e2e2e2e20e"; // epoch 1's keyring
+const O = "e2e2e2e2-000f-4e2e-8e2e-e2e2e2e2e20f"; // the reset preflight and work bucket
+const Q = "e2e2e2e2-0010-4e2e-8e2e-e2e2e2e2e210"; // invalid resets, then a valid one
 const SITE = "https://sagebrush.test";
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
@@ -63,7 +68,7 @@ const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled:
 const cocalc = async () => Response.json(plan);
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
 const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } } });
-const listed = [A, B, P, M, R, C, U, X, Y, Z, V].join(",");
+const listed = [A, B, P, M, R, C, U, X, Y, Z, V, K1, K2, K3, O, Q].join(",");
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_E2E: "1", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("4101") },
@@ -95,7 +100,9 @@ const objectOf = async (id) => {
   const ns = await mf.getDurableObjectNamespace("SYNC_ACCOUNT", "on");
   return ns.get(ns.idFromName("acct:" + hashOf(id)));
 };
-const seam = async (id, v) => (await at(SITE, "/__test/e2e?account=" + id, { method: "POST", body: JSON.stringify(v) })).json();
+const seamAll = async (id, v) => (await at(SITE, "/__test/e2e?account=" + id, { method: "POST", body: JSON.stringify(v) })).json();
+// (the E2E tables' row counts only; seamAll also has the store's work counters)
+const seam = async (id, v) => { const r = await seamAll(id, v); return r && Object.fromEntries(Object.entries(r).filter(([k]) => k.startsWith("e2e_"))); };
 async function until(f, ms = 15_000) {
   for (const t = Date.now(); Date.now() - t < ms; ) {
     if (await f()) return true;
@@ -514,6 +521,86 @@ await section("a reset never draws on the appends' bucket, and only verified res
   }
   const fifth = await W.reset(st);
   ok((await post(s, V, "/api/sync/v1/e2e/chain", fifth.body)).status === 429, "a fifth verified reset within the minute waits (the reset bucket is charged only by verified resets)");
+});
+
+await section("each stored keyring links to the stored one before it", async () => {
+  for (const [what, fault, id] of [["missing", "drop-last", K1], ["replaced", "swap-last", K2]]) {
+    const s = await enabled(id);
+    const W = account(id);
+    ok((await get(s, id, "/api/sync/v1/e2e/chain")).status === 200, "(the store is made)");
+    const g = await W.genesis();
+    ok((await post(s, id, "/api/sync/v1/e2e/chain", g.body)).status === 201, "(genesis)");
+    let st = g.next;
+    const e1 = await W.epoch(st);
+    const x1 = await E.sealEntry(g.d.signer, E.nextBody(st, W.ctx, "epoch", { epoch: e1.epoch }), g.d.sign);
+    const p1 = await W.pack(st, x1, g.d, [{ kind: "device", id: g.d.id }, { kind: "recovery", id: W.ctx.account }], e1.S, e1.n, e1.ring);
+    ok((await post(s, id, "/api/sync/v1/e2e/chain", p1.body)).status === 201, "(epoch 1, its keyring stored)");
+    st = p1.next; W.secrets.set(1, e1.S);
+    await seam(id, { keyrings: fault });
+    const before = await seam(id, {});
+    const head = (await answer(await get(s, id, "/api/sync/v1/e2e/chain"))).head;
+    const e2 = await W.epoch(st);
+    const x2 = await E.sealEntry(g.d.signer, E.nextBody(st, W.ctx, "epoch", { epoch: e2.epoch }), g.d.sign);
+    const p2 = await W.pack(st, x2, g.d, [{ kind: "device", id: g.d.id }, { kind: "recovery", id: W.ctx.account }], e2.S, e2.n, e2.ring);
+    const r = await answer(await post(s, id, "/api/sync/v1/e2e/chain", p2.body));
+    const after = await seam(id, {});
+    const head2 = (await answer(await get(s, id, "/api/sync/v1/e2e/chain"))).head;
+    ok(r.status === 400 && r.reason === "bad_package" && JSON.stringify(after) === JSON.stringify(before) && JSON.stringify(head2) === JSON.stringify(head),
+      `a signed epoch whose stored predecessor keyring is ${what} is refused, with nothing changed: ${r.status} ${r.reason}`);
+    const rs = await W.reset(st);
+    const rr = await answer(await post(s, id, "/api/sync/v1/e2e/chain", rs.body));
+    ok(rr.status === 400 && rr.reason === "bad_package" && JSON.stringify(await seam(id, {})) === JSON.stringify(before), `and so is a valid reset on it, with nothing changed (chain, head, keyrings, wrappers, checkpoint)`);
+  }
+  {
+    // (epoch 1 has no predecessor: a stray earlier row breaks the link too)
+    const s = await enabled(K3);
+    const W = account(K3);
+    ok((await get(s, K3, "/api/sync/v1/e2e/chain")).status === 200, "(the store is made)");
+    const g = await W.genesis();
+    ok((await post(s, K3, "/api/sync/v1/e2e/chain", g.body)).status === 201, "(genesis)");
+    const e1 = await W.epoch(g.next);
+    const x1 = await E.sealEntry(g.d.signer, E.nextBody(g.next, W.ctx, "epoch", { epoch: e1.epoch }), g.d.sign);
+    const p1 = await W.pack(g.next, x1, g.d, [{ kind: "device", id: g.d.id }, { kind: "recovery", id: W.ctx.account }], e1.S, e1.n, e1.ring);
+    ok((await post(s, K3, "/api/sync/v1/e2e/chain", p1.body)).status === 201 && (await seam(K3, {})).e2e_keyrings === 1, "epoch 1's keyring is stored with no predecessor");
+  }
+});
+
+await section("a claimed reset's preflight: one signature check before any package work", async () => {
+  const s = await enabled(O);
+  const W = account(O);
+  ok((await get(s, O, "/api/sync/v1/e2e/chain")).status === 200, "(the store is made)");
+  const g = await W.genesis();
+  ok((await post(s, O, "/api/sync/v1/e2e/chain", g.body)).status === 201, "(genesis)");
+  // (a cold object: restarted, nothing replayed yet; a bad signature must not make it replay either)
+  await (await objectOf(O)).crash().catch(() => {});
+  await until(async () => (await get(s, O, "/api/sync/v1/e2e/chain")).status === 200);
+  const c0 = await seamAll(O, {});
+  // (a) a claimed reset under another key: refused at the preflight, with no transition (package) check at all
+  const oldRk = await E.recoveryKeys(E.newRecoverySeed(), W.ctx.account);
+  const forged = await W.reset(g.next, { signWith: oldRk.sign });
+  for (let i = 0; i < 40; i++) ok((await post(s, O, "/api/sync/v1/e2e/chain", forged.body)).status === 400, `(a claimed reset under another key, refused ${i + 1})`);
+  const c1 = await seamAll(O, {});
+  ok(c1.preflights === c0.preflights && c1.transitions === c0.transitions && c1.replays === c0.replays && c0.replays === 0, "an invalid recovery signature costs no replay and no countersignature, keyring or wrapper check, even on a cold object: " + JSON.stringify([c0, c1].map((c) => [c.replays, c.transitions])));
+  // (c) recovery-signed resets with a torn package: each passes the preflight and is charged to the work bucket (30)
+  const torn = await W.reset(g.next);
+  for (let i = 0; i < 30; i++) ok((await post(s, O, "/api/sync/v1/e2e/chain", { ...torn.body, keyring: null })).status === 400, `(a recovery-signed reset with no keyring, refused ${i + 1})`);
+  const c2 = await seamAll(O, {});
+  ok(c2.preflights === c1.preflights + 30 && c2.transitions === c1.transitions + 30, "each recovery-signed attempt ran its package check");
+  ok((await post(s, O, "/api/sync/v1/e2e/chain", { ...torn.body, keyring: null })).status === 429, "the 31st recovery-signed attempt within the minute waits: the work bucket bounds them, and only the recovery key reaches it");
+  ok((await seamAll(O, {})).transitions === c2.transitions, "(and it ran no package check)");
+});
+
+await section("many invalid resets don't stop the next valid one", async () => {
+  const s = await enabled(Q);
+  const W = account(Q);
+  ok((await get(s, Q, "/api/sync/v1/e2e/chain")).status === 200, "(the store is made)");
+  const g = await W.genesis();
+  ok((await post(s, Q, "/api/sync/v1/e2e/chain", g.body)).status === 201, "(genesis)");
+  const oldRk = await E.recoveryKeys(E.newRecoverySeed(), W.ctx.account);
+  const forged = await W.reset(g.next, { signWith: oldRk.sign });
+  for (let i = 0; i < 60; i++) await post(s, Q, "/api/sync/v1/e2e/chain", forged.body);
+  const good = await W.reset(g.next);
+  ok((await post(s, Q, "/api/sync/v1/e2e/chain", good.body)).status === 201, "(b) after 60 claimed resets with invalid signatures, the valid reset commits");
 });
 
 await section("a corrupted checkpoint is refused after a restart", async () => {

@@ -122,6 +122,14 @@ const apply = (s, bytes) => E.applyChainEntry(s, bytes, ctx).then((r) => r.state
   await refuses("bad_keyring", () => E.walkBack({ S: S3, n: 3, expect: r3.hash, to: 0, account: ctx.account, row: async (k) => (k === 1 ? undefined : rows.get(k)) }), "walk: a missing row stops it");
   await refuses("bad_keyring", () => E.walkBack({ S: S3, n: 3, expect: r2.hash, to: 0, account: ctx.account, row: async (k) => rows.get(k) }), "walk: a start hash that isn't the signed one stops it");
   await refuses("bad_keyring", () => E.walkBack({ S: S3, n: 3, expect: r3.hash, to: 0, account: ctx.account, row: async (k) => rows.get(k), commit: (k) => (k === 1 ? commits.get(0) : commits.get(k)) }), "walk: a secret that isn't its epoch's commitment stops it");
+  {
+    // (a forged keyring 1 sealed under S1, which a removed device of epoch 1 could make: valid metadata, a fake S0. With no
+    //  commitment left for epoch 0 (after a reset), only keyring 2's authenticated prev_ring tells it from the real one)
+    const fake0 = E.newEpochSecret();
+    const evil = await E.sealKeyring({ S: S1, account: ctx.account, meta: r1.meta, secret: fake0 });
+    const forged = new Map([[1, row(evil)], [2, row(r2)], [3, row(r3)]]);
+    await refuses("bad_keyring", () => E.walkBack({ S: S3, n: 3, expect: r3.hash, to: 0, account: ctx.account, row: async (k) => forged.get(k) }), "walk: a forged earlier keyring with valid metadata is refused: the next expected hash comes only from the authenticated successor");
+  }
   await refuses("limit", () => E.walkBack({ S: S3, n: 3, expect: r3.hash, to: 0, budget: 2, account: ctx.account, row: async (k) => rows.get(k) }), "walk: past its budget, refused before any step");
   const ac = new AbortController(); ac.abort();
   await refuses("aborted", () => E.walkBack({ S: S3, n: 3, expect: r3.hash, to: 0, account: ctx.account, row: async (k) => rows.get(k), signal: ac.signal }), "walk: cancellable");
@@ -515,6 +523,15 @@ let state, A, B, C, seed, rec, e0, e1;
   await refuses("bad_suite", async () => apply(s, await E.sealEntry(E.recoverySigner(ctx.account, rk.sign), { ...body, min_suite: 2 }, rk.sign, { device: D.sign, recovery: rk2.sign })), "reset: carries the minimum suite exactly");
   await refuses("bad_form", async () => apply(s, await E.sealEntry(E.recoverySigner(ctx.account, rk.sign), { ...body, generation: "x" }, rk.sign, { device: D.sign, recovery: rk2.sign })), "reset: a generation that isn't a fresh id");
   await refuses("chain_fork", async () => apply(s, await E.sealEntry(E.recoverySigner(ctx.account, rk.sign), { ...body, seq: body.seq + 1 }, rk.sign, { device: D.sign, recovery: rk2.sign })), "reset: only at the next position");
+  // the store's preflight: one signature check against the recorded current recovery key, before anything else
+  const recNow = { sign: rk.sign.raw, signKey: rk.sign.key };
+  ok(await E.preflightReset(reset, ctx, recNow), "preflight: the reset signed by the current recovery key passes");
+  const byOther = await E.sealEntry(E.recoverySigner(ctx.account, rkOld.sign), body, rkOld.sign, { device: D.sign, recovery: rk2.sign });
+  await refuses("bad_signature", () => E.preflightReset(byOther, ctx, recNow), "preflight: another recovery key's reset is refused");
+  const sigFlip = parseCanonical(reset); sigFlip.sig = sigFlip.sig.slice(0, -2) + (sigFlip.sig.at(-2) === "A" ? "B" : "A") + sigFlip.sig.at(-1);
+  await refuses("bad_signature", () => E.preflightReset(enc(canonText(sigFlip)), ctx, recNow), "preflight: a bad signature under the right key id is refused");
+  await refuses("bad_signature", () => E.preflightReset(entries[1], ctx, recNow), "preflight: an entry that isn't a reset is refused");
+  await refuses("bad_signature", () => E.preflightReset(reset, ctx, null), "preflight: with no recorded recovery key, refused");
   // loading the compacted chain [reset, ...] under an anchor
   const anchor = { account: ctx.account, aud: ctx.aud, generation, seq: after.seq, hash: after.head };
   const loaded = await E.loadAnchored(reset, ctx, anchor);

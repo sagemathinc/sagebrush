@@ -15150,7 +15150,7 @@
   "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
   "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
  },
- "web/sync/e2e-chain.ts :: kept :: const last = this.sql.exec(\"SELECT epoch, bytes FROM e2e_keyrings ORDER BY epoch DESC LIMIT 1\").toArray()[0] as Row | undefined; #0": {
+ "web/sync/e2e-chain.ts :: kept :: const last = this.sql.exec(\"SELECT epoch, hash FROM e2e_keyrings ORDER BY epoch DESC LIMIT 1\").toArray()[0] as Row | undefined; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
