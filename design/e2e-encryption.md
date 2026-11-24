@@ -144,7 +144,7 @@ WebCrypto's AES-GCM takes whole buffers, so a large object is sealed in fixed, b
 ### 3.3 Blob addresses and dedup within an account
 
 - **The device keeps plaintext SHA-256 locally,** as today. The local blob store, a write's `base` compare-and-swap and the reducer all keep using it.
-- **At the wire boundary, one function:** `wireAddress(sha) = HMAC-SHA256(K_addr[e], "sagebrush.blob.v1" ‖ sha)` (the sync client's proposal).
+- **At the wire boundary, one function:** `wireAddress(sha) = "a1:" + hex(HMAC-SHA256(K_addr[e], "sagebrush.blob.v1" ‖ sha))` (the sync client's proposal). The `a1:` names the address scheme's version (§11.5).
   - The server keys holdings by that address.
   - It checks the uploaded ciphertext's declared `ct_sha256`.
 - **Deterministic blob encryption** (SEC): any device holding the epoch derives a blob's keys from the plaintext's hash, so two devices racing to upload the same file produce the same ciphertext, and no "winning key" has to be found. A random key per upload would need a serialized key registry, which is more complex and race-prone.
@@ -483,7 +483,8 @@ William asked for this review because a mistake found later, with millions of fi
   | Index entries | sealed under `K_index[e]` | re-sealed in the next index snapshot, which happens anyway |
   | Shares already sent | carry their files' `K_file`s, not epoch keys | nothing (their pins keep the blobs) |
 
-  So retirement re-uploads no blob bytes, and re-encrypts no content. With a million entries, it's one re-sealed index snapshot (§11.4) and one re-wrap per document.
+  So retirement re-uploads no blob bytes, and re-encrypts no content.
+  - **It never re-keys the index entry by entry.** At today's rate of 2,000 ops a minute, a million per-entry ops would take over 8 hours. The index moves as one client-made snapshot at a checkpoint (§4.1), which costs its size in upload, not a million ops. With a million entries, it's one re-sealed index snapshot (§11.4) and one re-wrap per document.
 - **The order:**
   1. a device writes a new index snapshot, under the current epoch, that carries every entry of the old epoch;
   2. it re-wraps the old epoch's document CEKs;
@@ -494,6 +495,9 @@ William asked for this review because a mistake found later, with millions of fi
   - the retirement entry is written only after verifying that the snapshot covers every entry, and every document of the epoch is re-wrapped;
   - until then, nothing changes for anyone.
 - **What other devices see:** before the retirement entry, the old snapshot and epoch, both valid. After it, the new snapshot.
+  - The index switches at one checkpoint `seq`. A device older than that takes the new snapshot, as the index's tombstone checkpoint already works.
+  - Documents switch one by one: each re-wrap is its own idempotent step.
+  - **A document's key epoch is a new field.** It isn't the document's existing `epoch`, which counts "Clear history". Reusing that would make a key move look to clients like a cleared history.
   - **An op sealed under a retired epoch is refused:** epochs change only with chain entries, and §4.1's rule already refuses ops bound to an old head. The writing device rebases it under the current epoch.
   - Devices keep the old secret locally until they've processed the retirement.
 - **Recovery:**
@@ -528,6 +532,9 @@ William asked for this review because a mistake found later, with millions of fi
 
 | Limit | Value | Assessment |
 | --- | --- | --- |
+| **Today's index ceilings** | 100,000 entries and 100,000 documents per account, 10,000 entries per folder (sync's protocol limits); 500 ops per message, 2,000 a minute | **a million files is ten times past them.** Under E2E they count opaque entries, so the numbers carry over. Raising them is a limits change (with the separate safety ceiling the sync scale design already plans), paired with the paged index (§11.4) |
+| Address and id forms | 64-hex addresses and `ct_sha256`; document ids (a UUID or 12 hex) | **fixed in the design:** an address carries its version, `a1:` + 64 hex, so a later scheme can share the holdings table with no flag day. The id forms are versioned the same way |
+| Sealed metadata per batch | at most 8 blob refs per patch envelope, 2 MiB per message | sealing grows each envelope. The limits are re-measured in the sealed-ops PR |
 | Chunk index | u32 of 1 MiB chunks: 4 PiB per file | ample |
 | Chunk format | whole-file compression, then fixed chunks: reading part of a large file decompresses from its start | a later codec version can add restart points, through §11.1 |
 | Sequence numbers (`seq`, `dseq`) | safe integers, 2^53 | ample |
