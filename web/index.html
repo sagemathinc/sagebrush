@@ -1606,7 +1606,7 @@ function notebookForExport() {
   if (r.missing.length) statusEl.textContent = IMAGES_LEFT_OUT(r.missing.length);
   return r.doc;
 }
-const IMAGES_LEFT_OUT = (n) => `${n} image${n === 1 ? "" : "s"} couldn't be included: ${n === 1 ? "its file is" : "their files are"} missing or no longer an image.`;
+const IMAGES_LEFT_OUT = (n) => `${n} image${n === 1 ? "" : "s"} couldn't be included. ${n === 1 ? "Its file may be" : "Their files may be"} unavailable, invalid, or over the image size limit.`;
 // A workspace file's bytes, for embedding another notebook's images (a folder share)
 const readImageFile = async (path) => {
   const r = ws ? await ws.read(path).catch(() => null) : null;
