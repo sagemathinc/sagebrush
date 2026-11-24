@@ -27,8 +27,9 @@ coefficient.
    irreducibility outright.
 3. **Hensel lifting** on a factor tree, with quadratic steps, past twice
    the Mignotte bound times the leading coefficient.
-4. **Zassenhaus recombination** of subsets of the lifted factors, with a
-   constant-term test before each trial division.
+4. **Recombination**: Zassenhaus's subsets of the lifted factors, with a
+   constant-term test before each trial division, when there are at most
+   eight; with more, van Hoeij's lattice recombination (`vanhoeij.rs`).
 
 **Validation:** identical to FLINT on 400 random products, on cyclotomic
 polynomials, and on the Hecke polynomials of $T_2$ and $T_3$ at about 100
@@ -45,8 +46,9 @@ level 3105 factors in **0.23 s instead of 80 s**, and the newspace
 
 FLINT does the same polynomial in 0.01 s. FLINT uses van Hoeij's
 lattice-based recombination, which avoids Zassenhaus's exponential subset
-search. That is the likely difference, and the next step if Hecke
-polynomials with many modular factors become common.
+search. That was the likely difference. Sagebrush has since added van
+Hoeij's recombination too (`vanhoeij.rs`), used when more than eight
+modular factors remain after trying subsets of sizes 1 and 2.
 
 ## What would have saved time
 
