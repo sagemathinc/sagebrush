@@ -9,7 +9,7 @@
 == unique
 True
 == count
-(213, 213)
+(214, 214)
 == missing
 []
 == extra
@@ -23,7 +23,7 @@ True
 == value-unique
 True
 == value-cases
-['blocks.added-nan-col']
+['blocks.added-nan-col', 'blocks.added-f32-std']
 == value-cases-pinned
 []
 == sagebrush-only

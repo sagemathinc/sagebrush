@@ -1,0 +1,221 @@
+== std
+
+0    0.707107
+1    2.121320
+2         NaN
+dtype: float64
+== var
+
+0    0.5
+1    4.5
+2    NaN
+dtype: float64
+== median
+
+0    2.0
+1    5.5
+2    3.0
+dtype: float64
+== std.exact
+[0.7071067811865476, 2.1213203435596424, nan]
+== std-ddof0
+
+0    0.5
+1    1.5
+2    0.0
+dtype: float64
+== var-ddof2
+
+0   NaN
+1   NaN
+2   NaN
+dtype: float64
+== std-skipna-false
+
+0    0.707107
+1         NaN
+2         NaN
+dtype: float64
+== median-skipna-false
+
+0    2.0
+1    NaN
+2    3.0
+dtype: float64
+== int-std
+
+0    0.707107
+1    1.000000
+2         NaN
+dtype: float64
+== int-median
+
+0    1.5
+1    4.0
+2    6.0
+dtype: float64
+== int-median-odd
+
+0    2.0
+1    5.0
+dtype: float64
+== bool-std
+
+0    0.707107
+1    0.577350
+2         NaN
+dtype: float64
+== bool-median
+
+0    0.5
+1    1.0
+2    1.0
+dtype: float64
+== uint8-median
+
+0    1.5
+1    4.0
+2    6.0
+dtype: float64
+== float32-std
+
+0    0.707107
+1    2.121320
+2         NaN
+dtype: float32
+== float32-std.exact
+[0.7071067690849304, 2.1213202476501465, nan]
+== float32-var
+
+0    0.5
+1    4.5
+2    NaN
+dtype: float32
+== float32-median
+
+0    2.0
+1    5.5
+2    3.0
+dtype: float32
+== float32-big-std.exact
+[3.2800352573394775, 3.666171073913574, 3.544095277786255, 3.6177427768707275, 3.8564350605010986]
+== float32-big-var.exact
+[10.758634567260742, 13.440810203552246, 12.560613632202148, 13.088064193725586, 14.872092247009277]
+== float32-big-median.exact
+[-0.5744966268539429, 0.22120685875415802, 0.6327635049819946, 0.4658386707305908, 0.3913825750350952]
+== big-std.exact
+[959.4505925650711, 938.9106385722823, 869.509020870424, 1017.9814974613976, 1008.8483526011108, 1119.5448319485492, 946.4104553025012]
+== big-var.exact
+[920545.4395734662, 881553.187224211, 756045.9373750434, 1036286.3291737494, 1017774.9985459753, 1253380.6307427054, 895692.7499058875]
+== big-median.exact
+[1000142.2513725263, 1000189.2931975586, 999948.8115523923, 999879.5354282114, 1000057.1209960821, 1000004.0008419753, 1000045.1181458014]
+== sorted-std.exact
+[883.6803774254565, 1006.3196323820998, 1082.6416211658461, 1021.5318531452114, 996.6188162818722, 957.5529372352552, 886.3556085395074]
+== median-even.exact
+[0.15000000000000002, 0.5]
+== inf
+[nan, nan]
+== single-value
+
+0   NaN
+dtype: float64
+== str-std
+!! TypeError: dtype 'str' does not support operation 'std'
+== str-median
+!! TypeError: dtype 'str' does not support operation 'median'
+== frame-std
+!! TypeError: dtype 'str' does not support operation 'std'
+== frame-std-numeric-only
+
+          x
+k          
+0  0.707107
+1  2.121320
+2       NaN
+== frame-median
+
+     x    n
+k          
+0  2.0  1.5
+1  5.5  4.0
+2  3.0  6.0
+== frame-median.dtypes
+[('x', 'float64'), ('n', 'float64')]
+== frame-var-float32
+[('x', 'float32')]
+== as-index-false
+
+   k    x
+0  0  2.0
+1  1  5.5
+2  2  3.0
+== agg-std
+
+0    0.707107
+1    2.121320
+2         NaN
+dtype: float64
+== agg-list
+
+   mean       std  median
+0   2.0  0.707107     2.0
+1   5.5  2.121320     5.5
+2   3.0       NaN     3.0
+== agg-named
+
+     spread  mid
+k               
+0  0.707107  2.0
+1  2.121320  5.5
+2       NaN  3.0
+== agg-dict
+
+     x    n
+k          
+0  0.5  1.5
+1  4.5  4.0
+2  NaN  6.0
+== f32-std-fits.dtype
+dtype('float32')
+== f32-std-wide.dtype
+dtype('float64')
+== f32-std-wide.exact
+[21216.73896950236, 1.4142135623730951]
+== f32-std-wide-nan.dtype
+dtype('float64')
+== f32-var-wide.dtype
+dtype('float32')
+== f32-median-half.dtype
+dtype('float64')
+== f32-median-half.exact
+[16777217.0, 1.5]
+== f32-median-fits.dtype
+dtype('float32')
+== f32-block-std.dtypes
+[dtype('float64'), dtype('float64')]
+== f32-block-median.dtypes
+[dtype('float32'), dtype('float32')]
+== f32-block-agg-str.dtypes
+[dtype('float64'), dtype('float64')]
+== f32-block-subset.dtypes
+[dtype('float32')]
+== f32-block-agg-dict.dtypes
+[dtype('float32'), dtype('float64')]
+== f32-block-var.dtypes
+[dtype('float32'), dtype('float32')]
+== f32-series-of-block.dtype
+dtype('float32')
+== wide-std.exact
+[36172.38117105313, 35635.159474356326, 44814.29769191511, 36791.49327042814, 29307.616245015168, 38191.250815370964, 39373.8257800173, 27781.35722458459, 27813.73195424012]
+== wide-f32-std
+
+0    36172.381123
+1    35635.159194
+2    44814.297685
+3    36791.493213
+4    29307.616494
+5    38191.251056
+6    39373.825672
+7    27781.357322
+8    27813.731917
+dtype: float64

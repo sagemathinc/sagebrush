@@ -260,12 +260,10 @@
 !! NotImplementedError: pandas.SeriesGroupBy.transform is not in Sagebrush's pandas 0.x subset
 == groupby.apply
 !! NotImplementedError: pandas.SeriesGroupBy.apply is not in Sagebrush's pandas 0.x subset
-== groupby.std
-!! NotImplementedError: pandas.SeriesGroupBy.std is not in Sagebrush's pandas 0.x subset
-== groupby.frame-median
-!! NotImplementedError: pandas.DataFrameGroupBy.median is not in Sagebrush's pandas 0.x subset
+== groupby.frame-prod
+!! NotImplementedError: pandas.DataFrameGroupBy.prod is not in Sagebrush's pandas 0.x subset
 == groupby.agg-name-outside
-!! NotImplementedError: pandas.SeriesGroupBy.agg('median') is not in Sagebrush's pandas 0.x subset
+!! NotImplementedError: pandas.SeriesGroupBy.agg('prod') is not in Sagebrush's pandas 0.x subset
 == groupby.by-function
 !! NotImplementedError: pandas.DataFrame.groupby by a builtin_function_or_method is not in Sagebrush's pandas 0.x subset
 == groupby.observed
@@ -282,6 +280,10 @@
 !! NotImplementedError: pandas.SeriesGroupBy.sum of a datetime64[us] column is not in Sagebrush's pandas 0.x subset
 == groupby.level-other
 !! NotImplementedError: pandas.DataFrame.groupby(level=) other than the index itself is not in Sagebrush's pandas 0.x subset
+== groupby.std-engine
+!! NotImplementedError: pandas.SeriesGroupBy.std(engine=, engine_kwargs=) is not in Sagebrush's pandas 0.x subset
+== groupby.median-datetime
+!! NotImplementedError: pandas.SeriesGroupBy.median of a datetime64[us] column is not in Sagebrush's pandas 0.x subset
 == reach.index-asarray-str
 !! NotImplementedError: pandas.numpy.asarray(Index) of str labels (Index.to_numpy() gives its '<U' array) is not in Sagebrush's pandas 0.x subset
 == reach.index-asarray-dtype

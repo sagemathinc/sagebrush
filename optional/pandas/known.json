@@ -982,18 +982,13 @@
       "reason": "apply runs pandas' own split-apply-combine with its result-shape rules, outside the subset's groupby; it raises before any work"
     },
     {
-      "case": "groupby.std",
-      "message": "pandas.SeriesGroupBy.std is not in Sagebrush's pandas 0.x subset",
-      "reason": "std per group is outside the subset's groupby for now; it raises before any work"
-    },
-    {
-      "case": "groupby.frame-median",
-      "message": "pandas.DataFrameGroupBy.median is not in Sagebrush's pandas 0.x subset",
-      "reason": "median per group is outside the subset's groupby for now; it raises before any work"
+      "case": "groupby.frame-prod",
+      "message": "pandas.DataFrameGroupBy.prod is not in Sagebrush's pandas 0.x subset",
+      "reason": "prod per group is outside the subset's groupby for now; it raises before any work"
     },
     {
       "case": "groupby.agg-name-outside",
-      "message": "pandas.SeriesGroupBy.agg('median') is not in Sagebrush's pandas 0.x subset",
+      "message": "pandas.SeriesGroupBy.agg('prod') is not in Sagebrush's pandas 0.x subset",
       "reason": "agg with the name of a reduction outside the subset's groupby raises before any work, rather than pandas' result"
     },
     {
@@ -1037,6 +1032,16 @@
       "reason": "level= other than the index itself needs a MultiIndex, which isn't in the subset; it raises before any work"
     },
     {
+      "case": "groupby.std-engine",
+      "message": "pandas.SeriesGroupBy.std(engine=, engine_kwargs=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "engine= picks numba in pandas, which isn't in Sagebrush; it raises before any work"
+    },
+    {
+      "case": "groupby.median-datetime",
+      "message": "pandas.SeriesGroupBy.median of a datetime64[us] column is not in Sagebrush's pandas 0.x subset",
+      "reason": "a median of datetimes is a Timestamp in pandas, computed on their integer values; datetime columns stay out of the subset's numeric groupby; it raises before any work"
+    },
+    {
       "case": "reach.index-asarray-str",
       "message": "pandas.numpy.asarray(Index) of str labels (Index.to_numpy() gives its '<U' array) is not in Sagebrush's pandas 0.x subset",
       "reason": "pandas gives an object array of the labels; Sagebrush's numpy can't take a string array from __array__ yet (Index.to_numpy() gives a '<U' array); it raises before any work"
@@ -1072,6 +1077,11 @@
       "case": "blocks.added-nan-col",
       "where": "DataFrameGroupBy sum and mean of a frame in which a float column was added after construction (df['x'] = ..., assign, insert), with the rows already in group order; tests/test_groupby_blocks.py pins Sagebrush's values (pandas gives x sums 0.0 and 0.0 there and means 0.0, Sagebrush sums 1.0 and means 0.25)",
       "reason": "the summation path can differ when a float column was added after construction (df['x'] = ..., assign, insert). On ordinary data that's a few ulps; on data with cancellation the sum can differ by the rounding error of the larger terms (e.g. 0 against 1 for [1e100, 1, -1e100, 1]). pandas picks its path per internal block of columns, and an added column is its own block until pandas consolidates; Sagebrush's frame treats a frame's columns of one float dtype as one block, as the constructor and read_csv make them (ruled a documented divergence)"
+    },
+    {
+      "case": "blocks.added-f32-std",
+      "where": "DataFrameGroupBy std and median of a frame with float32 columns, one of them added after construction (df['x'] = ..., assign, insert); tests/test_groupby_blocks.py pins Sagebrush's dtypes (pandas gives float32 for a and float64 for the added b there, Sagebrush float64 for both)",
+      "reason": "pandas computes a float32 column's groupby std and median in float64 and casts the result back to float32 only when every value of the block stays within 5e-4 of its float32 cast; an added column is its own block until pandas consolidates. Sagebrush's frame treats a frame's float32 columns as one block, as the constructor and read_csv make them, so one column whose result doesn't fit makes all of them float64. The values agree; only the dtype (and so float32 rounding) can differ"
     }
   ]
 }

@@ -1,6 +1,6 @@
 """groupby with one key (a column, a Series or a list of labels, or the
-index with level=0): size, count, sum, mean, min, max and agg, as pandas
-3.1.0 computes them, ported from pandas/_libs/groupby.pyx (BSD-3-Clause,
+index with level=0): size, count, sum, mean, min, max, std, var, median
+and agg, as pandas 3.1.0 computes them, ported from pandas/_libs/groupby.pyx (BSD-3-Clause,
 see _pd_license.py and NOTICE.md):
 
 - groups are the key's distinct values, sorted (sort=True) or in order of
@@ -16,9 +16,15 @@ see _pd_license.py and NOTICE.md):
   keep the column's dtype where every sum fits it (else int64, as pandas'
   downcast), bool sums are int64; means of integers and bools are float64;
 - min and max skip missing values and keep the dtype; str sums
-  concatenate ('' for a group of missing values).
+  concatenate ('' for a group of missing values);
+- std and var are pandas' Welford update (var of float32 in float32
+  arithmetic), median the middle value or the mean of the two middle ones;
+  a float32 column's std and median run in float64 and come back float32
+  only when every value of its block fits within 5e-4 (_fits32).
 Several keys need a MultiIndex, which isn't in the subset: they raise.
 """
+
+import math
 
 import numpy as np
 
@@ -38,7 +44,7 @@ _DATAFRAME_NAMES = frozenset([
     'take', 'transform', 'value_counts', 'var'])
 _SERIES_NAMES = _DATAFRAME_NAMES - {'boxplot', 'corrwith'} | {
     'dtype', 'is_monotonic_decreasing', 'is_monotonic_increasing', 'nlargest', 'nsmallest', 'unique'}
-_REDUCTIONS = ("sum", "mean", "min", "max", "count", "size")
+_REDUCTIONS = ("sum", "mean", "min", "max", "count", "size", "std", "var", "median")
 
 
 def _unsupported(what):
@@ -180,12 +186,101 @@ def fast_path(col, groups, op, block_nan):
             and not (col.dtype in FLOATS and block_nan))
 
 
-def reduce_groups(col, groups, op, owner, min_count=0, block_nan=None):
+def _welford(values, positions, f32, ddof, skipna, std):
+    # (pandas' group_var: Welford's update per group; NaN where a group has no more values than ddof, or, with
+    # skipna=False, any missing value. For a float32 column pandas 3.1 runs var in float32 arithmetic, and std in
+    # float64, its square root correctly rounded: measured, each matching pandas bit for bit)
+    rnd = _f32 if (f32 and not std) else float
+    out = []
+    for pos in positions:
+        nobs = 0
+        mean = acc = 0.0
+        missing = False
+        for i in pos:
+            val = values[i]
+            if val != val:
+                missing = True
+                continue
+            nobs += 1
+            oldmean = mean
+            mean = rnd(mean + rnd(rnd(val - oldmean) / nobs))
+            acc = rnd(acc + rnd(rnd(val - mean) * rnd(val - oldmean)))
+        if (missing and not skipna) or nobs <= ddof:
+            out.append(float("nan"))
+            continue
+        v = rnd(acc / rnd(nobs - ddof))
+        out.append((math.sqrt(v) if v >= 0 else float("nan")) if std else v)
+    return out
+
+
+def _median(values, positions, skipna):
+    # (pandas' group_median_float64: the middle value of the group's values present, or the mean of the two
+    # middle ones, in float64)
+    out = []
+    for pos in positions:
+        present = sorted(values[i] for i in pos if values[i] == values[i])
+        if not present or (not skipna and len(present) < len(pos)):
+            out.append(float("nan"))
+            continue
+        n = len(present)
+        out.append(present[n // 2] if n % 2 else (present[n // 2] + present[n // 2 - 1]) / 2)
+    return out
+
+
+def _fits32(res):
+    # (pandas' maybe_downcast_numeric for a float32 column's float64 result: float32 only if every value, cast,
+    # stays within 5e-4 of it, NaN matching NaN and an infinity its own sign)
+    for r in res:
+        c = _f32(r)
+        if r != r:
+            continue
+        if c == r or abs(c - r) <= 5e-4:
+            continue
+        return False
+    return True
+
+
+def _spread_values(col, groups, op, owner, ddof, skipna):
+    """(op per group as floats, whether float64 work needs the float32
+    check): std and median of a float32 column run in float64."""
+    d = col.dtype
+    if d is DT:
+        raise _unsupported("%s.%s of a datetime64[us] column" % (owner, op))
+    if d is STR:
+        raise TypeError("dtype 'str' does not support operation '%s'" % op)
+    if not (d in INTS or d in FLOATS or d == "bool"):
+        raise _unsupported("%s.%s of an object column" % (owner, op))
+    f32 = d == "float32"
+    values = col._pd_values.astype(np.float64).tolist()
+    if op == "median":
+        res = _median(values, groups.positions, skipna)
+    else:
+        res = _welford(values, groups.positions, f32, ddof, skipna, op == "std")
+    return res, f32 and op != "var"
+
+
+def spread_columns(cols, groups, op, owner, ddof=1, skipna=True):
+    """std, var or median of each column, as Columns. pandas computes a
+    float32 column's std and median in float64, then casts its whole block
+    (here: the columns given, all of the float32 ones) back to float32 only
+    when every value fits (_fits32)."""
+    done = [_spread_values(c, groups, op, owner, ddof, skipna) for c in cols]
+    to32 = all(_fits32(res) for res, check in done if check)
+    out = []
+    for c, (res, check) in zip(cols, done):
+        d = "float32" if c.dtype == "float32" and (to32 or not check) else "float64"
+        out.append(Column(d, np.array(res, dtype=d)))
+    return out
+
+
+def reduce_groups(col, groups, op, owner, min_count=0, block_nan=None, ddof=1, skipna=True):
     """One column's op per group, as a Column in group order. block_nan:
     whether the column's pandas block (its frame's columns of that float
     dtype) holds a missing value; the column's own when None."""
     d = col.dtype
     pos = groups.positions
+    if op in ("std", "var", "median"):
+        return spread_columns([col], groups, op, owner, ddof, skipna)[0]
     if block_nan is None:
         block_nan = d in FLOATS and bool(col.isna().any())
     if fast_path(col, groups, op, block_nan):
@@ -343,6 +438,24 @@ class SeriesGroupBy(_GroupBy):
     def count(self):
         return self._pd_reduce("count")
 
+    def _pd_spread(self, op, ddof, skipna, engine, engine_kwargs):
+        if engine is not None or engine_kwargs is not None:
+            raise _unsupported("SeriesGroupBy.%s(engine=, engine_kwargs=)" % op)
+        return self._pd_result(reduce_groups(self._pd_obj._pd_col, self._pd_groups, op, "SeriesGroupBy",
+                                             ddof=ddof, skipna=skipna))
+
+    def std(self, ddof=1, engine=None, engine_kwargs=None, numeric_only=False, skipna=True):
+        """Each group's standard deviation (pandas' Welford update; see _pd_groupby)."""
+        return self._pd_spread("std", ddof, skipna, engine, engine_kwargs)
+
+    def var(self, ddof=1, engine=None, engine_kwargs=None, numeric_only=False, skipna=True):
+        """Each group's variance (pandas' Welford update; see _pd_groupby)."""
+        return self._pd_spread("var", ddof, skipna, engine, engine_kwargs)
+
+    def median(self, numeric_only=False, skipna=True):
+        """Each group's median (the middle value, or the mean of the two middle ones)."""
+        return self._pd_spread("median", 1, skipna, None, None)
+
     def sum(self, numeric_only=False, min_count=0, **kwargs):
         if kwargs:
             raise _unsupported("SeriesGroupBy.sum(%s=)" % ", ".join(sorted(kwargs)))
@@ -445,6 +558,8 @@ class DataFrameGroupBy(_GroupBy):
     def _pd_reduce(self, op, numeric_only=False, min_count=0):
         f = self._pd_obj
         js = [j for j in self._pd_cols if not numeric_only or _numeric(f._pd_cols[j])]
+        if op in ("std", "var", "median"):
+            return self._pd_frame(spread_columns([f._pd_cols[j] for j in js], self._pd_groups, op, "DataFrameGroupBy"), js)
         # (pandas checks for NaN over a whole block: the frame's columns of one float dtype)
         nan_in = {}
         for j in js:
@@ -466,6 +581,26 @@ class DataFrameGroupBy(_GroupBy):
 
     def count(self):
         return self._pd_reduce("count")
+
+    def _pd_spread(self, op, ddof, skipna, numeric_only, engine, engine_kwargs):
+        if engine is not None or engine_kwargs is not None:
+            raise _unsupported("DataFrameGroupBy.%s(engine=, engine_kwargs=)" % op)
+        f = self._pd_obj
+        js = [j for j in self._pd_cols if not numeric_only or _numeric(f._pd_cols[j])]
+        cols = spread_columns([f._pd_cols[j] for j in js], self._pd_groups, op, "DataFrameGroupBy", ddof, skipna)
+        return self._pd_frame(cols, js)
+
+    def std(self, ddof=1, engine=None, engine_kwargs=None, numeric_only=False, skipna=True):
+        """Each group's standard deviation per column (pandas' Welford update)."""
+        return self._pd_spread("std", ddof, skipna, numeric_only, engine, engine_kwargs)
+
+    def var(self, ddof=1, engine=None, engine_kwargs=None, numeric_only=False, skipna=True):
+        """Each group's variance per column (pandas' Welford update)."""
+        return self._pd_spread("var", ddof, skipna, numeric_only, engine, engine_kwargs)
+
+    def median(self, numeric_only=False, skipna=True):
+        """Each group's median per column."""
+        return self._pd_spread("median", 1, skipna, numeric_only, None, None)
 
     def sum(self, numeric_only=False, min_count=0, **kwargs):
         if kwargs:
