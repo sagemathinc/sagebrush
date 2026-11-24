@@ -176,3 +176,14 @@ for cid, fn in [
     ("samplewise", lambda: multilabel_confusion_matrix(a, b, samplewise=2)),
 ]:
     case("param." + cid, sorted_sets(fn))
+
+# float32 inputs: the regression metrics compute in float32, as scikit-learn's
+# _find_matching_floating_dtype keeps the inputs' floating type
+t32 = np.array([0.1, 0.2, 0.3], dtype=np.float32)
+p32 = np.array([0.2, 0.0, 0.4], dtype=np.float32)
+for name, fn in [("r2", r2_score), ("mse", mean_squared_error), ("rmse", root_mean_squared_error), ("mae", mean_absolute_error)]:
+    case(name + ".float32", lambda: (np.asarray(fn(t32, p32, multioutput="raw_values")).dtype.name, hx(fn(t32, p32)), hx(fn(t32, p32, multioutput="raw_values"))))
+
+# zero_division=np.nan: the averages skip the NaN entries (_nanaverage), unweighted and weighted
+for avg in ("macro", "weighted"):
+    case("prfs.nan-skipped.%s" % avg, caught(lambda: hx(precision_recall_fscore_support([0, 1, 1, 2], [0, 0, 0, 0], labels=[0, 1, 2, 3], average=avg, zero_division=np.nan))))

@@ -320,3 +320,15 @@
 !! InvalidParameterError: The 'warn_for' parameter of precision_recall_fscore_support must be an instance of 'list', an instance of 'tuple' or an instance of 'set'. Got 'precision' instead.
 == param.samplewise
 !! InvalidParameterError: The 'samplewise' parameter of multilabel_confusion_matrix must be an instance of 'bool' or an instance of 'numpy.bool'. Got 2 instead.
+== r2.float32
+('float32', '-0x1.fffff80000000p+0', ((1,), ['-0x1.fffff80000000p+0']))
+== mse.float32
+('float32', '0x1.47ae160000000p-6', ((1,), ['0x1.47ae160000000p-6']))
+== rmse.float32
+('float32', '0x1.21a1860000000p-3', ((1,), ['0x1.21a1860000000p-3']))
+== mae.float32
+('float32', '0x1.1111120000000p-3', ((1,), ['0x1.1111120000000p-3']))
+== prfs.nan-skipped.macro
+(['0x1.0000000000000p-2', '0x1.5555555555555p-2', '0x1.1111111111111p-3', None], [])
+== prfs.nan-skipped.weighted
+(['0x1.0000000000000p-2', '0x1.0000000000000p-2', '0x1.999999999999ap-4', None], [])

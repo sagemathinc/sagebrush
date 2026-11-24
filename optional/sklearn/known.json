@@ -36,5 +36,12 @@
       "printed": "!! AttributeError: module 'sklearn.utils' has no attribute 'no_such_name'",
       "reason": "a name scikit-learn doesn't have either: AttributeError, as scikit-learn; the case shows the two kinds stay apart"
     }
+  ],
+  "tolerances": [
+    {
+      "function": "sklearn.metrics.accuracy_score(normalize=False, sample_weight=...)",
+      "rule": "a few float64 ulps",
+      "reason": "it is np.dot(score, sample_weight), and Sagebrush's np.dot doesn't reproduce OpenBLAS's ddot summation order (ruled: results through np.dot or @ may differ from scikit-learn by a few ulps; everything else is bit-exact)"
+    }
   ]
 }
