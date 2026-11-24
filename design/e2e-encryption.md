@@ -485,7 +485,7 @@ William asked for this review because a mistake found later, with millions of fi
   | Shares already sent | carry their files' `K_file`s, not epoch keys | nothing (their pins keep the blobs) |
 
   So retirement re-uploads no blob bytes, and re-encrypts no content.
-  - **It never re-keys the index entry by entry.** At today's rate of 2,000 ops a minute, a million per-entry ops would take over 8 hours. The index moves as one client-made snapshot at a checkpoint (§4.1), which costs its size in upload, not a million ops. With a million entries, it's one re-sealed index snapshot (§11.4) and one re-wrap per document.
+  - **It never re-keys the index entry by entry.** At today's rate of 2,000 ops a minute, a million per-entry ops would take over 8 hours. The index moves as one client-made snapshot at a checkpoint (§4.1), which costs its size in upload, not a million ops. With a million entries, it's one re-sealed index snapshot (§11.4), which re-wraps the document CEKs too.
 - **The order:**
   1. a device writes a new index snapshot, under the current epoch, that carries every entry of the old epoch;
   2. (the document CEKs are re-wrapped by step 1, since their wraps live in the index entries);
