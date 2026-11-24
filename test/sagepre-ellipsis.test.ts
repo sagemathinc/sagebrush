@@ -100,8 +100,9 @@ test("ellipsis ranges: the same text as the old rewrite, on Sage programs and ge
 
 // The shapes that took minutes (1 MiB each, a fraction of a second on an idle machine): linear now, so a 1 MiB file
 // costs about 4 times a 256 KiB one, where the old rewrite's cost grew 16 times (the bound leaves room for a busy
-// runner); and a few seconds at most.  Code nested past Python's limit of 200 brackets is left as it is (Python refuses
-// it, whatever the preparser does).
+// runner, with a floor of 50 ms so that one garbage collection in a fast shape can't fail it); and a few seconds at
+// most.  Code nested past Python's limit of 200 brackets is left as it is (Python refuses it, whatever the preparser
+// does).
 test("ellipsis ranges: linear in the file's length", () => {
   const time = (src: string) => {
     let best = Infinity;
@@ -116,7 +117,7 @@ test("ellipsis ranges: linear in the file's length", () => {
   for (const [name, unit] of [["[1,..,", "[1,..,"], ["[1..2]", "[1..2]\n"], ["mixed", "[(1..2), 3..4; 2]\n"], ["200 deep", deep]]) {
     const rep = (n: number) => unit.repeat(Math.floor(n / unit.length));
     const small = time(rep(1 << 18)), big = time(rep(1 << 20));
-    assert.ok(big < 8 * Math.max(small, 5), name + ": 1 MiB " + Math.round(big) + " ms, 256 KiB " + Math.round(small) + " ms");
+    assert.ok(big < 8 * Math.max(small, 50), name + ": 1 MiB " + Math.round(big) + " ms, 256 KiB " + Math.round(small) + " ms");
     assert.ok(big < 5000, name + ": 1 MiB " + Math.round(big) + " ms");
   }
   const tooDeep = "[".repeat(201) + "1..2" + "]".repeat(201);
