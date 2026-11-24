@@ -1,0 +1,16 @@
+{
+ "title": "Interpolation and curve fitting (MATLAB)",
+ "summary": "interp1's methods, Runge's example, least squares with polyfit and backslash, a nonlinear fit with fminsearch, smoothing, and interp2.",
+ "tags": [
+  "data",
+  "plots"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "matlab",
+ "author": "Sagebrush",
+ "license": "MIT"
+}
