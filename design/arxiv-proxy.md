@@ -1,4 +1,4 @@
-# The arXiv proxy: `/arxiv/<id>` opens a paper's LaTeX source (design r8, #1879)
+# The arXiv proxy: `/arxiv/<id>` opens a paper's LaTeX source (design r9, #1879)
 
 `https://sagebrush.space/arxiv/<id>` (for example `/arxiv/2611.26934`, `/arxiv/2611.26934v2`, `/arxiv/math/0211159`)
 opens that paper's LaTeX source in the LaTeX editor. The paper is in the reader's own workspace, ready to read,
@@ -15,7 +15,10 @@ browser's workspace.
   - `Content-Length` is readable from the page; `Content-Disposition` (which names the version) and `ETag` (a
     SHA-256) are not, because no `Access-Control-Expose-Headers` is sent;
   - `/e-print/<id>` answers `301` to `/src/<id>` without CORS headers, so the page requests `/src/` directly;
-  - old-style ids work (`/src/math/0211159`, a single gzipped file).
+  - old-style ids work (`/src/math/0211159`, a single gzipped file);
+  - `HEAD /src/<id>vN` answers `200` with CORS and a readable `Content-Length` for a version that exists. For one
+    that doesn't, it answers `404` **without** CORS headers, so a page sees only a network error. A missing version
+    can't be told from a failed request.
 - **arXiv's terms of use** (info.arxiv.org/help/api/tou.html):
   - the legacy APIs (the Atom API, OAI-PMH, RSS): "no more than one request every three seconds", one connection
     at a time, across all machines;
@@ -35,11 +38,15 @@ browser's workspace.
     fetch is one person's download of one paper they chose to open, so it is not a harvesting client that needs a
     worldwide limit. We pace it anyway, as courtesy, and say plainly that the pacing covers one browser only:
     - at most one source fetch at a time and one start every 3 s, across that browser's tabs (`navigator.locks`
-      plus a timestamp in `localStorage`);
+      plus a timestamp in `localStorage`). Where Web Locks are missing, the pacing holds within the tab only. Where
+      `localStorage` is unavailable, the timestamp is kept in memory. Either way, the import still runs one at a
+      time in that tab;
     - the unpacked copy in the workspace is the cache. Opening `/arxiv/<id>` again opens that copy and fetches
       nothing.
-  - No prefetching, no listing, no crawling: a fetch happens only when a person opens one paper. No contact with
-    arXiv is needed for v1 (§8, William): it is a browser-local, direct fetch. Should arXiv prefer `arxiv.org/src/`
+  - No prefetching, no listing, no crawling: a download happens only when a person opens one paper. An uncached,
+    unversioned open also makes up to 16 `HEAD` probes first to pin the version (§3), and the pacing tests count
+    them. No contact with
+    arXiv is needed for v1 (§8, William): each reader's browser fetches directly. Should arXiv prefer `arxiv.org/src/`
     for this traffic, it's a one-line change.
 - **Metadata with no CORS:** the license and the latest version are not readable by a page. The Atom API has
   neither header; OAI-PMH (oaipmh.arxiv.org) has `<license>` but no CORS. See §5 for how the license is handled
@@ -60,6 +67,23 @@ browser's workspace.
 
 ## 3. The three source shapes, decided by bytes
 
+**Pinning the version first (r9).** Every copy is pinned to a version `vN`, because arXiv's versioned sources
+don't change. A versioned link names it. For an unversioned link, the page finds the latest version with `HEAD`
+probes of `/src/<id>vK`: `v1`, then doubling (`v2`, `v4`, … up to `v64`) until one fails, then a binary search
+between the last success and the first failure, then one confirmation of the first failure.
+- The budget is at most 16 probes, which covers every version up to `v64`. If `v64` itself answers, `v64` is pinned
+  and the notice says "v64 or later".
+- Probes are `HEAD`, so nothing is downloaded. They run one at a time under the same per-browser lock as the
+  download, at least 1 s apart (the 3 s pacing is for source downloads), each with a 10 s timeout, and Cancel stops
+  them.
+- If `v1` fails, there is nothing to pin: the page says "Couldn't reach this paper on arXiv: it may not exist, or
+  the network failed", with the abstract link. It can't tell which (§1).
+- Because a failed probe can't be told from a missing version (§1), a network error can only make the pin
+  **older**, never wrong: whatever `vK` is pinned exists and is immutable, and the notice names it ("v3, the latest
+  arXiv showed on …").
+- The source is then fetched from the **versioned** URL `/src/<id>vK`, so what is downloaded is exactly what is
+  pinned, even if a new version appears meanwhile.
+
 The request is `GET`, `credentials: "omit"`, `redirect: "error"`, `referrerPolicy: "strict-origin"`. The response
 must be `200`. A `Content-Length` over the download cap (§4) is refused before reading. An absent one is allowed,
 because the running count over the body enforces the cap either way, and stops the read there even if the length
@@ -78,7 +102,9 @@ was wrong.
   source on arXiv" and links to the abstract page and the PDF on arxiv.org. The PDF isn't kept: we link, as arXiv
   asks.
 - **Anything else** (an HTML error page, a withdrawn paper): the same page, saying arXiv didn't send a source, with the
-  abstract link. `404` says "No such paper on arXiv". `429`/`503` say arXiv asked us to wait, with no retry loop.
+  abstract link. A missing paper or version reaches the page only as a network error (its `404` has no CORS
+headers, §1), so the page says "unavailable, or the network failed" rather than "doesn't exist". A readable
+`429`/`503` says arXiv asked us to wait, with no retry loop.
 - A real PDF-only id and a withdrawn id get recorded as test fixtures before the code (only the first bytes and the
   headers matter), so these branches are tested against what arXiv actually sends.
 
@@ -236,8 +262,8 @@ header, including one for an entry that would be skipped, refuses the whole arch
     absent, and the build log says why ("not part of this arXiv copy"). So a personal file moved into the copy isn't
     read, and neither is a file from another paper's copy.
   - **Adoption:** a file the person moves in becomes readable by the build only through an explicit "Make part of
-    this arXiv copy" action. It says that the file then shares the copy's limits: browser-local, never shared
-    publicly. Files created inside the copy inherit its identity already (§5).
+    this arXiv copy" action. It says that the file then shares the copy's limits: it builds only inside the copy and is
+    never shared publicly. Files created inside the copy inherit its identity already (§5).
   - **Imported files read by any other document:** a build whose main document has no arXiv origin, but which
     would read any file with an arXiv origin (`\input` of an imported `.tex`, `.sty` or `.cls`, or a figure), is
     refused: "This document uses files from an arXiv copy. Open it inside that copy to build it."
@@ -268,56 +294,87 @@ header, including one for an entry that would be skipped, refuses the whole arch
     loosen.
   - The trusted origin (§5) is workspace metadata the agent can read but not set.
 
-## 5. The reader's copy, where it lives, and the license
+## 5. The reader's copy, where it lives, how it syncs, and the license
 
-- **Where:** `/arXiv/<id>/` (for example `/arXiv/2611.26934v2/`, `/arXiv/math-0211159/`; old-style `/` becomes `-`).
-  - Versions: a versioned link gives a versioned folder. An unversioned link gives `/arXiv/<id>/`, "the latest
-    when fetched", because the version isn't readable from the page (§1). The folder's notice and the editor's
-    header say so with the time: "The latest version on arXiv as of Nov 23, 2026, 5:26 PM".
-  - Opening the link again opens the existing copy, with the reader's edits, but only if the folder at
-    `/arXiv/<id>/` is a trusted root (`root: true`) whose origin's `arxiv` equals that canonical id. A folder there
-    without that (made by hand, or moved in) isn't a cache hit: the import goes to
-    `/arXiv/<id> (fetched <date>)/` instead, and nothing of the existing folder is read.
-  - **Fetch again** never replaces anything. It imports into `/arXiv/<id> (fetched <date>)/` beside the old copy,
-    and says whether the bytes changed (by SHA-256).
-- **Trusted origin:** each entry the import makes carries an `origin: {arxiv: "<id>", importId, sha256, fetched}`
-  field in the workspace's own entry record, beside `made` (api.ts). `importId` is 24 random hex characters, one per
-  import. The import's top folder also has `root: true`. It is set only by the arXiv import, inside the workspace, and
-  no file contents can set it: an archive's own `.arxiv.json` or 00README is just a file. No file holds it, so
-  deleting or editing a file in the folder doesn't remove it. Propagation:
-  - **write** (an editor save, an agent's rewrite) keeps the entry, so it keeps its origin;
-  - **rename and move** carry it unchanged, as they carry `made`;
+- **Where:** `/arXiv/<id>v<N>/`, always the pinned version (for example `/arXiv/2611.26934v2/`,
+  `/arXiv/math-0211159v1/`; old-style `/` becomes `-`).
+  - Opening a link again opens the existing copy, with the reader's edits, but only if the folder is a trusted root
+    (`root: true`) whose origin matches the link: the same id, and the same version if the link names one. An
+    unversioned link opens the newest such copy and offers "Check for a newer version". A folder there without a
+    trusted root (made by hand, or moved in) isn't a cache hit: the import goes to `/arXiv/<id>v<N> (fetched
+    <date>)/`, and nothing of the existing folder is read.
+  - **Check for a newer version** probes as in §3. If it finds one, it imports it as a new copy beside the old one,
+    never replacing anything.
+- **Trusted origin:** each entry the import makes carries
+  `origin: {arxiv: "<id>", version: N, importId, sha256, fetched}` in the workspace's own entry record, beside
+  `made` (api.ts).
+  - `sha256` is the source tarball's, exactly as downloaded. `importId` is 24 random hex characters, one per
+    import. The import's top folder also has `root: true`.
+  - Each file that came from the tarball also has `base: {member, sha256}`: its path in the archive and the
+    SHA-256 of its bytes there.
+  - It is set only by the arXiv import, inside the workspace, and no file contents can set it: an archive's own
+    `.arxiv.json` or 00README is just a file. No file holds it, so deleting or editing a file in the folder doesn't
+    remove it.
+
+  Propagation:
+  - **write** (an editor save, an agent's rewrite) keeps the entry, so it keeps its origin and `base`;
+  - **rename and move** carry both unchanged, as they carry `made`;
   - **duplicate** of a whole copy (its root) gives every duplicated entry one new `importId`, consistently: a new
-    copy that builds on its own. Duplicating anything less than the root carries the origin without `root`, so
-    the duplicate has no matching root and doesn't build (§4b), though it stays browser-local and unshareable;
-  - **create inside a folder that has an arXiv origin** gives the new entry the same origin. That covers what
-    agents and the person make in the copy (notes, notebooks, generated files);
-  - **text copied elsewhere** (pasted into another file, or written by an agent outside the copy) isn't tracked. No
-    taint tracking of contents is attempted.
-- **Threat model:** the policy keeps a reader from publishing a paper's source by accident, and keeps Sagebrush
-  from storing or serving the fetched files. Sagebrush's upload boundaries check the origin of every entry they
-  would send, descendants included, so sharing a personal folder that contains an arXiv copy is refused too:
-  - sync;
-  - share and publish;
-  - the chat mirror's file attachments;
-  - any server-side export.
+    copy that builds on its own. Duplicating anything less than the root carries the origin without `root`, so the
+    duplicate has no matching root and doesn't build (§4b); it still never syncs arXiv bytes and isn't shareable;
+  - **create inside a folder that has an arXiv origin** gives the new entry the same origin (for the build, §4b)
+    but no `base`: it's the reader's own file (notes, notebooks, an agent's output);
+  - **text copied elsewhere** isn't tracked. No taint tracking of contents is attempted.
+- **Sync (r9, William's ruling): a reference and the reader's changes, never arXiv's bytes.**
+  - **The copy syncs as a reference:** `{arxiv: id, version: N, sha256 (of the tarball), fetched}` plus each base
+    file's `{member, sha256}` and its current path. That is metadata about the paper, not its text.
+  - **A text base file syncs as a delta against its pinned base (§5b)**, never as bytes, and only if the delta
+    passes the similarity gate. If it doesn't, that file's changes stay in this browser, and the file says so. An
+    unchanged file syncs as no delta at all. A deleted base file syncs as `deleted`.
+  - **A binary base file** (a figure) syncs only as unchanged, renamed or deleted. If the reader replaces its bytes,
+    the change stays in this browser in v1, because its new bytes can't be told apart from the paper's.
+  - **Everything else syncs normally**, as William ruled: files the reader or an agent creates inside the copy,
+    notebooks, chats and the reader's own files elsewhere. These are the reader's own work, and they may quote the
+    paper as any of their writing can.
+    - A file created in the copy keeps its origin, so on every device it builds only inside the copy and is never
+      shareable (§4b).
+    - Its contents are the reader's. If they paste paper text into it, that text syncs like any text they paste
+      anywhere: the same untracked-copy limit as above.
+  - **Not synced:** build outputs of an arXiv-origin document (PDF, log, SyncTeX, auxiliary files), because they can
+    reproduce the paper; each device rebuilds them. Also the version history of base files: it stays in the browser.
+    The current state syncs as its diff.
+  - **On another device**, opening the synced copy fetches `/src/<id>vN` in that browser (the same paced fetch and
+    extraction, §3 and §4) and checks the tarball's SHA-256 against the reference.
+    - Then each base file's member SHA-256 is checked, and the reader's deltas are applied (§5b).
+    - On a failed fetch or any mismatch, the copy shows the error ("Couldn't get this paper from arXiv: <why>. Your
+      changes are kept and will apply once it downloads.") and the base files are shown as unavailable. There is
+      never a fallback to a server copy, because there isn't one.
+  - **Enforced at the sync boundary:** the sync client builds each outbound payload from an immutable snapshot
+    (r8's rule: origin and bytes from one IndexedDB transaction). For an entry with a `base`, the payload is only the
+    reference and the diff, never its bytes. A test inspects every request body the stand-in sync server receives
+    and checks it after decoding every field (base64 included). Across all of them together it asserts: every
+    uploaded delta's literal parts are within the gate's bound; no unchanged base bytes are sent except as
+    references; no binary base file bytes; no build output.
+- **What is guaranteed, and what isn't:**
+  - **Structural, always:** Sagebrush never receives the fetched files as bytes, nor the build outputs made from
+    them. A base file's unchanged parts travel only as references (offsets and lengths). The only paper-derived
+    text that can reach the server is what appears in the reader's **literal** edits.
+  - **Bounded, for ordinary work:** the similarity gate (§5b) keeps a base file's change local when its literal
+    text overlaps the paper by more than 256 bytes or 5%. So ordinary edits, moved paragraphs and an agent's
+    whole-file rewrite don't upload the paper by accident. Up to that bound, paper words in a literal edit can sync.
+  - **Not prevented:** someone who deliberately disguises the paper's text, for example by cutting it into short
+    fragments, can get it past any content check. That's the same as copying the paper into another file, which
+    syncs normally as the reader's own writing (ruled: everything else syncs normally). The same goes for notes,
+    notebooks and chats that quote the paper. The design doesn't claim the server can never see any of the paper's
+    words. Public sharing stays refused in v1. The upload boundaries other than sync
+  (share, publish, chat attachments, server export) still refuse every arXiv-origin entry, descendants included,
+  on immutable snapshots, as in r8.
 
-  Each of these checks is bound to the bytes it sends. The outbound payload is taken as an immutable snapshot:
-  each entry's origin and its bytes come from one IndexedDB transaction (as for build reads, §4b), the check is made
-  on that snapshot, and exactly those bytes are sent. A queued upload or a retry keeps its snapshot and never
-  re-reads the path, so replacing a file after the check can't change what goes out.
-
-  It does not stop a person, or an agent they direct, who copies the text into files outside the copy and shares
-  those (nothing can without taint tracking). We say so in the folder notice.
-- **Sync (ruled, §8):** arXiv's terms forbid storing and serving source files from our servers, and they
-  name no private-account exception. Workspace sync stores the person's files on Sagebrush's servers and serves
-  them back to their own devices.
-  - **v1:** entries with an arXiv origin are local to the browser. Sync skips the whole origin subtree (blobs, entry
-    metadata, versions), and the folder notice (below) says so.
-  - This needs a sync exclusion by entry origin, which the sync owner adds. Until it exists, the proxy ships behind
-    the DEV flag. It goes PROD once tests show that no blob, metadata body or attachment of an arXiv-origin entry
-    reaches the server.
-  - With a permissive license (v2 metadata), sync could include them.
+  It does not stop a person, or an agent they direct, who copies the paper's text into their own files and shares
+  those. Nothing can without taint tracking, and the folder notice says so.
+- **End-to-end encryption** of synced workspaces isn't needed for the ruled policy above. It would keep synced
+  content, deliberate cases included, unreadable by the storage server. It can't prevent disclosure through other
+  channels. It remains a possible later option.
 - **Public sharing respects the license, failing closed:**
   - a share, publish or export-to-share that includes any entry with an arXiv origin is refused unless that
     origin's license is permissive and recorded. In v1 the license is never recorded, so it is always refused. The
@@ -326,27 +383,83 @@ header, including one for an entry that would be skipped, refuses the whole arch
     arXiv." The last sentence links to the abstract page. A download to the person's own computer is still allowed:
     that's their copy, as from arXiv.
   - Permissive means CC0, CC BY or CC BY-SA. The arXiv non-exclusive license and the NC/ND licenses are not.
-  - When sharing is allowed (v2), the share adds attribution and the license notice: a `LICENSE-arXiv.txt` with
-    the license URL, the abstract link and "Modified" if any file changed. The share page shows the same.
-- **v2 (needs a ruling, gated separately):** a Worker metadata endpoint `/api/arxiv/meta/<id>` that reads only OAI-PMH metadata
-  (license and version, CC0 data, never an e-print).
-  - It is identified by a `User-Agent` with a contact, and cached per id and version. The license must be for the
-    exact fetched version (an unversioned copy can't be shared until its version is known).
-  - The attribution added to a share must meet the license, not just link to it: authors, title, the license, and
-    "Modified" with what changed. Sharing under CC BY-SA must keep the adaptation under CC BY-SA. COPY and SEC
-    review that text then.
-  - It is paced to one request every 3 s, one connection at a time, worldwide, through one Durable Object that
-    holds the slot until the response is fully read. This endpoint is our only legacy-API consumer.
+- **v2 (gated separately):** the metadata endpoint for the license, its exact-version check and the share's
+  attribution, as in r8. Unchanged.
 - **Attribution:** the folder notice and the editor's header link to the abstract page ("from arXiv:<id>"), with
   no wording that implies arXiv endorses Sagebrush.
 - **The folder notice** (COPY), shown at the top of the copy's folder in Files and in the editor's header:
 
-  > From [arXiv:2611.26934v2](https://arxiv.org/abs/2611.26934v2), fetched Nov 23, 2026, 5:26 PM.
-  > Saved only in this browser. Your edits here aren't synced. Download a copy to keep it on your computer.
+  > From [arXiv:2611.26934v2](https://arxiv.org/abs/2611.26934v2), fetched Nov 23, 2026, 5:26 PM PST.
+  > Each of your devices downloads the paper from arXiv itself. Only your changes sync, not the paper.
   > Renaming or duplicating these files keeps the sharing restriction. Text copied into another file isn't tracked.
 
-  For an unversioned link the first line reads "From arXiv:2611.26934 (latest when fetched), fetched Nov 23, 2026,
-  5:26 PM." The notice says nothing about agents: their access is the normal grant and Allow flow (§4b).
+  For an unversioned link the first line reads "From arXiv:2611.26934v2 (the latest arXiv showed on Nov 23, 2026,
+  5:26 PM PST)." The notice says nothing about agents: their access is the normal grant and Allow flow (§4b).
+
+## 5b. The delta: references to the base, the reader's literal text, and a similarity gate
+
+A text base file's synced change is one record, and the server keeps only the latest record per file (no history
+of records; the sync owner's part):
+
+```
+{ base: {member, sha256}, result: {sha256, size},
+  parts: [ {copy: {member, from, len}} | {lit: "<base64 of the reader's bytes>"} ] }
+```
+
+The file's current bytes are the concatenation of the parts. A `copy` part is a range of a base file of the same
+pinned paper, by reference: offsets and a length, no bytes. A `lit` part is bytes the reader (or an agent) wrote.
+This carries the same information as offsets, deletion lengths and inserted text, in a form that is simpler to
+compute and to check. It has no context and no deleted text.
+
+- **Computing it, bounded:** one linear pass over the new file against an index of the paper's text base files
+  (`.tex`, `.bib`, `.bbl`, `.sty`, `.cls`, `.txt`, `00README*`).
+  - The index is built in the browser and discarded after use. It has two parts:
+    - **membership:** every 8-byte window of the base text, as a 32-bit hash, in a bitset of $2^{27}$ bits
+      (16 MiB);
+    - **seeds:** every 8-byte window at an offset divisible by 8, with its position, in a sorted table, at most
+      2 M entries (16 MiB).
+  - The indexed text is capped at 16 MiB. A paper with more text than that never syncs deltas: its edits stay in
+    the browser, and the folder says so.
+  - Any match of 32 bytes or more contains a seed. A seed hit is a candidate; its bytes are compared with the base
+    to rule out a hash collision, then the match is extended both ways and written as `copy`. What's left is `lit`.
+  - **A deterministic work budget:**
+    - each seed hash keeps at most 8 positions in the table, and seeds occurring more often in the base (repetitive
+      text) are dropped;
+    - each candidate's comparison and extension count against a budget of 64 byte operations per byte of the new
+      file.
+
+    A match missed because of these limits stays literal. The gate then sees it as base-like, so the limits can
+    only keep a change local, never leak more.
+  - It runs in a Web Worker that is terminated on Cancel, on leaving the page, and after 5 s. At most 100,000 parts
+    per record. A file over the per-file cap, an exhausted budget or the time limit keeps the change local, and the
+    file says so.
+- **The similarity gate (fail closed):** before a record is uploaded, its `lit` bytes are checked against the
+  membership bitset.
+  - A literal byte counts as **base-like** if some 8-byte window containing it is in the base.
+  - If base-like bytes are more than 256 in all, or more than 5% of the record's literal bytes, the record isn't
+    uploaded. The file's changes stay in this browser, with a notice: "Your changes to this file stay in this
+    browser: they repeat too much of the paper to sync."
+  - This catches paper text cut into short fragments, reordered, or separated by new characters, because each
+    fragment of 8 bytes or more is base-like. It also catches a base file of 8 to 31 bytes being re-typed (one under 8 bytes can't be detected, and carries
+    nothing of note).
+  - Hash collisions only make the gate stricter.
+  - The gate runs on the whole record each time, so separate edits can't add up past it. Because the server keeps
+    no older records, revisions can't add up either. A conflict copy is a record and passes the same gate.
+  - The thresholds (8 bytes, 256 bytes, 5%) are LIMITS' and SEC's to confirm. A test on real arXiv sources measures
+    how often ordinary edits trip them.
+- **Applying it, as untrusted input** (a record from the server or another device):
+  - before it is parsed: the record's byte length, known from the transport, must be at most the per-file cap times
+    4/3 plus 1 MiB. Then it is parsed with the bounded JSON parser (depth at most 4);
+  - before anything is decoded or allocated:
+    - the record's shape: at most 100,000 parts; every number a non-negative safe integer; `len` at least 1;
+    - each `lit` is strict, canonical base64 (no whitespace, correct padding). Its decoded length is computed from
+      the string's length;
+    - each `copy` names a member of this pinned paper whose SHA-256 matched after this device's own fetch, and
+      `from + len` must lie within that member;
+    - the sum of all part lengths (`copy` lengths and decoded `lit` lengths) is computed with checked additions
+      that stop at the first sum past the per-file cap. It must equal `result.size`;
+  - only then is the output allocated, once, at that size, and filled;
+  - `result.sha256` is checked last. Any failure shows the file as unavailable with the reason, never a guess.
 
 ## 6. The route: reusing `/gh/`
 
@@ -433,25 +546,69 @@ header, including one for an entry that would be skipped, refuses the whole arch
   - create inside the copy inherits the origin; write keeps it;
   - a truncated gzip, a corrupt trailer, concatenated members, a missing tar end marker, non-zero trailing data;
   - the import deadline and the idle deadline;
-  - sync skips entries with an arXiv origin;
+  - pinning: HEAD probes find the latest version, at most 16, at least 1 s apart; a probe that fails by network
+    error pins an older version, never a nonexistent one; the source is fetched from the versioned URL;
+  - sync: every request body the stand-in sync server receives is decoded (base64 included) and checked together.
+    The cases:
+    - edits;
+    - a moved paragraph;
+    - an agent's whole-file rewrite;
+    - the paper cut into 11-byte and 7-byte fragments separated by new characters;
+    - a base file under 32 bytes re-typed;
+    - renames, a duplicate and a deletion;
+    - a conflict copy;
+    - repeated small edits across many syncs.
+
+    Each either syncs only references and gate-passing literal text, or keeps the change local with its notice.
+    The fragment cases are expected to keep the change local whenever their 8-byte windows match. 7-byte fragments
+    with fresh delimiters are expected to pass, and the test records that, as the stated limit of the policy (§5).
+    No binary base bytes and no build output ever appear.
+  - the gate exactly at its thresholds (256 base-like bytes, 5%) and one past; on a set of real arXiv sources,
+    ordinary edits (a typo fix, a new paragraph, a new section) pass;
+  - the index: a paper at 16 MiB of text and one past it; a 5 s pass bound and Cancel; 100,000 parts and one past;
+  - applying records as hostile input: a `copy` past a member's end, of an unknown or unverified member, lengths
+    that overflow or don't sum to `result.size`, 100,001 parts, a size over the cap. Each is refused before
+    allocation. A correct record applies exactly on a second browser profile after its own fetch;
+  - a tarball or member SHA-256 mismatch, a failed fetch, a wrong result hash: each shows the error, with no
+    fallback;
+  - probes: v1 failing, v64 answering, 16 probes at most, the 10 s timeout, Cancel;
+  - the delta's work budget: a base of one repeated 8-byte pattern and a new file of the same pattern stay within
+    the budget, and the missed matches keep the change local, not uploaded; the worker is terminated at 5 s and on
+    Cancel;
+  - hostile records: a negative or fractional offset, a `len` of 0, non-canonical base64, a record over its byte
+    bound (refused before parsing), and a deep JSON;
+  - build outputs of an arXiv document never sync; files created in the copy sync as normal files and still don't
+    build outside it;
   - the Worker answers `/arxiv/*` without any outbound request.
 
 ## 8. Rulings (Nov 23 2026)
 
-1. **Sync:** arXiv copies are local to the browser in v1, behind the DEV flag until the sync owner adds the
-   origin-based sync exclusion; then PROD. Not waiting on arXiv.
+1. **Sync (r9, William, Nov 23 2026: "the files-from-arxiv that we store on our server could just be a REFERENCE to
+   the arxiv paper… We don't store the base, only their diff"):** it replaces r8's local-only rule.
+   - Sync carries a reference pinned to `vN` and the tarball's SHA-256, and context-free deltas that must pass a similarity gate (§5, §5b).
+   - Each device fetches from arXiv itself and checks the hash. There is no server fallback.
+   - Everything else syncs normally. Public sharing and export stay refused. End-to-end encryption isn't needed.
+   - The SEC origin-identity rules apply on each device.
+   - Until the sync layer carries reference-and-diff entries (the sync owner's part) and the request-body test
+     passes, copies stay in the browser behind the DEV flag.
 2. **Sharing:** no public sharing in v1 (fail closed). The metadata endpoint and the Durable Object pacing are v2,
    gated separately.
-3. **Unversioned links:** `/arxiv/<id>` is "the latest when fetched", and the reader is shown the fetch time.
-4. **Contacting arXiv:** William: no contact needed for v1 (browser-local, a direct fetch).
+3. **Unversioned links:** `/arxiv/<id>` is the latest version the probes find (§3), pinned at import as `vN`; the
+   reader is shown the version and the time.
+4. **Contacting arXiv:** William: no contact needed for v1 (each browser fetches directly).
 5. **Caps:** LIMITS accepted the numbers, in bytes (50 MiB, 100 MiB, 64 MiB, 5,000 headers, 2,000 files), with
    repairs L1 to L4 (§4): a bounded-output inflater, metadata and hint bounds, implicit folders counted, and a
    deterministic ratio.
 6. **SEC H1:** the build needs provenance plus path confinement (§4b): a matching marked root, every input with
    the same origin identity, no fallback, and explicit adoption.
-
 7. **COPY:** the sharing refusal states our policy ("Sagebrush hasn't verified this paper's license…"), and the
    folder notice's text is in §5.
+8. **Open question (r9):** arXiv may recompress a version's tarball, which changes its SHA-256 even though the
+   files are the same. In r9 a tarball mismatch stays an error (fail closed). Accepting a recompressed tarball would
+   need a separately specified check of the complete member manifest; that's a later revision if it ever happens.
+9. **Needed from the sync owner:** reference-and-delta entries, keeping only the latest record per base file (no
+   server history), and local-only status for a file whose change fails the gate. Until then, DEV only.
 
-Lanes for this revision: SEC (H1 in §4b and §5, and L1/L2 at the extraction boundary), LIMITS (L1 to L4 in §4),
-COPY (the refusal and the folder notice in §5).
+Lanes for r9 (re-check): SEC (the reference and diff sync in §5 and §5b, version pinning in §3, the sync-boundary
+test), LIMITS (the probe budget, the index's 32 MiB and 16 MiB text cap, the gate's thresholds, the part and time bounds), COPY (the new folder notice and the
+fetch-failure message in §5, the gate's notices in §5b).
