@@ -261,7 +261,18 @@
   .pane-bar { padding: 6px 12px; font-size: 13px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--line); background: #fff7e6; }
   .pane-bar.refused, .pane-bar.gone { background: #fdecea; }
   .pane-bar button { font-size: 12px; }
-  .open-full { margin-left: 8px; font-size: 12px; }
+  /* (Open, at the head's right: the artifact's file on its own page, in a new tab, #1614) */
+  .pane-head .open-full { flex: none; margin: 0 4px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 7px; font-size: 13px; color: var(--ink); text-decoration: none; white-space: nowrap; }
+  .pane-head .open-full:hover { background: var(--side); }
+  .pane-head .open-full[hidden] { display: none; }
+  /* (a code or text file: View in colour, ✎ Edit with the colours behind the text typed; one font and padding for both
+     layers, so they line up, #1618) */
+  .file-path .mode-toggle { font: 12px system-ui, sans-serif; border: 1px solid var(--line); background: var(--card); border-radius: 6px; padding: 1px 8px; cursor: pointer; }
+  .file-path .mode-toggle[hidden] { display: none; }
+  .pane-body .file-body pre.code-view, .pane-body .code-wrap pre.code-hl, .pane-body .code-wrap .code-edit { margin: 0; padding: 14px 18px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; tab-size: 4; }
+  .code-wrap { position: relative; background: #fff; }
+  .pane-body .code-wrap pre.code-hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  .file-body .code-wrap .code-edit { position: relative; display: block; box-sizing: border-box; background: transparent; color: transparent; caret-color: var(--ink); }
   .board-made { display: flex; align-items: center; gap: 12px; padding: 16px 18px; flex-wrap: wrap; }
   .board-made .who { min-width: 0; overflow-wrap: anywhere; }
   .board-made .open-board { background: #3f6b35; color: #fff; font-weight: 600; border-radius: 6px; padding: 5px 18px; text-decoration: none; }
@@ -395,7 +406,7 @@
     </div>
     <div id="help" hidden>
       <b>Run this on your computer</b>, then open the link it prints. <a href="/agents/connect/">Learn more</a>
-      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.14.tgz</pre>
+      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.16.tgz</pre>
     </div>
     <div id="log">
       <div id="log-tools" hidden><button id="mirror-copy" type="button" hidden></button><button id="copychat" type="button" title="This chat as Markdown: what you wrote, the agent's answers, a line for each thing it did, and links to its files">⧉ Copy chat</button></div>
