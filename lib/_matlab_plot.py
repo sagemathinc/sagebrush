@@ -2401,9 +2401,12 @@ def contourslice_(nargout, args):
     if any(_m._numel(a) and not _m._isvec(a) for a in planes_args):
         raise _m._err("contourslice: the planes' positions must be vectors; contours on a surface given by matrices Xi, "
                       "Yi and Zi are not supported in Sagebrush.")
-    # (admitted before any copy: V's copy, and its finite values' mask and copy for its range; the positions' copies)
+    # (admitted before any copy: V's copy, and its finite values' mask and copy for its range; and the positions'
+    # float copies, all of them counted as kept through the planes' loop)
     what = "contourslice of a volume of %s points" % "x".join(str(k) for k in _m._dims(vol[-1]))
-    held = _iso_admit(vol, None, 12, what, 8 * sum(_m._numel(a) for a in planes_args))
+    kept_positions = sum(_m._numel(a) * (16 if getattr(a, "dtype", None) is not None and a.dtype.kind == "c" else 8)
+                         for a in planes_args)
+    held = _iso_admit(vol, None, 12, what, kept_positions) + kept_positions
     x, y, z, V = _iso_volume(vol, "contourslice")
     finite = V[np.isfinite(V)]
     span = [float(finite.min()), float(finite.max())] if finite.size else []

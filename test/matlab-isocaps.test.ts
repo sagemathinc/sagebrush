@@ -190,5 +190,5 @@ test("isocaps and contourslice admitted before their copies are made; isosurface
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const lines = r.stdout.trim().split("\n");
   assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
-  assert.equal(lines.length, 9, r.stdout);
+  assert.equal(lines.length, 10, r.stdout);
 });

@@ -136,6 +136,15 @@ stand_in(100 * MB)
 assert attempt(lambda: cslice(B300, np.zeros((0, 0)), np.zeros((0, 0)), 1.5, 3.0), "N.interp_volume") == "reached"
 ok("contourslice: a plane admitted before its grids (low host: nomem, never interpolated; ample: reached)")
 
+# -- contourslice, positions not double: 600,000 int8 z positions on a 100-by-100-by-2 volume; their float copy (4.8
+# MB) is kept through the planes' loop and counted in each plane's admission, so under 7,000,000 bytes the volume and
+# the levels are admitted and the first plane (4.6 MB of its own work) refused before V is interpolated there
+P2 = N._un_nd(np.random.default_rng(0).standard_normal((100, 100, 2)))
+stand_in(7_000_000)
+assert attempt(lambda: cslice(P2, np.zeros((0, 0)), np.zeros((0, 0)), np.ones((1, 600000), dtype=np.int8), 4.0),
+               "N.interp_volume") == "MATLAB:nomem"
+ok("contourslice: the positions' float copy counted in every plane's admission (int8 positions: the first plane nomem)")
+
 # -- contourslice, a later plane: 40 planes of a 40-by-40-by-40 volume with 30 levels each; the lines' patches are
 # kept, about 15 lines and 90 KB a plane, so under 5 MB some planes are made and a later one is refused before its grids
 L40 = N._un_nd(np.fromfunction(lambda i, j, k: i + 2 * j + 3 * k, (40, 40, 40)) * 1.0)
