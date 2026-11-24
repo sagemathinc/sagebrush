@@ -4570,6 +4570,68 @@ def _cc_pow(z, e, rev=False):
     return _cc_slow("r^" if rev else "^", z, e)
 
 
+def _hypot_rn(x, y):
+    """sqrt(x^2 + y^2) for doubles x and y, correctly rounded (MPFR's
+    mpfr_hypot, which Sage's CC sqrt uses; math.hypot is not guaranteed
+    correctly rounded): the exact sum of squares in integers, its integer
+    square root, and round to nearest even on 53 bits.  x and y finite,
+    their result a normal double.
+    """
+    import math
+    na, da = abs(x).as_integer_ratio()
+    nb, db = abs(y).as_integer_ratio()
+    d = max(da, db)
+    # (|z| = sqrt(n) / d, d a power of two)
+    n = (na * (d // da)) ** 2 + (nb * (d // db)) ** 2
+    if n == 0:
+        return 0.0
+    e = max(0, 60 - n.bit_length() // 2)
+    m = n << (2 * e)
+    r = math.isqrt(m)
+    sticky = r * r != m
+    drop = r.bit_length() - 53
+    q, rem = divmod(r, 1 << drop)
+    half = 1 << (drop - 1)
+    if rem > half or (rem == half and (sticky or q & 1)):
+        q += 1
+    return math.ldexp(float(q), drop - e - (d.bit_length() - 1))
+
+
+def _cc_sqrt(z):
+    """The square root of the element z of CC, as Sage's ComplexNumber.sqrt
+    (MPFR's steps): on the real line sqrt(x), or sqrt(-x) I for x < 0; else
+    a = sqrt((|z| + x)/2), b = y/a/2, from -z where x < 0 and |y| < |x| (no
+    cancellation), |z| correctly rounded.  On tame parts each step is a
+    normal double operation that rounds as MPFR does, and an infinite or NaN
+    part takes the same steps; otherwise the 53-bit MP field does it (a
+    part past the doubles refused)."""
+    import math
+    z = complex(z)
+    x, y = z.real, z.imag
+    finite = _isfinite(z)
+    if finite and not _cc_tame(z):
+        import _sage_real
+        return _sage_real._cc_from_mp(_sage_real._cc_mp()(z).sqrt())
+    if y == 0:
+        # (Sage's branch on the real line: sqrt(-0.0) is -0.0, and a NaN x
+        # is NaN with an imaginary part +0.0, MPFR's sign test failing)
+        if x >= 0 or x != x:
+            return ComplexNumber(math.sqrt(x), 0.0)
+        return ComplexNumber(0.0, math.sqrt(-x))
+    avoid = x < 0 and abs(y) < abs(x)
+    # (an infinite or NaN part: the same steps in the doubles, whose special
+    # values are MPFR's; hypot of an infinity is +infinity, NaN or not)
+    a2 = _hypot_rn(x, y) if finite else math.hypot(x, y)
+    a2 = ((a2 - x) if avoid else (a2 + x)) / 2
+    re = math.sqrt(a2)
+    im = y / re / 2
+    if avoid:
+        re, im = im, re
+        if y < 0:
+            re, im = -re, -im
+    return ComplexNumber(re, im)
+
+
 class ComplexNumber(complex):
     """A 53-bit complex number, printed as Sage prints elements of CC.
 
@@ -4791,6 +4853,22 @@ class ComplexNumber(complex):
         return _sage_lang._rr_from_mp(_sage_real._cc_mp()(z).abs())
 
     __abs__ = abs
+
+    def sqrt(self, all=False):
+        """The principal square root, as Sage's: an exact 0 real part on the
+        negative real axis; with all, both roots, [r, -r] (only [0] for 0).
+
+        EXAMPLES::
+
+            sage: CC(-4, 0).sqrt(), CC(3, 4).sqrt()
+            (2.00000000000000*I, 2.00000000000000 + 1.00000000000000*I)
+            sage: CC(-4, 0).sqrt(all=True), CC(0).sqrt(all=True)
+            ([2.00000000000000*I, -2.00000000000000*I], [0.000000000000000])
+        """
+        r = _cc_sqrt(self)
+        if not all:
+            return r
+        return [r] if r == 0 else [r, -r]
 
     def log(self, base=None):
         """The principal logarithm, log|z| + arg(z) I with -pi < arg(z) <= pi
