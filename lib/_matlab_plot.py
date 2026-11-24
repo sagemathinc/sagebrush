@@ -2179,18 +2179,25 @@ def _iso_volume(vol, fname):
 
 
 def _iso_admit(vol, colors, per_point, what, extra=0):
-    """admitted before any copy is made: V's copy (and colors'), kept throughout, with the largest of the
-    conversions (one at a time: V's, colors', a full grid array's, each its copy and maybe a conversion
-    before it) and per_point bytes of work for each of V's points, and extra bytes; returns the bytes kept"""
+    """admitted before any copy is made: V's copy (and colors'), and the grid's coordinate vectors, kept
+    throughout, with the largest of the conversions (one at a time: V's, colors', a full grid array's) and
+    per_point bytes of work for each of V's points, and extra bytes; returns the bytes kept.  A full grid array
+    (volume_args' _grid_vec) is converted twice when it isn't double (_farr, then _nd's), copied, and compared
+    with its own first line for the meshgrid check, a flag a point, all while the earlier vectors are kept"""
     held, peak = 0, 0
     for v in [vol[-1]] + ([colors] if colors is not None else []):
         c, conv = _copy_bytes(v)
         held += c
         peak = max(peak, c + conv)
+    # (the three coordinate vectors, each copied once from its grid argument)
+    held += 2 * 8 * sum(_m._dims(vol[-1])[:3])
     for G in vol[:-1]:
         if sum(1 for k in _m._dims(G) if k != 1) > 1:
-            peak = max(peak, sum(_copy_bytes(G)))
-    _m._admit_bytes(held + max(peak, _m._numel(vol[-1]) * per_point) + extra, what)
+            c, conv = _copy_bytes(G)
+            # (the comparison's flags and its reduction's, a byte a point each)
+            peak = max(peak, c + 2 * conv + 2 * _m._numel(G))
+    # (and the interpreter's own small allocations meanwhile, measured at about 35 KB)
+    _m._admit_bytes(held + max(peak, _m._numel(vol[-1]) * per_point) + extra + (64 << 10), what)
     return held
 
 

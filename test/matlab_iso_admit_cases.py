@@ -74,7 +74,17 @@ assert attempt(lambda: iso(V, 0.5), "N._nd") == "reached"
 stand_in(10 * MB)
 assert attempt(lambda: iso(V, 0.5), "N._nd") == "reached"
 assert attempt(lambda: iso(V, 0.5, C), "N._nd") == "MATLAB:nomem"
-ok("isosurface: V's and the colors' copies admitted before they are made (low host: nomem; ample: reached)")
+# (full X, Y and Z grids: a grid's copy and the meshgrid check's flags, 5.1 MB, with V's copy and the vectors kept:
+# 9.3 MB, refused under 8 MiB before _grid_vec does anything; V alone, 8.3 MB, and its copy and V's alone without
+# the check's flags, 8.2 MB, would be admitted)
+Y3, X3, Z3 = np.meshgrid(np.arange(80.0), np.arange(80.0), np.arange(80.0), indexing="ij")
+X3, Y3, Z3 = N._un_nd(X3), N._un_nd(Y3), N._un_nd(Z3)
+stand_in(8 * MB)
+assert attempt(lambda: iso(X3, Y3, Z3, V, 0.5), "N._grid_vec", "N._nd") == "MATLAB:nomem"
+assert attempt(lambda: iso(V, 0.5), "N._nd") == "reached"
+stand_in(100 * MB)
+assert attempt(lambda: iso(X3, Y3, Z3, V, 0.5), "N._grid_vec") == "reached"
+ok("isosurface: V's and the colors' copies, and full grids' copies and checks, admitted before they are made (low host: nomem; ample: reached)")
 
 # -- the cells' arrays are admitted with the copies held: about 21 MB (4.1 kept, 1.5 of flags, 15.8 of cases);
 # without the kept copy it would be 17.2 MB, admitted under 19 MB
