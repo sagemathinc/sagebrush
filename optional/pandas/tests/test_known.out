@@ -33,6 +33,6 @@ True
 == oracle-and-sagebrush-only
 []
 == neither
-['test_frame_arith.py']
+[]
 == oracle-without-test
 []
