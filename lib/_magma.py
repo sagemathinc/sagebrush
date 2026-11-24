@@ -7773,7 +7773,12 @@ def DefiningPolynomial(F, sub=None):
     """The defining polynomial of F over GF(p): its Conway polynomial, and
     X - 1 for GF(p) itself ($.1 + (p - 1), as Magma's, whose generator
     there is 1); with sub, a subfield of F (Magma's error otherwise), the
-    minimal polynomial of F.1 over sub."""
+    minimal polynomial of F.1 over sub.  A number field's is its defining
+    polynomial in the ring it was given in (a quadratic field's in the
+    session's ring over the integers), as Magma 2.18-5's."""
+    if isinstance(F, _MNumberField) and sub is None:
+        R = F._fring if F._fring is not None else PolynomialRing(_ZZ)
+        return R(list(F._f))
     if not isinstance(F, _MFinField) or (sub is not None and not isinstance(sub, _MFinField)):
         raise _fferr("DefiningPolynomial of this argument is not supported yet", "DefiningPolynomial")
     P = _sff.GF(F.p)
