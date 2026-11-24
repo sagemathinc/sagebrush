@@ -85,3 +85,11 @@ test("below the preference nothing changes: a cell grown that far is out of memo
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.stdout.trim().split("\n").map((s) => s.trim()), ["0|MATLAB:nomem", "1048576", "1|OK", "1000", "2|OK"]);
 });
+
+test("the preference's boundary, called directly so nothing is allocated: 5 * 2^30 bytes refused, one byte less not (test/matlab_size_pref_cases.py)", () => {
+  const r = spawnSync(process.execPath, [cli, join(__dirname, "..", "..", "test", "matlab_size_pref_cases.py")], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const lines = r.stdout.trim().split("\n");
+  assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
+  assert.equal(lines.length, 4, r.stdout);
+});
