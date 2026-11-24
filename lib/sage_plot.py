@@ -7,7 +7,7 @@ notebook and save to .svg files.
 """
 
 import math
-from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, render_svg, render_frame,
+from _graphics import (InlineFigure as _InlineFigure, Panel, Line, Points, Polygon, Rects, Text, Arrow, render_svg, render_frame,
                        render_animation, adaptive_sample, show as _show, save_svg, save_figure, TAB10, describe_svg)
 
 __all__ = ["Graphics", "plot", "parametric_plot", "polar_plot", "list_plot", "line", "line2d",
@@ -47,7 +47,7 @@ def _label(s):
     return str(s)
 
 
-class Graphics:
+class Graphics(_InlineFigure):
     """A 2D picture: primitives plus options.  Add them with +.
 
     EXAMPLES::
@@ -331,7 +331,7 @@ class Graphics:
             return render_svg([(panel, (0, 0, 0.82, 1)), (bar, (0.85, 0.05, 0.04, 0.9))], w, h)
         return render_svg([(panel, (0, 0, 1, 1))], w, h)
 
-    def _repr_svg_(self):
+    def _sagebrush_svg_(self):
         return self._svg()
 
     def description(self):
@@ -919,7 +919,7 @@ def bar_chart(datalist, width=0.5, **options):
     return Graphics([Rects(rects, **o)], **gopts)
 
 
-class GraphicsArray:
+class GraphicsArray(_InlineFigure):
     """graphics_array([[g1, g2], [g3, g4]]): several plots side by side.
 
     EXAMPLES::
@@ -968,7 +968,7 @@ class GraphicsArray:
                 panels.append((g._panel(**self._kw)[0], (j / nc, i / nr, 1 / nc, 1 / nr)))
         return render_svg(panels, w * 100, h * 100)
 
-    def _repr_svg_(self):
+    def _sagebrush_svg_(self):
         return self._svg()
 
     def show(self, **kwds):

@@ -19,6 +19,7 @@ import { freePath, nameOf, parentOf, safeName, splitExt } from "../workspace/pat
 import { tokensOf, drawTokens } from "./tokens";
 import { langOf, type Lang } from "./langs";
 import { EDIT_BYTES, editableOf } from "./edit";
+import { codeUrl } from "./url";
 
 export const CODE = { openBytes: 4 * 2 ** 20, editBytes: EDIT_BYTES, viewBytes: 2 ** 20, liveBytes: 256 * 1024, saveMs: 600 };
 /** What the notebook page gives the code page: its workspace and the file's id; how to open what is chosen here; and
@@ -31,6 +32,9 @@ export type Host = {
   renderFileMenu: typeof renderFileMenu;
   /** File ▸ Connect an agent…: the hosting page's pairing (null where it isn't offered: the app, the CLI's page) */
   agent?: ((back: HTMLElement) => Promise<unknown>) | null;
+  /** To another page, every way out of this one: true once it navigates; false if the host refused, saying why (the
+   * desktop app: until what was saved here is on disk, src: index.html leaveTo), and the page stays */
+  navigate(to: string): Promise<boolean>;
 };
 const LANG_LABEL: Record<Lang, string> = { python: "Python", sage: "Sage", matlab: "MATLAB", magma: "Magma", js: "JavaScript", json: "JSON", text: "Text" };
 
@@ -48,7 +52,10 @@ body.sbft .code-page .code-home { display: inline; }
 .code-page .code-filemenu { position: absolute; right: 0; top: 100%; min-width: 220px; background: #fff; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.15); padding: 4px; z-index: 30; }
 .code-page .code-filemenu button { background: none; border: 0; padding: 5px 10px; border-radius: 5px; font: inherit; cursor: pointer; }
 .code-page .code-filemenu button:hover:not(:disabled) { background: #eef2f7; }
+.code-page .code-close { background: none; border: 0; font-size: 18px; line-height: 1; padding: 2px 6px; border-radius: 5px; color: #555; cursor: pointer; }
+.code-page .code-close:hover { background: #e8eaed; color: #222; }
 .code-page .code-bar { background: #fff4d6; border-bottom: 1px solid #e3c96b; padding: 6px 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.code-page .code-bar[hidden] { display: none; }
 .code-page .code-note { padding: 16px; color: #444; }
 .code-page .code-body { flex: 1; overflow: auto; display: flex; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; tab-size: 4; }
 .code-page .code-ln { margin: 0; padding: 10px 8px 10px 12px; text-align: right; color: #999; user-select: none; background: #fafafa; border-right: 1px solid #eee; white-space: pre; font: inherit; }
@@ -81,9 +88,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const page = el("div", "code-page"); root.append(page);
   const head = el("div", "code-head"), bar = el("div", "code-bar"), body = el("div", "code-body");
   bar.hidden = true;
-  page.append(head, bar, body);
+  // (the agent's bar, when one is connected: its row under the head, over the notebook page's; workspace/agent-ui.ts)
+  const agentRow = el("div", "code-agent"); agentRow.dataset.sbagSlot = "2";
+  page.append(head, agentRow, bar, body);
   const files = el("button", "code-files", "Files"); files.setAttribute("aria-controls", "wssidebar");
-  files.onclick = () => { const b = document.getElementById("wsfilesbtn"); if (b) b.click(); else location.assign("/"); };
+  files.onclick = () => { const b = document.getElementById("wsfilesbtn"); if (b) b.click(); else void leave(); };
   const name = el("span", "code-name"), lang = el("span", "code-lang"), status = el("span", "code-status");
   status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
   const toggle = el("button", "code-toggle");
@@ -93,7 +102,16 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   menuWrap.append(fileBtn, menu);
   // (Sagebrush, then the file's name, beside the corner Files button, as on the notebook, board and LaTeX pages)
   const home = el("a", "code-home", "Sagebrush") as HTMLAnchorElement; home.href = "/?home"; home.title = "About Sagebrush, and where to start";
-  head.append(files, home, name, lang, status, toggle, menuWrap);
+  home.onclick = (ev) => { if (ev.button || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return; ev.preventDefault(); void leave(home.href); };
+  // (✕: back to the notebook page, which opens the last notebook; what was typed here saved first)
+  const close = el("button", "code-close", "✕"); close.title = "Close this file"; close.setAttribute("aria-label", "Close");
+  // (leaving the page, to `to`: by the ✕, or by the notebook page for a notebook, board or code file opened here
+  // (index.html and boot.ts, __sbCodeLeave), so every way out saves first)
+  let mayLeave = async () => true;
+  let leave = async (to = "/") => { await host.navigate(to).catch((err) => say("Couldn't leave this page: " + (err?.message ?? err))); };
+  close.onclick = () => void leave();
+  (globalThis as any).__sbCodeLeave = (to: string) => leave(to);
+  head.append(files, home, name, lang, status, toggle, menuWrap, close);
   const say = (t: string) => { status.textContent = t; };
   const note = (t: string) => { body.replaceChildren(el("p", "code-note", t)); };
 
@@ -167,7 +185,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   ta.addEventListener("scroll", () => { hl.scrollTop = ta.scrollTop; hl.scrollLeft = ta.scrollLeft; ln.style.transform = `translateY(${-ta.scrollTop}px)`; });
   ta.addEventListener("keydown", (ev) => {
     // (Tab indents, as in the notebook's editor; Shift+Tab leaves the field)
-    if (ev.key === "Tab" && !ev.shiftKey && !ev.ctrlKey && !ev.altKey) { ev.preventDefault(); document.execCommand?.("insertText", false, lg === "python" || lg === "sage" ? "    " : "\t") || ta.setRangeText("    ", ta.selectionStart, ta.selectionEnd, "end"); ta.dispatchEvent(new Event("input")); }
+    if (ev.key === "Tab" && !ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ta.readOnly) { ev.preventDefault(); document.execCommand?.("insertText", false, lg === "python" || lg === "sage" ? "    " : "\t") || ta.setRangeText("    ", ta.selectionStart, ta.selectionEnd, "end"); ta.dispatchEvent(new Event("input")); }
   });
 
   // ---- saving as you type: over the revision read or saved, never over another's change. One write at a time, in a
@@ -214,18 +232,58 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       if (!stopped && live() === saved) say("Saved");
     })().finally(() => { saving = null; }));
   };
+  // (closing: the edits saved first; anything still unsaved (saving stopped, or a save refused or failed) is dropped by
+  // leaving, so it asks, and stays if the person says no)
+  // (one way out at a time (✕, a copy, Trash, a new notebook...), from its first step (the save, the question, the copy
+  //  or notebook made) to the navigation or the page staying: every other does nothing meanwhile (no second question,
+  //  drain or side effect), and no typing throughout, as what's typed then would be left behind (the desktop app's disk
+  //  written first, by the host); typing back if the page stays. `leaving`: the navigation asked for, so the browser's
+  //  prompt isn't. A navigation the host made that doesn't happen (cancelled) lets a way out be tried again after a
+  //  while, said, typing still off (the page may yet go); a page come back from the back/forward cache is freed)
+  let leaving = false, exiting = false;
+  const stay = () => { exiting = false; leaving = false; ta.readOnly = false; };
+  addEventListener("pageshow", (ev) => { if (ev.persisted) stay(); }, { signal: life.signal });
+  const exit = async (run: () => Promise<boolean>) => {
+    if (exiting) return;
+    exiting = true; ta.readOnly = true;
+    let went = false;
+    try { went = await run(); } catch (err: any) { say("Couldn't leave this page: " + String(err?.message ?? err).slice(0, 200)); } finally { if (!went) stay(); }
+    if (went) {
+      const t = setTimeout(() => { exiting = false; leaving = false; say("This page hasn't been left yet: try again."); }, 30000);
+      addEventListener("pagehide", () => clearTimeout(t), { once: true, signal: life.signal });
+    }
+  };
+  mayLeave = async () => { await flush(); return !dirty() || confirm("Close this file? Your unsaved edits here are dropped."); };
+  // (whether it navigated: false if the host refused (it said why) or failed (said here))
+  const go = async (to: string) => {
+    leaving = true;
+    try { return await host.navigate(to); } catch (err: any) { say("Couldn't leave this page: " + (err?.message ?? err)); return false; }
+  };
+  leave = (to = "/") => exit(async () => (await mayLeave()) && go(to));
+  // (decided to leave, with a step still to take first (a notebook made, this file moved to Trash), then gone)
+  // (the copy just saved holds the edits: opened straight away, never asking whether to drop them)
+  // (whether it navigated: a copy with no fid can't be opened here, and stays only said; nor one the host refused)
+  const openCopy = async (e: Entry) => (e.fid ? go(codeUrl(e.fid)) : false);
+  const thenGo = async (step: () => Promise<string>) => {
+    // (a test's seam: the page test holds the step here to type during it; nothing sets it otherwise)
+    await (globalThis as any).__sbCodeBeforeLeaveStep?.();
+    return go(await step());
+  };
   // (saving stopped: the bar asks; nothing is written until the person chooses)
   function stop(why: string) {
     stopped = true; clearTimeout(saveTimer);
     say("Not saved");
     const reload = el("button", "", "Reload (theirs)"), copy = el("button", "", "Save mine as a copy");
-    reload.onclick = () => { if (dirty() && !confirm("Reload this file? Your unsaved edits here are dropped.")) return; void mount(root, host); };
-    copy.onclick = () => void saveCopy(mode === "edit" ? ta.value : text).then((e) => { if (e) host.open(e, "here"); });
+    reload.onclick = () => { if (exiting) return; if (dirty() && !confirm("Reload this file? Your unsaved edits here are dropped.")) return; void mount(root, host); };
+    copy.onclick = () => void copyAndOpen();
     bar.replaceChildren(el("span", "", why), reload, copy);
     bar.hidden = false;
   }
   addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && dirty()) void flush(); }, { signal: life.signal });
   addEventListener("pagehide", () => { if (dirty()) void flush(); }, { signal: life.signal });
+  // (a reload or a closed tab inside the save delay: the save started, and the browser's leave prompt requested, as a
+  //  write isn't waited for on the way out; staying lets it land. Not once the page's own way out is navigating)
+  addEventListener("beforeunload", (ev) => { if (leaving || !dirty()) return; void flush(); ev.preventDefault(); ev.returnValue = ""; }, { signal: life.signal });
 
   // ---- a change to this file made elsewhere: followed when nothing here is unsaved, else saving stops
   let checkTimer: any = null;
@@ -268,20 +326,34 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
 
   // ---- the one File menu (filemenu.ts), this page's keys
   const free = async (folder: string, base: string, ext: string) => { const taken = new Set((await ws.list(folder)).map((e) => e.path)); return freePath(folder, base, ext, (p) => taken.has(p)); };
+  // (a copy of the text as it is now, then the copy opened: no typing from the moment the text is taken until the
+  //  navigation, as what's typed then would be in neither file; typing again if no copy is made)
+  // (a way out (exit): a second click while a copy is made does nothing)
+  function copyAndOpen() {
+    return exit(async () => {
+      const e = await saveCopy(mode === "edit" ? ta.value : text);
+      return e ? openCopy(e) : false;
+    });
+  }
   async function saveCopy(t: string): Promise<Entry | null> {
     const [base, ext] = splitExt(nameOf(path));
     const p = await free(parentOf(path), base + " (copy)", ext);
     if (!p) { say("No free name for a copy"); return null; }
-    try { const e = await ws.create(p, { content: encodeText(t, eol) }); say("Copied to " + nameOf(p)); return e; }
+    try {
+      // (a test's seam: the page test holds the copy's create here, or fails it; nothing sets it otherwise)
+      await (globalThis as any).__sbCodeBeforeCopyCreate?.();
+      const e = await ws.create(p, { content: encodeText(t, eol) }); say("Copied to " + nameOf(p)); return e;
+    }
     catch (err) { say("Not copied: " + String((err as Error)?.message ?? err).slice(0, 200)); return null; }
   }
   const actions: Record<string, () => unknown> = {
-    "c-new": async () => { const p = await free("/", "Untitled", ".ipynb"); if (!p) return say("No free name for a new notebook"); await flush(); const e = await ws.createByPerson(p, { mode: "python" }); location.assign("/?nb=" + encodeURIComponent(e.ref!)); },
-    "c-newboard": async () => { await flush(); location.assign("/board/?new=python"); },
+    "c-new": () => exit(async () => { const p = await free("/", "Untitled", ".ipynb"); if (!p) { say("No free name for a new notebook"); return false; } if (!(await mayLeave())) return false; return thenGo(async () => "/?nb=" + encodeURIComponent((await ws.createByPerson(p, { mode: "python" })).ref!)); }),
+    "c-newboard": () => leave("/board/?new=python"),
     "c-newfolder": async () => { const n = prompt("A new folder, at the top of your files: its name", "New folder"); if (n?.trim()) await ws.mkdir("/" + safeName(n.trim())); },
-    "c-examples": async () => { if (!(await host.examples())) location.assign("/"); },
+    // (the gallery's panel, the only list of examples; where this page can't reach it, said)
+    "c-examples": async () => { if (!(await host.examples())) say("The examples aren't available here."); },
     "c-open": () => host.openFiles(),
-    "c-copy": async () => { await flush(); const e = await saveCopy(mode === "edit" ? ta.value : text); if (e) host.open(e, "here"); },
+    "c-copy": async () => { await flush(); await copyAndOpen(); },
     "c-rename": async () => {
       await flush();
       const [base, ext] = splitExt(nameOf(path));
@@ -292,12 +364,13 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     },
     "c-download": async () => { await flush(); download(encodeText(mode === "edit" ? ta.value : text, eol), nameOf(path)); },
     "c-print": () => window.print(),
-    "c-delete": async () => {
-      if (!confirm(`Move "${nameOf(path)}" to Trash? Trash keeps it until you empty it.`)) return;
-      await flush();
-      try { await ws.remove(path, { kind: entry.kind, ref: entry.ref, fid: entry.fid, created: entry.created }); location.assign("/"); }
-      catch (err) { say("Not moved to Trash: " + String((err as Error)?.message ?? err).slice(0, 200)); }
-    },
+    "c-delete": () => exit(async () => {
+      if (!confirm(`Move "${nameOf(path)}" to Trash? Trash keeps it until you empty it.`)) return false;
+      // (the page is left after this: asked first, before anything is removed)
+      if (!(await mayLeave())) return false;
+      try { return await thenGo(async () => { await ws.remove(path, { kind: entry.kind, ref: entry.ref, fid: entry.fid, created: entry.created }); return "/"; }); }
+      catch (err) { say("Not moved to Trash: " + String((err as Error)?.message ?? err).slice(0, 200)); return false; }
+    }),
   };
   host.renderFileMenu(menu, {
     attr: "data-f",

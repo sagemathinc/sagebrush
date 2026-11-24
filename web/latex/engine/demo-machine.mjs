@@ -4,7 +4,7 @@
 // class). Markers are plain objects; tokens are the core's integers. Each unit carries its events (unit.ev), so the D4
 // incremental layer reuses a converged suffix's events together with its units.
 // incremental-demo.mjs is core/incremental.mjs with only its two import lines changed (to this module).
-import { isCodeEnv } from "./sagetex.mjs";
+import { isCodeEnv, utf8len } from "./sagetex.mjs";
 import { Machine as CoreMachine, Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, mkChar, isCs, catOf, codeOf, SPACE_TOK, meaning } from "../core/machine.mjs";
 
 export { Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, mkChar, isCs, catOf, codeOf, SPACE_TOK };
@@ -243,13 +243,27 @@ export class Machine extends CoreMachine {
   // sequence or an active character, a blank line (a \par token: the argument ran on, as "a % b}" does), the end of
   // the input, an empty argument, or more than SAGE_MAX_CODE characters is rejected. The whole argument is consumed
   // either way, so the rest of the document reads as TeX would read it.
+  // Read straight from a file (the usual case), the code is the argument's own source text, exactly as written between
+  // its braces, its line ends joined as TeX joins them (one space): so a backslash, a ~ or a run of spaces inside it
+  // (a Python string's '$\sin(x^2)$', '\n') is Sage's to read, never TeX's. The tokens above still decide where the
+  // argument ends, as TeX reads it; where the text and the tokens could differ (a % comment, ^^ notation, an argument
+  // that came from a macro), the subset's rules above apply instead.
   readSageArg() {
     const t0 = this.skipSpacesRaw();
     if (t0 === null) return { err: "unbalanced" };
     if (isCs(t0) || catOf(t0) !== CAT.BGROUP) { this.back(t0); return { err: "nobrace" }; }
+    // (the file the brace came from: under it, a list already read to its end, as \sageplot's look past its options
+    //  leaves one, holds nothing more)
+    let k = this.stack.length - 1;
+    while (k >= 0 && this.stack[k].kind !== "file" && this.stack[k].i >= this.stack[k].toks.length) k--;
+    const f = this.stack[k];
+    const fromFile = !!f && f.kind === "file" && f.line !== null;
+    const start = fromFile ? f.lineStart + f.li : -1;
+    let same = fromFile && f.text[start - 1] === "{";
     let depth = 1, s = "", bytes = 0, err = null, name = null, n = 0;
     for (;;) {
       const t = this.nextRaw();
+      if (same && this.stack[this.stack.length - 1] !== f) same = false;
       if (t === null) return { err: "unbalanced" };
       this.charge(1);
       if (++n > this.limits.tokenList) throw new BoundError("E-BOUND-TOKENS");
@@ -267,6 +281,19 @@ export class Machine extends CoreMachine {
       const cp = c === CAT.SPACE ? 32 : codeOf(t);
       bytes += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
       if (bytes <= SAGE_MAX_CODE) s += String.fromCodePoint(cp);
+    }
+    // (the closing brace read from the same file, right before where its reader now is: the text between the braces)
+    const end = same && this.stack[this.stack.length - 1] === f && f.line !== null ? f.lineStart + f.li - 1 : -1;
+    if (end >= 0 && end >= start && f.text[end] === "}") {
+      const raw = f.text.slice(start, end);
+      let plain = !raw.includes("^^");
+      for (let i = 0; plain && i < raw.length; i++) if (this.cat(raw.codePointAt(i)) === CAT.COMMENT) plain = false;
+      if (plain) {
+        const code = raw.replace(/[ \t]*\r?\n[ \t]*/g, " ");
+        if (utf8len(code) > SAGE_MAX_CODE) return { err: "toolong" };
+        if (code.trim() === "") return { err: "empty" };
+        return { code };
+      }
     }
     if (err !== null) return { err, name };
     if (bytes > SAGE_MAX_CODE) return { err: "toolong" };

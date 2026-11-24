@@ -1,0 +1,16 @@
+{
+ "title": "Plotting gallery (MATLAB)",
+ "summary": "Bars, stairs, stems, a filled area, a colored scatter plot and contour lines, as subplots of one figure.",
+ "tags": [
+  "plots",
+  "figures"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "matlab",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

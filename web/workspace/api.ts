@@ -24,6 +24,7 @@
 //
 // There is no verb that empties Trash or removes contents for good: only a
 // person does that, from the file browser (§2.4, §8.2).
+import { docValue } from "./notebook-form";
 import { BRANCHES, BRANCH_KEY, BRANCH_HASH_KEY, BRANCH_LIMITS, BRANCH_NAME, branchCopy, branchRefusal, BranchStop, BRANCH_REVIEW_KEY, BRANCH_RUNS_KEY, mergeRun, type BranchAt, type BranchCanon, type BranchRecord, type BranchReview, type BranchRun, type BranchRuns, type BranchSource } from "./branch-rules";
 import { TERM_KEPT_KEY, keepable, termKeptOf, type TermKept } from "./term-kept";
 import { inTx, req, hex, openWorkspaceDb, WS_DB, type JournalState, type OpenInfo } from "./db";
@@ -525,12 +526,23 @@ export const PATH_OF_FILE_MAX = 64;
 /** A new notebook's cells, each with its id: one it was given, or a new one, as the page gives an id-less cell when it opens
  * it, so the notebook stored is the one shown (an agent's notebook that runs by itself is compared by its cells' ids). */
 const withCellIds = (cells: any[]) => cells.map((c) => (c && typeof c === "object" && !c.id ? { ...c, id: cellId() } : c));
+/** A notebook's writer lock under sync's journal (notebook/journal.js's lockPrefix + its ref), held by the one tab of
+ * this browser that writes it. */
+export const NB_WRITER_LOCK = "sagebrush-nb-writer:";
+/** How long a whole write waits for the notebook's holder to answer, each phase. */
+export const NB_HOLDER_MS = 5000;
+/** A write that found a notebook under sync's journal: written through the journal (Workspace.writeJournaled). */
+class ToJournal { constructor(readonly ref: string) {} }
+/** The whole writes of notebooks a page may have under way at once (each holds its document until it ends). */
+export const NB_WRITES_MAX = 64;
 function nbDoc(content: unknown): unknown {
   try { return fromNbformat(content); } catch (err) { throw new WorkspaceError("invalid", (err as Error)?.message ?? String(err)); }
 }
 
 export class Workspace {
   private subs = new Set<(c: Change) => void>();
+  /** The whole writes of notebooks under sync's journal under way here, by what they write (writeJournaled). */
+  private nbWrites = new Map<string, { run: Promise<{ entry: Entry; rev: number }> }>();
   private channel: BroadcastChannel | null = null;
   private tab = hex(8);
   /** Who makes the changes from here: "person", or "agent:<name>" (§8.3); in the operation log and on versions. */
@@ -1455,6 +1467,14 @@ export class Workspace {
   async setLastExport(r: { at: number; partial: boolean; members: number; bytes: number }): Promise<void> {
     await inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").put(r, "export:last"); });
   }
+  /** A Delegate Merge's record on this device, for one task (meta "delegate-merge:<task>": web/agents/delegate-merge.ts
+   * writes and checks it), or undefined; `null` clears it. */
+  async delegateMerge(task: string): Promise<unknown> {
+    return inTx(this.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get("delegate-merge:" + task)));
+  }
+  async setDelegateMerge(task: string, rec: unknown): Promise<void> {
+    await inTx(this.ws, "meta", "readwrite", async (tx) => { const st = tx.objectStore("meta"); if (rec === null) st.delete("delegate-merge:" + task); else st.put(rec, "delegate-merge:" + task); });
+  }
 
   /** One entry, or undefined.  `opts.admit` (the host's, AdmitCheck): asked in the same read, before it answers. */
   async stat(p: string, opts: Admitted = {}): Promise<Entry | undefined> {
@@ -1570,7 +1590,139 @@ export class Workspace {
   /** `opts.expect`: only that entry (its kind, fid, creation and, a document's, ref, as remove's), checked holding the
    * lock: another there now, a WorkspaceError("conflict"), nothing written. */
   async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string; expect?: Pick<Entry, "kind" | "fid" | "created" | "ref"> } & Collect & Admitted = {}): Promise<{ entry: Entry; rev: number }> {
-    return this.writeLocked(p, owned(content, this.limits.maxFileBytes), opts).then((out) => { this.askToKeep(); return out; });
+    // (the bytes as given at the call, copied before any wait: a caller's change to them afterwards is never written)
+    const c = owned(content, this.limits.maxFileBytes);
+    // (every write takes its turn for the workspace's lock at the call, as before; one that finds a notebook under
+    // sync's journal there is written through the journal instead (writeJournaled), which checks the path again under
+    // the lock before anything is written.  Refused, when NB_WRITES_MAX are already under way, before it is read as a
+    // notebook or anything is made or sent for it (its copy above, taken at the call, is let go with it))
+    let out: { entry: Entry; rev: number };
+    try {
+      out = await this.writeLocked(p, c, opts);
+    } catch (e) {
+      if (!(e instanceof ToJournal)) throw e;
+      this.nbWriteRoom();
+      out = await this.writeJournaled(p, c, opts, e.ref);
+    }
+    this.askToKeep();
+    return out;
+  }
+  /** A whole write of the notebook at `p` (ref `ref`) under sync's journal (design: an agent's whole write of a
+   * notebook under sync's journal, r3).  The notebook's writer is whoever holds its writer lock
+   * (NB_WRITER_LOCK + ref, the journal store's): with no holder, the record is written as `create` writes one under
+   * the journal (marked unjournaled, the stored j kept) for the next writer's load to take in; with one, the holder
+   * makes the write, asked on the notebook's handover channel (web/page/handover.ts) in two phases, the commit sent
+   * only after the path and the grant are checked again.  The workspace's lock is held only around bounded steps,
+   * never across another tab's answer or save; every ok comes from reading the record again (this ref, a revision
+   * past the base, this whole document), never from an answer alone. */
+  private async writeJournaled(p: string, content: unknown, opts: { base?: number; tag?: string; expect?: Pick<Entry, "kind" | "fid" | "created" | "ref"> } & Collect & Admitted, ref: string): Promise<{ entry: Entry; rev: number }> {
+    const base = opts.base;
+    const doc = nbDoc(content) as any;
+    if (!doc || typeof doc !== "object" || !Array.isArray(doc.cells)) throw new WorkspaceError("invalid", "a notebook is {cells: [...]}");
+    const { id: _i, rev: _r, updated: _u, baseRev: _b, ...rest } = doc;
+    const want = { ...rest, cells: withCellIds(rest.cells) };
+    // (an ok: the record holds this whole document (notebook-form docValue: every field but the store's envelope, each
+    // cell whole), its language too if it names one)
+    const withMode = want.mode !== undefined, key = docValue(want, withMode);
+    // (one request per document asked for at once: the same write asked again while it is under way is that one; at
+    // most NB_WRITES_MAX under way, each holding its document; one that ended is forgotten at once, its document with it)
+    const one = `${ref}\n${base ?? ""}\n${key}`, running = this.nbWrites.get(one);
+    if (running) return running.run;
+    this.nbWriteRoom();
+    const entry = { run: null as unknown as Promise<{ entry: Entry; rev: number }> };
+    this.nbWrites.set(one, entry);
+    entry.run = this.writeJournaledOnce(p, want, key, withMode, opts, ref).finally(() => { if (this.nbWrites.get(one) === entry) this.nbWrites.delete(one); });
+    return entry.run;
+  }
+  /** Refuses a whole write of a notebook when NB_WRITES_MAX are under way in this page (each holds its document). */
+  private nbWriteRoom() {
+    if (this.nbWrites.size >= NB_WRITES_MAX) throw new WorkspaceError("busy", `too many notebook writes are under way in this page (${NB_WRITES_MAX}): nothing changed (try again shortly)`);
+  }
+  private async writeJournaledOnce(p: string, want: any, key: string, withMode: boolean, opts: { base?: number; tag?: string; expect?: Pick<Entry, "kind" | "fid" | "created" | "ref"> } & Collect & Admitted, ref: string): Promise<{ entry: Entry; rev: number }> {
+    const collect = sinkOf(opts.collect), admit = admitOf(opts.admit), base = opts.base;
+    const lock = NB_WRITER_LOCK + ref, locks = (globalThis as any).navigator?.locks;
+    if (!locks?.request) throw new WorkspaceError("storage", "this browser can't take a notebook's writer lock, which sync's journal needs");
+    // (the path still this notebook, outside Trash, and the grant in force: under the workspace's lock, right before a
+    // mutation or an ok)
+    const target = async (): Promise<Entry> => {
+      await this.admitAt(admit, "write", "target", path(p));
+      const e = await this.mustStat(p);
+      if (e.trashed || within(e.path, TRASH)) throw new WorkspaceError("invalid", "restore it from Trash first");
+      if (e.kind !== "notebook" || e.ref !== ref) throw new WorkspaceError("conflict", `${e.path} is another notebook now (read it again)`);
+      if (e.remote) throw new WorkspaceError("invalid", `${e.path}'s content is synced in the next step: open it on the device that made it`);
+      if (opts.expect && (e.kind !== opts.expect.kind || e.fid !== opts.expect.fid || e.created !== opts.expect.created || (e.ref ?? null) !== (opts.expect.ref ?? null))) throw new WorkspaceError("conflict", `${e.path} is another notebook now (read it again)`);
+      return e;
+    };
+    // (an ok: the record holds this document, at a revision not before the base; then its entry and op, as write's)
+    const verified = () => this.lockedFor(p, async () => {
+      const e = await target();
+      const rec = await this.mainTx("notebooks", "readonly", (st) => st.get(ref));
+      if (!rec || (base !== undefined && !(rec.rev > base)) || docValue(rec, withMode) !== key) return null;
+      const ops: Op[] = [], t = this.now();
+      const entry = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
+        await fenceCheck(tx, [e.path]);
+        const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
+        if (!cur || cur.ref !== ref) throw new WorkspaceError("conflict", `${e.path} was moved while it was written`);
+        const next: Entry = { ...cur, updated: t };
+        delete next.missing;
+        st.put(next);
+        await this.log(tx, ops, { op: "write", path: e.path, kind: e.kind }, next);
+        return next;
+      });
+      this.tell({ ops });
+      return { entry, rev: rec.rev as number };
+    }, undefined, collect);
+    // (no holder: the writer lock taken if free (never waited for) for the write, under the workspace's lock; null if a
+    // tab holds it)
+    const direct = () => this.lockedFor(p, async () => {
+      const e = await target();
+      return locks.request(lock, { ifAvailable: true }, async (l: unknown) => {
+        if (!l) return null;
+        const mode = want.mode ?? (await this.mainTx("notebooks", "readonly", (st) => st.get(ref)))?.mode ?? e.mode;
+        const out = await new IdbStore(this.main!, ref, null, { journal: true }).save({ ...want, ...(mode !== undefined ? { mode } : {}), name: splitExt(nameOf(e.path))[0], ...(base !== undefined ? { baseRev: base } : {}) }, { lockHeld: true, journal: { keep: true, hash: "", unjournaled: true } });
+        if (typeof out === "string") throw new WorkspaceError("storage", out);
+        if (out.conflict) throw new WorkspaceError("conflict", `${e.path} was changed elsewhere`, out.conflict);
+        return out.rev as number;
+      });
+    }, undefined, collect);
+    // (a holder: asked on the notebook's channel; its answers only steer, never decide an ok)
+    const id = hex(16);
+    const ask = async (): Promise<any> => {
+      const ch = new BroadcastChannel(lock);
+      try {
+        const answer = (ts: string[]) => new Promise<any>((done) => {
+          const timer = setTimeout(() => done({ t: "timeout" }), NB_HOLDER_MS);
+          ch.onmessage = (ev) => { const m = ev.data; if (m && typeof m === "object" && m.req === id && ts.includes(m.t)) { clearTimeout(timer); done(m); } };
+        });
+        let a = answer(["ready", "wrote", "conflict", "lost", "failed"]);
+        ch.postMessage({ t: "write", req: id, ref, doc: want, base: base ?? null });
+        const m = await a;
+        if (m.t !== "ready") return m;
+        a = answer(["wrote", "conflict", "lost", "failed"]);
+        // (the path and the grant checked again, and the commit sent in the same hold of the workspace's lock)
+        await this.lockedFor(p, async () => { await target(); ch.postMessage({ t: "commit", req: id, ref }); }, undefined, collect);
+        return await a;
+      } finally {
+        ch.close();
+      }
+    };
+    for (let i = 0; i < 3; i++) {
+      const rev = await direct();
+      if (rev !== null) {
+        const ok = await verified();
+        if (ok) return ok;
+        throw new WorkspaceError("busy", `couldn't confirm the write of ${path(p)}: its record no longer matches it (read it again)`);
+      }
+      const m = await ask();
+      if (m.t === "conflict") throw new WorkspaceError("conflict", `${path(p)} was changed elsewhere`, m.current ?? null);
+      if (m.t === "failed") throw new WorkspaceError("storage", `not saved: ${typeof m.why === "string" ? m.why.slice(0, 300) : "the tab that has it open couldn't save it"}`);
+      // (written, or not answered, or the holder let go first: what the record holds decides; a write already made (an
+      // answer that came late, or none) is answered ok, once)
+      const ok = await verified();
+      if (ok) return ok;
+    }
+    // (not confirmed: a commit already sent may still be made, so what happened isn't said, only what to do)
+    throw new WorkspaceError("busy", `couldn't confirm the write of ${path(p)}: a tab of this browser has it open and didn't confirm it (read it again before trying again)`);
   }
   private async writeLocked(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string; expect?: Pick<Entry, "kind" | "fid" | "created" | "ref"> } & Collect & Admitted, guard?: SaveGuard): Promise<{ entry: Entry; rev: number }> {
     const collect = sinkOf(opts.collect), admit = admitOf(opts.admit);
@@ -1588,6 +1740,8 @@ export class Workspace {
       let rev: number;
       if (e.kind === "notebook") {
         if (!this.main) throw new WorkspaceError("storage", "this browser has no storage for notebooks");
+        // (sync's journal writes this browser's notebooks: written through it, outside this hold (write)
+        if (opts.fid === undefined && (await this.mainTx("notebooks", "readonly", (st) => st.get(FENCE)))?.phase === "journal") throw new ToJournal(e.ref!);
         // (written as Jupyter's nbformat, as agents do: its cells made Sagebrush's, or the page shows them empty)
         const doc = nbDoc(content) as any;
         if (!doc || typeof doc !== "object" || !Array.isArray(doc.cells)) throw new WorkspaceError("invalid", "a notebook is {cells: [...]}");
@@ -1883,15 +2037,18 @@ export class Workspace {
 
   /** `p` (and what's in it) put in Trash, as `/Trash/<its name>` (or the
    * first free `name (2)`, …); nothing of its contents removed. */
-  /** `expect`: the entry asked for, by its identity (as rename's): another at `q` now, a WorkspaceError("conflict"), nothing moved. */
+  /** `expect`: the entry asked for, by its identity (as rename's): another at `q` now, a WorkspaceError("conflict"), nothing moved.
+   * With `expect.rev`, also only at that revision (as write's `base`: a data file's, a notebook's or board's record's),
+   * checked holding the lock, which a page's own saves wait for: a change since, a conflict, nothing moved. */
   /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, before anything moves. */
-  async remove(p: string, expect?: Pick<Entry, "kind" | "ref" | "fid" | "created">, signal?: AbortSignal, opts: Collect & Admitted & TrashGate = {}): Promise<Entry> {
+  async remove(p: string, expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> & { rev?: number }, signal?: AbortSignal, opts: Collect & Admitted & TrashGate = {}): Promise<Entry> {
     const q = path(p), collect = sinkOf(opts?.collect), admit = admitOf(opts?.admit);
     if (q === "/" || within(q, TRASH)) throw new WorkspaceError("invalid", `can't put ${q} in Trash`);
     return this.lockedFor(q, async () => {
       await this.admitAt(admit, "remove", "target", q);
       const cur = await this.mustStat(q);
       if (expect && (cur.kind !== expect.kind || cur.created !== expect.created || cur.fid !== expect.fid || (cur.kind !== "file" && cur.ref !== expect.ref))) throw new WorkspaceError("conflict", `${q} was moved or replaced meanwhile`);
+      if (expect?.rev !== undefined && (cur.kind === "folder" || (await this.revNow(cur)) !== expect.rev)) throw new WorkspaceError("conflict", `${q} was changed meanwhile`);
       const taken = new Set((await this.list(TRASH)).map((x) => x.path));
       const [base, ext] = splitExt(nameOf(q));
       const dest = freePath(TRASH, base, ext, (x) => taken.has(x));

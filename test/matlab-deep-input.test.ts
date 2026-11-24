@@ -255,8 +255,10 @@ test("an anonymous function's captures keep their order: left to right, as befor
   const py = matlabToPython("f = @() a + b + c;", "s", { cell: true });
   const sig = py.match(/lambda ([^:]*):/)![1];
   assert.ok(sig.indexOf("a=") < sig.indexOf("b=") && sig.indexOf("b=") < sig.indexOf("c="), sig);
-  // (the same Python as before this change, exactly)
-  assert.equal(sig, '_n, *, a=(_m.cp(a) if "a" in globals() else _m.NOVAR), b=(_m.cp(b) if "b" in globals() else _m.NOVAR), c=(_m.cp(c) if "c" in globals() else _m.NOVAR)');
+  // (the same Python as before this change, exactly, with the workspace's check that leaves another language's
+  // functions out: test/matlab-mixed-mode.test.ts)
+  const cap = (n: string) => `${n}=(_m.cp(${n}) if ("${n}" in globals() and not _m.foreign(${n})) else _m.NOVAR)`;
+  assert.equal(sig, `_n, *, ${cap("a")}, ${cap("b")}, ${cap("c")}`);
   // (a long chain in a handle: captured in order, walked in a loop)
   const names = Array.from({ length: 50 }, (_, k) => `v${k}`);
   const long = matlabToPython("f = @() " + names.join(" + ") + ";", "s", { cell: true });

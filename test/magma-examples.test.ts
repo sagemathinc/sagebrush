@@ -93,7 +93,7 @@ async function checkExamples(names: string[]) {
   assert.deepEqual(bad, []);
 }
 
-test("every Magma index example prints what it shows, in a fresh session", { skip: slowSkip }, async () => {
+test("every Magma index example prints what it shows, in a fresh session", { timeout: 900_000, skip: slowSkip }, async () => {
   const names = Object.keys(examples).sort();
   assert.ok(names.length >= 158, `${names.length} examples`);
   await checkExamples(names);

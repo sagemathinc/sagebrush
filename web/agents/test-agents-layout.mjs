@@ -2,7 +2,8 @@
 // The agents page's resizable columns (William A1 + A10; the layout plan r3, PR 2): the chat list and the artifact
 // pane are dragged or moved with the keys, clamped so the chat keeps 420 px and the pane 320, re-clamped on a resize
 // and when the pane opens, kept in localStorage only in a valid shape, and left alone by the narrow overlay and full
-// screen. The scripted agent (no pairing) opens a code artifact ("plot a Fourier series"); notebooks are
+// screen. Copy chat and a message's Copy put Markdown on the clipboard (C-copy-*).
+// The scripted agent (no pairing) opens a code artifact ("plot a Fourier series"); notebooks are
 // test-agents-artifacts.mjs's (A10 there: opening a notebook leaves the pane width as it was).
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/agents/test-agents-layout.mjs
 // Each case prints its id first ("ok   L2-side-179: ..."), so a run's FAIL set is the ids of its FAIL lines.
@@ -120,6 +121,8 @@ try {
     //  rather than pushing the buttons out of the header)
     const h = await ev(`(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(), top = r('.top'), who = r('#who'), how = r('#howto'), con = r('#connect');
       return { chat: r('main').width, whoTop: who.top, howTop: how.top, conTop: con.top, whoRight: who.right, howLeft: how.left, conRight: con.right, topRight: top.right, topH: top.height, conH: con.height }; })()`);
+    const al = await ev(`(() => { const t = document.querySelector('.top'), cs = getComputedStyle(t), g = document.querySelector('.top .top-actions').getBoundingClientRect(), r = t.getBoundingClientRect(); return { gap: (r.right - parseFloat(cs.paddingRight)) - g.right }; })()`);
+    ok("L2-header-actions-right", Math.abs(al.gap) < 1.5, "with the chat at 420 px the header's actions keep to its right edge (#1793)", al);
     ok("L2-header-one-line", near(h.chat, 420) && Math.abs(h.conTop - h.howTop) < 2 && Math.abs(h.conTop - h.whoTop) < 6 && h.topH < 2 * h.conH && h.whoRight <= h.howLeft + 1 && h.conRight <= h.topRight + 1, "with the chat at 420 px the header is one line: the name gives way, the buttons stay in the header", h);
     // (board's B-O2-1: "on your computer" either whole or visually hidden, never cut to a letter; the name itself whole,
     //  its own characters measured, not the space after it)
@@ -128,6 +131,25 @@ try {
       return { name: name.textContent.trim(), nameRight: nr.right, whoRight: w.right, smallRight: s.right, smallW: s.width, clip: cs.clipPath, display: cs.display, visibility: cs.visibility, smallText: sm.textContent }; })()`);
     const whole = l.smallW > 1 && l.smallRight <= l.whoRight + 0.5, hidden = l.smallW <= 1 && l.clip !== "none" && l.display !== "none" && l.visibility === "visible";
     ok("L2-header-label", (whole || hidden) && l.nameRight <= l.whoRight + 0.5 && l.smallText.trim() !== "", "with the chat at 420 px the agent's name is whole, and the where-it-runs label is either whole or visually hidden (still read by screen readers), never cut", l);
+  }
+  {
+    // (#1793: all four of the header's actions shown (Use your own Claude, Review changes, Delegate, Connected) with the
+    //  chat at its 420 px minimum: they wrap within the header, and none is drawn past the chat over the pane's tabs)
+    const h4 = await ev(`(() => {
+      document.querySelector('#howto').hidden = false;
+      document.querySelector('#review').hidden = false;
+      const con = document.querySelector('#connect'); con.hidden = false; con.textContent = 'Connected';
+      let sw = document.querySelector('#delegate-switch');
+      if (!sw) { sw = Object.assign(document.createElement('button'), { id: 'delegate-switch', className: 'link', type: 'button' }); con.before(sw); }
+      sw.hidden = false; sw.textContent = 'Delegate: on';
+      const r = (e) => e.getBoundingClientRect(), main = r(document.querySelector('main')), pane = r(document.querySelector('#artifacts'));
+      const btns = ['#howto', '#review', '#delegate-switch', '#connect'].map((s) => { const b = r(document.querySelector(s)); return { s, left: b.left, right: b.right, top: b.top, bottom: b.bottom, w: b.width, h: b.height }; });
+      return { mainRight: main.right, paneLeft: pane.left, btns };
+    })()`);
+    const apart = (a, b) => a.right <= b.left + 0.5 || b.right <= a.left + 0.5 || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5;
+    const noOverlap = h4.btns.every((a, i) => h4.btns.every((b, j) => i === j || apart(a, b)));
+    ok("L2-header-actions-fit", h4.btns.every((b) => b.w > 0 && b.h > 0 && b.right <= h4.mainRight + 0.5 && b.right <= h4.paneLeft + 0.5 && b.left >= 0) && noOverlap, "with the chat at 420 px and all four header actions shown (each drawn), none runs past the chat over the pane's tabs, and none overlaps another (#1793)", h4);
+    await ev(`(() => { document.querySelector('#review').hidden = true; const con = document.querySelector('#connect'); con.hidden = true; const sw = document.querySelector('#delegate-switch'); if (sw) sw.hidden = true; return true; })()`);
   }
   for (const [id, pane] of [["L2-pane-319", 319], ["L2-pane-320", 320]]) {
     await drag("sep-pane", 1600 - pane);
@@ -289,6 +311,89 @@ try {
     await sleep(200);
     const w1 = await ev(`window.__sbLayout.stats.writes`);
     ok("L2-write-count", w1 - w0 === 1, "one drag of 50 moves writes the stored layout once", { w0, w1 });
+  }
+  {
+    // Copy (decided Nov 19 2026): the header's Copy chat puts the whole chat on the clipboard as Markdown, and a
+    // message's Copy that message; the button is there only once the chat has something in it
+    await fresh(1400);
+    ok("C-copy-empty", await ev(`document.querySelector('#log-tools').hidden`), "an empty chat: no Copy chat");
+    await openPane();
+    await ev(`(() => { window.__clip = []; navigator.clipboard.writeText = (t) => (window.__clip.push(t), Promise.resolve()); return true; })()`);
+    ok("C-copy-shown", await ev(`!document.querySelector('#log-tools').hidden && !!document.querySelector('#copychat').offsetParent`), "with a turn in it: Copy chat is offered");
+    await ev(`(document.querySelector('#copychat').click(), true)`);
+    await until(`window.__clip.length === 1`);
+    const all = await ev(`window.__clip[0]`);
+    ok("C-copy-chat", /^# /.test(all) && all.includes("**You:**\n\nplot a Fourier series") && /\*\*Claude:\*\*/.test(all) && /\n- `[^`]+`/.test(all) && /\n- file: /.test(all), "Copy chat: the title, what the person wrote, the agent's turn with a line per tool call and its file", all.slice(0, 600));
+    await ev(`(document.querySelector('#log .user .copy-msg').click(), true)`);
+    await until(`window.__clip.length === 2`);
+    ok("C-copy-message", (await ev(`window.__clip[1]`)) === "**You:**\n\nplot a Fourier series", "a message's Copy: that message", await ev(`window.__clip[1]`));
+    await ev(`(document.querySelector('#log .turn .copy-msg').click(), true)`);
+    await until(`window.__clip.length === 3`);
+    const t = await ev(`window.__clip[2]`);
+    ok("C-copy-turn", /^\*\*Claude:\*\*/.test(t) && !t.includes("plot a Fourier series\n\n**Claude") && t.length > 20, "a turn's Copy: the agent's turn only", t.slice(0, 300));
+    ok("C-copy-quiet", exceptions.length === 0, "no page errors", exceptions);
+  }
+  // (Files…, at the foot of the chat list: big, visible in the chat view, and it opens the notebook page with its file
+  //  browser shown, even where this browser had hidden it)
+  await fresh(1600);
+  {
+    const b = await ev(`(() => { const b = document.getElementById('files-big'), r = b?.getBoundingClientRect(), nav = document.querySelector('nav.side').getBoundingClientRect(); return b && { text: b.textContent.trim(), w: r.width, h: r.height, fromBottom: nav.bottom - r.bottom, inNav: !!b.closest('nav.side'), shown: r.width > 0 && getComputedStyle(b).visibility === 'visible', font: parseFloat(getComputedStyle(b).fontSize) }; })()`);
+    ok("L2-files-button", b && b.text === "Files…" && b.inNav && b.shown && b.w >= 200 && b.h >= 36 && b.font >= 15 && b.fromBottom < 120, "a big Files… button at the foot of the chat list", b);
+    await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`);
+    await ev(`document.getElementById('files-big').click()`);
+    await until(`location.pathname === "/" && document.readyState === "complete"`);
+    await until(`!document.getElementById('wssidebar').hidden`, 30000).catch(() => {});
+    const side = await ev(`({ path: location.pathname, shown: !document.getElementById('wssidebar').hidden, pref: localStorage.getItem("sagebrush-files-sidebar") })`);
+    ok("L2-files-button-opens", side.path === "/" && side.shown && side.pref === "1", "Files… opens the notebook page with its file browser shown (though it had been hidden)", side);
+  }
+  // ---- while a turn runs, the composer's primary action queues: Shift+Enter and the primary button never interrupt the
+  //  agent; only Send now (and Stop) do. The scripted agent slowed down, so its turn is still running meanwhile
+  {
+    await fresh(1600);
+    await send("Page.navigate", { url: `${origin}/agents/?speed=0.05` });
+    await until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb')`);
+    await sleep(300);
+    const type = async (text) => {
+      if (!(await ev(`!!document.querySelector('#editor textarea')`))) {
+        const [x, y] = await ev(`(() => { const r = document.querySelector('#editor .mb-block').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+        for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+      }
+      await until(`!!document.querySelector('#editor textarea')`);
+      await ev(`document.querySelector('#editor textarea').focus()`);
+      await send("Input.insertText", { text });
+    };
+    const shiftEnter = async () => { for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", modifiers: 8, windowsVirtualKeyCode: 13 }); };
+    const state = () => ev(`(() => { const q = (s) => document.querySelector(s); return { running: !q('#stop').hidden, primary: q('#send').textContent, keys: q('#keys').textContent, now: !q('#send-now').hidden && q('#send-now').textContent, queued: q('#queued').textContent, interrupted: [...document.querySelectorAll('.status')].filter((x) => x.textContent === 'Interrupted').length, users: [...document.querySelectorAll('.user')].map((u) => u.className) }; })()`);
+    const idle = await state();
+    ok("Q1-idle", idle.primary === "Send" && idle.keys === "send" && idle.now === false && !idle.running, "with no turn running: Send, Shift+Enter sends, no Send now", idle);
+    // (#1806: the keys aren't said three times: no sidebar line, a plain placeholder, and the row under the prompt only
+    //  once there's text; Send's tooltip says its key)
+    const keysOf = () => ev(`(() => { const ph = [...document.querySelectorAll('#editor [data-placeholder], #editor textarea')].map((e) => e.dataset?.placeholder || e.placeholder || '').filter(Boolean); return { hint: getComputedStyle(document.querySelector('.composer .hint')).visibility, side: document.querySelector('nav.side').innerText, ph, sendTitle: document.querySelector('#send').title }; })()`);
+    const k0 = await keysOf();
+    ok("K1-empty", k0.hint === "hidden" && !/Shift\+Enter/.test(k0.side) && k0.ph.length > 0 && k0.ph.every((p) => /^Message .+…$/.test(p) && !/Enter/.test(p)) && /Shift\+Enter/.test(k0.sendTitle), "with nothing typed: no keys under the prompt, none in the chat list, the placeholder plain; Send's tooltip says Shift+Enter (#1806)", k0);
+    await type("plot a Fourier series");
+    const k1 = await keysOf();
+    ok("K1-typed", k1.hint === "visible", "once there's text, the keys row shows (#1806)", k1);
+    await shiftEnter();
+    await until(`!document.querySelector('#stop').hidden`, 10000);
+    await until(`getComputedStyle(document.querySelector('.composer .hint')).visibility === 'hidden'`, 3000).catch(() => {});
+    ok("K1-sent", (await keysOf()).hint === "hidden", "after a send clears the prompt, the keys row goes again (#1806)", await keysOf());
+    const run0 = await state();
+    ok("Q2-running", run0.primary === "Queue" && run0.keys === "queue" && run0.now === "Send now", "while a turn runs: the primary button is Queue, Shift+Enter queues, Send now beside it", run0);
+    await type("and a square wave too");
+    await shiftEnter();
+    await sleep(300);
+    const run1 = await state();
+    ok("Q3-shift-enter", run1.running && run1.interrupted === 0 && run1.queued === "1 queued" && /queued/.test(run1.users.at(-1) ?? ""), "Shift+Enter during a turn queues the message: the turn goes on, 1 queued", run1);
+    await type("label the axes");
+    await ev(`document.querySelector('#send').click()`);
+    await sleep(300);
+    const run2 = await state();
+    ok("Q4-primary", run2.running && run2.interrupted === 0 && run2.queued === "2 queued", "the primary button during a turn queues too: the turn goes on, 2 queued", run2);
+    await type("stop and do this instead");
+    await ev(`document.querySelector('#send-now').click()`);
+    const stopped = await until(`[...document.querySelectorAll('.status')].some((x) => x.textContent === 'Interrupted')`, 10000).then(() => true, () => false);
+    ok("Q5-send-now", stopped, "Send now interrupts the turn and sends", await state());
   }
   console.log(`${checks - fails}/${checks} passed${fails ? "" : ", all passed"}`);
   code = fails ? 1 : 0;

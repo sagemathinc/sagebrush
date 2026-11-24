@@ -1,8 +1,8 @@
 # MATLAB
 
 *October 13, 2026.* Sagebrush runs MATLAB programs: `sagebrush --matlab
-file.m`. Cambridge University Press, whose journals publish code with
-papers, asked for MATLAB language support. As with Magma (src/magma.ts),
+file.m`. A customer whose journals publish code with papers asked for
+MATLAB language support. As with Magma (src/magma.ts),
 the MATLAB source is translated to Python, which the usual pipeline compiles
 and runs on a runtime library with MATLAB's semantics:
 
@@ -392,6 +392,33 @@ both directions:
 
 Not supported: MATLAB 7.3 (HDF5) files and objects (strings are saved as
 char arrays, with a warning). Single sparse matrices are saved as double.
+
+## JSON
+
+`jsonencode` and `jsondecode` (lib/_matlab_json.py, loaded on their first
+call) follow MATLAB's documentation of them and are checked against Octave
+11.1's where the two agree (test_json):
+- **Encoding:** a vector becomes a flat array; a matrix or N-d array nested
+  arrays, its first dimension outermost. A cell array becomes a flat array in
+  column-major order; a struct array an array of objects, nested as a numeric
+  array is (Octave flattens it); a string array strings. Numbers are written
+  as integers where they are, else as the shortest text that reads back as
+  the double, as Octave writes them. `ConvertInfAndNaN` and `PrettyPrint`
+  are supported. Complex and sparse values are refused, as MATLAB refuses them;
+  so are object arrays, and MATLAB's tables, datetime, categorical,
+  containers.Map and enumerations, which Sagebrush lacks.
+- **Decoding:** arrays of numbers become column vectors (nulls NaN), arrays of
+  numeric (or of logical) arrays of one size an array of one more dimension,
+  arrays of objects with the same names in the same order struct arrays,
+  anything else cell arrays. Names are made
+  valid as `matlab.lang.makeValidName` makes them (Octave keeps a leading
+  `_`).
+- **Bounds:** the JSON text is untrusted input. Before it is parsed it is
+  refused over 2^22 characters, with more than 2^18 values (which bounds what
+  parsing builds), with a run of more than 1,000 consecutive digits, or
+  nested more than 200 levels deep (string and regular-expression scans, then
+  a loop over the brackets once their number is bounded). Integers are read as doubles, never as
+  arbitrary-precision integers.
 
 ## Graphics
 

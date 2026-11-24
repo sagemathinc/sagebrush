@@ -4,6 +4,8 @@ import { handleShare, scheduled, type ShareEnv } from "../../share/server.ts";
 import { handleEngines, handleLibChunk, handlePkg, type EnginesEnv } from "../../engines.ts";
 import { syncScheduled, type Env as SyncSiteEnv } from "../../sync/server.ts";
 import { BUILD } from "./build-id.ts";
+import * as BUILD_ID from "./build-id.ts";
+import { handleVersion } from "../../version.ts";
 import { handleGhPage, handleSharePage } from "./preview.ts";
 
 // Static assets are served before this runs.  The atlas's pages are
@@ -16,6 +18,9 @@ import { handleGhPage, handleSharePage } from "./preview.ts";
 export default {
   async fetch(request, _env, ctx) {
     const url = new URL(request.url);
+    // (which build this is, for the stamp the site's pages show: web/version.ts; a build with no release answers nothing)
+    const version = handleVersion(request, BUILD_ID);
+    if (version) return version;
     const shared = await handleShare(request, env as ShareEnv, ctx);
     if (shared) return shared;
     // engines by their content, from R2 (web/engines.ts)

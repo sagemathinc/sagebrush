@@ -66,7 +66,7 @@ try {
   const perms = await page.evaluate(() => window.sagebrush.permissions?.()?.files);
   const out = await page.evaluate(async () => { const n = window.sagebrush.notebook; const f = n.cells()[0].id; const x = await Promise.race([n.applyEdits({ set: [{ id: f, code: "print(6 * 7)" }] }), new Promise((r) => setTimeout(() => r(null), 90000))]); return x ? String(x.outputs?.[f] ?? "").trim() : "(no answer in 90 s)"; });
   // (the kernel's worker is the runner: its frame is one of the page's sandboxed frames, and it gave up for no other)
-  const where = await page.evaluate(() => { const w = window.sagebrush.kernel?.worker; const fs = [...document.querySelectorAll("iframe[sandbox]")]; return { sandbox: fs.map((f) => f.getAttribute("sandbox")), runner: !!w?.frame && fs.includes(w.frame), plain: !!w?.inner, bar: !document.querySelector("#runbar")?.hidden }; });
+  const where = await page.evaluate(() => { const w = window.sagebrush.kernel?.worker; const fs = [...document.querySelectorAll("iframe[sandbox]")]; return { sandbox: fs.map((f) => f.getAttribute("sandbox")), runner: !!w?.frame && fs.includes(w.frame), plain: !!w?.inner, bar: !!document.querySelector("#runbar") }; });
   ok(perms === false && out === "42", `a new notebook, its file changes off (${perms}), runs its cell: ${J(out.slice(0, 200))}`);
   ok(!/can't run here/.test(out) && where.runner && !where.plain && where.sandbox.every((x) => x === "allow-scripts") && !where.bar, "...in the runner frame, never refused, and no run bar: " + J(where));
   ok(blocked.length === 0, "nothing was blocked loading the runner: " + J(blocked));

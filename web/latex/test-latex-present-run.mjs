@@ -76,6 +76,18 @@ try {
   const fid = await ev(`window.sagebrush.workspace.create("/present-run.tex", { content: new TextEncoder().encode(${JSON.stringify(DOC(0))}) }).then((e) => e.fid)`);
   const openIt = async () => { await send("Page.navigate", { url: site + "?tex=" + encodeURIComponent(fid) }); return until(`!!document.querySelector(".tex-page .tex-run") && document.querySelectorAll(".tex-preview .slide").length >= 3`, 60000); };
   check(await openIt(), "(the talk open, three slides)");
+  // (before any Run, presenting: a code item not run yet names Shift+Enter, the key that runs it here, never the Run
+  //  button a slide doesn't have)
+  await ev(`document.querySelector(".tex-present-btn").click(), true`);
+  await until(`!!document.querySelector(".tex-present .tp-stage .slide")`, 15000);
+  const hints = [];
+  for (const d of ["1", "2", "3"]) {
+    await key(d, "Digit" + d, 48 + Number(d)); await key("Enter", "Enter", 13); await sleep(200);
+    hints.push(...(await ev(`[...document.querySelectorAll(".tex-present .tp-stage .sagechip.s-notrun")].map((c) => c.textContent)`)));
+  }
+  check(hints.length > 0 && hints.every((t) => /: not run yet \(press Shift\+Enter\)$/.test(t)), "presenting, before any Run: an item not run yet says to press Shift+Enter, not Run", hints);
+  await key("Escape", "Escape", 27);
+  check(await until(`!document.querySelector(".tex-present")`, 5000), "(presenting stopped)");
   await ev(`document.querySelector(".tex-run").click(), true`);
   check(await ran(), "(the first Run)", await status());
 

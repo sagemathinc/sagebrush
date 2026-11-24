@@ -7,8 +7,8 @@ polynomials are exact and proven (the engine checks a coefficient bound).
 """
 
 import re as _re
-from sagebrush import mf as _mf, ap as _ap
-from sagebrush._engine import call as _call
+from _sagebrush_lib import mf as _mf, ap as _ap
+from _sagebrush_lib._engine import call as _call
 
 
 def _gcd(a, b):
@@ -1275,7 +1275,7 @@ def _rref_exact(rows):
     elimination), without its zero rows."""
     if not rows:
         return []
-    from sagebrush import linalg
+    from _sagebrush_lib import linalg
     R, piv = linalg.rref(rows)
     return [[_Fr(x) for x in R[i]] for i in range(len(piv))]
 
@@ -1292,7 +1292,7 @@ def _cusp_hecke(N, k, n, s, new_only):
     precision s), then T_(p^r) by T_(p^(r+1)) = T_p T_(p^r) - p^(k-1)
     T_(p^(r-1)) (U_p^r for p | N) and the product over the primes, the
     products of integer matrices in the engine (zmat, metered)."""
-    from sagebrush.linalg import matmul
+    from _sagebrush_lib.linalg import matmul
     from sage_all import ZZ
     d = None
     out, out_den = None, 1
@@ -1330,7 +1330,7 @@ def _solve_rows(B, V):
         if any(any(v) for v in V):
             raise ValueError("not in the span")
         return [[] for _ in V]
-    from sagebrush import linalg
+    from _sagebrush_lib import linalg
     s = len(B[0])
     aug = [[B[i][c] for i in range(d)] + [v[c] for v in V] for c in range(s)]
     R, piv = linalg.rref(aug)
