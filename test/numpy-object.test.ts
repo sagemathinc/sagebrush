@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { slowSkip } from "./slow-tests";
 
 // The object dtype (numpy-tests/test_object.py compares what it has with
 // NumPy): arithmetic and the other ufuncs on object arrays aren't in
@@ -92,6 +93,66 @@ test("object arrays: discovery of shared sublists is admitted level by level (el
   } finally {
     Object.assign(np.ARRAY_LIMITS, saved);
   }
+});
+
+// (Stop reaches every loop of the walk: one wide list, read through a proxy that asks for Stop at its 4096th
+// read, stops within 4096 more reads, with a KeyboardInterrupt, never reading it all)
+test("object arrays: Stop interrupts the walk over one wide list within 4096 reads", () => {
+  const code = [
+    `const C = require(${JSON.stringify(__dirname + "/../src/compile.js")});`,
+    `const I = require(${JSON.stringify(__dirname + "/../src/runtime/interrupt.js")});`,
+    "Promise.resolve(C.initParser && C.initParser()).then(() => {",
+    "  C.R.importModule('sys').path.push(C.libDir());",
+    "  C.execModule('import numpy as np\\n', '<warm>', '__main__');",
+    "  let reads = 0;",
+    "  const isIndex = (k) => typeof k === 'string' && k !== '' && String(Number(k)) === k;",
+    "  const input = new Proxy(new Array(65536).fill(0), { get(t, k, r) { if (isIndex(k) && ++reads === 4096) I.requestCtrlC(); return Reflect.get(t, k, r); } });",
+    "  C.R.importModule('builtins')._wide = input;",
+    "  let caught = 'none';",
+    "  try { C.execModule('import numpy as np\\nimport builtins\\nnp.array(builtins._wide, dtype=object)\\n', '<wide>', '__main__'); }",
+    "  catch (e) { caught = C.R.formatException(e).trim().split('\\n').pop(); }",
+    "  console.log(JSON.stringify({ after: reads - 4096, caught }));",
+    "});",
+  ].join("\n");
+  const r = JSON.parse(execFileSync(process.execPath, ["-e", code], { encoding: "utf8" }).trim());
+  assert.equal(r.caught, "KeyboardInterrupt");
+  assert.ok(r.after <= 4096, `${r.after} reads after Stop was asked for`);
+});
+
+// (the walk's own memory goes through the heap's admission at its measured cost, OBJ_WALK_ITEM_BYTES an item:
+// with the heap shown nearly full, 128 MiB free, nested shared lists of 2**22 elements, about 192 MiB at that
+// cost, are refused before they are built; at a floor of 8 bytes a reference they would be made)
+test("object arrays: discovery's own memory is admitted by the heap at its measured cost (128 MiB shown free)", { timeout: 60_000 }, async () => {
+  const H = require("../src/runtime/heap");
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  let id = 0;
+  const run = async (code: string) => {
+    const n = ++id;
+    await s.handle({ id: n, code });
+    return msgs.filter((m) => m.id === n && m.stream).map((m) => m.text).join("");
+  };
+  await run("import numpy as np\nx = [0]\nfor _ in range(22):\n    x = [x, x]");
+  const saved = { ...H.heapProbe };
+  try {
+    H.heapProbe.used = () => H.heapLimit() - 2 ** 27;
+    H.heapProbe.collect = () => false;
+    const out = await run("try:\n    np.array(x, dtype=object)\n    print('made')\nexcept MemoryError as e:\n    print('refused', str(e))");
+    assert.match(out, /^refused making an object array of shape \((2, ){21}2\) from nested data needs about \d+ MiB, but this session's heap has only about 128 MiB free/, out);
+  } finally {
+    Object.assign(H.heapProbe, saved);
+  }
+  assert.equal(await run("print(np.array(x, dtype=object).size)"), `${2 ** 22}\n`);
+});
+
+// (at the default limits, nested shared lists 40 levels deep are refused by that admission with MemoryError,
+// never run the process out of memory: slow, about 11 s and 1.8 GB on the CLI, so CI's long tier)
+test("object arrays: at the default limits, 40 levels of shared lists are refused with MemoryError", { skip: slowSkip, timeout: 120_000 }, () => {
+  const code = "import numpy as np\nx = [0]\nfor _ in range(40):\n    x = [x, x]\ntry:\n    np.array(x, dtype=object)\n    print('made')\nexcept MemoryError as e:\n    print('refused', str(e).split(' needs ')[0][:22])";
+  const out = execFileSync(process.execPath, [CLI, "-c", code], { encoding: "utf8", timeout: 90_000 });
+  assert.equal(out, "refused making an object array\n");
 });
 
 test("object arrays: the object dtype's itemsize, and the dtype kept by creation and astype", () => {

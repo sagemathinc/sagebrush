@@ -47,6 +47,11 @@
    "id": "bytes-count-bound",
    "kind": "memory",
    "where": "src/runtime/types.ts::toBytes"
+  },
+  {
+   "id": "numpy-array-admission",
+   "kind": "memory",
+   "where": "src/runtime/numpy.ts::admitArray"
   }
  ]
 }

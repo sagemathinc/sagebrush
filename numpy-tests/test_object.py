@@ -235,3 +235,37 @@ for name, f in [
     ("repr-arrays-wrap", lambda: holding(*[np.zeros((2, 2))] * 6)),
 ]:
     show(name, f)
+
+
+class ManyLines:
+    def __repr__(self):
+        return "x\n" * 200000
+
+
+# (an element whose repr has 200,000 lines: its length, the same as NumPy's)
+show("repr-many-lines", lambda: (len(repr(np.array([ManyLines()], dtype=object))), repr(np.array([ManyLines()], dtype=object))[:20]))
+
+
+class Lines:
+    def __init__(self, s):
+        self.s = s
+
+    def __repr__(self):
+        return self.s
+
+
+# (line boundaries as str.splitlines finds them: a final one ends the last line; \r, \r\n, \x0b, \x0c,  )
+for name, s in [("lf-end", "a\nb\n"), ("lf-one", "x\n"), ("crlf", "a\r\nbb"), ("cr", "a\rbb"), ("vt-ff", "a\x0bb\x0cc"), ("u2028", "a bb"), ("empty-lines", "\n\n"), ("plain", "ab")]:
+    show("repr-lines-" + name, lambda: repr(np.array([Lines(s), 1], dtype=object)))
+
+# 0-d arrays among the data's items stay arrays (NumPy's); an array's own elements become its values
+for name, f in [
+    ("0d-pair", lambda: np.array([np.array(1), np.array(2)], dtype=object)), ("0d-float", lambda: np.array([np.array(1.5)], dtype=object)),
+    ("0d-mixed", lambda: np.array([1, np.array(2)], dtype=object)), ("0d-object", lambda: np.array([np.array(None, dtype=object)], dtype=object)),
+    ("0d-nested", lambda: np.array([[np.array(1), 2]], dtype=object)), ("0d-asarray", lambda: np.asarray([np.array(3)], dtype=object)),
+    ("0d-types", lambda: [type(v).__name__ for v in np.array([np.array(1), 2, np.float64(3)], dtype=object).tolist()]),
+    ("0d-top", lambda: (np.array(np.array(3), dtype=object), type(np.array(np.array(3), dtype=object).item()).__name__)),
+    ("array-elements", lambda: [type(v).__name__ for v in np.array(np.arange(3), dtype=object).tolist()]),
+    ("0d-nodtype", lambda: np.array([np.array(1), np.array(2)])), ("0d-str", lambda: np.array([np.array("a")], dtype=object)),
+]:
+    show(name, f)

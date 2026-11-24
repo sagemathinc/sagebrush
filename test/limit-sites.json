@@ -13607,6 +13607,16 @@
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
  },
+ "src/runtime/numpy.ts :: admitObjects :: if (n > OBJ_MAX_ITEMS) { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "numpy-array-admission"
+   }
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "an object array's admission: at most V8's largest JavaScript array (2**27 items), which its references are held in, with the array admission's MemoryError, before anything is allocated (objEmpty and the discovery walk's levels)"
+ },
  "src/runtime/numpy.ts :: admitWork :: if (bytes <= ARRAY_LIMITS.bytes) return; #0": {
   "class": "2",
   "owner": "NumPy shim/runtime memory",
@@ -13711,6 +13721,16 @@
   "class": "coverage",
   "owner": "python",
   "reason": "object arrays: operations not in sagebrush's numpy yet (arithmetic, ufuncs, an inner array cut off by the result's shape) refuse with NotImplementedError rather than compute something else"
+ },
+ "src/runtime/numpy.ts :: objSpec :: const OBJ_MAX_ITEMS = 2 ** 27; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "numpy-array-admission"
+   }
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "an object array's admission: at most V8's largest JavaScript array (2**27 items), which its references are held in, with the array admission's MemoryError, before anything is allocated (objEmpty and the discovery walk's levels)"
  },
  "src/runtime/numpy.ts :: prod :: export const ARRAY_LIMITS = { elements: 2 ** 32, bytes: 2 ** 32 }; #0": {
   "class": "2",

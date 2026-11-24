@@ -23,7 +23,7 @@ import { glibcLog, glibcExp, glibcExp2, glibcLog1p, EXP_TABLES, LOG_TABLES, glib
 import { gemmBuffers, noRoom, wasmUnary, wasmSinCos, wasmSort, wasmArgsort } from "./kernels";
 import { ND_MATMUL_MIN, ndMatmul, useNd } from "./nd";
 import * as FD from "./fdlibm";
-import { nativeHost } from "./heap";
+import { admitHeap, nativeHost } from "./heap";
 import * as CR from "./crmath";
 
 const { T, raise, tuple, typeName, NotImplemented } = Obj;
@@ -3117,9 +3117,11 @@ function arrayText1(a: NDArray, sep: string, prefix: string, suffix: string): st
   const extend = (st: { s: string; line: string }, word: string, width: number, hanging: string) => {
     // (a word of several lines, an object element's repr such as an array's: _extendLine_pretty, each further
     // line indented to where its first began, and the last padded to the widest)
-    const words = word.split("\n");
+    const words = splitLines(word);
     if (words.length > 1) {
-      const widest = Math.max(...words.map((w) => w.length));
+      // (a loop, not Math.max(...): a repr of very many lines would overflow the argument stack)
+      let widest = 0;
+      for (const w of words) if (w.length > widest) widest = w.length;
       let indent: string;
       if (st.line.length + widest > width && st.line.length > hanging.length) {
         st.s += st.line.trimEnd() + "\n";
@@ -3182,6 +3184,12 @@ function arrayText1(a: NDArray, sep: string, prefix: string, suffix: string): st
   return rec(0, nextLinePrefix, lineWidth);
 }
 
+// (Python's str.splitlines: every line boundary it knows, a final one ending the last line, not starting another)
+function splitLines(s: string): string[] {
+  const out = s.split(/\r\n|[\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]/);
+  if (out.length > 1 && out[out.length - 1] === "") out.pop();
+  return out;
+}
 // (a dtype as repr shows it: a string one quoted, dtype='<U3')
 const dtypeText = (dt: any): string => (dt instanceof StrDType ? `'${dt.str}'` : dt.name);
 export function arrayRepr(a: NDArray, override = true): string {
@@ -3821,8 +3829,25 @@ function objSpec(x: any): boolean {
   if (x === T.object || (objScalarType !== null && x === objScalarType)) return true;
   return typeof x === "string" && (x === "O" || x === "|O" || x === "=O" || x === "<O" || x === "object" || x === "object_" || x === "O8");
 }
-export function objEmpty(shape: number[]): ObjArray {
+// (an object array's admission: the array admission, and at most V8's largest JavaScript array, about 2**27
+// items, which its references are held in, with the same MemoryError: past it no host can make one)
+const OBJ_MAX_ITEMS = 2 ** 27;
+// (the discovery walk's memory per item of a level: its reference in the level's JS array (8 bytes), its flag
+// (1), its slot in the result's references at the end (8), and V8's holey-array and growth overhead. Measured
+// Nov 24 2026 on Node 24 (the CLI), each in a fresh process: np.array of nested shared lists, 2**24 elements,
+// peaked at 620 MB RSS against 149 MB with numpy imported and nothing made, about 29.4 bytes an element;
+// rounded up to 32, as ENGINE asked)
+const OBJ_WALK_ITEM_BYTES = 32;
+function admitObjects(shape: number[]): void {
   admitArray(shape, OBJ_DT as unknown as DType);
+  const n = prod(shape);
+  if (n > OBJ_MAX_ITEMS) {
+    const dims = shape.map(String);
+    raise(T.MemoryError, `Unable to allocate ${sizeString(BigInt(n) * 8n)} for an array with shape (${dims.join(", ")}${dims.length === 1 ? "," : ""}) and data type object`);
+  }
+}
+export function objEmpty(shape: number[]): ObjArray {
+  admitObjects(shape);
   return new ObjArray(OBJ_DT, new Array(prod(shape)).fill(null), shape.slice(), cStrides(shape));
 }
 // a C-ordered copy (of the references: the objects are shared, as NumPy's)
@@ -3852,9 +3877,15 @@ function elemObj(a: any, p: number): any {
 function objFromPy(x: any, discovered = false): ObjArray {
   const shape: number[] = [];
   let level: any[] = [x];
+  // (Stop is polled every 4096 items the walk reads or writes, in every loop: one wide list counts too)
+  let polled = 0;
+  const poll = () => {
+    if ((++polled & 4095) === 0) O.pollInterrupt();
+  };
   // (which of level's items are parts of an array the walk went into: one left with dimensions of its own
   // where the walk stops, NumPy assigns that whole array into its place, broadcasting, which isn't here yet)
-  let inArr: boolean[] = [false];
+  let inArr = new Uint8Array(1);
+  inArr[0] = anyArray(x) ? 1 : 0;
   const cutArray = () => {
     if (level.some((v, i) => inArr[i] && anyArray(v) && v.ndim > 0))
       raise(T.NotImplementedError, "this operation on object arrays is not supported by sagebrush's numpy yet (an array inside the data whose dimensions don't all fit the result's: NumPy assigns it whole, broadcasting)");
@@ -3872,9 +3903,8 @@ function objFromPy(x: any, discovered = false): ObjArray {
     O.pollInterrupt();
     let n = -1;
     let ok = true;
-    let polled = 0;
     for (const v of level) {
-      if ((++polled & 4095) === 0) O.pollInterrupt();
+      poll();
       let len: number;
       if (anyArray(v)) len = v.ndim === 0 ? -1 : v.shape[0];
       else if (isSeq(v) && !strLike(v)) len = seqItems(v).length;
@@ -3893,22 +3923,28 @@ function objFromPy(x: any, discovered = false): ObjArray {
       break;
     }
     shape.push(n);
-    // (the next level has as many items as the array so far has elements: admitted before it is built, so
-    // shared sublists, [x, x] nested, can't grow the walk past the array admission; Stop polled as it goes)
-    admitArray(shape, OBJ_DT as unknown as DType);
-    const next: any[] = [], nextIn: boolean[] = [];
+    // (the next level has as many items as the array so far has elements: admitted as an object array before
+    // it is built, so shared sublists, [x, x] nested, can't grow the walk past it; and the walk's own memory
+    // with it, through the heap's admission: this level and the next alive together, OBJ_WALK_ITEM_BYTES an item)
+    const count = prod(shape);
+    admitObjects(shape);
+    admitHeap(OBJ_WALK_ITEM_BYTES * (level.length + count), `making an object array of shape (${shape.join(", ")}${shape.length === 1 ? "," : ""}) from nested data`);
+    const next: any[] = new Array(count), nextIn = new Uint8Array(count);
+    let at = 0;
     for (const v of level) {
-      if ((++polled & 4095) === 0) O.pollInterrupt();
       if (anyArray(v))
         for (let i = 0; i < v.shape[0]; i++) {
-          next.push(arrayItem(v, i));
-          nextIn.push(true);
+          poll();
+          nextIn[at] = 1;
+          next[at++] = arrayItem(v, i);
         }
-      else
-        for (const it of seqItems(v)) {
-          next.push(it);
-          nextIn.push(false);
+      else {
+        const items = seqItems(v);
+        for (let i = 0; i < items.length; i++) {
+          if ((++polled & 4095) === 0) O.pollInterrupt();
+          next[at++] = items[i];
         }
+      }
     }
     level = next;
     inArr = nextIn;
@@ -3916,10 +3952,12 @@ function objFromPy(x: any, discovered = false): ObjArray {
   }
   const out = objEmpty(shape);
   if (out.size > 0) {
-    // (a 0-d array inside: its element; otherwise the item itself)
+    // (an element of an array the walk went into: its value; any other item itself, a 0-d array among the
+    // data's items too, which NumPy keeps as an array)
     for (let k = 0; k < level.length; k++) {
+      poll();
       const v = level[k];
-      out.data[k] = anyArray(v) && v.ndim === 0 ? elemObj(v, v.offset) : v;
+      out.data[k] = inArr[k] && anyArray(v) && v.ndim === 0 ? elemObj(v, v.offset) : v;
     }
   } else if (shape.length === 0) out.data[0] = x;
   return out;
