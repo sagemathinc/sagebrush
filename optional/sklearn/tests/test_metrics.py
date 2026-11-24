@@ -176,3 +176,32 @@ for cid, fn in [
     ("samplewise", lambda: multilabel_confusion_matrix(a, b, samplewise=2)),
 ]:
     case("param." + cid, sorted_sets(fn))
+
+# float32 inputs: the regression metrics compute in float32, as scikit-learn's
+# _find_matching_floating_dtype keeps the inputs' floating type
+t32 = np.array([0.1, 0.2, 0.3], dtype=np.float32)
+p32 = np.array([0.2, 0.0, 0.4], dtype=np.float32)
+for name, fn in [("r2", r2_score), ("mse", mean_squared_error), ("rmse", root_mean_squared_error), ("mae", mean_absolute_error)]:
+    case(name + ".float32", lambda: (np.asarray(fn(t32, p32, multioutput="raw_values")).dtype.name, hx(fn(t32, p32)), hx(fn(t32, p32, multioutput="raw_values"))))
+
+# zero_division=np.nan: the averages skip the NaN entries (_nanaverage), unweighted and weighted
+for avg in ("macro", "weighted"):
+    case("prfs.nan-skipped.%s" % avg, caught(lambda: hx(precision_recall_fscore_support([0, 1, 1, 2], [0, 0, 0, 0], labels=[0, 1, 2, 3], average=avg, zero_division=np.nan))))
+
+# the stated tolerance (known.json's tolerances): weighted, unnormalized accuracy is np.dot(score, w),
+# whose summation order differs; it is held to relative 1e-12 of the exactly rounded sum (math.fsum)
+import math
+
+rs_tol = np.random.RandomState(11)
+y_tol = rs_tol.randint(0, 3, 1000)
+p_tol = np.where(rs_tol.rand(1000) < 0.8, y_tol, rs_tol.randint(0, 3, 1000))
+w_tol = rs_tol.rand(1000) * 10
+
+
+def within_tolerance():
+    got = accuracy_score(y_tol, p_tol, normalize=False, sample_weight=w_tol)
+    exact = math.fsum(w for w, a, b in zip(w_tol.tolist(), y_tol.tolist(), p_tol.tolist()) if a == b)
+    return abs(got - exact) <= 1e-12 * abs(exact)
+
+
+case("acc.weighted-count-tolerance", within_tolerance)
