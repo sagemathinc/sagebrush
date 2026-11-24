@@ -2973,6 +2973,100 @@ try {
         const names = await call("workspace.list", { folder: "/notes" }).then((x) => (x.entries ?? x).map((e) => e.path), (e) => ["list: " + e.message]);
         ok(ran && added === true && run2 === "done" && versions && names.includes(path) && !names.some((p) => p.startsWith("/notes/live-plots (copy")), "J12: under sync's journal, a notebook the agent made and ran (a plot, then a next turn's cell and run), its chat left: no copy kept beside it", { ran, added, run2, versions, cells: rec?.cells?.length, names: names.filter((p) => p.includes("live-plots")) });
       }
+      // J13, J14: a whole write of the notebook the pane writes (Workspace.write: an agent's workspace_write through
+      // another page of this browser, here the notebook page's workspace in a tab open on no notebook): the pane is the
+      // writer the write asks. J13: saved, the pane shows it and the journal has it. J14: the person typed in the pane
+      // after the agent read it: a conflict, the person's text kept in the pane and the journal
+      {
+        const path = "/notes/whole.ipynb";
+        await call("workspace.create", { path, content: docFor(path, [{ code: "w = 1" }, { code: "v = 1" }]), mode: "python" });
+        const ref = await refOf(path);
+        await send("Page.bringToFront");
+        await openNotebook(path, { finish: false, turn });
+        const writes = await until(`document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly === false`, 10000).catch(() => false);
+        const rev0 = (await record(ref))?.rev;
+        const A = await tab(`${site}/`);
+        const aReady = await A.until(`!!window.__sbTestWs`, 30000);
+        await send("Page.bringToFront");
+        const nbCells = (cells) => cells.map((c) => ({ cell_type: "code", source: c.code, metadata: {}, outputs: [] }));
+        const whole = (cells, base) => Promise.race([
+          A.ev(`window.__sbTestWs.write(${JSON.stringify(path)}, { cells: ${JSON.stringify(nbCells(cells))} }, { base: ${base} }).then(() => ({ ok: true }), (e) => ({ ok: false, code: e?.code ?? null, msg: String(e?.message ?? e) }))`),
+          sleep(30000).then(() => ({ ok: false, code: "timeout", msg: "no answer in 30 s" })),
+        ]);
+        const r1 = await call("workspace.read", { path });
+        const res = await whole([{ code: "w = 2  # whole" }, { code: "v = 1" }], r1.rev);
+        const shown = await until(`(document.querySelector('${PANE} .nb-root .cell textarea')?.value ?? "") === "w = 2  # whole"`, 10000).catch(() => false);
+        const rec1 = await record(ref);
+        const stillWrites = await ev(`document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly === false`);
+        ok(aReady && writes && res.ok && shown && rec1?.cells?.[0]?.code === "w = 2  # whole" && rec1.rev > rev0 && stillWrites,
+          "J13: an agent's whole write of the notebook the pane writes: saved, the pane shows it (still the writer) and the journal has it",
+          { aReady, writes, res, shown, rev0, rec1: rec1 && { rev: rec1.rev, cells: rec1.cells?.map((c) => c.code) }, stillWrites });
+        // J14: read, then the person types in the pane's second cell, then the agent writes from what it read
+        const r2 = await call("workspace.read", { path });
+        await ev(`(() => { const t = ${cellJs(1)}.querySelector("textarea"); t.focus(); t.value = "v = 1  # person"; t.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+        const res2 = await whole([{ code: "w = 3  # whole" }, { code: "v = 1" }], r2.rev);
+        const pane2 = await ev(`[...document.querySelectorAll('${PANE} .nb-root .cell textarea')].map((t) => t.value)`);
+        let rec2 = null;
+        for (let i = 0; i < 50 && rec2?.cells?.[1]?.code !== "v = 1  # person"; i++) { rec2 = await record(ref); if (rec2?.cells?.[1]?.code !== "v = 1  # person") await sleep(200); }
+        ok(!res2.ok && res2.code === "conflict" && pane2?.[0] === "w = 2  # whole" && pane2?.[1] === "v = 1  # person" && rec2?.cells?.[0]?.code === "w = 2  # whole" && rec2?.cells?.[1]?.code === "v = 1  # person",
+          "J14: the person typed in the pane after the agent read the notebook: the agent's whole write is a conflict, the person's text kept in the pane and the journal",
+          { res2, pane2, rec2: rec2 && { rev: rec2.rev, cells: rec2.cells?.map((c) => c.code) } });
+        await A.close();
+        await send("Page.bringToFront");
+      }
+      // J15, J16: the pane still holds the notebook's writer lock but can't save it (a close's first step, freeze, alone:
+      // __sbTestPaneFreeze), frozen while a whole write is held at the pane's prepare (J15) or after its ready, at the
+      // commit (J16). The pane answers "lost" each time: nothing replaced, shown or saved by it, and the write ends not
+      // confirmed (no ok). Once the pane is closed and its lock let go, the same write is saved directly.
+      for (const [name, stage] of [["J15", "prepare"], ["J16", "commit"]]) {
+        const path = `/notes/whole-frozen-${stage}.ipynb`;
+        await call("workspace.create", { path, content: docFor(path, [{ code: "f = 1" }]), mode: "python" });
+        const ref = await refOf(path);
+        await send("Page.bringToFront");
+        await openNotebook(path, { finish: false, turn });
+        const writes = await until(`document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly === false`, 10000).catch(() => false);
+        const A = await tab(`${site}/`);
+        const aReady = await A.until(`!!window.__sbTestWs`, 30000);
+        await send("Page.bringToFront");
+        // (the revision the write is made from, read as the agent reads it, once the pane's own first save under the
+        // journal is made: the record unchanged for 2 s)
+        let last = -1, since = Date.now();
+        for (const t0 = Date.now(); Date.now() - t0 < 15000 && Date.now() - since < 2000; await sleep(200)) {
+          const r = (await record(ref))?.rev ?? -1;
+          if (r !== last) { last = r; since = Date.now(); }
+        }
+        const rec0 = await record(ref), base = (await call("workspace.read", { path })).rev;
+        const doc = JSON.stringify({ cells: [{ cell_type: "code", source: "f = 2  # whole", metadata: {}, outputs: [] }] });
+        const start = (base) => A.ev(`(window.__wres = null, window.__sbTestWs.write(${JSON.stringify(path)}, ${doc}, { base: ${base} }).then(() => ({ ok: true }), (e) => ({ ok: false, code: e?.code ?? null, msg: String(e?.message ?? e) })).then((r) => (window.__wres = r)), 1)`);
+        const result = async () => (await A.until(`window.__wres !== null`, 60000)) ? await A.ev(`window.__wres`) : { ok: false, code: "timeout" };
+        // (the pane's side held once, at `stage`; every stage it reaches recorded)
+        await ev(`(() => { window.__wstages = []; window.__wheld = null; window.__sbTestWritePause = (s) => { window.__wstages.push(s); if (s === ${JSON.stringify(stage)} && !window.__wheld) return new Promise((r) => { window.__wheld = s; window.__wresume = r; }); return null; }; return 1; })()`);
+        await start(base);
+        const held = await until(`window.__wheld === ${JSON.stringify(stage)}`, 15000).catch(() => false);
+        await ev(`(window.__sbTestPaneFreeze(), 1)`);
+        const frozen = await ev(`document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly === true`);
+        await ev(`(window.__wresume?.(), 1)`);
+        const res = await result();
+        const stages = await ev(`window.__wstages`);
+        const pane = await ev(`[...document.querySelectorAll('${PANE} .nb-root .cell textarea')].map((t) => t.value)`);
+        const rec1 = await record(ref);
+        await ev(`(window.__sbTestWritePause = null, window.__wresume = null, 1)`);
+        ok(writes && aReady && held && frozen && !res.ok && res.code === "busy" && /couldn't confirm/.test(res.msg ?? "") && !stages.includes("wrote") && JSON.stringify(pane) === JSON.stringify(["f = 1"]) && rec1?.rev === base && rec1?.cells?.[0]?.code === "f = 1",
+          `${name}: the pane frozen (still holding the writer lock) while a whole write was held at its ${stage}: answered lost, nothing replaced, shown or saved by the pane, and the write not confirmed`,
+          { writes, aReady, held, frozen, res, stages, pane, base, rec0rev: rec0?.rev, rec: rec1 && { rev: rec1.rev, cells: rec1.cells?.map((c) => c.code) } });
+        // (the pane closed: its writer lock let go, so the write goes straight to the record)
+        await ev(`document.querySelector('#close')?.click()`);
+        const closed = await until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => false);
+        const free = await until(`navigator.locks.query().then((q) => !q.held.some((l) => l.name.endsWith(${JSON.stringify(ref)})))`, 15000).catch(() => false);
+        await start(base);
+        const res2 = await result();
+        const rec2 = await record(ref);
+        ok(closed && free && res2.ok && rec2?.cells?.[0]?.code === "f = 2  # whole" && rec2.rev > base,
+          `${name}: …once the pane is closed and its lock let go, the same write is saved`,
+          { closed, free, res2, rec: rec2 && { rev: rec2.rev, cells: rec2.cells?.map((c) => c.code) } });
+        await A.close();
+        await send("Page.bringToFront");
+      }
     } finally {
       for (const x of tabs) await x.close().catch(() => {});
       if (fence0) await putRecord(fence0);
