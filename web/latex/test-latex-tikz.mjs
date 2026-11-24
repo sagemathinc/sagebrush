@@ -229,6 +229,10 @@ section("nodes", () => {
   const pl = [["\\node[draw] (A) at (0,0) {A}; \\node[draw,right=of A] (B) {B};", [42.81036, 0]], ["\\node[draw] (A) at (0,0) {A}; \\node[draw,right of=A] (B) {B};", [28.45274, 0]],
     ["\\node[draw] (A) at (0,0) {A}; \\node[draw,above right=of A] (B) {B};", [42.81036, 42.352]]].map(([src, c]) => [src, centre(draw(src), "B"), c]);
   check("node-positions-as-tex", pl.every(([, got, c]) => near(got[0], c[0], 0.05) && near(got[1], c[1], 0.05)), pl);
+  // a node inside an operation, -- node (f) {...} (B): midway along the segment as cut at the nodes' borders (from TeX's
+  // q-midsz box: A's east anchor at 24.85 pt, B's west at 106.23)
+  const mid = centre(draw("\\node[draw] (A) at (0,0) {Long text}; \\node[draw] (B) at (4,0) {$B$}; \\draw (A) -- node[above] (f) {$f$} (B);"), "f");
+  check("node-inside-an-operation", near(mid[0], (24.85246 + 106.2347) / 2, 0.15), mid);
   // nodes aren't scaled with their picture (TikZ's default): a scope's scale moves a node, its own scale= sizes it
   const us = draw("\\begin{scope}[scale=2] \\node[draw] (A) at (1,0) {A}; \\end{scope} \\node[scale=2] (B) at (0,2) {B};");
   const ub = (n) => new RegExp('data-name="' + n + '" data-c="[^"]+" data-box="([^"]+)"').exec(us)[1].split(" ").map(Number);
