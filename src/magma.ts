@@ -170,8 +170,8 @@ export function lex(src: string): Tok[] {
       adv(j + 1 - i);
       continue;
     }
-    // (:: is one token, as Magma's: print 1 :: 2; is bad syntax at its first colon; but ::= is : and :=, as before)
-    const op = OPS.find((o) => src.startsWith(o, i) && !(o === "::" && src[i + 2] === "="));
+    // (:: is one token, as Magma's, even before =: print 1 :: 2; and a ::= 1; are bad syntax at its first colon)
+    const op = OPS.find((o) => src.startsWith(o, i));
     if (!op) {
       // reported by the parser when it reaches it, so that the statements
       // before it still run (Magma parses one statement at a time)
@@ -388,7 +388,8 @@ class Parser {
         }
       }
       if (a.v === "." && (b.v === "-" || b.v === "<") && k > from && T[k - 1].t === "id") return found(b.v === "-" ? `${T[k - 1].v}.-1 (a generator's inverse by its index)` : `${T[k - 1].v}.<...> (an element by its indices)`);
-      if (a.v === "=" && a.t === "op") return found("= (an equation, as in a relation)");
+      // (an = after the syntax error isn't what failed: a ::= 1 is bad syntax at the ::)
+      if (a.v === "=" && a.t === "op" && k <= to) return found("= (an equation, as in a relation)");
       if (a.v === "^" && b.v === "^" && next(a, b)) return found("a^^n (a multiplicity in a multiset)");
       if (a.v === ":" && b.t === "id" && ["Hex", "Magma", "Maximal", "Minimal", "Default"].includes(b.v)) return found(`x: ${b.v} (a printing level)`);
       if (a.v === "where" && a.t === "kw") return found("where x is ... (a definition after an expression)");

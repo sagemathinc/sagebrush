@@ -51,4 +51,16 @@ User error: bad syntax
 >> 1/0 :: 2;
        ^
 User error: bad syntax
+
+>> a :: = 1;
+     ^
+User error: bad syntax
+
+>> print 1/0::=2;
+            ^
+User error: bad syntax
+
+>> x := 1/0 :: = 2;
+            ^
+User error: bad syntax
 end
