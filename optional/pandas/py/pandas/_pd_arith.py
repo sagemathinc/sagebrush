@@ -6,18 +6,21 @@ abs), as pandas 3.1 computes it over numpy:
   fit; a float32 column stays float32, the number rounded to float32 first),
   and so is a numpy number, which pandas takes as its Python value; an array
   or another Series promotes as numpy does; int / int is float64;
-- division by zero is pandas': / and // give inf, -inf, or NaN for 0/0,
-  and % gives NaN, an integer result becoming float64 where any divisor is
-  0;
+- division by zero is pandas': / is numpy's (a signed infinity, NaN for
+  0/0); // (and divmod) take pandas' mask_zero_div_zero, inf or -inf by the
+  signs of the dividend and of the zero, NaN for 0, the result float64; %
+  is NaN there, an integer result becoming float64;
 - bools: + is or, * is and, - is numpy's TypeError, and /, //, ** are
   pandas' NotImplementedError; a bool with a number is that number's type;
 - str: + concatenates and * an int repeats, a missing value staying
-  missing; anything else is Python's TypeError;
+  missing; anything else is Python's TypeError; object columns are refused
+  (pandas masks their missing values out, which this subset doesn't);
 - two Series with other labels align on the sorted union of their labels
   (missing values where one side has none); the name is kept when both
   names are the same.
 """
 
+import math
 import operator
 
 import numpy as np
@@ -85,42 +88,61 @@ def _right_values(right, n):
     return "obj", right
 
 
-def _zero_fill(op, x, y, out):
-    # (pandas' mask_zero_div_zero: where the divisor is 0, / and // give inf for x > 0, -inf for x < 0, NaN for 0
-    # or NaN; % gives NaN)
-    zero = (y == 0)
-    if not bool(_scalar(zero.any())):
+def _signed_zero(b):
+    # (a zero divisor's sign, as np.signbit reads it)
+    return isinstance(b, float) and math.copysign(1.0, b) < 0
+
+
+def _mask_zero_div_zero(x, y, out):
+    # (pandas' mask_zero_div_zero, for // and divmod: where the divisor is 0, NaN for 0, and inf or -inf by the
+    # signs of the dividend and of the zero; the result becomes float64 when any such position exists)
+    nan, pinf, ninf = [], [], []
+    for p, (a, b) in enumerate(zip(x.tolist(), y.tolist())):
+        if b == 0:
+            neg = _signed_zero(b)
+            if a == 0:
+                nan.append(p)
+            elif a > 0:
+                (ninf if neg else pinf).append(p)
+            elif a < 0:
+                (pinf if neg else ninf).append(p)
+    if not (nan or pinf or ninf):
         return out
     out = out.astype(np.float64)
-    if op == "mod":
-        out[zero] = np.nan
+    for p in nan:
+        out[p] = np.nan
+    for p in pinf:
+        out[p] = np.inf
+    for p in ninf:
+        out[p] = -np.inf
+    return out
+
+
+def _fill_zeros(y, out):
+    # (pandas' _fill_zeros, for %: an integer result is NaN, as float64, where the integer divisor is 0; a float
+    # result is numpy's own, NaN there)
+    zero = [p for p, b in enumerate(y.tolist()) if b == 0]
+    if not zero:
         return out
-    xf = x.astype(np.float64)
-    pos = zero & (xf > 0)
-    neg = zero & (xf < 0)
-    nan = zero & ~(xf > 0) & ~(xf < 0)
-    out[pos] = np.inf
-    out[neg] = -np.inf
-    out[nan] = np.nan
+    if out.dtype.kind != "f":
+        out = out.astype(np.float64)
+    for p in zero:
+        out[p] = np.nan
     return out
 
 
 def _numeric_op(op, x, y, d):
     """op of two numpy arrays already of dtype d (the result's dtype class)."""
     if op == "truediv":
+        # (numpy's true division: an integer one in float64; a zero divisor gives its signed infinity or NaN)
         xf, yf = (x, y) if d in FLOATS else (x.astype(np.float64), y.astype(np.float64))
         with np.errstate(all="ignore"):
-            out = xf / yf
-        return _zero_fill(op, x, y, out) if d not in FLOATS else _zero_fill(op, x, y, out).astype(d) if d == "float32" else _zero_fill(op, x, y, out)
+            return xf / yf
     if op in ("floordiv", "mod"):
-        if d in FLOATS:
-            safe = np.where(y == 0, np.ones(len(y), dtype=d), y)
-            out = (x // safe) if op == "floordiv" else (x % safe)
-            filled = _zero_fill(op, x, y, out)
-            return filled.astype(d) if d == "float32" else filled
-        safe = np.where(y == 0, np.ones(len(y), dtype=d), y)
+        one = np.ones(len(y), dtype=d)
+        safe = np.where(y == 0, one, y)
         out = (x // safe) if op == "floordiv" else (x % safe)
-        return _zero_fill(op, x, y, out)
+        return _mask_zero_div_zero(x, y, out) if op == "floordiv" else _fill_zeros(y, out)
     if op == "pow" and d in INTS and bool(_scalar((y < 0).any())):
         raise ValueError("Integers to negative integer powers are not allowed.")
     return OPS[op](x, y)
@@ -145,6 +167,9 @@ def binary(col, right, op, reflected, owner):
     d = col.dtype
     n = len(col)
     kind, rv = _right_values(right, n)
+    if d == "object" or (kind == "col" and rv.dtype == "object"):
+        # (pandas masks missing values out of an object column's arithmetic; not in the subset)
+        raise _unsupported("%s of an object column" % owner)
     if d is DT or (kind == "col" and rv.dtype is DT):
         raise _unsupported("%s of a datetime64[us] column (Timedelta arithmetic)" % owner)
     if _numeric(d) and (kind in ("weak", "scalar") or (kind == "col" and _numeric(rv.dtype))):
@@ -201,5 +226,7 @@ def unary(col, op):
         v = col._pd_values
         out = -v if op == "neg" else v.copy() if op == "pos" else np.abs(v)
         return Column(d, out)
+    if d == "object":
+        raise _unsupported("Series.__%s__ of an object column" % op)
     f = {"neg": operator.neg, "pos": operator.pos, "abs": abs}[op]
     return column_from([v if is_missing(v) else f(v) for v in col.tolist()])

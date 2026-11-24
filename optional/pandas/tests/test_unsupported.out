@@ -304,6 +304,18 @@
 !! NotImplementedError: pandas.Series.add(level=, axis=) is not in Sagebrush's pandas 0.x subset
 == arith.matmul
 !! NotImplementedError: pandas.Series.__matmul__ (a dot product) is not in Sagebrush's pandas 0.x subset
+== arith.object-add
+!! NotImplementedError: pandas.Series.add of an object column is not in Sagebrush's pandas 0.x subset
+== arith.object-radd
+!! NotImplementedError: pandas.Series.radd of an object column is not in Sagebrush's pandas 0.x subset
+== arith.object-str
+!! NotImplementedError: pandas.Series.add of an object column is not in Sagebrush's pandas 0.x subset
+== arith.object-nan
+!! NotImplementedError: pandas.Series.add of an object column is not in Sagebrush's pandas 0.x subset
+== arith.with-object-series
+!! NotImplementedError: pandas.Series.add of an object column is not in Sagebrush's pandas 0.x subset
+== arith.object-neg
+!! NotImplementedError: pandas.Series.__neg__ of an object column is not in Sagebrush's pandas 0.x subset
 == op.frame-add
 !! NotImplementedError: pandas.DataFrame.__add__ (arithmetic) is not in Sagebrush's pandas 0.x subset
 == op.frame-gt

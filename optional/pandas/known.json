@@ -287,6 +287,36 @@
       "reason": "@ is a dot product, outside the subset's elementwise arithmetic; it raises before any work"
     },
     {
+      "case": "arith.object-add",
+      "message": "pandas.Series.add of an object column is not in Sagebrush's pandas 0.x subset",
+      "reason": "arithmetic on an object column masks its missing values out in pandas (Series([1, None], dtype=object) + 1 gives [2, nan] as object); the subset refuses object columns here rather than give another dtype or an error, as it does for object columns elsewhere; it raises before any work"
+    },
+    {
+      "case": "arith.object-radd",
+      "message": "pandas.Series.radd of an object column is not in Sagebrush's pandas 0.x subset",
+      "reason": "arithmetic on an object column masks its missing values out in pandas (Series([1, None], dtype=object) + 1 gives [2, nan] as object); the subset refuses object columns here rather than give another dtype or an error, as it does for object columns elsewhere; it raises before any work"
+    },
+    {
+      "case": "arith.object-str",
+      "message": "pandas.Series.add of an object column is not in Sagebrush's pandas 0.x subset",
+      "reason": "arithmetic on an object column masks its missing values out in pandas (Series([1, None], dtype=object) + 1 gives [2, nan] as object); the subset refuses object columns here rather than give another dtype or an error, as it does for object columns elsewhere; it raises before any work"
+    },
+    {
+      "case": "arith.object-nan",
+      "message": "pandas.Series.add of an object column is not in Sagebrush's pandas 0.x subset",
+      "reason": "arithmetic on an object column masks its missing values out in pandas (Series([1, None], dtype=object) + 1 gives [2, nan] as object); the subset refuses object columns here rather than give another dtype or an error, as it does for object columns elsewhere; it raises before any work"
+    },
+    {
+      "case": "arith.with-object-series",
+      "message": "pandas.Series.add of an object column is not in Sagebrush's pandas 0.x subset",
+      "reason": "arithmetic on an object column masks its missing values out in pandas (Series([1, None], dtype=object) + 1 gives [2, nan] as object); the subset refuses object columns here rather than give another dtype or an error, as it does for object columns elsewhere; it raises before any work"
+    },
+    {
+      "case": "arith.object-neg",
+      "message": "pandas.Series.__neg__ of an object column is not in Sagebrush's pandas 0.x subset",
+      "reason": "arithmetic on an object column masks its missing values out in pandas (Series([1, None], dtype=object) + 1 gives [2, nan] as object); the subset refuses object columns here rather than give another dtype or an error, as it does for object columns elsewhere; it raises before any work"
+    },
+    {
       "case": "op.frame-add",
       "message": "pandas.DataFrame.__add__ (arithmetic) is not in Sagebrush's pandas 0.x subset",
       "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"

@@ -347,10 +347,10 @@ class Series(object):
         owner = "Series.%s" % (("r" if reflected else "") + op)
         left, right, index, name = self._pd_operand(other, owner)
         if fill_value is not None and isinstance(right, Column):
+            # (fill_value where one side is missing and the other isn't, each column keeping its dtype)
             lm, rm = left.isna().tolist(), right.isna().tolist()
-            lv, rv = left.tolist(), right.tolist()
-            left = column_from([fill_value if a and not b else x for x, a, b in zip(lv, lm, rm)])
-            right = column_from([fill_value if b and not a else y for y, a, b in zip(rv, lm, rm)])
+            left = RS.fill_positions(left, dict((p, fill_value) for p, (a, b) in enumerate(zip(lm, rm)) if a and not b))
+            right = RS.fill_positions(right, dict((p, fill_value) for p, (a, b) in enumerate(zip(lm, rm)) if b and not a))
         elif fill_value is not None:
             left = RS.fill_column(left, fill_value)
         return Series._pd_new(A.binary(left, right, op, reflected, owner), index, name)

@@ -543,11 +543,6 @@ Name: b, dtype: float64
 1    True
 2    True
 Name: b, dtype: bool
-== obj
-
-0     2
-1    aa
-dtype: object
 == f32-int-mul
 [0.20000000298023224, 6.0]
 == f32-int-mul.dtype
@@ -604,3 +599,69 @@ Name: i, dtype: float64
 1    1.0
 2    1.0
 Name: f, dtype: float64
+== div-neg-zero
+[-inf, inf, -inf, -inf, nan]
+== floordiv-neg-zero
+[-inf, inf, -inf, -inf, nan]
+== rdiv-neg-zero-element
+[2.0, -inf, inf]
+== rfloordiv-neg-zero-element
+[2.0, -inf, inf]
+== mod-neg-zero
+[nan, nan, nan, nan, nan]
+== int-div-neg-zero
+[-inf, inf, nan]
+== int-floordiv-neg-zero
+[-inf, inf, nan]
+== float32-div-neg-zero
+[-inf, inf]
+== float32-floordiv-zero
+
+0    inf
+1   -inf
+2    NaN
+dtype: float64
+== float32-floordiv-zero.dtype
+dtype('float64')
+== float32-div-zero.dtype
+dtype('float32')
+== float32-mod-zero.dtype
+dtype('float32')
+== float32-floordiv-two.dtype
+dtype('float32')
+== divmod-zero
+(0    inf
+1   -inf
+2    NaN
+3    3.0
+dtype: float64, 0    NaN
+1    NaN
+2    NaN
+3    1.0
+dtype: float64)
+== divmod-float32-zero.dtypes
+[dtype('float64'), dtype('float32')]
+== float32-fill.exact
+[0.10000000149011612, 0.4000000059604645]
+== float32-fill.dtype
+dtype('float32')
+== int8-fill
+
+0    4
+1    6
+dtype: int8
+== int16-fill
+
+0    3
+1    8
+dtype: int16
+== uint8-fill
+
+0    44
+1     6
+dtype: uint8
+== int-fill-aligned
+
+a     1.0
+b    12.0
+dtype: float64
