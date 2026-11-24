@@ -4,7 +4,10 @@
 //!
 //! - `nmod_poly_mul(p, a, b)` -> [a b];
 //! - `nmod_poly_divrem(p, a, b)` -> [q, r], a = q b + r, deg r < deg b;
-//! - `nmod_poly_gcd(p, a, b)` -> [the monic gcd].
+//! - `nmod_poly_gcd(p, a, b)` -> [the monic gcd];
+//! - `nmod_echelon(p, M, flags)` -> [pivots, det] or [pivots, det, rows]:
+//!   the JSON op's echelon (nmod_ops.rs) on a `MAT1` of words, without its
+//!   per-dimension cap (below).
 //!
 //! p is a typed scalar (a `U641` of one word), prime, below 2^63.  A
 //! polynomial is a `U641` of its coefficients,
@@ -25,8 +28,20 @@
 //! A failure is an `er` reply (S6) with a code, the request offset and a
 //! fixed text: a refused reservation is `Cap`, a failed invariant
 //! `Internal`.
+//!
+//! `nmod_echelon` admits any rows x cols >= 1 whose request fits the frame
+//! cap (its request cap is the frame cap): no per-dimension, entry or work
+//! ceiling of its own.  `flags` is a U641 scalar, bit 0 `reduced`, bit 1
+//! `want_rows`, any other bit refused.  Every entry must be below p (refused,
+//! never reduced, as the JSON op does).  The reply is the JSON op's fields
+//! as `U641` payloads: the pivot columns, the determinant factor (one word)
+//! and, with `want_rows`, every row of the (reduced, if asked) echelon form,
+//! row-major.  The scan, the decode and the reply poll for Stop every
+//! [`ECH_CHUNK`] words and count their words (Move) after each run.
 
+use sagebrush_arith::cost::{tally, Family};
 use sagebrush_arith::nmod::{is_prime, Modulus};
+use sagebrush_arith::nmod_mat::Mat;
 use sagebrush_arith::{nmod_poly, ntt};
 use sagebrush_wire::{self as wire, Code, OpSpec, U64s, WireError};
 
@@ -85,6 +100,9 @@ fn find(name: &str) -> Option<&'static BinOp> {
 }
 
 fn spec(name: &str) -> Option<OpSpec> {
+    if name == ECHELON {
+        return Some(OpSpec { min_args: 3, max_args: 3, request_cap: wire::FRAME_CAP });
+    }
     // (an overflow, excluded at compile time above, would leave the op
     // without a spec: refused, never admitted with a wrong cap)
     let o = find(name)?;
@@ -194,8 +212,16 @@ pub fn call_bin(req: &[u8]) -> Vec<u8> {
 }
 
 fn run(req: &[u8]) -> Result<Vec<u8>, WireError> {
+    run_with(req, wire::FRAME_CAP)
+}
+
+/// [`run`] with an explicit frame cap (the tests' boundary at a small cap).
+fn run_with(req: &[u8], frame_cap: usize) -> Result<Vec<u8>, WireError> {
     // S1: the frame, allocation-free
-    let f = wire::admit(req, spec)?;
+    let f = wire::admit_with(req, spec, u64::try_from(usize::MAX).unwrap_or(u64::MAX), frame_cap)?;
+    if f.op == ECHELON {
+        return echelon(&f);
+    }
     let op = find(f.op).ok_or(fail(Code::Internal, 0, "an admitted op without a row"))?;
     let arg = |i: usize| f.arg(i).ok_or(fail(Code::Internal, 0, "an admitted argument missing"));
     // S2 pass 2: every schema and domain, allocation-free
@@ -265,6 +291,149 @@ fn run(req: &[u8]) -> Result<Vec<u8>, WireError> {
     let len = wire::ok_u641_len(&counts[..n]).ok_or(fail(Code::Internal, 0, "a result too large to frame"))?;
     let mut out = Vec::with_capacity(len);
     wire::write_ok_u641(&mut out, &refs[..n])?;
+    Ok(out)
+}
+
+// ---------------------------------------------------------------- echelon
+
+/// The frame cap, for the hosts' checks before they assemble a request.
+pub const FRAME_CAP: usize = wire::FRAME_CAP;
+
+const ECHELON: &str = "nmod_echelon";
+
+/// The words the echelon's scan, decode and reply handle between two Stop
+/// polls (and two Move tallies).
+pub const ECH_CHUNK: usize = 4096;
+
+/// The fixed slack of the echelon's reservation: the allocator's rounding
+/// and the call's small allocations (the progress phases, the Poll).
+const ECH_SLACK: u64 = 4096;
+
+/// `nmod_echelon`'s request length for an r x c matrix: the header (4), the
+/// name's length and name (4 + 12), the argument count (4), p (4 + 12 + 8),
+/// the matrix (4 + `MAT1` 4 + r 4 + c 4 + `U641` 12 + 8 E) and the flags
+/// (4 + 12 + 8): 100 + 8 E.  None on an overflow.
+pub fn echelon_request_len(rows: usize, cols: usize) -> Option<usize> {
+    rows.checked_mul(cols)?.checked_mul(8)?.checked_add(100)
+}
+
+/// `nmod_echelon`'s reply length for k pivots of an r x c matrix: the ok
+/// header (10), the pivots (16 + 8 k), the det (24) and, with `want_rows`,
+/// the rows (16 + 8 E).  None on an overflow or a length past a u32 field.
+pub fn echelon_reply_len(rows: usize, cols: usize, k: usize, want_rows: bool) -> Option<usize> {
+    let e = rows.checked_mul(cols)?;
+    if want_rows {
+        wire::ok_u641_len(&[k, 1, e])
+    } else {
+        wire::ok_u641_len(&[k, 1])
+    }
+}
+
+/// The echelon's reservation for an r x c matrix, a conservative sum of
+/// what the call allocates, by phase:
+/// - the decoded matrix, which is the working matrix (eliminated in place):
+///   8 E;
+/// - the elimination's accumulators (nmod_mat's `Acc`, 16 c + 8 c) and its
+///   row update's partial sums on the u128 route (at most 8 c, one row at a
+///   time): 32 c;
+/// - the pivots, allocated once at exactly min(r, c) (w min(r, c), w the
+///   usize's bytes), and their copy as words for the reply (8 min(r, c):
+///   in place where usize is 64 bits, a new vector on wasm32);
+/// - the last block's copy of its pivots: at most 32 w;
+/// - the reply at min(r, c) pivots;
+/// - [`ECH_SLACK`].
+///
+/// None on an overflow.
+pub fn echelon_reservation(rows: usize, cols: usize, want_rows: bool) -> Option<u64> {
+    let kappa = rows.min(cols);
+    let w = u64::try_from(core::mem::size_of::<usize>()).ok()?;
+    let matrix = words(rows.checked_mul(cols)?)?;
+    let acc = u64::try_from(cols).ok()?.checked_mul(32)?;
+    let pivots = u64::try_from(kappa).ok()?.checked_mul(w.checked_add(8)?)?;
+    let block = w.checked_mul(32)?;
+    let reply = u64::try_from(echelon_reply_len(rows, cols, kappa, want_rows)?).ok()?;
+    matrix.checked_add(acc)?.checked_add(pivots)?.checked_add(block)?.checked_add(reply)?.checked_add(ECH_SLACK)
+}
+
+/// Every word of a validated view below p (S4, allocation-free), polled
+/// and counted (Move) after each run of [`ECH_CHUNK`] words.
+fn echelon_scan(v: &U64s, p: u64) -> Result<(), WireError> {
+    let _phase = sagebrush_interrupt::enter("scan");
+    let mut i = 0;
+    while i < v.count {
+        let end = v.count.min(i.saturating_add(ECH_CHUNK));
+        for j in i..end {
+            if v.get(j) >= p {
+                return Err(fail(Code::Domain, word_at(v.offset, j)?, "an entry outside [0, p)"));
+            }
+        }
+        tally(Family::Move, (end - i) as u64);
+        sagebrush_interrupt::check_coarse();
+        i = end;
+    }
+    Ok(())
+}
+
+/// The decoded words, into a vector of exactly that capacity (inside the
+/// reservation), polled and counted after each run.
+fn echelon_decode(v: &U64s) -> Vec<u64> {
+    let _phase = sagebrush_interrupt::enter("decode");
+    let mut out = Vec::with_capacity(v.count);
+    let mut i = 0;
+    while i < v.count {
+        let end = v.count.min(i.saturating_add(ECH_CHUNK));
+        out.extend((i..end).map(|j| v.get(j)));
+        tally(Family::Move, (end - i) as u64);
+        sagebrush_interrupt::check_coarse();
+        i = end;
+    }
+    out
+}
+
+fn echelon(f: &wire::Frame) -> Result<Vec<u8>, WireError> {
+    let arg = |i: usize| f.arg(i).ok_or(fail(Code::Internal, 0, "an admitted argument missing"));
+    // S2: every schema and domain, allocation-free
+    let pa = arg(0)?;
+    let p = wire::scalar(pa)?;
+    if p >= MAX_P || !is_prime(p) {
+        let at = pa.offset.checked_add(12).ok_or(fail(Code::Internal, 0, "an offset past u64"))?;
+        return Err(fail(Code::Domain, at, "p must be a prime below 2^63"));
+    }
+    let fa = arg(2)?;
+    let flags = wire::scalar(fa)?;
+    if flags & !3 != 0 {
+        let at = fa.offset.checked_add(12).ok_or(fail(Code::Internal, 0, "an offset past u64"))?;
+        return Err(fail(Code::Domain, at, "an unknown flag bit"));
+    }
+    let (reduced, want_rows) = (flags & 1 != 0, flags & 2 != 0);
+    let mat = wire::mat1(arg(1)?, wire::ElemKind::Words, false)?;
+    let wire::Elems::Words(v) = mat.elems else {
+        return Err(fail(Code::Internal, 0, "a words matrix of another kind"));
+    };
+    let (rows, cols) = (mat.rows, mat.cols);
+    echelon_scan(&v, p)?;
+    // S2/S3: one reservation of the whole call's bound, before any
+    // allocation, held to the end (released on every exit, unwinding too)
+    let need = echelon_reservation(rows, cols, want_rows).ok_or(fail(Code::Cap, 0, "a memory bound too large"))?;
+    let _r = sagebrush_ledger::reserve(ECHELON, need).map_err(|e| match e {
+        sagebrush_ledger::EngineError::Memory(_) => fail(Code::Cap, 0, "the call's memory reservation was refused"),
+        sagebrush_ledger::EngineError::Internal(_) => fail(Code::Internal, 0, "the ledger failed an invariant"),
+    })?;
+    let d = echelon_decode(&v);
+    let mut a = Mat { rows, cols, m: Modulus::new(p), d };
+    let (piv, det) = a.echelon(reduced, true);
+    let piv: Vec<u64> = piv.into_iter().map(|c| c as u64).collect();
+    // S3: the reply at its exact length, within the reservation's bound
+    let len = echelon_reply_len(rows, cols, piv.len(), want_rows).ok_or(fail(Code::Internal, 0, "a result too large to frame"))?;
+    let _phase = sagebrush_interrupt::enter("reply");
+    let mut out = Vec::with_capacity(len);
+    let det = [det];
+    let results: [&[u64]; 3] = [&piv, &det, &a.d];
+    let n = if want_rows { 3 } else { 2 };
+    wire::write_ok_u641_with(&mut out, &results[..n], ECH_CHUNK, |k| {
+        tally(Family::Move, k as u64);
+        sagebrush_interrupt::check_coarse();
+    })?;
     Ok(out)
 }
 

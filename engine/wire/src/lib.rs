@@ -878,6 +878,14 @@ pub fn ok_u641_len(counts: &[usize]) -> Option<usize> {
 /// intermediate payload buffers) into `out`, which the caller allocated
 /// with capacity [`ok_u641_len`] after reserving it: never a reallocation.
 pub fn write_ok_u641(out: &mut Vec<u8>, results: &[&[u64]]) -> Result<(), WireError> {
+    write_ok_u641_with(out, results, usize::MAX, |_| ())
+}
+
+/// [`write_ok_u641`], calling `after(n)` after each run of at most `chunk`
+/// words written (`n` of them): for a caller that polls for Stop and
+/// counts the words as they are written.
+pub fn write_ok_u641_with(out: &mut Vec<u8>, results: &[&[u64]], chunk: usize, mut after: impl FnMut(usize)) -> Result<(), WireError> {
+    let chunk = chunk.max(1);
     let mut counts = [0usize; MAX_ARGS];
     if results.len() > MAX_ARGS {
         return Err(err(Code::Internal, 0, "too many results"));
@@ -897,7 +905,15 @@ pub fn write_ok_u641(out: &mut Vec<u8>, results: &[&[u64]]) -> Result<(), WireEr
         // (ok_u641_len checked that each length fits u32)
         let len = u641_len(r.len()).and_then(|l| u32::try_from(l).ok()).ok_or(internal)?;
         out.extend_from_slice(&len.to_le_bytes());
-        put_u641(out, r);
+        out.extend_from_slice(b"U641");
+        // (exact: usize::BITS <= 64)
+        out.extend_from_slice(&u64::try_from(r.len()).unwrap_or(u64::MAX).to_le_bytes());
+        for part in r.chunks(chunk) {
+            for w in part {
+                out.extend_from_slice(&w.to_le_bytes());
+            }
+            after(part.len());
+        }
     }
     Ok(())
 }

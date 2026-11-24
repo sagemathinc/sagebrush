@@ -99,13 +99,17 @@ def add(transport, name):
         fam, owner = "E11 symbolics", "symbolic engine"
     elif transport == "mpCall":
         fam, owner = "E6 multivariate", "multivariate (sage)"
+    elif transport == "binCall":
+        # (the binary entry point's ops: the JSON ops' work on words; the echelon is dense linear
+        # algebra, the rest GF(p)[x])
+        fam, owner = next((f, o) for test, f, o in FAMILY if test("mat_rank" if name == "nmod_echelon" else "poly_mul"))
     else:
         for test, f, o in FAMILY:
             if test(name):
                 fam, owner = f, o
                 break
     entries.append(dict(id=key, transport=key, status="planned", family=fam, owner=owner))
-for tr in ("engineCall", "symCall", "mpCall"):
+for tr in ("engineCall", "symCall", "mpCall", "binCall"):
     for n in T[tr]:
         add(tr, n)
 for m in T["wasmModules"]:

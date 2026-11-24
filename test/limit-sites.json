@@ -2700,6 +2700,16 @@
   "owner": "engine arith (kernel metering)",
   "reason": "test code: the work estimate's models in u64 at sizes past 32 bits (saturation and zero-factor checks of size_product and a model); refuses nothing itself"
  },
+ "engine/arith/tests/nmod_fill_stop.rs :: a_stop_in_the_zero_fill_charges_the_runs_done :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: an accounting meter with no bound, for the zero fill's Move under a Stop; refuses nothing itself"
+ },
+ "engine/arith/tests/nmod_fill_stop.rs :: a_stop_in_the_zero_fill_charges_the_runs_done :: let mut whole = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: an accounting meter with no bound, for the zero fill's Move under a Stop; refuses nothing itself"
+ },
  "engine/arith/tests/nmod_poll_count.rs :: metering_polls_stop_at_least_as_often :: let mut full = Meter::accounting(u64::MAX); #0": {
   "class": "none",
   "owner": "engine arith (kernel metering)",
@@ -7777,6 +7787,30 @@
   "owner": "the primes engine (li, prime_pi, zeta zeros)",
   "reason": "a unit test's inputs; refuses nothing"
  },
+ "engine/py/src/lib.rs :: call_bin :: if list.len() > BIN_MAX_PIECES { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the binary pieces transport (both hosts), before any allocation: at most 2^16 pieces, summed size within the frame cap; the echelon sends about 2^12 pieces at most and keeps its memory-admitted Python path past the cap, so no computation is limited"
+ },
+ "engine/py/src/lib.rs :: call_bin :: return Err(PyValueError::new_err(format!(\"call_bin: a request in more than {} pieces\", BIN_MAX_PIECES))); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the binary pieces transport (both hosts), before any allocation: at most 2^16 pieces, summed size within the frame cap; the echelon sends about 2^12 pieces at most and keeps its memory-admitted Python path past the cap, so no computation is limited"
+ },
+ "engine/py/src/lib.rs :: call_bin :: return Err(PyValueError::new_err(format!(\"call_bin: a request of {} bytes, past the frame cap of {}\", total, sagebrush_web::bin_ops::FRAME_CAP))); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the binary pieces transport (both hosts), before any allocation: at most 2^16 pieces, summed size within the frame cap; the echelon sends about 2^12 pieces at most and keeps its memory-admitted Python path past the cap, so no computation is limited"
+ },
  "engine/py/src/lib.rs :: raster_render :: const RASTER_MAX_FILE_BYTES: usize = 256 << 20; #0": {
   "class": "1+2",
   "owner": "raster/image I/O",
@@ -8043,6 +8077,32 @@
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
  },
+ "engine/web/src/bin_ops.rs :: echelon :: if p >= MAX_P || !is_prime(p) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + finite-field linear algebra",
+  "reason": "the binary echelon's admission: the modulus range (a prime below 2^63, as the JSON op) and the frame cap (its request cap); past the frame cap the library keeps its memory-admitted Python path, so no user computation is limited"
+ },
+ "engine/web/src/bin_ops.rs :: echelon :: let len = echelon_reply_len(rows, cols, piv.len(), want_rows).ok_or(fail(Code::Internal, 0, \"a result too large to frame\"))?; #0": {
+  "class": "none",
+  "owner": "engine web + finite-field linear algebra",
+  "reason": "the binary echelon's plumbing (the reply's exact length, an invariant if it fails); refuses nothing itself"
+ },
+ "engine/web/src/bin_ops.rs :: echelon :: let need = echelon_reservation(rows, cols, want_rows).ok_or(fail(Code::Cap, 0, \"a memory bound too large\"))?; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + finite-field linear algebra",
+  "reason": "the binary echelon's reservation bound overflowing its u64 (no shape the frame admits reaches it): refused as Cap, as the poly ops' bound; past the frame cap the library keeps its memory-admitted Python path"
+ },
+ "engine/web/src/bin_ops.rs :: echelon :: sagebrush_ledger::EngineError::Memory(_) => fail(Code::Cap, 0, \"the call's memory reservation was refused\"), #0": {
+  "class": "none",
+  "owner": "engine web + finite-field linear algebra",
+  "reason": "the binary echelon's plumbing: the ledger's refusal mapped to its reply code (Cap), as the poly ops do; the ledger decides"
+ },
  "engine/web/src/bin_ops.rs :: poly_view :: fn poly_view(a: wire::Arg<'_>, max: usize, p: u64) -> Result<U64s<'_>, WireError> { #0": {
   "class": "none",
   "owner": "engine web + finite-field polynomials",
@@ -8103,7 +8163,7 @@
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
  },
- "engine/web/src/bin_ops.rs :: run :: if p >= MAX_P || !is_prime(p) { #0": {
+ "engine/web/src/bin_ops.rs :: run_with :: if p >= MAX_P || !is_prime(p) { #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -8111,22 +8171,27 @@
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
  },
- "engine/web/src/bin_ops.rs :: run :: let a = poly_view(arg(1)?, op.max_len, p)?; #0": {
+ "engine/web/src/bin_ops.rs :: run_with :: let a = poly_view(arg(1)?, op.max_len, p)?; #0": {
   "class": "none",
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
  },
- "engine/web/src/bin_ops.rs :: run :: let b = poly_view(arg(2)?, op.max_len, p)?; #0": {
+ "engine/web/src/bin_ops.rs :: run_with :: let b = poly_view(arg(2)?, op.max_len, p)?; #0": {
   "class": "none",
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
  },
- "engine/web/src/bin_ops.rs :: run :: let len = wire::ok_u641_len(&counts[..n]).ok_or(fail(Code::Internal, 0, \"a result too large to frame\"))?; #0": {
+ "engine/web/src/bin_ops.rs :: run_with :: let f = wire::admit_with(req, spec, u64::try_from(usize::MAX).unwrap_or(u64::MAX), frame_cap)?; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the binary transport's plumbing (the platform's usize bound and the frame cap passed to admission, a count's u64 field); refuses nothing itself"
+ },
+ "engine/web/src/bin_ops.rs :: run_with :: let len = wire::ok_u641_len(&counts[..n]).ok_or(fail(Code::Internal, 0, \"a result too large to frame\"))?; #0": {
   "class": "none",
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
  },
- "engine/web/src/bin_ops.rs :: run :: let need = bound(op.kind, la, lb).ok_or(fail(Code::Cap, 0, \"a memory bound too large\"))?; #0": {
+ "engine/web/src/bin_ops.rs :: run_with :: let need = bound(op.kind, la, lb).ok_or(fail(Code::Cap, 0, \"a memory bound too large\"))?; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -8134,7 +8199,7 @@
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
  },
- "engine/web/src/bin_ops.rs :: run :: sagebrush_ledger::EngineError::Memory(_) => fail(Code::Cap, 0, \"the call's memory reservation was refused\"), #0": {
+ "engine/web/src/bin_ops.rs :: run_with :: sagebrush_ledger::EngineError::Memory(_) => fail(Code::Cap, 0, \"the call's memory reservation was refused\"), #0": {
   "class": "none",
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
@@ -8146,6 +8211,19 @@
   },
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
+ },
+ "engine/web/src/bin_ops.rs :: spec :: return Some(OpSpec { min_args: 3, max_args: 3, request_cap: wire::FRAME_CAP }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + finite-field linear algebra",
+  "reason": "the binary echelon's admission: the modulus range (a prime below 2^63, as the JSON op) and the frame cap (its request cap); past the frame cap the library keeps its memory-admitted Python path, so no user computation is limited"
+ },
+ "engine/web/src/bin_ops/tests.rs :: echelon_refusals_have_their_codes_and_offsets_beside_the_json_ops :: for p in [0u64, 1, 4, 1 << 63, u64::MAX] { #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
  },
  "engine/web/src/bin_ops/tests.rs :: refusals_have_their_codes_and_offsets :: assert!(n > request_cap(2, MUL_MAX_LEN).unwrap()); #0": {
   "class": "none",
@@ -8168,6 +8246,26 @@
   "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
  },
  "engine/web/src/bin_ops/tests.rs :: refusals_have_their_codes_and_offsets :: let long = vec![1u64; MUL_MAX_LEN + 1]; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/src/bin_ops/tests.rs :: the_echelon_frame_cap_is_exact :: assert!(run_with(&r, r.len()).is_ok(), \"exactly at the cap\"); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/src/bin_ops/tests.rs :: the_echelon_frame_cap_is_exact :: assert_eq!((e.code, e.offset), (Code::Cap, 0), \"one byte past the cap\"); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/src/bin_ops/tests.rs :: the_echelon_reply_has_its_closed_form_length :: assert_eq!(echelon_request_len(usize::MAX, 2), None); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/src/bin_ops/tests.rs :: the_echelon_reservation_is_its_stated_sum :: assert_eq!(echelon_reservation(usize::MAX, 2, true), None); #0": {
   "class": "none",
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
@@ -8834,6 +8932,26 @@
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
  },
+ "engine/web/tests/bin_echelon_alloc.rs :: the_echelon_allocates_within_its_reservation_and_at_least_its_largest_phase :: assert_eq!((g, first), (wire::ERROR_REPLY_MAX, \"nmod_echelon\".len())); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_echelon_alloc.rs :: the_echelon_allocates_within_its_reservation_and_at_least_its_largest_phase :: assert_eq!(wire::parse_reply(&out).unwrap(), Err((wire::Code::Cap as u16, 0)), \"refused one unit short\"); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_echelon_stop.rs :: stop_in_every_phase_releases_and_charges_a_prefix :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_echelon_stop.rs :: stop_in_every_phase_releases_and_charges_a_prefix :: let mut whole = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
  "engine/web/tests/divrem_alloc.rs :: call :: fn call(a: &str, b: &str, limit: Option<u64>, work: Option<u64>) -> (Result<String, DivFault>, u64, u64, u64) { #0": {
   "class": "none",
   "owner": "zpoly_divrem",
@@ -9448,25 +9566,35 @@
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "a reply writer's invariant (results already bounded by the op): an Internal error if broken, not a limit"
  },
- "engine/wire/src/lib.rs :: write_ok_u641 :: if results.len() > MAX_ARGS { #0": {
+ "engine/wire/src/lib.rs :: write_ok_u641 :: write_ok_u641_with(out, results, usize::MAX, |_| ()) #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the reply writer without chunking (a value, usize::MAX, as the run length); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: write_ok_u641_with :: if results.len() > MAX_ARGS { #0": {
   "class": "none",
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "a reply writer's invariant (results already bounded by the op): an Internal error if broken, not a limit"
  },
- "engine/wire/src/lib.rs :: write_ok_u641 :: let internal = err(Code::Internal, 0, \"a result too large to frame\"); #0": {
+ "engine/wire/src/lib.rs :: write_ok_u641_with :: let internal = err(Code::Internal, 0, \"a result too large to frame\"); #0": {
   "class": "none",
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "a reply writer's invariant (results already bounded by the op): an Internal error if broken, not a limit"
  },
- "engine/wire/src/lib.rs :: write_ok_u641 :: let mut counts = [0usize; MAX_ARGS]; #0": {
+ "engine/wire/src/lib.rs :: write_ok_u641_with :: let mut counts = [0usize; MAX_ARGS]; #0": {
   "class": "none",
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
  },
- "engine/wire/src/lib.rs :: write_ok_u641 :: let need = ok_u641_len(&counts[..results.len()]).ok_or(err(Code::Internal, 0, \"a result too large to frame\"))?; #0": {
+ "engine/wire/src/lib.rs :: write_ok_u641_with :: let need = ok_u641_len(&counts[..results.len()]).ok_or(err(Code::Internal, 0, \"a result too large to frame\"))?; #0": {
   "class": "none",
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "a reply writer's invariant (results already bounded by the op): an Internal error if broken, not a limit"
+ },
+ "engine/wire/src/lib.rs :: write_ok_u641_with :: out.extend_from_slice(&u64::try_from(r.len()).unwrap_or(u64::MAX).to_le_bytes()); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the binary transport's plumbing (the platform's usize bound and the frame cap passed to admission, a count's u64 field); refuses nothing itself"
  },
  "engine/wire/src/lib.rs :: zv1_in :: .checked_add(bigint_heap_words(k).ok_or(err(Code::Count, at, \"a limb count too large\"))?) #0": {
   "class": "1",
@@ -12700,6 +12828,46 @@
  "lib/_sage_ffmat.py :: _admitted_rows.refuse :: return _refusal(\"a matrix over %r of more than %d entries, as they are read, needs more than sagebrush's budget of %d MiB for one matrix (1/%d of this process's %d MiB heap)\" % ( #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
+ },
+ "lib/_sage_ffmat.py :: _ech_bin_call :: reservation refused (Cap) is the memory error, a protocol or invariant #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "reason": "the binary echelon's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
+ },
+ "lib/_sage_ffmat.py :: _ech_bin_route :: binary entry point present, the request within the frame cap and the #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "reason": "the binary echelon's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
+ },
+ "lib/_sage_ffmat.py :: _ech_bin_route :: host's need (_ech_need) within its budget.  None for another field, an #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "reason": "the binary echelon's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
+ },
+ "lib/_sage_ffmat.py :: _ech_bound :: return (_echelon_transport_figure or _heap_budget)() // _HEAP_SHARE #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "reason": "the binary echelon's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
  },
  "lib/_sage_ffmat.py :: _engine_echelon_prime :: if not isinstance(base, _ff.IntegerModRing_) or not (0 < nrows <= _ENGINE_ECHELON_MAX_DIM and 0 < ncols <= _ENGINE_ECHELON_MAX_DIM): #0": {
   "class": "1+3",
@@ -18040,19 +18208,19 @@
  },
  "src/notebook-session.ts ::  :: const MAX_ABOVE = 4096; #0": {
   "class": "1",
-  "owner": "notebook/kernel",
-  "reason": "a reactive run's list of the cells above it (for _, __, ___): a protocol guard on a message field; only the first three that showed a value are used, so a page longer than this still binds correctly unless 4096 cells above showed nothing",
   "disposition": {
    "1": "shared"
-  }
+  },
+  "owner": "notebook/kernel",
+  "reason": "a reactive run's list of the cells above it (for _, __, ___): a protocol guard on a message field; only the first three that showed a value are used, so a page longer than this still binds correctly unless 4096 cells above showed nothing"
  },
  "src/notebook-session.ts :: aboveOf :: return m.above.filter((k: unknown): k is string => typeof k === \"string\" && /^[A-Za-z0-9]{1,128}$/.test(k)).slice(0, MAX_ABOVE); #0": {
   "class": "1",
-  "owner": "notebook/kernel",
-  "reason": "applies the cap above (MAX_ABOVE)",
   "disposition": {
    "1": "shared"
-  }
+  },
+  "owner": "notebook/kernel",
+  "reason": "applies the cap above (MAX_ABOVE)"
  },
  "src/pkgcache.ts ::  :: export const CACHE_LIMITS = Object.freeze({ bytes: 1024 * 1024 * 1024, entries: 256, staleMs: 60 * 60 * 1000, lockMs: 10 * 60 * 1000, adminLockMs: 5000, cleanPerRun: 100 }); #0": {
   "class": "1",
@@ -18687,6 +18855,30 @@
  "src/runtime/engine.ts :: addPending :: if (retiredSum + p.bytes > MAX_SAFE) overflow = fault = true; #0": {
   "class": "2",
   "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "src/runtime/engine.ts :: admitPieces :: if (pieces.length > BIN_MAX_PIECES) throw new BinRequestRefused(`a request in more than ${BIN_MAX_PIECES} pieces`); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the binary pieces transport (both hosts), before any allocation: at most 2^16 pieces, summed size within the frame cap; the echelon sends about 2^12 pieces at most and keeps its memory-admitted Python path past the cap, so no computation is limited"
+ },
+ "src/runtime/engine.ts :: admitPieces :: if (total > BIN_FRAME_CAP) throw new BinRequestRefused(`a request past the frame cap of ${BIN_FRAME_CAP} bytes`); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the binary pieces transport (both hosts), before any allocation: at most 2^16 pieces, summed size within the frame cap; the echelon sends about 2^12 pieces at most and keeps its memory-admitted Python path past the cap, so no computation is limited"
+ },
+ "src/runtime/engine.ts :: binCall :: export const BIN_MAX_PIECES = 1 << 16; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the binary pieces transport (both hosts), before any allocation: at most 2^16 pieces, summed size within the frame cap; the echelon sends about 2^12 pieces at most and keeps its memory-admitted Python path past the cap, so no computation is limited"
  },
  "src/runtime/engine.ts :: createInstance :: const SHARE_MAX_AGE_MS = 250, WASM_CEILING = 2 ** 32; #0": {
   "class": "2",
@@ -21244,5 +21436,21 @@
   },
   "owner": "3D viewer (@sagebrush-space)",
   "reason": "the 3D viewer's source, embedded for Jupyter's HTML: its LIMITS on what an untrusted saved scene may draw (checkScene, counted after expansion) protect the page, which keeps the static picture and says why; no computation is refused"
+ },
+ "engine/py/src/lib.rs :: call_bin :: total = total.checked_add(b.as_bytes().len()).ok_or_else(|| PyValueError::new_err(\"call_bin: a request past the frame cap\"))?; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the binary pieces transport (both hosts), before any allocation: at most 2^16 pieces, summed size within the frame cap; the echelon sends about 2^12 pieces at most and keeps its memory-admitted Python path past the cap, so no computation is limited"
+ },
+ "engine/py/src/lib.rs :: mpoly_call :: const BIN_MAX_PIECES: usize = 1 << 16; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the binary pieces transport (both hosts), before any allocation: at most 2^16 pieces, summed size within the frame cap; the echelon sends about 2^12 pieces at most and keeps its memory-admitted Python path past the cap, so no computation is limited"
  }
 }

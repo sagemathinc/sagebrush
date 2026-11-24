@@ -9,7 +9,7 @@
   },
   "pollSites": {
    "crmath.ts": 5,
-   "engine.ts": 1,
+   "engine.ts": 3,
    "format.ts": 4,
    "index.ts": 1,
    "interrupt.ts": 2,
@@ -1603,6 +1603,34 @@
    "status": "cheap-candidate",
    "evidence": null,
    "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "binCall:nmod_echelon",
+   "transport": "binCall:nmod_echelon",
+   "status": "planned",
+   "family": "E3 dense linear algebra",
+   "owner": "linear algebra"
+  },
+  {
+   "id": "binCall:nmod_poly_divrem",
+   "transport": "binCall:nmod_poly_divrem",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "binCall:nmod_poly_gcd",
+   "transport": "binCall:nmod_poly_gcd",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "binCall:nmod_poly_mul",
+   "transport": "binCall:nmod_poly_mul",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
   },
   {
    "id": "wasm:kernels.ts",

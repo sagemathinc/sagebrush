@@ -743,6 +743,12 @@
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator. Token-identical to engine/web/tests/nmod_alloc.rs's audited item (the same hash); here it measures the binary entry point's allocations against its reservations."
   },
   {
+   "file": "engine/web/tests/bin_echelon_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "644ec3433664359dcb0e4bbd1e87f577bc5b1b3189c68dea294cfb75d0f7e70a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator. Token-identical to engine/web/tests/nmod_alloc.rs's audited item (the same hash); here it measures the binary nmod_echelon's peak live memory against its reservation (bin_ops::echelon_reservation) and its largest phase. Test-only, not shipped."
+  },
+  {
    "file": "engine/web/tests/divrem_alloc.rs",
    "item": "impl GlobalAlloc for Counting",
    "hash": "3f019520e6ba19c22c010e6d78590c43f0cba957a3e8a8d0a0102e1dd8872e7a",

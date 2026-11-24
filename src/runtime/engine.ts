@@ -712,6 +712,112 @@ export function binCall(req: Uint8Array): Uint8Array | null {
   return new Uint8Array(e.memory.buffer, r, e.sb_reply_len()).slice();
 }
 
+// The run of bytes binCallPieces copies into or out of the engine's memory
+// between two checks for Ctrl-C; the frame cap (engine/wire FRAME_CAP) and
+// the most pieces a request may come in (engine/py src/lib.rs, the same).
+const BIN_CHUNK = 1 << 20;
+export const BIN_FRAME_CAP = 1 << 28;
+export const BIN_MAX_PIECES = 1 << 16;
+
+/** A pieces request refused before anything is allocated: past the frame
+ *  cap, or in too many pieces. */
+export class BinRequestRefused extends Error {}
+
+/** binCall with the request in pieces and the reply in pieces of at most
+ *  BIN_CHUNK bytes (the Sage-mode echelon's frame-sized calls): neither copy
+ *  is one step, and a pending Ctrl-C is seen after each run (before the
+ *  engine runs, or after its reply: the builtin's catch raises it as
+ *  KeyboardInterrupt).  null when the engine predates the entry point. */
+export function binCallPieces(pieces: Uint8Array[]): Uint8Array[] | null {
+  // (before anything is allocated, the engine's memory included: the
+  // pieces' count and their summed size against the frame cap, whatever
+  // they are made of, one array repeated included)
+  const total = admitPieces(pieces, (a) => a.length);
+  const e = engine();
+  if (!e.sb_bin_call) return null;
+  pushShare(e);
+  return binCallPiecesOn(e, pieces, total, BIN_CHUNK);
+}
+
+/** The pieces' summed size, or BinRequestRefused: too many pieces (checked
+ *  first, before any piece is looked at), or a sum past the frame cap
+ *  (checked as it grows: no overflow).  sizeOf may raise for a piece of
+ *  the wrong kind; nothing is allocated per piece. */
+function admitPieces<T>(pieces: T[], sizeOf: (x: T) => number): number {
+  if (pieces.length > BIN_MAX_PIECES) throw new BinRequestRefused(`a request in more than ${BIN_MAX_PIECES} pieces`);
+  let total = 0;
+  for (let i = 0; i < pieces.length; i++) {
+    total += sizeOf(pieces[i]);
+    if (total > BIN_FRAME_CAP) throw new BinRequestRefused(`a request past the frame cap of ${BIN_FRAME_CAP} bytes`);
+  }
+  return total;
+}
+
+/** The views of a pieces request's pieces, made only once the request is
+ *  admitted (the builtin's list: a view per piece is metadata the size of
+ *  the list, so it comes after the count and size checks). */
+function pieceViews<T>(pieces: T[], sizeOf: (x: T) => number, viewOf: (x: T) => Uint8Array): Uint8Array[] {
+  admitPieces(pieces, sizeOf);
+  return pieces.map(viewOf);
+}
+
+/** binCallPieces on engine e, copying in runs of `chunk` bytes. */
+function binCallPiecesOn(e: Engine, pieces: Uint8Array[], total: number, chunk: number): Uint8Array[] {
+  const p = e.sb_alloc(total);
+  try {
+    let at = 0;
+    let since = 0;
+    for (const a of pieces) {
+      for (let i = 0; i < a.length; i += chunk) {
+        const part = a.subarray(i, Math.min(a.length, i + chunk));
+        new Uint8Array(e.memory.buffer, p + at, part.length).set(part);
+        at += part.length;
+        since += part.length;
+        if (since >= chunk) {
+          since = 0;
+          if (INTR[0] & INTR_CTRL_C) throw new Error("interrupted while copying the request");
+        }
+      }
+    }
+  } catch (err) {
+    e.sb_free(p, total);
+    throw err;
+  }
+  let r: number;
+  inCall++;
+  try {
+    r = e.sb_bin_call!(p, total);
+  } catch (err) {
+    // an interrupt (or a bug) trapped: retire the instance
+    inCall--;
+    retire(e);
+    callEnded(true);
+    throw err;
+  }
+  inCall--;
+  callEnded(false);
+  e.sb_free(p, total);
+  const len = e.sb_reply_len();
+  const out: Uint8Array[] = [];
+  for (let i = 0; i < len; i += chunk) {
+    out.push(new Uint8Array(e.memory.buffer, r + i, Math.min(chunk, len - i)).slice());
+    if (INTR[0] & INTR_CTRL_C) throw new Error("interrupted while copying the reply");
+  }
+  return out;
+}
+
+/** For test/ffmat-echelon-bin-copy.test.ts only: the pieces call on a given
+ *  engine (a fake one: memory, sb_alloc, sb_free, sb_bin_call,
+ *  sb_reply_len) with a given run length (the omission mutant: one run of
+ *  the whole buffer), after the same admission. */
+export const binPiecesTest = {
+  run(e: any, pieces: Uint8Array[], chunk: number = BIN_CHUNK): Uint8Array[] {
+    return binCallPiecesOn(e, pieces, admitPieces(pieces, (a) => a.length), chunk);
+  },
+  views: pieceViews,
+  BIN_CHUNK,
+};
+
 // A Stop traps the engine, the instance is retired, and a new one is created
 // (admitted) on the next call; the old one's memory (tens of MB after an F4
 // matrix) is freed only by V8's next major collection, so a run of Stops
@@ -905,9 +1011,33 @@ newBuiltinModule("_sbengine", (m) => {
   }, "mp");
   // None: the engine predates the binary entry point
   m.bin = Obj.builtin((req: any) => {
+    // (bytes: one reply; a list of bytes pieces: binCallPieces, the reply in
+    // pieces; anything else, a bytearray included, a TypeError)
+    const isBytes = (x: any): boolean => x instanceof Obj.PyBytes && !(x instanceof Obj.PyByteArray);
+    const sizeOf = (x: any): number => (isBytes(x) ? x.n : Obj.raise(Obj.T.TypeError, "bin takes bytes, or a list of bytes pieces"));
+    const bytesOf = (x: any): Uint8Array => {
+      const n = sizeOf(x);
+      return x.a.subarray(0, n);
+    };
+    // (a list, as CPython's binding takes: not a tuple, which this runtime
+    // also keeps as an array, tagged $t; its count, kinds and summed size
+    // admitted before a view of any piece is made)
+    let pieces: Uint8Array[] | null = null;
+    if (Array.isArray(req) && (req as any).$t !== true) {
+      try {
+        pieces = pieceViews(req, sizeOf, bytesOf);
+      } catch (err: any) {
+        if (err instanceof BinRequestRefused) return Obj.raise(Obj.T.ValueError, `bin: ${err.message}`);
+        throw err;
+      }
+    }
+    const a = pieces === null ? bytesOf(req) : null;
     try {
-      const a = req instanceof Obj.PyBytes ? req.a.subarray(0, req.n) : new Uint8Array(0);
-      const r = binCall(a);
+      if (pieces !== null) {
+        const r = binCallPieces(pieces);
+        return r === null ? null : r.map((b) => new Obj.PyBytes(b));
+      }
+      const r = binCall(a!);
       return r === null ? null : new Obj.PyBytes(r);
     } catch (err: any) {
       return engineError(err);

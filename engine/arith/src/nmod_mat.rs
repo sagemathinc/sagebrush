@@ -552,7 +552,9 @@ impl Mat {
         let m = self.m;
         let (rows, cols) = (self.rows, self.cols);
         let batch = batch_len(&m);
-        let mut pivots: Vec<usize> = vec![];
+        // (at most min(rows, cols) pivots: one allocation of exactly that,
+        // the bound the binary echelon's reservation counts)
+        let mut pivots: Vec<usize> = Vec::with_capacity(rows.min(cols));
         let mut det = 1 % m.n;
         let mut r = 0;
         let mut block_start = 0; // first pivot row of the pending block
@@ -646,9 +648,16 @@ impl Mat {
         }
         // rows r.. are zero (every column was processed or no rows remain)
         if !keep {
-            poll.count(Family::Move, ((rows - r) * cols) as u64);
-            for x in self.d[r * cols..].iter_mut() {
-                *x = 0;
+            // (in runs of 2^16 words with a Stop check between two runs:
+            // below a low rank this is nearly the whole matrix; a fill of
+            // one run checks nothing more than before.  Each run is counted
+            // once done, so a Stop between runs charges only those done)
+            for (i, part) in self.d[r * cols..].chunks_mut(1 << 16).enumerate() {
+                if i > 0 {
+                    sagebrush_interrupt::check_coarse();
+                }
+                part.fill(0);
+                poll.count(Family::Move, part.len() as u64);
             }
         }
         drop(phase);

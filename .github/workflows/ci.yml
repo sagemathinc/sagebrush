@@ -1967,6 +1967,7 @@ jobs:
           python3 bench/core/test_runner.py
           python3 bench/core/test_shard.py
           python3 engine/py/test_ffmat_echelon.py
+          python3 engine/py/test_ech_bin.py
           python3 test/ff_poly_bin.py
           python3 sage-tests/run_cpython.py -v
 
