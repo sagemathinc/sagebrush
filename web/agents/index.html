@@ -219,6 +219,7 @@
   #editor { max-height: 40vh; overflow-y: auto; min-height: 28px; }
   .composer .row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
   .composer .hint { font-size: 12px; color: var(--muted); margin-right: auto; }
+  .composer .hint.idle { visibility: hidden; }
   .composer .hint kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--side); }
   #queued { font-size: 12px; color: var(--accent); }
   #send { background: var(--ink); color: #fff; border-color: var(--ink); }
@@ -399,7 +400,6 @@
     <div id="threads"></div>
     <button id="files-big" type="button" title="Your files and notebooks, in the file browser">Files…</button>
     <button id="mirror-btn" type="button" hidden>Mirror…</button>
-    <div class="foot">Shift+Enter sends (queues while the agent works) · Alt+Enter queues · Ctrl+Enter posts a note</div>
     <div class="foot sbver" id="sbversion" hidden></div>
   </nav>
   <div class="sep" id="sep-side" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize the chat list" aria-controls="chats"></div>
@@ -444,7 +444,7 @@
           <!-- (the agent's access, an icon at the start of the composer's footer row: click it for the details, Turn off
                running code and Revoke; workspace/agent-ui.ts, [data-sbag-footer]. A1, #1546) -->
           <span data-sbag-slot="2" data-sbag-footer></span>
-          <span class="hint"><kbd>Shift</kbd>+<kbd>Enter</kbd> <span id="keys">send</span> · <kbd>Alt</kbd>+<kbd>Enter</kbd> queue · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> note</span>
+          <span class="hint idle"><kbd>Shift</kbd>+<kbd>Enter</kbd> <span id="keys">send</span> · <kbd>Alt</kbd>+<kbd>Enter</kbd> queue · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> note</span>
           <span id="queued"></span>
           <button id="note" title="Post a note, not sent to the agent (Ctrl+Enter)">Note</button>
           <button id="send-now" title="Interrupt the agent and send this now" hidden>Send now</button>

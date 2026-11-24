@@ -34,7 +34,7 @@ import { openReviewDialog, showWhenBranches } from "../workspace/review/open-dia
 import { Workspace } from "../workspace/api";
 import { WS_DB } from "../workspace/db";
 import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
-import { mountComposer, renderComposerState, stopLabel } from "../workspace/agent-chat/composer";
+import { keysShown, mountComposer, renderComposerState, stopLabel } from "../workspace/agent-chat/composer";
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
@@ -284,6 +284,7 @@ function submit(mode: UserEntry["mode"]) {
   if (!session.submit(editor.value, mode)) return;
   if (mode !== "note") void mirror.kick(current().id);
   editor.value = "";
+  keysShown("");
   putDraft(draftOf || current().id, "", true);
   renderAll();
   scrollToEnd(true);
@@ -1323,6 +1324,7 @@ function showDraft() {
   if (draftOf === null || draftOf === id) return;
   draftOf = id;
   editor.value = draftsPending.get(id) ?? readDrafts()[id] ?? "";
+  keysShown(editor.value);
 }
 // (the chat shown's draft at once, as the composer comes up: the page's first render waits for the workspace, and by
 //  then the person may have typed)
@@ -1338,7 +1340,7 @@ const delegateUi = mountDelegate({
   draft: () => editor.value,
   // (the Pair chat shown, once something has been said in it: a brief is drafted from it, the agent saying if it can't)
   conversation: () => { const t = current(); return t.entries.some((e) => e.kind === "turn" || e.kind === "user") ? t.id : null; },
-  clearDraft: () => { editor.value = ""; putDraft(draftOf || current().id, "", true); },
+  clearDraft: () => { editor.value = ""; keysShown(""); putDraft(draftOf || current().id, "", true); },
   // (a workspace document as the task's copy starts from it: a notebook's .ipynb text, a text file's text; its path as
   //  the protocol has it, relative)
   async readDoc(path) {
@@ -1436,6 +1438,7 @@ $("#new").onclick = async () => {
 for (const b of document.querySelectorAll<HTMLButtonElement>("[data-try]")) {
   b.onclick = () => {
     editor.value = b.dataset.try!;
+    keysShown(editor.value);
     submit("sent");
   };
 }
@@ -1918,7 +1921,7 @@ function renderHeader() {
   } else {
     who.innerHTML = `<span class="conn demo"></span>Claude <small>scripted demo</small>`;
   }
-  for (const el of document.querySelectorAll<HTMLElement>("#editor [data-placeholder]")) el.dataset.placeholder = `Message ${agentName()}…  (Shift+Enter to send)`;
+  for (const el of document.querySelectorAll<HTMLElement>("#editor [data-placeholder]")) el.dataset.placeholder = `Message ${agentName()}…`;
   $("#connect").textContent = live() ? "Connected" : "Connect Claude";
   $("#stop").textContent = stopLabel(agentName());
   $("#connect").toggleAttribute("disabled", live());

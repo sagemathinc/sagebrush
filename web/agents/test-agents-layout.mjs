@@ -4,7 +4,8 @@
 // and when the pane opens, kept in localStorage only in a valid shape, and left alone by the narrow overlay and full
 // screen. Copy chat and a message's Copy put Markdown on the clipboard (C-copy-*). Switching between Files and Agents
 // moves no edge (#1808, M-*): the chat list is the files panel's width, its header row theirs, the top bar the files'
-// header's height, no banner above; the status's popover says what the banner said.
+// header's height, no banner above; the status's popover says what the banner said. The send keys are said once, under
+// the prompt, and only while it has text (#1806, K-*).
 // The scripted agent (no pairing) opens a code artifact ("plot a Fourier series"); notebooks are
 // test-agents-artifacts.mjs's (A10 there: opening a notebook leaves the pane width as it was).
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/agents/test-agents-layout.mjs
@@ -433,6 +434,47 @@ try {
     await sleep(100);
     const p3 = await pop();
     ok("M-popover-away", !p3.shown && p3.expanded === "false", "a click elsewhere closes it", p3);
+  }
+  // ---- the send keys (#1806): said once, under the prompt, only while it has something to send; never in the
+  //      placeholder or the chat list. Hidden, not removed: the buttons beside them don't move
+  {
+    const keys = () => ev(`(() => { const h = document.querySelector('.composer .hint'), s = document.querySelector('#send').getBoundingClientRect(), n = document.querySelector('#note').getBoundingClientRect();
+      return { shown: getComputedStyle(h).visibility === 'visible', send: [s.left, s.top].map(Math.round), note: [n.left, n.top].map(Math.round), text: h.textContent.replace(/[ \\n\\t]+/g, ' ').trim() }; })()`);
+    const typeIn = async (text) => {
+      if (!(await ev(`!!document.querySelector('#editor textarea')`))) {
+        const [x, y] = await ev(`(() => { const r = document.querySelector('#editor .mb-block').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+        for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+      }
+      await until(`!!document.querySelector('#editor textarea')`);
+      await ev(`document.querySelector('#editor textarea').focus()`);
+      await send("Input.insertText", { text });
+      await sleep(150);
+    };
+    const backspaces = async (n) => { for (let i = 0; i < n; i++) for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 }); await sleep(150); };
+    await fresh(1400);
+    const once = await ev(`(() => ({ placeholders: [...[...document.querySelectorAll('#editor [data-placeholder]')].map((e) => e.dataset.placeholder), ...[...document.querySelectorAll('#editor textarea')].map((e) => e.placeholder)].filter(Boolean), side: document.querySelector('nav.side').textContent }))()`);
+    ok("K-once", once.placeholders.length > 0 && once.placeholders.every((p) => p === "Message Claude…") && !/Shift\+Enter|Alt\+Enter|Ctrl\+Enter/.test(once.side), "the placeholder is just \"Message Claude…\", and the chat list names no keys", once);
+    const k0 = await keys();
+    await typeIn("hello");
+    const k1 = await keys();
+    ok("K-typing", !k0.shown && k1.shown && /^Shift\+Enter send · Alt\+Enter queue · Ctrl\+Enter note$/.test(k1.text) && JSON.stringify(k0.send) === JSON.stringify(k1.send) && JSON.stringify(k0.note) === JSON.stringify(k1.note), "an empty prompt shows no keys; typing shows them under the prompt, and Send and Note stay where they were", { k0, k1 });
+    await backspaces(5);
+    const k2 = await keys();
+    ok("K-emptied", !k2.shown, "erased to empty: the keys go again", k2);
+    await typeIn("plot a Fourier series");
+    for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", modifiers: 8, windowsVirtualKeyCode: 13 });
+    await sleep(300);
+    const k3 = await keys();
+    ok("K-sent", !k3.shown, "sent (Shift+Enter): the prompt is empty and the keys go", k3);
+    // (a draft the page puts back, on a reload: the keys with it, though nobody typed)
+    await until(`document.querySelector('#stop').hidden`, 30000);
+    await typeIn("a draft");
+    await sleep(500);
+    await send("Page.reload");
+    await until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb') && document.getElementById('sep-side').hasAttribute('aria-valuenow')`, 30000);
+    await sleep(500);
+    const k4 = await keys();
+    ok("K-draft", k4.shown, "a draft put back after a reload shows the keys", k4);
   }
   console.log(`${checks - fails}/${checks} passed${fails ? "" : ", all passed"}`);
   code = fails ? 1 : 0;

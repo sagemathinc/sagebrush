@@ -26,8 +26,8 @@ export function mountComposer(h: ComposerHooks): BlockEditor {
   const editor = new BlockEditor("", {
     render: h.render,
     typeset: h.typeset,
-    placeholder: "Message Claude…  (Shift+Enter to send)",
-    onChange: (v) => h.changed?.(v),
+    placeholder: "Message Claude…",
+    onChange: (v) => { keysShown(v); h.changed?.(v); },
     onKey(e) {
       if (e.key !== "Enter") return false;
       if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) return (e.preventDefault(), primary(), true);
@@ -43,6 +43,13 @@ export function mountComposer(h: ComposerHooks): BlockEditor {
   $("#note").onclick = () => h.submit("note");
   $("#stop").onclick = () => h.stop();
   return editor;
+}
+
+/** The keys under the prompt, only while it has something to send (as a chat's hint shows only once you type, #1806):
+ *  an empty prompt shows none. Hidden, not removed, so the buttons beside them stay put. After every change of the text,
+ *  the person's (the editor's onChange) and the page's own (page.ts, where it sets the text). */
+export function keysShown(value: string) {
+  $(".composer .hint")?.classList.toggle("idle", !value.trim());
 }
 
 /** The buttons for the thread shown: Send; while a turn runs, Steer with Queue and Stop beside it where the agent takes
