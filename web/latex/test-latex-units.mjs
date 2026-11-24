@@ -722,6 +722,18 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   check("bib-label-column-widest", pad && +pad[1] >= 3.5, /<ol class="bib"[^>]*>/.exec(h)?.[0]);
   const see = h.slice(h.indexOf("See"), h.indexOf("See") + 600);
   check("cite-note-typeset", see.includes("Nek12</a>, §B]") && see.includes('p.\u00a03, <span class="KI">x^2</span>]') && !see.includes("\\S"), see);
+  // amsart's front matter (the arXiv paper's): every \author, an abstract written before \maketitle printed after the
+  // title, \subjclass and \keywords as the first page's notes, no date unless one is given, and each author's address and
+  // email at the end, in amsart's order whatever the source's
+  const fm = new Engine().update("\\documentclass{amsart}\n\\title{T}\n\\author[A. One]{Ann One}\n\\email{ann@x.org}\n\\address{Dept.~One}\n\\author{Bo Two}\n\\address{Dept.~Two}\n\\email{bo@y.org}\n\\keywords{forms, twists}\n\\subjclass[2010]{Primary 11F30}\n\\begin{document}\n\\begin{abstract}Abs text.\\end{abstract}\n\\maketitle\nBody.\n\\end{document}\n").chunks.join("");
+  const tb = fm.slice(fm.indexOf('<div class="titleblock">'), fm.indexOf("Body."));
+  const end = fm.slice(fm.indexOf('class="amsaddr"'));
+  check("amsart-front-matter", (tb.match(/class="auth"/g) || []).length === 2 && tb.includes("Ann One") && tb.includes("Bo Two") && tb.indexOf("Abs text.") > tb.indexOf('class="title"')
+    && (fm.match(/Abs text\./g) || []).length === 1 && tb.includes("2010 Mathematics Subject Classification.</i> Primary 11F30") && tb.includes("Key words and phrases.</i> forms, twists")
+    && !tb.includes('class="date"') && fm.indexOf('class="amsaddr"') > fm.indexOf("Body.") && end.indexOf("Dept.") < end.indexOf("ann@x.org") && end.indexOf("ann@x.org") < end.indexOf("Dept.\u00a0Two") && end.indexOf("Dept.\u00a0Two") < end.indexOf("bo@y.org"), [tb.slice(0, 500), end.slice(0, 400)]);
+  // (in another class, TeX's own: the last \author is the author, the abstract where it is written, the date shown)
+  const ar = new Engine().update("\\documentclass{article}\n\\title{T}\n\\author{Ann One}\n\\author{Bo Two}\n\\begin{document}\n\\begin{abstract}Abs text.\\end{abstract}\n\\maketitle\nBody.\n\\end{document}\n").chunks.join("");
+  check("article-front-matter-unchanged", !ar.includes("Ann One") && ar.includes("Bo Two") && ar.indexOf("Abs text.") < ar.indexOf('class="titleblock"') && ar.includes('class="date"'), ar.slice(0, 500));
   // (a numeric bibliography keeps the page's own column)
   const hn = new Engine().update("\\documentclass{article}\n\\begin{document}\n\\cite{a}\n\\begin{thebibliography}{9}\n\\bibitem{a} A.\n\\end{thebibliography}\n\\end{document}\n").chunks.join("");
   check("bib-label-column-numeric", /<ol class="bib">/.test(hn), /<ol class="bib"[^>]*>/.exec(hn)?.[0]);
