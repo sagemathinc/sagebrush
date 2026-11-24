@@ -69,9 +69,9 @@
       "reason": "it is np.dot(score, sample_weight), and Sagebrush's np.dot doesn't reproduce OpenBLAS's ddot summation order (ruled: results through np.dot or @ may differ from scikit-learn by a few ulps; everything else is bit-exact)"
     },
     {
-      "function": "sklearn.preprocessing.StandardScaler fit and partial_fit with sample_weight (mean_, var_, scale_ and the transform)",
-      "rule": "relative 1e-12 of the exactly rounded sums (math.fsum), enforced by test_preprocessing's weighted-tolerance row on 1000 random weighted samples; the small weighted rows match scikit-learn to the bit",
-      "reason": "the weighted sums are np.matmul(sample_weight, X), as in scikit-learn's _incremental_mean_and_var, and Sagebrush's matmul doesn't reproduce OpenBLAS's summation order (ruled: results through np.dot or @ may differ from scikit-learn by a few ulps; everything else is bit-exact)"
+      "function": "sklearn.preprocessing.StandardScaler().fit(X, sample_weight=...): mean_, var_ and scale_; and its transform",
+      "rule": "mean_, var_ and scale_: relative 1e-12 of reference values computed with math.fsum (over the rounded products w*x for mean_, and over w*(x - mean)**2 for var_); test_preprocessing's weighted-tolerance row checks mean_ and var_ on one fit of 1000 random weighted samples (scale_ is the square root of var_). The transform, (x - mean_) / scale_, carries mean_'s error as an absolute error of about a few ulp(mean_) / scale_, so near mean_ its relative error can be anything (a constant column gives -0x1p-50 here against scikit-learn's -0x1p-48). The small weighted rows (fit, transform, partial_fit, NaNs) match scikit-learn to the bit",
+      "reason": "the weighted sums are np.matmul(sample_weight, X), as in scikit-learn's _incremental_mean_and_var, and Sagebrush's matmul doesn't reproduce OpenBLAS's summation order (ruled: results through np.dot or @ may differ from scikit-learn by a few ulps; everything else is bit-exact). Weighted partial_fit goes through the same sums, so it can differ by a few ulps too; the row doesn't bound it"
     }
   ]
 }

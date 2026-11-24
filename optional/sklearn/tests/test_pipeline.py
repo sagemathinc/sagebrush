@@ -35,8 +35,20 @@ class FitOnly(BaseEstimator):
         return self
 
 
+class FirstColumn(BaseEstimator):
+    # (a final step whose predictions depend on X: they show the steps before it transformed X)
+    def fit(self, X, y=None):
+        self.n_features_in_ = np.asarray(X).shape[1]
+        return self
+
+    def predict(self, X):
+        return np.asarray(X)[:, 0]
+
+
 X, y = load_wine(return_X_y=True)
 pipe = Pipeline([("scale", StandardScaler()), ("clf", DummyClassifier(strategy="most_frequent"))])
+case("predict.through-transforms", lambda: make_pipeline(Double(), FirstColumn()).fit([[1.0], [3.0]], [0, 1]).predict([[2.0], [5.0]]).tolist())
+case("predict.through-two-transforms", lambda: make_pipeline(Double(), Double(3.0), FirstColumn()).fit([[1.0], [3.0]]).predict([[2.0], [5.0]]).tolist())
 
 case("repr", lambda: repr(pipe))
 case("repr-make", lambda: repr(make_pipeline(StandardScaler(), Double(3), DummyRegressor())))

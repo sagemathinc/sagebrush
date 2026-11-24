@@ -6,6 +6,10 @@ package scipy 1.18.1
 package joblib 1.6.0
 package threadpoolctl 3.8.0
 --
+== predict.through-transforms
+[4.0, 10.0]
+== predict.through-two-transforms
+[12.0, 30.0]
 == repr
 "Pipeline(steps=[('scale', StandardScaler()),\n                ('clf', DummyClassifier(strategy='most_frequent'))])"
 == repr-make

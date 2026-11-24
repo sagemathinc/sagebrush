@@ -1,3 +1,7 @@
+== predict.through-transforms
+[4.0, 10.0]
+== predict.through-two-transforms
+[12.0, 30.0]
 == repr
 "Pipeline(steps=[('scale', StandardScaler()),\n                ('clf', DummyClassifier(strategy='most_frequent'))])"
 == repr-make
