@@ -2743,7 +2743,7 @@
   {
     "name": "numpy.unique",
     "kind": "function",
-    "signature": "(ar, return_index=False, return_inverse=False, return_counts=False)",
+    "signature": "(ar, return_index=False, return_inverse=False, return_counts=False, axis=None, *, equal_nan=True)",
     "summary": "The sorted distinct elements (and how often each occurs).",
     "examples": [
       {
@@ -2753,6 +2753,10 @@
       {
         "code": "np.unique([3, 1, 3, 2, 1], return_counts=True)",
         "expected": "(array([1, 2, 3]), array([2, 1, 2]))\n"
+      },
+      {
+        "code": "np.unique([[1, 0, 0], [1, 0, 0], [2, 3, 4]], axis=0)",
+        "expected": "array([[1, 0, 0],\n       [2, 3, 4]])\n"
       }
     ],
     "differs": [
