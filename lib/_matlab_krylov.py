@@ -110,13 +110,18 @@ def _isdiag(v, sparse):
         return True
     S = _m._farr(v)
     n = S.shape[0]
-    rows = max(1, E // max(n, 1))
+    # (blocks of at most E entries on both axes: rows by up to E columns; the diagonal counted where a block meets it)
+    cols = max(1, min(n, E))
+    rows = max(1, E // cols)
     for a in range(0, n, rows):
-        b = min(n, a + rows)
-        block = S[a:b]
-        diag = int(np.count_nonzero(block[np.arange(b - a), np.arange(a, b)]))
-        if int(np.count_nonzero(block)) != diag:
-            return False
+        a1 = min(n, a + rows)
+        for c in range(0, n, cols):
+            c1 = min(n, c + cols)
+            block = S[a:a1, c:c1]
+            lo, hi = max(a, c), min(a1, c1)
+            diag = int(np.count_nonzero(S[np.arange(lo, hi), np.arange(lo, hi)])) if hi > lo else 0
+            if int(np.count_nonzero(block)) != diag:
+                return False
     return True
 
 

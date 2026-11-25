@@ -222,8 +222,8 @@ ok("a handle charged as complex (exact need reached, one byte less refused); a s
 
 
 # (a preconditioner's diagonal test makes nothing larger than E entries before the admission: no sparse copy of a full
-# M (from_full, np.nonzero), no bandwidth discovery of a sparse one; sentinels on all of them, a host one byte short
-# of the need refusing and a host of exactly the need reaching the first vector, neither touching a sentinel)
+# M (from_full, np.nonzero), no bandwidth discovery of a sparse one; sentinels on all of them, and a host one byte
+# short of the need refusing without touching any (the exact-need rows for a full M are the factors' row above)
 saved_dd = (sp.from_full, sp._as_sparse, sp.bandwidths, np.nonzero)
 
 
@@ -242,3 +242,27 @@ for name, Mx, bx, Ax in (("full M", Mfd, bf, Tf), ("sparse M", Ld, bh, Th)):
     finally:
         sp.from_full, sp._as_sparse, sp.bandwidths, np.nonzero = saved_dd
 ok("a preconditioner's diagonal test copies nothing before the admission (full and sparse M; one byte short: nomem)")
+
+# (the full diagonal test's every kernel at most E entries, on both axes, also where n > E: with E lowered to 8 and
+# n = 9, a spy on count_nonzero sees no call larger than 8 entries, for a diagonal matrix and one with an off-diagonal
+# entry, and the answers are right)
+saved_E, saved_cnz = K.E, np.count_nonzero
+sizes = []
+
+
+def spy(a, *args, **kw):
+    sizes.append(int(np.asarray(a).size))
+    return saved_cnz(a, *args, **kw)
+
+
+K.E = 8
+np.count_nonzero = spy
+try:
+    D9 = np.diag(np.arange(1.0, 10.0))
+    assert K._isdiag(M._unmat(D9), False) is True
+    D9[7, 1] = 1.0
+    assert K._isdiag(M._unmat(D9), False) is False
+finally:
+    K.E, np.count_nonzero = saved_E, saved_cnz
+assert sizes and max(sizes) <= 8, sizes
+ok("the full diagonal test's kernels at most E entries on both axes (E = 8, n = 9: largest %d)" % max(sizes))
