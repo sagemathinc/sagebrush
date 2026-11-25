@@ -25,6 +25,16 @@ sudo chown -- "$(id -u):$(id -g)" "$ROOT" "$ROOT/cgroup.procs" "$ROOT/cgroup.sub
 # (the controller is enabled while the directory holds no process)
 grep -qw memory "$ROOT/cgroup.subtree_control" || echo +memory >"$ROOT/cgroup.subtree_control"
 grep -qw cpuset "$ROOT/cgroup.subtree_control" || echo +cpuset >"$ROOT/cgroup.subtree_control"
+# (the thread sweep pins each run by its cgroup's cpuset.cpus: check, as
+# this user, that a child takes one CPU, before any point relies on it)
+probe="$ROOT/setup-probe-$$"
+mkdir -- "$probe"
+first=$(cut -d, -f1 "$ROOT/cpuset.cpus.effective" | cut -d- -f1)
+if ! { echo "$first" >"$probe/cpuset.cpus"; } 2>/dev/null; then
+  rmdir -- "$probe"
+  fail "a child cgroup's cpuset.cpus can't be written (the thread sweep's pinning)"
+fi
+rmdir -- "$probe"
 mkdir -p -- "$ROOT/runner"
 cgroupdir "$ROOT/runner" || fail "$ROOT/runner is not a cgroup v2 directory"
 # (moving this shell needs write access to the common ancestor's procs file:

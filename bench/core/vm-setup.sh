@@ -69,3 +69,7 @@ fi
 # the bench drivers: native, native-host, WASI and the Rust FLINT oracle
 SAGEBRUSH_FLINT_PREFIX=$P python3 bench/core/run.py --build --dry-run --mem-cap none >/dev/null
 echo "== built in $((SECONDS - t0)) s"
+# (the caps' and the sweep's cgroup, checked once at the build: a VM whose
+# cgroup can't cap or pin fails its setup, which stops the type, rather
+# than failing every point)
+bash bench/core/cgroup-setup.sh true

@@ -168,6 +168,26 @@ class Caps(unittest.TestCase):
         self.assertEqual((r["cgroup"]["oom_kill"], r["cgroup"]["left"]), (0, 0))
         self.assertEqual(self.dirs(), [])
 
+    @unittest.skipIf(
+        run.Cap.problems(run.CGROUP_ROOT, cpuset=True),
+        "no delegated cgroup with cpuset: " + "; ".join(run.Cap.problems(run.CGROUP_ROOT, cpuset=True)),
+    )
+    def test_a_capped_child_is_pinned(self):
+        # (the thread sweep's path: a real cgroup with cpuset.cpus, and the
+        # child's affinity; only where the runner has its delegated cgroup)
+        cpu = min(os.sched_getaffinity(0))
+        r = run.run_child(
+            [PY, "-c", "import os; print(sorted(os.sched_getaffinity(0)), open('/proc/self/cgroup').read().strip())"],
+            60,
+            1,
+            cap=self.cap(),
+            cpus=[cpu],
+        )
+        self.assertEqual(r["status"], "ok", r["output"])
+        self.assertTrue(r["output"].startswith(f"[{cpu}] "), r["output"])
+        self.assertIn(f"/p-{os.getpid()}-", r["output"])
+        self.assertEqual(self.dirs(), [])
+
     @unittest.skipIf(CAP_PROBLEMS, "no delegated cgroup: " + "; ".join(CAP_PROBLEMS))
     def test_over_the_cap_is_oom(self):
         r = run.run_child(
@@ -435,6 +455,7 @@ class Points(unittest.TestCase):
             mock.patch.object(run, "invoke", fake_invoke),
             mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
             mock.patch.object(run, "EXPECTED", expected),
+            mock.patch.object(run, "units", lambda *a: ("unmetered", "")),
         ):
             rec = run.point(row, "s", list(inputs), {"artifacts": arts})
         return rec, calls
@@ -486,7 +507,12 @@ class Points(unittest.TestCase):
         self.assertNotIn("ratio_user_warm", rec)
         rec, _ = self.run_point({"user": "5", "magma": "5"}, row=dict(ROW, cold=True), cold=cold)
         self.assertEqual((rec["ratio_user"], rec["ratio_user_warm"]), (2.0, 1.0))
-        self.assertEqual(rec["ratio_user_basis"], "cold")
+        self.assertEqual(rec["ratio_basis"], "cold")
+        # (every ratio goes cold: native too, against the cold reference)
+        cold3 = dict(cold, native=0.75)
+        rec, _ = self.run_point({"user": "5", "native": "5", "magma": "5"}, row=dict(ROW, cold=True), cold=cold3)
+        self.assertEqual((rec["ratio_native"], rec["ratio_native_warm"]), (0.5, 1.0))
+        self.assertEqual((rec["ratio_best"], rec["ratio_best_warm"]), (0.5, 1.0))
         # (no cold sample: no headline ratio, the warm one kept apart)
         rec, _ = self.run_point({"user": "5", "magma": "5"}, row=dict(ROW, cold=True))
         self.assertNotIn("ratio_user", rec)
@@ -1207,6 +1233,72 @@ class Sweep(unittest.TestCase):
         rec, _ = self.sweep(dict(row, sweep=None))
         self.assertNotIn("sweep", rec)
 
+    def test_a_column_that_cannot_be_pinned_is_that_columns_error(self):
+        row = dict(ROW, parallel=True, sweep="cores")
+        def boom_on_pin(b, row, n, mode, timeout, k=1, cpus=None):
+            if cpus == [0, 1]:
+                raise OSError(22, "Invalid argument", "cpuset.cpus")
+            return {"status": "ok", "seconds": 1.0, "signature": "K:1", "steal": 0.0} if mode not in ("inputs", "once") else (
+                {"status": "ok", "input_hash": "5"} if mode == "inputs" else {"status": "ok", "signature": "s"}
+            )
+
+        cols = [("1", [0]), ("2", [0, 1]), ("4-smt", [0, 1, 2, 3])]
+        with (
+            mock.patch.object(run, "SWEEP", cols),
+            mock.patch.object(run, "invoke", boom_on_pin),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+            mock.patch.object(run, "units", lambda *a: ("unmetered", "")),
+        ):
+            rec = run.point(row, "s", ["user", "user-n", "magma"], {"artifacts": ARTS})
+        self.assertEqual(rec["status"], "ok")
+        sw = rec["sweep"]["user-n"]
+        self.assertEqual([sw[x]["status"] for x in ("1", "2", "4-smt")], ["ok", "error", "ok"])
+        self.assertIn("OSError", sw["2"]["detail"])
+
+    def test_the_run_identity_never_collides_with_a_points_fields(self):
+        # (a VM run crashed on this: the identity's "sweep" columns were the
+        # point record's "sweep" before its results.  Every key main() puts
+        # in the identity, with a point swept as on a VM: the record keeps
+        # each identity field as it was, and its own fields beside them)
+        import ast as ast_
+
+        tree = ast_.parse(Path(run.__file__).read_text())
+        main = next(n for n in tree.body if isinstance(n, ast_.FunctionDef) and n.name == "main")
+        ident_keys = next(
+            [k.value for k in n.value.keys]
+            for n in ast_.walk(main)
+            if isinstance(n, ast_.Assign)
+            and any(isinstance(t, ast_.Name) and t.id == "ident" for t in n.targets)
+            and isinstance(n.value, ast_.Dict)
+        )
+        self.assertIn("sweep_columns", ident_keys)
+        ident = {k: ["identity", k] for k in ident_keys}
+        ident["artifacts"] = ARTS
+        cols = [("1", [0]), ("2", [0, 1])]
+
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": "5"}
+            if mode == "once":
+                return {"status": "ok", "signature": "s", "seconds_cold": 1.0}
+            return {"status": "ok", "seconds": 1.0, "signature": "K:1", "steal": 0.0}
+
+        row = dict(ROW, parallel=True, sweep="cores", working_set="8*n")
+        with (
+            mock.patch.object(run, "SWEEP", cols),
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+            mock.patch.object(run, "units", lambda *a: ([{"v": 0, "families": [0] * 10, "used": 0}], "")),
+        ):
+            rec = run.point(row, "s", ["user", "user-n", "native", "native-n", "magma"], ident)
+        self.assertEqual(rec["status"], "ok")
+        # ("backends" is the one deliberate overlap: the run's list becomes
+        # the point's results per backend, and the shard takes the type's
+        # identity from their names)
+        self.assertEqual({k: rec[k] for k in ident if k != "backends"}, {k: v for k, v in ident.items() if k != "backends"})
+        self.assertIsInstance(rec["backends"], dict)
+        self.assertEqual(sorted(rec["sweep"]), ["native-n", "user-n"])
+
     def test_a_sweep_column_with_another_answer_is_a_mismatch(self):
         row = dict(ROW, parallel=True, sweep="cores")
         rec, _ = self.sweep(row, {"user-n": "K:2"})
@@ -1377,7 +1469,9 @@ class WasmSkip(unittest.TestCase):
             bs = ["user", "native", "wasm", "magma"]
             big = dict(row, working_set="5*2**30")
             self.assertEqual(run.selected(big, "c0", bs), (["user", "native"], {"wasm": mock.ANY}))
-            self.assertIn("4 GiB", run.selected(big, "c0", bs)[1]["wasm"])
+            self.assertIn("2 GiB", run.selected(big, "c0", bs)[1]["wasm"])
+            # (the margin: 3 GiB is skipped too)
+            self.assertIn("wasm", run.selected(dict(row, working_set="3*2**30"), "c0", bs)[1])
             # (not at the regular sizes, nor under 4 GiB, nor without a formula)
             self.assertEqual(run.selected(big, "s", bs), (bs, {}))
             self.assertEqual(run.selected(dict(row, working_set="2**30"), "c0", bs)[1], {})

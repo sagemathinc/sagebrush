@@ -1230,9 +1230,10 @@ def working_set(row: dict, n: int) -> int | None:
     return round(value)
 
 
-# wasm32's address space: a calibration size whose working set exceeds it
-# is skipped on wasm, and recorded as skipped
-WASM_BYTES = 4 << 30
+# wasm32's address space is 4 GiB; a calibration size whose working-set
+# estimate exceeds half of it is skipped on wasm, and recorded as skipped
+# (the margin: the formula is an estimate, and allocators peak above it)
+WASM_BYTES = 2 << 30
 
 
 def selected(row: dict, key: str, backends: list[str]) -> tuple[list[str], dict]:
@@ -1240,7 +1241,7 @@ def selected(row: dict, key: str, backends: list[str]) -> tuple[list[str], dict]
     those skipped by rule, with why: at a calibration size only the
     calibrated targets (the references need no calibration, and some sizes
     would take them far past the point's timeout), and wasm only while the
-    row's working set fits its 4 GiB."""
+    row's working set stays under half its 4 GiB."""
     n = row["sizes"][key]["n"]
     present = [b for b in backends if command(b, row, n, "once")]
     skipped = {}
@@ -1249,7 +1250,7 @@ def selected(row: dict, key: str, backends: list[str]) -> tuple[list[str], dict]
         ws = working_set(row, n)
         if "wasm" in present and ws is not None and ws > WASM_BYTES:
             present.remove("wasm")
-            skipped["wasm"] = f"working set {ws} bytes exceeds wasm32's 4 GiB"
+            skipped["wasm"] = f"working set {ws} bytes exceeds 2 GiB, half of wasm32's 4 GiB"
     return present, skipped
 
 
@@ -1348,7 +1349,13 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
                     continue
                 sweep = {}
                 for label, cpus in cols:
-                    t = invoke(b, row, n, mode, timeout, k, cpus)
+                    try:
+                        t = invoke(b, row, n, mode, timeout, k, cpus)
+                    except (OSError, subprocess.SubprocessError) as e:
+                        # (a column that can't be pinned, its cgroup's
+                        # cpuset or the child's affinity refused: that
+                        # column's error, not the point's)
+                        t = {"status": "error", "detail": f"pinning: {type(e).__name__}: {e}"}
                     t["cpus"] = cpus
                     if t["status"] == "ok" and t["signature"] not in combined:
                         t["status"] = "mismatch"
@@ -1403,18 +1410,26 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
             rec["ratio_best"] = round(ours[bo] / theirs[bt], 4)
         if row.get("cold"):
             # (a row whose reference reuses internal state across repetitions
-            # in one process, hecke_matrix: the headline user ratio is the
-            # cold first samples', like for like; the warm one is kept as
-            # ratio_user_warm; no cold sample, no headline)
+            # in one process, hecke_matrix: every headline ratio is the cold
+            # first samples', like for like, against the reference with the
+            # fastest cold first op; each warm one is kept as <name>_warm; a
+            # ratio without both cold samples has no headline)
             def cold(b):
                 return rec["backends"].get(b, {}).get("check", {}).get("seconds_cold")
 
-            warm = rec.pop("ratio_user", None)
-            if warm is not None:
-                rec["ratio_user_warm"] = warm
-            if cold("user") and cold(best):
-                rec["ratio_user"] = round(cold("user") / cold(best), 4)
-            rec["ratio_user_basis"] = "cold"
+            for key in [x for x in rec if x.startswith("ratio_")]:
+                rec[key + "_warm"] = rec.pop(key)
+            crefs = {b: cold(b) for b in ("magma", "flint") if cold(b)}
+            if crefs:
+                cbest = min(crefs.values())
+                for b in ("user", "native", "native-host", "wasm"):
+                    if cold(b):
+                        rec["ratio_" + b.replace("-", "_")] = round(cold(b) / cbest, 4)
+                cours = [cold(b) for b in ("native", "native-n") if cold(b)]
+                ctheirs = [cold(b) for b in ("magma", "flint", "flint-n") if cold(b)]
+                if cours and ctheirs:
+                    rec["ratio_best"] = round(min(cours) / min(ctheirs), 4)
+            rec["ratio_basis"] = "cold"
     rec["complete"] = True
     return rec
 
@@ -1466,7 +1481,9 @@ def calibration(out: Path) -> None:
     measured under this protocol, with what the fits use (n, the working
     set, the host, the units, and per calibrated target its times and
     per-variant vtime).  A point of another protocol is never mixed in:
-    it is only counted."""
+    it is only counted.  A point whose units are "unmetered" (an op the
+    meter doesn't cover yet) has times but no units: the fits must skip it
+    for the unit-cost terms."""
     points, other = [], 0
     for path in sorted((out / "rows").glob("*.json")):
         r = json.loads(path.read_text())
@@ -1544,13 +1561,17 @@ def summary(out: Path, items: dict) -> None:
         ]
         peaks = [x for x in peaks if x]
         peak = f"{max(peaks) / (1 << 20):.0f}" if peaks else "—"
-        # (a cold row's user ratio is the first calls', marked; its warm one
-        # beside it)
-        user_ratio = str(r.get("ratio_user", "—"))
-        if r.get("ratio_user_basis") == "cold":
-            user_ratio += f" cold (warm {r.get('ratio_user_warm', '—')})"
+        # (a cold row's ratios are the first calls', marked; the warm ones
+        # beside them)
+        def ratio(key, r=r):
+            text = str(r.get(key, "—"))
+            if r.get("ratio_basis") == "cold":
+                text += f" cold (warm {r.get(key + '_warm', '—')})"
+            return text
+
+        user_ratio = ratio("ratio_user")
         lines.append(
-            f"| {r['item']} | {r['row']} | {r['size']} | {r['n']} | {t('user')} | {t('native')} | {t('native-host')} | {t('native-n')} | {t('wasm')} | {t('magma')} | {t('flint')} | {t('flint-n')} | {r.get('best_ref', {}).get('adapter', '—')} | {user_ratio} | {r.get('ratio_native', '—')} | {r.get('ratio_wasm', '—')} | {r.get('ratio_best', '—')} | {peak} | {r['status']} |"
+            f"| {r['item']} | {r['row']} | {r['size']} | {r['n']} | {t('user')} | {t('native')} | {t('native-host')} | {t('native-n')} | {t('wasm')} | {t('magma')} | {t('flint')} | {t('flint-n')} | {r.get('best_ref', {}).get('adapter', '—')} | {user_ratio} | {ratio('ratio_native')} | {ratio('ratio_wasm')} | {ratio('ratio_best')} | {peak} | {r['status']} |"
         )
     # the thread sweep: per row and -n backend, each column's median and
     # its speedup over the 1-core column
@@ -1660,7 +1681,8 @@ def main() -> int:
             "wasm": "wasm32-wasip1, default target features",
         },
         "threads": THREADS,
-        "sweep": [[label, cpus] for label, cpus in SWEEP] if SWEEP else None,
+        # (the run's sweep columns; not "sweep", which is a point's results)
+        "sweep_columns": [[label, cpus] for label, cpus in SWEEP] if SWEEP else None,
         "mem_cap": CAP.limit if CAP else None,
         "backends": backends,
     }
