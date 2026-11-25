@@ -10,7 +10,7 @@ Open the page and start computing: nothing to install, no sign-in needed, on a l
 ### Sagebrush app: desktop builds for Mac, Windows and Linux; iPhone and Android in progress
 The same documents and file model as Sagebrush Space, with what a local app adds:
 - **Your files are real files,** in a folder on your disk, with their history kept beside them, and no browser storage limits.
-- **Agents connect directly:** an agent on your computer pairs with the app, without going through a website.
+- **Agents connect directly (in progress):** an agent on your computer will pair with the app, without going through a website. For now, connect agents on sagebrush.space.
 - **Native engines and multicore acceleration are being added engine by engine.** Today the app runs the same engines as the web.
 
 ### Sagebrush engine: the mathematics
@@ -49,4 +49,4 @@ One document at a time, in one small, uniform frame. We keep polishing it toward
 - **History is bounded,** so it never grows without limit.
 - **You can export everything to a zip at any time.**
 
-Browser storage can still be cleared by the browser or by you; export, or sign in to sync across devices, if the work matters. Signing in adds sync; paying adds more storage and longer history. Nothing here locks you in.
+Browser storage can still be cleared by the browser or by you; export if the work matters. Sync across devices needs signing in, and isn't available to every account yet; paying adds more storage and longer history. Nothing here locks you in.

@@ -227,6 +227,12 @@ const scalarDtype = (w: Weak): DType => w.dt ?? { b: D.bool, i: D.int64, f: D.fl
 
 // ------------------------------------------------------------------ ndarray
 
+// NumPy's NPY_MAXDIMS: no array has more dimensions, each way of making one refusing with its own message
+const MAX_DIMS = 64;
+function tooManyDims(n: number): never {
+  return raise(T.ValueError, `maximum supported dimension for an ndarray is currently ${MAX_DIMS}, found ${n}`) as never;
+}
+
 export class NDArray {
   constructor(
     public dt: DType,
@@ -235,7 +241,9 @@ export class NDArray {
     public strides: number[],
     public offset = 0,
     public base: NDArray | null = null,
-  ) {}
+  ) {
+    if (shape.length > MAX_DIMS) tooManyDims(shape.length);
+  }
   // read-only (broadcast_to's views, and views of them; flags.writeable =
   // False): writes raise
   ro = false;
@@ -289,6 +297,8 @@ export const ARRAY_LIMITS = { elements: 2 ** 32, bytes: 2 ** 32 };
 // integer rather than Infinity, since the admission counts in BigInt)
 if (nativeHost()) ARRAY_LIMITS.bytes = Number.MAX_SAFE_INTEGER;
 export function admitArray(shape: readonly (number | bigint)[], dt: DType, scratch = 0): void {
+  // (NumPy's limit of 64 dimensions first, before any storage is asked for)
+  if (shape.length > MAX_DIMS) tooManyDims(shape.length);
   let n = 1n;
   for (const d of shape) n *= typeof d === "bigint" ? d : BigInt(d);
   const bytes = n * BigInt(dt.itemsize);
@@ -658,6 +668,10 @@ function seqItems(x: any): any[] {
   return Array.isArray(x) ? x : O.toArray(x);
 }
 
+function nestedTooDeep(): never {
+  return raise(T.ValueError, `setting an array element with a sequence. The requested array would exceed the maximum number of dimension of ${MAX_DIMS}.`) as never;
+}
+
 // Shape and dtype of nested Python data. (shapeOnly: a dtype was given, so
 // an element is converted once, by fill, through that dtype's protocol
 // alone, as NumPy's: no other numeric protocol called here first, astra
@@ -665,12 +679,14 @@ function seqItems(x: any): any[] {
 function discover(x: any, depth: number, shape: number[] & { leaf?: number }, kinds: { dt: DType | null }, shapeOnly = false) {
   if (x instanceof NDArray) {
     const s = x.shape;
+    if (depth + s.length > MAX_DIMS) nestedTooDeep();
     for (let i = 0; i < s.length; i++) setDim(shape, depth + i, s[i]);
     kinds.dt = kinds.dt ? promote(kinds.dt, x.dt) : x.dt;
     return;
   }
   if (isSeq(x)) {
     if (protocolSeq(x)) throw PROTOCOL;
+    if (depth >= MAX_DIMS) nestedTooDeep();
     const items = seqItems(x);
     setDim(shape, depth, items.length);
     for (const it of items) discover(it, depth + 1, shape, kinds, shapeOnly);
@@ -1045,6 +1061,11 @@ function resolveIndex(a: NDArray, key: any): IndexResult {
   items = items.map((k) => (Array.isArray(k) && !(k as any).$t ? fromPy(k) : k));
   items = items.map((k) => (Array.isArray(k) && (k as any).$t ? fromPy(k) : k));
   const hasAdv = items.some((k) => k instanceof NDArray);
+  // (the result's dimensions, counted as NumPy counts them before indexing: the array's, less those an integer or
+  // an index array takes, plus each newaxis, plus the index arrays' broadcast rank (a boolean one's nonzero is 1-d))
+  const advRank = hasAdv ? Math.max(0, ...items.filter((k) => k instanceof NDArray).map((k: any) => (k.dt.kind === "b" ? 1 : k.ndim))) : 0;
+  const resultDims = a.ndim - items.reduce((s, k) => s + (k instanceof O.PySlice || k === null ? 0 : consumes(k)), 0) + items.filter((k) => k === null).length + advRank;
+  if (resultDims > MAX_DIMS) raise(T.IndexError, `number of dimensions must be within [0, ${MAX_DIMS}], indexing result would have ${resultDims}`);
   if (!hasAdv) {
     const shape: number[] = [], strides: number[] = [];
     let off = a.offset, d = 0;
@@ -1890,6 +1911,9 @@ function unaryRaw(op: string, x: any): any {
       && wasmSinCos(op === "cos", CR.SINCOS_TABLE, ad as Float64Array, a.offset, a.size, od as Float64Array, op === "cos" ? CR.cos : CR.sin)) return out;
   if (UN_EXPR[op] && a.ndim > 0 && a.size > 0) {
     unaryKernel(op, a.isC())(ad, a.offset, a.strides, a.shape, od, a.size);
+    // (an integer has no -0: -v at 0 is -0, which an int64 array would keep
+    // and give back as -0.0, so 1 / x would be -inf)
+    if (op === "negative" && rt.isInt && rt.ctor === Float64Array) for (let k = 0; k < a.size; k++) od[k] += 0;
     return out;
   }
   const f = op === "reciprocal" && rt.isInt ? (x: number) => (x === 0 ? 0 : Math.trunc(1 / x)) : spec.f;
@@ -3307,7 +3331,9 @@ export class StrArray {
     public strides: number[],
     public offset = 0,
     public base: StrArray | null = null,
-  ) {}
+  ) {
+    if (shape.length > MAX_DIMS) tooManyDims(shape.length);
+  }
 }
 export interface StrArray {
   readonly size: number;
@@ -3430,6 +3456,7 @@ function numStr(dt: DType, data: any, p: number): string {
 }
 
 export function strEmpty(shape: number[], dt: StrDType): StrArray {
+  // (admitArray refuses more than 64 dimensions before the strings are made)
   admitArray(shape, dt as unknown as DType);
   return new StrArray(dt, new Array(prod(shape)).fill(""), shape.slice(), cStrides(shape));
 }
@@ -3965,6 +3992,8 @@ newBuiltinModule("_numpy", (m) => {
 
   // creation (strings in the data, a string array or a string dtype: a string array)
   fn("array", (obj: any, dtype: any = null, copyFlag: any = true, ndmin: any = 0) => {
+    // (ndmin checked first, as NumPy's: before any conversion or protocol call)
+    if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`);
     let r: any;
     if (obj instanceof StrArray) r = dtype === null ? (copyFlag === false ? obj : strCopy(obj)) : strAstype(obj, dtype);
     else if (obj instanceof NDArray && dtype !== null && strSpec(dtype) !== null) r = numToStr(obj, strSpec(dtype)!);

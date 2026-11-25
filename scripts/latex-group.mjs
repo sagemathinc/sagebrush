@@ -106,7 +106,21 @@ export const LATEX_LAZY = {
 //  + 64)
 // (252,762 raw / 84,654 gzip: Nov 23 2026, the preview's watchdog not counting the page's own blocking (watchdog.ts):
 //  252,698 / 84,590 measured on the shipped build of master 881d80a8 with it, with bun 1.4.4 and node 24.21.0, + 64)
-export const LATEX_CAPS = { raw: 252762, gzip: 84654 };
+// (255,748 raw / 85,629 gzip: Nov 24 2026, amsart's front matter (every author, the abstract after the title, the first
+//  page's notes, the addresses at the end, \title[short] and \author[short]), a bibliography's label column as wide as its
+//  widest label, a \cite note typeset: 255,684 / 85,565 measured on the shipped build of its merge with master bf92ce4f,
+//  with bun 1.4.4 and node 24.21.0, + 64)
+// (255,840 raw / 85,653 gzip: Nov 24 2026, a block that fits is never "too large", the size said the one over the limit
+//  (web/latex/split.ts): 255,776 / 85,589 measured on the shipped build of its merge with master a1153559, with bun 1.4.4 and
+//  node 24.21.0 (+92 / +24 over master's 255,684 / 85,565), + 64)
+// (256,580 raw / 85,902 gzip: Nov 25 2026, amsthm's \qedhere (issue 1800), its symbol on its own row (KaTeX's tag):
+//  256,516 / 85,838 measured on the shipped build of its merge with master c0066039, with bun 1.4.4 and node 24.21.0
+//  (+740 / +249 over master's 255,776 / 85,589), + 64)
+// (287,627 raw / 97,060 gzip: Nov 25 2026, TikZ pictures drawn in the preview (paths, styles,
+//  transforms, \foreach: web/latex/engine/tikz.mjs, in the worker's bundle, with its bounds): 287,563 / 96,996 measured on the
+//  shipped build of its merge with master 3655725a, with bun 1.4.4 and node 24.21.0 (+31,047 / +11,158 over master's
+//  256,516 / 85,838), + 64)
+export const LATEX_CAPS = { raw: 287627, gzip: 97060 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:

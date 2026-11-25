@@ -686,7 +686,7 @@ async function serveOp(req, server, u, p) {
       return sessionAccount ? Response.json({ account_id: sessionAccount }) : Response.json({ error: "sign in first" }, { status: 401 });
     }
     const headers = {};
-    for (const k of ["content-type", "content-length", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v !== null) headers[k] = v; }
+    for (const k of ["content-type", "content-length", "x-sync-account", "x-sync-generation", "x-sb-ct-sha256"]) { const v = req.headers.get(k); if (v !== null) headers[k] = v; }
     // (the reference server reads a PUT's length from its header: the page's, forwarded; else the body's own)
     if (isPut && headers["content-length"] === undefined) headers["content-length"] = String(body.length);
     let r;
