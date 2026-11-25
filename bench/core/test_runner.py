@@ -435,6 +435,7 @@ class Points(unittest.TestCase):
             mock.patch.object(run, "invoke", fake_invoke),
             mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
             mock.patch.object(run, "EXPECTED", expected),
+            mock.patch.object(run, "units", lambda *a: ("unmetered", "")),
         ):
             rec = run.point(row, "s", list(inputs), {"artifacts": arts})
         return rec, calls
@@ -486,7 +487,12 @@ class Points(unittest.TestCase):
         self.assertNotIn("ratio_user_warm", rec)
         rec, _ = self.run_point({"user": "5", "magma": "5"}, row=dict(ROW, cold=True), cold=cold)
         self.assertEqual((rec["ratio_user"], rec["ratio_user_warm"]), (2.0, 1.0))
-        self.assertEqual(rec["ratio_user_basis"], "cold")
+        self.assertEqual(rec["ratio_basis"], "cold")
+        # (every ratio goes cold: native too, against the cold reference)
+        cold3 = dict(cold, native=0.75)
+        rec, _ = self.run_point({"user": "5", "native": "5", "magma": "5"}, row=dict(ROW, cold=True), cold=cold3)
+        self.assertEqual((rec["ratio_native"], rec["ratio_native_warm"]), (0.5, 1.0))
+        self.assertEqual((rec["ratio_best"], rec["ratio_best_warm"]), (0.5, 1.0))
         # (no cold sample: no headline ratio, the warm one kept apart)
         rec, _ = self.run_point({"user": "5", "magma": "5"}, row=dict(ROW, cold=True))
         self.assertNotIn("ratio_user", rec)
@@ -1377,7 +1383,9 @@ class WasmSkip(unittest.TestCase):
             bs = ["user", "native", "wasm", "magma"]
             big = dict(row, working_set="5*2**30")
             self.assertEqual(run.selected(big, "c0", bs), (["user", "native"], {"wasm": mock.ANY}))
-            self.assertIn("4 GiB", run.selected(big, "c0", bs)[1]["wasm"])
+            self.assertIn("2 GiB", run.selected(big, "c0", bs)[1]["wasm"])
+            # (the margin: 3 GiB is skipped too)
+            self.assertIn("wasm", run.selected(dict(row, working_set="3*2**30"), "c0", bs)[1])
             # (not at the regular sizes, nor under 4 GiB, nor without a formula)
             self.assertEqual(run.selected(big, "s", bs), (bs, {}))
             self.assertEqual(run.selected(dict(row, working_set="2**30"), "c0", bs)[1], {})
