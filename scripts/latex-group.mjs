@@ -126,7 +126,10 @@ export const LATEX_LAZY = {
 // (291,697 raw / 98,473 gzip: Nov 25 2026, enumitem's label=, ref= and start= on a list: 291,633 / 98,409 measured on the
 //  shipped build of its merge with master 46d3a16f, with bun 1.4.4 and node 24.21.0 (+1,727 / +647 over master's
 //  289,906 / 97,762), + 64)
-export const LATEX_CAPS = { raw: 291697, gzip: 98473 };
+// (291,770 raw / 98,518 gzip: Nov 25 2026, an element over PIECE_MAX split in turn (a theorem's long list, split.ts):
+//  291,706 / 98,454 measured on the shipped build of master e096453f with it, with bun 1.4.4 and node 24.21.0
+//  (+73 / +45 over master's 291,633 / 98,409), + 64)
+export const LATEX_CAPS = { raw: 291770, gzip: 98518 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
