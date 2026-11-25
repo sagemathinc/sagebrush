@@ -119,26 +119,28 @@ run is ended, including what earlier steps of the same job left in the backgroun
 processes go. A later `continue-on-error` step that relied on such a background process won't have it here.
 
 `build-all.sh` first isn't needed: each job builds what it needs, as in CI. The jobs, in the order they run, with
-their times here:
+their times here, measured before CI's jobs were regrouped on Nov 22 2026 (`ci.yml` now also has the Linux jobs
+`sprig`, `web-export`, `web-lookalike`, `web-sync-ops`, `web-runner-sync`, `web-artifacts`, `mpmath-suite`,
+`engine-clippy`, `examples` and `examples-census`, which this table doesn't list yet):
 
 | job | what it runs | time |
 |---|---|---|
 | `changes` | the tier a change needs; core imports no server code | 0.0 min |
 | `census` | the limits census and the limits sweep's manifest | 0.3 min |
-| `node-tests` (8 shards) | the Node tests (`dist/test`, `target`) | 24.0 min |
-| `language-node` (6 shards) | the Magma and MATLAB case tests under Node | 23.2 min |
+| `node-tests` (2 shards) | the Node tests (`dist/test`, `target`) | 24.0 min |
+| `language-node` (2 shards) | the Magma and MATLAB case tests under Node | 23.2 min |
 | `checks` | security, bundles, generated files and web assets; the size record; the npm package metrics; Mermaid | 3.9 min |
 | `web-sync` | sharing, sync, the engines and the PWA, in Chrome | 22.2 min |
 | `web-runner` | the runner, the workspace and the board frame, in Chrome | 11.8 min (8 cores; below) |
 | `interrupt-matrix` | Stop and Ctrl-C across hosts and modes (CI's set) | 6.5 min |
-| `web-browser` (5 groups) | the notebook's and the boards' browser suites | 40.6 min |
+| `web-browser` (board, notebook, latex) | the notebook's and the boards' browser suites | 40.6 min |
 | `conformance` (Node, Deno, Bun) | the catalog's examples and coverage | 1.5 min |
 | `modes` (4 groups) | the Sage, Magma and MATLAB, numeric and other modes | 7.3 min |
 | `engine-rust` | `cargo test` over the engine's workspace | 5.6 min |
 | `engine-unsafe-sweep` | the unsafe boundary's compiler sweep | 0.4 min |
 | `engine-wasm` | a fresh WebAssembly engine, built and smoke-tested | 1.3 min |
-| `engine-node` (8 shards) | the Node tests on that fresh engine | 24.8 min |
-| `engine-language` (6 shards) | the Magma and MATLAB tests on it | 24.2 min |
+| `engine-node` (2 shards) | the Node tests on that fresh engine | 24.8 min |
+| `engine-language` (2 shards) | the Magma and MATLAB tests on it | 24.2 min |
 | `engine-modes` | Sage, calculus, Magma and MATLAB on it | 4.2 min |
 | `engine-cpython` | the CPython extension, audit regressions, MCP and Sage | 4.3 min (warm; below) |
 
@@ -160,7 +162,12 @@ in `wasm/`, not a fresh one.
 
 - `size-base` and `size-gate`: the growth gate, which needs the base's size record from GitHub;
 - `ci`: the aggregate of the others;
+- `wasm-modules` and `wasm-publish`: the modules handed to the other jobs as the run's artifact, and publishing them to
+  the release bucket (here every job reads `wasm/` as it is);
+- `export-controls` and `lookalike-controls`, the long tier's jobs: run them with `scripts/test-all.sh --long`;
 - `webkit`: it installs Playwright's WebKit with `sudo apt`. Run it with `scripts/test-all.sh --webkit` where that's fine;
+- `engine-nd-neon` (macOS on Apple silicon: the NEON kernel of `engine/nd`) and `windows-smoke` (Windows): they
+  need those machines;
 - the other workflows:
   - `app.yml`: the desktop app on macOS, Windows and Linux, with its self-test;
   - `pypi.yml`: the wheels on five platforms, and Python 3.10 and 3.11;
@@ -179,3 +186,30 @@ python3 web/serve.py 8765                          # serve web/dist on http://12
 (cd engine && cargo test -p sagebrush-<crate>)     # one engine crate
 scripts/test-all.sh --only checks                  # the bundle, size and generated-file checks
 ```
+
+## Before sending a head: the precheck
+
+```sh
+node scripts/precheck.mjs            # CI's quick gates and the tests the branch touches: a few minutes
+node scripts/precheck.mjs --quick    # only the gates that need no build: about a minute
+node scripts/precheck.mjs --full     # also the long census suites (limits, catalog)
+```
+
+It runs, with ci.yml's own commands, the checks a change most often fails on CI: the limits census, the unsafe
+inventory, test discovery, the generated files and docs index (`sync-python-package.sh --check`), the Core API
+surface, the interrupt census and the rest of the `checks` job's quick gates, and every test file the branch
+touches. It runs them all and reports every failure at once. An author runs it before sending a head, and a
+reviewer runs it first. A track gets it with its pull of master, which brings the workflow lines it checks
+against; before that, a copy of `scripts/precheck.mjs` and `scripts/engine-cache.mjs` runs there and skips the gates
+the track's own CI doesn't have yet. When CI fails on a gate this could have run, add the gate to `STEPS` in
+`scripts/precheck.mjs` with ci.yml's command: `scripts/test-precheck.mjs` holds each such step to a line of a
+workflow.
+
+Its engine is the tree's own: `node scripts/engine-cache.mjs` fetches the pinned modules when the engine's source
+is master's, and otherwise copies the build of that exact source (engine/ and its build scripts, committed or
+not) from a cache shared by every checkout on the machine, building it only the first time.
+`node scripts/engine-cache.mjs --check` fails when `wasm/` is not this tree's engine, so a test never runs a stale
+or borrowed module.
+
+A meter review breaks every charge site in turn, with `scripts/meter-mutants.py`: the standard mutants (charge
+before the work, a dropped count, a dropped poll, a dropped preflight) are in its header.

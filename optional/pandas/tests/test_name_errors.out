@@ -1,15 +1,3 @@
-== module.hasattr
-False
-== module.getattr-default
-'default'
-== module.error
-('NotImplementedError', "pandas.pivot_table is not in Sagebrush's pandas 0.x subset")
-== module.both-bases
-(True, True)
-== module.missing-name
-(False, 'AttributeError')
-== module.present-name
-True
 == Series.hasattr
 False
 == Series.getattr-default
@@ -80,5 +68,15 @@ False
 (True, True)
 == dt.missing-name
 (False, 'NotImplementedError')
+== module.error
+('NotImplementedError', "pandas.pivot_table is not in Sagebrush's pandas 0.x subset")
+== module.bases
+(True, False)
+== module.from-import
+(True, "pandas.pivot_table is not in Sagebrush's pandas 0.x subset")
+== module.missing-name
+(False, 'AttributeError')
+== module.present-name
+True
 == argument-refusal
 (True, False)

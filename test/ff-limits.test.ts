@@ -97,6 +97,15 @@ test("ff.embed_max: a lowered size bound refuses common fields past it at the ex
   boundary("sage", "ff.embed_max", 6561, 'K = GF(3^8); k = GF(3^2)\nprint("ADMITTED", K(k.gen()).minpoly())\n', "ADMITTED x^2 + 2*x + 2", "at most 6560 elements", true);
 });
 
+test("ff.embed_max bounds Evaluate at another field's element: the common field GF(2^12) admitted at 4096, refused at 4095, the zero polynomial too (Magma)", () => {
+  // (a polynomial over GF(16) at an element of GF(8): evaluated in GF(2^12), the zero polynomial as any other)
+  const refusal = "evaluation of elements of GF(2^4) and GF(2^3) is not supported yet";
+  for (const f of ["P!0", "P!1", "x + a"]) {
+    const src = `F<a> := GF(16); L<c> := GF(8); P<x> := PolynomialRing(F); z := Evaluate(${f}, c); print "ADMITTED", Parent(z);\n`;
+    boundary("magma", "ff.embed_max", 4096, src, "ADMITTED Finite field of size 2^12", refusal, true);
+  }
+});
+
 test("ff.conway_work: the cold Conway search for GF(3^8) is admitted at its 1530226 cops and refused one short (Sage and Magma)", () => {
   boundary("sage", "ff.conway_work", 1530226, "print(GF(3^8))\n", "Finite Field in z8 of size 3^8", "beyond the bounded search here", true);
   boundary("magma", "ff.conway_work", 1530226, "F := GF(3^8); print F;\n", "Finite field of size 3^8", "is not supported yet", true);
