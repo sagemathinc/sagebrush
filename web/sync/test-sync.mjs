@@ -1848,12 +1848,16 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const st3 = await signIn(T3);
   const acctT3 = acctNs.get(acctNs.idFromName("acct:" + hashOf(T3)));
   ok((await post(st3, "/api/sync/v1/enable", {})).status === 200, "(T3: sync on)");
+  // (the alarm gives unused slack back 300 ms to 1 s after an abandon; on a loaded host that can come before the share
+  // below, which then has nothing to ask back. Held across the next two rows, so they test sharing's own give-back)
+  await acctT3.testHoldSlack({ on: true });
   const r3 = await acctT3.reserve({ account: T3, sha256: sha(Buffer.from("t3 slack")), ct_sha256: sha(Buffer.from("t3 slack")), size: 8000 });
   await acctT3.abandon({ id: r3.ok.id });
   const b3 = await acctT3.budget();
   ok(r3?.ok?.id && b3.claim >= 8000 && b3.files === 0 && (await claimOf(T3)) === b3.claim, "(T3: an upload reserved and abandoned leaves the claim holding " + b3.claim + " it doesn't use)");
   const sh3 = await sharePut(st3, Buffer.alloc(5000, 31));
   ok([200, 201].includes(sh3.status) && (await claimOf(T3)) === 0 && (await acctT3.budget()).claim === 0, "sharing at the edge: sync gives back its unused claim, and the upload goes (" + sh3.status + ")");
+  await acctT3.testHoldSlack({ on: false });
   // (fail closed: the give-back can't reach D1, so the refusal stands)
   const r3b = await acctT3.reserve({ account: T3, sha256: sha(Buffer.from("t3 slack 2")), ct_sha256: sha(Buffer.from("t3 slack 2")), size: 4900 });
   await acctT3.abandon({ id: r3b.ok.id });
