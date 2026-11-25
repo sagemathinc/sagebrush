@@ -1092,6 +1092,12 @@ class Units(unittest.TestCase):
         self.assertIsNone(got)
         self.assertIn("sum to the total", why)
 
+    def test_a_family_count_change_is_named(self):
+        self.fake("print('UNITS|0|1,0,0,0,0,0,0,0,0,0,2|3')\n")
+        got, why = run.units({"id": "r"}, 1, 30, 1)
+        self.assertIsNone(got)
+        self.assertIn("11 families, not 10", why)
+
     def test_unmetered_is_recorded_as_such(self):
         self.fake("print('UNITS|unmetered')\n")
         self.assertEqual(run.units({"id": "r"}, 1, 30, 1), ("unmetered", ""))
@@ -1415,6 +1421,160 @@ class DryRun(unittest.TestCase):
         )
         # (no reference at a calibration size)
         self.assertNotIn("magma", lines[1])
+
+
+class RotationOrder(unittest.TestCase):
+    """Protocol 5's schedule: every rotation whole, the offsets a function of
+    (seed, j, K) only, and no variant twice in a row across the warm pass,
+    the calibration, and the per-op rotations or batches."""
+
+    KS = (1, 2, 3, 4, 5, 8)
+
+    def setUp(self):
+        sys.path.insert(0, str(Path(run.__file__).parent / "drivers"))
+        import common
+
+        self.common = common
+
+    def recorder(self, k):
+        trace = []
+        ops = [(lambda v=v: trace.append(v)) for v in range(k)]
+        return trace, ops
+
+    def check(self, trace, k):
+        if k > 1:
+            pairs = [i for i in range(1, len(trace)) if trace[i] == trace[i - 1]]
+            self.assertEqual(pairs, [], (k, trace))
+
+    def test_per_op_rotations(self):
+        c = self.common
+        for k in self.KS:
+            for seed in range(40):
+                for rotations in (3, 5):
+                    trace, ops = self.recorder(k)
+                    for v in range(k):
+                        ops[v]()  # (the warm pass)
+                    c.per_op(lambda v: ops[v], k, False, ops, rotations, seed)
+                    self.check(trace, k)
+                    timed = trace[k:]
+                    for r in range(rotations):
+                        rot = timed[r * k : (r + 1) * k]
+                        self.assertEqual(sorted(rot), list(range(k)))
+                        self.assertEqual(rot[0], c.offset(seed, r, k))
+
+    def test_batched_whole_rotations(self):
+        c = self.common
+        for k in self.KS:
+            for seed in range(12):
+                trace, ops = self.recorder(k)
+                rot = c.Rotation(lambda v: ops[v], k, False)
+                rot.ops = ops
+                for v in range(k):
+                    ops[v]()
+                with mock.patch.object(c, "TARGET", 1e-4):
+                    med, lo, hi, reps, count, batches, offsets = c.measure_batched(rot, 1e-9, seed)
+                self.assertEqual(reps % k, 0)
+                self.assertEqual(offsets, [c.offset(seed, j, k) for j in range(count)])
+                self.check(trace, k)
+                for j in range(count):
+                    batch = trace[len(trace) - (count - j) * reps :][:reps]
+                    self.assertEqual(batch[0], offsets[j])
+                    self.assertEqual(batch[-1], (offsets[j] - 1) % k)
+
+    def test_the_offsets(self):
+        c = self.common
+        for k in self.KS:
+            for seed in range(40):
+                o = [c.offset(seed, j, k) for j in range(9)]
+                self.assertTrue(all(0 <= x < k for x in o))
+                if k > 1:
+                    # (rotation 0 never starts on the warm pass's last; each
+                    # next never on the previous rotation's last)
+                    self.assertNotEqual(o[0], k - 1)
+                    self.assertTrue(all(o[j] != (o[j - 1] - 1) % k for j in range(1, 9)))
+        self.assertEqual([c.whole(r, 8) for r in (1, 8, 9, 16)], [8, 8, 16, 16])
+
+    def grid(self):
+        return [(seed, j, k) for seed in (0, 1, 2, 7, 12345, 2**40 + 3) for j in range(7) for k in range(1, 10)]
+
+    def expected(self):
+        c = self.common
+        offs = [c.offset(s, j, k) for s, j, k in self.grid()]
+        wholes = [c.whole(r, k) for r in (1, 5, 8, 9, 100) for k in range(1, 10)]
+        return offs, wholes
+
+    def test_the_pyjs_driver_agrees(self):
+        import ast as ast_
+
+        src = (Path(run.__file__).parent / "drivers/sagebrush_bigint.py").read_text()
+        tree = ast_.parse(src)
+        ns = {}
+        for node in tree.body:
+            if isinstance(node, ast_.FunctionDef) and node.name in ("offset", "whole"):
+                exec(compile(ast_.Module([node], []), "sagebrush_bigint.py", "exec"), ns)
+        offs, wholes = self.expected()
+        self.assertEqual([ns["offset"](s, j, k) for s, j, k in self.grid()], offs)
+        self.assertEqual([ns["whole"](r, k) for r in (1, 5, 8, 9, 100) for k in range(1, 10)], wholes)
+
+    def rust_fns(self, path):
+        src = (Path(run.__file__).parent / path).read_text()
+        out = []
+        for name in ("rotation_offset", "whole_rotations"):
+            m = re.search(r"^fn %s\(.*?^}\n" % name, src, re.S | re.M)
+            self.assertIsNotNone(m, (path, name))
+            out.append(m.group(0))
+        return "\n".join(out)
+
+    def test_the_rust_drivers_agree(self):
+        rustc = shutil.which("rustc")
+        if not rustc:
+            self.skipTest("no rustc")
+        offs, wholes = self.expected()
+        grid = ", ".join("(%du64, %d, %d)" % g for g in self.grid())
+        for path in ("native/src/main.rs", "flint-rust/src/main.rs"):
+            d = Path(tempfile.mkdtemp(prefix="rot-"))
+            self.addCleanup(shutil.rmtree, d, True)
+            (d / "t.rs").write_text(
+                self.rust_fns(path)
+                + "\nfn main() {\n"
+                + "    for (s, j, k) in [%s] { print!(\"{} \", rotation_offset(s, j, k)); }\n" % grid
+                + "    println!();\n"
+                + "    for r in [1usize, 5, 8, 9, 100] { for k in 1..10 { print!(\"{} \", whole_rotations(r, k)); } }\n"
+                + "}\n"
+            )
+            r = subprocess.run(
+                [rustc, "--edition", "2021", "-O", "-o", str(d / "t"), str(d / "t.rs")],
+                capture_output=True, text=True, timeout=300, cwd=d,
+            )
+            self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+            lines = subprocess.run([str(d / "t")], capture_output=True, text=True, timeout=60).stdout.splitlines()
+            self.assertEqual([int(x) for x in lines[0].split()], offs, path)
+            self.assertEqual([int(x) for x in lines[1].split()], wholes, path)
+
+    def test_the_magma_driver_agrees(self):
+        magma = Path("/usr/local/bin/magma")
+        if not magma.exists():
+            self.skipTest("no Magma")
+        src = (Path(run.__file__).parent / "drivers/magma_case.m").read_text()
+        fns = [re.search(r"^function %s\(.*?^end function;\n" % f, src, re.S | re.M) for f in ("Offset", "Whole")]
+        self.assertTrue(all(fns))
+        d = Path(tempfile.mkdtemp(prefix="rot-"))
+        self.addCleanup(shutil.rmtree, d, True)
+        grid = ", ".join("<%d, %d, %d>" % g for g in self.grid())
+        (d / "t.m").write_text(
+            "".join(m.group(0) for m in fns)
+            + "for g in [%s] do print Offset(g[1], g[2], g[3]); end for;\n" % grid
+            + "print \"W\";\n"
+            + "for r in [1, 5, 8, 9, 100] do for k in [1..9] do print Whole(r, k); end for; end for;\n"
+            + "quit;\n"
+        )
+        r = subprocess.run([str(magma), "-b", str(d / "t.m")], capture_output=True, text=True, timeout=120)
+        # (one value per line: Magma wraps long lines)
+        lines = [line.strip() for line in r.stdout.splitlines() if line.strip()]
+        w = lines.index("W")
+        offs, wholes = self.expected()
+        self.assertEqual([int(x) for x in lines[:w]], offs)
+        self.assertEqual([int(x) for x in lines[w + 1 :]], wholes)
 
 
 class Host(unittest.TestCase):

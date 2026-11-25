@@ -56,7 +56,8 @@ Input construction, signature conversion and process startup are never timed.
 Protocol 5 adds a `TIMING|json` line before each `TIME` line: the samples a sweep pairs across candidates.
 - The driver measures its timer's granularity $g$. The per-op threshold is $\max(1\,\text{ms},\ 1000\,g)$.
 - **per-op** mode, when one operation takes at least the threshold: $R$ full rotations, each operation timed alone, in rotation order from a seeded offset. `samples[v]` holds variant $v$'s $R$ times, never back to back.
-- **batched** mode, below it: the calibrated rotation batches. Batch $j$ starts at the seeded offset $(\mathrm{seed} \cdot 1000003 + 7919\,j) \bmod K$, the same for every candidate's batch $j$.
+- **batched** mode, below it: the calibrated rotation batches, each a whole number of rotations. Batch $j$ starts at the seeded offset, the same for every candidate's batch $j$.
+- The offset of rotation or batch $j$ is $o_j = \big((\mathrm{seed} \cdot 1000003) \bmod (K-1) + j\,s\big) \bmod K$ ($o_j = 0$ for $K = 1$), with $s = 1$ for $K > 2$ and $s = 0$ for $K = 2$. Rotation 0 never starts on $K-1$, which ends the warm pass and every whole-rotation calibration run, and no rotation starts on the variant the previous one ended on. So no variant runs twice in a row in any mode (every driver uses the same schedule, and the tests check the order and that the drivers agree).
 - Magma's clock ticks at about 10 ms, so the Magma reference is always batched.
 - `BENCH_SEED` sets the seed. `BENCH_TIMING=per-op|batched` forces a mode (for tests).
 - `run.py` keeps the record, bounded and checked, in the point's `time.timing`.

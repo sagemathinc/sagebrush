@@ -39,6 +39,20 @@ fn hash_big(xs: &[BigInt]) -> u64 {
 
 /// The smallest positive step Instant shows (seconds): protocol 5's timer
 /// granularity.
+/// Batch or rotation j's starting variant (drivers/common.py's offset: the
+/// same schedule, so no variant runs twice in a row).
+fn rotation_offset(seed: u64, j: usize, k: usize) -> usize {
+    if k == 1 {
+        return 0;
+    }
+    ((seed as u128 * 1_000_003 % (k as u128 - 1) + j as u128 * (k > 2) as u128) % k as u128) as usize
+}
+
+/// reps rounded up to whole rotations (drivers/common.py's whole).
+fn whole_rotations(reps: usize, k: usize) -> usize {
+    reps.div_ceil(k) * k
+}
+
 fn timer_granularity() -> f64 {
     let (mut best, mut last) = (f64::INFINITY, Instant::now());
     for _ in 0..2000 {
@@ -113,7 +127,7 @@ fn run<T, F: FnMut() -> T>(mode: &str, variants: usize, mut build: impl FnMut(us
     let forced = std::env::var("BENCH_TIMING").unwrap_or_else(|_| "auto".to_string());
     let g = timer_granularity();
     let threshold = 1e-3f64.max(1000.0 * g);
-    let offset = |j: usize| ((seed as u128 * 1_000_003 + j as u128 * 7919) % variants as u128) as usize;
+    let offset = |j: usize| rotation_offset(seed, j, variants);
     let per = warm / variants as f64;
     let head = format!("\"granularity\":{:e},\"threshold\":{:e},\"seed\":{},\"k\":{}", g, threshold, seed, variants);
     let mut per_op_samples: Option<Vec<Vec<f64>>> = None;
@@ -146,14 +160,15 @@ fn run<T, F: FnMut() -> T>(mode: &str, variants: usize, mut build: impl FnMut(us
             }
             total
         };
+        // (whole rotations throughout, as common.py's calibrate)
         let (mut k, mut t) = if per >= TARGET {
-            (1usize, per)
+            (variants, warm)
         } else {
-            let k = if per > 0.0 { ((TARGET * 1.2 / per) as usize + 1).max(1) } else { variants };
+            let k = whole_rotations(if per > 0.0 { ((TARGET * 1.2 / per) as usize + 1).max(1) } else { variants }, variants);
             (k, reps(0, k))
         };
         while t < TARGET && k < 1 << 24 {
-            k = if t <= 0.0 { 2 * k } else { (2 * k).max((16 * k).min((k as f64 * TARGET * 1.2 / t) as usize + 1)) };
+            k = whole_rotations(if t <= 0.0 { 2 * k } else { (2 * k).max((16 * k).min((k as f64 * TARGET * 1.2 / t) as usize + 1)) }, variants);
             t = reps(0, k);
         }
         let count = if t / k as f64 <= 2.0 { 5 } else { 3 };

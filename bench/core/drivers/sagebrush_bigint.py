@@ -55,7 +55,15 @@ def granularity(tries=2000):
 
 
 def offset(seed, j, k):
-    return (seed * 1000003 + j * 7919) % k
+    """common.py's offset (the same schedule)."""
+    if k == 1:
+        return 0
+    return ((seed * 1000003) % (k - 1) + j * (1 if k > 2 else 0)) % k
+
+
+def whole(reps, k):
+    """common.py's whole."""
+    return -(-reps // k) * k
 
 
 def floats(xs):
@@ -111,16 +119,18 @@ elif mode in ("time", "time-fresh"):
         rows = ",".join("[%s]" % floats(s) for s in per_variant)
         print('TIMING|{%s,"mode":"per-op","samples":[%s]}' % (head, rows))
     else:
+        # (whole rotations, as common.py's calibrate)
         if per >= TARGET:
-            k, t = 1, per
+            k, t = K, warm
         else:
-            k = max(1, int(TARGET * 1.2 / per) + 1) if per > 0 else K
+            k = whole(max(1, int(TARGET * 1.2 / per) + 1) if per > 0 else K, K)
             t = run(k)
         while t < TARGET and k < 1 << 24:
-            k = (
+            k = whole(
                 k * 2
                 if t <= 0
-                else max(k * 2, min(k * 16, int(k * TARGET * 1.2 / t) + 1))
+                else max(k * 2, min(k * 16, int(k * TARGET * 1.2 / t) + 1)),
+                K,
             )
             t = run(k)
         count = 5 if t / k <= 2.0 else 3

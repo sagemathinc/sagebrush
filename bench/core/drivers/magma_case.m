@@ -342,8 +342,15 @@ function Granularity()
     return d gt 0 select d else 1.0;
 end function;
 
+// (common.py's offset and whole: the same schedule, so no variant runs
+// twice in a row)
 function Offset(seed, j, k)
-    return (seed*1000003 + j*7919) mod k;
+    if k eq 1 then return 0; end if;
+    return ((seed*1000003) mod (k - 1) + j*(k gt 2 select 1 else 0)) mod k;
+end function;
+
+function Whole(r, k)
+    return ((r + k - 1) div k) * k;
 end function;
 
 if mode eq "inputs" then
@@ -372,14 +379,15 @@ elif mode in {"time", "time-fresh"} then
     end for;
     idx := 0; el := 0.0;
     per := warm/K;
+    // (whole rotations throughout, as common.py's calibrate)
     if per ge 0.2 then
-        k := 1; el := per;
+        k := K; el := warm;
     else
-        k := per gt 0 select Max(1, Floor(0.24/per)+1) else K;
+        k := Whole(per gt 0 select Max(1, Floor(0.24/per)+1) else K, K);
         RunK(case_id, n, Ss, k, fresh, ~idx, ~el);
     end if;
     while el lt 0.2 and k lt 2^24 do
-        if el le 0 then k := 2*k; else k := Max(2*k, Min(16*k, Floor(k*0.24/el)+1)); end if;
+        if el le 0 then k := 2*k; else k := Whole(Max(2*k, Min(16*k, Floor(k*0.24/el)+1)), K); end if;
         RunK(case_id, n, Ss, k, fresh, ~idx, ~el);
     end while;
     count := el/k le 2.0 select 5 else 3;

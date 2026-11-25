@@ -28,9 +28,12 @@ row's reference input, the old scoreboard's):
     least the threshold: R full rotations, each operation timed alone, in
     rotation order from a seeded offset, so samples[v] holds variant v's R
     times, never back to back;
-  - batched mode, below it: the rotation batches above, batch j starting at
-    the seeded offset o_j (the same for every candidate's batch j), with
-    each batch's seconds per operation.
+  - batched mode, below it: the rotation batches above, each a whole
+    number of rotations, batch j starting at the seeded offset o_j (the
+    same for every candidate's batch j), with each batch's seconds per
+    operation;
+  - offset() makes the schedule: no variant runs twice in a row, across
+    the warm pass, the calibration and the rotations or batches.
   The seed is BENCH_SEED (0 when unset).  BENCH_TIMING=per-op|batched
   forces a mode (tests).
   With BENCH_VTIME=1 (the calibrated targets only), the record also has
@@ -97,15 +100,17 @@ def calibrate(rot, warm):
     """The repetitions per sample: until one sample takes at least TARGET
     seconds; `warm` is the untimed first pass's total over the K variants."""
     per = warm / rot.k
+    # (whole rotations throughout: every run starts where the last ended,
+    # on variant 0, so no variant runs twice in a row)
     if per >= TARGET:
-        return 1, per
-    k = max(1, min(MAX_REPS, int(TARGET * 1.2 / per) + 1 if per > 0 else rot.k))
+        return rot.k, warm
+    k = whole(max(1, min(MAX_REPS, int(TARGET * 1.2 / per) + 1 if per > 0 else rot.k)), rot.k)
     elapsed = rot.run(k)
     while elapsed < TARGET and k < MAX_REPS:
         if elapsed <= 0:
             k *= 2
         else:
-            k = max(k * 2, min(k * 16, int(k * TARGET * 1.2 / elapsed) + 1))
+            k = whole(max(k * 2, min(k * 16, int(k * TARGET * 1.2 / elapsed) + 1)), rot.k)
         elapsed = rot.run(k)
     return k, elapsed
 
@@ -128,8 +133,20 @@ def granularity(tries=2000):
 
 def offset(seed, j, k):
     """Batch or rotation j's starting variant (the same for every candidate
-    of a sweep: a function of the seed, j and K only)."""
-    return (seed * 1000003 + j * 7919) % k
+    of a sweep: a function of the seed, j and K only).  No variant runs twice
+    in a row: rotation 0 never starts on K - 1 (the warm pass's and every
+    whole-rotation calibration's last), and each next rotation starts one
+    later (K > 2), or at the same place (K = 2), never on the variant the
+    previous one ended on."""
+    if k == 1:
+        return 0
+    return ((seed * 1000003) % (k - 1) + j * (1 if k > 2 else 0)) % k
+
+
+def whole(reps, k):
+    """reps rounded up to whole rotations (a multiple of K), so a batch
+    ends on the variant before its start."""
+    return -(-reps // k) * k
 
 
 def per_op(prepare, k, fresh, ops, rotations, seed):

@@ -63,8 +63,11 @@ EXPECTED = None
 FLAGS = re.compile(r"^(avx|avx2|avx512\w*|fma|bmi2|adx|sse4_2|asimd|sve\w*|neon)$")
 LINE = re.compile(r"^(RESULT|TIME|INPUTS)\|(.*)$", re.MULTILINE)
 # (protocol 5: a time mode's samples, JSON, before its TIME line)
+# The meter's families (cost::Family): a units line with another count is
+# refused as such, not as a bad sum
+FAMILIES = 10
 UNITS_LINE = re.compile(
-    r"^UNITS\|(\d{1,6})\|(\d{1,20}(?:,\d{1,20}){9})\|(\d{1,20})$", re.MULTILINE
+    r"^UNITS\|(\d{1,6})\|(\d{1,20}(?:,\d{1,20}){0,63})\|(\d{1,20})$", re.MULTILINE
 )
 UNITS_NONE = re.compile(r"^UNITS\|unmetered$", re.MULTILINE)
 TIMING_LINE = re.compile(r"^TIMING\|(\{.*\})$", re.MULTILINE)
@@ -1135,22 +1138,31 @@ def invoke(
     return r
 
 
-def parse_units(text: str, k: int) -> list | str | None:
-    """A units run's report: "unmetered", or one {v, families, used} per
-    variant, in order, each family vector summing to used; None when
-    malformed."""
+def units_report(text: str, k: int) -> tuple[list | str | None, str]:
+    """A units run's report: ("unmetered", ""), or one {v, families, used}
+    per variant, in order, each with FAMILIES families summing to used; or
+    (None, why) when malformed."""
     if UNITS_NONE.search(text) and not UNITS_LINE.search(text):
-        return "unmetered"
+        return "unmetered", ""
     found = UNITS_LINE.findall(text)
     if len(found) != k:
-        return None
+        return None, f"units malformed ({len(found)} lines for {k} variants)"
     out = []
     for i, (v, fams, used) in enumerate(found):
         f = [int(x) for x in fams.split(",")]
-        if int(v) != i or sum(f) != int(used):
-            return None
+        if int(v) != i:
+            return None, f"units malformed (variant {v} where {i} was due)"
+        if len(f) != FAMILIES:
+            return None, f"units malformed ({len(f)} families, not {FAMILIES}: cost::Family changed?)"
+        if sum(f) != int(used):
+            return None, "units malformed (families must sum to the total)"
         out.append({"v": i, "families": f, "used": int(used)})
-    return out
+    return out, ""
+
+
+def parse_units(text: str, k: int) -> list | str | None:
+    """units_report's result alone (None when malformed)."""
+    return units_report(text, k)[0]
 
 
 def units(row: dict, n: int, timeout: float, k: int) -> tuple[list | str | None, str]:
@@ -1166,9 +1178,9 @@ def units(row: dict, n: int, timeout: float, k: int) -> tuple[list | str | None,
         r = run_child(cmd, timeout, threads, CAP)
         if r["status"] != "ok":
             return None, f"units run {r['status']}"
-        got = parse_units(r.get("output", ""), k)
+        got, why = units_report(r.get("output", ""), k)
         if got is None:
-            return None, "units malformed (families must sum to the total)"
+            return None, why
         runs.append(got)
     if runs[0] != runs[1]:
         return None, "units differ between two 1-thread runs"
