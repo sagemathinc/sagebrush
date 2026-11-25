@@ -412,6 +412,18 @@ const HOLD_MS = 5_000;
 export const BRANCH_HOOK: { inRoot?: () => void; inPublish?: () => void; atCheck?: (where: "root" | "root-late" | "copy" | "copy-late" | "folder-late" | "publish") => void; afterRead?: (path: string) => Promise<void> } = {};
 const sameSource = (e: Entry, s: BranchSource) =>
   e.kind === s.kind && e.created === s.created && e.fid === s.fid && (e.kind === "file" || e.kind === "folder" || e.ref === s.ref) && (e.kind !== "file" || (e.sha256 === s.sha256 && e.size === s.size));
+/** Whether `p` is a branch's root's place, `/Branches/<name>`. */
+const atBranchRoot = (p: string) => within(p, BRANCHES) && p !== BRANCHES && !p.slice(BRANCHES.length + 1).includes("/");
+/** Every record of the branch whose root folder is `fid`, deleted in `tx` (which has "meta"): its record, review
+ * state, runs and hash pages, as reconcileBranches deletes them.  Done in the transaction that puts the root in Trash,
+ * so nothing of the branch outlives its removal: a folder restored from Trash afterwards is a plain folder. */
+function dropBranch(tx: IDBTransaction, fid: string): void {
+  const st = tx.objectStore("meta");
+  st.delete(BRANCH_KEY + fid);
+  st.delete(BRANCH_REVIEW_KEY + fid);
+  st.delete(BRANCH_RUNS_KEY + fid);
+  st.delete(IDBKeyRange.bound(`${BRANCH_HASH_KEY}${fid}:`, `${BRANCH_HASH_KEY}${fid}:\uffff`));
+}
 async function branchRecordsIn(tx: IDBTransaction): Promise<Map<string, BranchRecord>> {
   const st = tx.objectStore("meta"), range = IDBKeyRange.bound(BRANCH_KEY, BRANCH_KEY + "\uffff");
   const [keys, values] = await Promise.all([req(st.getAllKeys(range)), req(st.getAll(range))]);
@@ -4087,7 +4099,9 @@ export class Workspace {
     if (stuck) throw new WorkspaceError("limit", tooLarge(stuck));
     await passGate(gate, "publishing:small");
     const ops: Op[] = [];
-    const moved = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
+    // (a branch's root put in Trash: the branch's records go in the same transaction)
+    const branch = op === "remove" && atBranchRoot(a);
+    const moved = await inTx(this.ws, withSync("entries", "ops", ...(branch ? ["meta"] : [])), "readwrite", async (tx) => {
       await fenceCheck(tx, [a, b]);
       const st = tx.objectStore("entries");
       if ((await req(st.getKey(b))) !== undefined || (await req(st.count(subtree(b)))) > 0) throw new WorkspaceError("exists", `${b} is there already`);
@@ -4112,6 +4126,7 @@ export class Workspace {
         out.push(n);
       }
       await this.log(tx, ops, { op, path: a, to: b, kind: old[0].kind }, out[0]);
+      if (branch && old[0].kind === "folder" && old[0].fid) dropBranch(tx, old[0].fid);
       return out;
     });
     this.tell({ ops });
@@ -4192,7 +4207,9 @@ export class Workspace {
       await passGate(gate, "publishing:large");
       // (the publication: the top moved, its op logged, the record published, one transaction (r4 §1))
       const ops: Op[] = [];
-      const moved = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
+      // (a branch's root put in Trash: the branch's records go in the same transaction)
+      const branch = op === "remove" && atBranchRoot(a);
+      const moved = await inTx(this.ws, withSync("entries", "ops", ...(branch ? ["meta"] : [])), "readwrite", async (tx) => {
         FENCE_READ.add(tx);
         const st = tx.objectStore("entries"), rec = (await req(st.get(RW))) as ERecord | undefined;
         if (!rec || rec.rid !== rid || rec.published) throw new WorkspaceError("conflict", `the move of ${a} was taken over`);
@@ -4209,6 +4226,7 @@ export class Workspace {
         st.put({ ...rec, published: true, rev: rec.rev + 1 } satisfies ERecord);
         dropView(tx);
         await this.log(tx, ops, { op, path: a, to: b, kind: top.kind }, n);
+        if (branch && top.kind === "folder" && top.fid) dropBranch(tx, top.fid);
         return n;
       });
       this.tell({ ops });
