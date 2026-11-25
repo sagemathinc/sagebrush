@@ -39,6 +39,8 @@ export const TEXT_SYMBOLS = {
   slash: "/", nobreakspace: " ", textnbsp: " ", enspace: " ", quad: " ", qquad: "  ", thinspace: " ", ",": " ",
   ";": " ", ":": " ", ">": " ", "!": "", negthinspace: "", enskip: " ", dotfill: " … ", hfill: " ", hfil: " ", hss: "",
   textbackslash: "\\", backslash: "\\",
+  // (thebibliography's \newblock, between an entry's parts: a space a little stretchier than a word's)
+  newblock: " ",
 };
 
 // accents (text mode): \' \` \^ \" \~ \= \. \u \v \H \c \d \b \r \t \k -> combining marks
