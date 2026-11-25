@@ -366,6 +366,20 @@ class Renderer {
     return s;
   }
   math(src, display) {
+    // (amsthm's \qedhere: in a proof, the end-of-proof symbol here, and not again at the proof's end. In a display, KaTeX's
+    //  \tag* where it stands, so the symbol is at the right of the very row it is in (an align*'s first, or last, as
+    //  amsthm places it); in a display already numbered or tagged, which can't take a second tag, the symbol stays at the
+    //  proof's end and check says so. After a formula in the text: after it. Outside a proof: nothing. KaTeX never sees
+    //  \qedhere itself)
+    let after = "";
+    if (src.includes("qedhere") && /\\qedhere(?![A-Za-z@])/.test(src)) {
+      const re = /\\qedhere(?![A-Za-z@])/g;
+      if (!this.qed || this.qed.here) src = src.replace(re, "");
+      else if (!display) { src = src.replace(re, ""); this.qed.here = true; after = '<span class="qed">∎</span>'; }
+      else if (/\\(tag|notag|nonumber)(?![A-Za-z@])/.test(src)) { src = src.replace(re, ""); this.problem("not-rendered", "\\qedhere in a numbered display (the end-of-proof symbol is at the proof's end)"); }
+      else { let first = true; src = src.replace(re, () => (first ? ((first = false), "\\tag*{$\\blacksquare$}") : "")); this.qed.here = true; }
+    }
+    if (after) return this.math(src, display) + after;
     const h = texMath(src, display, this.macros, this.macroSig, this.stats);
     if (h.includes("katex-error")) this.problem("math", String(src).slice(0, 120));
     // (a region holding a stale \sage value: the whole of it marked stale, as one value can't be marked inside KaTeX)
@@ -604,9 +618,11 @@ class Renderer {
         const [o, j] = this.opt(kids, -1); if (o) { head = this.inline(o, ctx); kids = kids.slice(j + 1); }
         const b = flow.open("div", ' class="proof"');
         flow.html('<span class="proofhead">' + head + ".</span> ", c2.st);
-        this.walk(kids, c2, flow);
-        flow.ensure(c2.st);
-        flow.html('<span class="qed">∎</span>', c2.st);
+        // (\qedhere inside puts the symbol where it is, and then it isn't put at the end too: math(), qedhere)
+        const outer = this.qed; this.qed = { here: false };
+        let here = false;
+        try { this.walk(kids, c2, flow); } finally { here = this.qed.here; this.qed = outer; }
+        if (!here) { flow.ensure(c2.st); flow.html('<span class="qed">∎</span>', c2.st); }
         flow.close(b); return;
       }
       case "multicols": case "multicols*": {
@@ -1216,6 +1232,9 @@ const CMDS = {
   //  line where it does. \newpage, \clearpage: the paragraph ends, then the page. \pagebreak in a paragraph: the page
   //  breaks after it, the paragraph kept whole (TeX: after its line); [n] below 4 is only a hint: nothing. Within an
   //  inline flow (a box): nothing. A beamer frame's: none (style.ts))
+  // (amsthm's \qedhere in a proof's text or list: the end-of-proof symbol here, not again at the proof's end; outside a
+  //  proof, nothing. In math: math())
+  qedhere: function (nodes, i, ctx, flow) { if (this.qed && !this.qed.here) { this.qed.here = true; flow.html('<span class="qed">∎</span>', ctx.st); } return i; },
   newpage: function (nodes, i, ctx, flow) { if (!flow.inline) flow.pageBreak(); return i; },
   clearpage: function (nodes, i, ctx, flow) { if (!flow.inline) flow.pageBreak(); return i; },
   cleardoublepage: function (nodes, i, ctx, flow) { if (!flow.inline) flow.pageBreak(); return i; },

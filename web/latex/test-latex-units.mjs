@@ -1164,6 +1164,37 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
   check("sagetex-source-args-comment-and-macro-keep-the-subset", pct[0].err === "par" && pct[1].code === "1" && eq(mac, [{ mode: "sage", err: "cs", name: "foo" }]), { pct, mac });
 }
 
+// ---- amsthm's \qedhere (issue 1800): in a proof, the end-of-proof symbol where it is, and not again at the proof's end:
+// in a display, KaTeX's tag on the very row it is in (an align*'s first row, or its last, as amsthm places it); in a
+// list item or the text, there; never sent to KaTeX (no math problem); a numbered display can't take it (said, the
+// symbol at the proof's end); outside a proof, nothing. A proof without it: the symbol at its end, as before
+{
+  const doc = (body) => "\\documentclass{article}\n\\usepackage{amsthm}\n\\begin{document}\n" + body + "\n\\end{document}\n";
+  const run = (body) => { const r = new Engine().update(doc(body)); return { h: r.chunks.join(""), problems: r.problems || [] }; };
+  // (KaTeX's visible HTML only: its MathML, for screen readers, holds the symbol again)
+  const seen = (h) => h.replace(/<span class="katex-mathml">[\s\S]*?<\/math><\/span>/g, "");
+  const qeds = (h) => (h.match(/class="qed"/g) || []).length, tags = (h) => (seen(h).match(/\u25a0/g) || []).length;
+  // (the tag's row: the vertical offset KaTeX gives the tag column's entry holding the symbol)
+  const rowTop = (h0) => { const h = seen(h0), i = h.indexOf("\u25a0"); const t = [...h.slice(Math.max(0, i - 400), i).matchAll(/top:(-?[\d.]+)em/g)]; return t.length ? +t[t.length - 1][1] : null; };
+  const noMath = (r) => !r.problems.some((p) => p.kind === "math" || p.kind === "command") && !/katex-error|qedhere/.test(r.h);
+  const disp = run("\\begin{proof}\nIt follows that\n\\[ a = b. \\qedhere \\]\n\\end{proof}");
+  check("qedhere-display", tags(disp.h) === 1 && qeds(disp.h) === 0 && /<div class="dmath">[\s\S]*\u25a0/.test(disp.h) && noMath(disp), { tags: tags(disp.h), qeds: qeds(disp.h), problems: disp.problems });
+  const rows = (k) => run("\\begin{proof}\n\\begin{align*} a&=b" + (k === 0 ? " \\qedhere" : "") + " \\\\ c&=d \\\\ e&=f" + (k === 2 ? " \\qedhere" : "") + " \\end{align*}\n\\end{proof}");
+  const r0 = rows(0), r2 = rows(2);
+  check("qedhere-align-its-own-row", tags(r0.h) === 1 && tags(r2.h) === 1 && qeds(r0.h) + qeds(r2.h) === 0 && rowTop(r0.h) !== null && rowTop(r2.h) !== null && rowTop(r0.h) < rowTop(r2.h) - 1 && noMath(r0) && noMath(r2), { first: rowTop(r0.h), last: rowTop(r2.h) });
+  const num = run("\\begin{proof}\n\\begin{align} a&=b \\\\ c&=d \\qedhere \\end{align}\n\\end{proof}");
+  check("qedhere-numbered-display-said", tags(num.h) === 0 && qeds(num.h) === 1 && num.problems.some((p) => p.kind === "not-rendered" && /qedhere in a numbered display/.test(p.name)) && !/katex-error|qedhere/.test(num.h), { problems: num.problems });
+  const list = run("\\begin{proof}\n\\begin{enumerate}\n\\item one\n\\item two \\qedhere\n\\end{enumerate}\n\\end{proof}");
+  const li = list.h.lastIndexOf("<li"), q = list.h.indexOf('class="qed"');
+  check("qedhere-list", qeds(list.h) === 1 && q > li && q < list.h.lastIndexOf("</li>") + 5 && !list.problems.some((p) => p.kind === "command"), { qeds: qeds(list.h), problems: list.problems });
+  const plain = run("\\begin{proof}\nTrivial.\n\\end{proof}");
+  check("qedhere-none-symbol-at-end", qeds(plain.h) === 1 && /Trivial\.[\s\S]*class="qed"/.test(plain.h), qeds(plain.h));
+  const outside = run("Not a proof \\qedhere.\n\\[ x \\qedhere \\]");
+  check("qedhere-outside-a-proof-nothing", qeds(outside.h) + tags(outside.h) === 0 && noMath(outside), { problems: outside.problems });
+  const two = run("\\begin{proof}\n\\[ a \\qedhere \\]\n\\end{proof}\n\\begin{proof}\nAgain.\n\\end{proof}");
+  check("qedhere-each-proof-its-own", tags(two.h) === 1 && qeds(two.h) === 1, { tags: tags(two.h), qeds: qeds(two.h) });
+}
+
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);
 console.log(failed.length ? `FAIL: ${failed.length} of ${results.length}: ${failed.join(", ")}` : `ok: the LaTeX editor's units, ${results.length} checks`);
 process.exit(failed.length ? 1 : 0);
