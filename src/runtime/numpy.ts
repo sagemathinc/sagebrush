@@ -1046,8 +1046,14 @@ function intNum(x: any): number {
 
 function resolveIndex(a: NDArray, key: any): IndexResult {
   let items: any[] = Array.isArray(key) && (key as any).$t ? key.slice() : [key];
-  // Ellipsis expands to the axes the other entries do not consume
-  const consumes = (k: any) => (k === null || k === Obj.Ellipsis ? 0 : k instanceof NDArray && k.dt.kind === "b" ? Math.max(k.ndim, 1) : 1);
+  // (a scalar bool, Python's or NumPy's, is a 0-d boolean index, as NumPy's)
+  items = items.map((k) => {
+    const b = typeof k === "boolean" ? k : k instanceof Obj.PrimBox && typeDtypes.get(Obj.typeOf(k)) === D.bool ? !!Obj.unbox(k) : undefined;
+    return b === undefined ? k : fromPy(b);
+  });
+  // Ellipsis expands to the axes the other entries do not consume (a boolean index takes its own dimensions, a 0-d
+  // one none)
+  const consumes = (k: any) => (k === null || k === Obj.Ellipsis ? 0 : k instanceof NDArray && k.dt.kind === "b" ? k.ndim : 1);
   const used = items.reduce((s, k) => s + consumes(k), 0);
   const ei = items.indexOf(Obj.Ellipsis);
   if (ei >= 0) {
@@ -1058,8 +1064,13 @@ function resolveIndex(a: NDArray, key: any): IndexResult {
     raise(T.IndexError, `too many indices for array: array is ${a.ndim}-dimensional, but ${items.reduce((s, k) => s + consumes(k), 0)} were indexed`);
   }
   // advanced indices: arrays and lists of ints or bools
-  items = items.map((k) => (Array.isArray(k) && !(k as any).$t ? fromPy(k) : k));
-  items = items.map((k) => (Array.isArray(k) && (k as any).$t ? fromPy(k) : k));
+  // (an empty list is an empty integer index, as NumPy's)
+  const listIndex = (k: any) => {
+    const r = fromPy(k);
+    return r.size === 0 && r.dt.kind === "f" ? empty(r.shape, D.int64) : r;
+  };
+  items = items.map((k) => (Array.isArray(k) && !(k as any).$t ? listIndex(k) : k));
+  items = items.map((k) => (Array.isArray(k) && (k as any).$t ? listIndex(k) : k));
   const hasAdv = items.some((k) => k instanceof NDArray);
   // (the result's dimensions, counted as NumPy counts them before indexing: the array's, less those an integer or
   // an index array takes, plus each newaxis, plus the index arrays' broadcast rank (a boolean one's nonzero is 1-d))
@@ -1094,7 +1105,7 @@ function resolveIndex(a: NDArray, key: any): IndexResult {
   // Advanced indexing: integer scalars count as advanced too.  The
   // broadcast index shape goes where the advanced indices are, if they are
   // next to each other, else first.
-  type Ent = { axis: number; kind: "slice" | "adv" | "new"; n?: number; stride?: number; start?: number; step?: number; idx?: NDArray };
+  type Ent = { axis: number; kind: "slice" | "adv" | "new"; n?: number; stride?: number; start?: number; step?: number; idx?: NDArray; fake?: boolean; scalar?: boolean };
   const ents: Ent[] = [];
   let d = 0;
   for (const k of items) {
@@ -1103,6 +1114,9 @@ function resolveIndex(a: NDArray, key: any): IndexResult {
       const [start, step, n] = O.sliceIndices(k, a.shape[d]);
       ents.push({ axis: d, kind: "slice", n, start, step });
       d++;
+    } else if (k instanceof NDArray && k.dt.kind === "b" && k.ndim === 0) {
+      // a 0-d boolean index: a new axis of length 1, indexed by [0] when true and by [] when false
+      ents.push({ axis: -1, kind: "adv", fake: true, idx: k.data[k.offset] ? fromPy([0]) : empty([0], D.int64) });
     } else if (k instanceof NDArray && k.dt.kind === "b") {
       // a boolean mask over k.ndim axes: its nonzero() positions
       for (let j = 0; j < k.ndim; j++) if (k.shape[j] !== a.shape[d + j]) raise(T.IndexError, `boolean index did not match indexed array along axis ${d + j}; size of axis is ${a.shape[d + j]} but size of corresponding boolean axis is ${k.shape[j]}`);
@@ -1114,13 +1128,19 @@ function resolveIndex(a: NDArray, key: any): IndexResult {
       ents.push({ axis: d, kind: "adv", idx: k });
       d++;
     } else {
-      ents.push({ axis: d, kind: "adv", idx: fromPy(intIndex(k, a.shape[d], d)) });
+      ents.push({ axis: d, kind: "adv", idx: fromPy(intIndex(k, a.shape[d], d)), scalar: true });
       d++;
     }
   }
   for (; d < a.ndim; d++) ents.push({ axis: d, kind: "slice", n: a.shape[d], start: 0, step: 1 });
   const adv = ents.filter((e) => e.kind === "adv");
-  const bshape = broadcastShapes(...adv.map((e) => e.idx!.shape));
+  const ishapes = adv.map((e) => e.idx!.shape);
+  if (!ishapes.every((s) => s.every((n, d) => n === 1 || ishapes.every((t) => { const m = t[t.length - s.length + d]; return m === undefined || m === 1 || m === n; })))) {
+    // (the message names the index arrays, not the integers)
+    const named = adv.filter((e) => !e.scalar).map((e) => shapeStr(e.idx!.shape));
+    raise(T.IndexError, `shape mismatch: indexing arrays could not be broadcast together with shapes ${named.join(" ")} `);
+  }
+  const bshape = broadcastShapes(...ishapes);
   const bsize = prod(bshape);
   // (the index arrays, the output's offsets (a JS array) and the output
   // itself, admitted together first; LIMIT-PR55-3)
@@ -1129,12 +1149,12 @@ function resolveIndex(a: NDArray, key: any): IndexResult {
   const idxs = adv.map((e) => {
     const s = bstrides(e.idx!, bshape);
     const out = new Array(bsize);
-    const n = a.shape[e.axis];
+    const n = e.fake ? 1 : a.shape[e.axis], st = e.fake ? 0 : a.strides[e.axis];
     loop1(bshape, s, e.idx!.offset, (p, k) => {
       let v = e.idx!.data[p];
       if (v < 0) v += n;
       if (v < 0 || v >= n) raise(T.IndexError, `index ${e.idx!.data[p]} is out of bounds for axis ${e.axis} with size ${n}`);
-      out[k] = v * a.strides[e.axis];
+      out[k] = v * st;
     });
     return out;
   });
