@@ -1150,17 +1150,23 @@ def invoke(
             r["timing"] = timing
             if "vtime" in timing:
                 r["vtime"] = timing["vtime"]
-        if mode == "time-stream" and not (
-            timing is not None and timing.get("mode") == "stream" and timing.get("k") == want_k
-        ):
-            # (a stream run is only its per-input record: without a valid
-            # one of exactly K inputs it is an error, and its aggregate TIME
-            # numbers are dropped, so nothing falls back to them)
-            got = "none" if timing is None else "mode %s, K %s" % (timing.get("mode"), timing.get("k"))
-            for x in ("seconds", "min", "max", "reps", "samples", "timing", "vtime"):
-                r.pop(x, None)
-            r["status"] = "error"
-            r["detail"] = f"time-stream needs a stream TIMING record of K = {want_k} (got {got})"
+    # (after every kind: a timing run's answer is a TIME line, whatever
+    # other line a driver printed last; and a stream run is only its
+    # per-input record, a valid stream TIMING record of exactly K inputs.
+    # Anything else is an error, with the fields of the wrong answer
+    # dropped, so nothing falls back to them)
+    why = None
+    if mode in ("time", "time-fresh", "time-stream") and kind != "TIME":
+        why = f"{mode} needs a TIME line (got {kind})"
+    elif mode == "time-stream":
+        tm = r.get("timing")
+        if not (tm is not None and tm.get("mode") == "stream" and tm.get("k") == want_k):
+            got = "none" if tm is None else "mode %s, K %s" % (tm.get("mode"), tm.get("k"))
+            why = f"time-stream needs a stream TIMING record of K = {want_k} (got {got})"
+    if why:
+        for x in ("seconds", "min", "max", "reps", "samples", "timing", "vtime", "signature", "seconds_cold", "input_hash"):
+            r.pop(x, None)
+        r["status"], r["detail"] = "error", why
     return r
 
 

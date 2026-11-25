@@ -1815,6 +1815,47 @@ class Stream(unittest.TestCase):
         r = self.invoke_with(['TIMING|{%s,"k":5,"mode":"stream","samples":%s}' % (self.HEAD, five), self.TIME])
         self.assertEqual((r["status"], r["timing"]["mode"], r["seconds"]), ("ok", "stream", 0.2))
 
+    def test_invoke_refuses_another_kind_of_answer(self):
+        # (a timing run answered by another recognized line, or none: an
+        # error, the wrong answer's fields dropped)
+        for lines in (["RESULT|1|s"], ["INPUTS|5"], ["no protocol line"]):
+            with self.subTest(lines[0]):
+                r = self.invoke_with(lines)
+                self.assertEqual(r["status"], "error")
+                self.assertFalse({"signature", "input_hash", "seconds_cold", "seconds"} & set(r), r)
+        # (the same for a plain timing run: its answer must be a TIME line)
+        cmd = [PY, "-c", "print('INPUTS|5')"]
+        with (
+            mock.patch.object(run, "command", lambda b, row, n, mode, kk=1: cmd),
+            mock.patch.object(run, "CAP", None),
+        ):
+            r = run.invoke("user", ROW, 10, "time", 30, 1)
+        self.assertEqual((r["status"], "input_hash" in r), ("error", False))
+        self.assertIn("needs a TIME line", r["detail"])
+
+    def test_point_is_an_error_when_a_stream_run_answers_with_another_kind(self):
+        # (the real invoke and point: a stand-in driver answering each mode,
+        # its time-stream run with a RESULT or an INPUTS line)
+        for wrong in ("RESULT|1|s", "INPUTS|5"):
+            with self.subTest(wrong):
+                d = Path(tempfile.mkdtemp(prefix="stream-kind-"))
+                self.addCleanup(shutil.rmtree, d, True)
+                drv = d / "drv.py"
+                drv.write_text(
+                    "import sys\n"
+                    "mode = sys.argv[1]\n"
+                    "print({'inputs': 'INPUTS|5', 'once': 'RESULT|0.1|s'}.get(mode, %r))\n" % wrong
+                )
+                row = dict(ROW, stream=True, fresh=True, sizes={"s": {"n": 18, "variants": 5, "timeout": 30}})
+                with (
+                    mock.patch.object(run, "command", lambda b, row, n, mode, k=1: [PY, str(drv), mode]),
+                    mock.patch.object(run, "CAP", None),
+                ):
+                    rec = run.point(row, "s", ["user", "magma"], {"artifacts": ARTS})
+                self.assertEqual(rec["status"], "error")
+                self.assertEqual(sorted(rec["stream_error"]), ["magma", "user"])
+                self.assertFalse([x for x in rec if x.startswith("ratio_") or x.startswith("per_input_")], rec)
+
     def point_with(self, magma):
         # (point on fake drivers: the user run a valid stream, the
         # reference's as given)
