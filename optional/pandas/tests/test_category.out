@@ -599,3 +599,51 @@ False
 (False, ['a', 'b'], [1, 0])
 == keep-ordered-categories-ab-ordered-true
 (True, ['a', 'b'], [1, 0])
+== frame-dict-categorical
+
+   c
+0  u
+1  v
+2  u
+== frame-dict-categorical-dtype
+('category', Index(['v', 'u', 'w'], dtype='str'))
+== frame-dict-categorical-index
+
+   c
+2  u
+0  v
+1  u
+== frame-dict-categorical-short
+!! ValueError: All arrays must be of the same length
+== frame-setitem-categorical
+
+   n  c
+0  1  u
+1  2  v
+2  3  u
+== frame-setitem-categorical-dtype
+Index(['v', 'u', 'w'], dtype='str')
+== frame-setitem-categorical-short
+!! ValueError: Length of values (3) does not match length of index (2)
+== frame-loc-set-categorical
+
+   n  c
+0  1  u
+1  2  v
+2  3  u
+== frame-records-categorical
+'object'
+== frame-dict-categorical-dtypes
+
+c    category
+n       int64
+dtype: object
+== series-key-category-series
+
+v    2
+u    1
+dtype: int64
+== frame-key-category-series
+
+   v  u
+0  2  1

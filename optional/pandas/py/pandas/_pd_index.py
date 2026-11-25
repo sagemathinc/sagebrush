@@ -37,6 +37,9 @@ class Index(object):
             col = data.copy()
         else:
             col = column_from([] if data is None else data, dtype)
+        from ._pd_category import CatColumn, refuse
+        if isinstance(col, CatColumn):
+            raise refuse("an Index of category dtype (CategoricalIndex)")
         self._pd_col = col
         self._pd_name = name
         self._pd_map = None

@@ -152,3 +152,17 @@ src_o = pd.Categorical(["b", "a"], categories=["b", "a", "c"], ordered=True)
 for cats in [["a", "b", "c"], ["b", "a", "c"], ["a", "b"]]:
     for kw_name, kw in [("none", {}), ("string", {"dtype": "category"}), ("ordered-false", {"ordered": False}), ("ordered-true", {"ordered": True})]:
         case("keep-ordered-categories-%s-%s" % ("".join(cats), kw_name), lambda cats=cats, kw=kw: (lambda r: (r.ordered, r.categories.tolist(), r.codes.tolist()))(pd.Categorical(src_o, categories=cats, **kw)))
+# a Categorical is a column of values, not one value per cell
+fc = pd.Categorical(["u", "v", "u"], categories=["v", "u", "w"])
+case("frame-dict-categorical", lambda: pd.DataFrame({"c": fc}))
+case("frame-dict-categorical-dtype", lambda: (str(pd.DataFrame({"n": [1, 2, 3], "c": fc})["c"].dtype), pd.DataFrame({"n": [1, 2, 3], "c": fc})["c"].cat.categories))
+case("frame-dict-categorical-index", lambda: pd.DataFrame({"c": fc}, index=[2, 0, 1]))
+case("frame-dict-categorical-short", lambda: pd.DataFrame({"n": [1, 2], "c": fc}))
+case("frame-setitem-categorical", lambda: (lambda d: (d.__setitem__("c", fc), d)[1])(pd.DataFrame({"n": [1, 2, 3]})))
+case("frame-setitem-categorical-dtype", lambda: (lambda d: (d.__setitem__("c", fc), d["c"].cat.categories)[1])(pd.DataFrame({"n": [1, 2, 3]})))
+case("frame-setitem-categorical-short", lambda: (lambda d: (d.__setitem__("c", fc), d)[1])(pd.DataFrame({"n": [1, 2]})))
+case("frame-loc-set-categorical", lambda: (lambda d: (d.loc.__setitem__((slice(None), "c"), fc), d)[1])(pd.DataFrame({"n": [1, 2, 3]})))
+case("frame-records-categorical", lambda: str(pd.DataFrame([{"c": fc}])["c"].dtype))
+case("frame-dict-categorical-dtypes", lambda: pd.DataFrame({"c": fc, "n": [1, 2, 3]}).dtypes)
+case("series-key-category-series", lambda: pd.Series([1, 2], index=["u", "v"])[pd.Series(pd.Categorical(["v", "u"]))])
+case("frame-key-category-series", lambda: pd.DataFrame({"u": [1], "v": [2]})[pd.Series(pd.Categorical(["v", "u"]))])

@@ -755,6 +755,9 @@ class Series(object):
         self._pd_set_positions(positions, value)
 
     def _pd_enlarge(self, label, value):
+        from . import _pd_category as CT
+        if isinstance(value, CT.Categorical):
+            raise CT.refuse("setting values from a Categorical")
         if not _is_scalar(value):
             raise ValueError("setting an array element with a sequence.")
         # (a new label: appended, the dtype kept where the value fits)
@@ -1189,10 +1192,13 @@ def _stacked(cols, dtype):
 
 def _broadcast(value, n):
     from ._pd_frame import DataFrame
+    from . import _pd_category as CT
     if isinstance(value, DataFrame):
         raise _unsupported("setting a Series from a DataFrame")
     if isinstance(value, Series):
         vals = value.tolist()
+    elif isinstance(value, CT.Categorical):
+        raise CT.refuse("setting values from a Categorical")
     elif isinstance(value, np.ndarray):
         vals = value.tolist()
     elif isinstance(value, (list, tuple, range)):

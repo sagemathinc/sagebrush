@@ -407,6 +407,26 @@
       "reason": "a datetime column as a category (Timestamp categories) isn't in the subset; it raises before any work"
     },
     {
+      "case": "category.key",
+      "message": "pandas: indexing with a Categorical is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas labels what a Categorical key selects with a CategoricalIndex, which isn't in the subset; it raises before any work (a Series of category dtype as the key works, with a plain Index)"
+    },
+    {
+      "case": "category.set-values",
+      "message": "pandas: setting values from a Categorical is not in Sagebrush's pandas 0.x subset",
+      "reason": "setting a Series' values (or enlarging it) from a Categorical isn't in the subset yet; it raises before any work (a DataFrame column set to a Categorical works, as a category column)"
+    },
+    {
+      "case": "category.index",
+      "message": "pandas: an Index of category dtype (CategoricalIndex) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a Categorical as an index or as columns is a CategoricalIndex, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "category.compare-categorical",
+      "message": "pandas.Series comparison with a Categorical is not in Sagebrush's pandas 0.x subset",
+      "reason": "comparing a Series with a Categorical isn't in the subset yet; it raises before any work (a category Series compared with a scalar or a list works)"
+    },
+    {
       "case": "get_dummies.sparse",
       "message": "pandas.get_dummies(sparse=True) is not in Sagebrush's pandas 0.x subset",
       "reason": "sparse=True gives SparseDtype columns, which aren't in the subset; it raises before any work"
