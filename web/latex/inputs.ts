@@ -15,7 +15,8 @@ export type Known = { text: string } | { why: string } | { absent: true };
 /** The engine's inputs, for the .tex at `docPath`, from what the host has read (`known`, by workspace path):
  * `files` (key -> text: the read ones), `resolve(name)` (the key, or why there is none) and `wanted(names)` (the
  * candidate paths the host should look at next: unknown ones for each name, in order, up to the first that might
- * be it). The .tex itself is the engine's main.tex. `relativeToFile`: the folders named from the file's (the CLI). */
+ * be it). The .tex itself is the engine's main.tex; `jobname` is its name, as TeX's \jobname. `relativeToFile`: the folders
+ * named from the file's (the CLI). */
 export function engineInputs(docPath: string, known: Map<string, Known>, relativeToFile = false) {
   const files = new Map<string, string>();
   for (const [p, k] of known) if ("text" in k && p !== docPath) files.set(p, k.text);
@@ -45,7 +46,10 @@ export function engineInputs(docPath: string, known: Map<string, Known>, relativ
     }
     return out;
   };
-  return { files, resolve, wanted };
+  // (TeX's \jobname: the .tex's name without its folder and ".tex", as \bibliography reads \jobname.bbl)
+  const base = docPath.slice(docPath.lastIndexOf("/") + 1);
+  const jobname = /\.tex$/i.test(base) ? base.slice(0, -4) : base;
+  return { files, resolve, wanted, jobname };
 }
 
 /** An included file's bytes as the engine's text, or why not, against what is already kept (`kept` bytes, `count`
