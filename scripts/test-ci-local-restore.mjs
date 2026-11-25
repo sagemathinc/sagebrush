@@ -1,5 +1,5 @@
 // ci: checks.6 order=31
-// scripts/ci-local.py's ownership of the four WebAssembly modules: its preflight refuses a rebuild over any module that
+// scripts/ci-local.py's ownership of the five WebAssembly modules: its preflight refuses a rebuild over any module that
 // isn't its pin, and at the end it restores the pins only when every changed module is still exactly its own build;
 // otherwise it restores nothing and reports.  The controls are Python (ci-local.py's own functions): this runs them.
 //   node scripts/test-ci-local-restore.mjs
