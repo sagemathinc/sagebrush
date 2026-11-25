@@ -65,9 +65,9 @@ function ZMat(k, v)
     return Matrix(Integers(), k, k, [ (PowMod(i+1+v,j+2,1000003)-500001) : i,j in [1..k] ]);
 end function;
 
-function FpMat(k, v)
-    F := GF(65537);
-    return Matrix(F, k, k, [ F!PowMod(i+1+v,j+2,65537) : i,j in [1..k] ]);
+function FpMat(k, v : p := 65537)
+    F := GF(p);
+    return Matrix(F, k, k, [ F!PowMod(i+1+v,j+2,p) : i,j in [1..k] ]);
 end function;
 
 function QMat(k, v)
@@ -197,9 +197,10 @@ function Build(case_id, n, v)
     elif case_id in {"mat_z_det","mat_z_rank","mat_z_hnf","mat_z_smith","mat_z_charpoly","mat_z_elementary_divisors","mat_z_smith_hard","mat_z_elementary_divisors_hard"} then
         A := case_id in {"mat_z_smith_hard","mat_z_elementary_divisors_hard"} select SmithHard(n,v) else ZMat(n,v);
         ops := Eltseq(A);
-    elif case_id in {"mat_fp_det","mat_fp_rank","mat_fp_solve","mat_fp_charpoly"} then
-        A:=FpMat(n,v); ops := Eltseq(A);
-        if case_id eq "mat_fp_solve" then w:=Vector(BaseRing(A),[i:i in [1..n]]); ops := ops cat Eltseq(w); end if;
+    elif case_id in {"mat_fp_det","mat_fp_rank","mat_fp_solve","mat_fp_charpoly","mat_fp31_det","mat_fp31_rank","mat_fp31_solve","mat_fp31_charpoly"} then
+        // (mat_fp31_*: the same rows modulo 2^31 - 1)
+        A:=FpMat(n,v : p := Substring(case_id, 1, 9) eq "mat_fp31_" select 2147483647 else 65537); ops := Eltseq(A);
+        if case_id in {"mat_fp_solve","mat_fp31_solve"} then w:=Vector(BaseRing(A),[i:i in [1..n]]); ops := ops cat Eltseq(w); end if;
     elif case_id in {"mat_q_det","mat_q_rank","mat_q_solve","mat_q_charpoly"} then
         A:=QMat(n,v); ops := Eltseq(A);
         if case_id eq "mat_q_solve" then w:=Vector(Rationals(),[i:i in [1..n]]); ops := ops cat Eltseq(w); end if;
@@ -230,13 +231,13 @@ function DoOp(case_id, S)
     elif case_id in {"poly_z_mul","poly_fp_mul"} then return pa*pb;
     elif case_id in {"poly_z_gcd","poly_fp_gcd"} then return GCD(pa,pb);
     elif case_id in {"poly_z_factor","poly_z_factor_product","poly_fp_factor","poly_z_factor_dense","poly_fp_factor_dense"} then return Factorization(pf);
-    elif case_id in {"mat_z_det","mat_fp_det","mat_q_det"} then return Determinant(A);
-    elif case_id in {"mat_z_rank","mat_fp_rank","mat_q_rank","mat_z_rank_wide","mat_z_rank_def","mat_z_rank_def_p","mat_q_rank_wide","mat_q_rank_def","mat_q_rank_def_p"} then return Rank(A);
+    elif case_id in {"mat_z_det","mat_fp_det","mat_fp31_det","mat_q_det"} then return Determinant(A);
+    elif case_id in {"mat_z_rank","mat_fp_rank","mat_fp31_rank","mat_q_rank","mat_z_rank_wide","mat_z_rank_def","mat_z_rank_def_p","mat_q_rank_wide","mat_q_rank_def","mat_q_rank_def_p"} then return Rank(A);
     elif case_id eq "mat_z_hnf" then return HermiteForm(A);
     elif case_id in {"mat_z_smith","mat_z_smith_hard"} then return SmithForm(A);
     elif case_id in {"mat_z_elementary_divisors","mat_z_elementary_divisors_hard"} then return ElementaryDivisors(A);
-    elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_q_charpoly"} then return CharacteristicPolynomial(A);
-    elif case_id in {"mat_fp_solve","mat_q_solve"} then return Solution(Transpose(A),v);
+    elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_fp31_charpoly","mat_q_charpoly"} then return CharacteristicPolynomial(A);
+    elif case_id in {"mat_fp_solve","mat_fp31_solve","mat_q_solve"} then return Solution(Transpose(A),v);
     elif case_id in {"groebner_cyclic","groebner_katsura"} then return GroebnerBasis(I);
     elif case_id eq "class_group" then return ClassGroup(O);
     elif case_id eq "galois_group" then return GaloisGroup(pf);
@@ -256,9 +257,9 @@ function Sig(case_id, n, answer)
         items := [<Degree(z[1]),z[2],SeqHash(Coefficients(z[1]))>:z in answer]; Sort(~items);
         flat := &cat [[z[1],z[2],z[3]]:z in items];
         return IntegerToString(#items) cat ":" cat IntegerToString(SeqHash(flat));
-    elif case_id in {"mat_z_det","mat_z_rank","mat_fp_det","mat_fp_rank","mat_q_det","mat_q_rank","mat_z_rank_wide","mat_z_rank_def","mat_z_rank_def_p","mat_q_rank_wide","mat_q_rank_def","mat_q_rank_def_p"} then
+    elif case_id in {"mat_z_det","mat_z_rank","mat_fp_det","mat_fp31_det","mat_fp_rank","mat_fp31_rank","mat_q_det","mat_q_rank","mat_z_rank_wide","mat_z_rank_def","mat_z_rank_def_p","mat_q_rank_wide","mat_q_rank_def","mat_q_rank_def_p"} then
         return Sprint(answer);
-    elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_q_charpoly"} then
+    elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_fp31_charpoly","mat_q_charpoly"} then
         return IntegerToString(Degree(answer)) cat ":" cat IntegerToString(SeqHash(Coefficients(answer)));
     elif case_id in {"mat_z_smith","mat_z_smith_hard"} then
         return IntegerToString(n) cat ":" cat IntegerToString(SeqHash([Abs(answer[i,i]):i in [1..n]]));
@@ -266,7 +267,7 @@ function Sig(case_id, n, answer)
         // (the nonzero divisors only: padded with zeros to n, as the others)
         d := [Integers()| Abs(z) : z in answer] cat [Integers()| 0 : i in [1..n-#answer]];
         return IntegerToString(n) cat ":" cat IntegerToString(SeqHash(d));
-    elif case_id in {"mat_z_hnf","mat_fp_solve","mat_q_solve"} then
+    elif case_id in {"mat_z_hnf","mat_fp_solve","mat_fp31_solve","mat_q_solve"} then
         return IntegerToString(n) cat ":" cat IntegerToString(SeqHash(Eltseq(answer)));
     elif case_id in {"groebner_cyclic","groebner_katsura"} then
         ds:=[TotalDegree(f):f in answer]; Sort(~ds); return IntegerToString(#answer) cat ":" cat IntegerToString(SeqHash(ds));

@@ -71,7 +71,8 @@ def det_input(ring, size, v=0):
         return matrix(
             ZZ, size, size, lambda i, j: pow(i + 2 + v, j + 3, 1000003) - 500001
         )
-    return matrix(ring, size, size, lambda i, j: pow(i + 2 + v, j + 3, 65537))
+    p = int(ring.characteristic())
+    return matrix(ring, size, size, lambda i, j: pow(i + 2 + v, j + 3, p))
 
 
 # The rank rows beyond the square ones (expected_inputs.py's formulas, which
@@ -276,6 +277,8 @@ def prepare(v):
         ring = (
             ZZ
             if case_id.startswith("mat_z_")
+            else GF(2147483647)
+            if case_id.startswith("mat_fp31_")
             else GF(65537)
             if case_id.startswith("mat_fp_")
             else QQ

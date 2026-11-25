@@ -16,6 +16,7 @@ case_id, n = sys.argv[1], int(sys.argv[2])
 MOD = common.MOD
 OPERANDS = []
 P = 65537
+P31 = 2147483647  # (the mat_fp31_* rows: a word-size prime)
 # (1, or N for the flint-n backend: run.py sets BENCH_THREADS)
 flint.ctx.threads = int(os.environ.get("BENCH_THREADS", "1"))
 
@@ -159,7 +160,7 @@ def det_rows(kind, size, v=0):
             ]
             for i in range(size)
         ]
-    modulus = 1000003 if kind == "z" else P
+    modulus = 1000003 if kind == "z" else P31 if kind == "fp31" else P
     offset = 500001 if kind == "z" else 0
     return [
         [pow(i + 2 + v, j + 3, modulus) - offset for j in range(size)]
@@ -244,6 +245,8 @@ def prepare(v):
         kind = (
             "z"
             if case_id.startswith("mat_z_")
+            else "fp31"
+            if case_id.startswith("mat_fp31_")
             else "fp"
             if case_id.startswith("mat_fp_")
             else "q"
@@ -253,12 +256,12 @@ def prepare(v):
         A = (
             flint.fmpz_mat(rows)
             if kind == "z"
-            else flint.nmod_mat(rows, P)
-            if kind == "fp"
+            else flint.nmod_mat(rows, P31 if kind == "fp31" else P)
+            if kind in ("fp", "fp31")
             else flint.fmpq_mat(rows)
         )
         op = case_id.removesuffix("_hard").rsplit("_", 1)[1]
-        entries = [int(x) if kind == "fp" else x for x in flatten(A)]
+        entries = [int(x) if kind in ("fp", "fp31") else x for x in flatten(A)]
         operands(entries)
         if op == "det":
             return lambda: A.det()
@@ -271,7 +274,11 @@ def prepare(v):
         if op in ("smith", "divisors"):
             return lambda: A.snf()
         b_rows = [[i + 1] for i in range(n)]
-        b = flint.nmod_mat(b_rows, P) if kind == "fp" else flint.fmpq_mat(b_rows)
+        b = (
+            flint.nmod_mat(b_rows, P31 if kind == "fp31" else P)
+            if kind in ("fp", "fp31")
+            else flint.fmpq_mat(b_rows)
+        )
         operands(entries, [i + 1 for i in range(n)])
         return lambda: A.solve(b)
     raise ValueError("FLINT operation unavailable: " + case_id)

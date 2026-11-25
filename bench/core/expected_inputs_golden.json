@@ -529,6 +529,166 @@
  },
  "pending_note": "Points not yet confirmed by every backend in a VM run: expected_inputs.py's hashes. The calibration sizes (c0 .. c4) are timed on the calibrated targets only (the Sage-mode, native and wasm drivers), and test_expected_inputs.py checks only their shape (their hashes take minutes to recompute). The first VM run that agrees on a point moves it into points, in a reviewed commit. mat_z_rank_wide's calibration hashes were computed on a spot VM (n2-standard-16, Nov 23 2026; up to 16 min each, for the certified-rank inputs), the smaller two also in the project.",
  "pending": {
+  "mat_fp31_charpoly:c0": {
+   "n": 59,
+   "variants": 8,
+   "input_hash": "540580246"
+  },
+  "mat_fp31_charpoly:c1": {
+   "n": 105,
+   "variants": 8,
+   "input_hash": "647710310"
+  },
+  "mat_fp31_charpoly:c2": {
+   "n": 187,
+   "variants": 8,
+   "input_hash": "110005103"
+  },
+  "mat_fp31_charpoly:c3": {
+   "n": 333,
+   "variants": 8,
+   "input_hash": "665242312"
+  },
+  "mat_fp31_charpoly:c4": {
+   "n": 592,
+   "variants": 8,
+   "input_hash": "800723522"
+  },
+  "mat_fp31_charpoly:l": {
+   "n": 400,
+   "variants": 8,
+   "input_hash": "971559880"
+  },
+  "mat_fp31_charpoly:m": {
+   "n": 160,
+   "variants": 8,
+   "input_hash": "667857989"
+  },
+  "mat_fp31_charpoly:s": {
+   "n": 60,
+   "variants": 8,
+   "input_hash": "776023185"
+  },
+  "mat_fp31_det:c0": {
+   "n": 122,
+   "variants": 8,
+   "input_hash": "208349694"
+  },
+  "mat_fp31_det:c1": {
+   "n": 218,
+   "variants": 8,
+   "input_hash": "158665404"
+  },
+  "mat_fp31_det:c2": {
+   "n": 387,
+   "variants": 8,
+   "input_hash": "105324733"
+  },
+  "mat_fp31_det:c3": {
+   "n": 688,
+   "variants": 8,
+   "input_hash": "299633958"
+  },
+  "mat_fp31_det:c4": {
+   "n": 1224,
+   "variants": 8,
+   "input_hash": "640609974"
+  },
+  "mat_fp31_det:l": {
+   "n": 400,
+   "variants": 8,
+   "input_hash": "971559880"
+  },
+  "mat_fp31_det:m": {
+   "n": 160,
+   "variants": 8,
+   "input_hash": "667857989"
+  },
+  "mat_fp31_det:s": {
+   "n": 60,
+   "variants": 8,
+   "input_hash": "776023185"
+  },
+  "mat_fp31_rank:c0": {
+   "n": 122,
+   "variants": 8,
+   "input_hash": "208349694"
+  },
+  "mat_fp31_rank:c1": {
+   "n": 218,
+   "variants": 8,
+   "input_hash": "158665404"
+  },
+  "mat_fp31_rank:c2": {
+   "n": 387,
+   "variants": 8,
+   "input_hash": "105324733"
+  },
+  "mat_fp31_rank:c3": {
+   "n": 688,
+   "variants": 8,
+   "input_hash": "299633958"
+  },
+  "mat_fp31_rank:c4": {
+   "n": 1223,
+   "variants": 8,
+   "input_hash": "241502811"
+  },
+  "mat_fp31_rank:l": {
+   "n": 400,
+   "variants": 8,
+   "input_hash": "971559880"
+  },
+  "mat_fp31_rank:m": {
+   "n": 160,
+   "variants": 8,
+   "input_hash": "667857989"
+  },
+  "mat_fp31_rank:s": {
+   "n": 60,
+   "variants": 8,
+   "input_hash": "776023185"
+  },
+  "mat_fp31_solve:c0": {
+   "n": 106,
+   "variants": 8,
+   "input_hash": "482964971"
+  },
+  "mat_fp31_solve:c1": {
+   "n": 188,
+   "variants": 8,
+   "input_hash": "947159654"
+  },
+  "mat_fp31_solve:c2": {
+   "n": 335,
+   "variants": 8,
+   "input_hash": "97950272"
+  },
+  "mat_fp31_solve:c3": {
+   "n": 595,
+   "variants": 8,
+   "input_hash": "21714698"
+  },
+  "mat_fp31_solve:c4": {
+   "n": 1058,
+   "variants": 8,
+   "input_hash": "693615129"
+  },
+  "mat_fp31_solve:l": {
+   "n": 400,
+   "variants": 8,
+   "input_hash": "673965137"
+  },
+  "mat_fp31_solve:m": {
+   "n": 160,
+   "variants": 8,
+   "input_hash": "967596677"
+  },
+  "mat_fp31_solve:s": {
+   "n": 60,
+   "variants": 8,
+   "input_hash": "985305985"
+  },
   "mat_fp_charpoly:c0": {
    "n": 59,
    "variants": 8,

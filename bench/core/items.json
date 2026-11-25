@@ -1179,6 +1179,195 @@
    }
   },
   {
+   "id": "mat_fp31_det",
+   "item": "la0",
+   "category": "linear algebra over Fp, word-size p",
+   "label": "determinant (p=65537) (p = 2^31 - 1)",
+   "sizes": {
+    "s": {
+     "n": 60,
+     "timeout": 120
+    },
+    "m": {
+     "n": 160,
+     "timeout": 300
+    },
+    "l": {
+     "n": 400,
+     "timeout": 900
+    },
+    "c0": {
+     "n": 122,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 218,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 387,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 688,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 1224,
+     "timeout": 600
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "mat_fp31_rank",
+   "item": "la0",
+   "category": "linear algebra over Fp, word-size p",
+   "label": "rank (p=65537) (p = 2^31 - 1)",
+   "sizes": {
+    "s": {
+     "n": 60,
+     "timeout": 120
+    },
+    "m": {
+     "n": 160,
+     "timeout": 300
+    },
+    "l": {
+     "n": 400,
+     "timeout": 900
+    },
+    "c0": {
+     "n": 122,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 218,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 387,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 688,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 1223,
+     "timeout": 600
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "mat_fp31_solve",
+   "item": "la0",
+   "category": "linear algebra over Fp, word-size p",
+   "label": "solve (p=65537) (p = 2^31 - 1)",
+   "sizes": {
+    "s": {
+     "n": 60,
+     "timeout": 120
+    },
+    "m": {
+     "n": 160,
+     "timeout": 300
+    },
+    "l": {
+     "n": 400,
+     "timeout": 900
+    },
+    "c0": {
+     "n": 106,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 188,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 335,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 595,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 1058,
+     "timeout": 600
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "mat_fp31_charpoly",
+   "item": "la2",
+   "category": "linear algebra over Fp, word-size p",
+   "label": "characteristic polynomial (p=65537) (p = 2^31 - 1)",
+   "sizes": {
+    "s": {
+     "n": 60,
+     "timeout": 120
+    },
+    "m": {
+     "n": 160,
+     "timeout": 300
+    },
+    "l": {
+     "n": 400,
+     "timeout": 900
+    },
+    "c0": {
+     "n": 59,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 105,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 187,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 333,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 592,
+     "timeout": 600
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   },
+   "control_note": "a control: charpoly is not on the folded u64 sums, so it should not move"
+  },
+  {
    "id": "mat_q_det",
    "item": "la1",
    "category": "linear algebra over Q",

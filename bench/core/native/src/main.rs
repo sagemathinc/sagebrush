@@ -13,6 +13,7 @@ use std::time::Instant;
 
 const MOD: u64 = 1_000_000_007;
 const P: u64 = 65537;
+const P31: u64 = 2_147_483_647;
 
 fn residue(x: &BigInt) -> u64 {
     let text = x.to_string();
@@ -392,23 +393,26 @@ fn main() {
             };
             (hash_big(&f), move || sagebrush_poly::factor(&f))
         }, |r| factor_sig(&r.1, |c: &Vec<BigInt>| ((c.len() - 1) as u64, hash_big(c)))),
-        "mat_fp_det" | "mat_fp_rank" | "mat_fp_charpoly" => {
+        "mat_fp_det" | "mat_fp_rank" | "mat_fp_charpoly" | "mat_fp31_det" | "mat_fp31_rank" | "mat_fp31_charpoly" => {
+            // (mat_fp31_*: the same rows modulo 2^31 - 1, a word-size prime)
+            let pm = if case_id.starts_with("mat_fp31_") { P31 } else { P };
             let fp = |v: usize| {
-                let rows: Vec<Vec<u64>> = entries(n, P, 0, v).into_iter().map(|r| r.into_iter().map(|x| x as u64).collect()).collect();
-                (hash_u64(&rows.concat()), nmod_mat::Mat::from_rows(&rows, Modulus::new(P)))
+                let rows: Vec<Vec<u64>> = entries(n, pm, 0, v).into_iter().map(|r| r.into_iter().map(|x| x as u64).collect()).collect();
+                (hash_u64(&rows.concat()), nmod_mat::Mat::from_rows(&rows, Modulus::new(pm)))
             };
-            match case_id.as_str() {
-                "mat_fp_det" => run(&mode, variants, |v| { let (h, a) = fp(v); (h, move || a.det()) }, |d| d.to_string()),
-                "mat_fp_rank" => run(&mode, variants, |v| { let (h, a) = fp(v); (h, move || a.rank()) }, |r| r.to_string()),
+            match case_id.trim_start_matches("mat_fp31_").trim_start_matches("mat_fp_") {
+                "det" => run(&mode, variants, |v| { let (h, a) = fp(v); (h, move || a.det()) }, |d| d.to_string()),
+                "rank" => run(&mode, variants, |v| { let (h, a) = fp(v); (h, move || a.rank()) }, |r| r.to_string()),
                 _ => run(&mode, variants, |v| { let (h, a) = fp(v); (h, move || a.charpoly()) }, |c| poly_sig(c)),
             }
         }
-        "mat_fp_solve" => run(&mode, variants, |v| {
-            let rows: Vec<Vec<u64>> = entries(n, P, 0, v).into_iter().map(|r| r.into_iter().map(|x| x as u64).collect()).collect();
+        "mat_fp_solve" | "mat_fp31_solve" => run(&mode, variants, |v| {
+            let pm = if case_id.starts_with("mat_fp31_") { P31 } else { P };
+            let rows: Vec<Vec<u64>> = entries(n, pm, 0, v).into_iter().map(|r| r.into_iter().map(|x| x as u64).collect()).collect();
             let rhs: Vec<u64> = (1..=n as u64).collect();
             let h = hash_u64(&[rows.concat(), rhs.clone()].concat());
-            let a = nmod_mat::Mat::from_rows(&rows, Modulus::new(P));
-            let b = nmod_mat::Mat::from_rows(&rhs.iter().map(|&x| vec![x]).collect::<Vec<_>>(), Modulus::new(P));
+            let a = nmod_mat::Mat::from_rows(&rows, Modulus::new(pm));
+            let b = nmod_mat::Mat::from_rows(&rhs.iter().map(|&x| vec![x]).collect::<Vec<_>>(), Modulus::new(pm));
             (h, move || a.solve(&b).expect("solvable"))
         }, |x| {
             let xs: Vec<u64> = (0..n).map(|i| x.row(i)[0]).collect();

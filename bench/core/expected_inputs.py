@@ -23,6 +23,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 MOD = 1000000007
 P = 65537
+P31 = 2147483647  # (the mat_fp31_* rows: a word-size prime)
 
 
 def ihash(xs) -> int:
@@ -147,6 +148,8 @@ def det_entries(kind: str, size: int, v: int) -> list[int]:
                 out.append(rat(pow(i + 2 + v, j + 3, 101) - 50, 1 + (i * j) % 7))
             elif kind == "z":
                 out.append(pow(i + 2 + v, j + 3, 1000003) - 500001)
+            elif kind == "fp31":
+                out.append(pow(i + 2 + v, j + 3, P31))
             else:
                 out.append(pow(i + 2 + v, j + 3, P))
     return out
