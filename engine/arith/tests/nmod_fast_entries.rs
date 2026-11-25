@@ -101,7 +101,11 @@ fn the_fast_products_entries_are_admitted_or_gated() {
             ("planned_peak".to_string(), true)
         ]);
     // the one ungated caller goes through the admission
-    assert!(body.contains("    pub fn mul(&self, o: &Mat) -> Mat {\n        assert_eq!(self.cols, o.rows);\n        fast::mul(self, o)\n    }"));
+    // (with its own documentation right above it: a gated item between
+    // them would take the documentation with it from production builds)
+    assert!(body.contains(
+        "    /// never totals more units than the classical one.\n    pub fn mul(&self, o: &Mat) -> Mat {\n        assert_eq!(self.cols, o.rows);\n        fast::mul(self, o)\n    }"
+    ));
     // and the re-exports: the allowance in production, its state gated
     assert!(body.contains(
         "pub use fast::{reset_fast_product, with_fast_product};\n#[cfg(feature = \"test-hooks\")]\npub use fast::{fast_allowance_left, fast_n0, fast_product_state, leave_fast_product_state, set_fast_n0};\n"

@@ -1104,12 +1104,6 @@ impl Mat {
         fast::mul_planned(self, o, n0)
     }
 
-    /// self * o.  Classical ([`Mat::mul_classical`]) unless a caller has
-    /// given this thread an allowance for the fast route's workspace
-    /// ([`with_fast_product`]): then the fast route where its plan takes it
-    /// and its extra words fit what is left of the allowance, which it
-    /// holds while it runs.  Either way the same result, and the fast route
-    /// never totals more units than the classical one.
     /// The Winograd levels the plan with crossover `n0` runs (each fast
     /// product, its half products' included); `None` on overflow (tests
     /// and benchmarks).
@@ -1121,6 +1115,12 @@ impl Mat {
         }
     }
 
+    /// self * o.  Classical ([`Mat::mul_classical`]) unless a caller has
+    /// given this thread an allowance for the fast route's workspace
+    /// ([`with_fast_product`]): then the fast route where its plan takes it
+    /// and its extra words fit what is left of the allowance, which it
+    /// holds while it runs.  Either way the same result, and the fast route
+    /// never totals more units than the classical one.
     pub fn mul(&self, o: &Mat) -> Mat {
         assert_eq!(self.cols, o.rows);
         fast::mul(self, o)
