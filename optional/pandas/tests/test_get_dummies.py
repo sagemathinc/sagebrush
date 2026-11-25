@@ -118,3 +118,10 @@ ci("index-frame-kept", lambda: pd.get_dummies(pd.DataFrame({"n": [1, 2], "a": ["
 case("frame-no-columns", lambda: pd.get_dummies(pd.DataFrame(index=[0, 1])))
 case("dtype-object", lambda: pd.get_dummies(pd.Series(["a"]), dtype=object))
 case("dtype-object-string", lambda: pd.get_dummies(pd.Series(["a"]), dtype="object"))
+# a time column's missing-value label is NaT, prefixed or not
+dts = pd.Series(pd.to_datetime(["2020-01-02", None, "2020-01-01"]))
+ci("datetime-dummy-na-prefix", lambda: pd.get_dummies(dts, prefix="d", dummy_na=True))
+ci("datetime-dummy-na-prefix-sep", lambda: pd.get_dummies(dts, prefix="d", prefix_sep="", dummy_na=True))
+t("datetime-frame-dummy-na", lambda: pd.get_dummies(pd.DataFrame({"t": dts, "n": [1, 2, 3]}), columns=["t"], dummy_na=True))
+ci("datetime-frame-dummy-na-drop-first", lambda: pd.get_dummies(pd.DataFrame({"t": dts}), columns=["t"], dummy_na=True, drop_first=True))
+ci("float-dummy-na-prefix", lambda: pd.get_dummies(pd.Series([1.5, None]), prefix="f", dummy_na=True))

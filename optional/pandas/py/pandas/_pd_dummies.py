@@ -43,7 +43,9 @@ def _categories_and_codes(col):
 def _label(prefix, sep, value):
     if prefix is None:
         return value
-    return "%s%s%s" % (prefix, sep, "nan" if is_missing(value) else value)
+    from ._pd_datetime import NaT
+    # (a time column's missing value is NaT, and its label says so)
+    return "%s%s%s" % (prefix, sep, "NaT" if value is NaT else "nan" if is_missing(value) else value)
 
 
 def _encode(col, prefix, sep, dummy_na, drop_first, d):

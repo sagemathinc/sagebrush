@@ -509,3 +509,21 @@ Index: []
 !! ValueError: dtype=object is not a valid dtype for get_dummies
 == dtype-object-string
 !! ValueError: dtype=object is not a valid dtype for get_dummies
+== datetime-dummy-na-prefix
+('Index', 'str', ['d_2020-01-01 00:00:00', 'd_2020-01-02 00:00:00', 'd_NaT'])
+== datetime-dummy-na-prefix-sep
+('Index', 'str', ['d2020-01-01 00:00:00', 'd2020-01-02 00:00:00', 'dNaT'])
+== datetime-frame-dummy-na
+
+   n  t_2020-01-01 00:00:00  t_2020-01-02 00:00:00  t_NaT
+0  1                  False                   True  False
+1  2                  False                  False   True
+2  3                   True                  False  False
+== datetime-frame-dummy-na.dtypes
+['int64', 'bool', 'bool', 'bool']
+== datetime-frame-dummy-na.columns
+['n', 't_2020-01-01 00:00:00', 't_2020-01-02 00:00:00', 't_NaT']
+== datetime-frame-dummy-na-drop-first
+('Index', 'str', ['t_2020-01-02 00:00:00', 't_NaT'])
+== float-dummy-na-prefix
+('Index', 'str', ['f_1.5', 'f_nan'])
