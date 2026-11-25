@@ -36,7 +36,7 @@ def _sa():
 
 
 def _call(name, **kw):
-    from sagebrush._engine import call
+    from _sagebrush_lib._engine import call
     return call(name, **kw)
 
 

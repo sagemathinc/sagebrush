@@ -221,6 +221,8 @@ try {
     await frame(`(() => { const w = ${ta}; w.value = ${JSON.stringify(v)}; w.dispatchEvent(new Event("change")); return 1; })()`);
   };
   check(await frame(`!!${fb}`), "a question with decide offers Get feedback on my words");
+  // (its tooltip says where the words go: the page the board is shown in; and that Submit sends that page all the answers)
+  check(await frame(`(() => { const t = ${fb}.querySelector('button').title; return /the page this board is shown in/.test(t) && /Submit sends that page all your answers and your comment\./.test(t) && !/only when you submit/.test(t); })()`), "Get feedback's tooltip: the words go to the page the board is shown in; Submit sends that page all the answers and the comment");
   check(await frame(`!document.querySelector('[data-ask="q1"] .board-ask-decide')`), "a question without, doesn't");
   await top(`mode.decide = "confuses-transitive-with-two-transitive"`);
   await frame(`${fb}.querySelector('button').click()`);

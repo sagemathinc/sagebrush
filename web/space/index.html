@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Sagebrush</title>
+<style>
+  /* light by default (a white space); dark when the system is dark, or when chosen (Theme) */
+  /* (the viewer's own root: its theme, its colours, the whole window) */
+  .space3d { color-scheme: light;
+    --bg: #f5f6f8; --fg: #1f2328; --muted: #5f6b7a; --panel: rgba(255, 255, 255, 0.9); --line: #d5dbe3; --ctl: #ffffff; --ctl-line: #c9d1db; --hover: #eaeef3;
+    --ov: #ffffff; --ov-fg: #1f2328; --ov-muted: #57606a; --ov-shadow: 0 10px 40px rgba(20, 30, 50, 0.18); --pre: #f0f2f5; --edit: #f6f8fa; --edit-line: #d0d7de;
+    --out: #e7f6ec; --err: #ffebe9; --err-fg: #82071e; --link: #0b5cad; --ctl2: #eef1f5;
+    --k: #cf222e; --t: #8250df; --s: #0a3069; --n: #0550ae; --c: #6e7781; --p: #24292f; --m: #953800; }
+  .space3d[data-theme="dark"] { color-scheme: dark;
+    --bg: #0e1116; --fg: #e8eef7; --muted: #93a1b5; --panel: rgba(20, 24, 32, 0.88); --line: #2c3442; --ctl: #1b2130; --ctl-line: #364055; --hover: #253046;
+    --ov: #161b22; --ov-fg: #e6edf3; --ov-muted: #8d96a0; --ov-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); --pre: #0d1117; --edit: #0d1117; --edit-line: #30363d;
+    --out: #0f2a1b; --err: #3a1418; --err-fg: #ffa198; --link: #58a6ff; --ctl2: #21262d;
+    --k: #ff7b72; --t: #d2a8ff; --s: #a5d6ff; --n: #79c0ff; --c: #8b949e; --p: #e6edf3; --m: #ffa657; }
+  .space3d { position: fixed; inset: 0; background: var(--bg); color: var(--fg); }
+  html, body { margin: 0; height: 100%; overflow: hidden; font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
+  [data-c="view"] { position: fixed; inset: 0; }
+  [data-c="panel"] { position: fixed; top: 12px; left: 12px; width: 320px; max-height: calc(100% - 60px); display: flex; flex-direction: column; gap: 8px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; backdrop-filter: blur(6px); box-shadow: 0 4px 18px rgba(20, 30, 50, 0.08); }
+  .embed [data-c="panel"] { width: 260px; top: 8px; left: 8px; }
+  .embed [data-c="space"] { display: none; }
+  [data-c="title"] { font-weight: 600; font-size: 15px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  [data-c="title"] a { color: var(--link); text-decoration: none; } [data-c="title"] a:hover { text-decoration: underline; }
+  .head { display: flex; align-items: center; gap: 6px; }
+  [data-c="fold"] { padding: 2px 9px; font-size: 13px; }
+  /* folded (a phone's default): only the title, Back and the button that unfolds it */
+  .space3d.folded [data-c="panel"] > :not(.head) { display: none; }
+  .space3d.folded [data-c="panel"] { width: auto; max-width: calc(100% - 24px); padding: 6px 8px; }
+  [data-c="status"], [data-c="hover"] { color: var(--muted); font-size: 12px; min-height: 16px; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  select, input, button { font: inherit; color: inherit; background: var(--ctl); border: 1px solid var(--ctl-line); border-radius: 6px; padding: 6px 8px; }
+  button { cursor: pointer; } button:hover { background: var(--hover); } button:disabled { opacity: 0.45; cursor: default; }
+  select { flex: 1; } [data-c="q"] { width: 100%; box-sizing: border-box; }
+  [data-c="results"] { list-style: none; margin: 0; padding: 0; overflow: auto; }
+  [data-c="results"] li { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+  [data-c="results"] li:hover { background: var(--hover); }
+  [data-c="results"] li b { display: block; font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  [data-c="results"] li span { display: block; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  [data-c="results"] li.none { color: var(--muted); cursor: default; }
+  [data-c="overlay"] { position: fixed; top: 12px; right: 12px; bottom: 12px; width: min(560px, 46vw); overflow: auto; background: var(--ov); color: var(--ov-fg);
+    border: 1px solid var(--line); border-radius: 10px; padding: 18px 22px; box-shadow: var(--ov-shadow); }
+  [data-c="overlay"] h2 { margin: 0 32px 10px 0; font-size: 18px; word-break: break-all; }
+  [data-c="overlay"] .close { position: absolute; top: 10px; right: 10px; background: none; border: 0; color: var(--ov-muted); font-size: 22px; padding: 2px 8px; }
+  [data-c="overlay"] pre { background: var(--pre); padding: 10px 12px; border-radius: 6px; overflow: auto; font: 12.5px/1.45 ui-monospace, Menlo, monospace; }
+  [data-c="overlay"] pre.out { background: var(--out); }
+  [data-c="overlay"] .label { margin-top: 12px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ov-muted); }
+  [data-c="overlay"] .meta, [data-c="overlay"] .hint { color: var(--ov-muted); font-size: 12px; }
+  [data-c="overlay"] a { color: var(--link); }
+  [data-c="overlay"] ul.links { margin: 4px 0; padding-left: 18px; } [data-c="overlay"] ul.links a { text-decoration: none; word-break: break-all; }
+  [data-c="overlay"] .md code { background: var(--pre); padding: 1px 4px; border-radius: 4px; }
+  [data-c="overlay"] .grip { position: absolute; left: 0; top: 0; bottom: 0; width: 7px; cursor: ew-resize; }
+  [data-c="overlay"] .grip:hover { background: rgba(11, 92, 173, 0.15); }
+  [data-c="overlay"] .runbar { display: flex; gap: 6px; align-items: center; margin: 4px 0 8px; }
+  [data-c="overlay"] .runbar select, [data-c="overlay"] .runbar button { background: var(--ctl2); color: var(--ov-fg); border: 1px solid var(--ctl-line); padding: 4px 10px; }
+  [data-c="overlay"] .runbar button.run { background: #1f6feb; color: #fff; border-color: #1f6feb; font-weight: 600; }
+  [data-c="overlay"] .runbar button:disabled { opacity: 0.5; }
+  [data-c="overlay"] .runstate { color: var(--ov-muted); font-size: 12px; }
+  [data-c="overlay"] .editor { position: relative; border: 1px solid var(--edit-line); border-radius: 6px; background: var(--edit); }
+  [data-c="overlay"] .editor pre.hl, [data-c="overlay"] .editor textarea { margin: 0; padding: 10px 12px; font: 12.5px/1.45 ui-monospace, Menlo, monospace; white-space: pre-wrap;
+    word-break: break-word; tab-size: 4; border: 0; background: transparent; }
+  [data-c="overlay"] .editor pre.hl { pointer-events: none; }
+  [data-c="overlay"] .editor textarea { position: absolute; inset: 0; width: 100%; box-sizing: border-box; color: transparent; caret-color: var(--ov-fg); resize: none;
+    outline: none; overflow: hidden; }
+  [data-c="overlay"] .editor:focus-within { border-color: #1f6feb; box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.2); }
+  [data-c="overlay"] pre.out.err { background: var(--err); color: var(--err-fg); }
+  [data-c="overlay"] .summary { font-size: 14px; background: color-mix(in srgb, #1f6feb 9%, transparent); border-left: 3px solid #1f6feb; padding: 6px 10px; border-radius: 6px; margin: 4px 0 10px; }
+  [data-c="overlay"] .summary p { margin: 0.2em 0; }
+  [data-c="overlay"] .tourcard { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 0 0 12px; background: color-mix(in srgb, #e3a008 10%, transparent); }
+  [data-c="overlay"] .tourhead { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ov-muted); }
+  [data-c="overlay"] .tourbar { display: flex; gap: 6px; margin-top: 6px; }
+  [data-c="overlay"] .tourbar button { background: var(--ctl2); color: var(--ov-fg); border: 1px solid var(--ctl-line); padding: 4px 10px; }
+  [data-c="overlay"] .tourbar button.next { background: #1f6feb; color: #fff; border-color: #1f6feb; font-weight: 600; }
+  [data-c="tour"] { width: 100%; }
+  [data-c="fade"] { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 3; }
+  [data-c="helpbtn"] { padding: 2px 9px; font-size: 13px; font-weight: 700; }
+  [data-c="helpcard"] { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 8; width: min(520px, 92vw); max-height: 86vh; overflow: auto;
+    background: var(--ov); color: var(--ov-fg); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; box-shadow: var(--ov-shadow); font-size: 13.5px; }
+  [data-c="helpcard"][hidden] { display: none; }
+  [data-c="helpcard"] h3 { margin: 0 0 8px; } [data-c="helpcard"] table { border-collapse: collapse; width: 100%; }
+  [data-c="helpcard"] th { text-align: left; padding: 10px 0 4px; color: var(--ov-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  [data-c="helpcard"] td { padding: 3px 8px 3px 0; vertical-align: top; } [data-c="helpcard"] td:first-child { white-space: nowrap; font-weight: 600; width: 38%; }
+  [data-c="helpcard"] .close { position: absolute; top: 8px; right: 10px; background: none; border: 0; font-size: 22px; color: var(--ov-muted); }
+  /* (these use display: flex, which would override the hidden attribute) */
+  [data-c="tourpill"][hidden] { display: none; }
+  [data-c="tourpill"] { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; gap: 8px; align-items: center; padding: 6px 8px 6px 14px;
+    border-radius: 999px; background: color-mix(in srgb, #e3a008 18%, var(--ov)); color: var(--ov-fg); border: 1px solid var(--line); box-shadow: var(--ov-shadow); font-size: 13px; }
+  [data-c="tourpill"] button { padding: 3px 10px; font-size: 12.5px; } [data-c="tourpill"] button[data-t="1"] { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+  [data-c="overlay"] .enterbar { display: flex; gap: 10px; align-items: center; margin: 2px 0 10px; }
+  [data-c="overlay"] .enterbar button { background: #1f6feb; color: #fff; border-color: #1f6feb; font-weight: 600; padding: 5px 14px; }
+  [data-c="overlay"] .noroom { margin: 2px 0 10px; padding: 6px 10px; border-radius: 6px; background: var(--ctl2); }
+  [data-c="overlay"] a.ref { color: inherit; text-decoration: underline dotted color-mix(in srgb, var(--link) 70%, transparent); text-underline-offset: 3px; }
+  [data-c="overlay"] a.ref:hover { color: var(--link); text-decoration-style: solid; }
+  [data-c="overlay"] img.fig { max-width: 100%; background: #fff; border-radius: 6px; margin: 6px 0; }
+  /* highlight.js: GitHub's light and dark colors */
+  /* code, by the one highlighter (web/code/tokens.ts): comment, string, number, keyword and builtin, a name defined, a decorator */
+  .hk, .hb { color: var(--k); } .hf { color: var(--t); } .hs { color: var(--s); } .hn { color: var(--n); }
+  .hc { color: var(--c); font-style: italic; } .hd { color: var(--m); }
+  /* narrow (the agents chat's pane): an open object hides the panel and the help, so the space stays in view */
+  @media (max-width: 1000px) {
+    .space3d.reading [data-c="panel"] { display: none; }
+  }
+  /* a phone: the drawer is a sheet over the lower part of the screen, the space in view above it */
+  @media (max-width: 700px) {
+    [data-c="overlay"] { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto !important; height: 52vh; padding: 14px 16px; }
+    [data-c="overlay"] .grip { display: none; }
+    .space3d.reading [data-c="panel"] { display: flex; width: auto; padding: 6px 8px; }
+    .space3d.reading [data-c="panel"] > :not(.head) { display: none; } /* (while reading, folded: the title and Back stay) */
+</style>
+</head>
+<body>
+<div class="space3d" data-space3d>
+<div data-c="view"></div>
+<div data-c="panel">
+  <div class="head">
+    <button data-c="back" title="Back to where you were (B); out of a room, past where you entered it" disabled>←</button>
+    <div data-c="title"></div>
+    <button data-c="helpbtn" title="How to move, and the keys (?)">?</button>
+    <button data-c="fold" title="Hide the controls (show them again with this button)" aria-expanded="true">▴</button>
+  </div>
+  <div class="row"><select data-c="space" title="The space shown"></select></div>
+  <div class="row">
+    <button data-c="fwd" title="Forward again (F)" disabled>Forward →</button>
+    <button data-c="home" title="See everything (H)">See all</button>
+    <button data-c="move" title="Walking or flying (G)">Walking (G)</button>
+    <button data-c="dims" title="Float the space in the air, as laid out in 3D">Float</button>
+    <button data-c="fs" title="Full screen">Full screen</button>
+    <button data-c="runall" title="Run every object's code, one after another">Run all</button>
+    <button data-c="theme" title="Light, dark, or as your system is (Auto)">Theme: Auto</button>
+  </div>
+  <select data-c="tour" hidden title="Guided tours through this space: each stop says what to look at"></select>
+  <input data-c="q" type="search" placeholder="Search everything (press /)" autocomplete="off">
+  <ul data-c="results"></ul>
+  <div data-c="hover"></div>
+  <div data-c="status"></div>
+</div>
+<div data-c="overlay" hidden></div>
+<div data-c="tourpill" hidden></div>
+<div data-c="fade"></div>
+<div data-c="helpcard" hidden role="dialog" aria-label="Help">
+  <button type="button" class="close" title="Close (Esc)">×</button>
+  <h3>Moving around</h3>
+  <table>
+    <tr><th colspan="2">Walking (the default with a mouse)</th></tr>
+    <tr><td>Drag</td><td>look around</td></tr>
+    <tr><td>W A S D, arrows</td><td>walk (Shift: faster)</td></tr>
+    <tr><td>Space</td><td>jump</td></tr>
+    <tr><td>Click the floor</td><td>go there (a terrace too; you walk up stairs)</td></tr>
+    <tr><td>Scroll</td><td>step forward or back</td></tr>
+    <tr><th colspan="2">Flying (G switches; the default on a phone)</th></tr>
+    <tr><td>Drag, pinch</td><td>turn around what you look at; zoom</td></tr>
+    <tr><td>Right-drag</td><td>pan</td></tr>
+    <tr><td>W A S D, E Q</td><td>fly; up and down</td></tr>
+    <tr><th colspan="2">Everywhere</th></tr>
+    <tr><td>Click an object</td><td>read it (Esc closes)</td></tr>
+    <tr><td>Enter</td><td>into a folder</td></tr>
+    <tr><td>B, F</td><td>back, forward (Back also leaves a room)</td></tr>
+    <tr><td>H</td><td>see everything</td></tr>
+    <tr><td>/</td><td>search</td></tr>
+    <tr><td>N, P</td><td>a tour's next and previous stop</td></tr>
+    <tr><td>G</td><td>walking or flying</td></tr>
+    <tr><td>?</td><td>this help</td></tr>
+  </table>
+</div>
+</div>
+<script type="module" src="space.js"></script>
+</body>
+</html>

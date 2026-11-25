@@ -20,7 +20,7 @@ case("text.series", lambda: check_array(pd.Series(["x", "y"]), ensure_2d=False, 
 case("feature-names.dtype", lambda: Fits().fit(pd.DataFrame({"a": [1.0], "bc": [2.0]})).feature_names_in_.dtype)
 # (names outside the subset: one class, one function, one submodule's name)
 case("missing.svm", lambda: __import__("sklearn.svm", fromlist=["SVC"]).SVC)
-case("missing.utils", lambda: __import__("sklearn.utils", fromlist=["compute_class_weight"]).compute_class_weight)
+case("missing.utils", lambda: __import__("sklearn.utils", fromlist=["murmurhash3_32"]).murmurhash3_32)
 case("missing.unknown", lambda: __import__("sklearn.utils", fromlist=["no_such_name"]).no_such_name)
 
 # (step 3b: what the dummy estimators, the scaler and pipelines refuse)
@@ -44,3 +44,20 @@ def routing():
 
 
 case("pipeline.routing", routing)
+
+# (step P3b: what the decision trees refuse)
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+
+Xt = [[0.0, 1.0], [1.0, 0.0], [1.0, 1.0], [0.0, 0.0]]
+yt = [0, 1, 1, 0]
+case("tree.splitter-random", lambda: DecisionTreeClassifier(splitter="random").fit(Xt, yt))
+case("tree.max_leaf_nodes", lambda: DecisionTreeClassifier(max_leaf_nodes=3).fit(Xt, yt))
+case("tree.ccp_alpha", lambda: DecisionTreeRegressor(ccp_alpha=0.1).fit(Xt, yt))
+case("tree.monotonic_cst", lambda: DecisionTreeClassifier(monotonic_cst=[1, 0]).fit(Xt, yt))
+case("tree.absolute_error", lambda: DecisionTreeRegressor(criterion="absolute_error").fit(Xt, yt))
+case("tree.poisson", lambda: DecisionTreeRegressor(criterion="poisson").fit(Xt, yt))
+case("tree.decision_path", lambda: DecisionTreeClassifier().fit(Xt, yt).decision_path(Xt))
+case("tree.pruning_path", lambda: DecisionTreeClassifier().cost_complexity_pruning_path(Xt, yt))
+case("tree.extra-tree", lambda: __import__("sklearn.tree", fromlist=["ExtraTreeClassifier"]).ExtraTreeClassifier)
+case("tree.export_text", lambda: __import__("sklearn.tree", fromlist=["export_text"]).export_text)
+case("tree.tree-class", lambda: type(DecisionTreeClassifier().fit(Xt, yt).tree_).__module__)

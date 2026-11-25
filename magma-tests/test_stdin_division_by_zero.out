@@ -1,0 +1,361 @@
+
+>> print 1/0;
+           ^
+User error: Illegal zero denominator
+
+>> print 1 / 0;
+             ^
+User error: Illegal zero denominator
+
+>> print -1/0;
+            ^
+User error: Illegal zero denominator
+
+>> print (-1)/0;
+              ^
+User error: Illegal zero denominator
+
+>> print 1/(0);
+            ^
+User error: Illegal zero denominator
+
+>> print 1/-0;
+           ^
+User error: Illegal zero denominator
+
+>> print 1/(-0);
+            ^
+User error: Illegal zero denominator
+
+>> print [3 + 10/0];
+                 ^
+User error: Illegal zero denominator
+
+>> print -(1)/0;
+              ^
+User error: Illegal zero denominator
+
+>> print (-(1))/0;
+                ^
+User error: Illegal zero denominator
+
+>> print 1/-(0);
+           ^
+User error: Illegal zero denominator
+
+>> print 1/(-(0));
+            ^
+User error: Illegal zero denominator
+
+>> print 1/-(-0);
+           ^
+User error: Illegal zero denominator
+
+>> print 1/(-(-0));
+            ^
+User error: Illegal zero denominator
+
+>> print 1/--0;
+           ^
+User error: Illegal zero denominator
+
+>> print --1/0;
+             ^
+User error: Illegal zero denominator
+
+>> print -(-1)/0;
+               ^
+User error: Illegal zero denominator
+
+>> print 1/-((0));
+           ^
+User error: Illegal zero denominator
+
+>> print (-1)/(-(0));
+               ^
+User error: Illegal zero denominator
+
+>> print 1/0 eq 1;
+           ^
+User error: Illegal zero denominator
+
+>> x := [1/0 : i in [1]];
+           ^
+User error: Illegal zero denominator
+
+>> print 1/0X5;
+            ^
+User error: bad syntax
+
+>> print 1/0X0;
+            ^
+User error: bad syntax
+
+>> print 1/0 x;
+             ^
+User error: bad syntax
+
+>> print 1/0 1;
+             ^
+User error: bad syntax
+
+>> print 1/0 true;
+             ^
+User error: bad syntax
+
+>> print 1/0 false;
+             ^
+User error: bad syntax
+
+>> print 1/0 return;
+             ^
+User error: bad syntax
+
+>> print 1/0 if;
+             ^
+User error: bad syntax
+
+>> print 1/0 function;
+             ^
+User error: bad syntax
+
+>> print 1/0 # 1;
+             ^
+User error: bad syntax
+
+>> print 1/0 is 1;
+             ^
+User error: bad syntax
+
+>> x := 1/0 :: 2;
+            ^
+User error: bad syntax
+
+>> 1/0 :: 2;
+       ^
+User error: bad syntax
+
+>> print 1/0 ne 1;
+           ^
+User error: Illegal zero denominator
+
+>> print 1/0 in [1];
+           ^
+User error: Illegal zero denominator
+
+>> print 1/0 div 1;
+           ^
+User error: Illegal zero denominator
+
+>> print 1/0 and true;
+           ^
+User error: Illegal zero denominator
+
+>> print 1/0 join {1};
+           ^
+User error: Illegal zero denominator
+
+>> print 1/0 subset {1};
+           ^
+User error: Illegal zero denominator
+
+>> if 1/0 then print 1; end if;
+        ^
+User error: Illegal zero denominator
+
+>> while 1/0 do print 1; end while;
+           ^
+User error: Illegal zero denominator
+
+>> for i := 1 to 1/0 do print 1; end for;
+                   ^
+User error: Illegal zero denominator
+
+>> for i := 1 to 2 by 1/0 do print 1; end for;
+                        ^
+User error: Illegal zero denominator
+
+>> x := 1/0 select 1 else 2;
+          ^
+User error: Illegal zero denominator
+
+>> x := true select 1/0 else 2;
+                      ^
+User error: Illegal zero denominator
+
+>> print 1/0 where x is 1;
+           ^
+User error: Illegal zero denominator
+
+>> x := [1/0 .. 3];
+           ^
+User error: Illegal zero denominator
+
+>> x := [i : i in [1] | 1/0];
+                          ^
+User error: Illegal zero denominator
+
+>> x := <1/0, 2>;
+           ^
+User error: Illegal zero denominator
+
+>> x := {@ 1/0 @};
+             ^
+User error: Illegal zero denominator
+
+>> x := 1/0 -> 2;
+          ^
+User error: Illegal zero denominator
+
+>> case 1: when 1/0: print 1; end case;
+                  ^
+User error: Illegal zero denominator
+
+>> f := func< | 2/0 >;
+                  ^
+User error: Illegal zero denominator
+the statement before it ran
+
+>> print 7/x;
+          ^
+Runtime error in '/': Division by zero
+
+
+>> print 1/+0;
+          ^
+Runtime error in '/': Division by zero
+
+
+>> print 1/(+0);
+          ^
+Runtime error in '/': Division by zero
+
+
+>> print 1/0^2;
+          ^
+Runtime error in '/': Division by zero
+
+
+>> print +1/0;
+           ^
+Runtime error in '/': Division by zero
+
+
+>> print (1+1)/0;
+              ^
+Runtime error in '/': Division by zero
+
+
+>> print 1/(0+0);
+          ^
+Runtime error in '/': Division by zero
+
+
+>> print 2*3/0;
+            ^
+Runtime error in '/': Division by zero
+
+
+>> print 1/2/0;
+            ^
+Runtime error in '/': Division by zero
+
+
+>> print (2/3)/0;
+              ^
+Runtime error in '/': Division by zero
+
+
+>> print 1.5/0;
+            ^
+Runtime error in '/': Division by zero
+
+
+>> print 1/0.0;
+          ^
+Runtime error in '/': Division by zero
+
+
+>> print 7 div 0;
+           ^
+Runtime error in 'div': Division by zero
+
+
+>> print 7 mod 0;
+           ^
+Runtime error in 'mod': Division by zero
+
+
+>> print 7 div (1-1);
+           ^
+Runtime error in 'div': Division by zero
+
+
+>> y /:= 0;
+     ^
+Runtime error in '/:=': Division by zero
+
+
+>> print F!1 / F!0;
+             ^
+Runtime error in '/': Division by zero
+
+
+>> print (P.1 + 1)/0;
+                  ^
+Runtime error in '/': Argument 2 is not a unit
+
+
+>> print 1/(P.1 - P.1);
+          ^
+Runtime error in '/': Division by zero
+
+
+>> print P.1/(0/1);
+            ^
+Runtime error in '/': Argument 2 is not a unit
+
+
+>> print P.1 div 0;
+             ^
+Runtime error in 'div': Division by zero
+
+
+>> print P.1 mod 0;
+             ^
+Runtime error in 'mod': Division by zero
+
+
+>> print Z.1/0;
+            ^
+Runtime error in '/': Argument 2 is not a unit
+
+
+>> 1/0x0;
+     ^
+User error: Illegal zero denominator
+
+>> 1/00 true;
+        ^
+User error: bad syntax
+
+>> 1/0x0 true;
+         ^
+User error: bad syntax
+
+>> x := 1/0x00;
+          ^
+User error: Illegal zero denominator
+
+>> h := 1; h div:= 1/0x0;
+                     ^
+User error: Illegal zero denominator
+
+>> print 1/0 = 1;
+           ^
+User error: Illegal zero denominator
+
+>> x := [1/0 = 1];
+           ^
+User error: Illegal zero denominator
+end

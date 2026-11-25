@@ -1775,8 +1775,12 @@ export async function scheduled(env: ShareEnv): Promise<void> {
     const r = await db.prepare(STATES_EXPIRED).bind(t - STATE_SKEW_S, 1000).run().catch(() => null);
     if (!r || Number(r.meta?.changes ?? 0) < 1000) break;
   }
-  // the admin page's audit log, after ADMIN_RECORD_DAYS (admin-visibility-plan r1d §4)
-  await db.prepare("DELETE FROM admin_views WHERE at < ?1").bind(t - ADMIN_RECORD_DAYS * DAY).run();
+  // the admin page's audit log, after ADMIN_RECORD_DAYS (admin-visibility-plan r1d §4): a view's targets with it, in
+  // one batch, the targets first (they reference the view)
+  await db.batch([
+    db.prepare("DELETE FROM admin_view_targets WHERE view_id IN (SELECT id FROM admin_views WHERE at < ?1)").bind(t - ADMIN_RECORD_DAYS * DAY),
+    db.prepare("DELETE FROM admin_views WHERE at < ?1").bind(t - ADMIN_RECORD_DAYS * DAY),
+  ]);
   // expired admin grants (r1h §1.8)
   await db.prepare("DELETE FROM admin_grants WHERE expires_at < ?1").bind(t).run();
   // records of finished deletions, after their time (HARD-SHARE-3, HARD-E55-2):

@@ -569,6 +569,120 @@
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-raster (deps: wasmheap, which has no workspace deps; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types, and it handles the module's own byte buffers (request bytes, REPLY, the bounded heap's pages, refusal statics). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_dataset_new",
+   "hash": "003b44a9abc8e263e0817ac1b7e95d4bb23e5c2d47c813ea75bbaa8cecb4d195",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset table, a buffer's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_dataset_x",
+   "hash": "b8a6c39c645ab3baff25cfb9362cfb6c578036cc43e06f27a039992655ed557d",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset table, a buffer's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_dataset_y",
+   "hash": "07690165242788ebb8da62c672112115e51455862606b5907e5d8aea4de335f9",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset table, a buffer's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_dataset_mask",
+   "hash": "068ffefb124c1b75175181df76879b1afd09eb6973e8d6175b70b4f19093598f",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset table, a buffer's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_dataset_seal",
+   "hash": "4a082a09bfbf7cbf190c29679e0b7aaad9d62453d9acf91559ab3ed0a3b5cbbe",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset table, a buffer's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_dataset_release",
+   "hash": "962778633a5ecbb41f12d68a4a1735d08791996c5d9589a53564ac28ee433173",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset table, a buffer's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_detail_row",
+   "hash": "c1b10e78575edc19a42dd54baa64e45b5be489fbf7b23a0ccf774b8e8c68f61b",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset table, a buffer's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_detail_col",
+   "hash": "b3eab4ebe7611a4168029f2c501e467ac630d89a4085cb5ae253b2c86c7358ba",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset table, a buffer's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_live_bytes",
+   "hash": "91fb6cb0a150ae71de7fb5919f54487fa1f6e007ddbe4438840fc830ac791a6e",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset table, a buffer's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_begin",
+   "hash": "dca79a9809ce589d3551e67e2dec14bba57d6a37f6acd3cd9aea848b61d2dace",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset table, a buffer's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_last_refusal",
+   "hash": "68e75c2b6f72c4cf7931f5847026ccb7c25b9a2db3c341011475372cf012a10d",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset table, a buffer's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_buffer_new",
+   "hash": "2ce2f719f8abd1b6650128defdc00426ae6ea7fdbe68f5457ae9afa18084737e",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset, buffer and tree tables, a buffer's or a tree array's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_buffer_ptr",
+   "hash": "3c459cb01029fab2f42de48e6736cc7da4a2ece6732063256f380272dcd987a5",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset, buffer and tree tables, a buffer's or a tree array's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_buffer_release",
+   "hash": "a87be75db4ff617274eb8742961e95839f4eba42904de3a0d1288477f379227b",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset, buffer and tree tables, a buffer's or a tree array's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_fit",
+   "hash": "cee587154ee90b4b59566f9e7063ba9a1afa8f9b464ef5975a706a7c9cd504cd",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset, buffer and tree tables, a buffer's or a tree array's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_tree_info",
+   "hash": "2b683c90ab9dcdbca3529b14d5f8b079776e307182b53fa96798f602dead8942",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset, buffer and tree tables, a buffer's or a tree array's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_tree_array",
+   "hash": "da5e94615be3d6c2cc9208888fb42f58bb3ecc50129b7ae4d98f4004403c575c",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset, buffer and tree tables, a buffer's or a tree array's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_tree_release",
+   "hash": "71d29756f56131c078a19949f5e0fe3c267b63256abfa3da7f5f3728106cee4a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset, buffer and tree tables, a buffer's or a tree array's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/skltree/src/wasm.rs",
+   "item": "fn skt_fit_bytes",
+   "hash": "f3504060e2c5e3e8d22fde515ecd4f68b4a852df4e882bcddede27223f203306",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt, glibm and wasmheap, none of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset, buffer and tree tables, a buffer's or a tree array's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
    "file": "engine/wasmheap/src/lib.rs",
    "item": "impl Allocator for Bounded",
    "hash": "81adb2602206cc52cb57eae198ae88c2efda32facdb383a114794dcb0d90e482",

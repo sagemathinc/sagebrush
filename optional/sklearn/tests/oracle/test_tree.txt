@@ -1,0 +1,354 @@
+python 3.14.4 x86_64 glibc
+package numpy 2.5.5
+package pandas 3.1.1
+package scikit-learn 1.9.1
+package scipy 1.18.1
+package joblib 1.6.0
+package threadpoolctl 3.8.0
+--
+== clf.iris.gini.0
+{'node_count': 17, 'max_depth': 5, 'n_leaves': 9, 'capacity': 17, 'n_features': 4, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (17,), '86d543d7bd8a4be4'), 'children_right': ('int64', (17,), '9f91218a74b7b4f2'), 'feature': ('int64', (17,), '19e5d8f5f37c178a'), 'threshold': ('float64', (17,), 'f2279c1db7fb906d'), 'impurity': ('float64', (17,), '161f80098117c333'), 'n_node_samples': ('int64', (17,), '20dc83de22fe6dff'), 'weighted_n_node_samples': ('float64', (17,), '0b0c47b86abbb4b5'), 'missing_go_to_left': ('uint8', (17,), 'c950775f21ff5b1c'), 'value': ('float64', (17, 1, 3), 'f9597a056eda2cb1'), 'importances': ('float64', (4,), 'f07ebba5c66c8cc7'), 'raw_importances': ('float64', (4,), '0b71a2f7227dd078')}
+== clf.iris.gini.2026
+{'node_count': 17, 'max_depth': 5, 'n_leaves': 9, 'capacity': 17, 'n_features': 4, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (17,), '86d543d7bd8a4be4'), 'children_right': ('int64', (17,), '9f91218a74b7b4f2'), 'feature': ('int64', (17,), '9b706dae27a8e8f1'), 'threshold': ('float64', (17,), '359a25dde7760a7d'), 'impurity': ('float64', (17,), '161f80098117c333'), 'n_node_samples': ('int64', (17,), '8258ac7ffcd86e1c'), 'weighted_n_node_samples': ('float64', (17,), 'ca6dca8de58da498'), 'missing_go_to_left': ('uint8', (17,), '92063da101cbe73e'), 'value': ('float64', (17, 1, 3), '6cc1da3c40565e40'), 'importances': ('float64', (4,), 'f41c30227a15bd07'), 'raw_importances': ('float64', (4,), 'ac36d965de6198f8')}
+== clf.iris.entropy.0
+{'node_count': 17, 'max_depth': 5, 'n_leaves': 9, 'capacity': 17, 'n_features': 4, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (17,), '86d543d7bd8a4be4'), 'children_right': ('int64', (17,), '9f91218a74b7b4f2'), 'feature': ('int64', (17,), '19e5d8f5f37c178a'), 'threshold': ('float64', (17,), 'f2279c1db7fb906d'), 'impurity': ('float64', (17,), '56d458df5e71025a'), 'n_node_samples': ('int64', (17,), '20dc83de22fe6dff'), 'weighted_n_node_samples': ('float64', (17,), '0b0c47b86abbb4b5'), 'missing_go_to_left': ('uint8', (17,), 'c950775f21ff5b1c'), 'value': ('float64', (17, 1, 3), 'f9597a056eda2cb1'), 'importances': ('float64', (4,), 'a81c8a080c1ac302'), 'raw_importances': ('float64', (4,), '0f75f6d17da8ba9a')}
+== clf.iris.entropy.2026
+{'node_count': 17, 'max_depth': 5, 'n_leaves': 9, 'capacity': 17, 'n_features': 4, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (17,), '86d543d7bd8a4be4'), 'children_right': ('int64', (17,), '9f91218a74b7b4f2'), 'feature': ('int64', (17,), '9b706dae27a8e8f1'), 'threshold': ('float64', (17,), '359a25dde7760a7d'), 'impurity': ('float64', (17,), '56d458df5e71025a'), 'n_node_samples': ('int64', (17,), '8258ac7ffcd86e1c'), 'weighted_n_node_samples': ('float64', (17,), 'ca6dca8de58da498'), 'missing_go_to_left': ('uint8', (17,), '92063da101cbe73e'), 'value': ('float64', (17, 1, 3), '6cc1da3c40565e40'), 'importances': ('float64', (4,), 'bee34b5b80b884ba'), 'raw_importances': ('float64', (4,), 'c1bbbdc9c2d62fa3')}
+== clf.iris.log_loss.0
+{'node_count': 17, 'max_depth': 5, 'n_leaves': 9, 'capacity': 17, 'n_features': 4, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (17,), '86d543d7bd8a4be4'), 'children_right': ('int64', (17,), '9f91218a74b7b4f2'), 'feature': ('int64', (17,), '19e5d8f5f37c178a'), 'threshold': ('float64', (17,), 'f2279c1db7fb906d'), 'impurity': ('float64', (17,), '56d458df5e71025a'), 'n_node_samples': ('int64', (17,), '20dc83de22fe6dff'), 'weighted_n_node_samples': ('float64', (17,), '0b0c47b86abbb4b5'), 'missing_go_to_left': ('uint8', (17,), 'c950775f21ff5b1c'), 'value': ('float64', (17, 1, 3), 'f9597a056eda2cb1'), 'importances': ('float64', (4,), 'a81c8a080c1ac302'), 'raw_importances': ('float64', (4,), '0f75f6d17da8ba9a')}
+== clf.iris.log_loss.2026
+{'node_count': 17, 'max_depth': 5, 'n_leaves': 9, 'capacity': 17, 'n_features': 4, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (17,), '86d543d7bd8a4be4'), 'children_right': ('int64', (17,), '9f91218a74b7b4f2'), 'feature': ('int64', (17,), '9b706dae27a8e8f1'), 'threshold': ('float64', (17,), '359a25dde7760a7d'), 'impurity': ('float64', (17,), '56d458df5e71025a'), 'n_node_samples': ('int64', (17,), '8258ac7ffcd86e1c'), 'weighted_n_node_samples': ('float64', (17,), 'ca6dca8de58da498'), 'missing_go_to_left': ('uint8', (17,), '92063da101cbe73e'), 'value': ('float64', (17, 1, 3), '6cc1da3c40565e40'), 'importances': ('float64', (4,), 'bee34b5b80b884ba'), 'raw_importances': ('float64', (4,), 'c1bbbdc9c2d62fa3')}
+== clf.iris.sqrt
+{'node_count': 23, 'max_depth': 5, 'n_leaves': 12, 'capacity': 23, 'n_features': 4, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (23,), 'a6eec223452ab94d'), 'children_right': ('int64', (23,), 'f0ffdbcc253300a2'), 'feature': ('int64', (23,), '12baa5fc93cd40e8'), 'threshold': ('float64', (23,), '57d9fa859d744ccf'), 'impurity': ('float64', (23,), 'e3b419f82336cfb9'), 'n_node_samples': ('int64', (23,), 'a0c05f4a6cef856c'), 'weighted_n_node_samples': ('float64', (23,), '066c350ce325d731'), 'missing_go_to_left': ('uint8', (23,), 'e910806734fa4ab5'), 'value': ('float64', (23, 1, 3), 'c548ccf648dee642'), 'importances': ('float64', (4,), 'b41652767410f38c'), 'raw_importances': ('float64', (4,), '0083d47435eed086')}
+== clf.iris.shallow
+{'node_count': 11, 'max_depth': 4, 'n_leaves': 6, 'capacity': 11, 'n_features': 4, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (11,), '44d209546b439aab'), 'children_right': ('int64', (11,), '4781cb8524010bec'), 'feature': ('int64', (11,), '882456a67c2cb87a'), 'threshold': ('float64', (11,), 'a9aec63e59e4789c'), 'impurity': ('float64', (11,), '69125bf76be25d01'), 'n_node_samples': ('int64', (11,), 'f5871bd947a70e64'), 'weighted_n_node_samples': ('float64', (11,), 'ca1f4346c84e6417'), 'missing_go_to_left': ('uint8', (11,), '152cfb8ab07d3d49'), 'value': ('float64', (11, 1, 3), 'a1ec1c9dacec3145'), 'importances': ('float64', (4,), '5b9aa32966693661'), 'raw_importances': ('float64', (4,), 'cb8d146661970376')}
+== clf.iris.predict
+('int64', (150,), '734737f111629912')
+== clf.iris.proba
+('float64', (150, 3), 'abb0c01056115fd1')
+== clf.iris.apply
+('int64', (50,), '0507f9718419a66d')
+== clf.iris.score
+0.9733333333333334
+== clf.wine.gini.0
+{'node_count': 23, 'max_depth': 5, 'n_leaves': 12, 'capacity': 23, 'n_features': 13, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (23,), '5de117f272c5e642'), 'children_right': ('int64', (23,), 'c6aaa245b10d0b00'), 'feature': ('int64', (23,), '86cb4eefa16261c4'), 'threshold': ('float64', (23,), '6d5e9e3e8aadf1f7'), 'impurity': ('float64', (23,), '1d1547a1543a3a66'), 'n_node_samples': ('int64', (23,), '3bf6687b3977aa42'), 'weighted_n_node_samples': ('float64', (23,), '744bf9e791df604c'), 'missing_go_to_left': ('uint8', (23,), '0c656d514dc420f8'), 'value': ('float64', (23, 1, 3), 'e70e68499f7c8c03'), 'importances': ('float64', (13,), '0874cd6a25334f91'), 'raw_importances': ('float64', (13,), '001041713c9399a3')}
+== clf.wine.gini.2026
+{'node_count': 23, 'max_depth': 5, 'n_leaves': 12, 'capacity': 23, 'n_features': 13, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (23,), '5de117f272c5e642'), 'children_right': ('int64', (23,), 'c6aaa245b10d0b00'), 'feature': ('int64', (23,), '8eb5a350f8b91b8d'), 'threshold': ('float64', (23,), '9176306bebad58f9'), 'impurity': ('float64', (23,), '1d1547a1543a3a66'), 'n_node_samples': ('int64', (23,), '4cb464fe026f7fa1'), 'weighted_n_node_samples': ('float64', (23,), '1e27178a41df8f37'), 'missing_go_to_left': ('uint8', (23,), '4d7e5b693705be4c'), 'value': ('float64', (23, 1, 3), '15580029346a0ddf'), 'importances': ('float64', (13,), 'c01f931a20460f3a'), 'raw_importances': ('float64', (13,), 'd93cbc0d4301dd3d')}
+== clf.wine.entropy.0
+{'node_count': 15, 'max_depth': 4, 'n_leaves': 8, 'capacity': 15, 'n_features': 13, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (15,), '917bc11532f94847'), 'children_right': ('int64', (15,), '4be92c287dd9a699'), 'feature': ('int64', (15,), 'ed12aa9bb87ed0c7'), 'threshold': ('float64', (15,), '9645f3600792fdd8'), 'impurity': ('float64', (15,), 'dbf8e8404d2a02d0'), 'n_node_samples': ('int64', (15,), '998e60e240e5521e'), 'weighted_n_node_samples': ('float64', (15,), 'cc4ed31970eb9bd2'), 'missing_go_to_left': ('uint8', (15,), 'df01952480e834ac'), 'value': ('float64', (15, 1, 3), '531ffa712628bcdf'), 'importances': ('float64', (13,), '5ec458a62269f37a'), 'raw_importances': ('float64', (13,), '6ad20f3878d8a8ef')}
+== clf.wine.entropy.2026
+{'node_count': 15, 'max_depth': 4, 'n_leaves': 8, 'capacity': 15, 'n_features': 13, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (15,), '917bc11532f94847'), 'children_right': ('int64', (15,), '4be92c287dd9a699'), 'feature': ('int64', (15,), '97a7b84385ebc961'), 'threshold': ('float64', (15,), '48783d357ba887fb'), 'impurity': ('float64', (15,), 'dbf8e8404d2a02d0'), 'n_node_samples': ('int64', (15,), '998e60e240e5521e'), 'weighted_n_node_samples': ('float64', (15,), 'cc4ed31970eb9bd2'), 'missing_go_to_left': ('uint8', (15,), 'df01952480e834ac'), 'value': ('float64', (15, 1, 3), '531ffa712628bcdf'), 'importances': ('float64', (13,), 'ec9cdde0074bae26'), 'raw_importances': ('float64', (13,), '117b9480452ca5b4')}
+== clf.wine.log_loss.0
+{'node_count': 15, 'max_depth': 4, 'n_leaves': 8, 'capacity': 15, 'n_features': 13, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (15,), '917bc11532f94847'), 'children_right': ('int64', (15,), '4be92c287dd9a699'), 'feature': ('int64', (15,), 'ed12aa9bb87ed0c7'), 'threshold': ('float64', (15,), '9645f3600792fdd8'), 'impurity': ('float64', (15,), 'dbf8e8404d2a02d0'), 'n_node_samples': ('int64', (15,), '998e60e240e5521e'), 'weighted_n_node_samples': ('float64', (15,), 'cc4ed31970eb9bd2'), 'missing_go_to_left': ('uint8', (15,), 'df01952480e834ac'), 'value': ('float64', (15, 1, 3), '531ffa712628bcdf'), 'importances': ('float64', (13,), '5ec458a62269f37a'), 'raw_importances': ('float64', (13,), '6ad20f3878d8a8ef')}
+== clf.wine.log_loss.2026
+{'node_count': 15, 'max_depth': 4, 'n_leaves': 8, 'capacity': 15, 'n_features': 13, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (15,), '917bc11532f94847'), 'children_right': ('int64', (15,), '4be92c287dd9a699'), 'feature': ('int64', (15,), '97a7b84385ebc961'), 'threshold': ('float64', (15,), '48783d357ba887fb'), 'impurity': ('float64', (15,), 'dbf8e8404d2a02d0'), 'n_node_samples': ('int64', (15,), '998e60e240e5521e'), 'weighted_n_node_samples': ('float64', (15,), 'cc4ed31970eb9bd2'), 'missing_go_to_left': ('uint8', (15,), 'df01952480e834ac'), 'value': ('float64', (15, 1, 3), '531ffa712628bcdf'), 'importances': ('float64', (13,), 'ec9cdde0074bae26'), 'raw_importances': ('float64', (13,), '117b9480452ca5b4')}
+== clf.wine.sqrt
+{'node_count': 25, 'max_depth': 5, 'n_leaves': 13, 'capacity': 25, 'n_features': 13, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (25,), '5465d44628636438'), 'children_right': ('int64', (25,), 'd4eb544b724372ef'), 'feature': ('int64', (25,), '46969ebf70c7ec8c'), 'threshold': ('float64', (25,), 'ac1cbe3b092133ed'), 'impurity': ('float64', (25,), '59d2848a3763c55c'), 'n_node_samples': ('int64', (25,), 'b96b1a2fac0f623a'), 'weighted_n_node_samples': ('float64', (25,), 'a94629742df979f8'), 'missing_go_to_left': ('uint8', (25,), 'bae5c8506cc5b40e'), 'value': ('float64', (25, 1, 3), '17bacb4acd85a2f9'), 'importances': ('float64', (13,), '13285fd11e76be3d'), 'raw_importances': ('float64', (13,), '9016d095ca02f1d3')}
+== clf.wine.shallow
+{'node_count': 21, 'max_depth': 4, 'n_leaves': 11, 'capacity': 21, 'n_features': 13, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (21,), '7e28d66f59743ffd'), 'children_right': ('int64', (21,), '12d16fb9dbac72a5'), 'feature': ('int64', (21,), 'ac51152150fed153'), 'threshold': ('float64', (21,), '5f2b46bab47f108a'), 'impurity': ('float64', (21,), '497e26abd5c6c641'), 'n_node_samples': ('int64', (21,), '339eed53d25b3e1a'), 'weighted_n_node_samples': ('float64', (21,), '5a17022d1430f9e8'), 'missing_go_to_left': ('uint8', (21,), '1224f8e3adfd766b'), 'value': ('float64', (21, 1, 3), '318a0e76a4402562'), 'importances': ('float64', (13,), '1062dcb8d98f66c7'), 'raw_importances': ('float64', (13,), '0ddf601b53f8b136')}
+== clf.wine.predict
+('int64', (178,), 'b6514e07a6d27854')
+== clf.wine.proba
+('float64', (178, 3), '821d8125e6b78dc6')
+== clf.wine.apply
+('int64', (60,), '7928c457d4226748')
+== clf.wine.score
+0.9775280898876404
+== clf.cancer.gini.0
+{'node_count': 43, 'max_depth': 7, 'n_leaves': 22, 'capacity': 43, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 2, 'n_classes': [2], 'children_left': ('int64', (43,), 'fabacb6a2047cc80'), 'children_right': ('int64', (43,), '888bc77d347c548c'), 'feature': ('int64', (43,), 'fe2aa2f6a1cfc243'), 'threshold': ('float64', (43,), '64e400d5cffd981d'), 'impurity': ('float64', (43,), 'cacb96934328e425'), 'n_node_samples': ('int64', (43,), '919a3db52a567b12'), 'weighted_n_node_samples': ('float64', (43,), 'b62b673c7c51027a'), 'missing_go_to_left': ('uint8', (43,), 'be0dc3883da2810d'), 'value': ('float64', (43, 1, 2), 'de923b2c90eb5b43'), 'importances': ('float64', (30,), '1ee085aaeb4b9d9b'), 'raw_importances': ('float64', (30,), 'ab2755b40bdae74f')}
+== clf.cancer.gini.2026
+{'node_count': 43, 'max_depth': 7, 'n_leaves': 22, 'capacity': 43, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 2, 'n_classes': [2], 'children_left': ('int64', (43,), 'c348d1ecdc7ec38d'), 'children_right': ('int64', (43,), 'ee3b29b2122c424b'), 'feature': ('int64', (43,), 'f2770c6b97bdf9ae'), 'threshold': ('float64', (43,), 'ea138572c63c3197'), 'impurity': ('float64', (43,), '2c3c791bdad40460'), 'n_node_samples': ('int64', (43,), 'eb63085be6199c72'), 'weighted_n_node_samples': ('float64', (43,), '516d8ca31bac8cd5'), 'missing_go_to_left': ('uint8', (43,), 'f3783e4e55d53f5a'), 'value': ('float64', (43, 1, 2), '7e2a35768b4d9208'), 'importances': ('float64', (30,), 'baae4a7aa72895c6'), 'raw_importances': ('float64', (30,), '55dfa3fb7296846f')}
+== clf.cancer.entropy.0
+{'node_count': 39, 'max_depth': 7, 'n_leaves': 20, 'capacity': 39, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 2, 'n_classes': [2], 'children_left': ('int64', (39,), 'b8961892a7f1a308'), 'children_right': ('int64', (39,), '66f949ff9e254add'), 'feature': ('int64', (39,), '87ac98d2a17b90ec'), 'threshold': ('float64', (39,), '183952fa4ccc7f14'), 'impurity': ('float64', (39,), 'bcf1f94473e4b75b'), 'n_node_samples': ('int64', (39,), '55bbf2a8ed159847'), 'weighted_n_node_samples': ('float64', (39,), 'f2b0a55224e9d7f9'), 'missing_go_to_left': ('uint8', (39,), '9da379a18ce7bf2f'), 'value': ('float64', (39, 1, 2), '1eae44f46bb4c5ea'), 'importances': ('float64', (30,), 'de73658c83745631'), 'raw_importances': ('float64', (30,), '872774137efa51fc')}
+== clf.cancer.entropy.2026
+{'node_count': 39, 'max_depth': 7, 'n_leaves': 20, 'capacity': 39, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 2, 'n_classes': [2], 'children_left': ('int64', (39,), '6b2c2c4410eb7e53'), 'children_right': ('int64', (39,), '600a7e145b114676'), 'feature': ('int64', (39,), 'ddd8aad33e0f483c'), 'threshold': ('float64', (39,), '1f6dc0c62d4167b2'), 'impurity': ('float64', (39,), '597a849bca443a72'), 'n_node_samples': ('int64', (39,), '38a7033ecbcf4749'), 'weighted_n_node_samples': ('float64', (39,), 'f3ef3e90d997ae7f'), 'missing_go_to_left': ('uint8', (39,), '1f4f1452ddd2f067'), 'value': ('float64', (39, 1, 2), '890ec0d51b9eeef0'), 'importances': ('float64', (30,), 'b0f3d824e62ce160'), 'raw_importances': ('float64', (30,), '9443d7825f1d4d86')}
+== clf.cancer.log_loss.0
+{'node_count': 39, 'max_depth': 7, 'n_leaves': 20, 'capacity': 39, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 2, 'n_classes': [2], 'children_left': ('int64', (39,), 'b8961892a7f1a308'), 'children_right': ('int64', (39,), '66f949ff9e254add'), 'feature': ('int64', (39,), '87ac98d2a17b90ec'), 'threshold': ('float64', (39,), '183952fa4ccc7f14'), 'impurity': ('float64', (39,), 'bcf1f94473e4b75b'), 'n_node_samples': ('int64', (39,), '55bbf2a8ed159847'), 'weighted_n_node_samples': ('float64', (39,), 'f2b0a55224e9d7f9'), 'missing_go_to_left': ('uint8', (39,), '9da379a18ce7bf2f'), 'value': ('float64', (39, 1, 2), '1eae44f46bb4c5ea'), 'importances': ('float64', (30,), 'de73658c83745631'), 'raw_importances': ('float64', (30,), '872774137efa51fc')}
+== clf.cancer.log_loss.2026
+{'node_count': 39, 'max_depth': 7, 'n_leaves': 20, 'capacity': 39, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 2, 'n_classes': [2], 'children_left': ('int64', (39,), '6b2c2c4410eb7e53'), 'children_right': ('int64', (39,), '600a7e145b114676'), 'feature': ('int64', (39,), 'ddd8aad33e0f483c'), 'threshold': ('float64', (39,), '1f6dc0c62d4167b2'), 'impurity': ('float64', (39,), '597a849bca443a72'), 'n_node_samples': ('int64', (39,), '38a7033ecbcf4749'), 'weighted_n_node_samples': ('float64', (39,), 'f3ef3e90d997ae7f'), 'missing_go_to_left': ('uint8', (39,), '1f4f1452ddd2f067'), 'value': ('float64', (39, 1, 2), '890ec0d51b9eeef0'), 'importances': ('float64', (30,), 'b0f3d824e62ce160'), 'raw_importances': ('float64', (30,), '9443d7825f1d4d86')}
+== clf.cancer.sqrt
+{'node_count': 25, 'max_depth': 6, 'n_leaves': 13, 'capacity': 25, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 2, 'n_classes': [2], 'children_left': ('int64', (25,), '5b0ed3c60cde611c'), 'children_right': ('int64', (25,), 'c9beaf5db774ce51'), 'feature': ('int64', (25,), '0b4af96784e418a6'), 'threshold': ('float64', (25,), '07e1c20e80fe965b'), 'impurity': ('float64', (25,), 'b364b673a1345ddf'), 'n_node_samples': ('int64', (25,), '45a55e7113b6618e'), 'weighted_n_node_samples': ('float64', (25,), '7e863ca27feaefa7'), 'missing_go_to_left': ('uint8', (25,), '4773f1c6370cf7bc'), 'value': ('float64', (25, 1, 2), 'fcdbef30d2d60035'), 'importances': ('float64', (30,), '7c23feb17392001b'), 'raw_importances': ('float64', (30,), 'd5dbb2ffa9bab270')}
+== clf.cancer.shallow
+{'node_count': 13, 'max_depth': 4, 'n_leaves': 7, 'capacity': 13, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 2, 'n_classes': [2], 'children_left': ('int64', (13,), '93019d0b5e156086'), 'children_right': ('int64', (13,), 'fb796cb4cc3c0365'), 'feature': ('int64', (13,), 'e19d5b20bf99dbd1'), 'threshold': ('float64', (13,), '935460d0456e9aef'), 'impurity': ('float64', (13,), '1f0fe2d5c0165fa7'), 'n_node_samples': ('int64', (13,), '31cf32fe20c8e8d3'), 'weighted_n_node_samples': ('float64', (13,), '27e881c9df03fc7b'), 'missing_go_to_left': ('uint8', (13,), '3208cd9f4901d3e7'), 'value': ('float64', (13, 1, 2), 'c7b85d49e94767d1'), 'importances': ('float64', (30,), 'ee1261fd526e4418'), 'raw_importances': ('float64', (30,), 'b51227182da50aab')}
+== clf.cancer.predict
+('int64', (569,), 'e426cc953da361d7')
+== clf.cancer.proba
+('float64', (569, 2), '5dc5c857ee2ff0fc')
+== clf.cancer.apply
+('int64', (190,), '596f19666bccb8d9')
+== clf.cancer.score
+0.9789103690685413
+== clf.digits.gini.0
+{'node_count': 335, 'max_depth': 15, 'n_leaves': 168, 'capacity': 335, 'n_features': 64, 'n_outputs': 1, 'max_n_classes': 10, 'n_classes': [10], 'children_left': ('int64', (335,), '590b8c3440bf4b9a'), 'children_right': ('int64', (335,), 'e407d0c74c4aefe8'), 'feature': ('int64', (335,), '5a15d7f87ea1946a'), 'threshold': ('float64', (335,), '8fe8ac01c838fe93'), 'impurity': ('float64', (335,), 'a73406d72f6ecae0'), 'n_node_samples': ('int64', (335,), '3603ca61fab642c9'), 'weighted_n_node_samples': ('float64', (335,), '01638f238425674d'), 'missing_go_to_left': ('uint8', (335,), '235edb847d7ef523'), 'value': ('float64', (335, 1, 10), '0f5d4a0fdd088556'), 'importances': ('float64', (64,), '72ee5ccce77078b0'), 'raw_importances': ('float64', (64,), 'c8c6c92ab64fc42b')}
+== clf.digits.gini.2026
+{'node_count': 335, 'max_depth': 15, 'n_leaves': 168, 'capacity': 335, 'n_features': 64, 'n_outputs': 1, 'max_n_classes': 10, 'n_classes': [10], 'children_left': ('int64', (335,), '53c1706b0a1ddf71'), 'children_right': ('int64', (335,), '122eba9d6f253abd'), 'feature': ('int64', (335,), '3ad86d05530d6197'), 'threshold': ('float64', (335,), 'f223228955698cf3'), 'impurity': ('float64', (335,), 'ff84dcab9e2e674e'), 'n_node_samples': ('int64', (335,), '5fd76949319ff392'), 'weighted_n_node_samples': ('float64', (335,), 'a2500a37ff77d8ed'), 'missing_go_to_left': ('uint8', (335,), '301a938c4d1d4a12'), 'value': ('float64', (335, 1, 10), 'c57c3f1c786bfadc'), 'importances': ('float64', (64,), '95a1ee0327f508dd'), 'raw_importances': ('float64', (64,), 'd203bc4e15faf011')}
+== clf.digits.entropy.0
+{'node_count': 295, 'max_depth': 11, 'n_leaves': 148, 'capacity': 295, 'n_features': 64, 'n_outputs': 1, 'max_n_classes': 10, 'n_classes': [10], 'children_left': ('int64', (295,), '32750dcad0ce28f6'), 'children_right': ('int64', (295,), '125af6bcd9ff431c'), 'feature': ('int64', (295,), 'bff16f49db15dcbc'), 'threshold': ('float64', (295,), 'cba6f8b40a9fb7a1'), 'impurity': ('float64', (295,), 'be32d0af13aea9c8'), 'n_node_samples': ('int64', (295,), 'fe291f2c91351778'), 'weighted_n_node_samples': ('float64', (295,), '99cfefd61096c0f5'), 'missing_go_to_left': ('uint8', (295,), '3a9c25f95133b68d'), 'value': ('float64', (295, 1, 10), 'ab5c8b9891e68897'), 'importances': ('float64', (64,), '69cfc70bfea17204'), 'raw_importances': ('float64', (64,), 'e680eeddb41358d8')}
+== clf.digits.entropy.2026
+{'node_count': 295, 'max_depth': 11, 'n_leaves': 148, 'capacity': 295, 'n_features': 64, 'n_outputs': 1, 'max_n_classes': 10, 'n_classes': [10], 'children_left': ('int64', (295,), '6c91bb585df6ba8b'), 'children_right': ('int64', (295,), '888931d8dea80c3c'), 'feature': ('int64', (295,), '93db5b8e98df60dd'), 'threshold': ('float64', (295,), 'a44902031e733d9c'), 'impurity': ('float64', (295,), '511244e33d5279d0'), 'n_node_samples': ('int64', (295,), '657bda8154c8b942'), 'weighted_n_node_samples': ('float64', (295,), '70c767bd1ffe4396'), 'missing_go_to_left': ('uint8', (295,), '8fe8d7cdb2755577'), 'value': ('float64', (295, 1, 10), '22e3d300221161a6'), 'importances': ('float64', (64,), '97db1b71f9d67e77'), 'raw_importances': ('float64', (64,), 'd132e73b09f44481')}
+== clf.digits.log_loss.0
+{'node_count': 295, 'max_depth': 11, 'n_leaves': 148, 'capacity': 295, 'n_features': 64, 'n_outputs': 1, 'max_n_classes': 10, 'n_classes': [10], 'children_left': ('int64', (295,), '32750dcad0ce28f6'), 'children_right': ('int64', (295,), '125af6bcd9ff431c'), 'feature': ('int64', (295,), 'bff16f49db15dcbc'), 'threshold': ('float64', (295,), 'cba6f8b40a9fb7a1'), 'impurity': ('float64', (295,), 'be32d0af13aea9c8'), 'n_node_samples': ('int64', (295,), 'fe291f2c91351778'), 'weighted_n_node_samples': ('float64', (295,), '99cfefd61096c0f5'), 'missing_go_to_left': ('uint8', (295,), '3a9c25f95133b68d'), 'value': ('float64', (295, 1, 10), 'ab5c8b9891e68897'), 'importances': ('float64', (64,), '69cfc70bfea17204'), 'raw_importances': ('float64', (64,), 'e680eeddb41358d8')}
+== clf.digits.log_loss.2026
+{'node_count': 295, 'max_depth': 11, 'n_leaves': 148, 'capacity': 295, 'n_features': 64, 'n_outputs': 1, 'max_n_classes': 10, 'n_classes': [10], 'children_left': ('int64', (295,), '6c91bb585df6ba8b'), 'children_right': ('int64', (295,), '888931d8dea80c3c'), 'feature': ('int64', (295,), '93db5b8e98df60dd'), 'threshold': ('float64', (295,), 'a44902031e733d9c'), 'impurity': ('float64', (295,), '511244e33d5279d0'), 'n_node_samples': ('int64', (295,), '657bda8154c8b942'), 'weighted_n_node_samples': ('float64', (295,), '70c767bd1ffe4396'), 'missing_go_to_left': ('uint8', (295,), '8fe8d7cdb2755577'), 'value': ('float64', (295, 1, 10), '22e3d300221161a6'), 'importances': ('float64', (64,), '97db1b71f9d67e77'), 'raw_importances': ('float64', (64,), 'd132e73b09f44481')}
+== clf.digits.sqrt
+{'node_count': 79, 'max_depth': 8, 'n_leaves': 40, 'capacity': 79, 'n_features': 64, 'n_outputs': 1, 'max_n_classes': 10, 'n_classes': [10], 'children_left': ('int64', (79,), '50e6e124b98f29de'), 'children_right': ('int64', (79,), '6c1f87559ab75bf3'), 'feature': ('int64', (79,), '885d336d4dc65ac8'), 'threshold': ('float64', (79,), '69276676636f1c84'), 'impurity': ('float64', (79,), '9869487416cd89bc'), 'n_node_samples': ('int64', (79,), '2a30167e9bc291db'), 'weighted_n_node_samples': ('float64', (79,), 'e07d329bc01d20e8'), 'missing_go_to_left': ('uint8', (79,), '891b732cf562189d'), 'value': ('float64', (79, 1, 10), '97ade1261001ee5f'), 'importances': ('float64', (64,), '74131cfcfa60b027'), 'raw_importances': ('float64', (64,), '7d04ca6990a8b7be')}
+== clf.digits.shallow
+{'node_count': 25, 'max_depth': 4, 'n_leaves': 13, 'capacity': 25, 'n_features': 64, 'n_outputs': 1, 'max_n_classes': 10, 'n_classes': [10], 'children_left': ('int64', (25,), 'df921e262c00037d'), 'children_right': ('int64', (25,), '130b52b9dfdfc828'), 'feature': ('int64', (25,), '2c92fa9c3ff8a8a1'), 'threshold': ('float64', (25,), '2926a2669cd913e0'), 'impurity': ('float64', (25,), '001eb9938a8b682e'), 'n_node_samples': ('int64', (25,), 'f96ef45650a52522'), 'weighted_n_node_samples': ('float64', (25,), '9e7267fd8471e337'), 'missing_go_to_left': ('uint8', (25,), '84255c0cf46cd3a2'), 'value': ('float64', (25, 1, 10), 'afdc7587b196a8e3'), 'importances': ('float64', (64,), 'be6dd6ee959c657e'), 'raw_importances': ('float64', (64,), 'e3c364f9ab872683')}
+== clf.digits.predict
+('int64', (1797,), '50e7481790268be1')
+== clf.digits.proba
+('float64', (1797, 10), 'acf58982106e67bc')
+== clf.digits.apply
+('int64', (599,), '22fc6d506203e60b')
+== clf.digits.score
+0.4885920979410128
+== clf.cancer-nan.gini.0
+{'node_count': 43, 'max_depth': 6, 'n_leaves': 22, 'capacity': 43, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 2, 'n_classes': [2], 'children_left': ('int64', (43,), '5ca7316bde8b6849'), 'children_right': ('int64', (43,), 'b80f6997ff023dab'), 'feature': ('int64', (43,), '54bab38abca58ca5'), 'threshold': ('float64', (43,), '76b0254c9a00c578'), 'impurity': ('float64', (43,), 'd3e58fb030edb923'), 'n_node_samples': ('int64', (43,), '0a3b9c7a60301eb3'), 'weighted_n_node_samples': ('float64', (43,), 'bb65d0c4bc02cda5'), 'missing_go_to_left': ('uint8', (43,), 'c0b743acd9f22b7d'), 'value': ('float64', (43, 1, 2), 'ce034e9bb196dd1c'), 'importances': ('float64', (30,), '6b84b44513b95a2b'), 'raw_importances': ('float64', (30,), 'd6d160a7dc3f78ca')}
+== clf.cancer-nan.gini.2026
+{'node_count': 43, 'max_depth': 6, 'n_leaves': 22, 'capacity': 43, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 2, 'n_classes': [2], 'children_left': ('int64', (43,), '5ca7316bde8b6849'), 'children_right': ('int64', (43,), 'b80f6997ff023dab'), 'feature': ('int64', (43,), '97d98ce8b601b439'), 'threshold': ('float64', (43,), '3752f2d2895b9468'), 'impurity': ('float64', (43,), 'd3e58fb030edb923'), 'n_node_samples': ('int64', (43,), '10f5f62c14489113'), 'weighted_n_node_samples': ('float64', (43,), '95e473f8a97c28a1'), 'missing_go_to_left': ('uint8', (43,), '103302243452862f'), 'value': ('float64', (43, 1, 2), 'cd8462578f7c794d'), 'importances': ('float64', (30,), '8aef8a31796dd45b'), 'raw_importances': ('float64', (30,), 'd84b197482a3232f')}
+== clf.cancer-nan.entropy.0
+{'node_count': 43, 'max_depth': 7, 'n_leaves': 22, 'capacity': 43, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 2, 'n_classes': [2], 'children_left': ('int64', (43,), 'c8bedd6126300940'), 'children_right': ('int64', (43,), '5a6b1d188c0c300e'), 'feature': ('int64', (43,), '3255abad8acc4e5c'), 'threshold': ('float64', (43,), '243ce34b0fe958d1'), 'impurity': ('float64', (43,), 'ef5ef5ddf86338bd'), 'n_node_samples': ('int64', (43,), '598d936cbc9373d2'), 'weighted_n_node_samples': ('float64', (43,), 'a29b406d316794af'), 'missing_go_to_left': ('uint8', (43,), 'f254dfde9a0a79cc'), 'value': ('float64', (43, 1, 2), '8fee41fec4d0f8d7'), 'importances': ('float64', (30,), '5f5f4c220bc1e773'), 'raw_importances': ('float64', (30,), 'd81305eec95e0b06')}
+== clf.cancer-nan.entropy.2026
+{'node_count': 43, 'max_depth': 7, 'n_leaves': 22, 'capacity': 43, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 2, 'n_classes': [2], 'children_left': ('int64', (43,), 'c8bedd6126300940'), 'children_right': ('int64', (43,), '5a6b1d188c0c300e'), 'feature': ('int64', (43,), '74bd01fe3c5c17c7'), 'threshold': ('float64', (43,), 'c6ff36add837adea'), 'impurity': ('float64', (43,), 'ef5ef5ddf86338bd'), 'n_node_samples': ('int64', (43,), 'de3e4edbb5b6cb99'), 'weighted_n_node_samples': ('float64', (43,), 'd4be471648e132fb'), 'missing_go_to_left': ('uint8', (43,), 'd2c204e65d5da6dd'), 'value': ('float64', (43, 1, 2), '2c095ef954734dbb'), 'importances': ('float64', (30,), '7c8fe96157833686'), 'raw_importances': ('float64', (30,), '0f1f50b15405c33b')}
+== clf.cancer-nan.log_loss.0
+{'node_count': 43, 'max_depth': 7, 'n_leaves': 22, 'capacity': 43, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 2, 'n_classes': [2], 'children_left': ('int64', (43,), 'c8bedd6126300940'), 'children_right': ('int64', (43,), '5a6b1d188c0c300e'), 'feature': ('int64', (43,), '3255abad8acc4e5c'), 'threshold': ('float64', (43,), '243ce34b0fe958d1'), 'impurity': ('float64', (43,), 'ef5ef5ddf86338bd'), 'n_node_samples': ('int64', (43,), '598d936cbc9373d2'), 'weighted_n_node_samples': ('float64', (43,), 'a29b406d316794af'), 'missing_go_to_left': ('uint8', (43,), 'f254dfde9a0a79cc'), 'value': ('float64', (43, 1, 2), '8fee41fec4d0f8d7'), 'importances': ('float64', (30,), '5f5f4c220bc1e773'), 'raw_importances': ('float64', (30,), 'd81305eec95e0b06')}
+== clf.cancer-nan.log_loss.2026
+{'node_count': 43, 'max_depth': 7, 'n_leaves': 22, 'capacity': 43, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 2, 'n_classes': [2], 'children_left': ('int64', (43,), 'c8bedd6126300940'), 'children_right': ('int64', (43,), '5a6b1d188c0c300e'), 'feature': ('int64', (43,), '74bd01fe3c5c17c7'), 'threshold': ('float64', (43,), 'c6ff36add837adea'), 'impurity': ('float64', (43,), 'ef5ef5ddf86338bd'), 'n_node_samples': ('int64', (43,), 'de3e4edbb5b6cb99'), 'weighted_n_node_samples': ('float64', (43,), 'd4be471648e132fb'), 'missing_go_to_left': ('uint8', (43,), 'd2c204e65d5da6dd'), 'value': ('float64', (43, 1, 2), '2c095ef954734dbb'), 'importances': ('float64', (30,), '7c8fe96157833686'), 'raw_importances': ('float64', (30,), '0f1f50b15405c33b')}
+== clf.cancer-nan.sqrt
+{'node_count': 25, 'max_depth': 6, 'n_leaves': 13, 'capacity': 25, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 2, 'n_classes': [2], 'children_left': ('int64', (25,), '003943a8342d207b'), 'children_right': ('int64', (25,), '322e75aafab8643c'), 'feature': ('int64', (25,), 'c733e4dd661ccdea'), 'threshold': ('float64', (25,), '5e0d9a5e18c7cc83'), 'impurity': ('float64', (25,), 'd2dc918d351d8ae9'), 'n_node_samples': ('int64', (25,), 'e1db73dc80478170'), 'weighted_n_node_samples': ('float64', (25,), '5e062847da570801'), 'missing_go_to_left': ('uint8', (25,), '56c16b0d5439d3d2'), 'value': ('float64', (25, 1, 2), 'c662bbf6430e22f6'), 'importances': ('float64', (30,), 'e4821a5feab74ad5'), 'raw_importances': ('float64', (30,), '8accdcbd743a612a')}
+== clf.cancer-nan.shallow
+{'node_count': 17, 'max_depth': 4, 'n_leaves': 9, 'capacity': 17, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 2, 'n_classes': [2], 'children_left': ('int64', (17,), 'e465caedac78700d'), 'children_right': ('int64', (17,), '3d2eb891f729381f'), 'feature': ('int64', (17,), '019fd3fc14e362fe'), 'threshold': ('float64', (17,), '11f1f8cbaca276e8'), 'impurity': ('float64', (17,), '4107d13bb0ec68f1'), 'n_node_samples': ('int64', (17,), 'cae6eb2fa7c86bb5'), 'weighted_n_node_samples': ('float64', (17,), 'f8d5ba704f56f55b'), 'missing_go_to_left': ('uint8', (17,), '4a0baac63ccfa990'), 'value': ('float64', (17, 1, 2), '770339c49a126c08'), 'importances': ('float64', (30,), '2df617e68420d356'), 'raw_importances': ('float64', (30,), 'c396c15bdcf85da1')}
+== clf.cancer-nan.predict
+('int64', (569,), 'cbc3db9bdf16e495')
+== clf.cancer-nan.proba
+('float64', (569, 2), '4a1379821489d7d2')
+== clf.cancer-nan.apply
+('int64', (190,), '111318c85fb8a1b4')
+== clf.cancer-nan.score
+0.9578207381370826
+== reg.wine.0
+{'node_count': 263, 'max_depth': 9, 'n_leaves': 132, 'capacity': 263, 'n_features': 13, 'n_outputs': 1, 'max_n_classes': 1, 'n_classes': [1], 'children_left': ('int64', (263,), '358f5b4caa971215'), 'children_right': ('int64', (263,), '6c79695cda583d84'), 'feature': ('int64', (263,), '9afba1a46e12a88c'), 'threshold': ('float64', (263,), '52494df9b15a2a1f'), 'impurity': ('float64', (263,), '99bcbe9db2ef75e6'), 'n_node_samples': ('int64', (263,), '2b3c8113003302f8'), 'weighted_n_node_samples': ('float64', (263,), '0561c17131a8c499'), 'missing_go_to_left': ('uint8', (263,), 'a681df5310c7d6b1'), 'value': ('float64', (263, 1, 1), '2adc75644d8d61fb'), 'importances': ('float64', (13,), '0462148312667e84'), 'raw_importances': ('float64', (13,), '2b2635b4eff41931')}
+== reg.wine.5
+{'node_count': 265, 'max_depth': 9, 'n_leaves': 133, 'capacity': 265, 'n_features': 13, 'n_outputs': 1, 'max_n_classes': 1, 'n_classes': [1], 'children_left': ('int64', (265,), '2b154b6a4a7251bf'), 'children_right': ('int64', (265,), '3c78615f8c476fbc'), 'feature': ('int64', (265,), 'ced53c28ad7bd525'), 'threshold': ('float64', (265,), 'fa5f3165ddb7bc68'), 'impurity': ('float64', (265,), '06a9aa1622dad5df'), 'n_node_samples': ('int64', (265,), '822472b512ee76fc'), 'weighted_n_node_samples': ('float64', (265,), '1025c1bd8928e478'), 'missing_go_to_left': ('uint8', (265,), '16dc7ca12adbdab6'), 'value': ('float64', (265, 1, 1), 'eacc9cf567725463'), 'importances': ('float64', (13,), '136b1535009ceb17'), 'raw_importances': ('float64', (13,), 'b2598cddda3ee5bc')}
+== reg.wine.half
+{'node_count': 83, 'max_depth': 8, 'n_leaves': 42, 'capacity': 83, 'n_features': 13, 'n_outputs': 1, 'max_n_classes': 1, 'n_classes': [1], 'children_left': ('int64', (83,), '0b47ef0ed35ef309'), 'children_right': ('int64', (83,), '8837006f47061d95'), 'feature': ('int64', (83,), '4c6f0f3dc31cb62d'), 'threshold': ('float64', (83,), '9b8585a3fb532cb4'), 'impurity': ('float64', (83,), '96c0889e5a1503bc'), 'n_node_samples': ('int64', (83,), '4cf3c7a3818aae6c'), 'weighted_n_node_samples': ('float64', (83,), 'e1aa68ff506d12c6'), 'missing_go_to_left': ('uint8', (83,), '71454fec09aee911'), 'value': ('float64', (83, 1, 1), '726e947874c1047a'), 'importances': ('float64', (13,), '7ffed4d4bc5b67de'), 'raw_importances': ('float64', (13,), 'b4dc91f89b3863ad')}
+== reg.wine.predict
+('float64', (178,), '5b7075bbc4054977')
+== reg.wine.score
+0.9943225207117893
+== reg.cancer-nan.0
+{'node_count': 1015, 'max_depth': 14, 'n_leaves': 508, 'capacity': 1015, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 1, 'n_classes': [1], 'children_left': ('int64', (1015,), '212160e5f5bee7aa'), 'children_right': ('int64', (1015,), '7f7f51e60d43dc21'), 'feature': ('int64', (1015,), '05047e1bd6a58b5d'), 'threshold': ('float64', (1015,), 'bd2634e1bc93dd0e'), 'impurity': ('float64', (1015,), '124d04f850b95742'), 'n_node_samples': ('int64', (1015,), '0b1196a7642314c7'), 'weighted_n_node_samples': ('float64', (1015,), 'a6808412172229d0'), 'missing_go_to_left': ('uint8', (1015,), 'f927297fccaed3ab'), 'value': ('float64', (1015, 1, 1), '6a034c413b606d36'), 'importances': ('float64', (30,), '07ea9e18da403d1d'), 'raw_importances': ('float64', (30,), '32c790bb7b884f6e')}
+== reg.cancer-nan.5
+{'node_count': 1019, 'max_depth': 14, 'n_leaves': 510, 'capacity': 1019, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 1, 'n_classes': [1], 'children_left': ('int64', (1019,), 'a775d594f8279609'), 'children_right': ('int64', (1019,), '5de193650ad98cd2'), 'feature': ('int64', (1019,), '55475d5988f51d18'), 'threshold': ('float64', (1019,), 'd1e853ebb84f2199'), 'impurity': ('float64', (1019,), 'ed45fe8f68cd4898'), 'n_node_samples': ('int64', (1019,), 'e29177940495f8f0'), 'weighted_n_node_samples': ('float64', (1019,), '168cbf0a0cccfa94'), 'missing_go_to_left': ('uint8', (1019,), '026e63ec0dffa370'), 'value': ('float64', (1019, 1, 1), '1032c8671e946dd2'), 'importances': ('float64', (30,), '7930884934bb573f'), 'raw_importances': ('float64', (30,), 'f3dc9dffe8e84174')}
+== reg.cancer-nan.half
+{'node_count': 75, 'max_depth': 10, 'n_leaves': 38, 'capacity': 75, 'n_features': 30, 'n_outputs': 1, 'max_n_classes': 1, 'n_classes': [1], 'children_left': ('int64', (75,), 'ebc9174acc0a883f'), 'children_right': ('int64', (75,), '332d69ceb3e06677'), 'feature': ('int64', (75,), 'ce1d1ccddec6780c'), 'threshold': ('float64', (75,), 'acab3affc0185a36'), 'impurity': ('float64', (75,), '1831f0a45ada18a0'), 'n_node_samples': ('int64', (75,), '82f262bd18843a7c'), 'weighted_n_node_samples': ('float64', (75,), '441ba69d4a72086f'), 'missing_go_to_left': ('uint8', (75,), '5caac772d6993ff1'), 'value': ('float64', (75, 1, 1), 'f5cad76729b8f0fd'), 'importances': ('float64', (30,), '971a913a432cfbc5'), 'raw_importances': ('float64', (30,), 'bf33447823327a26')}
+== reg.cancer-nan.predict
+('float64', (569,), 'dcea6b00f89cbe9f')
+== reg.cancer-nan.score
+0.9745450818553199
+== reg.digits.0
+{'node_count': 523, 'max_depth': 19, 'n_leaves': 262, 'capacity': 523, 'n_features': 64, 'n_outputs': 1, 'max_n_classes': 1, 'n_classes': [1], 'children_left': ('int64', (523,), 'e970299bbe3898a5'), 'children_right': ('int64', (523,), '643b99144b567a97'), 'feature': ('int64', (523,), 'caa64dfde56c1327'), 'threshold': ('float64', (523,), '075b9717945213d7'), 'impurity': ('float64', (523,), '3991fed0baf8abf2'), 'n_node_samples': ('int64', (523,), '5bb4fe5488a9fa19'), 'weighted_n_node_samples': ('float64', (523,), '98169049112342b0'), 'missing_go_to_left': ('uint8', (523,), 'd38dffbee13f13f5'), 'value': ('float64', (523, 1, 1), '61e469c1cfa19a1c'), 'importances': ('float64', (64,), 'e121db841a8c8839'), 'raw_importances': ('float64', (64,), '05cb74174b4a0f64')}
+== reg.digits.5
+{'node_count': 549, 'max_depth': 20, 'n_leaves': 275, 'capacity': 549, 'n_features': 64, 'n_outputs': 1, 'max_n_classes': 1, 'n_classes': [1], 'children_left': ('int64', (549,), '6ee6897eb5a7e1b2'), 'children_right': ('int64', (549,), '0512905b96d8b84b'), 'feature': ('int64', (549,), 'efac1eea99bbdcc4'), 'threshold': ('float64', (549,), '31c9223171b2b356'), 'impurity': ('float64', (549,), 'ba870cdf80b9ad4e'), 'n_node_samples': ('int64', (549,), '428cc6e772bd2755'), 'weighted_n_node_samples': ('float64', (549,), '012151ae26343b97'), 'missing_go_to_left': ('uint8', (549,), 'c7591e9821382d14'), 'value': ('float64', (549, 1, 1), '6cdba6e942cdcb7f'), 'importances': ('float64', (64,), 'f86b04adaa3fe2b9'), 'raw_importances': ('float64', (64,), 'b456802c6e74033a')}
+== reg.digits.half
+{'node_count': 95, 'max_depth': 18, 'n_leaves': 48, 'capacity': 95, 'n_features': 64, 'n_outputs': 1, 'max_n_classes': 1, 'n_classes': [1], 'children_left': ('int64', (95,), '9d3c5ce3d7c249a3'), 'children_right': ('int64', (95,), 'cc31f6882ff2d2fb'), 'feature': ('int64', (95,), '3392b1df345325db'), 'threshold': ('float64', (95,), 'c21fd7f7f62160ae'), 'impurity': ('float64', (95,), 'c6e328da8e55cc73'), 'n_node_samples': ('int64', (95,), '957392060d2f2022'), 'weighted_n_node_samples': ('float64', (95,), '3bbe856d8ec4e535'), 'missing_go_to_left': ('uint8', (95,), '852ae650606542b9'), 'value': ('float64', (95, 1, 1), 'dec3be32dd3ad304'), 'importances': ('float64', (64,), '625998dd1f6d3e0e'), 'raw_importances': ('float64', (64,), 'a65b2a688115784b')}
+== reg.digits.predict
+('float64', (1797,), '188666076fbad05b')
+== reg.digits.score
+0.5928580962988181
+== clf.weights
+{'node_count': 21, 'max_depth': 5, 'n_leaves': 11, 'capacity': 21, 'n_features': 4, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (21,), '4b8d6e58e1b047bf'), 'children_right': ('int64', (21,), 'de0c7e1cb7c74325'), 'feature': ('int64', (21,), 'a772b6bb000af582'), 'threshold': ('float64', (21,), 'fd8a625717649f0b'), 'impurity': ('float64', (21,), 'f84a04b9e15b9cef'), 'n_node_samples': ('int64', (21,), '1bb4a3ab813a29ff'), 'weighted_n_node_samples': ('float64', (21,), '08eee3cbd1e9c37a'), 'missing_go_to_left': ('uint8', (21,), '3b9933ca49b109cc'), 'value': ('float64', (21, 1, 3), 'fbcd2339fd40db1e'), 'importances': ('float64', (4,), '14c4a4016cf045ef'), 'raw_importances': ('float64', (4,), '487f2634be779298')}
+== clf.weights-fraction
+{'node_count': 9, 'max_depth': 3, 'n_leaves': 5, 'capacity': 9, 'n_features': 4, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (9,), 'de3faef9521f6fd7'), 'children_right': ('int64', (9,), 'e11c094d62be9e88'), 'feature': ('int64', (9,), '2d20ab2e5cc24a48'), 'threshold': ('float64', (9,), '3653f1b28dfb82b2'), 'impurity': ('float64', (9,), 'faae8d3d974884c7'), 'n_node_samples': ('int64', (9,), 'db3c9a5bfbda5470'), 'weighted_n_node_samples': ('float64', (9,), 'c871676719524900'), 'missing_go_to_left': ('uint8', (9,), 'a818dcb62a559bf4'), 'value': ('float64', (9, 1, 3), 'a78d68113d9637ee'), 'importances': ('float64', (4,), 'd0f2c487c0accf1d'), 'raw_importances': ('float64', (4,), '64688982eb25bcab')}
+== clf.weights-zero
+{'node_count': 17, 'max_depth': 5, 'n_leaves': 9, 'capacity': 17, 'n_features': 4, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (17,), '0bfd61561684d586'), 'children_right': ('int64', (17,), 'ac7d8069a6d8e469'), 'feature': ('int64', (17,), 'bb69e3ad7c31302b'), 'threshold': ('float64', (17,), 'b16786498f6c9ba3'), 'impurity': ('float64', (17,), 'c0e5585f03ac6ba4'), 'n_node_samples': ('int64', (17,), 'dee452d878b78be9'), 'weighted_n_node_samples': ('float64', (17,), '3a3b97ed2973b31a'), 'missing_go_to_left': ('uint8', (17,), 'ab2b4ab02c897ee0'), 'value': ('float64', (17, 1, 3), '10eaa97a50c97ca9'), 'importances': ('float64', (4,), '730ff4664e556817'), 'raw_importances': ('float64', (4,), '066e120808ab925b')}
+== reg.weights
+{'node_count': 129, 'max_depth': 8, 'n_leaves': 65, 'capacity': 129, 'n_features': 13, 'n_outputs': 1, 'max_n_classes': 1, 'n_classes': [1], 'children_left': ('int64', (129,), '3c042024d68e6458'), 'children_right': ('int64', (129,), '0491d97032203479'), 'feature': ('int64', (129,), '9e19ee4b34df6009'), 'threshold': ('float64', (129,), 'a5177e19f8df03a7'), 'impurity': ('float64', (129,), 'ab291e15c4c5f744'), 'n_node_samples': ('int64', (129,), '7cb469796e9ce6b6'), 'weighted_n_node_samples': ('float64', (129,), '7365ad722612b7fd'), 'missing_go_to_left': ('uint8', (129,), 'd6a4004838e02f73'), 'value': ('float64', (129, 1, 1), '957ede61dad2e7e9'), 'importances': ('float64', (13,), 'd6dd5f132104d094'), 'raw_importances': ('float64', (13,), 'c7695ba81620aa3b')}
+== clf.class_weight.balanced
+{'node_count': 19, 'max_depth': 6, 'n_leaves': 10, 'capacity': 19, 'n_features': 13, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (19,), 'e8c7d53cd38f5f95'), 'children_right': ('int64', (19,), '5b5ea1fa78074e13'), 'feature': ('int64', (19,), '0587f5cb586d37c0'), 'threshold': ('float64', (19,), '4ecb708a3f9b198e'), 'impurity': ('float64', (19,), '3fd4cc650a84c998'), 'n_node_samples': ('int64', (19,), '9187233b5285cd9d'), 'weighted_n_node_samples': ('float64', (19,), 'b50c968556232c34'), 'missing_go_to_left': ('uint8', (19,), '882e8a0b5e65979e'), 'value': ('float64', (19, 1, 3), '9b71e0702a8907c6'), 'importances': ('float64', (13,), 'edb644a02cfd4d62'), 'raw_importances': ('float64', (13,), '853d9b964d004c35')}
+== clf.class_weight.dict
+{'node_count': 21, 'max_depth': 6, 'n_leaves': 11, 'capacity': 21, 'n_features': 13, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (21,), '3dd17ac534d3af5a'), 'children_right': ('int64', (21,), '8f8f0d77fa7a7f82'), 'feature': ('int64', (21,), '7e748398164a079f'), 'threshold': ('float64', (21,), '90888024eb3e975a'), 'impurity': ('float64', (21,), 'f57184357b7e26b7'), 'n_node_samples': ('int64', (21,), '2d956c0ea4f32902'), 'weighted_n_node_samples': ('float64', (21,), '264a2a7ce76192f8'), 'missing_go_to_left': ('uint8', (21,), 'b4b1c5bd1ee22cf3'), 'value': ('float64', (21, 1, 3), '83a1a709b4c6eaf7'), 'importances': ('float64', (13,), '63dce7aaf54e2792'), 'raw_importances': ('float64', (13,), '5aaf5fbdb4ee9bb3')}
+== clf.class_weight-and-weights
+{'node_count': 15, 'max_depth': 5, 'n_leaves': 8, 'capacity': 15, 'n_features': 4, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (15,), '5592714f68602793'), 'children_right': ('int64', (15,), '8aaa02ebf5e32f4a'), 'feature': ('int64', (15,), '9a8384fc33ffabdf'), 'threshold': ('float64', (15,), 'c303a3db3160e0d3'), 'impurity': ('float64', (15,), '15f3ff37ad41448d'), 'n_node_samples': ('int64', (15,), '49fa7f0d31157f80'), 'weighted_n_node_samples': ('float64', (15,), 'e8b59a71ed4ebe27'), 'missing_go_to_left': ('uint8', (15,), '81f2f93654a18c3a'), 'value': ('float64', (15, 1, 3), '56c997ef126c6dbe'), 'importances': ('float64', (4,), '5a8592c844fb2ef4'), 'raw_importances': ('float64', (4,), '4714851b7642c98e')}
+== clf.class_weight-missing
+DecisionTreeClassifier(class_weight={0: 1.0, 1: 2.0})
+== clf.strings
+['setosa', 'setosa', 'versicolor', 'versicolor', 'virginica', 'virginica']
+== clf.strings-classes
+['setosa', 'versicolor', 'virginica']
+== clf.str-series
+['setosa', 'setosa', 'versicolor', 'versicolor', 'virginica']
+== clf.feature-names
+['sepal length (cm)', 'sepal width (cm)', 'petal length (cm)', 'petal width (cm)']
+== clf.strings-balanced
+{'node_count': 17, 'max_depth': 5, 'n_leaves': 9, 'capacity': 17, 'n_features': 4, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (17,), '86d543d7bd8a4be4'), 'children_right': ('int64', (17,), '9f91218a74b7b4f2'), 'feature': ('int64', (17,), '19e5d8f5f37c178a'), 'threshold': ('float64', (17,), 'f2279c1db7fb906d'), 'impurity': ('float64', (17,), '1fcd769c55dec708'), 'n_node_samples': ('int64', (17,), 'd9ae89ff4eed8fb2'), 'weighted_n_node_samples': ('float64', (17,), 'a775dd50312c81a4'), 'missing_go_to_left': ('uint8', (17,), 'c950775f21ff5b1c'), 'value': ('float64', (17, 1, 3), '96cc97c797e236fe'), 'importances': ('float64', (4,), '25c17342938f7aec'), 'raw_importances': ('float64', (4,), '1631abdf8bbbd0d3')}
+== clf.multi
+{'node_count': 19, 'max_depth': 5, 'n_leaves': 10, 'capacity': 19, 'n_features': 4, 'n_outputs': 2, 'max_n_classes': 3, 'n_classes': [3, 2], 'children_left': ('int64', (19,), 'fa796dc37c9dab18'), 'children_right': ('int64', (19,), '49bfdddb7672bd31'), 'feature': ('int64', (19,), '1bb981d236afdd8d'), 'threshold': ('float64', (19,), '06eb4ca53a43a6b4'), 'impurity': ('float64', (19,), '6f57a1943aac68ca'), 'n_node_samples': ('int64', (19,), '8cfb467ee39a3be7'), 'weighted_n_node_samples': ('float64', (19,), 'de07d4e85a0e8256'), 'missing_go_to_left': ('uint8', (19,), 'b1ca566846ad0f6a'), 'value': ('float64', (19, 2, 3), 'ec99bf9bcbfc31ee'), 'importances': ('float64', (4,), '591e92cd886b3cbb'), 'raw_importances': ('float64', (4,), 'e8a6b3cb86f486e0')}
+== clf.multi-predict
+array([[0, 0],
+       [0, 0],
+       [1, 0],
+       [1, 0],
+       [2, 1]])
+== clf.multi-proba
+[('float64', (150, 3), '278f9bc128d51f5d'), ('float64', (150, 2), '76686e23944ac42b')]
+== clf.multi-log-proba
+[('float64', (150, 3), 'aba5212178f01513'), ('float64', (150, 2), '433b5f6aa15b6df6')]
+== clf.multi-class_weight
+{'node_count': 23, 'max_depth': 6, 'n_leaves': 12, 'capacity': 23, 'n_features': 4, 'n_outputs': 2, 'max_n_classes': 3, 'n_classes': [3, 2], 'children_left': ('int64', (23,), '29bbf96ba115a60f'), 'children_right': ('int64', (23,), 'bc9ea404cdc49d2d'), 'feature': ('int64', (23,), 'e462a89ee4ca03f6'), 'threshold': ('float64', (23,), '00878bdb80f8d74d'), 'impurity': ('float64', (23,), '2b10da31253ae308'), 'n_node_samples': ('int64', (23,), '8f334e4827f07b81'), 'weighted_n_node_samples': ('float64', (23,), '1582e37bd58e13bb'), 'missing_go_to_left': ('uint8', (23,), '352d696ad848038a'), 'value': ('float64', (23, 2, 3), '86d53359ab8c2108'), 'importances': ('float64', (4,), 'c1356ee71aeb35fc'), 'raw_importances': ('float64', (4,), '55cb4720987caea2')}
+== clf.multi-balanced
+{'node_count': 19, 'max_depth': 5, 'n_leaves': 10, 'capacity': 19, 'n_features': 4, 'n_outputs': 2, 'max_n_classes': 3, 'n_classes': [3, 2], 'children_left': ('int64', (19,), 'fa796dc37c9dab18'), 'children_right': ('int64', (19,), '49bfdddb7672bd31'), 'feature': ('int64', (19,), '1bb981d236afdd8d'), 'threshold': ('float64', (19,), '06eb4ca53a43a6b4'), 'impurity': ('float64', (19,), '2eb01a13f5dc6802'), 'n_node_samples': ('int64', (19,), '8cfb467ee39a3be7'), 'weighted_n_node_samples': ('float64', (19,), '6aac6fce2bda54ea'), 'missing_go_to_left': ('uint8', (19,), 'b1ca566846ad0f6a'), 'value': ('float64', (19, 2, 3), '7e6d97b0c83f7468'), 'importances': ('float64', (4,), '05b59e29ae17d394'), 'raw_importances': ('float64', (4,), '78277943c87b6fa5')}
+== clf.multi-fitted
+{'classes_': [array([0, 1, 2]), array([0, 1])], 'max_features_': 4, 'n_classes_': array([3, 2]), 'n_features_in_': 4, 'n_outputs_': 2}
+== reg.multi
+{'node_count': 349, 'max_depth': 11, 'n_leaves': 175, 'capacity': 349, 'n_features': 13, 'n_outputs': 2, 'max_n_classes': 1, 'n_classes': [1, 1], 'children_left': ('int64', (349,), '913f299dc1f93103'), 'children_right': ('int64', (349,), '0482853fae64fb31'), 'feature': ('int64', (349,), '62739ec0e2be62c6'), 'threshold': ('float64', (349,), '395e850306cc8807'), 'impurity': ('float64', (349,), 'a564eea3f4e5bed4'), 'n_node_samples': ('int64', (349,), '1a3d6efa7c8bdefe'), 'weighted_n_node_samples': ('float64', (349,), '166551e1b71cdfcb'), 'missing_go_to_left': ('uint8', (349,), '6ecfd9839d175682'), 'value': ('float64', (349, 2, 1), '28b515f5315b5cee'), 'importances': ('float64', (13,), 'f4677754aa99eaee'), 'raw_importances': ('float64', (13,), 'e491ac698dc66a81')}
+== reg.multi-predict
+('float64', (178, 2), 'a588733bc4e04ec2')
+== clf.fitted
+{'classes_': array([0, 1, 2]), 'max_features_': 4, 'n_classes_': np.int64(3), 'n_features_in_': 4, 'n_outputs_': 1}
+== reg.fitted
+{'max_features_': 13, 'n_features_in_': 13, 'n_outputs_': 1}
+== clf.small.arrays
+{'children_left': [1, -1, 3, -1, -1], 'children_right': [2, -1, 4, -1, -1], 'feature': [3, -2, 3, -2, -2], 'threshold': [0.800000011920929, -2.0, 1.75, -2.0, -2.0], 'impurity': [0.6666666666666667, 0.0, 0.5, 0.16803840877914955, 0.042533081285444196], 'n_node_samples': [150, 50, 100, 54, 46], 'weighted_n_node_samples': [150.0, 50.0, 100.0, 54.0, 46.0], 'missing_go_to_left': [0, 0, 1, 0, 0], 'value': [[[0.3333333333333333, 0.3333333333333333, 0.3333333333333333]], [[1.0, 0.0, 0.0]], [[0.0, 0.5, 0.5]], [[0.0, 0.9074074074074074, 0.09259259259259259]], [[0.0, 0.021739130434782608, 0.9782608695652174]]]}
+== clf.small.depth-leaves
+(2, np.int64(3))
+== clf.small.importances
+[0.0, 0.0, 0.0, 1.0]
+== clf.small.log-proba
+array([[ 0.        ,        -inf,        -inf],
+       [       -inf, -0.09716375, -2.37954613],
+       [       -inf, -3.8286414 , -0.02197891]])
+== clf.small.tree-predict
+array([[1.        , 0.        , 0.        ],
+       [0.        , 0.90740741, 0.09259259],
+       [0.        , 0.02173913, 0.97826087]])
+== clf.small.tree-apply
+array([1, 3, 4])
+== clf.small.tree-apply-float64
+!! ValueError: X.dtype should be np.float32, got float64
+== clf.small.tree-apply-list
+!! ValueError: X should be in np.ndarray format, got <class 'list'>
+== clf.check_input-false
+array([0, 1, 2])
+== clf.pure
+{'node_count': 1, 'max_depth': 0, 'n_leaves': 1, 'capacity': 1, 'n_features': 4, 'n_outputs': 1, 'max_n_classes': 1, 'n_classes': [1], 'children_left': ('int64', (1,), '12a3ae445661ce5d'), 'children_right': ('int64', (1,), '12a3ae445661ce5d'), 'feature': ('int64', (1,), '81b37f7f8b78762f'), 'threshold': ('float64', (1,), 'e25d2084cf6f361f'), 'impurity': ('float64', (1,), 'af5570f5a1810b7a'), 'n_node_samples': ('int64', (1,), 'a111f275cc2e7588'), 'weighted_n_node_samples': ('float64', (1,), '24b1f4ef66b650ff'), 'missing_go_to_left': ('uint8', (1,), '6e340b9cffb37a98'), 'value': ('float64', (1, 1, 1), '6c3c396ed6b5c36d'), 'importances': ('float64', (4,), '66687aadf862bd77'), 'raw_importances': ('float64', (4,), '66687aadf862bd77')}
+== clf.one-feature
+{'node_count': 47, 'max_depth': 9, 'n_leaves': 24, 'capacity': 47, 'n_features': 1, 'n_outputs': 1, 'max_n_classes': 3, 'n_classes': [3], 'children_left': ('int64', (47,), '9fe51eb5129d083f'), 'children_right': ('int64', (47,), '8bae58daa4aa437c'), 'feature': ('int64', (47,), '0c0f76378c160419'), 'threshold': ('float64', (47,), '6f68e6515f7ac922'), 'impurity': ('float64', (47,), '1b4884d7faed8881'), 'n_node_samples': ('int64', (47,), '234cbc8a89a29bcd'), 'weighted_n_node_samples': ('float64', (47,), '455ab24a05306914'), 'missing_go_to_left': ('uint8', (47,), '1359165103b5ef1d'), 'value': ('float64', (47, 1, 3), 'e115c3de26c7d728'), 'importances': ('float64', (1,), '6c3c396ed6b5c36d'), 'raw_importances': ('float64', (1,), '8db7b25f74d75a7d')}
+== clf.int-max-features
+{'node_count': 1087, 'max_depth': 20, 'n_leaves': 544, 'capacity': 1087, 'n_features': 64, 'n_outputs': 1, 'max_n_classes': 10, 'n_classes': [10], 'children_left': ('int64', (1087,), '55dda7ed7659b2c3'), 'children_right': ('int64', (1087,), 'e4b18b5d7181b7f7'), 'feature': ('int64', (1087,), '37e41928a38d1d2a'), 'threshold': ('float64', (1087,), '65199749e8f0123b'), 'impurity': ('float64', (1087,), '76b1bab205410924'), 'n_node_samples': ('int64', (1087,), 'e69422d6bd16f557'), 'weighted_n_node_samples': ('float64', (1087,), 'bd8f530d66f0d7b4'), 'missing_go_to_left': ('uint8', (1087,), 'a348c81d51d01069'), 'value': ('float64', (1087, 1, 10), 'ea0e3c1c35361c20'), 'importances': ('float64', (64,), 'e6f75bb1524d9bca'), 'raw_importances': ('float64', (64,), 'a13999d798537b30')}
+== clf.log2
+{'node_count': 615, 'max_depth': 17, 'n_leaves': 308, 'capacity': 615, 'n_features': 64, 'n_outputs': 1, 'max_n_classes': 10, 'n_classes': [10], 'children_left': ('int64', (615,), 'c90131588c3411ed'), 'children_right': ('int64', (615,), '628c80680e246c6a'), 'feature': ('int64', (615,), 'e7af113cea93459b'), 'threshold': ('float64', (615,), '8ce2d076679cecea'), 'impurity': ('float64', (615,), 'f706ed209a0904f2'), 'n_node_samples': ('int64', (615,), '5ffe2db4f58225f5'), 'weighted_n_node_samples': ('float64', (615,), 'aad966ffed037e42'), 'missing_go_to_left': ('uint8', (615,), '7a9ce762a1d61b64'), 'value': ('float64', (615, 1, 10), '909a7ff028054cdf'), 'importances': ('float64', (64,), '9842fa227e36f5c2'), 'raw_importances': ('float64', (64,), '873446160f6de9a2')}
+== clf.lists
+array([1, 0])
+== clf.bool-labels
+array([False, False,  True, False])
+== reg.friedman_mse
+'squared_error'
+== clf.repr
+"DecisionTreeClassifier(class_weight='balanced', max_depth=3, random_state=1)"
+== reg.repr
+'DecisionTreeRegressor(min_samples_leaf=5)'
+== clf.nan-predict
+('float64', (40, 2), '6f7e2ed09f6e7758')
+== clf.nan-unseen
+('float64', (40, 2), '6f7e2ed09f6e7758')
+== clf.global-random-state
+(('int64', (831,), 'e91e30e9b8da879a'), ('int64', (861,), '654684c2c7a08c63'), 390)
+== clf.random-state-instance
+{'node_count': 701, 'max_depth': 19, 'n_leaves': 351, 'capacity': 701, 'n_features': 64, 'n_outputs': 1, 'max_n_classes': 10, 'n_classes': [10], 'children_left': ('int64', (701,), 'b4210f7a49386730'), 'children_right': ('int64', (701,), 'f451fc994cc60e42'), 'feature': ('int64', (701,), '77fd88042d78f3b3'), 'threshold': ('float64', (701,), '2846b3582da23cee'), 'impurity': ('float64', (701,), '22403f95d4cd76bd'), 'n_node_samples': ('int64', (701,), 'f269a450f2301b32'), 'weighted_n_node_samples': ('float64', (701,), '353f40aa3166fb9d'), 'missing_go_to_left': ('uint8', (701,), 'a9ef1777a024be32'), 'value': ('float64', (701, 1, 10), '35798e768ab42593'), 'importances': ('float64', (64,), 'd7e0fd97c883873a'), 'raw_importances': ('float64', (64,), '5b2bb10de812920c')}
+== ccw.balanced
+array([1.        , 2.        , 0.66666667])
+== ccw.dict
+array([1., 3., 1.])
+== ccw.none
+array([1., 1.])
+== ccw.strings-balanced
+array([1.5 , 0.75])
+== ccw.weights
+array([0.875     , 1.16666667])
+== ccw.extra-label
+!! ValueError: classes should include all valid labels that can be in y
+== ccw.absent-class
+!! ValueError: classes should have valid labels that are in y
+== ccw.dict-partial
+!! ValueError: The classes, [1], are not in class_weight
+== ccw.classes-list
+!! InvalidParameterError: The 'classes' parameter of compute_class_weight must be an instance of 'numpy.ndarray'. Got [0, 1] instead.
+== csw.balanced
+array([1.        , 1.        , 2.        , 0.66666667, 0.66666667,
+       0.66666667])
+== csw.dict
+array([0.5, 2. , 1. , 2. ])
+== csw.none
+array([1., 1., 1.])
+== csw.multi
+array([6., 3., 1.])
+== csw.multi-balanced
+array([1.33333333, 0.44444444, 1.33333333, 0.44444444])
+== csw.multi-dict
+!! ValueError: For multi-output, class_weight should be a list of dicts, or the string 'balanced'.
+== csw.multi-length
+!! ValueError: For multi-output, number of elements in class_weight should match number of outputs. Got 1 element(s) while having 2 outputs.
+== csw.indices
+array([1.25      , 1.25      , 0.83333333, 0.83333333, 0.        ,
+       0.        ])
+== csw.indices-dict
+!! ValueError: The only valid class_weight for subsampling is 'balanced'. Given {0: 1.0}.
+== csw.strings
+array([1.33333333, 0.66666667, 0.66666667, 1.33333333])
+== csw.bad
+!! InvalidParameterError: The 'class_weight' parameter of compute_sample_weight must be an instance of 'dict', an instance of 'list', a str among {'balanced'} or None. Got 'even' instead.
+== err.labels
+!! ValueError: Number of labels=100 does not match number of samples=150
+== err.inf
+!! ValueError: Input X contains infinity or a value too large for dtype('float32').
+== err.y-nan
+!! ValueError: Input y contains NaN.
+== err.continuous
+!! ValueError: Unknown label type: continuous. Maybe you are trying to fit a classifier, which expects discrete classes on a regression target with continuous values.
+== err.weights-zero
+!! ValueError: Sample weights must contain at least one non-zero number.
+== err.weights-shape
+!! ValueError: sample_weight.shape == (10,), expected (150,)!
+== err.weights-nan
+!! ValueError: Input sample_weight contains NaN.
+== err.not-fitted
+!! NotFittedError: This DecisionTreeClassifier instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.
+== err.features
+!! ValueError: X has 3 features, but DecisionTreeClassifier is expecting 4 features as input.
+== err.predict-inf
+!! ValueError: Input X contains infinity or a value too large for dtype('float32').
+== err.empty
+!! ValueError: Found array with 0 sample(s) (shape=(0, 2)) while a minimum of 1 is required by DecisionTreeRegressor.
+== err.1d
+!! ValueError: Expected 2D array, got 1D array instead:
+array=[0. 1. 2. 3.].
+Reshape your data either using array.reshape(-1, 1) if your data has a single feature or array.reshape(1, -1) if it contains a single sample.
+== err.max-features-high
+DecisionTreeClassifier(max_features=9)
+== param.criterion
+!! InvalidParameterError: The 'criterion' parameter of DecisionTreeClassifier must be a str among {'entropy', 'gini', 'log_loss'}. Got 'squared_error' instead.
+== param.reg-criterion
+!! InvalidParameterError: The 'criterion' parameter of DecisionTreeRegressor must be a str among {'absolute_error', 'poisson', 'squared_error'}. Got 'gini' instead.
+== param.splitter
+!! InvalidParameterError: The 'splitter' parameter of DecisionTreeClassifier must be a str among {'best', 'random'}. Got 'worst' instead.
+== param.max_depth
+!! InvalidParameterError: The 'max_depth' parameter of DecisionTreeClassifier must be an int in the range [1, inf) or None. Got 0 instead.
+== param.min_samples_split
+!! InvalidParameterError: The 'min_samples_split' parameter of DecisionTreeClassifier must be an int in the range [2, inf) or a float in the range (0.0, 1.0]. Got 1 instead.
+== param.min_samples_leaf
+!! InvalidParameterError: The 'min_samples_leaf' parameter of DecisionTreeClassifier must be an int in the range [1, inf) or a float in the range (0.0, 1.0). Got 1.0 instead.
+== param.min_weight_fraction_leaf
+!! InvalidParameterError: The 'min_weight_fraction_leaf' parameter of DecisionTreeClassifier must be a float in the range [0.0, 0.5]. Got 0.6 instead.
+== param.max_features
+!! InvalidParameterError: The 'max_features' parameter of DecisionTreeClassifier must be an int in the range [1, inf), a float in the range (0.0, 1.0], a str among {'log2', 'sqrt'} or None. Got 'all' instead.
+== param.random_state
+!! InvalidParameterError: The 'random_state' parameter of DecisionTreeClassifier must be an int in the range [0, 4294967295], an instance of 'numpy.random.mtrand.RandomState' or None. Got 'x' instead.
+== param.class_weight
+!! InvalidParameterError: The 'class_weight' parameter of DecisionTreeClassifier must be an instance of 'dict', an instance of 'list', a str among {'balanced'} or None. Got 'even' instead.
+== param.min_impurity_decrease
+!! InvalidParameterError: The 'min_impurity_decrease' parameter of DecisionTreeClassifier must be a float in the range [0.0, inf). Got -1.0 instead.
+== param.max_leaf_nodes
+!! InvalidParameterError: The 'max_leaf_nodes' parameter of DecisionTreeClassifier must be an int in the range [2, inf) or None. Got 1 instead.
+== param.ccp_alpha
+!! InvalidParameterError: The 'ccp_alpha' parameter of DecisionTreeRegressor must be a float in the range [0.0, inf). Got -0.5 instead.

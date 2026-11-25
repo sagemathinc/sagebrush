@@ -151,3 +151,12 @@ test("environment: the wasm-publish environment's three names, an account id, th
   }
   assert.equal(seen[2][1].headers["accept-encoding"], undefined);
 });
+test("s3: HEAD's size is the Content-Length of an unencoded answer only; an encoded one's (the compressed bytes') is no size", async () => {
+  const ok = { R2_ACCOUNT_ID: "a".repeat(32), AWS_ACCESS_KEY_ID: "k", AWS_SECRET_ACCESS_KEY: "s" };
+  const at = (headers) => s3FromEnv(ok, async () => new Response(null, { status: 200, headers }));
+  assert.equal((await at({ "content-length": "445430" }).head("lib/x")).size, 445430);
+  assert.equal((await at({ "content-length": "445430", "content-encoding": "identity" }).head("lib/x")).size, 445430);
+  assert.equal((await at({ "content-length": "61234", "content-encoding": "gzip" }).head("lib/x")).size, null);
+  assert.equal((await at({ "content-length": "61234", "content-encoding": "br" }).head("lib/x")).size, null);
+  assert.equal((await at({}).head("lib/x")).size, null);
+});
