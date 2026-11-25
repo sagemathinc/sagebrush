@@ -19,6 +19,7 @@ that programs without one pay nothing.
 """
 
 import math as _math
+import sys as _sys
 
 import numpy as np
 
@@ -1571,10 +1572,15 @@ def mldivide(a, b):
     k = _m._dims(b)[1] if len(_m._dims(b)) > 1 else 1
     cv = 16 if A.pr.dtype.kind == "c" or not isreal(b) else 8
     dense_need = (DENSE_A_COPIES * A.m * A.n + DENSE_B_COPIES * A.m * k) * cv
+    rec0 = None
+    if A.m == A.n and not big:
+        r, rec0 = _small_triangular(A, b, k)
+        if r is not None:
+            return r
     if not big and dense_need + 3 * E * 8 * (2 if type(b) is Sparse else 1) <= SMALL_NEED:
         # (exempt: the dense route below, unadmitted; its fills' chunk transients counted; no capacity read)
         return _dense_solve(a, b)
-    rec = _capacity_record()
+    rec = rec0 if rec0 is not None else _capacity_record()
     if unmeasured_reason(rec) is not None:
         return _legacy_mldivide(a, b)
     import _matlab_ledger as LG
@@ -1586,10 +1592,14 @@ def mldivide(a, b):
         return _dense_solve(a, b)
     import _matlab_lu as L
 
-    Bm = _m._mat(full(b) if type(b) is Sparse else b)
+    Bm = _LazyRhs(A.n, k, b)
     what = "Solving this %dx%d sparse system" % (A.n, A.n)
-    out = L.solve(A, Bm, what, rec=rec)
+    out = L.solve(A, Bm, what, rec=rec, tri=lambda lower, led, work, bound:
+                  _big_triangular(A, b, k, lower, led, work, bound))
+    if type(out) is _Solved:
+        return out.value
     if out is None:
+        Bm = Bm.make()
         # (diagonal: each row divided by its element; its arrays admitted)
         led = LG.Ledger(what, rec=rec)
         led.reserve(A.n * cv + 2 * A.n * Bm.shape[1] * cv, "diagonal")
@@ -1605,6 +1615,255 @@ def mldivide(a, b):
             _m.warning_("Matrix is singular to working precision.")
     r = _m._unmat(X)
     return from_full(r) if type(b) is Sparse else r
+
+
+# (bytes per index and per array object, r6 section 2.2's c_idx and the measured ndarray header: _matlab_lu's
+# constants, defined here so that the small triangular route needs nothing of that module)
+C_IDX, C_HDR = 8, 534
+
+
+def tri_block(k):
+    """a triangular solve's right-hand-side width per block and rows per block: entries*width at most E"""
+    w = max(1, min(k, E))
+    return w, max(1, E // w)
+
+
+def triangular_solve(S, X, lower, work=None):
+    """X (n by k, in the result's class) overwritten by S \\ X for a sparse triangular S, column by column in the
+    order substitution takes (forward for lower, backward for upper): each column's diagonal divides its row, then its
+    other entries update theirs, in blocks of at most E entries*width; work (None: uncharged) charged before each
+    block, one unit per off-diagonal entry per right-hand side (the band route's own count of those multiply-adds).
+    A zero or missing diagonal divides in IEEE arithmetic; returns whether one was met"""
+    n = S.n
+    k = X.shape[1] if X.ndim == 2 else 1
+    if k == 0 or n == 0:
+        return False
+    jc, ir, pr = S.jc, S.ir, S.pr
+    w, rows = tri_block(k)
+    singular = False
+    order = range(n) if lower else range(n - 1, -1, -1)
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        for c in order:
+            s, e = int(jc[c]), int(jc[c + 1])
+            d = 0.0
+            if lower:
+                if s < e and int(ir[s]) == c:
+                    d = pr[s]
+                    s += 1
+            elif s < e and int(ir[e - 1]) == c:
+                d = pr[e - 1]
+                e -= 1
+            if d == 0:
+                singular = True
+            for q0 in range(0, k, w):
+                q1 = min(k, q0 + w)
+                X[c, q0:q1] = X[c, q0:q1] / d
+                if e > s:
+                    xc = X[c, q0:q1]
+                    for a in range(s, e, rows):
+                        b = min(e, a + rows)
+                        if work is not None:
+                            work.charge((b - a) * (q1 - q0), "triangular")
+                        r = ir[a:b]
+                        X[r, q0:q1] = X[r, q0:q1] - np.outer(pr[a:b], xc)
+    return singular
+
+
+def from_full_need(n, k, cv):
+    """the bytes a solve's sparse result takes from the dense matrix r it is converted from: r (n by k, and _box's real
+    copy when r is complex with all imaginary parts zero) with from_full's index, value, pointer and canonical copies at
+    nnz(r) <= n*k; the same for the triangular route and the dense route, which both end so for a sparse b"""
+    H = C_HDR
+    nk = n * k
+    real_copy = nk * 8 + H if cv == 16 else 0
+    return (nk * cv + H) + real_copy + 4 * nk * C_IDX + 3 * nk * cv + 3 * (k + 1) * C_IDX + 10 * H
+
+
+def small_triangular_need(n, k, cplx_a, cplx_b, sparse_b):
+    """the bytes the small triangular route's phases hold at once, the largest of them, and every single array's size
+    (for A_SAFE), past the bandwidths' discovery (a constant workspace under the small-need floor): P1 b's dense copy (a
+    sparse b's full value, its fill's chunks and _mat's copy together), promoted to the result's class when b is real
+    and A complex; P2 X and one block's temporaries (at most min(E, n*k) values each); P3 X and the result: _unmat's
+    copy (and _box's real copy when its imaginary parts are all zero), then for a sparse b, X deleted, the result's
+    conversion (from_full_need)"""
+    cvb = 16 if cplx_b else 8
+    cv = 16 if (cplx_a or cplx_b) else 8
+    H = C_HDR
+    nk = n * k
+    B1 = nk * cvb + H
+    X = nk * cv + H
+    promote = cv != cvb
+    if sparse_b:
+        fill = 3 * E * 8 * 2
+        p1 = max(B1 + fill, 2 * B1, B1 + (X if promote else 0))
+    else:
+        p1 = B1 + (X if promote else 0)
+    p2 = X + 3 * min(E, nk) * cv + 3 * H
+    real_copy = nk * 8 + H if cv == 16 else 0
+    p3 = X + (nk * cv + H) + real_copy
+    if sparse_b:
+        p3 = max(p3, from_full_need(n, k, cv))
+    arrays = [nk * cvb, nk * cv, nk * 8, nk * C_IDX, (k + 1) * C_IDX]
+    return max(p1, p2, p3), max(arrays)
+
+
+def _small_triangular(A, b, k):
+    """A \\ b for a triangular (or diagonal) sparse A of order at most MAX_DENSE_SOLVE, by substitution: O(nnz)
+    rather than the dense route's O(n^3), charging no lu_work units, as the dense route charges none.  Whether to try
+    it is decided from A and b alone, never the host's free memory: A triangular (its bandwidths), no single array past
+    A_SAFE, and its whole need (small_triangular_need) under the small-need floor (where nothing is admitted, so it
+    never refuses) or at most the dense route's (so a refusal refuses the dense route's admitted need too: the dense
+    route is exempt only under the floor).  For a sparse b the dense route's side also counts its own conversion of
+    its result, which it makes unreserved after its admitted copies, at the worst case nnz = n*k (from the shape
+    alone, deterministic): a conservative bound, so some sparse-b solves the dense route answered within a guard (its
+    actual result smaller) are refused here.  Then, past the small-need
+    floor, the need is reserved before anything is made, and a guard that refuses it ends the solve with the
+    out-of-memory error naming this solve: never the dense route, which, needing at least as much, would refuse too.
+    Returns (result or None, the capacity record if one was read, for the dense route to use: one read per solve); a
+    solve the dense route would take exempt reads none (its need at most the dense route's, under the floor too)"""
+    n = A.n
+    sparse_b = type(b) is Sparse
+    cplx_a = A.pr.dtype.kind == "c"
+    cplx_b = not isreal(b)
+    need, largest = small_triangular_need(n, k, cplx_a, cplx_b, sparse_b)
+    cv = 16 if cplx_a or cplx_b else 8
+    dense = (DENSE_A_COPIES * n * n + DENSE_B_COPIES * n * k) * cv
+    if sparse_b:
+        # (the dense route ends so too: its result's conversion, after its solve's copies are gone)
+        dense = max(dense, from_full_need(n, k, cv))
+    if largest > A_SAFE or (need > SMALL_NEED and need > dense):
+        return None, None
+    # (the bandwidths first, the one piece before the reservation: a fixed workspace of 4E indices with their headers
+    # and views, far under the small-need floor, made before any copy of b and any capacity read, deciding no route by
+    # capacity; a Stop or MemoryError in it ends the solve.  Then a triangular A's need is admitted, or refused naming
+    # it.  This exempts the discovery only, nothing else of a larger solve)
+    kl, ku = bandwidths(A)
+    if kl and ku:
+        return None, None
+    led = rec = None
+    if need > SMALL_NEED:
+        rec = _capacity_record()
+        if unmeasured_reason(rec) is not None:
+            return None, rec
+        import _matlab_ledger as LG
+
+        led = LG.Ledger("Solving this %dx%d triangular system" % (n, n), "this solve", rec=rec)
+        led.reserve(need, "triangular")
+    try:
+        if k == 0:
+            r = _m._unmat(np.zeros((n, 0), dtype=np.complex128 if cplx_a or cplx_b else np.float64))
+            return (from_full(r) if sparse_b else r), rec
+        lu = _sys.modules.get("_matlab_lu")
+        if lu is not None:
+            lu._route("triangular")
+        # (a sparse b's full value filled under this route's reservation, P1: no admission or capacity read of its own)
+        Bf = _m._box(_fill_full(b)) if sparse_b else b
+        Bm = _m._mat(Bf)
+        del Bf
+        dt = np.complex128 if cplx_a or cplx_b else np.float64
+        X = Bm.astype(dt) if Bm.dtype != dt else Bm
+        del Bm
+        if triangular_solve(A, X, ku == 0):
+            _m.warning_("Matrix is singular to working precision.")
+        r = _m._unmat(X)
+        del X
+        return (from_full(r) if sparse_b else r), rec
+    finally:
+        if led is not None:
+            led.release(need)
+
+
+class _LazyRhs:
+    """b's dense copy for the sparse solver's old routes (band, LU, the diagonal shortcut), made by make() only once one
+    of them is taken, as mldivide made it before; its shape and class known before (the triangular route makes its own
+    copy, under its reservation)"""
+
+    def __init__(self, n, k, b):
+        self.b, self.shape = b, (n, k)
+        self.dtype = np.dtype(np.float64 if isreal(b) else np.complex128)
+
+    def make(self):
+        b, self.b = self.b, None
+        return _m._mat(full(b) if type(b) is Sparse else b)
+
+
+class _Solved:
+    """the triangular route's value, returned through _matlab_lu.solve"""
+
+    __slots__ = ("value",)
+
+    def __init__(self, value):
+        self.value = value
+
+
+def big_triangular_need(n, k, cplx_a, cplx_b, sparse_b, convert_b=False):
+    """the bytes the triangular route above MAX_DENSE_SOLVE holds at once, from its choice (before any copy of b) to
+    its result, and every single array's size (for A_SAFE).  X is b's copy in the result's class, made under the
+    route's reservation: P1 X's making, from a sparse b's full value (its fill's chunks, then the value and X), or
+    from a full b, through a converted copy when b isn't double (convert_b); P2 X and one block's temporaries (at
+    most min(E, n*k) values each); P3 X and the result, _unmat's copy (and _box's real copy when its imaginary parts
+    are all zero), and for a sparse b from_full's arrays as the small route's P3"""
+    cvb = 16 if cplx_b else 8
+    cv = 16 if (cplx_a or cplx_b) else 8
+    H = C_HDR
+    nk = n * k
+    X = nk * cv + H
+    if sparse_b:
+        F = nk * cvb + H
+        p1 = max(F + 3 * E * 8 * 2, F + X)
+    else:
+        p1 = X + (nk * cvb + H if convert_b else 0)
+    p2 = X + 3 * min(E, nk) * cv + 3 * H
+    real_copy = nk * 8 + H if cv == 16 else 0
+    p3 = X + nk * cv + H + real_copy
+    if sparse_b:
+        p3 += 4 * nk * C_IDX + 3 * nk * cv + 3 * (k + 1) * C_IDX + 10 * H
+    return max(p1, p2, p3), max(nk * cvb, nk * cv, nk * 8, nk * C_IDX, (k + 1) * C_IDX)
+
+
+def _big_triangular(A, b, k, lower, led, work, bound):
+    """the triangular route of mldivide above MAX_DENSE_SOLVE, offered by _matlab_lu.solve for every triangular A once
+    its bandwidths are known, with bound, the least need of the routes it replaces (the band's, the ordering's that the
+    LU needs first).  Taken where its whole need (big_triangular_need) is at most bound and no single array passes
+    A_SAFE, by those formulas alone: which route a triangular A takes, and its lu_work units, never depend on the
+    host's free memory.  Its need is then reserved, from before X is made until the result is, released only after; a
+    guard that refuses it ends the solve with the out-of-memory error, never another route (one the old routes would
+    have given too: each needs at least bound).  Returns _Solved(the result) or None (the old routes, nothing made).
+
+    Its lu_work units, k per stored off-diagonal entry, are never more than the band's: its solve charges every
+    position of the band per right-hand side, a superset of the stored entries.  Against the LU: its factorization
+    charges 3 units per stored entry of A before any solve, besides its ordering, and its solve k per kept factor
+    entry and k per row; its factors cover A's pattern but drop zero values.  So this route's total passes the LU's
+    only if k * (entries lost) > 3 nnz(A) + the ordering's units: k >= 4 and more than 3 nnz(A)/k of A's pattern
+    lost to stored zeros or exact cancellation; never for k <= 3, never for an A without stored zeros whose
+    elimination cancels nothing"""
+    n = A.n
+    sparse_b = type(b) is Sparse
+    cplx_a = A.pr.dtype.kind == "c"
+    cplx_b = not isreal(b)
+    dt = np.complex128 if cplx_a or cplx_b else np.float64
+    a = None if sparse_b else _m._arr(b)
+    convert = a is not None and a.dtype not in (np.dtype(np.float64), np.dtype(np.complex128))
+    need, largest = big_triangular_need(n, k, cplx_a, cplx_b, sparse_b, convert)
+    if largest > A_SAFE or need > bound:
+        return None
+    led.reserve(need, "triangular")
+    _sys.modules["_matlab_lu"]._route("triangular")
+    try:
+        if sparse_b:
+            F = _fill_full(b)
+            X = np.array(F.T, dtype=dt)
+            del F
+        else:
+            X = np.array(_m._farr(a).T, dtype=dt)
+        del a
+        if triangular_solve(A, X, lower, work):
+            _m.warning_("Matrix is singular to working precision.")
+        r = _m._unmat(X)
+        del X
+        return _Solved(from_full(r) if sparse_b else r)
+    finally:
+        led.release(need)
 
 
 def _dense_solve(a, b):

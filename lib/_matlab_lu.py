@@ -48,8 +48,10 @@ from _matlab_ledger import Ledger, _record
 # (sys._sagebrush_heap_used after a full collection; provisional: the
 # project's host, until M1b's VM run) times 1.25, rounded up: an ndarray
 # 427 bytes, a list pointer 9.62 (Node 24), a large Python int 10.4
-C_IDX, C_BOOL, C_RE, C_CPLX, C_PTR, C_PYINT = 8, 1, 8, 16, 13, 14
-C_HDR, C_LIST = 534, 53
+C_BOOL, C_RE, C_CPLX, C_PTR, C_PYINT = 1, 8, 16, 13, 14
+C_LIST = 53
+# (C_IDX and C_HDR are _matlab_sparse's, which needs them for its triangular solves without importing this module)
+from _matlab_sparse import C_IDX, C_HDR  # noqa: E402
 # (Python lists' entries, float 34.6 and complex 50.6 bytes, and a 2-tuple 114)
 C_ENT, C_TUPLE = 64, 143
 
@@ -478,6 +480,18 @@ def _solve1(F, b, trans, dt):
     return x
 
 
+def ordering_need(S):
+    """the ordering's reservation: its workspace and its result q (bytes, of which q's)"""
+    n, m = S.n, S.m
+    nnz = int(S.jc[n])
+    Nn = n + m
+    ord_bytes = C_ENT * (3 * nnz + 10 * Nn + 6 * n) + C_LIST * (m + 3 * n) + C_TUPLE * (2 * n + 16)
+    # (the ordering's result, a Python list: held from before the ordering
+    # until its typed copy qa replaces it)
+    qheld = C_LIST + n * C_ENT
+    return ord_bytes + qheld, qheld
+
+
 def ordering(S, led, work, stats=None):
     """the fill-reducing column order of the square sparse S (_matlab_colamd's,
     a Python list), its workspace reserved before it runs and released when it
@@ -488,12 +502,8 @@ def ordering(S, led, work, stats=None):
 
     _phase("ordering")
     n, m = S.n, S.m
-    nnz = int(S.jc[n])
-    Nn = n + m
-    ord_bytes = C_ENT * (3 * nnz + 10 * Nn + 6 * n) + C_LIST * (m + 3 * n) + C_TUPLE * (2 * n + 16)
-    # (the ordering's result, a Python list: held from before the ordering
-    # until its typed copy qa replaces it)
-    qheld = C_LIST + n * C_ENT
+    total, qheld = ordering_need(S)
+    ord_bytes = total - qheld
     led.reserve(ord_bytes + qheld, "ordering")
     try:
         q = _matlab_colamd.order_columns(m, n, S.jc, S.ir, lambda u: work.charge(u, "ordering"), stats)
@@ -1238,7 +1248,7 @@ def _warn_slow(n, t_lu):
                     "faster.)" % (n, n, _sp.MAX_DENSE_SOLVE), SLOW_LU_ID, n)
 
 
-def solve(S, Bm, what, bands=None, rec=None):
+def solve(S, Bm, what, bands=None, rec=None, tri=None):
     """S \\ Bm for a square sparse S, n > MAX_DENSE_SOLVE, by its band or its
     sparse LU (r6 section 2.4a): the bandwidths found in chunks (their
     workspace reserved first; refused, the band path is unknown, not
@@ -1251,7 +1261,20 @@ def solve(S, Bm, what, bands=None, rec=None):
     back to band if band fits.  Refused only when no path can be admitted,
     once, with both needs.  Returns (X, singular), or None for a diagonal S
     (the caller's shortcut); bands, a seam, gives (kl, ku) instead; rec, the
-    operation's capacity record when the caller has read it (one per operation)"""
+    operation's capacity record when the caller has read it (one per operation);
+    Bm may be lazy (shape, dtype and make(), the caller's copy of b): made
+    after the triangular route's choice, so that route makes its own copy
+    under its reservation.  tri, the caller's triangular route: tri(lower,
+    led, work, bound) for every
+    triangular S once its bandwidths are known, its value (the caller's
+    result) or None (the routes below, as before) by formulas alone, its
+    whole need at most bound, never by the ledger's guard, which only admits
+    or refuses it.  bound is the least need of the routes it replaces: the
+    band's m_band (where the band path exists) and the ordering's, which the
+    LU needs before anything else.  So a refusal of the triangular route is
+    one the old routes would give (the band and the ordering both refused),
+    and which route a triangular S takes, and the units it is charged,
+    depend only on S and b"""
     n = S.n
     led = Ledger(what, rec=rec)
     work = Work(what)
@@ -1279,6 +1302,16 @@ def solve(S, Bm, what, bands=None, rec=None):
         if nb is not None:
             m_band = nb["persistent"] + max(nb["setup"], nb["step"])
             band_ok = led.owned + m_band <= led.G
+        # a triangular S: substitution, decided from S and b alone (above)
+        if (kl == 0 or ku == 0) and tri is not None:
+            bound = ordering_need(S)[0]
+            out = tri(ku == 0, led, work, bound if m_band is None else min(m_band, bound))
+            if out is not None:
+                return out
+    # (the old routes' copy of b, made here when the caller passed it lazily: after the discovery and the triangular
+    # route's choice, as the caller's own expression)
+    if hasattr(Bm, "make"):
+        Bm = Bm.make()
     t_band = c["step"] * n + c["band"] * n * (kl + 1) * (kl + ku + 1) if kl is not None else None
 
     def band():
