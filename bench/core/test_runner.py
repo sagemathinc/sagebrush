@@ -1866,7 +1866,7 @@ class Stream(unittest.TestCase):
         ns = {}
         for node in ast_.parse(src).body:
             names = {t.id for t in getattr(node, "targets", []) if isinstance(t, ast_.Name)}
-            if getattr(node, "name", None) in ("_is_prime", "_nth_prime", "_legendre", "stream_disc") or "_STREAM_BASES" in names:
+            if getattr(node, "name", None) in ("_is_prime", "_nth_prime", "_lcg", "_legendre", "stream_disc") or "_STREAM_BASES" in names:
                 exec(compile(ast_.Module([node], []), "sagebrush_case.py", "exec"), ns)
         self.assertEqual([ns["stream_disc"](k, n, v) for k, n, v in self.GRID], want)
         # (the Magma driver's, run, when Magma is here: its IsPrime proves)
@@ -1874,7 +1874,7 @@ class Stream(unittest.TestCase):
         if not magma.exists():
             self.skipTest("no Magma")
         msrc = (Path(run.__file__).parent / "drivers/magma_case.m").read_text()
-        fns = [re.search(r"^function %s\(.*?^end function;\n" % f, msrc, re.S | re.M) for f in ("StreamPrime", "StreamDisc")]
+        fns = [re.search(r"^function %s\(.*?^end function;\n" % f, msrc, re.S | re.M) for f in ("StreamPrime", "StreamLCG", "StreamDisc")]
         self.assertTrue(all(fns))
         d = Path(tempfile.mkdtemp(prefix="stream-"))
         self.addCleanup(shutil.rmtree, d, True)

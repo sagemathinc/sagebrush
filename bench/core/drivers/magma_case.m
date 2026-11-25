@@ -175,14 +175,21 @@ function StreamPrime(start, m, r, j)
     end while;
 end function;
 
+function StreamLCG(s)
+    return (6364136223846793005*s + 1442695040888963407) mod 2^64;
+end function;
+
 function StreamDisc(kind, n, v)
     if kind eq "prime" then return -StreamPrime(2*10^(n-1), 4, 3, v); end if;
     if kind eq "composite" then
-        h := (n - 1) div 2; j := v div 2;
-        if v mod 2 eq 0 then
-            return -StreamPrime(2*10^h, 4, 1, j) * StreamPrime(4*10^(n-2-h), 4, 3, j);
-        end if;
-        return -4 * StreamPrime(2*10^h, 4, 1, j) * StreamPrime(3*10^(n-2-h), 4, 1, j);
+        // (p and q from pseudo-random points of their decades: no simple q / p)
+        h := (n - 1) div 2; g := n - 2 - h;
+        s1 := StreamLCG(1000003*n + 7919*v + 12345); s2 := StreamLCG(s1);
+        r := v mod 2 eq 0 select 3 else 1;
+        p := StreamPrime(10^h + (s1 mod (9*10^h)), 4, 1, 0);
+        q := StreamPrime(10^g + (s2 mod (9*10^g)), 4, r, 0);
+        if q eq p then q := StreamPrime(q + 1, 4, r, 0); end if;
+        return v mod 2 eq 0 select -p*q else -4*p*q;
     end if;
     // large_h: p = 7 (mod 8) prime with (-p | q) = +1 for q = 3 .. 23
     p := 2*10^(n-1) + ((7 - 2*10^(n-1)) mod 8); left := v;

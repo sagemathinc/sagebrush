@@ -1754,7 +1754,7 @@
     "magma": true,
     "flint": null
    },
-   "variants_note": "a stream of discriminants alternating -pq and -4pq: each input a new D, timed once; input 0 is the cold sample",
+   "variants_note": "a stream of discriminants alternating -pq and -4pq, p and q the first primes of their classes from pseudo-random points of their decades (no simple q / p): each input a new D, timed once; input 0 is the cold sample",
    "route_note": "ours: the default class group, assuming GRH; Magma: its quadratic-field route, which takes no proof option (its default, documented as rigorous), so the levels differ: class_group_proven compares at one level",
    "working_set": null
   },
