@@ -3438,7 +3438,7 @@ def _ff_subfields(self, degree=0, name=None):
     list): the prime field, each proper subfield by its Conway embedding,
     and this field by the identity; computed by the shared core, for fields
     of at most 2^20 elements, admitted as a whole before anything is made
-    (daybreak2 LIMIT-PR53-1).  A proper subfield is named as Sage names it
+    (the limits review LIMIT-PR53-1).  A proper subfield is named as Sage names it
     (astra CORR-PR53-2): for one degree, name itself; else name with its
     degree appended, or name[degree] for a dict (which must have every
     degree); with no name, the prefix field of a prefix field, else this
