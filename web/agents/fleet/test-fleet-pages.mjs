@@ -203,6 +203,22 @@ try {
     ok(g3 === "its newest grants couldn't be read: not checked", "L-3: the service names a grant but none can be read: unresolved, not \"no grant yet\"", g3);
     const g4 = await line({ ...base(), hosts: [hostRow({ grant_gen: 5, ack: null })] });
     ok(g4 === "grant 1 · expires in 1 h · waiting for the host · its newest grants couldn't be read: not checked", "L-4: the service says gen 5 but serves only up to 1: gen 1 verified, the rest unresolved", g4);
+    // (the agent's lineage cases: native G1, then browser narrowings G2 and G3 under the native policy, a browser widening
+    //  G4 of G3; and an ack of the first grant)
+    const L = (n) => F.objects.grants.find((c) => c.name === `a lineage: ${n}`);
+    const n1 = L("a browser narrowing of the native first grant"), n2 = L("a second browser narrowing, of the first narrowing"), w4 = L("a browser widening of the second narrowing");
+    const ack1 = F.objects.grant_acks.find((c) => c.name === "an ack of the first grant")?.bytes;
+    if (n1 && n2 && w4 && ack1) {
+      const G1 = n1.current.bytes, G2 = n1.bytes, G3 = n2.bytes, G4 = w4.bytes;
+      const n = await line({ ...base(), hosts: [hostRow({ grant_gen: 3, ack: null })], grants: { [HOST]: [G1, G2, G3] } });
+      ok(/^grant 3 · expires in \d+ (h|min) · narrowing: waiting for the host$/.test(n), "N-1: two browser narrowings in a row under the native policy: anchored at the native G1, G2 and G3 each verified against the one before: G3, a narrowing", n);
+      const w = await line({ ...base(), hosts: [hostRow({ grant_gen: 4, ack: null })], grants: { [HOST]: [G1, G2, G3, G4] } });
+      ok(/^grant 3 · expires in \d+ (h|min) · narrowing: waiting for the host · a newer grant, signed by a browser device, can't be checked under your fleet's current rule that widening needs the Sagebrush app$/.test(w), "N-2: a browser widening after them: the walk stops at G3; G4 said, never verified", w);
+      const a = await line({ ...base(), hosts: [hostRow({ ack: ack1 })] });
+      ok(a === "grant 1 · expires in 1 h · applied", "N-3: the host's verified ack of the very grant shown: applied", a);
+      const lone = await line({ ...base(), hosts: [hostRow({ grant_gen: 3, ack: null })], grants: { [HOST]: [G2, G3] } });
+      ok(/^its grant didn't verify \(device_tier\)$/.test(lone), "N-4: the narrowings without the native grant they narrow: no anchor, so the current authority is refused", lone);
+    } else ok(false, "the agent's fixtures carry the grant lineage and the ack of the first grant (fixtures 201)");
     const g5 = await line({ ...base(), hosts: [hostRow({ grant_gen: null, ack: null })], grants: {} });
     ok(g5 === "no grant yet", "L-5: a host with no grant: \"no grant yet\"", g5);
   }
