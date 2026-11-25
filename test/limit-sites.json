@@ -13652,6 +13652,11 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
  },
+ "src/runtime/numpy.ts :: cumulative :: if (axis !== null && axis !== undefined) normAxis(intNum(axis), a.ndim); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; it refuses an axis out of bounds for a 0-d array viewed as one element, as NumPy's cumsum"
+ },
  "src/runtime/numpy.ts :: discover :: if (depth + s.length > MAX_DIMS) nestedTooDeep(); #0": {
   "class": "none",
   "owner": "NumPy shim",
