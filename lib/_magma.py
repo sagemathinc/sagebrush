@@ -9665,14 +9665,6 @@ class _MNumberField(_snf.NumberField_absolute):
     _magma_block = True
 
     def __init__(self, f, quadratic=False, irreducible=False):
-        # (Magma mode prints and converts on the defining polynomial itself: a field the core keeps through a
-        # scaled model, one of a rational or non-monic polynomial, is refused here as before, until Magma mode
-        # maps its coordinates)
-        c, _ = _snf._int_coeffs(f)
-        if any(_Fraction(a).denominator != 1 for a in c):
-            raise NotImplementedError("defining polynomials must have integer coefficients")
-        if not c or c[-1] != 1:
-            raise NotImplementedError("defining polynomials must be monic (for now)")
         super().__init__(f, "$.1", irreducible=irreducible)
         # (as Magma 2.18-5 has it: a polynomial over the rationals defines the field made monic, NumberField(3*x^2
         # + 1) is x^2 + 1/3; one over the integers made primitive with a positive leading coefficient, 2*y^2 - 3
