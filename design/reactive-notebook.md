@@ -385,7 +385,7 @@ compromises are unnecessary.
 6. **Automatic file tracking: adopted** (writer-to-reader edges from the
    filesystem layer).
 
-7. **Budget default: 2 s.**
+7. **Budget default: 10 s** (2 s at first: too short for research math).
 8. **Mutation tracking: adopted** (version counters in the runtime; a cell
    that mutates another cell's object becomes its updater). See "What owning
    the parser and the runtime buys", 3.
@@ -421,7 +421,7 @@ web/test-reactive.mjs (60 browser checks).
 | Widgets | lib/ipywidgets `_report` | the cells reading a moved widget's names rerun. (anywidget: not adopted.) |
 | Fix for redefinitions | src/rename.ts | "Rename the later definitions of x (x_2, …)", keeping a Jupyter notebook's meaning; scope-aware; Sage through the preparser. |
 | Agents | notebook.js applyEdits/graph/verify; WebMCP edit_notebook, notebook_graph, verify_notebook | |
-| UI | index.html | Auto-run (2 s, 10 s, always, never; per notebook), Run stale, manual cells (cell menu), edited marks, errors with fixes. |
+| UI | index.html | Auto-run (10 s, 2 s, always, never; per notebook), Run stale, manual cells (cell menu), edited marks, errors with fixes. |
 | marimo's format | web/notebook/marimo.js | File > Open reads marimo .py notebooks (identical to marimo's parser on its 198 example notebooks, 1,805 cells); File > Download as marimo writes them (marimo reads all 198 back identically). lib/marimo: mo.md (rendered Markdown output), mo.ui controls (as widgets: moving one reruns its readers), hstack/vstack, stop, state, so imported notebooks run. |
 | TimeTravel | index.html replayResumed | a reactive notebook resumes a version by recomputing it, with its files as they were: no "Cannot resume here". |
 

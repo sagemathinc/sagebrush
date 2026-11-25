@@ -879,6 +879,18 @@ async function purgeStatus(rid) {
     const young = (await db.prepare("SELECT COUNT(*) AS n FROM upload_receipts WHERE owner = 'old-0' AND retired >= ?1").bind(t - 30 * 86400).first()).n;
     ok(a0 === 12_000 && a1 === 2000 && a2 === 0 && young === 5, `S10 12,000 receipts past their days: 10,000 removed by one run (20 pages of 500), the rest by the next; 5 younger ones stay (${a0} -> ${a1} -> ${a2}, young ${young})`);
   }
+  // S12: the admin log's retention: a view past ADMIN_RECORD_DAYS (365) goes with its targets, in one run; a younger
+  // view and its targets stay
+  {
+    const t = Math.floor(Date.now() / 1000), old = t - 366 * 86400, young = t - 364 * 86400;
+    const view = async (at) => (await db.prepare("INSERT INTO admin_views (at, admin_id, view) VALUES (?1, 'adm', 'accounts') RETURNING id").bind(at).first()).id;
+    const v1 = await view(old), v2 = await view(young);
+    for (const [v, h] of [[v1, "h1"], [v1, "h2"], [v2, "h3"]]) await db.prepare("INSERT INTO admin_view_targets (view_id, target_hash) VALUES (?1, ?2)").bind(v, h).run();
+    await tick();
+    const views = (await db.prepare("SELECT id FROM admin_views WHERE id IN (?1, ?2) ORDER BY id").bind(v1, v2).all()).results.map((r) => r.id);
+    const targets = (await db.prepare("SELECT target_hash FROM admin_view_targets WHERE view_id IN (?1, ?2) ORDER BY target_hash").bind(v1, v2).all()).results.map((r) => r.target_hash);
+    ok(JSON.stringify(views) === JSON.stringify([v2]) && JSON.stringify(targets) === JSON.stringify(["h3"]), `S12 the admin log past 365 days goes with its targets; a younger view keeps its own (${JSON.stringify({ views, targets })})`);
+  }
 
   // S11 (daybreak3's S2): a Worker rolled back to before this change (07b50cf5's share server, from git history),
   // and this change's page client (uploadCollection, bundled as the page is): the upload fails, and the old server

@@ -5,7 +5,8 @@ gen-doc-vectors.py; doc-claim-vectors.json) and core's reference server (referen
 
 ## doc-vectors.json's `refusals`: comparing a refusal with a case
 
-Each case of `refusals` gives a refusal's `code` and its `detail`: the refusal's own fields (`why`, `limit`,
+Each case of `refusals` names the request (`for`), the situation (`when`) and when it may be sent again (`again`),
+and in `error` gives a refusal's `code` and, if it has one, its `detail`: the refusal's own fields (`why`, `limit`,
 `retry_after_*`, `latest_at_seq`).
 
 On a document socket a refusal arrives as `{t: "error", req, code, detail: {message, ...the refusal's own fields}}`, as
