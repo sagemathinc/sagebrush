@@ -633,6 +633,39 @@ export class FlagsObj {
 }
 
 // out[...] = src (an array, broadcast to out's shape), casting as needed.
+// A float converted to an integer dtype as NumPy converts it (#2149), each
+// element by NumPy's scalar (per-element) loop, which its x86-64 builds
+// compile to the truncating conversions: for int8, int16, int32, uint8 and
+// uint16 the 32-bit one (INT32_MIN when the truncated value is out of int32's
+// range, NaN or infinite; the narrow types keep its low bits, so NaN and
+// infinity become 0 there and 300.7 becomes 44 in int8); for uint32 the
+// 64-bit one, its low 32 bits kept (NaN, infinity and |x| >= 2**63 become 0,
+// -3e9 becomes 1294967296). NumPy's vectorized loop gives some uint32 elements
+// of a contiguous array other values (NUMPY.md); one rule
+// here, the same for every element and on every machine. An invalid
+// conversion sets castInvalid, for the cast's RuntimeWarning; warnInvalidCast,
+// after each cast, clears it, so it is false between casts. int64 and
+// uint64 are left to castNum: their x86-64 results (INT64_MIN, 2**63) are
+// past the 2**53 Sagebrush's 64-bit stores hold.
+let castInvalid = false;
+function floatToInt(dt: DType, v: number): number {
+  if (dt.kind === "b" || dt.ctor === Float64Array) return castNum(dt, v);
+  if (dt.name === "uint32") {
+    if (v >= -9223372036854775808 && v < 9223372036854775808) return Math.trunc(v);
+    castInvalid = true;
+    return 0;
+  }
+  if (v > -2147483649 && v < 2147483648) return Math.trunc(v);
+  castInvalid = true;
+  return -2147483648;
+}
+// (NumPy's warning for a cast with an invalid conversion, once per cast)
+function warnInvalidCast(): void {
+  if (!castInvalid) return;
+  castInvalid = false;
+  Obj.callObj(Obj.getattr(Obj.hooks.importModule("warnings"), "warn"), ["invalid value encountered in cast", T.RuntimeWarning, 2]);
+}
+
 function assign(out: NDArray, src: NDArray) {
   writable(out);
   // overlapping storage (a[1:] = a[:-1], a[:] = a[::-1]): read from a copy
@@ -646,14 +679,22 @@ function assign(out: NDArray, src: NDArray) {
   }
   const dt = out.dt;
   if (src.dt.cplx) {
-    loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = castNum(dt, sd[2 * q])));
+    // (a complex one by its real part, as NumPy's; to bool, true if either part is nonzero)
+    if (dt.kind === "b") loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = sd[2 * q] !== 0 || sd[2 * q + 1] !== 0 ? 1 : 0));
+    else {
+      const conv = dt.kind === "i" || dt.kind === "u" ? floatToInt : castNum;
+      loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = conv(dt, sd[2 * q])));
+      warnInvalidCast();
+    }
   } else if (isWide(dt) && isWide(src.dt) && src.dt !== dt) {
     // (int64 <-> uint64: NumPy's wrap, certified)
     loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = exact64(dt, BigInt(sd[q])) ?? wideRefuse(dt)));
   } else if (dt.kind === "f" || dt.ctor !== Float64Array && dt.kind !== "b" && src.dt.isInt) {
     loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = sd[q]));
   } else {
-    loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = castNum(dt, sd[q])));
+    const conv = src.dt.kind === "f" && (dt.kind === "i" || dt.kind === "u") ? floatToInt : castNum;
+    loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = conv(dt, sd[q])));
+    warnInvalidCast();
   }
 }
 
@@ -842,7 +883,27 @@ function admitWide(v: any, dt: DType): number {
   if (ownInt !== undefined || Obj.lookupType(t, "__index__") !== undefined) return admitWide(Ty.intCall(v), dt);
   return raise(T.TypeError, `int() argument must be a string, a bytes-like object or a real number, not '${typeName(v)}'`);
 }
+// (a NumPy float scalar: np.float64 or np.float32, a Python float subclass here)
+const isFloatScalar = (v: any): boolean => typeName(v) === "float64" || typeName(v) === "float32";
 function toNum(v: any, dt?: DType): number {
+  // (a NumPy float scalar into an unsigned dtype is cast, as NumPy packs it: its per-element conversion, with the
+  // warning, #2149; into a signed one, by int(), as a Python float below)
+  if (dt && dt.kind === "u" && isFloatScalar(v)) {
+    const r = floatToInt(dt, Number(Obj.unbox(v) instanceof Obj.FloatBox ? (Obj.unbox(v) as any).v : Obj.unbox(v)));
+    warnInvalidCast();
+    return r;
+  }
+  // (a Python float into an integer dtype, as NumPy converts it: by int(), NaN and infinity refused in its words,
+  // the rest truncated and checked as a Python int, #2149)
+  const fu = dt && dt.isInt && typeof v === "object" && v !== null ? Obj.unbox(v) : v;
+  if (dt && dt.isInt && ((typeof fu === "number" && !Number.isInteger(fu) && (Object.is(fu, v) || isFloatScalar(v))) || fu instanceof Obj.FloatBox)) {
+    const f: number = typeof fu === "number" ? fu : fu.v;
+    if (Number.isNaN(f)) raise(T.ValueError, "cannot convert float NaN to integer");
+    if (!Number.isFinite(f)) raise(T.OverflowError, "cannot convert float infinity to integer");
+    const n = Math.trunc(f) + 0;
+    if (!(n >= -9223372036854775808 && n < (dt.kind === "u" && dt.itemsize === 8 ? 18446744073709551616 : 9223372036854775808))) raise(T.OverflowError, "Python int too large to convert to C long");
+    return toNum(Number.isSafeInteger(n) ? n : BigInt(n), dt);
+  }
   if (dt && isWide(dt)) return admitWide(v, dt);
   if (typeof v === "number") {
     if (dt && dt.isInt && Number.isInteger(v)) checkPyInt(dt, v);
@@ -1282,6 +1343,9 @@ function getitem(a: NDArray, key: any): any {
 function setitem(a: NDArray, key: any, value: any) {
   writable(a);
   const r = resolveIndex(a, key);
+  // (a Python or NumPy float into an integer array as NumPy packs it, by int(), #2149: toNum's checks; a sequence
+  // stays an array, cast)
+  if (a.dt.isInt && ((typeof value === "number" && !Number.isInteger(value)) || value instanceof Obj.FloatBox || typeName(value) === "float64" || typeName(value) === "float32")) value = toNum(value, a.dt);
   // (a Python value into int64/uint64 through the admission, its original)
   const src = value instanceof NDArray ? value : isWide(a.dt) ? fromPy(value, a.dt) : operand(value).arr;
   if ("view" in r) return assign(r.view, src);

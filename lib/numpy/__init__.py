@@ -260,6 +260,10 @@ def _int_new(cls, value=0):
             if value < 0 and cls.__name__ == "uint64":
                 raise OverflowError(f"Python integer {value} out of bounds for uint64")
             return int.__new__(cls, value)
+    if isinstance(value, floating):
+        # (a NumPy float scalar is cast, as an array element of its type is: NaN, infinity and out-of-range values
+        # as NumPy's per-element conversion gives them, with its warning, #2149; a Python float goes by int())
+        return array(value, dtype=type(value)).astype(cls)[()]
     r = array(value, dtype=cls)
     return r if r.ndim else r[()]
 
@@ -876,7 +880,7 @@ class ufunc:
         if out is not None:
             if isinstance(out, tuple):
                 out = out[0]
-            out[...] = r
+            out[...] = asarray(r)  # (cast as an array, as NumPy's loop writes it, not packed as one value, #2149)
             return out
         return r
 
@@ -1358,7 +1362,7 @@ def _count(a, axis):
 
 def _out(r, out):
     if out is not None:
-        out[...] = r
+        out[...] = asarray(r)  # (cast as an array, as NumPy's loop writes a result, not packed as one value, #2149)
         return out
     return r
 
