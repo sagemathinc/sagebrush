@@ -87,6 +87,8 @@ try {
       cases["id overlong UTF-8 (C0 AF)"] = withLen(2, new Uint8Array([0xc0, 0xaf]));
       cases["id a lone surrogate (ED A0 80)"] = withLen(3, new Uint8Array([0xed, 0xa0, 0x80]));
       cases["id with NUL"] = withLen(3, new Uint8Array([0x6b, 0, 0x31]));
+      // (a leading byte order mark: a decoder drops it, so "EF BB BF 6B" would read as "k": not the id's one encoding)
+      cases["id with a leading BOM (EF BB BF 6B)"] = withLen(4, new Uint8Array([0xef, 0xbb, 0xbf, 0x6b]));
       cases["key epoch 2^53"] = epochOf(2n ** 53n);
       cases["key epoch 2^64 - 1"] = epochOf(2n ** 64n - 1n);
       const out = {};
@@ -96,7 +98,7 @@ try {
     })()`);
     const { ["2^53 - 1 is read exactly (no rounding)"]: exact, ...out } = r.out;
     const wrong = Object.entries(out).filter(([, v]) => v !== "bad_form");
-    ok(Object.keys(out).length === 16 && wrong.length === 0 && r.finds === 0, `D-2: ${Object.keys(out).length} malformed prefixes are each refused (bad_form) before any key lookup (0 finds): another format, empty or cut short, an id of length 0, 257 or past the slice, an id that isn't well-formed UTF-8 or holds NUL, a key epoch past 2^53 - 1`, { wrong, finds: r.finds });
+    ok(Object.keys(out).length === 17 && wrong.length === 0 && r.finds === 0, `D-2: ${Object.keys(out).length} malformed prefixes are each refused (bad_form) before any key lookup (0 finds): another format, empty or cut short, an id of length 0, 257 or past the slice, an id that isn't well-formed UTF-8, holds NUL or starts with a byte order mark (not its one encoding), a key epoch past 2^53 - 1`, { wrong, finds: r.finds });
     ok(exact === true, "D-2: a key epoch of exactly 2^53 - 1 is read as itself (a BigInt bound, no lossy conversion)");
   }
 
@@ -136,8 +138,9 @@ try {
     const r = await P.ev(`(async () => {
       const gens = [{ doc: ${J(DOC)}, cekId: ${J(long)}, keyEpoch: 9007199254740991, fill: 0x44 }];
       const { p, calls } = await provider(gens, 0), max = S.payloadMax(${J(long)}, 9007199254740991);
-      const atMax = await S.sealSlice(p, ${J(W)}, new Uint8Array(max));
-      const out = { limit: LIMITS.patchBytes, max, sealMax: atMax.length, openMax: (await S.openSlice(p, ${J(W)}, atMax)).length };
+      const atMax = await S.sealSlice(p, ${J(W)}, new Uint8Array(max)).catch((e) => null);
+      const len = async (f) => { try { return (await f()).length; } catch (e) { return e?.code ?? String(e); } };
+      const out = { limit: LIMITS.patchBytes, max, sealMax: atMax ? atMax.length : "refused", openMax: atMax ? await len(() => S.openSlice(p, ${J(W)}, atMax)) : "refused" };
       out.sealOver = await code(() => S.sealSlice(p, ${J(W)}, new Uint8Array(max + 1)));
       const finds = calls.find.length;
       out.openOver = await code(() => S.openSlice(p, ${J(W)}, new Uint8Array(LIMITS.patchBytes + 1)));

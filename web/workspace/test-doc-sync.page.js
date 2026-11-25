@@ -2,7 +2,7 @@
 // Locks): a workspace with the journal active and DEV's docsync on, a notebook store per notebook, and doc-sync.ts's
 // DocSync on a minimal account socket to the reference server (hello, welcome, then the document requests).  The
 // harness drives two of these, as two devices of one account.
-import { W, N, H, DS, P, NB, ST } from "./all.js";
+import { W, N, H, DS, P, NB, ST, E } from "./all.js";
 
 const J = JSON.stringify;
 const T = { stores: new Map(), pending: new Map(), req: 0, log: [], warns: [] };
@@ -33,6 +33,23 @@ T.updatedOf = async (id) => { const p = await T.w.pathOf("notebook", id); return
 T.pagesOf = (id) => T.pages.filter((p) => p.doc === id);
 T.touch = async (id, t) => { await T.w.touch(id, t); return T.updatedOf(id); };
 
+/** End-to-end encryption on the wire for this device (doc-seal.ts, opt-in): its DocSync made again, before it connects,
+ * with a fixture key provider over `gens` (each {cekId, keyEpoch, fill}: a content key of 32 bytes of `fill`), the
+ * one at `current` sealing new patches; `find` answers only a generation it lists. */
+T.useKeys = async (account, gens, current) => {
+  const keys = new Map(), at = (cekId, keyEpoch) => `${cekId}\u0000${keyEpoch}`;
+  for (const g of gens) keys.set(at(g.cekId, g.keyEpoch), await E.importCek(new Uint8Array(32).fill(g.fill)));
+  const cur = gens[current];
+  T.ds = new DS.DocSync({
+    retryMs: 200, askMs: 5000, onPage: (p) => { T.pages.push(p); void T.w.touch(p.doc, p.at); },
+    keys: {
+      account,
+      current: async () => ({ cekId: cur.cekId, keyEpoch: cur.keyEpoch, cek: keys.get(at(cur.cekId, cur.keyEpoch)) }),
+      find: async (doc, cekId, keyEpoch) => keys.get(at(cekId, keyEpoch)) ?? null,
+    },
+  });
+  return true;
+};
 /** The account socket (the front adds this device's session), hello, welcome, then DocSync connected on it. */
 T.connect = async (dev, account) => {
   const owner = await P.accountHash(account);
