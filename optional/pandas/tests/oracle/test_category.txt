@@ -555,3 +555,41 @@ False
 !! ValueError: Cannot cast str dtype to float64
 == str-astype-int
 !! ValueError: Cannot cast str dtype to int64
+== keep-ordered-categorical-False-default
+(False, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-categorical-False-arg-false
+(False, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-categorical-False-arg-true
+(True, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-categorical-False-dtype-string
+(False, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-categorical-False-dtype-false
+(False, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-categorical-False-dtype-true
+(True, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-categorical-True-default
+(True, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-categorical-True-arg-false
+(False, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-categorical-True-arg-true
+(True, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-categorical-True-dtype-string
+(True, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-categorical-True-dtype-false
+(False, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-categorical-True-dtype-true
+(True, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-series-False-default
+(False, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-series-False-arg-false
+(False, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-series-False-arg-true
+(True, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-series-True-default
+(True, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-series-True-arg-false
+(False, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-series-True-arg-true
+(True, ['b', 'a', 'c'], [0, 1])
+== ordered-eq-rebuilt
+[True, True]

@@ -1,9 +1,9 @@
 """The category dtype (pandas' CategoricalDtype and Categorical), as pandas
 3.1 builds and prints it:
 
-- the categories are the distinct values present, sorted (in order of first
-  appearance when they don't sort), or the ones given; a value outside them
-  is missing;
+- the categories are the distinct values present, sorted (numbers before
+  strings when they mix, as pandas' safe sort orders them), or the ones
+  given; a value outside them is missing;
 - a column holds int codes into the categories, -1 for a missing value, in
   the smallest signed integer type that fits (int8 for fewer than 127
   categories);
@@ -314,7 +314,9 @@ class Categorical(object):
     def __init__(self, values=None, categories=None, ordered=None, dtype=None, fastpath=False, copy=True):
         if fastpath:
             raise refuse("Categorical(fastpath=)")
-        explicit = dtype is not None
+        # (a CategoricalDtype, or ordered=, sets whether an existing categorical's categories are ordered; the string
+        # "category" keeps its flag)
+        explicit = isinstance(dtype, CategoricalDtype)
         if dtype is not None:
             if isinstance(dtype, str) and dtype == "category":
                 dtype = CategoricalDtype(categories, ordered)
@@ -326,10 +328,10 @@ class Categorical(object):
         from ._pd_index import Index
         if values is None:
             values = []
-        if isinstance(values, Categorical):
-            col = column_to_category(values._pd_col, dtype if dtype.categories is not None else None)
+        source = values._pd_col if isinstance(values, (Categorical, Series)) else None
+        if isinstance(source, CatColumn):
+            col = column_to_category(source, dtype if dtype.categories is not None else None)
             if dtype.categories is None and (explicit or ordered is not None):
-                # (an explicit dtype, or ordered=, sets whether the categories are ordered)
                 col = CatColumn(CategoricalDtype(col.dtype.categories, dtype.ordered), col._pd_codes)
         elif isinstance(values, Series):
             col = column_to_category(values._pd_col, dtype)
