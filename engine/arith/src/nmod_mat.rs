@@ -13,6 +13,12 @@
 use crate::cost::{publish_progress, size_product, tally, tally_all, Family, FAMILIES};
 use crate::nmod::{mul_shoup, Modulus};
 
+mod fast;
+
+pub use fast::{reset_fast_product, with_fast_product};
+#[cfg(feature = "test-hooks")]
+pub use fast::{fast_allowance_left, fast_n0, fast_product_state, leave_fast_product_state, set_fast_n0};
+
 /// P A = L U modulo p: L lower triangular (the pivots on its diagonal),
 /// U unit upper triangular, stored together in `a`; row i of P A is row
 /// perm[i] of A.
@@ -99,7 +105,7 @@ impl Poll {
         Poll::stepping([0; FAMILIES])
     }
     fn stepping(step: [u64; FAMILIES]) -> Poll {
-        Poll { since: 0, acc: [0; FAMILIES], step, steps: 0 }
+        Poll { since: Carrying::take(), acc: [0; FAMILIES], step, steps: 0 }
     }
     /// One more step done.
     #[inline]
@@ -116,6 +122,16 @@ impl Poll {
             sagebrush_interrupt::check_coarse();
             publish_progress();
         }
+    }
+    /// Inside a fast product, before child products: this Poll's work
+    /// toward the next poll carried on to theirs.
+    fn hand_off(&mut self) {
+        Carrying::put(self.since);
+        self.since = 0;
+    }
+    /// After them: the carried work back.
+    fn take_back(&mut self) {
+        self.since += Carrying::take();
     }
     /// `n` units of family `f` (not a poll).
     #[inline]
@@ -139,6 +155,68 @@ impl Poll {
 impl Drop for Poll {
     fn drop(&mut self) {
         self.flush();
+        Carrying::put(self.since);
+    }
+}
+
+thread_local! {
+    /// Inside a fast product (its depth, and the work toward the next Stop
+    /// poll): the work carried from each Poll to the next, so that the
+    /// product's own passes and its many small child products poll as one
+    /// loop would, about every 2^16 of work, rather than each from zero.
+    static CARRY: std::cell::Cell<(u32, u64)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// While alive (a fast product running), Polls carry their work toward the
+/// next Stop poll from one to the next; at the outermost one's end the
+/// carry is dropped.
+struct Carrying;
+
+impl Carrying {
+    fn new() -> Carrying {
+        CARRY.with(|c| {
+            let (d, s) = c.get();
+            c.set((d + 1, s));
+        });
+        Carrying
+    }
+    /// The carried work (0 outside a fast product), now this Poll's.
+    fn take() -> u64 {
+        CARRY.with(|c| {
+            let (d, s) = c.get();
+            if d == 0 {
+                return 0;
+            }
+            c.set((d, 0));
+            s
+        })
+    }
+    /// No fast product running, nothing carried (see
+    /// [`fast::reset_fast_product`]).
+    fn reset() {
+        CARRY.with(|c| c.set((0, 0)));
+    }
+    #[cfg(feature = "test-hooks")]
+    fn state() -> (u32, u64) {
+        CARRY.with(|c| c.get())
+    }
+    /// A Poll's work toward the next poll, carried on (none outside).
+    fn put(since: u64) {
+        CARRY.with(|c| {
+            let (d, s) = c.get();
+            if d > 0 {
+                c.set((d, s + since));
+            }
+        });
+    }
+}
+
+impl Drop for Carrying {
+    fn drop(&mut self) {
+        CARRY.with(|c| {
+            let (d, s) = c.get();
+            c.set((d - 1, if d == 1 { 0 } else { s }));
+        });
     }
 }
 
@@ -1017,7 +1095,49 @@ impl Mat {
         t
     }
 
+    /// The product by the fast route's plan with crossover `n0` (see
+    /// `nmod_mat/fast.rs`), whatever the allowance (tests and benchmarks
+    /// only: it bypasses the admission).
+    #[cfg(feature = "test-hooks")]
+    pub fn mul_planned(&self, o: &Mat, n0: usize) -> Mat {
+        assert_eq!(self.cols, o.rows);
+        fast::mul_planned(self, o, n0)
+    }
+
+    /// self * o.  Classical ([`Mat::mul_classical`]) unless a caller has
+    /// given this thread an allowance for the fast route's workspace
+    /// ([`with_fast_product`]): then the fast route where its plan takes it
+    /// and its extra words fit what is left of the allowance, which it
+    /// holds while it runs.  Either way the same result, and the fast route
+    /// never totals more units than the classical one.
+    /// The Winograd levels the plan with crossover `n0` runs (each fast
+    /// product, its half products' included); `None` on overflow (tests
+    /// and benchmarks).
+    #[cfg(feature = "test-hooks")]
+    pub fn planned_levels(m: usize, k: usize, n: usize, md: &Modulus, n0: usize) -> Option<u64> {
+        match fast::plan(m, k, n, md, n0)?.0 {
+            fast::Plan::Winograd => Mat::planned_levels(m / 2, k / 2, n / 2, md, n0)?.checked_mul(7)?.checked_add(1),
+            fast::Plan::Classical => Some(0),
+        }
+    }
+
     pub fn mul(&self, o: &Mat) -> Mat {
+        assert_eq!(self.cols, o.rows);
+        fast::mul(self, o)
+    }
+
+    /// The words the product of an m x k by a k x n matrix by the fast
+    /// route's plan with crossover `n0` allocates at once at most (its result
+    /// included); `None` on overflow (tests and benchmarks).
+    #[cfg(feature = "test-hooks")]
+    pub fn planned_peak(m: usize, k: usize, n: usize, md: &Modulus, n0: usize) -> Option<u64> {
+        fast::plan(m, k, n, md, n0).map(|p| p.2)
+    }
+
+    /// self * o by the classical product: a row of sums of products at a
+    /// time, in u64 sums where they cannot overflow, else in u128 sums
+    /// against the transpose of o.
+    pub fn mul_classical(&self, o: &Mat) -> Mat {
         assert_eq!(self.cols, o.rows);
         let m = self.m;
         let sq = (m.n as u128 - 1) * (m.n as u128 - 1);

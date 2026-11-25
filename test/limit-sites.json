@@ -720,7 +720,12 @@
   "owner": "engine arithmetic (GF(p) matrices)",
   "reason": "test code: an accounting meter with no budget (Meter::accounting(u64::MAX)), to read a call's units; refuses nothing"
  },
- "engine/arith/src/nmod_mat.rs :: mul :: let pinv = u64::MAX / m.n; #0": {
+ "engine/arith/src/nmod_mat.rs :: mul_classical :: let batch = if sq == 0 { usize::MAX } else { (u128::MAX / sq).min(1 << 30) as usize }; #0": {
+  "class": "none",
+  "owner": "engine arithmetic (dense matrices mod p)",
+  "reason": "the classical product's u128 sums: how many products of residues fit a u128 before a reduction (at most 2^30); a value, not a cap; refuses nothing"
+ },
+ "engine/arith/src/nmod_mat.rs :: mul_classical :: let pinv = u64::MAX / m.n; #0": {
   "class": "none",
   "owner": "engine arithmetic (dense matrices mod p)",
   "reason": "u64 sums of 32-bit residues: how many products fit a u64 (batch64) and Barrett's reciprocal floor((2^64 - 1) / n) for reducing them; values, not caps; refuses nothing"
@@ -779,6 +784,21 @@
   "class": "none",
   "owner": "engine arithmetic (dense matrices mod p)",
   "reason": "u64 sums of 32-bit residues: how many products fit a u64 (batch64) and Barrett's reciprocal floor((2^64 - 1) / n) for reducing them; values, not caps; refuses nothing"
+ },
+ "engine/arith/src/nmod_mat/fast.rs :: an_overflowing_count_gives_no_plan :: assert!(classical_units(usize::MAX, 2, 2, &md).is_none()); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: a shape whose counts overflow gets no fast-product plan (so the classical product); refuses nothing itself"
+ },
+ "engine/arith/src/nmod_mat/fast.rs :: an_overflowing_count_gives_no_plan :: assert!(plan(usize::MAX / 2, usize::MAX / 2, 4, &md, 2).is_none()); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: a shape whose counts overflow gets no fast-product plan (so the classical product); refuses nothing itself"
+ },
+ "engine/arith/src/nmod_mat/fast.rs :: units_of :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an accounting meter with no budget (Meter::accounting(u64::MAX)), to read a call's units; refuses nothing"
  },
  "engine/arith/src/nmod_poly.rs :: barrett_reduction_edges :: let mut xs: Vec<u64> = vec![0, 1, n - 1, n, n + 1, 2 * n - 1, u64::MAX, u64::MAX - 1, u64::MAX - n]; #0": {
   "class": "none",
@@ -2824,6 +2844,81 @@
   "class": "none",
   "owner": "engine arith (kernel metering)",
   "reason": "test code: the work estimate's models in u64 at sizes past 32 bits (saturation and zero-factor checks of size_product and a model); refuses nothing itself"
+ },
+ "engine/arith/tests/nmod_fast_alloc.rs :: the_fast_product_allocates_its_planned_peak :: assert!(Mat::planned_peak(usize::MAX / 2, usize::MAX / 2, 4, &md, n0).is_none()); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: a shape whose counts overflow gets no fast-product plan (so the classical product); refuses nothing itself"
+ },
+ "engine/arith/tests/nmod_fast_alloc.rs :: the_fast_product_allocates_its_planned_peak :: let (wf, pf) = measured(|| with_fast_product(u64::MAX / 4, || metered(&mut mf, || x.mul(&y)))); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an ample allowance for the fast product's extra words (u64::MAX / 4), so that its plan alone decides the route; refuses nothing"
+ },
+ "engine/arith/tests/nmod_fast_alloc.rs :: the_fast_product_allocates_its_planned_peak :: let got = with_fast_product(u64::MAX / 4, || metered(&mut mo, || x.mul(&y))); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an ample allowance for the fast product's extra words (u64::MAX / 4), so that its plan alone decides the route; refuses nothing"
+ },
+ "engine/arith/tests/nmod_fast_alloc.rs :: the_fast_product_allocates_its_planned_peak :: let mut mc = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an accounting meter with no budget (Meter::accounting(u64::MAX)), to read a call's units; refuses nothing"
+ },
+ "engine/arith/tests/nmod_fast_alloc.rs :: the_fast_product_allocates_its_planned_peak :: let mut mc = Meter::accounting(u64::MAX); #1": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an accounting meter with no budget (Meter::accounting(u64::MAX)), to read a call's units; refuses nothing"
+ },
+ "engine/arith/tests/nmod_fast_alloc.rs :: the_fast_product_allocates_its_planned_peak :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an accounting meter with no budget (Meter::accounting(u64::MAX)), to read a call's units; refuses nothing"
+ },
+ "engine/arith/tests/nmod_fast_alloc.rs :: the_fast_product_allocates_its_planned_peak :: let mut meter = Meter::accounting(u64::MAX); #1": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an accounting meter with no budget (Meter::accounting(u64::MAX)), to read a call's units; refuses nothing"
+ },
+ "engine/arith/tests/nmod_fast_alloc.rs :: the_fast_product_allocates_its_planned_peak :: let mut mf = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an accounting meter with no budget (Meter::accounting(u64::MAX)), to read a call's units; refuses nothing"
+ },
+ "engine/arith/tests/nmod_fast_alloc.rs :: the_fast_product_allocates_its_planned_peak :: let mut mf = Meter::accounting(u64::MAX); #1": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an accounting meter with no budget (Meter::accounting(u64::MAX)), to read a call's units; refuses nothing"
+ },
+ "engine/arith/tests/nmod_fast_alloc.rs :: the_fast_product_allocates_its_planned_peak :: let mut mo = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an accounting meter with no budget (Meter::accounting(u64::MAX)), to read a call's units; refuses nothing"
+ },
+ "engine/arith/tests/nmod_fast_alloc.rs :: the_fast_product_allocates_its_planned_peak :: with_fast_product(u64::MAX / 4, || metered(&mut mf, || drop(x.mul(&y)))); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an ample allowance for the fast product's extra words (u64::MAX / 4), so that its plan alone decides the route; refuses nothing"
+ },
+ "engine/arith/tests/nmod_fast_stop.rs :: a_stop_in_the_fast_product_charges_a_prefix :: let mut classical = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an accounting meter with no budget (Meter::accounting(u64::MAX)), to read a call's units; refuses nothing"
+ },
+ "engine/arith/tests/nmod_fast_stop.rs :: a_stop_in_the_fast_product_charges_a_prefix :: let mut fast = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an accounting meter with no budget (Meter::accounting(u64::MAX)), to read a call's units; refuses nothing"
+ },
+ "engine/arith/tests/nmod_fast_stop.rs :: a_stop_in_the_fast_product_charges_a_prefix :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an accounting meter with no budget (Meter::accounting(u64::MAX)), to read a call's units; refuses nothing"
+ },
+ "engine/arith/tests/nmod_fast_stop.rs :: a_stop_in_the_fast_product_charges_a_prefix :: let mut whole = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an accounting meter with no budget (Meter::accounting(u64::MAX)), to read a call's units; refuses nothing"
  },
  "engine/arith/tests/nmod_fill_stop.rs :: a_stop_in_the_zero_fill_charges_the_runs_done :: let mut meter = Meter::accounting(u64::MAX); #0": {
   "class": "none",

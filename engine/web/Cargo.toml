@@ -34,6 +34,9 @@ sagebrush-interrupt = { path = "../interrupt", features = ["wasm-host", "test-ho
 # (tests only: a fake ledger row, for the exact admission boundary of
 # tests/bin_echelon_alloc.rs)
 sagebrush-ledger = { path = "../ledger", features = ["test-hooks"] }
+# (tests only: the fast product's state left as a trap leaves it,
+# tests/new_run.rs)
+sagebrush-arith = { path = "../arith", features = ["test-hooks"] }
 
 [lints]
 workspace = true
