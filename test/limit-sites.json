@@ -11212,6 +11212,14 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
  },
+ "src/latex-cli.ts :: loadWait :: export const loadWait = (bytes: number): number => Math.min(LOAD_WAIT_MAX, LOAD_WAIT_MIN + Math.ceil(bytes / 2 ** 20) * LOAD_WAIT_PER_MIB); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex render --png/--pdf: how long the browser's load of the HTML is waited for, 30 s and 10 s per MiB, at most 600 s (render's --timeout, at most 3600 s, sets it): a local command's wait, not a refusal of input"
+ },
  "src/latex-cli.ts :: msgOf :: if (Buffer.byteLength(l) > MAX_RESULT) { states.push({ key, s: \"error\", msg: `${it.mode === \"sage\" ? \"the result's LaTeX\" : it.mode === \"py\" ? \"the result\" : \"the printed output\"} is over ${MAX_RESULT / 1024} KiB` }); failed = true; continue; } #0": {
   "class": "1",
   "disposition": {
@@ -11315,6 +11323,14 @@
   },
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
+ },
+ "src/latex-cli.ts :: sleep :: export const LOAD_WAIT_MIN = 30, LOAD_WAIT_PER_MIB = 10, LOAD_WAIT_MAX = 600; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex render --png/--pdf: how long the browser's load of the HTML is waited for, 30 s and 10 s per MiB, at most 600 s (render's --timeout, at most 3600 s, sets it): a local command's wait, not a refusal of input"
  },
  "src/lib-embed.ts :: decode :: JSON.parse(new TextDecoder(\"utf-8\", { fatal: true }).decode(gunzipSync(Buffer.from(payload, \"base64\"), maxBytes === undefined ? {} : { maxOutputLength: maxBytes }))); #0": {
   "class": "1",
