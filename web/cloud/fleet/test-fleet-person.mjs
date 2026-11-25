@@ -173,6 +173,24 @@ const grant = (f, bytes) => W.applyGrant(db, core, { fleet: f.fleet, aud: AUD, g
   }
   const expired = await sessionRow({ expires: nowS - 1 });
   ok((await real(live2, expired.token, "/api/fleet/v1/fleet")).status === 401, "P-1r: an expired session row: 401");
+  // (and a session with no idle limit, whose end only the primary's own read checks, as no idle touch re-reads it: a
+  // 'legacy' session, counted where no provider is set)
+  {
+    const leg = deployed(["FLEET_DB", "SHARE_DB"], { FLEET_AUD: AUD });
+    await run(await leg.getD1Database("FLEET_DB"), FLEET_MIGRATIONS);
+    const ldb = await leg.getD1Database("SHARE_DB");
+    await run(ldb, shareMigrations().map((m) => m.path));
+    const legacyRow = async (expires) => {
+      const account = crypto.randomUUID(), token = randomBytes(32).toString("base64url");
+      await ldb.prepare("INSERT INTO accounts (account_id, email, name, created, last_login) VALUES (?1, ?2, 'X', ?3, ?3)").bind(account, `${account}@example.com`, nowS).run();
+      await ldb.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind) VALUES (?1, ?2, ?3, ?4, 'legacy')").bind(sha(token), account, nowS, expires).run();
+      return token;
+    };
+    ok((await real(leg, await legacyRow(nowS - 1), "/api/fleet/v1/fleet")).status === 401, "P-1r: an expired session with no idle limit: 401");
+    const fresh = await real(leg, await legacyRow(nowS + 86400), "/api/fleet/v1/fleet");
+    ok(fresh.status === 404 && fresh.json?.error === "no_fleet", "P-1r: control, the same session unexpired: authenticated", fresh);
+    await leg.dispose();
+  }
   const leaving = await sessionRow();
   await shareDb.prepare("UPDATE accounts SET deleting = ?2 WHERE account_id = ?1").bind(leaving.account, nowS).run();
   ok((await real(live2, leaving.token, "/api/fleet/v1/fleet")).status === 401, "P-1r: an account being deleted: 401");
