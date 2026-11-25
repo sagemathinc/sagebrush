@@ -116,7 +116,7 @@ test("the site's articles and blog are web's core: the web jobs and checks, not 
     const o = classify([f]);
     assert.deepEqual(suites(o), { node: "true", web: "true", modes: "false", engine_smoke: "false", docs_only: "false" }, f);
     assert.deepEqual([o.wasm_build, o.engine_full, o.engine_cpython, o.unsafe_sweep], ["false", "false", "false", "false"], f);
-    assert.deepEqual(JSON.parse(o.web_groups).length, 9, f);
+    assert.deepEqual(JSON.parse(o.web_groups).length, 10, f);
   }
 });
 
@@ -582,7 +582,7 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
 });
 
 test("the web jobs by area (CI speed plan option 7): a change inside one area runs that area's suites", () => {
-  const ALL = ["notebook", "preload", "latex", "board-a", "board-b", "board-c", "board-unit", "terminal", "remote-preview"];
+  const ALL = ["notebook", "preload", "latex", "board-a", "board-b", "board-c", "board-unit", "terminal", "remote-preview", "space"];
   const pick = (files: string[]) => {
     const o = classify(files);
     return { groups: JSON.parse(o.web_groups), runner: o.web_runner, export: o.web_export, lookalike: o.web_lookalike };
@@ -595,6 +595,10 @@ test("the web jobs by area (CI speed plan option 7): a change inside one area ru
   for (const f of ["examples/notebook/welcome/main.ipynb", "examples/latex/article/article.tex"]) assert.deepEqual(pick([f]).groups, ALL, f);
   // the terminal panel: its group alone
   assert.deepEqual(pick(["web/shell/panel.ts"]), { groups: ["terminal"], runner: "false", export: "false", lookalike: "false" });
+  // a space in 3D (web/space): its group alone (its page loads nothing of the others')
+  for (const f of ["web/space/src/main.js", "web/space/test-walk.mjs", "web/space/examples/intro.space.json"]) {
+    assert.deepEqual(pick([f]), { groups: ["space"], runner: "false", export: "false", lookalike: "false" }, f);
+  }
   // the workspace: web-runner, the export and lookalike jobs, and board-unit (the export's measure and reminder units)
   assert.deepEqual(pick(["web/workspace/browser.ts"]), { groups: ["board-unit"], runner: "true", export: "true", lookalike: "true" });
   // two areas: their union
@@ -692,19 +696,20 @@ test("a changed suite runs on its own pull request: its `// ci:` job, and the fu
   // a source another area's suite tests: the board's page selects latex (test-latex-page's newLatexHere, #566)
   assert.deepEqual(JSON.parse(classify(["web/board/page.ts"]).web_groups), ["latex", "board-a", "board-b", "board-c", "board-unit"]);
   assert.deepEqual(JSON.parse(classify(["web/board/frame.ts"]).web_groups), ["board-a", "board-b", "board-c", "board-unit"]);
-  // (the web-browser jobs: every selected group in exactly one of at most three jobs, the CI capacity ruling, Nov 22 2026;
-  // latex alone, on its own build; terminal last in its job, since it rebuilds web/dist)
+  // (the web-browser jobs: every selected group in exactly one of at most four jobs, the CI capacity ruling, Nov 22 2026;
+  // latex alone, on its own build; notebook alone, the longest group; terminal last in its job, since it rebuilds web/dist)
   const matrix = JSON.parse(classify(["web/index.html"]).web_matrix);
   assert.deepEqual(matrix, [
     { name: "board", groups: "board-a board-b board-c board-unit preload" },
-    { name: "notebook", groups: "notebook remote-preview terminal" },
+    { name: "notebook", groups: "notebook space" },
+    { name: "remote-terminal", groups: "remote-preview terminal" },
     { name: "latex", groups: "latex" },
   ]);
   const all = JSON.parse(classify(["web/index.html"]).web_groups);
   assert.deepEqual(matrix.flatMap((x: { groups: string }) => x.groups.split(" ")).sort(), [...all].sort(), "every selected group in exactly one job");
   // (a change that selects some groups runs only the jobs that hold them, each with only those)
   assert.deepEqual(JSON.parse(classify(["web/board/frame.ts"]).web_matrix), [{ name: "board", groups: "board-a board-b board-c board-unit" }]);
-  assert.deepEqual(JSON.parse(classify(["web/shell/test-cross.mjs"], "", at).web_matrix), [{ name: "notebook", groups: "notebook terminal" }]);
+  assert.deepEqual(JSON.parse(classify(["web/shell/test-cross.mjs"], "", at).web_matrix), [{ name: "notebook", groups: "notebook" }, { name: "remote-terminal", groups: "terminal" }]);
   assert.deepEqual(JSON.parse(classify(["web/board/page.ts"]).web_matrix).map((x: { name: string }) => x.name), ["board", "latex"]);
   // (ci.yml runs each job's groups in a loop that keeps going after a failure, and fails the step if any failed)
   const yml = readFileSync(join(__dirname, "..", "..", ".github", "workflows", "ci.yml"), "utf8");
@@ -903,8 +908,9 @@ test("a master push the merge queue already tested (CI_QUEUE_TESTED): every test
   for (const files of [["src/compile.ts"], ["web/notebook/x.ts", "engine/poly/src/lib.rs", "magma-tests/x.m"]]) {
     const o = classify(files, "", { ...push, CI_QUEUE_TESTED: "true" });
     assert.equal(o.queue_tested, "true");
-    // (the matrices' contents, read only by jobs now off, and the counts aren't selections)
-    const kept = new Set(["wasm_build", "queue_tested", "mpmath_backends", "web_sync_shards", "files"]);
+    // (the matrices' contents, read only by jobs now off, and the counts aren't selections; app_build is app.yml's,
+    // which a queue-tested push doesn't change)
+    const kept = new Set(["wasm_build", "queue_tested", "mpmath_backends", "web_sync_shards", "files", "app_build"]);
     for (const [k, v] of Object.entries(o)) if (!kept.has(k)) assert.ok(v === "false" || v === "[]" || v === "", `${files.join()}: ${k}=${v}`);
     assert.equal(o.wasm_build, "true");
     // (without it, or not "true", the same push runs the full tier)
@@ -916,6 +922,15 @@ test("a master push the merge queue already tested (CI_QUEUE_TESTED): every test
   // (only a master push: a track push, the queue's own run, a pull request ignore it)
   assert.equal(classify(["src/x.ts"], "", { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/track/math", CI_QUEUE_TESTED: "true" }).full, "true");
   assert.equal(classify(["src/x.ts"], "", { CI_QUEUE_TESTED: "true" }).queue_tested, "false");
+});
+
+test("latex_budget: a pull request changing the LaTeX group's inputs keeps web-artifacts, light or not; nothing else does", () => {
+  for (const files of [["web/latex/split.ts"], ["scripts/latex-group.mjs"], ["web/workspace/paths.ts"], ["web/build.ts"]]) {
+    assert.equal(classify(files).latex_budget, "true", files.join());
+    assert.equal(classify(files, "", { CI_PR_LIGHT: "true" }).latex_budget, "true", files.join());
+  }
+  for (const files of [["web/latex/test-latex-units.mjs"], ["web/board/x.ts"], ["design/x.md"]]) assert.equal(classify(files).latex_budget, "false", files.join());
+  assert.equal(classify(["web/latex/split.ts"], "", { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" }).latex_budget, "false");
 });
 
 test("PR CI light (CI_PR_LIGHT exactly \"true\"): a pull request keeps only checks' and the size gate's inputs and the modules' build", () => {
@@ -935,4 +950,12 @@ test("PR CI light (CI_PR_LIGHT exactly \"true\"): a pull request keeps only chec
   assert.equal(classify(files, "", { CI_PR_LIGHT: "true", GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" }).full, "true");
   // (a docs-only change runs no checks either way)
   assert.equal(classify(["design/x.md"], "", { CI_PR_LIGHT: "true" }).size_inputs, classify(["design/x.md"]).size_inputs);
+});
+
+test("app_build: a light pull request builds the desktop app only when it changes app/, the pins or app.yml; everything else always", () => {
+  assert.equal(classify(["web/index.html"], "", { CI_PR_LIGHT: "true" }).app_build, "false");
+  assert.equal(classify(["app/src-tauri/src/lib.rs"], "", { CI_PR_LIGHT: "true" }).app_build, "true");
+  assert.equal(classify(["web/index.html"]).app_build, "true");
+  assert.equal(classify(["web/index.html"], "full-ci", { CI_PR_LIGHT: "true" }).app_build, "true");
+  assert.equal(classify(["web/index.html"], "", { CI_PR_LIGHT: "true", GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" }).app_build, "true");
 });

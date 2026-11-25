@@ -8,7 +8,7 @@ import { EDIT_BYTES, editableOf } from "./edit.ts";
 
 let checks = 0, failed = 0;
 const check = (ok, what) => { checks++; if (!ok) { failed++; console.log("FAIL " + what); } };
-const LANGS = ["python", "sage", "matlab", "magma", "js", "json", "text"];
+const LANGS = ["python", "sage", "matlab", "magma", "js", "json", "rust", "text"];
 const joined = (t) => t.map((x) => x[1]).join("");
 
 const samples = [
@@ -69,6 +69,14 @@ check(editableOf(true, 10, false) && editableOf(true, EDIT_BYTES, undefined), "e
 check(!editableOf(false, 10, false), "…not if it can't be written back exactly");
 check(!editableOf(true, EDIT_BYTES + 1, false), "…not over EDIT_BYTES");
 check(!editableOf(true, 10, true), "…not if it is in the cloud (remote)");
+
+// Rust (the 3D view's file panels): keywords, strings, numbers, comments; a lifetime isn't a string; a raw string is one
+{ const t = tokensOf(`fn main() { let s = "hi"; let r = r#"a "q" b"#; let x: &'a str = s; // done\n  1_000u32 }`, "rust");
+  const kinds = (c) => t.filter((x) => x[0] === c).map((x) => x[1]);
+  check(joined(t) === `fn main() { let s = "hi"; let r = r#"a "q" b"#; let x: &'a str = s; // done\n  1_000u32 }`, "rust: joins exactly");
+  check(kinds("hk").includes("fn") && kinds("hk").includes("let"), "rust: keywords");
+  check(kinds("hs").includes('"hi"') && kinds("hs").includes('r#"a "q" b"#') && !kinds("hs").some((x) => x.includes("'a")), "rust: strings, a raw string whole, and no lifetime taken for one");
+  check(kinds("hc").includes("// done") && kinds("hn").includes("1_000u32"), "rust: a comment, and a number with its suffix"); }
 
 console.log(failed ? `${failed} of ${checks} failed` : `ok: code tokens, ${checks} checks`);
 process.exit(failed ? 1 : 0);

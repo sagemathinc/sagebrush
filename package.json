@@ -24,6 +24,7 @@
     "mathjax-full": "3.2.2",
     "parse5": "^8.0.1",
     "patchflow": "0.16.0",
+    "three": "0.187.0",
     "typescript": "^7.0.2",
     "typescript-api": "npm:typescript@5.9.3"
   }

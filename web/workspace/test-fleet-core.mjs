@@ -8,7 +8,7 @@
 //   (SAGEBRUSH_AGENT_DIR=<a sagebrush-agent clone> also compares every file with the upstream commit's own bytes)
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { browser } from "../agents/a14-cases.mjs";
@@ -67,22 +67,105 @@ const impure = Object.keys(PINS).filter((f) => f.startsWith("core/")).flatMap((f
 });
 ok(impure.length === 0, "M-4: the mirrored core is pure (only ./*.mjs imports; no node:, Buffer, process, import.meta, require)", impure);
 
-// ---- the end-to-end crypto (e2e/) is the core's only page user, and only through fleet/install.ts: no signing or
-// verifying path of the fleet is live yet, and nothing reaches core/ past the one installer
-// (any web/ module other than fleet/ itself and the tests that imports fleet/install or fleet/core fails this row,
-//  unless it is in e2e/ and imports install only)
+// ---- the core's page users: the end-to-end crypto (e2e/), and the fleet verifier (fleet-verify.ts, which signs nothing,
+// and which nothing reaches yet: N-2). A page module (e2e/*.ts, fleet-verify.ts) reaches it only through
+// fleet/install.ts, the one installer. e2e/core/'s pure modules
+// (.mjs, like the core itself) may import the core's pure functions directly, but never an installer: not
+// core/index.mjs, not webcrypto.mjs, and no useCrypto or useSchemas, so nothing there can install or swap a backend.
+// (any other web/ module, fleet/ itself and the tests aside, that imports fleet/install or fleet/core fails this row)
 const web = join(here, "..");
 const e2e = join(here, "e2e");
-const users = [];
-const scan = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) {
-  const p = join(d, e.name);
-  if (e.isDirectory()) { if (!["node_modules", "dist", ".cache"].includes(e.name) && p !== fleet) scan(p); continue; }
-  if (!/\.(?:ts|mts|js|mjs)$/.test(e.name) || /^test-/.test(e.name)) continue;
-  const t = readFileSync(p, "utf8");
-  if (/fleet\/core/.test(t) || (/fleet\/install/.test(t) && !p.startsWith(e2e + "/"))) users.push(relative(web, p));
-} };
-scan(web);
-ok(users.length === 0, "N-1: only e2e/ uses the fleet core, and only through fleet/install.ts (no fleet signing or verifying path is live)", users);
+const e2eCore = join(e2e, "core");
+const INSTALLERS = /\b(?:useCrypto|useSchemas|webCrypto)\b/;
+// (every quoted mention of fleet/core in the file must be one of its allowed imports: a static, named import at a
+//  statement's start, of a pure core module. Anything else that names the core, a side-effect import, a dynamic
+//  import(), an export ... from, a namespace or default import, even a string, is unaccounted for and refused)
+const coreImportOk = (t) => {
+  const refs = [...t.matchAll(/["'`][^"'`\n]*fleet\/core[^"'`\n]*["'`]/g)].length;
+  const named = [...t.matchAll(/(?:^|\n)[ \t]*import[ \t]*(\{[^}]*\})[ \t]*from[ \t]*["']([^"'\n]+)["']/g)].filter((m) => /fleet\/core/.test(m[2]));
+  return named.length === refs && named.every((m) => /^\.\.\/\.\.\/fleet\/core\/[a-z0-9-]+\.mjs$/.test(m[2])
+    && !/\/(?:index|webcrypto)\.mjs$/.test(m[2]) && !INSTALLERS.test(m[1]));
+};
+/** The page modules under `webDir` (a web/ tree) that reach the fleet core other than N-1 allows. */
+const coreUsers = (webDir) => {
+  const fleetDir = join(webDir, "workspace", "fleet"), e2eDir = join(webDir, "workspace", "e2e"), coreDir = join(e2eDir, "core");
+  const out = [];
+  const scan = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) {
+    const p = join(d, e.name);
+    if (e.isDirectory()) { if (!["node_modules", "dist", ".cache"].includes(e.name) && p !== fleetDir) scan(p); continue; }
+    if (!/\.(?:ts|mts|js|mjs)$/.test(e.name) || /^test-/.test(e.name)) continue;
+    const t = readFileSync(p, "utf8");
+    const inCore = p.startsWith(coreDir + "/") && p.endsWith(".mjs");
+    const verifier = relative(webDir, p) === join("workspace", "fleet-verify.ts");
+    if ((/fleet\/core/.test(t) && !(inCore && coreImportOk(t))) || (/fleet\/install/.test(t) && !p.startsWith(e2eDir + "/") && !verifier)) out.push(relative(webDir, p));
+  } };
+  scan(webDir);
+  return out;
+};
+const users = coreUsers(web);
+ok(users.length === 0, "N-1: only e2e/ and the verifier (fleet-verify.ts) use the fleet core: page modules through fleet/install.ts, e2e/core/'s pure modules by named imports of the core's pure functions, never an installer", users);
+// (and nothing reaches the verifier yet: until a page that uses it is reviewed, no fleet verifying path is live. The
+//  scan covers fleet/ too, its own installer included: only the byte-pinned mirror files, PINS, are left out)
+/** The modules under `webDir` (a web/ tree) that name the verifier, other than the verifier itself. */
+const verifierUsersIn = (webDir) => {
+  const fleetDir = join(webDir, "workspace", "fleet");
+  const out = [];
+  const scan = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) {
+    const p = join(d, e.name);
+    if (e.isDirectory()) { if (!["node_modules", "dist", ".cache"].includes(e.name)) scan(p); continue; }
+    if (!/\.(?:ts|mts|js|mjs)$/.test(e.name) || /^test-/.test(e.name)) continue;
+    if (p.startsWith(fleetDir + "/") && Object.hasOwn(PINS, relative(fleetDir, p))) continue;
+    if (/fleet-verify/.test(readFileSync(p, "utf8")) && relative(webDir, p) !== join("workspace", "fleet-verify.ts")) out.push(relative(webDir, p));
+  } };
+  scan(webDir);
+  return out;
+};
+const verifierUsers = verifierUsersIn(web);
+ok(verifierUsers.length === 0, "N-2: no page module imports the verifier yet (no fleet verifying path is live)", verifierUsers);
+{
+  // (its control, on real files: the page's own installer importing the verifier is reported, while a pinned mirror
+  //  file is left out of the scan)
+  const root = mkdtempSync(join(tmpdir(), "sb-n2-"));
+  mkdirSync(join(root, "workspace", "fleet", "core"), { recursive: true });
+  writeFileSync(join(root, "workspace", "fleet", "install.ts"), 'export const x = 1;\nimport "../fleet-verify";\n');
+  writeFileSync(join(root, "workspace", "fleet", "core", "index.mjs"), '// fleet-verify (a pinned path: not scanned)\n');
+  writeFileSync(join(root, "workspace", "fleet-verify.ts"), 'export const v = 1;\n');
+  const found = verifierUsersIn(root);
+  rmSync(root, { recursive: true, force: true });
+  ok(JSON.stringify(found) === JSON.stringify([join("workspace", "fleet", "install.ts")]), "N-2: (its control) fleet/install.ts importing the verifier is reported; a pinned mirror path isn't scanned", found);
+}
+// (the rule's own controls: what it lets through and what it refuses)
+ok(coreImportOk('import { canonText } from "../../fleet/core/canonical.mjs";') && coreImportOk('import { crypto } from "../../fleet/core/crypto.mjs";')
+  && !coreImportOk('import { useCrypto } from "../../fleet/core/crypto.mjs";') && !coreImportOk('import { webCrypto } from "../../fleet/core/webcrypto.mjs";')
+  && !coreImportOk('import { canonText } from "../../fleet/core/index.mjs";') && !coreImportOk('import * as core from "../../fleet/core/bytes.mjs";')
+  && !coreImportOk('import { useSchemas } from "../../fleet/core/schemas.mjs";') && !coreImportOk('import { x } from "../fleet/core/bytes.mjs";')
+  && !coreImportOk('import "../../fleet/core/index.mjs";') && !coreImportOk('const m = await import("../../fleet/core/webcrypto.mjs");')
+  && !coreImportOk('export { useCrypto } from "../../fleet/core/crypto.mjs";') && !coreImportOk('export * from "../../fleet/core/bytes.mjs";')
+  && !coreImportOk('import core from "../../fleet/core/bytes.mjs";') && !coreImportOk('const p = "../../fleet/core/webcrypto.mjs";')
+  && !coreImportOk('import { canonText } from "../../fleet/core/canonical.mjs";\nimport "../../fleet/core/webcrypto.mjs";')
+  && coreImportOk('import { canonText } from "../../fleet/core/canonical.mjs";\nimport { b64, enc } from "../../fleet/core/bytes.mjs";'),
+  "N-1: (its controls) named pure imports pass; an installer, the index, a namespace or default import, another path, a side-effect import, a dynamic import(), an export ... from, or any other mention of the core is refused");
+{
+  // (and on real files: each form planted as a module of e2e/core in a scratch web/ tree is reported by the scan)
+  const forms = {
+    "side-effect import": 'import "../../fleet/core/webcrypto.mjs";\n',
+    "dynamic import": 'export const load = async () => await import("../../fleet/core/index.mjs");\n',
+    "re-export": 'export { useCrypto } from "../../fleet/core/crypto.mjs";\n',
+    "default and namespace import": 'import core, * as ns from "../../fleet/core/webcrypto.mjs";\nexport { core, ns };\n',
+    "an installer by name": 'import { useCrypto } from "../../fleet/core/crypto.mjs";\nexport { useCrypto };\n',
+  };
+  const planted = {};
+  for (const [name, body] of Object.entries(forms)) {
+    const root = mkdtempSync(join(tmpdir(), "sb-n1-"));
+    mkdirSync(join(root, "workspace", "e2e", "core"), { recursive: true });
+    writeFileSync(join(root, "workspace", "e2e", "core", "bad.mjs"), 'import { canonText } from "../../fleet/core/canonical.mjs";\n' + body);
+    writeFileSync(join(root, "workspace", "e2e", "core", "good.mjs"), 'import { canonText } from "../../fleet/core/canonical.mjs";\nexport { canonText };\n');
+    planted[name] = coreUsers(root);
+    rmSync(root, { recursive: true, force: true });
+  }
+  const wrong = Object.entries(planted).filter(([, u]) => JSON.stringify(u) !== JSON.stringify(["workspace/e2e/core/bad.mjs"]));
+  ok(wrong.length === 0, `N-1: (on real files) each of ${Object.keys(forms).length} forbidden forms in an e2e/core module fails the scan, and its allowed sibling doesn't`, wrong);
+}
 
 // ---- the agent's fixture cases, in Chromium, through fleetCore()
 const dir = mkdtempSync(join(tmpdir(), "sb-fleet-core-"));
@@ -154,6 +237,13 @@ try {
     ok(v.n === HPKE_VECTOR && v.bad.length === 0, `C-6: RFC 9180's vector for DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, AES-256-GCM agrees in Chromium (${HPKE_VECTOR - 3} encryptions and 3 exports, both key pairs, enc)`, v);
     const f = await P.ev(`fc.checkHpkeFixtures(fc.fleetCore(), HF).then((r) => ({ n: r.n, bad: r.bad }))`);
     ok(f.n === HPKE_CASES && f.bad.length === 0, `C-6: all ${HPKE_CASES} of the agent's HPKE cases agree in Chromium (key ids, sealed packages, capability mints)`, f);
+    // (no Claude login is ever sealed or opened here: the agent's own case for a claude-setup-token package must be among
+    //  them, expecting a refusal, and C-6 has just seen the core refuse it)
+    const claude = JSON.parse(hpkeFixtures.toString("utf8")).packages.filter((c) => /claude-setup-token/.test(c.name));
+    ok(claude.length === 1 && claude[0].expect === "bad_form" && !f.bad.some((b) => b.name === claude[0].name), "C-9: a claude-setup-token package is refused (bad_form): the core takes no Claude purpose", claude);
+    // (and the schema the page installs names no Claude provider where a subscription or a sealed package is described)
+    const prov = await P.ev(`(() => { const d = fc.fleetCore().fleetSchema().$defs; return ["subscription", "sealed-package", "package_plaintext"].map((n) => JSON.stringify(d[n]?.properties?.provider?.enum ?? null)); })()`);
+    ok(prov.every((e) => e === '["codex"]'), "C-10: the installed schema allows only codex as a subscription, sealed-package and package provider (no Claude subscription)", prov);
   }
   {
     // (a page with no WebCrypto, as an insecure origin: fleetCore() throws; it never falls back to anything)

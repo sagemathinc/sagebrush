@@ -322,6 +322,8 @@ SUMMARIES = {
     "numpy.random.exponential": "Samples of an exponential distribution (legacy).",
     "numpy.random.standard_exponential": "Samples of the standard exponential distribution (legacy).",
     "numpy.random.poisson": "Samples of a Poisson distribution (legacy).",
+    "numpy.random.gamma": "Samples of a gamma distribution, shape and scale (legacy).",
+    "numpy.random.standard_gamma": "Samples of the standard gamma distribution, scale 1 (legacy).",
     "numpy.random.choice": "A random sample of the elements of an array (legacy).",
     "numpy.random.permutation": "A random permutation (legacy).",
     "numpy.random.shuffle": "Shuffles an array in place (legacy).",
