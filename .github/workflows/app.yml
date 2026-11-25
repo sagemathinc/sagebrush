@@ -247,8 +247,12 @@ jobs:
           grep -q 'Bundling .*\.AppImage' /tmp/tauri-build.log || { echo "FAIL: no AppImage bundled"; exit 1; }
           cd "${XDG_CACHE_HOME:-$HOME/.cache}/tauri"
           sha256sum -c --strict /tmp/appimage-tools-after.sha256
+      # (each self-test step bounded: the job's 40 min let a hung self-test hold its runner and the merge queue's entry
+      # 32 min, Nov 23 2026.  Linux: 25 green runs took at most 7.9 min and failing ones ended by themselves within 12.4
+      # (run.mjs bounds its main run at 6 min): 15.  macOS and Windows: at most 3.8 min green: 10)
       - name: self-test (Linux, in a virtual display)
         if: runner.os == 'Linux'
+        timeout-minutes: 15
         run: xvfb-run -a node app/selftest/run.mjs ${{ matrix.exe }}
       # GTK's TIFF loader brings libtiff and libjbig (GPL-2+): removed, and
       # the stripped AppImage itself self-tested (DIST-F1)
@@ -262,15 +266,18 @@ jobs:
           APPIMAGETOOL=/tmp/appimagetool sh app/strip-appimage.sh app/src-tauri/target/release/bundle/appimage/*.AppImage
       - name: self-test the stripped AppImage
         if: runner.os == 'Linux'
+        timeout-minutes: 15
         env:
           APPIMAGE_EXTRACT_AND_RUN: 1
         run: xvfb-run -a node app/selftest/run.mjs $(ls app/src-tauri/target/release/bundle/appimage/*.AppImage)
       - name: self-test
         if: runner.os != 'Linux'
+        timeout-minutes: 10
         run: node app/selftest/run.mjs ${{ matrix.exe }}
       # (and the built .app's own executable, so the engine it ships is the one that runs)
       - name: self-test the .app (the engine it ships)
         if: runner.os == 'macOS'
+        timeout-minutes: 10
         run: node app/selftest/run.mjs "$(ls -d app/src-tauri/target/release/bundle/macos/*.app)/Contents/MacOS/sagebrush-app"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()

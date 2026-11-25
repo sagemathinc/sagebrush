@@ -45,7 +45,8 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
   const parts: string[] = [];
   for (const p of turn.parts) {
     if (p.kind === "thinking") {
-      parts.push(`<details class="thinking"><summary>Thinking</summary><div>${esc(p.text)}</div></details>`);
+      // (never an empty disclosure: one kept from before #1789 may have no text)
+      if (p.text.trim()) parts.push(`<details class="thinking"><summary>Thinking</summary><div>${esc(p.text)}</div></details>`);
     } else if (p.kind === "message") {
       parts.push(`<div class="msg board-text">${h.md(p.text)}${p.truncated ? `<div class="tag">(cut at 256 KiB)</div>` : ""}</div>`);
     } else if (p.kind === "tool") {

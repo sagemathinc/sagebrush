@@ -70,6 +70,30 @@ const files = process.env.CI_PATHS_FILES
 const matches = (patterns) => files.some((file) => patterns.some((pattern) => pattern.test(file)));
 const every = (patterns) => files.length > 0 && files.every((file) => patterns.some((pattern) => pattern.test(file)));
 
+// The LaTeX group's inputs and its measure (latexBudgetPaths): they select the full tier on a pull request (fullTierPaths),
+// and keep web-artifacts, whose suite checks the group's caps, under PR CI light too (latex_budget below): #1702 grew the
+// group 45 B past its raw cap on a light pull request, and 4 merge_group runs failed on it, Nov 24 2026.
+const latexBudgetPaths = [
+  // (the LaTeX group's absolute ceiling and its lazy chunks' caps, checked only in web-artifacts (scripts/test-latex-group-budget.mjs): the
+  // inputs of sagebrush-latex.js and its worker, as the build's metafile lists them (build/latex-metafile.json):
+  // web/latex's own sources (not its suites), core/ and engine/, web/workspace/paths.ts; and the group's measure.
+  // That suite checks every input of the two bundles is matched here)
+  /^web\/latex\/(?!test-)[^/]+\.(?:ts|mts|js|mjs)$/, /^web\/latex\/(?:core|engine)\//, /^web\/workspace\/paths\.ts$/, /^scripts\/latex-group\.mjs$/,
+  // (and the lazy chunks' inputs outside web/latex, each chunk under its own cap in the same check: the agent
+  // pairing's modules (its doc-protocol.ts is above, with sync), the mode registry, which verbs.ts reads, and the view
+  // chunk's kept views (view-state.ts, design/view-state.md); and an entry's page address, which the pairing adds to
+  // its answers (entry-url.ts, with the code page's languages and address))
+  // (the agent pairing chunk's doc-protocol.ts: also a sync path, fullTierPaths, but listed here for latex_budget)
+  /^web\/sync-protocol\/doc-protocol\.ts$/,
+  /^web\/workspace\/(?:agent-ui|agent-pair|agent-made-tex|pair-link|notebook-edit|notebook-form|agent-grant|agent-schema|verbs|verbs-page|branch-rules|git-branch|view-state|entry-url)\.ts$/, /^src\/modes\.ts$/,
+  /^web\/code\/(?:langs|url)\.ts$/,
+  // (and the highlighting chunk's highlighter, the notebook's)
+  /^web\/notebook\/highlight\.js$/,
+  // (and what makes those bundles from them, which no metafile lists: the build and its helpers and the dependencies;
+  // @sagebrush's ruling, Nov 4. Not .github/workflows/ci.yml, which pins bun and node but changes in about one pull
+  // request in six: a bun or node bump carries the full-ci label instead)
+  /^web\/build(?:-[^/]+)?\.(?:ts|mts|mjs)$/, /^package\.json$/, /^pnpm-lock\.yaml$/,
+];
 // The two tiers (CI speed plan option 2, William, Nov 2 2026): a pull request runs the fast tier, unless it has the
 // `full-ci` label or changes a path where a bug loses data or trust: sync, sharing and security (CSP, HTML
 // sanitizing), and data loss (save, Trash, export, purge). Then it runs the full suite, as every master or track/**
@@ -83,9 +107,9 @@ const fullTierPaths = [
   /^web\/share\//, /^web\/share-client\//, /^web\/csp(?:-policy)?\.m?ts$/, /^web\/safe-html\.ts$/,
   // (the account at the top right, which reads the share dialog's first check: the share dialog's suite, below)
   /^web\/workspace\/account\.ts$/,
-  // (the hosted service's sharing, remotes, log mirror and support Worker, MS-RSL: their suites run only in web-sync's
-  // full-tier shards; and the mirror's format, which its Worker validates uploads with)
-  /^web\/cloud\/share\//, /^web\/cloud\/remote\//, /^web\/cloud\/mirror\//, /^web\/cloud\/support\//,
+  // (the hosted service's sharing, remotes, log mirror, LTI tool and support Worker, MS-RSL: their suites run only in
+  // web-sync's full-tier shards; and the mirror's format, which its Worker validates uploads with)
+  /^web\/cloud\/share\//, /^web\/cloud\/remote\//, /^web\/cloud\/mirror\//, /^web\/cloud\/lti\//, /^web\/cloud\/support\//,
   /^web\/workspace\/agent-chat\/mirror-format\.ts$/,
   // data loss: save, Trash, export, purge, and the workspace's store and its migrations
   /^web\/workspace\/[^/]*(?:trash|export|purge|save)[^/]*$/, /^web\/workspace\/export\//,
@@ -101,23 +125,8 @@ const fullTierPaths = [
   /^web\/miniflare-dispatch\.mjs$/,
   // (a document's checkpoints, the client's side (BH-0b-2): sync, whose suite runs only in web-sync.1)
   /^web\/workspace\/checkpoint(?:-types)?\.ts$/,
-  // (the LaTeX group's absolute ceiling and its lazy chunks' caps, checked only in web-artifacts (scripts/test-latex-group-budget.mjs): the
-  // inputs of sagebrush-latex.js and its worker, as the build's metafile lists them (build/latex-metafile.json):
-  // web/latex's own sources (not its suites), core/ and engine/, web/workspace/paths.ts; and the group's measure.
-  // That suite checks every input of the two bundles is matched here)
-  /^web\/latex\/(?!test-)[^/]+\.(?:ts|mts|js|mjs)$/, /^web\/latex\/(?:core|engine)\//, /^web\/workspace\/paths\.ts$/, /^scripts\/latex-group\.mjs$/,
-  // (and the lazy chunks' inputs outside web/latex, each chunk under its own cap in the same check: the agent
-  // pairing's modules (its doc-protocol.ts is above, with sync), the mode registry, which verbs.ts reads, and the view
-  // chunk's kept views (view-state.ts, design/view-state.md); and an entry's page address, which the pairing adds to
-  // its answers (entry-url.ts, with the code page's languages and address))
-  /^web\/workspace\/(?:agent-ui|agent-pair|agent-made-tex|pair-link|notebook-edit|notebook-form|agent-grant|agent-schema|verbs|verbs-page|branch-rules|git-branch|view-state|entry-url)\.ts$/, /^src\/modes\.ts$/,
-  /^web\/code\/(?:langs|url)\.ts$/,
-  // (and the highlighting chunk's highlighter, the notebook's)
-  /^web\/notebook\/highlight\.js$/,
-  // (and what makes those bundles from them, which no metafile lists: the build and its helpers and the dependencies;
-  // @sagebrush's ruling, Nov 4. Not .github/workflows/ci.yml, which pins bun and node but changes in about one pull
-  // request in six: a bun or node bump carries the full-ci label instead)
-  /^web\/build(?:-[^/]+)?\.(?:ts|mts|mjs)$/, /^package\.json$/, /^pnpm-lock\.yaml$/,
+  // (the LaTeX group's inputs and its measure: latexBudgetPaths, below)
+  ...latexBudgetPaths,
 ];
 // A changed suite runs on its own pull request (#565: web/sw.js and test-sw-read-stall.mjs, `ci: web-sync.2`, ran
 // neither): its `// ci:` header names its job, read as scripts/web-tests.mjs reads it, from the checkout (or
@@ -445,8 +454,9 @@ const outputs = {
   long,
   // (mpmath's suite: the core backend always; the Python backend, a rollback path, the long tier's)
   mpmath_backends: JSON.stringify(long ? ["sagebrush", "python"] : ["sagebrush"]),
-  // (web-sync's shards: the share dialog's part 2, its big listing and upload leaks, the long tier's)
-  web_sync_shards: JSON.stringify(["core", "client", "pwa", ...(long ? ["share-dialog-2"] : [])]),
+  // (web-sync's shards: lti and lti-b, the hosted LTI tool's suites, web-sync.8 and .9; the share dialog's part 2, its
+  // big listing and upload leaks, the long tier's)
+  web_sync_shards: JSON.stringify(["core", "client", "pwa", "lti", "lti-b", ...(long ? ["share-dialog-2"] : [])]),
   wasm_build: wasmBuild,
   engine_cpython: engineCpython,
   webkit,
@@ -483,8 +493,9 @@ if (queueTested) {
   Object.assign(outputs, { web_groups: "[]", web_matrix: "[]", examples_ids: "[]", examples_matrix: "[]", slow_scope: "" });
 }
 outputs.queue_tested = queueTested;
-// PR CI light (the repository variable PR_CI_LIGHT, exactly "true", set by William while the merge queue is starved of
-// runners; ci.yml's changes job passes it as CI_PR_LIGHT): a pull request runs only checks and the size gate (with its
+// PR CI light (the checked-in switch .github/pr-ci-light, exactly "true", set by William while the merge queue is starved
+// of runners; ci.yml's changes job passes its first line as CI_PR_LIGHT, a file so that a fork's pull request reads it
+// too): a pull request runs only checks and the size gate (with its
 // size-base), as an ordinary pull request does when checks runs, and the modules' build when it needs one; every other
 // suite is left to its merge_group run, which is the full tier and gates the merge.  Never a queue group, a push, the
 // schedule or a dispatch; and a pull request labelled full-ci still runs everything it selected.  (@sagebrush's go,
@@ -498,6 +509,9 @@ if (prLight) {
   // (checks and size-base run on size_inputs; where checks would have run, they still do, and the gate measures)
   outputs.size_inputs = checksRan;
 }
+// (the LaTeX group's caps, checked only in web-artifacts: a pull request changing the group's inputs keeps that job,
+// light or not; elsewhere it follows the full tier, as before)
+outputs.latex_budget = event === "pull_request" && matches(latexBudgetPaths);
 outputs.pr_light = prLight;
 for (const [key, value] of Object.entries(outputs)) console.log(`${key}=${value}`);
 console.error(`ci paths (${event}, ${files.length} files): ${JSON.stringify(outputs)}`);

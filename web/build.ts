@@ -794,7 +794,7 @@ if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force:
   }
 }
 // a space in 3D (web/space, /space/): the viewer, its page and the format's description. Its code loads only there:
-// three.js and highlight.js in its own bundle, chunks split out, nothing in any other page's bundle
+// three.js in its own bundle, chunks split out, nothing in any other page's bundle
 {
   const out = join(here, "dist", "space");
   rmSync(out, { recursive: true, force: true });
