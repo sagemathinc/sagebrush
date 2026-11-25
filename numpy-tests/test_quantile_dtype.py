@@ -29,6 +29,8 @@ for name, f in [
     ("quantile-list", lambda: np.quantile(e, [0.1, 0.5, 0.9])),
     ("quantile-array", lambda: np.quantile(e, np.array([0.25, 0.75]))),
     ("quantile-axis", lambda: np.quantile(m, 0.37, axis=0)),
+    # (gamma >= 1/2 in some rows, so the weight 1 - gamma, rounded to float32 for a Python q, is used)
+    ("quantile-axis-upper-weight", lambda: np.quantile(m, 0.3, axis=1)),
     ("quantile-lower", lambda: np.quantile(e, 0.3, method="lower")),
     ("quantile-higher", lambda: np.quantile(e, 0.3, method="higher")),
     ("quantile-nearest", lambda: np.quantile(e, 0.3, method="nearest")),
