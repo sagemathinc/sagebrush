@@ -139,6 +139,10 @@ TABLE = {
     "LeadingCoefficient": (["polynomials"], "The coefficient of the highest power."),
     "Evaluate": (["polynomials"], "A polynomial's value at a point."),
     "Derivative": (["polynomials"], "The derivative of a polynomial."),
+    "Integral": (["polynomials"], "The integral of a polynomial over the rationals, with constant term 0."),
+    "Normalize": (["polynomials"], "A polynomial over the rationals divided by its leading coefficient (monic)."),
+    "Normalise": (["polynomials"], "The same as Normalize."),
+    "SquarefreeFactorization": (["polynomials"], "The squarefree factorization of a polynomial over the rationals, as a sequence of <factor, multiplicity> pairs."),
     "Discriminant": (["polynomials", "elliptic curves"], "The discriminant of a polynomial or an elliptic curve."),
     "Resultant": (["polynomials"], "The resultant of two polynomials."),
     "IsIrreducible": (["polynomials"], "Whether a polynomial is irreducible."),
@@ -746,6 +750,25 @@ y^5 + 1""",
 > P<x> := PolynomialRing(Integers());
 > Derivative(x^4 + 3*x);
 4*x^3 + 3""",
+    "Integral": """\
+> P<x> := PolynomialRing(Rationals());
+> Integral(3*x^2 + 1);
+x^3 + x""",
+    "Normalize": """\
+> P<x> := PolynomialRing(Rationals());
+> Normalize(2*x^2 + 4*x + 6);
+x^2 + 2*x + 3""",
+    "Normalise": """\
+> P<x> := PolynomialRing(Rationals());
+> Normalise(-3*x + 1);
+x - 1/3""",
+    "SquarefreeFactorization": """\
+> P<x> := PolynomialRing(Rationals());
+> SquarefreeFactorization((x - 1)^2 * (x + 2)^3);
+[
+    <x - 1, 2>,
+    <x + 2, 3>
+]""",
     "Discriminant": """\
 > P<x> := PolynomialRing(Integers());
 > Discriminant(x^2 + x + 1);

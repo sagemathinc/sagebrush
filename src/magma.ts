@@ -59,9 +59,20 @@ export const KEYWORDS = new Set(
 const OPS = [":->", "@@", "+:=", "-:=", "*:=", "/:=", "^:=", ":=", "..", "->", "{@", "@}", "{*", "*}", "$$", "<", ">", "(", ")", "[", "]", "{", "}",
   ",", ";", ":", "|", "#", "&", "~", "+", "-", "*", "/", "^", ".", "!", "`", "@", "=", "\\"];
 
+// A real literal's text as Python reads it: 1. as 1.0, 1.e5 as 1.0e5
+function realText(t: string, real: boolean): string {
+  return real ? t.replace(/\.(?=[eE]|$)/, ".0") : t;
+}
+
 // The keywords whose assignment form Magma has, x div:= 2 (Magma 2.18-5; not eq:=, cmpeq:= or subset:=)
 const OPA_KW = new Set(["cat", "div", "mod", "join", "meet", "diff", "sdiff", "and", "or", "xor"]);
 const OPAS = ["+:=", "-:=", "*:=", "/:=", "^:=", ...[...OPA_KW].map((k) => k + ":=")];
+
+// After a literal zero denominator (Parser.zeroDenominator): the operators that start or bind an operand of their
+// own, which Magma doesn't take as continuing the expression, and the keywords it does (Magma 2.18-5, each checked)
+const ZERO_NOT_AFTER = new Set(["(", "[", "{", "{@", "{*", ".", "$", "$$", "#", "!", "@", "@@", "~", "&", "`", "\\"]);
+const ZERO_KW_AFTER = new Set(("eq ne lt le gt ge in notin subset notsubset cmpeq cmpne div mod and or xor join meet diff sdiff " +
+  "then do to by select else where").split(" "));
 
 export function lex(src: string): Tok[] {
   const out: Tok[] = [];
@@ -86,19 +97,48 @@ export function lex(src: string): Tok[] {
     if (/[0-9]/.test(c)) {
       let j = i;
       while (j < n && /[0-9]/.test(src[j])) j++;
+      // hexadecimal, 0x1f (as Magma 2.18-5 reads it: ONE digit, any digit, which is ignored, then a lower-case x and
+      // hexadecimal digits of either case; 1x5 is 5 too): the integer, in decimal; digits and an x that aren't one
+      // (0x, 0xg, 10x5, 01x5) are Magma's "Invalid hexadecimal integer", at the x
+      if (src[j] === "x") {
+        let k = j + 1;
+        while (k < n && /[0-9a-fA-F]/.test(src[k])) k++;
+        if (j === i + 1 && k > j + 1) {
+          out.push({ t: "num", v: BigInt("0x" + src.slice(j + 1, k)).toString(), line: L, col: C });
+          adv(k - i);
+          continue;
+        }
+        out.push({ t: "num", v: src.slice(i, j).replace(/^0+(?=\d)/, ""), line: L, col: C });
+        adv(j - i);
+        out.push({ t: "bad", v: "x", line, col, msg: "Invalid hexadecimal integer" });
+        adv(1);
+        continue;
+      }
       let real = false;
-      // 1.5 (but not 1..5) and 1e10
-      if (src[j] === "." && /[0-9]/.test(src[j + 1] ?? "")) {
+      // a real, as Magma 2.18-5 reads it: 1.5, and 1. with no digits after the point (12., 1.e5), but not 1..5 (a
+      // range); then an exponent, e or E, which must have digits after its sign (1e5, 1.5E-2): else Magma's "Real
+      // literal has no digits after exponent indicator", just after the e (1e;, 1.ex)
+      if (src[j] === "." && src[j + 1] !== ".") {
         real = true;
         j++;
         while (j < n && /[0-9]/.test(src[j])) j++;
       }
-      if ((src[j] === "e" || src[j] === "E") && /[0-9+-]/.test(src[j + 1] ?? "") && (real || /[0-9]/.test(src[j + 1]) || /[0-9]/.test(src[j + 2] ?? ""))) {
+      if (src[j] === "e" || src[j] === "E") {
+        let k = j + 1;
+        if (src[k] === "+" || src[k] === "-") k++;
+        if (!/[0-9]/.test(src[k] ?? "")) {
+          out.push({ t: real ? "real" : "num", v: realText(src.slice(i, j), real), line: L, col: C });
+          adv(j + 1 - i);
+          out.push({ t: "bad", v: src.slice(j + 1, k) || "e", line, col, msg: "Real literal has no digits after exponent indicator" });
+          adv(k - j - 1);
+          continue;
+        }
         real = true;
-        j += 2;
+        j = k;
         while (j < n && /[0-9]/.test(src[j])) j++;
       }
-      out.push({ t: real ? "real" : "num", v: src.slice(i, j), line: L, col: C });
+      // (an integer without its leading zeros: 007 is 7 in Magma, and not a Python literal)
+      out.push({ t: real ? "real" : "num", v: real ? realText(src.slice(i, j), true) : src.slice(i, j).replace(/^0+(?=\d)/, ""), line: L, col: C });
       adv(j - i);
       continue;
     }
@@ -194,8 +234,9 @@ export const pyName = (s: string) => (PYKW.has(s) || PY_BUILTINS.has(s) || s.sta
  * (lib/_magma.py's _CALL_POS_NAMES, which a test keeps equal): their calls
  * are emitted as _m._call((line, col), f, args), so that a repeated or
  * nested call is told apart. */
-export const CALL_POS = new Set(("ChangeRing CharacteristicPolynomial DefiningPolynomial Embed Generator Identity IsSubfield " +
-  "MinimalPolynomial Norm PrimeField Root RootsInSplittingField Solution Submatrix Subsets Sym Trace Vector").split(" "));
+export const CALL_POS = new Set(("ChangeRing CharacteristicPolynomial DefiningPolynomial Embed Generator Identity Integral IsSubfield " +
+  "MinimalPolynomial Norm Normalise Normalize PrimeField Root RootsInSplittingField Solution SquarefreeFactorization " +
+  "Submatrix Subsets Sym Trace Vector").split(" "));
 /** The Magma name of a Python name made by pyName. */
 const magmaName = (py: string) => (py.endsWith("_") && pyName(py.slice(0, -1)) === py ? py.slice(0, -1) : py);
 
@@ -877,7 +918,11 @@ class Parser {
       if (names.length === 1) this.store(names[0], `_m._ref1(${tmp})`);
       else names.forEach((r, k) => this.store(r, `_m._refk(${tmp}, ${k})`));
     } else {
-      this.emit(`_m._show_values(${this.all(e.code)})`);
+      // (a call that is the whole statement, f(3);, names its bad argument types after the application, '@', as
+      // Magma 2.18-5 does: _m._call_bare)
+      const whole = this.calls.get(e.code);
+      const code = whole?.startsWith("_m._call(") ? "_m._call_bare(" + whole.slice("_m._call(".length) : this.all(e.code);
+      this.emit(`_m._show_values(${code})`);
     }
   }
 
@@ -1450,10 +1495,15 @@ class Parser {
       while (op(T[at], "(")) at++;
       return { zero: /^0+$/.test(n.v), at: T[at] };
     };
-    // (Magma reads one token past the zero first: one that can't follow it, an identifier, a number, a string, . or
-    // $, is its bad syntax there instead, as in 1/0 x and 1/0X5, which is 0 and X5)
-    const ahead = this.toks[b1];
-    if (["id", "num", "real", "str", "bad"].includes(ahead.t) || (ahead.t === "op" && [".", "$", "$$"].includes(ahead.v))) return;
+    // (Magma reads one token past the zero first, and refuses only if that token can continue the expression: an
+    // operator, a closer or separator, or one of the keywords below (Magma 2.18-5, each checked); anything else,
+    // as in 1/0 x, 1/0 true, 1/0 is 1 and 1/0X5 (which is 0 and X5), is its bad syntax there instead.  The
+    // operators that start or bind an operand of their own, ( [ { . $ # ! @ ~ ::, aren't followers here)
+    // (= is a follower, as Magma reads 1/0 = 1; :: is two :s here)
+    const ahead = this.toks[b1], after = this.toks[b1 + 1];
+    const follows = ahead.t === "op" ? !ZERO_NOT_AFTER.has(ahead.v) : ahead.t === "kw" && ZERO_KW_AFTER.has(ahead.v);
+    const colons = ahead.v === ":" && after?.v === ":" && after.line === ahead.line && after.col === ahead.col + 1;
+    if (!follows || colons) return;
     const a = literal(a0, a1), b = literal(b0, b1);
     if (a && b?.zero) throw new MagmaSyntaxError("Illegal zero denominator", b.at.line, b.at.col, true);
   }
@@ -1509,8 +1559,10 @@ class Parser {
   }
 
   postfix(): string {
-    const head = this.peek();
+    const head = this.peek(), h0 = this.i;
     let e = this.primary();
+    // (the callee just a name, its one token: in a function body its read is a placeholder, or the function's own)
+    const oneName = head.t === "id" && this.i === h0 + 1;
     // (a call of an intrinsic that says its errors at its call's "(", by
     // its name or through a variable or parameter that may hold one:
     // _m._call tells the runtime which call it is, nested or repeated; in a
@@ -1537,7 +1589,10 @@ class Parser {
         // are references (_m._refcall), as AssignNames checks them
         if (a.refs.length) e = `_m._refcall(${e}, [${a.refPos.join(", ")}], ${a.code})`;
         else {
-          const call = located && links === 1 ? `_m._call((${lp.line}, ${lp.col}), ${e}${a.code ? ", " + a.code : ""})` : `${e}(${a.code})`;
+          // (a callee that isn't a name, 2(3), (f)(x), g()(3), goes through _m._call too, which refuses a value
+          // that isn't a function at its "(", as Magma does)
+          const named = oneName && links === 1;
+          const call = (located && links === 1) || !named ? `_m._call((${lp.line}, ${lp.col}), ${e}${a.code ? ", " + a.code : ""})` : `${e}(${a.code})`;
           e = `_m._first(${call})`;
           this.calls.set(e, call);
         }
