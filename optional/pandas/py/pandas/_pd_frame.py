@@ -10,7 +10,8 @@ import numpy as np
 from ._pd_column import Column, column_from, set_values
 from ._pd_dtypes import STR, INTS, infer, is_missing, resolve_dtype
 from ._pd_index import Index, RangeIndex, default_index, ensure_index
-from ._pd_series import Series, _astype, _broadcast, _head_positions, _tail_positions, _sample_positions, dtype_object, diff_column
+from ._pd_series import Series, _astype, _broadcast, _head_positions, _tail_positions, _sample_positions, dtype_object, diff_column, \
+    with_na_value, export_as, is_int_target
 from ._pd_datetime import DT, to_us
 from .errors import _INPLACE, inplace_given
 from . import _pd_indexing as X
@@ -18,6 +19,8 @@ from . import _pd_reduce as R
 from . import _pd_repr
 from . import _pd_sort as S
 from . import _pd_reshape as RS
+from . import _pd_combine as CB
+from . import _pd_info as INF
 
 __all__ = ["DataFrame"]
 
@@ -182,7 +185,8 @@ class DataFrame(object):
             elif _is_scalar(v):
                 cols.append(column_from([v] * n, want))
             else:
-                col = column_from(v, want)
+                # (an empty list is float64 here, numpy's empty array; a Series of one is object)
+                col = column_from(v, want if want or not isinstance(v, (list, tuple)) or len(v) else "float64")
                 if len(col) != n:
                     raise ValueError("Length of values (%d) does not match length of index (%d)" % (len(col), n))
                 cols.append(col)
@@ -270,10 +274,29 @@ class DataFrame(object):
     def values(self):
         return self._pd_export("DataFrame.values", False)
 
-    def to_numpy(self, dtype=None, copy=False, na_value=None):
-        if dtype is not None or na_value is not None:
-            raise _unsupported("DataFrame.to_numpy(dtype=, na_value=)")
-        return self._pd_export("DataFrame.to_numpy()", copy)
+    def to_numpy(self, dtype=None, copy=False, na_value=RS.NO_VALUE):
+        """The values as a 2-D numpy array (see _pd_export), converted to
+        dtype if given (see _pd_series.export_as), then the missing values
+        as na_value if given. Read-only when the columns share one dtype and
+        neither copy nor na_value is given, as pandas' (a view of its one
+        block)."""
+        filling = na_value is not RS.NO_VALUE and not (isinstance(na_value, float) and na_value != na_value)
+        if dtype is None and not filling:
+            return self._pd_export("DataFrame.to_numpy()", copy)
+        cols = self._pd_cols
+        if dtype is not None:
+            # (pandas casts before it fills: a float NaN cast to an integer is numpy's, whatever na_value is)
+            if is_int_target(dtype) and any(c.dtype == "float64" and c.isna().any() for c in cols):
+                raise _unsupported("DataFrame.to_numpy(dtype=) of missing values to an integer dtype (pandas casts NaN "
+                                   "with numpy before na_value applies)")
+        if filling:
+            cols = [with_na_value(c, na_value) for c in cols]
+        if dtype is None:
+            return DataFrame._pd_new(cols, self._pd_columns, self._pd_index)._pd_export("DataFrame.to_numpy()", True)
+        a = export_as(cols, dtype, "DataFrame.to_numpy(dtype=)")
+        if not copy and not filling and cols and all(c.dtype == cols[0].dtype for c in cols):
+            a.flags.writeable = False
+        return a
 
     def __array__(self, dtype=None, copy=None):
         if dtype is not None:
@@ -650,6 +673,100 @@ class DataFrame(object):
             self._pd_init(out._pd_cols, out._pd_columns, out._pd_index)
             return None
         return out
+
+    def drop(self, labels=None, *, axis=0, index=None, columns=None, level=None, inplace=_INPLACE, errors="raise"):
+        """Without the rows (axis=0, or index=) or the columns (axis=1, or
+        columns=) of labels, every one of a repeated label."""
+        inplace = inplace_given(inplace, "DataFrame.drop")
+        if level is not None:
+            raise _unsupported("DataFrame.drop(level=)")
+        if labels is not None:
+            if index is not None or columns is not None:
+                raise ValueError("Cannot specify both 'labels' and 'index'/'columns'")
+            if axis in (0, "index", "rows"):
+                index = labels
+            elif axis in (1, "columns"):
+                columns = labels
+            else:
+                raise ValueError("No axis named %s for object type DataFrame" % (axis,))
+        elif index is None and columns is None:
+            raise ValueError("Need to specify at least one of 'labels', 'index' or 'columns'")
+        out = self
+        if columns is not None:
+            keep = CB.keep_positions(out._pd_columns, columns, errors)
+            out = DataFrame._pd_new([out._pd_cols[j].copy() for j in keep], CB.kept_index(out._pd_columns, keep), out._pd_index.copy())
+        if index is not None:
+            keep = CB.keep_positions(out._pd_index, index, errors)
+            out = DataFrame._pd_new([c.take(keep) for c in out._pd_cols], out._pd_columns.copy(), CB.kept_index(out._pd_index, keep))
+        if out is self:
+            out = self.copy()
+        if inplace:
+            self._pd_init(out._pd_cols, out._pd_columns, out._pd_index)
+            return None
+        return out
+
+    def melt(self, id_vars=None, value_vars=None, var_name=None, value_name="value", col_level=None, ignore_index=True):
+        """Wide to long, as pandas 3.1's melt: the id_vars columns repeated
+        once for each value column, a column of the value columns' labels
+        (var_name, the columns' name or 'variable') and one of their values
+        end to end (value_name; concat's dtype rules)."""
+        if col_level is not None:
+            raise _unsupported("DataFrame.melt(col_level=) (a MultiIndex)")
+        labels = self._pd_columns.tolist()
+        if RS.hashable(value_name) and value_name in self._pd_columns:
+            raise ValueError("value_name (%s) cannot match an element in the DataFrame columns." % (value_name,))
+        ids = [] if id_vars is None else (list(id_vars) if X.is_list_like(id_vars) else [id_vars])
+        values = None if value_vars is None else (list(value_vars) if X.is_list_like(value_vars) else [value_vars])
+        js = list(range(len(labels)))
+        if ids or values:
+            wanted = ids + (values or [])
+            missing = [lab for lab in wanted if lab not in self._pd_columns]
+            if missing:
+                raise KeyError("The following id_vars or value_vars are not present in the DataFrame: %r" % (missing,))
+            if values is not None:
+                js = []
+                for lab in wanted:
+                    p = self._pd_columns._pd_positions(lab)
+                    for q in (p if isinstance(p, list) else [p]):
+                        if q not in js:
+                            js.append(q)
+        if var_name is None:
+            var_name = self._pd_columns.name if self._pd_columns.name is not None else "variable"
+        elif X.is_list_like(var_name) or isinstance(var_name, tuple):
+            raise ValueError("var_name=%r must be a scalar." % (var_name,))
+        names = ids + [var_name, value_name]
+        dups = [x for x in names if names.count(x) > 1]
+        if dups:
+            raise ValueError("melt output columns cannot contain duplicate names: %r" % (list(dict.fromkeys(dups)),))
+        id_js = []
+        for lab in ids:
+            p = self._pd_columns._pd_positions(lab)
+            if isinstance(p, list):
+                raise _unsupported("DataFrame.melt with a repeated id column label")
+            id_js.append(p)
+        value_js = [j for j in js if j not in id_js]
+        n, k = len(self), len(value_js)
+        cols = [CB.join_columns([self._pd_cols[j]] * k) if k else self._pd_cols[j].take([]) for j in id_js]
+        var_labels = self._pd_columns._pd_column().take([j for j in value_js for _ in range(n)])
+        cols.append(var_labels)
+        cols.append(CB.join_columns([self._pd_cols[j] for j in value_js]) if k else Column("float64", np.array([], dtype=np.float64)))
+        index = default_index(n * k) if ignore_index else self._pd_index._pd_take(list(range(n)) * k)
+        return DataFrame._pd_new(cols, Index(names), index)
+
+    def memory_usage(self, index=True, deep=False):
+        """The bytes pandas counts for each column (and the index, first,
+        labelled 'Index'): a Series of int64; see _pd_info."""
+        if deep:
+            INF.check_deep("DataFrame.memory_usage(deep=True)", self._pd_cols, self._pd_index if index else None)
+        sizes = [INF.column_nbytes(c) for c in self._pd_cols]
+        labels = self._pd_columns.tolist()
+        if index:
+            sizes = [INF.index_nbytes(self._pd_index)] + sizes
+            labels = ["Index"] + labels
+        return Series._pd_new(Column("int64", np.array(sizes, dtype=np.int64)), Index(labels) if index else self._pd_columns.copy())
+
+    def info(self, verbose=None, buf=None, max_cols=None, memory_usage=None, show_counts=None):
+        return INF.frame_info(self, verbose, buf, max_cols, memory_usage, show_counts)
 
     def __getattr__(self, name):
         if not name.startswith("_pd_") and not name.startswith("__"):

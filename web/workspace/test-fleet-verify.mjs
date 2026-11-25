@@ -93,10 +93,10 @@ try {
     ok(changed !== F.objects.host_cert && tampered !== null, "V-7: a certificate with a changed byte is refused", tampered);
     const g = await P.ev(`(async () => { const bad = []; for (const c of F.objects.grants) { const cur = c.current && { gen: c.current.gen, bytes: new TextEncoder().encode(c.current.bytes), body: JSON.parse(c.current.bytes).body };
       let got; try { await m.fv.verifyGrant(${CTX}, CH, CERT, c.bytes, cur ?? null, F.now_ms); got = "ok"; } catch (e) { got = e?.code ?? String(e); } if (got !== c.expect) bad.push({ name: c.name, got, expect: c.expect }); } return { n: F.objects.grants.length, bad }; })()`);
-    ok(g.n === 11 && g.bad.length === 0, `V-8: all ${g.n} of the agent's grant cases get the fixtures' answer through verifyGrant`, g);
+    ok(g.n === 16 && g.bad.length === 0, `V-8: all ${g.n} of the agent's grant cases get the fixtures' answer through verifyGrant`, g);
     const a = await P.ev(`(async () => { const bad = []; for (const c of F.objects.grant_acks) {
       let got; try { await m.fv.verifyGrantAck(${CTX}, CERT, c.bytes, c.current_gen); got = "ok"; } catch (e) { got = e?.code ?? String(e); } if (got !== c.expect) bad.push({ name: c.name, got, expect: c.expect }); } return { n: F.objects.grant_acks.length, bad, refused: F.objects.grant_acks.filter((c) => c.expect !== "ok").length }; })()`);
-    ok(a.n === 7 && a.refused === 5 && a.bad.length === 0, `V-16: all ${a.n} of the agent's grant-ack cases (${a.refused} refused) get the fixtures' answer through verifyGrantAck`, a);
+    ok(a.n === 8 && a.refused === 5 && a.bad.length === 0, `V-16: all ${a.n} of the agent's grant-ack cases (${a.refused} refused) get the fixtures' answer through verifyGrantAck`, a);
   }
   // ---- when this browser can't store the pin or the fork mark: storage_failed, never a fork it didn't record
   // (IDBObjectStore.put made to throw QuotaExceededError, or to drop the write silently; restored afterwards)

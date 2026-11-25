@@ -103,7 +103,7 @@ export function buildTree(events, items = []) {
       // (PythonTeX: a stale result read back begins (on) or ends; what is drawn in between is faded, R3-4)
       case "z": top().kids.push({ t: "Z", on: e.on }); break;
       case "label": top().kids.push({ t: "L", key: e.key }); break;
-      case "ref": top().kids.push({ t: "R", cmd: e.cmd, key: e.key, opt: e.opt }); break;
+      case "ref": top().kids.push({ t: "R", cmd: e.cmd, key: e.key, opt: e.opt, star: !!e.star }); break;
       case "doc": st.length = 1; root.kids.push({ t: "doc" }); break;
       case "cls": top().kids.push({ t: "cls", cls: e.cls, opt: e.opt }); break;
       case "natbib": top().kids.push({ t: "natbib", opt: e.opt }); break;
@@ -1047,6 +1047,8 @@ class Renderer {
     return out;
   }
   resolveRef(r, plain) {
+    // (a starred reference, \ref*{key}: the same text, without its link)
+    if (r.star && !plain) return this.resolveRef(Object.assign({}, r, { star: false }), false).replace(/<a\b[^>]*>|<\/a>/g, "");
     if ((r.cmd === "cite" || r.cmd === "citep" || r.cmd === "citet") && this.nat?.numbers) return this.natCite(r, plain);
     if (r.cmd === "cite" || r.cmd === "citep" || r.cmd === "citet") {
       const parts = r.key.split(",").map((k) => k.trim()).filter(Boolean).map((k) => { const b = this.bib.get(k); return b ? (plain ? b.lab : '<a href="#' + b.id + '">' + b.lab + "</a>") : (plain ? "?" : '<span class="missing">' + esc(k) + "</span>"); });

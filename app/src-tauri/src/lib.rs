@@ -32,6 +32,10 @@ mod windows;
 #[cfg(desktop)]
 #[allow(dead_code)]
 mod agent_host;
+// (the tools the app connects, chosen by the person: the checks, before the agents page offers them)
+#[cfg(desktop)]
+#[allow(dead_code)]
+mod tools;
 mod nav;
 mod version;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};

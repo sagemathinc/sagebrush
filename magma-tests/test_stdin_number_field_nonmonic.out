@@ -1,0 +1,117 @@
+Number Field with defining polynomial x^2 + 1/3 over the Rational Field
+-1/3
+-12
+[ 1, 1/2 ]
+2*a + 1
+1/3*(6*a + 2)
+1/2*(-3*a - 1)
+1/3
+0
+2
+Maximal Order of Equation Order with defining polynomial 3*x^2 + 1 over its ground order
+Maximal Order of Equation Order with defining polynomial 3*x^2 + 1 over its ground order
+0 1
+1
+Number Field with defining polynomial x^3 - 1/4*x + 5/2 over the Rational Field
+1/4*(c - 10)
+-43184
+[ 0, 0, 1/3 ]
+Number Field with defining polynomial x^2 - 1/2 over the Rational Field
+1/2
+8
+Maximal Order of Equation Order with defining polynomial 2*x^2 - 1 over its ground order
+Number Field with defining polynomial 2*y^2 - 3 over the Rational Field
+3/2
+24
+[ 0, 1/2 ]
+Number Field with defining polynomial 3*y^3 - 2 over the Rational Field
+2/3
+-972
+false
+Number Field with defining polynomial x^2 - 2 over the Rational Field
+Maximal Equation Order with defining polynomial x^2 - 2 over its ground order
+8
+Number Field with defining polynomial 2*x^2 + 1 over the Rational Field
+Maximal Order of Equation Order with defining polynomial 2*x^2 + 1 over its ground order
+-8
+Number Field with defining polynomial 3*x^2 + 2*x + 1 over the Rational Field
+Maximal Order of Equation Order with defining polynomial 3*x^2 + 2*x + 1 over its ground order
+-8
+Number Field with defining polynomial 2*x^2 - 7 over the Rational Field
+7/2
+[ 0, 1 ]
+Maximal Order of Equation Order with defining polynomial 2*x^2 - 7 over its ground order
+56
+Number Field with defining polynomial 3*x^2 + 1 over the Rational Field
+-1/3
+-1/3*a
+[ 1/3, 1 ]
+[ 3/4, -3/4 ]
+1/3
+0
+-12
+Maximal Order of Equation Order with defining polynomial 3*x^2 + 1 over its ground order
+Number Field with defining polynomial 2*x^2 - 3 over the Rational Field
+3/2
+3/2*a
+[ 5/4, 1 ]
+[ -2, 2 ]
+-3/2
+0
+24
+Maximal Order of Equation Order with defining polynomial 2*x^2 - 3 over its ground order
+Number Field with defining polynomial 3*x^2 + 3*x + 1 over the Rational Field
+1/3*(-3*a - 1)
+1/3*(2*a + 1)
+[ 1/3, 1/2 ]
+[ 0, -3 ]
+1/3
+-1
+-3
+Maximal Order of Equation Order with defining polynomial 3*x^2 + 3*x + 1 over its ground order
+Number Field with defining polynomial 3*x^3 - 2 over the Rational Field
+a^2
+2/3
+[ 1/2, 1, 1/2 ]
+[ 3/5, -3/5, 3/5 ]
+2/3
+0
+-972
+Maximal Order of Equation Order with defining polynomial 3*x^3 - 2 over its ground order
+Number Field with defining polynomial x^2 + 1/3 over the Rational Field
+-1/3
+-1/3*a
+[ 1/3, 1 ]
+[ 3/4, -3/4 ]
+1/3
+0
+-12
+Maximal Order of Equation Order with defining polynomial 3*x^2 + 1 over its ground order
+Number Field with defining polynomial x^2 - 3/2 over the Rational Field
+3/2
+3/2*a
+[ 5/4, 1 ]
+[ -2, 2 ]
+-3/2
+0
+24
+Maximal Order of Equation Order with defining polynomial 2*x^2 - 3 over its ground order
+Number Field with defining polynomial x^2 + x + 1/3 over the Rational Field
+1/3*(-3*a - 1)
+1/3*(2*a + 1)
+[ 1/3, 1/2 ]
+[ 0, -3 ]
+1/3
+-1
+-3
+Maximal Order of Equation Order with defining polynomial 3*x^2 + 3*x + 1 over its ground order
+Number Field with defining polynomial x^3 + 1/4*x + 3/2 over the Rational Field
+a^2
+1/4*(-a - 6)
+[ 1/2, 1, 1/2 ]
+[ -5, 4, -4 ]
+-3/2
+0
+-15568
+Maximal Order of Equation Order with defining polynomial 4*x^3 + x + 6 over its ground order
+end

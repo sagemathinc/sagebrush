@@ -31,6 +31,7 @@
     "web/preload.ts",
     "web/notebook/gradescope/dialog.ts",
     "web/zip/read.ts",
+    "web/tar/read.ts",
     "web/space/src/main.ts"
   ]
 }
