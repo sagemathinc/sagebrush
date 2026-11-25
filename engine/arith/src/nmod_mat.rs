@@ -15,7 +15,7 @@ use crate::nmod::{mul_shoup, Modulus};
 
 mod fast;
 
-pub use fast::{reset_fast_product, with_fast_product};
+pub use fast::{product_peak, reset_fast_product, with_fast_product};
 #[cfg(feature = "test-hooks")]
 pub use fast::{fast_allowance_left, fast_n0, fast_product_state, leave_fast_product_state, set_fast_n0};
 

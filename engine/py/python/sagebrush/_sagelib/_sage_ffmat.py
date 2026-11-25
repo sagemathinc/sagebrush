@@ -1854,6 +1854,15 @@ class FFMatrix:
             # it cannot be what refuses incompatible fields)
             A, o = self._coerced(o, "*")
             _admit_size(A._base, A.nrows(), o.ncols())  # (the product's size before it is built)
+            # (over a prime field, from the product's shape alone: the
+            # engine's nmod_mat_mul, or its memory error, never this loop)
+            r, k, c = A.nrows(), A._ncols, o.ncols()
+            B = _mul_bin(A._base, r, k, c)
+            p = B._mul_bin_route(A._base, r, k, c) if B else None
+            if p:
+                rows = B._mul_bin_call(A._rows, o._rows, A._base, r, k, c, p)
+                if rows is not None:
+                    return FFMatrix(A._base, rows, c)
             cols = o.columns()
             z = A._base.zero()
             out = []
@@ -2752,6 +2761,30 @@ def _engine_echelon(rows, base, ncols, p, want_rows):
 # (tests: False keeps every matrix off the binary route, for the JSON
 # route's own cases, test/ffmat_echelon_admission.py)
 _ECH_BIN_ENABLED = True
+
+
+# (tests: False keeps every product on the loop)
+_MUL_BIN_ENABLED = True
+# the product's work threshold for the binary route, r k c multiply-adds,
+# fixed: the route's fixed cost (packing, the call, the rows built from the
+# reply) is below the loop's from about 27 multiply-adds in CPython and 64
+# in pyjs on square shapes; at 256 every shape measured, thin ones included
+# (256 x 1 x 1, 1 x 256 x 1, 1 x 1 x 256, 16 x 1 x 16), took less time on
+# the binary route in both runtimes
+_MUL_BIN_MIN = 256
+
+
+def _mul_bin(base, r, k, c):
+    """The binary route's module (lib/_sage_ffmat_bin.py) when the product
+    of an r x k and a k x c matrix over base may take nmod_mat_mul: a prime
+    field the engine takes, the binary entry point present, at least
+    _MUL_BIN_MIN multiply-adds; else None, without importing it."""
+    if not _MUL_BIN_ENABLED or not isinstance(base, _ff.IntegerModRing_) or min(r, k, c) < 1 or r * k * c < _MUL_BIN_MIN:
+        return None
+    if not _ff._SBW1_LE or not _engine_prime(base):
+        return None
+    import _sage_ffmat_bin
+    return _sage_ffmat_bin
 
 
 def _ech_bin(base, r, c):

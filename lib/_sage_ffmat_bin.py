@@ -420,3 +420,261 @@ def _ech_kernel_out(r, c):
     k = min(kap, c // 2)
     w = max(k * (c - k), (k + 1) * (c - k - 1) if k + 1 <= kap else 0)
     return _ech_words_cost(w) + c + _ECH_HDR
+
+
+# ---- the product's binary route (engine/web bin_ops.rs nmod_mat_mul, SBW1):
+# A * B over a prime field below 2^63, taken from the product's shape alone:
+# at least _sage_ffmat._MUL_BIN_MIN multiply-adds (below it the Python loop
+# is faster),
+# the request within the frame cap, and the host's need (_mul_need) within
+# its budget; a proved memory non-fit raises the memory error, never the
+# loop.  The pieces, the binding's copies and the reply's reading are the
+# echelon's (above).
+
+# the engine's fixed allowance for the fast product's extra words, in
+# bytes (bin_ops.rs MAT_MUL_FAST_ALLOWANCE, 2^24 words)
+_MUL_FAST_ALLOWANCE = 8 << 24
+
+
+def _mul_request_len(r, k, c):
+    """nmod_mat_mul's request bytes (bin_ops.rs mat_mul_request_len)."""
+    return 104 + 8 * (r * k + k * c)
+
+
+def _mul_reply_len(r, c):
+    """nmod_mat_mul's reply bytes (bin_ops.rs mat_mul_reply_len)."""
+    return 26 + 8 * r * c
+
+
+def _mul_batch64(p):
+    """How many products of residues mod p a u64 sum holds (nmod_mat.rs
+    batch64): 0 for p above 2^32."""
+    if p > 1 << 32:
+        return 0
+    q = (p - 1) * (p - 1)
+    return (1 << 64) - 1 if q == 0 else ((1 << 64) - 1) // q
+
+
+def _mul_engine_reservation(r, k, c, p):
+    """An upper bound for the engine's reservation (bin_ops.rs
+    mat_mul_reservation): the decoded factors, the classical product's peak
+    (nmod_mat.rs classical_peak: the result, and a row's sums or the
+    transpose of B), the fast route's extra words at most, where the shape
+    may take the fast route (its smallest dimension at least the crossover,
+    nmod_mat/fast.rs N0_U64 and N0_U128; else none, exactly): 2 (r k + k c +
+    r c) + 8 (r + k + c) + 64 words, at most the fixed allowance (the bound
+    engine/web's bin_ops tests check against the plan's own extra words over
+    a grid of shapes), the reply and the slack."""
+    b64 = _mul_batch64(p)
+    classical = r * c + (k * c if k > b64 else c)
+    n0 = 384 if b64 > 0 else 64
+    extra = 8 * (2 * (r * k + k * c + r * c) + 8 * (r + k + c) + 64)
+    fast = min(_MUL_FAST_ALLOWANCE, extra) if min(r, k, c) >= n0 else 0
+    return 8 * (r * k + k * c) + 8 * classical + fast + _mul_reply_len(r, c) + _ECH_ENGINE_SLACK
+
+
+def _mul_need(r, k, c, p, out, python_only=False):
+    """The host's peak for one binary product of an r x k and a k x c
+    matrix whose result takes out bytes, plus the fixed slack: the largest
+    of its phases (the echelon's, _ech_need), with both factors packed."""
+    iota, hdr = _ECH_INT_COST, _ECH_HDR
+    q = _mul_request_len(r, k, c)
+    rp = _mul_reply_len(r, c)
+    pyjs = _sys.implementation.name == "pyjs"
+    engine = 0 if pyjs or python_only else _mul_engine_reservation(r, k, c, p)
+    copies = 0 if python_only else _ECH_BINDING_COPIES
+    reply_copies = 0 if python_only else _ECH_REPLY_COPIES
+    req = _ech_pieces_cost(q, _ECH_PIECE)
+    rep = _ech_pieces_cost(rp, _ECH_REPLY_PIECE)
+    per = _ECH_PIECE // 8
+    # (pack: the ints of the piece being filled, across rows, at most a
+    # piece's words or a factor's, their list and the array made of them;
+    # build: one reply run's elements, their list and a row's slice of it)
+    w = min(max(r * k, k * c), per)
+    run = (iota + 8) * w + 8 * w + 3 * hdr
+    phases = (
+        req + _ECH_PIECE + hdr + run,      # pack
+        req + copies * q + engine,         # call
+        req + reply_copies * rp + rep,     # return
+        rep + 16 * min(r * c, _ECH_REPLY_PIECE // 8) + 4 * hdr + out,  # build
+    )
+    return max(phases) + _ECH_SLACK
+
+
+def _mul_fits(base, p, bound):
+    """The largest n whose n x n binary product fits bound, by bisection
+    on the monotone need."""
+    def need(n):
+        return _mul_need(n, n, n, p, _ech_out_cost(base, n, n))
+    lo, hi = 0, 1
+    while need(hi) <= bound and hi < 1 << 20:
+        hi *= 2
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if need(mid) <= bound:
+            lo = mid
+        else:
+            hi = mid
+    return lo
+
+
+def _mul_bin_route(base, r, k, c):
+    """p when the binary nmod_mat_mul takes the product of an r x k and a
+    k x c matrix over base: a prime field below 2^63, the binary entry point
+    present, at least _sage_ffmat._MUL_BIN_MIN multiply-adds, the request
+    within the
+    frame cap and the host's need (_mul_need) within its budget.  None for
+    another field, an engine without the entry point, a product below the
+    threshold or a frame-only non-fit (the loop, under its own admission).
+    A proved memory non-fit raises the memory error (never the loop)."""
+    if not _fm._MUL_BIN_ENABLED or not isinstance(base, _ff.IntegerModRing_) or min(r, k, c) < 1:
+        return None
+    if r * k * c < _fm._MUL_BIN_MIN:
+        return None
+    p = _ff._engine_prime(base)
+    if not p or not _ff._SBW1_LE:
+        return None
+    if max(r, k, c) >= 1 << 32 or _mul_request_len(r, k, c) > _ech_frame_cap():
+        return None
+    need = _mul_need(r, k, c, p, _ech_out_cost(base, r, c))
+    bound = _ech_bound()
+    if need > bound:
+        import _memguard
+        n = _mul_fits(base, p, bound)
+        e = _memguard.memory_guard("The product of a %d x %d and a %d x %d matrix over %r" % (r, k, k, c, base), need, bound, "one matrix")
+        e.fits = n
+        lines = e.args[0].split("\n")
+        i = next((j for j, t in enumerate(lines) if "needs about" in t), len(lines) - 1)
+        lines[i] += " At most about an %d x %d product fits here." % (n, n)
+        e.args = ("\n".join(lines),) + e.args[1:]
+        raise e
+    return p
+
+
+def _mul_fill(pieces, buf, rowsrc, r, c):
+    """The words of rowsrc's r rows of c entries each into pieces of exactly
+    _ECH_PIECE bytes (the last one shorter, returned unfilled): the entries
+    as ints in buf, a list of at most a piece's words across rows, made into
+    an array once per piece (an array per row costs more than the row in
+    pyjs)."""
+    import array
+    import itertools
+    per = _ECH_PIECE // 8
+    rows = 0
+    for row in rowsrc:
+        if type(row) is list and len(row) == c and c <= per - len(buf):
+            # (a matrix's own row that fits the piece: no iterator, no run)
+            buf.extend(map(int, row))
+            if len(buf) == per:
+                pieces.append(array.array("Q", buf).tobytes())
+                del buf[:]
+            rows += 1
+            continue
+        it = iter(row)
+        got = 0
+        while True:
+            room = per - len(buf)
+            run = [int(x) for x in itertools.islice(it, room)]
+            got += len(run)
+            buf.extend(run)
+            del run
+            if len(buf) == per:
+                pieces.append(array.array("Q", buf).tobytes())
+                del buf[:]
+                continue
+            break
+        if got != c:
+            raise RuntimeError("Sagebrush: a matrix row without %d entries" % c)
+        rows += 1
+    if rows != r:
+        raise RuntimeError("Sagebrush: a matrix without %d rows" % r)
+    return buf
+
+
+def _mul_pack(arows, brows, r, k, c, p):
+    """The request's pieces: the header and A's argument header, A's words,
+    B's argument header, B's words; no piece longer than _ECH_PIECE."""
+    import array
+
+    def mat_head(rows, cols):
+        return b"".join([(24 + 8 * rows * cols).to_bytes(4, "little"), b"MAT1", rows.to_bytes(4, "little"),
+                         cols.to_bytes(4, "little"), b"U641", (rows * cols).to_bytes(8, "little")])
+    pieces = [b"".join([b"SBW1", (12).to_bytes(4, "little"), b"nmod_mat_mul", (3).to_bytes(4, "little"),
+                        _ff._sbw1_u641(array.array("Q", (p,))), mat_head(r, k)])]
+    buf = _mul_fill(pieces, [], arows, r, k)
+    if buf:
+        pieces.append(array.array("Q", buf).tobytes())
+    pieces.append(mat_head(k, c))
+    buf = _mul_fill(pieces, [], brows, k, c)
+    if buf:
+        pieces.append(array.array("Q", buf).tobytes())
+    del buf
+    if sum(len(b) for b in pieces) != _mul_request_len(r, k, c):
+        raise RuntimeError("Sagebrush: an nmod_mat_mul request of the wrong length")
+    return pieces
+
+
+def _mul_bin_call(arows, brows, base, r, k, c, p):
+    """The product's rows (lists of elements over base) by the binary
+    nmod_mat_mul, or None when the engine predates the op (the loop).  The
+    engine's refusals map by code, as the echelon's: its reservation
+    refused (Cap) is the memory error, a domain failure ValueError, a
+    protocol or invariant failure RuntimeError; a Stop is
+    KeyboardInterrupt, never retried."""
+    pieces = _mul_pack(arows, brows, r, k, c, p)
+    from _sagebrush_lib._engine import call_bin
+    try:
+        reply = call_bin(pieces)
+    except TypeError:
+        return None
+    del pieces
+    if reply is None:
+        return None
+    if not isinstance(reply, list):
+        raise RuntimeError("Sagebrush engine: an nmod_mat_mul reply that is not in pieces")
+    rd = _EchReply(reply)
+    del reply
+    head = rd.take(6)
+    if head[:4] != b"SBW1":
+        raise RuntimeError("Sagebrush engine: a malformed nmod_mat_mul reply")
+    if head[4:] == b"er":
+        code = int.from_bytes(rd.take(2), "little")
+        rd.take(8)
+        text = rd.take(int.from_bytes(rd.take(2), "little")).decode("ascii", "replace")
+        if code in (2, 3):
+            return None
+        if code == 7:
+            import _memguard
+            raise _memguard.memory_guard("The product of a %d x %d and a %d x %d matrix over %r" % (r, k, k, c, base),
+                                         _mul_engine_reservation(r, k, c, p), 0, "one matrix",
+                                         unmeasured="the engine's memory ledger refused its reservation")
+        raise (ValueError if code == 6 else RuntimeError)("Sagebrush engine: nmod_mat_mul: %s" % text)
+    if head[4:] != b"ok" or int.from_bytes(rd.take(4), "little") != 1:
+        raise RuntimeError("Sagebrush engine: a malformed nmod_mat_mul reply")
+    if rd.u641() != r * c:
+        raise RuntimeError("Sagebrush engine: a malformed nmod_mat_mul reply")
+    return _mul_rows(rd, base, r, c)
+
+
+def _mul_rows(rd, base, r, c):
+    """The product's r rows of c elements over base from the reply: each run
+    of words (at most a reply piece) made into elements at once, then cut
+    into rows (a reader per row costs more than a short row in pyjs)."""
+    elt = _ff._elt
+    out = []
+    row = []
+    for v in rd.runs(r * c):
+        vals = [elt(base, x) for x in v]
+        i, n = 0, len(vals)
+        while i < n:
+            j = min(n, i + c - len(row))
+            row.extend(vals[i:j])
+            i = j
+            if len(row) == c:
+                out.append(row)
+                row = []
+        del vals
+    rd.done()
+    if len(out) != r or row:
+        raise RuntimeError("Sagebrush engine: a malformed nmod_mat_mul reply")
+    return out

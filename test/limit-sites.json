@@ -8349,6 +8349,32 @@
   "owner": "engine web + finite-field linear algebra",
   "reason": "the binary echelon's plumbing: the ledger's refusal mapped to its reply code (Cap), as the poly ops do; the ledger decides"
  },
+ "engine/web/src/bin_ops.rs :: mat_mul :: if p >= MAX_P || !is_prime(p) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + finite-field linear algebra",
+  "reason": "the binary product's admission: the modulus range (a prime below 2^63, as the echelon's) and the frame cap (its request cap); past the frame cap the library keeps its memory-admitted loop, so no user computation is limited"
+ },
+ "engine/web/src/bin_ops.rs :: mat_mul :: let len = mat_mul_reply_len(r, c).ok_or(fail(Code::Internal, 0, \"a result too large to frame\"))?; #0": {
+  "class": "none",
+  "owner": "engine web + finite-field linear algebra",
+  "reason": "the binary product's plumbing (the ledger's refusal mapped to its Cap code; the reply's exact length, an invariant if it fails); refuses nothing itself"
+ },
+ "engine/web/src/bin_ops.rs :: mat_mul :: let need = mat_mul_reservation(r, k, c, p).ok_or(fail(Code::Cap, 0, \"a memory bound too large\"))?; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + finite-field linear algebra",
+  "reason": "the binary product's reservation bound overflowing its u64 (no shape the frame admits reaches it): refused as Cap, as the echelon's; past the frame cap the library keeps its memory-admitted loop"
+ },
+ "engine/web/src/bin_ops.rs :: mat_mul :: sagebrush_ledger::EngineError::Memory(_) => fail(Code::Cap, 0, \"the call's memory reservation was refused\"), #0": {
+  "class": "none",
+  "owner": "engine web + finite-field linear algebra",
+  "reason": "the binary product's plumbing (the ledger's refusal mapped to its Cap code; the reply's exact length, an invariant if it fails); refuses nothing itself"
+ },
  "engine/web/src/bin_ops.rs :: poly_view :: fn poly_view(a: wire::Arg<'_>, max: usize, p: u64) -> Result<U64s<'_>, WireError> { #0": {
   "class": "none",
   "owner": "engine web + finite-field polynomials",
@@ -8471,6 +8497,11 @@
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
  },
+ "engine/web/src/bin_ops/tests.rs :: product_refusals_have_their_codes_and_offsets :: for p in [0u64, 1, 4, 1 << 63, u64::MAX] { #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
+ },
  "engine/web/src/bin_ops/tests.rs :: refusals_have_their_codes_and_offsets :: assert!(n > request_cap(2, MUL_MAX_LEN).unwrap()); #0": {
   "class": "none",
   "owner": "engine binary transport (sagebrush-wire)",
@@ -8515,6 +8546,31 @@
   "class": "none",
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/src/bin_ops/tests.rs :: the_hosts_bound_on_the_fast_routes_extra_words_holds :: let (_, extra) = product_peak(r, k, c, &m, u64::MAX).unwrap(); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
+ },
+ "engine/web/src/bin_ops/tests.rs :: the_product_frame_cap_is_exact :: assert!(run_with(&r, r.len()).is_ok(), \"exactly at the cap\"); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
+ },
+ "engine/web/src/bin_ops/tests.rs :: the_product_frame_cap_is_exact :: assert_eq!((e.code, e.offset), (Code::Cap, 0), \"one byte past the cap\"); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
+ },
+ "engine/web/src/bin_ops/tests.rs :: the_product_reply_has_its_closed_form_length :: assert_eq!(mat_mul_request_len(usize::MAX, 2, 2), None); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
+ },
+ "engine/web/src/bin_ops/tests.rs :: the_product_reply_has_its_closed_form_length :: assert_eq!(mat_mul_reservation(usize::MAX, 2, 2, 101), None); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
  },
  "engine/web/src/hmfq.rs ::  :: const MAX_DISC: i64 = 1 << 20; #0": {
   "class": "3",
@@ -9197,6 +9253,41 @@
   "class": "none",
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_mat_mul_alloc.rs :: the_product_allocates_within_its_reservation_and_reads_no_free_memory :: assert!(matches!(wire::parse_reply(&out), Ok(Ok(_))), \"admitted at limit {limit}\"); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_mat_mul_alloc.rs :: the_product_allocates_within_its_reservation_and_reads_no_free_memory :: assert_eq!((g, first), (wire::ERROR_REPLY_MAX, \"nmod_mat_mul\".len())); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_mat_mul_alloc.rs :: the_product_allocates_within_its_reservation_and_reads_no_free_memory :: assert_eq!(wire::parse_reply(&out).unwrap(), Err((wire::Code::Cap as u16, 0)), \"refused one unit short\"); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_mat_mul_alloc.rs :: the_product_allocates_within_its_reservation_and_reads_no_free_memory :: for limit in [1u64 << 40, exact] { #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_mat_mul_alloc.rs :: the_product_allocates_within_its_reservation_and_reads_no_free_memory :: let mut classical = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an accounting meter with no budget (Meter::accounting(u64::MAX)), to read a call's units; refuses nothing"
+ },
+ "engine/web/tests/bin_mat_mul_alloc.rs :: the_product_allocates_within_its_reservation_and_reads_no_free_memory :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an accounting meter with no budget (Meter::accounting(u64::MAX)), to read a call's units; refuses nothing"
+ },
+ "engine/web/tests/bin_mat_mul_alloc.rs :: the_product_allocates_within_its_reservation_and_reads_no_free_memory :: sagebrush_ledger::hooks::set_fake_rows(Some(vec![(limit, 0, None)])); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
  },
  "engine/web/tests/divrem_alloc.rs :: call :: fn call(a: &str, b: &str, limit: Option<u64>, work: Option<u64>) -> (Result<String, DivFault>, u64, u64, u64) { #0": {
   "class": "none",
@@ -13174,6 +13265,36 @@
   },
   "owner": "linear algebra/runtime memory",
   "reason": "the binary echelon's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
+ },
+ "lib/_sage_ffmat_bin.py :: _mul_bin_call :: refused (Cap) is the memory error, a domain failure ValueError, a #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "reason": "the binary product's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
+ },
+ "lib/_sage_ffmat_bin.py :: _mul_bin_route :: frame cap and the host's need (_mul_need) within its budget.  None for #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "reason": "the binary product's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
+ },
+ "lib/_sage_ffmat_bin.py :: _mul_bin_route :: threshold or a frame-only non-fit (the loop, under its own admission). #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "reason": "the binary product's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
  },
  "lib/_sage_ffsub.py ::  :: CONWAY_MAX = 10 ** 7 #0": {
   "class": "3",
