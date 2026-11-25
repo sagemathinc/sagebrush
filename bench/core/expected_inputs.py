@@ -317,9 +317,10 @@ def katsura_shape(n: int) -> list[int]:
 #   prime:     -p, p = 3 (mod 4) prime, from 2 10^(n-1) up
 #   composite: even v: -p q, p = 1 and q = 3 (mod 4); odd v: -4 p q,
 #              p = q = 1 (mod 4); p the first such prime from a pseudo-random
-#              point of [10^h, 10^(h+1)), q of [10^g, 10^(g+1)), h = (n-1)//2,
-#              g = n - 2 - h (the 64-bit LCG below, seeded by n and v), so
-#              q / p is no simple ratio that Fermat-type methods would spot
+#              point of [10^h, 10^(h+1)), h = (n-1)//2, q from one of the range
+#              that gives |D| exactly n digits (the 64-bit LCG below, seeded
+#              by n and v), so q / p is no simple ratio that Fermat-type
+#              methods would spot
 #   large_h:   -p, p = 7 (mod 8) prime with (-p | q) = +1 for q = 3 .. 23,
 #              so L(1, chi) and h are large for |D|
 _STREAM_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97)
@@ -377,16 +378,21 @@ def stream_disc(kind, n, v):
         return -_nth_prime(2 * 10 ** (n - 1), 4, 3, v)
     if kind == "composite":
         h = (n - 1) // 2
-        g = n - 2 - h
+        c, r = (1, 3) if v % 2 == 0 else (4, 1)
         s1 = _lcg(1000003 * n + 7919 * v + 12345)
-        s2 = _lcg(s1)
-        r = 3 if v % 2 == 0 else 1
         p = _nth_prime(10**h + s1 % (9 * 10**h), 4, 1, 0)
-        q = _nth_prime(10**g + s2 % (9 * 10**g), 4, r, 0)
-        if q == p:
-            # (p = q would make -4 p q no fundamental discriminant)
-            q = _nth_prime(q + 1, 4, r, 0)
-        return -p * q if v % 2 == 0 else -4 * p * q
+        # (q from a pseudo-random point of the range that gives |D| exactly
+        # n digits, drawn again in the rare case the prime steps past it)
+        lo, hi = -(-(10 ** (n - 1)) // (c * p)), (10**n - 1) // (c * p)
+        s2 = s1
+        while True:
+            s2 = _lcg(s2)
+            q = _nth_prime(lo + s2 % (hi - lo + 1), 4, r, 0)
+            if q == p:
+                # (p = q would make -4 p q no fundamental discriminant)
+                q = _nth_prime(q + 1, 4, r, 0)
+            if c * p * q < 10**n:
+                return -c * p * q
     if kind == "large_h":
         p, left = 2 * 10 ** (n - 1) + (7 - 2 * 10 ** (n - 1)) % 8, v
         while True:

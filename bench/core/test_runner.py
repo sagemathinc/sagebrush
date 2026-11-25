@@ -1856,6 +1856,20 @@ class Stream(unittest.TestCase):
     GRID = [(k, n, v) for k in ("prime", "composite", "large_h") for n in (12, 18) for v in range(5)]
     GRID += [(k, 40, v) for k in ("prime", "composite", "large_h") for v in range(2)]
 
+    def test_every_input_has_its_points_size(self):
+        # (|D| exactly n digits, so a point's median and the fits against n
+        # don't mix sizes; every row's every size and input)
+        import expected_inputs
+
+        rows = json.loads((Path(run.__file__).parent / "items.json").read_text())["rows"]
+        for r in rows:
+            if r.get("stream"):
+                for key, size in r["sizes"].items():
+                    n = size["n"]
+                    ds = [expected_inputs.stream_disc(expected_inputs.CG_STREAM[r["id"]], n, v) for v in range(size["variants"])]
+                    self.assertEqual({len(str(-d)) for d in ds}, {n}, (r["id"], key))
+                    self.assertEqual(len(set(ds)), len(ds), (r["id"], key))
+
     def test_the_drivers_build_the_same_streams(self):
         import ast as ast_
         import expected_inputs

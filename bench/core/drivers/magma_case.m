@@ -182,14 +182,22 @@ end function;
 function StreamDisc(kind, n, v)
     if kind eq "prime" then return -StreamPrime(2*10^(n-1), 4, 3, v); end if;
     if kind eq "composite" then
-        // (p and q from pseudo-random points of their decades: no simple q / p)
-        h := (n - 1) div 2; g := n - 2 - h;
-        s1 := StreamLCG(1000003*n + 7919*v + 12345); s2 := StreamLCG(s1);
+        // (p from a pseudo-random point of its decade; q from one of the
+        // range that gives |D| exactly n digits, drawn again if the prime
+        // steps past it: no simple q / p)
+        h := (n - 1) div 2;
+        c := v mod 2 eq 0 select 1 else 4;
         r := v mod 2 eq 0 select 3 else 1;
+        s1 := StreamLCG(1000003*n + 7919*v + 12345);
         p := StreamPrime(10^h + (s1 mod (9*10^h)), 4, 1, 0);
-        q := StreamPrime(10^g + (s2 mod (9*10^g)), 4, r, 0);
-        if q eq p then q := StreamPrime(q + 1, 4, r, 0); end if;
-        return v mod 2 eq 0 select -p*q else -4*p*q;
+        lo := Ceiling(10^(n-1) / (c*p)); hi := (10^n - 1) div (c*p);
+        s2 := s1;
+        while true do
+            s2 := StreamLCG(s2);
+            q := StreamPrime(lo + (s2 mod (hi - lo + 1)), 4, r, 0);
+            if q eq p then q := StreamPrime(q + 1, 4, r, 0); end if;
+            if c*p*q lt 10^n then return -c*p*q; end if;
+        end while;
     end if;
     // large_h: p = 7 (mod 8) prime with (-p | q) = +1 for q = 3 .. 23
     p := 2*10^(n-1) + ((7 - 2*10^(n-1)) mod 8); left := v;
