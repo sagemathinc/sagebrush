@@ -140,6 +140,14 @@ def _absent_alternative(name):
     return _ABSENT[0].get(name)
 
 
+# Magma's file, process, environment and socket intrinsics: refused by name (Sagebrush has no file or process
+# route from Magma code), and, unlike another intrinsic Sagebrush lacks, they don't stop a file (_report)
+_FILE_PROCESS_NAMES = frozenset((
+    "Attach AttachSpec ChangeDirectory Detach DetachSpec Flush GetCurrentDirectory GetEnv Getc Getpid Gets Getuid "
+    "Open POpen Pipe PrintFile PrintFileMagma Puts Read ReadBinary ReadBytes Rewind Seek SetLogFile SetOutputFile "
+    "Socket System Tell UnsetLogFile UnsetOutputFile WaitForConnection Write WriteBinary WriteBytes").split())
+
+
 def _report(e, line, col):
     """A runtime error, reported as Magma does; then a file stops and a
     session goes on."""
@@ -163,6 +171,13 @@ def _report(e, line, col):
             alt = _absent_alternative(name)
             _sys.stdout.write("%sUser error: '%s' is a Magma intrinsic not implemented in Sagebrush%s\n"
                               % (_where(line, col), name, "; instead: " + alt if alt else ""))
+            # (and a file stops, with exit status 1, as at a runtime error:
+            # Magma has the intrinsic, so what follows would run on what it
+            # didn't compute; a session goes on.  A file, process,
+            # environment or socket intrinsic, which Sagebrush refuses by
+            # name on purpose, is reported and the file goes on, as before)
+            if _src[2] != "session" and name not in _FILE_PROCESS_NAMES:
+                raise SystemExit(1)
         else:
             # (wrapped at 80 columns, as Magma wraps it)
             _sys.stdout.write("%s%s\n" % (_where(line, col), _wrap("User error: Identifier '%s' has not been declared or assigned" % name, 0, 0)))
@@ -9665,6 +9680,14 @@ class _MNumberField(_snf.NumberField_absolute):
     _magma_block = True
 
     def __init__(self, f, quadratic=False, irreducible=False):
+        # (Magma mode prints and converts on the defining polynomial itself: a field the core keeps through a
+        # scaled model, one of a rational or non-monic polynomial, is refused here as before, until Magma mode
+        # maps its coordinates)
+        c, _ = _snf._int_coeffs(f)
+        if any(_Fraction(a).denominator != 1 for a in c):
+            raise NotImplementedError("defining polynomials must have integer coefficients")
+        if not c or c[-1] != 1:
+            raise NotImplementedError("defining polynomials must be monic (for now)")
         super().__init__(f, "$.1", irreducible=irreducible)
         self._quadratic = quadratic
         self._order = None
