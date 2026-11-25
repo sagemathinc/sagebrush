@@ -45,7 +45,7 @@
    "class": "NOT-SOURCE",
    "why": "versions, versionBytes, prunable only (dropping kept versions): no source store written"
   },
-  "workspace/api.ts|1|await inTx(this.ws, withSync(\"ops\"), \"readwrite\", async (tx) => { await this.log(tx, ops, { op: \"dropVersions\", path: q, kind }); });": {
+  "workspace/api.ts|1|await inTx(this.ws, withSync(\"ops\"), \"readwrite\", async (tx) => { await this.log(tx, ops, { op: \"dropVersions\", path: q, kind, ...(keep > 0 ? { keep } : {}), ...(only ? { partial: true as const } : {}) }); });": {
    "class": "EXEMPT",
    "why": "ops only (dropVersions logged): no source row changed"
   },
@@ -376,6 +376,10 @@
   "workspace/sync-reset.ts|1|const more = await inTx(w.ws, [\"meta\", \"entries\", \"fileBytes\"], \"readwrite\", async (tx) => {": {
    "class": "EXEMPT",
    "why": "a sync reset's leftover orphan markers swept a slice at a time, as the cleanup's sweep: only orphaned bytes (no entry names them) deleted"
+  },
+  "workspace/sync-client.ts|1|const due = await inTx(this.w.ws, [META, \"syncIndex\"], \"readwrite\", (tx) => duePairs(tx.objectStore(META), idbStore(tx, gen), gen, now, RELEASE_PAGE));": {
+   "class": "NOT-SOURCE",
+   "why": "meta and syncIndex only (the sweep's first-sight stamps and walk position, e2e PR 5d): no source store"
   }
  }
 }
