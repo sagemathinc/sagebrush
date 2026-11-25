@@ -169,6 +169,8 @@ test("the flags for a singular or indefinite preconditioner, maxit 0, the messag
     "try, gmres(T, b, 0), catch err, fprintf('restart0|%s\\n', err.message), end",
     "try, pcg(T, b, 1e-6, 10, ones(3)), catch err, fprintf('Msize|%s\\n', err.message), end",
     "try, pcg(@(v) [v; 1], b), catch err, fprintf('hsize|%s\\n', err.message), end",
+    "Ti = full(T); Ti(2, 2) = Inf; try, pcg(Ti, b), catch err, fprintf('infA|%s\\n', err.message), end",
+    "try, gmres(sparse(Ti), b), catch err, fprintf('infS|%s\\n', err.message), end",
   ]);
   // (M\x not finite: flag 2 at the first step, x0 returned)
   assert.deepEqual(rows.get("singM"), ["2", "0", "1", "1"]);
@@ -194,6 +196,50 @@ test("the flags for a singular or indefinite preconditioner, maxit 0, the messag
   assert.match(rows.get("restart0")![0], /restart must be a positive integer/);
   assert.match(rows.get("Msize")![0], /M1 must be 10-by-10/);
   assert.match(rows.get("hsize")![0], /must return a vector of length 10/);
+  // (A's Inf and NaN refused as mtimes refuses them, full or sparse)
+  assert.match(rows.get("infA")![0], /Matrix multiplication of values that include Inf or NaN is not supported/);
+  assert.match(rows.get("infS")![0], /Matrix multiplication of values that include Inf or NaN is not supported/);
+});
+
+test("lsqr's stop by Paige and Saunders's scaled test: b scaled by 1e-6 or 1e6 changes no iteration; NaN in b alike", () => {
+  const { rows } = run([
+    ...SYSTEMS,
+    "A = [1 2; 3 4; 5 6; 7 8]; c = [1; 2; 2; 3]; xs = A\\c;",
+    "for s = [1 1e-6 1e6], [x, f, r, it] = lsqr(A, s*c, 1e-6, 20); rr = s*c - A*x; " +
+      "fprintf('lsq%g|%d|%g|%.3g|%.3g\\n', s, f, it, norm(x/s - xs)/norm(xs), norm(A'*rr)/(norm(A, 'fro')*norm(rr))); end",
+    // (b with a NaN: every solver alike, no iteration, flag 4, x0, relres NaN, resvec [NaN])
+    "bn = b; bn(3) = NaN;",
+    "[x, f, r, it, rv] = pcg(T, bn); fprintf('nanpcg|%d|%g|%s|%g|%d\\n', f, r, mat2str(it), rv, isequal(x, zeros(n, 1)));",
+    "[x, f, r, it, rv] = minres(T, bn); fprintf('nanminres|%d|%g|%s|%g|%d\\n', f, r, mat2str(it), rv, isequal(x, zeros(n, 1)));",
+    "[x, f, r, it, rv] = gmres(T, bn, 3, 1e-8, 5, [], [], ones(n, 1)); fprintf('nangmres|%d|%g|%s|%g|%d\\n', f, r, mat2str(it), rv, isequal(x, ones(n, 1)));",
+    "[x, f, r, it, rv] = bicgstab(T, bn); fprintf('nanbicg|%d|%g|%s|%g|%d\\n', f, r, mat2str(it), rv, isequal(x, zeros(n, 1)));",
+    "[x, f, r, it, rv, lv] = lsqr(T, bn); fprintf('nanlsqr|%d|%g|%s|%g|%d|%d\\n', f, r, mat2str(it), rv, isequal(x, zeros(n, 1)), numel(lv));",
+    // (a handle returning complex values, and a complex preconditioner: complex iterates)
+    "H = full(T) + 0.5*eye(n) + 0.3i*(diag(ones(n-1,1),1) - diag(ones(n-1,1),-1));",
+    "[x, f] = pcg(@(v) H*v, b, 1e-12, 50); fprintf('hcplx|%d|%.3g\\n', f, norm(x - H\\b)/norm(H\\b));",
+    "[x, f] = gmres(full(N), b, [], 1e-12, 10, (1+1i)*eye(n)); fprintf('mcplx|%d|%.3g\\n', f, norm(N*x - b)/norm(b));",
+    "[x, f] = bicgstab(N, b, 1e-12, 50, full(N)); fprintf('mfull|%d|%.3g\\n', f, norm(N*x - b)/norm(b));",
+    "[x, f] = lsqr(N, b, 1e-12, 50, sparse(tril(full(N)))); fprintf('msp|%d|%.3g\\n', f, norm(N*x - b)/norm(b));",
+    // (a full M whose first column's largest entry is off the diagonal, so its factorization must pivot: N's rows
+    // reversed, its (1,1) entry 0)
+    "Mp = full(N); Mp = Mp(end:-1:1, :); [x, f] = gmres(N, b, [], 1e-12, 10, Mp); fprintf('mpiv|%d|%.3g\\n', f, norm(N*x - b)/norm(b));",
+    // (complex lsqr: a full complex M, applied transposed with its conjugate; a sparse complex A, A'*r conjugated)
+    "A = [1 2; 3 4; 5 6; 7 8]; Ac = A + 1i*[0 1; 1 0; 2 1; 0 3]; cc = [1; 2; 2; 3] - 2i;",
+    "[x, f] = lsqr(Ac, cc, 1e-12, 20, [2 1i; 0.5 3]); fprintf('lsqMc|%d|%.3g\\n', f, norm(x - Ac\\cc)/norm(Ac\\cc));",
+    "[x, f] = lsqr(sparse(Ac), cc, 1e-12, 20); fprintf('lsqSc|%d|%.3g\\n', f, norm(x - Ac\\cc)/norm(Ac\\cc));",
+  ]);
+  const f = (id: string) => rows.get(id)!.map(Number);
+  for (const s of ["1", "1e-06", "1e+06"]) {
+    const [flag, it, err, stat] = f("lsq" + s);
+    // (the same two iterations at every scale, to the least-squares solution, stationary)
+    assert.equal(flag, 0, s); assert.equal(it, 2, s); assert.ok(err < 1e-12, `${s}: ${err}`); assert.ok(stat < 1e-6, `${s}: ${stat}`);
+  }
+  for (const id of ["nanpcg", "nanminres", "nanbicg"]) assert.deepEqual(rows.get(id), ["4", "NaN", "0", "NaN", "1"], id);
+  assert.deepEqual(rows.get("nangmres"), ["4", "NaN", "[0 0]", "NaN", "1"]);
+  assert.deepEqual(rows.get("nanlsqr"), ["4", "NaN", "0", "NaN", "1", "0"]);
+  assert.equal(f("hcplx")[0], 0); assert.ok(f("hcplx")[1] < 1e-11);
+  for (const id of ["mcplx", "mfull", "msp", "mpiv"]) { assert.equal(f(id)[0], 0, id); assert.ok(f(id)[1] <= 1e-11, id); }
+  for (const id of ["lsqMc", "lsqSc"]) { assert.equal(f(id)[0], 0, id); assert.ok(f(id)[1] <= 1e-10, `${id}: ${f(id)[1]}`); }
 });
 
 test("the solvers' work admitted before their first vector (test/matlab_krylov_admit_cases.py)", () => {
@@ -201,5 +247,5 @@ test("the solvers' work admitted before their first vector (test/matlab_krylov_a
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const lines = r.stdout.trim().split("\n");
   assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
-  assert.equal(lines.length, 3, r.stdout);
+  assert.equal(lines.length, 8, r.stdout);
 });

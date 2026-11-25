@@ -27,6 +27,9 @@ import numpy as np
 
 import _matlab as _m
 from _matlab import _bi, _err, _istext, _text
+import _matlab_sparse as _sp
+from _matlab_lu import C_ENT, C_HDR, C_IDX, C_LIST
+from _matlab_sparse import E
 
 _EPS = 2.220446049250313e-16
 # (stagnation: this many steps in a row that change x by less than eps relative to it)
@@ -37,6 +40,10 @@ _STAG_STEPS = 3
 # to 24 for the others, and gmres the same 20 or so besides its basis)
 _VECTOR_BYTES = 8
 _SHORT = 32
+# (a residual history's entry: a list's entry, pointer and float object, at the engine's measured C_ENT, then its
+# element in the output array and in that array's copy as a MATLAB value; the entries reserved this many at a time)
+_HISTORY_ENTRY = C_ENT + 2 * _VECTOR_BYTES
+_HISTORY_STEP = 1024
 
 
 def _norm(v):
@@ -81,70 +88,199 @@ def _matrix_arg(v, fname, what):
 
 
 class _Op:
-    """A (or a preconditioner): a matrix applied with MATLAB's own mtimes and mldivide, so full, sparse and complex
-    matrices are all A*x and M\\x as MATLAB computes them, or a function handle that returns them"""
+    """A (or a preconditioner): a matrix or a function handle.  A matrix is applied as MATLAB mode's mtimes applies it
+    (the same NumPy product for a full one, the same sums for a sparse one: the same values), but by the solver's own
+    code, so that each product's arrays are the ones the solver admitted: A's Inf and NaN refused once, as mtimes
+    refuses them, rather than checked at every product.  A preconditioner matrix is factored once (a diagonal one
+    divides; a sparse one by _matlab_lu's sparse LU; a full one by Gaussian elimination with partial pivoting) and
+    each M\\x is then two triangular solves; a handle returns A*x or M\\x itself"""
 
     def __init__(self, v, fname, what, m, n, transp=False, precond=False):
         self.fname, self.what, self.m, self.n, self.transp = fname, what, m, n, transp
         self.handle = _m._iscallable(v)
-        self.diag, self.isdiag = None, False
+        self.precond = precond
+        self.sparse = False
+        self.isdiag = False
         if not self.handle:
             _matrix_arg(v, fname, what)
             d = _m._dims(v)
             if (d[0], d[1]) != (m, n):
                 raise _err("%s: %s must be %d-by-%d." % (fname, what, m, n))
-            # (a diagonal preconditioner, Jacobi's: M\x is x divided by its diagonal, as mldivide divides, without
-            # mldivide's work on the whole matrix at every step; the diagonal is taken at the first solve, after the
-            # solver's memory is admitted)
+            self.sparse = type(v) is _m.Sparse
             self.isdiag = precond and bool(_m._B["isdiag"].call(1, [v]))
         self.v = v
+        self.diag = self.cols = self.lu = self.perm = self.F = None
 
-    def _diagonal(self):
-        if self.diag is None:
-            self.diag = _vec(_m._B["diag"].call(1, [self.v]))
-        return self.diag
+    # ---- what each kind holds and makes, for the solver's budget
+
+    def nnz(self):
+        return int(self.v.jc[self.v.n]) if self.sparse else self.m * self.n
+
+    def retained(self, per):
+        """the bytes this operator keeps for the solve, besides what it was given: a sparse A's column of each nonzero,
+        a diagonal preconditioner's diagonal, a full one's factors (a sparse one's are admitted by its factorization,
+        in the same budget)"""
+        if self.handle:
+            return 0
+        if self.precond:
+            if self.isdiag:
+                return self.n * per + C_HDR
+            if not self.sparse:
+                return self.n * self.n * per + self.n * C_IDX + 2 * C_HDR
+            return 0
+        return self.nnz() * C_IDX + C_HDR if self.sparse else 0
+
+    def step(self, per):
+        """the bytes one application makes and drops: a product's gathered values and terms (with a complex product's
+        two parts and two sums), or a triangular solve's vector and a full factorization's row block"""
+        N = max(self.m, self.n)
+        if self.handle:
+            return 0
+        if self.precond:
+            # (a full factorization's step: its pivot search and row swap, n each, and a row block's product and
+            # difference, E each; a solve's vectors)
+            return 3 * N * per + 3 * E * per + 3 * C_HDR
+        if self.sparse:
+            return self.nnz() * (2 * per + 2 * _VECTOR_BYTES) + 4 * N * per + 8 * C_HDR
+        return 3 * N * per + 3 * C_HDR
+
+    def prepare(self, budget, cplx):
+        """the one-time work, after the solver's memory is admitted: A's finiteness, a sparse A's columns, a
+        preconditioner's diagonal or factors"""
+        if self.handle:
+            return
+        v = self.v
+        if not self.precond:
+            vals = v.pr if self.sparse else _m._farr(v)
+            flat = vals.reshape(-1)
+            for a in range(0, flat.size, E):
+                if not np.all(np.isfinite(flat[a:a + E])):
+                    raise _err("Matrix multiplication of values that include Inf or NaN is not supported in Sagebrush: "
+                               "where Inf and NaN appear in the result depends on how the product is computed. "
+                               "Multiply finite values, or write the sums out with .* and sum.")
+            if self.sparse:
+                self.cols = _sp._cols(v)
+            return
+        if self.isdiag:
+            self.diag = _vec(_m._B["diag"].call(1, [v]))
+        elif self.sparse:
+            import _matlab_lu as L
+            self.F = L.factor(v, "The preconditioner's sparse LU", ledger=budget)
+        else:
+            self._dense_factor(cplx)
+
+    def _dense_factor(self, cplx):
+        """P*M = L*U in place in one n-by-n array (L's unit diagonal implied), each step's update by row blocks of at
+        most E elements; a zero pivot leaves its column as it is, and the solves then give Inf or NaN"""
+        n = self.n
+        dt = np.complex128 if cplx else np.float64
+        LU = np.array(_m._farr(self.v).T, dtype=dt)
+        perm = np.arange(n)
+        for j in range(n):
+            p = j + int(np.argmax(np.abs(LU[j:, j])))
+            if p != j:
+                row = np.array(LU[j])
+                LU[j] = LU[p]
+                LU[p] = row
+                perm[j], perm[p] = perm[p], perm[j]
+            piv = LU[j, j]
+            if piv == 0 or j == n - 1:
+                continue
+            LU[j + 1:, j] = LU[j + 1:, j] / piv
+            w = n - j - 1
+            rows = max(1, E // w)
+            for a in range(j + 1, n, rows):
+                b = min(n, a + rows)
+                LU[a:b, j + 1:] = LU[a:b, j + 1:] - np.outer(LU[a:b, j], LU[j, j + 1:])
+        self.lu, self.perm = LU, perm
+
+    # ---- the applications
 
     def _handle_call(self, x, opt, rows):
         args = [_col(x)] + ([_m.Char(opt)] if self.transp else [])
         r = _m._call(self.v, args)
         if not _m._isnumlike(r) or _istext(r) or _m._numel(r) != rows:
-            raise _err("%s: the function handle for %s must return a vector of length %d." % (self.fname, self.what, rows))
+            raise _err("%s: the function handle for %s must return a vector of length %d."
+                       % (self.fname, self.what, rows))
         return _vec(r)
 
+    def _finite_operand(self, x):
+        if not _finite(x):
+            raise _err("Matrix multiplication of values that include Inf or NaN is not supported in Sagebrush: "
+                       "where Inf and NaN appear in the result depends on how the product is computed. "
+                       "Multiply finite values, or write the sums out with .* and sum.")
+
     def times(self, x):
-        """A*x"""
+        """A*x, with mtimes's arithmetic"""
         if self.handle:
             return self._handle_call(x, "notransp", self.m)
-        return _vec(_m._B["mtimes"].call(1, [self.v, _col(x)]))
+        self._finite_operand(x)
+        v = self.v
+        if not self.sparse:
+            # (mtimes: stored transposed, (A x)' = x' A', one NumPy product)
+            return np.matmul(x.reshape((1, -1)), _m._farr(v)).reshape(-1)
+        av = v.pr
+        prod = av * x[self.cols]
+        if np.iscomplexobj(prod):
+            return _m._cplx(np.bincount(v.ir, weights=prod.real, minlength=v.m),
+                            np.bincount(v.ir, weights=prod.imag, minlength=v.m))
+        return np.bincount(v.ir, weights=prod, minlength=v.m)
 
-    def ctimes(self, x):
-        """A'*x, as (x'*A)' so that A is never transposed into a copy"""
+    def ctimes(self, u):
+        """A'*u, as (u'*A)' with mtimes's arithmetic, so that A is never transposed into a copy"""
         if self.handle:
-            return self._handle_call(x, "transp", self.n)
-        row = _m._B["mtimes"].call(1, [_m._B["ctranspose"].call(1, [_col(x)]), self.v])
-        return np.conj(_vec(row))
+            return self._handle_call(u, "transp", self.n)
+        self._finite_operand(u)
+        v = self.v
+        uc = np.conj(u)
+        if not self.sparse:
+            return np.conj(np.matmul(_m._farr(v), uc.reshape((-1, 1))).reshape(-1))
+        prod = uc[v.ir] * v.pr
+        if np.iscomplexobj(prod):
+            r = _m._cplx(np.bincount(self.cols, weights=prod.real, minlength=v.n),
+                         np.bincount(self.cols, weights=prod.imag, minlength=v.n))
+        else:
+            r = np.bincount(self.cols, weights=prod, minlength=v.n)
+        return np.conj(r)
 
-    def solve(self, x):
-        """M\\x, or None when it isn't finite (an ill-conditioned preconditioner)"""
+    def solve(self, x, trans=False):
+        """M\\x (M'\\x with trans), or None when it isn't finite (an ill-conditioned preconditioner)"""
         if self.handle:
-            y = self._handle_call(x, "notransp", self.n)
+            y = self._handle_call(x, "transp" if trans else "notransp", self.n)
         elif self.isdiag:
             with np.errstate(divide="ignore", invalid="ignore"):
-                y = x / self._diagonal()
+                y = x / (np.conj(self.diag) if trans else self.diag)
+        elif self.F is not None:
+            with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+                y = np.asarray(self.F.solve(x.reshape((-1, 1)), trans=trans)).reshape(-1)
         else:
-            y = _vec(_m._B["mldivide"].call(1, [self.v, _col(x)]))
+            y = self._dense_solve(x, trans)
         return y if _finite(y) else None
 
     def csolve(self, x):
         """M'\\x"""
-        if self.handle:
-            y = self._handle_call(x, "transp", self.n)
-        elif self.isdiag:
-            with np.errstate(divide="ignore", invalid="ignore"):
-                y = x / np.conj(self._diagonal())
-        else:
-            y = _vec(_m._B["mldivide"].call(1, [_m._B["ctranspose"].call(1, [self.v]), _col(x)]))
-        return y if _finite(y) else None
+        return self.solve(x, trans=True)
+
+    def _dense_solve(self, x, trans):
+        """M\\x from P*M = L*U: x permuted, then L and U solved; M'\\x: U' and L' solved, then permuted back"""
+        LU, perm, n = self.lu, self.perm, self.n
+        dt = np.result_type(LU.dtype, x.dtype)
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            if not trans:
+                y = np.array(x[perm], dtype=dt)
+                for i in range(1, n):
+                    y[i] = y[i] - np.dot(LU[i, :i], y[:i])
+                for i in range(n - 1, -1, -1):
+                    y[i] = (y[i] - np.dot(LU[i, i + 1:], y[i + 1:])) / LU[i, i]
+                return y
+            w = np.array(x, dtype=dt)
+            for i in range(n):
+                w[i] = (w[i] - np.dot(np.conj(LU[:i, i]), w[:i])) / np.conj(LU[i, i])
+            for i in range(n - 2, -1, -1):
+                w[i] = w[i] - np.dot(np.conj(LU[i + 1:, i]), w[i + 1:])
+            y = np.zeros(n, dtype=dt)
+            y[perm] = w
+            return y
 
 
 class _Precond:
@@ -183,10 +319,15 @@ def _scalar_arg(v, fname, what, default, integer=False):
     return s
 
 
+def _its(n, maxit):
+    """the iterations a short-recurrence solver may run: maxit, or the pages' default, min(n, 20)"""
+    return min(n, 20) if maxit is None else maxit
+
+
 def _setup(fname, nargout, args, vectors, restart=False, square=True, nout=5):
     """the problem from a solver's arguments: (A, b, [restart,] tol, maxit, M1, M2, x0), as its page lists them; its
-    work, vectors(n, restart, maxit) -> (vectors of the problem's length, other elements), admitted before any vector
-    is made"""
+    work, vectors(n, restart, maxit) -> (vectors of the problem's length, other elements, (history entries at most,
+    histories)), admitted before any vector is made (_Budget)"""
     names = ["A", "b"] + (["restart"] if restart else []) + ["tol", "maxit", "M1", "M2", "x0"]
     if len(args) < 2:
         raise _err("Not enough input arguments.", "MATLAB:minrhs")
@@ -210,6 +351,7 @@ def _setup(fname, nargout, args, vectors, restart=False, square=True, nout=5):
             if _istext(probe) or not _m._isnumlike(probe):
                 raise _err("%s: the function handle for A must return a numeric vector." % fname)
             n = _m._numel(probe)
+            probe = None
     else:
         _matrix_arg(A, fname, "A")
         m, n = _m._dims(A)[0], _m._dims(A)[1]
@@ -241,21 +383,92 @@ def _setup(fname, nargout, args, vectors, restart=False, square=True, nout=5):
         if xd[1] != 1 or xd[0] != n:
             raise _err("Initial guess must be a column vector of length %d to match the problem size." % n,
                        "MATLAB:%s:WrongInitGuessSize" % fname)
+    # (complex arithmetic, charged at 16 bytes an element, wherever any operand may make it complex: a complex b, x0,
+    # A, M1 or M2, or a function handle, whose results' class isn't known until it is called)
     isreal = _m._B["isreal"]
-    cplx = not isreal.call(1, [b]) or (not _empty(x0) and not isreal.call(1, [x0]))
-    if not _m._iscallable(A):
-        cplx = cplx or not isreal.call(1, [A])
-    count, extra = vectors(max(m, n), r, maxit)
-    _admit(fname, max(m, n), count, cplx, extra)
-    bv = _vec(b)
-    x0v = np.zeros(n, dtype=np.complex128 if cplx else np.float64) if _empty(x0) else _vec(x0)
-    return op, bv, tol, maxit, r, _Precond(pre), x0v, m, n, cplx
-
-
-def _admit(fname, n, vectors, cplx, extra=0):
-    """the solver's vectors of length n (and extra elements) admitted before any is made"""
+    operands = [b] + ([] if _empty(x0) else [x0]) + [A] + [a.get(k) for k in ("M1", "M2") if not _empty(a.get(k))]
+    # (the arrays' class is the data's: complex only when a given value is; a handle's complex results promote them as
+    # they come)
+    data_cplx = any(not _m._iscallable(v) and not isreal.call(1, [v]) for v in operands)
+    cplx = data_cplx or any(_m._iscallable(v) for v in operands)
+    count, extra, history = vectors(max(m, n), r, maxit)
+    N = max(m, n)
     per = _VECTOR_BYTES * (2 if cplx else 1)
-    _m._admit_bytes(per * (n * vectors + extra), "%s of a system of %d unknowns" % (fname, n))
+    ops = [op] + pre
+    lists = history[1]
+    budget = _Budget("%s of a system of %d unknowns" % (fname, N))
+    # (before any vector: the Krylov vectors and the extra elements, with their arrays' headers; each history's list,
+    # array and copy; what each operator keeps; the largest one application makes and drops; and the first history
+    # entries)
+    first = min(_HISTORY_STEP, history[0])
+    budget.reserve(per * (N * count + extra) + C_HDR * (count + 2 * lists) + C_LIST * lists
+                   + sum(o.retained(per) for o in ops) + max(o.step(per) for o in ops) + _HISTORY_ENTRY * first)
+    budget.reserved = first
+    for o in ops:
+        o.prepare(budget, data_cplx)
+    bv = _vec(b)
+    x0v = np.zeros(n, dtype=np.complex128 if data_cplx else np.float64) if _empty(x0) else _vec(x0)
+    return op, bv, tol, maxit, r, _Precond(pre), x0v, m, n, cplx, budget
+
+
+class _Budget:
+    """the solver's memory, one ledger for the whole solve: reserve before each growth, release after, every
+    reservation admitted as the total owned (so a preconditioner's factorization and each of its solves, which reserve
+    here, count on top of the Krylov vectors and histories the solver holds).  Admission is _admit_bytes's: nothing
+    checked under its small-need floor, the fixed bound where memory can't be measured.  Residual histories, whose
+    length depends on the iterations run rather than on n, are reserved _HISTORY_STEP entries at a time (take)"""
+
+    def __init__(self, what):
+        self.what = what
+        self.owned = 0
+        self.reserved = self.used = 0
+
+    def reserve(self, nbytes, tag=None, parts=None):
+        need = self.owned + max(0, int(nbytes))
+        _m._admit_bytes(need, self.what)
+        self.owned = need
+
+    def release(self, nbytes):
+        self.owned = max(0, self.owned - max(0, int(nbytes)))
+
+    def take(self):
+        """room for one more history entry, admitted before it is made"""
+        if self.used >= self.reserved:
+            self.reserve(_HISTORY_ENTRY * _HISTORY_STEP)
+            self.reserved += _HISTORY_STEP
+        self.used += 1
+
+
+class _History(list):
+    """a residual history whose every entry is admitted (_Budget.take) before it is appended"""
+
+    def __init__(self, budget, first=()):
+        list.__init__(self)
+        self.budget = budget
+        for v in first:
+            self.append(v)
+
+    def append(self, v):
+        self.budget.take()
+        list.append(self, v)
+
+
+def _nan_rhs(fname, nargout, b, x0, tol, budget, gmres=False, lsq=False):
+    """b with a NaN: no iteration, flag 4 (a scalar quantity is NaN), x0 returned, relres NaN, resvec [NaN], in every
+    solver alike; None when b has none"""
+    if not np.any(np.isnan(b)):
+        return None
+    resvec = _History(budget, [_math.nan])
+    if nargout < 2:
+        if gmres:
+            _m._write("gmres stopped at outer iteration 0 (inner iteration 0) without converging to the desired "
+                      "tolerance %.2g\nbecause %s.\nThe iterate returned (number 0(0)) has relative residual NaN.\n"
+                      % (tol, _REASONS[4]))
+        else:
+            _report(fname, 4, _math.nan, 0, 0, tol)
+    it = _m._unmat(np.array([[0.0, 0.0]])) if gmres else 0
+    return _outputs(nargout, x0, 4, _math.nan, it, resvec,
+                    extra=[_col(np.zeros(0))] if lsq else ())
 
 
 _REASONS = {
@@ -274,7 +487,8 @@ def _it(v):
 def _report(fname, flag, relres, it_ret, it_stop, tol):
     """the message a solver prints when its flag isn't requested"""
     if flag == 0:
-        _m._write("%s converged at iteration %s to a solution with relative residual %.2g.\n" % (fname, _it(it_ret), relres))
+        _m._write("%s converged at iteration %s to a solution with relative residual %.2g.\n"
+                  % (fname, _it(it_ret), relres))
         return
     _m._write("%s stopped at iteration %s without converging to the desired tolerance %.2g\n"
               "because %s.\nThe iterate returned (number %s) has relative residual %.2g.\n"
@@ -291,7 +505,7 @@ def _outputs(nargout, x, flag, relres, it, resvec, extra=()):
 
 # ------------------------------------------------------------------ pcg
 
-def _pcg(op, b, tol, maxit, M, x0):
+def _pcg(op, b, tol, maxit, M, x0, budget):
     """preconditioned conjugate gradients: (x, flag, relres, iter, resvec, last iteration tried)"""
     n2b = _norm(b)
     if n2b == 0:
@@ -299,7 +513,7 @@ def _pcg(op, b, tol, maxit, M, x0):
     x = x0.copy()
     r = b - op.times(x)
     normr = _norm(r)
-    resvec = [normr]
+    resvec = _History(budget, [normr])
     tolb = tol * n2b
     if normr <= tolb:
         return x, 0, normr / n2b, 0, resvec, 0
@@ -356,9 +570,13 @@ def pcg_(nargout, *args):
     """[x, flag, relres, iter, resvec] = pcg(A, b, tol, maxit, M1, M2, x0): preconditioned conjugate gradients for a
     symmetric (Hermitian) positive definite A, a matrix or a function handle returning A*x; M = M1*M2 the
     preconditioner, matrices or handles returning M\\x; tol 1e-6 and maxit min(size(A,1), 20) by default"""
-    op, b, tol, maxit, _, M, x0, m, n, cplx = _setup("pcg", nargout, args, lambda n, r, k: (_SHORT, 0))
+    op, b, tol, maxit, _, M, x0, m, n, cplx, budget = _setup("pcg", nargout, args,
+                                                              lambda n, r, k: (_SHORT, 0, (_its(n, k) + 1, 1)))
     maxit = min(n, 20) if maxit is None else maxit
-    x, flag, relres, it, resvec, stop = _pcg(op, b, tol, maxit, M, x0)
+    nan = _nan_rhs("pcg", nargout, b, x0, tol, budget)
+    if nan is not None:
+        return nan
+    x, flag, relres, it, resvec, stop = _pcg(op, b, tol, maxit, M, x0, budget)
     if nargout < 2:
         _report("pcg", flag, relres, it, stop, tol)
     return _outputs(nargout, x, flag, relres, it, resvec)
@@ -366,7 +584,7 @@ def pcg_(nargout, *args):
 
 # ------------------------------------------------------------------ minres
 
-def _minres(op, b, tol, maxit, M, x0):
+def _minres(op, b, tol, maxit, M, x0, budget):
     """MINRES (Paige and Saunders): the Lanczos process on A, preconditioned by a symmetric positive definite M, and
     the residual's norm kept by plane rotations"""
     n2b = _norm(b)
@@ -375,7 +593,7 @@ def _minres(op, b, tol, maxit, M, x0):
     x = x0.copy()
     r1 = b - op.times(x)
     normr = _norm(r1)
-    resvec = [normr]
+    resvec = _History(budget, [normr])
     tolb = tol * n2b
     if normr <= tolb:
         return x, 0, normr / n2b, 0, resvec, 0
@@ -455,9 +673,13 @@ def minres_(nargout, *args):
     tol 1e-6 and maxit min(size(A,1), 20) by default.  The sixth output, resveccg, is not supported in Sagebrush"""
     if nargout > 5:
         raise _err("minres: the sixth output (resveccg) is not supported in Sagebrush.")
-    op, b, tol, maxit, _, M, x0, m, n, cplx = _setup("minres", nargout, args, lambda n, r, k: (_SHORT, 0))
+    op, b, tol, maxit, _, M, x0, m, n, cplx, budget = _setup("minres", nargout, args,
+                                                              lambda n, r, k: (_SHORT, 0, (_its(n, k) + 1, 1)))
     maxit = min(n, 20) if maxit is None else maxit
-    x, flag, relres, it, resvec, stop = _minres(op, b, tol, maxit, M, x0)
+    nan = _nan_rhs("minres", nargout, b, x0, tol, budget)
+    if nan is not None:
+        return nan
+    x, flag, relres, it, resvec, stop = _minres(op, b, tol, maxit, M, x0, budget)
     if nargout < 2:
         _report("minres", flag, relres, it, stop, tol)
     return _outputs(nargout, x, flag, relres, it, resvec)
@@ -465,7 +687,7 @@ def minres_(nargout, *args):
 
 # ------------------------------------------------------------------ gmres
 
-def _gmres(op, b, tol, restart, outer, M, x0, n):
+def _gmres(op, b, tol, restart, outer, M, x0, n, budget):
     """restarted GMRES (Saad and Schultz) on M\\A x = M\\b: Arnoldi with modified Gram-Schmidt, orthogonalized
     twice, and Givens rotations for the least-squares problem; (x, flag, relres, [outer inner], resvec, stop)"""
     mb = M.solve(b)
@@ -480,7 +702,7 @@ def _gmres(op, b, tol, restart, outer, M, x0, n):
     if r is None:
         return x, 2, 1.0, [0, 0], [_norm(b)], [0, 0]
     normr = _norm(r)
-    resvec = [normr]
+    resvec = _History(budget, [normr])
     if normr <= tolb:
         return x, 0, normr / n2b, [0, 0], resvec, [0, 0]
     xmin, normrmin, itmin = x.copy(), normr, [0, 0]
@@ -578,9 +800,11 @@ def _gmres_inner(n, restart, maxit):
 
 def _gmres_work(n, restart, maxit):
     """gmres's work: its Krylov basis, a vector for each inner iteration and one more, besides the short
-    recurrences' vectors; and the Hessenberg matrix's elements"""
-    inner = max(_gmres_inner(n, restart, maxit)[0], 1)
-    return inner + 1 + _SHORT, (inner + 1) * (inner + 4)
+    recurrences' vectors; the Hessenberg matrix's elements; and its history, an entry for each inner iteration of each
+    outer one"""
+    inner, outer = _gmres_inner(n, restart, maxit)
+    inner = max(inner, 1)
+    return inner + 1 + _SHORT, (inner + 1) * (inner + 4), (inner * outer + 1, 1)
 
 
 @_bi("gmres")
@@ -589,14 +813,18 @@ def gmres_(nargout, *args):
     residual method, restarted every restart inner iterations ([] or size(A,1): never), left preconditioned by
     M = M1*M2; tol 1e-6; maxit outer iterations, min(ceil(size(A,1)/restart), 10) by default, or min(size(A,1), 10)
     iterations without restarts; iter is [outer inner], and relres and resvec are of the preconditioned residual"""
-    op, b, tol, maxit, restart, M, x0, m, n, cplx = _setup("gmres", nargout, args, _gmres_work, restart=True)
+    op, b, tol, maxit, restart, M, x0, m, n, cplx, budget = _setup("gmres", nargout, args, _gmres_work, restart=True)
     if restart is not None and restart > n:
         _m.warning_("Number of inner iterations before restart is %d but should be bounded by size(A,1). "
-                    "Setting the number of inner iterations to %d." % (restart, n), "MATLAB:gmres:tooManyInnerItsRestart")
+                    "Setting the number of inner iterations to %d." % (restart, n),
+                    "MATLAB:gmres:tooManyInnerItsRestart")
         restart = n
     inner, outer = _gmres_inner(n, restart, maxit)
     # (maxit 0 without restarts: no iteration at all)
-    x, flag, relres, it, resvec, stop = _gmres(op, b, tol, max(inner, 1), outer if inner else 0, M, x0, n)
+    nan = _nan_rhs("gmres", nargout, b, x0, tol, budget, gmres=True)
+    if nan is not None:
+        return nan
+    x, flag, relres, it, resvec, stop = _gmres(op, b, tol, max(inner, 1), outer if inner else 0, M, x0, n, budget)
     if nargout < 2:
         if flag == 0:
             _m._write("gmres converged at outer iteration %d (inner iteration %d) to a solution with relative "
@@ -610,7 +838,7 @@ def gmres_(nargout, *args):
 
 # ------------------------------------------------------------------ bicgstab
 
-def _bicgstab(op, b, tol, maxit, M, x0):
+def _bicgstab(op, b, tol, maxit, M, x0, budget):
     """BiCGSTAB (van der Vorst), right preconditioned: two half iterations a step, each with its residual"""
     n2b = _norm(b)
     if n2b == 0:
@@ -618,7 +846,7 @@ def _bicgstab(op, b, tol, maxit, M, x0):
     x = x0.copy()
     r = b - op.times(x)
     normr = _norm(r)
-    resvec = [normr]
+    resvec = _History(budget, [normr])
     tolb = tol * n2b
     if normr <= tolb:
         return x, 0, normr / n2b, 0, resvec, 0
@@ -706,9 +934,13 @@ def bicgstab_(nargout, *args):
     """[x, flag, relres, iter, resvec] = bicgstab(A, b, tol, maxit, M1, M2, x0): the biconjugate gradients
     stabilized method, right preconditioned by M = M1*M2; tol 1e-6 and maxit min(size(A,1), 20) by default; iter
     and resvec count half iterations"""
-    op, b, tol, maxit, _, M, x0, m, n, cplx = _setup("bicgstab", nargout, args, lambda n, r, k: (_SHORT, 0))
+    op, b, tol, maxit, _, M, x0, m, n, cplx, budget = _setup("bicgstab", nargout, args,
+                                                              lambda n, r, k: (_SHORT, 0, (2 * _its(n, k) + 1, 1)))
     maxit = min(n, 20) if maxit is None else maxit
-    x, flag, relres, it, resvec, stop = _bicgstab(op, b, tol, maxit, M, x0)
+    nan = _nan_rhs("bicgstab", nargout, b, x0, tol, budget)
+    if nan is not None:
+        return nan
+    x, flag, relres, it, resvec, stop = _bicgstab(op, b, tol, maxit, M, x0, budget)
     if nargout < 2:
         _report("bicgstab", flag, relres, it, stop, tol)
     return _outputs(nargout, x, flag, relres, it, resvec)
@@ -716,7 +948,7 @@ def bicgstab_(nargout, *args):
 
 # ------------------------------------------------------------------ lsqr
 
-def _lsqr(op, b, tol, maxit, M, x0):
+def _lsqr(op, b, tol, maxit, M, x0, budget):
     """LSQR (Paige and Saunders): Golub-Kahan bidiagonalization of A*inv(M), right preconditioned; converged when
     norm(b - A*x)/norm(b) or the scaled normal-equations residual meets tol"""
     n2b = _norm(b)
@@ -725,7 +957,7 @@ def _lsqr(op, b, tol, maxit, M, x0):
     x = x0.copy()
     u = b - op.times(x)
     beta = _norm(u)
-    resvec, lsvec = [beta], []
+    resvec, lsvec = _History(budget, [beta]), _History(budget)
     tolb = tol * n2b
     if beta <= tolb:
         return x, 0, beta / n2b, 0, resvec, lsvec, 0
@@ -784,10 +1016,13 @@ def _lsqr(op, b, tol, maxit, M, x0):
         ls = normar / _math.sqrt(anorm2) if anorm2 > 0 else 0.0
         resvec.append(normr)
         lsvec.append(ls)
-        if normr <= tolb or ls <= tol or stag >= _STAG_STEPS:
+        # (converged by the relative residual, or by the scaled normal-equations residual relative to the residual,
+        # Paige and Saunders's test, which no scaling of b changes; lsvec reports it unscaled by the residual, as
+        # MATLAB's page defines lsvec)
+        if normr <= tolb or ls <= tol * normr or stag >= _STAG_STEPS:
             true = _norm(b - op.times(x))
             resvec[ii] = true
-            if true <= tolb or ls <= tol:
+            if true <= tolb or ls <= tol * normr:
                 return x, 0, true / n2b, ii, resvec, lsvec, ii
             normr = true
         if normr < normrmin:
@@ -804,10 +1039,14 @@ def lsqr_(nargout, *args):
     m-by-n A, a matrix or a function handle afun(x, 'notransp') = A*x, afun(x, 'transp') = A'*x; right
     preconditioned by an n-by-n M = M1*M2; tol 1e-6 and maxit min(size(A,1), 20) by default (the page's); lsvec the
     estimates of norm((A*inv(M))'*(b - A*x))/norm(A*inv(M), 'fro'), one each iteration"""
-    op, b, tol, maxit, _, M, x0, m, n, cplx = _setup("lsqr", nargout, args, lambda n, r, k: (_SHORT, 0), square=False,
-                                                      nout=6)
+    op, b, tol, maxit, _, M, x0, m, n, cplx, budget = _setup("lsqr", nargout, args,
+                                                              lambda n, r, k: (_SHORT, 0, (2 * _its(n, k) + 2, 2)),
+                                                              square=False, nout=6)
     maxit = min(m, 20) if maxit is None else maxit
-    x, flag, relres, it, resvec, lsvec, stop = _lsqr(op, b, tol, maxit, M, x0)
+    nan = _nan_rhs("lsqr", nargout, b, x0, tol, budget, lsq=True)
+    if nan is not None:
+        return nan
+    x, flag, relres, it, resvec, lsvec, stop = _lsqr(op, b, tol, maxit, M, x0, budget)
     if nargout < 2:
         _report("lsqr", flag, relres, it, stop, tol)
     return _outputs(nargout, x, flag, relres, it, resvec, extra=[_col(np.array(lsvec, dtype=np.float64))])

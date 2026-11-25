@@ -81,9 +81,142 @@ for name, f, low, high in (("restart 200", call("gmres", T, b, 200.0), 100 * MB,
     assert attempt(f) == "reached", name
 ok("gmres's Krylov basis charged by its restart, or by maxit without one (low host: nomem; ample: reached)")
 
-# (complex data: 16 bytes an element, about 49 MB for pcg's vectors, refused under 30 MB where real data's 24 MB is
-# reached)
-stand_in(30 * MB)
+# (complex data: 16 bytes an element where real data's are 8: a host with room for the real solve exactly refuses the
+# complex one)
+real_admit0 = M._admit_bytes
+seen = []
+M._admit_bytes = lambda need, what="": seen.append(need)
+try:
+    attempt(call("pcg", T, b))
+    nr = seen[0]
+    del seen[:]
+    attempt(call("pcg", T, bc))
+    nc = seen[0]
+finally:
+    M._admit_bytes = real_admit0
+assert nc > 1.5 * nr, (nr, nc)
+stand_in(nr)
 assert attempt(call("pcg", T, bc)) == "MATLAB:nomem"
 assert attempt(call("pcg", T, b)) == "reached"
-ok("complex data charged at twice the bytes (30 MB host: complex nomem, real reached)")
+ok("complex data charged at twice the bytes (a host of the real need: complex nomem, real reached)")
+
+# (complex arithmetic that only a preconditioner brings: gmres and pcg with A = I, b real and M1 = (1+i)I, charged as
+# complex, about twice the real need; the need recorded, then a host of exactly that need reaches the first vector and
+# one byte less refuses it)
+needs = []
+real_admit = M._admit_bytes
+
+
+def record(f):
+    """the needs f's admission asks for, the check itself bypassed, the solver stopped at its first vector"""
+    del needs[:]
+    M._admit_bytes = lambda need, what="": needs.append(need)
+    try:
+        attempt(f)
+    finally:
+        M._admit_bytes = real_admit
+    return list(needs)
+
+
+m = 20000
+I = B["speye"].call(1, [float(m)])
+Ic = B["times"].call(1, [1 + 1j, I])
+ones = col(np.ones(m))
+for name, f_real, f_cplx in (
+        ("gmres", call("gmres", I, ones, 150.0, 1e-6, 1.0, I), call("gmres", I, ones, 150.0, 1e-6, 1.0, Ic)),
+        ("pcg", call("pcg", I, ones, 1e-6, 10.0, I), call("pcg", I, ones, 1e-6, 10.0, Ic))):
+    nr, nc = record(f_real)[0], record(f_cplx)[0]
+    assert nc > 1.8 * nr, (name, nr, nc)
+    stand_in(nc)
+    assert attempt(f_cplx) == "reached", name
+    stand_in(nc - 1)
+    assert attempt(f_cplx) == "MATLAB:nomem", name
+ok("a complex preconditioner charged as complex: exact need reached, one byte less refused (gmres, pcg)")
+
+# (a residual history's growth admitted before each step: with 2048 entries' room beyond what the solve owns, the
+# 2048th entry fits and the 2049th is refused, however many iterations maxit allows)
+stand_in(1 << 40)
+bud = K._Budget("a test solve")
+bud.reserve(8 << 20)
+room = bud.owned + K._HISTORY_ENTRY * 2048
+stand_in(room)
+h = K._History(bud)
+for i in range(2048):
+    h.append(float(i))
+try:
+    h.append(0.0)
+    assert False, "the 2049th entry was admitted"
+except MemoryError as e:
+    assert M._identifier(e) == "MATLAB:nomem"
+assert len(h) == 2048
+ok("a residual history admitted step by step: 2048 entries fit exactly, the 2049th is refused")
+
+stand_in(1 << 40)
+taken = [0]
+real_take = K._Budget.take
+
+
+def counting(self):
+    taken[0] += 1
+    return real_take(self)
+
+
+K._Budget.take = counting
+try:
+    small = 30
+    Es = col(np.ones(small))
+    Ds = B["horzcat"].call(1, [B["uminus"].call(1, [Es]), B["times"].call(1, [3.0, Es]),
+                               B["times"].call(1, [-2.0, Es])])
+    Ns = B["spdiags"].call(1, [Ds, M._unmat(np.array([[-1.0, 0.0, 1.0]])), float(small), float(small)])
+    bs = col(np.arange(1.0, small + 1))
+    for name, args, n_out in (("pcg", [Ns, bs, 1e-12, 200.0], 5), ("minres", [Ns, bs, 1e-12, 200.0], 5),
+                              ("bicgstab", [Ns, bs, 1e-12, 200.0], 5), ("gmres", [Ns, bs, 3.0, 1e-12, 40.0], 5),
+                              ("lsqr", [Ns, bs, 1e-12, 200.0], 6)):
+        taken[0] = 0
+        out = B[name].call(n_out, args)
+        entries = M._numel(out[4]) + (M._numel(out[5]) if n_out == 6 else 0)
+        assert taken[0] == entries and entries > 1, (name, taken[0], entries)
+finally:
+    K._Budget.take = real_take
+ok("every solver's residual histories admitted entry by entry (taken == returned, pcg minres bicgstab gmres lsqr)")
+
+# (a preconditioner's factors kept and admitted in the solve's own budget: a sparse M's LU reserves there, on top of
+# the Krylov vectors, and a full M's factors are counted before the first vector; each refused on a host with room for
+# the vectors alone)
+stand_in(1 << 40)
+nf = 800
+Ef = col(np.ones(nf))
+Df = B["horzcat"].call(1, [B["uminus"].call(1, [Ef]), B["times"].call(1, [4.0, Ef]), B["uminus"].call(1, [Ef])])
+Tf = B["spdiags"].call(1, [Df, M._unmat(np.array([[-1.0, 0.0, 1.0]])), float(nf), float(nf)])
+bf = col(np.arange(1.0, nf + 1))
+Mfull = B["full"].call(1, [Tf])
+plain = record(call("pcg", Tf, bf, 1e-6, 10.0))[0]
+full_need = record(call("pcg", Tf, bf, 1e-6, 10.0, Mfull))[0]
+# (a full M of 800: its factors alone 5.1 MB, past the small-need floor)
+assert full_need - plain >= nf * nf * 8, (plain, full_need)
+stand_in(full_need - 1)
+assert attempt(call("pcg", Tf, bf, 1e-6, 10.0, Mfull)) == "MATLAB:nomem"
+stand_in(full_need)
+assert attempt(call("pcg", Tf, bf, 1e-6, 10.0, Mfull)) == "reached"
+ok("a full preconditioner's factors counted with the Krylov vectors (one byte short: nomem; exact: reached)")
+
+# (a function handle's results may be complex: charged at 16 bytes an element, so pcg with A a handle needs at least
+# the 32 vectors at 16; and a sparse preconditioner's LU reserves in the solve's own ledger, on top of the Krylov
+# vectors, so a host with room for those alone refuses it)
+nh = 20000
+bh = col(np.arange(1.0, nh + 1))
+h_need = record(call("pcg", B["uplus"], bh, 1e-6, 10.0))[0]
+assert h_need >= 16 * K._SHORT * nh, h_need
+stand_in(h_need - 1)
+assert attempt(call("pcg", B["uplus"], bh, 1e-6, 10.0)) == "MATLAB:nomem"
+stand_in(h_need)
+assert attempt(call("pcg", B["uplus"], bh, 1e-6, 10.0)) == "reached"
+Th = B["spdiags"].call(1, [B["horzcat"].call(1, [B["uminus"].call(1, [bh]), B["times"].call(1, [4.0, col(np.ones(nh))]),
+                                                 B["uminus"].call(1, [bh])]),
+                           M._unmat(np.array([[-1.0, 0.0, 1.0]])), float(nh), float(nh)])
+Lh = B["tril"].call(1, [Th])
+first = record(call("pcg", Th, bh, 1e-6, 10.0, Lh))[0]
+stand_in(first)
+assert attempt(call("pcg", Th, bh, 1e-6, 10.0, Lh)) == "MATLAB:nomem"
+ok("a handle charged as complex (exact need reached, one byte less refused); a sparse M's LU reserved on top of the vectors")
+
