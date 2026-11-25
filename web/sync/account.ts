@@ -1300,6 +1300,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
   /** The alarm's part of the budget: give back slack beyond 2 chunks, or write a release D1 missed. */
   private async tendClaim(): Promise<void> {
+    if (testMode(this.env) && this.holdSlack) return;
     const cached = this.get("limits");
     if (!cached) return;
     const C = this.chunk((JSON.parse(cached) as Limits).storage_bytes);
@@ -2162,6 +2163,13 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   /** Tests only: make the budget's D1 writes fail, as an unreachable D1 would (§6.1). */
   async setFailClaim(a: { on: boolean }): Promise<void> {
     if (testMode(this.env)) this.failClaim = a.on;
+  }
+  private holdSlack = false;
+  /** Tests only: the alarm leaves the claim alone (no slack given back, no missed release written) while this is on, so
+   * a test can observe an unused claim for as long as it needs, however loaded the host is.  A give-back that sharing
+   * asks for (releaseClaim) still runs. */
+  async testHoldSlack(a: { on: boolean }): Promise<void> {
+    if (testMode(this.env)) this.holdSlack = a.on;
   }
   /** Tests only: the budget as this object holds it. */
   async budget(): Promise<{ claim: number; blob_cap: number; files: number; documents: number; held: number; holds: number; dirty: boolean; calls: number; writes: number; alarm: number | null } | null> {
