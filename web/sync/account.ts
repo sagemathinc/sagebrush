@@ -623,9 +623,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     };
     stale(next0, head);
     // (each new op's signature, by a device current in the chain at this head: a well-formed op that isn't is refused
-    // for the whole message; a malformed one is left to its own refusal below.  And each one's envelope hash, for its ack)
+    // for the whole message; a malformed one is left to its own refusal below.  And each one's envelope hash, for its ack,
+    // kept by its place in the message, not its dseq: two ops naming one dseq are two envelopes)
     const envHash = new Map<number, string>();
-    for (const raw of list) {
+    for (const [at, raw] of list.entries()) {
       if (!fresh(raw, next0)) continue;
       let op: SealedOp;
       try {
@@ -638,7 +639,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (!key || !(await verifyStrict(key, msg, unb64(op.sig, 64)))) {
         throw new SyncError("forbidden", "a sealed op not signed by a current device of this account's key chain", { dseq: op.dseq, signer: op.signer });
       }
-      envHash.set(op.dseq, await sha256b64(op.env));
+      envHash.set(at, await sha256b64(op.env));
     }
     // (tests only: held between the checks and the commit, as a slow verification would be)
     if (testMode(this.env) && this.sealedHold > 0) await new Promise((r) => setTimeout(r, this.sealedHold));
@@ -661,7 +662,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const out: SealedAck[] = [];
       const refusedCount = () => Number(this.one("SELECT COUNT(*) AS n FROM refused WHERE device = ?", device)!.n);
       let ended = false;
-      for (const raw of list) {
+      for (const [at, raw] of list.entries()) {
         const dseq = (raw as { dseq?: unknown })?.dseq;
         if (!isNat(dseq) || dseq < 1) throw new SyncError("invalid", "op: dseq");
         if (dseq < next) {
@@ -684,7 +685,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
             if (!h || Number(h.refs) < 1) throw new SyncError("invalid", "a release of a reference that isn't held", { sha256: a });
           }
           // (its hash was taken with its signature, before the transaction: every op that gets here was checked there)
-          const h = envHash.get(dseq);
+          const h = envHash.get(at);
           if (h === undefined) throw new SyncError("invalid", "op: not checked before its decision");
           this.sql.exec(
             "INSERT INTO ops (device, dseq, recv, size, env, head, adds, releases, chain_gen, signer, sig, env_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
