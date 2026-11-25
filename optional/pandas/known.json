@@ -357,6 +357,11 @@
       "reason": "a named comparison matches columns by label, which needs unique labels when the two frames' columns differ; pandas lines repeated labels up by position within each label, which isn't in the subset; it raises before any work (identical labels, a scalar or a list-like work)"
     },
     {
+      "case": "compare.series-repeated-labels",
+      "message": "pandas.DataFrame.eq with a Series of repeated labels is not in Sagebrush's pandas 0.x subset",
+      "reason": "a named comparison lines a Series up with the frame's columns by label, which needs the Series' labels unique; pandas lines repeated labels up by position within each label, which isn't in the subset; it raises before any work"
+    },
+    {
       "case": "compare.level",
       "message": "pandas.DataFrame.eq(level=) (a MultiIndex) is not in Sagebrush's pandas 0.x subset",
       "reason": "level= broadcasts across a MultiIndex level, which isn't in the subset; it raises before any work"

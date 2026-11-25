@@ -219,6 +219,34 @@ def _compare_times(col, right, op, f):
     if isinstance(right, Column) and right.dtype is DT:
         r = right._pd_values
         miss = (v == NAT_INT) | (r == NAT_INT)
+    elif isinstance(right, Column):
+        # (another array, as pandas infers it: numbers or bools are equal to none, with no order; strings are
+        # parsed, all of them or none; values of mixed types are compared one by one)
+        d = right.dtype
+        rv = right.tolist()
+        if d in INTS or d in FLOATS or d == "bool":
+            if op in ("eq", "ne"):
+                return Column("bool", np.full(n, op == "ne", dtype=bool))
+            raise TypeError("Invalid comparison between dtype=datetime64[us] and ndarray")
+        if all(is_missing(x) for x in rv):
+            return Column("bool", np.full(n, op == "ne", dtype=bool))
+        if d is STR:
+            try:
+                r = np.array([NAT_INT if is_missing(x) else as_us(Timestamp(x)) for x in rv], dtype=np.int64)
+            except ValueError:
+                if op in ("eq", "ne"):
+                    return Column("bool", np.full(n, op == "ne", dtype=bool))
+                raise TypeError("Invalid comparison between dtype=datetime64[us] and StringArray") from None
+            miss = (v == NAT_INT) | (r == NAT_INT)
+        else:
+            left = col.tolist()
+            out = []
+            for a, b in zip(left, rv):
+                if is_missing(a) or is_missing(b):
+                    out.append(op == "ne")
+                else:
+                    out.append(bool(f(a, b)))
+            return Column("bool", np.array(out, dtype=bool))
     else:
         r = None
         if is_missing(right):

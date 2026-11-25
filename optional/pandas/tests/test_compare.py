@@ -166,3 +166,29 @@ t("dt-named-aligned", lambda: dts.lt(pd.to_datetime(pd.Series(["2022-01-01"], in
 t("num-eq-timestamp", lambda: si == pd.Timestamp("2020-01-01"))
 case("num-gt-timestamp", lambda: si > pd.Timestamp("2020-01-01"))
 t("str-eq-timestamp", lambda: pd.Series(["a"]) == pd.Timestamp("2020-01-01"))
+
+# a datetime column against another array, as pandas infers it: strings parsed (all of them, or none), datetimes,
+# numbers and bools (equal to none, no order), all-missing, mixed values compared one by one
+for name, right in [("str-list", ["2020-01-01", None, "2021-01-01"]), ("str-series", pd.Series(["2020-01-01", None, "2021-01-01"])),
+                    ("str-iso", ["2020-01-01T00:00:00", None, "2021-01-01 00:00"]), ("bad-str-list", ["2020-01-01", None, "abc"]),
+                    ("num-list", [1, 2, 3]), ("num-series", pd.Series([1, 2, 3])), ("float-list", [1.5, 2.0, 3.0]),
+                    ("bool-list", [True, False, True]), ("none-list", [None, None, None]),
+                    ("datetime-list", [datetime.datetime(2020, 1, 1), None, datetime.datetime(2022, 1, 1)]),
+                    ("nat-list", [pd.NaT, pd.NaT, pd.NaT]), ("nat-str-list", [pd.NaT, "2020-01-01", "2021-01-01"]),
+                    ("mixed-list", [pd.Timestamp("2020-01-01"), None, 3]), ("mixed-str-list", ["2020-01-01", pd.NaT, pd.Timestamp("2021-01-01")])]:
+    for n, op in ops:
+        case("dt-%s-%s" % (name, n), lambda op=op, right=right: op(dts, right).tolist())
+        case("dt-%s-named-%s" % (name, n), lambda n=n, right=right: getattr(dts, n)(right).tolist())
+
+# a range: one value broadcasts; a Series of one value against a longer or empty range is pandas' length error
+for n in [0, 1, 2, 3]:
+    for m in [0, 1, 2, 3]:
+        for name, op in ops:
+            case("range-%d-%d-%s" % (n, m, name), lambda n=n, m=m, op=op: warned(lambda: op(pd.Series(list(range(n)), dtype="int64"), range(m)))[0].tolist())
+            case("range-%d-%d-named-%s" % (n, m, name), lambda n=n, m=m, name=name: warned(lambda: getattr(pd.Series(list(range(n)), dtype="int64"), name)(range(m)))[0].tolist())
+case("range-named-broadcast", lambda: warned(lambda: si.eq(range(1)))[0].tolist())
+# (a one-value list doesn't broadcast as a one-value range does: pandas' length error, operators and named)
+for name, op in ops:
+    case("list-one-%s" % name, lambda op=op: op(pd.Series([0, 1], dtype="int64"), [0]))
+    case("list-one-named-%s" % name, lambda name=name: getattr(pd.Series([0, 1], dtype="int64"), name)([0]))
+    case("ndarray-one-%s" % name, lambda op=op: op(pd.Series([0, 1], dtype="int64"), np.array([0])))

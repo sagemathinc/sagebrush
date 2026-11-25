@@ -293,7 +293,15 @@ class Series(object):
                 raise ValueError("Can only compare identically-labeled Series objects")
             right = other._pd_col
         elif isinstance(other, range):
-            right = _compare_values(list(other), len(self), True)
+            # (a range is an array to numpy: one value broadcasts; a Series of one value against a longer range is
+            # pandas' length error)
+            values = list(other)
+            n = len(self)
+            if len(values) == 1 and n != 1:
+                values = values * n
+            elif n == 1 and len(values) != 1:
+                raise ValueError("Length of values (%d) does not match length of index (1)" % len(values))
+            right = _compare_values(values, n, True)
         elif isinstance(other, (list, tuple, np.ndarray, Index)):
             right = _compare_values(other, len(self), False)
         elif _is_scalar(other):

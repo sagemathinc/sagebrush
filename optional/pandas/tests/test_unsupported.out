@@ -320,6 +320,8 @@
 !! NotImplementedError: pandas.Series.__neg__ of an object column is not in Sagebrush's pandas 0.x subset
 == compare.repeated-columns
 !! NotImplementedError: pandas.DataFrame.eq of a frame with repeated column labels is not in Sagebrush's pandas 0.x subset
+== compare.series-repeated-labels
+!! NotImplementedError: pandas.DataFrame.eq with a Series of repeated labels is not in Sagebrush's pandas 0.x subset
 == compare.level
 !! NotImplementedError: pandas.DataFrame.eq(level=) (a MultiIndex) is not in Sagebrush's pandas 0.x subset
 == compare.series-level

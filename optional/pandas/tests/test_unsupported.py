@@ -178,6 +178,7 @@ case("arith.object-neg", lambda: -pd.Series([1, None], dtype=object))
 # the frame arithmetic whose added all-missing columns take pandas' block-dependent dtype, and comparisons outside
 # the subset
 case("compare.repeated-columns", lambda: pd.DataFrame([[1, 2]], columns=["a", "a"]).eq(pd.DataFrame([[1]], columns=["a"])))
+case("compare.series-repeated-labels", lambda: df.eq(pd.Series([1, 2], index=["a", "a"])))
 case("compare.level", lambda: df.eq(1, level=0))
 case("compare.series-level", lambda: s.eq(1, level=0))
 case("compare.3d", lambda: df == np.ones((2, 1, 1)))

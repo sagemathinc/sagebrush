@@ -1056,3 +1056,761 @@ dtype: bool
 dtype: bool
 == str-eq-timestamp.dtypes
 'bool'
+== dt-str-list-eq
+[True, False, True]
+== dt-str-list-named-eq
+[True, False, True]
+== dt-str-list-ne
+[False, True, False]
+== dt-str-list-named-ne
+[False, True, False]
+== dt-str-list-lt
+[False, False, False]
+== dt-str-list-named-lt
+[False, False, False]
+== dt-str-list-le
+[True, False, True]
+== dt-str-list-named-le
+[True, False, True]
+== dt-str-list-gt
+[False, False, False]
+== dt-str-list-named-gt
+[False, False, False]
+== dt-str-list-ge
+[True, False, True]
+== dt-str-list-named-ge
+[True, False, True]
+== dt-str-series-eq
+[True, False, True]
+== dt-str-series-named-eq
+[True, False, True]
+== dt-str-series-ne
+[False, True, False]
+== dt-str-series-named-ne
+[False, True, False]
+== dt-str-series-lt
+[False, False, False]
+== dt-str-series-named-lt
+[False, False, False]
+== dt-str-series-le
+[True, False, True]
+== dt-str-series-named-le
+[True, False, True]
+== dt-str-series-gt
+[False, False, False]
+== dt-str-series-named-gt
+[False, False, False]
+== dt-str-series-ge
+[True, False, True]
+== dt-str-series-named-ge
+[True, False, True]
+== dt-str-iso-eq
+[True, False, True]
+== dt-str-iso-named-eq
+[True, False, True]
+== dt-str-iso-ne
+[False, True, False]
+== dt-str-iso-named-ne
+[False, True, False]
+== dt-str-iso-lt
+[False, False, False]
+== dt-str-iso-named-lt
+[False, False, False]
+== dt-str-iso-le
+[True, False, True]
+== dt-str-iso-named-le
+[True, False, True]
+== dt-str-iso-gt
+[False, False, False]
+== dt-str-iso-named-gt
+[False, False, False]
+== dt-str-iso-ge
+[True, False, True]
+== dt-str-iso-named-ge
+[True, False, True]
+== dt-bad-str-list-eq
+[False, False, False]
+== dt-bad-str-list-named-eq
+[False, False, False]
+== dt-bad-str-list-ne
+[True, True, True]
+== dt-bad-str-list-named-ne
+[True, True, True]
+== dt-bad-str-list-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and StringArray
+== dt-bad-str-list-named-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and StringArray
+== dt-bad-str-list-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and StringArray
+== dt-bad-str-list-named-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and StringArray
+== dt-bad-str-list-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and StringArray
+== dt-bad-str-list-named-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and StringArray
+== dt-bad-str-list-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and StringArray
+== dt-bad-str-list-named-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and StringArray
+== dt-num-list-eq
+[False, False, False]
+== dt-num-list-named-eq
+[False, False, False]
+== dt-num-list-ne
+[True, True, True]
+== dt-num-list-named-ne
+[True, True, True]
+== dt-num-list-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-num-list-named-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-num-list-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-num-list-named-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-num-list-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-num-list-named-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-num-list-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-num-list-named-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-num-series-eq
+[False, False, False]
+== dt-num-series-named-eq
+[False, False, False]
+== dt-num-series-ne
+[True, True, True]
+== dt-num-series-named-ne
+[True, True, True]
+== dt-num-series-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-num-series-named-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-num-series-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-num-series-named-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-num-series-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-num-series-named-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-num-series-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-num-series-named-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-float-list-eq
+[False, False, False]
+== dt-float-list-named-eq
+[False, False, False]
+== dt-float-list-ne
+[True, True, True]
+== dt-float-list-named-ne
+[True, True, True]
+== dt-float-list-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-float-list-named-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-float-list-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-float-list-named-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-float-list-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-float-list-named-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-float-list-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-float-list-named-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-bool-list-eq
+[False, False, False]
+== dt-bool-list-named-eq
+[False, False, False]
+== dt-bool-list-ne
+[True, True, True]
+== dt-bool-list-named-ne
+[True, True, True]
+== dt-bool-list-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-bool-list-named-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-bool-list-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-bool-list-named-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-bool-list-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-bool-list-named-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-bool-list-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-bool-list-named-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== dt-none-list-eq
+[False, False, False]
+== dt-none-list-named-eq
+[False, False, False]
+== dt-none-list-ne
+[True, True, True]
+== dt-none-list-named-ne
+[True, True, True]
+== dt-none-list-lt
+[False, False, False]
+== dt-none-list-named-lt
+[False, False, False]
+== dt-none-list-le
+[False, False, False]
+== dt-none-list-named-le
+[False, False, False]
+== dt-none-list-gt
+[False, False, False]
+== dt-none-list-named-gt
+[False, False, False]
+== dt-none-list-ge
+[False, False, False]
+== dt-none-list-named-ge
+[False, False, False]
+== dt-datetime-list-eq
+[True, False, False]
+== dt-datetime-list-named-eq
+[True, False, False]
+== dt-datetime-list-ne
+[False, True, True]
+== dt-datetime-list-named-ne
+[False, True, True]
+== dt-datetime-list-lt
+[False, False, True]
+== dt-datetime-list-named-lt
+[False, False, True]
+== dt-datetime-list-le
+[True, False, True]
+== dt-datetime-list-named-le
+[True, False, True]
+== dt-datetime-list-gt
+[False, False, False]
+== dt-datetime-list-named-gt
+[False, False, False]
+== dt-datetime-list-ge
+[True, False, False]
+== dt-datetime-list-named-ge
+[True, False, False]
+== dt-nat-list-eq
+[False, False, False]
+== dt-nat-list-named-eq
+[False, False, False]
+== dt-nat-list-ne
+[True, True, True]
+== dt-nat-list-named-ne
+[True, True, True]
+== dt-nat-list-lt
+[False, False, False]
+== dt-nat-list-named-lt
+[False, False, False]
+== dt-nat-list-le
+[False, False, False]
+== dt-nat-list-named-le
+[False, False, False]
+== dt-nat-list-gt
+[False, False, False]
+== dt-nat-list-named-gt
+[False, False, False]
+== dt-nat-list-ge
+[False, False, False]
+== dt-nat-list-named-ge
+[False, False, False]
+== dt-nat-str-list-eq
+[False, False, False]
+== dt-nat-str-list-named-eq
+[False, False, False]
+== dt-nat-str-list-ne
+[True, True, True]
+== dt-nat-str-list-named-ne
+[True, True, True]
+== dt-nat-str-list-lt
+!! TypeError: '<' not supported between instances of 'Timestamp' and 'str'
+== dt-nat-str-list-named-lt
+!! TypeError: '<' not supported between instances of 'Timestamp' and 'str'
+== dt-nat-str-list-le
+!! TypeError: '<=' not supported between instances of 'Timestamp' and 'str'
+== dt-nat-str-list-named-le
+!! TypeError: '<=' not supported between instances of 'Timestamp' and 'str'
+== dt-nat-str-list-gt
+!! TypeError: '>' not supported between instances of 'Timestamp' and 'str'
+== dt-nat-str-list-named-gt
+!! TypeError: '>' not supported between instances of 'Timestamp' and 'str'
+== dt-nat-str-list-ge
+!! TypeError: '>=' not supported between instances of 'Timestamp' and 'str'
+== dt-nat-str-list-named-ge
+!! TypeError: '>=' not supported between instances of 'Timestamp' and 'str'
+== dt-mixed-list-eq
+[True, False, False]
+== dt-mixed-list-named-eq
+[True, False, False]
+== dt-mixed-list-ne
+[False, True, True]
+== dt-mixed-list-named-ne
+[False, True, True]
+== dt-mixed-list-lt
+!! TypeError: '<' not supported between instances of 'Timestamp' and 'int'
+== dt-mixed-list-named-lt
+!! TypeError: '<' not supported between instances of 'Timestamp' and 'int'
+== dt-mixed-list-le
+!! TypeError: '<=' not supported between instances of 'Timestamp' and 'int'
+== dt-mixed-list-named-le
+!! TypeError: '<=' not supported between instances of 'Timestamp' and 'int'
+== dt-mixed-list-gt
+!! TypeError: '>' not supported between instances of 'Timestamp' and 'int'
+== dt-mixed-list-named-gt
+!! TypeError: '>' not supported between instances of 'Timestamp' and 'int'
+== dt-mixed-list-ge
+!! TypeError: '>=' not supported between instances of 'Timestamp' and 'int'
+== dt-mixed-list-named-ge
+!! TypeError: '>=' not supported between instances of 'Timestamp' and 'int'
+== dt-mixed-str-list-eq
+[False, False, True]
+== dt-mixed-str-list-named-eq
+[False, False, True]
+== dt-mixed-str-list-ne
+[True, True, False]
+== dt-mixed-str-list-named-ne
+[True, True, False]
+== dt-mixed-str-list-lt
+!! TypeError: '<' not supported between instances of 'Timestamp' and 'str'
+== dt-mixed-str-list-named-lt
+!! TypeError: '<' not supported between instances of 'Timestamp' and 'str'
+== dt-mixed-str-list-le
+!! TypeError: '<=' not supported between instances of 'Timestamp' and 'str'
+== dt-mixed-str-list-named-le
+!! TypeError: '<=' not supported between instances of 'Timestamp' and 'str'
+== dt-mixed-str-list-gt
+!! TypeError: '>' not supported between instances of 'Timestamp' and 'str'
+== dt-mixed-str-list-named-gt
+!! TypeError: '>' not supported between instances of 'Timestamp' and 'str'
+== dt-mixed-str-list-ge
+!! TypeError: '>=' not supported between instances of 'Timestamp' and 'str'
+== dt-mixed-str-list-named-ge
+!! TypeError: '>=' not supported between instances of 'Timestamp' and 'str'
+== range-0-0-eq
+[]
+== range-0-0-named-eq
+[]
+== range-0-0-ne
+[]
+== range-0-0-named-ne
+[]
+== range-0-0-lt
+[]
+== range-0-0-named-lt
+[]
+== range-0-0-le
+[]
+== range-0-0-named-le
+[]
+== range-0-0-gt
+[]
+== range-0-0-named-gt
+[]
+== range-0-0-ge
+[]
+== range-0-0-named-ge
+[]
+== range-0-1-eq
+[]
+== range-0-1-named-eq
+[]
+== range-0-1-ne
+[]
+== range-0-1-named-ne
+[]
+== range-0-1-lt
+[]
+== range-0-1-named-lt
+[]
+== range-0-1-le
+[]
+== range-0-1-named-le
+[]
+== range-0-1-gt
+[]
+== range-0-1-named-gt
+[]
+== range-0-1-ge
+[]
+== range-0-1-named-ge
+[]
+== range-0-2-eq
+!! ValueError: operands could not be broadcast together with shapes (0,) (2,) 
+== range-0-2-named-eq
+!! ValueError: operands could not be broadcast together with shapes (0,) (2,) 
+== range-0-2-ne
+!! ValueError: operands could not be broadcast together with shapes (0,) (2,) 
+== range-0-2-named-ne
+!! ValueError: operands could not be broadcast together with shapes (0,) (2,) 
+== range-0-2-lt
+!! ValueError: operands could not be broadcast together with shapes (0,) (2,) 
+== range-0-2-named-lt
+!! ValueError: operands could not be broadcast together with shapes (0,) (2,) 
+== range-0-2-le
+!! ValueError: operands could not be broadcast together with shapes (0,) (2,) 
+== range-0-2-named-le
+!! ValueError: operands could not be broadcast together with shapes (0,) (2,) 
+== range-0-2-gt
+!! ValueError: operands could not be broadcast together with shapes (0,) (2,) 
+== range-0-2-named-gt
+!! ValueError: operands could not be broadcast together with shapes (0,) (2,) 
+== range-0-2-ge
+!! ValueError: operands could not be broadcast together with shapes (0,) (2,) 
+== range-0-2-named-ge
+!! ValueError: operands could not be broadcast together with shapes (0,) (2,) 
+== range-0-3-eq
+!! ValueError: operands could not be broadcast together with shapes (0,) (3,) 
+== range-0-3-named-eq
+!! ValueError: operands could not be broadcast together with shapes (0,) (3,) 
+== range-0-3-ne
+!! ValueError: operands could not be broadcast together with shapes (0,) (3,) 
+== range-0-3-named-ne
+!! ValueError: operands could not be broadcast together with shapes (0,) (3,) 
+== range-0-3-lt
+!! ValueError: operands could not be broadcast together with shapes (0,) (3,) 
+== range-0-3-named-lt
+!! ValueError: operands could not be broadcast together with shapes (0,) (3,) 
+== range-0-3-le
+!! ValueError: operands could not be broadcast together with shapes (0,) (3,) 
+== range-0-3-named-le
+!! ValueError: operands could not be broadcast together with shapes (0,) (3,) 
+== range-0-3-gt
+!! ValueError: operands could not be broadcast together with shapes (0,) (3,) 
+== range-0-3-named-gt
+!! ValueError: operands could not be broadcast together with shapes (0,) (3,) 
+== range-0-3-ge
+!! ValueError: operands could not be broadcast together with shapes (0,) (3,) 
+== range-0-3-named-ge
+!! ValueError: operands could not be broadcast together with shapes (0,) (3,) 
+== range-1-0-eq
+!! ValueError: Length of values (0) does not match length of index (1)
+== range-1-0-named-eq
+!! ValueError: Length of values (0) does not match length of index (1)
+== range-1-0-ne
+!! ValueError: Length of values (0) does not match length of index (1)
+== range-1-0-named-ne
+!! ValueError: Length of values (0) does not match length of index (1)
+== range-1-0-lt
+!! ValueError: Length of values (0) does not match length of index (1)
+== range-1-0-named-lt
+!! ValueError: Length of values (0) does not match length of index (1)
+== range-1-0-le
+!! ValueError: Length of values (0) does not match length of index (1)
+== range-1-0-named-le
+!! ValueError: Length of values (0) does not match length of index (1)
+== range-1-0-gt
+!! ValueError: Length of values (0) does not match length of index (1)
+== range-1-0-named-gt
+!! ValueError: Length of values (0) does not match length of index (1)
+== range-1-0-ge
+!! ValueError: Length of values (0) does not match length of index (1)
+== range-1-0-named-ge
+!! ValueError: Length of values (0) does not match length of index (1)
+== range-1-1-eq
+[True]
+== range-1-1-named-eq
+[True]
+== range-1-1-ne
+[False]
+== range-1-1-named-ne
+[False]
+== range-1-1-lt
+[False]
+== range-1-1-named-lt
+[False]
+== range-1-1-le
+[True]
+== range-1-1-named-le
+[True]
+== range-1-1-gt
+[False]
+== range-1-1-named-gt
+[False]
+== range-1-1-ge
+[True]
+== range-1-1-named-ge
+[True]
+== range-1-2-eq
+!! ValueError: Length of values (2) does not match length of index (1)
+== range-1-2-named-eq
+!! ValueError: Length of values (2) does not match length of index (1)
+== range-1-2-ne
+!! ValueError: Length of values (2) does not match length of index (1)
+== range-1-2-named-ne
+!! ValueError: Length of values (2) does not match length of index (1)
+== range-1-2-lt
+!! ValueError: Length of values (2) does not match length of index (1)
+== range-1-2-named-lt
+!! ValueError: Length of values (2) does not match length of index (1)
+== range-1-2-le
+!! ValueError: Length of values (2) does not match length of index (1)
+== range-1-2-named-le
+!! ValueError: Length of values (2) does not match length of index (1)
+== range-1-2-gt
+!! ValueError: Length of values (2) does not match length of index (1)
+== range-1-2-named-gt
+!! ValueError: Length of values (2) does not match length of index (1)
+== range-1-2-ge
+!! ValueError: Length of values (2) does not match length of index (1)
+== range-1-2-named-ge
+!! ValueError: Length of values (2) does not match length of index (1)
+== range-1-3-eq
+!! ValueError: Length of values (3) does not match length of index (1)
+== range-1-3-named-eq
+!! ValueError: Length of values (3) does not match length of index (1)
+== range-1-3-ne
+!! ValueError: Length of values (3) does not match length of index (1)
+== range-1-3-named-ne
+!! ValueError: Length of values (3) does not match length of index (1)
+== range-1-3-lt
+!! ValueError: Length of values (3) does not match length of index (1)
+== range-1-3-named-lt
+!! ValueError: Length of values (3) does not match length of index (1)
+== range-1-3-le
+!! ValueError: Length of values (3) does not match length of index (1)
+== range-1-3-named-le
+!! ValueError: Length of values (3) does not match length of index (1)
+== range-1-3-gt
+!! ValueError: Length of values (3) does not match length of index (1)
+== range-1-3-named-gt
+!! ValueError: Length of values (3) does not match length of index (1)
+== range-1-3-ge
+!! ValueError: Length of values (3) does not match length of index (1)
+== range-1-3-named-ge
+!! ValueError: Length of values (3) does not match length of index (1)
+== range-2-0-eq
+!! ValueError: operands could not be broadcast together with shapes (2,) (0,) 
+== range-2-0-named-eq
+!! ValueError: operands could not be broadcast together with shapes (2,) (0,) 
+== range-2-0-ne
+!! ValueError: operands could not be broadcast together with shapes (2,) (0,) 
+== range-2-0-named-ne
+!! ValueError: operands could not be broadcast together with shapes (2,) (0,) 
+== range-2-0-lt
+!! ValueError: operands could not be broadcast together with shapes (2,) (0,) 
+== range-2-0-named-lt
+!! ValueError: operands could not be broadcast together with shapes (2,) (0,) 
+== range-2-0-le
+!! ValueError: operands could not be broadcast together with shapes (2,) (0,) 
+== range-2-0-named-le
+!! ValueError: operands could not be broadcast together with shapes (2,) (0,) 
+== range-2-0-gt
+!! ValueError: operands could not be broadcast together with shapes (2,) (0,) 
+== range-2-0-named-gt
+!! ValueError: operands could not be broadcast together with shapes (2,) (0,) 
+== range-2-0-ge
+!! ValueError: operands could not be broadcast together with shapes (2,) (0,) 
+== range-2-0-named-ge
+!! ValueError: operands could not be broadcast together with shapes (2,) (0,) 
+== range-2-1-eq
+[True, False]
+== range-2-1-named-eq
+[True, False]
+== range-2-1-ne
+[False, True]
+== range-2-1-named-ne
+[False, True]
+== range-2-1-lt
+[False, False]
+== range-2-1-named-lt
+[False, False]
+== range-2-1-le
+[True, False]
+== range-2-1-named-le
+[True, False]
+== range-2-1-gt
+[False, True]
+== range-2-1-named-gt
+[False, True]
+== range-2-1-ge
+[True, True]
+== range-2-1-named-ge
+[True, True]
+== range-2-2-eq
+[True, True]
+== range-2-2-named-eq
+[True, True]
+== range-2-2-ne
+[False, False]
+== range-2-2-named-ne
+[False, False]
+== range-2-2-lt
+[False, False]
+== range-2-2-named-lt
+[False, False]
+== range-2-2-le
+[True, True]
+== range-2-2-named-le
+[True, True]
+== range-2-2-gt
+[False, False]
+== range-2-2-named-gt
+[False, False]
+== range-2-2-ge
+[True, True]
+== range-2-2-named-ge
+[True, True]
+== range-2-3-eq
+!! ValueError: operands could not be broadcast together with shapes (2,) (3,) 
+== range-2-3-named-eq
+!! ValueError: operands could not be broadcast together with shapes (2,) (3,) 
+== range-2-3-ne
+!! ValueError: operands could not be broadcast together with shapes (2,) (3,) 
+== range-2-3-named-ne
+!! ValueError: operands could not be broadcast together with shapes (2,) (3,) 
+== range-2-3-lt
+!! ValueError: operands could not be broadcast together with shapes (2,) (3,) 
+== range-2-3-named-lt
+!! ValueError: operands could not be broadcast together with shapes (2,) (3,) 
+== range-2-3-le
+!! ValueError: operands could not be broadcast together with shapes (2,) (3,) 
+== range-2-3-named-le
+!! ValueError: operands could not be broadcast together with shapes (2,) (3,) 
+== range-2-3-gt
+!! ValueError: operands could not be broadcast together with shapes (2,) (3,) 
+== range-2-3-named-gt
+!! ValueError: operands could not be broadcast together with shapes (2,) (3,) 
+== range-2-3-ge
+!! ValueError: operands could not be broadcast together with shapes (2,) (3,) 
+== range-2-3-named-ge
+!! ValueError: operands could not be broadcast together with shapes (2,) (3,) 
+== range-3-0-eq
+!! ValueError: operands could not be broadcast together with shapes (3,) (0,) 
+== range-3-0-named-eq
+!! ValueError: operands could not be broadcast together with shapes (3,) (0,) 
+== range-3-0-ne
+!! ValueError: operands could not be broadcast together with shapes (3,) (0,) 
+== range-3-0-named-ne
+!! ValueError: operands could not be broadcast together with shapes (3,) (0,) 
+== range-3-0-lt
+!! ValueError: operands could not be broadcast together with shapes (3,) (0,) 
+== range-3-0-named-lt
+!! ValueError: operands could not be broadcast together with shapes (3,) (0,) 
+== range-3-0-le
+!! ValueError: operands could not be broadcast together with shapes (3,) (0,) 
+== range-3-0-named-le
+!! ValueError: operands could not be broadcast together with shapes (3,) (0,) 
+== range-3-0-gt
+!! ValueError: operands could not be broadcast together with shapes (3,) (0,) 
+== range-3-0-named-gt
+!! ValueError: operands could not be broadcast together with shapes (3,) (0,) 
+== range-3-0-ge
+!! ValueError: operands could not be broadcast together with shapes (3,) (0,) 
+== range-3-0-named-ge
+!! ValueError: operands could not be broadcast together with shapes (3,) (0,) 
+== range-3-1-eq
+[True, False, False]
+== range-3-1-named-eq
+[True, False, False]
+== range-3-1-ne
+[False, True, True]
+== range-3-1-named-ne
+[False, True, True]
+== range-3-1-lt
+[False, False, False]
+== range-3-1-named-lt
+[False, False, False]
+== range-3-1-le
+[True, False, False]
+== range-3-1-named-le
+[True, False, False]
+== range-3-1-gt
+[False, True, True]
+== range-3-1-named-gt
+[False, True, True]
+== range-3-1-ge
+[True, True, True]
+== range-3-1-named-ge
+[True, True, True]
+== range-3-2-eq
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== range-3-2-named-eq
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== range-3-2-ne
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== range-3-2-named-ne
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== range-3-2-lt
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== range-3-2-named-lt
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== range-3-2-le
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== range-3-2-named-le
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== range-3-2-gt
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== range-3-2-named-gt
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== range-3-2-ge
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== range-3-2-named-ge
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== range-3-3-eq
+[True, True, True]
+== range-3-3-named-eq
+[True, True, True]
+== range-3-3-ne
+[False, False, False]
+== range-3-3-named-ne
+[False, False, False]
+== range-3-3-lt
+[False, False, False]
+== range-3-3-named-lt
+[False, False, False]
+== range-3-3-le
+[True, True, True]
+== range-3-3-named-le
+[True, True, True]
+== range-3-3-gt
+[False, False, False]
+== range-3-3-named-gt
+[False, False, False]
+== range-3-3-ge
+[True, True, True]
+== range-3-3-named-ge
+[True, True, True]
+== range-named-broadcast
+[False, False, False]
+== list-one-eq
+!! ValueError: ('Lengths must match to compare', (2,), (1,))
+== list-one-named-eq
+!! ValueError: Lengths must be equal
+== ndarray-one-eq
+!! ValueError: ('Lengths must match to compare', (2,), (1,))
+== list-one-ne
+!! ValueError: ('Lengths must match to compare', (2,), (1,))
+== list-one-named-ne
+!! ValueError: Lengths must be equal
+== ndarray-one-ne
+!! ValueError: ('Lengths must match to compare', (2,), (1,))
+== list-one-lt
+!! ValueError: ('Lengths must match to compare', (2,), (1,))
+== list-one-named-lt
+!! ValueError: Lengths must be equal
+== ndarray-one-lt
+!! ValueError: ('Lengths must match to compare', (2,), (1,))
+== list-one-le
+!! ValueError: ('Lengths must match to compare', (2,), (1,))
+== list-one-named-le
+!! ValueError: Lengths must be equal
+== ndarray-one-le
+!! ValueError: ('Lengths must match to compare', (2,), (1,))
+== list-one-gt
+!! ValueError: ('Lengths must match to compare', (2,), (1,))
+== list-one-named-gt
+!! ValueError: Lengths must be equal
+== ndarray-one-gt
+!! ValueError: ('Lengths must match to compare', (2,), (1,))
+== list-one-ge
+!! ValueError: ('Lengths must match to compare', (2,), (1,))
+== list-one-named-ge
+!! ValueError: Lengths must be equal
+== ndarray-one-ge
+!! ValueError: ('Lengths must match to compare', (2,), (1,))
