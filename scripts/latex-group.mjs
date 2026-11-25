@@ -116,7 +116,11 @@ export const LATEX_LAZY = {
 // (256,580 raw / 85,902 gzip: Nov 25 2026, amsthm's \qedhere (issue 1800), its symbol on its own row (KaTeX's tag):
 //  256,516 / 85,838 measured on the shipped build of its merge with master c0066039, with bun 1.4.4 and node 24.21.0
 //  (+740 / +249 over master's 255,776 / 85,589), + 64)
-export const LATEX_CAPS = { raw: 256580, gzip: 85902 };
+// (287,627 raw / 97,060 gzip: Nov 25 2026, TikZ pictures drawn in the preview (paths, styles,
+//  transforms, \foreach: web/latex/engine/tikz.mjs, in the worker's bundle, with its bounds): 287,563 / 96,996 measured on the
+//  shipped build of its merge with master 3655725a, with bun 1.4.4 and node 24.21.0 (+31,047 / +11,158 over master's
+//  256,516 / 85,838), + 64)
+export const LATEX_CAPS = { raw: 287627, gzip: 97060 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
