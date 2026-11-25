@@ -13,8 +13,11 @@ README.md for the protocol, the backends and the output.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
+import math
+import operator
 import os
 import platform
 import re
@@ -1174,6 +1177,47 @@ def units(row: dict, n: int, timeout: float, k: int) -> tuple[list | str | None,
     return runs[0], ""
 
 
+def working_set(row: dict, n: int) -> int | None:
+    """The row's working_set formula (items.json) at n, in bytes; None
+    without one.  The formula is an expression in n with numbers, + - * /
+    // ** and log2, nothing else (it is data, so it is never eval'd)."""
+    expr = row.get("working_set")
+    if expr is None:
+        return None
+    ops = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Pow: operator.pow,
+    }
+
+    def ev(node):
+        if isinstance(node, ast.Expression):
+            return ev(node.body)
+        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+            return node.value
+        if isinstance(node, ast.Name) and node.id == "n":
+            return n
+        if isinstance(node, ast.BinOp) and type(node.op) in ops:
+            return ops[type(node.op)](ev(node.left), ev(node.right))
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "log2"
+            and len(node.args) == 1
+            and not node.keywords
+        ):
+            return math.log2(ev(node.args[0]))
+        raise ValueError(f"working_set of {row['id']}: {ast.dump(node)[:80]} is not allowed")
+
+    value = ev(ast.parse(expr, mode="eval"))
+    if not value > 0:
+        raise ValueError(f"working_set of {row['id']} at n={n} is {value}")
+    return round(value)
+
+
 def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
     size = row["sizes"][key]
     n, timeout = size["n"], float(size["timeout"])
@@ -1190,6 +1234,7 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
         label=row["label"],
         size=key,
         n=n,
+        working_set_bytes=working_set(row, n),
         fresh=row["fresh"],
         variants=k,
         backends={},

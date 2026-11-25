@@ -1236,6 +1236,47 @@ class SweepSummary(unittest.TestCase):
         )
 
 
+class WorkingSet(unittest.TestCase):
+    def test_every_rows_formula_at_every_size(self):
+        rows = json.loads((Path(run.__file__).parent / "items.json").read_text())["rows"]
+        for r in rows:
+            self.assertIn("working_set", r, r["id"])
+            for key, size in r["sizes"].items():
+                b = run.working_set(r, size["n"])
+                if r["working_set"] is None:
+                    self.assertIsNone(b)
+                else:
+                    self.assertTrue(isinstance(b, int) and b > 0, (r["id"], key, b))
+
+    def test_the_formulas(self):
+        self.assertEqual(run.working_set({"id": "x", "working_set": "8*n**2"}, 400), 1280000)
+        self.assertEqual(run.working_set({"id": "x", "working_set": "16*n/log2(n)"}, 256), 512)
+        self.assertEqual(run.working_set({"id": "x", "working_set": "n//3"}, 10), 3)
+
+    def test_only_arithmetic_in_n(self):
+        for bad in (
+            "__import__('os').getcwd()",
+            "m*2",
+            "n.bit_length()",
+            "log2(n, 2)",
+            "abs(n)",
+            "'8'",
+            "[n][0]",
+            "n if n else 1",
+            "-n",
+            "n - n",
+        ):
+            with self.assertRaises(ValueError, msg=bad):
+                run.working_set({"id": "x", "working_set": bad}, 10)
+
+    def test_a_point_records_it(self):
+        pts = Points()
+        rec, _ = pts.run_point({"user": "5", "magma": "5"}, row=dict(ROW, working_set="8*n**2"))
+        self.assertEqual(rec["working_set_bytes"], 800)
+        rec, _ = pts.run_point({"user": "5", "magma": "5"})
+        self.assertIsNone(rec["working_set_bytes"])
+
+
 class Host(unittest.TestCase):
     def test_the_host_record(self):
         h = run.host()
