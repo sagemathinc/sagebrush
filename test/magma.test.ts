@@ -68,6 +68,45 @@ test("a notebook or kernel cell (no recovery) still stops at its first error, an
   assert.equal(runtime.stdout, "1\nRuntime error: stop\n");
 });
 
+test("a script file stops at an intrinsic Sagebrush lacks, with exit status 1, as at a runtime error; a session goes on", () => {
+  const { mkdtempSync, writeFileSync, rmSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const { spawnSync } = require("node:child_process");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const dir = mkdtempSync(join(tmpdir(), "magma-file-"));
+  try {
+    const file = (src: string) => {
+      const f = join(dir, "script.m");
+      writeFileSync(f, src);
+      return spawnSync(process.execPath, [cli, "--magma", f], { encoding: "utf8", timeout: WALL(60000) });
+    };
+    const said = /User error: 'QuadraticForms' is a Magma intrinsic not implemented in Sagebrush\n$/;
+    const lacking = file("print 1;\nQ := QuadraticForms(-23);\nprint \"AFTER\";\n");
+    assert.equal(lacking.status, 1, lacking.stdout + lacking.stderr);
+    assert.match(lacking.stdout, /^1\n/);
+    assert.match(lacking.stdout, said);
+    // (also read in a function's body, where the function reads it)
+    const inFunction = file("function f(D) return QuadraticForms(D); end function;\nprint 1;\nQ := f(-23);\nprint \"AFTER\";\n");
+    assert.equal(inFunction.status, 1, inFunction.stdout + inFunction.stderr);
+    assert.match(inFunction.stdout, /^1\n[\s\S]*User error: 'QuadraticForms' is a Magma intrinsic not implemented in Sagebrush\n$/);
+    // as a runtime error, and a "not supported yet" one, stop it
+    const runtime = file("print 1;\nerror \"stop\";\nprint \"AFTER\";\n");
+    assert.equal(runtime.status, 1);
+    assert.doesNotMatch(runtime.stdout, /AFTER/);
+    // a name Magma doesn't have either is Magma's compile-time error: the file goes on, as in Magma
+    const undeclared = file("print 1;\nFoo;\nprint \"AFTER\";\n");
+    assert.equal(undeclared.status, 0);
+    assert.match(undeclared.stdout, /Identifier 'Foo' has not been declared or assigned\nAFTER\n$/);
+    // on standard input (Magma's interactive session) every error is reported and the session goes on
+    const session = spawnSync(process.execPath, [cli, "--magma"], { input: "Q := QuadraticForms(-23);\nprint \"AFTER\";\n", encoding: "utf8", timeout: WALL(60000) });
+    assert.equal(session.status, 0);
+    assert.match(session.stdout, /is a Magma intrinsic not implemented in Sagebrush\nAFTER\n$/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("QuadraticField's squarefree part by bounded work: a hard 78-digit semiprime is refused at once (HARD-731-1)", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");

@@ -57,7 +57,8 @@ test("__pyjs_compile_magma__: state carries across items, and each ends as Magma
       "print 1;\nx := ;\nprint 3;",
       // (quit;: the item ends, not a failure)
       "print 1;\nquit;\nprint 2;",
-      // (no file or process route: an intrinsic Sagebrush lacks is reported and goes on; load stops)
+      // (no file or process route: an intrinsic Sagebrush lacks is reported and stops the item, as a runtime
+      // error does, since what follows would run without its value; load stops)
       'System("touch made-by-magma");\nprint 7;',
       'print Read("x.txt");\nprint 7;',
       'load "x.m";\nprint 7;',
@@ -72,8 +73,8 @@ test("__pyjs_compile_magma__: state carries across items, and each ends as Magma
       ["exit 1", "1\nRuntime error: boom\n"],
       ["exit 1", `1\n${at(2, 6, "x := ;")}User error: bad syntax\n`],
       ["exit 0", "1\n"],
-      ["ok", `${at(1, 1, 'System("touch made-by-magma");')}User error: 'System' is a Magma intrinsic not implemented in Sagebrush\n7\n`],
-      ["ok", `${at(1, 7, 'print Read("x.txt");')}User error: 'Read' is a Magma intrinsic not implemented in Sagebrush\n7\n`],
+      ["exit 1", `${at(1, 1, 'System("touch made-by-magma");')}User error: 'System' is a Magma intrinsic not implemented in Sagebrush\n`],
+      ["exit 1", `${at(1, 7, 'print Read("x.txt");')}User error: 'Read' is a Magma intrinsic not implemented in Sagebrush\n`],
       ["exit 1", `${at(1, 1, 'load "x.m";')}User error: load (Magma's library files) is not supported yet\n`],
       ["ValueError", "__pyjs_compile_magma__() mode must be 'exec'"],
       ["TypeError", "__pyjs_compile_magma__() arg 1 must be a string"],
