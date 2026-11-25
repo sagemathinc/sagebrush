@@ -34,12 +34,12 @@
     {
       "case": "c3.series-object-to_numpy",
       "message": "pandas.Series.to_numpy() of an object column is not in Sagebrush's pandas 0.x subset",
-      "reason": "C3: pandas exports str/object data as an object ndarray; Sagebrush's numpy has no str or object arrays, so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
+      "reason": "C3: pandas exports object data as an object ndarray; Sagebrush's numpy has no object arrays (a str column exports as a '<U' array instead), so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
     },
     {
       "case": "c3.series-object-values",
       "message": "pandas.Series.values of an object column is not in Sagebrush's pandas 0.x subset",
-      "reason": "C3: pandas exports str/object data as an object ndarray; Sagebrush's numpy has no str or object arrays, so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
+      "reason": "C3: pandas exports object data as an object ndarray; Sagebrush's numpy has no object arrays (a str column exports as a '<U' array instead), so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
     },
     {
       "case": "c3.frame-str-to_numpy",
@@ -74,12 +74,12 @@
     {
       "case": "dtype.string",
       "message": "pandas: dtype='string' is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas' extension dtypes (string, category, Int64) are outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "reason": "pandas' nullable string dtype ('string') is outside M1's frozen support table (plan r7 C4); text columns use pandas 3's default str dtype; it raises before any work"
     },
     {
       "case": "dtype.Int64",
       "message": "pandas: dtype='Int64' is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas' extension dtypes (string, category, Int64) are outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "reason": "pandas' nullable integer dtypes (Int64 and the like) are outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
       "case": "value.int-beyond-int64",
@@ -564,7 +564,7 @@
     {
       "case": "csv.dtype-category",
       "message": "pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet",
-      "reason": "pandas' extension dtypes (string, category, Int64) are outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "reason": "read_csv doesn't build category columns while parsing in the subset yet (astype('category') after reading does); it raises before any work"
     },
     {
       "case": "csv.usecols-mixed",
@@ -954,7 +954,7 @@
     {
       "case": "reshape.concat-union_categories",
       "message": "pandas.concat(union_categories=) is not in Sagebrush's pandas 0.x subset",
-      "reason": "union_categories= is for the category dtype, which isn't in the subset yet; it raises before any work"
+      "reason": "union_categories= merges the categories of category columns, which concat doesn't do in the subset yet; it raises before any work"
     },
     {
       "case": "reshape.drop-level",
