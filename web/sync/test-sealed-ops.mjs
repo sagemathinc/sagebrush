@@ -429,6 +429,17 @@ await section("what a device that pulls needs: every signed value served, the en
   ok(resealed?.ops?.[0]?.seq === a.ops[0].seq && resealed.ops[0].env_sha256 === envHash(one.env) && envHash(other.env) !== envHash(one.env),
     "the same dseq sealed again with other bytes: answered with the log's seq and the hash of the bytes the log holds, not the new ones");
   n += 1;
+  // (one message naming one new dseq twice, with two validly signed envelopes: the first is decided; the second is
+  // answered as its resend, with the hash of the bytes the log holds; the row, every answer and a later resend agree)
+  const x = await signed(W, d, st, dev, n), y = await signed(W, d, st, dev, n);
+  const twice = await ws.ask({ t: "sops", ops: [x, y] });
+  ok(twice?.ops?.length === 2 && twice.ops[0].seq === twice.ops[1].seq && twice.ops.every((o) => o.env_sha256 === envHash(x.env)),
+    "one message, one new dseq twice: both answered with its seq and the first envelope's hash: " + JSON.stringify(twice?.ops));
+  const xRow = (await logOf()).find((o) => o.device === dev && o.dseq === n);
+  ok(xRow?.env === x.env && xRow.sig === x.sig, "…the log holds the first envelope and its signature");
+  const yLater = await ws.ask({ t: "sops", ops: [y] });
+  ok(yLater?.ops?.[0]?.seq === twice.ops[0].seq && yLater.ops[0].env_sha256 === envHash(x.env), "…and the second sent again later: the same seq and the first envelope's hash");
+  n += 1;
 
   // (every signed value is served as it was signed: the signed bytes rebuilt from the served row verify, and no field can change alone)
   const row = (await logOf()).find((o) => o.device === dev && o.dseq === one.dseq);
