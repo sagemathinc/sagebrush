@@ -2,7 +2,7 @@
 # index: it consumes no dimension and adds one of length 1 (true) or 0 (false), an advanced index of [0] or [] on
 # that new axis, so it broadcasts with the other index arrays. An empty list is an empty integer index. The rows read
 # and write through such indices on 0-d, 1-d and 2-d arrays, numeric, complex and string, and check the
-# too-many-indices count and the shape-mismatch message (index arrays named, integers not).
+# too-many-indices count and the shape-mismatch message (index arrays named, integers not), and lists as indices.
 import numpy as np
 
 
@@ -58,4 +58,9 @@ b[np.False_] = 0
 print(b.tolist())
 print(show(lambda: np.arange(5)[np.array([], dtype=float)]))
 print(show(lambda: np.arange(5)[np.array([])]))
-print(show(lambda: np.arange(5)[[0.0, 1.0]]))
+# (lists are converted before the indices are counted: a list's type is checked first, a 2-d boolean list takes
+# two dimensions)
+for k in ([0.0, 1.0], [1j], [[0.5]], ([0.0],), (0, [0.0]), [0, 1.0], [True, 1], [[1], [2]], (np.array([0.0]),),
+          (0, 1.5), ([[True, False], [True, False]],), (Ellipsis, [[True, False, True, False, True]]),
+          ([[True, True]], 0)):
+    print("list", repr(k), "|", show(lambda: np.arange(10).reshape(2, 5)[k]))

@@ -1051,6 +1051,16 @@ function resolveIndex(a: NDArray, key: any): IndexResult {
     const b = typeof k === "boolean" ? k : k instanceof Obj.PrimBox && typeDtypes.get(Obj.typeOf(k)) === D.bool ? !!Obj.unbox(k) : undefined;
     return b === undefined ? k : fromPy(b);
   });
+  // advanced indices: arrays and lists of ints or bools, converted first, as NumPy checks them before counting
+  // (an empty list is an empty integer index, as NumPy's; a list of anything but integers or bools no index)
+  const listIndex = (k: any) => {
+    const r = fromPy(k);
+    if (r.size === 0 && r.dt.kind === "f") return empty(r.shape, D.int64);
+    if (!r.dt.isInt && r.dt.kind !== "b") raise(T.IndexError, "only integers, slices (`:`), ellipsis (`...`), numpy.newaxis (`None`) and integer or boolean arrays are valid indices");
+    return r;
+  };
+  items = items.map((k) => (Array.isArray(k) && !(k as any).$t ? listIndex(k) : k));
+  items = items.map((k) => (Array.isArray(k) && (k as any).$t ? listIndex(k) : k));
   // Ellipsis expands to the axes the other entries do not consume (a boolean index takes its own dimensions, a 0-d
   // one none)
   const consumes = (k: any) => (k === null || k === Obj.Ellipsis ? 0 : k instanceof NDArray && k.dt.kind === "b" ? k.ndim : 1);
@@ -1063,14 +1073,6 @@ function resolveIndex(a: NDArray, key: any): IndexResult {
   if (items.reduce((s, k) => s + consumes(k), 0) > a.ndim) {
     raise(T.IndexError, `too many indices for array: array is ${a.ndim}-dimensional, but ${items.reduce((s, k) => s + consumes(k), 0)} were indexed`);
   }
-  // advanced indices: arrays and lists of ints or bools
-  // (an empty list is an empty integer index, as NumPy's)
-  const listIndex = (k: any) => {
-    const r = fromPy(k);
-    return r.size === 0 && r.dt.kind === "f" ? empty(r.shape, D.int64) : r;
-  };
-  items = items.map((k) => (Array.isArray(k) && !(k as any).$t ? listIndex(k) : k));
-  items = items.map((k) => (Array.isArray(k) && (k as any).$t ? listIndex(k) : k));
   const hasAdv = items.some((k) => k instanceof NDArray);
   // (the result's dimensions, counted as NumPy counts them before indexing: the array's, less those an integer or
   // an index array takes, plus each newaxis, plus the index arrays' broadcast rank (a boolean one's nonzero is 1-d))
