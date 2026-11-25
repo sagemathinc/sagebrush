@@ -177,7 +177,7 @@ try {
   {
     const P = await page();
     const names = await P.ev(`Object.keys(m.fv).sort().join()`);
-    ok(names === "PinMoved,StorageFailed,hostFingerprintShown,syncChain,verifyGrant,verifyGrantAck,verifyHostCert,verifyHostRevocation", "S-1: the module exports verification only: syncChain, verifyHostCert, verifyGrant, verifyGrantAck, verifyHostRevocation, hostFingerprintShown (and its errors StorageFailed, PinMoved)", names);
+    ok(names === "PinMoved,StorageFailed,hostFingerprintShown,readChainPage,syncChain,verifyGrant,verifyGrantAck,verifyHostCert,verifyHostRevocation", "S-1: the module exports verification and reading only: syncChain, readChainPage, verifyHostCert, verifyGrant, verifyGrantAck, verifyHostRevocation, hostFingerprintShown (and its errors StorageFailed, PinMoved)", names);
     // (the fingerprint a person compares: recomputed from the verified certificate's keys, and equal to the first 100
     //  bits of the full fingerprint the certificate carries, which the core has already checked against those keys)
     const fp = await P.ev(`(async () => { const c = await m.fv.syncChain(${CTX}, F.objects.chain); const cert = await m.fv.verifyHostCert(${CTX}, c, F.objects.host_cert); const full = JSON.parse(F.objects.host_cert).body.fingerprint; const b = Uint8Array.from(atob(full.replace(/-/g, "+").replace(/_/g, "/")), (x) => x.charCodeAt(0)); let acc = 0n; for (const x of b.subarray(0, 13)) acc = (acc << 8n) | BigInt(x); acc >>= 4n; let want = ""; for (let i = 19; i >= 0; i--) want += "abcdefghijklmnopqrstuvwxyz234567"[Number((acc >> BigInt(5 * i)) & 31n)]; return { got: await m.fv.hostFingerprintShown(cert), want: want.match(/.{4}/g).join("-") }; })()`);

@@ -53,12 +53,31 @@ const report = (over = {}, agent = {}) => ({ host: { reported_at_ms: NOW - 1500,
 const hostRow = (over = {}) => ({ host: HOST, cert: F.objects.host_cert, revocation: null, grant_gen: 1, ack: ackAhead, ...over });
 const base = () => ({ fleet: F.ids.fleet, aud: F.aud, now_ms: NOW, chain: F.objects.chain, hosts: [hostRow()], grants: { [HOST]: [grant] }, state: { [HOST]: report() }, ops: {} });
 let fixtures = base();
+// (the service's routes, when a case turns them on: the person's reads, with the chain paged 2 entries at a time)
+let service = null;
+const served = [];
+const jsonRes = (v, status = 200) => new Response(typeof v === "string" ? v : JSON.stringify(v), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+function api(u) {
+  const p = u.pathname, svc = service;
+  served.push(p + u.search);
+  if (!svc) return jsonRes({ error: "not_found" }, 404);
+  if (svc.status) return jsonRes({ error: svc.error }, svc.status);
+  if (p === "/api/fleet/v1/fleet") return jsonRes({ fleet: F.ids.fleet, aud: F.aud });
+  if (p === "/api/fleet/v1/chain") {
+    const after = u.searchParams.has("after") ? Number(u.searchParams.get("after")) : -1, head = F.objects.chain.length - 1;
+    const entries = F.objects.chain.slice(after + 1, after + 3);
+    return jsonRes(svc.chainPage ? svc.chainPage(entries, head) : JSON.stringify({ entries, head }));
+  }
+  if (p === "/api/fleet/v1/hosts") return jsonRes({ hosts: [hostRow({ ack: null })] });
+  if (p === `/api/fleet/v1/hosts/${HOST}/grants`) return jsonRes({ grants: [grant], head: 1 });
+  return jsonRes({ error: "not_found" }, 404);
+}
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (r) => {
-  const p = new URL(r.url).pathname;
+  const u = new URL(r.url), p = u.pathname;
+  if (p.startsWith("/api/")) return api(u);
   if (p === "/agents/fleet/fleet.js") return new Response(js, { headers: { "content-type": "text/javascript" } });
   if (p === "/agents/fleet/fixtures.json") return new Response(JSON.stringify(fixtures), { headers: { "content-type": "application/json" } });
   if (p === "/agents/fleet/") return new Response(html, { headers: { "content-type": "text/html" } });
-  if (p.startsWith("/api/")) return new Response(JSON.stringify({ error: "not_found" }), { status: 404, headers: { "content-type": "application/json" } });
   return new Response("not found", { status: 404 });
 } });
 const site = `http://127.0.0.1:${server.port}/agents/fleet/`;
@@ -80,6 +99,28 @@ try {
     const P = await fresh();
     await open(P, site, notLoading);
     ok(/You have no fleet yet/.test(await text(P)), "G-2: loopback without ?fixtures=1 reads the service, which has no fleet here: \"You have no fleet yet\"", await text(P));
+  }
+  {
+    // (G-3: the same page against the service's routes (loopback, no flag): the chain read in pages by the core's reader,
+    //  then verified whole; the hosts and the grant lineage as on the fixtures)
+    service = {};
+    served.length = 0;
+    let P = await fresh();
+    await open(P, site + "#hosts", `!!document.querySelector("li.host .grant")`);
+    const g = await P.ev(`document.querySelector("li.host .grant").textContent`);
+    const chainReads = served.filter((x) => x.startsWith("/api/fleet/v1/chain"));
+    // (the service path reads the real clock; the fixtures' grant starts in 2027, so it isn't in force yet: said, and never applied)
+    ok(g === "grant 1 · not yet in force · waiting for the host" && chainReads.join() === "/api/fleet/v1/chain,/api/fleet/v1/chain?after=1,/api/fleet/v1/chain?after=3", "G-3: the service's routes: the chain read in 3 pages (from genesis, then after=1, after=3), the host and its grant verified", { g, chainReads });
+    ok(served.some((x) => x === `/api/fleet/v1/hosts/${HOST}/grants`), "G-3: the grant lineage read newest first (no cursor)", served);
+    service = { status: 401, error: "unauthenticated" };
+    P = await fresh();
+    await open(P, site, notLoading);
+    ok(/^Sign in to see your fleet\.$/.test((await text(P)).trim()), "G-4: no session (401): \"Sign in to see your fleet.\"", await text(P));
+    service = { chainPage: (entries, head) => JSON.stringify({ entries, extra: 1, head }) };
+    P = await fresh();
+    await open(P, site, notLoading);
+    ok(/This device list didn't verify \(bad_form\)/.test(await text(P)), "G-5: a chain page not exactly {entries, head}: the core's reader refuses it (bad_form), nothing trusted", await text(P));
+    service = null;
   }
   {
     const P = await fresh();

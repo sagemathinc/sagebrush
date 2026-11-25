@@ -4,9 +4,9 @@
 // - A host (#host/<id>): the agents its verified grant lists, each with the host's unverified report beside it.
 // Every signed object is verified on this page (fleet-verify.ts) before anything about it is shown. The host's state is
 // an unverified report (view.ts). This page signs nothing; its one write is Reset this device (fleet-device.ts).
-import { PinMoved, StorageFailed, hostFingerprintShown, syncChain, verifyGrant, verifyGrantAck, verifyHostCert, verifyHostRevocation, type Chain, type FleetCtx, type HostCert } from "../../workspace/fleet-verify";
+import { PinMoved, StorageFailed, hostFingerprintShown, readChainPage, syncChain, verifyGrant, verifyGrantAck, verifyHostCert, verifyHostRevocation, type Chain, type FleetCtx, type HostCert } from "../../workspace/fleet-verify";
 import { deviceKey, resetDevice } from "../../workspace/fleet-device";
-import { ServiceError, fixtureSource, isLoopback, serviceSource, sourceKind, type ChainPage, type HostRow, type OpRow, type Source } from "./client";
+import { ServiceError, fixtureSource, isLoopback, serviceSource, sourceKind, type HostRow, type OpRow, type Source } from "./client";
 import * as V from "./view";
 
 const T = {
@@ -51,9 +51,8 @@ const T = {
 
 // ---- the source, and the guard against late answers
 const url = new URL(location.href);
-// (the service's chain pages are read by the core's own reader, through fleet-verify.ts, once the mirror carries it)
-const readPage = (_bytes: Uint8Array, _after: number): ChainPage => { throw new ServiceError("unavailable", 0); };
-const src: Source = sourceKind(url) === "fixtures" ? fixtureSource() : serviceSource(readPage);
+// (the service's chain pages are read by the core's own reader, through fleet-verify.ts)
+const src: Source = sourceKind(url) === "fixtures" ? fixtureSource() : serviceSource(readChainPage);
 const fresh = V.freshness();
 /** At most this many pages of a host's grants (16 each) are read; more than that is shown as unresolved. */
 const GRANT_PAGES_MAX = 64;
