@@ -133,3 +133,17 @@ case("int-vs-int-categories-ne", lambda: (pd.Series([1, 0], dtype="category") !=
 case("int-none-astype-object", lambda: pd.Series([3, None, 2], dtype="category").astype(object).tolist())
 case("str-astype-float", lambda: pd.Series(["a", "b"]).astype("category").astype("float64"))
 case("str-astype-int", lambda: pd.Series(["a", "b"]).astype("category").astype("int64"))
+
+# an existing categorical keeps its ordered flag unless a CategoricalDtype or ordered= says otherwise
+for src in ["categorical", "series"]:
+    for o in [False, True]:
+        base_c = pd.Categorical(["b", "a"], categories=["b", "a", "c"], ordered=o)
+        src_v = pd.Series(base_c) if src == "series" else base_c
+        kws = [("default", {}), ("arg-false", {"ordered": False}), ("arg-true", {"ordered": True})]
+        if src == "categorical":
+            kws += [("dtype-string", {"dtype": "category"}), ("dtype-false", {"dtype": pd.CategoricalDtype(ordered=False)}),
+                    ("dtype-true", {"dtype": pd.CategoricalDtype(ordered=True)})]
+        for name, kw in kws:
+            case("keep-ordered-%s-%s-%s" % (src, o, name), lambda src_v=src_v, kw=kw: (lambda r: (r.ordered, r.categories.tolist(), r.codes.tolist()))(pd.Categorical(src_v, **kw)))
+ordc = pd.Series(["b", "a"]).astype(pd.CategoricalDtype(["a", "b"], ordered=True))
+case("ordered-eq-rebuilt", lambda: (pd.Series(pd.Categorical(ordc)) == ordc).tolist())
