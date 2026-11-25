@@ -1684,8 +1684,11 @@ def make_plan(
 ) -> str:
     """A run directory ready for approval: plan.json (its sha256 printed),
     and payload.tar (a git archive of the clean HEAD, plus .bench-commit and
-    expected-inputs.json). The expected inputs are computed here, in the
-    project, before any VM exists."""
+    expected-inputs.json). The expected inputs come from the reviewed
+    golden file (its confirmed and pending points) where it has the point at
+    the row's current n and K; the rest are computed here, in the project,
+    before any VM exists (a wrong hash fails closed on the VM: an input
+    mismatch)."""
     import secrets
     import tarfile
     import io
@@ -1703,9 +1706,25 @@ def make_plan(
     commit = git("rev-parse", "HEAD").strip()
     run_dir.mkdir(parents=True, exist_ok=False)
     keys = sorted(set(points))
-    sizes = sorted({k.split(":")[1] for k in keys})
-    exp_all = expected_inputs.expected(sizes, sorted({k.split(":")[0] for k in keys}))
-    expected = {k: exp_all[k] for k in keys}
+    import run  # noqa: E402  (the variants rule)
+
+    rows = {r["id"]: r for r in json.loads((HERE / "items.json").read_text())["rows"]}
+    golden = json.loads((HERE / "expected_inputs_golden.json").read_text())
+    known = {**golden["pending"], **golden["points"]}
+    expected = {}
+    for k in keys:
+        row, _, size = k.partition(":")
+        if row not in rows or size not in rows[row]["sizes"]:
+            raise Fatal(f"no such point: {k}")
+        g = known.get(k)
+        now = (rows[row]["sizes"][size]["n"], run.variants(rows[row], size))
+        if g and (g["n"], g["variants"]) == now:
+            expected[k] = {"n": g["n"], "variants": g["variants"], "input_hash": g["input_hash"]}
+    rest = [k for k in keys if k not in expected]
+    if rest:
+        sizes = sorted({k.split(":")[1] for k in rest})
+        exp_all = expected_inputs.expected(sizes, sorted({k.split(":")[0] for k in rest}))
+        expected.update({k: exp_all[k] for k in rest})
     archive = run_dir / "payload.tar"
     subprocess.run(
         ["git", "archive", "--format=tar", "--prefix=", "-o", str(archive), commit],
