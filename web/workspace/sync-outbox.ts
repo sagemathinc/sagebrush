@@ -227,7 +227,7 @@ export class Outbox {
   readonly ns: string;
   /** This namespace's records are sealed (e2e PR 5d), set by the client that has the sealing module: a "delete old
    * versions" then waits in the scan until the verified index has this device's own writes. */
-  sealed = false;
+  sealing = false;
   constructor(readonly w: Workspace, readonly lease: Lease) {
     checkNs(lease.ns);
     this.ns = lease.ns;
@@ -353,7 +353,7 @@ export class Outbox {
             // (not before the verified index has this device's own ops: none still in the outbox, and the index's cursor
             // past the newest confirmed; the op waits here, scanned on a later run, so its history is the one the person saw)
             const top = ((await req(meta.get(key(this.ns, "confirmedTop")))) as number | undefined) ?? 0;
-            if (this.sealed && (t.count > 0 || (((await req(meta.get(cursorKey(this.ns)))) as number | undefined) ?? 0) < top)) { waiting = true; break; }
+            if (this.sealing && (t.count > 0 || (((await req(meta.get(cursorKey(this.ns)))) as number | undefined) ?? 0) < top)) { waiting = true; break; }
             const gen = genPrefix(this.ns, ((await req(meta.get(genKey(this.ns)))) as number | undefined) ?? 0);
             const pairs = await historyUnder(meta, idbStore(tx, gen), gen, o.path, o.keep ?? 0);
             const atCursor = ((await req(meta.get(cursorKey(this.ns)))) as number | undefined) ?? 0;

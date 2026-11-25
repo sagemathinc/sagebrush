@@ -553,7 +553,7 @@ export class SyncClient {
     }
     this.opts.onLease?.(lease);
     const ob = new Outbox(this.w, lease);
-    ob.sealed = !!this.opts.e2e;
+    ob.sealing = !!this.opts.e2e;
     // (with the confirmed index: the first sync's adoption captured (the tree as of W1) before the socket opens (C3);
     // without it (step 3): the scan starts at the latest op)
     if (this.opts.onIndex) await captureAdoption(this.w, ns);
