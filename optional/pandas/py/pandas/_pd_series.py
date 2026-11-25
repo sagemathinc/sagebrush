@@ -6,14 +6,16 @@ derived from a Series is an eager copy (Copy-on-Write, r7 §C3).
 
 import numpy as np
 
-from ._pd_column import Column, column_from, set_values
-from ._pd_dtypes import STR, infer, is_missing, resolve_dtype
+from ._pd_column import Column, column_from, set_values, astype_column
+from ._pd_dtypes import STR, INTS, infer, is_missing, resolve_dtype
 from ._pd_datetime import DT, NaT, FIELDS
 from .errors import _INPLACE, inplace_given
 from ._pd_index import Index, RangeIndex, default_index, ensure_index
 from . import _pd_indexing as X
 from . import _pd_reduce as R
 from . import _pd_repr
+from . import _pd_sort as S
+from . import _pd_reshape as RS
 
 __all__ = ["Series"]
 
@@ -142,7 +144,7 @@ class Series(object):
         if dtype is not None or na_value is not None:
             raise _unsupported("Series.to_numpy(dtype=, na_value=)")
         if copy:
-            if self._pd_col.dtype is DT:
+            if self._pd_col.dtype is DT or self._pd_col.dtype is STR:
                 return _export(self._pd_col, "Series.to_numpy()")
             if self._pd_col.is_list:
                 raise _unsupported("Series.to_numpy() of a%s %s column" % ("n" if self._pd_col.dtype == "object" else "", self._pd_col.dtype))
@@ -156,6 +158,9 @@ class Series(object):
     def __array__(self, dtype=None, copy=None):
         if dtype is not None:
             raise _unsupported("numpy.asarray(Series, dtype=)")
+        if self._pd_col.dtype is STR:
+            # (Sagebrush's numpy can't take a string array from __array__ yet; to_numpy() gives one)
+            raise _unsupported("numpy.asarray(Series) of a str column (Series.to_numpy() gives its '<U' array)")
         return _export(self._pd_col, "numpy.asarray(Series)")
 
     def __len__(self):
@@ -458,6 +463,123 @@ class Series(object):
             return None
         return out
 
+    # --- sorting and reshaping -----------------------------------------------
+
+    def fillna(self, value=RS.NO_VALUE, *, axis=None, inplace=_INPLACE, limit=None):
+        """The missing values replaced by value (a scalar, or a dict of
+        label -> value); see _pd_reshape.fill_column for the dtype."""
+        if value is RS.NO_VALUE:
+            raise TypeError("NDFrame.fillna() missing 1 required positional argument: 'value'")
+        inplace = inplace_given(inplace, "Series.fillna")
+        if axis not in (None, 0, "index", "rows") or limit is not None:
+            raise _unsupported("Series.fillna(axis=, limit=)")
+        if isinstance(value, dict):
+            col = RS.fill_mapped(self._pd_col, self._pd_index.tolist(), value)
+        elif value is not None and not _is_scalar(value):
+            raise _unsupported("Series.fillna(a %s)" % type(value).__name__)
+        else:
+            col = RS.fill_column(self._pd_col, value)
+        if inplace:
+            self._pd_col = col
+            return None
+        return Series._pd_new(col, self._pd_index.copy(), self._pd_name)
+
+    def rename(self, index=None, *, axis=None, copy=None, inplace=_INPLACE, level=None, errors="ignore"):
+        """A scalar (or None) as the new name; a dict or a function maps the
+        index's labels."""
+        inplace = inplace_given(inplace, "Series.rename")
+        if level is not None:
+            raise _unsupported("Series.rename(level=)")
+        if isinstance(index, dict) or callable(index):
+            out = Series._pd_new(self._pd_col.copy(), RS.relabel(self._pd_index, index, errors, "Series.rename"), self._pd_name)
+        elif index is None or _is_scalar(index) or isinstance(index, tuple):
+            out = Series._pd_new(self._pd_col.copy(), self._pd_index.copy(), index)
+        else:
+            raise _unsupported("Series.rename(a %s)" % type(index).__name__)
+        if inplace:
+            self._pd_index, self._pd_name = out._pd_index, out._pd_name
+            return None
+        return out
+
+    def reset_index(self, level=None, *, drop=False, name=RS.NO_VALUE, inplace=_INPLACE, allow_duplicates=False):
+        """drop=True: the values with a new RangeIndex; else a DataFrame of
+        the index (a column named after it, or 'index') and the values (a
+        column named `name`, the Series' name or 0)."""
+        inplace = inplace_given(inplace, "Series.reset_index")
+        if level is not None or allow_duplicates:
+            raise _unsupported("Series.reset_index(level=, allow_duplicates=)")
+        if drop:
+            out = Series._pd_new(self._pd_col.copy(), default_index(len(self)), self._pd_name)
+            if inplace:
+                self._pd_index = out._pd_index
+                return None
+            return out
+        if inplace:
+            raise TypeError("Cannot reset_index inplace on a Series to create a DataFrame")
+        from ._pd_frame import DataFrame
+        vname = name if name is not RS.NO_VALUE else (0 if self._pd_name is None else self._pd_name)
+        iname = self._pd_index.name if self._pd_index.name is not None else ("index" if vname != "index" else "level_0")
+        cols = [self._pd_index._pd_column().copy(), self._pd_col.copy()]
+        return DataFrame._pd_new(cols, Index([iname, vname]), default_index(len(self)))
+
+    def apply(self, func, convert_dtype=None, args=(), *, by_row="compat", **kwargs):
+        """func of each value, as a new Series (the dtype inferred from the
+        results, as pandas does; an empty Series keeps its dtype)."""
+        if convert_dtype is not None or by_row != "compat" or not callable(func):
+            raise _unsupported("Series.apply(convert_dtype=, by_row=, a func name)")
+        if not len(self):
+            return Series._pd_new(self._pd_col.copy(), self._pd_index.copy(), self._pd_name)
+        results = [func(v, *args, **kwargs) for v in self._pd_col.tolist()]
+        if any(isinstance(r, Series) for r in results):
+            raise _unsupported("Series.apply with a func returning a Series")
+        return Series._pd_new(column_from(results), self._pd_index.copy(), self._pd_name)
+
+    def unique(self):
+        """The distinct values in order of first appearance (NaN once, -0.0
+        as 0.0): an array of the Series' dtype; a str Series gives a '<U'
+        array (pandas: a StringArray; Sagebrush's numpy has no object dtype
+        yet)."""
+        col = self._pd_col
+        seen = {}
+        keep = []
+        nan_seen = False
+        for i, v in enumerate(col.tolist()):
+            if is_missing(v):
+                if not nan_seen:
+                    nan_seen = True
+                    keep.append(i)
+                continue
+            if v not in seen:
+                seen[v] = True
+                keep.append(i)
+        return _export(col.take(keep), "Series.unique()", False)
+
+    def astype(self, dtype, copy=None, errors="raise"):
+        """A copy as dtype (see _pd_column.astype_column)."""
+        if errors != "raise" or isinstance(dtype, dict):
+            raise _unsupported("Series.astype(errors=, a dict)")
+        return Series._pd_new(astype_column(self._pd_col, dtype), self._pd_index.copy(), self._pd_name)
+
+    def sort_values(self, *, axis=0, ascending=True, inplace=_INPLACE, kind="quicksort", na_position="last",
+                    ignore_index=False, key=None):
+        """The values in order (stable; see _pd_sort), missing values last
+        or first."""
+        inplace = inplace_given(inplace, "Series.sort_values")
+        if axis not in (0, "index", "rows") or key is not None:
+            raise _unsupported("Series.sort_values(axis=, key=)")
+        flags = S.check_ascending(ascending)
+        if len(flags) != 1:
+            raise ValueError("Length of ascending (%d) must be 1 for Series" % len(flags))
+        S.check_na_position(na_position)
+        S.check_kind(kind)
+        out = self._pd_take(S.sort_positions([self._pd_col], flags, na_position))
+        if ignore_index:
+            out._pd_index = default_index(len(out))
+        if inplace:
+            self._pd_col, self._pd_index = out._pd_col, out._pd_index
+            return None
+        return out
+
     # --- reprs -------------------------------------------------------------
 
     def __repr__(self):
@@ -500,29 +622,34 @@ _ObjectDtype = _ObjectDtypeType()
 
 def dtype_object(d):
     """The dtype object pandas shows for a column dtype."""
-    if d in ("int64", "float64", "bool", "int32"):
+    if d in INTS or d in ("float64", "bool"):
         return np.dtype(d)
     return d if d is STR or d is DT else _ObjectDtype
 
 
 def _astype(col, dtype):
-    want = resolve_dtype(dtype)
-    if want == col.dtype:
-        return col.copy()
-    return column_from(col.tolist(), want)
+    return astype_column(col, dtype)
 
 
-def _export(col, what):
+def _export(col, what, readonly=True):
     """to_numpy()/.values of one column: a read-only copy of a numeric
-    column (r7 §C3's table); str/object are rejected, and so is a datetime
+    column (r7 §C3's table). A str column without missing values gives a
+    '<U' array of its strings, where pandas gives an object array
+    (Sagebrush's numpy has no object dtype yet); object
+    columns and str with missing values are rejected, and so is a datetime
     column: pandas gives a numpy datetime64 array, which Sagebrush's numpy
     doesn't have yet (never the microsecond ints in its place)."""
     if col.dtype is DT:
         raise _unsupported("%s of a datetime64[us] column (Sagebrush's numpy has no datetime64 yet)" % what)
+    if col.dtype is STR:
+        if any(is_missing(v) for v in col._pd_values):
+            raise _unsupported("%s of a str column with missing values (pandas gives an object array; Sagebrush's numpy has no object dtype yet)" % what)
+        return np.array(list(col._pd_values), dtype=str) if len(col) else np.array([], dtype="<U1")
     if col.is_list:
         raise _unsupported("%s of a%s %s column" % (what, "n" if col.dtype == "object" else "", col.dtype))
     a = col._pd_values.copy()
-    a.flags.writeable = False
+    if readonly:
+        a.flags.writeable = False
     return a
 
 
@@ -613,7 +740,7 @@ def diff_column(col, periods):
     periods = int(periods)
     if col.dtype is DT:
         raise _unsupported("diff of a datetime64[us] column (a Timedelta column)")
-    if col.dtype not in ("int64", "float64", "int32"):
+    if col.dtype not in INTS and col.dtype != "float64":
         raise _unsupported("diff of a %s column" % (col.dtype,))
     v = col._pd_values.astype(np.float64)
     n = len(v)

@@ -18,13 +18,13 @@
     },
     {
       "case": "c3.series-str-to_numpy",
-      "message": "pandas.Series.to_numpy() of a str column is not in Sagebrush's pandas 0.x subset",
-      "reason": "C3: pandas exports str/object data as an object ndarray; Sagebrush's numpy has no str or object arrays, so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
+      "message": "pandas.Series.to_numpy() of a str column with missing values (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a str column with a missing value: pandas returns an object array holding NaN, and Sagebrush's numpy has no object dtype yet; a str column without missing values gives a '<U' array"
     },
     {
       "case": "c3.series-str-values",
-      "message": "pandas.Series.values of a str column is not in Sagebrush's pandas 0.x subset",
-      "reason": "C3: pandas exports str/object data as an object ndarray; Sagebrush's numpy has no str or object arrays, so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
+      "message": "pandas.Series.values of a str column with missing values (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a str column with a missing value: pandas returns an object array holding NaN, and Sagebrush's numpy has no object dtype yet; a str column without missing values gives a '<U' array"
     },
     {
       "case": "c3.series-str-to_numpy-object",
@@ -43,13 +43,13 @@
     },
     {
       "case": "c3.frame-str-to_numpy",
-      "message": "pandas.DataFrame.to_numpy() of a frame with str/object columns is not in Sagebrush's pandas 0.x subset",
-      "reason": "C3: pandas exports str/object data as an object ndarray; Sagebrush's numpy has no str or object arrays, so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
+      "message": "pandas.DataFrame.to_numpy() of a frame mixing str and other columns (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a frame mixing str with other columns: pandas returns an object array, and Sagebrush's numpy has no object dtype yet; a frame of only str columns gives a '<U' array"
     },
     {
       "case": "c3.frame-str-values",
-      "message": "pandas.DataFrame.values of a frame with str/object columns is not in Sagebrush's pandas 0.x subset",
-      "reason": "C3: pandas exports str/object data as an object ndarray; Sagebrush's numpy has no str or object arrays, so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
+      "message": "pandas.DataFrame.values of a frame mixing str and other columns (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a frame mixing str with other columns: pandas returns an object array, and Sagebrush's numpy has no object dtype yet; a frame of only str columns gives a '<U' array"
     },
     {
       "case": "c3.frame-numeric-to_numpy-object",
@@ -78,8 +78,8 @@
     },
     {
       "case": "c3.series-str-to_numpy-copy",
-      "message": "pandas.Series.to_numpy() of a str column is not in Sagebrush's pandas 0.x subset",
-      "reason": "C3: pandas exports str/object data as an object ndarray; Sagebrush's numpy has no str or object arrays, so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
+      "message": "pandas.Series.to_numpy() of a str column with missing values (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a str column with a missing value: pandas returns an object array holding NaN, and Sagebrush's numpy has no object dtype yet; a str column without missing values gives a '<U' array"
     },
     {
       "case": "dtype.string",
@@ -88,7 +88,7 @@
     },
     {
       "case": "dtype.category",
-      "message": "pandas: dtype='category' is not in Sagebrush's pandas 0.x subset",
+      "message": "pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet",
       "reason": "pandas' extension dtypes (string, category, Int64) are outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
@@ -172,9 +172,9 @@
       "reason": "pandas.DataFrame.describe is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
-      "case": "name.DataFrame.sort_values",
-      "message": "pandas.DataFrame.sort_values is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas.DataFrame.sort_values is outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "case": "name.DataFrame.rank",
+      "message": "pandas.DataFrame.rank is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.DataFrame.rank is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
       "case": "name.DataFrame.drop",
@@ -182,14 +182,14 @@
       "reason": "pandas.DataFrame.drop is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
-      "case": "name.DataFrame.rename",
-      "message": "pandas.DataFrame.rename is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas.DataFrame.rename is outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "case": "name.DataFrame.pivot_table",
+      "message": "pandas.DataFrame.pivot_table is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.DataFrame.pivot_table is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
-      "case": "name.DataFrame.apply",
-      "message": "pandas.DataFrame.apply is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas.DataFrame.apply is outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "case": "name.DataFrame.nlargest",
+      "message": "pandas.DataFrame.nlargest is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.DataFrame.nlargest is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
       "case": "name.DataFrame.plot",
@@ -237,9 +237,9 @@
       "reason": "pandas.Series.value_counts is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
-      "case": "name.Series.apply",
-      "message": "pandas.Series.apply is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas.Series.apply is outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "case": "name.Series.rank",
+      "message": "pandas.Series.rank is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.Series.rank is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
       "case": "name.Series.map",
@@ -247,9 +247,9 @@
       "reason": "pandas.Series.map is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
-      "case": "name.Series.astype",
-      "message": "pandas.Series.astype is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas.Series.astype is outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "case": "name.Series.nlargest",
+      "message": "pandas.Series.nlargest is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.Series.nlargest is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
       "case": "name.Series.plot",
@@ -257,9 +257,9 @@
       "reason": "pandas.Series.plot is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
-      "case": "name.Series.unique",
-      "message": "pandas.Series.unique is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas.Series.unique is outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "case": "name.Series.nunique",
+      "message": "pandas.Series.nunique is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.Series.nunique is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
       "case": "name.Series.quantile",
@@ -413,7 +413,7 @@
     },
     {
       "case": "csv.dtype-category",
-      "message": "pandas: dtype='category' is not in Sagebrush's pandas 0.x subset",
+      "message": "pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet",
       "reason": "pandas' extension dtypes (string, category, Int64) are outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
@@ -445,6 +445,51 @@
       "case": "csv.url-s3",
       "message": "read_csv from a URL isn't supported; download the file into the project first",
       "reason": "pandas fetches a URL itself; Sagebrush's read_csv does no network I/O, and the file must be in the project first"
+    },
+    {
+      "case": "csv.dtype-uint8",
+      "message": "pandas.read_csv(dtype=uint8) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into the smaller integers (with its overflow and lossy-cast errors); Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype"
+    },
+    {
+      "case": "csv.dtype-dict-int32",
+      "message": "pandas.read_csv(dtype=int32) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into the smaller integers (with its overflow and lossy-cast errors); Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype"
+    },
+    {
+      "case": "csv.dtype-dict-int8",
+      "message": "pandas.read_csv(dtype=int8) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into the smaller integers (with its overflow and lossy-cast errors); Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype"
+    },
+    {
+      "case": "csv.dtype-dict-uint16",
+      "message": "pandas.read_csv(dtype=uint16) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into the smaller integers (with its overflow and lossy-cast errors); Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype"
+    },
+    {
+      "case": "csv.dtype-int16",
+      "message": "pandas.read_csv(dtype=int16) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into the smaller integers (with its overflow and lossy-cast errors); Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype"
+    },
+    {
+      "case": "csv.dtype-dict-int16",
+      "message": "pandas.read_csv(dtype=int16) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into the smaller integers (with its overflow and lossy-cast errors); Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype"
+    },
+    {
+      "case": "csv.dtype-uint32",
+      "message": "pandas.read_csv(dtype=uint32) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into the smaller integers (with its overflow and lossy-cast errors); Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype"
+    },
+    {
+      "case": "csv.dtype-dict-uint32",
+      "message": "pandas.read_csv(dtype=uint32) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into the smaller integers (with its overflow and lossy-cast errors); Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype"
+    },
+    {
+      "case": "csv.dtype-float32",
+      "message": "pandas: dtype='float32' is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into float32; float32 isn't one of the subset's dtypes yet, so the dtype is refused before reading"
     },
     {
       "case": "dt.series-values",
@@ -640,6 +685,86 @@
       "case": "xl.url-https",
       "message": "read_excel from a URL isn't supported; download the file into the project first",
       "reason": "pandas fetches a URL itself; Sagebrush's read_excel does no network I/O (data-access design: the reader downloads third-party files from the source), as read_csv"
+    },
+    {
+      "case": "d1.astype-category",
+      "message": "pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet",
+      "reason": "the category dtype (a codes array and a categories Index, with its own repr) comes in a later step; until then it raises before any work"
+    },
+    {
+      "case": "d1.frame-astype-category",
+      "message": "pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet",
+      "reason": "the category dtype comes in a later step; a dict naming it raises before any column is converted"
+    },
+    {
+      "case": "d1.astype-errors",
+      "message": "pandas.Series.astype(errors=, a dict) is not in Sagebrush's pandas 0.x subset",
+      "reason": "astype's errors='ignore' and a Series' dict of dtypes are outside the subset; they raise before any work"
+    },
+    {
+      "case": "d1.small-int-from-values",
+      "message": "pandas: dtype uint8 from values is not in Sagebrush's pandas 0.x subset (astype gives one)",
+      "reason": "a smaller integer dtype (int8 to int32, uint8 to uint32) comes only from astype for now; constructing one from values, with pandas' range checks, is outside the subset"
+    },
+    {
+      "case": "d1.small-int-setitem",
+      "message": "pandas: setting a value in a uint8 column is not in Sagebrush's pandas 0.x subset",
+      "reason": "setting a value in a smaller integer column needs numpy's casting rules for that dtype, outside the subset; it raises before any change"
+    },
+    {
+      "case": "d1.sort_values-key",
+      "message": "pandas.Series.sort_values(axis=, key=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "sort_values' key= (a function of the column) and axis=1 are outside the subset; they raise before any work"
+    },
+    {
+      "case": "d1.apply-func-name",
+      "message": "pandas.Series.apply(convert_dtype=, by_row=, a func name) is not in Sagebrush's pandas 0.x subset",
+      "reason": "apply with a function's name (a string), convert_dtype= or by_row= is outside the subset; it raises before any work"
+    },
+    {
+      "case": "d1.apply-returns-series",
+      "message": "pandas.Series.apply with a func returning a Series is not in Sagebrush's pandas 0.x subset",
+      "reason": "a Series.apply whose function returns Series builds a DataFrame in pandas; outside the subset, it raises once the first results are in"
+    },
+    {
+      "case": "d1.frame-apply-raw",
+      "message": "pandas.DataFrame.apply(raw=, result_type=, by_row=, engine=, a func name) is not in Sagebrush's pandas 0.x subset",
+      "reason": "DataFrame.apply's raw=, result_type=, by_row= and engine= are outside the subset; they raise before any work"
+    },
+    {
+      "case": "d1.unique-str-missing",
+      "message": "pandas.Series.unique() of a str column with missing values (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas returns a StringArray holding NaN; a '<U' array can't hold a missing value and Sagebrush's numpy has no object dtype yet, so it raises before any work"
+    },
+    {
+      "case": "d1.frame-to_numpy-str-missing",
+      "message": "pandas.DataFrame.to_numpy() of str columns with missing values (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas returns an object array holding NaN; a '<U' array can't hold a missing value and Sagebrush's numpy has no object dtype yet, so it raises before any work"
+    },
+    {
+      "case": "d1.rename-level",
+      "message": "pandas.DataFrame.rename(level=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "rename's level= is for a MultiIndex, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "d1.reset_index-level",
+      "message": "pandas.DataFrame.reset_index(level=, col_level=, col_fill=, allow_duplicates=, names=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "reset_index's level=, col_level=, col_fill=, allow_duplicates= and names= are for a MultiIndex or duplicate labels, outside the subset; they raise before any work"
+    },
+    {
+      "case": "d1.fillna-limit",
+      "message": "pandas.Series.fillna(axis=, limit=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "fillna's limit= and axis=1 are outside the subset; they raise before any work"
+    },
+    {
+      "case": "d1.asarray-str",
+      "message": "pandas.numpy.asarray(Series) of a str column (Series.to_numpy() gives its '<U' array) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas gives an object array; Sagebrush's numpy can't take a string array from __array__ yet, so numpy.asarray of str data raises before any work and points to to_numpy(), which gives a '<U' array"
+    },
+    {
+      "case": "d1.frame-asarray-str",
+      "message": "pandas.numpy.asarray(DataFrame) of str columns (DataFrame.to_numpy() gives a '<U' array of a frame of only str columns) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas gives an object array; Sagebrush's numpy can't take a string array from __array__ yet, so numpy.asarray of str data raises before any work and points to to_numpy(), which gives a '<U' array"
     }
   ]
 }

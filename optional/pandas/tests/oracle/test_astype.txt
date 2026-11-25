@@ -1,0 +1,317 @@
+python 3.14.9 x86_64 glibc
+package et_xmlfile 2.0.0
+package numpy 2.5.1
+package openpyxl 3.1.5
+package pandas 3.1.0
+package python-dateutil 3.0.0
+package six 1.17.0
+package tzdata 2026.6
+pyarrow absent
+future.infer_string True
+str dtype <StringDtype(storage='python', na_value=nan)>
+option display.max_rows 60
+option display.min_rows 10
+option display.max_columns 0
+option display.width 80
+option display.precision 6
+option display.max_colwidth 50
+--
+== int-float
+
+0      1.0
+1      2.0
+2    300.0
+Name: i, dtype: float64
+== int-str
+
+0      1
+1      2
+2    300
+Name: i, dtype: str
+== int-object
+
+0      1
+1      2
+2    300
+Name: i, dtype: object
+== int-bool
+
+0    False
+1     True
+2     True
+dtype: bool
+== int-int64-copy
+
+0      1
+1      2
+2    300
+Name: i, dtype: int64
+== float-int-truncates
+
+0    1
+1   -2
+2    3
+dtype: int64
+== float-nan-int
+!! IntCastingNaNError: Cannot convert non-finite values (NA or inf) to integer. Replace or remove non-finite values or cast to an integer type that supports these values (e.g. 'Int64')
+== float-str
+
+0     1.9
+1    -2.5
+2     NaN
+dtype: str
+== bool-int
+
+0    1
+1    0
+2    1
+dtype: int64
+== bool-float
+
+0    1.0
+1    0.0
+2    1.0
+dtype: float64
+== bool-str
+
+0     True
+1    False
+2     True
+dtype: str
+== str-int-missing
+!! ValueError: cannot convert float NaN to integer
+== str-int
+
+0     1
+1    22
+2    -3
+dtype: int64
+== str-float
+
+0     1.0
+1    22.0
+2     NaN
+dtype: float64
+== str-float-bad
+!! ValueError: could not convert string to float: 'x'
+== str-object
+
+0      1
+1     22
+2    NaN
+dtype: object
+== object-str
+
+0      1
+1      a
+2    2.5
+dtype: str
+== int-to-int8
+
+0      0
+1      7
+2    120
+dtype: int8
+== float-to-int8
+
+0      0
+1      7
+2    120
+dtype: int8
+== bool-to-int8
+
+0    1
+1    0
+2    1
+dtype: int8
+== int-to-int16
+
+0      0
+1      7
+2    120
+dtype: int16
+== float-to-int16
+
+0      0
+1      7
+2    120
+dtype: int16
+== bool-to-int16
+
+0    1
+1    0
+2    1
+dtype: int16
+== int-to-int32
+
+0      0
+1      7
+2    120
+dtype: int32
+== float-to-int32
+
+0      0
+1      7
+2    120
+dtype: int32
+== bool-to-int32
+
+0    1
+1    0
+2    1
+dtype: int32
+== int-to-uint8
+
+0      0
+1      7
+2    120
+dtype: uint8
+== float-to-uint8
+
+0      0
+1      7
+2    120
+dtype: uint8
+== bool-to-uint8
+
+0    1
+1    0
+2    1
+dtype: uint8
+== int-to-uint16
+
+0      0
+1      7
+2    120
+dtype: uint16
+== float-to-uint16
+
+0      0
+1      7
+2    120
+dtype: uint16
+== bool-to-uint16
+
+0    1
+1    0
+2    1
+dtype: uint16
+== int-to-uint32
+
+0      0
+1      7
+2    120
+dtype: uint32
+== float-to-uint32
+
+0      0
+1      7
+2    120
+dtype: uint32
+== bool-to-uint32
+
+0    1
+1    0
+2    1
+dtype: uint32
+== int-to-uint8
+
+0      0
+1      7
+2    120
+dtype: uint8
+== float-to-uint8
+
+0      0
+1      7
+2    120
+dtype: uint8
+== bool-to-uint8
+
+0    1
+1    0
+2    1
+dtype: uint8
+== int-to-int16
+
+0      0
+1      7
+2    120
+dtype: int16
+== float-to-int16
+
+0      0
+1      7
+2    120
+dtype: int16
+== bool-to-int16
+
+0    1
+1    0
+2    1
+dtype: int16
+== uint8-wraps
+
+0    255
+1      0
+2    255
+dtype: uint8
+== int8-wraps
+
+0    127
+1   -128
+2    127
+dtype: int8
+== uint8-back-to-int64
+
+0    1
+1    2
+dtype: int64
+== uint8-dtype
+'uint8'
+== uint8-sum
+np.uint64(300)
+== uint8-max
+np.uint8(200)
+== uint8-mean
+np.float64(150.0)
+== int16-to_numpy
+[1, -2]
+== uint8-nan
+!! IntCastingNaNError: Cannot convert non-finite values (NA or inf) to integer. Replace or remove non-finite values or cast to an integer type that supports these values (e.g. 'Int64')
+== frame.float
+
+    age  fare
+0  22.0   7.0
+1  38.0  71.0
+2  26.5   8.0
+== frame.dict
+[('sex', 'str'), ('age', 'float64'), ('fare', 'float64'), ('alone', 'uint8')]
+== frame.dict-values
+
+  sex   age  fare  alone
+0   m  22.0   7.0      1
+1   f  38.0  71.0      0
+2   m  26.5   8.0      1
+== frame.dict-missing-col
+!! KeyError: "Only a column name can be used for the key in a dtype mappings argument. 'height' not found in columns."
+== frame.all-str
+[('sex', 'str'), ('age', 'str'), ('fare', 'str'), ('alone', 'str')]
+== frame.all-str-values
+
+  sex   age fare  alone
+0   m  22.0    7   True
+1   f  38.0   71  False
+2   m  26.5    8   True
+== frame.str-to-float-fails
+!! ValueError: could not convert string to float: 'm'
+== frame.original-kept
+[('sex', 'str'), ('age', 'float64'), ('fare', 'int64'), ('alone', 'bool')]
+== frame.uint8
+[('fare', 'uint8'), ('alone', 'uint8')]
+== frame.uint8-values
+
+   fare  alone
+0     7      1
+1    71      0
+2     8      1
