@@ -1764,7 +1764,7 @@
    "id": "hecke_matrix",
    "item": "ag3",
    "category": "modular forms",
-   "label": "T_p on S_2(Gamma0(389)) (p = 2, 11, 97)",
+   "label": "T_p on S_2(Gamma0(389)) (p = 2, 11, 97), level to T_p; warm: Magma reuses internal state across equal spaces, see ratio_user_cold",
    "sizes": {
     "s": {
      "n": 2,
