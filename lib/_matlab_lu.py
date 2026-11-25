@@ -48,8 +48,10 @@ from _matlab_ledger import Ledger, _record
 # (sys._sagebrush_heap_used after a full collection; provisional: the
 # project's host, until M1b's VM run) times 1.25, rounded up: an ndarray
 # 427 bytes, a list pointer 9.62 (Node 24), a large Python int 10.4
-C_IDX, C_BOOL, C_RE, C_CPLX, C_PTR, C_PYINT = 8, 1, 8, 16, 13, 14
-C_HDR, C_LIST = 534, 53
+C_BOOL, C_RE, C_CPLX, C_PTR, C_PYINT = 1, 8, 16, 13, 14
+C_LIST = 53
+# (C_IDX and C_HDR are _matlab_sparse's, which needs them for its triangular solves without importing this module)
+from _matlab_sparse import C_IDX, C_HDR  # noqa: E402
 # (Python lists' entries, float 34.6 and complex 50.6 bytes, and a 2-tuple 114)
 C_ENT, C_TUPLE = 64, 143
 
@@ -1187,6 +1189,42 @@ def _band_rhs(T, piv, Bm, n, kl, ku, k, dt, work):
     return out
 
 
+# ------------------------------------------------------------------ triangular solves
+
+def triangular_need(n, k, promote, cv):
+    """the bytes a triangular solve in place on B needs: B's copy in the result's class when it must be promoted (a
+    complex S, a real B), and one block's gathered rows, their product and their difference (at most E values each)"""
+    return (n * k * cv + C_HDR if promote else 0) + 3 * E * cv + 3 * C_HDR
+
+
+def triangular_in_place(S, Bm, lower, led, work):
+    """the triangular route of solve, past the band predicate: (X, singular), or None where its need doesn't fit led's
+    guard or a single array would pass A_SAFE (the band runs as before); Bm, the caller's own copy, solved in place
+    unless it must be promoted to complex"""
+    import _matlab_sparse as _sp
+
+    n = S.n
+    Bm = np.asarray(Bm).reshape((n, -1))
+    k = Bm.shape[1]
+    cplx = S.pr.dtype.kind == "c" or Bm.dtype.kind == "c"
+    dt = np.complex128 if cplx else np.float64
+    cv = _cval(dt)
+    promote = Bm.dtype != dt
+    if promote and n * k * cv > A_SAFE:
+        return None
+    need = triangular_need(n, k, promote, cv)
+    if led.owned + need > led.G:
+        return None
+    _route("triangular")
+    led.reserve(need, "triangular")
+    try:
+        X = Bm.astype(dt) if promote else Bm
+        singular = _sp.triangular_solve(S, X, lower, work)
+    finally:
+        led.release(need)
+    return X, singular
+
+
 # ------------------------------------------------------------------ the route (r6 sections 2.4, 2.4a)
 
 # the routing estimate's timing constants per host (seconds per unit; r6
@@ -1293,8 +1331,14 @@ def solve(S, Bm, what, bands=None, rec=None):
                            min(needs) if needs else 0, led.G, led.allowance_for, record=led.rec)
 
     # 2. band without the ordering: where master's route takes band (the
-    # amendment r1 floor: no sunk ordering), or where it beats LU's lower bound
+    # amendment r1 floor: no sunk ordering), or where it beats LU's lower bound;
+    # a triangular S (kl or ku 0; a diagonal one returned above) solved there by
+    # substitution instead, when its whole need fits the same ledger (else the band)
     if band_ok and (_sp.legacy_band_route(n, kl, ku) or t_band <= c["ord"] * nnz):
+        if kl == 0 or ku == 0:
+            out = triangular_in_place(S, Bm, ku == 0, led, work)
+            if out is not None:
+                return out
         return band()
     # 3. and 4. the ordering, admitted, then the estimate
     stats = {}

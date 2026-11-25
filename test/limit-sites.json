@@ -16483,5 +16483,10 @@
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_sparse.py :: _small_triangular :: \"\"\"A \\\\ b for a triangular (or diagonal) sparse A of order at most MAX_DENSE_SOLVE, by substitution: O(nnz) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'MAX' in MAX_DENSE_SOLVE, the existing switch between the dense and sparse routes this docstring names; the triangular route admits its need by the ledger's guard"
  }
 }

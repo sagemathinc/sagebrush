@@ -101,13 +101,16 @@ def restore():
 
 # -- 1b. above the floor, measured: the Ledger, without _matlab_lu (its own chunk) or _matlab_colamd
 G = make(1000, list(range(1000)), list(range(1000)), [1.0] * 1000)
-D300 = make(300, list(range(300)), list(range(300)), [3.0] * 300)
+# (a diagonal system now takes the sparse triangular route, exempt; one off-diagonal pair keeps this one on the
+# dense route, admitted)
+D300 = make(300, list(range(300)) + [0, 1], list(range(300)) + [1, 0], [3.0] * 300 + [1.0, 1.0])
 try:
     cap = Cap(10 ** 12)
     use(cap)
     assert float(sp.full_arr(G)[999, 999]) == 1.0
     x = M._mat(sp.mldivide(D300, M._unmat(np.ones((300, 1)))))
-    assert float(np.max(np.abs(x - 1.0 / 3.0))) <= 1e-15 and cap.reads == 2, cap.reads
+    r = np.dot(sp.full_arr(D300).T, x) - 1.0
+    assert float(np.max(np.abs(r))) <= 1e-14 and cap.reads == 2, cap.reads
 finally:
     restore()
 assert "_matlab_lu" not in sys.modules and "_matlab_colamd" not in sys.modules
@@ -141,6 +144,9 @@ def spy(nm):
 
 assert sp.SMALL_NEED == 1 << 22
 F = make(30, list(range(30)), list(range(30)), [2.0] * 30)
+# (the dense solve's boundary on a non-triangular twin of F, of the same size and need: a triangular one takes the
+# sparse triangular route)
+FN = make(30, list(range(30)) + [0, 1], list(range(30)) + [1, 0], [2.0] * 30 + [1.0, 1.0])
 need = sp._full_need(F)
 B1 = np.ones((30, 1))
 dn = dense_need(F, 1, False, False)
@@ -173,15 +179,15 @@ try:
         cap = Cap(0)
         use(cap)
         sp.SMALL_NEED = nd
-        x = sp.mldivide(F, b)
+        x = sp.mldivide(FN, b)
         assert cap.reads == 0
         sp.SMALL_NEED = nd - 1
-        e = refused(lambda: sp.mldivide(F, b))
+        e = refused(lambda: sp.mldivide(FN, b))
         assert isinstance(e, MemoryError) and cap.reads == 1, (e, cap.reads)
         use(Cap(4 << 30, domains=("wasm-engine",)))
         calls, f = spy("_legacy_mldivide")
         try:
-            sp.mldivide(F, b)
+            sp.mldivide(FN, b)
             assert calls == [1]
         finally:
             sp._legacy_mldivide = f
@@ -232,7 +238,7 @@ try:
     cap = Cap(dneed)
     use(cap)
     x = M._mat(sp.mldivide(D300, M._unmat(np.ones((300, 1)))))
-    assert float(np.max(np.abs(x - 1.0 / 3.0))) <= 1e-15 and cap.reads == 1
+    assert float(np.max(np.abs(np.dot(sp.full_arr(D300).T, x) - 1.0))) <= 1e-14 and cap.reads == 1
     cap = Cap(dneed - 1)
     use(cap)
     assert isinstance(refused(lambda: sp.mldivide(D300, M._unmat(np.ones((300, 1))))), MemoryError) and cap.reads == 1
