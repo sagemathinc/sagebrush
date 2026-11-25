@@ -307,3 +307,205 @@
 Empty DataFrame
 Columns: []
 Index: []
+== prefix-sep-list
+
+   n    x-p    x-q    y+r    y+s
+0  1   True  False   True  False
+1  2  False   True  False   True
+== prefix-sep-list.dtypes
+['int64', 'bool', 'bool', 'bool', 'bool']
+== prefix-sep-list.columns
+['n', 'x-p', 'x-q', 'y+r', 'y+s']
+== prefix-sep-dict
+
+   n    x-p    x-q    y+r    y+s
+0  1   True  False   True  False
+1  2  False   True  False   True
+== prefix-sep-dict.dtypes
+['int64', 'bool', 'bool', 'bool', 'bool']
+== prefix-sep-dict.columns
+['n', 'x-p', 'x-q', 'y+r', 'y+s']
+== prefix-sep-list-length
+!! ValueError: Length of 'prefix_sep' (1) did not match the length of the columns being encoded (2).
+== prefix-sep-int
+!! TypeError: 'int' object is not iterable
+== series-columns-ignored
+
+       a      b
+0  False   True
+1   True  False
+== series-columns-ignored.dtypes
+['bool', 'bool']
+== series-columns-ignored.columns
+['a', 'b']
+== float32-series-prefix
+
+   p_1.5  p_2.5
+0   True  False
+1  False   True
+== float32-series-prefix.dtypes
+['bool', 'bool']
+== float32-series-prefix.columns
+['p_1.5', 'p_2.5']
+== int8-series-prefix
+
+     p_1    p_2
+0   True  False
+1  False   True
+== int8-series-prefix.dtypes
+['bool', 'bool']
+== int8-series-prefix.columns
+['p_1', 'p_2']
+== datetime-series.columns
+[Timestamp('2020-01-01 00:00:00'), Timestamp('2021-01-01 00:00:00')]
+== datetime-series.values
+[[True, False], [False, True]]
+== frame-int8-columns
+
+     k_1    k_3
+0  False   True
+1   True  False
+== frame-int8-columns.dtypes
+['bool', 'bool']
+== frame-int8-columns.columns
+['k_1', 'k_3']
+== frame-float32-columns
+
+   k_1.5  k_2.5
+0   True  False
+1  False   True
+== frame-float32-columns.dtypes
+['bool', 'bool']
+== frame-float32-columns.columns
+['k_1.5', 'k_2.5']
+== frame-datetime-columns
+
+   k_2020-01-01 00:00:00  k_2021-01-01 00:00:00
+0                   True                  False
+1                  False                   True
+== frame-datetime-columns.dtypes
+['bool', 'bool']
+== frame-datetime-columns.columns
+['k_2020-01-01 00:00:00', 'k_2021-01-01 00:00:00']
+== repeated-labels-default
+
+     k_a    k_b    k_b    k_c
+0   True  False   True  False
+1  False   True  False   True
+== repeated-labels-default.dtypes
+['bool', 'bool', 'bool', 'bool']
+== repeated-labels-default.columns
+['k_a', 'k_b', 'k_b', 'k_c']
+== repeated-labels-columns
+
+     k_a    k_b    k_b    k_c
+0   True  False   True  False
+1  False   True  False   True
+== repeated-labels-columns.dtypes
+['bool', 'bool', 'bool', 'bool']
+== repeated-labels-columns.columns
+['k_a', 'k_b', 'k_b', 'k_c']
+== repeated-labels-columns-twice
+
+     k_a    k_b    k_b    k_c    k_a    k_b    k_b    k_c
+0   True  False   True  False   True  False   True  False
+1  False   True  False   True  False   True  False   True
+== repeated-labels-columns-twice.dtypes
+['bool', 'bool', 'bool', 'bool', 'bool', 'bool', 'bool', 'bool']
+== repeated-labels-columns-twice.columns
+['k_a', 'k_b', 'k_b', 'k_c', 'k_a', 'k_b', 'k_b', 'k_c']
+== dict-prefix-empty
+!! ValueError: Length of 'prefix' (0) did not match the length of the columns being encoded (2).
+== dict-prefix-empty-one-column
+!! ValueError: Length of 'prefix' (0) did not match the length of the columns being encoded (1).
+== dict-prefix-short
+!! ValueError: Length of 'prefix' (1) did not match the length of the columns being encoded (2).
+== dict-prefix-short-one-column
+['b', 'n', 'A_x', 'A_y']
+== dict-prefix-long
+!! ValueError: Length of 'prefix' (3) did not match the length of the columns being encoded (2).
+== dict-prefix-long-one-column
+!! ValueError: Length of 'prefix' (3) did not match the length of the columns being encoded (1).
+== dict-prefix-exact
+['n', 'A_x', 'A_y', 'B_u', 'B_v']
+== dict-prefix-exact-one-column
+!! ValueError: Length of 'prefix' (2) did not match the length of the columns being encoded (1).
+== dict-prefix-sep-long
+!! ValueError: Length of 'prefix_sep' (3) did not match the length of the columns being encoded (2).
+== list-prefix-no-columns
+!! ValueError: Length of 'prefix' (1) did not match the length of the columns being encoded (0).
+== columns-all-absent
+!! KeyError: "None of [Index(['absent'], dtype='str')] are in the [columns]"
+== columns-some-absent
+!! KeyError: "['absent'] not in index"
+== object-values-labels
+
+   False   True
+0  False   True
+1   True  False
+2  False  False
+== object-values-labels.dtypes
+['bool', 'bool']
+== object-values-labels.columns
+[False, True]
+== mixed-values
+
+       1      2      a      b    NaN
+0   True  False  False  False  False
+1  False  False   True  False  False
+2  False   True  False  False  False
+3  False  False  False   True  False
+== mixed-values.dtypes
+['bool', 'bool', 'bool', 'bool', 'bool']
+== mixed-values.columns
+[1, 2, 'a', 'b', nan]
+== index-int-categories-dummy-na
+[('3', 'int'), ('2', 'int'), ('1', 'int'), ('nan', 'float')]
+== index-int-categories-dummy-na-series
+[('3', 'int'), ('2', 'int'), ('1', 'int'), ('nan', 'float')]
+== index-int-categories-dummy-na-drop-first
+[('2', 'int'), ('1', 'int'), ('nan', 'float')]
+== index-int-categories-dummy-na-prefix
+('Index', 'str', ['p_3', 'p_2', 'p_1', 'p_nan'])
+== index-int-categories-frame-dummy-na
+('Index', 'str', ['c_3', 'c_2', 'c_1', 'c_nan'])
+== index-all-nan
+('RangeIndex', 'int64', [])
+== index-all-nan-prefix
+('RangeIndex', 'int64', [])
+== index-empty-list
+('RangeIndex', 'int64', [])
+== index-empty-dummy-na
+('Index', 'float64', [nan])
+== index-one-drop-first
+('RangeIndex', 'int64', [])
+== index-one-dummy-na-drop-first
+('Index', 'str', [nan])
+== index-int-dummy-na-drop-first
+('Index', 'float64', [nan])
+== index-int-dummy-na
+('Index', 'float64', [1.0, 2.0, nan])
+== index-bool-dummy-na
+('Index', 'object', [False, True, nan])
+== index-bool-none
+('Index', 'object', [False, True])
+== index-bool-none-prefix
+('Index', 'str', ['p_False', 'p_True'])
+== index-mixed-prefix
+('Index', 'str', ['p_1', 'p_1.5', 'p_2', 'p_a', 'p_b'])
+== index-object-ints-dummy-na
+('Index', 'object', [1, 2, nan])
+== index-datetime-dummy-na
+('DatetimeIndex', 'datetime64[us]', [Timestamp('2020-01-02 00:00:00'), NaT])
+== index-frame-all-dropped
+('RangeIndex', 'int64', [])
+== index-frame-all-nan
+('RangeIndex', 'int64', [])
+== index-frame-kept
+('Index', 'str', ['n'])
+== frame-no-columns
+!! ValueError: No objects to concatenate
+== dtype-object
+!! ValueError: dtype=object is not a valid dtype for get_dummies
+== dtype-object-string
+!! ValueError: dtype=object is not a valid dtype for get_dummies

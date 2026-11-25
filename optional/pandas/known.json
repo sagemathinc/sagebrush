@@ -432,6 +432,26 @@
       "reason": "sparse=True gives SparseDtype columns, which aren't in the subset; it raises before any work"
     },
     {
+      "case": "get_dummies.series-list-prefix",
+      "message": "pandas.get_dummies(a list or dict prefix or prefix_sep of a Series) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas pastes the text of a Series' list or dict prefix into its labels; not in the subset, it raises before any work (a str prefix works)"
+    },
+    {
+      "case": "get_dummies.series-dict-prefix",
+      "message": "pandas.get_dummies(a list or dict prefix or prefix_sep of a Series) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas pastes the text of a Series' list or dict prefix into its labels; not in the subset, it raises before any work (a str prefix works)"
+    },
+    {
+      "case": "get_dummies.series-list-prefix-sep",
+      "message": "pandas.get_dummies(a list or dict prefix or prefix_sep of a Series) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas pastes the text of a Series' list or dict prefix_sep into its labels; not in the subset, it raises before any work (a str prefix_sep works)"
+    },
+    {
+      "case": "get_dummies.series-int8-labels",
+      "message": "pandas: get_dummies of a Series of dtype int8 without a prefix is not in Sagebrush's pandas 0.x subset",
+      "reason": "without a prefix, pandas labels the columns with an Index of the values' own dtype (int8 ... uint32, float32), which the subset's Index doesn't hold; it raises before any result (with a prefix, or as a frame column, the labels are strings and it works)"
+    },
+    {
       "case": "get_dummies.dtype",
       "message": "pandas.get_dummies(dtype='int8') is not in Sagebrush's pandas 0.x subset",
       "reason": "get_dummies takes dtype bool (its default), int or float in the subset; other dtypes raise before any work"

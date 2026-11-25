@@ -16,6 +16,9 @@ def _unsupported(what):
 
 
 def _out_dtype(dtype):
+    if dtype is object or (isinstance(dtype, str) and dtype in ("object", "O")) or \
+            (isinstance(dtype, np.dtype) and dtype.kind == "O"):
+        raise ValueError("dtype=object is not a valid dtype for get_dummies")
     if dtype is None or dtype is bool or dtype == "bool":
         return "bool"
     if dtype is int or dtype in ("int64", "int"):
@@ -26,9 +29,15 @@ def _out_dtype(dtype):
 
 
 def _categories_and_codes(col):
+    # (a category column's own categories; otherwise the distinct values present, sorted as pandas sorts them, of
+    # any dtype: float32, smaller ints and times too)
     from . import _pd_category as CT
-    enc = col if isinstance(col, CT.CatColumn) else CT.column_to_category(col)
-    return enc.dtype.categories.tolist(), enc._pd_codes.tolist()
+    if isinstance(col, CT.CatColumn):
+        return col.dtype.categories.tolist(), col._pd_codes.tolist()
+    values = col.tolist()
+    cats = CT.sorted_unique(values)
+    pos = dict((v, k) for k, v in enumerate(cats))
+    return cats, [-1 if is_missing(v) else pos[v] for v in values]
 
 
 def _label(prefix, sep, value):
@@ -38,18 +47,48 @@ def _label(prefix, sep, value):
 
 
 def _encode(col, prefix, sep, dummy_na, drop_first, d):
+    """The labels, the indicator columns, and the labels before drop_first
+    (whose types give the label Index its dtype)."""
+    from ._pd_datetime import DT, NaT
     cats, codes = _categories_and_codes(col)
-    n = len(codes)
     labels, cols = [], []
     for k, cat in enumerate(cats):
         labels.append(_label(prefix, sep, cat))
         cols.append(np.array([c == k for c in codes], dtype=bool))
     if dummy_na:
-        labels.append(_label(prefix, sep, float("nan")))
+        labels.append(_label(prefix, sep, NaT if col.dtype == DT else float("nan")))
         cols.append(np.array([c < 0 for c in codes], dtype=bool))
+    full = labels
     if drop_first:
         labels, cols = labels[1:], cols[1:]
-    return labels, [Column(d, a.astype(d) if d != "bool" else a) for a in cols]
+    return labels, [Column(d, a.astype(d) if d != "bool" else a) for a in cols], full
+
+
+# (the dtypes an Index holds in the subset: a source of another dtype, int8 or float32, labels the columns with an
+# Index of its own dtype in pandas)
+_LABEL_DTYPES = ("int64", "float64", "bool", "object")
+
+
+def _label_index(col, labels, full, prefix):
+    """The columns' Index of a Series' or list's dummies, as pandas types it."""
+    from ._pd_index import Index, default_index
+    from ._pd_datetime import DT
+    from . import _pd_category as CT
+    if not labels:
+        return default_index(0)
+    if prefix is not None:
+        return Index(labels)
+    if col.dtype == "object" and not all(is_missing(v) for v in full):
+        # (an object column's values: an object Index, as pandas' categories of it are)
+        return Index(labels, dtype=object)
+    if isinstance(col, CT.CatColumn):
+        # (pandas makes a CategoricalIndex, of the categories' own values: int categories stay ints beside a nan)
+        if len(full) > len(col.dtype.categories) and col.dtype.categories.dtype == "int64":
+            return Index(labels, dtype=object)
+    elif not (col.dtype is STR or col.dtype == DT or str(col.dtype) in _LABEL_DTYPES):
+        raise NotImplementedError("pandas: get_dummies of a Series of dtype %s without a prefix is not in Sagebrush's "
+                                  "pandas 0.x subset" % col.dtype)
+    return Index(labels, dtype=Index(full).dtype)
 
 
 def get_dummies(data, prefix=None, prefix_sep="_", dummy_na=False, columns=None, sparse=False, drop_first=False,
@@ -60,11 +99,12 @@ def get_dummies(data, prefix=None, prefix_sep="_", dummy_na=False, columns=None,
     from . import _pd_category as CT
     if sparse:
         raise _unsupported("sparse=True")
-    if not isinstance(prefix_sep, str):
-        raise _unsupported("prefix_sep of a %s" % type(prefix_sep).__name__)
     d = _out_dtype(dtype)
     if isinstance(data, DataFrame):
         f = data
+        if not f._pd_cols:
+            # (pandas concatenates the frame's parts, of which there are none)
+            raise ValueError("No objects to concatenate")
         names = f.columns.tolist()
         if columns is None:
             js = [j for j, c in enumerate(f._pd_cols) if c.dtype is STR or c.dtype == "object"
@@ -73,11 +113,29 @@ def get_dummies(data, prefix=None, prefix_sep="_", dummy_na=False, columns=None,
             if isinstance(columns, str) or not isinstance(columns, (list, tuple, Index)):
                 raise TypeError("Input must be a list-like for parameter `columns`")
             want = list(columns)
-            js = []
-            for lab in want:
-                if lab not in names:
-                    raise KeyError("None of [Index(%r, dtype='object')] are in the [columns]" % (want,))
-                js.append(names.index(lab))
+            absent = [lab for lab in want if lab not in names]
+            if absent and len(absent) == len(want):
+                raise KeyError("None of [%r] are in the [columns]" % (Index(want),))
+            if absent:
+                raise KeyError("%r not in index" % (absent,))
+            # (every column with a label given: repeated labels are all encoded, as pandas selects them)
+            js = [j for lab in want for j, name in enumerate(names) if name == lab]
+        for what, given in (("prefix", prefix), ("prefix_sep", prefix_sep)):
+            # (a list or dict per encoded column: its length checked first, as pandas checks it)
+            if isinstance(given, (list, tuple, dict)) and len(given) != len(js):
+                raise ValueError("Length of '%s' (%d) did not match the length of the columns being encoded (%d)."
+                                 % (what, len(given), len(js)))
+        if isinstance(prefix_sep, (list, tuple)):
+            if len(prefix_sep) != len(js):
+                raise ValueError("Length of 'prefix_sep' (%d) did not match the length of the columns being encoded "
+                                 "(%d)." % (len(prefix_sep), len(js)))
+            seps = list(prefix_sep)
+        elif isinstance(prefix_sep, dict):
+            seps = [prefix_sep[names[j]] for j in js]
+        elif isinstance(prefix_sep, str):
+            seps = [prefix_sep] * len(js)
+        else:
+            raise TypeError("'%s' object is not iterable" % type(prefix_sep).__name__)
         if isinstance(prefix, (list, tuple)):
             if len(prefix) != len(js):
                 raise ValueError("Length of 'prefix' (%d) did not match the length of the columns being encoded (%d)."
@@ -91,22 +149,22 @@ def get_dummies(data, prefix=None, prefix_sep="_", dummy_na=False, columns=None,
             prefixes = [names[j] for j in js]
         else:
             raise _unsupported("prefix of a %s" % type(prefix).__name__)
-        keep = [j for j in range(len(f._pd_cols)) if j not in js]
+        keep = [j for j in range(len(f._pd_cols)) if j not in set(js)]
         labels = [names[j] for j in keep]
         cols = [f._pd_cols[j].copy() for j in keep]
-        for j, p in zip(js, prefixes):
-            ls, cs = _encode(f._pd_cols[j], p, prefix_sep, dummy_na, drop_first, d)
+        for j, p, sep in zip(js, prefixes, seps):
+            ls, cs, full = _encode(f._pd_cols[j], p, sep, dummy_na, drop_first, d)
             labels += ls
             cols += cs
-        return DataFrame._pd_new(cols, Index(labels) if labels else Index([], dtype=object), f._pd_index.copy())
-    if columns is not None:
-        raise _unsupported("columns= of a Series")
+        return DataFrame._pd_new(cols, Index(labels) if labels else default_index(0), f._pd_index.copy())
+    # (columns= means nothing for a Series: pandas ignores it)
     if isinstance(data, Series):
         col, index = data._pd_col, data._pd_index.copy()
     else:
         col = column_from(data)
         index = default_index(len(col))
-    if isinstance(prefix, (list, tuple, dict)):
-        raise _unsupported("a list or dict prefix of a Series")
-    labels, cols = _encode(col, prefix, prefix_sep, dummy_na, drop_first, d)
-    return DataFrame._pd_new(cols, Index(labels) if labels else Index([], dtype=object), index)
+    if isinstance(prefix, (list, tuple, dict)) or not isinstance(prefix_sep, str):
+        # (pandas pastes such a prefix's or separator's text into the labels)
+        raise _unsupported("a list or dict prefix or prefix_sep of a Series")
+    labels, cols, full = _encode(col, prefix, prefix_sep, dummy_na, drop_first, d)
+    return DataFrame._pd_new(cols, _label_index(col, labels, full, prefix), index)

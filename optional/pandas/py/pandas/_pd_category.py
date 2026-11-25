@@ -161,7 +161,7 @@ def _decoded_dtype(d):
     return None if d in INTS or d == "bool" else d
 
 
-def _sorted_unique(values):
+def sorted_unique(values):
     seen = []
     known = set()
     for v in values:
@@ -188,7 +188,7 @@ def encode(values, dtype=None):
     ordered = dtype.ordered if isinstance(dtype, CategoricalDtype) else False
     cats = dtype.categories if isinstance(dtype, CategoricalDtype) else None
     if cats is None:
-        cats = Index(_sorted_unique(values)) if values else Index([], dtype=object)
+        cats = Index(sorted_unique(values)) if values else Index([], dtype=object)
         if cats.dtype == "object" and not len(cats):
             cats = Index([], dtype=object)
     lookup = dict((v, i) for i, v in enumerate(cats.tolist()))
