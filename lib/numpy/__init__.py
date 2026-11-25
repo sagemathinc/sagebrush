@@ -1587,7 +1587,8 @@ def _quantile(a, qa, weak_q, axis, method, keepdims, out_of_range, out=None):
     ox, ix, ov, odt = out, Ellipsis, out, None
     if out is not None:
         if keepdims:
-            ix = (Ellipsis,) + ((0,) * nd if all_axes else tuple(0 if i == axis % nd else slice(None) for i in range(nd)))
+            ix = (Ellipsis,) + ((0,) * nd if all_axes else tuple(0 if (i in axes if axes is not None else i == axis % nd)
+                                                                else slice(None) for i in range(nd)))
             out[ix]  # (indexed first, as _ureduce indexes it: a tuple or list refuses that itself)
         elif not takes and isinstance(out, tuple):
             # (the ufuncs' out= as a tuple: one entry, an array, or None for a new result, which is computed and the
