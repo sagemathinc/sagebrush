@@ -318,8 +318,14 @@
 !! NotImplementedError: pandas.Series.add of an object column is not in Sagebrush's pandas 0.x subset
 == arith.object-neg
 !! NotImplementedError: pandas.Series.__neg__ of an object column is not in Sagebrush's pandas 0.x subset
-== op.frame-gt
-!! NotImplementedError: pandas.DataFrame.__gt__ (comparison) is not in Sagebrush's pandas 0.x subset
+== compare.repeated-columns
+!! NotImplementedError: pandas.DataFrame.eq of a frame with repeated column labels is not in Sagebrush's pandas 0.x subset
+== compare.level
+!! NotImplementedError: pandas.DataFrame.eq(level=) (a MultiIndex) is not in Sagebrush's pandas 0.x subset
+== compare.series-level
+!! NotImplementedError: pandas.Series.eq(level=) (a MultiIndex) is not in Sagebrush's pandas 0.x subset
+== compare.3d
+!! NotImplementedError: pandas.DataFrame.eq with a 3-dimensional array is not in Sagebrush's pandas 0.x subset
 == frame-arith.other-columns
 !! NotImplementedError: pandas.DataFrame.add of frames with different columns (pandas' added all-missing columns take a dtype from its internal blocks) is not in Sagebrush's pandas 0.x subset
 == frame-arith.series-other-labels

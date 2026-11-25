@@ -1,0 +1,1076 @@
+python 3.14.9 x86_64 glibc
+package et_xmlfile 2.0.0
+package numpy 2.5.1
+package openpyxl 3.1.5
+package pandas 3.1.0
+package python-dateutil 3.0.0
+package six 1.17.0
+package tzdata 2026.6
+pyarrow absent
+future.infer_string True
+str dtype <StringDtype(storage='python', na_value=nan)>
+option display.max_rows 60
+option display.min_rows 10
+option display.max_columns 0
+option display.width 80
+option display.precision 6
+option display.max_colwidth 50
+--
+== series-scalar-eq
+
+0    False
+1     True
+2    False
+dtype: bool
+== series-scalar-eq.dtypes
+'bool'
+== series-list-eq
+
+0     True
+1     True
+2    False
+dtype: bool
+== series-list-eq.dtypes
+'bool'
+== series-series-eq
+
+0     True
+1    False
+2    False
+dtype: bool
+== series-series-eq.dtypes
+'bool'
+== frame-scalar-eq
+
+       a      b
+0  False   True
+1  False  False
+2  False  False
+== frame-scalar-eq.dtypes
+['bool', 'bool']
+== frame-frame-eq
+
+      a      b
+0  True   True
+1  True  False
+2  True   True
+== frame-frame-eq.dtypes
+['bool', 'bool']
+== frame-row-eq
+
+       a      b
+0   True   True
+1  False  False
+2  False  False
+== frame-row-eq.dtypes
+['bool', 'bool']
+== frame-named-eq
+
+       a      b      z
+0   True  False  False
+1  False  False  False
+2  False  False  False
+== frame-named-eq.dtypes
+['bool', 'bool', 'bool']
+== series-named-eq
+
+0     True
+1    False
+2    False
+5    False
+dtype: bool
+== series-named-eq.dtypes
+'bool'
+== series-scalar-ne
+
+0     True
+1    False
+2     True
+dtype: bool
+== series-scalar-ne.dtypes
+'bool'
+== series-list-ne
+
+0    False
+1    False
+2     True
+dtype: bool
+== series-list-ne.dtypes
+'bool'
+== series-series-ne
+
+0    False
+1     True
+2     True
+dtype: bool
+== series-series-ne.dtypes
+'bool'
+== frame-scalar-ne
+
+      a      b
+0  True  False
+1  True   True
+2  True   True
+== frame-scalar-ne.dtypes
+['bool', 'bool']
+== frame-frame-ne
+
+       a      b
+0  False  False
+1  False   True
+2  False  False
+== frame-frame-ne.dtypes
+['bool', 'bool']
+== frame-row-ne
+
+       a      b
+0  False  False
+1   True   True
+2   True   True
+== frame-row-ne.dtypes
+['bool', 'bool']
+== frame-named-ne
+
+       a     b     z
+0  False  True  True
+1   True  True  True
+2   True  True  True
+== frame-named-ne.dtypes
+['bool', 'bool', 'bool']
+== series-named-ne
+
+0    False
+1     True
+2     True
+5     True
+dtype: bool
+== series-named-ne.dtypes
+'bool'
+== series-scalar-lt
+
+0     True
+1    False
+2    False
+dtype: bool
+== series-scalar-lt.dtypes
+'bool'
+== series-list-lt
+
+0    False
+1    False
+2    False
+dtype: bool
+== series-list-lt.dtypes
+'bool'
+== series-series-lt
+
+0    False
+1     True
+2    False
+dtype: bool
+== series-series-lt.dtypes
+'bool'
+== frame-scalar-lt
+
+       a      b
+0   True  False
+1  False  False
+2  False   True
+== frame-scalar-lt.dtypes
+['bool', 'bool']
+== frame-frame-lt
+
+       a      b
+0  False  False
+1  False  False
+2  False  False
+== frame-frame-lt.dtypes
+['bool', 'bool']
+== frame-row-lt
+
+       a      b
+0  False  False
+1  False  False
+2  False   True
+== frame-row-lt.dtypes
+['bool', 'bool']
+== frame-named-lt
+
+       a      b      z
+0  False  False  False
+1   True  False  False
+2  False  False  False
+== frame-named-lt.dtypes
+['bool', 'bool', 'bool']
+== series-named-lt
+
+0    False
+1     True
+2    False
+5    False
+dtype: bool
+== series-named-lt.dtypes
+'bool'
+== series-scalar-le
+
+0     True
+1     True
+2    False
+dtype: bool
+== series-scalar-le.dtypes
+'bool'
+== series-list-le
+
+0     True
+1     True
+2    False
+dtype: bool
+== series-list-le.dtypes
+'bool'
+== series-series-le
+
+0     True
+1     True
+2    False
+dtype: bool
+== series-series-le.dtypes
+'bool'
+== frame-scalar-le
+
+       a      b
+0   True   True
+1  False  False
+2  False   True
+== frame-scalar-le.dtypes
+['bool', 'bool']
+== frame-frame-le
+
+      a      b
+0  True   True
+1  True  False
+2  True   True
+== frame-frame-le.dtypes
+['bool', 'bool']
+== frame-row-le
+
+       a      b
+0   True   True
+1  False  False
+2  False   True
+== frame-row-le.dtypes
+['bool', 'bool']
+== frame-named-le
+
+       a      b      z
+0   True  False  False
+1   True  False  False
+2  False  False  False
+== frame-named-le.dtypes
+['bool', 'bool', 'bool']
+== series-named-le
+
+0     True
+1     True
+2    False
+5    False
+dtype: bool
+== series-named-le.dtypes
+'bool'
+== series-scalar-gt
+
+0    False
+1    False
+2    False
+dtype: bool
+== series-scalar-gt.dtypes
+'bool'
+== series-list-gt
+
+0    False
+1    False
+2    False
+dtype: bool
+== series-list-gt.dtypes
+'bool'
+== series-series-gt
+
+0    False
+1    False
+2    False
+dtype: bool
+== series-series-gt.dtypes
+'bool'
+== frame-scalar-gt
+
+       a      b
+0  False  False
+1   True  False
+2   True  False
+== frame-scalar-gt.dtypes
+['bool', 'bool']
+== frame-frame-gt
+
+       a      b
+0  False  False
+1  False  False
+2  False  False
+== frame-frame-gt.dtypes
+['bool', 'bool']
+== frame-row-gt
+
+       a      b
+0  False  False
+1   True  False
+2   True  False
+== frame-row-gt.dtypes
+['bool', 'bool']
+== frame-named-gt
+
+       a      b      z
+0  False  False  False
+1  False  False  False
+2  False  False  False
+== frame-named-gt.dtypes
+['bool', 'bool', 'bool']
+== series-named-gt
+
+0    False
+1    False
+2    False
+5    False
+dtype: bool
+== series-named-gt.dtypes
+'bool'
+== series-scalar-ge
+
+0    False
+1     True
+2    False
+dtype: bool
+== series-scalar-ge.dtypes
+'bool'
+== series-list-ge
+
+0     True
+1     True
+2    False
+dtype: bool
+== series-list-ge.dtypes
+'bool'
+== series-series-ge
+
+0     True
+1    False
+2    False
+dtype: bool
+== series-series-ge.dtypes
+'bool'
+== frame-scalar-ge
+
+       a      b
+0  False   True
+1   True  False
+2   True  False
+== frame-scalar-ge.dtypes
+['bool', 'bool']
+== frame-frame-ge
+
+      a      b
+0  True   True
+1  True  False
+2  True   True
+== frame-frame-ge.dtypes
+['bool', 'bool']
+== frame-row-ge
+
+      a      b
+0  True   True
+1  True  False
+2  True  False
+== frame-row-ge.dtypes
+['bool', 'bool']
+== frame-named-ge
+
+       a      b      z
+0   True  False  False
+1  False  False  False
+2  False  False  False
+== frame-named-ge.dtypes
+['bool', 'bool', 'bool']
+== series-named-ge
+
+0     True
+1    False
+2    False
+5    False
+dtype: bool
+== series-named-ge.dtypes
+'bool'
+== series-ndarray
+
+0     True
+1    False
+2    False
+dtype: bool
+== series-ndarray.dtypes
+'bool'
+== series-tuple
+(0     True
+1     True
+2    False
+dtype: bool, [('Pandas4Warning', 'Operation with tuple is deprecated. In a future version these will be treated as scalar-like. To retain the old behavior, explicitly wrap in a Series instead.')])
+== series-range
+(0    False
+1    False
+2    False
+dtype: bool, [('Pandas4Warning', 'Operation with range is deprecated. In a future version these will be treated as scalar-like. To retain the old behavior, explicitly wrap in a Series instead.')])
+== series-index
+
+0     True
+1    False
+2     True
+dtype: bool
+== series-index.dtypes
+'bool'
+== series-zerodim
+
+0     True
+1    False
+2    False
+dtype: bool
+== series-zerodim.dtypes
+'bool'
+== series-list-length
+!! ValueError: ('Lengths must match to compare', (3,), (2,))
+== series-index-length
+!! ValueError: ('Lengths must match to compare', (3,), (2,))
+== series-range-length
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== series-other-labels
+!! ValueError: Can only compare identically-labeled Series objects
+== series-permuted-labels
+!! ValueError: Can only compare identically-labeled Series objects
+== series-none
+
+0    False
+1    False
+2    False
+dtype: bool
+== series-none.dtypes
+'bool'
+== series-ne-nan
+
+0    True
+1    True
+2    True
+dtype: bool
+== series-ne-nan.dtypes
+'bool'
+== series-float32-weak
+
+0    True
+dtype: bool
+== series-float32-weak.dtypes
+'bool'
+== series-float32-list
+
+0    False
+dtype: bool
+== series-float32-list.dtypes
+'bool'
+== series-int-gt-str
+!! TypeError: Invalid comparison between dtype=int64 and str
+== series-float-gt-str
+!! TypeError: Invalid comparison between dtype=float64 and str
+== series-bool-gt-str
+!! TypeError: Invalid comparison between dtype=bool and str
+== series-int-eq-str
+
+0    False
+1    False
+2    False
+dtype: bool
+== series-int-eq-str.dtypes
+'bool'
+== series-str-eq
+
+0     True
+1    False
+2    False
+dtype: bool
+== series-str-eq.dtypes
+'bool'
+== series-str-lt
+
+0     True
+1    False
+2    False
+dtype: bool
+== series-str-lt.dtypes
+'bool'
+== series-str-gt-int
+!! TypeError: '>' not supported between instances of 'str' and 'int'
+== series-datetime
+
+0    False
+1     True
+dtype: bool
+== series-datetime.dtypes
+'bool'
+== named-aligned-ordered
+
+1     True
+5    False
+dtype: bool
+== named-aligned-ordered.dtypes
+'bool'
+== named-fill
+
+0     True
+1    False
+2    False
+5    False
+dtype: bool
+== named-fill.dtypes
+'bool'
+== named-list
+
+0     True
+1     True
+2    False
+dtype: bool
+== named-list.dtypes
+'bool'
+== named-list-length
+!! ValueError: Lengths must be equal
+== named-tuple
+(0    True
+1    True
+2    True
+dtype: bool, [('Pandas4Warning', 'Series.eq with a tuple is deprecated and will be treated as scalar-like in a future version. Explicitly wrap in a numpy array instead.')])
+== named-range
+(0    False
+1    False
+2    False
+dtype: bool, [('Pandas4Warning', 'Operation with range is deprecated. In a future version these will be treated as scalar-like. To retain the old behavior, explicitly wrap in a Series instead.')])
+== named-range-length
+!! ValueError: operands could not be broadcast together with shapes (3,) (2,) 
+== named-index
+
+0    True
+1    True
+2    True
+dtype: bool
+== named-index.dtypes
+'bool'
+== named-index-length
+!! ValueError: ('Lengths must match to compare', (3,), (2,))
+== named-zerodim
+
+0     True
+1    False
+2    False
+dtype: bool
+== named-zerodim.dtypes
+'bool'
+== named-scalar-fill
+
+0    False
+1     True
+2     True
+dtype: bool
+== named-scalar-fill.dtypes
+'bool'
+== named-nan-fill
+
+0     True
+1    False
+dtype: bool
+== named-nan-fill.dtypes
+'bool'
+== named-list-fill
+
+0    True
+1    True
+dtype: bool
+== named-list-fill.dtypes
+'bool'
+== named-ne-nan
+
+0    True
+1    True
+2    True
+dtype: bool
+== named-ne-nan.dtypes
+'bool'
+== named-axis-1
+!! ValueError: No axis named 1 for object type Series
+== named-frame
+!! TypeError: Series.eq does not support a DataFrame `other`. Use df.eq(ser) instead.
+== frame-other-rows
+!! ValueError: Can only compare identically-labeled (both index and columns) DataFrame objects
+== frame-other-columns
+!! ValueError: Can only compare identically-labeled (both index and columns) DataFrame objects
+== frame-permuted-columns
+!! ValueError: Can only compare identically-labeled (both index and columns) DataFrame objects
+== frame-series-columns
+
+       a      b
+0   True   True
+1  False  False
+2  False  False
+== frame-series-columns.dtypes
+['bool', 'bool']
+== frame-series-permuted
+!! ValueError: Operands are not aligned. Do `left, right = left.align(right, axis=1)` before operating.
+== frame-series-other
+!! ValueError: Operands are not aligned. Do `left, right = left.align(right, axis=1)` before operating.
+== frame-series-reflected
+
+       a      b
+0   True   True
+1  False  False
+2  False  False
+== frame-series-reflected.dtypes
+['bool', 'bool']
+== frame-series-reflected-lt
+
+       a      b
+0  False   True
+1  False  False
+2   True  False
+== frame-series-reflected-lt.dtypes
+['bool', 'bool']
+== frame-series-reflected-other
+!! ValueError: Operands are not aligned. Do `left, right = left.align(right, axis=1)` before operating.
+== frame-scalar-reflected
+
+       a      b
+0  False   True
+1   True  False
+2   True  False
+== frame-scalar-reflected.dtypes
+['bool', 'bool']
+== frame-row-length
+!! ValueError: Unable to coerce to Series, length must be 2: given 3
+== frame-tuple
+
+       a      b
+0   True  False
+1  False  False
+2  False  False
+== frame-tuple.dtypes
+['bool', 'bool']
+== frame-tuple.warnings
+[('Pandas4Warning', 'Operation with tuple is deprecated. In a future version these will be treated as scalar-like. To retain the old behavior, explicitly wrap in a Series instead.')]
+== frame-range
+
+       a      b
+0  False  False
+1  False  False
+2  False  False
+== frame-range.dtypes
+['bool', 'bool']
+== frame-index
+
+       a      b
+0   True  False
+1  False  False
+2  False  False
+== frame-index.dtypes
+['bool', 'bool']
+== frame-zerodim
+
+       a      b
+0   True  False
+1  False  False
+2  False  False
+== frame-zerodim.dtypes
+['bool', 'bool']
+== frame-block
+
+       a      b
+0   True  False
+1  False  False
+2  False  False
+== frame-block.dtypes
+['bool', 'bool']
+== frame-block-column
+
+       a      b
+0   True  False
+1  False  False
+2  False  False
+== frame-block-column.dtypes
+['bool', 'bool']
+== frame-block-shape
+!! ValueError: Unable to coerce to DataFrame, shape must be (3, 2): given (2, 2)
+== frame-none
+
+       a      b
+0  False  False
+1  False  False
+2  False  False
+== frame-none.dtypes
+['bool', 'bool']
+== frame-float32-weak
+
+       f
+0  False
+1   True
+== frame-float32-weak.dtypes
+['bool']
+== frame-float32-row
+
+       f
+0  False
+1  False
+== frame-float32-row.dtypes
+['bool']
+== frame-int-gt-str
+!! TypeError: Invalid comparison between dtype=int64 and str
+== frame-str
+
+       s
+0   True
+1  False
+== frame-str.dtypes
+['bool']
+== frame-str-lt
+
+       s
+0   True
+1  False
+== frame-str-lt.dtypes
+['bool']
+== frame-mixed-lt
+!! TypeError: '<' not supported between instances of 'str' and 'int'
+== frame-mixed-eq
+
+       s     a
+0  False  True
+== frame-mixed-eq.dtypes
+['bool', 'bool']
+== frame-repeated-columns-scalar
+
+      a      a
+0  True  False
+== frame-repeated-columns-scalar.dtypes
+['bool', 'bool']
+== frame-repeated-columns-self
+
+      a     a
+0  True  True
+== frame-repeated-columns-self.dtypes
+['bool', 'bool']
+== frame-datetime
+
+      d
+0  True
+== frame-datetime.dtypes
+['bool']
+== frame-empty
+
+Empty DataFrame
+Columns: []
+Index: [2, 0]
+== frame-empty.dtypes
+[]
+== frame-named-other-rows
+
+       a      b
+0   True   True
+1   True  False
+2  False  False
+5  False  False
+== frame-named-other-rows.dtypes
+['bool', 'bool']
+== frame-named-other-columns
+
+      a      b
+0  True  False
+1  True  False
+2  True  False
+== frame-named-other-columns.dtypes
+['bool', 'bool']
+== frame-named-other-columns-ne
+
+       a     b     z
+0  False  True  True
+1  False  True  True
+2  False  True  True
+== frame-named-other-columns-ne.dtypes
+['bool', 'bool', 'bool']
+== frame-named-no-shared-columns
+
+       a      b      z
+0  False  False  False
+1  False  False  False
+2  False  False  False
+== frame-named-no-shared-columns.dtypes
+['bool', 'bool', 'bool']
+== frame-named-no-shared-columns-ne
+
+      a     b     z
+0  True  True  True
+1  True  True  True
+2  True  True  True
+== frame-named-no-shared-columns-ne.dtypes
+['bool', 'bool', 'bool']
+== frame-named-permuted-columns
+
+      a      b
+0  True   True
+1  True  False
+2  True   True
+== frame-named-permuted-columns.dtypes
+['bool', 'bool']
+== frame-named-rows-differ-ne
+
+       a      b
+0  False  False
+1   True   True
+2   True   True
+== frame-named-rows-differ-ne.dtypes
+['bool', 'bool']
+== frame-named-float32
+
+       f      g
+0   True  False
+1  False  False
+== frame-named-float32.dtypes
+['bool', 'bool']
+== frame-named-str
+
+      g      s
+0  True  False
+== frame-named-str.dtypes
+['bool', 'bool']
+== frame-named-series
+
+       a      b
+0   True   True
+1  False  False
+2  False  False
+== frame-named-series.dtypes
+['bool', 'bool']
+== frame-named-series-permuted
+
+       a      b
+0   True   True
+1  False  False
+2  False  False
+== frame-named-series-permuted.dtypes
+['bool', 'bool']
+== frame-named-series-other
+
+       a      b      z
+0   True  False  False
+1  False  False  False
+2  False  False  False
+== frame-named-series-other.dtypes
+['bool', 'bool', 'bool']
+== frame-named-series-other-ne
+
+       a     b     z
+0  False  True  True
+1   True  True  True
+2   True  True  True
+== frame-named-series-other-ne.dtypes
+['bool', 'bool', 'bool']
+== frame-named-series-gt
+
+      a      b      z
+0  True  False  False
+== frame-named-series-gt.dtypes
+['bool', 'bool', 'bool']
+== frame-named-series-rows
+
+      a      b
+0  True  False
+1  True  False
+2  True  False
+== frame-named-series-rows.dtypes
+['bool', 'bool']
+== frame-named-series-rows-aligned
+
+       a      b
+0   True  False
+1  False  False
+2  False  False
+9  False  False
+== frame-named-series-rows-aligned.dtypes
+['bool', 'bool']
+== frame-named-list-rows
+
+      a      b
+0  True  False
+1  True  False
+2  True  False
+== frame-named-list-rows.dtypes
+['bool', 'bool']
+== frame-named-list-rows-length
+!! ValueError: Unable to coerce to Series, length must be 3: given 2
+== frame-named-axis-none
+
+       a      b
+0   True  False
+1  False  False
+2  False  False
+== frame-named-axis-none.dtypes
+['bool', 'bool']
+== frame-named-axis-2
+!! ValueError: No axis named 2 for object type DataFrame
+== frame-named-fill
+!! TypeError: DataFrame.eq() got an unexpected keyword argument 'fill_value'
+== frame-named-empty-rows
+
+Empty DataFrame
+Columns: []
+Index: [0, 2, 3]
+== frame-named-empty-rows.dtypes
+[]
+== frame-named-empty-rows.index
+[0, 2, 3]
+== frame-named-repeated-self
+
+      a     a
+0  True  True
+== frame-named-repeated-self.dtypes
+['bool', 'bool']
+== dt-timestamp-gt
+
+0    False
+1    False
+2     True
+dtype: bool
+== dt-timestamp-gt.dtypes
+'bool'
+== dt-timestamp-eq
+
+0     True
+1    False
+2    False
+dtype: bool
+== dt-timestamp-eq.dtypes
+'bool'
+== dt-timestamp-ne
+
+0    False
+1     True
+2     True
+dtype: bool
+== dt-timestamp-ne.dtypes
+'bool'
+== dt-string
+
+0    False
+1    False
+2     True
+dtype: bool
+== dt-string.dtypes
+'bool'
+== dt-string-eq
+
+0     True
+1    False
+2    False
+dtype: bool
+== dt-string-eq.dtypes
+'bool'
+== dt-bad-string
+!! TypeError: Invalid comparison between dtype=datetime64[us] and str
+== dt-bad-string-eq
+
+0    False
+1    False
+2    False
+dtype: bool
+== dt-bad-string-eq.dtypes
+'bool'
+== dt-datetime
+
+0     True
+1    False
+2    False
+dtype: bool
+== dt-datetime.dtypes
+'bool'
+== dt-date
+!! TypeError: Invalid comparison between dtype=datetime64[us] and date
+== dt-nat
+
+0    False
+1    False
+2    False
+dtype: bool
+== dt-nat.dtypes
+'bool'
+== dt-nat-ne
+
+0    True
+1    True
+2    True
+dtype: bool
+== dt-nat-ne.dtypes
+'bool'
+== dt-none
+
+0    False
+1    False
+2    False
+dtype: bool
+== dt-none.dtypes
+'bool'
+== dt-int-eq
+
+0    False
+1    False
+2    False
+dtype: bool
+== dt-int-eq.dtypes
+'bool'
+== dt-int-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and int
+== dt-float-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and float
+== dt-series
+
+0     True
+1    False
+2     True
+dtype: bool
+== dt-series.dtypes
+'bool'
+== dt-list
+
+0     True
+1    False
+2     True
+dtype: bool
+== dt-list.dtypes
+'bool'
+== dt-named-aligned
+
+0    False
+1    False
+2     True
+dtype: bool
+== dt-named-aligned.dtypes
+'bool'
+== num-eq-timestamp
+
+0    False
+1    False
+2    False
+dtype: bool
+== num-eq-timestamp.dtypes
+'bool'
+== num-gt-timestamp
+!! TypeError: '>' not supported between instances of 'numpy.ndarray' and 'Timestamp'
+== str-eq-timestamp
+
+0    False
+dtype: bool
+== str-eq-timestamp.dtypes
+'bool'

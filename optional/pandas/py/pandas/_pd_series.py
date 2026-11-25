@@ -36,6 +36,19 @@ def _is_scalar(v):
     return X.is_scalar_key(v) and not isinstance(v, (Index, Series))
 
 
+def _compare_values(values, n, broadcast):
+    # (a list-like compared by an operator: its length must be the Series', with pandas' message, or numpy's
+    # broadcast message for a range)
+    m = len(values)
+    if m != n:
+        if broadcast:
+            raise ValueError("operands could not be broadcast together with shapes (%d,) (%d,) " % (n, m))
+        raise ValueError("Lengths must match to compare", (n,), (m,))
+    if isinstance(values, Index):
+        values = values.tolist()
+    return column_from(values.copy() if isinstance(values, np.ndarray) else list(values))
+
+
 class Series(object):
     """A one-dimensional labelled array."""
 
@@ -264,18 +277,65 @@ class Series(object):
             raise ValueError("No axis named %s for object type Series" % (axis,))
         return self._pd_take(take_positions(indices, len(self)))
 
-    # --- comparisons (for boolean masks) -----------------------------------
+    # --- comparisons ---------------------------------------------------------
 
-    def _pd_compare(self, other, op):
+    def _pd_compare(self, other, op, warned=False):
+        """An operator: another Series needs the same labels, a list-like the
+        same length; a frame's comparison is the frame's."""
+        from . import _pd_arith as A
+        from ._pd_frame import DataFrame
+        if isinstance(other, DataFrame):
+            return NotImplemented
+        if not warned:
+            other = A.operand(other, "Series.%s" % op, False)
         if isinstance(other, Series):
             if not self._pd_index.equals(other._pd_index):
                 raise ValueError("Can only compare identically-labeled Series objects")
             right = other._pd_col
+        elif isinstance(other, range):
+            right = _compare_values(list(other), len(self), True)
+        elif isinstance(other, (list, tuple, np.ndarray, Index)):
+            right = _compare_values(other, len(self), False)
         elif _is_scalar(other):
             right = other
         else:
             raise _unsupported("Series comparison with a %s" % type(other).__name__)
         return Series._pd_new(R.compare(self._pd_col, right, op), self._pd_index.copy(), self._pd_name)
+
+    def _pd_flex_compare(self, other, op, level, fill_value, axis):
+        """A named comparison: another Series aligned on the sorted union of
+        the labels (a label one side lacks compares False, True for ne); a
+        list, tuple or array of the same length; fill_value where one side
+        is missing and the other isn't, as the named arithmetic fills."""
+        from . import _pd_arith as A
+        from ._pd_frame import DataFrame
+        owner = "Series.%s" % op
+        if level is not None:
+            raise _unsupported("%s(level=) (a MultiIndex)" % owner)
+        if axis not in (0, "index", "rows"):
+            raise ValueError("No axis named %s for object type Series" % (axis,))
+        if isinstance(other, DataFrame):
+            raise TypeError("%s does not support a DataFrame `other`. Use df.%s(ser) instead." % (owner, op))
+        other = A.operand(other, owner, True)
+        if isinstance(other, (range, Index)) or not isinstance(other, (Series, list, tuple, np.ndarray)):
+            # (a range, an Index or a scalar takes the operator's path, after filling this Series)
+            left = self
+            if fill_value is not None and not isinstance(other, (range, Index)) and is_missing(other):
+                # (pandas: a missing scalar is replaced by fill_value, and this Series' own missing values stay)
+                other = fill_value
+            elif fill_value is not None:
+                left = Series._pd_new(RS.fill_column(self._pd_col, fill_value), self._pd_index.copy(), self._pd_name)
+            return left._pd_compare(other, op, True)
+        left, right, index, name = self._pd_operand(other, owner)
+        if not isinstance(other, Series):
+            if len(right) != len(left):
+                raise ValueError("Lengths must be equal")
+            right = column_from(right.copy() if isinstance(right, np.ndarray) else list(right))
+        if fill_value is not None:
+            lm, rm = left.isna().tolist(), right.isna().tolist()
+            left = RS.fill_positions(left, dict((p, fill_value) for p, (a, b) in enumerate(zip(lm, rm)) if a and not b))
+            right = RS.fill_positions(right, dict((p, fill_value) for p, (a, b) in enumerate(zip(lm, rm)) if b and not a))
+        return Series._pd_new(R.compare(left, right, op), index, name)
 
     def __eq__(self, other):
         return self._pd_compare(other, "eq")
@@ -294,6 +354,30 @@ class Series(object):
 
     def __ge__(self, other):
         return self._pd_compare(other, "ge")
+
+    def eq(self, other, level=None, fill_value=None, axis=0):
+        """Named eq: aligned as the named arithmetic, a bool Series."""
+        return self._pd_flex_compare(other, "eq", level, fill_value, axis)
+
+    def ne(self, other, level=None, fill_value=None, axis=0):
+        """Named ne: aligned as the named arithmetic, a bool Series."""
+        return self._pd_flex_compare(other, "ne", level, fill_value, axis)
+
+    def lt(self, other, level=None, fill_value=None, axis=0):
+        """Named lt: aligned as the named arithmetic, a bool Series."""
+        return self._pd_flex_compare(other, "lt", level, fill_value, axis)
+
+    def le(self, other, level=None, fill_value=None, axis=0):
+        """Named le: aligned as the named arithmetic, a bool Series."""
+        return self._pd_flex_compare(other, "le", level, fill_value, axis)
+
+    def gt(self, other, level=None, fill_value=None, axis=0):
+        """Named gt: aligned as the named arithmetic, a bool Series."""
+        return self._pd_flex_compare(other, "gt", level, fill_value, axis)
+
+    def ge(self, other, level=None, fill_value=None, axis=0):
+        """Named ge: aligned as the named arithmetic, a bool Series."""
+        return self._pd_flex_compare(other, "ge", level, fill_value, axis)
 
     __hash__ = None
 

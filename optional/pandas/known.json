@@ -352,9 +352,24 @@
       "reason": "a row of mixed values is an object Series in pandas, and object columns aren't in the subset's arithmetic; it raises before any work"
     },
     {
-      "case": "op.frame-gt",
-      "message": "pandas.DataFrame.__gt__ (comparison) is not in Sagebrush's pandas 0.x subset",
-      "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"
+      "case": "compare.repeated-columns",
+      "message": "pandas.DataFrame.eq of a frame with repeated column labels is not in Sagebrush's pandas 0.x subset",
+      "reason": "a named comparison matches columns by label, which needs unique labels when the two frames' columns differ; pandas lines repeated labels up by position within each label, which isn't in the subset; it raises before any work (identical labels, a scalar or a list-like work)"
+    },
+    {
+      "case": "compare.level",
+      "message": "pandas.DataFrame.eq(level=) (a MultiIndex) is not in Sagebrush's pandas 0.x subset",
+      "reason": "level= broadcasts across a MultiIndex level, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "compare.series-level",
+      "message": "pandas.Series.eq(level=) (a MultiIndex) is not in Sagebrush's pandas 0.x subset",
+      "reason": "level= broadcasts across a MultiIndex level, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "compare.3d",
+      "message": "pandas.DataFrame.eq with a 3-dimensional array is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas can't compare with arrays of more than two dimensions either (its message differs); it raises before any work"
     },
     {
       "case": "param.Series.sum-min_count",

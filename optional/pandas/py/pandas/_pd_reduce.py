@@ -21,7 +21,7 @@ import operator
 import numpy as np
 
 from ._pd_column import Column
-from ._pd_dtypes import STR, INTS, is_missing
+from ._pd_dtypes import STR, INTS, FLOATS, is_missing
 
 __all__ = ["check_args", "reduce_column", "truth_column", "compare", "logical"]
 
@@ -165,6 +165,13 @@ def compare(col, right, op):
     """A bool Column: col <op> right (a scalar or a Column of the same
     length).  A missing value compares False (True for ne), as pandas."""
     f = _OPS[op]
+    from ._pd_datetime import DT
+    if col.dtype is DT:
+        return _compare_times(col, right, op, f)
+    if isinstance(right, str) and op not in ("eq", "ne") and not col.is_list and (col.dtype in INTS or col.dtype in FLOATS
+                                                                               or col.dtype == "bool"):
+        # (pandas' message for ordering numbers against a string)
+        raise TypeError("Invalid comparison between dtype=%s and str" % col.dtype)
     if not col.is_list and (not isinstance(right, Column) or not right.is_list) and not isinstance(right, str):
         rv = right._pd_values if isinstance(right, Column) else right
         if col.dtype == "float32" and isinstance(rv, (int, float)) and not isinstance(rv, bool):
@@ -172,7 +179,17 @@ def compare(col, right, op):
             rv = np.float32(rv)
         if rv is None:
             return Column("bool", np.full(len(col), op == "ne", dtype=bool))
-        return Column("bool", np.asarray(f(col._pd_values, rv), dtype=bool))
+        try:
+            out = f(col._pd_values, rv)
+        except TypeError:
+            out = False
+        if np.ndim(out) == 0:
+            # (numpy can't compare its numbers with this value, a Timestamp say: equal to none, and no order)
+            if op in ("eq", "ne"):
+                return Column("bool", np.full(len(col), op == "ne", dtype=bool))
+            raise TypeError("'%s' not supported between instances of 'numpy.ndarray' and '%s'"
+                            % ({"lt": "<", "le": "<=", "gt": ">", "ge": ">="}[op], type(rv).__name__))
+        return Column("bool", np.asarray(out, dtype=bool))
     left = col.tolist()
     rvals = right.tolist() if isinstance(right, Column) else [right] * len(left)
     out = []
@@ -190,6 +207,37 @@ def compare(col, right, op):
                                     % ({"lt": "<", "le": "<=", "gt": ">", "ge": ">="}[op],
                                        type(a).__name__, type(b).__name__)) from None
     return Column("bool", np.array(out, dtype=bool))
+
+
+def _compare_times(col, right, op, f):
+    # (a datetime64[us] column: microseconds compared, NaT on either side comparing False, True for ne; a
+    # string is parsed as pandas parses it; another value is equal to none, and ordering by it raises)
+    from ._pd_datetime import DT, NAT_INT, Timestamp, as_us, is_time
+    import datetime as _datetime
+    v = col._pd_values
+    n = len(v)
+    if isinstance(right, Column) and right.dtype is DT:
+        r = right._pd_values
+        miss = (v == NAT_INT) | (r == NAT_INT)
+    else:
+        r = None
+        if is_missing(right):
+            return Column("bool", np.full(n, op == "ne", dtype=bool))
+        if isinstance(right, str):
+            try:
+                r = as_us(Timestamp(right))
+            except ValueError:
+                r = None
+        elif is_time(right) and not (isinstance(right, _datetime.date) and not isinstance(right, _datetime.datetime)):
+            r = as_us(right)
+        if r is None:
+            if op in ("eq", "ne"):
+                return Column("bool", np.full(n, op == "ne", dtype=bool))
+            raise TypeError("Invalid comparison between dtype=datetime64[us] and %s" % type(right).__name__)
+        miss = v == NAT_INT
+    out = np.asarray(f(v, r), dtype=bool)
+    out[miss] = op == "ne"
+    return Column("bool", out)
 
 
 def logical(col, right, op):

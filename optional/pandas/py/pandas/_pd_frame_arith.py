@@ -193,3 +193,116 @@ def _with_frame(f, g, op, reflected, fill_value, owner):
 def unary(f, op):
     from . import _pd_arith as A
     return _frame([A.unary(c, op) for c in f._pd_cols], f._pd_columns.copy(), f._pd_index.copy())
+
+
+# --- comparisons ---------------------------------------------------------------
+# (as pandas 3.1: an operator needs another frame with the same rows and columns, or a Series with exactly the
+# columns' labels; a named comparison aligns, a label one side lacks comparing False, True for ne; the result is
+# always bool, so there are no added all-missing columns of a block-dependent dtype here)
+
+
+def _missing_series(index):
+    from ._pd_series import Series
+    return Series._pd_new(Column("float64", np.full(len(index), np.nan)), index.copy(), None)
+
+
+def _row_compare_columns(f, s):
+    # (a row for the columns: each column against an array of its value in the row's dtype)
+    from ._pd_column import column_from
+    n = len(f)
+    d = s._pd_col.dtype
+    vals = s._pd_col.tolist()
+    if isinstance(d, str) and d != "object":
+        return [Column(d, np.full(n, s._pd_col._pd_values[j], dtype=d)) for j in range(len(vals))]
+    return [column_from([vals[j]] * n) for j in range(len(vals))]
+
+
+def compare(f, other, op, axis="columns", level=None, method=False):
+    from . import _pd_arith as A
+    from . import _pd_combine as CB
+    from . import _pd_reduce as R
+    from ._pd_column import column_from
+    from ._pd_frame import DataFrame
+    from ._pd_series import Series
+    owner = "DataFrame.%s" % op
+    if level is not None:
+        raise _unsupported("%s(level=) (a MultiIndex)" % owner)
+    ax = _axis(axis)
+    other = A.operand(other, owner, False)
+    k, n = len(f._pd_cols), len(f)
+    if isinstance(other, DataFrame):
+        same = f._pd_index.equals(other._pd_index) and f._pd_columns.equals(other._pd_columns)
+        if not method or same:
+            if not same:
+                raise ValueError("Can only compare identically-labeled (both index and columns) DataFrame objects")
+            return _frame([R.compare(a, b, op) for a, b in zip(f._pd_cols, other._pd_cols)], f._pd_columns.copy(),
+                          f._pd_index.copy())
+        _unique_columns(f, owner)
+        _unique_columns(other, owner)
+        labels = CB.join_labels([f._pd_columns, other._pd_columns], "outer", True)
+        labels = f._pd_columns.copy() if labels is None else labels
+        rows = CB.join_labels([f._pd_index, other._pd_index], "outer", True)
+        index = f._pd_index.copy() if rows is None else rows
+        lpos = dict((lab, j) for j, lab in enumerate(f._pd_columns.tolist()))
+        rpos = dict((lab, j) for j, lab in enumerate(other._pd_columns.tolist()))
+        cols = []
+        for lab in labels.tolist():
+            left = _series_of(f, lpos[lab]) if lab in lpos else _missing_series(f._pd_index)
+            right = _series_of(other, rpos[lab]) if lab in rpos else _missing_series(other._pd_index)
+            s = left._pd_flex_compare(right, op, None, None, 0)
+            cols.append(s._pd_col)
+            index = s._pd_index
+        return _frame(cols, labels, index)
+    if isinstance(other, Series):
+        if ax == 0:
+            if not k:
+                rows = CB.join_labels([f._pd_index, other._pd_index], "outer", True)
+                return _frame([], f._pd_columns.copy(), f._pd_index.copy() if rows is None else rows)
+            cols = []
+            index = f._pd_index.copy()
+            for j in range(k):
+                s = _series_of(f, j)._pd_flex_compare(other, op, None, None, 0)
+                cols.append(s._pd_col)
+                index = s._pd_index
+            return _frame(cols, f._pd_columns.copy(), index)
+        if not method:
+            if not other._pd_index.equals(f._pd_columns):
+                raise ValueError("Operands are not aligned. Do `left, right = left.align(right, axis=1)` before "
+                                 "operating.")
+            return _frame([R.compare(c, r, op) for c, r in zip(f._pd_cols, _row_compare_columns(f, other))],
+                          f._pd_columns.copy(), f._pd_index.copy())
+        _unique_columns(f, owner)
+        if not other._pd_index.is_unique:
+            raise _unsupported("%s with a Series of repeated labels" % owner)
+        labels = CB.join_labels([f._pd_columns, other._pd_index], "outer", True)
+        labels = f._pd_columns.copy() if labels is None else labels
+        lpos = dict((lab, j) for j, lab in enumerate(f._pd_columns.tolist()))
+        rvals = _row_compare_columns(f, other)
+        rpos = dict((lab, j) for j, lab in enumerate(other._pd_index.tolist()))
+        cols = []
+        for lab in labels.tolist():
+            if lab in lpos and lab in rpos:
+                cols.append(R.compare(f._pd_cols[lpos[lab]], rvals[rpos[lab]], op))
+            else:
+                cols.append(Column("bool", np.full(n, op == "ne", dtype=bool)))
+        return _frame(cols, labels, f._pd_index.copy())
+    if isinstance(other, Index):
+        other = other.tolist()
+    if isinstance(other, range):
+        other = list(other)
+    if isinstance(other, np.ndarray) and other.ndim == 2:
+        return _frame([R.compare(c, column_from(a), op) for c, a in zip(f._pd_cols, _block_values(f, other))],
+                      f._pd_columns.copy(), f._pd_index.copy())
+    if isinstance(other, np.ndarray) and other.ndim > 2:
+        raise _unsupported("%s with a %d-dimensional array" % (owner, other.ndim))
+    if isinstance(other, (list, tuple, np.ndarray)):
+        values = other.copy() if isinstance(other, np.ndarray) else list(other)
+        if ax == 0:
+            s = _column_values(f, values)
+            return _frame([R.compare(c, s._pd_col, op) for c in f._pd_cols], f._pd_columns.copy(), f._pd_index.copy())
+        if len(values) != k:
+            raise ValueError("Unable to coerce to Series, length must be %d: given %d" % (k, len(values)))
+        rights = _row_compare_columns(f, Series(values))
+        return _frame([R.compare(c, r, op) for c, r in zip(f._pd_cols, rights)], f._pd_columns.copy(),
+                      f._pd_index.copy())
+    return _frame([R.compare(c, other, op) for c in f._pd_cols], f._pd_columns.copy(), f._pd_index.copy())

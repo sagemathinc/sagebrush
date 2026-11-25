@@ -175,8 +175,12 @@ case("arith.object-nan", lambda: pd.Series([1, np.nan], dtype=object) + 1)
 case("arith.with-object-series", lambda: s + pd.Series([1, None], dtype=object))
 case("arith.object-neg", lambda: -pd.Series([1, None], dtype=object))
 
-# frame comparisons (M2), and the frame arithmetic whose added all-missing columns take pandas' block-dependent dtype
-case("op.frame-gt", lambda: df > 0)
+# the frame arithmetic whose added all-missing columns take pandas' block-dependent dtype, and comparisons outside
+# the subset
+case("compare.repeated-columns", lambda: pd.DataFrame([[1, 2]], columns=["a", "a"]).eq(pd.DataFrame([[1]], columns=["a"])))
+case("compare.level", lambda: df.eq(1, level=0))
+case("compare.series-level", lambda: s.eq(1, level=0))
+case("compare.3d", lambda: df == np.ones((2, 1, 1)))
 case("frame-arith.other-columns", lambda: df + pd.DataFrame({"b": [1, 2]}))
 case("frame-arith.series-other-labels", lambda: df + pd.Series({"a": 1, "z": 2}))
 case("frame-arith.repeated-columns", lambda: pd.DataFrame([[1, 2]], columns=["a", "a"]) + pd.DataFrame([[1, 2]], columns=["a", "a"]))

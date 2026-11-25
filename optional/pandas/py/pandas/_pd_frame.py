@@ -1084,24 +1084,68 @@ class DataFrame(object):
         from . import _pd_frame_arith as FA
         return FA.binary(self, other, "pow", True, fill_value, axis, level, True)
 
-    # (comparisons of frames are M2's too)
+    # --- comparisons (_pd_frame_arith.compare) ------------------------------
+
     def __eq__(self, other):
-        raise _unsupported("DataFrame.__eq__ (comparison)")
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "eq")
 
     def __ne__(self, other):
-        raise _unsupported("DataFrame.__ne__ (comparison)")
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "ne")
 
     def __lt__(self, other):
-        raise _unsupported("DataFrame.__lt__ (comparison)")
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "lt")
 
     def __le__(self, other):
-        raise _unsupported("DataFrame.__le__ (comparison)")
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "le")
 
     def __gt__(self, other):
-        raise _unsupported("DataFrame.__gt__ (comparison)")
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "gt")
 
     def __ge__(self, other):
-        raise _unsupported("DataFrame.__ge__ (comparison)")
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "ge")
+
+    def eq(self, other, axis="columns", level=None):
+        """Named eq: aligned on both axes (a label one side lacks compares
+        False, True for ne), a bool frame."""
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "eq", axis, level, True)
+
+    def ne(self, other, axis="columns", level=None):
+        """Named ne: aligned on both axes (a label one side lacks compares
+        False, True for ne), a bool frame."""
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "ne", axis, level, True)
+
+    def lt(self, other, axis="columns", level=None):
+        """Named lt: aligned on both axes (a label one side lacks compares
+        False, True for ne), a bool frame."""
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "lt", axis, level, True)
+
+    def le(self, other, axis="columns", level=None):
+        """Named le: aligned on both axes (a label one side lacks compares
+        False, True for ne), a bool frame."""
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "le", axis, level, True)
+
+    def gt(self, other, axis="columns", level=None):
+        """Named gt: aligned on both axes (a label one side lacks compares
+        False, True for ne), a bool frame."""
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "gt", axis, level, True)
+
+    def ge(self, other, axis="columns", level=None):
+        """Named ge: aligned on both axes (a label one side lacks compares
+        False, True for ne), a bool frame."""
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "ge", axis, level, True)
+
 
     def __setitem__(self, key, value):
         if isinstance(key, DataFrame):
