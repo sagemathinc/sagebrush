@@ -270,6 +270,9 @@ def binary(col, right, op, reflected, owner, mask_zero=True):
 
 
 def unary(col, op):
+    from . import _pd_category as CT
+    if isinstance(col, CT.CatColumn):
+        raise CT.unary_error(op)
     d = col.dtype
     if d is DT:
         raise _unsupported("Series.__%s__ of a datetime64[us] column" % op)

@@ -179,6 +179,13 @@ def column_from(data, dtype=None):
     """A new Column from a list, tuple, range or 1-D numpy array (always a
     copy, never the caller's storage), with pandas 3.1's inference or the
     dtype given."""
+    from . import _pd_category as CT
+    if isinstance(data, CT.Categorical):
+        if dtype is None or CT.is_category(dtype):
+            return CT.column_to_category(data._pd_col, dtype if isinstance(dtype, CT.CategoricalDtype) else None)
+        return astype_column(data._pd_col, dtype)
+    if CT.is_category(dtype):
+        return CT.column_to_category(column_from(data), dtype if isinstance(dtype, CT.CategoricalDtype) else None)
     want = resolve_dtype(dtype)
     from ._pd_index import Index
     if isinstance(data, Index):
@@ -256,6 +263,16 @@ def astype_column(col, dtype):
     astype does, str parses as int() and float() do, anything to str is str()
     of each value with missing values kept (NaN)."""
     from .errors import IntCastingNaNError
+    from . import _pd_category as CT
+    if CT.is_category(dtype):
+        return CT.column_to_category(col, dtype if isinstance(dtype, CT.CategoricalDtype) else None)
+    if isinstance(col, CT.CatColumn):
+        # (a category column as another dtype: its values, as the categories' dtype holds them, cast; a missing
+        # value to an integer is pandas' error first)
+        target = resolve_dtype(dtype)
+        if target in INTS and bool(col.isna().any()):
+            raise ValueError("Cannot convert float NaN to integer")
+        col = col.decoded()
     want = resolve_dtype(dtype)
     d = col.dtype
     if want == d and (want is not STR or d is STR):

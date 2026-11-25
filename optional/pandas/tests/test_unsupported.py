@@ -59,7 +59,6 @@ case("c3.series-str-to_numpy-copy", lambda: ss.to_numpy(copy=True))
 
 # dtypes and values outside the subset
 case("dtype.string", lambda: pd.Series(["a"], dtype="string"))
-case("dtype.category", lambda: pd.Series(["a"], dtype="category"))
 case("dtype.Int64", lambda: pd.Series([1], dtype="Int64"))
 case("value.int-beyond-int64", lambda: pd.Series([2 ** 63]))
 case("value.int64-beyond-2-53", lambda: pd.Series([2 ** 53 + 1]))
@@ -67,7 +66,7 @@ case("value.sum-beyond-2-53", lambda: pd.Series([2 ** 52, 2 ** 52, 1]).sum())
 case("frame.ragged-rows", lambda: pd.DataFrame([[1, 2], [3]]))
 
 # names outside the subset
-for name in ["NA", "merge", "crosstab", "Timedelta", "Categorical", "MultiIndex", "read_parquet", "get_dummies"]:
+for name in ["NA", "merge", "crosstab", "Timedelta", "MultiIndex", "read_parquet", "get_dummies"]:
     case("name.pd." + name, lambda name=name: getattr(pd, name))
 for name in ["pivot", "merge", "cov", "rank", "query", "pivot_table", "nlargest", "plot", "nsmallest", "value_counts", "to_csv", "where"]:
     case("name.DataFrame." + name, lambda name=name: getattr(df, name))
@@ -79,8 +78,6 @@ case("name.DataFrame.unknown-is-AttributeError", lambda: df.no_such_name)
 
 # Sorting and reshaping's refusals: forms of those methods outside the subset, and the dtypes they don't take yet
 su = pd.Series([1, 2]).astype("uint8")
-case("d1.astype-category", lambda: pd.Series(["a", "b"]).astype("category"))
-case("d1.frame-astype-category", lambda: pd.DataFrame({"s": ["a"]}).astype({"s": "category"}))
 case("cast.astype-float-beyond-int32", lambda: pd.Series([1.5, 3e9], dtype="float32").astype("int32"))
 case("cast.astype-float-beyond-int64", lambda: pd.Series([1e19]).astype("int64"))
 case("cast.astype-float-below-int8", lambda: pd.Series([-200.0]).astype("int8"))
@@ -178,6 +175,18 @@ case("arith.object-neg", lambda: -pd.Series([1, None], dtype=object))
 # the frame arithmetic whose added all-missing columns take pandas' block-dependent dtype, and comparisons outside
 # the subset
 case("compare.repeated-columns", lambda: pd.DataFrame([[1, 2]], columns=["a", "a"]).eq(pd.DataFrame([[1]], columns=["a"])))
+cat = pd.Series(["b", "a", None]).astype("category")
+case("category.sort_values", lambda: cat.sort_values())
+case("category.value_counts", lambda: cat.value_counts())
+case("category.fillna", lambda: cat.fillna("a"))
+case("category.groupby", lambda: pd.DataFrame({"k": cat, "v": [1, 2, 3]}).groupby("k")["v"].sum())
+case("category.set_index", lambda: pd.DataFrame({"k": cat, "v": [1, 2, 3]}).set_index("k"))
+case("category.info", lambda: pd.DataFrame({"k": cat}).info())
+case("category.to_numpy", lambda: cat.to_numpy())
+case("category.describe", lambda: cat.describe())
+case("category.order-comparison-ordered", lambda: pd.Series(["b"]).astype(pd.CategoricalDtype(["a", "b"], ordered=True)) < "b")
+case("category.cat-method", lambda: cat.cat.add_categories("z"))
+case("category.float32", lambda: pd.Series([1.0], dtype="float32").astype("category"))
 case("compare.series-repeated-labels", lambda: df.eq(pd.Series([1, 2], index=["a", "a"])))
 case("compare.level", lambda: df.eq(1, level=0))
 case("compare.series-level", lambda: s.eq(1, level=0))

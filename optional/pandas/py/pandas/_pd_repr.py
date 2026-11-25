@@ -316,6 +316,11 @@ def format_column(col, na_rep="NaN", justify="right", leading_space=True, max_co
     """format_array of one column: its values as fixed-width strings."""
     d = col.dtype
     digits = _opt("precision")
+    from ._pd_category import CatColumn
+    if isinstance(col, CatColumn):
+        # (a category column prints its values as objects)
+        return _make_fixed_width(_generic_strings(col.tolist(), na_rep, leading_space), justify,
+                                 max_colwidth=max_colwidth)[0]
     if d == "float64" or d == "float32":
         # (a float32 shows its value as a float64, as pandas formats it)
         strs = _float_strings(col._pd_values.astype("float64"), na_rep, leading_space, justify, digits)
@@ -485,6 +490,9 @@ def series_repr(s):
     if footer:
         footer += ", "
     footer += "dtype: %s" % pprint_thing(_dtype_str(col.dtype))
+    from ._pd_category import CatColumn, categories_line
+    if isinstance(col, CatColumn):
+        footer += "\n" + categories_line(col.dtype)
     if n == 0:
         return "Series([], %s)" % footer
     have_header = _has_names(index)

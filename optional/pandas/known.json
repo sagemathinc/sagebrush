@@ -77,11 +77,6 @@
       "reason": "pandas' extension dtypes (string, category, Int64) are outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
-      "case": "dtype.category",
-      "message": "pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet",
-      "reason": "pandas' extension dtypes (string, category, Int64) are outside M1's frozen support table (plan r7 C4); it raises before any work"
-    },
-    {
       "case": "dtype.Int64",
       "message": "pandas: dtype='Int64' is not in Sagebrush's pandas 0.x subset",
       "reason": "pandas' extension dtypes (string, category, Int64) are outside M1's frozen support table (plan r7 C4); it raises before any work"
@@ -125,11 +120,6 @@
       "case": "name.pd.Timedelta",
       "message": "pandas.Timedelta is not in Sagebrush's pandas 0.x subset",
       "reason": "pandas.Timedelta (time differences) is outside the subset: PR A brings times, not their differences; it raises before any work"
-    },
-    {
-      "case": "name.pd.Categorical",
-      "message": "pandas.Categorical is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas.Categorical is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
       "case": "name.pd.MultiIndex",
@@ -355,6 +345,61 @@
       "case": "compare.repeated-columns",
       "message": "pandas.DataFrame.eq of a frame with repeated column labels is not in Sagebrush's pandas 0.x subset",
       "reason": "a named comparison matches columns by label, which needs unique labels when the two frames' columns differ; pandas lines repeated labels up by position within each label, which isn't in the subset; it raises before any work (identical labels, a scalar or a list-like work)"
+    },
+    {
+      "case": "category.sort_values",
+      "message": "pandas: this operation on a category column is not in Sagebrush's pandas 0.x subset",
+      "reason": "sorting a category by its categories' order isn't in the subset yet; a category column's values aren't readable as an array, so the operation raises before any work"
+    },
+    {
+      "case": "category.value_counts",
+      "message": "pandas: this operation on a category column is not in Sagebrush's pandas 0.x subset",
+      "reason": "value_counts of a category gives a CategoricalIndex, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "category.fillna",
+      "message": "pandas: filling a category column (fillna, fill_value) is not in Sagebrush's pandas 0.x subset",
+      "reason": "filling a category keeps it a category and needs the value among its categories; not in the subset yet, it raises before any work"
+    },
+    {
+      "case": "category.groupby",
+      "message": "pandas: groupby by a category column is not in Sagebrush's pandas 0.x subset",
+      "reason": "grouping by a category groups by its categories (observed=) into a CategoricalIndex, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "category.set_index",
+      "message": "pandas: set_index of a category column is not in Sagebrush's pandas 0.x subset",
+      "reason": "a category column as the index is a CategoricalIndex, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "category.info",
+      "message": "pandas: the memory usage of a category column (info, memory_usage) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas counts a category's memory as its codes and its categories' own memory, which isn't ported yet; it raises before any output"
+    },
+    {
+      "case": "category.to_numpy",
+      "message": "pandas: this operation on a category column is not in Sagebrush's pandas 0.x subset",
+      "reason": "a category's values as a numpy array are an object array in pandas, and Sagebrush's numpy has no object dtype yet; it raises before any work"
+    },
+    {
+      "case": "category.describe",
+      "message": "pandas: this operation on a category column is not in Sagebrush's pandas 0.x subset",
+      "reason": "describe of a category isn't in the subset yet; it raises before any work"
+    },
+    {
+      "case": "category.order-comparison-ordered",
+      "message": "pandas: an order comparison of an ordered category column is not in Sagebrush's pandas 0.x subset",
+      "reason": "an order comparison of an ordered category isn't in the subset yet (an unordered one raises pandas' TypeError, as pandas does); it raises before any work"
+    },
+    {
+      "case": "category.cat-method",
+      "message": "pandas.Series.cat.add_categories is not in Sagebrush's pandas 0.x subset",
+      "reason": "the .cat accessor has categories, codes and ordered in the subset; its methods that change the categories aren't, and raise before any work"
+    },
+    {
+      "case": "category.float32",
+      "message": "pandas: astype('category') of a float32 column is not in Sagebrush's pandas 0.x subset",
+      "reason": "a float32 column as a category isn't in the subset; it raises before any work"
     },
     {
       "case": "compare.series-repeated-labels",
@@ -760,16 +805,6 @@
       "case": "xl.url-https",
       "message": "read_excel from a URL isn't supported; download the file into the project first",
       "reason": "pandas fetches a URL itself; Sagebrush's read_excel does no network I/O (data-access design: the reader downloads third-party files from the source), as read_csv"
-    },
-    {
-      "case": "d1.astype-category",
-      "message": "pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet",
-      "reason": "the category dtype (a codes array and a categories Index, with its own repr) comes in a later step; until then it raises before any work"
-    },
-    {
-      "case": "d1.frame-astype-category",
-      "message": "pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet",
-      "reason": "the category dtype comes in a later step; a dict naming it raises before any column is converted"
     },
     {
       "case": "cast.astype-float-beyond-int32",

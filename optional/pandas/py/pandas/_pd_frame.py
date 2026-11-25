@@ -551,6 +551,10 @@ class DataFrame(object):
         p = self._pd_columns._pd_positions(keys)
         if isinstance(p, list):
             raise _unsupported("DataFrame.set_index of a repeated column label")
+        from . import _pd_category as CT
+        if isinstance(self._pd_cols[p], CT.CatColumn):
+            # (pandas makes a CategoricalIndex of it)
+            raise CT.refuse("set_index of a category column")
         index = Index(self._pd_cols[p].copy(), name=keys)
         js = [j for j in range(len(self._pd_cols)) if j != p or not drop]
         out = DataFrame._pd_new([self._pd_cols[j].copy() for j in js], self._pd_columns._pd_take(js), index)

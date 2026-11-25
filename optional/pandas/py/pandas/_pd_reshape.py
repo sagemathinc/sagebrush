@@ -47,6 +47,9 @@ def fill_positions(col, fills):
     """col with the values `fills` (position -> value) set, as a new
     column: the dtype kept where every value fits it, else object (with
     pandas 3.1's Pandas4Warning for the first value that doesn't fit)."""
+    from . import _pd_category as CT
+    if isinstance(col, CT.CatColumn):
+        raise CT.refuse("filling a category column (fillna, fill_value)")
     if not fills:
         return col.copy()
     d = col.dtype

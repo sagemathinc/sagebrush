@@ -55,8 +55,11 @@ def truth_column(col, op, skipna):
     value is Python's bool of it, as pandas (None is False, NaN True), an
     np.bool_ as pandas gives."""
     from ._pd_datetime import DT
+    from . import _pd_category as CT
     if col.dtype is DT:
         raise _unsupported("Series.%s of a datetime64[us] column" % op)
+    if isinstance(col, CT.CatColumn):
+        CT.reduce(col, op, skipna)
     vals = col.tolist()
     miss = col.isna().tolist()
     if skipna:
@@ -70,6 +73,9 @@ def reduce_column(col, op, skipna):
     d = col.dtype
     if op == "count":
         return np.int64(int(len(col) - int(_scalar(col.isna().sum()))))
+    from . import _pd_category as CT
+    if isinstance(col, CT.CatColumn):
+        return CT.reduce(col, op, skipna)
     if d in INTS or d == "bool":
         # (a smaller integer, as numpy and pandas 3.1: summed in int64, or uint64 when unsigned, averaged in float64,
         # its min/max a scalar of its own dtype)
@@ -164,6 +170,11 @@ _OPS = {
 def compare(col, right, op, array_name="ndarray"):
     """A bool Column: col <op> right (a scalar or a Column of the same
     length).  A missing value compares False (True for ne), as pandas."""
+    from . import _pd_category as CT
+    if isinstance(col, CT.CatColumn):
+        return CT.compare(col, right, op)
+    if isinstance(right, CT.CatColumn):
+        right = right.decoded()
     f = _OPS[op]
     from ._pd_datetime import DT
     if col.dtype is DT:

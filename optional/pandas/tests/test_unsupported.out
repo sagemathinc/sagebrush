@@ -74,8 +74,6 @@
 !! NotImplementedError: pandas.Series.to_numpy() of a str column with missing values (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset
 == dtype.string
 !! NotImplementedError: pandas: dtype='string' is not in Sagebrush's pandas 0.x subset
-== dtype.category
-!! NotImplementedError: pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet
 == dtype.Int64
 !! NotImplementedError: pandas: dtype='Int64' is not in Sagebrush's pandas 0.x subset
 == value.int-beyond-int64
@@ -94,8 +92,6 @@
 !! NotImplementedError: pandas.crosstab is not in Sagebrush's pandas 0.x subset
 == name.pd.Timedelta
 !! NotImplementedError: pandas.Timedelta is not in Sagebrush's pandas 0.x subset
-== name.pd.Categorical
-!! NotImplementedError: pandas.Categorical is not in Sagebrush's pandas 0.x subset
 == name.pd.MultiIndex
 !! NotImplementedError: pandas.MultiIndex is not in Sagebrush's pandas 0.x subset
 == name.pd.read_parquet
@@ -152,10 +148,6 @@
 !! AttributeError: module 'pandas' has no attribute 'no_such_name'
 == name.DataFrame.unknown-is-AttributeError
 !! AttributeError: 'DataFrame' object has no attribute 'no_such_name'
-== d1.astype-category
-!! NotImplementedError: pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet
-== d1.frame-astype-category
-!! NotImplementedError: pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet
 == cast.astype-float-beyond-int32
 !! NotImplementedError: pandas: astype of float values beyond int32's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset
 == cast.astype-float-beyond-int64
@@ -320,6 +312,28 @@
 !! NotImplementedError: pandas.Series.__neg__ of an object column is not in Sagebrush's pandas 0.x subset
 == compare.repeated-columns
 !! NotImplementedError: pandas.DataFrame.eq of a frame with repeated column labels is not in Sagebrush's pandas 0.x subset
+== category.sort_values
+!! NotImplementedError: pandas: this operation on a category column is not in Sagebrush's pandas 0.x subset
+== category.value_counts
+!! NotImplementedError: pandas: this operation on a category column is not in Sagebrush's pandas 0.x subset
+== category.fillna
+!! NotImplementedError: pandas: filling a category column (fillna, fill_value) is not in Sagebrush's pandas 0.x subset
+== category.groupby
+!! NotImplementedError: pandas: groupby by a category column is not in Sagebrush's pandas 0.x subset
+== category.set_index
+!! NotImplementedError: pandas: set_index of a category column is not in Sagebrush's pandas 0.x subset
+== category.info
+!! NotImplementedError: pandas: the memory usage of a category column (info, memory_usage) is not in Sagebrush's pandas 0.x subset
+== category.to_numpy
+!! NotImplementedError: pandas: this operation on a category column is not in Sagebrush's pandas 0.x subset
+== category.describe
+!! NotImplementedError: pandas: this operation on a category column is not in Sagebrush's pandas 0.x subset
+== category.order-comparison-ordered
+!! NotImplementedError: pandas: an order comparison of an ordered category column is not in Sagebrush's pandas 0.x subset
+== category.cat-method
+!! NotImplementedError: pandas.Series.cat.add_categories is not in Sagebrush's pandas 0.x subset
+== category.float32
+!! NotImplementedError: pandas: astype('category') of a float32 column is not in Sagebrush's pandas 0.x subset
 == compare.series-repeated-labels
 !! NotImplementedError: pandas.DataFrame.eq with a Series of repeated labels is not in Sagebrush's pandas 0.x subset
 == compare.level

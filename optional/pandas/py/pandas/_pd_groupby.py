@@ -68,6 +68,10 @@ class _Groups(object):
     __slots__ = ("keys", "positions", "key_col", "name", "monotonic")
 
     def __init__(self, key_col, name, sort, dropna):
+        from . import _pd_category as CT
+        if isinstance(key_col, CT.CatColumn):
+            # (pandas groups by a category's categories, observed=, into a CategoricalIndex)
+            raise CT.refuse("groupby by a category column")
         raw = key_col.tolist()
         missing = key_col.isna().tolist()
         slot, keys, positions = {}, [], []

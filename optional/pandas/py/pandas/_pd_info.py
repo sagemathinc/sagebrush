@@ -29,6 +29,10 @@ def _unsupported(what):
 
 
 def column_nbytes(col):
+    from . import _pd_category as CT
+    if isinstance(col, CT.CatColumn):
+        # (pandas counts the codes and the categories' own memory)
+        raise CT.refuse("the memory usage of a category column (info, memory_usage)")
     return len(col) * _ITEMSIZE.get(col.dtype, 8) if col.dtype not in (STR, DT) else len(col) * 8
 
 

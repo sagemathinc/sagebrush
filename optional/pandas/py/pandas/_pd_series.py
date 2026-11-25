@@ -78,6 +78,7 @@ class Series(object):
 
     def __init__(self, data=None, index=None, dtype=None, name=None, copy=None):
         from ._pd_frame import DataFrame
+        from . import _pd_category as CT
         if isinstance(data, np.ndarray) and copy is False:
             raise _unsupported("Series(..., copy=False) with an ndarray")
         if isinstance(data, DataFrame):
@@ -101,6 +102,11 @@ class Series(object):
                 idx = ensure_index(index)
                 vals = [data[k] if k in data else float("nan") for k in idx.tolist()]
                 col = column_from(vals, dtype)
+        elif isinstance(data, CT.Categorical):
+            col = column_from(data, dtype)
+            idx = default_index(len(col)) if index is None else ensure_index(index)
+            if len(idx) != len(col):
+                raise ValueError("Length of values (%d) does not match length of index (%d)" % (len(col), len(idx)))
         elif data is None or _is_scalar(data):
             if data is None and index is None:
                 col, idx = column_from([], dtype), default_index(0)
@@ -477,6 +483,11 @@ class Series(object):
         if isinstance(other, DataFrame) and not method:
             # (an operator with a frame is the frame's: Python then calls its reflected operator)
             return NotImplemented
+        from . import _pd_category as CT
+        self_cat = isinstance(self._pd_col, CT.CatColumn)
+        other_cat = isinstance(other, Series) and isinstance(other._pd_col, CT.CatColumn)
+        if self_cat or other_cat:
+            raise CT.arith_error(op, reflected, other, self_cat, other_cat)
         owner = "Series.%s" % (("r" if reflected else "") + op)
         other = A.operand(other, owner, method)
         # (pandas' flex methods take a Series, list, tuple or array argument through their own path: its length
@@ -764,6 +775,13 @@ class Series(object):
     # --- time series (design-pandas-xlsx-timeseries PR A) --------------------
 
     @property
+    def cat(self):
+        from . import _pd_category as CT
+        if not isinstance(self._pd_col, CT.CatColumn):
+            raise AttributeError("Can only use .cat accessor with a 'category' dtype")
+        return CT.CategoricalAccessor(self)
+
+    @property
     def dt(self):
         if self._pd_col.dtype is not DT:
             raise AttributeError("Can only use .dt accessor with datetimelike values")
@@ -861,6 +879,15 @@ class Series(object):
         as 0.0): an array of the Series' dtype; a str Series gives a '<U'
         array (pandas: a StringArray; Sagebrush's numpy has no object dtype
         yet)."""
+        from . import _pd_category as CT
+        if isinstance(self._pd_col, CT.CatColumn):
+            # (a Categorical of the values in order of first appearance, missing once, all the categories kept)
+            seen, keep = set(), []
+            for i, k in enumerate(self._pd_col._pd_codes.tolist()):
+                if k not in seen:
+                    seen.add(k)
+                    keep.append(i)
+            return CT.Categorical._pd_from_column(self._pd_col.take(keep))
         col = self._pd_col
         seen = {}
         keep = []
@@ -1036,7 +1063,8 @@ def dtype_object(d):
     """The dtype object pandas shows for a column dtype."""
     if d in INTS or d in FLOATS or d == "bool":
         return np.dtype(d)
-    return d if d is STR or d is DT else _ObjectDtype
+    from ._pd_category import CategoricalDtype
+    return d if d is STR or d is DT or isinstance(d, CategoricalDtype) else _ObjectDtype
 
 
 def _astype(col, dtype):
