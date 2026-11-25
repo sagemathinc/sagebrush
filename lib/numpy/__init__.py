@@ -1419,14 +1419,21 @@ def _count_where(a, axis, keepdims, where):
     return sum(broadcast_to(where, a.shape), axis, intp, None, keepdims)
 
 
+class _UFuncTypeError(TypeError):
+    """NumPy's UFuncTypeError (numpy._core._exceptions), a TypeError: a ufunc's output its casting rule refuses"""
+
+
+_UFuncTypeError.__name__ = _UFuncTypeError.__qualname__ = "UFuncTypeError"
+
+
 def _root(r):
     # (std's root of the variance, as NumPy's: in place for an array (sqrt(r, out=r), refused for an integer one by
     # same_kind casting), a scalar's in its own type)
     if isinstance(r, ndarray):
         s = sqrt(r)
         if s.dtype != r.dtype and not can_cast(s.dtype, r.dtype, "same_kind"):
-            raise TypeError("Cannot cast ufunc 'sqrt' output from dtype('%s') to dtype('%s') with casting rule "
-                            "'same_kind'" % (s.dtype.name, r.dtype.name))
+            raise _UFuncTypeError("Cannot cast ufunc 'sqrt' output from dtype('%s') to dtype('%s') with casting rule "
+                                  "'same_kind'" % (s.dtype.name, r.dtype.name))
         r[...] = s
         return r
     return r.dtype.type(sqrt(r))
@@ -1681,6 +1688,9 @@ def _inexact_args(dtype, out):
 
 
 def nansum(a, axis=None, dtype=None, out=None, keepdims=False, initial=_NoValue, where=True):
+    if out is not None:
+        # (NumPy's np.sum into out is add.reduce's: in the loop the input's and out's dtypes convert to)
+        return add.reduce(_replace_nan(a, 0)[0], axis, dtype, out, keepdims, initial, where)
     return sum(_replace_nan(a, 0)[0], axis, dtype, out, keepdims, initial, where)
 
 
@@ -1724,7 +1734,10 @@ def nanmean(a, axis=None, dtype=None, out=None, keepdims=False, *, where=True):
         return mean(arr, axis, dtype, out, keepdims, where=where)
     _inexact_args(dtype, out)
     n = sum(~isn, axis, intp, None, keepdims, where=where)
-    return _divided(sum(arr, axis, dtype, out, keepdims, where=where), n)
+    # (into out as NumPy's sum into out, add.reduce: in the loop the input's and out's dtypes convert to)
+    tot = add.reduce(arr, axis, dtype, out, keepdims, where=where) if out is not None else \
+        sum(arr, axis, dtype, None, keepdims, where=where)
+    return _divided(tot, n)
 
 
 def nanvar(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=True, mean=_NoValue,
@@ -1752,7 +1765,8 @@ def nanvar(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=
     x = asarray(arr.transpose(order) - (avg if weak else broadcast_to(avg, arr.shape).transpose(order))).astype(arr.dtype)
     x = _np.where3(isn.transpose(order), zeros((), x.dtype), x)  # (the parameter where hides the function)
     x = ((x * x.conj()).real if x.dtype.kind == "c" else x * x).transpose(back)
-    r = sum(x, axis, dtype, out, keepdims, where=where)
+    r = add.reduce(x, axis, dtype, out, keepdims, where=where) if out is not None else \
+        sum(x, axis, dtype, None, keepdims, where=where)
     if ndim(r) < n.ndim:
         n = n.squeeze(axis)
         n = n[()] if n.ndim == 0 else n
@@ -1761,7 +1775,7 @@ def nanvar(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=
     bad = dof <= 0
     if _builtins.bool(any(bad)):
         if isinstance(r, ndarray):
-            r[bad] = nan
+            r[...] = _np.where3(bad, nan, r)  # (a 0-d out too, which a boolean index doesn't take)
         else:
             r = r.dtype.type(nan)
     return r

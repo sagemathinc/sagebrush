@@ -344,3 +344,34 @@ for dt in (np.int8, np.int64, np.uint8, np.bool_):
     show(f"sum floats as {dt.__name__} initial=None", lambda: np.sum(fa, dtype=dt, initial=None))
     show(f"nansum floats as {dt.__name__} initial=None", lambda: np.nansum(fa, dtype=dt, initial=None))
     show(f"sum floats as {dt.__name__} axis 1 initial=None", lambda: np.sum(fa.reshape(2, 2), axis=1, dtype=dt, initial=None))
+# (the nan functions with out: a 0-d out with nothing kept (no kept element, or all NaN) holds NaN; into a wider out
+# they sum in out's dtype, as NumPy's sum into out does (add.reduce), float32 squares summed in float64; std's root
+# refused for an integer out in NumPy's class, UFuncTypeError, a TypeError)
+for name in ("nanvar", "nanstd"):
+    f = getattr(np, name)
+    for desc, arr, kw in (("where=False", np.array([1.0, 2.0]), {"where": False}),
+                          ("all NaN", np.array([np.nan, np.nan]), {}),
+                          ("float32 where", np.array([1.0, 2.0, 4.0], np.float32), {"where": [True, True, True]}),
+                          ("float32", np.array([1.0, 2.0, 4.0], np.float32), {}),
+                          ("ddof past the count", np.array([1.0, np.nan, 3.0]), {"ddof": 2})):
+        o77 = np.array(77.0)
+        show(f"{name} {desc} into 0-d float64 out", lambda: (f(arr, out=o77, **kw), o77)[1])
+    o2 = np.full(2, 77.0)
+    show(f"{name} rows into out, one row empty", lambda: (f(np.array([[np.nan, np.nan], [1.0, 3.0]]), axis=1, out=o2), o2)[1])
+for name in ("nanmean", "nansum"):
+    f = getattr(np, name)
+    o64 = np.array(0.0)
+    show(f"{name} float32 into float64 out", lambda: (f(np.array([1e8, 1.0, 1.0, np.nan], np.float32), out=o64), o64)[1])
+    o64w = np.array(0.0)
+    show(f"{name} float32 where into float64 out", lambda: (f(np.array([1e8, 1.0, 1.0, 5.0], np.float32), where=[True, True, True, False], out=o64w), o64w)[1])
+
+
+def std_int_out():
+    try:
+        np.std(np.array([1.0, 2.0]), where=[True, True], out=np.zeros((), np.int32))
+    except TypeError as e:
+        return type(e).__name__ + ": " + str(e)
+
+
+show("std where into an int out", std_int_out)
+show("nanstd int input into an int out", lambda: np.nanstd(np.array([1, 2, 4]), out=np.zeros((), np.int32)))
