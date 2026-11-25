@@ -59,12 +59,24 @@ function cases(col, fam, valid) {
   return [
     ["a NUL inside the bounds", "a\0b", false],
     ["valid text + NUL + suffix", valid + "\0EVIL", false],
+    ["a NUL first, then valid text", "\0" + valid, false],
     [`exactly ${fam.max} bytes of 2-byte characters`, at(fam.max, "é"), true],
     [`${fam.max + 1} bytes of 2-byte characters (${Math.ceil((fam.max + 1) / 2)} characters)`, at(fam.max + 1, "é"), false],
     [`exactly ${fam.max} bytes of 4-byte characters`, at(fam.max, "𝄞"), true],
+    [`${fam.max + 1} bytes of 4-byte characters`, at(fam.max + 1, "𝄞"), false],
     [`${fam.max} characters, more than ${fam.max} bytes`, "é".repeat(fam.max), false],
     ["empty", "", fam.min === 0],
   ];
+}
+
+/** Every TEXT column of every table, as the schema itself declares them: the census must be exactly TABLES'. */
+async function census(label, all) {
+  const tables = (await all("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name")).map((r) => r.name);
+  ok(JSON.stringify(tables) === JSON.stringify(Object.keys(TABLES).sort()), `${label}: the tables are exactly the ones driven here`, tables);
+  for (const t of tables) {
+    const text = (await all(`PRAGMA table_info(${t})`)).filter((c) => String(c.type).toUpperCase() === "TEXT").map((c) => c.name).sort();
+    ok(JSON.stringify(text) === JSON.stringify(Object.keys(TABLES[t]?.text ?? {}).sort()), `${label}: ${t}: every TEXT column is driven`, text);
+  }
 }
 
 async function run(label, exec) {
@@ -91,12 +103,14 @@ async function run(label, exec) {
 // ---- SQLite, through node:sqlite
 const lite = new DatabaseSync(":memory:");
 for (const s of statements) lite.exec(s);
+await census("sqlite", async (sql) => lite.prepare(sql).all());
 await run("sqlite", async (sql, v) => { lite.prepare(sql).run(...v); });
 
 // ---- D1 itself, through Miniflare
 const mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "fleet", modules: true, script: "export default { fetch() { return new Response('') } }", compatibilityDate: "2026-10-01", d1Databases: ["FLEET_DB"] }] }));
 const db = await mf.getD1Database("FLEET_DB");
 for (const s of statements) await db.prepare(s).run();
+await census("d1", async (sql) => (await db.prepare(sql).all()).results);
 await run("d1", (sql, v) => db.prepare(sql).bind(...v).run());
 // (the stored bytes are what was sent: D1 keeps a NUL-free value byte for byte)
 await db.prepare("INSERT INTO fleet_bucket_hits (key, t, id) VALUES (?1, 0, ?2)").bind("é".repeat(100), ID).run();
