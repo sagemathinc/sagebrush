@@ -62,7 +62,7 @@ export interface FleetHooks {
  */
 export async function handleFleet(req: Request, env: FleetEnv, hooks: FleetHooks = {}, person?: PersonDeps): Promise<Response | null> {
   const url = new URL(req.url);
-  const mine = await handlePerson(req, url, env, person);
+  const mine = await handlePerson(req, url, env, fleetCore, person);
   if (mine) return mine;
   if (url.pathname === CHAIN_ROUTE) return chainRead(req, url, env);
   if (url.pathname !== LEASE_ROUTE) return null;

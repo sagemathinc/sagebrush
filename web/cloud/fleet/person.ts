@@ -11,14 +11,25 @@
 // the account's is not_found, never told apart from one that doesn't exist. The session is resolved by the mounting
 // Worker's own code (the site's session read of SHARE_DB's primary), passed in as `session`: this file never sees a
 // cookie or a token. Every answer is read by ONE SQL statement. Nothing is cached (no-store).
-import { fleetCore } from "../../workspace/fleet/install.ts";
-import { appendChainEntry } from "./writers.ts";
+import { appendChainEntry, type WriterCore } from "./writers.ts";
 import { bucket, chainPage, type D1 } from "./store.ts";
 
 export type PersonSession = { kind: "ok"; account: string } | { kind: "none" } | { kind: "unavailable" };
 /** What the mounting Worker supplies: the request's account session, read now from the primary (never a cache). */
 export interface PersonDeps { session(req: Request): Promise<PersonSession> }
 interface PersonEnv { FLEET_DB?: D1; FLEET_AUD?: string }
+/** The parts of the fleet core these routes use; server.ts passes the installer's getter (only it names the core). */
+export interface PersonCore extends WriterCore {
+  SIGNED_MAX: number;
+  CHAIN_ROUTE: string;
+  CHAIN_PAGE_ENTRIES: number;
+  CHAIN_PAGE_BYTES: number;
+  parseCanonical(bytes: Uint8Array, max?: number): { body?: { fleet?: unknown } } | null;
+  parseChainTarget(target: string): number;
+  chainPageBody(page: { head: number; entries: { seq: number; bytes: string }[] }, after: number): Uint8Array;
+  isId(s: unknown): boolean;
+  newId(): string;
+}
 
 /** §3.1: the /hosts answer's encoded bytes; one more is a store fault (500), never served. */
 export const FLEET_HOSTS_BYTES = 1_048_576;
@@ -43,7 +54,7 @@ const bare = (status: number) => new Response(null, { status, headers: { "cache-
 const utf8 = (s: string) => new TextEncoder().encode(s).length;
 
 /** The person's fleet routes, or null for any other path. */
-export async function handlePerson(req: Request, url: URL, env: PersonEnv, deps?: PersonDeps): Promise<Response | null> {
+export async function handlePerson(req: Request, url: URL, env: PersonEnv, getCore: () => PersonCore, deps?: PersonDeps): Promise<Response | null> {
   const path = url.pathname;
   const grants = GRANTS.exec(path);
   if (path !== FLEET && path !== CHAIN && path !== HOSTS && !grants) return null;
@@ -57,17 +68,17 @@ export async function handlePerson(req: Request, url: URL, env: PersonEnv, deps?
   if (s.kind === "unavailable") return bare(503);
   if (s.kind !== "ok") return refusal("unauthenticated");
   if (!ACCOUNT.test(s.account)) return bare(500);
-  const core = fleetCore();
+  const core = getCore();
   if (!(await bucket(db, `fleet-read:${s.account}`, PERSON_RATE.limit, PERSON_RATE.windowMs, Date.now(), core.newId())))
     return refusal("rate", { retry_after_s: Math.ceil(PERSON_RATE.windowMs / 1000) });
-  if (write) return append(req, db, env.FLEET_AUD, s.account);
+  if (write) return append(req, core, db, env.FLEET_AUD, s.account);
   const fleet = (await db.prepare("SELECT fleet FROM fleet_accounts WHERE account = ?1").bind(s.account).first<{ fleet: string }>())?.fleet ?? null;
   if (path === FLEET) return fleet ? json(200, { fleet, aud: env.FLEET_AUD }) : refusal("no_fleet");
   if (!fleet) return refusal("no_fleet");
   try {
-    if (path === CHAIN) return await chain(db, fleet, url);
+    if (path === CHAIN) return await chain(core, db, fleet, url);
     if (path === HOSTS) return await hosts(db, fleet);
-    return await lineage(db, fleet, decodeURIComponentSafe(grants![1]), url);
+    return await lineage(core, db, fleet, decodeURIComponentSafe(grants![1]), url);
   } catch (e) {
     const code = (e as { code?: unknown })?.code;
     return typeof code === "string" && Object.hasOwn(STATUS, code) ? refusal(code) : bare(500);
@@ -77,8 +88,7 @@ export async function handlePerson(req: Request, url: URL, env: PersonEnv, deps?
 const decodeURIComponentSafe = (s: string) => { try { return decodeURIComponent(s); } catch { return ""; } };
 
 /** GET /chain: the host route's target grammar and page, under the account's fleet. */
-async function chain(db: D1, fleet: string, url: URL): Promise<Response> {
-  const core = fleetCore();
+async function chain(core: PersonCore, db: D1, fleet: string, url: URL): Promise<Response> {
   const after = core.parseChainTarget(core.CHAIN_ROUTE + url.search);
   const page = await chainPage(db, fleet, after, core.CHAIN_PAGE_ENTRIES);
   let body: Uint8Array;
@@ -87,8 +97,7 @@ async function chain(db: D1, fleet: string, url: URL): Promise<Response> {
 }
 
 /** POST /chain: one entry, appended under this account (a genesis binds the fleet to it, §1). */
-async function append(req: Request, db: D1, aud: string, account: string): Promise<Response> {
-  const core = fleetCore();
+async function append(req: Request, core: PersonCore, db: D1, aud: string, account: string): Promise<Response> {
   const body = await readBody(req, core.SIGNED_MAX, APPEND_READ_MS);
   if (body === null) return bare(408);
   if (body.length > core.SIGNED_MAX) return refusal("limit");
@@ -121,8 +130,7 @@ async function hosts(db: D1, fleet: string): Promise<Response> {
  * ?before=<gen>: the highest grants below it; ?after=<gen>: the lowest above it (after=0 from the oldest). No cursor
  * arithmetic happens here, so none can overflow.
  */
-async function lineage(db: D1, fleet: string, host: string, url: URL): Promise<Response> {
-  const core = fleetCore();
+async function lineage(core: PersonCore, db: D1, fleet: string, host: string, url: URL): Promise<Response> {
   if (!core.isId(host)) return refusal("not_found");
   const q = url.search;
   let dir: "newest" | "before" | "after" = "newest", at = 0;
