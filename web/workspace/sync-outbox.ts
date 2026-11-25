@@ -70,7 +70,7 @@ export const ownedSeq = (r: OutboxRecord): number | undefined => r.heldSeq !== u
 type Totals = { count: number; bytes: number; charged: number; full?: { at: number; count: number; bytes: number } };
 const NONE: Totals = { count: 0, bytes: 0, charged: 0 };
 
-const key = (ns: string, what: "scanned" | "dseq" | "outbox" | "successors" | "sealedPrev" | "releaseOut" | "releaseRefused") => `sync:${ns}:${what}`;
+const key = (ns: string, what: "scanned" | "dseq" | "outbox" | "successors" | "sealedPrev" | "releaseOut" | "releaseRefused" | "confirmedTop") => `sync:${ns}:${what}`;
 /** A release record's refusal (e2e PR 5d), kept until the next read of the log to its end decides what it was: the
  * pairs it named, whether it was a resend after a race, and whether the person asked for it ("delete old versions":
  * a file's history may be released only so). */
@@ -281,7 +281,7 @@ export class Outbox {
       cut(3);
       const ops = (await req(tx.objectStore("ops").getAll(IDBKeyRange.lowerBound(scanned, true), OUTBOX.page))) as Op[];
       cut(4);
-      let made = 0, full = false;
+      let made = 0, full = false, waiting = false;
       const fits = (r: OutboxRecord) => t.count + 1 <= OUTBOX.maxRecords && t.charged + chargeOf(r) <= OUTBOX.maxBytes;
       const admit = (r: OutboxRecord) => {
         out.add(r);
@@ -347,6 +347,10 @@ export class Outbox {
           // released by release records; none without the index's references (a plaintext account's ledger is empty))
           // (one that named only some versions: those are this device's own, which name no add; nothing released)
           if (o.op === "dropVersions" && !o.partial) {
+            // (not before the verified index has this device's own ops: none still in the outbox, and the index's cursor
+            // past the newest confirmed; the op waits here, scanned on a later run, so its history is the one the person saw)
+            const top = ((await req(meta.get(key(this.ns, "confirmedTop")))) as number | undefined) ?? 0;
+            if (t.count > 0 || (((await req(meta.get(cursorKey(this.ns)))) as number | undefined) ?? 0) < top) { waiting = true; break; }
             const gen = genPrefix(this.ns, ((await req(meta.get(genKey(this.ns)))) as number | undefined) ?? 0);
             const pairs = await historyUnder(meta, idbStore(tx, gen), gen, o.path, o.keep ?? 0);
             const atCursor = ((await req(meta.get(cursorKey(this.ns)))) as number | undefined) ?? 0;
@@ -373,7 +377,7 @@ export class Outbox {
       // once restored, or ends as gone if it is deleted for good)
       const succKey = key(this.ns, "successors");
       const succ = ((await req(meta.get(succKey))) as string[] | undefined) ?? [];
-      const caughtUp = !full && ops.length < OUTBOX.page;
+      const caughtUp = !full && !waiting && ops.length < OUTBOX.page;
       const left: string[] = [];
       for (const id of succ) {
         if (full || !caughtUp) { left.push(id); continue; }
@@ -670,7 +674,7 @@ export class Outbox {
   /** Records confirmed (their echo in an `index`, or the confirmed index past their seq: C3), removed under the
    * lease, in one transaction, their pins released, whether their ack came first or not (an echo first decides a
    * held identity's record as accepted). */
-  async confirmed(dseqs: number[], echoed: Map<number, string> = new Map()): Promise<void> {
+  async confirmed(dseqs: number[], echoed: Map<number, string> = new Map(), seqs: Map<number, number> = new Map()): Promise<void> {
     await inTx(this.w.ws, ["outbox", "syncIndex", "syncLedger", ...RELEASE_STORES], "readwrite", async (tx) => {
       const out = tx.objectStore("outbox"), meta = tx.objectStore("meta");
       await fence(meta, this.lease);
@@ -679,9 +683,12 @@ export class Outbox {
       const t = { ...NONE, ...((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) };
       const scanned = (await req(meta.get(key(this.ns, "scanned")))) as number | undefined;
       const lg = new LedgerTx(tx, this.ns);
+      // (the newest seq of this device's confirmed records: a "delete old versions" waits until the index has it, e2e PR 5d)
+      let top = ((await req(meta.get(key(this.ns, "confirmedTop")))) as number | undefined) ?? 0;
       for (const dseq of dseqs) {
         const r = (await req(out.get([this.ns, dseq]))) as OutboxRecord | undefined;
         if (!r) continue;
+        top = Math.max(top, r.accepted ?? seqs.get(dseq) ?? 0);
         // (a sealed record confirmed: its echo must be the envelope kept for it (or its ack already said so), and that
         // envelope becomes the chain's last link here, before its sealed form goes: an echo that comes before a lost
         // ack's resend still advances the chain, so the next envelope is sealed after this one)
@@ -706,6 +713,7 @@ export class Outbox {
         if (own !== undefined) await lg.decide(own, r.dseq, "confirmed");
       }
       meta.put(t, key(this.ns, "outbox"));
+      meta.put(top, key(this.ns, "confirmedTop"));
       await lg.finish();
     });
     afterReleases(this.w);

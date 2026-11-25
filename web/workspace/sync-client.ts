@@ -320,7 +320,7 @@ export class SyncClient {
   private barriers = new Map<string, number>();
   private answered: string[] = [];
   /** (tests: what the client did) */
-  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, blobConflicts: 0, sealedHalt: "" as string, releasesDropped: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0, liveChecks: 0, liveFails: 0, ends: {} as Record<string, number> };
+  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, blobConflicts: 0, sealedHalt: "" as string, releasesDropped: 0, releaseChecks: 0, releaseCheckFailures: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0, liveChecks: 0, liveFails: 0, ends: {} as Record<string, number> };
 
   constructor(readonly w: Workspace, private opts: ClientOptions = {}) {
     this.clock = opts.clock ?? realClock;
@@ -871,7 +871,7 @@ export class SyncClient {
       const lo = mine[0].dseq, hi = mine[mine.length - 1].dseq;
       const recs = new Map((await c.ob.records(lo, Math.max(1, hi - lo + 1))).map((r) => [r.dseq, r]));
       const kept = mine.some(sealedRow) ? await c.ob.sealed(mine.filter(sealedRow).map((o) => o.dseq)) : new Map();
-      const ok: number[] = [], echoed = new Map<number, string>(), passed = new Set<number>();
+      const ok: number[] = [], echoed = new Map<number, string>(), passed = new Set<number>(), seqs = new Map<number, number>();
       let sealedTop: number | undefined;
       for (const o of mine) {
         const r = recs.get(o.dseq);
@@ -907,6 +907,7 @@ export class SyncClient {
           }
           ops[ops.indexOf(o)] = { ...r.op, seq: o.seq, device: o.device, dseq: o.dseq } as unknown as IndexOp;
           ok.push(o.dseq);
+          seqs.set(o.dseq, o.seq);
           echoed.set(o.dseq, h);
           continue;
         }
@@ -915,11 +916,12 @@ export class SyncClient {
           return;
         }
         ok.push(o.dseq);
+        seqs.set(o.dseq, o.seq);
       }
       if (passed.size) for (let i = ops.length - 1; i >= 0; i--) if (passed.has(ops[i].seq)) ops.splice(i, 1);
       if (ok.length) {
         try {
-          await c.ob.confirmed(ok, echoed);
+          await c.ob.confirmed(ok, echoed, seqs);
         } catch (e) {
           if (!(e instanceof SealedMismatch)) throw e;
           await this.halt(c, "diverged", e.message);
@@ -971,6 +973,8 @@ export class SyncClient {
     if (!m.more && this.opts.e2e && this.opts.onIndex) {
       await this.releases(c);
       if (c.halted) return;
+      // (and the scan, which waits at a "delete old versions" until the ledger has this device's own ops: e2e PR 5d)
+      this.kick();
     }
     // (syncReady: the log's end, read by a pull asked after a token was given, its pages applied: that token answered;
     // a token given after this pull was asked: once more, to the end)
@@ -2072,7 +2076,18 @@ export class SyncClient {
         this.stats.releasesDropped += v.dropped;
         resends.push({ pairs: v.resend, retried: r.retried, person: r.person, at: r.at });
       }
-      await c.ob.releaseChecked(resends, refused.length);
+      // (its transaction failing (storage, a crash's abort) leaves every refusal as it was, for the next read of the log
+      // to its end: never an error out of the pull)
+      try {
+        await c.ob.releaseChecked(resends, refused.length);
+      } catch (e) {
+        if (e instanceof Fenced) throw e;
+        this.stats.releaseCheckFailures++;
+        console.warn("sync: a release refusal's check couldn't be kept; it runs again:", e);
+        return;
+      } finally {
+        this.stats.releaseChecks++;
+      }
       c.sweepBackoff = Math.min((c.sweepBackoff ?? 1) * 2, SWEEP.maxBackoff);
       this.kick();
       return;

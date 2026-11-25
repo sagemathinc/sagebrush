@@ -5330,6 +5330,25 @@ async function releaseHistory() {
   await stop(b);
 }
 
+async function releaseHistoryEarly() {
+  // (delete old versions asked at once after the writes, before the verified index has them: the request waits in the
+  // scan until it has, so the history released is the history the person saw, never an older ledger's (nothing lost))
+  const id = await account();
+  const f = await sealedFixture(id);
+  const wa = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "release history early: A synced");
+  await wa.create("/e.txt", { content: "one" });
+  await wa.write("/e.txt", "two");
+  await wa.write("/e.txt", "three");
+  await wa.dropVersions("/e.txt");
+  const done = await until(async () => (await refRows(id)).filter(([, , rel]) => rel !== null).length === 2 && settled(wa, a), 20_000);
+  const rows = (await refRows(id)).sort((x, y) => x[1] - y[1]);
+  check(done && rows.length === 3 && rows[0][2] !== null && rows[1][2] !== null && rows[2][2] === null,
+    "release history early: asked before its writes were confirmed, it still released the two older adds once the index had them, the current one live: " + J(rows));
+  await stop(a);
+}
+
 async function releaseCurrent() {
   // (a current device signs a release of a live file's current bytes: the server takes it (it can't see which bytes
   // are current); every device's check of that release stops there, nothing of it kept, after a reload too)
@@ -5534,7 +5553,15 @@ async function releaseRoom() {
   check(await until(async () => (await refRows(id)).some(([x, s, rel]) => x === adds[0].address && s === adds[0].add && rel !== null), 15_000), "release room: B ended the first add");
   const bounds = { ...W.OUTBOX };
   let n = 0;
-  const nudge = async () => { await wb.mkdir(`/room${n++}`); await until(() => settled(wb, b), 15_000); await sleep(800); };
+  // (A told the log moved on: it reads to the log's end, and its check of its refusal runs once more (stats.releaseChecks),
+  // whatever it decides; a notice, not an op, so the room under test is nobody's to use: the bounds are the page's, both
+  // clients')
+  const nudge = async () => {
+    const k = a.stats.releaseChecks;
+    n++;
+    await ctl("notice", { head: (a.debug().cursor ?? 0) + 1 });
+    check(await until(() => a.stats.releaseChecks > k, 20_000), `(release room: A's check ran again, nudge ${n})`);
+  };
   const totals = async () => (await metaGet(wa.ws, `sync:${nsOf(a)}:outbox`)) ?? { count: 0, charged: 0 };
   const releaseRecords = async () => (await outbox(wa));
   W.SWEEP.hold = true;
@@ -5549,7 +5576,7 @@ async function releaseRoom() {
     W.OUTBOX.cut = (k) => { if (k === 300) throw new Error("cut (test)"); };
     W.SWEEP.hold = false;
     await nudge();
-    check(J(await refusedOf(wa, a)) === before && (await releaseRecords()) === 0, "release room: a crash in the middle: the refusal as it was, no record made: " + J({ refused: await refusedOf(wa, a), before, rows: await refRows(id), adds, dropped: a.stats.releasesDropped, why: a.stats.sealedHalt, records: await releaseRecords() }));
+    check(J(await refusedOf(wa, a)) === before && (await releaseRecords()) === 0 && a.stats.releaseCheckFailures >= 1 && a.debug().halted === undefined, "release room: a crash in the middle: the refusal as it was, no record made, nothing stopped: " + J({ refused: await refusedOf(wa, a), before, rows: await refRows(id), adds, dropped: a.stats.releasesDropped, why: a.stats.sealedHalt, records: await releaseRecords() }));
     W.OUTBOX.cut = null;
     // (no room by bytes)
     W.OUTBOX.maxBytes = 0;
@@ -5587,7 +5614,7 @@ async function releaseRoom() {
   await stop(b);
 }
 
-const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained, releasePlaintext, releaseRetry, releaseRoom };
+const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained, releasePlaintext, releaseRetry, releaseRoom, releaseHistoryEarly };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
