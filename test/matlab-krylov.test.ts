@@ -154,6 +154,9 @@ test("the flags for a singular or indefinite preconditioner, maxit 0, the messag
     "[x, f, r, it, rv] = pcg(T, b, 1e-10, 50, zeros(n)); fprintf('singM|%d|%g|%d|%d\\n', f, it, numel(rv), isequal(x, zeros(n, 1)));",
     "[x, f, r, it, rv] = pcg(T, b, 1e-10, 50, @(v) v ./ [0; ones(n-1, 1)]); fprintf('singH|%d|%g\\n', f, it);",
     "[x, f] = minres(T, b, 1e-10, 50, -eye(n)); fprintf('negM|%d\\n', f);",
+    // (a non-finite preconditioner is computed with, not refused: its solve is not finite, so flag 2 and x0)
+    "Mi = full(T); Mi(2, 5) = Inf; [x, f, r, it] = gmres(T, b, [], 1e-10, 10, Mi); fprintf('infM|%d|%s|%d\\n', f, mat2str(it), isequal(x, zeros(n, 1)));",
+    "Mn = tril(T); Mn(4, 2) = NaN; [x, f, r, it] = bicgstab(T, b, 1e-10, 50, Mn); fprintf('nanM|%d|%g|%d\\n', f, it, isequal(x, zeros(n, 1)));",
     "[x, f, r, it, rv] = bicgstab(T, b, 1e-10, 0); fprintf('maxit0|%d|%g|%g|%d\\n', f, r, it, numel(rv));",
     "[x, f, r, it, rv] = gmres(T, b, [], 1e-10, 0, [], [], ones(n, 1)); fprintf('gmaxit0|%d|%s|%d|%d\\n', f, mat2str(it), numel(rv), isequal(x, ones(n, 1)));",
     "[x, f, r, it] = pcg(T, T*ones(n, 1), 1e-10, 50, [], [], ones(n, 1)); fprintf('x0exact|%d|%g|%g\\n', f, r, it);",
@@ -176,6 +179,8 @@ test("the flags for a singular or indefinite preconditioner, maxit 0, the messag
   assert.deepEqual(rows.get("singM"), ["2", "0", "1", "1"]);
   assert.deepEqual(rows.get("singH"), ["2", "0"]);
   assert.deepEqual(rows.get("negM"), ["5"]);
+  assert.deepEqual(rows.get("infM"), ["2", "[0 0]", "1"]);
+  assert.deepEqual(rows.get("nanM"), ["2", "0", "1"]);
   assert.deepEqual(rows.get("maxit0"), ["1", "1", "0", "1"]);
   assert.deepEqual(rows.get("gmaxit0"), ["1", "[0 0]", "1", "1"]);
   assert.deepEqual(rows.get("x0exact"), ["0", "0", "0"]);
@@ -247,5 +252,5 @@ test("the solvers' work admitted before their first vector (test/matlab_krylov_a
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const lines = r.stdout.trim().split("\n");
   assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
-  assert.equal(lines.length, 8, r.stdout);
+  assert.equal(lines.length, 9, r.stdout);
 });

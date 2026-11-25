@@ -87,6 +87,39 @@ def _matrix_arg(v, fname, what):
         raise _err("%s: %s must be a 2-D matrix." % (fname, what))
 
 
+def _isdiag(v, sparse):
+    """whether a square matrix is diagonal, read in blocks of at most E entries, so that nothing larger is made: a full
+    one's rows (its nonzeros counted, less its diagonal's), a sparse one's columns (each stored entry's row its
+    column); the isdiag built-in would make a sparse copy of a full matrix first"""
+    if sparse:
+        jc, ir, n = v.jc, v.ir, v.n
+        c0 = 0
+        while c0 < n:
+            # (columns up to E entries; a longer column alone, by E entries at a time)
+            a = int(jc[c0])
+            c1 = c0 + 1
+            while c1 < n and int(jc[c1 + 1]) - a <= E:
+                c1 += 1
+            b = int(jc[c1])
+            for s0 in range(a, b, E):
+                s1 = min(b, s0 + E)
+                cols = np.searchsorted(jc[c0:c1 + 1], np.arange(s0, s1), "right") - 1 + c0
+                if np.any(ir[s0:s1] != cols):
+                    return False
+            c0 = c1
+        return True
+    S = _m._farr(v)
+    n = S.shape[0]
+    rows = max(1, E // max(n, 1))
+    for a in range(0, n, rows):
+        b = min(n, a + rows)
+        block = S[a:b]
+        diag = int(np.count_nonzero(block[np.arange(b - a), np.arange(a, b)]))
+        if int(np.count_nonzero(block)) != diag:
+            return False
+    return True
+
+
 class _Op:
     """A (or a preconditioner): a matrix or a function handle.  A matrix is applied as MATLAB mode's mtimes applies it
     (the same NumPy product for a full one, the same sums for a sparse one: the same values), but by the solver's own
@@ -107,7 +140,7 @@ class _Op:
             if (d[0], d[1]) != (m, n):
                 raise _err("%s: %s must be %d-by-%d." % (fname, what, m, n))
             self.sparse = type(v) is _m.Sparse
-            self.isdiag = precond and bool(_m._B["isdiag"].call(1, [v]))
+            self.isdiag = precond and _isdiag(v, self.sparse)
         self.v = v
         self.diag = self.cols = self.lu = self.perm = self.F = None
 

@@ -220,3 +220,25 @@ stand_in(first)
 assert attempt(call("pcg", Th, bh, 1e-6, 10.0, Lh)) == "MATLAB:nomem"
 ok("a handle charged as complex (exact need reached, one byte less refused); a sparse M's LU reserved on top of the vectors")
 
+
+# (a preconditioner's diagonal test makes nothing larger than E entries before the admission: no sparse copy of a full
+# M (from_full, np.nonzero), no bandwidth discovery of a sparse one; sentinels on all of them, a host one byte short
+# of the need refusing and a host of exactly the need reaching the first vector, neither touching a sentinel)
+saved_dd = (sp.from_full, sp._as_sparse, sp.bandwidths, np.nonzero)
+
+
+def touched(*a, **k):
+    raise AssertionError("a sparse copy or a discovery before the admission")
+
+
+Ld = B["tril"].call(1, [Th])
+Mfd = B["full"].call(1, [B["tril"].call(1, [Tf])])
+for name, Mx, bx, Ax in (("full M", Mfd, bf, Tf), ("sparse M", Ld, bh, Th)):
+    need = record(call("pcg", Ax, bx, 1e-6, 10.0, Mx))[0]
+    sp.from_full = sp._as_sparse = sp.bandwidths = np.nonzero = touched
+    try:
+        stand_in(need - 1)
+        assert attempt(call("pcg", Ax, bx, 1e-6, 10.0, Mx)) == "MATLAB:nomem", name
+    finally:
+        sp.from_full, sp._as_sparse, sp.bandwidths, np.nonzero = saved_dd
+ok("a preconditioner's diagonal test copies nothing before the admission (full and sparse M; one byte short: nomem)")
