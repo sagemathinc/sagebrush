@@ -199,6 +199,16 @@
       "meaning": "the kernel's Landlock ABI is below 4"
     },
     {
+      "name": "unit_failed",
+      "owner": "host",
+      "meaning": "the agent's unit failed or exited while starting; it is left stopped and masked until the next grant or a resume"
+    },
+    {
+      "name": "start_timeout",
+      "owner": "host",
+      "meaning": "the agent's start didn't finish within its deadline; it is left stopped and masked until the next grant or a resume"
+    },
+    {
       "name": "uid_exhausted",
       "owner": "host",
       "meaning": "the host's agent UID range is used up (UIDs are never reused)"
