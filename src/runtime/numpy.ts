@@ -434,7 +434,9 @@ function castNum(dt: DType, v: number): number {
         }
         return v >= -9223372036854775808 && v < 9223372036854775808 ? v + 0 : wideRefuse(dt);
       }
-      return Number.isFinite(v) ? Math.trunc(v) : dt.kind === "i" ? RANGE[dt.name][0] : 0;
+      // (NaN or infinity: what NumPy's C cast gives on x86, through a 32-bit integer, so the int32 minimum, whose
+      // low bits make 0 in int8 and int16, and 0 in an unsigned dtype)
+      return Number.isFinite(v) ? Math.trunc(v) : dt.name === "int32" ? RANGE.int32[0] : 0;
     case "f":
       return dt.ctor === Float32Array ? Math.fround(v) : v;
     default:
@@ -737,7 +739,7 @@ function fill(out: NDArray, x: any) {
       const c = toC(v);
       d[2 * k] = c[0];
       d[2 * k + 1] = c[1];
-    } else d[k] = castNum(dt, toNum(v, dt));
+    } else d[k] = castNum(dt, toNum(v, isSmallInt(dt) ? undefined : dt));
     k++;
   };
   put(x);
@@ -965,6 +967,10 @@ export function fromPy(x: any, dtype: any = null, copyKw: any = undefined, strOK
     return fromPy(y, dtype, undefined, strOK);
   }
   const dt = given ? toDtype(dtype) : (kinds.dt ?? D.float64);
+  // (Python values into an int8 to uint32 dtype: the one admission, as NumPy converts them: a list's values as its
+  // integer setitem does (a NumPy scalar checked into a signed dtype), a lone value checked unless it is a NumPy
+  // scalar, which is cast; then fill casts what was admitted)
+  if (given && isSmallInt(dt)) admitSmallInt(dt, x, true, false, true);
   const out = empty(shape, dt);
   fill(out, x);
   return out;

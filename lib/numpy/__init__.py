@@ -2950,6 +2950,58 @@ def _m_argsort(self, axis=-1, kind=None, order=None):
     return argsort(self, axis)
 
 
+def _fill_scalar(dt, v):
+    # (NumPy's fill converts its value as the dtype's scalar setitem does: integers by int(), floats by float() (None
+    # is nan), complex by complex() (bytes decoded), bools by truth; a 0-d array is its element, any other array or
+    # sequence is refused as NumPy refuses it)
+    k = dt.kind
+    if isinstance(v, ndarray):
+        if v.ndim == 0:
+            return v[()]
+        if k == "b" and v.size == 1:
+            return _builtins.bool(v.ravel()[0])
+        if k == "c":
+            raise TypeError("only 0-dimensional arrays can be converted to Python scalars")
+        raise ValueError("setting an array element with a sequence.")
+    if k == "b":
+        return _builtins.bool(v)
+    if k in "iu":
+        if isinstance(v, (str, bytes)):
+            return int(v)
+        if v is None or isinstance(v, (list, tuple)):
+            raise TypeError("int() argument must be a string, a bytes-like object or a real number, not '%s'"
+                            % type(v).__name__)
+        return v
+    if k == "f":
+        if isinstance(v, bytes):
+            v = v.decode("latin-1")
+        if isinstance(v, str):
+            return float(v)
+        if v is None:
+            return float("nan")
+        if isinstance(v, (list, tuple)):
+            raise ValueError("setting an array element with a sequence.")
+        return v
+    if k == "c":
+        if isinstance(v, bytes):
+            v = v.decode("latin-1")
+        if isinstance(v, str):
+            return complex(v)
+        if v is None:
+            return complex(float("nan"), float("nan"))
+        if isinstance(v, (list, tuple)):
+            raise TypeError("must be real number, not %s" % type(v).__name__)
+        return v
+    return v
+
+
+def _m_fill(self, value):
+    if self.dtype.kind in "US":
+        self[...] = value
+    else:
+        self[...] = _fill_scalar(self.dtype, value)
+
+
 def _m_flatten(self, order="C"):
     return _np.copy(_np.ravel(self))
 
