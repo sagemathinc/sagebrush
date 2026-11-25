@@ -39,7 +39,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [{ name: "fleet", modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["FLEET_DB"], bindings: { FLEET_AUD: AUD } }],
 }));
 const db = await mf.getD1Database("FLEET_DB");
-for (const m of ["0001_fleet_leases.sql", "0002_fleet_writers_chain_hosts.sql", "0003_fleet_writers_grants_transfers.sql", "0004_fleet_request_nonces.sql"])
+for (const m of ["0001_fleet_leases.sql", "0002_fleet_writers_chain_hosts.sql", "0003_fleet_writers_grants_transfers.sql", "0004_fleet_request_nonces.sql", "0005_fleet_accounts_and_bytes.sql"])
   for (const stmt of readFileSync(join(here, "migrations", m), "utf8").replace(/--[^\n]*/g, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(stmt).run();
 const exec = (sql, ...v) => db.prepare(sql).bind(...v).run();
 const all = async (sql, ...v) => (await db.prepare(sql).bind(...v).all()).results;
