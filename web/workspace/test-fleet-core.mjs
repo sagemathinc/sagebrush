@@ -19,19 +19,20 @@ let failures = 0;
 const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 600) : "")); if (!c) failures++; };
 
 // ---- the mirror: the upstream commit and each file's sha256 there (a new upstream version means new pins, reviewed)
-const UPSTREAM = "5b9c1bbcae004ade31d6fd1919e38b59674bae99";
+const UPSTREAM = "20c017f79038de42b929d3bf6597c1b5b71ab850";
 const PINS = {
   "core/bytes.mjs": ["lib/fleet/core/bytes.mjs", "be5c199fcadf375336c49dae692fce6af96644af6f98b11161a4fb0d65eaaf6b"],
   "core/canon.mjs": ["lib/fleet/core/canon.mjs", "d9b7831f6772f6010689ecb74a8727280470e8e1437a2166fc0fd6b1728f08e8"],
   "core/canonical.mjs": ["lib/fleet/core/canonical.mjs", "7943e0fe146f6ad12a802e9cab7f9284a7879f0181ee9adcf2ae024ad9e819e3"],
   "core/chain-service.mjs": ["lib/fleet/core/chain-service.mjs", "ccbebba30754c45d88f3c8ed80408707a3c0116f121e631aa5d4abb274c8647e"],
+  "core/grant-service.mjs": ["lib/fleet/core/grant-service.mjs", "5adf702a20d28aeee3b0194f9aad12e35f283c0437006e7358b252ec8ad7653e"],
   "core/chain.mjs": ["lib/fleet/core/chain.mjs", "774c2e7478d475c7e66ab0172d219a287d934b4efb4ebc3cbb62d10b6ec6e16e"],
   "core/control.mjs": ["lib/fleet/core/control.mjs", "32ff93c76b65e19b3a5e6189fd118ae7860ecfbae70c22a1c0469e246379165b"],
   "core/crypto.mjs": ["lib/fleet/core/crypto.mjs", "34d85de82f75c4bbae276d7fb24fddce0b8fd576825298fbe452535db12557b4"],
   "core/ed25519.mjs": ["lib/fleet/core/ed25519.mjs", "63420ae7dd5f17d159e56bc3a0ad91a3e96269a7eedf56196da2599a3a05c4ad"],
   "core/envelope.mjs": ["lib/fleet/core/envelope.mjs", "a75fdd24675a12377dfba1a2e1f2c38c846e61f1b80e0914afa988bc7501d2e5"],
   "core/hpke.mjs": ["lib/fleet/core/hpke.mjs", "38d2ac452098e275b423a8530fb62c2cc113c6f4493cbefa397aa92dd40bf6d1"],
-  "core/index.mjs": ["lib/fleet/core/index.mjs", "af6bde84f6d98612248ec2526a040dde259b6149d86bc8d749100c5a06dbbd5e"],
+  "core/index.mjs": ["lib/fleet/core/index.mjs", "19b2be8494502aa10239889dade828234d85fe595a37731c3bde38017fe2f3d1"],
   "core/lease-service.mjs": ["lib/fleet/core/lease-service.mjs", "b92c721e5718c2e27a983ef8612b4a1a8741443ab4797a1503f9682881fa244b"],
   "core/recovery.mjs": ["lib/fleet/core/recovery.mjs", "a636cdaab732d71eeb24c241cd6f0c61b5d1634bafd5992675976083e36a90ff"],
   "core/relay.mjs": ["lib/fleet/core/relay.mjs", "c30eab74b5305ae0e0194e76555ed11bee3a2768c12ba95c599145fd74138c2a"],
@@ -43,7 +44,7 @@ const PINS = {
   "core/webcrypto.mjs": ["lib/fleet/core/webcrypto.mjs", "82f5b25fcd77710fa75f18c65df00dbea5be223315ff4f32308f3164acb0e61b"],
   "core/worker.mjs": ["lib/fleet/core/worker.mjs", "9471ad45d78b0a423ac64a07d1ee02c73b5e6241d11f11f40e6daf070801633f"],
   "fleet.schema.json": ["schema/fleet/fleet.schema.json", "e74f056439d6d360c525529e90bd945e9dd9e2edb9e299d384a5f9fce8ff887e"],
-  "reasons.json": ["schema/fleet/reasons.json", "c1866dbf2a0c5d83c43f1af4e3ad8aecb737f39612aedafbbd75a69f12e2bae3"],
+  "reasons.json": ["schema/fleet/reasons.json", "f4723e0c0ab84d20dfe6cfcccb6cbf55aac1c4a6a4de56b89ff35e7353e52c98"],
   "fleet-fixtures.json": ["test/fixtures/fleet-fixtures.json", "c21999636530b9a86a7e005c7537b62aeee6443cc604c67643c98568560df135"],
   "fleet-hpke-fixtures.json": ["test/fixtures/fleet-hpke-fixtures.json", "2c4d640af72ee2514c33930763dd17521b73ca50e231fdc0cb8d54915e16736c"],
   "hpke-x25519-sha256-aes256gcm.json": ["test/fixtures/hpke-x25519-sha256-aes256gcm.json", "054c8e53704afdc91aae501f96ee964828c78fd4581e5894d21593b93a066d8e"],
