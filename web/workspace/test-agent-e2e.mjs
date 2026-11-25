@@ -211,6 +211,19 @@ try {
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); sock.send(JSON.stringify({ id, method, params })); });
   const ev = async (expr) => { const r = await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails).slice(0, 400)); return r.result?.result?.value; };
   const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
+  // Arm this before the click that starts pairing. The old polling row could time out and then immediately read the
+  // absent dialog, replacing the useful failure with a secondary exception. A DOM notification cannot miss the dialog
+  // between CDP polls; its bounded failure records the pairing and every dialog that actually exists (#1585).
+  const nextDialog = (title, ms = 30000) => ev(`new Promise((resolve) => {
+    const title = ${JSON.stringify(title)};
+    const headings = () => [...document.querySelectorAll(".sbag-box h2")].map((h) => h.textContent ?? "");
+    const found = () => headings().includes(title);
+    const done = (ok) => resolve({ ok, dialogs: headings(), pairing: T.ui.pairing ? { state: T.ui.pairing.state, reason: T.ui.pairing.closeReason ?? "" } : null, ready: window.ready === true });
+    if (found()) return done(true);
+    const observer = new MutationObserver(() => { if (found()) { clearTimeout(timer); observer.disconnect(); done(true); } });
+    observer.observe(document.body, { childList: true, subtree: true });
+    const timer = setTimeout(() => { observer.disconnect(); done(false); }, ${ms});
+  })`);
   // (the old document marked first: under load it can still answer `ready` after the navigation was asked, and a row
   // acting on it then loses what it did when the new one replaces it (reload 9's Connect dialog))
   const open = async (q) => { await ev("(window.__sbOldDoc = true, 1)").catch(() => {}); await send("Page.navigate", { url: origin + "/" + q }); await sleep(300); return until("window.ready === true && !window.__sbOldDoc"); };
@@ -263,8 +276,11 @@ try {
 
   // the right code, through the dialog, then the grant: /A, read and write, until the page closes
   ok(await open(`?pair=${CODE}&port=${PORT}`), "the right code's link");
+  const firstGrant = nextDialog("Allow this agent?");
   await click(".sbag-box button.primary");
-  ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "paired: the grant dialog asks the person");
+  const firstGrantResult = await firstGrant;
+  ok(firstGrantResult.ok, `paired: the grant dialog asks the person (${JSON.stringify(firstGrantResult)})`);
+  if (!firstGrantResult.ok) throw new Error(`the grant dialog did not open: ${JSON.stringify(firstGrantResult)}`);
   // (the default, D (chat plan PR 3): Everything ticked when the dialog opens, the folders disabled until it is unticked)
   const dflt = await ev(`(() => { const ins = [...document.querySelectorAll(".sbag-box .folders input")]; return { all: ins[0].checked, others: ins.slice(1).map((i) => i.disabled), focus: document.activeElement === ins[0] }; })()`);
   ok(dflt.all === true && dflt.others.length >= 2 && dflt.others.every(Boolean), `the grant dialog opens with Everything ticked, the folders disabled (${JSON.stringify(dflt)})`);
@@ -354,8 +370,11 @@ try {
   // registered for a moment, and its silent reconnect is answered "another page is paired" until it isn't)
   await drive({ op: "slow", s: 0.6 });
   ok(await open(`?pair=${fresh.code}&port=${fresh.port}`), "a new code's link, to remember the agent");
+  const rememberedGrant = nextDialog("Allow this agent?");
   await click(".sbag-box button.primary");
-  ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "paired again: the grant dialog");
+  const rememberedGrantResult = await rememberedGrant;
+  ok(rememberedGrantResult.ok, `paired again: the grant dialog (${JSON.stringify(rememberedGrantResult)})`);
+  if (!rememberedGrantResult.ok) throw new Error(`the remembered grant dialog did not open: ${JSON.stringify(rememberedGrantResult)}`);
   await ev(`(() => { { const all = document.querySelector(".sbag-box .folders input"); if (all.checked) all.click(); } document.querySelector('.sbag-box input[value="/A"]').click(); const s = document.querySelector(".sbag-box select"); s.value = "3600000"; s.dispatchEvent(new Event("change")); const r = [...document.querySelectorAll(".sbag-box label")].find((l) => /Remember this agent/.test(l.textContent)).querySelector("input"); if (!r.checked) r.click(); return true; })()`);
   await click(".sbag-box button.primary");
   ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed for an hour, remembered");

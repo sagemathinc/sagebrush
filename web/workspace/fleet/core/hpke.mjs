@@ -1,7 +1,8 @@
 // HPKE (RFC 9180) in base mode with one suite, the one r2.3 §7 fixes: DHKEM(X25519, HKDF-SHA256) (0x0020),
 // HKDF-SHA256 (0x0001) and AES-256-GCM (0x0002). Pure: the X25519, HMAC and AES-GCM steps go through the installed
 // backend (crypto.mjs); the labels, the key schedule and every check are here, so both backends run the same scheme.
-// Checked against the CFRG known-answer vector for exactly this suite (test/fixtures/hpke-x25519-sha256-aes256gcm.json).
+// Checked against the CFRG known-answer vector for exactly this suite (test/fixtures/hpke-x25519-sha256-aes256gcm.json),
+// its encryptions and its exports.
 
 import { concat, enc, refuse } from "./bytes.mjs";
 import { crypto } from "./crypto.mjs";
@@ -70,6 +71,7 @@ async function keySchedule(shared, info) {
     return {
       key: await labeledExpand(SUITE, secret, "key", context, NK),
       baseNonce: await labeledExpand(SUITE, secret, "base_nonce", context, NN),
+      exporterSecret: await labeledExpand(SUITE, secret, "exp", context, NH),
     };
   } finally {
     secret.fill(0);
@@ -84,13 +86,15 @@ function nonceAt(base, seq) {
 
 /**
  * A sender's context (RFC 9180 §5.1.1, base mode) to `pkR` (32 raw bytes). `ephemeral` is for the vectors only: a pair
- * from deriveKeyPair; otherwise a fresh one is generated. Returns { enc, seal(aad, pt) }: a sender never opens.
+ * from deriveKeyPair; otherwise a fresh one is generated. Returns { enc, seal(aad, pt), export(ctx, L) }: a sender
+ * never opens.
  */
 export const setupSender = (pkR, info, ephemeral = null) => sender(pkR, info, ephemeral, 0);
 
 /**
- * @typedef {Readonly<{ enc: Uint8Array, seal(aad: Uint8Array, pt: Uint8Array): Promise<Uint8Array> }>} SenderContext
- * @typedef {Readonly<{ open(aad: Uint8Array, ct: Uint8Array): Promise<Uint8Array> }>} RecipientContext
+ * @typedef {(exporterContext: Uint8Array, length: number) => Promise<Uint8Array>} Exporter
+ * @typedef {Readonly<{ enc: Uint8Array, seal(aad: Uint8Array, pt: Uint8Array): Promise<Uint8Array>, export: Exporter }>} SenderContext
+ * @typedef {Readonly<{ open(aad: Uint8Array, ct: Uint8Array): Promise<Uint8Array>, export: Exporter }>} RecipientContext
  */
 
 /** @returns {Promise<SenderContext>} */
@@ -130,8 +134,22 @@ export const atSequence = Object.freeze({
 // packages and capability mints use one context per message (seal() and open() below), so they never overlap.
 const SEQ_MAX = Number.MAX_SAFE_INTEGER;
 
+// Export (RFC 9180 §5.3) is on both roles: a secret of `length` bytes (1 to 255 * Nh) bound to this context and to
+// `exporterContext`. It uses no nonce and no sequence, so it is neither claimed nor counted, and may overlap a seal or
+// open; the same arguments always give the same secret.
+const EXPORT_MAX = 255 * NH;
+
+function exporter(ks) {
+  return async (exporterContext, length) => {
+    if (!(exporterContext instanceof Uint8Array)) refuse("bad_form", "an exporter context is bytes");
+    if (!Number.isInteger(length) || length < 1 || length > EXPORT_MAX) refuse("bad_form", `an exported secret is 1 to ${EXPORT_MAX} bytes`);
+    return labeledExpand(SUITE, ks.exporterSecret, "sec", exporterContext, length);
+  };
+}
+
 function context(encapsulated, ks, role, start) {
   let seq = start, busy = false;
+  const exp = exporter(ks);
   const claim = () => {
     if (busy) refuse("in_progress", "another operation of this context is pending");
     if (seq >= SEQ_MAX) refuse("limit", "this context's sequence is used up");
@@ -150,6 +168,7 @@ function context(encapsulated, ks, role, start) {
           busy = false;
         }
       },
+      export: exp,
     });
   }
   return Object.freeze({
@@ -166,6 +185,7 @@ function context(encapsulated, ks, role, start) {
         busy = false;
       }
     },
+    export: exp,
   });
 }
 
@@ -178,4 +198,15 @@ export async function seal(pkR, info, aad, pt, ephemeral = null) {
 /** Open one single-shot message. */
 export async function open(own, encapsulated, info, aad, ct) {
   return (await setupRecipient(own, encapsulated, info)).open(aad, ct);
+}
+
+/** One exported secret, sender side (SetupBaseS, then Export): { enc, secret }. */
+export async function sendExport(pkR, info, exporterContext, length, ephemeral = null) {
+  const s = await setupSender(pkR, info, ephemeral);
+  return { enc: s.enc, secret: await s.export(exporterContext, length) };
+}
+
+/** The same secret, recipient side (SetupBaseR, then Export). */
+export async function receiveExport(own, encapsulated, info, exporterContext, length) {
+  return (await setupRecipient(own, encapsulated, info)).export(exporterContext, length);
 }

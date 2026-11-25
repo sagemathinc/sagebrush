@@ -549,7 +549,7 @@ the Agents pane's frame of the LaTeX editor, /?tex=&embed=1, which is the editor
       </div>
       <div class="card">
         <h3>Independent and open</h3>
-        <p>MIT or Apache-2.0, written from papers and books. No code from Magma, PARI, Sage, Singular, FLINT or GMP, so when Sagebrush agrees with them, that is <a href="/articles/#independent">independent confirmation</a>.</p>
+        <p>MIT or Apache-2.0, mostly written from papers and books. No code from Magma, PARI, Sage, Singular, FLINT or GMP, so when Sagebrush agrees with them, that is <a href="/articles/#independent">independent confirmation</a>.</p>
       </div>
       <div class="card">
         <h3>Use it anywhere</h3>
@@ -593,7 +593,7 @@ the Agents pane's frame of the LaTeX editor, /?tex=&embed=1, which is the editor
     <button id="runstale" hidden title="Run the cells that are stale (left by the time limit, or manual)">Run stale</button>
     <!-- (the reactive notebook's automatic reruns and the function search, always in view (the brief, Nov 12: search is
          "EXTREMELY important for sagebrush", and auto-run "emphasizes clearly how sagebrush is a reactive notebook")) -->
-    <select id="autorun" hidden aria-label="Auto: automatic reruns" title="Auto: Sagebrush is reactive: when a cell runs, the cells that depend on it rerun automatically while they fit in this time; slower ones wait, marked stale"><option value="2000">2 s</option><option value="10000">10 s</option><option value="always">Always</option><option value="never">Never</option><option value="about">About…</option></select>
+    <select id="autorun" hidden aria-label="Auto: automatic reruns" title="Auto: Sagebrush is reactive: when a cell runs, the cells that depend on it rerun automatically while they fit in this time; slower ones wait, marked stale"><option value="10000">10 s</option><option value="2000">2 s</option><option value="always">Always</option><option value="never">Never</option><option value="about">About…</option></select>
     <div id="docsearchbox" role="search">
       <input id="docsearch" type="search" placeholder="Search functions  /" aria-label="Search Sagebrush's functions and their documentation" aria-controls="docresults" aria-expanded="false" aria-autocomplete="list" autocomplete="off" spellcheck="false">
       <ul id="docresults" role="listbox" aria-label="Matching functions" hidden></ul>
@@ -1710,6 +1710,8 @@ window.sagebrush = {
   get download() { return downloadDialog; }, get downloadTest() { return downloadTest; },
   // (tests: Move to Trash's pauses, B1)
   get trashTest() { return trashTest; },
+  // (tests: an open's workspace listing held across another open, so its completion cannot act on the later notebook)
+  get wsListTest() { return wsListTest; },
   /** Open a notebook of this browser by id (switching to its interpreter). */
   open: (id) => openId(id),
 };
@@ -2053,7 +2055,7 @@ $("#runall").onclick = () => nb.runAll();
 // The reactive notebook's controls: the time budget for automatic reruns
 // (kept in the notebook), and running what is stale.
 const autorunEl = $("#autorun"), runStaleEl = $("#runstale");
-const budgetOf = (v) => (v === "always" ? Infinity : v === "never" ? 0 : Number(v) || 2000);
+const budgetOf = (v) => (v === "always" ? Infinity : v === "never" ? 0 : Number(v) || 10000);
 // (its entries just the times, "2 s", "Always", …; closed, the chosen one says "Auto 2 s" (decided Nov 12: "Auto",
 //  beside the Run buttons, with About to explain it): the prefix put on the chosen entry, and taken off as it opens)
 const autoPlain = (o) => o.textContent.replace(/^Auto /, "");
@@ -2143,7 +2145,15 @@ function showName(name) {
   nbName.value = name || "Untitled";
   document.title = `${nbName.value} — Sagebrush`;
 }
-nbName.addEventListener("input", () => { document.title = `${nbName.value} — Sagebrush`; nb.setMeta({ name: docName() }); wsRenameSoon(); localRenameSoon(); });
+nbName.addEventListener("input", () => {
+  document.title = `${nbName.value} — Sagebrush`;
+  const name = docName();
+  // Keep the workspace rename intent with the title itself.  If this page goes away before the debounce below, the
+  // next writer that opens the notebook can finish the rename instead of treating the old file name as authoritative.
+  nb.setMeta({ name, ...(current.kind === "browser" && pageMay().rename ? { file_rename: name } : {}) });
+  wsRenameSoon();
+  localRenameSoon();
+});
 // `sagebrush notebook DIR`'s file (LOCAL): its title is its file's name, so a rename renames the file (B2):
 // to a free name beside it (" (2)", " (3)"... if taken: never over another file, the server refuses that), after the
 // saves before it, and then the page's address and its "saved to" say the new name. A notebook not saved yet only
@@ -2289,16 +2299,17 @@ let arrivalWait = null, attachSeq = 0;
 // (the file's name wins on open: a stored title that a rename didn't follow (older data, a sync's rename) is replaced
 // by the file's name, shown, and kept as a typed title is; only for this notebook while it is still the one open, and
 // never while its title is being typed. A file named "<title> (2)" because its title's name was taken is not that)
-async function fileNameWins(id) {
+async function fileNameWins(id, still = () => current.kind === "browser" && current.id === id) {
   try {
+    if (!still()) return;
     const p = ws ? await ws.pathOf("notebook", id) : null;
-    if (!p || current.id !== id || document.activeElement === nbName) return;
+    if (!p || !still() || document.activeElement === nbName) return;
     const base = splitExt(nameOf(p))[0];
     const name = docName();
     // (a file named after its title with a number added (the title's name was taken) keeps its title, as made)
     if (!base || base === name || (base.startsWith(name + " (") && /^ \(\d+\)$/.test(base.slice(name.length)))) return;
     showName(base);
-    if (pageMay().rename) nb.setMeta({ name: base });
+    if (pageMay().rename) nb.setMeta({ name: base, file_rename: null });
   } catch {}
 }
 async function open(store, id, kind = "browser", guard = null, intent = null) {
@@ -2359,7 +2370,19 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
   // (the reactive notebook: random numbers are reproducible per cell, always)
   $("#ttreprolabel").hidden = REACTIVE;
   if (kind === "browser") try { localStorage.setItem("sagebrush-current", id); } catch {}
-  if (kind === "browser") wsListNotebook(id, doc.name, nb.mode).then(() => fileNameWins(id)).then(wsTrackCurrent);
+  const openGen = docGen;
+  if (kind === "browser") wsListNotebook(id, doc.name, nb.mode).then(() => {
+    const still = () => docGen === openGen && current.kind === "browser" && current.id === id;
+    // A listing from an older opening of this notebook can finish after it was opened again.  It may do neither side
+    // of this decision: in particular, fileNameWins would otherwise clear the newer opening's pending title intent.
+    if (!still()) return;
+    // A title saved before its debounced file rename survives a reload.  Only that explicit intent makes the title
+    // win here; an ordinary mismatch still means that a Files/sidebar rename wins (fileNameWins).
+    if (nb.meta.file_rename === doc.name && docName() === doc.name) {
+      wsRenameSoon(0, { id, name: doc.name, openGen });
+    }
+    else return fileNameWins(id, still);
+  }).then(wsTrackCurrent);
   if (kind === "browser") recordOpened({ kind: "notebook", ref: id });
   startHistory(id);
   presence.open(id);
@@ -2469,6 +2492,8 @@ function filesPrompt(doc, generation, path, changed, what, ask = null) {
     return say(changed ? "This notebook's permissions changed while it ran. Run the cell again." : `This change to ${shown(name)} is allowed now. Run the cell again to ${done} (the notebook's variables are cleared).`, ["fbok"]);
   }
   if (perms.deniedWrite(doc, path)) { ask?.reply(null); return; } // (Don't allow: silent for the rest of the session)
+  // (the app's grants set aside while its permissions file can't be read: refused, saying why, nothing to allow)
+  if (perms.suspended()) { ask?.reply(null); fbReq = { open: false }; return say(perms.suspended(), ["fbok"]); }
   const req = { open: true, id: ++fbSeq, doc, generation, path, folder, trees: now.join("\n"), rev: revOf(doc), armedAt: performance.now() + FB_ARM, pressed: null, ask: ask ? { ...ask, claimed: false } : null };
   fbReq = req;
   if (folder === "/") return say(`This notebook is trying to ${doing} ${shown(name)} at the top of ${whereIs("/")}. To allow that, use File > Permissions…`, ["fbperms", "fbdeny"]);
@@ -2531,7 +2556,7 @@ function filesShown() {
   const only = current.id && !on ? perms.writeTrees(current.id) : [];
   const fp = document.getElementById("filesperm"); // (the Permissions panel's)
   if (fp) fp.textContent = on ? "Don't allow file changes" : "Allow file changes anywhere";
-  $("#permsfiles").textContent = !current.id ? "" : on ? "Allowed: this notebook's code may change your files." : only.length ? `Allowed only in ${only.join(", ")}: this notebook's code can't change files anywhere else.` : "Not allowed: this notebook's code can't change your files.";
+  $("#permsfiles").textContent = !current.id ? "" : perms.suspended() ? perms.suspended() : on ? "Allowed: this notebook's code may change your files." : only.length ? `Allowed only in ${only.join(", ")}: this notebook's code can't change files anywhere else.` : "Not allowed: this notebook's code can't change your files.";
   $("#permsfor").textContent = current.id ? `For "${docName()}".` : "";
   if (on && !filesBarEl.hidden) filesBar(false);
 }
@@ -3625,7 +3650,15 @@ const texEmbedded = (() => { const q = new URLSearchParams(location.search); ret
 const latexHere = typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && latexHereFor(location.hostname, desktopApp());
 // (the editor's Run sandbox and Share on this page, for latexBoot and the app self-test's mount alike: no Share on the
 //  CLI's page or in the app, which can't publish (the editor's Share says why); no sandbox in the app, RUNNER)
-const texSandbox = () => (RUNNER ? { WorkerKernel, RunnerWorker } : null);
+// (the desktop app has no runner frame: its LaTeX Run's interpreter is the app's engine, as its notebooks' is (#1540),
+// the page's own worker where the engine doesn't start; Run tells it first that it may change no file (run-core.mjs),
+// as it tells the runner's)
+class AppTexWorker {
+  constructor(_runnerUrl, { name = "" } = {}) {
+    return new NativeWorker(TAURI.core, { name, fallback: () => new Worker("sagebrush-worker.js", { type: "module", name }) });
+  }
+}
+const texSandbox = () => (RUNNER ? { WorkerKernel, RunnerWorker } : desktopApp() ? { WorkerKernel, RunnerWorker: AppTexWorker } : null);
 const texShare = LOCAL || TAURI ? null : (doc) => void openTalkShare(doc);
 // (the app has no share server at its own origin, so a share couldn't be checked or made there: File ▸ Share… is
 //  disabled, saying where to share instead, the header's Share follows it, and Share folder… and Your shares… aren't
@@ -3654,9 +3687,6 @@ function drawFileMenu() {
       // (a public GitHub repository's notebook or folder, by its address: its /gh/ page, which reads GitHub itself)
       { after: "upload", key: "github", label: "Open from GitHub…", title: "A notebook or a folder of a public GitHub repository, by its address" },
       { after: "saveCopy", key: "saveas", label: "Save as…", hidden: true },
-      // (Gradescope: the student's PDF, its pages as the assignment's template has them, and the instructor's template)
-      { after: "print", key: "gradescope", label: "PDF for Gradescope…", title: "A PDF laid out for Gradescope: your name on page 1, then each exercise on its own pages, as the assignment's template has them" },
-      { after: "print", key: "gstemplate", label: "Gradescope template…", title: "For instructors: each exercise's pages in every student's PDF, the template PDF and the page list for Gradescope" },
       // (whether this notebook's code may change the person's files: no-mutation's one switch, a document's setting)
       // (the person's shares: Your shares, a dialog of its own; not where there is no share server, the CLI's page)
       { after: "share", key: "mine", label: "Your shares…", hidden: !!LOCAL || !!TAURI },
@@ -3777,6 +3807,21 @@ window.sagebrushAnchorShare = anchorShare;
 // (a document opened from the File menu (Recent, Open…, an example's copy): a notebook here, a board on its page; a
 // .tex in the LaTeX editor where it's on (web/latex/boot.ts), another file in its preview, as openPath has it)
 function openEntry(e, how = "here") {
+  if (TAURI && desktopApp() && how === "here" && (e.kind === "notebook" || e.kind === "board")) return void claimHere(e).then((yes) => yes && openEntryHere(e, how));
+  openEntryHere(e, how);
+}
+// (the desktop app's windows, #1541: a notebook or board is open in one window at a time; opening one another window
+// shows brings that window to the front instead (app/src-tauri/src/windows.rs window_claim).  Whether to open it here:
+// always, but in the app)
+async function claimHere(e) {
+  if (!(TAURI && desktopApp()) || !e?.path) return true;
+  try {
+    if ((await TAURI.core.invoke("window_claim", { doc: e.path })) == null) return true;
+    announce(statusEl.textContent = `${e.path} is open in another window.`);
+    return false;
+  } catch (err) { console.warn("window:", err); return true; }
+}
+function openEntryHere(e, how) {
   if (e.kind === "file") {
     if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && globalThis.__sbTex) { saveNow(); if (globalThis.__sbTex(e, how === "tab")) return; }
     return void wsNow().then((w) => w && openPreview(w, e, { say: (t) => (savedEl.textContent = t), fail: (x) => (savedEl.textContent = String(x?.message ?? x)) }));
@@ -4105,7 +4150,8 @@ fileMenu.addEventListener("click", async (e) => {
       break;
     }
     case "print": window.print(); break;
-    // (the dialogs, their measuring and the print view: web/notebook/gradescope, a chunk of its own, fetched when chosen)
+    // (Gradescope's dialogs, their measuring and the print view: web/notebook/gradescope, a chunk of its own, fetched when
+    // chosen; not in the File menu, a feature for paying accounts later: these keys open them then)
     case "gradescope": {
       let mod;
       try { mod = await import(new URL("sagebrush-gradescope.js", location.href).href); } catch (e) { savedEl.textContent = "PDF for Gradescope didn't load: " + (e?.message ?? e); break; }
@@ -4777,7 +4823,7 @@ const tools = [
         set: { type: "array", items: { type: "object", properties: { id: { type: "string" }, code: { type: "string" }, type: { type: "string", enum: ["code", "markdown"] } }, required: ["id"] }, description: "Cells to change." },
         insert: { type: "array", items: { type: "object", properties: { code: { type: "string" }, type: { type: "string", enum: ["code", "markdown"] }, after: { type: ["string", "null"], description: "Insert after this cell id (null: first; omitted: at the end)." } }, required: ["code"] }, description: "Cells to add." },
         remove: { type: "array", items: { type: "string" }, description: "Ids of cells to delete." },
-        budget_ms: { type: "number", description: "Time budget for the cells rerun automatically (default: the notebook's, 2000; use a large number to update everything)." },
+        budget_ms: { type: "number", description: "Time budget for the cells rerun automatically (default: the notebook's, 10000; use a large number to update everything)." },
       },
     },
     async execute({ set, insert, remove, budget_ms }) {
@@ -5011,7 +5057,9 @@ async function leaveTo(url, notebook = true) {
   if (globalThis.__sbTexLeave) return void globalThis.__sbTexLeave(go);
   return go();
 }
-globalThis.__sbLeaveTo = leaveTo;
+// (from outside this file, the LaTeX boot's .tex opens (Files' row, New ▸ LaTeX document) among them: while the code
+// page is up, through its own way out, its edits saved and asked about first, as every other way off it, #1798)
+globalThis.__sbLeaveTo = (url) => (codePageUp ? leaveCodePage(url) : leaveTo(url));
 // (tests, loopback pages in a browser only, never the app (whose page is on localhost too): a stand-in for the desktop
 // app's disk mirror, so the page's ways out meet its drain, and what each way out asked of leaveTo)
 let leaveSeen = null;
@@ -5027,8 +5075,27 @@ const wsReady = (async () => {
     // made in another tab is)
     if (TAURI && desktopApp() && diskMirror) try {
       const d = await desktopModule(), invoke = (c, a) => TAURI.core.invoke(c, a);
-      if (await d.restoreGrants(w, invoke)) { for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); } if (current.id) filesShown(); }
-      grantsKept = d.keepGrants(w, invoke, (f) => perms.onChange(f));
+      // (one queue for this page's reads and writes of grants.json, each merged with what it last saw: grants-file.ts)
+      const grantsFile = d.grantsSync(w, invoke);
+      if (await grantsFile.restore()) { for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); } if (current.id) filesShown(); }
+      grantsKept = d.keepGrants(w, invoke, (f) => perms.onChange(f), undefined, undefined, grantsFile);
+      // (another window of the app wrote grants.json, #1541: merged in, so what it took back is gone here too)
+      const me = window.__TAURI_INTERNALS__?.metadata?.currentWebview?.label;
+      // (one that can't be read: every grant here set aside until it can, tried again every 5 s: grants-file.ts
+      // reconcileGrants)
+      let again = null;
+      const reconcile = async () => {
+        clearTimeout(again);
+        again = null;
+        try {
+          const r = await d.reconcileGrants(grantsFile, perms);
+          if (r.changed) { for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); } if (fbReq?.doc !== undefined) filesBar(false); if (current.id) filesShown(); }
+          // (this page's own changes grants.json hasn't yet: written, over what was just merged)
+          if (r.ahead) grantsKept.changed();
+          if (r.failed) again = setTimeout(reconcile, 5000);
+        } catch (e) { console.warn("grants.json:", e); }
+      };
+      TAURI.event.listen("sb-grants-changed", (ev) => { if (me && ev?.payload?.from !== me) void reconcile(); }).catch((e) => console.warn("grants.json:", e));
       // (in the quit's and the leave's barrier, as the settings' flush is: disk-mirror.ts keepAll)
       window.__sbGrantsFlush = () => grantsKept.flush();
     } catch (e) { console.warn("grants.json:", e); }
@@ -5233,7 +5300,9 @@ async function storeFor(id, initial) {
 }
 // (the workspace, or null if it isn't open within a few seconds)
 const wsNow = () => Promise.race([wsReady, new Promise((r) => setTimeout(() => r(null), 5000))]);
+const wsListTest = { pause: null };
 async function wsListNotebook(id, name, mode) {
+  if (wsListTest.pause) await wsListTest.pause(id);
   try { await wsAdoptNotebook(id, name, mode); } catch (e) { console.warn("workspace:", e); }
 }
 // (the same, its failure the caller's: a full folder, no free name, or the
@@ -5258,35 +5327,40 @@ async function wsAdoptNotebook(id, name, mode) {
 // workspace's lock: checked holding it, CORR-0B0-1)
 let wsRenameTimer = null, wsRenameGen = 0;
 function wsRenameCancel() { clearTimeout(wsRenameTimer); wsRenameGen++; }
-function wsRenameSoon() {
+function wsRenameSoon(delay = 800, target = null) {
   wsRenameCancel();
-  const id = current.id, name = docName(), gen = wsRenameGen;
-  if (current.kind !== "browser" || !id) return;
+  const id = target?.id ?? current.id, name = target?.name ?? docName(), openGen = target?.openGen ?? docGen, gen = wsRenameGen;
+  const still = () => gen === wsRenameGen && docGen === openGen && current.kind === "browser" && current.id === id;
+  if (!still() || !id) return;
   // (not from a tab that isn't the notebook's writer: its file is the writer's to rename)
   if (!pageMay().rename) return;
   wsRenameTimer = setTimeout(async () => {
     const w = await wsNow();
     if (!w) return;
     // (moved elsewhere meanwhile, by another tab: from where it is then)
-    for (let i = 0; i < 3 && gen === wsRenameGen; i++) {
+    for (let i = 0; i < 3 && still(); i++) {
       try {
         const from = await w.pathOf("notebook", id);
         if (!from) return;
         const folder = parentOf(from), base = safeName(name || "Untitled");
-        if (splitExt(nameOf(from))[0] === base) return;
+        if (splitExt(nameOf(from))[0] === base) {
+          if (still() && nb.meta.file_rename === name) nb.setMeta({ file_rename: null });
+          return;
+        }
         const entry = await w.stat(from);
         if (!entry || entry.ref !== id) continue;
         const taken = new Set((await w.list(folder)).map((e) => e.path));
         const to = freePath(folder, base, ".ipynb", (p) => taken.has(p) && p !== from);
         // (only this notebook, checked holding the lock: another put at its path meanwhile is never renamed, CORR-5D2-3)
-        if (to && to !== from) await w.rename(from, to, { still: () => gen === wsRenameGen, expect: { kind: "notebook", ref: id, fid: entry.fid, created: entry.created } });
+        if (to && to !== from) await w.rename(from, to, { still, expect: { kind: "notebook", ref: id, fid: entry.fid, created: entry.created } });
+        if (still() && nb.meta.file_rename === name) nb.setMeta({ file_rename: null });
         return;
       } catch (e) {
         // (moved, or another put at its path: from where it is then)
         if (e?.code !== "missing" && e?.code !== "exists" && e?.code !== "conflict") return void console.warn("workspace: rename:", e);
       }
     }
-  }, 800);
+  }, delay);
 }
 async function wsForgetNotebook(id) {
   const w = await wsNow();
@@ -5501,26 +5575,32 @@ function wsShowFiles(on) {
   wsFilesBtn.setAttribute("aria-pressed", String(on));
   try { localStorage.setItem("sagebrush-files-sidebar", on ? "1" : "0"); } catch {}
   if (on && !wsBrowser && ws) {
+    const openHere = (e, how) => {
+      const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
+      if (how === "tab") return void window.open(url, "_blank", "noopener");
+      if (e.kind === "notebook" && !codePageUp) {
+        saveNow();
+        // (on a phone the files cover the page: out of the way of what was
+        // opened; not opened, they stay, saying why: LIMIT-900-2)
+        openId(e.ref).then(() => {
+          wsTrackCurrent();
+          if (matchMedia("(max-width: 640px)").matches) wsShowFiles(false);
+        }, sayNotLeft);
+      }
+      else if (codePageUp) leaveCodePage(url);
+      // (by this page's way out: the LaTeX editor's edit written first, if its page is up; the disk in the app)
+      else { saveNow(); void leaveTo(url); }
+    };
     wsBrowser = mountBrowser(wsSidebar, {
       ws,
-      // (Agents…: the agents page once this notebook is saved, as the board is opened; not saved, it stays, saying why)
-      agents: () => void toBoard("/agents/", "the agents page"),
+      // (Agents…: the agents page once this notebook is saved, as the board is opened; not saved, it stays, saying why.
+      // Not in the desktop app, which has no agents page yet (#1542): no Agents… and no Files | Agents switch there)
+      ...(desktopApp() ? {} : { agents: () => void toBoard("/agents/", "the agents page") }),
       current: () => (current.kind === "browser" && current.id ? { kind: "notebook", ref: current.id } : undefined),
+      // (in the app, a notebook or board another window shows: that window to the front instead, claimHere)
       open(e, how) {
-        const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
-        if (how === "tab") return void window.open(url, "_blank", "noopener");
-        if (e.kind === "notebook" && !codePageUp) {
-          saveNow();
-          // (on a phone the files cover the page: out of the way of what was
-          // opened; not opened, they stay, saying why: LIMIT-900-2)
-          openId(e.ref).then(() => {
-            wsTrackCurrent();
-            if (matchMedia("(max-width: 640px)").matches) wsShowFiles(false);
-          }, sayNotLeft);
-        }
-        else if (codePageUp) leaveCodePage(url);
-        // (by this page's way out: the LaTeX editor's edit written first, if its page is up; the disk in the app)
-        else { saveNow(); void leaveTo(url); }
+        if (TAURI && desktopApp() && how !== "tab" && (e.kind === "notebook" || e.kind === "board")) return void claimHere(e).then((yes) => yes && openHere(e, how));
+        openHere(e, how);
       },
       upload: (files, folder) => uploadHere(files, folder),
       openAs: (e, as) => openAs(e, as),
@@ -5536,7 +5616,12 @@ function wsShowFiles(on) {
       saveOpen: async () => { saveNow(); await nb.saved(); },
       // (the open notebook renamed here: a typed title's rename not yet made
       // is dropped, and its name follows, as if typed)
-      renaming(e) { if (e.kind === "notebook" && e.ref === current.id) wsRenameCancel(); },
+      renaming(e) {
+        if (e.kind === "notebook" && e.ref === current.id) {
+          wsRenameCancel();
+          if (nb.meta.file_rename != null) nb.setMeta({ file_rename: null });
+        }
+      },
       // (a Move to Trash of what is open here has settled: its own hold released, if it took one; a navigation that
       // waited is told what went)
       trashDone(gate, moved) { gate?.release?.(moved); },
@@ -5617,7 +5702,7 @@ function wsShowFiles(on) {
         if (e.kind === "notebook" && e.ref === current.id) {
           const base = splitExt(nameOf(e.path))[0];
           nbName.value = base;
-          nb.setMeta({ name: base });
+          nb.setMeta({ name: base, file_rename: null });
           document.title = `${base} — Sagebrush`;
         }
         wsTrackCurrent();
@@ -5694,6 +5779,19 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // (?nb=ID: that notebook of this browser's, from the file browser in another tab or page)
   const nbParam = new URLSearchParams(location.search).get("nb");
   if (nbParam && /^[\w-]{1,64}$/.test(nbParam)) { last = nbParam; history.replaceState(null, "", location.pathname + location.hash); }
+  // (?wsopen=<workspace path>, the desktop app only: a document in a window the app opened for it (#1541,
+  // windows.rs window_open), named by its path, since each window's workspace, and so its ids, are its own; a
+  // notebook opened here, anything else once the page is up; one another window shows brings that one forward)
+  const wsOpen = TAURI && desktopApp() ? new URLSearchParams(location.search).get("wsopen") : null;
+  if (wsOpen) {
+    history.replaceState(null, "", location.pathname + location.hash);
+    try {
+      const w = await wsReady, e = w && wsOpen.startsWith("/") ? await w.stat(wsOpen) : null;
+      if (!e || e.kind === "folder") statusEl.textContent = `${wsOpen} isn't in your files.`;
+      else if (e.kind === "notebook") { if (await claimHere(e)) last = e.ref; }
+      else setTimeout(() => openEntry(e), 0);
+    } catch (err) { console.warn("wsopen:", err); }
+  }
   // ?open=URL of a notebook (.ipynb, .py, ...) and file=URL (repeatable) of
   // data it reads: fetched into the browser's files, then opened (nothing runs until the person runs it: Run all)
   const qs = new URLSearchParams(location.search), remote = qs.get("open");
@@ -5880,8 +5978,10 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     // (a quit, or the window closed: the notebook's save, the settings and every change on disk first)
     if (desktopApp()) desktopModule().then((d) => d.drainOnQuit({ mirror: () => diskMirror, invoke: (c, a) => TAURI.core.invoke(c, a), listen: (ev, f) => TAURI.event.listen(ev, f), freeze: () => nb.setReadOnly(true), flushEditor: () => nb.saved() })).catch((e) => console.warn("quit:", e));
     const persist = st && desktopApp() && await TAURI.core.invoke("selftest_persist");
-    if (persist) desktopModule().then((d) => d.persistProbe(persist, { ws: () => wsReady.then(() => ws), mirror: () => diskMirror, invoke: (c, a) => TAURI.core.invoke(c, a), grant: (doc, folder) => perms.grant(doc, "write", folder).ok, trees: (doc) => perms.writeTrees(doc), grantsSaved: () => grantsKept?.flush() }));
-    else if (st) selftest(st);
+    // (a window after the first runs a self-test only as the two-window probe's second window, persist-probe.ts)
+    const later = (window.__TAURI_INTERNALS__?.metadata?.currentWebview?.label ?? "main") !== "main";
+    if (persist && (!later || persist.startsWith("windows:"))) desktopModule().then((d) => d.persistProbe(persist, { ws: () => wsReady.then(() => ws), mirror: () => diskMirror, invoke: (c, a) => TAURI.core.invoke(c, a), grant: (doc, folder) => perms.grant(doc, "write", folder).ok, trees: (doc) => perms.writeTrees(doc), grantsSaved: () => grantsKept?.flush() }));
+    else if (st && !later) selftest(st);
   }
   // (however the start ends, an error included, Share stops waiting for it)
 })().finally(() => booted());

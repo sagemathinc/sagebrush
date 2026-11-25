@@ -25,6 +25,8 @@ use std::sync::Mutex;
 mod disk;
 #[cfg(desktop)]
 mod engine;
+#[cfg(desktop)]
+mod windows;
 // (the agent the app hosts, desktop only: its owned child and bundle check, for the agents page's launcher, which
 //  comes next; until then nothing calls it but its tests)
 #[cfg(desktop)]
@@ -316,10 +318,44 @@ fn app_quit_now(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+/// A window of the app's page (the first, "main", and on the desktop those after it, windows.rs): it loads only this
+/// page's origin, the port just bound, and its own frames (nav.rs; `open`, a self-test's control, leaves that out).
+fn page_window<'a, M: Manager<tauri::Wry>>(app: &'a M, label: &str, url: tauri::Url, port: u16, open: bool) -> WebviewWindowBuilder<'a, tauri::Wry, M> {
+    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url)).on_navigation(move |u| {
+        let yes = open || nav::may_load(u, port);
+        if !yes {
+            eprintln!("[app] refused to load {}", u.origin().ascii_serialization());
+        }
+        yes
+    });
+    // (a phone's window is the screen: no title, size or drag-and-drop; and the page learns it is in the
+    // desktop app, before its own script runs, from __SB_DESKTOP_APP__: window.__TAURI__ is there on phones
+    // too, and what only the desktop app offers (the LaTeX editor, web/latex/boot.ts latexHereFor) asks this)
+    #[cfg(desktop)]
+    let window = window
+        .title("Sagebrush")
+        .inner_size(1100.0, 860.0)
+        .min_inner_size(480.0, 400.0)
+        .disable_drag_drop_handler()
+        // (nothing kept by the web view between launches: the workspace and the settings are files on disk,
+        // the page's IndexedDB a cache of them for one launch, disk.rs)
+        .incognito(true)
+        .initialization_script("window.__SB_DESKTOP_APP__ = true;")
+        .initialization_script(&version::page_script())
+        .initialization_script(&disk::settings_script(app.app_handle()));
+    // (a self-test's control of the workspace on disk: its import or its write-through left out, run.mjs)
+    #[cfg(desktop)]
+    let window = match std::env::var("SAGEBRUSH_APP_DISK_CONTROL").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some()).as_deref() {
+        Some(c @ ("no-import" | "no-write")) => window.initialization_script(&format!("window.__SB_DISK_CONTROL__ = {c:?};")),
+        _ => window,
+    };
+    window
+}
+
 // the page's commands: the engine's on the desktop too
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_write, disk::grants_read, disk::grants_write, app_quit_hold, app_quit_now]
+    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, windows::window_open, windows::window_claim, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_write, disk::grants_read, disk::grants_write, app_quit_hold, app_quit_now]
 }
 #[cfg(mobile)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
@@ -349,6 +385,9 @@ pub fn run() {
     // (the engine subprocess, on the desktop only: phones run the page's own worker, design/native-desktop.md §5)
     #[cfg(desktop)]
     let builder = builder.manage(engine::Engine::default());
+    // (the windows after the first, and which document each shows, windows.rs)
+    #[cfg(desktop)]
+    let builder = builder.manage(windows::Docs::default()).manage(windows::NextWindow::default());
     // (the paths of the app's own page files, as serve_page answers them: "/index.html", "/board/board.js")
     let context = tauri::generate_context!();
     let files: std::collections::HashSet<String> = context
@@ -384,36 +423,15 @@ pub fn run() {
             let open = matches!(control.as_deref(), Some("open" | "wide"));
             // (the app's commands for this page's exact origin only, nav.rs page_capability; before the window exists)
             app.add_capability(if control.as_deref() == Some("wide") { nav::page_capability(port).replace(&format!("\"http://127.0.0.1:{port}\""), "\"http://127.0.0.1:*\"") } else { nav::page_capability(port) })?;
+            // (the web view data folders of the last launch's other windows, gone before any window opens, windows.rs)
+            #[cfg(desktop)]
+            if let Ok(d) = disk::data_dir(app.handle()) {
+                windows::clear_webview_dirs(&d);
+            }
+            #[cfg(desktop)]
+            app.manage(windows::PagePort(port));
             let url = format!("http://127.0.0.1:{port}/").parse().unwrap();
-            // (the window loads only this page's origin, the port just bound, and its own frames: nav.rs)
-            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url)).on_navigation(move |u| {
-                let yes = open || nav::may_load(u, port);
-                if !yes {
-                    eprintln!("[app] refused to load {}", u.origin().ascii_serialization());
-                }
-                yes
-            });
-            // (a phone's window is the screen: no title, size or drag-and-drop; and the page learns it is in the
-            // desktop app, before its own script runs, from __SB_DESKTOP_APP__: window.__TAURI__ is there on phones
-            // too, and what only the desktop app offers (the LaTeX editor, web/latex/boot.ts latexHereFor) asks this)
-            #[cfg(desktop)]
-            let window = window
-                .title("Sagebrush")
-                .inner_size(1100.0, 860.0)
-                .min_inner_size(480.0, 400.0)
-                .disable_drag_drop_handler()
-                // (nothing kept by the web view between launches: the workspace and the settings are files on disk,
-                // the page's IndexedDB a cache of them for one launch, disk.rs)
-                .incognito(true)
-                .initialization_script("window.__SB_DESKTOP_APP__ = true;")
-                .initialization_script(&version::page_script())
-                .initialization_script(&disk::settings_script(app.handle()));
-            // (a self-test's control of the workspace on disk: its import or its write-through left out, run.mjs)
-            #[cfg(desktop)]
-            let window = match std::env::var("SAGEBRUSH_APP_DISK_CONTROL").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some()).as_deref() {
-                Some(c @ ("no-import" | "no-write")) => window.initialization_script(&format!("window.__SB_DISK_CONTROL__ = {c:?};")),
-                _ => window,
-            };
+            let window = page_window(app, "main", url, port, open);
             window.build()?;
             Ok(())
         })
@@ -433,10 +451,21 @@ pub fn run() {
                 }
                 _ => {}
             }
-            // (the engine ends with the app)
+            // (a window's engine ends with its window (#1541), and every engine with the app)
+            #[cfg(desktop)]
+            if let tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } = &_event {
+                _app.state::<engine::Engine>().stop_window(label);
+                windows::closed(_app, label);
+            }
             #[cfg(desktop)]
             if let tauri::RunEvent::Exit = _event {
                 _app.state::<engine::Engine>().stop();
+                // (and the later windows' web view data folders: an exit (a quit, the self-test's) destroys no window
+                // one by one, so windows::closed never ran for them; what a web view still holds waits for the next
+                // launch's clear, windows.rs)
+                if let Ok(d) = disk::data_dir(_app) {
+                    windows::clear_webview_dirs(&d);
+                }
             }
             // macOS hands over files (Finder, `open -a Sagebrush f.ipynb`) as an event: kept for startup_files, and
             // sent to a page already there (granted, on macOS, as startup_files grants them)

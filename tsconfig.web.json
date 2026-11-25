@@ -22,12 +22,15 @@
     "web/workspace/agent-pair.ts",
     "web/workspace/fleet/install.ts",
     "web/workspace/fleet-verify.ts",
+    "web/workspace/e2e/index.ts",
     "web/workspace/agent-ui.ts",
     "web/workspace/agent-relay.ts",
     "web/workspace/agent-canon.ts",
+    "web/workspace/agent-tags.ts",
     "web/workspace/agent-cards.ts",
     "web/preload.ts",
     "web/notebook/gradescope/dialog.ts",
-    "web/zip/read.ts"
+    "web/zip/read.ts",
+    "web/space/src/main.ts"
   ]
 }
