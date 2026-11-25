@@ -116,10 +116,10 @@ export const LATEX_LAZY = {
 // (256,580 raw / 85,902 gzip: Nov 25 2026, amsthm's \qedhere (issue 1800), its symbol on its own row (KaTeX's tag):
 //  256,516 / 85,838 measured on the shipped build of its merge with master c0066039, with bun 1.4.4 and node 24.21.0
 //  (+740 / +249 over master's 255,776 / 85,589), + 64)
-// (258,738 raw / 86,594 gzip: Nov 25 2026, \bibliography reading the .bbl BibTeX made beside the .tex, and natbib's
-//  numbers and sort&compress: 258,674 / 86,530 measured on the shipped build of master 3b73d0e2 with it, with bun 1.4.4 and
-//  node 24.21.0 (+2,158 / +692 over master's 256,516 / 85,838), + 64)
-export const LATEX_CAPS = { raw: 258738, gzip: 86594 };
+// (258,923 raw / 86,686 gzip: Nov 25 2026, \bibliography reading the .bbl BibTeX made beside the .tex, and natbib's
+//  numbers and sort&compress: 258,859 / 86,622 measured on the shipped build of master 3b73d0e2 with it, with bun 1.4.4 and
+//  node 24.21.0 (+2,343 / +784 over master's 256,516 / 85,838), + 64)
+export const LATEX_CAPS = { raw: 258923, gzip: 86686 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
