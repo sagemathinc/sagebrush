@@ -123,7 +123,10 @@ export const LATEX_LAZY = {
 // (289,970 raw / 97,826 gzip: Nov 25 2026, \bibliography reading the .bbl BibTeX made beside the .tex, and natbib's
 //  numbers and sort&compress: 289,906 / 97,762 measured on the shipped build of its merge with master d4692ae4, with bun
 //  1.4.4 and node 24.21.0 (+2,343 / +766 over master's 287,563 / 96,996), + 64)
-export const LATEX_CAPS = { raw: 289970, gzip: 97826 };
+// (291,697 raw / 98,473 gzip: Nov 25 2026, enumitem's label=, ref= and start= on a list: 291,633 / 98,409 measured on the
+//  shipped build of its merge with master 46d3a16f, with bun 1.4.4 and node 24.21.0 (+1,727 / +647 over master's
+//  289,906 / 97,762), + 64)
+export const LATEX_CAPS = { raw: 291697, gzip: 98473 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
