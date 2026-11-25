@@ -1183,7 +1183,7 @@
    "id": "mat_fp31_det",
    "item": "la0",
    "category": "linear algebra over Fp, word-size p",
-   "label": "determinant (p=65537) (p = 2^31 - 1)",
+   "label": "determinant (p = 2^31 - 1)",
    "sizes": {
     "s": {
      "n": 60,
@@ -1230,7 +1230,7 @@
    "id": "mat_fp31_rank",
    "item": "la0",
    "category": "linear algebra over Fp, word-size p",
-   "label": "rank (p=65537) (p = 2^31 - 1)",
+   "label": "rank (p = 2^31 - 1)",
    "sizes": {
     "s": {
      "n": 60,
@@ -1277,7 +1277,7 @@
    "id": "mat_fp31_solve",
    "item": "la0",
    "category": "linear algebra over Fp, word-size p",
-   "label": "solve (p=65537) (p = 2^31 - 1)",
+   "label": "solve (p = 2^31 - 1)",
    "sizes": {
     "s": {
      "n": 60,
@@ -1324,7 +1324,7 @@
    "id": "mat_fp31_charpoly",
    "item": "la2",
    "category": "linear algebra over Fp, word-size p",
-   "label": "characteristic polynomial (p=65537) (p = 2^31 - 1)",
+   "label": "characteristic polynomial (p = 2^31 - 1)",
    "sizes": {
     "s": {
      "n": 60,
