@@ -13612,6 +13612,11 @@
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
  },
+ "src/runtime/numpy.ts :: admitArray :: if (shape.length > MAX_DIMS) tooManyDims(shape.length); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), checked before any storage is admitted, as NumPy checks the dimensions before allocating; NumPy's semantics, not a Sagebrush limit"
+ },
  "src/runtime/numpy.ts :: admitWork :: if (bytes <= ARRAY_LIMITS.bytes) return; #0": {
   "class": "2",
   "owner": "NumPy shim/runtime memory",
@@ -13621,6 +13626,26 @@
   "class": "2",
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
+ },
+ "src/runtime/numpy.ts :: conj :: if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: consumes :: if (resultDims > MAX_DIMS) raise(T.IndexError, `number of dimensions must be within [0, ${MAX_DIMS}], indexing result would have ${resultDims}`); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: discover :: if (depth + s.length > MAX_DIMS) nestedTooDeep(); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: discover :: if (depth >= MAX_DIMS) nestedTooDeep(); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
  },
  "src/runtime/numpy.ts :: itemIndex :: if (typeof x === \"bigint\" && (x > I64MAX || x < I64MIN)) raise(T.OverflowError, \"Python int too large to convert to C long\"); #0": {
   "class": "none",
@@ -13657,6 +13682,11 @@
   "owner": "NumPy shim",
   "row": "src-11"
  },
+ "src/runtime/numpy.ts :: nestedTooDeep :: return raise(T.ValueError, `setting an array element with a sequence. The requested array would exceed the maximum number of dimension of ${MAX_DIMS}.`) as never; #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
  "src/runtime/numpy.ts :: notIndex :: fn(\"amax\", (a: any, axis: any = null, keepdims: any = false, initial: any = null, first: any = false) => minmax(asarray(a), opt(axis), !!keepdims, true, opt(initial), !!first)); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -13692,6 +13722,16 @@
   "owner": "NumPy shim",
   "row": "src-11"
  },
+ "src/runtime/numpy.ts :: scalarDtype :: const MAX_DIMS = 64; #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: str :: if (shape.length > MAX_DIMS) tooManyDims(shape.length); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
  "src/runtime/numpy.ts :: strConcat :: const ax = normAxis(axis, nd); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -13706,6 +13746,16 @@
   "class": "3",
   "owner": "NumPy shim",
   "row": "src-11"
+ },
+ "src/runtime/numpy.ts :: tooManyDims :: if (shape.length > MAX_DIMS) tooManyDims(shape.length); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: tooManyDims :: return raise(T.ValueError, `maximum supported dimension for an ndarray is currently ${MAX_DIMS}, found ${n}`) as never; #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
  },
  "src/runtime/numpy.ts :: wideRefuse :: return raise(T.NotImplementedError, `${d.name} values beyond 2**53 are not supported yet`); #0": {
   "class": "3",
