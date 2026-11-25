@@ -1,6 +1,6 @@
 // Where the fleet pages get their data (design: agent-autonomous-pages-fleet r2.1 §2, §3): the service's read routes
 // with the person's own session, or, on a loopback test page that asks for it, a fixture service. Read only: nothing
-// here writes, signs or verifies; the page verifies every signed object itself (fleet-verify.ts).
+// here writes, signs or verifies; the page verifies every signed object itself (page.ts, through the verifier).
 //
 // The mock gate (§3, §4's truth table): the fixtures are served only to a loopback page (localhost or 127.0.0.1) whose
 // address carries ?fixtures=1. Anywhere else the flag is ignored and the page reads the service. The fixtures come
@@ -100,7 +100,7 @@ const opsOf = (v: unknown): OpRow[] | null => (Array.isArray(v) ? v.slice(0, 64)
 
 /**
  * The service's routes, with the person's session (same-origin cookies). `readPage` is the core's chain-page reader
- * (fleet-verify.ts readChainPage): it refuses a page that isn't exactly the agreed form.
+ * (the verifier's readChainPage): it refuses a page that isn't exactly the agreed form.
  */
 export function serviceSource(readPage: (bytes: Uint8Array, after: number) => ChainPage, f: Fetch = (i, o) => fetch(i, o)): Source {
   return {

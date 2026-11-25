@@ -1,5 +1,5 @@
 // The fleet pages' view model (design: agent-autonomous-pages-fleet r2.1 §1-§2.1): what each page says, worked out from
-// the facts the page verified (fleet-verify.ts) and the reports the service relays. Pure: no DOM, no fetch, no storage.
+// the facts the page verified (page.ts, through the verifier) and the reports the service relays. Pure: no DOM, no fetch, no storage.
 //
 // Two kinds of input, never mixed:
 // - VERIFIED facts: a host's certificate, its grant and the host's acknowledgement, each checked on this page. Only they
