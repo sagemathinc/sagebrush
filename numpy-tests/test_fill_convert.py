@@ -2,6 +2,7 @@
 # otherwise, though slice assignment broadcasts it), strings parse into numbers, None is NaN in a float dtype and
 # refused in an integer one. And np.array admits a NumPy scalar into an int8 to uint32 dtype as NumPy does: in a
 # list checked into a signed dtype and cast into an unsigned one, alone always cast; Python values always checked.
+# A 0-d numeric array is cast into fill's array, as slice assignment casts it.
 # A float NaN or infinity cast into a small integer gives what NumPy gives on x86.
 import warnings
 import numpy as np
@@ -34,6 +35,23 @@ for dt in ("int64", "uint64", "int8", "float64", "complex128", "bool"):
         print(dt, repr(v), "| fill", show(lambda: filled(dt, v)))
 for dt in ("int64", "int8"):
     print(dt, "slice np.array([5])", show(lambda: sliced(dt, np.array([5]))))
+
+# (a 0-d numeric array is cast, as a[...] = v casts it: NaN and infinity into small ints, complex into real dtypes;
+# a 0-d string array is parsed; a Python complex is no real number, a NumPy complex scalar casts to its real part;
+# a string array refuses any sequence and stores str(None). NaN, infinity and negative values into int64/uint64 are
+# left out: Sagebrush still refuses those, before and after this change)
+for dt in ("int8", "uint8", "int16", "int32", "uint32", "int64", "uint64", "float32", "float64", "complex128", "bool"):
+    wide = dt in ("int64", "uint64")
+    for v in (np.array(np.nan), np.array(1 + 2j), np.array(2.7), np.array(-3), np.array(True), np.array("7"),
+              np.array(300), 1 + 2j, np.complex128(1 + 2j), np.complex64(3 - 1j), complex(0, 0), np.array(np.inf),
+              np.float64(2.5)):
+        if wide and isinstance(v, np.ndarray) and v.dtype.kind == "f" and not np.isfinite(v):
+            continue
+        if dt == "uint64" and isinstance(v, np.ndarray) and v.dtype.kind == "i" and v < 0:
+            continue
+        print(dt, repr(v), "| fill", show(lambda: filled(dt, v)))
+for v in (np.array([5, 6]), np.array([5]), [5], ["x", "y"], np.array(["a"]), np.array("q"), 5, None, 1 + 2j):
+    print("U3", repr(v), "| fill", show(lambda: filled("U3", v)))
 
 for dt in ("int8", "uint8", "int16", "uint16", "int32", "uint32"):
     for v in (np.int64(300), np.int64(-1), np.uint8(255), np.float64(300.7), np.float32(70000.0), np.uint64(2 ** 40),

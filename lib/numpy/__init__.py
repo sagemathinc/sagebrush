@@ -2964,20 +2964,35 @@ def _m_argsort(self, axis=-1, kind=None, order=None):
 
 def _fill_scalar(dt, v):
     # (NumPy's fill converts its value as the dtype's scalar setitem does: integers by int(), floats by float() (None
-    # is nan), complex by complex() (bytes decoded), bools by truth; a 0-d array is its element, any other array or
-    # sequence is refused as NumPy refuses it)
+    # is nan), complex by complex() (bytes decoded), bools by truth, strings by str(); a Python complex is no real
+    # number, a NumPy complex scalar casts. A 0-d numeric array is cast as a[...] = v casts it (so it is returned as
+    # is), a 0-d string array is its string; any other array or sequence is refused as NumPy refuses it)
     k = dt.kind
     if isinstance(v, ndarray):
         if v.ndim == 0:
-            return v[()]
-        if k == "b" and v.size == 1:
+            if v.dtype.kind not in "US":
+                return v
+            v = v[()]
+        elif k == "b" and v.size == 1:
             return _builtins.bool(v.ravel()[0])
-        if k == "c":
+        elif k == "U":
+            raise ValueError("setting an array element with a sequence")
+        elif k == "c":
             raise TypeError("only 0-dimensional arrays can be converted to Python scalars")
-        raise ValueError("setting an array element with a sequence.")
+        else:
+            raise ValueError("setting an array element with a sequence.")
+    if k == "U":
+        if isinstance(v, (list, tuple)):
+            raise ValueError("setting an array element with a sequence")
+        return "None" if v is None else v
     if k == "b":
         return _builtins.bool(v)
+    if type(v) is complex and k in "iuf":
+        raise TypeError("float() argument must be a string or a real number, not 'complex'" if k == "f" else
+                        "int() argument must be a string, a bytes-like object or a real number, not 'complex'")
     if k in "iu":
+        if isinstance(v, complex):
+            return v.real
         if isinstance(v, (str, bytes)):
             return int(v)
         if v is None or isinstance(v, (list, tuple)):
@@ -3008,10 +3023,7 @@ def _fill_scalar(dt, v):
 
 
 def _m_fill(self, value):
-    if self.dtype.kind in "US":
-        self[...] = value
-    else:
-        self[...] = _fill_scalar(self.dtype, value)
+    self[...] = _fill_scalar(self.dtype, value)
 
 
 def _m_flatten(self, order="C"):
