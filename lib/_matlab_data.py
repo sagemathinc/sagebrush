@@ -429,6 +429,9 @@ _MISSING_VECTOR = 128
 _MISSING_FILL = 768
 # (a moving median's work: each window's values for each element, and their sorted copy)
 _MOV_CELL = 40
+# (a moving statistic's arrays for each element: the data's copies, the counts, the accumulators and one offset's
+# shifted values and masks)
+_MOV_ELEMENT = 160
 
 
 def _missing_admit(A, what, axis, *others, fill=True, slices=False, extra=0):
@@ -819,6 +822,8 @@ def _window(k):
     if _m._numel(k) not in (1, 2):
         raise _err("Window length must be a finite, positive scalar or a 2-element vector of nonnegative values.")
     K = _vec(k).real
+    if not np.all(np.isfinite(K)):
+        raise _err("Window length must be a finite, positive scalar or a 2-element vector of nonnegative values.")
     if K.size == 1:
         v = float(K[0])
         if v != _math.floor(v) or v < 1:
@@ -868,6 +873,9 @@ def _mov_args(args, fname, takes_w):
 def _moving(A, kb, kf, stat, w, omit, ends):
     """stat over each window [i-kb, i+kf] down axis 0 of A (L-by-R)"""
     L, R = A.shape
+    if ends == "discard" and kb + kf > L - 1:
+        # (no window lies wholly inside the data, however long it is: the result is empty, with no work)
+        return np.zeros((0, R), dtype=np.result_type(A.dtype, np.float64))
     fill = ends == "fill" or not isinstance(ends, str)
     if fill:
         # (Endpoints "fill" or a value: the nonexisting elements are NaN or that value, as
@@ -877,7 +885,13 @@ def _moving(A, kb, kf, stat, w, omit, ends):
         # same as 'shrink''s, L times the window, with no padded copy)
         v = _math.nan if ends == "fill" else ends
         A = A.astype(np.result_type(A.dtype, np.float64, np.asarray(v).dtype))
-    offs = range(-kb, kf + 1)
+    # (an offset of L or more reaches outside the data from every element: with 'shrink' it adds nothing, so the
+    # window is cut at the data's length, the same result in time bounded by the data rather than the window; with a
+    # fill it reads the fill value at every element, so those nb offsets are taken together, not one at a time)
+    cb, cf = min(kb, max(L - 1, 0)), min(kf, max(L - 1, 0))
+    nb = kb - cb + kf - cf if fill else 0
+    vnum = bool(nb) and not np.isnan(v)
+    offs = range(-cb, cf + 1)
 
     def shifted(o):
         """A[i+o] at each i, with whether it is in range (with a fill, every position is:
@@ -898,8 +912,30 @@ def _moving(A, kb, kf, stat, w, omit, ends):
         isn = ok & np.isnan(S)
         hasnan |= isn
         cnt += ok & ~isn
+    if nb and not vnum:
+        hasnan[:] = True
+    # (the count with the fill values outside the data; cnt keeps the ones inside it)
+    count = cnt + nb if vnum else cnt
     if stat in ("sum", "mean", "prod", "var", "std"):
         acc = np.zeros(A.shape, dtype=A.dtype) if stat != "prod" else np.ones(A.shape, dtype=A.dtype)
+
+        def outside(acc, k):
+            """acc with k fill values outside the data taken in"""
+            if not vnum or not k:
+                return acc
+            with np.errstate(over="ignore", invalid="ignore", under="ignore"):
+                if stat != "prod":
+                    return acc + float(k) * v
+                if np.iscomplexobj(acc) and np.isinf(v):
+                    # (complex products with an infinite factor have NaN parts after two of them, as one at a time)
+                    for _ in range(min(k, 2)):
+                        acc = acc * v
+                    return acc
+                # (|v| to the k as a float, and its sign from k's parity, which float(k) can lose past 2^53)
+                p = np.power(abs(v), float(k))
+                return acc * (-p if k % 2 and _math.copysign(1.0, v) < 0 else p)
+        # (the ones before the data first and after it last, in the order of the offsets)
+        acc = outside(acc, kb - cb)
         for o in offs:
             S, ok = shifted(o)
             use = ok & ~np.isnan(S)
@@ -907,21 +943,29 @@ def _moving(A, kb, kf, stat, w, omit, ends):
                 acc = acc * np.where(use, S, 1)
             else:
                 acc = acc + np.where(use, S, 0)
+        acc = outside(acc, kf - cf)
         if stat in ("mean", "var", "std"):
             with np.errstate(invalid="ignore", divide="ignore"):
-                mean = acc / cnt
+                mean = acc / count
             if stat == "mean":
                 res = mean
             else:
                 ss = np.zeros(A.shape)
+                if vnum:
+                    with np.errstate(over="ignore", invalid="ignore"):
+                        dv = np.abs(v - mean) ** 2
+                    ss = ss + float(kb - cb) * dv if kb > cb else ss
                 for o in offs:
                     S, ok = shifted(o)
                     use = ok & ~np.isnan(S)
                     ss = ss + np.where(use, np.abs(S - mean) ** 2, 0)
-                den = np.where((w == 0) & (cnt > 1), cnt - 1, cnt)
+                if vnum and kf > cf:
+                    with np.errstate(over="ignore", invalid="ignore"):
+                        ss = ss + float(kf - cf) * dv
+                den = np.where((w == 0) & (count > 1), count - 1, count)
                 with np.errstate(invalid="ignore", divide="ignore"):
-                    res = np.where(cnt == 1, 0.0, ss / den)
-                    res = np.where(cnt == 0, _math.nan, res)
+                    res = np.where(count == 1, 0.0, ss / den)
+                    res = np.where(count == 0, _math.nan, res)
                 if stat == "std":
                     res = np.sqrt(res)
         else:
@@ -933,14 +977,21 @@ def _moving(A, kb, kf, stat, w, omit, ends):
             S, ok = shifted(o)
             use = ok & ~np.isnan(S)
             res = np.where(use, np.minimum(res, S) if stat == "min" else np.maximum(res, S), res)
-        res = np.where(cnt == 0, _math.nan, res)
+        if vnum:
+            res = np.minimum(res, v) if stat == "min" else np.maximum(res, v)
+        res = np.where(count == 0, _math.nan, res)
     else:  # (median: each window's values sorted, the missing ones, NaN, last)
-        W = np.full((len(offs),) + A.shape, np.inf)
+        # (copies of the fill value outnumbering the window's other values by two or more hold both middle places,
+        # whatever those values are: so up to two more than them give the same median as all nb)
+        e = _mov_fill_copies(len(offs), nb) if vnum else 0
+        W = np.full((len(offs) + e,) + A.shape, np.inf)
         for t, o in enumerate(offs):
             S, ok = shifted(o)
             W[t] = np.where(ok & ~np.isnan(S), S, np.inf)
+        if e:
+            W[len(offs):] = v
         W = np.sort(W, axis=0)
-        m = cnt.astype(np.int64)
+        m = cnt.astype(np.int64) + e
         lo = _m._take_along(W, np.maximum((m - 1) // 2, 0).reshape((1,) + A.shape), 0)[0]
         hi = _m._take_along(W, np.maximum(m // 2, 0).reshape((1,) + A.shape), 0)[0]
         with np.errstate(invalid="ignore"):
@@ -948,25 +999,46 @@ def _moving(A, kb, kf, stat, w, omit, ends):
         res = np.where(m == 0, _math.nan, res)
     if not omit:
         res = np.where(hasnan, _math.nan, res)
-    # (the windows wholly inside the data)
-    i = np.arange(L)
-    complete = (i - kb >= 0) & (i + kf <= L - 1)
     if ends == "discard":
-        return res[np.nonzero(complete)[0]]
+        # (the windows wholly inside the data)
+        i = np.arange(L)
+        return res[np.nonzero((i - kb >= 0) & (i + kf <= L - 1))[0]]
     return res
+
+
+def _mov_fill_copies(n, nb):
+    """how many of a moving median's nb fill values outside the data to sort with a window's n others"""
+    return min(nb, n + 2)
+
+
+def _mov_admit(x, fname, dims, axis, kb, kf, ends, median):
+    """the moving statistic's work admitted before any copy of x: each element's arrays, and for a median each element's
+    window, cut at the data's length, sorted (with a fill, the copies of the fill value sorted with it)"""
+    n = _m._numel(x)
+    L = dims[axis] if axis < len(dims) else 1
+    need = n * _MOV_ELEMENT
+    if median and not (ends == "discard" and kb + kf > L - 1):
+        cb, cf = min(kb, max(L - 1, 0)), min(kf, max(L - 1, 0))
+        rows = cb + cf + 1
+        if not isinstance(ends, str) and not _math.isnan(ends):
+            rows += _mov_fill_copies(rows, kb - cb + kf - cf)
+        need += rows * n * _MOV_CELL
+    _m._admit_bytes(need, "%s of %d elements" % (fname, n))
 
 
 def _mov(stat, fname, takes_w=False):
     def f(nargout, x, k, *args):
         kb, kf = _window(k)
         w, axis, omit, ends = _mov_args(args, fname, takes_w)
+        dims = list(_m._dims(x))
+        # (a dimension past x's last has length 1: no padding out to it)
+        axis = _first_dim(tuple(dims)) if axis is None else min(axis, len(dims))
+        _mov_admit(x, fname, dims, axis, kb, kf, ends, stat == "median")
         M = _md(x)
         if stat == "median" and np.iscomplexobj(M):
             raise _err("%s: complex values are not supported." % fname)
         if stat in ("max", "min") and np.iscomplexobj(M):
             raise _err("%s: complex values are not supported in Sagebrush." % fname)
-        if axis is None:
-            axis = _first_dim(M.shape)
         F, how = _to_front(M, axis)
         res = _moving(F, kb, kf, stat, w, omit, ends)
         return _out(_from_front(res, how), _cls(x))

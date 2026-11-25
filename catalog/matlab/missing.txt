@@ -310,14 +310,6 @@ mkdir
 mkpp
 mldivide
 more
-movmax
-movmean
-movmedian
-movmin
-movprod
-movstd
-movsum
-movvar
 mpower
 mrdivide
 mtimes
