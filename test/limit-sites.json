@@ -16494,7 +16494,7 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'MAX' in MAX_DENSE_SOLVE, the existing switch between the dense and sparse routes this docstring names; the triangular route's need is admitted or refused by the ledger's guard"
  },
- "lib/_matlab_sparse.py :: big_triangular_need :: \"\"\"the bytes the triangular route above MAX_DENSE_SOLVE holds at once, from its choice to its result, and every #0": {
+ "lib/_matlab_sparse.py :: big_triangular_need :: \"\"\"the bytes the triangular route above MAX_DENSE_SOLVE holds at once, from its choice (before any copy of b) to #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'MAX' in MAX_DENSE_SOLVE, the existing switch between the dense and sparse routes this docstring names; the triangular route's need is admitted or refused by the ledger's guard"

@@ -162,6 +162,31 @@ finally:
 tags = [r[3] for r in rec if r[0] == "reserve"]
 assert tags == ["triangular"] and routes == [], (tags, routes)
 assert "triangular system" in msg, msg
+# (the one piece before the reservation, the bandwidths' discovery: a fixed workspace of 4E indices, far under the
+# small-need floor, read before the capacity record and before any copy of b)
+assert 4 * sp.E * sp.C_IDX * 2 < sp.SMALL_NEED
+order = []
+real_bw, real_rec, real_full, real_mat = sp.bandwidths, sp._capacity_record, sp.full, M._mat
+sp.bandwidths = lambda *a, **kw: (order.append("bandwidths"), real_bw(*a, **kw))[1]
+sp._capacity_record = lambda *a, **kw: (order.append("record"), real_rec(*a, **kw))[1]
+sp.full = lambda *a, **kw: (order.append("full"), real_full(*a, **kw))[1]
+M._mat = lambda *a, **kw: (order.append("_mat"), real_mat(*a, **kw))[1]
+try:
+    stand_in(need)
+    solve(S, Bk)
+    order_full = list(order)
+    del order[:]
+    # (a sparse b past the floor: its full value filled under the route's reservation, still one record)
+    Bks = sp.from_full(Bk)
+    stand_in(1 << 40)
+    x, routes = solve(S, Bks)
+    order_sparse = list(order)
+finally:
+    sp.bandwidths, sp._capacity_record, sp.full, M._mat = real_bw, real_rec, real_full, real_mat
+assert order_full[:2] == ["bandwidths", "record"] and order_full.count("record") == 1, order_full
+assert sp.small_triangular_need(n, k, False, False, True)[0] > sp.SMALL_NEED
+assert routes == ["triangular"] and order_sparse[:2] == ["bandwidths", "record"], order_sparse
+assert order_sparse.count("record") == 1 and "full" not in order_sparse, order_sparse
 ok("small route: its exact need (%d bytes) and any larger guard admit it; one byte short refuses naming it, the dense "
    "route never tried" % need)
 
@@ -186,6 +211,37 @@ for guard in (dense_need, 1 << 40):
     assert routes == ["triangular"], (guard, routes)
 ok("the small route by shape: a sparse b whose triangular need (%d) passes the dense route's (%d) runs the dense route "
    "at that guard and at a large one; the full b of the same shape the triangular route at both" % (tri_need, dense_need))
+
+# 3c. no size cliff: every order from 2 (1, a scalar A, divides) takes substitution (a need under the small-need floor never refuses), lower and
+# upper, real and complex A and b, full and sparse b, several right-hand sides; an all-zero A divides by zero in each
+# row alike (Inf, not the dense route's NaN after the first)
+stand_in(1 << 40)
+count = 0
+for n in range(2, 9):
+    for lower in (True, False):
+        for cplx in (False, True):
+            S = bidiagonal(n, lower, cplx)
+            for k in (1, 2, 5):
+                for cplx_b in (False, True):
+                    for sparse_b in (False, True):
+                        bv = np.arange(1.0, n * k + 1).reshape((n, k)) + (1j if cplx_b else 0)
+                        b = sp.from_full(M._unmat(bv)) if sparse_b else M._unmat(bv)
+                        x, routes = solve(S, b)
+                        assert routes == ["triangular"], (n, lower, cplx, k, cplx_b, sparse_b, routes)
+                        r = M._farr(B["minus"].call(1, [B["mtimes"].call(1, [S, x]), b]))
+                        assert float(np.max(np.abs(r))) < 1e-9, (n, k)
+                        count += 1
+    Z = sp.zeros(n, n)
+    shown, real_err = [], M._write_err
+    M._write_err = shown.append
+    try:
+        x, routes = solve(Z, col(np.arange(1.0, n + 1)))
+    finally:
+        M._write_err = real_err
+    assert routes == ["triangular"] and bool(np.all(M._farr(x) == np.inf)), (n, routes, M._farr(x))
+    assert sum("singular to working precision" in w for w in shown) == 1, shown
+ok("no size cliff: n = 2..8, %d systems (lower, upper, real, complex, full and sparse b, k = 1, 2, 5) by substitution; "
+   "an all-zero A gives Inf in every row" % count)
 
 # 4. above n = 4000: a triangular system takes the triangular route once its bandwidths are known, where its whole
 # need (big_triangular_need: the caller's copy of b, X, the result and its conversions) is at most the least need of
@@ -255,11 +311,12 @@ except MemoryError:
     pass
 finally:
     L._routes = None
-# (the whole need by hand at n = 100000, k = 1: b's copy and the result, each with its header; with A complex, b's
-# real copy, X its complex copy, the result and _box's real copy; with a sparse b, from_full's arrays on top)
+# (the whole need by hand at n = 100000, k = 1: X, b's copy, and the result, each with its header; with A complex, X
+# made complex from b directly (no real copy kept), the result and _box's real copy; with a sparse b, from_full's
+# arrays on top)
 H = sp.C_HDR
 assert need == 2 * (8 * n + H), need
-assert sp.big_triangular_need(n, 1, True, False, False)[0] == (8 + 16 + 16 + 8) * n + 4 * H
+assert sp.big_triangular_need(n, 1, True, False, False)[0] == (16 + 16 + 8) * n + 3 * H
 assert sp.big_triangular_need(n, 1, False, False, True)[0] == 2 * (8 * n + H) + 4 * 8 * n + 3 * 8 * n + 3 * 2 * 8 + 10 * H
 # (the reservation held until the result is made: released after _unmat and, for a sparse b, from_full)
 events = []
@@ -288,6 +345,33 @@ assert routes == ["triangular"] and type(x) is sp.Sparse, routes
 names = [e[0] for e in events]
 assert names.index("from_full") > names.index("_unmat") and ("release", need_sb) in events, events
 assert events.index(("release", need_sb)) > names.index("from_full"), events
+# (and nothing of b is copied before the route's reservation: a sparse b's full value is filled after it, the old
+# routes' _mat copy never made, and one byte short no copy at all; for the band, b's copy comes after the discovery)
+order = []
+real_fill, real_mat = sp._fill_full, M._mat
+sp._fill_full = lambda *a, **kw: (order.append("fill"), real_fill(*a, **kw))[1]
+M._mat = lambda *a, **kw: (order.append("_mat"), real_mat(*a, **kw))[1]
+LG._recorder = order
+try:
+    stand_in(1 << 40)
+    x, routes = solve(Ssb, bsb)
+    tri_order = [o if isinstance(o, str) else o[3] for o in order]
+    del order[:]
+    stand_in(need_sb - 1)
+    short_refused = nomem(lambda: B["mldivide"].call(1, [Ssb, bsb]))
+    short_order = [o if isinstance(o, str) else o[3] for o in order]
+    stand_in(1 << 40)
+    T6 = B["plus"].call(1, [bidiagonal(6000), bidiagonal(6000, False)])
+    b6 = col(np.ones(6000))
+    del order[:]
+    x6, routes6 = solve(T6, b6)
+    band_order = [o if isinstance(o, str) else o[3] for o in order]
+finally:
+    sp._fill_full, M._mat, LG._recorder = real_fill, real_mat, None
+assert routes == ["triangular"] and "_mat" not in tri_order, tri_order
+assert tri_order.index("triangular") < tri_order.index("fill"), tri_order
+assert short_refused and short_order == ["discovery", "triangular"], short_order
+assert routes6 == ["band"] and band_order.index("discovery") < band_order.index("_mat"), band_order
 # (a zero diagonal on the big route: the singular warning, once)
 shown, real_err = [], M._write_err
 M._write_err = shown.append
@@ -300,7 +384,8 @@ finally:
 assert routes == ["triangular"] and sum("singular to working precision" in s for s in shown) == 1, (routes, shown)
 ok("big route: its whole need (%d bytes), within the band's m_band (%d): at exactly that need and at any larger guard "
    "the triangular route, the same units (%d); one byte short refused, no other route tried, as the old routes refuse; "
-   "the need by hand; released after the result is made; a zero diagonal warns" % (need, mb, r_big[1]))
+   "the need by hand; nothing of b copied before its reservation (none one byte short); released after the result "
+   "is made; a zero diagonal warns" % (need, mb, r_big[1]))
 
 # 4b. the choice by formula over shapes: lower and upper, bidiagonal and wider (ku = 4), one and many right-hand
 # sides, real, complex A and complex b (A complex and b real: the promotion), full and sparse b (both outcomes: at

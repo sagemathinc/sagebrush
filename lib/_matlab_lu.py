@@ -1262,7 +1262,10 @@ def solve(S, Bm, what, bands=None, rec=None, tri=None):
     once, with both needs.  Returns (X, singular), or None for a diagonal S
     (the caller's shortcut); bands, a seam, gives (kl, ku) instead; rec, the
     operation's capacity record when the caller has read it (one per operation);
-    tri, the caller's triangular route: tri(lower, led, work, bound) for every
+    Bm may be lazy (shape, dtype and make(), the caller's copy of b): made
+    after the triangular route's choice, so that route makes its own copy
+    under its reservation.  tri, the caller's triangular route: tri(lower,
+    led, work, bound) for every
     triangular S once its bandwidths are known, its value (the caller's
     result) or None (the routes below, as before) by formulas alone, its
     whole need at most bound, never by the ledger's guard, which only admits
@@ -1305,6 +1308,10 @@ def solve(S, Bm, what, bands=None, rec=None, tri=None):
             out = tri(ku == 0, led, work, bound if m_band is None else min(m_band, bound))
             if out is not None:
                 return out
+    # (the old routes' copy of b, made here when the caller passed it lazily: after the discovery and the triangular
+    # route's choice, as the caller's own expression)
+    if hasattr(Bm, "make"):
+        Bm = Bm.make()
     t_band = c["step"] * n + c["band"] * n * (kl + 1) * (kl + ku + 1) if kl is not None else None
 
     def band():
