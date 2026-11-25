@@ -92,7 +92,7 @@ const front = Bun.serve({
       const h = new Headers();
       // (content-length too: the reference server checks a blob's PUT against it, as the site's server does; a Request
       // made from an ArrayBuffer carries none, sync-docs' finding on run 3)
-      for (const k of ["cookie", "content-type", "content-length", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
+      for (const k of ["cookie", "content-type", "content-length", "x-sync-account", "x-sync-generation", "x-sb-ct-sha256"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
       const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
       const r = await ref.fetch(new Request(ORIGIN + p + u.search, { method: req.method, headers: h, body }));
       const out = new Headers();

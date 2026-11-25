@@ -5215,6 +5215,9 @@ def _coerce_int(x):
         return int(x)
     if isinstance(x, _Fraction) and x.denominator == 1:
         return int(x)
+    if isinstance(x, _Fraction):
+        # (Magma's words for a rational that isn't an integer: Integers()!(1/2))
+        raise MagmaError("Rational argument is not a whole integer\nLHS: RngInt\nRHS: FldRatElt", "'!'", False)
     if isinstance(x, (bool, str)):
         # Python would read "7" as 7 and true as 1
         raise MagmaError("Illegal coercion\nLHS: RngInt\nRHS: %s" % _type(x), "'!'", False)
@@ -11424,6 +11427,14 @@ def _order_text(n):
     return "Order = %d" % n if f == str(n) else "Order = %d = %s" % (n, f)
 
 
+def _no_covering_group():
+    """Magma's error for a permutation coerced into a permutation group of
+    another degree (Sym(5)!(Sym(4)!(1, 2))), with no empty line after it;
+    one of the same degree that isn't in the group is an illegal
+    coercion."""
+    return MagmaError("Could not find a covering group\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", False)
+
+
 class _MSymGroup:
     """Sym(n): the symmetric group on 1 .. n (GrpPerm), its elements the
     permutations, composed left to right as Magma's: i^(p*q) = (i^p)^q."""
@@ -11467,7 +11478,7 @@ class _MSymGroup:
                 return x
             if x.G.n == self.n:
                 return _MPerm(self, x.images)  # (a dihedral group's, of degree n)
-            raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", True)
+            raise _no_covering_group()
         if isinstance(x, (MSeq, MRange)):
             # G![images]: the permutation i -> images[i], integers only
             # (CORR-DFC-4)
@@ -11692,9 +11703,12 @@ class _MDihedralGroup:
         # (cycles or images made a permutation as Sym(n)'s, then admitted
         # only if it is the group's: G!(1, 2) is Magma's Illegal coercion)
         p = x if isinstance(x, _MPerm) else _MSymGroup(self.n)._magma_coerce(x)
-        if p.G.n == self.n and self._has(p.images):
+        if p.G.n != self.n:
+            raise _no_covering_group()
+        if self._has(p.images):
             return _MPerm(self, p.images)
-        raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", True)
+        # (with no empty line after it, as Magma's)
+        raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", False)
 
 
 def DihedralGroup(n):

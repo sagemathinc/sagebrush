@@ -360,7 +360,7 @@ test("a copy of a value that shares its parts is admitted before it is made: x :
   assert.equal(r.signal, null, r.stderr);
   assert.match(r.stdout.replace(/\s+/g, " "), /a value of more than 50000 sequences, sets, tuples and records \(a record counting as 8\) is not supported yet/);
   assert.match(r.stdout, /\n1\n$/);
-  assert.ok(took < 40000, `${took} ms`);
+  assert.ok(took < WALL(40000), `${took} ms`);
   // (a value of 40000 sequences is copied as before; at the default heap,
   // since each copy of it costs tens of megabytes; untimed, under its own
   // spawn timeout only)
@@ -1802,7 +1802,7 @@ test("BaseRing, CoefficientRing, CyclotomicField and a number field's Basis, as 
   const { join } = require("node:path");
   // (the expected text is Magma 2.18's for these lines; a cyclotomic field
   // is one for each n, so a name given to it holds for every handle)
-  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8", timeout: 60000 }).stdout as string;
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8", timeout: WALL(60000) }).stdout as string;
   const ok = run(["BaseRing(PolynomialRing(Integers())); BaseRing(PolynomialRing(GF(7))); BaseRing(Rationals());", "P<x>:=PolynomialRing(Rationals()); K<a>:=NumberField(x^3-2); BaseRing(K); CoefficientRing(K);", "BaseRing(Matrix(Integers(),2,3,[1..6])); BaseRing(MaximalOrder(QuadraticField(5))); CoefficientRing(Matrix(GF(5),2,2,[1,2,3,4]));", "P<x>:=PolynomialRing(Integers()); BaseRing(x^2+1); BaseRing(Parent(Matrix(Rationals(),2,2,[1,2,3,4])));", "K<z>:=CyclotomicField(5); K; z^5; z^4; Type(z); Type(K); BaseRing(K);", "K:=CyclotomicField(1); K; K.1; Degree(K); K:=CyclotomicField(2); K.1; Basis(K);", "K<z>:=CyclotomicField(5); L<w>:=CyclotomicField(5); z; K eq L;", "K:=CyclotomicField(9); K.1^3; K:=CyclotomicField(12); K; K.1^4;", "K<z>:=CyclotomicField(5); z^-1; (1+z)^-1; 1/2 + z; Norm(z+1); Eltseq(z^2+3);", "K<z>:=CyclotomicField(5); Basis(K);", "P<x>:=PolynomialRing(Rationals()); K<a>:=NumberField(x^3-2); Basis(K); Eltseq(a^2/3+1);", "P<x>:=PolynomialRing(Rationals()); K:=NumberField(x^3-2); Basis(K); K.1^2+1;", "K:=QuadraticField(5); Basis(K); [K.1, K.1+1]; Eltseq(K.1+1/2);", "K<a>:=QuadraticField(-3); Basis(K);", "K<z>:=CyclotomicField(4); z^2; [z, 1/2];"].join("\n"));
   assert.equal(ok, "Integer Ring\nFinite field of size 7\nRational Field\nRational Field\nRational Field\nInteger Ring\nInteger Ring\nFinite field of size 5\nInteger Ring\nRational Field\nCyclotomic Field of order 5 and degree 4\n1\n-z^3 - z^2 - z - 1\nFldCycElt\nFldCyc\nRational Field\nCyclotomic Field of order 1 and degree 1\n1\n1\n-1\n[\n    1\n]\nw\ntrue\nzeta_9^3\nCyclotomic Field of order 12 and degree 4\nzeta_12^2 - 1\n-z^3 - z^2 - z - 1\n-z^3 - z\n1/2*(2*z + 1)\n1\n[ 3, 0, 1, 0 ]\n[\n    1,\n    z,\n    z^2,\n    z^3\n]\n[\n    1,\n    a,\n    a^2\n]\n[ 1, 0, 1/3 ]\n[\n    1,\n    K.1,\n    K.1^2\n]\nK.1^2 + 1\n[ 1, K.1 ]\n[ K.1, K.1 + 1 ]\n[ 1/2, 1 ]\n[ 1, a ]\n-1\n[\n    z,\n    1/2\n]\nend\n", ok);
   // (Magma's errors, each line on its own)
@@ -1939,12 +1939,12 @@ test("a power of an integer or rational matrix is admitted by the size of its en
   const t0 = Date.now();
   const src = "M:=Matrix(Integers(),2,2,[2,0,0,2]); X:=M^(10^9);\nX:=M^(-10^9);\nN:=Matrix(Rationals(),3,3,[1/2,1,2,3,5/3,8,13,21,34]); X:=N^(10^7);\n" +
     "M:=Matrix(Integers(),2,2,[1,1,1,0]); (M^100)[1][1]; (M^-3)[1][1]; Type(M^100);\nA:=Matrix(Integers(),2,3,[1..6]); B:=A*Transpose(A); Type(B^3); (B^3)[1][1];\n\"end\";\n";
-  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
   assert.equal((out.match(/a power of a \d by \d matrix whose entries could have more than 2097152 bits \(8388608 in all\)/g) ?? []).length, 3, r.stdout);
   assert.ok(r.stdout.endsWith("573147844013817084101\n-1\nAlgMatElt\nModMatRngElt\n110264\nend\n"), r.stdout);
-  assert.ok(Date.now() - t0 < 20000, `${Date.now() - t0} ms`);
+  assert.ok(Date.now() - t0 < WALL(20000), `${Date.now() - t0} ms`);
 });
 
 test("a negative power of an integer matrix needs a unit determinant and stays integral; a module of matrices has a zero but no one (CORR-CA8-1, CORR-CA8-2)", () => {
@@ -2015,7 +2015,7 @@ test("a dihedral group too wide to print is refused before either generator is r
     "print('disagree', bad)",
     "",
   ].join("\n"));
-  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: 60000 });
+  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: WALL(60000) });
   assert.equal(r.stdout, "refused 0\ndisagree []\n", r.stdout + r.stderr);
 });
 
