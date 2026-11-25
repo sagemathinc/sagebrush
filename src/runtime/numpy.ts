@@ -699,13 +699,10 @@ function discover(x: any, depth: number, shape: number[] & { leaf?: number }, ki
     kinds.dt = kinds.dt ? promote(kinds.dt, D.float64) : D.float64;
     return;
   }
-  const dt = scalarDtype(w);
-  kinds.dt = kinds.dt ? promoteScalar(kinds.dt, dt, w) : dt;
-}
-// Python scalars inside a list promote as values (an int and a float give float64).
-function promoteScalar(a: DType, b: DType, w: Weak): DType {
-  if (w.dt === null && a.kind !== "b" && b === D.int64 && a.isInt) return a.itemsize >= 8 ? a : D.int64;
-  return promote(a, b);
+  // (a Python int is int64, as NumPy discovers it, or uint64 from 2**63 up to 2**64 - 1, past int64; then the
+  // dtypes promote as any others: with an int64, a uint64 makes float64)
+  const dt = w.kind === "i" && w.dt === null && w.big !== undefined && w.big > I64MAX && w.big <= U64MAX ? D.uint64 : scalarDtype(w);
+  kinds.dt = kinds.dt ? promote(kinds.dt, dt) : dt;
 }
 function setDim(shape: number[] & { leaf?: number }, d: number, n: number) {
   if (shape.length === d) shape.push(n);
@@ -757,8 +754,12 @@ function checkWeak(dt: DType, w: Weak) {
   if (isWide(dt) && w.inexact) wideRefuse(dt);
 }
 function checkWeakRange(dt: DType, w: Weak) {
-  if (w.big !== undefined && (dt.kind === "u" && dt.itemsize === 8 ? w.big < I64MIN || w.big > U64MAX : w.big < I64MIN || w.big > I64MAX)) raise(T.OverflowError, "Python int too large to convert to C long");
+  if (w.big !== undefined) cLongRange(dt, w.big);
   checkPyInt(dt, w.v);
+}
+// (a Python int no C long holds: NumPy's OverflowError, whatever the integer dtype; uint64 takes its own range)
+function cLongRange(dt: DType, big: bigint) {
+  if (dt.kind === "u" && dt.itemsize === 8 ? big < I64MIN || big > U64MAX : big < I64MIN || big > I64MAX) raise(T.OverflowError, "Python int too large to convert to C long");
 }
 const MINMAX_OPS: Record<string, boolean> = { maximum: true, minimum: true, fmax: true, fmin: true };
 function bigMinMax(op: string, ct: DType, arr: NDArray, big: bigint): NDArray {
@@ -806,6 +807,7 @@ function admitWide(v: any, dt: DType): number {
     return v + 0;
   }
   if (typeof v === "bigint") {
+    cLongRange(dt, v);
     const lo = dt.kind === "u" ? 0n : -(2n ** 63n), hi = dt.kind === "u" ? 2n ** 64n - 1n : 2n ** 63n - 1n;
     if (v < lo || v > hi) raise(T.OverflowError, `Python integer ${v} out of bounds for ${dt.name}`);
     const n = Number(v);
@@ -834,7 +836,12 @@ function toNum(v: any, dt?: DType): number {
   }
   if (typeof v === "boolean") return +v;
   if (typeof v === "bigint") {
-    if (dt && dt.isInt && dt.itemsize === 8 && (v > 18446744073709551615n || v < -9223372036854775808n)) raise(T.OverflowError, `Python integer ${v} out of bounds for ${dt.name}`);
+    if (dt && dt.isInt) {
+      cLongRange(dt, v);
+      // (the dtype's range, the int in the message as it is, not as a double)
+      const rg = RANGE[dt.name];
+      if ((rg && (v < BigInt(rg[0]) || v > BigInt(rg[1]))) || (dt.kind === "u" && v < 0n)) raise(T.OverflowError, `Python integer ${v} out of bounds for ${dt.name}`);
+    }
     // (into int64 or uint64 only if a double holds it exactly)
     if (dt && isWide(dt) && BigInt(Number(v)) !== v) wideRefuse(dt);
     return Number(v);
