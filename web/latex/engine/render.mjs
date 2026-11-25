@@ -106,6 +106,7 @@ export function buildTree(events, items = []) {
       case "ref": top().kids.push({ t: "R", cmd: e.cmd, key: e.key, opt: e.opt }); break;
       case "doc": st.length = 1; root.kids.push({ t: "doc" }); break;
       case "cls": top().kids.push({ t: "cls", cls: e.cls, opt: e.opt }); break;
+      case "natbib": top().kids.push({ t: "natbib", opt: e.opt }); break;
       // (a Magma name the document defines itself: ours is off for it, said once by check and the editor)
       case "own": top().kids.push({ t: "own", name: e.name }); break;
       case "err": top().kids.push({ t: "err", code: e.code, name: e.name, text: e.text }); break;
@@ -273,7 +274,7 @@ class Renderer {
   constructor(opts) {
     this.opts = opts || {};
     this.images = this.opts.images || {}; this.imageRefs = new Set(); this.inputMisses = [];
-    this.cls = "article"; this.book = false; this.clsOpt = "";
+    this.cls = "article"; this.book = false; this.clsOpt = ""; this.nat = null;
     // (frames: a beamer document's frames, in order {n, title, at}; problems: what the preview can't show or found wrong,
     //  each {kind, name, at} with at the source offset of the nearest node before it, or -1: `sagebrush latex check`)
     this.frameList = []; this.problems = []; this.lastPos = -1; this.ov = null;
@@ -471,6 +472,9 @@ class Renderer {
           this.problem(n.code === "runaway" ? "runaway" : "redefined", n.name);
           if (n.code === "runaway") { const tx = String(n.text || "").replace(/\s+$/, ""); flow.html('<span class="unk errchip" title="LaTeX: Paragraph ended before \\' + esc(n.name) + ' was complete">\\' + esc(n.name) + esc(tx.length > 40 ? tx.slice(0, 40) + "…" : tx) + " not finished</span>", ctx.st); break; }
           flow.html('<span class="unk errchip" title="LaTeX would stop here">\\newcommand: \\' + esc(n.name) + " is already defined</span>", ctx.st); break;
+        // (natbib's options: numbers (its entries numbered, whatever label BibTeX gave), sort and compress (a citation's
+        //  numbers in order, and a run of three or more as a range))
+        case "natbib": { const o = String(n.opt || "").split(",").map((x) => x.trim()); this.nat = { numbers: o.includes("numbers"), sort: o.includes("sort") || o.includes("sort&compress"), compress: o.includes("compress") || o.includes("sort&compress") }; break; }
         case "cls": this.cls = n.cls; this.clsOpt = typeof n.opt === "string" ? n.opt : ""; this.book = /^(book|report|memoir|scrbook|scrreprt)$/.test(n.cls); this.secnumdepth = depthOf(n.cls); break;
         default: break;
       }
@@ -927,9 +931,13 @@ class Renderer {
       if (this.csName(kids[i]) === "bibitem") {
         const [o, j1] = this.opt(kids, i); const [k, j2] = this.arg(kids, j1);
         if (li) flow.close(li);
-        const key = this.str(k).trim(); const num = ++this.bibN; const lab = o ? this.inline(o, ctx) : String(num);
-        widest = Math.max(widest, labelEm(o ? this.str(o) : String(num)));
-        this.bib.set(key, { lab, id: "bib-" + num });
+        // (under natbib's numbers, an entry is its number whatever label BibTeX gave it, "Knuth(1984)": the label's
+        //  author, before its "(", is what \citet names)
+        const key = this.str(k).trim(); const num = ++this.bibN, nn = !!this.nat?.numbers;
+        const lab = o && !nn ? this.inline(o, ctx) : String(num);
+        widest = Math.max(widest, labelEm(o && !nn ? this.str(o) : String(num)));
+        const who = nn && o ? this.inline(o, ctx).replace(/\(.*$/, "").trim() : "";
+        this.bib.set(key, { lab, id: "bib-" + num, num, who });
         li = flow.open("li", ' id="bib-' + num + '"', '<span class="biblab">[' + lab + "]</span> ");
         i = j2; continue;
       }
@@ -995,6 +1003,7 @@ class Renderer {
     return out;
   }
   resolveRef(r, plain) {
+    if ((r.cmd === "cite" || r.cmd === "citep" || r.cmd === "citet") && this.nat?.numbers) return this.natCite(r, plain);
     if (r.cmd === "cite" || r.cmd === "citep" || r.cmd === "citet") {
       const parts = r.key.split(",").map((k) => k.trim()).filter(Boolean).map((k) => { const b = this.bib.get(k); return b ? (plain ? b.lab : '<a href="#' + b.id + '">' + b.lab + "</a>") : (plain ? "?" : '<span class="missing">' + esc(k) + "</span>"); });
       return "[" + parts.join(", ") + (r.opt ? ", " + this.noteHtml(r.opt, plain) : "") + "]";
@@ -1020,6 +1029,27 @@ class Renderer {
     }
     if (plain) return txt;
     return L.id ? '<a class="ref" href="#' + L.id + '">' + esc(txt) + "</a>" : esc(txt);
+  }
+  // (natbib's numbers, as TeX Live's natbib sets them: [3, 1] in the order given; with sort, in order; with compress, a
+  //  run of three or more as a range, [1–3] (two stay [1, 2]); a missing key as "?"; \citet as each entry's author then
+  //  its number, "Ann [1]"; a note last, inside the brackets)
+  natCite(r, plain) {
+    const link = (b) => (plain ? String(b.num) : '<a href="#' + b.id + '">' + b.num + "</a>");
+    const note = r.opt ? ", " + this.noteHtml(r.opt, plain) : "";
+    const keys = r.key.split(",").map((k) => k.trim()).filter(Boolean);
+    const miss = (k) => (plain ? "?" : '<span class="missing">' + esc(k) + "</span>");
+    if (r.cmd === "citet") return keys.map((k, n) => { const b = this.bib.get(k); if (!b) return miss(k); const w = plain ? b.who.replace(/<[^>]*>/g, "") : b.who; return (w ? w + " " : "") + "[" + link(b) + (n === keys.length - 1 ? note : "") + "]"; }).join(", ");
+    const found = keys.map((k) => ({ k, b: this.bib.get(k) }));
+    if (this.nat.sort) found.sort((x, y) => (x.b ? x.b.num : Infinity) - (y.b ? y.b.num : Infinity));
+    const out = [];
+    for (let i = 0; i < found.length; i++) {
+      const { k, b } = found[i];
+      if (!b) { out.push(miss(k)); continue; }
+      let j = i;
+      if (this.nat.compress) while (j + 1 < found.length && found[j + 1].b && found[j + 1].b.num === found[j].b.num + 1) j++;
+      if (j - i >= 2) { out.push(link(b) + "\u2013" + link(found[j].b)); i = j; } else out.push(link(b));
+    }
+    return "[" + out.join(", ") + note + "]";
   }
   // (a label's \nameref text: its title with the references in it resolved, as text (no link inside the link): the final
   //  pass replaces each placeholder once, so one \nameref brings in is resolved here (daybreak3, #682); null if the title
