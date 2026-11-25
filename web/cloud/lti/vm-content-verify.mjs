@@ -192,8 +192,9 @@ const TIMER_KINDS = ["sleep", "deadline", "budget"];
 const RECONCILE_MS = 0.01;
 
 /**
- * The scaled-clock lateness accounting (#18: astra3's and daybreak3's timing rulings): a DIAGNOSTIC, never a pass
- * condition. The bounds stay raw. From one checkpoint result's own timer records (each deliberate timer the checkpoint
+ * The scaled-clock lateness accounting (#18 timing rulings): adjusted times are DIAGNOSTIC, never an elapsed
+ * qualification pass condition. Accounting validity is checked separately; qualification bounds stay raw.
+ * From one checkpoint result's own timer records (each deliberate timer the checkpoint
  * itself awaited) and its phase marks:
  * - every record valid: a known kind; finite non-negative values; monotonic order schedule ≤ fire ≤ resumption; the
  *   elapsed, overshoot and unit conversions reconciling with its own stamps; a timer that won must have fired, one
@@ -223,7 +224,8 @@ export function timerAccounting(c) {
     const over = t.won === "timer" ? Math.max(0, t.elapsed_real_ms - t.requested_real_ms) : 0;
     if (!(Math.abs(over - t.overshoot_real_ms) <= RECONCILE_MS)) f.push(`timer ${i}: overshoot ${t.overshoot_real_ms} ≠ ${over}`);
     if (t.virtual) {
-      // (on the virtual clock a sleep has no real duration, and no timer moves the gate clock: no gate overshoot; a call's
+      // (on the virtual clock a sleep has no real duration; sleeps and expired deadlines advance by their exact budget,
+      // with no gate overshoot; a call's
       // deadline is still a real timer, with its real duration)
       if ((t.kind === "sleep" && t.requested_real_ms !== 0) || t.overshoot_gate_ms !== 0) f.push(`timer ${i}: a virtual-clock sleep with real duration, or a virtual-clock gate overshoot`);
     } else {
@@ -255,12 +257,13 @@ export function requestedGaps(c) {
   return (c?.timers ?? []).filter((t) => t.kind === "sleep" && t.label === "gap").map((t) => t.requested_gate_ms);
 }
 
-// D4 r3's raw bound on the protected part, with no slack (CORR-PRIVATE18-TIMING-1, -2: the strict 64,200 everywhere)
+// D4 r3's protected bound, no slack: real bound:x1 qualification and observed virtual CI duration.
 export const PROTECTED_MAX_MS = 64_200;
 
 /**
  * The raw D4 r3 checks of one worst-case checkpoint (its call and its tombstone held past the deadline), shared by the
- * ×10 CI case and bound:x1: not done; sent, with exactly two sends in the protected part; protected ≤ 64,200 ms;
+ * virtual upper-endpoint CI case and real bound:x1 qualification (not the timing-diagnostic ×10 sample):
+ * not done; sent, with exactly two sends in the protected part; protected ≤ 64,200 ms;
  * decision → end ≤ 125,200 ms; due → end ≤ 197,200 ms plus its firing delay; every figure finite and non-negative.
  */
 export function rawD4Failures(c) {

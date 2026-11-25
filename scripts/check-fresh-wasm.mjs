@@ -1,4 +1,4 @@
-// The pins against a fresh build of engine/ (the engine-wasm job, after scripts/build-engine.mjs wrote the four
+// The pins against a fresh build of engine/ (the engine-wasm job, after scripts/build-engine.mjs wrote the five
 // modules into wasm/): a module whose bytes don't match its pin in wasm/pins.json, or whose mode isn't 0644,
 // means the pin is stale.  On a master push, a dispatch (a train's gate, before it lands) or the schedule that is an
 // error: master must never carry a pin that isn't its own source's build.  So is a pull request from a track
