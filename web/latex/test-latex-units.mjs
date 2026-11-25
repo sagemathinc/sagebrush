@@ -1074,6 +1074,31 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
   check("input-change-rerenders", r2.stats.mode === "cold" && /\\mathbb ?\{Z\}/.test(r2.chunks.join("")), r2.stats.mode);
 }
 
+// ---- an accent before a font command with its argument, unbraced ($\bar\mathbb F_q$, $\hat\mathcal O$): typeset as TeX
+// reads it, \bar{\mathbb F}, where KaTeX alone refuses it; nothing else changed, and a source TeX would refuse is left
+// as written (KaTeX's error, as before)
+{
+  const { braceAccentFonts } = await import("./engine/render.mjs");
+  const cases = [["\\bar\\mathbb F_q", "\\bar{\\mathbb F}_q"], ["\\hat\\mathcal O", "\\hat{\\mathcal O}"], ["\\tilde\\mathrm{x}", "\\tilde{\\mathrm{x}}"],
+    ["x\\in \\bar \\mathbb F_g^\\times", "x\\in \\bar{\\mathbb F}_g^\\times"], ["\\overline\\mathbb{Q}", "\\overline{\\mathbb{Q}}"], ["\\bar\\mathbf\\alpha", "\\bar{\\mathbf \\alpha}"],
+    ["\\bar\\mathbb F\\hat\\mathcal O", "\\bar{\\mathbb F}\\hat{\\mathcal O}"], ["\\vec\\boldsymbol v", "\\vec{\\boldsymbol v}"],
+    ["\\bar{\\mathbb F}_q", "\\bar{\\mathbb F}_q"], ["\\barx\\mathbb F", "\\barx\\mathbb F"], ["\\bar\\mathbbx F", "\\bar\\mathbbx F"], ["\\bar\\mathbb", "\\bar\\mathbb"],
+    ["\\bar\\mathbb{F", "\\bar\\mathbb{F"], ["\\bar\\mathbb ^2", "\\bar\\mathbb ^2"], ["\\bar\\mathbb{\\{F\\}}", "\\bar{\\mathbb{\\{F\\}}}"], ["\\bar\\mathbb{\\{}x", "\\bar{\\mathbb{\\{}}x"], ["a+b", "a+b"]];
+  const bad = cases.filter(([a, b]) => braceAccentFonts(a) !== b).map(([a, b]) => [a, b, braceAccentFonts(a)]);
+  check("accent-font-braced", bad.length === 0, bad);
+  // (in the preview, with the real KaTeX for these rows: each drawn as its braced form is, no error, no problem for
+  //  check; the stub put back after)
+  const { default: katex } = await import("katex");
+  setKatex((src, o) => katex.renderToString(src, o));
+  try {
+    const drawn = (h) => [...h.matchAll(/<span class="katex-html"[\s\S]*?<\/span><\/span><\/span>/g)].map((m) => m[0]).join("|");
+    const one = (m) => { const r = new Engine().update("\\documentclass{article}\n\\usepackage{amssymb}\n\\begin{document}\n$" + m + "$\n\\end{document}\n", { cold: true }); const h = r.chunks.join(""); return { d: drawn(h), err: /katex-error/.test(h), p: r.problems }; };
+    const pairs = cases.slice(0, 8).map(([a, b]) => [a, one(a), one(b)]);
+    const off = pairs.filter(([, x, y]) => !x.d || x.d !== y.d || x.err || x.p.some((p) => p.kind === "math")).map(([a, x, y]) => [a, x.err, x.d.slice(0, 80), y.d.slice(0, 80)]);
+    check("accent-font-typeset", off.length === 0, off);
+  } finally { setKatex((src) => src); }
+}
+
 // ---- envclose.ts (P1a): the close a "}" typed after \begin{X} adds, or none
 {
   const at = (t) => [t.replace("|", ""), t.indexOf("|")];

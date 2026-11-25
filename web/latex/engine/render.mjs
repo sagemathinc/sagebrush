@@ -188,7 +188,29 @@ class Flow {
 
 // ------------------------------------------------------------------ KaTeX
 const KCACHE = new Map();
+// (an accent before a font command with its own argument, unbraced: TeX takes \bar\mathbb F as \bar{\mathbb F}, KaTeX
+//  refuses it ("Unexpected end of input in a macro argument"); braced here, before KaTeX, in one pass. The font
+//  command's argument is a group or one token, as TeX reads it; anything else is left as written)
+const ACCENT_CS = "bar|hat|tilde|vec|dot|ddot|check|breve|acute|grave|mathring|widehat|widetilde|overline|underline";
+const FONT_CS = "mathbb|mathcal|mathrm|mathbf|mathit|mathsf|mathtt|mathfrak|mathscr|boldsymbol|bm|operatorname";
+const ACCENT_FONT = new RegExp("\\\\(" + ACCENT_CS + ")(?![A-Za-z])\\s*\\\\(" + FONT_CS + ")(?![A-Za-z])\\s*", "g");
+export function braceAccentFonts(src) {
+  if (!src.includes("\\")) return src;
+  let out = "", at = 0, m;
+  ACCENT_FONT.lastIndex = 0;
+  while ((m = ACCENT_FONT.exec(src))) {
+    let j = m.index + m[0].length, end = -1;
+    if (src[j] === "{") { let d = 0; for (let k = j; k < src.length; k++) { const c = src[k]; if (c === "\\") { k++; continue; } if (c === "{") d++; else if (c === "}" && --d === 0) { end = k + 1; break; } } }
+    else if (src[j] === "\\") { const w = /^\\([A-Za-z]+|.)/.exec(src.slice(j)); if (w) end = j + w[0].length; }
+    else if (j < src.length && !/[}\s^_&]/.test(src[j])) end = j + String.fromCodePoint(src.codePointAt(j)).length;
+    if (end < 0) continue;
+    out += src.slice(at, m.index) + "\\" + m[1] + "{\\" + m[2] + (src[j] === "{" ? "" : " ") + src.slice(j, end) + "}";
+    at = end; ACCENT_FONT.lastIndex = end;
+  }
+  return at ? out + src.slice(at) : src;
+}
 function texMath(src, display, macros, macroSig, stats) {
+  src = braceAccentFonts(src);
   const key = (display ? "D" : "I") + macroSig + "\u0000" + src;
   const hit = KCACHE.get(key);
   if (hit !== undefined) { if (hit.includes("katex-error")) { stats.katexErrors++; if (stats.katexErrorSamples.length < 5) stats.katexErrorSamples.push(src.slice(0, 120)); } return hit; }
