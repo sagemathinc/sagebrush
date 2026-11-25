@@ -12,17 +12,27 @@
 // its first in this sync generation). Within one message, an op's prev is the envelope just before it in that
 // message. The server ends a message at its first refusal and answers the rest `undecided`, so a refused envelope
 // never has a successor in the log; the undecided ones are sealed again after the accepted one.
-import { opHash, sealIndexOp, signIndexOp } from "./e2e/index-op.ts";
+import { opEpoch, opHash, openIndexOp, sealIndexOp, signIndexOp, verifyIndexOp } from "./e2e/index-op.ts";
 import type { EpochKeys } from "./e2e/keys.ts";
 import type { WireOp } from "./sync-outbox";
 
-/** The key chain as this device last verified it: what a sealed op commits to. */
+/** The key chain as this device last verified it: what a sealed op commits to, and what pull checks one against. Every
+ * position is the chain's ABSOLUTE seq (its base plus the head's index), and anything about a head this verified chain
+ * doesn't hold is unknown (null), never ordered or guessed. */
 export interface ChainView {
   /** the chain's head (unpadded base64url SHA-256) and its generation */
   readonly head: string;
   readonly generation: string;
   /** the account's current epoch at that head */
   readonly currentEpoch: number;
+  /** a head's absolute position in this chain, or null if this chain doesn't hold it */
+  position(head: string): number | null;
+  /** a device's Ed25519 key if it was a current device at that head (added at or before it, not removed by it) */
+  signerAt(head: string, id: string): Uint8Array | null;
+  /** the epoch current at that head */
+  epochAt(head: string): number | null;
+  /** a device as this chain knows it (absolute positions), or null for a device it never had */
+  device(id: string): { added: number; removed: number | null } | null;
 }
 /** What the sync client needs to seal and sign: the E2E account, this device's signer, the chain and epoch keys. */
 export interface OpKeys {
@@ -105,4 +115,103 @@ export async function envHashOf(envB64: string): Promise<string> {
   const bin = atob(envB64);
   const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
   return b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
+}
+
+// ---- pull (e2e PR 5c, its pull half): every sealed op verified, in the log's order, before it is applied
+
+/**
+ * What pull has verified so far, kept with the cursor (in the same transaction): the floor, the largest chain position
+ * of any op verified in this log (heads only move forward in an honest log, since the server accepts an op only at the
+ * chain's current head), with the chain generation it was taken under; and each sync device's newest verified envelope
+ * (its dseq and hash), the per-device envelope chain's last link.
+ */
+export type PullState = Readonly<{ seq: number; floor: number; chainGen: string | null; devices: Readonly<Record<string, { dseq: number; hash: string }>> }>;
+/** (`seq`: the last op verified, so one read again from an earlier cursor, as an echo's match, isn't verified twice) */
+export const PULL_START: PullState = Object.freeze({ seq: 0, floor: -1, chainGen: null, devices: Object.freeze({}) });
+
+/** A sealed op that doesn't verify: pull stops there (deterministically, for every device reading the same log against
+ * the same verified chain), nothing from it on applied. */
+export class SealedHalt extends Error {
+  constructor(readonly seq: number, readonly why: string) { super(`sync: the server's sealed op ${seq} doesn't verify: ${why}`); }
+}
+
+const REF = /^(?:a1:)?[0-9a-f]{64}$/;
+const ENV_B64_MAX = Math.ceil((64 << 10) / 3) * 4;
+const sameList = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/**
+ * Verify one served sealed op (a log row with its signed values) and open it, after `st`:
+ * 1. its head is in this device's verified chain (read again once if not), under that chain's generation;
+ * 2. that head is at or after the floor (no op authorized at a head the log has already passed);
+ * 3. its signer was a current device at that head, and signed exactly this op (sealedOpMessage);
+ * 4. its envelope's epoch is the one current at that head;
+ * 5. its dseq is past its device's last verified one;
+ * 6. it opens under that epoch's index key at its place, naming its device's previous verified envelope (none for the
+ *    device's first in this sync generation) and exactly its visible references, which are the op's own (refsOf).
+ * Returns the op and the state after it; any failure is a SealedHalt.
+ */
+export async function verifyRow(keys: OpKeys, syncGeneration: number, row: Record<string, unknown>, st: PullState): Promise<{ op: WireOp; state: PullState }> {
+  const seq = Number.isSafeInteger(row.seq) ? (row.seq as number) : -1;
+  const halt = (why: string): never => { throw new SealedHalt(seq, why); };
+  const str = (k: string) => (typeof row[k] === "string" ? (row[k] as string) : halt(`no ${k}`));
+  const env64 = str("env"), head = str("head"), chainGen = str("chain_gen"), device = str("device"), signer = str("signer"), sig = str("sig");
+  const dseq = row.dseq;
+  if (!Number.isSafeInteger(dseq) || (dseq as number) < 1) halt("a dseq that isn't one");
+  const list = (k: string) => {
+    const x = row[k] ?? [];
+    return Array.isArray(x) && x.every((r) => typeof r === "string" && REF.test(r)) ? (x as string[]) : halt(`${k} that aren't blob references`);
+  };
+  const adds = list("adds"), releases = list("releases");
+  let env: Uint8Array;
+  try {
+    if (env64.length > ENV_B64_MAX) throw new Error("too long");
+    env = Uint8Array.from(atob(env64), (c) => c.charCodeAt(0));
+  } catch {
+    return halt("an envelope that isn't one");
+  }
+  // (1) the head, in this device's verified chain: read again once when it isn't there yet (a chain newer than ours)
+  let chain = await keys.chain();
+  let p = chain.position(head);
+  if (p === null) {
+    chain = await keys.chain(true);
+    p = chain.position(head);
+  }
+  if (p === null) halt("authorized at a head this device's verified chain doesn't hold");
+  if (chainGen !== chain.generation) halt("sealed under another chain generation");
+  // (2) the floor
+  if (p! < st.floor) halt("authorized at a head before one the log has already passed");
+  // (3) the signer, current at that head, and the signature over exactly this op
+  const key = chain.signerAt(head, signer);
+  if (!key) halt(chain.device(signer) ? "its signer wasn't a current device at that head" : "its signer was never a device of this chain");
+  const ctx = { account: keys.account, syncGeneration, chainGeneration: chainGen, head, device, dseq: dseq as number, adds, releases, signer };
+  if (!(await verifyIndexOp(key!, ctx, env, sig))) halt("a signature that doesn't verify");
+  // (4) the epoch
+  let n: number;
+  try {
+    n = opEpoch(env);
+  } catch {
+    return halt("an envelope that isn't one");
+  }
+  if (n !== chain.epochAt(head)) halt("sealed under another epoch than its head's");
+  // (5) the device's order
+  const before = st.devices[device];
+  if (before && (dseq as number) <= before.dseq) halt("a dseq not past its device's last");
+  // (6) opened, chained, and its references its own
+  let epoch = await keys.epochKeys(n);
+  if (!epoch) {
+    await keys.chain(true);
+    epoch = await keys.epochKeys(n);
+  }
+  if (!epoch) halt("an epoch whose keys this device doesn't hold");
+  let op: WireOp;
+  try {
+    op = (await openIndexOp(epoch!, { device, dseq: dseq as number }, env, { prev: before ? fromB64url(before.hash) : null, adds, releases })) as WireOp;
+  } catch {
+    return halt("it doesn't open at its place, after its device's previous envelope, with its references");
+  }
+  if (!op || typeof op !== "object" || op.dseq !== dseq) halt("an op that isn't its own");
+  const own = refsOf(op);
+  if (!sameList(own.adds, adds) || !sameList(own.releases, releases)) halt("visible references that aren't its op's");
+  const hash = b64url(await opHash(env));
+  return { op, state: Object.freeze({ seq, floor: p!, chainGen: chain.generation, devices: Object.freeze({ ...st.devices, [device]: { dseq: dseq as number, hash } }) }) };
 }
