@@ -1335,16 +1335,18 @@ class Axes:
         """How many tick intervals matplotlib's AutoLocator allows on each axis
         (Axis.get_tick_space, at most 9): the axis length in points over 3
         tick labels' size (x) or 2 (y), the size in pixels.  The length is
-        that of these axes in matplotlib's layout: on a grid, its default
-        subplot parameters (left 0.125, right 0.9, bottom 0.11, top 0.88,
-        wspace and hspace 0.2), as if tight_layout were not called."""
+        that of these axes in matplotlib's layout: on a grid, the figure's
+        subplot parameters (rcParams', or those subplots_adjust or
+        tight_layout set)."""
         W, H = self.figure._size
         _, _, w, h = self._rect
         grid = getattr(self, "_grid", None)
         if grid is not None and not self._opts.get("exact"):
+            from matplotlib._axes_geometry import subplot_params
+            sp = subplot_params(self.figure)
             nr, nc = grid
-            w *= nc * (0.9 - 0.125) / (nc + 0.2 * (nc - 1))
-            h *= nr * (0.88 - 0.11) / (nr + 0.2 * (nr - 1))
+            w *= nc * (sp["right"] - sp["left"]) / (nc + sp["wspace"] * (nc - 1))
+            h *= nr * (sp["top"] - sp["bottom"]) / (nr + sp["hspace"] * (nr - 1))
         pt = size / PT
         return {"x": min(9, max(1, int(math.floor(w * W * 72 / (pt * 3))))),
                 "y": min(9, max(1, int(math.floor(h * H * 72 / (pt * 2)))))}
@@ -1487,6 +1489,9 @@ class Figure:
         self._ca = None  # (plt.axes(ax)'s selection, and len(axes) then)
         self._suptitle = None
         self._grid = (1, 1)
+        # (the subplot parameters, rcParams' as they are now, as matplotlib's SubplotParams; subplots_adjust and
+        # tight_layout set them)
+        self._subplotpars = {k: float(rcParams["figure.subplot." + k]) for k in ("left", "right", "bottom", "top", "wspace", "hspace")}
 
     def __repr__(self):
         return "<Figure size %dx%d with %d Axes>" % (self._size[0] * 100, self._size[1] * 100, len(self.axes))
@@ -1545,8 +1550,32 @@ class Figure:
     def suptitle(self, s, **kw):
         self._suptitle = str(s)
 
+    def subplots_adjust(self, left=None, bottom=None, right=None, top=None, wspace=None, hspace=None):
+        """Set the subplot parameters: where the grid of subplots sits in the figure (left, right, bottom and top, as
+        fractions of it) and the room between them (wspace and hspace, as fractions of an Axes' width and height).
+        The Axes made by add_subplot and subplots move: their get_position, and the ticks their size gives. (The figure
+        is drawn as before: each subplot in its share of the figure, with room for its labels.)"""
+        from matplotlib._axes_geometry import subplot_params
+        sp = dict(subplot_params(self))
+        for k, v in (("left", left), ("bottom", bottom), ("right", right), ("top", top), ("wspace", wspace), ("hspace", hspace)):
+            if v is not None:
+                sp[k] = float(v)
+        if sp["left"] >= sp["right"]:
+            raise ValueError("left cannot be >= right")
+        if sp["bottom"] >= sp["top"]:
+            raise ValueError("bottom cannot be >= top")
+        self._subplotpars = sp
+
     def tight_layout(self, **kw):
-        pass
+        """Subplot parameters that leave room for each subplot's tick labels, axis labels and title, as matplotlib's
+        tight_layout computes them (from the sizes those texts have in its default font): set as subplots_adjust
+        would. Keywords as matplotlib's: pad=1.08, h_pad and w_pad in multiples of the font size; rect = (left, bottom,
+        right, top), the part of the figure the subplots and their labels fit in."""
+        from matplotlib._tight_layout import tight_layout
+        bad = [k for k in kw if k not in ("pad", "h_pad", "w_pad", "rect")]
+        if bad:
+            raise TypeError("Figure.tight_layout() got an unexpected keyword argument %r" % bad[0])
+        tight_layout(self, pad=kw.get("pad", 1.08), h_pad=kw.get("h_pad"), w_pad=kw.get("w_pad"), rect=kw.get("rect"))
 
     @property
     def canvas(self):
@@ -1912,7 +1941,16 @@ def suptitle(s, **kw):
 
 
 def tight_layout(**kw):
-    pass
+    """The current figure's tight_layout (Figure.tight_layout): pad=1.08, h_pad, w_pad, rect."""
+    bad = [k for k in kw if k not in ("pad", "h_pad", "w_pad", "rect")]
+    if bad:
+        raise TypeError("tight_layout() got an unexpected keyword argument %r" % bad[0])
+    gcf().tight_layout(**kw)
+
+
+def subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=None, hspace=None):
+    """The current figure's subplots_adjust (Figure.subplots_adjust)."""
+    gcf().subplots_adjust(left=left, bottom=bottom, right=right, top=top, wspace=wspace, hspace=hspace)
 
 
 def ion():

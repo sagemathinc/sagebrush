@@ -9,13 +9,22 @@ from matplotlib import rcParams
 from matplotlib.transforms import Bbox
 
 
-def grid_bbox(nrows, ncols, row, col):
+def subplot_params(fig):
+    """A figure's subplot parameters (left, right, bottom, top, wspace, hspace): those subplots_adjust or
+    tight_layout set, else rcParams' as they were when it was made, as matplotlib's SubplotParams."""
+    sp = getattr(fig, "_subplotpars", None)
+    if sp is None:
+        sp = {k: float(rcParams["figure.subplot." + k]) for k in ("left", "right", "bottom", "top", "wspace", "hspace")}
+    return sp
+
+
+def grid_bbox(nrows, ncols, row, col, sp=None):
     """The Bbox of cell (row, col) of an nrows x ncols grid of subplots, by
-    matplotlib's GridSpec arithmetic (the subplot parameters from rcParams;
-    the same sums in the same order, so the same floats)."""
-    sp = lambda k: float(rcParams["figure.subplot." + k])
-    left, right, bottom, top = sp("left"), sp("right"), sp("bottom"), sp("top")
-    wspace, hspace = sp("wspace"), sp("hspace")
+    matplotlib's GridSpec arithmetic (the subplot parameters `sp`, a figure's,
+    or rcParams'; the same sums in the same order, so the same floats)."""
+    sp = sp or subplot_params(None)
+    left, right, bottom, top = sp["left"], sp["right"], sp["bottom"], sp["top"]
+    wspace, hspace = sp["wspace"], sp["hspace"]
 
     def cells(total, n, space):
         cell = total / (n + space * (n - 1))
@@ -47,7 +56,8 @@ def _cell(ax):
         return Bbox.from_bounds(l, 1 - t - h, w, h)
     nrows, ncols = ax._grid
     x, y = rect[0], rect[1]
-    return grid_bbox(nrows, ncols, min(nrows - 1, int(round(y * nrows))), min(ncols - 1, int(round(x * ncols))))
+    return grid_bbox(nrows, ncols, min(nrows - 1, int(round(y * nrows))), min(ncols - 1, int(round(x * ncols))),
+                     subplot_params(ax.figure))
 
 
 def _cumsum(ratios, space, total):
@@ -341,7 +351,8 @@ def ticklabels(ax, a):
         pairs = p.ticks(lo, hi, log, None, None, 5, a)
         pos, texts = [v for v, _ in pairs], [re.sub(r"<[^>]*>", "", str(t)) for _, t in pairs]
     else:
-        texts = list(labs) if labs is not None else _mpl_labels(pos)
+        # (fewer labels than ticks: the rest are empty, as matplotlib's FixedFormatter gives them)
+        texts = (list(labs) + [""] * (len(pos) - len(labs)))[:len(pos)] if labs is not None else _mpl_labels(pos)
     rot = float(ax._opts.get("xtick_rotation" if a == "x" else "_ytick_rotation") or 0)
     return [TickText(v, t, rot, a) for v, t in zip(pos, texts)]
 
