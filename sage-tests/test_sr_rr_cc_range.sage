@@ -55,6 +55,13 @@ print(h(SR(RR(1e300)) / SR(CC(-800, 0.5))))
 print(h(SR(CC(1, 1)) / SR(CC(2^600, 1))))
 print(h(SR(CC(-2^-520, 2^520)) / SR(CC(1e300, 1e300))))
 
+# a quotient whose inverse has a part past the doubles, though the operands
+# and the quotient are in range (1/b's lost part changes the product)
+for e in [400, 510]:
+    a, b = CC(2^-e, -2^e), CC(2^e, -2^-e)
+    print(h(SR(a) / SR(a)), h(SR(a) / SR(b)), h(SR(b) / SR(a)))
+print(h(SR(CC(-2^-450, 2^450)) / SR(CC(2^450, 2^-450))), h(SR(CC(2^300, 2^-300)) / SR(CC(-2^-300, -2^300))))
+
 # an integer power of an element of CC: Sage's generic_power
 print(h(SR(CC(1, 1))^2))
 print(h(SR(CC(1, 1))^3))
