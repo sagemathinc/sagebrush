@@ -413,14 +413,14 @@ test("the long tier: the nightly schedule and a dispatch with long set; never a 
   for (const o of longRuns) {
     assert.equal(o.long, "true");
     assert.deepEqual(JSON.parse(o.mpmath_backends), ["sagebrush", "python"]);
-    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "pwa", "share-dialog-2"]);
+    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "pwa", "lti", "lti-b", "share-dialog-2"]);
     assert.equal(o.slow_tests, "true");
     assert.equal(o.slow_scope, "1");
   }
   for (const o of notLong) {
     assert.equal(o.long, "false", JSON.stringify(o));
     assert.deepEqual(JSON.parse(o.mpmath_backends), ["sagebrush"]);
-    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "pwa"]);
+    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "pwa", "lti", "lti-b"]);
     assert.equal(o.slow_tests, "false");
     assert.equal(o.slow_scope, "");
   }
@@ -549,7 +549,7 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
     "web/workspace/doc-sync.ts", "web/notebook/sync-rows.js", "web/notebook/db-merge3.ts", "web/board/syncdb.ts",
     "web/share/files.ts", "web/share-client/upload.ts", "web/csp.ts", "web/csp-policy.mts", "web/safe-html.ts",
     "web/cloud/share/server.ts", "web/cloud/share/migrations/0009_remotes.sql", "web/cloud/remote/relay.ts",
-    "web/cloud/mirror/account.ts", "web/cloud/support/support.ts", "web/workspace/agent-chat/mirror-format.ts",
+    "web/cloud/mirror/account.ts", "web/cloud/lti/launch.ts", "web/cloud/support/support.ts", "web/workspace/agent-chat/mirror-format.ts",
     "web/workspace/export/run.ts", "web/workspace/db.ts", "web/workspace/api.ts", "web/workspace/migrate.ts", "web/board/export.ts",
     "web/latex/save.ts", "scripts/check-export-size.mjs",
     // (the LaTeX group's inputs: its ceiling is checked only in the full tier's web-artifacts)
@@ -920,6 +920,15 @@ test("a master push the merge queue already tested (CI_QUEUE_TESTED): every test
   // (only a master push: a track push, the queue's own run, a pull request ignore it)
   assert.equal(classify(["src/x.ts"], "", { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/track/math", CI_QUEUE_TESTED: "true" }).full, "true");
   assert.equal(classify(["src/x.ts"], "", { CI_QUEUE_TESTED: "true" }).queue_tested, "false");
+});
+
+test("latex_budget: a pull request changing the LaTeX group's inputs keeps web-artifacts, light or not; nothing else does", () => {
+  for (const files of [["web/latex/split.ts"], ["scripts/latex-group.mjs"], ["web/workspace/paths.ts"], ["web/build.ts"]]) {
+    assert.equal(classify(files).latex_budget, "true", files.join());
+    assert.equal(classify(files, "", { CI_PR_LIGHT: "true" }).latex_budget, "true", files.join());
+  }
+  for (const files of [["web/latex/test-latex-units.mjs"], ["web/board/x.ts"], ["design/x.md"]]) assert.equal(classify(files).latex_budget, "false", files.join());
+  assert.equal(classify(["web/latex/split.ts"], "", { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" }).latex_budget, "false");
 });
 
 test("PR CI light (CI_PR_LIGHT exactly \"true\"): a pull request keeps only checks' and the size gate's inputs and the modules' build", () => {

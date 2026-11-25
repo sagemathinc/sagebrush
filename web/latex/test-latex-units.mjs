@@ -6,6 +6,7 @@
 import { openBytes, encodeText, EDIT_MAX } from "./save.ts";
 import { imageCandidates, graphicsPathOf, notFoundWhy, relativePath, sniffImage, admitImageBytes, IMAGE_BOUNDS } from "./images.ts";
 import { splitChunk, PIECE_MAX, CHUNK_MAX, bytes, weight, tooLargeProblem } from "./split.ts";
+import { watchdog, WATCHDOG_MS, LATE_MS } from "./watchdog.ts";
 import { autoClose } from "./envclose.ts";
 import { tokenizeLine } from "./highlight.ts";
 import { latexOn, latexHereFor, desktopApp, APP_NO_RUN } from "./boot.ts";
@@ -139,6 +140,37 @@ check("split-over-2MiB-placeholder", (() => { const t = splitChunk('<div class="
   check("split-weight", weight('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') === bytes('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') - "data:abc".length && weight("src=\"data:zz\" text") === bytes("src=\"data:zz\" text"), null);
 }
 check("split-small-unchanged", splitChunk('<div class="p">hi</div>')[0] === '<div class="p">hi</div>', null);
+
+// ---- watchdog.ts (issue 619): the preview's watchdog judges the worker by the page's time; a timer the page's own
+// blocking made late waits once more (LATE_MS) for a reply already queued, then the worker is hung. A fake clock: `run`
+// moves time on, firing what is due; `block` moves it on with nothing run (the main thread blocked), then fires
+{
+  const fake = () => { let t = 0, n = 0; const due = new Map();
+    const c = { now: () => t, set: (f, ms) => { const h = ++n; due.set(h, { at: t + ms, f }); return h; }, clear: (h) => due.delete(h) };
+    const fire = () => { for (;;) { const next = [...due.entries()].filter(([, d]) => d.at <= t).sort((a, b) => a[1].at - b[1].at)[0]; if (!next) return; due.delete(next[0]); next[1].f(); } };
+    return { c, run: (ms) => { const end = t + ms; for (;;) { const next = [...due.values()].filter((d) => d.at <= end).sort((a, b) => a.at - b.at)[0]; if (!next) { t = end; return; } t = next.at; fire(); } }, block: (ms) => { t += ms; fire(); }, pending: () => due.size };
+  };
+  // (on time: hung at WATCHDOG_MS, not before)
+  { const k = fake(), d = watchdog({ clock: k.c }); let hung = 0; d.start(() => hung++);
+    k.run(WATCHDOG_MS - 1); const before = hung; k.run(1);
+    check("watchdog-on-time-hung", before === 0 && hung === 1 && k.pending() === 0, { before, hung }); }
+  // (the page blocked past the due time: not hung then; a reply in the grace stops it, never hung)
+  { const k = fake(), d = watchdog({ clock: k.c }); let hung = 0; d.start(() => hung++);
+    k.block(WATCHDOG_MS + 5000); const at = hung; d.stop(); k.run(10 * LATE_MS);
+    check("watchdog-late-waits-for-a-queued-reply", at === 0 && hung === 0 && k.pending() === 0, { at, hung }); }
+  // (late, and no reply in the grace: hung after it, once)
+  { const k = fake(), d = watchdog({ clock: k.c }); let hung = 0; d.start(() => hung++);
+    k.block(WATCHDOG_MS + 5000); const at = hung; k.run(LATE_MS);
+    check("watchdog-late-then-hung", at === 0 && hung === 1 && k.pending() === 0, { at, hung }); }
+  // (one grace only: blocked again past it, hung)
+  { const k = fake(), d = watchdog({ clock: k.c }); let hung = 0; d.start(() => hung++);
+    k.block(WATCHDOG_MS + 5000); k.block(LATE_MS + 5000);
+    check("watchdog-one-grace-only", hung === 1 && k.pending() === 0, { hung }); }
+  // (a little late, within LATE_MS: on time; stop() and a new start: only the new request's)
+  { const k = fake(), d = watchdog({ clock: k.c }); let a = 0, b = 0; d.start(() => a++); k.block(WATCHDOG_MS + LATE_MS - 1);
+    d.start(() => b++); d.stop(); k.run(2 * WATCHDOG_MS);
+    check("watchdog-slightly-late-hung-and-stop", a === 1 && b === 0 && k.pending() === 0, { a, b }); }
+}
 
 // ---- highlight.ts: the tokenizer's states
 const run = (line, st) => { const g = tokenizeLine(line, st); const toks = []; for (;;) { const r = g.next(); if (r.done) return { toks, end: r.value }; toks.push(r.value); } };
@@ -712,6 +744,37 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   for (const [name, body, ok] of longs) { const h = doc("\\documentclass{article}\n\\newcounter{foo}\n", body); check(name, ok(h), h.slice(0, 700)); }
 }
 
+// ---- amsart's front matter and a bibliography with author-year labels (as an arXiv paper's): \title[short]{long} and
+// \author[short]{long} show the long form only; the labels' column as wide as its widest label; a \cite note typeset
+{
+  setKatex((src) => '<span class="KI">' + src.replace(/[&<>]/g, "") + "</span>");
+  const h = new Engine().update("\\documentclass{amsart}\n\\title[Short T]{Long title}\n\\author[N. K.]{Narasimha K}\n\\begin{document}\n\\maketitle\nSee \\cite[\\S B]{Nek12} and \\cite[p.~3, $x^2$]{BM03}.\n\\begin{thebibliography}{abcd999}\n\\bibitem[BM03]{BM03} Baba.\n\\bibitem[Nek12]{Nek12} Nekov.\n\\end{thebibliography}\n\\end{document}\n").chunks.join("");
+  check("amsart-title-short-form", h.includes("Long title") && h.includes("Narasimha K") && !h.includes("Short T") && !h.includes("N. K.") && !h.includes('class="title">[') && !h.includes('class="auth">['), h.slice(0, 600));
+  const pad = /<ol class="bib" style="padding-left:(\d+\.\d+)em">/.exec(h);
+  check("bib-label-column-widest", pad && +pad[1] >= 3.5, /<ol class="bib"[^>]*>/.exec(h)?.[0]);
+  const see = h.slice(h.indexOf("See"), h.indexOf("See") + 600);
+  check("cite-note-typeset", see.includes("Nek12</a>, §B]") && see.includes('p.\u00a03, <span class="KI">x^2</span>]') && !see.includes("\\S"), see);
+  // amsart's front matter (the arXiv paper's): every \author, an abstract written before \maketitle printed after the
+  // title, \subjclass and \keywords as the first page's notes, no date unless one is given, and each author's address and
+  // email at the end, in amsart's order whatever the source's
+  const fm = new Engine().update("\\documentclass{amsart}\n\\title{T}\n\\author[A. One]{Ann One}\n\\email{ann@x.org}\n\\address{Dept.~One}\n\\author{Bo Two}\n\\address{Dept.~Two}\n\\email{bo@y.org}\n\\keywords{forms, twists}\n\\subjclass[2010]{Primary 11F30}\n\\begin{document}\n\\begin{abstract}Abs text.\\end{abstract}\n\\maketitle\nBody.\n\\end{document}\n").chunks.join("");
+  const tb = fm.slice(fm.indexOf('<div class="titleblock">'), fm.indexOf("Body."));
+  const end = fm.slice(fm.indexOf('class="amsaddr"'));
+  check("amsart-front-matter", (tb.match(/class="auth"/g) || []).length === 2 && tb.includes("Ann One") && tb.includes("Bo Two") && tb.indexOf("Abs text.") > tb.indexOf('class="title"')
+    && (fm.match(/Abs text\./g) || []).length === 1 && tb.includes("2010 Mathematics Subject Classification.</i> Primary 11F30") && tb.includes("Key words and phrases.</i> forms, twists")
+    && !tb.includes('class="date"') && fm.indexOf('class="amsaddr"') > fm.indexOf("Body.") && end.indexOf("Dept.") < end.indexOf("ann@x.org") && end.indexOf("ann@x.org") < end.indexOf("Dept.\u00a0Two") && end.indexOf("Dept.\u00a0Two") < end.indexOf("bo@y.org"), [tb.slice(0, 500), end.slice(0, 400)]);
+  // (in the article class, TeX's own: the last \author is the author, the abstract where it is written, the date shown)
+  const ar = new Engine().update("\\documentclass{article}\n\\title{T}\n\\author{Ann One}\n\\author{Bo Two}\n\\begin{document}\n\\begin{abstract}Abs text.\\end{abstract}\n\\maketitle\nBody.\n\\end{document}\n").chunks.join("");
+  check("article-front-matter-unchanged", !ar.includes("Ann One") && ar.includes("Bo Two") && ar.indexOf("Abs text.") < ar.indexOf('class="titleblock"') && ar.includes('class="date"'), ar.slice(0, 500));
+  // (a numeric bibliography keeps the page's own column)
+  const hn = new Engine().update("\\documentclass{article}\n\\begin{document}\n\\cite{a}\n\\begin{thebibliography}{9}\n\\bibitem{a} A.\n\\end{thebibliography}\n\\end{document}\n").chunks.join("");
+  check("bib-label-column-numeric", /<ol class="bib">/.test(hn), /<ol class="bib"[^>]*>/.exec(hn)?.[0]);
+  // (the {widest} argument alone widens it: {abcd999} with numeric labels)
+  const hw = new Engine().update("\\documentclass{article}\n\\begin{document}\n\\cite{a}\n\\begin{thebibliography}{abcd999}\n\\bibitem{a} A.\n\\end{thebibliography}\n\\end{document}\n").chunks.join("");
+  const pw = /<ol class="bib" style="padding-left:(\d+\.\d+)em">/.exec(hw);
+  check("bib-label-column-widest-argument", pw && +pw[1] >= 4.5, /<ol class="bib"[^>]*>/.exec(hw)?.[0]);
+}
+
 // ---- source position markers: each main-file line is marked at most once (a resume inside an \input that a main
 // line started in the middle; the main file read again)
 {
@@ -855,12 +918,12 @@ check("off-cli-and-phone", !latexHereFor("127.0.0.1", false, SITE) && !latexHere
 check("site-unchanged", latexHereFor("sagebrush.space", false, SITE) && latexHereFor("dev.sagebrush.space", false, SITE) && !latexHereFor("sagebrush.space.evil", false, SITE), null);
 check("app-run-why", /desktop app/.test(APP_NO_RUN) && /sagebrush\.space/.test(APP_NO_RUN), APP_NO_RUN);
 // (the app self-test's LaTeX checks, web/notebook/selftest-latex.js: none outside the desktop app, so a phone's report has
-// none; in it, its three rows, named as the desktop report's judge requires them, app/selftest/android-report.py DESKTOP)
+// none; in it, its four rows, named as the desktop report's judge requires them, app/selftest/android-report.py DESKTOP)
 const judgeNames = [...(/DESKTOP = \[([\s\S]*?)\]/.exec(readFileSync(new URL("../../app/selftest/android-report.py", import.meta.url), "utf8"))?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]);
 check("selftest-latex-phone-none", (await latexChecks({ desktop: false, on: true, menu: null, ws: null })).length === 0 && (await latexChecks({ on: true, menu: null, ws: null })).length === 0, null);
 const deskRows = await latexChecks({ desktop: true, on: false, menu: null, ws: null });
-check("selftest-latex-desktop-rows", deskRows.length === 3 && deskRows.every((r, i) => r[0] === LATEX_CHECKS[i] && r[1] === false), deskRows);
-check("selftest-latex-names-are-the-judge's", judgeNames.length === 3 && JSON.stringify(judgeNames) === JSON.stringify(LATEX_CHECKS), judgeNames);
+check("selftest-latex-desktop-rows", deskRows.length === 4 && deskRows.every((r, i) => r[0] === LATEX_CHECKS[i] && r[1] === false), deskRows);
+check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.stringify(judgeNames) === JSON.stringify(LATEX_CHECKS), judgeNames);
 
 // ---- the examples (the corpus's, scripts/latex-examples.mjs; William, Oct 29: "good tests to illustrate the breadth of editor support"): each one
 // rendered by the pipeline the page uses, and its result recorded (one line each): it renders (outcome ok), with no

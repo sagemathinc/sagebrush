@@ -675,6 +675,11 @@
   "web/space/src/main.ts :: tourPill :: el.innerHTML = `<span>On a tour: ${esc(tour.t.title ?? \"Tour\")} · stop ${tour.i + 1} of ${tour.t.steps.length}</span>` + #0": {
    "kind": "host",
    "owner": "host"
+  },
+  "web/workspace/review/proposal-view.ts :: say :: if (md) await rendered(body, a, b, stale, \"md-rendered\", async () => md, (render, el, t) => { el.innerHTML = render(t); return null; }); #0": {
+   "kind": "rich",
+   "owner": "phase-5",
+   "readers": []
   }
  }
 }
