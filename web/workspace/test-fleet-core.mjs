@@ -104,16 +104,36 @@ const coreUsers = (webDir) => {
 };
 const users = coreUsers(web);
 ok(users.length === 0, "N-1: only e2e/ and the verifier (fleet-verify.ts) use the fleet core: page modules through fleet/install.ts, e2e/core/'s pure modules by named imports of the core's pure functions, never an installer", users);
-// (and nothing reaches the verifier yet: until a page that uses it is reviewed, no fleet verifying path is live)
-const verifierUsers = [];
-const scanVerifier = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) {
-  const p = join(d, e.name);
-  if (e.isDirectory()) { if (!["node_modules", "dist", ".cache"].includes(e.name) && p !== fleet) scanVerifier(p); continue; }
-  if (!/\.(?:ts|mts|js|mjs)$/.test(e.name) || /^test-/.test(e.name)) continue;
-  if (/fleet-verify/.test(readFileSync(p, "utf8")) && relative(web, p) !== join("workspace", "fleet-verify.ts")) verifierUsers.push(relative(web, p));
-} };
-scanVerifier(web);
+// (and nothing reaches the verifier yet: until a page that uses it is reviewed, no fleet verifying path is live. The
+//  scan covers fleet/ too, its own installer included: only the byte-pinned mirror files, PINS, are left out)
+/** The modules under `webDir` (a web/ tree) that name the verifier, other than the verifier itself. */
+const verifierUsersIn = (webDir) => {
+  const fleetDir = join(webDir, "workspace", "fleet");
+  const out = [];
+  const scan = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) {
+    const p = join(d, e.name);
+    if (e.isDirectory()) { if (!["node_modules", "dist", ".cache"].includes(e.name)) scan(p); continue; }
+    if (!/\.(?:ts|mts|js|mjs)$/.test(e.name) || /^test-/.test(e.name)) continue;
+    if (p.startsWith(fleetDir + "/") && Object.hasOwn(PINS, relative(fleetDir, p))) continue;
+    if (/fleet-verify/.test(readFileSync(p, "utf8")) && relative(webDir, p) !== join("workspace", "fleet-verify.ts")) out.push(relative(webDir, p));
+  } };
+  scan(webDir);
+  return out;
+};
+const verifierUsers = verifierUsersIn(web);
 ok(verifierUsers.length === 0, "N-2: no page module imports the verifier yet (no fleet verifying path is live)", verifierUsers);
+{
+  // (its control, on real files: the page's own installer importing the verifier is reported, while a pinned mirror
+  //  file is left out of the scan)
+  const root = mkdtempSync(join(tmpdir(), "sb-n2-"));
+  mkdirSync(join(root, "workspace", "fleet", "core"), { recursive: true });
+  writeFileSync(join(root, "workspace", "fleet", "install.ts"), 'export const x = 1;\nimport "../fleet-verify";\n');
+  writeFileSync(join(root, "workspace", "fleet", "core", "index.mjs"), '// fleet-verify (a pinned path: not scanned)\n');
+  writeFileSync(join(root, "workspace", "fleet-verify.ts"), 'export const v = 1;\n');
+  const found = verifierUsersIn(root);
+  rmSync(root, { recursive: true, force: true });
+  ok(JSON.stringify(found) === JSON.stringify([join("workspace", "fleet", "install.ts")]), "N-2: (its control) fleet/install.ts importing the verifier is reported; a pinned mirror path isn't scanned", found);
+}
 // (the rule's own controls: what it lets through and what it refuses)
 ok(coreImportOk('import { canonText } from "../../fleet/core/canonical.mjs";') && coreImportOk('import { crypto } from "../../fleet/core/crypto.mjs";')
   && !coreImportOk('import { useCrypto } from "../../fleet/core/crypto.mjs";') && !coreImportOk('import { webCrypto } from "../../fleet/core/webcrypto.mjs";')
