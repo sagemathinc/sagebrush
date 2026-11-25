@@ -331,8 +331,10 @@ class Categorical(object):
         source = values._pd_col if isinstance(values, (Categorical, Series)) else None
         if isinstance(source, CatColumn):
             col = column_to_category(source, dtype if dtype.categories is not None else None)
-            if dtype.categories is None and (explicit or ordered is not None):
-                col = CatColumn(CategoricalDtype(col.dtype.categories, dtype.ordered), col._pd_codes)
+            # (only ordered= or a CategoricalDtype sets the flag; otherwise the source's stays, categories= or not)
+            keep = dtype.ordered if (explicit or ordered is not None) else source.dtype.ordered
+            if col.dtype.ordered != keep:
+                col = CatColumn(CategoricalDtype(col.dtype.categories, keep), col._pd_codes)
         elif isinstance(values, Series):
             col = column_to_category(values._pd_col, dtype)
         else:

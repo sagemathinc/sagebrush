@@ -147,3 +147,8 @@ for src in ["categorical", "series"]:
             case("keep-ordered-%s-%s-%s" % (src, o, name), lambda src_v=src_v, kw=kw: (lambda r: (r.ordered, r.categories.tolist(), r.codes.tolist()))(pd.Categorical(src_v, **kw)))
 ordc = pd.Series(["b", "a"]).astype(pd.CategoricalDtype(["a", "b"], ordered=True))
 case("ordered-eq-rebuilt", lambda: (pd.Series(pd.Categorical(ordc)) == ordc).tolist())
+# categories= without ordered= keeps the source's flag too
+src_o = pd.Categorical(["b", "a"], categories=["b", "a", "c"], ordered=True)
+for cats in [["a", "b", "c"], ["b", "a", "c"], ["a", "b"]]:
+    for kw_name, kw in [("none", {}), ("string", {"dtype": "category"}), ("ordered-false", {"ordered": False}), ("ordered-true", {"ordered": True})]:
+        case("keep-ordered-categories-%s-%s" % ("".join(cats), kw_name), lambda cats=cats, kw=kw: (lambda r: (r.ordered, r.categories.tolist(), r.codes.tolist()))(pd.Categorical(src_o, categories=cats, **kw)))

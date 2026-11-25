@@ -593,3 +593,27 @@ False
 (True, ['b', 'a', 'c'], [0, 1])
 == ordered-eq-rebuilt
 [True, True]
+== keep-ordered-categories-abc-none
+(True, ['a', 'b', 'c'], [1, 0])
+== keep-ordered-categories-abc-string
+(True, ['a', 'b', 'c'], [1, 0])
+== keep-ordered-categories-abc-ordered-false
+(False, ['a', 'b', 'c'], [1, 0])
+== keep-ordered-categories-abc-ordered-true
+(True, ['a', 'b', 'c'], [1, 0])
+== keep-ordered-categories-bac-none
+(True, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-categories-bac-string
+(True, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-categories-bac-ordered-false
+(False, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-categories-bac-ordered-true
+(True, ['b', 'a', 'c'], [0, 1])
+== keep-ordered-categories-ab-none
+(True, ['a', 'b'], [1, 0])
+== keep-ordered-categories-ab-string
+(True, ['a', 'b'], [1, 0])
+== keep-ordered-categories-ab-ordered-false
+(False, ['a', 'b'], [1, 0])
+== keep-ordered-categories-ab-ordered-true
+(True, ['a', 'b'], [1, 0])
