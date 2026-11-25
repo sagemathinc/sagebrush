@@ -410,6 +410,17 @@ jobs:
           # (the identity must be in the keychain, by its exact name: a wrong SIGN_ID fails here, not at notarization)
           security find-identity -v -p codesigning "$keychain" | grep -qF "\"$SIGN_ID\"" || { echo "The signing identity is not in the imported certificates" >&2; exit 1; }
           echo "SAGEBRUSH_NOTARY_KEY=$api_key" >> "$GITHUB_ENV"
+      # (the Team ID the app is signed with, from the identity's exact name, compiled in by build.rs: the bundled
+      # agent's Node, which signing rewrites, is checked by its code signature and this team, src/agent_host.rs
+      # node_check; the self-test of the signed app below requires that check to pass. A Team ID isn't a secret)
+      - name: The signing Team ID
+        shell: bash
+        env:
+          SIGN_ID: ${{ secrets.SAGEBRUSH_MACOS_SIGN_ID }}
+        run: |
+          team=$(printf '%s' "$SIGN_ID" | sed -nE 's/^Developer ID Application: .+ \(([A-Z0-9]{10})\)$/\1/p')
+          [ -n "$team" ] || { echo "FAIL: the signing identity's name ends in no Team ID" >&2; exit 1; }
+          echo "SAGEBRUSH_MACOS_TEAM_ID=$team" >> "$GITHUB_ENV"
       # Tauri signs the app (hardened runtime, a secure timestamp), notarizes it with the API key and tries to staple it
       # (tauri-bundler's macOS signing: APPLE_SIGNING_IDENTITY, APPLE_API_KEY, APPLE_API_ISSUER, APPLE_API_KEY_PATH).
       # The app only: the disk image is made below, from the app once its ticket is stapled
