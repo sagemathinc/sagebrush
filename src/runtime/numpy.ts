@@ -541,6 +541,13 @@ function bstrides(a: NDArray, shape: number[]): number[] {
   return out;
 }
 function broadcastShapes(...shapes: number[][]): number[] {
+  return broadcastOr(shapes, () => raise(T.ValueError, `operands could not be broadcast together with shapes ${shapes.map(shapeStr).join(" ")} `));
+}
+// (an advanced index's arrays that don't broadcast together: NumPy's IndexError, in its words)
+function broadcastIndexShapes(shapes: number[][]): number[] {
+  return broadcastOr(shapes, () => raise(T.IndexError, `shape mismatch: indexing arrays could not be broadcast together with shapes ${shapes.map(shapeStr).join(" ")} `));
+}
+function broadcastOr(shapes: number[][], fail: () => never): number[] {
   const nd = Math.max(0, ...shapes.map((s) => s.length));
   const out = new Array(nd).fill(1);
   for (const s of shapes) {
@@ -548,7 +555,7 @@ function broadcastShapes(...shapes: number[][]): number[] {
       const j = nd - s.length + d, n = s[d];
       if (n === 1) continue;
       if (out[j] === 1) out[j] = n;
-      else if (out[j] !== n) raise(T.ValueError, `operands could not be broadcast together with shapes ${shapes.map(shapeStr).join(" ")} `);
+      else if (out[j] !== n) fail();
     }
   }
   return out;
@@ -1126,7 +1133,7 @@ function resolveIndex(a: NDArray, key: any): IndexResult {
   }
   for (; d < a.ndim; d++) ents.push({ axis: d, kind: "slice", n: a.shape[d], start: 0, step: 1 });
   const adv = ents.filter((e) => e.kind === "adv");
-  const bshape = broadcastShapes(...adv.map((e) => e.idx!.shape));
+  const bshape = broadcastIndexShapes(adv.map((e) => e.idx!.shape));
   const bsize = prod(bshape);
   // (the index arrays, the output's offsets (a JS array) and the output
   // itself, admitted together first; LIMIT-PR55-3)

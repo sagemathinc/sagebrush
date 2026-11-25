@@ -2669,6 +2669,26 @@
     "upstream_version": "NumPy 2.5.1"
   },
   {
+    "name": "numpy.take_along_axis",
+    "kind": "function",
+    "signature": "(arr, indices, axis=-1)",
+    "summary": "The values of an array at given indices along one axis, the indices broadcasting against it on the other axes.",
+    "doc": "indices is an integer array with as many dimensions as arr; on every axis but `axis` it broadcasts against arr, so the result of argsort, or of argmax with keepdims=True, selects along that axis. axis None takes from arr flattened, with 1-D indices. Raises AxisError for an axis out of range, IndexError for indices that are not integers or out of bounds, and ValueError when the numbers of dimensions differ.",
+    "examples": [
+      {
+        "code": "a = np.array([[10, 30, 20], [60, 40, 50]])\nnp.take_along_axis(a, np.argsort(a, axis=1), axis=1)",
+        "expected": "array([[10, 20, 30],\n       [40, 50, 60]])\n"
+      },
+      {
+        "code": "a = np.array([[10, 30, 20], [60, 40, 50]])\nnp.take_along_axis(a, np.argmax(a, axis=1, keepdims=True), axis=1)",
+        "expected": "array([[30],\n       [60]])\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
     "name": "numpy.lexsort",
     "kind": "function",
     "signature": "(keys)",

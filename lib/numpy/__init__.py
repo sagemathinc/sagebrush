@@ -2239,6 +2239,32 @@ def take(a, indices, axis=None):
     return a[tuple(idx)]
 
 
+def _make_along_axis_idx(arr_shape, indices, axis):
+    # (as NumPy's: the indices at the axis, and along every other axis an arange shaped to broadcast against them)
+    if not issubdtype(indices.dtype, integer):
+        raise IndexError("`indices` must be an integer array")
+    if len(arr_shape) != indices.ndim:
+        raise ValueError("`indices` and `arr` must have the same number of dimensions")
+    ones = (1,) * indices.ndim
+    idx = []
+    for dim, n in enumerate(arr_shape):
+        idx.append(indices if dim == axis else arange(n).reshape(ones[:dim] + (-1,) + ones[dim + 1:]))
+    return tuple(idx)
+
+
+def take_along_axis(arr, indices, axis=-1):
+    """Values of arr at indices along an axis: indices has arr's number of dimensions, and broadcasts against it
+    on every other axis (as argsort's or argmax(keepdims=True)'s result does); axis None takes from arr flattened."""
+    if axis is None:
+        if indices.ndim != 1:
+            raise ValueError("when axis=None, `indices` must have a single dimension.")
+        arr = array(arr.flat)
+        axis = 0
+    else:
+        axis = _normalize_axis_index(axis, arr.ndim)
+    return arr[_make_along_axis_idx(arr.shape, indices, axis)]
+
+
 def repeat(a, repeats, axis=None):
     a = asarray(a)
     if axis is None:
