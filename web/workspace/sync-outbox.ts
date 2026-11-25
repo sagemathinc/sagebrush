@@ -349,7 +349,9 @@ export class Outbox {
           // (the person's "delete old versions" (e2e PR 5d): the history of the files there, as this device verified it,
           // released by release records; none without the index's references (a plaintext account's ledger is empty))
           // (one that named only some versions: those are this device's own, which name no add; nothing released)
-          if (o.op === "dropVersions" && !o.partial) {
+          // (a request asked in another sync namespace (another server generation, after a purge and turning sync on
+          // again, or another account): its view is that log's, never this one's, so it releases nothing here)
+          if (o.op === "dropVersions" && !o.partial && o.viewNs === this.ns) {
             // (not before the verified index has this device's own ops: none still in the outbox, and the index's cursor
             // past the newest confirmed; the op waits here, scanned on a later run, so its history is the one the person saw)
             const top = ((await req(meta.get(key(this.ns, "confirmedTop")))) as number | undefined) ?? 0;

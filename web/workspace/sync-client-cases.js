@@ -5423,6 +5423,48 @@ async function releaseBacklog() {
   }
 }
 
+async function releaseGeneration() {
+  // (a request's view is its namespace's: after "Delete my synced data" and sync on again (a new server generation, seqs
+  // from 1 again), a request asked in the old one releases nothing in the new one, though the new one's adds have seqs
+  // within its old view; a request asked in the new one releases its own history as usual)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const wa = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "release generation: A synced");
+  await threeAdds(id, wa, a, "/g.txt");
+  const ns1 = nsOf(a), view1 = await metaGet(wa.ws, `sync:${ns1}:cursor`), gen1 = Number(ns1.split(":")[1]);
+  await stop(a);
+  const del = await post("/api/sync/v1/delete", { confirm: "delete", generation: gen1 });
+  check(del.status === 202, "(release generation: the synced data deleted)");
+  check((await post("/api/sync/v1/enable", {})).ok, "(release generation: sync on again)");
+  const a2 = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a2) && nsOf(a2) !== ns1, 20_000), "release generation: A synced in the new generation: " + J({ ns: nsOf(a2), status: a2.status }));
+  // (the file adopted into the new generation first, then two writes, each settled)
+  check(await until(async () => settled(wa, a2) && (await refRows(id)).length >= 1, 15_000), "(release generation: the file adopted into the new generation)");
+  await wa.write("/g.txt", "four");
+  check(await until(async () => settled(wa, a2) && (await refRows(id)).length >= 2, 15_000), "(release generation: a write in the new generation)");
+  await wa.write("/g.txt", "five");
+  check(await until(async () => settled(wa, a2) && (await refRows(id)).length >= 3, 15_000), "(release generation: another)");
+  const rows0 = await refRows(id);
+  check(rows0.length >= 2 && rows0.some(([, sq]) => sq <= view1), "(release generation: the new generation's adds have seqs within the old view): " + J({ rows0, view1, refused: await metaGet(wa.ws, `sync:${nsOf(a2)}:refused`), debug: a2.debug(), stats: { opsSent: a2.stats.opsSent, puts: a2.stats.puts }, entry: await wa.stat("/g.txt") }));
+  // (the old generation's request, as it would be if asked before the switch and scanned after it)
+  await new Promise((ok, no) => {
+    const tx = wa.ws.transaction("ops", "readwrite");
+    tx.objectStore("ops").add({ t: Date.now(), device: wa.device, by: "person", op: "dropVersions", path: "/g.txt", kind: "file", view: view1, viewNs: ns1 });
+    tx.oncomplete = ok;
+    tx.onerror = () => no(tx.error);
+  });
+  await wa.mkdir("/g-after");
+  check(await until(async () => settled(wa, a2) && !!(await wa.stat("/g-after")), 15_000), "(release generation: the op after it sent)");
+  await sleep(500);
+  check((await refRows(id)).every(([, , rel]) => rel === null), "release generation: the old generation's request released nothing in the new one: " + J(await refRows(id)));
+  // (and one asked now releases this generation's history)
+  await wa.dropVersions("/g.txt");
+  check(await until(async () => (await refRows(id)).some(([, , rel]) => rel !== null), 15_000) && a2.debug().halted === undefined, "release generation: a request asked in the new generation releases its history: " + J(await refRows(id)));
+  await stop(a2);
+}
+
 async function releaseCurrent() {
   // (a current device signs a release of a live file's current bytes: the server takes it (it can't see which bytes
   // are current); every device's check of that release stops there, nothing of it kept, after a reload too)
@@ -5688,7 +5730,7 @@ async function releaseRoom() {
   await stop(b);
 }
 
-const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained, releasePlaintext, releaseRetry, releaseRoom, releaseHistoryEarly, releaseHistoryView, releaseBacklog };
+const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained, releasePlaintext, releaseRetry, releaseRoom, releaseHistoryEarly, releaseHistoryView, releaseBacklog, releaseGeneration };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

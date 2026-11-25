@@ -124,6 +124,8 @@ export type Op = {
   /** (dropVersions) what the person saw when asking (e2e PR 5d): the verified index's cursor then, and the files in its
    * scope by identity (none: every file) */
   view?: number; fids?: string[];
+  /** (dropVersions) the sync namespace `view` was read in (its account and server generation): another's releases nothing */
+  viewNs?: string;
 };
 /** An entry's identity (design/sync-client.md §3): a data file's or folder's fid, a document's ref; undefined
  * where it has none yet (a folder or file from before ids were kept, until the migrator gives it one). */
@@ -2316,7 +2318,7 @@ export class Workspace {
       await inTx(this.ws, withSync("ops"), "readwrite", async (tx) => {
         const meta = tx.objectStore("meta"), cur = (await req(meta.get("sync:current"))) as { ns?: string } | undefined;
         const view = cur?.ns ? (((await req(meta.get(`sync:${cur.ns}:cursor`))) as number | undefined) ?? 0) : 0;
-        await this.log(tx, ops, { op: "dropVersions", path: q, kind, view, ...(fids ? { fids } : {}), ...(keep > 0 ? { keep } : {}), ...(only ? { partial: true as const } : {}) });
+        await this.log(tx, ops, { op: "dropVersions", path: q, kind, view, ...(cur?.ns ? { viewNs: cur.ns } : {}), ...(fids ? { fids } : {}), ...(keep > 0 ? { keep } : {}), ...(only ? { partial: true as const } : {}) });
       });
       this.tell({ ops });
       return freed;
