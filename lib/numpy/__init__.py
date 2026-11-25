@@ -779,10 +779,6 @@ def _one_out(out):
     return out
 
 
-def _shape_text(shape):
-    return "(%s)" % (", ".join(str(n) for n in shape) + ("," if len(shape) == 1 else ""))
-
-
 class ufunc:
     def __init__(self, name, nin, op=None, identity=None):
         self.__name__ = name
@@ -1496,7 +1492,8 @@ def nanmedian(a, axis=None, out=None, overwrite_input=False, keepdims=False):
 
 
 def quantile(a, q, axis=None, out=None, overwrite_input=False, method="linear", keepdims=False):
-    return _quantile(a, asarray(q), type(q) in (int, float), axis, method, keepdims, "Quantiles must be in the range [0, 1]")
+    return _quantile(a, asarray(q), type(q) in (int, float), axis, method, keepdims, "Quantiles must be in the range [0, 1]",
+                     out)
 
 
 # (NumPy's method names, in its order (its error message lists them), and each continuous method's virtual index:
@@ -1518,7 +1515,7 @@ def _quantile_virtual_index(method, n, q):
     return n * q + (alpha + q * (1 - alpha - beta)) - 1
 
 
-def _quantile(a, qa, weak_q, axis, method, keepdims, out_of_range):
+def _quantile(a, qa, weak_q, axis, method, keepdims, out_of_range, out=None):
     # (NumPy's _quantile, step for step, so the result's dtype and bits are NumPy's: the virtual index (n-1)*q in q's
     # own dtype (a float32 q gives a float32 index, #1866), gamma its fractional part in that dtype (a Python float when
     # q was a Python int or float: weak, so float32 data stays float32), method="midpoint"'s gamma 0 where the index is
@@ -1539,6 +1536,28 @@ def _quantile(a, qa, weak_q, axis, method, keepdims, out_of_range):
     # an empty one so refused, with min's error; a short 1-d q one value at a time, below)
     if qa.ndim != 1 or qa.size >= 10:
         qa.min()
+    # (out=, #2046: NumPy's _ureduce indexes it to drop the dimensions keepdims keeps, writes the result there and returns
+    # out itself; the methods that take elements write as np.take does, the others as _lerp's ufuncs do)
+    # (written through an index rather than a view: out[..., 0] with no slice left is a 0-d array in NumPy; ox is the
+    # array written, ix its index, ov what is there now)
+    takes = method in ("inverted_cdf", "closest_observation", "lower", "higher", "nearest") or (
+        method == "linear" and qa.dtype.kind in "iub")
+    ox, ix, ov, odt = out, Ellipsis, out, None
+    if out is not None:
+        if keepdims:
+            ix = (Ellipsis,) + ((0,) * nd if all_axes else tuple(0 if i == axis % nd else slice(None) for i in range(nd)))
+            out[ix]  # (indexed first, as _ureduce indexes it: a tuple or list refuses that itself)
+        elif not takes and isinstance(out, tuple):
+            # (the ufuncs' out= as a tuple: one entry, an array, or None for a new result, which is computed and the
+            # tuple returned, as NumPy returns out)
+            if len(out) != 1:
+                raise ValueError("The 'out' tuple must have exactly one entry per ufunc output")
+            if out[0] is None:
+                _quantile(a, qa, weak_q, -1 if all_axes else axis, method, False, out_of_range)
+                return out
+            ox = out[0]
+        if isinstance(ox, ndarray):
+            ov, odt = asarray(ox[ix]), ox.dtype
     if qa.size == 0:
         # (an empty q: an empty result, of the dtype a q of its dtype gives, its shape q's then the data's but the
         # reduced axis)
@@ -1548,8 +1567,11 @@ def _quantile(a, qa, weak_q, axis, method, keepdims, out_of_range):
             raise IndexError("index -1 is out of bounds for axis 0 with size 0")
         dt = _quantile(zeros(1, dtype=s.dtype), zeros(1, dtype=qa.dtype), weak_q, -1, method, False, out_of_range).dtype
         res = empty(qa.shape + s.shape[:-1], dtype=dt)
+        if out is not None:
+            _quantile_out_check(res.shape, res.dtype, ox, ov, takes)
+            return out
         return _quantile_keepdims(res, qa, nd, all_axes, axis, keepdims)
-    vals = []
+    vals, ovals = [], []
     for qq in qa.ravel():
         if not (0 <= qq <= 1):
             raise ValueError(out_of_range)
@@ -1596,16 +1618,62 @@ def _quantile(a, qa, weak_q, axis, method, keepdims, out_of_range):
         else:
             w, w1 = gamma, 1 - gamma
         vals.append(nxt - diff_b_a * w1 if gamma >= 0.5 else prev + diff_b_a * w)  # NumPy's _lerp
+        if odt is not None and odt.kind in "fc":
+            # (into out, NumPy's _lerp adds into out, then subtracts where gamma >= 1/2 with dtype=out's dtype: that
+            # subtraction is in out's dtype, its operands converted to it first)
+            ovals.append(asarray(nxt).astype(odt) - asarray(diff_b_a * w1).astype(odt) if gamma >= 0.5 else vals[-1])
+        # (an out of another kind is refused below, as _lerp's add refuses it)
     res = array(vals) if qa.ndim else asarray(vals[0])
     if qa.ndim:
         res = res.reshape(qa.shape + res.shape[1:])
     # (a slice with a NaN: NumPy's result there is that slice's last sorted element, the NaN, #1909; a 0-d result is
     # that element itself, in the data's dtype; an empty q has no result to fill)
+    if out is not None:
+        _quantile_out_check(res.shape, res.dtype, ox, ov, takes)
+        # (a slice with a NaN: NumPy copies its last sorted element, the NaN, into out, by np.copyto's same-kind rule; an
+        # out that can't hold it is refused, here before anything is written)
+        nans = asarray(isnan(s[..., -1])) if s.dtype.kind == "f" and res.size else None
+        if nans is not None and nans.any() and odt.kind not in "fc":
+            raise TypeError("Cannot cast array data from dtype('%s') to dtype('%s') according to the rule 'same_kind'"
+                            % (s.dtype.name, odt.name))
+        if takes:
+            ox[ix] = res  # (as np.take writes: any conversion)
+        else:
+            ores = array(ovals) if qa.ndim else asarray(ovals[0])
+            ox[ix] = ores.reshape(res.shape) if qa.ndim else ores
+        if nans is not None and nans.any():
+            ox[ix] = where(nans, s[..., -1], asarray(ox[ix]))
+        return out
     if s.dtype.kind == "f" and res.size:
         nans = asarray(isnan(s[..., -1]))
         if nans.any():
             res = asarray(s[..., -1]) if res.ndim == 0 else where(nans, s[..., -1], res).astype(res.dtype)
     return _quantile_keepdims(res, qa, nd, all_axes, axis, keepdims)
+
+
+def _quantile_out_check(shape, dt, ox, ov, takes):
+    # (NumPy's own refusals of an out, in its order: np.take wants an array of exactly the result's shape and converts
+    # anything into it; _lerp's add wants an array its float result can be cast to by the same-kind rule, and a shape
+    # the result broadcasts to)
+    if takes:
+        if not isinstance(ox, ndarray):
+            raise TypeError("output must be an array")
+        if ov.shape != tuple(shape):
+            raise ValueError("output array does not match result of ndarray.take")
+        return
+    if not isinstance(ox, ndarray):
+        raise TypeError("return arrays must be of ArrayType")
+    if ov.dtype.kind not in "fc":
+        raise TypeError("Cannot cast ufunc 'add' output from dtype('%s') to dtype('%s') with casting rule 'same_kind'"
+                        % (dt.name, ov.dtype.name))
+    try:
+        b = broadcast_shapes(tuple(shape), ov.shape)
+    except ValueError:
+        raise ValueError("operands could not be broadcast together with shapes %s %s %s "
+                         % (_shape_text(shape), _shape_text(shape), _shape_text(ov.shape))) from None
+    if b != ov.shape:
+        raise ValueError("non-broadcastable output operand with shape %s doesn't match the broadcast shape %s"
+                         % (_shape_text(ov.shape), _shape_text(b)))
 
 
 def _quantile_keepdims(res, qa, nd, all_axes, axis, keepdims):
@@ -1620,7 +1688,7 @@ def _quantile_keepdims(res, qa, nd, all_axes, axis, keepdims):
 def percentile(a, q, axis=None, out=None, overwrite_input=False, method="linear", keepdims=False):
     # (q/100 as NumPy divides it, in q's dtype; a Python int or float q stays weak, so float32 data stays float32)
     return _quantile(a, true_divide(asarray(q), 100), type(q) in (int, float), axis, method, keepdims,
-                     "Percentiles must be in the range [0, 100]")
+                     "Percentiles must be in the range [0, 100]", out)
 
 
 def average(a, axis=None, weights=None, returned=False, *, keepdims=False):
