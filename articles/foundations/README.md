@@ -34,11 +34,10 @@ LGPL and GPL libraries they replace.
 | big-integer gcd at 8 million bits | GMP | 4.8× its time (our half-gcd; dashu alone: 21×) |
 | exact matrices over $\mathbb{Z}$ and $\mathbb{Z}/p$ | FLINT 3.6 | 1.1–5× its time; inverse over $\mathbb{Z}$ 4–6× faster |
 | polynomial arithmetic over $\mathbb{Z}$ | FLINT 3.6 | 1–5× its time |
-| factoring in $\mathbb{Z}[x]$ | FLINT 3.6 | identical results; usually comparable, about 20× slower on a hard Hecke polynomial (0.23 s against 0.01 s) |
+| factoring in $\mathbb{Z}[x]$ | FLINT 3.6 | identical results; usually comparable, about 20× slower on a hard Hecke polynomial (0.23 s against 0.01 s) before van Hoeij's recombination was added |
 
-The worst cases are named in the articles, with what would close them:
-faster big-integer division, and van Hoeij's recombination for
-factoring.
+The worst cases are named in the articles, with what would close them,
+such as faster big-integer division.
 
 1. [Big integers](01-big-integers.md): choosing dashu by measurement, a
    subquadratic gcd, NTT multiplication, and WebAssembly.
