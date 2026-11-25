@@ -1815,7 +1815,7 @@
    "pyjs_driver": "numpy_case.py",
    "variants": 3,
    "variants_note": "three input pairs: every variant's operands stay in memory, and the largest calibration size is 2048",
-   "route_note": "NumPy's A @ B through the CLI, which takes the engine's wasm GEMM on its thread pool for n >= 256; the pool's size follows the CPUs the process may use, so every 1-thread column is pinned to one CPU (threads_by_affinity); entries integers |x| <= 1024, so every product is exact in f64 and the signature is exact; the reference is NumPy with OpenBLAS, OPENBLAS_NUM_THREADS matched",
+   "route_note": "NumPy's A @ B through the CLI, which takes the engine's wasm GEMM on its thread pool for n >= 256; the pool's size follows the CPUs the process may use, so every 1-thread column is pinned to one CPU (threads_by_affinity); entries integers |x| <= 1024, so every product is exact in f64 and the signature is exact; the reference is NumPy with OpenBLAS, OPENBLAS_NUM_THREADS matched; the CLI's pool has at most 8 helpers, so 9 workers whatever the CPUs (blas gets the column's N): each timed user run records the workers its products ran on (pool); its calibration points carry user times only, with no units (no native column), so the fits skip them for the unit-cost terms",
    "parallel": true,
    "sweep": "cores",
    "threads_by_affinity": true,

@@ -1122,6 +1122,9 @@ def wants_vtime(backend: str, row: dict) -> bool:
     )
 
 
+POOL_LINE = re.compile(r"^POOL\|(.*)$", re.M)
+
+
 def invoke(
     backend: str,
     row: dict,
@@ -1142,11 +1145,12 @@ def invoke(
         if mode in ("time", "time-fresh") and wants_vtime(backend, row)
         else None
     )
-    pinned = cpus is None and row.get("threads_by_affinity") and not backend.endswith("-n")
+    pinned = cpus is None and bool(row.get("threads_by_affinity"))
     if pinned:
         # (code that sizes its own threads from the CPUs it may use, the CLI's
-        # pool: a 1-thread column must be one CPU to be one thread; recorded)
-        cpus = [min(os.sched_getaffinity(0))]
+        # pool: a 1-thread column must be one CPU to be one thread, and an
+        # -n column its THREADS CPUs, the first ones; recorded)
+        cpus = sorted(os.sched_getaffinity(0))[: THREADS if backend.endswith("-n") else 1]
     threads = len(cpus) if cpus else (THREADS if backend.endswith("-n") else 1)
     r = run_child(cmd, timeout, threads, CAP, extra, cpus)
     if pinned:
@@ -1159,6 +1163,19 @@ def invoke(
         r["status"] = "error"
     if r["status"] != "ok":
         r["detail"] = text[-600:]
+        return r
+    # (numpy_case.py under the CLI: the pool's record, the workers every
+    # product since its readiness gate ran on, apart from the CPUs; a timed
+    # user run of a threads_by_affinity row must have it)
+    pools = POOL_LINE.findall(text)
+    if pools:
+        try:
+            r["pool"] = json.loads(pools[-1])
+        except ValueError:
+            r["status"], r["detail"] = "error", "malformed POOL line: " + pools[-1][:200]
+            return r
+    elif row.get("threads_by_affinity") and BASE.get(backend, backend) == "user" and mode.startswith("time"):
+        r["status"], r["detail"] = "error", "no POOL record (the pool's readiness gate didn't run)"
         return r
     kind, fields = found[-1]
     parts = fields.split("|")
@@ -1739,7 +1756,10 @@ def summary(out: Path, items: dict) -> None:
                         cells.append(f"{label}: {t.get('status')}")
                     else:
                         up = f" ({one / sec:.2f}x)" if one else ""
-                        cells.append(f"{label}: {secs(sec)}{up}")
+                        # (the CLI pool's workers, when its record says: at
+                        # most 9, whatever the column's CPUs)
+                        w = (t.get("pool") or {}).get("threads")
+                        cells.append(f"{label}: {secs(sec)}{up}" + (f" [{w} workers]" if w else ""))
                 lines.append(f"- **{r['row']}** {r['size']} (n={r['n']}) {b}: " + "; ".join(cells))
     uncovered = [i for i in items.values() if i["status"] != "rows"]
     lines += ["", "## Items without rows", ""] + [

@@ -2097,6 +2097,30 @@ class Gemm(unittest.TestCase):
         rec, _ = self.point(self.GEMM, "s", {"user": 3.0, "blas": 1.5, "blas-n": 0.5})
         self.assertEqual((rec["best_ref"]["backend"], rec["ratio_user"]), ("blas", 2.0))
 
+    def test_the_pool_record(self):
+        # (a timed user run of a threads_by_affinity row: its POOL line
+        # recorded, required, and well-formed; the blas column has none)
+        time_line = "TIME|0.5|3:1|0.4|0.6|3|5"
+        pool = '{"products": {"9": 18}, "state": "ready", "threads": 9, "waited": 0.001, "want": 9}'
+
+        def go(backend, lines):
+            cmd = [PY, "-c", "print(%r)" % "\n".join(lines)]
+            with (
+                mock.patch.object(run, "command", lambda b, row, n, mode, k=1: cmd),
+                mock.patch.object(run, "CAP", None),
+            ):
+                return run.invoke(backend, self.GEMM, 256, "time", 30, 3, [0])
+
+        r = go("user-n", [time_line, "POOL|" + pool])
+        self.assertEqual((r["status"], r["pool"]["threads"], r["pool"]["want"]), ("ok", 9, 9))
+        r = go("user-n", [time_line])
+        self.assertEqual(r["status"], "error")
+        self.assertIn("no POOL record", r["detail"])
+        r = go("user", [time_line, "POOL|{not json"])
+        self.assertEqual(r["status"], "error")
+        self.assertIn("malformed POOL", r["detail"])
+        self.assertEqual(go("blas-n", [time_line])["status"], "ok")
+
     def test_threads_by_affinity_pins_the_one_thread_columns(self):
         got = []
 
@@ -2117,7 +2141,8 @@ class Gemm(unittest.TestCase):
             run.invoke("user-n", self.GEMM, 256, "inputs", 30)
             run.invoke("user", self.GEMM, 256, "inputs", 30, 1, [0, 1])
             run.invoke("user", ROW, 256, "inputs", 30)
-        self.assertEqual(got, [(1, [first]), (1, [first]), (run.THREADS, None), (2, [0, 1]), (1, None)])
+        n_cpus = sorted(os.sched_getaffinity(0))[: run.THREADS]
+        self.assertEqual(got, [(1, [first]), (1, [first]), (len(n_cpus), n_cpus), (2, [0, 1]), (1, None)])
 
 
 if __name__ == "__main__":

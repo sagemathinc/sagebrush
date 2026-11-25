@@ -1109,61 +1109,6 @@
    "variants": 8,
    "input_hash": "961238924"
   },
-  "mat_f64_gemm:c0": {
-   "input_hash": "808427466",
-   "n": 256,
-   "variants": 3
-  },
-  "mat_f64_gemm:c1": {
-   "input_hash": "612007824",
-   "n": 431,
-   "variants": 3
-  },
-  "mat_f64_gemm:c2": {
-   "input_hash": "372645973",
-   "n": 724,
-   "variants": 3
-  },
-  "mat_f64_gemm:c3": {
-   "input_hash": "422724287",
-   "n": 1218,
-   "variants": 3
-  },
-  "mat_f64_gemm:c4": {
-   "input_hash": "710808244",
-   "n": 2048,
-   "variants": 3
-  },
-  "mat_f64_gemm:l": {
-   "input_hash": "958782254",
-   "n": 1024,
-   "variants": 3
-  },
-  "mat_f64_gemm:m": {
-   "input_hash": "969849010",
-   "n": 512,
-   "variants": 3
-  },
-  "mat_f64_gemm:s": {
-   "input_hash": "808427466",
-   "n": 256,
-   "variants": 3
-  },
-  "mat_f64_gemm_bits:l": {
-   "input_hash": "958782254",
-   "n": 1024,
-   "variants": 3
-  },
-  "mat_f64_gemm_bits:m": {
-   "input_hash": "969849010",
-   "n": 512,
-   "variants": 3
-  },
-  "mat_f64_gemm_bits:s": {
-   "input_hash": "808427466",
-   "n": 256,
-   "variants": 3
-  },
   "mat_fp31_mul:c0": {
    "input_hash": "354451338",
    "n": 128,
@@ -1273,6 +1218,61 @@
    "input_hash": "954314665",
    "n": 200,
    "variants": 8
+  },
+  "mat_f64_gemm:c0": {
+   "input_hash": "816724007",
+   "n": 256,
+   "variants": 3
+  },
+  "mat_f64_gemm:c1": {
+   "input_hash": "772072943",
+   "n": 431,
+   "variants": 3
+  },
+  "mat_f64_gemm:c2": {
+   "input_hash": "475320599",
+   "n": 724,
+   "variants": 3
+  },
+  "mat_f64_gemm:c3": {
+   "input_hash": "307747744",
+   "n": 1218,
+   "variants": 3
+  },
+  "mat_f64_gemm:c4": {
+   "input_hash": "422027546",
+   "n": 2048,
+   "variants": 3
+  },
+  "mat_f64_gemm:l": {
+   "input_hash": "850500125",
+   "n": 1024,
+   "variants": 3
+  },
+  "mat_f64_gemm:m": {
+   "input_hash": "976202449",
+   "n": 512,
+   "variants": 3
+  },
+  "mat_f64_gemm:s": {
+   "input_hash": "816724007",
+   "n": 256,
+   "variants": 3
+  },
+  "mat_f64_gemm_bits:l": {
+   "input_hash": "495685133",
+   "n": 1024,
+   "variants": 3
+  },
+  "mat_f64_gemm_bits:m": {
+   "input_hash": "341525827",
+   "n": 512,
+   "variants": 3
+  },
+  "mat_f64_gemm_bits:s": {
+   "input_hash": "868737186",
+   "n": 256,
+   "variants": 3
   }
  }
 }

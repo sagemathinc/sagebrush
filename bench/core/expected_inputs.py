@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import struct
 import sys
+import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -159,11 +161,30 @@ def gemm_entries(size: int, v: int, salt: int) -> list[list[int]]:
     return [[((i * size + j) * 2654435761 + c) % 2049 - 1024 for j in range(size)] for i in range(size)]
 
 
-def gemm_operands(size: int, v: int) -> list[int]:
-    """The gemm rows' operands: n, v, A's row sums, B's column sums (both
-    rows hash the integer operands; the bits row maps them after)."""
+def gemm_digest(m: list[list], fmt: str = "q") -> int:
+    """Every entry of a matrix: the CRC-32 and the Adler-32 (zlib's) of its
+    entries as little-endian int64 (fmt "q") or float64 bits ("d"),
+    row-major, as one 64-bit integer (drivers/numpy_case.py's digest)."""
+    flat = [x for r in m for x in r]
+    data = struct.pack("<%d%s" % (len(flat), fmt), *flat)
+    return zlib.crc32(data) << 32 | zlib.adler32(data)
+
+
+def gemm_bits_map(m: list[list[int]]) -> list[list[float]]:
+    """mat_f64_gemm_bits' entries: x / 1024 + 1/3 in float64 (x / 1024 is
+    exact; the sum rounds once, to nearest even)."""
+    third = 1.0 / 3.0
+    return [[x / 1024.0 + third for x in r] for r in m]
+
+
+def gemm_operands(row: str, size: int, v: int) -> list[int]:
+    """The gemm rows' operands: n, v and a digest of every entry of A and of
+    B; for the bits row also the digests of the mapped matrices' bits."""
     a, b = gemm_entries(size, v, 12345), gemm_entries(size, v, 54321)
-    return [size, v] + [sum(r) for r in a] + [sum(col) for col in zip(*b)]
+    out = [size, v, gemm_digest(a), gemm_digest(b)]
+    if row == "mat_f64_gemm_bits":
+        out += [gemm_digest(gemm_bits_map(a), "d"), gemm_digest(gemm_bits_map(b), "d")]
+    return out
 
 
 def det_entries(kind: str, size: int, v: int) -> list[int]:
@@ -474,7 +495,7 @@ def operands(row: str, n: int, v: int) -> list[int]:
     if row.startswith("mat_") and "_rank_" in row:
         return rank_entries(row, n, v)
     if row in ("mat_f64_gemm", "mat_f64_gemm_bits"):
-        return gemm_operands(n, v)
+        return gemm_operands(row, n, v)
     if row.startswith("mat_"):
         kind = row.split("_")[1]
         entries = det_entries(kind, n, v)
