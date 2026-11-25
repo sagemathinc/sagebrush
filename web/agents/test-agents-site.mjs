@@ -12,13 +12,16 @@ const web = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const fails = [];
 const ok = (c, what) => (console.log(`${c ? "ok  " : "FAIL"} ${what}`), c || fails.push(what));
 
-const FILES = ["agents.js", "connect.md", "connect/copy.js", "connect/index.html", "index.html"];
+const FILES = ["agents.js", "connect.md", "connect/copy.js", "connect/index.html", "fleet/fleet.js", "fleet/index.html", "index.html"];
 // (a directory's files, as paths under it, sorted)
 const walk = (dir, rel = "") => existsSync(join(dir, rel)) ? readdirSync(join(dir, rel), { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(dir, rel + e.name + "/") : [rel + e.name]).sort() : [];
 const dist = join(web, "dist", "agents");
 ok(existsSync(dist) && FILES.every((f) => existsSync(join(dist, f)) && statSync(join(dist, f)).size > 0), "the default build (no flags) built the Agents page: dist/agents/index.html and agents.js, and connect/index.html");
 const html = existsSync(join(dist, "index.html")) ? readFileSync(join(dist, "index.html"), "utf8") : "";
 ok(/<script[^>]+src="\/agents\/agents\.js"/.test(html), "its page loads its own script, /agents/agents.js");
+// (and the fleet pages, /agents/fleet/: a page and a script of their own, so none of the fleet code loads elsewhere)
+const fleetHtml = existsSync(join(dist, "fleet", "index.html")) ? readFileSync(join(dist, "fleet", "index.html"), "utf8") : "";
+ok(/<script[^>]+src="\/agents\/fleet\/fleet\.js"/.test(fleetHtml) && !/agents\.js"/.test(fleetHtml.replace(/fleet\.js"/g, "")), "the fleet page loads its own script, /agents/fleet/fleet.js, and not the Agents page's");
 ok(/<a href="\/agents\/connect\/">/.test(html), "its help box links to \"How to connect your agent\", /agents/connect/ (a directory's index: served without .html on every host)");
 // (the help box and the connect page name one sagebrush-agent release, the same one, with the same sha256: a new
 // release changes the URL, the sha and every "sagebrush-agent X.Y.Z" mention together, in both pages)
