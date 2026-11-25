@@ -305,6 +305,29 @@ export function checkTransferForHost(pair, host) {
   return { first: true };
 }
 
+// ---- the old host's fence acknowledgement (r2.4 §3.7.4)
+
+/**
+ * §3.7.4, the service's check of a fence acknowledgement's envelope: its form, fleet and aud, and the signature by the
+ * old host's certified key (the signer is that host, its key id the certificate's, and the body names the same host).
+ * ctx: { aud, fleet, cert }, where cert is verifyHostCert's result for the host's pairing. Whether it answers a transfer
+ * the service applied, at the old host's last generation, after the apply, and for the first time, is the service's
+ * own serialized decision (it holds that state), not this check. Returns { body, hash } (hash: of its signed bytes).
+ */
+export async function verifyFenceAck(bytes, ctx) {
+  const env = await open(bytes, {
+    aud: ctx.aud, fleet: ctx.fleet,
+    resolveKey: async (signer, t, body) => {
+      if (t !== "sb.agent-fence-ack.v1") refuse("bad_form", "another type");
+      bodyValidator("agent-fence-ack")(body);
+      if (signer.kind !== "host" || signer.id !== ctx.cert.body.host || body.host !== signer.id) refuse("bad_signature");
+      if (signer.key !== (await keyId("ed25519", ctx.cert.signRaw))) refuse("bad_signature", "not the certified host key");
+      return ctx.cert.signRaw;
+    },
+  });
+  return { body: env.body, hash: await sha256b64(env.signed) };
+}
+
 // ---- execution-lease renewal (r2.5 §3.8)
 
 /**

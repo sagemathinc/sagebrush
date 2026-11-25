@@ -67,7 +67,14 @@ export function openTarget(f) {
   return `${ROUTE}?${QUERY.map((k) => `${k}=${f[k]}`).join("&")}`;
 }
 
-/** The fields of an open's request target: exactly the route and its seven query fields, in order, each in its form. */
+/**
+ * @typedef {{ role: "host" | "app", fleet: string, session: string, agent: string, browser_gen: number, host_gen: number, resume_n: number }} OpenTarget
+ */
+
+/**
+ * The fields of an open's request target: exactly the route and its seven query fields, in order, each in its form.
+ * @returns {OpenTarget}
+ */
 export function parseOpenTarget(target) {
   if (typeof target !== "string" || target.length > 512 || !target.startsWith(`${ROUTE}?`)) refuse("bad_form", "not the relay's route");
   const parts = target.slice(ROUTE.length + 1).split("&");
@@ -85,7 +92,8 @@ export function parseOpenTarget(target) {
     f[k] = Number(f[k]);
   }
   if (f.browser_gen < 1 || f.host_gen < 1) refuse("bad_form", "generations start at 1");
-  return f;
+  // (typed for a checker reading this file: the fields were built one by one above, each checked in its form)
+  return /** @type {OpenTarget} */ (f);
 }
 
 /** The headers' total size as the first parser counts it (names, values, ": " and CRLF), in UTF-8 bytes. */

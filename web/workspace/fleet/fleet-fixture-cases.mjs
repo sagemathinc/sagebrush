@@ -55,6 +55,17 @@ export async function checkFixtures(core, F) {
       check("leases", c.name, got, c.expect);
     }
   }
+  {
+    const A = F.fence_acks;
+    const ac = await core.replayChain(A.chain.map(enc), ctx);
+    const acert = await core.verifyHostCert(enc(A.host_cert), { ...ctx, chain: ac });
+    for (const c of A.cases) {
+      let h = null;
+      const got = await result(async () => { h = (await core.verifyFenceAck(enc(c.bytes), { ...ctx, cert: acert })).hash; });
+      check("fence_acks", c.name, got, c.expect);
+      if (c.hash) check("fence_acks", `${c.name}: its hash`, h, c.hash);
+    }
+  }
   const O = F.objects;
   const st = await core.replayChain(O.chain.map(enc), ctx);
   const cert = await core.verifyHostCert(enc(O.host_cert), { ...ctx, chain: st });
