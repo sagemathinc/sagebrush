@@ -185,7 +185,12 @@ def column_from(data, dtype=None):
             return CT.column_to_category(data._pd_col, dtype if isinstance(dtype, CT.CategoricalDtype) else None)
         return astype_column(data._pd_col, dtype)
     if CT.is_category(dtype):
-        return CT.column_to_category(column_from(data), dtype if isinstance(dtype, CT.CategoricalDtype) else None)
+        # (categories from the values as given, as pandas infers them: [3, None, 2] has int categories, not the
+        # float ones of the column it would make)
+        cdt = dtype if isinstance(dtype, CT.CategoricalDtype) else None
+        if isinstance(data, (list, tuple, range)):
+            return CT.encode(list(data), cdt)
+        return CT.column_to_category(column_from(data), cdt)
     want = resolve_dtype(dtype)
     from ._pd_index import Index
     if isinstance(data, Index):
@@ -270,8 +275,13 @@ def astype_column(col, dtype):
         # (a category column as another dtype: its values, as the categories' dtype holds them, cast; a missing
         # value to an integer is pandas' error first)
         target = resolve_dtype(dtype)
+        if target == "object":
+            # (the categories' own values, missing as NaN: int categories stay ints)
+            return Column("object", col.tolist())
         if target in INTS and bool(col.isna().any()):
             raise ValueError("Cannot convert float NaN to integer")
+        if (target in INTS or target in FLOATS) and col.dtype.categories.dtype is STR:
+            raise ValueError("Cannot cast str dtype to %s" % target)
         col = col.decoded()
     want = resolve_dtype(dtype)
     d = col.dtype

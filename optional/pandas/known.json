@@ -399,7 +399,17 @@
     {
       "case": "category.float32",
       "message": "pandas: astype('category') of a float32 column is not in Sagebrush's pandas 0.x subset",
-      "reason": "a float32 column as a category isn't in the subset; it raises before any work"
+      "reason": "pandas keeps a float32 column's dtype for its categories, which the subset's Index doesn't hold; it raises before any work"
+    },
+    {
+      "case": "category.int8",
+      "message": "pandas: astype('category') of an int8 column is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas keeps a smaller integer column's dtype (int8, int16, int32, uint8, uint16, uint32) for its categories, which the subset's Index doesn't hold; it raises before any work, rather than give int64 categories"
+    },
+    {
+      "case": "category.datetime",
+      "message": "pandas: astype('category') of a datetime64[us] column is not in Sagebrush's pandas 0.x subset",
+      "reason": "a datetime column as a category (Timestamp categories) isn't in the subset; it raises before any work"
     },
     {
       "case": "compare.series-repeated-labels",

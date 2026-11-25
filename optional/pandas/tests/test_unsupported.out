@@ -334,6 +334,10 @@
 !! NotImplementedError: pandas.Series.cat.add_categories is not in Sagebrush's pandas 0.x subset
 == category.float32
 !! NotImplementedError: pandas: astype('category') of a float32 column is not in Sagebrush's pandas 0.x subset
+== category.int8
+!! NotImplementedError: pandas: astype('category') of an int8 column is not in Sagebrush's pandas 0.x subset
+== category.datetime
+!! NotImplementedError: pandas: astype('category') of a datetime64[us] column is not in Sagebrush's pandas 0.x subset
 == compare.series-repeated-labels
 !! NotImplementedError: pandas.DataFrame.eq with a Series of repeated labels is not in Sagebrush's pandas 0.x subset
 == compare.level

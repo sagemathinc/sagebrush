@@ -494,3 +494,64 @@ max    5.000000
 4  False  False
 == frame-html
 '<div>\n<style scoped>\n    .dataframe tbody tr th:only-of-type {\n        vertical-align: middle;\n    }\n\n    .dataframe tbody tr th {\n        vertical-align: top;\n    }\n\n    .dataframe thead th {\n        text-align: right;\n    }\n</style>\n<table border="1" class="dataframe">\n  <thead>\n    <tr style="text-align: right;">\n      <th></th>\n      <th>k</th>\n      <th>v</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <th>0</th>\n      <td>b</td>\n      <td>1</td>\n    </tr>\n    <tr>\n      <th>1</th>\n      <td>a</td>\n      <td>2</td>\n    </tr>\n    <tr>\n      <th>2</th>\n      <td>NaN</td>\n      <td>3</td>\n    </tr>\n    <tr>\n      <th>3</th>\n      <td>b</td>\n      <td>4</td>\n    </tr>\n    <tr>\n      <th>4</th>\n      <td>c</td>\n      <td>5</td>\n    </tr>\n  </tbody>\n</table>\n</div>'
+== codes-dtype-126
+'int8'
+== codes-dtype-127
+'int16'
+== codes-dtype-128
+'int16'
+== compat-same-eq
+[True, True, False]
+== compat-same-ne-named
+[False, False, True]
+== compat-permuted-eq
+[True, True, False]
+== compat-permuted-ne-named
+[False, False, True]
+== compat-superset-eq
+!! TypeError: Categoricals can only be compared if 'categories' are the same.
+== compat-superset-ne-named
+!! TypeError: Categoricals can only be compared if 'categories' are the same.
+== compat-other-eq
+!! TypeError: Categoricals can only be compared if 'categories' are the same.
+== compat-other-ne-named
+!! TypeError: Categoricals can only be compared if 'categories' are the same.
+== compat-ordered-eq
+!! TypeError: Categoricals can only be compared if 'categories' are the same.
+== compat-ordered-ne-named
+!! TypeError: Categoricals can only be compared if 'categories' are the same.
+== infer-mixed
+([1, 2, 'a', 'b'], [3, 0, 2, 1])
+== infer-int-none
+
+0      3
+1    NaN
+2      2
+dtype: category
+Categories (2, int64): [2, 3]
+== infer-int-none-categories
+Index([2, 3], dtype='int64')
+== infer-int-none-astype
+Index([2.0, 3.0], dtype='float64')
+== dtype-none-eq-defined
+False
+== dtype-none-eq-none
+True
+== recast-ordered
+True
+== recast-unordered
+False
+== bool-vs-int-categories
+[False, False]
+== int-vs-bool-categories
+[False, False]
+== float-vs-int-categories
+[True, False]
+== int-vs-int-categories-ne
+[False, True]
+== int-none-astype-object
+[3, nan, 2]
+== str-astype-float
+!! ValueError: Cannot cast str dtype to float64
+== str-astype-int
+!! ValueError: Cannot cast str dtype to int64

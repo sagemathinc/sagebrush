@@ -5,13 +5,15 @@
   appearance when they don't sort), or the ones given; a value outside them
   is missing;
 - a column holds int codes into the categories, -1 for a missing value, in
-  the smallest signed integer type that fits (int8 below 128 categories);
+  the smallest signed integer type that fits (int8 for fewer than 127
+  categories);
 - a Series prints the values as objects, then the dtype and a line of the
   categories ("Categories (3, str): ['a', 'b', 'c']", at most 8 shown,
   wrapped at display.width).
 
 Only some operations take a category column: indexing and selection, isna,
-== and != (and the order comparisons of an ordered one), astype, unique,
+== and != (order comparisons raise: pandas' TypeError for an unordered
+category, NotImplementedError for an ordered one), astype, unique,
 .cat.categories, .cat.codes and .cat.ordered, tolist and printing. Any other
 operation raises NotImplementedError rather than computing on the codes: a
 category column's values are not readable as an array (CatColumn).
@@ -20,7 +22,7 @@ category column's values are not readable as an array (CatColumn).
 import numpy as np
 
 from ._pd_column import Column, column_from
-from ._pd_dtypes import STR, INTS, FLOATS, is_missing
+from ._pd_dtypes import STR, SMALL_INTS, INTS, FLOATS, is_missing
 
 
 def refuse(what):
@@ -81,7 +83,8 @@ class CategoricalDtype(object):
         if not isinstance(other, CategoricalDtype):
             return False
         if self._pd_categories is None or other._pd_categories is None:
-            return True
+            # (pandas: a dtype without categories equals only another without them)
+            return self._pd_categories is None and other._pd_categories is None
         if self._pd_ordered != other._pd_ordered:
             return False
         if self._pd_ordered:
@@ -169,7 +172,13 @@ def _sorted_unique(values):
     try:
         return sorted(seen)
     except TypeError:
-        return seen
+        # (pandas' safe_sort of mixed values: the non-strings sorted, then the strings sorted)
+        others = [v for v in seen if not isinstance(v, str)]
+        strs = [v for v in seen if isinstance(v, str)]
+        try:
+            return sorted(others) + sorted(strs)
+        except TypeError:
+            return seen
 
 
 def encode(values, dtype=None):
@@ -194,8 +203,9 @@ def column_to_category(col, dtype=None):
                 return CatColumn(CategoricalDtype(col.dtype.categories, dtype.ordered), col._pd_codes.copy())
             return col.copy()
         return encode(col.tolist(), dtype)
-    if col.dtype == "float32":
-        raise refuse("astype('category') of a float32 column")
+    if col.dtype == "float32" or col.dtype in SMALL_INTS:
+        # (pandas keeps the column's own dtype for the categories, which the subset's Index doesn't hold)
+        raise refuse("astype('category') of %s %s column" % ("an" if col.dtype[0] in "aeiou" else "a", col.dtype))
     from ._pd_datetime import DT
     if col.dtype is DT:
         raise refuse("astype('category') of a datetime64[us] column")
@@ -304,6 +314,7 @@ class Categorical(object):
     def __init__(self, values=None, categories=None, ordered=None, dtype=None, fastpath=False, copy=True):
         if fastpath:
             raise refuse("Categorical(fastpath=)")
+        explicit = dtype is not None
         if dtype is not None:
             if isinstance(dtype, str) and dtype == "category":
                 dtype = CategoricalDtype(categories, ordered)
@@ -317,8 +328,9 @@ class Categorical(object):
             values = []
         if isinstance(values, Categorical):
             col = column_to_category(values._pd_col, dtype if dtype.categories is not None else None)
-            if dtype.categories is None and ordered is not None:
-                col = CatColumn(CategoricalDtype(col.dtype.categories, ordered), col._pd_codes)
+            if dtype.categories is None and (explicit or ordered is not None):
+                # (an explicit dtype, or ordered=, sets whether the categories are ordered)
+                col = CatColumn(CategoricalDtype(col.dtype.categories, dtype.ordered), col._pd_codes)
         elif isinstance(values, Series):
             col = column_to_category(values._pd_col, dtype)
         else:
@@ -400,13 +412,40 @@ class CategoricalAccessor(object):
         raise unsupported_name("Series.cat.%s" % name)
 
 
+def _category_position(cats, value):
+    if is_missing(value):
+        return None
+    for k, c in enumerate(cats):
+        if isinstance(c, bool) != isinstance(value, (bool, np.bool_)):
+            continue
+        try:
+            if c == value:
+                return k
+        except TypeError:
+            continue
+    return None
+
+
 def compare(col, right, op):
-    """A category column compared: == and != on the values; the order
-    comparisons only for ordered categories, by position in them."""
+    """A category column compared: == and != on the values; an order
+    comparison raises (pandas' TypeError for an unordered category; an
+    ordered one isn't in the subset yet)."""
     from . import _pd_reduce as R
     if op in ("eq", "ne"):
         if isinstance(right, CatColumn):
+            a, b = col.dtype, right.dtype
+            la, lb = a.categories.tolist(), b.categories.tolist()
+            same = a.ordered == b.ordered and (la == lb if a.ordered else (len(la) == len(lb) and set(la) == set(lb)))
+            if not same:
+                raise TypeError("Categoricals can only be compared if 'categories' are the same.")
             right = right.decoded()
+        elif not isinstance(right, (Column, list, tuple, range, np.ndarray)):
+            # (a scalar is looked up among the categories, as pandas looks it up: by value and type, so True is
+            # not the category 1; then the codes are compared)
+            k = _category_position(col.dtype.categories.tolist(), right)
+            codes = col._pd_codes
+            hit = codes == k if k is not None else np.zeros(len(codes), dtype=bool)
+            return Column("bool", ~hit if op == "ne" else hit)
         return R.compare(col.decoded(), right, op)
     if not col.dtype.ordered:
         raise TypeError("Unordered Categoricals can only compare equality or not")

@@ -104,3 +104,32 @@ case("frame-melt", lambda: df.melt())
 case("frame-drop", lambda: df.drop(columns="v"))
 case("frame-eq", lambda: df == "b")
 case("frame-html", lambda: df._repr_html_())
+case("codes-dtype-126", lambda: str(pd.Series(range(126)).astype("category").cat.codes.dtype))
+case("codes-dtype-127", lambda: str(pd.Series(range(127)).astype("category").cat.codes.dtype))
+case("codes-dtype-128", lambda: str(pd.Series(range(128)).astype("category").cat.codes.dtype))
+
+# compatibility: two categories compare only with the same categories (a set for unordered ones) and ordered flag
+base = pd.Series(["a", "b", None], dtype=pd.CategoricalDtype(["a", "b"]))
+for name, dt in [("same", pd.CategoricalDtype(["a", "b"])), ("permuted", pd.CategoricalDtype(["b", "a"])),
+                 ("superset", pd.CategoricalDtype(["a", "b", "c"])), ("other", pd.CategoricalDtype(["a", "c"])),
+                 ("ordered", pd.CategoricalDtype(["a", "b"], ordered=True))]:
+    other = pd.Series(["a", "b", None], dtype=dt)
+    case("compat-%s-eq" % name, lambda other=other: (base == other).tolist())
+    case("compat-%s-ne-named" % name, lambda other=other: base.ne(other).tolist())
+# inference: mixed values sort numbers before strings; values as given at construction (int categories with None)
+case("infer-mixed", lambda: (pd.Categorical(["b", 1, "a", 2]).categories.tolist(), pd.Categorical(["b", 1, "a", 2]).codes.tolist()))
+case("infer-int-none", lambda: pd.Series([3, None, 2], dtype="category"))
+case("infer-int-none-categories", lambda: pd.Series([3, None, 2], dtype="category").cat.categories)
+case("infer-int-none-astype", lambda: pd.Series([3, None, 2]).astype("category").cat.categories)
+case("dtype-none-eq-defined", lambda: pd.CategoricalDtype() == pd.CategoricalDtype(["a"]))
+case("dtype-none-eq-none", lambda: pd.CategoricalDtype() == pd.CategoricalDtype(ordered=True))
+case("recast-ordered", lambda: pd.Categorical(pd.Categorical(["b", "a"]), dtype=pd.CategoricalDtype(ordered=True)).ordered)
+case("recast-unordered", lambda: pd.Categorical(pd.Categorical(["b", "a"], ordered=True), dtype=pd.CategoricalDtype()).ordered)
+# a scalar looked up by value and type
+case("bool-vs-int-categories", lambda: (pd.Series([1, 0], dtype="category") == True).tolist())
+case("int-vs-bool-categories", lambda: (pd.Series([True, False], dtype="category") == 1).tolist())
+case("float-vs-int-categories", lambda: (pd.Series([1, 0], dtype="category") == 1.0).tolist())
+case("int-vs-int-categories-ne", lambda: (pd.Series([1, 0], dtype="category") != 1).tolist())
+case("int-none-astype-object", lambda: pd.Series([3, None, 2], dtype="category").astype(object).tolist())
+case("str-astype-float", lambda: pd.Series(["a", "b"]).astype("category").astype("float64"))
+case("str-astype-int", lambda: pd.Series(["a", "b"]).astype("category").astype("int64"))
