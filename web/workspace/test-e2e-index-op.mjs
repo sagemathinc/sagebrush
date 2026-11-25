@@ -243,7 +243,7 @@ try {
     const pad = room - J({ adds: [], op: "", prev: null, releases: [] }).length;
     const fit = await P.ev(`(async () => { const env = await e2e.sealIndexOp(await keys(), { device: "d", dseq: 1 }, "x".repeat(${pad}), { prev: null, adds: [], releases: [] }); return { n: env.length, hex: hx(env) }; })()`);
     ok(fit.n === LIMITS.sealedOpBytes, "L-2: the largest op seals to an envelope of exactly the server's limit", fit.n);
-    const form = (() => { try { return checkSealedOp({ dseq: 1, head: "A".repeat(43), env: Buffer.from(unhx(fit.hex)).toString("base64"), adds: [], releases: [], signer: CTX.signer, sig: "A".repeat(86) }).env.length; } catch (e) { return String(e?.message ?? e); } })();
+    const form = (() => { try { return checkSealedOp({ dseq: 1, head: "A".repeat(43), chain_gen: "A".repeat(43), env: Buffer.from(unhx(fit.hex)).toString("base64"), adds: [], releases: [], signer: CTX.signer, sig: "A".repeat(86) }).env.length; } catch (e) { return String(e?.message ?? e); } })();
     ok(form === LIMITS.sealedOpBytes, "L-2: and the server's checkSealedOp takes it", form);
     const over = await P.ev(`code(async () => e2e.sealIndexOp(await keys(), { device: "d", dseq: 1 }, "x".repeat(${pad + 1}), { prev: null, adds: [], releases: [] }))`);
     ok(over === "limit", "L-2: one byte more is refused (limit) before anything is sealed", over);
