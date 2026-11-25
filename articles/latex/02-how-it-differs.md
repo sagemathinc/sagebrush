@@ -16,12 +16,15 @@ How it works inside, and how it is tested against TeX Live:
   TeX installation and no server.
 - Beamer documents as slides, and **Present** to show them full screen,
   step by step.
-- **Print / Save as PDF** from the preview: the browser's print dialog
-  prints the rendered page. There is no TeX-to-PDF compiler.
+- **File ▸ Print or save as PDF…** from the preview: the browser's
+  print dialog prints the rendered page. There is no TeX-to-PDF compiler.
 - SageTeX and PythonTeX code run when you press **Run**: Sage code by
   Sagebrush's own Sage, Python code by its Python.
 - The same preview on the command line, for agents:
   `sagebrush latex check`, `render` and `run` (see [For agents](#for-agents)).
+- **Comments** on the source, kept beside it in `FILE.tex.comments.json`;
+  **Agent** connects an agent on this computer (Claude Code, Codex, …) to
+  read and answer them and edit the `.tex`.
 
 ## Supported
 

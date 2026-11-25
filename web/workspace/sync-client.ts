@@ -299,7 +299,7 @@ export class SyncClient {
   private barriers = new Map<string, number>();
   private answered: string[] = [];
   /** (tests: what the client did) */
-  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0, liveChecks: 0, liveFails: 0, ends: {} as Record<string, number> };
+  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, blobConflicts: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0, liveChecks: 0, liveFails: 0, ends: {} as Record<string, number> };
 
   constructor(readonly w: Workspace, private opts: ClientOptions = {}) {
     this.clock = opts.clock ?? realClock;
@@ -1195,9 +1195,18 @@ export class SyncClient {
     }
   }
 
+  /** The server holds other bytes at an address one of this device's records names (e2e PR 3a): nothing more is sent
+   * on this connection, since an op naming that address would publish those bytes as this file's. */
+  private async blobConflict(c: Conn) {
+    this.stats.blobConflicts++;
+    c.halted = "blob-conflict";
+    this.showWaiting(c, (await c.ob.status()).count);
+  }
+
   private showWaiting(c: Conn, count: number, resumesAt?: number) {
     if (!c.writable) return this.say({ ...this.status, ns: c.ns, waiting: count });
     if (c.halted === "reset-unsupported") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's sync can't continue: the server can't reset its refused changes. Delete my synced data to start again" });
+    if (c.halted === "blob-conflict") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's sync can't continue: the server holds other bytes for one of this device's files. Delete my synced data to start again" });
     if (c.halted === "stuck") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's queue can't continue here: Delete my synced data to start again" });
     if (c.rebuilding) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "rebuilding sync", stuck: true });
     if (c.largeHalt) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: c.largeHalt, stuck: true });
@@ -1217,13 +1226,15 @@ export class SyncClient {
     const files = recs.filter((r) => r.op.kind === "file" && r.op.sha256 !== undefined);
     const known = (sha: string) => c.have.has(sha) || c.final.has(sha) || c.gone.has(sha);
     // (checked: what this connection hasn't asked about, in pages of at most 1,000)
-    const ask: { sha256: string; size: number }[] = [];
+    // (a blob's address and its bytes' SHA-256 are the same here: the bytes are stored as they are, until end-to-end
+    // encryption (design/e2e-encryption.md §3.3), whose addresses are keyed and whose bytes are ciphertext)
+    const ask: { sha256: string; ct_sha256: string; size: number }[] = [];
     const seen = new Set<string>();
     for (const r of files) {
       const sha = r.op.sha256!;
       if (known(sha) || c.missing.has(sha) || seen.has(sha)) continue;
       seen.add(sha);
-      ask.push({ sha256: sha, size: r.op.size ?? 0 });
+      ask.push({ sha256: sha, ct_sha256: sha, size: r.op.size ?? 0 });
     }
     for (let i = 0; i < ask.length && this.conn === c; i += CLIENT.checkItems) {
       // (a check timer, persisted, maybe from before a reload: woken at its end, CORR-PR58-2)
@@ -1243,6 +1254,12 @@ export class SyncClient {
       }
       await this.timerOk(c.ns, "check");
       const missing = new Set(Array.isArray((r.body as { missing?: unknown }).missing) ? ((r.body as { missing: string[] }).missing) : []);
+      // (held as other bytes than these: never "have", so no op naming that address is sent; this connection halts)
+      const conflicts = Array.isArray((r.body as { conflicts?: unknown }).conflicts) ? (r.body as { conflicts: { sha256?: unknown }[] }).conflicts : [];
+      if (conflicts.length) {
+        await this.blobConflict(c);
+        break;
+      }
       for (const b of page) (missing.has(b.sha256) ? c.missing : c.have).add(b.sha256);
     }
     // (uploads: those missing, in the records' order, at most CLIENT.uploadsAtOnce at once)
@@ -1345,7 +1362,7 @@ export class SyncClient {
         this.stats.maxPutsAtOnce = Math.max(this.stats.maxPutsAtOnce, this.stats.putsAtOnce);
         let res;
         try {
-          res = await this.http("PUT", `/api/sync/v1/blob/${r.op.sha256}`, bytes, this.binding(c));
+          res = await this.http("PUT", `/api/sync/v1/blob/${r.op.sha256}`, bytes, { ...this.binding(c), "x-sb-ct-sha256": r.op.sha256! });
         } finally {
           this.stats.putsAtOnce--;
         }
@@ -1366,6 +1383,11 @@ export class SyncClient {
         if (res.status === 409 && (res.code === "readonly" || res.code === "deleting")) {
           c.writable = false;
           this.say({ state: "paused", ns: c.ns, reason: res.code === "readonly" ? "read-only" : "deleting" });
+          return "wait";
+        }
+        // (other bytes held at this address: never "have"; this connection halts, and nothing naming it is sent)
+        if (res.status === 409 && res.code === "conflict" && (res.body as { held?: unknown })?.held !== undefined) {
+          await this.blobConflict(c);
           return "wait";
         }
         if (res.status === 401 || res.status === 403 || (res.status === 409 && res.code === "conflict")) {

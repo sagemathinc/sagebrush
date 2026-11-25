@@ -40,6 +40,14 @@ export async function run(only, skip = []) {
   return out;
 }
 const REAL_AFTER = W.GIT_WAIT_CLOCK.after;
+/** A branch's rows in the meta store, by kind: record, review, runs and hash pages. */
+async function branchRows(w, fid) {
+  const st = w.ws.transaction("meta").objectStore("meta");
+  const keys = await new Promise((ok, no) => { const q = st.getAllKeys(IDBKeyRange.bound("agent-branch", "agent-branch\uffff")); q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error); });
+  const n = (p) => keys.filter((k) => k.startsWith(p)).length;
+  return { record: n(W.BRANCH_KEY + fid), review: n(W.BRANCH_REVIEW_KEY + fid), runs: n(W.BRANCH_RUNS_KEY + fid), pages: n(`${W.BRANCH_HASH_KEY}${fid}:`) };
+}
+const noRows = (c) => c.record + c.review + c.runs + c.pages === 0;
 const REAL_CAP = W.HISTORY_CAP.bytes;
 
 /** Main: a notebook with an output, a text file, a board. */
@@ -58,6 +66,86 @@ function manualClock() {
 }
 
 const CASES = {
+  async restoredBeforeReconcile(check) {
+    // (SEC's H1 ordering: the agent removes its branch, the person restores it from Trash BEFORE any reconcile, then
+    //  the reconcile: the restored folder (the same fid) is a plain folder; the former owner can't write in it, the
+    //  old review handle can't accept into main, and a branch made again under the name has a fresh fid)
+    const w = await fresh("rrb");
+    await smallMain(w);
+    await make(w, "same");
+    await edit(w, B("same/intro.txt"), () => enc("Branch text.\n"));
+    await commit(w, "same", "Old work", true);
+    const old = await at(w, "same");
+    // (a runs row as a finished run leaves it (noteBranchRun, reached only through runHost): put directly)
+    await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); tx.objectStore("meta").put({ seq: 1, runs: [] }, W.BRANCH_RUNS_KEY + old.fid); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    const had = await branchRows(w, old.fid);
+    check(had.record === 1 && had.review === 1 && had.runs === 1 && had.pages > 0, `before: the branch has its record, review, runs and hash pages (${JSON.stringify(had)})`);
+    const gone = await agent(w).remove(B("same"));
+    const removed = await branchRows(w, old.fid);
+    check(noRows(removed), `the removal itself drops them all (${JSON.stringify(removed)})`);
+    const back = await w.restore(gone.path, gone);
+    check(back.path === B("same") && back.fid === old.fid, `the person restores it at once, the same fid (${back.fid})`);
+    const restored = await branchRows(w, old.fid);
+    check(noRows(restored), `restored before any reconcile: none of them come back (${JSON.stringify(restored)})`);
+    await W.withBranchLock(() => w.reconcileBranches("closed"));
+    const after = await branchRows(w, old.fid);
+    check(noRows(after), `after the reconcile: still none (${JSON.stringify(after)})`);
+    check((await w.branchAtName("same"))?.record == null && (await w.branchReview(old.fid, "same"))?.review == null, "after the reconcile: no record, no review state");
+    const e1 = await caught(edit(w, B("same/intro.txt"), () => enc("again\n")));
+    check(e1?.message === RULE.notYours, `the former owner can't write in the restored folder: ${e1?.message}`);
+    const e2 = await caught(W.review(person(w), old, { files: { "/intro.txt": { decision: "accepted" } } }));
+    check(e2?.message === R.moved && dec((await w.read("/intro.txt")).content) === "A long introduction.\n", `the old handle can't accept into main: ${e2?.message}`);
+    const e3 = await caught(make(w, "same"));
+    check(e3 !== null, "the name is a plain folder now, not free for git_branch: " + e3?.message);
+    await w.remove(B("same"));
+    await make(w, "same");
+    check((await fidOf(w, "same")) !== old.fid, "made again once the person removed the plain folder: a fresh fid");
+  },
+
+  async restoredBeforeReconcileLarge(check) {
+    // (the same ordering for a branch large enough to be moved in chunks (D11's largeMove: lowered to 10 here))
+    const was = { ...W.D11 };
+    W.configureD11({ ...W.D11, chunk: 10, page: 10, planPage: 100, validatePage: 10 });
+    try {
+      const w = await fresh("rrbl");
+      for (let i = 0; i < 14; i++) await w.putFile(`/many/f${i}.txt`, enc("x" + i));
+      await make(w, "big");
+      const fid = await fidOf(w, "big");
+      const had = await branchRows(w, fid);
+      const gone = await agent(w).remove(B("big"));
+      const removed = await branchRows(w, fid);
+      check(had.record === 1 && had.pages > 0 && noRows(removed), `the chunked removal drops the record and hash pages (${JSON.stringify(had)} -> ${JSON.stringify(removed)})`);
+      const back = await w.restore(gone.path, gone);
+      await W.withBranchLock(() => w.reconcileBranches("closed"));
+      check(back.fid === fid && (await w.branchAtName("big"))?.record == null && noRows(await branchRows(w, fid)), "a large branch's root: its record goes with the removal; restored, it is a plain folder");
+      const e = await caught(agent(w).write(B("big/many/f0.txt"), enc("again"), { base: (await w.read(B("big/many/f0.txt"))).rev }));
+      check(e?.message === RULE.notYours, `the former owner can't write in it: ${e?.message}`);
+    } finally {
+      W.configureD11(was);
+    }
+  },
+
+  async removedHandle(check) {
+    // (#1803, SEC's row: an old review handle {fid, head, seq} of a branch its agent removed, reconciled and made again
+    //  under the same name, can't accept into main)
+    const w = await fresh("rmh");
+    await smallMain(w);
+    await make(w, "same");
+    await edit(w, B("same/intro.txt"), () => enc("Branch text.\n"));
+    await commit(w, "same", "Old work", true);
+    const old = await at(w, "same");
+    await agent(w).remove(B("same"));
+    await W.withBranchLock(() => w.reconcileBranches("closed"));
+    await make(w, "same");
+    await edit(w, B("same/intro.txt"), () => enc("Branch text.\n"));
+    await commit(w, "same", "New work", true);
+    const now = await at(w, "same");
+    check(now.fid !== old.fid, `the branch made again has a fresh fid (${old.fid} -> ${now.fid})`);
+    const e = await caught(W.review(person(w), old, { files: { "/intro.txt": { decision: "accepted" } } }));
+    check(e?.message === R.moved && dec((await w.read("/intro.txt")).content) === "A long introduction.\n", `the old handle can't accept into main: ${e?.message}`);
+    check((await w.branchReview(old.fid, "same")) === null || (await w.branchReview(old.fid, "same"))?.review == null, "the old fid has no review state");
+  },
+
   async loop(check) {
     // (the acceptance loop, E3: submit A; changes asked on A; commit B; A's decisions neither reported nor accepted for
     //  B; decide B)

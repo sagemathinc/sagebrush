@@ -48,6 +48,10 @@ function codexSummary(tool: string, i: Record<string, unknown>): string {
   return cwd ? `${command} (in ${cwd})` : command;
 }
 
+/** A card's added words, for actions whose consequence the path alone doesn't show. */
+export const CARD_NOTE = {
+  branchRemove: "This also removes the branch's review history.",
+} as const;
 /** A card's words from its action, exactly as the agent words them (sagebrush-agent's askPerson): the tool's name,
  * what the call is for (its address, query or path), and all of its arguments. */
 export function cardText(tool: string, input: unknown): { title: string; summary: string; detail: string } {
@@ -56,7 +60,9 @@ export function cardText(tool: string, input: unknown): { title: string; summary
   const codex = CODEX_TITLES[tool];
   if (codex) return { title: codex, summary: codexSummary(tool, i), detail: JSON.stringify(input, null, 2) };
   const target = [i.url, i.query, i.path, i.from && i.to ? `${i.from} → ${i.to}` : undefined].find((v) => typeof v === "string") as string | undefined;
-  return { title: `Allow ${name}?`, summary: target ?? "(no address or query given)", detail: JSON.stringify(input, null, 2) };
+  // (removing a branch's own folder, /Branches/<name>: its review history goes with it, said on the card)
+  const branchRoot = name === "workspace_remove" && typeof i.path === "string" && /^\/Branches\/[^/]+\/?$/.test(i.path);
+  return { title: `Allow ${name}?`, summary: target === undefined ? "(no address or query given)" : branchRoot ? `${target}\n${CARD_NOTE.branchRemove}` : target, detail: JSON.stringify(input, null, 2) };
 }
 /** A kept card's words: a web card's from its checked request, any other's as cardText makes them. */
 function cardView(c: { tool?: string; input?: unknown; turnInput?: unknown }): Record<string, unknown> {
