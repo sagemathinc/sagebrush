@@ -113,7 +113,23 @@ export const LATEX_LAZY = {
 // (255,840 raw / 85,653 gzip: Nov 24 2026, a block that fits is never "too large", the size said the one over the limit
 //  (web/latex/split.ts): 255,776 / 85,589 measured on the shipped build of its merge with master a1153559, with bun 1.4.4 and
 //  node 24.21.0 (+92 / +24 over master's 255,684 / 85,565), + 64)
-export const LATEX_CAPS = { raw: 255840, gzip: 85653 };
+// (256,580 raw / 85,902 gzip: Nov 25 2026, amsthm's \qedhere (issue 1800), its symbol on its own row (KaTeX's tag):
+//  256,516 / 85,838 measured on the shipped build of its merge with master c0066039, with bun 1.4.4 and node 24.21.0
+//  (+740 / +249 over master's 255,776 / 85,589), + 64)
+// (287,627 raw / 97,060 gzip: Nov 25 2026, TikZ pictures drawn in the preview (paths, styles,
+//  transforms, \foreach: web/latex/engine/tikz.mjs, in the worker's bundle, with its bounds): 287,563 / 96,996 measured on the
+//  shipped build of its merge with master 3655725a, with bun 1.4.4 and node 24.21.0 (+31,047 / +11,158 over master's
+//  256,516 / 85,838), + 64)
+// (289,970 raw / 97,826 gzip: Nov 25 2026, \bibliography reading the .bbl BibTeX made beside the .tex, and natbib's
+//  numbers and sort&compress: 289,906 / 97,762 measured on the shipped build of its merge with master d4692ae4, with bun
+//  1.4.4 and node 24.21.0 (+2,343 / +766 over master's 287,563 / 96,996), + 64)
+// (291,697 raw / 98,473 gzip: Nov 25 2026, enumitem's label=, ref= and start= on a list: 291,633 / 98,409 measured on the
+//  shipped build of its merge with master 46d3a16f, with bun 1.4.4 and node 24.21.0 (+1,727 / +647 over master's
+//  289,906 / 97,762), + 64)
+// (292,864 raw / 98,922 gzip: Nov 25 2026, an accent before a font command with its argument, unbraced ($\bar\mathbb F$),
+//  braced before KaTeX: 292,800 / 98,858 measured on the shipped build of its merge with master 56958e3d, with bun 1.4.4 and
+//  node 24.21.0 (+1,167 / +449 over master's 291,633 / 98,409), + 64)
+export const LATEX_CAPS = { raw: 292864, gzip: 98922 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
