@@ -5,9 +5,14 @@
 //
 //   POST /api/sync/v1/enable             turn sync on for this account (allowlisted on dev)
 //   GET  /api/sync/v1/account            the account socket (upgrade; Origin checked)
-//   POST /api/sync/v1/blobs/check        {blobs: [{sha256, size}]} -> {missing}
-//   PUT  /api/sync/v1/blob/<sha256>      the bytes (R2 checks the hash)
+//   POST /api/sync/v1/blobs/check        {blobs: [{sha256, ct_sha256, size}]} -> {missing, conflicts?}
+//   PUT  /api/sync/v1/blob/<sha256>      the bytes, with x-sb-ct-sha256: their SHA-256, which R2 checks
 //   GET  /api/sync/v1/blob/<sha256>      303 to a signed URL on the user-content domain
+//
+// (a blob's `sha256` is its address, 64 hex: today the bytes' own hash, under end-to-end encryption a keyed address
+// (design/e2e-encryption.md §3.3).  So the server never assumes it is the bytes' hash: it checks the declared
+// ct_sha256, and holds one (ct_sha256, size) per address, the first; another at that address is a 409 conflict
+// naming what is held)
 //
 // and, with chunked files on (SYNC_TIERED, DEV only; design/tiered-files.md §4.1):
 //
@@ -38,7 +43,7 @@
 import { adminLength, bindPurge, sessionOf, signedWith, type ShareEnv } from "../share/server.ts";
 import { parseRange } from "../share/files.ts";
 import { accountHash, fields, hmacHex, isNat, isSha, same, LIMITS, URL_MS, SyncError, type Result } from "../sync-protocol/protocol.ts";
-import { agentOn, allowed, gate, gateOn, testMode, tieredOn, type SyncEnv } from "./env.ts";
+import { e2eOn, agentOn, allowed, gate, gateOn, testMode, tieredOn, type SyncEnv } from "./env.ts";
 import { AGENT, tokenOf } from "./agent-token.ts";
 import { TIERED } from "./manifest.ts";
 import { Sha256 } from "./sha256.ts";
@@ -282,24 +287,67 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     if (!/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
     const text = await req.text();
     if (text.length > 128 << 10) return err(413, "limit");
-    let blobs: string[];
+    let blobs: { sha256: string; ct_sha256: string; size: number }[];
     try {
       const b = fields(JSON.parse(text), ["blobs"], "check");
       if (!Array.isArray(b.blobs) || b.blobs.length > LIMITS.checkItems) throw new SyncError("limit", "at most " + LIMITS.checkItems);
       blobs = b.blobs.map((x) => {
-        const o = fields(x, ["sha256", "size"], "blob");
-        if (!isSha(o.sha256) || !isNat(o.size)) throw new SyncError("invalid", "blob");
-        return o.sha256;
+        const o = fields(x, ["sha256", "ct_sha256", "size"], "blob");
+        if (!isSha(o.sha256) || !isSha(o.ct_sha256) || !isNat(o.size)) throw new SyncError("invalid", "blob");
+        return { sha256: o.sha256, ct_sha256: o.ct_sha256, size: o.size };
       });
     } catch (e) {
       return err(e instanceof SyncError && e.code === "limit" ? 413 : 400, e instanceof SyncError ? e.code : "invalid");
     }
-    return answer(await stub.missing({ account: who.id, blobs, bind }), (v) => json(v.verifying.length ? v : { missing: v.missing }));
+    return answer(await stub.missing({ account: who.id, blobs, bind }), (v) => json({ missing: v.missing, ...(v.verifying.length ? { verifying: v.verifying } : {}), ...(v.conflicts.length ? { conflicts: v.conflicts } : {}) }));
   }
   // the agents' index, rebuilt by the person (fs-sync 1a2: a failed index stays failed until this; single-flight)
   if (p === "/api/sync/v1/index/rebuild" && m === "POST") {
     if (!agentOn(env)) return err(404, "not found");
     return answer(await stub.indexRebuild({ account: who.id }), json);
+  }
+  // the E2E key chain and the enrollment mailbox (design/e2e-encryption.md §2, PR 2c), from the person's devices: a
+  // 404 while the switch is off. Every route carries the client's binding (x-sync-account, x-sync-generation).
+  if (p.startsWith("/api/sync/v1/e2e/")) {
+    if (!e2eOn(env)) return err(404, "not found");
+    if (p === "/api/sync/v1/e2e/chain" && m === "GET") {
+      const from = url.searchParams.get("from") ?? "0";
+      if (!/^\d{1,15}$/.test(from)) return err(400, "invalid", { message: "from" });
+      return answer(await stub.e2eChain({ account: who.id, bind, from: Number(from) }), json);
+    }
+    if (p === "/api/sync/v1/e2e/chain" && m === "POST") {
+      if (!/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
+      const text = await readBounded(req, 1 << 20);
+      if (text === null) return err(413, "limit", { limit: "body_bytes", max: 1 << 20 });
+      let b: Record<string, unknown>;
+      try {
+        b = fields(JSON.parse(text), ["entry", "keyring", "wrappers"], "append");
+      } catch {
+        return err(400, "invalid", { message: "send {entry, keyring?, wrappers}" });
+      }
+      return answer(await stub.e2eAppend({ account: who.id, bind, entry: b.entry, keyring: b.keyring, wrappers: b.wrappers }), (v) => json(v, 201));
+    }
+    if (p === "/api/sync/v1/e2e/wrapper" && m === "GET") {
+      const kind = url.searchParams.get("kind"), id = url.searchParams.get("id");
+      return answer(await stub.e2eWrapper({ account: who.id, bind, kind, ...(id !== null ? { id } : {}) }), json);
+    }
+    const kr = p.match(/^\/api\/sync\/v1\/e2e\/keyring\/(\d{1,15})$/);
+    if (kr && m === "GET") return answer(await stub.e2eKeyring({ account: who.id, bind, epoch: Number(kr[1]) }), json);
+    const mb = p.match(/^\/api\/sync\/v1\/e2e\/enroll\/([a-z2-7]{25}[aeimquy4])\/([1-5])$/);
+    if (mb && m === "GET") return answer(await stub.e2eMailRead({ account: who.id, bind, session: mb[1], phase: Number(mb[2]) }), json);
+    if (mb && m === "POST") {
+      if (!/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
+      const text = await readBounded(req, 32 << 10);
+      if (text === null) return err(413, "limit", { limit: "body_bytes", max: 32 << 10 });
+      let b: Record<string, unknown>;
+      try {
+        b = fields(JSON.parse(text), ["msg"], "message");
+      } catch {
+        return err(400, "invalid", { message: "send {msg}" });
+      }
+      return answer(await stub.e2eMailPost({ account: who.id, bind, session: mb[1], phase: Number(mb[2]), msg: b.msg }), (v) => json(v, 201));
+    }
+    return err(404, "not found");
   }
   // agents' grants, from the person's session (design/agent-endpoint.md §2, the grant dialog's calls; §8, the log): a
   // 404 while the switch is off
@@ -664,7 +712,10 @@ async function putBlob(req: Request, env: Env, stub: ReturnType<NonNullable<Env[
   const len = req.headers.get("content-length");
   if (!len || !/^\d{1,12}$/.test(len)) return err(411, "Content-Length is required");
   const size = Number(len);
-  const r = await stub.reserve({ account, sha256, size, bind });
+  // (the bytes' own SHA-256, declared: R2 checks the body against it, never against the address)
+  const ct = req.headers.get("x-sb-ct-sha256") ?? "";
+  if (!isSha(ct)) return err(400, "invalid", { message: "x-sb-ct-sha256: the bytes' SHA-256 is required" });
+  const r = await stub.reserve({ account, sha256, ct_sha256: ct, size, bind });
   if ("error" in r) return answer(r, json);
   if ("have" in r.ok) return json({ sha256, have: true });
   const { id, key, expires } = r.ok;
@@ -680,7 +731,7 @@ async function putBlob(req: Request, env: Env, stub: ReturnType<NonNullable<Env[
   try {
     const fixed = new FixedLengthStream(size);
     req.body!.pipeTo(fixed.writable, { signal: ac.signal }).catch(() => {});
-    stored = await env.SHARE_BUCKET!.put(key, fixed.readable, { sha256 });
+    stored = await env.SHARE_BUCKET!.put(key, fixed.readable, { sha256: ct });
   } catch {
     stored = null;
   } finally {

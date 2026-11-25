@@ -12,11 +12,15 @@
 
 import { DurableObject } from "cloudflare:workers";
 import {
-  SyncError, LIMITS, RECHECK_MS, PIN_MS, VERSION, Bucket, checkBatch, checkHead, checkOp, clientOf, fields, has, isDevice, isDocId, isNat,
+  SyncError, LIMITS, RECHECK_MS, PIN_MS, VERSION, Bucket, checkBatch, checkHead, checkOp, checkSealedOp, isChainHead, toB64, clientOf, type SealedOp, fields, has, isDevice, isDocId, isNat,
   parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, same, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
 } from "../sync-protocol/protocol.ts";
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
-import { agentOn, allowed, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
+import { agentOn, allowed, e2eOn, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
+import { E2E, E2E_KEEP, E2EStore, e2eAccount, e2eAud } from "./e2e-chain.ts";
+import { sealedOpMessage } from "../workspace/e2e/sealed-op.mjs";
+import { verifyStrict } from "../workspace/fleet/core/ed25519.mjs";
+import { unb64 } from "../workspace/fleet/core/bytes.mjs";
 import { AGENT, GRANT_ID, READS, SCOPED, VERBS, checkAgentName, checkScopes, inScope, makeToken, newGrantId, newSecret, secretHash, type Scope } from "./agent-token.ts";
 import { TRASH, normPath, within } from "../workspace/paths.ts";
 import { checkCall } from "../workspace/agent-schema.ts";
@@ -42,10 +46,10 @@ interface Attachment {
 const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)",
   "CREATE TABLE IF NOT EXISTS devices (device TEXT PRIMARY KEY, name TEXT, created INTEGER, last_seen INTEGER, session_hash TEXT, next_dseq INTEGER NOT NULL)",
-  "CREATE TABLE IF NOT EXISTS ops (seq INTEGER PRIMARY KEY, device TEXT NOT NULL, dseq INTEGER NOT NULL, t INTEGER, by TEXT, op TEXT, path TEXT, \"to\" TEXT, kind TEXT, ref TEXT, fid TEXT, sha256 TEXT, size INTEGER, base TEXT, recv INTEGER, parent TEXT, UNIQUE (device, dseq))",
+  "CREATE TABLE IF NOT EXISTS ops (seq INTEGER PRIMARY KEY, device TEXT NOT NULL, dseq INTEGER NOT NULL, t INTEGER, by TEXT, op TEXT, path TEXT, \"to\" TEXT, kind TEXT, ref TEXT, fid TEXT, sha256 TEXT, size INTEGER, base TEXT, recv INTEGER, parent TEXT, env TEXT, head TEXT, adds TEXT, releases TEXT, UNIQUE (device, dseq))",
   "CREATE TABLE IF NOT EXISTS refused (device TEXT NOT NULL, dseq INTEGER NOT NULL, code TEXT NOT NULL, PRIMARY KEY (device, dseq))",
   "CREATE TABLE IF NOT EXISTS docs (doc TEXT PRIMARY KEY, kind TEXT NOT NULL, created INTEGER, bytes INTEGER NOT NULL DEFAULT 0, epoch INTEGER NOT NULL DEFAULT 1, head_seq INTEGER NOT NULL DEFAULT 0, deleted INTEGER)",
-  "CREATE TABLE IF NOT EXISTS holdings (sha256 TEXT PRIMARY KEY, key TEXT NOT NULL, size INTEGER NOT NULL, refs INTEGER NOT NULL DEFAULT 0, created INTEGER)",
+  "CREATE TABLE IF NOT EXISTS holdings (sha256 TEXT PRIMARY KEY, key TEXT NOT NULL, size INTEGER NOT NULL, refs INTEGER NOT NULL DEFAULT 0, created INTEGER, ct_sha256 TEXT)",
   "CREATE INDEX IF NOT EXISTS holdings_key ON holdings (key)",
   // a pin (§4.3): its identity is the patch's own, (doc, epoch, client, cseq, id, sha256), so two
   // attempts at one cseq with different ids are two pins (CORR-321-1); `inflight` counts the forwards
@@ -65,7 +69,7 @@ const SCHEMA = [
   // (each retried item keeps its own retry time and tries, so an outage backs off per item, CORR-B8A-2)
   "CREATE TABLE IF NOT EXISTS fences_due (session_hash TEXT NOT NULL, doc TEXT NOT NULL, expires INTEGER NOT NULL, retry_at INTEGER, tries INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (session_hash, doc))",
   "CREATE TABLE IF NOT EXISTS outbox (key TEXT PRIMARY KEY, created INTEGER, retry_at INTEGER, tries INTEGER NOT NULL DEFAULT 0)",
-  "CREATE TABLE IF NOT EXISTS reservations (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, bytes INTEGER NOT NULL, key TEXT NOT NULL, expires INTEGER NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS reservations (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, bytes INTEGER NOT NULL, key TEXT NOT NULL, expires INTEGER NOT NULL, ct_sha256 TEXT)",
   "CREATE INDEX IF NOT EXISTS reservations_key ON reservations (key)",
   // (finalized uploads, a day: a finalize answered again gives the same answer, CORR-796-2)
   "CREATE TABLE IF NOT EXISTS finalized (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, size INTEGER NOT NULL, at INTEGER NOT NULL)",
@@ -83,6 +87,8 @@ const MAX_HOLDS = LIMITS.liveBatches;
 
 /** The limits CoCalc gives an account (design/sync-server.md §6), as this service reads them. */
 /** (one storage_bytes for sharing and sync together, §6.1: sync has no storage limit of its own) */
+/** A held blob's identity: its address, its stored bytes' SHA-256 and its size (e2e PR 3a). */
+export type Held = { sha256: string; ct_sha256: string; size: number };
 export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; version_bytes: number; read_bytes_per_day: number; retention_days?: number; verify_bytes_per_day?: number }; issued?: number }
 /** Dev deployments with no CoCalc to ask (SHARE_DEV=1): small, fixed limits. */
 /** After CoCalc couldn't say an account's plan, how long before it's asked again (LIMIT-SYNC-STATUS-1). */
@@ -122,6 +128,15 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private batches = new Bucket(LIMITS.batchBurst, LIMITS.batchRate);
   private opsRate = new Bucket(LIMITS.opsPerMinute, LIMITS.opsPerMinute / 60);
   private urls = new Bucket(LIMITS.urlsPerMinute, LIMITS.urlsPerMinute / 60);
+  private e2eAppends = new Bucket(E2E.appendsPerMinute, E2E.appendsPerMinute / 60);
+  private e2eMail = new Bucket(E2E.mailPerMinute, E2E.mailPerMinute / 60);
+  private e2eResets = new Bucket(E2E.resetsPerMinute, E2E.resetsPerMinute / 60);
+  private e2eResetWork = new Bucket(E2E.resetWorkPerMinute, E2E.resetWorkPerMinute / 60);
+  private e2eStore: E2EStore | null = null;
+  /** tests only: the mailbox's clock, shifted (ms); and the next E2E write's transaction made to fail after its writes */
+  private e2eShift = 0;
+  private e2eFailCommit = false;
+  private e2eHold = 0;
   private ticketsAll = new Bucket(TICKETS_PER_MINUTE_ACCOUNT, TICKETS_PER_MINUTE_ACCOUNT / 60);
   private ticketsBySession = new Map<string, Bucket>();
   private ticketBucket(session: string): Bucket {
@@ -158,6 +173,19 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       // (an object made before an op column existed gains it: §3's `parent`, Oct 20)
       if (this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'ops'") && !this.sql.exec("PRAGMA table_info(ops)").toArray().some((c) => (c as Row).name === "parent")) {
         this.sql.exec("ALTER TABLE ops ADD COLUMN parent TEXT");
+      }
+      // (an object made before sealed ops gains their columns, e2e PR 5b: the envelope (base64), the key chain's head it
+      // was sealed under, and the blob references it adds and releases (JSON lists); a plaintext op has them NULL)
+      if (this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'ops'")) {
+        const have = new Set(this.sql.exec("PRAGMA table_info(ops)").toArray().map((c) => String((c as Row).name)));
+        for (const c of ["env", "head", "adds", "releases"]) if (!have.has(c)) this.sql.exec(`ALTER TABLE ops ADD COLUMN ${c} TEXT`);
+      }
+      // (an object made before blobs had a ciphertext hash gains the column: e2e PR 3a; its old rows keep NULL, read as
+      // ct = the address they were checked against, and every new row has one)
+      for (const t of ["holdings", "reservations"]) {
+        if (this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = ?", t) && !this.sql.exec(`PRAGMA table_info(${t})`).toArray().some((c) => (c as Row).name === "ct_sha256")) {
+          this.sql.exec(`ALTER TABLE ${t} ADD COLUMN ct_sha256 TEXT`);
+        }
       }
       this.alarmAt = await ctx.storage.getAlarm();
       if (this.hasMeta()) this.arm();
@@ -416,6 +444,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       // (the agents' index follows the ops just accepted, in its own transaction: it can fail, never the ops, 1a2)
       this.indexLive();
       send(ws, { t: "ack", req, ops: acked });
+    } else if (t === "sops") {
+      fields(m, ["t", "req", "ops"], "sops");
+      const acked = await this.sealedOps(att, dev, m.ops);
+      send(ws, { t: "ack", req, ops: acked });
     } else if (t === "pull_index") {
       fields(m, ["t", "req", "after"], "pull_index");
       if (!isNat(m.after)) throw new SyncError("invalid", "after");
@@ -535,13 +567,133 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     });
   }
 
+  /** The sealed log's cap (LIMITS.sealedLog; lowered by a test). */
+  private sealedCap: number = LIMITS.sealedLog;
+  /** Tests only: a hold between a sealed message's checks and its commit (ms). */
+  private sealedHold = 0;
+  /**
+   * Sealed ops from one device (design/e2e-encryption.md §4, §4.1; e2e PR 5b), decided as ops() decides plaintext ones:
+   * in dseq order with no gaps, once each, a refusal kept with its code.  The server reads only each op's form, the key
+   * chain's head it was sealed under, the signature over it, and its blob references.
+   *
+   * Before anything is decided, for the whole message (so none of these spends a dseq):
+   * - the head must be the chain's current one: a device that sealed under an older head re-seals and sends the same
+   *   dseqs again;
+   * - every new op must be signed by a device current in that chain, over its place, envelope and references
+   *   (web/workspace/e2e/sealed-op.mjs): the head is public, so the signature is what keeps a removed device, or a
+   *   session that is no E2E device, from appending or moving a reference;
+   * - the new ops must fit the log's cap (resends don't count).
+   * The signatures are checked before the transaction, and the transaction checks that the head and the device's next
+   * dseq are still the ones they were checked against.  Then each op: every address it adds must be held, and gains a
+   * reference; every address it releases must be held with a reference to give back.
+   */
+  private async sealedOps(att: Attachment, device: string, list: unknown): Promise<({ dseq: number; seq: number } | { dseq: number; code: string })[]> {
+    this.admit(att.account, true);
+    const store = this.e2e(att.account);
+    const head = store.current();
+    if (!head) throw new SyncError("conflict", "this account has no key chain yet", { reason: "no_chain" });
+    if (!Array.isArray(list) || list.length === 0) throw new SyncError("invalid", "ops");
+    if (list.length > LIMITS.opsPerMessage) throw new SyncError("limit", "too many ops", { limit: "ops_per_message", max: LIMITS.opsPerMessage });
+    const wait = this.opsRate.take(list.length);
+    if (wait) throw new SyncError("rate", "too many ops", { retry_after: wait });
+    const next0 = Number(this.one("SELECT next_dseq FROM devices WHERE device = ?", device)!.next_dseq);
+    // (this sync incarnation: "Delete my synced data" ends it while the key chain stays, so it is signed, and the
+    // commit requires it unchanged)
+    const gen = Number(this.get("generation"));
+    const fresh = (raw: unknown, next: number) => {
+      const d = (raw as { dseq?: unknown })?.dseq;
+      return isNat(d) && d >= next;
+    };
+    const stale = (next: number, now: { hash: string }) => {
+      for (const raw of list) {
+        const h = (raw as { head?: unknown })?.head;
+        if (fresh(raw, next) && isChainHead(h) && h !== now.hash) throw new SyncError("conflict", "sealed under another key chain head: seal again under the current one", { reason: "stale_head", head: now });
+      }
+    };
+    stale(next0, head);
+    // (each new op's signature, by a device current in the chain at this head: a well-formed op that isn't is refused
+    // for the whole message; a malformed one is left to its own refusal below)
+    for (const raw of list) {
+      if (!fresh(raw, next0)) continue;
+      let op: SealedOp;
+      try {
+        op = checkSealedOp(raw);
+      } catch {
+        continue;
+      }
+      const key = await store.currentSigner(op.signer);
+      const msg = await sealedOpMessage({ account: store.account, syncGeneration: gen, chainGeneration: head.generation, head: head.hash, device, dseq: op.dseq, env: op.env, adds: op.adds, releases: op.releases, signer: op.signer });
+      if (!key || !(await verifyStrict(key, msg, unb64(op.sig, 64)))) {
+        throw new SyncError("forbidden", "a sealed op not signed by a current device of this account's key chain", { dseq: op.dseq, signer: op.signer });
+      }
+    }
+    // (tests only: held between the checks and the commit, as a slow verification would be)
+    if (testMode(this.env) && this.sealedHold > 0) await new Promise((r) => setTimeout(r, this.sealedHold));
+    return this.ctx.storage.transactionSync(() => {
+      // (what was checked is still so: this account takes writes, in the same sync generation (a deletion, or one that
+      // finished and was followed by turning sync on again, ends what the checks were for), the head (a removal during
+      // the checks would change it), and this device's order)
+      this.admit(att.account, true);
+      if (Number(this.get("generation")) !== gen) throw new SyncError("conflict", "this account's sync changed meanwhile", { reason: "generation" });
+      let next = Number(this.one("SELECT next_dseq FROM devices WHERE device = ?", device)!.next_dseq);
+      const now = store.current();
+      if (!now || now.hash !== head.hash || now.generation !== head.generation) {
+        throw new SyncError("conflict", "the key chain moved; seal again under its current head", { reason: "stale_head", head: now });
+      }
+      if (next !== next0) throw new SyncError("busy", "this device's ops moved meanwhile; send again", { retry_after: 0 });
+      // (the log's cap, for the new ops only: a resend at a full log is still answered with its seq)
+      const added = list.filter((raw) => fresh(raw, next)).length;
+      const kept = Number(this.get("sealed_ops") ?? 0);
+      if (added > 0 && kept + added > this.sealedCap) throw new SyncError("limit", "this account's sealed log is full", { limit: "sealed_log", max: this.sealedCap });
+      const out: ({ dseq: number; seq: number } | { dseq: number; code: string })[] = [];
+      const refusedCount = () => Number(this.one("SELECT COUNT(*) AS n FROM refused WHERE device = ?", device)!.n);
+      for (const raw of list) {
+        const dseq = (raw as { dseq?: unknown })?.dseq;
+        if (!isNat(dseq) || dseq < 1) throw new SyncError("invalid", "op: dseq");
+        if (dseq < next) {
+          const r = this.one("SELECT seq FROM ops WHERE device = ? AND dseq = ?", device, dseq);
+          const f = r ? undefined : this.one("SELECT code FROM refused WHERE device = ? AND dseq = ?", device, dseq);
+          out.push(r ? { dseq, seq: Number(r.seq) } : { dseq, code: String(f?.code ?? "invalid") });
+          continue;
+        }
+        if (dseq > next) throw new SyncError("order", "a gap in this device's ops", { next_dseq: next });
+        try {
+          const op = checkSealedOp(raw);
+          for (const a of op.adds) if (!this.held(a)) throw new SyncError("missing", "upload the blob before the op that names it", { sha256: a });
+          for (const a of op.releases) {
+            const h = this.one("SELECT refs FROM holdings WHERE sha256 = ?", a);
+            if (!h || Number(h.refs) < 1) throw new SyncError("invalid", "a release of a reference that isn't held", { sha256: a });
+          }
+          this.sql.exec(
+            "INSERT INTO ops (device, dseq, recv, size, env, head, adds, releases) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            device, dseq, Date.now(), op.env.length, toB64(op.env), op.head, JSON.stringify(op.adds), JSON.stringify(op.releases),
+          );
+          out.push({ dseq, seq: Number(this.one("SELECT last_insert_rowid() AS n")!.n) });
+          this.set("sealed_ops", Number(this.get("sealed_ops") ?? 0) + 1);
+          for (const a of op.adds) this.sql.exec("UPDATE holdings SET refs = refs + 1 WHERE sha256 = ?", a);
+          for (const a of op.releases) this.sql.exec("UPDATE holdings SET refs = refs - 1 WHERE sha256 = ?", a);
+        } catch (e) {
+          if (!(e instanceof SyncError)) throw e;
+          if (refusedCount() >= LIMITS.refusalsPerDevice) throw new SyncError("invalid", "too many refused ops: rebuild from the server's log");
+          this.sql.exec("INSERT INTO refused (device, dseq, code) VALUES (?, ?, ?)", device, dseq, e.code);
+          out.push({ dseq, code: e.code });
+        }
+        next++;
+        this.sql.exec("UPDATE devices SET next_dseq = ? WHERE device = ?", next, device);
+      }
+      return out;
+    });
+  }
+
   /** The log after `after`, a page at a time (§5.2, §8). */
   private index(after: number): { ops: Row[]; more: boolean } {
-    const rows = this.sql.exec('SELECT seq, device, dseq, t, by, op, path, "to", kind, ref, fid, sha256, size, base, parent FROM ops WHERE seq > ? ORDER BY seq LIMIT ?', after, LIMITS.indexPage + 1).toArray() as Row[];
+    const rows = this.sql.exec('SELECT seq, device, dseq, t, by, op, path, "to", kind, ref, fid, sha256, size, base, parent, env, head, adds, releases FROM ops WHERE seq > ? ORDER BY seq LIMIT ?', after, LIMITS.indexPage + 1).toArray() as Row[];
     const ops: Row[] = [];
     let bytes = 0;
     for (const r of rows.slice(0, LIMITS.indexPage)) {
-      const o = Object.fromEntries(Object.entries(r).filter(([, v]) => v !== null));
+      const o: Record<string, unknown> = Object.fromEntries(Object.entries(r).filter(([, v]) => v !== null));
+      // (a sealed op: its references as the lists they were sent as)
+      for (const k of ["adds", "releases"]) if (typeof o[k] === "string") o[k] = JSON.parse(o[k] as string);
       const n = JSON.stringify(o).length;
       if (ops.length > 0 && bytes + n > LIMITS.indexPageBytes) return { ops, more: true };
       bytes += n;
@@ -1480,7 +1632,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const retired = Math.max(this.retired(), generation);
       const deleted = this.deleted();
       const tables = (this.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").toArray() as Row[]).map((r) => String(r.name));
-      for (const t of tables) this.sql.exec(`DROP TABLE IF EXISTS "${t}"`);
+      // (the E2E key chain is the account's identity: a sync-data purge keeps it, its current keyring and its current
+      // wrappers, named one by one in E2E_KEEP, and drops its mailbox; deleting the CoCalc account drops them all)
+      for (const t of tables) if (deleted || !E2E_KEEP.includes(t)) this.sql.exec(`DROP TABLE IF EXISTS "${t}"`);
       this.sql.exec("CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT)");
       this.sql.exec("INSERT INTO meta (k, v) VALUES ('retired', ?)", String(retired));
       // (one record, whatever came before: an earlier one not yet written is covered by this one, LIMIT-B92-1)
@@ -1550,14 +1704,16 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * Reserve the bytes of one upload: one transaction, against the limits,
    * with at most uploadsAtOnce running.  A blob already held needs no upload.
    */
-  async reserve(a: { account: string; sha256: string; size: number; bind?: { account?: string; generation?: number } }): Promise<Result<{ have: true } | { id: string; key: string; expires: number }>> {
+  async reserve(a: { account: string; sha256: string; ct_sha256: string; size: number; bind?: { account?: string; generation?: number } }): Promise<Result<{ have: true } | { id: string; key: string; expires: number }>> {
+    // (the bytes' own hash, which R2 checks, is the caller's to declare: an address names bytes but needn't be their hash)
+    if (!isSha(a.ct_sha256)) return { error: { code: "invalid", message: "the bytes' SHA-256 (x-sb-ct-sha256) is required" } };
     // (no storage, no sync: refused before anything reads a table, CORR-00F-1)
     if (!this.exists()) return { error: { code: "forbidden", message: "turn on sync first" } };
     const b = attempt(() => this.bound(a.bind?.account, a.bind?.generation));
     if ("error" in b) return b;
     const l = await this.limits();
     // room in the one budget first (§6.1), for an upload the checks below would take
-    if (l && l.sync.enabled && a.size <= Math.min(l.max_file_bytes, MAX_PUT) && !this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", a.sha256)) {
+    if (l && l.sync.enabled && a.size <= Math.min(l.max_file_bytes, MAX_PUT) && !this.held(a.sha256)) {
       const r = await attemptAsync(async () => {
         this.admit(a.account, true);
         await this.room(a.size, "file");
@@ -1571,7 +1727,13 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       // (the binding again, in the transaction that answers or allocates: the generation may have been retired and
       // the next one turned on during the awaits above, astra's narrowed CORR-PR58-1)
       this.bound(a.bind?.account, a.bind?.generation);
-      if (this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", a.sha256)) return { have: true as const };
+      // (held already: "have" only for exactly these bytes, this hash and size; anything else at this address is a
+      // conflict naming what is held, never adopted or replaced)
+      const h = this.held(a.sha256);
+      if (h) {
+        if (h.ct_sha256 === a.ct_sha256 && h.size === a.size) return { have: true as const };
+        throw SyncAccount.blobConflict(h);
+      }
       if (!l) throw new SyncError("busy", "this account's limits aren't known yet; try again");
       if (!l.sync.enabled) throw new SyncError("readonly", "this account's plan doesn't include sync");
       if (a.size > Math.min(l.max_file_bytes, MAX_PUT)) throw new SyncError("limit", "this file is too large", { limit: "max_file_bytes", max: Math.min(l.max_file_bytes, MAX_PUT) });
@@ -1582,7 +1744,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const id = randomHex(16);
       const key = `s/${this.get("account_hash")!.slice(0, 32)}/${randomHex(18)}`;
       const ends = now + (testMode(this.env) ? 3000 : RESERVE_MS);
-      this.sql.exec("INSERT INTO reservations (id, sha256, bytes, key, expires) VALUES (?, ?, ?, ?, ?)", id, a.sha256, a.size, key, ends);
+      this.sql.exec("INSERT INTO reservations (id, sha256, bytes, key, expires, ct_sha256) VALUES (?, ?, ?, ?, ?, ?)", id, a.sha256, a.size, key, ends, a.ct_sha256);
       this.addUsed(a.size);
       // (a dead upload's bytes come back at its end, even if nothing else happens here: LIMIT-7FB-1)
       this.wakeBy(ends + 1);
@@ -1612,7 +1774,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     }
     const r = attempt(() => this.ctx.storage.transactionSync(() => {
       this.admit(a.account, true);
-      const res = this.one("SELECT sha256, bytes, key, expires FROM reservations WHERE id = ?", a.id);
+      const res = this.one("SELECT sha256, ct_sha256, bytes, key, expires FROM reservations WHERE id = ?", a.id);
       if (!res) {
         // (finalized already: the same answer for the same size, a conflict for another)
         const f = this.one("SELECT sha256, size FROM finalized WHERE id = ?", a.id);
@@ -1622,19 +1784,28 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       }
       if (Number(res.expires) < Date.now()) throw new SyncError("busy", "this upload took too long; send it again");
       this.sql.exec("DELETE FROM reservations WHERE id = ?", a.id);
-      const sha = String(res.sha256);
+      const sha = String(res.sha256), ct = res.ct_sha256 === null ? sha : String(res.ct_sha256);
+      // (another upload to this address finalized first, with other bytes: this one's object goes and its bytes come
+      // back, and it is told what is held, never "finalized"; a reservation from before the column reads as ct = sha)
+      const h = this.held(sha);
+      if (h && a.size === Number(res.bytes) && (h.ct_sha256 !== ct || h.size !== a.size)) {
+        this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) VALUES (?, ?)", res.key, Date.now());
+        this.addUsed(-Number(res.bytes));
+        return { conflict: h };
+      }
       if (a.size === Number(res.bytes)) this.sql.exec("INSERT INTO finalized (id, sha256, size, at) VALUES (?, ?, ?, ?)", a.id, sha, a.size, Date.now());
-      if (a.size !== Number(res.bytes) || this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", sha)) {
+      if (a.size !== Number(res.bytes) || h) {
         this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) VALUES (?, ?)", res.key, Date.now());
         this.addUsed(-Number(res.bytes));
         if (a.size !== Number(res.bytes)) throw new SyncError("invalid", "the stored size isn't the declared one");
         return { sha256: sha };
       }
-      this.sql.exec("INSERT INTO holdings (sha256, key, size, refs, created) VALUES (?, ?, ?, 0, ?)", sha, res.key, res.bytes, Date.now());
+      this.sql.exec("INSERT INTO holdings (sha256, key, size, refs, created, ct_sha256) VALUES (?, ?, ?, 0, ?, ?)", sha, res.key, res.bytes, Date.now(), ct);
       return { sha256: sha };
     }));
     this.wakeBy(Date.now() + 5000);
-    return r;
+    if ("ok" in r && "conflict" in r.ok) return { error: { code: "conflict", message: "the server holds other bytes under this address", detail: { held: r.ok.conflict } } };
+    return r as Result<{ sha256: string }>;
   }
 
   /** An upload that failed before finalize: its object and its reservation go now. */
@@ -1680,23 +1851,45 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Which of these blobs this account must upload (advisory, §5.4). */
-  async missing(a: { account: string; blobs: string[]; bind?: { account?: string; generation?: number } }): Promise<Result<{ missing: string[]; verifying: string[] }>> {
+  async missing(a: { account: string; blobs: { sha256: string; ct_sha256: string; size: number }[]; bind?: { account?: string; generation?: number } }): Promise<Result<{ missing: string[]; verifying: string[]; conflicts: Held[] }>> {
     return attempt(() => {
       this.admit(a.account, false);
       this.bound(a.bind?.account, a.bind?.generation);
       // (with chunked files on, a whole file's hash is answered too, design/tiered-files.md §4.1 "First, is the whole
       // file already there?": held as a verified manifest, or being verified, which the client then drives)
       const files = tieredOn(this.env) && this.hasFiles();
-      const missing: string[] = [], verifying: string[] = [];
-      for (const sha of a.blobs) {
-        if (this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", sha)) continue;
-        const f = files ? this.one("SELECT state FROM files WHERE sha256 = ?", sha) : undefined;
-        if (f && f.state !== "verifying") continue;
+      const missing: string[] = [], verifying: string[] = [], conflicts: Held[] = [];
+      for (const { sha256: sha, ct_sha256: ct, size } of a.blobs) {
+        // (held is "there" only as exactly these bytes: held otherwise is a conflict, so no caller sends an op naming
+        // an address whose bytes aren't the ones it means)
+        const h = this.held(sha);
+        if (h) {
+          if (h.ct_sha256 !== ct || h.size !== size) conflicts.push(h);
+          continue;
+        }
+        const f = files ? this.one("SELECT state, size FROM files WHERE sha256 = ?", sha) : undefined;
+        if (f && f.state !== "verifying") {
+          // (a chunked file, verified or live: held as its address (which its verification checked the chunks' bytes
+          // make; ct = address, the bridge until end-to-end encryption) and its size, under the same exact rule)
+          const fh: Held = { sha256: sha, ct_sha256: sha, size: Number(f.size) };
+          if (fh.ct_sha256 !== ct || fh.size !== size) conflicts.push(fh);
+          continue;
+        }
         if (f) verifying.push(sha);
         missing.push(sha);
       }
-      return { missing, verifying };
+      return { missing, verifying, conflicts };
     });
+  }
+
+  /** A held blob (e2e PR 3a): its address, the SHA-256 its stored bytes were checked against (a row from before that
+   * column has NULL, read as its address, which R2 checked them against then) and its size; undefined if not held. */
+  private held(address: string): Held | undefined {
+    const h = this.one("SELECT sha256, COALESCE(ct_sha256, sha256) AS ct, size FROM holdings WHERE sha256 = ?", address);
+    return h ? { sha256: String(h.sha256), ct_sha256: String(h.ct), size: Number(h.size) } : undefined;
+  }
+  private static blobConflict(h: Held): SyncError {
+    return new SyncError("conflict", "the server holds other bytes under this address", { held: h });
   }
 
   // ---- chunked files (design/tiered-files.md §4.1, §4.3, §5.1), behind tieredOn (DEV only)
@@ -2179,6 +2372,18 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (!testMode(this.env)) return;
     this.sql.exec("ALTER TABLE ops DROP COLUMN parent");
   }
+  /** Tests only: this object as one made before blobs had a ciphertext hash (e2e PR 3a): the column dropped. */
+  async testOldBlobs(): Promise<boolean> {
+    if (!testMode(this.env)) return false;
+    for (const t of ["holdings", "reservations"]) this.sql.exec(`ALTER TABLE ${t} DROP COLUMN ct_sha256`);
+    return this.sql.exec("PRAGMA table_info(holdings)").toArray().every((c) => (c as Row).name !== "ct_sha256");
+  }
+  /** Tests only: a holding's stored ct_sha256, as stored (null for a row from before the column). */
+  async testHeldCt(a: { sha256: string }): Promise<string | null | undefined> {
+    if (!testMode(this.env)) return undefined;
+    const h = this.one("SELECT ct_sha256 FROM holdings WHERE sha256 = ?", a.sha256);
+    return h ? (h.ct_sha256 === null ? null : String(h.ct_sha256)) : undefined;
+  }
   async crash(): Promise<void> {
     if (!testMode(this.env)) return;
     await this.ctx.storage.deleteAlarm();
@@ -2291,6 +2496,127 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** The alarm: settle pins whose answer was lost (§4.3), and forget revoked sessions past their expiry. */
+  // ---- the E2E key chain and the enrollment mailbox (design/e2e-encryption.md §2, PR 2c), behind e2eOn (DEV only)
+
+  /**
+   * The checks every E2E call makes: the switch, this account (read admission: E2E writes still go through while the
+   * account is read-only or full, since removing a device or recovering is a safety action, but never while it is
+   * being deleted), and the client's binding. Then the account's store, made once.
+   */
+  private e2e(account: string, bind?: { account?: string; generation?: number }): E2EStore {
+    if (!e2eOn(this.env)) throw new SyncError("forbidden", "end-to-end encryption isn't enabled here");
+    this.admit(account, false);
+    this.bound(bind?.account, bind?.generation);
+    // (every write's transaction checks admission again: a deletion that began during the append's checks wins)
+    return (this.e2eStore ??= new E2EStore(this.sql, (f) => this.ctx.storage.transactionSync(() => {
+      this.admit(account, false);
+      const r = f();
+      // (tests only: a commit that fails after the writes, which roll back)
+      if (testMode(this.env) && this.e2eFailCommit) {
+        this.e2eFailCommit = false;
+        throw new Error("the commit failed (test seam)");
+      }
+      return r;
+    }), { aud: e2eAud(this.env.SHARE_DEV === "1"), account: e2eAccount(this.get("account_hash")!) },
+    // (tests only: an append held between its checks and its transaction)
+    () => (testMode(this.env) && this.e2eHold > 0 ? new Promise((r) => setTimeout(r, this.e2eHold)) : Promise.resolve())));
+  }
+
+  /** Append a chain entry with its package (keyring, wrappers), checked and stored together. */
+  async e2eAppend(a: { account: string; bind?: { account?: string; generation?: number }; entry: unknown; keyring?: unknown; wrappers?: unknown }): Promise<Result<{ seq: number; head: string }>> {
+    return attemptAsync(async () => {
+      const store = this.e2e(a.account, a.bind);
+      // (a reset never draws on the appends' bucket, which a compromised device can drain: it is charged to its own
+      // bucket, and only once its recovery signature and package have verified)
+      let claimed: unknown = null;
+      try { claimed = typeof a.entry === "string" ? (JSON.parse(a.entry) as { body?: { op?: unknown } })?.body?.op : null; } catch { /* (the checks refuse it) */ }
+      if (claimed !== "reset") {
+        const wait = this.e2eAppends.take();
+        if (wait) throw new SyncError("rate", "too many key-chain changes; wait", { retry_after: wait });
+      }
+      return store.append(a, {
+        work: () => {
+          const wait = this.e2eResetWork.take();
+          if (wait) throw new SyncError("rate", "too many reset attempts; wait", { retry_after: wait });
+        },
+        verified: () => {
+          const wait = this.e2eResets.take();
+          if (wait) throw new SyncError("rate", "too many resets; wait", { retry_after: wait });
+        },
+      });
+    });
+  }
+
+
+  /** A page of the chain. */
+  async e2eChain(a: { account: string; bind?: { account?: string; generation?: number }; from: number }): Promise<Result<ReturnType<E2EStore["chain"]>>> {
+    return attempt(() => this.e2e(a.account, a.bind).chain(a.from));
+  }
+
+  /** The latest current-epoch wrapper to a current device, or to the recovery key (by account alone). */
+  async e2eWrapper(a: { account: string; bind?: { account?: string; generation?: number }; kind: unknown; id?: unknown }): Promise<Result<NonNullable<ReturnType<E2EStore["wrapper"]>>>> {
+    return attempt(() => {
+      const w = this.e2e(a.account, a.bind).wrapper(a.kind, a.id);
+      if (!w) throw new SyncError("missing", "no current wrapper for that recipient");
+      return w;
+    });
+  }
+
+  /** The current epoch's keyring. */
+  async e2eKeyring(a: { account: string; bind?: { account?: string; generation?: number }; epoch: number }): Promise<Result<{ keyring: string }>> {
+    return attempt(() => {
+      const k = this.e2e(a.account, a.bind).keyring(a.epoch);
+      if (!k) throw new SyncError("missing", "no keyring for that epoch");
+      return k;
+    });
+  }
+
+  /** The enrollment mailbox: post one phase's message. */
+  async e2eMailPost(a: { account: string; bind?: { account?: string; generation?: number }; session: unknown; phase: unknown; msg: unknown }): Promise<Result<{ expires: number }>> {
+    return attempt(() => {
+      const store = this.e2e(a.account, a.bind);
+      const wait = this.e2eMail.take();
+      if (wait) throw new SyncError("rate", "too many enrollment messages; wait", { retry_after: wait });
+      return store.post(a.session, a.phase, a.msg, Date.now() + this.e2eShift);
+    });
+  }
+
+  /** The enrollment mailbox: read one phase's message. */
+  async e2eMailRead(a: { account: string; bind?: { account?: string; generation?: number }; session: unknown; phase: unknown }): Promise<Result<{ msg: string; expires: number }>> {
+    return attempt(() => {
+      const store = this.e2e(a.account, a.bind);
+      const wait = this.e2eMail.take();
+      if (wait) throw new SyncError("rate", "too many enrollment messages; wait", { retry_after: wait });
+      const m = store.read(a.session, a.phase, Date.now() + this.e2eShift);
+      if (!m) throw new SyncError("missing", "no such message");
+      return m;
+    });
+  }
+
+  /** Tests only: shift the mailbox's clock, and count the E2E rows. */
+  async testE2E(a: { sealedCap?: number; sealedHold?: number; shift?: number; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number }; corrupt?: "state_hash" | "hash"; keyrings?: "drop-last" | "swap-last" | "stray-first" }): Promise<Record<string, number> | null> {
+    if (!testMode(this.env)) return null;
+    if (a.sealedCap !== undefined) this.sealedCap = a.sealedCap;
+    if (a.sealedHold !== undefined) this.sealedHold = a.sealedHold;
+    if (a.shift !== undefined) this.e2eShift = a.shift;
+    if (a.failCommit !== undefined) this.e2eFailCommit = a.failCommit;
+    if (a.hold !== undefined) this.e2eHold = a.hold;
+    if (a.bounds !== undefined && this.e2eStore) Object.assign(this.e2eStore.bounds, a.bounds);
+    // (a stored keyring row lost, or replaced by other bytes under their own hash, as a storage fault would leave it)
+    if (a.keyrings === "drop-last") this.sql.exec("DELETE FROM e2e_keyrings WHERE epoch = (SELECT MAX(epoch) FROM e2e_keyrings)");
+    // (a stray row before epoch 1, as a damaged store might hold)
+    if (a.keyrings === "stray-first") this.sql.exec("INSERT INTO e2e_keyrings (epoch, generation, suite, prev, prev_ring, hash, bytes) VALUES (0, 'x', 1, 'x', '', 'x', randomblob(60))");
+    if (a.keyrings === "swap-last") this.sql.exec("UPDATE e2e_keyrings SET bytes = randomblob(60), hash = 'x' WHERE epoch = (SELECT MAX(epoch) FROM e2e_keyrings)");
+    if (a.corrupt === "state_hash" || a.corrupt === "hash") this.sql.exec(`UPDATE e2e_checkpoint SET ${a.corrupt} = 'x' WHERE id = 1`);
+    const out: Record<string, number> = {};
+    for (const t of ["e2e_chain", "e2e_keyrings", "e2e_wrappers", "e2e_head", "e2e_checkpoint", "e2e_mailbox"]) {
+      const there = this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = ?", t);
+      out[t] = there ? Number(this.one(`SELECT COUNT(*) AS n FROM ${t}`)!.n) : -1;
+    }
+    if (this.e2eStore) Object.assign(out, { preflights: this.e2eStore.counters.preflights, transitions: this.e2eStore.counters.transitions, replays: this.e2eStore.counters.replays });
+    return out;
+  }
+
   // ---- agents' grants and their requests (design/agent-endpoint.md §1-§3, §7, §8; fs-sync step 1a, behind SYNC_AGENT
   // on DEV).  The tables are made by the first grant, so an account without one is as it was.  The person makes,
   // lists, rotates and revokes grants from a session; an agent's request reaches agentCall only after the Worker has
@@ -2700,6 +3026,12 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const b = this.ixBounds;
     let ents = Number(this.get("ix_n_entries") ?? 0), gone = Number(this.get("ix_n_gone") ?? 0), cursor = Number(this.get("ix_cursor"));
     for (const r of rows) {
+      // (a sealed op, e2e PR 5b: the server can't read it, so it never enters the agents' index; its place is passed)
+      if (r.op === null || r.op === undefined) {
+        cursor = Number(r.seq);
+        done.n++;
+        continue;
+      }
       const res = applyOp(this.sql, SyncAccount.opOf(r), budget());
       ents += res.entries;
       gone += res.gone;
