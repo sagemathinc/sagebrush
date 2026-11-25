@@ -84,7 +84,7 @@ const MAX_HOLDS = LIMITS.liveBatches;
 /** The limits CoCalc gives an account (design/sync-server.md §6), as this service reads them. */
 /** (one storage_bytes for sharing and sync together, §6.1: sync has no storage limit of its own) */
 /** A held blob's identity: its address, its stored bytes' SHA-256 and its size (e2e PR 3a). */
-export type Held = { sha256: string; ct_sha256: string; size: number };
+export type Held = { address: string; ct_sha256: string; size: number };
 export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; version_bytes: number; read_bytes_per_day: number; retention_days?: number; verify_bytes_per_day?: number }; issued?: number }
 /** Dev deployments with no CoCalc to ask (SHARE_DEV=1): small, fixed limits. */
 /** After CoCalc couldn't say an account's plan, how long before it's asked again (LIMIT-SYNC-STATUS-1). */
@@ -602,7 +602,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const keys: PinKey[] = [];
       for (const e of b.patches)
         for (const sha of e.blobs ?? []) {
-          if (!this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", sha)) throw new SyncError("missing", "upload this blob first", { sha256: sha });
+          if (!this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", sha)) throw new SyncError("missing", "upload this blob first", { address: sha });
           const k = { doc, epoch, ref: patchRef(e), sha256: sha };
           const had = this.one("SELECT state FROM pins WHERE doc = ? AND epoch = ? AND ref = ? AND sha256 = ?", doc, epoch, k.ref, sha);
           if (!had) {
@@ -1613,7 +1613,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * uploads of the same bytes at once), this upload's object goes to the
    * outbox instead; a reservation already reaped can't be finalized.
    */
-  async finalize(a: { account: string; id: string; size: number }): Promise<Result<{ sha256: string }>> {
+  async finalize(a: { account: string; id: string; size: number }): Promise<Result<{ address: string }>> {
     // (during a purge: the upload's object is the purge's to delete, handed over in a transaction of its
     // own, which a refusal can't roll back, CORR-5E2-2)
     if (this.exists() && this.state() === "deleting") {
@@ -1633,7 +1633,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (!res) {
         // (finalized already: the same answer for the same size, a conflict for another)
         const f = this.one("SELECT sha256, size FROM finalized WHERE id = ?", a.id);
-        if (f && Number(f.size) === a.size) return { sha256: String(f.sha256) };
+        if (f && Number(f.size) === a.size) return { address: String(f.sha256) };
         if (f) throw new SyncError("conflict", "this upload was finalized with another size");
         throw new SyncError("busy", "this upload took too long; send it again");
       }
@@ -1653,14 +1653,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) VALUES (?, ?)", res.key, Date.now());
         this.addUsed(-Number(res.bytes));
         if (a.size !== Number(res.bytes)) throw new SyncError("invalid", "the stored size isn't the declared one");
-        return { sha256: sha };
+        return { address: sha };
       }
       this.sql.exec("INSERT INTO holdings (sha256, key, size, refs, created, ct_sha256) VALUES (?, ?, ?, 0, ?, ?)", sha, res.key, res.bytes, Date.now(), ct);
-      return { sha256: sha };
+      return { address: sha };
     }));
     this.wakeBy(Date.now() + 5000);
     if ("ok" in r && "conflict" in r.ok) return { error: { code: "conflict", message: "the server holds other bytes under this address", detail: { held: r.ok.conflict } } };
-    return r as Result<{ sha256: string }>;
+    return r as Result<{ address: string }>;
   }
 
   /** An upload that failed before finalize: its object and its reservation go now. */
@@ -1706,7 +1706,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Which of these blobs this account must upload (advisory, §5.4). */
-  async missing(a: { account: string; blobs: { sha256: string; ct_sha256: string; size: number }[]; bind?: { account?: string; generation?: number } }): Promise<Result<{ missing: string[]; verifying: string[]; conflicts: Held[] }>> {
+  async missing(a: { account: string; blobs: { address: string; ct_sha256: string; size: number }[]; bind?: { account?: string; generation?: number } }): Promise<Result<{ missing: string[]; verifying: string[]; conflicts: Held[] }>> {
     return attempt(() => {
       this.admit(a.account, false);
       this.bound(a.bind?.account, a.bind?.generation);
@@ -1714,7 +1714,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       // file already there?": held as a verified manifest, or being verified, which the client then drives)
       const files = tieredOn(this.env) && this.hasFiles();
       const missing: string[] = [], verifying: string[] = [], conflicts: Held[] = [];
-      for (const { sha256: sha, ct_sha256: ct, size } of a.blobs) {
+      for (const { address: sha, ct_sha256: ct, size } of a.blobs) {
         // (held is "there" only as exactly these bytes: held otherwise is a conflict, so no caller sends an op naming
         // an address whose bytes aren't the ones it means)
         const h = this.held(sha);
@@ -1726,7 +1726,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         if (f && f.state !== "verifying") {
           // (a chunked file, verified or live: held as its address (which its verification checked the chunks' bytes
           // make; ct = address, the bridge until end-to-end encryption) and its size, under the same exact rule)
-          const fh: Held = { sha256: sha, ct_sha256: sha, size: Number(f.size) };
+          const fh: Held = { address: sha, ct_sha256: sha, size: Number(f.size) };
           if (fh.ct_sha256 !== ct || fh.size !== size) conflicts.push(fh);
           continue;
         }
@@ -1741,7 +1741,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * column has NULL, read as its address, which R2 checked them against then) and its size; undefined if not held. */
   private held(address: string): Held | undefined {
     const h = this.one("SELECT sha256, COALESCE(ct_sha256, sha256) AS ct, size FROM holdings WHERE sha256 = ?", address);
-    return h ? { sha256: String(h.sha256), ct_sha256: String(h.ct), size: Number(h.size) } : undefined;
+    return h ? { address: String(h.sha256), ct_sha256: String(h.ct), size: Number(h.size) } : undefined;
   }
   private static blobConflict(h: Held): SyncError {
     return new SyncError("conflict", "the server holds other bytes under this address", { held: h });
