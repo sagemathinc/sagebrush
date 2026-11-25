@@ -78,23 +78,43 @@ export function modeSwitch(current: Mode): HTMLElement {
 // be refused. Over the channel go only "live?" and "live", never anything of the pairing.
 export const FILES_TAB = "sb-files-from-agents";
 const LIVE = "sb-agents-live";
-/** The Agents page's answer to "live?": "live" while `live()` (its agent connected). */
-export function answerAgentsLive(live: () => boolean): void {
+// "Use Claude here" (#1550, SEC design r1 option A): two more exact strings, still nothing of the pairing. "remembered?"
+// is answered "remembered" only by a tab whose connection is local and remembered (its grant kept in this browser,
+// where another tab can use it); "release" asks such a tab to let go of its agent, and does nothing else: it never
+// connects any tab, and anything on the channel may send it (its worst is a disconnect).
+const MESSAGES = new Set(["live?", "live", "remembered?", "remembered", "release"]);
+/** The Agents page's answers: "live" to "live?" while `live()` (its agent connected); "remembered" to "remembered?"
+ * while `o.remembered()`; and "release" handed to `o.release`. Any other message is ignored. */
+export function answerAgentsLive(live: () => boolean, o: { remembered?: () => boolean; release?: () => void } = {}): void {
   try {
     const ch = new BroadcastChannel(LIVE);
-    ch.onmessage = (e) => { if (e.data === "live?" && live()) ch.postMessage("live"); };
+    ch.onmessage = (e) => {
+      if (e.data === "live?" && live()) ch.postMessage("live");
+      else if (e.data === "remembered?" && live() && o.remembered?.()) ch.postMessage("remembered");
+      else if (e.data === "release") o.release?.();
+    };
   } catch { /* (no BroadcastChannel: no answer, so Agents opens as a page, as before) */ }
 }
-/** Whether an Agents page of this site, in another tab, says its agent is connected, within `ms`. */
-export function agentsTabLive(ms = 400): Promise<boolean> {
+/** Whether an Agents page of this site, in another tab, answers `ask` with `want` within `ms`. */
+function askAgentsTab(ask: "live?" | "remembered?", want: "live" | "remembered", ms: number): Promise<boolean> {
   return new Promise((done) => {
     let ch: BroadcastChannel;
     try { ch = new BroadcastChannel(LIVE); } catch { done(false); return; }
     const t = setTimeout(() => { ch.close(); done(false); }, ms);
-    ch.onmessage = (e) => { if (e.data !== "live") return; clearTimeout(t); ch.close(); done(true); };
-    ch.postMessage("live?");
+    ch.onmessage = (e) => { if (e.data !== want) return; clearTimeout(t); ch.close(); done(true); };
+    ch.postMessage(ask);
   });
 }
+/** Whether an Agents page of this site, in another tab, says its agent is connected, within `ms`. */
+export const agentsTabLive = (ms = 400) => askAgentsTab("live?", "live", ms);
+/** Whether one says its connection is local and remembered (one this browser's remembered access can take over). */
+export const agentsTabRemembered = (ms = 400) => askAgentsTab("remembered?", "remembered", ms);
+/** Ask the other Agents tabs to let go of a remembered local connection: the bare string, nothing else. */
+export function releaseAgentsTab(): void {
+  try { const ch = new BroadcastChannel(LIVE); ch.postMessage("release"); ch.close(); } catch {}
+}
+/** The channel's messages, exactly (for the tests' census). */
+export const AGENTS_TAB_MESSAGES: ReadonlySet<string> = MESSAGES;
 /** Leaving for `url`: from a Files tab the Agents page opened, to the Agents page while that tab's agent is connected,
  * this tab closes instead (true). Else false (another tab, another address, no such Agents tab, or the browser kept
  * this tab open), and the caller goes to `url` as before. */

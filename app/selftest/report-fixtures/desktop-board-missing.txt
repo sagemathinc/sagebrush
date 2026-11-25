@@ -18,7 +18,8 @@ ok   the page reaches the app's bridge: nonce=0b8c2a3e-1f2d-4e5f-8a9b-0c1d2e3f4a
 ok   the shell worker can't reach the app's bridge: engine=chromium mode=all-events violations=3 events=ipc-scheme:1,ipc-localhost:1,own-origin:1 unmatched=0 differential=own-origin:refused,control:fetched-ok routes=tauri-internals-invoke:unavailable,tauri-core-invoke:unavailable,ipc-postmessage:unavailable,webkit-ipc-postmessage:unavailable,webview2-postmessage:unavailable ipc=ipc-scheme:refused,ipc-localhost:refused
 ok   the LaTeX editor is on in the desktop app: on=true New > LaTeX document: shown
 ok   a .tex opens in the editor and renders: the title and the formula shown
-ok   Share, Agent and Run say what the app doesn't offer: share=disabled "Sharing isn't available here: upload this file, and the f" agent=hidden run="Run" said "Run isn't available in the desktop app: to run this document"
+ok   Share and Agent say what the app doesn't offer: share=disabled "Sharing isn't available here: upload this file, and the f" agent=hidden
+ok   Run runs a SageTeX item in the app: run="Run the document's Sage code on this computer: Shift+Enter" preview="Hello from the app Two is 2, and x2+1." status=""
 info origin: "http://127.0.0.1:41234"
 info secure-context: true
 info top-level: true

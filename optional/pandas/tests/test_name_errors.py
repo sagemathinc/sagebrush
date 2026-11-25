@@ -1,6 +1,8 @@
-# A pandas name outside the subset raises an error that is both a NotImplementedError (the subset's refusal) and an
-# AttributeError, so that hasattr() gives False and getattr() with a default gives the default, as for a name that
-# pandas lacks; the message is the refusal's. pandas has these names, so this test's .out is Sagebrush's
+# A pandas name outside the subset on an object raises an error that is both a NotImplementedError (the subset's
+# refusal) and an AttributeError, so that hasattr() gives False and getattr() with a default gives the default, as
+# for a name that pandas lacks; the message is the refusal's. A name of the pandas module itself raises the builtin
+# NotImplementedError only, so that `from pandas import name` keeps the message (from-import turns an
+# AttributeError into a bare ImportError). pandas has these names, so this test's .out is Sagebrush's
 # (sagebrush-only.txt).
 import builtins
 import pandas as pd
@@ -10,7 +12,6 @@ s = pd.Series([1, 2])
 df = pd.DataFrame({"k": [1, 1], "a": [1.0, 2.0]})
 d = pd.to_datetime(pd.Series(["2020-01-01"]))
 objects = [
-    ("module", pd, "pivot_table", "concat"),
     ("Series", s, "divmod", "sum"),
     ("DataFrame", df, "pivot_table", "sum"),
     ("Index", df.columns, "map", "tolist"),
@@ -37,6 +38,23 @@ for what, obj, name, have in objects:
     case(what + ".missing-name", lambda: (hasattr(obj, "no_such_name"), type(raised(obj, "no_such_name")).__name__))
     if have is not None:
         case(what + ".present-name", lambda: hasattr(obj, have))
+
+# (the module: the builtin NotImplementedError alone, from attribute access and from a from-import, with the message;
+# a name pandas lacks too is an AttributeError, a present name found)
+def from_import():
+    try:
+        from pandas import pivot_table  # noqa: F401
+    except Exception as e:
+        return e
+    return None
+
+
+case("module.error", lambda: (type(raised(pd, "pivot_table")).__name__, str(raised(pd, "pivot_table"))))
+case("module.bases", lambda: (type(raised(pd, "pivot_table")) is builtins.NotImplementedError,
+                              isinstance(raised(pd, "pivot_table"), AttributeError)))
+case("module.from-import", lambda: (type(from_import()) is builtins.NotImplementedError, str(from_import())))
+case("module.missing-name", lambda: (hasattr(pd, "no_such_name"), type(raised(pd, "no_such_name")).__name__))
+case("module.present-name", lambda: hasattr(pd, "concat"))
 
 # (an argument outside the subset still raises the builtin NotImplementedError alone)
 case("argument-refusal", lambda: (lambda e: (type(e) is builtins.NotImplementedError, isinstance(e, AttributeError)))(
