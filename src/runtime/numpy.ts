@@ -415,6 +415,17 @@ function allSafe(a: NDArray): boolean {
   return ok;
 }
 
+// A float cast into an int8 to uint32 dtype as NumPy's C cast does on x86: through a 32-bit integer (a 64-bit one
+// for uint32), so a value that integer does not hold gives its minimum, whose low bits are 0 (the int32 minimum
+// itself in int32); one it holds wraps into the dtype, as the typed array's store wraps it. (NumPy's SIMD loop for
+// uint32, on 8 elements or more, differs from this for values outside (-2**31, 2**32); this is its scalar path.)
+function castFloat(dt: DType, v: number): number {
+  if (!isSmallInt(dt) || !Number.isFinite(v)) return castNum(dt, v);
+  const t = Math.trunc(v), lim = dt.name === "uint32" ? 9223372036854775808 : 2147483648;
+  if (t >= -lim && t < lim) return t + 0;
+  return dt.name === "int32" ? -2147483648 : 0;
+}
+
 function castNum(dt: DType, v: number): number {
   switch (dt.kind) {
     case "b":
@@ -638,12 +649,14 @@ function assign(out: NDArray, src: NDArray) {
   }
   const dt = out.dt;
   if (src.dt.cplx) {
-    loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = castNum(dt, sd[2 * q])));
+    loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = castFloat(dt, sd[2 * q])));
   } else if (isWide(dt) && isWide(src.dt) && src.dt !== dt) {
     // (int64 <-> uint64: NumPy's wrap, certified)
     loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = exact64(dt, BigInt(sd[q])) ?? wideRefuse(dt)));
   } else if (dt.kind === "f" || dt.ctor !== Float64Array && dt.kind !== "b" && src.dt.isInt) {
     loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = sd[q]));
+  } else if (src.dt.kind === "f") {
+    loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = castFloat(dt, sd[q])));
   } else {
     loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = castNum(dt, sd[q])));
   }
@@ -739,7 +752,11 @@ function fill(out: NDArray, x: any) {
       const c = toC(v);
       d[2 * k] = c[0];
       d[2 * k + 1] = c[1];
-    } else d[k] = castNum(dt, toNum(v, isSmallInt(dt) ? undefined : dt));
+    } else if (isSmallInt(dt)) {
+      // (a float, Python's or NumPy's, already admitted: cast as NumPy casts it)
+      const n = toNum(v);
+      d[k] = pyScalar(v)?.kind === "f" ? castFloat(dt, n) : castNum(dt, n);
+    } else d[k] = castNum(dt, toNum(v, dt));
     k++;
   };
   put(x);
