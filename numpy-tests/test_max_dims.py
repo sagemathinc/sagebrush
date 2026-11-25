@@ -57,5 +57,52 @@ cases = [
     ("str 65", lambda: np.empty((1,) * 65, dtype="U3")),
     ("str reshape 65", lambda: np.array(["ab"]).reshape((1,) * 65)),
 ]
+
+# advanced indexing: the result's dimensions count the index arrays' broadcast rank (NumPy's IndexError past 64)
+cases += [
+    ("adv [0] (64)", lambda: a64[[0]]),
+    ("adv array 1-d (64)", lambda: a64[np.array([0])]),
+    ("adv array 2-d (65)", lambda: a64[np.array([[0]])]),
+    ("adv array 3-d (66)", lambda: a64[np.array([[[0]]])]),
+    ("adv array 2-d and newaxis (66)", lambda: a64[np.array([[0]]), None]),
+    ("adv two arrays broadcast (64)", lambda: a64[np.array([[0]]), np.array([0])]),
+    ("adv two arrays broadcast (65)", lambda: a64[np.array([[[0]]]), np.array([0])]),
+    ("adv two arrays broadcast and newaxis (65)", lambda: a64[np.array([[0]]), None, np.array([0])]),
+    ("adv two arrays 1-d (63)", lambda: a64[np.array([0]), np.array([0])]),
+    ("adv bool (64)", lambda: a64[np.array([True])]),
+    ("adv bool and newaxis (65)", lambda: a64[np.array([True]), None]),
+    ("adv 2-d bool and two newaxis (65)", lambda: a64[np.ones((1, 1), dtype=bool), None, None]),
+    ("adv 2-d bool and newaxis (64)", lambda: a64[np.ones((1, 1), dtype=bool), None]),
+    ("adv int and array 2-d (64)", lambda: a64[0, np.array([[0]])]),
+    ("adv on 63-d array 2-d (64)", lambda: np.zeros((1,) * 63)[np.array([[0]])]),
+]
+
+
+class Proto:
+    """An object with __array__, counting its calls: NumPy refuses ndmin > 64 before calling it."""
+    calls = 0
+
+    def __array__(self, dtype=None, copy=None):
+        Proto.calls += 1
+        return np.zeros(2)
+
+
+def proto_ndmin(n):
+    Proto.calls = 0
+    try:
+        r = np.array(Proto(), ndmin=n).ndim
+    except ValueError as e:
+        r = "ValueError " + str(e)
+    return r, "__array__ calls", Proto.calls
+
+
 for name, f in cases:
     show(name, f)
+# (the limit before any storage is asked for: a size no memory holds, with 65 dimensions, is the dimension error,
+# not a MemoryError)
+show("huge 65 zeros", lambda: np.zeros((10 ** 12,) + (1,) * 64))
+show("huge 65 empty", lambda: np.empty((10 ** 9,) + (1,) * 64))
+show("huge 65 str", lambda: np.empty((10 ** 10,) + (1,) * 64, dtype="U3"))
+show("huge 65 full", lambda: np.full((10 ** 9,) + (1,) * 64, 1.0))
+print("protocol ndmin 65", proto_ndmin(65))
+print("protocol ndmin 64", proto_ndmin(64))

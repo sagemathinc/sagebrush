@@ -297,6 +297,8 @@ export const ARRAY_LIMITS = { elements: 2 ** 32, bytes: 2 ** 32 };
 // integer rather than Infinity, since the admission counts in BigInt)
 if (nativeHost()) ARRAY_LIMITS.bytes = Number.MAX_SAFE_INTEGER;
 export function admitArray(shape: readonly (number | bigint)[], dt: DType, scratch = 0): void {
+  // (NumPy's limit of 64 dimensions first, before any storage is asked for)
+  if (shape.length > MAX_DIMS) tooManyDims(shape.length);
   let n = 1n;
   for (const d of shape) n *= typeof d === "bigint" ? d : BigInt(d);
   const bytes = n * BigInt(dt.itemsize);
@@ -1055,14 +1057,15 @@ function resolveIndex(a: NDArray, key: any): IndexResult {
   if (items.reduce((s, k) => s + consumes(k), 0) > a.ndim) {
     raise(T.IndexError, `too many indices for array: array is ${a.ndim}-dimensional, but ${items.reduce((s, k) => s + consumes(k), 0)} were indexed`);
   }
-  // (the result's dimensions, counted as NumPy's prepare_index counts them before indexing: the array's, less
-  // those an integer or an index array takes, plus each newaxis)
-  const resultDims = a.ndim - items.reduce((s, k) => s + (k instanceof O.PySlice || k === null ? 0 : consumes(k)), 0) + items.filter((k) => k === null).length;
-  if (resultDims > MAX_DIMS) raise(T.IndexError, `number of dimensions must be within [0, ${MAX_DIMS}], indexing result would have ${resultDims}`);
   // advanced indices: arrays and lists of ints or bools
   items = items.map((k) => (Array.isArray(k) && !(k as any).$t ? fromPy(k) : k));
   items = items.map((k) => (Array.isArray(k) && (k as any).$t ? fromPy(k) : k));
   const hasAdv = items.some((k) => k instanceof NDArray);
+  // (the result's dimensions, counted as NumPy counts them before indexing: the array's, less those an integer or
+  // an index array takes, plus each newaxis, plus the index arrays' broadcast rank (a boolean one's nonzero is 1-d))
+  const advRank = hasAdv ? Math.max(0, ...items.filter((k) => k instanceof NDArray).map((k: any) => (k.dt.kind === "b" ? 1 : k.ndim))) : 0;
+  const resultDims = a.ndim - items.reduce((s, k) => s + (k instanceof O.PySlice || k === null ? 0 : consumes(k)), 0) + items.filter((k) => k === null).length + advRank;
+  if (resultDims > MAX_DIMS) raise(T.IndexError, `number of dimensions must be within [0, ${MAX_DIMS}], indexing result would have ${resultDims}`);
   if (!hasAdv) {
     const shape: number[] = [], strides: number[] = [];
     let off = a.offset, d = 0;
@@ -3453,6 +3456,7 @@ function numStr(dt: DType, data: any, p: number): string {
 }
 
 export function strEmpty(shape: number[], dt: StrDType): StrArray {
+  // (admitArray refuses more than 64 dimensions before the strings are made)
   admitArray(shape, dt as unknown as DType);
   return new StrArray(dt, new Array(prod(shape)).fill(""), shape.slice(), cStrides(shape));
 }
@@ -3988,11 +3992,12 @@ newBuiltinModule("_numpy", (m) => {
 
   // creation (strings in the data, a string array or a string dtype: a string array)
   fn("array", (obj: any, dtype: any = null, copyFlag: any = true, ndmin: any = 0) => {
+    // (ndmin checked first, as NumPy's: before any conversion or protocol call)
+    if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`);
     let r: any;
     if (obj instanceof StrArray) r = dtype === null ? (copyFlag === false ? obj : strCopy(obj)) : strAstype(obj, dtype);
     else if (obj instanceof NDArray && dtype !== null && strSpec(dtype) !== null) r = numToStr(obj, strSpec(dtype)!);
     else r = obj instanceof NDArray ? (copyFlag === false && (dtype === null || toDtype(dtype) === obj.dt) ? obj : copy(obj, dtype === null ? obj.dt : toDtype(dtype))) : fromPy(obj, dtype, copyFlag, true);
-    if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`);
     while (r.ndim < Number(ndmin)) r = rs(r, [1, ...r.shape]);
     return r;
   });
