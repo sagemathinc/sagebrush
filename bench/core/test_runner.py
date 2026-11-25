@@ -1778,10 +1778,80 @@ class Stream(unittest.TestCase):
         pts = json.loads((d / "calibration.json").read_text())["points"]
         self.assertEqual(len(pts), 1)
         self.assertTrue(pts[0]["stream"])
-        self.assertEqual(pts[0]["backends"]["magma"]["seconds_per_input"], [1, 1, 2, 2, 4])
-        self.assertEqual(pts[0]["backends"]["user"]["seconds_per_input"], [9, 2, 4, 6, 8])
+        # (the cold input 0 apart: the list starts at input 1)
+        self.assertEqual(pts[0]["backends"]["magma"]["seconds_per_input"], [1, 2, 2, 4])
+        self.assertEqual(pts[0]["backends"]["magma"]["seconds_cold"], 1)
+        self.assertEqual(pts[0]["backends"]["user"]["seconds_per_input"], [2, 4, 6, 8])
+        self.assertEqual(pts[0]["backends"]["user"]["seconds_cold"], 9)
         self.assertIn("per_input_user", pts[0]["per_input"])
         self.assertIn("per input [", (d / "summary.md").read_text())
+
+    def invoke_with(self, lines, k=5):
+        # (the real invoke and parser, on a stand-in driver printing lines)
+        cmd = [PY, "-c", "print(%r)" % "\n".join(lines)]
+        with (
+            mock.patch.object(run, "command", lambda b, row, n, mode, kk=1: cmd),
+            mock.patch.object(run, "CAP", None),
+        ):
+            return run.invoke("user", dict(ROW, stream=True), 18, "time-stream", 30, k)
+
+    HEAD = '"granularity":1e-7,"threshold":0.001,"seed":0'
+    TIME = "TIME|0.2|5:1|0.1|0.4|1|4"
+
+    def test_invoke_refuses_a_stream_run_without_its_record(self):
+        five = "[[0.9],[0.1],[0.2],[0.3],[0.4]]"
+        cases = {
+            "missing": [self.TIME],
+            "wrong K": ['TIMING|{%s,"k":4,"mode":"stream","samples":[[0.9],[0.1],[0.2],[0.3]]}' % self.HEAD, self.TIME],
+            "per-op mode": ['TIMING|{%s,"k":5,"mode":"per-op","samples":[[0.9,0.8],[0.1,0.1],[0.2,0.2],[0.3,0.3],[0.4,0.4]]}' % self.HEAD, self.TIME],
+            "malformed count": ['TIMING|{%s,"k":5,"mode":"stream","samples":[[0.9],[0.1],[0.2],[0.3]]}' % self.HEAD, self.TIME],
+        }
+        for name, lines in cases.items():
+            with self.subTest(name):
+                r = self.invoke_with(lines)
+                self.assertEqual(r["status"], "error")
+                self.assertIn("stream TIMING record of K = 5", r["detail"])
+                self.assertFalse({"seconds", "timing", "samples"} & set(r), r)
+        r = self.invoke_with(['TIMING|{%s,"k":5,"mode":"stream","samples":%s}' % (self.HEAD, five), self.TIME])
+        self.assertEqual((r["status"], r["timing"]["mode"], r["seconds"]), ("ok", "stream", 0.2))
+
+    def point_with(self, magma):
+        # (point on fake drivers: the user run a valid stream, the
+        # reference's as given)
+        row = dict(ROW, stream=True, fresh=True, sizes={"s": {"n": 18, "variants": 5, "timeout": 30}})
+        user = {"status": "ok", "seconds": 4, "signature": "5:1",
+                "timing": {"granularity": 1e-7, "threshold": 1e-3, "seed": 0, "k": 5, "mode": "stream", "samples": [[9], [2], [4], [6], [8]]}}
+
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": "5"}
+            if mode == "once":
+                return {"status": "ok", "signature": "s"}
+            return dict(user if b == "user" else magma)
+
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+        ):
+            return run.point(row, "s", ["user", "magma"], {"artifacts": ARTS})
+
+    def test_point_is_an_error_without_a_paired_reference(self):
+        # (the reference's stream run refused by invoke: the point is an
+        # error with no ratio, not an aggregate one)
+        rec = self.point_with({"status": "error", "detail": "time-stream needs a stream TIMING record of K = 5 (got none)"})
+        self.assertEqual(rec["status"], "error")
+        self.assertIn("magma", rec["stream_error"])
+        self.assertFalse([x for x in rec if x.startswith("ratio_") or x.startswith("per_input_")], rec)
+
+    def test_point_never_takes_a_non_stream_record_as_paired(self):
+        # (a record of another mode, had it got past invoke: no per-input
+        # pairing and no headline ratio, only the ratio of medians)
+        per_op = {"status": "ok", "seconds": 2, "signature": "5:1",
+                  "timing": {"granularity": 1e-7, "threshold": 1e-3, "seed": 0, "k": 5, "mode": "per-op", "samples": [[1, 1], [1, 1], [2, 2], [2, 2], [4, 4]]}}
+        rec = self.point_with(per_op)
+        self.assertNotIn("per_input_user", rec)
+        self.assertNotIn("ratio_user", rec)
+        self.assertEqual(rec["ratio_user_of_medians"], 2.0)
 
     GRID = [(k, n, v) for k in ("prime", "composite", "large_h") for n in (12, 18) for v in range(5)]
     GRID += [(k, 40, v) for k in ("prime", "composite", "large_h") for v in range(2)]

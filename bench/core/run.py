@@ -1102,6 +1102,8 @@ def invoke(
 ) -> dict:
     """One driver run, its output parsed; with cpus (the thread sweep),
     pinned to them, on len(cpus) threads."""
+    # (the K asked for: the TIME line's parse below reuses k for its reps)
+    want_k = k
     cmd = command(backend, row, n, mode, k)
     s0 = cpu_times()
     extra = (
@@ -1148,6 +1150,17 @@ def invoke(
             r["timing"] = timing
             if "vtime" in timing:
                 r["vtime"] = timing["vtime"]
+        if mode == "time-stream" and not (
+            timing is not None and timing.get("mode") == "stream" and timing.get("k") == want_k
+        ):
+            # (a stream run is only its per-input record: without a valid
+            # one of exactly K inputs it is an error, and its aggregate TIME
+            # numbers are dropped, so nothing falls back to them)
+            got = "none" if timing is None else "mode %s, K %s" % (timing.get("mode"), timing.get("k"))
+            for x in ("seconds", "min", "max", "reps", "samples", "timing", "vtime"):
+                r.pop(x, None)
+            r["status"] = "error"
+            r["detail"] = f"time-stream needs a stream TIMING record of K = {want_k} (got {got})"
     return r
 
 
@@ -1352,6 +1365,13 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
             for t in timed.values():
                 if t["status"] == "ok":
                     t["status"] = "mismatch"
+        # (a stream point is its per-input pairing: a backend whose stream
+        # run failed, or came back without its stream record, makes the
+        # whole point an error rather than leaving an unpaired one)
+        failed = {b: t.get("detail") or t["status"] for b, t in timed.items() if t["status"] != "ok"}
+        if row.get("stream") and failed and rec["status"] == "ok":
+            rec["status"] = "error"
+            rec["stream_error"] = failed
         # the thread sweep (--sweep, rows marked "sweep"): each -n backend
         # again on each column's cpus, pinned; "ends" only the first and
         # the last column (a flat baseline); a combined signature that
@@ -1430,8 +1450,9 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
             # apart and never in the median)
             def per_input(b):
                 t = rec["backends"].get(b, {}).get("time", {})
-                smp = (t.get("timing") or {}).get("samples")
-                if t.get("status") != "ok" or not smp or len(smp) != k:
+                tm = t.get("timing") or {}
+                smp = tm.get("samples")
+                if t.get("status") != "ok" or tm.get("mode") != "stream" or not smp or len(smp) != k:
                     return None
                 return [x[0] for x in smp]
 
@@ -1448,7 +1469,7 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
                     return round(ratios[round(f * (len(ratios) - 1))], 4)
 
                 key = b.replace("-", "_")
-                rec["ratio_" + key + "_of_medians"] = rec.get("ratio_" + key)
+                rec["ratio_" + key + "_of_medians"] = rec.pop("ratio_" + key, None)
                 rec["ratio_" + key] = q(0.5)
                 rec["per_input_" + key] = {
                     "against": best,
@@ -1461,6 +1482,12 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
                     "cold": round(ours[0] / ref[0], 4) if ref[0] > 0 else None,
                     "reference_zero_samples": sum(1 for r in ref[1:] if r <= 0),
                 }
+            # (no aggregate headline for a stream row: a backend without its
+            # per-input pairing keeps the ratio of medians under that name)
+            for b in ("user", "native", "native-host", "wasm"):
+                key = b.replace("-", "_")
+                if "per_input_" + key not in rec and "ratio_" + key in rec:
+                    rec["ratio_" + key + "_of_medians"] = rec.pop("ratio_" + key)
         if row.get("cold"):
             # (a row whose reference reuses internal state across repetitions
             # in one process, hecke_matrix: every headline ratio is the cold
@@ -1534,8 +1561,8 @@ def calibration(out: Path) -> None:
     and every stream point, measured under this protocol, with what the
     fits use (n, the working set, the host, the units, and per calibrated
     target its times and per-variant vtime; for a stream point every
-    backend's seconds per input, references included, and the per-input
-    ratios, input 0 being the cold one).  A point of another protocol is never mixed in:
+    backend's seconds per input from input 1 on, references included, its
+    cold input 0 apart as seconds_cold, and the per-input ratios).  A point of another protocol is never mixed in:
     it is only counted.  A point whose units are "unmetered" (an op the
     meter doesn't cover yet) has times but no units: the fits must skip it
     for the unit-cost terms."""
@@ -1560,7 +1587,10 @@ def calibration(out: Path) -> None:
         for b, v in r.get("backends", {}).items():
             t = v.get("time") or {}
             if r.get("stream") and (t.get("timing") or {}).get("mode") == "stream":
-                pt["backends"].setdefault(b, {})["seconds_per_input"] = [x[0] for x in t["timing"]["samples"]]
+                # (the cold input 0 apart, so a fit reading the list can't
+                # take it: seconds_per_input starts at input 1)
+                smp = [x[0] for x in t["timing"]["samples"]]
+                pt["backends"].setdefault(b, {}).update(seconds_cold=smp[0], seconds_per_input=smp[1:])
             if b not in VTIME_TARGETS:
                 continue
             pt["backends"][b] = dict(pt["backends"].get(b, {}), status=(t or v.get("check") or v).get("status"))
