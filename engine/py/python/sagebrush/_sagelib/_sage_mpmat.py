@@ -14,7 +14,7 @@ Sage's ZeroDivisionError for the inverse and 0 for the determinant."""
 
 def _core():
     try:
-        from sagebrush import _mpcore as C  # the CPython package: the core natively
+        from _sagebrush_lib import _mpcore as C  # the CPython package: the core natively
     except ImportError:
         import _sagebrush_mpcore as C  # pyjs: the builtin module (WebAssembly, or the host's native core)
     return C
