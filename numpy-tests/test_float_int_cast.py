@@ -67,3 +67,8 @@ for dt in ("uint8", "uint16", "int8", "int16", "int32", "uint32"):
     for v in (np.float64(3e9 + 1), np.float64(70000.7), np.float64(-1.5), np.float64(1e20), np.float32(3e9), np.float64(2.0 ** 32 + 5),
               np.int64(2 ** 40 + 3), np.int64(-(2 ** 40) - 3), np.int64(70000), np.uint64(2 ** 40 + 3)):
         print(dt, repr(v), "| lone", show(lambda: np.array(v, dtype=dt)), "| list", show(lambda: np.array([v], dtype=dt)))
+
+# (np.full casts any value but a Python int, the same way)
+for dt in ("int8", "uint8", "int16", "uint16", "int32", "uint32"):
+    print(dt, "full", [show(lambda: np.full(2, v, dt)) for v in (3e9 + 1, np.float64(3e9 + 1), 70000.7, np.float64(-1.5), 1e20,
+                                                                 float("nan"), 2.0 ** 32 + 5, np.float32(3e9))])
