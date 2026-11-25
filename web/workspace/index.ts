@@ -13,8 +13,6 @@ export { reserve, reserved, RESERVE_BYTES } from "./reserve";
 export { IdbStore, IdbPatchStore, openHistoryDb, openBoardHistoryDb, setSaveGate, ownedByWorkspace, LOCK_WAIT, HISTORY_BACKLOG, JOURNAL_TX_HOOK, historyBacklog, onHistoryRefused } from "../notebook/stores.js";
 export { Outbox, OUTBOX, Fenced, switchTo, currentLease, sender, wireOf, recordBytes, chargeOf, type Lease, type OutboxRecord, type WireOp } from "./sync-outbox";
 export { PINS, RELEASE_COST, VDUE, VOVER, BACKFILL, GONE, syncOff, cleanPins, scheduleClean, bytesFor, capNow, pinTotal, liveLease, epochOf, newEpoch, metaWrite, type Pin, type Pending, type NsState, type Skipped } from "./sync-pins";
-// (e2e PR 5c: an epoch's keys, for the sealed sends' key provider: a fixture's in tests until the page's key store exists)
-export { deriveEpochKeys } from "./e2e/keys.ts";
 export { SyncClient, CLIENT, READY, realClock, type Clock, type SyncStatus, type IndexOp, type IndexPage, type Refusal, type ClientOptions, type Work } from "./sync-client";
 export { applyOps, applyConfirmed, confirmedIndex, cursorOf, confirmedEntry, genPrefix, genKey, cursorKey, idbStore } from "./sync-confirmed";
 export { applyView, VIEW_STORES, listedSummary, type ListedWhy, type JournalRecord } from "./sync-view";

@@ -30,13 +30,14 @@ if (process.env.SYNC_REQUIRE_CLAIM !== "1") {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const J = JSON.stringify;
-// (each case signs in its own account, so none sees another's log: 97 of them, then FULL and SMALL, which end the
-// cases' pool; an id's index stays under 100, its last group 12 hex digits)
+// (each case signs in its own account, so none sees another's log: 97 of them and 30 more, then FULL and SMALL, which
+// end the cases' pool; an id's index stays under 100 in its family, its last group 12 hex digits)
 const accountId = (i) => `c1c1c1c1-${String(i).padStart(4, "0")}-4c1c-8c1c-c1c1c1c1c1${String(i).padStart(2, "0")}`;
+const accountId2 = (i) => `c2c2c2c2-${String(i).padStart(4, "0")}-4c2c-8c2c-c2c2c2c2c2${String(i).padStart(2, "0")}`;
 // (the cloud's fake CoCalc gives FULL a small storage and SMALL small files; the reference server has no plan limits,
 // so the two cases that use them are skipped here, by name)
 const FULL = accountId(87), SMALL = accountId(88);
-const ACCOUNTS = [...Array.from({ length: 99 }, (_, i) => accountId(i)).filter((a) => a !== FULL && a !== SMALL), FULL, SMALL];
+const ACCOUNTS = [...Array.from({ length: 99 }, (_, i) => accountId(i)).filter((a) => a !== FULL && a !== SMALL), ...Array.from({ length: 30 }, (_, i) => accountId2(i)), FULL, SMALL];
 // (the control pages' accounts: their own, so no case of the main run sees a control's log)
 // (each control page takes its own 3 of them, by its place in CONTROL_PAGES)
 const CTL_ACCOUNTS = Array.from({ length: 30 }, (_, i) => `d0d0d0d0-${String(i).padStart(4, "0")}-4d0d-8d0d-d0d0d0d0d0${String(i).padStart(2, "0")}`);
@@ -610,7 +611,7 @@ async function serveOp(req, server, u, p) {
       floorsFront.served.push(createHash("sha256").update(bytes).digest("hex"));
       return new Response(bytes, { headers: { "content-type": "text/javascript" } });
     }
-    if (p === "/" || p === "/ws.js" || p === "/cases.js" || p === "/ctl.html" || (FLOORS && p === "/floors.html")) {
+    if (p === "/" || p === "/ws.js" || p === "/cases.js" || p === "/sealkit.js" || p === "/ctl.html" || (FLOORS && p === "/floors.html")) {
       return new Response(Bun.file(join(site, p === "/" ? "index.html" : p.slice(1))), { headers: { "content-type": p.endsWith(".js") ? "text/javascript" : "text/html" } });
     }
     if (p === "/__ctl") {
@@ -1576,6 +1577,12 @@ try {
     waitingOn = "the page's bundle (Bun.build of index.ts)";
     const b = await bounded(Bun.build({ entrypoints: [join(here, "index.ts")], outdir: site, naming: "ws.js", target: "browser", format: "esm" }), waitingOn, 120_000);
     if (!b.success) throw new Error("the page's bundle: " + b.logs.map(String).join("\n"));
+    // (e2e PR 5c: the sealing module and an epoch's keys, a bundle of their own that only the sealed cases load, so the
+    // workspace's bundle carries none of it, as a page without end-to-end encryption doesn't)
+    const kitEntry = join(site, "sealkit-entry.ts");
+    writeFileSync(kitEntry, `export * from ${J(join(here, "sync-seal.ts"))};\nexport { deriveEpochKeys } from ${J(join(here, "e2e", "keys.ts"))};\n`);
+    const kb = await bounded(Bun.build({ entrypoints: [kitEntry], outdir: site, naming: "sealkit.js", target: "browser", format: "esm" }), "the sealed cases' kit", 120_000);
+    if (!kb.success) throw new Error("the sealed cases' kit: " + kb.logs.map(String).join("\n"));
     copyFileSync(join(here, "sync-client-cases.js"), join(site, "cases.js"));
     writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>sync client test</title><script>window.ACCOUNTS = ${J(ACCOUNTS)}; window.FULL = ${J(FULL)}; window.SMALL = ${J(SMALL)}; window.REQUIRE_CLAIM = true; window.__budgets = ${J(MAIN_BUDGETS)};</script><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
     // (the control pages: their own accounts, never the main run's, and their own budgets; P7 has none, so it's legacy)

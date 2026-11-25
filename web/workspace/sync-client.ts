@@ -32,7 +32,7 @@
 import { COPIES, LEGACY_MAX, type Workspace } from "./api";
 import { inTx, req } from "./db";
 import { Outbox, Fenced, switchTo, renewLease, sender, obligate, rebuildKey, wireOf, ownedSeq, SealedMismatch, type Lease, type OutboxRecord, type WireOp } from "./sync-outbox";
-import { envHashOf, sealOps, sopsItem, type OpKeys } from "./sync-seal";
+import type * as SealMod from "./sync-seal";
 import { seedLedger, hubOf, driveObsolete, ledgerKeys } from "./sync-ledger";
 import { bytesFor } from "./sync-pins";
 import { cursorOf, applyOps, genPrefix, drainConfirmed } from "./sync-confirmed";
@@ -187,9 +187,11 @@ export type ClientOptions = {
   docs?: DocSync;
   /** (P0 #3) the network's state and its return: the browser's unless given (tests) */
   net?: NetWatch;
-  /** (e2e PR 5c) index ops sealed and signed at send time (sync-seal.ts), sent as `sops`: given only with a key
-   * provider, which no page gives yet. Another device's sealed ops halt the pull until they can be verified (5c-2) */
-  e2e?: OpKeys;
+  /** (e2e PR 5c) index ops sealed and signed at send time, sent as `sops`: given only with a key provider, which no
+   * page gives yet, and the sealing module itself (sync-seal.ts, the `kit`), passed in rather than imported, so a page
+   * without end-to-end encryption carries none of its code. Another device's sealed ops halt the pull until they can
+   * be verified (5c-2) */
+  e2e?: { keys: SealMod.OpKeys; kit: Pick<typeof SealMod, "sealOps" | "sopsItem" | "envHashOf"> };
 };
 
 const key = (ns: string, what: string) => `sync:${ns}:${what}`;
@@ -819,7 +821,7 @@ export class SyncClient {
         }
         if (sealedRow(o)) {
           const s = kept.get(o.dseq);
-          if (!s || (await envHashOf((o as unknown as { env: string }).env)) !== s.envHash) {
+          if (!s || (await this.opts.e2e!.kit.envHashOf((o as unknown as { env: string }).env)) !== s.envHash) {
             await this.halt(c, "diverged", `the server's sealed op ${o.seq} for dseq ${o.dseq} isn't the envelope this device sealed`);
             return;
           }
@@ -1090,7 +1092,7 @@ export class SyncClient {
       // record not yet accepted is sealed again under the chain as it is now, with its dseq)
       if (code === "conflict" && (detail.reason === "stale_head" || detail.reason === "no_chain")) {
         await c.ob.dropSealed();
-        await this.opts.e2e.chain(true);
+        await this.opts.e2e.keys.chain(true);
       }
       // (the sealed log is full: no resend can fit, so it stops and says so, rather than trying again)
       if (code === "limit" && detail.limit === "sealed_log") {
@@ -1896,7 +1898,7 @@ export class SyncClient {
    * runs, each chained from the record before it), or null if a sealing couldn't be kept (an ack or a drop came
    * meanwhile: sealed again on the next run). */
   private async sealFor(c: Conn, batch: OutboxRecord[]): Promise<unknown[] | null> {
-    const keys = this.opts.e2e!;
+    const { keys, kit } = this.opts.e2e!;
     const have = await c.ob.sealed(batch.map((r) => r.dseq));
     for (let i = 0; i < batch.length; ) {
       if (have.has(batch[i].dseq)) {
@@ -1906,12 +1908,12 @@ export class SyncClient {
       let j = i;
       while (j < batch.length && !have.has(batch[j].dseq)) j++;
       const prev = await c.ob.chainAfter(batch[i].dseq - 1);
-      const fresh = await sealOps(keys, c.generation, this.w.device, batch.slice(i, j).map((r) => r.op), prev);
+      const fresh = await kit.sealOps(keys, c.generation, this.w.device, batch.slice(i, j).map((r) => r.op), prev);
       if (!(await c.ob.keepSealed(fresh, prev))) return null;
       for (const s of fresh) have.set(s.dseq, s);
       i = j;
     }
-    return batch.map((r) => sopsItem(have.get(r.dseq)!));
+    return batch.map((r) => kit.sopsItem(have.get(r.dseq)!));
   }
 
   private async halt(c: Conn, why: "invalid" | "diverged", detail: string) {

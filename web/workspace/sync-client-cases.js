@@ -4873,10 +4873,12 @@ const e2eId = () => {
   return Array.from(r.subarray(0, 25), (x) => A[x & 31]).join("") + "aeimquy4"[r[25] & 7];
 };
 async function sealedFixture(accountId) {
+  // (the kit: the sealing module, loaded only here; the workspace's bundle doesn't carry it)
+  const kit = await import("./sealkit.js");
   const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"]);
   const raw = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
   const id = e2eId(), account = "e2e-" + e2eId();
-  const keys = await W.deriveEpochKeys(rand32(), account, 1);
+  const keys = await kit.deriveEpochKeys(rand32(), account, 1);
   const server = { head: b64u(rand32()), generation: b64u(rand32()) };
   let view = { ...server, currentEpoch: 1 };
   const refreshes = { n: 0 };
@@ -4888,7 +4890,7 @@ async function sealedFixture(accountId) {
     chain: async (refresh) => { if (refresh) { refreshes.n++; view = { ...server, currentEpoch: 1 }; } return view; },
     epochKeys: async (n) => (n === 1 ? keys : null),
   };
-  return { provider, refreshes, server, move: async () => { server.head = b64u(rand32()); await put(); } };
+  return { provider, kit, refreshes, server, move: async () => { server.head = b64u(rand32()); await put(); } };
 }
 const sealedSends = (log) => log.sent.filter((m) => m.t === "sops");
 const itemsOf = (sends) => sends.flatMap((m) => m.json.map((j) => JSON.parse(j)));
@@ -4897,7 +4899,7 @@ async function sealedSend() {
   const id = await account();
   const f = await sealedFixture(id);
   const w = await fresh();
-  const c = client(w, { e2e: f.provider });
+  const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
   check(await until(() => settled(w, c)), "sealed send: synced");
   await ctl("log", { reset: true });
   await w.mkdir("/s");
@@ -4918,7 +4920,7 @@ async function sealedLostAck() {
   const id = await account();
   const f = await sealedFixture(id);
   const w = await fresh();
-  const c = client(w, { e2e: f.provider });
+  const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
   check(await until(() => settled(w, c)), "sealed lost ack: synced");
   await ctl("log", { reset: true });
   // (the ack lost, and the next connection's first index too, so the record is resent rather than confirmed by its echo)
@@ -4927,7 +4929,7 @@ async function sealedLostAck() {
   check(await until(async () => (await ctl("log")).got.some((g) => g.dropped && g.t === "ack")), "sealed lost ack: the answer was dropped");
   await stop(c);
   // (a reload: the outbox holds the record and its sealed form; the new client sends those exact bytes again)
-  const c2 = client(w, { e2e: f.provider });
+  const c2 = client(w, { e2e: { keys: f.provider, kit: f.kit } });
   check(await until(() => settled(w, c2), 15_000), "sealed lost ack: after a reload, settled: " + J(c2.status));
   const sends = sealedSends(await ctl("log"));
   const first = sends[0]?.json?.[0], again = sends.slice(1).flatMap((m) => m.json).filter((j) => JSON.parse(j).dseq === JSON.parse(first ?? "{}").dseq);
@@ -4940,14 +4942,14 @@ async function sealedRefusal() {
   const id = await account();
   const f = await sealedFixture(id);
   const w = await fresh();
-  const c0 = client(w, { e2e: f.provider });
+  const c0 = client(w, { e2e: { keys: f.provider, kit: f.kit } });
   check(await until(() => settled(w, c0)), "sealed refusal: synced");
   await stop(c0);
   // (three changes made offline go in one message: the server refuses the second; the third is undecided)
   for (const p of ["/r1", "/r2", "/r3"]) await w.mkdir(p);
   await ctl("log", { reset: true });
   await ctl("refuseSealed", { dseq: 2, code: "missing" });
-  const c = client(w, { e2e: f.provider });
+  const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
   // (settled: scanned past the three, every record decided, nothing in flight)
   check(await until(() => settled(w, c), 15_000), "sealed refusal: every record decided: " + J(c.status));
   const sends = sealedSends(await ctl("log"));
@@ -4964,14 +4966,14 @@ async function sealedStale() {
   const id = await account();
   const f = await sealedFixture(id);
   const w = await fresh();
-  const c0 = client(w, { e2e: f.provider });
+  const c0 = client(w, { e2e: { keys: f.provider, kit: f.kit } });
   check(await until(() => settled(w, c0)), "sealed stale: synced");
   await stop(c0);
   await w.mkdir("/st");
   const oldHead = f.server.head;
   await f.move();
   await ctl("log", { reset: true });
-  const c = client(w, { e2e: f.provider });
+  const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
   check(await until(() => settled(w, c), 15_000), "sealed stale: settled after the chain moved: " + J(c.status));
   const sends = sealedSends(await ctl("log")), heads = itemsOf(sends).map((o) => o.head);
   check(heads[0] === oldHead && heads[heads.length - 1] === f.server.head && f.refreshes.n >= 1,
@@ -4983,7 +4985,7 @@ async function sealedBusy() {
   const id = await account();
   const f = await sealedFixture(id);
   const w = await fresh();
-  const c = client(w, { e2e: f.provider });
+  const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
   check(await until(() => settled(w, c)), "sealed busy: synced");
   await ctl("log", { reset: true });
   await ctl("set", { set: { fakeOps: [{ code: "busy", detail: { retry_after: 200 } }] } });
@@ -4998,7 +5000,7 @@ async function sealedLogFull() {
   const id = await account();
   const f = await sealedFixture(id);
   const w = await fresh();
-  const c = client(w, { e2e: f.provider });
+  const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
   check(await until(() => settled(w, c)), "sealed log full: synced");
   await ctl("sealedCap", { n: 0 });
   await ctl("log", { reset: true });
@@ -5015,11 +5017,11 @@ async function sealedForeign() {
   const id = await account();
   const f = await sealedFixture(id);
   const wa = await fresh(), wb = await fresh();
-  const a = client(wa, { e2e: f.provider });
+  const a = client(wa, { e2e: { keys: f.provider, kit: f.kit } });
   check(await until(() => settled(wa, a)), "sealed foreign: A synced");
   await wa.mkdir("/from-a");
   check(await until(() => settled(wa, a), 15_000), "sealed foreign: A's op in the log");
-  const b = client(wb, { e2e: f.provider });
+  const b = client(wb, { e2e: { keys: f.provider, kit: f.kit } });
   check(await until(() => b.debug().halted === "sealed-unverified" && /can't verify/.test(b.status.reason ?? ""), 15_000), "sealed foreign: B halts at A's sealed op, saying why: " + J(b.status));
   check(!(await wb.stat("/from-a")), "sealed foreign: nothing of it applied on B");
   await stop(a);
