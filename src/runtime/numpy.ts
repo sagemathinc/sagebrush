@@ -20,7 +20,7 @@ import * as Ty from "./types";
 import { PyComplex } from "./complex";
 import { newBuiltinModule } from "./modules";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, EXP_TABLES, LOG_TABLES, glibcPow, glibcPowf } from "./libm";
-import { gemmBuffers, noRoom, wasmUnary, wasmSinCos, wasmSort, wasmArgsort } from "./kernels";
+import { gemmBuffers, wasmUnary, wasmSinCos, wasmSort, wasmArgsort } from "./kernels";
 import { ND_MATMUL_MIN, ndMatmul, useNd } from "./nd";
 import * as FD from "./fdlibm";
 import { nativeHost } from "./heap";
@@ -2583,24 +2583,20 @@ function matmul(x: any, y: any): any {
   // engine/nd's GEMM, on its thread pool where that is ready (src/runtime/nd.ts): every dimension at least
   // ND_MATMUL_MIN, where the module runs this session; by size alone, so that a product's bits never depend on
   // whether the pool is up (the module's sums are in blocks of k, so not the bits of the paths below)
-  // (no room in the module's memory for the operands: the paths below compute it, never refused for the module's sake;
-  // its last bits are then theirs, so under memory pressure they can depend on the memory the machine could give)
+  // (the operands past the module's memory's fixed maximum, or a grow the computer refuses: a MemoryError, never the
+  // paths below)
   if (Math.min(n, m, p) >= ND_MATMUL_MIN && useNd()) {
-    try {
-      const wa = new Float64Array(n * m), wb = new Float64Array(m * p), f64out = ct === D.float64;
-      loop2(batch, Ab, A.offset, Bb, B.offset, (pa, pb, bk) => {
-        if (as1 === 1 && as0 === m) wa.set(ad.subarray(pa, pa + n * m) as any);
-        else for (let i = 0, t = 0; i < n; i++) for (let k = 0, x = pa + i * as0; k < m; k++, x += as1) wa[t++] = ad[x];
-        if (bs1 === 1 && bs0 === p) wb.set(bd.subarray(pb, pb + m * p) as any);
-        else for (let k = 0, t = 0; k < m; k++) for (let j = 0, y = pb + k * bs0; j < p; j++, y += bs1) wb[t++] = bd[y];
-        const wc = ndMatmul(wa, wb, n, m, p), ob = bk * n * p;
-        if (f64out) (od as Float64Array).set(wc, ob);
-        else for (let t = 0; t < n * p; t++) od[ob + t] = castNum(ct, wc[t]);
-      });
-      return squeezeMatmul(out, a, b, ct);
-    } catch (e) {
-      if (!noRoom(e)) throw e;
-    }
+    const wa = new Float64Array(n * m), wb = new Float64Array(m * p), f64out = ct === D.float64;
+    loop2(batch, Ab, A.offset, Bb, B.offset, (pa, pb, bk) => {
+      if (as1 === 1 && as0 === m) wa.set(ad.subarray(pa, pa + n * m) as any);
+      else for (let i = 0, t = 0; i < n; i++) for (let k = 0, x = pa + i * as0; k < m; k++, x += as1) wa[t++] = ad[x];
+      if (bs1 === 1 && bs0 === p) wb.set(bd.subarray(pb, pb + m * p) as any);
+      else for (let k = 0, t = 0; k < m; k++) for (let j = 0, y = pb + k * bs0; j < p; j++, y += bs1) wb[t++] = bd[y];
+      const wc = ndMatmul(wa, wb, n, m, p), ob = bk * n * p;
+      if (f64out) (od as Float64Array).set(wc, ob);
+      else for (let t = 0; t < n * p; t++) od[ob + t] = castNum(ct, wc[t]);
+    });
+    return squeezeMatmul(out, a, b, ct);
   }
   // WebAssembly SIMD (kernels/src/lib.rs), same sums in the same order
   const W = gemmBuffers(n, p, m);
