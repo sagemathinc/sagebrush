@@ -6,7 +6,7 @@
 // an overflowing frame reported.
 //   node scripts/build-cli.mjs && node web/latex/test-latex-cli.mjs
 //   (CHROME=/path/to/chrome for the PNGs; LATEX_CLI_PNG=1 makes a missing browser a failure, not a skip)
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, mkdirSync, copyFileSync, symlinkSync, truncateSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync, mkdirSync, copyFileSync, symlinkSync, truncateSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
@@ -243,6 +243,55 @@ ${"many words ".repeat(14000)}
     //  gives up at 30 s, with what it said)
     const ft = await fakeRun("#!/bin/sh\necho 'fake-chrome: still starting' >&2\nexec sleep 40\n", "fspng");
     check("png: a browser that never opens its DevTools port: the 30 s timeout, with what it said", ft.code === 1 && /didn't open its DevTools port in 30 s; it said: fake-chrome: still starting$/.test(ft.json?.png_error ?? ""), { code: ft.code, png_error: ft.json?.png_error });
+    // (a browser whose page never loads, as a long document's on a busy computer: a DevTools that answers every request
+    //  and never sends Page.loadEventFired. --timeout is the wait; the error says the HTML's size and what to do, the
+    //  HTML kept)
+    const slowCdp = `#!${process.execPath}
+const http = require("http"), crypto = require("crypto"), fs = require("fs"), path = require("path");
+const prof = process.argv.find((a) => a.startsWith("--user-data-dir=")).slice(16);
+const srv = http.createServer((q, r) => { r.setHeader("content-type", "application/json"); r.end(JSON.stringify([{ type: "page", webSocketDebuggerUrl: "ws://127.0.0.1:" + srv.address().port + "/devtools/page/1" }])); });
+srv.on("upgrade", (q, sock) => {
+  sock.write("HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\nSec-WebSocket-Accept: " + crypto.createHash("sha1").update(q.headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64") + "\\r\\n\\r\\n");
+  let buf = Buffer.alloc(0);
+  sock.on("data", (d) => {
+    buf = Buffer.concat([buf, d]);
+    for (;;) {
+      if (buf.length < 2) return;
+      let n = buf[1] & 127, at = 2;
+      if (n === 126) { if (buf.length < 4) return; n = buf.readUInt16BE(2); at = 4; } else if (n === 127) { if (buf.length < 10) return; n = Number(buf.readBigUInt64BE(2)); at = 10; }
+      if (buf.length < at + 4 + n) return;
+      const mask = buf.subarray(at, at + 4), body = Buffer.from(buf.subarray(at + 4, at + 4 + n).map((b, i) => b ^ mask[i % 4])), op = buf[0] & 15;
+      buf = buf.subarray(at + 4 + n);
+      if (op !== 1) continue;
+      const out = Buffer.from(JSON.stringify({ id: JSON.parse(body).id, result: {} }));
+      sock.write(Buffer.concat([Buffer.from(out.length < 126 ? [129, out.length] : [129, 126, out.length >> 8, out.length & 255]), out]));
+    }
+  });
+  sock.on("error", () => {});
+});
+srv.listen(0, "127.0.0.1", () => fs.writeFileSync(path.join(prof, "DevToolsActivePort"), srv.address().port + "\\n/devtools/browser/x\\n"));
+`;
+    // (both at once: fakeRun passes no --timeout, the other gives one)
+    const t0 = Date.now();
+    let slMs = 0, stMs = 0;
+    const [sl, st] = await Promise.all([
+      fakeRun(slowCdp, "slpng").then((r) => { slMs = Date.now() - t0; return r; }),
+      new Promise((res) => {
+        const q = spawn(process.execPath, [CLI, "latex", "render", "talk.tex", "--pdf", "slow.pdf", "--timeout", "2", "--json"], { cwd: dir, env: { ...process.env, CHROME: fake } });
+        let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { stMs = Date.now() - t0; let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); });
+      }),
+    ]);
+    check("pdf --timeout: a page that never loads, given up at the timeout with the HTML's size and what to do; the HTML kept, no PDF",
+      st.code === 1 && /^the browser didn't finish loading the HTML \(0\.\d MiB\) in 2 s; .*--timeout.*open talk\.html in a browser$/.test(st.json?.pdf_error ?? "") && stMs < 15000 && existsSync(join(dir, "talk.html")) && !existsSync(join(dir, "slow.pdf")),
+      { code: st.code, pdf_error: st.json?.pdf_error, ms: stMs });
+    // (the HTML's size, as written: 30 s and 10 s for each MiB begun, 40 s for this one's under 1 MiB)
+    const want = 30 + 10 * Math.ceil(statSync(join(dir, "talk.html")).size / 2 ** 20);
+    check("png: a page that never loads, without --timeout: the wait for its size", sl.code === 1 && new RegExp(`didn't finish loading the HTML \\(\\d+\\.\\d MiB\\) in ${want} s; `).test(sl.json?.png_error ?? "") && want > 30 && slMs >= want * 1000 - 1000, { code: sl.code, png_error: sl.json?.png_error, ms: slMs });
+  }
+  {
+    const bad = await run(dir, "render", "talk.tex", "--timeout", "0");
+    const notCheck = await run(dir, "check", "talk.tex", "--timeout", "5");
+    check("render --timeout: a number of seconds, at most 3600; check has none", bad.code === 2 && /--timeout needs a number of seconds, at most 3600/.test(bad.err ?? "") && notCheck.code === 2 && /unknown option --timeout/.test(notCheck.err ?? ""), { bad, notCheck });
   }
   const browser = process.env.CHROME || ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((b) => existsSync(b));
   if (!browser) {

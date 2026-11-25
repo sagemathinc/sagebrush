@@ -1261,6 +1261,14 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
   check("cli-remove-temp-used", !/rmSync\((tmp|profile)\b/.test(src) && (src.match(/removeTemp\((tmp|profile)\)/g) || []).length === 3, src.match(/rmSync\([a-z]+/g));
 }
 
+// ---- src/latex-cli.ts's loadWait: --png and --pdf wait for the browser's load by the HTML's size (a long article's 40 MB
+//      took over 30 s to load on a busy computer, and the PDF failed), 30 s and 10 s per MiB begun, at most 600 s
+{
+  const { loadWait, LOAD_WAIT_MIN, LOAD_WAIT_PER_MIB, LOAD_WAIT_MAX } = await import("../../src/latex-cli.ts");
+  const M = 2 ** 20, got = [0, 1, M, M + 1, 40 * M, 56 * M, 57 * M, 58 * M, 2 ** 31].map(loadWait);
+  check("cli-load-wait-by-size", LOAD_WAIT_MIN === 30 && LOAD_WAIT_PER_MIB === 10 && LOAD_WAIT_MAX === 600 && JSON.stringify(got) === JSON.stringify([30, 40, 40, 50, 430, 590, 600, 600, 600]), got);
+}
+
 // ---- SageTeX's code arguments: read from the file, the code is the source between the braces (a backslash, a ~ or a
 // run of spaces in it is Sage's), its line ends joined with one space; from a macro, the inline subset's rules still
 {
