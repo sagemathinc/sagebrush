@@ -5453,16 +5453,6 @@
   "owner": "Magma compatibility",
   "row": "inv-25"
  },
- "lib/_magma.py :: _MNumberField.__init__ :: raise NotImplementedError(\"defining polynomials must be monic (for now)\") #0": {
-  "class": "none",
-  "owner": "Magma compatibility",
-  "reason": "Magma mode's refusal of a number field whose polynomial is rational or not monic, kept until Magma mode maps the core's scaled coordinates; a feature gap, not a limit"
- },
- "lib/_magma.py :: _MNumberField.__init__ :: raise NotImplementedError(\"defining polynomials must have integer coefficients\") #0": {
-  "class": "none",
-  "owner": "Magma compatibility",
-  "reason": "Magma mode's refusal of a number field whose polynomial is rational or not monic, kept until Magma mode maps the core's scaled coordinates; a feature gap, not a limit"
- },
  "lib/_magma.py :: _collect :: _COLLECT_MAX of them, before the collection is built (HARD-FCC-1).\"\"\" #0": {
   "class": "1+2",
   "owner": "Magma compatibility/runtime memory",
@@ -11212,6 +11202,14 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
  },
+ "src/latex-cli.ts :: loadWait :: export const loadWait = (bytes: number): number => Math.min(LOAD_WAIT_MAX, LOAD_WAIT_MIN + Math.ceil(bytes / 2 ** 20) * LOAD_WAIT_PER_MIB); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex render --png/--pdf: how long the browser's load of the HTML is waited for, 30 s and 10 s per MiB, at most 600 s (render's --timeout, at most 3600 s, sets it): a local command's wait, not a refusal of input"
+ },
  "src/latex-cli.ts :: msgOf :: if (Buffer.byteLength(l) > MAX_RESULT) { states.push({ key, s: \"error\", msg: `${it.mode === \"sage\" ? \"the result's LaTeX\" : it.mode === \"py\" ? \"the result\" : \"the printed output\"} is over ${MAX_RESULT / 1024} KiB` }); failed = true; continue; } #0": {
   "class": "1",
   "disposition": {
@@ -11315,6 +11313,14 @@
   },
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
+ },
+ "src/latex-cli.ts :: sleep :: export const LOAD_WAIT_MIN = 30, LOAD_WAIT_PER_MIB = 10, LOAD_WAIT_MAX = 600; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex render --png/--pdf: how long the browser's load of the HTML is waited for, 30 s and 10 s per MiB, at most 600 s (render's --timeout, at most 3600 s, sets it): a local command's wait, not a refusal of input"
  },
  "src/lib-embed.ts :: decode :: JSON.parse(new TextDecoder(\"utf-8\", { fatal: true }).decode(gunzipSync(Buffer.from(payload, \"base64\"), maxBytes === undefined ? {} : { maxOutputLength: maxBytes }))); #0": {
   "class": "1",
@@ -13675,11 +13681,16 @@
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
  },
- "src/runtime/numpy.ts :: axesArg :: const axes = axis.map((x) => normAxis(intNum(x), nd)); #0": {
+ "src/runtime/numpy.ts :: axesArg :: const axes = axis.map((x) => normAxis(axisInt(x), nd)); #0": {
   "class": "none",
   "owner": "NumPy shim",
-  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
-  },
+  "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; a tuple axis read as indexes in turn, a bool refused, a duplicate refused (#1944)"
+ },
+ "src/runtime/numpy.ts :: axesArg :: return [normAxis(axisInt(axis), nd)]; #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; a single axis read as an index, a bool refused (#1944)"
+ },
  "src/runtime/numpy.ts :: conj :: if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -13760,16 +13771,26 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
  },
- "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, false) : strSort(a, normAxis(Number(axis), a.ndim), false); #0": {
+ "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, false) : strSort(a, normAxis(intNum(axis), a.ndim), false); #0": {
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
  },
- "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, true) : strSort(a, normAxis(Number(axis), a.ndim), true); #0": {
+ "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, true) : strSort(a, normAxis(intNum(axis), a.ndim), true); #0": {
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
  },
+ "src/runtime/numpy.ts :: notIndex :: return sortAxis(x, normAxis(intNum(axis), x.ndim), false); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; the axis read as an index (#1944)"
+ },
+ "src/runtime/numpy.ts :: notIndex :: return sortAxis(x, normAxis(intNum(axis), x.ndim), true); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; the axis read as an index (#1944)"
+  },
  "src/runtime/numpy.ts :: plainOperand :: const i = normAxis(Number(x), a.ndim, \"axis1\"), j = normAxis(Number(y), a.ndim, \"axis2\"); #0": {
   "class": "none",
   "owner": "NumPy shim",

@@ -1074,6 +1074,27 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
   check("input-change-rerenders", r2.stats.mode === "cold" && /\\mathbb ?\{Z\}/.test(r2.chunks.join("")), r2.stats.mode);
 }
 
+// ---- starred references, hyperref's \ref*{key} (and \pageref*, \autoref*, \nameref*, cleveref's \cref*): the same text
+// as the plain form, without a link, as pdflatex with hyperref prints this source ("Theorem 1 (Hypothesis 1)", "A: 1. C: 1.
+// D: 1*. E: ??. F: Sec."); the "*" never taken for the key, and one after the argument left as text
+{
+  const DOC = "\\documentclass{article}\n\\usepackage{amsthm,hyperref}\n\\newtheorem{theorem}{Theorem}\n\\newtheorem{hypothesis}{Hypothesis}\n\\begin{document}\n" +
+    "\\section{Sec}\\label{s}\n\\begin{hypothesis}\\label{h}A hypothesis.\\end{hypothesis}\n\\begin{theorem}[Hypothesis~\\ref*{h}]Its proof.\\end{theorem}\n" +
+    "\\begin{equation}\\label{e}x=1\\end{equation}\n" +
+    "A: \\ref*{h}. C: \\ref{h}. D: \\ref{h}*. E: \\ref*{nokey}. F: \\nameref*{s}.\n\\end{document}\n";
+  const r = new Engine().update(DOC, { cold: true }), h = r.chunks.join(""), t = h.replace(/<[^>]+>/g, "").replace(/\s+/g, " ");
+  check("ref-star-text", /Theorem 1 \(Hypothesis 1\)/.test(t) && /A: 1\. C: 1\. D: 1\*\. E: \?\?\. F: Sec\./.test(t), t.slice(t.indexOf("Theorem"), t.indexOf("Theorem") + 160));
+  const links = [...h.matchAll(/<a class="ref"[^>]*>([^<]*)<\/a>/g)].map((m) => m[1]);
+  check("ref-star-no-link", JSON.stringify(links) === JSON.stringify(["1", "1"]), links);
+  check("ref-star-no-key-star", !/\*\s*\?\?|\?\? ?h|\?\? ?e\b/.test(t) && !r.problems.some((p) => /\*/.test(p.name ?? "")), t.slice(0, 300));
+  // (natbib's \cite*, \citet*, \citep*: their "*" read, never the key, and still linked, as pdflatex with natbib and
+  //  hyperref links them)
+  const NAT = "\\documentclass{article}\n\\usepackage[numbers]{natbib}\n\\usepackage{hyperref}\n\\begin{document}\nA \\cite*{k}. B \\citet*{k}. C \\citep*{k}.\n\\begin{thebibliography}{1}\n\\bibitem[Knuth(1984)]{k} D. Knuth.\n\\end{thebibliography}\n\\end{document}\n";
+  const hn = new Engine().update(NAT, { cold: true }).chunks.join("");
+  const citeLinks = (hn.match(/<a href="#bib-1">/g) || []).length;
+  check("cite-star-linked", citeLinks === 3 && !/class="missing">\*</.test(hn) && !/>\*</.test(hn), { citeLinks, t: hn.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").slice(0, 160) });
+}
+
 // ---- an accent before a font command with its argument, unbraced: $\bar\F_q$ with \newcommand{\F}{\mathbb F} (TeX
 // takes the macro as \bar's one-token argument; the preview has expanded it), and $\bar\mathbb F_q$ written out (plain
 // LaTeX takes it; amsmath refuses it): typeset as TeX reads them, \bar{\mathbb{F}}, where KaTeX alone refuses them. A
@@ -1259,6 +1280,14 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
   // (and every scratch folder of the CLI goes through it: no direct rmSync of the profile or a run's folder left)
   const src = (await import("node:fs")).readFileSync(new URL("../../src/latex-cli.ts", import.meta.url), "utf8");
   check("cli-remove-temp-used", !/rmSync\((tmp|profile)\b/.test(src) && (src.match(/removeTemp\((tmp|profile)\)/g) || []).length === 3, src.match(/rmSync\([a-z]+/g));
+}
+
+// ---- src/latex-cli.ts's loadWait: --png and --pdf wait for the browser's load by the HTML's size (a long article's 40 MB
+//      took over 30 s to load on a busy computer, and the PDF failed), 30 s and 10 s per MiB begun, at most 600 s
+{
+  const { loadWait, LOAD_WAIT_MIN, LOAD_WAIT_PER_MIB, LOAD_WAIT_MAX } = await import("../../src/latex-cli.ts");
+  const M = 2 ** 20, got = [0, 1, M, M + 1, 40 * M, 56 * M, 57 * M, 58 * M, 2 ** 31].map(loadWait);
+  check("cli-load-wait-by-size", LOAD_WAIT_MIN === 30 && LOAD_WAIT_PER_MIB === 10 && LOAD_WAIT_MAX === 600 && JSON.stringify(got) === JSON.stringify([30, 40, 40, 50, 430, 590, 600, 600, 600]), got);
 }
 
 // ---- SageTeX's code arguments: read from the file, the code is the source between the braces (a backslash, a ~ or a
