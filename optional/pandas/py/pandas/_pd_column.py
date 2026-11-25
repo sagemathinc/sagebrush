@@ -6,7 +6,9 @@ A column is a dtype and its values:
   object arrays), missing values NaN (str) or as given (object);
 - datetime64[us] (_pd_datetime.DT): an int64 array of microseconds since
   1970, NaT as int64's minimum (Sagebrush's numpy has no datetime64 yet);
-- int32: a numpy int32 array (what .dt.year and an index's .year give).
+- int8, int16, int32, uint8, uint16, uint32: a numpy array of that dtype
+  (int32 is what .dt.year and an index's .year give; the others come from
+  astype).
 
 Columns are copied eagerly when an object is derived from another (M1's
 Copy-on-Write, §C3): a column is never shared between two pandas objects,
@@ -15,12 +17,12 @@ and never with a caller's array.
 
 import numpy as np
 
-from ._pd_dtypes import STR, StringDtype, infer, is_missing, resolve_dtype
+from ._pd_dtypes import STR, SMALL_INTS, INTS, StringDtype, infer, is_missing, resolve_dtype
 from ._pd_datetime import DT, NAT_INT, from_us, as_us, is_time, to_us
 
-__all__ = ["Column", "column_from"]
+__all__ = ["Column", "column_from", "astype_column"]
 
-_NUMERIC = ("int64", "float64", "bool", "int32")
+_NUMERIC = ("int64", "float64", "bool") + SMALL_INTS
 
 
 class Column(object):
@@ -77,7 +79,7 @@ class Column(object):
         v = self._pd_values
         if self._pd_dtype == "float64":
             return v != v
-        if self._pd_dtype in ("int64", "bool", "int32"):
+        if self._pd_dtype in INTS or self._pd_dtype == "bool":
             return np.zeros(len(v), dtype=bool)
         if self._pd_dtype is DT:
             return v == NAT_INT
@@ -139,8 +141,8 @@ def _holdable(dtype, v):
         if is_time(v):
             return as_us(v)
         raise TypeError("Invalid value '%s' for dtype 'datetime64[us]'" % (v,))
-    if dtype == "int32":
-        raise NotImplementedError("pandas: setting a value in an int32 column is not in Sagebrush's pandas 0.x subset")
+    if dtype in SMALL_INTS:
+        raise NotImplementedError("pandas: setting a value in a%s %s column is not in Sagebrush's pandas 0.x subset" % ("n" if dtype.startswith("int") else "", dtype))
     return v
 
 
@@ -230,6 +232,54 @@ def _cast_list(values, want):
         return Column(STR, [float("nan") if is_missing(v) else str(v) for v in values])
     if want is DT:
         return Column(DT, np.array([to_us(v) for v in values], dtype=np.int64))
-    if want == "int32":
-        raise NotImplementedError("pandas: dtype int32 from values is not in Sagebrush's pandas 0.x subset")
+    if want in SMALL_INTS:
+        raise NotImplementedError("pandas: dtype %s from values is not in Sagebrush's pandas 0.x subset (astype gives one)" % want)
     return Column("object", list(values))
+
+
+def _str_of(v):
+    # (astype(str) of one value: str() of its Python value, a missing value kept as NaN)
+    if is_missing(v):
+        return float("nan")
+    return str(v)
+
+
+def astype_column(col, dtype):
+    """col as dtype (a new column), with pandas 3.1's rules: a float with NaN
+    or infinity to an integer raises IntCastingNaNError, a float to an integer
+    truncates toward zero, an integer to a smaller one wraps as numpy's
+    astype does, str parses as int() and float() do, anything to str is str()
+    of each value with missing values kept (NaN)."""
+    from .errors import IntCastingNaNError
+    want = resolve_dtype(dtype)
+    d = col.dtype
+    if want == d and (want is not STR or d is STR):
+        return col.copy()
+    if d is DT or want is DT:
+        if want is DT:
+            return column_from(col.tolist(), DT)
+        raise NotImplementedError("pandas: astype of a datetime64[us] column is not in Sagebrush's pandas 0.x subset")
+    if want is STR:
+        return Column(STR, [_str_of(v) for v in col.tolist()])
+    if want == "object":
+        return Column("object", col.tolist())
+    if not col.is_list:
+        v = col._pd_values
+        if want in INTS and d == "float64":
+            if len(v) and not bool(np.isfinite(v).all()):
+                raise IntCastingNaNError("Cannot convert non-finite values (NA or inf) to integer. Replace or remove non-finite values or cast to an integer type that supports these values (e.g. 'Int64')")
+        return Column(want, v.astype(want))
+    # (str and object values)
+    vals = col.tolist()
+    if want in INTS:
+        out = []
+        for x in vals:
+            if is_missing(x):
+                raise ValueError("cannot convert float NaN to integer")
+            out.append(int(x))
+        return Column(want, np.array(out, dtype=np.int64).astype(want))
+    if want == "float64":
+        return Column("float64", np.array([float("nan") if is_missing(x) else float(x) for x in vals], dtype=np.float64))
+    if want == "bool":
+        return Column("bool", np.array([bool(x) for x in vals], dtype=bool))
+    raise NotImplementedError("pandas: astype to %s is not in Sagebrush's pandas 0.x subset" % (want,))

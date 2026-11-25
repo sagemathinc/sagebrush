@@ -2,7 +2,8 @@
 // and their language. Its own module, with nothing else, so the page's boot hook (boot.ts) carries no highlighter.
 import { nameOf, splitExt } from "../workspace/paths";
 
-export type Lang = "python" | "sage" | "matlab" | "magma" | "js" | "json" | "text";
+// ("rust" is highlighted (tokens.ts) but not opened on the code page: no extension maps to it here)
+export type Lang = "python" | "sage" | "matlab" | "magma" | "js" | "json" | "rust" | "text";
 export const CODE_LANGS: Record<string, Lang> = { ".py": "python", ".sage": "sage", ".m": "matlab", ".mag": "magma", ".js": "js", ".json": "json", ".txt": "text" };
 
 /** A file's language by its name, or null if the code page doesn't open it. */
