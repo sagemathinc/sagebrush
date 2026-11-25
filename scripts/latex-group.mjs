@@ -110,7 +110,10 @@ export const LATEX_LAZY = {
 //  page's notes, the addresses at the end, \title[short] and \author[short]), a bibliography's label column as wide as its
 //  widest label, a \cite note typeset: 255,684 / 85,565 measured on the shipped build of its merge with master bf92ce4f,
 //  with bun 1.4.4 and node 24.21.0, + 64)
-export const LATEX_CAPS = { raw: 255748, gzip: 85629 };
+// (255,840 raw / 85,653 gzip: Nov 24 2026, a block that fits is never "too large", the size said the one over the limit
+//  (web/latex/split.ts): 255,776 / 85,589 measured on the shipped build of its merge with master a1153559, with bun 1.4.4 and
+//  node 24.21.0 (+92 / +24 over master's 255,684 / 85,565), + 64)
+export const LATEX_CAPS = { raw: 255840, gzip: 85653 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
