@@ -606,10 +606,10 @@ class Cdp {
       this.ws.send(JSON.stringify({ id, method, params }));
     });
   }
-  once(method: string, ms: number): Promise<void> {
-    return new Promise((ok, no) => {
-      const t = setTimeout(() => no(new Error(`the browser sent no ${method} in ${ms / 1000} s`)), ms);
-      const f = (m: any) => { if (m.method === method) { clearTimeout(t); this.events = this.events.filter((g) => g !== f); ok(); } };
+  /** The next `method` event (its deadline the caller's). */
+  once(method: string): Promise<void> {
+    return new Promise((ok) => {
+      const f = (m: any) => { if (m.method === method) { this.events = this.events.filter((g) => g !== f); ok(); } };
       this.events.push(f);
     });
   }
@@ -655,11 +655,15 @@ async function screenshots(htmlPath: string, dir: string | null, check: CheckRes
     const beamer = check.class === "beamer";
     const width = beamer ? SLIDE_W + 32 : 900;
     await cdp.send("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
-    // (a load that doesn't end in time: said with the HTML's size and what to do, the HTML itself kept)
-    const loaded = cdp.once("Page.loadEventFired", wait * 1000);
-    await cdp.send("Page.navigate", { url: pathToFileURL(resolve(htmlPath)).href });
-    try { await loaded; }
-    catch {
+    // (the navigation and its load awaited together under the one deadline, from the start: a navigate the browser
+    //  answers late or never ends there too, and the finally below closes the browser. A load that doesn't end in time
+    //  is said with the HTML's size and what to do, the HTML itself kept)
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<"late">((ok) => { timer = setTimeout(() => ok("late"), wait * 1000); });
+    const loading = Promise.all([cdp.once("Page.loadEventFired"), cdp.send("Page.navigate", { url: pathToFileURL(resolve(htmlPath)).href })]).then(() => "loaded" as const);
+    let how: "loaded" | "late";
+    try { how = await Promise.race([loading, late]); } finally { clearTimeout(timer); }
+    if (how === "late") {
       const mb = (statSync(htmlPath).size / 2 ** 20).toFixed(1);
       throw new Error(`the browser didn't finish loading the HTML (${mb} MiB) in ${wait} s; a long document loads slowly on a busy computer: try again with a longer --timeout (at most 3600 s), or open ${htmlPath} in a browser`);
     }
