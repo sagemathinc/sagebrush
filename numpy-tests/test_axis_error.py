@@ -97,3 +97,16 @@ for name, f, q, method, ax in [("quantile out keepdims (2, 0)", np.quantile, [0.
     show(name, lambda: (f(a, q, axis=ax, keepdims=True, method=method, out=o) is o, o))
 show("quantile out keepdims (2, 0), out of the wrong shape",
      lambda: np.quantile(a, 0.5, axis=(2, 0), keepdims=True, out=np.zeros((1, 3, 4))))
+
+# (median's out= with several axes: the data reduced over each, written into out, and out returned; with
+# keepdims=True out has every dimension, the reduced ones kept as 1)
+b = a.copy()
+b[1, 1, 2] = np.nan
+for ax in [(0, 2), (2, 0), (1,), (0, 1, 2), [0, 1]]:
+    for kd in (False, True):
+        o = np.full(np.median(b, axis=ax, keepdims=kd).shape, -1.0)
+        show("median out %r keepdims=%s" % (ax, kd), lambda: (np.median(b, axis=ax, keepdims=kd, out=o) is o, o))
+o = np.zeros(3, dtype=np.int64)
+show("median out (0, 2), an integer out", lambda: (np.median(np.arange(24).reshape(2, 3, 4), axis=(0, 2), out=o) is o, o))
+show("median out (0, 0)", lambda: np.median(a, axis=(0, 0), out=np.zeros(4)))
+show("median out (0, 3)", lambda: np.median(a, axis=(0, 3), out=np.zeros(3)))

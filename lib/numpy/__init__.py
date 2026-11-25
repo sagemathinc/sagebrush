@@ -1572,14 +1572,27 @@ def _keepdims_out_index(out, nd, axis, keepdims):
     # left is a 0-d array in NumPy)
     if not keepdims:
         return Ellipsis
-    return (Ellipsis,) + ((0,) * nd if axis is None else tuple(0 if i == axis % nd else slice(None) for i in range(nd)))
+    if axis is None:
+        return (Ellipsis,) + (0,) * nd
+    axes = set(_normalize_axis_tuple(axis, nd)) if isinstance(axis, (tuple, list)) else {axis % nd}
+    return (Ellipsis,) + tuple(0 if i in axes else slice(None) for i in range(nd))
 
 
 def _median_out(a, axis, out, keepdims):
     # (median with out=, #2046's sibling: as NumPy's _median, the mean of the middle element or two, sorted along the
     # axis where it is, reduced into out by mean's own out=; then a slice's NaN copied in by np.copyto's same-kind rule)
     ix = _keepdims_out_index(out, a.ndim, axis, keepdims)
-    p, pax = (sort(a.ravel()), 0) if axis is None else (sort(a, axis=axis), axis % a.ndim)
+    if isinstance(axis, (tuple, list)):
+        # (several axes, as median's own: moved last and taken as one, the rest in their order)
+        axes = _normalize_axis_tuple(_axes(a, axis), a.ndim)
+        keep = [i for i in range(a.ndim) if i not in axes]
+        m = 1
+        for i in axes:
+            m *= a.shape[i]
+        b = _np.transpose(a, keep + list(axes)).reshape(tuple(a.shape[i] for i in keep) + (m,))
+        p, pax = sort(b, axis=-1), b.ndim - 1
+    else:
+        p, pax = (sort(a.ravel()), 0) if axis is None else (sort(a, axis=axis), axis % a.ndim)
     n = p.shape[pax]
     k = n // 2
     mid = [slice(None)] * p.ndim
