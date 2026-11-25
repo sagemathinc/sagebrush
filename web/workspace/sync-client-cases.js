@@ -5404,7 +5404,49 @@ async function releaseUnexplained() {
   await stop(a);
 }
 
-const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained };
+async function releasePlaintext() {
+  // (a plaintext write after sealed ones, alone in the page a device reads it in: the file's current bytes are now
+  // ones no index add holds, so its sealed adds are all history, on every device, however the log was paged. A sends
+  // one write up as a plaintext op, as an older client of the account might)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  let plain = false;
+  const recordOf = (w, ns, dseq) => new Promise((ok, no) => {
+    const tx = w.ws.transaction("outbox", "readonly"), r = tx.objectStore("outbox").get([ns, dseq]);
+    tx.oncomplete = () => ok(r.result);
+    tx.onerror = () => no(tx.error);
+  });
+  class PlainOnce extends WebSocket {
+    send(data) {
+      if (plain && typeof data === "string" && data.includes('"t":"sops"')) {
+        plain = false;
+        const m = JSON.parse(data), dseq = JSON.parse(m.json?.[0] ?? "null")?.dseq ?? m.ops?.[0]?.dseq;
+        recordOf(wa, nsOf(a), dseq).then((r) => super.send(JSON.stringify({ t: "ops", req: m.req, ops: [r.op] })));
+        return;
+      }
+      super.send(data);
+    }
+  }
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit }, WebSocket: PlainOnce });
+  check(await until(() => settled(wa, a)), "release plaintext: A synced");
+  await threeAdds(id, wa, a, "/p.txt");
+  await ctl("set", { set: { serverNotices: true } });
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(async () => settled(wb, b) && (await contentOf(wb, "/p.txt")) === "three", 15_000), "release plaintext: B has the file");
+  const nsB = nsOf(b), fid = (await wb.stat("/p.txt")).fid, gen = `${nsB}#${(await metaGet(wb.ws, `sync:${nsB}:indexGen`)) ?? 0}`;
+  check(typeof (await metaGet(wb.ws, `sync:${gen}:refs:c:${fid}`)) === "number" && (await metaGet(wb.ws, `sync:${gen}:refs:c:${fid}`)) > 0, "release plaintext: B's ledger: the file's current bytes held by its last sealed add");
+  plain = true;
+  await wa.write("/p.txt", "four");
+  check(await until(async () => (await contentOf(wb, "/p.txt")) === "four", 15_000), "release plaintext: B has the plaintext write");
+  check((await metaGet(wb.ws, `sync:${gen}:refs:c:${fid}`)) === 0, "release plaintext: B's ledger: the file's current bytes now no index add's (0), its sealed adds history: " + J(await metaGet(wb.ws, `sync:${gen}:refs:c:${fid}`)));
+  await ctl("set", { set: { serverNotices: false } });
+  await stop(a);
+  await stop(b);
+}
+
+const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained, releasePlaintext };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
