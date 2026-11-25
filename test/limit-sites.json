@@ -13901,10 +13901,10 @@
   "owner": "pyjs runtime",
   "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
  },
- "src/runtime/object.ts :: toPyExc :: if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\\.Memory\\.grow|failed to grow memory/.test(e.message)) { #0": {
+ "src/runtime/object.ts :: toPyExc :: if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\\.Memory\\.grow|failed to grow memory|WebAssembly\\.\\w+\\(\\): Out of memory/.test(e.message)) { #0": {
   "class": "none",
   "owner": "pyjs runtime",
-  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+  "reason": "translates the JavaScript engine's own allocation failure (also a WebAssembly module's setup out of memory) into a MemoryError naming that engine limit; no limit of ours"
  },
  "src/runtime/ops.ts :: bytearrayInplaceRepeat :: if (size > SSIZE_MAX) raise(T.MemoryError); #0": {
   "class": "2",

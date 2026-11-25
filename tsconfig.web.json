@@ -22,6 +22,7 @@
     "web/workspace/agent-pair.ts",
     "web/workspace/fleet/install.ts",
     "web/workspace/fleet-verify.ts",
+    "web/agents/fleet/page.ts",
     "web/workspace/e2e/index.ts",
     "web/workspace/agent-ui.ts",
     "web/workspace/agent-relay.ts",
