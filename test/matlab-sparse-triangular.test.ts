@@ -78,3 +78,20 @@ test("routes, meter, admission and kernel bounds (test/matlab_sparse_triangular_
   assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
   assert.equal(lines.length, 11, r.stdout);
 });
+
+test("a singular triangular A: a sparse b gives the full b's answer, by substitution, at every size (n up to 200, k up to 400000)", () => {
+  // (an all-zero A: substitution gives Inf in every row, the dense route NaN after the first)
+  const lines: string[] = [
+    "for n = [2 3 5 8 50 200]",
+    "  for k = [1 1000 100000 400000]",
+    "    if n * k > 8e6, continue; end",
+    "    A = sparse(n, n);",
+    "    xr = A \\ ones(n, k); xc = A \\ (ones(n, k) + 1i); xs = A \\ sparse(ones(n, k));",
+    "    fprintf('n=%d k=%d|%d|%d|%d|%d|%d\\n', n, k, ~isnan(xr(2,1)), ~isnan(xc(2,1)), ~isnan(full(xs(2,1))), issparse(xs), isequal(full(xs), xr));",
+    "  end",
+    "end",
+  ];
+  const { rows } = run(lines);
+  assert.equal(rows.size, 21, [...rows.keys()].join(" "));
+  for (const [id, v] of rows) assert.deepEqual(v, ["1", "1", "1", "1", "1"], id);
+});

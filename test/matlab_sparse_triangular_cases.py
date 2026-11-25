@@ -190,27 +190,36 @@ assert order_sparse.count("record") == 1 and "full" not in order_sparse, order_s
 ok("small route: its exact need (%d bytes) and any larger guard admit it; one byte short refuses naming it, the dense "
    "route never tried" % need)
 
-# 3b. the choice by shape: a sparse b of many columns, where the triangular route needs more than the dense route,
-# takes the dense route at every guard (a host between the two needs answers, as before), and a full b of the same
-# shape, needing less, the triangular route at every guard
+# 3b. a sparse b of many columns: its result's conversion dominates both routes' needs (the dense route converts its
+# result too, unreserved, after its admitted copies), so it is counted on both sides and the sparse b takes
+# substitution as the full b does, with the same answer; its need passes the dense route's admitted copies, so one
+# byte short of it is refused, where the dense route admitted its copies and converted over the guard
 n, k = 20, 20000
 S = bidiagonal(n)
 Bs = sp.from_full(M._unmat(np.eye(n)[:, [i % n for i in range(k)]]))
 tri_need = sp.small_triangular_need(n, k, False, False, True)[0]
-dense_need = (sp.DENSE_A_COPIES * n * n + sp.DENSE_B_COPIES * n * k) * 8 + 3 * sp.E * 8 * 2
-assert dense_need < tri_need, (dense_need, tri_need)
-for guard in (dense_need, 1 << 40):
+dense_admitted = (sp.DENSE_A_COPIES * n * n + sp.DENSE_B_COPIES * n * k) * 8
+dense_side = max(dense_admitted, sp.from_full_need(n, k, 8))
+assert dense_admitted < tri_need <= dense_side, (dense_admitted, tri_need, dense_side)
+Bf = sp.full(Bs)
+stand_in(1 << 40)
+xf, routes_f = solve(S, Bf)
+for guard in (tri_need, 1 << 40):
     stand_in(guard)
     x, routes = solve(S, Bs)
-    assert "triangular" not in routes and M._dims(x) == (n, k), (guard, routes)
-Bf = sp.full(Bs)
-assert sp.small_triangular_need(n, k, False, False, False)[0] <= (sp.DENSE_A_COPIES * n * n + sp.DENSE_B_COPIES * n * k) * 8
-for guard in (dense_need, 1 << 40):
-    stand_in(guard)
-    x, routes = solve(S, Bf)
-    assert routes == ["triangular"], (guard, routes)
-ok("the small route by shape: a sparse b whose triangular need (%d) passes the dense route's (%d) runs the dense route "
-   "at that guard and at a large one; the full b of the same shape the triangular route at both" % (tri_need, dense_need))
+    assert routes == ["triangular"] and type(x) is sp.Sparse, (guard, routes)
+    assert bool(np.array_equal(M._farr(sp.full(x)), M._farr(xf))), guard
+assert routes_f == ["triangular"], routes_f
+stand_in(tri_need - 1)
+L._routes = []
+try:
+    assert nomem(lambda: B["mldivide"].call(1, [S, Bs]))
+finally:
+    routes, L._routes = L._routes, None
+assert routes == [], routes
+ok("a sparse b of %d columns: its conversion (%d bytes) counted on both sides, substitution as for the full b, the same "
+   "answer; one byte short of its need refused (the dense route admitted %d and converted unreserved)"
+   % (k, sp.from_full_need(n, k, 8), dense_admitted))
 
 # 3c. no size cliff: every order from 2 (1, a scalar A, divides) takes substitution (a need under the small-need floor never refuses), lower and
 # upper, real and complex A and b, full and sparse b, several right-hand sides; an all-zero A divides by zero in each

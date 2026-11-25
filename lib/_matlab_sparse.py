@@ -1669,12 +1669,23 @@ def triangular_solve(S, X, lower, work=None):
     return singular
 
 
+def from_full_need(n, k, cv):
+    """the bytes a solve's sparse result takes from the dense matrix r it is converted from: r (n by k, and _box's real
+    copy when r is complex with all imaginary parts zero) with from_full's index, value, pointer and canonical copies at
+    nnz(r) <= n*k; the same for the triangular route and the dense route, which both end so for a sparse b"""
+    H = C_HDR
+    nk = n * k
+    real_copy = nk * 8 + H if cv == 16 else 0
+    return (nk * cv + H) + real_copy + 4 * nk * C_IDX + 3 * nk * cv + 3 * (k + 1) * C_IDX + 10 * H
+
+
 def small_triangular_need(n, k, cplx_a, cplx_b, sparse_b):
     """the bytes the small triangular route's phases hold at once, the largest of them, and every single array's size
     (for A_SAFE), past the bandwidths' discovery (a constant workspace under the small-need floor): P1 b's dense copy (a
     sparse b's full value, its fill's chunks and _mat's copy together), promoted to the result's class when b is real
-    and A complex; P2 X and one block's temporaries (at most min(E, n*k) values each); P3 X and the result: _unmat's copy (and _box's real copy when its imaginary parts are all zero), or
-    for a sparse b from_full's index, value, pointer and canonical copies at nnz(X) <= n*k"""
+    and A complex; P2 X and one block's temporaries (at most min(E, n*k) values each); P3 X and the result: _unmat's
+    copy (and _box's real copy when its imaginary parts are all zero), then for a sparse b, X deleted, the result's
+    conversion (from_full_need)"""
     cvb = 16 if cplx_b else 8
     cv = 16 if (cplx_a or cplx_b) else 8
     H = C_HDR
@@ -1689,10 +1700,9 @@ def small_triangular_need(n, k, cplx_a, cplx_b, sparse_b):
         p1 = B1 + (X if promote else 0)
     p2 = X + 3 * min(E, nk) * cv + 3 * H
     real_copy = nk * 8 + H if cv == 16 else 0
+    p3 = X + (nk * cv + H) + real_copy
     if sparse_b:
-        p3 = (X + (nk * cv + H) + real_copy + 4 * nk * C_IDX + 3 * nk * cv + 3 * (k + 1) * C_IDX + 10 * H)
-    else:
-        p3 = X + (nk * cv + H) + real_copy
+        p3 = max(p3, from_full_need(n, k, cv))
     arrays = [nk * cvb, nk * cv, nk * 8, nk * C_IDX, (k + 1) * C_IDX]
     return max(p1, p2, p3), max(arrays)
 
@@ -1703,7 +1713,8 @@ def _small_triangular(A, b, k):
     it is decided from A and b alone, never the host's free memory: A triangular (its bandwidths), no single array past
     A_SAFE, and its whole need (small_triangular_need) under the small-need floor (where nothing is admitted, so it
     never refuses) or at most the dense route's (so a refusal is one the dense route would give too: the dense route
-    is exempt only under the floor).  Then, past the small-need
+    is exempt only under the floor), counting for a sparse b the dense route's own conversion of its result, which it
+    makes unreserved after its admitted copies.  Then, past the small-need
     floor, the need is reserved before anything is made, and a guard that refuses it ends the solve with the
     out-of-memory error naming this solve: never the dense route, which, needing at least as much, would refuse too.
     Returns (result or None, the capacity record if one was read, for the dense route to use: one read per solve); a
@@ -1714,7 +1725,11 @@ def _small_triangular(A, b, k):
     cplx_b = not isreal(b)
     need, largest = small_triangular_need(n, k, cplx_a, cplx_b, sparse_b)
     cv = 16 if cplx_a or cplx_b else 8
-    if largest > A_SAFE or (need > SMALL_NEED and need > (DENSE_A_COPIES * n * n + DENSE_B_COPIES * n * k) * cv):
+    dense = (DENSE_A_COPIES * n * n + DENSE_B_COPIES * n * k) * cv
+    if sparse_b:
+        # (the dense route ends so too: its result's conversion, after its solve's copies are gone)
+        dense = max(dense, from_full_need(n, k, cv))
+    if largest > A_SAFE or (need > SMALL_NEED and need > dense):
         return None, None
     # (the bandwidths first, the one piece before the reservation: a fixed workspace of 4E indices with their headers
     # and views, far under the small-need floor, made before any copy of b and any capacity read, deciding no route by
