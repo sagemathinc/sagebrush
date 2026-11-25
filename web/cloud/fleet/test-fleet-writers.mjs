@@ -193,6 +193,37 @@ const revocationOf = (f, what, id, signer = { s: f.sN, k: f.N }) => core.seal("s
   ok(got.startsWith("threw:") && (await snapshot()) === before, "W-5: the certificate's insert failing: the host's row is rolled back too", got);
 }
 
+// ---- W-6: a failure at EACH statement of each writer's batch rolls the whole batch back (snapshot unchanged)
+// (a statement is swapped for one that fails at run time, as the real D1 batch runs it)
+const failing = (i) => ({ prepare: (s) => db.prepare(s), batch: (stmts) => { const b = [...stmts]; b[i] = db.prepare("SELECT json_extract('broken', '$')"); return db.batch(b); } });
+{
+  for (let i = 0; i < 2; i++) {
+    const f = await fleetOf();
+    await f.append(await f.genesis);
+    const e = await f.entry("policy", { policy: { require_native_for_widening: true } });
+    const before = await snapshot();
+    const got = await codeOf(W.appendChainEntry(failing(i), core, { fleet: f.fleet, aud: AUD, bytes: e, now: NOW }));
+    ok(got.startsWith("threw:") && (await snapshot()) === before, `W-6: the append's statement ${i + 1} failing: nothing written (entry and hash together)`, got);
+  }
+  for (let i = 0; i < 3; i++) {
+    const f = await fleetOf();
+    await f.append(await f.genesis);
+    const c = await certOf(f, { s: f.sN, k: f.N });
+    const before = await snapshot();
+    const got = await codeOf(W.pairHost(failing(i), core, { fleet: f.fleet, aud: AUD, bytes: c.bytes }));
+    ok(got.startsWith("threw:") && (await snapshot()) === before, `W-6: the pairing's statement ${i + 1} failing: nothing written (host and certificate together)`, got);
+  }
+  for (let i = 0; i < 2; i++) {
+    const f = await fleetOf();
+    await f.append(await f.genesis);
+    const c = await certOf(f, { s: f.sN, k: f.N });
+    await W.pairHost(db, core, { fleet: f.fleet, aud: AUD, bytes: c.bytes });
+    const before = await snapshot();
+    const got = await codeOf(W.revoke(failing(i), core, { fleet: f.fleet, aud: AUD, bytes: await revocationOf(f, "host", c.host) }));
+    ok(got.startsWith("threw:") && (await snapshot()) === before, `W-6: the revocation's statement ${i + 1} failing: nothing written (marker and flag together)`, got);
+  }
+}
+
 await mf.dispose();
 console.log(`${count - failures}/${count} passed`);
 if (failures) process.exit(1);
