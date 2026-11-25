@@ -35,6 +35,12 @@ mod signer;
 //  in part 3)
 #[allow(dead_code)]
 mod fleet_sig;
+// (the browser lane's frames, browser lane 3 (c): nothing routes them yet but their tests; the session's launcher
+//  and router come next)
+#[allow(dead_code)]
+mod browser_frames;
+#[allow(dead_code)]
+mod browser_launch;
 #[cfg(desktop)]
 #[allow(dead_code)]
 mod device_key;
