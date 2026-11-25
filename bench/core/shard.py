@@ -1033,12 +1033,15 @@ def point_sizes(plan: dict) -> dict:
 
 def expected_seconds(key: str) -> float:
     """A point's expected cost, for longest-first assignment: the row's
-    timeout (no earlier medians in v1)."""
+    timeout (no earlier medians in v1), times the thread sweep's extra
+    timed runs on the rows marked "sweep" (up to 6 columns, or 2 at the
+    ends)."""
     rows = json.loads((HERE / "items.json").read_text())["rows"]
     row, _, size = key.partition(":")
     for r in rows:
         if r["id"] == row:
-            return float(r["sizes"][size]["timeout"])
+            extra = {"cores": 6, "ends": 2}.get(r.get("sweep"), 0)
+            return float(r["sizes"][size]["timeout"]) * (1 + extra)
     return 0.0
 
 
@@ -1447,6 +1450,7 @@ class Driver:
                 "out",
                 "--expected-inputs",
                 "sb/expected-inputs.json",
+                "--sweep",
             ],
             timeout,
         )

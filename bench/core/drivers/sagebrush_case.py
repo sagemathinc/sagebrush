@@ -4,6 +4,7 @@ native bindings); the protocol is common.py's."""
 
 from __future__ import annotations
 
+import os
 import sys
 
 import common
@@ -176,6 +177,10 @@ def smith_hard_rows(size, v):
         for i in range(size)
     ]
 
+
+# The threads of the parallel ops: 1, or the -n backend's count (run.py
+# sets BENCH_THREADS; F4 reads SAGEBRUSH_THREADS, also set by run.py)
+THREADS = int(os.environ.get("BENCH_THREADS", "1"))
 
 # hecke_matrix's level: prime, S_2 of dimension 32 (one rational newform,
 # the curve 389a of rank 2, and a 20-dimensional orbit)
@@ -352,11 +357,11 @@ def prepare(v):
     if case_id == "ec_aplist":
         operands([0, 0, 1, -7, 6, n])
     if case_id == "modsym_charpoly":
-        return lambda: modsym.charpoly_exact(n, 2, threads=1)["charpoly"]
+        return lambda: modsym.charpoly_exact(n, 2, threads=THREADS)["charpoly"]
     if case_id == "newforms":
-        return lambda: mf.newforms(n, 2, bound=30, threads=1)
+        return lambda: mf.newforms(n, 2, bound=30, threads=THREADS)
     if case_id == "ec_aplist":
-        return lambda: ap.aplist([0, 0, 1, -7, 6], n, threads=1)
+        return lambda: ap.aplist([0, 0, 1, -7, 6], n, threads=THREADS)
     raise ValueError(case_id)
 
 

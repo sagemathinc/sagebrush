@@ -412,11 +412,16 @@ ARTS = {
 class Points(unittest.TestCase):
     """point() with the drivers replaced (no subprocess): its decisions."""
 
+    # (a sweep column's combined signature by backend, when not the timed one)
+    sweep_sig: dict = {}
+
     def run_point(self, inputs, expected=None, arts=ARTS, steal=0.0, row=ROW, cold=None):
         calls = []
 
-        def fake_invoke(b, row, n, mode, timeout, k=1):
-            calls.append((b, mode))
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            calls.append((b, mode) if cpus is None else (b, mode, tuple(cpus)))
+            if cpus and b in self.sweep_sig:
+                return {"status": "ok", "seconds": 1.0, "signature": self.sweep_sig[b], "steal": steal}
             if mode == "inputs":
                 return {"status": "ok", "input_hash": inputs[b]}
             if mode == "once":
@@ -1099,6 +1104,136 @@ class CalibrationSizes(unittest.TestCase):
             self.assertTrue(shard.SIZE_RE.match(k), k)
         for k in ("c5", "x", "c0/../l", "s "):
             self.assertFalse(shard.SIZE_RE.match(k), k)
+
+
+class Sweep(unittest.TestCase):
+    """The thread sweep: its columns, the pinning, and point()'s sweep."""
+
+    def sysfs(self, siblings):
+        root = Path(tempfile.mkdtemp(prefix="bench-core-cpu-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        for cpu, text in siblings.items():
+            d = root / f"cpu{cpu}" / "topology"
+            d.mkdir(parents=True)
+            (d / "thread_siblings_list").write_text(text + "\n")
+        return root
+
+    def test_cpu_lists(self):
+        self.assertEqual(run.cpu_list("0-3,8,10-11\n"), [0, 1, 2, 3, 8, 10, 11])
+        self.assertEqual(run.cpu_list("5"), [5])
+
+    def test_eight_cores_with_smt(self):
+        # (n2-standard-16: cpu i and i + 8 share a core)
+        root = self.sysfs({i: f"{i % 8},{i % 8 + 8}" for i in range(16)})
+        cols = run.core_columns(root, range(16))
+        self.assertEqual([c[0] for c in cols], ["1", "2", "4", "8", "16-smt"])
+        self.assertEqual(cols[3][1], list(range(8)))
+        self.assertEqual(cols[4][1], list(range(16)))
+
+    def test_sixteen_cores_without_smt(self):
+        # (c4a-standard-16)
+        root = self.sysfs({i: str(i) for i in range(16)})
+        cols = run.core_columns(root, range(16))
+        self.assertEqual([c[0] for c in cols], ["1", "2", "4", "8", "16"])
+
+    def test_cores_not_a_power_of_two_and_the_affinity(self):
+        root = self.sysfs({i: f"{i // 2 * 2}-{i // 2 * 2 + 1}" for i in range(12)})
+        cols = run.core_columns(root, range(12))
+        self.assertEqual([c[0] for c in cols], ["1", "2", "4", "6", "12-smt"])
+        self.assertEqual(cols[1][1], [0, 2])
+        # (only the CPUs this process may run on)
+        cols = run.core_columns(root, [0, 2, 3])
+        self.assertEqual(cols, [("1", [0]), ("2", [0, 2]), ("3-smt", [0, 2, 3])])
+
+    def test_run_child_pins_the_child(self):
+        code = "import os; print(len(os.sched_getaffinity(0)), os.environ['BENCH_THREADS'])"
+        r = run.run_child([PY, "-c", code], 30, 1, cpus=[min(os.sched_getaffinity(0))])
+        self.assertEqual(r["output"].split(), ["1", "1"])
+
+    def test_a_cap_pins_its_cgroup(self):
+        root = Path(tempfile.mkdtemp(prefix="bench-core-fake-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        cap = FakeCap(root)
+        d = cap.new([0, 2])
+        self.assertEqual((d / "cpuset.cpus").read_text(), "0,2")
+        self.assertFalse((cap.new() / "cpuset.cpus").exists())
+
+    def test_the_sweep_needs_the_cpuset_controller(self):
+        root = Path(tempfile.mkdtemp(prefix="bench-core-fake-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        (root / "cgroup.subtree_control").write_text("memory\n")
+        self.assertFalse(any("cpuset" in x for x in run.Cap.problems(root)))
+        self.assertTrue(any("cpuset" in x for x in run.Cap.problems(root, cpuset=True)))
+
+    def test_user_n_only_on_the_parallel_rows(self):
+        with mock.patch.object(run, "VENV_PY", Path(PY)):
+            self.assertIsNone(run.command("user-n", ROW, 10, "once"))
+            self.assertIsNotNone(run.command("user-n", dict(ROW, parallel=True), 10, "once"))
+
+    def sweep(self, row, sweep_sig=None):
+        cols = [("1", [0]), ("2", [0, 1]), ("4-smt", [0, 1, 2, 3])]
+        pts = Points()
+        pts.sweep_sig = sweep_sig or {}
+        with (
+            mock.patch.object(run, "SWEEP", cols),
+            mock.patch.object(run, "VENV_PY", Path(PY)),
+        ):
+            return pts.run_point({"user": "5", "user-n": "5", "magma": "5"}, row=row)
+
+    def test_point_sweeps_the_n_backends(self):
+        row = dict(ROW, parallel=True, sweep="cores")
+        rec, calls = self.sweep(row)
+        self.assertEqual(list(rec["sweep"]), ["user-n"])
+        self.assertEqual(list(rec["sweep"]["user-n"]), ["1", "2", "4-smt"])
+        self.assertEqual(rec["sweep"]["user-n"]["2"]["cpus"], [0, 1])
+        self.assertIn(("user-n", "time", (0, 1, 2, 3)), calls)
+        self.assertFalse([c for c in calls if len(c) == 3 and c[0] != "user-n"])
+        # (the ends: the first and the last column only)
+        rec, _ = self.sweep(dict(row, sweep="ends"))
+        self.assertEqual(list(rec["sweep"]["user-n"]), ["1", "4-smt"])
+        # (no sweep without the row's mark)
+        rec, _ = self.sweep(dict(row, sweep=None))
+        self.assertNotIn("sweep", rec)
+
+    def test_a_sweep_column_with_another_answer_is_a_mismatch(self):
+        row = dict(ROW, parallel=True, sweep="cores")
+        rec, _ = self.sweep(row, {"user-n": "K:2"})
+        self.assertEqual(
+            {t["status"] for t in rec["sweep"]["user-n"].values()}, {"mismatch"}
+        )
+
+
+class SweepSummary(unittest.TestCase):
+    def test_the_summary_lists_the_sweep(self):
+        d = Path(tempfile.mkdtemp(prefix="bench-core-sum-"))
+        self.addCleanup(shutil.rmtree, d, True)
+        (d / "rows").mkdir()
+        rec = {
+            "item": "ca0",
+            "row": "groebner_cyclic",
+            "size": "s",
+            "n": 6,
+            "commit": "c" * 40,
+            "machine": {"label": "x86", "cpu": "Xeon", "arch": "x86_64", "nproc": 16, "flags": []},
+            "engine_pin": {"ok": False, "policy": "track", "sha256": "b" * 64},
+            "backends": {},
+            "status": "ok",
+            "sweep": {
+                "user-n": {
+                    "1": {"status": "ok", "seconds": 2.0},
+                    "2": {"status": "ok", "seconds": 1.0},
+                    "16-smt": {"status": "timeout"},
+                }
+            },
+        }
+        (d / "rows/groebner_cyclic-s.json").write_text(json.dumps(rec))
+        run.summary(d, {})
+        text = (d / "summary.md").read_text()
+        self.assertIn("## Thread sweep", text)
+        self.assertIn(
+            "- **groebner_cyclic** s (n=6) user-n: 1: 2.000 (1.00x); 2: 1.000 (2.00x); 16-smt: timeout",
+            text,
+        )
 
 
 class Host(unittest.TestCase):

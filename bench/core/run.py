@@ -44,11 +44,13 @@ WASM = HERE / "native/target/wasm32-wasip1/release/bench-core-native.wasm"
 WASI_RUN = HERE / "drivers/wasi_run.mjs"
 FLINT_RUST = HERE / "flint-rust/target/release/bench-core-flint"
 # Every backend; a name ending in "-n" is its base run on N threads
-BACKENDS = "user,native,native-host,native-n,wasm,magma,flint,flint-n"
+BACKENDS = "user,user-n,native,native-host,native-n,wasm,magma,flint,flint-n"
 # The delegated cgroup v2 directory the memory caps live under (README)
 CGROUP_ROOT = Path(os.environ.get("BENCH_CGROUP", "/sys/fs/cgroup/bench-core"))
 # The threads of the "-n" backends (main sets it: --threads, else nproc)
 THREADS = os.cpu_count() or 1
+# The thread sweep's columns, [(label, cpus)] (main sets it with --sweep)
+SWEEP = None
 # The memory cap of every subprocess (main sets it: a Cap, or None for an
 # explicitly uncapped run)
 CAP = None
@@ -170,6 +172,13 @@ def parse_args() -> argparse.Namespace:
         help="the threads of the -n backends (default: the CPU count)",
     )
     p.add_argument(
+        "--sweep",
+        action="store_true",
+        help="the thread sweep: the -n backends of the rows marked \"sweep\" "
+        "also timed on 1, 2, 4, 8, ... physical cores, then with the SMT "
+        "siblings, each pinned (core_columns)",
+    )
+    p.add_argument(
         "--mem-cap",
         default="auto",
         help="each subprocess's memory cap: auto (the machine's memory less a "
@@ -241,6 +250,40 @@ def _read(path: str) -> str | None:
         return Path(path).read_text().strip()
     except OSError:
         return None
+
+
+def cpu_list(text: str) -> list[int]:
+    """A sysfs CPU list ("0-3,8,10-11") as its CPUs."""
+    out = []
+    for part in text.strip().split(","):
+        if part:
+            lo, _, hi = part.partition("-")
+            out += range(int(lo), int(hi or lo) + 1)
+    return out
+
+
+def core_columns(sysfs: Path = Path("/sys/devices/system/cpu"), allowed=None) -> list:
+    """The thread sweep's columns, [(label, cpus)]: the first c physical
+    cores for c = 1, 2, 4, 8, ... (and all of them), one logical CPU each
+    (the first of its thread_siblings_list), then, with SMT, every logical
+    CPU (label "<count>-smt").  Only the CPUs this process may run on."""
+    allowed = set(os.sched_getaffinity(0) if allowed is None else allowed)
+    groups = set()
+    for f in sysfs.glob("cpu[0-9]*/topology/thread_siblings_list"):
+        cpu = int(f.parent.parent.name[3:])
+        if cpu in allowed:
+            groups.add(tuple(sorted(c for c in cpu_list(f.read_text()) if c in allowed)))
+    firsts = sorted(g[0] for g in groups)
+    cols, c = [], 1
+    while c <= len(firsts):
+        cols.append((str(c), firsts[:c]))
+        c *= 2
+    if cols and len(cols[-1][1]) != len(firsts):
+        cols.append((str(len(firsts)), firsts))
+    every = sorted(x for g in groups for x in g)
+    if len(every) > len(firsts):
+        cols.append((f"{len(every)}-smt", every))
+    return cols
 
 
 def host() -> dict:
@@ -406,18 +449,21 @@ class Cap:
         return max(total - max(2 << 30, total // 10), 256 << 20)
 
     @staticmethod
-    def problems(root: Path) -> list[str]:
-        """Why caps can't be made under root (none: they can)."""
+    def problems(root: Path, cpuset: bool = False) -> list[str]:
+        """Why caps (and, for the thread sweep, cpusets) can't be made under
+        root (none: they can)."""
         out = []
         if not root.is_dir():
             return [f"{root} does not exist"]
         if not os.access(root, os.W_OK):
             out.append(f"{root} is not writable by this user")
         try:
-            if "memory" not in (root / "cgroup.subtree_control").read_text().split():
-                out.append(
-                    f"the memory controller is not enabled in {root}/cgroup.subtree_control"
-                )
+            enabled = (root / "cgroup.subtree_control").read_text().split()
+            for c in ("memory", "cpuset") if cpuset else ("memory",):
+                if c not in enabled:
+                    out.append(
+                        f"the {c} controller is not enabled in {root}/cgroup.subtree_control"
+                    )
         except OSError as e:
             out.append(f"{root}/cgroup.subtree_control: {e}")
         # (the interfaces teardown needs: cgroup.kill, Linux 5.14; memory.peak, 5.19)
@@ -438,14 +484,17 @@ class Cap:
             )
         return out
 
-    def new(self) -> Path:
-        """A fresh capped cgroup; if any step fails, the directory is removed
-        before the error propagates."""
+    def new(self, cpus: list[int] | None = None) -> Path:
+        """A fresh capped cgroup (pinned to cpus, if given, by cpuset.cpus);
+        if any step fails, the directory is removed before the error
+        propagates."""
         self.k += 1
         d = self.root / f"p-{os.getpid()}-{self.k}"
         self._mkdir(d)
         try:
             self._write(d / "memory.max", str(self.limit))
+            if cpus:
+                self._write(d / "cpuset.cpus", ",".join(map(str, cpus)))
             for name, value in (("memory.swap.max", "0"), ("memory.oom.group", "1")):
                 if (d / name).exists():
                     self._write(d / name, value)
@@ -532,6 +581,7 @@ def run_child(
     threads: int = 1,
     cap: Cap | None = None,
     extra_env: dict | None = None,
+    cpus: list[int] | None = None,
 ) -> dict:
     """Run cmd in its own process group with `threads`-thread settings (and,
     with a cap, in its own capped cgroup); its output, exit status, wall
@@ -540,7 +590,9 @@ def run_child(
     child exits, KILL again for anything it left behind in the group (and
     cgroup.kill for anything in its cgroup), and on any other way out (an
     interruption, an error) KILL and a reap of the child before the
-    exception propagates."""
+    exception propagates.  With cpus, the child is pinned to them: its
+    cgroup's cpuset.cpus (with a cap) and its affinity, so
+    sched_getaffinity, and so available_parallelism, see len(cpus)."""
     env = dict(os.environ, **{k: str(threads) for k in SINGLE_THREAD})
     env["BENCH_THREADS"] = str(threads)
     env.update(extra_env or {})
@@ -548,15 +600,19 @@ def run_child(
     with tempfile.TemporaryFile() as out:
         # (the output file first, then the cgroup: from here on every way
         # out goes through the finally below, which tears the cgroup down)
-        cg = cap.new() if cap else None
+        cg = cap.new(cpus) if cap else None
         enter = None
-        if cg:
-            procs = str(cg / "cgroup.procs")
+        procs = str(cg / "cgroup.procs") if cg else None
+        if cg or cpus:
 
             def enter():
-                # (in the child, before it executes: into its own cgroup)
-                with open(procs, "w") as f:
-                    f.write(str(os.getpid()))
+                # (in the child, before it executes: into its own cgroup,
+                # then onto its cpus)
+                if procs:
+                    with open(procs, "w") as f:
+                        f.write(str(os.getpid()))
+                if cpus:
+                    os.sched_setaffinity(0, cpus)
 
         pgid, status, rusage, timed_out, termed, proc = (
             None,
@@ -638,6 +694,7 @@ def _killpg(pgid: int, sig: int) -> None:
 
 # The base of each derived backend (its driver, and whether the row has one)
 BASE = {
+    "user-n": "user",
     "native-host": "native",
     "native-n": "native",
     "wasm": "native",
@@ -898,6 +955,9 @@ def command(backend: str, row: dict, n: int, mode: str, k: int = 1) -> list[str]
     or isn't on this host.  A "-n" backend is its base's command (run on
     THREADS threads by invoke)."""
     if backend.endswith("-n"):
+        # (user-n only on the rows whose code runs in parallel)
+        if backend == "user-n" and not row.get("parallel"):
+            return None
         return command(backend[:-2], row, n, mode, k)
     cid, kinds = row["id"], row["backends"]
     if backend == "native-host":
@@ -1013,8 +1073,16 @@ def wants_vtime(backend: str, row: dict) -> bool:
 
 
 def invoke(
-    backend: str, row: dict, n: int, mode: str, timeout: float, k: int = 1
+    backend: str,
+    row: dict,
+    n: int,
+    mode: str,
+    timeout: float,
+    k: int = 1,
+    cpus: list[int] | None = None,
 ) -> dict:
+    """One driver run, its output parsed; with cpus (the thread sweep),
+    pinned to them, on len(cpus) threads."""
     cmd = command(backend, row, n, mode, k)
     s0 = cpu_times()
     extra = (
@@ -1022,7 +1090,8 @@ def invoke(
         if mode in ("time", "time-fresh") and wants_vtime(backend, row)
         else None
     )
-    r = run_child(cmd, timeout, THREADS if backend.endswith("-n") else 1, CAP, extra)
+    threads = len(cpus) if cpus else (THREADS if backend.endswith("-n") else 1)
+    r = run_child(cmd, timeout, threads, CAP, extra, cpus)
     r["steal"] = max_steal(s0, cpu_times())
     # (Magma 2.18 wraps long lines with backslash-newline)
     text = r.pop("output").replace("\\\n", "")
@@ -1145,8 +1214,11 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
         if b not in present and b not in rec["backends"]:
             rec["backends"][b] = {
                 "status": "not applicable"
-                if BASE.get(b, b) in ("native", "flint")
-                and not (row["backends"][BASE.get(b, b)])
+                if (
+                    BASE.get(b, b) in ("native", "flint")
+                    and not (row["backends"][BASE.get(b, b)])
+                )
+                or (b == "user-n" and not row.get("parallel"))
                 else "not on host"
             }
     # 1. the inputs each backend builds
@@ -1188,6 +1260,23 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
             for t in timed.values():
                 if t["status"] == "ok":
                     t["status"] = "mismatch"
+        # the thread sweep (--sweep, rows marked "sweep"): each -n backend
+        # again on each column's cpus, pinned; "ends" only the first and
+        # the last column (a flat baseline); a combined signature that
+        # differs from the timed one is a mismatch
+        if SWEEP and row.get("sweep") and rec["status"] == "ok":
+            cols = SWEEP if row["sweep"] == "cores" else [SWEEP[0], SWEEP[-1]]
+            for b in present:
+                if not b.endswith("-n") or "time" not in rec["backends"][b]:
+                    continue
+                sweep = {}
+                for label, cpus in cols:
+                    t = invoke(b, row, n, mode, timeout, k, cpus)
+                    t["cpus"] = cpus
+                    if t["status"] == "ok" and t["signature"] not in combined:
+                        t["status"] = "mismatch"
+                    sweep[label] = t
+                rec.setdefault("sweep", {})[b] = sweep
 
     # 4. the meter's units (calibration rows with a native driver): refused,
     # as an error, when they are not deterministic or not thread-independent
@@ -1353,6 +1442,23 @@ def summary(out: Path, items: dict) -> None:
         lines.append(
             f"| {r['item']} | {r['row']} | {r['size']} | {r['n']} | {t('user')} | {t('native')} | {t('native-host')} | {t('native-n')} | {t('wasm')} | {t('magma')} | {t('flint')} | {t('flint-n')} | {r.get('best_ref', {}).get('adapter', '—')} | {user_ratio} | {r.get('ratio_native', '—')} | {r.get('ratio_wasm', '—')} | {r.get('ratio_best', '—')} | {peak} | {r['status']} |"
         )
+    # the thread sweep: per row and -n backend, each column's median and
+    # its speedup over the 1-core column
+    swept = [r for r in recs if r.get("sweep")]
+    if swept:
+        lines += ["", "## Thread sweep", "", "Medians in seconds, pinned to the column's CPUs (c physical cores, then every logical CPU: -smt); in brackets the speedup over 1 core.", ""]
+        for r in swept:
+            for b, cols in r["sweep"].items():
+                one = (cols.get("1") or {}).get("seconds")
+                cells = []
+                for label, t in cols.items():
+                    sec = t.get("seconds") if t.get("status") == "ok" else None
+                    if sec is None:
+                        cells.append(f"{label}: {t.get('status')}")
+                    else:
+                        up = f" ({one / sec:.2f}x)" if one else ""
+                        cells.append(f"{label}: {secs(sec)}{up}")
+                lines.append(f"- **{r['row']}** {r['size']} (n={r['n']}) {b}: " + "; ".join(cells))
     uncovered = [i for i in items.values() if i["status"] != "rows"]
     lines += ["", "## Items without rows", ""] + [
         f"- {i['id']} ({i['title']}): {i['status']}" for i in uncovered
@@ -1376,12 +1482,15 @@ def main() -> int:
         return 0
     if args.build:
         build()
-    global THREADS, CAP, EXPECTED
+    global THREADS, CAP, EXPECTED, SWEEP
     THREADS = max(1, args.threads)
     if args.expected_inputs:
         EXPECTED = json.loads(args.expected_inputs.read_text())
+    SWEEP = core_columns() if args.sweep else None
     if args.dry_run:
         print(json.dumps(machine(args.host_label)))
+        if SWEEP:
+            print("sweep", json.dumps(SWEEP))
         for row in rows:
             for key in (k for k in sizes if k in row["sizes"]):
                 found = [
@@ -1392,7 +1501,7 @@ def main() -> int:
                 print(row["id"], key, row["sizes"][key]["n"], " ".join(found))
         return 0
     if args.mem_cap != "none":
-        problems = Cap.problems(CGROUP_ROOT)
+        problems = Cap.problems(CGROUP_ROOT, cpuset=bool(SWEEP))
         if problems:
             raise SystemExit(
                 "a memory cap needs a delegated cgroup (README, 'Memory caps'):\n- "
@@ -1435,6 +1544,7 @@ def main() -> int:
             "wasm": "wasm32-wasip1, default target features",
         },
         "threads": THREADS,
+        "sweep": [[label, cpus] for label, cpus in SWEEP] if SWEEP else None,
         "mem_cap": CAP.limit if CAP else None,
         "backends": backends,
     }

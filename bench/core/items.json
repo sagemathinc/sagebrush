@@ -988,7 +988,8 @@
     "native": true,
     "magma": true,
     "flint": "rust"
-   }
+   },
+   "sweep": "ends"
   },
   {
    "id": "mat_fp_det",
@@ -1583,7 +1584,9 @@
     "flint": null
    },
    "variants": 1,
-   "variants_note": "one named input, the Cyclic-n ideal"
+   "variants_note": "one named input, the Cyclic-n ideal",
+   "parallel": true,
+   "sweep": "cores"
   },
   {
    "id": "groebner_katsura",
@@ -1612,7 +1615,9 @@
     "flint": null
    },
    "variants": 1,
-   "variants_note": "one named input, the Katsura-n ideal"
+   "variants_note": "one named input, the Katsura-n ideal",
+   "parallel": true,
+   "sweep": "cores"
   },
   {
    "id": "class_group",
@@ -1729,7 +1734,9 @@
     "flint": null
    },
    "variants": 1,
-   "variants_note": "one named input per size, a fixed level"
+   "variants_note": "one named input per size, a fixed level",
+   "parallel": true,
+   "sweep": "cores"
   },
   {
    "id": "newforms",
@@ -1758,7 +1765,9 @@
     "flint": null
    },
    "variants": 1,
-   "variants_note": "one named input per size, a fixed level"
+   "variants_note": "one named input per size, a fixed level",
+   "parallel": true,
+   "sweep": "cores"
   },
   {
    "id": "hecke_matrix",
