@@ -70,7 +70,12 @@ pass, and CI runs them.
   uint32 elements of a contiguous array other values (in blocks of 4: NaN gives 2147483648 there); Sagebrush gives
   every element the per-element result. A Python float (or a NumPy float scalar) assigned or listed is converted by
   `int()`, NaN, infinity and out-of-range values refused, as in NumPy. int64 and uint64 keep refusing results past
-  $2^{53}$.
+  $2^{53}$. The warning names the operation as NumPy's does ("in cast"; "in add" and so on when a ufunc writes into
+  an integer `out=`; "in reduce" for a reduction into one), and `np.errstate`/`np.seterr` set whether it warns, is
+  ignored or raises `FloatingPointError` (their 'call', 'print' and 'log' modes are not supported for 'invalid'
+  yet). Sagebrush gives one warning per call: NumPy casts the first element of `min`/`max` (and of an accumulation,
+  "in accumulate") into `out=` on its own, so it may give a second warning, or say "in cast" when only that element
+  is invalid.
 
 ## What is there
 

@@ -643,8 +643,8 @@ export class FlagsObj {
 // -3e9 becomes 1294967296). NumPy's vectorized loop gives some uint32 elements
 // of a contiguous array other values (NUMPY.md); one rule
 // here, the same for every element and on every machine. An invalid
-// conversion sets castInvalid, for the cast's RuntimeWarning; warnInvalidCast,
-// after each cast, clears it, so it is false between casts. int64 and
+// conversion sets castInvalid, for the cast's RuntimeWarning; each cast clears
+// it first (a cast that threw midway may have left it set). int64 and
 // uint64 are left to castNum: their x86-64 results (INT64_MIN, 2**63) are
 // past the 2**53 Sagebrush's 64-bit stores hold.
 let castInvalid = false;
@@ -659,11 +659,19 @@ function floatToInt(dt: DType, v: number): number {
   castInvalid = true;
   return -2147483648;
 }
-// (NumPy's warning for a cast with an invalid conversion, once per cast)
+// (np.errstate's 'invalid' mode, which lib/numpy's seterr keeps here: "ignore", "warn" or "raise")
+let invalidMode = "warn";
+// (the operation the warning names, as NumPy's does: "cast", or what lib/numpy sets while it stores a result into
+// out=, a ufunc's name or "reduce")
+let castLabel = "cast";
+// (NumPy's warning for a cast with an invalid conversion, once per cast, as np.errstate's 'invalid' mode says)
 function warnInvalidCast(): void {
   if (!castInvalid) return;
   castInvalid = false;
-  Obj.callObj(Obj.getattr(Obj.hooks.importModule("warnings"), "warn"), ["invalid value encountered in cast", T.RuntimeWarning, 2]);
+  if (invalidMode === "ignore") return;
+  const msg = `invalid value encountered in ${castLabel}`;
+  if (invalidMode === "raise") raise(T.FloatingPointError, msg);
+  Obj.callObj(Obj.getattr(Obj.hooks.importModule("warnings"), "warn"), [msg, T.RuntimeWarning, 2]);
 }
 
 function assign(out: NDArray, src: NDArray) {
@@ -683,6 +691,7 @@ function assign(out: NDArray, src: NDArray) {
     if (dt.kind === "b") loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = sd[2 * q] !== 0 || sd[2 * q + 1] !== 0 ? 1 : 0));
     else {
       const conv = dt.kind === "i" || dt.kind === "u" ? floatToInt : castNum;
+      castInvalid = false;
       loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = conv(dt, sd[2 * q])));
       warnInvalidCast();
     }
@@ -693,6 +702,7 @@ function assign(out: NDArray, src: NDArray) {
     loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = sd[q]));
   } else {
     const conv = src.dt.kind === "f" && (dt.kind === "i" || dt.kind === "u") ? floatToInt : castNum;
+    castInvalid = false;
     loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = conv(dt, sd[q])));
     warnInvalidCast();
   }
@@ -885,10 +895,16 @@ function admitWide(v: any, dt: DType): number {
 }
 // (a NumPy float scalar: np.float64 or np.float32, a Python float subclass here)
 const isFloatScalar = (v: any): boolean => typeName(v) === "float64" || typeName(v) === "float32";
+// (a Python float or a NumPy float scalar)
+function isPyFloat(v: any): boolean {
+  const u = typeof v === "object" && v !== null ? Obj.unbox(v) : v;
+  return (typeof u === "number" && !Number.isInteger(u)) || u instanceof Obj.FloatBox || isFloatScalar(v);
+}
 function toNum(v: any, dt?: DType): number {
   // (a NumPy float scalar into an unsigned dtype is cast, as NumPy packs it: its per-element conversion, with the
   // warning, #2149; into a signed one, by int(), as a Python float below)
   if (dt && dt.kind === "u" && isFloatScalar(v)) {
+    castInvalid = false;
     const r = floatToInt(dt, Number(Obj.unbox(v) instanceof Obj.FloatBox ? (Obj.unbox(v) as any).v : Obj.unbox(v)));
     warnInvalidCast();
     return r;
@@ -901,7 +917,10 @@ function toNum(v: any, dt?: DType): number {
     if (Number.isNaN(f)) raise(T.ValueError, "cannot convert float NaN to integer");
     if (!Number.isFinite(f)) raise(T.OverflowError, "cannot convert float infinity to integer");
     const n = Math.trunc(f) + 0;
-    if (!(n >= -9223372036854775808 && n < (dt.kind === "u" && dt.itemsize === 8 ? 18446744073709551616 : 9223372036854775808))) raise(T.OverflowError, "Python int too large to convert to C long");
+    // (as NumPy checks it: first as a C long (an unsigned one for uint32 and uint64), then in the dtype's bounds,
+    // which past 2**53 only the 64-bit types have)
+    if (!(n >= -9223372036854775808 && n < (dt.kind === "u" && dt.itemsize >= 4 ? 18446744073709551616 : 9223372036854775808))) raise(T.OverflowError, "Python int too large to convert to C long");
+    if (!Number.isSafeInteger(n) && !isWide(dt)) raise(T.OverflowError, `Python integer ${BigInt(n)} out of bounds for ${dt.name}`);
     return toNum(Number.isSafeInteger(n) ? n : BigInt(n), dt);
   }
   if (dt && isWide(dt)) return admitWide(v, dt);
@@ -3854,6 +3873,14 @@ function strFull(shape: number[], v: any, sd: StrDType | null): StrArray {
 newBuiltinModule("_numpy", (m) => {
   const fn = (name: string, f: any, s: Obj.Signature | null = null) => (m[name] = Obj.builtin(f, name, s));
   const opt = (x: any) => (x === undefined ? null : x);
+  // (np.seterr's 'invalid' mode, for the casts' warning)
+  fn("_set_invalid_mode", (mode: any) => ((invalidMode = String(mode)), null));
+  // (the name a cast's warning gives its operation; returns the one it replaces)
+  fn("_cast_label", (name: any) => {
+    const old = castLabel;
+    castLabel = String(name);
+    return old;
+  });
 
   // dtype
   const DT = Ty.builtinTypeFor("dtype", DType, "numpy", (x: any) => strSpec(x) ?? toDtype(x));
@@ -4169,8 +4196,9 @@ newBuiltinModule("_numpy", (m) => {
       assign(a, strFromPy(value, dtype) as NDArray);
       return a;
     }
-    // (a Python value into int64/uint64 converted once, by the admission)
-    if (dtype !== null && isWide(toDtype(dtype)) && !(value instanceof NDArray)) {
+    // (a Python value into int64/uint64 converted once, by the admission; a float one cast, as NumPy's copyto
+    // (casting='unsafe') casts it, #2149)
+    if (dtype !== null && isWide(toDtype(dtype)) && !(value instanceof NDArray) && !isPyFloat(value)) {
       const a = empty(shapeArg(shape), toDtype(dtype));
       assign(a, fromPy(value, a.dt));
       return a;
@@ -4178,7 +4206,7 @@ newBuiltinModule("_numpy", (m) => {
     const v = operand(value);
     const dt = dtype !== null ? toDtype(dtype) : v.weak ? scalarDtype(v.weak) : v.arr.dt;
     const a = empty(shapeArg(shape), dt);
-    assign(a, isWide(dt) && !(value instanceof NDArray) ? fromPy(value, dt) : v.arr);
+    assign(a, isWide(dt) && !(value instanceof NDArray) && !isPyFloat(value) ? fromPy(value, dt) : v.arr);
     return a;
   });
   fn("arange", (start: any, stop: any = null, step: any = null, dtype: any = null) => {
