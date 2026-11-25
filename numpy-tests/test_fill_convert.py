@@ -52,6 +52,19 @@ for dt in ("int8", "uint8", "int16", "int32", "uint32", "int64", "uint64", "floa
         print(dt, repr(v), "| fill", show(lambda: filled(dt, v)))
 for v in (np.array([5, 6]), np.array([5]), [5], ["x", "y"], np.array(["a"]), np.array("q"), 5, None, 1 + 2j):
     print("U3", repr(v), "| fill", show(lambda: filled("U3", v)))
+# (a NumPy complex scalar casts as its real part's NumPy scalar does: checked into a signed dtype, cast into an
+# unsigned one; int64/uint64 only with values Sagebrush holds there, and uint32 without 1e20, a cast NumPy does
+# through int64)
+cvals = (np.complex128(300 + 1j), np.complex128(complex(float("nan"), 1)), np.complex128(complex(float("inf"), 0)),
+         np.complex128(-1 + 2j), np.complex128(1e20), np.complex64(300 + 1j), np.complex64(-1 + 2j), np.complex128(7 + 1j))
+for dt in ("uint8", "uint16", "uint32", "int8", "int16", "int32", "int64", "uint64"):
+    for v in cvals:
+        r = v.real
+        if dt == "uint32" and r == 1e20:
+            continue
+        if dt in ("int64", "uint64") and (not np.isfinite(r) or abs(r) > 2 ** 53 or (dt == "uint64" and r < 0)):
+            continue
+        print(dt, repr(v), "| fill", show(lambda: filled(dt, v)))
 
 for dt in ("int8", "uint8", "int16", "uint16", "int32", "uint32"):
     for v in (np.int64(300), np.int64(-1), np.uint8(255), np.float64(300.7), np.float32(70000.0), np.uint64(2 ** 40),

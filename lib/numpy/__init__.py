@@ -2992,7 +2992,9 @@ def _fill_scalar(dt, v):
                         "int() argument must be a string, a bytes-like object or a real number, not 'complex'")
     if k in "iu":
         if isinstance(v, complex):
-            return v.real
+            # (its real part stays a NumPy scalar (float64 holds a complex64's exactly), so it casts into an unsigned
+            # dtype as NumPy casts)
+            return float64(v.real)
         if isinstance(v, (str, bytes)):
             return int(v)
         if v is None or isinstance(v, (list, tuple)):
