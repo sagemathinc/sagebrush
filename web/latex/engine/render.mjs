@@ -103,7 +103,7 @@ export function buildTree(events, items = []) {
       // (PythonTeX: a stale result read back begins (on) or ends; what is drawn in between is faded, R3-4)
       case "z": top().kids.push({ t: "Z", on: e.on }); break;
       case "label": top().kids.push({ t: "L", key: e.key }); break;
-      case "ref": top().kids.push({ t: "R", cmd: e.cmd, key: e.key, opt: e.opt }); break;
+      case "ref": top().kids.push({ t: "R", cmd: e.cmd, key: e.key, opt: e.opt, star: !!e.star }); break;
       case "doc": st.length = 1; root.kids.push({ t: "doc" }); break;
       case "cls": top().kids.push({ t: "cls", cls: e.cls, opt: e.opt }); break;
       case "natbib": top().kids.push({ t: "natbib", opt: e.opt }); break;
@@ -214,7 +214,51 @@ class Flow {
 
 // ------------------------------------------------------------------ KaTeX
 const KCACHE = new Map();
+// (an accent before a font command with its own argument, unbraced, \bar\mathbb F: KaTeX refuses it ("Unexpected end
+//  of input in a macro argument"). It comes most often from a macro, \bar\F with \newcommand{\F}{\mathbb F}, which TeX
+//  takes as \bar{\mathbb F} (the macro is the accent's one-token argument) and the preview has expanded before KaTeX;
+//  written out, plain LaTeX takes it too (amsmath refuses it). Braced here, before KaTeX: the font command's argument is
+//  read as TeX reads it, a group or one token, and a font command as that token brings its own (\mathbf\mathit x); the
+//  argument is rewritten in turn (\bar\mathrm{\hat\mathcal O}), at most ACCENT_NEST groups deep, past which it is left
+//  as written. Anything else, and a source TeX would refuse, is left as written)
+const ACCENT_CS = "bar|hat|tilde|vec|dot|ddot|check|breve|acute|grave|mathring|widehat|widetilde|overline|underline";
+const FONT_CS = "mathbb|mathcal|mathrm|mathbf|mathit|mathsf|mathtt|mathfrak|mathscr|boldsymbol|bm|operatorname";
+const ACCENT_FONT = new RegExp("\\\\(" + ACCENT_CS + ")(?![A-Za-z])\\s*\\\\(" + FONT_CS + ")(?![A-Za-z])\\s*", "g");
+const FONT_TOKEN = new RegExp("^\\\\(?:" + FONT_CS + ")(?![A-Za-z])\\s*");
+export const ACCENT_NEST = 16;
+// (the argument starting at j, as TeX reads it, made explicit for KaTeX: [end, its text braced], or null. A group has the
+//  pairs inside it braced in turn; a font command as the token takes its own argument ({\mathit{x}} for \mathit x);
+//  one token otherwise. depth: how many arguments deep, at most ACCENT_NEST)
+function accentArg(src, j, depth) {
+  if (depth > ACCENT_NEST) return null;
+  if (src[j] === "{") {
+    let d = 0;
+    for (let k = j; k < src.length; k++) { const c = src[k]; if (c === "\\") { k++; continue; } if (c === "{") d++; else if (c === "}" && --d === 0) return [k + 1, "{" + braceAccentFonts(src.slice(j + 1, k), depth + 1) + "}"]; }
+    return null;
+  }
+  if (src[j] === "\\") {
+    const f = FONT_TOKEN.exec(src.slice(j));
+    if (f) { const r = accentArg(src, j + f[0].length, depth + 1); return r && [r[0], "{" + f[0].trimEnd() + r[1] + "}"]; }
+    const w = /^\\([A-Za-z]+|.)/.exec(src.slice(j)); return w ? [j + w[0].length, "{" + w[0] + "}"] : null;
+  }
+  if (j >= src.length || /[}\s^_&]/.test(src[j])) return null;
+  const e = j + String.fromCodePoint(src.codePointAt(j)).length;
+  return [e, "{" + src.slice(j, e) + "}"];
+}
+export function braceAccentFonts(src, depth = 0) {
+  if (!src.includes("\\")) return src;
+  const re = new RegExp(ACCENT_FONT.source, "g");
+  let out = "", at = 0, m;
+  while ((m = re.exec(src))) {
+    const r = accentArg(src, m.index + m[0].length, depth);
+    if (!r) continue;
+    out += src.slice(at, m.index) + "\\" + m[1] + "{\\" + m[2] + r[1] + "}";
+    at = r[0]; re.lastIndex = r[0];
+  }
+  return at ? out + src.slice(at) : src;
+}
 function texMath(src, display, macros, macroSig, stats) {
+  src = braceAccentFonts(src);
   const key = (display ? "D" : "I") + macroSig + "\u0000" + src;
   const hit = KCACHE.get(key);
   if (hit !== undefined) { if (hit.includes("katex-error")) { stats.katexErrors++; if (stats.katexErrorSamples.length < 5) stats.katexErrorSamples.push(src.slice(0, 120)); } return hit; }
@@ -1003,6 +1047,8 @@ class Renderer {
     return out;
   }
   resolveRef(r, plain) {
+    // (a starred reference, \ref*{key}: the same text, without its link)
+    if (r.star && !plain) return this.resolveRef(Object.assign({}, r, { star: false }), false).replace(/<a\b[^>]*>|<\/a>/g, "");
     if ((r.cmd === "cite" || r.cmd === "citep" || r.cmd === "citet") && this.nat?.numbers) return this.natCite(r, plain);
     if (r.cmd === "cite" || r.cmd === "citep" || r.cmd === "citet") {
       const parts = r.key.split(",").map((k) => k.trim()).filter(Boolean).map((k) => { const b = this.bib.get(k); return b ? (plain ? b.lab : '<a href="#' + b.id + '">' + b.lab + "</a>") : (plain ? "?" : '<span class="missing">' + esc(k) + "</span>"); });
