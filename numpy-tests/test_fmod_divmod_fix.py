@@ -93,6 +93,32 @@ show("divmod dtype", lambda: np.divmod(np.array([7, -7]), np.array([2, 2]), dtyp
 show("fmod dtype", lambda: np.fmod(np.array([7, -7, 0]), np.array([2, 2, 3]), dtype=np.float32))
 show("fmod out", lambda: np.fmod(np.array([7.5, -7.5]), 2, out=np.zeros(2)))
 show("fix out", lambda: np.fix(np.array([1.5, -1.5]), out=np.zeros(2)))
+
+# (an out that is also an input: both results are computed from the inputs as they were)
+a, r = np.array([7, 8]), np.zeros(2, dtype=np.int64)
+show("divmod out aliases the dividend", lambda: np.divmod(a, 3, out=(a, r)))
+show("  the dividend after", lambda: (a, r))
+d, q = np.array([3, -3]), np.zeros(2, dtype=np.int64)
+show("divmod out aliases the divisor", lambda: np.divmod(np.array([7, 8]), d, out=(q, d)))
+show("  the divisor after", lambda: (q, d))
+d, r = np.array([4, -3]), np.zeros(2, dtype=np.int64)
+show("divmod quotient out aliases the divisor", lambda: np.divmod(np.array([7, 10]), d, out=(d, r)))
+show("  the divisor after", lambda: (d, r))
+a = np.array([7, -8])
+show("divmod remainder out aliases the dividend", lambda: np.divmod(a, 3, out=(np.zeros(2, dtype=np.int64), a)))
+f, r = np.array([7.5, -7.5]), np.zeros(2)
+show("divmod float out aliases the dividend", lambda: np.divmod(f, 2.0, out=(f, r)))
+show("  the dividend after", lambda: (f, r))
+a = np.array([7.0, 8.0])
+show("divmod where, out aliases the dividend", lambda: np.divmod(a, 3, out=(a, np.full(2, 9.0)), where=np.array([True, False])))
+q, r = np.zeros((2, 2), dtype=np.int64), np.zeros((2, 2), dtype=np.int64)
+res = np.divmod.outer(np.array([7, 8]), np.array([2, 3]), out=(q, r))
+show("divmod outer out", lambda: (q, r))
+print("divmod outer out returned", res[0] is q, res[1] is r)
+show("divmod outer dtype", lambda: np.divmod.outer([7, 8], [2, 3], dtype=np.float64))
+show("divmod outer 2-d", lambda: np.divmod.outer(np.array([[7, -7]]), np.array([2, -3, 4])))
+show("divmod out bigger than the inputs", lambda: np.divmod(np.array([7, 8]), 3, out=(np.zeros((2, 2), dtype=np.int64),
+                                                                                       np.zeros((2, 2), dtype=np.int64))))
 show("fmod outer", lambda: np.fmod.outer(np.array([7, -7]), np.array([2, -3])))
 show("divmod outer", lambda: np.divmod.outer(np.array([7, -7]), np.array([2, -3])))
 show("fmod reduce", lambda: np.fmod.reduce(np.array([100, 7, 3])))
@@ -100,6 +126,20 @@ show("fmod accumulate", lambda: np.fmod.accumulate(np.array([100.5, -7.0, 3.0]))
 
 # (the refusals, with NumPy's types and messages)
 show("divmod out not a tuple", lambda: np.divmod(np.array([7]), 2, out=np.zeros(1, dtype=np.int64)))
+show("divmod out a list", lambda: np.divmod(np.array([7]), 2, out=[np.zeros(1), np.zeros(1)]))
+show("divmod out not an array", lambda: np.divmod(np.array([7]), 2, out=(np.zeros(1), [0.0])))
+# (a refused out leaves every out as it was)
+for name, outs in [("second out of the wrong shape", (np.zeros(2, dtype=np.int64), np.zeros(3, dtype=np.int64))),
+                   ("first out of the wrong shape", (np.zeros(3, dtype=np.int64), np.zeros(2, dtype=np.int64))),
+                   ("an out smaller than the result", (np.zeros(2, dtype=np.int64), np.zeros((2, 2), dtype=np.int64))),
+                   ("second out read-only", (np.zeros(2, dtype=np.int64), np.zeros(2, dtype=np.int64)))]:
+    if name == "second out read-only":
+        outs[1].flags.writeable = False
+    x = np.array([[7, 8], [9, 10]]) if "smaller" in name else np.array([7, 8])
+    show("divmod " + name, lambda: np.divmod(x, 3, out=outs))
+    show("  the outs after", lambda: outs)
+show("divmod outs that don't broadcast, 2-d", lambda: np.divmod(np.ones((2, 3), dtype=np.int64), np.ones((2, 1), dtype=np.int64),
+                                                                out=(np.zeros((2, 3), dtype=np.int64), np.zeros((3, 2), dtype=np.int64))))
 show("divmod out of one", lambda: np.divmod(np.array([7]), 2, out=(np.zeros(1, dtype=np.int64),)))
 show("divmod five positional", lambda: np.divmod(1, 2, 3, 4, 5))
 show("divmod one argument", lambda: np.divmod(1))

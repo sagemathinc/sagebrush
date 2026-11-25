@@ -1074,7 +1074,32 @@ class _ufunc2(ufunc):
             raise TypeError("'out' must be a tuple of arrays")
         elif len(out) != 2:
             raise ValueError("The 'out' tuple must have exactly one entry per ufunc output")
-        return tuple(f(*args, out=o, **kw) for f, o in zip(self._parts, out))
+        for o in out:
+            if o is not None and not isinstance(o, ndarray):
+                raise TypeError("return arrays must be of ArrayType")
+        _out_writeable(out)
+        where = kw.pop("where", True)
+        # (both results computed before either out is written, so an out that is also an input is read as it was; every
+        # out checked first, so a refusal leaves them all as they were)
+        res = [f(*args, **kw) for f in self._parts]
+        outs = [o for o in out if o is not None]
+        if outs:
+            ins = [asarray(x).shape for x in args]
+            try:
+                full = broadcast_shapes(*ins, *[o.shape for o in outs])
+            except ValueError:
+                raise ValueError("operands could not be broadcast together with shapes %s "
+                                 % " ".join(_shape_text(t) for t in ins + [o.shape for o in outs])) from None
+            for o in outs:
+                if o.shape != full:
+                    raise ValueError("non-broadcastable output operand with shape %s doesn't match the broadcast shape %s"
+                                     % (_shape_text(o.shape), _shape_text(full)))
+        got = []
+        for o, r in zip(out, res):
+            if o is not None:
+                o[...] = r if where is True else _np.where3(where, r, o)
+            got.append(r if o is None else o)
+        return tuple(got)
 
     def reduce(self, *args, **kw):
         raise ValueError("reduce only supported for functions returning a single value")
@@ -1084,9 +1109,6 @@ class _ufunc2(ufunc):
 
     def reduceat(self, *args, **kw):
         raise ValueError("reduceat only supported for functions returning a single value")
-
-    def outer(self, A, B, **kw):
-        return tuple(f.outer(A, B, **kw) for f in self._parts)
 
     def at(self, *args, **kw):
         raise ValueError("Only single output ufuncs supported at this time")
