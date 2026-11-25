@@ -72,7 +72,6 @@ colorbar
 colormap
 colororder
 commandwindow
-complex
 computer
 cond
 condest
