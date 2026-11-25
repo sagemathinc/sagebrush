@@ -69,6 +69,14 @@ def _weak_dtype(d, v):
     return d if d in FLOATS else "float64"
 
 
+def zerodim(other):
+    """A 0-d array as its numpy scalar (strong, as a comparison takes it);
+    anything else as it is."""
+    if isinstance(other, np.ndarray) and other.ndim == 0:
+        return other[()]
+    return other
+
+
 def operand(other, owner, method):
     """The other operand as the arithmetic takes it: a 0-d array as its
     value (pandas' item_from_zerodim); a range or a tuple with pandas 3.1's

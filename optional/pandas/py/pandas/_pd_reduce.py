@@ -174,8 +174,9 @@ def compare(col, right, op):
         raise TypeError("Invalid comparison between dtype=%s and str" % col.dtype)
     if not col.is_list and (not isinstance(right, Column) or not right.is_list) and not isinstance(right, str):
         rv = right._pd_values if isinstance(right, Column) else right
-        if col.dtype == "float32" and isinstance(rv, (int, float)) and not isinstance(rv, bool):
-            # (NumPy 2's weak promotion: a Python number compares with a float32 column as a float32)
+        if col.dtype == "float32" and isinstance(rv, (int, float)) and not isinstance(rv, (bool, np.generic)):
+            # (NumPy 2's weak promotion: a Python number compares with a float32 column as a float32; a numpy
+            # number, or a 0-d array, is strong: a float64 one compares at float64)
             rv = np.float32(rv)
         if rv is None:
             return Column("bool", np.full(len(col), op == "ne", dtype=bool))
@@ -250,7 +251,10 @@ def _compare_times(col, right, op, f):
     else:
         r = None
         if is_missing(right):
-            return Column("bool", np.full(n, op == "ne", dtype=bool))
+            if op in ("eq", "ne") or type(right).__name__ == "NaTType":
+                return Column("bool", np.full(n, op == "ne", dtype=bool))
+            # (only NaT has an order with times; None and NaN don't)
+            raise TypeError("Invalid comparison between dtype=datetime64[us] and %s" % type(right).__name__)
         if isinstance(right, str):
             try:
                 r = as_us(Timestamp(right))

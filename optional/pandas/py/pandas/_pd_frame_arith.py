@@ -228,7 +228,7 @@ def compare(f, other, op, axis="columns", level=None, method=False):
     if level is not None:
         raise _unsupported("%s(level=) (a MultiIndex)" % owner)
     ax = _axis(axis)
-    other = A.operand(other, owner, False)
+    other = A.operand(A.zerodim(other), owner, False)
     k, n = len(f._pd_cols), len(f)
     if isinstance(other, DataFrame):
         same = f._pd_index.equals(other._pd_index) and f._pd_columns.equals(other._pd_columns)

@@ -192,3 +192,24 @@ for name, op in ops:
     case("list-one-%s" % name, lambda op=op: op(pd.Series([0, 1], dtype="int64"), [0]))
     case("list-one-named-%s" % name, lambda name=name: getattr(pd.Series([0, 1], dtype="int64"), name)([0]))
     case("ndarray-one-%s" % name, lambda op=op: op(pd.Series([0, 1], dtype="int64"), np.array([0])))
+
+# a numpy number or a 0-d array compares strong (a float64 one at float64 against a float32 column); a Python
+# number weak; arithmetic keeps them weak
+s32 = pd.Series(np.array([0.1, 1.0], dtype=np.float32))
+d32 = pd.DataFrame({"a": s32})
+for name, v in [("py", 0.1), ("np-float64", np.float64(0.1)), ("np-float32", np.float32(0.1)), ("zerodim-float64", np.array(0.1)),
+                ("zerodim-float32", np.array(0.1, np.float32))]:
+    case("strength-%s-op" % name, lambda v=v: (s32 == v).tolist())
+    case("strength-%s-named" % name, lambda v=v: s32.eq(v).tolist())
+    case("strength-%s-frame" % name, lambda v=v: (d32 == v)["a"].tolist())
+    case("strength-%s-frame-named" % name, lambda v=v: d32.eq(v)["a"].tolist())
+    case("strength-%s-lt" % name, lambda v=v: (s32 < v).tolist())
+    case("strength-%s-add-dtype" % name, lambda v=v: str((s32 + v).dtype))
+case("strength-int8-np-int64", lambda: (pd.Series([1, 2]).astype("int8") == np.int64(300)).tolist())
+
+# ordering a datetime column against a missing value: only NaT; None and NaN raise
+dtn = pd.to_datetime(pd.Series(["2020-01-01", None]))
+for name, v in [("none", None), ("nan", float("nan")), ("np-nan", np.float64("nan")), ("nat", pd.NaT)]:
+    for n, op in ops:
+        case("dt-missing-%s-%s" % (name, n), lambda op=op, v=v: op(dtn, v).tolist())
+        case("dt-missing-%s-named-%s" % (name, n), lambda n=n, v=v: getattr(dtn, n)(v).tolist())

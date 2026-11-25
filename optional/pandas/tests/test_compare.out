@@ -1814,3 +1814,161 @@ dtype: bool
 !! ValueError: Lengths must be equal
 == ndarray-one-ge
 !! ValueError: ('Lengths must match to compare', (2,), (1,))
+== strength-py-op
+[True, False]
+== strength-py-named
+[True, False]
+== strength-py-frame
+[True, False]
+== strength-py-frame-named
+[True, False]
+== strength-py-lt
+[False, False]
+== strength-py-add-dtype
+'float32'
+== strength-np-float64-op
+[False, False]
+== strength-np-float64-named
+[False, False]
+== strength-np-float64-frame
+[False, False]
+== strength-np-float64-frame-named
+[False, False]
+== strength-np-float64-lt
+[False, False]
+== strength-np-float64-add-dtype
+'float32'
+== strength-np-float32-op
+[True, False]
+== strength-np-float32-named
+[True, False]
+== strength-np-float32-frame
+[True, False]
+== strength-np-float32-frame-named
+[True, False]
+== strength-np-float32-lt
+[False, False]
+== strength-np-float32-add-dtype
+'float32'
+== strength-zerodim-float64-op
+[False, False]
+== strength-zerodim-float64-named
+[False, False]
+== strength-zerodim-float64-frame
+[False, False]
+== strength-zerodim-float64-frame-named
+[False, False]
+== strength-zerodim-float64-lt
+[False, False]
+== strength-zerodim-float64-add-dtype
+'float32'
+== strength-zerodim-float32-op
+[True, False]
+== strength-zerodim-float32-named
+[True, False]
+== strength-zerodim-float32-frame
+[True, False]
+== strength-zerodim-float32-frame-named
+[True, False]
+== strength-zerodim-float32-lt
+[False, False]
+== strength-zerodim-float32-add-dtype
+'float32'
+== strength-int8-np-int64
+[False, False]
+== dt-missing-none-eq
+[False, False]
+== dt-missing-none-named-eq
+[False, False]
+== dt-missing-none-ne
+[True, True]
+== dt-missing-none-named-ne
+[True, True]
+== dt-missing-none-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and NoneType
+== dt-missing-none-named-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and NoneType
+== dt-missing-none-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and NoneType
+== dt-missing-none-named-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and NoneType
+== dt-missing-none-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and NoneType
+== dt-missing-none-named-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and NoneType
+== dt-missing-none-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and NoneType
+== dt-missing-none-named-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and NoneType
+== dt-missing-nan-eq
+[False, False]
+== dt-missing-nan-named-eq
+[False, False]
+== dt-missing-nan-ne
+[True, True]
+== dt-missing-nan-named-ne
+[True, True]
+== dt-missing-nan-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and float
+== dt-missing-nan-named-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and float
+== dt-missing-nan-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and float
+== dt-missing-nan-named-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and float
+== dt-missing-nan-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and float
+== dt-missing-nan-named-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and float
+== dt-missing-nan-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and float
+== dt-missing-nan-named-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and float
+== dt-missing-np-nan-eq
+[False, False]
+== dt-missing-np-nan-named-eq
+[False, False]
+== dt-missing-np-nan-ne
+[True, True]
+== dt-missing-np-nan-named-ne
+[True, True]
+== dt-missing-np-nan-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and float64
+== dt-missing-np-nan-named-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and float64
+== dt-missing-np-nan-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and float64
+== dt-missing-np-nan-named-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and float64
+== dt-missing-np-nan-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and float64
+== dt-missing-np-nan-named-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and float64
+== dt-missing-np-nan-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and float64
+== dt-missing-np-nan-named-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and float64
+== dt-missing-nat-eq
+[False, False]
+== dt-missing-nat-named-eq
+[False, False]
+== dt-missing-nat-ne
+[True, True]
+== dt-missing-nat-named-ne
+[True, True]
+== dt-missing-nat-lt
+[False, False]
+== dt-missing-nat-named-lt
+[False, False]
+== dt-missing-nat-le
+[False, False]
+== dt-missing-nat-named-le
+[False, False]
+== dt-missing-nat-gt
+[False, False]
+== dt-missing-nat-named-gt
+[False, False]
+== dt-missing-nat-ge
+[False, False]
+== dt-missing-nat-named-ge
+[False, False]

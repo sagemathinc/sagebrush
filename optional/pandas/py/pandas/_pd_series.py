@@ -287,7 +287,7 @@ class Series(object):
         if isinstance(other, DataFrame):
             return NotImplemented
         if not warned:
-            other = A.operand(other, "Series.%s" % op, False)
+            other = A.operand(A.zerodim(other), "Series.%s" % op, False)
         if isinstance(other, Series):
             if not self._pd_index.equals(other._pd_index):
                 raise ValueError("Can only compare identically-labeled Series objects")
@@ -324,7 +324,7 @@ class Series(object):
             raise ValueError("No axis named %s for object type Series" % (axis,))
         if isinstance(other, DataFrame):
             raise TypeError("%s does not support a DataFrame `other`. Use df.%s(ser) instead." % (owner, op))
-        other = A.operand(other, owner, True)
+        other = A.operand(A.zerodim(other), owner, True)
         if isinstance(other, (range, Index)) or not isinstance(other, (Series, list, tuple, np.ndarray)):
             # (a range, an Index or a scalar takes the operator's path, after filling this Series)
             left = self
