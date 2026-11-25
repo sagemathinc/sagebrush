@@ -2,7 +2,7 @@
 <!-- disclosure: Written by Claude Opus 5.5, an AI model made by Anthropic, from the code, tests, benchmark results and commit history of the Sagebrush project, led by William Stein (SageMath, Inc.). -->
 # How the LaTeX preview works
 
-*Code: `web/latex/` (the editor, about 8,700 lines without its tests).
+*Code: `web/latex/` (the editor, about 11,400 lines without its tests).
 The expander is `web/latex/core/machine.mjs` and `engine/demo-machine.mjs`;
 the renderer is `engine/render.mjs`; Beamer is `engine/beamer.mjs`;
 SageTeX is `engine/sagetex.mjs` and `run-core.mjs`. The command line is
@@ -65,8 +65,10 @@ Sage, in the browser. Their results are kept beside the document
 every item before it are unchanged, so an edit near the end doesn't
 re-run the beginning. Until you run again, a changed item keeps its last
 value, shown faded. Nothing runs without a click, or Shift+Enter, which
-also works while presenting. **PythonTeX is not run yet**: its code is
-shown as written, with a "not run" mark where its results would go.
+also works while presenting. **PythonTeX** runs too: `\py{…}`, `pycode`
+and `pyblock` run with Run, as plain Python in a session of their own,
+and their results are read back as LaTeX (see
+[PythonTeX](02-how-it-differs.md#pythontex)).
 
 **Interactive widgets (Sagebrush only).** Sage's own `@interact` works
 inside `sagesilent` and `sageblock`:
@@ -209,7 +211,7 @@ benchmark, with the main reason for each lower number:
 | C7 our ten examples | 0.649 – 1.000 | PythonTeX's results; two TikZ labels |
 | C1 arXiv paper | 0.867 | mostly mathematics written differently |
 | C5 SageTeX example | 0.841 | |
-| C5b PythonTeX gallery | 0.746 | PythonTeX isn't run: code where the PDF has results |
+| C5b PythonTeX gallery | 0.746 | PythonTeX wasn't run yet: code where the PDF has results |
 | C3 Beamer talk | 0.717 | the theme's headers and footers on every slide |
 | C7b Beamer example | 0.698 (recall 0.536) | the same |
 | C2 amsmath user's guide | 0.153 | a bug, since fixed: 0.851 |
@@ -221,8 +223,7 @@ benchmark, with the main reason for each lower number:
   preview showed none of it, so about half the words of a Beamer PDF
   were missing. Each theme's headers and footers are now drawn as TeX
   Live's Beamer draws them, checked word for word against TeX on 27
-  themes. With them, C3 rises to 0.828 and the example to 0.880. That
-  change is in review.
+  themes. With them, C3 rises to 0.828 and the example to 0.880.
 - **TikZ and pgfplots** aren't drawn: a picture is a placeholder, and
   `check` says so. The pgfplots manual's chapter also stops early, at one
   of the expander's bounds, inside the manual's own macro machinery.
@@ -248,11 +249,11 @@ places where the preview was wrong and said nothing:
 - **contents:** short titles and `\addcontentsline` ignored.
 
 Silent wrong output is worse than a visible gap, so these come first.
-Fixes for the first three match TeX on the campaign's examples, and on
-29 references checked against cleveref, and are in review. Tables and
+Fixes for the first three are in, and match TeX on the campaign's
+examples and on 29 references checked against cleveref. Tables and
 contents come next.
 
-**Then:** PythonTeX run as SageTeX is; large tables; and an incremental
+**Then:** large tables, and an incremental
 renderer. After an edit, re-rendering is now 87 to 96% of the time on
 large documents (about 200 ms of 208 ms on the Chinese text), so that is
 where the edit time goes.

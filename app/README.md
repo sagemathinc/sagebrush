@@ -2,10 +2,12 @@
 
 The sagebrush.space notebook as an app for macOS, Linux and Windows. The
 page runs in the system's web view (WebKit on macOS and Linux, WebView2 on
-Windows), and Python and the engines run there as WebAssembly, exactly as
-on the site. The installers are about 10–15 MB.
+Windows). On macOS (Apple silicon) and Linux (x64), notebooks run in an
+engine process the app ships (the page's own worker in a pinned Node; see
+below); on Windows, and where that engine can't start, Python and the
+engines run in the web view as WebAssembly, exactly as on the site. The installers are about 10–15 MB.
 
-The Rust shell (`src-tauri/src/main.rs`) adds what a web page cannot do:
+The Rust shell (`src-tauri/src/lib.rs` and the modules beside it) adds what a web page cannot do:
 
 - **The computer's files.** File → *Open file…* and *Save as…* use the
   system's dialogs. A notebook opened from disk is its `.ipynb` file and is
@@ -61,7 +63,9 @@ tauri".
 
 The bundles are in
 `app/src-tauri/target/release/bundle/` (`.app`/`.dmg`, `.deb`/`.AppImage`/`.rpm`,
-`.msi`/`.exe`). They are not signed or notarized yet.
+`.msi`/`.exe`). They are not signed or notarized. The `mac-release` job in
+`.github/workflows/app.yml` (for an `app-v*` tag, or a dispatch with `sign`)
+builds the Mac app signed and notarized.
 
 A plain `cargo build` in `app/src-tauri` (no CLI) builds only the binary,
 in debug mode, as `target/debug/sagebrush-app`, without any bundle. It is
@@ -129,4 +133,6 @@ library older than Node 24 needs: glibc 2.28), the page runs Python itself.
 - The engine subprocess above in the app, then the Rust engines in it
   natively instead of as WebAssembly, for speed and for computations bigger
   than WebAssembly's 4 GB.
-- iOS and Android, from this same project (Tauri 2 mobile).
+- iOS and Android, from this same project (Tauri 2 mobile). CI already
+  builds both and runs the app's self-test on an Android emulator and an
+  iPhone simulator; neither is signed for distribution yet.

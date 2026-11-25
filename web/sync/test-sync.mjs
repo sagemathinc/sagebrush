@@ -535,25 +535,63 @@ const hashOf = (id) => createHash("sha256").update("sagebrush-account\n" + id).d
 const genOf = async (id) => (await db.prepare("SELECT generation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(id)).first())?.generation;
 const del = async (session, id) => post(session, "/api/sync/v1/delete", { confirm: "delete", generation: await genOf(id) });
 let acctA = acctNs.get(acctNs.idFromName("acct:" + hashOf(A)));
-const put = (session, bytes, h = sha(bytes)) => fetchAt(SITE, `/api/sync/v1/blob/${h}`, { method: "PUT", headers: { cookie: session, origin: SITE, "content-type": "application/octet-stream" }, body: bytes });
+// (an address `h`, and the bytes' declared SHA-256 `ct`, which R2 checks: both the bytes' hash unless a row says otherwise)
+const put = (session, bytes, h = sha(bytes), ct = sha(bytes)) => fetchAt(SITE, `/api/sync/v1/blob/${h}`, { method: "PUT", headers: { cookie: session, origin: SITE, "content-type": "application/octet-stream", ...(ct === null ? {} : { "x-sb-ct-sha256": ct }) }, body: bytes });
 const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Buffer.alloc(6000, 9);
 {
-  let r = await post(sa, "/api/sync/v1/blobs/check", { blobs: [{ sha256: sha(big), size: big.length }, { sha256: sha(small), size: small.length }] });
+  let r = await post(sa, "/api/sync/v1/blobs/check", { blobs: [{ sha256: sha(big), ct_sha256: sha(big), size: big.length }, { sha256: sha(small), ct_sha256: sha(small), size: small.length }] });
   ok(r.status === 200 && (await r.json()).missing.length === 2, "check: both missing");
-  r = await post(sa, "/api/sync/v1/blobs/check", { blobs: [{ sha256: sha(big), size: 1, extra: 1 }] });
+  r = await post(sa, "/api/sync/v1/blobs/check", { blobs: [{ sha256: sha(big), ct_sha256: sha(big), size: 1, extra: 1 }] });
   ok(r.status === 400, "check: an unknown field is refused");
+  r = await post(sa, "/api/sync/v1/blobs/check", { blobs: [{ sha256: sha(big), size: big.length }] });
+  ok(r.status === 400, "check: an item without ct_sha256 is refused");
   r = await put(sa, big);
   ok(r.status === 201 && (await r.json()).sha256 === sha(big), "an upload");
   r = await put(sa, big);
   ok(r.status === 200 && (await r.json()).have === true, "the same bytes again: already held, nothing stored");
-  r = await put(sa, small, sha(big).replace(/^./, "0"));
-  ok(r.status === 400, "bytes that don't match their SHA-256 are refused by R2");
+  r = await put(sa, small, sha(big).replace(/^./, "0"), sha(big));
+  ok(r.status === 400, "bytes that don't match their declared SHA-256 (x-sb-ct-sha256) are refused by R2");
+  r = await put(sa, small, sha(small), null);
+  ok(r.status === 400 && /x-sb-ct-sha256/.test((await r.json()).message ?? ""), "an upload without x-sb-ct-sha256 is refused, even at its bytes' own hash: the address is never taken as their hash");
   let i = await acctA.inspect({ sha256: sha(big) });
   ok(i?.refs === 0 && i.used === 6000, "a held blob counts in usage from its upload; the refused upload gave its reservation back");
   r = await put(sa, Buffer.alloc(60_000, 1));
   ok(r.status === 413, "a file over max_file_bytes is refused");
   r = await put(sa, other);
   ok(r.status === 201, "a second blob");
+  // (e2e PR 3a: an address names bytes but needn't be their hash; the first (ct_sha256, size) held at an address stays,
+  // the same again is "have", and other bytes there are a conflict naming what is held, never adopted or replaced)
+  const one = Buffer.from("x"), two = Buffer.from("y"), addr = sha(Buffer.from("e2e: an address that isn't its bytes' hash"));
+  r = await put(sa, one, addr);
+  ok(r.status === 201 && (await r.json()).sha256 === addr, "bytes under an address that isn't their hash, with their ct_sha256: held");
+  r = await put(sa, one, addr);
+  ok(r.status === 200 && (await r.json()).have === true, "the same bytes again at that address: have");
+  r = await put(sa, two, addr);
+  let rj = await r.json();
+  ok(r.status === 409 && rj.error === "conflict" && JSON.stringify(rj.held) === JSON.stringify({ sha256: addr, ct_sha256: sha(one), size: 1 }), "other bytes at a held address: 409 conflict naming what is held: " + JSON.stringify(rj));
+  i = await acctA.inspect({ sha256: addr });
+  ok(i?.used === 12_001, "…nothing stored for the conflict: its reservation came back (" + i?.used + ")");
+  const sizeOnly = await acctA.reserve({ account: A, sha256: addr, ct_sha256: sha(one), size: 2 });
+  ok(sizeOnly.error?.code === "conflict" && JSON.stringify(sizeOnly.error.detail?.held) === JSON.stringify({ sha256: addr, ct_sha256: sha(one), size: 1 }), "a reservation at a held address with its ct but another size: a conflict, never \"have\": " + JSON.stringify(sizeOnly));
+  i = await acctA.inspect({ sha256: addr });
+  ok(i?.used === 12_001 && i.reservations === 0, "…and it reserved nothing: usage and reservations unchanged (" + JSON.stringify({ used: i?.used, reservations: i?.reservations }) + ")");
+  r = await post(sa, "/api/sync/v1/blobs/check", { blobs: [{ sha256: addr, ct_sha256: sha(two), size: 1 }, { sha256: addr, ct_sha256: sha(one), size: 2 }, { sha256: addr, ct_sha256: sha(one), size: 1 }] });
+  rj = await r.json();
+  ok(r.status === 200 && rj.missing.length === 0 && rj.conflicts?.length === 2, "check: held as other bytes or another size is a conflict, never present or missing: " + JSON.stringify(rj));
+  // (the race: two uploads to one new address, both reserved before either finalizes; the first finalized wins, the
+  // other is a conflict naming the winner, and its bytes come back.  The loser's reservation is made and finalized by
+  // the object's own calls around the winner's whole upload, so the two are interleaved exactly so)
+  const addr2 = sha(Buffer.from("e2e: the race's address")), late = Buffer.from("l"), early = Buffer.from("m");
+  const lose = await acctA.reserve({ account: A, sha256: addr2, ct_sha256: sha(late), size: 1 });
+  ok(lose.ok?.id !== undefined, "the race: the first upload reserves");
+  r = await put(sa, early, addr2);
+  ok(r.status === 201, "the race: the second upload, finished first, is held");
+  const fin = await acctA.finalize({ account: A, id: lose.ok.id, size: 1 });
+  ok(fin.error?.code === "conflict" && JSON.stringify(fin.error.detail?.held) === JSON.stringify({ sha256: addr2, ct_sha256: sha(early), size: 1 }), "the race: the first upload, finalized second, is a conflict naming the winner, never \"finalized\": " + JSON.stringify(fin));
+  i = await acctA.inspect({ sha256: addr2 });
+  ok(i?.used === 12_002 && i.reservations === 0 && i.outbox >= 1, "the race: the loser's bytes came back, its reservation is gone and its object is queued for deletion (" + JSON.stringify({ used: i?.used, reservations: i?.reservations, outbox: i?.outbox }) + ")");
+  const again2 = await acctA.finalize({ account: A, id: lose.ok.id, size: 1 });
+  ok(again2.error !== undefined, "the race: the loser's finalize again is still refused, never \"finalized\": " + JSON.stringify(again2));
   r = await put(sa, Buffer.alloc(20_000, 3));
   ok(r.status === 507 && (await r.json()).error === "storage_full", "over storage_bytes: storage_full");
   // a read: debited at issue, a 303 to a signed URL on the user-content domain
@@ -655,7 +693,7 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
 {
   // a dead upload on an otherwise idle account: its reservation ends, and its bytes come back, by the alarm alone
   const before = (await acctA.inspect({}))?.used;
-  const r = await acctA.reserve({ account: A, sha256: "d".repeat(64), size: 1234 });
+  const r = await acctA.reserve({ account: A, sha256: "d".repeat(64), ct_sha256: "d".repeat(64), size: 1234 });
   ok(r?.ok?.id && (await acctA.inspect({}))?.used === before + 1234, "a reservation charges its bytes");
   await until(async () => (await acctA.inspect({}))?.used === before);
   ok((await acctA.inspect({}))?.used === before, "with nothing else happening, the reservation's end gives its bytes back (the alarm was armed at reserve)");
@@ -702,7 +740,7 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
 // ---- astra's slice-2 findings (CORR-796-1..2)
 {
   // a finalize answered again: the same answer for the same size, a conflict for another
-  const r = await acctA.reserve({ account: A, sha256: sha(Buffer.from("fin")), size: 3 });
+  const r = await acctA.reserve({ account: A, sha256: sha(Buffer.from("fin")), ct_sha256: sha(Buffer.from("fin")), size: 3 });
   ok(r?.ok?.id, "(a reservation)");
   const f1 = await acctA.finalize({ account: A, id: r.ok.id, size: 3 });
   const f2 = await acctA.finalize({ account: A, id: r.ok.id, size: 3 });
@@ -1266,7 +1304,7 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   // CORR-5E2-2: a purge while an upload is outstanding
   const se = await signIn(E);
   const acctE = acctNs.get(acctNs.idFromName("acct:" + hashOf(E)));
-  const late = await acctE.reserve({ account: E, sha256: sha(Buffer.from("late put")), size: 8 });
+  const late = await acctE.reserve({ account: E, sha256: sha(Buffer.from("late put")), ct_sha256: sha(Buffer.from("late put")), size: 8 });
   ok(late?.ok?.key, "(an upload reserved, its bytes not yet in R2)");
   ok((await del(se, E)).status === 202, "(E: Delete my synced data, meanwhile)");
   // (within the test's 3 s reservation)
@@ -1303,7 +1341,7 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
       } catch {}
     },
   });
-  const upload = fetchAt(SITE, `/api/sync/v1/blob/${sha(bytes)}`, { method: "PUT", headers: { cookie: sg, origin: SITE, "content-type": "application/octet-stream", "content-length": "4" }, body, duplex: "half" });
+  const upload = fetchAt(SITE, `/api/sync/v1/blob/${sha(bytes)}`, { method: "PUT", headers: { cookie: sg, origin: SITE, "content-type": "application/octet-stream", "content-length": "4", "x-sb-ct-sha256": sha(bytes) }, body, duplex: "half" });
   await new Promise((r) => setTimeout(r, 200));
   ok((await del(sg, G)).status === 202, "(G: Delete my synced data, while an upload's bytes are still coming)");
   // (the test's reservation is 3 s and the cut-off a second before it: just after the cut-off, the
@@ -1777,7 +1815,7 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   ok((await signedPost(PURGE_KEY, "/api/admin/purge", JSON.stringify({ account_id: M, request_id: crypto.randomUUID() }))).status === 202, "(CoCalc purges M, which never synced)");
   const lcM = await acctM.lifecycle();
   const lateEnM = await acctM.enable({ account: M, hash: hashOf(M) });
-  const lateResM = await acctM.reserve({ account: M, sha256: sha(Buffer.from("m")), size: 1 });
+  const lateResM = await acctM.reserve({ account: M, sha256: sha(Buffer.from("m")), ct_sha256: sha(Buffer.from("m")), size: 1 });
   ok(lcM?.deleted === true && lcM.state === null && lateEnM?.error?.code === "forbidden" && lateResM?.error?.code === "forbidden" && (await acctM.lifecycle())?.state === null && (await rowOf(M)) === null,
     "an enable and an upload that were past their session check, arriving after, are refused: no storage, no row");
   ok([401, 403].includes((await post(sm, "/api/sync/v1/enable", {})).status) && (await acctM.lifecycle())?.state === null, "and so is every later enable");
@@ -1810,14 +1848,14 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const st3 = await signIn(T3);
   const acctT3 = acctNs.get(acctNs.idFromName("acct:" + hashOf(T3)));
   ok((await post(st3, "/api/sync/v1/enable", {})).status === 200, "(T3: sync on)");
-  const r3 = await acctT3.reserve({ account: T3, sha256: sha(Buffer.from("t3 slack")), size: 8000 });
+  const r3 = await acctT3.reserve({ account: T3, sha256: sha(Buffer.from("t3 slack")), ct_sha256: sha(Buffer.from("t3 slack")), size: 8000 });
   await acctT3.abandon({ id: r3.ok.id });
   const b3 = await acctT3.budget();
   ok(r3?.ok?.id && b3.claim >= 8000 && b3.files === 0 && (await claimOf(T3)) === b3.claim, "(T3: an upload reserved and abandoned leaves the claim holding " + b3.claim + " it doesn't use)");
   const sh3 = await sharePut(st3, Buffer.alloc(5000, 31));
   ok([200, 201].includes(sh3.status) && (await claimOf(T3)) === 0 && (await acctT3.budget()).claim === 0, "sharing at the edge: sync gives back its unused claim, and the upload goes (" + sh3.status + ")");
   // (fail closed: the give-back can't reach D1, so the refusal stands)
-  const r3b = await acctT3.reserve({ account: T3, sha256: sha(Buffer.from("t3 slack 2")), size: 4900 });
+  const r3b = await acctT3.reserve({ account: T3, sha256: sha(Buffer.from("t3 slack 2")), ct_sha256: sha(Buffer.from("t3 slack 2")), size: 4900 });
   await acctT3.abandon({ id: r3b.ok.id });
   // (the raise left more than 2 chunks of slack, which the alarm gives back 300 ms later: settled first, so no alarm
   // is pending to write the give-back below for it; the chunk in tests is account.ts's chunk(): L / 64, 64 at least)
@@ -1928,7 +1966,7 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const acctU1 = acctNs.get(acctNs.idFromName("acct:" + hashOf(U1)));
   ok((await post(su1, "/api/sync/v1/enable", {})).status === 200, "(U1: sync on, generation 1)");
   await gs("claim-raise-answer", true);
-  const pr1 = acctU1.reserve({ account: U1, sha256: sha(Buffer.from("u1 raise")), size: 5000 });
+  const pr1 = acctU1.reserve({ account: U1, sha256: sha(Buffer.from("u1 raise")), ct_sha256: sha(Buffer.from("u1 raise")), size: 5000 });
   ok(await until(async () => (await claimOf(U1)) >= 5000), "(the raise's statement ran in D1: 5,000 granted, its answer held)");
   ok((await del(su1, U1)).status === 202 && (await until(async () => (await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(U1)).first())?.state === "purged")), "(meanwhile, Delete my synced data: generation 1 purged, its claim 0)");
   const en2u = await (await post(su1, "/api/sync/v1/enable", {})).json();
@@ -1942,10 +1980,10 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const acctU2 = acctNs.get(acctNs.idFromName("acct:" + hashOf(U2)));
   ok((await post(su2, "/api/sync/v1/enable", {})).status === 200, "(U2: sync on, storage_bytes 10,000)");
   await gs("claim-raise-answer", true);
-  const pr2 = acctU2.reserve({ account: U2, sha256: sha(Buffer.from("u2 raise")), size: 5000 });
+  const pr2 = acctU2.reserve({ account: U2, sha256: sha(Buffer.from("u2 raise")), ct_sha256: sha(Buffer.from("u2 raise")), size: 5000 });
   ok(await until(async () => (await claimOf(U2)) >= 5000), "(the raise's statement ran: its answer held)");
   // (and a second upload's raise queued behind it, with the limit as it was when it asked)
-  const pr2b = acctU2.reserve({ account: U2, sha256: sha(Buffer.from("u2 raise, queued")), size: 4000 });
+  const pr2b = acctU2.reserve({ account: U2, sha256: sha(Buffer.from("u2 raise, queued")), ct_sha256: sha(Buffer.from("u2 raise, queued")), size: 4000 });
   await new Promise((r) => setTimeout(r, 200));
   fake.limits.set(U2, sync(0, 1 << 20));
   ok((await (await signedPost(LIMITS_KEY, "/api/admin/limits", JSON.stringify({ request_id: crypto.randomUUID(), account_id: U2, issued: Date.now(), limits: sync(0, 1 << 20) }))).json()).applied === true, "(meanwhile, a downgrade to 0)");
@@ -1971,7 +2009,7 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const acctV1 = acctNs.get(acctNs.idFromName("acct:" + hashOf(V1)));
   ok((await post(sv1, "/api/sync/v1/enable", {})).status === 200, "(V1: sync on, empty, storage_bytes 10,000)");
   await gs("claim-raise-answer", true);
-  const prv = acctV1.reserve({ account: V1, sha256: sha(Buffer.from("v1 raise")), size: 5000 });
+  const prv = acctV1.reserve({ account: V1, sha256: sha(Buffer.from("v1 raise")), ct_sha256: sha(Buffer.from("v1 raise")), size: 5000 });
   ok(await until(async () => (await claimOf(V1)) >= 5000), "(the raise's statement ran in D1: its answer held)");
   fake.limits.set(V1, sync(0, 1 << 20));
   ok((await (await signedPost(LIMITS_KEY, "/api/admin/limits", JSON.stringify({ request_id: crypto.randomUUID(), account_id: V1, issued: Date.now(), limits: sync(0, 1 << 20) }))).json()).applied === true, "(meanwhile, a downgrade to 0)");
@@ -1988,7 +2026,7 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   // (and a lower limit alone: slack within 2 chunks of the old one, beyond 2 of the new, is given back)
   fake.limits.set(V1, sync(10_000, 1 << 20));
   await signedPost(LIMITS_KEY, "/api/admin/limits", JSON.stringify({ request_id: crypto.randomUUID(), account_id: V1, issued: Date.now(), limits: sync(10_000, 1 << 20) }));
-  const rv2 = await acctV1.reserve({ account: V1, sha256: sha(Buffer.from("v1 small")), size: 100 });
+  const rv2 = await acctV1.reserve({ account: V1, sha256: sha(Buffer.from("v1 small")), ct_sha256: sha(Buffer.from("v1 small")), size: 100 });
   await acctV1.abandon({ id: rv2.ok.id });
   // (until no alarm is pending at all: the upload's own end has passed, so only the notice can arm one)
   ok(await until(async () => (await acctV1.budget()).alarm === null, 10_000), "(nothing pending: no alarm)");
@@ -2157,7 +2195,7 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   ok((await post(sz1, "/api/sync/v1/enable", {})).status === 200, "(Z1: on, storage_bytes 1 MiB, retention 100 days)");
   const gz = (name, on) => fetchAt(SITE, `/__test/gate?name=${name}&on=${on ? 1 : 0}`, { method: "POST" });
   await gz("claim-raise-answer", true);
-  const prz = acctZ1.reserve({ account: Z1, sha256: sha(Buffer.from("z1 raise")), size: 40_000 });
+  const prz = acctZ1.reserve({ account: Z1, sha256: sha(Buffer.from("z1 raise")), ct_sha256: sha(Buffer.from("z1 raise")), size: 40_000 });
   ok(await until(async () => ((await db.prepare("SELECT claim_bytes FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(Z1)).first())?.claim_bytes ?? 0) >= 40_000), "(the raise's statement ran in D1: its answer held)");
   fake.limits.set(Z1, plan(false, 100));
   // (a 100-day retention: its deadline's alarm is far off, so only the grant's own can give it back soon)
@@ -2216,6 +2254,20 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   ok(a2?.ops?.[0]?.seq && ix2?.ops?.length === 9 && ix2.ops.slice(0, 8).every((o) => o.parent === undefined) && ix2.ops[8].parent === F1,
     "an object whose ops table predates parent gains the column on restart: old ops come back without it, a new op carries it: " + JSON.stringify(ix2?.ops?.map((o) => o.parent ?? null)));
   s2.ws.close();
+  // (e2e PR 3a) an object made before blobs had a ciphertext hash: its restart adds the column; its old holdings read as
+  // ct = their address (what R2 checked them against), and every new holding stores its own
+  const old = Buffer.from("held before ct_sha256");
+  ok((await put(sp, old)).status === 201, "(P holds a blob)");
+  ok((await acctP().testOldBlobs()) === true, "(P's holdings and reservations lose ct_sha256, as before the column)");
+  await acctP().crash().catch(() => {});
+  await until(async () => (await acctP().inspect({}).catch(() => null)) !== null, 10_000);
+  ok((await acctP().testHeldCt({ sha256: sha(old) })) === null, "after a restart the column is back, and the old row's is NULL");
+  const c3 = await (await post(sp, "/api/sync/v1/blobs/check", { blobs: [{ sha256: sha(old), ct_sha256: sha(old), size: old.length }] })).json();
+  ok(c3.missing.length === 0 && c3.conflicts === undefined, "an old holding reads as ct = its address: present, no conflict: " + JSON.stringify(c3));
+  const r3 = await put(sp, old);
+  ok(r3.status === 200 && (await r3.json()).have === true, "…and the same bytes again are \"have\"");
+  const fresh = Buffer.from("held after ct_sha256"), freshAt = sha(Buffer.from("e2e: P's new address"));
+  ok((await put(sp, fresh, freshAt)).status === 201 && (await acctP().testHeldCt({ sha256: freshAt })) === sha(fresh), "a holding made after the migration stores its own ct_sha256");
 }
 
 // ---- the client's side of the contract: ops made by the client's own outbox (web/workspace/sync-outbox.ts
@@ -2270,8 +2322,8 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
   ok((await sb.next((m) => m.t === "welcome" || m.t === "error"))?.t === "welcome", "hello bound to its own account and generation: welcome");
   sb.ws.close();
   const bytes3 = Buffer.from("bound bytes");
-  const checkAs = (h) => fetchAt(SITE, "/api/sync/v1/blobs/check", { method: "POST", headers: { cookie: sp, origin: SITE, "content-type": "application/json", ...h }, body: JSON.stringify({ blobs: [{ sha256: sha(bytes3), size: bytes3.length }] }) });
-  const putAs = (h) => fetchAt(SITE, `/api/sync/v1/blob/${sha(bytes3)}`, { method: "PUT", headers: { cookie: sp, origin: SITE, "content-type": "application/octet-stream", ...h }, body: bytes3 });
+  const checkAs = (h) => fetchAt(SITE, "/api/sync/v1/blobs/check", { method: "POST", headers: { cookie: sp, origin: SITE, "content-type": "application/json", ...h }, body: JSON.stringify({ blobs: [{ sha256: sha(bytes3), ct_sha256: sha(bytes3), size: bytes3.length }] }) });
+  const putAs = (h) => fetchAt(SITE, `/api/sync/v1/blob/${sha(bytes3)}`, { method: "PUT", headers: { cookie: sp, origin: SITE, "content-type": "application/octet-stream", "x-sb-ct-sha256": sha(bytes3), ...h }, body: bytes3 });
   ok((await checkAs({ "x-sync-account": other })).status === 403 && (await checkAs({ "x-sync-account": mine, "x-sync-generation": "2" })).status === 409 && (await checkAs({ "x-sync-account": mine, "x-sync-generation": "1" })).status === 200, "blobs/check bound: another account 403, another generation 409, its own 200");
   ok((await putAs({ "x-sync-account": other })).status === 403 && (await putAs({ "x-sync-account": mine, "x-sync-generation": "2" })).status === 409, "PUT bound to another account or generation: refused");
   const still = await (await checkAs({ "x-sync-account": mine, "x-sync-generation": "1" })).json();
@@ -2364,7 +2416,7 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
   const gateP2 = (on) => fetchAt(SITE, `/__test/gate?name=reserve-allocate&on=${on ? 1 : 0}`, { method: "POST" });
   const bytes4 = Buffer.from("bytes of generation 1, late");
   await gateP2(true);
-  const latePut = fetchAt(SITE, `/api/sync/v1/blob/${sha(bytes4)}`, { method: "PUT", headers: { cookie: sp, origin: SITE, "content-type": "application/octet-stream", "x-sync-account": mine, "x-sync-generation": "1" }, body: bytes4 });
+  const latePut = fetchAt(SITE, `/api/sync/v1/blob/${sha(bytes4)}`, { method: "PUT", headers: { cookie: sp, origin: SITE, "content-type": "application/octet-stream", "x-sync-account": mine, "x-sync-generation": "1", "x-sb-ct-sha256": sha(bytes4) }, body: bytes4 });
   await new Promise((r) => setTimeout(r, 300));
   const acctP2 = acctNs.get(acctNs.idFromName("acct:" + mine));
   ok((await del(sp, P2)).status === 202, "(P2: Delete my synced data, generation 1, while the PUT waits)");
@@ -2375,7 +2427,7 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
   const lr = await latePut;
   const lrb = await lr.json().catch(() => ({}));
   ok(lr.status === 409 && lrb.reason === "generation", "a PUT bound to generation 1, held across its purge and generation 2's start, is refused at its allocation: " + JSON.stringify({ status: lr.status, body: lrb }));
-  const chk2 = await (await fetchAt(SITE, "/api/sync/v1/blobs/check", { method: "POST", headers: { cookie: sp, origin: SITE, "content-type": "application/json", "x-sync-account": mine, "x-sync-generation": "2" }, body: JSON.stringify({ blobs: [{ sha256: sha(bytes4), size: bytes4.length }] }) })).json();
+  const chk2 = await (await fetchAt(SITE, "/api/sync/v1/blobs/check", { method: "POST", headers: { cookie: sp, origin: SITE, "content-type": "application/json", "x-sync-account": mine, "x-sync-generation": "2" }, body: JSON.stringify({ blobs: [{ sha256: sha(bytes4), ct_sha256: sha(bytes4), size: bytes4.length }] }) })).json();
   ok(chk2.missing?.includes(sha(bytes4)), "…and generation 2 holds nothing of it");
 }
 

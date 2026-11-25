@@ -20,6 +20,7 @@ import { runningTurn, type Artifact, type Thread, type Turn, type UserEntry } fr
 import { ChatSession } from "../workspace/agent-chat/session";
 import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, diffHtml, mirrorSectionNode } from "../workspace/agent-chat/view";
 import { Mirror, MIRROR_COPY, mirrorTitle, type RemoteConversation, type Section } from "../workspace/agent-chat/mirror";
+import { mountDictation } from "./dictation";
 import { startFakeTurn } from "./fake-agent";
 import { AgentError, RELOAD_KEY, type AgentPairing, type Created, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
@@ -281,6 +282,8 @@ function submit(mode: UserEntry["mode"]) {
   // (a mirrored conversation is read-only: nothing is sent from it)
   if (mirrorOpen) return;
   // (not connected, in a chat the demo may not answer: Send is inert and the draft stays, A14 C1; a note still posts)
+  // (dictating stops as the message or note goes, its words heard so far in it: none is added after it)
+  dictation.finish();
   if (!session.submit(editor.value, mode)) return;
   if (mode !== "note") void mirror.kick(current().id);
   editor.value = "";
@@ -1358,10 +1361,25 @@ const editor = mountComposer({
   typeset: (el) => typeset(el),
   changed: (v) => { if (draftOf) putDraft(draftOf, v); },
 });
+// (dictation into the draft, #1791: a mic by Send where the browser turns speech into text)
+const dictation = mountDictation({
+  before: $("#send"),
+  conversation: () => draftOf || current().id,
+  // (the words heard, at the end of the draft of the chat they were spoken for: the composer's if it is shown)
+  append: (conv, text) => {
+    const join = (a: string) => (!a ? text : /\s$/.test(a) ? a + text : a + " " + text);
+    if ((draftOf || current().id) === conv) {
+      editor.value = join(editor.value);
+      putDraft(conv, editor.value);
+    } else putDraft(conv, join(draftsPending.get(conv) ?? readDrafts()[conv] ?? ""), true);
+  },
+  toast: (t, ms) => toast(t, ms),
+});
 /** The chat shown's draft in the composer, when another chat's was there. */
 function showDraft() {
   const id = current().id;
   if (draftOf === null || draftOf === id) return;
+  dictation.finish(); // (dictating belongs to the chat it started in: it stops, its words in that chat's draft)
   draftOf = id;
   editor.value = draftsPending.get(id) ?? readDrafts()[id] ?? "";
 }
@@ -1997,7 +2015,7 @@ function renderHeader() {
   } else {
     who.innerHTML = `<span class="conn demo"></span>Claude <small>scripted demo</small>`;
   }
-  for (const el of document.querySelectorAll<HTMLElement>("#editor [data-placeholder]")) el.dataset.placeholder = `Message ${agentName()}…  (Shift+Enter to send)`;
+  for (const el of document.querySelectorAll<HTMLElement>("#editor [data-placeholder]")) el.dataset.placeholder = `Message ${agentName()}…`;
   $("#connect").textContent = live() ? "Connected" : "Connect Claude";
   $("#stop").textContent = stopLabel(agentName());
   $("#connect").toggleAttribute("disabled", live());
