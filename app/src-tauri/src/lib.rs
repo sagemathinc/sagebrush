@@ -28,7 +28,7 @@ mod engine;
 #[cfg(desktop)]
 mod windows;
 // (the agent the app hosts, desktop only: its owned child and bundle check, for the agents page's launcher, which
-//  comes next; until then nothing calls it but its tests)
+//  comes next; until then only its tests and the self-test's bundle report call it)
 #[cfg(desktop)]
 #[allow(dead_code)]
 mod agent_host;
@@ -363,6 +363,27 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync +
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// The agent bundle's check, on this app's own resources, Node and compiled-in values, as one log line for the
+/// self-test's judge: "[agent] bundle: ok ...", "[agent] bundle: not_bundled", or "[agent] bundle: refused <why>".
+#[cfg(desktop)]
+fn selftest_agent_bundle(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let check = agent_host::node_check();
+    let how = match check {
+        agent_host::NodeCheck::Bytes => "bytes",
+        agent_host::NodeCheck::TeamSignature(_) => "signature",
+    };
+    let r = match (app.path().resource_dir().ok(), agent_host::shipped_node()) {
+        (Some(res), Some(node)) => agent_host::verify_bundle(&res, &node, env!("SAGEBRUSH_AGENT_MANIFEST_SHA256"), check),
+        _ => Err(agent_host::BundleError::Missing),
+    };
+    match r {
+        Ok(v) => eprintln!("[agent] bundle: ok agent={} node={} claude_code={} node_check={how}", v.agent, v.node, v.claude_code.as_deref().unwrap_or("not_bundled")),
+        Err(agent_host::BundleError::NotBundled) => eprintln!("[agent] bundle: not_bundled"),
+        Err(e) => eprintln!("[agent] bundle: refused {e:?} node_check={how}"),
+    }
+}
+
 pub fn run() {
     let args: Vec<String> = std::env::args()
         .skip(1)
@@ -400,6 +421,11 @@ pub fn run() {
     let builder = builder.menu(version::menu);
     builder
         .setup(move |app| {
+            // (a self-test reports the agent bundle's check, as the launcher will run it: app/selftest/run-judge.mjs)
+            #[cfg(desktop)]
+            if std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some() {
+                selftest_agent_bundle(app.handle());
+            }
             // (the page's server, listening before the window exists: the window never loads a page from a port
             // this app doesn't hold)
             // (a free port; in a self-test, SAGEBRUSH_APP_PORT, so two launches can be made to differ: the workspace

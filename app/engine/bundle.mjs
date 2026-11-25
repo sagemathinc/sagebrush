@@ -11,15 +11,18 @@
 //   engine/*.mjs                                   the engine (app/engine/, its tests and this file left out)
 //   engine/root/                                   the interpreter's files from app/dist: the worker, its
 //                                                  WebAssembly modules, the library's chunks and the packages
+//   agent/                                         the agent the app hosts, with agent/MANIFEST.json
+//                                                  (app/engine/agent-bundle.mjs; build.rs compiles its SHA-256 in)
 // The download is checked against the pinned SHA-256 before anything is
-// unpacked; a mismatch, or a failed download, fails this (never skipped).
-// --cache DIR keeps the download (default: ~/.cache/sagebrush-node).
+// unpacked; a mismatch, or a failed download, fails this (never skipped). The same for the agent's release tarball.
+// --cache DIR keeps the downloads (default: ~/.cache/sagebrush-node).
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, chmodSync, copyFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { bundleAgent } from "./agent-bundle.mjs";
 
 // Node 24.21.0 (the version CI's size gate pins), from nodejs.org/dist/v24.21.0/SHASUMS256.txt
 export const NODE = {
@@ -67,7 +70,8 @@ function main(argv) {
   rmSync(unpack, { recursive: true, force: true });
   mkdirSync(unpack, { recursive: true });
   const top = pin.file.replace(/\.tar\.xz$/, "");
-  execFileSync("tar", ["-xJf", archive, "-C", unpack, `${top}/bin/node`, `${top}/LICENSE`]);
+  // (Node, its licence, and its own npm: the agent's dependencies are installed with the pinned Node's npm)
+  execFileSync("tar", ["-xJf", archive, "-C", unpack, `${top}/bin/node`, `${top}/LICENSE`, `${top}/lib/node_modules/npm`]);
   mkdirSync(join(tauri, "binaries"), { recursive: true });
   const bin = join(tauri, "binaries", `sagebrush-node-${pin.triple}`);
   copyFileSync(join(unpack, top, "bin", "node"), bin);
@@ -77,6 +81,14 @@ function main(argv) {
   rmSync(engine, { recursive: true, force: true });
   mkdirSync(join(engine, "root"), { recursive: true });
   copyFileSync(join(unpack, top, "LICENSE"), join(engine, "NODE-LICENSE.txt"));
+  // the agent: the manifest names the Node as shipped (Linux and unsigned builds check its exact bytes)
+  const nodeBytes = readFileSync(bin);
+  const agent = bundleAgent({
+    tauri, cache,
+    nodeBin: join(unpack, top, "bin", "node"),
+    npmCli: join(unpack, top, "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+    node: { version: NODE.version, sha256: sha256(nodeBytes), size: nodeBytes.length },
+  });
   rmSync(unpack, { recursive: true, force: true });
 
   // the engine, and the interpreter's files
@@ -87,6 +99,7 @@ function main(argv) {
   for (const f of ROOT_FILES) cpSync(join(dist, f), join(engine, "root", f), { recursive: true });
   const n = readdirSync(join(engine, "root", "lib")).length;
   console.log(`engine bundled: Node ${NODE.version} (${pin.triple}), ${ENGINE_FILES.length} engine files, the interpreter's files (${n} entries in lib/)`);
+  console.log(`agent bundled: ${agent.files} files, MANIFEST.json ${agent.sha256}`);
 }
 
 main(process.argv.slice(2));
