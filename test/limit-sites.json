@@ -5453,16 +5453,6 @@
   "owner": "Magma compatibility",
   "row": "inv-25"
  },
- "lib/_magma.py :: _MNumberField.__init__ :: raise NotImplementedError(\"defining polynomials must be monic (for now)\") #0": {
-  "class": "none",
-  "owner": "Magma compatibility",
-  "reason": "Magma mode's refusal of a number field whose polynomial is rational or not monic, kept until Magma mode maps the core's scaled coordinates; a feature gap, not a limit"
- },
- "lib/_magma.py :: _MNumberField.__init__ :: raise NotImplementedError(\"defining polynomials must have integer coefficients\") #0": {
-  "class": "none",
-  "owner": "Magma compatibility",
-  "reason": "Magma mode's refusal of a number field whose polynomial is rational or not monic, kept until Magma mode maps the core's scaled coordinates; a feature gap, not a limit"
- },
  "lib/_magma.py :: _collect :: _COLLECT_MAX of them, before the collection is built (HARD-FCC-1).\"\"\" #0": {
   "class": "1+2",
   "owner": "Magma compatibility/runtime memory",
