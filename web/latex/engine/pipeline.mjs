@@ -64,7 +64,7 @@ export function installPythontex(m) {
 export class Engine {
   constructor(opts = {}) { this.opts = opts; this.prev = null; this.text = null; this.epoch = 0; this.inputs = null; this.inputsKey = ""; }
   // sage: SageTeX S1's item states from the page's executor ({states}); kept until the next one is given
-  // inputs: the files \input and \include read ({files: Map key -> text, resolve(name) -> {key} | {why}}, the host's:
+  // inputs: the files \input and \include read ({files: Map key -> text, resolve(name) -> {key} | {why}, jobname}, the host's:
   // the page's from the workspace, the CLI's from its folder); kept until the next is given; when they change, the
   // document is expanded again from the start (an included file's macros apply everywhere after it)
   update(text, { cold = false, sage, inputs } = {}) {
@@ -77,7 +77,7 @@ export class Engine {
     }
     const t0 = now();
     setPosEpoch(++this.epoch);
-    setInputResolver(this.inputs ? this.inputs.resolve : null);
+    setInputResolver(this.inputs ? this.inputs.resolve : null, this.inputs?.jobname ?? null);
     const files = new Map([["main.tex", text], ...(this.inputs ? [...this.inputs.files].filter(([k]) => k !== "main.tex") : [])]);
     let res, mode, inc = null;
     const edit = this.prev && this.text !== null ? diffEdit(this.text, text) : null;

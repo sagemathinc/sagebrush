@@ -999,7 +999,7 @@ def _in_row_lattice(S, x):
     L = S.laplacian()
     n = L.nrows()
     rows = [[int(L[i, j]) for j in range(n)] for i in range(n)]
-    from sagebrush import nf
+    from _sagebrush_lib import nf
     H = [r for r in nf.hermite_form(rows) if any(r)]
     v = list(x)
     for r in H:
