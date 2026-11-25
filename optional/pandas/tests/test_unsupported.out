@@ -5,9 +5,9 @@
 == c3.frame-dict-ndarray-copy-false
 !! NotImplementedError: pandas.DataFrame(..., copy=False) with an ndarray is not in Sagebrush's pandas 0.x subset
 == c3.series-str-to_numpy
-!! NotImplementedError: pandas.Series.to_numpy() of a str column is not in Sagebrush's pandas 0.x subset
+!! NotImplementedError: pandas.Series.to_numpy() of a str column with missing values (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset
 == c3.series-str-values
-!! NotImplementedError: pandas.Series.values of a str column is not in Sagebrush's pandas 0.x subset
+!! NotImplementedError: pandas.Series.values of a str column with missing values (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset
 == dt.series-values
 !! NotImplementedError: pandas.Series.values of a datetime64[us] column (Sagebrush's numpy has no datetime64 yet) is not in Sagebrush's pandas 0.x subset
 == dt.series-to_numpy
@@ -61,9 +61,9 @@
 == c3.series-object-values
 !! NotImplementedError: pandas.Series.values of an object column is not in Sagebrush's pandas 0.x subset
 == c3.frame-str-to_numpy
-!! NotImplementedError: pandas.DataFrame.to_numpy() of a frame with str/object columns is not in Sagebrush's pandas 0.x subset
+!! NotImplementedError: pandas.DataFrame.to_numpy() of a frame mixing str and other columns (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset
 == c3.frame-str-values
-!! NotImplementedError: pandas.DataFrame.values of a frame with str/object columns is not in Sagebrush's pandas 0.x subset
+!! NotImplementedError: pandas.DataFrame.values of a frame mixing str and other columns (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset
 == c3.frame-numeric-to_numpy-object
 !! NotImplementedError: pandas.DataFrame.to_numpy(dtype=, na_value=) is not in Sagebrush's pandas 0.x subset
 == c3.frame-int-bool-to_numpy
@@ -75,11 +75,11 @@
 == c3.to_numpy-na_value
 !! NotImplementedError: pandas.Series.to_numpy(dtype=, na_value=) is not in Sagebrush's pandas 0.x subset
 == c3.series-str-to_numpy-copy
-!! NotImplementedError: pandas.Series.to_numpy() of a str column is not in Sagebrush's pandas 0.x subset
+!! NotImplementedError: pandas.Series.to_numpy() of a str column with missing values (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset
 == dtype.string
 !! NotImplementedError: pandas: dtype='string' is not in Sagebrush's pandas 0.x subset
 == dtype.category
-!! NotImplementedError: pandas: dtype='category' is not in Sagebrush's pandas 0.x subset
+!! NotImplementedError: pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet
 == dtype.Int64
 !! NotImplementedError: pandas: dtype='Int64' is not in Sagebrush's pandas 0.x subset
 == value.int-beyond-int64
@@ -112,14 +112,14 @@
 !! NotImplementedError: pandas.DataFrame.merge is not in Sagebrush's pandas 0.x subset
 == name.DataFrame.describe
 !! NotImplementedError: pandas.DataFrame.describe is not in Sagebrush's pandas 0.x subset
-== name.DataFrame.sort_values
-!! NotImplementedError: pandas.DataFrame.sort_values is not in Sagebrush's pandas 0.x subset
+== name.DataFrame.rank
+!! NotImplementedError: pandas.DataFrame.rank is not in Sagebrush's pandas 0.x subset
 == name.DataFrame.drop
 !! NotImplementedError: pandas.DataFrame.drop is not in Sagebrush's pandas 0.x subset
-== name.DataFrame.rename
-!! NotImplementedError: pandas.DataFrame.rename is not in Sagebrush's pandas 0.x subset
-== name.DataFrame.apply
-!! NotImplementedError: pandas.DataFrame.apply is not in Sagebrush's pandas 0.x subset
+== name.DataFrame.pivot_table
+!! NotImplementedError: pandas.DataFrame.pivot_table is not in Sagebrush's pandas 0.x subset
+== name.DataFrame.nlargest
+!! NotImplementedError: pandas.DataFrame.nlargest is not in Sagebrush's pandas 0.x subset
 == name.DataFrame.plot
 !! NotImplementedError: pandas.DataFrame.plot is not in Sagebrush's pandas 0.x subset
 == name.DataFrame.info
@@ -138,16 +138,16 @@
 !! NotImplementedError: pandas.Series.groupby is not in Sagebrush's pandas 0.x subset
 == name.Series.value_counts
 !! NotImplementedError: pandas.Series.value_counts is not in Sagebrush's pandas 0.x subset
-== name.Series.apply
-!! NotImplementedError: pandas.Series.apply is not in Sagebrush's pandas 0.x subset
+== name.Series.rank
+!! NotImplementedError: pandas.Series.rank is not in Sagebrush's pandas 0.x subset
 == name.Series.map
 !! NotImplementedError: pandas.Series.map is not in Sagebrush's pandas 0.x subset
-== name.Series.astype
-!! NotImplementedError: pandas.Series.astype is not in Sagebrush's pandas 0.x subset
+== name.Series.nlargest
+!! NotImplementedError: pandas.Series.nlargest is not in Sagebrush's pandas 0.x subset
 == name.Series.plot
 !! NotImplementedError: pandas.Series.plot is not in Sagebrush's pandas 0.x subset
-== name.Series.unique
-!! NotImplementedError: pandas.Series.unique is not in Sagebrush's pandas 0.x subset
+== name.Series.nunique
+!! NotImplementedError: pandas.Series.nunique is not in Sagebrush's pandas 0.x subset
 == name.Series.quantile
 !! NotImplementedError: pandas.Series.quantile is not in Sagebrush's pandas 0.x subset
 == name.Index.sort_values
@@ -156,6 +156,38 @@
 !! AttributeError: module 'pandas' has no attribute 'no_such_name'
 == name.DataFrame.unknown-is-AttributeError
 !! AttributeError: 'DataFrame' object has no attribute 'no_such_name'
+== d1.astype-category
+!! NotImplementedError: pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet
+== d1.frame-astype-category
+!! NotImplementedError: pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet
+== d1.astype-errors
+!! NotImplementedError: pandas.Series.astype(errors=, a dict) is not in Sagebrush's pandas 0.x subset
+== d1.small-int-from-values
+!! NotImplementedError: pandas: dtype uint8 from values is not in Sagebrush's pandas 0.x subset (astype gives one)
+== d1.small-int-setitem
+!! NotImplementedError: pandas: setting a value in a uint8 column is not in Sagebrush's pandas 0.x subset
+== d1.sort_values-key
+!! NotImplementedError: pandas.Series.sort_values(axis=, key=) is not in Sagebrush's pandas 0.x subset
+== d1.apply-func-name
+!! NotImplementedError: pandas.Series.apply(convert_dtype=, by_row=, a func name) is not in Sagebrush's pandas 0.x subset
+== d1.apply-returns-series
+!! NotImplementedError: pandas.Series.apply with a func returning a Series is not in Sagebrush's pandas 0.x subset
+== d1.frame-apply-raw
+!! NotImplementedError: pandas.DataFrame.apply(raw=, result_type=, by_row=, engine=, a func name) is not in Sagebrush's pandas 0.x subset
+== d1.unique-str-missing
+!! NotImplementedError: pandas.Series.unique() of a str column with missing values (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset
+== d1.frame-to_numpy-str-missing
+!! NotImplementedError: pandas.DataFrame.to_numpy() of str columns with missing values (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset
+== d1.rename-level
+!! NotImplementedError: pandas.DataFrame.rename(level=) is not in Sagebrush's pandas 0.x subset
+== d1.reset_index-level
+!! NotImplementedError: pandas.DataFrame.reset_index(level=, col_level=, col_fill=, allow_duplicates=, names=) is not in Sagebrush's pandas 0.x subset
+== d1.fillna-limit
+!! NotImplementedError: pandas.Series.fillna(axis=, limit=) is not in Sagebrush's pandas 0.x subset
+== d1.asarray-str
+!! NotImplementedError: pandas.numpy.asarray(Series) of a str column (Series.to_numpy() gives its '<U' array) is not in Sagebrush's pandas 0.x subset
+== d1.frame-asarray-str
+!! NotImplementedError: pandas.numpy.asarray(DataFrame) of str columns (DataFrame.to_numpy() gives a '<U' array of a frame of only str columns) is not in Sagebrush's pandas 0.x subset
 == op.series-add
 !! NotImplementedError: pandas.Series.__add__ (arithmetic) is not in Sagebrush's pandas 0.x subset
 == op.series-radd
@@ -213,7 +245,7 @@
 == csv.na_values-dict
 !! NotImplementedError: pandas.read_csv(na_values of type dict) is not in Sagebrush's pandas 0.x subset
 == csv.dtype-category
-!! NotImplementedError: pandas: dtype='category' is not in Sagebrush's pandas 0.x subset
+!! NotImplementedError: pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet
 == csv.usecols-mixed
 !! NotImplementedError: pandas.read_csv(usecols mixing names and positions) is not in Sagebrush's pandas 0.x subset
 == csv.binary-file
@@ -260,3 +292,21 @@
 !! NotImplementedError: read_excel from a URL isn't supported; download the file into the project first
 == csv.url-nothing-opened
 []
+== csv.dtype-uint8
+!! NotImplementedError: pandas.read_csv(dtype=uint8) is not in Sagebrush's pandas 0.x subset
+== csv.dtype-dict-int32
+!! NotImplementedError: pandas.read_csv(dtype=int32) is not in Sagebrush's pandas 0.x subset
+== csv.dtype-dict-int8
+!! NotImplementedError: pandas.read_csv(dtype=int8) is not in Sagebrush's pandas 0.x subset
+== csv.dtype-dict-uint16
+!! NotImplementedError: pandas.read_csv(dtype=uint16) is not in Sagebrush's pandas 0.x subset
+== csv.dtype-int16
+!! NotImplementedError: pandas.read_csv(dtype=int16) is not in Sagebrush's pandas 0.x subset
+== csv.dtype-dict-int16
+!! NotImplementedError: pandas.read_csv(dtype=int16) is not in Sagebrush's pandas 0.x subset
+== csv.dtype-uint32
+!! NotImplementedError: pandas.read_csv(dtype=uint32) is not in Sagebrush's pandas 0.x subset
+== csv.dtype-dict-uint32
+!! NotImplementedError: pandas.read_csv(dtype=uint32) is not in Sagebrush's pandas 0.x subset
+== csv.dtype-float32
+!! NotImplementedError: pandas: dtype='float32' is not in Sagebrush's pandas 0.x subset

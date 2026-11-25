@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// The four WebAssembly modules as one CI artifact (design/wasm-artifacts.md section 4).
+// The five WebAssembly modules as one CI artifact (design/wasm-artifacts.md section 4).
 //
-//   node scripts/wasm-artifact.mjs pack <dir>     after a build: the four modules from wasm/ plus wasm-manifest.json
+//   node scripts/wasm-artifact.mjs pack <dir>     after a build: the five modules from wasm/ plus wasm-manifest.json
 //                                                 (their sha256 and length, this run's id and head commit) into <dir>;
 //                                                 prints the pins.json lines for this build
 //   node scripts/wasm-artifact.mjs install <dir>  in a job that reads wasm/: checks the artifact (exactly those five
 //                                                 files, this run's manifest, every module matching it), installs all
-//                                                 four, and applies the pin policy (below)
+//                                                 five, and applies the pin policy (below)
 //   node scripts/wasm-artifact.mjs policy         the pin policy on wasm/ as it is (the producer, after its build)
 //
 // The pin policy: the modules must match wasm/pins.json.  Two exceptions run a mismatching build labelled "fresh"
@@ -40,7 +40,7 @@ function writeAtomic(path, bytes) {
 
 const pinsLines = (modules) => formatPins(modules).trimEnd();
 
-// The four modules of wasm/ into `dir`, with their manifest.  Returns the manifest.
+// The five modules of wasm/ into `dir`, with their manifest.  Returns the manifest.
 export function pack(dir, { root = ROOT, env = process.env } = {}) {
   mkdirSync(dir, { recursive: true });
   const modules = {};
@@ -54,7 +54,7 @@ export function pack(dir, { root = ROOT, env = process.env } = {}) {
   return manifest;
 }
 
-// Check an artifact directory: exactly the four modules and the manifest, the manifest this run's, every module
+// Check an artifact directory: exactly the five modules and the manifest, the manifest this run's, every module
 // matching it.  Returns {manifest, bytes: {name: Buffer}}; throws naming every problem.
 export function readArtifact(dir, { env = process.env } = {}) {
   const problems = [];
@@ -78,7 +78,7 @@ export function readArtifact(dir, { env = process.env } = {}) {
       problems.push(`${MANIFEST} is from run ${manifest.run_id} at ${manifest.sha}, not this run (${run.run_id} at ${run.sha})`);
     }
     const names = Object.keys(manifest.modules ?? {}).sort();
-    if (names.join() !== [...MODULES].sort().join()) problems.push(`${MANIFEST} names ${names.join(", ") || "no modules"}, not exactly the four`);
+    if (names.join() !== [...MODULES].sort().join()) problems.push(`${MANIFEST} names ${names.join(", ") || "no modules"}, not exactly the five`);
   }
   const bytes = {};
   for (const name of MODULES) {
