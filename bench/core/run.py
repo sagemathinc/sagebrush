@@ -1349,7 +1349,13 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
                     continue
                 sweep = {}
                 for label, cpus in cols:
-                    t = invoke(b, row, n, mode, timeout, k, cpus)
+                    try:
+                        t = invoke(b, row, n, mode, timeout, k, cpus)
+                    except (OSError, subprocess.SubprocessError) as e:
+                        # (a column that can't be pinned, its cgroup's
+                        # cpuset or the child's affinity refused: that
+                        # column's error, not the point's)
+                        t = {"status": "error", "detail": f"pinning: {type(e).__name__}: {e}"}
                     t["cpus"] = cpus
                     if t["status"] == "ok" and t["signature"] not in combined:
                         t["status"] = "mismatch"
@@ -1675,7 +1681,8 @@ def main() -> int:
             "wasm": "wasm32-wasip1, default target features",
         },
         "threads": THREADS,
-        "sweep": [[label, cpus] for label, cpus in SWEEP] if SWEEP else None,
+        # (the run's sweep columns; not "sweep", which is a point's results)
+        "sweep_columns": [[label, cpus] for label, cpus in SWEEP] if SWEEP else None,
         "mem_cap": CAP.limit if CAP else None,
         "backends": backends,
     }

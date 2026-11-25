@@ -790,6 +790,8 @@ class FakeRemote:
         self.refuse = {}
         # (VMs whose build command's connection drops, that many times)
         self.build_exit_255 = {}
+        # (points whose run.py crashes on every VM)
+        self.run_fails = set()
         self.build_fails, self.preempt_on, self.fetch_fails, self.corrupt = (
             False,
             set(),
@@ -847,6 +849,15 @@ class FakeRemote:
         if self.on_run:
             self.on_run(name)
         key = words[words.index("--only") + 1] + ":" + words[words.index("--sizes") + 1]
+        if key in self.run_fails:
+            # (run.py itself crashes: a traceback longer than the old 300
+            # characters, its exception at the end)
+            self.log.append(("run", key, name, -1))
+            return {
+                "status": "error",
+                "exit": 1,
+                "output": "Traceback (most recent call last):\n" + "  frame\n" * 400 + "OSError: [Errno 22] cpuset.cpus",
+            }
         self.provider.clock.t += 1000  # (a point takes time)
         self.log.append(
             (
@@ -1004,6 +1015,59 @@ class Drivers(unittest.TestCase):
         )
         self.assertGreaterEqual(first, 2000 / 3600)
         self.assertGreater(rep["charged_hours"], first)
+
+    def test_a_point_that_crashes_run_py_fails_after_two_vms(self):
+        self.remote.run_fails = {"poly_fp_gcd:s"}
+        rep = self.driver().run()
+        self.assertEqual(rep["accepted"], 2)
+        self.assertEqual(rep["failed"], ["x86/poly_fp_gcd:s"])
+        self.assertEqual(rep["left"], [])
+        ret = self.events("retired")
+        self.assertEqual(len(ret), shard.POINT_TRIES)
+        self.assertTrue(all(e["point_error"] for e in ret))
+        # (the exception itself is kept, not just the traceback's frames)
+        self.assertTrue(all(e["detail"].endswith("OSError: [Errno 22] cpuset.cpus") for e in ret))
+        failed = self.events("point-failed")
+        self.assertEqual([(e["type"], e["key"]) for e in failed], [("x86", "poly_fp_gcd:s")])
+        self.assertIn("OSError", failed[0]["detail"])
+        self.assertEqual(len([x for x in self.remote.log if x[0] == "run" and x[1] == "poly_fp_gcd:s"]), shard.POINT_TRIES)
+        self.assertEqual(self.prov.vms, {})
+        # (a later driver on the same run doesn't measure it again)
+        runs = len([x for x in self.remote.log if x[0] == "run"])
+        rep = self.driver().run()
+        self.assertEqual(rep["failed"], ["x86/poly_fp_gcd:s"])
+        self.assertEqual(len([x for x in self.remote.log if x[0] == "run"]), runs)
+
+    def test_a_type_whose_points_all_crash_stops(self):
+        # (systematic: TYPE_POINT_FAILURES failed points stop the type, so a
+        # broken build costs POINT_TRIES VMs per point only that often)
+        self.remote.run_fails = {"poly_fp_mul:s", "poly_fp_gcd:s", "mat_fp_det:s"}
+        rep = self.driver().run()
+        self.assertEqual(rep["accepted"], 0)
+        self.assertEqual(len(rep["failed"]), shard.TYPE_POINT_FAILURES)
+        self.assertIn("points failed on this type", rep["stopped_types"]["x86"])
+        self.assertEqual(len(self.events("retired")), shard.TYPE_POINT_FAILURES * shard.POINT_TRIES)
+        self.assertEqual(self.prov.vms, {})
+
+    def test_one_crash_then_success_is_accepted(self):
+        self.remote.run_fails = {"poly_fp_gcd:s"}
+
+        def once(name):
+            if len([x for x in self.remote.log if x[0] == "run" and x[1] == "poly_fp_gcd:s"]) == 1:
+                self.remote.run_fails = set()
+
+        self.remote.on_run = once
+        rep = self.driver().run()
+        self.assertEqual((rep["accepted"], rep["failed"]), (3, []))
+        self.assertEqual(len(self.events("retired")), 1)
+        self.assertEqual(self.events("point-failed"), [])
+
+    def test_a_preempted_point_does_not_count_toward_failure(self):
+        # (the VM went away under run.py: lost, not a point error)
+        self.remote.preempt_on = {"poly_fp_gcd:s"}
+        rep = self.driver().run()
+        self.assertEqual((rep["accepted"], rep["failed"]), (3, []))
+        self.assertEqual(self.events("point-failed"), [])
 
     def test_failing_copies_retire_the_vm_and_the_point_moves(self):
         self.remote.fetch_fails = shard.TRANSFER_TRIES
