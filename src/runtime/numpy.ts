@@ -2072,8 +2072,22 @@ function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
   return out;
 }
 
+// (a bool axis, Python's or NumPy's, refused with NumPy's TypeError: True and False are not axes there, though
+// Python's bools are ints)
+function refuseBoolAxis(axis: any, msg: string): void {
+  // (np.bool_ is an int subclass named bool: lib/numpy/__init__.py)
+  if (typeof Obj.unbox(axis) === "boolean" || typeName(axis) === "bool") raise(T.TypeError, msg);
+}
+
 function axesArg(axis: any, nd: number): number[] | null {
   if (axis === null || axis === undefined) return null;
+  for (const x of Array.isArray(axis) ? axis : [axis]) refuseBoolAxis(x, "an integer is required");
+  // (a 0-d array with an integer axis of 0 or -1: no axis to reduce, the value itself, as NumPy's C reductions allow
+  // (a legacy allowance, #1907); a tuple of axes, or any other integer, is out of bounds as before)
+  if (nd === 0 && !Array.isArray(axis)) {
+    const v = intNum(axis);
+    if (v === 0 || v === -1) return [];
+  }
   if (Array.isArray(axis)) return axis.map((x) => normAxis(intNum(x), nd));
   return [normAxis(intNum(axis), nd)];
 }
@@ -2154,7 +2168,8 @@ function complexProd(a: NDArray, axes: number[] | null, keepdims: boolean, rt: D
   return keepdims ? reshape(out, a.shape.map((n, i) => (ax.includes(i) ? 1 : n))) : out;
 }
 function finish(r: NDArray, axis: any, keepdims: boolean): any {
-  return r.ndim === 0 && !keepdims ? pyScalarOf(r.dt, r.data, r.offset) : r;
+  // (a 0-d result is NumPy's scalar, keepdims or not: a 0-d array's reduction kept as 0-d, #1907)
+  return r.ndim === 0 ? pyScalarOf(r.dt, r.data, r.offset) : r;
 }
 // (a complex array's components are views of it, read-only where it is,
 // as NumPy's; a real array's imag is a new read-only array of zeros)
@@ -2217,7 +2232,10 @@ function minmax(a: NDArray, axis: any, keepdims: boolean, isMax: boolean, initia
 }
 
 function argminmax(a: NDArray, axis: any, isMax: boolean): any {
-  if (axis === null || axis === undefined) a = ravel(a);
+  // (no axis: the flattened array; a 0-d array with an axis: as one of one element, as NumPy's argmax views it, so its
+  // axis 0 or -1 gives 0 and any other is out of bounds for dimension 1, #1907)
+  if (axis !== null && axis !== undefined) refuseBoolAxis(axis, "an integer is required for the axis");
+  if (axis === null || axis === undefined || a.ndim === 0) a = ravel(a);
   const ax = axis === null || axis === undefined ? 0 : normAxis(intNum(axis), a.ndim);
   if (a.shape[ax] === 0) raise(T.ValueError, `attempt to get ${isMax ? "argmax" : "argmin"} of an empty sequence`);
   const t = moveAxisToEnd(a, ax);
@@ -2367,7 +2385,11 @@ function prodReduce(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
 }
 
 function cumulative(a: NDArray, axis: any, isProd: boolean, dtype: any): NDArray {
-  if (axis === null || axis === undefined) a = ravel(a);
+  // (no axis, or a 0-d array (as one of one element, as NumPy's cumsum views it, so its axis 0 or -1 is that one and
+  // any other is out of bounds for dimension 1, #1907): the flattened array)
+  if (axis !== null && axis !== undefined) refuseBoolAxis(axis, "an integer is required for the axis");
+  if (axis === null || axis === undefined || a.ndim === 0) a = ravel(a);
+  if (axis !== null && axis !== undefined) normAxis(intNum(axis), a.ndim);
   if (a.ndim === 1 && a.isC() && (dtype === null || dtype === undefined) && a.dt.kind === "f") {
     // (the first element is copied, as NumPy does: 0 + -0.0 would be +0.0)
     const out = empty(a.shape, a.dt), d = a.data, od = out.data, n = a.size;
