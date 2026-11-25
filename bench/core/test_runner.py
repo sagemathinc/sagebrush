@@ -1046,7 +1046,7 @@ class Files(unittest.TestCase):
             cal = sorted(k for k in r["sizes"] if k not in ("s", "m", "l"))
             self.assertEqual(sorted(set(r["sizes"]) - set(cal)), ["l", "m", "s"])
             self.assertIn(cal, ([], ["c0", "c1", "c2", "c3", "c4"]))
-        self.assertEqual(len(m["rows"]), 47)
+        self.assertEqual(len(m["rows"]), 52)
 
 
 class Units(unittest.TestCase):
@@ -1669,6 +1669,153 @@ class RotationOrder(unittest.TestCase):
         offs, wholes = self.expected()
         self.assertEqual([int(x) for x in lines[:w]], offs)
         self.assertEqual([int(x) for x in lines[w + 1 :]], wholes)
+
+
+class Stream(unittest.TestCase):
+    """The stream rows (class_group_prime and the others): each input new,
+    timed once, the systems paired input by input."""
+
+    def setUp(self):
+        sys.path.insert(0, str(Path(run.__file__).parent / "drivers"))
+        import common
+
+        self.common = common
+
+    def run_main(self, k, slow0=0.0):
+        import contextlib
+        import io
+
+        calls = []
+
+        def prepare(v):
+            calls.append(("prepare", v))
+
+            def op():
+                calls.append(("op", v))
+                if v == 0 and slow0:
+                    time.sleep(slow0)
+                return v
+
+            return op
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.common.main(["x", "case", "5", "time-stream", str(k)], prepare, lambda a: "s%d" % a, lambda: 0)
+        return calls, buf.getvalue()
+
+    def test_each_input_once_and_no_warm_pass(self):
+        calls, out = self.run_main(4, slow0=0.05)
+        self.assertEqual(calls, [(w, v) for v in range(4) for w in ("prepare", "op")])
+        t = run.parse_timing(out)
+        self.assertEqual((t["mode"], t["k"], len(t["samples"])), ("stream", 4, 4))
+        self.assertGreater(t["samples"][0][0], 0.04)
+        line = [x for x in out.splitlines() if x.startswith("TIME|")][0].split("|")
+        # (the cold input 0 is outside the TIME statistics: 3 samples, all fast)
+        self.assertEqual(line[6], "3")
+        self.assertLess(float(line[4]), 0.04)
+        self.assertEqual(line[2], self.common.combined_signature(["s0", "s1", "s2", "s3"]))
+
+    def test_needs_two_inputs(self):
+        with self.assertRaises(SystemExit):
+            self.run_main(1)
+
+    def test_parse_timing(self):
+        head = '"granularity":1e-7,"threshold":0.001,"seed":0'
+        good = 'TIMING|{%s,"k":3,"mode":"stream","samples":[[0.5],[0.1],[0.2]]}' % head
+        self.assertEqual(run.parse_timing(good)["mode"], "stream")
+        for bad in (
+            'TIMING|{%s,"k":3,"mode":"stream","samples":[[0.5],[0.1]]}' % head,
+            'TIMING|{%s,"k":2,"mode":"stream","samples":[[0.5,0.4],[0.1,0.2]]}' % head,
+            'TIMING|{%s,"k":1,"mode":"stream","samples":[[0.5]]}' % head,
+        ):
+            self.assertIsNone(run.parse_timing(bad), bad)
+
+    def point(self):
+        row = dict(ROW, stream=True, fresh=True, sizes={"s": {"n": 18, "variants": 5, "timeout": 30}})
+        samples = {"user": [9, 2, 4, 6, 8], "magma": [1, 1, 2, 2, 4]}
+        modes = []
+
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            modes.append((b, mode))
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": "5"}
+            if mode == "once":
+                return {"status": "ok", "signature": "s", "seconds_cold": 1.0}
+            smp = samples[b]
+            t = {"granularity": 1e-7, "threshold": 1e-3, "seed": 0, "k": 5, "mode": "stream", "samples": [[x] for x in smp]}
+            rest = sorted(smp[1:])
+            return {"status": "ok", "seconds": rest[len(rest) // 2], "signature": "5:1", "timing": t}
+
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+        ):
+            rec = run.point(row, "s", ["user", "magma"], {"artifacts": ARTS})
+        return rec, modes
+
+    def test_point_pairs_the_inputs(self):
+        rec, modes = self.point()
+        self.assertEqual(rec["status"], "ok")
+        self.assertTrue(rec["stream"])
+        self.assertEqual({m for b, m in modes if m.startswith("time")}, {"time-stream"})
+        # (inputs 1..4: ratios 2, 2, 3, 2; the cold input 0 (9 / 1) is apart)
+        pi = rec["per_input_user"]
+        self.assertEqual((rec["ratio_user"], pi["min"], pi["max"], pi["cold"]), (2.0, 2.0, 3.0, 9.0))
+        self.assertEqual(pi["ratios"], [2.0, 2.0, 2.0, 3.0])
+        self.assertEqual(pi["against"], "magma")
+        self.assertEqual(rec["ratio_user_of_medians"], round(6 / 2, 4))
+        self.assertFalse(run.wants_vtime("user", {"stream": True}))
+
+    def test_calibration_json_keeps_stream_points(self):
+        rec, _ = self.point()
+        rec.update(protocol=run.PROTOCOL, machine={"label": "x86", "cpu": "c", "arch": "x86_64", "nproc": 16, "flags": []}, commit="c" * 40)
+        rec.setdefault("engine_pin", {"ok": False, "policy": "track", "sha256": "b" * 64})
+        d = Path(tempfile.mkdtemp(prefix="bench-core-stream-"))
+        self.addCleanup(shutil.rmtree, d, True)
+        (d / "rows").mkdir()
+        (d / "rows" / "class_group_prime-s.json").write_text(json.dumps(rec))
+        run.summary(d, {})
+        pts = json.loads((d / "calibration.json").read_text())["points"]
+        self.assertEqual(len(pts), 1)
+        self.assertTrue(pts[0]["stream"])
+        self.assertEqual(pts[0]["backends"]["magma"]["seconds_per_input"], [1, 1, 2, 2, 4])
+        self.assertEqual(pts[0]["backends"]["user"]["seconds_per_input"], [9, 2, 4, 6, 8])
+        self.assertIn("per_input_user", pts[0]["per_input"])
+        self.assertIn("per input [", (d / "summary.md").read_text())
+
+    GRID = [(k, n, v) for k in ("prime", "composite", "large_h") for n in (12, 18) for v in range(5)]
+    GRID += [(k, 40, v) for k in ("prime", "composite", "large_h") for v in range(2)]
+
+    def test_the_drivers_build_the_same_streams(self):
+        import ast as ast_
+        import expected_inputs
+
+        want = [expected_inputs.stream_disc(k, n, v) for k, n, v in self.GRID]
+        # (the Sage-mode driver's copy, read from its source)
+        src = (Path(run.__file__).parent / "drivers/sagebrush_case.py").read_text()
+        ns = {}
+        for node in ast_.parse(src).body:
+            names = {t.id for t in getattr(node, "targets", []) if isinstance(t, ast_.Name)}
+            if getattr(node, "name", None) in ("_is_prime", "_nth_prime", "_legendre", "stream_disc") or "_STREAM_BASES" in names:
+                exec(compile(ast_.Module([node], []), "sagebrush_case.py", "exec"), ns)
+        self.assertEqual([ns["stream_disc"](k, n, v) for k, n, v in self.GRID], want)
+        # (the Magma driver's, run, when Magma is here: its IsPrime proves)
+        magma = Path("/usr/local/bin/magma")
+        if not magma.exists():
+            self.skipTest("no Magma")
+        msrc = (Path(run.__file__).parent / "drivers/magma_case.m").read_text()
+        fns = [re.search(r"^function %s\(.*?^end function;\n" % f, msrc, re.S | re.M) for f in ("StreamPrime", "StreamDisc")]
+        self.assertTrue(all(fns))
+        d = Path(tempfile.mkdtemp(prefix="stream-"))
+        self.addCleanup(shutil.rmtree, d, True)
+        grid = ", ".join('<"%s", %d, %d>' % g for g in self.GRID)
+        (d / "t.m").write_text(
+            "".join(m.group(0) for m in fns)
+            + "for g in [%s] do print StreamDisc(g[1], g[2], g[3]); end for;\nquit;\n" % grid
+        )
+        r = subprocess.run([str(magma), "-b", str(d / "t.m")], capture_output=True, text=True, timeout=300)
+        got = [int(x) for x in r.stdout.split()]
+        self.assertEqual(got, want)
 
 
 class Host(unittest.TestCase):

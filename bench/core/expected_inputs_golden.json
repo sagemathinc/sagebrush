@@ -529,6 +529,81 @@
  },
  "pending_note": "Points not yet confirmed by every backend in a VM run: expected_inputs.py's hashes. The calibration sizes (c0 .. c4) are timed on the calibrated targets only (the Sage-mode, native and wasm drivers), and test_expected_inputs.py checks only their shape (their hashes take minutes to recompute). The first VM run that agrees on a point moves it into points, in a reviewed commit. mat_z_rank_wide's calibration hashes were computed on a spot VM (n2-standard-16, Nov 23 2026; up to 16 min each, for the certified-rank inputs), the smaller two also in the project.",
  "pending": {
+  "class_group_composite:l": {
+   "n": 40,
+   "variants": 6,
+   "input_hash": "710600799"
+  },
+  "class_group_composite:m": {
+   "n": 28,
+   "variants": 12,
+   "input_hash": "593702347"
+  },
+  "class_group_composite:s": {
+   "n": 18,
+   "variants": 24,
+   "input_hash": "339734947"
+  },
+  "class_group_generic:l": {
+   "n": 12,
+   "variants": 3,
+   "input_hash": "521154262"
+  },
+  "class_group_generic:m": {
+   "n": 11,
+   "variants": 3,
+   "input_hash": "722014113"
+  },
+  "class_group_generic:s": {
+   "n": 10,
+   "variants": 4,
+   "input_hash": "616135690"
+  },
+  "class_group_large_h:l": {
+   "n": 40,
+   "variants": 6,
+   "input_hash": "827153994"
+  },
+  "class_group_large_h:m": {
+   "n": 28,
+   "variants": 12,
+   "input_hash": "719337567"
+  },
+  "class_group_large_h:s": {
+   "n": 18,
+   "variants": 24,
+   "input_hash": "714667955"
+  },
+  "class_group_prime:l": {
+   "n": 40,
+   "variants": 6,
+   "input_hash": "219143742"
+  },
+  "class_group_prime:m": {
+   "n": 28,
+   "variants": 12,
+   "input_hash": "344751741"
+  },
+  "class_group_prime:s": {
+   "n": 18,
+   "variants": 24,
+   "input_hash": "399455090"
+  },
+  "class_group_proven:l": {
+   "n": 13,
+   "variants": 3,
+   "input_hash": "795943527"
+  },
+  "class_group_proven:m": {
+   "n": 12,
+   "variants": 3,
+   "input_hash": "521154262"
+  },
+  "class_group_proven:s": {
+   "n": 11,
+   "variants": 4,
+   "input_hash": "290988187"
+  },
   "galois_group_small:l": {
    "n": 12,
    "variants": 1,

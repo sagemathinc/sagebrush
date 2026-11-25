@@ -162,6 +162,45 @@ function KatsuraIdeal(k)
     return ideal<R|gens>;
 end function;
 
+// The class-group stream rows' discriminants (expected_inputs.py's
+// stream_disc: the same streams, a test checks): variant v is the v-th D.
+function StreamPrime(start, m, r, j)
+    p := start + ((r - start) mod m);
+    while true do
+        if IsPrime(p) then
+            if j eq 0 then return p; end if;
+            j -:= 1;
+        end if;
+        p +:= m;
+    end while;
+end function;
+
+function StreamDisc(kind, n, v)
+    if kind eq "prime" then return -StreamPrime(2*10^(n-1), 4, 3, v); end if;
+    if kind eq "composite" then
+        h := (n - 1) div 2; j := v div 2;
+        if v mod 2 eq 0 then
+            return -StreamPrime(2*10^h, 4, 1, j) * StreamPrime(4*10^(n-2-h), 4, 3, j);
+        end if;
+        return -4 * StreamPrime(2*10^h, 4, 1, j) * StreamPrime(3*10^(n-2-h), 4, 1, j);
+    end if;
+    // large_h: p = 7 (mod 8) prime with (-p | q) = +1 for q = 3 .. 23
+    p := 2*10^(n-1) + ((7 - 2*10^(n-1)) mod 8); left := v;
+    while true do
+        if &and[LegendreSymbol((-p) mod q, q) eq 1 : q in [3, 5, 7, 11, 13, 17, 19, 23]] and IsPrime(p) then
+            if left eq 0 then return -p; end if;
+            left -:= 1;
+        end if;
+        p +:= 8;
+    end while;
+end function;
+
+function CGStream(case_id)
+    if case_id in {"class_group_prime", "class_group_proven", "class_group_generic"} then return "prime"; end if;
+    if case_id eq "class_group_composite" then return "composite"; end if;
+    return "large_h";
+end function;
+
 function ClassDisc(digits)
     if digits eq 12 then return -100000000003; end if;
     if digits eq 24 then return -1000000000000000000000003; end if;
@@ -212,6 +251,14 @@ function Build(case_id, n, v)
         ops := &cat [[z div 100000, z mod 100000] : z in shape];
     elif case_id eq "class_group" then
         K:=QuadraticField(ClassDisc(n)); O:=MaximalOrder(K); ops := [ClassDisc(n)];
+    elif case_id in {"class_group_prime","class_group_composite","class_group_large_h","class_group_proven"} then
+        // (its quadratic route, which takes no proof option)
+        D := StreamDisc(CGStream(case_id), n, v);
+        K:=QuadraticField(D); O:=MaximalOrder(K); ops := [D];
+    elif case_id eq "class_group_generic" then
+        // (the generic number field route, informational)
+        D := StreamDisc("prime", n, v);
+        R<x>:=PolynomialRing(Rationals()); K:=NumberField(x^2 - D); O:=MaximalOrder(K); ops := [D];
     elif case_id eq "galois_group" then
         R<x>:=PolynomialRing(Rationals()); pf:=x^n-x-1; ops := Coefficients(pf);
     elif case_id eq "galois_group_small" then
@@ -248,7 +295,7 @@ function DoOp(case_id, S)
     elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_fp31_charpoly","mat_q_charpoly"} then return CharacteristicPolynomial(A);
     elif case_id in {"mat_fp_solve","mat_fp31_solve","mat_q_solve"} then return Solution(Transpose(A),v);
     elif case_id in {"groebner_cyclic","groebner_katsura"} then return GroebnerBasis(I);
-    elif case_id eq "class_group" then return ClassGroup(O);
+    elif case_id in {"class_group","class_group_prime","class_group_composite","class_group_large_h","class_group_proven","class_group_generic"} then return ClassGroup(O);
     elif case_id in {"galois_group","galois_group_small"} then return GaloisGroup(pf);
     elif case_id eq "modsym_charpoly" then return CharacteristicPolynomial(HeckeOperator(M,2));
     elif case_id eq "newforms" then return NewformDecomposition(M);
@@ -289,7 +336,7 @@ function Sig(case_id, n, answer)
         return IntegerToString(n) cat ":" cat IntegerToString(SeqHash(Eltseq(answer)));
     elif case_id in {"groebner_cyclic","groebner_katsura"} then
         ds:=[TotalDegree(f):f in answer]; Sort(~ds); return IntegerToString(#answer) cat ":" cat IntegerToString(SeqHash(ds));
-    elif case_id eq "class_group" then
+    elif case_id in {"class_group","class_group_prime","class_group_composite","class_group_large_h","class_group_proven","class_group_generic"} then
         inv:=[Integers()!z:z in Invariants(answer)]; Sort(~inv); return IntegerToString(#answer) cat ":" cat Join([IntegerToString(z):z in inv],",");
     elif case_id eq "galois_group_small" then
         // (the order and the transitive number, as the Sage-mode driver)
@@ -366,6 +413,24 @@ elif mode eq "once" then
     answer := DoOp(case_id, S);
     seconds := Realtime(t);
     printf "RESULT|%.9o|%o\n", seconds, Sig(case_id, n, answer);
+elif mode eq "time-stream" then
+    // (the stream rows, common.py's time-stream: each variant's input built
+    // outside the timer and its operation timed once, in order; no warm
+    // pass, so no input is seen twice; variant 0 is the cold sample)
+    samples := []; sigs := [];
+    for v in [0..K-1] do
+        S, ops := Build(case_id, n, v);
+        t := Realtime();
+        answer := DoOp(case_id, S);
+        Append(~samples, Realtime(t));
+        Append(~sigs, Sig(case_id, n, answer));
+    end for;
+    g := Granularity();
+    printf "TIMING|{\"granularity\":%o,\"threshold\":%o,\"seed\":0,\"k\":%o,\"mode\":\"stream\",\"samples\":[%o]}\n",
+        Sprintf("%.12o", g), Sprintf("%.12o", Max(0.001, 1000*g)), K,
+        Join(["[" cat Sprintf("%.12o", x) cat "]" : x in samples], ",");
+    rest := Sort(samples[2..#samples]);
+    printf "TIME|%.9o|%o|%.9o|%.9o|1|%o\n", rest[(#rest div 2)+1], Combined(sigs), rest[1], rest[#rest], #rest;
 elif mode in {"time", "time-fresh"} then
     fresh := mode eq "time-fresh";
     Ss := [* *]; sigs := []; warm := 0.0;
