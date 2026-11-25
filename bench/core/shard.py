@@ -468,6 +468,23 @@ def point_failed(events: list[dict]) -> set[tuple[str, str]]:
     return {(e["type"], e["key"]) for e in events if e["ev"] == "point-failed"}
 
 
+def type_stops(events: list[dict]) -> dict:
+    """The types stopped by their failed points (TYPE_POINT_FAILURES of
+    them), with why: the same whether the stop happens in this driver or
+    is read back from an earlier driver's ledger."""
+    count: dict = {}
+    last: dict = {}
+    for e in events:
+        if e["ev"] == "point-failed":
+            count[e["type"]] = count.get(e["type"], 0) + 1
+            last[e["type"]] = e["key"]
+    return {
+        tk: f"{n} points failed on this type (last: {last[tk]})"
+        for tk, n in count.items()
+        if n >= TYPE_POINT_FAILURES
+    }
+
+
 def point_errors(events: list[dict]) -> dict:
     """Each point's run.py failures so far, by (type, key), from the VMs
     retired for them."""
@@ -1582,11 +1599,9 @@ class Driver:
                             }
                         )
                         with self.spend:
-                            nf = len([x for x in point_failed(self.ledger.events) if x[0] == tk])
-                            if nf >= TYPE_POINT_FAILURES:
-                                self.stopped[tk] = (
-                                    f"{nf} points failed on this type (last: {key})"
-                                )
+                            why = type_stops(self.ledger.events).get(tk)
+                            if why:
+                                self.stopped[tk] = why
                     if self.stop.is_set():
                         return
                     if not up:
@@ -1684,8 +1699,14 @@ class Driver:
             # count toward POINT_TRIES)
             failed = point_failed(self.ledger.events)
             self.point_failures = point_errors(self.ledger.events)
+            # (a type an earlier driver stopped for its failed points stays
+            # stopped: no worker, so no reservation, for it)
+            for tk, why in type_stops(self.ledger.events).items():
+                self.stopped.setdefault(tk, why)
             done = self.rows.accepted() | failed
             for tk, t in self.plan["types"].items():
+                if tk in self.stopped:
+                    continue
                 queue = sorted(
                     (k for k in self.plan["points"] if (tk, k) not in done),
                     key=lambda k: -expected_seconds(k),

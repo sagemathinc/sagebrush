@@ -1049,6 +1049,24 @@ class Drivers(unittest.TestCase):
         self.assertEqual(len(self.events("retired")), shard.TYPE_POINT_FAILURES * shard.POINT_TRIES)
         self.assertEqual(self.prov.vms, {})
 
+    def test_a_stopped_type_stays_stopped_after_a_restart(self):
+        # (TYPE_POINT_FAILURES failed points with one point still pending: a
+        # new driver on the same ledger reserves nothing more for the type)
+        self.remote.run_fails = {"poly_fp_mul:s", "poly_fp_gcd:s", "mat_fp_det:s", "poly_fp_mul:m"}
+        self.plan["points"] = self.plan["points"] + ["poly_fp_mul:m"]
+        self.plan["expected_inputs"]["poly_fp_mul:m"] = {"n": 5000, "variants": 8, "input_hash": "104"}
+        (self.d / "plan.json").write_bytes(shard.canonical(self.plan))
+        rep = self.driver().run()
+        self.assertEqual(len(rep["failed"]), shard.TYPE_POINT_FAILURES)
+        self.assertEqual(len(rep["left"]), 1)
+        self.assertIn("x86", rep["stopped_types"])
+        reserved = len(self.events("reserve"))
+        rep = self.driver().run()
+        self.assertEqual(len(self.events("reserve")), reserved)
+        self.assertIn("points failed on this type", rep["stopped_types"]["x86"])
+        self.assertEqual(len(rep["left"]), 1)
+        self.assertEqual(self.prov.vms, {})
+
     def test_one_crash_then_success_is_accepted(self):
         self.remote.run_fails = {"poly_fp_gcd:s"}
 
