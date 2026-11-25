@@ -9664,8 +9664,9 @@ class _MNumberField(_snf.NumberField_absolute):
     def __init__(self, f, quadratic=False, irreducible=False):
         super().__init__(f, "$.1", irreducible=irreducible)
         # (as Magma 2.18-5 has it: a polynomial over the rationals defines the field made monic, NumberField(3*x^2
-        # + 1) is x^2 + 1/3; one over the integers is kept as given, 2*y^2 - 3; either way the generator is its
-        # root, which the core's coordinates are on)
+        # + 1) is x^2 + 1/3; one over the integers made primitive with a positive leading coefficient, 2*y^2 - 3
+        # as given, 6*y^2 + 2 as 3*y^2 + 1 (below); either way the generator is its root, which the core's
+        # coordinates are on)
         over_z = getattr(getattr(f, "parent", lambda: None)(), "base_ring", lambda: None)() is _sp.ZZ
         if not over_z and self._uf[-1] != 1:
             self._uf = tuple(_Fraction(a) / _Fraction(self._uf[-1]) for a in self._uf)

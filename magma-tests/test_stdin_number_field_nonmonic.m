@@ -1,5 +1,6 @@
 // Number fields of a non-monic or rational polynomial, as Magma 2.18-5 has them: over the rationals the field is
-// defined by the polynomial made monic, over the integers by the polynomial as given; the generator is its root,
+// defined by the polynomial made monic, over the integers by the polynomial made primitive with a positive leading
+// coefficient; the generator is its root,
 // elements print and give coordinates on its powers, and Discriminant(K) is the primitive integral polynomial's.
 P<x> := PolynomialRing(Rationals());
 K<a> := NumberField(3*x^2 + 1);
