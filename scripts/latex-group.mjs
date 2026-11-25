@@ -120,7 +120,10 @@ export const LATEX_LAZY = {
 //  transforms, \foreach: web/latex/engine/tikz.mjs, in the worker's bundle, with its bounds): 287,563 / 96,996 measured on the
 //  shipped build of its merge with master 3655725a, with bun 1.4.4 and node 24.21.0 (+31,047 / +11,158 over master's
 //  256,516 / 85,838), + 64)
-export const LATEX_CAPS = { raw: 287627, gzip: 97060 };
+// (289,343 raw / 97,655 gzip: Nov 25 2026, enumitem's label=, ref= and start= on a list: 289,279 / 97,591 measured on the
+//  shipped build of master d4692ae4 with it, with bun 1.4.4 and node 24.21.0 (+1,716 / +595 over master's
+//  287,563 / 96,996), + 64)
+export const LATEX_CAPS = { raw: 289343, gzip: 97655 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:

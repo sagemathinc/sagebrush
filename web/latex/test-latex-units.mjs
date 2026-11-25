@@ -1074,6 +1074,34 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
   check("input-change-rerenders", r2.stats.mode === "cold" && /\\mathbb ?\{Z\}/.test(r2.chunks.join("")), r2.stats.mode);
 }
 
+// ---- enumitem's options on a list: label= (with \arabic*, \alph*, \Alph*, \roman*, \Roman*), ref= and start= read,
+// the rest (spacing, nosep) accepted; none of it shown as text; each item's label, and what \ref gives, as pdflatex
+// with enumitem gives them for this source (checked): (i), (C6), "A" by ref=, a)a under a list of enumitem's label
+{
+  const DOC = "\\documentclass{article}\n\\usepackage{enumitem}\n\\begin{document}\n" +
+    "\\begin{enumerate}[label=\\textup{(\\roman*)},leftmargin=*]\n\\item\\label{a1} A1.\n\\item\\label{a2} A2.\n\\end{enumerate}\n" +
+    "\\begin{enumerate}[label=(C\\arabic*),start=6,leftmargin=*]\n\\item\\label{c6} C6.\n\\item\\label{c7} C7.\n\\end{enumerate}\n" +
+    "\\begin{enumerate}[label=\\Alph*.,ref=\\Alph*]\n\\item\\label{b1} B1.\n\\end{enumerate}\n" +
+    "\\begin{enumerate}[label=\\Roman*)]\n\\item R1.\n\\item R2.\n\\end{enumerate}\n" +
+    "\\begin{enumerate}[label=\\alph*),nosep]\n\\item\\label{n1} N1.\n  \\begin{enumerate}\n  \\item\\label{n1a} N1a.\n  \\end{enumerate}\n\\end{enumerate}\n" +
+    "\\begin{enumerate}[nosep]\n\\item\\label{p1} P1.\n\\end{enumerate}\n" +
+    "\\begin{itemize}[label=--]\n\\item Dash.\n\\end{itemize}\n" +
+    "\\begin{enumerate}[label=\\textbf{Step \\arabic*.}]\n\\item\\label{s1} S1.\n\\end{enumerate}\n" +
+    "Refs: \\ref{a1}, \\ref{a2}, \\ref{c6}, \\ref{c7}, \\ref{b1}, \\ref{n1}, \\ref{n1a}, \\ref{p1}, \\ref{s1}.\n\\end{document}\n";
+  const r = new Engine().update(DOC, { cold: true }), h = r.chunks.join("");
+  const lbls = [...h.matchAll(/<span class="lbl">([\s\S]*?)<\/span>/g)].map((m) => m[1].replace(/<[^>]+>/g, ""));
+  check("enumitem-labels", JSON.stringify(lbls) === JSON.stringify(["(i)", "(ii)", "(C6)", "(C7)", "A.", "I)", "II)", "a)", "(a)", "1.", "–", "Step 1."]), lbls);
+  check("enumitem-bold-label", /<span class="lbl"><b>Step 1\.<\/b><\/span>/.test(h), h.slice(h.indexOf("Step"), h.indexOf("Step") + 80));
+  const refs = h.replace(/<[^>]+>/g, "").match(/Refs: [^\n]*/)?.[0].replace(/\s+/g, " ");
+  check("enumitem-refs", refs === "Refs: (i), (ii), (C6), (C7), A, a), a)a, 1, Step 1..", refs);
+  check("enumitem-options-not-shown", !/label=|leftmargin|nosep|start=/.test(h.replace(/<[^>]+>/g, "")) && !/class="unk"/.test(h) && !r.problems.some((p) => p.kind === "command"), r.problems.slice(0, 4));
+  // (an optional argument that isn't enumitem's (the enumerate package's [(a)] and [i] shorthands): as before, shown; a
+  //  start= that isn't a number: the list starts at 1)
+  const r2 = new Engine().update("\\documentclass{article}\n\\begin{document}\n\\begin{enumerate}[(a)]\n\\item X.\n\\end{enumerate}\n\\begin{enumerate}[i]\n\\item I.\n\\end{enumerate}\n\\begin{enumerate}[start=x]\n\\item Y.\n\\end{enumerate}\n\\end{document}\n", { cold: true }).chunks.join("");
+  const l2 = [...r2.matchAll(/<span class="lbl">([\s\S]*?)<\/span>/g)].map((m) => m[1]), t2 = r2.replace(/<[^>]+>/g, "");
+  check("enumitem-not-its-own", /\[\(a\)\]/.test(t2) && /\[i\]/.test(t2) && JSON.stringify(l2) === JSON.stringify(["1.", "1.", "1."]), { l2, t: t2.replace(/\s+/g, " ").slice(0, 200) });
+}
+
 // ---- envclose.ts (P1a): the close a "}" typed after \begin{X} adds, or none
 {
   const at = (t) => [t.replace("|", ""), t.indexOf("|")];
