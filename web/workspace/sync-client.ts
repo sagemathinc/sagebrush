@@ -35,11 +35,11 @@ import { Outbox, Fenced, switchTo, renewLease, sender, obligate, rebuildKey, wir
 import type * as SealMod from "./sync-seal";
 import { seedLedger, hubOf, driveObsolete, ledgerKeys } from "./sync-ledger";
 import { bytesFor } from "./sync-pins";
-import { cursorOf, applyOps, genPrefix, drainConfirmed, sealedPullKey } from "./sync-confirmed";
+import { cursorOf, applyOps, genPrefix, genKey, idbStore, drainConfirmed, sealedPullKey } from "./sync-confirmed";
 import { capture as captureAdoption } from "./sync-adopt";
 import { SENDER_HOLD, ReplayHalted, runReplay } from "./sync-replay";
 import { Halt } from "./sync-overlay";
-import { ReleaseHalt } from "./sync-refs";
+import { ReleaseHalt, RELEASE_PAGE, duePairs, heldAs, type RefPair } from "./sync-refs";
 import { rewriting } from "./sync-rewrite";
 import { REBUILD, passOf, passCursor, cleanStep, stage, stageEchoes, logDone, captureStep, done, viewStep, retireStep, acked as rebuiltAcked, announceInvalid } from "./sync-rebuild";
 import type { SyncOp } from "./sync-reduce";
@@ -51,6 +51,9 @@ import type { DocSync } from "./doc-sync";
 /** (syncReady) refresh tokens: at most this many waiting, and as many answered kept in the status; each a short
  * random word (the status message's bound, sync-owner STATUS_PUB, holds them) */
 export const READY = { tokens: 8, form: /^[0-9a-z]{12}$/ };
+/** (e2e PR 5d) the sweep of the adds due: at most every `everyMs` (plus up to `jitterMs`), that times up to
+ * `maxBackoff` after each release race; tests lower them. */
+export const SWEEP = { everyMs: 10 * 60_000, jitterMs: 60_000, maxBackoff: 32 };
 
 export const CLIENT = {
   /** ops in one `ops` message (the server's opsPerMessage) */
@@ -259,6 +262,9 @@ type Conn = {
   rebuildRunning?: boolean;
   /** (D11) a large move's view stopped, stable (failed, or late before its plan's publication): pages held, why said */
   largeHalt?: string;
+  /** (e2e PR 5d) when the next sweep may run, and its backoff after release races */
+  sweepAt?: number;
+  sweepBackoff?: number;
   /** (r5, CORR-D11-R4-1) a pull or an ops run asked for while the announce was pending: run once it is settled */
   deferPull?: boolean;
   deferOps?: boolean;
@@ -947,6 +953,11 @@ export class SyncClient {
     }
     // (no further than the target: past it, pages are another time's, LIMIT-PR58-3)
     if (!m.more && c.target > last) c.target = last;
+    // (the log read to its end: a release refusal checked against it, or a sweep of the adds due; e2e PR 5d)
+    if (!m.more && this.opts.e2e && this.opts.onIndex) {
+      await this.releases(c);
+      if (c.halted) return;
+    }
     // (syncReady: the log's end, read by a pull asked after a token was given, its pages applied: that token answered;
     // a token given after this pull was asked: once more, to the end)
     if (!m.more && this.barriers.size) {
@@ -2000,6 +2011,54 @@ export class SyncClient {
       i = j;
     }
     return batch.map((r) => kit.sopsItem(have.get(r.dseq)!));
+  }
+
+  /**
+   * The index's references (e2e PR 5d), once the log has been read to its end. A release refusal first: against this
+   * newer verified prefix, each refused release's pairs are either ended now by another device's release (a race: the
+   * pairs still live and still eligible are sent again, at fresh dseqs) or not one of them is (the log isn't what this
+   * device verified: it stops, said); a pair still live but no longer eligible stops it too. Otherwise, at most every
+   * SWEEP.everyMs (jittered, backing off after a race) and with no release in flight: a sweep of the adds due.
+   */
+  private async releases(c: Conn) {
+    const refused = await c.ob.releaseRefused();
+    const gen = genPrefix(c.ns, (await this.metaGet<number>(genKey(c.ns))) ?? 0);
+    if (refused.length) {
+      const verdicts = await inTx(this.w.ws, [META, "syncIndex"], "readonly", async (tx) => {
+        const meta = tx.objectStore(META), store = idbStore(tx, gen);
+        const out: { held: (string | null)[]; pairs: RefPair[]; person: boolean }[] = [];
+        for (const r of refused) {
+          const held: (string | null)[] = [];
+          for (const p of r.pairs) held.push(await heldAs(meta, store, gen, p));
+          out.push({ held, pairs: r.pairs, person: r.person });
+        }
+        return out;
+      });
+      const resends: { pairs: RefPair[]; person: boolean }[] = [];
+      for (const v of verdicts) {
+        const ok = (h: string | null) => h === "orphan" || h === "forgotten" || (v.person && h === "history");
+        if (!v.held.some((h) => h === null) || v.held.some((h) => h !== null && !ok(h))) {
+          c.halted = "sealed-halt";
+          this.stats.sealedHalt = `sync: a release this device sent was refused, and the log it then read doesn't say why (${v.held.map((h) => h ?? "ended").join(", ")})`.slice(0, 300);
+          this.showWaiting(c, (await c.ob.status()).count);
+          return;
+        }
+        resends.push({ pairs: v.pairs.filter((_, i) => v.held[i] !== null), person: v.person });
+      }
+      await c.ob.releaseChecked(resends);
+      c.sweepBackoff = Math.min((c.sweepBackoff ?? 1) * 2, SWEEP.maxBackoff);
+      this.kick();
+      return;
+    }
+    const now = this.clock.now();
+    if (now < (c.sweepAt ?? 0) || (await c.ob.releaseOut())) return;
+    c.sweepAt = now + SWEEP.everyMs * (c.sweepBackoff ?? 1) + Math.floor(Math.random() * SWEEP.jitterMs);
+    const due = await inTx(this.w.ws, [META, "syncIndex"], "readwrite", (tx) => duePairs(tx.objectStore(META), idbStore(tx, gen), gen, now, RELEASE_PAGE));
+    if (!due.length) {
+      c.sweepBackoff = 1;
+      return;
+    }
+    if ((await c.ob.addReleases(due)) !== null) this.kick();
   }
 
   private async halt(c: Conn, why: "invalid" | "diverged", detail: string) {

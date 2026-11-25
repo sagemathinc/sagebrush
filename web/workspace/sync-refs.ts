@@ -13,11 +13,16 @@
 //   sync:<gen>:refs:o:<seq>:<address>  -> 1               the live orphans
 //   sync:<gen>:refs:c:<fid>            -> seq             the add holding the file's current bytes (0: bytes a
 //                                                        plaintext op wrote, which no index add holds)
+//   sync:<gen>:refs:d:<address>:<seq>  -> ms              when this device first saw a live add due (its holder
+//                                                        an orphan or forgotten), by its own clock: a sweep releases
+//                                                        it DUE_MS later. Only a delay, never a condition of validity
+//   sync:<gen>:refs:scan               -> key             where the sweep's walk of the files' adds goes on from
 // A holder is live or forgotten as the confirmed rows say (Store byId / gone), read for a release op, which runs alone in
 // its page (sync-overlay.ts runPage), so what it reads is the state just before it.
 //
 // No DOM, crypto or E2E code here: the page bundle has it without the sealing module.
 import { req } from "./db";
+import { within } from "./paths";
 import type { Outcome, SyncOp } from "./sync-reduce";
 import type { Store } from "./sync-overlay";
 
@@ -25,6 +30,8 @@ import type { Store } from "./sync-overlay";
 export type RefPair = { address: string; add: number };
 /** The op that releases index references: `{ dseq, t, by, op: "release", path: "/", kind: "folder", releases }`. */
 export const RELEASE_OP = "release";
+/** The most adds one release op ends (the server's LIMITS.sealedOpRefs). */
+export const RELEASE_PAGE = 64;
 
 /**
  * The blob references an op declares in the clear (the server counts them): as today's plaintext log counts them, a
@@ -50,7 +57,15 @@ const K = {
   orphan: (gen: string, seq: number, address: string) => `sync:${gen}:refs:o:${pad(seq)}:${address}`,
   orphanRange: (gen: string) => IDBKeyRange.bound(`sync:${gen}:refs:o:`, `sync:${gen}:refs:o;`, false, true),
   cur: (gen: string, fid: string) => `sync:${gen}:refs:c:${fid}`,
+  due: (gen: string, address: string, seq: number) => `sync:${gen}:refs:d:${address}:${pad(seq)}`,
+  heldAll: (gen: string, after?: string) => IDBKeyRange.bound(after ?? `sync:${gen}:refs:h:`, `sync:${gen}:refs:h;`, after !== undefined, true),
+  scan: (gen: string) => `sync:${gen}:refs:scan`,
 };
+/** How long a device waits, from when it first saw an add due, before its sweep releases it: so that the device whose
+ * forget made it due, or another, usually releases it first, and two devices seldom race for it. A delay only. */
+export const DUE_MS = 24 * 3600_000;
+/** How many of the files' adds one sweep walks. */
+export const SWEEP_WALK = 500;
 export type AddRow = { fid: string | null; rel?: number };
 
 /** How one live add is held, before an op: by a live file as its current bytes or as its history, by a forgotten one,
@@ -102,6 +117,7 @@ export async function ledgerPage(meta: IDBObjectStore, store: Store, gen: string
         meta.put({ ...row, rel: op.seq } satisfies AddRow, K.add(gen, p.address, p.add));
         if (row.fid === null) meta.delete(K.orphan(gen, p.add, p.address));
         else meta.delete(K.held(gen, row.fid, p.add));
+        meta.delete(K.due(gen, p.address, p.add));
       }
       continue;
     }
@@ -130,3 +146,62 @@ export async function liveOrphans(meta: IDBObjectStore, gen: string, n: number):
 }
 /** The add holding a file's current bytes (0: a plaintext op's), or undefined. */
 export const currentAdd = async (meta: IDBObjectStore, gen: string, fid: string) => (await req(meta.get(K.cur(gen, fid)))) as number | undefined;
+
+/** The key of a file's add: its fid, seq and address. */
+const heldOf = (gen: string, k: string, address: string) => {
+  const rest = k.slice(`sync:${gen}:refs:h:`.length), i = rest.lastIndexOf(":");
+  return { fid: rest.slice(0, i), pair: { address, add: Number(rest.slice(i + 1)) } };
+};
+
+/**
+ * The adds due now, at most `n`, for a sweep (in a readwrite transaction on meta, the confirmed rows read through
+ * `store`): the live orphans, and the live adds of forgotten files met in a walk of SWEEP_WALK of the files' adds (from
+ * where the last walk stopped, round again at the end). An add due for the first time is stamped with `now`; one is
+ * returned only DUE_MS after its stamp. Eligibility is the verified ledger's alone; the stamp only delays.
+ */
+export async function duePairs(meta: IDBObjectStore, store: Store, gen: string, now: number, n: number): Promise<RefPair[]> {
+  const cands: RefPair[] = [];
+  for (const p of await liveOrphans(meta, gen, n)) cands.push(p);
+  const after = (await req(meta.get(K.scan(gen)))) as string | undefined;
+  let keys = (await req(meta.getAllKeys(K.heldAll(gen, after), SWEEP_WALK))) as string[];
+  let vals = (await req(meta.getAll(K.heldAll(gen, after), SWEEP_WALK))) as string[];
+  if (!keys.length && after !== undefined) {
+    keys = (await req(meta.getAllKeys(K.heldAll(gen), SWEEP_WALK))) as string[];
+    vals = (await req(meta.getAll(K.heldAll(gen), SWEEP_WALK))) as string[];
+  }
+  if (keys.length) meta.put(keys[keys.length - 1], K.scan(gen));
+  const live = new Map<string, boolean>();
+  for (let i = 0; i < keys.length; i++) {
+    const { fid, pair } = heldOf(gen, keys[i], vals[i]);
+    if (!live.has(fid)) live.set(fid, !!(await store.byId(fid)) || (await store.gone(fid)) === undefined);
+    if (!live.get(fid)) cands.push(pair);
+  }
+  const out: RefPair[] = [];
+  for (const p of cands) {
+    if (out.length >= n) break;
+    const how = await heldAs(meta, store, gen, p);
+    if (how !== "orphan" && how !== "forgotten") continue;
+    const k = K.due(gen, p.address, p.add), seen = (await req(meta.get(k))) as number | undefined;
+    if (seen === undefined) meta.put(now, k);
+    else if (now - seen >= DUE_MS) out.push(p);
+  }
+  return out;
+}
+
+/** The history of every live file at or under `path` (all its live adds but the one holding its current bytes): what
+ * the person's "delete old versions" there releases. */
+export async function historyUnder(meta: IDBObjectStore, store: Store, gen: string, path: string): Promise<RefPair[]> {
+  const keys = (await req(meta.getAllKeys(K.heldAll(gen)))) as string[];
+  const vals = (await req(meta.getAll(K.heldAll(gen)))) as string[];
+  const out: RefPair[] = [], cur = new Map<string, number | undefined>(), under = new Map<string, boolean>();
+  for (let i = 0; i < keys.length; i++) {
+    const { fid, pair } = heldOf(gen, keys[i], vals[i]);
+    if (!under.has(fid)) {
+      const e = await store.byId(fid);
+      under.set(fid, !!e && within(e.path, path));
+      cur.set(fid, await currentAdd(meta, gen, fid));
+    }
+    if (under.get(fid) && cur.get(fid) !== pair.add) out.push(pair);
+  }
+  return out;
+}

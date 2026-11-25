@@ -7,7 +7,7 @@
 // same ledger whatever the ops' `t` and however the log is cut into pages.
 //   bun web/workspace/test-sync-refs.mjs
 import { reduce, SyncIndex } from "./sync-reduce.ts";
-import { ledgerPage, heldAs, liveAdds, liveOrphans, currentAdd, refsOf, ReleaseHalt } from "./sync-refs.ts";
+import { ledgerPage, heldAs, liveAdds, liveOrphans, currentAdd, refsOf, ReleaseHalt, duePairs, historyUnder, DUE_MS } from "./sync-refs.ts";
 
 let checks = 0;
 const fails = [];
@@ -180,6 +180,38 @@ const halts = async (d, o) => {
     tEqual: await run(log(() => 5), 4),
   };
   check(Object.values(rows).every((x) => x === base) && base.includes(":refs:a:"), `the same ledger for pages of 1, 3 or all ops, and for ops' t forward, backward, far in the future or all equal: ${J(Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, v === base])))}`);
+}
+
+// ---- what a sweep may release, and when; what "delete old versions" releases
+{
+  seq = 0;
+  const d = device(), st = storeOf(d.ix);
+  const s1 = op({ op: "create", path: "/d/a.txt", kind: "file", fid: F, sha256: A, size: 1 });
+  await d.apply([op({ op: "mkdir", path: "/d", kind: "folder", fid: DIR }), s1]);
+  const s2 = op({ op: "write", path: "/d/a.txt", kind: "file", fid: F, sha256: B, base: A, size: 1 });
+  const s3 = op({ op: "write", path: "/d/a.txt", kind: "file", fid: F, sha256: A, base: B, size: 1 });
+  const same = op({ op: "write", path: "/d/a.txt", kind: "file", fid: F, sha256: A, base: A, size: 1 });
+  const g1 = op({ op: "create", path: "/g.txt", kind: "file", fid: G, sha256: C, size: 1 });
+  const g2 = op({ op: "write", path: "/g.txt", kind: "file", fid: G, sha256: E, base: C, size: 1 });
+  await d.apply([s2, s3, same, g1, g2]);
+  const hist = async (path) => J(await historyUnder(d.meta, st, GEN, path));
+  check((await hist("/d/a.txt")) === J([{ address: A, add: s1.seq }, { address: B, add: s2.seq }]) && (await hist("/d")) === (await hist("/d/a.txt")) && (await hist("/")) === J([{ address: A, add: s1.seq }, { address: B, add: s2.seq }, { address: C, add: g1.seq }]) && (await hist("/x")) === "[]",
+    "delete old versions: a file's history (never its current bytes' add, A -> B -> A's third), a folder's files' or everyone's; nothing elsewhere");
+  // (a sweep: the orphan now, the forgotten file's adds once it is forgotten; first seen only stamps; due a day later)
+  const T0 = 1_000_000;
+  const at = async (t) => J(await duePairs(d.meta, st, GEN, t, 64));
+  check((await at(T0)) === "[]", "a sweep's first sight of a due add only stamps it");
+  check((await at(T0 + DUE_MS - 1)) === "[]", "…nothing released before DUE_MS from its first sight");
+  check((await at(T0 + DUE_MS)) === J([{ add: same.seq, address: A }]), "…then the orphan (the same bytes again); never a live file's history or current bytes");
+  await d.apply([op({ op: "remove", path: "/g.txt", to: "/Trash/g.txt", kind: "file", fid: G })]);
+  check((await at(T0 + 2 * DUE_MS)) === J([{ add: same.seq, address: A }]), "a file in Trash is live: its adds aren't due");
+  await d.apply([op({ op: "forget", path: "/Trash/g.txt", kind: "file", fid: G })]);
+  const T1 = T0 + 3 * DUE_MS;
+  check((await at(T1)) === J([{ add: same.seq, address: A }]), "forgotten: its adds first seen now (stamped), not yet due");
+  check((await at(T1 + DUE_MS)) === J([{ add: same.seq, address: A }, { address: C, add: g1.seq }, { address: E, add: g2.seq }]), "…a day later, every add it held, its last current bytes too");
+  check((await at(T1 + DUE_MS)) === (await at(T1 + DUE_MS)) && J(await duePairs(d.meta, st, GEN, T1 + DUE_MS, 2)) === J([{ add: same.seq, address: A }, { address: C, add: g1.seq }]), "at most n at a time");
+  await d.apply([release([{ address: A, add: same.seq }, { address: C, add: g1.seq }, { address: E, add: g2.seq }])]);
+  check((await at(T1 + 2 * DUE_MS)) === "[]" && ![...d.meta.map.keys()].some((k) => k.includes(":refs:d:")), "released: none due any more, their stamps gone");
 }
 
 console.log(`${checks - fails.length}/${checks} checks passed`);
