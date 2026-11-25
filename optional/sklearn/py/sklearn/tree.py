@@ -105,6 +105,37 @@ class Tree:
         _sk_refused("_tree.Tree.decision_path", "it returns a scipy sparse matrix")
 
 
+class _SkInput:
+    """A fit's validated input (sklearn.tree's own: what _sk_input resolved, and the kernel's Dataset when an
+    ensemble shares one)."""
+
+    def __init__(self, X, y, mask, n_samples, n_features, n_outputs, classes, n_classes, expanded_class_weight):
+        self.X = X
+        self.y = y
+        self.mask = mask
+        self.n_samples = n_samples
+        self.n_features = n_features
+        self.n_outputs = n_outputs
+        self.classes = classes
+        self.n_classes = n_classes
+        self.expanded_class_weight = expanded_class_weight
+        self.dataset = None
+
+
+class _SkShared:
+    """The X and y every member of a bagging ensemble is fit on, and (once the first member made it) their
+    validated input with the kernel's one Dataset. release() frees the Dataset."""
+
+    def __init__(self, X, y):
+        self.X = X
+        self.y = y
+        self.data = None
+
+    def release(self):
+        if self.data is not None and self.data.dataset is not None:
+            self.data.dataset.release()
+
+
 _sk_base_constraints = {
     "splitter": [StrOptions({"best", "random"})],
     "max_depth": [Interval(Integral, 1, None, closed="left"), None],
@@ -212,6 +243,13 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator):
     def _fit(self, X, y, sample_weight=None, check_input=True, missing_values_in_feature_mask=None):
         self._sk_refuse_unsupported()
         random_state = check_random_state(self.random_state)
+        data = self._sk_input(X, y, check_input, missing_values_in_feature_mask)
+        return self._sk_grow(data, sample_weight, random_state)
+
+    def _sk_input(self, X, y, check_input, missing_values_in_feature_mask):
+        # (the part of scikit-learn's _fit that doesn't depend on sample_weight, in its order: the validated input,
+        # the output settings, the encoded classes and the class weights. A bagging ensemble computes it once for
+        # its first member, and its other members adopt it, _sk_adopt, with the kernel's one copy of the data.)
         is_classification = is_classifier(self)
 
         if check_input:
@@ -260,6 +298,24 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator):
         # (y is an ndarray here: np.atleast_1d made it one)
         if y.dtype != np.float64 or not y.flags["C_CONTIGUOUS"]:
             y = np.ascontiguousarray(y, dtype=np.float64)
+
+        return _SkInput(X, y, missing_values_in_feature_mask, n_samples, self.n_features_in_, self.n_outputs_,
+                        self.classes_ if is_classification else None,
+                        self.n_classes_ if is_classification else None, expanded_class_weight)
+
+    def _sk_adopt(self, data):
+        # (another member's input, as _sk_input set it on that member: this member was given the same X and y)
+        self.n_features_in_ = data.n_features
+        self.n_outputs_ = data.n_outputs
+        if data.classes is not None:
+            self.classes_ = [c.copy() for c in data.classes]
+            self.n_classes_ = data.n_classes.copy()
+
+    def _sk_grow(self, data, sample_weight, random_state):
+        # (the rest of scikit-learn's _fit: the resolved parameters, the sample weights, the seed and the tree)
+        is_classification = is_classifier(self)
+        X, y, n_samples = data.X, data.y, data.n_samples
+        expanded_class_weight = data.expanded_class_weight
 
         max_depth = np.iinfo(np.int32).max if self.max_depth is None else self.max_depth
 
@@ -316,9 +372,11 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator):
         else:
             self.tree_ = Tree(self.n_features_in_, np.array([1] * self.n_outputs_, dtype=np.intp), self.n_outputs_)
 
-        # Build tree: the kernel holds X, y and the mask for this fit
+        # Build tree: the kernel holds X, y and the mask, for this fit or (data.dataset) for a whole ensemble
         from sagebrush import skltree
-        dataset = skltree.dataset(np.ascontiguousarray(X, dtype=np.float32), y, missing_values_in_feature_mask)
+        owned = data.dataset is None
+        dataset = data.dataset if not owned else skltree.dataset(
+            np.ascontiguousarray(X, dtype=np.float32), y, data.mask)
         try:
             # (the splitter's XorShift seed, drawn as its init draws it, once the input is checked)
             seed = random_state.randint(0, _SK_RAND_R_MAX)
@@ -338,7 +396,8 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator):
                 seed=int(seed),
             )
         finally:
-            dataset.release()
+            if owned:
+                dataset.release()
         self.tree_._sk_set(grown)
 
         if self.n_outputs_ == 1 and is_classification:
@@ -346,6 +405,22 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator):
             self.classes_ = self.classes_[0]
 
         return self
+
+    @_fit_context(prefer_skip_nested_validation=True)
+    def _sk_fit_shared(self, shared, sample_weight):
+        # (a bagging member's fit(X, y, sample_weight=sample_weight) on the X and y of `shared`, which every member
+        # is given: the first member validates them and makes the kernel's Dataset, the others adopt that; the
+        # ensemble releases the Dataset)
+        self._sk_refuse_unsupported()
+        random_state = check_random_state(self.random_state)
+        if shared.data is None:
+            data = self._sk_input(shared.X, shared.y, True, None)
+            from sagebrush import skltree
+            data.dataset = skltree.dataset(np.ascontiguousarray(data.X, dtype=np.float32), data.y, data.mask)
+            shared.data = data
+        else:
+            self._sk_adopt(shared.data)
+        return self._sk_grow(shared.data, sample_weight, random_state)
 
     def _validate_X_predict(self, X, check_input):
         """Validate the training data on predict (probabilities)."""

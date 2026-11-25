@@ -51,3 +51,36 @@ def failing_fit():
 
 case("fit.failure", failing_fit)
 case("fit.after-failure", lambda: unchanged(lambda: DecisionTreeClassifier(random_state=0).fit(X, y)))
+
+# bagging: the members share one copy (or, on their own columns, make their own); every copy is released, also
+# when a member's fit fails partway through the ensemble
+from sklearn.ensemble import BaggingClassifier, BaggingRegressor
+
+case("bagging.shared", lambda: unchanged(lambda: BaggingClassifier(n_estimators=6, random_state=0).fit(X, y)))
+case("bagging.own-columns", lambda: unchanged(lambda: BaggingClassifier(n_estimators=6, max_features=1, random_state=0).fit(X, y)))
+case("bagging.regressor-oob", lambda: unchanged(lambda: BaggingRegressor(n_estimators=6, oob_score=True, random_state=0).fit(X, y * 1.5)))
+
+
+def failing_member(**kw):
+    # (the third member's fit fails)
+    original = skltree.fit
+    calls = []
+
+    def fail_third(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 3:
+            raise ValueError("injected failure in the third member")
+        return original(*args, **kwargs)
+
+    skltree.fit = fail_third
+    try:
+        BaggingClassifier(n_estimators=6, random_state=0, **kw).fit(X, y)
+    except ValueError as e:
+        return str(e), len(calls), live() == before
+    finally:
+        skltree.fit = original
+    return "no failure", len(calls), live() == before
+
+
+case("bagging.failure-shared", failing_member)
+case("bagging.failure-own-columns", lambda: failing_member(max_features=1))

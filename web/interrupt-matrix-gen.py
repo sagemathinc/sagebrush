@@ -56,6 +56,13 @@ CASES = [
          setup="import numpy as np\nfrom sagebrush import skltree\n_g = np.random.RandomState(0)\nX = _g.rand(S, 8).astype(np.float32)\ny = (X @ np.arange(1.0, 9.0) + _g.rand(S))[:, None]",
          target="_ds = skltree.dataset(X, y)\n_t = skltree.fit(_ds, criterion=\"squared_error\", max_features=8, seed=1)\n_ds.release()",
          probe="_d2 = skltree.dataset(np.array([[0.0], [1.0]], dtype=np.float32), np.array([[0.0], [1.0]]))\nassert skltree.fit(_d2, n_classes=[2], criterion=\"gini\", max_features=1, seed=1)[\"node_count\"] == 3\n_d2.release()"),
+    # SK3: bagging's member loop (the kernel's dataset shared, a bootstrap's counts as each member's weights; the
+    # members' fits between Python's polls)
+    dict(id="SK3", transport="skltree:bagging", owner="decision trees (sklearn)", mode="python", s0=20_000, smin=2_000, smax=400_000,
+         grow=dict(kind="scale", p=1), leak_measure="heap+external", hosts=["cli"],
+         setup="import numpy as np\nfrom sagebrush import skltree\n_g = np.random.RandomState(0)\nX = _g.rand(S, 8).astype(np.float32)\ny = np.floor(X[:, :1].astype(np.float64) * 5)\n_ds = skltree.dataset(X, y)",
+         target="_rs = np.random.RandomState(1)\nfor _k in range(20):\n    _w = np.bincount(_rs.randint(0, S, S), minlength=S).astype(np.float64)\n    _t = skltree.fit(_ds, _w, n_classes=[5], criterion=\"gini\", max_features=3, seed=_k + 1)\n_ds.release()",
+         probe="_d2 = skltree.dataset(np.array([[0.0], [1.0]], dtype=np.float32), np.array([[0.0], [1.0]]))\nassert skltree.fit(_d2, n_classes=[2], criterion=\"gini\", max_features=1, seed=1)[\"node_count\"] == 3\n_d2.release()"),
     dict(id="SK4", transport="skltree:apply", owner="decision trees (sklearn)", mode="python", s0=4_000_000, smin=400_000, smax=30_000_000,
          grow=dict(kind="scale", p=1), leak_measure="heap+external", hosts=["cli"],
          setup="import numpy as np\nfrom sagebrush import skltree\n_g = np.random.RandomState(0)\n_X = _g.rand(50000, 2).astype(np.float32)\n_d = skltree.dataset(_X, (_X[:, 0] * 3 + _X[:, 1] + _g.rand(50000))[:, None])\n_t = skltree.fit(_d, criterion=\"squared_error\", max_features=2, seed=1)\n_d.release()\nXq = _g.rand(S, 2).astype(np.float32)",
