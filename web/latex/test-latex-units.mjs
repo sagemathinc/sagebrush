@@ -1074,6 +1074,21 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
   check("input-change-rerenders", r2.stats.mode === "cold" && /\\mathbb ?\{Z\}/.test(r2.chunks.join("")), r2.stats.mode);
 }
 
+// ---- starred references, hyperref's \ref*{key} (and \pageref*, \autoref*, \nameref*, cleveref's \cref*): the same text
+// as the plain form, without a link, as pdflatex with hyperref prints this source ("Theorem 1 (Hypothesis 1)", "A: 1. C: 1.
+// D: 1*. E: ??. F: Sec."); the "*" never taken for the key, and one after the argument left as text
+{
+  const DOC = "\\documentclass{article}\n\\usepackage{amsthm,hyperref}\n\\newtheorem{theorem}{Theorem}\n\\newtheorem{hypothesis}{Hypothesis}\n\\begin{document}\n" +
+    "\\section{Sec}\\label{s}\n\\begin{hypothesis}\\label{h}A hypothesis.\\end{hypothesis}\n\\begin{theorem}[Hypothesis~\\ref*{h}]Its proof.\\end{theorem}\n" +
+    "\\begin{equation}\\label{e}x=1\\end{equation}\n" +
+    "A: \\ref*{h}. C: \\ref{h}. D: \\ref{h}*. E: \\ref*{nokey}. F: \\nameref*{s}.\n\\end{document}\n";
+  const r = new Engine().update(DOC, { cold: true }), h = r.chunks.join(""), t = h.replace(/<[^>]+>/g, "").replace(/\s+/g, " ");
+  check("ref-star-text", /Theorem 1 \(Hypothesis 1\)/.test(t) && /A: 1\. C: 1\. D: 1\*\. E: \?\?\. F: Sec\./.test(t), t.slice(t.indexOf("Theorem"), t.indexOf("Theorem") + 160));
+  const links = [...h.matchAll(/<a class="ref"[^>]*>([^<]*)<\/a>/g)].map((m) => m[1]);
+  check("ref-star-no-link", JSON.stringify(links) === JSON.stringify(["1", "1"]), links);
+  check("ref-star-no-key-star", !/\*\s*\?\?|\?\? ?h|\?\? ?e\b/.test(t) && !r.problems.some((p) => /\*/.test(p.name ?? "")), t.slice(0, 300));
+}
+
 // ---- envclose.ts (P1a): the close a "}" typed after \begin{X} adds, or none
 {
   const at = (t) => [t.replace("|", ""), t.indexOf("|")];
