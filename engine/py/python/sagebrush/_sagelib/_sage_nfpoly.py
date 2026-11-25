@@ -36,7 +36,7 @@ def _sa():
 
 
 def _call(name, **kw):
-    from sagebrush._engine import call
+    from _sagebrush_lib._engine import call
     return call(name, **kw)
 
 
@@ -854,7 +854,8 @@ class Polynomial_nf:
     def _from_engine(self, d):
         K = self._ring._base
         den = int(d["den"])
-        return Polynomial_nf(self._ring, [K([_F(int(x), den) for x in c]) for c in d["num"]])
+        # (the engine's coordinates are the field's model's, as _engine sends them: K._from_model, not K(list))
+        return Polynomial_nf(self._ring, [K._from_model([_F(int(x), den) for x in c]) for c in d["num"]])
 
     def _field_t(self):
         return [str(c) for c in self._ring._base._f]

@@ -6,6 +6,7 @@
 import { openBytes, encodeText, EDIT_MAX } from "./save.ts";
 import { imageCandidates, graphicsPathOf, notFoundWhy, relativePath, sniffImage, admitImageBytes, IMAGE_BOUNDS } from "./images.ts";
 import { splitChunk, PIECE_MAX, CHUNK_MAX, bytes, weight, tooLargeProblem } from "./split.ts";
+import { watchdog, WATCHDOG_MS, LATE_MS } from "./watchdog.ts";
 import { autoClose } from "./envclose.ts";
 import { tokenizeLine } from "./highlight.ts";
 import { latexOn, latexHereFor, desktopApp, APP_NO_RUN } from "./boot.ts";
@@ -139,6 +140,56 @@ check("split-over-2MiB-placeholder", (() => { const t = splitChunk('<div class="
   check("split-weight", weight('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') === bytes('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') - "data:abc".length && weight("src=\"data:zz\" text") === bytes("src=\"data:zz\" text"), null);
 }
 check("split-small-unchanged", splitChunk('<div class="p">hi</div>')[0] === '<div class="p">hi</div>', null);
+// (issue 623: a table float of amsldoc's, 50 KiB, was "too large (50 KiB, over 128 KiB)". KaTeX's MathML writes
+//  <mtd class ="mtr-glue"> (a space before "="), which the tag pattern didn't take as a tag: its close tags unmatched,
+//  the float wasn't one element, and that was a placeholder at any size over the 32 KiB aimed for. Now such tags are
+//  tags; a chunk that fits one piece is never a placeholder; and the size a placeholder says is over the limit it says)
+{
+  const gather = '<span class="katex-display"><math><semantics><mtable><mtr><mtd class ="mtr-glue"></mtd><mtd><mi>a</mi></mtd><mtd class ="mml-eqn-num"></mtd></mtr></mtable></semantics></math></span>';
+  const float = '<div class="float">' + Array.from({ length: 160 }, (_, k) => '<div class="p">row ' + k + " " + gather.repeat(2) + "</div>").join("") + "</div>";
+  const told = [], fp = splitChunk(float, (why, size) => told.push(tooLargeProblem(why, size, 0)));
+  check("split-katex-spaced-attributes-are-tags", bytes(float) > 32 * 1024 && bytes(float) < PIECE_MAX && told.length === 0 && fp.length > 1 && !fp.some((p) => /toolarge/.test(p)) && fp.slice(1).every((p) => p.startsWith('<div class="float cont">')), { n: bytes(float), told, pieces: fp.length });
+  // (not one element (two siblings), over the target, under the maximum: kept whole, nothing said)
+  const two = '<div class="p">' + "a ".repeat(12000) + '</div><div class="p">' + "b ".repeat(12000) + "</div>", told2 = [];
+  const tw = splitChunk(two, (why, size) => told2.push(size));
+  check("split-fits-one-piece-never-a-placeholder", bytes(two) > 32 * 1024 && bytes(two) < PIECE_MAX && tw.length === 1 && tw[0] === two && told2.length === 0, { n: bytes(two), told2, pieces: tw.length });
+  // (every placeholder's size over the limit it names)
+  const said = [];
+  for (const h of [table, huge, '<div class="p">' + "y ".repeat(CHUNK_MAX) + "</div>"]) splitChunk(h, (why, size) => said.push(tooLargeProblem(why, size, 0).name));
+  const over = said.map((s) => /\((\d+) KiB, over (\d+) KiB\)$/.exec(s)).map((m) => m && +m[1] > +m[2]);
+  check("split-placeholder-size-over-its-limit", said.length === 3 && over.every(Boolean), said);
+}
+
+// ---- watchdog.ts (issue 619): the preview's watchdog judges the worker by the page's time; a timer the page's own
+// blocking made late waits once more (LATE_MS) for a reply already queued, then the worker is hung. A fake clock: `run`
+// moves time on, firing what is due; `block` moves it on with nothing run (the main thread blocked), then fires
+{
+  const fake = () => { let t = 0, n = 0; const due = new Map();
+    const c = { now: () => t, set: (f, ms) => { const h = ++n; due.set(h, { at: t + ms, f }); return h; }, clear: (h) => due.delete(h) };
+    const fire = () => { for (;;) { const next = [...due.entries()].filter(([, d]) => d.at <= t).sort((a, b) => a[1].at - b[1].at)[0]; if (!next) return; due.delete(next[0]); next[1].f(); } };
+    return { c, run: (ms) => { const end = t + ms; for (;;) { const next = [...due.values()].filter((d) => d.at <= end).sort((a, b) => a.at - b.at)[0]; if (!next) { t = end; return; } t = next.at; fire(); } }, block: (ms) => { t += ms; fire(); }, pending: () => due.size };
+  };
+  // (on time: hung at WATCHDOG_MS, not before)
+  { const k = fake(), d = watchdog({ clock: k.c }); let hung = 0; d.start(() => hung++);
+    k.run(WATCHDOG_MS - 1); const before = hung; k.run(1);
+    check("watchdog-on-time-hung", before === 0 && hung === 1 && k.pending() === 0, { before, hung }); }
+  // (the page blocked past the due time: not hung then; a reply in the grace stops it, never hung)
+  { const k = fake(), d = watchdog({ clock: k.c }); let hung = 0; d.start(() => hung++);
+    k.block(WATCHDOG_MS + 5000); const at = hung; d.stop(); k.run(10 * LATE_MS);
+    check("watchdog-late-waits-for-a-queued-reply", at === 0 && hung === 0 && k.pending() === 0, { at, hung }); }
+  // (late, and no reply in the grace: hung after it, once)
+  { const k = fake(), d = watchdog({ clock: k.c }); let hung = 0; d.start(() => hung++);
+    k.block(WATCHDOG_MS + 5000); const at = hung; k.run(LATE_MS);
+    check("watchdog-late-then-hung", at === 0 && hung === 1 && k.pending() === 0, { at, hung }); }
+  // (one grace only: blocked again past it, hung)
+  { const k = fake(), d = watchdog({ clock: k.c }); let hung = 0; d.start(() => hung++);
+    k.block(WATCHDOG_MS + 5000); k.block(LATE_MS + 5000);
+    check("watchdog-one-grace-only", hung === 1 && k.pending() === 0, { hung }); }
+  // (a little late, within LATE_MS: on time; stop() and a new start: only the new request's)
+  { const k = fake(), d = watchdog({ clock: k.c }); let a = 0, b = 0; d.start(() => a++); k.block(WATCHDOG_MS + LATE_MS - 1);
+    d.start(() => b++); d.stop(); k.run(2 * WATCHDOG_MS);
+    check("watchdog-slightly-late-hung-and-stop", a === 1 && b === 0 && k.pending() === 0, { a, b }); }
+}
 
 // ---- highlight.ts: the tokenizer's states
 const run = (line, st) => { const g = tokenizeLine(line, st); const toks = []; for (;;) { const r = g.next(); if (r.done) return { toks, end: r.value }; toks.push(r.value); } };
@@ -712,6 +763,37 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   for (const [name, body, ok] of longs) { const h = doc("\\documentclass{article}\n\\newcounter{foo}\n", body); check(name, ok(h), h.slice(0, 700)); }
 }
 
+// ---- amsart's front matter and a bibliography with author-year labels (as an arXiv paper's): \title[short]{long} and
+// \author[short]{long} show the long form only; the labels' column as wide as its widest label; a \cite note typeset
+{
+  setKatex((src) => '<span class="KI">' + src.replace(/[&<>]/g, "") + "</span>");
+  const h = new Engine().update("\\documentclass{amsart}\n\\title[Short T]{Long title}\n\\author[N. K.]{Narasimha K}\n\\begin{document}\n\\maketitle\nSee \\cite[\\S B]{Nek12} and \\cite[p.~3, $x^2$]{BM03}.\n\\begin{thebibliography}{abcd999}\n\\bibitem[BM03]{BM03} Baba.\n\\bibitem[Nek12]{Nek12} Nekov.\n\\end{thebibliography}\n\\end{document}\n").chunks.join("");
+  check("amsart-title-short-form", h.includes("Long title") && h.includes("Narasimha K") && !h.includes("Short T") && !h.includes("N. K.") && !h.includes('class="title">[') && !h.includes('class="auth">['), h.slice(0, 600));
+  const pad = /<ol class="bib" style="padding-left:(\d+\.\d+)em">/.exec(h);
+  check("bib-label-column-widest", pad && +pad[1] >= 3.5, /<ol class="bib"[^>]*>/.exec(h)?.[0]);
+  const see = h.slice(h.indexOf("See"), h.indexOf("See") + 600);
+  check("cite-note-typeset", see.includes("Nek12</a>, §B]") && see.includes('p.\u00a03, <span class="KI">x^2</span>]') && !see.includes("\\S"), see);
+  // amsart's front matter (the arXiv paper's): every \author, an abstract written before \maketitle printed after the
+  // title, \subjclass and \keywords as the first page's notes, no date unless one is given, and each author's address and
+  // email at the end, in amsart's order whatever the source's
+  const fm = new Engine().update("\\documentclass{amsart}\n\\title{T}\n\\author[A. One]{Ann One}\n\\email{ann@x.org}\n\\address{Dept.~One}\n\\author{Bo Two}\n\\address{Dept.~Two}\n\\email{bo@y.org}\n\\keywords{forms, twists}\n\\subjclass[2010]{Primary 11F30}\n\\begin{document}\n\\begin{abstract}Abs text.\\end{abstract}\n\\maketitle\nBody.\n\\end{document}\n").chunks.join("");
+  const tb = fm.slice(fm.indexOf('<div class="titleblock">'), fm.indexOf("Body."));
+  const end = fm.slice(fm.indexOf('class="amsaddr"'));
+  check("amsart-front-matter", (tb.match(/class="auth"/g) || []).length === 2 && tb.includes("Ann One") && tb.includes("Bo Two") && tb.indexOf("Abs text.") > tb.indexOf('class="title"')
+    && (fm.match(/Abs text\./g) || []).length === 1 && tb.includes("2010 Mathematics Subject Classification.</i> Primary 11F30") && tb.includes("Key words and phrases.</i> forms, twists")
+    && !tb.includes('class="date"') && fm.indexOf('class="amsaddr"') > fm.indexOf("Body.") && end.indexOf("Dept.") < end.indexOf("ann@x.org") && end.indexOf("ann@x.org") < end.indexOf("Dept.\u00a0Two") && end.indexOf("Dept.\u00a0Two") < end.indexOf("bo@y.org"), [tb.slice(0, 500), end.slice(0, 400)]);
+  // (in the article class, TeX's own: the last \author is the author, the abstract where it is written, the date shown)
+  const ar = new Engine().update("\\documentclass{article}\n\\title{T}\n\\author{Ann One}\n\\author{Bo Two}\n\\begin{document}\n\\begin{abstract}Abs text.\\end{abstract}\n\\maketitle\nBody.\n\\end{document}\n").chunks.join("");
+  check("article-front-matter-unchanged", !ar.includes("Ann One") && ar.includes("Bo Two") && ar.indexOf("Abs text.") < ar.indexOf('class="titleblock"') && ar.includes('class="date"'), ar.slice(0, 500));
+  // (a numeric bibliography keeps the page's own column)
+  const hn = new Engine().update("\\documentclass{article}\n\\begin{document}\n\\cite{a}\n\\begin{thebibliography}{9}\n\\bibitem{a} A.\n\\end{thebibliography}\n\\end{document}\n").chunks.join("");
+  check("bib-label-column-numeric", /<ol class="bib">/.test(hn), /<ol class="bib"[^>]*>/.exec(hn)?.[0]);
+  // (the {widest} argument alone widens it: {abcd999} with numeric labels)
+  const hw = new Engine().update("\\documentclass{article}\n\\begin{document}\n\\cite{a}\n\\begin{thebibliography}{abcd999}\n\\bibitem{a} A.\n\\end{thebibliography}\n\\end{document}\n").chunks.join("");
+  const pw = /<ol class="bib" style="padding-left:(\d+\.\d+)em">/.exec(hw);
+  check("bib-label-column-widest-argument", pw && +pw[1] >= 4.5, /<ol class="bib"[^>]*>/.exec(hw)?.[0]);
+}
+
 // ---- source position markers: each main-file line is marked at most once (a resume inside an \input that a main
 // line started in the middle; the main file read again)
 {
@@ -855,12 +937,12 @@ check("off-cli-and-phone", !latexHereFor("127.0.0.1", false, SITE) && !latexHere
 check("site-unchanged", latexHereFor("sagebrush.space", false, SITE) && latexHereFor("dev.sagebrush.space", false, SITE) && !latexHereFor("sagebrush.space.evil", false, SITE), null);
 check("app-run-why", /desktop app/.test(APP_NO_RUN) && /sagebrush\.space/.test(APP_NO_RUN), APP_NO_RUN);
 // (the app self-test's LaTeX checks, web/notebook/selftest-latex.js: none outside the desktop app, so a phone's report has
-// none; in it, its three rows, named as the desktop report's judge requires them, app/selftest/android-report.py DESKTOP)
+// none; in it, its four rows, named as the desktop report's judge requires them, app/selftest/android-report.py DESKTOP)
 const judgeNames = [...(/DESKTOP = \[([\s\S]*?)\]/.exec(readFileSync(new URL("../../app/selftest/android-report.py", import.meta.url), "utf8"))?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]);
 check("selftest-latex-phone-none", (await latexChecks({ desktop: false, on: true, menu: null, ws: null })).length === 0 && (await latexChecks({ on: true, menu: null, ws: null })).length === 0, null);
 const deskRows = await latexChecks({ desktop: true, on: false, menu: null, ws: null });
-check("selftest-latex-desktop-rows", deskRows.length === 3 && deskRows.every((r, i) => r[0] === LATEX_CHECKS[i] && r[1] === false), deskRows);
-check("selftest-latex-names-are-the-judge's", judgeNames.length === 3 && JSON.stringify(judgeNames) === JSON.stringify(LATEX_CHECKS), judgeNames);
+check("selftest-latex-desktop-rows", deskRows.length === 4 && deskRows.every((r, i) => r[0] === LATEX_CHECKS[i] && r[1] === false), deskRows);
+check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.stringify(judgeNames) === JSON.stringify(LATEX_CHECKS), judgeNames);
 
 // ---- the examples (the corpus's, scripts/latex-examples.mjs; William, Oct 29: "good tests to illustrate the breadth of editor support"): each one
 // rendered by the pipeline the page uses, and its result recorded (one line each): it renders (outcome ok), with no
@@ -873,7 +955,7 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 3 && JSON.st
     article: ["Sums of Squares", "Contents", "Theorem", "Proof"], beamer: ["A Short Talk", "Overlays", "Two columns", "A math slide"],
     sagetex: ["In this preview", "sagebrush latex run"], pythontex: ["In this preview", "Python item 2: not run"],
     matlab: ["MATLAB in LaTeX", "eig(A)"], figure: ["Figure 1", "The function"], cv: ["Ada Example", "Education", "Publications"],
-    tikz: ["not rendered in this prototype"], bibliography: ["[1]", "Diamond"], homework: ["Homework 3", "(10 points)"],
+    tikz: ["[tikzpicture: the axis environment", "[tikzpicture: a node on a path"], bibliography: ["[1]", "Diamond"], homework: ["Homework 3", "(10 points)"],
   };
   const record = [];
   for (const ex of EXAMPLES) {
@@ -992,6 +1074,120 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 3 && JSON.st
   check("input-change-rerenders", r2.stats.mode === "cold" && /\\mathbb ?\{Z\}/.test(r2.chunks.join("")), r2.stats.mode);
 }
 
+// ---- an accent before a font command with its argument, unbraced: $\bar\F_q$ with \newcommand{\F}{\mathbb F} (TeX
+// takes the macro as \bar's one-token argument; the preview has expanded it), and $\bar\mathbb F_q$ written out (plain
+// LaTeX takes it; amsmath refuses it): typeset as TeX reads them, \bar{\mathbb{F}}, where KaTeX alone refuses them. A
+// font command as the argument brings its own (\mathbf\mathit x), and the pairs inside an argument are braced too
+// (\bar\mathrm{\hat\mathcal O}), at most ACCENT_NEST deep; a source TeX would refuse is left as written
+{
+  const { braceAccentFonts, ACCENT_NEST } = await import("./engine/render.mjs");
+  const cases = [["\\bar\\mathbb F_q", "\\bar{\\mathbb{F}}_q"], ["\\hat\\mathcal O", "\\hat{\\mathcal{O}}"], ["\\tilde\\mathrm{x}", "\\tilde{\\mathrm{x}}"],
+    ["x\\in \\bar \\mathbb F_g^\\times", "x\\in \\bar{\\mathbb{F}}_g^\\times"], ["\\overline\\mathbb{Q}", "\\overline{\\mathbb{Q}}"], ["\\bar\\mathbf\\alpha", "\\bar{\\mathbf{\\alpha}}"],
+    ["\\bar\\mathbb F\\hat\\mathcal O", "\\bar{\\mathbb{F}}\\hat{\\mathcal{O}}"], ["\\vec\\boldsymbol v", "\\vec{\\boldsymbol{v}}"],
+    ["\\bar\\mathrm{\\hat\\mathcal O}", "\\bar{\\mathrm{\\hat{\\mathcal{O}}}}"], ["\\bar\\mathbf\\mathit x", "\\bar{\\mathbf{\\mathit{x}}}"], ["\\bar\\mathbf\\mathit\\mathrm{y}", "\\bar{\\mathbf{\\mathit{\\mathrm{y}}}}"],
+    ["x^{\\hat\\mathcal O_K}", "x^{\\hat{\\mathcal{O}}_K}"],
+    ["\\bar{\\mathbb F}_q", "\\bar{\\mathbb F}_q"], ["\\barx\\mathbb F", "\\barx\\mathbb F"], ["\\bar\\mathbbx F", "\\bar\\mathbbx F"], ["\\bar\\mathbb", "\\bar\\mathbb"],
+    ["\\bar\\mathbb{F", "\\bar\\mathbb{F"], ["\\bar\\mathbb ^2", "\\bar\\mathbb ^2"], ["\\bar\\mathbb{\\{F\\}}", "\\bar{\\mathbb{\\{F\\}}}"], ["\\bar\\mathbb{\\{}x", "\\bar{\\mathbb{\\{}}x"], ["a+b", "a+b"]];
+  const bad = cases.filter(([a, b]) => braceAccentFonts(a) !== b).map(([a, b]) => [a, b, braceAccentFonts(a)]);
+  check("accent-font-braced", bad.length === 0, bad);
+  // (deeper than ACCENT_NEST: left as written past it, in a bounded time, never a thrown stack overflow)
+  const deep = "\\bar\\mathrm{".repeat(5000) + "x" + "}".repeat(5000);
+  const t0 = performance.now(); let deepOk = true, dr = "";
+  try { dr = braceAccentFonts(deep); } catch { deepOk = false; }
+  check("accent-font-depth-bound", deepOk && performance.now() - t0 < 1000 && (dr.match(/\\bar\{/g) || []).length === ACCENT_NEST + 1, { ok: deepOk, n: (dr.match(/\\bar\{/g) || []).length });
+  // (in the preview, with the real KaTeX for these rows: each drawn as its fully braced form is, no error, no problem
+  //  for check; the stub put back after)
+  const { default: katex } = await import("katex");
+  setKatex((src, o) => katex.renderToString(src, o));
+  try {
+    const drawn = (h) => [...h.matchAll(/<span class="katex-html"[\s\S]*?<\/span><\/span><\/span>/g)].map((m) => m[0]).join("|");
+    const one = (m, pre = "") => { const r = new Engine().update("\\documentclass{article}\n\\usepackage{amssymb}\n" + pre + "\\begin{document}\n$" + m + "$\n\\end{document}\n", { cold: true }); const h = r.chunks.join(""); return { d: drawn(h), err: /katex-error/.test(h), p: r.problems }; };
+    const pairs = cases.slice(0, 12).map(([a, b]) => [a, one(a), one(b)]);
+    pairs.push(["\\bar\\F_q (a macro)", one("\\bar\\F_q", "\\newcommand{\\F}{\\mathbb F}\n"), one("\\bar{\\mathbb{F}}_q")]);
+    const off = pairs.filter(([, x, y]) => !x.d || x.d !== y.d || x.err || y.err || x.p.some((p) => p.kind === "math")).map(([a, x, y]) => [a, x.err, y.err, x.d.slice(0, 60), y.d.slice(0, 60)]);
+    check("accent-font-typeset", off.length === 0, off);
+  } finally { setKatex((src) => src); }
+}
+
+// ---- enumitem's options on a list: label= (with \arabic*, \alph*, \Alph*, \roman*, \Roman*), ref= and start= read,
+// the rest (spacing, nosep) accepted; none of it shown as text; each item's label, and what \ref gives, as pdflatex
+// with enumitem gives them for this source (checked): (i), (C6), "A" by ref=, a)a under a list of enumitem's label
+{
+  const DOC = "\\documentclass{article}\n\\usepackage{enumitem}\n\\begin{document}\n" +
+    "\\begin{enumerate}[label=\\textup{(\\roman*)},leftmargin=*]\n\\item\\label{a1} A1.\n\\item\\label{a2} A2.\n\\end{enumerate}\n" +
+    "\\begin{enumerate}[label=(C\\arabic*),start=6,leftmargin=*]\n\\item\\label{c6} C6.\n\\item\\label{c7} C7.\n\\end{enumerate}\n" +
+    "\\begin{enumerate}[label=\\Alph*.,ref=\\Alph*]\n\\item\\label{b1} B1.\n\\end{enumerate}\n" +
+    "\\begin{enumerate}[label=\\Roman*)]\n\\item R1.\n\\item R2.\n\\end{enumerate}\n" +
+    "\\begin{enumerate}[label=\\alph*),nosep]\n\\item\\label{n1} N1.\n  \\begin{enumerate}\n  \\item\\label{n1a} N1a.\n  \\end{enumerate}\n\\end{enumerate}\n" +
+    "\\begin{enumerate}[nosep]\n\\item\\label{p1} P1.\n\\end{enumerate}\n" +
+    "\\begin{itemize}[label=--]\n\\item Dash.\n\\end{itemize}\n" +
+    "\\begin{enumerate}[label=\\textbf{Step \\arabic*.}]\n\\item\\label{s1} S1.\n\\end{enumerate}\n" +
+    "Refs: \\ref{a1}, \\ref{a2}, \\ref{c6}, \\ref{c7}, \\ref{b1}, \\ref{n1}, \\ref{n1a}, \\ref{p1}, \\ref{s1}.\n\\end{document}\n";
+  const r = new Engine().update(DOC, { cold: true }), h = r.chunks.join("");
+  const lbls = [...h.matchAll(/<span class="lbl">([\s\S]*?)<\/span>/g)].map((m) => m[1].replace(/<[^>]+>/g, ""));
+  check("enumitem-labels", JSON.stringify(lbls) === JSON.stringify(["(i)", "(ii)", "(C6)", "(C7)", "A.", "I)", "II)", "a)", "(a)", "1.", "–", "Step 1."]), lbls);
+  check("enumitem-bold-label", /<span class="lbl"><b>Step 1\.<\/b><\/span>/.test(h), h.slice(h.indexOf("Step"), h.indexOf("Step") + 80));
+  const refs = h.replace(/<[^>]+>/g, "").match(/Refs: [^\n]*/)?.[0].replace(/\s+/g, " ");
+  check("enumitem-refs", refs === "Refs: (i), (ii), (C6), (C7), A, a), a)a, 1, Step 1..", refs);
+  check("enumitem-options-not-shown", !/label=|leftmargin|nosep|start=/.test(h.replace(/<[^>]+>/g, "")) && !/class="unk"/.test(h) && !r.problems.some((p) => p.kind === "command"), r.problems.slice(0, 4));
+  // (references four levels deep, as LaTeX composes them, \p@enumN\theenumN, with enumitem's \theenum: under label=
+  //  and under ref=, a custom level between, and plain; the expected line is pdflatex's for this source, two passes)
+  const DEEP = "\\documentclass{article}\n\\usepackage{enumitem}\n\\begin{document}\n\\begin{enumerate}[label=T\\arabic*)]\n\\item\\label{t1} a\n \\begin{enumerate}\n \\item\\label{t2} b\n  \\begin{enumerate}\n  \\item\\label{t3} c\n   \\begin{enumerate}\n   \\item\\label{t4} d\n   \\end{enumerate}\n  \\end{enumerate}\n \\end{enumerate}\n\\end{enumerate}\n\\begin{enumerate}[ref=Q\\arabic*]\n\\item\\label{q1} a\n \\begin{enumerate}\n \\item\\label{q2} b\n  \\begin{enumerate}\n  \\item\\label{q3} c\n   \\begin{enumerate}\n   \\item\\label{q4} d\n   \\end{enumerate}\n  \\end{enumerate}\n \\end{enumerate}\n\\end{enumerate}\n\\begin{enumerate}[label=T\\arabic*)]\n\\item\\label{m1} a\n \\begin{enumerate}[label=S\\alph*)]\n \\item\\label{m2} b\n  \\begin{enumerate}\n  \\item\\label{m3} c\n  \\end{enumerate}\n \\end{enumerate}\n\\end{enumerate}\n\\begin{enumerate}\n\\item\\label{p1} a\n \\begin{enumerate}\n \\item\\label{p2} b\n  \\begin{enumerate}\n  \\item\\label{p3} c\n   \\begin{enumerate}\n   \\item\\label{p4} d\n   \\end{enumerate}\n  \\end{enumerate}\n \\end{enumerate}\n\\end{enumerate}\nRefs: \\ref{t1}; \\ref{t2}; \\ref{t3}; \\ref{t4}; \\ref{q1}; \\ref{q2}; \\ref{q3}; \\ref{q4}; \\ref{m1}; \\ref{m2}; \\ref{m3}; \\ref{p1}; \\ref{p2}; \\ref{p3}; \\ref{p4}.\n\\end{document}\n";
+  const deep = new Engine().update(DEEP, { cold: true }).chunks.join("").replace(/<[^>]+>/g, "").match(/Refs: [^\n]*/)?.[0].replace(/\s+/g, " ").trim();
+  check("enumitem-refs-deep", deep === "Refs: T1); T1)a; T1)(a)i; T1)(a)iA; Q1; Q1a; Q1(a)i; Q1(a)iA; T1); Sa); T1)(Sa))i; 1; 1a; 1(a)i; 1(a)iA.", deep);
+  // (an optional argument that isn't enumitem's (the enumerate package's [(a)] and [i] shorthands): as before, shown; a
+  //  start= that isn't a number: the list starts at 1)
+  const r2 = new Engine().update("\\documentclass{article}\n\\begin{document}\n\\begin{enumerate}[(a)]\n\\item X.\n\\end{enumerate}\n\\begin{enumerate}[i]\n\\item I.\n\\end{enumerate}\n\\begin{enumerate}[start=x]\n\\item Y.\n\\end{enumerate}\n\\end{document}\n", { cold: true }).chunks.join("");
+  const l2 = [...r2.matchAll(/<span class="lbl">([\s\S]*?)<\/span>/g)].map((m) => m[1]), t2 = r2.replace(/<[^>]+>/g, "");
+  check("enumitem-not-its-own", /\[\(a\)\]/.test(t2) && /\[i\]/.test(t2) && JSON.stringify(l2) === JSON.stringify(["1.", "1.", "1."]), { l2, t: t2.replace(/\s+/g, " ").slice(0, 200) });
+}
+
+// ---- \bibliography{refs} reads \jobname.bbl, the thebibliography BibTeX wrote beside the .tex (inputs.ts jobname, the
+// expander's \bibliography): the references listed and each \cite resolved; without one, or before the host has read
+// it, the placeholder as before, and the host asked for it. natbib's numbers, sort&compress and \citet as TeX Live's
+// natbib sets them (checked against pdflatex): [3, 1]; [1, 3], [1, 2], [1–3]; "Ann [1]"; a note inside the brackets.
+// \newblock is a space, \penalty0 is dropped (plainnat writes both; TeX prints "156:\penalty0 2399" as "156:2399")
+{
+  const { engineInputs } = await import("./inputs.ts");
+  const BBL = "\\begin{thebibliography}{1}\n\\providecommand{\\natexlab}[1]{#1}\n\\providecommand{\\url}[1]{\\texttt{#1}}\n\\expandafter\\ifx\\csname urlstyle\\endcsname\\relax\n  \\providecommand{\\doi}[1]{doi: #1}\\else\n  \\providecommand{\\doi}{doi: \\begingroup \\urlstyle{rm}\\Url}\\fi\n\n\\bibitem[Knuth(1984)]{knuth84}\nDonald~E. Knuth.\n\\newblock \\emph{The {\\TeX}book}.\n\\newblock Addison-Wesley, 1984, 1:\\penalty0 2--3.\n\n\\end{thebibliography}\n";
+  const DOC = "\\documentclass{article}\n\\usepackage[numbers]{natbib}\n\\begin{document}\nAs shown in \\cite{knuth84}.\n\\bibliographystyle{plainnat}\n\\bibliography{refs}\n\\end{document}\n";
+  const run = (known, docPath = "/ex/paper.tex") => { const ei = engineInputs(docPath, known); return new Engine().update(DOC, { cold: true, inputs: { files: ei.files, resolve: ei.resolve, jobname: ei.jobname, version: 1 } }); };
+  const plain = (h) => h.replace(/<span class="katex-mathml">[\s\S]*?<\/span>/g, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ");
+  const r = run(new Map([["/ex/paper.bbl", { text: BBL }]]));
+  const h = r.chunks.join(""), t = plain(h);
+  check("bbl-read", /As shown in \[1\]\./.test(t) && /References/.test(t) && /\[1\] Donald E\. Knuth\. The TeXbook\. Addison-Wesley, 1984, 1:2–3\./.test(t) && !/BibTeX is not run/.test(h) && !/newblock|penalty/.test(h), t.slice(0, 500));
+  check("bbl-cite-links", /<a href="#bib-1">1<\/a>/.test(h) && /<li id="bib-1"/.test(h), h.slice(0, 600));
+  check("bbl-asked", r.inputRefs.includes("paper.bbl"), r.inputRefs);
+  check("bbl-jobname", engineInputs("/ex/My Paper.tex", new Map()).jobname === "My Paper" && engineInputs("/a/b/c.TEX", new Map()).jobname === "c" && engineInputs("/a/notes", new Map()).jobname === "notes", null);
+  // (none beside it, or not read yet: the placeholder, as before; the host still asked)
+  for (const [nm, known] of [["absent", new Map([["/ex/paper.bbl", { absent: true }]])], ["unread", new Map()]]) {
+    const r0 = run(known), h0 = r0.chunks.join("");
+    check("bbl-none-" + nm, /\[bibliography from refs\.bib: BibTeX is not run/.test(h0) && r0.inputRefs.includes("paper.bbl") && /class="missing">knuth84</.test(h0) && !r0.problems.some((p) => p.kind === "input"), plain(h0).slice(0, 300));
+  }
+  // (\jobname.bbl by its exact name, as pdflatex reads it: a paper.bbl.tex beside it is never read instead, nor alone;
+  //  the host is asked for paper.bbl only)
+  const SHADOW = "\\begin{thebibliography}{1}\n\\bibitem{knuth84} SHADOW_TEX.\n\\end{thebibliography}\n";
+  const both = run(new Map([["/ex/paper.bbl.tex", { text: SHADOW }], ["/ex/paper.bbl", { text: BBL }]])), hb = both.chunks.join("");
+  check("bbl-exact-both", /Donald E\. Knuth/.test(plain(hb)) && !/SHADOW_TEX/.test(hb), plain(hb).slice(0, 300));
+  const only = run(new Map([["/ex/paper.bbl.tex", { text: SHADOW }], ["/ex/paper.bbl", { absent: true }]])), ho = only.chunks.join("");
+  check("bbl-exact-only-tex", /BibTeX is not run/.test(ho) && !/SHADOW_TEX/.test(ho), plain(ho).slice(0, 300));
+  const e0 = engineInputs("/ex/paper.tex", new Map()), eTop = engineInputs("/paper.tex", new Map());
+  check("bbl-exact-wanted", JSON.stringify(e0.wanted(["paper.bbl"])) === JSON.stringify(["/ex/paper.bbl"]) && JSON.stringify(eTop.wanted(["paper.bbl"])) === JSON.stringify(["/paper.bbl"]) && e0.resolve("paper.bbl").why === "not read yet" && JSON.stringify(e0.wanted(["other.bbl"])) === JSON.stringify(["/ex/other.bbl.tex"]), [e0.wanted(["paper.bbl"]), eTop.wanted(["paper.bbl"]), e0.wanted(["other.bbl"])]);
+  // (another document's .bbl is not this one's: \jobname is the .tex's own name)
+  const rOther = run(new Map([["/ex/other.bbl", { text: BBL }], ["/ex/paper.bbl", { absent: true }]]));
+  check("bbl-own-jobname", /BibTeX is not run/.test(rOther.chunks.join("")), null);
+  // (no host inputs at all, as before)
+  check("bbl-no-host", /BibTeX is not run/.test(new Engine().update(DOC, { cold: true }).chunks.join("")), null);
+  // natbib, against pdflatex's output for the same source
+  const NAT = (opts) => "\\documentclass{article}\n\\usepackage[" + opts + "]{natbib}\n\\begin{document}\nA \\cite{c,a}. B \\cite{a,b}. C \\cite{a,b,c}. D \\cite{d,a,b,c}. E \\cite[Thm.~2]{a}. F \\citep{a,c}. G \\citet{a}.\n\\begin{thebibliography}{9}\n\\bibitem[Ann(2001)]{a} A.\n\\bibitem[Bob(2002)]{b} B.\n\\bibitem[Cat(2003)]{c} C.\n\\bibitem[Dan(2004)]{d} D.\n\\end{thebibliography}\n\\end{document}\n";
+  const nt = (opts) => plain(new Engine().update(NAT(opts), { cold: true }).chunks.join("")).replace(/\[\s*/g, "[").replace(/\s*\]/g, "]").replace(/\s*,\s*/g, ", ").replace(/\s*–\s*/g, "–");
+  const sc = nt("numbers,sort&compress"), nu = nt("numbers");
+  check("natbib-sort-compress", sc.includes("A [1, 3]. B [1, 2]. C [1–3]. D [1–4]. E [1, Thm. 2]. F [1, 3]. G Ann [1].") && /\[1\] ?A\. ?\[2\] ?B\./.test(sc), sc.slice(0, 200));
+  check("natbib-numbers", nu.includes("A [3, 1]. B [1, 2]. C [1, 2, 3]. D [4, 1, 2, 3]. E [1, Thm. 2]. F [1, 3]. G Ann [1]."), nu.slice(0, 200));
+  // (without natbib's numbers, a \bibitem's own label, as before)
+  check("natbib-labels-kept", /\[Ann\(2001\)\]/.test(plain(new Engine().update(NAT("sort").replace("\\usepackage[sort]{natbib}", ""), { cold: true }).chunks.join(""))), null);
+}
+
 // ---- envclose.ts (P1a): the close a "}" typed after \begin{X} adds, or none
 {
   const at = (t) => [t.replace("|", ""), t.indexOf("|")];
@@ -1080,6 +1276,37 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 3 && JSON.st
   const pct = its(sd("$\\sage{7 % 3}$\n\n$\\sage{1}$"));
   const mac = its(sd("$\\x$", "\\newcommand{\\x}{\\sage{1+\\foo}}\n"));
   check("sagetex-source-args-comment-and-macro-keep-the-subset", pct[0].err === "par" && pct[1].code === "1" && eq(mac, [{ mode: "sage", err: "cs", name: "foo" }]), { pct, mac });
+}
+
+// ---- amsthm's \qedhere (issue 1800): in a proof, the end-of-proof symbol where it is, and not again at the proof's end:
+// in a display, KaTeX's tag on the very row it is in (an align*'s first row, or its last, as amsthm places it); in a
+// list item or the text, there; never sent to KaTeX (no math problem); a numbered display can't take it (said, the
+// symbol at the proof's end); outside a proof, nothing. A proof without it: the symbol at its end, as before
+{
+  const doc = (body) => "\\documentclass{article}\n\\usepackage{amsthm}\n\\begin{document}\n" + body + "\n\\end{document}\n";
+  const run = (body) => { const r = new Engine().update(doc(body)); return { h: r.chunks.join(""), problems: r.problems || [] }; };
+  // (KaTeX's visible HTML only: its MathML, for screen readers, holds the symbol again)
+  const seen = (h) => h.replace(/<span class="katex-mathml">[\s\S]*?<\/math><\/span>/g, "");
+  const qeds = (h) => (h.match(/class="qed"/g) || []).length, tags = (h) => (seen(h).match(/\u25a0/g) || []).length;
+  // (the tag's row: the vertical offset KaTeX gives the tag column's entry holding the symbol)
+  const rowTop = (h0) => { const h = seen(h0), i = h.indexOf("\u25a0"); const t = [...h.slice(Math.max(0, i - 400), i).matchAll(/top:(-?[\d.]+)em/g)]; return t.length ? +t[t.length - 1][1] : null; };
+  const noMath = (r) => !r.problems.some((p) => p.kind === "math" || p.kind === "command") && !/katex-error|qedhere/.test(r.h);
+  const disp = run("\\begin{proof}\nIt follows that\n\\[ a = b. \\qedhere \\]\n\\end{proof}");
+  check("qedhere-display", tags(disp.h) === 1 && qeds(disp.h) === 0 && /<div class="dmath">[\s\S]*\u25a0/.test(disp.h) && noMath(disp), { tags: tags(disp.h), qeds: qeds(disp.h), problems: disp.problems });
+  const rows = (k) => run("\\begin{proof}\n\\begin{align*} a&=b" + (k === 0 ? " \\qedhere" : "") + " \\\\ c&=d \\\\ e&=f" + (k === 2 ? " \\qedhere" : "") + " \\end{align*}\n\\end{proof}");
+  const r0 = rows(0), r2 = rows(2);
+  check("qedhere-align-its-own-row", tags(r0.h) === 1 && tags(r2.h) === 1 && qeds(r0.h) + qeds(r2.h) === 0 && rowTop(r0.h) !== null && rowTop(r2.h) !== null && rowTop(r0.h) < rowTop(r2.h) - 1 && noMath(r0) && noMath(r2), { first: rowTop(r0.h), last: rowTop(r2.h) });
+  const num = run("\\begin{proof}\n\\begin{align} a&=b \\\\ c&=d \\qedhere \\end{align}\n\\end{proof}");
+  check("qedhere-numbered-display-said", tags(num.h) === 0 && qeds(num.h) === 1 && num.problems.some((p) => p.kind === "not-rendered" && /qedhere in a numbered display/.test(p.name)) && !/katex-error|qedhere/.test(num.h), { problems: num.problems });
+  const list = run("\\begin{proof}\n\\begin{enumerate}\n\\item one\n\\item two \\qedhere\n\\end{enumerate}\n\\end{proof}");
+  const li = list.h.lastIndexOf("<li"), q = list.h.indexOf('class="qed"');
+  check("qedhere-list", qeds(list.h) === 1 && q > li && q < list.h.lastIndexOf("</li>") + 5 && !list.problems.some((p) => p.kind === "command"), { qeds: qeds(list.h), problems: list.problems });
+  const plain = run("\\begin{proof}\nTrivial.\n\\end{proof}");
+  check("qedhere-none-symbol-at-end", qeds(plain.h) === 1 && /Trivial\.[\s\S]*class="qed"/.test(plain.h), qeds(plain.h));
+  const outside = run("Not a proof \\qedhere.\n\\[ x \\qedhere \\]");
+  check("qedhere-outside-a-proof-nothing", qeds(outside.h) + tags(outside.h) === 0 && noMath(outside), { problems: outside.problems });
+  const two = run("\\begin{proof}\n\\[ a \\qedhere \\]\n\\end{proof}\n\\begin{proof}\nAgain.\n\\end{proof}");
+  check("qedhere-each-proof-its-own", tags(two.h) === 1 && qeds(two.h) === 1, { tags: tags(two.h), qeds: qeds(two.h) });
 }
 
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);
