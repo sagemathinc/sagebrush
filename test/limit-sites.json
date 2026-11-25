@@ -16488,5 +16488,15 @@
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'MAX' in MAX_DENSE_SOLVE, the existing switch between the dense and sparse routes this docstring names; the triangular route admits its need by the ledger's guard"
+ },
+ "lib/_matlab_sparse.py :: _big_triangular :: \"\"\"the triangular route of mldivide above MAX_DENSE_SOLVE, offered by _matlab_lu.solve for every triangular A once #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'MAX' in MAX_DENSE_SOLVE, the existing switch between the dense and sparse routes this docstring names; the triangular route's need is admitted or refused by the ledger's guard"
+ },
+ "lib/_matlab_sparse.py :: big_triangular_need :: \"\"\"the bytes the triangular route above MAX_DENSE_SOLVE holds at once, from its choice to its result, and every #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'MAX' in MAX_DENSE_SOLVE, the existing switch between the dense and sparse routes this docstring names; the triangular route's need is admitted or refused by the ledger's guard"
  }
 }

@@ -76,5 +76,5 @@ test("routes, meter, admission and kernel bounds (test/matlab_sparse_triangular_
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const lines = r.stdout.trim().split("\n");
   assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
-  assert.equal(lines.length, 8, r.stdout);
+  assert.equal(lines.length, 10, r.stdout);
 });

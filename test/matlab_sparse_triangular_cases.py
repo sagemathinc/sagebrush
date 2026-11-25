@@ -137,81 +137,270 @@ assert wt.used == k * offdiag and wt.used < wb.used, (wt.used, k * offdiag, wb.u
 pins.append((n, "upper ku4 holes+zero", k, wt.used, wb.used))
 ok("meter: k units per off-diagonal, never more than the band route's (%s)" % "; ".join("%d %s k%d: %d <= %d" % p for p in pins))
 
-# 3. the small route's need: exact admits the triangular route, one byte short leaves the dense route (which, needing
-# far more, refuses as it did before)
+# 3. the small route's need: exact admits the triangular route, as does any larger guard; one byte short refuses with
+# the out-of-memory error naming this triangular solve and its need, the dense route (needing far more) never tried
 n, k = 1000, 300
 S = bidiagonal(n)
 Bk = M._unmat(np.ones((n, k)))
 need, largest = sp.small_triangular_need(n, k, False, False, False)
 assert need > sp.SMALL_NEED, need
-stand_in(need)
-x, routes = solve(S, Bk)
-assert routes == ["triangular"], routes
+for guard in (need, 1 << 40):
+    stand_in(guard)
+    x, routes = solve(S, Bk)
+    assert routes == ["triangular"], (guard, routes)
 stand_in(need - 1)
-L._routes = []
-assert nomem(lambda: B["mldivide"].call(1, [S, Bk]))
-assert "triangular" not in (L._routes or []), L._routes
-L._routes = None
-# (and the decision comes before any discovery: one byte short, the bandwidths are never read)
-saved_bw = sp.bandwidths
-
-
-def no_discovery(*a, **kw):
-    raise AssertionError("bandwidths read before the triangular need was admitted")
-
-
-sp.bandwidths = no_discovery
+L._routes, LG._recorder = [], []
 try:
-    stand_in(need - 1)
-    assert nomem(lambda: B["mldivide"].call(1, [S, Bk]))
+    B["mldivide"].call(1, [S, Bk])
+    assert False, "admitted one byte short"
+except MemoryError as e:
+    msg = str(e)
+    assert M._identifier(e) == "MATLAB:nomem", M._identifier(e)
 finally:
-    sp.bandwidths = saved_bw
-ok("small route: its exact need (%d bytes) admits it; one byte short leaves the old dense route, which refuses" % need)
+    routes, L._routes = L._routes, None
+    rec, LG._recorder = LG._recorder, None
+tags = [r[3] for r in rec if r[0] == "reserve"]
+assert tags == ["triangular"] and routes == [], (tags, routes)
+assert "triangular system" in msg, msg
+ok("small route: its exact need (%d bytes) and any larger guard admit it; one byte short refuses naming it, the dense "
+   "route never tried" % need)
 
-# 3b. no earlier refusal: a sparse b of many columns, where the triangular route needs more than the dense route; a
-# host between the two runs the dense route, which succeeds as it did before
+# 3b. the choice by shape: a sparse b of many columns, where the triangular route needs more than the dense route,
+# takes the dense route at every guard (a host between the two needs answers, as before), and a full b of the same
+# shape, needing less, the triangular route at every guard
 n, k = 20, 20000
 S = bidiagonal(n)
 Bs = sp.from_full(M._unmat(np.eye(n)[:, [i % n for i in range(k)]]))
 tri_need = sp.small_triangular_need(n, k, False, False, True)[0]
 dense_need = (sp.DENSE_A_COPIES * n * n + sp.DENSE_B_COPIES * n * k) * 8 + 3 * sp.E * 8 * 2
 assert dense_need < tri_need, (dense_need, tri_need)
-stand_in(dense_need)
-x, routes = solve(S, Bs)
-assert "triangular" not in routes and M._dims(x) == (n, k), routes
-ok("no earlier refusal: a host of the dense route's need (%d) below the triangular need (%d) runs the dense route" % (dense_need, tri_need))
+for guard in (dense_need, 1 << 40):
+    stand_in(guard)
+    x, routes = solve(S, Bs)
+    assert "triangular" not in routes and M._dims(x) == (n, k), (guard, routes)
+Bf = sp.full(Bs)
+assert sp.small_triangular_need(n, k, False, False, False)[0] <= (sp.DENSE_A_COPIES * n * n + sp.DENSE_B_COPIES * n * k) * 8
+for guard in (dense_need, 1 << 40):
+    stand_in(guard)
+    x, routes = solve(S, Bf)
+    assert routes == ["triangular"], (guard, routes)
+ok("the small route by shape: a sparse b whose triangular need (%d) passes the dense route's (%d) runs the dense route "
+   "at that guard and at a large one; the full b of the same shape the triangular route at both" % (tri_need, dense_need))
 
-# 4. no earlier refusal above n = 4000: the band need admitted and the triangular need too large leaves the band; the
-# counterexample (upper bidiagonal, n = 100000, k = 1) fits the triangular route at the band route's own need
+# 4. above n = 4000: a triangular system takes the triangular route once its bandwidths are known, where its whole
+# need (big_triangular_need: the caller's copy of b, X, the result and its conversions) is at most the least need of
+# the routes it replaces (the band's m_band, the ordering's that the LU needs first), by those formulas alone, never
+# by the ledger's guard: the same route, and the same units, on every host.  The guard only admits its need (reserved
+# until the result is made) or refuses it, and a refusal is one the old routes give too
+def m_band_of(S, k, cplx):
+    kl, ku = sp.bandwidths(S)
+    nb = L.band_need(S.n, kl, ku, k, cplx)
+    return None if nb is None else nb["persistent"] + max(nb["setup"], nb["step"])
+
+
+def bound_of(S, k, cplx):
+    mb = m_band_of(S, k, cplx)
+    o = L.ordering_need(S)[0]
+    return o if mb is None else min(mb, o)
+
+
+def run(S, b, guard):
+    """S \\ b at a guard: (routes, lu_work units, the triangular reservation's bytes or None, the result)"""
+    stand_in(guard)
+    LG._recorder = []
+    W = L.Work
+    used = []
+
+    class Spy(W):
+        def __init__(self, *a, **kw):
+            W.__init__(self, *a, **kw)
+            used.append(self)
+    L.Work = Spy
+    try:
+        x, routes = solve(S, b)
+    finally:
+        L.Work = W
+        rec, LG._recorder = LG._recorder, None
+    tri = [r[2] for r in rec if r[0] == "reserve" and r[3] == "triangular"]
+    return routes, sum(w.used for w in used), (tri[0] if tri else None), x
+
+
 n = 100000
 S = bidiagonal(n, False)
-b1 = col(np.ones(n))
-kl, ku = sp.bandwidths(S)
-nb = L.band_need(n, kl, ku, 1, False)
-band_total = nb["persistent"] + max(nb["setup"], nb["step"])
-tri = L.triangular_need(n, 1, False, 8)
-assert tri < band_total, (tri, band_total)
-stand_in(band_total)
-x, routes = solve(S, b1)
-assert routes == ["triangular"], routes
-saved = L.triangular_need
-L.triangular_need = lambda *a: band_total + 1
+b1 = col(np.arange(1.0, n + 1))
+mb = m_band_of(S, 1, False)
+need = sp.big_triangular_need(n, 1, False, False, False)[0]
+assert need <= bound_of(S, 1, False) == mb, (need, mb)
+r_big = run(S, b1, 1 << 40)
+r_exact = run(S, b1, need)
+assert r_big[0] == r_exact[0] == ["triangular"], (r_big[0], r_exact[0])
+assert r_big[1] == r_exact[1], (r_big[1], r_exact[1])
+assert r_big[2] == r_exact[2] == need, (r_big[2], need)
+# (one byte short: the out-of-memory error, no other route tried; without the triangular route, refused too)
+stand_in(need - 1)
+LG._recorder = []
+L._routes = []
 try:
-    x, routes = solve(S, b1)
-    assert routes == ["band"], routes
+    assert nomem(lambda: B["mldivide"].call(1, [S, b1]))
 finally:
-    L.triangular_need = saved
-ok("big route: at the band's own need (%d bytes) the triangular route (%d) runs; a larger one leaves the band" % (band_total, tri))
+    routes, L._routes = L._routes, None
+    rec, LG._recorder = LG._recorder, None
+tags = [r[3] for r in rec if r[0] == "reserve"]
+assert routes == [] and tags == ["discovery", "triangular"], (routes, tags)
+L._routes = []
+try:
+    L.solve(S, M._mat(b1), "t", tri=None)
+    assert False, "admitted"
+except MemoryError:
+    pass
+finally:
+    L._routes = None
+# (the whole need by hand at n = 100000, k = 1: b's copy and the result, each with its header; with A complex, b's
+# real copy, X its complex copy, the result and _box's real copy; with a sparse b, from_full's arrays on top)
+H = sp.C_HDR
+assert need == 2 * (8 * n + H), need
+assert sp.big_triangular_need(n, 1, True, False, False)[0] == (8 + 16 + 16 + 8) * n + 4 * H
+assert sp.big_triangular_need(n, 1, False, False, True)[0] == 2 * (8 * n + H) + 4 * 8 * n + 3 * 8 * n + 3 * 2 * 8 + 10 * H
+# (the reservation held until the result is made: released after _unmat and, for a sparse b, from_full)
+events = []
+real_release, real_unmat, real_ff = LG.Ledger.release, M._unmat, sp.from_full
+
+
+def spy_release(self, nbytes):
+    events.append(("release", int(nbytes)))
+    return real_release(self, nbytes)
+
+
+LG.Ledger.release = spy_release
+M._unmat = lambda *a, **kw: (events.append(("_unmat",)), real_unmat(*a, **kw))[1]
+sp.from_full = lambda *a, **kw: (events.append(("from_full",)), real_ff(*a, **kw))[1]
+try:
+    stand_in(1 << 40)
+    nsb = 4500
+    need_sb = sp.big_triangular_need(nsb, 1, False, False, True)[0]
+    bsb = real_ff(col(np.arange(1.0, nsb + 1)))
+    Ssb = bidiagonal(nsb)
+    del events[:]
+    x, routes = solve(Ssb, bsb)
+finally:
+    LG.Ledger.release, M._unmat, sp.from_full = real_release, real_unmat, real_ff
+assert routes == ["triangular"] and type(x) is sp.Sparse, routes
+names = [e[0] for e in events]
+assert names.index("from_full") > names.index("_unmat") and ("release", need_sb) in events, events
+assert events.index(("release", need_sb)) > names.index("from_full"), events
+# (a zero diagonal on the big route: the singular warning, once)
+shown, real_err = [], M._write_err
+M._write_err = shown.append
+try:
+    Sz = bidiagonal(4001)
+    Sz.pr[Sz.pr == 4.0] = np.where(np.arange(4001) == 7, 0.0, 4.0)
+    x, routes = solve(Sz, col(np.ones(4001)))
+finally:
+    M._write_err = real_err
+assert routes == ["triangular"] and sum("singular to working precision" in s for s in shown) == 1, (routes, shown)
+ok("big route: its whole need (%d bytes), within the band's m_band (%d): at exactly that need and at any larger guard "
+   "the triangular route, the same units (%d); one byte short refused, no other route tried, as the old routes refuse; "
+   "the need by hand; released after the result is made; a zero diagonal warns" % (need, mb, r_big[1]))
+
+# 4b. the choice by formula over shapes: lower and upper, bidiagonal and wider (ku = 4), one and many right-hand
+# sides, real, complex A and complex b (A complex and b real: the promotion), full and sparse b (both outcomes: at
+# k = 12 a sparse b, and the promotion of a lower bidiagonal A, pass m_band).  Where the whole need is within the
+# bound (the proof's inequality: at most the band's need and the ordering's), the triangular route at its exact need
+# and at a large guard, the same units, reserving exactly its whole need; where it passes the bound, the band as
+# before (at m_band and at a large guard)
+def wide_upper(n, cplx=False):
+    e = col(np.ones(n))
+    D = B["horzcat"].call(1, [B["times"].call(1, [4.0, e])] + [B["uminus"].call(1, [e])] * 4)
+    S = B["spdiags"].call(1, [D, M._unmat(np.array([[0.0, 1.0, 2.0, 3.0, 4.0]])), float(n), float(n)])
+    if cplx:
+        S = B["plus"].call(1, [S, B["times"].call(1, [0.5j, B["speye"].call(1, [float(n)])])])
+    return S
+
+
+n = 4500
+taken = {True: 0, False: 0}
+for name, S, cplx_a in (("lower", bidiagonal(n), False), ("upper", bidiagonal(n, False), False),
+                        ("ku4", wide_upper(n), False), ("lower complex", bidiagonal(n, cplx=True), True),
+                        ("ku4 complex", wide_upper(n, True), True)):
+    for k in (1, 12):
+        for cplx_b in (False, True):
+            for sparse_b in (False, True):
+                bv = np.arange(1.0, n * k + 1).reshape((n, k)) % 7 + 1
+                if cplx_b:
+                    bv = bv + 1j
+                b = M._unmat(bv)
+                if sparse_b:
+                    b = sp.from_full(b)
+                cplx = cplx_a or cplx_b
+                mb = m_band_of(S, k, cplx)
+                need = sp.big_triangular_need(n, k, cplx_a, cplx_b, sparse_b)[0]
+                fits = need <= bound_of(S, k, cplx)
+                assert bound_of(S, k, cplx) == mb, (name, k)
+                # (the route's least guard: its need, and before it the discovery's, 4E indices, as the old routes)
+                for guard in ((max(need, 4 * sp.E * 8) if fits else mb), 1 << 40):
+                    routes, units, tri_res, x = run(S, b, guard)
+                    assert routes == (["triangular"] if fits else ["band"]), (name, k, cplx_b, sparse_b, guard, routes)
+                    assert tri_res == (need if fits else None), (name, k, tri_res, need)
+                    if guard < 1 << 40:
+                        u0, x0 = units, x
+                    else:
+                        assert units == u0, (name, k, cplx_b, sparse_b, units, u0)
+                r = M._farr(B["minus"].call(1, [B["mtimes"].call(1, [S, x0]), b]))
+                assert float(np.max(np.abs(r))) < 1e-9 * n * k, (name, k)
+                taken[fits] += 1
+assert taken[True] and taken[False], taken
+ok("route by formula over 40 shapes (%d triangular, %d band): the same route and units at the route's own need and at a "
+   "large guard, the triangular reservation its whole need, within the band's and the ordering's" % (taken[True], taken[False]))
+
+# 4c. a triangular system the band doesn't take (too wide: the LU before this route): now the triangular route, its
+# need within the ordering's, its units below the LU's (pinned for one and three right-hand sides)
+n = 4500
+rng = np.random.default_rng(5)
+rows_ = rng.integers(0, n, 3 * n)
+cols_ = rng.integers(0, n, 3 * n)
+keep = rows_ > cols_
+W = sp.make(n, n, np.concatenate([rows_[keep], np.arange(n)]), np.concatenate([cols_[keep], np.arange(n)]),
+            np.concatenate([rng.standard_normal(int(keep.sum())), 4.0 + rng.random(n)]))
+kl, ku = sp.bandwidths(W)
+assert ku == 0 and kl > n // 2, (kl, ku)
+lu_pins = []
+for k in (1, 3):
+    bw = M._unmat(np.ones((n, k)))
+    stand_in(1 << 40)
+    old = L.Work("old")
+    W0 = L.Work
+    L._routes = []
+    try:
+        L.Work = lambda *a, **kw: old
+        L.solve(W, M._mat(bw), "t", tri=None)
+    finally:
+        L.Work = W0
+        old_routes, L._routes = L._routes, None
+    assert old_routes == ["lu"], old_routes
+    routes, units, tri_res, x = run(W, bw, 1 << 40)
+    assert routes == ["triangular"] and units <= old.used, (routes, units, old.used)
+    assert sp.big_triangular_need(n, k, False, False, False)[0] <= bound_of(W, k, False)
+    r = M._farr(B["minus"].call(1, [B["mtimes"].call(1, [W, x]), bw]))
+    assert float(np.max(np.abs(r))) < 1e-8, float(np.max(np.abs(r)))
+    lu_pins.append((k, units, old.used))
+# (and where the triangular need passes the ordering's, below the band's m_band, the LU as before: k = 200)
+k = 200
+need = sp.big_triangular_need(n, k, False, False, False)[0]
+assert L.ordering_need(W)[0] < need <= m_band_of(W, k, False), (L.ordering_need(W)[0], need)
+routes, units, tri_res, x = run(W, M._unmat(np.ones((n, k))), 1 << 40)
+assert routes == ["lu"] and tri_res is None, routes
+ok("a triangular system the LU took (kl = %d): the triangular route, its units below the LU's (%s); its need past the "
+   "ordering's (k = 200), the LU as before" % (kl, "; ".join("k%d: %d <= %d" % p for p in lu_pins)))
 
 # 5. A_SAFE: a promotion copy past A_SAFE leaves the band; the discovery's reservation refused leaves today's path
 stand_in(1 << 40)
-saved = L.A_SAFE
-L.A_SAFE = 1000
+saved = sp.A_SAFE
+sp.A_SAFE = 1000
 try:
     x, routes = solve(bidiagonal(6000, cplx=True), col(np.ones(6000)))
     assert routes == ["band"], routes
 finally:
-    L.A_SAFE = saved
+    sp.A_SAFE = saved
 saved = sp.A_SAFE
 sp.A_SAFE = 1000
 try:

@@ -480,6 +480,18 @@ def _solve1(F, b, trans, dt):
     return x
 
 
+def ordering_need(S):
+    """the ordering's reservation: its workspace and its result q (bytes, of which q's)"""
+    n, m = S.n, S.m
+    nnz = int(S.jc[n])
+    Nn = n + m
+    ord_bytes = C_ENT * (3 * nnz + 10 * Nn + 6 * n) + C_LIST * (m + 3 * n) + C_TUPLE * (2 * n + 16)
+    # (the ordering's result, a Python list: held from before the ordering
+    # until its typed copy qa replaces it)
+    qheld = C_LIST + n * C_ENT
+    return ord_bytes + qheld, qheld
+
+
 def ordering(S, led, work, stats=None):
     """the fill-reducing column order of the square sparse S (_matlab_colamd's,
     a Python list), its workspace reserved before it runs and released when it
@@ -490,12 +502,8 @@ def ordering(S, led, work, stats=None):
 
     _phase("ordering")
     n, m = S.n, S.m
-    nnz = int(S.jc[n])
-    Nn = n + m
-    ord_bytes = C_ENT * (3 * nnz + 10 * Nn + 6 * n) + C_LIST * (m + 3 * n) + C_TUPLE * (2 * n + 16)
-    # (the ordering's result, a Python list: held from before the ordering
-    # until its typed copy qa replaces it)
-    qheld = C_LIST + n * C_ENT
+    total, qheld = ordering_need(S)
+    ord_bytes = total - qheld
     led.reserve(ord_bytes + qheld, "ordering")
     try:
         q = _matlab_colamd.order_columns(m, n, S.jc, S.ir, lambda u: work.charge(u, "ordering"), stats)
@@ -1189,42 +1197,6 @@ def _band_rhs(T, piv, Bm, n, kl, ku, k, dt, work):
     return out
 
 
-# ------------------------------------------------------------------ triangular solves
-
-def triangular_need(n, k, promote, cv):
-    """the bytes a triangular solve in place on B needs: B's copy in the result's class when it must be promoted (a
-    complex S, a real B), and one block's gathered rows, their product and their difference (at most E values each)"""
-    return (n * k * cv + C_HDR if promote else 0) + 3 * E * cv + 3 * C_HDR
-
-
-def triangular_in_place(S, Bm, lower, led, work):
-    """the triangular route of solve, past the band predicate: (X, singular), or None where its need doesn't fit led's
-    guard or a single array would pass A_SAFE (the band runs as before); Bm, the caller's own copy, solved in place
-    unless it must be promoted to complex"""
-    import _matlab_sparse as _sp
-
-    n = S.n
-    Bm = np.asarray(Bm).reshape((n, -1))
-    k = Bm.shape[1]
-    cplx = S.pr.dtype.kind == "c" or Bm.dtype.kind == "c"
-    dt = np.complex128 if cplx else np.float64
-    cv = _cval(dt)
-    promote = Bm.dtype != dt
-    if promote and n * k * cv > A_SAFE:
-        return None
-    need = triangular_need(n, k, promote, cv)
-    if led.owned + need > led.G:
-        return None
-    _route("triangular")
-    led.reserve(need, "triangular")
-    try:
-        X = Bm.astype(dt) if promote else Bm
-        singular = _sp.triangular_solve(S, X, lower, work)
-    finally:
-        led.release(need)
-    return X, singular
-
-
 # ------------------------------------------------------------------ the route (r6 sections 2.4, 2.4a)
 
 # the routing estimate's timing constants per host (seconds per unit; r6
@@ -1276,7 +1248,7 @@ def _warn_slow(n, t_lu):
                     "faster.)" % (n, n, _sp.MAX_DENSE_SOLVE), SLOW_LU_ID, n)
 
 
-def solve(S, Bm, what, bands=None, rec=None):
+def solve(S, Bm, what, bands=None, rec=None, tri=None):
     """S \\ Bm for a square sparse S, n > MAX_DENSE_SOLVE, by its band or its
     sparse LU (r6 section 2.4a): the bandwidths found in chunks (their
     workspace reserved first; refused, the band path is unknown, not
@@ -1289,7 +1261,17 @@ def solve(S, Bm, what, bands=None, rec=None):
     back to band if band fits.  Refused only when no path can be admitted,
     once, with both needs.  Returns (X, singular), or None for a diagonal S
     (the caller's shortcut); bands, a seam, gives (kl, ku) instead; rec, the
-    operation's capacity record when the caller has read it (one per operation)"""
+    operation's capacity record when the caller has read it (one per operation);
+    tri, the caller's triangular route: tri(lower, led, work, bound) for every
+    triangular S once its bandwidths are known, its value (the caller's
+    result) or None (the routes below, as before) by formulas alone, its
+    whole need at most bound, never by the ledger's guard, which only admits
+    or refuses it.  bound is the least need of the routes it replaces: the
+    band's m_band (where the band path exists) and the ordering's, which the
+    LU needs before anything else.  So a refusal of the triangular route is
+    one the old routes would give (the band and the ordering both refused),
+    and which route a triangular S takes, and the units it is charged,
+    depend only on S and b"""
     n = S.n
     led = Ledger(what, rec=rec)
     work = Work(what)
@@ -1317,6 +1299,12 @@ def solve(S, Bm, what, bands=None, rec=None):
         if nb is not None:
             m_band = nb["persistent"] + max(nb["setup"], nb["step"])
             band_ok = led.owned + m_band <= led.G
+        # a triangular S: substitution, decided from S and b alone (above)
+        if (kl == 0 or ku == 0) and tri is not None:
+            bound = ordering_need(S)[0]
+            out = tri(ku == 0, led, work, bound if m_band is None else min(m_band, bound))
+            if out is not None:
+                return out
     t_band = c["step"] * n + c["band"] * n * (kl + 1) * (kl + ku + 1) if kl is not None else None
 
     def band():
@@ -1331,14 +1319,8 @@ def solve(S, Bm, what, bands=None, rec=None):
                            min(needs) if needs else 0, led.G, led.allowance_for, record=led.rec)
 
     # 2. band without the ordering: where master's route takes band (the
-    # amendment r1 floor: no sunk ordering), or where it beats LU's lower bound;
-    # a triangular S (kl or ku 0; a diagonal one returned above) solved there by
-    # substitution instead, when its whole need fits the same ledger (else the band)
+    # amendment r1 floor: no sunk ordering), or where it beats LU's lower bound
     if band_ok and (_sp.legacy_band_route(n, kl, ku) or t_band <= c["ord"] * nnz):
-        if kl == 0 or ku == 0:
-            out = triangular_in_place(S, Bm, ku == 0, led, work)
-            if out is not None:
-                return out
         return band()
     # 3. and 4. the ordering, admitted, then the estimate
     stats = {}
