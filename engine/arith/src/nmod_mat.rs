@@ -290,7 +290,16 @@ mod test_hooks {
     pub(super) fn reset_folds() {
         FOLDS.with(|c| c.set(0));
     }
-
+    thread_local!(static PLAIN_SUMS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+    /// The characteristic polynomial's products each reduced and its row
+    /// operations by Shoup's product (as before its u64 sums), to compare
+    /// results and units.
+    pub(super) fn plain_sums() -> bool {
+        PLAIN_SUMS.with(|c| c.get())
+    }
+    pub(super) fn set_plain_sums(v: bool) {
+        PLAIN_SUMS.with(|c| c.set(v));
+    }
 }
 #[cfg(not(test))]
 mod test_hooks {
@@ -300,6 +309,10 @@ mod test_hooks {
     }
     #[inline(always)]
     pub(super) fn fold_done() {}
+    #[inline(always)]
+    pub(super) fn plain_sums() -> bool {
+        false
+    }
 }
 
 /// The folds of a u64 sum of `terms` products: the first [`batch64`] of
@@ -346,6 +359,77 @@ fn reduce32(x: u64, n: u64, pinv: u64) -> u64 {
 fn sub_reduce32(x: u64, a: u64, n: u64, pinv: u64) -> u64 {
     let d = x + n - reduce32(a, n, pinv);
     d - (n & 0u64.wrapping_sub((d >= n) as u64))
+}
+
+/// sum_t a_t b_t mod p for residues a, b: in u64 when the products fit one
+/// u64 sum or the modulus' sums fold (folded every fold64 products past the
+/// first batch64, as the elimination's), else in u128 chunks of `batch`;
+/// either way exactly the residue of the sum.
+fn dot(a: &[u64], b: &[u64], m: &Modulus, batch: usize) -> u64 {
+    if (a.len() <= batch64(m) || folding(m)) && !test_hooks::plain_sums() {
+        let pinv = u64::MAX / m.n;
+        let (mut limit, bf) = (batch64(m), fold64(m));
+        let (mut s, mut seg) = (0u64, 0usize);
+        for (&x, &y) in a.iter().zip(b) {
+            if seg == limit {
+                s = reduce32(s, m.n, pinv);
+                (seg, limit) = (0, bf);
+            }
+            debug_assert!(s <= u64::MAX - (m.n - 1) * (m.n - 1));
+            s += (x as u32 as u64) * (y as u32 as u64);
+            seg += 1;
+        }
+        return reduce32(s, m.n, pinv);
+    }
+    let mut r = 0u64;
+    for (ca, cb) in a.chunks(batch).zip(b.chunks(batch)) {
+        let mut acc = 0u128;
+        for (&x, &y) in ca.iter().zip(cb) {
+            acc += x as u128 * y as u128;
+        }
+        r = m.add(r, m.reduce_u128(acc));
+    }
+    r
+}
+
+/// Sums of scaled rows for the characteristic polynomial's recurrence, for
+/// 32-bit residues: acc[j] = sum f_i src_i[j] in u64, folded (every entry
+/// reduced) every fold64 rows past the first batch64.
+struct Sums {
+    acc: Vec<u64>,
+    n: u64,
+    pinv: u64,
+    seg: usize,
+    limit: usize,
+    bf: usize,
+}
+
+impl Sums {
+    /// None unless the modulus' sums fold, as the elimination's (the caller
+    /// reduces each product).
+    fn new(m: &Modulus, len: usize) -> Option<Sums> {
+        (folding(m) && !test_hooks::plain_sums()).then(|| Sums { acc: vec![0; len], n: m.n, pinv: u64::MAX / m.n, seg: 0, limit: batch64(m), bf: fold64(m) })
+    }
+    fn add_scaled(&mut self, f: u64, src: &[u64]) {
+        if self.seg == self.limit {
+            for a in self.acc.iter_mut() {
+                *a = reduce32(*a, self.n, self.pinv);
+            }
+            (self.seg, self.limit) = (0, self.bf);
+        }
+        let q = (self.n - 1) * (self.n - 1);
+        for (a, &c) in self.acc.iter_mut().zip(src) {
+            debug_assert!(*a <= u64::MAX - q);
+            *a += (f as u32 as u64) * (c as u32 as u64);
+        }
+        self.seg += 1;
+    }
+    /// next[j] -= acc[j] (mod p).
+    fn subtract_from(&self, next: &mut [u64]) {
+        for (x, &a) in next.iter_mut().zip(&self.acc) {
+            *x = sub_reduce32(*x, a, self.n, self.pinv);
+        }
+    }
 }
 
 /// acc += f * src, f and the entries of src residues below 2^32, the sums
@@ -492,6 +576,16 @@ fn update_row<'a, F: Fn(usize) -> &'a [u64]>(row: &mut [u64], from: usize, blk: 
 #[inline]
 fn axpy(dst: &mut [u64], src: &[u64], c: u64, m: &Modulus) {
     if c == 0 {
+        return;
+    }
+    if batch64(m) > 0 && !test_hooks::plain_sums() {
+        // (32-bit residues: x + c y < p + (p - 1)^2 < 2^64, one branch-free
+        // reduction, which vectorizes)
+        let pinv = u64::MAX / m.n;
+        let c = c as u32 as u64;
+        for (x, &y) in dst.iter_mut().zip(src) {
+            *x = reduce32(*x + c * (y as u32 as u64), m.n, pinv);
+        }
         return;
     }
     if m.n < 1 << 63 {
@@ -1091,14 +1185,7 @@ impl Mat {
                 poll.count(Family::ModArith, (n * us.len().div_ceil(batch)) as u64);
                 for r in 0..n {
                     let row = &h.d[r * n + k + 1..(r + 1) * n];
-                    let mut add = 0u64;
-                    for (ca, cb) in row.chunks(batch).zip(us.chunks(batch)) {
-                        let mut acc = 0u128;
-                        for (&x, &y) in ca.iter().zip(cb) {
-                            acc += x as u128 * y as u128;
-                        }
-                        add = m.add(add, m.reduce_u128(acc));
-                    }
+                    let add = dot(row, &us, &m, batch);
                     h.d[r * n + k] = m.add(h.d[r * n + k], add);
                 }
             }
@@ -1116,6 +1203,13 @@ impl Mat {
                 next[j] = m.sub(next[j], m.mul(h.get(k, k), c));
             }
             let mut t = 1 % m.n;
+            // the terms f p_{k-i}: where the modulus' sums fold (as the
+            // elimination's), summed in u64 per coefficient (folded every
+            // fold64 terms past the first batch64), one reduction per
+            // coefficient at the end; else each product reduced.  Counted
+            // as each product reduced (one ModArith per coefficient of
+            // each term), the same units whatever the sums.
+            let mut acc = Sums::new(&m, k + 2);
             for i in 1..=k {
                 poll.add(1);
                 t = m.mul(t, h.get(k - i + 1, k - i));
@@ -1128,10 +1222,18 @@ impl Mat {
                 if f != 0 {
                     poll.add(p[k - i].len());
                     poll.count(Family::ModArith, p[k - i].len() as u64);
-                    for (j, &c) in p[k - i].iter().enumerate() {
-                        next[j] = m.sub(next[j], m.mul(f, c));
+                    match acc.as_mut() {
+                        Some(a) => a.add_scaled(f, &p[k - i]),
+                        None => {
+                            for (j, &c) in p[k - i].iter().enumerate() {
+                                next[j] = m.sub(next[j], m.mul(f, c));
+                            }
+                        }
                     }
                 }
+            }
+            if let Some(a) = acc {
+                a.subtract_from(&mut next);
             }
             p.push(next);
         }
@@ -1607,6 +1709,84 @@ mod tests {
                     if !folding(&m) {
                         assert_eq!(new.3, 0, "nothing folds, p {}", p);
                     }
+                }
+            }
+        }
+    }
+
+    /// The characteristic polynomial's u64 sums at their headroom: dot,
+    /// Sums and axpy with every operand p - 1 (each product the largest), at
+    /// lengths batch64, batch64 + 1, batch64 + fold64, batch64 + fold64 + 1
+    /// and three folds past them, against u128 arithmetic; at fold64 = 4
+    /// and 15, and at a prime whose whole sum fits.
+    #[test]
+    fn charpoly_sums_at_their_headroom() {
+        for p in [(1u64 << 31) - 1, (1 << 30) + 3, 65537] {
+            let m = Modulus::new(p);
+            let (b, f) = (batch64(&m), fold64(&m));
+            let q = p - 1;
+            let want = |len: usize| ((len as u128 * (q as u128 * q as u128)) % p as u128) as u64;
+            let lens: Vec<usize> = if b > 1 << 20 { vec![1, 2, 1000] } else { vec![b, b + 1, b + f, b + f + 1, b + 3 * f + 1] };
+            for len in lens {
+                let a = vec![q; len];
+                assert_eq!(dot(&a, &a, &m, batch_len(&m)), want(len), "dot p {} len {}", p, len);
+                // (Sums: len rows of p - 1, each scaled by p - 1, subtracted from 0)
+                if let Some(mut s) = Sums::new(&m, 3) {
+                    for _ in 0..len {
+                        s.add_scaled(q, &[q, q, q]);
+                    }
+                    let mut next = vec![0u64; 3];
+                    s.subtract_from(&mut next);
+                    assert_eq!(next, vec![(p - want(len)) % p; 3], "Sums p {} len {}", p, len);
+                }
+            }
+            // axpy: x + c y at the largest operands
+            let mut x = vec![q; 5];
+            axpy(&mut x, &[q; 5], q, &m);
+            assert_eq!(x, vec![((q as u128 + q as u128 * q as u128) % p as u128) as u64; 5], "axpy p {}", p);
+        }
+    }
+
+    /// The characteristic polynomial (Hessenberg) with its u64 sums against
+    /// the same computation with every product reduced (the route before
+    /// them): the same polynomial and exactly the same units, family by
+    /// family, at primes of every class (tiny, small, folding, fold64 = 1,
+    /// above 2^32), on random, sparse, zero, low-rank and all-(p - 1)
+    /// matrices.
+    #[test]
+    fn charpoly_sums_change_neither_the_result_nor_the_units() {
+        use crate::cost::{metered, Family, Meter};
+        let run = |a: &Mat, plain: bool| {
+            test_hooks::set_plain_sums(plain);
+            let mut meter = Meter::accounting(u64::MAX);
+            let c = metered(&mut meter, || a.charpoly_hessenberg());
+            test_hooks::set_plain_sums(false);
+            assert_eq!(meter.units().total(), Some(meter.used()));
+            (c, [Family::MulSchool, Family::ModArith, Family::Move].map(|f| meter.units().get(f)))
+        };
+        let mut s = 77u64;
+        for p in [3u64, 7, 65537, 1_000_000_007, (1 << 31) - 1, (1 << 32) - 5, (1 << 62) - 57] {
+            let m = Modulus::new(p);
+            for n in [1usize, 2, 9, 40, 73] {
+                let dense = rand_mat(n, n, m, &mut s);
+                let mut sparse = dense.clone();
+                for (k, x) in sparse.d.iter_mut().enumerate() {
+                    if k % 4 != 0 {
+                        *x = 0;
+                    }
+                }
+                let mut low = dense.clone();
+                for i in n / 2..n {
+                    for j in 0..n {
+                        let v = m.add(low.get(i - n / 2, j), low.get(i.saturating_sub(1), j));
+                        low.set(i, j, v);
+                    }
+                }
+                let full = Mat { rows: n, cols: n, m, d: vec![p - 1; n * n] };
+                for (name, a) in [("dense", dense), ("sparse", sparse), ("low", low), ("p-1", full), ("zero", Mat::zero(n, n, m)), ("identity", Mat::identity(n, m))] {
+                    let new = run(&a, false);
+                    let old = run(&a, true);
+                    assert_eq!(new, old, "p {} n {} {}", p, n, name);
                 }
             }
         }
