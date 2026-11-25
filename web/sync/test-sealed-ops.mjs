@@ -228,7 +228,7 @@ async function socket(session, origin = SITE) {
   return s;
 }
 async function hello(s, device) {
-  s.send({ t: "hello", v: 2, device, name: "test", index_after: 0 });
+  s.send({ t: "hello", v: 3, device, name: "test", index_after: 0 });
   const w = await s.next((m) => m.t === "welcome" || m.t === "error");
   await s.next((m) => m.t === "index");
   return w;
