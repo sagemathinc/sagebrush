@@ -37,4 +37,19 @@ N2;
 N2.1^3;
 Discriminant(N2);
 K eq NumberField(x^2 + 1/3);
+// over the integers the polynomial is made primitive with a positive leading coefficient: 4*x^2 + 2 is 2*x^2 + 1
+Z<x> := PolynomialRing(Integers());
+K := NumberField(-x^2 + 2); K; MaximalOrder(K); Discriminant(K);
+K := NumberField(4*x^2 + 2); K; MaximalOrder(K); Discriminant(K);
+K := NumberField(6*x^2 + 4*x + 2); K; MaximalOrder(K); Discriminant(K);
+K<b> := NumberField(-2*x^2 + 7); K; b^2; Eltseq(b); MaximalOrder(K); Discriminant(K);
+for f in [6*x^2 + 2, -2*x^2 + 3, 3*x^2 + 3*x + 1, 3*x^3 - 2] do
+    K<a> := NumberField(f);
+    K; a^2; a^3; Eltseq((a + 1)^2/2); Eltseq(1/(a + 1)); Norm(a); Trace(a); Discriminant(K); MaximalOrder(K);
+end for;
+P<x> := PolynomialRing(Rationals());
+for f in [6*x^2 + 2, -2*x^2 + 3, 3*x^2 + 3*x + 1, 2/3*x^3 + 1/6*x + 1] do
+    K<a> := NumberField(f);
+    K; a^2; a^3; Eltseq((a + 1)^2/2); Eltseq(1/(a + 1)); Norm(a); Trace(a); Discriminant(K); MaximalOrder(K);
+end for;
 print "end";

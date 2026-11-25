@@ -9669,6 +9669,13 @@ class _MNumberField(_snf.NumberField_absolute):
         over_z = getattr(getattr(f, "parent", lambda: None)(), "base_ring", lambda: None)() is _sp.ZZ
         if not over_z and self._uf[-1] != 1:
             self._uf = tuple(_Fraction(a) / _Fraction(self._uf[-1]) for a in self._uf)
+        if over_z:
+            # (made primitive with a positive leading coefficient: 6*y^2 + 2 is 3*y^2 + 1, -2*y^2 + 3 is 2*y^2 - 3)
+            g = 0
+            for a in self._uf:
+                g = _math.gcd(g, int(a))
+            g = -g if self._uf[-1] < 0 else g
+            self._uf = tuple(int(a) // g for a in self._uf)
         # (the primitive integral polynomial of the field's: its equation order's, whose discriminant is
         # Discriminant(K); 3*x^2 + 1 for x^2 + 1/3)
         L = 1
