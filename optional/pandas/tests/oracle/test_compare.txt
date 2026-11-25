@@ -2182,3 +2182,435 @@ dtype: bool
 []
 == empty-float-tuple-ge
 []
+== length-first-0-list-eq
+[]
+== length-first-0-list-named-eq
+[]
+== length-first-0-list-ne
+[]
+== length-first-0-list-named-ne
+[]
+== length-first-0-list-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== length-first-0-list-named-lt
+[]
+== length-first-0-list-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== length-first-0-list-named-le
+[]
+== length-first-0-list-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== length-first-0-list-named-gt
+[]
+== length-first-0-list-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== length-first-0-list-named-ge
+[]
+== length-first-0-tuple-eq
+[]
+== length-first-0-tuple-named-eq
+[]
+== length-first-0-tuple-ne
+[]
+== length-first-0-tuple-named-ne
+[]
+== length-first-0-tuple-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and tuple
+== length-first-0-tuple-named-lt
+[]
+== length-first-0-tuple-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and tuple
+== length-first-0-tuple-named-le
+[]
+== length-first-0-tuple-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and tuple
+== length-first-0-tuple-named-gt
+[]
+== length-first-0-tuple-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and tuple
+== length-first-0-tuple-named-ge
+[]
+== length-first-1-list-eq
+!! ValueError: ('Lengths must match to compare', (1,), (0,))
+== length-first-1-list-named-eq
+!! ValueError: Lengths must be equal
+== length-first-1-list-ne
+!! ValueError: ('Lengths must match to compare', (1,), (0,))
+== length-first-1-list-named-ne
+!! ValueError: Lengths must be equal
+== length-first-1-list-lt
+!! ValueError: ('Lengths must match to compare', (1,), (0,))
+== length-first-1-list-named-lt
+!! ValueError: Lengths must be equal
+== length-first-1-list-le
+!! ValueError: ('Lengths must match to compare', (1,), (0,))
+== length-first-1-list-named-le
+!! ValueError: Lengths must be equal
+== length-first-1-list-gt
+!! ValueError: ('Lengths must match to compare', (1,), (0,))
+== length-first-1-list-named-gt
+!! ValueError: Lengths must be equal
+== length-first-1-list-ge
+!! ValueError: ('Lengths must match to compare', (1,), (0,))
+== length-first-1-list-named-ge
+!! ValueError: Lengths must be equal
+== length-first-1-tuple-eq
+!! ValueError: Lengths must match
+== length-first-1-tuple-named-eq
+!! ValueError: Lengths must be equal
+== length-first-1-tuple-ne
+!! ValueError: Lengths must match
+== length-first-1-tuple-named-ne
+!! ValueError: Lengths must be equal
+== length-first-1-tuple-lt
+!! ValueError: Lengths must match
+== length-first-1-tuple-named-lt
+!! ValueError: Lengths must be equal
+== length-first-1-tuple-le
+!! ValueError: Lengths must match
+== length-first-1-tuple-named-le
+!! ValueError: Lengths must be equal
+== length-first-1-tuple-gt
+!! ValueError: Lengths must match
+== length-first-1-tuple-named-gt
+!! ValueError: Lengths must be equal
+== length-first-1-tuple-ge
+!! ValueError: Lengths must match
+== length-first-1-tuple-named-ge
+!! ValueError: Lengths must be equal
+== length-first-2-list-eq
+!! ValueError: ('Lengths must match to compare', (2,), (0,))
+== length-first-2-list-named-eq
+!! ValueError: Lengths must be equal
+== length-first-2-list-ne
+!! ValueError: ('Lengths must match to compare', (2,), (0,))
+== length-first-2-list-named-ne
+!! ValueError: Lengths must be equal
+== length-first-2-list-lt
+!! ValueError: ('Lengths must match to compare', (2,), (0,))
+== length-first-2-list-named-lt
+!! ValueError: Lengths must be equal
+== length-first-2-list-le
+!! ValueError: ('Lengths must match to compare', (2,), (0,))
+== length-first-2-list-named-le
+!! ValueError: Lengths must be equal
+== length-first-2-list-gt
+!! ValueError: ('Lengths must match to compare', (2,), (0,))
+== length-first-2-list-named-gt
+!! ValueError: Lengths must be equal
+== length-first-2-list-ge
+!! ValueError: ('Lengths must match to compare', (2,), (0,))
+== length-first-2-list-named-ge
+!! ValueError: Lengths must be equal
+== length-first-2-tuple-eq
+!! ValueError: Lengths must match
+== length-first-2-tuple-named-eq
+!! ValueError: Lengths must be equal
+== length-first-2-tuple-ne
+!! ValueError: Lengths must match
+== length-first-2-tuple-named-ne
+!! ValueError: Lengths must be equal
+== length-first-2-tuple-lt
+!! ValueError: Lengths must match
+== length-first-2-tuple-named-lt
+!! ValueError: Lengths must be equal
+== length-first-2-tuple-le
+!! ValueError: Lengths must match
+== length-first-2-tuple-named-le
+!! ValueError: Lengths must be equal
+== length-first-2-tuple-gt
+!! ValueError: Lengths must match
+== length-first-2-tuple-named-gt
+!! ValueError: Lengths must be equal
+== length-first-2-tuple-ge
+!! ValueError: Lengths must match
+== length-first-2-tuple-named-ge
+!! ValueError: Lengths must be equal
+== tuple-int-0-0-eq
+[]
+== range-int-0-0-eq
+[]
+== tuple-int-0-0-lt
+[]
+== range-int-0-0-lt
+[]
+== tuple-int-0-1-eq
+[]
+== range-int-0-1-eq
+[]
+== tuple-int-0-1-lt
+[]
+== range-int-0-1-lt
+[]
+== tuple-int-0-2-eq
+!! ValueError: operands could not be broadcast together with shapes (0,) (2,) 
+== range-int-0-2-eq
+!! ValueError: operands could not be broadcast together with shapes (0,) (2,) 
+== tuple-int-0-2-lt
+!! ValueError: operands could not be broadcast together with shapes (0,) (2,) 
+== range-int-0-2-lt
+!! ValueError: operands could not be broadcast together with shapes (0,) (2,) 
+== tuple-int-0-3-eq
+!! ValueError: operands could not be broadcast together with shapes (0,) (3,) 
+== range-int-0-3-eq
+!! ValueError: operands could not be broadcast together with shapes (0,) (3,) 
+== tuple-int-0-3-lt
+!! ValueError: operands could not be broadcast together with shapes (0,) (3,) 
+== range-int-0-3-lt
+!! ValueError: operands could not be broadcast together with shapes (0,) (3,) 
+== tuple-int-1-0-eq
+!! ValueError: Length of values (0) does not match length of index (1)
+== range-int-1-0-eq
+!! ValueError: Length of values (0) does not match length of index (1)
+== tuple-int-1-0-lt
+!! ValueError: Length of values (0) does not match length of index (1)
+== range-int-1-0-lt
+!! ValueError: Length of values (0) does not match length of index (1)
+== tuple-int-1-1-eq
+[True]
+== range-int-1-1-eq
+[True]
+== tuple-int-1-1-lt
+[False]
+== range-int-1-1-lt
+[False]
+== tuple-int-1-2-eq
+!! ValueError: Length of values (2) does not match length of index (1)
+== range-int-1-2-eq
+!! ValueError: Length of values (2) does not match length of index (1)
+== tuple-int-1-2-lt
+!! ValueError: Length of values (2) does not match length of index (1)
+== range-int-1-2-lt
+!! ValueError: Length of values (2) does not match length of index (1)
+== tuple-int-1-3-eq
+!! ValueError: Length of values (3) does not match length of index (1)
+== range-int-1-3-eq
+!! ValueError: Length of values (3) does not match length of index (1)
+== tuple-int-1-3-lt
+!! ValueError: Length of values (3) does not match length of index (1)
+== range-int-1-3-lt
+!! ValueError: Length of values (3) does not match length of index (1)
+== tuple-int-2-0-eq
+!! ValueError: operands could not be broadcast together with shapes (2,) (0,) 
+== range-int-2-0-eq
+!! ValueError: operands could not be broadcast together with shapes (2,) (0,) 
+== tuple-int-2-0-lt
+!! ValueError: operands could not be broadcast together with shapes (2,) (0,) 
+== range-int-2-0-lt
+!! ValueError: operands could not be broadcast together with shapes (2,) (0,) 
+== tuple-int-2-1-eq
+[True, False]
+== range-int-2-1-eq
+[True, False]
+== tuple-int-2-1-lt
+[False, False]
+== range-int-2-1-lt
+[False, False]
+== tuple-int-2-2-eq
+[True, False]
+== range-int-2-2-eq
+[True, True]
+== tuple-int-2-2-lt
+[False, False]
+== range-int-2-2-lt
+[False, False]
+== tuple-int-2-3-eq
+!! ValueError: operands could not be broadcast together with shapes (2,) (3,) 
+== range-int-2-3-eq
+!! ValueError: operands could not be broadcast together with shapes (2,) (3,) 
+== tuple-int-2-3-lt
+!! ValueError: operands could not be broadcast together with shapes (2,) (3,) 
+== range-int-2-3-lt
+!! ValueError: operands could not be broadcast together with shapes (2,) (3,) 
+== tuple-str-0-0-eq
+[]
+== range-str-0-0-eq
+[]
+== tuple-str-0-0-lt
+[]
+== range-str-0-0-lt
+[]
+== tuple-str-0-1-eq
+!! ValueError: Lengths of operands do not match: 0 != 1
+== range-str-0-1-eq
+!! ValueError: Lengths of operands do not match: 0 != 1
+== tuple-str-0-1-lt
+!! ValueError: Lengths of operands do not match: 0 != 1
+== range-str-0-1-lt
+!! ValueError: Lengths of operands do not match: 0 != 1
+== tuple-str-0-2-eq
+!! ValueError: Lengths of operands do not match: 0 != 2
+== range-str-0-2-eq
+!! ValueError: Lengths of operands do not match: 0 != 2
+== tuple-str-0-2-lt
+!! ValueError: Lengths of operands do not match: 0 != 2
+== range-str-0-2-lt
+!! ValueError: Lengths of operands do not match: 0 != 2
+== tuple-str-0-3-eq
+!! ValueError: Lengths of operands do not match: 0 != 3
+== range-str-0-3-eq
+!! ValueError: Lengths of operands do not match: 0 != 3
+== tuple-str-0-3-lt
+!! ValueError: Lengths of operands do not match: 0 != 3
+== range-str-0-3-lt
+!! ValueError: Lengths of operands do not match: 0 != 3
+== tuple-str-1-0-eq
+!! ValueError: Lengths of operands do not match: 1 != 0
+== range-str-1-0-eq
+!! ValueError: Lengths of operands do not match: 1 != 0
+== tuple-str-1-0-lt
+!! ValueError: Lengths of operands do not match: 1 != 0
+== range-str-1-0-lt
+!! ValueError: Lengths of operands do not match: 1 != 0
+== tuple-str-1-1-eq
+[True]
+== range-str-1-1-eq
+[False]
+== tuple-str-1-1-lt
+[False]
+== range-str-1-1-lt
+!! TypeError: '<' not supported between instances of 'str' and 'int'
+== tuple-str-1-2-eq
+!! ValueError: Lengths of operands do not match: 1 != 2
+== range-str-1-2-eq
+!! ValueError: Lengths of operands do not match: 1 != 2
+== tuple-str-1-2-lt
+!! ValueError: Lengths of operands do not match: 1 != 2
+== range-str-1-2-lt
+!! ValueError: Lengths of operands do not match: 1 != 2
+== tuple-str-1-3-eq
+!! ValueError: Lengths of operands do not match: 1 != 3
+== range-str-1-3-eq
+!! ValueError: Lengths of operands do not match: 1 != 3
+== tuple-str-1-3-lt
+!! ValueError: Lengths of operands do not match: 1 != 3
+== range-str-1-3-lt
+!! ValueError: Lengths of operands do not match: 1 != 3
+== tuple-str-2-0-eq
+!! ValueError: Lengths of operands do not match: 2 != 0
+== range-str-2-0-eq
+!! ValueError: Lengths of operands do not match: 2 != 0
+== tuple-str-2-0-lt
+!! ValueError: Lengths of operands do not match: 2 != 0
+== range-str-2-0-lt
+!! ValueError: Lengths of operands do not match: 2 != 0
+== tuple-str-2-1-eq
+!! ValueError: Lengths of operands do not match: 2 != 1
+== range-str-2-1-eq
+!! ValueError: Lengths of operands do not match: 2 != 1
+== tuple-str-2-1-lt
+!! ValueError: Lengths of operands do not match: 2 != 1
+== range-str-2-1-lt
+!! ValueError: Lengths of operands do not match: 2 != 1
+== tuple-str-2-2-eq
+[True, True]
+== range-str-2-2-eq
+[False, False]
+== tuple-str-2-2-lt
+[False, False]
+== range-str-2-2-lt
+!! TypeError: '<' not supported between instances of 'str' and 'int'
+== tuple-str-2-3-eq
+!! ValueError: Lengths of operands do not match: 2 != 3
+== range-str-2-3-eq
+!! ValueError: Lengths of operands do not match: 2 != 3
+== tuple-str-2-3-lt
+!! ValueError: Lengths of operands do not match: 2 != 3
+== range-str-2-3-lt
+!! ValueError: Lengths of operands do not match: 2 != 3
+== tuple-dt-0-0-eq
+[]
+== range-dt-0-0-eq
+[]
+== tuple-dt-0-0-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and tuple
+== range-dt-0-0-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and range
+== tuple-dt-0-1-eq
+!! ValueError: Lengths must match
+== range-dt-0-1-eq
+!! ValueError: Lengths must match
+== tuple-dt-0-1-lt
+!! ValueError: Lengths must match
+== range-dt-0-1-lt
+!! ValueError: Lengths must match
+== tuple-dt-0-2-eq
+!! ValueError: Lengths must match
+== range-dt-0-2-eq
+!! ValueError: Lengths must match
+== tuple-dt-0-2-lt
+!! ValueError: Lengths must match
+== range-dt-0-2-lt
+!! ValueError: Lengths must match
+== tuple-dt-0-3-eq
+!! ValueError: Lengths must match
+== range-dt-0-3-eq
+!! ValueError: Lengths must match
+== tuple-dt-0-3-lt
+!! ValueError: Lengths must match
+== range-dt-0-3-lt
+!! ValueError: Lengths must match
+== tuple-dt-1-0-eq
+!! ValueError: Lengths must match
+== range-dt-1-0-eq
+!! ValueError: Lengths must match
+== tuple-dt-1-0-lt
+!! ValueError: Lengths must match
+== range-dt-1-0-lt
+!! ValueError: Lengths must match
+== tuple-dt-1-1-eq
+[True]
+== range-dt-1-1-eq
+[False]
+== tuple-dt-1-1-lt
+[False]
+== range-dt-1-1-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and range
+== tuple-dt-1-2-eq
+!! ValueError: Lengths must match
+== range-dt-1-2-eq
+!! ValueError: Lengths must match
+== tuple-dt-1-2-lt
+!! ValueError: Lengths must match
+== range-dt-1-2-lt
+!! ValueError: Lengths must match
+== tuple-dt-1-3-eq
+!! ValueError: Lengths must match
+== range-dt-1-3-eq
+!! ValueError: Lengths must match
+== tuple-dt-1-3-lt
+!! ValueError: Lengths must match
+== range-dt-1-3-lt
+!! ValueError: Lengths must match
+== tuple-dt-2-0-eq
+!! ValueError: Lengths must match
+== range-dt-2-0-eq
+!! ValueError: Lengths must match
+== tuple-dt-2-0-lt
+!! ValueError: Lengths must match
+== range-dt-2-0-lt
+!! ValueError: Lengths must match
+== tuple-dt-2-1-eq
+!! ValueError: Lengths must match
+== range-dt-2-1-eq
+!! ValueError: Lengths must match
+== tuple-dt-2-1-lt
+!! ValueError: Lengths must match
+== range-dt-2-1-lt
+!! ValueError: Lengths must match
+== tuple-dt-2-2-eq
+[True, True]
+== range-dt-2-2-eq
+[False, False]
+== tuple-dt-2-2-lt
+[False, False]
+== range-dt-2-2-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and range
+== tuple-dt-2-3-eq
+!! ValueError: Lengths must match
+== range-dt-2-3-eq
+!! ValueError: Lengths must match
+== tuple-dt-2-3-lt
+!! ValueError: Lengths must match
+== range-dt-2-3-lt
+!! ValueError: Lengths must match

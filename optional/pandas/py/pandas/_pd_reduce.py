@@ -161,13 +161,13 @@ _OPS = {
 }
 
 
-def compare(col, right, op):
+def compare(col, right, op, array_name="ndarray"):
     """A bool Column: col <op> right (a scalar or a Column of the same
     length).  A missing value compares False (True for ne), as pandas."""
     f = _OPS[op]
     from ._pd_datetime import DT
     if col.dtype is DT:
-        return _compare_times(col, right, op, f)
+        return _compare_times(col, right, op, f, array_name)
     if isinstance(right, str) and op not in ("eq", "ne") and not col.is_list and (col.dtype in INTS or col.dtype in FLOATS
                                                                                or col.dtype == "bool"):
         # (pandas' message for ordering numbers against a string)
@@ -210,7 +210,7 @@ def compare(col, right, op):
     return Column("bool", np.array(out, dtype=bool))
 
 
-def _compare_times(col, right, op, f):
+def _compare_times(col, right, op, f, array_name="ndarray"):
     # (a datetime64[us] column: microseconds compared, NaT on either side comparing False, True for ne; a
     # string is parsed as pandas parses it; another value is equal to none, and ordering by it raises)
     from ._pd_datetime import DT, NAT_INT, Timestamp, as_us, is_time
@@ -225,10 +225,14 @@ def _compare_times(col, right, op, f):
         # parsed, all of them or none; values of mixed types are compared one by one)
         d = right.dtype
         rv = right.tolist()
+        if not rv and op not in ("eq", "ne") and array_name is not None:
+            # (an empty operand of the operators has no order with times: pandas' error names it; the named
+            # comparisons make a Series of it, and give an empty result)
+            raise TypeError("Invalid comparison between dtype=datetime64[us] and %s" % array_name)
         if d in INTS or d in FLOATS or d == "bool":
             if op in ("eq", "ne"):
                 return Column("bool", np.full(n, op == "ne", dtype=bool))
-            raise TypeError("Invalid comparison between dtype=datetime64[us] and ndarray")
+            raise TypeError("Invalid comparison between dtype=datetime64[us] and %s" % (array_name or "ndarray"))
         if all(is_missing(x) for x in rv):
             return Column("bool", np.full(n, op == "ne", dtype=bool))
         if d is STR:

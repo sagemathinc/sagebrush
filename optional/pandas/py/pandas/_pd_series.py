@@ -36,6 +36,28 @@ def _is_scalar(v):
     return X.is_scalar_key(v) and not isinstance(v, (Index, Series))
 
 
+def _array_op_values(col, values, n):
+    """A range's or a tuple's values against a column, as the column's array
+    compares with them: numpy's broadcasting for numbers and bools (one value
+    broadcasts; a Series of one value against more is pandas' length error),
+    else equal lengths, with the str and datetime arrays' own messages."""
+    m = len(values)
+    if col.dtype is STR:
+        if m != n:
+            raise ValueError("Lengths of operands do not match: %d != %d" % (n, m))
+    elif col.dtype is DT:
+        if m != n:
+            raise ValueError("Lengths must match")
+    elif m != n:
+        if m == 1:
+            values = values * n
+        elif n == 1:
+            raise ValueError("Length of values (%d) does not match length of index (1)" % m)
+        else:
+            raise ValueError("operands could not be broadcast together with shapes (%d,) (%d,) " % (n, m))
+    return column_from(values) if values else Column("object", [])
+
+
 def _compare_values(values, n, broadcast):
     # (a list-like compared by an operator: its length must be the Series', with pandas' message, or numpy's
     # broadcast message for a range)
@@ -292,23 +314,12 @@ class Series(object):
             if not self._pd_index.equals(other._pd_index):
                 raise ValueError("Can only compare identically-labeled Series objects")
             right = other._pd_col
-        elif isinstance(other, range):
-            # (a range is an array to numpy: one value broadcasts; a Series of one value against a longer range is
-            # pandas' length error)
-            values = list(other)
-            n = len(self)
-            if len(values) == 1 and n != 1:
-                values = values * n
-            elif n == 1 and len(values) != 1:
-                raise ValueError("Length of values (%d) does not match length of index (1)" % len(values))
-            right = _compare_values(values, n, True)
-        elif isinstance(other, (list, tuple, np.ndarray, Index)):
-            if (self._pd_col.dtype is DT and isinstance(other, (list, tuple)) and not len(other)
-                    and op not in ("eq", "ne")):
-                # (pandas takes an empty list as a float array, and a tuple as itself: neither has an order with
-                # times; the named comparisons make a Series of it first, and give an empty result)
-                raise TypeError("Invalid comparison between dtype=datetime64[us] and %s"
-                                % ("tuple" if isinstance(other, tuple) else "ndarray"))
+        elif isinstance(other, (range, tuple)):
+            # (pandas passes a range or a tuple to the array's own comparison, without its length check)
+            right = _array_op_values(self._pd_col, list(other), len(self))
+            return Series._pd_new(R.compare(self._pd_col, right, op, type(other).__name__), self._pd_index.copy(),
+                                  self._pd_name)
+        elif isinstance(other, (list, np.ndarray, Index)):
             right = _compare_values(other, len(self), False)
         elif _is_scalar(other):
             right = other
@@ -349,7 +360,7 @@ class Series(object):
             lm, rm = left.isna().tolist(), right.isna().tolist()
             left = RS.fill_positions(left, dict((p, fill_value) for p, (a, b) in enumerate(zip(lm, rm)) if a and not b))
             right = RS.fill_positions(right, dict((p, fill_value) for p, (a, b) in enumerate(zip(lm, rm)) if b and not a))
-        return Series._pd_new(R.compare(left, right, op), index, name)
+        return Series._pd_new(R.compare(left, right, op, None), index, name)
 
     def __eq__(self, other):
         return self._pd_compare(other, "eq")

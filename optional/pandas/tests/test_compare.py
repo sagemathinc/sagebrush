@@ -223,3 +223,23 @@ for name, e in [("dt", pd.Series([], dtype="datetime64[us]")), ("int", pd.Series
         case("empty-%s-named-list-%s" % (name, n), lambda n=n, e=e: getattr(e, n)([]).tolist())
         case("empty-%s-ndarray-%s" % (name, n), lambda op=op, e=e: op(e, np.array([])).tolist())
         case("empty-%s-tuple-%s" % (name, n), lambda op=op, e=e: warned(lambda: op(e, ()))[0].tolist())
+
+# length before order: an empty list or tuple against a nonempty datetime Series is a length error first
+for k in [0, 1, 2]:
+    dk = pd.Series([pd.Timestamp("2020-01-01")] * k, dtype="datetime64[us]")
+    for kind, r in [("list", []), ("tuple", ())]:
+        for n, op in ops:
+            case("length-first-%d-%s-%s" % (k, kind, n), lambda op=op, dk=dk, r=r: warned(lambda: op(dk, r))[0].tolist())
+            case("length-first-%d-%s-named-%s" % (k, kind, n), lambda n=n, dk=dk, r=r: warned(lambda: getattr(dk, n)(r))[0].tolist())
+
+# a tuple or a range is compared by the column's own array: numpy's broadcasting for numbers, equal lengths with
+# the str and datetime arrays' messages
+makers = {"int": lambda k: pd.Series(list(range(k)), dtype="int64"), "str": lambda k: pd.Series(["a"] * k, dtype="str"),
+          "dt": lambda k: pd.Series([pd.Timestamp("2020-01-01")] * k, dtype="datetime64[us]")}
+fill = {"int": 0, "str": "a", "dt": pd.Timestamp("2020-01-01")}
+for name in makers:
+    for k in [0, 1, 2]:
+        for m in [0, 1, 2, 3]:
+            for n, op in [("eq", operator.eq), ("lt", operator.lt)]:
+                case("tuple-%s-%d-%d-%s" % (name, k, m, n), lambda op=op, name=name, k=k, m=m: warned(lambda: op(makers[name](k), tuple([fill[name]] * m)))[0].tolist())
+                case("range-%s-%d-%d-%s" % (name, k, m, n), lambda op=op, name=name, k=k, m=m: warned(lambda: op(makers[name](k), range(m)))[0].tolist())
