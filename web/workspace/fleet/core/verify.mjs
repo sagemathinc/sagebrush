@@ -34,7 +34,7 @@ export function showFingerprint(full) {
 // ---- shared steps
 
 /** Open a device-signed object: the signer counts at the body's chain_seq and at the pinned head (§2.3). */
-async function openByDevice(bytes, ctx, type, schema, { allowRemoved = false } = {}) {
+export async function openByDevice(bytes, ctx, type, schema, { allowRemoved = false } = {}) {
   let device = null;
   const env = await open(bytes, {
     aud: ctx.aud, fleet: ctx.fleet,

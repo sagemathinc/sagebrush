@@ -140,6 +140,25 @@ check("split-over-2MiB-placeholder", (() => { const t = splitChunk('<div class="
   check("split-weight", weight('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') === bytes('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') - "data:abc".length && weight("src=\"data:zz\" text") === bytes("src=\"data:zz\" text"), null);
 }
 check("split-small-unchanged", splitChunk('<div class="p">hi</div>')[0] === '<div class="p">hi</div>', null);
+// (issue 623: a table float of amsldoc's, 50 KiB, was "too large (50 KiB, over 128 KiB)". KaTeX's MathML writes
+//  <mtd class ="mtr-glue"> (a space before "="), which the tag pattern didn't take as a tag: its close tags unmatched,
+//  the float wasn't one element, and that was a placeholder at any size over the 32 KiB aimed for. Now such tags are
+//  tags; a chunk that fits one piece is never a placeholder; and the size a placeholder says is over the limit it says)
+{
+  const gather = '<span class="katex-display"><math><semantics><mtable><mtr><mtd class ="mtr-glue"></mtd><mtd><mi>a</mi></mtd><mtd class ="mml-eqn-num"></mtd></mtr></mtable></semantics></math></span>';
+  const float = '<div class="float">' + Array.from({ length: 160 }, (_, k) => '<div class="p">row ' + k + " " + gather.repeat(2) + "</div>").join("") + "</div>";
+  const told = [], fp = splitChunk(float, (why, size) => told.push(tooLargeProblem(why, size, 0)));
+  check("split-katex-spaced-attributes-are-tags", bytes(float) > 32 * 1024 && bytes(float) < PIECE_MAX && told.length === 0 && fp.length > 1 && !fp.some((p) => /toolarge/.test(p)) && fp.slice(1).every((p) => p.startsWith('<div class="float cont">')), { n: bytes(float), told, pieces: fp.length });
+  // (not one element (two siblings), over the target, under the maximum: kept whole, nothing said)
+  const two = '<div class="p">' + "a ".repeat(12000) + '</div><div class="p">' + "b ".repeat(12000) + "</div>", told2 = [];
+  const tw = splitChunk(two, (why, size) => told2.push(size));
+  check("split-fits-one-piece-never-a-placeholder", bytes(two) > 32 * 1024 && bytes(two) < PIECE_MAX && tw.length === 1 && tw[0] === two && told2.length === 0, { n: bytes(two), told2, pieces: tw.length });
+  // (every placeholder's size over the limit it names)
+  const said = [];
+  for (const h of [table, huge, '<div class="p">' + "y ".repeat(CHUNK_MAX) + "</div>"]) splitChunk(h, (why, size) => said.push(tooLargeProblem(why, size, 0).name));
+  const over = said.map((s) => /\((\d+) KiB, over (\d+) KiB\)$/.exec(s)).map((m) => m && +m[1] > +m[2]);
+  check("split-placeholder-size-over-its-limit", said.length === 3 && over.every(Boolean), said);
+}
 
 // ---- watchdog.ts (issue 619): the preview's watchdog judges the worker by the page's time; a timer the page's own
 // blocking made late waits once more (LATE_MS) for a reply already queued, then the worker is hung. A fake clock: `run`
@@ -936,7 +955,7 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
     article: ["Sums of Squares", "Contents", "Theorem", "Proof"], beamer: ["A Short Talk", "Overlays", "Two columns", "A math slide"],
     sagetex: ["In this preview", "sagebrush latex run"], pythontex: ["In this preview", "Python item 2: not run"],
     matlab: ["MATLAB in LaTeX", "eig(A)"], figure: ["Figure 1", "The function"], cv: ["Ada Example", "Education", "Publications"],
-    tikz: ["not rendered in this prototype"], bibliography: ["[1]", "Diamond"], homework: ["Homework 3", "(10 points)"],
+    tikz: ["[tikzpicture: the axis environment", "[tikzpicture: a node on a path"], bibliography: ["[1]", "Diamond"], homework: ["Homework 3", "(10 points)"],
   };
   const record = [];
   for (const ex of EXAMPLES) {
@@ -1143,6 +1162,37 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
   const pct = its(sd("$\\sage{7 % 3}$\n\n$\\sage{1}$"));
   const mac = its(sd("$\\x$", "\\newcommand{\\x}{\\sage{1+\\foo}}\n"));
   check("sagetex-source-args-comment-and-macro-keep-the-subset", pct[0].err === "par" && pct[1].code === "1" && eq(mac, [{ mode: "sage", err: "cs", name: "foo" }]), { pct, mac });
+}
+
+// ---- amsthm's \qedhere (issue 1800): in a proof, the end-of-proof symbol where it is, and not again at the proof's end:
+// in a display, KaTeX's tag on the very row it is in (an align*'s first row, or its last, as amsthm places it); in a
+// list item or the text, there; never sent to KaTeX (no math problem); a numbered display can't take it (said, the
+// symbol at the proof's end); outside a proof, nothing. A proof without it: the symbol at its end, as before
+{
+  const doc = (body) => "\\documentclass{article}\n\\usepackage{amsthm}\n\\begin{document}\n" + body + "\n\\end{document}\n";
+  const run = (body) => { const r = new Engine().update(doc(body)); return { h: r.chunks.join(""), problems: r.problems || [] }; };
+  // (KaTeX's visible HTML only: its MathML, for screen readers, holds the symbol again)
+  const seen = (h) => h.replace(/<span class="katex-mathml">[\s\S]*?<\/math><\/span>/g, "");
+  const qeds = (h) => (h.match(/class="qed"/g) || []).length, tags = (h) => (seen(h).match(/\u25a0/g) || []).length;
+  // (the tag's row: the vertical offset KaTeX gives the tag column's entry holding the symbol)
+  const rowTop = (h0) => { const h = seen(h0), i = h.indexOf("\u25a0"); const t = [...h.slice(Math.max(0, i - 400), i).matchAll(/top:(-?[\d.]+)em/g)]; return t.length ? +t[t.length - 1][1] : null; };
+  const noMath = (r) => !r.problems.some((p) => p.kind === "math" || p.kind === "command") && !/katex-error|qedhere/.test(r.h);
+  const disp = run("\\begin{proof}\nIt follows that\n\\[ a = b. \\qedhere \\]\n\\end{proof}");
+  check("qedhere-display", tags(disp.h) === 1 && qeds(disp.h) === 0 && /<div class="dmath">[\s\S]*\u25a0/.test(disp.h) && noMath(disp), { tags: tags(disp.h), qeds: qeds(disp.h), problems: disp.problems });
+  const rows = (k) => run("\\begin{proof}\n\\begin{align*} a&=b" + (k === 0 ? " \\qedhere" : "") + " \\\\ c&=d \\\\ e&=f" + (k === 2 ? " \\qedhere" : "") + " \\end{align*}\n\\end{proof}");
+  const r0 = rows(0), r2 = rows(2);
+  check("qedhere-align-its-own-row", tags(r0.h) === 1 && tags(r2.h) === 1 && qeds(r0.h) + qeds(r2.h) === 0 && rowTop(r0.h) !== null && rowTop(r2.h) !== null && rowTop(r0.h) < rowTop(r2.h) - 1 && noMath(r0) && noMath(r2), { first: rowTop(r0.h), last: rowTop(r2.h) });
+  const num = run("\\begin{proof}\n\\begin{align} a&=b \\\\ c&=d \\qedhere \\end{align}\n\\end{proof}");
+  check("qedhere-numbered-display-said", tags(num.h) === 0 && qeds(num.h) === 1 && num.problems.some((p) => p.kind === "not-rendered" && /qedhere in a numbered display/.test(p.name)) && !/katex-error|qedhere/.test(num.h), { problems: num.problems });
+  const list = run("\\begin{proof}\n\\begin{enumerate}\n\\item one\n\\item two \\qedhere\n\\end{enumerate}\n\\end{proof}");
+  const li = list.h.lastIndexOf("<li"), q = list.h.indexOf('class="qed"');
+  check("qedhere-list", qeds(list.h) === 1 && q > li && q < list.h.lastIndexOf("</li>") + 5 && !list.problems.some((p) => p.kind === "command"), { qeds: qeds(list.h), problems: list.problems });
+  const plain = run("\\begin{proof}\nTrivial.\n\\end{proof}");
+  check("qedhere-none-symbol-at-end", qeds(plain.h) === 1 && /Trivial\.[\s\S]*class="qed"/.test(plain.h), qeds(plain.h));
+  const outside = run("Not a proof \\qedhere.\n\\[ x \\qedhere \\]");
+  check("qedhere-outside-a-proof-nothing", qeds(outside.h) + tags(outside.h) === 0 && noMath(outside), { problems: outside.problems });
+  const two = run("\\begin{proof}\n\\[ a \\qedhere \\]\n\\end{proof}\n\\begin{proof}\nAgain.\n\\end{proof}");
+  check("qedhere-each-proof-its-own", tags(two.h) === 1 && qeds(two.h) === 1, { tags: tags(two.h), qeds: qeds(two.h) });
 }
 
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);
