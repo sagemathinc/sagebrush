@@ -955,7 +955,7 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
     article: ["Sums of Squares", "Contents", "Theorem", "Proof"], beamer: ["A Short Talk", "Overlays", "Two columns", "A math slide"],
     sagetex: ["In this preview", "sagebrush latex run"], pythontex: ["In this preview", "Python item 2: not run"],
     matlab: ["MATLAB in LaTeX", "eig(A)"], figure: ["Figure 1", "The function"], cv: ["Ada Example", "Education", "Publications"],
-    tikz: ["not rendered in this prototype"], bibliography: ["[1]", "Diamond"], homework: ["Homework 3", "(10 points)"],
+    tikz: ["[tikzpicture: the axis environment", "[tikzpicture: a node on a path"], bibliography: ["[1]", "Diamond"], homework: ["Homework 3", "(10 points)"],
   };
   const record = [];
   for (const ex of EXAMPLES) {

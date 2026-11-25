@@ -84,9 +84,11 @@ CLASSES = {"1", "2", "3", "1+2", "1+3", "2+3", "1+2+3", "coverage", "none"}
 # host's deadlines and live-frame cap, with their measurements (web/test-output-frames.mjs): class 1)
 # and the sync server's agents' index (fs-sync 1a2, web/sync/entries.ts): its host bounds, each its own IX_*_MAX line, and
 # its work meter (the Budget and its charges): class 1, interim until #904's slice 2 (LIMITS on #913), never membership)
+# and the LaTeX preview's TikZ pictures (web/latex/engine/tikz.mjs TIKZ_LIMITS, each bound a named problem and a
+# placeholder, never a partial picture, with its hostile row in web/latex/test-latex-tikz.mjs): class 1)
 WEB = {"web/workspace/sync-ledger.ts", "web/notebook/text-overlap.ts", "web/stall-fetch.js", "web/workspace/checkpoint.ts", "web/latex/run-core.mjs",
        "web/latex/results-check.mjs", "web/output-shell/protocol.js", "web/output-shell/shell.js", "web/notebook/output-frames.js",
-       "web/sync/entries.ts"}
+       "web/sync/entries.ts", "web/latex/engine/tikz.mjs"}
 
 
 def short(key):

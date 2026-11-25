@@ -85,7 +85,7 @@ const U = {
   subfigure: "\\begin{subfigure}{3cm}x\\end{subfigure}", subequations: "\\begin{subequations}\\begin{equation}x\\end{equation}\\end{subequations}",
   algorithm: "\\begin{algorithm}x\\end{algorithm}", algorithmic: "\\begin{algorithmic}x\\end{algorithmic}", tcolorbox: "\\begin{tcolorbox}x\\end{tcolorbox}",
   mdframed: "\\begin{mdframed}x\\end{mdframed}", framed: "\\begin{framed}x\\end{framed}", landscape: "\\begin{landscape}x\\end{landscape}",
-  tikzpicture: "\\begin{tikzpicture}\\draw (0,0)--(1,1);\\end{tikzpicture}",
+  tikzpicture: "\\begin{tikzpicture}\\draw (0,0)--(1,1) node {x};\\end{tikzpicture}",
 };
 const UNOT = new Set(["\\bibliography", ".bib", "\\cite", "\\usepackage"]);
 const uns = rows(section("Not supported, and what you see instead")).flatMap((l) => ticks(l.split(" | ")[0])).filter((t) => !UNOT.has(t));
@@ -95,7 +95,8 @@ for (const [name, snip] of Object.entries(U)) {
   const f = "u-" + name.replace(/\W/g, "") + ".tex";
   writeFileSync(join(dir, f), "\\documentclass{article}\n\\begin{document}\n" + snip + "\n\\end{document}\n");
   const r = latex("check", "--json", f), nm = name.replace(/^\\/, "");
-  ok(r.json?.problems?.some((p) => p.name === nm && ["command", "environment", "not-rendered"].includes(p.kind)), "Not supported: " + name + " reported by check", r.json?.problems);
+  // (a picture's problem names what it needs: "tikzpicture (a node on a path: ...)")
+  ok(r.json?.problems?.some((p) => (p.name === nm || p.name.startsWith(nm + " (")) && ["command", "environment", "not-rendered"].includes(p.kind)), "Not supported: " + name + " reported by check", r.json?.problems);
 }
 writeFileSync(join(dir, "refs.bib"), "@article{knuth84, author = {D. Knuth}, title = {Literate Programming}, year = {1984}}\n");
 writeFileSync(join(dir, "bib.tex"), "\\documentclass{article}\n\\begin{document}\n\\cite{knuth84}\n\\bibliography{refs}\n\\end{document}\n");
