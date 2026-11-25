@@ -1209,6 +1209,29 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
   check("natbib-labels-kept", /\[Ann\(2001\)\]/.test(plain(new Engine().update(NAT("sort").replace("\\usepackage[sort]{natbib}", ""), { cold: true }).chunks.join(""))), null);
 }
 
+// ---- latex check: a problem in an \input file is reported at that file and its own line (and the main file's line it
+// was read from, input_line), in reading order; text after the \input on the same line is the main file's again; the
+// file named from the main file's folder, as the main file is named
+{
+  const { engineInputs } = await import("./inputs.ts");
+  const { checkResult, checkText, inputFileName } = await import("./check.ts");
+  const names = [["/sec/x.tex", "/main.tex", "main.tex", "sec/x.tex"], ["/paper/sec/x.tex", "/paper/main.tex", "paper/main.tex", "paper/sec/x.tex"],
+    ["/shared/defs.tex", "/ex/doc.tex", "doc.tex", "../shared/defs.tex"], ["/a.tex", "/a/b/doc.tex", "doc.tex", "../../a.tex"], ["/w/sec/x.tex", "/w/main.tex", "/w/main.tex", "/w/sec/x.tex"]];
+  const badN = names.filter(([k, d, f, want]) => inputFileName(k, d, f) !== want).map(([k, d, f, want]) => [k, d, f, want, inputFileName(k, d, f)]);
+  check("check-input-file-name", badN.length === 0, badN);
+  const MAIN = "\\documentclass{article}\n\\begin{document}\nA \\zza.\n\\input{part} \\zzb.\n\\zzc.\n\\end{document}\n";
+  const known = new Map([["/ex/part.tex", { text: "One.\n\\zzd.\n\\input{nothere}\n\\input{sub/deep}\nTwo \\zze.\n" }], ["/ex/sub/deep.tex", { text: "\n\n\\zzf.\n" }],
+    ["/ex/nothere.tex", { absent: true }], ["/ex/nothere", { absent: true }]]);
+  const ei = engineInputs("/ex/main.tex", known), r = new Engine().update(MAIN, { cold: true, inputs: { files: ei.files, resolve: ei.resolve, version: 1 } });
+  const res = checkResult("main.tex", MAIN, { outcome: String(r.stats.outcome), beamer: false, problems: r.problems, frames: r.frames, sage: [] }, [], "/ex/main.tex");
+  const got = res.problems.filter((p) => p.kind === "command" || p.kind === "input").map((p) => [p.name, p.file ?? "main.tex", p.line, p.input_line ?? null]);
+  check("check-input-lines", JSON.stringify(got) === JSON.stringify([["zza", "main.tex", 3, null], ["zzd", "part.tex", 2, 4], ["nothere", "part.tex", 3, 4], ["zzf", "sub/deep.tex", 3, 4], ["zze", "part.tex", 5, 4], ["zzb", "main.tex", 4, null], ["zzc", "main.tex", 5, null]]), got);
+  check("check-input-text", /^part\.tex:2: warning: \\zzd is not supported/m.test(checkText(res)) && /^sub\/deep\.tex:3: warning: \\zzf/m.test(checkText(res)) && /^main\.tex:4: warning: \\zzb/m.test(checkText(res)), checkText(res));
+  // (without the main file's path: as before, every problem at the main file's line)
+  const old = checkResult("main.tex", MAIN, { outcome: "ok", beamer: false, problems: r.problems, frames: [], sage: [] }, []);
+  check("check-input-no-docpath", old.problems.every((p) => p.file === undefined && p.input_line === undefined) && old.problems.filter((p) => ["zzd", "zze", "zzf"].includes(p.name)).every((p) => p.line === 4), old.problems.map((p) => [p.name, p.line]));
+}
+
 // ---- envclose.ts (P1a): the close a "}" typed after \begin{X} adds, or none
 {
   const at = (t) => [t.replace("|", ""), t.indexOf("|")];
