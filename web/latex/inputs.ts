@@ -15,12 +15,19 @@ export type Known = { text: string } | { why: string } | { absent: true };
 /** The engine's inputs, for the .tex at `docPath`, from what the host has read (`known`, by workspace path):
  * `files` (key -> text: the read ones), `resolve(name)` (the key, or why there is none) and `wanted(names)` (the
  * candidate paths the host should look at next: unknown ones for each name, in order, up to the first that might
- * be it). The .tex itself is the engine's main.tex. `relativeToFile`: the folders named from the file's (the CLI). */
+ * be it). The .tex itself is the engine's main.tex; `jobname` is its name, as TeX's \jobname, and `jobname`.bbl is looked
+ * for by that exact name. `relativeToFile`: the folders named from the file's (the CLI). */
 export function engineInputs(docPath: string, known: Map<string, Known>, relativeToFile = false) {
   const files = new Map<string, string>();
   for (const [p, k] of known) if ("text" in k && p !== docPath) files.set(p, k.text);
+  // (TeX's \jobname: the .tex's name without its folder and ".tex"; \bibliography reads \jobname.bbl by that exact name,
+  //  beside the .tex, as pdflatex does: never a .bbl.tex, as an \input's name would be tried first)
+  const slash = docPath.lastIndexOf("/"), base = docPath.slice(slash + 1);
+  const jobname = /\.tex$/i.test(base) ? base.slice(0, -4) : base;
+  const bbl = jobname + ".bbl";
+  const candidates = (name: string) => name === bbl ? { ok: true as const, paths: [docPath.slice(0, slash + 1) + bbl], searched: [docPath.slice(0, Math.max(slash, 1))] } : texCandidates(name, docPath);
   const resolve = (name: string): { key?: string; why?: string } => {
-    const c = texCandidates(name, docPath);
+    const c = candidates(name);
     if (!c.ok) return { why: c.why };
     for (const p of c.paths) {
       if (p === docPath) return { key: "main.tex" };
@@ -34,7 +41,7 @@ export function engineInputs(docPath: string, known: Map<string, Known>, relativ
   const wanted = (names: string[]): string[] => {
     const out: string[] = [];
     for (const name of names) {
-      const c = texCandidates(name, docPath);
+      const c = candidates(name);
       if (!c.ok) continue;
       for (const p of c.paths) {
         if (p === docPath) break;
@@ -45,7 +52,7 @@ export function engineInputs(docPath: string, known: Map<string, Known>, relativ
     }
     return out;
   };
-  return { files, resolve, wanted };
+  return { files, resolve, wanted, jobname };
 }
 
 /** An included file's bytes as the engine's text, or why not, against what is already kept (`kept` bytes, `count`

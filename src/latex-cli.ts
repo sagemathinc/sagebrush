@@ -177,7 +177,7 @@ export function renderTex(file: string, text: string): { result: CheckResult; ht
   //  it by their real paths), until it asks for no new one; a .tex outside the folder reads none)
   const known = new Map<string, Known>();
   let inputBytes = 0;
-  const inputsNow = () => { const ei = engineInputs(doc ?? "/", known, true); return { ei, opt: { files: ei.files, resolve: doc ? ei.resolve : () => ({ why: "the .tex is outside the folder the command runs in" }), version: known.size } }; };
+  const inputsNow = () => { const ei = engineInputs(doc ?? "/", known, true); return { ei, opt: { files: ei.files, resolve: doc ? ei.resolve : () => ({ why: "the .tex is outside the folder the command runs in" }), jobname: ei.jobname, version: known.size } }; };
   let first: any;
   for (let round = 0; ; round++) {
     const { ei, opt } = inputsNow();
