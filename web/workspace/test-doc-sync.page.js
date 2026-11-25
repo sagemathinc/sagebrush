@@ -262,6 +262,9 @@ T.untyped = (how, cid) => {
   T.nb.flush();
   return true;
 };
+/** The same, then the save it caused finished (the notebook's own saved(): every queued save written), for a case
+ * that reads what that save kept, rather than racing it with a fixed wait. */
+T.untypedSaved = async (how, cid) => { T.untyped(how, cid); await T.nb.saved(); return true; };
 /** A stale save (made from a revision the record has passed, from that record's value): its T1 kept and sent like any
  * other, its T2 refused (a conflict): an orphan version, never the document. */
 T.editStale = async (id, cells) => {
