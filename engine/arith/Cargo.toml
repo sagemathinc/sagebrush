@@ -14,7 +14,15 @@ num-integer = "0.1"
 num-traits = "0.2"
 dashu-int = { git = "https://github.com/sagemathinc/dashu", rev = "36ff7ad5b9225198bf6a322a70f0947e9376cece" }
 
+[features]
+# Tests and benchmarks only: the fast product's entries that bypass its
+# admission (Mat::mul_planned, Mat::planned_peak) and its state
+# (fast_allowance_left, fast_n0); never in a production build
+test-hooks = []
+
 [dev-dependencies]
+# (this crate's own integration tests and examples get its test hooks)
+sagebrush-arith = { path = ".", features = ["test-hooks"] }
 # (tests only: the checked extended gcd's fallback forced, tests/xgcd_charge.rs)
 sagebrush-bigint = { path = "../bigint", features = ["test-hooks"] }
 sagebrush-interrupt = { path = "../interrupt", features = ["test-hooks"] }

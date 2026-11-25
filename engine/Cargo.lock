@@ -746,6 +746,7 @@ dependencies = [
  "dashu-int",
  "num-integer",
  "num-traits",
+ "sagebrush-arith",
  "sagebrush-bigint",
  "sagebrush-interrupt",
  "sagebrush-par",
