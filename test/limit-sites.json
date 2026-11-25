@@ -16093,5 +16093,395 @@
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'max' in np.maximum; the line takes a moving maximum's (or minimum's) fill value into each window's statistic, not a limit on a computation"
+ },
+ "lib/_matlab_krylov.py ::  :: 1: \"the maximum number of iterations was reached\", #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in a solver's message, MATLAB's wording for why it stopped (its own maxit reached, or a scalar out of range), not a limit Sagebrush imposes"
+ },
+ "lib/_matlab_krylov.py ::  :: 4: \"a scalar quantity became too small or too large to continue computing\", #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in a solver's message, MATLAB's wording for why it stopped (its own maxit reached, or a scalar out of range), not a limit Sagebrush imposes"
+ },
+ "lib/_matlab_krylov.py ::  :: desired tolerance 1e-12 / because the maximum number of iterations was reached. / The iterate returned (number 0) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in a solver's message, MATLAB's wording for why it stopped (its own maxit reached, or a scalar out of range), not a limit Sagebrush imposes"
+ },
+ "lib/_matlab_krylov.py :: _bicgstab :: for ii in range(1, maxit + 1): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _gmres_inner :: \"\"\"(inner iterations per cycle, outer cycles) from gmres's restart and maxit, as its page gives them\"\"\" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _gmres_inner :: def _gmres_inner(n, restart, maxit): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _gmres_inner :: return (min(n, 10) if maxit is None else min(maxit, n)), 1 #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _gmres_inner :: return restart, (min(-(-n // restart), 10) if maxit is None else maxit) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _gmres_work :: def _gmres_work(n, restart, maxit): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _lsqr :: for ii in range(1, maxit + 1): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _minres :: for ii in range(1, maxit + 1): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _pcg :: for ii in range(1, maxit + 1): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _setup :: \"\"\"the problem from a solver's arguments: (A, b, [restart,] tol, maxit, M1, M2, x0), as its page lists them; its #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _setup :: maxit = None if _empty(maxit) else _scalar_arg(maxit, fname, \"maxit\", None, integer=True) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _setup :: maxit = a.get(\"maxit\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _setup :: names = [\"A\", \"b\"] + ([\"restart\"] if restart else []) + [\"tol\", \"maxit\", \"M1\", \"M2\", \"x0\"] #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: bicgstab_ :: \"\"\"[x, flag, relres, iter, resvec] = bicgstab(A, b, tol, maxit, M1, M2, x0): the biconjugate gradients #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: bicgstab_ :: maxit = min(n, 20) if maxit is None else maxit #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: bicgstab_ :: stabilized method, right preconditioned by M = M1*M2; tol 1e-6 and maxit min(size(A,1), 20) by default; iter #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: gmres_ :: \"\"\"[x, flag, relres, iter, resvec] = gmres(A, b, restart, tol, maxit, M1, M2, x0): the generalized minimum #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: gmres_ :: M = M1*M2; tol 1e-6; maxit outer iterations, min(ceil(size(A,1)/restart), 10) by default, or min(size(A,1), 10) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: gmres_ :: inner, outer = _gmres_inner(n, restart, maxit) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: lsqr_ :: \"\"\"[x, flag, relres, iter, resvec, lsvec] = lsqr(A, b, tol, maxit, M1, M2, x0): least squares by LSQR for any #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: lsqr_ :: maxit = min(m, 20) if maxit is None else maxit #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: lsqr_ :: preconditioned by an n-by-n M = M1*M2; tol 1e-6 and maxit min(size(A,1), 20) by default (the page's); lsvec the #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: minres_ :: \"\"\"[x, flag, relres, iter, resvec] = minres(A, b, tol, maxit, M1, M2, x0): the minimum residual method for a #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: minres_ :: maxit = min(n, 20) if maxit is None else maxit #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: minres_ :: tol 1e-6 and maxit min(size(A,1), 20) by default. The sixth output, resveccg, is not supported in Sagebrush\"\"\" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: pcg_ :: \"\"\"[x, flag, relres, iter, resvec] = pcg(A, b, tol, maxit, M1, M2, x0): preconditioned conjugate gradients for a #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: pcg_ :: maxit = min(n, 20) if maxit is None else maxit #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: pcg_ :: preconditioner, matrices or handles returning M\\\\x; tol 1e-6 and maxit min(size(A,1), 20) by default\"\"\" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _Budget :: class _Budget: #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _History :: \"\"\"a residual history whose every entry is admitted (_Budget.take) before it is appended\"\"\" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _History.__init__ :: def __init__(self, budget, first=()): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _History.__init__ :: self.budget = budget #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _History.append :: self.budget.take() #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _Op.prepare :: def prepare(self, budget, cplx): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _Op.prepare :: self.F = L.factor(v, \"The preconditioner's sparse LU\", ledger=budget) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _Op.retained :: in the same budget)\"\"\" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _bicgstab :: def _bicgstab(op, b, tol, maxit, M, x0, budget): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _bicgstab :: resvec = _History(budget, [normr]) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _gmres :: def _gmres(op, b, tol, restart, outer, M, x0, n, budget): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _gmres :: resvec = _History(budget, [normr]) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _gmres_work :: inner, outer = _gmres_inner(n, restart, maxit) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _its :: \"\"\"the iterations a short-recurrence solver may run: maxit, or the pages' default, min(n, 20)\"\"\" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _its :: def _its(n, maxit): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _its :: return min(n, 20) if maxit is None else maxit #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _lsqr :: def _lsqr(op, b, tol, maxit, M, x0, budget): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _lsqr :: resvec, lsvec = _History(budget, [beta]), _History(budget) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _minres :: def _minres(op, b, tol, maxit, M, x0, budget): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _minres :: resvec = _History(budget, [normr]) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _nan_rhs :: def _nan_rhs(fname, nargout, b, x0, tol, budget, gmres=False, lsq=False): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _nan_rhs :: resvec = _History(budget, [_math.nan]) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _pcg :: def _pcg(op, b, tol, maxit, M, x0, budget): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _pcg :: resvec = _History(budget, [normr]) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _setup :: budget = _Budget(\"%s of a system of %d unknowns\" % (fname, N)) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _setup :: budget.reserve(per * (N * count + extra) + C_HDR * (count + 2 * lists) + C_LIST * lists #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _setup :: budget.reserved = first #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _setup :: count, extra, history = vectors(max(m, n), r, maxit) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches max() choosing the problem's length for the memory charged, which is admitted by _m._admit_bytes, not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _setup :: histories)), admitted before any vector is made (_Budget)\"\"\" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _setup :: o.prepare(budget, data_cplx) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _setup :: return op, bv, tol, maxit, r, _Precond(pre), x0v, m, n, cplx, budget #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: _setup :: work, vectors(n, restart, maxit) -> (vectors of the problem's length, other elements, (history entries at most, #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: bicgstab_ :: nan = _nan_rhs(\"bicgstab\", nargout, b, x0, tol, budget) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: bicgstab_ :: op, b, tol, maxit, _, M, x0, m, n, cplx, budget = _setup(\"bicgstab\", nargout, args, #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: bicgstab_ :: x, flag, relres, it, resvec, stop = _bicgstab(op, b, tol, maxit, M, x0, budget) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: gmres_ :: nan = _nan_rhs(\"gmres\", nargout, b, x0, tol, budget, gmres=True) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: gmres_ :: op, b, tol, maxit, restart, M, x0, m, n, cplx, budget = _setup(\"gmres\", nargout, args, _gmres_work, restart=True) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: gmres_ :: x, flag, relres, it, resvec, stop = _gmres(op, b, tol, max(inner, 1), outer if inner else 0, M, x0, n, budget) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: lsqr_ :: nan = _nan_rhs(\"lsqr\", nargout, b, x0, tol, budget, lsq=True) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: lsqr_ :: op, b, tol, maxit, _, M, x0, m, n, cplx, budget = _setup(\"lsqr\", nargout, args, #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: lsqr_ :: x, flag, relres, it, resvec, lsvec, stop = _lsqr(op, b, tol, maxit, M, x0, budget) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: minres_ :: nan = _nan_rhs(\"minres\", nargout, b, x0, tol, budget) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: minres_ :: op, b, tol, maxit, _, M, x0, m, n, cplx, budget = _setup(\"minres\", nargout, args, #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: minres_ :: x, flag, relres, it, resvec, stop = _minres(op, b, tol, maxit, M, x0, budget) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: pcg_ :: nan = _nan_rhs(\"pcg\", nargout, b, x0, tol, budget) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: pcg_ :: op, b, tol, maxit, _, M, x0, m, n, cplx, budget = _setup(\"pcg\", nargout, args, #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
+ },
+ "lib/_matlab_krylov.py :: pcg_ :: x, flag, relres, it, resvec, stop = _pcg(op, b, tol, maxit, M, x0, budget) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
  }
 }

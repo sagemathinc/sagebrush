@@ -213,5 +213,140 @@
     "tags": [
       "linear algebra"
     ]
+  },
+  {
+    "name": "pcg",
+    "kind": "function",
+    "signature": "x = pcg(A, b)\nx = pcg(A, b, tol)\nx = pcg(A, b, tol, maxit)\nx = pcg(A, b, tol, maxit, M)\nx = pcg(A, b, tol, maxit, M1, M2)\nx = pcg(A, b, tol, maxit, M1, M2, x0)\n[x, flag, relres, iter, resvec] = pcg(___)",
+    "summary": "Preconditioned conjugate gradients for a symmetric (Hermitian) positive definite system A*x = b.",
+    "doc": "tol is 1e-6 and maxit min(size(A,1), 20) by default. A is a matrix (full or sparse) or a function handle returning A*x; M = M1*M2 a preconditioner, matrices or handles returning M\\x; x0 the initial guess (zeros). [] for an argument takes its default. flag is 0 when relres <= tol, 1 when maxit iterations didn't get there, 2 for an ill-conditioned preconditioner, 3 when the method stagnated, 4 when a scalar quantity broke down. A solver that doesn't converge returns the iterate with the least residual, and iter its number; resvec holds the residual norms from x0's on. Without a flag output the solver prints what happened. A step whose p'*A*p isn't positive (A not positive definite) ends with flag 4.",
+    "examples": [
+      {
+        "code": "n = 10; e = ones(n, 1); A = spdiags([-e 2*e -e], -1:1, n, n);\n[x, flag, relres, iter] = pcg(A, (1:n)', 1e-10, 100)",
+        "expected": "\nx =\n\n   20.0000\n   39.0000\n   56.0000\n   70.0000\n   80.0000\n   85.0000\n   84.0000\n   76.0000\n   60.0000\n   35.0000\n\n\nflag =\n\n     0\n\n\nrelres =\n\n   2.9641e-15\n\n\niter =\n\n    10\n\n"
+      }
+    ],
+    "differs": [
+      "Not supported: single precision, and the old trailing parameters passed on to a function handle.",
+      "Not yet checked against MATLAB: the messages other than pcg's for a maxit stop, the identifiers of the refusals other than pcg's size mismatch, and the stagnation test (three steps in a row that move x by less than eps relative to it)."
+    ],
+    "status": "partial",
+    "see_also": [
+      "minres",
+      "gmres",
+      "bicgstab",
+      "lsqr"
+    ],
+    "tags": [
+      "linear algebra"
+    ]
+  },
+  {
+    "name": "minres",
+    "kind": "function",
+    "signature": "x = minres(A, b)\nx = minres(A, b, tol)\nx = minres(A, b, tol, maxit)\nx = minres(A, b, tol, maxit, M)\nx = minres(A, b, tol, maxit, M1, M2)\nx = minres(A, b, tol, maxit, M1, M2, x0)\n[x, flag, relres, iter, resvec] = minres(___)",
+    "summary": "The minimum residual method for a symmetric (Hermitian), possibly indefinite, system A*x = b.",
+    "doc": "tol is 1e-6 and maxit min(size(A,1), 20) by default. A is a matrix (full or sparse) or a function handle returning A*x; M = M1*M2 a preconditioner, matrices or handles returning M\\x; x0 the initial guess (zeros). [] for an argument takes its default. flag is 0 when relres <= tol, 1 when maxit iterations didn't get there, 2 for an ill-conditioned preconditioner, 3 when the method stagnated, 4 when a scalar quantity broke down. A solver that doesn't converge returns the iterate with the least residual, and iter its number; resvec holds the residual norms from x0's on. Without a flag output the solver prints what happened. M must be symmetric positive definite: flag 5 when it isn't. The residual norms in resvec never increase.",
+    "examples": [
+      {
+        "code": "n = 10; e = ones(n, 1); A = spdiags([e -2*e e], -1:1, n, n) + speye(n);\n[x, flag, relres, iter] = minres(A, (1:n)', 1e-10, 100)",
+        "expected": "\nx =\n\n   12.0000\n   13.0000\n    3.0000\n   -7.0000\n   -6.0000\n    6.0000\n   18.0000\n   19.0000\n    9.0000\n   -1.0000\n\n\nflag =\n\n     0\n\n\nrelres =\n\n   4.6410e-15\n\n\niter =\n\n    10\n\n"
+      }
+    ],
+    "differs": [
+      "Not supported: single precision, and the old trailing parameters passed on to a function handle. The sixth output, resveccg, is not supported.",
+      "Not yet checked against MATLAB: the messages other than pcg's for a maxit stop, the identifiers of the refusals other than pcg's size mismatch, and the stagnation test (three steps in a row that move x by less than eps relative to it)."
+    ],
+    "status": "partial",
+    "see_also": [
+      "pcg",
+      "gmres",
+      "bicgstab",
+      "lsqr"
+    ],
+    "tags": [
+      "linear algebra"
+    ]
+  },
+  {
+    "name": "gmres",
+    "kind": "function",
+    "signature": "x = gmres(A, b)\nx = gmres(A, b, restart)\nx = gmres(A, b, restart, tol)\nx = gmres(A, b, restart, tol, maxit)\nx = gmres(A, b, restart, tol, maxit, M)\nx = gmres(A, b, restart, tol, maxit, M1, M2)\nx = gmres(A, b, restart, tol, maxit, M1, M2, x0)\n[x, flag, relres, iter, resvec] = gmres(___)",
+    "summary": "The generalized minimum residual method for a general square system A*x = b, restarted or not.",
+    "doc": "restart inner iterations between restarts ([] or size(A,1): none; more than size(A,1) warns and is size(A,1)); maxit outer iterations, min(ceil(size(A,1)/restart), 10) by default, or min(size(A,1), 10) iterations without restarts; tol 1e-6. M preconditions on the left: relres and resvec are of M\\(b - A*x). iter is [outer inner]. A is a matrix (full or sparse) or a function handle returning A*x; M = M1*M2 a preconditioner, matrices or handles returning M\\x; x0 the initial guess (zeros). [] for an argument takes its default. flag is 0 when relres <= tol, 1 when maxit iterations didn't get there, 2 for an ill-conditioned preconditioner, 3 when the method stagnated, 4 when a scalar quantity broke down. A solver that doesn't converge returns the iterate with the least residual, and iter its number; resvec holds the residual norms from x0's on. Without a flag output the solver prints what happened.",
+    "examples": [
+      {
+        "code": "n = 10; e = ones(n, 1); A = spdiags([-e 3*e -2*e], -1:1, n, n);\n[x, flag, relres, iter] = gmres(A, (1:n)', 4, 1e-10, 20)",
+        "expected": "\nx =\n\n   23.0107\n   34.0161\n   38.5188\n   39.2702\n   37.6458\n   34.3337\n   29.6776\n   23.8495\n   16.9355\n    8.9785\n\n\nflag =\n\n     0\n\n\nrelres =\n\n   9.9333e-11\n\n\niter =\n\n    16     4\n\n"
+      }
+    ],
+    "differs": [
+      "Not supported: single precision, and the old trailing parameters passed on to a function handle.",
+      "Not yet checked against MATLAB: the messages other than pcg's for a maxit stop, the identifiers of the refusals other than pcg's size mismatch, and the stagnation test (three steps in a row that move x by less than eps relative to it)."
+    ],
+    "status": "partial",
+    "see_also": [
+      "pcg",
+      "minres",
+      "bicgstab",
+      "lsqr"
+    ],
+    "tags": [
+      "linear algebra"
+    ]
+  },
+  {
+    "name": "bicgstab",
+    "kind": "function",
+    "signature": "x = bicgstab(A, b)\nx = bicgstab(A, b, tol)\nx = bicgstab(A, b, tol, maxit)\nx = bicgstab(A, b, tol, maxit, M)\nx = bicgstab(A, b, tol, maxit, M1, M2)\nx = bicgstab(A, b, tol, maxit, M1, M2, x0)\n[x, flag, relres, iter, resvec] = bicgstab(___)",
+    "summary": "The biconjugate gradients stabilized method for a general square system A*x = b.",
+    "doc": "tol is 1e-6 and maxit min(size(A,1), 20) by default. M preconditions on the right. iter counts half iterations (9.5), and resvec has an entry for each. A is a matrix (full or sparse) or a function handle returning A*x; M = M1*M2 a preconditioner, matrices or handles returning M\\x; x0 the initial guess (zeros). [] for an argument takes its default. flag is 0 when relres <= tol, 1 when maxit iterations didn't get there, 2 for an ill-conditioned preconditioner, 3 when the method stagnated, 4 when a scalar quantity broke down. A solver that doesn't converge returns the iterate with the least residual, and iter its number; resvec holds the residual norms from x0's on. Without a flag output the solver prints what happened.",
+    "examples": [
+      {
+        "code": "n = 10; e = ones(n, 1); A = spdiags([-e 3*e -2*e], -1:1, n, n);\n[x, flag, relres, iter] = bicgstab(A, (1:n)', 1e-10, 100)",
+        "expected": "\nx =\n\n   23.0107\n   34.0161\n   38.5188\n   39.2702\n   37.6458\n   34.3337\n   29.6776\n   23.8495\n   16.9355\n    8.9785\n\n\nflag =\n\n     0\n\n\nrelres =\n\n   3.7502e-15\n\n\niter =\n\n    9.5000\n\n"
+      }
+    ],
+    "differs": [
+      "Not supported: single precision, and the old trailing parameters passed on to a function handle.",
+      "Not yet checked against MATLAB: the messages other than pcg's for a maxit stop, the identifiers of the refusals other than pcg's size mismatch, and the stagnation test (three steps in a row that move x by less than eps relative to it)."
+    ],
+    "status": "partial",
+    "see_also": [
+      "pcg",
+      "minres",
+      "gmres",
+      "lsqr"
+    ],
+    "tags": [
+      "linear algebra"
+    ]
+  },
+  {
+    "name": "lsqr",
+    "kind": "function",
+    "signature": "x = lsqr(A, b)\nx = lsqr(A, b, tol)\nx = lsqr(A, b, tol, maxit)\nx = lsqr(A, b, tol, maxit, M)\nx = lsqr(A, b, tol, maxit, M1, M2)\nx = lsqr(A, b, tol, maxit, M1, M2, x0)\n[x, flag, relres, iter, resvec, lsvec] = lsqr(___)",
+    "summary": "Least squares by LSQR: min norm(b - A*x) for any m-by-n A, or A*x = b when it has a solution.",
+    "doc": "A is a matrix or a handle afun(x, 'notransp') = A*x, afun(x, 'transp') = A'*x; M an n-by-n right preconditioner (handles take the same option). tol is 1e-6 and maxit min(size(A,1), 20) by default. It converges when norm(b - A*x)/norm(b) or the scaled normal-equations residual lsvec meets tol; relres is norm(b - A*x)/norm(b) either way. A is a matrix (full or sparse) or a function handle returning A*x; M = M1*M2 a preconditioner, matrices or handles returning M\\x; x0 the initial guess (zeros). [] for an argument takes its default. flag is 0 when relres <= tol, 1 when maxit iterations didn't get there, 2 for an ill-conditioned preconditioner, 3 when the method stagnated, 4 when a scalar quantity broke down. A solver that doesn't converge returns the iterate with the least residual, and iter its number; resvec holds the residual norms from x0's on. Without a flag output the solver prints what happened.",
+    "examples": [
+      {
+        "code": "A = [1 2; 3 4; 5 6; 7 8];\n[x, flag, relres, iter] = lsqr(A, [1; 2; 2; 3], 1e-12, 100)",
+        "expected": "\nx =\n\n   -0.5000\n    0.8000\n\n\nflag =\n\n     0\n\n\nrelres =\n\n    0.1054\n\n\niter =\n\n     2\n\n"
+      }
+    ],
+    "differs": [
+      "Not supported: single precision, and the old trailing parameters passed on to a function handle.",
+      "Not yet checked against MATLAB: the messages other than pcg's for a maxit stop, the identifiers of the refusals other than pcg's size mismatch, and the stagnation test (three steps in a row that move x by less than eps relative to it)."
+    ],
+    "status": "partial",
+    "see_also": [
+      "pcg",
+      "minres",
+      "gmres",
+      "bicgstab"
+    ],
+    "tags": [
+      "linear algebra"
+    ]
   }
 ]

@@ -2291,7 +2291,8 @@ _PASS = set("""size numel length ndims isempty isscalar isvector ismatrix isrow 
 isnumeric isfloat islogical isinteger ischar iscell isstruct isstring iscellstr isobject is_function_handle
 disp display feval struct cell deal isfield whos exist clear jsonencode
 plus minus times rdivide ldivide power mtimes mrdivide mldivide mpower eq ne lt le gt ge and or not uminus uplus
-transpose ctranspose cat horzcat vertcat""".split())
+transpose ctranspose cat horzcat vertcat
+pcg minres gmres bicgstab lsqr""".split())
 _FULL = {}  # the built-ins as they were, for full arguments
 _active = [False]
 
