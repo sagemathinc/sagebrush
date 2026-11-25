@@ -36,3 +36,11 @@ show("nan keepdims", lambda: np.quantile(np.array([[1.0, np.nan], [2.0, 3.0]]), 
 show("nan empty q", lambda: np.quantile(np.array([[1.0, np.nan], [2.0, 3.0]]), [], axis=1))
 show("percentile empty", lambda: np.percentile(a3, [], axis=0))
 show("int q empty", lambda: np.quantile(ai, np.array([], dtype=int), axis=0))
+# empty data with an empty q: an empty result of the shape and dtype a q gives (integer data), or, for float data
+# with nothing along the axis, NumPy's IndexError from its NaN check
+for dt in (int, float, np.float32):
+    for shape, axis in (((0,), None), ((0, 3), 0), ((0, 3), 1), ((2, 0, 3), 1)):
+        for q in ([], np.array([], dtype=np.int64)):
+            for keepdims in (False, True):
+                show("empty data %s %s axis=%s q=%s keepdims=%s" % (np.dtype(dt).name, shape, axis, "i64[]" if isinstance(q, np.ndarray) else "[]", keepdims),
+                     lambda: np.quantile(np.empty(shape, dtype=dt), q, axis=axis, keepdims=keepdims))

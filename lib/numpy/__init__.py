@@ -1514,7 +1514,11 @@ def _quantile(a, qa, weak_q, axis, method, keepdims, out_of_range):
     if qa.size == 0:
         # (an empty q: an empty result, of the dtype a q of its dtype gives, its shape q's then the data's but the
         # reduced axis)
-        dt = _quantile(s, zeros(1, dtype=qa.dtype), weak_q, -1, method, False, out_of_range).dtype
+        # (the dtype from one element of the data's dtype, so empty data gives it too; float data with nothing along the
+        # axis raises as NumPy's NaN check does, reading the last element)
+        if n == 0 and s.dtype.kind == "f":
+            raise IndexError("index -1 is out of bounds for axis 0 with size 0")
+        dt = _quantile(zeros(1, dtype=s.dtype), zeros(1, dtype=qa.dtype), weak_q, -1, method, False, out_of_range).dtype
         res = empty(qa.shape + s.shape[:-1], dtype=dt)
         return _quantile_keepdims(res, qa, nd, all_axes, axis, keepdims)
     vals = []
