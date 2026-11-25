@@ -794,7 +794,7 @@ if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force:
   }
 }
 // a space in 3D (web/space, /space/): the viewer, its page and the format's description. Its code loads only there:
-// three.js and highlight.js in its own bundle, chunks split out, nothing in any other page's bundle
+// three.js in its own bundle, chunks split out, nothing in any other page's bundle
 {
   const out = join(here, "dist", "space");
   rmSync(out, { recursive: true, force: true });
@@ -807,6 +807,21 @@ if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force:
   // (the example spaces: the page's list, spaces.json, is what it offers)
   const examples = readdirSync(join(here, "space", "examples")).filter((f) => f.endsWith(".space.json")).sort();
   for (const f of examples) copyFileSync(join(here, "space", "examples", f), join(out, f));
+  // (and a small project as a tree: its files, served beside it (/space/project/), and its space, written here from them
+  //  so the lengths it carries are the files' own)
+  const project = join(here, "space", "examples", "project"), files: [string, number][] = [];
+  const walk = (dir: string, rel = "") => {
+    for (const e of readdirSync(join(dir, rel), { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const p = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(dir, p);
+      else files.push([p, readFileSync(join(dir, p), "utf8").replace(/\n$/, "").split("\n").length]);
+    }
+  };
+  walk(project);
+  cpSync(project, join(out, "project"), { recursive: true });
+  writeFileSync(join(out, "project.space.json"), JSON.stringify({ format: "sagebrush-space", version: 1, title: "A small project", summary: "Its folders and files as rooms: enter a folder, a file, or a class in it; an import leads to the file it names.", tree: { name: "project", commit: "", base: "/space/project/", files, imports: [] } }) + "\n");
+  examples.push("project.space.json");
+  examples.sort();
   writeFileSync(join(out, "spaces.json"), JSON.stringify(examples) + "\n");
 }
 // the numerics core's browser-threads demo (web/threads, numerics-core r4.2 milestone M0): a dense product on 1 and N
