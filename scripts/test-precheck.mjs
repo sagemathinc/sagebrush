@@ -22,7 +22,7 @@ ok(STEPS.filter((s) => s.ci).length >= 20, "precheck runs at least 20 of CI's co
 ok(new Set(STEPS.map((s) => s.name)).size === STEPS.length, "precheck's step names are distinct");
 
 // what scripts/build-engine.mjs reads besides engine/ (the test's own list: SOURCE_PATHS must cover it)
-const BUILD_SCRIPTS = ["scripts/build-engine.mjs", "scripts/build-nd.mjs", "scripts/build-raster.mjs", "scripts/build-mp.mjs", "scripts/install-engine-wasm.mjs"];
+const BUILD_SCRIPTS = ["scripts/build-engine.mjs", "scripts/build-nd.mjs", "scripts/build-raster.mjs", "scripts/build-mp.mjs", "scripts/build-skltree.mjs", "scripts/install-engine-wasm.mjs"];
 
 // the engine key and the dispatch: a scratch repository with the source paths, a stub fetch and a stub build
 const repo = mkdtempSync(join(tmpdir(), "engine-cache-test-"));

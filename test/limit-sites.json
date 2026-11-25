@@ -3768,6 +3768,29 @@
   "owner": "raster/image I/O",
   "row": "inv-31"
  },
+ "engine/skltree/src/data.rs :: create :: let handle = self.next.checked_add(1).filter(|&h| h <= i32::MAX as u32).ok_or(Error::Handle)?; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "the kernel's ABI returns a dataset handle as a positive i32 (2^31 - 1 datasets per instance, never reused); a protocol bound, not a cap on any computation"
+ },
+ "engine/skltree/src/data.rs :: shapes_are_checked_before_anything_is_allocated :: assert_eq!(t.create(1, 1, usize::MAX / 8 + 1, false), Err(Error::Shape)); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "test inputs past usize's byte counts, and the exactness bound of the retired debt's sum; refuse nothing themselves"
+ },
+ "engine/skltree/src/data.rs :: shapes_are_checked_before_anything_is_allocated :: assert_eq!(t.create(usize::MAX / 2, 3, 1, false), Err(Error::Shape)); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "test inputs past usize's byte counts, and the exactness bound of the retired debt's sum; refuse nothing themselves"
+ },
+ "engine/skltree/src/data.rs :: shapes_are_checked_before_anything_is_allocated :: assert_eq!(t.create(usize::MAX / 4 + 1, 1, 1, false), Err(Error::Shape)); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "test inputs past usize's byte counts, and the exactness bound of the retired debt's sum; refuse nothing themselves"
+ },
  "engine/sym/src/definite.rs :: endpoints :: .or_else(|_| crate::limit::try_limit(&crate::rewrite::simplify_log(big_f), x, pt, dir)) #0": {
   "class": "none",
   "owner": "symbolic calculus (@sagebrush-matlab)",
@@ -13912,6 +13935,41 @@
   "owner": "pyjs regex",
   "row": "src-9"
  },
+ "src/runtime/retired-debt.ts ::  :: const MAX_SAFE = 2 ** 53 - 1; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "test inputs past usize's byte counts, and the exactness bound of the retired debt's sum; refuse nothing themselves"
+ },
+ "src/runtime/retired-debt.ts :: retire :: if (this.sum + p.bytes > MAX_SAFE) this.overflow = true; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "skltree-footprint"
+   }
+  },
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "the decision-tree kernel's footprint bound B = min(4 GiB, ARRAY_LIMITS.bytes, the engine's E), retired debt included (fails closed on an inexact sum): MemoryError through memoryGuard before anything is made (design note sklearn-trees r3 section 6)"
+ },
+ "src/runtime/skltree.ts ::  :: import { ARRAY_LIMITS, NDArray } from \"./numpy\"; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "skltree-footprint"
+   }
+  },
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "the decision-tree kernel's footprint bound B = min(4 GiB, ARRAY_LIMITS.bytes, the engine's E), retired debt included (fails closed on an inexact sum): MemoryError through memoryGuard before anything is made (design note sklearn-trees r3 section 6)"
+ },
+ "src/runtime/skltree.ts :: skltreeBound :: const arr = BigInt(ARRAY_LIMITS.bytes), e = moduleAllowance(); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "skltree-footprint"
+   }
+  },
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "the decision-tree kernel's footprint bound B = min(4 GiB, ARRAY_LIMITS.bytes, the engine's E), retired debt included (fails closed on an inexact sum): MemoryError through memoryGuard before anything is made (design note sklearn-trees r3 section 6)"
+ },
  "src/runtime/types.ts :: flush :: if (size > MAX_STR) raise(T.MemoryError); #0": {
   "class": "2",
   "owner": "pyjs containers/runtime memory",
@@ -14886,6 +14944,22 @@
   },
   "owner": "the isolated output renderer (@sagebrush-agents-ui)",
   "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/space/src/pyroom.ts :: containsDef :: export const ELLIPSIS_BUDGET = 5e7; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's rooms for files of code (@sagebrush-space)",
+  "reason": "the 3D view's room for a Sage file: the preparser's time grows as its ranges (..) times the file's length, so a file over ELLIPSIS_BUDGET (5e7, about 1 s at worst) isn't preparsed or entered; interim, until ranges are rewritten in one pass"
+ },
+ "web/space/src/pyroom.ts :: parsePython :: if (sage && (text.split(\"..\").length - 1) * utf8Bytes(text) > ELLIPSIS_BUDGET) throw new Error(\"it's too long to enter here\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's rooms for files of code (@sagebrush-space)",
+  "reason": "the 3D view's room for a Sage file: the preparser's time grows as its ranges (..) times the file's length, so a file over ELLIPSIS_BUDGET (5e7, about 1 s at worst) isn't preparsed or entered; interim, until ranges are rewritten in one pass"
  },
  "web/stall-fetch.js ::  :: export const STALL_LIMIT_MS = 20000; #0": {
   "class": "1",

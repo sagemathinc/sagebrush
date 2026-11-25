@@ -226,10 +226,10 @@ const modePaths = [
 ];
 const enginePaths = [
   /^engine\//, /^wasm\//, /^Cargo(?:\.lock|\.toml)$/,
-  /^scripts\/build-engine\.mjs$/, /^scripts\/build-nd\.mjs$/, /^scripts\/build-raster\.mjs$/, /^scripts\/build-mp\.mjs$/,
+  /^scripts\/build-engine\.mjs$/, /^scripts\/build-nd\.mjs$/, /^scripts\/build-raster\.mjs$/, /^scripts\/build-mp\.mjs$/, /^scripts\/build-skltree\.mjs$/,
 ];
 // What the modules' bytes, their pins and their handling depend on (design/wasm-artifacts.md section 4): a change
-// here builds the four modules once (the wasm-modules job), and every job that reads wasm/ installs that run's
+// here builds the five modules once (the wasm-modules job), and every job that reads wasm/ installs that run's
 // artifact instead of fetching the published modules, whose pins this change may not have published yet.
 const wasmBuildPaths = [
   ...enginePaths,

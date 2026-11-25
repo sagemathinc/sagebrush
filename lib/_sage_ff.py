@@ -2971,7 +2971,7 @@ class RingExtensionElement_ff:
     def vector(self, base=None):
         """The coordinates over base (default: the extension's base), a
         vector of its VectorSpace, as Sage's; over the extension itself (a
-        vector of dimension 1 over L, in Sage) refused (astra CORR-FF2-4)."""
+        vector of dimension 1 over L, in Sage) refused (the correctness review CORR-FF2-4)."""
         L = self._L
         if L._check_base(base) is not L._F:
             raise NotImplementedError("the vector of an element over the extension itself is not supported yet")
@@ -3333,7 +3333,7 @@ def _ff_subfields(self, degree=0, name=None):
     and this field by the identity; computed by the shared core, for fields
     of at most 2^20 elements, admitted as a whole before anything is made
     (the limits review LIMIT-PR53-1).  A proper subfield is named as Sage names it
-    (astra CORR-PR53-2): for one degree, name itself; else name with its
+    (the correctness review CORR-PR53-2): for one degree, name itself; else name with its
     degree appended, or name[degree] for a dict (which must have every
     degree); with no name, the prefix field of a prefix field, else this
     field's name with the degree appended.
