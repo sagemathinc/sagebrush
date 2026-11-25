@@ -27,7 +27,7 @@ def _sa():
 
 
 def _nf():
-    from sagebrush import nf
+    from _sagebrush_lib import nf
     return nf
 
 
@@ -872,7 +872,7 @@ def _primes_above(f, p):
 
 @_ft.lru_cache(maxsize=256)
 def _nf_irreducible(f):
-    from sagebrush import poly
+    from _sagebrush_lib import poly
     _, fs = poly.factor(list(f))
     return len(fs) == 1 and fs[0][1] == 1
 

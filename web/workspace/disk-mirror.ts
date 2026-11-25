@@ -23,6 +23,9 @@
 //     "… 2", "… 3": whichever is free, never one that is there), later saves of it go there too, and the person is
 //     told.  What is left is the moment between disk.rs's check and its rename.  The check is a file's: a folder's
 //     move or removal (emptying Trash) doesn't check what is in it.
+//   - The app's other windows (#1541) each have a workspace of their own, a cache of the same disk: a change one of
+//     them writes is told to the rest (disk.rs "sb-disk-changed"), and each reads the disk again (pull, a task in its
+//     queue, so never in the middle of its own writes), the disk's contents winning, as at a launch's start.
 // Folders and files are named as in the workspace, a name the disk refuses escaped (encodeName, below); Trash, "/Trash",
 // is ".Trash" on disk, and what is in it is imported into Trash at a launch's start.
 import { TRASH, kindOf, nameOf, parentOf, splitExt, within } from "./paths";
@@ -271,7 +274,7 @@ export async function importDisk(ws: any, disk: Disk, now: () => number = () => 
 }
 
 type Write = { k: "write"; path: string; bytes: Promise<Uint8Array | null>; capture: () => Promise<Uint8Array | null> };
-type Task = Write | { k: "mkdir"; path: string } | { k: "move"; from: string; to: string } | { k: "remove"; path: string };
+type Task = Write | { k: "mkdir"; path: string } | { k: "move"; from: string; to: string } | { k: "remove"; path: string } | { k: "pull"; path: "" };
 const touches = (t: Task, p: string) => (t.k === "move" ? within(t.from, p) || within(p, t.from) || within(t.to, p) || within(p, t.to) : !!t.path && (within(t.path, p) || within(p, t.path)));
 const RETRY_MS = [1000, 2000, 5000, 10000, 30000];
 const isMissing = (e: unknown) => (e as any)?.code === "missing";
@@ -299,6 +302,9 @@ export type MirrorEvents = {
   pending?: (n: number) => void;
   /** what it knows changed (after a task: kept for the launch's next page) */
   state?: (m: DiskMirror) => void;
+  /** another window's changes read (pull): the files brought in or changed here, those gone from disk, and what
+   * couldn't be read */
+  pulled?: (imported: string[], gone: string[], skipped: [string, string][]) => void;
 };
 export type MirrorState = { known: [string, DiskStat][]; redirect: [string, string][]; alias?: [string, string][] };
 
@@ -358,6 +364,8 @@ export class DiskMirror {
   private redirect = new Map<string, string>();
   /** the workspace paths whose disk path isn't their escaping (diskPathOf): a name read as it is, a Trash name taken */
   private alias = new Map<string, string>();
+  /** the workspace paths pull is changing: their ops are the disk's, not this page's, so never written back */
+  private quiet = new Map<string, number>();
   /** the last failure: [file, error], while there is one */
   failing: [string, unknown] | null = null;
   /** what it knows, kept for the launch's next page (diskWorkspace: idbState), the latest of it: resolves once it is,
@@ -416,6 +424,67 @@ export class DiskMirror {
     this.pump();
   }
 
+  /** Another window changed the disk (#1541): it is read again once the tasks before it are done (one read waiting
+   * at most: a later call while one waits is that one). */
+  pull() {
+    if (this.q.some((t, i) => t.k === "pull" && !(i === 0 && this.running && this.started))) return;
+    this.add({ k: "pull", path: "" });
+  }
+  /** `f`, a change of the workspace at `p` made from the disk: its op left out (never written back). */
+  private async quietly<T>(p: string, f: () => Promise<T>): Promise<T> {
+    this.quiet.set(p, (this.quiet.get(p) ?? 0) + 1);
+    try { return await f(); } finally { const n = this.quiet.get(p)! - 1; if (n) this.quiet.set(p, n); else this.quiet.delete(p); }
+  }
+  /** The disk read again, as reconcileDisk does a later page's: each file whose size or time isn't the one this page
+   * knows (and whose contents aren't either), or that it doesn't know, brought in, a folder it hasn't made, and each
+   * file it knows that is gone from disk dropped from the workspace (moved or deleted in another window: its new
+   * place comes in as a new file).  A path one of this page's own tasks still waits to change is left to that task
+   * (which checks the disk as it always does), and so is a file whose writes from here go to a conflict's copy.  Never fails: what couldn't be read is said (on.pulled). */
+  private async pullDisk() {
+    const imported: string[] = [], gone: string[] = [], skipped: [string, string][] = [];
+    let listed: DiskStat[];
+    try { listed = await this.disk.list(); } catch (e: any) { this.on.pulled?.(imported, gone, [["/", e?.message ?? String(e)]]); return; }
+    // (a conflict's copy, and the file it was the copy of, whose writes from here go to that copy: left as they are)
+    const redirected = new Set([...this.redirect.keys(), ...this.redirect.values()]), mine = (p: string) => this.q.slice(1).some((u) => touches(u, p));
+    let rev = reverse(this.alias);
+    const on = new Set(listed.map((e) => e.path));
+    for (const e of listed.sort((a, b) => a.path.length - b.path.length)) {
+      if (within(e.path, DISK_TRASH) || redirected.has(e.path)) continue;
+      try {
+        const w = workspacePathOf(e.path, this.alias, rev), p = w.path;
+        if (mine(p)) continue;
+        if (e.dir) {
+          if (!(await this.ws.stat(p))) await this.quietly(p, () => this.ws.mkdir(p));
+          continue;
+        }
+        const k = this.known.get(e.path);
+        if (k && k.size === e.size && k.mtime === e.mtime) continue;
+        const b = await this.disk.read(e.path), sha256 = await sha256Hex(b);
+        if (k?.sha256 === sha256 && (await this.ws.stat(p))) { this.known.set(e.path, { ...e, sha256 }); continue; }
+        const kind = kindOf(p), content = kind === "file" ? b : JSON.parse(dec.decode(b));
+        let at = p;
+        if (!w.alias && (await this.ws.stat(p))) await this.quietly(p, () => this.ws.write(p, content));
+        else { at = await freeIn(this.ws, p); await this.quietly(at, () => this.ws.create(at, { content })); }
+        if (w.alias || at !== p) { this.alias.set(at, e.path); rev = reverse(this.alias); }
+        this.known.set(e.path, { ...e, sha256 });
+        imported.push(at);
+      } catch (err: any) { skipped.push([e.path, err?.message ?? String(err)]); }
+    }
+    for (const d of [...this.known.keys()]) {
+      if (on.has(d) || within(d, DISK_TRASH) || redirected.has(d)) continue;
+      try {
+        const p = workspacePathOf(d, this.alias, rev).path;
+        if (mine(p)) continue;
+        this.known.delete(d);
+        if (this.alias.get(p) === d) this.alias.delete(p);
+        if ((await this.ws.stat(p))?.kind === "folder") continue;
+        if (await this.ws.stat(p)) { await this.quietly(p, () => this.ws.forget(p)); gone.push(p); }
+      } catch (err: any) { skipped.push([d, err?.message ?? String(err)]); }
+    }
+    this.knew();
+    this.on.pulled?.(imported, gone, skipped);
+  }
+
   /** Resolves true once no task waits (tasks added meanwhile waited for too), false at `timeoutMs`. */
   async drain(timeoutMs: number): Promise<boolean> {
     if (!this.q.length && !this.running) return true;
@@ -447,7 +516,7 @@ export class DiskMirror {
   }
 
   private op(op: any) {
-    if (op.origin === "server") return;
+    if (op.origin === "server" || this.quiet.has(op.path)) return;
     const p: string = op.path, to: string | undefined = op.to;
     switch (op.op) {
       case "create":
@@ -607,6 +676,7 @@ export class DiskMirror {
   }
 
   private async run(t: Task) {
+    if (t.k === "pull") return this.pullDisk();
     if (t.k === "mkdir") return this.disk.mkdir(await this.place(t.path));
     if (t.k === "write") {
       let bytes: Uint8Array | null;
@@ -789,6 +859,18 @@ export async function diskWorkspace(ws: any, invoke: (cmd: string, args?: any, o
     pending: saving,
   }, undefined, redirect, alias);
   if (control !== "no-write") m.start();
+  // (another window's changes to the disk, #1541: read again, a moment after the last one told)
+  const me = (window as any).__TAURI_INTERNALS__?.metadata?.currentWebview?.label;
+  let soon: ReturnType<typeof setTimeout> | null = null;
+  (window as any).__TAURI__?.event?.listen?.("sb-disk-changed", (ev: any) => {
+    if (!me || ev?.payload?.from === me) return;
+    if (soon) clearTimeout(soon);
+    soon = setTimeout(() => { soon = null; m.pull(); }, 150);
+  })?.catch?.((e: unknown) => console.warn("disk: other windows' changes:", e));
+  m.on.pulled = (imported, gone, skipped) => {
+    if (skipped.length) banner.set("report", `${skipped.length} files another window changed couldn't be opened here: ${skipped.slice(0, 3).map(([p, why]) => `${p} (${why})`).join(", ")}`);
+    if (imported.length || gone.length) console.log(`disk: another window's changes: ${imported.length} brought in, ${gone.length} gone`);
+  };
   m.persist = () => saver.flush();
   saver.dirty(() => m.state());
   (window as any).__sbDiskError = (what: string, e: unknown) => banner.set("settings", e ? `Couldn't save ${what}: ${(e as any)?.message ?? e}` : null);
