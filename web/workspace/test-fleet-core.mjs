@@ -76,9 +76,15 @@ const web = join(here, "..");
 const e2e = join(here, "e2e");
 const e2eCore = join(e2e, "core");
 const INSTALLERS = /\b(?:useCrypto|useSchemas|webCrypto)\b/;
-const coreImportOk = (t) => [...t.matchAll(/import\s*(\{[^}]*\}|\*\s*as\s+\w+|\w+)\s*from\s*["']([^"']+)["']/g)]
-  .filter((m) => /fleet\/core/.test(m[2]))
-  .every((m) => /^\.\.\/\.\.\/fleet\/core\/[a-z0-9-]+\.mjs$/.test(m[2]) && !/\/(?:index|webcrypto)\.mjs$/.test(m[2]) && m[1].startsWith("{") && !INSTALLERS.test(m[1]));
+// (every quoted mention of fleet/core in the file must be one of its allowed imports: a static, named import at a
+//  statement's start, of a pure core module. Anything else that names the core, a side-effect import, a dynamic
+//  import(), an export ... from, a namespace or default import, even a string, is unaccounted for and refused)
+const coreImportOk = (t) => {
+  const refs = [...t.matchAll(/["'`][^"'`\n]*fleet\/core[^"'`\n]*["'`]/g)].length;
+  const named = [...t.matchAll(/(?:^|\n)[ \t]*import[ \t]*(\{[^}]*\})[ \t]*from[ \t]*["']([^"'\n]+)["']/g)].filter((m) => /fleet\/core/.test(m[2]));
+  return named.length === refs && named.every((m) => /^\.\.\/\.\.\/fleet\/core\/[a-z0-9-]+\.mjs$/.test(m[2])
+    && !/\/(?:index|webcrypto)\.mjs$/.test(m[2]) && !INSTALLERS.test(m[1]));
+};
 const users = [];
 const scan = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) {
   const p = join(d, e.name);
@@ -94,8 +100,13 @@ ok(users.length === 0, "N-1: only e2e/ uses the fleet core: its page modules thr
 ok(coreImportOk('import { canonText } from "../../fleet/core/canonical.mjs";') && coreImportOk('import { crypto } from "../../fleet/core/crypto.mjs";')
   && !coreImportOk('import { useCrypto } from "../../fleet/core/crypto.mjs";') && !coreImportOk('import { webCrypto } from "../../fleet/core/webcrypto.mjs";')
   && !coreImportOk('import { canonText } from "../../fleet/core/index.mjs";') && !coreImportOk('import * as core from "../../fleet/core/bytes.mjs";')
-  && !coreImportOk('import { useSchemas } from "../../fleet/core/schemas.mjs";') && !coreImportOk('import { x } from "../fleet/core/bytes.mjs";'),
-  "N-1: (its controls) named pure imports pass; an installer, the index, a namespace import or another path is refused");
+  && !coreImportOk('import { useSchemas } from "../../fleet/core/schemas.mjs";') && !coreImportOk('import { x } from "../fleet/core/bytes.mjs";')
+  && !coreImportOk('import "../../fleet/core/index.mjs";') && !coreImportOk('const m = await import("../../fleet/core/webcrypto.mjs");')
+  && !coreImportOk('export { useCrypto } from "../../fleet/core/crypto.mjs";') && !coreImportOk('export * from "../../fleet/core/bytes.mjs";')
+  && !coreImportOk('import core from "../../fleet/core/bytes.mjs";') && !coreImportOk('const p = "../../fleet/core/webcrypto.mjs";')
+  && !coreImportOk('import { canonText } from "../../fleet/core/canonical.mjs";\nimport "../../fleet/core/webcrypto.mjs";')
+  && coreImportOk('import { canonText } from "../../fleet/core/canonical.mjs";\nimport { b64, enc } from "../../fleet/core/bytes.mjs";'),
+  "N-1: (its controls) named pure imports pass; an installer, the index, a namespace or default import, another path, a side-effect import, a dynamic import(), an export ... from, or any other mention of the core is refused");
 
 // ---- the agent's fixture cases, in Chromium, through fleetCore()
 const dir = mkdtempSync(join(tmpdir(), "sb-fleet-core-"));
