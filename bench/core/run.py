@@ -1218,6 +1218,29 @@ def working_set(row: dict, n: int) -> int | None:
     return round(value)
 
 
+# wasm32's address space: a calibration size whose working set exceeds it
+# is skipped on wasm, and recorded as skipped
+WASM_BYTES = 4 << 30
+
+
+def selected(row: dict, key: str, backends: list[str]) -> tuple[list[str], dict]:
+    """The backends a point runs (present on this host and applicable), and
+    those skipped by rule, with why: at a calibration size only the
+    calibrated targets (the references need no calibration, and some sizes
+    would take them far past the point's timeout), and wasm only while the
+    row's working set fits its 4 GiB."""
+    n = row["sizes"][key]["n"]
+    present = [b for b in backends if command(b, row, n, "once")]
+    skipped = {}
+    if is_calibration_size(key):
+        present = [b for b in present if b in VTIME_TARGETS]
+        ws = working_set(row, n)
+        if "wasm" in present and ws is not None and ws > WASM_BYTES:
+            present.remove("wasm")
+            skipped["wasm"] = f"working set {ws} bytes exceeds wasm32's 4 GiB"
+    return present, skipped
+
+
 def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
     size = row["sizes"][key]
     n, timeout = size["n"], float(size["timeout"])
@@ -1239,12 +1262,9 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
         variants=k,
         backends={},
     )
-    present = [b for b in backends if command(b, row, n, "once")]
-    if is_calibration_size(key):
-        # (a calibration size times only the calibrated targets: the
-        # references need no calibration, and some sizes would take them
-        # far past the point's timeout)
-        present = [b for b in present if b in VTIME_TARGETS]
+    present, skipped = selected(row, key, backends)
+    for b, why in skipped.items():
+        rec["backends"][b] = {"status": "skipped", "detail": why}
     arts = ident.get("artifacts") or {}
     for b in list(present):
         missing = [a for a in needs(b, row) if not arts.get(a)]
@@ -1429,17 +1449,50 @@ def engine_label(rec: dict) -> str:
     return f"UNPINNED {sha} @ {commit} (not an official run)"
 
 
+def calibration(out: Path) -> None:
+    """calibration.json, for the fits: every point at a calibration size
+    measured under this protocol, with what the fits use (n, the working
+    set, the host, the units, and per calibrated target its times and
+    per-variant vtime).  A point of another protocol is never mixed in:
+    it is only counted."""
+    points, other = [], 0
+    for path in sorted((out / "rows").glob("*.json")):
+        r = json.loads(path.read_text())
+        if not is_calibration_size(r.get("size", "")):
+            continue
+        if r.get("protocol") != PROTOCOL:
+            other += 1
+            continue
+        keep = ("row", "size", "n", "variants", "status", "working_set_bytes", "units")
+        keep += ("host", "machine", "commit", "engine_pin")
+        pt = {k: r.get(k) for k in keep}
+        pt["backends"] = {}
+        for b, v in r.get("backends", {}).items():
+            if b not in VTIME_TARGETS:
+                continue
+            t = v.get("time") or {}
+            pt["backends"][b] = {"status": (t or v.get("check") or v).get("status")}
+            pt["backends"][b].update(
+                {x: t.get(x) for x in ("seconds", "min", "max", "reps", "samples", "vtime") if x in t}
+            )
+        points.append(pt)
+    doc = {"protocol": PROTOCOL, "points": points, "other_protocols_skipped": other}
+    write_atomic(out / "calibration.json", json.dumps(doc, indent=1, sort_keys=True) + "\n")
+
+
 def summary(out: Path, items: dict) -> None:
     recs = sorted(
         (
             r
             for r in (json.loads(p.read_text()) for p in (out / "rows").glob("*.json"))
-            # (the calibration sizes are for the cost fits, not this table)
+            # (the calibration sizes are for the cost fits, not this table:
+            # calibration.json)
             if not is_calibration_size(r["size"])
         ),
         key=lambda r: (r["item"], r["row"], "sml".index(r["size"])),
     )
     if not recs:
+        calibration(out)
         return
     m = recs[0]["machine"]
     lines = [
@@ -1509,6 +1562,7 @@ def summary(out: Path, items: dict) -> None:
         f"- {i['id']} ({i['title']}): {i['status']}" for i in uncovered
     ]
     write_atomic(out / "summary.md", "\n".join(lines) + "\n")
+    calibration(out)
 
 
 def main() -> int:
@@ -1538,12 +1592,17 @@ def main() -> int:
             print("sweep", json.dumps(SWEEP))
         for row in rows:
             for key in (k for k in sizes if k in row["sizes"]):
-                found = [
-                    b
-                    for b in backends
-                    if command(b, row, row["sizes"][key]["n"], "once")
-                ]
-                print(row["id"], key, row["sizes"][key]["n"], " ".join(found))
+                found, skipped = selected(row, key, backends)
+                cols = list(found)
+                cols += [f"{b}:skipped" for b in skipped]
+                cols += [f"vtime:{b}" for b in found if wants_vtime(b, row)]
+                if "native" in found and wants_vtime("native", row):
+                    cols.append("units")
+                if SWEEP and row.get("sweep"):
+                    labels = [c[0] for c in (SWEEP if row["sweep"] == "cores" else [SWEEP[0], SWEEP[-1]])]
+                    cols += [f"{b}@{x}" for b in found if b.endswith("-n") for x in labels]
+                n = row["sizes"][key]["n"]
+                print(row["id"], key, n, f"ws={working_set(row, n)}", " ".join(cols))
         return 0
     if args.mem_cap != "none":
         problems = Cap.problems(CGROUP_ROOT, cpuset=bool(SWEEP))

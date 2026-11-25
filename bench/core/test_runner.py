@@ -1086,6 +1086,12 @@ class Units(unittest.TestCase):
         self.assertIsNone(got)
         self.assertIn("between 1 and", why)
 
+    def test_units_that_do_not_sum_are_refused(self):
+        self.fake("print('UNITS|0|1,0,0,0,0,0,0,0,0,2|4')\n")
+        got, why = run.units({"id": "r"}, 1, 30, 1)
+        self.assertIsNone(got)
+        self.assertIn("sum to the total", why)
+
     def test_unmetered_is_recorded_as_such(self):
         self.fake("print('UNITS|unmetered')\n")
         self.assertEqual(run.units({"id": "r"}, 1, 30, 1), ("unmetered", ""))
@@ -1275,6 +1281,140 @@ class WorkingSet(unittest.TestCase):
         self.assertEqual(rec["working_set_bytes"], 800)
         rec, _ = pts.run_point({"user": "5", "magma": "5"})
         self.assertIsNone(rec["working_set_bytes"])
+
+
+class CalibrationJson(unittest.TestCase):
+    """calibration.json: the calibration-size points of this protocol only."""
+
+    def point(self, size, protocol):
+        return {
+            "item": "la0",
+            "row": "mat_fp_det",
+            "size": size,
+            "n": 122,
+            "variants": 8,
+            "protocol": protocol,
+            "status": "ok",
+            "working_set_bytes": 119072,
+            "host": {"physical_cores": 8},
+            "machine": {"label": "x86", "cpu": "Xeon", "arch": "x86_64", "nproc": 16, "flags": []},
+            "commit": "c" * 40,
+            "engine_pin": {"ok": False, "policy": "track", "sha256": "b" * 64},
+            "backends": {
+                "native": {
+                    "time": {
+                        "status": "ok",
+                        "seconds": 0.5,
+                        "min": 0.4,
+                        "max": 0.6,
+                        "reps": 3,
+                        "samples": 3,
+                        "vtime": [{"v": 0, "seconds": 0.5}],
+                        "wall": 9.0,
+                    }
+                },
+                "wasm": {"status": "skipped", "detail": "too big"},
+                "magma": {"time": {"status": "ok", "seconds": 0.1}},
+            },
+        }
+
+    def out(self, recs):
+        d = Path(tempfile.mkdtemp(prefix="bench-core-cal-"))
+        self.addCleanup(shutil.rmtree, d, True)
+        (d / "rows").mkdir()
+        for name, rec in recs.items():
+            (d / "rows" / name).write_text(json.dumps(rec))
+        return d
+
+    def test_only_this_protocols_calibration_points(self):
+        d = self.out(
+            {
+                "mat_fp_det-c0.json": self.point("c0", run.PROTOCOL),
+                "mat_fp_det-c1.json": self.point("c1", 4),
+                "mat_fp_det-s.json": self.point("s", run.PROTOCOL),
+            }
+        )
+        run.summary(d, {})
+        doc = json.loads((d / "calibration.json").read_text())
+        self.assertEqual(doc["protocol"], run.PROTOCOL)
+        self.assertEqual(doc["other_protocols_skipped"], 1)
+        self.assertEqual([p["size"] for p in doc["points"]], ["c0"])
+        pt = doc["points"][0]
+        self.assertEqual(pt["working_set_bytes"], 119072)
+        self.assertEqual(pt["host"], {"physical_cores": 8})
+        # (the calibrated targets only, their times and vtime; no references)
+        self.assertEqual(sorted(pt["backends"]), ["native", "wasm"])
+        self.assertEqual(pt["backends"]["native"]["vtime"], [{"v": 0, "seconds": 0.5}])
+        self.assertNotIn("wall", pt["backends"]["native"])
+        self.assertEqual(pt["backends"]["wasm"], {"status": "skipped"})
+        # (the s point is in the summary, not here)
+        self.assertIn("mat_fp_det", (d / "summary.md").read_text())
+
+    def test_a_calibration_only_run_still_writes_it(self):
+        d = self.out({"mat_fp_det-c0.json": self.point("c0", run.PROTOCOL)})
+        run.summary(d, {})
+        self.assertEqual(len(json.loads((d / "calibration.json").read_text())["points"]), 1)
+
+    def test_protocol_4_points_stay_readable(self):
+        old = self.point("s", 4)
+        del old["working_set_bytes"], old["host"]
+        old["backends"]["native"]["time"].pop("vtime")
+        d = self.out({"mat_fp_det-s.json": old})
+        run.summary(d, {})
+        self.assertIn("mat_fp_det", (d / "summary.md").read_text())
+
+
+class WasmSkip(unittest.TestCase):
+    def test_a_calibration_size_past_4_gib_skips_wasm(self):
+        row = dict(ROW, sizes={"s": {"n": 10, "timeout": 30}, "c0": {"n": 10, "timeout": 30}})
+        with mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]):
+            bs = ["user", "native", "wasm", "magma"]
+            big = dict(row, working_set="5*2**30")
+            self.assertEqual(run.selected(big, "c0", bs), (["user", "native"], {"wasm": mock.ANY}))
+            self.assertIn("4 GiB", run.selected(big, "c0", bs)[1]["wasm"])
+            # (not at the regular sizes, nor under 4 GiB, nor without a formula)
+            self.assertEqual(run.selected(big, "s", bs), (bs, {}))
+            self.assertEqual(run.selected(dict(row, working_set="2**30"), "c0", bs)[1], {})
+            self.assertEqual(run.selected(row, "c0", bs), (["user", "native", "wasm"], {}))
+
+    def test_the_point_records_the_skip(self):
+        row = dict(ROW, working_set="5*2**30", sizes={"c0": {"n": 10, "timeout": 30}})
+        calls = []
+
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            calls.append(b)
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": "5"}
+            if mode == "once":
+                return {"status": "ok", "signature": "s"}
+            return {"status": "ok", "seconds": 1.0, "signature": "K:1"}
+
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+            mock.patch.object(run, "units", lambda *a: ("unmetered", "")),
+        ):
+            rec = run.point(row, "c0", ["user", "native", "wasm"], {"artifacts": ARTS})
+        self.assertEqual(rec["backends"]["wasm"]["status"], "skipped")
+        self.assertNotIn("wasm", calls)
+
+
+class DryRun(unittest.TestCase):
+    def test_it_lists_every_point_with_its_working_set(self):
+        r = subprocess.run(
+            [PY, str(Path(run.__file__)), "--dry-run", "--only", "mat_fp_det", "--only", "groebner_cyclic", "--sizes", "s,c0", "--mem-cap", "none"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = r.stdout.splitlines()[1:]
+        self.assertEqual(
+            [line.split()[:4] for line in lines],
+            [["mat_fp_det", "s", "60", "ws=28800"], ["mat_fp_det", "c0", "122", "ws=119072"], ["groebner_cyclic", "s", "5", "ws=None"]],
+        )
+        # (no reference at a calibration size)
+        self.assertNotIn("magma", lines[1])
 
 
 class Host(unittest.TestCase):
