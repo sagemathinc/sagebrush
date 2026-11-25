@@ -264,6 +264,7 @@ body { margin: 0; background: #eef0f2; }
 .sb-standalone .page.beamer > .slide { margin: 0 0 16px; }
 @media print {
   body { background: #fff; }
+  .sb-standalone .dmath { overflow: visible; }
   .sb-standalone .page.beamer { padding: 0; }
   .sb-standalone .page.beamer > .slide { margin: 0; border: none; box-shadow: none; break-after: page; break-inside: avoid; }
   .sb-standalone .page:not(.beamer) { box-shadow: none; margin: 0 auto; }
@@ -272,7 +273,8 @@ body { margin: 0; background: #eef0f2; }
 </head>
 <body><div class="tex-page sb-standalone"><div class="page tex-preview">
 <h2 id="sec-1">TikZ and pgfplots</h2>
-<div class="p ni"><span class="it">In this preview:</span> TikZ and pgfplots pictures are not drawn yet; each shows as a placeholder with its source. A full LaTeX run draws them.</div>
-<div class="center"><div class="placeholder">[tikzpicture: not rendered in this prototype]</div></div>
-<div class="center"><div class="placeholder">[tikzpicture: not rendered in this prototype]</div></div>
+<div class="p ni"><span class="it">In this preview:</span> TikZ’s paths are drawn (lines, curves, circles and arcs, grids, arrows, styles, transforms, <span class="tt">\foreach</span>). Text in a picture (nodes) and pgfplots are not drawn yet: such a picture shows as a placeholder naming what it needs. A full LaTeX run draws them all.</div>
+<div class="center"><div class="p al-c"><span class="tikz" data-box="-45.72 -45.72 45.72 45.72" style="display:inline-block;position:relative;vertical-align:baseline;width:91.45pt;height:91.45pt"><svg width="91.45pt" height="91.45pt" viewBox="0 0 91.45 91.45" style="display:block;overflow:visible"><defs><marker id="tk2" markerUnits="userSpaceOnUse" refX="0" refY="0" orient="auto-start-reverse" overflow="visible"><path d="M-2.08 -2.4C-1.52 -0.94 -0.62 -0.26 0 0C-0.62 0.26 -1.52 0.94 -2.08 2.4" fill="none" stroke="rgb(0,0,0)" stroke-width="0.4" stroke-linecap="round" stroke-linejoin="round"/></marker></defs><path d="M3.04,88.4M3.04,88.4M88.4,3.04M17.27,88.4L17.27,3.04M45.72,88.4L45.72,3.04M74.17,88.4L74.17,3.04M3.04,74.17L88.4,74.17M3.04,45.72L88.4,45.72M3.04,17.27L88.4,17.27" fill="none" stroke="rgb(191,191,191)" stroke-width="0.2"/><path d="M0.2,45.72L91.24,45.72" fill="none" stroke="rgb(0,0,0)" stroke-width="0.4" marker-end="url(#tk2)"/><path d="M45.72,91.24L45.72,0.2" fill="none" stroke="rgb(0,0,0)" stroke-width="0.4" marker-end="url(#tk2)"/><path d="M45.72,45.72M74.17,45.72C74.17,30.01 61.43,17.27 45.72,17.27C30.01,17.27 17.27,30.01 17.27,45.72C17.27,61.43 30.01,74.17 45.72,74.17C61.43,74.17 74.17,61.43 74.17,45.72Z" fill="none" stroke="rgb(0,0,0)" stroke-width="0.4"/><path d="M45.72,45.72L67.52,27.43" fill="none" stroke="rgb(255,0,0)" stroke-width="0.8"/><path d="M54.26,45.72C54.26,43.71 53.55,41.77 52.26,40.23" fill="none" stroke="rgb(255,0,0)" stroke-width="0.4"/><path d="M67.52,27.43L67.52,45.72" fill="none" stroke="rgb(0,0,0)" stroke-width="0.4" stroke-dasharray="3 3"/></svg></span></div></div>
+<div class="center"><div class="placeholder">[tikzpicture: the axis environment inside a picture isn&#39;t drawn by the preview yet]</div></div>
+<div class="center"><div class="placeholder">[tikzpicture: a node on a path: nodes aren&#39;t drawn by the preview yet]</div></div>
 </div></div></body></html>

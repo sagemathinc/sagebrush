@@ -1,0 +1,27 @@
+{
+	# the test-only CA: made and kept in this container's /data volume, never installed on the VM host
+	local_certs
+	skip_install_trust
+	admin off
+}
+
+moodle.vmtest {
+	tls internal
+	reverse_proxy moodle-moodle-1:8080 {
+		header_up Host moodle.vmtest
+		header_up X-Forwarded-Proto https
+	}
+}
+
+canvas.vmtest {
+	tls internal
+	reverse_proxy canvas-lms-web-1:80 {
+		header_up Host canvas.vmtest
+		header_up X-Forwarded-Proto https
+	}
+}
+
+lti.vmtest {
+	tls internal
+	reverse_proxy lti-tool:8787
+}

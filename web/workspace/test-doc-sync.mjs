@@ -154,7 +154,7 @@ const front = Bun.serve({
       emit.syncStart(k, req.method, path);
       try {
         const h = new Headers({ cookie: sessions.D, ...(CLOUD ? { origin: cloud.url } : {}) });
-        for (const k of ["content-type", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
+        for (const k of ["content-type", "x-sync-account", "x-sync-generation", "x-sb-ct-sha256"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
         const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
         const r = await (CLOUD ? fetch(cloud.url + path + u.search, { method: req.method, headers: h, body }) : ref.fetch(new Request("http://ref" + path + u.search, { method: req.method, headers: h, body })));
         emit.syncEnd(k, req.method, path, r.status, Date.now() - t);

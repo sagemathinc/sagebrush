@@ -6995,6 +6995,11 @@
   "class": "3",
   "owner": "finite fields + configuration"
  },
+ "lib/_sage_ff.py :: _ff_subfields :: (the limits review LIMIT-PR53-1). A proper subfield is named as Sage names it #0": {
+  "class": "none",
+  "owner": "finite fields",
+  "reason": "Docstring review reference; this line refuses nothing."
+ },
  "lib/_sage_ff.py :: _ff_subfields :: refuse = lambda: NotImplementedError(\"subfields of %r are not supported yet (computed here only for fields of at most %s elements%s)\" % (self, S.embed_max_text(), S.work_clause())) #0": {
   "class": "3",
   "owner": "finite fields + configuration"
@@ -7321,6 +7326,11 @@
  "lib/_sage_ffsub.py :: embed_max_text :: or 10^7, the Conway search's cutoff, when ff.embed_max is unlimited.\"\"\" #0": {
   "class": "none",
   "owner": "finite fields + configuration"
+ },
+ "lib/_sage_ffsub.py :: subfields_admit :: map or result is made or any cache touched (the limits review LIMIT-PR53-1): #0": {
+  "class": "none",
+  "owner": "finite fields",
+  "reason": "Docstring review reference; this line refuses nothing."
  },
  "lib/_sage_ffsub.py :: trace :: def trace(x, budget, refuse): #0": {
   "class": "3",
@@ -11808,6 +11818,11 @@
   "owner": "Magma translator",
   "reason": "the Magma translator's parser protection: a chain of calls or indexes nests its translation one level each; past the cap it is refused in words, within what the generated Python's bound allows"
  },
+ "src/magma.ts :: constructor :: const PRINT_LEVELS = new Set([\"Default\", \"Minimal\", \"Maximal\", \"Magma\", \"Hex\", \"Latex\", \"Debug\"]); #0": {
+  "class": "none",
+  "owner": "Magma compatibility",
+  "reason": "the word Maximal (the print level's name), not a limit: nothing is refused"
+ },
  "src/magma.ts :: constructor :: export const MAX_NESTING = 100, MAX_PY_NEST = 50, MAX_PY_BLOCKS = 90, CHAIN_FLAT = 32, MAX_OPS = 2000; #0": {
   "class": "1",
   "disposition": {
@@ -13750,6 +13765,11 @@
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
  },
+ "src/runtime/numpy.ts :: admitArray :: if (shape.length > MAX_DIMS) tooManyDims(shape.length); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), checked before any storage is admitted, as NumPy checks the dimensions before allocating; NumPy's semantics, not a Sagebrush limit"
+ },
  "src/runtime/numpy.ts :: admitWork :: if (bytes <= ARRAY_LIMITS.bytes) return; #0": {
   "class": "2",
   "owner": "NumPy shim/runtime memory",
@@ -13759,6 +13779,31 @@
   "class": "2",
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
+ },
+ "src/runtime/numpy.ts :: conj :: if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: consumes :: if (resultDims > MAX_DIMS) raise(T.IndexError, `number of dimensions must be within [0, ${MAX_DIMS}], indexing result would have ${resultDims}`); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: cumulative :: if (axis !== null && axis !== undefined) normAxis(intNum(axis), a.ndim); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; it refuses an axis out of bounds for a 0-d array viewed as one element, as NumPy's cumsum"
+ },
+ "src/runtime/numpy.ts :: discover :: if (depth + s.length > MAX_DIMS) nestedTooDeep(); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: discover :: if (depth >= MAX_DIMS) nestedTooDeep(); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
  },
  "src/runtime/numpy.ts :: itemIndex :: if (typeof x === \"bigint\" && (x > I64MAX || x < I64MIN)) raise(T.OverflowError, \"Python int too large to convert to C long\"); #0": {
   "class": "none",
@@ -13795,6 +13840,11 @@
   "owner": "NumPy shim",
   "row": "src-11"
  },
+ "src/runtime/numpy.ts :: nestedTooDeep :: return raise(T.ValueError, `setting an array element with a sequence. The requested array would exceed the maximum number of dimension of ${MAX_DIMS}.`) as never; #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
  "src/runtime/numpy.ts :: notIndex :: fn(\"amax\", (a: any, axis: any = null, keepdims: any = false, initial: any = null, first: any = false) => minmax(asarray(a), opt(axis), !!keepdims, true, opt(initial), !!first)); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -13830,6 +13880,16 @@
   "owner": "NumPy shim",
   "row": "src-11"
  },
+ "src/runtime/numpy.ts :: scalarDtype :: const MAX_DIMS = 64; #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: str :: if (shape.length > MAX_DIMS) tooManyDims(shape.length); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
  "src/runtime/numpy.ts :: strConcat :: const ax = normAxis(axis, nd); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -13844,6 +13904,16 @@
   "class": "3",
   "owner": "NumPy shim",
   "row": "src-11"
+ },
+ "src/runtime/numpy.ts :: tooManyDims :: if (shape.length > MAX_DIMS) tooManyDims(shape.length); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: tooManyDims :: return raise(T.ValueError, `maximum supported dimension for an ndarray is currently ${MAX_DIMS}, found ${n}`) as never; #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
  },
  "src/runtime/numpy.ts :: wideRefuse :: return raise(T.NotImplementedError, `${d.name} values beyond 2**53 are not supported yet`); #0": {
   "class": "3",
@@ -14277,6 +14347,30 @@
   "owner": "file formats/raster",
   "row": "src-13"
  },
+ "src/sagepre.ts :: parseEllipsis :: const stack = new Int32Array(PY_MAX_NESTING + 1); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "Sage mode preparser (@sagebrush-sage)",
+  "reason": "Python's tokenizer limit on nested brackets (its MAXLEVEL, 200): code nested deeper is left to Python, which refuses it whatever the preparser does; parser protection that bounds the ellipsis rewrite's bracket stack, not a cap of a user's computation"
+ },
+ "src/sagepre.ts :: parseEllipsis :: if (depth === PY_MAX_NESTING) return code; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "Sage mode preparser (@sagebrush-sage)",
+  "reason": "Python's tokenizer limit on nested brackets (its MAXLEVEL, 200): code nested deeper is left to Python, which refuses it whatever the preparser does; parser protection that bounds the ellipsis rewrite's bracket stack, not a cap of a user's computation"
+ },
+ "src/sagepre.ts :: preparseFString :: const PY_MAX_NESTING = 200; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "Sage mode preparser (@sagebrush-sage)",
+  "reason": "Python's tokenizer limit on nested brackets (its MAXLEVEL, 200): code nested deeper is left to Python, which refuses it whatever the preparser does; parser protection that bounds the ellipsis rewrite's bracket stack, not a cap of a user's computation"
+ },
  "src/stdin-wait.ts :: stopped :: const max = buffer.byteLength - 8; #0": {
   "class": "none",
   "owner": "notebook/kernel",
@@ -14385,6 +14479,226 @@
   "class": "none",
   "owner": "sagebrush-remote-compute",
   "reason": "The wave envelope's validation of the scheduler's automatic-run time budget field (null or a finite number), before anything is admitted; it limits nothing, it refuses a malformed wave."
+ },
+ "web/latex/engine/tikz.mjs ::  :: COORD_MAX: 2845275.6, // |x|, |y| in pt (1000 m): past it, a named problem, not an SVG of that size #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs ::  :: SRC_MAX: 256 * 1024, // a picture's source, and one \\foreach body once its variables are replaced: UTF-8 bytes #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs ::  :: export const TIKZ_LIMITS = { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: MORE_TEXT :: const MORE_TEXT = () => \"more than \" + TIKZ_LIMITS.LEX_TEXT / 2 ** 20 + \" MiB of picture text read, \\\\foreach bodies expanded included\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: X :: if (out.length > TIKZ_LIMITS.SVG_BYTES) fail(\"a picture over \" + TIKZ_LIMITS.SVG_BYTES / 2 ** 20 + \" MiB of SVG\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: X :: if (st.cap) a += ' stroke-linecap=\"' + st.cap + '\"'; #0": {
+  "class": "none",
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: the line cap's attribute, the path state's cap field, pgfmath's max function"
+ },
+ "web/latex/engine/tikz.mjs :: atom :: if (!Number.isFinite(v)) fail(\"a value too large in \" + JSON.stringify(s)); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: atom :: if (++depth > TIKZ_LIMITS.EXPR_DEPTH) fail(\"an expression nested over \" + TIKZ_LIMITS.EXPR_DEPTH + \" deep\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: base :: op: 1, dop: null, fop: null, arrows: { start: null, end: null }, defaultTip: \"to\", rounded: 0, cap: null, join: null, step: [PT_PER_CM, PT_PER_CM], doDraw: false, doFill: false }; #0": {
+  "class": "none",
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: the line cap's attribute, the path state's cap field, pgfmath's max function"
+ },
+ "web/latex/engine/tikz.mjs :: checkPt :: if (Math.abs(p[0]) > TIKZ_LIMITS.COORD_MAX || Math.abs(p[1]) > TIKZ_LIMITS.COORD_MAX) fail(\"a point farther than \" + Math.round(TIKZ_LIMITS.COORD_MAX / PT_PER_CM / 100) + \" m\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: dim :: case \"line cap\": if (!/^(butt|round|rect)$/.test(val)) fail(\"a line cap the preview doesn't draw: \" + val); st.cap = val === \"rect\" ? \"square\" : val; return; #0": {
+  "class": "coverage",
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "an unsupported feature, not a cap: a line cap TikZ doesn't have is named, not drawn"
+ },
+ "web/latex/engine/tikz.mjs :: evalMath :: if (s.length > TIKZ_LIMITS.EXPR_LEN) fail(\"an expression over \" + TIKZ_LIMITS.EXPR_LEN + \" characters\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: expandList :: for (let j = 1; j <= n; j++) { out.push(fmtNum(a + j * step)); if (out.length > TIKZ_LIMITS.EXPAND) fail(\"a \\\\foreach list of more than \" + TIKZ_LIMITS.EXPAND + \" items\"); } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: expandList :: if (Math.abs((z - a) / step) > TIKZ_LIMITS.EXPAND) fail(\"a \\\\foreach range of more than \" + TIKZ_LIMITS.EXPAND + \" items\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: expandList :: if (out.length > TIKZ_LIMITS.EXPAND) fail(\"a \\\\foreach list of more than \" + TIKZ_LIMITS.EXPAND + \" items\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: foreach :: if (++this.expansions > TIKZ_LIMITS.EXPAND) fail(\"\\\\foreach bodies expanded more than \" + TIKZ_LIMITS.EXPAND + \" times\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: foreach :: if (depth >= TIKZ_LIMITS.FOREACH_DEPTH) fail(\"\\\\foreach inside \\\\foreach more than \" + TIKZ_LIMITS.FOREACH_DEPTH + \" deep\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: foreach :: if (next > TIKZ_LIMITS.SRC_MAX) fail(\"a \\\\foreach body over \" + TIKZ_LIMITS.SRC_MAX / 1024 + \" KiB once its variables are replaced\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: foreach :: if (this.lexed + next > TIKZ_LIMITS.LEX_TEXT) fail(MORE_TEXT()); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: foreach :: if (this.lexed + size > TIKZ_LIMITS.LEX_TEXT) fail(MORE_TEXT()); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: lex :: count(n = 1) { if ((this.items += n) > TIKZ_LIMITS.ITEMS) fail(\"more than \" + TIKZ_LIMITS.ITEMS + \" path segments\"); } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: lex :: if (this.lexed + n > TIKZ_LIMITS.LEX_TEXT) fail(MORE_TEXT()); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: options :: if ((this.optionText += utf8Len(text) + 32) > TIKZ_LIMITS.OPTION_TEXT) fail(\"options and styles past \" + TIKZ_LIMITS.OPTION_TEXT + \" bytes applied in all (styles naming styles many times over?)\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: options :: if (depth > TIKZ_LIMITS.STYLE_DEPTH) fail(\"styles naming styles more than \" + TIKZ_LIMITS.STYLE_DEPTH + \" deep (a style that names itself?)\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: r :: if (nx + ny > TIKZ_LIMITS.GRID_LINES) fail(\"a grid of more than \" + TIKZ_LIMITS.GRID_LINES + \" lines\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: renderTikz :: if (utf8Len(src) > TIKZ_LIMITS.SRC_MAX) throw new TikzError(\"a picture over \" + TIKZ_LIMITS.SRC_MAX / 1024 + \" KiB of source\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: renderTikz :: throw new TikzError(\"a picture the preview couldn't draw (\" + (e instanceof RangeError ? \"too large\" : \"an internal error\") + \")\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: run :: if (sdepth >= TIKZ_LIMITS.SCOPE_DEPTH) fail(\"scopes inside scopes more than \" + TIKZ_LIMITS.SCOPE_DEPTH + \" deep\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: skipGroup :: const FUNCS2 = { min: Math.min, max: Math.max, atan2: (y, x) => (Math.atan2(y, x) * 180) / Math.PI, mod: (a, b) => { if (b === 0) fail(\"mod by 0\"); return a % b; }, pow: (a, b) => a ** b }; #0": {
+  "class": "none",
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: the line cap's attribute, the path state's cap field, pgfmath's max function"
  },
  "web/latex/results-check.mjs :: wsReader :: catch (err) { return err?.code === \"limit\" ? \"over\" : null; } #0": {
   "class": "1",

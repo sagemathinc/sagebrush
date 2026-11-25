@@ -4,6 +4,7 @@
 //   client's HTTP stack won't send a body whose length differs from its Content-Length, and Cloudflare's edge
 //   refuses one, so the reader is tested here);
 // - /__test/logs: this isolate's log lines since the last call (Miniflare doesn't hand console output over);
+// - /__test/clock?at=<ms>: the backstop's clock, fixed at that instant (at=real restores the real one);
 // - X-Witness: 1, /__test/cancels-reset: the body's cancellations counted (state's cancels);
 // - /__test/hold?on=1|0 and /__test/state: while on, an admitted request waits right after its bounded read,
 //   holding its slot and its bytes; state reports the admission count and the bytes held.
@@ -56,13 +57,21 @@ function witnessed(request: Request): Request {
   return new Request(request.url, { method: request.method, headers: request.headers, body, duplex: "half" } as RequestInit);
 }
 
-const dev = supportWorker({ prod: false, onBodyRead });
-const prod = supportWorker({ prod: true, onBodyRead });
+// (/__test/clock?at=<ms>: the backstop's clock, fixed at that instant until set again; at=real restores the real one)
+let clockAt: number | null = null;
+const backstopNow = () => clockAt ?? Date.now();
+const dev = supportWorker({ prod: false, onBodyRead, backstopNow });
+const prod = supportWorker({ prod: true, onBodyRead, backstopNow });
 
 export default {
   async fetch(request: Request, env: SupportEnv & { TEST_PROD?: string }) {
     const url = new URL(request.url);
     if (url.pathname === "/__test/logs") return Response.json(lines.splice(0));
+    if (url.pathname === "/__test/clock") {
+      const at = url.searchParams.get("at");
+      clockAt = at === "real" ? null : Number(at);
+      return Response.json({ ok: clockAt === null || Number.isSafeInteger(clockAt) });
+    }
     if (url.pathname === "/__test/hold") {
       holding = url.searchParams.get("on") === "1";
       if (holding) maxHeldBytes = 0;

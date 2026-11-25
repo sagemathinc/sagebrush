@@ -1,0 +1,282 @@
+{
+  "$comment": "The one closed registry of reason and refusal codes (O6/O7 r2.3 §5.4, §5.5). Closed per release: a verifier refuses a name not listed. Lanes add entries by a reviewed change to this file. Host codes come from grader's host r2 and are local (no HTTP status).",
+  "freeze": "db905c9d72ba5d4e18620d3267ea9214992d3a82c735289dda4088970dddc7e3",
+  "reasons": [
+    {
+      "name": "bad_form",
+      "owner": "service",
+      "status": 400,
+      "meaning": "a header, body or signed object isn't in its exact form"
+    },
+    {
+      "name": "bad_audience",
+      "owner": "service",
+      "status": 401,
+      "meaning": "aud isn't this service"
+    },
+    {
+      "name": "clock_skew",
+      "owner": "service",
+      "status": 401,
+      "meaning": "outside the 5-minute window; carries the service's time"
+    },
+    {
+      "name": "bad_signature",
+      "owner": "service",
+      "status": 401,
+      "meaning": "the signature doesn't verify, or the type isn't signed by that kind of signer"
+    },
+    {
+      "name": "unknown_host",
+      "owner": "service",
+      "status": 401,
+      "meaning": "not paired, or a re-paired host's old id"
+    },
+    {
+      "name": "host_revoked",
+      "owner": "service",
+      "status": 403,
+      "meaning": "the host is revoked"
+    },
+    {
+      "name": "agent_revoked",
+      "owner": "service",
+      "status": 403,
+      "meaning": "the agent is revoked"
+    },
+    {
+      "name": "stale_generation",
+      "owner": "service",
+      "status": 409,
+      "meaning": "gen isn't the current generation; a retry under a newer one carries only receipt_state"
+    },
+    {
+      "name": "grant_expired",
+      "owner": "service",
+      "status": 403,
+      "meaning": "the grant's not_after_ms has passed"
+    },
+    {
+      "name": "replay",
+      "owner": "service",
+      "status": 409,
+      "meaning": "the nonce has been seen"
+    },
+    {
+      "name": "idem_mismatch",
+      "owner": "service",
+      "status": 409,
+      "meaning": "the same idem with a different operation digest"
+    },
+    {
+      "name": "cap_invalid",
+      "owner": "service",
+      "status": 401,
+      "meaning": "the capability is unknown, expired, replaced or bound elsewhere"
+    },
+    {
+      "name": "not_granted",
+      "owner": "service",
+      "status": 403,
+      "meaning": "the operation or agent isn't in the grant"
+    },
+    {
+      "name": "scope",
+      "owner": "service",
+      "status": 403,
+      "meaning": "the endpoint's path scope (its existing code)"
+    },
+    {
+      "name": "not_found",
+      "owner": "service",
+      "status": 404,
+      "meaning": "a missing path, and any path in /.agents the caller can't read (O4)"
+    },
+    {
+      "name": "limit",
+      "owner": "service",
+      "status": 413,
+      "meaning": "a size or count limit; carries which"
+    },
+    {
+      "name": "device_unknown",
+      "owner": "service",
+      "status": 403,
+      "meaning": "the signer isn't enrolled at chain_seq, or its signer kind isn't the type's"
+    },
+    {
+      "name": "chain_fork",
+      "owner": "service",
+      "status": 409,
+      "meaning": "two entries at one seq, or a chain behind the pin (rollback)"
+    },
+    {
+      "name": "approval_used",
+      "owner": "service",
+      "status": 409,
+      "meaning": "an approval used twice"
+    },
+    {
+      "name": "approval_mismatch",
+      "owner": "service",
+      "status": 403,
+      "meaning": "subject_hash, kind or requester doesn't match the operation, or a preimage doesn't match its hash"
+    },
+    {
+      "name": "stale_auth",
+      "owner": "service",
+      "status": 401,
+      "meaning": "the sign-in is more than 5 minutes old, for a change of the fleet's shape"
+    },
+    {
+      "name": "rate",
+      "owner": "service",
+      "status": 429,
+      "meaning": "a rate limit; carries retry_after_s"
+    },
+    {
+      "name": "in_progress",
+      "owner": "service",
+      "status": 409,
+      "meaning": "the same idem is pending; carries retry_after_s"
+    },
+    {
+      "name": "outcome_unknown",
+      "owner": "service",
+      "status": 409,
+      "meaning": "the first attempt's outcome is being reconciled"
+    },
+    {
+      "name": "idem_expired",
+      "owner": "service",
+      "status": 409,
+      "meaning": "op is more than 23 hours old, or in the future"
+    },
+    {
+      "name": "approval_stale",
+      "owner": "service",
+      "status": 403,
+      "meaning": "the approval's gen or life is no longer current"
+    },
+    {
+      "name": "device_tier",
+      "owner": "service",
+      "status": 403,
+      "meaning": "a browser device signed what needs a native signer"
+    },
+    {
+      "name": "device_removed",
+      "owner": "service",
+      "status": 403,
+      "meaning": "the signer was removed at the verifier's pinned head"
+    },
+    {
+      "name": "browser_gen_stale",
+      "owner": "service",
+      "status": 409,
+      "meaning": "a retired or stale browser_gen"
+    },
+    {
+      "name": "recovery_key_mismatch",
+      "owner": "service",
+      "status": 403,
+      "meaning": "a recover entry not signed by the chain's recovery key"
+    },
+    {
+      "name": "package_stale",
+      "owner": "service",
+      "status": 409,
+      "meaning": "a sealed package expired, already opened, revoked, or of another generation"
+    },
+    {
+      "name": "preflight_missing",
+      "owner": "host",
+      "meaning": "a required unit, Landlock or path-contract control is missing at start"
+    },
+    {
+      "name": "landlock_abi",
+      "owner": "host",
+      "meaning": "the kernel's Landlock ABI is below 4"
+    },
+    {
+      "name": "unit_failed",
+      "owner": "host",
+      "meaning": "the agent's unit failed or exited while starting; it is left stopped and masked until the next grant or a resume"
+    },
+    {
+      "name": "start_timeout",
+      "owner": "host",
+      "meaning": "the agent's start didn't finish within its deadline; it is left stopped and masked until the next grant or a resume"
+    },
+    {
+      "name": "uid_exhausted",
+      "owner": "host",
+      "meaning": "the host's agent UID range is used up (UIDs are never reused)"
+    },
+    {
+      "name": "clone_detected",
+      "owner": "host",
+      "meaning": "the host keys don't match this machine id; re-pair"
+    },
+    {
+      "name": "qualify_required",
+      "owner": "host",
+      "meaning": "the qualification report is missing, or invalidated by a change"
+    },
+    {
+      "name": "audit_unavailable",
+      "owner": "host",
+      "meaning": "a durable intent couldn't be appended (unavailable); refused fail-closed"
+    },
+    {
+      "name": "audit_timeout",
+      "owner": "host",
+      "meaning": "a durable intent couldn't be appended (timeout); refused fail-closed"
+    },
+    {
+      "name": "audit_full",
+      "owner": "host",
+      "meaning": "a durable intent couldn't be appended (full); refused fail-closed"
+    },
+    {
+      "name": "program_mismatch",
+      "owner": "browser",
+      "meaning": "the rewrite program's bytes aren't the reviewed, pinned program"
+    },
+    {
+      "name": "unknown_owner",
+      "owner": "browser",
+      "meaning": "no rewrite program for this CDP result or event"
+    },
+    {
+      "name": "unmappable",
+      "owner": "browser",
+      "meaning": "a CDP result or event isn't the shape the rewrite program expects; it's dropped, never forwarded"
+    },
+    {
+      "name": "bad_kind",
+      "owner": "browser",
+      "meaning": "not a virtual handle kind"
+    },
+    {
+      "name": "stale_handle",
+      "owner": "browser",
+      "meaning": "a virtual handle that's revoked, unknown, of another kind or from another target"
+    },
+    {
+      "name": "bad_scope",
+      "owner": "browser",
+      "meaning": "a target-local handle without its target's scope, or a page handle with one"
+    },
+    {
+      "name": "handle_budget",
+      "owner": "browser",
+      "meaning": "the session has allocated its whole handle budget (live and revoked); it's retired"
+    },
+    {
+      "name": "bad_params",
+      "owner": "browser",
+      "meaning": "an agent's CDP command parameters are missing, extra, of the wrong type or out of their bounds"
+    }
+  ]
+}
