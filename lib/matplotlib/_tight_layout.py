@@ -31,22 +31,21 @@ def text_metrics(s, size, dpi):
     between them, and the highest and lowest ink. At a size and dpi the table doesn't have, the 10 pt metrics scaled,
     which are within a pixel or so; a character it doesn't have is measured as a digit."""
     key = round(size * dpi / M.DPI, 6)
-    rows, kerned = _SIZES.get(key) or (None, None)
-    ppem = size * dpi / 72.0
+    table = _SIZES.get(key)
+    # (a size the table has: its own, as the formula for kerning was checked at; 11.999999999999998 is 12)
+    ppem = (key if table is not None else size * dpi / M.DPI) * M.DPI / 72.0
     w, a, d, prev = 0, None, None, None
     for u in _units(s):
         i = _INDEX.get(u)
-        if rows is not None and i is not None:
-            adv, asc, des = rows[i]
+        if table is not None and i is not None:
+            adv, asc, des = table[0][i] * 64, table[1][i], table[2][i]
         else:
             # (a size the table lacks: the unit at 10 pt, scaled; a character it lacks: as '0', the typical digit)
-            k = ppem / (10.0 * M.DPI / 72.0)
-            adv, asc, des = (round(v * k) for v in M.SIZES[10.0][0][_INDEX["0"] if i is None else i])
+            k, ten, j = ppem / (10.0 * M.DPI / 72.0), M.SIZES[10.0], _INDEX["0"] if i is None else i
+            adv, asc, des = round(ten[0][j] * 64 * k), round(ten[1][j] * k), round(ten[2][j] * k)
         if prev is not None:
-            if rows is not None:
-                w += kerned.get((prev, u), 0)
-            else:
-                w += round(M.KERN.get(prev + u, 0) * ppem * 64 / M.UPM)
+            kv = table[3].get((prev, u)) if table is not None else None
+            w += kv if kv is not None else round(M.KERN.get(prev + u, 0) * ppem * 64 / M.UPM)
         w += adv
         a = asc if a is None else max(a, asc)
         d = des if d is None else max(d, des)
@@ -85,8 +84,8 @@ def _measure(line, size, dpi):
     m = re.match(r"^\$\\mathdefault\{10\^\{([-\u2212]?\d+)\}\}\$$", line)
     key = round(size * dpi / M.DPI, 6)
     if m and key in _POWERS and -30 <= int(m.group(1).replace("\u2212", "-")) <= 30:
-        w, a, d = _POWERS[key][int(m.group(1).replace("\u2212", "-")) + 30]
-        return w / 64.0, a / 64.0, d / 64.0
+        a, d, widths = _POWERS[key]
+        return float(widths[int(m.group(1).replace("\u2212", "-")) + 30]), a / 64.0, d / 64.0
     return text_metrics(re.sub(r"\\mathdefault|\\mathrm|[{}^_$\\]", "", line), size, dpi)
 
 
