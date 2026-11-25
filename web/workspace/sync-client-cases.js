@@ -4899,21 +4899,57 @@ async function sealedSend() {
   const id = await account();
   const f = await sealedFixture(id);
   const w = await fresh();
-  const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
-  check(await until(() => settled(w, c)), "sealed send: synced");
-  await ctl("log", { reset: true });
+  const c0 = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(w, c0)), "sealed send: synced");
+  await stop(c0);
+  // (made while not connected, so they go up together: one message chains its ops, each after the one before it)
   await w.mkdir("/s");
   await w.create("/s/a.txt", { content: "sealed a" });
+  await w.mkdir("/s/b");
+  await ctl("log", { reset: true });
+  const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
   check(await until(() => settled(w, c), 15_000), "sealed send: the changes settled: " + J(c.status));
   const log = await ctl("log");
   const sends = sealedSends(log), items = itemsOf(sends);
-  check(sends.length >= 1 && log.sent.every((m) => m.t !== "ops"), "sealed send: every op went as sops, none as plaintext: " + J(log.sent.map((m) => m.t)));
+  check(sends.length >= 1 && log.sent.every((m) => m.t !== "ops") && sends.some((m) => m.dseqs.length >= 3), "sealed send: every op went as sops, none as plaintext, the three in one message: " + J(sends.map((m) => m.dseqs)));
   check(items.length >= 2 && items.every((o) => o.env && o.sig && o.signer === f.provider.device.id && o.head === f.server.head && o.chain_gen === f.server.generation && o.path === undefined && o.op === undefined),
     "sealed send: each op sealed and signed under the chain's head and generation, nothing readable beside it");
   const file = items.find((o) => o.adds?.length === 1);
   check(file && (await ctl("sealedRefs", { account: id, address: file.adds[0] })).refs === 1, "sealed send: the file's blob counted once, by its visible add");
   check((await outbox(w)) === 0 && c.debug().halted === undefined, "sealed send: every record confirmed by its echo (matched by the envelope's hash)");
+  // (the per-device envelope chain: each envelope, opened, names the previous one's hash, the first none; the outbox's
+  // last link is the newest accepted envelope)
+  const hashOf = async (env) => b64u(new Uint8Array(await crypto.subtle.digest("SHA-256", Uint8Array.from(atob(env), (ch) => ch.charCodeAt(0)))));
+  const keys = await f.provider.epochKeys(1);
+  const fromB64u = (x) => Uint8Array.from(atob(x.replace(/-/g, "+").replace(/_/g, "/")), (ch) => ch.charCodeAt(0));
+  let prev = null, chained = true;
+  for (const o of items.sort((x, y) => x.dseq - y.dseq)) {
+    try {
+      await f.kit.openIndexOp(keys, { device: w.device, dseq: o.dseq }, Uint8Array.from(atob(o.env), (ch) => ch.charCodeAt(0)), { prev: prev === null ? null : fromB64u(prev), adds: o.adds, releases: o.releases });
+    } catch (e) {
+      chained = false;
+    }
+    prev = await hashOf(o.env);
+  }
+  check(chained, "sealed send: each envelope opens naming the previous envelope's hash (the first, none), and its visible references");
+  const last = await metaGet(w.ws, `sync:${nsOf(c)}:sealedPrev`);
+  check(last?.hash === prev && last.dseq === items[items.length - 1].dseq, "sealed send: the outbox's last link is the newest accepted envelope: " + J(last));
   await stop(c);
+}
+
+async function sealedTamper() {
+  // (the server names other bytes than this device sealed: in an ack, or in the echo it serves: halted, diverged)
+  for (const via of ["ack", "echo"]) {
+    const id = await account();
+    const f = await sealedFixture(id);
+    const w = await fresh();
+    const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+    check(await until(() => settled(w, c)), `sealed tamper (${via}): synced`);
+    await ctl("set", { set: via === "ack" ? { tamperAckHash: 1 } : { tamperIndexEnv: 1 } });
+    await w.mkdir(`/t-${via}`);
+    check(await until(() => c.debug().halted === "diverged", 15_000), `sealed tamper (${via}): another envelope's hash named: halted, diverged: ` + J(c.status));
+    await stop(c);
+  }
 }
 
 async function sealedLostAck() {
@@ -5028,7 +5064,7 @@ async function sealedForeign() {
   await stop(b);
 }
 
-const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign };
+const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
