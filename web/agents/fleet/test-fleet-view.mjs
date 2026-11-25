@@ -1,3 +1,4 @@
+// ci: web-runner order=356 runner=bun
 // The fleet pages' view model (web/agents/fleet/view.ts; design agent-autonomous-pages-fleet r2.1 §1.3, §2.1, §4):
 // unverified reports are closed enums or "unknown", missing or stale is unknown and never healthy, and only verified
 // facts decide "applied". With SAGEBRUSH_AGENT_DIR, the page's closed lists are compared with the producer's own files.

@@ -50,7 +50,8 @@ const NOW = F.now_ms, HOST = F.ids.host, AGENT = F.ids.agent;
 const grant = F.objects.grants.find((c) => c.name === "a grant" && c.expect === "ok").bytes;
 const ackAhead = F.objects.grant_acks.find((c) => c.name === "an ack of the current generation").bytes; // (gen 3: ahead of grant 1)
 const report = (over = {}, agent = {}) => ({ host: { reported_at_ms: NOW - 1500, last_seen_ms: NOW - 1000, health: "ok", health_reasons: [], ...over }, agents: { [AGENT]: { run: "running", fences: [], lease: "live", lease_expires_at_ms: NOW + 600_000, restore: null, ...agent } } });
-const base = () => ({ fleet: F.ids.fleet, aud: F.aud, now_ms: NOW, chain: F.objects.chain, hosts: [{ host: HOST, cert: F.objects.host_cert, revocation: null, grant, ack: ackAhead }], state: { [HOST]: report() }, ops: {} });
+const hostRow = (over = {}) => ({ host: HOST, cert: F.objects.host_cert, revocation: null, grant_gen: 1, ack: ackAhead, ...over });
+const base = () => ({ fleet: F.ids.fleet, aud: F.aud, now_ms: NOW, chain: F.objects.chain, hosts: [hostRow()], grants: { [HOST]: [grant] }, state: { [HOST]: report() }, ops: {} });
 let fixtures = base();
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (r) => {
   const p = new URL(r.url).pathname;
@@ -143,7 +144,23 @@ try {
     ok(!(await P.ev(`!!document.querySelector("li.host")`)), "A-2: and no host is shown either");
   }
   {
-    fixtures = { ...base(), hosts: [{ host: HOST, cert: F.objects.host_cert.replace(/"name":"/, '"name":"x'), revocation: null, grant, ack: null }] };
+    // (the lineage: verified in order, each against the previous VERIFIED grant; the walk stops at the first refusal)
+    const older = F.objects.grants.find((c) => c.name === "an older generation" && c.expect === "stale_generation");
+    const same = F.objects.grants.find((c) => c.name === "the same bytes again" && c.expect === "ok");
+    const line = async (fx) => { fixtures = fx; const P = await fresh(); await open(P, site + "?fixtures=1#hosts", `!!document.querySelector("li.host .grant")`); return P.ev(`document.querySelector("li.host .grant").textContent`); };
+    const g1 = await line({ ...base(), hosts: [hostRow({ grant_gen: 2, ack: null })], grants: { [HOST]: [older.current.bytes, older.bytes] } });
+    ok(g1 === "grant 2 · expires in 1 h · waiting for the host · a newer grant didn't verify (stale_generation)", "L-1: a lineage whose next grant goes back a generation: the last verified one shown, and the refusal after it said", g1);
+    const g2 = await line({ ...base(), hosts: [hostRow({ ack: null })], grants: { [HOST]: [same.current.bytes, same.bytes] } });
+    ok(g2 === "grant 1 · expires in 1 h · waiting for the host", "L-2: the same grant twice (a re-apply): verifies, and isn't a narrowing", g2);
+    const g3 = await line({ ...base(), hosts: [hostRow({ ack: null })], grants: { [HOST]: "not a list" } });
+    ok(g3 === "its newest grants couldn't be read: not checked", "L-3: the service names a grant but none can be read: unresolved, not \"no grant yet\"", g3);
+    const g4 = await line({ ...base(), hosts: [hostRow({ grant_gen: 5, ack: null })] });
+    ok(g4 === "grant 1 · expires in 1 h · waiting for the host · its newest grants couldn't be read: not checked", "L-4: the service says gen 5 but serves only up to 1: gen 1 verified, the rest unresolved", g4);
+    const g5 = await line({ ...base(), hosts: [hostRow({ grant_gen: null, ack: null })], grants: {} });
+    ok(g5 === "no grant yet", "L-5: a host with no grant: \"no grant yet\"", g5);
+  }
+  {
+    fixtures = { ...base(), hosts: [hostRow({ cert: F.objects.host_cert.replace(/"name":"/, '"name":"x'), ack: null })] };
     const P = await fresh();
     await open(P, site + "?fixtures=1#hosts", `!!document.querySelector("li.host")`);
     const t = await text(P);

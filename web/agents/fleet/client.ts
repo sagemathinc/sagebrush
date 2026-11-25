@@ -6,8 +6,11 @@
 // address carries ?fixtures=1. Anywhere else the flag is ignored and the page reads the service. The fixtures come
 // from the test's own server (fixtures.json next to the page), never from the page's bundle.
 
-/** One host as the service lists it: each object as its exact signed text, or null. */
-export type HostRow = Readonly<{ host: string; cert: string; revocation: string | null; grant: string | null; ack: string | null }>;
+/** One host as the service lists it: its certificate, revocation and latest ack as exact signed text (or null), and
+ *  grant_gen, the highest generation the service accepted (unverified: the grants themselves come from grantsPage). */
+export type HostRow = Readonly<{ host: string; cert: string; revocation: string | null; grant_gen: number | null; ack: string | null }>;
+/** A page of a host's accepted grants, oldest first, with gen above `after`: their exact texts, and the head generation. */
+export type GrantsPage = Readonly<{ grants: readonly string[]; head: number }>;
 /** A narrowing op as the service lists it (unsigned: shown as an unverified report). */
 export type OpRow = Readonly<{ op_id: unknown; kind: unknown; state: unknown; at_ms: unknown }>;
 /** A page of the device chain, read by the core's own reader: each entry's text, the head, and the next `after`. */
@@ -20,6 +23,8 @@ export interface Source {
   /** The whole device chain, from genesis, as its entries' texts. */
   chain(): Promise<string[]>;
   hosts(): Promise<HostRow[]>;
+  /** The host's accepted grants with gen above `after` (0: from the first), oldest first. */
+  grantsPage(host: string, after: number): Promise<GrantsPage>;
   /** A host's state report (unverified); null when there is none. */
   state(host: string): Promise<unknown>;
   ops(host: string): Promise<OpRow[] | null>;
@@ -36,6 +41,7 @@ export const ROUTES = {
   fleet: "/api/fleet/v1/fleet",
   chain: "/api/fleet/v1/chain",
   hosts: "/api/fleet/v1/hosts",
+  grants: (host: string, after: number) => `/api/fleet/v1/hosts/${encodeURIComponent(host)}/grants` + (after > 0 ? `?after=${after}` : ""),
   state: (host: string) => `/api/fleet/v1/hosts/${encodeURIComponent(host)}/state`,
   ops: (host: string) => `/api/fleet/v1/hosts/${encodeURIComponent(host)}/ops`,
 } as const;
@@ -79,8 +85,14 @@ const strOrNull = (v: unknown) => v === null || str(v);
 function hostsOf(v: unknown): HostRow[] | null {
   if (!isRec(v) || !Array.isArray(v.hosts)) return null;
   const rows = v.hosts.slice(0, 256);
-  if (!rows.every((h) => isRec(h) && str(h.host) && str(h.cert) && strOrNull(h.revocation) && strOrNull(h.grant) && strOrNull(h.ack))) return null;
-  return rows.map((h: any) => ({ host: h.host, cert: h.cert, revocation: h.revocation, grant: h.grant, ack: h.ack }));
+  const gen = (v: unknown) => v === null || (typeof v === "number" && Number.isSafeInteger(v) && v > 0);
+  if (!rows.every((h) => isRec(h) && str(h.host) && str(h.cert) && strOrNull(h.revocation) && gen(h.grant_gen) && strOrNull(h.ack))) return null;
+  return rows.map((h: any) => ({ host: h.host, cert: h.cert, revocation: h.revocation, grant_gen: h.grant_gen, ack: h.ack }));
+}
+/** A grants page in its agreed shape (at most 16 grants), or null. */
+function grantsOf(v: unknown): GrantsPage | null {
+  if (!isRec(v) || !Array.isArray(v.grants) || v.grants.length > 16 || !v.grants.every(str) || !(typeof v.head === "number" && Number.isSafeInteger(v.head) && v.head >= 0)) return null;
+  return { grants: v.grants as string[], head: v.head };
 }
 /** An ops list (at most 64, each field still unchecked: the page reads them as a report), or null. */
 const opsOf = (v: unknown): OpRow[] | null => (Array.isArray(v) ? v.slice(0, 64).filter(isRec).map((o) => ({ op_id: o.op_id, kind: o.kind, state: o.state, at_ms: o.at_ms })) : null);
@@ -120,6 +132,13 @@ export function serviceSource(readPage: (bytes: Uint8Array, after: number) => Ch
       if (!rows) throw new ServiceError("unavailable", r.status);
       return rows;
     },
+    async grantsPage(host, after) {
+      const r = await get(f, ROUTES.grants(host, after));
+      if (r.status !== 200) throw refusal(r.status, r.bytes);
+      const p = grantsOf(json(r.bytes));
+      if (!p) throw new ServiceError("unavailable", r.status);
+      return p;
+    },
     async state(host) {
       const r = await get(f, ROUTES.state(host));
       if (r.status === 404) return null;
@@ -139,7 +158,8 @@ export function serviceSource(readPage: (bytes: Uint8Array, after: number) => Ch
 
 /**
  * The fixture service of a loopback test page (§3): one JSON file the test serves beside the page,
- * { fleet, aud, now_ms, chain: [entry], hosts: [HostRow], state: { <host>: report }, ops: { <host>: [OpRow] } }. Its
+ * { fleet, aud, now_ms, chain: [entry], hosts: [HostRow], grants: { <host>: [grant] }, state: { <host>: report },
+ * ops: { <host>: [OpRow] } }. Its
  * signed objects are the agent's own fixtures; it only serves them, and signs nothing.
  */
 export function fixtureSource(f: Fetch = (i, o) => fetch(i, o)): Source {
@@ -157,6 +177,13 @@ export function fixtureSource(f: Fetch = (i, o) => fetch(i, o)): Source {
     async fleet() { const v = await load(); return str(v.fleet) && str(v.aud) ? { fleet: v.fleet, aud: v.aud } : null; },
     async chain() { const v = await load(); return Array.isArray(v.chain) ? v.chain.filter(str) : []; },
     async hosts() { const rows = hostsOf(await load()); if (!rows) throw new ServiceError("unavailable", 200); return rows; },
+    // (the mock only: it reads each grant's gen to page as the service does; the page verifies them all the same)
+    async grantsPage(host, after) {
+      const v = await load();
+      const all: string[] = isRec(v.grants) && Array.isArray(v.grants[host]) ? v.grants[host].filter(str) : [];
+      const genOf = (g: string) => { try { return Number(JSON.parse(g)?.body?.gen) || 0; } catch { return 0; } };
+      return { grants: all.filter((g) => genOf(g) > after).slice(0, 16), head: all.reduce((m, g) => Math.max(m, genOf(g)), 0) };
+    },
     async state(host) { const v = await load(); return isRec(v.state) && Object.hasOwn(v.state, host) ? v.state[host] : null; },
     async ops(host) { const v = await load(); return isRec(v.ops) && Object.hasOwn(v.ops, host) ? opsOf(v.ops[host]) : null; },
     now: () => (now > 0 ? now : Date.now()),

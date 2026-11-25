@@ -16,7 +16,8 @@ const T = {
   back: "← Hosts",
   loading: "Loading…",
   noFleet: "You have no fleet yet. Autonomous agents run on hosts you pair from the Sagebrush app.",
-  unavailable: "The fleet service didn't answer. Nothing here was trusted.",
+  unavailable: "The fleet service didn't answer. Nothing here was trusted. Try again in a moment.",
+  signIn: "Sign in to see your fleet.",
   refused: (code: string) => `The fleet service refused (${code}). Nothing here was trusted.`,
   chainBad: (code: string) => `This device list didn't verify (${code}). Nothing in it was trusted.`,
   tier: "This browser",
@@ -34,6 +35,9 @@ const T = {
   hostBad: (code: string) => `Its certificate didn't verify (${code}). Nothing about this host is shown.`,
   revoked: "revoked",
   grantBad: (code: string) => `its grant didn't verify (${code})`,
+  newerBad: (code: string) => `a newer grant didn't verify (${code})`,
+  unresolved: "its newest grants couldn't be read: not checked",
+  notYet: "not yet in force",
   gen: (gen: number) => `grant ${gen}`,
   unknownHost: "There is no such host in your fleet.",
   agentsNone: "Its grant lists no agents.",
@@ -49,6 +53,8 @@ const url = new URL(location.href);
 const readPage = (_bytes: Uint8Array, _after: number): ChainPage => { throw new ServiceError("unavailable", 0); };
 const src: Source = sourceKind(url) === "fixtures" ? fixtureSource() : serviceSource(readPage);
 const fresh = V.freshness();
+/** At most this many pages of a host's grants (16 each) are read; more than that is shown as unresolved. */
+const GRANT_PAGES_MAX = 64;
 
 // ---- DOM
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> & Record<string, unknown> = {}, ...kids: (Node | string | null)[]) => {
@@ -78,9 +84,13 @@ type HostView = Readonly<{
   name: string;
   fingerprint: string;
   revoked: boolean;
-  grant: { gen: number; notAfter: number | null; agents: readonly any[] } | null;
+  grant: { gen: number; notBefore: number; notAfter: number | null; agents: readonly any[] } | null;
   grantRefused: string | null;
+  /** The grants couldn't all be read (a page that failed to load, or more than this page reads): unresolved. */
+  grantUnresolved: boolean;
   ackGen: number | null;
+  /** The current grant narrows the verified one before it. */
+  narrowing: boolean;
 }>;
 type Loaded =
   | { kind: "no-fleet" }
@@ -88,6 +98,8 @@ type Loaded =
   | { kind: "fork"; ctx: FleetCtx }
   | { kind: "ok"; ctx: FleetCtx; chain: Chain; hosts: HostView[] };
 
+/** What a service failure says: sign in, try again, or the refusal's own code. */
+const serviceText = (e: ServiceError) => (e.code === "unauthenticated" || e.status === 401 ? T.signIn : e.code === "unavailable" || e.code === "rate" || e.status === 429 || e.status >= 500 ? T.unavailable : T.refused(e.code));
 const codeOf = (e: unknown) => (e && typeof e === "object" && typeof (e as any).code === "string" && /^[a-z_]{1,40}$/.test((e as any).code) ? (e as any).code : "error");
 
 async function verifiedChain(ctx: FleetCtx): Promise<Chain> {
@@ -97,19 +109,55 @@ async function verifiedChain(ctx: FleetCtx): Promise<Chain> {
   }
 }
 
+/** A grant's own not_before_ms, read only as the clock its lifetime is checked at (the signature covers it); else now. */
+function startOf(text: string): number {
+  try { const nb = JSON.parse(text)?.body?.not_before_ms; if (Number.isSafeInteger(nb) && nb > 0) return nb; } catch {}
+  return src.now();
+}
+
 async function verifyHost(ctx: FleetCtx, chain: Chain, h: HostRow): Promise<HostView> {
-  const base = { host: h.host, cert: null, certRefused: null, name: "", fingerprint: "", revoked: false, grant: null, grantRefused: null, ackGen: null };
+  const base = { host: h.host, cert: null, certRefused: null, name: "", fingerprint: "", revoked: false, grant: null, grantRefused: null, grantUnresolved: false, ackGen: null, narrowing: false };
   let cert: HostCert;
   try { cert = await verifyHostCert(ctx, chain, h.cert); } catch (e) { return { ...base, certRefused: codeOf(e) }; }
   const body = cert.body as { host: string; name: string };
   if (body.host !== h.host) return { ...base, certRefused: "not_granted" };
   const v: { -readonly [K in keyof HostView]: HostView[K] } = { ...base, cert, name: body.name, fingerprint: await hostFingerprintShown(cert) };
   if (h.revocation) { try { await verifyHostRevocation(ctx, chain, h.host, h.revocation); v.revoked = true; } catch {} }
-  if (h.grant) {
-    try {
-      const g = (await verifyGrant(ctx, chain, cert, h.grant, null, src.now())) as { body: { gen: number; not_after_ms: number | null; agents: any[] } };
-      v.grant = { gen: g.body.gen, notAfter: g.body.not_after_ms, agents: g.body.agents };
-    } catch (e) { v.grantRefused = codeOf(e); }
+  // (the host's accepted grants, oldest first, verified IN ORDER as the host accepted them: the first against nothing,
+  //  each next one against the previous VERIFIED one, so a narrowing signed by a browser device verifies against what
+  //  it narrows. The walk stops at the first grant that doesn't verify; nothing after it is shown as verified.)
+  if (h.grant_gen !== null) {
+    let cur: { gen: number; bytes: Uint8Array; body: unknown } | null = null;
+    let prevGen = 0, widened = true, after = 0;
+    walk: for (let page = 0; page < GRANT_PAGES_MAX; page++) {
+      let p: { grants: readonly string[]; head: number };
+      try { p = await src.grantsPage(h.host, after); } catch { v.grantUnresolved = true; break; }
+      if (!p.grants.length) break;
+      for (const text of p.grants) {
+        try {
+          // (each checked at its own start: the host accepted it then, and its signer, form and place in the order
+          //  are what the walk proves; whether the newest is still in force is shown from its lifetime, below)
+          const g = (await verifyGrant(ctx, chain, cert, text, cur, startOf(text))) as { body: { gen: number }; widens: boolean };
+          prevGen = cur?.gen ?? 0;
+          widened = g.widens;
+          cur = { gen: g.body.gen, bytes: new TextEncoder().encode(text), body: g.body };
+        } catch (e) {
+          v.grantRefused = codeOf(e);
+          break walk;
+        }
+      }
+      after = cur?.gen ?? after;
+      if (cur && cur.gen >= p.head) break;
+      if (page === GRANT_PAGES_MAX - 1) v.grantUnresolved = true;
+    }
+    // (the service names a grant but none could be read and verified: not "no grant")
+    if (!cur && !v.grantRefused) v.grantUnresolved = true;
+    if (cur) {
+      const b = cur.body as { gen: number; not_before_ms: number; not_after_ms: number | null; agents: any[] };
+      v.grant = { gen: b.gen, notBefore: b.not_before_ms, notAfter: b.not_after_ms, agents: b.agents };
+      v.narrowing = prevGen > 0 && prevGen < b.gen && !widened;
+      if (h.grant_gen > b.gen && !v.grantRefused) v.grantUnresolved = true;
+    }
   }
   if (h.ack && v.grant) {
     try { v.ackGen = ((await verifyGrantAck(ctx, cert, h.ack, v.grant.gen)) as { gen: number }).gen; } catch {}
@@ -119,20 +167,20 @@ async function verifyHost(ctx: FleetCtx, chain: Chain, h: HostRow): Promise<Host
 
 async function load(): Promise<Loaded> {
   let f: { fleet: string; aud: string } | null;
-  try { f = await src.fleet(); } catch (e) { return { kind: "error", text: e instanceof ServiceError && e.code !== "unavailable" ? T.refused(e.code) : T.unavailable }; }
+  try { f = await src.fleet(); } catch (e) { return { kind: "error", text: e instanceof ServiceError ? serviceText(e) : T.unavailable }; }
   if (!f) return { kind: "no-fleet" };
   const ctx: FleetCtx = { aud: f.aud, fleet: f.fleet };
   let chain: Chain;
   try { chain = await verifiedChain(ctx); } catch (e) {
     if (codeOf(e) === "chain_fork") return { kind: "fork", ctx };
-    if (e instanceof ServiceError) return { kind: "error", text: e.code === "unavailable" ? T.unavailable : T.refused(e.code) };
+    if (e instanceof ServiceError) return { kind: "error", text: serviceText(e) };
     // (the core refuses with a reason code; anything else came from this browser's own storage, which couldn't keep or
     //  read the pin: nothing was trusted either way)
     if (e instanceof StorageFailed || codeOf(e) === "error") return { kind: "error", text: T.storage };
     return { kind: "error", text: T.chainBad(codeOf(e)) };
   }
   let rows: HostRow[];
-  try { rows = await src.hosts(); } catch (e) { return { kind: "error", text: e instanceof ServiceError && e.code !== "unavailable" ? T.refused(e.code) : T.unavailable }; }
+  try { rows = await src.hosts(); } catch (e) { return { kind: "error", text: e instanceof ServiceError ? serviceText(e) : T.unavailable }; }
   const hosts: HostView[] = [];
   for (const h of rows) hosts.push(await verifyHost(ctx, chain, h));
   return { kind: "ok", ctx, chain, hosts };
@@ -165,10 +213,13 @@ async function deviceView(l: Loaded) {
 }
 
 function grantLine(h: HostView): string {
-  if (h.grantRefused) return T.grantBad(h.grantRefused);
-  const s = V.grantState(h.grant?.gen ?? null, h.ackGen, false);
-  if (!h.grant) return V.TEXT.grant.none;
-  return `${T.gen(h.grant.gen)} · ${V.lifetime(h.grant.notAfter, src.now())} · ${V.TEXT.grant[s]}`;
+  if (!h.grant) return h.grantRefused ? T.grantBad(h.grantRefused) : h.grantUnresolved ? T.unresolved : V.TEXT.grant.none;
+  // (the last VERIFIED grant; a newer one that didn't verify, or couldn't be read, is said after it, and then nothing
+  //  is "applied": the host may be on a grant this page couldn't check)
+  const newer = h.grantRefused ? T.newerBad(h.grantRefused) : h.grantUnresolved ? T.unresolved : null;
+  const s = newer ? (h.narrowing ? "narrowing" : "waiting") : V.grantState(h.grant.gen, h.ackGen, h.narrowing);
+  const life = src.now() < h.grant.notBefore ? T.notYet : V.lifetime(h.grant.notAfter, src.now());
+  return [T.gen(h.grant.gen), life, V.TEXT.grant[s], newer].filter(Boolean).join(" · ");
 }
 
 function hostsView(l: Loaded) {
