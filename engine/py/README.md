@@ -14,7 +14,7 @@ which also runs in the browser at [sagebrush.space](https://sagebrush.space).
 >>> nf.bnf([-11, 0, 0, 1])              # Q[x]/(x^3 - 11): class group, regulator
 {'assumes': ['GRH'], 'certified': True, 'cyc': [2], 'degree': 3, 'disc': -3267, 'h': 2, 'r1': 1, 'r2': 1, 'regulator': '5.5872066260609077619', 'w': 2, 'w_proven': True}
 
->>> nf.factor_integer(2**128 + 1)       # ECM
+>>> nf.factor_integer(2**128 + 1)       # the quadratic sieve
 [(59649589127497217, 1), (5704689200685129054721, 1)]
 
 >>> nf.primes_above([-11, 0, 0, 1], 5)  # 5 = P_1 P_2 with residue degrees 1, 2
@@ -204,7 +204,7 @@ versions, the load average, and the median and range of each case;
 - `sagebrush.nf`: number fields: maximal orders, prime ideals, class groups,
   units and regulators (assuming GRH, with a field-specific bound for the
   generators), quadratic class groups to |D| ~ 10^60; integer factoring
-  (ECM); Hermite and Smith forms, LLL; complex roots to any precision.
+  (ECM and the quadratic sieve); Hermite and Smith forms, LLL; complex roots to any precision.
 - `sagebrush.mf`: modular forms of weight k >= 2 with character:
   dimensions, exact Hecke characteristic polynomials, newform orbits, trace
   forms.

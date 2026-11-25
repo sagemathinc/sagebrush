@@ -114,7 +114,7 @@ export async function browserPilot({ record = (r) => console.log(JSON.stringify(
     result.worker_ids.push(await workers());
     const cases = [
       { id: "P1", mode: "python", nonterminating: true, code: (i) => `print('EN' + 'TER ${i}', flush=True)\ntry:\n    k = 0\n    while True:\n        k += 1\nexcept KeyboardInterrupt:\n    print('K' + 'I ${i}', flush=True)\nprint('PRO' + 'BE ${i} ' + ('ok' if keep == 41 and sum(range(10)) == 45 else 'fail'))`, delay: 1000 },
-      { id: "E2", mode: "sage", code: (i) => `n = next_prime(10**22) * next_prime(3 * 10**22)\nprint('EN' + 'TER ${i}', flush=True)\ntry:\n    _r = factor(n)\n    print('R' + 'ET ${i}')\nexcept KeyboardInterrupt:\n    print('K' + 'I ${i}', flush=True)\nprint('PRO' + 'BE ${i} ' + ('ok' if keep == 41 and len(factor(2**64 + 1)) == 2 else 'fail'))`, delay: 1500 },
+      { id: "E2", mode: "sage", code: (i) => `n = next_prime(10**39) * next_prime(3 * 10**39)\nprint('EN' + 'TER ${i}', flush=True)\ntry:\n    _r = factor(n)\n    print('R' + 'ET ${i}')\nexcept KeyboardInterrupt:\n    print('K' + 'I ${i}', flush=True)\nprint('PRO' + 'BE ${i} ' + ('ok' if keep == 41 and len(factor(2**64 + 1)) == 2 else 'fail'))`, delay: 1500 },
     ];
     // (the Sage cases run in Sage mode: the page's mode selector, then ready again)
     const MODE_MS = 120_000;
