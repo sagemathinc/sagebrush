@@ -362,7 +362,6 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync +
     tauri::generate_handler![startup_files, selftest_file, selftest_persist, selftest_report, app_log]
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// The agent bundle's check, on this app's own resources, Node and compiled-in values, as one log line for the
 /// self-test's judge: "[agent] bundle: ok ...", "[agent] bundle: not_bundled", or "[agent] bundle: refused <why>".
 #[cfg(desktop)]
@@ -384,6 +383,7 @@ fn selftest_agent_bundle(app: &tauri::AppHandle) {
     }
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let args: Vec<String> = std::env::args()
         .skip(1)
@@ -510,4 +510,18 @@ pub fn run() {
                 let _ = _app.emit("open-files", sent);
             }
         });
+}
+
+#[cfg(test)]
+mod entry_point_tests {
+    // (the mobile build's entry point is the attribute on run(): an item inserted between them would take it, and
+    // the phone apps would have no entry point while the desktop build stays green)
+    #[test]
+    fn the_mobile_entry_point_attribute_is_on_run() {
+        let src = include_str!("lib.rs");
+        let attr = concat!("#[cfg_attr(mobile, tauri::", "mobile_entry_point)]");
+        let at: Vec<usize> = src.lines().enumerate().filter(|(_, l)| l.trim() == attr).map(|(i, _)| i).collect();
+        assert_eq!(at.len(), 1, "the attribute appears once");
+        assert_eq!(src.lines().nth(at[0] + 1).map(str::trim), Some("pub fn run() {"), "the line after it is run()'s");
+    }
 }
