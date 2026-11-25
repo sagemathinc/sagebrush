@@ -1497,6 +1497,15 @@ def median(a, axis=None, out=None, overwrite_input=False, keepdims=False):
     a = asarray(a)
     if axis is None:
         ax, s = 0, sort(a.ravel())
+    elif isinstance(axis, (tuple, list)):
+        # (several axes, as NumPy's: they are moved last and taken as one; keepdims keeps each of them; a float
+        # refused as the reductions refuse it, an axis named twice as NumPy's median does)
+        ax = _normalize_axis_tuple(_axes(a, axis), a.ndim)
+        keep = [i for i in range(a.ndim) if i not in ax]
+        m = 1
+        for i in ax:
+            m *= a.shape[i]
+        s = sort(_np.transpose(a, keep + list(ax)).reshape(tuple(a.shape[i] for i in keep) + (m,)), axis=-1)
     else:
         # (sort checks the axis first, with NumPy's AxisError; then it is a valid index)
         s = moveaxis(sort(a, axis=axis), axis, -1)
