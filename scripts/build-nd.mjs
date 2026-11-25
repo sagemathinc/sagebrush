@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { installWasm } from "./install-engine-wasm.mjs";
+import { installWasm, remappedRustflags } from "./install-engine-wasm.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FLAGS = [
@@ -27,7 +27,9 @@ export function buildNd(target = join(process.env.CARGO_TARGET_DIR ?? join(root,
   execFileSync("cargo", ["build", "--release", "--target", "wasm32-unknown-unknown", "-p", "sagebrush-nd"], {
     cwd: join(root, "engine"),
     stdio: "inherit",
-    env: { ...process.env, RUSTFLAGS: FLAGS, CARGO_TARGET_DIR: target },
+    // (its own flags, not the caller's, after the Cargo home written as CI's: nd names no registry file today, but a
+    // dependency that panics with its path would otherwise make a local build differ from the pin, #1899)
+    env: { ...process.env, RUSTFLAGS: remappedRustflags({ ...process.env, RUSTFLAGS: FLAGS }), CARGO_TARGET_DIR: target },
   });
   const built = join(target, "wasm32-unknown-unknown", "release", "sagebrush_nd.wasm");
   new WebAssembly.Module(readFileSync(built)); // validate
