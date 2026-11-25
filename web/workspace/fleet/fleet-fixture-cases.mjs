@@ -27,6 +27,34 @@ export async function checkFixtures(core, F) {
   const sk = await core.replayChain(F.service_keys.chain.map(enc), ctx);
   for (const c of F.service_keys.cases) check("service_keys", c.name, await result(() => core.serviceKeyAt(sk, c.signer, c.chain_seq)), c.expect);
 
+  for (const c of F.lease_keys.chain_cases) {
+    const got = await result(async () => {
+      const st = await core.replayChain(c.entries.map(enc), ctx);
+      if (c.append) await core.applyChainEntry(st, enc(c.append), ctx);
+    });
+    check("lease_chain", c.name, got, c.expect);
+  }
+  const lk = await core.replayChain(F.lease_keys.chain.map(enc), ctx);
+  for (const c of F.lease_keys.cases) {
+    const at = c.lookup === "lease" ? core.leaseKeyAt : core.serviceKeyAt;
+    check("lease_keys", c.name, await result(() => at(lk, c.signer, c.chain_seq)), c.expect);
+  }
+
+  {
+    const E = F.leases;
+    const lc = await core.replayChain(E.chain.map(enc), ctx);
+    const lcert = await core.verifyHostCert(enc(E.host_cert), { ...ctx, chain: lc });
+    for (const c of E.requests) {
+      let h = null;
+      const got = await result(async () => { h = (await core.verifyLeaseRequest(enc(c.bytes), { ...ctx, cert: lcert })).hash; });
+      check("lease_requests", c.name, got, c.expect);
+      if (c.hash) check("lease_requests", `${c.name}: its hash`, h, c.hash);
+    }
+    for (const c of E.leases) {
+      const got = await result(() => core.verifyExecutionLease(enc(c.bytes), { ...ctx, chain: lc, host: E.host, hostKey: E.host_key, outstanding: c.outstanding }));
+      check("leases", c.name, got, c.expect);
+    }
+  }
   const O = F.objects;
   const st = await core.replayChain(O.chain.map(enc), ctx);
   const cert = await core.verifyHostCert(enc(O.host_cert), { ...ctx, chain: st });
@@ -48,6 +76,28 @@ export async function checkFixtures(core, F) {
   for (const c of O.approvals) {
     const got = await result(() => core.verifyApproval(enc(c.bytes), { ...ctx, chain: st, now: F.now_ms, expect: c.expect_op, current: c.current, used: (a) => c.used.includes(a) }));
     check("approvals", c.name, got, c.expect);
+  }
+
+  // moving an agent (r2.4 §3.7): the receipt pair (checks 1-3), then the host's records (checks 4-6)
+  const X = F.transfers;
+  const chains = { honest: await core.replayChain(X.chain.map(enc), ctx), removed: await core.replayChain(X.chain_removed.map(enc), ctx) };
+  for (const c of X.receipts) {
+    const got = await result(() => core.verifyTransferReceipt({ transfer: enc(c.transfer), receipt: enc(c.receipt) }, { ...ctx, chain: chains[c.chain ?? "honest"] }));
+    check("transfer_receipts", c.name, got, c.expect);
+  }
+  const hostOf = (r) => ({
+    id: r.id, fingerprint: r.fingerprint,
+    grantHashAt: (g) => r.grants[g]?.hash ?? null,
+    grantListsAgent: (g, a) => r.grants[g]?.agents.includes(a) ?? false,
+    listedSince: (a) => r.listed_since[a] ?? null,
+    entryGen: (a) => r.entry_gen[a] ?? null,
+    acceptedTransfer: (a) => r.accepted[a] ?? null,
+    nonceSeen: (x) => r.nonces[x] ?? null,
+  });
+  for (const c of X.hosts) {
+    let first = null;
+    const got = await result(() => { first = core.checkTransferForHost(c.pair, hostOf(c.host)).first; });
+    check("transfer_hosts", c.name, got === "ok" ? `ok first=${first}` : got, c.expect === "ok" ? `ok first=${c.first}` : c.expect);
   }
   return { bad, n };
 }
