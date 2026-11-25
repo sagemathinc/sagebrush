@@ -479,5 +479,76 @@
     ],
     "status": "partial",
     "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.figure.Figure.tight_layout",
+    "kind": "method",
+    "signature": "(self, *, pad=1.08, h_pad=None, w_pad=None, rect=None)",
+    "summary": "Subplot parameters that leave room for each subplot's tick labels, axis labels and title (and the figure's suptitle), as Matplotlib computes them; set as subplots_adjust would.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, axs = plt.subplots(2, 1)\naxs[0].plot([0, 1000, 2000], [0, 1, 0.5])\naxs[0].set_title('Signal')\naxs[1].plot([0, 1, 2], [-50, 25, 0])\naxs[1].set_xlabel('time (s)')\nfig.tight_layout()\nprint([round(float(v), 4) for v in axs[0].get_position().bounds])\nprint([round(float(v), 4) for v in axs[1].get_position().bounds])",
+        "expected": "[0.0855, 0.5633, 0.8911, 0.361]\n[0.0855, 0.1219, 0.8911, 0.361]\n"
+      }
+    ],
+    "differs": [
+      "Texts are measured as Matplotlib's Agg renderer measures its default font, DejaVu Sans, at the named sizes (xx-small to xx-large of 10 pt) and 100 dpi; at other sizes or dpi, and for characters outside ASCII, within a pixel or so.",
+      "Axes from a GridSpec, and figures with colorbars, keep their subplot parameters: tight_layout isn't computed for them.",
+      "Legends, texts and annotations placed outside an Axes aren't counted.",
+      "The figure is drawn as before: each subplot in its share of the figure, with room for its labels. The subplot parameters move what get_position gives and the ticks an Axes' size gives, as in Matplotlib."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.pyplot.tight_layout",
+    "kind": "function",
+    "signature": "(*, pad=1.08, h_pad=None, w_pad=None, rect=None)",
+    "summary": "The current figure's tight_layout: room for each subplot's labels and title.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nplt.figure()\nplt.plot([1, 2, 3], [10, 250, 40])\nplt.ylabel('count')\nplt.tight_layout(pad=0.5)\nprint([round(float(v), 4) for v in plt.gca().get_position().bounds])",
+        "expected": "[0.0986, 0.0637, 0.8905, 0.9219]\n"
+      }
+    ],
+    "differs": [
+      "As Figure.tight_layout."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.figure.Figure.subplots_adjust",
+    "kind": "method",
+    "signature": "(self, left=None, bottom=None, right=None, top=None, wspace=None, hspace=None)",
+    "summary": "Set the subplot parameters: where the grid of subplots sits (left, right, bottom, top, fractions of the figure) and the room between them (wspace, hspace, fractions of an Axes' width and height).",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, axs = plt.subplots(1, 2)\nfig.subplots_adjust(left=0.1, right=0.95, wspace=0.4)\nprint([round(float(v), 4) for v in axs[1].get_position().bounds])",
+        "expected": "[0.5958, 0.11, 0.3542, 0.77]\n"
+      }
+    ],
+    "differs": [
+      "The figure is drawn as before: each subplot in its share of the figure, with room for its labels. The subplot parameters move what get_position gives and the ticks an Axes' size gives, as in Matplotlib."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.pyplot.subplots_adjust",
+    "kind": "function",
+    "signature": "(left=None, bottom=None, right=None, top=None, wspace=None, hspace=None)",
+    "summary": "The current figure's subplots_adjust.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, axs = plt.subplots(3, 1)\nplt.subplots_adjust(hspace=0)\nprint([round(float(v), 4) for v in axs[1].get_position().bounds])",
+        "expected": "[0.125, 0.3667, 0.775, 0.2567]\n"
+      }
+    ],
+    "differs": [
+      "As Figure.subplots_adjust."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
   }
 ]
