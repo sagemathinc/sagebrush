@@ -69,7 +69,7 @@ check(LATEX_CAPS.raw === 299137 && LATEX_CAPS.gzip === 101514, "the caps are 299
 // (tools 17,335 / 7,231 B: renewed at the landing merge on master 14279164, 17,271 / 7,167 measured + 64; its +777 / +286
 //  over 16,494 / 6,881 is inherited from a shared check's and the tools' changes)
 // (the examples' chunk, EXAMPLES, gone with the editor's own list of examples: the gallery's panel is the only one)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [67404, 23063], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [3853, 2021], HL: [4474, 2419] };
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [67913, 23282], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [3853, 2021], HL: [4474, 2419] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- which build is measured: only the shipped LaTeX build (version.json's latexMode "shipped"); anything else is a
@@ -202,10 +202,14 @@ else {
     writeFileSync(join(dir, "files.txt"), f + "\n");
     const r = spawnSync(process.execPath, [join(root, "scripts", "ci-paths.mjs")], { encoding: "utf8", cwd: root,
       env: { ...process.env, CI_PATHS_FILES: join(dir, "files.txt"), GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: "" } });
-    return r.status !== 0 || !/^full=true$/m.test(r.stdout);
+    if (r.status !== 0 || !/^full=true$/m.test(r.stdout)) return true;
+    // (and under PR CI light, which turns the full tier off, it still keeps web-artifacts: latex_budget)
+    const light = spawnSync(process.execPath, [join(root, "scripts", "ci-paths.mjs")], { encoding: "utf8", cwd: root,
+      env: { ...process.env, CI_PATHS_FILES: join(dir, "files.txt"), GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: "", CI_PR_LIGHT: "true" } });
+    return light.status !== 0 || !/^latex_budget=true$/m.test(light.stdout);
   });
   rmSync(dir, { recursive: true, force: true });
-  check(inputs.length > 0 && notFull.length === 0, `each of the LaTeX bundles' ${inputs.length} inputs selects the full tier (scripts/ci-paths.mjs)`, { notFull });
+  check(inputs.length > 0 && notFull.length === 0, `each of the LaTeX bundles' ${inputs.length} inputs selects the full tier, and web-artifacts under PR CI light (scripts/ci-paths.mjs)`, { notFull });
 }
 
 const status = fails.length ? 1 : 0;

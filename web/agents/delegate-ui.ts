@@ -113,6 +113,9 @@ export type DelegateHost = {
   site: URL;
   /** the LaTeX page module, where this page has the LaTeX editor: a proposal's .tex shown rendered (none: its diff only) */
   latex?: (() => Promise<any>) | null;
+  /** the page's Markdown renderer (the chat's: safe HTML, remote pictures click-to-load): a proposal's .md shown
+   *  rendered (none: its diff only) */
+  markdown?: ((src: string) => string) | null;
   toast: (text: string, ms?: number) => void;
   /** Merge's workspace and agent (delegate-merge.ts workspaceIO); without it, Merge stays off */
   merge?: MergeIO;
@@ -373,7 +376,7 @@ export function mountDelegate(h: DelegateHost) {
       // (a new round: any Ask for changes block was the old round's)
       askSlot.replaceChildren();
       src = D.source(id, c);
-      pv = mod.openProposal(src, panel, { notebook: () => import(new URL("sagebrush-notebook.js", h.site).href), latex: h.latex ?? null, actions: bar });
+      pv = mod.openProposal(src, panel, { notebook: () => import(new URL("sagebrush-notebook.js", h.site).href), latex: h.latex ?? null, markdown: h.markdown ?? null, actions: bar });
     };
     // (the task as it is now: a newer round replaces the one shown, in place; Close only while it is a proposal)
     me.sync = () => {

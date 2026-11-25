@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { pathJoin } from "../src/compile";
+import { libOnDisk } from "../src/notebook-run";
 
 // Windows: the runtime's virtual paths ("/$pyjs/lib/...", the embedded library and the packages' mounts) are POSIX
 // paths everywhere, and only a real file's path is joined by the system's path.join, path.win32's there.  Joined by
@@ -104,4 +105,47 @@ test("--sage under Windows' join: the startup import works; when it raises, a tr
   } finally {
     rmSync(d, { recursive: true, force: true });
   }
+});
+
+// `notebook run --confine` from a build that reads the library from disk: its folder is one of the run's roots.  It
+// was told from the embedded library's virtual folder by a leading "/", which a Windows folder ("C:\...") hasn't.
+test("libOnDisk: a library folder of any form is on disk; the embedded library's virtual folder is not", () => {
+  const same = (p: string) => p;
+  assert.equal(libOnDisk("C:\\Users\\u\\sagebrush\\lib", same), "C:\\Users\\u\\sagebrush\\lib");
+  assert.equal(libOnDisk("/home/u/sagebrush/lib", same), "/home/u/sagebrush/lib");
+  assert.equal(libOnDisk("/$pyjs/lib", same), null);
+  // (this build's own: lib/ on disk, its real path)
+  assert.equal(libOnDisk(), realpathSync(LIB));
+});
+
+// (--confine's path checks are POSIX paths' so far: on Windows it refuses up front, and this row waits for that,
+// https://github.com/sagemathinc/sagebrush/issues/1667)
+const UNSUPPORTED = /--confine is not supported on Windows yet: https:\/\/github\.com\/sagemathinc\/sagebrush\/issues\/1667/;
+function confinedRun(preload?: string) {
+  const d = realpathSync(mkdtempSync(path.join(tmpdir(), "sb-winpaths-nb-")));
+  try {
+    const cell = { cell_type: "code", metadata: {}, outputs: [], execution_count: null, source: "import fractions\nprint(fractions.Fraction(1, 3))" };
+    writeFileSync(path.join(d, "f.ipynb"), JSON.stringify({ cells: [cell], metadata: {}, nbformat: 4, nbformat_minor: 5 }));
+    if (preload !== undefined) writeFileSync(path.join(d, "platform.cjs"), preload);
+    const pre = preload !== undefined ? ["-r", path.join(d, "platform.cjs")] : [];
+    return spawnSync(process.execPath, [...pre, CLI, "notebook", "run", "f.ipynb", "--json", "--confine", d], { cwd: d, encoding: "utf8", timeout: 180_000 });
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+}
+test("notebook run --confine from a source build: the notebook imports from the library on disk (on Windows: refused up front)", () => {
+  const r = confinedRun();
+  if (process.platform === "win32") {
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, UNSUPPORTED);
+    return;
+  }
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(JSON.stringify(JSON.parse(r.stdout)), /1\/3/);
+});
+test("notebook run --confine where the platform is win32: refused before anything is read or run, status 2", () => {
+  const r = confinedRun('Object.defineProperty(process, "platform", { value: "win32" });\n');
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, UNSUPPORTED);
+  assert.equal(r.stdout, "");
 });
