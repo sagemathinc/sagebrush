@@ -355,7 +355,9 @@ export class Outbox {
             const top = ((await req(meta.get(key(this.ns, "confirmedTop")))) as number | undefined) ?? 0;
             if (this.sealing && (t.count > 0 || (((await req(meta.get(cursorKey(this.ns)))) as number | undefined) ?? 0) < top)) { waiting = true; break; }
             const gen = genPrefix(this.ns, ((await req(meta.get(genKey(this.ns)))) as number | undefined) ?? 0);
-            const pairs = await historyUnder(meta, idbStore(tx, gen), gen, o.path, o.keep ?? 0);
+            // (bounded by what the person saw: the verified index then, this device's own ops before the request, and its
+            // files by identity)
+            const pairs = await historyUnder(meta, idbStore(tx, gen), gen, o.path, o.keep ?? 0, { view: o.view ?? 0, device: this.w.device, dseqBelow: dseq, ...(o.fids ? { fids: o.fids } : {}) });
             const atCursor = ((await req(meta.get(cursorKey(this.ns)))) as number | undefined) ?? 0;
             // (all its records or none: the op is scanned only once they are all made, so none is made twice)
             const recs: OutboxRecord[] = [];
@@ -424,7 +426,9 @@ export class Outbox {
       meta.put(t, key(this.ns, "outbox"));
       await lg.finish();
       cut(5);
-      return { made, full, more: full || ops.length === OUTBOX.page };
+      // (waiting at a "delete old versions": no more this run, whatever the page held; the watermark stays before it, so
+      // the next run reads it again in order, once what it waits for has come)
+      return { made, full, more: !waiting && (full || ops.length === OUTBOX.page) };
     });
     // (a pin released by the scan: its version prunable again, its file due; the cleanup begun)
     afterReleases(this.w);

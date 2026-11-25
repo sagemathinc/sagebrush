@@ -216,6 +216,40 @@ const halts = async (d, o) => {
   check((await at(T1 + 2 * REFS.dueMs)) === "[]" && ![...d.meta.map.keys()].some((k) => k.includes(":refs:d:")), "released: none due any more, their stamps gone");
 }
 
+// ---- "delete old versions" bounded by what the person saw (SEC on 5d-2b): the view's cursor, this device's own ops
+// before the request, the files by identity
+{
+  seq = 0;
+  const d = device(), st = storeOf(d.ix);
+  const on = (dev, o) => ({ ...op(o), device: dev });
+  const s1 = on(D1, { op: "create", path: "/d/f.txt", kind: "file", fid: F, sha256: A, size: 1 });
+  await d.apply([op({ op: "mkdir", path: "/d", kind: "folder", fid: DIR }), s1]);
+  const s2 = on(D1, { op: "write", path: "/d/f.txt", kind: "file", fid: F, sha256: B, base: A, size: 1 });
+  const s3 = on(D1, { op: "write", path: "/d/f.txt", kind: "file", fid: F, sha256: C, base: B, size: 1 });
+  await d.apply([s2, s3]);
+  const view = s3.seq;
+  // (after the person's request, another device writes the file: its add is after the view)
+  const s4 = on(D2, { op: "write", path: "/d/f.txt", kind: "file", fid: F, sha256: E, base: C, size: 1 });
+  await d.apply([s4]);
+  const h = async (bound, keep = 0, path = "/d/f.txt") => J(await historyUnder(d.meta, st, GEN, path, keep, bound));
+  check((await h({ view, device: D1, dseqBelow: 1 })) === J([{ address: A, add: s1.seq }, { address: B, add: s2.seq }]) && (await h(undefined)) === J([{ address: A, add: s1.seq }, { address: B, add: s2.seq }, { address: C, add: s3.seq }]),
+    "a request made when the third version was current: after another device's write, it releases the first two only (the third, current in the view, is kept); unbounded it would release all three");
+  // (asked before its own writes were in the verified index: its own adds before the request are in the view, another's after it aren't)
+  check((await h({ view: 0, device: D1, dseqBelow: s3.dseq + 1 })) === J([{ address: A, add: s1.seq }, { address: B, add: s2.seq }]), "asked right after its own writes (the view's cursor before them): its own adds count, the other device's later one doesn't");
+  check((await h({ view: 0, device: D1, dseqBelow: s2.dseq + 1 })) === J([{ address: A, add: s1.seq }]), "an own write made after the request isn't in the view: the second becomes the view's current, only the first goes");
+  check((await h({ view, device: D1, dseqBelow: 1 }, 1)) === J([{ address: A, add: s1.seq }]), "keep 1 with the bound: the view's current and its newest old version stay");
+  // (the files by identity: one moved into the folder after the request isn't released; one moved out still is)
+  const g1 = on(D2, { op: "create", path: "/g.txt", kind: "file", fid: G, sha256: A, size: 1 });
+  const g2 = on(D2, { op: "write", path: "/g.txt", kind: "file", fid: G, sha256: B, base: A, size: 1 });
+  await d.apply([g1, g2]);
+  const view2 = g2.seq;
+  await d.apply([on(D2, { op: "rename", path: "/g.txt", to: "/d/g.txt", kind: "file", fid: G }), on(D2, { op: "rename", path: "/d/f.txt", to: "/f.txt", kind: "file", fid: F })]);
+  check((await h({ view: view2, device: D1, dseqBelow: 1, fids: [F] }, 0, "/d")) === J([{ address: A, add: s1.seq }, { address: B, add: s2.seq }, { address: C, add: s3.seq }]),
+    "a folder's request by identity: the file it held (since moved out) keeps its scope; the file moved in after isn't touched");
+  check((await h({ view: view2, device: D1, dseqBelow: 1 }, 0, "/")) === J([{ address: A, add: s1.seq }, { address: B, add: s2.seq }, { address: C, add: s3.seq }, { address: A, add: g1.seq }]),
+    "the whole workspace's request: each file's history as of the view, each view's current kept");
+}
+
 // ---- a refused release's check: stop, or send again what is still live and eligible, once
 {
   const P = [{ address: A, add: 1 }, { address: B, add: 2 }, { address: C, add: 3 }];

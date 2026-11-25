@@ -121,6 +121,9 @@ export type Op = {
   /** (dropVersions, never sent) the newest old versions of each file it kept, and whether it named only some: the
    * account's history it releases follows them (e2e PR 5d) */
   keep?: number; partial?: true;
+  /** (dropVersions) what the person saw when asking (e2e PR 5d): the verified index's cursor then, and the files in its
+   * scope by identity (none: every file) */
+  view?: number; fids?: string[];
 };
 /** An entry's identity (design/sync-client.md §3): a data file's or folder's fid, a document's ref; undefined
  * where it has none yet (a folder or file from before ids were kept, until the migrator gives it one). */
@@ -2308,7 +2311,13 @@ export class Workspace {
       }
       this.noteDeleting(1);
       const ops: Op[] = [];
-      await inTx(this.ws, withSync("ops"), "readwrite", async (tx) => { await this.log(tx, ops, { op: "dropVersions", path: q, kind, ...(keep > 0 ? { keep } : {}), ...(only ? { partial: true as const } : {}) }); });
+      // (what the person saw, kept with the request (e2e PR 5d): the account's history it releases is bounded by the
+      // verified index as of now and these files by identity, never by what has come since)
+      await inTx(this.ws, withSync("ops"), "readwrite", async (tx) => {
+        const meta = tx.objectStore("meta"), cur = (await req(meta.get("sync:current"))) as { ns?: string } | undefined;
+        const view = cur?.ns ? (((await req(meta.get(`sync:${cur.ns}:cursor`))) as number | undefined) ?? 0) : 0;
+        await this.log(tx, ops, { op: "dropVersions", path: q, kind, view, ...(fids ? { fids } : {}), ...(keep > 0 ? { keep } : {}), ...(only ? { partial: true as const } : {}) });
+      });
       this.tell({ ops });
       return freed;
     });

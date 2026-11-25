@@ -45,9 +45,9 @@
    "class": "NOT-SOURCE",
    "why": "versions, versionBytes, prunable only (dropping kept versions): no source store written"
   },
-  "workspace/api.ts|1|await inTx(this.ws, withSync(\"ops\"), \"readwrite\", async (tx) => { await this.log(tx, ops, { op: \"dropVersions\", path: q, kind, ...(keep > 0 ? { keep } : {}), ...(only ? { partial: true as const } : {}) }); });": {
+  "workspace/api.ts|1|await inTx(this.ws, withSync(\"ops\"), \"readwrite\", async (tx) => {": {
    "class": "EXEMPT",
-   "why": "ops only (dropVersions logged): no source row changed"
+   "why": "ops only (dropVersions logged, with the view it was asked in, read from meta): no source row changed"
   },
   "workspace/api.ts|1|const gone: Entry[] = await inTx(this.ws, withSync(...RELEASE_STORES, \"entries\", \"ops\", \"fileBytes\", \"trash\"), \"readwrite\", async (tx) => {": {
    "class": "TOKEN",

@@ -64,7 +64,8 @@ const K = {
 /** `dueMs`: how long a device waits, from when it first saw an add due, before its sweep releases it, so that two
  * devices seldom race for one (a delay only); `walk`: how many of the files' adds one sweep walks. Tests lower them. */
 export const REFS = { dueMs: 24 * 3600_000, walk: 500, page: RELEASE_MAX };
-export type AddRow = { fid: string | null; rel?: number };
+/** An add: its holder, the release that ended it, and the sync device and dseq of the op that made it. */
+export type AddRow = { fid: string | null; rel?: number; d?: string; q?: number };
 
 /** How one live add is held, before an op: by a live file as its current bytes or as its history, by a forgotten one,
  * or by none (an orphan). */
@@ -123,7 +124,7 @@ export async function ledgerPage(meta: IDBObjectStore, store: Store, gen: string
       continue;
     }
     for (const address of refsOf(op).adds) {
-      meta.put({ fid: holder ?? null } satisfies AddRow, K.add(gen, address, op.seq));
+      meta.put({ fid: holder ?? null, d: op.device, q: op.dseq } satisfies AddRow, K.add(gen, address, op.seq));
       if (holder === undefined) meta.put(1, K.orphan(gen, op.seq, address));
       else meta.put(address, K.held(gen, holder, op.seq));
     }
@@ -189,9 +190,16 @@ export async function duePairs(meta: IDBObjectStore, store: Store, gen: string, 
   return out;
 }
 
+/** What the person saw when asking "delete old versions" (e2e PR 5d): the verified index's cursor then (`view`), this
+ * device's sync id and the dseq its request came to (its own adds before it were in its view, confirmed or not), and
+ * the files in scope by identity (`fids`; none: by `path`, as files are now). */
+export type HistoryBound = { view: number; device: string; dseqBelow: number; fids?: readonly string[] };
+
 /** The history of every live file at or under `path` (all its live adds but the one holding its current bytes, and but
- * its newest `keep` others): what the person's "delete old versions" there releases. */
-export async function historyUnder(meta: IDBObjectStore, store: Store, gen: string, path: string, keep = 0): Promise<RefPair[]> {
+ * its newest `keep` others): what the person's "delete old versions" there releases. With `bound`, only what the person
+ * saw: each file's adds in that view, the newest of them (the view's current bytes) kept, and the newest `keep` of the
+ * rest; never an add made after (another device's write since makes nothing more history to release). */
+export async function historyUnder(meta: IDBObjectStore, store: Store, gen: string, path: string, keep = 0, bound?: HistoryBound): Promise<RefPair[]> {
   const keys = (await req(meta.getAllKeys(K.heldAll(gen)))) as string[];
   const vals = (await req(meta.getAll(K.heldAll(gen)))) as string[];
   const out: RefPair[] = [], cur = new Map<string, number | undefined>(), under = new Map<string, boolean>(), byFile = new Map<string, RefPair[]>();
@@ -199,13 +207,22 @@ export async function historyUnder(meta: IDBObjectStore, store: Store, gen: stri
     const { fid, pair } = heldOf(gen, keys[i], vals[i]);
     if (!under.has(fid)) {
       const e = await store.byId(fid);
-      under.set(fid, !!e && within(e.path, path));
+      under.set(fid, !!e && (bound?.fids ? bound.fids.includes(fid) : within(e.path, path)));
       cur.set(fid, await currentAdd(meta, gen, fid));
     }
-    if (under.get(fid) && cur.get(fid) !== pair.add) (byFile.get(fid) ?? byFile.set(fid, []).get(fid)!).push(pair);
+    if (!under.get(fid)) continue;
+    if (bound) {
+      const row = await addRow(meta, gen, pair);
+      if (!(pair.add <= bound.view || (row?.d === bound.device && (row.q ?? Infinity) < bound.dseqBelow))) continue;
+    } else if (cur.get(fid) === pair.add) continue;
+    (byFile.get(fid) ?? byFile.set(fid, []).get(fid)!).push(pair);
   }
-  // (each file's, oldest first (its keys are in seq order): all but its newest `keep`)
-  for (const list of byFile.values()) out.push(...list.slice(0, Math.max(0, list.length - keep)));
+  // (each file's, oldest first (its keys are in seq order): all but its newest `keep`; with a bound, the newest in the
+  // view is that view's current bytes and is kept too, and the file's current add now is never released)
+  for (const [fid, list] of byFile) {
+    const hist = bound ? list.slice(0, -1) : list;
+    out.push(...hist.slice(0, Math.max(0, hist.length - keep)).filter((p) => p.add !== cur.get(fid)));
+  }
   return out;
 }
 
