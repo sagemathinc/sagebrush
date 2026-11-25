@@ -1981,6 +1981,30 @@ function pairwise32(d: any, off: number, n: number, st: number): number {
   return f32(pairwise32(d, off, n2, st) + pairwise32(d, off + n2 * st, n - n2, st));
 }
 
+// NumPy's pairwise sum of a complex array (its CDOUBLE/CFLOAT pairwise_sum),
+// for one part: it walks the interleaved parts as doubles, so a run of fewer
+// than 4 elements is added in turn, up to 64 in four accumulators per part,
+// and a longer one split where a multiple of 4 elements ends near its middle
+// (#2088). `round` is f32 for a complex64 part, else the identity.
+function pairwiseCplx(d: any, off: number, n: number, st: number, round: (x: number) => number = (x) => x): number {
+  if (n < 4) {
+    let res = -0;
+    for (let i = 0; i < n; i++) res = round(res + d[off + i * st]);
+    return res;
+  }
+  if (n <= 64) {
+    const r = [d[off], d[off + st], d[off + 2 * st], d[off + 3 * st]];
+    let i = 4;
+    for (; i < n - (n % 4); i += 4) for (let j = 0; j < 4; j++) r[j] = round(r[j] + d[off + (i + j) * st]);
+    let res = round(round(r[0] + r[1]) + round(r[2] + r[3]));
+    for (; i < n; i++) res = round(res + d[off + i * st]);
+    return res;
+  }
+  const n2 = (n - (n % 8)) / 2;
+  return round(pairwiseCplx(d, off, n2, st, round) + pairwiseCplx(d, off + n2 * st, n - n2, st, round));
+}
+const pairwiseCplx32 = (d: any, off: number, n: number, st: number): number => pairwiseCplx(d, off, n, st, f32);
+
 // pairwise() of (d[i] - m)^2: var's sum of squared deviations with NumPy's
 // bits (it computes a - mean, squares in place and sums pairwise) and no
 // temporary array.
@@ -2018,6 +2042,20 @@ function pairwiseSqDev(d: any, off: number, n: number, m: number): number {
   return pairwiseSqDev(d, off, n2, m) + pairwiseSqDev(d, off + n2, n - n2, m);
 }
 
+// The stride of one run through all of a's elements, when its axes coalesce
+// into one in NumPy's iterator order (iterAxisOrder; length-1 axes dropped),
+// else null (#2088)
+function oneRun(a: NDArray): number | null {
+  const order = iterAxisOrder(a.ndim, [a.strides]).filter((i) => a.shape[i] > 1);
+  if (!order.length) return 1;
+  let len = a.shape[order[0]];
+  for (let j = 1; j < order.length; j++) {
+    if (a.strides[order[j]] !== a.strides[order[0]] * len) return null;
+    len *= a.shape[order[j]];
+  }
+  return a.strides[order[0]];
+}
+
 // Reduce `a` over `axes` with fold(acc, x) from init; `inner` reduces a run of
 // the innermost axis at once (pairwise sums). With `first` (a sum without an
 // identity: NumPy's initial=None) each result starts from its first element
@@ -2053,9 +2091,11 @@ function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
     return out;
   }
   // everything that is not reduced has length 1: NumPy's iterator drops those
-  // axes, leaving one contiguous run, summed pairwise
-  if (inner && a.isC() && prod(outShape) === 1 && rn > 0) {
-    out.data[0] = castNum(rt, first ? fold(d[a.offset], inner(d, a.offset + 1, rn - 1, 1)) : fold(init, inner(d, a.offset, rn, 1)));
+  // axes, and when the rest coalesce in the order it takes (a C or F array, a
+  // complex array's part, a strided view), leaves one run, summed pairwise
+  const st = inner && prod(outShape) === 1 && rn > 0 ? oneRun(a) : null;
+  if (st !== null) {
+    out.data[0] = castNum(rt, first ? fold(d[a.offset], inner!(d, a.offset + st, rn - 1, st)) : fold(init, inner!(d, a.offset, rn, st)));
     return keepdims ? reshape(out, a.shape.map((n, i) => (ax.includes(i) ? 1 : n))) : out;
   }
   const usePairwise = inner && red.length >= 1 && red[red.length - 1] === nd - 1 && (red.length === 1 || a.isC());
@@ -2116,8 +2156,141 @@ function sumType(dt: DType): DType {
   return dt;
 }
 
-// (first: no identity, NumPy's initial=None: each result starts from its first element; see reduceAxes)
-function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null, first = false): any {
+// A where= sum (#2088), as NumPy's masked reduction: each output from the
+// identity, its kept elements only. NumPy's iterator orders the axes for the
+// input and the mask (iterAxisOrder; the result it allocates afterwards, in
+// that order). When the innermost axes it iterates are reduced (the block, up
+// to the first kept axis), its inner loop runs over them: one stretch when
+// they coalesce into one dimension for the input and the mask alike;
+// otherwise its buffer takes them in chunks: P is the size of the innermost
+// dimensions that fit whole in 8192 elements, a chunk as many P as fit, and
+// the chunks start again at each step of the next dimension out (one
+// innermost row a chunk if it alone is longer). When the input is converted
+// to the summing dtype, its buffer takes a stretch or a row 8192 elements at
+// a time. Chunks start again for each output too. Its masked loop then adds each run of kept elements in a
+// chunk at once, pairwise for a float (`inner`). When a kept axis is
+// innermost, each kept element is added in turn. `cast`: a's values are
+// converted to rt as they are read, as NumPy's buffer converts them. The mask
+// may be a plain array (a broadcast True): only md[q] is read.
+function maskedSum(a: NDArray, mask: NDArray, ax: number[], keepdims: boolean, rt: DType, fold: (acc: number, x: number) => number, inner?: (d: any, off: number, n: number, st: number) => number, cast = false): NDArray {
+  const nd = a.ndim;
+  const keep = a.shape.map((_, i) => i).filter((i) => !ax.includes(i));
+  const outShape = keep.map((i) => a.shape[i]);
+  const shaped = (r: NDArray) => (keepdims ? reshape(r, a.shape.map((m, i) => (ax.includes(i) ? 1 : m))) : r);
+  // (nothing to reduce: each output the identity)
+  if (ax.some((i) => a.shape[i] === 0)) {
+    admitWork(prod(outShape) * rt.itemsize, "the masked sum");
+    const out = empty(outShape, rt);
+    for (let k = 0; k < out.size; k++) out.data[k] = castNum(rt, 0);
+    return shaped(out);
+  }
+  const conv = cast && rt !== D.float64 ? (x: number) => castNum(rt, x) : null;
+  // (the axes innermost first; a length-1 axis is no loop at all)
+  const order = iterAxisOrder(nd, [a.strides, mask.strides]).filter((i) => a.shape[i] > 1);
+  const block: number[] = [];
+  if (inner) for (const i of order) {
+    if (!ax.includes(i)) break;
+    block.push(i);
+  }
+  const n = block.reduce((m, i) => m * a.shape[i], 1);
+  // (the block's dimensions, innermost first: adjacent axes that continue each other in memory for both operands
+  // coalesce into one, walked from its innermost axis's stride)
+  const groups: { len: number; st: number; mst: number }[] = [];
+  for (let j = 0; j < block.length; ) {
+    const i0 = block[j];
+    let len = a.shape[i0];
+    for (j++; j < block.length; j++) {
+      const o = block[j];
+      if (a.strides[o] !== a.strides[i0] * len || mask.strides[o] !== mask.strides[i0] * len) break;
+      len *= a.shape[o];
+    }
+    groups.push({ len, st: a.strides[i0], mst: mask.strides[i0] });
+  }
+  let P = 1, k = 0;
+  while (k < groups.length && P * groups[k].len <= 8192) P *= groups[k++].len;
+  // (rowwise: the chunks never span two innermost rows (one stretch, or rows longer than 8192), each `rc` long at
+  // most; otherwise chunks of whole rows, `chunk` at most and within segments of `seg`)
+  const rowwise = groups.length <= 1 || k === 0;
+  const rc = groups.length ? (cast ? Math.min(groups[0].len, 8192) : groups[0].len) : 0;
+  const chunk = k === groups.length ? n : P * Math.floor(8192 / P), seg = k === groups.length ? n : P * (groups[k]?.len ?? 1);
+  // (the other reduced axes, outermost first; the block's rows, outermost first)
+  const rest = order.filter((i) => ax.includes(i) && !block.includes(i)).reverse();
+  const rshape = rest.map((i) => a.shape[i]), rst = rest.map((i) => a.strides[i]), rmst = rest.map((i) => mask.strides[i]);
+  const outer = groups.slice(1).reverse();
+  const gshape = outer.map((g) => g.len), gst = outer.map((g) => g.st), gmst = outer.map((g) => g.mst);
+  const kshape = keep.map((i) => a.shape[i]), kst = keep.map((i) => a.strides[i]), kmst = keep.map((i) => mask.strides[i]);
+  const d = a.data, md = mask.data;
+  const L = groups.length ? groups[0].len : 0, s0 = groups.length ? groups[0].st : 0, m0s = groups.length ? groups[0].mst : 0;
+  // (a scratch buffer for the values a chunk gathers or converts, at most 8192 elements; admitted with the output
+  // before either is allocated)
+  const need = !block.length ? 0 : !rowwise ? chunk : conv ? rc : 0;
+  admitWork(prod(outShape) * rt.itemsize + need * 9, "the masked sum");
+  const out = empty(outShape, rt), od = out.data;
+  const buf = new Float64Array(need), bm = new Uint8Array(rowwise ? 0 : need);
+  // (the runs of kept elements in [lo, hi) of a buffer, or of a row read in place)
+  const runs = (acc: number, data: any, off: number, st: number, mk: (i: number) => boolean, lo: number, hi: number): number => {
+    for (let i = lo; i < hi; ) {
+      if (!mk(i)) {
+        i++;
+        continue;
+      }
+      let j = i + 1;
+      while (j < hi && mk(j)) j++;
+      acc = fold(acc, inner!(data, off + i * st, j - i, st));
+      i = j;
+    }
+    return acc;
+  };
+  loop2(kshape, kst, a.offset, kmst, mask.offset, (p0, q0, kk) => {
+    let acc = 0;
+    loop2(rshape, rst, p0, rmst, q0, (p, q) => {
+      if (!block.length) {
+        if (md[q]) acc = fold(acc, conv ? conv(d[p]) : d[p]);
+        return;
+      }
+      if (rowwise) {
+        loop2(gshape, gst, p, gmst, q, (pr, qr) => {
+          const mk = (i: number) => md[qr + i * m0s] !== 0;
+          for (let lo = 0; lo < L; lo += rc) {
+            const hi = Math.min(lo + rc, L);
+            if (conv) {
+              for (let i = lo; i < hi; i++) buf[i - lo] = conv(d[pr + i * s0]);
+              acc = runs(acc, buf, -lo, 1, mk, lo, hi);
+            } else acc = runs(acc, d, pr, s0, mk, lo, hi);
+          }
+        });
+        return;
+      }
+      // (whole rows gathered into the buffer, a chunk run through when it is full or its segment ends)
+      let fill = 0, inSeg = 0;
+      const flush = () => {
+        acc = runs(acc, buf, 0, 1, (i) => bm[i] !== 0, 0, fill);
+        fill = 0;
+      };
+      loop2(gshape, gst, p, gmst, q, (pr, qr) => {
+        for (let i = 0; i < L; i++) {
+          const v = d[pr + i * s0];
+          buf[fill + i] = conv ? conv(v) : v;
+          bm[fill + i] = md[qr + i * m0s] ? 1 : 0;
+        }
+        fill += L;
+        inSeg += L;
+        if (fill === chunk || inSeg === seg) {
+          flush();
+          if (inSeg === seg) inSeg = 0;
+        }
+      });
+      if (fill) flush();
+    });
+    od[kk] = castNum(rt, acc);
+  });
+  return shaped(out);
+}
+
+// (first: no identity, NumPy's initial=None: each result starts from its first element; see reduceAxes. mask: a
+// where= mask of a's shape, maskedSum. part: a complex array's real or imaginary part, summed pairwise as NumPy sums
+// the complex array, pairwiseCplx)
+function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null, first = false, mask: NDArray | null = null, part = false): any {
   const rt = dtype !== null ? toDtype(dtype) : sumType(a.dt);
   const axs = axesArg(axis, a.ndim);
   const outN = axs === null ? 1 : prod(a.shape.filter((_, i) => !axs.includes(i)));
@@ -2127,19 +2300,40 @@ function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null, first 
     // LIMIT-PR56-1; the parts are views, not copies)
     admitWork(outN * (2 * (8 + 8) + 16), "sum");
     const re = realPart(a), im = imagPart(a);
-    const r = sum(re, axis, keepdims, null, first), i = sum(im, axis, keepdims, null, first);
+    const r = sum(re, axis, keepdims, null, first, mask, true), i = sum(im, axis, keepdims, null, first, mask, true);
     return combineComplex(r, i, rt.cplx ? rt : a.dt);
   }
   // (a float sum of another dtype sums a converted copy: that copy, the
   // output and its accumulator admitted first; LIMIT-PR55-3)
   const widen = rt !== a.dt && rt.kind === "f";
-  admitWork((widen ? a.size * rt.itemsize : 0) + outN * (rt.itemsize + 8), "sum");
-  const src = widen ? copy(a, rt) : a;
+  // (an unmasked float sum is NumPy's masked sum with every element kept (a mask of one True, broadcast), #2088: so
+  // taken, unless it is one reduceAxes walks as NumPy does, a C-ordered array's whole, last axis or leading axes,
+  // in its own dtype; a sum that converts its operand goes through NumPy's buffer, 8192 elements at a time)
+  // (a float operand summed in an integer or bool dtype: NumPy converts each element before adding it, as the masked
+  // sum does)
+  if (mask === null && !first && (rt.kind === "f" || a.dt.kind === "f")) {
+    const nd = a.ndim, red = axs === null ? null : [...axs].sort((x, y) => x - y);
+    const walked = rt.kind === "f" && a.isC() && !widen && (red === null || red.length === nd || red.every((x, i) => x === i) || (red.length === 1 && red[0] === nd - 1));
+    // (its one element a plain array: no typed buffer before the work is admitted)
+    if (!walked) mask = new NDArray(D.bool, [1], a.shape.slice(), a.shape.map(() => 0));
+  }
+  // (a float operand summed without an identity in an integer or bool dtype: converted first, each element as NumPy
+  // converts it before adding, the first included)
+  const narrow = mask === null && first && rt.kind !== "f" && a.dt.kind === "f";
+  admitWork(((widen || narrow) && mask === null ? a.size * rt.itemsize : 0) + outN * (rt.itemsize + 8), "sum");
+  const src = (widen || narrow) && mask === null ? copy(a, rt) : a;
   const init = first ? -0 : 0;
-  if (rt === D.float32) return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, init, (x, y) => f32(x + y), pairwise32, first), axis, keepdims);
+  if (mask !== null) {
+    // (the operand itself, in its own layout (NumPy's iterator orders the axes by it), its values converted as read)
+    const ax = axs === null ? a.shape.map((_, i) => i) : axs;
+    if (rt === D.float32) return finish(maskedSum(a, mask, ax, keepdims, rt, (x, y) => f32(x + y), part ? pairwiseCplx32 : pairwise32, rt !== a.dt), axis, keepdims);
+    const add = isWide(rt) ? (x: number, y: number) => wideExact(rt, "add", x + y, x, y) : (x: number, y: number) => x + y;
+    return finish(maskedSum(a, mask, ax, keepdims, rt, add, rt.kind === "f" ? (part ? pairwiseCplx : pairwise) : undefined, rt !== a.dt), axis, keepdims);
+  }
+  if (rt === D.float32) return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, init, (x, y) => f32(x + y), part ? pairwiseCplx32 : pairwise32, first), axis, keepdims);
   // (int64: each partial sum checked, as wideExact)
   const add = isWide(rt) ? (x: number, y: number) => wideExact(rt, "add", x + y, x, y) : (x: number, y: number) => x + y;
-  return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, init, add, rt.kind === "f" ? pairwise : undefined, first), axis, keepdims);
+  return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, init, add, rt.kind === "f" ? (part ? pairwiseCplx : pairwise) : undefined, first), axis, keepdims);
 }
 // The product of a complex array (or of one into a complex dtype) over the
 // axes: each output element the product of its reduced elements, one at a
@@ -4270,7 +4464,7 @@ newBuiltinModule("_numpy", (m) => {
     const r = binary(op, x, y);
     return isArrayLike(x) || isArrayLike(y) ? r : pyScalarOf(r.dt, r.data, 0);
   });
-  fn("sum", (a: any, axis: any = null, keepdims: any = false, dtype: any = null, first: any = false) => sum(asarray(a), opt(axis), !!keepdims, opt(dtype), !!first));
+  fn("sum", (a: any, axis: any = null, keepdims: any = false, dtype: any = null, first: any = false, mask: any = null) => sum(asarray(a), opt(axis), !!keepdims, opt(dtype), !!first, opt(mask) === null ? null : asarray(mask)));
   // sum((a - m)**2) over a whole C-contiguous float64 array, or None
   fn("sqdev_sum", (x: any, m: any) => {
     const a = asarray(x);
