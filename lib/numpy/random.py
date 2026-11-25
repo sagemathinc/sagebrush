@@ -9,6 +9,7 @@ distributed but not NumPy's stream (NumPy uses ziggurat tables for them).
 """
 
 import math as _math
+import operator as _operator
 import numpy as _np
 import _nprandom as _r
 
@@ -17,14 +18,38 @@ __all__ = ["seed", "rand", "randn", "random", "random_sample", "ranf", "sample",
            "choice", "shuffle", "permutation", "RandomState", "Generator", "default_rng", "get_state", "set_state"]
 
 
+def _dim(d):
+    # (one dimension of a shape, as NumPy reads it: through __index__, so a NumPy integer is an int; a bool or a
+    # float is refused)
+    if isinstance(d, (bool, _np.bool_)):
+        raise TypeError("an integer is required")
+    return _nonneg_dim(_operator.index(d))
+
+
+def _nonneg_dim(n):
+    if n < 0:
+        raise ValueError("negative dimensions are not allowed")
+    return n
+
+
 def _size(size):
     if size is None:
         return None
-    return list(size) if isinstance(size, (tuple, list)) else [size]
+    if isinstance(size, (tuple, list)):
+        return [_dim(d) for d in size]
+    # (__index__ read once, as NumPy reads it)
+    if not isinstance(size, (bool, _np.bool_)):
+        try:
+            n = _operator.index(size)
+        except TypeError:
+            n = None
+        if n is not None:
+            return [_nonneg_dim(n)]
+    raise TypeError(f"expected a sequence of integers or a single integer, got '{size}'")
 
 
 def _sz(*args):
-    return list(args) if args else None
+    return [_dim(d) for d in args] if args else None
 
 
 def _scalar_or(x):
@@ -171,8 +196,29 @@ class RandomState:
             if k > n:
                 raise ValueError("Cannot take a larger sample than population when 'replace=False'")
             if p is not None:
-                raise NotImplementedError("choice(replace=False, p=...)")
-            idx = self.permutation(n)[:k]
+                # (NumPy's legacy draw: rand() for the indices still missing, through the cdf of p with those
+                # already found zeroed, keeping each new index's first occurrence, until there are k)
+                p = _check_p(p, n)
+                if _np.count_nonzero(p > 0) < k:
+                    raise ValueError("Fewer non-zero entries in p than size")
+                n_uniq = 0
+                p = p.copy()
+                found = _np.zeros(k, dtype=_np.int64)
+                while n_uniq < k:
+                    x = self.rand(k - n_uniq)
+                    if n_uniq > 0:
+                        p[found[0:n_uniq]] = 0
+                    cdf = _np.cumsum(p)
+                    cdf /= cdf[-1]
+                    new = _np.searchsorted(cdf, x, side="right")
+                    _, unique_indices = _np.unique(new, return_index=True)
+                    unique_indices.sort()
+                    new = new.take(unique_indices)
+                    found[n_uniq:n_uniq + new.size] = new
+                    n_uniq += new.size
+                idx = found
+            else:
+                idx = self.permutation(n)[:k]
             if shape is not None:
                 idx = idx.reshape(shape)
             else:

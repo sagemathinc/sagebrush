@@ -106,7 +106,11 @@ export const LATEX_LAZY = {
 //  + 64)
 // (252,762 raw / 84,654 gzip: Nov 23 2026, the preview's watchdog not counting the page's own blocking (watchdog.ts):
 //  252,698 / 84,590 measured on the shipped build of master 881d80a8 with it, with bun 1.4.4 and node 24.21.0, + 64)
-export const LATEX_CAPS = { raw: 252762, gzip: 84654 };
+// (255,748 raw / 85,629 gzip: Nov 24 2026, amsart's front matter (every author, the abstract after the title, the first
+//  page's notes, the addresses at the end, \title[short] and \author[short]), a bibliography's label column as wide as its
+//  widest label, a \cite note typeset: 255,684 / 85,565 measured on the shipped build of its merge with master bf92ce4f,
+//  with bun 1.4.4 and node 24.21.0, + 64)
+export const LATEX_CAPS = { raw: 255748, gzip: 85629 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
