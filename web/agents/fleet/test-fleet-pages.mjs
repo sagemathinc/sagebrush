@@ -56,20 +56,25 @@ let fixtures = base();
 // (the service's routes, when a case turns them on: the person's reads, with the chain paged 2 entries at a time)
 let service = null;
 const served = [];
-const jsonRes = (v, status = 200) => new Response(typeof v === "string" ? v : JSON.stringify(v), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+const jsonRes = (v, status = 200) => {
+  const text = typeof v === "string" ? v : JSON.stringify(v);
+  // (streamed: no Content-Length, so the page has to count the bytes as they come)
+  const body = service?.stream ? new ReadableStream({ start(c) { const b = new TextEncoder().encode(text); for (let i = 0; i < b.length; i += 65536) c.enqueue(b.subarray(i, i + 65536)); c.close(); } }) : text;
+  return new Response(body, { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+};
 function api(u) {
   const p = u.pathname, svc = service;
   served.push(p + u.search);
   if (!svc) return jsonRes({ error: "not_found" }, 404);
   if (svc.status) return jsonRes({ error: svc.error }, svc.status);
-  if (p === "/api/fleet/v1/fleet") return jsonRes({ fleet: F.ids.fleet, aud: F.aud });
+  if (p === "/api/fleet/v1/fleet") return jsonRes(svc.fleetBody ?? { fleet: F.ids.fleet, aud: F.aud });
   if (p === "/api/fleet/v1/chain") {
     const after = u.searchParams.has("after") ? Number(u.searchParams.get("after")) : -1, head = F.objects.chain.length - 1;
     const entries = F.objects.chain.slice(after + 1, after + 3);
     return jsonRes(svc.chainPage ? svc.chainPage(entries, head) : JSON.stringify({ entries, head }));
   }
-  if (p === "/api/fleet/v1/hosts") return jsonRes({ hosts: [hostRow({ ack: null })] });
-  if (p === `/api/fleet/v1/hosts/${HOST}/grants`) return jsonRes({ grants: [grant], head: 1 });
+  if (p === "/api/fleet/v1/hosts") return jsonRes(svc.hostsBody ?? { hosts: [hostRow({ ack: null })] });
+  if (p === `/api/fleet/v1/hosts/${HOST}/grants`) return jsonRes(svc.grantsBody ?? { grants: [grant], head: 1 });
   return jsonRes({ error: "not_found" }, 404);
 }
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (r) => {
@@ -120,6 +125,27 @@ try {
     P = await fresh();
     await open(P, site, notLoading);
     ok(/This device list didn't verify \(bad_form\)/.test(await text(P)), "G-5: a chain page not exactly {entries, head}: the core's reader refuses it (bad_form), nothing trusted", await text(P));
+    // (the caps, reads r4: /hosts at most 64 hosts and 1,048,576 bytes, a grants page 1,048,576 bytes; /fleet 4,096)
+    const padTo = (v, n) => { const t = JSON.stringify(v); return t + " ".repeat(n - new TextEncoder().encode(t).length); };
+    const other = (i) => (i.toString(32) + "a".repeat(26)).replace(/[^a-z2-7]/g, "b").slice(0, 25) + "a";
+    const rows = (n) => ({ hosts: [hostRow({ ack: null }), ...Array.from({ length: n - 1 }, (_, i) => hostRow({ host: other(i + 1), ack: null, grant_gen: null }))] });
+    const hostsText = async () => { const P = await fresh(); await open(P, site + "#hosts", notLoading); return P.ev(`({ t: document.querySelector("#fleet").innerText, n: document.querySelectorAll("li.host").length })`); };
+    service = { hostsBody: rows(64) };
+    const c64 = await hostsText();
+    service = { hostsBody: rows(65) };
+    const c65 = await hostsText();
+    ok(c64.n === 64 && /^The fleet service sent more than this page reads\. Nothing here was trusted\.$/.test(c65.t.trim()) && c65.n === 0, "C-1: 64 hosts are listed; 65 are refused, never cut to 64", { n64: c64.n, t65: c65.t });
+    for (const stream of [false, true]) {
+      service = { stream, hostsBody: padTo({ hosts: [hostRow({ ack: null })] }, 1_048_576) };
+      const exact = await hostsText();
+      service = { stream, hostsBody: padTo({ hosts: [hostRow({ ack: null })] }, 1_048_577) };
+      const over = await hostsText();
+      ok(exact.n === 1 && /sent more than this page reads/.test(over.t) && over.n === 0, `C-2: /hosts of exactly 1,048,576 bytes is read; one byte more is refused (${stream ? "streamed, no declared length" : "declared length"})`, { exact: exact.n, over: over.t });
+    }
+    service = { grantsBody: padTo({ grants: [grant], head: 1 }, 1_048_577) };
+    { const P = await fresh(); await open(P, site + "#hosts", `!!document.querySelector("li.host .grant")`); const g = await P.ev(`document.querySelector("li.host .grant").textContent`); ok(g === "its newest grants couldn't be read: not checked", "C-3: a grants page over 1,048,576 bytes isn't read: unresolved", g); }
+    service = { fleetBody: padTo({ fleet: F.ids.fleet, aud: F.aud }, 4097) };
+    { const P = await fresh(); await open(P, site, notLoading); ok(/sent more than this page reads/.test(await text(P)), "C-4: a /fleet answer over its 4,096-byte cap is refused", await text(P)); }
     service = null;
   }
   {
@@ -180,6 +206,39 @@ try {
     ok(after.hosts && !after.agent && after.hash === "#hosts", "A-1: a host's report that arrives after the person went back to Hosts is dropped, not drawn", after);
   }
   {
+    // (A-3: the device view's key read held; the person goes to Hosts meanwhile; the late answer isn't drawn)
+    fixtures = base();
+    const P = await fresh();
+    await P.send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__fleetRelease = null; window.__fleetHold = (what) => what === "device" ? new Promise((r) => { window.__fleetRelease = r; }) : Promise.resolve();` });
+    await open(P, site + "?fixtures=1#device", `typeof window.__fleetRelease === "function"`);
+    await P.ev(`(location.hash = "#hosts", true)`);
+    await P.until(`!!document.querySelector("li.host")`, 10000);
+    await P.ev(`(window.__fleetRelease(), true)`);
+    await new Promise((r) => setTimeout(r, 500));
+    const after = await P.ev(`({ hosts: !!document.querySelector("li.host"), device: /This browser/.test(document.querySelector("#fleet").innerText), hash: location.hash })`);
+    ok(after.hosts && !after.device && after.hash === "#hosts", "A-3: the device view's late answer (its key read) after the person went to Hosts: dropped, not drawn", after);
+  }
+  {
+    // (A-4: a report 29 s old when asked for, drawn 2 s later: its age is taken when drawn, so it is stale, never ok;
+    //  A-5: a fresh report left on screen past its bound is read again, and shows stale)
+    fixtures = { ...base(), clock: "advancing", state: { [HOST]: report({ last_seen_ms: NOW - 29_000 }) } };
+    let P = await fresh();
+    await P.send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__fleetRelease = null; window.__fleetHold = (what) => what === "state" ? new Promise((r) => { window.__fleetRelease = r; }) : Promise.resolve();` });
+    await open(P, site + `?fixtures=1#host/${HOST}`, `typeof window.__fleetRelease === "function"`);
+    await new Promise((r) => setTimeout(r, 2500));
+    await P.ev(`(window.__fleetRelease(), true)`);
+    await P.until(`!!document.querySelector("li.agent")`, 10000);
+    const h = await P.ev(`document.querySelector(".card .report").innerText`);
+    ok(/\(stale\)/.test(h) && /health\s+unknown/.test(h) && !/health\s+ok/.test(h), "A-4: a report that went past 30 s while it was being read: stale when drawn, health unknown", h);
+    fixtures = { ...base(), clock: "advancing", state: { [HOST]: report({ last_seen_ms: NOW - 27_000 }) } };
+    P = await fresh();
+    await open(P, site + `?fixtures=1#host/${HOST}`, `!!document.querySelector("li.agent")`);
+    const first = await P.ev(`document.querySelector(".card .report").innerText`);
+    await P.until(`/\\(stale\\)/.test(document.querySelector(".card .report")?.innerText ?? "")`, 15000);
+    const later = await P.ev(`document.querySelector(".card .report").innerText`);
+    ok(/health\s+ok/.test(first) && !/stale/.test(first) && /\(stale\)/.test(later) && /health\s+unknown/.test(later), "A-5: a fresh report left on screen past 30 s is read again and shows stale, health unknown", { first, later });
+  }
+  {
     // (A-2: this browser's storage fails: said, and nothing is shown as trusted (no pin, no host))
     fixtures = base();
     const P = await fresh();
@@ -227,6 +286,23 @@ try {
     } else ok(false, "the agent's fixtures carry the grant lineage and the ack of the first grant (fixtures 201)");
     const g5 = await line({ ...base(), hosts: [hostRow({ grant_gen: null, ack: null })], grants: {} });
     ok(g5 === "no grant yet", "L-5: a host with no grant: \"no grant yet\"", g5);
+  }
+  {
+    // (R: a revocation the service names that doesn't verify fails the host closed: nothing about it shown)
+    for (const [rev, what] of [["not a revocation", "text that isn't one"], [F.objects.host_cert, "another kind of object (a host certificate)"], [grant, "a grant in its place"]]) {
+      fixtures = { ...base(), hosts: [hostRow({ revocation: rev })] };
+      const P = await fresh();
+      await open(P, site + "?fixtures=1#hosts", `!!document.querySelector("li.host")`);
+      const t = await P.ev(`({ t: document.querySelector("li.host").innerText, link: !!document.querySelector("li.host a"), refused: document.querySelector("li.host").classList.contains("refused") })`);
+      ok(/A revocation of this host was given but didn't verify \(\w+\)\. Nothing about this host is shown\./.test(t.t) && !/lab-box/.test(t.t) && !t.link && t.refused, `R-1: a revocation that doesn't verify (${what}): the host refused, nothing about it shown`, t);
+    }
+    // (W: a verified scope's access, exactly as the grant says it)
+    const scopes = async (fx) => { fixtures = fx; const P = await fresh(); await open(P, site + `?fixtures=1#host/${HOST}`, `!!document.querySelector("li.agent")`); return P.ev(`[...document.querySelectorAll("li.agent .kv")].filter((k) => k.querySelector(".k").textContent === "workspace").map((k) => k.querySelector(".v").textContent)`); };
+    const w = await scopes(base());
+    ok(JSON.stringify(w) === JSON.stringify(["/Algebra (may change files)"]), "W-1: a write scope says \"may change files\"", w);
+    const n1x = F.objects.grants.find((c) => c.name === "a lineage: a browser narrowing of the native first grant");
+    const r = await scopes({ ...base(), hosts: [hostRow({ grant_gen: 2, ack: null })], grants: { [HOST]: [n1x.current.bytes, n1x.bytes] } });
+    ok(JSON.stringify(r) === JSON.stringify(["/Algebra (read only)"]), "W-2: a read scope (the narrowing to read) says \"read only\"", r);
   }
   {
     fixtures = { ...base(), hosts: [hostRow({ cert: F.objects.host_cert.replace(/"name":"/, '"name":"x'), ack: null })] };

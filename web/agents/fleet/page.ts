@@ -33,6 +33,8 @@ const T = {
   storage: "This browser couldn't save its fleet record. Nothing was trusted.",
   noHosts: "No hosts are paired with your fleet yet.",
   hostBad: (code: string) => `Its certificate didn't verify (${code}). Nothing about this host is shown.`,
+  revocationBad: (code: string) => `A revocation of this host was given but didn't verify (${code}). Nothing about this host is shown.`,
+  tooLarge: "The fleet service sent more than this page reads. Nothing here was trusted.",
   revoked: "revoked",
   grantBad: (code: string) => `its grant didn't verify (${code})`,
   newerBad: (code: string) => `a newer grant didn't verify (${code})`,
@@ -44,6 +46,8 @@ const T = {
   unknownHost: "There is no such host in your fleet.",
   agentsNone: "Its grant lists no agents.",
   root: "root: can change anything in its workspace scopes",
+  mayWrite: "may change files",
+  readOnly: "read only",
   reportFrom: (host: string, age: string) => `from host ${host}, received ${age}`,
   ops: "Narrowings you asked for",
   approx: "about",
@@ -92,6 +96,8 @@ type HostView = Readonly<{
   ackGen: number | null;
   /** The current grant narrows the verified one before it. */
   narrowing: boolean;
+  /** What was refused when the host is: its certificate, or a revocation that didn't verify. */
+  refusedWhat: "cert" | "revocation";
   /** The generation the walk was anchored at, when grants before it no longer count; else null. */
   anchoredAt: number | null;
 }>;
@@ -102,7 +108,7 @@ type Loaded =
   | { kind: "ok"; ctx: FleetCtx; chain: Chain; hosts: HostView[] };
 
 /** What a service failure says: sign in, try again, or the refusal's own code. */
-const serviceText = (e: ServiceError) => (e.code === "unauthenticated" || e.status === 401 ? T.signIn : e.code === "unavailable" || e.code === "rate" || e.status === 429 || e.status >= 500 ? T.unavailable : T.refused(e.code));
+const serviceText = (e: ServiceError) => (e.code === "limit" ? T.tooLarge : e.code === "unauthenticated" || e.status === 401 ? T.signIn : e.code === "unavailable" || e.code === "rate" || e.status === 429 || e.status >= 500 ? T.unavailable : T.refused(e.code));
 const codeOf = (e: unknown) => (e && typeof e === "object" && typeof (e as any).code === "string" && /^[a-z_]{1,40}$/.test((e as any).code) ? (e as any).code : "error");
 
 async function verifiedChain(ctx: FleetCtx): Promise<Chain> {
@@ -124,13 +130,16 @@ function startOf(text: string): number {
 }
 
 async function verifyHost(ctx: FleetCtx, chain: Chain, h: HostRow): Promise<HostView> {
-  const base = { host: h.host, cert: null, certRefused: null, name: "", fingerprint: "", revoked: false, grant: null, grantRefused: null, grantUnresolved: false, ackGen: null, narrowing: false, anchoredAt: null };
+  const base = { host: h.host, cert: null, certRefused: null, name: "", fingerprint: "", revoked: false, grant: null, grantRefused: null, grantUnresolved: false, ackGen: null, narrowing: false, anchoredAt: null, refusedWhat: "cert" as const };
   let cert: HostCert;
   try { cert = await verifyHostCert(ctx, chain, h.cert); } catch (e) { return { ...base, certRefused: codeOf(e) }; }
   const body = cert.body as { host: string; name: string };
   if (body.host !== h.host) return { ...base, certRefused: "not_granted" };
   const v: { -readonly [K in keyof HostView]: HostView[K] } = { ...base, cert, name: body.name, fingerprint: await hostFingerprintShown(cert) };
-  if (h.revocation) { try { await verifyHostRevocation(ctx, chain, h.host, h.revocation); v.revoked = true; } catch {} }
+  // (a revocation the service names but that doesn't verify: the host is refused, never shown as unrevoked)
+  if (h.revocation) {
+    try { await verifyHostRevocation(ctx, chain, h.host, h.revocation); v.revoked = true; } catch (e) { return { ...base, certRefused: codeOf(e), refusedWhat: "revocation" }; }
+  }
   // (the host's accepted grants, read whole (oldest first), then verified as the host accepted them, from an ANCHOR: the
   //  newest grant that verifies on its own (against nothing: typically the regrant a device's removal makes, or any
   //  grant a native device signed). From there each next grant is verified against the previous VERIFIED one, so a
@@ -209,7 +218,13 @@ const tabs = (on: "device" | "hosts") => el("nav", { className: "tabs" },
   el("a", { href: "#device", className: on === "device" ? "on" : "", textContent: T.device }), " ",
   el("a", { href: "#hosts", className: on === "hosts" ? "on" : "", textContent: T.hosts }));
 
-async function deviceView(l: Loaded) {
+/** Tests only, on a loopback page: an answer held before it is drawn (`what` names it), so a test can move on meanwhile. */
+const testHold = async (what: string) => {
+  const hold = isLoopback(location.hostname) && typeof (window as any).__fleetHold === "function" ? (window as any).__fleetHold : null;
+  if (hold) await hold(what);
+};
+
+async function deviceView(l: Loaded, ticket: { n: number; key: string }) {
   if (l.kind === "fork") {
     const b = el("button", { type: "button", id: "reset", textContent: T.reset });
     const msg = el("p", { className: "msg", role: "status" });
@@ -222,6 +237,9 @@ async function deviceView(l: Loaded) {
   }
   if (l.kind !== "ok") return;
   const k = await deviceKey(l.ctx.fleet).catch(() => null);
+  await testHold("device");
+  // (drawn only if the person is still on this view)
+  if (!fresh.current(ticket)) return;
   let status: string = T.notEnrolled;
   if (k) for (const d of (l.chain as any).devices.values() as Iterable<{ raw: Uint8Array; name: string; removed: number | null }>) {
     if (d.raw.length === k.publicRaw.length && d.raw.every((x, i) => x === k.publicRaw[i])) { status = d.removed === null ? T.enrolled(d.name) : T.removed; break; }
@@ -248,7 +266,7 @@ function hostsView(l: Loaded) {
   if (!l.hosts.length) return draw(tabs("hosts"), note(T.noHosts));
   const list = el("ul", { className: "hosts" });
   for (const h of l.hosts) {
-    if (h.certRefused) { list.append(el("li", { className: "host refused" }, el("span", { className: "name", textContent: h.host }), " ", note(T.hostBad(h.certRefused), "warn"))); continue; }
+    if (h.certRefused) { list.append(el("li", { className: "host refused" }, el("span", { className: "name", textContent: h.host }), " ", note(h.refusedWhat === "revocation" ? T.revocationBad(h.certRefused) : T.hostBad(h.certRefused), "warn"))); continue; }
     list.append(el("li", { className: "host" },
       el("a", { href: `#host/${h.host}`, className: "name", textContent: V.bounded(h.name) }), " ",
       el("code", { className: "fp", textContent: h.fingerprint }), " ",
@@ -266,12 +284,11 @@ async function hostView(l: Loaded, id: string, ticket: { n: number; key: string 
   if (!h) return draw(back, note(T.unknownHost));
   // (the host's report and ops: unverified, read after the verified facts are on screen, and drawn only if the person
   //  is still on this host)
-  const now = src.now();
   const [raw, ops] = await Promise.all([src.state(id).catch(() => null), src.ops(id).catch(() => null)]);
-  // (tests only, on a loopback page: the answer held before it is drawn, so a test can move on meanwhile)
-  const hold = isLoopback(location.hostname) && typeof (window as any).__fleetHold === "function" ? (window as any).__fleetHold : null;
-  if (hold) await hold("state");
+  await testHold("state");
   if (!fresh.current(ticket)) return;
+  // (the report's age is taken when it is drawn, not when it was asked for)
+  const now = src.now();
   const r = V.readHostReport(raw, id, now);
   const head = el("div", { className: "card" },
     el("h2", { textContent: V.bounded(h.name) }), el("code", { className: "fp", textContent: h.fingerprint }),
@@ -291,7 +308,8 @@ async function hostView(l: Loaded, id: string, ticket: { n: number; key: string 
       el("h3", { textContent: V.bounded(a.name ?? a.agent) }),
       row("client", String(a.client ?? "")),
       ...(Array.isArray(a.tags) && a.tags.length ? [row("tags", a.tags.join(", "))] : []),
-      ...(Array.isArray(a.workspace) ? a.workspace.map((s: any) => row("workspace", `${s.path}${s.write ? " (may change files)" : " (read only)"}`)) : []),
+      // (a verified scope is exactly { path, access: "read" | "write" })
+      ...(Array.isArray(a.workspace) ? a.workspace.map((s: any) => row("workspace", `${s.path} (${s.access === "write" ? T.mayWrite : s.access === "read" ? T.readOnly : V.TEXT.unknown})`)) : []),
       a.root ? note(T.root, "warn") : null,
       reportBox(r, ...words));
     li.dataset.agent = a.agent;
@@ -301,6 +319,11 @@ async function hostView(l: Loaded, id: string, ticket: { n: number; key: string 
   const opList = el("ul", { className: "ops" });
   for (const o of ops ?? []) opList.append(el("li", { textContent: `${V.bounded(String(o.kind))}: ${V.bounded(String(o.state))}` }));
   draw(back, head, agents, ...(ops && ops.length ? [el("h3", { textContent: T.ops }), reportBox(r, opList)] : []));
+  // (a fresh report goes stale while the page stays open: the view is read again just after its bound, so it never
+  //  goes on showing a report older than that as fresh)
+  if (r.kind === "report" && !r.stale && r.age !== null) {
+    setTimeout(() => { if (fresh.current(ticket)) void route(); }, V.STALE_MS - r.age + 250);
+  }
 }
 
 // ---- routing: each change of view takes a ticket; a load's answer is drawn only for the newest ticket
@@ -316,7 +339,7 @@ async function route() {
   if (l.kind === "error") return draw(note(l.text, "warn"));
   if (id !== null) return hostView(l, id, ticket);
   if (hash === "hosts") return hostsView(l);
-  return deviceView(l);
+  return deviceView(l, ticket);
 }
 window.addEventListener("hashchange", () => void route());
 document.title = T.title + " · Sagebrush";
