@@ -13681,6 +13681,16 @@
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
  },
+ "src/runtime/numpy.ts :: axesArg :: const axes = axis.map((x) => normAxis(axisInt(x), nd)); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; a tuple axis read as indexes in turn, a bool refused, a duplicate refused (#1944)"
+ },
+ "src/runtime/numpy.ts :: axesArg :: return [normAxis(axisInt(axis), nd)]; #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; a single axis read as an index, a bool refused (#1944)"
+ },
  "src/runtime/numpy.ts :: conj :: if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -13756,15 +13766,25 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
  },
- "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, false) : strSort(a, normAxis(Number(axis), a.ndim), false); #0": {
+ "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, false) : strSort(a, normAxis(intNum(axis), a.ndim), false); #0": {
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
  },
- "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, true) : strSort(a, normAxis(Number(axis), a.ndim), true); #0": {
+ "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, true) : strSort(a, normAxis(intNum(axis), a.ndim), true); #0": {
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
+ },
+ "src/runtime/numpy.ts :: notIndex :: return sortAxis(x, normAxis(intNum(axis), x.ndim), false); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; the axis read as an index (#1944)"
+ },
+ "src/runtime/numpy.ts :: notIndex :: return sortAxis(x, normAxis(intNum(axis), x.ndim), true); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; the axis read as an index (#1944)"
  },
  "src/runtime/numpy.ts :: prod :: export const ARRAY_LIMITS = { elements: 2 ** 32, bytes: 2 ** 32 }; #0": {
   "class": "2",
