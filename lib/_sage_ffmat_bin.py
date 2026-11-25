@@ -489,14 +489,24 @@ def _mul_need(r, k, c, p, out, python_only=False):
     per = _ECH_PIECE // 8
     # (pack: the ints of the piece being filled, across rows, at most a
     # piece's words or a factor's, their list and the array made of them;
-    # build: one reply run's elements, their list and a row's slice of it)
+    # build: the ints of one run of the reply's words, as they are read)
     w = min(max(r * k, k * c), per)
     run = (iota + 8) * w + 8 * w + 3 * hdr
+    # (each row of A, of B and of the result: an iterator or a list header
+    # and its slot, in every phase)
+    rows = (2 * r + k) * (hdr + 8)
+    # (pyjs reclaims an object only when V8 collects, not when its last
+    # reference goes: the packer's array per piece (8 bytes a word of both
+    # factors) and its iterator per row may all still be resident in every
+    # later phase; CPython frees each when its last reference goes.  The
+    # entries' ints are the elements' own (int(x) is x._v), and the reply's
+    # words become the result's elements, counted in out)
+    late = 8 * (r * k + k * c) + hdr * (r + k) if pyjs and not python_only else 0
     phases = (
-        req + _ECH_PIECE + hdr + run,      # pack
-        req + copies * q + engine,         # call
-        req + reply_copies * rp + rep,     # return
-        rep + 16 * min(r * c, _ECH_REPLY_PIECE // 8) + 4 * hdr + out,  # build
+        req + _ECH_PIECE + hdr + run + rows + late,          # pack
+        req + copies * q + engine + late,                    # call
+        req + reply_copies * rp + rep + late,                # return
+        rep + run + rows + 4 * hdr + out + late,             # build
     )
     return max(phases) + _ECH_SLACK
 
@@ -563,8 +573,10 @@ def _mul_fill(pieces, buf, rowsrc, r, c):
     rows = 0
     for row in rowsrc:
         if type(row) is list and len(row) == c and c <= per - len(buf):
-            # (a matrix's own row that fits the piece: no iterator, no run)
-            buf.extend(map(int, row))
+            # (a matrix's own row that fits the piece: no run list, no map
+            # object; each is garbage per row, which pyjs reclaims late)
+            for x in row:
+                buf.append(int(x))
             if len(buf) == per:
                 pieces.append(array.array("Q", buf).tobytes())
                 del buf[:]
@@ -657,23 +669,22 @@ def _mul_bin_call(arows, brows, base, r, k, c, p):
 
 
 def _mul_rows(rd, base, r, c):
-    """The product's r rows of c elements over base from the reply: each run
-    of words (at most a reply piece) made into elements at once, then cut
-    into rows (a reader per row costs more than a short row in pyjs)."""
+    """The product's r rows of c elements over base from the reply, read a
+    run of words at a time and appended to the row being built: one reader
+    for all the rows (a reader per row costs more than a short row in pyjs),
+    and no list or slice per run or per row besides the rows themselves."""
     elt = _ff._elt
     out = []
     row = []
+    n = 0
     for v in rd.runs(r * c):
-        vals = [elt(base, x) for x in v]
-        i, n = 0, len(vals)
-        while i < n:
-            j = min(n, i + c - len(row))
-            row.extend(vals[i:j])
-            i = j
-            if len(row) == c:
+        for x in v:
+            row.append(elt(base, x))
+            n += 1
+            if n == c:
                 out.append(row)
                 row = []
-        del vals
+                n = 0
     rd.done()
     if len(out) != r or row:
         raise RuntimeError("Sagebrush engine: a malformed nmod_mat_mul reply")
