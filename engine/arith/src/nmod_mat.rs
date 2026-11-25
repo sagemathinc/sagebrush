@@ -1714,6 +1714,39 @@ mod tests {
         }
     }
 
+    /// The characteristic polynomial's u64 sums at their headroom: dot,
+    /// Sums and axpy with every operand p - 1 (each product the largest), at
+    /// lengths batch64, batch64 + 1, batch64 + fold64, batch64 + fold64 + 1
+    /// and three folds past them, against u128 arithmetic; at fold64 = 4
+    /// and 15, and at a prime whose whole sum fits.
+    #[test]
+    fn charpoly_sums_at_their_headroom() {
+        for p in [(1u64 << 31) - 1, (1 << 30) + 3, 65537] {
+            let m = Modulus::new(p);
+            let (b, f) = (batch64(&m), fold64(&m));
+            let q = p - 1;
+            let want = |len: usize| ((len as u128 * (q as u128 * q as u128)) % p as u128) as u64;
+            let lens: Vec<usize> = if b > 1 << 20 { vec![1, 2, 1000] } else { vec![b, b + 1, b + f, b + f + 1, b + 3 * f + 1] };
+            for len in lens {
+                let a = vec![q; len];
+                assert_eq!(dot(&a, &a, &m, batch_len(&m)), want(len), "dot p {} len {}", p, len);
+                // (Sums: len rows of p - 1, each scaled by p - 1, subtracted from 0)
+                if let Some(mut s) = Sums::new(&m, 3) {
+                    for _ in 0..len {
+                        s.add_scaled(q, &[q, q, q]);
+                    }
+                    let mut next = vec![0u64; 3];
+                    s.subtract_from(&mut next);
+                    assert_eq!(next, vec![(p - want(len)) % p; 3], "Sums p {} len {}", p, len);
+                }
+            }
+            // axpy: x + c y at the largest operands
+            let mut x = vec![q; 5];
+            axpy(&mut x, &[q; 5], q, &m);
+            assert_eq!(x, vec![((q as u128 + q as u128 * q as u128) % p as u128) as u64; 5], "axpy p {}", p);
+        }
+    }
+
     /// The characteristic polynomial (Hessenberg) with its u64 sums against
     /// the same computation with every product reduced (the route before
     /// them): the same polynomial and exactly the same units, family by
