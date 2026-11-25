@@ -34,12 +34,12 @@
     {
       "case": "c3.series-object-to_numpy",
       "message": "pandas.Series.to_numpy() of an object column is not in Sagebrush's pandas 0.x subset",
-      "reason": "C3: pandas exports str/object data as an object ndarray; Sagebrush's numpy has no str or object arrays, so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
+      "reason": "C3: pandas exports object data as an object ndarray; Sagebrush's numpy has no object arrays (a str column exports as a '<U' array instead), so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
     },
     {
       "case": "c3.series-object-values",
       "message": "pandas.Series.values of an object column is not in Sagebrush's pandas 0.x subset",
-      "reason": "C3: pandas exports str/object data as an object ndarray; Sagebrush's numpy has no str or object arrays, so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
+      "reason": "C3: pandas exports object data as an object ndarray; Sagebrush's numpy has no object arrays (a str column exports as a '<U' array instead), so the export is refused (no list wrapper: it would hide assignment differences, r7 C2)"
     },
     {
       "case": "c3.frame-str-to_numpy",
@@ -74,17 +74,12 @@
     {
       "case": "dtype.string",
       "message": "pandas: dtype='string' is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas' extension dtypes (string, category, Int64) are outside M1's frozen support table (plan r7 C4); it raises before any work"
-    },
-    {
-      "case": "dtype.category",
-      "message": "pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet",
-      "reason": "pandas' extension dtypes (string, category, Int64) are outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "reason": "pandas' nullable string dtype ('string') is outside M1's frozen support table (plan r7 C4); text columns use pandas 3's default str dtype; it raises before any work"
     },
     {
       "case": "dtype.Int64",
       "message": "pandas: dtype='Int64' is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas' extension dtypes (string, category, Int64) are outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "reason": "pandas' nullable integer dtypes (Int64 and the like) are outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
       "case": "value.int-beyond-int64",
@@ -127,11 +122,6 @@
       "reason": "pandas.Timedelta (time differences) is outside the subset: PR A brings times, not their differences; it raises before any work"
     },
     {
-      "case": "name.pd.Categorical",
-      "message": "pandas.Categorical is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas.Categorical is outside M1's frozen support table (plan r7 C4); it raises before any work"
-    },
-    {
       "case": "name.pd.MultiIndex",
       "message": "pandas.MultiIndex is not in Sagebrush's pandas 0.x subset",
       "reason": "pandas.MultiIndex is outside M1's frozen support table (plan r7 C4); it raises before any work"
@@ -147,9 +137,9 @@
       "reason": "pandas.get_dummies is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
-      "case": "name.DataFrame.groupby",
-      "message": "pandas.DataFrame.groupby is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas.DataFrame.groupby: groupby is deferred to M2 (accepted at plan review); outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "case": "name.DataFrame.pivot",
+      "message": "pandas.DataFrame.pivot is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.DataFrame.pivot is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
       "case": "name.DataFrame.merge",
@@ -157,9 +147,9 @@
       "reason": "pandas.DataFrame.merge is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
-      "case": "name.DataFrame.describe",
-      "message": "pandas.DataFrame.describe is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas.DataFrame.describe is outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "case": "name.DataFrame.cov",
+      "message": "pandas.DataFrame.cov is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.DataFrame.cov is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
       "case": "name.DataFrame.rank",
@@ -217,9 +207,9 @@
       "reason": "pandas.Series.rolling is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
-      "case": "name.Series.groupby",
-      "message": "pandas.Series.groupby is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas.Series.groupby: groupby is deferred to M2 (accepted at plan review); outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "case": "name.Series.cumsum",
+      "message": "pandas.Series.cumsum is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas.Series.cumsum is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
       "case": "name.Series.mode",
@@ -262,34 +252,204 @@
       "reason": "pandas.Index.sort_values is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
-      "case": "op.series-add",
-      "message": "pandas.Series.__add__ (arithmetic) is not in Sagebrush's pandas 0.x subset",
-      "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"
+      "case": "arith.repeated-labels",
+      "message": "pandas.Series.add of Series with other, repeated labels is not in Sagebrush's pandas 0.x subset",
+      "reason": "two Series with other labels align first; with a repeated label pandas' join repeats rows, which this subset doesn't do; it raises before any work"
     },
     {
-      "case": "op.series-radd",
-      "message": "pandas.Series.__radd__ (arithmetic) is not in Sagebrush's pandas 0.x subset",
-      "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"
+      "case": "arith.with-frame",
+      "message": "pandas.DataFrame.radd with a Series whose labels aren't the frame's columns (pandas' added all-missing columns) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a Series with a frame is the frame's arithmetic, the Series lined up with the columns; here its labels (0, 1) aren't the frame's columns, so pandas adds all-missing columns with its block-dependent dtype; it raises before any work"
     },
     {
-      "case": "op.series-mul",
-      "message": "pandas.Series.__mul__ (arithmetic) is not in Sagebrush's pandas 0.x subset",
-      "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"
+      "case": "arith.datetime",
+      "message": "pandas.Series.sub of a datetime64[us] column (Timedelta arithmetic) is not in Sagebrush's pandas 0.x subset",
+      "reason": "arithmetic of datetimes gives Timedeltas in pandas, which aren't in the subset; it raises before any work"
     },
     {
-      "case": "op.series-neg",
-      "message": "pandas.Series.__neg__ (arithmetic) is not in Sagebrush's pandas 0.x subset",
-      "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"
+      "case": "arith.level",
+      "message": "pandas.Series.add(level=, axis=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "level= aligns on a MultiIndex level, which isn't in the subset; it raises before any work"
     },
     {
-      "case": "op.frame-add",
-      "message": "pandas.DataFrame.__add__ (arithmetic) is not in Sagebrush's pandas 0.x subset",
-      "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"
+      "case": "arith.matmul",
+      "message": "pandas.Series.__matmul__ (a dot product) is not in Sagebrush's pandas 0.x subset",
+      "reason": "@ is a dot product, outside the subset's elementwise arithmetic; it raises before any work"
     },
     {
-      "case": "op.frame-gt",
-      "message": "pandas.DataFrame.__gt__ (comparison) is not in Sagebrush's pandas 0.x subset",
-      "reason": "Series and DataFrame arithmetic and comparison are outside M1's frozen support table (plan r7 C4); it raises before any work; they come in a later milestone"
+      "case": "arith.object-add",
+      "message": "pandas.Series.add of an object column is not in Sagebrush's pandas 0.x subset",
+      "reason": "arithmetic on an object column masks its missing values out in pandas (Series([1, None], dtype=object) + 1 gives [2, nan] as object); the subset refuses object columns here rather than give another dtype or an error, as it does for object columns elsewhere; it raises before any work"
+    },
+    {
+      "case": "arith.object-radd",
+      "message": "pandas.Series.radd of an object column is not in Sagebrush's pandas 0.x subset",
+      "reason": "arithmetic on an object column masks its missing values out in pandas (Series([1, None], dtype=object) + 1 gives [2, nan] as object); the subset refuses object columns here rather than give another dtype or an error, as it does for object columns elsewhere; it raises before any work"
+    },
+    {
+      "case": "arith.object-str",
+      "message": "pandas.Series.add of an object column is not in Sagebrush's pandas 0.x subset",
+      "reason": "arithmetic on an object column masks its missing values out in pandas (Series([1, None], dtype=object) + 1 gives [2, nan] as object); the subset refuses object columns here rather than give another dtype or an error, as it does for object columns elsewhere; it raises before any work"
+    },
+    {
+      "case": "arith.object-nan",
+      "message": "pandas.Series.add of an object column is not in Sagebrush's pandas 0.x subset",
+      "reason": "arithmetic on an object column masks its missing values out in pandas (Series([1, None], dtype=object) + 1 gives [2, nan] as object); the subset refuses object columns here rather than give another dtype or an error, as it does for object columns elsewhere; it raises before any work"
+    },
+    {
+      "case": "arith.with-object-series",
+      "message": "pandas.Series.add of an object column is not in Sagebrush's pandas 0.x subset",
+      "reason": "arithmetic on an object column masks its missing values out in pandas (Series([1, None], dtype=object) + 1 gives [2, nan] as object); the subset refuses object columns here rather than give another dtype or an error, as it does for object columns elsewhere; it raises before any work"
+    },
+    {
+      "case": "arith.object-neg",
+      "message": "pandas.Series.__neg__ of an object column is not in Sagebrush's pandas 0.x subset",
+      "reason": "arithmetic on an object column masks its missing values out in pandas (Series([1, None], dtype=object) + 1 gives [2, nan] as object); the subset refuses object columns here rather than give another dtype or an error, as it does for object columns elsewhere; it raises before any work"
+    },
+    {
+      "case": "frame-arith.other-columns",
+      "message": "pandas.DataFrame.add of frames with different columns (pandas' added all-missing columns take a dtype from its internal blocks) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas computes two frames whose column sets differ on their shared columns and then adds the others as all-missing columns, whose dtype depends on its internal blocks (float32 after a float32 result, float64 after an int64, str or bool one); Sagebrush's frame has no blocks, so it raises before any work rather than guess the dtype"
+    },
+    {
+      "case": "frame-arith.series-other-labels",
+      "message": "pandas.DataFrame.add with a Series whose labels aren't the frame's columns (pandas' added all-missing columns) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a Series with labels that aren't the frame's columns adds all-missing columns, with pandas' block-dependent dtype as for two frames with different columns; it raises before any work"
+    },
+    {
+      "case": "frame-arith.repeated-columns",
+      "message": "pandas.DataFrame.add of a frame with repeated column labels is not in Sagebrush's pandas 0.x subset",
+      "reason": "matching columns by label needs unique labels; pandas lines repeated labels up by position within each label, which isn't in the subset; it raises before any work (a scalar, list-like or array works with repeated labels)"
+    },
+    {
+      "case": "frame-arith.level",
+      "message": "pandas.DataFrame.add(level=) (a MultiIndex) is not in Sagebrush's pandas 0.x subset",
+      "reason": "level= broadcasts across a MultiIndex level, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "frame-arith.3d",
+      "message": "pandas.DataFrame.add with a 3-dimensional array is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas can't take arrays of more than two dimensions either (its message differs); it raises before any work"
+    },
+    {
+      "case": "frame-arith.matmul",
+      "message": "pandas.DataFrame.__matmul__ (a matrix product) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a frame's matrix product (@, dot) isn't in the subset yet; it raises before any work"
+    },
+    {
+      "case": "frame-arith.object-row",
+      "message": "pandas.DataFrame.add with a row of object values is not in Sagebrush's pandas 0.x subset",
+      "reason": "a row of mixed values is an object Series in pandas, and object columns aren't in the subset's arithmetic; it raises before any work"
+    },
+    {
+      "case": "compare.repeated-columns",
+      "message": "pandas.DataFrame.eq of a frame with repeated column labels is not in Sagebrush's pandas 0.x subset",
+      "reason": "a named comparison matches columns by label, which needs unique labels when the two frames' columns differ; pandas lines repeated labels up by position within each label, which isn't in the subset; it raises before any work (identical labels, a scalar or a list-like work)"
+    },
+    {
+      "case": "category.sort_values",
+      "message": "pandas: this operation on a category column is not in Sagebrush's pandas 0.x subset",
+      "reason": "sorting a category by its categories' order isn't in the subset yet; a category column's values aren't readable as an array, so the operation raises before any work"
+    },
+    {
+      "case": "category.value_counts",
+      "message": "pandas: this operation on a category column is not in Sagebrush's pandas 0.x subset",
+      "reason": "value_counts of a category gives a CategoricalIndex, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "category.fillna",
+      "message": "pandas: filling a category column (fillna, fill_value) is not in Sagebrush's pandas 0.x subset",
+      "reason": "filling a category keeps it a category and needs the value among its categories; not in the subset yet, it raises before any work"
+    },
+    {
+      "case": "category.groupby",
+      "message": "pandas: groupby by a category column is not in Sagebrush's pandas 0.x subset",
+      "reason": "grouping by a category groups by its categories (observed=) into a CategoricalIndex, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "category.set_index",
+      "message": "pandas: set_index of a category column is not in Sagebrush's pandas 0.x subset",
+      "reason": "a category column as the index is a CategoricalIndex, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "category.info",
+      "message": "pandas: the memory usage of a category column (info, memory_usage) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas counts a category's memory as its codes and its categories' own memory, which isn't ported yet; it raises before any output"
+    },
+    {
+      "case": "category.to_numpy",
+      "message": "pandas: this operation on a category column is not in Sagebrush's pandas 0.x subset",
+      "reason": "a category's values as a numpy array are an object array in pandas, and Sagebrush's numpy has no object dtype yet; it raises before any work"
+    },
+    {
+      "case": "category.describe",
+      "message": "pandas: this operation on a category column is not in Sagebrush's pandas 0.x subset",
+      "reason": "describe of a category isn't in the subset yet; it raises before any work"
+    },
+    {
+      "case": "category.order-comparison-ordered",
+      "message": "pandas: an order comparison of an ordered category column is not in Sagebrush's pandas 0.x subset",
+      "reason": "an order comparison of an ordered category isn't in the subset yet (an unordered one raises pandas' TypeError, as pandas does); it raises before any work"
+    },
+    {
+      "case": "category.cat-method",
+      "message": "pandas.Series.cat.add_categories is not in Sagebrush's pandas 0.x subset",
+      "reason": "the .cat accessor has categories, codes and ordered in the subset; its methods that change the categories aren't, and raise before any work"
+    },
+    {
+      "case": "category.float32",
+      "message": "pandas: astype('category') of a float32 column is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas keeps a float32 column's dtype for its categories, which the subset's Index doesn't hold; it raises before any work"
+    },
+    {
+      "case": "category.int8",
+      "message": "pandas: astype('category') of an int8 column is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas keeps a smaller integer column's dtype (int8, int16, int32, uint8, uint16, uint32) for its categories, which the subset's Index doesn't hold; it raises before any work, rather than give int64 categories"
+    },
+    {
+      "case": "category.datetime",
+      "message": "pandas: astype('category') of a datetime64[us] column is not in Sagebrush's pandas 0.x subset",
+      "reason": "a datetime column as a category (Timestamp categories) isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "category.key",
+      "message": "pandas: indexing with a Categorical is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas labels what a Categorical key selects with a CategoricalIndex, which isn't in the subset; it raises before any work (a Series of category dtype as the key works, with a plain Index)"
+    },
+    {
+      "case": "category.set-values",
+      "message": "pandas: setting values from a Categorical is not in Sagebrush's pandas 0.x subset",
+      "reason": "setting a Series' values (or enlarging it) from a Categorical isn't in the subset yet; it raises before any work (a DataFrame column set to a Categorical works, as a category column)"
+    },
+    {
+      "case": "category.index",
+      "message": "pandas: an Index of category dtype (CategoricalIndex) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a Categorical as an index or as columns is a CategoricalIndex, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "category.compare-categorical",
+      "message": "pandas.Series comparison with a Categorical is not in Sagebrush's pandas 0.x subset",
+      "reason": "comparing a Series with a Categorical isn't in the subset yet; it raises before any work (a category Series compared with a scalar or a list works)"
+    },
+    {
+      "case": "compare.series-repeated-labels",
+      "message": "pandas.DataFrame.eq with a Series of repeated labels is not in Sagebrush's pandas 0.x subset",
+      "reason": "a named comparison lines a Series up with the frame's columns by label, which needs the Series' labels unique; pandas lines repeated labels up by position within each label, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "compare.level",
+      "message": "pandas.DataFrame.eq(level=) (a MultiIndex) is not in Sagebrush's pandas 0.x subset",
+      "reason": "level= broadcasts across a MultiIndex level, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "compare.series-level",
+      "message": "pandas.Series.eq(level=) (a MultiIndex) is not in Sagebrush's pandas 0.x subset",
+      "reason": "level= broadcasts across a MultiIndex level, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "compare.3d",
+      "message": "pandas.DataFrame.eq with a 3-dimensional array is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas can't compare with arrays of more than two dimensions either (its message differs); it raises before any work"
     },
     {
       "case": "param.Series.sum-min_count",
@@ -404,7 +564,7 @@
     {
       "case": "csv.dtype-category",
       "message": "pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet",
-      "reason": "pandas' extension dtypes (string, category, Int64) are outside M1's frozen support table (plan r7 C4); it raises before any work"
+      "reason": "read_csv doesn't build category columns while parsing in the subset yet (astype('category') after reading does); it raises before any work"
     },
     {
       "case": "csv.usecols-mixed",
@@ -478,8 +638,8 @@
     },
     {
       "case": "csv.dtype-float32",
-      "message": "pandas: dtype='float32' is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas parses into float32; float32 isn't one of the subset's dtypes yet, so the dtype is refused before reading"
+      "message": "pandas.read_csv(dtype=float32) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas parses into float32; Sagebrush's CSV builder fills only str, object, float64, int64 and bool, so it refuses before reading rather than build a column of the wrong dtype (astype('float32') after reading gives one)"
     },
     {
       "case": "dt.series-values",
@@ -677,14 +837,29 @@
       "reason": "pandas fetches a URL itself; Sagebrush's read_excel does no network I/O (data-access design: the reader downloads third-party files from the source), as read_csv"
     },
     {
-      "case": "d1.astype-category",
-      "message": "pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet",
-      "reason": "the category dtype (a codes array and a categories Index, with its own repr) comes in a later step; until then it raises before any work"
+      "case": "cast.astype-float-beyond-int32",
+      "message": "pandas: astype of float values beyond int32's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset",
+      "reason": "above int32's range numpy's float-to-int cast is undefined (pandas gives INT32_MIN on x86, silently); Sagebrush refuses it rather than give another value"
     },
     {
-      "case": "d1.frame-astype-category",
-      "message": "pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet",
-      "reason": "the category dtype comes in a later step; a dict naming it raises before any column is converted"
+      "case": "cast.astype-float-beyond-int64",
+      "message": "pandas: astype of float values beyond int64's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset",
+      "reason": "above int64's range numpy's float-to-int cast is undefined (pandas gives INT64_MIN on x86, with a RuntimeWarning); Sagebrush refuses it rather than give another value"
+    },
+    {
+      "case": "cast.astype-float-below-int8",
+      "message": "pandas: astype of float values beyond int8's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset",
+      "reason": "below int8's range numpy's float-to-int cast is undefined (pandas gives 56 for -200.0 on x86, silently); Sagebrush refuses it rather than give another value"
+    },
+    {
+      "case": "cast.astype-float32-below-int32",
+      "message": "pandas: astype of float values beyond int32's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset",
+      "reason": "below int32's range numpy's float-to-int cast is undefined (pandas gives INT32_MIN on x86, silently); Sagebrush refuses it rather than give another value"
+    },
+    {
+      "case": "cast.astype-float-beyond-uint8",
+      "message": "pandas: astype of float values beyond uint8's range (numpy's cast is undefined) is not in Sagebrush's pandas 0.x subset",
+      "reason": "above uint8's range numpy's float-to-int cast is undefined (pandas gives 44 for 300.0 on x86, silently); Sagebrush refuses it rather than give another value. A negative float to an unsigned type is pandas' own ValueError, which Sagebrush matches (test_astype)"
     },
     {
       "case": "d1.astype-errors",
@@ -779,7 +954,7 @@
     {
       "case": "reshape.concat-union_categories",
       "message": "pandas.concat(union_categories=) is not in Sagebrush's pandas 0.x subset",
-      "reason": "union_categories= is for the category dtype, which isn't in the subset yet; it raises before any work"
+      "reason": "union_categories= merges the categories of category columns, which concat doesn't do in the subset yet; it raises before any work"
     },
     {
       "case": "reshape.drop-level",
@@ -850,6 +1025,178 @@
       "case": "reshape.to_numpy-kwargs",
       "message": "pandas.Series.to_numpy(**kwargs) is not in Sagebrush's pandas 0.x subset",
       "reason": "Series.to_numpy passes other keywords to an extension array's own to_numpy, which this subset doesn't have; it raises before any work"
+    },
+    {
+      "case": "stats.describe-datetime",
+      "message": "pandas.DataFrame.describe of a datetime64[us] column is not in Sagebrush's pandas 0.x subset",
+      "reason": "describe of a datetime column gives Timestamps for mean and the percentiles, which this subset doesn't compute yet; it raises before any column is described"
+    },
+    {
+      "case": "stats.series-describe-datetime",
+      "message": "pandas.Series.describe of a datetime64[us] column is not in Sagebrush's pandas 0.x subset",
+      "reason": "describe of a datetime column gives Timestamps for mean and the percentiles, which this subset doesn't compute yet; it raises before any work"
+    },
+    {
+      "case": "stats.describe-include-unknown",
+      "message": "pandas.DataFrame.describe(include=, exclude=) with 'timedelta' is not in Sagebrush's pandas 0.x subset",
+      "reason": "include= and exclude= take select_dtypes' common spellings here (number, object, str, bool, integer, floating, datetime, category and the subset's dtypes); pandas takes any dtype spelling, and others raise before any work"
+    },
+    {
+      "case": "stats.corr-spearman",
+      "message": "pandas.DataFrame.corr(method='spearman') (a rank correlation) is not in Sagebrush's pandas 0.x subset",
+      "reason": "Spearman's correlation ranks the values with pandas' own rank routine, which this subset doesn't have yet; it raises before any work"
+    },
+    {
+      "case": "stats.corr-kendall",
+      "message": "pandas.DataFrame.corr(method='kendall') (a rank correlation) is not in Sagebrush's pandas 0.x subset",
+      "reason": "Kendall's tau counts concordant pairs with pandas' own routine, which this subset doesn't have yet; it raises before any work"
+    },
+    {
+      "case": "stats.series-corr-spearman",
+      "message": "pandas.Series.corr(method='spearman') (a rank correlation) is not in Sagebrush's pandas 0.x subset",
+      "reason": "Series.corr with Spearman's method uses scipy's spearmanr, which isn't in Sagebrush; it raises once the two Series are aligned"
+    },
+    {
+      "case": "stats.corr-datetime",
+      "message": "pandas.DataFrame.corr of a datetime64[us] column is not in Sagebrush's pandas 0.x subset",
+      "reason": "corr of a datetime column correlates the times as numbers in pandas; this subset leaves datetime columns out of numeric work; it raises before any work"
+    },
+    {
+      "case": "stats.series-corr-frame",
+      "message": "pandas.Series.corr of a DataFrame is not in Sagebrush's pandas 0.x subset",
+      "reason": "Series.corr of a DataFrame isn't a pandas form either (pandas fails inside with numpy's shape error); Sagebrush says so plainly before any work"
+    },
+    {
+      "case": "stats.series-corr-repeated-labels",
+      "message": "pandas.Series.corr of Series with repeated labels is not in Sagebrush's pandas 0.x subset",
+      "reason": "Series.corr aligns the two Series on their labels; with a repeated label pandas' join repeats rows, which this subset doesn't do; it raises before any work"
+    },
+    {
+      "case": "groupby.several-keys",
+      "message": "pandas.DataFrame.groupby by several keys (a MultiIndex) is not in Sagebrush's pandas 0.x subset",
+      "reason": "grouping by several keys gives a MultiIndex, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "groupby.frame-agg-list",
+      "message": "pandas.DataFrameGroupBy.agg(a list) (MultiIndex columns) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a list of functions over a frame's columns gives MultiIndex columns, which aren't in the subset; it raises before any work"
+    },
+    {
+      "case": "groupby.agg-dict-of-lists",
+      "message": "pandas.DataFrameGroupBy.agg(a dict of lists) (MultiIndex columns) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a dict of lists gives MultiIndex columns, which aren't in the subset; it raises before any work"
+    },
+    {
+      "case": "groupby.transform",
+      "message": "pandas.SeriesGroupBy.transform is not in Sagebrush's pandas 0.x subset",
+      "reason": "transform (a result per row) is outside the subset's groupby (size, count, sum, mean, min, max, agg); it raises before any work"
+    },
+    {
+      "case": "groupby.apply",
+      "message": "pandas.SeriesGroupBy.apply is not in Sagebrush's pandas 0.x subset",
+      "reason": "apply runs pandas' own split-apply-combine with its result-shape rules, outside the subset's groupby; it raises before any work"
+    },
+    {
+      "case": "groupby.frame-prod",
+      "message": "pandas.DataFrameGroupBy.prod is not in Sagebrush's pandas 0.x subset",
+      "reason": "prod per group is outside the subset's groupby for now; it raises before any work"
+    },
+    {
+      "case": "groupby.agg-name-outside",
+      "message": "pandas.SeriesGroupBy.agg('prod') is not in Sagebrush's pandas 0.x subset",
+      "reason": "agg with the name of a reduction outside the subset's groupby raises before any work, rather than pandas' result"
+    },
+    {
+      "case": "groupby.by-function",
+      "message": "pandas.DataFrame.groupby by a builtin_function_or_method is not in Sagebrush's pandas 0.x subset",
+      "reason": "grouping by a function of the labels is outside the subset; it raises before any work"
+    },
+    {
+      "case": "groupby.observed",
+      "message": "pandas.DataFrame.groupby(observed=, group_keys=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "observed= and group_keys= other than pandas' defaults concern categoricals and apply, outside the subset; they raise before any work"
+    },
+    {
+      "case": "groupby.series-other-labels",
+      "message": "pandas.Series.groupby by a Series with other labels is not in Sagebrush's pandas 0.x subset",
+      "reason": "grouping by a Series with other labels aligns it first in pandas; outside the subset, it raises before any work"
+    },
+    {
+      "case": "groupby.mixed-keys",
+      "message": "pandas.groupby of keys of mixed types (pandas sorts them its own way) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas sorts keys of mixed types with its own rule (numbers before strings); outside the subset, it raises before any group is formed"
+    },
+    {
+      "case": "groupby.uint8-sum-beyond",
+      "message": "pandas.groupby sum of uint8 beyond its range (pandas gives uint64) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a uint8 sum beyond uint8 is uint64 in pandas, which isn't one of the subset's dtypes; it raises once the sums are known"
+    },
+    {
+      "case": "groupby.uint8-sum-beyond-sorted",
+      "message": "pandas.groupby sum of uint8 beyond its range (pandas gives uint64) is not in Sagebrush's pandas 0.x subset",
+      "reason": "a uint8 sum beyond uint8 is uint64 in pandas (here through its reduceat path), which isn't one of the subset's dtypes; it raises once the sums are known"
+    },
+    {
+      "case": "groupby.datetime-sum",
+      "message": "pandas.SeriesGroupBy.sum of a datetime64[us] column is not in Sagebrush's pandas 0.x subset",
+      "reason": "sums of datetimes are Timedelta arithmetic, outside the subset; it raises before any work"
+    },
+    {
+      "case": "groupby.level-other",
+      "message": "pandas.DataFrame.groupby(level=) other than the index itself is not in Sagebrush's pandas 0.x subset",
+      "reason": "level= other than the index itself needs a MultiIndex, which isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "groupby.std-engine",
+      "message": "pandas.SeriesGroupBy.std(engine=, engine_kwargs=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "explicit engine selection and engine options are outside this subset, which uses its built-in implementation; it raises before any work"
+    },
+    {
+      "case": "groupby.median-datetime",
+      "message": "pandas.SeriesGroupBy.median of a datetime64[us] column is not in Sagebrush's pandas 0.x subset",
+      "reason": "a median of datetimes is a Timestamp in pandas, computed on their integer values; datetime columns stay out of the subset's numeric groupby; it raises before any work"
+    },
+    {
+      "case": "reach.index-asarray-str",
+      "message": "pandas.numpy.asarray(Index) of str labels (Index.to_numpy() gives its '<U' array) is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas gives an object array of the labels; Sagebrush's numpy can't take a string array from __array__ yet (Index.to_numpy() gives a '<U' array); it raises before any work"
+    },
+    {
+      "case": "reach.index-asarray-dtype",
+      "message": "pandas.numpy.asarray(Index, dtype=) is not in Sagebrush's pandas 0.x subset",
+      "reason": "numpy.asarray of an Index with a dtype is outside the subset (Index.to_numpy(dtype=) converts); it raises before any work"
+    },
+    {
+      "case": "reach.any-datetime",
+      "message": "pandas.Series.any of a datetime64[us] column is not in Sagebrush's pandas 0.x subset",
+      "reason": "any/all of datetimes test them against zero in pandas, which needs numpy's datetime64; it raises before any work"
+    },
+    {
+      "case": "reach.frame-any-axis1",
+      "message": "pandas.DataFrame.any(axis=, **kwargs) is not in Sagebrush's pandas 0.x subset",
+      "reason": "any/all along rows (axis=1) or over the whole frame (axis=None) are outside the subset; they raise before any work"
+    },
+    {
+      "case": "reach.series-all-bool-only",
+      "message": "pandas.Series.all(axis=, bool_only=, **kwargs) is not in Sagebrush's pandas 0.x subset",
+      "reason": "bool_only= is a frame's column selection; on a Series it is outside the subset; it raises before any work"
+    },
+    {
+      "case": "reach.take-kwargs",
+      "message": "pandas.Series.take(**kwargs) is not in Sagebrush's pandas 0.x subset",
+      "reason": "take's extra keywords (is_copy and others pandas has deprecated or removed) are outside the subset; it raises before any work"
+    }
+  ],
+  "value_divergences": [
+    {
+      "case": "blocks.added-nan-col",
+      "where": "DataFrameGroupBy sum and mean of a frame in which a float column was added after construction (df['x'] = ..., assign, insert), with the rows already in group order; tests/test_groupby_blocks.py pins Sagebrush's values (pandas gives x sums 0.0 and 0.0 there and means 0.0, Sagebrush sums 1.0 and means 0.25)",
+      "reason": "the summation path can differ when a float column was added after construction (df['x'] = ..., assign, insert). On ordinary data that's a few ulps; on data with cancellation the sum can differ by the rounding error of the larger terms (e.g. 0 against 1 for [1e100, 1, -1e100, 1]). pandas picks its path per internal block of columns, and an added column is its own block until pandas consolidates; Sagebrush's frame treats a frame's columns of one float dtype as one block, as the constructor and read_csv make them (ruled a documented divergence)"
+    },
+    {
+      "case": "blocks.added-f32-std",
+      "where": "DataFrameGroupBy std and median of a frame with float32 columns, one of them added after construction (df['x'] = ..., assign, insert); tests/test_groupby_blocks.py pins Sagebrush's dtypes (pandas gives float32 for a and float64 for the added b there, Sagebrush float64 for both)",
+      "reason": "pandas computes a float32 column's groupby std and median in float64 and casts the result back to float32 only when every value of the block stays within 5e-4 (absolute) of its float32 cast; an added column is its own block until pandas consolidates. Sagebrush's frame treats a frame's float32 columns as one block, as the constructor and read_csv make them, so one column whose result doesn't fit makes all of them float64. Both compute the result in float64, but pandas can cast one column back to float32 while Sagebrush keeps both in float64. The returned dtypes and the values after rounding can therefore differ"
     }
   ]
 }
