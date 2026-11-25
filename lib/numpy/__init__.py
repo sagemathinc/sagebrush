@@ -1094,11 +1094,16 @@ class _ufunc2(ufunc):
                 if o.shape != full:
                     raise ValueError("non-broadcastable output operand with shape %s doesn't match the broadcast shape %s"
                                      % (_shape_text(o.shape), _shape_text(full)))
-        got = []
-        for o, r in zip(out, res):
+        got = [None, None]
+        # (the quotient written first, so one array given as both outs ends with the remainder, as in NumPy)
+        for k in (0, 1):
+            o, r = out[k], res[k]
             if o is not None:
                 o[...] = r if where is True else _np.where3(where, r, o)
-            got.append(r if o is None else o)
+            elif outs:
+                # (the other output's shape drives the loop, as NumPy's iterator: a None slot's new array has it too)
+                o = broadcast_to(asarray(r), full).copy()
+            got[k] = r if o is None else o
         return tuple(got)
 
     def reduce(self, *args, **kw):

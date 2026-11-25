@@ -117,6 +117,18 @@ show("divmod outer out", lambda: (q, r))
 print("divmod outer out returned", res[0] is q, res[1] is r)
 show("divmod outer dtype", lambda: np.divmod.outer([7, 8], [2, 3], dtype=np.float64))
 show("divmod outer 2-d", lambda: np.divmod.outer(np.array([[7, -7]]), np.array([2, -3, 4])))
+# (an out larger than the inputs drives the loop's shape, so the None slot's new array has that shape too)
+for x, y, shape in [(7, 3, (2,)), ([7], 3, (2,)), ([[7], [8]], [3], (2, 3))]:
+    for slot in (0, 1):
+        o = np.zeros(shape, dtype=np.int64)
+        res = np.divmod(x, y, out=(o, None) if slot == 0 else (None, o))
+        show("divmod %r %r out in slot %d, None in the other" % (x, y, slot), lambda: res)
+        print("  the out returned", res[slot] is o)
+z = np.zeros(2, dtype=np.int64)
+show("divmod one array as both outs", lambda: np.divmod(np.array([7, -8]), 3, out=(z, z)))
+show("  the array after", lambda: z)
+a, r = np.array([7, 8]), np.zeros((2, 2), dtype=np.int64)
+show("divmod None, then an out larger than the inputs", lambda: np.divmod(a, 3, out=(None, r)))
 show("divmod out bigger than the inputs", lambda: np.divmod(np.array([7, 8]), 3, out=(np.zeros((2, 2), dtype=np.int64),
                                                                                        np.zeros((2, 2), dtype=np.int64))))
 show("fmod outer", lambda: np.fmod.outer(np.array([7, -7]), np.array([2, -3])))
