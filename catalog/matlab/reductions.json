@@ -601,5 +601,251 @@
     "tags": [
       "statistics"
     ]
+  },
+  {
+    "name": "movsum",
+    "kind": "function",
+    "signature": "M = movsum(A, k)\nM = movsum(A, [kb kf])\nM = movsum(___, dim)\nM = movsum(___, nanflag)\nM = movsum(___, 'Endpoints', e)",
+    "summary": "Moving sums: the sum of each element's window along a dimension, the window cut at the data's ends by default.",
+    "doc": "The sum of each element's window along the first dimension whose size isn't 1 (or `dim`). A window length `k` centres the window on the element (an even `k` takes one more before it than after it); `[kb kf]` takes `kb` elements before and `kf` after. `nanflag` is 'includenan' (the default: a window with NaN gives NaN) or 'omitnan'. 'Endpoints': 'shrink' (the default) cuts each window at the data's ends; 'discard' keeps only the windows wholly inside the data; 'fill' or a value reads the elements past the ends as NaN or that value. A window longer than the data is cut at its length, the same result.",
+    "examples": [
+      {
+        "code": "movsum([4 8 6 -1 -2 -3 -1 3 4 5], 3)",
+        "expected": "\nans =\n\n    12    18    13     3    -6    -6    -1     6    12     9\n\n"
+      },
+      {
+        "code": "movsum([1 2 3 4], [1 0], 'Endpoints', 'discard')",
+        "expected": "\nans =\n\n     3     5     7\n\n"
+      }
+    ],
+    "differs": [
+      "Not supported: 'SamplePoints', and tables or timetables.",
+      "Not yet checked against MATLAB: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's sum with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
+    ],
+    "status": "partial",
+    "see_also": [
+      "movmean",
+      "movprod",
+      "movmax",
+      "movmin"
+    ],
+    "tags": [
+      "statistics",
+      "data"
+    ]
+  },
+  {
+    "name": "movmean",
+    "kind": "function",
+    "signature": "M = movmean(A, k)\nM = movmean(A, [kb kf])\nM = movmean(___, dim)\nM = movmean(___, nanflag)\nM = movmean(___, 'Endpoints', e)",
+    "summary": "Moving averages: the mean of each element's window along a dimension, the window cut at the data's ends by default.",
+    "doc": "The mean of each element's window along the first dimension whose size isn't 1 (or `dim`). A window length `k` centres the window on the element (an even `k` takes one more before it than after it); `[kb kf]` takes `kb` elements before and `kf` after. `nanflag` is 'includenan' (the default: a window with NaN gives NaN) or 'omitnan'. 'Endpoints': 'shrink' (the default) cuts each window at the data's ends; 'discard' keeps only the windows wholly inside the data; 'fill' or a value reads the elements past the ends as NaN or that value. A window longer than the data is cut at its length, the same result.",
+    "examples": [
+      {
+        "code": "movmean([4 8 6 -1 -2 -3 -1 3 4 5], 3)",
+        "expected": "\nans =\n\n  Columns 1 through 7\n\n    6.0000    6.0000    4.3333    1.0000   -2.0000   -2.0000   -0.3333\n\n  Columns 8 through 10\n\n    2.0000    4.0000    4.5000\n\n"
+      },
+      {
+        "code": "movmean([4 NaN 6 -1], 3, 'omitnan')",
+        "expected": "\nans =\n\n    4.0000    5.0000    2.5000    2.5000\n\n"
+      },
+      {
+        "code": "movmean([4 8 6 -1], 1e9)",
+        "expected": "\nans =\n\n    4.2500    4.2500    4.2500    4.2500\n\n"
+      }
+    ],
+    "differs": [
+      "Not supported: 'SamplePoints', and tables or timetables.",
+      "Not yet checked against MATLAB: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's mean with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
+    ],
+    "status": "partial",
+    "see_also": [
+      "movmedian",
+      "movsum",
+      "fillmissing"
+    ],
+    "tags": [
+      "statistics",
+      "data"
+    ]
+  },
+  {
+    "name": "movprod",
+    "kind": "function",
+    "signature": "M = movprod(A, k)\nM = movprod(A, [kb kf])\nM = movprod(___, dim)\nM = movprod(___, nanflag)\nM = movprod(___, 'Endpoints', e)",
+    "summary": "Moving products: the product of each element's window along a dimension, the window cut at the data's ends by default.",
+    "doc": "The product of each element's window along the first dimension whose size isn't 1 (or `dim`). A window length `k` centres the window on the element (an even `k` takes one more before it than after it); `[kb kf]` takes `kb` elements before and `kf` after. `nanflag` is 'includenan' (the default: a window with NaN gives NaN) or 'omitnan'. 'Endpoints': 'shrink' (the default) cuts each window at the data's ends; 'discard' keeps only the windows wholly inside the data; 'fill' or a value reads the elements past the ends as NaN or that value. A window longer than the data is cut at its length, the same result.",
+    "examples": [
+      {
+        "code": "movprod([1 2 3 4 5], 2)",
+        "expected": "\nans =\n\n     1     2     6    12    20\n\n"
+      }
+    ],
+    "differs": [
+      "Not supported: 'SamplePoints', and tables or timetables.",
+      "Not yet checked against MATLAB: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's product with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
+    ],
+    "status": "partial",
+    "see_also": [
+      "movsum",
+      "movmean",
+      "movmax",
+      "movmin"
+    ],
+    "tags": [
+      "statistics",
+      "data"
+    ]
+  },
+  {
+    "name": "movmax",
+    "kind": "function",
+    "signature": "M = movmax(A, k)\nM = movmax(A, [kb kf])\nM = movmax(___, dim)\nM = movmax(___, nanflag)\nM = movmax(___, 'Endpoints', e)",
+    "summary": "Moving maxima: the largest value in each element's window along a dimension, the window cut at the data's ends by default.",
+    "doc": "The maximum of each element's window along the first dimension whose size isn't 1 (or `dim`). A window length `k` centres the window on the element (an even `k` takes one more before it than after it); `[kb kf]` takes `kb` elements before and `kf` after. `nanflag` is 'includenan' (the default: a window with NaN gives NaN) or 'omitnan'. 'Endpoints': 'shrink' (the default) cuts each window at the data's ends; 'discard' keeps only the windows wholly inside the data; 'fill' or a value reads the elements past the ends as NaN or that value. A window longer than the data is cut at its length, the same result.",
+    "examples": [
+      {
+        "code": "movmax([4 8 6 -1 -2 -3 -1 3 4 5], [2 0])",
+        "expected": "\nans =\n\n     4     8     8     8     6    -1    -1     3     4     5\n\n"
+      }
+    ],
+    "differs": [
+      "Not supported: 'SamplePoints', and tables or timetables.",
+      "Complex data is refused in Sagebrush.",
+      "Not yet checked against MATLAB: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's maximum with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
+    ],
+    "status": "partial",
+    "see_also": [
+      "movsum",
+      "movmean",
+      "movprod",
+      "movmin"
+    ],
+    "tags": [
+      "statistics",
+      "data"
+    ]
+  },
+  {
+    "name": "movmin",
+    "kind": "function",
+    "signature": "M = movmin(A, k)\nM = movmin(A, [kb kf])\nM = movmin(___, dim)\nM = movmin(___, nanflag)\nM = movmin(___, 'Endpoints', e)",
+    "summary": "Moving minima: the smallest value in each element's window along a dimension, the window cut at the data's ends by default.",
+    "doc": "The minimum of each element's window along the first dimension whose size isn't 1 (or `dim`). A window length `k` centres the window on the element (an even `k` takes one more before it than after it); `[kb kf]` takes `kb` elements before and `kf` after. `nanflag` is 'includenan' (the default: a window with NaN gives NaN) or 'omitnan'. 'Endpoints': 'shrink' (the default) cuts each window at the data's ends; 'discard' keeps only the windows wholly inside the data; 'fill' or a value reads the elements past the ends as NaN or that value. A window longer than the data is cut at its length, the same result.",
+    "examples": [
+      {
+        "code": "movmin([4 8 6 -1 -2 -3 -1 3 4 5], 3)",
+        "expected": "\nans =\n\n     4     4    -1    -2    -3    -3    -3    -1     3     4\n\n"
+      }
+    ],
+    "differs": [
+      "Not supported: 'SamplePoints', and tables or timetables.",
+      "Complex data is refused in Sagebrush.",
+      "Not yet checked against MATLAB: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's minimum with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
+    ],
+    "status": "partial",
+    "see_also": [
+      "movsum",
+      "movmean",
+      "movprod",
+      "movmax"
+    ],
+    "tags": [
+      "statistics",
+      "data"
+    ]
+  },
+  {
+    "name": "movmedian",
+    "kind": "function",
+    "signature": "M = movmedian(A, k)\nM = movmedian(A, [kb kf])\nM = movmedian(___, dim)\nM = movmedian(___, nanflag)\nM = movmedian(___, 'Endpoints', e)",
+    "summary": "Moving medians: the median of each element's window along a dimension, the window cut at the data's ends by default.",
+    "doc": "The median of each element's window along the first dimension whose size isn't 1 (or `dim`). A window length `k` centres the window on the element (an even `k` takes one more before it than after it); `[kb kf]` takes `kb` elements before and `kf` after. `nanflag` is 'includenan' (the default: a window with NaN gives NaN) or 'omitnan'. 'Endpoints': 'shrink' (the default) cuts each window at the data's ends; 'discard' keeps only the windows wholly inside the data; 'fill' or a value reads the elements past the ends as NaN or that value. A window longer than the data is cut at its length, the same result.",
+    "examples": [
+      {
+        "code": "movmedian([4 8 6 -1 -2 -3 -1 3 4 5], 3)",
+        "expected": "\nans =\n\n  Columns 1 through 7\n\n    6.0000    6.0000    6.0000   -1.0000   -2.0000   -2.0000   -1.0000\n\n  Columns 8 through 10\n\n    3.0000    4.0000    4.5000\n\n"
+      },
+      {
+        "code": "movmedian([1 2; 3 4; 5 6], 2, 2)",
+        "expected": "\nans =\n\n    1.0000    1.5000\n    3.0000    3.5000\n    5.0000    5.5000\n\n"
+      }
+    ],
+    "differs": [
+      "Not supported: 'SamplePoints', and tables or timetables.",
+      "Complex data is refused, as in MATLAB.",
+      "Not yet checked against MATLAB: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's median with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
+    ],
+    "status": "partial",
+    "see_also": [
+      "movmean",
+      "median",
+      "fillmissing",
+      "movmax"
+    ],
+    "tags": [
+      "statistics",
+      "data"
+    ]
+  },
+  {
+    "name": "movvar",
+    "kind": "function",
+    "signature": "M = movvar(A, k)\nM = movvar(A, [kb kf])\nM = movvar(A, k, w)\nM = movvar(___, dim)\nM = movvar(___, nanflag)\nM = movvar(___, 'Endpoints', e)",
+    "summary": "Moving variances of each element's window along a dimension, normalized by n - 1 (w 0) or n (w 1); the window cut at the ends.",
+    "doc": "The variance of each element's window along the first dimension whose size isn't 1 (or `dim`). A window length `k` centres the window on the element (an even `k` takes one more before it than after it); `[kb kf]` takes `kb` elements before and `kf` after. `nanflag` is 'includenan' (the default: a window with NaN gives NaN) or 'omitnan'. 'Endpoints': 'shrink' (the default) cuts each window at the data's ends; 'discard' keeps only the windows wholly inside the data; 'fill' or a value reads the elements past the ends as NaN or that value. A window longer than the data is cut at its length, the same result. `w` 0 (the default) normalizes by $n - 1$, 1 by $n$.",
+    "examples": [
+      {
+        "code": "movvar([4 8 6 -1 -2 -3 -1 3 4 5], 3)",
+        "expected": "\nans =\n\n  Columns 1 through 7\n\n    8.0000    4.0000   22.3333   19.0000    1.0000    1.0000    9.3333\n\n  Columns 8 through 10\n\n    7.0000    1.0000    0.5000\n\n"
+      },
+      {
+        "code": "movvar([4 8 6 -1], 3, 1)",
+        "expected": "\nans =\n\n    4.0000    2.6667   14.8889   12.2500\n\n"
+      }
+    ],
+    "differs": [
+      "Not supported: 'SamplePoints', and tables or timetables.",
+      "Not yet checked against MATLAB: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's variance with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
+    ],
+    "status": "partial",
+    "see_also": [
+      "movsum",
+      "movmean",
+      "movprod",
+      "movmax"
+    ],
+    "tags": [
+      "statistics",
+      "data"
+    ]
+  },
+  {
+    "name": "movstd",
+    "kind": "function",
+    "signature": "M = movstd(A, k)\nM = movstd(A, [kb kf])\nM = movstd(A, k, w)\nM = movstd(___, dim)\nM = movstd(___, nanflag)\nM = movstd(___, 'Endpoints', e)",
+    "summary": "Moving standard deviations of each element's window along a dimension, normalized by n - 1 (w 0) or n (w 1).",
+    "doc": "The standard deviation of each element's window along the first dimension whose size isn't 1 (or `dim`). A window length `k` centres the window on the element (an even `k` takes one more before it than after it); `[kb kf]` takes `kb` elements before and `kf` after. `nanflag` is 'includenan' (the default: a window with NaN gives NaN) or 'omitnan'. 'Endpoints': 'shrink' (the default) cuts each window at the data's ends; 'discard' keeps only the windows wholly inside the data; 'fill' or a value reads the elements past the ends as NaN or that value. A window longer than the data is cut at its length, the same result. `w` 0 (the default) normalizes by $n - 1$, 1 by $n$.",
+    "examples": [
+      {
+        "code": "movstd([4 8 6 -1 -2 -3 -1 3 4 5], 3)",
+        "expected": "\nans =\n\n  Columns 1 through 7\n\n    2.8284    2.0000    4.7258    4.3589    1.0000    1.0000    3.0551\n\n  Columns 8 through 10\n\n    2.6458    1.0000    0.7071\n\n"
+      }
+    ],
+    "differs": [
+      "Not supported: 'SamplePoints', and tables or timetables.",
+      "Not yet checked against MATLAB: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's standard deviation with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
+    ],
+    "status": "partial",
+    "see_also": [
+      "movsum",
+      "movmean",
+      "movprod",
+      "movmax"
+    ],
+    "tags": [
+      "statistics",
+      "data"
+    ]
   }
 ]

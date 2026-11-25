@@ -16088,5 +16088,10 @@
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'max' in maxgap, MATLAB's 'MaxGap' argument passed on to each part of complex data; not a Sagebrush limit"
+ },
+ "lib/_matlab_data.py :: _moving :: res = np.minimum(res, v) if stat == \"min\" else np.maximum(res, v) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in np.maximum; the line takes a moving maximum's (or minimum's) fill value into each window's statistic, not a limit on a computation"
  }
 }
