@@ -11,3 +11,5 @@ export { hpke } from "./hpke.ts";
 export type { Recipient } from "./hpke.ts";
 export { FLOOR_MESSAGE, checkFloor } from "./floor.ts";
 export type { Floor } from "./floor.ts";
+export { OP_ENV_VERSION, OP_ENV_MAX, OP_PLAINTEXT_MAX, OP_REFS_MAX, sealIndexOp, openIndexOp, opEpoch, opHash, signIndexOp, verifyIndexOp } from "./index-op.ts";
+export type { OpPlace, OpCommit, OpContext } from "./index-op.ts";
