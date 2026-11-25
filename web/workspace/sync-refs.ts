@@ -30,8 +30,8 @@ import type { Store } from "./sync-overlay";
 export type RefPair = { address: string; add: number };
 /** The op that releases index references: `{ dseq, t, by, op: "release", path: "/", kind: "folder", releases }`. */
 export const RELEASE_OP = "release";
-/** The most adds one release op ends (the server's LIMITS.sealedOpRefs). */
-export const RELEASE_PAGE = 64;
+/** The most adds one release op ends (the server's LIMITS.sealedOpRefs): REFS.page, which tests lower. */
+export const RELEASE_MAX = 64;
 
 /**
  * The blob references an op declares in the clear (the server counts them): as today's plaintext log counts them, a
@@ -63,7 +63,7 @@ const K = {
 };
 /** `dueMs`: how long a device waits, from when it first saw an add due, before its sweep releases it, so that two
  * devices seldom race for one (a delay only); `walk`: how many of the files' adds one sweep walks. Tests lower them. */
-export const REFS = { dueMs: 24 * 3600_000, walk: 500 };
+export const REFS = { dueMs: 24 * 3600_000, walk: 500, page: RELEASE_MAX };
 export type AddRow = { fid: string | null; rel?: number };
 
 /** How one live add is held, before an op: by a live file as its current bytes or as its history, by a forgotten one,
@@ -207,4 +207,20 @@ export async function historyUnder(meta: IDBObjectStore, store: Store, gen: stri
   // (each file's, oldest first (its keys are in seq order): all but its newest `keep`)
   for (const list of byFile.values()) out.push(...list.slice(0, Math.max(0, list.length - keep)));
   return out;
+}
+
+/** What a refused release's check decides (e2e PR 5d): stop (the log isn't what this device verified), or send again the
+ * pairs still live and eligible. A release that was itself the resend after a race is never sent a third time: its pairs
+ * are dropped (`dropped`), and a later sweep finds again those still due. */
+export type RefusalVerdict = { halt: string } | { resend: RefPair[]; dropped: number };
+/**
+ * A refused release's pairs, each as the log read to its end now says: "ended" (by a release after the cursor it was
+ * sent at: another device's, a race), or how it is held ("orphan", "forgotten", "history", "current", "inconsistent"), or
+ * "gone" (not live, and not ended since). `person`: the person's "delete old versions", which may release history.
+ */
+export function refusalVerdict(held: readonly string[], pairs: readonly RefPair[], person: boolean, retried: boolean): RefusalVerdict {
+  const ok = (h: string) => h === "ended" || h === "orphan" || h === "forgotten" || (person && h === "history");
+  if (!held.includes("ended") || !held.every(ok)) return { halt: `sync: a release this device sent was refused, and the log it then read doesn't say why (${held.join(", ")})` };
+  const resend = pairs.filter((_, i) => held[i] !== "ended").map((p) => ({ address: p.address, add: p.add }));
+  return retried ? { resend: [], dropped: resend.length } : { resend, dropped: 0 };
 }

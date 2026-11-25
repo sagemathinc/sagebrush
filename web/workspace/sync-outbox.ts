@@ -30,7 +30,7 @@ import { RELEASE_STORES, afterReleases, metaWrite, newEpoch, epochOf, lifeMarkOf
 import { LedgerTx, isWire, queueObsolete, cleanObsoleteStep, hubOf } from "./sync-ledger";
 import { PROTO, PROTO_KEY, OLD_SYNC_HOOK, OldSyncError, detectOldSync } from "./sync-old";
 import type { Sealed } from "./sync-seal";
-import { RELEASE_OP, RELEASE_PAGE, historyUnder, type RefPair } from "./sync-refs";
+import { RELEASE_OP, REFS, historyUnder, type RefPair } from "./sync-refs";
 
 export const OUTBOX = {
   /** ops read per scan page */
@@ -74,7 +74,9 @@ const key = (ns: string, what: "scanned" | "dseq" | "outbox" | "successors" | "s
 /** A release record's refusal (e2e PR 5d), kept until the next read of the log to its end decides what it was: the
  * pairs it named, whether it was a resend after a race, and whether the person asked for it ("delete old versions":
  * a file's history may be released only so). */
-export type ReleaseRefused = { pairs: RefPair[]; retried: boolean; person: boolean; at: number };
+export type ReleaseRefused = { pairs: RefPair[]; retried: boolean; person: boolean; at: number; checked?: true };
+/** A checked refusal's outcome, for releaseChecked: the pairs to send again (none: done), with what they were. */
+export type ReleaseResend = { pairs: RefPair[]; retried: boolean; person: boolean; at: number };
 const isRelease = (r: OutboxRecord) => r.op.op === RELEASE_OP;
 /** A record's sealed form (sync-seal.ts), kept in meta beside it until its record goes: the bytes every resend sends. */
 const sealedKey = (ns: string, dseq: number) => `sync:${ns}:sealed:${String(dseq).padStart(16, "0")}`;
@@ -350,8 +352,8 @@ export class Outbox {
             const atCursor = ((await req(meta.get(cursorKey(this.ns)))) as number | undefined) ?? 0;
             // (all its records or none: the op is scanned only once they are all made, so none is made twice)
             const recs: OutboxRecord[] = [];
-            for (let i = 0, d = dseq; i < pairs.length; i += RELEASE_PAGE, d++) {
-              const releases = pairs.slice(i, i + RELEASE_PAGE).map((p) => ({ address: p.address, add: p.add }));
+            for (let i = 0, d = dseq; i < pairs.length; i += REFS.page, d++) {
+              const releases = pairs.slice(i, i + REFS.page).map((p) => ({ address: p.address, add: p.add }));
               recs.push({ ns: this.ns, dseq: d, lseq: 0, id: `release:${d}`, op: { dseq: d, t: Date.now(), by: o.by ?? "person", op: RELEASE_OP, path: "/", kind: "folder", releases }, at: atCursor, person: true });
             }
             if (t.count + recs.length > OUTBOX.maxRecords || t.charged + recs.reduce((n, r) => n + chargeOf(r), 0) > OUTBOX.maxBytes) { full = true; break; }
@@ -710,7 +712,7 @@ export class Outbox {
   }
 
   /**
-   * Release records (e2e PR 5d) for `pairs`, at most RELEASE_PAGE each, made under the lease with the next dseqs: none
+   * Release records (e2e PR 5d) for `pairs`, at most REFS.page each, made under the lease with the next dseqs: none
    * if one is still in flight (one batch at a time), or the outbox has no room. The last one's dseq, or null.
    * `retry`: the one resend a release race allows.
    */
@@ -724,8 +726,8 @@ export class Outbox {
       const t = { ...NONE, ...((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) };
       const at = ((await req(meta.get(cursorKey(this.ns)))) as number | undefined) ?? 0;
       let last: number | null = null;
-      for (let i = 0; i < pairs.length; i += RELEASE_PAGE) {
-        const releases = pairs.slice(i, i + RELEASE_PAGE).map((p) => ({ address: p.address, add: p.add }));
+      for (let i = 0; i < pairs.length; i += REFS.page) {
+        const releases = pairs.slice(i, i + REFS.page).map((p) => ({ address: p.address, add: p.add }));
         const r: OutboxRecord = { ns: this.ns, dseq, lseq: 0, id: `release:${dseq}`, op: { dseq, t: Date.now(), by: "person", op: RELEASE_OP, path: "/", kind: "folder", releases }, at, ...(opts.retry ? { retry: true } : {}), ...(opts.person ? { person: true } : {}) };
         if (t.count + 1 > OUTBOX.maxRecords || t.charged + chargeOf(r) > OUTBOX.maxBytes) break;
         out.add(r);
@@ -745,29 +747,48 @@ export class Outbox {
   async releaseRefused(): Promise<ReleaseRefused[]> {
     return inTx(this.w.ws, ["meta"], "readonly", async (tx) => ((await req(tx.objectStore("meta").get(key(this.ns, "releaseRefused")))) as ReleaseRefused[] | undefined) ?? []);
   }
-  /** Those checked: the list taken, and the resends a race allows made, in one transaction under the lease (a crash
-   * leaves both or neither). */
-  async releaseChecked(resends: readonly { pairs: readonly RefPair[]; person: boolean }[]): Promise<void> {
-    await inTx(this.w.ws, ["outbox", "meta"], "readwrite", async (tx) => {
-      const out = tx.objectStore("outbox"), meta = tx.objectStore("meta");
+  /**
+   * The first `n` refusals checked (`resends`, in their order): in one transaction under the lease, each one's pairs to
+   * send again made into release records (marked as resends: a resend refused is never sent a third time) as far as the
+   * outbox has room, by its record and byte bounds; the pairs left over kept in their place, checked, with what they
+   * were, for when there is room (none lost, none made twice: a crash leaves all of it or none). Refusals that came in
+   * meanwhile (after the first `n`) stay as they are. Whether everything was made.
+   */
+  async releaseChecked(resends: readonly ReleaseResend[], n: number): Promise<boolean> {
+    return inTx(this.w.ws, ["outbox", "meta"], "readwrite", async (tx) => {
+      const out = tx.objectStore("outbox"), meta = tx.objectStore("meta"), k = key(this.ns, "releaseRefused");
       await fence(meta, this.lease);
-      meta.delete(key(this.ns, "releaseRefused"));
-      if (!resends.some((x) => x.pairs.length)) return;
+      const list = ((await req(meta.get(k))) as ReleaseRefused[] | undefined) ?? [];
       let dseq = ((await req(meta.get(key(this.ns, "dseq")))) as number | undefined) ?? 1;
-      const at = ((await req(meta.get(cursorKey(this.ns)))) as number | undefined) ?? 0;
       const t = { ...NONE, ...((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) };
-      for (const { pairs: resend, person } of resends) for (let i = 0; i < resend.length; i += RELEASE_PAGE) {
-        const releases = resend.slice(i, i + RELEASE_PAGE).map((p) => ({ address: p.address, add: p.add }));
-        const r: OutboxRecord = { ns: this.ns, dseq, lseq: 0, id: `release:${dseq}`, op: { dseq, t: Date.now(), by: "person", op: RELEASE_OP, path: "/", kind: "folder", releases }, at, retry: true, ...(person ? { person: true } : {}) };
-        out.add(r);
-        t.count++;
-        t.bytes += recordBytes(r);
-        t.charged += chargeOf(r);
-        meta.put(dseq, key(this.ns, "releaseOut"));
-        dseq++;
+      const at = ((await req(meta.get(cursorKey(this.ns)))) as number | undefined) ?? 0;
+      const left: ReleaseRefused[] = [];
+      let full = false, last: number | null = null;
+      for (const x of resends) {
+        let i = 0;
+        for (; !full && i < x.pairs.length; i += REFS.page) {
+          const releases = x.pairs.slice(i, i + REFS.page).map((p) => ({ address: p.address, add: p.add }));
+          const r: OutboxRecord = { ns: this.ns, dseq, lseq: 0, id: `release:${dseq}`, op: { dseq, t: Date.now(), by: "person", op: RELEASE_OP, path: "/", kind: "folder", releases }, at, retry: true, ...(x.person ? { person: true } : {}) };
+          if (t.count + 1 > OUTBOX.maxRecords || t.charged + chargeOf(r) > OUTBOX.maxBytes) { full = true; break; }
+          out.add(r);
+          t.count++;
+          t.bytes += recordBytes(r);
+          t.charged += chargeOf(r);
+          last = dseq++;
+          OUTBOX.cut?.(300);
+        }
+        if (i < x.pairs.length) left.push({ pairs: x.pairs.slice(i).map((p) => ({ address: p.address, add: p.add })), retried: x.retried, person: x.person, at: x.at, checked: true });
       }
-      meta.put(dseq, key(this.ns, "dseq"));
-      meta.put(t, key(this.ns, "outbox"));
+      const rest = [...left, ...list.slice(n)];
+      if (rest.length) meta.put(rest, k);
+      else meta.delete(k);
+      OUTBOX.cut?.(301);
+      if (last !== null) {
+        meta.put(dseq, key(this.ns, "dseq"));
+        meta.put(t, key(this.ns, "outbox"));
+        meta.put(last, key(this.ns, "releaseOut"));
+      }
+      return left.length === 0;
     });
   }
   /** Whether a release record is in flight. */

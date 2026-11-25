@@ -5446,7 +5446,148 @@ async function releasePlaintext() {
   await stop(b);
 }
 
-const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained, releasePlaintext };
+/** A forgotten file of `w`'s with three adds, read by both devices: its three adds (the remove's orphan aside). */
+async function forgottenThree(id, wa, a, wb, b, path) {
+  const adds = await threeAdds(id, wa, a, path);
+  await wa.remove(path);
+  await wa.emptyTrash();
+  check(await until(() => settled(wa, a), 15_000), `(${path} forgotten)`);
+  check(await until(async () => settled(wb, b) && !(await wb.stat(path)), 15_000), `(${path}: B has read it all)`);
+  return adds;
+}
+const refusedOf = (w, c) => metaGet(w.ws, `sync:${nsOf(c)}:releaseRefused`);
+
+async function releaseRetry() {
+  // (two successive partial races, across a reload: A's release of three adds is refused (B ended one first); A is
+  // reloaded before its check; then its one resend is refused too (B ended another meanwhile). That resend is never sent
+  // a third time: its pair still live is dropped, for a later sweep; nothing stops)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  let holdSops = false;
+  const held = [];
+  class Holding extends WebSocket {
+    send(data) {
+      if (holdSops && typeof data === "string" && data.includes('"t":"sops"')) { held.push(() => super.send(data)); return; }
+      super.send(data);
+    }
+  }
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(() => settled(wa, a) && settled(wb, b)), "release retry: A and B synced");
+  const adds = await forgottenThree(id, wa, a, wb, b, "/y.txt");
+  await b.testRelease([adds[1]]);
+  check(await until(async () => (await refRows(id)).some(([x, s, rel]) => x === adds[1].address && s === adds[1].add && rel !== null), 15_000), "release retry: B ended the middle add");
+  W.SWEEP.hold = true;
+  try {
+    const d0 = await a.testRelease(adds);
+    check(await until(async () => (await refusedOf(wa, a))?.length === 1, 15_000), "release retry: A's release of all three refused, its refusal kept for its check: " + J(await refusedOf(wa, a)));
+    await stop(a);
+    // (reloaded: the check runs at its first read of the log to its end; its resend held at the socket while B ends another)
+    W.SWEEP.hold = false;
+    holdSops = true;
+    const a2 = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit }, WebSocket: Holding });
+    check(await until(async () => held.length >= 1 && !(await refusedOf(wa, a2))?.length, 15_000), "release retry: after the reload, the check made one resend (the two pairs B hadn't ended): " + J({ held: held.length, refused: await refusedOf(wa, a2) }));
+    await b.testRelease([adds[2]]);
+    check(await until(async () => (await refRows(id)).some(([x, s, rel]) => x === adds[2].address && s === adds[2].add && rel !== null), 15_000), "release retry: B ended the last add meanwhile");
+    holdSops = false;
+    for (const go of held.splice(0)) go();
+    await ctl("set", { set: { serverNotices: true } });
+    await wb.mkdir("/nudge");
+    check(await until(async () => settled(wa, a2) && (await refusedOf(wa, a2)) === undefined && a2.stats.releasesDropped === 1, 15_000),
+      "release retry: the resend refused (a second race): never sent a third time, its pair still live dropped, nothing stopped: " + J({ debug: a2.debug(), dropped: a2.stats.releasesDropped, why: a2.stats.sealedHalt, refused: await refusedOf(wa, a2) }));
+    await sleep(500);
+    const rows = await refRows(id), first = rows.find(([x, s]) => x === adds[0].address && s === adds[0].add);
+    check(a2.debug().next === d0 + 2 && a2.debug().halted === undefined && first && first[2] === null,
+      "release retry: exactly the release and its one resend (no third dseq); the first add still live, for a later sweep: " + J({ next: a2.debug().next, d0, first }));
+    await ctl("set", { set: { serverNotices: false } });
+    await stop(a2);
+  } finally {
+    W.SWEEP.hold = false;
+  }
+  await stop(b);
+}
+
+async function releaseRoom() {
+  // (a refusal's resends admitted only as the outbox's bounds allow, the rest kept, checked, in their place: a crash in
+  // the middle keeps everything as it was; no room (records, or bytes) keeps all of it; room for one record makes one,
+  // the rest kept; and as room comes back it all goes. Each check is run by a read of the log to its end, which B's ops
+  // cause (A's own would use the room under test))
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  let holdSops = false;
+  const held = [];
+  class Holding extends WebSocket {
+    send(data) {
+      if (holdSops && typeof data === "string" && data.includes('"t":"sops"')) { held.push(() => super.send(data)); return; }
+      super.send(data);
+    }
+  }
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit }, WebSocket: Holding });
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(() => settled(wa, a) && settled(wb, b)), "release room: A and B synced");
+  const adds = await forgottenThree(id, wa, a, wb, b, "/z.txt");
+  await b.testRelease([adds[0]]);
+  check(await until(async () => (await refRows(id)).some(([x, s, rel]) => x === adds[0].address && s === adds[0].add && rel !== null), 15_000), "release room: B ended the first add");
+  const bounds = { ...W.OUTBOX };
+  let n = 0;
+  const nudge = async () => { await wb.mkdir(`/room${n++}`); await until(() => settled(wb, b), 15_000); await sleep(800); };
+  const totals = async () => (await metaGet(wa.ws, `sync:${nsOf(a)}:outbox`)) ?? { count: 0, charged: 0 };
+  const releaseRecords = async () => (await outbox(wa));
+  W.SWEEP.hold = true;
+  try {
+    await a.testRelease(adds);
+    check(await until(async () => (await refusedOf(wa, a))?.length === 1 && (await refusedOf(wa, a))[0].pairs.length === 3, 15_000), "release room: A's release of three refused, kept for its check");
+    await ctl("set", { set: { serverNotices: true } });
+    // (one add a release record from here: its two pairs to send again need two)
+    Object.assign(W.REFS, { page: 1 });
+    const before = J(await refusedOf(wa, a));
+    // (a crash in the middle of the check's transaction: nothing of it kept)
+    W.OUTBOX.cut = (k) => { if (k === 300) throw new Error("cut (test)"); };
+    W.SWEEP.hold = false;
+    await nudge();
+    check(J(await refusedOf(wa, a)) === before && (await releaseRecords()) === 0, "release room: a crash in the middle: the refusal as it was, no record made: " + J({ refused: await refusedOf(wa, a), before, rows: await refRows(id), adds, dropped: a.stats.releasesDropped, why: a.stats.sealedHalt, records: await releaseRecords() }));
+    W.OUTBOX.cut = null;
+    // (no room by bytes)
+    W.OUTBOX.maxBytes = 0;
+    await nudge();
+    const kept = await refusedOf(wa, a);
+    check(kept?.length === 1 && kept[0].checked === true && kept[0].pairs.length === 2 && (await releaseRecords()) === 0 && (await totals()).charged <= W.OUTBOX.maxBytes,
+      "release room: no room by bytes: no record, the two pairs to send again kept, checked: " + J(kept));
+    W.OUTBOX.maxBytes = bounds.maxBytes;
+    // (no room by records)
+    W.OUTBOX.maxRecords = 0;
+    await nudge();
+    check(J(await refusedOf(wa, a)) === J(kept) && (await releaseRecords()) === 0 && (await totals()).count <= W.OUTBOX.maxRecords, "release room: no room by records: as it was");
+    // (room for one record: one pair sent again (held at the socket, so its record stays), the other kept; another check
+    // makes nothing more; then, as room comes back, the rest)
+    W.OUTBOX.maxRecords = 1;
+    holdSops = true;
+    await nudge();
+    await nudge();
+    const part = await refusedOf(wa, a);
+    check(part?.length === 1 && part[0].checked === true && part[0].pairs.length === 1 && part[0].pairs[0].add === adds[2].add && (await releaseRecords()) === 1 && (await totals()).count <= 1,
+      "release room: room for one: the second add's record made, the third kept, checked; a second check makes nothing more: " + J({ part, records: await releaseRecords(), totals: await totals() }));
+    holdSops = false;
+    for (const go of held.splice(0)) go();
+    check(await until(async () => (await refRows(id)).some(([x, s, rel]) => x === adds[1].address && s === adds[1].add && rel !== null), 15_000), "release room: …and accepted");
+    await nudge();
+    check(await until(async () => (await refRows(id)).filter(([x, s]) => adds.some((p) => p.address === x && p.add === s)).every(([, , rel]) => rel !== null) && (await refusedOf(wa, a)) === undefined, 15_000) && a.debug().halted === undefined,
+      "release room: room again: the rest sent and accepted, nothing kept, nothing stopped: " + J({ rows: await refRows(id), refused: await refusedOf(wa, a) }));
+  } finally {
+    Object.assign(W.OUTBOX, bounds, { cut: null });
+    Object.assign(W.REFS, { page: 64 });
+    W.SWEEP.hold = false;
+    await ctl("set", { set: { serverNotices: false } });
+  }
+  await stop(a);
+  await stop(b);
+}
+
+const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained, releasePlaintext, releaseRetry, releaseRoom };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

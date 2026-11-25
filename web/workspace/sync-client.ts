@@ -31,7 +31,7 @@
 //   or state, or the person's resume().
 import { COPIES, LEGACY_MAX, type Workspace } from "./api";
 import { inTx, req } from "./db";
-import { Outbox, Fenced, switchTo, renewLease, sender, obligate, rebuildKey, wireOf, ownedSeq, SealedMismatch, type Lease, type OutboxRecord, type WireOp } from "./sync-outbox";
+import { Outbox, Fenced, switchTo, renewLease, sender, obligate, rebuildKey, wireOf, ownedSeq, SealedMismatch, type Lease, type OutboxRecord, type ReleaseResend, type WireOp } from "./sync-outbox";
 import type * as SealMod from "./sync-seal";
 import { seedLedger, hubOf, driveObsolete, ledgerKeys } from "./sync-ledger";
 import { bytesFor } from "./sync-pins";
@@ -39,7 +39,7 @@ import { cursorOf, applyOps, genPrefix, genKey, idbStore, drainConfirmed, sealed
 import { capture as captureAdoption } from "./sync-adopt";
 import { SENDER_HOLD, ReplayHalted, runReplay } from "./sync-replay";
 import { Halt } from "./sync-overlay";
-import { ReleaseHalt, RELEASE_OP as RELEASE, RELEASE_PAGE, addRow, duePairs, heldAs, type RefPair } from "./sync-refs";
+import { ReleaseHalt, RELEASE_OP as RELEASE, REFS, addRow, duePairs, heldAs, refusalVerdict, type RefPair } from "./sync-refs";
 import { rewriting } from "./sync-rewrite";
 import { REBUILD, passOf, passCursor, cleanStep, stage, stageEchoes, logDone, captureStep, done, viewStep, retireStep, acked as rebuiltAcked, announceInvalid } from "./sync-rebuild";
 import type { SyncOp } from "./sync-reduce";
@@ -52,8 +52,8 @@ import type { DocSync } from "./doc-sync";
  * random word (the status message's bound, sync-owner STATUS_PUB, holds them) */
 export const READY = { tokens: 8, form: /^[0-9a-z]{12}$/ };
 /** (e2e PR 5d) the sweep of the adds due: at most every `everyMs` (plus up to `jitterMs`), that times up to
- * `maxBackoff` after each release race; tests lower them. */
-export const SWEEP = { everyMs: 10 * 60_000, jitterMs: 60_000, maxBackoff: 32 };
+ * `maxBackoff` after each release race; tests lower them, and `hold` (tests only) holds a refusal's check and the sweep. */
+export const SWEEP = { everyMs: 10 * 60_000, jitterMs: 60_000, maxBackoff: 32, hold: false };
 
 export const CLIENT = {
   /** ops in one `ops` message (the server's opsPerMessage) */
@@ -320,7 +320,7 @@ export class SyncClient {
   private barriers = new Map<string, number>();
   private answered: string[] = [];
   /** (tests: what the client did) */
-  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, blobConflicts: 0, sealedHalt: "" as string, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0, liveChecks: 0, liveFails: 0, ends: {} as Record<string, number> };
+  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, blobConflicts: 0, sealedHalt: "" as string, releasesDropped: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0, liveChecks: 0, liveFails: 0, ends: {} as Record<string, number> };
 
   constructor(readonly w: Workspace, private opts: ClientOptions = {}) {
     this.clock = opts.clock ?? realClock;
@@ -2037,36 +2037,42 @@ export class SyncClient {
    * SWEEP.everyMs (jittered, backing off after a race) and with no release in flight: a sweep of the adds due.
    */
   private async releases(c: Conn) {
+    if (SWEEP.hold) return;
     const refused = await c.ob.releaseRefused();
     const gen = genPrefix(c.ns, (await this.metaGet<number>(genKey(c.ns))) ?? 0);
     if (refused.length) {
-      const verdicts = await inTx(this.w.ws, [META, "syncIndex"], "readonly", async (tx) => {
+      // (each refusal not yet checked: each pair ended by a release after the cursor it was sent at (another device's, a
+      // race), or how it is held now, or "gone": not live, and not ended since; then refusalVerdict decides)
+      const held = await inTx(this.w.ws, [META, "syncIndex"], "readonly", async (tx) => {
         const meta = tx.objectStore(META), store = idbStore(tx, gen);
-        // (each pair: ended by a release after the cursor it was sent at (another device's, a race), or how it is
-        // held now, or "gone": not live, and not ended since it was sent)
-        const out: { held: string[]; pairs: RefPair[]; person: boolean }[] = [];
+        const out: (string[] | null)[] = [];
         for (const r of refused) {
-          const held: string[] = [];
+          if (r.checked) { out.push(null); continue; }
+          const h: string[] = [];
           for (const p of r.pairs) {
             const row = await addRow(meta, gen, p);
-            held.push(row?.rel !== undefined && row.rel > r.at ? "ended" : ((await heldAs(meta, store, gen, p)) ?? "gone"));
+            h.push(row?.rel !== undefined && row.rel > r.at ? "ended" : ((await heldAs(meta, store, gen, p)) ?? "gone"));
           }
-          out.push({ held, pairs: r.pairs, person: r.person });
+          out.push(h);
         }
         return out;
       });
-      const resends: { pairs: RefPair[]; person: boolean }[] = [];
-      for (const v of verdicts) {
-        const ok = (h: string) => h === "ended" || h === "orphan" || h === "forgotten" || (v.person && h === "history");
-        if (!v.held.includes("ended") || !v.held.every(ok)) {
+      const resends: ReleaseResend[] = [];
+      for (let i = 0; i < refused.length; i++) {
+        const r = refused[i], h = held[i];
+        // (checked already, and left over for want of room: only made now)
+        if (!h) { resends.push({ pairs: r.pairs, retried: r.retried, person: r.person, at: r.at }); continue; }
+        const v = refusalVerdict(h, r.pairs, r.person, r.retried);
+        if ("halt" in v) {
           c.halted = "sealed-halt";
-          this.stats.sealedHalt = `sync: a release this device sent was refused, and the log it then read doesn't say why (${v.held.join(", ")})`.slice(0, 300);
+          this.stats.sealedHalt = v.halt.slice(0, 300);
           this.showWaiting(c, (await c.ob.status()).count);
           return;
         }
-        resends.push({ pairs: v.pairs.filter((_, i) => v.held[i] !== "ended"), person: v.person });
+        this.stats.releasesDropped += v.dropped;
+        resends.push({ pairs: v.resend, retried: r.retried, person: r.person, at: r.at });
       }
-      await c.ob.releaseChecked(resends);
+      await c.ob.releaseChecked(resends, refused.length);
       c.sweepBackoff = Math.min((c.sweepBackoff ?? 1) * 2, SWEEP.maxBackoff);
       this.kick();
       return;
@@ -2074,7 +2080,7 @@ export class SyncClient {
     const now = this.clock.now();
     if (now < (c.sweepAt ?? 0) || (await c.ob.releaseOut())) return;
     c.sweepAt = now + SWEEP.everyMs * (c.sweepBackoff ?? 1) + Math.floor(Math.random() * SWEEP.jitterMs);
-    const due = await inTx(this.w.ws, [META, "syncIndex"], "readwrite", (tx) => duePairs(tx.objectStore(META), idbStore(tx, gen), gen, now, RELEASE_PAGE));
+    const due = await inTx(this.w.ws, [META, "syncIndex"], "readwrite", (tx) => duePairs(tx.objectStore(META), idbStore(tx, gen), gen, now, REFS.page));
     if (!due.length) {
       c.sweepBackoff = 1;
       return;

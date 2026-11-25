@@ -7,7 +7,7 @@
 // same ledger whatever the ops' `t` and however the log is cut into pages.
 //   bun web/workspace/test-sync-refs.mjs
 import { reduce, SyncIndex } from "./sync-reduce.ts";
-import { ledgerPage, heldAs, liveAdds, liveOrphans, currentAdd, refsOf, ReleaseHalt, duePairs, historyUnder, REFS } from "./sync-refs.ts";
+import { ledgerPage, heldAs, liveAdds, liveOrphans, currentAdd, refsOf, ReleaseHalt, duePairs, historyUnder, REFS, refusalVerdict } from "./sync-refs.ts";
 
 let checks = 0;
 const fails = [];
@@ -214,6 +214,32 @@ const halts = async (d, o) => {
   check((await at(T1 + REFS.dueMs)) === (await at(T1 + REFS.dueMs)) && J(await duePairs(d.meta, st, GEN, T1 + REFS.dueMs, 2)) === J([{ add: same.seq, address: A }, { address: C, add: g1.seq }]), "at most n at a time");
   await d.apply([release([{ address: A, add: same.seq }, { address: C, add: g1.seq }, { address: E, add: g2.seq }])]);
   check((await at(T1 + 2 * REFS.dueMs)) === "[]" && ![...d.meta.map.keys()].some((k) => k.includes(":refs:d:")), "released: none due any more, their stamps gone");
+}
+
+// ---- a refused release's check: stop, or send again what is still live and eligible, once
+{
+  const P = [{ address: A, add: 1 }, { address: B, add: 2 }, { address: C, add: 3 }];
+  const v = (held, person = false, retried = false) => refusalVerdict(held, P, person, retried);
+  const rows = {
+    race: v(["orphan", "ended", "forgotten"]),
+    raceAllEnded: v(["ended", "ended", "ended"]),
+    noneEnded: v(["orphan", "forgotten", "orphan"]),
+    gone: v(["ended", "gone", "orphan"]),
+    current: v(["ended", "current", "orphan"]),
+    historySweep: v(["ended", "history", "orphan"]),
+    historyPerson: v(["ended", "history", "orphan"], true),
+    inconsistent: v(["ended", "inconsistent", "orphan"]),
+    retriedRace: v(["orphan", "ended", "forgotten"], false, true),
+    retriedNoneEnded: v(["orphan", "forgotten", "orphan"], false, true),
+  };
+  const kind = (x) => ("halt" in x ? "halt" : J(x));
+  const got = Object.fromEntries(Object.entries(rows).map(([k, x]) => [k, kind(x)]));
+  const want = {
+    race: J({ resend: [P[0], P[2]], dropped: 0 }), raceAllEnded: J({ resend: [], dropped: 0 }), noneEnded: "halt", gone: "halt", current: "halt",
+    historySweep: "halt", historyPerson: J({ resend: [P[0], P[1], P[2]].filter((_, i) => i !== 0), dropped: 0 }), inconsistent: "halt",
+    retriedRace: J({ resend: [], dropped: 2 }), retriedNoneEnded: "halt",
+  };
+  check(J(got) === J(want), `a refused release's check: a race sends the rest again; nothing ended, or a pair gone, current, inconsistent, or history not the person's, stops; a resend refused again by a race is never sent a third time (its pairs dropped): ${J(got)}`);
 }
 
 console.log(`${checks - fails.length}/${checks} checks passed`);
