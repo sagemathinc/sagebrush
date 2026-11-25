@@ -180,6 +180,17 @@ export const langOf = (v: unknown): string | undefined => (typeof v === "string"
 export const count = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined);
 /** A record's own entry for `k`, never one inherited (an id like "__proto__" or "toString"). */
 export const own = <T,>(rec: Record<string, T> | undefined, k: string): T | undefined => (rec && Object.hasOwn(rec, k) ? rec[k] : undefined);
+
+// A Claude sign-in failure: the agent's closed reasons for it, said in the page's own words whatever text came with
+// them, so Claude Code's own text (with its advice about a long-lived token) is never what the page shows (#1804). The
+// one next step is `claude auth login`, on the computer running the agent (where Claude Code runs; this page may be
+// on another device).
+const SIGN_IN_WORDS: Readonly<Record<string, string>> = Object.freeze({
+  claude_login_expired: "Your Claude sign-in expired. On the computer running your agent, run `claude auth login` in a terminal, then send your message again.",
+  claude_not_signed_in: "Claude Code isn't signed in on the computer running your agent. There, run `claude auth login` in a terminal, then send your message again.",
+});
+/** A turn's error as the page says it: a sign-in reason in the page's words alone, any other as "Error: " and its text. */
+export const errorLine = (code: string, message: string): string => own(SIGN_IN_WORDS, code) ?? `Error: ${message}`;
 const put = <T,>(rec: Record<string, T>, k: string, v: T) => { Object.defineProperty(rec, k, { value: v, writable: true, enumerable: true, configurable: true }); };
 /** A web card's own fields, each kept only in a form the view knows and within its bound (a stored thread's too). */
 function webCard(e: any): Partial<Attention> {
