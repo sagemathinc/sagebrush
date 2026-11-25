@@ -13652,10 +13652,15 @@
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
  },
- "src/runtime/numpy.ts :: axesArg :: const axes = axis.map((x) => normAxis(intNum(x), nd)); #0": {
+ "src/runtime/numpy.ts :: axesArg :: const axes = axis.map((x) => normAxis(axisInt(x), nd)); #0": {
   "class": "none",
   "owner": "NumPy shim",
-  "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; a tuple axis read as indexes, a duplicate refused (#1944)"
+  "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; a tuple axis read as indexes in turn, a bool refused, a duplicate refused (#1944)"
+ },
+ "src/runtime/numpy.ts :: axesArg :: return [normAxis(axisInt(axis), nd)]; #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; a single axis read as an index, a bool refused (#1944)"
  },
  "src/runtime/numpy.ts :: conj :: if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`); #0": {
   "class": "none",

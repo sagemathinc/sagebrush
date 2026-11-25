@@ -779,6 +779,15 @@ def _one_out(out):
     return out
 
 
+class _NoValueType:
+    # (NumPy's np._NoValue: the default that tells an omitted argument from an explicit None)
+    def __repr__(self):
+        return "<no value>"
+
+
+_NoValue = _NoValueType()
+
+
 class ufunc:
     def __init__(self, name, nin, op=None, identity=None):
         self.__name__ = name
@@ -901,7 +910,12 @@ class ufunc:
             res[idx] = r
         return res
 
-    def reduce(self, a, axis=0, dtype=None, out=None, keepdims=False, initial=None, where=True):
+    def reduce(self, a, axis=0, dtype=None, out=None, keepdims=False, initial=_NoValue, where=True):
+        # (an explicit initial=None leaves the reduction without an identity, refused as NumPy refuses it; omitted, the
+        # ufunc's own identity serves)
+        first = initial is None
+        if first:
+            _no_identity(asarray(a), axis, where, self.__name__)
         if out is not None:
             # (computed in out's dtype unless dtype is given, then written
             # into out, which must have the result's shape, as NumPy's)
@@ -915,6 +929,8 @@ class ufunc:
                                  % (_shape_text(out.shape), ",".join(str(n) for n in out.shape), _shape_text(asarray(a).shape).replace(" ", "")))
             out[...] = r
             return out
+        if initial is _NoValue:
+            initial = None
         a = asarray(a)
         if dtype is not None:
             dt = self._loop(dtype)
@@ -923,7 +939,8 @@ class ufunc:
         quick = {"add": sum, "multiply": prod, "maximum": amax, "minimum": amin, "logical_and": all,
                  "logical_or": any}
         if self._op in quick and initial is None and not (dtype is not None and _wraps_in(self._op, dt)):
-            r = quick[self._op](a, axis=axis, keepdims=keepdims)
+            # (a sum without an identity starts from its first element: a product's 1 changes nothing)
+            r = quick[self._op](a, axis=axis, keepdims=keepdims, **({"initial": None} if first and self._op == "add" else {}))
             if dtype is not None:
                 # (sum promotes small ints to int64 and bools to int: the
                 # accumulator is dtype, where an int sum wraps as it does
@@ -1238,10 +1255,34 @@ def _refuse_list_axis(axis):
         raise TypeError("'%s' object cannot be interpreted as an integer" % type(axis).__name__)
 
 
-def _where_mask(a, where):
+def _reduce_axes(a, axis):
+    # (a C reduction's axes, read as NumPy's reductions read them: a list refused, and each axis in turn, alone or in a
+    # tuple, a bool refused, then an index (a float in Python's words) in bounds; then none repeated; a 0-d operand
+    # takes the single axis 0 or -1 as none)
+    from _operator import index
+    if axis is None:
+        return tuple(range(a.ndim))
+    _refuse_list_axis(axis)
+    one = not isinstance(axis, tuple)
+    axes = []
+    for x in (axis,) if one else axis:
+        if isinstance(x, (_builtins.bool, bool_)):
+            raise TypeError("an integer is required")
+        x = index(x)
+        if one and a.ndim == 0 and x in (0, -1):
+            return ()
+        if not -a.ndim <= x < a.ndim:
+            raise IndexError("axis %d is out of bounds for array of dimension %d" % (x, a.ndim))
+        axes.append(x % a.ndim)
+    if len(set(axes)) != len(axes):
+        raise ValueError("duplicate value in 'axis'")
+    return tuple(axes)
+
+
+def _where_mask(a, where, axis):
     # (a reduction's where=: a bool mask. An array is converted by the safe rule (an int or float one refused, a 0-d one
-    # as a scalar in NumPy's words), anything else by its truth values, below. It must broadcast to the operand without
-    # stretching it, refused in NumPy's words)
+    # as a scalar in NumPy's words), anything else by its truth values, below. Then the reduction's axes are checked,
+    # and then the mask must broadcast to the operand without stretching it, refused in NumPy's words: NumPy's order)
     if isinstance(where, ndarray):
         w = where
         if w.dtype != bool_:
@@ -1255,6 +1296,7 @@ def _where_mask(a, where):
         def truth(v):
             return [truth(e) for e in v] if isinstance(v, (list, tuple, range)) else _builtins.bool(v)
         w = array(truth(where), dtype=bool_)
+    _reduce_axes(a, axis)
     if w.ndim > a.ndim:
         raise ValueError("input operand has more dimensions than allowed by the axis remapping")
     try:
@@ -1281,22 +1323,40 @@ def _out(r, out):
     return r
 
 
-def sum(a, axis=None, dtype=None, out=None, keepdims=False, initial=None, where=True):
-    a = asarray(a)
+def _no_identity(a, axis, where, name):
+    # (an explicit initial=None: the reduction has no identity, as NumPy's ufunc reduce takes it. After the mask and the
+    # axes are checked, any mask but True is refused, and so is a reduction over an empty axis, in NumPy's words)
     if where is not True:
-        a = _np.where3(_where_mask(a, where), a, zeros((), a.dtype))
-    r = _np.sum(a, axis, keepdims, dtype)
-    if initial is not None:
+        _where_mask(a, where, axis)
+        raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to "
+                         "specify 'initial'" % name)
+    if _builtins.any(a.shape[ax] == 0 for ax in _reduce_axes(a, axis)):
+        raise ValueError("zero-size array to reduction operation %s which has no identity" % name)
+
+
+def sum(a, axis=None, dtype=None, out=None, keepdims=False, initial=_NoValue, where=True):
+    a = asarray(a)
+    if initial is None:
+        _no_identity(a, axis, where, "add")
+    if where is not True:
+        a = _np.where3(_where_mask(a, where, axis), a, zeros((), a.dtype))
+    # (without an identity, each sum starts from its first element, as NumPy's)
+    r = _np.sum(a, axis, keepdims, dtype, initial is None)
+    if initial is not None and initial is not _NoValue:
         r = r + initial
     return _out(r, out)
 
 
-def prod(a, axis=None, dtype=None, out=None, keepdims=False, initial=None, where=True):
+def prod(a, axis=None, dtype=None, out=None, keepdims=False, initial=_NoValue, where=True):
     # (initial starts the product, as NumPy's reduction: not a last factor)
     a = asarray(a)
+    if initial is None:
+        _no_identity(a, axis, where, "multiply")
+    if initial is _NoValue:
+        initial = None
     # (where=, #1944: the mask checked here, then the runtime's product folds the kept elements only, from the identity
     # or initial, in the order NumPy's iterator takes for the input, the result and the mask)
-    m = None if where is True else _where_mask(a, where)
+    m = None if where is True else _where_mask(a, where, axis)
     r = _np.prod(a, axis, keepdims, dtype, initial, m)
     return _out(r, out)
 
@@ -1826,8 +1886,37 @@ def squeeze(a, axis=None):
     a = asarray(a)
     if axis is None:
         return a.reshape(tuple(n for n in a.shape if n != 1))
-    _refuse_list_axis(axis)
-    axes = [x % a.ndim for x in (axis if isinstance(axis, tuple) else [axis])]
+    from _operator import index
+    # (the axes as NumPy's multi-axis conversion reads them: a bool refused, each an index that fits a C long and a C
+    # int, in bounds and not repeated, checked one by one in order; a 0-d array takes the single axis 0 or -1 as none)
+    if isinstance(axis, tuple):
+        axes = []
+        for x in axis:
+            if isinstance(x, (_builtins.bool, bool_)):
+                raise TypeError("integers are required for the axis tuple elements")
+            x = index(x)
+            if not -2 ** 63 <= x < 2 ** 63:
+                raise OverflowError("Python int too large to convert to C long")
+            if not -2 ** 31 <= x < 2 ** 31:
+                raise ValueError("integer won't fit into a C int")
+            if not -a.ndim <= x < a.ndim:
+                raise IndexError("axis %d is out of bounds for array of dimension %d" % (x, a.ndim))
+            if x % a.ndim in axes:
+                raise ValueError("duplicate value in 'axis'")
+            axes.append(x % a.ndim)
+    else:
+        if isinstance(axis, (_builtins.bool, bool_)):
+            raise TypeError("an integer is required for the axis")
+        x = index(axis)
+        if not -2 ** 63 <= x < 2 ** 63:
+            raise OverflowError("Python int too large to convert to C long")
+        if not -2 ** 31 <= x < 2 ** 31:
+            raise ValueError("integer won't fit into a C int")
+        if a.ndim == 0 and x in (0, -1):
+            return a.reshape(())
+        if not -a.ndim <= x < a.ndim:
+            raise IndexError("axis %d is out of bounds for array of dimension %d" % (x, a.ndim))
+        axes = [x % a.ndim]
     for x in axes:
         if a.shape[x] != 1:
             raise ValueError("cannot select an axis to squeeze out which has size not equal to one")
@@ -3189,11 +3278,11 @@ def _m_min(self, axis=None, out=None, keepdims=False, initial=None, where=True):
     return amin(self, axis, out, keepdims, initial, where)
 
 
-def _m_sum(self, axis=None, dtype=None, out=None, keepdims=False, initial=None, where=True):
+def _m_sum(self, axis=None, dtype=None, out=None, keepdims=False, initial=_NoValue, where=True):
     return sum(self, axis, dtype, out, keepdims, initial, where)
 
 
-def _m_prod(self, axis=None, dtype=None, out=None, keepdims=False, initial=None, where=True):
+def _m_prod(self, axis=None, dtype=None, out=None, keepdims=False, initial=_NoValue, where=True):
     return prod(self, axis, dtype, out, keepdims, initial, where)
 
 

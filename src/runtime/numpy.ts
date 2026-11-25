@@ -2019,8 +2019,11 @@ function pairwiseSqDev(d: any, off: number, n: number, m: number): number {
 }
 
 // Reduce `a` over `axes` with fold(acc, x) from init; `inner` reduces a run of
-// the innermost axis at once (pairwise sums).
-function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DType, init: number, fold: (acc: number, x: number) => number, inner?: (d: any, off: number, n: number, st: number) => number): NDArray {
+// the innermost axis at once (pairwise sums). With `first` (a sum without an
+// identity: NumPy's initial=None) each result starts from its first element
+// and a pairwise run sums the rest, as NumPy's reduction does; init must then
+// be -0, which leaves the sequential folds' first element as it is.
+function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DType, init: number, fold: (acc: number, x: number) => number, inner?: (d: any, off: number, n: number, st: number) => number, first = false): NDArray {
   const nd = a.ndim;
   const ax = axes === null ? a.shape.map((_, i) => i) : [...new Set(axes.map((x) => normAxis(x, nd)))];
   const keep = a.shape.map((_, i) => i).filter((i) => !ax.includes(i));
@@ -2036,7 +2039,8 @@ function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
   // pairwise only when the reduction is over the last axis (as NumPy's inner loop)
   // reducing the leading axes of a C-contiguous array: accumulate whole rows
   // (NumPy adds slice by slice in this case, so the order is NumPy's too)
-  if (inner && a.isC() && red.length < nd && red.every((x, i) => x === i) && !keepdims && prod(outShape) > 1) {
+  // (not when the reduced axes are empty: there is no first row, and the result is the identity)
+  if (inner && a.isC() && red.length < nd && red.every((x, i) => x === i) && !keepdims && prod(outShape) > 1 && rn > 0) {
     const rows = rn, w = prod(outShape);
     const od = out.data;
     const acc = rt === D.float32 ? new Float32Array(w) : new Float64Array(w);
@@ -2051,13 +2055,15 @@ function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
   // everything that is not reduced has length 1: NumPy's iterator drops those
   // axes, leaving one contiguous run, summed pairwise
   if (inner && a.isC() && prod(outShape) === 1 && rn > 0) {
-    out.data[0] = castNum(rt, fold(init, inner(d, a.offset, rn, 1)));
+    out.data[0] = castNum(rt, first ? fold(d[a.offset], inner(d, a.offset + 1, rn - 1, 1)) : fold(init, inner(d, a.offset, rn, 1)));
     return keepdims ? reshape(out, a.shape.map((n, i) => (ax.includes(i) ? 1 : n))) : out;
   }
   const usePairwise = inner && red.length >= 1 && red[red.length - 1] === nd - 1 && (red.length === 1 || a.isC());
   loop1(outShape, kstr, a.offset, (base, k) => {
     let acc = init;
-    if (usePairwise && red.length === 1) acc = fold(acc, inner!(d, base, rn, rstr[0]));
+    const st = red.length === 1 ? rstr[0] : 1;
+    if (usePairwise && first && rn > 0 && (red.length === 1 || (a.isC() && red.length === nd))) acc = fold(d[base], inner!(d, base + st, rn - 1, st));
+    else if (usePairwise && red.length === 1) acc = fold(acc, inner!(d, base, rn, rstr[0]));
     else if (usePairwise && a.isC() && red.length === nd) acc = fold(acc, inner!(d, base, rn, 1));
     else if (inner && red.length === 1) {
       // over an outer axis NumPy adds slice by slice: sequentially
@@ -2079,24 +2085,29 @@ function refuseBoolAxis(axis: any, msg: string): void {
   if (typeof Obj.unbox(axis) === "boolean" || typeName(axis) === "bool") raise(T.TypeError, msg);
 }
 
+// (a reduction's axis, each read in turn as NumPy reads them: a bool refused, then the index; its bounds after)
+function axisInt(x: any): number {
+  refuseBoolAxis(x, "an integer is required");
+  return intNum(x);
+}
+
 function axesArg(axis: any, nd: number): number[] | null {
   if (axis === null || axis === undefined) return null;
   // (a list is no axis, as NumPy's C reductions take only an int or a tuple: its TypeError, #1944)
   if (Obj.typeOf(axis) === T.list || (Array.isArray(axis) && Obj.typeOf(axis) !== T.tuple)) intNum(axis);
-  for (const x of Array.isArray(axis) ? axis : [axis]) refuseBoolAxis(x, "an integer is required");
   // (a 0-d array with an integer axis of 0 or -1: no axis to reduce, the value itself, as NumPy's C reductions allow
   // (a legacy allowance, #1907); a tuple of axes, or any other integer, is out of bounds as before)
   if (nd === 0 && !Array.isArray(axis)) {
-    const v = intNum(axis);
+    const v = axisInt(axis);
     if (v === 0 || v === -1) return [];
   }
   if (Array.isArray(axis)) {
-    const axes = axis.map((x) => normAxis(intNum(x), nd));
+    const axes = axis.map((x) => normAxis(axisInt(x), nd));
     // (an axis named twice, as itself or by its negative: NumPy's ValueError, #1944)
     if (new Set(axes).size !== axes.length) raise(T.ValueError, "duplicate value in 'axis'");
     return axes;
   }
-  return [normAxis(intNum(axis), nd)];
+  return [normAxis(axisInt(axis), nd)];
 }
 
 function sumType(dt: DType): DType {
@@ -2105,7 +2116,8 @@ function sumType(dt: DType): DType {
   return dt;
 }
 
-function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null): any {
+// (first: no identity, NumPy's initial=None: each result starts from its first element; see reduceAxes)
+function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null, first = false): any {
   const rt = dtype !== null ? toDtype(dtype) : sumType(a.dt);
   const axs = axesArg(axis, a.ndim);
   const outN = axs === null ? 1 : prod(a.shape.filter((_, i) => !axs.includes(i)));
@@ -2115,7 +2127,7 @@ function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null): any {
     // LIMIT-PR56-1; the parts are views, not copies)
     admitWork(outN * (2 * (8 + 8) + 16), "sum");
     const re = realPart(a), im = imagPart(a);
-    const r = sum(re, axis, keepdims), i = sum(im, axis, keepdims);
+    const r = sum(re, axis, keepdims, null, first), i = sum(im, axis, keepdims, null, first);
     return combineComplex(r, i, rt.cplx ? rt : a.dt);
   }
   // (a float sum of another dtype sums a converted copy: that copy, the
@@ -2123,10 +2135,11 @@ function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null): any {
   const widen = rt !== a.dt && rt.kind === "f";
   admitWork((widen ? a.size * rt.itemsize : 0) + outN * (rt.itemsize + 8), "sum");
   const src = widen ? copy(a, rt) : a;
-  if (rt === D.float32) return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, 0, (x, y) => f32(x + y), pairwise32), axis, keepdims);
+  const init = first ? -0 : 0;
+  if (rt === D.float32) return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, init, (x, y) => f32(x + y), pairwise32, first), axis, keepdims);
   // (int64: each partial sum checked, as wideExact)
   const add = isWide(rt) ? (x: number, y: number) => wideExact(rt, "add", x + y, x, y) : (x: number, y: number) => x + y;
-  return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, 0, add, rt.kind === "f" ? pairwise : undefined), axis, keepdims);
+  return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, init, add, rt.kind === "f" ? pairwise : undefined, first), axis, keepdims);
 }
 // The product of a complex array (or of one into a complex dtype) over the
 // axes: each output element the product of its reduced elements, one at a
@@ -4257,7 +4270,7 @@ newBuiltinModule("_numpy", (m) => {
     const r = binary(op, x, y);
     return isArrayLike(x) || isArrayLike(y) ? r : pyScalarOf(r.dt, r.data, 0);
   });
-  fn("sum", (a: any, axis: any = null, keepdims: any = false, dtype: any = null) => sum(asarray(a), opt(axis), !!keepdims, opt(dtype)));
+  fn("sum", (a: any, axis: any = null, keepdims: any = false, dtype: any = null, first: any = false) => sum(asarray(a), opt(axis), !!keepdims, opt(dtype), !!first));
   // sum((a - m)**2) over a whole C-contiguous float64 array, or None
   fn("sqdev_sum", (x: any, m: any) => {
     const a = asarray(x);
