@@ -696,19 +696,20 @@ test("a changed suite runs on its own pull request: its `// ci:` job, and the fu
   // a source another area's suite tests: the board's page selects latex (test-latex-page's newLatexHere, #566)
   assert.deepEqual(JSON.parse(classify(["web/board/page.ts"]).web_groups), ["latex", "board-a", "board-b", "board-c", "board-unit"]);
   assert.deepEqual(JSON.parse(classify(["web/board/frame.ts"]).web_groups), ["board-a", "board-b", "board-c", "board-unit"]);
-  // (the web-browser jobs: every selected group in exactly one of at most three jobs, the CI capacity ruling, Nov 22 2026;
-  // latex alone, on its own build; terminal last in its job, since it rebuilds web/dist)
+  // (the web-browser jobs: every selected group in exactly one of at most four jobs, the CI capacity ruling, Nov 22 2026;
+  // latex alone, on its own build; notebook alone, the longest group; terminal last in its job, since it rebuilds web/dist)
   const matrix = JSON.parse(classify(["web/index.html"]).web_matrix);
   assert.deepEqual(matrix, [
     { name: "board", groups: "board-a board-b board-c board-unit preload" },
-    { name: "notebook", groups: "notebook remote-preview space terminal" },
+    { name: "notebook", groups: "notebook space" },
+    { name: "remote-terminal", groups: "remote-preview terminal" },
     { name: "latex", groups: "latex" },
   ]);
   const all = JSON.parse(classify(["web/index.html"]).web_groups);
   assert.deepEqual(matrix.flatMap((x: { groups: string }) => x.groups.split(" ")).sort(), [...all].sort(), "every selected group in exactly one job");
   // (a change that selects some groups runs only the jobs that hold them, each with only those)
   assert.deepEqual(JSON.parse(classify(["web/board/frame.ts"]).web_matrix), [{ name: "board", groups: "board-a board-b board-c board-unit" }]);
-  assert.deepEqual(JSON.parse(classify(["web/shell/test-cross.mjs"], "", at).web_matrix), [{ name: "notebook", groups: "notebook terminal" }]);
+  assert.deepEqual(JSON.parse(classify(["web/shell/test-cross.mjs"], "", at).web_matrix), [{ name: "notebook", groups: "notebook" }, { name: "remote-terminal", groups: "terminal" }]);
   assert.deepEqual(JSON.parse(classify(["web/board/page.ts"]).web_matrix).map((x: { name: string }) => x.name), ["board", "latex"]);
   // (ci.yml runs each job's groups in a loop that keeps going after a failure, and fails the step if any failed)
   const yml = readFileSync(join(__dirname, "..", "..", ".github", "workflows", "ci.yml"), "utf8");

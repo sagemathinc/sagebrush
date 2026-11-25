@@ -120,11 +120,11 @@ export const LATEX_LAZY = {
 //  transforms, \foreach: web/latex/engine/tikz.mjs, in the worker's bundle, with its bounds): 287,563 / 96,996 measured on the
 //  shipped build of its merge with master 3655725a, with bun 1.4.4 and node 24.21.0 (+31,047 / +11,158 over master's
 //  256,516 / 85,838), + 64)
-// (299,137 raw / 101,514 gzip: Nov 24 2026, TikZ nodes drawn in the preview (their text typeset by KaTeX, sized from its
+// (303,243 raw / 102,916 gzip: Nov 25 2026, TikZ nodes drawn in the preview (their text typeset by KaTeX, sized from its
 //  layout tree; anchors, placement, labels, lines stopping at their borders), in the worker's bundle with the paths:
-//  299,073 / 101,450 measured on the shipped build of the branch, on the paths' change (its merge with master 6d1c0b06),
-//  with bun 1.4.4 and node 24.21.0, + 64)
-export const LATEX_CAPS = { raw: 299137, gzip: 101514 };
+//  303,179 / 102,852 measured on the shipped build of its merge with master d4692ae4, with bun 1.4.4 and node 24.21.0
+//  (+15,616 / +5,856 over master's 287,563 / 96,996), + 64)
+export const LATEX_CAPS = { raw: 303243, gzip: 102916 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
