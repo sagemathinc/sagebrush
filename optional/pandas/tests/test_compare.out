@@ -2788,3 +2788,99 @@ dtype: bool
 [True, False]
 == index-datetime-named-ge
 [True, False]
+== index-obj-valid-eq
+[True, False]
+== index-obj-valid-named-eq
+[True, False]
+== index-obj-valid-ne
+[False, True]
+== index-obj-valid-named-ne
+[False, True]
+== index-obj-valid-lt
+[False, True]
+== index-obj-valid-named-lt
+[False, True]
+== index-obj-valid-le
+[True, True]
+== index-obj-valid-named-le
+[True, True]
+== index-obj-valid-gt
+[False, False]
+== index-obj-valid-named-gt
+[False, False]
+== index-obj-valid-ge
+[True, False]
+== index-obj-valid-named-ge
+[True, False]
+== index-obj-bad-eq
+[False, False]
+== index-obj-bad-named-eq
+[False, False]
+== index-obj-bad-ne
+[True, True]
+== index-obj-bad-named-ne
+[True, True]
+== index-obj-bad-lt
+!! TypeError: '<' not supported between instances of 'Timestamp' and 'str'
+== index-obj-bad-named-lt
+!! TypeError: '<' not supported between instances of 'Timestamp' and 'str'
+== index-obj-bad-le
+!! TypeError: '<=' not supported between instances of 'Timestamp' and 'str'
+== index-obj-bad-named-le
+!! TypeError: '<=' not supported between instances of 'Timestamp' and 'str'
+== index-obj-bad-gt
+!! TypeError: '>' not supported between instances of 'Timestamp' and 'str'
+== index-obj-bad-named-gt
+!! TypeError: '>' not supported between instances of 'Timestamp' and 'str'
+== index-obj-bad-ge
+!! TypeError: '>=' not supported between instances of 'Timestamp' and 'str'
+== index-obj-bad-named-ge
+!! TypeError: '>=' not supported between instances of 'Timestamp' and 'str'
+== index-obj-missing-eq
+[True, False]
+== index-obj-missing-named-eq
+[True, False]
+== index-obj-missing-ne
+[False, True]
+== index-obj-missing-named-ne
+[False, True]
+== index-obj-missing-lt
+[False, False]
+== index-obj-missing-named-lt
+[False, False]
+== index-obj-missing-le
+[True, False]
+== index-obj-missing-named-le
+[True, False]
+== index-obj-missing-gt
+[False, False]
+== index-obj-missing-named-gt
+[False, False]
+== index-obj-missing-ge
+[True, False]
+== index-obj-missing-named-ge
+[True, False]
+== index-obj-mixed-eq
+[False, False]
+== index-obj-mixed-named-eq
+[False, False]
+== index-obj-mixed-ne
+[True, True]
+== index-obj-mixed-named-ne
+[True, True]
+== index-obj-mixed-lt
+!! TypeError: '<' not supported between instances of 'Timestamp' and 'str'
+== index-obj-mixed-named-lt
+!! TypeError: '<' not supported between instances of 'Timestamp' and 'str'
+== index-obj-mixed-le
+!! TypeError: '<=' not supported between instances of 'Timestamp' and 'str'
+== index-obj-mixed-named-le
+!! TypeError: '<=' not supported between instances of 'Timestamp' and 'str'
+== index-obj-mixed-gt
+!! TypeError: '>' not supported between instances of 'Timestamp' and 'str'
+== index-obj-mixed-named-gt
+!! TypeError: '>' not supported between instances of 'Timestamp' and 'str'
+== index-obj-mixed-ge
+!! TypeError: '>=' not supported between instances of 'Timestamp' and 'str'
+== index-obj-mixed-named-ge
+!! TypeError: '>=' not supported between instances of 'Timestamp' and 'str'

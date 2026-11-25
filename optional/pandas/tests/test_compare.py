@@ -253,3 +253,10 @@ for name, s_, v in [("empty-object", dtu, pd.Index([])), ("empty-int", dtu, pd.I
     for n, op in ops:
         case("index-%s-%s" % (name, n), lambda op=op, s_=s_, v=v: op(s_, v).tolist())
         case("index-%s-named-%s" % (name, n), lambda n=n, s_=s_, v=v: getattr(s_, n)(v).tolist())
+
+# an object Index of strings is parsed when every string parses, else compared one by one
+for name, v in [("obj-valid", pd.Index(["2020-01-01", "2020-06-01"], dtype="object")), ("obj-bad", pd.Index(["2020-01-01", "x"], dtype="object")),
+                ("obj-missing", pd.Index(["2020-01-01", None], dtype="object")), ("obj-mixed", pd.Index(["2020-01-01", pd.Timestamp("2021-01-01")], dtype="object"))]:
+    for n, op in ops:
+        case("index-%s-%s" % (name, n), lambda op=op, v=v: op(dt2, v).tolist())
+        case("index-%s-named-%s" % (name, n), lambda n=n, v=v: getattr(dt2, n)(v).tolist())

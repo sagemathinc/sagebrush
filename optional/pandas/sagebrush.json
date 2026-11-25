@@ -62,7 +62,7 @@
     "py/pandas/_pd_license.py": "4213fbbfe7e6ca4b9bfad2a4d69835158471b17acf89156852658deeda2772bb",
     "py/pandas/_pd_names.py": "0d5fc57939c930d3d79b5efe829c0fb55c2f2353dfaf30ecd038ed02373550f8",
     "py/pandas/_pd_options.py": "c3c171b8ea00498f8588b5ab28e787d81aca016d5a338a2092f11c5c3eb81917",
-    "py/pandas/_pd_reduce.py": "bc57eb881e66e607c76dde58e3a1f3436a182721f1e7108ab7a47a5bc7611997",
+    "py/pandas/_pd_reduce.py": "faa900a26a4a684d6463c256d71977e0a5968e0e9933f39582e80e7fd11cc7ff",
     "py/pandas/_pd_repr.py": "a196be43538dad2023474c037351581225fba2c6f31f1865a069e06c13af1660",
     "py/pandas/_pd_reshape.py": "7b95921daed3a3ad231f95b6246f0cc6630d2e36a0a0ca00ae0b2e1f090330e7",
     "py/pandas/_pd_series.py": "d8db50f80bcb7b14931ebf0c97199ddd6dc52ad7164d9a4553f03ac799866146",
