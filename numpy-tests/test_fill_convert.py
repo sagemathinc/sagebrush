@@ -56,7 +56,8 @@ for v in (np.array([5, 6]), np.array([5]), [5], ["x", "y"], np.array(["a"]), np.
 # unsigned one; int64/uint64 only with values Sagebrush holds there, and uint32 without 1e20, a cast NumPy does
 # through int64)
 cvals = (np.complex128(300 + 1j), np.complex128(complex(float("nan"), 1)), np.complex128(complex(float("inf"), 0)),
-         np.complex128(-1 + 2j), np.complex128(1e20), np.complex64(300 + 1j), np.complex64(-1 + 2j), np.complex128(7 + 1j))
+         np.complex128(-1 + 2j), np.complex128(1e20), np.complex64(300 + 1j), np.complex64(-1 + 2j), np.complex128(7 + 1j),
+         np.complex64(300 + 2j), np.complex128(-1.5 + 2j), np.complex64(-1.5 + 2j), np.complex128(255.9 + 0j))
 for dt in ("uint8", "uint16", "uint32", "int8", "int16", "int32", "int64", "uint64"):
     for v in cvals:
         r = v.real
