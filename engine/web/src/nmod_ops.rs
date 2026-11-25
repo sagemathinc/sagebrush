@@ -324,9 +324,16 @@ fn echelon(mut o: Map<String, Value>) -> Result<String, String> {
             parse_list(r, cols, true, m.n, &mut d, OP)?;
         }
     }
-    drop(s);
+    // (the text is dropped after the elimination, not before: freed first,
+    // its room was where the elimination's pivots (min(rows, cols) words,
+    // allocated at once) went, and the reply, a little longer than the text
+    // at the envelope, no longer fit there and grew the heap by its whole
+    // size.  Freed now, its room and the gap before it take the reply, as
+    // the peak counts it; the parse already holds the text and the matrix
+    // together, so the peak is unchanged)
     let mut a = Mat { rows, cols, m, d };
     let (piv, det) = a.echelon(reduced, true);
+    drop(s);
     let _phase = sagebrush_interrupt::enter("reply");
     let mut out = Reply::new(if want_rows { ENTRY_TEXT * e } else { 0 } + ENTRY_TEXT * (piv.len() + 1) + 64);
     out.raw("{\"pivots\":\"");
