@@ -8,7 +8,7 @@
 //   (SAGEBRUSH_AGENT_DIR=<a sagebrush-agent clone> also compares every file with the upstream commit's own bytes)
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { browser } from "../agents/a14-cases.mjs";
@@ -85,16 +85,22 @@ const coreImportOk = (t) => {
   return named.length === refs && named.every((m) => /^\.\.\/\.\.\/fleet\/core\/[a-z0-9-]+\.mjs$/.test(m[2])
     && !/\/(?:index|webcrypto)\.mjs$/.test(m[2]) && !INSTALLERS.test(m[1]));
 };
-const users = [];
-const scan = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) {
-  const p = join(d, e.name);
-  if (e.isDirectory()) { if (!["node_modules", "dist", ".cache"].includes(e.name) && p !== fleet) scan(p); continue; }
-  if (!/\.(?:ts|mts|js|mjs)$/.test(e.name) || /^test-/.test(e.name)) continue;
-  const t = readFileSync(p, "utf8");
-  const inCore = p.startsWith(e2eCore + "/") && p.endsWith(".mjs");
-  if ((/fleet\/core/.test(t) && !(inCore && coreImportOk(t))) || (/fleet\/install/.test(t) && !p.startsWith(e2e + "/"))) users.push(relative(web, p));
-} };
-scan(web);
+/** The page modules under `webDir` (a web/ tree) that reach the fleet core other than N-1 allows. */
+const coreUsers = (webDir) => {
+  const fleetDir = join(webDir, "workspace", "fleet"), e2eDir = join(webDir, "workspace", "e2e"), coreDir = join(e2eDir, "core");
+  const out = [];
+  const scan = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) {
+    const p = join(d, e.name);
+    if (e.isDirectory()) { if (!["node_modules", "dist", ".cache"].includes(e.name) && p !== fleetDir) scan(p); continue; }
+    if (!/\.(?:ts|mts|js|mjs)$/.test(e.name) || /^test-/.test(e.name)) continue;
+    const t = readFileSync(p, "utf8");
+    const inCore = p.startsWith(coreDir + "/") && p.endsWith(".mjs");
+    if ((/fleet\/core/.test(t) && !(inCore && coreImportOk(t))) || (/fleet\/install/.test(t) && !p.startsWith(e2eDir + "/"))) out.push(relative(webDir, p));
+  } };
+  scan(webDir);
+  return out;
+};
+const users = coreUsers(web);
 ok(users.length === 0, "N-1: only e2e/ uses the fleet core: its page modules through fleet/install.ts, e2e/core/'s pure modules by named imports of the core's pure functions, never an installer", users);
 // (the rule's own controls: what it lets through and what it refuses)
 ok(coreImportOk('import { canonText } from "../../fleet/core/canonical.mjs";') && coreImportOk('import { crypto } from "../../fleet/core/crypto.mjs";')
@@ -107,6 +113,27 @@ ok(coreImportOk('import { canonText } from "../../fleet/core/canonical.mjs";') &
   && !coreImportOk('import { canonText } from "../../fleet/core/canonical.mjs";\nimport "../../fleet/core/webcrypto.mjs";')
   && coreImportOk('import { canonText } from "../../fleet/core/canonical.mjs";\nimport { b64, enc } from "../../fleet/core/bytes.mjs";'),
   "N-1: (its controls) named pure imports pass; an installer, the index, a namespace or default import, another path, a side-effect import, a dynamic import(), an export ... from, or any other mention of the core is refused");
+{
+  // (and on real files: each form planted as a module of e2e/core in a scratch web/ tree is reported by the scan)
+  const forms = {
+    "side-effect import": 'import "../../fleet/core/webcrypto.mjs";\n',
+    "dynamic import": 'export const load = async () => await import("../../fleet/core/index.mjs");\n',
+    "re-export": 'export { useCrypto } from "../../fleet/core/crypto.mjs";\n',
+    "default and namespace import": 'import core, * as ns from "../../fleet/core/webcrypto.mjs";\nexport { core, ns };\n',
+    "an installer by name": 'import { useCrypto } from "../../fleet/core/crypto.mjs";\nexport { useCrypto };\n',
+  };
+  const planted = {};
+  for (const [name, body] of Object.entries(forms)) {
+    const root = mkdtempSync(join(tmpdir(), "sb-n1-"));
+    mkdirSync(join(root, "workspace", "e2e", "core"), { recursive: true });
+    writeFileSync(join(root, "workspace", "e2e", "core", "bad.mjs"), 'import { canonText } from "../../fleet/core/canonical.mjs";\n' + body);
+    writeFileSync(join(root, "workspace", "e2e", "core", "good.mjs"), 'import { canonText } from "../../fleet/core/canonical.mjs";\nexport { canonText };\n');
+    planted[name] = coreUsers(root);
+    rmSync(root, { recursive: true, force: true });
+  }
+  const wrong = Object.entries(planted).filter(([, u]) => JSON.stringify(u) !== JSON.stringify(["workspace/e2e/core/bad.mjs"]));
+  ok(wrong.length === 0, `N-1: (on real files) each of ${Object.keys(forms).length} forbidden forms in an e2e/core module fails the scan, and its allowed sibling doesn't`, wrong);
+}
 
 // ---- the agent's fixture cases, in Chromium, through fleetCore()
 const dir = mkdtempSync(join(tmpdir(), "sb-fleet-core-"));
