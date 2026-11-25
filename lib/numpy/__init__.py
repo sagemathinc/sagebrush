@@ -1499,12 +1499,24 @@ def _quantile(a, qa, weak_q, axis, method, keepdims, out_of_range):
     a = asarray(a)
     if a.dtype.kind == "c":
         raise TypeError("a must be an array of real numbers")  # (NumPy's quantile and percentile; median takes them)
+    # (keepdims puts q's dimensions first, then the data's with the reduced one kept as 1, every one for axis=None)
+    nd, all_axes = a.ndim, axis is None
     if axis is None:
         a, axis = a.ravel(), 0
     s = moveaxis(sort(a, axis=axis), axis, -1)
     n = s.shape[-1]
     if method not in _QUANTILE_METHODS:
         raise ValueError("%r is not a valid method. Use one of: dict_keys(%r)" % (method, list(_QUANTILE_METHODS)))
+    # (NumPy's _quantile_is_valid checks a q of more than one dimension, or of 10 values or more, by its min and max:
+    # an empty one so refused, with min's error; a short 1-d q one value at a time, below)
+    if qa.ndim != 1 or qa.size >= 10:
+        qa.min()
+    if qa.size == 0:
+        # (an empty q: an empty result, of the dtype a q of its dtype gives, its shape q's then the data's but the
+        # reduced axis)
+        dt = _quantile(s, zeros(1, dtype=qa.dtype), weak_q, -1, method, False, out_of_range).dtype
+        res = empty(qa.shape + s.shape[:-1], dtype=dt)
+        return _quantile_keepdims(res, qa, nd, all_axes, axis, keepdims)
     vals = []
     for qq in qa.ravel():
         if not (0 <= qq <= 1):
@@ -1561,8 +1573,15 @@ def _quantile(a, qa, weak_q, axis, method, keepdims, out_of_range):
         nans = asarray(isnan(s[..., -1]))
         if nans.any():
             res = asarray(s[..., -1]) if res.ndim == 0 else where(nans, s[..., -1], res).astype(res.dtype)
+    return _quantile_keepdims(res, qa, nd, all_axes, axis, keepdims)
+
+
+def _quantile_keepdims(res, qa, nd, all_axes, axis, keepdims):
     if keepdims:
-        res = expand_dims(res, axis if qa.ndim == 0 else axis + qa.ndim)
+        if all_axes:
+            res = asarray(res).reshape(qa.shape + (1,) * nd)
+        else:
+            res = expand_dims(res, qa.ndim + axis % nd)
     return res if res.ndim else res[()]
 
 
