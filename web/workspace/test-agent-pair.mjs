@@ -55,7 +55,7 @@ function fakeWs() {
     const v = {
       list: async (f) => [...files.keys()].filter((p) => p.startsWith(f + "/")).map(entry),
       stat: async (p) => (files.has(p) ? entry(p) : null),
-      read: async (p) => { if (W.hang) await new Promise(() => {}); W.reads = (W.reads ?? 0) + 1; if (W.readHold) await W.readHold; if (!files.has(p)) throw Object.assign(new Error("no such entry"), { code: "missing" }); return { entry: entry(p), content: files.get(p), rev: 1 }; },
+      read: async (p) => { if (W.hang) await new Promise(() => {}); W.reads = (W.reads ?? 0) + 1; if (W.readHold) await W.readHold; if (!files.has(p)) throw Object.assign(new Error("no such entry"), { code: "missing" }); return { entry: entry(p), content: files.get(p), rev: W.rev ?? 1 }; },
       write: async (p, c) => { if (W.conflictOn.has(p)) throw Object.assign(new Error("changed elsewhere"), { code: "conflict" }); files.set(p, c); return { entry: entry(p), rev: 2 }; },
       create: async (p) => { files.set(p, ""); return entry(p); }, mkdir: async (p) => ({ path: p, kind: "folder" }),
       rename: async (a, b) => { files.set(b, files.get(a)); files.delete(a); return entry(b); }, duplicate: async (p) => entry(p),
@@ -328,6 +328,108 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   const e8 = await S.request("workspace.read", { path: "/A/ctl.txt" }, w);
   ok(e8.error?.data?.code === "limit" && /as a message/.test(e8.error.data.message), "an answer whose message would pass 12 MiB (escaping) is refused, not sent");
   S.srv.stop(true);
+}
+// ---- an image read (workspace.image): exactly {entry, rev, image: {base64}}, by the file's bytes, to an agent that said so
+{
+  const withImage = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude Code", client: "claude-code" }, wants: { write: true }, features: ["workspace.image", "no.such"] } }));
+  const bytes = (head, n = 64) => { const u = new Uint8Array(n).fill(7); u.set(head); return u; };
+  const ascii = (s) => [...s].map((c) => c.charCodeAt(0));
+  const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  const kinds = { "/A/a.png": PNG, "/A/b.jpg": [0xff, 0xd8, 0xff, 0xe0], "/A/c.gif": ascii("GIF87a"), "/A/d.gif": ascii("GIF89a"), "/A/e.webp": [...ascii("RIFF"), 1, 2, 3, 4, ...ascii("WEBP")] };
+  const fill = (W) => {
+    for (const [p, h] of Object.entries(kinds)) W.files.set(p, bytes(h));
+    W.files.set("/A/png-named.txt", bytes(PNG));
+    W.files.set("/A/text.png", "not an image");
+    W.files.set("/A/wave.webp", bytes([...ascii("RIFF"), 1, 2, 3, 4, ...ascii("WAVE")]));
+    W.files.set("/A/half.png", bytes(PNG.slice(0, 7)));
+    W.files.set("/A/half.jpg", bytes([0xff, 0xd8]));
+    W.files.set("/A/half.gif", bytes(ascii("GIF89")));
+    W.files.set("/A/half.webp", bytes([...ascii("RIFF"), 1, 2, 3, 4, ...ascii("WEB")]));
+    W.files.set("/A/buf.png", bytes(PNG).buffer);
+    W.files.set("/A/exact.png", bytes(PNG, 3_750_000));
+    W.files.set("/A/over.png", bytes(PNG, 3_750_001));
+  };
+  const S = server(withImage), W = fakeWs(), P = mk(S, W);
+  fill(W);
+  await P.paired();
+  ok(P.hello.features.join() === "workspace.image", "a hello that lists workspace.image keeps it (FEATURES); an unknown feature is dropped");
+  await P.allow({ folders: ["/A"], write: true, expires: null }, false);
+  const w = { wait: 8000 };
+  let all = true;
+  for (const [p, h] of Object.entries(kinds)) {
+    const r = await S.request("workspace.read", { path: p }, w);
+    const got = r.result?.image?.base64 ? Uint8Array.from(atob(r.result.image.base64), (c) => c.charCodeAt(0)) : null;
+    const exact = r.result && Object.keys(r.result).sort().join() === "entry,image,rev" && Object.keys(r.result.image).join() === "base64" && r.result.rev === 1 && r.result.entry?.path === p;
+    if (!exact || !got || got.length !== 64 || !h.every((b, i) => got[i] === b)) { all = false; console.log("  ", p, r.result ? Object.keys(r.result).join() : r.error?.data?.code, r.result?.rev, r.result?.image?.base64?.length); }
+  }
+  ok(all, "PNG, JPEG, GIF87a, GIF89a and WebP: exactly {entry, rev, image: {base64}}, the file's bytes, no type or size");
+  const n1 = await S.request("workspace.read", { path: "/A/png-named.txt" }, w);
+  const n2 = await S.request("workspace.read", { path: "/A/text.png" }, w);
+  ok(typeof n1.result?.image?.base64 === "string" && n2.result?.content?.text === "not an image" && !("image" in n2.result), "judged by the bytes, not the name: a PNG named .txt is an image, text named .png is text");
+  const n3 = await S.request("workspace.read", { path: "/A/wave.webp" }, w);
+  const n4 = await S.request("workspace.read", { path: "/A/half.png" }, w);
+  ok(n3.result?.content !== undefined && !("image" in n3.result) && typeof n4.result?.content?.base64 === "string" && !("image" in n4.result), "RIFF that isn't WEBP, and a cut PNG signature: read as before ({content})");
+  const cut = [];
+  for (const p of ["/A/half.jpg", "/A/half.gif", "/A/half.webp"]) cut.push(await S.request("workspace.read", { path: p }, w));
+  ok(cut.every((r) => r.result?.content !== undefined && !("image" in r.result)), "a cut JPEG, GIF or WebP signature: not an image");
+  const ab = await S.request("workspace.read", { path: "/A/buf.png" }, w);
+  ok(ab.result?.image?.base64?.length === 88, "an image held as an ArrayBuffer: sent as an image too");
+  const n5 = await S.request("workspace.read", { path: "/A/x.txt" }, w);
+  const n6 = await S.request("workspace.read", { path: "/A/doc.ipynb" }, w);
+  ok(n5.result?.content?.text === "hello" && n6.result?.content?.json?.cells !== undefined, "text and documents are read as before");
+  const x1 = await S.request("workspace.read", { path: "/A/exact.png" }, w);
+  ok(x1.result?.image?.base64?.length === 5_000_000, "an image of exactly 3,750,000 bytes is sent: 5,000,000 base64 characters");
+  const x2 = await S.request("workspace.read", { path: "/A/over.png" }, w);
+  const said = JSON.stringify(x2);
+  ok(x2.error?.data?.code === "limit" && /3750001 bytes/.test(x2.error.data.message) && /3750000/.test(x2.error.data.message) && !said.includes("iVBORw0KGgo") && said.length < 600, "one byte over: refused with its size, and none of its bytes in the error");
+  W.rev = -1;
+  const v1 = await S.request("workspace.read", { path: "/A/a.png" }, w);
+  W.rev = 2 ** 53;
+  const v2 = await S.request("workspace.read", { path: "/A/a.png" }, w);
+  delete W.rev;
+  ok(v1.error?.data?.code === "storage" && v2.error?.data?.code === "storage" && !JSON.stringify([v1, v2]).includes("iVBORw0KGgo"), "a revision that isn't a safe whole number from 0: refused, no image sent");
+  W.files.set("/B/b.png", bytes(PNG));
+  const reads = W.calls.filter((c) => c === "read").length;
+  const g1 = await S.request("workspace.read", { path: "/B/b.png" }, w);
+  ok(g1.error?.data?.code === "invalid" && W.calls.filter((c) => c === "read").length === reads && !JSON.stringify(g1).includes("iVBORw0KGgo"), "an image outside the grant: refused before the workspace, as any read");
+  W.conflictOn.add("/A/a.png");
+  const c1 = await S.request("workspace.write", { path: "/A/a.png", content: { text: "x" }, base: 1 }, w);
+  ok(c1.error?.data?.code === "conflict" && !("current" in c1.error.data) && c1.error.data.currentOmitted === "its current contents are an image: read it" && !JSON.stringify(c1).includes("iVBORw0KGgo"), "a conflict on an image: said without its contents (read it as an image), none of its bytes");
+  W.conflictOn.add("/A/x.txt");
+  const c2 = await S.request("workspace.write", { path: "/A/x.txt", content: { text: "x" }, base: 1 }, w);
+  ok(c2.error?.data?.current?.content?.text === "hello", "a conflict on text still carries its current contents");
+  W.versionBytes = bytes(PNG);
+  const vv = await S.request("workspace.version", { path: "/A/a.png", index: 0 }, w);
+  ok(typeof vv.result?.content?.base64 === "string" && Object.keys(vv.result).join() === "content", "workspace.version is as before (only workspace.read gives images)");
+  S.srv.stop(true);
+  // (the grant checked after the read's wait: one that expired meanwhile gets no image)
+  {
+    let t = 7_000_000;
+    const S3 = server(withImage), W3 = fakeWs(), P3 = mk(S3, W3, { code: "x" }, () => t);
+    fill(W3);
+    await P3.paired();
+    await P3.allow({ folders: ["/A"], write: true, expires: t + 60_000 }, false);
+    const go = W3.holdReads();
+    const pending = S3.request("workspace.read", { path: "/A/a.png" }, { wait: 5000 });
+    await until(() => W3.reads === 1);
+    t += 61_000;
+    go();
+    const late = await pending;
+    ok(late.error?.data?.code === "invalid" && !("result" in late) && !JSON.stringify(late).includes("iVBORw0KGgo"), "an image read whose grant expired while it read: refused, none of its bytes");
+    S3.srv.stop(true);
+  }
+  // (an agent that didn't say workspace.image gets the bytes as before: it would pass {image} on as text)
+  const S2 = server(pairOk), W2 = fakeWs(), P2 = mk(S2, W2);
+  fill(W2);
+  await P2.paired();
+  await P2.allow({ folders: ["/A"], write: true, expires: null }, false);
+  const o1 = await S2.request("workspace.read", { path: "/A/a.png" }, w);
+  const o2 = await S2.request("workspace.read", { path: "/A/over.png" }, w);
+  ok(typeof o1.result?.content?.base64 === "string" && !("image" in o1.result) && typeof o2.result?.content?.base64 === "string", "without workspace.image: an image is {content: {base64}} as before, and the image cap doesn't apply");
+  W2.conflictOn.add("/A/a.png");
+  const o3 = await S2.request("workspace.write", { path: "/A/a.png", content: { text: "x" }, base: 1 }, w);
+  ok(typeof o3.error?.data?.current?.content?.base64 === "string", "without workspace.image: a conflict on an image carries its contents as before");
+  S2.srv.stop(true);
 }
 // ---- after the LAST wait, before anything is said: the same grant, in force now
 {

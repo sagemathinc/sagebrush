@@ -129,7 +129,10 @@ export const LATEX_LAZY = {
 // (292,864 raw / 98,922 gzip: Nov 25 2026, an accent before a font command with its argument, unbraced ($\bar\mathbb F$),
 //  braced before KaTeX: 292,800 / 98,858 measured on the shipped build of its merge with master 56958e3d, with bun 1.4.4 and
 //  node 24.21.0 (+1,167 / +449 over master's 291,633 / 98,409), + 64)
-export const LATEX_CAPS = { raw: 292864, gzip: 98922 };
+// (293,229 raw / 99,054 gzip: Nov 25 2026, starred references read as such, \ref*{key} drawn without its link (natbib's
+//  starred citations keep theirs): 293,165 / 98,990 measured on the shipped build of its merge with master bff44e83, with
+//  bun 1.4.4 and node 24.21.0 (+365 / +132 over master's 292,800 / 98,858), + 64)
+export const LATEX_CAPS = { raw: 293229, gzip: 99054 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -227,7 +230,10 @@ export const LATEX_LAZY_CAPS = {
   // (65,566 / 22,526: Nov 22 2026, A1 (#1546): the agent's access as an icon in the composer's footer row, its CSS (a
   //  masked shield and the footer rules) in the pairing's chunk (agent-ui.ts), measured on the shipped build of the head
   //  on master e4c0b8c0 with bun 1.4.4 and node 24.21.0: 65,502 / 22,462, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 67913, gzip: 23282 },
+  // (68,867 / 23,606: Nov 25 2026, image reads: a raster image's read as an image for an agent that takes one, by its
+  //  bytes (isRaster, imageOut, agent-pair.ts), measured on the shipped build of the head merged with master 5fb549fa
+  //  with bun 1.4.4 and node 24.21.0: 68,803 / 23,542, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 68867, gzip: 23606 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
