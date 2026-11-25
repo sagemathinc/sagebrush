@@ -1943,6 +1943,41 @@ class Stream(unittest.TestCase):
         self.assertEqual(got, want)
 
 
+class Reruns(unittest.TestCase):
+    """A complete point measured under the same identity is skipped on a
+    rerun: same_run, on a record point() really makes."""
+
+    def record(self, ident, backends):
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": "5"}
+            if mode == "once":
+                return {"status": "ok", "signature": "s", "seconds_cold": 1.0}
+            return {"status": "ok", "seconds": 1.0, "signature": "K:1", "steal": 0.0}
+
+        cmd = lambda b, row, n, mode, k=1: ["x"] if b in ("user", "magma") else None  # noqa: E731
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", cmd),
+            mock.patch.object(run, "units", lambda *a: ("unmetered", "")),
+        ):
+            return run.point(ROW, "s", backends, ident)
+
+    def test_a_point_of_this_run_is_the_same_run(self):
+        backends = ["user", "native", "magma", "flint"]
+        ident = {"commit": "c" * 40, "threads": 16, "backends": backends, "artifacts": ARTS}
+        rec = json.loads(json.dumps(self.record(ident, backends)))
+        self.assertTrue(rec["complete"])
+        # (the record's backends are results per backend, not the list)
+        self.assertIsInstance(rec["backends"], dict)
+        self.assertTrue(run.same_run(rec, ident))
+        # (another backend list, commit or thread count: measured again)
+        self.assertFalse(run.same_run(rec, dict(ident, backends=backends + ["wasm"])))
+        self.assertFalse(run.same_run(rec, dict(ident, commit="d" * 40)))
+        self.assertFalse(run.same_run(rec, dict(ident, threads=8)))
+        self.assertFalse(run.same_run(dict(rec, backends=backends), ident))
+
+
 class Host(unittest.TestCase):
     def test_the_host_record(self):
         h = run.host()
