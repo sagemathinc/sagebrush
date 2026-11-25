@@ -65,7 +65,7 @@
     "py/pandas/_pd_reduce.py": "faa900a26a4a684d6463c256d71977e0a5968e0e9933f39582e80e7fd11cc7ff",
     "py/pandas/_pd_repr.py": "a196be43538dad2023474c037351581225fba2c6f31f1865a069e06c13af1660",
     "py/pandas/_pd_reshape.py": "7b95921daed3a3ad231f95b6246f0cc6630d2e36a0a0ca00ae0b2e1f090330e7",
-    "py/pandas/_pd_series.py": "b48a2fdc7516015e4bd169ea3ba85f1c55bd8e721dfb6c099bc85a5b923a5aad",
+    "py/pandas/_pd_series.py": "300eea018568d34c3693ed7fe0bf26cd42c09a57a43dd83e7e4d146649a73fd2",
     "py/pandas/_pd_sort.py": "e4af67ea572518ee65357edf146cd8c9dc0824437e722f0f49bb8271bee37808",
     "py/pandas/_pd_stats.py": "244c2bf7005c6b68f18fced39dcb29baf5c52ca30274e7f87c7a84f95a8cbe4f",
     "py/pandas/_pd_toplevel.py": "9de996699481ac55265cddda97a720989e2af742968163e4234582afc19369ee",

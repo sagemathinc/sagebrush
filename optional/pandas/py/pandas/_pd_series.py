@@ -708,17 +708,25 @@ class Series(object):
         return self._pd_take(positions)
 
     def _pd_reindex(self, index):
-        vals = []
+        from . import _pd_category as CT
+        positions = []
         for lab in index.tolist():
             try:
                 p = self._pd_index._pd_positions(lab)
             except KeyError:
-                vals.append(float("nan"))
+                positions.append(-1)
                 continue
             if isinstance(p, list):
                 raise ValueError("cannot reindex on an axis with duplicate labels")
-            vals.append(self._pd_col.value(p))
-        return Series._pd_new(column_from(vals) if vals else self._pd_col.take([]), index, self._pd_name)
+            positions.append(p)
+        col = self._pd_col
+        if isinstance(col, CT.CatColumn):
+            # (a category stays one: its codes taken, -1 for a missing label)
+            codes = col.take([max(p, 0) for p in positions])._pd_codes
+            codes[np.asarray([p < 0 for p in positions], dtype=bool)] = -1
+            return Series._pd_new(CT.CatColumn(col.dtype, codes), index, self._pd_name)
+        vals = [float("nan") if p < 0 else col.value(p) for p in positions]
+        return Series._pd_new(column_from(vals) if vals else col.take([]), index, self._pd_name)
 
     def _pd_select(self, positions, scalar):
         if scalar:
