@@ -799,17 +799,23 @@ thread_local! {
     static IN_STEPS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// f() with the RR and CC checks of its steps suspended (IN_STEPS).
+/// f() with the RR and CC checks of its steps suspended (IN_STEPS), the
+/// previous state restored after it (a nested call keeps its caller's).
 fn in_steps(f: impl FnOnce() -> Num) -> Num {
-    struct Done;
+    struct Done(bool);
     impl Drop for Done {
         fn drop(&mut self) {
-            IN_STEPS.with(|p| p.set(false));
+            IN_STEPS.with(|p| p.set(self.0));
         }
     }
-    IN_STEPS.with(|p| p.set(true));
-    let _done = Done;
+    let _done = Done(IN_STEPS.with(|p| p.replace(true)));
     f()
+}
+
+/// A top-level call starts: the RR and CC checks are on, whatever a trapped
+/// call left (a trap runs no destructors, so in_steps' restore may not run).
+pub fn reset_steps() {
+    IN_STEPS.with(|p| p.set(false));
 }
 
 /// An operand of an RR or CC operation as a number of the 53-bit MP field,
@@ -1277,6 +1283,20 @@ mod tests {
         assert!(refused(&|| rr(1.5).div(&Num::Float(p(600), 1.0, Fk::CC))).starts_with("3.61487979765433e-181 - 8.71157063432625e-362*I, an element of CC"));
         // RDF and CDF are doubles in Sage too
         assert_eq!(Num::Float(1e300, 0.0, Fk::RDF).mul(&Num::Float(1e300, 0.0, Fk::RDF)), Num::Float(f64::INFINITY, 0.0, Fk::RDF));
+        // (the checks are off only inside in_steps: a nested one restores its
+        // caller's state, and a top-level call turns them back on after a
+        // trap left them off)
+        let on = || !IN_STEPS.with(|p| p.get());
+        in_steps(|| {
+            in_steps(|| Num::zero());
+            assert!(!on());
+            Num::zero()
+        });
+        assert!(on());
+        IN_STEPS.with(|p| p.set(true));
+        reset_steps();
+        assert!(on());
+        assert!(refused(&|| rr(p(-600)).mul(&rr(p(-600)))).starts_with("5.80771375621750e-362"));
     }
 
     #[test]

@@ -65,6 +65,7 @@ fn new_run() {
     sagebrush_arith::smith::progress::reset();
     sagebrush_poly::reset_binomial_units();
     sagebrush_arith::nmod_mat::reset_fast_product();
+    sagebrush_sym::num::reset_steps();
 }
 
 #[no_mangle]
