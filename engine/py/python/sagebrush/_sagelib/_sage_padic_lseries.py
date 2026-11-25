@@ -954,7 +954,7 @@ class pAdicLseriesSupersingular(pAdicLseriesOrdinary):
         a1, a2, a3, a4, a6 = [_F(int(x)) if not isinstance(x, _F) else x for x in self._E.a_invariants()]
         Qc = [(a3 * a3 + 4 * a6) / 4, (2 * a4 + a1 * a3) / 2, (a1 * a1 + 4 * a2) / 4, _F(1)]
         N = prec + 1
-        from sagebrush import progress
+        from _sagebrush_lib import progress
         with progress.call("padic_lseries.frobenius") as call:
             rec = _KdProgress(call)
             rec.stage(0, 1)
