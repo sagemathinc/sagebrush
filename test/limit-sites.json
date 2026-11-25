@@ -13647,6 +13647,11 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: I64MAX, the int64 range, past which NumPy's item index raises OverflowError (C long)"
  },
+ "src/runtime/numpy.ts :: listIndex :: if (Obj.isinstance(e, T.TypeError) || Obj.isinstance(e, T.NotImplementedError)) notIndex(); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: a list index NumPy cannot make a numeric array of (strings, None, objects) raises NumPy's IndexError; only TypeError and NotImplementedError are turned into it, every other error (MemoryError and the limits' errors included) passes through unchanged"
+ },
  "src/runtime/numpy.ts :: minmax :: : isMax ? (x: number, y: number) => (x !== x || y !== y ? NaN : x > y ? x : y) : (x: number, y: number) => (x !== x || y !== y ? NaN : x < y ? x : y); #0": {
   "class": "none",
   "owner": "NumPy shim",
