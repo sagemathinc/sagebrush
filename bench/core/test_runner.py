@@ -474,13 +474,18 @@ class Points(unittest.TestCase):
         self.assertEqual((r["status"], r["signature"], r["seconds_cold"]), ("ok", "7:9", 0.125))
         self.assertEqual(once("RESULT|soon|7:9")["status"], "error")
 
-    def test_a_cold_row_compares_the_cold_samples_too(self):
+    def test_a_cold_rows_headline_ratio_is_the_cold_samples(self):
         cold = {"user": 3.0, "magma": 1.5}
         rec, _ = self.run_point({"user": "5", "magma": "5"}, cold=cold)
-        self.assertNotIn("ratio_user_cold", rec)
-        rec, _ = self.run_point({"user": "5", "magma": "5"}, row=dict(ROW, cold=True), cold=cold)
-        self.assertEqual(rec["ratio_user_cold"], 2.0)
         self.assertEqual(rec["ratio_user"], 1.0)
+        self.assertNotIn("ratio_user_warm", rec)
+        rec, _ = self.run_point({"user": "5", "magma": "5"}, row=dict(ROW, cold=True), cold=cold)
+        self.assertEqual((rec["ratio_user"], rec["ratio_user_warm"]), (2.0, 1.0))
+        self.assertEqual(rec["ratio_user_basis"], "cold")
+        # (no cold sample: no headline ratio, the warm one kept apart)
+        rec, _ = self.run_point({"user": "5", "magma": "5"}, row=dict(ROW, cold=True))
+        self.assertNotIn("ratio_user", rec)
+        self.assertEqual(rec["ratio_user_warm"], 1.0)
 
     def test_a_row_marked_no_ratio_has_none(self):
         rec, _ = self.run_point({"user": "5", "magma": "5"})

@@ -1236,13 +1236,19 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
             }
             rec["ratio_best"] = round(ours[bo] / theirs[bt], 4)
         if row.get("cold"):
-            # (a row whose reference warms up across repetitions in one
-            # process, hecke_matrix: the cold first samples' ratio too)
+            # (a row whose reference reuses internal state across repetitions
+            # in one process, hecke_matrix: the headline user ratio is the
+            # cold first samples', like for like; the warm one is kept as
+            # ratio_user_warm; no cold sample, no headline)
             def cold(b):
                 return rec["backends"].get(b, {}).get("check", {}).get("seconds_cold")
 
+            warm = rec.pop("ratio_user", None)
+            if warm is not None:
+                rec["ratio_user_warm"] = warm
             if cold("user") and cold(best):
-                rec["ratio_user_cold"] = round(cold("user") / cold(best), 4)
+                rec["ratio_user"] = round(cold("user") / cold(best), 4)
+            rec["ratio_user_basis"] = "cold"
     rec["complete"] = True
     return rec
 
@@ -1339,8 +1345,13 @@ def summary(out: Path, items: dict) -> None:
         ]
         peaks = [x for x in peaks if x]
         peak = f"{max(peaks) / (1 << 20):.0f}" if peaks else "—"
+        # (a cold row's user ratio is the first calls', marked; its warm one
+        # beside it)
+        user_ratio = str(r.get("ratio_user", "—"))
+        if r.get("ratio_user_basis") == "cold":
+            user_ratio += f" cold (warm {r.get('ratio_user_warm', '—')})"
         lines.append(
-            f"| {r['item']} | {r['row']} | {r['size']} | {r['n']} | {t('user')} | {t('native')} | {t('native-host')} | {t('native-n')} | {t('wasm')} | {t('magma')} | {t('flint')} | {t('flint-n')} | {r.get('best_ref', {}).get('adapter', '—')} | {r.get('ratio_user', '—')} | {r.get('ratio_native', '—')} | {r.get('ratio_wasm', '—')} | {r.get('ratio_best', '—')} | {peak} | {r['status']} |"
+            f"| {r['item']} | {r['row']} | {r['size']} | {r['n']} | {t('user')} | {t('native')} | {t('native-host')} | {t('native-n')} | {t('wasm')} | {t('magma')} | {t('flint')} | {t('flint-n')} | {r.get('best_ref', {}).get('adapter', '—')} | {user_ratio} | {r.get('ratio_native', '—')} | {r.get('ratio_wasm', '—')} | {r.get('ratio_best', '—')} | {peak} | {r['status']} |"
         )
     uncovered = [i for i in items.values() if i["status"] != "rows"]
     lines += ["", "## Items without rows", ""] + [

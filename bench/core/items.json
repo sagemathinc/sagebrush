@@ -1764,7 +1764,7 @@
    "id": "hecke_matrix",
    "item": "ag3",
    "category": "modular forms",
-   "label": "T_p on S_2(Gamma0(389)) (p = 2, 11, 97), level to T_p; warm: Magma reuses internal state across equal spaces, see ratio_user_cold",
+   "label": "T_p on S_2(Gamma0(389)) (p = 2, 11, 97), level to T_p; the user ratio is the cold first calls' (Magma reuses internal state across equal spaces: ratio_user_warm)",
    "sizes": {
     "s": {
      "n": 2,
@@ -1788,7 +1788,7 @@
    },
    "variants": 1,
    "variants_note": "one named input per size: the level 389, the prime p",
-   "route_note": "ours: twisted traces (each T_p builds its own newspace data, no space object, no cache); Magma: the sign +1 cuspidal modular symbols space (dimension 32 = dim S_2) built inside the timer, then T_p: level to T_p on both sides. Magma's rebuild of an equal space is warm within a process, so ratio_user_cold also compares the cold first samples (one per process)",
+   "route_note": "ours: twisted traces (each T_p builds its own newspace data, no space object, no cache); Magma: the sign +1 cuspidal modular symbols space (dimension 32 = dim S_2) built inside the timer, then T_p: level to T_p on both sides. Magma's rebuild of an equal space is warm within a process, so the headline user ratio compares the cold first samples (one per process); the warm one is ratio_user_warm",
    "compares": "charpoly of T_p on S_2",
    "cold": true
   },
