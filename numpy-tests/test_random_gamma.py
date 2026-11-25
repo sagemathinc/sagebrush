@@ -41,6 +41,24 @@ for shape in (0.5, 0.25):
 r = np.random.RandomState(8)
 show("zero shape draws nothing", lambda: (r.gamma(0.0), r.standard_gamma(0.0), r.random_sample().hex()))
 
+# (exact ties at the rejection tests' boundaries, reached through set_state: a state whose next draws make U equal
+# 1 - shape, X equal V, or 1 + c*X equal 0 (from a cached gauss, an int); the value drawn, the next draw and the
+# state's position, as NumPy's)
+ties = [("accept X equals V", 0.5, [0, 0, 0, 0], 0, 0.0),
+        ("U threshold 0.1", 0.1, [3365886098, 2966380640, 2027307812, 3412492598], 0, 0.0),
+        ("U threshold 0.2", 0.2, [925764274, 1558554413, 2027307812, 3412492598], 0, 0.0),
+        ("U threshold 0.3", 0.3, [886559510, 3412492598, 2027307812, 3412492598], 0, 0.0),
+        ("U threshold 0.4", 0.4, [3412492598, 925764274, 2027307812, 3412492598], 0, 0.0),
+        ("U threshold 0.8", 0.8, [3033002258, 3412492598, 2027307812, 3412492598], 0, 0.0),
+        ("U threshold 0.9", 0.9, [1266066226, 925764274, 2027307812, 3412492598], 0, 0.0),
+        ("V equals zero", 1.3333333333333333, [], 1, -3)]
+for name, shape, prefix, has, gauss in ties:
+    r = np.random.RandomState(123)
+    key = r.get_state()[1].tolist()
+    key[:len(prefix)] = prefix
+    r.set_state(("MT19937", np.array(key, dtype=np.uint32), 0, has, gauss))
+    show("tie " + name, lambda: (r.gamma(shape).hex(), r.random_sample().hex(), r.get_state()[2]))
+
 r = np.random.RandomState(5)
 show("array shape", lambda: h(r.gamma([0.5, 1.0, 2.0, 9.0], [1.0, 2.0, 0.5, 3.0])))
 show("array broadcast", lambda: h(r.gamma([[0.3], [3.0]], size=(2, 4))))
