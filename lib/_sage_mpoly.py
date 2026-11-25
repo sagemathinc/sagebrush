@@ -15,7 +15,7 @@ from fractions import Fraction as _F
 import math
 
 try:  # the CPython package
-    from sagebrush._native import mpoly_call as _mp_raw
+    from _sagebrush_lib._native import mpoly_call as _mp_raw
 except ImportError:
     try:  # pyjs: the engine is linked into the runtime
         import _sbengine
@@ -2920,7 +2920,7 @@ def _factor_sqfree(f):
     coeffs = [0] * (deg + 1)
     for e, c in f._d.items():
         coeffs[kron(e)] += int(c * den)
-    from sagebrush import poly
+    from _sagebrush_lib import poly
     _, fs = poly.factor(coeffs)
     ufs = []
     for g, m in fs:
@@ -2989,7 +2989,7 @@ def _factor_univariate(f, i):
     cs = [0] * (n + 1)
     for e, c in f._d.items():
         cs[e[i]] = int(c * den)
-    from sagebrush import poly
+    from _sagebrush_lib import poly
     _, fs = poly.factor(cs)
     out = []
     for g, m in fs:
@@ -4478,7 +4478,7 @@ def _numeric_points(g, rems, ring, kind):
     a real or imaginary part that is rational is computed exactly instead.
     Refused beyond 20000 digits."""
     import _sage_qqbar as qb
-    from sagebrush import nf
+    from _sagebrush_lib import nf
     sa = _sa()
     gi = [int(x) for x in qb._primitive(g)]
     prec = int(ring.prec()) if hasattr(ring, "prec") else 53
