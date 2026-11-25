@@ -722,8 +722,9 @@ class Series(object):
         col = self._pd_col
         if isinstance(col, CT.CatColumn):
             # (a category stays one: its codes taken, -1 for a missing label)
-            codes = col.take([max(p, 0) for p in positions])._pd_codes
-            codes[np.asarray([p < 0 for p in positions], dtype=bool)] = -1
+            pos = np.asarray(positions, dtype=np.int64)
+            codes = np.full(len(pos), -1, dtype=col._pd_codes.dtype)
+            codes[pos >= 0] = col._pd_codes[pos[pos >= 0]]
             return Series._pd_new(CT.CatColumn(col.dtype, codes), index, self._pd_name)
         vals = [float("nan") if p < 0 else col.value(p) for p in positions]
         return Series._pd_new(column_from(vals) if vals else col.take([]), index, self._pd_name)

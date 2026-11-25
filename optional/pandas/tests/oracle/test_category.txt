@@ -724,3 +724,16 @@ dtype: bool
 !! TypeError: Categoricals can only be compared if 'categories' are the same.
 == align-add
 !! TypeError: Object with dtype category cannot perform the numpy op add
+== align-empty-dict-index
+('category', [0, 1], [nan, nan], ['a', 'b'], True)
+== align-empty-series-index
+('category', [0], [nan], ['a', 'b'], True)
+== align-empty-setitem
+('category', [0, 1], [nan, nan], ['a', 'b'], True)
+== align-empty-codes
+
+0   -1
+1   -1
+dtype: int8
+== align-empty-to-empty
+('category', [], [], ['a', 'b'], True)
