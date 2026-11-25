@@ -1598,6 +1598,21 @@ def summary(out: Path, items: dict) -> None:
     calibration(out)
 
 
+def same_run(old: dict, ident: dict) -> bool:
+    """Whether a point file was measured under this run's identity, so a
+    complete one can be skipped on a rerun.  Every identity field must be
+    equal, except "backends": a point records its results per backend
+    there, one entry for each backend the run asked for, so the names are
+    compared with the run's list."""
+    for k, v in ident.items():
+        if k == "backends":
+            if not isinstance(old.get(k), dict) or sorted(old[k]) != sorted(v):
+                return False
+        elif old.get(k) != v:
+            return False
+    return True
+
+
 def main() -> int:
     args = parse_args()
     manifest = json.loads((HERE / "items.json").read_text())
@@ -1691,7 +1706,7 @@ def main() -> int:
             path = out / "rows" / f"{row['id']}-{key}.json"
             if path.exists():
                 old = json.loads(path.read_text())
-                same = all(old.get(k) == ident[k] for k in ident) and (
+                same = same_run(old, ident) and (
                     old.get("n"),
                     old.get("variants"),
                 ) == (row["sizes"][key]["n"], variants(row, key))
