@@ -841,7 +841,7 @@ class ufunc:
         op = self._op
         if (dt.kind != "b" if op in _BOOL_OUT else dt.kind in "biu" if op in _FLOAT_OUT
                 else dt.kind not in ("iu" if op in ("left_shift", "right_shift") else "biu") if op in _BITWISE
-                else dt.kind == "c" and op in ("floor_divide", "remainder")):
+                else dt.kind == "c" and op in ("floor_divide", "remainder", "fmod")):
             raise TypeError("No loop matching the specified signature and casting was found for ufunc %s" % self.__name__)
         return dt
 
@@ -1020,14 +1020,14 @@ class ufunc:
             # (the flat position's index in a, C order)
             i = []
             for n in reversed(shape):
-                p, c = divmod(p, n)
+                p, c = _builtins.divmod(p, n)
                 i.append(c)
             i = tuple(reversed(i))
             r = self(a[i]) if self.nin == 1 else self(a[i], bs[k])
             a[i] = asarray(r).astype(a.dtype)[()]
 
 
-_BINARY = ["add", "subtract", "multiply", "true_divide", "floor_divide", "remainder", "power",
+_BINARY = ["add", "subtract", "multiply", "true_divide", "floor_divide", "remainder", "fmod", "power",
            "maximum", "minimum", "fmax", "fmin", "arctan2", "hypot", "copysign", "logaddexp",
            "equal", "not_equal", "less", "less_equal", "greater", "greater_equal",
            "logical_and", "logical_or", "logical_xor", "bitwise_and", "bitwise_or", "bitwise_xor",
@@ -1049,6 +1049,58 @@ bitwise_not = bitwise_invert = invert
 pow = power
 acos, asin, atan, atan2 = arccos, arcsin, arctan, arctan2
 acosh, asinh, atanh = arccosh, arcsinh, arctanh
+
+
+class _ufunc2(ufunc):
+    """A ufunc of two outputs, each another ufunc's: divmod, floor_divide and
+    remainder in one call, as NumPy's"""
+    def __init__(self, name, first, second):
+        ufunc.__init__(self, name, 2)
+        self.nout = 2
+        self._parts = (first, second)
+
+    def __call__(self, *args, out=None, **kw):
+        if len(args) in (3, 4) and out is not None:
+            raise TypeError("cannot specify 'out' as both a positional and keyword argument")
+        if len(args) < 2 or len(args) > 4:
+            raise TypeError("%s() takes from 2 to 4 positional arguments but %d %s given"
+                            % (self.__name__, len(args), "was" if len(args) == 1 else "were"))
+        if len(args) > 2:
+            out = args[2:] + (None,) * (4 - len(args))
+            args = args[:2]
+        if out is None:
+            out = (None, None)
+        elif not isinstance(out, tuple):
+            raise TypeError("'out' must be a tuple of arrays")
+        elif len(out) != 2:
+            raise ValueError("The 'out' tuple must have exactly one entry per ufunc output")
+        return tuple(f(*args, out=o, **kw) for f, o in zip(self._parts, out))
+
+    def reduce(self, *args, **kw):
+        raise ValueError("reduce only supported for functions returning a single value")
+
+    def accumulate(self, *args, **kw):
+        raise ValueError("accumulate only supported for functions returning a single value")
+
+    def reduceat(self, *args, **kw):
+        raise ValueError("reduceat only supported for functions returning a single value")
+
+    def outer(self, A, B, **kw):
+        return tuple(f.outer(A, B, **kw) for f in self._parts)
+
+    def at(self, *args, **kw):
+        raise ValueError("Only single output ufuncs supported at this time")
+
+
+divmod = _ufunc2("divmod", floor_divide, remainder)
+
+
+def fix(x, out=None):
+    # (deprecated in NumPy 2.5, with this warning: np.trunc's values, dtype and errors)
+    import warnings
+    warnings.warn("numpy.fix is deprecated. Use numpy.trunc instead, which is faster and follows the Array API standard.",
+                  DeprecationWarning, stacklevel=2)
+    return trunc(x, out=out)
 
 
 def float_power(x, y):
@@ -1806,7 +1858,7 @@ def array_split(ary, indices_or_sections, axis=0):
     n = a.shape[axis]
     if isinstance(indices_or_sections, int):
         k = indices_or_sections
-        each, extra = divmod(n, k)
+        each, extra = _builtins.divmod(n, k)
         bounds = [0]
         for i in range(k):
             bounds.append(bounds[-1] + each + (1 if i < extra else 0))
