@@ -1,9 +1,10 @@
 // Fleet protocol (r2.3 §2, §1.7): the person's device chain, verified entry by entry. Pure: state in, state out.
 //
 // A chain state is what a verifier pins and persists: the fleet, the head (seq and hash), every device ever enrolled
-// (its key, tier, and the seqs it was added and removed at), the recovery key, the service keys with the seq each
-// came in at, and the policy. replay() verifies a whole chain from genesis against an optional pin; apply() adds one
-// entry. Objects outside the chain ask deviceKey() and serviceKeyAt() which keys count (§2.3, §2.4, §1.7).
+// (its key, tier, and the seqs it was added and removed at), the recovery key, the service keys and the lease keys
+// (r2.5 §1.7a) with the seq each came in at, and the policy. replay() verifies a whole chain from genesis against an optional pin; apply() adds one
+// entry. Objects outside the chain ask deviceKey(), serviceKeyAt() and leaseKeyAt() which keys count (§2.3, §2.4, §1.7,
+// §1.7a).
 // apply() and replay() are async (signatures and hashes go through the installed backend); the key lookups aren't.
 
 import { isId, refuse, sha256b64, unb64 } from "./bytes.mjs";
@@ -19,7 +20,7 @@ const rawKey = (k) => checkPublicKey(unb64(k.key, 32));
 const tierOf = (state, signer) => (signer.kind === "recovery" ? "native" : state.devices.get(signer.id).tier);
 
 function copy(s) {
-  return { ...s, devices: new Map(s.devices), serviceKeys: [...s.serviceKeys], hashes: [...s.hashes] };
+  return { ...s, devices: new Map(s.devices), serviceKeys: [...s.serviceKeys], leaseKeys: [...s.leaseKeys], hashes: [...s.hashes] };
 }
 
 /**
@@ -28,7 +29,7 @@ function copy(s) {
  */
 export async function apply(state, bytes, ctx) {
   // (a chain is one fleet in one audience: a context that isn't the state's own is refused before anything else, so
-  // a valid signature for another fleet or audience can never extend this chain; astra4)
+  // a valid signature for another fleet or audience can never extend this chain; a security review finding)
   if (state && state.aud !== ctx.aud) refuse("bad_audience", "not this chain's audience");
   if (state && state.fleet !== ctx.fleet) refuse("bad_form", "not this chain's fleet");
   const resolveKey = async (signer, type, body) => {
@@ -60,7 +61,7 @@ export async function apply(state, bytes, ctx) {
   if (body.seq !== seq || body.prev !== (state ? state.head : "")) refuse("chain_fork", "not the next entry");
 
   const next = state ? copy(state) : {
-    fleet: ctx.fleet, aud: ctx.aud, seq: -1, head: "", devices: new Map(), recovery: null, serviceKeys: [],
+    fleet: ctx.fleet, aud: ctx.aud, seq: -1, head: "", devices: new Map(), recovery: null, serviceKeys: [], leaseKeys: [],
     policy: Object.freeze({ require_native_for_widening: false }), hashes: [],
   };
   const enroll = async (dev) => {
@@ -73,6 +74,15 @@ export async function apply(state, bytes, ctx) {
     const id = await keyId("ed25519", raw);
     if (next.recovery && next.recovery.keyId === id) refuse("bad_form", "the same recovery key");
     next.recovery = Object.freeze({ raw, keyId: id });
+  };
+  // (a service or lease key: an id unique across both lists, and key material never shared between them, §1.7a)
+  const pinned = async (k, what) => {
+    const raw = rawKey(k);
+    const all = [...next.serviceKeys, ...next.leaseKeys];
+    if (!isId(k.id) || all.some((x) => x.id === k.id)) refuse("bad_form", `a ${what} key id twice`);
+    const other = what === "service" ? next.leaseKeys : next.serviceKeys;
+    if (other.some((x) => x.raw.length === raw.length && x.raw.every((b, i) => b === raw[i]))) refuse("bad_form", `a ${what} key that is also a ${what === "service" ? "lease" : "service"} key`);
+    return Object.freeze({ id: k.id, raw, keyId: await keyId("ed25519", raw), seq });
   };
   const deviceSigner = () => { if (signer.kind !== "device") refuse("device_unknown"); };
   const needNative = () => { if (tierOf(state, signer) !== "native") refuse("device_tier"); };
@@ -111,9 +121,14 @@ export async function apply(state, bytes, ctx) {
       break;
     case "service-key": {
       deviceSigner();
-      const raw = rawKey(body.service_key);
-      if (!isId(body.service_key.id) || next.serviceKeys.some((k) => k.id === body.service_key.id)) refuse("bad_form", "a service key id twice");
-      next.serviceKeys.push(Object.freeze({ id: body.service_key.id, raw, keyId: await keyId("ed25519", raw), seq }));
+      next.serviceKeys.push(await pinned(body.service_key, "service"));
+      break;
+    }
+    case "lease-key": {
+      // (r2.5 §1.7a, SEC's Q4: only a native device pins or rotates the lease key; a browser one runs the origin's code)
+      deviceSigner();
+      needNative();
+      next.leaseKeys.push(await pinned(body.lease_key, "lease"));
       break;
     }
     case "policy":
@@ -166,10 +181,22 @@ export function requireTier(state, device, widening) {
  * K counts over [seq(K), seq(K')). Historical acks stay verifiable; a replaced key never signs a newer ack.
  */
 export function serviceKeyAt(state, signer, chainSeq) {
-  if (signer.kind !== "service") refuse("bad_signature");
+  return keyAt(state, state.serviceKeys, "service", signer, chainSeq);
+}
+
+/**
+ * The lease key in force at an execution lease's chainSeq (r2.5 §1.7a): the same half-open rule over the lease-key
+ * entries alone. Only signer kind "lease", and never a service key.
+ */
+export function leaseKeyAt(state, signer, chainSeq) {
+  return keyAt(state, state.leaseKeys, "lease", signer, chainSeq);
+}
+
+function keyAt(state, keys, kind, signer, chainSeq) {
+  if (signer.kind !== kind) refuse("bad_signature");
   if (!Number.isSafeInteger(chainSeq) || chainSeq < 0 || chainSeq > state.seq) refuse("device_unknown", "fetch the chain first");
   let k = null;
-  for (const s of state.serviceKeys) if (s.seq <= chainSeq) k = s;
+  for (const s of keys) if (s.seq <= chainSeq) k = s;
   if (!k || k.id !== signer.id || k.keyId !== signer.key) refuse("bad_signature");
   return k.raw;
 }

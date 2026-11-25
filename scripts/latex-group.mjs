@@ -126,10 +126,19 @@ export const LATEX_LAZY = {
 // (291,697 raw / 98,473 gzip: Nov 25 2026, enumitem's label=, ref= and start= on a list: 291,633 / 98,409 measured on the
 //  shipped build of its merge with master 46d3a16f, with bun 1.4.4 and node 24.21.0 (+1,727 / +647 over master's
 //  289,906 / 97,762), + 64)
-// (291,770 raw / 98,518 gzip: Nov 25 2026, an element over PIECE_MAX split in turn (a theorem's long list, split.ts):
-//  291,706 / 98,454 measured on the shipped build of master e096453f with it, with bun 1.4.4 and node 24.21.0
-//  (+73 / +45 over master's 291,633 / 98,409), + 64)
-export const LATEX_CAPS = { raw: 291770, gzip: 98518 };
+// (292,864 raw / 98,922 gzip: Nov 25 2026, an accent before a font command with its argument, unbraced ($\bar\mathbb F$),
+//  braced before KaTeX: 292,800 / 98,858 measured on the shipped build of its merge with master 56958e3d, with bun 1.4.4 and
+//  node 24.21.0 (+1,167 / +449 over master's 291,633 / 98,409), + 64)
+// (293,229 raw / 99,054 gzip: Nov 25 2026, starred references read as such, \ref*{key} drawn without its link (natbib's
+//  starred citations keep theirs): 293,165 / 98,990 measured on the shipped build of its merge with master bff44e83, with
+//  bun 1.4.4 and node 24.21.0 (+365 / +132 over master's 292,800 / 98,858), + 64)
+// (294,144 raw / 99,370 gzip: Nov 25 2026, latex check naming an \input file and its line for a problem found there (the
+//  expander's file-line markers, the renderer's where()): 294,080 / 99,306 measured on the shipped build of its merge with
+//  master fb8a65b0, with bun 1.4.4 and node 24.21.0 (+915 / +316 over master's 293,165 / 98,990), + 64)
+// (294,217 raw / 99,416 gzip: Nov 25 2026, an element over PIECE_MAX split in turn (a theorem's long list, split.ts):
+//  294,153 / 99,352 measured on the shipped build of its merge with master b0b02122, with bun 1.4.4 and node 24.21.0
+//  (+73 / +46 over master's 294,080 / 99,306), + 64)
+export const LATEX_CAPS = { raw: 294217, gzip: 99416 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -227,14 +236,19 @@ export const LATEX_LAZY_CAPS = {
   // (65,566 / 22,526: Nov 22 2026, A1 (#1546): the agent's access as an icon in the composer's footer row, its CSS (a
   //  masked shield and the footer rules) in the pairing's chunk (agent-ui.ts), measured on the shipped build of the head
   //  on master e4c0b8c0 with bun 1.4.4 and node 24.21.0: 65,502 / 22,462, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 67913, gzip: 23282 },
+  // (68,867 / 23,606: Nov 25 2026, image reads: a raster image's read as an image for an agent that takes one, by its
+  //  bytes (isRaster, imageOut, agent-pair.ts), measured on the shipped build of the head merged with master 5fb549fa
+  //  with bun 1.4.4 and node 24.21.0: 68,803 / 23,542, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 68867, gzip: 23606 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
   //  page module rather than bundled again; measured 16,482 / 6,886 on master 4d4225f9, + 64. Was 16 / 6 KiB)
   // (17,335 / 7,231: renewed at the landing merge on master 14279164: 16,494 / 6,881 before it -> 17,271 / 7,167 after,
   //  +777 / +286 inherited from a shared check's and the tools' changes, none of it that change's own code; + 64)
-  TOOLS: { label: "the LaTeX agent tools' chunk", raw: 17335, gzip: 7231 },
+  // (17,758 / 7,432: Nov 25 2026, latex_check naming a problem's \input file (check.ts's inputFileName): 17,694 / 7,368
+  //  measured on master 6e3a0f71 with it, + 64)
+  TOOLS: { label: "the LaTeX agent tools' chunk", raw: 17758, gzip: 7432 },
   // (the presenter: web/latex/present.ts with overlay.ts, fetched only when Present is pressed)
   PRESENT: { label: "the LaTeX presenter's chunk", raw: 16 * 1024, gzip: 6 * 1024 },
   // (a published document opened read only, doc.ts: fetched only for a /?tex-doc= link, the articles';

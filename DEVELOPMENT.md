@@ -52,7 +52,7 @@ scripts; nothing is installed into your system Python.
 ```sh
 scripts/build-all.sh             # about 6.5 min here (pnpm's store and cargo's registry already downloaded)
 scripts/build-all.sh --no-app    # without the desktop app (no Tauri CLI or WebKitGTK needed)
-scripts/build-all.sh --no-engine # fetch the four WebAssembly modules by their pins (no Rust needed)
+scripts/build-all.sh --no-engine # fetch the five WebAssembly modules by their pins (no Rust needed)
 ```
 
 It runs these steps, in this order, and prints each one's time:
@@ -75,7 +75,7 @@ It runs these steps, in this order, and prints each one's time:
 
 Notes:
 
-- **The WebAssembly modules and `wasm/pins.json`.** The four modules in `wasm/` aren't in git: `wasm/pins.json`
+- **The WebAssembly modules and `wasm/pins.json`.** The five modules in `wasm/` aren't in git: `wasm/pins.json`
   names each one's sha256 and length, and `node scripts/wasm-fetch.mjs` (or `pnpm wasm`) puts them there from
   `https://get.sagebrush.space/wasm/sha256/`, through a cache in `~/.cache/sagebrush/wasm`, checking every byte
   (design/wasm-artifacts.md). Run it after a clone, and after switching to a branch with other pins.
