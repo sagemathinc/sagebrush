@@ -1647,7 +1647,7 @@
    "id": "galois_group",
    "item": "nt2",
    "category": "number fields",
-   "label": "Galois group of x^n-x-1",
+   "label": "Galois group of x^n-x-1 (S_n: the cycle-type route)",
    "sizes": {
     "s": {
      "n": 3,
@@ -1671,6 +1671,36 @@
    },
    "variants": 1,
    "variants_note": "one named input, x^n - x - 1"
+  },
+  {
+   "id": "galois_group_small",
+   "item": "nt2",
+   "category": "number fields",
+   "label": "Galois group with a small or imprimitive group (PSL(2,5) sextic, x^8 - 2, x^12 - 2)",
+   "sizes": {
+    "s": {
+     "n": 6,
+     "timeout": 120
+    },
+    "m": {
+     "n": 8,
+     "timeout": 300
+    },
+    "l": {
+     "n": 12,
+     "timeout": 900
+    }
+   },
+   "fresh": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants": 1,
+   "variants_note": "one named input per degree: groups of order 60, 16 and 48",
+   "route_note": "not S_n: needs more than the cycle-type certificate"
   },
   {
    "id": "modsym_charpoly",

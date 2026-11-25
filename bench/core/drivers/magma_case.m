@@ -214,6 +214,11 @@ function Build(case_id, n, v)
         K:=QuadraticField(ClassDisc(n)); O:=MaximalOrder(K); ops := [ClassDisc(n)];
     elif case_id eq "galois_group" then
         R<x>:=PolynomialRing(Rationals()); pf:=x^n-x-1; ops := Coefficients(pf);
+    elif case_id eq "galois_group_small" then
+        // (drivers/sagebrush_case.py's SMALL_GROUP_POLYS)
+        R<x>:=PolynomialRing(Rationals());
+        pf := R!(n eq 6 select [3,2,-2,-2,-1,0,1] else [-2] cat [0 : i in [1..n-1]] cat [1]);
+        ops := Coefficients(pf);
     elif case_id eq "modsym_charpoly" then M:=ModularSymbols(n,2,+1); ops := [n, 2];
     elif case_id eq "newforms" then M:=NewSubspace(CuspidalSubspace(ModularSymbols(n,2,+1))); ops := [n, 2];
     elif case_id eq "ec_aplist" then
@@ -240,7 +245,7 @@ function DoOp(case_id, S)
     elif case_id in {"mat_fp_solve","mat_fp31_solve","mat_q_solve"} then return Solution(Transpose(A),v);
     elif case_id in {"groebner_cyclic","groebner_katsura"} then return GroebnerBasis(I);
     elif case_id eq "class_group" then return ClassGroup(O);
-    elif case_id eq "galois_group" then return GaloisGroup(pf);
+    elif case_id in {"galois_group","galois_group_small"} then return GaloisGroup(pf);
     elif case_id eq "modsym_charpoly" then return CharacteristicPolynomial(HeckeOperator(M,2));
     elif case_id eq "newforms" then return NewformDecomposition(M);
     elif case_id eq "ec_aplist" then return [<p,TraceOfFrobenius(ChangeRing(E,GF(p)))>:p in ps];
@@ -273,7 +278,7 @@ function Sig(case_id, n, answer)
         ds:=[TotalDegree(f):f in answer]; Sort(~ds); return IntegerToString(#answer) cat ":" cat IntegerToString(SeqHash(ds));
     elif case_id eq "class_group" then
         inv:=[Integers()!z:z in Invariants(answer)]; Sort(~inv); return IntegerToString(#answer) cat ":" cat Join([IntegerToString(z):z in inv],",");
-    elif case_id eq "galois_group" then return IntegerToString(#answer);
+    elif case_id in {"galois_group","galois_group_small"} then return IntegerToString(#answer);
     elif case_id eq "modsym_charpoly" then return IntegerToString(Degree(answer)) cat ":" cat IntegerToString(SeqHash(Coefficients(answer)));
     elif case_id eq "newforms" then ds:=[Dimension(B):B in answer]; Sort(~ds); return IntegerToString(#ds) cat ":" cat Join([IntegerToString(d):d in ds],",");
     elif case_id eq "ec_aplist" then return IntegerToString(#answer) cat ":" cat IntegerToString(SeqHash([z[1]*1000+z[2]:z in answer]));

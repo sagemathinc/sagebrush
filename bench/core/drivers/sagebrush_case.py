@@ -177,6 +177,18 @@ def smith_hard_rows(size, v):
     ]
 
 
+# galois_group_small's inputs by degree, coefficients from the constant term
+# up: a sextic with group PSL(2,5) (6T12, order 60), x^8 - 2 (8T8, order 16,
+# a 2-group) and x^12 - 2 (12T28, order 48): small and imprimitive groups,
+# where S_n's cycle-type certificate doesn't apply (groups checked with a
+# black-box reference)
+SMALL_GROUP_POLYS = {
+    6: [3, 2, -2, -2, -1, 0, 1],
+    8: [-2, 0, 0, 0, 0, 0, 0, 0, 1],
+    12: [-2] + [0] * 11 + [1],
+}
+
+
 def fppoly(size, salt):
     return [((i * i * salt + 3 * i + 1) % 65537) for i in range(size)]
 
@@ -318,10 +330,10 @@ def prepare(v):
         operands([D])
         K = QuadraticField(D, "a")
         return lambda: K.class_group()
-    if case_id == "galois_group":
+    if case_id in ("galois_group", "galois_group_small"):
         R = PolynomialRing(QQ, "x")
         x = R.gen()
-        f = x**n - x - 1
+        f = R(SMALL_GROUP_POLYS[n]) if case_id == "galois_group_small" else x**n - x - 1
         operands(coeffs(f))
         return lambda: f.galois_group()
     if case_id in ("modsym_charpoly", "newforms"):
@@ -372,7 +384,7 @@ def signature(answer):
     if case_id == "class_group":
         inv = sorted(map(int, answer.invariants()))
         return "%d:%s" % (int(answer.order()), ",".join(map(str, inv)))
-    if case_id == "galois_group":
+    if case_id in ("galois_group", "galois_group_small"):
         return str(int(answer.order()))
     if case_id == "modsym_charpoly":
         return "%d:%d" % (len(answer) - 1, seq_hash(answer))

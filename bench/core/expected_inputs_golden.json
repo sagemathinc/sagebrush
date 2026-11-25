@@ -529,6 +529,21 @@
  },
  "pending_note": "Points not yet confirmed by every backend in a VM run: expected_inputs.py's hashes. The calibration sizes (c0 .. c4) are timed on the calibrated targets only (the Sage-mode, native and wasm drivers), and test_expected_inputs.py checks only their shape (their hashes take minutes to recompute). The first VM run that agrees on a point moves it into points, in a reviewed commit. mat_z_rank_wide's calibration hashes were computed on a spot VM (n2-standard-16, Nov 23 2026; up to 16 min each, for the certified-rank inputs), the smaller two also in the project.",
  "pending": {
+  "galois_group_small:l": {
+   "n": 12,
+   "variants": 1,
+   "input_hash": "196815565"
+  },
+  "galois_group_small:m": {
+   "n": 8,
+   "variants": 1,
+   "input_hash": "356994766"
+  },
+  "galois_group_small:s": {
+   "n": 6,
+   "variants": 1,
+   "input_hash": "141415947"
+  },
   "mat_fp31_charpoly:c0": {
    "n": 59,
    "variants": 8,

@@ -135,6 +135,18 @@ def smith_hard_rows(size, v):
     ]
 
 
+# galois_group_small's inputs by degree, coefficients from the constant term
+# up: a sextic with group PSL(2,5) (6T12, order 60), x^8 - 2 (8T8, order 16,
+# a 2-group) and x^12 - 2 (12T28, order 48): small and imprimitive groups,
+# where S_n's cycle-type certificate doesn't apply (groups checked with a
+# black-box reference)
+SMALL_GROUP_POLYS = {
+    6: [3, 2, -2, -2, -1, 0, 1],
+    8: [-2, 0, 0, 0, 0, 0, 0, 0, 1],
+    12: [-2] + [0] * 11 + [1],
+}
+
+
 def fppoly(size: int, salt: int) -> list[int]:
     return trim([(i * i * salt + 3 * i + 1) % P for i in range(size)])
 
@@ -356,6 +368,8 @@ def operands(row: str, n: int, v: int) -> list[int]:
         return [class_disc(n)]
     if row == "galois_group":
         return [-1, -1] + [0] * (n - 2) + [1]
+    if row == "galois_group_small":
+        return list(SMALL_GROUP_POLYS[n])
     if row in ("modsym_charpoly", "newforms"):
         return [n, 2]
     if row == "ec_aplist":
