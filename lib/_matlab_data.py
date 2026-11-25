@@ -419,6 +419,331 @@ def corrcoef_(nargout, x, *args):
     return _m._finish(_m._contig(R.T), _cls(x, *([y] if y is not None else [])))
 
 
+# ------------------------------------------------------------------ rmmissing, fillmissing
+
+# (the most rmmissing and fillmissing hold at once: for each element, the data's float copy, the missing mask, the
+# fill and the result; for each vector, its TF and bookkeeping; and for the one vector being filled at a time, each of
+# its elements' interpolation work (a spline's or pchip's setup through interp1 the most))
+_MISSING_ELEMENT = 96
+_MISSING_VECTOR = 128
+_MISSING_FILL = 768
+# (a moving median's work: each window's values for each element, and their sorted copy)
+_MOV_CELL = 40
+
+
+def _missing_admit(A, what, axis, *others, fill=True, slices=False, extra=0):
+    """the work admitted before any copy of A: its elements, its vectors along axis (axis None: the first dimension
+    not 1), one vector's fill when fill, each slice's bookkeeping when slices (rmmissing's counts, TF and index),
+    extra bytes, and others' float copies"""
+    dims = list(_m._dims(A))
+    if axis is None:
+        axis = _first_dim(tuple(dims))
+    dims += [1] * (axis + 1 - len(dims))
+    L, R = dims[axis], _m._prod(dims[:axis] + dims[axis + 1:])
+    _m._admit_bytes(_m._numel(A) * _MISSING_ELEMENT + R * _MISSING_VECTOR + (L * _MISSING_FILL if fill else 0)
+                    + (L * _MISSING_VECTOR if slices else 0) + extra + 16 * sum(_m._numel(o) for o in others),
+                    "%s of %d elements" % (what, _m._numel(A)))
+
+
+def _standard_missing(A):
+    """where A holds MATLAB's standard missing value: NaN in double and single (a complex value with a NaN part);
+    integer, logical and char data have none"""
+    if _m.class_(A) in ("double", "single"):
+        M = _md(A)
+        return np.isnan(M.real) | (np.isnan(M.imag) if np.iscomplexobj(M) else False)
+    return np.zeros(_md(A).shape if _m._isnumlike(A) else np.transpose(np.array(_m._arr(A))).shape, dtype=bool)
+
+
+def _missing_locations(A, loc):
+    """the missing mask: MissingLocations when given (a logical array of A's size), else the standard one"""
+    if loc is None:
+        return _standard_missing(A)
+    if _m.class_(loc) != "logical" or tuple(_m._dims(loc)) != tuple(_m._dims(A)):
+        raise _err("MissingLocations must be a logical array of the same size as the input data.")
+    return np.transpose(_m._arr(loc)).astype(bool)
+
+
+def _take_slices(A, keep, axis):
+    """A without the slices along axis where keep is false, in A's class"""
+    idx = [_m.COLON for _ in range(max(len(_m._dims(A)), axis + 1))]
+    idx[axis] = _m._box(np.flatnonzero(keep).astype(float).reshape(1, -1) + 1)
+    return _m.index(A, idx)
+
+
+@_bi("rmmissing")
+def rmmissing_(nargout, A, *args):
+    """[R, TF] = rmmissing(A, dim, 'MinNumMissing', n, 'MissingLocations', L): A without the entries (a vector) or the
+    slices along dim (the first dimension not 1 by default: a matrix's rows) that hold at least n missing values (1
+    by default), as MATLAB's rmmissing page describes; missing is NaN in double and single data (a complex value with
+    a NaN part), or MissingLocations' true entries; TF marks the slices removed"""
+    args = list(args)
+    dim = None
+    if args and not _istext(args[0]):
+        dim = _dim_value(args.pop(0))
+    minn, loc = 1, None
+    while args:
+        name = args.pop(0)
+        key = _text(name).lower() if _istext(name) else None
+        if key not in ("minnummissing", "missinglocations", "datavariables") or not args:
+            raise _err("rmmissing: the name-value arguments are 'MinNumMissing' and 'MissingLocations'.")
+        val = args.pop(0)
+        if key == "datavariables":
+            raise _err("rmmissing: 'DataVariables' applies to tables, which Sagebrush does not have.")
+        if key == "minnummissing":
+            if _istext(val) or _m._numel(val) != 1 or not _m._isnumlike(val):
+                raise _err("MinNumMissing must be a nonnegative integer scalar.")
+            minn = _scalar(val)
+            if not (_math.isfinite(minn) and minn == _math.floor(minn) and minn >= 0):
+                raise _err("MinNumMissing must be a nonnegative integer scalar.")
+        else:
+            loc = val
+    if not (_m._isnumlike(A) or _m.class_(A) == "char"):
+        raise _err("rmmissing: the data must be numeric, logical or char in Sagebrush.")
+    if dim is not None:
+        # (a dimension past A's last is 1, as every one after it is: the first of them stands for all, so that a huge
+        # dim costs nothing)
+        dim = min(dim, len(_m._dims(A)))
+    _missing_admit(A, "rmmissing", dim, fill=False, slices=True)
+    miss = _missing_locations(A, loc)
+    d = list(_m._dims(A))
+    axis = _first_dim(tuple(d)) if dim is None else dim
+    while len(d) <= axis:
+        d.append(1)
+    F, _ = _to_front(miss.reshape(tuple(d)), axis)
+    counts = F.sum(axis=1)
+    removed = counts >= max(minn, 1) if minn > 0 else np.ones(F.shape[0], dtype=bool)
+    R = _take_slices(A, ~removed, axis)
+    if nargout <= 1:
+        return R
+    tf_shape = [1] * max(2, axis + 1)
+    tf_shape[axis] = F.shape[0]
+    return [R, _m._box(np.transpose(removed.reshape(tuple(tf_shape))))]
+
+
+_FILL_METHODS = ("constant", "previous", "next", "nearest", "linear", "spline", "pchip", "mean", "median", "mode",
+                 "movmean", "movmedian")
+
+
+def _part(v, k):
+    """a complex fill value's real (k 0) or imaginary (k 1) part; a real value is its own real part, imaginary 0"""
+    if isinstance(v, (complex, np.complexfloating)) or (isinstance(v, np.ndarray) and v.dtype.kind == "c"):
+        return v.real if k == 0 else v.imag
+    if isinstance(v, (int, float, np.floating, np.integer)) and not isinstance(v, bool):
+        return v if k == 0 else 0.0
+    return v
+
+
+def _fill_vector(x, miss, t, method, param, endv, maxgap):
+    """one vector x filled where miss is true, at sample points t: (the filled vector, which entries were filled);
+    complex data by parts, each filled as real data and put together without arithmetic, so that a part that isn't
+    finite never touches the other"""
+    if np.iscomplexobj(x):
+        re, _ = _fill_vector(np.array(x.real), miss, t, method, _part(param, 0), _part(endv, 0), maxgap)
+        im, _ = _fill_vector(np.array(x.imag), miss, t, method, _part(param, 1), _part(endv, 1), maxgap)
+        z = np.zeros(x.shape, dtype=np.complex128)
+        z.real = re
+        z.imag = im
+        # (an entry still NaN in either part isn't filled)
+        return z, miss & ~np.isnan(z.real) & ~np.isnan(z.imag)
+    n = x.size
+    known = ~miss
+    ki = np.flatnonzero(known)
+    out = x.copy()
+    want = miss.copy()
+    if not ki.size:
+        # (nothing to fill from: a constant or an end value still fills)
+        vals = np.full(n, _math.nan, dtype=x.dtype)
+        if method == "constant":
+            vals[:] = param
+        elif isinstance(endv, (int, float, complex)) and not isinstance(endv, bool):
+            vals[:] = endv
+        out = np.where(want, vals, out)
+        return out, want & ~np.isnan(np.real(out))
+    first, last = ki[0], ki[-1]
+    pos = np.arange(n)
+    lead, trail = miss & (pos < first), miss & (pos > last)
+    inner = miss & ~lead & ~trail
+    # (gaps: an interior gap's size is the distance between the known values around it; leading and trailing gaps
+    # are 0, so always filled, as the page says)
+    if maxgap is not None:
+        prev_k = np.maximum.accumulate(np.where(known, pos, -1))
+        nxt = np.where(known, pos, n)
+        next_k = np.minimum.accumulate(nxt[::-1])[::-1]
+        size = np.where(inner, t[np.minimum(next_k, n - 1)] - t[np.maximum(prev_k, 0)], 0.0)
+        want = want & (size <= maxgap)
+    prev_k = np.maximum.accumulate(np.where(known, pos, -1))
+    nxt = np.where(known, pos, n)
+    next_k = np.minimum.accumulate(nxt[::-1])[::-1]
+    prev_v = np.where(prev_k >= 0, x[np.maximum(prev_k, 0)], _math.nan)
+    next_v = np.where(next_k < n, x[np.minimum(next_k, n - 1)], _math.nan)
+
+    def nearest():
+        dp = np.where(prev_k >= 0, t - t[np.maximum(prev_k, 0)], _math.inf)
+        dn = np.where(next_k < n, t[np.minimum(next_k, n - 1)] - t, _math.inf)
+        # (a tie goes to the next value, as interp1's 'nearest' rounds a midpoint up)
+        return np.where(dn <= dp, next_v, prev_v)
+
+    def interp(kind):
+        if ki.size < 2:
+            return np.full(n, _math.nan, dtype=x.dtype)
+        # (interp1's own interpolation, with its own extrapolation; real data only, complex data comes by parts)
+        r = _m._B["interp1"].call(1, [_m._box(t[ki].reshape(-1, 1)), _m._box(x[ki].reshape(-1, 1)),
+                                     _m._box(t.reshape(-1, 1)), _m.Char(kind), _m.Char("extrap")])
+        return _m._farr(r).reshape(-1)
+
+    if method == "constant":
+        vals = np.broadcast_to(np.asarray(param, dtype=x.dtype), (n,))
+    elif method == "previous":
+        vals = prev_v
+    elif method == "next":
+        vals = next_v
+    elif method == "nearest":
+        vals = nearest()
+    elif method in ("linear", "spline", "pchip"):
+        vals = interp(method)
+    elif method in ("mean", "median", "mode"):
+        kv = x[ki]
+        if method == "mean":
+            v = kv.sum() / ki.size
+        elif method == "median":
+            S = np.sort(kv)
+            v = S[(ki.size - 1) // 2] if ki.size % 2 else _m._median_middle(S[ki.size // 2 - 1:ki.size // 2], S[ki.size // 2:ki.size // 2 + 1])[0]
+        else:
+            u, c = np.unique(kv, return_counts=True)
+            v = u[np.argmax(c)]
+        vals = np.full(n, v, dtype=x.dtype)
+    else:  # movmean, movmedian: the window's statistic of the known values
+        kb, kf = param
+        F = np.where(known, x, _math.nan).reshape(-1, 1)
+        vals = _moving(F, kb, kf, "mean" if method == "movmean" else "median", 0, True, "shrink")[:, 0]
+    vals = np.asarray(vals, dtype=x.dtype)
+    # (the ends: the method's own values ('extrap'), or by EndValues)
+    if not (isinstance(endv, str) and endv == "extrap"):
+        ends = lead | trail
+        if isinstance(endv, str):
+            ev = {"previous": prev_v, "next": next_v, "nearest": nearest(), "none": np.full(n, _math.nan)}[endv]
+        else:
+            ev = np.full(n, endv)
+        vals = np.where(ends, np.asarray(ev, dtype=x.dtype), vals)
+        if isinstance(endv, str) and endv == "none":
+            want = want & ~ends
+    out = np.where(want, vals, out)
+    filled = want & ~np.isnan(np.real(np.asarray(out)))
+    return out, filled
+
+
+@_bi("fillmissing")
+def fillmissing_(nargout, A, *args):
+    """[F, TF] = fillmissing(A, method), fillmissing(A, 'constant', v), fillmissing(A, movmethod, window), with dim
+    and 'EndValues', 'MaxGap', 'SamplePoints' and 'MissingLocations': A's missing values (NaN in double and single
+    data) filled along dim (the first dimension not 1 by default) by the method, as MATLAB's fillmissing page
+    describes: 'previous', 'next', 'nearest', 'linear', 'spline', 'pchip', 'mean', 'median', 'mode', a constant (one
+    for all, or one per vector), or a moving mean or median of the known values; the leading and trailing ones by
+    the method ('extrap', the default) or by EndValues ('previous', 'next', 'nearest', 'none' or a value); gaps
+    wider than MaxGap left; TF marks the entries filled"""
+    args = list(args)
+    if not args or not _istext(args[0]):
+        raise _err("fillmissing: give the fill method, as in fillmissing(A, 'linear').")
+    method = _text(args.pop(0)).lower()
+    if method == "makima":
+        raise _err("fillmissing: the 'makima' method is not supported in Sagebrush; 'pchip' and 'spline' are.")
+    if method in ("knn",):
+        raise _err("fillmissing: the 'knn' method is not supported in Sagebrush.")
+    if method not in _FILL_METHODS:
+        raise _err("fillmissing: the method must be 'constant', 'previous', 'next', 'nearest', 'linear', 'spline', "
+                   "'pchip', 'mean', 'median', 'mode', 'movmean' or 'movmedian'.")
+    param = None
+    if method == "constant" or method in ("movmean", "movmedian"):
+        if not args or _istext(args[0]):
+            raise _err("fillmissing: the '%s' method needs %s." % (method, "a value" if method == "constant" else "a window length"))
+        param = args.pop(0)
+    dim = None
+    if args and not _istext(args[0]):
+        dim = _dim_value(args.pop(0))
+    endv, maxgap, sp, loc = "extrap", None, None, None
+    while args:
+        name = args.pop(0)
+        key = _text(name).lower() if _istext(name) else None
+        if key in ("datavariables", "replacevalues"):
+            raise _err("fillmissing: '%s' applies to tables, which Sagebrush does not have." % _text(name))
+        if key not in ("endvalues", "maxgap", "samplepoints", "missinglocations") or not args:
+            raise _err("fillmissing: the name-value arguments are 'EndValues', 'MaxGap', 'SamplePoints' and 'MissingLocations'.")
+        val = args.pop(0)
+        if key == "endvalues":
+            if _istext(val):
+                endv = _text(val).lower()
+                if endv not in ("extrap", "previous", "next", "nearest", "none"):
+                    raise _err("fillmissing: EndValues must be 'extrap', 'previous', 'next', 'nearest', 'none' or a value.")
+            elif _m._numel(val) == 1 and _m._isnumlike(val):
+                endv = complex(_m._arr(val).reshape(-1)[0]) if np.iscomplexobj(_m._arr(val)) else _scalar(val)
+            else:
+                raise _err("fillmissing: EndValues must be 'extrap', 'previous', 'next', 'nearest', 'none' or a scalar value in Sagebrush.")
+        elif key == "maxgap":
+            if _istext(val) or _m._numel(val) != 1 or not _m._isnumlike(val) or not _scalar(val) > 0:
+                raise _err("MaxGap must be a positive numeric scalar.")
+            maxgap = _scalar(val)
+        elif key == "samplepoints":
+            sp = val
+        else:
+            loc = val
+    if not _m._isnumlike(A):
+        raise _err("fillmissing: the data must be numeric or logical in Sagebrush.")
+    if dim is not None:
+        # (a dimension past A's last is 1: as rmmissing)
+        dim = min(dim, len(_m._dims(A)))
+    wins, extra = None, 0
+    if method in ("movmean", "movmedian"):
+        kb, kf = _window(param)
+        dims = list(_m._dims(A))
+        ax = _first_dim(tuple(dims)) if dim is None else dim
+        Lw = dims[ax] if ax < len(dims) else 1
+        # (a window reaching past the data's ends is cut there anyway, so it is never longer than the data: the same
+        # result, with a moving median's work, each element's window sorted, bounded by the data's length)
+        wins = (min(kb, max(Lw - 1, 0)), min(kf, max(Lw - 1, 0)))
+        if method == "movmedian":
+            extra = (wins[0] + wins[1] + 1) * Lw * _MOV_CELL
+    _missing_admit(A, "fillmissing", dim, *(o for o in (param, sp, loc) if o is not None and not _istext(o)), extra=extra)
+    miss = _missing_locations(A, loc)
+    cls = _m.class_(A)
+    M = _md(A)
+    if not np.iscomplexobj(M):
+        M = M.astype(np.float64)
+    d = list(M.shape)
+    axis = _first_dim(tuple(_m._dims(A))) if dim is None else dim
+    F, how = _to_front(M, axis)
+    Fm, _ = _to_front(miss.reshape(M.shape), axis)
+    L, R = F.shape
+    t = np.arange(1.0, L + 1)
+    if sp is not None:
+        if method in ("movmean", "movmedian"):
+            raise _err("fillmissing: 'SamplePoints' with a moving window is not supported in Sagebrush.")
+        t = _vec(sp).real.astype(np.float64)
+        if t.size != L or np.any(np.isnan(t)) or (t.size > 1 and not np.all(np.diff(t) > 0)):
+            raise _err("SamplePoints must be a sorted vector of unique values, one for each entry along the dimension.")
+    if np.iscomplexobj(F) and method in ("median", "mode", "movmedian"):
+        # (MATLAB orders complex values by magnitude for a median or mode: not a fill by parts)
+        raise _err("fillmissing: complex data is not supported with '%s' in Sagebrush." % method)
+    if method == "constant":
+        if _istext(param) or not _m._isnumlike(param):
+            raise _err("fillmissing: the constant must be numeric.")
+        cv = _vec(param)
+        if cv.size not in (1, R):
+            raise _err("fillmissing: the constant must be a scalar, or have one value for each vector filled.")
+        consts = np.broadcast_to(cv, (R,))
+    out = F.copy()
+    tf = np.zeros(F.shape, dtype=bool)
+    for c in range(R):
+        if not Fm[:, c].any():
+            continue
+        p = consts[c] if method == "constant" else (wins if method in ("movmean", "movmedian") else None)
+        out[:, c], tf[:, c] = _fill_vector(F[:, c], Fm[:, c], t, method, p, endv, maxgap)
+    res = _from_front(out, how)
+    Fout = _m._finish(_m._canon(_m._contig(np.transpose(res))), cls) if cls not in ("double", "single") else _out(res, cls)
+    if nargout <= 1:
+        return Fout
+    return [Fout, _m._box(np.transpose(_from_front(tf, how)))]
+
+
 # ------------------------------------------------------------------ prctile, quantile
 
 def _quantiles(S, p):
@@ -490,6 +815,9 @@ def quantile_(x, p, *rest):
 # ------------------------------------------------------------------ moving statistics
 
 def _window(k):
+    # (a window is one or two numbers: anything larger is refused before it is read, so that no copy of it is made)
+    if _m._numel(k) not in (1, 2):
+        raise _err("Window length must be a finite, positive scalar or a 2-element vector of nonnegative values.")
     K = _vec(k).real
     if K.size == 1:
         v = float(K[0])

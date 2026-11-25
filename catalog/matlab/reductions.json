@@ -118,6 +118,42 @@
     ]
   },
   {
+    "name": "fillmissing",
+    "kind": "function",
+    "signature": "F = fillmissing(A, method)\nF = fillmissing(A, 'constant', v)\nF = fillmissing(A, movmethod, window)\nF = fillmissing(___, dim)\nF = fillmissing(___, Name, Value)\n[F, TF] = fillmissing(___)",
+    "summary": "Missing values (NaN) filled: by the previous, next or nearest value, by interpolation, a statistic, a constant or a moving window.",
+    "doc": "Methods: 'previous', 'next', 'nearest', 'linear', 'spline', 'pchip', 'mean', 'median', 'mode', 'constant' with a value (one for all, or one per vector), and 'movmean' or 'movmedian' with a window (a length, or [b f]). The default dimension is the first whose size isn't 1. Name-value arguments: 'EndValues' ('extrap', the default, which fills the leading and trailing missing values by the method; 'previous', 'next', 'nearest', 'none' or a value), 'MaxGap' (interior gaps wider than it, measured between the known values around them, are left), 'SamplePoints' and 'MissingLocations'. TF marks the entries filled.",
+    "examples": [
+      {
+        "code": "fillmissing([1 3 NaN 4 NaN NaN 5], 'previous')",
+        "expected": "\nans =\n\n     1     3     3     4     4     4     5\n\n"
+      },
+      {
+        "code": "fillmissing([1 NaN; NaN 2], 'constant', [100 1000])",
+        "expected": "\nans =\n\n           1        1000\n         100           2\n\n"
+      },
+      {
+        "code": "fillmissing([1 NaN 3 NaN NaN 6], 'linear')",
+        "expected": "\nans =\n\n     1     2     3     4     5     6\n\n"
+      }
+    ],
+    "differs": [
+      "Not supported: 'makima', 'knn', a fill function with a gap window, 'SamplePoints' with a moving window, and tables ('DataVariables', 'ReplaceValues').",
+      "Not yet checked against MATLAB, which leaves these open: 'nearest' breaks a tie toward the next value; 'linear', 'spline' and 'pchip' fill nothing with fewer than two known values; a fill that finds no value (as 'previous' before the first known one) leaves NaN and is not marked in TF.",
+      "Also not yet checked: integer data filled through MissingLocations is filled in double and rounded to its class; MaxGap measures a leading or trailing gap from the end sample, so a single missing value at an end is always filled; the refusals' identifiers and messages are Sagebrush's."
+    ],
+    "status": "partial",
+    "see_also": [
+      "rmmissing",
+      "interp1",
+      "movmean",
+      "ismissing"
+    ],
+    "tags": [
+      "data cleaning"
+    ]
+  },
+  {
     "name": "max",
     "kind": "function",
     "signature": "M = max(A)\nM = max(A, [], dim)\nM = max(A, [], vecdim)\nM = max(A, [], 'all')\n[M, I] = max(___)\n[M, I] = max(A, [], 'all', 'linear')\nC = max(A, B)\n___ = max(___, missingflag)",
@@ -401,6 +437,36 @@
     ],
     "tags": [
       "statistics"
+    ]
+  },
+  {
+    "name": "rmmissing",
+    "kind": "function",
+    "signature": "R = rmmissing(A)\nR = rmmissing(A, dim)\nR = rmmissing(___, 'MinNumMissing', n)\nR = rmmissing(___, 'MissingLocations', L)\n[R, TF] = rmmissing(___)",
+    "summary": "Missing values (NaN) removed: a vector's entries, or the rows (or the slices along a dimension) that hold them.",
+    "doc": "The default dimension is the first whose size isn't 1: a matrix loses its rows that hold a missing value, `dim` 2 its columns. 'MinNumMissing' removes only the slices with at least that many. 'MissingLocations' gives the missing entries instead of NaN. TF marks the slices removed. Integer, logical and char data have no missing value.",
+    "examples": [
+      {
+        "code": "rmmissing([1 3 NaN 6 NaN])",
+        "expected": "\nans =\n\n     1     3     6\n\n"
+      },
+      {
+        "code": "[R, TF] = rmmissing([1 NaN; NaN 2; 3 4])",
+        "expected": "\nR =\n\n     3     4\n\n\nTF =\n\n  3×1 logical array\n\n   1\n   1\n   0\n\n"
+      }
+    ],
+    "differs": [
+      "Tables are not supported ('DataVariables').",
+      "Not yet checked against MATLAB: a dimension past the array's last is 1, so rmmissing([1 NaN], 3) removes the one slice and gives a 1-by-2-by-0 array; the refusals' identifiers and messages are Sagebrush's."
+    ],
+    "status": "partial",
+    "see_also": [
+      "fillmissing",
+      "isnan",
+      "ismissing"
+    ],
+    "tags": [
+      "data cleaning"
     ]
   },
   {

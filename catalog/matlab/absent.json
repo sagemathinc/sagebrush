@@ -197,19 +197,6 @@
     ]
   },
   {
-    "name": "fillmissing",
-    "kind": "function",
-    "signature": "F = fillmissing(A, method)",
-    "summary": "Fills missing values (NaN) by a method such as a constant, the previous value or interpolation.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "isnan with indexing: A(isnan(A)) = v for a constant; interp1 over the non-NaN points for interpolation.",
-    "tags": [
-      "data cleaning"
-    ]
-  },
-  {
     "name": "fmincon",
     "kind": "function",
     "signature": "x = fmincon(fun, x0, A, b)",
@@ -469,19 +456,6 @@
     "alternative": "load reads a numeric text file, whitespace- or comma-separated (M = load('data.csv')); for other text, fopen with fgetl, strsplit and str2double; in Python mode, numpy.loadtxt.",
     "tags": [
       "files"
-    ]
-  },
-  {
-    "name": "rmmissing",
-    "kind": "function",
-    "signature": "R = rmmissing(A)",
-    "summary": "Removes missing values (NaN), or rows containing them.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "A(~isnan(A)) for a vector; A(~any(isnan(A), 2), :) for rows of a matrix.",
-    "tags": [
-      "data cleaning"
     ]
   },
   {

@@ -15993,5 +15993,100 @@
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the extrema's largest magnitude, which scales a range that overflows; not a limit"
+ },
+ "lib/_matlab_data.py :: _fill_vector :: def _fill_vector(x, miss, t, method, param, endv, maxgap): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's 'MaxGap', fillmissing's own argument that leaves wider gaps unfilled, as MATLAB's page describes; not a Sagebrush limit"
+ },
+ "lib/_matlab_data.py :: _fill_vector :: if maxgap is not None: #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's 'MaxGap', fillmissing's own argument that leaves wider gaps unfilled, as MATLAB's page describes; not a Sagebrush limit"
+ },
+ "lib/_matlab_data.py :: _fill_vector :: prev_k = np.maximum.accumulate(np.where(known, pos, -1)) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: np.maximum/np.minimum find the known value before or after each entry and keep its index in range; not a limit"
+ },
+ "lib/_matlab_data.py :: _fill_vector :: prev_k = np.maximum.accumulate(np.where(known, pos, -1)) #1": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: np.maximum/np.minimum find the known value before or after each entry and keep its index in range; not a limit"
+ },
+ "lib/_matlab_data.py :: _fill_vector :: prev_v = np.where(prev_k >= 0, x[np.maximum(prev_k, 0)], _math.nan) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: np.maximum/np.minimum find the known value before or after each entry and keep its index in range; not a limit"
+ },
+ "lib/_matlab_data.py :: _fill_vector :: size = np.where(inner, t[np.minimum(next_k, n - 1)] - t[np.maximum(prev_k, 0)], 0.0) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: np.maximum/np.minimum find the known value before or after each entry and keep its index in range; not a limit"
+ },
+ "lib/_matlab_data.py :: _fill_vector :: want = want & (size <= maxgap) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's 'MaxGap', fillmissing's own argument that leaves wider gaps unfilled, as MATLAB's page describes; not a Sagebrush limit"
+ },
+ "lib/_matlab_data.py :: _fill_vector.nearest :: dp = np.where(prev_k >= 0, t - t[np.maximum(prev_k, 0)], _math.inf) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: np.maximum/np.minimum find the known value before or after each entry and keep its index in range; not a limit"
+ },
+ "lib/_matlab_data.py :: fillmissing_ :: and 'EndValues', 'MaxGap', 'SamplePoints' and 'MissingLocations': A's missing values (NaN in double and single #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's 'MaxGap', fillmissing's own argument that leaves wider gaps unfilled, as MATLAB's page describes; not a Sagebrush limit"
+ },
+ "lib/_matlab_data.py :: fillmissing_ :: elif key == \"maxgap\": #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's 'MaxGap', fillmissing's own argument that leaves wider gaps unfilled, as MATLAB's page describes; not a Sagebrush limit"
+ },
+ "lib/_matlab_data.py :: fillmissing_ :: endv, maxgap, sp, loc = \"extrap\", None, None, None #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's 'MaxGap', fillmissing's own argument that leaves wider gaps unfilled, as MATLAB's page describes; not a Sagebrush limit"
+ },
+ "lib/_matlab_data.py :: fillmissing_ :: if key not in (\"endvalues\", \"maxgap\", \"samplepoints\", \"missinglocations\") or not args: #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's 'MaxGap', fillmissing's own argument that leaves wider gaps unfilled, as MATLAB's page describes; not a Sagebrush limit"
+ },
+ "lib/_matlab_data.py :: fillmissing_ :: maxgap = _scalar(val) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's 'MaxGap', fillmissing's own argument that leaves wider gaps unfilled, as MATLAB's page describes; not a Sagebrush limit"
+ },
+ "lib/_matlab_data.py :: fillmissing_ :: out[:, c], tf[:, c] = _fill_vector(F[:, c], Fm[:, c], t, method, p, endv, maxgap) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's 'MaxGap', fillmissing's own argument that leaves wider gaps unfilled, as MATLAB's page describes; not a Sagebrush limit"
+ },
+ "lib/_matlab_data.py :: fillmissing_ :: raise _err(\"MaxGap must be a positive numeric scalar.\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's 'MaxGap', fillmissing's own argument that leaves wider gaps unfilled, as MATLAB's page describes; not a Sagebrush limit"
+ },
+ "lib/_matlab_data.py :: fillmissing_ :: raise _err(\"fillmissing: the name-value arguments are 'EndValues', 'MaxGap', 'SamplePoints' and 'MissingLocations'.\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's 'MaxGap', fillmissing's own argument that leaves wider gaps unfilled, as MATLAB's page describes; not a Sagebrush limit"
+ },
+ "lib/_matlab_data.py :: fillmissing_ :: wider than MaxGap left; TF marks the entries filled\"\"\" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in MATLAB's 'MaxGap', fillmissing's own argument that leaves wider gaps unfilled, as MATLAB's page describes; not a Sagebrush limit"
+ },
+ "lib/_matlab_data.py :: _fill_vector :: im, _ = _fill_vector(np.array(x.imag), miss, t, method, _part(param, 1), _part(endv, 1), maxgap) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxgap, MATLAB's 'MaxGap' argument passed on to each part of complex data; not a Sagebrush limit"
+ },
+ "lib/_matlab_data.py :: _fill_vector :: re, _ = _fill_vector(np.array(x.real), miss, t, method, _part(param, 0), _part(endv, 0), maxgap) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxgap, MATLAB's 'MaxGap' argument passed on to each part of complex data; not a Sagebrush limit"
  }
 }
