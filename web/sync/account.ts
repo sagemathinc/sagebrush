@@ -2424,6 +2424,12 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     for (const t of ["holdings", "reservations"]) this.sql.exec(`ALTER TABLE ${t} DROP COLUMN ct_sha256`);
     return this.sql.exec("PRAGMA table_info(holdings)").toArray().every((c) => (c as Row).name !== "ct_sha256");
   }
+  /** Tests only: this object as one made before the index's references (e2e PR 5d): the table dropped. */
+  async testOldIndexRefs(): Promise<boolean> {
+    if (!testMode(this.env)) return false;
+    this.sql.exec("DROP TABLE IF EXISTS index_refs");
+    return !this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'index_refs'");
+  }
   /** Tests only: a holding's stored ct_sha256, as stored (null for a row from before the column). */
   async testHeldCt(a: { sha256: string }): Promise<string | null | undefined> {
     if (!testMode(this.env)) return undefined;

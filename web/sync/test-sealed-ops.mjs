@@ -55,6 +55,7 @@ const X = "5ea1ed00-0006-4e2e-8e2e-e2e2e2e2e206"; // the agents' index of an acc
 const Y = "5ea1ed00-0007-4e2e-8e2e-e2e2e2e2e207"; // an account encrypted before its first grant
 const Z = "5ea1ed00-0008-4e2e-8e2e-e2e2e2e2e208"; // an account encrypted while its index builds
 const K = "5ea1ed00-0009-4e2e-8e2e-e2e2e2e2e209"; // releases keyed to the add they end
+const L = "5ea1ed00-000a-4e2e-8e2e-e2e2e2e2e20a"; // an object made before the index's references
 const SITE = "https://sagebrush.test";
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
@@ -63,7 +64,7 @@ const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled:
 const cocalc = async () => Response.json(plan);
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
 const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_AGENT_FAIL: { namespace_id: id + "9", simple: { limit: 1_000_000, period: 60 } } });
-const listed = [A, N, R, P, S, X, Y, Z, K].join(",");
+const listed = [A, N, R, P, S, X, Y, Z, K, L].join(",");
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_E2E: "1", SYNC_AGENT: "1", GRANT_TAG_KEY: "grant-tag-key", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("4101") },
@@ -577,6 +578,30 @@ await section("releases keyed to the add they end: exact, once, and only an inde
   ok((await one(b3)) === 3, "b3's shared count is still the pins' and the plaintext op's, untouched by every refusal");
   ws.ws.close();
   wp.ws.close();
+});
+
+await section("an object made before the index's references: its restart makes the table, and an add and its release work", async () => {
+  const s = await enabled(L);
+  const ws0 = await socket(s);
+  const n0 = (await hello(ws0, "sealed-dev-l001")).next_dseq;
+  ok(Number.isInteger((await ws0.ask({ t: "ops", ops: [{ dseq: n0, t: Date.now(), by: "person", op: "mkdir", path: "/l", kind: "folder", fid: "0000000000000f01" }] }))?.ops?.[0]?.seq), "(a plaintext op: the object exists)");
+  ws0.ws.close();
+  const acct = await objectOf(L);
+  ok((await acct.testOldIndexRefs()) === true, "(the table dropped, as an object made before it has none)");
+  await acct.crash().catch(() => {});
+  ok(await until(async () => (await (await objectOf(L)).inspect({}).catch(() => null)) !== null, 5_000), "(the object restarted)");
+  const W = account(L);
+  const g = await W.genesis();
+  ok((await post(s, L, "/api/sync/v1/e2e/chain", g.body)).status === 201, "(genesis)");
+  const ws = await socket(s);
+  let n = (await hello(ws, "sealed-dev-l001")).next_dseq;
+  const blob = Buffer.from("an old object's blob");
+  ok((await putBlob(s, blob)).status === 201, "(a blob held)");
+  const a1 = await ws.ask({ t: "sops", ops: [await signed(W, g.d, g.next, "sealed-dev-l001", n, { adds: [sha(blob)] })] });
+  const r1 = Number.isInteger(a1?.ops?.[0]?.seq) ? await ws.ask({ t: "sops", ops: [await signed(W, g.d, g.next, "sealed-dev-l001", n + 1, { releases: [{ address: sha(blob), add: a1.ops[0].seq }] })] }) : null;
+  const ix = (await (await objectOf(L)).inspect({}))?.index_refs ?? [];
+  ok(Number.isInteger(r1?.ops?.[0]?.seq) && ix.length === 1 && ix[0].released_seq === r1.ops[0].seq, "after the restart: an add and its release accepted, the add recorded and ended: " + J({ a1: a1?.ops ?? a1, r1: r1?.ops ?? r1, ix }));
+  ws.ws.close();
 });
 
 await section("an encrypted account's agents' index: off, every route that reads it refused, before and after the first sealed op", async () => {
