@@ -33,7 +33,7 @@ function files(web) {
 }
 
 // ---- the caps themselves, as approved (a change to them is a ruling: this line changes with it)
-check(LATEX_CAPS.raw === 255748 && LATEX_CAPS.gzip === 85629, "the caps are 255,748 B raw and 85,629 B gzip (2026-11-24, amsart's front matter, the bibliography's label column, a \\cite note, on its merge with master bf92ce4f: 255,684 / 85,565 measured + 64; 252,762 / 84,654 before, the preview's watchdog not counting the page's own blocking)");
+check(LATEX_CAPS.raw === 255840 && LATEX_CAPS.gzip === 85653, "the caps are 255,840 B raw and 85,653 B gzip (2026-11-24, a block that fits is never too large, on its merge with master a1153559: 255,776 / 85,589 measured + 64; 255,748 / 85,629 before, amsart's front matter)");
 
 // (and each lazy chunk's, as approved: comments 16/6, comments-doc 40/16, agent 47,645 / 16,403 B (2026-11-10, for the
 //  grant's "May run code"; 45,952 / 16,000 for the grant's id and hold, 44/15.5 on 2026-11-04, before), tools
@@ -198,10 +198,14 @@ else {
     writeFileSync(join(dir, "files.txt"), f + "\n");
     const r = spawnSync(process.execPath, [join(root, "scripts", "ci-paths.mjs")], { encoding: "utf8", cwd: root,
       env: { ...process.env, CI_PATHS_FILES: join(dir, "files.txt"), GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: "" } });
-    return r.status !== 0 || !/^full=true$/m.test(r.stdout);
+    if (r.status !== 0 || !/^full=true$/m.test(r.stdout)) return true;
+    // (and under PR CI light, which turns the full tier off, it still keeps web-artifacts: latex_budget)
+    const light = spawnSync(process.execPath, [join(root, "scripts", "ci-paths.mjs")], { encoding: "utf8", cwd: root,
+      env: { ...process.env, CI_PATHS_FILES: join(dir, "files.txt"), GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: "", CI_PR_LIGHT: "true" } });
+    return light.status !== 0 || !/^latex_budget=true$/m.test(light.stdout);
   });
   rmSync(dir, { recursive: true, force: true });
-  check(inputs.length > 0 && notFull.length === 0, `each of the LaTeX bundles' ${inputs.length} inputs selects the full tier (scripts/ci-paths.mjs)`, { notFull });
+  check(inputs.length > 0 && notFull.length === 0, `each of the LaTeX bundles' ${inputs.length} inputs selects the full tier, and web-artifacts under PR CI light (scripts/ci-paths.mjs)`, { notFull });
 }
 
 const status = fails.length ? 1 : 0;

@@ -140,6 +140,25 @@ check("split-over-2MiB-placeholder", (() => { const t = splitChunk('<div class="
   check("split-weight", weight('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') === bytes('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') - "data:abc".length && weight("src=\"data:zz\" text") === bytes("src=\"data:zz\" text"), null);
 }
 check("split-small-unchanged", splitChunk('<div class="p">hi</div>')[0] === '<div class="p">hi</div>', null);
+// (issue 623: a table float of amsldoc's, 50 KiB, was "too large (50 KiB, over 128 KiB)". KaTeX's MathML writes
+//  <mtd class ="mtr-glue"> (a space before "="), which the tag pattern didn't take as a tag: its close tags unmatched,
+//  the float wasn't one element, and that was a placeholder at any size over the 32 KiB aimed for. Now such tags are
+//  tags; a chunk that fits one piece is never a placeholder; and the size a placeholder says is over the limit it says)
+{
+  const gather = '<span class="katex-display"><math><semantics><mtable><mtr><mtd class ="mtr-glue"></mtd><mtd><mi>a</mi></mtd><mtd class ="mml-eqn-num"></mtd></mtr></mtable></semantics></math></span>';
+  const float = '<div class="float">' + Array.from({ length: 160 }, (_, k) => '<div class="p">row ' + k + " " + gather.repeat(2) + "</div>").join("") + "</div>";
+  const told = [], fp = splitChunk(float, (why, size) => told.push(tooLargeProblem(why, size, 0)));
+  check("split-katex-spaced-attributes-are-tags", bytes(float) > 32 * 1024 && bytes(float) < PIECE_MAX && told.length === 0 && fp.length > 1 && !fp.some((p) => /toolarge/.test(p)) && fp.slice(1).every((p) => p.startsWith('<div class="float cont">')), { n: bytes(float), told, pieces: fp.length });
+  // (not one element (two siblings), over the target, under the maximum: kept whole, nothing said)
+  const two = '<div class="p">' + "a ".repeat(12000) + '</div><div class="p">' + "b ".repeat(12000) + "</div>", told2 = [];
+  const tw = splitChunk(two, (why, size) => told2.push(size));
+  check("split-fits-one-piece-never-a-placeholder", bytes(two) > 32 * 1024 && bytes(two) < PIECE_MAX && tw.length === 1 && tw[0] === two && told2.length === 0, { n: bytes(two), told2, pieces: tw.length });
+  // (every placeholder's size over the limit it names)
+  const said = [];
+  for (const h of [table, huge, '<div class="p">' + "y ".repeat(CHUNK_MAX) + "</div>"]) splitChunk(h, (why, size) => said.push(tooLargeProblem(why, size, 0).name));
+  const over = said.map((s) => /\((\d+) KiB, over (\d+) KiB\)$/.exec(s)).map((m) => m && +m[1] > +m[2]);
+  check("split-placeholder-size-over-its-limit", said.length === 3 && over.every(Boolean), said);
+}
 
 // ---- watchdog.ts (issue 619): the preview's watchdog judges the worker by the page's time; a timer the page's own
 // blocking made late waits once more (LATE_MS) for a reply already queued, then the worker is hung. A fake clock: `run`

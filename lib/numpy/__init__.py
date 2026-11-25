@@ -1468,53 +1468,65 @@ def nanmedian(a, axis=None, out=None, overwrite_input=False, keepdims=False):
 
 
 def quantile(a, q, axis=None, out=None, overwrite_input=False, method="linear", keepdims=False):
+    return _quantile(a, asarray(q), type(q) in (int, float), axis, method, keepdims, "Quantiles must be in the range [0, 1]")
+
+
+def _quantile(a, qa, weak_q, axis, method, keepdims, out_of_range):
+    # (NumPy's _quantile, step for step, so the result's dtype and bits are NumPy's: the virtual index (n-1)*q in q's
+    # own dtype (a float32 q gives a float32 index, #1866), gamma its fractional part in that dtype (a Python float when
+    # q was a Python int or float: weak, so float32 data stays float32), method="midpoint"'s gamma 0 where the index is
+    # an integer and 0.5 elsewhere (#1866), then NumPy's _lerp with its dtype promotion: a weak q keeps float32 data
+    # float32, a strong float64 q promotes the result)
     a = asarray(a)
     if axis is None:
         a, axis = a.ravel(), 0
     s = moveaxis(sort(a, axis=axis), axis, -1)
     n = s.shape[-1]
-    # (the result's dtype, as NumPy's NEP 50 promotion gives it: a float array keeps its float type for a q given as
-    # a Python number; a NumPy or array q promotes with it; integers interpolate in float64)
-    dt = a.dtype if a.dtype.kind == "f" else dtype(float64)
-    if not (isinstance(q, (int, float)) and not isinstance(q, (bool, generic))):
-        dt = result_type(dt, asarray(q).dtype)
-    # (the neighbours in their own float type, as NumPy's _lerp takes them, so b - a is computed there; integers
-    # as float64; anything else as before, which refuses it as NumPy's arithmetic does)
-    cast = (lambda v: v) if a.dtype.kind == "f" else (lambda v: v.astype(float64)) if a.dtype.kind in "biu" else _floats
-    qs = _floats(q)
     vals = []
-    for qq in qs.ravel().tolist():
+    for qq in qa.ravel():
         if not (0 <= qq <= 1):
-            raise ValueError("Quantiles must be in the range [0, 1]")
+            raise ValueError(out_of_range)
         virtual = (n - 1) * qq
+        # (an integer q, 0 or 1, under "linear": the element itself, in the data's dtype, as NumPy takes it)
+        if method == "linear" and qa.dtype.kind in "iub":
+            vals.append(s[..., int(virtual)])
+            continue
         if method in ("lower", "higher", "nearest"):
-            k = {"lower": _math.floor, "higher": _math.ceil, "nearest": _builtins.round}[method](virtual)
+            k = {"lower": _math.floor, "higher": _math.ceil, "nearest": _builtins.round}[method](float(virtual))
             vals.append(s[..., int(k)])
             continue
-        lo = int(_math.floor(virtual))
-        hi = _builtins.min(lo + 1, n - 1)
         if method == "midpoint":
-            vals.append((cast(s[..., lo]) + cast(s[..., hi])) / 2)
-            continue
-        t = virtual - lo
-        av, bv = cast(s[..., lo]), cast(s[..., hi])
-        diff_b_a = bv - av
-        # (NumPy's _lerp, its weights in the result's float type: a Python float rounded to float32 for a float32
-        # loop, as NumPy casts it; float64 for a NumPy or array q, which promotes the float32 neighbours)
-        w, w1 = (float32(t), float32(1 - t)) if dt == float32 else (float64(t), float64(1 - t))
-        vals.append(where(t >= 0.5, bv - diff_b_a * w1, av + diff_b_a * w))
-    res = array(vals) if qs.ndim else asarray(vals[0])
-    if qs.ndim:
-        res = res.reshape(qs.shape + res.shape[1:])
+            virtual = 0.5 * (floor(virtual) + ceil(virtual))
+        lo = int(_math.floor(float(virtual)))
+        hi = _builtins.min(lo + 1, n - 1)
+        if virtual >= n - 1:
+            lo = hi = n - 1
+        if method == "midpoint":
+            gamma = asarray(0.0 if virtual % 1 == 0 else 0.5, dtype=asarray(virtual).dtype)[()]
+        else:
+            gamma = virtual - floor(virtual)
+        prev, nxt = s[..., lo], s[..., hi]
+        diff_b_a = nxt - prev
+        if weak_q:
+            # (a Python float weight, as NumPy makes gamma: weak, so for float32 data it and 1 - gamma are rounded to
+            # float32 before the loop, as NEP 50 casts a weak scalar; the arithmetic then stays float32)
+            g = float(gamma)
+            w, w1 = (float32(g), float32(1 - g)) if asarray(diff_b_a).dtype == float32 else (g, 1 - g)
+        else:
+            w, w1 = gamma, 1 - gamma
+        vals.append(nxt - diff_b_a * w1 if gamma >= 0.5 else prev + diff_b_a * w)  # NumPy's _lerp
+    res = array(vals) if qa.ndim else asarray(vals[0])
+    if qa.ndim:
+        res = res.reshape(qa.shape + res.shape[1:])
     if keepdims:
-        res = expand_dims(res, axis if qs.ndim == 0 else axis + qs.ndim)
+        res = expand_dims(res, axis if qa.ndim == 0 else axis + qa.ndim)
     return res if res.ndim else res[()]
 
 
 def percentile(a, q, axis=None, out=None, overwrite_input=False, method="linear", keepdims=False):
-    # (a q given as a Python number stays one, so the result keeps the array's float type, as NumPy's)
-    weak = isinstance(q, (int, float)) and not isinstance(q, (bool, generic))
-    return quantile(a, q / 100 if weak else _floats(q) / 100, axis=axis, method=method, keepdims=keepdims)
+    # (q/100 as NumPy divides it, in q's dtype; a Python int or float q stays weak, so float32 data stays float32)
+    return _quantile(a, true_divide(asarray(q), 100), type(q) in (int, float), axis, method, keepdims,
+                     "Percentiles must be in the range [0, 100]")
 
 
 def average(a, axis=None, weights=None, returned=False, *, keepdims=False):
