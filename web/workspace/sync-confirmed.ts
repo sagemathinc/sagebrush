@@ -16,8 +16,9 @@ import { OVERLAY, runPage, rowsOf, Halt, type Hidden, type Overlay, type Store }
 import { D11, RW, type Mapping } from "./sync-rewrite";
 import { VIEW_STORES, applyView, type ListedWhy } from "./sync-view";
 import { capNow } from "./sync-pins";
+import { ledgerPage } from "./sync-refs";
 import type { Entry, Op, SyncRenamed } from "./api";
-import type { SyncEntry, SyncOp } from "./sync-reduce";
+import type { Outcome, SyncEntry, SyncOp } from "./sync-reduce";
 
 const keyOf = (p: string) => p.normalize("NFC");
 const META = "meta";
@@ -335,7 +336,7 @@ export async function applyOps(
   w: Workspace,
   ns: string,
   ops: SyncOp[],
-  opts: { prefix?: string; cursorAt?: string; stores?: string[]; onPage?: (tx: IDBTransaction, changed: string[], prefix: string, large?: LargeApplied, taken?: SyncOp[]) => Promise<void>; locked?: <T>(f: () => Promise<T>) => Promise<T>; afterLarge?: (gen: string) => Promise<void> } = {},
+  opts: { prefix?: string; cursorAt?: string; stores?: string[]; onPage?: (tx: IDBTransaction, changed: string[], prefix: string, large?: LargeApplied, taken?: SyncOp[], outcomes?: Outcome[]) => Promise<void>; locked?: <T>(f: () => Promise<T>) => Promise<T>; afterLarge?: (gen: string) => Promise<void> } = {},
 ): Promise<Applied> {
   const stores = [...new Set(["syncIndex", META, ...(opts.stores ?? [])])];
   let at = 0, pages = 0, carry = 0, cursor = 0;
@@ -399,7 +400,7 @@ export async function applyOps(
         }
       }
       const changed = [...page.changed];
-      if (opts.onPage) await opts.onPage(tx, changed, prefix, large, ops.slice(at, at + taken));
+      if (opts.onPage) await opts.onPage(tx, changed, prefix, large, ops.slice(at, at + taken), page.outcomes);
       for (const id of changed) changedAll.push(id);
       at += taken;
       carry = page.carry;
@@ -458,8 +459,11 @@ export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], ho
         // (each page holding the workspace's lock: an ordinary change's hold, refused while quarantined or after a
         // reset elsewhere, the durability witness brought up to its commit; never across a large move's own pages)
         locked: (f) => w.locked(f),
-        onPage: async (tx, changed, prefix, large, taken) => {
+        onPage: async (tx, changed, prefix, large, taken, outcomes) => {
           keep();
+          // (e2e PR 5d: the index's references, from this page's sealed ops, in the transaction that moves the cursor; a
+          // release op that can't be accepted throws here, so nothing of its page is kept)
+          if (hooks.sealed && taken?.length) await ledgerPage(tx.objectStore(META), idbStore(tx, prefix), prefix, taken, outcomes ?? [], (seq) => hooks.sealed!.has(seq));
           // (e2e PR 5c: what pull had verified as of this page's last op, kept in the transaction that moves the cursor
           // past it, so a reload resumes verifying from exactly there)
           if (hooks.sealed && taken?.length) {

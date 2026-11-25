@@ -39,6 +39,7 @@ import { cursorOf, applyOps, genPrefix, drainConfirmed, sealedPullKey } from "./
 import { capture as captureAdoption } from "./sync-adopt";
 import { SENDER_HOLD, ReplayHalted, runReplay } from "./sync-replay";
 import { Halt } from "./sync-overlay";
+import { ReleaseHalt } from "./sync-refs";
 import { rewriting } from "./sync-rewrite";
 import { REBUILD, passOf, passCursor, cleanStep, stage, stageEchoes, logDone, captureStep, done, viewStep, retireStep, acked as rebuiltAcked, announceInvalid } from "./sync-rebuild";
 import type { SyncOp } from "./sync-reduce";
@@ -913,8 +914,17 @@ export class SyncClient {
     }
     if (this.opts.onIndex && ops.length) {
       try {
-        await this.opts.onIndex({ ns: c.ns, ops, more: m.more, ...(pageStates.size ? { sealed: pageStates } : {}) });
+        // (with the sealing module, every page carries its map, empty or not: the index's references (e2e PR 5d) are kept
+        // from every page alike, however the log was cut into pages)
+        await this.opts.onIndex({ ns: c.ns, ops, more: m.more, ...(this.opts.e2e || pageStates.size ? { sealed: pageStates } : {}) });
       } catch (e) {
+        // (a release op this device can't accept (e2e PR 5d): stopped at it, as at a sealed op that doesn't verify)
+        if (e instanceof ReleaseHalt) {
+          c.halted = "sealed-halt";
+          this.stats.sealedHalt = e.message.slice(0, 300);
+          this.showWaiting(c, (await c.ob.status()).count);
+          return;
+        }
         // (D11: a large move's rewrite stuck, or its view's replay stopped: the pages held (nothing past them is
         // read), sending goes on, the person told; a reload tries once more)
         if (e instanceof ReplayHalted || e instanceof Halt) {

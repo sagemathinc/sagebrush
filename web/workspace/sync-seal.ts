@@ -15,6 +15,7 @@
 import { OP_REFS_MAX, opEpoch, opHash, openIndexOp, sealIndexOp, signIndexOp, verifyIndexOp, type OpRelease } from "./e2e/index-op.ts";
 import type { EpochKeys } from "./e2e/keys.ts";
 import type { WireOp } from "./sync-outbox";
+import { RELEASE_OP as RELEASE, refsOf } from "./sync-refs";
 
 /** The key chain as this device last verified it: what a sealed op commits to, and what pull checks one against. Every
  * position is the chain's ABSOLUTE seq (its base plus the head's index), and anything about a head this verified chain
@@ -61,19 +62,8 @@ export type Sealed = {
   sig: string;
 };
 
-/**
- * The blob references an op declares in the clear (the server counts them): as today's plaintext log counts them, a
- * data file's op adds a reference to the blob it names. Only a `release` op releases (e2e PR 5d): it adds nothing,
- * changes no entry, and names the adds it ends; no other op carries a release, so a race between two devices releasing
- * one add refuses a release, never a person's edit.
- */
-export function refsOf(op: WireOp): { adds: string[]; releases: OpRelease[] } {
-  if (op.op === RELEASE) return { adds: [], releases: (op.releases ?? []).map((r) => ({ address: r.address, add: r.add })) };
-  return { adds: op.kind === "file" && op.sha256 !== undefined ? [op.sha256] : [], releases: [] };
-}
-
-/** The op that releases index references (e2e PR 5d): `{ dseq, t, by, op: "release", path: "/", kind: "folder", releases }`, nothing else. */
-export const RELEASE = "release";
+/** (the references an op declares, and the release op's name: sync-refs.ts, which the page has without this module) */
+export { refsOf, RELEASE };
 /** A release op as this device makes it. */
 export const releaseOp = (dseq: number, t: number, by: string, releases: readonly OpRelease[]): WireOp =>
   ({ dseq, t, by, op: RELEASE, path: "/", kind: "folder", releases: releases.map((r) => ({ address: r.address, add: r.add })) });
