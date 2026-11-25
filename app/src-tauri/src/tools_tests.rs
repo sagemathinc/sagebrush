@@ -271,3 +271,35 @@ fn the_refusal_codes_are_the_closed_list() {
     let codes: Vec<&str> = all.iter().map(|r| r.code()).collect();
     assert_eq!(codes, ["not_absolute", "missing", "not_regular", "not_executable", "wrong_owner", "writable_by_others", "parent_writable", "version_unknown", "version_mismatch", "no_answer", "identity_changed", "unsupported_platform"]);
 }
+
+#[test]
+fn a_descendant_that_escapes_the_group_with_the_pipes_holds_nothing_of_ours_after_the_call() {
+    // (the tool answers and exits, leaving a finite descendant in its own session that keeps both inherited pipes;
+    //  after choose() has returned, it writes one byte to each and records whether a reader still held the pipe:
+    //  with ours closed, each write fails (EPIPE); a reader left behind would take it)
+    let t = Tmp::new("escape");
+    let probe = t.0.join("probe");
+    let body = format!(
+        "perl -MPOSIX -e '$SIG{{PIPE}}=\"IGNORE\"; POSIX::setsid(); sleep 4; $|=1; my $o = (print STDOUT \"x\") ? \"open\" : \"closed\"; select(STDERR); $|=1; my $e = (print STDERR \"x\") ? \"open\" : \"closed\"; open(my $f, \">\", $ARGV[0]); print $f \"$o $e\"; close $f' '{}' &\n{GOOD}",
+        probe.display()
+    );
+    let p = script(&t.0, "claude", &body, 0o755);
+    let started = std::time::Instant::now();
+    let r = choose(&p, my_uid(), &run(&t));
+    let took = started.elapsed();
+    // (the answer came, but the streams never ended: refused, within the grace after the tool's exit)
+    assert_eq!(r.unwrap_err(), ToolRefusal::NoAnswer);
+    // (within the grace after the tool's exit, and well before the descendant ends: its pipes didn't hold the call)
+    assert!(took < Duration::from_millis(3500), "returned within the grace: {took:?}");
+    let mut got = String::new();
+    for _ in 0..800 {
+        if let Ok(s) = fs::read_to_string(&probe) {
+            if !s.is_empty() {
+                got = s;
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(got, "closed closed", "no reader of ours outlived the call");
+}

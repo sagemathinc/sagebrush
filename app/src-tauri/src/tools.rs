@@ -15,7 +15,8 @@
 //
 // version(): no shell; an explicit environment (PATH fixed, HOME the person's, DISABLE_AUTOUPDATER=1, nothing
 // inherited); the app's own working folder; stdin closed; stdout and stderr each capped at VERSION_OUTPUT bytes; its
-// own process group, killed at VERSION_DEADLINE and reaped.
+// own process group, killed at VERSION_DEADLINE and reaped. Both streams are read on the calling thread from
+// non-blocking pipes, so no reader outlives the call, even if something the tool left behind holds a pipe open.
 //
 // The refusal codes are the agent's (--claude-path) closed list, in its order: wrong_owner is the file or a folder
 // above it owned by someone other than the person or root; parent_writable a folder above it writable by others. Windows: unsupported_platform, until the agent host starts agents there.
@@ -85,6 +86,18 @@ pub struct VersionRun<'a> {
     pub home: &'a Path,
     pub cwd: &'a Path,
     pub supported: &'a [&'a str],
+}
+
+/// A child's output pipe: readable, with its descriptor (for O_NONBLOCK and poll).
+#[cfg(unix)]
+trait ReadFd: std::io::Read {
+    fn raw(&self) -> std::os::fd::RawFd;
+}
+#[cfg(unix)]
+impl<T: std::io::Read + std::os::fd::AsRawFd> ReadFd for T {
+    fn raw(&self) -> std::os::fd::RawFd {
+        self.as_raw_fd()
+    }
 }
 
 /// The person's effective user id (the owner a chosen tool and its folders may have, besides root).
@@ -175,7 +188,6 @@ fn check_file(target: &Path, me: u32) -> Result<Identity, ToolRefusal> {
 /// supported.
 #[cfg(unix)]
 pub fn version(target: &Path, run: &VersionRun) -> Result<String, ToolRefusal> {
-    use std::io::Read;
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
     let mut cmd = Command::new(target);
@@ -191,58 +203,114 @@ pub fn version(target: &Path, run: &VersionRun) -> Result<String, ToolRefusal> {
         .process_group(0);
     let mut child = cmd.spawn().map_err(|_| ToolRefusal::NoAnswer)?;
     let pid = child.id() as libc::pid_t;
-    // (each stream read on its own thread, at most VERSION_OUTPUT + 1 bytes: one more means over the cap; the
-    //  results come back on channels, so a stream something else keeps open can't hold the app)
-    let take = |s: Option<Box<dyn Read + Send>>| {
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            if let Some(s) = s {
-                let _ = s.take(VERSION_OUTPUT as u64 + 1).read_to_end(&mut buf);
-            }
-            let _ = tx.send(buf);
-        });
-        rx
-    };
-    let out = take(child.stdout.take().map(|s| Box::new(s) as Box<dyn Read + Send>));
-    let err = take(child.stderr.take().map(|s| Box::new(s) as Box<dyn Read + Send>));
+    // (both streams read here, on this thread, from non-blocking pipes under poll(): no reader thread exists, so
+    //  nothing is left behind when a descendant that escaped the group keeps a pipe open; at most VERSION_OUTPUT + 1
+    //  bytes each, and a stream past its cap is closed at once)
+    let mut streams: [Option<Box<dyn ReadFd>>; 2] = [
+        child.stdout.take().map(|s| Box::new(s) as Box<dyn ReadFd>),
+        child.stderr.take().map(|s| Box::new(s) as Box<dyn ReadFd>),
+    ];
+    for s in streams.iter().flatten() {
+        let fd = s.raw();
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL);
+            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        }
+    }
+    let mut bufs: [Vec<u8>; 2] = [Vec::new(), Vec::new()];
+    let mut eof = [false, false];
+    let mut over = false;
     // (the leader's exit is observed without reaping it (WNOWAIT): until the reap, its pid and group id can't be
     //  reused, so the group kill below can only reach this tool's own group)
     let started = std::time::Instant::now();
+    let grace = Duration::from_secs(1);
     let mut gone = false;
-    let exited = loop {
-        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
-        let r = unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) };
-        if r != 0 {
-            if std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
+    let mut exited_at: Option<std::time::Instant> = None;
+    loop {
+        // (read what is there, waiting at most 10 ms)
+        let mut fds: Vec<libc::pollfd> = Vec::new();
+        let mut which: Vec<usize> = Vec::new();
+        for (i, s) in streams.iter().enumerate() {
+            if let (Some(s), false) = (s, eof[i]) {
+                fds.push(libc::pollfd { fd: s.raw(), events: libc::POLLIN, revents: 0 });
+                which.push(i);
+            }
+        }
+        if !fds.is_empty() {
+            unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, 10) };
+        } else {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        for (k, &i) in which.iter().enumerate() {
+            if fds[k].revents == 0 {
                 continue;
             }
-            // (no such child: reaped some other way, so its group id may already be someone else's: no group kill)
-            gone = true;
-            break false;
+            let mut chunk = [0u8; 4096];
+            loop {
+                let Some(s) = streams[i].as_mut() else { break };
+                match s.read(&mut chunk) {
+                    Ok(0) => {
+                        eof[i] = true;
+                        break;
+                    }
+                    Ok(n) => {
+                        bufs[i].extend_from_slice(&chunk[..n]);
+                        if bufs[i].len() > VERSION_OUTPUT {
+                            // (past the cap: refused whatever follows; the stream closed now, so the writer stops)
+                            over = true;
+                            eof[i] = true;
+                            streams[i] = None;
+                            break;
+                        }
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(_) => {
+                        eof[i] = true;
+                        break;
+                    }
+                }
+            }
         }
-        // (WNOHANG with nothing to report leaves the zeroed siginfo as it was; an exit reports SIGCHLD)
-        if info.si_signo == libc::SIGCHLD {
-            break true;
+        if exited_at.is_none() && !gone {
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            let r = unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) };
+            if r != 0 {
+                if std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+                    // (no such child: reaped some other way, so its group id may already be someone else's)
+                    gone = true;
+                }
+            } else if info.si_signo == libc::SIGCHLD {
+                // (WNOHANG with nothing to report leaves the zeroed siginfo as it was; an exit reports SIGCHLD)
+                exited_at = Some(std::time::Instant::now());
+            }
         }
-        if started.elapsed() >= VERSION_DEADLINE {
-            break false;
+        let done = eof[0] && eof[1];
+        if over || gone || (exited_at.is_some() && done) {
+            break;
         }
-        std::thread::sleep(Duration::from_millis(10));
-    };
-    // (the whole group, whatever happened: a child the tool left behind dies with it; then the leader is reaped)
+        // (the tool exited but a stream stays open past the grace: something it left behind holds it)
+        if exited_at.is_some_and(|t| t.elapsed() >= grace) || started.elapsed() >= VERSION_DEADLINE {
+            break;
+        }
+    }
+    // (the whole group, whatever happened: a child the tool left behind dies with it; then the leader is reaped;
+    //  then both read ends are closed, here, so nothing of this run outlives the call)
     if !gone {
         unsafe { libc::kill(-pid, libc::SIGKILL) };
     }
     let status = if gone { None } else { child.wait().ok() };
-    let grace = Duration::from_secs(1);
-    let (out, err) = match (out.recv_timeout(grace), err.recv_timeout(grace)) {
-        (Ok(o), Ok(e)) => (o, e),
-        _ => return Err(ToolRefusal::NoAnswer),
-    };
-    let status = if exited { status } else { None };
+    drop(streams);
+    if over {
+        return Err(ToolRefusal::VersionUnknown);
+    }
+    if exited_at.is_none() || !(eof[0] && eof[1]) {
+        return Err(ToolRefusal::NoAnswer);
+    }
+    let [out, _err] = bufs; // (stderr only counted against its cap)
     let status = status.ok_or(ToolRefusal::NoAnswer)?;
-    if !status.success() || out.len() > VERSION_OUTPUT || err.len() > VERSION_OUTPUT {
+    // (an answer past either cap was refused above, while reading)
+    if !status.success() {
         return Err(ToolRefusal::VersionUnknown);
     }
     let v = parse_claude_version(&out).ok_or(ToolRefusal::VersionUnknown)?;
