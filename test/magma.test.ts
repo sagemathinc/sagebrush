@@ -68,7 +68,7 @@ test("a notebook or kernel cell (no recovery) still stops at its first error, an
   assert.equal(runtime.stdout, "1\nRuntime error: stop\n");
 });
 
-test("a script file stops at an intrinsic Sagebrush lacks, with exit status 1, as at a runtime error; a session goes on", () => {
+test("a script file stops at an intrinsic Sagebrush lacks, with exit status 1, as at a runtime error; a file or process intrinsic is refused and the file goes on; a session goes on", () => {
   const { mkdtempSync, writeFileSync, rmSync } = require("node:fs");
   const { join } = require("node:path");
   const { tmpdir } = require("node:os");
@@ -98,6 +98,12 @@ test("a script file stops at an intrinsic Sagebrush lacks, with exit status 1, a
     const undeclared = file("print 1;\nFoo;\nprint \"AFTER\";\n");
     assert.equal(undeclared.status, 0);
     assert.match(undeclared.stdout, /Identifier 'Foo' has not been declared or assigned\nAFTER\n$/);
+    // a file or process intrinsic is refused by name and the file goes on, exit status 0 (no file or process route)
+    for (const call of ['System("ls");', 'print Read("x.txt");', 'Write("x.txt", 1);', 'p := POpen("ls", "r");']) {
+      const refused = file(`print 1;\n${call}\nprint "AFTER";\n`);
+      assert.equal(refused.status, 0, call + refused.stdout + refused.stderr);
+      assert.match(refused.stdout, /is a Magma intrinsic not implemented in Sagebrush\nAFTER\n$/, call);
+    }
     // on standard input (Magma's interactive session) every error is reported and the session goes on
     const session = spawnSync(process.execPath, [cli, "--magma"], { input: "Q := QuadraticForms(-23);\nprint \"AFTER\";\n", encoding: "utf8", timeout: WALL(60000) });
     assert.equal(session.status, 0);
