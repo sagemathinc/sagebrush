@@ -3988,7 +3988,9 @@ newBuiltinModule("_numpy", (m) => {
     else {
       writable(a);
       if (isSmallInt(a.dt) && !(v instanceof NDArray)) admitSmallInt(a.dt, v, true, true, false);
-      assign(a, operand(v).arr);
+      // (a Python value into int64/uint64 through the admission, its original, as slice assignment takes it: the
+      // exact int range, then a double that holds it; operand() made a double of it first, #2034)
+      assign(a, isWide(a.dt) && !(v instanceof NDArray) ? fromPy(v, a.dt) : operand(v).arr);
     }
     return null;
   });
