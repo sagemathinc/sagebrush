@@ -665,3 +665,62 @@ dtype: int64
 
    v  u
 0  2  1
+== align-dict-index
+('category', [0, 1, 2, 3], [nan, 'u', 'v', 'u'], ['v', 'u', 'w'], True)
+== align-dict-index-subset
+('category', [1, 3], ['u', 'u'], ['v', 'u', 'w'], True)
+== align-dict-index-all-missing
+('category', [0, 9], [nan, nan], ['v', 'u', 'w'], True)
+== align-dict-mixed-index
+('category', [0, 1, 2, 3], [nan, 'u', 'v', 'u'], ['v', 'u', 'w'], True)
+== align-setitem
+('category', [0, 1, 2, 3], [nan, 'u', 'v', 'u'], ['v', 'u', 'w'], True)
+== align-setitem-short
+('category', [0, 1, 2, 3], [nan, nan, 'v', 'u'], ['v', 'u', 'w'], True)
+== align-series-index
+('category', [0, 1], [nan, 'u'], ['v', 'u', 'w'], True)
+== align-series-index-all-missing
+('category', [7, 8], [nan, nan], ['v', 'u', 'w'], True)
+== align-frame-repr
+
+     k
+0  NaN
+1    u
+2    v
+3    u
+== align-eq-str
+
+0    False
+1     True
+2    False
+3    False
+5    False
+dtype: bool
+== align-ne-str
+
+0     True
+1    False
+2     True
+3     True
+5     True
+dtype: bool
+== align-eq-reflected
+
+0    False
+1     True
+2    False
+3    False
+5    False
+dtype: bool
+== align-eq-category
+
+0    False
+1     True
+2    False
+3    False
+7    False
+dtype: bool
+== align-eq-other-categories
+!! TypeError: Categoricals can only be compared if 'categories' are the same.
+== align-add
+!! TypeError: Object with dtype category cannot perform the numpy op add

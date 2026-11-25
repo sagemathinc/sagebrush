@@ -166,3 +166,29 @@ case("frame-records-categorical", lambda: str(pd.DataFrame([{"c": fc}])["c"].dty
 case("frame-dict-categorical-dtypes", lambda: pd.DataFrame({"c": fc, "n": [1, 2, 3]}).dtypes)
 case("series-key-category-series", lambda: pd.Series([1, 2], index=["u", "v"])[pd.Series(pd.Categorical(["v", "u"]))])
 case("frame-key-category-series", lambda: pd.DataFrame({"u": [1], "v": [2]})[pd.Series(pd.Categorical(["v", "u"]))])
+# aligned on other labels, a category stays one: missing where a label is absent
+ac = pd.Categorical(["u", "v", "u", None], categories=["v", "u", "w"], ordered=True)
+asr = pd.Series(ac, index=[3, 2, 1, 0])
+
+
+def aligned(name, f):
+    case(name, lambda: (lambda col: (str(col.dtype), col.index.tolist(), col.tolist(), col.cat.categories.tolist(), col.cat.ordered))(f()))
+
+
+aligned("align-dict-index", lambda: pd.DataFrame({"k": asr}, index=[0, 1, 2, 3])["k"])
+aligned("align-dict-index-subset", lambda: pd.DataFrame({"k": asr}, index=[1, 3])["k"])
+aligned("align-dict-index-all-missing", lambda: pd.DataFrame({"k": asr}, index=[0, 9])["k"])
+aligned("align-dict-mixed-index", lambda: pd.DataFrame({"k": asr, "x": pd.Series([1, 2, 3, 4])})["k"])
+aligned("align-setitem", lambda: (lambda d: (d.__setitem__("k", asr), d)[1])(pd.DataFrame({"x": [1, 2, 3, 4]}))["k"])
+aligned("align-setitem-short", lambda: (lambda d: (d.__setitem__("k", asr.iloc[:2]), d)[1])(pd.DataFrame({"x": [1, 2, 3, 4]}))["k"])
+aligned("align-series-index", lambda: pd.Series(asr, index=[0, 1]))
+aligned("align-series-index-all-missing", lambda: pd.Series(asr, index=[7, 8]))
+case("align-frame-repr", lambda: pd.DataFrame({"k": asr}, index=[0, 1, 2, 3]))
+uo = pd.Series(pd.Categorical(["u", "v", "u", None], categories=["v", "u", "w"]), index=[3, 2, 1, 0])
+other = pd.Series(["u", "u", "v"], index=[0, 1, 5])
+case("align-eq-str", lambda: uo.eq(other))
+case("align-ne-str", lambda: uo.ne(other))
+case("align-eq-reflected", lambda: other.eq(uo))
+case("align-eq-category", lambda: uo.eq(pd.Series(pd.Categorical(["u", "v"], categories=["v", "u", "w"]), index=[1, 7])))
+case("align-eq-other-categories", lambda: uo.eq(pd.Series(pd.Categorical(["u", "v"]), index=[1, 7])))
+case("align-add", lambda: uo.add(other))
