@@ -725,6 +725,10 @@ for (const [what, text] of [["a pong with a space in it", '{"relay":"pong" }'], 
   const q = { type: "attention", id: "perm-3", kind: "approval", state: "open", child: "ch", conversation: "conv", request_id: "perm-3", action: act, title: "Allow harmless?" };
   const shown = cards.view("conv", "T", q);
   ok(shown.title === "Allow web_fetch?" && cardText("mcp__sagebrush__web_fetch", {}).title === "Allow web_fetch?", "a workspace tool's title drops mcp__sagebrush__: exactly \"Allow web_fetch?\"");
+  // (#1803: removing a branch's own folder says its review history goes with it; any other remove doesn't)
+  const rm = (path) => cardText("mcp__sagebrush__workspace_remove", { path }).summary;
+  ok(rm("/Branches/tests") === "/Branches/tests\nThis also removes the branch's review history." && rm("/Branches/tests/") === "/Branches/tests/\nThis also removes the branch's review history.", "a branch folder's remove card names the review history");
+  ok(rm("/Branches/tests/a.ipynb") === "/Branches/tests/a.ipynb" && rm("/A/b.txt") === "/A/b.txt" && rm("/Branches") === "/Branches" && cardText("mcp__sagebrush__workspace_rename", { path: "/Branches/tests" }).summary === "/Branches/tests", "and no other card does");
   const done = cards.view("conv", "T", { ...q, state: "approved", title: "Allow harmless?", summary: "nothing", detail: "{}" });
   ok(done.title === "Allow web_fetch?" && done.summary === "https://e/x" && done.detail === JSON.stringify(act.input, null, 2), "an answer event shows the question's own words (from its action), not the event's strings");
 }

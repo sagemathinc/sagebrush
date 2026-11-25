@@ -63,8 +63,8 @@ if [ "$ENGINE" = 0 ]; then
 fi
 if [ "$ENGINE" = 1 ]; then
   # (rustup installs engine/rust-toolchain.toml's toolchain and wasm32 target on first use. The modules embed the
-  # crate registry's paths; mapped to CI's, a fresh build matches wasm/pins.json: README)
-  step "the engine as WebAssembly (wasm/sagebrush-engine.wasm)" env RUSTFLAGS="--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/home/runner/.cargo${RUSTFLAGS:+ $RUSTFLAGS}" node scripts/build-engine.mjs
+  # crate registry's paths; build-engine.mjs maps them to CI's, so a fresh build matches wasm/pins.json: README)
+  step "the engine as WebAssembly (wasm/sagebrush-engine.wasm)" node scripts/build-engine.mjs
 fi
 step "TypeScript (dist/)" pnpm run build
 step "the CLI (build/cli/pyjs.cjs)" node scripts/build-cli.mjs

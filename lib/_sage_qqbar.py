@@ -359,7 +359,7 @@ def _primitive(f):
 
 def _factor(f):
     """The irreducible factors of an integer polynomial (with exponents)."""
-    from sagebrush import poly
+    from _sagebrush_lib import poly
     if len(f) == 2:
         return [(list(f), 1)]
     _, fs = poly.factor([int(x) for x in f])
@@ -472,7 +472,7 @@ def _is_pure_imaginary(g, gen):
 def _roots(g, digits):
     """The complex roots of the integer polynomial g to `digits` digits:
     [(re, im)] as Fractions."""
-    from sagebrush import nf
+    from _sagebrush_lib import nf
     out = []
     for re, im, m in nf.complex_roots([int(x) for x in g], digits + 5):
         out.append((_F(re), _F(im)))
@@ -1451,7 +1451,7 @@ def _mult_matrix(c, g):
 
 
 def _charpoly(m):
-    from sagebrush import linalg
+    from _sagebrush_lib import linalg
     return [_F(x) for x in linalg.charpoly(m)]
 
 

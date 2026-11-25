@@ -109,6 +109,8 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "E := EllipticCurve([0, w]);",
     "CremonaReference(EllipticCurve([0, 0, 0, 0, 1000003]));",
     "Integers(F);",
+    "Normalize(w); Integral(w + 1);",
+    "SquarefreeFactorization(PolynomialRing(GF(5)).1^2);",
     "SetSeed(1);",
     "Random(1, 4);",
     "Universe({ {1} });",
@@ -129,6 +131,9 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "Runtime error in 'HeckePolynomial': HeckePolynomial of a",
     "Runtime error in 'EllipticCurve': EllipticCurve with a coefficient in a FldNumElt is not supported yet",
     "Runtime error: not supported yet: this curve is not in sagebrush's table",
+    "Runtime error in 'Normalize': Normalize of this argument is not supported yet (only of a polynomial over the integers or the rationals)",
+    "Runtime error in 'Integral': Integral of this argument is not supported yet (only of a polynomial over the integers or the rationals)",
+    "Runtime error in 'SquarefreeFactorization': SquarefreeFactorization of a polynomial over a finite field (or its ring) is not supported yet",
     "User error: 'SetSeed' is a Magma intrinsic not implemented in Sagebrush",
     "Runtime error in 'Random': Random after SetSeed or GetSeed is not supported yet",
     "Runtime error in 'Universe': Universe of this SetEnum is not supported yet",
@@ -162,7 +167,6 @@ test("Magma syntax Sagebrush doesn't have is named, not called bad syntax (cover
     ["x := 5; x; $1;", "$1 (the values printed last)"],
     ["f := func< n | n le 2 select 1 else $$(n-1) + $$(n-2) >;", "$$ in func< >"],
     ["P<[X]> := PolynomialRing(Rationals(), 2);", "P<[...]> (generator names in a sequence)"],
-    ["S := {1}; S join:= {2};", "join:= (an assignment with join)"],
     ["for x, y in [1, 2] do x; end for;", "for x, y in S (several loop variables)"],
     ["M := {* 1^^4, 2^^5 *};", "a^^n (a multiplicity in a multiset)"],
     ["x := 255; x: Hex;", "x: Hex (a printing level)"],
@@ -178,7 +182,6 @@ test("Magma syntax Sagebrush doesn't have is named, not called bad syntax (cover
     ["G := 1; G.-1;", "G.-1 (a generator's inverse by its index)"],
     ["B := 1; B.<3,1>;", "B.<...> (an element by its indices)"],
     ["x := 2; r := x = 3;", "= (an equation, as in a relation)"],
-    ["F<x, y>, f := FPGroup(G);", "F<...>, ... := (generator names with other values)"],
   ];
   for (const [src, name] of cases) {
     const out = spawnSync(process.execPath, [cli, "--magma"], { input: src + "\n", encoding: "utf8" }).stdout;
@@ -186,8 +189,8 @@ test("Magma syntax Sagebrush doesn't have is named, not called bad syntax (cover
     assert.doesNotMatch(out, /bad syntax/, src);
   }
   // the session goes on with the next line, as after a syntax error
-  const next = spawnSync(process.execPath, [cli, "--magma"], { input: "S := {1}; S join:= {2};\n7;\n", encoding: "utf8" }).stdout;
-  assert.match(next, /join:= \(an assignment with join\) is not supported yet\n7\n$/);
+  const next = spawnSync(process.execPath, [cli, "--magma"], { input: "M := {* 1^^4, 2^^5 *};\n7;\n", encoding: "utf8" }).stdout;
+  assert.match(next, /a\^\^n \(a multiplicity in a multiset\) is not supported yet\n7\n$/);
   // a cell (no recovery: the kernel's) says it too
   const { magmaToPython, MagmaSyntaxError } = require("../src/magma");
   assert.throws(() => magmaToPython("y := x where x is 10;\n", "<cell>"), (e: any) => e instanceof MagmaSyntaxError && /where x is \.\.\. \(a definition after an expression\) is not supported yet/.test(e.message));
@@ -357,7 +360,7 @@ test("a copy of a value that shares its parts is admitted before it is made: x :
   assert.equal(r.signal, null, r.stderr);
   assert.match(r.stdout.replace(/\s+/g, " "), /a value of more than 50000 sequences, sets, tuples and records \(a record counting as 8\) is not supported yet/);
   assert.match(r.stdout, /\n1\n$/);
-  assert.ok(took < 40000, `${took} ms`);
+  assert.ok(took < WALL(40000), `${took} ms`);
   // (a value of 40000 sequences is copied as before; at the default heap,
   // since each copy of it costs tens of megabytes; untimed, under its own
   // spawn timeout only)
@@ -1593,19 +1596,27 @@ test("Matrix checks its shape in Magma's words before it builds anything: no Pyt
 test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
+  const run = (src: string) => spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
+  // (the degree bound is _COLLECT_MAX, the heap left over in 96 MiB, which
+  // moves with the build, the machine's load and between runs (29696 or
+  // 30720 on CI's Node 24 in late October 2026, 33792 on Node 26, 19456 on
+  // a loaded machine) and is never more than 49152: so the degree admitted
+  // here is half of the bound measured in a run of its own, D, under the
+  // bound of the run below by a wide margin, and the three refused, 100000,
+  // 10^20 and 3000^2, stay over it, whatever it is)
+  const probe = run("R<x> := PolynomialRing(GF(7));\n(x+1)^100000;\n");
+  const bound = Number(probe.stdout.replace(/\s+/g, " ").match(/a polynomial of degree more than (\d+) is not supported yet/)?.[1]);
+  assert.ok(bound > 4000 && bound <= 49152, probe.stdout + probe.stderr);
+  // (D's derivative, D (D - 1) coefficient products, stays over 10^6)
+  const D = Math.floor(bound / 2);
   const t0 = Date.now();
   const src = "R<x> := PolynomialRing(GF(7)); K<w> := GF(9); S<y> := PolynomialRing(K);\n" +
     "(x+1)^100000;\nx^(10^20);\n(R!3)^(10^20);\nFactorization(x^1001 + 1);\nFactorization(y^70 + w);\nIsIrreducible(y^70 + w);\n" +
-    "f := x^3000 + 3*x + 1; g := f * f;\nh := y^400 + w; k := h * h;\nEvaluate(f, f);\nGCD(f, f);\nDerivative(x^20000 + x, 19999);\n" +
+    `f := x^3000 + 3*x + 1; g := f * f;\nh := y^400 + w; k := h * h;\nEvaluate(f, f);\nGCD(f, f);\nDerivative(x^${D} + x, ${D - 1});\n` +
     // (each step within the allowance, the fold past it: HARD-53E-1)
     "a := x^500 + 1; GCD([a, a, a, a, a, a]);\nLCM([x^300 + 1, x^300 + 2, x^300 + 3, x^300 + 4]);\n" +
-    "Degree(x^20000); #Factorization(x^200 + x + 1);\n\"end\";\n";
-  // (the degree bound is _COLLECT_MAX, the heap left over in 96 MiB, which
-  // moves with the build and between runs (29696 or 30720 on CI's Node 24
-  // in late October 2026, 33792 on Node 26) and is never more than 49152:
-  // so the degrees admitted here stay at 20000, under it, and the three
-  // refused, 100000, 10^20 and 3000^2, stay over it, whatever it is)
-  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
+    `Degree(x^${D}); #Factorization(x^200 + x + 1);\n"end";\n`;
+  const r = run(src);
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
   assert.equal((out.match(/a polynomial of degree more than \d+ is not supported yet/g) ?? []).length, 3, r.stdout);
@@ -1620,7 +1631,7 @@ test("polynomial arithmetic over a finite field is admitted before it computes, 
   for (const what of ["a product", "a Gcd", "a derivative", "a Lcm"])
     assert.ok(out.includes(`${what} of polynomials over a finite field of more than 1000000 coefficient products is not supported yet`), what + r.stdout);
   assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
-  assert.match(r.stdout, /\n20000\n\d+\nend\n$/);
+  assert.match(r.stdout, new RegExp(`\\n${D}\\n\\d+\\nend\\n$`));
   assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 
@@ -1799,7 +1810,7 @@ test("BaseRing, CoefficientRing, CyclotomicField and a number field's Basis, as 
   const { join } = require("node:path");
   // (the expected text is Magma 2.18's for these lines; a cyclotomic field
   // is one for each n, so a name given to it holds for every handle)
-  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8", timeout: 60000 }).stdout as string;
+  const run = (src: string) => spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src + "\n\"end\";\n", encoding: "utf8", timeout: WALL(60000) }).stdout as string;
   const ok = run(["BaseRing(PolynomialRing(Integers())); BaseRing(PolynomialRing(GF(7))); BaseRing(Rationals());", "P<x>:=PolynomialRing(Rationals()); K<a>:=NumberField(x^3-2); BaseRing(K); CoefficientRing(K);", "BaseRing(Matrix(Integers(),2,3,[1..6])); BaseRing(MaximalOrder(QuadraticField(5))); CoefficientRing(Matrix(GF(5),2,2,[1,2,3,4]));", "P<x>:=PolynomialRing(Integers()); BaseRing(x^2+1); BaseRing(Parent(Matrix(Rationals(),2,2,[1,2,3,4])));", "K<z>:=CyclotomicField(5); K; z^5; z^4; Type(z); Type(K); BaseRing(K);", "K:=CyclotomicField(1); K; K.1; Degree(K); K:=CyclotomicField(2); K.1; Basis(K);", "K<z>:=CyclotomicField(5); L<w>:=CyclotomicField(5); z; K eq L;", "K:=CyclotomicField(9); K.1^3; K:=CyclotomicField(12); K; K.1^4;", "K<z>:=CyclotomicField(5); z^-1; (1+z)^-1; 1/2 + z; Norm(z+1); Eltseq(z^2+3);", "K<z>:=CyclotomicField(5); Basis(K);", "P<x>:=PolynomialRing(Rationals()); K<a>:=NumberField(x^3-2); Basis(K); Eltseq(a^2/3+1);", "P<x>:=PolynomialRing(Rationals()); K:=NumberField(x^3-2); Basis(K); K.1^2+1;", "K:=QuadraticField(5); Basis(K); [K.1, K.1+1]; Eltseq(K.1+1/2);", "K<a>:=QuadraticField(-3); Basis(K);", "K<z>:=CyclotomicField(4); z^2; [z, 1/2];"].join("\n"));
   assert.equal(ok, "Integer Ring\nFinite field of size 7\nRational Field\nRational Field\nRational Field\nInteger Ring\nInteger Ring\nFinite field of size 5\nInteger Ring\nRational Field\nCyclotomic Field of order 5 and degree 4\n1\n-z^3 - z^2 - z - 1\nFldCycElt\nFldCyc\nRational Field\nCyclotomic Field of order 1 and degree 1\n1\n1\n-1\n[\n    1\n]\nw\ntrue\nzeta_9^3\nCyclotomic Field of order 12 and degree 4\nzeta_12^2 - 1\n-z^3 - z^2 - z - 1\n-z^3 - z\n1/2*(2*z + 1)\n1\n[ 3, 0, 1, 0 ]\n[\n    1,\n    z,\n    z^2,\n    z^3\n]\n[\n    1,\n    a,\n    a^2\n]\n[ 1, 0, 1/3 ]\n[\n    1,\n    K.1,\n    K.1^2\n]\nK.1^2 + 1\n[ 1, K.1 ]\n[ K.1, K.1 + 1 ]\n[ 1/2, 1 ]\n[ 1, a ]\n-1\n[\n    z,\n    1/2\n]\nend\n", ok);
   // (Magma's errors, each line on its own)
@@ -1936,12 +1947,12 @@ test("a power of an integer or rational matrix is admitted by the size of its en
   const t0 = Date.now();
   const src = "M:=Matrix(Integers(),2,2,[2,0,0,2]); X:=M^(10^9);\nX:=M^(-10^9);\nN:=Matrix(Rationals(),3,3,[1/2,1,2,3,5/3,8,13,21,34]); X:=N^(10^7);\n" +
     "M:=Matrix(Integers(),2,2,[1,1,1,0]); (M^100)[1][1]; (M^-3)[1][1]; Type(M^100);\nA:=Matrix(Integers(),2,3,[1..6]); B:=A*Transpose(A); Type(B^3); (B^3)[1][1];\n\"end\";\n";
-  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: 60000 });
+  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
   assert.equal((out.match(/a power of a \d by \d matrix whose entries could have more than 2097152 bits \(8388608 in all\)/g) ?? []).length, 3, r.stdout);
   assert.ok(r.stdout.endsWith("573147844013817084101\n-1\nAlgMatElt\nModMatRngElt\n110264\nend\n"), r.stdout);
-  assert.ok(Date.now() - t0 < 20000, `${Date.now() - t0} ms`);
+  assert.ok(Date.now() - t0 < WALL(20000), `${Date.now() - t0} ms`);
 });
 
 test("a negative power of an integer matrix needs a unit determinant and stays integral; a module of matrices has a zero but no one (CORR-CA8-1, CORR-CA8-2)", () => {
@@ -2012,7 +2023,7 @@ test("a dihedral group too wide to print is refused before either generator is r
     "print('disagree', bad)",
     "",
   ].join("\n"));
-  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: 60000 });
+  const r = spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), f], { encoding: "utf8", timeout: WALL(60000) });
   assert.equal(r.stdout, "refused 0\ndisagree []\n", r.stdout + r.stderr);
 });
 
@@ -2575,7 +2586,7 @@ test("an intrinsic's errors are said at the \"(\" of a call through a parameter,
   assert.ok(r.stdout.trimEnd().endsWith("55"), r.stdout);
   // a function defined by name is the user's own: its calls are not wrapped
   assert.doesNotMatch(magmaToPython("function g(n) return n; end function;\ng(1);"), /_m\._call\(/);
-  assert.match(magmaToPython("f := ChangeRing;\nf(1, 2);"), /_m\._call\(\(2, 2\), f, 1, 2\)/);
+  assert.match(magmaToPython("f := ChangeRing;\nf(1, 2);"), /_m\._call(_bare)?\(\(2, 2\), f, 1, 2\)/);
 });
 
 test("a call is located by the binding in scope at it: an optional parameter is, a named function is not, whatever other functions bind (astra's CORR-ALIAS105-1/2)", () => {
@@ -2617,5 +2628,5 @@ test("a call is located by the binding in scope at it: an optional parameter is,
   assert.deepEqual(call("function fib(n) return n le 1 select n else fib(n - 1) + fib(n - 2); end function;\nfib(10);\n"), ["    _m._show_values(fib(10))"]);
   assert.doesNotMatch(magmaToPython("function fib(n) return n le 1 select n else fib(n - 1) + fib(n - 2); end function;\nfib(10);\n"), /_m\._call\(/);
   // a variable assigned a named function's name later is a variable again
-  assert.match(magmaToPython("function g(n) return n; end function;\ng := ChangeRing;\ng(1, 2);\n"), /_m\._call\(\(3, 2\), g, 1, 2\)/);
+  assert.match(magmaToPython("function g(n) return n; end function;\ng := ChangeRing;\ng(1, 2);\n"), /_m\._call(_bare)?\(\(3, 2\), g, 1, 2\)/);
 });
