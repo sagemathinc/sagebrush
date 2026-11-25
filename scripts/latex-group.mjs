@@ -116,7 +116,10 @@ export const LATEX_LAZY = {
 // (256,580 raw / 85,902 gzip: Nov 25 2026, amsthm's \qedhere (issue 1800), its symbol on its own row (KaTeX's tag):
 //  256,516 / 85,838 measured on the shipped build of its merge with master c0066039, with bun 1.4.4 and node 24.21.0
 //  (+740 / +249 over master's 255,776 / 85,589), + 64)
-export const LATEX_CAPS = { raw: 256580, gzip: 85902 };
+// (257,227 raw / 86,138 gzip: Nov 25 2026, \input and \include in a shared or GitHub view (mountEditor's inputs,
+//  web/latex/component.ts): 257,163 / 86,074 measured on the shipped build of master 3655725a with it, with bun 1.4.4 and
+//  node 24.21.0 (+647 / +236 over master's 256,516 / 85,838), + 64)
+export const LATEX_CAPS = { raw: 257227, gzip: 86138 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -271,7 +274,9 @@ export const LATEX_LAZY_CAPS = {
   // (a shared talk's view, loaded by the share page by URL for a .tex only (Nov 12): its
   //  measurement + 64, 3,688 / 1,957 on master 8431bd54)
   // (and its raw cap renewed Nov 13 with the editor's bar and math timing: 3,789 measured + 64; its gzip, 1,976, within)
-  SHARE: { label: "the LaTeX shared talk's chunk", raw: 3853, gzip: 2021 },
+  // (and both renewed Nov 25 with \input and \include read from the share's files, the .tex's folder only: 4,096 / 2,089
+  //  measured on master 3655725a with it, + 64)
+  SHARE: { label: "the LaTeX shared talk's chunk", raw: 4160, gzip: 2153 },
   // (the preview's code blocks coloured (hl.ts with the notebook's highlight.js), fetched once a preview has one: a lazy
   //  chunk, Nov 10: 4,410 / 2,355 measured on master e0b7306c,
   //  + 64 B each)

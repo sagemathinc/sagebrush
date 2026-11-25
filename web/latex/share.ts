@@ -20,6 +20,10 @@ export type SharedOpts = {
   sandbox: { WorkerKernel: unknown; RunnerWorker: unknown; runnerUrl: string } | null;
   /** The share's files ([manifest path, {url, sha256, size}]): only those under the .tex's folder are given to Sage. */
   mount: [string, Remote][];
+  /** A file of the share by manifest path, its bytes checked by the share page against the share's listing (SHA-256,
+   *  or GitHub's blob id at the listed commit), for \input and \include; null if the share has no such file. Asked
+   *  only for a path in the .tex's folder or under it. */
+  read?(path: string): Promise<Uint8Array | null>;
   say(text: string): void;
   onRunning(on: boolean): void;
   /** After each render, what the document has: code to run (Run's own items) and slides to present (as the editor
@@ -55,6 +59,13 @@ export function mountIn(mount: [string, Remote][], dir: string): [string, Remote
   return (Array.isArray(mount) ? mount : []).filter((e) => Array.isArray(e) && folderOf(e[0]) !== null && (dir === "" || e[0].startsWith(dir + "/")) && !!e[1] && typeof e[1].url === "string" && typeof e[1].sha256 === "string" && Number.isSafeInteger(e[1].size))
     .map(([p, r]) => [p, { url: r.url, sha256: r.sha256, size: r.size }]);
 }
+/** The manifest path an \input of the .tex in `dir` (folderOf's) may read, for the editor's candidate `p` (a path from
+ *  the share's top, "/a/b.tex"), or null: one outside `dir` ("../", a leading "/"), or not a plain relative path. */
+export function inputIn(p: string, dir: string): string | null {
+  if (typeof p !== "string" || !p.startsWith("/")) return null;
+  const rel = p.slice(1);
+  return folderOf(rel) !== null && (dir === "" || rel.startsWith(dir + "/")) ? rel : null;
+}
 /** The author's results as the renderer reads them, or none: the editor's results file (format, version, wrapper,
  *  items), its items' own checks left to the renderer (savedStates). */
 export function savedOf(j: any): { wrapper: string | null; saved: unknown[] } {
@@ -70,7 +81,15 @@ export async function openShared(root: HTMLElement, o: SharedOpts): Promise<Shar
   const page = (await import(at("sagebrush-latex.js"))) as { mountEditor: typeof MountEditor };
   // (the author's results: what the slides show until a Run, and what an item a Run doesn't reach keeps)
   const results = savedOf(o.results);
-  const E: LatexEditor = page.mountEditor(root, { text: o.text, readOnly: true, layout: "preview", sage: results });
+  // (\input and \include: a file of the .tex's folder or under it, of this share as listed, read and checked by the share
+  //  page; one outside the folder is refused before any read, whatever the share holds)
+  const read = o.read;
+  const inputs = read && { docPath: "/" + o.path, read: async (p: string) => {
+    const rel = inputIn(p, dir);
+    if (rel === null) throw new Error("outside the shared folder");
+    return read(rel);
+  } };
+  const E: LatexEditor = page.mountEditor(root, { text: o.text, readOnly: true, layout: "preview", sage: results, ...(inputs ? { inputs } : {}) });
   const preview = E.previewRoot();
   const mount = mountIn(o.mount, dir);
   let session: ReturnType<RunCore["sessionOf"]> | null = null;

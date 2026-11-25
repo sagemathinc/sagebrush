@@ -1,6 +1,6 @@
 // ci: checks.3 order=114 runner=bun
 // A shared talk's Run on the share page (run-core's runInMemory, and sessionOf's mount and dispose; share.ts's folder
-// boundary and results), without a browser:
+// boundary, an \input's, and results), without a browser:
 //   - the session tells each worker it may change no file, then gives it the shared files (mount), in that order;
 //   - dispose() ends the session: a kernel still starting is stopped when it is ready and never returned, a kernel
 //     already started is stopped, and a call after it starts nothing;
@@ -11,7 +11,7 @@
 //   bun web/latex/test-latex-run-memory.mjs
 import { sessionOf, runInMemory, runAndSave, MARK, SANDBOX_FAILED, statesOf } from "./run-core.mjs";
 import { itemKey } from "./engine/sagetex.mjs";
-import { folderOf, mountIn, savedOf } from "./share.ts";
+import { folderOf, inputIn, mountIn, savedOf } from "./share.ts";
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 900)); };
@@ -142,6 +142,12 @@ const MOUNT = [["talks/st.tex", { url: "https://files.example/c/1/aa", sha256: "
   check("mountIn: only plain paths under the folder, never a sibling with the same start, nor a malformed entry", JSON.stringify(mountIn(M, "talks").map((e) => e[0])) === JSON.stringify(["talks/a.py", "talks/sub/b.py"]), mountIn(M, "talks").map((e) => e[0]));
   check("mountIn: at the share's top, any plain path, nothing traversing", JSON.stringify(mountIn(M, "").map((e) => e[0])) === JSON.stringify(["talks/a.py", "talks/sub/b.py", "talks2/c.py", "talksX.py"]), mountIn(M, "").map((e) => e[0]));
   check("mountIn: each entry copied as {url, sha256, size} only", JSON.stringify(mountIn([["a.py", { ...r, extra: 1 }]], "")) === JSON.stringify([["a.py", r]]));
+  // (an \input's file: the editor's candidate, a path from the share's top, read only in the .tex's folder or under it)
+  const ins = [["/talks/part.tex", "talks", "talks/part.tex"], ["/talks/sub/d.tex", "talks", "talks/sub/d.tex"], ["/secret.tex", "talks", null], ["/talksX/a.tex", "talks", null], ["/talks2/a.tex", "talks", null],
+    ["/talks/../secret.tex", "talks", null], ["/talks/./a.tex", "talks", null], ["//talks/a.tex", "talks", null], ["talks/a.tex", "talks", null], ["/talks\\a.tex", "talks", null], ["/talks/", "talks", null], ["/", "", null],
+    ["/a.tex", "", "a.tex"], ["/any/b.tex", "", "any/b.tex"], ["/../a.tex", "", null], [null, "", null]];
+  const badIn = ins.filter(([p, dir, want]) => inputIn(p, dir) !== want).map(([p, dir, want]) => [p, dir, want, inputIn(p, dir)]);
+  check("inputIn: an \\input's file only in the .tex's folder or under it (never a sibling with the same start, \"../\", the top), as a plain path", badIn.length === 0, badIn);
   // (the author's results: the editor's results file only (grader's T3 S7))
   const ok = { format: "sagebrush-latex-results", version: 1, wrapper: "W", items: [{ key: "k", s: "ok" }] };
   check("savedOf: the editor's results file read as the renderer reads it", JSON.stringify(savedOf(ok)) === JSON.stringify({ wrapper: "W", saved: ok.items }));
