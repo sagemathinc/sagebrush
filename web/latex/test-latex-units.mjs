@@ -1074,27 +1074,37 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
   check("input-change-rerenders", r2.stats.mode === "cold" && /\\mathbb ?\{Z\}/.test(r2.chunks.join("")), r2.stats.mode);
 }
 
-// ---- an accent before a font command with its argument, unbraced ($\bar\mathbb F_q$, $\hat\mathcal O$): typeset as TeX
-// reads it, \bar{\mathbb F}, where KaTeX alone refuses it; nothing else changed, and a source TeX would refuse is left
-// as written (KaTeX's error, as before)
+// ---- an accent before a font command with its argument, unbraced: $\bar\F_q$ with \newcommand{\F}{\mathbb F} (TeX
+// takes the macro as \bar's one-token argument; the preview has expanded it), and $\bar\mathbb F_q$ written out (plain
+// LaTeX takes it; amsmath refuses it): typeset as TeX reads them, \bar{\mathbb{F}}, where KaTeX alone refuses them. A
+// font command as the argument brings its own (\mathbf\mathit x), and the pairs inside an argument are braced too
+// (\bar\mathrm{\hat\mathcal O}), at most ACCENT_NEST deep; a source TeX would refuse is left as written
 {
-  const { braceAccentFonts } = await import("./engine/render.mjs");
-  const cases = [["\\bar\\mathbb F_q", "\\bar{\\mathbb F}_q"], ["\\hat\\mathcal O", "\\hat{\\mathcal O}"], ["\\tilde\\mathrm{x}", "\\tilde{\\mathrm{x}}"],
-    ["x\\in \\bar \\mathbb F_g^\\times", "x\\in \\bar{\\mathbb F}_g^\\times"], ["\\overline\\mathbb{Q}", "\\overline{\\mathbb{Q}}"], ["\\bar\\mathbf\\alpha", "\\bar{\\mathbf \\alpha}"],
-    ["\\bar\\mathbb F\\hat\\mathcal O", "\\bar{\\mathbb F}\\hat{\\mathcal O}"], ["\\vec\\boldsymbol v", "\\vec{\\boldsymbol v}"],
+  const { braceAccentFonts, ACCENT_NEST } = await import("./engine/render.mjs");
+  const cases = [["\\bar\\mathbb F_q", "\\bar{\\mathbb{F}}_q"], ["\\hat\\mathcal O", "\\hat{\\mathcal{O}}"], ["\\tilde\\mathrm{x}", "\\tilde{\\mathrm{x}}"],
+    ["x\\in \\bar \\mathbb F_g^\\times", "x\\in \\bar{\\mathbb{F}}_g^\\times"], ["\\overline\\mathbb{Q}", "\\overline{\\mathbb{Q}}"], ["\\bar\\mathbf\\alpha", "\\bar{\\mathbf{\\alpha}}"],
+    ["\\bar\\mathbb F\\hat\\mathcal O", "\\bar{\\mathbb{F}}\\hat{\\mathcal{O}}"], ["\\vec\\boldsymbol v", "\\vec{\\boldsymbol{v}}"],
+    ["\\bar\\mathrm{\\hat\\mathcal O}", "\\bar{\\mathrm{\\hat{\\mathcal{O}}}}"], ["\\bar\\mathbf\\mathit x", "\\bar{\\mathbf{\\mathit{x}}}"], ["\\bar\\mathbf\\mathit\\mathrm{y}", "\\bar{\\mathbf{\\mathit{\\mathrm{y}}}}"],
+    ["x^{\\hat\\mathcal O_K}", "x^{\\hat{\\mathcal{O}}_K}"],
     ["\\bar{\\mathbb F}_q", "\\bar{\\mathbb F}_q"], ["\\barx\\mathbb F", "\\barx\\mathbb F"], ["\\bar\\mathbbx F", "\\bar\\mathbbx F"], ["\\bar\\mathbb", "\\bar\\mathbb"],
     ["\\bar\\mathbb{F", "\\bar\\mathbb{F"], ["\\bar\\mathbb ^2", "\\bar\\mathbb ^2"], ["\\bar\\mathbb{\\{F\\}}", "\\bar{\\mathbb{\\{F\\}}}"], ["\\bar\\mathbb{\\{}x", "\\bar{\\mathbb{\\{}}x"], ["a+b", "a+b"]];
   const bad = cases.filter(([a, b]) => braceAccentFonts(a) !== b).map(([a, b]) => [a, b, braceAccentFonts(a)]);
   check("accent-font-braced", bad.length === 0, bad);
-  // (in the preview, with the real KaTeX for these rows: each drawn as its braced form is, no error, no problem for
-  //  check; the stub put back after)
+  // (deeper than ACCENT_NEST: left as written past it, in a bounded time, never a thrown stack overflow)
+  const deep = "\\bar\\mathrm{".repeat(5000) + "x" + "}".repeat(5000);
+  const t0 = performance.now(); let deepOk = true, dr = "";
+  try { dr = braceAccentFonts(deep); } catch { deepOk = false; }
+  check("accent-font-depth-bound", deepOk && performance.now() - t0 < 1000 && (dr.match(/\\bar\{/g) || []).length === ACCENT_NEST + 1, { ok: deepOk, n: (dr.match(/\\bar\{/g) || []).length });
+  // (in the preview, with the real KaTeX for these rows: each drawn as its fully braced form is, no error, no problem
+  //  for check; the stub put back after)
   const { default: katex } = await import("katex");
   setKatex((src, o) => katex.renderToString(src, o));
   try {
     const drawn = (h) => [...h.matchAll(/<span class="katex-html"[\s\S]*?<\/span><\/span><\/span>/g)].map((m) => m[0]).join("|");
-    const one = (m) => { const r = new Engine().update("\\documentclass{article}\n\\usepackage{amssymb}\n\\begin{document}\n$" + m + "$\n\\end{document}\n", { cold: true }); const h = r.chunks.join(""); return { d: drawn(h), err: /katex-error/.test(h), p: r.problems }; };
-    const pairs = cases.slice(0, 8).map(([a, b]) => [a, one(a), one(b)]);
-    const off = pairs.filter(([, x, y]) => !x.d || x.d !== y.d || x.err || x.p.some((p) => p.kind === "math")).map(([a, x, y]) => [a, x.err, x.d.slice(0, 80), y.d.slice(0, 80)]);
+    const one = (m, pre = "") => { const r = new Engine().update("\\documentclass{article}\n\\usepackage{amssymb}\n" + pre + "\\begin{document}\n$" + m + "$\n\\end{document}\n", { cold: true }); const h = r.chunks.join(""); return { d: drawn(h), err: /katex-error/.test(h), p: r.problems }; };
+    const pairs = cases.slice(0, 12).map(([a, b]) => [a, one(a), one(b)]);
+    pairs.push(["\\bar\\F_q (a macro)", one("\\bar\\F_q", "\\newcommand{\\F}{\\mathbb F}\n"), one("\\bar{\\mathbb{F}}_q")]);
+    const off = pairs.filter(([, x, y]) => !x.d || x.d !== y.d || x.err || y.err || x.p.some((p) => p.kind === "math")).map(([a, x, y]) => [a, x.err, y.err, x.d.slice(0, 60), y.d.slice(0, 60)]);
     check("accent-font-typeset", off.length === 0, off);
   } finally { setKatex((src) => src); }
 }

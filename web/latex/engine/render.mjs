@@ -188,24 +188,46 @@ class Flow {
 
 // ------------------------------------------------------------------ KaTeX
 const KCACHE = new Map();
-// (an accent before a font command with its own argument, unbraced: TeX takes \bar\mathbb F as \bar{\mathbb F}, KaTeX
-//  refuses it ("Unexpected end of input in a macro argument"); braced here, before KaTeX, in one pass. The font
-//  command's argument is a group or one token, as TeX reads it; anything else is left as written)
+// (an accent before a font command with its own argument, unbraced, \bar\mathbb F: KaTeX refuses it ("Unexpected end
+//  of input in a macro argument"). It comes most often from a macro, \bar\F with \newcommand{\F}{\mathbb F}, which TeX
+//  takes as \bar{\mathbb F} (the macro is the accent's one-token argument) and the preview has expanded before KaTeX;
+//  written out, plain LaTeX takes it too (amsmath refuses it). Braced here, before KaTeX: the font command's argument is
+//  read as TeX reads it, a group or one token, and a font command as that token brings its own (\mathbf\mathit x); the
+//  argument is rewritten in turn (\bar\mathrm{\hat\mathcal O}), at most ACCENT_NEST groups deep, past which it is left
+//  as written. Anything else, and a source TeX would refuse, is left as written)
 const ACCENT_CS = "bar|hat|tilde|vec|dot|ddot|check|breve|acute|grave|mathring|widehat|widetilde|overline|underline";
 const FONT_CS = "mathbb|mathcal|mathrm|mathbf|mathit|mathsf|mathtt|mathfrak|mathscr|boldsymbol|bm|operatorname";
 const ACCENT_FONT = new RegExp("\\\\(" + ACCENT_CS + ")(?![A-Za-z])\\s*\\\\(" + FONT_CS + ")(?![A-Za-z])\\s*", "g");
-export function braceAccentFonts(src) {
+const FONT_TOKEN = new RegExp("^\\\\(?:" + FONT_CS + ")(?![A-Za-z])\\s*");
+export const ACCENT_NEST = 16;
+// (the argument starting at j, as TeX reads it, made explicit for KaTeX: [end, its text braced], or null. A group has the
+//  pairs inside it braced in turn; a font command as the token takes its own argument ({\mathit{x}} for \mathit x);
+//  one token otherwise. depth: how many arguments deep, at most ACCENT_NEST)
+function accentArg(src, j, depth) {
+  if (depth > ACCENT_NEST) return null;
+  if (src[j] === "{") {
+    let d = 0;
+    for (let k = j; k < src.length; k++) { const c = src[k]; if (c === "\\") { k++; continue; } if (c === "{") d++; else if (c === "}" && --d === 0) return [k + 1, "{" + braceAccentFonts(src.slice(j + 1, k), depth + 1) + "}"]; }
+    return null;
+  }
+  if (src[j] === "\\") {
+    const f = FONT_TOKEN.exec(src.slice(j));
+    if (f) { const r = accentArg(src, j + f[0].length, depth + 1); return r && [r[0], "{" + f[0].trimEnd() + r[1] + "}"]; }
+    const w = /^\\([A-Za-z]+|.)/.exec(src.slice(j)); return w ? [j + w[0].length, "{" + w[0] + "}"] : null;
+  }
+  if (j >= src.length || /[}\s^_&]/.test(src[j])) return null;
+  const e = j + String.fromCodePoint(src.codePointAt(j)).length;
+  return [e, "{" + src.slice(j, e) + "}"];
+}
+export function braceAccentFonts(src, depth = 0) {
   if (!src.includes("\\")) return src;
+  const re = new RegExp(ACCENT_FONT.source, "g");
   let out = "", at = 0, m;
-  ACCENT_FONT.lastIndex = 0;
-  while ((m = ACCENT_FONT.exec(src))) {
-    let j = m.index + m[0].length, end = -1;
-    if (src[j] === "{") { let d = 0; for (let k = j; k < src.length; k++) { const c = src[k]; if (c === "\\") { k++; continue; } if (c === "{") d++; else if (c === "}" && --d === 0) { end = k + 1; break; } } }
-    else if (src[j] === "\\") { const w = /^\\([A-Za-z]+|.)/.exec(src.slice(j)); if (w) end = j + w[0].length; }
-    else if (j < src.length && !/[}\s^_&]/.test(src[j])) end = j + String.fromCodePoint(src.codePointAt(j)).length;
-    if (end < 0) continue;
-    out += src.slice(at, m.index) + "\\" + m[1] + "{\\" + m[2] + (src[j] === "{" ? "" : " ") + src.slice(j, end) + "}";
-    at = end; ACCENT_FONT.lastIndex = end;
+  while ((m = re.exec(src))) {
+    const r = accentArg(src, m.index + m[0].length, depth);
+    if (!r) continue;
+    out += src.slice(at, m.index) + "\\" + m[1] + "{\\" + m[2] + r[1] + "}";
+    at = r[0]; re.lastIndex = r[0];
   }
   return at ? out + src.slice(at) : src;
 }
