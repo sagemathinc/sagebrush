@@ -172,7 +172,7 @@ function client(m, name) {
     const ss = await all.signIn(SMALL);
     ok((await all.enable(ss)) === 200, "all: a small plan's account turns sync on");
     const bytes = Buffer.from("x".repeat(500)), sha = createHash("sha256").update(bytes).digest("hex");
-    const put = await all.go(`/api/sync/v1/blob/${sha}`, { method: "PUT", headers: { cookie: ss, origin: all.origin, "content-type": "application/octet-stream" }, body: bytes });
+    const put = await all.go(`/api/sync/v1/blob/${sha}`, { method: "PUT", headers: { cookie: ss, origin: all.origin, "content-type": "application/octet-stream", "x-sb-ct-sha256": sha }, body: bytes });
     const pb = await put.json().catch(() => null);
     ok(put.status >= 400 && /too large/.test(JSON.stringify(pb)), "all: a file over the plan's maximum (100 bytes) refused at its upload: " + JSON.stringify({ status: put.status, body: pb }));
     // (any other value, or none: only the lists)
@@ -218,7 +218,7 @@ function client(m, name) {
       ok(b?.t !== "ack", "rollback: unbound: an op sent on that socket anyway is refused: " + JSON.stringify(b));
       sock.ws.close();
     }
-    const up = await c.check(s, [{ sha256: "0".repeat(64), size: 10 }]);
+    const up = await c.check(s, [{ sha256: "0".repeat(64), ct_sha256: "0".repeat(64), size: 10 }]);
     ok(up.code === 403, "rollback: unbound: uploads refused: " + up.code);
     await m.dispose();
     // (bound again: the same account goes on from what it had: its op kept, nothing lost or redone)

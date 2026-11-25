@@ -140,6 +140,25 @@ check("split-over-2MiB-placeholder", (() => { const t = splitChunk('<div class="
   check("split-weight", weight('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') === bytes('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') - "data:abc".length && weight("src=\"data:zz\" text") === bytes("src=\"data:zz\" text"), null);
 }
 check("split-small-unchanged", splitChunk('<div class="p">hi</div>')[0] === '<div class="p">hi</div>', null);
+// (issue 623: a table float of amsldoc's, 50 KiB, was "too large (50 KiB, over 128 KiB)". KaTeX's MathML writes
+//  <mtd class ="mtr-glue"> (a space before "="), which the tag pattern didn't take as a tag: its close tags unmatched,
+//  the float wasn't one element, and that was a placeholder at any size over the 32 KiB aimed for. Now such tags are
+//  tags; a chunk that fits one piece is never a placeholder; and the size a placeholder says is over the limit it says)
+{
+  const gather = '<span class="katex-display"><math><semantics><mtable><mtr><mtd class ="mtr-glue"></mtd><mtd><mi>a</mi></mtd><mtd class ="mml-eqn-num"></mtd></mtr></mtable></semantics></math></span>';
+  const float = '<div class="float">' + Array.from({ length: 160 }, (_, k) => '<div class="p">row ' + k + " " + gather.repeat(2) + "</div>").join("") + "</div>";
+  const told = [], fp = splitChunk(float, (why, size) => told.push(tooLargeProblem(why, size, 0)));
+  check("split-katex-spaced-attributes-are-tags", bytes(float) > 32 * 1024 && bytes(float) < PIECE_MAX && told.length === 0 && fp.length > 1 && !fp.some((p) => /toolarge/.test(p)) && fp.slice(1).every((p) => p.startsWith('<div class="float cont">')), { n: bytes(float), told, pieces: fp.length });
+  // (not one element (two siblings), over the target, under the maximum: kept whole, nothing said)
+  const two = '<div class="p">' + "a ".repeat(12000) + '</div><div class="p">' + "b ".repeat(12000) + "</div>", told2 = [];
+  const tw = splitChunk(two, (why, size) => told2.push(size));
+  check("split-fits-one-piece-never-a-placeholder", bytes(two) > 32 * 1024 && bytes(two) < PIECE_MAX && tw.length === 1 && tw[0] === two && told2.length === 0, { n: bytes(two), told2, pieces: tw.length });
+  // (every placeholder's size over the limit it names)
+  const said = [];
+  for (const h of [table, huge, '<div class="p">' + "y ".repeat(CHUNK_MAX) + "</div>"]) splitChunk(h, (why, size) => said.push(tooLargeProblem(why, size, 0).name));
+  const over = said.map((s) => /\((\d+) KiB, over (\d+) KiB\)$/.exec(s)).map((m) => m && +m[1] > +m[2]);
+  check("split-placeholder-size-over-its-limit", said.length === 3 && over.every(Boolean), said);
+}
 
 // ---- watchdog.ts (issue 619): the preview's watchdog judges the worker by the page's time; a timer the page's own
 // blocking made late waits once more (LATE_MS) for a reply already queued, then the worker is hung. A fake clock: `run`
@@ -742,6 +761,37 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
     ["opt-cite-runaway", "See \\cite[page\n\nNext para.", (h) => h.includes("\\cite[page") && h.includes("not finished") && h.includes("Next para.")],
   ];
   for (const [name, body, ok] of longs) { const h = doc("\\documentclass{article}\n\\newcounter{foo}\n", body); check(name, ok(h), h.slice(0, 700)); }
+}
+
+// ---- amsart's front matter and a bibliography with author-year labels (as an arXiv paper's): \title[short]{long} and
+// \author[short]{long} show the long form only; the labels' column as wide as its widest label; a \cite note typeset
+{
+  setKatex((src) => '<span class="KI">' + src.replace(/[&<>]/g, "") + "</span>");
+  const h = new Engine().update("\\documentclass{amsart}\n\\title[Short T]{Long title}\n\\author[N. K.]{Narasimha K}\n\\begin{document}\n\\maketitle\nSee \\cite[\\S B]{Nek12} and \\cite[p.~3, $x^2$]{BM03}.\n\\begin{thebibliography}{abcd999}\n\\bibitem[BM03]{BM03} Baba.\n\\bibitem[Nek12]{Nek12} Nekov.\n\\end{thebibliography}\n\\end{document}\n").chunks.join("");
+  check("amsart-title-short-form", h.includes("Long title") && h.includes("Narasimha K") && !h.includes("Short T") && !h.includes("N. K.") && !h.includes('class="title">[') && !h.includes('class="auth">['), h.slice(0, 600));
+  const pad = /<ol class="bib" style="padding-left:(\d+\.\d+)em">/.exec(h);
+  check("bib-label-column-widest", pad && +pad[1] >= 3.5, /<ol class="bib"[^>]*>/.exec(h)?.[0]);
+  const see = h.slice(h.indexOf("See"), h.indexOf("See") + 600);
+  check("cite-note-typeset", see.includes("Nek12</a>, §B]") && see.includes('p.\u00a03, <span class="KI">x^2</span>]') && !see.includes("\\S"), see);
+  // amsart's front matter (the arXiv paper's): every \author, an abstract written before \maketitle printed after the
+  // title, \subjclass and \keywords as the first page's notes, no date unless one is given, and each author's address and
+  // email at the end, in amsart's order whatever the source's
+  const fm = new Engine().update("\\documentclass{amsart}\n\\title{T}\n\\author[A. One]{Ann One}\n\\email{ann@x.org}\n\\address{Dept.~One}\n\\author{Bo Two}\n\\address{Dept.~Two}\n\\email{bo@y.org}\n\\keywords{forms, twists}\n\\subjclass[2010]{Primary 11F30}\n\\begin{document}\n\\begin{abstract}Abs text.\\end{abstract}\n\\maketitle\nBody.\n\\end{document}\n").chunks.join("");
+  const tb = fm.slice(fm.indexOf('<div class="titleblock">'), fm.indexOf("Body."));
+  const end = fm.slice(fm.indexOf('class="amsaddr"'));
+  check("amsart-front-matter", (tb.match(/class="auth"/g) || []).length === 2 && tb.includes("Ann One") && tb.includes("Bo Two") && tb.indexOf("Abs text.") > tb.indexOf('class="title"')
+    && (fm.match(/Abs text\./g) || []).length === 1 && tb.includes("2010 Mathematics Subject Classification.</i> Primary 11F30") && tb.includes("Key words and phrases.</i> forms, twists")
+    && !tb.includes('class="date"') && fm.indexOf('class="amsaddr"') > fm.indexOf("Body.") && end.indexOf("Dept.") < end.indexOf("ann@x.org") && end.indexOf("ann@x.org") < end.indexOf("Dept.\u00a0Two") && end.indexOf("Dept.\u00a0Two") < end.indexOf("bo@y.org"), [tb.slice(0, 500), end.slice(0, 400)]);
+  // (in the article class, TeX's own: the last \author is the author, the abstract where it is written, the date shown)
+  const ar = new Engine().update("\\documentclass{article}\n\\title{T}\n\\author{Ann One}\n\\author{Bo Two}\n\\begin{document}\n\\begin{abstract}Abs text.\\end{abstract}\n\\maketitle\nBody.\n\\end{document}\n").chunks.join("");
+  check("article-front-matter-unchanged", !ar.includes("Ann One") && ar.includes("Bo Two") && ar.indexOf("Abs text.") < ar.indexOf('class="titleblock"') && ar.includes('class="date"'), ar.slice(0, 500));
+  // (a numeric bibliography keeps the page's own column)
+  const hn = new Engine().update("\\documentclass{article}\n\\begin{document}\n\\cite{a}\n\\begin{thebibliography}{9}\n\\bibitem{a} A.\n\\end{thebibliography}\n\\end{document}\n").chunks.join("");
+  check("bib-label-column-numeric", /<ol class="bib">/.test(hn), /<ol class="bib"[^>]*>/.exec(hn)?.[0]);
+  // (the {widest} argument alone widens it: {abcd999} with numeric labels)
+  const hw = new Engine().update("\\documentclass{article}\n\\begin{document}\n\\cite{a}\n\\begin{thebibliography}{abcd999}\n\\bibitem{a} A.\n\\end{thebibliography}\n\\end{document}\n").chunks.join("");
+  const pw = /<ol class="bib" style="padding-left:(\d+\.\d+)em">/.exec(hw);
+  check("bib-label-column-widest-argument", pw && +pw[1] >= 4.5, /<ol class="bib"[^>]*>/.exec(hw)?.[0]);
 }
 
 // ---- source position markers: each main-file line is marked at most once (a resume inside an \input that a main

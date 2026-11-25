@@ -11680,6 +11680,11 @@
   "owner": "Magma translator",
   "reason": "the Magma translator's parser protection: a chain of calls or indexes nests its translation one level each; past the cap it is refused in words, within what the generated Python's bound allows"
  },
+ "src/magma.ts :: constructor :: const PRINT_LEVELS = new Set([\"Default\", \"Minimal\", \"Maximal\", \"Magma\", \"Hex\", \"Latex\", \"Debug\"]); #0": {
+  "class": "none",
+  "owner": "Magma compatibility",
+  "reason": "the word Maximal (the print level's name), not a limit: nothing is refused"
+ },
  "src/magma.ts :: constructor :: export const MAX_NESTING = 100, MAX_PY_NEST = 50, MAX_PY_BLOCKS = 90, CHAIN_FLAT = 32, MAX_OPS = 2000; #0": {
   "class": "1",
   "disposition": {
@@ -14113,6 +14118,30 @@
   },
   "owner": "file formats/raster",
   "row": "src-13"
+ },
+ "src/sagepre.ts :: parseEllipsis :: const stack = new Int32Array(PY_MAX_NESTING + 1); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "Sage mode preparser (@sagebrush-sage)",
+  "reason": "Python's tokenizer limit on nested brackets (its MAXLEVEL, 200): code nested deeper is left to Python, which refuses it whatever the preparser does; parser protection that bounds the ellipsis rewrite's bracket stack, not a cap of a user's computation"
+ },
+ "src/sagepre.ts :: parseEllipsis :: if (depth === PY_MAX_NESTING) return code; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "Sage mode preparser (@sagebrush-sage)",
+  "reason": "Python's tokenizer limit on nested brackets (its MAXLEVEL, 200): code nested deeper is left to Python, which refuses it whatever the preparser does; parser protection that bounds the ellipsis rewrite's bracket stack, not a cap of a user's computation"
+ },
+ "src/sagepre.ts :: preparseFString :: const PY_MAX_NESTING = 200; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "Sage mode preparser (@sagebrush-sage)",
+  "reason": "Python's tokenizer limit on nested brackets (its MAXLEVEL, 200): code nested deeper is left to Python, which refuses it whatever the preparser does; parser protection that bounds the ellipsis rewrite's bracket stack, not a cap of a user's computation"
  },
  "src/stdin-wait.ts :: stopped :: const max = buffer.byteLength - 8; #0": {
   "class": "none",
