@@ -21,7 +21,7 @@ import operator
 import numpy as np
 
 from ._pd_column import Column
-from ._pd_dtypes import STR, is_missing
+from ._pd_dtypes import STR, INTS, is_missing
 
 __all__ = ["check_args", "reduce_column", "compare", "logical"]
 
@@ -45,21 +45,28 @@ def _scalar(x):
     return x
 
 
+_INT_SCALARS = {"int64": np.int64, "int32": np.int32, "int16": np.int16, "int8": np.int8,
+                "uint32": np.uint32, "uint16": np.uint16, "uint8": np.uint8}
+
+
 def reduce_column(col, op, skipna):
     d = col.dtype
     if op == "count":
         return np.int64(int(len(col) - int(_scalar(col.isna().sum()))))
-    if d in ("int64", "bool", "int32"):
-        # (int32, what .dt.year gives: summed in int64 and averaged in float64, its min/max np.int32, as pandas 3.1)
+    if d in INTS or d == "bool":
+        # (a smaller integer, as numpy and pandas 3.1: summed in int64, or uint64 when unsigned, averaged in float64,
+        # its min/max a scalar of its own dtype)
         v = col._pd_values
         if op == "sum":
+            if d.startswith("uint"):
+                return np.uint64(int(_scalar(v.astype("uint64").sum())) if len(v) else 0)
             return np.int64(int(_scalar(v.astype("int64").sum())) if len(v) else 0)
         if op == "mean":
             return float("nan") if not len(v) else np.float64(float(_scalar(v.astype("float64").mean())))
         if not len(v):
             return float("nan")
         r = _scalar(v.min() if op == "min" else v.max())
-        return np.bool_(bool(r)) if d == "bool" else np.int32(int(r)) if d == "int32" else np.int64(int(r))
+        return np.bool_(bool(r)) if d == "bool" else _INT_SCALARS[d](int(r))
     if d == "float64":
         v = col._pd_values
         if not len(v):

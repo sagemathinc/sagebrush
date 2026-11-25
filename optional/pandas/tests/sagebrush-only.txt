@@ -8,4 +8,5 @@ test_known.py
 test_read_excel_budget.py
 test_read_excel_limits.py
 test_repr_escape.py
+test_str_export.py
 test_unsupported.py
