@@ -12,7 +12,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import {
-  SyncError, LIMITS, RECHECK_MS, PIN_MS, VERSION, Bucket, checkBatch, checkHead, checkOp, checkSealedOp, isChainHead, toB64, clientOf, type SealedOp, fields, has, isDevice, isDocId, isNat,
+  SyncError, LIMITS, RECHECK_MS, PIN_MS, VERSION, Bucket, checkBatch, checkHead, checkOp, checkSealedOp, isChainHead, isChainGeneration, toB64, clientOf, type SealedOp, fields, has, isDevice, isDocId, isNat,
   parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, same, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
 } from "../sync-protocol/protocol.ts";
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
@@ -20,7 +20,7 @@ import { agentOn, allowed, e2eOn, gate, testMode, tieredOn, type SyncEnv } from 
 import { E2E, E2E_KEEP, E2EStore, e2eAccount, e2eAud } from "./e2e-chain.ts";
 import { sealedOpMessage } from "../workspace/e2e/sealed-op.mjs";
 import { verifyStrict } from "../workspace/fleet/core/ed25519.mjs";
-import { unb64 } from "../workspace/fleet/core/bytes.mjs";
+import { sha256b64, unb64 } from "../workspace/fleet/core/bytes.mjs";
 import { AGENT, GRANT_ID, READS, SCOPED, VERBS, checkAgentName, checkScopes, inScope, makeToken, newGrantId, newSecret, secretHash, type Scope } from "./agent-token.ts";
 import { TRASH, normPath, within } from "../workspace/paths.ts";
 import { checkCall } from "../workspace/agent-schema.ts";
@@ -46,7 +46,7 @@ interface Attachment {
 const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)",
   "CREATE TABLE IF NOT EXISTS devices (device TEXT PRIMARY KEY, name TEXT, created INTEGER, last_seen INTEGER, session_hash TEXT, next_dseq INTEGER NOT NULL)",
-  "CREATE TABLE IF NOT EXISTS ops (seq INTEGER PRIMARY KEY, device TEXT NOT NULL, dseq INTEGER NOT NULL, t INTEGER, by TEXT, op TEXT, path TEXT, \"to\" TEXT, kind TEXT, ref TEXT, fid TEXT, sha256 TEXT, size INTEGER, base TEXT, recv INTEGER, parent TEXT, env TEXT, head TEXT, adds TEXT, releases TEXT, UNIQUE (device, dseq))",
+  "CREATE TABLE IF NOT EXISTS ops (seq INTEGER PRIMARY KEY, device TEXT NOT NULL, dseq INTEGER NOT NULL, t INTEGER, by TEXT, op TEXT, path TEXT, \"to\" TEXT, kind TEXT, ref TEXT, fid TEXT, sha256 TEXT, size INTEGER, base TEXT, recv INTEGER, parent TEXT, env TEXT, head TEXT, adds TEXT, releases TEXT, chain_gen TEXT, signer TEXT, sig TEXT, env_sha256 TEXT, UNIQUE (device, dseq))",
   "CREATE TABLE IF NOT EXISTS refused (device TEXT NOT NULL, dseq INTEGER NOT NULL, code TEXT NOT NULL, PRIMARY KEY (device, dseq))",
   "CREATE TABLE IF NOT EXISTS docs (doc TEXT PRIMARY KEY, kind TEXT NOT NULL, created INTEGER, bytes INTEGER NOT NULL DEFAULT 0, epoch INTEGER NOT NULL DEFAULT 1, head_seq INTEGER NOT NULL DEFAULT 0, deleted INTEGER)",
   "CREATE TABLE IF NOT EXISTS holdings (sha256 TEXT PRIMARY KEY, key TEXT NOT NULL, size INTEGER NOT NULL, refs INTEGER NOT NULL DEFAULT 0, created INTEGER, ct_sha256 TEXT)",
@@ -88,6 +88,8 @@ const MAX_HOLDS = LIMITS.liveBatches;
 /** The limits CoCalc gives an account (design/sync-server.md §6), as this service reads them. */
 /** (one storage_bytes for sharing and sync together, §6.1: sync has no storage limit of its own) */
 /** A held blob's identity: its address, its stored bytes' SHA-256 and its size (e2e PR 3a). */
+/** A sealed op's answer: decided (accepted, with the hash of the envelope the log holds; or refused), or undecided. */
+export type SealedAck = { dseq: number; seq: number; env_sha256?: string } | { dseq: number; code: string } | { dseq: number; undecided: true };
 export type Held = { sha256: string; ct_sha256: string; size: number };
 export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; version_bytes: number; read_bytes_per_day: number; retention_days?: number; verify_bytes_per_day?: number }; issued?: number }
 /** Dev deployments with no CoCalc to ask (SHARE_DEV=1): small, fixed limits. */
@@ -174,11 +176,13 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'ops'") && !this.sql.exec("PRAGMA table_info(ops)").toArray().some((c) => (c as Row).name === "parent")) {
         this.sql.exec("ALTER TABLE ops ADD COLUMN parent TEXT");
       }
-      // (an object made before sealed ops gains their columns, e2e PR 5b: the envelope (base64), the key chain's head it
-      // was sealed under, and the blob references it adds and releases (JSON lists); a plaintext op has them NULL)
+      // (an object made before sealed ops gains their columns, e2e PR 5b: the envelope (base64), the key chain's head and
+      // generation it was sealed under, the blob references it adds and releases (JSON lists), the E2E device that signed
+      // it and the signature (every signed value, as received, so a device that pulls can verify it again), and the
+      // envelope's hash its ack names; a plaintext op has them NULL)
       if (this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'ops'")) {
         const have = new Set(this.sql.exec("PRAGMA table_info(ops)").toArray().map((c) => String((c as Row).name)));
-        for (const c of ["env", "head", "adds", "releases"]) if (!have.has(c)) this.sql.exec(`ALTER TABLE ops ADD COLUMN ${c} TEXT`);
+        for (const c of ["env", "head", "adds", "releases", "chain_gen", "signer", "sig", "env_sha256"]) if (!have.has(c)) this.sql.exec(`ALTER TABLE ops ADD COLUMN ${c} TEXT`);
       }
       // (an object made before blobs had a ciphertext hash gains the column: e2e PR 3a; its old rows keep NULL, read as
       // ct = the address they were checked against, and every new row has one)
@@ -586,8 +590,13 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * The signatures are checked before the transaction, and the transaction checks that the head and the device's next
    * dseq are still the ones they were checked against.  Then each op: every address it adds must be held, and gains a
    * reference; every address it releases must be held with a reference to give back.
+   *
+   * An accepted op is answered with its seq and its envelope's hash (env_sha256), the first time and on every resend, so
+   * a device whose answer was lost learns which bytes the log holds for that dseq.  The first refusal of an op ends the
+   * message: each new op after it is answered `undecided`, which decides nothing (no dseq spent, no refusal kept, no
+   * reference moved), because its envelope names the refused one as the op before it, and must be sealed again.
    */
-  private async sealedOps(att: Attachment, device: string, list: unknown): Promise<({ dseq: number; seq: number } | { dseq: number; code: string })[]> {
+  private async sealedOps(att: Attachment, device: string, list: unknown): Promise<SealedAck[]> {
     this.admit(att.account, true);
     const store = this.e2e(att.account);
     const head = store.current();
@@ -604,15 +613,18 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const d = (raw as { dseq?: unknown })?.dseq;
       return isNat(d) && d >= next;
     };
-    const stale = (next: number, now: { hash: string }) => {
+    const stale = (next: number, now: { hash: string; generation: string }) => {
       for (const raw of list) {
-        const h = (raw as { head?: unknown })?.head;
-        if (fresh(raw, next) && isChainHead(h) && h !== now.hash) throw new SyncError("conflict", "sealed under another key chain head: seal again under the current one", { reason: "stale_head", head: now });
+        const { head: h, chain_gen: g } = (raw ?? {}) as { head?: unknown; chain_gen?: unknown };
+        if (fresh(raw, next) && ((isChainHead(h) && h !== now.hash) || (isChainGeneration(g) && g !== now.generation))) {
+          throw new SyncError("conflict", "sealed under another key chain head: seal again under the current one", { reason: "stale_head", head: now });
+        }
       }
     };
     stale(next0, head);
     // (each new op's signature, by a device current in the chain at this head: a well-formed op that isn't is refused
-    // for the whole message; a malformed one is left to its own refusal below)
+    // for the whole message; a malformed one is left to its own refusal below.  And each one's envelope hash, for its ack)
+    const envHash = new Map<number, string>();
     for (const raw of list) {
       if (!fresh(raw, next0)) continue;
       let op: SealedOp;
@@ -622,10 +634,11 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         continue;
       }
       const key = await store.currentSigner(op.signer);
-      const msg = await sealedOpMessage({ account: store.account, syncGeneration: gen, chainGeneration: head.generation, head: head.hash, device, dseq: op.dseq, env: op.env, adds: op.adds, releases: op.releases, signer: op.signer });
+      const msg = await sealedOpMessage({ account: store.account, syncGeneration: gen, chainGeneration: op.chainGen, head: op.head, device, dseq: op.dseq, env: op.env, adds: op.adds, releases: op.releases, signer: op.signer });
       if (!key || !(await verifyStrict(key, msg, unb64(op.sig, 64)))) {
         throw new SyncError("forbidden", "a sealed op not signed by a current device of this account's key chain", { dseq: op.dseq, signer: op.signer });
       }
+      envHash.set(op.dseq, await sha256b64(op.env));
     }
     // (tests only: held between the checks and the commit, as a slow verification would be)
     if (testMode(this.env) && this.sealedHold > 0) await new Promise((r) => setTimeout(r, this.sealedHold));
@@ -645,15 +658,21 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const added = list.filter((raw) => fresh(raw, next)).length;
       const kept = Number(this.get("sealed_ops") ?? 0);
       if (added > 0 && kept + added > this.sealedCap) throw new SyncError("limit", "this account's sealed log is full", { limit: "sealed_log", max: this.sealedCap });
-      const out: ({ dseq: number; seq: number } | { dseq: number; code: string })[] = [];
+      const out: SealedAck[] = [];
       const refusedCount = () => Number(this.one("SELECT COUNT(*) AS n FROM refused WHERE device = ?", device)!.n);
+      let ended = false;
       for (const raw of list) {
         const dseq = (raw as { dseq?: unknown })?.dseq;
         if (!isNat(dseq) || dseq < 1) throw new SyncError("invalid", "op: dseq");
         if (dseq < next) {
-          const r = this.one("SELECT seq FROM ops WHERE device = ? AND dseq = ?", device, dseq);
+          const r = this.one("SELECT seq, env_sha256 FROM ops WHERE device = ? AND dseq = ?", device, dseq);
           const f = r ? undefined : this.one("SELECT code FROM refused WHERE device = ? AND dseq = ?", device, dseq);
-          out.push(r ? { dseq, seq: Number(r.seq) } : { dseq, code: String(f?.code ?? "invalid") });
+          out.push(r ? { dseq, seq: Number(r.seq), ...(r.env_sha256 === null ? {} : { env_sha256: String(r.env_sha256) }) } : { dseq, code: String(f?.code ?? "invalid") });
+          continue;
+        }
+        // (after this message's first refusal: decides nothing; the device seals it again after the refused one)
+        if (ended) {
+          out.push({ dseq, undecided: true });
           continue;
         }
         if (dseq > next) throw new SyncError("order", "a gap in this device's ops", { next_dseq: next });
@@ -664,11 +683,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
             const h = this.one("SELECT refs FROM holdings WHERE sha256 = ?", a);
             if (!h || Number(h.refs) < 1) throw new SyncError("invalid", "a release of a reference that isn't held", { sha256: a });
           }
+          // (its hash was taken with its signature, before the transaction: every op that gets here was checked there)
+          const h = envHash.get(dseq);
+          if (h === undefined) throw new SyncError("invalid", "op: not checked before its decision");
           this.sql.exec(
-            "INSERT INTO ops (device, dseq, recv, size, env, head, adds, releases) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            device, dseq, Date.now(), op.env.length, toB64(op.env), op.head, JSON.stringify(op.adds), JSON.stringify(op.releases),
+            "INSERT INTO ops (device, dseq, recv, size, env, head, adds, releases, chain_gen, signer, sig, env_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            device, dseq, Date.now(), op.env.length, toB64(op.env), op.head, JSON.stringify(op.adds), JSON.stringify(op.releases), op.chainGen, op.signer, op.sig, h,
           );
-          out.push({ dseq, seq: Number(this.one("SELECT last_insert_rowid() AS n")!.n) });
+          out.push({ dseq, seq: Number(this.one("SELECT last_insert_rowid() AS n")!.n), env_sha256: h });
           this.set("sealed_ops", Number(this.get("sealed_ops") ?? 0) + 1);
           for (const a of op.adds) this.sql.exec("UPDATE holdings SET refs = refs + 1 WHERE sha256 = ?", a);
           for (const a of op.releases) this.sql.exec("UPDATE holdings SET refs = refs - 1 WHERE sha256 = ?", a);
@@ -677,6 +699,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
           if (refusedCount() >= LIMITS.refusalsPerDevice) throw new SyncError("invalid", "too many refused ops: rebuild from the server's log");
           this.sql.exec("INSERT INTO refused (device, dseq, code) VALUES (?, ?, ?)", device, dseq, e.code);
           out.push({ dseq, code: e.code });
+          ended = true;
         }
         next++;
         this.sql.exec("UPDATE devices SET next_dseq = ? WHERE device = ?", next, device);
@@ -687,7 +710,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
 
   /** The log after `after`, a page at a time (§5.2, §8). */
   private index(after: number): { ops: Row[]; more: boolean } {
-    const rows = this.sql.exec('SELECT seq, device, dseq, t, by, op, path, "to", kind, ref, fid, sha256, size, base, parent, env, head, adds, releases FROM ops WHERE seq > ? ORDER BY seq LIMIT ?', after, LIMITS.indexPage + 1).toArray() as Row[];
+    const rows = this.sql.exec('SELECT seq, device, dseq, t, by, op, path, "to", kind, ref, fid, sha256, size, base, parent, env, head, adds, releases, chain_gen, signer, sig FROM ops WHERE seq > ? ORDER BY seq LIMIT ?', after, LIMITS.indexPage + 1).toArray() as Row[];
     const ops: Row[] = [];
     let bytes = 0;
     for (const r of rows.slice(0, LIMITS.indexPage)) {

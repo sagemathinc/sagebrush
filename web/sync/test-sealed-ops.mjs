@@ -13,8 +13,8 @@ import { execFileSync } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
 import { dispatch } from "../miniflare-dispatch.mjs";
 import { useCrypto, webCrypto } from "../workspace/fleet/core/index.mjs";
-import { keyFromSeed } from "../workspace/fleet/core/ed25519.mjs";
-import { b64, idOfBytes, newId, random } from "../workspace/fleet/core/bytes.mjs";
+import { keyFromSeed, verifyStrict } from "../workspace/fleet/core/ed25519.mjs";
+import { b64, idOfBytes, newId, random, unb64 } from "../workspace/fleet/core/bytes.mjs";
 import * as E from "../workspace/e2e/core/index.mjs";
 import { sealedOpMessage } from "../workspace/e2e/sealed-op.mjs";
 import { hpkeDouble as hpke } from "../workspace/e2e/hpke-double.mjs";
@@ -49,6 +49,7 @@ const A = "5ea1ed00-0001-4e2e-8e2e-e2e2e2e2e201"; // the main account
 const N = "5ea1ed00-0002-4e2e-8e2e-e2e2e2e2e202"; // no key chain yet
 const R = "5ea1ed00-0003-4e2e-8e2e-e2e2e2e2e203"; // read-only
 const P = "5ea1ed00-0004-4e2e-8e2e-e2e2e2e2e204"; // the sync generation: deleting the synced data, and after
+const S = "5ea1ed00-0005-4e2e-8e2e-e2e2e2e2e205"; // what a device that pulls needs: the signed fields, acks, a refusal's end
 const SITE = "https://sagebrush.test";
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
@@ -57,7 +58,7 @@ const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled:
 const cocalc = async () => Response.json(plan);
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
 const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } } });
-const listed = [A, N, R, P].join(",");
+const listed = [A, N, R, P, S].join(",");
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_E2E: "1", SYNC_AGENT: "1", GRANT_TAG_KEY: "grant-tag-key", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("4101") },
@@ -235,12 +236,15 @@ async function hello(s, device) {
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 const putBlob = (s, bytes) => at(SITE, `/api/sync/v1/blob/${sha(bytes)}`, { method: "PUT", headers: { cookie: s, origin: SITE, "content-type": "application/octet-stream", "x-sb-ct-sha256": sha(bytes) }, body: bytes });
 /** A sealed op as a device makes it: an envelope (random bytes: the server never reads it), signed by E2E device `d`
- * of `W` under chain state `st`, for sync device `sdev` at `dseq`, in sync generation `extra.gen` (1 unless said). */
+ * of `W` under chain state `st` (and its generation, unless `extra.chainGen` says another), for sync device `sdev` at
+ * `dseq`, in sync generation `extra.gen` (1 unless said). */
 async function signed(W, d, st, sdev, dseq, extra = {}) {
-  const env = random(48), adds = extra.adds ?? [], releases = extra.releases ?? [];
-  const msg = await sealedOpMessage({ account: W.ctx.account, syncGeneration: extra.gen ?? 1, chainGeneration: st.generation, head: st.head, device: sdev, dseq, env, adds, releases, signer: d.id });
-  return { dseq, head: st.head, env: Buffer.from(env).toString("base64"), adds, releases, signer: d.id, sig: b64(await d.sign.sign(msg)) };
+  const env = random(48), adds = extra.adds ?? [], releases = extra.releases ?? [], chainGen = extra.chainGen ?? st.generation;
+  const msg = await sealedOpMessage({ account: W.ctx.account, syncGeneration: extra.gen ?? 1, chainGeneration: chainGen, head: st.head, device: sdev, dseq, env, adds, releases, signer: d.id });
+  return { dseq, head: st.head, chain_gen: chainGen, env: Buffer.from(env).toString("base64"), adds, releases, signer: d.id, sig: b64(await d.sign.sign(msg)) };
 }
+/** An envelope's hash as an ack names it: SHA-256, unpadded base64url (worked out here independently of the server). */
+const envHash = (envB64) => createHash("sha256").update(Buffer.from(envB64, "base64")).digest("base64url");
 const noSig = (op) => ({ ...op, sig: "A".repeat(86) });
 
 await section("what a device signs: a fixed vector, written out by hand", async () => {
@@ -350,22 +354,25 @@ await section("sealed ops: signed by a current device, under the current head", 
   const prior = await ws.ask({ t: "sops", ops: [await signed(W, d, old, dev, n)] });
   ok(prior?.code === "conflict" && prior.detail?.reason === "stale_head", "an op sealed before the removal: refused, stale_head");
 
-  // (form: each refused alone, its dseq spent as a refusal, the next decided)
-  const h = st.head;
-  const form = await ws.ask({ t: "sops", ops: [
-    { dseq: n, head: h, env: "", adds: [], releases: [], signer: d.id, sig: "A".repeat(86) },
-    { dseq: n + 1, head: h, env: Buffer.alloc((64 << 10) + 1).toString("base64"), signer: d.id, sig: "A".repeat(86) },
-    { dseq: n + 2, head: h, env: "AAAA", adds: ["0".repeat(64), "0".repeat(64)], signer: d.id, sig: "A".repeat(86) },
-    { dseq: n + 3, head: "not a head", env: "AAAA", signer: d.id, sig: "A".repeat(86) },
-    { dseq: n + 4, head: h, env: "AAAA", path: "/plain.txt", signer: d.id, sig: "A".repeat(86) },
-    { dseq: n + 5, head: h, env: "AAAA", adds: Array.from({ length: 65 }, (_, i) => i.toString(16).padStart(64, "0")), signer: d.id, sig: "A".repeat(86) },
-    { dseq: n + 6, head: h, env: "AAAA" },
-    await signed(W, d, st, dev, n + 7),
-  ] });
-  const codes = form?.ops?.map((o) => o.code ?? "ok");
-  ok(JSON.stringify(codes) === JSON.stringify(["invalid", "limit", "invalid", "invalid", "invalid", "limit", "invalid", "ok"]),
-    "an empty envelope, one over 64 KiB, an address twice, a malformed head, a plaintext field, 65 references, no signer: each refused; the next accepted: " + JSON.stringify(codes));
-  n += 8;
+  // (form: each refused, its dseq spent as a refusal (one per message: a refusal ends its message), the next decided)
+  const h = st.head, cg = st.generation;
+  const malformed = [
+    { head: h, chain_gen: cg, env: "", adds: [], releases: [], signer: d.id, sig: "A".repeat(86) },
+    { head: h, chain_gen: cg, env: Buffer.alloc((64 << 10) + 1).toString("base64"), signer: d.id, sig: "A".repeat(86) },
+    { head: h, chain_gen: cg, env: "AAAA", adds: ["0".repeat(64), "0".repeat(64)], signer: d.id, sig: "A".repeat(86) },
+    { head: "not a head", chain_gen: cg, env: "AAAA", signer: d.id, sig: "A".repeat(86) },
+    { head: h, chain_gen: cg, env: "AAAA", path: "/plain.txt", signer: d.id, sig: "A".repeat(86) },
+    { head: h, chain_gen: cg, env: "AAAA", adds: Array.from({ length: 65 }, (_, i) => i.toString(16).padStart(64, "0")), signer: d.id, sig: "A".repeat(86) },
+    { head: h, chain_gen: cg, env: "AAAA" },
+    { head: h, env: "AAAA", signer: d.id, sig: "A".repeat(86) },
+    { head: h, chain_gen: "not a generation", env: "AAAA", signer: d.id, sig: "A".repeat(86) },
+  ];
+  const codes = [];
+  for (const [i, m] of malformed.entries()) codes.push((await ws.ask({ t: "sops", ops: [{ dseq: n + i, ...m }] }))?.ops?.[0]?.code ?? "ok");
+  codes.push((await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n + malformed.length)] }))?.ops?.[0]?.seq !== undefined ? "ok" : "refused");
+  ok(JSON.stringify(codes) === JSON.stringify(["invalid", "limit", "invalid", "invalid", "invalid", "limit", "invalid", "invalid", "invalid", "ok"]),
+    "an empty envelope, one over 64 KiB, an address twice, a malformed head, a plaintext field, 65 references, no signer, no chain generation, a malformed one: each refused; the next accepted: " + JSON.stringify(codes));
+  n += malformed.length + 1;
 
   // (the log's cap counts new ops only: a lost ack's retry at a full log is still answered with its seq)
   const kept = (await ws.ask({ t: "pull_index", after: 0 }))?.ops?.filter((o) => o.env !== undefined).length;
@@ -396,6 +403,72 @@ await section("sealed ops: signed by a current device, under the current head", 
     await new Promise((r) => setTimeout(r, 50));
   }
   ok(ixs?.state === "ready" && ixs.cursor === ixs.max && ixs.max === plain.ops[0].seq, "the agents' index is built past the sealed ops, through the plaintext op after them, to the log's end: " + JSON.stringify(ixs));
+  ws.ws.close();
+});
+
+await section("what a device that pulls needs: every signed value served, the envelope's hash in each ack, and a refusal ending its message", async () => {
+  const s = await enabled(S);
+  const W = account(S);
+  const g = await W.genesis();
+  ok((await post(s, S, "/api/sync/v1/e2e/chain", g.body)).status === 201, "(genesis)");
+  const d = g.d, st = g.next;
+  const ws = await socket(s);
+  const dev = "sealed-dev-s001";
+  let n = (await hello(ws, dev)).next_dseq;
+  const acct = await objectOf(S);
+  const logOf = async () => (await ws.ask({ t: "pull_index", after: 0 }))?.ops ?? [];
+
+  // (the ack names the hash of the envelope the log holds, the first time and on a resend)
+  const one = await signed(W, d, st, dev, n);
+  const a = await ws.ask({ t: "sops", ops: [one] });
+  ok(a?.ops?.[0]?.env_sha256 === envHash(one.env) && /^[A-Za-z0-9_-]{43}$/.test(a.ops[0].env_sha256), "an accepted op's ack: its seq and its envelope's SHA-256 (unpadded base64url, 43 characters): " + JSON.stringify(a?.ops?.[0]));
+  const again = await ws.ask({ t: "sops", ops: [one] });
+  ok(again?.ops?.[0]?.seq === a.ops[0].seq && again.ops[0].env_sha256 === envHash(one.env), "a resend (a lost ack): the same seq and the same hash");
+  const other = { ...(await signed(W, d, st, dev, n)) };
+  const resealed = await ws.ask({ t: "sops", ops: [other] });
+  ok(resealed?.ops?.[0]?.seq === a.ops[0].seq && resealed.ops[0].env_sha256 === envHash(one.env) && envHash(other.env) !== envHash(one.env),
+    "the same dseq sealed again with other bytes: answered with the log's seq and the hash of the bytes the log holds, not the new ones");
+  n += 1;
+
+  // (every signed value is served as it was signed: the signed bytes rebuilt from the served row verify, and no field can change alone)
+  const row = (await logOf()).find((o) => o.device === dev && o.dseq === one.dseq);
+  const rebuild = (r) => sealedOpMessage({ account: W.ctx.account, syncGeneration: 1, chainGeneration: r.chain_gen, head: r.head, device: r.device, dseq: r.dseq,
+    env: new Uint8Array(Buffer.from(r.env, "base64")), adds: r.adds ?? [], releases: r.releases ?? [], signer: r.signer });
+  const verifies = async (r) => verifyStrict(d.sign.raw, await rebuild(r), unb64(r.sig, 64));
+  const signedBytes = await sealedOpMessage({ account: W.ctx.account, syncGeneration: 1, chainGeneration: one.chain_gen, head: one.head, device: dev, dseq: one.dseq,
+    env: new Uint8Array(Buffer.from(one.env, "base64")), adds: one.adds, releases: one.releases, signer: one.signer });
+  ok(row && Buffer.from(await rebuild(row)).equals(Buffer.from(signedBytes)) && row.signer === d.id && row.sig === one.sig && row.chain_gen === st.generation && (await verifies(row)),
+    "the served row rebuilds the signed bytes exactly, and its signature verifies: " + JSON.stringify(row && { signer: row.signer, chain_gen: row.chain_gen, head: row.head }));
+  const tampered = {
+    device: "sealed-dev-s002", dseq: row.dseq + 1, head: "B".repeat(43), chain_gen: newId(), env: Buffer.from(random(48)).toString("base64"),
+    adds: ["0".repeat(64)], releases: ["1".repeat(64)], signer: newId(), sig: b64(random(64)),
+  };
+  const held = {};
+  for (const [k, v] of Object.entries(tampered)) held[k] = await verifies({ ...row, [k]: v });
+  ok(Object.values(held).every((x) => x === false) && Object.keys(held).length === 9, "each served signed value changed alone (device, dseq, head, chain generation, envelope, adds, releases, signer, signature): the signature fails: " + JSON.stringify(held));
+
+  // (a chain generation that isn't the chain's current one: the whole message, as a stale head)
+  const rows0 = (await logOf()).length;
+  const wrongGen = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n, { chainGen: newId() })] });
+  ok(wrongGen?.code === "conflict" && wrongGen.detail?.reason === "stale_head" && (await logOf()).length === rows0, "an op naming another chain generation: refused whole, stale_head, nothing stored: " + JSON.stringify(wrongGen));
+
+  // (the first refusal ends the message: the ops after it decide nothing, and are new when they come again)
+  const blob = Buffer.from("sealed ops' undecided blob");
+  ok((await putBlob(s, blob)).status === 201, "(a blob held)");
+  const refs = async () => (await acct.inspect({ sha256: sha(blob) }))?.refs;
+  const first = await signed(W, d, st, dev, n), bad = await signed(W, d, st, dev, n + 1, { adds: ["e".repeat(64)] });
+  const later = await signed(W, d, st, dev, n + 2, { adds: [sha(blob)] }), last = await signed(W, d, st, dev, n + 3);
+  const rows1 = (await logOf()).length;
+  const mid = await ws.ask({ t: "sops", ops: [first, bad, later, last] });
+  const shape = mid?.ops?.map((o) => (o.seq !== undefined ? "seq" : o.code ?? (o.undecided === true ? "undecided" : "?")));
+  ok(JSON.stringify(shape) === JSON.stringify(["seq", "missing", "undecided", "undecided"]), "[accepted, refused, two more]: the two after the refusal are undecided: " + JSON.stringify(mid?.ops));
+  ok((await logOf()).length === rows1 + 1 && (await refs()) === 0, "…only the first is in the log, and the undecided one's reference wasn't counted");
+  const w2 = await hello(await socket(s), "sealed-dev-s001");
+  ok(w2?.next_dseq === n + 2, "…the next dseq is the first undecided one: the refused one was spent, the undecided ones weren't (" + w2?.next_dseq + ")");
+  const resent = await ws.ask({ t: "sops", ops: [later, last] });
+  ok(resent?.ops?.every((o) => Number.isInteger(o.seq) && o.env_sha256 !== undefined) && (await refs()) === 1, "the undecided ones sent again: decided as new, accepted, the reference counted: " + JSON.stringify(resent?.ops));
+  const refusedAgain = await ws.ask({ t: "sops", ops: [bad] });
+  ok(refusedAgain?.ops?.[0]?.code === "missing" && refusedAgain.ops[0].undecided === undefined, "the refused one sent again: its refusal, kept");
   ws.ws.close();
 });
 

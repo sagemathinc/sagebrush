@@ -297,15 +297,22 @@ const E2E_ID = /^[a-z2-7]{25}[aeimquy4]$/;
 /** An Ed25519 signature: 64 bytes as unpadded base64url (86 characters). */
 const SIG = /^[A-Za-z0-9_-]{86}$/;
 
-/** A sealed op: its device order, the chain head it was sealed under, its envelope, its visible blob references, and
- * the E2E device that signed it (web/workspace/e2e/sealed-op.mjs says what is signed). */
-export interface SealedOp { dseq: number; head: string; env: Uint8Array; adds: string[]; releases: string[]; signer: string; sig: string }
+/** A key chain's generation: its genesis entry's hash (a head's form) or, after a reset, the id it names (an E2E id). */
+export const isChainGeneration = (s: unknown): s is string => isChainHead(s) || (typeof s === "string" && E2E_ID.test(s));
+
+/** A sealed op: its device order, the chain head (and that chain's generation) it was sealed under, its envelope, its
+ * visible blob references, and the E2E device that signed it (web/workspace/e2e/sealed-op.mjs says what is signed). */
+export interface SealedOp { dseq: number; head: string; chainGen: string; env: Uint8Array; adds: string[]; releases: string[]; signer: string; sig: string }
+
+/** An envelope's SHA-256 as an ack names it: unpadded base64url, 43 characters (e2e/index-op.ts opHash, encoded). */
+export const isEnvHash = (s: unknown): s is string => isChainHead(s);
 
 /** One sealed op, checked: its form only (the server can't read it). */
 export function checkSealedOp(v: unknown): SealedOp {
-  const o = fields(v, ["dseq", "head", "env", "adds", "releases", "signer", "sig"], "sealed op");
+  const o = fields(v, ["dseq", "head", "chain_gen", "env", "adds", "releases", "signer", "sig"], "sealed op");
   if (!isNat(o.dseq) || o.dseq < 1) throw invalid("sealed op: dseq is a positive integer");
   if (!isChainHead(o.head)) throw invalid("sealed op: head is the key chain's head, 43 base64url characters");
+  if (!isChainGeneration(o.chain_gen)) throw invalid("sealed op: chain_gen is the key chain's generation");
   const env = fromB64(o.env, LIMITS.sealedOpBytes, "sealed_op_bytes");
   if (env.length === 0) throw invalid("sealed op: env is empty");
   const refs = (x: unknown, what: string): string[] => {
@@ -317,7 +324,7 @@ export function checkSealedOp(v: unknown): SealedOp {
   };
   if (typeof o.signer !== "string" || !E2E_ID.test(o.signer)) throw invalid("sealed op: signer is an E2E device's id");
   if (typeof o.sig !== "string" || !SIG.test(o.sig)) throw invalid("sealed op: sig is an Ed25519 signature, 86 base64url characters");
-  return { dseq: o.dseq, head: o.head, env, adds: refs(o.adds, "adds"), releases: refs(o.releases, "releases"), signer: o.signer, sig: o.sig };
+  return { dseq: o.dseq, head: o.head, chainGen: o.chain_gen, env, adds: refs(o.adds, "adds"), releases: refs(o.releases, "releases"), signer: o.signer, sig: o.sig };
 }
 
 // ---- batches (§4.1, §5.3)
