@@ -276,10 +276,14 @@ function Sig(case_id, n, answer)
     elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_fp31_charpoly","mat_q_charpoly"} then
         return IntegerToString(Degree(answer)) cat ":" cat IntegerToString(SeqHash(Coefficients(answer)));
     elif case_id in {"mat_z_smith","mat_z_smith_hard"} then
-        return IntegerToString(n) cat ":" cat IntegerToString(SeqHash([Abs(answer[i,i]):i in [1..n]]));
+        d := [Abs(answer[i,i]):i in [1..n]];
+        // (the hard rows' answer is known: diag(1, p, ..., p))
+        error if case_id eq "mat_z_smith_hard" and d ne [1] cat [1000003 : i in [2..n]], "the hard Smith form is not diag(1, p, ..., p)";
+        return IntegerToString(n) cat ":" cat IntegerToString(SeqHash(d));
     elif case_id in {"mat_z_elementary_divisors","mat_z_elementary_divisors_hard"} then
         // (the nonzero divisors only: padded with zeros to n, as the others)
         d := [Integers()| Abs(z) : z in answer] cat [Integers()| 0 : i in [1..n-#answer]];
+        error if case_id eq "mat_z_elementary_divisors_hard" and d ne [1] cat [1000003 : i in [2..n]], "the hard elementary divisors are not [1, p, ..., p]";
         return IntegerToString(n) cat ":" cat IntegerToString(SeqHash(d));
     elif case_id in {"mat_z_hnf","mat_fp_solve","mat_fp31_solve","mat_q_solve"} then
         return IntegerToString(n) cat ":" cat IntegerToString(SeqHash(Eltseq(answer)));
@@ -287,7 +291,10 @@ function Sig(case_id, n, answer)
         ds:=[TotalDegree(f):f in answer]; Sort(~ds); return IntegerToString(#answer) cat ":" cat IntegerToString(SeqHash(ds));
     elif case_id eq "class_group" then
         inv:=[Integers()!z:z in Invariants(answer)]; Sort(~inv); return IntegerToString(#answer) cat ":" cat Join([IntegerToString(z):z in inv],",");
-    elif case_id in {"galois_group","galois_group_small"} then return IntegerToString(#answer);
+    elif case_id eq "galois_group_small" then
+        // (the order and the transitive number, as the Sage-mode driver)
+        return IntegerToString(#answer) cat ":T" cat IntegerToString(TransitiveGroupIdentification(answer));
+    elif case_id eq "galois_group" then return IntegerToString(#answer);
     elif case_id eq "modsym_charpoly" then return IntegerToString(Degree(answer)) cat ":" cat IntegerToString(SeqHash(Coefficients(answer)));
     elif case_id in {"hecke_matrix","hecke_matrix_prebuilt"} then
         g := ChangeRing(CharacteristicPolynomial(answer), Integers());

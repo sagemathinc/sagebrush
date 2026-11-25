@@ -365,6 +365,13 @@ def prepare(v):
     raise ValueError(case_id)
 
 
+def known_smith(diagonal):
+    """The hard Smith rows' answer is known: diag(1, p, ..., p).  A wrong
+    one is an error here, even if every system agreed on it."""
+    if case_id.endswith("_hard") and diagonal != [1] + [SMITH_P] * (n - 1):
+        raise AssertionError("the hard Smith form is not diag(1, p, ..., p)")
+
+
 def signature(answer):
     if case_id.startswith("poly_") and "factor" in case_id:
         fs = sorted((f.degree(), int(e), seq_hash(coeffs(f))) for f, e in answer)
@@ -384,11 +391,13 @@ def signature(answer):
             return "%d:%d" % (answer.degree(), seq_hash(coeffs(answer)))
         if op == "smith":
             diagonal = [abs(int(answer[i, i])) for i in range(n)]
+            known_smith(diagonal)
             return "%d:%d" % (n, seq_hash(diagonal))
         if op == "divisors":
             # (the diagonal, as the Smith form's signature: padded with
             # zeros to n, since some systems list only the nonzero ones)
             d = [abs(int(x)) for x in answer]
+            known_smith(d + [0] * (n - len(d)))
             return "%d:%d" % (n, seq_hash(d + [0] * (n - len(d))))
         return "%d:%d" % (
             n,
@@ -400,7 +409,11 @@ def signature(answer):
     if case_id == "class_group":
         inv = sorted(map(int, answer.invariants()))
         return "%d:%s" % (int(answer.order()), ",".join(map(str, inv)))
-    if case_id in ("galois_group", "galois_group_small"):
+    if case_id == "galois_group_small":
+        # (the order and the transitive number: several transitive groups
+        # share an order, e.g. degree 8, order 16)
+        return "%d:T%d" % (int(answer.order()), int(answer.transitive_number()))
+    if case_id == "galois_group":
         return str(int(answer.order()))
     if case_id == "modsym_charpoly":
         return "%d:%d" % (len(answer) - 1, seq_hash(answer))
