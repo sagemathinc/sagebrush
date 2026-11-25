@@ -93,7 +93,7 @@ for name, f, q, method, ax in [("quantile out keepdims (2, 0)", np.quantile, [0.
                                ("percentile out keepdims (0, 1)", np.percentile, 30, "linear", (0, 1)),
                                ("quantile out keepdims nearest (1, 2)", np.quantile, 0.4, "nearest", (1, 2)),
                                ("quantile out keepdims midpoint (0, 1, 2)", np.quantile, [0.5], "midpoint", (0, 1, 2))]:
-    o = np.full(np.quantile(a, q, axis=ax, keepdims=True).shape, -1.0)
+    o = np.full(f(a, q, axis=ax, keepdims=True, method=method).shape, -1.0)
     show(name, lambda: (f(a, q, axis=ax, keepdims=True, method=method, out=o) is o, o))
 show("quantile out keepdims (2, 0), out of the wrong shape",
      lambda: np.quantile(a, 0.5, axis=(2, 0), keepdims=True, out=np.zeros((1, 3, 4))))
