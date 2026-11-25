@@ -377,7 +377,7 @@
    "class": "EXEMPT",
    "why": "a sync reset's leftover orphan markers swept a slice at a time, as the cleanup's sweep: only orphaned bytes (no entry names them) deleted"
   },
-  "workspace/sync-client.ts|1|const due = await inTx(this.w.ws, [META, \"syncIndex\"], \"readwrite\", (tx) => duePairs(tx.objectStore(META), idbStore(tx, gen), gen, now, RELEASE_PAGE));": {
+  "workspace/sync-client.ts|1|const due = await inTx(this.w.ws, [META, \"syncIndex\"], \"readwrite\", (tx) => duePairs(tx.objectStore(META), idbStore(tx, gen), gen, now, REFS.page));": {
    "class": "NOT-SOURCE",
    "why": "meta and syncIndex only (the sweep's first-sight stamps and walk position, e2e PR 5d): no source store"
   }
