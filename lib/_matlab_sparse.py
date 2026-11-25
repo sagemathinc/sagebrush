@@ -1712,9 +1712,11 @@ def _small_triangular(A, b, k):
     rather than the dense route's O(n^3), charging no lu_work units, as the dense route charges none.  Whether to try
     it is decided from A and b alone, never the host's free memory: A triangular (its bandwidths), no single array past
     A_SAFE, and its whole need (small_triangular_need) under the small-need floor (where nothing is admitted, so it
-    never refuses) or at most the dense route's (so a refusal is one the dense route would give too: the dense route
-    is exempt only under the floor), counting for a sparse b the dense route's own conversion of its result, which it
-    makes unreserved after its admitted copies.  Then, past the small-need
+    never refuses) or at most the dense route's (so a refusal refuses the dense route's admitted need too: the dense
+    route is exempt only under the floor).  For a sparse b the dense route's side also counts its own conversion of
+    its result, which it makes unreserved after its admitted copies, at the worst case nnz = n*k (from the shape
+    alone, deterministic): a conservative bound, so some sparse-b solves the dense route answered within a guard (its
+    actual result smaller) are refused here.  Then, past the small-need
     floor, the need is reserved before anything is made, and a guard that refuses it ends the solve with the
     out-of-memory error naming this solve: never the dense route, which, needing at least as much, would refuse too.
     Returns (result or None, the capacity record if one was read, for the dense route to use: one read per solve); a
