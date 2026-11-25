@@ -5430,6 +5430,16 @@
   "owner": "Magma compatibility",
   "row": "inv-25"
  },
+ "lib/_magma.py :: _MNumberField.__init__ :: raise NotImplementedError(\"defining polynomials must be monic (for now)\") #0": {
+  "class": "none",
+  "owner": "Magma compatibility",
+  "reason": "Magma mode's refusal of a number field whose polynomial is rational or not monic, kept until Magma mode maps the core's scaled coordinates; a feature gap, not a limit"
+ },
+ "lib/_magma.py :: _MNumberField.__init__ :: raise NotImplementedError(\"defining polynomials must have integer coefficients\") #0": {
+  "class": "none",
+  "owner": "Magma compatibility",
+  "reason": "Magma mode's refusal of a number field whose polynomial is rational or not monic, kept until Magma mode maps the core's scaled coordinates; a feature gap, not a limit"
+ },
  "lib/_magma.py :: _collect :: _COLLECT_MAX of them, before the collection is built (HARD-FCC-1).\"\"\" #0": {
   "class": "1+2",
   "owner": "Magma compatibility/runtime memory",
@@ -6852,6 +6862,11 @@
   "class": "3",
   "owner": "finite fields + configuration"
  },
+ "lib/_sage_ff.py :: _ff_subfields :: (the limits review LIMIT-PR53-1). A proper subfield is named as Sage names it #0": {
+  "class": "none",
+  "owner": "finite fields",
+  "reason": "Docstring review reference; this line refuses nothing."
+ },
  "lib/_sage_ff.py :: _ff_subfields :: refuse = lambda: NotImplementedError(\"subfields of %r are not supported yet (computed here only for fields of at most %s elements%s)\" % (self, S.embed_max_text(), S.work_clause())) #0": {
   "class": "3",
   "owner": "finite fields + configuration"
@@ -7178,6 +7193,11 @@
  "lib/_sage_ffsub.py :: embed_max_text :: or 10^7, the Conway search's cutoff, when ff.embed_max is unlimited.\"\"\" #0": {
   "class": "none",
   "owner": "finite fields + configuration"
+ },
+ "lib/_sage_ffsub.py :: subfields_admit :: map or result is made or any cache touched (the limits review LIMIT-PR53-1): #0": {
+  "class": "none",
+  "owner": "finite fields",
+  "reason": "Docstring review reference; this line refuses nothing."
  },
  "lib/_sage_ffsub.py :: trace :: def trace(x, budget, refuse): #0": {
   "class": "3",
@@ -8038,6 +8058,11 @@
  "lib/_sage_nf.py :: NumberField_absolute.class_group :: session limits nf.certify_norm_max and nf.certify_index_max make it #0": {
   "class": "3",
   "owner": "number fields"
+ },
+ "lib/_sage_nf.py :: Order.__repr__ :: name = \"Maximal Order\" #0": {
+  "class": "none",
+  "owner": "Sage compatibility",
+  "reason": "the word Maximal (the maximal order's name as Sage prints it), not a limit: nothing is refused"
  },
  "lib/_sage_numfun.py :: prime_pi_plot :: \"\"\"A plot of prime_pi(x) for xmin <= x <= xmax: a step line, with the #0": {
   "class": "none",
@@ -13636,6 +13661,11 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: cumulative :: if (axis !== null && axis !== undefined) normAxis(intNum(axis), a.ndim); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; it refuses an axis out of bounds for a 0-d array viewed as one element, as NumPy's cumsum"
  },
  "src/runtime/numpy.ts :: discover :: if (depth + s.length > MAX_DIMS) nestedTooDeep(); #0": {
   "class": "none",
