@@ -1087,6 +1087,12 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
   const links = [...h.matchAll(/<a class="ref"[^>]*>([^<]*)<\/a>/g)].map((m) => m[1]);
   check("ref-star-no-link", JSON.stringify(links) === JSON.stringify(["1", "1"]), links);
   check("ref-star-no-key-star", !/\*\s*\?\?|\?\? ?h|\?\? ?e\b/.test(t) && !r.problems.some((p) => /\*/.test(p.name ?? "")), t.slice(0, 300));
+  // (natbib's \cite*, \citet*, \citep*: their "*" read, never the key, and still linked, as pdflatex with natbib and
+  //  hyperref links them)
+  const NAT = "\\documentclass{article}\n\\usepackage[numbers]{natbib}\n\\usepackage{hyperref}\n\\begin{document}\nA \\cite*{k}. B \\citet*{k}. C \\citep*{k}.\n\\begin{thebibliography}{1}\n\\bibitem[Knuth(1984)]{k} D. Knuth.\n\\end{thebibliography}\n\\end{document}\n";
+  const hn = new Engine().update(NAT, { cold: true }).chunks.join("");
+  const citeLinks = (hn.match(/<a href="#bib-1">/g) || []).length;
+  check("cite-star-linked", citeLinks === 3 && !/class="missing">\*</.test(hn) && !/>\*</.test(hn), { citeLinks, t: hn.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").slice(0, 160) });
 }
 
 // ---- envclose.ts (P1a): the close a "}" typed after \begin{X} adds, or none

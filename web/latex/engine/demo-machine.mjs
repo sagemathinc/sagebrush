@@ -361,15 +361,16 @@ export class Machine extends CoreMachine {
       this.pushArg(key);
       coreLabel.call(this, t);
     });
-    // (and the starred forms the packages define, \ref*{key}: hyperref's \ref*, \pageref*, \autoref*, \nameref* and
-    //  cleveref's \cref*, \Cref*, a reference without a link; natbib's \citet*, \citep*, with every author. The "*" is read
-    //  here, never taken for the key; \eqref and \cite have none, as in LaTeX)
-    const STARRED = new Set(["ref", "pageref", "autoref", "nameref", "cref", "Cref", "citep", "citet"]);
+    // (and the starred forms the packages define, their "*" read here, never taken for the key: hyperref's \ref*, \pageref*,
+    //  \autoref*, \nameref* and cleveref's \cref*, \Cref*, a reference without a link (marked star); natbib's \cite*,
+    //  \citet*, \citep*, with every author and still linked (not marked). \eqref has none, as in LaTeX)
+    const STARRED = new Set(["ref", "pageref", "autoref", "nameref", "cref", "Cref", "cite", "citep", "citet"]);
+    const CITES = new Set(["cite", "citep", "citet"]);
     for (const nm of ["ref", "eqref", "pageref", "cite", "cref", "Cref", "autoref", "citep", "citet", "nameref"]) P.prim(nm, function () {
       const s = STARRED.has(nm) ? this.nextRaw() : null, star = s !== null && !isCs(s) && codeOf(s) === 42;
       if (s !== null && !star) this.back(s);
       const opt = this.readOptRaw(); const key = this.readArgString();
-      this.mark({ k: "ref", cmd: nm, key, opt: opt ? this.toks2str(opt) : null, ...(star ? { star: true } : {}) });
+      this.mark({ k: "ref", cmd: nm, key, opt: opt ? this.toks2str(opt) : null, ...(star && !CITES.has(nm) ? { star: true } : {}) });
     });
     // \newcommand (and \newcommand*) on a name that already has a meaning: LaTeX's "already defined" error, and the old
     // meaning stays (the core's own prim reported E-ALREADY-DEFINED but redefined anyway); the arguments are consumed
