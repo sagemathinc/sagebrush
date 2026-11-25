@@ -19,7 +19,7 @@ let failures = 0;
 const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 600) : "")); if (!c) failures++; };
 
 // ---- the mirror: the upstream commit and each file's sha256 there (a new upstream version means new pins, reviewed)
-const UPSTREAM = "68722fd430baaaf5e29363201312fa96ff1ed6cb";
+const UPSTREAM = "59ab819764512a86c34286090094146c800c8ba9";
 const PINS = {
   "core/bytes.mjs": ["lib/fleet/core/bytes.mjs", "be5c199fcadf375336c49dae692fce6af96644af6f98b11161a4fb0d65eaaf6b"],
   "core/canon.mjs": ["lib/fleet/core/canon.mjs", "d9b7831f6772f6010689ecb74a8727280470e8e1437a2166fc0fd6b1728f08e8"],
@@ -44,7 +44,7 @@ const PINS = {
   "core/worker.mjs": ["lib/fleet/core/worker.mjs", "9471ad45d78b0a423ac64a07d1ee02c73b5e6241d11f11f40e6daf070801633f"],
   "fleet.schema.json": ["schema/fleet/fleet.schema.json", "e74f056439d6d360c525529e90bd945e9dd9e2edb9e299d384a5f9fce8ff887e"],
   "reasons.json": ["schema/fleet/reasons.json", "c1866dbf2a0c5d83c43f1af4e3ad8aecb737f39612aedafbbd75a69f12e2bae3"],
-  "fleet-fixtures.json": ["test/fixtures/fleet-fixtures.json", "1c4720652d3260b48ad97593d07832f8e98f7f5650a126792957e90d98f83aa0"],
+  "fleet-fixtures.json": ["test/fixtures/fleet-fixtures.json", "c21999636530b9a86a7e005c7537b62aeee6443cc604c67643c98568560df135"],
   "fleet-hpke-fixtures.json": ["test/fixtures/fleet-hpke-fixtures.json", "2c4d640af72ee2514c33930763dd17521b73ca50e231fdc0cb8d54915e16736c"],
   "hpke-x25519-sha256-aes256gcm.json": ["test/fixtures/hpke-x25519-sha256-aes256gcm.json", "054c8e53704afdc91aae501f96ee964828c78fd4581e5894d21593b93a066d8e"],
   "fleet-fixture-cases.mjs": ["test/fleet-fixture-cases.mjs", "d2b2fca719d78951df7af8f0d23854aa2ab2763e0e175d2dcab2f3b5547f9a19"],
@@ -202,7 +202,7 @@ const settle = async (P, before) => { for (const t = Date.now(); P.loads === bef
 const page = async () => { const P = await B.tab(); const n = P.loads; await P.send("Page.navigate", { url: site + "/" }); await settle(P, n); return P; };
 const err = (P, expr) => P.ev(`(async () => { try { await (${expr}); return null; } catch (e) { return String(e?.message ?? e); } })()`);
 // (the count is pinned so a group of cases that stopped running shows up, not only a case that fails)
-const CASES = 195, HPKE_VECTOR = 260, HPKE_CASES = 34;
+const CASES = 201, HPKE_VECTOR = 260, HPKE_CASES = 34;
 try {
   {
     const P = await page();
