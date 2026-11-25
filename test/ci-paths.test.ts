@@ -93,8 +93,9 @@ test("prose no code reads is docs-only: the other top-level pages, docs/'s pages
 
 test("prose classified docs-only is read by no code: no tracked file names one as a path", () => {
   const root = join(__dirname, "..", "..");
+  // The public-text baseline lists prose paths as hygiene debt, not as build or runtime inputs.
   const grep = (pattern: string) => {
-    const r = spawnSync("git", ["grep", "-nIE", pattern, "--", ":!design/", ":!notes/", ":!docs/*.md", ":!*.md", ":!test/ci-paths.test.ts"], { cwd: root, encoding: "utf8" });
+    const r = spawnSync("git", ["grep", "-nIE", pattern, "--", ":!design/", ":!notes/", ":!docs/*.md", ":!*.md", ":!test/ci-paths.test.ts", ":!scripts/public-text-allowlist.json"], { cwd: root, encoding: "utf8" });
     assert.ok(r.status === 0 || r.status === 1, r.stderr);
     return r.stdout.trim();
   };

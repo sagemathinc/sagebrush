@@ -1074,6 +1074,52 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
   check("input-change-rerenders", r2.stats.mode === "cold" && /\\mathbb ?\{Z\}/.test(r2.chunks.join("")), r2.stats.mode);
 }
 
+// ---- \bibliography{refs} reads \jobname.bbl, the thebibliography BibTeX wrote beside the .tex (inputs.ts jobname, the
+// expander's \bibliography): the references listed and each \cite resolved; without one, or before the host has read
+// it, the placeholder as before, and the host asked for it. natbib's numbers, sort&compress and \citet as TeX Live's
+// natbib sets them (checked against pdflatex): [3, 1]; [1, 3], [1, 2], [1–3]; "Ann [1]"; a note inside the brackets.
+// \newblock is a space, \penalty0 is dropped (plainnat writes both; TeX prints "156:\penalty0 2399" as "156:2399")
+{
+  const { engineInputs } = await import("./inputs.ts");
+  const BBL = "\\begin{thebibliography}{1}\n\\providecommand{\\natexlab}[1]{#1}\n\\providecommand{\\url}[1]{\\texttt{#1}}\n\\expandafter\\ifx\\csname urlstyle\\endcsname\\relax\n  \\providecommand{\\doi}[1]{doi: #1}\\else\n  \\providecommand{\\doi}{doi: \\begingroup \\urlstyle{rm}\\Url}\\fi\n\n\\bibitem[Knuth(1984)]{knuth84}\nDonald~E. Knuth.\n\\newblock \\emph{The {\\TeX}book}.\n\\newblock Addison-Wesley, 1984, 1:\\penalty0 2--3.\n\n\\end{thebibliography}\n";
+  const DOC = "\\documentclass{article}\n\\usepackage[numbers]{natbib}\n\\begin{document}\nAs shown in \\cite{knuth84}.\n\\bibliographystyle{plainnat}\n\\bibliography{refs}\n\\end{document}\n";
+  const run = (known, docPath = "/ex/paper.tex") => { const ei = engineInputs(docPath, known); return new Engine().update(DOC, { cold: true, inputs: { files: ei.files, resolve: ei.resolve, jobname: ei.jobname, version: 1 } }); };
+  const plain = (h) => h.replace(/<span class="katex-mathml">[\s\S]*?<\/span>/g, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ");
+  const r = run(new Map([["/ex/paper.bbl", { text: BBL }]]));
+  const h = r.chunks.join(""), t = plain(h);
+  check("bbl-read", /As shown in \[1\]\./.test(t) && /References/.test(t) && /\[1\] Donald E\. Knuth\. The TeXbook\. Addison-Wesley, 1984, 1:2–3\./.test(t) && !/BibTeX is not run/.test(h) && !/newblock|penalty/.test(h), t.slice(0, 500));
+  check("bbl-cite-links", /<a href="#bib-1">1<\/a>/.test(h) && /<li id="bib-1"/.test(h), h.slice(0, 600));
+  check("bbl-asked", r.inputRefs.includes("paper.bbl"), r.inputRefs);
+  check("bbl-jobname", engineInputs("/ex/My Paper.tex", new Map()).jobname === "My Paper" && engineInputs("/a/b/c.TEX", new Map()).jobname === "c" && engineInputs("/a/notes", new Map()).jobname === "notes", null);
+  // (none beside it, or not read yet: the placeholder, as before; the host still asked)
+  for (const [nm, known] of [["absent", new Map([["/ex/paper.bbl", { absent: true }]])], ["unread", new Map()]]) {
+    const r0 = run(known), h0 = r0.chunks.join("");
+    check("bbl-none-" + nm, /\[bibliography from refs\.bib: BibTeX is not run/.test(h0) && r0.inputRefs.includes("paper.bbl") && /class="missing">knuth84</.test(h0) && !r0.problems.some((p) => p.kind === "input"), plain(h0).slice(0, 300));
+  }
+  // (\jobname.bbl by its exact name, as pdflatex reads it: a paper.bbl.tex beside it is never read instead, nor alone;
+  //  the host is asked for paper.bbl only)
+  const SHADOW = "\\begin{thebibliography}{1}\n\\bibitem{knuth84} SHADOW_TEX.\n\\end{thebibliography}\n";
+  const both = run(new Map([["/ex/paper.bbl.tex", { text: SHADOW }], ["/ex/paper.bbl", { text: BBL }]])), hb = both.chunks.join("");
+  check("bbl-exact-both", /Donald E\. Knuth/.test(plain(hb)) && !/SHADOW_TEX/.test(hb), plain(hb).slice(0, 300));
+  const only = run(new Map([["/ex/paper.bbl.tex", { text: SHADOW }], ["/ex/paper.bbl", { absent: true }]])), ho = only.chunks.join("");
+  check("bbl-exact-only-tex", /BibTeX is not run/.test(ho) && !/SHADOW_TEX/.test(ho), plain(ho).slice(0, 300));
+  const e0 = engineInputs("/ex/paper.tex", new Map()), eTop = engineInputs("/paper.tex", new Map());
+  check("bbl-exact-wanted", JSON.stringify(e0.wanted(["paper.bbl"])) === JSON.stringify(["/ex/paper.bbl"]) && JSON.stringify(eTop.wanted(["paper.bbl"])) === JSON.stringify(["/paper.bbl"]) && e0.resolve("paper.bbl").why === "not read yet" && JSON.stringify(e0.wanted(["other.bbl"])) === JSON.stringify(["/ex/other.bbl.tex"]), [e0.wanted(["paper.bbl"]), eTop.wanted(["paper.bbl"]), e0.wanted(["other.bbl"])]);
+  // (another document's .bbl is not this one's: \jobname is the .tex's own name)
+  const rOther = run(new Map([["/ex/other.bbl", { text: BBL }], ["/ex/paper.bbl", { absent: true }]]));
+  check("bbl-own-jobname", /BibTeX is not run/.test(rOther.chunks.join("")), null);
+  // (no host inputs at all, as before)
+  check("bbl-no-host", /BibTeX is not run/.test(new Engine().update(DOC, { cold: true }).chunks.join("")), null);
+  // natbib, against pdflatex's output for the same source
+  const NAT = (opts) => "\\documentclass{article}\n\\usepackage[" + opts + "]{natbib}\n\\begin{document}\nA \\cite{c,a}. B \\cite{a,b}. C \\cite{a,b,c}. D \\cite{d,a,b,c}. E \\cite[Thm.~2]{a}. F \\citep{a,c}. G \\citet{a}.\n\\begin{thebibliography}{9}\n\\bibitem[Ann(2001)]{a} A.\n\\bibitem[Bob(2002)]{b} B.\n\\bibitem[Cat(2003)]{c} C.\n\\bibitem[Dan(2004)]{d} D.\n\\end{thebibliography}\n\\end{document}\n";
+  const nt = (opts) => plain(new Engine().update(NAT(opts), { cold: true }).chunks.join("")).replace(/\[\s*/g, "[").replace(/\s*\]/g, "]").replace(/\s*,\s*/g, ", ").replace(/\s*–\s*/g, "–");
+  const sc = nt("numbers,sort&compress"), nu = nt("numbers");
+  check("natbib-sort-compress", sc.includes("A [1, 3]. B [1, 2]. C [1–3]. D [1–4]. E [1, Thm. 2]. F [1, 3]. G Ann [1].") && /\[1\] ?A\. ?\[2\] ?B\./.test(sc), sc.slice(0, 200));
+  check("natbib-numbers", nu.includes("A [3, 1]. B [1, 2]. C [1, 2, 3]. D [4, 1, 2, 3]. E [1, Thm. 2]. F [1, 3]. G Ann [1]."), nu.slice(0, 200));
+  // (without natbib's numbers, a \bibitem's own label, as before)
+  check("natbib-labels-kept", /\[Ann\(2001\)\]/.test(plain(new Engine().update(NAT("sort").replace("\\usepackage[sort]{natbib}", ""), { cold: true }).chunks.join(""))), null);
+}
+
 // ---- envclose.ts (P1a): the close a "}" typed after \begin{X} adds, or none
 {
   const at = (t) => [t.replace("|", ""), t.indexOf("|")];

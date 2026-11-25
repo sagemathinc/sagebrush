@@ -959,6 +959,8 @@ class ufunc:
         return acc
 
     def accumulate(self, a, axis=0, dtype=None, out=None):
+        if asarray(a).ndim == 0:
+            raise TypeError("cannot accumulate on a scalar")
         if out is not None:
             # (computed in out's dtype unless dtype is given, as NumPy's)
             out = _one_out(out)
@@ -1215,9 +1217,17 @@ def lcm(a, b):
 def _axes(a, axis):
     if axis is None:
         return tuple(range(a.ndim))
-    if isinstance(axis, (tuple, list)):
-        return tuple(x % a.ndim for x in axis)
-    return (axis % a.ndim if a.ndim else 0,)
+    from _operator import index
+    # (each axis an index, as NumPy's normalize_axis_index takes it: a float refused with its text, np.bool_ as no
+    # index; and an axis out of bounds refused with NumPy's text, as the reductions refuse it: a 0-d array has none)
+    axes = axis if isinstance(axis, (tuple, list)) else (axis,)
+    if _builtins.any(isinstance(x, float) for x in axes):
+        raise TypeError("integer argument expected, got float")
+    axes = tuple(index(x) for x in axes)
+    for x in axes:
+        if not -a.ndim <= x < a.ndim:
+            raise IndexError("axis %d is out of bounds for array of dimension %d" % (x, a.ndim))
+    return tuple(x % a.ndim for x in axes)
 
 
 def _count(a, axis):
@@ -1330,15 +1340,19 @@ min = amin
 
 
 def argmax(a, axis=None, out=None, *, keepdims=False):
-    r = _np.argmax(asarray(a), axis)
-    if keepdims and axis is not None:
+    a = asarray(a)
+    r = _np.argmax(a, axis)
+    # (a 0-d array keeps no axis: NumPy's result is the scalar)
+    if keepdims and axis is not None and a.ndim:
         r = expand_dims(r, axis)
     return r
 
 
 def argmin(a, axis=None, out=None, *, keepdims=False):
-    r = _np.argmin(asarray(a), axis)
-    if keepdims and axis is not None:
+    a = asarray(a)
+    r = _np.argmin(a, axis)
+    # (a 0-d array keeps no axis: NumPy's result is the scalar)
+    if keepdims and axis is not None and a.ndim:
         r = expand_dims(r, axis)
     return r
 
@@ -1414,28 +1428,42 @@ def nanmin(a, axis=None, out=None, keepdims=False, initial=None, where=True):
 
 def nanmean(a, axis=None, dtype=None, out=None, keepdims=False):
     a = asarray(a)
-    ok = ~isnan(a) if a.dtype.kind in "fc" else ones(a.shape, bool_)
-    return sum(_nanfill(a, 0), axis, dtype, out, keepdims) / sum(ok, axis, keepdims=keepdims)
+    if a.dtype.kind not in "fc":
+        return mean(a, axis, dtype, out, keepdims)  # (no NaN to skip: NumPy's mean, its refusals included)
+    ok = ~isnan(a)
+    # (the mean, not the sum, in out, which is returned, as NumPy's)
+    return _out(sum(_nanfill(a, 0), axis, dtype, None, keepdims) / sum(ok, axis, keepdims=keepdims), out)
 
 
 def nanvar(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False):
     a = asarray(a)
+    if a.dtype.kind not in "fc":
+        return var(a, axis, dtype, out, ddof, keepdims)  # (no NaN to skip: NumPy's var, its refusals included)
     ok = ~isnan(a)
     n = sum(ok, axis, keepdims=True)
     m = sum(_nanfill(a, 0), axis, keepdims=True) / n
     d = where(ok, a - m, 0.0)
-    return sum(d * d, axis, keepdims=keepdims) / (sum(ok, axis, keepdims=keepdims) - ddof)
+    return _out(sum(d * d, axis, keepdims=keepdims) / (sum(ok, axis, keepdims=keepdims) - ddof), out)
 
 
 def nanstd(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False):
-    return sqrt(nanvar(a, axis, dtype, out, ddof, keepdims))
+    return _out(sqrt(nanvar(a, axis, dtype, None, ddof, keepdims)), out)  # (the root, not the variance, in out)
+
+
+def _all_nan_refused(a, axis):
+    # (as NumPy's: a slice of NaNs alone has no position to give)
+    a = asarray(a)
+    if a.dtype.kind in "fc" and a.size and any(all(isnan(a), axis=axis)):
+        raise ValueError("All-NaN slice encountered")
 
 
 def nanargmax(a, axis=None):
+    _all_nan_refused(a, axis)
     return argmax(_nanfill(a, -inf), axis)
 
 
 def nanargmin(a, axis=None):
+    _all_nan_refused(a, axis)
     return argmin(_nanfill(a, inf), axis)
 
 
@@ -1919,8 +1947,25 @@ def rot90(m, k=1, axes=(0, 1)):
     return flip(swapaxes(m, a0, a1), a1)
 
 
+def _shape_text(s):
+    # (a shape as NumPy's C messages print it: "(2,3)", "(3,)")
+    return "(" + ",".join(str(n) for n in s) + ("," if len(s) == 1 else "") + ")"
+
+
 def broadcast_to(array, shape, subok=False):
-    return _np.broadcast_to(asarray(array), _shape(shape))
+    a, target = asarray(array), _shape(shape)
+    # (NumPy's own refusals, in its order, #1908: its _broadcast_to's, then its iterator's, not the ufuncs')
+    if not target and a.shape:
+        raise ValueError("cannot broadcast a non-scalar to a scalar array")
+    if _builtins.any(n < 0 for n in target):
+        raise ValueError("all elements of broadcast shape must be non-negative")
+    if a.ndim > len(target):
+        raise ValueError("input operand has more dimensions than allowed by the axis remapping")
+    for n, t in zip(a.shape[::-1], target[::-1]):
+        if n != 1 and n != t:
+            raise ValueError("operands could not be broadcast together with remapped shapes [original->remapped]: %s  and "
+                             "requested shape %s" % (_shape_text(a.shape), _shape_text(target)))
+    return _np.broadcast_to(a, target)
 
 
 def broadcast_arrays(*args, subok=False):
@@ -1929,7 +1974,26 @@ def broadcast_arrays(*args, subok=False):
 
 
 def broadcast_shapes(*args):
-    return _np.broadcast_shapes(*[_shape(s) for s in args])
+    shapes = [_shape(s) for s in args]
+    # (NumPy makes an empty array of each shape first)
+    if _builtins.any(n < 0 for s in shapes for n in s):
+        raise ValueError("negative dimensions are not allowed")
+    # (NumPy's message where shapes don't broadcast, #1908: its broadcast iterator walks the result's dimensions from
+    # the first, and in each the arguments in order, and names the first that disagrees and the one that set that
+    # dimension's size)
+    nd = _builtins.max([len(s) for s in shapes], default=0)
+    for i in range(nd):
+        size, src = 1, None
+        for j, s in enumerate(shapes):
+            k = i + len(s) - nd
+            if k < 0 or s[k] == 1:
+                continue
+            if size == 1:
+                size, src = s[k], j
+            elif s[k] != size:
+                raise ValueError("shape mismatch: objects cannot be broadcast to a single shape.  Mismatch is between arg "
+                                 "%d with shape %s and arg %d with shape %s." % (src, tuple(shapes[src]), j, tuple(s)))
+    return _np.broadcast_shapes(*shapes)
 
 
 def append(arr, values, axis=None):
