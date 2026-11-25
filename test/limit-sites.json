@@ -6362,7 +6362,7 @@
   "class": "none",
   "owner": "MATLAB sparse linear algebra"
  },
- "lib/_matlab_lu.py :: solve :: \"\"\"S \\\\ Bm for a square sparse S, n > MAX_DENSE_SOLVE, by its band or its #0": {
+ "lib/_matlab_lu.py :: solve :: \"\"\"S \\\\ Bm for a square sparse S, n > MAX_DENSE_SOLVE, by substitution, its #0": {
   "class": "none",
   "owner": "MATLAB sparse linear algebra"
  },

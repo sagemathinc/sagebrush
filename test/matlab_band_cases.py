@@ -1,7 +1,7 @@
 # MATLAB mode's sparse solves, rank-13 PR 2 (plan-matlab-nocliffs r6
 # sections 2.2's band rows, 2.4, 2.4a, 2.5, 2.8; ruling d2): the chunked
-# bandwidths, the chunked band path, the cost route and its admission
-# fallback, the full and dense admissions, and the browser interim.  Run
+# bandwidths, the chunked band path, the cost route (from the input alone:
+# free memory only admits or refuses it), the full and dense admissions, and the browser interim.  Run
 # under the engine by test/matlab-band.test.ts: each check prints one
 # "ok ..." line, and any failure raises.
 import numpy as np
@@ -296,16 +296,32 @@ try:
     X0 = sp._legacy_band_solve(T, b.copy())
     assert float(np.max(np.abs(X - X0))) == 0.0
     ok("route: a tridiagonal-like n = 4001 system takes the band path at once (master's route as the floor, no ordering), with master's band answer exactly; G = M_band admits it")
-    # (one byte less: band is refused; the LU, whose own need is larger here, too: one refusal, naming both)
+    # (one byte less: the band, the route this input takes, is refused with the out-of-memory error naming it and its
+    # need; no other route is tried, the ordering never reserved)
     use(Cap(m_band - 1))
+    L._routes = []
+    LG._recorder = []
+    try:
+        L.solve(T, b, "t")
+        raise AssertionError("no refusal")
+    except MemoryError as e:
+        assert "t by its band needs" in str(e), str(e)
+        assert e.need_bytes == m_band, (e.need_bytes, m_band)
+        tags = [r[3] for r in LG._recorder if r[0] == "reserve"]
+    finally:
+        LG._recorder = None
+    assert L._routes == [] and tags == ["discovery"], (L._routes, tags)
+    ok("route: G = M_band - 1 refuses the band, its input's route, naming it and its need; no other route is tried")
+    # (the discovery's own reservation refused: the out-of-memory error, every route needing the bandwidths)
+    use(Cap(disc - 1))
     L._routes = []
     try:
         L.solve(T, b, "t")
         raise AssertionError("no refusal")
     except MemoryError as e:
-        assert "band path needs %d bytes" % m_band in str(e).splitlines()[0] or "band path needs" in str(e), str(e)
-        assert e.need_bytes <= m_band
-    ok("route: G = M_band - 1 refuses band; neither path admitted gives one refusal naming both needs")
+        assert "t (finding its bandwidths) needs" in str(e), str(e)
+    assert L._routes == [], L._routes
+    ok("route: the bandwidths' workspace refused ends the solve with the out-of-memory error, no route tried")
     # (the route-only mutant: no floor and a band estimate never chosen is caught by the route assertion)
     use(Cap(10 ** 12))
     L.COSTS["cli"]["band"] = 1.0
@@ -373,7 +389,8 @@ finally:
     restore()
 
 
-# -- 4. the fallback table (r6 section 2.4a)
+# -- 4. the refusal table (formerly r6 section 2.4a's fallbacks): the route is the input's alone, and the guard only
+# admits it or refuses it with the out-of-memory error naming it; no route is tried after another's refusal
 def peak_of(fn):
     LG._recorder = []
     try:
@@ -410,9 +427,9 @@ try:
     assert L._routes == ["lu"]
     assert n_peak == 1 and len(shown4) == 1, (n_peak, shown4)
     assert shown4[0].startswith("Warning: Solving this 4001x4001 sparse system by its sparse LU"), shown4
-    ok("fallback: LU-only feasible (band's need beyond G): the LU, at exactly its peak")
-    # band-only, at step 3: the ordering is refused and band fits (a cheap band forced by the cost seam).  These
-    # fallback rows exercise the cost route's steps 3-5, so the routing floor (master's band route, which would take
+    ok("refusal table: the LU, its input's route, at exactly its peak (the band's larger need never consulted)")
+    # the ordering refused where the band would fit (a band costed high enough by the cost seam that the input's
+    # route is the ordering, then the LU).  These rows exercise the cost route's steps 3-5, so the routing floor (master's band route, which would take
     # band(4001, 3, 3) at once) is turned off here and restored in this section's finally
     sp.legacy_band_route = lambda n, kl, ku: False
     Tb = band_matrix(n, 3, 3)
@@ -425,15 +442,18 @@ try:
     LG._recorder = []
     try:
         L.solve(Tb, b, "t")
+        raise AssertionError("no refusal")
+    except MemoryError as e:
+        assert "t by its sparse LU needs" in str(e), str(e)
         ev = LG._recorder
     finally:
         LG._recorder = None
-    assert L._routes == ["band"], L._routes
+    assert L._routes == [], L._routes
     tags = [r[3] for r in ev if r[0] == "reserve"]
-    assert "ordering" in tags and tags.index("ordering") < tags.index("band"), tags
+    assert tags == ["discovery", "ordering"], tags
     assert [r for r in ev if r[0] == "reserve" and r[3] == "ordering"][0][1] > mT
-    ok("fallback: band-only at step 3 (the ordering's admission tried and refused): band")
-    # band-only, at step 5: the LU is preferred, then refused part way; the ledger returns, band runs
+    ok("refusal table: the ordering (its input's route the LU) refused: the out-of-memory error naming the LU, not the band that fits")
+    # the LU, its input's route at step 5, refused part way: the out-of-memory error, the band (which would fit) never tried
     L.COSTS["cli"]["band"] = 1.0
     L._routes = []
     led_seen = []
@@ -446,7 +466,7 @@ try:
         finally:
             led_seen.append(kw["ledger"].owned)
     L.factor = watched
-    # (G: the ordering fits, the LU's factor doesn't, band does)
+    # (G: the ordering fits, the LU's factor doesn't, the band would)
     use(Cap(10 ** 12))
     LG._recorder = []
     try:
@@ -456,20 +476,25 @@ try:
         LG._recorder = None
     G = max(ord_peak, mT) + 1
     LG._recorder = []
+    refused = False
     try:
         use(Cap(G))
-        X, s = L.solve(Tb, b, "t")
-        ev = LG._recorder
+        L.solve(Tb, b, "t")
+    except MemoryError as e:
+        refused = "t by its sparse LU needs" in str(e)
     finally:
+        ev = LG._recorder
         LG._recorder = None
         L.factor = real_factor
-    assert L._routes == ["band"], L._routes
+    assert refused and L._routes == [], (refused, L._routes)
     assert len(led_seen) == 2, led_seen
-    band_first = [r for r in ev if r[0] == "reserve" and r[3] == "band"][0]
-    assert band_first[1] == band_first[2], ("the LU's bytes left in the ledger", band_first)
-    X0 = sp._legacy_band_solve(Tb, b.copy())
-    assert float(np.max(np.abs(X - X0))) == 0.0
-    ok("fallback: band-only at step 5 (the LU preferred, refused part way): the ledger back to empty, then band, master's answer")
+    assert not [r for r in ev if r[0] == "reserve" and r[3] in ("band", "band-step")], ev
+    # (and the same input at a guard that admits its LU: the LU, the same route as at any guard)
+    use(Cap(10 ** 12))
+    L._routes = []
+    L.solve(Tb, b, "t")
+    assert L._routes == ["lu"], L._routes
+    ok("refusal table: the LU (its input's route) refused part way: the out-of-memory error, no band after it; admitted, the LU")
 finally:
     L.COSTS["cli"].update(saved_costs)
     sp.legacy_band_route = saved_floor

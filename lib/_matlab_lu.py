@@ -1249,32 +1249,30 @@ def _warn_slow(n, t_lu):
 
 
 def solve(S, Bm, what, bands=None, rec=None, tri=None):
-    """S \\ Bm for a square sparse S, n > MAX_DENSE_SOLVE, by its band or its
-    sparse LU (r6 section 2.4a): the bandwidths found in chunks (their
-    workspace reserved first; refused, the band path is unknown, not
-    impossible); the band path's need M_band; band at once when it is
-    admitted and master's route takes band (the amendment r1 floor) or it is
-    cheaper than LU's lower bound c_ord nnz; else the ordering
-    (admitted, or band if band fits), then band if admitted and cheaper than
-    the LU estimated from the ordering's fill (q dropped first), else the
-    LU, which, refused part way, leaves the ledger as before it and falls
-    back to band if band fits.  Refused only when no path can be admitted,
-    once, with both needs.  Returns (X, singular), or None for a diagonal S
-    (the caller's shortcut); bands, a seam, gives (kl, ku) instead; rec, the
-    operation's capacity record when the caller has read it (one per operation);
-    Bm may be lazy (shape, dtype and make(), the caller's copy of b): made
-    after the triangular route's choice, so that route makes its own copy
-    under its reservation.  tri, the caller's triangular route: tri(lower,
-    led, work, bound) for every
-    triangular S once its bandwidths are known, its value (the caller's
-    result) or None (the routes below, as before) by formulas alone, its
-    whole need at most bound, never by the ledger's guard, which only admits
-    or refuses it.  bound is the least need of the routes it replaces: the
-    band's m_band (where the band path exists) and the ordering's, which the
-    LU needs before anything else.  So a refusal of the triangular route is
-    one the old routes would give (the band and the ordering both refused),
-    and which route a triangular S takes, and the units it is charged,
-    depend only on S and b"""
+    """S \\ Bm for a square sparse S, n > MAX_DENSE_SOLVE, by substitution, its
+    band or its sparse LU (r6 section 2.4a), the route chosen from S, b and
+    fixed constants only: the ledger's guard (the host's free memory) only
+    admits the chosen route or refuses it with the out-of-memory error naming
+    the route and its need, and no route is retried after another's refusal.
+    The bandwidths found in chunks, their workspace reserved first (refused,
+    the solve ends: every route needs them); a triangular S offered to tri
+    (below); the band at once where its path exists (band_need, a formula)
+    and master's route takes band (the amendment r1 floor) or it is cheaper
+    than LU's lower bound c_ord nnz; else the ordering, then the band where
+    its path exists and it is cheaper than the LU estimated from the
+    ordering's fill (q dropped first), else the LU.  The costs c are the
+    host type's (fixed constants).  Returns (X, singular), or None for a
+    diagonal S (the caller's shortcut); bands, a seam, gives (kl, ku) instead;
+    rec, the operation's capacity record when the caller has read it (one per
+    operation); Bm may be lazy (shape, dtype and make(), the caller's copy of
+    b): made after the triangular route's choice, so that route makes its own
+    copy under its reservation.  tri, the caller's triangular route: tri(lower,
+    led, work, bound) for every triangular S once its bandwidths are known,
+    its value (the caller's result) or None (the routes below) by formulas
+    alone, its whole need at most bound, never by the ledger's guard, which
+    only admits or refuses it.  bound is the least need of the routes it
+    replaces: the band's m_band (where the band path exists) and the
+    ordering's, which the LU needs before anything else"""
     n = S.n
     led = Ledger(what, rec=rec)
     work = Work(what)
@@ -1284,75 +1282,52 @@ def solve(S, Bm, what, bands=None, rec=None, tri=None):
     c = _costs()
     import _matlab_sparse as _sp
 
-    # 1. the bandwidths, then the band path's need
-    kl = ku = None
-    m_band = None
-    band_ok = False
+    # 1. the bandwidths, then the band path's need (a formula: None where a band column alone would pass A_SAFE)
     disc = 4 * E * C_IDX
-    try:
-        led.reserve(disc, "discovery")
-    except MemoryError:
-        pass
-    else:
-        kl, ku = bands if bands is not None else _sp.bandwidths(S, E, lambda u: work.charge(u, "discovery"))
-        led.release(disc)
-        if (kl, ku) == (0, 0):
-            return None
-        nb = band_need(n, kl, ku, k, cplx)
-        if nb is not None:
-            m_band = nb["persistent"] + max(nb["setup"], nb["step"])
-            band_ok = led.owned + m_band <= led.G
-        # a triangular S: substitution, decided from S and b alone (above)
-        if (kl == 0 or ku == 0) and tri is not None:
-            bound = ordering_need(S)[0]
-            out = tri(ku == 0, led, work, bound if m_band is None else min(m_band, bound))
-            if out is not None:
-                return out
+    led.what = "%s (finding its bandwidths)" % what
+    led.reserve(disc, "discovery")
+    kl, ku = bands if bands is not None else _sp.bandwidths(S, E, lambda u: work.charge(u, "discovery"))
+    led.release(disc)
+    led.what = what
+    if (kl, ku) == (0, 0):
+        return None
+    nb = band_need(n, kl, ku, k, cplx)
+    m_band = None if nb is None else nb["persistent"] + max(nb["setup"], nb["step"])
+    # a triangular S: substitution, decided from S and b alone
+    if (kl == 0 or ku == 0) and tri is not None:
+        bound = ordering_need(S)[0]
+        out = tri(ku == 0, led, work, bound if m_band is None else min(m_band, bound))
+        if out is not None:
+            return out
     # (the old routes' copy of b, made here when the caller passed it lazily: after the discovery and the triangular
     # route's choice, as the caller's own expression)
     if hasattr(Bm, "make"):
         Bm = Bm.make()
-    t_band = c["step"] * n + c["band"] * n * (kl + 1) * (kl + ku + 1) if kl is not None else None
+    t_band = c["step"] * n + c["band"] * n * (kl + 1) * (kl + ku + 1)
 
     def band():
+        # (its whole need admitted before anything is made, or the out-of-memory error naming the band)
+        led.what = "%s by its band" % what
+        if led.owned + m_band > led.G:
+            raise memory_guard(led.what, led.owned + m_band, led.G, led.allowance_for, record=led.rec)
         _route("band")
         return band_solve(S, Bm, kl, ku, led, work)
 
-    def refuse(lu_need):
-        needs = [v for v in (m_band, lu_need) if v is not None]
-        raise memory_guard("Solving this %dx%d sparse system (its band path needs %s bytes, its LU at least %s)"
-                           % (n, n, "an unknown number of" if m_band is None else m_band,
-                              "an unknown number of bytes" if lu_need is None else "%d bytes" % lu_need),
-                           min(needs) if needs else 0, led.G, led.allowance_for, record=led.rec)
-
-    # 2. band without the ordering: where master's route takes band (the
+    # 2. the band without the ordering: where master's route takes band (the
     # amendment r1 floor: no sunk ordering), or where it beats LU's lower bound
-    if band_ok and (_sp.legacy_band_route(n, kl, ku) or t_band <= c["ord"] * nnz):
+    if m_band is not None and (_sp.legacy_band_route(n, kl, ku) or t_band <= c["ord"] * nnz):
         return band()
-    # 3. and 4. the ordering, admitted, then the estimate
+    # 3. and 4. the ordering (refused: the out-of-memory error naming the LU), then the estimate
+    led.what = "%s by its sparse LU" % what
     stats = {}
-    try:
-        q, qheld = ordering(S, led, work, stats)
-    except MemoryError as e:
-        if band_ok:
-            return band()
-        refuse(getattr(e, "need_bytes", None))
+    q, qheld = ordering(S, led, work, stats)
     t_lu = c["ord"] * nnz + c["lu"] * stats.get("fill", 0)
-    if band_ok and t_band < t_lu:
+    if m_band is not None and t_band < t_lu:
         q = None
         led.release(qheld)
         return band()
-    # 5. the LU, falling back to band if it can't be admitted part way; a
-    # slow one warns first, before its factorization starts
+    # 5. the LU (refused part way: the out-of-memory error); a slow one warns first, before its factorization starts
     _warn_slow(n, t_lu)
-    before = led.owned - qheld
-    try:
-        F = factor(S, what, q=q, ledger=led, work=work, qheld=qheld)
-    except MemoryError as e:
-        q = F = None
-        led.owned = before
-        if band_ok and led.owned + m_band <= led.G:
-            return band()
-        refuse(getattr(e, "need_bytes", None))
+    F = factor(S, led.what, q=q, ledger=led, work=work, qheld=qheld)
     _route("lu")
     return F.solve(Bm), F.singular
