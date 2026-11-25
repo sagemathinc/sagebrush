@@ -1101,7 +1101,7 @@ class Polynomial:
             return self._make([], o)
         if len(self._c) * len(o._c) > 2500:
             # long products in the engine (NTT / Kronecker substitution)
-            from sagebrush import poly
+            from _sagebrush_lib import poly
             da, ca = self._integral()
             db, cb = o._integral()
             c = poly.mul(ca, cb)
@@ -1418,7 +1418,7 @@ class Polynomial:
             if over_zz or not a._c:
                 return Polynomial(self._ring if over_zz else a._ring, a._c)
             return a.change_ring(QQ).monic()
-        from sagebrush import poly
+        from _sagebrush_lib import poly
         da, ca = self._integral()
         db, cb = o._integral()
         g = poly.gcd(ca, cb)
@@ -1493,7 +1493,7 @@ class Polynomial:
         """
         if not self._c:
             raise ArithmeticError("factorization of 0 is not defined")
-        from sagebrush import poly
+        from _sagebrush_lib import poly
         sa = _sa()
         if self._ring._base is ZZ:
             content, fs = poly.factor(self._c) if self.degree() > 0 else (self._c[0], [])

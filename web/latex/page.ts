@@ -119,9 +119,12 @@ type Host = {
   fileMenu?(menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }): (e: KeyboardEvent) => void;
   /** A comment's text drawn into `box` as Markdown with math, by the notebook page's own renderer (boot.ts) */
   markdown?(box: HTMLElement, text: string): void;
-  /** The desktop app (boot.ts mountTex): why Run doesn't run there (APP_NO_RUN), said instead of NO_SANDBOX and as
-   * Run's title; and no Agent button or pairing, as its notebook page has none */
+  /** The desktop app without an interpreter for Run (boot.ts mountTex): why Run doesn't run (APP_NO_RUN), said instead
+   * of NO_SANDBOX and as Run's title */
   app?: string;
+  /** The desktop app (boot.ts mountTex): no Agent button or pairing, as its notebook page has none; Run's code runs on
+   * this computer (the app's engine), not in a browser */
+  desktop?: boolean;
   /** The site's address before its own paths: "" on the site, sagebrush.space's in the app (docs-link.ts siteHref) */
   site?: string;
   /** Embedded in the Agents page's pane (boot.ts, ?embed=1, a frame of this site's only): no Files, home, title, File
@@ -435,7 +438,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (embedded: the pane has its tab, Close and the file's name, and the Agents page's pairing is the only one: none here,
   //  so the agent chunk isn't fetched at all; the page's left edge is the frame's, whatever the hosting page's files do)
   if (host.embed) { for (const e of [back, home, title, fileBtn, agentBtn, shareBtn]) e.hidden = true; page.classList.add("tex-embedded"); page.style.left = "0"; }
-  if (host.app || host.embed) agentBtn.hidden = true;
+  if (host.app || host.desktop || host.embed) agentBtn.hidden = true;
   else if ((globalThis as any)[Symbol.for("sagebrush.pairLink")] || new URLSearchParams(location.search).has("pair") || reloadNow) void pairAgent(host.ws).catch(agentFailed);
   else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws).catch(agentFailed); }, () => {});
   const main = el("div", "tex-main");
@@ -846,7 +849,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   //  them, one rule for any set (board): "A", "A and B", "A, B and C")
   const langs = () => { const l = E.lastCheck()?.sage ?? [], m = (x: any) => (/^py/.test(x.mode) ? 1 : /^magma/.test(x.mode) ? 2 : 0); return ["Sage", "Python", "Magma"].filter((_, i) => l.some((x: any) => m(x) === i)); };
   const what = () => (langs().some((x) => x !== "Sage") ? "code item" : "SageTeX item");
-  const runTitle = () => { const L = langs(); return host.app || "Run the document's " + (L.length > 1 ? L.slice(0, -1).join(", ") + " and " + L[L.length - 1] : L[0] ?? "Sage") + " code in this browser: Shift+Enter"; };
+  const runTitle = () => { const L = langs(); return host.app || "Run the document's " + (L.length > 1 ? L.slice(0, -1).join(", ") + " and " + L[L.length - 1] : L[0] ?? "Sage") + " code " + (host.desktop ? "on this computer" : "in this browser") + ": Shift+Enter"; };
   E.onRendered(() => { const c = E.lastCheck(); if (c) runBtn.hidden = !(Array.isArray(c.sage) && c.sage.length); if (!running) runBtn.title = runTitle(); });
   const runIdle = () => { running = false; presenting?.running(false); runBtn.textContent = "Run"; runBtn.title = runTitle(); };
   runBtn.onclick = async () => {
@@ -937,7 +940,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // pairing whose agent made it, under the grant it was made under, still in force with May run code and Everything.
   // Then this page's own Run, as the person's, if it still shows that revision unedited. Asked again when the pairing
   // says its agent made the revision shown (a build after this page opened it)
-  const made = typeof BroadcastChannel === "function" && host.sandbox && !host.app ? new BroadcastChannel(MADE_CHANNEL) : null;
+  const made = typeof BroadcastChannel === "function" && host.sandbox && !host.app && !host.desktop ? new BroadcastChannel(MADE_CHANNEL) : null;
   let askedAt = "", asking: { id: string; rev: number; text: string } | null = null;
   // (an item not run yet, as the check counts them (check.ts): not refused, and not ok, failed or blocked)
   const unrun = () => { const c = E.lastCheck(); return hasCode(c) && c.sage.some((x: any) => !x.err && x.s !== "ok" && x.s !== "error" && x.s !== "blocked"); };
