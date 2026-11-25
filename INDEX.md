@@ -12,6 +12,7 @@ A map for finding code, kept short. Every path below exists (`scripts/test-index
   - `engine/sym/`: symbolic expressions: simplification, printing, LaTeX, calculus.
   - `engine/nd/`: numerics: dense column-major kernels (the numpy and MATLAB side).
   - `engine/mp/`: multiprecision floats and elementary functions (mpmath's arithmetic).
+  - `engine/glibm/`: glibc's log and pow, ported bit for bit (shared by the wasm modules that need CPython's float bits).
   - `engine/ball/`: ball arithmetic for certified results.
   - Number theory:
     - `engine/primes/`, `engine/ap/` (traces of Frobenius), `engine/lfun/` (L-functions), `engine/modsym/` (modular symbols);

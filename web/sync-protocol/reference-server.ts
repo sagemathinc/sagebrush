@@ -291,19 +291,26 @@ export class ReferenceServer {
     if (bound) return err(bound.status, bound.code, { reason: bound.reason });
     if (p === "/api/sync/v1/blobs/check" && m === "POST") {
       if (a.state !== "active") return err(409, a.state === "deleting" ? "deleting" : "readonly");
-      let blobs: string[];
+      let blobs: { sha256: string; ct_sha256: string; size: number }[];
       try {
         const b = fields(JSON.parse(await req.text()), ["blobs"], "check");
         if (!Array.isArray(b.blobs) || b.blobs.length > LIMITS.checkItems) throw new SyncError("limit", "at most " + LIMITS.checkItems, { limit: "check_items", max: LIMITS.checkItems });
         blobs = b.blobs.map((x) => {
-          const o = fields(x, ["sha256", "size"], "blob");
-          if (!isSha(o.sha256) || !isNat(o.size)) throw new SyncError("invalid", "blob");
-          return o.sha256 as string;
+          const o = fields(x, ["sha256", "ct_sha256", "size"], "blob");
+          if (!isSha(o.sha256) || !isSha(o.ct_sha256) || !isNat(o.size)) throw new SyncError("invalid", "blob");
+          return { sha256: o.sha256 as string, ct_sha256: o.ct_sha256 as string, size: o.size as number };
         });
       } catch (e) {
         return err(e instanceof SyncError && e.code === "limit" ? 413 : 400, e instanceof SyncError ? e.code : "invalid");
       }
-      return json({ missing: blobs.filter((s) => !a.blobs.has(s)) });
+      // (held is "there" only as exactly these bytes; held otherwise is a conflict naming what is held)
+      const missing: string[] = [], conflicts: Held[] = [];
+      for (const b of blobs) {
+        const h = await held(a, b.sha256);
+        if (!h) missing.push(b.sha256);
+        else if (h.ct_sha256 !== b.ct_sha256 || h.size !== b.size) conflicts.push(h);
+      }
+      return json({ missing, ...(conflicts.length ? { conflicts } : {}) });
     }
     const g = p.match(/^\/api\/sync\/v1\/blob\/([0-9a-f]{64})$/);
     if (g && m === "PUT") {
@@ -320,8 +327,17 @@ export class ReferenceServer {
       if (len > MAX_PUT) return err(413, "limit", { limit: "put_bytes", max: MAX_PUT });
       const bytes = new Uint8Array(await req.arrayBuffer());
       if (bytes.length !== len) return err(400, "invalid", { message: "the body isn't its Content-Length" });
-      if ((await sha256Hex(bytes)) !== g[1]) return err(400, "invalid", { message: "the bytes don't have this sha256" });
+      // (the address names the bytes but needn't be their hash: the declared ct_sha256 is what they're checked against)
+      const ct = req.headers.get("x-sb-ct-sha256") ?? "";
+      if (!isSha(ct)) return err(400, "invalid", { message: "x-sb-ct-sha256: the bytes' SHA-256 is required" });
+      if ((await sha256Hex(bytes)) !== ct) return err(400, "invalid", { message: "the bytes don't have this sha256" });
       if (a.state !== "active" || a.generation !== gen) return err(409, "conflict", { reason: "generation", message: "this account's sync changed while the bytes came" });
+      // (the first bytes held at an address stay: the same again is "have", other bytes a conflict, never a replacement)
+      const h = await held(a, g[1]);
+      if (h) {
+        if (h.ct_sha256 === ct && h.size === bytes.length) return json({ sha256: g[1], have: true });
+        return err(409, "conflict", { message: "the server holds other bytes under this address", held: h });
+      }
       a.blobs.set(g[1], bytes);
       return json({ sha256: g[1], size: bytes.length });
     }
@@ -803,6 +819,13 @@ function attemptDoc<T>(f: () => T): T {
     if (x?.code === "invalid" || x?.code === "limit") throw new SyncError(x.code, x.message ?? "invalid", x.detail);
     throw e;
   }
+}
+
+/** A held blob: its address, its bytes' SHA-256 and its size (design/e2e-encryption.md §3.3; e2e PR 3a). */
+type Held = { sha256: string; ct_sha256: string; size: number };
+async function held(a: { blobs: Map<string, Uint8Array> }, address: string): Promise<Held | undefined> {
+  const b = a.blobs.get(address);
+  return b ? { sha256: address, ct_sha256: await sha256Hex(b), size: b.length } : undefined;
 }
 
 /** A blob PUT's `x-sync-release: <n>:<core sha>` (absent or malformed: no release). */

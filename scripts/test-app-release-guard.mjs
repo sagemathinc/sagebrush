@@ -334,6 +334,10 @@ if (jit) {
   const signStep = check.slice(sign, verify);
   ok(/cache-dependencies: false/.test(signStep) && /exclude-environment-credential: true/.test(signStep) && /exclude-azure-cli-credential: false/.test(signStep), "the sign step uses the Azure CLI sign-in alone, with no cache");
   ok(/timestamp-rfc3161: http:\/\/timestamp\.acs\.microsoft\.com/.test(signStep), "the signature is timestamped (RFC 3161)");
+  // (the sign-in is tenant-level: the identity's one role is on the certificate profile, so it sees no subscription,
+  //  and a subscription-id would make azure/login fail with "No subscriptions found" (the first real run, Nov 24))
+  const loginStep = check.slice(login, sign);
+  ok(/^\s+allow-no-subscriptions: true$/m.test(loginStep) && !/subscription-id|AZURE_SUBSCRIPTION_ID/.test(ws), "the sign-in allows no subscription and names none");
   ok(/files: \$\{\{ runner\.temp \}\}\\probe\\sagebrush-signing-probe\.exe/.test(signStep) && !/files-folder|files-catalog/.test(signStep), "the sign step signs the throwaway probe alone");
   const verifyStep = check.slice(verify, upload);
   ok(/verify \/pa \/all/.test(verifyStep) && /Get-AuthenticodeSignature/.test(verifyStep) && /TimeStamperCertificate/.test(verifyStep), "the check runs signtool verify /pa /all and Get-AuthenticodeSignature, timestamp included");
