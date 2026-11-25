@@ -757,9 +757,10 @@ function checkWeakRange(dt: DType, w: Weak) {
   if (w.big !== undefined) cLongRange(dt, w.big);
   checkPyInt(dt, w.v);
 }
-// (a Python int no C long holds: NumPy's OverflowError, whatever the integer dtype; uint64 takes its own range)
+// (a Python int no C long holds: NumPy's OverflowError, whatever the integer dtype; uint32 and uint64 convert through
+// an unsigned long, up to 2**64 - 1)
 function cLongRange(dt: DType, big: bigint) {
-  if (dt.kind === "u" && dt.itemsize === 8 ? big < I64MIN || big > U64MAX : big < I64MIN || big > I64MAX) raise(T.OverflowError, "Python int too large to convert to C long");
+  if (dt.kind === "u" && dt.itemsize >= 4 ? big < I64MIN || big > U64MAX : big < I64MIN || big > I64MAX) raise(T.OverflowError, "Python int too large to convert to C long");
 }
 const MINMAX_OPS: Record<string, boolean> = { maximum: true, minimum: true, fmax: true, fmin: true };
 function bigMinMax(op: string, ct: DType, arr: NDArray, big: bigint): NDArray {
@@ -1265,9 +1266,39 @@ function getitem(a: NDArray, key: any): any {
   return out;
 }
 
+// The one check of Python values written into an int8 to uint32 array (np.full, item and slice assignment, fill),
+// as NumPy's integer conversion makes it: an int (a float truncated, where floats count) no C long holds raises
+// "Python int too large to convert to C long", one outside the dtype "Python integer N out of bounds for <dtype>".
+// NumPy checks a Python int on every path; a float only where its integer setitem converts the value, and np.full
+// casts all but a Python int. A NumPy scalar (an int, unsigned or float one) is checked into a signed dtype by basic
+// indexing and fill, as a Python int of its value; into an unsigned dtype, and by fancy and mask assignment, it is
+// cast as the arrays are, wrapping. A list's values are checked one by one, a NumPy scalar among them as by basic
+// indexing (not in np.full).
+const isSmallInt = (dt: DType) => dt.isInt && !isWide(dt);
+function admitSmallInt(dt: DType, x: any, floats: boolean, npScalars: boolean, lists: boolean) {
+  if (lists && isSeq(x) && !(x instanceof NDArray)) {
+    for (const it of seqItems(x)) admitSmallInt(dt, it, floats, true, true);
+    return;
+  }
+  const w = pyScalar(x);
+  if (w === null || w.kind === "b" || w.kind === "c" || (w.dt !== null && (!npScalars || dt.kind === "u"))) return;
+  if (w.kind === "f" && !floats) return;
+  let big: bigint;
+  if (w.kind === "i") big = w.big ?? BigInt(w.v);
+  else {
+    if (Number.isNaN(w.v)) raise(T.ValueError, "cannot convert float NaN to integer");
+    if (!Number.isFinite(w.v)) raise(T.OverflowError, "cannot convert float infinity to integer");
+    big = BigInt(Math.trunc(w.v));
+  }
+  cLongRange(dt, big);
+  const rg = RANGE[dt.name];
+  if (rg && (big < BigInt(rg[0]) || big > BigInt(rg[1]))) raise(T.OverflowError, `Python integer ${big} out of bounds for ${dt.name}`);
+}
+
 function setitem(a: NDArray, key: any, value: any) {
   writable(a);
   const r = resolveIndex(a, key);
+  if (isSmallInt(a.dt) && !(value instanceof NDArray)) admitSmallInt(a.dt, value, true, "view" in r, true);
   // (a Python value into int64/uint64 through the admission, its original)
   const src = value instanceof NDArray ? value : isWide(a.dt) ? fromPy(value, a.dt) : operand(value).arr;
   if ("view" in r) return assign(r.view, src);
@@ -3952,7 +3983,15 @@ newBuiltinModule("_numpy", (m) => {
     [order[i], order[j]] = [order[j], order[i]];
     return tr(a, order);
   });
-  M("fill", (a: NDArray, v: any) => (isS(a) ? strSetitem(a, Obj.Ellipsis, v) : assign(a, operand(v).arr), null));
+  M("fill", (a: NDArray, v: any) => {
+    if (isS(a)) strSetitem(a, Obj.Ellipsis, v);
+    else {
+      writable(a);
+      if (isSmallInt(a.dt) && !(v instanceof NDArray)) admitSmallInt(a.dt, v, true, true, false);
+      assign(a, operand(v).arr);
+    }
+    return null;
+  });
   M("conj", (a: NDArray) => conj(a));
   M("conjugate", (a: NDArray) => conj(a));
   M("view", (a: NDArray) => {
@@ -4019,6 +4058,7 @@ newBuiltinModule("_numpy", (m) => {
       assign(a, fromPy(value, a.dt));
       return a;
     }
+    if (dtype !== null && isSmallInt(toDtype(dtype)) && !(value instanceof NDArray)) admitSmallInt(toDtype(dtype), value, false, false, false);
     const v = operand(value);
     const dt = dtype !== null ? toDtype(dtype) : v.weak ? scalarDtype(v.weak) : v.arr.dt;
     const a = empty(shapeArg(shape), dt);
