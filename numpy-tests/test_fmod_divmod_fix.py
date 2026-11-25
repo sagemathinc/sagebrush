@@ -128,6 +128,12 @@ for x, y, shape in [(7, 3, (2,)), ([7], 3, (2,)), ([[7], [8]], [3], (2, 3))]:
 for x, y, mask in [(7, 3, [True, True]), ([7], 3, [True, True]), ([[7], [8]], 3, [[True] * 3] * 2)]:
     show("divmod %r %r where all True" % (x, y), lambda: np.divmod(x, y, where=np.array(mask)))
     show("divmod %r %r where all True, out=(None, None)" % (x, y), lambda: np.divmod(x, y, where=np.array(mask), out=(None, None)))
+m, r = np.array([True, False]), np.array([True, True])
+show("divmod where= also the quotient's out", lambda: np.divmod(np.array([0, 0]), 2, out=(m, r), where=m, casting="unsafe"))
+show("  the mask and the remainder after", lambda: (m, r))
+m, q = np.array([False, True]), np.array([True, True])
+show("divmod where= also the remainder's out", lambda: np.divmod(np.array([3, 3]), 2, out=(q, m), where=m, casting="unsafe"))
+show("  the quotient and the mask after", lambda: (q, m))
 show("divmod where a list", lambda: np.divmod(7, 3, where=[True, True]))
 show("divmod where True", lambda: np.divmod(7, 3, where=True))
 show("divmod where a 0-d True", lambda: np.divmod(7, 3, where=np.array(True)))

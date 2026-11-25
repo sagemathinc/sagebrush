@@ -1079,6 +1079,9 @@ class _ufunc2(ufunc):
                 raise TypeError("return arrays must be of ArrayType")
         _out_writeable(out)
         where = kw.pop("where", True)
+        if where is not True:
+            # (a copy, so a mask that is also an out is read as it was, as NumPy reads it, after the first write too)
+            where = array(where, dtype=bool_)
         # (both results computed before either out is written, so an out that is also an input is read as it was; every
         # out checked first, so a refusal leaves them all as they were)
         res = [f(*args, **kw) for f in self._parts]
