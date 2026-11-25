@@ -5215,6 +5215,9 @@ def _coerce_int(x):
         return int(x)
     if isinstance(x, _Fraction) and x.denominator == 1:
         return int(x)
+    if isinstance(x, _Fraction):
+        # (Magma's words for a rational that isn't an integer: Integers()!(1/2))
+        raise MagmaError("Rational argument is not a whole integer\nLHS: RngInt\nRHS: FldRatElt", "'!'", False)
     if isinstance(x, (bool, str)):
         # Python would read "7" as 7 and true as 1
         raise MagmaError("Illegal coercion\nLHS: RngInt\nRHS: %s" % _type(x), "'!'", False)
