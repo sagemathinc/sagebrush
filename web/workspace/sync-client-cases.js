@@ -5169,6 +5169,7 @@ async function sealedPull() {
   // state is kept with its cursor, so after a reload A's next op still verifies, chained after the last B verified)
   const id = await account();
   const f = await sealedFixture(id);
+  const h0 = f.server.head;
   const pb = await f.device();
   const wa = await fresh(), wb = await fresh();
   const a = client(wa, { e2e: { keys: f.provider, kit: f.kit } });
@@ -5187,6 +5188,11 @@ async function sealedPull() {
   check(await until(() => settled(wa, a), 15_000), "sealed pull: A's next op in the log");
   const b2 = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
   check(await until(async () => !!(await wb.stat("/pa/two.txt")), 15_000) && b2.debug().halted === undefined, "sealed pull: after a reload, A's next op verifies (chained after the last B kept) and applies: " + J({ halted: b2.debug().halted, why: b2.stats.sealedHalt }));
+  // (the floor, kept too: A's next op served at a head from before the ones B has verified halts by the floor, before
+  // any other check, so a reload can't lower it)
+  await ctl("set", { set: { tamperIndexHead: h0, tamperFor: wb.device, serverNotices: true } });
+  await wa.create("/pa/three.txt", { content: "three" });
+  check(await until(() => b2.debug().halted === "sealed-halt", 15_000) && /already passed/.test(b2.stats.sealedHalt), "sealed pull: after the reload, an op served at an earlier head halts by the floor B kept: " + J({ why: b2.stats.sealedHalt }));
   await stop(a);
   await stop(b2);
 }

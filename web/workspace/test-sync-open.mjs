@@ -187,6 +187,20 @@ const haltOf = async (P, rows, k, change) => {
   ok(honest.state.floor === R + 1 && honest.state.floor > C.base, "V3: the floor is the absolute position (base + index), past the base", { floor: honest.state.floor, base: C.base });
 }
 
+// ---- V3b: a device signing at a head from before it was added (current now, not then): halted
+{
+  const C = await chainOf();
+  const a = await C.device();
+  const h0 = C.heads[0];
+  const b = await C.device(); // (added at the next head)
+  // (b seals and signs honestly, but with a view of the chain from before its addition: its op authorized at h0)
+  const P0 = C.provider(b, 1);
+  const [early] = await K.sealOps(P0, SYNC_GEN, "sync-dev-b", [opOf(1, 0)], null);
+  const row = { seq: 1, device: "sync-dev-b", dseq: 1, env: early.env, head: early.head, chain_gen: early.chainGen, adds: early.adds, releases: early.releases, signer: early.signer, sig: early.sig };
+  const r = await read(C.provider(a), [row]);
+  ok(early.head === h0 && r.verdict === "halt" && /wasn't a current device/.test(r.why), "V3b: an op signed at a head from before its signer was added (a current device now): halted, not a current device there", r.why);
+}
+
 // ---- V4: a compacted chain (base > 0), a head before its anchor, and a head newer than the reader's view
 {
   const C = await chainOf(40);
@@ -234,6 +248,24 @@ const haltOf = async (P, rows, k, change) => {
   const sigN = await signIndexOp(a, { ...ctx, adds: [] }, envN);
   const rn = await read(P, [{ ...rows[0], env: Buffer.from(envN).toString("base64"), sig: sigN, adds: [] }]);
   ok(rn.verdict === "halt" && /references that aren't its op's/.test(rn.why), "V6: a file op whose visible adds aren't its own (refsOf): halted", rn.why);
+}
+
+// ---- V8: a chain reset (recovery): a new generation, positions going on from the old; the new chain's ops verify, and
+// an op at a head of the old generation (absent from the anchored suffix) halts, never ordered
+{
+  const C = await chainOf(3);
+  const a = await C.device();
+  const old = await logOf(C, { a }, [{ dev: "a" }]);
+  // (the reset: the recovering device alone, a new generation, the anchor at the next position)
+  const nextBase = C.top() + 1;
+  const R2 = await chainOf(nextBase);
+  const b = await R2.device();
+  const rows = await logOf(R2, { b }, [{ dev: "b" }, { dev: "b", then: (C) => C.move() }]);
+  const r = await read(R2.provider(b), rows);
+  ok(r.verdict === "ok" && r.state.floor === nextBase + 1 && r.state.floor > C.top(), "V8: after a reset, the new generation's ops verify, positions going on from the old chain's", { floor: r.state.floor, oldTop: C.top() });
+  const mixed = [...rows, { ...old[0], seq: 3, device: "sync-dev-x" }];
+  const rm = await read(R2.provider(b), mixed);
+  ok(rm.verdict === "halt" && rm.seq === 3 && /doesn't hold/.test(rm.why), "V8: an op of the old generation after the reset: its head isn't in the anchored chain: halted", rm.why);
 }
 
 // ---- V7: the fuzz: the same log and the same chain, read by two devices in different pages with different refresh

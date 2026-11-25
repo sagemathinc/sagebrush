@@ -161,7 +161,7 @@ const ctl = {
   dropIndex: 0,
   // (e2e PR 5c: the next ack naming an envelope hash, or the next index serving a sealed op, altered on its way to the
   // page, as a server holding other bytes would answer)
-  tamperAckHash: 0, tamperIndexEnv: 0, tamperIndexEnvBad: 0, tamperFor: null,
+  tamperAckHash: 0, tamperIndexEnv: 0, tamperIndexEnvBad: 0, tamperFor: null, tamperIndexHead: null,
   /** the next n pulled index pages (answers to pull_index) dropped */
   dropPulled: 0,
   /** the next n pulled index pages answered {ops: [], more: true} instead (a page that moves nothing) */
@@ -454,7 +454,7 @@ async function control(body) {
     // (a frame of the server's own, pushed to every page socket as the server would push it (no req): 2c-3's docWire)
     case "frame": { let sent = 0; for (const f of toPage) { f(JSON.stringify(body.frame)); sent++; } return { sent }; }
     case "notice": { let sent = 0; for (let i = 0; i < (body.times ?? 1); i++) for (const f of toPage) { f(JSON.stringify({ t: "index_changed", head: body.head })); sent++; } return { sent }; }
-    case "reset": Object.assign(ctl, { tamperAckHash: 0, tamperIndexEnv: 0, tamperIndexEnvBad: 0, tamperFor: null, fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, holdGet: false, rebuilt: [], rebuiltReal: false, dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null, serverNotices: false }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
+    case "reset": Object.assign(ctl, { tamperAckHash: 0, tamperIndexEnv: 0, tamperIndexEnvBad: 0, tamperFor: null, tamperIndexHead: null, fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, holdGet: false, rebuilt: [], rebuiltReal: false, dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null, serverNotices: false }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
     // (3b's control-only commands: a held wait released only by release/reset or the barrier (K-B, K-R1); a timer
     // (K-I, K-J); K-L2's armed late op; K-R2's reset of exactly its one untracked read)
     case "hang": await new Promise((ok) => held.push(ok)); return { ok: true };
@@ -811,6 +811,11 @@ const websocket = {
       if (m.t === "index" && Array.isArray(m.ops) && ctl.tamperIndexEnvBad > 0 && m.ops.some((o) => typeof o.env === "string")) {
         ctl.tamperIndexEnvBad--;
         m.ops.find((x) => typeof x.env === "string").env = "!!not base64!!";
+        return d.send(JSON.stringify(m));
+      }
+      if (m.t === "index" && Array.isArray(m.ops) && ctl.tamperIndexHead && (!ctl.tamperFor || d.helloDevice === ctl.tamperFor) && m.ops.some((o) => typeof o.env === "string")) {
+        m.ops.find((x) => typeof x.env === "string").head = ctl.tamperIndexHead;
+        ctl.tamperIndexHead = null;
         return d.send(JSON.stringify(m));
       }
       if (m.t === "index" && Array.isArray(m.ops) && ctl.tamperIndexEnv > 0 && (!ctl.tamperFor || d.helloDevice === ctl.tamperFor) && m.ops.some((o) => typeof o.env === "string")) {
