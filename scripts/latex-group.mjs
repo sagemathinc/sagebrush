@@ -104,7 +104,29 @@ export const LATEX_LAZY = {
 // (252,517 raw / 84,516 gzip: Nov 21 2026, the editor's own list of examples gone (the gallery's panel the only one):
 //  252,453 / 84,452 measured on the shipped build of its merge with master 68280840, with bun 1.4.4 and node 24.21.0,
 //  + 64)
-export const LATEX_CAPS = { raw: 252517, gzip: 84516 };
+// (252,762 raw / 84,654 gzip: Nov 23 2026, the preview's watchdog not counting the page's own blocking (watchdog.ts):
+//  252,698 / 84,590 measured on the shipped build of master 881d80a8 with it, with bun 1.4.4 and node 24.21.0, + 64)
+// (255,748 raw / 85,629 gzip: Nov 24 2026, amsart's front matter (every author, the abstract after the title, the first
+//  page's notes, the addresses at the end, \title[short] and \author[short]), a bibliography's label column as wide as its
+//  widest label, a \cite note typeset: 255,684 / 85,565 measured on the shipped build of its merge with master bf92ce4f,
+//  with bun 1.4.4 and node 24.21.0, + 64)
+// (255,840 raw / 85,653 gzip: Nov 24 2026, a block that fits is never "too large", the size said the one over the limit
+//  (web/latex/split.ts): 255,776 / 85,589 measured on the shipped build of its merge with master a1153559, with bun 1.4.4 and
+//  node 24.21.0 (+92 / +24 over master's 255,684 / 85,565), + 64)
+// (256,580 raw / 85,902 gzip: Nov 25 2026, amsthm's \qedhere (issue 1800), its symbol on its own row (KaTeX's tag):
+//  256,516 / 85,838 measured on the shipped build of its merge with master c0066039, with bun 1.4.4 and node 24.21.0
+//  (+740 / +249 over master's 255,776 / 85,589), + 64)
+// (287,627 raw / 97,060 gzip: Nov 25 2026, TikZ pictures drawn in the preview (paths, styles,
+//  transforms, \foreach: web/latex/engine/tikz.mjs, in the worker's bundle, with its bounds): 287,563 / 96,996 measured on the
+//  shipped build of its merge with master 3655725a, with bun 1.4.4 and node 24.21.0 (+31,047 / +11,158 over master's
+//  256,516 / 85,838), + 64)
+// (289,970 raw / 97,826 gzip: Nov 25 2026, \bibliography reading the .bbl BibTeX made beside the .tex, and natbib's
+//  numbers and sort&compress: 289,906 / 97,762 measured on the shipped build of its merge with master d4692ae4, with bun
+//  1.4.4 and node 24.21.0 (+2,343 / +766 over master's 287,563 / 96,996), + 64)
+// (291,697 raw / 98,473 gzip: Nov 25 2026, enumitem's label=, ref= and start= on a list: 291,633 / 98,409 measured on the
+//  shipped build of its merge with master 46d3a16f, with bun 1.4.4 and node 24.21.0 (+1,727 / +647 over master's
+//  289,906 / 97,762), + 64)
+export const LATEX_CAPS = { raw: 291697, gzip: 98473 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -202,7 +224,7 @@ export const LATEX_LAZY_CAPS = {
   // (65,566 / 22,526: Nov 22 2026, A1 (#1546): the agent's access as an icon in the composer's footer row, its CSS (a
   //  masked shield and the footer rules) in the pairing's chunk (agent-ui.ts), measured on the shipped build of the head
   //  on master e4c0b8c0 with bun 1.4.4 and node 24.21.0: 65,502 / 22,462, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 67404, gzip: 23063 },
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 67913, gzip: 23282 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
