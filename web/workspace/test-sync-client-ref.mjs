@@ -433,6 +433,17 @@ async function control(body) {
     case "dead": { let n = 0; for (const c of pageSockets) if (!c.data.dead) { c.data.dead = true; n++; } return { dead: n }; }
     case "release": { const n = held.length; for (const f of held.splice(0)) f(); return { released: n }; }
     case "probe": return probe(body);
+    // (e2e PR 5c: the reference server's key chain for an account (sealed ops are checked against it; null: none), its
+    // sealed log's cap, and a blob's sealed references)
+    case "e2eChain": {
+      const ch = body.chain;
+      const unb = (x) => Uint8Array.from(atob(x.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+      ref.controls.setChain(body.account, ch ? { account: ch.account, head: ch.head, generation: ch.generation, signers: new Map(ch.signers.map(([id, raw]) => [id, unb(raw)])) } : null);
+      return { ok: true };
+    }
+    case "sealedCap": ref.controls.setSealedCap(body.n); return { ok: true };
+    case "refuseSealed": ref.controls.refuseSealed(body.dseq, body.code); return { ok: true };
+    case "sealedRefs": return { refs: ref.controls.refs(body.account, body.address) };
     // (index_changed notices, as the account object sends them (plan-sync-index-changed r1), `times` of them to every
     // open socket: the client's side is tested by injecting them here; the server's own are dropped unless
     // ctl.serverNotices)
@@ -800,7 +811,9 @@ const websocket = {
     const text = typeof data === "string" ? data : Buffer.from(data).toString();
     let m;
     try { m = JSON.parse(text); } catch { m = {}; }
-    log.sent.push(m.t === "ops" ? { t: "ops", req: m.req, dseqs: m.ops.map((o) => o.dseq), json: m.ops.map((o) => JSON.stringify(o)), at: Date.now() } : { t: m.t, req: m.req, index_after: m.index_after, after: m.after, at: Date.now() });
+    // (sealed sends, e2e PR 5c: `sops`, logged as its own type with the same fields)
+    const opsLike = m.t === "ops" || m.t === "sops";
+    log.sent.push(opsLike ? { t: m.t, req: m.req, dseqs: m.ops.map((o) => o.dseq), json: m.ops.map((o) => JSON.stringify(o)), at: Date.now() } : { t: m.t, req: m.req, index_after: m.index_after, after: m.after, at: Date.now() });
     if (m.t === "hello") d.helloAccount = m.account ?? null;
     if (d.dead) return;
     fl({ k: "sent", t: m.t, req: m.req, ...(m.t === "batch" ? { doc: m.doc } : {}) });
@@ -815,8 +828,8 @@ const websocket = {
         return;
       }
     }
-    if (m.t === "ops") log.bindings.push({ session: d.socketSession, hello: d.helloAccount, dseqs: m.ops.map((o) => o.dseq) });
-    if (m.t === "ops") log.ops.push(...m.ops.map((o) => JSON.stringify(o)));
+    if (opsLike) log.bindings.push({ session: d.socketSession, hello: d.helloAccount, dseqs: m.ops.map((o) => o.dseq) });
+    if (opsLike) log.ops.push(...m.ops.map((o) => JSON.stringify(o)));
     if (m.t === "rebuilt" && ctl.rebuiltReal) log.rebuilt.push({ through: m.through, answer: "server", at: Date.now() });
     if (m.t === "rebuilt" && !ctl.rebuiltReal) {
       const f = ctl.rebuilt.shift() ?? { ack: { floor: m.through, count: 0 } };
@@ -831,7 +844,7 @@ const websocket = {
       d.send(JSON.stringify({ t: "error", req: m.req, code: f.code, detail: f.detail ?? { message: "faked" } }));
       return;
     }
-    if (m.t === "ops" && ctl.fakeOps.length) {
+    if (opsLike && ctl.fakeOps.length) {
       const f = ctl.fakeOps.shift();
       // (hold: answered only when the test releases it, after it has seen the client's sender idle)
       const answer = () => d.send(JSON.stringify({ t: "error", req: m.req, code: f.code, detail: f.detail ?? { message: "faked" } }));

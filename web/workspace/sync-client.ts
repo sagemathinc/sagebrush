@@ -31,7 +31,8 @@
 //   or state, or the person's resume().
 import { COPIES, LEGACY_MAX, type Workspace } from "./api";
 import { inTx, req } from "./db";
-import { Outbox, Fenced, switchTo, renewLease, sender, obligate, rebuildKey, wireOf, ownedSeq, type Lease, type OutboxRecord, type WireOp } from "./sync-outbox";
+import { Outbox, Fenced, switchTo, renewLease, sender, obligate, rebuildKey, wireOf, ownedSeq, SealedMismatch, type Lease, type OutboxRecord, type WireOp } from "./sync-outbox";
+import { envHashOf, sealOps, sopsItem, type OpKeys } from "./sync-seal";
 import { seedLedger, hubOf, driveObsolete, ledgerKeys } from "./sync-ledger";
 import { bytesFor } from "./sync-pins";
 import { cursorOf, applyOps, genPrefix, drainConfirmed } from "./sync-confirmed";
@@ -186,6 +187,9 @@ export type ClientOptions = {
   docs?: DocSync;
   /** (P0 #3) the network's state and its return: the browser's unless given (tests) */
   net?: NetWatch;
+  /** (e2e PR 5c) index ops sealed and signed at send time (sync-seal.ts), sent as `sops`: given only with a key
+   * provider, which no page gives yet. Another device's sealed ops halt the pull until they can be verified (5c-2) */
+  e2e?: OpKeys;
 };
 
 const key = (ns: string, what: string) => `sync:${ns}:${what}`;
@@ -788,15 +792,41 @@ export class SyncClient {
       last = o.seq;
       ops.push(o as unknown as IndexOp);
     }
-    // (this device's echoes: their records confirmed, if each is the very op of its record)
+    // (a sealed op from another device: not read until it can be verified (e2e PR 5c's pull half); the pages stop here)
+    const sealedRow = (o: IndexOp) => typeof (o as unknown as { env?: unknown }).env === "string";
+    if (ops.some((o) => sealedRow(o) && o.device !== this.w.device)) {
+      c.halted = "sealed-unverified";
+      this.showWaiting(c, (await c.ob.status()).count);
+      return;
+    }
+    // (this device's echoes: their records confirmed, if each is the very op of its record; a sealed echo is its record's
+    // if it is the envelope this device kept for that dseq, and goes on as the record's own op)
     const mine = ops.filter((o) => o.device === this.w.device);
     if (mine.length) {
       const lo = mine[0].dseq, hi = mine[mine.length - 1].dseq;
       const recs = new Map((await c.ob.records(lo, Math.max(1, hi - lo + 1))).map((r) => [r.dseq, r]));
+      const kept = mine.some(sealedRow) ? await c.ob.sealed(mine.filter(sealedRow).map((o) => o.dseq)) : new Map();
       const ok: number[] = [];
       for (const o of mine) {
         const r = recs.get(o.dseq);
-        if (!r) continue;
+        if (!r) {
+          // (a sealed echo of a record already gone: this device can't read it back; its op was applied here when made)
+          if (sealedRow(o)) {
+            await this.halt(c, "diverged", `the server's sealed op ${o.seq} for dseq ${o.dseq} has no record here`);
+            return;
+          }
+          continue;
+        }
+        if (sealedRow(o)) {
+          const s = kept.get(o.dseq);
+          if (!s || (await envHashOf((o as unknown as { env: string }).env)) !== s.envHash) {
+            await this.halt(c, "diverged", `the server's sealed op ${o.seq} for dseq ${o.dseq} isn't the envelope this device sealed`);
+            return;
+          }
+          ops[ops.indexOf(o)] = { ...r.op, seq: o.seq, device: o.device, dseq: o.dseq } as unknown as IndexOp;
+          ok.push(o.dseq);
+          continue;
+        }
         if (!sameOp(r.op, o as unknown as Record<string, unknown>)) {
           await this.halt(c, "diverged", `the server's op ${o.seq} for dseq ${o.dseq} isn't this device's record`);
           return;
@@ -949,11 +979,19 @@ export class SyncClient {
     c.pending.delete(m.req);
     hubOf(this.w.ws).answered(c.ns, c.ob.lease.gen, p.recs.map(ownedSeq).filter((x): x is number => x !== undefined));
     if (!Array.isArray(m.ops)) return c.end("closed");
-    const results = m.ops as ({ dseq: number; seq: number } | { dseq: number; code: string })[];
-    await c.ob.acked(results);
+    const results = m.ops as ({ dseq: number; seq: number; env_sha256?: string } | { dseq: number; code: string } | { dseq: number; undecided: true })[];
+    try {
+      await c.ob.acked(results);
+    } catch (e) {
+      if (!(e instanceof SealedMismatch)) throw e;
+      await this.halt(c, "diverged", e.message);
+      return;
+    }
     // (the server decides in dseq order with no gaps: its decided prefix, D6's server_next, follows each ack, so a
-    // rebuild starting now knows which records it has decided)
-    for (const d of results) if (isNat(d.dseq)) c.serverNext = Math.max(c.serverNext ?? 1, d.dseq + 1);
+    // rebuild starting now knows which records it has decided; an undecided op isn't decided)
+    for (const d of results) if (isNat(d.dseq) && !("undecided" in d)) c.serverNext = Math.max(c.serverNext ?? 1, d.dseq + 1);
+    // (undecided ones, after a refusal in their message: sealed again, from the lowest, once nothing is in flight)
+    if (results.some((d) => "undecided" in d)) c.resync = true;
     await this.timerOk(c.ns, "ops");
     const byDseq = new Map(p.recs.map((r) => [r.dseq, r]));
     const refused = results.filter((d): d is { dseq: number; code: string } => "code" in d);
@@ -986,7 +1024,7 @@ export class SyncClient {
   }
   private async errorOf(c: Conn, m: Record<string, unknown>) {
     const code = String(m.code ?? "");
-    const detail = (m.detail && typeof m.detail === "object" ? m.detail : {}) as { message?: string; retry_after?: number; next_dseq?: number };
+    const detail = (m.detail && typeof m.detail === "object" ? m.detail : {}) as { message?: string; retry_after?: number; next_dseq?: number; reason?: string; limit?: string };
     const ra = isNat(detail.retry_after) ? detail.retry_after : undefined;
     const p = isNat(m.req) ? c.pending.get(m.req) : undefined;
     // (an announce's refusal stays pending until it is handled, as its answer does (r4): deleted by error())
@@ -1046,6 +1084,26 @@ export class SyncClient {
     if (code === "readonly" || code === "deleting") {
       c.writable = false;
       this.say({ state: "paused", ns: c.ns, reason: code === "readonly" ? "read-only" : "deleting" });
+    }
+    if (this.opts.e2e) {
+      // (sealed: the key chain moved (or the server has none yet) for the whole message, so nothing was decided: every
+      // record not yet accepted is sealed again under the chain as it is now, with its dseq)
+      if (code === "conflict" && (detail.reason === "stale_head" || detail.reason === "no_chain")) {
+        await c.ob.dropSealed();
+        await this.opts.e2e.chain(true);
+      }
+      // (the sealed log is full: no resend can fit, so it stops and says so, rather than trying again)
+      if (code === "limit" && detail.limit === "sealed_log") {
+        c.halted = "sealed-log-full";
+        this.showWaiting(c, (await c.ob.status()).count);
+        return;
+      }
+      // (a signature the server doesn't take: this device isn't a current device of the account's key chain)
+      if (code === "forbidden") {
+        c.halted = "not-a-device";
+        this.showWaiting(c, (await c.ob.status()).count);
+        return;
+      }
     }
     if (code === "forbidden") return c.end("closed");
     // (order: a gap, after an earlier message failed; resent from the lowest, so no timer of its own beyond the first)
@@ -1107,6 +1165,13 @@ export class SyncClient {
         // (the refusal limit, already found unliftable on this server for this very obligation: halted, no rebuild)
         const un = await this.metaGet<{ n: number }>(key(c.ns, "resetUnsupported"));
         if (ob.why === "invalid" && un?.n === ob.n) return this.haltUnsupported(c);
+        // (sealed: a rebuild reads the server's log back, which this device can't do until it verifies and opens sealed
+        // ops (e2e PR 5c's pull half): halted, said, the obligation kept for then)
+        if (this.opts.e2e) {
+          c.halted = "sealed-rebuild";
+          this.showWaiting(c, (await c.ob.status()).count);
+          return;
+        }
         c.rebuilding = true;
       }
     }
@@ -1164,6 +1229,16 @@ export class SyncClient {
         return;
       }
       const batch = recs.slice(0, n);
+      // (sealed sends: each record's sealed form, kept before it first goes, then the same bytes on every resend)
+      let sealedItems: unknown[] | null = null;
+      if (this.opts.e2e) {
+        sealedItems = await this.sealFor(c, batch);
+        if (this.conn !== c || c.resync) return;
+        if (!sealedItems) {
+          this.again = true;
+          return;
+        }
+      }
       const wait = this.bucket.take(batch.length, this.clock.now());
       if (wait === Infinity) throw new Error("sync: a message larger than the pace allows");
       if (wait > 0) {
@@ -1175,7 +1250,7 @@ export class SyncClient {
       this.stats.opsMessages++;
       this.stats.opsSent += batch.length;
       this.stats.maxOps = Math.max(this.stats.maxOps, batch.length);
-      this.ask(c, { t: "ops", ops: batch.map((r) => r.op) }, { kind: "ops", recs: batch });
+      this.ask(c, sealedItems ? { t: "sops", ops: sealedItems } : { t: "ops", ops: batch.map((r) => r.op) }, { kind: "ops", recs: batch });
       // (sent: in memory only, fenced by this connection's lease generation (task #14))
       hubOf(this.w.ws).sent(c.ns, c.epoch, c.ob.lease.gen, batch.map(ownedSeq).filter((x): x is number => x !== undefined));
       c.next = batch[batch.length - 1].dseq + 1;
@@ -1206,6 +1281,10 @@ export class SyncClient {
   private showWaiting(c: Conn, count: number, resumesAt?: number) {
     if (!c.writable) return this.say({ ...this.status, ns: c.ns, waiting: count });
     if (c.halted === "reset-unsupported") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's sync can't continue: the server can't reset its refused changes. Delete my synced data to start again" });
+    if (c.halted === "sealed-unverified") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device can't verify another device's encrypted changes yet" });
+    if (c.halted === "sealed-rebuild") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device can't rebuild its sync from encrypted changes yet" });
+    if (c.halted === "sealed-log-full") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this account's encrypted change log is full" });
+    if (c.halted === "not-a-device") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device isn't one of this account's encryption devices any more" });
     if (c.halted === "blob-conflict") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's sync can't continue: the server holds other bytes for one of this device's files. Delete my synced data to start again" });
     if (c.halted === "stuck") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's queue can't continue here: Delete my synced data to start again" });
     if (c.rebuilding) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "rebuilding sync", stuck: true });
@@ -1813,6 +1892,28 @@ export class SyncClient {
     // (the obligation, its counter incremented in the same transaction (D7 r2); a halt is never lowered to a refusal)
     await inTx(this.w.ws, META, "readwrite", async (tx) => { await obligate(tx.objectStore(META), ns, why, detail); });
   }
+  /** The `sops` items for `batch`: each record's kept sealed form, sealed and kept now for those that have none (in
+   * runs, each chained from the record before it), or null if a sealing couldn't be kept (an ack or a drop came
+   * meanwhile: sealed again on the next run). */
+  private async sealFor(c: Conn, batch: OutboxRecord[]): Promise<unknown[] | null> {
+    const keys = this.opts.e2e!;
+    const have = await c.ob.sealed(batch.map((r) => r.dseq));
+    for (let i = 0; i < batch.length; ) {
+      if (have.has(batch[i].dseq)) {
+        i++;
+        continue;
+      }
+      let j = i;
+      while (j < batch.length && !have.has(batch[j].dseq)) j++;
+      const prev = await c.ob.chainAfter(batch[i].dseq - 1);
+      const fresh = await sealOps(keys, c.generation, this.w.device, batch.slice(i, j).map((r) => r.op), prev);
+      if (!(await c.ob.keepSealed(fresh, prev))) return null;
+      for (const s of fresh) have.set(s.dseq, s);
+      i = j;
+    }
+    return batch.map((r) => sopsItem(have.get(r.dseq)!));
+  }
+
   private async halt(c: Conn, why: "invalid" | "diverged", detail: string) {
     c.halted = why;
     // (tests: between the halt, in memory, and its flag's write: the window a crash can fall in)

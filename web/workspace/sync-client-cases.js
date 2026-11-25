@@ -4864,7 +4864,169 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+// ---- e2e PR 5c, its send half: sealed sends.  A fixture key provider (an epoch's keys, a device's Ed25519 key, a view
+// of the key chain) stands where the page's key store will; the reference server holds the same chain (/__ctl e2eChain)
+const b64u = (b) => btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const rand32 = () => crypto.getRandomValues(new Uint8Array(32));
+const e2eId = () => {
+  const A = "abcdefghijklmnopqrstuvwxyz234567", r = crypto.getRandomValues(new Uint8Array(26));
+  return Array.from(r.subarray(0, 25), (x) => A[x & 31]).join("") + "aeimquy4"[r[25] & 7];
+};
+async function sealedFixture(accountId) {
+  const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"]);
+  const raw = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
+  const id = e2eId(), account = "e2e-" + e2eId();
+  const keys = await W.deriveEpochKeys(rand32(), account, 1);
+  const server = { head: b64u(rand32()), generation: b64u(rand32()) };
+  let view = { ...server, currentEpoch: 1 };
+  const refreshes = { n: 0 };
+  const put = () => ctl("e2eChain", { account: accountId, chain: { account, head: server.head, generation: server.generation, signers: [[id, b64u(raw)]] } });
+  await put();
+  const provider = {
+    account,
+    device: { id, sign: async (b) => new Uint8Array(await crypto.subtle.sign("Ed25519", pair.privateKey, b)) },
+    chain: async (refresh) => { if (refresh) { refreshes.n++; view = { ...server, currentEpoch: 1 }; } return view; },
+    epochKeys: async (n) => (n === 1 ? keys : null),
+  };
+  return { provider, refreshes, server, move: async () => { server.head = b64u(rand32()); await put(); } };
+}
+const sealedSends = (log) => log.sent.filter((m) => m.t === "sops");
+const itemsOf = (sends) => sends.flatMap((m) => m.json.map((j) => JSON.parse(j)));
+
+async function sealedSend() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const w = await fresh();
+  const c = client(w, { e2e: f.provider });
+  check(await until(() => settled(w, c)), "sealed send: synced");
+  await ctl("log", { reset: true });
+  await w.mkdir("/s");
+  await w.create("/s/a.txt", { content: "sealed a" });
+  check(await until(() => settled(w, c), 15_000), "sealed send: the changes settled: " + J(c.status));
+  const log = await ctl("log");
+  const sends = sealedSends(log), items = itemsOf(sends);
+  check(sends.length >= 1 && log.sent.every((m) => m.t !== "ops"), "sealed send: every op went as sops, none as plaintext: " + J(log.sent.map((m) => m.t)));
+  check(items.length >= 2 && items.every((o) => o.env && o.sig && o.signer === f.provider.device.id && o.head === f.server.head && o.chain_gen === f.server.generation && o.path === undefined && o.op === undefined),
+    "sealed send: each op sealed and signed under the chain's head and generation, nothing readable beside it");
+  const file = items.find((o) => o.adds?.length === 1);
+  check(file && (await ctl("sealedRefs", { account: id, address: file.adds[0] })).refs === 1, "sealed send: the file's blob counted once, by its visible add");
+  check((await outbox(w)) === 0 && c.debug().halted === undefined, "sealed send: every record confirmed by its echo (matched by the envelope's hash)");
+  await stop(c);
+}
+
+async function sealedLostAck() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const w = await fresh();
+  const c = client(w, { e2e: f.provider });
+  check(await until(() => settled(w, c)), "sealed lost ack: synced");
+  await ctl("log", { reset: true });
+  // (the ack lost, and the next connection's first index too, so the record is resent rather than confirmed by its echo)
+  await ctl("set", { set: { dropAcks: 1, dropIndex: 1 } });
+  await w.create("/lost.txt", { content: "sealed, its answer lost" });
+  check(await until(async () => (await ctl("log")).got.some((g) => g.dropped && g.t === "ack")), "sealed lost ack: the answer was dropped");
+  await stop(c);
+  // (a reload: the outbox holds the record and its sealed form; the new client sends those exact bytes again)
+  const c2 = client(w, { e2e: f.provider });
+  check(await until(() => settled(w, c2), 15_000), "sealed lost ack: after a reload, settled: " + J(c2.status));
+  const sends = sealedSends(await ctl("log"));
+  const first = sends[0]?.json?.[0], again = sends.slice(1).flatMap((m) => m.json).filter((j) => JSON.parse(j).dseq === JSON.parse(first ?? "{}").dseq);
+  check(first && again.length >= 1 && again.every((j) => j === first), "sealed lost ack: the resend after the reload carried the very same sealed bytes: " + J(sends.map((m) => m.dseqs)));
+  check((await outbox(w)) === 0 && c2.debug().halted === undefined, "sealed lost ack: decided once, confirmed, no divergence");
+  await stop(c2);
+}
+
+async function sealedRefusal() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const w = await fresh();
+  const c0 = client(w, { e2e: f.provider });
+  check(await until(() => settled(w, c0)), "sealed refusal: synced");
+  await stop(c0);
+  // (three changes made offline go in one message: the server refuses the second; the third is undecided)
+  for (const p of ["/r1", "/r2", "/r3"]) await w.mkdir(p);
+  await ctl("log", { reset: true });
+  await ctl("refuseSealed", { dseq: 2, code: "missing" });
+  const c = client(w, { e2e: f.provider });
+  // (settled: scanned past the three, every record decided, nothing in flight)
+  check(await until(() => settled(w, c), 15_000), "sealed refusal: every record decided: " + J(c.status));
+  const sends = sealedSends(await ctl("log"));
+  const firstMsg = sends.find((m) => m.dseqs.length === 3);
+  const third0 = firstMsg && JSON.parse(firstMsg.json[2]);
+  const third1 = sends.filter((m) => m !== firstMsg).flatMap((m) => m.json.map((j) => JSON.parse(j))).find((o) => o.dseq === 3);
+  check(firstMsg && third1 && third1.env !== third0.env, "sealed refusal: the undecided third was sealed again (other bytes) and sent again: " + J(sends.map((m) => m.dseqs)));
+  const refusals = await metaGet(w.ws, `sync:${nsOf(c)}:refused`);
+  check(Array.isArray(refusals) && refusals.some((r) => r.dseq === 2 && r.code === "missing"), "sealed refusal: the second's refusal kept: " + J(refusals));
+  await stop(c);
+}
+
+async function sealedStale() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const w = await fresh();
+  const c0 = client(w, { e2e: f.provider });
+  check(await until(() => settled(w, c0)), "sealed stale: synced");
+  await stop(c0);
+  await w.mkdir("/st");
+  const oldHead = f.server.head;
+  await f.move();
+  await ctl("log", { reset: true });
+  const c = client(w, { e2e: f.provider });
+  check(await until(() => settled(w, c), 15_000), "sealed stale: settled after the chain moved: " + J(c.status));
+  const sends = sealedSends(await ctl("log")), heads = itemsOf(sends).map((o) => o.head);
+  check(heads[0] === oldHead && heads[heads.length - 1] === f.server.head && f.refreshes.n >= 1,
+    "sealed stale: sealed under the old head, refused stale_head, the chain read again, sealed again under the new head and accepted, the same dseq: " + J({ n: heads.length, refreshes: f.refreshes.n }));
+  await stop(c);
+}
+
+async function sealedBusy() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const w = await fresh();
+  const c = client(w, { e2e: f.provider });
+  check(await until(() => settled(w, c)), "sealed busy: synced");
+  await ctl("log", { reset: true });
+  await ctl("set", { set: { fakeOps: [{ code: "busy", detail: { retry_after: 200 } }] } });
+  await w.mkdir("/busy");
+  check(await until(() => settled(w, c), 15_000), "sealed busy: settled: " + J(c.status));
+  const sends = sealedSends(await ctl("log"));
+  check(sends.length >= 2 && sends[1].json[0] === sends[0].json[0], "sealed busy: sent again with the identical bytes (nothing was decided, the head didn't move)");
+  await stop(c);
+}
+
+async function sealedLogFull() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const w = await fresh();
+  const c = client(w, { e2e: f.provider });
+  check(await until(() => settled(w, c)), "sealed log full: synced");
+  await ctl("sealedCap", { n: 0 });
+  await ctl("log", { reset: true });
+  await w.mkdir("/full");
+  check(await until(() => c.debug().halted === "sealed-log-full" && /log is full/.test(c.status.reason ?? ""), 15_000), "sealed log full: halted, saying why: " + J(c.status));
+  await sleep(500);
+  check(sealedSends(await ctl("log")).length === 1 && (await outbox(w)) >= 1, "sealed log full: tried once, no retry loop; the record kept");
+  await ctl("sealedCap", { n: 1_000_000 });
+  await stop(c);
+}
+
+async function sealedForeign() {
+  // (another device's sealed op in the log: this half can't verify it yet (5c-2), so the pull stops there, said)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const wa = await fresh(), wb = await fresh();
+  const a = client(wa, { e2e: f.provider });
+  check(await until(() => settled(wa, a)), "sealed foreign: A synced");
+  await wa.mkdir("/from-a");
+  check(await until(() => settled(wa, a), 15_000), "sealed foreign: A's op in the log");
+  const b = client(wb, { e2e: f.provider });
+  check(await until(() => b.debug().halted === "sealed-unverified" && /can't verify/.test(b.status.reason ?? ""), 15_000), "sealed foreign: B halts at A's sealed op, saying why: " + J(b.status));
+  check(!(await wb.stat("/from-a")), "sealed foreign: nothing of it applied on B");
+  await stop(a);
+  await stop(b);
+}
+
+const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
