@@ -116,6 +116,25 @@ for n, lower, k in ((5000, False, 1), (5000, True, 1), (5000, True, 3), (4001, F
     assert wt.used <= wb.used, (n, lower, k, wt.used, wb.used)
     pins.append((n, "lower" if lower else "upper", k, wt.used, wb.used))
 assert pins[0][3:] == (4999, 4999), pins[0]
+# (a wider upper band, ku = 4, with holes inside it and one explicitly stored zero: still k units per stored
+# off-diagonal, the stored zero included, and strictly fewer than the band route's)
+n, k = 5000, 2
+rows, vals = [], []
+for j in range(n):
+    rj = [i for i in range(max(0, j - 4), j) if not (j % 3 == 0 and i == j - 2)] + [j]
+    rows.append(rj)
+    vals.append([0.0 if (j, i) == (10, 7) else -1.0 for i in rj[:-1]] + [4.0])
+jc = np.zeros(n + 1, dtype=sp._I)
+jc[1:] = np.cumsum([len(r) for r in rows])
+S = sp._new(n, n, jc, np.array([i for r in rows for i in r], dtype=sp._I), np.array([v for c in vals for v in c]))
+assert sp.bandwidths(S) == (0, 4) and int(np.sum(S.pr == 0)) == 1, sp.bandwidths(S)
+Bm = np.ones((n, k))
+wt, wb = L.Work("tri"), L.Work("band")
+sp.triangular_solve(S, Bm.copy(), False, wt)
+L.band_solve(S, Bm.copy(), 0, 4, _Led(), wb)
+offdiag = int(S.jc[n]) - n
+assert wt.used == k * offdiag and wt.used < wb.used, (wt.used, k * offdiag, wb.used)
+pins.append((n, "upper ku4 holes+zero", k, wt.used, wb.used))
 ok("meter: k units per off-diagonal, never more than the band route's (%s)" % "; ".join("%d %s k%d: %d <= %d" % p for p in pins))
 
 # 3. the small route's need: exact admits the triangular route, one byte short leaves the dense route (which, needing
