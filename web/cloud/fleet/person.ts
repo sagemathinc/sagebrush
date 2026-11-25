@@ -13,10 +13,26 @@
 // cookie or a token. Every answer is read by ONE SQL statement. Nothing is cached (no-store).
 import { appendChainEntry, type WriterCore } from "./writers.ts";
 import { bucket, chainPage, type D1 } from "./store.ts";
+import { sessionResult, type Ctx, type ShareEnv } from "../share/server.ts";
 
 export type PersonSession = { kind: "ok"; account: string } | { kind: "none" } | { kind: "unavailable" };
 /** What the mounting Worker supplies: the request's account session, read now from the primary (never a cache). */
 export interface PersonDeps { session(req: Request): Promise<PersonSession> }
+
+/**
+ * The site's own session (the reads scope r4 §2): share/server.ts's `sessionResult`, the cookie and then a read of the
+ * SHARE_DB primary, exactly as sharing, sync and remote authenticate. Without the SHARE_DB binding the session can't be
+ * checked: "unavailable" (503), never "none". A read that throws is handlePerson's 503.
+ */
+export function shareSession(env: ShareEnv, ctx?: Ctx): PersonDeps {
+  return {
+    async session(req) {
+      if (!env.SHARE_DB) return { kind: "unavailable" };
+      const r = await sessionResult(req, env, ctx);
+      return r.kind === "ok" ? { kind: "ok", account: r.id } : r.kind === "unavailable" ? { kind: "unavailable" } : { kind: "none" };
+    },
+  };
+}
 interface PersonEnv { FLEET_DB?: D1; FLEET_AUD?: string }
 /** The parts of the fleet core these routes use; server.ts passes the installer's getter (only it names the core). */
 export interface PersonCore extends WriterCore {

@@ -1,16 +1,19 @@
 // ci: web-sync.1 order=16
 // Tests for the person's own fleet routes (web/cloud/fleet/person.ts; the reads scope r4): the Worker in Miniflare on a
 // real D1 with every migration, the person's session given as the mounting Worker would (test-entry.ts takes it from
-// x-test-account / x-test-session), and the fleet built through the real writers (writers.ts, bundled with bun). Every
+// x-test-account / x-test-session) or, in P-1r, through the fleet Worker's own entry (worker.ts), which resolves the
+// cookie with the site's resolver over a real SHARE_DB (person.ts shareSession; the reads scope r4 §2), and the fleet built through the real writers (writers.ts, bundled with bun). Every
 // signed object a route returns is checked with the mirrored core's own verifiers, as the page checks it.
 //   node web/cloud/fleet/test-fleet-person.mjs
 import { execFileSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dispatch } from "../../miniflare-dispatch.mjs";
+import { migrations as shareMigrations } from "../share/migrations.mjs";
 import * as core from "../../workspace/fleet/core/index.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -35,10 +38,17 @@ const text = (b) => new TextDecoder().decode(b);
 const rand = (n) => core.b64(core.random(n));
 
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser"], { encoding: "utf8" });
-const mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "fleet", modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["FLEET_DB"], bindings: { FLEET_AUD: AUD } }] }));
+// (AUTH_PROVIDER "local": the site's sessions of kind 'local', written straight into SHARE_DB as a deployment's own
+// sign-in would, as share/test-local-sessions.mjs does)
+const worker = (d1, bindings = { FLEET_AUD: AUD }, src = script) => new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "fleet", modules: true, script: src, compatibilityDate: "2026-10-01", d1Databases: d1, bindings }] }));
+// (the fleet Worker's own entry, as a deployment would run it: no test header reaches the session)
+const entry = execFileSync("bun", ["build", join(here, "worker.ts"), "--format", "esm", "--target", "browser"], { encoding: "utf8" });
+const deployed = (d1, bindings = { FLEET_AUD: AUD, AUTH_PROVIDER: "local" }) => worker(d1, bindings, entry);
+const run = async (d, files) => { for (const f of files) for (const stmt of readFileSync(f, "utf8").replace(/--[^\n]*/g, "").split(";").map((s) => s.trim()).filter(Boolean)) await d.prepare(stmt).run(); };
+const FLEET_MIGRATIONS = ["0001_fleet_leases.sql", "0002_fleet_writers_chain_hosts.sql", "0003_fleet_writers_grants_transfers.sql", "0004_fleet_request_nonces.sql", "0005_fleet_accounts_and_bytes.sql"].map((m) => join(here, "migrations", m));
+const mf = worker(["FLEET_DB"]);
 const db = await mf.getD1Database("FLEET_DB");
-for (const m of ["0001_fleet_leases.sql", "0002_fleet_writers_chain_hosts.sql", "0003_fleet_writers_grants_transfers.sql", "0004_fleet_request_nonces.sql", "0005_fleet_accounts_and_bytes.sql"])
-  for (const stmt of readFileSync(join(here, "migrations", m), "utf8").replace(/--[^\n]*/g, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(stmt).run();
+await run(db, FLEET_MIGRATIONS);
 const all = async (sql, ...v) => (await db.prepare(sql).bind(...v).all()).results;
 const exec = (sql, ...v) => db.prepare(sql).bind(...v).run();
 const snapshot = async () => JSON.stringify(await Promise.all(["fleet_accounts", "fleet_chain_entries", "fleet_chain_hashes", "fleet_hosts", "fleet_host_certs"].map((t) => all(`SELECT * FROM ${t} ORDER BY 1, 2`))));
@@ -113,6 +123,88 @@ const grant = (f, bytes) => W.applyGrant(db, core, { fleet: f.fleet, aud: AUD, g
   ok((await as("acct", "/api/fleet/v1/chain", { method: "POST", body: "{}", session: "none" })).status === 401, "P-1: an append with no session: 401");
   ok((await as("acct", "/api/fleet/v1/hosts", { method: "POST", body: "{}" })).status === 405, "P-1: a POST to a read route: 405");
   ok((await as("bad account!", "/api/fleet/v1/fleet")).status === 500, "P-1: a session account outside the id grammar: 500, nothing read");
+}
+
+// ---- P-1r: the session resolved for real, through the fleet Worker's entry: the site's own resolver (the cookie, then
+// the SHARE_DB primary; r4 §2), on two D1s, FLEET_DB and SHARE_DB
+{
+  const live2 = deployed(["FLEET_DB", "SHARE_DB"]);
+  const fdb = await live2.getD1Database("FLEET_DB");
+  await run(fdb, FLEET_MIGRATIONS);
+  const shareDb = await live2.getD1Database("SHARE_DB");
+  await run(shareDb, shareMigrations().map((m) => m.path));
+  const nowS = Math.floor(Date.now() / 1000);
+  const sha = (x) => createHash("sha256").update(x).digest("hex");
+  /** A session row as a sign-in writes it (kind 'local' unless given), for a new account unless one is named. */
+  const sessionRow = async (opts = {}) => {
+    const account = opts.account ?? crypto.randomUUID(), token = randomBytes(32).toString("base64url");
+    await shareDb.prepare("INSERT OR IGNORE INTO accounts (account_id, email, name, created, last_login) VALUES (?1, ?2, 'X', ?3, ?3)").bind(account, `${account}@example.com`, nowS).run();
+    const kind = opts.kind ?? "local", abs = nowS + 30 * 86400;
+    const expires = opts.expires ?? nowS + 86400;
+    await shareDb.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, abs_expires, validated, idle_s, last_used) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8)")
+      .bind(sha(token), account, nowS, expires, kind, kind === "local" ? abs : null, kind === "local" ? 86400 : null, kind === "local" ? nowS : null).run();
+    return { account, token };
+  };
+  const real = async (m, cookie, path, { method = "GET", body } = {}) => {
+    const headers = cookie === null ? {} : { cookie: `__Host-sb_session=${cookie}` };
+    const r = await dispatch(m, SITE + path, { method, headers, ...(body ? { body } : {}) });
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    let json = null;
+    try { json = bytes.length ? JSON.parse(text(bytes)) : null; } catch { /* (not JSON) */ }
+    return { status: r.status, json };
+  };
+  const live = await sessionRow();
+  const r0 = await real(live2, live.token, "/api/fleet/v1/fleet");
+  ok(r0.status === 404 && r0.json?.error === "no_fleet", "P-1r: a live session, read for real: authenticated (no_fleet), not 401", r0);
+  // (its account is the session row's own: a genesis through the cookie binds THAT account, and the injected seam for the
+  // same id then sees the same fleet)
+  const f = await fleetOf(live.account).init();
+  const g = await real(live2, live.token, "/api/fleet/v1/chain", { method: "POST", body: await f.genesisBytes() });
+  ok(g.status === 200, "P-1r: a genesis through the real session", g);
+  const bound = (await fdb.prepare("SELECT account FROM fleet_accounts WHERE fleet = ?1").bind(f.fleet).all()).results;
+  ok(bound.length === 1 && bound[0].account === live.account, "P-1r: the fleet is bound to the session row's account", bound);
+  const seen = await real(live2, live.token, "/api/fleet/v1/fleet");
+  ok(seen.status === 200 && seen.json?.fleet === f.fleet, "P-1r: /fleet through the real session shows it", seen);
+  ok((await real(live2, null, "/api/fleet/v1/fleet")).status === 401 && (await real(live2, (await sessionRow()).token, "/api/fleet/v1/fleet")).status === 404, "P-1r: the fleet is that account's alone: no cookie is 401, another live account has none");
+  for (const path of ["/api/fleet/v1/fleet", "/api/fleet/v1/chain", "/api/fleet/v1/hosts", `/api/fleet/v1/hosts/${core.newId()}/grants`]) {
+    ok((await real(live2, null, path)).status === 401, `P-1r: ${path} with no cookie: 401`);
+    ok((await real(live2, "not-a-token", path)).status === 401, `P-1r: ${path} with a malformed token: 401`);
+    ok((await real(live2, randomBytes(32).toString("base64url"), path)).status === 401, `P-1r: ${path} with a token no row has: 401`);
+  }
+  const expired = await sessionRow({ expires: nowS - 1 });
+  ok((await real(live2, expired.token, "/api/fleet/v1/fleet")).status === 401, "P-1r: an expired session row: 401");
+  const leaving = await sessionRow();
+  await shareDb.prepare("UPDATE accounts SET deleting = ?2 WHERE account_id = ?1").bind(leaving.account, nowS).run();
+  ok((await real(live2, leaving.token, "/api/fleet/v1/fleet")).status === 401, "P-1r: an account being deleted: 401");
+  const legacy = await sessionRow({ kind: "legacy" });
+  ok((await real(live2, legacy.token, "/api/fleet/v1/fleet")).status === 401, "P-1r: a session of a kind this deployment's provider doesn't count: 401");
+  ok((await real(live2, live.token, "/api/fleet/v1/chain", { method: "POST", body: "{}" })).status !== 401, "P-1r: an append with the live session is past the session check");
+  // (no SHARE_DB binding: the session can't be checked, 503, never signed out)
+  const noShare = deployed(["FLEET_DB"]);
+  ok((await real(noShare, live.token, "/api/fleet/v1/fleet")).status === 503, "P-1r: no SHARE_DB binding: 503");
+  await noShare.dispose();
+  // (a SHARE_DB whose read fails: 503, and nothing of the fleet is read)
+  const broken = deployed(["FLEET_DB", "SHARE_DB"]);
+  ok((await real(broken, live.token, "/api/fleet/v1/fleet")).status === 503, "P-1r: a failing SHARE_DB read: 503");
+  await broken.dispose();
+  // (the primary's own "unavailable": a WorkOS session past its grace whose last refresh just failed, so WorkOS can't be
+  // asked again yet. 503, never signed out. Its control, the same row inside the grace, is served)
+  const wos = deployed(["FLEET_DB", "SHARE_DB"], { FLEET_AUD: AUD, AUTH_PROVIDER: "workos" });
+  await run(await wos.getD1Database("FLEET_DB"), FLEET_MIGRATIONS);
+  const wdb = await wos.getD1Database("SHARE_DB");
+  await run(wdb, shareMigrations().map((m) => m.path));
+  const workosRow = async (validatedAgo) => {
+    const account = crypto.randomUUID(), token = randomBytes(32).toString("base64url");
+    await wdb.prepare("INSERT INTO accounts (account_id, email, name, created, last_login) VALUES (?1, ?2, 'X', ?3, ?3)").bind(account, `${account}@example.com`, nowS).run();
+    await wdb.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, abs_expires, validated, refresh_failed) VALUES (?1, ?2, ?3, ?4, 'workos', ?5, ?6, ?7)")
+      .bind(sha(token), account, nowS - validatedAgo, nowS - validatedAgo + 3600, nowS + 30 * 86400, nowS - validatedAgo, nowS - 10).run();
+    return token;
+  };
+  ok((await real(wos, await workosRow(2 * 86400), "/api/fleet/v1/fleet")).status === 503, "P-1r: the primary says unavailable (WorkOS past its grace, its refresh just failed): 503");
+  const inGrace = await real(wos, await workosRow(2 * 3600), "/api/fleet/v1/fleet");
+  ok(inGrace.status === 404 && inGrace.json?.error === "no_fleet", "P-1r: control, the same inside its grace: authenticated", inGrace);
+  await wos.dispose();
+  await live2.dispose();
 }
 
 // ---- P-2 and P-3: /fleet, and the genesis binding (SEC H1, H2)

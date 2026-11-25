@@ -10,8 +10,10 @@
 import { fleetCore } from "../../workspace/fleet/install.ts";
 import { bucket, chainEntries, chainPage, hostGen, hostRow, issueLease, spendRequestNonce, type D1 } from "./store.ts";
 import { handlePerson, type PersonDeps } from "./person.ts";
+import type { ShareEnv } from "../share/server.ts";
 
-export interface FleetEnv {
+/** ShareEnv: the person's routes read the site's own session (SHARE_DB, AUTH_PROVIDER, ...; person.ts shareSession). */
+export interface FleetEnv extends ShareEnv {
   FLEET_DB?: D1;
   /** the audience: "https://sagebrush.space" or "https://dev.sagebrush.space" */
   FLEET_AUD?: string;
