@@ -126,7 +126,10 @@ export const LATEX_LAZY = {
 // (291,697 raw / 98,473 gzip: Nov 25 2026, enumitem's label=, ref= and start= on a list: 291,633 / 98,409 measured on the
 //  shipped build of its merge with master 46d3a16f, with bun 1.4.4 and node 24.21.0 (+1,727 / +647 over master's
 //  289,906 / 97,762), + 64)
-export const LATEX_CAPS = { raw: 291697, gzip: 98473 };
+// (292,864 raw / 98,922 gzip: Nov 25 2026, an accent before a font command with its argument, unbraced ($\bar\mathbb F$),
+//  braced before KaTeX: 292,800 / 98,858 measured on the shipped build of its merge with master 56958e3d, with bun 1.4.4 and
+//  node 24.21.0 (+1,167 / +449 over master's 291,633 / 98,409), + 64)
+export const LATEX_CAPS = { raw: 292864, gzip: 98922 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:

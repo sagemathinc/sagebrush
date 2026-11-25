@@ -730,6 +730,8 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
 - another person's keys are trusted at first use, with a loud warning if they change, so a substitution at first use isn't caught;
 - **post-quantum:** X25519 isn't, so ciphertext kept today could be opened by a future quantum computer. A hybrid suite comes in a later epoch, through crypto agility (e2e-encryption.md §11.1), not in the first version.
 
+**Deleting:** "Delete my synced data" keeps the account's key identity (the key chain, the current keyring and wrappers, and each device's name and public key), and deleting the CoCalc account removes it (a SEC ruling; e2e-encryption.md §2).
+
 **No migration:** sync is DEV-only, so DEV's synced data is wiped and its devices re-enrolled at the cutover. Plaintext data is never converted.
 
 ## 11. The flag, and what is deployed

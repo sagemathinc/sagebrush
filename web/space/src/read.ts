@@ -3,6 +3,9 @@
 // and at most LIMITS.bytes are read. A space, from a URL or from the page around (an embed), is checked whole before
 // anything of it is drawn: its depth, its values and strings, its objects and links, and its tree's files.
 export const LIMITS = { bytes: 8 << 20, depth: 24, values: 400000, string: 2 << 20, nodes: 4000, edges: 20000, files: 50000 };
+// (the most of a file's text parsed into its room, in UTF-8 bytes: the file as read, and again as parsed (Sage's
+//  preparser lengthens it), so a long file's parse can't hold the page)
+export const ROOM_TEXT = 1 << 20;
 // (a string's length in UTF-8, without encoding it)
 export function utf8Bytes(s) {
   let n = 0;
