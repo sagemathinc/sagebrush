@@ -33,7 +33,7 @@ function files(web) {
 }
 
 // ---- the caps themselves, as approved (a change to them is a ruling: this line changes with it)
-check(LATEX_CAPS.raw === 252762 && LATEX_CAPS.gzip === 84654, "the caps are 252,762 B raw and 84,654 B gzip (2026-11-23, the preview's watchdog not counting the page's own blocking, on master 881d80a8: 252,698 / 84,590 measured + 64; 252,517 / 84,516 before, the editor's own list of examples gone)");
+check(LATEX_CAPS.raw === 287627 && LATEX_CAPS.gzip === 97060, "the caps are 287,627 B raw and 97,060 B gzip (2026-11-25, TikZ pictures drawn in the preview, on its merge with master 3655725a: 287,563 / 96,996 measured + 64; 256,580 / 85,902 before, amsthm's \\qedhere on its own row)");
 
 // (and each lazy chunk's, as approved: comments 16/6, comments-doc 40/16, agent 47,645 / 16,403 B (2026-11-10, for the
 //  grant's "May run code"; 45,952 / 16,000 for the grant's id and hold, 44/15.5 on 2026-11-04, before), tools
@@ -69,7 +69,7 @@ check(LATEX_CAPS.raw === 252762 && LATEX_CAPS.gzip === 84654, "the caps are 252,
 // (tools 17,335 / 7,231 B: renewed at the landing merge on master 14279164, 17,271 / 7,167 measured + 64; its +777 / +286
 //  over 16,494 / 6,881 is inherited from a shared check's and the tools' changes)
 // (the examples' chunk, EXAMPLES, gone with the editor's own list of examples: the gallery's panel is the only one)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [67404, 23063], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [3853, 2021], HL: [4474, 2419] };
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [67913, 23282], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [3853, 2021], HL: [4474, 2419] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- which build is measured: only the shipped LaTeX build (version.json's latexMode "shipped"); anything else is a
@@ -198,10 +198,14 @@ else {
     writeFileSync(join(dir, "files.txt"), f + "\n");
     const r = spawnSync(process.execPath, [join(root, "scripts", "ci-paths.mjs")], { encoding: "utf8", cwd: root,
       env: { ...process.env, CI_PATHS_FILES: join(dir, "files.txt"), GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: "" } });
-    return r.status !== 0 || !/^full=true$/m.test(r.stdout);
+    if (r.status !== 0 || !/^full=true$/m.test(r.stdout)) return true;
+    // (and under PR CI light, which turns the full tier off, it still keeps web-artifacts: latex_budget)
+    const light = spawnSync(process.execPath, [join(root, "scripts", "ci-paths.mjs")], { encoding: "utf8", cwd: root,
+      env: { ...process.env, CI_PATHS_FILES: join(dir, "files.txt"), GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: "", CI_PR_LIGHT: "true" } });
+    return light.status !== 0 || !/^latex_budget=true$/m.test(light.stdout);
   });
   rmSync(dir, { recursive: true, force: true });
-  check(inputs.length > 0 && notFull.length === 0, `each of the LaTeX bundles' ${inputs.length} inputs selects the full tier (scripts/ci-paths.mjs)`, { notFull });
+  check(inputs.length > 0 && notFull.length === 0, `each of the LaTeX bundles' ${inputs.length} inputs selects the full tier, and web-artifacts under PR CI light (scripts/ci-paths.mjs)`, { notFull });
 }
 
 const status = fails.length ? 1 : 0;

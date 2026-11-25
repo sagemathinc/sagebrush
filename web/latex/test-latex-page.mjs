@@ -1300,20 +1300,33 @@ try {
       const still = new TextDecoder().decode(new Uint8Array(await bytesOf("/cm/bad.tex.comments.json")));
       check(shownErr && refused && still === "{ this is not json", "comments: an invalid comments file is shown as unreadable, a comment over it refused with the draft kept, the file untouched", { shownErr, refused, still });
     }
-    // (7) LC-T5 / LC-T2: retries exhausted end to end: another writer on every attempt; after 5 conflicts, "busy", the
-    // draft kept in the composer, nothing of it in the file
+    // (7) LC-T5 / LC-T2: another writer on every attempt; the attempt cap OR the operation's deadline ends in
+    // "busy", the draft kept, nothing of it in the file. The core unit separately requires exactly five fast attempts.
     {
       await open(ftex);
       await until(`/Comments \\(\\d+\\)/.test(document.querySelector(".tex-comments")?.textContent ?? "")`, 20000);
       await ev(`(() => { window.__writes = 0; window.__sbTexCommentsWrite = async () => { window.__writes++; const r = await ${W}.read(${J(SIDE)}); await ${W}.write(${J(SIDE)}, r.content, { base: r.entry.rev ?? 0 }); }; return true; })()`);
       await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("A middle"); t.focus(); t.setSelectionRange(i, i + 8); return true; })()`);
       await send("Input.dispatchKeyEvent", { type: "keyDown", key: "m", code: "KeyM", modifiers: 3, windowsVirtualKeyCode: 77 });
+      // Observe completion in the browser, not when the host next polls: a delayed CDP response must not make
+      // premature busy look like deadline exhaustion. Start at the send click, before the operation starts.
+      await ev(`(() => { const timing = window.__conflictTiming = { start: null, end: null };
+        const start = (e) => { if (e.target.closest(".sb-cm-compose .sb-cm-send") && timing.start === null) timing.start = performance.now(); };
+        const observer = new MutationObserver(() => { if (timing.start !== null && timing.end === null && /kept changing/.test(document.querySelector(".sb-cm-compose .sb-cm-err")?.textContent ?? "")) timing.end = performance.now(); });
+        document.addEventListener("click", start, true); observer.observe(document.body, { subtree: true, childList: true, characterData: true });
+        window.__stopConflicts = () => { observer.disconnect(); document.removeEventListener("click", start, true); }; return true; })()`);
       await post("never lands");
       const busy = await until(`/kept changing/.test(document.querySelector(".sb-cm-compose .sb-cm-err")?.textContent ?? "") && document.querySelector(".sb-cm-compose textarea")?.value === "never lands"`, 20000);
-      const writes = await ev(`window.__writes`);
-      await ev(`(delete window.__sbTexCommentsWrite, true)`);
+      const { writes, elapsed } = await ev(`(() => { const { start, end } = window.__conflictTiming; return { writes: window.__writes, elapsed: start === null || end === null ? null : end - start }; })()`);
+      await ev(`(window.__stopConflicts(), delete window.__stopConflicts, delete window.__conflictTiming, delete window.__sbTexCommentsWrite, true)`);
       const dx = await sideDoc();
-      check(busy && writes === 5 && !dx.threads.some((t) => t.messages.some((m) => m.text.value === "never lands")), "comments: on a conflict every attempt, five attempts then busy, the draft kept, nothing written", { busy, writes });
+      // The core also stops before sleeping if the next jittered backoff would reach the deadline.
+      // Use this attempt's maximum permitted backoff, not the largest backoff of any attempt.
+      const backoff = writes > 0 && writes < C.LIMITS.attempts ? Math.round(C.LIMITS.backoffMs[writes - 1] * 1.25) : 0;
+      check(busy && Number.isInteger(writes) && writes >= 0 && writes <= C.LIMITS.attempts && elapsed !== null &&
+        (writes === C.LIMITS.attempts || elapsed + backoff >= C.LIMITS.deadlineMs) &&
+        !dx.threads.some((t) => t.messages.some((m) => m.text.value === "never lands")),
+        "comments: on a conflict every attempt, the attempt cap or deadline then busy, the draft kept, nothing written", { busy, writes, elapsed, backoff });
     }
     // (8) PR 316's bounds on re-finding and drawing, measured and printed: slices at most 8 ms up to 256 KiB and 32 ms
     // up to 2 MiB (the source limit); drawing and the list bounded by what is near the view (300 and 2,000 threads);
@@ -2715,6 +2728,32 @@ try {
   await open(fa2);
   const a2 = await until(`!!document.querySelector(".tex-preview .mathopen") && document.querySelector(".tex-preview").textContent.includes("After words here.")`, 20000);
   check(a2 && await ev(`[...document.querySelectorAll(".tex-preview .katex")].every((k) => !k.textContent.includes("After")) && document.querySelector(".tex-preview h2")?.textContent.includes("Later") && (() => { const d = [...document.querySelectorAll(".tex-preview .dmath")].pop(); return !!d && !!d.querySelector(".katex") && d.textContent.includes("y=1"); })()`), "A2: $$ not closed: a note, the text after the blank line not math, the section and a later display after it rendered", await ev(`(document.querySelector(".tex-preview") ?? document.body).textContent.slice(0, 300)`));
+
+  // TikZ in the browser (tikz.mjs): the picture's box is its span's, in the page's pt; every path lies in it (the box is
+  // TeX's, with half the line and the tips); the text after it starts below it; each arrow's marker exists, its id once
+  const TIKZ = "\\documentclass{article}\n\\usepackage{tikz}\n\\begin{document}\nBefore.\n\n\\begin{tikzpicture}\n\\draw[->, thick] (0,0) -- (3,1);\n\\draw[red] (2,0) arc (0:200:1);\n\\draw[<->] (0,-1) .. controls (1,1) and (2,-2) .. (3,-1);\n\\foreach \\x in {0,0.5,...,3} \\draw[help lines] (\\x,-1.5) -- (\\x,-1.2);\n\\end{tikzpicture}\n\nAfter the picture.\n\\end{document}\n";
+  const ftk = await mk("/t/tikz.tex", enc(TIKZ));
+  await open(ftk);
+  const tk = await until(`!!document.querySelector(".tex-preview .tikz svg path") && document.querySelector(".tex-preview").textContent.includes("After the picture.")`, 20000);
+  const tkr = tk && await ev(`(() => {
+    const span = document.querySelector(".tex-preview .tikz"), r = span.getBoundingClientRect(), px = 96 / 72, out = [];
+    const [x0, y0, x1, y1] = span.dataset.box.split(" ").map(Number);
+    if (Math.abs(r.width - (x1 - x0) * px) > 0.6 || Math.abs(r.height - (y1 - y0) * px) > 0.6) out.push(["size", r.width, r.height, (x1 - x0) * px, (y1 - y0) * px]);
+    const paths = [...span.querySelectorAll("svg > path")];
+    for (const p of paths) {
+      const b = p.getBBox(), m = p.getScreenCTM(), a = new DOMPoint(b.x, b.y).matrixTransform(m), c = new DOMPoint(b.x + b.width, b.y + b.height).matrixTransform(m);
+      if (Math.min(a.x, c.x) < r.left - 0.6 || Math.max(a.x, c.x) > r.right + 0.6 || Math.min(a.y, c.y) < r.top - 0.6 || Math.max(a.y, c.y) > r.bottom + 0.6) out.push(["path out of the box", p.getAttribute("d").slice(0, 60)]);
+    }
+    const tw = document.createTreeWalker(document.querySelector(".tex-preview"), NodeFilter.SHOW_TEXT);
+    let tn; while ((tn = tw.nextNode()) && !tn.data.includes("After the picture.")) {}
+    const rg = document.createRange(); if (tn) rg.selectNodeContents(tn);
+    const top = tn ? rg.getBoundingClientRect().top : null;
+    if (top === null || top < r.bottom - 1) out.push(["text over the picture", top, r.bottom]);
+    const refs = paths.flatMap((p) => ["marker-start", "marker-end"].map((k) => p.getAttribute(k)).filter(Boolean).map((u) => u.slice(5, -1)));
+    for (const id of refs) if (document.querySelectorAll("#" + CSS.escape(id)).length !== 1) out.push(["marker", id]);
+    return { n: paths.length, refs: refs.length, out };
+  })()`);
+  check(tkr && tkr.n >= 10 && tkr.refs === 3 && tkr.out.length === 0, "TikZ in the browser: the picture's box is its span's, every path inside it, the text after it below it, each marker once", tkr);
 
   // ---- source and preview in sync (A3): a double-click in the preview puts the cursor on that word in the source;
   // Follow (on by default) scrolls the preview to the cursor's place; Show flashes it; after an edit above, the
