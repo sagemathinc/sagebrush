@@ -19,7 +19,7 @@ export const TEXT_MAX = 200;
 //      registry.mjs STATES, fence.mjs CAUSES plus "transferred", restore-record.mjs STATES; test-fleet-pages.mjs
 //      compares them with the agent's own files when it has them)
 export const HEALTH = ["ok", "degraded", "failing"] as const;
-export const HEALTH_REASONS = ["audit_full", "audit_timeout", "audit_unavailable", "bad_config", "clone_detected", "host_ended", "identity_broken", "lease_unqualified", "preflight_missing", "qualify_required", "uid_exhausted"] as const;
+export const HEALTH_REASONS = ["audit_full", "audit_timeout", "audit_unavailable", "bad_config", "clone_detected", "host_ended", "identity_broken", "lease_unqualified", "preflight_missing", "qualify_required", "suspend_gate_exhausted", "suspend_gate_stuck", "uid_exhausted"] as const;
 export const RUN_STATES = ["provisioned", "running", "paused", "stopped", "revoked", "deleted"] as const;
 export const FENCES = ["all", "agent", "expiry", "backup", "lease", "restore", "transferred"] as const;
 export const LEASES = ["live", "none"] as const;
