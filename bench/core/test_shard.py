@@ -417,6 +417,19 @@ class Acceptance(unittest.TestCase):
                 "bc-vm",
             )
 
+    def test_the_host_record_is_never_compared(self):
+        # (microcode, boost or cache sizes may differ between two VMs of
+        # one type: the per-point host record is not part of any identity)
+        self.accept(row(host={"cpu": {"microcode": "0x1"}}))
+        self.rows.check_identity(
+            "x86", row(host={"cpu": {"microcode": "0x2"}}), "bc-vm"
+        )
+        self.rows.check_identity(
+            "x86", row(host={"cpu": {"microcode": "0x3"}}), "bc-vm-2"
+        )
+        self.assertNotIn("host", shard.identity_of(row(host={"x": 1})))
+        self.assertNotIn("host", shard.vm_identity_of(row(host={"x": 1})))
+
     def test_a_rejected_point_records_no_vm_identity(self):
         self.rows.check_identity("x86", row(build={"rustc": "1.99.2"}), "bc-vm-0")
         with self.assertRaises(shard.Fatal):
@@ -1834,6 +1847,67 @@ class Plans2(unittest.TestCase):
             with self.assertRaisesRegex(shard.Fatal, "not clean"):
                 shard.make_plan(d / "run2", types, 18, ["poly_fp_mul:s"])
         shutil.rmtree(d)
+
+
+class PlanInputs(unittest.TestCase):
+    """make_plan's expected inputs: the golden file's where it has the point
+    at the row's current n and K, computed otherwise."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="shard-plan-"))
+        self.addCleanup(shutil.rmtree, self.d, True)
+        self.repo = self.d / "repo"
+        self.repo.mkdir()
+        (self.repo / "f.txt").write_text("x\n")
+        for a in (("init", "-q"), ("add", "f.txt"), ("commit", "-q", "-m", "c")):
+            subprocess.run(
+                ["git", "-c", "user.name=t", "-c", "user.email=t@t", *a],
+                cwd=self.repo,
+                check=True,
+                capture_output=True,
+            )
+
+    def make(self, name, points, golden):
+        from unittest import mock
+        import expected_inputs
+
+        computed = []
+        real = expected_inputs.expected
+
+        def spy(sizes, only):
+            computed.append((tuple(sizes), tuple(only)))
+            return real(sizes, only)
+
+        real_read = Path.read_text
+
+        def read_text(path, *a, **k):
+            if path.name == "expected_inputs_golden.json":
+                return json.dumps(golden)
+            return real_read(path, *a, **k)
+
+        with (
+            mock.patch.object(shard, "ROOT", self.repo),
+            mock.patch.object(expected_inputs, "expected", spy),
+            mock.patch.object(Path, "read_text", read_text),
+        ):
+            shard.make_plan(self.d / name, plan()["types"], 18, points)
+        return json.loads((self.d / name / "plan.json").read_text()), computed
+
+    def test_golden_points_are_not_recomputed(self):
+        g = {"points": {"poly_fp_mul:s": {"n": 1000, "variants": 8, "input_hash": "111"}}, "pending": {}}
+        p, computed = self.make("a", ["poly_fp_mul:s"], g)
+        self.assertEqual(p["expected_inputs"]["poly_fp_mul:s"]["input_hash"], "111")
+        self.assertEqual(computed, [])
+
+    def test_a_stale_golden_point_is_recomputed(self):
+        g = {"points": {}, "pending": {"poly_fp_mul:s": {"n": 999, "variants": 8, "input_hash": "111"}}}
+        p, computed = self.make("b", ["poly_fp_mul:s"], g)
+        self.assertEqual(p["expected_inputs"]["poly_fp_mul:s"]["input_hash"], "308890519")
+        self.assertEqual(computed, [(("s",), ("poly_fp_mul",))])
+
+    def test_an_unknown_point_is_refused(self):
+        with self.assertRaisesRegex(shard.Fatal, "no such point"):
+            self.make("c", ["poly_fp_mul:xl"], {"points": {}, "pending": {}})
 
 
 class Locks(unittest.TestCase):

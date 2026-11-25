@@ -23,6 +23,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 MOD = 1000000007
 P = 65537
+P31 = 2147483647  # (the mat_fp31_* rows: a word-size prime)
 
 
 def ihash(xs) -> int:
@@ -78,6 +79,74 @@ def zpoly(size: int, salt: int) -> list[int]:
     return trim([((i * i * salt + 3 * i + 1) % 1000003) - 500001 for i in range(size)])
 
 
+def dense_poly(size: int, kind: str, v: int) -> list[int]:
+    """The dense factoring rows' input: a monic polynomial of degree size,
+    its coefficients from a 64-bit LCG (not a polynomial in i, whose
+    generating function would be structured), residues mod 65537 (kind
+    "fp") or integers in [-1000, 1000] (kind "z"); the same in every
+    driver."""
+    s = 1000003 * (1 if kind == "fp" else 2) + 7919 * v + 12345
+    out = []
+    for _ in range(size):
+        s = (6364136223846793005 * s + 1442695040888963407) % (1 << 64)
+        r = s >> 33
+        out.append(r % 65537 if kind == "fp" else r % 2001 - 1000)
+    return out + [1]
+
+
+SMITH_P = 1000003
+
+
+def smith_hard_rows(size, v):
+    """The hard Smith family: U diag(1, p, ..., p) V with p = 1000003, U and
+    V unimodular (unit lower times unit upper triangular, off-diagonal
+    entries in [-2^16, 2^16] from a 64-bit LCG), so its Smith form is known
+    and its divisors are large.  The same in every driver."""
+    state = [987654321 + 7919 * v]
+
+    def rnd():
+        state[0] = (6364136223846793005 * state[0] + 1442695040888963407) % (1 << 64)
+        return (state[0] >> 33) % 131073 - 65536
+
+    def unimodular():
+        lo = [
+            [1 if i == j else (rnd() if j < i else 0) for j in range(size)]
+            for i in range(size)
+        ]
+        up = [[1 if i == j else 0 for j in range(size)] for i in range(size)]
+        for i in range(size):
+            for j in range(i + 1, size):
+                up[i][j] = rnd()
+        return [
+            [
+                sum(lo[i][k] * up[k][j] for k in range(min(i, j) + 1))
+                for j in range(size)
+            ]
+            for i in range(size)
+        ]
+
+    u, w = unimodular(), unimodular()
+    ud = [
+        [u[i][j] * (1 if j == 0 else SMITH_P) for j in range(size)] for i in range(size)
+    ]
+    return [
+        [sum(ud[i][k] * w[k][j] for k in range(size)) for j in range(size)]
+        for i in range(size)
+    ]
+
+
+# galois_group_small's inputs by degree, coefficients from the constant term
+# up: a sextic with group PSL(2,5) (6T12, order 60), x^8 - 2 (8T8, order 16,
+# a 2-group) and x^12 - 2 (12T28, order 48): small and imprimitive groups,
+# where S_n's cycle-type certificate doesn't apply (groups checked with a
+# black-box reference)
+SMALL_GROUP_POLYS = {
+    6: [3, 2, -2, -2, -1, 0, 1],
+    8: [-2, 0, 0, 0, 0, 0, 0, 0, 1],
+    12: [-2] + [0] * 11 + [1],
+}
+
+
 def fppoly(size: int, salt: int) -> list[int]:
     return trim([(i * i * salt + 3 * i + 1) % P for i in range(size)])
 
@@ -91,6 +160,8 @@ def det_entries(kind: str, size: int, v: int) -> list[int]:
                 out.append(rat(pow(i + 2 + v, j + 3, 101) - 50, 1 + (i * j) % 7))
             elif kind == "z":
                 out.append(pow(i + 2 + v, j + 3, 1000003) - 500001)
+            elif kind == "fp31":
+                out.append(pow(i + 2 + v, j + 3, P31))
             else:
                 out.append(pow(i + 2 + v, j + 3, P))
     return out
@@ -275,6 +346,12 @@ def operands(row: str, n: int, v: int) -> list[int]:
         return ga + gb
     if row == "poly_fp_factor":
         return [P - 1] + [0] * (n - 1) + [1]
+    if row == "poly_fp_factor_dense":
+        return dense_poly(n, "fp", v)
+    if row == "poly_z_factor_dense":
+        return dense_poly(n, "z", v)
+    if row.endswith("_hard"):
+        return [x for r in smith_hard_rows(n, v) for x in r]
     if row.startswith("mat_") and "_rank_" in row:
         return rank_entries(row, n, v)
     if row.startswith("mat_"):
@@ -291,8 +368,12 @@ def operands(row: str, n: int, v: int) -> list[int]:
         return [class_disc(n)]
     if row == "galois_group":
         return [-1, -1] + [0] * (n - 2) + [1]
+    if row == "galois_group_small":
+        return list(SMALL_GROUP_POLYS[n])
     if row in ("modsym_charpoly", "newforms"):
         return [n, 2]
+    if row in ("hecke_matrix", "hecke_matrix_prebuilt"):
+        return [389, 2, n]
     if row == "ec_aplist":
         return [0, 0, 1, -7, 6, n]
     raise ValueError("no input formula for row " + row)
@@ -311,7 +392,7 @@ def expected(sizes: list[str], only: list[str]) -> dict:
     for row in rows:
         if only and row["id"] not in only:
             continue
-        for key in sizes:
+        for key in (k for k in (sizes or row["sizes"]) if k in row["sizes"]):
             n, k = row["sizes"][key]["n"], run.variants(row, key)
             out[f"{row['id']}:{key}"] = {
                 "n": n,
@@ -323,10 +404,13 @@ def expected(sizes: list[str], only: list[str]) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--size", default="all", help="s, m, l or all")
+    ap.add_argument(
+        "--size", default="all", help="comma-separated sizes (s, m, l, c0 .. c4) or all"
+    )
     ap.add_argument("--only", action="append", default=[], metavar="ROW")
     a = ap.parse_args()
-    sizes = ["s", "m", "l"] if a.size == "all" else a.size.split(",")
+    # ("all": every size each row has, calibration sizes included)
+    sizes = [] if a.size == "all" else a.size.split(",")
     print(json.dumps(expected(sizes, a.only), indent=1, sort_keys=True))
     return 0
 

@@ -48,6 +48,9 @@ ROOT = HERE.parents[1]
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 RUNID_RE = re.compile(r"^[0-9a-f]{16}$")
 TYPE_RE = re.compile(r"^[a-z][a-z0-9]{0,11}$")
+# A point's size: s, m, l, or a calibration size c0 .. c4 (the calibrated
+# targets only)
+SIZE_RE = re.compile(r"^(s|m|l|c[0-4])$")
 TOKEN_RE = re.compile(r"^[a-z0-9_]{1,64}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 HEX64L = re.compile(r"\A[0-9a-f]{64}\Z")
@@ -149,7 +152,7 @@ def validate_plan(plan: dict) -> None:
     need(isinstance(points, list) and points, "points")
     for p in points:
         row, _, size = str(p).partition(":")
-        need(TOKEN_RE.match(row) and size in ("s", "m", "l"), f"point {p!r}")
+        need(TOKEN_RE.match(row) and SIZE_RE.match(size), f"point {p!r}")
     exp = plan.get("expected_inputs")
     need(
         isinstance(exp, dict) and all(p in exp for p in points),
@@ -490,11 +493,7 @@ class Rows:
 
     def paths(self, tk: str, key: str) -> tuple[Path, Path]:
         row, _, size = key.partition(":")
-        if (
-            not TYPE_RE.match(tk)
-            or not TOKEN_RE.match(row)
-            or size not in ("s", "m", "l")
-        ):
+        if not TYPE_RE.match(tk) or not TOKEN_RE.match(row) or not SIZE_RE.match(size):
             raise Fatal(f"bad key {tk}/{key}")
         name = f"{row}-{size}"
         return (
@@ -1034,12 +1033,15 @@ def point_sizes(plan: dict) -> dict:
 
 def expected_seconds(key: str) -> float:
     """A point's expected cost, for longest-first assignment: the row's
-    timeout (no earlier medians in v1)."""
+    timeout (no earlier medians in v1), times the thread sweep's extra
+    timed runs on the rows marked "sweep" (up to 6 columns, or 2 at the
+    ends)."""
     rows = json.loads((HERE / "items.json").read_text())["rows"]
     row, _, size = key.partition(":")
     for r in rows:
         if r["id"] == row:
-            return float(r["sizes"][size]["timeout"])
+            extra = {"cores": 6, "ends": 2}.get(r.get("sweep"), 0)
+            return float(r["sizes"][size]["timeout"]) * (1 + extra)
     return 0.0
 
 
@@ -1448,6 +1450,7 @@ class Driver:
                 "out",
                 "--expected-inputs",
                 "sb/expected-inputs.json",
+                "--sweep",
             ],
             timeout,
         )
@@ -1681,8 +1684,11 @@ def make_plan(
 ) -> str:
     """A run directory ready for approval: plan.json (its sha256 printed),
     and payload.tar (a git archive of the clean HEAD, plus .bench-commit and
-    expected-inputs.json). The expected inputs are computed here, in the
-    project, before any VM exists."""
+    expected-inputs.json). The expected inputs come from the reviewed
+    golden file (its confirmed and pending points) where it has the point at
+    the row's current n and K; the rest are computed here, in the project,
+    before any VM exists (a wrong hash fails closed on the VM: an input
+    mismatch)."""
     import secrets
     import tarfile
     import io
@@ -1700,9 +1706,25 @@ def make_plan(
     commit = git("rev-parse", "HEAD").strip()
     run_dir.mkdir(parents=True, exist_ok=False)
     keys = sorted(set(points))
-    sizes = sorted({k.split(":")[1] for k in keys})
-    exp_all = expected_inputs.expected(sizes, sorted({k.split(":")[0] for k in keys}))
-    expected = {k: exp_all[k] for k in keys}
+    import run  # noqa: E402  (the variants rule)
+
+    rows = {r["id"]: r for r in json.loads((HERE / "items.json").read_text())["rows"]}
+    golden = json.loads((HERE / "expected_inputs_golden.json").read_text())
+    known = {**golden["pending"], **golden["points"]}
+    expected = {}
+    for k in keys:
+        row, _, size = k.partition(":")
+        if row not in rows or size not in rows[row]["sizes"]:
+            raise Fatal(f"no such point: {k}")
+        g = known.get(k)
+        now = (rows[row]["sizes"][size]["n"], run.variants(rows[row], size))
+        if g and (g["n"], g["variants"]) == now:
+            expected[k] = {"n": g["n"], "variants": g["variants"], "input_hash": g["input_hash"]}
+    rest = [k for k in keys if k not in expected]
+    if rest:
+        sizes = sorted({k.split(":")[1] for k in rest})
+        exp_all = expected_inputs.expected(sizes, sorted({k.split(":")[0] for k in rest}))
+        expected.update({k: exp_all[k] for k in rest})
     archive = run_dir / "payload.tar"
     subprocess.run(
         ["git", "archive", "--format=tar", "--prefix=", "-o", str(archive), commit],

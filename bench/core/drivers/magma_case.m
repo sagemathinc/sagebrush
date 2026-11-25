@@ -38,13 +38,36 @@ function PowMod(a, e, m)
 end function;
 
 // Variant v: entry (i, j) from the node i + 1 + v (1-based i, j).
+// The hard Smith family (drivers/sagebrush_case.py's smith_hard_rows):
+// U diag(1, p, ..., p) V, p = 1000003, U and V unit lower times unit upper
+// triangular with LCG entries in [-2^16, 2^16], drawn in the same order.
+function SmithHard(k, v)
+    s := 987654321 + 7919*v;
+    Unimodular := function(k, s)
+        lo := IdentityMatrix(Integers(), k); up := IdentityMatrix(Integers(), k);
+        for i in [2..k] do for j in [1..i-1] do
+            s := (6364136223846793005*s + 1442695040888963407) mod 2^64;
+            lo[i,j] := (s div 2^33) mod 131073 - 65536;
+        end for; end for;
+        for i in [1..k-1] do for j in [i+1..k] do
+            s := (6364136223846793005*s + 1442695040888963407) mod 2^64;
+            up[i,j] := (s div 2^33) mod 131073 - 65536;
+        end for; end for;
+        return lo*up, s;
+    end function;
+    U, s := Unimodular(k, s);
+    W, s := Unimodular(k, s);
+    D := DiagonalMatrix(Integers(), [1] cat [1000003 : i in [2..k]]);
+    return U*D*W;
+end function;
+
 function ZMat(k, v)
     return Matrix(Integers(), k, k, [ (PowMod(i+1+v,j+2,1000003)-500001) : i,j in [1..k] ]);
 end function;
 
-function FpMat(k, v)
-    F := GF(65537);
-    return Matrix(F, k, k, [ F!PowMod(i+1+v,j+2,65537) : i,j in [1..k] ]);
+function FpMat(k, v : p := 65537)
+    F := GF(p);
+    return Matrix(F, k, k, [ F!PowMod(i+1+v,j+2,p) : i,j in [1..k] ]);
 end function;
 
 function QMat(k, v)
@@ -84,6 +107,20 @@ end function;
 
 function ZPoly(k, salt, R)
     return R![ ((i*i*salt + 3*i + 1) mod 1000003)-500001 : i in [0..k-1] ];
+end function;
+
+// The dense factoring rows' input (bench/core/drivers/sagebrush_case.py's
+// dense_poly): monic of degree n, coefficients from a 64-bit LCG, residues
+// mod 65537 (k = 1) or integers in [-1000, 1000] (k = 2).
+function DensePoly(n, k, v, R)
+    s := 1000003*k + 7919*v + 12345; c := [];
+    for i in [1..n] do
+        s := (6364136223846793005*s + 1442695040888963407) mod 2^64;
+        r := s div 2^33;
+        Append(~c, k eq 1 select r mod 65537 else (r mod 2001) - 1000);
+    end for;
+    Append(~c, 1);
+    return R!c;
 end function;
 
 function FpPoly(k, salt, R)
@@ -142,24 +179,28 @@ function Build(case_id, n, v)
         a := 2^n - 2^(n div 3) + 123456789 + v*1000003;
         b := 2^(n-1) + 2^(n div 2) + 987654321 + v*998244353;
         ops := [a, b];
-    elif case_id in {"poly_z_mul","poly_z_gcd","poly_z_factor","poly_z_factor_product"} then
+    elif case_id in {"poly_z_mul","poly_z_gcd","poly_z_factor","poly_z_factor_product","poly_z_factor_dense"} then
         R<x> := PolynomialRing(Integers());
         if case_id eq "poly_z_mul" then pa:=ZPoly(n,11+6*v,R); pb:=ZPoly(n,17+6*v,R); end if;
         if case_id eq "poly_z_gcd" then g:=ZPoly(n div 2,5+6*v,R); pa:=g*ZPoly(n,11+6*v,R); pb:=g*ZPoly(n,17+6*v,R); end if;
         if case_id eq "poly_z_factor" then pf:=x^n-1; end if;
         if case_id eq "poly_z_factor_product" then pf:=ZFactorProduct(n,R,v); end if;
+        if case_id eq "poly_z_factor_dense" then pf:=DensePoly(n,2,v,R); end if;
         ops := case_id in {"poly_z_mul","poly_z_gcd"} select Coefficients(pa) cat Coefficients(pb) else Coefficients(pf);
-    elif case_id in {"poly_fp_mul","poly_fp_gcd","poly_fp_factor"} then
+    elif case_id in {"poly_fp_mul","poly_fp_gcd","poly_fp_factor","poly_fp_factor_dense"} then
         R<x> := PolynomialRing(GF(65537));
         if case_id eq "poly_fp_mul" then pa:=FpPoly(n,11+6*v,R); pb:=FpPoly(n,17+6*v,R); end if;
         if case_id eq "poly_fp_gcd" then g:=FpPoly(n div 2,5+6*v,R); pa:=g*FpPoly(n,11+6*v,R); pb:=g*FpPoly(n,17+6*v,R); end if;
         if case_id eq "poly_fp_factor" then pf:=x^n-1; end if;
-        ops := case_id eq "poly_fp_factor" select Coefficients(pf) else Coefficients(pa) cat Coefficients(pb);
-    elif case_id in {"mat_z_det","mat_z_rank","mat_z_hnf","mat_z_smith","mat_z_charpoly"} then
-        A:=ZMat(n,v); ops := Eltseq(A);
-    elif case_id in {"mat_fp_det","mat_fp_rank","mat_fp_solve","mat_fp_charpoly"} then
-        A:=FpMat(n,v); ops := Eltseq(A);
-        if case_id eq "mat_fp_solve" then w:=Vector(BaseRing(A),[i:i in [1..n]]); ops := ops cat Eltseq(w); end if;
+        if case_id eq "poly_fp_factor_dense" then pf:=DensePoly(n,1,v,R); end if;
+        ops := case_id in {"poly_fp_factor","poly_fp_factor_dense"} select Coefficients(pf) else Coefficients(pa) cat Coefficients(pb);
+    elif case_id in {"mat_z_det","mat_z_rank","mat_z_hnf","mat_z_smith","mat_z_charpoly","mat_z_elementary_divisors","mat_z_smith_hard","mat_z_elementary_divisors_hard"} then
+        A := case_id in {"mat_z_smith_hard","mat_z_elementary_divisors_hard"} select SmithHard(n,v) else ZMat(n,v);
+        ops := Eltseq(A);
+    elif case_id in {"mat_fp_det","mat_fp_rank","mat_fp_solve","mat_fp_charpoly","mat_fp31_det","mat_fp31_rank","mat_fp31_solve","mat_fp31_charpoly"} then
+        // (mat_fp31_*: the same rows modulo 2^31 - 1)
+        A:=FpMat(n,v : p := Substring(case_id, 1, 9) eq "mat_fp31_" select 2147483647 else 65537); ops := Eltseq(A);
+        if case_id in {"mat_fp_solve","mat_fp31_solve"} then w:=Vector(BaseRing(A),[i:i in [1..n]]); ops := ops cat Eltseq(w); end if;
     elif case_id in {"mat_q_det","mat_q_rank","mat_q_solve","mat_q_charpoly"} then
         A:=QMat(n,v); ops := Eltseq(A);
         if case_id eq "mat_q_solve" then w:=Vector(Rationals(),[i:i in [1..n]]); ops := ops cat Eltseq(w); end if;
@@ -173,8 +214,17 @@ function Build(case_id, n, v)
         K:=QuadraticField(ClassDisc(n)); O:=MaximalOrder(K); ops := [ClassDisc(n)];
     elif case_id eq "galois_group" then
         R<x>:=PolynomialRing(Rationals()); pf:=x^n-x-1; ops := Coefficients(pf);
+    elif case_id eq "galois_group_small" then
+        // (drivers/sagebrush_case.py's SMALL_GROUP_POLYS)
+        R<x>:=PolynomialRing(Rationals());
+        pf := R!(n eq 6 select [3,2,-2,-2,-1,0,1] else [-2] cat [0 : i in [1..n-1]] cat [1]);
+        ops := Coefficients(pf);
     elif case_id eq "modsym_charpoly" then M:=ModularSymbols(n,2,+1); ops := [n, 2];
     elif case_id eq "newforms" then M:=NewSubspace(CuspidalSubspace(ModularSymbols(n,2,+1))); ops := [n, 2];
+    elif case_id eq "hecke_matrix" then ops := [389, 2, n];
+    elif case_id eq "hecke_matrix_prebuilt" then
+        // (the space outside the timer: informational, no ratio)
+        M:=CuspidalSubspace(ModularSymbols(389,2,+1)); ops := [389, 2, n];
     elif case_id eq "ec_aplist" then
         E:=EllipticCurve([0,0,1,-7,6]); conductor:=Conductor(E);
         ps:=[p:p in PrimesUpTo(n)|conductor mod p ne 0]; ops := [0, 0, 1, -7, 6, n];
@@ -189,18 +239,24 @@ function DoOp(case_id, S)
     elif case_id eq "bigint_gcd" then return GCD(a*1000003,b*1000003);
     elif case_id in {"poly_z_mul","poly_fp_mul"} then return pa*pb;
     elif case_id in {"poly_z_gcd","poly_fp_gcd"} then return GCD(pa,pb);
-    elif case_id in {"poly_z_factor","poly_z_factor_product","poly_fp_factor"} then return Factorization(pf);
-    elif case_id in {"mat_z_det","mat_fp_det","mat_q_det"} then return Determinant(A);
-    elif case_id in {"mat_z_rank","mat_fp_rank","mat_q_rank","mat_z_rank_wide","mat_z_rank_def","mat_z_rank_def_p","mat_q_rank_wide","mat_q_rank_def","mat_q_rank_def_p"} then return Rank(A);
+    elif case_id in {"poly_z_factor","poly_z_factor_product","poly_fp_factor","poly_z_factor_dense","poly_fp_factor_dense"} then return Factorization(pf);
+    elif case_id in {"mat_z_det","mat_fp_det","mat_fp31_det","mat_q_det"} then return Determinant(A);
+    elif case_id in {"mat_z_rank","mat_fp_rank","mat_fp31_rank","mat_q_rank","mat_z_rank_wide","mat_z_rank_def","mat_z_rank_def_p","mat_q_rank_wide","mat_q_rank_def","mat_q_rank_def_p"} then return Rank(A);
     elif case_id eq "mat_z_hnf" then return HermiteForm(A);
-    elif case_id eq "mat_z_smith" then return SmithForm(A);
-    elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_q_charpoly"} then return CharacteristicPolynomial(A);
-    elif case_id in {"mat_fp_solve","mat_q_solve"} then return Solution(Transpose(A),v);
+    elif case_id in {"mat_z_smith","mat_z_smith_hard"} then return SmithForm(A);
+    elif case_id in {"mat_z_elementary_divisors","mat_z_elementary_divisors_hard"} then return ElementaryDivisors(A);
+    elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_fp31_charpoly","mat_q_charpoly"} then return CharacteristicPolynomial(A);
+    elif case_id in {"mat_fp_solve","mat_fp31_solve","mat_q_solve"} then return Solution(Transpose(A),v);
     elif case_id in {"groebner_cyclic","groebner_katsura"} then return GroebnerBasis(I);
     elif case_id eq "class_group" then return ClassGroup(O);
-    elif case_id eq "galois_group" then return GaloisGroup(pf);
+    elif case_id in {"galois_group","galois_group_small"} then return GaloisGroup(pf);
     elif case_id eq "modsym_charpoly" then return CharacteristicPolynomial(HeckeOperator(M,2));
     elif case_id eq "newforms" then return NewformDecomposition(M);
+    elif case_id eq "hecke_matrix" then
+        // (sign +1: the cuspidal part has S_2's dimension; built in the timer,
+        // as ours builds its newspace data in each call)
+        return HeckeOperator(CuspidalSubspace(ModularSymbols(389,2,+1)),n);
+    elif case_id eq "hecke_matrix_prebuilt" then return HeckeOperator(M,n);
     elif case_id eq "ec_aplist" then return [<p,TraceOfFrobenius(ChangeRing(E,GF(p)))>:p in ps];
     end if;
     error "unknown case";
@@ -211,24 +267,38 @@ function Sig(case_id, n, answer)
         return IntegerToString(Ilog2(answer)+1) cat ":" cat IntegerToString(answer mod HMOD);
     elif case_id in {"poly_z_mul","poly_z_gcd","poly_fp_mul","poly_fp_gcd"} then
         return IntegerToString(Degree(answer)) cat ":" cat IntegerToString(SeqHash(Coefficients(answer)));
-    elif case_id in {"poly_z_factor","poly_z_factor_product","poly_fp_factor"} then
+    elif case_id in {"poly_z_factor","poly_z_factor_product","poly_fp_factor","poly_z_factor_dense","poly_fp_factor_dense"} then
         items := [<Degree(z[1]),z[2],SeqHash(Coefficients(z[1]))>:z in answer]; Sort(~items);
         flat := &cat [[z[1],z[2],z[3]]:z in items];
         return IntegerToString(#items) cat ":" cat IntegerToString(SeqHash(flat));
-    elif case_id in {"mat_z_det","mat_z_rank","mat_fp_det","mat_fp_rank","mat_q_det","mat_q_rank","mat_z_rank_wide","mat_z_rank_def","mat_z_rank_def_p","mat_q_rank_wide","mat_q_rank_def","mat_q_rank_def_p"} then
+    elif case_id in {"mat_z_det","mat_z_rank","mat_fp_det","mat_fp31_det","mat_fp_rank","mat_fp31_rank","mat_q_det","mat_q_rank","mat_z_rank_wide","mat_z_rank_def","mat_z_rank_def_p","mat_q_rank_wide","mat_q_rank_def","mat_q_rank_def_p"} then
         return Sprint(answer);
-    elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_q_charpoly"} then
+    elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_fp31_charpoly","mat_q_charpoly"} then
         return IntegerToString(Degree(answer)) cat ":" cat IntegerToString(SeqHash(Coefficients(answer)));
-    elif case_id eq "mat_z_smith" then
-        return IntegerToString(n) cat ":" cat IntegerToString(SeqHash([Abs(answer[i,i]):i in [1..n]]));
-    elif case_id in {"mat_z_hnf","mat_fp_solve","mat_q_solve"} then
+    elif case_id in {"mat_z_smith","mat_z_smith_hard"} then
+        d := [Abs(answer[i,i]):i in [1..n]];
+        // (the hard rows' answer is known: diag(1, p, ..., p))
+        error if case_id eq "mat_z_smith_hard" and d ne [1] cat [1000003 : i in [2..n]], "the hard Smith form is not diag(1, p, ..., p)";
+        return IntegerToString(n) cat ":" cat IntegerToString(SeqHash(d));
+    elif case_id in {"mat_z_elementary_divisors","mat_z_elementary_divisors_hard"} then
+        // (the nonzero divisors only: padded with zeros to n, as the others)
+        d := [Integers()| Abs(z) : z in answer] cat [Integers()| 0 : i in [1..n-#answer]];
+        error if case_id eq "mat_z_elementary_divisors_hard" and d ne [1] cat [1000003 : i in [2..n]], "the hard elementary divisors are not [1, p, ..., p]";
+        return IntegerToString(n) cat ":" cat IntegerToString(SeqHash(d));
+    elif case_id in {"mat_z_hnf","mat_fp_solve","mat_fp31_solve","mat_q_solve"} then
         return IntegerToString(n) cat ":" cat IntegerToString(SeqHash(Eltseq(answer)));
     elif case_id in {"groebner_cyclic","groebner_katsura"} then
         ds:=[TotalDegree(f):f in answer]; Sort(~ds); return IntegerToString(#answer) cat ":" cat IntegerToString(SeqHash(ds));
     elif case_id eq "class_group" then
         inv:=[Integers()!z:z in Invariants(answer)]; Sort(~inv); return IntegerToString(#answer) cat ":" cat Join([IntegerToString(z):z in inv],",");
+    elif case_id eq "galois_group_small" then
+        // (the order and the transitive number, as the Sage-mode driver)
+        return IntegerToString(#answer) cat ":T" cat IntegerToString(TransitiveGroupIdentification(answer));
     elif case_id eq "galois_group" then return IntegerToString(#answer);
     elif case_id eq "modsym_charpoly" then return IntegerToString(Degree(answer)) cat ":" cat IntegerToString(SeqHash(Coefficients(answer)));
+    elif case_id in {"hecke_matrix","hecke_matrix_prebuilt"} then
+        g := ChangeRing(CharacteristicPolynomial(answer), Integers());
+        return IntegerToString(Degree(g)) cat ":" cat IntegerToString(SeqHash(Coefficients(g)));
     elif case_id eq "newforms" then ds:=[Dimension(B):B in answer]; Sort(~ds); return IntegerToString(#ds) cat ":" cat Join([IntegerToString(d):d in ds],",");
     elif case_id eq "ec_aplist" then return IntegerToString(#answer) cat ":" cat IntegerToString(SeqHash([z[1]*1000+z[2]:z in answer]));
     end if;
@@ -258,6 +328,31 @@ procedure RunK(case_id, n, Ss, k, fresh, ~idx, ~el)
     end for;
 end procedure;
 
+// Protocol 5 (common.py): the timer's granularity, and batch j's seeded
+// starting variant.  Magma's Realtime ticks too coarsely for per-op timing
+// (about 10 ms), so this reference is always batched.
+function Granularity()
+    // (the step between two consecutive ticks: wait for one tick, then time
+    // the next; bounded, in case the clock never moves)
+    t0 := Realtime(); i := 0;
+    repeat t1 := Realtime(); i +:= 1; until t1 gt t0 or i ge 10^7;
+    i := 0;
+    repeat t2 := Realtime(); i +:= 1; until t2 gt t1 or i ge 10^7;
+    d := t2 - t1;
+    return d gt 0 select d else 1.0;
+end function;
+
+// (common.py's offset and whole: the same schedule, so no variant runs
+// twice in a row)
+function Offset(seed, j, k)
+    if k eq 1 then return 0; end if;
+    return ((seed*1000003) mod (k - 1) + j*(k gt 2 select 1 else 0)) mod k;
+end function;
+
+function Whole(r, k)
+    return ((r + k - 1) div k) * k;
+end function;
+
 if mode eq "inputs" then
     hs := [];
     for v in [0..K-1] do
@@ -284,22 +379,31 @@ elif mode in {"time", "time-fresh"} then
     end for;
     idx := 0; el := 0.0;
     per := warm/K;
+    // (whole rotations throughout, as common.py's calibrate)
     if per ge 0.2 then
-        k := 1; el := per;
+        k := K; el := warm;
     else
-        k := per gt 0 select Max(1, Floor(0.24/per)+1) else K;
+        k := Whole(per gt 0 select Max(1, Floor(0.24/per)+1) else K, K);
         RunK(case_id, n, Ss, k, fresh, ~idx, ~el);
     end if;
     while el lt 0.2 and k lt 2^24 do
-        if el le 0 then k := 2*k; else k := Max(2*k, Min(16*k, Floor(k*0.24/el)+1)); end if;
+        if el le 0 then k := 2*k; else k := Whole(Max(2*k, Min(16*k, Floor(k*0.24/el)+1)), K); end if;
         RunK(case_id, n, Ss, k, fresh, ~idx, ~el);
     end while;
     count := el/k le 2.0 select 5 else 3;
-    samples := [];
-    for i in [1..count] do
+    env := GetEnv("BENCH_SEED");
+    seed := env eq "" select 0 else StringToInteger(env);
+    samples := []; offsets := [];
+    for j in [0..count-1] do
+        idx := Offset(seed, j, K);
+        Append(~offsets, idx);
         RunK(case_id, n, Ss, k, fresh, ~idx, ~el);
         Append(~samples, el/k);
     end for;
+    g := Granularity();
+    printf "TIMING|{\"granularity\":%o,\"threshold\":%o,\"seed\":%o,\"k\":%o,\"mode\":\"batched\",\"reps\":%o,\"batches\":[%o],\"offsets\":[%o]}\n",
+        Sprintf("%.12o", g), Sprintf("%.12o", Max(0.001, 1000*g)), seed, K, k,
+        Join([Sprintf("%.12o", x) : x in samples], ","), Join([IntegerToString(o) : o in offsets], ",");
     Sort(~samples);
     printf "TIME|%.9o|%o|%.9o|%.9o|%o|%o\n", samples[(count div 2)+1], Combined(sigs), samples[1], samples[count], k, count;
 else

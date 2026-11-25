@@ -33,6 +33,35 @@ fn seq_hash_u64(xs: &[u64]) -> u64 {
         .fold(17, |h, &x| (h * 1_000_003 + x % MOD) % MOD)
 }
 
+/// The smallest positive step Instant shows (seconds): protocol 5's timer
+/// granularity.
+/// Batch or rotation j's starting variant (drivers/common.py's offset: the
+/// same schedule, so no variant runs twice in a row).
+fn rotation_offset(seed: u64, j: usize, k: usize) -> usize {
+    if k == 1 {
+        return 0;
+    }
+    ((seed as u128 * 1_000_003 % (k as u128 - 1) + j as u128 * (k > 2) as u128) % k as u128) as usize
+}
+
+/// reps rounded up to whole rotations (drivers/common.py's whole).
+fn whole_rotations(reps: usize, k: usize) -> usize {
+    reps.div_ceil(k) * k
+}
+
+fn timer_granularity() -> f64 {
+    let (mut best, mut last) = (f64::INFINITY, Instant::now());
+    for _ in 0..2000 {
+        let now = Instant::now();
+        let d = now.duration_since(last).as_secs_f64();
+        if d > 0.0 && d < best {
+            best = d;
+        }
+        last = now;
+    }
+    if best.is_finite() { best } else { 1e-9 }
+}
+
 /// One invocation in the drivers' protocol (bench/core/drivers/common.py):
 /// `build(v)` makes variant v's operands and operation; `inputs` hashes the
 /// variants' operand hashes, `once` times variant 0 once, `time` runs every
@@ -62,35 +91,72 @@ fn run<T, F: FnMut() -> T>(mode: &str, variants: usize, mut build: impl FnMut(us
         warm += started.elapsed().as_secs_f64();
         sigs.push(sig(&answer));
     }
-    let mut idx = 0usize;
-    let mut reps = |k: usize| {
-        let mut total = 0.0;
-        for _ in 0..k {
-            let op = &mut ops[idx % variants];
-            idx += 1;
-            let started = Instant::now();
-            std::hint::black_box(op());
-            total += started.elapsed().as_secs_f64();
-        }
-        total
-    };
+    // (protocol 5, drivers/common.py: per-op mode at or above
+    // max(1 ms, 1000 g), else batched from seeded offsets; a TIMING record
+    // before the TIME line)
+    let seed: u64 = std::env::var("BENCH_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let forced = std::env::var("BENCH_TIMING").unwrap_or_else(|_| "auto".to_string());
+    let g = timer_granularity();
+    let threshold = 1e-3f64.max(1000.0 * g);
+    let offset = |j: usize| rotation_offset(seed, j, variants);
     let per = warm / variants as f64;
-    let (mut k, mut t) = if per >= TARGET {
-        (1usize, per)
+    let head = format!("\"granularity\":{:e},\"threshold\":{:e},\"seed\":{},\"k\":{}", g, threshold, seed, variants);
+    let (med, lo, hi, k, count) = if forced == "per-op" || (forced == "auto" && per >= threshold) {
+        let rotations = if per <= 2.0 { 5 } else { 3 };
+        let mut samples: Vec<Vec<f64>> = vec![Vec::with_capacity(rotations); variants];
+        for r in 0..rotations {
+            let start = offset(r);
+            for i in 0..variants {
+                let v = (start + i) % variants;
+                let started = Instant::now();
+                std::hint::black_box(ops[v]());
+                samples[v].push(started.elapsed().as_secs_f64());
+            }
+        }
+        let mut means: Vec<f64> = (0..rotations).map(|r| samples.iter().map(|s| s[r]).sum::<f64>() / variants as f64).collect();
+        means.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        let rows: Vec<String> = samples.iter().map(|s| format!("[{}]", s.iter().map(|x| format!("{:e}", x)).collect::<Vec<_>>().join(","))).collect();
+        println!("TIMING|{{{},\"mode\":\"per-op\",\"samples\":[{}]}}", head, rows.join(","));
+        (means[rotations / 2], means[0], means[rotations - 1], variants, rotations)
     } else {
-        let k = if per > 0.0 { ((TARGET * 1.2 / per) as usize + 1).max(1) } else { variants };
-        (k, reps(k))
+        let mut reps = |start: usize, k: usize| {
+            let mut total = 0.0;
+            for i in 0..k {
+                let op = &mut ops[(start + i) % variants];
+                let started = Instant::now();
+                std::hint::black_box(op());
+                total += started.elapsed().as_secs_f64();
+            }
+            total
+        };
+        // (whole rotations throughout, as common.py's calibrate)
+        let (mut k, mut t) = if per >= TARGET {
+            (variants, warm)
+        } else {
+            let k = whole_rotations(if per > 0.0 { ((TARGET * 1.2 / per) as usize + 1).max(1) } else { variants }, variants);
+            (k, reps(0, k))
+        };
+        while t < TARGET && k < 1 << 24 {
+            k = whole_rotations(if t <= 0.0 { 2 * k } else { (2 * k).max((16 * k).min((k as f64 * TARGET * 1.2 / t) as usize + 1)) }, variants);
+            t = reps(0, k);
+        }
+        let count = if t / k as f64 <= 2.0 { 5 } else { 3 };
+        let offsets: Vec<usize> = (0..count).map(offset).collect();
+        let batches: Vec<f64> = offsets.iter().map(|&o| reps(o, k) / k as f64).collect();
+        let mut sorted = batches.clone();
+        sorted.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        println!(
+            "TIMING|{{{},\"mode\":\"batched\",\"reps\":{},\"batches\":[{}],\"offsets\":[{}]}}",
+            head,
+            k,
+            batches.iter().map(|x| format!("{:e}", x)).collect::<Vec<_>>().join(","),
+            offsets.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")
+        );
+        (sorted[count / 2], sorted[0], sorted[count - 1], k, count)
     };
-    while t < TARGET && k < 1 << 24 {
-        k = if t <= 0.0 { 2 * k } else { (2 * k).max((16 * k).min((k as f64 * TARGET * 1.2 / t) as usize + 1)) };
-        t = reps(k);
-    }
-    let count = if t / k as f64 <= 2.0 { 5 } else { 3 };
-    let mut samples: Vec<f64> = (0..count).map(|_| reps(k) / k as f64).collect();
-    samples.sort_by(|x, y| x.partial_cmp(y).unwrap());
     let joined = sigs.join(";");
     let combined = format!("{}:{}", variants, seq_hash_u64(&joined.bytes().map(u64::from).collect::<Vec<_>>()));
-    println!("TIME|{:.9e}|{}|{:.9e}|{:.9e}|{}|{}", samples[count / 2], combined, samples[0], samples[count - 1], k, count);
+    println!("TIME|{:.9e}|{}|{:.9e}|{:.9e}|{}|{}", med, combined, lo, hi, k, count);
 }
 
 fn zpoly(n: usize, salt: i64) -> Vec<BigInt> {
@@ -101,6 +167,22 @@ fn zpoly(n: usize, salt: i64) -> Vec<BigInt> {
             )
         })
         .collect()
+}
+
+/// The dense factoring rows' input (drivers/sagebrush_case.py's dense_poly):
+/// monic of degree n, coefficients from a 64-bit LCG, residues mod 65537
+/// (fp) or integers in [-1000, 1000].
+fn dense_poly(n: usize, fp: bool, v: usize) -> Vec<i64> {
+    let mut s: u64 = 1_000_003 * if fp { 1 } else { 2 } + 7919 * v as u64 + 12345;
+    let mut out: Vec<i64> = (0..n)
+        .map(|_| {
+            s = s.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            let r = s >> 33;
+            if fp { (r % 65537) as i64 } else { (r % 2001) as i64 - 1000 }
+        })
+        .collect();
+    out.push(1);
+    out
 }
 
 fn mul_plain(a: &[BigInt], b: &[BigInt]) -> Vec<BigInt> {
@@ -242,8 +324,10 @@ fn main() {
             let (a, b) = (FPoly::new(&ga), FPoly::new(&gb));
             ([ga, gb].concat(), move || a.gcd(&b).coeffs())
         }, poly_sig),
-        "poly_z_factor" | "poly_z_factor_product" => run(&mode, variants, |v| {
-            let f = if case_id == "poly_z_factor" {
+        "poly_z_factor" | "poly_z_factor_product" | "poly_z_factor_dense" => run(&mode, variants, |v| {
+            let f = if case_id == "poly_z_factor_dense" {
+                dense_poly(n, false, v).into_iter().map(BigInt::from).collect()
+            } else if case_id == "poly_z_factor" {
                 let mut coefficients = vec![BigInt::from(0); n + 1];
                 coefficients[0] = BigInt::from(-1);
                 coefficients[n] = BigInt::from(1);

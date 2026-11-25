@@ -76,6 +76,17 @@ class Golden(unittest.TestCase):
         )
         got = expected_inputs.expected(["s", "m", "l"], [])
         for key, want in {**golden, **pending}.items():
+            if key.rpartition(":")[2] not in ("s", "m", "l"):
+                # (a calibration size: its hash takes minutes to recompute
+                # here, so only its shape is checked; every VM run checks
+                # each backend's input hash against it, as for every point)
+                row = next(r for r in ROWS if r["id"] == key.partition(":")[0])
+                size = key.rpartition(":")[2]
+                self.assertEqual(
+                    (want["n"], want["variants"]),
+                    (row["sizes"][size]["n"], run.variants(row, size)),
+                )
+                continue
             with self.subTest(point=key):
                 self.assertEqual(
                     (got[key]["n"], got[key]["variants"]), (want["n"], want["variants"])

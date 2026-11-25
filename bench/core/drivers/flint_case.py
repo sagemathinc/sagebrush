@@ -16,6 +16,7 @@ case_id, n = sys.argv[1], int(sys.argv[2])
 MOD = common.MOD
 OPERANDS = []
 P = 65537
+P31 = 2147483647  # (the mat_fp31_* rows: a word-size prime)
 # (1, or N for the flint-n backend: run.py sets BENCH_THREADS)
 flint.ctx.threads = int(os.environ.get("BENCH_THREADS", "1"))
 
@@ -90,6 +91,62 @@ def zpoly(size, salt):
     return [((i * i * salt + 3 * i + 1) % 1000003) - 500001 for i in range(size)]
 
 
+def dense_poly(size, kind, v):
+    """The dense factoring rows' input: a monic polynomial of degree size,
+    its coefficients from a 64-bit LCG (not a polynomial in i, whose
+    generating function would be structured), residues mod 65537 (kind
+    "fp") or integers in [-1000, 1000] (kind "z"); the same in every
+    driver."""
+    s = 1000003 * (1 if kind == "fp" else 2) + 7919 * v + 12345
+    out = []
+    for _ in range(size):
+        s = (6364136223846793005 * s + 1442695040888963407) % (1 << 64)
+        r = s >> 33
+        out.append(r % 65537 if kind == "fp" else r % 2001 - 1000)
+    return out + [1]
+
+
+SMITH_P = 1000003
+
+
+def smith_hard_rows(size, v):
+    """The hard Smith family: U diag(1, p, ..., p) V with p = 1000003, U and
+    V unimodular (unit lower times unit upper triangular, off-diagonal
+    entries in [-2^16, 2^16] from a 64-bit LCG), so its Smith form is known
+    and its divisors are large.  The same in every driver."""
+    state = [987654321 + 7919 * v]
+
+    def rnd():
+        state[0] = (6364136223846793005 * state[0] + 1442695040888963407) % (1 << 64)
+        return (state[0] >> 33) % 131073 - 65536
+
+    def unimodular():
+        lo = [
+            [1 if i == j else (rnd() if j < i else 0) for j in range(size)]
+            for i in range(size)
+        ]
+        up = [[1 if i == j else 0 for j in range(size)] for i in range(size)]
+        for i in range(size):
+            for j in range(i + 1, size):
+                up[i][j] = rnd()
+        return [
+            [
+                sum(lo[i][k] * up[k][j] for k in range(min(i, j) + 1))
+                for j in range(size)
+            ]
+            for i in range(size)
+        ]
+
+    u, w = unimodular(), unimodular()
+    ud = [
+        [u[i][j] * (1 if j == 0 else SMITH_P) for j in range(size)] for i in range(size)
+    ]
+    return [
+        [sum(ud[i][k] * w[k][j] for k in range(size)) for j in range(size)]
+        for i in range(size)
+    ]
+
+
 def fppoly(size, salt):
     return [((i * i * salt + 3 * i + 1) % P) for i in range(size)]
 
@@ -103,7 +160,7 @@ def det_rows(kind, size, v=0):
             ]
             for i in range(size)
         ]
-    modulus = 1000003 if kind == "z" else P
+    modulus = 1000003 if kind == "z" else P31 if kind == "fp31" else P
     offset = 500001 if kind == "z" else 0
     return [
         [pow(i + 2 + v, j + 3, modulus) - offset for j in range(size)]
@@ -152,6 +209,8 @@ def prepare(v):
             return lambda: a.gcd(b)
         if case_id == "poly_z_factor":
             f = flint.fmpz_poly([-1] + [0] * (n - 1) + [1])
+        elif case_id == "poly_z_factor_dense":
+            f = flint.fmpz_poly(dense_poly(n, "z", v))
         else:
             f = zfactor_product(n, v)
         operands(list(f))
@@ -172,7 +231,10 @@ def prepare(v):
             )
             operands([int(c) for c in a], [int(c) for c in b])
             return lambda: a.gcd(b)
-        f = flint.nmod_poly([-1] + [0] * (n - 1) + [1], P)
+        if case_id == "poly_fp_factor_dense":
+            f = flint.nmod_poly(dense_poly(n, "fp", v), P)
+        else:
+            f = flint.nmod_poly([-1] + [0] * (n - 1) + [1], P)
         operands([int(c) for c in f])
         return lambda: f.factor()
     if case_id.startswith("mat_") and "_rank_" in case_id:
@@ -183,20 +245,23 @@ def prepare(v):
         kind = (
             "z"
             if case_id.startswith("mat_z_")
+            else "fp31"
+            if case_id.startswith("mat_fp31_")
             else "fp"
             if case_id.startswith("mat_fp_")
             else "q"
         )
-        rows = det_rows(kind, n, v)
+        hard = case_id.endswith("_hard")
+        rows = smith_hard_rows(n, v) if hard else det_rows(kind, n, v)
         A = (
             flint.fmpz_mat(rows)
             if kind == "z"
-            else flint.nmod_mat(rows, P)
-            if kind == "fp"
+            else flint.nmod_mat(rows, P31 if kind == "fp31" else P)
+            if kind in ("fp", "fp31")
             else flint.fmpq_mat(rows)
         )
-        op = case_id.rsplit("_", 1)[1]
-        entries = [int(x) if kind == "fp" else x for x in flatten(A)]
+        op = case_id.removesuffix("_hard").rsplit("_", 1)[1]
+        entries = [int(x) if kind in ("fp", "fp31") else x for x in flatten(A)]
         operands(entries)
         if op == "det":
             return lambda: A.det()
@@ -206,10 +271,14 @@ def prepare(v):
             return lambda: A.charpoly()
         if op == "hnf":
             return lambda: A.hnf()
-        if op == "smith":
+        if op in ("smith", "divisors"):
             return lambda: A.snf()
         b_rows = [[i + 1] for i in range(n)]
-        b = flint.nmod_mat(b_rows, P) if kind == "fp" else flint.fmpq_mat(b_rows)
+        b = (
+            flint.nmod_mat(b_rows, P31 if kind == "fp31" else P)
+            if kind in ("fp", "fp31")
+            else flint.fmpq_mat(b_rows)
+        )
         operands(entries, [i + 1 for i in range(n)])
         return lambda: A.solve(b)
     raise ValueError("FLINT operation unavailable: " + case_id)
@@ -231,13 +300,17 @@ def signature(answer):
         cs = list(answer)
         return "%d:%d" % (len(cs) - 1, seq_hash(cs))
     if case_id.startswith("mat_"):
-        op = "rank" if "_rank_" in case_id else case_id.rsplit("_", 1)[1]
+        op = (
+            "rank"
+            if "_rank_" in case_id
+            else case_id.removesuffix("_hard").rsplit("_", 1)[1]
+        )
         if op in ("det", "rank"):
             return str(answer)
         if op == "charpoly":
             cs = list(answer)
             return "%d:%d" % (len(cs) - 1, seq_hash(cs))
-        if op == "smith":
+        if op in ("smith", "divisors"):
             return "%d:%d" % (n, seq_hash(abs(int(answer[i, i])) for i in range(n)))
         return "%d:%d" % (n, seq_hash(flatten(answer)))
     raise ValueError(case_id)

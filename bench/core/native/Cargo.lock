@@ -53,7 +53,7 @@ checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 [[package]]
 name = "dashu-base"
 version = "0.6.1"
-source = "git+https://github.com/sagemathinc/dashu?rev=2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f#2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f"
+source = "git+https://github.com/sagemathinc/dashu?rev=36ff7ad5b9225198bf6a322a70f0947e9376cece#36ff7ad5b9225198bf6a322a70f0947e9376cece"
 dependencies = [
  "num-modular",
 ]
@@ -61,7 +61,7 @@ dependencies = [
 [[package]]
 name = "dashu-int"
 version = "0.6.2"
-source = "git+https://github.com/sagemathinc/dashu?rev=2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f#2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f"
+source = "git+https://github.com/sagemathinc/dashu?rev=36ff7ad5b9225198bf6a322a70f0947e9376cece#36ff7ad5b9225198bf6a322a70f0947e9376cece"
 dependencies = [
  "cfg-if",
  "dashu-base",
@@ -166,6 +166,7 @@ dependencies = [
  "sagebrush-bigint",
  "sagebrush-interrupt",
  "sagebrush-par",
+ "sagebrush-wire",
 ]
 
 [[package]]
@@ -232,6 +233,10 @@ dependencies = [
  "sagebrush-bigint",
  "sagebrush-interrupt",
 ]
+
+[[package]]
+name = "sagebrush-wire"
+version = "0.1.0"
 
 [[package]]
 name = "static_assertions"

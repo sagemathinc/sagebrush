@@ -15,6 +15,7 @@ The finish line for an item is our native engine within $2\times$ of the best re
 | magma | `drivers/magma_case.m`, run by `/usr/local/bin/magma` | Magma V2.18-5, a black-box reference |
 | flint | `flint-rust/` (Rust bindings) where it covers the operation, else `drivers/flint_case.py` (python-flint 0.9.0) | FLINT 3.6, a black-box reference |
 | native-n, flint-n | native and flint on $N$ threads (`--threads`, default the CPU count) | the parallel speed of each. Magma V2.18 runs on one thread |
+| user-n | user on $N$ threads, only on the rows marked `"parallel"` (F4, modular symbols, newforms) | the parallel speed users get |
 
 - The gap between user and native shows a *routing* cost: the Sage layer and the wire. The gap between native and the best reference shows an *algorithm* cost.
 - Rows without a native driver show no native ratio.
@@ -51,6 +52,15 @@ The modes:
 - `time-fresh`: the same, but each repetition gets a freshly built input (of its variant) outside the timed region. It is used for rows whose objects cache answers: Gröbner bases, class groups, Galois groups and modular symbols.
 
 Input construction, signature conversion and process startup are never timed.
+
+Protocol 5 adds a `TIMING|json` line before each `TIME` line: the samples a sweep pairs across candidates.
+- The driver measures its timer's granularity $g$. The per-op threshold is $\max(1\,\text{ms},\ 1000\,g)$.
+- **per-op** mode, when one operation takes at least the threshold: $R$ full rotations, each operation timed alone, in rotation order from a seeded offset. `samples[v]` holds variant $v$'s $R$ times, never back to back.
+- **batched** mode, below it: the calibrated rotation batches, each a whole number of rotations. Batch $j$ starts at the seeded offset, the same for every candidate's batch $j$.
+- The offset of rotation or batch $j$ is $o_j = \big((\mathrm{seed} \cdot 1000003) \bmod (K-1) + j\,s\big) \bmod K$ ($o_j = 0$ for $K = 1$), with $s = 1$ for $K > 2$ and $s = 0$ for $K = 2$. Rotation 0 never starts on $K-1$, which ends the warm pass and every whole-rotation calibration run, and no rotation starts on the variant the previous one ended on. So no variant runs twice in a row in any mode (every driver uses the same schedule, and the tests check the order and that the drivers agree).
+- Magma's clock ticks at about 10 ms, so the Magma reference is always batched.
+- `BENCH_SEED` sets the seed. `BENCH_TIMING=per-op|batched` forces a mode (for tests).
+- `run.py` keeps the record, bounded and checked, in the point's `time.timing`.
 
 ## A point, step by step
 
@@ -101,6 +111,12 @@ bash bench/core/cgroup-setup.sh python3 bench/core/run.py --build --host-label n
 ```
 
 Without it, `run.py` refuses to run and says why. `--mem-cap none` runs uncapped, and the points record that.
+
+## Thread sweep
+
+With `--sweep` (the shard driver always passes it), the rows marked `"sweep"` also time their -n backends on a series of pinned CPU sets: the first $c$ physical cores for $c = 1, 2, 4, 8, \dots$ (and all of them), one logical CPU per core, then every logical CPU (the `-smt` column) when the machine has SMT. A row marked `"sweep": "ends"` (mat_z_charpoly, the flat baseline) takes only the first and the last column. The cores come from `thread_siblings_list`, limited to the CPUs the runner may use.
+
+Each run is pinned twice: by `cpuset.cpus` in its capped cgroup (`cgroup-setup.sh` enables the cpuset controller too) and by its affinity, so `sched_getaffinity`, and so `available_parallelism`, see $c$. Its thread settings are $c$ as well: `BENCH_THREADS` (the Sage-mode driver passes it as `threads=` to modular symbols and newforms), `SAGEBRUSH_THREADS` (F4) and `RAYON_NUM_THREADS`. A column whose combined signature differs from the timed one is a `mismatch`. Each point records the columns under `sweep`, and the summary lists them with each column's speedup over one core.
 
 ## Reruns
 
