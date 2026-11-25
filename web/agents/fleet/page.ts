@@ -285,7 +285,7 @@ async function hostView(l: Loaded, id: string, ticket: { n: number; key: string 
       row("run", rep.run),
       ...rep.fences.map((f) => row("fenced", V.fenceWords(f))),
       row("lease", rep.lease === "live" && rep.leaseEnds !== null ? `${rep.lease}, ${rep.leaseLapsed ? "ended" : `ends ${T.approx} ${new Date(rep.leaseEnds).toLocaleTimeString()}`}` : rep.lease),
-      ...(V.restoreWords(rep.restore, rep.run) ? [row("restore", V.restoreWords(rep.restore, rep.run)!)] : []),
+      ...(V.restoreWords(rep.restore, rep.run, rep.fences) ? [row("restore", V.restoreWords(rep.restore, rep.run, rep.fences)!)] : []),
     ] : [];
     const li = el("li", { className: "agent" },
       el("h3", { textContent: V.bounded(a.name ?? a.agent) }),

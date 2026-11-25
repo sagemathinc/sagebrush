@@ -158,6 +158,12 @@ try {
     await open(P, site + `?fixtures=1#host/${HOST}`, `!!document.querySelector("li.agent")`);
     const r = await P.ev(`document.querySelector("li.agent .report").innerText`);
     ok(/restore\s+restored, waiting to resume/.test(r) && /fenced\s+restored, waiting for resume/.test(r) && (await P.ev(`document.querySelectorAll("#fleet button").length`)) === 0, "P-9: restored and not running: \"restored, waiting to resume\", and no action is offered (Resume is a signed flow, not here)", r);
+    // (after an unknown outcome of resume-restored: a plain resume recorded running, the restore fence still holds it)
+    fixtures = { ...base(), state: { [HOST]: report({}, { restore: "validated", run: "running", fences: ["restore"] }) } };
+    P = await fresh();
+    await open(P, site + `?fixtures=1#host/${HOST}`, `!!document.querySelector("li.agent")`);
+    const r2 = await P.ev(`document.querySelector("li.agent .report").innerText`);
+    ok(/restore\s+restored, waiting to resume/.test(r2) && !/restored and resumed/.test(r2), "P-9: running but the restore fence still up: \"restored, waiting to resume\", never \"restored and resumed\"", r2);
     ok(P.errors.length === 0, "no page errors (P-9)", P.errors);
   }
   {

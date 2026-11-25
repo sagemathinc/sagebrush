@@ -160,13 +160,20 @@ export function agentShown(r: HostReport, agent: string): AgentReport | null {
   return a;
 }
 
-/** The restore stage in the page's words (r2.1 §2.1), read with `run`; null shows nothing. */
-export function restoreWords(restore: Known<Restore> | null, run: Known<Run>): string | null {
+/**
+ * The restore stage in the page's words (r2.1 §2.1), read with `run` and the fences; null shows nothing. "Restored and
+ * resumed" needs run "running" AND no `restore` fence: after an unknown outcome of resume-restored, a plain resume
+ * records running while the `restore` fence still holds the agent stopped.
+ */
+export function restoreWords(restore: Known<Restore> | null, run: Known<Run>, fences: readonly Known<Fence>[]): string | null {
   switch (restore) {
     case null: return null;
     case "staging": case "staged": case "filling": return TEXT.restore.restoring;
     case "published": return TEXT.restore.checking;
-    case "validated": return run === "running" ? TEXT.restore.resumed : run === "unknown" ? TEXT.unknown : TEXT.restore.waiting;
+    case "validated":
+      if (fences.includes("restore")) return TEXT.restore.waiting;
+      if (run === "unknown" || fences.includes("unknown")) return TEXT.unknown;
+      return run === "running" ? TEXT.restore.resumed : TEXT.restore.waiting;
     case "not_fitting": return TEXT.restore.notFitting;
     case "failed": return TEXT.restore.failed;
     default: return TEXT.unknown;

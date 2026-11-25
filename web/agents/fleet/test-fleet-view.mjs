@@ -62,9 +62,12 @@ for (const [raw, what] of [[null, "no answer"], [undefined, "undefined"], ["ok",
     [null, "running", null], ["staging", "stopped", W.restoring], ["staged", "stopped", W.restoring], ["filling", "stopped", W.restoring],
     ["published", "stopped", W.checking], ["validated", "stopped", W.waiting], ["validated", "provisioned", W.waiting], ["validated", "paused", W.waiting],
     ["validated", "running", W.resumed], ["validated", "unknown", "unknown"], ["not_fitting", "stopped", W.notFitting], ["failed", "running", W.failed], ["unknown", "running", "unknown"],
+    // (after an unknown outcome of resume-restored: run running, but the restore fence still holds the agent stopped)
+    ["validated", "running", W.waiting, ["restore"]], ["validated", "running", W.waiting, ["agent", "restore"]], ["validated", "running", "unknown", ["unknown"]],
+    ["validated", "unknown", W.waiting, ["restore"]], ["validated", "running", W.resumed, ["agent"]],
   ];
-  const bad = rows.filter(([r, run, want]) => V.restoreWords(r, run) !== want);
-  ok(bad.length === 0, `restore words: all ${rows.length} rows of the table (validated is "waiting to resume" unless run says running; unknown run, unknown)`, bad);
+  const bad = rows.filter(([r, run, want, fences = []]) => V.restoreWords(r, run, fences) !== want);
+  ok(bad.length === 0, `restore words: all ${rows.length} rows (validated: "waiting to resume" while the restore fence is up, whatever run says; "restored and resumed" only for running with no restore fence; an unknown fence or run, unknown)`, bad);
   ok(V.FENCES.every((f) => typeof V.fenceWords(f) === "string" && V.fenceWords(f).length > 0) && V.fenceWords("unknown") === "unknown", "every fence has its words; an unknown fence says unknown");
 }
 // ---- "applied" only from verified facts
