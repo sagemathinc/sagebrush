@@ -36,8 +36,10 @@ const T = {
   revoked: "revoked",
   grantBad: (code: string) => `its grant didn't verify (${code})`,
   newerBad: (code: string) => `a newer grant didn't verify (${code})`,
+  newerTier: "a newer grant, signed by a browser device, can't be checked under your fleet's current rule that widening needs the Sagebrush app",
   unresolved: "its newest grants couldn't be read: not checked",
   notYet: "not yet in force",
+  anchored: (gen: number) => `checked from grant ${gen}; earlier grants no longer count`,
   gen: (gen: number) => `grant ${gen}`,
   unknownHost: "There is no such host in your fleet.",
   agentsNone: "Its grant lists no agents.",
@@ -91,6 +93,8 @@ type HostView = Readonly<{
   ackGen: number | null;
   /** The current grant narrows the verified one before it. */
   narrowing: boolean;
+  /** The generation the walk was anchored at, when grants before it no longer count; else null. */
+  anchoredAt: number | null;
 }>;
 type Loaded =
   | { kind: "no-fleet" }
@@ -109,6 +113,11 @@ async function verifiedChain(ctx: FleetCtx): Promise<Chain> {
   }
 }
 
+/** A grant's gen as its text says (unverified: only to page the lineage), or 0. */
+function genOf(text: string): number {
+  try { const g = JSON.parse(text)?.body?.gen; return Number.isSafeInteger(g) && g > 0 ? g : 0; } catch { return 0; }
+}
+
 /** A grant's own not_before_ms, read only as the clock its lifetime is checked at (the signature covers it); else now. */
 function startOf(text: string): number {
   try { const nb = JSON.parse(text)?.body?.not_before_ms; if (Number.isSafeInteger(nb) && nb > 0) return nb; } catch {}
@@ -116,39 +125,49 @@ function startOf(text: string): number {
 }
 
 async function verifyHost(ctx: FleetCtx, chain: Chain, h: HostRow): Promise<HostView> {
-  const base = { host: h.host, cert: null, certRefused: null, name: "", fingerprint: "", revoked: false, grant: null, grantRefused: null, grantUnresolved: false, ackGen: null, narrowing: false };
+  const base = { host: h.host, cert: null, certRefused: null, name: "", fingerprint: "", revoked: false, grant: null, grantRefused: null, grantUnresolved: false, ackGen: null, narrowing: false, anchoredAt: null };
   let cert: HostCert;
   try { cert = await verifyHostCert(ctx, chain, h.cert); } catch (e) { return { ...base, certRefused: codeOf(e) }; }
   const body = cert.body as { host: string; name: string };
   if (body.host !== h.host) return { ...base, certRefused: "not_granted" };
   const v: { -readonly [K in keyof HostView]: HostView[K] } = { ...base, cert, name: body.name, fingerprint: await hostFingerprintShown(cert) };
   if (h.revocation) { try { await verifyHostRevocation(ctx, chain, h.host, h.revocation); v.revoked = true; } catch {} }
-  // (the host's accepted grants, oldest first, verified IN ORDER as the host accepted them: the first against nothing,
-  //  each next one against the previous VERIFIED one, so a narrowing signed by a browser device verifies against what
-  //  it narrows. The walk stops at the first grant that doesn't verify; nothing after it is shown as verified.)
+  // (the host's accepted grants, read whole (oldest first), then verified as the host accepted them, from an ANCHOR: the
+  //  newest grant that verifies on its own (against nothing: typically the regrant a device's removal makes, or any
+  //  grant a native device signed). From there each next grant is verified against the previous VERIFIED one, so a
+  //  narrowing a browser device signed verifies against what it narrows. Grants before the anchor no longer count (a
+  //  removed device's grants stop counting, schemas §2.3) and aren't checked. The walk stops at the first refusal.)
   if (h.grant_gen !== null) {
-    let cur: { gen: number; bytes: Uint8Array; body: unknown } | null = null;
-    let prevGen = 0, widened = true, after = 0;
-    walk: for (let page = 0; page < GRANT_PAGES_MAX; page++) {
+    type Verified = { gen: number; bytes: Uint8Array; body: unknown };
+    const check = async (text: string, cur: Verified | null) => {
+      const g = (await verifyGrant(ctx, chain, cert, text, cur, startOf(text))) as { body: { gen: number }; widens: boolean };
+      return { v: { gen: g.body.gen, bytes: new TextEncoder().encode(text), body: g.body } as Verified, widens: g.widens };
+    };
+    // (read BACKWARD from the newest, page by page, until a grant verifies on its own: the anchor)
+    const texts: string[] = [];
+    let cur: Verified | null = null, prevGen = 0, widened = true, anchor = -1, firstRefusal: string | null = null;
+    let before: number | null = null;
+    for (let page = 0; anchor < 0; page++) {
+      if (page === GRANT_PAGES_MAX) { v.grantUnresolved = true; break; }
       let p: { grants: readonly string[]; head: number };
-      try { p = await src.grantsPage(h.host, after); } catch { v.grantUnresolved = true; break; }
+      try { p = await src.grantsPage(h.host, before); } catch { v.grantUnresolved = true; break; }
       if (!p.grants.length) break;
-      for (const text of p.grants) {
-        try {
-          // (each checked at its own start: the host accepted it then, and its signer, form and place in the order
-          //  are what the walk proves; whether the newest is still in force is shown from its lifetime, below)
-          const g = (await verifyGrant(ctx, chain, cert, text, cur, startOf(text))) as { body: { gen: number }; widens: boolean };
-          prevGen = cur?.gen ?? 0;
-          widened = g.widens;
-          cur = { gen: g.body.gen, bytes: new TextEncoder().encode(text), body: g.body };
-        } catch (e) {
-          v.grantRefused = codeOf(e);
-          break walk;
-        }
+      texts.unshift(...p.grants);
+      for (let i = p.grants.length - 1; i >= 0 && anchor < 0; i--) {
+        try { cur = (await check(p.grants[i], null)).v; anchor = i; } catch (e) { firstRefusal ??= codeOf(e); }
       }
-      after = cur?.gen ?? after;
-      if (cur && cur.gen >= p.head) break;
-      if (page === GRANT_PAGES_MAX - 1) v.grantUnresolved = true;
+      // (the next page's `before`, read from this page's first grant's text only to page: every grant is verified)
+      const first = genOf(p.grants[0]);
+      if (!(first > 0 && (before === null || first < before))) break;
+      before = first;
+    }
+    if (anchor < 0) { if (texts.length) v.grantRefused = firstRefusal; }
+    else {
+      // (said when there is history before the anchor: grants in its page before it, or a first grant above gen 1)
+      v.anchoredAt = anchor > 0 || genOf(texts[0]) > 1 ? cur!.gen : null;
+      for (let j = anchor + 1; j < texts.length; j++) {
+        try { const r = await check(texts[j], cur); prevGen = cur!.gen; widened = r.widens; cur = r.v; } catch (e) { v.grantRefused = codeOf(e); break; }
+      }
     }
     // (the service names a grant but none could be read and verified: not "no grant")
     if (!cur && !v.grantRefused) v.grantUnresolved = true;
@@ -216,10 +235,13 @@ function grantLine(h: HostView): string {
   if (!h.grant) return h.grantRefused ? T.grantBad(h.grantRefused) : h.grantUnresolved ? T.unresolved : V.TEXT.grant.none;
   // (the last VERIFIED grant; a newer one that didn't verify, or couldn't be read, is said after it, and then nothing
   //  is "applied": the host may be on a grant this page couldn't check)
-  const newer = h.grantRefused ? T.newerBad(h.grantRefused) : h.grantUnresolved ? T.unresolved : null;
-  const s = newer ? (h.narrowing ? "narrowing" : "waiting") : V.grantState(h.grant.gen, h.ackGen, h.narrowing);
-  const life = src.now() < h.grant.notBefore ? T.notYet : V.lifetime(h.grant.notAfter, src.now());
-  return [T.gen(h.grant.gen), life, V.TEXT.grant[s], newer].filter(Boolean).join(" · ");
+  const newer = h.grantRefused === "device_tier" ? T.newerTier : h.grantRefused ? T.newerBad(h.grantRefused) : h.grantUnresolved ? T.unresolved : null;
+  // (the newest grant's lineage is checked at each grant's own start; whether it is CURRENT authority is its lifetime
+  //  now: one not in force now is never "applied")
+  const now = src.now(), inForce = now >= h.grant.notBefore && (h.grant.notAfter === null || now < h.grant.notAfter);
+  const s = newer || !inForce ? (h.narrowing ? "narrowing" : "waiting") : V.grantState(h.grant.gen, h.ackGen, h.narrowing);
+  const life = now < h.grant.notBefore ? T.notYet : V.lifetime(h.grant.notAfter, now);
+  return [T.gen(h.grant.gen), life, V.TEXT.grant[s], newer, h.anchoredAt !== null ? T.anchored(h.anchoredAt) : null].filter(Boolean).join(" · ");
 }
 
 function hostsView(l: Loaded) {

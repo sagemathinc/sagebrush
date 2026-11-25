@@ -147,11 +147,17 @@ try {
     // (the lineage: verified in order, each against the previous VERIFIED grant; the walk stops at the first refusal)
     const older = F.objects.grants.find((c) => c.name === "an older generation" && c.expect === "stale_generation");
     const same = F.objects.grants.find((c) => c.name === "the same bytes again" && c.expect === "ok");
-    const line = async (fx) => { fixtures = fx; const P = await fresh(); await open(P, site + "?fixtures=1#hosts", `!!document.querySelector("li.host .grant")`); return P.ev(`document.querySelector("li.host .grant").textContent`); };
-    const g1 = await line({ ...base(), hosts: [hostRow({ grant_gen: 2, ack: null })], grants: { [HOST]: [older.current.bytes, older.bytes] } });
-    ok(g1 === "grant 2 · expires in 1 h · waiting for the host · a newer grant didn't verify (stale_generation)", "L-1: a lineage whose next grant goes back a generation: the last verified one shown, and the refusal after it said", g1);
-    const g2 = await line({ ...base(), hosts: [hostRow({ ack: null })], grants: { [HOST]: [same.current.bytes, same.bytes] } });
-    ok(g2 === "grant 1 · expires in 1 h · waiting for the host", "L-2: the same grant twice (a re-apply): verifies, and isn't a narrowing", g2);
+    let lastP = null;
+    const P0class = () => lastP.ev(`!!document.querySelector("li.host .warn, li.host.refused")`);
+    const line = async (fx) => { fixtures = fx; const P = (lastP = await fresh()); await open(P, site + "?fixtures=1#hosts", `!!document.querySelector("li.host .grant")`); return P.ev(`document.querySelector("li.host .grant").textContent`); };
+    // (L-1: the anchor is grant 1, the newest that verifies on its own; the next one doesn't verify: the walk stops there)
+    const g1 = await line({ ...base(), hosts: [hostRow({ grant_gen: 3, ack: null })], grants: { [HOST]: [grant, older.current.bytes.replace(/"gen":2/, '"gen":3')] } });
+    ok(/^grant 1 · expires in 1 h · waiting for the host · a newer grant didn't verify \(\w+\)$/.test(g1), "L-1: a grant after the anchor that doesn't verify: the anchor shown, the refusal after it said, nothing after it verified", g1);
+    // (L-2: an earlier grant that doesn't verify any more (as a removed device's): before the anchor, it no longer counts)
+    const g2 = await line({ ...base(), hosts: [hostRow({ ack: null })], grants: { [HOST]: [grant.replace(/"at_ms":(\d)/, (m, d) => `"at_ms":${(Number(d) + 1) % 10}`), grant] } });
+    ok(g2 === "grant 1 · expires in 1 h · waiting for the host · checked from grant 1; earlier grants no longer count", "L-2: history before the anchor: \"no longer counts\", said plainly, not as a refusal", g2);
+    const g2c = await P0class();
+    ok(g2c === false, "L-2: and the host isn't shown in a warning style", g2c);
     const g3 = await line({ ...base(), hosts: [hostRow({ ack: null })], grants: { [HOST]: "not a list" } });
     ok(g3 === "its newest grants couldn't be read: not checked", "L-3: the service names a grant but none can be read: unresolved, not \"no grant yet\"", g3);
     const g4 = await line({ ...base(), hosts: [hostRow({ grant_gen: 5, ack: null })] });
