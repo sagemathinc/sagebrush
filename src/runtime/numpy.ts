@@ -1052,11 +1052,19 @@ function resolveIndex(a: NDArray, key: any): IndexResult {
     return b === undefined ? k : fromPy(b);
   });
   // advanced indices: arrays and lists of ints or bools, converted first, as NumPy checks them before counting
-  // (an empty list is an empty integer index, as NumPy's; a list of anything but integers or bools no index)
+  // (an empty list is an empty integer index, as NumPy's; a list of anything but integers or bools no index, also
+  // one no numeric array holds (strings, None, objects))
+  const notIndex = () => raise(T.IndexError, "only integers, slices (`:`), ellipsis (`...`), numpy.newaxis (`None`) and integer or boolean arrays are valid indices");
   const listIndex = (k: any) => {
-    const r = fromPy(k);
+    let r: NDArray;
+    try {
+      r = fromPy(k);
+    } catch (e) {
+      if (Obj.isinstance(e, T.TypeError) || Obj.isinstance(e, T.NotImplementedError)) notIndex();
+      throw e;
+    }
     if (r.size === 0 && r.dt.kind === "f") return empty(r.shape, D.int64);
-    if (!r.dt.isInt && r.dt.kind !== "b") raise(T.IndexError, "only integers, slices (`:`), ellipsis (`...`), numpy.newaxis (`None`) and integer or boolean arrays are valid indices");
+    if (!r.dt.isInt && r.dt.kind !== "b") notIndex();
     return r;
   };
   items = items.map((k) => (Array.isArray(k) && !(k as any).$t ? listIndex(k) : k));
@@ -1307,6 +1315,11 @@ function setitem(a: NDArray, key: any, value: any) {
   // (a Python value into int64/uint64 through the admission, its original)
   const src = value instanceof NDArray ? value : isWide(a.dt) ? fromPy(value, a.dt) : operand(value).arr;
   if ("view" in r) return assign(r.view, src);
+  // (a value that does not broadcast to an advanced index's result: NumPy's message)
+  const sh = src.shape, off = r.shape.length - sh.length;
+  if (!sh.every((n, d) => n === 1 || (d >= -off && n === r.shape[d + off]))) {
+    raise(T.ValueError, `shape mismatch: value array of shape ${shapeStr(sh)} could not be broadcast to indexing result of shape ${shapeStr(r.shape)}`);
+  }
   const tmp = empty(r.shape, a.dt);
   assign(tmp, src);
   const ad = a.data, td = tmp.data;
