@@ -39,7 +39,7 @@ const indexNonce = (i: number) => concat(new Uint8Array(8), u32(i));
 const subtle = (): SubtleCrypto => globalThis.crypto.subtle;
 const gcm = (iv: Uint8Array, additionalData: Uint8Array) => ({ name: "AES-GCM", iv, additionalData, tagLength: 128 });
 
-export const KINDS = Object.freeze(["document", "snapshot", "index-snapshot"] as const);
+export const KINDS = Object.freeze(["document", "snapshot", "index-snapshot", "patch", "presence"] as const);
 export type ObjectHeader = Readonly<{
   account: string;
   kind: (typeof KINDS)[number];
@@ -77,7 +77,7 @@ function totals(h: { codec: string; plaintextLength: number; compressedLength: n
 
 // (an object header's canonical fields: what both its key and every chunk's AAD bind)
 function objectFields(h: ObjectHeader): Uint8Array {
-  if (!KINDS.includes(h?.kind)) refuse("bad_form", "an object is a document, a snapshot or an index snapshot");
+  if (!KINDS.includes(h?.kind)) refuse("bad_form", "an object is a document, a snapshot, an index snapshot, a patch or a presence message");
   return concat(name(h.account, "the account"), field(utf8(h.kind)), name(h.object, "the object"), name(h.version, "the version"), totals(h));
 }
 
