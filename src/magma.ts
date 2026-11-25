@@ -55,6 +55,13 @@ export const KEYWORDS = new Set(
     "intrinsic time eval declare clear").split(" "),
 );
 
+// print x : Level, the levels Magma 2.18-5 knows (another name is its "Bad print level")
+const PRINT_LEVELS = new Set(["Default", "Minimal", "Maximal", "Magma", "Hex", "Latex", "Debug"]);
+// Magma 2.18-5's reserved words that this lexer reads as names (each checked: print 1 : default; is bad syntax there,
+// not a bad print level)
+const RESERVED_NAMES = new Set(("adj assert2 assert3 catch default exists forall fprintf freeze iload import load notadj " +
+  "random read readi requirege requirerange restore save try vprintf vtime").split(" "));
+
 // longest first
 const OPS = [":->", "@@", "+:=", "-:=", "*:=", "/:=", "^:=", ":=", "..", "->", "{@", "@}", "{*", "*}", "$$", "<", ">", "(", ")", "[", "]", "{", "}",
   ",", ";", ":", "|", "#", "&", "~", "+", "-", "*", "/", "^", ".", "!", "`", "@", "=", "\\"];
@@ -406,10 +413,16 @@ class Parser {
       if (a.v === "." && (b.v === "-" || b.v === "<") && k > from && T[k - 1].t === "id") return found(b.v === "-" ? `${T[k - 1].v}.-1 (a generator's inverse by its index)` : `${T[k - 1].v}.<...> (an element by its indices)`);
       if (a.v === "=" && a.t === "op") return found("= (an equation, as in a relation)");
       if (a.v === "^" && b.v === "^" && next(a, b)) return found("a^^n (a multiplicity in a multiset)");
-      if (a.v === ":" && b.t === "id" && ["Hex", "Magma", "Maximal", "Minimal", "Default"].includes(b.v)) return found(`x: ${b.v} (a printing level)`);
+      // (x: Magma as a statement of its own, which Magma prints; anywhere else, x := 1 : Magma, : : Magma, it's bad syntax;
+      // a name that isn't a level there is Magma's "Bad print level" at it, a reserved word its bad syntax)
+      if (a.v === ":" && b.t === "id" && c.v === ";" && this.levelStatement(from, k)) {
+        if (PRINT_LEVELS.has(b.v)) return found(`x: ${b.v} (a printing level)`);
+        const said = { name: "", tok: b, verbatim: RESERVED_NAMES.has(b.v) ? "bad syntax" : `Bad print level "${b.v}"` };
+        return said;
+      }
       if (a.v === "where" && a.t === "kw") return found("where x is ... (a definition after an expression)");
       if (a.v === "eval" && a.t === "kw") return found("eval");
-      if (a.t === "id" && (a.v === "try" || a.v === "catch")) return found("try ... catch");
+      if (a.t === "id" && (a.v === "try" || a.v === "catch") && k === from) return found("try ... catch");
       if (a.v === ".." && b.v === "." && next(a, b)) return found("... (a function with a variable number of arguments)");
       if (a.v === "case" && b.v === "<") return found("case< ... >");
       if (a.v === "." && b.t === "id" && k > from && (T[k - 1].t === "id" || T[k - 1].v === ")" || T[k - 1].v === "]")) return found(`${T[k - 1].v}.${b.v} (a generator by a variable's index)`);
@@ -417,6 +430,21 @@ class Parser {
       if (a.v === "\\") return found("\\ (a line continued)");
     }
     return null;
+  }
+
+  /** Whether the tokens [from, k) are an expression statement's value, as in Magma's x : Magma; (not a print, an
+   * assignment or anything inside brackets). */
+  levelStatement(from: number, k: number): boolean {
+    const T = this.toks;
+    // (a statement that a keyword begins takes no level: return 1 : Magma; is bad syntax, as in Magma)
+    if (T[from].t === "kw" && ["print", "printf", "vprint", "return", "assert", "error", "delete", "require"].includes(T[from].v)) return false;
+    let depth = 0;
+    for (let q = from; q < k; q++) {
+      if ("([{<".includes(T[q].v) || T[q].v === "{@" || T[q].v === "{*") depth++;
+      else if (")]}>".includes(T[q].v) || T[q].v === "@}" || T[q].v === "*}") depth--;
+      else if (depth === 0 && (T[q].v === ":=" || T[q].v === ":")) return false;
+    }
+    return depth === 0;
   }
 
   // The loops being parsed, innermost last (a function's body starts its
@@ -542,7 +570,10 @@ class Parser {
         // (the line the statement is dropped through, in a session: the error's)
         const errLine = e instanceof MagmaSyntaxError ? e.line : 0;
         if (u && e instanceof MagmaSyntaxError) {
-          e.message = `${u.name} is not supported yet`;
+          // (Magma's own words where it has them: x : Bogus; is its "Bad print level")
+          const said = (u as { verbatim?: string }).verbatim;
+          e.message = said ?? `${u.name} is not supported yet`;
+          if (said) e.verbatim = true;
           e.line = u.tok.line;
           e.col = u.tok.col;
         }
@@ -1179,8 +1210,13 @@ class Parser {
   printList(kind: "print" | "vprint") {
     const vals = [this.expr()];
     while (this.eat(",")) vals.push(this.expr());
-    // print x: Magma level; print x: Maximal etc. are ignored
-    if (this.eat(":")) this.ident();
+    // print x: Magma level; print x: Maximal etc. are ignored; a name that isn't a level is Magma's error at it
+    if (this.eat(":")) {
+      const t = this.peek();
+      if (t.t === "id" && RESERVED_NAMES.has(t.v)) this.fail(`'${t.v}' is reserved, not a print level`, t);
+      const level = this.ident();
+      if (!PRINT_LEVELS.has(level)) throw new MagmaSyntaxError(`Bad print level "${level}"`, t.line, t.col, true);
+    }
     this.expect(";");
     // (each value's all, as for a, b; at a statement)
     this.emit(`_m._print_line(_m._flat([${vals.map((v) => this.all(v)).join(", ")}]))`);
