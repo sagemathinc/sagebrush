@@ -48,13 +48,15 @@ function instantiate(b64: string): WebAssembly.Exports | null {
     if (!WebAssembly.validate(bytes)) return null;
     return new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports;
   } catch (e) {
-    if (e instanceof RangeError) throw setupNoMemory(e);
+    // (V8 and JavaScriptCore throw a RangeError; other engines say it in words: SpiderMonkey's thrown "out of memory",
+    // a CompileError when executable memory runs out)
+    const m = String((e as any)?.message ?? e);
+    if (e instanceof RangeError || /out of (executable )?memory/i.test(m)) throw setupNoMemory(m);
     return null; // (a valid module this engine still won't compile or link: taken as the feature's absence, as before)
   }
 }
 // (in the words object.ts's ENGINE_LIMITS names a MemoryError by)
-const setupNoMemory = (e: RangeError) =>
-  /^WebAssembly\.\w+\(\): Out of memory/.test(e.message) ? e : new RangeError(`WebAssembly.Instance(): Out of memory: ${e.message}`);
+const setupNoMemory = (m: string) => new RangeError(/^WebAssembly\.\w+\(\): Out of memory/.test(m) ? m : `WebAssembly.Instance(): Out of memory: ${m}`);
 let base = 0;
 let f64 = new Float64Array(0);
 let i32 = new Int32Array(0);
