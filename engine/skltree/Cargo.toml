@@ -12,6 +12,8 @@ crate-type = ["cdylib", "rlib"]
 # Stop (Ctrl-C): the long loops poll it through work::tick (in WebAssembly through the
 # import `sagebrush.interrupted`; an interrupt traps and the host retires the instance)
 sagebrush-interrupt = { path = "../interrupt", features = ["wasm-host"] }
+# glibc's log, for entropy (as CPython's compiled scikit-learn calls it)
+sagebrush-glibm = { path = "../glibm" }
 
 # The WebAssembly heap and its page bound: engine/wasmheap's, as the PNG module's and the
 # multiprecision core's (exported by src/wasm.rs)

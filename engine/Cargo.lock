@@ -1001,6 +1001,7 @@ dependencies = [
 name = "sagebrush-skltree"
 version = "0.1.0"
 dependencies = [
+ "sagebrush-glibm",
  "sagebrush-interrupt",
  "sagebrush-wasmheap",
 ]

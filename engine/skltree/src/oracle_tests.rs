@@ -175,3 +175,133 @@ fn every_swap_array_slices_row_matches_scikit_learn() {
         assert_eq!(h, want, "len {len} start {start} end {end} n {n} f32 {f32_}");
     }
 }
+
+// ---- the trees: oracle/trees.rows (record_trees.py), every fitted tree_ array and its apply and raw importances
+
+use crate::criterion::{Criterion, Kind};
+use crate::splitter::{Inputs, Splitter};
+use crate::tree::{apply, build, importances, Params};
+use std::collections::HashMap;
+
+fn hex_f32(s: &str) -> f32 {
+    f32::from_bits(u32::from_str_radix(s, 16).unwrap())
+}
+fn hex_f64(s: &str) -> f64 {
+    f64::from_bits(u64::from_str_radix(s, 16).unwrap())
+}
+fn parse_hexf(s: &str) -> f64 {
+    // (Python's float.hex: [-]0x1.<frac>p<exp>, or 0x0.0p+0)
+    let (neg, s) = s.strip_prefix('-').map_or((false, s), |r| (true, r));
+    let s = s.strip_prefix("0x").unwrap();
+    let (mant, exp) = s.split_once('p').unwrap();
+    let (int, frac) = mant.split_once('.').unwrap_or((mant, ""));
+    let mut v = u64::from_str_radix(int, 16).unwrap() as f64;
+    let mut scale = 1.0 / 16.0;
+    for ch in frac.chars() {
+        v += ch.to_digit(16).unwrap() as f64 * scale;
+        scale /= 16.0;
+    }
+    let v = v * 2f64.powi(exp.parse().unwrap());
+    if neg {
+        -v
+    } else {
+        v
+    }
+}
+
+fn fnv_bytes<T: Copy>(v: &[T], f: impl Fn(T) -> Vec<u8>) -> u64 {
+    let mut h = FNV0;
+    for &x in v {
+        fnv(&mut h, &f(x));
+    }
+    h
+}
+
+#[test]
+fn every_tree_matches_scikit_learn() {
+    let _g = crate::work::tests_serial();
+    let text = include_str!("../oracle/trees.rows");
+    let mut oracle = "";
+    let mut data: HashMap<&str, (usize, usize, Vec<f32>)> = HashMap::new();
+    let mut ys: HashMap<(&str, &str), Vec<f64>> = HashMap::new();
+    let mut sws: HashMap<&str, Vec<f64>> = HashMap::new();
+    let mut cases = vec![];
+    let mut dims: HashMap<&str, (usize, usize)> = HashMap::new();
+    for line in text.lines().filter(|l| !l.starts_with('#') && !l.is_empty()) {
+        let f: Vec<&str> = line.split(' ').collect();
+        match f[0] {
+            "oracle" => oracle = &line[7..],
+            "data" => {
+                dims.insert(f[1], (f[2].parse().unwrap(), f[3].parse().unwrap()));
+            }
+            "x" => {
+                let (n, nf) = dims[f[1]];
+                let x: Vec<f32> = f[2..].iter().map(|s| hex_f32(s)).collect();
+                assert_eq!(x.len(), n * nf);
+                data.insert(f[1], (n, nf, x));
+            }
+            "y" => {
+                ys.insert((f[1], f[2]), f[3..].iter().map(|s| hex_f64(s)).collect());
+            }
+            "sw" => {
+                sws.insert(f[1], f[2..].iter().map(|s| s.parse().unwrap()).collect());
+            }
+            "case" => cases.push(f),
+            t => panic!("row {t}"),
+        }
+    }
+    assert!(oracle.starts_with("scikit-learn 1.9.1,"), "{oracle}");
+    assert_eq!(cases.len(), 246 + 18 + 9, "the recorded trees' count");
+    let mut bad = vec![];
+    let mut by_kind: HashMap<&str, usize> = HashMap::new();
+    for c in &cases {
+        let (id, name, kind) = (c[1], c[2], c[3]);
+        *by_kind.entry(kind).or_default() += 1;
+        let (n, nf, x) = &data[name];
+        let y = &ys[&(name, if kind == "mse" { "reg" } else { "clf" })];
+        let n_outputs = y.len() / n;
+        let n_classes: Vec<usize> = if c[4] == "-" { vec![] } else { c[4].split(',').map(|v| v.parse().unwrap()).collect() };
+        let max_depth: u64 = c[5].parse().unwrap();
+        let (mss, msl): (usize, usize) = (c[6].parse().unwrap(), c[7].parse().unwrap());
+        let mwl = parse_hexf(c[8]);
+        let max_features: usize = c[9].parse().unwrap();
+        let mid = parse_hexf(c[10]);
+        let seed: u32 = c[11].parse().unwrap();
+        let mask: Option<Vec<u8>> = if c[12] == "-" { None } else { Some(c[12].bytes().map(|b| b - b'0').collect()) };
+        let (node_count, max_depth_seen): (usize, i64) = (c[13].parse().unwrap(), c[14].parse().unwrap());
+        let want: Vec<u64> = c[15..].iter().map(|h| u64::from_str_radix(h, 16).unwrap()).collect();
+        let sw = sws.get(id).cloned();
+        let input = Inputs { x, f: *nf, y, sample_weight: sw.as_deref(), missing: mask.as_deref() };
+        let k = match kind {
+            "gini" => Kind::Gini,
+            "entropy" => Kind::Entropy,
+            _ => Kind::Mse,
+        };
+        let crit = Criterion::new(k, n_outputs, &n_classes).unwrap();
+        let mut sp = Splitter::new(input, *n, crit, max_features, msl, mwl, seed).unwrap();
+        let tree = build(input, &mut sp, &Params { max_depth, min_samples_split: mss, min_samples_leaf: msl, min_weight_leaf: mwl, min_impurity_decrease: mid }).unwrap();
+        let mut leaves = vec![0i64; *n];
+        apply(&tree, x, *nf, &mut leaves);
+        let imp = importances(&tree, *nf).unwrap();
+        let i8s = |v: &[i64]| fnv_bytes(v, |x| x.to_le_bytes().to_vec());
+        let f8s = |v: &[f64]| fnv_bytes(v, |x| x.to_le_bytes().to_vec());
+        let got = [
+            i8s(&tree.children_left), i8s(&tree.children_right), i8s(&tree.feature), f8s(&tree.threshold), f8s(&tree.impurity),
+            i8s(&tree.n_node_samples), f8s(&tree.weighted_n_node_samples), fnv_bytes(&tree.missing_go_to_left, |x| vec![x]),
+            f8s(&tree.value), f8s(&imp), i8s(&leaves),
+        ];
+        const NAMES: [&str; 11] = ["children_left", "children_right", "feature", "threshold", "impurity", "n_node_samples", "weighted_n_node_samples", "missing_go_to_left", "value", "importances", "apply"];
+        let mut diff: Vec<&str> = NAMES.iter().zip(got.iter().zip(&want)).filter(|(_, (g, w))| g != w).map(|(n, _)| *n).collect();
+        if tree.node_count() != node_count {
+            diff.insert(0, "node_count");
+        }
+        if tree.max_depth != max_depth_seen {
+            diff.push("max_depth");
+        }
+        if !diff.is_empty() {
+            bad.push(format!("case {id} ({name} {kind}, {} vs {} nodes): {}", tree.node_count(), node_count, diff.join(", ")));
+        }
+    }
+    assert!(bad.is_empty(), "{} of {} trees differ:\n{}", bad.len(), cases.len(), bad[..bad.len().min(15)].join("\n"));
+    assert_eq!((by_kind["gini"], by_kind["entropy"], by_kind["mse"]), (114, 114, 45));
+}

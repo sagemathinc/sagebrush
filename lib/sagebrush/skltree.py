@@ -16,11 +16,14 @@ forest or a bagging ensemble then uses that one copy.
 
 Importing this module is cheap: the kernel is compiled at the first
 dataset(), never before.
+
+    tree = skltree.fit(ds, n_classes=[2], criterion="gini", max_features=2, seed=209652396)
+    skltree.apply(tree, X)                     # each row's leaf
 """
 
 import _skltree as _k
 
-__all__ = ["Dataset", "dataset"]
+__all__ = ["Dataset", "apply", "dataset", "fit"]
 
 
 class Dataset:
@@ -76,3 +79,41 @@ def dataset(X, y, missing_mask=None):
     """
     token = _k.dataset(X, y, missing_mask)
     return Dataset(token, X.shape[0], X.shape[1], y.shape[1])
+
+
+def fit(dataset, sample_weight=None, *, n_classes=None, criterion, max_depth=None, min_samples_split=2,
+        min_samples_leaf=1, min_weight_leaf=0.0, max_features, min_impurity_decrease=0.0, seed):
+    """Grow one tree on a dataset, as scikit-learn 1.9.1's depth-first builder with its best splitter does.
+
+    The parameters are as scikit-learn's DecisionTree*.fit resolves them in
+    Python before its builder runs: criterion is "gini", "entropy",
+    "log_loss" (entropy) or "squared_error"; n_classes is each output's
+    class count for a classifier (y holding class indices) and None for a
+    regressor; max_depth is an int or None; min_samples_split,
+    min_samples_leaf and max_features are ints; min_weight_leaf is a float
+    (min_weight_fraction_leaf times the total weight); seed is the
+    splitter's XorShift seed, random_state.randint(0, 2**31 - 1).
+    sample_weight is None or a float64 array of n_samples weights, copied
+    for this tree only (the dataset isn't copied again).
+
+    Returns a dict of the tree's arrays, as scikit-learn's tree_ holds them:
+    children_left, children_right, feature, n_node_samples (int64),
+    threshold, impurity, weighted_n_node_samples (float64),
+    missing_go_to_left (uint8), value (float64, node_count x n_outputs x
+    max_n_classes: class fractions, or means), the raw feature importances
+    (each split's weighted impurity decrease over the root's weight, before
+    normalization), node_count and max_depth.  The dataset must be usable;
+    a released or stale one raises ValueError.
+    """
+    if dataset._token is None:
+        raise ValueError("this dataset can't be used: it was released")
+    return _k.fit(dataset._token, sample_weight, n_classes, criterion, max_depth, min_samples_split,
+                  min_samples_leaf, min_weight_leaf, max_features, min_impurity_decrease, seed)
+
+
+def apply(tree, X):
+    """Each row's leaf in a tree fit() returned, as scikit-learn's apply: X must be a C-contiguous float32 array
+    of shape (n_samples, n_features); a value is compared with the node's threshold as a float64, and NaN goes
+    the way the node's missing_go_to_left says.  Returns an int64 array."""
+    return _k.apply(tree["children_left"], tree["children_right"], tree["feature"], tree["threshold"],
+                    tree["missing_go_to_left"], X)

@@ -24,10 +24,14 @@
 //! bound to exactly that (`skt_begin`).  Every allocation here is fallible
 //! (`try_reserve_exact`): a refused one is the call's error code, not a trap.
 
+pub mod criterion;
 pub mod data;
+pub mod fit;
 pub mod partition;
 pub mod rng;
 pub mod sort;
+pub mod splitter;
+pub mod tree;
 pub mod work;
 
 #[cfg(test)]
