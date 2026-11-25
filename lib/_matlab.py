@@ -5562,8 +5562,8 @@ def angle_(x):
 
 
 @_bs("complex")
-def complex_(a, b=0.0):
-    ca, cb = class_(a), class_(b)
+def complex_(a, b=None):
+    ca, cb = class_(a), class_(b) if b is not None else class_(a)
     if ca in _INTS or cb in _INTS:
         # (complex integers, as complex(uint8(1), uint8(2)) makes in MATLAB, are not
         # represented: refused rather than made double)
@@ -5576,7 +5576,15 @@ def complex_(a, b=0.0):
         z.real = x
         z.imag = y
         return z
-    r = np.asarray(_broadcast(parts, _farr(a), _farr(b)), dtype=np.complex128)
+    if b is None and _farr(a).dtype.kind == "c":
+        # (complex(z) of a complex z is z, as MATLAB's page says, both of its parts kept, and still complex when its
+        # imaginary parts are all zero)
+        r = np.array(_farr(a), dtype=np.complex128)
+    elif b is not None and (_farr(a).dtype.kind == "c" or _farr(b).dtype.kind == "c"):
+        # (two parts, one of them complex: refused rather than its imaginary part dropped)
+        raise _err("complex: the real and imaginary parts must both be real when two are given.")
+    else:
+        r = np.asarray(_broadcast(parts, _farr(a), _farr(0.0 if b is None else b)), dtype=np.complex128)
     if "single" in (ca, cb):
         return _canon(_contig(r.astype(np.complex64)))
     if r.size == 1:

@@ -473,5 +473,39 @@
     "tags": [
       "data types"
     ]
+  },
+  {
+    "name": "complex",
+    "kind": "function",
+    "signature": "z = complex(a, b)\nz = complex(x)",
+    "summary": "A complex array from real and imaginary parts, or x made complex; complex even when its imaginary parts are all zero.",
+    "doc": "`complex(a, b)` is `a + bi` with the parts set as given, so a `-0` imaginary part keeps its sign. `a` and `b` are the same size, or one is a scalar. `complex(x)` of a real `x` is `x + 0i`; of a complex `x`, `x` itself. The result is complex (`isreal` is false) even when every imaginary part is zero. Single parts give a single result.",
+    "examples": [
+      {
+        "code": "z = complex(3, 4)",
+        "expected": "\nz =\n\n   3.0000 + 4.0000i\n\n"
+      },
+      {
+        "code": "isreal(complex(5))",
+        "expected": "\nans =\n\n  logical\n\n   0\n\n"
+      },
+      {
+        "code": "complex([1+1i 2 -3i])",
+        "expected": "\nans =\n\n   1.0000 + 1.0000i   2.0000 + 0.0000i   0.0000 - 3.0000i\n\n"
+      }
+    ],
+    "differs": [
+      "Integer parts are refused: complex integers are not represented in Sagebrush.",
+      "Not yet checked against MATLAB: complex(a, b) with a complex a or b is refused (Sagebrush's identifier and message), and so is complex(z, []) for a complex z."
+    ],
+    "status": "partial",
+    "see_also": [
+      "abs",
+      "exp",
+      "sqrt"
+    ],
+    "tags": [
+      "elementary math"
+    ]
   }
 ]
