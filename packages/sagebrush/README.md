@@ -7,7 +7,12 @@ npx sagebrush                 # interactive prompt (tab completion, history)
 npx sagebrush script.py       # run a program
 npx sagebrush -c 'print(2**200)'
 npx sagebrush --sage          # Sage syntax: 2^3 == 8, 2/3 is exact, factor(), ...
+npx sagebrush --magma f.mag   # Magma (--matlab: MATLAB)
+npx sagebrush --search 'class group'   # search every function's documentation
+npx sagebrush notebook        # the Sagebrush notebook in your browser, running Python here
 ```
+
+`sagebrush --help` lists every option, including the `board` and `latex` commands.
 
 or `npm install -g sagebrush`, then `sagebrush`.
 
@@ -24,7 +29,7 @@ with a Node version that supports that option. Bounds checks can be slower.
 
 ```
 npx sagebrush --install-jupyter-kernel                 # "Sagebrush (Sage)"
-npx sagebrush --install-jupyter-kernel --mode all      # + "Sagebrush (Python)", "Sagebrush (Magma)"
+npx sagebrush --install-jupyter-kernel --mode all      # + "Sagebrush (Python)", "Sagebrush (Magma)", "Sagebrush (MATLAB)"
 ```
 
 It works in JupyterLab, Notebook, VS Code and any other Jupyter client, and
@@ -32,18 +37,20 @@ installing it needs neither Python nor ZeroMQ: the kernel speaks the Jupyter
 protocol over its own JavaScript ZeroMQ transport. In the notebook you get:
 - Sage syntax with Sagebrush's engines: number fields and class groups,
   modular forms, elliptic curves, exact linear algebra;
-- plots as SVG;
+- plots as SVG, or as a sharp PNG when the SVG would be over 1 MiB
+  (`--figures auto|svg|png|both` when installing; default `auto`);
 - streamed output, tab completion, and multi-line input checks;
 - Stop (interrupt), which also stops the Rust engines.
 
 `--user` (the default), `--sys-prefix` or `--prefix DIR` choose where the
 kernelspec goes, and `--uninstall-jupyter-kernel` removes it. The
-self-contained `sagebrush` executable
-(`curl -fsSL https://get.sagebrush.space/install.sh | sh`) installs the same
+self-contained `sagebrush` executable, from the
+[releases page](https://github.com/sagemathinc/sagebrush/releases), installs the same
 kernel.
 
 - The whole thing is one JavaScript file, with its Python library, the
-  notebook page and the WebAssembly engines embedded. It runs on Node 22+,
+  notebook page and the WebAssembly engines embedded (`sagebrush latex`
+  loads a second file). It runs on Node 22+,
   Deno (`deno run -A`) and Bun.
 - Measured for version 0.5.0 on Oct 18, 2026 (Node 26.12, an idle Linux VM
   with an AMD EPYC 7B13, the file cache warm):

@@ -214,6 +214,10 @@
   "PrimeField": "> PrimeField(GF(16));\nFinite field of size 2",
   "Root": "> K<b> := GF(16);\n> Root(b, 7);\nb^13",
   "RootsInSplittingField": "> P<x> := PolynomialRing(GF(5));\n> RootsInSplittingField(x^2 + 2);\n[ <$.1^9, 1>, <$.1^21, 1> ]\nFinite field of size 5^2",
-  "Trace(FldFinElt, FldFin)": "> K<b> := GF(16); F<a> := GF(4);\n> Trace(b, F);\n1"
+  "Trace(FldFinElt, FldFin)": "> K<b> := GF(16); F<a> := GF(4);\n> Trace(b, F);\n1",
+  "Integral": "> P<x> := PolynomialRing(Rationals());\n> Integral(3*x^2 + 1);\nx^3 + x",
+  "Normalise": "> P<x> := PolynomialRing(Rationals());\n> Normalise(-3*x + 1);\nx - 1/3",
+  "Normalize": "> P<x> := PolynomialRing(Rationals());\n> Normalize(2*x^2 + 4*x + 6);\nx^2 + 2*x + 3",
+  "SquarefreeFactorization": "> P<x> := PolynomialRing(Rationals());\n> SquarefreeFactorization((x - 1)^2 * (x + 2)^3);\n[\n    <x - 1, 2>,\n    <x + 2, 3>\n]"
  }
 }

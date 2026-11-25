@@ -3,7 +3,8 @@
   "bundle": {
     "externalBin": ["binaries/sagebrush-node"],
     "resources": {
-      "engine/": "engine/"
+      "engine/": "engine/",
+      "agent/": "agent/"
     },
     "macOS": {
       "entitlements": "entitlements.plist"
