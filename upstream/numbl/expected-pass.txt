@@ -388,6 +388,7 @@ linear_algebra/test_eig.m
 linear_algebra/test_eig_equal_diag.m
 linear_algebra/test_eigs.m
 linear_algebra/test_expm.m
+linear_algebra/test_gmres.m
 linear_algebra/test_horzcat_empty_shapes.m
 linear_algebra/test_kron.m
 linear_algebra/test_lu.m

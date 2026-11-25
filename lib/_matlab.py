@@ -13432,6 +13432,10 @@ for _n in ("addpath", "rmpath", "genpath", "path", "pkg", "import"):
 for _n in ("rref", "nextpow2", "cumtrapz", "unwrap", "deg2rad", "rad2deg", "cart2pol", "pol2cart"):
     _B[_n] = _lazy_builtin("_matlab_numeric_more", _n)
 
+# (lib/_matlab_krylov.py: the Krylov solvers, lazy too)
+for _n in ("pcg", "minres", "gmres", "bicgstab", "lsqr"):
+    _B[_n] = _lazy_builtin("_matlab_krylov", _n)
+
 # (lib/_matlab_json.py: jsonencode and jsondecode, lazy too)
 for _n in ("jsonencode", "jsondecode"):
     _B[_n] = _lazy_builtin("_matlab_json", _n)
