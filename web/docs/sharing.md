@@ -8,8 +8,9 @@ Open **File ▸ Share…** to share a notebook. The window has three tabs: **Lin
 On the **Link** tab, **Publish link** puts this notebook on a page of its own at sagebrush.space/s/…, with its outputs and the data files you choose. Anyone with the link can view it, run it in their own browser and copy it. The link is copied for you.
 
 - Publishing needs you to be signed in: **Sign in** appears in the dialog when you aren't.
+- What you publish counts against your plan's storage, which sync uses too, and a notebook larger than your plan's largest file can't be published.
 - The **Download** tab saves the notebook as an .ipynb file, or with the files it uses as one .zip, to send any way you like; Jupyter or Sagebrush opens it. It needs no account and works on every site.
-- A site that can't publish, such as Sagebrush on your own computer, says so in the dialog and still offers a quick link. Publish from [sagebrush.space](https://sagebrush.space/) instead.
+- A site that can't publish, such as `sagebrush notebook` on your own computer, says so in the dialog and still offers a quick link. Publish from [sagebrush.space](https://sagebrush.space/) instead. In the desktop app, **Share…** isn't available: upload the notebook and the files it uses to sagebrush.space and share it there.
 - **Options** holds the title, the byline, the license, the edit history and the files; its summary line shows what you'll share. The files the notebook's code uses are included for you when Sagebrush can find them. **Add files…** shows them, and its search finds any other file to include.
 - **Author(s)** is shown on the page as "by …", exactly as you type it: one name, several, or none. Leave it empty for no byline. Sagebrush never fills it in from your account.
 - **License** starts as "None given": what you share is then governed by [CoCalc's policies](https://cocalc.ai/policies). Choose a license if you want one to apply.
@@ -24,7 +25,7 @@ On the **Link** tab, **Publish link** puts this notebook on a page of its own at
 
 ## Copy to my workspace {#copy}
 
-On a published notebook's page, **Copy to my workspace** puts the notebook, with its data files, in your own files in this browser and opens it, ready to edit. No account is needed. Next time, the button reads **Open my copy**.
+On a published notebook's page, **Copy to my workspace** puts the notebook, with its data files, in your own files in this browser and opens it, ready to edit. Your first change on the page makes this copy too. A data file you already have there is kept. No account is needed. Next time, the button reads **Open my copy**.
 
 Code brought in from a link can't change your files until you allow it.
 
@@ -33,6 +34,10 @@ Code brought in from a link can't change your files until you allow it.
 In the LaTeX editor, **File ▸ Share…** shares a talk with the files it uses, because the talk's code can read them. The dialog lists the files it uses, ticked, and the other files in its folder, unticked; a file that looks like it holds a key or password is never ticked for you. Tick any the talk needs that weren't found, and untick any you don't want to publish. Each talk or notebook left ticked gets its own link, and the one you shared from is listed first.
 
 On the shared page, a visitor sees the slides with your results. **Run** runs the talk's code in their own browser, and **Copy to my workspace** copies the talk's folder into their files.
+
+## Share a folder {#folder}
+
+In the file browser, **⋯ ▸ Share folder…** on a folder shares the notebooks and data files in it, ticked; a file that looks like it holds a key or password is never ticked for you. Untick any you don't want to publish. Each notebook or LaTeX document left ticked gets its own link. **Download as .zip** downloads the ticked files instead, to send any way you like. **Share folder…** isn't offered in the desktop app or under `sagebrush notebook`.
 
 ## Your shares {#your-shares}
 

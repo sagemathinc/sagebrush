@@ -816,6 +816,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-glibm"
+version = "0.1.0"
+
+[[package]]
 name = "sagebrush-group"
 version = "0.1.0"
 dependencies = [
@@ -883,6 +887,7 @@ dependencies = [
  "dashu-base",
  "dashu-int",
  "sagebrush-bigint",
+ "sagebrush-glibm",
  "sagebrush-interrupt",
  "sagebrush-wasmheap",
 ]

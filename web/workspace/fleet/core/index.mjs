@@ -13,4 +13,17 @@ export { AUDIENCES, TYPES, signedBytes, parseEnvelope, seal, sealAdd, open } fro
 export { compile } from "./schema.mjs";
 export { apply as applyChainEntry, replay as replayChain, deviceKey, requireTier, serviceKeyAt } from "./chain.mjs";
 export { newRecoveryCode, showCode, readCode, recoveryKey } from "./recovery.mjs";
-export { canonicalPath, hostFingerprint, deviceFingerprint, showFingerprint, narrowsOnly, preimageHash, verifyHostCert, verifyGrant, verifyGrantAck, verifyHostOp, verifyRevocation, verifyApproval } from "./verify.mjs";
+export { openByDevice, canonicalPath, hostFingerprint, deviceFingerprint, showFingerprint, narrowsOnly, preimageHash, verifyHostCert, verifyGrant, verifyGrantAck, verifyHostOp, verifyRevocation, verifyApproval } from "./verify.mjs";
+export { HPKE, deriveKeyPair, setupSender, setupRecipient, seal as hpkeSeal, open as hpkeOpen, sendExport as hpkeSendExport, receiveExport as hpkeReceiveExport } from "./hpke.mjs";
+export { encKeyId, sealPackage, verifyPackage, sealCap, openCap } from "./sealed.mjs";
+export { SIG_KEYS, parseSig, requestBytes, verifyRequest } from "./request.mjs";
+export {
+  ROUTE as RELAY_ROUTE, COMMIT_ROUTE as RELAY_COMMIT_ROUTE, RECORD_HEADER_MAX, HEADERS_MAX, openTarget, parseOpenTarget, headerBytes, commitBody,
+  parseCommit, verifyHostOpen, verifyAppOpen, verifyCommit,
+} from "./relay.mjs";
+export {
+  ADMIT_ROUTE, EPOCHS_ROUTE, AUTH_HEADER, ANSWER_HEADER, REQUEST_MAX, ANSWER_MAX, CONTROL_SKEW_MS, CALL_ID_TTL_MS, FEED_MAX, ADMIT_REFUSALS,
+  CURSOR_EXPIRED, SCHEMAS as CONTROL_SCHEMAS,
+  controlKey, signControlRequest, parseControlAuth, verifyControlRequest, signControlAnswer, verifyControlAnswer, parseAdmitRequest, parseEpochsTarget,
+  epochsTarget,
+} from "./control.mjs";

@@ -2,7 +2,7 @@
 # throwaway executable, built here and unsigned, is signed through Azure Artifact Signing with an RFC 3161 timestamp,
 # then checked with signtool verify and Get-AuthenticodeSignature.  The sign-in is GitHub's OIDC token for this job
 # (a federated credential trusted only for this environment): no Windows credential is stored anywhere; the
-# environment holds only identifiers (tenant, client, subscription) and the account, profile and endpoint names.
+# environment holds only identifiers (tenant, client) and the account, profile and endpoint names.
 # Prints only PASS or FAIL per check, and keeps the signed probe as a one-day run artifact; nothing is released.
 # Run by hand: gh workflow run windows-signing-check.yml -R sagemathinc/sagebrush --ref master -f sign_windows=true
 name: windows-signing-check
@@ -36,13 +36,12 @@ jobs:
         env:
           TENANT: ${{ secrets.AZURE_TENANT_ID }}
           CLIENT: ${{ secrets.AZURE_CLIENT_ID }}
-          SUBSCRIPTION: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ENDPOINT: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
           ACCOUNT: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
           PROFILE: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
         run: |
           $fails = 0
-          foreach ($n in 'TENANT','CLIENT','SUBSCRIPTION','ENDPOINT','ACCOUNT','PROFILE') {
+          foreach ($n in 'TENANT','CLIENT','ENDPOINT','ACCOUNT','PROFILE') {
             if ([string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($n))) { "FAIL  $n is empty or missing"; $fails++ } else { "PASS  $n is set" }
           }
           if ($env:ENDPOINT -notmatch '^https://[a-z0-9]+\.codesigning\.azure\.net/?$') { "FAIL  ARTIFACT_SIGNING_ENDPOINT isn't an Artifact Signing endpoint"; $fails++ } else { "PASS  ARTIFACT_SIGNING_ENDPOINT is an Artifact Signing endpoint" }
@@ -59,11 +58,13 @@ jobs:
           if ($s.Status -ne 'NotSigned') { "FAIL  the probe isn't unsigned before signing ($($s.Status))"; exit 1 }
           "PASS  the probe is built, unsigned"
 
+      # (a tenant-level sign-in: the CI identity holds one role, on the certificate profile, and none on any
+      #  subscription, so it sees no subscription; signing needs none)
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          allow-no-subscriptions: true
 
       # (signs with the Azure CLI sign-in above alone: every other credential type is left out; no caches in this job)
       - uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
