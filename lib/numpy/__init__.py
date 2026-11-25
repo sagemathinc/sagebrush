@@ -826,6 +826,15 @@ def _one_out(out):
     return out
 
 
+class _NoValueType:
+    # (NumPy's np._NoValue: the default that tells an omitted argument from an explicit None)
+    def __repr__(self):
+        return "<no value>"
+
+
+_NoValue = _NoValueType()
+
+
 class ufunc:
     def __init__(self, name, nin, op=None, identity=None):
         self.__name__ = name
@@ -948,7 +957,12 @@ class ufunc:
             res[idx] = r
         return res
 
-    def reduce(self, a, axis=0, dtype=None, out=None, keepdims=False, initial=None, where=True):
+    def reduce(self, a, axis=0, dtype=None, out=None, keepdims=False, initial=_NoValue, where=True):
+        # (an explicit initial=None leaves the reduction without an identity, refused as NumPy refuses it; omitted, the
+        # ufunc's own identity serves)
+        first = initial is None
+        if first:
+            _no_identity(asarray(a), axis, where, self.__name__)
         if out is not None:
             # (written into out, which must fit the result as NumPy's iterator checks it; computed in the loop both
             # the input's and out's dtypes convert to, as NumPy resolves a reduction with out (no promotion of small
@@ -960,6 +974,8 @@ class ufunc:
                 dtype = result_type(asarray(a).dtype, out.dtype)
             out[...] = asarray(self.reduce(a, axis, dtype, None, keepdims, initial, where))
             return out
+        if initial is _NoValue:
+            initial = None
         a = asarray(a)
         if dtype is not None:
             dt = self._loop(dtype)
@@ -968,7 +984,8 @@ class ufunc:
         quick = {"add": sum, "multiply": prod, "maximum": amax, "minimum": amin, "logical_and": all,
                  "logical_or": any}
         if self._op in quick and initial is None and not (dtype is not None and _wraps_in(self._op, dt)):
-            r = quick[self._op](a, axis=axis, keepdims=keepdims)
+            # (a sum without an identity starts from its first element: a product's 1 changes nothing)
+            r = quick[self._op](a, axis=axis, keepdims=keepdims, **({"initial": None} if first and self._op == "add" else {}))
             if dtype is not None:
                 # (sum promotes small ints to int64 and bools to int: the
                 # accumulator is dtype, where an int sum wraps as it does
@@ -1282,12 +1299,83 @@ def _axes(a, axis):
     # (an axis named twice is left for the reduction itself to refuse, with NumPy's message)
     if axis is None:
         return tuple(range(a.ndim))
+    if isinstance(axis, list):
+        _refuse_list_axis(axis)
+    from _operator import index
     # (each axis an index, as NumPy's normalize_axis_index takes it: a float refused with its text, np.bool_ as no
     # index; and an axis out of bounds refused with NumPy's AxisError, as the reductions refuse it: a 0-d array has none)
     axes = axis if isinstance(axis, (tuple, list)) else (axis,)
     if _builtins.any(isinstance(x, float) for x in axes):
         raise TypeError("integer argument expected, got float")
-    return tuple(_normalize_axis_index(x, a.ndim) for x in axes)
+    axes = tuple(index(x) for x in axes)
+    for x in axes:
+        if not -a.ndim <= x < a.ndim:
+            raise _AxisError(x, a.ndim)
+    axes = tuple(x % a.ndim for x in axes)
+    if len(set(axes)) != len(axes):
+        raise ValueError("duplicate value in 'axis'")  # (an axis named twice: NumPy's, #1944)
+    return axes
+
+
+def _refuse_list_axis(axis):
+    # (NumPy's C reductions, sort, squeeze, diff and concatenate read an axis as an int or a tuple of ints: a list is
+    # its TypeError, #1944; the functions that take axes by normalize_axis_tuple, average and median, take a list)
+    if isinstance(axis, list):
+        raise TypeError("'%s' object cannot be interpreted as an integer" % type(axis).__name__)
+
+
+def _reduce_axes(a, axis):
+    # (a C reduction's axes, read as NumPy's reductions read them: a list refused, and each axis in turn, alone or in a
+    # tuple, a bool refused, then an index (a float in Python's words) in bounds; then none repeated; a 0-d operand
+    # takes the single axis 0 or -1 as none)
+    from _operator import index
+    if axis is None:
+        return tuple(range(a.ndim))
+    _refuse_list_axis(axis)
+    one = not isinstance(axis, tuple)
+    axes = []
+    for x in (axis,) if one else axis:
+        if isinstance(x, (_builtins.bool, bool_)):
+            raise TypeError("an integer is required")
+        x = index(x)
+        if one and a.ndim == 0 and x in (0, -1):
+            return ()
+        if not -a.ndim <= x < a.ndim:
+            raise _AxisError(x, a.ndim)
+        axes.append(x % a.ndim)
+    if len(set(axes)) != len(axes):
+        raise ValueError("duplicate value in 'axis'")
+    return tuple(axes)
+
+
+def _where_mask(a, where, axis):
+    # (a reduction's where=: a bool mask. An array is converted by the safe rule (an int or float one refused, a 0-d one
+    # as a scalar in NumPy's words), anything else by its truth values, below. Then the reduction's axes are checked,
+    # and then the mask must broadcast to the operand without stretching it, refused in NumPy's words: NumPy's order)
+    if isinstance(where, ndarray):
+        w = where
+        if w.dtype != bool_:
+            if not can_cast(w.dtype, bool_):
+                raise TypeError("Cannot cast %s from dtype('%s') to dtype('bool') according to the rule 'safe'"
+                                % ("scalar" if w.ndim == 0 else "array data", w.dtype.name))
+            w = w.astype(bool_)
+    else:
+        # (a Python value, NumPy scalar, list, tuple or range: each element's own truth value, as NumPy converts it, not
+        # through a common dtype first ([False, "False"] is [False, True]); None is False)
+        def truth(v):
+            return [truth(e) for e in v] if isinstance(v, (list, tuple, range)) else _builtins.bool(v)
+        w = array(truth(where), dtype=bool_)
+    _reduce_axes(a, axis)
+    if w.ndim > a.ndim:
+        raise ValueError("input operand has more dimensions than allowed by the axis remapping")
+    try:
+        fits = broadcast_shapes(a.shape, w.shape) == a.shape
+    except ValueError:
+        fits = False
+    if not fits:
+        raise ValueError("operands could not be broadcast together with remapped shapes [original->remapped]: %s %s "
+                         % (_shape_text(a.shape), _shape_text(w.shape)))
+    return broadcast_to(w, a.shape)
 
 
 def _count(a, axis):
@@ -1304,19 +1392,41 @@ def _out(r, out):
     return r
 
 
-def sum(a, axis=None, dtype=None, out=None, keepdims=False, initial=None, where=True):
-    a = asarray(a)
+def _no_identity(a, axis, where, name):
+    # (an explicit initial=None: the reduction has no identity, as NumPy's ufunc reduce takes it. After the mask and the
+    # axes are checked, any mask but True is refused, and so is a reduction over an empty axis, in NumPy's words)
     if where is not True:
-        a = _np.where3(where, a, zeros(1, a.dtype))
-    r = _np.sum(a, axis, keepdims, dtype)
-    if initial is not None:
+        _where_mask(a, where, axis)
+        raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to "
+                         "specify 'initial'" % name)
+    if _builtins.any(a.shape[ax] == 0 for ax in _reduce_axes(a, axis)):
+        raise ValueError("zero-size array to reduction operation %s which has no identity" % name)
+
+
+def sum(a, axis=None, dtype=None, out=None, keepdims=False, initial=_NoValue, where=True):
+    a = asarray(a)
+    if initial is None:
+        _no_identity(a, axis, where, "add")
+    if where is not True:
+        a = _np.where3(_where_mask(a, where, axis), a, zeros((), a.dtype))
+    # (without an identity, each sum starts from its first element, as NumPy's)
+    r = _np.sum(a, axis, keepdims, dtype, initial is None)
+    if initial is not None and initial is not _NoValue:
         r = r + initial
     return _out(r, out)
 
 
-def prod(a, axis=None, dtype=None, out=None, keepdims=False, initial=None, where=True):
+def prod(a, axis=None, dtype=None, out=None, keepdims=False, initial=_NoValue, where=True):
     # (initial starts the product, as NumPy's reduction: not a last factor)
-    r = _np.prod(asarray(a), axis, keepdims, dtype, initial)
+    a = asarray(a)
+    if initial is None:
+        _no_identity(a, axis, where, "multiply")
+    if initial is _NoValue:
+        initial = None
+    # (where=, #1944: the mask checked here, then the runtime's product folds the kept elements only, from the identity
+    # or initial, in the order NumPy's iterator takes for the input, the result and the mask)
+    m = None if where is True else _where_mask(a, where, axis)
+    r = _np.prod(a, axis, keepdims, dtype, initial, m)
     return _out(r, out)
 
 
@@ -1546,7 +1656,7 @@ def median(a, axis=None, out=None, overwrite_input=False, keepdims=False):
     elif isinstance(axis, (tuple, list)):
         # (several axes, as NumPy's: they are moved last and taken as one; keepdims keeps each of them; a float
         # refused as the reductions refuse it, an axis named twice as NumPy's median does)
-        ax = _normalize_axis_tuple(_axes(a, axis), a.ndim)
+        ax = _median_axes(a, axis)
         keep = [i for i in range(a.ndim) if i not in ax]
         m = 1
         for i in ax:
@@ -1564,6 +1674,14 @@ def median(a, axis=None, out=None, overwrite_input=False, keepdims=False):
     if keepdims:
         r = r.reshape((1,) * a.ndim) if axis is None else expand_dims(r, ax)
     return r if r.ndim else r[()]
+
+
+def _median_axes(a, axis):
+    # (median's several axes, as NumPy's normalize_axis_tuple takes them: a list too, a float refused as the
+    # reductions refuse it, an axis named twice NumPy's "repeated axis")
+    if _builtins.any(isinstance(x, float) for x in axis):
+        raise TypeError("integer argument expected, got float")
+    return _normalize_axis_tuple(axis, a.ndim)
 
 
 def _keepdims_out_index(out, nd, axis, keepdims):
@@ -1584,7 +1702,7 @@ def _median_out(a, axis, out, keepdims):
     ix = _keepdims_out_index(out, a.ndim, axis, keepdims)
     if isinstance(axis, (tuple, list)):
         # (several axes, as median's own: moved last and taken as one, the rest in their order)
-        axes = _normalize_axis_tuple(_axes(a, axis), a.ndim)
+        axes = _median_axes(a, axis)
         keep = [i for i in range(a.ndim) if i not in axes]
         m = 1
         for i in axes:
@@ -1864,6 +1982,8 @@ def percentile(a, q, axis=None, out=None, overwrite_input=False, method="linear"
 
 def average(a, axis=None, weights=None, returned=False, *, keepdims=False):
     a = asarray(a)
+    if isinstance(axis, list):
+        axis = tuple(axis)  # (NumPy's normalize_axis_tuple takes a list; mean then gets a tuple)
     if axis is not None:
         _normalize_axis_tuple(axis, a.ndim, argname="axis")
     if weights is None:
@@ -1954,9 +2074,37 @@ def squeeze(a, axis=None):
     a = asarray(a)
     if axis is None:
         return a.reshape(tuple(n for n in a.shape if n != 1))
-    axes = [_normalize_axis_index(x, a.ndim) for x in (axis if isinstance(axis, (tuple, list)) else [axis])]
-    if len(set(axes)) != len(axes):
-        raise ValueError("duplicate value in 'axis'")
+    from _operator import index
+    # (the axes as NumPy's multi-axis conversion reads them: a bool refused, each an index that fits a C long and a C
+    # int, in bounds and not repeated, checked one by one in order; a 0-d array takes the single axis 0 or -1 as none)
+    if isinstance(axis, tuple):
+        axes = []
+        for x in axis:
+            if isinstance(x, (_builtins.bool, bool_)):
+                raise TypeError("integers are required for the axis tuple elements")
+            x = index(x)
+            if not -2 ** 63 <= x < 2 ** 63:
+                raise OverflowError("Python int too large to convert to C long")
+            if not -2 ** 31 <= x < 2 ** 31:
+                raise ValueError("integer won't fit into a C int")
+            if not -a.ndim <= x < a.ndim:
+                raise _AxisError(x, a.ndim)
+            if x % a.ndim in axes:
+                raise ValueError("duplicate value in 'axis'")
+            axes.append(x % a.ndim)
+    else:
+        if isinstance(axis, (_builtins.bool, bool_)):
+            raise TypeError("an integer is required for the axis")
+        x = index(axis)
+        if not -2 ** 63 <= x < 2 ** 63:
+            raise OverflowError("Python int too large to convert to C long")
+        if not -2 ** 31 <= x < 2 ** 31:
+            raise ValueError("integer won't fit into a C int")
+        if a.ndim == 0 and x in (0, -1):
+            return a.reshape(())
+        if not -a.ndim <= x < a.ndim:
+            raise _AxisError(x, a.ndim)
+        axes = [x % a.ndim]
     for x in axes:
         if a.shape[x] != 1:
             raise ValueError("cannot select an axis to squeeze out which has size not equal to one")
@@ -2478,9 +2626,18 @@ def setdiff1d(a, b, assume_unique=False):
 
 
 def diff(a, n=1, axis=-1, prepend=None, append=None):
+    # (NumPy's order: n = 0 gives back the input itself, unconverted; a negative n and a 0-d input refused; then the
+    # axis read as an index, as normalize_axis_index reads it: a list, tuple or np.bool_ refused, a float in its own
+    # words, #1944)
+    if n == 0:
+        return a
+    if n < 0:
+        raise ValueError("order must be non-negative but got " + repr(n))
     a = asarray(a)
     if a.ndim == 0:
         raise ValueError("diff requires input that is at least one dimensional")
+    if isinstance(axis, float):
+        raise TypeError("integer argument expected, got float")
     axis = _normalize_axis_index(axis, a.ndim)
     if prepend is not None or append is not None:
         parts = []
@@ -2579,8 +2736,7 @@ def trapezoid(y, x=None, dx=1.0, axis=-1):
     y = asarray(y)
     lo = [slice(None)] * y.ndim
     hi = [slice(None)] * y.ndim
-    # (an axis out of range: NumPy's own IndexError, from these assignments)
-    lo[axis] = slice(None, -1)
+    lo[axis] = slice(None, -1)  # (first, as NumPy's: a list axis is list indexing's own TypeError)
     hi[axis] = slice(1, None)
     n = y.shape[axis]
     if x is None:
@@ -3365,12 +3521,12 @@ def _m_min(self, axis=None, out=None, keepdims=False, initial=None, where=True):
     return amin(self, axis, out, keepdims, initial, where)
 
 
-def _m_sum(self, axis=None, dtype=None, out=None, keepdims=False, initial=None, where=True):
+def _m_sum(self, axis=None, dtype=None, out=None, keepdims=False, initial=_NoValue, where=True):
     return sum(self, axis, dtype, out, keepdims, initial, where)
 
 
-def _m_prod(self, axis=None, dtype=None, out=None, keepdims=False, initial=None, where=True):
-    return prod(self, axis, dtype, out, keepdims, initial)
+def _m_prod(self, axis=None, dtype=None, out=None, keepdims=False, initial=_NoValue, where=True):
+    return prod(self, axis, dtype, out, keepdims, initial, where)
 
 
 def _m_mean(self, axis=None, dtype=None, out=None, keepdims=False, *, where=True):
