@@ -104,10 +104,19 @@ export const LATEX_LAZY = {
 // (252,517 raw / 84,516 gzip: Nov 21 2026, the editor's own list of examples gone (the gallery's panel the only one):
 //  252,453 / 84,452 measured on the shipped build of its merge with master 68280840, with bun 1.4.4 and node 24.21.0,
 //  + 64)
-// (253,214 raw / 84,728 gzip: Nov 23 2026, amsthm's \qedhere (issue 1800), its symbol on its own row (KaTeX's tag):
-//  253,150 / 84,684 measured on the shipped build of master 4dd77825 with it (252,410 / 84,437 without), with bun 1.4.4
-//  and node 24.21.0; raw + 64, gzip as it was set at 253,044 / 84,664 + 64, still above)
-export const LATEX_CAPS = { raw: 253214, gzip: 84728 };
+// (252,762 raw / 84,654 gzip: Nov 23 2026, the preview's watchdog not counting the page's own blocking (watchdog.ts):
+//  252,698 / 84,590 measured on the shipped build of master 881d80a8 with it, with bun 1.4.4 and node 24.21.0, + 64)
+// (255,748 raw / 85,629 gzip: Nov 24 2026, amsart's front matter (every author, the abstract after the title, the first
+//  page's notes, the addresses at the end, \title[short] and \author[short]), a bibliography's label column as wide as its
+//  widest label, a \cite note typeset: 255,684 / 85,565 measured on the shipped build of its merge with master bf92ce4f,
+//  with bun 1.4.4 and node 24.21.0, + 64)
+// (255,840 raw / 85,653 gzip: Nov 24 2026, a block that fits is never "too large", the size said the one over the limit
+//  (web/latex/split.ts): 255,776 / 85,589 measured on the shipped build of its merge with master a1153559, with bun 1.4.4 and
+//  node 24.21.0 (+92 / +24 over master's 255,684 / 85,565), + 64)
+// (256,580 raw / 85,902 gzip: Nov 25 2026, amsthm's \qedhere (issue 1800), its symbol on its own row (KaTeX's tag):
+//  256,516 / 85,838 measured on the shipped build of its merge with master c0066039, with bun 1.4.4 and node 24.21.0
+//  (+740 / +249 over master's 255,776 / 85,589), + 64)
+export const LATEX_CAPS = { raw: 256580, gzip: 85902 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -205,7 +214,7 @@ export const LATEX_LAZY_CAPS = {
   // (65,566 / 22,526: Nov 22 2026, A1 (#1546): the agent's access as an icon in the composer's footer row, its CSS (a
   //  masked shield and the footer rules) in the pairing's chunk (agent-ui.ts), measured on the shipped build of the head
   //  on master e4c0b8c0 with bun 1.4.4 and node 24.21.0: 65,502 / 22,462, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 67404, gzip: 23063 },
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 67913, gzip: 23282 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the

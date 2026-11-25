@@ -14,7 +14,7 @@ fn main() {
         println!("cargo:rerun-if-changed={p}");
     }
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
-        tauri_build::AppManifest::new().commands(&["startup_files", "selftest_file", "selftest_open", "file_open_dialog", "file_save_dialog", "file_read_text", "file_write_text", "folder_list", "folder_read", "folder_write", "selftest_persist", "selftest_report", "app_log", "engine_start", "engine_send", "engine_ack", "engine_stop", "disk_list", "disk_stat", "disk_read", "disk_write", "disk_mkdir", "disk_rename", "disk_remove", "disk_where", "settings_write", "grants_read", "grants_write", "app_quit_hold", "app_quit_now"]),
+        tauri_build::AppManifest::new().commands(&["startup_files", "selftest_file", "selftest_open", "file_open_dialog", "file_save_dialog", "file_read_text", "file_write_text", "folder_list", "folder_read", "folder_write", "selftest_persist", "selftest_report", "app_log", "engine_start", "engine_send", "engine_ack", "engine_stop", "window_open", "window_claim", "disk_list", "disk_stat", "disk_read", "disk_write", "disk_mkdir", "disk_rename", "disk_remove", "disk_where", "settings_write", "grants_read", "grants_write", "app_quit_hold", "app_quit_now"]),
     ))
     .expect("failed to run tauri-build");
 }
