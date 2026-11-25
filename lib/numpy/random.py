@@ -15,6 +15,7 @@ import _nprandom as _r
 
 __all__ = ["seed", "rand", "randn", "random", "random_sample", "ranf", "sample", "randint", "random_integers",
            "uniform", "normal", "standard_normal", "exponential", "standard_exponential", "poisson",
+           "gamma", "standard_gamma",
            "choice", "shuffle", "permutation", "RandomState", "Generator", "default_rng", "get_state", "set_state"]
 
 
@@ -75,6 +76,21 @@ def _poisson(g, lam, size):
         return _r.poisson(g, lam, _size(size))
     lam = _np.broadcast_to(_np.asarray(lam, float), tuple(_size(size)))
     return _np.array([_r.poisson(g, float(v), None) for v in lam.ravel().tolist()], dtype=_np.int64).reshape(lam.shape)
+
+
+def _gamma(g, shape, scale, size):
+    # (NumPy's legacy gamma: shape, then scale, checked; array parameters drawn element by element in C order of
+    # their broadcast shape, each scale * standard_gamma(shape))
+    _nonneg(shape, "shape")
+    _nonneg(scale, "scale")
+    size = _bsize(size, shape, scale)
+    if not _np.shape(shape) and not _np.shape(scale):
+        z = _r.legacy_gamma(g, float(shape), _size(size))
+        return float(scale) * z
+    sh = tuple(_size(size))
+    sv = _np.broadcast_to(_np.asarray(shape, float), sh).ravel().tolist()
+    cv = _np.broadcast_to(_np.asarray(scale, float), sh).ravel().tolist()
+    return _np.array([c * _r.legacy_gamma(g, v, None) for v, c in zip(sv, cv)], dtype=float).reshape(sh)
 
 
 class RandomState:
@@ -143,6 +159,12 @@ class RandomState:
 
     def poisson(self, lam=1.0, size=None):
         return _poisson(self._g, lam, size)
+
+    def standard_gamma(self, shape, size=None):
+        return _gamma(self._g, shape, 1.0, size)
+
+    def gamma(self, shape, scale=1.0, size=None):
+        return _gamma(self._g, shape, scale, size)
 
     def randint(self, low, high=None, size=None, dtype=int):
         if high is None:
@@ -250,6 +272,8 @@ uniform = _global.uniform
 exponential = _global.exponential
 standard_exponential = _global.standard_exponential
 poisson = _global.poisson
+gamma = _global.gamma
+standard_gamma = _global.standard_gamma
 randint = _global.randint
 random_integers = _global.random_integers
 shuffle = _global.shuffle

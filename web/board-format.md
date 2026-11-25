@@ -3,7 +3,7 @@
 A board is a JSON file (`*.board.json`): notes with Markdown and math, live
 code, groups laid out for you, edges between items, pages or slides, and a
 guided tour. You describe structure; the board does the layout. Open a board at
-/board/ (its ⋯ menu > Open…, or drop the file on the
+/board/ (its File menu > Upload…, or drop the file on the
 page). A page that embeds a board uses https://sagebrush.space/frame/board/ (an absolute address: it is on another site).
 
 This page is for people and agents writing boards. Its fields are those of the
@@ -53,7 +53,9 @@ authoritative.
 - **Code is reactive.** A note with `code` is a code item. Its output is shown
   under it, and items that use a name it defines rerun when it changes, as in
   a reactive notebook. Code runs in the reader's browser, in a sandbox with no
-  network, so keep each item quick. `sagebrush board run FILE --timeout S`
+  network, so keep each item quick. A board brought in from a file (an
+  upload or a drop) runs its code only once the reader presses **▶ Run this
+  board's code**. `sagebrush board run FILE --timeout S`
   runs a board's code outside the browser, each item for at most `S`
   seconds from when the interpreter begins it. The whole run takes at most
   $122 + n \cdot (62 + S)$ seconds for $n$ runs (an item, or the check of
@@ -66,7 +68,7 @@ authoritative.
 - **Pictures** live in the top-level `images` object:
   `"images": {"fig1": {"w": 800, "h": 600, "src": "data:image/png;base64,..."}}`,
   and a note shows one with `"image": "fig1"`. A name is letters, digits, `_`
-  and `-` (no spaces or dots), up to 100 characters. `src` may be a raster `data:` URL
+  and `-` (no spaces or dots), up to 100 characters. `src` may be a `data:` URL (PNG, JPEG, GIF, WebP or SVG; an SVG of at most 2 MB)
   or an `https:` address; a board you hand to someone else should use `data:`
   URLs, so it is complete in one file. Keep a board under 16 MiB.
 - **Pages and slides.** For several pages, put `nodes`, `edges` and `steps` in
@@ -287,7 +289,7 @@ raises an error, and then the check decides nothing.
 
 `symbolic_equal` is an equality of expressions:
 - Cancellation counts, so $x^2/x$ equals $x$; it doesn't compare functions on a domain.
-- It is wrong only with a proof: a point with positive rational coordinates where each side, on its own, is an exact rational, and the two differ.
+- It is wrong only with a proof: a point with positive rational coordinates where each side, on its own, is an exact rational, and the two differ; or, where a side isn't (with sin or $e^x$, say), one where the two sides' certified interval enclosures don't overlap.
 - Otherwise it can't decide; trying points never makes it right.
 - With assumptions in force (`assume(...)`), it only simplifies.
 
@@ -592,13 +594,21 @@ A picture a note shows, by its name in the document's `images`.
 2. Search before you guess: `npx sagebrush@0.10.3 --search "elliptic curve rank"`.
 3. Open the board at /board/ to see the layout, or, on
    your own computer, `npx sagebrush@0.10.3 board open FILE`: the board in
-   your browser, shown again each time you rewrite FILE.
+   your browser, shown again each time you rewrite FILE. Without a browser,
+   `npx sagebrush@0.10.3 board render FILE -o OUT.svg` draws it as SVG
+   (`--page N`: one page). Code outputs are drawn only once
+   `npx sagebrush@0.10.3 board run FILE --store-previews --preview-ms 0` has
+   stored them, in NAME.previews.board.json: render that file.
 
 ## What's new
 
-- **2026-10-16:** questions for the reader (`"kind": "ask"`), their answers
-  (and the reader's own words, `note`) kept in the board, and
-  `sagebrush board answers`.
+- **2026-11-07:** pictures may be SVG (`data:image/svg+xml`).
+- **2026-10-17:** `decide`: what a reader's own words may show.
+- **2026-10-16:**
+  - questions for the reader (`"kind": "ask"`), their answers (and the
+    reader's own words, `note`) kept in the board, and `sagebrush board answers`;
+  - a question's `check`, `hints` and `next`, and `sagebrush board try`;
+  - the `spring` layout.
 - **2026-10-14:**
   - `"mode": "magma"` and `"mode": "matlab"`;
   - template pages (`template`, `uses`) and stickers;

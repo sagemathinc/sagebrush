@@ -254,6 +254,77 @@
     ]
   },
   {
+    "name": "Integral",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f) -> RngUPolElt",
+    "summary": "The integral of a polynomial over a field of characteristic 0, with constant term 0.",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(Rationals()); Integral(3*x^2 + 2*x + 1);",
+        "expected": "x^3 + x^2 + x\n"
+      }
+    ],
+    "differs": [
+      "Polynomials over the rationals only (over the integers and finite fields, refused in Magma's words): over a number field, it is refused as not supported yet."
+    ],
+    "status": "partial",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials"
+    ]
+  },
+  {
+    "name": "Normalize",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f) -> RngUPolElt",
+    "summary": "The polynomial made monic over a field; over the integers, with a positive leading coefficient.",
+    "examples": [
+      {
+        "code": "P<x> := PolynomialRing(Rationals()); Normalize(-3*x^2/7 + 1);",
+        "expected": "x^2 - 7/3\n"
+      },
+      {
+        "code": "R<y> := PolynomialRing(Integers()); Normalize(-2*y + 4);",
+        "expected": "2*y - 4\n"
+      }
+    ],
+    "differs": [
+      "Polynomials over the integers and the rationals only: over a number field or another ring, it is refused as not supported yet."
+    ],
+    "status": "partial",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials"
+    ],
+    "aliases": [
+      "Normalise"
+    ]
+  },
+  {
+    "name": "SquarefreeFactorization",
+    "kind": "function",
+    "signature": "(<RngUPolElt> f) -> SeqEnum",
+    "summary": "The square-free factorization of a nonzero polynomial: [<g, i>], a square-free g for each multiplicity i (over Z, the content's primes too).",
+    "examples": [
+      {
+        "code": "R<y> := PolynomialRing(Integers()); SquarefreeFactorization(12*(y + 1)^2);",
+        "expected": "[\n    <3, 1>,\n    <2, 2>,\n    <y + 1, 2>\n]\n"
+      },
+      {
+        "code": "P<x> := PolynomialRing(Rationals()); SquarefreeFactorization((x - 1)^2*(x + 2)/3);",
+        "expected": "[\n    <x + 2, 1>,\n    <x - 1, 2>\n]\n"
+      }
+    ],
+    "differs": [
+      "Polynomials over the integers and the rationals only: over a number field or another ring, it is refused as not supported yet."
+    ],
+    "status": "partial",
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "polynomials"
+    ]
+  },
+  {
     "name": "Discriminant",
     "kind": "function",
     "signature": "(<RngUPolElt> f) -> RngElt",

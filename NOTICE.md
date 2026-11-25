@@ -16,7 +16,9 @@ Most of Sagebrush is MIT OR Apache-2.0. `web/cloud/` is under the Microsoft Refe
 
 Some parts are derived from other permissively licensed projects. Their
 notices follow and must be kept with the parts named. Nothing in Sagebrush
-is derived from GPL software: PARI, Sage, Magma and FLINT are used only from
+is derived from GPL software, except code whose copyright holder gave
+permission for it to be ported to Sagebrush and licensed under MIT OR
+Apache-2.0 (PSAGE, below): PARI, Sage, Magma and FLINT are used only from
 the outside, as oracles in tests and as benchmarks.
 
 ## Code derived from other projects

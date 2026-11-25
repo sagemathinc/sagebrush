@@ -1,0 +1,6 @@
+before
+
+In file "test_error_zero_denominator.m", line 4, column 20:
+>> f := func< | (-1)/(0) >;
+                      ^
+User error: Illegal zero denominator

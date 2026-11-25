@@ -760,7 +760,7 @@ def _reduced_field(A, B):
     computation's floating point needs a well-scaled polynomial (f has
     coefficients like 10^14 for a field of discriminant -1144).  None if
     f itself is no worse."""
-    from sagebrush._engine import call
+    from _sagebrush_lib._engine import call
     nf = call("nf_data", f=[str(B), str(A), "0", "1"])
     den = int(nf["den"])
     W = [[_F(int(x), den) for x in row] for row in nf["basis"]]
@@ -841,7 +841,7 @@ def selmer(a, verbose=False):
     of A (coefficients over Q of 1, t, t^2, products kept factored as
     exponent vectors over the relation elements), and the data used."""
     import _sage_ec as ec
-    from sagebrush._engine import call
+    from _sagebrush_lib._engine import call
     c4, c6 = ec._c(a)
     A, B = -27 * c4, -54 * c6
     S = sorted({2, 3} | {p for p, e in ec._factor_int(ec._disc(a))})
