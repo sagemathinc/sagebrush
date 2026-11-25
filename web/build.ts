@@ -785,12 +785,22 @@ if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force:
   for (const f of ["index.html", "connect/index.html", "connect/copy.js", "connect.md"]) copyFileSync(join(here, "agents", f), join(here, "dist", "agents", f));
   // (the reviewed sagebrush-agent tarball the help box points to: not committed; placed in web/agents by the publisher)
   for (const f of readdirSync(join(here, "agents"))) if (/^sagebrush-agent-\d+\.\d+\.\d+\.tgz$/.test(f)) copyFileSync(join(here, "agents", f), join(here, "dist", "agents", f));
+  // (the person's Autonomous fleet, read only: /agents/fleet/, a page and a script of its own, so none of the fleet
+  //  code loads for people without a fleet (pages-fleet r2.1, Q3))
+  mkdirSync(join(here, "dist", "agents", "fleet"), { recursive: true });
+  const fr = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "agents", "fleet", "page.ts")], outdir: join(here, "dist", "agents", "fleet"), naming: "fleet.js", target: "browser", format: "esm", minify: true });
+  if (!fr.success) {
+    for (const l of fr.logs) console.error(l);
+    process.exit(1);
+  }
+  copyFileSync(join(here, "agents", "fleet", "index.html"), join(here, "dist", "agents", "fleet", "index.html"));
   // (the site's copy: the pages and the script; the help box points at the reviewed tarball's own immutable URL, so
   // no tarball is served from the site)
   if (hasSite) {
     mkdirSync(join(siteDir, "public", "agents"), { recursive: true });
     mkdirSync(join(siteDir, "public", "agents", "connect"), { recursive: true });
-    for (const f of ["index.html", "agents.js", "connect/index.html", "connect/copy.js", "connect.md"]) copyFileSync(join(here, "dist", "agents", f), join(siteDir, "public", "agents", f));
+    mkdirSync(join(siteDir, "public", "agents", "fleet"), { recursive: true });
+    for (const f of ["index.html", "agents.js", "connect/index.html", "connect/copy.js", "connect.md", "fleet/index.html", "fleet/fleet.js"]) copyFileSync(join(here, "dist", "agents", f), join(siteDir, "public", "agents", f));
   }
 }
 // a space in 3D (web/space, /space/): the viewer, its page and the format's description. Its code loads only there:

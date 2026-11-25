@@ -101,3 +101,23 @@ export async function verifyGrant(ctx: FleetCtx, chain: Chain, cert: HostCert, g
 export async function verifyGrantAck(ctx: FleetCtx, cert: HostCert, ack: string, currentGen: number): Promise<unknown> {
   return fleetCore().verifyGrantAck(utf8(ack), { aud: ctx.aud, fleet: ctx.fleet, cert, currentGen });
 }
+
+/**
+ * What a person compares for a host (§3.1): the first 100 bits of its fingerprint, recomputed from the verified
+ * certificate's keys (never taken from the object), as 20 base32 characters in groups of 4.
+ */
+export async function hostFingerprintShown(cert: HostCert): Promise<string> {
+  const core = fleetCore();
+  return core.showFingerprint(await core.hostFingerprint(cert.body.host, cert.signRaw, cert.encRaw));
+}
+
+/**
+ * A host's revocation (sb.revocation.v1, §2.3), verified against the chain: signed by a device of the fleet (one since
+ * removed still counts: obeying a revocation only narrows), and about this very host. The verified body, or a refusal.
+ */
+export async function verifyHostRevocation(ctx: FleetCtx, chain: Chain, host: string, revocation: string): Promise<unknown> {
+  const core = fleetCore();
+  const b = (await core.verifyRevocation(utf8(revocation), { aud: ctx.aud, fleet: ctx.fleet, chain })) as { what?: unknown; id?: unknown };
+  if (b.what !== "host" || b.id !== host) core.refuse("bad_form", "a revocation of something else");
+  return b;
+}
