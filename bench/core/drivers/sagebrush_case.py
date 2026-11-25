@@ -342,17 +342,13 @@ def prepare(v):
         return lambda: f.galois_group()
     if case_id in ("modsym_charpoly", "newforms"):
         operands([n, 2])
-    if case_id == "hecke_matrix":
+    if case_id in ("hecke_matrix", "hecke_matrix_prebuilt"):
         # (T_n at the fixed level 389: the twisted traces build their
-        # newspace data inside each call, so there is no space to prebuild)
+        # newspace data inside each call, so there is no space to prebuild;
+        # the two rows differ on Magma's side only)
         operands([HECKE_LEVEL, 2, n])
         S = CuspForms(HECKE_LEVEL, 2)
         return lambda: S.hecke_matrix(n)
-    if case_id == "hecke_space":
-        # (Magma's space construction; ours builds no space object, so the
-        # dimension formula alone: the row has no ratio)
-        operands([n, 2, 0])
-        return lambda: CuspForms(n, 2).dimension()
     if case_id == "ec_aplist":
         operands([0, 0, 1, -7, 6, n])
     if case_id == "modsym_charpoly":
@@ -403,11 +399,9 @@ def signature(answer):
         return str(int(answer.order()))
     if case_id == "modsym_charpoly":
         return "%d:%d" % (len(answer) - 1, seq_hash(answer))
-    if case_id == "hecke_matrix":
+    if case_id in ("hecke_matrix", "hecke_matrix_prebuilt"):
         f = answer.charpoly()
         return "%d:%d" % (f.degree(), seq_hash([int(c) for c in coeffs(f)]))
-    if case_id == "hecke_space":
-        return str(int(answer))
     if case_id == "newforms":
         forms = answer["newforms"] if isinstance(answer, dict) else answer
         dims = sorted(int(f["dim"] if "dim" in f else f["dimension"]) for f in forms)

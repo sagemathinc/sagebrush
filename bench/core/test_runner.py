@@ -412,7 +412,7 @@ ARTS = {
 class Points(unittest.TestCase):
     """point() with the drivers replaced (no subprocess): its decisions."""
 
-    def run_point(self, inputs, expected=None, arts=ARTS, steal=0.0, row=ROW):
+    def run_point(self, inputs, expected=None, arts=ARTS, steal=0.0, row=ROW, cold=None):
         calls = []
 
         def fake_invoke(b, row, n, mode, timeout, k=1):
@@ -420,7 +420,10 @@ class Points(unittest.TestCase):
             if mode == "inputs":
                 return {"status": "ok", "input_hash": inputs[b]}
             if mode == "once":
-                return {"status": "ok", "signature": "s"}
+                r = {"status": "ok", "signature": "s"}
+                if cold:
+                    r["seconds_cold"] = cold[b]
+                return r
             return {"status": "ok", "seconds": 1.0, "signature": "K:1", "steal": steal}
 
         with (
@@ -457,6 +460,27 @@ class Points(unittest.TestCase):
         self.assertTrue(rec["noisy"])
         rec, _ = self.run_point({"user": "5", "magma": "5"}, steal=0.001)
         self.assertFalse(rec["noisy"])
+
+    def test_once_records_the_cold_sample(self):
+        def once(line):
+            cmd = [PY, "-c", "print(%r)" % line]
+            with (
+                mock.patch.object(run, "command", lambda b, row, n, mode, k=1: cmd),
+                mock.patch.object(run, "CAP", None),
+            ):
+                return run.invoke("user", ROW, 10, "once", 30)
+
+        r = once("RESULT|0.125000000|7:9")
+        self.assertEqual((r["status"], r["signature"], r["seconds_cold"]), ("ok", "7:9", 0.125))
+        self.assertEqual(once("RESULT|soon|7:9")["status"], "error")
+
+    def test_a_cold_row_compares_the_cold_samples_too(self):
+        cold = {"user": 3.0, "magma": 1.5}
+        rec, _ = self.run_point({"user": "5", "magma": "5"}, cold=cold)
+        self.assertNotIn("ratio_user_cold", rec)
+        rec, _ = self.run_point({"user": "5", "magma": "5"}, row=dict(ROW, cold=True), cold=cold)
+        self.assertEqual(rec["ratio_user_cold"], 2.0)
+        self.assertEqual(rec["ratio_user"], 1.0)
 
     def test_a_row_marked_no_ratio_has_none(self):
         rec, _ = self.run_point({"user": "5", "magma": "5"})

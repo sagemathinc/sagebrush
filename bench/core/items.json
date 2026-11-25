@@ -1788,25 +1788,26 @@
    },
    "variants": 1,
    "variants_note": "one named input per size: the level 389, the prime p",
-   "route_note": "ours: twisted traces (each T_p builds its own newspace data, no space object); Magma: T_p on the sign-0 cuspidal modular symbols space (dimension 64, twice S_2), the space built outside the timer and timed in hecke_space",
-   "compares": "charpoly of T_p on S_2 (Magma's sign-0 charpoly is its square)"
+   "route_note": "ours: twisted traces (each T_p builds its own newspace data, no space object, no cache); Magma: the sign +1 cuspidal modular symbols space (dimension 32 = dim S_2) built inside the timer, then T_p: level to T_p on both sides. Magma's rebuild of an equal space is warm within a process, so ratio_user_cold also compares the cold first samples (one per process)",
+   "compares": "charpoly of T_p on S_2",
+   "cold": true
   },
   {
-   "id": "hecke_space",
+   "id": "hecke_matrix_prebuilt",
    "item": "ag3",
    "category": "modular forms",
-   "label": "the space for hecke_matrix: sign-0 cuspidal modular symbols, weight 2",
+   "label": "T_p on S_2(Gamma0(389)) (p = 2, 11, 97), Magma's space prebuilt (informational)",
    "sizes": {
     "s": {
-     "n": 389,
+     "n": 2,
      "timeout": 120
     },
     "m": {
-     "n": 1009,
+     "n": 11,
      "timeout": 300
     },
     "l": {
-     "n": 5003,
+     "n": 97,
      "timeout": 900
     }
    },
@@ -1818,9 +1819,9 @@
     "flint": null
    },
    "variants": 1,
-   "variants_note": "one named input per size, a fixed level",
-   "route_note": "Magma's space construction, timed apart from T_p; ours builds no space (the dimension formula alone), so this row has no ratio: add it to hecke_matrix to compare totals",
-   "compares": "dimension of S_2 only; no ratio",
+   "variants_note": "one named input per size: the level 389, the prime p",
+   "route_note": "Magma's T_p alone, on a sign +1 cuspidal space built outside the timer; ours as in hecke_matrix (no space to prebuild), so the row has no ratio: the gap to hecke_matrix is Magma's space construction",
+   "compares": "charpoly of T_p on S_2; no ratio",
    "calibration": false,
    "ratio": false
   },

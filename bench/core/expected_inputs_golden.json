@@ -559,20 +559,20 @@
    "variants": 1,
    "input_hash": "808210838"
   },
-  "hecke_space:l": {
-   "n": 5003,
-   "variants": 1,
-   "input_hash": "459954166"
+  "hecke_matrix_prebuilt:l": {
+   "input_hash": "808210933",
+   "n": 97,
+   "variants": 1
   },
-  "hecke_space:m": {
-   "n": 1009,
-   "variants": 1,
-   "input_hash": "523876388"
+  "hecke_matrix_prebuilt:m": {
+   "input_hash": "808210847",
+   "n": 11,
+   "variants": 1
   },
-  "hecke_space:s": {
-   "n": 389,
-   "variants": 1,
-   "input_hash": "808210836"
+  "hecke_matrix_prebuilt:s": {
+   "input_hash": "808210838",
+   "n": 2,
+   "variants": 1
   },
   "mat_fp31_charpoly:c0": {
    "n": 59,

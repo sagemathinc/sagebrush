@@ -1037,7 +1037,13 @@ def invoke(
     if kind == "INPUTS":
         r["input_hash"] = parts[0]
     elif kind == "RESULT":
+        # (the first op in a fresh process: the cold sample, recorded apart
+        # from the timed samples and never in a fit)
         r["signature"] = parts[1]
+        try:
+            r["seconds_cold"] = float(parts[0])
+        except ValueError:
+            r["status"], r["detail"] = "error", "bad RESULT seconds: " + text[-600:]
     else:
         med, sig, lo, hi, k, count = parts
         r.update(
@@ -1229,6 +1235,14 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
                 "seconds": theirs[bt],
             }
             rec["ratio_best"] = round(ours[bo] / theirs[bt], 4)
+        if row.get("cold"):
+            # (a row whose reference warms up across repetitions in one
+            # process, hecke_matrix: the cold first samples' ratio too)
+            def cold(b):
+                return rec["backends"].get(b, {}).get("check", {}).get("seconds_cold")
+
+            if cold("user") and cold(best):
+                rec["ratio_user_cold"] = round(cold("user") / cold(best), 4)
     rec["complete"] = True
     return rec
 
