@@ -118,7 +118,7 @@ function client(m, name) {
         },
         async ask(msg) { const r = ++req; ws.send(JSON.stringify({ ...msg, req: r })); return sock.next((x) => x.req === r); },
         async hello(device) {
-          ws.send(JSON.stringify({ t: "hello", v: 2, device, name: "test", index_after: 0 }));
+          ws.send(JSON.stringify({ t: "hello", v: 3, device, name: "test", index_after: 0 }));
           const w = await sock.next((x) => x.t === "welcome" || x.t === "error");
           const ix = w?.t === "welcome" ? await sock.next((x) => x.t === "index") : null;
           return { welcome: w, index: ix };
@@ -218,7 +218,7 @@ function client(m, name) {
       ok(b?.t !== "ack", "rollback: unbound: an op sent on that socket anyway is refused: " + JSON.stringify(b));
       sock.ws.close();
     }
-    const up = await c.check(s, [{ sha256: "0".repeat(64), ct_sha256: "0".repeat(64), size: 10 }]);
+    const up = await c.check(s, [{ address: "0".repeat(64), ct_sha256: "0".repeat(64), size: 10 }]);
     ok(up.code === 403, "rollback: unbound: uploads refused: " + up.code);
     await m.dispose();
     // (bound again: the same account goes on from what it had: its op kept, nothing lost or redone)

@@ -38,7 +38,7 @@ the PDF (see [Differences from pdflatex's output](#differences-from-pdflatexs-ou
 | Several files | `\input`, `\include`, a `.sty` file beside the `.tex` | found from the document's folder as TeX finds them, `../` included, never above the workspace's top folder |
 | Structure | `\part` to `\subparagraph`, `\maketitle`, `\tableofcontents`, `abstract`, `\appendix` | |
 | Text | `\textbf`, `\textit`, `\emph`, `\texttt`, `\textsc`, `\underline`, sizes, `\footnote` (also `[n]`), `\marginpar`, `\verb`, `verbatim` | |
-| Lists | `itemize`, `enumerate`, `description` | |
+| Lists | `itemize`, `enumerate`, `description` | enumitem's label=, ref= and start= options are followed (with \arabic\*, \alph\*, \roman\* and their capitals), and its spacing options are read and not drawn |
 | Mathematics | `$…$`, `\[…\]`, `equation`, `align`, `gather`, `multline`, `split`, `aligned`, `cases`, matrices, `alignat`, `flalign`; in math `\tag`, `\intertext`, `\text`, `\boxed`, `\cancel`; `\DeclareMathOperator` | typeset by KaTeX |
 | Theorems | `\newtheorem`, `\theoremstyle`, `proof` | |
 | References | `\label`, `\ref`, `\eqref`, `\pageref`, `\nameref`, `\autoref`, `\cref`, `\Cref` | resolved at once, no second run |

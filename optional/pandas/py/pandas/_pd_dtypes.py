@@ -21,7 +21,11 @@ is in the 0.x subset (NotImplementedError), rather than another dtype.
 
 import numpy as np
 
-__all__ = ["StringDtype", "STR", "is_missing", "infer", "resolve_dtype"]
+__all__ = ["StringDtype", "STR", "SMALL_INTS", "INTS", "is_missing", "infer", "resolve_dtype"]
+
+# (numpy's smaller integers: a column of one holds a numpy array of that dtype, as int64 does; astype gives them)
+SMALL_INTS = ("int8", "int16", "int32", "uint8", "uint16", "uint32")
+INTS = ("int64",) + SMALL_INTS
 
 _I64_MIN, _I64_MAX = -(2 ** 63), 2 ** 63 - 1
 
@@ -150,6 +154,10 @@ def resolve_dtype(dtype):
     if isinstance(dtype, str):
         if dtype == "str":
             return STR
+        if dtype == "category":
+            raise NotImplementedError("pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet")
+        if dtype in SMALL_INTS:
+            return dtype
         # ('string' is StringDtype(na_value=pd.NA), the nullable variant:
         # out, as pd.NA is)
         if dtype in ("int64", "int", "i8"):
@@ -174,6 +182,6 @@ def resolve_dtype(dtype):
         nd = np.dtype(dtype)
     except Exception:
         nd = None
-    if nd is not None and str(nd) in ("int64", "float64", "bool"):
+    if nd is not None and str(nd) in ("int64", "float64", "bool") + SMALL_INTS:
         return str(nd)
     raise NotImplementedError("pandas: dtype=%r is not in Sagebrush's pandas 0.x subset" % (dtype,))

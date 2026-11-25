@@ -123,10 +123,19 @@ export const LATEX_LAZY = {
 // (289,970 raw / 97,826 gzip: Nov 25 2026, \bibliography reading the .bbl BibTeX made beside the .tex, and natbib's
 //  numbers and sort&compress: 289,906 / 97,762 measured on the shipped build of its merge with master d4692ae4, with bun
 //  1.4.4 and node 24.21.0 (+2,343 / +766 over master's 287,563 / 96,996), + 64)
-// (290,885 raw / 98,139 gzip: Nov 25 2026, latex check naming an \input file and its line for a problem found there (the
-//  expander's file-line markers, the renderer's where()): 290,821 / 98,075 measured on the shipped build of master
-//  6e3a0f71 with it, with bun 1.4.4 and node 24.21.0 (+915 / +313 over master's 289,906 / 97,762), + 64)
-export const LATEX_CAPS = { raw: 290885, gzip: 98139 };
+// (291,697 raw / 98,473 gzip: Nov 25 2026, enumitem's label=, ref= and start= on a list: 291,633 / 98,409 measured on the
+//  shipped build of its merge with master 46d3a16f, with bun 1.4.4 and node 24.21.0 (+1,727 / +647 over master's
+//  289,906 / 97,762), + 64)
+// (292,864 raw / 98,922 gzip: Nov 25 2026, an accent before a font command with its argument, unbraced ($\bar\mathbb F$),
+//  braced before KaTeX: 292,800 / 98,858 measured on the shipped build of its merge with master 56958e3d, with bun 1.4.4 and
+//  node 24.21.0 (+1,167 / +449 over master's 291,633 / 98,409), + 64)
+// (293,229 raw / 99,054 gzip: Nov 25 2026, starred references read as such, \ref*{key} drawn without its link (natbib's
+//  starred citations keep theirs): 293,165 / 98,990 measured on the shipped build of its merge with master bff44e83, with
+//  bun 1.4.4 and node 24.21.0 (+365 / +132 over master's 292,800 / 98,858), + 64)
+// (294,144 raw / 99,370 gzip: Nov 25 2026, latex check naming an \input file and its line for a problem found there (the
+//  expander's file-line markers, the renderer's where()): 294,080 / 99,306 measured on the shipped build of its merge with
+//  master fb8a65b0, with bun 1.4.4 and node 24.21.0 (+915 / +316 over master's 293,165 / 98,990), + 64)
+export const LATEX_CAPS = { raw: 294144, gzip: 99370 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
