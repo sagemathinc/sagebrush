@@ -17,6 +17,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReferenceServer, SESSION_COOKIE } from "../sync-protocol/reference-server.ts";
 import { accountHash } from "../sync-protocol/protocol.ts";
+import { batchHash, chainNext, chainSeed, hex as hexOf } from "../sync-protocol/doc-protocol.ts";
 import { devtoolsPort } from "../test-port.mjs";
 import { emit, guardConsole, pairCheck } from "./doc-sync-diag.mjs";
 // (before anything that can print: every in-process console call from here on is scrubbed (doc-sync-diag.mjs
@@ -40,6 +41,7 @@ writeFileSync(join(src, "entry.js"), [
   `export * as P from ${J(join(here, "../sync-protocol/protocol.ts"))};`,
   `export * as NB from ${J(join(here, "../notebook/notebook.js"))};`,
   `export * as ST from ${J(join(here, "../notebook/stores.js"))};`,
+  `export * as E from ${J(join(here, "e2e/index.ts"))};`,
 ].join("\n"));
 const b = await Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" });
 rmSync(src, { recursive: true, force: true });
@@ -78,7 +80,7 @@ if (CLOUD) {
 } else ref = new ReferenceServer();
 // (each device's session, as its Cookie header's name=value)
 const signIn = async () => (CLOUD ? await cloud.signIn(ACCOUNT) : `${SESSION_COOKIE}=${ref.signIn(ACCOUNT)}`);
-const sessions = { A: await signIn(), B: await signIn(), C: await signIn(), D: await signIn() };
+const sessions = { A: await signIn(), B: await signIn(), C: await signIn(), D: await signIn(), E: await signIn(), F: await signIn(), G: await signIn() };
 // (sync on for the account, as its first device's enable does: off, the server refuses every hello `readonly`)
 const enabled = await (CLOUD ? cloud.enable(sessions.A) : ref.fetch(new Request("http://ref/api/sync/v1/enable", { method: "POST", headers: { cookie: sessions.A } }))).then((r) => r.json());
 if (enabled.state !== "active") { emit.enableFail(enabled); process.exit(1); }
@@ -199,6 +201,22 @@ const front = Bun.serve({
             if (t === "chain") m.items[0].chain = "0".repeat(64);
             if (t === "owner") m.owner = "f".repeat(64);
             if (t === "snapshot") m.snapshot = { at_seq: 1, sha256: "0".repeat(64) };
+            // (case E: a sealed page edited: a byte of the LAST batch's body flipped (in its tag), or the FIRST slice's key
+            // generation id changed from k-1 to k-2 (its third byte), another generation the device lists)
+            if (t === "slice-last" || t === "prefix-gen") {
+              const it = t === "slice-last" ? m.items[m.items.length - 1] : m.items[0];
+              const body = Buffer.from(it.body, "base64");
+              if (t === "slice-last") body[body.length - 3] ^= 1; else body[1 + 4 + 2] = 0x32;
+              it.body = body.toString("base64");
+              // (and the page's chain made again from the edited batch on, as a server that edits what it sends would:
+              // so the edit is caught by the slice not opening, not by the chain; the reference server's stored chain
+              // gives the link before the page)
+              for (let i = m.items.indexOf(it); i < m.items.length; i++) {
+                const b = m.items[i], before = i > 0 ? null : ref.controls.doc(ACCOUNT, m.doc)?.batches.find((x) => x.seq === b.seq - 1);
+                const prev = i > 0 ? Buffer.from(m.items[i - 1].chain, "hex") : before ? Buffer.from(before.chain, "hex") : chainSeed(m.owner, m.doc, 1);
+                b.chain = hexOf(chainNext(prev, { seq: b.seq, recv: b.recv, epoch: 1, author: String(b.author), writer: String(b.writer), hb: batchHash(J(b.patches), Buffer.from(b.body, "base64")) }));
+              }
+            }
             text = J(m);
           }
         }
@@ -1406,6 +1424,85 @@ try {
     const tr = await Promise.race([P.ev("T.traceDump ? T.traceDump() : []").catch(() => []), sleep(10_000).then(() => [])]);
     for (const x of tr ?? []) if (x.kind) emit.stage(x.call, x.kind, x.detail); else emit.pageBytes(x.call, x.bytes, x.sha);
   }
+  progress("case E");
+  // E. End-to-end encryption on the wire (doc-seal.ts; opt-in, with a fixture key provider, as no page has one yet):
+  // devices E and F of the account, each given the document key generations k-1 and k-2 (k-1 seals), and G given
+  // only k-2; A and B away.  Each check below that refuses a page says the whole page was left unapplied.
+  await A.call("disconnect");
+  await B.call("disconnect");
+  const E2E_ACCT = "e2e-acct-1", GENS = [{ cekId: "k-1", keyEpoch: 5, fill: 0x11 }, { cekId: "k-2", keyEpoch: 5, fill: 0x22 }];
+  const Ed = await device("E"), Fd = await device("F"), Gd = await device("G");
+  await Ed.call("useKeys", E2E_ACCT, GENS, 0);
+  await Fd.call("useKeys", E2E_ACCT, GENS, 0);
+  await Gd.call("useKeys", E2E_ACCT, GENS.slice(1), 0);
+  await Ed.call("connect", "E", ACCOUNT);
+  await Fd.call("connect", "F", ACCOUNT);
+  const efIdle = async () => { for (let i = 0; i < 3; i++) await Promise.all([Ed.call("idle"), Fd.call("idle")]); };
+  // E-1: E's new notebook reaches F, and F's edit reaches E; what the server stores is ciphertext
+  const NE = "e2e00000-0000-4000-8000-000000000001";
+  await Ed.call("open", NE, [["a", "SECRET-E1"]]);
+  await Ed.call("kick", NE);
+  await efIdle();
+  if (!CLOUD) {
+    const bodies = (ref.controls.doc(ACCOUNT, NE)?.batches ?? []).map((b) => Buffer.from(b.body));
+    check(bodies.length >= 1 && bodies.every((b) => b[0] === 1 && !b.includes("SECRET")), "E-1: what the server stores of a sealed notebook is its slices (format 0x01), with none of its text: " + J({ batches: bodies.length, first: bodies.map((b) => b[0]) }));
+  }
+  const fo = await Fd.call("open", NE);
+  check(fo.codes === J([["a", "SECRET-E1"]]), "E-1: …F, given its key generation, pulls and opens it: " + fo.codes);
+  check(await Fd.call("edit", NE, [["a", "SECRET-E1"], ["b", "SECRET-F1"]]) === true, "E-1: F's edit saved");
+  await efIdle();
+  const er = await Ed.call("record", NE);
+  check(er.codes === J([["a", "SECRET-E1"], ["b", "SECRET-F1"]]), "E-1: …and F's sealed edit reaches E: " + er.codes);
+  // E-2: a page of two sealed batches whose LAST slice is damaged (its chain made again, as a server that edits its
+  // pages would; on the reference server, whose stored chain the front reads): F stops "e2e" and applies neither
+  if (!CLOUD) {
+  await Fd.call("disconnect");
+  for (const code of ["SECRET-E2", "SECRET-E3"]) { await Ed.call("edit", NE, [["a", code], ["b", "SECRET-F1"]]); await Ed.call("idle"); }
+  const fj2 = await Fd.call("journal", NE), fr2 = await Fd.call("record", NE);
+  tamper.F = "slice-last";
+  await Fd.call("connect", "F", ACCOUNT);
+  await Fd.call("kick", NE);
+  await Fd.call("idle");
+  tamper.F = null;
+  const [fs2, fj2b, fr2b] = [await Fd.call("stopped"), await Fd.call("journal", NE), await Fd.call("record", NE)];
+  check(fs2[NE]?.code === "e2e" && J(fj2b.cursor) === J(fj2.cursor) && fr2b.codes === fr2.codes, "E-2: a pulled page whose last sealed slice fails to open stops the notebook (e2e) before any of the page is applied: its cursor and record unchanged: " + J({ stop: fs2[NE], before: fj2.cursor?.after, after: fj2b.cursor?.after }));
+  // E-3: a slice whose prefix names another generation F lists (k-2 for k-1): refused, nothing applied
+  const NE3 = "e2e00000-0000-4000-8000-000000000003";
+  await Fd.call("disconnect");
+  await Ed.call("open", NE3, [["a", "SECRET-E3"]]);
+  await Ed.call("kick", NE3);
+  await Ed.call("idle");
+  tamper.F = "prefix-gen";
+  await Fd.call("connect", "F", ACCOUNT);
+  await Fd.call("kick", NE3, true);
+  await Fd.call("idle");
+  tamper.F = null;
+  const [fs3, fj3] = [await Fd.call("stopped"), await Fd.call("journal", NE3)];
+  check(fs3[NE3]?.code === "e2e" && !fj3.cursor, "E-3: a slice whose prefix is edited to another generation the device lists is refused (e2e): never applied, no cursor: " + J({ stop: fs3[NE3], cursor: fj3.cursor }));
+  }
+  // E-4: G lists only k-2, and the notebook is sealed under k-1: refused, never another generation tried
+  const NE4 = "e2e00000-0000-4000-8000-000000000004";
+  await Ed.call("open", NE4, [["a", "SECRET-E4"]]);
+  await Ed.call("kick", NE4);
+  await Ed.call("idle");
+  await Gd.call("connect", "G", ACCOUNT);
+  await Gd.call("kick", NE4, true);
+  await Gd.call("idle");
+  const [gs4, gj4] = [await Gd.call("stopped"), await Gd.call("journal", NE4)];
+  check(gs4[NE4]?.code === "e2e" && /declare/.test(gs4[NE4]?.detail ?? "") && !gj4.cursor, "E-4: a device that doesn't list the generation a slice names refuses it (e2e: a generation the document doesn't declare), nothing applied: " + J(gs4[NE4]));
+  // E-5: a patch sent unsealed (A, which has no keys) reaches F, which has: refused, nothing applied
+  const NE5 = "e2e00000-0000-4000-8000-000000000005";
+  await A.call("connect", "A", ACCOUNT);
+  await A.call("open", NE5, [["a", "plain"]]);
+  await A.call("kick", NE5);
+  await A.call("idle");
+  await A.call("disconnect");
+  await Fd.call("kick", NE5, true);
+  await Fd.call("idle");
+  const [fs5, fj5] = [await Fd.call("stopped"), await Fd.call("journal", NE5)];
+  check(fs5[NE5]?.code === "e2e" && !fj5.cursor, "E-5: an unsealed patch reaching a device with keys is refused (e2e), never applied: " + J(fs5[NE5]));
+  for (const d of [Ed, Fd, Gd]) await d.call("disconnect");
+
   censusAt("cases-done");
   if (!emit.failures(results, errors)) {
     emit.ok(results.length);
