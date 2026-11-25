@@ -129,7 +129,10 @@ export const LATEX_LAZY = {
 // (292,864 raw / 98,922 gzip: Nov 25 2026, an accent before a font command with its argument, unbraced ($\bar\mathbb F$),
 //  braced before KaTeX: 292,800 / 98,858 measured on the shipped build of its merge with master 56958e3d, with bun 1.4.4 and
 //  node 24.21.0 (+1,167 / +449 over master's 291,633 / 98,409), + 64)
-export const LATEX_CAPS = { raw: 292864, gzip: 98922 };
+// (293,229 raw / 99,054 gzip: Nov 25 2026, starred references read as such, \ref*{key} drawn without its link (natbib's
+//  starred citations keep theirs): 293,165 / 98,990 measured on the shipped build of its merge with master bff44e83, with
+//  bun 1.4.4 and node 24.21.0 (+365 / +132 over master's 292,800 / 98,858), + 64)
+export const LATEX_CAPS = { raw: 293229, gzip: 99054 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
