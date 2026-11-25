@@ -5,7 +5,7 @@
 #
 #   scripts/build-all.sh             # everything
 #   scripts/build-all.sh --no-app    # without the Tauri app (no Tauri CLI or WebKitGTK needed)
-#   scripts/build-all.sh --no-engine # fetch the four WebAssembly modules by their pins instead (no Rust needed for them)
+#   scripts/build-all.sh --no-engine # fetch the five WebAssembly modules by their pins instead (no Rust needed for them)
 #
 # The prerequisites and their versions are DEVELOPMENT.md's. This script checks them first and stops on a
 # missing one, and on a bun older than CI's pin (an older Bun.build gives the build no metafile); another
