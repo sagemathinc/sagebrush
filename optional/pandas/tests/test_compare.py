@@ -213,3 +213,13 @@ for name, v in [("none", None), ("nan", float("nan")), ("np-nan", np.float64("na
     for n, op in ops:
         case("dt-missing-%s-%s" % (name, n), lambda op=op, v=v: op(dtn, v).tolist())
         case("dt-missing-%s-named-%s" % (name, n), lambda n=n, v=v: getattr(dtn, n)(v).tolist())
+
+# empty operands: an empty list or tuple has no order with times under the operators; the named comparisons give an
+# empty result
+for name, e in [("dt", pd.Series([], dtype="datetime64[us]")), ("int", pd.Series([], dtype="int64")), ("str", pd.Series([], dtype="str")),
+                ("float", pd.Series([], dtype="float64"))]:
+    for n, op in ops:
+        case("empty-%s-list-%s" % (name, n), lambda op=op, e=e: op(e, []).tolist())
+        case("empty-%s-named-list-%s" % (name, n), lambda n=n, e=e: getattr(e, n)([]).tolist())
+        case("empty-%s-ndarray-%s" % (name, n), lambda op=op, e=e: op(e, np.array([])).tolist())
+        case("empty-%s-tuple-%s" % (name, n), lambda op=op, e=e: warned(lambda: op(e, ()))[0].tolist())

@@ -303,6 +303,12 @@ class Series(object):
                 raise ValueError("Length of values (%d) does not match length of index (1)" % len(values))
             right = _compare_values(values, n, True)
         elif isinstance(other, (list, tuple, np.ndarray, Index)):
+            if (self._pd_col.dtype is DT and isinstance(other, (list, tuple)) and not len(other)
+                    and op not in ("eq", "ne")):
+                # (pandas takes an empty list as a float array, and a tuple as itself: neither has an order with
+                # times; the named comparisons make a Series of it first, and give an empty result)
+                raise TypeError("Invalid comparison between dtype=datetime64[us] and %s"
+                                % ("tuple" if isinstance(other, tuple) else "ndarray"))
             right = _compare_values(other, len(self), False)
         elif _is_scalar(other):
             right = other

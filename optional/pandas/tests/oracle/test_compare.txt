@@ -1990,3 +1990,195 @@ dtype: bool
 [False, False]
 == dt-missing-nat-named-ge
 [False, False]
+== empty-dt-list-eq
+[]
+== empty-dt-named-list-eq
+[]
+== empty-dt-ndarray-eq
+[]
+== empty-dt-tuple-eq
+[]
+== empty-dt-list-ne
+[]
+== empty-dt-named-list-ne
+[]
+== empty-dt-ndarray-ne
+[]
+== empty-dt-tuple-ne
+[]
+== empty-dt-list-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== empty-dt-named-list-lt
+[]
+== empty-dt-ndarray-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== empty-dt-tuple-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and tuple
+== empty-dt-list-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== empty-dt-named-list-le
+[]
+== empty-dt-ndarray-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== empty-dt-tuple-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and tuple
+== empty-dt-list-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== empty-dt-named-list-gt
+[]
+== empty-dt-ndarray-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== empty-dt-tuple-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and tuple
+== empty-dt-list-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== empty-dt-named-list-ge
+[]
+== empty-dt-ndarray-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== empty-dt-tuple-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and tuple
+== empty-int-list-eq
+[]
+== empty-int-named-list-eq
+[]
+== empty-int-ndarray-eq
+[]
+== empty-int-tuple-eq
+[]
+== empty-int-list-ne
+[]
+== empty-int-named-list-ne
+[]
+== empty-int-ndarray-ne
+[]
+== empty-int-tuple-ne
+[]
+== empty-int-list-lt
+[]
+== empty-int-named-list-lt
+[]
+== empty-int-ndarray-lt
+[]
+== empty-int-tuple-lt
+[]
+== empty-int-list-le
+[]
+== empty-int-named-list-le
+[]
+== empty-int-ndarray-le
+[]
+== empty-int-tuple-le
+[]
+== empty-int-list-gt
+[]
+== empty-int-named-list-gt
+[]
+== empty-int-ndarray-gt
+[]
+== empty-int-tuple-gt
+[]
+== empty-int-list-ge
+[]
+== empty-int-named-list-ge
+[]
+== empty-int-ndarray-ge
+[]
+== empty-int-tuple-ge
+[]
+== empty-str-list-eq
+[]
+== empty-str-named-list-eq
+[]
+== empty-str-ndarray-eq
+[]
+== empty-str-tuple-eq
+[]
+== empty-str-list-ne
+[]
+== empty-str-named-list-ne
+[]
+== empty-str-ndarray-ne
+[]
+== empty-str-tuple-ne
+[]
+== empty-str-list-lt
+[]
+== empty-str-named-list-lt
+[]
+== empty-str-ndarray-lt
+[]
+== empty-str-tuple-lt
+[]
+== empty-str-list-le
+[]
+== empty-str-named-list-le
+[]
+== empty-str-ndarray-le
+[]
+== empty-str-tuple-le
+[]
+== empty-str-list-gt
+[]
+== empty-str-named-list-gt
+[]
+== empty-str-ndarray-gt
+[]
+== empty-str-tuple-gt
+[]
+== empty-str-list-ge
+[]
+== empty-str-named-list-ge
+[]
+== empty-str-ndarray-ge
+[]
+== empty-str-tuple-ge
+[]
+== empty-float-list-eq
+[]
+== empty-float-named-list-eq
+[]
+== empty-float-ndarray-eq
+[]
+== empty-float-tuple-eq
+[]
+== empty-float-list-ne
+[]
+== empty-float-named-list-ne
+[]
+== empty-float-ndarray-ne
+[]
+== empty-float-tuple-ne
+[]
+== empty-float-list-lt
+[]
+== empty-float-named-list-lt
+[]
+== empty-float-ndarray-lt
+[]
+== empty-float-tuple-lt
+[]
+== empty-float-list-le
+[]
+== empty-float-named-list-le
+[]
+== empty-float-ndarray-le
+[]
+== empty-float-tuple-le
+[]
+== empty-float-list-gt
+[]
+== empty-float-named-list-gt
+[]
+== empty-float-ndarray-gt
+[]
+== empty-float-tuple-gt
+[]
+== empty-float-list-ge
+[]
+== empty-float-named-list-ge
+[]
+== empty-float-ndarray-ge
+[]
+== empty-float-tuple-ge
+[]
