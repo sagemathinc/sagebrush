@@ -19,7 +19,7 @@ let failures = 0;
 const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 600) : "")); if (!c) failures++; };
 
 // ---- the mirror: the upstream commit and each file's sha256 there (a new upstream version means new pins, reviewed)
-const UPSTREAM = "585f64882b79eeb0f2fe902a1313a2e891bdb769";
+const UPSTREAM = "097e98a1c6a0d96f6630135753de218b0c49876e";
 const PINS = {
   "core/bytes.mjs": ["lib/fleet/core/bytes.mjs", "be5c199fcadf375336c49dae692fce6af96644af6f98b11161a4fb0d65eaaf6b"],
   "core/canon.mjs": ["lib/fleet/core/canon.mjs", "d9b7831f6772f6010689ecb74a8727280470e8e1437a2166fc0fd6b1728f08e8"],
