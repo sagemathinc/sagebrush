@@ -26,6 +26,31 @@ const safeUrl = (u) => { const s = String(u).trim(); return /^(https?:\/\/|mailt
 const roman = (n) => { if (n <= 0) return ""; if (n > 4999) return String(n); const v = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]]; let s = ""; for (const [k, r] of v) while (n >= k) { s += r; n -= k; } return s; };
 const alph = (n) => (n >= 1 && n <= 26 ? String.fromCharCode(96 + n) : String(n));
 const Alph = (n) => alph(n).toUpperCase();
+// enumitem's key=value options on a list, \begin{enumerate}[label=(T\arabic*),start=6,leftmargin=*]: its label and
+// reference templates and its start, the other keys (spacing, alignment, fonts) accepted and not drawn. A part without
+// "=" counts only if it is one of enumitem's own keys (nosep, wide, ...): otherwise (a beamer overlay, the enumerate
+// package's [(a)] shorthand) the argument isn't enumitem's, and null leaves it as before
+const ENUMITEM_FLAGS = new Set(["nosep", "noitemsep", "nolistsep", "wide", "resume", "resume*", "first", "first*", "before", "after"]);
+function splitTop(s) {
+  const out = []; let d = 0, cur = "";
+  for (const ch of s) { if (ch === "{") d++; else if (ch === "}") d--; if (ch === "," && d === 0) { out.push(cur); cur = ""; } else cur += ch; }
+  out.push(cur);
+  return out;
+}
+function enumitemOpts(s) {
+  const o = {};
+  for (const part of splitTop(s)) {
+    const m = /^\s*([A-Za-z]+\*?)\s*(?:=([\s\S]*))?$/.exec(part);
+    if (!m) { if (part.trim() === "") continue; return null; }
+    if (m[2] === undefined) { if (!ENUMITEM_FLAGS.has(m[1])) return null; continue; }
+    let v = m[2].trim();
+    if (v.startsWith("{") && v.endsWith("}")) v = v.slice(1, -1);
+    o[m[1]] = v;
+  }
+  return o;
+}
+// (a label or reference template with the item's number in place of \arabic*, \alph*, \Alph*, \roman*, \Roman*)
+const labelFill = (t, n) => t.replace(/\\(arabic|alph|Alph|roman|Roman) *\*/g, (_, f) => f === "arabic" ? String(n) : f === "alph" ? alph(n) : f === "Alph" ? Alph(n) : f === "roman" ? roman(n) : roman(n).toUpperCase());
 // a TeX dimension -> CSS (fixed units only), or null; rel = the length of 1\textwidth in CSS (a percentage)
 const OV_STEPS_MAX = 100;   // (a frame's steps, at most)
 // beamer's frames, blocks and overlay commands are engine/beamer.mjs, installed by the host (installBeamer): the worker
@@ -81,6 +106,7 @@ export function buildTree(events, items = []) {
       case "ref": top().kids.push({ t: "R", cmd: e.cmd, key: e.key, opt: e.opt }); break;
       case "doc": st.length = 1; root.kids.push({ t: "doc" }); break;
       case "cls": top().kids.push({ t: "cls", cls: e.cls, opt: e.opt }); break;
+      case "natbib": top().kids.push({ t: "natbib", opt: e.opt }); break;
       // (a Magma name the document defines itself: ours is off for it, said once by check and the editor)
       case "own": top().kids.push({ t: "own", name: e.name }); break;
       case "err": top().kids.push({ t: "err", code: e.code, name: e.name, text: e.text }); break;
@@ -292,7 +318,7 @@ class Renderer {
   constructor(opts) {
     this.opts = opts || {};
     this.images = this.opts.images || {}; this.imageRefs = new Set(); this.inputMisses = [];
-    this.cls = "article"; this.book = false; this.clsOpt = "";
+    this.cls = "article"; this.book = false; this.clsOpt = ""; this.nat = null;
     // (frames: a beamer document's frames, in order {n, title, at}; problems: what the preview can't show or found wrong,
     //  each {kind, name, at} with at the source offset of the nearest node before it, or -1: `sagebrush latex check`)
     this.frameList = []; this.problems = []; this.lastPos = -1; this.ov = null;
@@ -490,6 +516,9 @@ class Renderer {
           this.problem(n.code === "runaway" ? "runaway" : "redefined", n.name);
           if (n.code === "runaway") { const tx = String(n.text || "").replace(/\s+$/, ""); flow.html('<span class="unk errchip" title="LaTeX: Paragraph ended before \\' + esc(n.name) + ' was complete">\\' + esc(n.name) + esc(tx.length > 40 ? tx.slice(0, 40) + "…" : tx) + " not finished</span>", ctx.st); break; }
           flow.html('<span class="unk errchip" title="LaTeX would stop here">\\newcommand: \\' + esc(n.name) + " is already defined</span>", ctx.st); break;
+        // (natbib's options: numbers (its entries numbered, whatever label BibTeX gave), sort and compress (a citation's
+        //  numbers in order, and a run of three or more as a range))
+        case "natbib": { const o = String(n.opt || "").split(",").map((x) => x.trim()); this.nat = { numbers: o.includes("numbers"), sort: o.includes("sort") || o.includes("sort&compress"), compress: o.includes("compress") || o.includes("sort&compress") }; break; }
         case "cls": this.cls = n.cls; this.clsOpt = typeof n.opt === "string" ? n.opt : ""; this.book = /^(book|report|memoir|scrbook|scrreprt)$/.test(n.cls); this.secnumdepth = depthOf(n.cls); break;
         default: break;
       }
@@ -819,6 +848,12 @@ class Renderer {
     // (beamer: itemize[<+->] gives every item that spec, an item's own <..> instead)
     let lead = kids.slice(0, first), dflt = null;
     if (this.ov) { const [o, oj] = this.opt(lead, -1); if (o && this.isChar(o[0], 60)) { dflt = this.str(o).trim().replace(/^<|>$/g, ""); lead = lead.slice(oj + 1); } }
+    // (enumitem's options: read, not shown; label= and ref= give each item's label and what \ref names it by)
+    let eo = null;
+    if (dflt === null) { const [o, oj] = this.opt(lead, -1); if (o && !this.isChar(o[0], 60)) { eo = enumitemOpts(this.str(o)); if (eo) lead = lead.slice(oj + 1); } }
+    const tpl = eo ? eo.label ?? eo["label*"] ?? null : null;
+    L.refTpl = eo?.ref ?? tpl;
+    if (eo && kind === "enum" && eo.start !== undefined && /^\s*-?\d+\s*$/.test(eo.start)) L.n = parseInt(eo.start, 10) - 1;
     this.walk(lead, ctx, flow);
     i = first;
     while (i < kids.length) {
@@ -834,10 +869,17 @@ class Renderer {
         const nums = this.lists.filter((x) => x.kind === "enum").map((x) => x.n);
         const d = depth;
         lbl = d === 1 ? nums[0] + "." : d === 2 ? "(" + alph(nums[1]) + ")" : d === 3 ? roman(nums[2]) + "." : Alph(nums[3]) + ".";
-        const ref = nums[0] + (d >= 2 ? (d === 2 ? alph(nums[1]) : "(" + alph(nums[1]) + ")") : "") + (d >= 3 ? roman(nums[2]) : "") + (d >= 4 ? Alph(nums[3]) : "");
         lbl = esc(lbl);
-        this.setTarget(ref, "", "item");
-      } else if (kind === "item") lbl = ["•", "–", "∗", "·"][Math.min(depth, 4) - 1];
+        if (tpl !== null) { lbl = this.labelHtml(labelFill(tpl, L.n), false); }
+        // (what \ref gives, as LaTeX composes it, \p@enumN\theenumN: each level's \theenum is enumitem's ref= or
+        //  label= filled in, else LaTeX's own (1, a, i, A); the prefix is LaTeX's, from the levels above: none, then
+        //  \theenumi, then \theenumi(\theenumii), then that and \theenumiii. So T1) above a default list's (a) above i
+        //  gives T1)(a)i, and T1) above Sa) above i gives T1)(Sa))i, as pdflatex with enumitem does)
+        const t = this.lists.filter((x) => x.kind === "enum").map((x) => this.theOf(x));
+        const pre = d === 1 ? "" : d === 2 ? t[0] : t[0] + "(" + t[1] + ")" + (d >= 4 ? t[2] : "");
+        // (an item of a list with its own label= or ref= is that alone, as enumitem gives it: Sa), not T1)Sa))
+        this.setTarget(L.refTpl != null ? t[t.length - 1] : pre + t[t.length - 1], "", "item");
+      } else if (kind === "item") lbl = tpl !== null ? this.labelHtml(tpl, false) : ["•", "–", "∗", "·"][Math.min(depth, 4) - 1];
       else lbl = "";
       const id = this.nid("it"); if (kind === "enum" && !o) this.target.id = id;
       L.li = flow.open("li", ' id="' + id + '"' + (spec ? ' class="ov" data-ov="' + esc(spec) + '" data-ovm="uncover"' : ""), kind === "desc" ? (lbl ? '<span class="dlabel">' + lbl + "</span> " : "") : '<span class="lbl">' + lbl + "</span>");
@@ -933,9 +975,13 @@ class Renderer {
       if (this.csName(kids[i]) === "bibitem") {
         const [o, j1] = this.opt(kids, i); const [k, j2] = this.arg(kids, j1);
         if (li) flow.close(li);
-        const key = this.str(k).trim(); const num = ++this.bibN; const lab = o ? this.inline(o, ctx) : String(num);
-        widest = Math.max(widest, labelEm(o ? this.str(o) : String(num)));
-        this.bib.set(key, { lab, id: "bib-" + num });
+        // (under natbib's numbers, an entry is its number whatever label BibTeX gave it, "Knuth(1984)": the label's
+        //  author, before its "(", is what \citet names)
+        const key = this.str(k).trim(); const num = ++this.bibN, nn = !!this.nat?.numbers;
+        const lab = o && !nn ? this.inline(o, ctx) : String(num);
+        widest = Math.max(widest, labelEm(o && !nn ? this.str(o) : String(num)));
+        const who = nn && o ? this.inline(o, ctx).replace(/\(.*$/, "").trim() : "";
+        this.bib.set(key, { lab, id: "bib-" + num, num, who });
         li = flow.open("li", ' id="bib-' + num + '"', '<span class="biblab">[' + lab + "]</span> ");
         i = j2; continue;
       }
@@ -970,6 +1016,20 @@ class Renderer {
     return '<div class="amsaddr">' + [...by.values()].map((xs) => '<div class="p">' + xs.map((x) => x.kind === "address" ? '<span style="font-variant:small-caps">' + x.h + "</span>" : "<i>" + LAB[x.kind] + "</i>: " + x.h).join("<br>") + "</div>").join("") + "</div>";
   }
   amsShort(nodes, i) { return this.ams() ? this.opt(nodes, i) : [null, i]; }
+  // (a list's \theenumN for its item now: enumitem's ref= or label= filled in, else LaTeX's own for its depth)
+  theOf(X) { return X.refTpl != null ? this.labelHtml(labelFill(X.refTpl, X.n), true) : X.depth === 1 ? String(X.n) : X.depth === 2 ? alph(X.n) : X.depth === 3 ? roman(X.n) : Alph(X.n); }
+  // (a list label from enumitem's template, its number put in: the shape switches \textup, \upshape, \normalfont and the
+  //  like dropped, \textbf and \textit or \emph kept, the rest as a citation's note is typeset; plain: the text alone)
+  labelHtml(t, plain) {
+    t = t.replace(/\\(?:upshape|normalfont|rmfamily|mdseries|itshape|bfseries|scshape|small|footnotesize)(?![A-Za-z]) */g, "").replace(/\\(?:textup|textnormal|textrm|textmd) *\{([^{}]*)\}/g, "$1");
+    const parts = t.split(/(\\(?:textbf|textit|emph) *\{[^{}]*\})/);
+    return parts.map((p) => {
+      const m = /^\\(textbf|textit|emph) *\{([^{}]*)\}$/.exec(p);
+      if (!m) return this.noteHtml(p, plain);
+      const inner = this.noteHtml(m[2], plain);
+      return plain ? inner : (m[1] === "textbf" ? "<b>" + inner + "</b>" : "<i>" + inner + "</i>");
+    }).join("");
+  }
   // (a citation's note, \cite[\S B]{key}: its text with TeX's text symbols, ties and dashes, its $...$ as math)
   noteHtml(s, plain) {
     let out = "";
@@ -987,6 +1047,7 @@ class Renderer {
     return out;
   }
   resolveRef(r, plain) {
+    if ((r.cmd === "cite" || r.cmd === "citep" || r.cmd === "citet") && this.nat?.numbers) return this.natCite(r, plain);
     if (r.cmd === "cite" || r.cmd === "citep" || r.cmd === "citet") {
       const parts = r.key.split(",").map((k) => k.trim()).filter(Boolean).map((k) => { const b = this.bib.get(k); return b ? (plain ? b.lab : '<a href="#' + b.id + '">' + b.lab + "</a>") : (plain ? "?" : '<span class="missing">' + esc(k) + "</span>"); });
       return "[" + parts.join(", ") + (r.opt ? ", " + this.noteHtml(r.opt, plain) : "") + "]";
@@ -1012,6 +1073,27 @@ class Renderer {
     }
     if (plain) return txt;
     return L.id ? '<a class="ref" href="#' + L.id + '">' + esc(txt) + "</a>" : esc(txt);
+  }
+  // (natbib's numbers, as TeX Live's natbib sets them: [3, 1] in the order given; with sort, in order; with compress, a
+  //  run of three or more as a range, [1–3] (two stay [1, 2]); a missing key as "?"; \citet as each entry's author then
+  //  its number, "Ann [1]"; a note last, inside the brackets)
+  natCite(r, plain) {
+    const link = (b) => (plain ? String(b.num) : '<a href="#' + b.id + '">' + b.num + "</a>");
+    const note = r.opt ? ", " + this.noteHtml(r.opt, plain) : "";
+    const keys = r.key.split(",").map((k) => k.trim()).filter(Boolean);
+    const miss = (k) => (plain ? "?" : '<span class="missing">' + esc(k) + "</span>");
+    if (r.cmd === "citet") return keys.map((k, n) => { const b = this.bib.get(k); if (!b) return miss(k); const w = plain ? b.who.replace(/<[^>]*>/g, "") : b.who; return (w ? w + " " : "") + "[" + link(b) + (n === keys.length - 1 ? note : "") + "]"; }).join(", ");
+    const found = keys.map((k) => ({ k, b: this.bib.get(k) }));
+    if (this.nat.sort) found.sort((x, y) => (x.b ? x.b.num : Infinity) - (y.b ? y.b.num : Infinity));
+    const out = [];
+    for (let i = 0; i < found.length; i++) {
+      const { k, b } = found[i];
+      if (!b) { out.push(miss(k)); continue; }
+      let j = i;
+      if (this.nat.compress) while (j + 1 < found.length && found[j + 1].b && found[j + 1].b.num === found[j].b.num + 1) j++;
+      if (j - i >= 2) { out.push(link(b) + "\u2013" + link(found[j].b)); i = j; } else out.push(link(b));
+    }
+    return "[" + out.join(", ") + note + "]";
   }
   // (a label's \nameref text: its title with the references in it resolved, as text (no link inside the link): the final
   //  pass replaces each placeholder once, so one \nameref brings in is resolved here (daybreak3, #682); null if the title

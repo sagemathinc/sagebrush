@@ -38,7 +38,7 @@ the PDF (see [Differences from pdflatex's output](#differences-from-pdflatexs-ou
 | Several files | `\input`, `\include`, a `.sty` file beside the `.tex` | found from the document's folder as TeX finds them, `../` included, never above the workspace's top folder |
 | Structure | `\part` to `\subparagraph`, `\maketitle`, `\tableofcontents`, `abstract`, `\appendix` | |
 | Text | `\textbf`, `\textit`, `\emph`, `\texttt`, `\textsc`, `\underline`, sizes, `\footnote` (also `[n]`), `\marginpar`, `\verb`, `verbatim` | |
-| Lists | `itemize`, `enumerate`, `description` | |
+| Lists | `itemize`, `enumerate`, `description` | enumitem's label=, ref= and start= options are followed (with \arabic\*, \alph\*, \roman\* and their capitals), and its spacing options are read and not drawn |
 | Mathematics | `$…$`, `\[…\]`, `equation`, `align`, `gather`, `multline`, `split`, `aligned`, `cases`, matrices, `alignat`, `flalign`; in math `\tag`, `\intertext`, `\text`, `\boxed`, `\cancel`; `\DeclareMathOperator` | typeset by KaTeX |
 | Theorems | `\newtheorem`, `\theoremstyle`, `proof` | |
 | References | `\label`, `\ref`, `\eqref`, `\pageref`, `\nameref`, `\autoref`, `\cref`, `\Cref` | resolved at once, no second run |
@@ -46,7 +46,7 @@ the PDF (see [Differences from pdflatex's output](#differences-from-pdflatexs-ou
 | Tables | `tabular`, `tabularx`, `longtable`, `array`, `\multicolumn`, `\hline`, `\cline`, `\toprule`, `\midrule`, `\bottomrule`, `\cmidrule` | |
 | Links and color | `\url`, `\href`, `\hyperref`, `\textcolor`, `\color`, `\colorbox`, `\definecolor` | |
 | Code | `lstlisting`, `minted`, `Verbatim`, `\lstinline` | shown as written, not highlighted |
-| Citations | `\cite`, `\citet`, `\citep`, `thebibliography` with `\bibitem` | see BibTeX below |
+| Citations | `\cite`, `\citet`, `\citep`, `thebibliography` with `\bibitem`, natbib's numbers and sort&compress options | \bibliography reads the .bbl BibTeX made beside the .tex; see BibTeX below |
 | Beamer | frames, `block`, `columns`, overlays (`\pause`, `<2->`, `\only`, `\uncover`, `\alt`), each theme's headers and footers | the preview shows every overlay step at once; Present steps through them |
 | SageTeX | `\sage`, `\sageplot`, `sageblock`, `sagesilent`, and `@interact` widgets | see [SageTeX](#sagetex-and-interact) |
 | PythonTeX | `\py`, `pycode`, `pyblock`, `\printpythontex` | see [PythonTeX](#pythontex) |
@@ -67,7 +67,7 @@ each one with its line.
 | babel and csquotes: `\selectlanguage`, `\foreignlanguage`, `otherlanguage`, `\enquote` | a grey chip or a plain box; the text itself is shown |
 | `subfigure`, `subequations`, `algorithm`, `algorithmic`, `tcolorbox`, `mdframed`, `framed`, `landscape` | a plain box with the content |
 | TikZ pictures with text in them (nodes), and pgfplots: `tikzpicture` | a placeholder naming what isn't drawn yet. A picture of paths alone (lines, curves, circles and arcs, grids, arrows, styles, transforms, `\foreach`) is drawn |
-| BibTeX and biber: `\bibliography` with a `.bib` file | the line "[bibliography from refs.bib: BibTeX is not run]", and `\cite` shows the key in brackets, [knuth84] |
+| BibTeX and biber: `\bibliography` with a `.bib` file and no .bbl beside the .tex | the line "[bibliography from refs.bib: BibTeX is not run]", and `\cite` shows the key in brackets, [knuth84]. Run BibTeX once and keep its .bbl beside the .tex: the preview reads it |
 | PythonTeX's other commands and environments (pyc, pys, pyb, pyconsole, pysub, pyverbatim, and the families other than py) | the code as written, or a "not run" mark where its results would go |
 
 A package named in `\usepackage` isn't loaded: its commands work only if
@@ -86,7 +86,7 @@ is dropped, and biblatex's `\printbibliography` shows nothing.
 | Line breaks and spacing | TeX's paragraph breaking | the browser's |
 | Floats | placed by TeX (`[t]`, `[h]`, ...) | where they are written |
 | References | after a second run | at once |
-| Bibliography | from BibTeX or biber | only `thebibliography` written in the document |
+| Bibliography | from BibTeX or biber | `thebibliography` written in the document, or the .bbl BibTeX made beside the .tex |
 | Pictures | TikZ and pgfplots drawn | TikZ's paths drawn; text in a picture (nodes) and pgfplots as placeholders |
 | Speed | about 0.5 to 20 s to remake the PDF after an edit | about 25 to 260 ms from a keystroke to the preview ([benchmark](01-how-it-works.md)) |
 

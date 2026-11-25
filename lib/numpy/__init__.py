@@ -959,6 +959,8 @@ class ufunc:
         return acc
 
     def accumulate(self, a, axis=0, dtype=None, out=None):
+        if asarray(a).ndim == 0:
+            raise TypeError("cannot accumulate on a scalar")
         if out is not None:
             # (computed in out's dtype unless dtype is given, as NumPy's)
             out = _one_out(out)
@@ -1215,9 +1217,17 @@ def lcm(a, b):
 def _axes(a, axis):
     if axis is None:
         return tuple(range(a.ndim))
-    if isinstance(axis, (tuple, list)):
-        return tuple(x % a.ndim for x in axis)
-    return (axis % a.ndim if a.ndim else 0,)
+    from _operator import index
+    # (each axis an index, as NumPy's normalize_axis_index takes it: a float refused with its text, np.bool_ as no
+    # index; and an axis out of bounds refused with NumPy's text, as the reductions refuse it: a 0-d array has none)
+    axes = axis if isinstance(axis, (tuple, list)) else (axis,)
+    if _builtins.any(isinstance(x, float) for x in axes):
+        raise TypeError("integer argument expected, got float")
+    axes = tuple(index(x) for x in axes)
+    for x in axes:
+        if not -a.ndim <= x < a.ndim:
+            raise IndexError("axis %d is out of bounds for array of dimension %d" % (x, a.ndim))
+    return tuple(x % a.ndim for x in axes)
 
 
 def _count(a, axis):
@@ -1330,15 +1340,19 @@ min = amin
 
 
 def argmax(a, axis=None, out=None, *, keepdims=False):
-    r = _np.argmax(asarray(a), axis)
-    if keepdims and axis is not None:
+    a = asarray(a)
+    r = _np.argmax(a, axis)
+    # (a 0-d array keeps no axis: NumPy's result is the scalar)
+    if keepdims and axis is not None and a.ndim:
         r = expand_dims(r, axis)
     return r
 
 
 def argmin(a, axis=None, out=None, *, keepdims=False):
-    r = _np.argmin(asarray(a), axis)
-    if keepdims and axis is not None:
+    a = asarray(a)
+    r = _np.argmin(a, axis)
+    # (a 0-d array keeps no axis: NumPy's result is the scalar)
+    if keepdims and axis is not None and a.ndim:
         r = expand_dims(r, axis)
     return r
 
@@ -1414,28 +1428,42 @@ def nanmin(a, axis=None, out=None, keepdims=False, initial=None, where=True):
 
 def nanmean(a, axis=None, dtype=None, out=None, keepdims=False):
     a = asarray(a)
-    ok = ~isnan(a) if a.dtype.kind in "fc" else ones(a.shape, bool_)
-    return sum(_nanfill(a, 0), axis, dtype, out, keepdims) / sum(ok, axis, keepdims=keepdims)
+    if a.dtype.kind not in "fc":
+        return mean(a, axis, dtype, out, keepdims)  # (no NaN to skip: NumPy's mean, its refusals included)
+    ok = ~isnan(a)
+    # (the mean, not the sum, in out, which is returned, as NumPy's)
+    return _out(sum(_nanfill(a, 0), axis, dtype, None, keepdims) / sum(ok, axis, keepdims=keepdims), out)
 
 
 def nanvar(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False):
     a = asarray(a)
+    if a.dtype.kind not in "fc":
+        return var(a, axis, dtype, out, ddof, keepdims)  # (no NaN to skip: NumPy's var, its refusals included)
     ok = ~isnan(a)
     n = sum(ok, axis, keepdims=True)
     m = sum(_nanfill(a, 0), axis, keepdims=True) / n
     d = where(ok, a - m, 0.0)
-    return sum(d * d, axis, keepdims=keepdims) / (sum(ok, axis, keepdims=keepdims) - ddof)
+    return _out(sum(d * d, axis, keepdims=keepdims) / (sum(ok, axis, keepdims=keepdims) - ddof), out)
 
 
 def nanstd(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False):
-    return sqrt(nanvar(a, axis, dtype, out, ddof, keepdims))
+    return _out(sqrt(nanvar(a, axis, dtype, None, ddof, keepdims)), out)  # (the root, not the variance, in out)
+
+
+def _all_nan_refused(a, axis):
+    # (as NumPy's: a slice of NaNs alone has no position to give)
+    a = asarray(a)
+    if a.dtype.kind in "fc" and a.size and any(all(isnan(a), axis=axis)):
+        raise ValueError("All-NaN slice encountered")
 
 
 def nanargmax(a, axis=None):
+    _all_nan_refused(a, axis)
     return argmax(_nanfill(a, -inf), axis)
 
 
 def nanargmin(a, axis=None):
+    _all_nan_refused(a, axis)
     return argmin(_nanfill(a, inf), axis)
 
 
@@ -1471,6 +1499,25 @@ def quantile(a, q, axis=None, out=None, overwrite_input=False, method="linear", 
     return _quantile(a, asarray(q), type(q) in (int, float), axis, method, keepdims, "Quantiles must be in the range [0, 1]")
 
 
+# (NumPy's method names, in its order (its error message lists them), and each continuous method's virtual index:
+# Hyndman and Fan's alpha, beta, as NumPy's _compute_virtual_index computes it, #1910)
+_QUANTILE_METHODS = ("inverted_cdf", "averaged_inverted_cdf", "closest_observation", "interpolated_inverted_cdf", "hazen",
+                     "weibull", "linear", "median_unbiased", "normal_unbiased", "lower", "higher", "midpoint", "nearest")
+_QUANTILE_ALPHA_BETA = {"interpolated_inverted_cdf": (0, 1), "hazen": (0.5, 0.5), "weibull": (0, 0),
+                        "median_unbiased": (1 / 3.0, 1 / 3.0), "normal_unbiased": (3 / 8.0, 3 / 8.0)}
+
+
+def _quantile_virtual_index(method, n, q):
+    if method == "linear":
+        return (n - 1) * q
+    if method == "midpoint":
+        return 0.5 * (floor((n - 1) * q) + ceil((n - 1) * q))
+    if method == "averaged_inverted_cdf":
+        return n * q - 1
+    alpha, beta = _QUANTILE_ALPHA_BETA[method]
+    return n * q + (alpha + q * (1 - alpha - beta)) - 1
+
+
 def _quantile(a, qa, weak_q, axis, method, keepdims, out_of_range):
     # (NumPy's _quantile, step for step, so the result's dtype and bits are NumPy's: the virtual index (n-1)*q in q's
     # own dtype (a float32 q gives a float32 index, #1866), gamma its fractional part in that dtype (a Python float when
@@ -1478,33 +1525,67 @@ def _quantile(a, qa, weak_q, axis, method, keepdims, out_of_range):
     # an integer and 0.5 elsewhere (#1866), then NumPy's _lerp with its dtype promotion: a weak q keeps float32 data
     # float32, a strong float64 q promotes the result)
     a = asarray(a)
+    if a.dtype.kind == "c":
+        raise TypeError("a must be an array of real numbers")  # (NumPy's quantile and percentile; median takes them)
+    # (keepdims puts q's dimensions first, then the data's with the reduced one kept as 1, every one for axis=None)
+    nd, all_axes = a.ndim, axis is None
     if axis is None:
         a, axis = a.ravel(), 0
     s = moveaxis(sort(a, axis=axis), axis, -1)
     n = s.shape[-1]
+    if method not in _QUANTILE_METHODS:
+        raise ValueError("%r is not a valid method. Use one of: dict_keys(%r)" % (method, list(_QUANTILE_METHODS)))
+    # (NumPy's _quantile_is_valid checks a q of more than one dimension, or of 10 values or more, by its min and max:
+    # an empty one so refused, with min's error; a short 1-d q one value at a time, below)
+    if qa.ndim != 1 or qa.size >= 10:
+        qa.min()
+    if qa.size == 0:
+        # (an empty q: an empty result, of the dtype a q of its dtype gives, its shape q's then the data's but the
+        # reduced axis)
+        # (the dtype from one element of the data's dtype, so empty data gives it too; float data with nothing along the
+        # axis raises as NumPy's NaN check does, reading the last element)
+        if n == 0 and s.dtype.kind == "f":
+            raise IndexError("index -1 is out of bounds for axis 0 with size 0")
+        dt = _quantile(zeros(1, dtype=s.dtype), zeros(1, dtype=qa.dtype), weak_q, -1, method, False, out_of_range).dtype
+        res = empty(qa.shape + s.shape[:-1], dtype=dt)
+        return _quantile_keepdims(res, qa, nd, all_axes, axis, keepdims)
     vals = []
     for qq in qa.ravel():
         if not (0 <= qq <= 1):
             raise ValueError(out_of_range)
-        virtual = (n - 1) * qq
         # (an integer q, 0 or 1, under "linear": the element itself, in the data's dtype, as NumPy takes it)
         if method == "linear" and qa.dtype.kind in "iub":
-            vals.append(s[..., int(virtual)])
+            vals.append(s[..., int((n - 1) * qq)])
+            continue
+        # (the discrete methods: an index, the element itself; NumPy's _inverted_cdf, _closest_observation, and the
+        # floor, ceil and around of (n-1)*q)
+        if method in ("inverted_cdf", "closest_observation"):
+            index = n * qq - 1 if method == "inverted_cdf" else n * qq - 1 - 0.5
+            prev = floor(index)
+            g = index - prev
+            take_prev = g == 0 if method == "inverted_cdf" else (g == 0 and prev % 2 == 1)
+            vals.append(s[..., _builtins.max(int(prev if take_prev else prev + 1), 0)])
             continue
         if method in ("lower", "higher", "nearest"):
+            virtual = (n - 1) * qq
             k = {"lower": _math.floor, "higher": _math.ceil, "nearest": _builtins.round}[method](float(virtual))
             vals.append(s[..., int(k)])
             continue
-        if method == "midpoint":
-            virtual = 0.5 * (floor(virtual) + ceil(virtual))
+        virtual = _quantile_virtual_index(method, n, qq)
+        # (NumPy's _get_indexes: past the last index both neighbours are the last element, below 0 both the first; and
+        # gamma is taken from those neighbours' index, as NumPy's _get_gamma takes it)
         lo = int(_math.floor(float(virtual)))
-        hi = _builtins.min(lo + 1, n - 1)
         if virtual >= n - 1:
-            lo = hi = n - 1
+            lo = hi = -1
+        elif virtual < 0:
+            lo = hi = 0
+        else:
+            hi = lo + 1
+        gamma = virtual - lo
         if method == "midpoint":
             gamma = asarray(0.0 if virtual % 1 == 0 else 0.5, dtype=asarray(virtual).dtype)[()]
-        else:
-            gamma = virtual - floor(virtual)
+        elif method == "averaged_inverted_cdf":
+            gamma = asarray(0.5 if gamma == 0 else 1.0, dtype=asarray(virtual).dtype)[()]
         prev, nxt = s[..., lo], s[..., hi]
         diff_b_a = nxt - prev
         if weak_q:
@@ -1518,8 +1599,21 @@ def _quantile(a, qa, weak_q, axis, method, keepdims, out_of_range):
     res = array(vals) if qa.ndim else asarray(vals[0])
     if qa.ndim:
         res = res.reshape(qa.shape + res.shape[1:])
+    # (a slice with a NaN: NumPy's result there is that slice's last sorted element, the NaN, #1909; a 0-d result is
+    # that element itself, in the data's dtype; an empty q has no result to fill)
+    if s.dtype.kind == "f" and res.size:
+        nans = asarray(isnan(s[..., -1]))
+        if nans.any():
+            res = asarray(s[..., -1]) if res.ndim == 0 else where(nans, s[..., -1], res).astype(res.dtype)
+    return _quantile_keepdims(res, qa, nd, all_axes, axis, keepdims)
+
+
+def _quantile_keepdims(res, qa, nd, all_axes, axis, keepdims):
     if keepdims:
-        res = expand_dims(res, axis if qa.ndim == 0 else axis + qa.ndim)
+        if all_axes:
+            res = asarray(res).reshape(qa.shape + (1,) * nd)
+        else:
+            res = expand_dims(res, qa.ndim + axis % nd)
     return res if res.ndim else res[()]
 
 
@@ -1853,8 +1947,25 @@ def rot90(m, k=1, axes=(0, 1)):
     return flip(swapaxes(m, a0, a1), a1)
 
 
+def _shape_text(s):
+    # (a shape as NumPy's C messages print it: "(2,3)", "(3,)")
+    return "(" + ",".join(str(n) for n in s) + ("," if len(s) == 1 else "") + ")"
+
+
 def broadcast_to(array, shape, subok=False):
-    return _np.broadcast_to(asarray(array), _shape(shape))
+    a, target = asarray(array), _shape(shape)
+    # (NumPy's own refusals, in its order, #1908: its _broadcast_to's, then its iterator's, not the ufuncs')
+    if not target and a.shape:
+        raise ValueError("cannot broadcast a non-scalar to a scalar array")
+    if _builtins.any(n < 0 for n in target):
+        raise ValueError("all elements of broadcast shape must be non-negative")
+    if a.ndim > len(target):
+        raise ValueError("input operand has more dimensions than allowed by the axis remapping")
+    for n, t in zip(a.shape[::-1], target[::-1]):
+        if n != 1 and n != t:
+            raise ValueError("operands could not be broadcast together with remapped shapes [original->remapped]: %s  and "
+                             "requested shape %s" % (_shape_text(a.shape), _shape_text(target)))
+    return _np.broadcast_to(a, target)
 
 
 def broadcast_arrays(*args, subok=False):
@@ -1863,7 +1974,26 @@ def broadcast_arrays(*args, subok=False):
 
 
 def broadcast_shapes(*args):
-    return _np.broadcast_shapes(*[_shape(s) for s in args])
+    shapes = [_shape(s) for s in args]
+    # (NumPy makes an empty array of each shape first)
+    if _builtins.any(n < 0 for s in shapes for n in s):
+        raise ValueError("negative dimensions are not allowed")
+    # (NumPy's message where shapes don't broadcast, #1908: its broadcast iterator walks the result's dimensions from
+    # the first, and in each the arguments in order, and names the first that disagrees and the one that set that
+    # dimension's size)
+    nd = _builtins.max([len(s) for s in shapes], default=0)
+    for i in range(nd):
+        size, src = 1, None
+        for j, s in enumerate(shapes):
+            k = i + len(s) - nd
+            if k < 0 or s[k] == 1:
+                continue
+            if size == 1:
+                size, src = s[k], j
+            elif s[k] != size:
+                raise ValueError("shape mismatch: objects cannot be broadcast to a single shape.  Mismatch is between arg "
+                                 "%d with shape %s and arg %d with shape %s." % (src, tuple(shapes[src]), j, tuple(s)))
+    return _np.broadcast_shapes(*shapes)
 
 
 def append(arr, values, axis=None):
