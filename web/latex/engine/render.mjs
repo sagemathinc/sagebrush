@@ -804,7 +804,7 @@ class Renderer {
     let eo = null;
     if (dflt === null) { const [o, oj] = this.opt(lead, -1); if (o && !this.isChar(o[0], 60)) { eo = enumitemOpts(this.str(o)); if (eo) lead = lead.slice(oj + 1); } }
     const tpl = eo ? eo.label ?? eo["label*"] ?? null : null;
-    L.custom = tpl !== null || eo?.ref !== undefined;
+    L.refTpl = eo?.ref ?? tpl;
     if (eo && kind === "enum" && eo.start !== undefined && /^\s*-?\d+\s*$/.test(eo.start)) L.n = parseInt(eo.start, 10) - 1;
     this.walk(lead, ctx, flow);
     i = first;
@@ -821,15 +821,16 @@ class Renderer {
         const nums = this.lists.filter((x) => x.kind === "enum").map((x) => x.n);
         const d = depth;
         lbl = d === 1 ? nums[0] + "." : d === 2 ? "(" + alph(nums[1]) + ")" : d === 3 ? roman(nums[2]) + "." : Alph(nums[3]) + ".";
-        const ref = nums[0] + (d >= 2 ? (d === 2 ? alph(nums[1]) : "(" + alph(nums[1]) + ")") : "") + (d >= 3 ? roman(nums[2]) : "") + (d >= 4 ? Alph(nums[3]) : "");
         lbl = esc(lbl);
         if (tpl !== null) { lbl = this.labelHtml(labelFill(tpl, L.n), false); }
-        // (what \ref gives: enumitem's ref= or label=; under a list of enumitem's own label, a default item's is that
-        //  list's item's, then its own counter, as enumitem sets it: a) then a, "a)a")
-        const up = this.lists.filter((x) => x.kind === "enum").at(-2);
-        L.refNow = tpl !== null || eo?.ref !== undefined ? this.labelHtml(labelFill(eo.ref ?? tpl, L.n), true)
-          : up?.custom ? up.refNow + (d === 2 ? alph(L.n) : d === 3 ? roman(L.n) : Alph(L.n)) : ref;
-        this.setTarget(L.refNow, "", "item");
+        // (what \ref gives, as LaTeX composes it, \p@enumN\theenumN: each level's \theenum is enumitem's ref= or
+        //  label= filled in, else LaTeX's own (1, a, i, A); the prefix is LaTeX's, from the levels above: none, then
+        //  \theenumi, then \theenumi(\theenumii), then that and \theenumiii. So T1) above a default list's (a) above i
+        //  gives T1)(a)i, and T1) above Sa) above i gives T1)(Sa))i, as pdflatex with enumitem does)
+        const t = this.lists.filter((x) => x.kind === "enum").map((x) => this.theOf(x));
+        const pre = d === 1 ? "" : d === 2 ? t[0] : t[0] + "(" + t[1] + ")" + (d >= 4 ? t[2] : "");
+        // (an item of a list with its own label= or ref= is that alone, as enumitem gives it: Sa), not T1)Sa))
+        this.setTarget(L.refTpl != null ? t[t.length - 1] : pre + t[t.length - 1], "", "item");
       } else if (kind === "item") lbl = tpl !== null ? this.labelHtml(tpl, false) : ["•", "–", "∗", "·"][Math.min(depth, 4) - 1];
       else lbl = "";
       const id = this.nid("it"); if (kind === "enum" && !o) this.target.id = id;
@@ -963,6 +964,8 @@ class Renderer {
     return '<div class="amsaddr">' + [...by.values()].map((xs) => '<div class="p">' + xs.map((x) => x.kind === "address" ? '<span style="font-variant:small-caps">' + x.h + "</span>" : "<i>" + LAB[x.kind] + "</i>: " + x.h).join("<br>") + "</div>").join("") + "</div>";
   }
   amsShort(nodes, i) { return this.ams() ? this.opt(nodes, i) : [null, i]; }
+  // (a list's \theenumN for its item now: enumitem's ref= or label= filled in, else LaTeX's own for its depth)
+  theOf(X) { return X.refTpl != null ? this.labelHtml(labelFill(X.refTpl, X.n), true) : X.depth === 1 ? String(X.n) : X.depth === 2 ? alph(X.n) : X.depth === 3 ? roman(X.n) : Alph(X.n); }
   // (a list label from enumitem's template, its number put in: the shape switches \textup, \upshape, \normalfont and the
   //  like dropped, \textbf and \textit or \emph kept, the rest as a citation's note is typeset; plain: the text alone)
   labelHtml(t, plain) {
