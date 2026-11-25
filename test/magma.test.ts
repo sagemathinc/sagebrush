@@ -1596,19 +1596,27 @@ test("Matrix checks its shape in Magma's words before it builds anything: no Pyt
 test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
+  const run = (src: string) => spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
+  // (the degree bound is _COLLECT_MAX, the heap left over in 96 MiB, which
+  // moves with the build, the machine's load and between runs (29696 or
+  // 30720 on CI's Node 24 in late October 2026, 33792 on Node 26, 19456 on
+  // a loaded machine) and is never more than 49152: so the degree admitted
+  // here is half of the bound measured in a run of its own, D, under the
+  // bound of the run below by a wide margin, and the three refused, 100000,
+  // 10^20 and 3000^2, stay over it, whatever it is)
+  const probe = run("R<x> := PolynomialRing(GF(7));\n(x+1)^100000;\n");
+  const bound = Number(probe.stdout.replace(/\s+/g, " ").match(/a polynomial of degree more than (\d+) is not supported yet/)?.[1]);
+  assert.ok(bound > 4000 && bound <= 49152, probe.stdout + probe.stderr);
+  // (D's derivative, D (D - 1) coefficient products, stays over 10^6)
+  const D = Math.floor(bound / 2);
   const t0 = Date.now();
   const src = "R<x> := PolynomialRing(GF(7)); K<w> := GF(9); S<y> := PolynomialRing(K);\n" +
     "(x+1)^100000;\nx^(10^20);\n(R!3)^(10^20);\nFactorization(x^1001 + 1);\nFactorization(y^70 + w);\nIsIrreducible(y^70 + w);\n" +
-    "f := x^3000 + 3*x + 1; g := f * f;\nh := y^400 + w; k := h * h;\nEvaluate(f, f);\nGCD(f, f);\nDerivative(x^20000 + x, 19999);\n" +
+    `f := x^3000 + 3*x + 1; g := f * f;\nh := y^400 + w; k := h * h;\nEvaluate(f, f);\nGCD(f, f);\nDerivative(x^${D} + x, ${D - 1});\n` +
     // (each step within the allowance, the fold past it: HARD-53E-1)
     "a := x^500 + 1; GCD([a, a, a, a, a, a]);\nLCM([x^300 + 1, x^300 + 2, x^300 + 3, x^300 + 4]);\n" +
-    "Degree(x^20000); #Factorization(x^200 + x + 1);\n\"end\";\n";
-  // (the degree bound is _COLLECT_MAX, the heap left over in 96 MiB, which
-  // moves with the build and between runs (29696 or 30720 on CI's Node 24
-  // in late October 2026, 33792 on Node 26) and is never more than 49152:
-  // so the degrees admitted here stay at 20000, under it, and the three
-  // refused, 100000, 10^20 and 3000^2, stay over it, whatever it is)
-  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
+    `Degree(x^${D}); #Factorization(x^200 + x + 1);\n"end";\n`;
+  const r = run(src);
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
   assert.equal((out.match(/a polynomial of degree more than \d+ is not supported yet/g) ?? []).length, 3, r.stdout);
@@ -1623,7 +1631,7 @@ test("polynomial arithmetic over a finite field is admitted before it computes, 
   for (const what of ["a product", "a Gcd", "a derivative", "a Lcm"])
     assert.ok(out.includes(`${what} of polynomials over a finite field of more than 1000000 coefficient products is not supported yet`), what + r.stdout);
   assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
-  assert.match(r.stdout, /\n20000\n\d+\nend\n$/);
+  assert.match(r.stdout, new RegExp(`\\n${D}\\n\\d+\\nend\\n$`));
   assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 

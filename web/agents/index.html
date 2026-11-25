@@ -311,6 +311,21 @@
   .tabs { display: flex; gap: 2px; overflow-x: auto; margin-right: auto; }
   .tab { border: 0; background: none; padding: 5px 10px; border-radius: 7px; cursor: pointer; white-space: nowrap; font-size: 14px; }
   .tab.on { background: var(--card); box-shadow: 0 0 0 1px var(--line); font-weight: 550; }
+  /* (#1792: a tab and its ×, which shows on the tab shown and on hover; the pane's All artifacts) */
+  .tab-wrap { display: inline-flex; align-items: center; border-radius: 7px; flex: none; }
+  .tab-wrap.on { background: var(--card); box-shadow: 0 0 0 1px var(--line); }
+  .tab-wrap.on .tab.on { box-shadow: none; background: none; }
+  .tab-x { border: 0; background: none; cursor: pointer; padding: 2px 6px; margin-left: -6px; border-radius: 5px; color: var(--muted); font-size: 15px; line-height: 1; visibility: hidden; }
+  .tab-wrap:hover .tab-x, .tab-wrap.on .tab-x, .tab-wrap:focus-within .tab-x { visibility: visible; }
+  .tab-x:hover { background: var(--side); color: inherit; }
+  dialog.arts-dlg { border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; width: min(520px, 92vw); }
+  dialog.arts-dlg h3 { margin: 0 0 8px; font-size: 16px; }
+  dialog.arts-dlg .arts-list { display: flex; flex-direction: column; gap: 4px; max-height: 60vh; overflow-y: auto; }
+  dialog.arts-dlg .arts-item { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; text-align: left; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); cursor: pointer; font: inherit; color: inherit; }
+  dialog.arts-dlg .arts-item.on { border-color: var(--accent2, #4a6b49); }
+  dialog.arts-dlg .arts-item .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  dialog.arts-dlg .arts-item small { color: var(--muted); }
+  dialog.arts-dlg menu { display: flex; justify-content: flex-end; padding: 0; margin: 10px 0 0; }
   /* (dictation, #1791: the mic by Send, red while listening, and what is being heard) */
   #mic { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 4px 9px; cursor: pointer; font-size: 15px; line-height: 1; }
   #mic.rec { background: #b3261e; border-color: #b3261e; color: #fff; animation: mic-pulse 1.2s ease-in-out infinite; }
@@ -428,7 +443,7 @@
       <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.18.tgz</pre>
     </div>
     <div id="log">
-      <div id="log-tools" hidden><button id="mirror-copy" type="button" hidden></button><button id="copychat" type="button" title="This chat as Markdown: what you wrote, the agent's answers, a line for each thing it did, and links to its files">⧉ Copy chat</button></div>
+      <div id="log-tools" hidden><button id="mirror-copy" type="button" hidden></button><button id="all-arts-chat" type="button" hidden title="Everything this chat has made or opened">☰ Artifacts</button><button id="copychat" type="button" title="This chat as Markdown: what you wrote, the agent's answers, a line for each thing it did, and links to its files">⧉ Copy chat</button></div>
       <div id="empty">
         <h1>What should we work on?</h1>
         <div>Ask anything, or try one of these:</div>
