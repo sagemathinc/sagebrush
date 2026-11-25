@@ -99,6 +99,29 @@ export async function advancePin(fleet: string, next: Pin): Promise<"moved" | "s
   return out;
 }
 
+/** Move the pin to `head`, the head of a chain the caller verified, whose entry hashes by seq are `hashes`, in one
+ * transaction (a compare-and-set, so tabs can't interleave): only if the stored pin is one of that chain's entries.
+ * A stored pin at another hash than the chain's at its seq (another tab pinned another branch) marks the fleet forked,
+ * for good, and is refused (chain_fork), as is a forked fleet. A stored pin past the head (another tab pinned further)
+ * proves nothing about that chain: nothing is written and "behind" says to sync again. */
+export async function advancePinOnChain(fleet: string, hashes: readonly string[], head: Pin): Promise<"moved" | "same" | "behind"> {
+  fleetOk(fleet);
+  if (!Number.isSafeInteger(head.seq) || head.seq < 0 || typeof head.hash !== "string" || !HASH.test(head.hash) || hashes[head.seq] !== head.hash) throw new Error("not a chain position");
+  const tx = (await open()).transaction("pins", "readwrite");
+  const s = tx.objectStore("pins");
+  const cur = (await req(s.get(fleet))) as PinRecord | undefined;
+  let out: "moved" | "same" | "behind" | "fork";
+  if (cur?.forked) out = "fork";
+  else if (!cur) { s.put({ seq: head.seq, hash: head.hash } satisfies PinRecord, fleet); out = "moved"; }
+  else if (cur.seq > head.seq) out = "behind";
+  else if (hashes[cur.seq] !== cur.hash) { s.put({ ...cur, forked: { at: Date.now(), seen: { seq: cur.seq, hash: String(hashes[cur.seq]) } } } satisfies PinRecord, fleet); out = "fork"; }
+  else if (cur.seq === head.seq) out = "same";
+  else { s.put({ seq: head.seq, hash: head.hash } satisfies PinRecord, fleet); out = "moved"; }
+  await done(tx);
+  if (out === "fork") throw new Error("chain_fork");
+  return out;
+}
+
 /** "Reset this device" (§2): this install's key and pin for `fleet` deleted, the fork mark with them. The install is
  * then a new device, enrolled again from another device or with the recovery code. */
 export async function resetDevice(fleet: string): Promise<void> {

@@ -5215,6 +5215,9 @@ def _coerce_int(x):
         return int(x)
     if isinstance(x, _Fraction) and x.denominator == 1:
         return int(x)
+    if isinstance(x, _Fraction):
+        # (Magma's words for a rational that isn't an integer: Integers()!(1/2))
+        raise MagmaError("Rational argument is not a whole integer\nLHS: RngInt\nRHS: FldRatElt", "'!'", False)
     if isinstance(x, (bool, str)):
         # Python would read "7" as 7 and true as 1
         raise MagmaError("Illegal coercion\nLHS: RngInt\nRHS: %s" % _type(x), "'!'", False)
@@ -9662,6 +9665,14 @@ class _MNumberField(_snf.NumberField_absolute):
     _magma_block = True
 
     def __init__(self, f, quadratic=False, irreducible=False):
+        # (Magma mode prints and converts on the defining polynomial itself: a field the core keeps through a
+        # scaled model, one of a rational or non-monic polynomial, is refused here as before, until Magma mode
+        # maps its coordinates)
+        c, _ = _snf._int_coeffs(f)
+        if any(_Fraction(a).denominator != 1 for a in c):
+            raise NotImplementedError("defining polynomials must have integer coefficients")
+        if not c or c[-1] != 1:
+            raise NotImplementedError("defining polynomials must be monic (for now)")
         super().__init__(f, "$.1", irreducible=irreducible)
         # (as Magma 2.18-5 has it: a polynomial over the rationals defines the field made monic, NumberField(3*x^2
         # + 1) is x^2 + 1/3; one over the integers made primitive with a positive leading coefficient, 2*y^2 - 3
@@ -11441,6 +11452,14 @@ def _order_text(n):
     return "Order = %d" % n if f == str(n) else "Order = %d = %s" % (n, f)
 
 
+def _no_covering_group():
+    """Magma's error for a permutation coerced into a permutation group of
+    another degree (Sym(5)!(Sym(4)!(1, 2))), with no empty line after it;
+    one of the same degree that isn't in the group is an illegal
+    coercion."""
+    return MagmaError("Could not find a covering group\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", False)
+
+
 class _MSymGroup:
     """Sym(n): the symmetric group on 1 .. n (GrpPerm), its elements the
     permutations, composed left to right as Magma's: i^(p*q) = (i^p)^q."""
@@ -11484,7 +11503,7 @@ class _MSymGroup:
                 return x
             if x.G.n == self.n:
                 return _MPerm(self, x.images)  # (a dihedral group's, of degree n)
-            raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", True)
+            raise _no_covering_group()
         if isinstance(x, (MSeq, MRange)):
             # G![images]: the permutation i -> images[i], integers only
             # (CORR-DFC-4)
@@ -11709,9 +11728,12 @@ class _MDihedralGroup:
         # (cycles or images made a permutation as Sym(n)'s, then admitted
         # only if it is the group's: G!(1, 2) is Magma's Illegal coercion)
         p = x if isinstance(x, _MPerm) else _MSymGroup(self.n)._magma_coerce(x)
-        if p.G.n == self.n and self._has(p.images):
+        if p.G.n != self.n:
+            raise _no_covering_group()
+        if self._has(p.images):
             return _MPerm(self, p.images)
-        raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", True)
+        # (with no empty line after it, as Magma's)
+        raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", False)
 
 
 def DihedralGroup(n):
