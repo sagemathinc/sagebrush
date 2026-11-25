@@ -1046,7 +1046,7 @@ class Files(unittest.TestCase):
             cal = sorted(k for k in r["sizes"] if k not in ("s", "m", "l"))
             self.assertEqual(sorted(set(r["sizes"]) - set(cal)), ["l", "m", "s"])
             self.assertIn(cal, ([], ["c0", "c1", "c2", "c3", "c4"]))
-        self.assertEqual(len(m["rows"]), 47)
+        self.assertEqual(len(m["rows"]), 52)
 
 
 class Units(unittest.TestCase):
@@ -1669,6 +1669,278 @@ class RotationOrder(unittest.TestCase):
         offs, wholes = self.expected()
         self.assertEqual([int(x) for x in lines[:w]], offs)
         self.assertEqual([int(x) for x in lines[w + 1 :]], wholes)
+
+
+class Stream(unittest.TestCase):
+    """The stream rows (class_group_prime and the others): each input new,
+    timed once, the systems paired input by input."""
+
+    def setUp(self):
+        sys.path.insert(0, str(Path(run.__file__).parent / "drivers"))
+        import common
+
+        self.common = common
+
+    def run_main(self, k, slow0=0.0):
+        import contextlib
+        import io
+
+        calls = []
+
+        def prepare(v):
+            calls.append(("prepare", v))
+
+            def op():
+                calls.append(("op", v))
+                if v == 0 and slow0:
+                    time.sleep(slow0)
+                return v
+
+            return op
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.common.main(["x", "case", "5", "time-stream", str(k)], prepare, lambda a: "s%d" % a, lambda: 0)
+        return calls, buf.getvalue()
+
+    def test_each_input_once_and_no_warm_pass(self):
+        calls, out = self.run_main(4, slow0=0.05)
+        self.assertEqual(calls, [(w, v) for v in range(4) for w in ("prepare", "op")])
+        t = run.parse_timing(out)
+        self.assertEqual((t["mode"], t["k"], len(t["samples"])), ("stream", 4, 4))
+        self.assertGreater(t["samples"][0][0], 0.04)
+        line = [x for x in out.splitlines() if x.startswith("TIME|")][0].split("|")
+        # (the cold input 0 is outside the TIME statistics: 3 samples, all fast)
+        self.assertEqual(line[6], "3")
+        self.assertLess(float(line[4]), 0.04)
+        self.assertEqual(line[2], self.common.combined_signature(["s0", "s1", "s2", "s3"]))
+
+    def test_needs_two_inputs(self):
+        with self.assertRaises(SystemExit):
+            self.run_main(1)
+
+    def test_parse_timing(self):
+        head = '"granularity":1e-7,"threshold":0.001,"seed":0'
+        good = 'TIMING|{%s,"k":3,"mode":"stream","samples":[[0.5],[0.1],[0.2]]}' % head
+        self.assertEqual(run.parse_timing(good)["mode"], "stream")
+        for bad in (
+            'TIMING|{%s,"k":3,"mode":"stream","samples":[[0.5],[0.1]]}' % head,
+            'TIMING|{%s,"k":2,"mode":"stream","samples":[[0.5,0.4],[0.1,0.2]]}' % head,
+            'TIMING|{%s,"k":1,"mode":"stream","samples":[[0.5]]}' % head,
+        ):
+            self.assertIsNone(run.parse_timing(bad), bad)
+
+    def point(self):
+        row = dict(ROW, stream=True, fresh=True, sizes={"s": {"n": 18, "variants": 5, "timeout": 30}})
+        samples = {"user": [9, 2, 4, 6, 8], "magma": [1, 1, 2, 2, 4]}
+        modes = []
+
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            modes.append((b, mode))
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": "5"}
+            if mode == "once":
+                return {"status": "ok", "signature": "s", "seconds_cold": 1.0}
+            smp = samples[b]
+            t = {"granularity": 1e-7, "threshold": 1e-3, "seed": 0, "k": 5, "mode": "stream", "samples": [[x] for x in smp]}
+            rest = sorted(smp[1:])
+            return {"status": "ok", "seconds": rest[len(rest) // 2], "signature": "5:1", "timing": t}
+
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+        ):
+            rec = run.point(row, "s", ["user", "magma"], {"artifacts": ARTS})
+        return rec, modes
+
+    def test_point_pairs_the_inputs(self):
+        rec, modes = self.point()
+        self.assertEqual(rec["status"], "ok")
+        self.assertTrue(rec["stream"])
+        self.assertEqual({m for b, m in modes if m.startswith("time")}, {"time-stream"})
+        # (inputs 1..4: ratios 2, 2, 3, 2; the cold input 0 (9 / 1) is apart)
+        pi = rec["per_input_user"]
+        self.assertEqual((rec["ratio_user"], pi["min"], pi["max"], pi["cold"]), (2.0, 2.0, 3.0, 9.0))
+        self.assertEqual(pi["ratios"], [2.0, 2.0, 2.0, 3.0])
+        self.assertEqual(pi["against"], "magma")
+        self.assertEqual(rec["ratio_user_of_medians"], round(6 / 2, 4))
+        self.assertFalse(run.wants_vtime("user", {"stream": True}))
+
+    def test_calibration_json_keeps_stream_points(self):
+        rec, _ = self.point()
+        rec.update(protocol=run.PROTOCOL, machine={"label": "x86", "cpu": "c", "arch": "x86_64", "nproc": 16, "flags": []}, commit="c" * 40)
+        rec.setdefault("engine_pin", {"ok": False, "policy": "track", "sha256": "b" * 64})
+        d = Path(tempfile.mkdtemp(prefix="bench-core-stream-"))
+        self.addCleanup(shutil.rmtree, d, True)
+        (d / "rows").mkdir()
+        (d / "rows" / "class_group_prime-s.json").write_text(json.dumps(rec))
+        run.summary(d, {})
+        pts = json.loads((d / "calibration.json").read_text())["points"]
+        self.assertEqual(len(pts), 1)
+        self.assertTrue(pts[0]["stream"])
+        # (the cold input 0 apart: the list starts at input 1)
+        self.assertEqual(pts[0]["backends"]["magma"]["seconds_per_input"], [1, 2, 2, 4])
+        self.assertEqual(pts[0]["backends"]["magma"]["seconds_cold"], 1)
+        self.assertEqual(pts[0]["backends"]["user"]["seconds_per_input"], [2, 4, 6, 8])
+        self.assertEqual(pts[0]["backends"]["user"]["seconds_cold"], 9)
+        self.assertIn("per_input_user", pts[0]["per_input"])
+        self.assertIn("per input [", (d / "summary.md").read_text())
+
+    def invoke_with(self, lines, k=5):
+        # (the real invoke and parser, on a stand-in driver printing lines)
+        cmd = [PY, "-c", "print(%r)" % "\n".join(lines)]
+        with (
+            mock.patch.object(run, "command", lambda b, row, n, mode, kk=1: cmd),
+            mock.patch.object(run, "CAP", None),
+        ):
+            return run.invoke("user", dict(ROW, stream=True), 18, "time-stream", 30, k)
+
+    HEAD = '"granularity":1e-7,"threshold":0.001,"seed":0'
+    TIME = "TIME|0.2|5:1|0.1|0.4|1|4"
+
+    def test_invoke_refuses_a_stream_run_without_its_record(self):
+        five = "[[0.9],[0.1],[0.2],[0.3],[0.4]]"
+        cases = {
+            "missing": [self.TIME],
+            "wrong K": ['TIMING|{%s,"k":4,"mode":"stream","samples":[[0.9],[0.1],[0.2],[0.3]]}' % self.HEAD, self.TIME],
+            "per-op mode": ['TIMING|{%s,"k":5,"mode":"per-op","samples":[[0.9,0.8],[0.1,0.1],[0.2,0.2],[0.3,0.3],[0.4,0.4]]}' % self.HEAD, self.TIME],
+            "malformed count": ['TIMING|{%s,"k":5,"mode":"stream","samples":[[0.9],[0.1],[0.2],[0.3]]}' % self.HEAD, self.TIME],
+        }
+        for name, lines in cases.items():
+            with self.subTest(name):
+                r = self.invoke_with(lines)
+                self.assertEqual(r["status"], "error")
+                self.assertIn("stream TIMING record of K = 5", r["detail"])
+                self.assertFalse({"seconds", "timing", "samples"} & set(r), r)
+        r = self.invoke_with(['TIMING|{%s,"k":5,"mode":"stream","samples":%s}' % (self.HEAD, five), self.TIME])
+        self.assertEqual((r["status"], r["timing"]["mode"], r["seconds"]), ("ok", "stream", 0.2))
+
+    def test_invoke_refuses_another_kind_of_answer(self):
+        # (a timing run answered by another recognized line, or none: an
+        # error, the wrong answer's fields dropped)
+        for lines in (["RESULT|1|s"], ["INPUTS|5"], ["no protocol line"]):
+            with self.subTest(lines[0]):
+                r = self.invoke_with(lines)
+                self.assertEqual(r["status"], "error")
+                self.assertFalse({"signature", "input_hash", "seconds_cold", "seconds"} & set(r), r)
+        # (the same for a plain timing run: its answer must be a TIME line)
+        cmd = [PY, "-c", "print('INPUTS|5')"]
+        with (
+            mock.patch.object(run, "command", lambda b, row, n, mode, kk=1: cmd),
+            mock.patch.object(run, "CAP", None),
+        ):
+            r = run.invoke("user", ROW, 10, "time", 30, 1)
+        self.assertEqual((r["status"], "input_hash" in r), ("error", False))
+        self.assertIn("needs a TIME line", r["detail"])
+
+    def test_point_is_an_error_when_a_stream_run_answers_with_another_kind(self):
+        # (the real invoke and point: a stand-in driver answering each mode,
+        # its time-stream run with a RESULT or an INPUTS line)
+        for wrong in ("RESULT|1|s", "INPUTS|5"):
+            with self.subTest(wrong):
+                d = Path(tempfile.mkdtemp(prefix="stream-kind-"))
+                self.addCleanup(shutil.rmtree, d, True)
+                drv = d / "drv.py"
+                drv.write_text(
+                    "import sys\n"
+                    "mode = sys.argv[1]\n"
+                    "print({'inputs': 'INPUTS|5', 'once': 'RESULT|0.1|s'}.get(mode, %r))\n" % wrong
+                )
+                row = dict(ROW, stream=True, fresh=True, sizes={"s": {"n": 18, "variants": 5, "timeout": 30}})
+                with (
+                    mock.patch.object(run, "command", lambda b, row, n, mode, k=1: [PY, str(drv), mode]),
+                    mock.patch.object(run, "CAP", None),
+                ):
+                    rec = run.point(row, "s", ["user", "magma"], {"artifacts": ARTS})
+                self.assertEqual(rec["status"], "error")
+                self.assertEqual(sorted(rec["stream_error"]), ["magma", "user"])
+                self.assertFalse([x for x in rec if x.startswith("ratio_") or x.startswith("per_input_")], rec)
+
+    def point_with(self, magma):
+        # (point on fake drivers: the user run a valid stream, the
+        # reference's as given)
+        row = dict(ROW, stream=True, fresh=True, sizes={"s": {"n": 18, "variants": 5, "timeout": 30}})
+        user = {"status": "ok", "seconds": 4, "signature": "5:1",
+                "timing": {"granularity": 1e-7, "threshold": 1e-3, "seed": 0, "k": 5, "mode": "stream", "samples": [[9], [2], [4], [6], [8]]}}
+
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": "5"}
+            if mode == "once":
+                return {"status": "ok", "signature": "s"}
+            return dict(user if b == "user" else magma)
+
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+        ):
+            return run.point(row, "s", ["user", "magma"], {"artifacts": ARTS})
+
+    def test_point_is_an_error_without_a_paired_reference(self):
+        # (the reference's stream run refused by invoke: the point is an
+        # error with no ratio, not an aggregate one)
+        rec = self.point_with({"status": "error", "detail": "time-stream needs a stream TIMING record of K = 5 (got none)"})
+        self.assertEqual(rec["status"], "error")
+        self.assertIn("magma", rec["stream_error"])
+        self.assertFalse([x for x in rec if x.startswith("ratio_") or x.startswith("per_input_")], rec)
+
+    def test_point_never_takes_a_non_stream_record_as_paired(self):
+        # (a record of another mode, had it got past invoke: no per-input
+        # pairing and no headline ratio, only the ratio of medians)
+        per_op = {"status": "ok", "seconds": 2, "signature": "5:1",
+                  "timing": {"granularity": 1e-7, "threshold": 1e-3, "seed": 0, "k": 5, "mode": "per-op", "samples": [[1, 1], [1, 1], [2, 2], [2, 2], [4, 4]]}}
+        rec = self.point_with(per_op)
+        self.assertNotIn("per_input_user", rec)
+        self.assertNotIn("ratio_user", rec)
+        self.assertEqual(rec["ratio_user_of_medians"], 2.0)
+
+    GRID = [(k, n, v) for k in ("prime", "composite", "large_h") for n in (12, 18) for v in range(5)]
+    GRID += [(k, 40, v) for k in ("prime", "composite", "large_h") for v in range(2)]
+
+    def test_every_input_has_its_points_size(self):
+        # (|D| exactly n digits, so a point's median and the fits against n
+        # don't mix sizes; every row's every size and input)
+        import expected_inputs
+
+        rows = json.loads((Path(run.__file__).parent / "items.json").read_text())["rows"]
+        for r in rows:
+            if r.get("stream"):
+                for key, size in r["sizes"].items():
+                    n = size["n"]
+                    ds = [expected_inputs.stream_disc(expected_inputs.CG_STREAM[r["id"]], n, v) for v in range(size["variants"])]
+                    self.assertEqual({len(str(-d)) for d in ds}, {n}, (r["id"], key))
+                    self.assertEqual(len(set(ds)), len(ds), (r["id"], key))
+
+    def test_the_drivers_build_the_same_streams(self):
+        import ast as ast_
+        import expected_inputs
+
+        want = [expected_inputs.stream_disc(k, n, v) for k, n, v in self.GRID]
+        # (the Sage-mode driver's copy, read from its source)
+        src = (Path(run.__file__).parent / "drivers/sagebrush_case.py").read_text()
+        ns = {}
+        for node in ast_.parse(src).body:
+            names = {t.id for t in getattr(node, "targets", []) if isinstance(t, ast_.Name)}
+            if getattr(node, "name", None) in ("_is_prime", "_nth_prime", "_lcg", "_legendre", "stream_disc") or "_STREAM_BASES" in names:
+                exec(compile(ast_.Module([node], []), "sagebrush_case.py", "exec"), ns)
+        self.assertEqual([ns["stream_disc"](k, n, v) for k, n, v in self.GRID], want)
+        # (the Magma driver's, run, when Magma is here: its IsPrime proves)
+        magma = Path("/usr/local/bin/magma")
+        if not magma.exists():
+            self.skipTest("no Magma")
+        msrc = (Path(run.__file__).parent / "drivers/magma_case.m").read_text()
+        fns = [re.search(r"^function %s\(.*?^end function;\n" % f, msrc, re.S | re.M) for f in ("StreamPrime", "StreamLCG", "StreamDisc")]
+        self.assertTrue(all(fns))
+        d = Path(tempfile.mkdtemp(prefix="stream-"))
+        self.addCleanup(shutil.rmtree, d, True)
+        grid = ", ".join('<"%s", %d, %d>' % g for g in self.GRID)
+        (d / "t.m").write_text(
+            "".join(m.group(0) for m in fns)
+            + "for g in [%s] do print StreamDisc(g[1], g[2], g[3]); end for;\nquit;\n" % grid
+        )
+        r = subprocess.run([str(magma), "-b", str(d / "t.m")], capture_output=True, text=True, timeout=300)
+        got = [int(x) for x in r.stdout.split()]
+        self.assertEqual(got, want)
 
 
 class Reruns(unittest.TestCase):

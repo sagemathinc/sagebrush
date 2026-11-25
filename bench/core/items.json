@@ -1687,6 +1687,179 @@
    },
    "variants": 1,
    "variants_note": "one named input per size, a fixed discriminant",
+   "working_set": null,
+   "route_note": "warm: both systems cache the field and its class group, so the repetitions time a cache hit; the stream rows (class_group_prime and the others) time a new discriminant per input"
+  },
+  {
+   "id": "class_group_prime",
+   "item": "nt1",
+   "category": "number fields",
+   "label": "imaginary quadratic class group, a fresh prime discriminant -p per input",
+   "sizes": {
+    "s": {
+     "n": 18,
+     "variants": 24,
+     "timeout": 600
+    },
+    "m": {
+     "n": 28,
+     "variants": 12,
+     "timeout": 900
+    },
+    "l": {
+     "n": 40,
+     "variants": 6,
+     "timeout": 1800
+    }
+   },
+   "fresh": true,
+   "stream": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants_note": "a stream of discriminants (stream_disc): each input is a new D, timed once; input 0 is the cold sample",
+   "route_note": "ours: the default class group, assuming GRH; Magma: its quadratic-field route, which takes no proof option (its default, documented as rigorous), so the levels differ: class_group_proven compares at one level",
+   "working_set": null
+  },
+  {
+   "id": "class_group_composite",
+   "item": "nt1",
+   "category": "number fields",
+   "label": "imaginary quadratic class group, fresh composite discriminants (-pq and -4pq) per input",
+   "sizes": {
+    "s": {
+     "n": 18,
+     "variants": 24,
+     "timeout": 600
+    },
+    "m": {
+     "n": 28,
+     "variants": 12,
+     "timeout": 900
+    },
+    "l": {
+     "n": 40,
+     "variants": 6,
+     "timeout": 1800
+    }
+   },
+   "fresh": true,
+   "stream": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants_note": "a stream of discriminants alternating -pq and -4pq: p the first prime of its class from a pseudo-random point of its decade, q from a pseudo-random point of the range that gives |D| exactly n digits (no simple q / p); each input a new D, timed once; input 0 is the cold sample",
+   "route_note": "ours: the default class group, assuming GRH; Magma: its quadratic-field route, which takes no proof option (its default, documented as rigorous), so the levels differ: class_group_proven compares at one level",
+   "working_set": null
+  },
+  {
+   "id": "class_group_large_h",
+   "item": "nt1",
+   "category": "number fields",
+   "label": "imaginary quadratic class group, fresh discriminants of large h / sqrt|D| (about 2)",
+   "sizes": {
+    "s": {
+     "n": 18,
+     "variants": 24,
+     "timeout": 600
+    },
+    "m": {
+     "n": 28,
+     "variants": 12,
+     "timeout": 900
+    },
+    "l": {
+     "n": 40,
+     "variants": 6,
+     "timeout": 1800
+    }
+   },
+   "fresh": true,
+   "stream": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants_note": "-p with (-p | q) = +1 for every q up to 23, so L(1, chi) and h are large; each input a new D, timed once",
+   "route_note": "ours: the default class group, assuming GRH; Magma: its quadratic-field route, which takes no proof option (its default, documented as rigorous), so the levels differ: class_group_proven compares at one level",
+   "working_set": null
+  },
+  {
+   "id": "class_group_proven",
+   "item": "nt1",
+   "category": "number fields",
+   "label": "imaginary quadratic class group without GRH (ours certified), fresh prime discriminants",
+   "sizes": {
+    "s": {
+     "n": 11,
+     "variants": 4,
+     "timeout": 600
+    },
+    "m": {
+     "n": 12,
+     "variants": 3,
+     "timeout": 900
+    },
+    "l": {
+     "n": 13,
+     "variants": 3,
+     "timeout": 1800
+    }
+   },
+   "fresh": true,
+   "stream": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants_note": "the prime stream at small sizes, where our certificate (a bound about 0.64 sqrt|d|) is feasible",
+   "route_note": "one level on both sides: ours class_group(proof=True), certified without GRH; Magma's quadratic route (its rigorous default). Magma's clock ticks in 10 ms, which these sizes approach",
+   "calibration": false,
+   "working_set": null
+  },
+  {
+   "id": "class_group_generic",
+   "item": "nt1",
+   "category": "number fields",
+   "label": "class group through the generic number field x^2 - D, fresh prime discriminants (informational)",
+   "sizes": {
+    "s": {
+     "n": 10,
+     "variants": 4,
+     "timeout": 600
+    },
+    "m": {
+     "n": 11,
+     "variants": 3,
+     "timeout": 900
+    },
+    "l": {
+     "n": 12,
+     "variants": 3,
+     "timeout": 1800
+    }
+   },
+   "fresh": true,
+   "stream": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants_note": "the prime stream; both sides build NumberField(x^2 - D) rather than the quadratic field",
+   "route_note": "informational: each system's generic number-field route, not its quadratic one; no calibration",
+   "calibration": false,
    "working_set": null
   },
   {

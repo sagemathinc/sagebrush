@@ -106,6 +106,15 @@ def parse_timing(text: str) -> dict | None:
             and all(isinstance(v, list) and v and all(num(x) for x in v) for v in s)
             and len({len(v) for v in s}) == 1
         )
+    elif t.get("mode") == "stream":
+        # (the stream rows: one sample per variant, variant 0 the cold one)
+        s = t.get("samples")
+        ok = (
+            isinstance(s, list)
+            and len(s) == k
+            and k >= 2
+            and all(isinstance(v, list) and len(v) == 1 and num(v[0]) for v in s)
+        )
     elif t.get("mode") == "batched":
         b, o = t.get("batches"), t.get("offsets")
         ok = (
@@ -1075,7 +1084,11 @@ def is_calibration_size(key: str) -> bool:
 
 
 def wants_vtime(backend: str, row: dict) -> bool:
-    return backend in VTIME_TARGETS and row.get("calibration", True) is not False
+    return (
+        backend in VTIME_TARGETS
+        and row.get("calibration", True) is not False
+        and not row.get("stream")
+    )
 
 
 def invoke(
@@ -1089,6 +1102,8 @@ def invoke(
 ) -> dict:
     """One driver run, its output parsed; with cpus (the thread sweep),
     pinned to them, on len(cpus) threads."""
+    # (the K asked for: the TIME line's parse below reuses k for its reps)
+    want_k = k
     cmd = command(backend, row, n, mode, k)
     s0 = cpu_times()
     extra = (
@@ -1135,6 +1150,23 @@ def invoke(
             r["timing"] = timing
             if "vtime" in timing:
                 r["vtime"] = timing["vtime"]
+    # (after every kind: a timing run's answer is a TIME line, whatever
+    # other line a driver printed last; and a stream run is only its
+    # per-input record, a valid stream TIMING record of exactly K inputs.
+    # Anything else is an error, with the fields of the wrong answer
+    # dropped, so nothing falls back to them)
+    why = None
+    if mode in ("time", "time-fresh", "time-stream") and kind != "TIME":
+        why = f"{mode} needs a TIME line (got {kind})"
+    elif mode == "time-stream":
+        tm = r.get("timing")
+        if not (tm is not None and tm.get("mode") == "stream" and tm.get("k") == want_k):
+            got = "none" if tm is None else "mode %s, K %s" % (tm.get("mode"), tm.get("k"))
+            why = f"time-stream needs a stream TIMING record of K = {want_k} (got {got})"
+    if why:
+        for x in ("seconds", "min", "max", "reps", "samples", "timing", "vtime", "signature", "seconds_cold", "input_hash"):
+            r.pop(x, None)
+        r["status"], r["detail"] = "error", why
     return r
 
 
@@ -1271,6 +1303,7 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
         size=key,
         n=n,
         working_set_bytes=working_set(row, n),
+        **({"stream": True} if row.get("stream") else {}),
         fresh=row["fresh"],
         variants=k,
         backends={},
@@ -1322,7 +1355,7 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
     # the K variants, and their combined signatures must agree too (the
     # check above covers variant 0; this covers all K)
     if rec["status"] == "ok":
-        mode = "time-fresh" if row["fresh"] else "time"
+        mode = "time-stream" if row.get("stream") else ("time-fresh" if row["fresh"] else "time")
         for b in present:
             if rec["backends"][b]["check"]["status"] != "ok":
                 continue
@@ -1338,6 +1371,13 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
             for t in timed.values():
                 if t["status"] == "ok":
                     t["status"] = "mismatch"
+        # (a stream point is its per-input pairing: a backend whose stream
+        # run failed, or came back without its stream record, makes the
+        # whole point an error rather than leaving an unpaired one)
+        failed = {b: t.get("detail") or t["status"] for b, t in timed.items() if t["status"] != "ok"}
+        if row.get("stream") and failed and rec["status"] == "ok":
+            rec["status"] = "error"
+            rec["stream_error"] = failed
         # the thread sweep (--sweep, rows marked "sweep"): each -n backend
         # again on each column's cpus, pinned; "ends" only the first and
         # the last column (a flat baseline); a combined signature that
@@ -1408,6 +1448,52 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
                 "seconds": theirs[bt],
             }
             rec["ratio_best"] = round(ours[bo] / theirs[bt], 4)
+        if row.get("stream"):
+            # (a stream row: each variant is a new input timed once, so the
+            # headline ratios pair the systems input by input: the median of
+            # the per-input ratios, with their quartiles, over the variants
+            # after the first; variant 0 is the cold sample, its ratio kept
+            # apart and never in the median)
+            def per_input(b):
+                t = rec["backends"].get(b, {}).get("time", {})
+                tm = t.get("timing") or {}
+                smp = tm.get("samples")
+                if t.get("status") != "ok" or tm.get("mode") != "stream" or not smp or len(smp) != k:
+                    return None
+                return [x[0] for x in smp]
+
+            ref = per_input(best)
+            for b in ("user", "native", "native-host", "wasm"):
+                ours = per_input(b)
+                if not (ref and ours):
+                    continue
+                ratios = sorted(o / r for o, r in zip(ours[1:], ref[1:]) if r > 0)
+                if not ratios:
+                    continue
+
+                def q(f):
+                    return round(ratios[round(f * (len(ratios) - 1))], 4)
+
+                key = b.replace("-", "_")
+                rec["ratio_" + key + "_of_medians"] = rec.pop("ratio_" + key, None)
+                rec["ratio_" + key] = q(0.5)
+                rec["per_input_" + key] = {
+                    "against": best,
+                    "ratios": [round(x, 4) for x in ratios],
+                    "min": q(0),
+                    "q1": q(0.25),
+                    "median": q(0.5),
+                    "q3": q(0.75),
+                    "max": q(1),
+                    "cold": round(ours[0] / ref[0], 4) if ref[0] > 0 else None,
+                    "reference_zero_samples": sum(1 for r in ref[1:] if r <= 0),
+                }
+            # (no aggregate headline for a stream row: a backend without its
+            # per-input pairing keeps the ratio of medians under that name)
+            for b in ("user", "native", "native-host", "wasm"):
+                key = b.replace("-", "_")
+                if "per_input_" + key not in rec and "ratio_" + key in rec:
+                    rec["ratio_" + key + "_of_medians"] = rec.pop("ratio_" + key)
         if row.get("cold"):
             # (a row whose reference reuses internal state across repetitions
             # in one process, hecke_matrix: every headline ratio is the cold
@@ -1477,17 +1563,19 @@ def engine_label(rec: dict) -> str:
 
 
 def calibration(out: Path) -> None:
-    """calibration.json, for the fits: every point at a calibration size
-    measured under this protocol, with what the fits use (n, the working
-    set, the host, the units, and per calibrated target its times and
-    per-variant vtime).  A point of another protocol is never mixed in:
+    """calibration.json, for the fits: every point at a calibration size,
+    and every stream point, measured under this protocol, with what the
+    fits use (n, the working set, the host, the units, and per calibrated
+    target its times and per-variant vtime; for a stream point every
+    backend's seconds per input from input 1 on, references included, its
+    cold input 0 apart as seconds_cold, and the per-input ratios).  A point of another protocol is never mixed in:
     it is only counted.  A point whose units are "unmetered" (an op the
     meter doesn't cover yet) has times but no units: the fits must skip it
     for the unit-cost terms."""
     points, other = [], 0
     for path in sorted((out / "rows").glob("*.json")):
         r = json.loads(path.read_text())
-        if not is_calibration_size(r.get("size", "")):
+        if not (is_calibration_size(r.get("size", "")) or r.get("stream")):
             continue
         if r.get("protocol") != PROTOCOL:
             other += 1
@@ -1496,11 +1584,22 @@ def calibration(out: Path) -> None:
         keep += ("host", "machine", "commit", "engine_pin")
         pt = {k: r.get(k) for k in keep}
         pt["backends"] = {}
+        if r.get("stream"):
+            # (a stream point: every backend's seconds per input, the
+            # references' too, so the fits pair them input by input; input 0
+            # is the cold one)
+            pt["stream"] = True
+            pt["per_input"] = {x: r[x] for x in r if x.startswith("per_input_")}
         for b, v in r.get("backends", {}).items():
+            t = v.get("time") or {}
+            if r.get("stream") and (t.get("timing") or {}).get("mode") == "stream":
+                # (the cold input 0 apart, so a fit reading the list can't
+                # take it: seconds_per_input starts at input 1)
+                smp = [x[0] for x in t["timing"]["samples"]]
+                pt["backends"].setdefault(b, {}).update(seconds_cold=smp[0], seconds_per_input=smp[1:])
             if b not in VTIME_TARGETS:
                 continue
-            t = v.get("time") or {}
-            pt["backends"][b] = {"status": (t or v.get("check") or v).get("status")}
+            pt["backends"][b] = dict(pt["backends"].get(b, {}), status=(t or v.get("check") or v).get("status"))
             pt["backends"][b].update(
                 {x: t.get(x) for x in ("seconds", "min", "max", "reps", "samples", "vtime") if x in t}
             )
@@ -1565,6 +1664,9 @@ def summary(out: Path, items: dict) -> None:
         # beside them)
         def ratio(key, r=r):
             text = str(r.get(key, "—"))
+            pi = r.get("per_input_" + key[len("ratio_"):])
+            if pi:
+                text += f" per input [{pi['q1']}, {pi['q3']}]"
             if r.get("ratio_basis") == "cold":
                 text += f" cold (warm {r.get(key + '_warm', '—')})"
             return text
