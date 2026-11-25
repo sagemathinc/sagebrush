@@ -361,7 +361,7 @@ const probe = (body, own = {}) => frontOp("probe", async () => {
         await new Promise((ok) => { wake = ok; setTimeout(ok, 50); });
       }
     };
-    ws.send(JSON.stringify({ t: "hello", v: 2, device, name: "probe", index_after: 0 }));
+    ws.send(JSON.stringify({ t: "hello", v: 3, device, name: "probe", index_after: 0 }));
     const welcome = await next((m) => m.t === "welcome");
     const index = [];
     let page = await next((m) => m.t === "index");
@@ -686,7 +686,7 @@ async function serveOp(req, server, u, p) {
       return sessionAccount ? Response.json({ account_id: sessionAccount }) : Response.json({ error: "sign in first" }, { status: 401 });
     }
     const headers = {};
-    for (const k of ["content-type", "content-length", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v !== null) headers[k] = v; }
+    for (const k of ["content-type", "content-length", "x-sync-account", "x-sync-generation", "x-sb-ct-sha256"]) { const v = req.headers.get(k); if (v !== null) headers[k] = v; }
     // (the reference server reads a PUT's length from its header: the page's, forwarded; else the body's own)
     if (isPut && headers["content-length"] === undefined) headers["content-length"] = String(body.length);
     let r;
@@ -1179,7 +1179,7 @@ async function resourceControls() {
         for (const text of c.buf.splice(0)) ws.onmessage(text);
         const next = async (f, ms = 1000) => { const t = performance.now(); for (;;) { const m = got.find(f); if (m) return m; if (performance.now() - t > ms) return null; await sleep(10); } };
         const doc = crypto.randomUUID(), client = "ctlmsg1", id = "1".padStart(11, "0") + "_" + client;
-        ws.send(J({ t: "hello", v: 2, device: "c0c0c0c0c0c0c0c0", name: "ctl", index_after: 0, generation: 1 }));
+        ws.send(J({ t: "hello", v: 3, device: "c0c0c0c0c0c0c0c0", name: "ctl", index_after: 0, generation: 1 }));
         const welcome = await next((m) => m.t === "welcome" || m.t === "error");
         steps.push(["welcome", welcome?.t === "welcome" && welcome.state === "active" && welcome.generation === 1]);
         ws.send(J({ t: "doc_claim", req: 1, epoch: 1, doc, client }));

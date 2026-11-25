@@ -21,13 +21,14 @@
    "ops.ts": 3,
    "raster.ts": 2,
    "re.ts": 2,
+   "skltree.ts": 3,
    "strpos.ts": 1,
    "types.ts": 14
   },
   "registries": {
    "magma": {
-    "count": 184,
-    "sha": "b17e39e27d2d7de5"
+    "count": 188,
+    "sha": "df37ab5bf261b5bd"
    },
    "matlab": {
     "count": 264,

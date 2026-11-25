@@ -30,7 +30,7 @@ import re
 import numpy as np
 
 from . import _pd_options
-from ._pd_dtypes import STR, is_missing
+from ._pd_dtypes import STR, INTS, is_missing
 from ._pd_datetime import DT, fmt_times
 
 __all__ = ["series_repr", "frame_repr", "frame_repr_html", "index_repr", "pprint_thing"]
@@ -318,7 +318,7 @@ def format_column(col, na_rep="NaN", justify="right", leading_space=True, max_co
     digits = _opt("precision")
     if d == "float64":
         strs = _float_strings(col._pd_values, na_rep, leading_space, justify, digits)
-    elif d in ("int64", "int32"):
+    elif d in INTS:
         spec = "d" if leading_space is False else " d"
         strs = [format(x, spec) for x in col._pd_values.tolist()]
     elif d is DT:
@@ -598,7 +598,7 @@ class _FrameFormatter(object):
         fmt_columns = index_format_flat(self.tr_frame.columns, include_name=False)
         # (pandas zips the shown labels with the whole frame's dtypes)
         dtypes = [c.dtype for c in self.frame._pd_cols]
-        return [[" " + x if d in ("int64", "float64", "bool", "int32") else x]
+        return [[" " + x if d in INTS or d in ("float64", "bool") else x]
                 for x, d in zip(fmt_columns, dtypes)]
 
     def _strcols_without_index(self):

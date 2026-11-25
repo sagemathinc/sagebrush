@@ -3,4 +3,4 @@
 // Neither the site nor the CLI serves it; the app copies it (app/build-frontend.mjs).
 export { diskWorkspace, beforeLeave, drainOnQuit } from "./disk-mirror";
 export { persistProbe } from "./persist-probe";
-export { restoreGrants, keepGrants } from "./grants-file";
+export { grantsSync, keepGrants, reconcileGrants } from "./grants-file";

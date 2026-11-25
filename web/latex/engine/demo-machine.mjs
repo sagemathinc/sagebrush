@@ -65,8 +65,9 @@ export function setPyResults(p) { PY = p; }
 // snapshot, or why there is none; read from the snapshot, never fetched here. Each \input marks {k:"inref", name} (the
 // host gathers the files to read from them) and, when nothing is read, a visible note {k:"err", code:"input"}: a
 // file not found or refused, or nested deeper than INPUT_NEST (a cycle)
-let INPUT_RESOLVE = null;
-export function setInputResolver(f) { INPUT_RESOLVE = f; }
+// (and \bibliography: the host's \jobname, whose .bbl, made by BibTeX beside the .tex, is read as \input reads)
+let INPUT_RESOLVE = null, INPUT_JOB = null;
+export function setInputResolver(f, jobname = null) { INPUT_RESOLVE = f; INPUT_JOB = typeof jobname === "string" && jobname ? jobname : null; }
 const INPUT_NEST = 16;
 
 export class Machine extends CoreMachine {
@@ -304,7 +305,7 @@ export class Machine extends CoreMachine {
   installDemoPrimitives() {
     const P = this;
     const core = (nm) => this.A.get("m:" + nm).fn;
-    const coreBegin = core("begin"), coreEnd = core("end"), coreClass = core("documentclass"), coreLabel = core("label");
+    const coreBegin = core("begin"), coreEnd = core("end"), coreClass = core("documentclass"), coreLabel = core("label"), coreUse = core("usepackage");
     const isVerb = (env) => VERBATIM.has(env);
     // \begin / \end: the core's behaviour, plus markers (the name is read here, then pushed back for the core)
     P.prim("begin", function (t) {
@@ -354,6 +355,16 @@ export class Machine extends CoreMachine {
       this.pushArg(cls);
       coreClass.call(this, t);
     });
+    // \penalty<number>: a line-breaking hint, nothing to see in the preview (BibTeX's plainnat writes "156:\penalty0 2399");
+    // the number read as TeX reads it, and dropped
+    P.prim("penalty", function () { this.scanInt(); });
+    // \usepackage: natbib's options marked (how its citations look: numbers, sort, compress), then the core's
+    P.prim("usepackage", function (t) {
+      const opt = this.readOptRaw(); const names = this.readArgString();
+      if (names.split(",").some((x) => x.trim() === "natbib")) this.mark({ k: "natbib", opt: opt ? this.toks2str(opt) : "" });
+      this.pushArg(names);
+      coreUse.call(this, t);
+    });
     // labels and references: the key is kept as a marker
     P.prim("label", function (t) {
       const key = this.readArgString();
@@ -361,9 +372,16 @@ export class Machine extends CoreMachine {
       this.pushArg(key);
       coreLabel.call(this, t);
     });
+    // (and the starred forms the packages define, their "*" read here, never taken for the key: hyperref's \ref*, \pageref*,
+    //  \autoref*, \nameref* and cleveref's \cref*, \Cref*, a reference without a link (marked star); natbib's \cite*,
+    //  \citet*, \citep*, with every author and still linked (not marked). \eqref has none, as in LaTeX)
+    const STARRED = new Set(["ref", "pageref", "autoref", "nameref", "cref", "Cref", "cite", "citep", "citet"]);
+    const CITES = new Set(["cite", "citep", "citet"]);
     for (const nm of ["ref", "eqref", "pageref", "cite", "cref", "Cref", "autoref", "citep", "citet", "nameref"]) P.prim(nm, function () {
+      const s = STARRED.has(nm) ? this.nextRaw() : null, star = s !== null && !isCs(s) && codeOf(s) === 42;
+      if (s !== null && !star) this.back(s);
       const opt = this.readOptRaw(); const key = this.readArgString();
-      this.mark({ k: "ref", cmd: nm, key, opt: opt ? this.toks2str(opt) : null });
+      this.mark({ k: "ref", cmd: nm, key, opt: opt ? this.toks2str(opt) : null, ...(star && !CITES.has(nm) ? { star: true } : {}) });
     });
     // \newcommand (and \newcommand*) on a name that already has a meaning: LaTeX's "already defined" error, and the old
     // meaning stays (the core's own prim reported E-ALREADY-DEFINED but redefined anyway); the arguments are consumed
@@ -501,6 +519,19 @@ export class Machine extends CoreMachine {
       const cps = [...(this.getS("svchars") ?? "")].map((c) => c.codePointAt(0));
       const saved = cps.map((cp) => this.cat(cp)); for (const cp of cps) this.setS("cat:" + cp, CAT.OTHER, true);
       let arg; try { arg = this.readArgRaw(); } finally { cps.forEach((cp, k) => this.setS("cat:" + cp, saved[k], true)); }
+      this.emit(t); this.pushList([mkChar(CAT.BGROUP, 123), ...arg, mkChar(CAT.EGROUP, 125)]);
+    });
+    // \bibliography{refs} reads \jobname.bbl, as LaTeX's does: the thebibliography BibTeX wrote beside the .tex, read
+    // as \input reads it (asked of the host by name, never fetched here). Without one, or before the host has read it,
+    // the command and its argument go on as before (render.mjs: the placeholder saying BibTeX is not run)
+    P.prim("bibliography", function (t) {
+      const arg = this.readArgRaw();
+      if (INPUT_JOB && INPUT_RESOLVE) {
+        const name = INPUT_JOB + ".bbl";
+        this.mark({ k: "inref", name });
+        const r = INPUT_RESOLVE(name);
+        if (r && r.key && this.files.has(r.key) && this.stack.filter((f) => f.kind === "file").length <= INPUT_NEST) { this.openFile(r.key); return; }
+      }
       this.emit(t); this.pushList([mkChar(CAT.BGROUP, 123), ...arg, mkChar(CAT.EGROUP, 125)]);
     });
     // (the classes that make "|" (and l3doc also '"') short verbatim at \begin{document})

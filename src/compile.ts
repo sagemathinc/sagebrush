@@ -250,14 +250,16 @@ const pyEntry: (code: any, g: any, R: any, state: typeof frameState) => any = ru
 // whatever its code does with it, aliases included, even if it then raises,
 // the module is already known as what it is: execFile's optional-set tag)
 let moduleRuns = 0;
-export function execModule(source: string, filename: string, name: string, isPackage = false, sage = filename.endsWith(".sage"), made?: (m: any) => void): any {
+// (keys: the sys.modules names it is kept under, `name` unless given; pkg: its __package__, which relative imports read,
+// when that isn't its name's: the library's own sagebrush package, libraryPackage)
+export function execModule(source: string, filename: string, name: string, isPackage = false, sage = filename.endsWith(".sage"), made?: (m: any) => void, keys: string[] = [name], pkg?: string): any {
   const m = R.newModule(name);
   made?.(m);
   m.__file__ = filename;
-  m.__package__ = isPackage ? name : name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : "";
+  m.__package__ = pkg ?? (isPackage ? name : name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : "");
   if (isPackage) m.__path__ = [dirname(filename)];
   m.__builtins__ = R.builtins;
-  R.dictSet(R.sysModules, name, m);
+  for (const k of keys) R.dictSet(R.sysModules, k, m);
   // (a file run again, by reload or imported under a second name, is a
   // script of its own: the first run's functions keep their own globals)
   let jsName = scriptName(resolvePath(filename));
@@ -276,7 +278,7 @@ export function execModule(source: string, filename: string, name: string, isPac
     if (sage) R.loader.exec("from sage_all import *\nimport _sage_lazy as _sage_lazy_; _sage_lazy_.bind(globals()); del _sage_lazy_\n", m, "exec", "<sage>");
     pyEntry(fn, m, R, frameState);
   } catch (e) {
-    dictDelete(R.sysModules, name);
+    for (const k of keys) dictDelete(R.sysModules, k);
     throw e;
   }
   return m;
@@ -435,7 +437,75 @@ export function libDir(): string {
 
 // Import search: directories in sys.path, `name.py` or `name/__init__.py`; failing those anywhere (and in the
 // registry's and optional packages), a namespace package (PEP 420) of every directory `name` found on the way.
+// The library's own package, sagebrush (lib/sagebrush/), which the library imports by a private name,
+// _sagebrush_lib (`from _sagebrush_lib._engine import call`): that name is bound here to the library's files, before
+// any search, so a user's sagebrush.py or sagebrush/ folder never stands in for it, whatever sys.path holds.  Each file
+// is one module object: named "sagebrush[.x]" (its reprs, pickles and tracebacks as ever), its __package__ the private
+// name (so its relative imports stay the library's), kept in sys.modules under the private name, and under the public
+// one too unless that would hide a user's own sagebrush.  A user's import that finds the library's file gets that same
+// object (scripts/library-imports check: the library never imports the public name).
+export const LIB_PACKAGE = "_sagebrush_lib";
+const PUBLIC_PACKAGE = "sagebrush";
+const libraryModules: Map<string, any> = new Map(); // "" or ".x" -> the library's module
+function libraryPackageDir(): string {
+  return pathJoin(libDir(), PUBLIC_PACKAGE);
+}
+// (`name`, a public import, found `file`: is that the library's own sagebrush?)
+function isLibraryPackageFile(name: string, file: string): boolean {
+  if (name !== PUBLIC_PACKAGE && !name.startsWith(PUBLIC_PACKAGE + ".")) return false;
+  const dir = libraryPackageDir();
+  return file === pathJoin(dir, "__init__.py") || file.startsWith(dir + "/") || file.startsWith(dir + "\\");
+}
+// (whether the public name may name the library's module: nothing holds it yet, and a user's import would find the
+// library's file anyway, no sagebrush of theirs first on sys.path; for a submodule, the package there is the library's)
+function publicNameFree(rest: string): boolean {
+  const pub = PUBLIC_PACKAGE + rest;
+  if (R.sysModules.$m.get(pub) !== undefined) return false;
+  if (rest !== "") return R.sysModules.$m.get(PUBLIC_PACKAGE) === libraryModules.get("");
+  const lib = libDir();
+  for (const d of R.toArray(R.importModule("sys").path) as string[]) {
+    if (d === lib) return true;
+    if (fileExists(pathJoin(d, PUBLIC_PACKAGE, "__init__.py")) || fileExists(pathJoin(d, PUBLIC_PACKAGE + ".py")) || dirExists(pathJoin(d, PUBLIC_PACKAGE))) return false;
+  }
+  return true;
+}
+// The library's module sagebrush<rest> ("" or ".x.y"), loaded once; `also`: the public name a user's import asked by
+function libraryPackage(rest: string, also: string | null): any {
+  let m = libraryModules.get(rest);
+  if (m === undefined && rest !== "") {
+    // (its package first, which may import it)
+    R.importModule(LIB_PACKAGE + rest.slice(0, rest.lastIndexOf(".")));
+    m = libraryModules.get(rest);
+  }
+  if (m === undefined) {
+    const at = pathJoin(libraryPackageDir(), ...rest.split(".").filter(Boolean));
+    const init = pathJoin(at, "__init__.py"), isPackage = fileExists(init);
+    const file = isPackage ? init : at + ".py";
+    if (!isPackage && !fileExists(file)) return null;
+    const keys = [LIB_PACKAGE + rest];
+    if (also !== null) keys.push(also);
+    else if (publicNameFree(rest)) keys.push(PUBLIC_PACKAGE + rest);
+    const pkg = isPackage ? LIB_PACKAGE + rest : LIB_PACKAGE + rest.slice(0, rest.lastIndexOf("."));
+    try {
+      // (its submodules imported by the private name too, `from . import x` and `from _sagebrush_lib import x`)
+      const made = (m: any) => {
+        libraryModules.set(rest, m);
+        Object.defineProperty(m, R.IMPORT_NAME, { value: LIB_PACKAGE + rest, enumerable: false });
+      };
+      return execModule(fileRead(file), file, PUBLIC_PACKAGE + rest, isPackage, false, made, keys, pkg);
+    } catch (e) {
+      // (one that raised is gone from sys.modules, execModule, and from here: the next import runs it again)
+      libraryModules.delete(rest);
+      throw e;
+    }
+  }
+  // (already loaded: kept under the name asked for too)
+  R.dictSet(R.sysModules, also ?? LIB_PACKAGE + rest, m);
+  return m;
+}
 R.loader.load = (name: string) => {
+  // (the library's own package by its private name: bound to the library's files, never looked for on sys.path)
+  if (name === LIB_PACKAGE || name.startsWith(LIB_PACKAGE + ".")) return libraryPackage(name.slice(LIB_PACKAGE.length), null);
   const sys = R.importModule("sys");
   const parts = name.split(".");
   let dirs: string[];
@@ -456,9 +526,10 @@ R.loader.load = (name: string) => {
   const portions: string[] = [];
   for (const d of dirs) {
     const pkg = pathJoin(d, leaf, "__init__.py");
-    if (fileExists(pkg)) return execFile(fileRead(pkg), pkg, name, true);
+    // (`import sagebrush` that finds the library's own file: the one module object the library has, libraryPackage)
+    if (fileExists(pkg)) return isLibraryPackageFile(name, pkg) ? libraryPackage(name.slice(PUBLIC_PACKAGE.length), name) : execFile(fileRead(pkg), pkg, name, true);
     const file = pathJoin(d, leaf + ".py");
-    if (fileExists(file)) return execFile(fileRead(file), file, name, false);
+    if (fileExists(file)) return isLibraryPackageFile(name, file) ? libraryPackage(name.slice(PUBLIC_PACKAGE.length), name) : execFile(fileRead(file), file, name, false);
     // (absolute, as CPython's: a relative sys.path entry against the current directory)
     if (dirExists(pathJoin(d, leaf))) portions.push(resolvePath(cwdPath(pathJoin(d, leaf))));
   }
