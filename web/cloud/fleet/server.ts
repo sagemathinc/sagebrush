@@ -46,8 +46,14 @@ async function readBody(req: Request, max: number, ms: number): Promise<Uint8Arr
 
 const bare = (status: number) => new Response(null, { status, headers: { "cache-control": "no-store" } });
 
+/** Test seams (test-entry.ts only; the deployed entry passes none). */
+export interface FleetHooks {
+  /** runs after the handler's checks and its issue-time sample, immediately before the lease batch */
+  beforeIssue?: (db: D1) => Promise<void>;
+}
+
 /** The fleet routes, or null for any other path. */
-export async function handleFleet(req: Request, env: FleetEnv): Promise<Response | null> {
+export async function handleFleet(req: Request, env: FleetEnv, hooks: FleetHooks = {}): Promise<Response | null> {
   const url = new URL(req.url);
   if (url.pathname !== LEASE_ROUTE) return null;
   const db = env.FLEET_DB;
@@ -75,7 +81,12 @@ export async function handleFleet(req: Request, env: FleetEnv): Promise<Response
     },
     leaseKey,
     bucket: (key: string, limit: number, windowMs: number) => bucket(db, key, limit, windowMs, Date.now(), core.newId()),
-    leases: { issue: (d: Parameters<typeof issueLease>[1]) => issueLease(db, d) },
+    leases: {
+      issue: async (d: Parameters<typeof issueLease>[1]) => {
+        if (hooks.beforeIssue) await hooks.beforeIssue(db);
+        return issueLease(db, d);
+      },
+    },
   };
   const r = await core.handleLease({
     method: req.method,

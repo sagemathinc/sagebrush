@@ -91,7 +91,8 @@ const request = async (h = hostA, extra = {}) => {
   const bytes = await core.seal("sb.lease-request.v1", hs, body, hosts[h].H);
   return { bytes, body, outstanding: { request: await core.sha256b64(core.signedBytes("sb.lease-request.v1", hs, body)), agent, gen: body.gen, nonce: body.nonce, boot_id: BOOT } };
 };
-const send = (bytes) => dispatch(mf, SITE + "/api/fleet/v1/host/lease", { method: "POST", body: bytes, headers: { "cf-connecting-ip": "198.51.100.7" } });
+const send = (bytes, change) => dispatch(mf, SITE + "/api/fleet/v1/host/lease", { method: "POST", body: bytes,
+  headers: { "cf-connecting-ip": "198.51.100.7", ...(change ? { "x-test-before-issue": change } : {}) } });
 const errorOf = async (r) => { const t = await r.text(); try { return JSON.parse(t).error; } catch { return `status ${r.status} ${t.slice(0, 80)}`; } };
 const hostAccepts = async (r, q, h = hostA) => {
   if (r.status !== 200) return `status ${r.status} ${await r.text()}`;
@@ -249,6 +250,70 @@ await reset();
   const q = await request();
   ok((await hostAccepts(await send(q.bytes), q)) === "ok", "F-11: a renewal under a longer standing expiry");
   ok((await all("SELECT expires_at FROM lease_clock"))[0].expires_at === far, "F-11: the expiry stays the max", await all("SELECT expires_at FROM lease_clock"));
+}
+
+// ---- F-12: state moved AFTER the handler's own reads and BEFORE the batch: the batch's re-reads decide (TESTS),
+// each leaving only the nonce
+for (const [change, code] of [["host-fleet", "unknown_host"], ["host-revoked", "host_revoked"], ["host-repaired", "not_granted"], ["agent-gone", "not_granted"], ["agent-moved", "not_granted"]]) {
+  await reset();
+  const q = await request();
+  const r = await send(q.bytes, change);
+  const got = await errorOf(r);
+  const after = await rows();
+  ok(got === code, `F-12 ${change} between the handler's read and the batch: ${code}`, got);
+  ok(after.nonces === 1 && after.clock.length === 0 && after.pending === 0, `F-12 ${change}: the nonce row only`, after);
+}
+
+// ---- F-13: the other order: the batch first, then the change: the lease stands, recorded, and the next renewal is refused
+// (a re-pairing replaces the host's signing key with its fingerprint: the old key's requests no longer verify)
+const repair = await key();
+for (const [sql, code] of [["UPDATE fleet_hosts SET revoked = 1 WHERE host = ?1", "host_revoked"],
+  [`UPDATE fleet_hosts SET sign_key = '${core.b64(repair.raw)}', fingerprint = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' WHERE host = ?1`, "bad_signature"]]) {
+  await reset();
+  const q = await request();
+  ok((await hostAccepts(await send(q.bytes), q)) === "ok", "F-13: the renewal before the change is granted");
+  await exec(sql, hostA);
+  ok((await rows()).clock.length === 1, "F-13: and its grant clock stands");
+  const got = await errorOf(await send((await request()).bytes));
+  ok(got === code, `F-13: the next renewal after the change: ${code}`, String(got));
+}
+
+// ---- F-14: a failure at each statement of the batch rolls the whole batch back: 503, unsigned, nothing written
+for (const [name, trigger, setup] of [
+  ["the nonce reservation", "CREATE TRIGGER t_fail BEFORE INSERT ON lease_nonces BEGIN SELECT RAISE(ABORT, 'injected'); END", null],
+  ["the decision", "CREATE TRIGGER t_fail BEFORE UPDATE ON lease_nonces BEGIN SELECT RAISE(ABORT, 'injected'); END", null],
+  ["the clock's insert", "CREATE TRIGGER t_fail BEFORE INSERT ON lease_clock BEGIN SELECT RAISE(ABORT, 'injected'); END", null],
+  ["the clock's update", "CREATE TRIGGER t_fail BEFORE UPDATE ON lease_clock BEGIN SELECT RAISE(ABORT, 'injected'); END", "renewed"],
+  ["the pending gate's settle", "CREATE TRIGGER t_fail BEFORE DELETE ON lease_pending BEGIN SELECT RAISE(ABORT, 'injected'); END", "moved"],
+]) {
+  await reset();
+  let q = await request();
+  if (setup === "renewed") await send((await request()).bytes);
+  if (setup === "moved") {
+    await exec("UPDATE fleet_agents SET host = ?1, entry_gen = 7", hostB);
+    await exec("INSERT INTO lease_pending (agent, from_host, to_host, transfer, acked) VALUES (?1, ?2, ?3, ?4, 1)", agent, hostA, hostB, core.b64(new Uint8Array(32).fill(5)));
+    q = await request(hostB, { gen: 7 });
+  }
+  const before = await rows();
+  await exec(trigger);
+  const r = await send(q.bytes);
+  ok(r.status === 503 && (await r.arrayBuffer()).byteLength === 0, `F-14 a failure at ${name}: 503, unsigned`, r.status);
+  await exec("DROP TRIGGER t_fail");
+  ok(JSON.stringify(await rows()) === JSON.stringify(before), `F-14 a failure at ${name}: the batch rolled back whole`, { before, after: await rows() });
+}
+
+// ---- F-15: any one of the five statements failing, the read included, rolls back nonce, clock and pending: the store
+// throws (the handler's 503) and nothing changed. (A statement is swapped for one that fails at run time.)
+for (let failAt = 0; failAt < 5; failAt++) {
+  await reset();
+  await exec("INSERT INTO lease_pending (agent, from_host, to_host, transfer, acked) VALUES (?1, ?2, ?3, ?4, 1)", agent, hostB, hostA, core.b64(new Uint8Array(32)));
+  const q = await request();
+  const d = { fleet, agent, host: hostA, host_key: hosts[hostA].fingerprint, gen: 3, nonce: q.body.nonce, request: q.outstanding.request, lease_id: core.newId(), ttl_ms: TTL, now: Date.now() };
+  const before = JSON.stringify(await rows());
+  const injected = { prepare: (s) => db.prepare(s), batch: (stmts) => { const broken = [...stmts]; broken[failAt] = db.prepare("SELECT json_extract('broken', '$')"); return db.batch(broken); } };
+  let threw = false;
+  try { await issueLease(injected, d); } catch { threw = true; }
+  ok(threw && JSON.stringify(await rows()) === before, `F-15: statement ${failAt + 1} failing rolls back nonce, clock and pending`, await rows());
 }
 
 // ---- F-10: the rate buckets: exactly the limit in a window, across calls
