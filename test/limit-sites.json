@@ -11665,6 +11665,11 @@
   "owner": "Magma translator",
   "reason": "the Magma translator's parser protection: a chain of calls or indexes nests its translation one level each; past the cap it is refused in words, within what the generated Python's bound allows"
  },
+ "src/magma.ts :: constructor :: const PRINT_LEVELS = new Set([\"Default\", \"Minimal\", \"Maximal\", \"Magma\", \"Hex\", \"Latex\", \"Debug\"]); #0": {
+  "class": "none",
+  "owner": "Magma compatibility",
+  "reason": "the word Maximal (the print level's name), not a limit: nothing is refused"
+ },
  "src/magma.ts :: constructor :: export const MAX_NESTING = 100, MAX_PY_NEST = 50, MAX_PY_BLOCKS = 90, CHAIN_FLAT = 32, MAX_OPS = 2000; #0": {
   "class": "1",
   "disposition": {
