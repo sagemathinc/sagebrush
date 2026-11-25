@@ -20,6 +20,7 @@ import { sealedOpMessage } from "../workspace/e2e/sealed-op.mjs";
 import { hpkeDouble as hpke } from "../workspace/e2e/hpke-double.mjs";
 
 useCrypto(webCrypto());
+const J = JSON.stringify;
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(join(here, "../site/package.json"));
 const { Miniflare, convertV4MiniflareOptions } = require("miniflare");
@@ -50,6 +51,9 @@ const N = "5ea1ed00-0002-4e2e-8e2e-e2e2e2e2e202"; // no key chain yet
 const R = "5ea1ed00-0003-4e2e-8e2e-e2e2e2e2e203"; // read-only
 const P = "5ea1ed00-0004-4e2e-8e2e-e2e2e2e2e204"; // the sync generation: deleting the synced data, and after
 const S = "5ea1ed00-0005-4e2e-8e2e-e2e2e2e2e205"; // what a device that pulls needs: the signed fields, acks, a refusal's end
+const X = "5ea1ed00-0006-4e2e-8e2e-e2e2e2e2e206"; // the agents' index of an account that becomes encrypted
+const Y = "5ea1ed00-0007-4e2e-8e2e-e2e2e2e2e207"; // an account encrypted before its first grant
+const Z = "5ea1ed00-0008-4e2e-8e2e-e2e2e2e2e208"; // an account encrypted while its index builds
 const SITE = "https://sagebrush.test";
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
@@ -57,8 +61,8 @@ const shareBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOK
 const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 1 << 30 } };
 const cocalc = async () => Response.json(plan);
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
-const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } } });
-const listed = [A, N, R, P, S].join(",");
+const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_AGENT_FAIL: { namespace_id: id + "9", simple: { limit: 1_000_000, period: 60 } } });
+const listed = [A, N, R, P, S, X, Y, Z].join(",");
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_E2E: "1", SYNC_AGENT: "1", GRANT_TAG_KEY: "grant-tag-key", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("4101") },
@@ -391,18 +395,12 @@ await section("sealed ops: signed by a current device, under the current head", 
   await seam(A, { sealedCap: 1_000_000 });
   n += 2;
 
-  // (the agents' index passes sealed ops by: built through a plaintext op after them, to the log's end)
+  // (an account with a key chain is encrypted (e2e PR 5d): its agents' index isn't rebuilt, sealed ops or not)
   const plain = await ws.ask({ t: "ops", ops: [{ dseq: n, t: Date.now(), by: "person", op: "mkdir", path: "/after-sealed", kind: "folder", fid: "00000000000005b1" }] });
   ok(Number.isInteger(plain?.ops?.[0]?.seq), "(a plaintext op after the sealed ones)");
   const rb = await at(SITE, "/api/sync/v1/index/rebuild", { method: "POST", headers: { cookie: s, origin: SITE, "content-type": "application/json" }, body: "{}" });
-  ok(rb.status === 200, "(the agents' index rebuilt from the first op)");
-  let ixs = null;
-  for (let k = 0; k < 40; k++) {
-    ixs = await acct.testIndex({ step: true });
-    if (ixs?.state === "ready") break;
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  ok(ixs?.state === "ready" && ixs.cursor === ixs.max && ixs.max === plain.ops[0].seq, "the agents' index is built past the sealed ops, through the plaintext op after them, to the log's end: " + JSON.stringify(ixs));
+  const rbb = await rb.json().catch(() => ({}));
+  ok(rb.status === 409 && rbb.reason === "encrypted", "the agents' index of an account with a key chain isn't rebuilt: 409, encrypted: " + J({ status: rb.status, body: rbb }));
   ws.ws.close();
 });
 
@@ -481,6 +479,84 @@ await section("what a device that pulls needs: every signed value served, the en
   const refusedAgain = await ws.ask({ t: "sops", ops: [bad] });
   ok(refusedAgain?.ops?.[0]?.code === "missing" && refusedAgain.ops[0].undecided === undefined, "the refused one sent again: its refusal, kept");
   ws.ws.close();
+});
+
+await section("an encrypted account's agents' index: off, every route that reads it refused, before and after the first sealed op", async () => {
+  const agentCall = (token, verb, params) => at(SITE, "/api/agent/v1/" + verb, { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify(params) });
+  const grant = async (s, id) => (await (await post(s, id, "/api/sync/v1/grants", { agent: "an agent", scopes: [{ path: "/", access: "read" }] })).json()).token;
+  const s = await enabled(X);
+  const ws = await socket(s);
+  const n = (await hello(ws, "sealed-dev-x001")).next_dseq;
+  const mk = await ws.ask({ t: "ops", ops: [{ dseq: n, t: Date.now(), by: "person", op: "mkdir", path: "/before", kind: "folder", fid: "0000000000000d01" }] });
+  ok(Number.isInteger(mk?.ops?.[0]?.seq), "(a plaintext op, before the account has a key chain)");
+  const token = await grant(s, X);
+  let st = null;
+  const ax = await objectOf(X);
+  for (let k = 0; k < 100 && st?.status !== 200; k++) {
+    await ax.testIndex({ step: true });
+    st = await agentCall(token, "stat", { path: "/before" });
+    if (st.status !== 200) await new Promise((r) => setTimeout(r, 50));
+  }
+  ok(st?.status === 200, "(before its key chain: the agents' index is built and answers)");
+  const W = account(X);
+  const g = await W.genesis();
+  ok((await post(s, X, "/api/sync/v1/e2e/chain", g.body)).status === 201, "(its key chain made: the account is encrypted from here)");
+  const refused = async (what) => {
+    const r = await agentCall(token, what.verb, what.params);
+    const b = await r.json().catch(() => ({}));
+    return r.status === 409 && b.error === "conflict" && b.reason === "encrypted";
+  };
+  const verbs = [{ verb: "stat", params: { path: "/before" } }, { verb: "list", params: { folder: "/" } }, { verb: "list", params: { folder: "/", recursive: true } }];
+  const before = await Promise.all(verbs.map(refused));
+  ok(before.every(Boolean), "before its first sealed op: stat, list and a recursive list are refused (409 conflict, encrypted), the index it had never read: " + J(before));
+  const rb = await at(SITE, "/api/sync/v1/index/rebuild", { method: "POST", headers: { ...hdr(s, X, SITE), "content-type": "application/json" }, body: "{}" });
+  const rbb = await rb.json().catch(() => ({}));
+  ok(rb.status === 409 && rbb.reason === "encrypted", "rebuilding the index is refused too: " + J({ status: rb.status, body: rbb }));
+  const ix0 = await ax.testIndex({});
+  const pl = await ws.ask({ t: "ops", ops: [{ dseq: n + 1, t: Date.now(), by: "person", op: "mkdir", path: "/after-chain", kind: "folder", fid: "0000000000000d02" }] });
+  ok(Number.isInteger(pl?.ops?.[0]?.seq), "(a plaintext op after its key chain)");
+  const ix1 = await ax.testIndex({});
+  ok(ix1.cursor === ix0.cursor && ix1.entries === ix0.entries && ix1.max > ix0.max, "the ready index takes no op past the key chain (nothing applied live): " + J({ before: [ix0.cursor, ix0.entries], after: [ix1.cursor, ix1.entries], max: ix1.max }));
+  const op = await signed(W, g.d, g.next, "sealed-dev-x001", n + 2);
+  ok(Number.isInteger((await ws.ask({ t: "sops", ops: [op] }))?.ops?.[0]?.seq), "(a sealed op accepted)");
+  const after = await Promise.all(verbs.map(refused));
+  ok(after.every(Boolean), "after it: still refused, every one: " + J(after));
+  const acct = await objectOf(X);
+  const ix = await acct.testIndex({});
+  ok(ix && ix.state !== "building", "the index isn't building any more for it (nothing derives from a log it can't read): " + J(ix?.state));
+  ws.ws.close();
+  // (an account with a key chain before its first grant: the grant starts no index; a plaintext account is unchanged)
+  const sy = await enabled(Y);
+  const Wy = account(Y);
+  const gy = await Wy.genesis();
+  ok((await post(sy, Y, "/api/sync/v1/e2e/chain", gy.body)).status === 201, "(Y: a key chain first)");
+  const ty = await grant(sy, Y);
+  const iy = await (await objectOf(Y)).testIndex({});
+  ok((await agentCall(ty, "stat", { path: "/" })).status === 409 && (iy?.state ?? null) === null,
+    "Y: its first grant starts no index, and its agents' stat is refused: " + J(iy?.state ?? null));
+  // (an index still building when the key chain is made: no step builds it further, and the alarm stops waking for it)
+  const sz = await enabled(Z);
+  const wz = await socket(sz);
+  const nz = (await hello(wz, "sealed-dev-z001")).next_dseq;
+  ok(Number.isInteger((await wz.ask({ t: "ops", ops: [{ dseq: nz, t: Date.now(), by: "person", op: "mkdir", path: "/z", kind: "folder", fid: "0000000000000d03" }] }))?.ops?.[0]?.seq), "(Z: a plaintext op)");
+  wz.ws.close();
+  const az = await objectOf(Z);
+  await az.testIndex({ manual: true });
+  const tz = await grant(sz, Z);
+  ok(tz && (await az.testIndex({})).state === "building", "(Z: its first grant starts the index, held at its first step)");
+  const gz = await account(Z).genesis();
+  ok((await post(sz, Z, "/api/sync/v1/e2e/chain", gz.body)).status === 201, "(Z: its key chain made while the index builds)");
+  let iz = null;
+  for (let k = 0; k < 3; k++) iz = await az.testIndex({ step: true });
+  ok(iz.state === "building" && iz.cursor === 0 && iz.entries === 0, "Z: no step builds the index further once the account is encrypted: " + J({ state: iz.state, cursor: iz.cursor, entries: iz.entries }));
+  await new Promise((r) => setTimeout(r, 1500));
+  const za = (await az.testIndex({})).alarm;
+  ok(za === null || za > Date.now() + 60_000, "Z: the alarm no longer wakes at once for an index it won't build: " + J(za === null ? null : za - Date.now()));
+  const sn = await enabled(N);
+  const tn = await grant(sn, N);
+  const pn = await agentCall(tn, "stat", { path: "/" });
+  const bn = await pn.json().catch(() => ({}));
+  ok(bn.reason !== "encrypted" && [200, 503].includes(pn.status), "a plaintext account's agents' stat is answered as before: " + pn.status);
 });
 
 await section("the sync generation: an op in flight when the synced data is deleted, and a replay after", async () => {

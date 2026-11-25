@@ -2491,7 +2491,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const hold = tieredOn(this.env) && this.hasFiles() ? this.one("SELECT MIN(hold_until) AS t FROM files WHERE refs <= 0 AND state <> 'live'")?.t : null;
     if (hold !== null && hold !== undefined) t.push(Number(hold) + 1);
     // (the agents' index while it builds: its next step at once)
-    if (agentOn(this.env) && this.get("ix_state") === "building") t.push(now + 1);
+    if (agentOn(this.env) && this.get("ix_state") === "building" && !this.encrypted()) t.push(now + 1);
     // (the next live grant's expiry, when the dead ones past AGENT.deadGrants are trimmed)
     const exp = this.hasGrants() ? this.one("SELECT MIN(expires) AS t FROM grants WHERE revoked IS NULL AND expires > ?", now)?.t : null;
     if (exp !== null && exp !== undefined) t.push(Number(exp) + 1);
@@ -2752,7 +2752,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       this.wakeBy(now + (days as number) * this.agentBounds.dayMs + 1);
       this.trimDead(now);
       // (an account's first grant starts its index, so it is likely ready before the agent's first list)
-      if (this.get("ix_state") === undefined) this.indexStart();
+      if (this.get("ix_state") === undefined && !this.encrypted()) this.indexStart();
       return this.grantView(this.one("SELECT * FROM grants WHERE id = ?", id)!);
     }));
     if ("error" in made) return made;
@@ -2917,6 +2917,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const scopes = JSON.parse(String(g.scopes)) as Scope[];
       // (Trash is reached by any grant, and shows only what came from its scope: by each entry's trashed_from, below)
       if (!within(path, TRASH) && !inScope(scopes, path, need)) return answer(403, "scope", [path], { path, access: need });
+      // (an encrypted account, e2e PR 5d: its log carries ops the server can't read, so the index derived from it is
+      // wrong, not just behind; refused before it is read, before and after the first sealed op, until a device of the
+      // person's answers through the relay)
+      if (this.encrypted()) return answer(409, "conflict", [path], { reason: "encrypted", message: "this account's files are end-to-end encrypted: an online device of the person's answers this" });
       // the index: ready and caught up with the log, in this same read, or 503 (never a partial index)
       const ixst = this.get("ix_state");
       if (ixst === undefined) this.indexStart();
@@ -3075,9 +3079,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       this.wakeBy(Date.now() + 1);
     }
   }
+  /** Whether this account's files are end-to-end encrypted (e2e PR 5d): its key chain exists, durably (the chain survives
+   * "Delete my synced data"). From then on the server derives no index from the log and serves none. */
+  private encrypted(): boolean {
+    return !!this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'e2e_head'") && !!this.one("SELECT 1 AS x FROM e2e_head WHERE id = 1");
+  }
   /** After ops are accepted: a ready index applies them, all under one budget; any failure fails the index, never the ops. */
   private indexLive() {
-    if (!agentOn(this.env) || !this.exists() || this.get("ix_state") !== "ready" || this.ixNoLive) return;
+    if (!agentOn(this.env) || !this.exists() || this.get("ix_state") !== "ready" || this.ixNoLive || this.encrypted()) return;
     const done = { n: 0 };
     try {
       // (one budget for the whole batch, whatever it holds (PERF P1 on #913): past it, nothing is kept, and the alarm's
@@ -3102,6 +3111,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * over the steps after, its cursor published when it is whole.
    */
   private indexStep(manual = false) {
+    if (this.encrypted()) return;
     if (!agentOn(this.env) || !this.exists() || this.get("ix_state") !== "building" || ((this.ixManual || (testMode(this.env) && Number(this.get("ix_test_manual")) === 1)) && !manual)) return;
     if (Number(this.get("ix_reset") ?? 0) === 1) return this.indexResetStep();
     if (jobGet(this.sql)) return this.indexJobStep();
@@ -3257,6 +3267,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     return attempt(() => this.ctx.storage.transactionSync(() => {
       if (!agentOn(this.env)) throw new SyncError("forbidden", "agents aren't enabled here");
       this.admit(a.account, false);
+      if (this.encrypted()) throw new SyncError("conflict", "this account's files are end-to-end encrypted: the server keeps no index of them", { reason: "encrypted" });
       if (this.get("ix_state") !== "building") this.indexStart();
       return { state: String(this.get("ix_state")) };
     }));
