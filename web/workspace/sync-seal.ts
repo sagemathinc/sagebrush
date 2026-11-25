@@ -12,7 +12,7 @@
 // its first in this sync generation). Within one message, an op's prev is the envelope just before it in that
 // message. The server ends a message at its first refusal and answers the rest `undecided`, so a refused envelope
 // never has a successor in the log; the undecided ones are sealed again after the accepted one.
-import { opEpoch, opHash, openIndexOp, sealIndexOp, signIndexOp, verifyIndexOp } from "./e2e/index-op.ts";
+import { OP_REFS_MAX, opEpoch, opHash, openIndexOp, sealIndexOp, signIndexOp, verifyIndexOp } from "./e2e/index-op.ts";
 import type { EpochKeys } from "./e2e/keys.ts";
 import type { WireOp } from "./sync-outbox";
 
@@ -157,9 +157,15 @@ export async function verifyRow(keys: OpKeys, syncGeneration: number, row: Recor
   const env64 = str("env"), head = str("head"), chainGen = str("chain_gen"), device = str("device"), signer = str("signer"), sig = str("sig");
   const dseq = row.dseq;
   if (!Number.isSafeInteger(dseq) || (dseq as number) < 1) halt("a dseq that isn't one");
+  // (the reference lists as the server takes them: blob references, at most REFS_MAX, none twice; anything else halts here,
+  // never later as another error out of the signature's bytes)
   const list = (k: string) => {
     const x = row[k] ?? [];
-    return Array.isArray(x) && x.every((r) => typeof r === "string" && REF.test(r)) ? (x as string[]) : halt(`${k} that aren't blob references`);
+    if (!Array.isArray(x) || !x.every((r) => typeof r === "string" && REF.test(r))) halt(`${k} that aren't blob references`);
+    if ((x as string[]).length > OP_REFS_MAX) halt(`more ${k} than an op may have`);
+    if (new Set(x as string[]).size !== (x as string[]).length) halt(`${k} naming a reference twice`);
+    // (a copy, taken before any await: the served row can't change what is checked and signed)
+    return [...(x as string[])];
   };
   const adds = list("adds"), releases = list("releases");
   let env: Uint8Array;
@@ -184,7 +190,15 @@ export async function verifyRow(keys: OpKeys, syncGeneration: number, row: Recor
   const key = chain.signerAt(head, signer);
   if (!key) halt(chain.device(signer) ? "its signer wasn't a current device at that head" : "its signer was never a device of this chain");
   const ctx = { account: keys.account, syncGeneration, chainGeneration: chainGen, head, device, dseq: dseq as number, adds, releases, signer };
-  if (!(await verifyIndexOp(key!, ctx, env, sig))) halt("a signature that doesn't verify");
+  // (verifyIndexOp refuses, as an error, what has no signed form: one that escaped here would end the connection, not
+  // halt it, so every refusal of the row's form is this op's halt)
+  let signedOk = false;
+  try {
+    signedOk = await verifyIndexOp(key!, ctx, env, sig);
+  } catch {
+    halt("values with no signed form");
+  }
+  if (!signedOk) halt("a signature that doesn't verify");
   // (4) the epoch
   let n: number;
   try {
@@ -209,9 +223,17 @@ export async function verifyRow(keys: OpKeys, syncGeneration: number, row: Recor
   } catch {
     return halt("it doesn't open at its place, after its device's previous envelope, with its references");
   }
-  if (!op || typeof op !== "object" || op.dseq !== dseq) halt("an op that isn't its own");
-  const own = refsOf(op);
-  if (!sameList(own.adds, adds) || !sameList(own.releases, releases)) halt("visible references that aren't its op's");
+  if (!op || typeof op !== "object" || Array.isArray(op) || op.dseq !== dseq) halt("an op that isn't its own");
+  // (the opened op is untrusted too: its references read and compared under the halt, so nothing it holds escapes as
+  // another error)
+  let refsMatch = false;
+  try {
+    const own = refsOf(op);
+    refsMatch = sameList(own.adds, adds) && sameList(own.releases, releases);
+  } catch {
+    halt("an op whose references can't be read");
+  }
+  if (!refsMatch) halt("visible references that aren't its op's");
   const hash = b64url(await opHash(env));
   return { op, state: Object.freeze({ seq, floor: p!, chainGen: chain.generation, devices: Object.freeze({ ...st.devices, [device]: { dseq: dseq as number, hash } }) }) };
 }

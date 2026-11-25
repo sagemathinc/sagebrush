@@ -149,13 +149,18 @@ const haltOf = async (P, rows, k, change) => {
     "another dseq": [2, (r) => ({ ...r, dseq: r.dseq + 1 }), /signature/],
     "another sync device": [2, (r) => ({ ...r, device: "sync-dev-z" }), /signature/],
     "no signature": [2, (r) => ({ ...r, sig: undefined }), /no sig/],
+    "an add named twice": [2, (r) => ({ ...r, adds: [...r.adds, ...r.adds, "1".repeat(64), "1".repeat(64)] }), /twice/],
+    "a release named twice": [2, (r) => ({ ...r, releases: ["2".repeat(64), "2".repeat(64)] }), /twice/],
+    "65 adds": [2, (r) => ({ ...r, adds: Array.from({ length: 65 }, (_, i) => i.toString(16).padStart(64, "0")) }), /more adds/],
+    "65 releases": [2, (r) => ({ ...r, releases: Array.from({ length: 65 }, (_, i) => i.toString(16).padStart(64, "0")) }), /more releases/],
+    "an add that isn't a reference": [2, (r) => ({ ...r, adds: ["nope"] }), /aren't blob references/],
   };
   const got = {};
   for (const [name, [k, change, why]] of Object.entries(cases)) {
     const r = await haltOf(P, rows, k, change);
     got[name] = r.verdict === "halt" && r.seq === rows[k].seq && why.test(r.why) && r.opened.length === k && r.state.seq === rows[k - 1].seq ? "ok" : r;
   }
-  ok(Object.values(got).every((x) => x === "ok"), "V2: a changed envelope (or not base64), an unknown head, another chain generation, an unknown or other signer, a changed signature, adds, releases, dseq or sync device, no signature: each halts at that row, with its check named, the state where it was", got);
+  ok(Object.values(got).every((x) => x === "ok"), "V2: a changed envelope (or not base64), an unknown head, another chain generation, an unknown or other signer, a changed signature, adds, releases, dseq or sync device, no signature, a reference named twice, 65 of them, one that isn't a reference: each halts at that row (a SealedHalt, never another error), with its check named, the state where it was", got);
   // (a row out of its device's order: the same op again, later in the log)
   const replayed = [...rows, { ...rows[2], seq: 5 }];
   const rr = await read(P, replayed);

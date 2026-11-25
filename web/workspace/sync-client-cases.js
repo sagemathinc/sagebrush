@@ -5198,22 +5198,48 @@ async function sealedPull() {
 }
 
 async function sealedPullHalt() {
-  // (a sealed op served altered: B halts at it, deterministically, nothing of it applied, the cursor where it was)
-  const id = await account();
-  const f = await sealedFixture(id);
-  const pb = await f.device();
-  const wa = await fresh(), wb = await fresh();
-  const a = client(wa, { e2e: { keys: f.provider, kit: f.kit } });
-  check(await until(() => settled(wa, a)), "sealed pull halt: A synced");
-  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
-  check(await until(() => settled(wb, b)), "sealed pull halt: B synced");
-  const cursor0 = await metaGet(wb.ws, `sync:${nsOf(b)}:cursor`);
-  await ctl("set", { set: { tamperIndexEnv: 1, tamperFor: wb.device, serverNotices: true } });
-  await wa.mkdir("/tampered");
-  check(await until(() => b.debug().halted === "sealed-halt" && /doesn't verify/.test(b.status.reason ?? ""), 15_000), "sealed pull halt: B halted, saying the log doesn't verify: " + J({ status: b.status, why: b.stats.sealedHalt }));
-  check(!(await wb.stat("/tampered")) && (await metaGet(wb.ws, `sync:${nsOf(b)}:cursor`)) === cursor0, "sealed pull halt: nothing of it applied, B's cursor where it was");
-  await stop(a);
-  await stop(b);
+  // (a sealed op served altered: B halts at it, deterministically, nothing of it applied, the cursor where it was; for
+  // every kind of change, the reference lists' form included (never another error, which would end the connection and
+  // read the op again, untouched))
+  const many = Array.from({ length: 65 }, (_, i) => i.toString(16).padStart(64, "0"));
+  const kinds = [
+    ["envelope", { tamperIndexEnv: 1 }],
+    ["an add twice", { tamperIndexField: { field: "adds", value: ["3".repeat(64), "3".repeat(64)], sticky: true } }],
+    ["65 adds", { tamperIndexField: { field: "adds", value: many, sticky: true } }],
+    ["a release twice", { tamperIndexField: { field: "releases", value: ["4".repeat(64), "4".repeat(64)], sticky: true } }],
+    ["65 releases", { tamperIndexField: { field: "releases", value: many, sticky: true } }],
+  ];
+  for (const [kind, set] of kinds) {
+    const id = await account();
+    const f = await sealedFixture(id);
+    const pb = await f.device();
+    const wa = await fresh(), wb = await fresh();
+    const a = client(wa, { e2e: { keys: f.provider, kit: f.kit } });
+    check(await until(() => settled(wa, a)), `sealed pull halt (${kind}): A synced`);
+    const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+    check(await until(() => settled(wb, b)), `sealed pull halt (${kind}): B synced`);
+    const cursor0 = await metaGet(wb.ws, `sync:${nsOf(b)}:cursor`);
+    await ctl("set", { set: { ...set, tamperFor: wb.device, serverNotices: true } });
+    await wa.mkdir("/tampered");
+    check(await until(() => b.debug().halted === "sealed-halt" && /doesn't verify/.test(b.status.reason ?? ""), 15_000), `sealed pull halt (${kind}): B halted, saying the log doesn't verify: ` + J({ status: b.status, why: b.stats.sealedHalt }));
+    await sleep(300);
+    const ns = nsOf(b);
+    const pull0 = J(await metaGet(wb.ws, `sync:${ns}:sealedPull`) ?? null);
+    check(b.debug().halted === "sealed-halt" && !(await wb.stat("/tampered")) && (await metaGet(wb.ws, `sync:${ns}:cursor`)) === cursor0, `sealed pull halt (${kind}): still halted, nothing of it applied, B's cursor where it was`);
+    await stop(b);
+    if (set.tamperIndexField?.sticky) {
+      // (a server that keeps serving it: after a reload B halts again at the same op, nothing applied, its cursor and
+      // what it had verified unchanged)
+      const b2 = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+      check(await until(() => b2.debug().halted === "sealed-halt", 15_000), `sealed pull halt (${kind}): after a reload, halted again at it: ` + J({ why: b2.stats.sealedHalt }));
+      await sleep(300);
+      check(!(await wb.stat("/tampered")) && (await metaGet(wb.ws, `sync:${ns}:cursor`)) === cursor0 && J(await metaGet(wb.ws, `sync:${ns}:sealedPull`) ?? null) === pull0,
+        `sealed pull halt (${kind}): after the reload, nothing applied, the cursor and what B verified unchanged`);
+      await stop(b2);
+      await ctl("set", { set: { tamperIndexField: null } });
+    }
+    await stop(a);
+  }
 }
 
 const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt };
