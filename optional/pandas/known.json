@@ -132,11 +132,6 @@
       "reason": "pandas.read_parquet is outside M1's frozen support table (plan r7 C4); it raises before any work"
     },
     {
-      "case": "name.pd.get_dummies",
-      "message": "pandas.get_dummies is not in Sagebrush's pandas 0.x subset",
-      "reason": "pandas.get_dummies is outside M1's frozen support table (plan r7 C4); it raises before any work"
-    },
-    {
       "case": "name.DataFrame.pivot",
       "message": "pandas.DataFrame.pivot is not in Sagebrush's pandas 0.x subset",
       "reason": "pandas.DataFrame.pivot is outside M1's frozen support table (plan r7 C4); it raises before any work"
@@ -410,6 +405,16 @@
       "case": "category.datetime",
       "message": "pandas: astype('category') of a datetime64[us] column is not in Sagebrush's pandas 0.x subset",
       "reason": "a datetime column as a category (Timestamp categories) isn't in the subset; it raises before any work"
+    },
+    {
+      "case": "get_dummies.sparse",
+      "message": "pandas.get_dummies(sparse=True) is not in Sagebrush's pandas 0.x subset",
+      "reason": "sparse=True gives SparseDtype columns, which aren't in the subset; it raises before any work"
+    },
+    {
+      "case": "get_dummies.dtype",
+      "message": "pandas.get_dummies(dtype='int8') is not in Sagebrush's pandas 0.x subset",
+      "reason": "get_dummies takes dtype bool (its default), int or float in the subset; other dtypes raise before any work"
     },
     {
       "case": "compare.series-repeated-labels",

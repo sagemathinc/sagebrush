@@ -66,7 +66,7 @@ case("value.sum-beyond-2-53", lambda: pd.Series([2 ** 52, 2 ** 52, 1]).sum())
 case("frame.ragged-rows", lambda: pd.DataFrame([[1, 2], [3]]))
 
 # names outside the subset
-for name in ["NA", "merge", "crosstab", "Timedelta", "MultiIndex", "read_parquet", "get_dummies"]:
+for name in ["NA", "merge", "crosstab", "Timedelta", "MultiIndex", "read_parquet"]:
     case("name.pd." + name, lambda name=name: getattr(pd, name))
 for name in ["pivot", "merge", "cov", "rank", "query", "pivot_table", "nlargest", "plot", "nsmallest", "value_counts", "to_csv", "where"]:
     case("name.DataFrame." + name, lambda name=name: getattr(df, name))
@@ -189,6 +189,8 @@ case("category.cat-method", lambda: cat.cat.add_categories("z"))
 case("category.float32", lambda: pd.Series([1.0], dtype="float32").astype("category"))
 case("category.int8", lambda: pd.Series([1, 2]).astype("int8").astype("category"))
 case("category.datetime", lambda: pd.to_datetime(pd.Series(["2020-01-01"])).astype("category"))
+case("get_dummies.sparse", lambda: pd.get_dummies(pd.Series(["a"]), sparse=True))
+case("get_dummies.dtype", lambda: pd.get_dummies(pd.Series(["a"]), dtype="int8"))
 case("compare.series-repeated-labels", lambda: df.eq(pd.Series([1, 2], index=["a", "a"])))
 case("compare.level", lambda: df.eq(1, level=0))
 case("compare.series-level", lambda: s.eq(1, level=0))

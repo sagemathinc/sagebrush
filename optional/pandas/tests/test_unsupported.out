@@ -96,8 +96,6 @@
 !! NotImplementedError: pandas.MultiIndex is not in Sagebrush's pandas 0.x subset
 == name.pd.read_parquet
 !! NotImplementedError: pandas.read_parquet is not in Sagebrush's pandas 0.x subset
-== name.pd.get_dummies
-!! NotImplementedError: pandas.get_dummies is not in Sagebrush's pandas 0.x subset
 == name.DataFrame.pivot
 !! NotImplementedError: pandas.DataFrame.pivot is not in Sagebrush's pandas 0.x subset
 == name.DataFrame.merge
@@ -338,6 +336,10 @@
 !! NotImplementedError: pandas: astype('category') of an int8 column is not in Sagebrush's pandas 0.x subset
 == category.datetime
 !! NotImplementedError: pandas: astype('category') of a datetime64[us] column is not in Sagebrush's pandas 0.x subset
+== get_dummies.sparse
+!! NotImplementedError: pandas.get_dummies(sparse=True) is not in Sagebrush's pandas 0.x subset
+== get_dummies.dtype
+!! NotImplementedError: pandas.get_dummies(dtype='int8') is not in Sagebrush's pandas 0.x subset
 == compare.series-repeated-labels
 !! NotImplementedError: pandas.DataFrame.eq with a Series of repeated labels is not in Sagebrush's pandas 0.x subset
 == compare.level
