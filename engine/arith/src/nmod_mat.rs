@@ -1472,6 +1472,12 @@ mod tests {
     /// not, at least 1 below 2^32, 0 above; and the primes where it steps.
     #[test]
     fn the_fold_fits_a_u64() {
+        // (the measured FOLD_MIN = 2: fold64 = 15 and 4 fold, fold64 = 1
+        // doesn't, nor does any modulus above 2^32)
+        assert_eq!(FOLD_MIN, 2);
+        assert!(folding(&Modulus::new((1 << 30) + 3)) && folding(&Modulus::new((1 << 31) - 1)));
+        assert!(!folding(&Modulus::new(3 * (1 << 30) + 1)) && !folding(&Modulus::new((1 << 32) - 5)));
+        assert!(!folding(&Modulus::new((1 << 32) + 15)));
         for p in [3u64, 65537, (1 << 30) + 3, (1 << 31) - 1, 3 * (1 << 30) + 1, (1 << 32) - 5, last_folding(2), last_folding(16)] {
             let m = Modulus::new(p);
             let (b, q) = (fold64(&m) as u128, p as u128 - 1);
@@ -1486,10 +1492,11 @@ mod tests {
         }
     }
 
-    /// update_row (on the u64 route where it applies), against the sums in u128, for blocks of
-    /// fold64, fold64 + 1, 2 fold64 + 1, 16 and 32 factors, with entries
-    /// p - 1 - {0, 1, 2} (the largest products) and random ones, some
-    /// factors zero; and the reductions it counts, one row's per fold.
+    /// update_row (on the u64 route where it applies), against the sums in
+    /// u128, for blocks of fold64, fold64 + 1, 2 fold64 + 1, 16 and 32
+    /// factors, with entries p - 1 - {0, 1, 2} (the largest products) and
+    /// random ones, some factors zero; and the reductions it counts, the
+    /// u128 route's (one row's per batch, whatever the folds).
     #[test]
     fn update_row_folds_exactly() {
         use crate::cost::{tallied, Family};
