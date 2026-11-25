@@ -235,6 +235,7 @@ def _compare_times(col, right, op, f, array_name="ndarray"):
             raise TypeError("Invalid comparison between dtype=datetime64[us] and %s" % (array_name or "ndarray"))
         if all(is_missing(x) for x in rv):
             return Column("bool", np.full(n, op == "ne", dtype=bool))
+        r = None
         if d is STR:
             try:
                 r = np.array([NAT_INT if is_missing(x) else as_us(Timestamp(x)) for x in rv], dtype=np.int64)
@@ -242,6 +243,14 @@ def _compare_times(col, right, op, f, array_name="ndarray"):
                 if op in ("eq", "ne"):
                     return Column("bool", np.full(n, op == "ne", dtype=bool))
                 raise TypeError("Invalid comparison between dtype=datetime64[us] and StringArray") from None
+        elif all(isinstance(x, str) or (is_missing(x) and type(x).__name__ != "NaTType") for x in rv):
+            # (object values that are all strings (None or NaN missing; NaT makes them mixed, as pandas infers):
+            # parsed when every one parses, else compared one by one)
+            try:
+                r = np.array([NAT_INT if is_missing(x) else as_us(Timestamp(x)) for x in rv], dtype=np.int64)
+            except ValueError:
+                r = None
+        if r is not None:
             miss = (v == NAT_INT) | (r == NAT_INT)
         else:
             left = col.tolist()
