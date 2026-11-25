@@ -1083,25 +1083,30 @@ class _ufunc2(ufunc):
         # out checked first, so a refusal leaves them all as they were)
         res = [f(*args, **kw) for f in self._parts]
         outs = [o for o in out if o is not None]
-        if outs:
-            ins = [asarray(x).shape for x in args]
+        # (the loop's shape, as NumPy's iterator makes it: the inputs', every out's and where='s)
+        ws = [] if where is True else [asarray(where).shape]
+        full = None
+        if outs or ws:
+            shapes = [asarray(x).shape for x in args] + [o.shape for o in outs] + ws
             try:
-                full = broadcast_shapes(*ins, *[o.shape for o in outs])
+                full = broadcast_shapes(*shapes)
             except ValueError:
                 raise ValueError("operands could not be broadcast together with shapes %s "
-                                 % " ".join(_shape_text(t) for t in ins + [o.shape for o in outs])) from None
+                                 % " ".join(_shape_text(t) for t in shapes)) from None
             for o in outs:
                 if o.shape != full:
                     raise ValueError("non-broadcastable output operand with shape %s doesn't match the broadcast shape %s"
                                      % (_shape_text(o.shape), _shape_text(full)))
         got = [None, None]
-        # (the quotient written first, so one array given as both outs ends with the remainder, as in NumPy)
-        for k in (0, 1):
+        # (the order NumPy 2.5's loops write in, which shows when one array is given as both outs: the quotient first,
+        # so it ends with the remainder, except a float loop into outs of its own dtype, which ends with the quotient)
+        dt = asarray(res[0]).dtype
+        for k in ((1, 0) if dt.kind == "f" and _builtins.all(o.dtype == dt for o in outs) else (0, 1)):
             o, r = out[k], res[k]
             if o is not None:
                 o[...] = r if where is True else _np.where3(where, r, o)
-            elif outs:
-                # (the other output's shape drives the loop, as NumPy's iterator: a None slot's new array has it too)
+            elif full is not None and asarray(r).shape != full:
+                # (an out or where= can drive the loop's shape, as NumPy's iterator: a None slot's new array has it too)
                 o = broadcast_to(asarray(r), full).copy()
             got[k] = r if o is None else o
         return tuple(got)

@@ -124,9 +124,29 @@ for x, y, shape in [(7, 3, (2,)), ([7], 3, (2,)), ([[7], [8]], [3], (2, 3))]:
         res = np.divmod(x, y, out=(o, None) if slot == 0 else (None, o))
         show("divmod %r %r out in slot %d, None in the other" % (x, y, slot), lambda: res)
         print("  the out returned", res[slot] is o)
+# (where= drives the loop's shape too: with every position True, the new arrays have where's shape)
+for x, y, mask in [(7, 3, [True, True]), ([7], 3, [True, True]), ([[7], [8]], 3, [[True] * 3] * 2)]:
+    show("divmod %r %r where all True" % (x, y), lambda: np.divmod(x, y, where=np.array(mask)))
+    show("divmod %r %r where all True, out=(None, None)" % (x, y), lambda: np.divmod(x, y, where=np.array(mask), out=(None, None)))
+show("divmod where a list", lambda: np.divmod(7, 3, where=[True, True]))
+show("divmod where True", lambda: np.divmod(7, 3, where=True))
+show("divmod where a 0-d True", lambda: np.divmod(7, 3, where=np.array(True)))
+show("divmod where that doesn't broadcast", lambda: np.divmod(np.array([7, 8]), 3, where=np.array([True, True, True])))
+show("divmod where that doesn't broadcast, with an out", lambda: np.divmod(np.array([7, 8]), 3, where=np.array([True, True, True]),
+                                                                          out=(np.zeros(2, dtype=np.int64), None)))
+show("divmod where larger than the out", lambda: np.divmod(np.array([7, 8]), 3, where=np.ones((2, 2), dtype=bool),
+                                                           out=(np.zeros(2, dtype=np.int64), None)))
 z = np.zeros(2, dtype=np.int64)
 show("divmod one array as both outs", lambda: np.divmod(np.array([7, -8]), 3, out=(z, z)))
 show("  the array after", lambda: z)
+# (which result one array given as both outs ends with: NumPy's loops' order, by the loop's and the out's dtypes)
+for x, y, zdt in [([7.0, 8.0], 3.0, np.float64), (np.array([7, 8], dtype=np.float32), np.float32(3), np.float32),
+                  (np.array([7.5, 8.5], dtype=np.float32), 3.0, np.float32), (np.array([7, 8], dtype=np.int8), np.int8(3), np.int8),
+                  (np.array([7, 8], dtype=np.uint8), np.uint8(3), np.uint8), ([7, 8], 3, np.float64), ([7.0, 8.0], 3.0, np.int64),
+                  (np.array([True, True]), np.array([True, True]), np.int8)]:
+    z = np.zeros(2, dtype=zdt)
+    np.divmod(x, y, out=(z, z), casting="unsafe")
+    show("divmod one %s array as both outs, %s inputs" % (np.dtype(zdt).name, np.asarray(x).dtype.name), lambda: z)
 a, r = np.array([7, 8]), np.zeros((2, 2), dtype=np.int64)
 show("divmod None, then an out larger than the inputs", lambda: np.divmod(a, 3, out=(None, r)))
 show("divmod out bigger than the inputs", lambda: np.divmod(np.array([7, 8]), 3, out=(np.zeros((2, 2), dtype=np.int64),
