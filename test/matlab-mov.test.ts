@@ -33,13 +33,21 @@ const field = (got: Map<string, string>, id: string) => {
 };
 // (MATLAB prints infinities as Inf and -Inf, which Number reads as NaN)
 const nums = (s: string) => s.trim().split(/\s+/).filter((t) => t.length).map((t) => (t === "Inf" ? Infinity : t === "-Inf" ? -Infinity : Number(t)));
+// (NaN and the infinities are matched exactly, before any tolerance: Infinity <= tol * Infinity would accept anything)
 const close = (id: string, g: number[], want: number[], tol: number) => {
   assert.equal(g.length, want.length, `${id}: ${g} / ${want}`);
   g.forEach((v, k) => {
     if (Number.isNaN(want[k])) assert.ok(Number.isNaN(v), `${id}[${k}]: ${v}, expected NaN`);
+    else if (!Number.isFinite(want[k])) assert.equal(v, want[k], `${id}[${k}]: ${v}, expected ${want[k]}`);
     else assert.ok(v === want[k] || Math.abs(v - want[k]) <= tol * Math.max(1, Math.abs(want[k])), `${id}[${k}]: ${v}, expected ${want[k]}`);
   });
 };
+
+test("the comparison itself: an infinity matches only itself, NaN only NaN, others within the tolerance", () => {
+  close("inf", [Infinity, -Infinity, NaN, 1 + 1e-14], [Infinity, -Infinity, NaN, 1], 1e-13);
+  for (const [g, want] of [[0, Infinity], [123, Infinity], [-Infinity, Infinity], [Infinity, -Infinity], [NaN, Infinity], [Infinity, NaN], [1.1, 1], [NaN, 1], [Infinity, 1]])
+    assert.throws(() => close("control", [g], [want], 1e-13), assert.AssertionError, `${g} accepted for ${want}`);
+});
 const P = (name: string, expr: string) => `fprintf('${name}|%s\\n', sprintf('%.17g ', double(${expr})));`;
 
 test("a window far longer than the data: the same as one cut at the data's length, at once", () => {
@@ -140,6 +148,14 @@ test("a fill value with a window of 1e9: counted, not walked; exact where the su
     P("nanback", "movmean([1 2 3], [5 0], 'Endpoints', 'fill')"),
     P("medback", "movmedian([1 2 3], [9 0], 'Endpoints', -9)"),
     P("medfront", "movmedian([1 2 3], [0 9], 'Endpoints', 9)"),
+    P("prododd", "movprod([1 1], [1e16 0], 'Endpoints', -1)"),
+    P("prododdf", "movprod([1 1], [0 1e16], 'Endpoints', -1)"),
+    P("prodsmall", "movprod([1 1], [5 0], 'Endpoints', -1)"),
+    P("prodnegzero", "movprod([1 1], [0 1e16], 'Endpoints', -0)"),
+    P("prodhalf", "movprod([1 1], [1e16 0], 'Endpoints', -0.5)"),
+    P("prodtwo", "movprod([1 1], [1e16 0], 'Endpoints', -2)"),
+    P("prodtwof", "movprod([1 1], [0 1e16], 'Endpoints', -2)"),
+    P("prodomit", "movprod([1 NaN], [1e16 0], 'omitnan', 'Endpoints', -1)"),
   ]);
   const f = (id: string) => nums(field(got, id)[0]);
   // (a window of 1e9 holds the 3 values and 1e9 - 3 fill values at every position)
@@ -160,6 +176,19 @@ test("a fill value with a window of 1e9: counted, not walked; exact where the su
   // count and two more of the fill value, 5, it would be (-9 + 1) / 2; the first's, past the end, the same at 9)
   assert.deepEqual(f("medback"), [-9, -9, -9]);
   assert.deepEqual(f("medfront"), [9, 9, 9]);
+  // (a negative fill value's sign from the count's parity past 2^53, where a double holds only even integers: with
+  // [1e16 0] on 2 elements, the first element's window holds 1e16 fill values (even) and the second's 1e16 - 1 (odd);
+  // [0 1e16] the same the other way round; [5 0], a small control, 5 and 4; a -0 fill keeps its sign at an odd count,
+  // and |-0.5| to such a power underflows to a zero of that sign)
+  assert.deepEqual(f("prododd"), [1, -1]);
+  assert.deepEqual(f("prododdf"), [-1, 1]);
+  assert.deepEqual(f("prodsmall"), [-1, 1]);
+  assert.ok(Object.is(f("prodnegzero")[0], -0) && Object.is(f("prodnegzero")[1], 0), `prodnegzero: ${f("prodnegzero")}`);
+  assert.ok(Object.is(f("prodhalf")[0], 0) && Object.is(f("prodhalf")[1], -0), `prodhalf: ${f("prodhalf")}`);
+  // (-2 to such a power overflows to an infinity of that sign; 'omitnan' leaves the NaN out and the sign the same)
+  assert.deepEqual(f("prodtwo"), [Infinity, -Infinity]);
+  assert.deepEqual(f("prodtwof"), [-Infinity, Infinity]);
+  assert.deepEqual(f("prodomit"), [1, -1]);
 });
 
 test("the moving statistics admitted before their copies are made (test/matlab_mov_admit_cases.py)", () => {

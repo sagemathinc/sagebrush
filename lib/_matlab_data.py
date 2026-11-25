@@ -931,7 +931,9 @@ def _moving(A, kb, kf, stat, w, omit, ends):
                     for _ in range(min(k, 2)):
                         acc = acc * v
                     return acc
-                return acc * np.power(v, float(k))
+                # (|v| to the k as a float, and its sign from k's parity, which float(k) can lose past 2^53)
+                p = np.power(abs(v), float(k))
+                return acc * (-p if k % 2 and _math.copysign(1.0, v) < 0 else p)
         # (the ones before the data first and after it last, in the order of the offsets)
         acc = outside(acc, kb - cb)
         for o in offs:
