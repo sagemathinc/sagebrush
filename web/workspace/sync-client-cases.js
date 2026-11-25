@@ -5206,8 +5206,9 @@ async function sealedPullHalt() {
     ["envelope", { tamperIndexEnv: 1 }],
     ["an add twice", { tamperIndexField: { field: "adds", value: ["3".repeat(64), "3".repeat(64)], sticky: true } }],
     ["65 adds", { tamperIndexField: { field: "adds", value: many, sticky: true } }],
-    ["a release twice", { tamperIndexField: { field: "releases", value: ["4".repeat(64), "4".repeat(64)], sticky: true } }],
-    ["65 releases", { tamperIndexField: { field: "releases", value: many, sticky: true } }],
+    ["a release twice", { tamperIndexField: { field: "releases", value: [{ address: "4".repeat(64), add: 1 }, { address: "4".repeat(64), add: 1 }], sticky: true } }],
+    ["65 releases", { tamperIndexField: { field: "releases", value: many.map((address) => ({ address, add: 1 })), sticky: true } }],
+    ["a release in the old form", { tamperIndexField: { field: "releases", value: ["4".repeat(64)], sticky: true } }],
   ];
   for (const [kind, set] of kinds) {
     const id = await account();
@@ -5242,7 +5243,168 @@ async function sealedPullHalt() {
   }
 }
 
-const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt };
+// ---- e2e PR 5d: the index's references released, and every device's check of a release
+
+/** The reference server's index references for an account: [address, add seq, the seq that released it or null]. */
+const refRows = async (id) => (await ctl("indexRefs", { account: id })).rows.map(([k, rel]) => [k.slice(0, k.lastIndexOf(":")), Number(k.slice(k.lastIndexOf(":") + 1)), rel]);
+/** A data file's content as text, or null if it isn't there. */
+const contentOf = async (w, p) => {
+  const c = (await w.read(p).catch(() => null))?.content;
+  return c instanceof Uint8Array ? new TextDecoder().decode(c) : c ?? null;
+};
+/** A device's ledger (its meta's index references, without the sweep's own stamps and place). */
+const ledgerOf = (ws) => new Promise((ok, no) => {
+  const tx = ws.transaction("meta", "readonly"), st = tx.objectStore("meta"), range = IDBKeyRange.bound("sync:", "sync;");
+  const ks = st.getAllKeys(range), vs = st.getAll(range);
+  tx.oncomplete = () => ok(J(ks.result.map((k, i) => [k, vs.result[i]]).filter(([k]) => k.includes(":refs:") && !k.includes(":refs:d:") && !k.endsWith(":refs:scan"))));
+  tx.onerror = () => no(tx.error);
+});
+/** Sweeps every time the log is read to its end, an add due at once after its first sight (on), or as shipped (off). */
+const sweepNow = (on) => {
+  Object.assign(W.REFS, { dueMs: on ? 0 : 24 * 3600_000 });
+  Object.assign(W.SWEEP, on ? { everyMs: 0, jitterMs: 0 } : { everyMs: 10 * 60_000, jitterMs: 60_000 });
+};
+/** A file made and written twice by `w`: its three index adds on the server, oldest first. */
+async function threeAdds(id, w, c, path) {
+  await w.create(path, { content: "one" });
+  await w.write(path, "two");
+  await w.write(path, "three");
+  check(await until(() => settled(w, c), 15_000), `(${path}: three writes in the log)`);
+  return (await refRows(id)).filter(([, , rel]) => rel === null).sort((x, y) => x[1] - y[1]).slice(-3).map(([address, add]) => ({ address, add }));
+}
+
+async function releaseSweep() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  sweepNow(true);
+  try {
+    const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+    check(await until(() => settled(wa, a)), "release sweep: A synced");
+    const adds = await threeAdds(id, wa, a, "/r.txt");
+    check(adds.length === 3, "release sweep: three live index adds on the server: " + J(adds));
+    await wa.remove("/r.txt");
+    await wa.emptyTrash();
+    check(await until(() => settled(wa, a), 15_000), "release sweep: the file forgotten");
+    // (the first sweep after it only stamps what it sees due; a later read of the log to its end releases)
+    for (let i = 0; i < 3 && !(await refRows(id)).every(([, , rel]) => rel !== null); i++) {
+      await wa.mkdir("/tick" + i);
+      await until(() => settled(wa, a), 15_000);
+    }
+    const rows = await refRows(id);
+    // (its three writes' adds, and the remove's: every op on a data file names its bytes, so adds one; that one held by no
+    // file, an orphan)
+    check(rows.length === 4 && rows.every(([, , rel]) => rel !== null) && a.debug().halted === undefined, "release sweep: every add the forgotten file held released, and the remove's orphan, by A's sweeps: " + J(rows));
+    // (B told of each new op, so it reads the log to its end)
+    await ctl("set", { set: { serverNotices: true } });
+    const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+    // (each device's keys are under its own namespace's index generation: compared without it)
+    const bare = async (w) => (await ledgerOf(w.ws)).replace(/sync:[^"]*?#\d+:refs:/g, "refs:");
+    const same = async () => (await bare(wa)) === (await bare(wb));
+    check(await until(async () => settled(wb, b) && b.debug().cursor === a.debug().cursor && (await same()), 15_000) && b.debug().halted === undefined, "release sweep: B reads the release ops, checks each against what it verified before it, and goes on: " + J({ b: b.debug(), a: a.debug().cursor, why: b.stats.sealedHalt }));
+    check((await ledgerOf(wa.ws)).length > 2 && (await same()), "release sweep: A's ledger and B's are the same");
+    await ctl("set", { set: { serverNotices: false } });
+    await stop(a);
+    await stop(b);
+  } finally {
+    sweepNow(false);
+  }
+}
+
+async function releaseHistory() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "release history: A synced");
+  const adds = await threeAdds(id, wa, a, "/h.txt");
+  await wa.dropVersions("/h.txt");
+  const done = await until(async () => (await refRows(id)).filter(([, , rel]) => rel !== null).length === 2, 15_000);
+  const rows = await refRows(id), live = rows.filter(([, , rel]) => rel === null);
+  check(done && live.length === 1 && live[0][1] === adds[2].add, "release history: delete old versions released the file's two older adds at once, its current bytes' add live: " + J(rows));
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(async () => settled(wb, b) && (await contentOf(wb, "/h.txt")) === "three", 15_000) && b.debug().halted === undefined, "release history: B accepts the release (history of a live file) and has the file as it is: " + J({ halted: b.debug().halted, why: b.stats.sealedHalt }));
+  await stop(a);
+  await stop(b);
+}
+
+async function releaseCurrent() {
+  // (a current device signs a release of a live file's current bytes: the server takes it (it can't see which bytes
+  // are current); every device's check of that release stops there, nothing of it kept, after a reload too)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "release current: A synced");
+  const adds = await threeAdds(id, wa, a, "/c.txt");
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(async () => settled(wb, b) && (await contentOf(wb, "/c.txt")) === "three", 15_000), "release current: B has the file");
+  const ns = nsOf(b), cursor0 = await metaGet(wb.ws, `sync:${ns}:cursor`), ledger0 = await ledgerOf(wb.ws);
+  await ctl("set", { set: { serverNotices: true } });
+  await a.testRelease([adds[0], adds[2]]);
+  check(await until(async () => (await refRows(id)).filter(([, , rel]) => rel !== null).length === 2, 15_000), "release current: the server accepted the release (history and the current bytes' add)");
+  await wa.mkdir("/after");
+  check(await until(() => b.debug().halted === "sealed-halt", 15_000) && /current bytes/.test(b.stats.sealedHalt ?? ""), "release current: B stops at it, saying it would end a live file's current bytes: " + J({ halted: b.debug().halted, why: b.stats.sealedHalt }));
+  await sleep(300);
+  check((await metaGet(wb.ws, `sync:${ns}:cursor`)) === cursor0 && (await ledgerOf(wb.ws)) === ledger0 && !(await wb.stat("/after")) && (await contentOf(wb, "/c.txt")) === "three",
+    "release current: nothing of it kept on B (its cursor and ledger as they were; nothing after it applied; the file as it was)");
+  check(await until(() => a.debug().halted === "sealed-halt", 15_000), "release current: A, reading its own release back, stops there too");
+  await stop(b);
+  const b2 = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(() => b2.debug().halted === "sealed-halt", 15_000) && (await metaGet(wb.ws, `sync:${ns}:cursor`)) === cursor0 && (await ledgerOf(wb.ws)) === ledger0, "release current: after a reload, B stops at it again, nothing kept");
+  await ctl("set", { set: { serverNotices: false } });
+  await stop(b2);
+  await stop(a);
+}
+
+async function releaseRace() {
+  // (B releases one add of a forgotten file; A, before it has read that, releases three including it: refused. A's
+  // next read of the log to its end finds that one ended by B: a race. The other two, still live and eligible, go again
+  // once, and are accepted)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "release race: A synced");
+  const adds = await threeAdds(id, wa, a, "/x.txt");
+  await wa.remove("/x.txt");
+  await wa.emptyTrash();
+  check(await until(() => settled(wa, a), 15_000), "release race: the file forgotten");
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(async () => settled(wb, b) && !(await wb.stat("/x.txt")), 15_000), "release race: B has read it all");
+  const dB = await b.testRelease([adds[1]]);
+  check(await until(async () => (await refRows(id)).some(([address, add, rel]) => address === adds[1].address && add === adds[1].add && rel !== null), 15_000), "release race: B's release of the middle add accepted: " + J({ dB, adds, rows: await refRows(id) }));
+  await ctl("log", { reset: true });
+  await a.testRelease(adds);
+  const mine = (rows) => rows.filter(([address, add]) => adds.some((p) => p.address === address && p.add === add));
+  const ended = await until(async () => mine(await refRows(id)).every(([, , rel]) => rel !== null), 15_000);
+  const sends = itemsOf(sealedSends(await ctl("log"))).length;
+  check(ended && a.debug().halted === undefined, "release race: A's three refused, then the two still live sent again and accepted; A goes on: " + J({ rows: await refRows(id), debug: a.debug(), why: a.stats.sealedHalt, sent: itemsOf(sealedSends(await ctl("log"))).map((o) => ({ dseq: o.dseq, releases: o.releases })), acks: (await ctl("log")).got?.slice?.(-5) }));
+  await sleep(500);
+  check(itemsOf(sealedSends(await ctl("log"))).length === sends && sends === 2, "release race: exactly the refused release and its one resend: " + J({ sends }));
+  await stop(a);
+  await stop(b);
+}
+
+async function releaseUnexplained() {
+  // (a release refused when not one pair it named was ended meanwhile: the log isn't what this device verified; it stops)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const wa = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "release unexplained: A synced");
+  const adds = await threeAdds(id, wa, a, "/u.txt");
+  await a.testRelease([{ address: adds[0].address, add: adds[2].add + 1000 }]);
+  check(await until(() => a.debug().halted === "sealed-halt", 15_000) && /doesn't say why/.test(a.stats.sealedHalt ?? "") && (await refRows(id)).every(([, , rel]) => rel === null),
+    "release unexplained: refused, and no pair it named ended since: A stops, saying so; nothing released: " + J({ debug: a.debug(), why: a.stats.sealedHalt, rows: await refRows(id) }));
+  await stop(a);
+}
+
+const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

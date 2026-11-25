@@ -448,6 +448,8 @@ async function control(body) {
     case "sealedCap": ref.controls.setSealedCap(body.n); return { ok: true };
     case "refuseSealed": ref.controls.refuseSealed(body.dseq, body.code); return { ok: true };
     case "sealedRefs": return { refs: ref.controls.refs(body.account, body.address) };
+    // (e2e PR 5d: the index's references, each add `address:add_seq` with the seq that released it or null)
+    case "indexRefs": return { rows: ref.controls.indexRefs(body.account) };
     // (index_changed notices, as the account object sends them (plan-sync-index-changed r1), `times` of them to every
     // open socket: the client's side is tested by injecting them here; the server's own are dropped unless
     // ctl.serverNotices)

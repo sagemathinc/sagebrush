@@ -118,6 +118,9 @@ export type OpAfter = { id: string; parent: string | null; name: string; kind: K
 export type Op = {
   seq?: number; t: number; device: string; by: string; op: string; path: string; to?: string; kind: Kind;
   ref?: string; fid?: string; sha256?: string; size?: number; base?: string; parent?: string; after?: OpAfter | null; origin?: "server";
+  /** (dropVersions, never sent) the newest old versions of each file it kept, and whether it named only some: the
+   * account's history it releases follows them (e2e PR 5d) */
+  keep?: number; partial?: true;
 };
 /** An entry's identity (design/sync-client.md §3): a data file's or folder's fid, a document's ref; undefined
  * where it has none yet (a folder or file from before ids were kept, until the migrator gives it one). */
@@ -2305,7 +2308,7 @@ export class Workspace {
       }
       this.noteDeleting(1);
       const ops: Op[] = [];
-      await inTx(this.ws, withSync("ops"), "readwrite", async (tx) => { await this.log(tx, ops, { op: "dropVersions", path: q, kind }); });
+      await inTx(this.ws, withSync("ops"), "readwrite", async (tx) => { await this.log(tx, ops, { op: "dropVersions", path: q, kind, ...(keep > 0 ? { keep } : {}), ...(only ? { partial: true as const } : {}) }); });
       this.tell({ ops });
       return freed;
     });

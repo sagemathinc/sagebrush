@@ -39,7 +39,7 @@ import { cursorOf, applyOps, genPrefix, genKey, idbStore, drainConfirmed, sealed
 import { capture as captureAdoption } from "./sync-adopt";
 import { SENDER_HOLD, ReplayHalted, runReplay } from "./sync-replay";
 import { Halt } from "./sync-overlay";
-import { ReleaseHalt, RELEASE_PAGE, duePairs, heldAs, type RefPair } from "./sync-refs";
+import { ReleaseHalt, RELEASE_OP as RELEASE, RELEASE_PAGE, addRow, duePairs, heldAs, type RefPair } from "./sync-refs";
 import { rewriting } from "./sync-rewrite";
 import { REBUILD, passOf, passCursor, cleanStep, stage, stageEchoes, logDone, captureStep, done, viewStep, retireStep, acked as rebuiltAcked, announceInvalid } from "./sync-rebuild";
 import type { SyncOp } from "./sync-reduce";
@@ -439,6 +439,20 @@ export class SyncClient {
   }
 
   /** (tests) the in-memory cursor, and what is in flight */
+  /** Tests only (e2e PR 5d): release records for exactly `pairs`, as a current device that doesn't check them would
+   * make them: what every other device's check of a release op is for. Their last dseq, or null. */
+  async testRelease(pairs: RefPair[]): Promise<number | null> {
+    for (let i = 0; i < 100 && !this.conn; i++) {
+      this.kick();
+      await new Promise((ok) => setTimeout(ok, 50));
+    }
+    const c = this.conn;
+    if (!c) return null;
+    const d = await c.ob.addReleases(pairs);
+    this.kick();
+    return d;
+  }
+
   debug() {
     const c = this.conn;
     return { cursor: this.cursor, wakes: this.wakes.size, target: c?.target, pages: c?.pages, ns: c?.ns, inflight: c?.pending.size ?? 0, next: c?.next, writable: c?.writable, halted: c?.halted, paused: this.paused };
@@ -1105,6 +1119,8 @@ export class SyncClient {
     }
     // (accepted ones wait for their echo: the log is read on, to the newest of them, and no further)
     for (const d of results) if ("seq" in d && isNat(d.seq)) c.target = Math.max(c.target, d.seq);
+    // (a release refused (e2e PR 5d): the log read to its end, where its check runs (releases))
+    if (refused.some((d) => byDseq.get(d.dseq)?.op.op === RELEASE)) c.discover = true;
     this.pull(c);
     this.kick();
   }
@@ -2026,24 +2042,29 @@ export class SyncClient {
     if (refused.length) {
       const verdicts = await inTx(this.w.ws, [META, "syncIndex"], "readonly", async (tx) => {
         const meta = tx.objectStore(META), store = idbStore(tx, gen);
-        const out: { held: (string | null)[]; pairs: RefPair[]; person: boolean }[] = [];
+        // (each pair: ended by a release after the cursor it was sent at (another device's, a race), or how it is
+        // held now, or "gone": not live, and not ended since it was sent)
+        const out: { held: string[]; pairs: RefPair[]; person: boolean }[] = [];
         for (const r of refused) {
-          const held: (string | null)[] = [];
-          for (const p of r.pairs) held.push(await heldAs(meta, store, gen, p));
+          const held: string[] = [];
+          for (const p of r.pairs) {
+            const row = await addRow(meta, gen, p);
+            held.push(row?.rel !== undefined && row.rel > r.at ? "ended" : ((await heldAs(meta, store, gen, p)) ?? "gone"));
+          }
           out.push({ held, pairs: r.pairs, person: r.person });
         }
         return out;
       });
       const resends: { pairs: RefPair[]; person: boolean }[] = [];
       for (const v of verdicts) {
-        const ok = (h: string | null) => h === "orphan" || h === "forgotten" || (v.person && h === "history");
-        if (!v.held.some((h) => h === null) || v.held.some((h) => h !== null && !ok(h))) {
+        const ok = (h: string) => h === "ended" || h === "orphan" || h === "forgotten" || (v.person && h === "history");
+        if (!v.held.includes("ended") || !v.held.every(ok)) {
           c.halted = "sealed-halt";
-          this.stats.sealedHalt = `sync: a release this device sent was refused, and the log it then read doesn't say why (${v.held.map((h) => h ?? "ended").join(", ")})`.slice(0, 300);
+          this.stats.sealedHalt = `sync: a release this device sent was refused, and the log it then read doesn't say why (${v.held.join(", ")})`.slice(0, 300);
           this.showWaiting(c, (await c.ob.status()).count);
           return;
         }
-        resends.push({ pairs: v.pairs.filter((_, i) => v.held[i] !== null), person: v.person });
+        resends.push({ pairs: v.pairs.filter((_, i) => v.held[i] !== "ended"), person: v.person });
       }
       await c.ob.releaseChecked(resends);
       c.sweepBackoff = Math.min((c.sweepBackoff ?? 1) * 2, SWEEP.maxBackoff);

@@ -7,7 +7,7 @@
 // same ledger whatever the ops' `t` and however the log is cut into pages.
 //   bun web/workspace/test-sync-refs.mjs
 import { reduce, SyncIndex } from "./sync-reduce.ts";
-import { ledgerPage, heldAs, liveAdds, liveOrphans, currentAdd, refsOf, ReleaseHalt, duePairs, historyUnder, DUE_MS } from "./sync-refs.ts";
+import { ledgerPage, heldAs, liveAdds, liveOrphans, currentAdd, refsOf, ReleaseHalt, duePairs, historyUnder, REFS } from "./sync-refs.ts";
 
 let checks = 0;
 const fails = [];
@@ -197,21 +197,23 @@ const halts = async (d, o) => {
   const hist = async (path) => J(await historyUnder(d.meta, st, GEN, path));
   check((await hist("/d/a.txt")) === J([{ address: A, add: s1.seq }, { address: B, add: s2.seq }]) && (await hist("/d")) === (await hist("/d/a.txt")) && (await hist("/")) === J([{ address: A, add: s1.seq }, { address: B, add: s2.seq }, { address: C, add: g1.seq }]) && (await hist("/x")) === "[]",
     "delete old versions: a file's history (never its current bytes' add, A -> B -> A's third), a folder's files' or everyone's; nothing elsewhere");
+  check(J(await historyUnder(d.meta, st, GEN, "/d", 1)) === J([{ address: A, add: s1.seq }]) && J(await historyUnder(d.meta, st, GEN, "/", 5)) === "[]",
+    "…keeping each file's newest `keep` old versions: the older ones only");
   // (a sweep: the orphan now, the forgotten file's adds once it is forgotten; first seen only stamps; due a day later)
   const T0 = 1_000_000;
   const at = async (t) => J(await duePairs(d.meta, st, GEN, t, 64));
   check((await at(T0)) === "[]", "a sweep's first sight of a due add only stamps it");
-  check((await at(T0 + DUE_MS - 1)) === "[]", "…nothing released before DUE_MS from its first sight");
-  check((await at(T0 + DUE_MS)) === J([{ add: same.seq, address: A }]), "…then the orphan (the same bytes again); never a live file's history or current bytes");
+  check((await at(T0 + REFS.dueMs - 1)) === "[]", "…nothing released before REFS.dueMs from its first sight");
+  check((await at(T0 + REFS.dueMs)) === J([{ add: same.seq, address: A }]), "…then the orphan (the same bytes again); never a live file's history or current bytes");
   await d.apply([op({ op: "remove", path: "/g.txt", to: "/Trash/g.txt", kind: "file", fid: G })]);
-  check((await at(T0 + 2 * DUE_MS)) === J([{ add: same.seq, address: A }]), "a file in Trash is live: its adds aren't due");
+  check((await at(T0 + 2 * REFS.dueMs)) === J([{ add: same.seq, address: A }]), "a file in Trash is live: its adds aren't due");
   await d.apply([op({ op: "forget", path: "/Trash/g.txt", kind: "file", fid: G })]);
-  const T1 = T0 + 3 * DUE_MS;
+  const T1 = T0 + 3 * REFS.dueMs;
   check((await at(T1)) === J([{ add: same.seq, address: A }]), "forgotten: its adds first seen now (stamped), not yet due");
-  check((await at(T1 + DUE_MS)) === J([{ add: same.seq, address: A }, { address: C, add: g1.seq }, { address: E, add: g2.seq }]), "…a day later, every add it held, its last current bytes too");
-  check((await at(T1 + DUE_MS)) === (await at(T1 + DUE_MS)) && J(await duePairs(d.meta, st, GEN, T1 + DUE_MS, 2)) === J([{ add: same.seq, address: A }, { address: C, add: g1.seq }]), "at most n at a time");
+  check((await at(T1 + REFS.dueMs)) === J([{ add: same.seq, address: A }, { address: C, add: g1.seq }, { address: E, add: g2.seq }]), "…a day later, every add it held, its last current bytes too");
+  check((await at(T1 + REFS.dueMs)) === (await at(T1 + REFS.dueMs)) && J(await duePairs(d.meta, st, GEN, T1 + REFS.dueMs, 2)) === J([{ add: same.seq, address: A }, { address: C, add: g1.seq }]), "at most n at a time");
   await d.apply([release([{ address: A, add: same.seq }, { address: C, add: g1.seq }, { address: E, add: g2.seq }])]);
-  check((await at(T1 + 2 * DUE_MS)) === "[]" && ![...d.meta.map.keys()].some((k) => k.includes(":refs:d:")), "released: none due any more, their stamps gone");
+  check((await at(T1 + 2 * REFS.dueMs)) === "[]" && ![...d.meta.map.keys()].some((k) => k.includes(":refs:d:")), "released: none due any more, their stamps gone");
 }
 
 console.log(`${checks - fails.length}/${checks} checks passed`);
