@@ -2090,7 +2090,7 @@ class Matrix:
 
     def echelon_form(self):
         """Over ZZ the Hermite form; over QQ the reduced row echelon form
-        (an empty matrix keeps its shape: astra's SAGE-940-2).
+        (an empty matrix keeps its shape: the review's SAGE-940-2).
 
         EXAMPLES::
 
@@ -2111,7 +2111,7 @@ class Matrix:
 
     def rref(self):
         """The reduced row echelon form over the fraction field: over ZZ
-        that is over QQ, not the Hermite form (astra's SAGE-940-3).
+        that is over QQ, not the Hermite form (the review's SAGE-940-3).
 
         EXAMPLES::
 
