@@ -338,6 +338,14 @@
 !! NotImplementedError: pandas: astype('category') of an int8 column is not in Sagebrush's pandas 0.x subset
 == category.datetime
 !! NotImplementedError: pandas: astype('category') of a datetime64[us] column is not in Sagebrush's pandas 0.x subset
+== category.key
+!! NotImplementedError: pandas: indexing with a Categorical is not in Sagebrush's pandas 0.x subset
+== category.set-values
+!! NotImplementedError: pandas: setting values from a Categorical is not in Sagebrush's pandas 0.x subset
+== category.index
+!! NotImplementedError: pandas: an Index of category dtype (CategoricalIndex) is not in Sagebrush's pandas 0.x subset
+== category.compare-categorical
+!! NotImplementedError: pandas.Series comparison with a Categorical is not in Sagebrush's pandas 0.x subset
 == compare.series-repeated-labels
 !! NotImplementedError: pandas.DataFrame.eq with a Series of repeated labels is not in Sagebrush's pandas 0.x subset
 == compare.level

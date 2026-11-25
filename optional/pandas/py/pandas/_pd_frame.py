@@ -476,6 +476,7 @@ class DataFrame(object):
 
     def _pd_col_positions(self, key):
         """Columns for df[key] with a label or a list of labels."""
+        X.refuse_categorical_key(key)
         if X.is_list_like(key):
             return X.loc_positions(self._pd_columns, key)
         if isinstance(key, tuple):
@@ -1154,6 +1155,7 @@ class DataFrame(object):
     def __setitem__(self, key, value):
         if isinstance(key, DataFrame):
             raise _unsupported("DataFrame[DataFrame] = value (where)")
+        X.refuse_categorical_key(key)
         if isinstance(key, slice) or X.is_bool_key(key):
             rows = X.getitem_slice_positions(self._pd_index, key) if isinstance(key, slice) \
                 else X.mask_positions(key, len(self), self._pd_index)
