@@ -523,13 +523,13 @@ await section("releases keyed to the add they end: exact, once, and only an inde
     "each accepted add is an index reference keyed by its op's seq: " + J(ix));
 
   // (every wrong release: refused invalid, the message ended there, and nothing it could touch changed; its dseq is spent as any refusal's)
-  const refused = async (releases, what, malformed = false) => {
+  const refused = async (releases, what, malformed = false, code = "invalid") => {
     const before = await state();
     // (a malformed list can't be signed: it goes in place of a signed op's, as a device that isn't ours would send it)
     const op = malformed ? { ...(await signed(W, d, st, dev, n)), releases } : await signed(W, d, st, dev, n, { releases });
     const r = await ws.ask({ t: "sops", ops: [op] });
     n += 1;
-    ok(r?.ops?.[0]?.code === "invalid" && (await state()) === before, `${what}: refused, invalid, and the log, the counts and the index's references unchanged: ` + J(r?.ops ?? r));
+    ok(r?.ops?.[0]?.code === code && (await state()) === before, `${what}: refused, ${code}, and the log, the counts and the index's references unchanged: ` + J(r?.ops ?? r));
   };
   await refused([{ address: sha(b1), add: s3 }], "the address right, the add wrong (s3 added b2, not b1)");
   await refused([{ address: sha(b2), add: s1 }], "the add right, the address wrong (s1 added b1, not b2)");
@@ -549,6 +549,10 @@ await section("releases keyed to the add they end: exact, once, and only an inde
   await refused([{ address: sha(b1) }], "a release with no add", true);
   await refused([{ address: sha(b1), add: 0 }], "an add seq of 0", true);
   await refused([{ address: sha(b1), add: s1, n: 1 }], "a release with a field it doesn't have", true);
+  // (at most 64 releases an op: 65 is refused by its form, and 64 distinct ones (none live) get as far as the log)
+  const many = (k) => Array.from({ length: k }, (_, i) => ({ address: sha(b1), add: s4 + 2000 + i }));
+  await refused(many(65), "65 releases in one op", false, "limit");
+  await refused(many(64), "64 releases in one op, none of them live: past the form, refused by the log", false, "invalid");
 
   // (two live adds of one address, released independently, each once)
   const rel = async (releases) => (await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n++, { releases })] }))?.ops?.[0];
