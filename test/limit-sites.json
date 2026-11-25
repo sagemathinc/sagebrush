@@ -8193,6 +8193,16 @@
   "owner": "symbolic engine",
   "row": "inv-44"
  },
+ "engine/sym/src/num.rs :: fcmp :: const TAME_MAX: f64 = f64::from_bits(1533 << 52); // 2^510 #0": {
+  "class": "none",
+  "owner": "symbolic engine",
+  "reason": "the operand range on which an RR or CC operation's double steps are MPFR's (outside it the operation is done again in the 53-bit MP field); refuses nothing"
+ },
+ "engine/sym/src/num.rs :: tame :: x == 0.0 || (TAME_MIN..=TAME_MAX).contains(&x.abs()) #0": {
+  "class": "none",
+  "owner": "symbolic engine",
+  "reason": "the operand range on which an RR or CC operation's double steps are MPFR's (outside it the operation is done again in the 53-bit MP field); refuses nothing"
+ },
  "engine/sym/src/rewrite.rs :: has_float :: const MAX_REDUCE_TERMS: u64 = 1024; #0": {
   "class": "2+3",
   "owner": "symbolic engine",
@@ -12596,6 +12606,11 @@
   "owner": "sage kernel (@sagebrush-sage2)",
   "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
  },
+ "lib/_sage_expr.py :: _function.f :: except NotImplementedError: #0": {
+  "class": "none",
+  "owner": "Sage kernel",
+  "reason": "an element of CC whose engine value was refused past the doubles goes to the 53-bit MP field; refuses nothing itself"
+ },
  "lib/_sage_expr.py :: _ilt_term :: raise NotImplementedError(\"inverse_laplace: no inverse known for %s\" % F) #0": {
   "class": "coverage",
   "owner": "Sage kernel (@sagebrush-sage2)",
@@ -13343,6 +13358,26 @@
   "class": "2",
   "owner": "HMF Python API",
   "row": "inv-27"
+ },
+ "lib/_sage_lang.py :: RealNumber :: NotImplementedError: 1.15052360631188e310 + 1.07374182400000e9*I, an element of CC past the double range, has no symbolic form in sagebrush yet #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's expected output for that refusal of an RR or CC value past the doubles in a symbolic expression, not a cap"
+ },
+ "lib/_sage_lang.py :: RealNumber :: NotImplementedError: 1.15052360631188e310, an element of RR past the double range, has no symbolic form in sagebrush yet #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's expected output for that refusal of an RR or CC value past the doubles in a symbolic expression, not a cap"
+ },
+ "lib/_sage_lang.py :: RealNumber :: NotImplementedError: exp(1000.00000000000 + 1.00000000000000*I): the value in CC, past the double range, is not available in sagebrush yet #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's expected output for that refusal of an RR or CC value past the doubles in a symbolic expression, not a cap"
+ },
+ "lib/_sage_lang.py :: RealNumber :: NotImplementedError: exp(1000.00000000000): the value in RR, past the double range, is not available in sagebrush yet #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's expected output for that refusal of an RR or CC value past the doubles in a symbolic expression, not a cap"
  },
  "lib/_sage_matrix.py ::  :: _MAX_ENTRIES = 1 << 22 #0": {
   "class": "2",

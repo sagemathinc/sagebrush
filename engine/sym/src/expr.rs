@@ -684,6 +684,13 @@ pub fn div(a: &Expr, b: &Expr) -> Expr {
         }
         throw(SymError::DivisionByZero);
     }
+    // (an RR or CC number and a number: Sage's quotient, a times 1/b, checked
+    // past the doubles as a whole, Num::div)
+    if let (Some(x), Some(y)) = (a.as_num(), b.as_num()) {
+        if (x.fk().is_some() || y.fk().is_some()) && !x.fk_with(y).double() && !x.is_mp_kind() && !y.is_mp_kind() {
+            return num(x.div(y));
+        }
+    }
     mul(vec![a.clone(), pow(b, &int(-1))])
 }
 pub fn recip(a: &Expr) -> Expr {
@@ -770,7 +777,10 @@ pub fn pow(b: &Expr, x: &Expr) -> Expr {
             let (re, im) = n.to_c64();
             let m = re.exp();
             let k = n.fk().unwrap_or(crate::num::Fk::RR);
-            return num(if im == 0.0 { Num::Float(m, 0.0, k) } else { Num::fl(m * im.cos(), m * im.sin(), k) });
+            let r = if im == 0.0 { Num::Float(m, 0.0, k) } else { Num::fl(m * im.cos(), m * im.sin(), k) };
+            // (an RR or CC value past the doubles refused: e^x is never 0)
+            crate::num::check_float_value("exp", &[(re, im)], &r, false, |i| i == 1 && im == 0.0);
+            return num(r);
         }
         (Kind::Const(Const::Infinity), Kind::Num(n)) if n.is_positive() => return infinity(),
         (Kind::Const(Const::Infinity), Kind::Num(n)) if n.is_negative() => return zero(),
@@ -821,6 +831,14 @@ fn num_pow(b: &Num, x: &Num) -> Expr {
     // (CDF's power is always GSL's formula: SR(CDF(1, 2))^2 is -2.9999999999999987 + 4.0*I)
     if !b.is_exact() && b.fk_with(x) == crate::num::Fk::RDF {
         if let Some(n) = x.as_i64() {
+            return num(b.pow_int(n));
+        }
+    }
+    // an element of CC to an exact integer: Sage's generic_power (the inverse
+    // first for a negative one; SR(CC(1, 1))^2 is 2.00000000000000*I, and
+    // 1/SR(CC(1, 1)) its __invert__'s), checked past the doubles (Num::pow_int)
+    if !b.is_exact() && b.fk_with(x) == crate::num::Fk::CC {
+        if let Some(n) = x.as_i64().filter(|_| x.is_exact()) {
             return num(b.pow_int(n));
         }
     }
@@ -953,8 +971,28 @@ pub fn float_pow(b: &Num, x: &Num) -> Num {
     if k.double() {
         return double_pow(br, bi, xr, xi, k);
     }
+    // (an RR or CC value past the doubles refused: a nonzero base's power is
+    // never 0, its imaginary part 0 on the real branch)
+    // An integer power as Sage computes it (a real base to an exact or RR
+    // integer, mpfr_pow_si's correctly rounded value, as mpfr_pow's; a
+    // complex one to an exact integer, generic_power): its value or Sage's
+    let int_power = if bi == 0.0 && xi == 0.0 && !k.complex() && xr.fract() == 0.0 && xr.abs() < 9.0e15 {
+        Some(xr as i64)
+    } else {
+        x.as_i64().filter(|_| x.is_exact())
+    };
+    let checked = |r: Num| {
+        let v = [(br, bi), (xr, xi)];
+        if crate::num::float_value_off(&v, &r, false, |i| i == 1 && r.to_c64().1 == 0.0 && bi == 0.0 && xi == 0.0) {
+            match int_power {
+                Some(n) => return crate::num::pow_int_mp53(b, n, k),
+                None => crate::num::refuse_float_value("pow", &v, k),
+            }
+        }
+        r
+    };
     if bi == 0.0 && xi == 0.0 && (br >= 0.0 || xr.fract() == 0.0) {
-        return Num::Float(br.powf(xr), 0.0, k);
+        return checked(Num::Float(br.powf(xr), 0.0, k));
     }
     if br == 0.0 && bi == 0.0 {
         return Num::Float(0.0, 0.0, k);
@@ -964,7 +1002,7 @@ pub fn float_pow(b: &Num, x: &Num) -> Num {
     let li = bi.atan2(br);
     let (er, ei) = (xr * lr - xi * li, xr * li + xi * lr);
     let m = er.exp();
-    Num::fl(m * ei.cos(), m * ei.sin(), k)
+    checked(Num::fl(m * ei.cos(), m * ei.sin(), k))
 }
 
 /// A power in RDF or CDF as Sage computes it: a real one exp(y log x) (2.0^0.5 is
