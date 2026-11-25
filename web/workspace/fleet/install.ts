@@ -1,5 +1,5 @@
 // The page's one way into the fleet core. core/ is a byte-for-byte mirror of sagebrush-agent's lib/fleet/core/ at
-// 097e98a1c6a0d96f6630135753de218b0c49876e, with fleet.schema.json and reasons.json from its schema/fleet/
+// 68722fd430baaaf5e29363201312fa96ff1ed6cb, with fleet.schema.json and reasons.json from its schema/fleet/
 // (test-fleet-core.mjs pins every file's sha256). The core takes one crypto backend and one schema loader per page
 // and refuses any other after that, so every page module that verifies goes through fleetCore() here, never through
 // core/ itself. The strict Ed25519 rules (canonical points, no small-order key, S < L) are the core's own and run
