@@ -84,3 +84,34 @@ def failing_member(**kw):
 
 case("bagging.failure-shared", failing_member)
 case("bagging.failure-own-columns", lambda: failing_member(max_features=1))
+
+# random forests: the trees share one copy; it is released, also when a tree's fit fails partway through
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+
+case("forest.classifier", lambda: unchanged(lambda: RandomForestClassifier(n_estimators=6, random_state=0).fit(X, y)))
+case("forest.balanced_subsample-oob", lambda: unchanged(lambda: RandomForestClassifier(n_estimators=6, class_weight="balanced_subsample", oob_score=True, random_state=0).fit(X, y)))
+case("forest.regressor", lambda: unchanged(lambda: RandomForestRegressor(n_estimators=6, random_state=0).fit(X, y * 1.5)))
+
+
+def failing_tree():
+    # (the third tree's fit fails)
+    original = skltree.fit
+    calls = []
+
+    def fail_third(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 3:
+            raise ValueError("injected failure in the third tree")
+        return original(*args, **kwargs)
+
+    skltree.fit = fail_third
+    try:
+        RandomForestClassifier(n_estimators=6, random_state=0).fit(X, y)
+    except ValueError as e:
+        return str(e), len(calls), live() == before
+    finally:
+        skltree.fit = original
+    return "no failure", len(calls), live() == before
+
+
+case("forest.failure", failing_tree)

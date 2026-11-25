@@ -48,5 +48,19 @@ dtype('<U2')
 !! NotImplementedError: sklearn.ensemble.BaggingClassifier(warm_start=True) is not in Sagebrush's sklearn 0.x subset (adding members to a fitted ensemble isn't)
 == bagging.estimator
 !! NotImplementedError: sklearn.ensemble.BaggingClassifier(estimator=DummyClassifier(...)) is not in Sagebrush's sklearn 0.x subset (only decision trees are bagged: estimator=None, DecisionTreeClassifier or DecisionTreeRegressor)
-== bagging.random-forest
-!! NotImplementedError: sklearn.ensemble.RandomForestClassifier is not in Sagebrush's sklearn 0.x subset
+== bagging.extra-trees
+!! NotImplementedError: sklearn.ensemble.ExtraTreesClassifier is not in Sagebrush's sklearn 0.x subset
+== forest.warm_start
+!! NotImplementedError: sklearn.ensemble.RandomForestClassifier(warm_start=True) is not in Sagebrush's sklearn 0.x subset (adding trees to a fitted forest isn't)
+== forest.max_leaf_nodes
+!! NotImplementedError: sklearn.ensemble.RandomForestClassifier(max_leaf_nodes=...) is not in Sagebrush's sklearn 0.x subset (the best-first builder isn't; max_leaf_nodes=None is)
+== forest.ccp_alpha
+!! NotImplementedError: sklearn.ensemble.RandomForestRegressor(ccp_alpha=...) is not in Sagebrush's sklearn 0.x subset (minimal cost-complexity pruning isn't; ccp_alpha=0.0 is)
+== forest.monotonic_cst
+!! NotImplementedError: sklearn.ensemble.RandomForestClassifier(monotonic_cst=...) is not in Sagebrush's sklearn 0.x subset (monotonicity constraints aren't)
+== forest.absolute_error
+!! NotImplementedError: sklearn.ensemble.RandomForestRegressor(criterion='absolute_error') is not in Sagebrush's sklearn 0.x subset (the squared_error criterion is)
+== forest.decision_path
+!! NotImplementedError: sklearn.ensemble.RandomForestClassifier.decision_path is not in Sagebrush's sklearn 0.x subset (it returns a scipy sparse matrix)
+== forest.multilabel-oob
+!! NotImplementedError: sklearn.metrics with multilabel-indicator targets is not in Sagebrush's sklearn 0.x subset

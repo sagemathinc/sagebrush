@@ -123,17 +123,43 @@ class _SkInput:
 
 
 class _SkShared:
-    """The X and y every member of a bagging ensemble is fit on, and (once the first member made it) their
-    validated input with the kernel's one Dataset. release() frees the Dataset."""
+    """The X and y every member of an ensemble is fit on (with check_input and the missing-value mask as the
+    ensemble passes them), and (once the first member made it) their validated input with the kernel's one
+    Dataset. release() frees the Dataset."""
 
-    def __init__(self, X, y):
+    def __init__(self, X, y, check_input=True, mask=None):
         self.X = X
         self.y = y
+        self.check_input = check_input
+        self.mask = mask
         self.data = None
 
     def release(self):
         if self.data is not None and self.data.dataset is not None:
             self.data.dataset.release()
+
+
+def _sk_missing_mask(support_missing_values, X, estimator_name):
+    # (BaseDecisionTree._compute_missing_values_in_feature_mask's body, which a forest also calls for its X)
+    common_kwargs = dict(estimator_name=estimator_name, input_name="X")
+
+    if not support_missing_values:
+        assert_all_finite(X, **common_kwargs)
+        return None
+
+    with np.errstate(over="ignore"):
+        overall_sum = np.sum(X)
+
+    if not np.isfinite(overall_sum):
+        # Raise a ValueError in case of the presence of an infinite element.
+        _assert_all_finite(X, allow_nan=True, **common_kwargs)
+
+    # If the sum is not nan, then there are no missing values
+    if not np.isnan(overall_sum):
+        return None
+
+    missing_values_in_feature_mask = np.isnan(X.sum(axis=0))
+    return missing_values_in_feature_mask
 
 
 _sk_base_constraints = {
@@ -159,6 +185,17 @@ _sk_base_constraints = {
     "min_impurity_decrease": [Interval(Real, 0.0, None, closed="left")],
     "ccp_alpha": [Interval(Real, 0.0, None, closed="left")],
     "monotonic_cst": ["array-like", None],
+}
+
+_sk_clf_constraints = {
+    **_sk_base_constraints,
+    "criterion": [StrOptions({"gini", "entropy", "log_loss"})],
+    "class_weight": [dict, list, StrOptions({"balanced"}), None],
+}
+
+_sk_reg_constraints = {
+    **_sk_base_constraints,
+    "criterion": [StrOptions({"squared_error", "absolute_error", "poisson"})],
 }
 
 
@@ -206,26 +243,7 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator):
 
         This method also ensures that X is finite.
         """
-        estimator_name = estimator_name or self.__class__.__name__
-        common_kwargs = dict(estimator_name=estimator_name, input_name="X")
-
-        if not self._support_missing_values(X):
-            assert_all_finite(X, **common_kwargs)
-            return None
-
-        with np.errstate(over="ignore"):
-            overall_sum = np.sum(X)
-
-        if not np.isfinite(overall_sum):
-            # Raise a ValueError in case of the presence of an infinite element.
-            _assert_all_finite(X, allow_nan=True, **common_kwargs)
-
-        # If the sum is not nan, then there are no missing values
-        if not np.isnan(overall_sum):
-            return None
-
-        missing_values_in_feature_mask = np.isnan(X.sum(axis=0))
-        return missing_values_in_feature_mask
+        return _sk_missing_mask(self._support_missing_values(X), X, estimator_name or self.__class__.__name__)
 
     def _sk_refuse_unsupported(self):
         name = type(self).__name__
@@ -409,12 +427,17 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator):
     @_fit_context(prefer_skip_nested_validation=True)
     def _sk_fit_shared(self, shared, sample_weight):
         # (a bagging member's fit(X, y, sample_weight=sample_weight) on the X and y of `shared`, which every member
+        # is given)
+        return self._sk_fit_shared_input(shared, sample_weight)
+
+    def _sk_fit_shared_input(self, shared, sample_weight):
+        # (a member's _fit(X, y, sample_weight, check_input, mask) on the X and y of `shared`, which every member
         # is given: the first member validates them and makes the kernel's Dataset, the others adopt that; the
-        # ensemble releases the Dataset)
+        # ensemble releases the Dataset. A forest calls this as it calls each tree's _fit.)
         self._sk_refuse_unsupported()
         random_state = check_random_state(self.random_state)
         if shared.data is None:
-            data = self._sk_input(shared.X, shared.y, True, None)
+            data = self._sk_input(shared.X, shared.y, shared.check_input, shared.mask)
             from sagebrush import skltree
             data.dataset = skltree.dataset(np.ascontiguousarray(data.X, dtype=np.float32), data.y, data.mask)
             shared.data = data
@@ -495,11 +518,7 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator):
 class DecisionTreeClassifier(ClassifierMixin, BaseDecisionTree):
     """A decision tree classifier."""
 
-    _parameter_constraints: dict = {
-        **_sk_base_constraints,
-        "criterion": [StrOptions({"gini", "entropy", "log_loss"})],
-        "class_weight": [dict, list, StrOptions({"balanced"}), None],
-    }
+    _parameter_constraints: dict = _sk_clf_constraints
 
     def __init__(self, *, criterion="gini", splitter="best", max_depth=None, min_samples_split=2,
                  min_samples_leaf=1, min_weight_fraction_leaf=0.0, max_features=None, random_state=None,
@@ -566,10 +585,7 @@ class DecisionTreeClassifier(ClassifierMixin, BaseDecisionTree):
 class DecisionTreeRegressor(RegressorMixin, BaseDecisionTree):
     """A decision tree regressor."""
 
-    _parameter_constraints: dict = {
-        **_sk_base_constraints,
-        "criterion": [StrOptions({"squared_error", "absolute_error", "poisson"})],
-    }
+    _parameter_constraints: dict = _sk_reg_constraints
 
     def __init__(self, *, criterion="squared_error", splitter="best", max_depth=None, min_samples_split=2,
                  min_samples_leaf=1, min_weight_fraction_leaf=0.0, max_features=None, random_state=None,

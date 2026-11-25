@@ -1,0 +1,232 @@
+python 3.14.4 x86_64 glibc
+package numpy 2.5.5
+package pandas 3.1.1
+package scikit-learn 1.9.1
+package scipy 1.18.1
+package joblib 1.6.0
+package threadpoolctl 3.8.0
+--
+== clf.iris.0
+{'n': 8, 'trees': 'd32e159b96862786', 'node_counts': [13, 15, 19, 23, 13, 17], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': '8a9800c1d58b3c68', 'member_classes': 'd4fcab9d8981bf39', 'importances': ('float64', (4,), '0f2626f46b13c78a'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 4, 'n_outputs_': 1}
+== clf.iris.7
+{'n': 8, 'trees': 'acbef29bf56d71f0', 'node_counts': [17, 15, 17, 19, 15, 17], 'seeds': [327741615, 976413892, 1202242073, 1369975286], 'samples': '1a3b4d01ae4ae388', 'member_classes': 'd4fcab9d8981bf39', 'importances': ('float64', (4,), 'a689c6171ce9caf1'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 4, 'n_outputs_': 1}
+== clf.iris.proba
+('float64', (150, 3), 'efaccab9bd162477')
+== clf.iris.predict
+('int64', (150,), '6c3ebad44cdc3ae4')
+== clf.iris.log-proba
+('float64', (150, 3), '64f05849dcf0a594')
+== clf.iris.apply
+('int64', (150, 6), '600cde30ee38126c')
+== clf.iris.oob
+{'n': 12, 'trees': '882b215d16932e1b', 'node_counts': [17, 7, 15, 13, 15, 15], 'seeds': [1872583848, 794921487, 111352301, 1853453896], 'samples': 'b36ce4ba99f85e3c', 'member_classes': '441bd4e9ec28abe8', 'importances': ('float64', (4,), '7825ca4fdd76927c'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 4, 'n_outputs_': 1, 'oob_decision_function_': ('float64', (150, 3), '93d94ac0901b3e75'), 'oob_score_': 0.9533333333333334}
+== clf.iris.entropy
+{'n': 5, 'trees': '0750274a8170e0e1', 'node_counts': [17, 15, 19, 13, 17], 'seeds': [218175338, 303761048, 893988089, 1460070019], 'samples': 'd211f7346e0a92dc', 'member_classes': '5e08ec20489a3c2c', 'importances': ('float64', (4,), '9e09412bc078a68e'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 4, 'n_outputs_': 1}
+== clf.iris.no-bootstrap
+{'n': 4, 'trees': '1578bba6e0931703', 'node_counts': [29, 25, 23, 27], 'seeds': [2005877882, 1720656046, 202860983, 741720773], 'samples': '4e066b2cf4b64697', 'member_classes': '4409c51e475e5a22', 'importances': ('float64', (4,), 'a1817cf16b536907'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 4, 'n_outputs_': 1}
+== clf.iris.score
+0.9933333333333333
+== clf.wine.0
+{'n': 8, 'trees': '1e065d1298d5e59a', 'node_counts': [21, 23, 15, 25, 17, 19], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': '8c8072ae4f83d789', 'member_classes': 'd4fcab9d8981bf39', 'importances': ('float64', (13,), '74df1278fba990bf'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 13, 'n_outputs_': 1}
+== clf.wine.7
+{'n': 8, 'trees': '54629f8ae633eef8', 'node_counts': [21, 17, 17, 17, 19, 25], 'seeds': [327741615, 976413892, 1202242073, 1369975286], 'samples': '842963fc06b19d0a', 'member_classes': 'd4fcab9d8981bf39', 'importances': ('float64', (13,), '45ce80b52ad3fb3a'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 13, 'n_outputs_': 1}
+== clf.wine.proba
+('float64', (178, 3), '130d1dc743dd558a')
+== clf.wine.predict
+('int64', (178,), 'b6514e07a6d27854')
+== clf.wine.log-proba
+('float64', (178, 3), 'efb9c2dfc7003f02')
+== clf.wine.apply
+('int64', (178, 6), 'df2cc0ff025f17ba')
+== clf.wine.oob
+{'n': 12, 'trees': 'a4714dddb2ce17c8', 'node_counts': [23, 19, 19, 29, 29, 25], 'seeds': [1872583848, 794921487, 111352301, 1853453896], 'samples': '29d433de844513f4', 'member_classes': '441bd4e9ec28abe8', 'importances': ('float64', (13,), 'b64b5d53856757b1'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 13, 'n_outputs_': 1, 'oob_decision_function_': ('float64', (178, 3), '576c6c18961433e0'), 'oob_score_': 0.9382022471910112}
+== clf.wine.entropy
+{'n': 5, 'trees': '77fac316bf6a29c1', 'node_counts': [23, 21, 21, 15, 19], 'seeds': [218175338, 303761048, 893988089, 1460070019], 'samples': '6dd3b57fea40aeec', 'member_classes': '5e08ec20489a3c2c', 'importances': ('float64', (13,), '54a2b6bcb7467594'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 13, 'n_outputs_': 1}
+== clf.wine.no-bootstrap
+{'n': 4, 'trees': '21c0dce470886fcd', 'node_counts': [21, 27, 29, 17], 'seeds': [2005877882, 1720656046, 202860983, 741720773], 'samples': '28c4136c819d792f', 'member_classes': '4409c51e475e5a22', 'importances': ('float64', (13,), '236b2ba0d237f1d4'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 13, 'n_outputs_': 1}
+== clf.wine.score
+0.9775280898876404
+== clf.cancer-nan.0
+{'n': 8, 'trees': 'e37f6a6186ff4b6f', 'node_counts': [59, 43, 47, 39, 43, 33], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': 'cdf9d9809b38b6a5', 'member_classes': 'd48de554fb444a02', 'importances': ('float64', (30,), '4da6ab3a248ef13e'), 'classes_': array([0, 1]), 'n_classes_': 2, 'n_features_in_': 30, 'n_outputs_': 1}
+== clf.cancer-nan.7
+{'n': 8, 'trees': '4b3af1c6cc4fc3e8', 'node_counts': [41, 37, 45, 41, 47, 43], 'seeds': [327741615, 976413892, 1202242073, 1369975286], 'samples': '44d23abf8f04af8b', 'member_classes': 'd48de554fb444a02', 'importances': ('float64', (30,), 'be3b26ecd7a91fde'), 'classes_': array([0, 1]), 'n_classes_': 2, 'n_features_in_': 30, 'n_outputs_': 1}
+== clf.cancer-nan.proba
+('float64', (569, 2), '70b64e81b3ad8efc')
+== clf.cancer-nan.predict
+('int64', (569,), '96c6c30b8bfc9425')
+== clf.cancer-nan.log-proba
+('float64', (569, 2), '40307c85ff1878c4')
+== clf.cancer-nan.apply
+('int64', (569, 6), '1ba12b365925f9dc')
+== clf.cancer-nan.oob
+{'n': 12, 'trees': '0a48a3c8c1acb1b9', 'node_counts': [45, 39, 45, 37, 43, 39], 'seeds': [1872583848, 794921487, 111352301, 1853453896], 'samples': '09248eefdcfec915', 'member_classes': '5aacedb5466b03a2', 'importances': ('float64', (30,), '262b760ae78e8072'), 'classes_': array([0, 1]), 'n_classes_': 2, 'n_features_in_': 30, 'n_outputs_': 1, 'oob_decision_function_': ('float64', (569, 2), 'ed33f899eb8eb3c9'), 'oob_score_': 0.9420035149384886}
+== clf.cancer-nan.entropy
+{'n': 5, 'trees': '0b9bc5f30c868fd2', 'node_counts': [39, 33, 33, 31, 31], 'seeds': [218175338, 303761048, 893988089, 1460070019], 'samples': '55709a0c4089b0e7', 'member_classes': '2d075835b67e94ff', 'importances': ('float64', (30,), '333775382dbd10a0'), 'classes_': array([0, 1]), 'n_classes_': 2, 'n_features_in_': 30, 'n_outputs_': 1}
+== clf.cancer-nan.no-bootstrap
+{'n': 4, 'trees': '59fa6b7af8c870a9', 'node_counts': [49, 41, 47, 49], 'seeds': [2005877882, 1720656046, 202860983, 741720773], 'samples': '31c06d373ea4e04b', 'member_classes': 'f754ddca070b2645', 'importances': ('float64', (30,), 'e9fd35f0294c332c'), 'classes_': array([0, 1]), 'n_classes_': 2, 'n_features_in_': 30, 'n_outputs_': 1}
+== clf.cancer-nan.score
+0.9929701230228472
+== clf.digits.0
+{'n': 8, 'trees': 'dbbb7e2394741c13', 'node_counts': [397, 435, 413, 423, 419, 437], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': 'ccb94bcb809ec171', 'member_classes': '37b8731f2350f321', 'importances': ('float64', (64,), 'd934381246e1c20c'), 'classes_': ('int64', (10,), '23c379d6c0f22ef6'), 'n_classes_': 10, 'n_features_in_': 64, 'n_outputs_': 1}
+== clf.digits.7
+{'n': 8, 'trees': '5e36b819bef796c5', 'node_counts': [395, 349, 361, 413, 377, 419], 'seeds': [327741615, 976413892, 1202242073, 1369975286], 'samples': '24878dd97b739ef8', 'member_classes': '37b8731f2350f321', 'importances': ('float64', (64,), '1709cd8544273056'), 'classes_': ('int64', (10,), '23c379d6c0f22ef6'), 'n_classes_': 10, 'n_features_in_': 64, 'n_outputs_': 1}
+== clf.digits.proba
+('float64', (1797, 10), '5ff79423e31cf505')
+== clf.digits.predict
+('int64', (1797,), 'a0c24ec394df7e0e')
+== clf.digits.log-proba
+('float64', (1797, 10), '7d59169741872768')
+== clf.digits.apply
+('int64', (1797, 6), '271a05e48753e666')
+== clf.digits.oob
+{'n': 12, 'trees': 'abdd7e0a31cf0be2', 'node_counts': [411, 423, 381, 425, 399, 429], 'seeds': [1872583848, 794921487, 111352301, 1853453896], 'samples': 'ebe58b81384c2464', 'member_classes': '910574c4767521d4', 'importances': ('float64', (64,), '58d46765aff10aa7'), 'classes_': ('int64', (10,), '23c379d6c0f22ef6'), 'n_classes_': 10, 'n_features_in_': 64, 'n_outputs_': 1, 'oob_decision_function_': ('float64', (1797, 10), 'df313a902dbff58d'), 'oob_score_': 0.8848080133555927}
+== clf.digits.entropy
+{'n': 5, 'trees': '0f818c1c7cc97bc4', 'node_counts': [107, 121, 113, 113, 113], 'seeds': [218175338, 303761048, 893988089, 1460070019], 'samples': '1415ab4eddd7121f', 'member_classes': '8fd945d4ef9c04a5', 'importances': ('float64', (64,), '0c52927356ad3f3d'), 'classes_': ('int64', (10,), '23c379d6c0f22ef6'), 'n_classes_': 10, 'n_features_in_': 64, 'n_outputs_': 1}
+== clf.digits.no-bootstrap
+{'n': 4, 'trees': 'b22eaecce9156181', 'node_counts': [369, 363, 337, 373], 'seeds': [2005877882, 1720656046, 202860983, 741720773], 'samples': 'cb473d50a445dd52', 'member_classes': 'e17f6bbab9abb7b1', 'importances': ('float64', (64,), 'da59efffc1ccde60'), 'classes_': ('int64', (10,), '23c379d6c0f22ef6'), 'n_classes_': 10, 'n_features_in_': 64, 'n_outputs_': 1}
+== clf.digits.score
+0.9860879243183083
+== clf.default-100
+{'n': 100, 'trees': '3340d1ec2d6522aa', 'node_counts': [13, 15, 19, 23, 13, 17], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': 'cc9297acfde0fbe8', 'member_classes': '2dadeab9e509a0af', 'importances': ('float64', (4,), '5c4067a9c52c6437'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 4, 'n_outputs_': 1}
+== clf.max_samples-int
+{'n': 5, 'trees': '553252b28d731781', 'node_counts': [5, 11, 7, 7, 7], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': '70051924b7bf5efe', 'member_classes': '5e08ec20489a3c2c', 'importances': ('float64', (13,), '1fcd3c1ae258c939'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 13, 'n_outputs_': 1}
+== clf.max_samples-float
+{'n': 5, 'trees': '74e2323c51d4b0cd', 'node_counts': [9, 11, 9, 7, 9], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': '2d536320a4890dd3', 'member_classes': '5e08ec20489a3c2c', 'importances': ('float64', (13,), '058c7dae63381e16'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 13, 'n_outputs_': 1}
+== clf.params
+{'n': 5, 'trees': '792f42a4249a5e61', 'node_counts': [47, 43, 37, 47, 39], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': 'aac57412b41e06d2', 'member_classes': '8fd945d4ef9c04a5', 'importances': ('float64', (64,), 'a824e429b92934c7'), 'classes_': ('int64', (10,), '23c379d6c0f22ef6'), 'n_classes_': 10, 'n_features_in_': 64, 'n_outputs_': 1}
+== clf.weights
+{'n': 6, 'trees': '256ba109f2766564', 'node_counts': [15, 33, 17, 17, 25, 15], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': 'da21d359ba7b124b', 'member_classes': 'cce7f9a192a0f93b', 'importances': ('float64', (13,), '1731ccc946ed685c'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 13, 'n_outputs_': 1}
+== clf.weights-max_samples-float
+{'n': 4, 'trees': 'defa86c648534386', 'node_counts': [15, 13, 19, 15], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': '98a9e983890e5778', 'member_classes': '4409c51e475e5a22', 'importances': ('float64', (13,), '499f773edc132dfc'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 13, 'n_outputs_': 1}
+== clf.weights-no-bootstrap
+{'n': 3, 'trees': 'e5e8d10ed400d366', 'node_counts': [23, 25, 29], 'seeds': [209652396, 398764591, 924231285], 'samples': 'fb9031c0d05a67a3', 'member_classes': 'a23aa9ac12381a65', 'importances': ('float64', (13,), '2cb8bec3120e1d0e'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 13, 'n_outputs_': 1}
+== clf.class_weight.balanced
+{'n': 5, 'trees': '3fdc62435d5ad1c7', 'node_counts': [21, 13, 15, 23, 19], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': 'b72d6f697306b940', 'member_classes': '5e08ec20489a3c2c', 'importances': ('float64', (13,), '6f348c9acded3e6c'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 13, 'n_outputs_': 1}
+== clf.class_weight.balanced-weights
+{'n': 5, 'trees': '0e2c4ff0fd563f4b', 'node_counts': [13, 13, 19, 11, 17], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': '6b2018b21d0cde12', 'member_classes': '5e08ec20489a3c2c', 'importances': ('float64', (13,), '747f175b4a427ac7'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 13, 'n_outputs_': 1}
+== clf.class_weight.balanced_subsample
+{'n': 5, 'trees': '86efe6eae3d5a158', 'node_counts': [21, 25, 15, 19, 17], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': 'a90be5656d6c74cd', 'member_classes': '5e08ec20489a3c2c', 'importances': ('float64', (13,), '037b1c057ce9ee11'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 13, 'n_outputs_': 1}
+== clf.class_weight.balanced_subsample-weights
+{'n': 5, 'trees': 'd0e2b5dff364f780', 'node_counts': [19, 13, 21, 19, 21], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': '23fcd9566c8cfc7f', 'member_classes': '5e08ec20489a3c2c', 'importances': ('float64', (13,), 'f19951f31c064848'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 13, 'n_outputs_': 1}
+== clf.class_weight.dict
+{'n': 5, 'trees': '1e2a70c6702b652c', 'node_counts': [19, 23, 21, 15, 15], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': 'bf16a11e7d0e2e04', 'member_classes': '5e08ec20489a3c2c', 'importances': ('float64', (13,), '7680781854a1136e'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 13, 'n_outputs_': 1}
+== clf.class_weight.dict-weights
+{'n': 5, 'trees': '713fb9c1e120d5aa', 'node_counts': [21, 23, 21, 21, 27], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': 'f646a9b02b223967', 'member_classes': '5e08ec20489a3c2c', 'importances': ('float64', (13,), '8b65d6cd6cab1157'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 13, 'n_outputs_': 1}
+== clf.balanced_subsample-no-bootstrap
+{'n': 3, 'trees': 'f1789582ef2842c6', 'node_counts': [37, 21, 29], 'seeds': [209652396, 398764591, 924231285], 'samples': 'fb9031c0d05a67a3', 'member_classes': 'a23aa9ac12381a65', 'importances': ('float64', (13,), 'c06d00d77fbfccd1'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 13, 'n_outputs_': 1}
+== clf.class_weight-oob
+{'n': 10, 'trees': '460faca3c808dd85', 'node_counts': [21, 25, 15, 19, 17, 21], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': '309be62ff4d52a8c', 'member_classes': '72d90a59278244b4', 'importances': ('float64', (13,), 'e9f31ffd708df8f4'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 13, 'n_outputs_': 1, 'oob_decision_function_': ('float64', (178, 3), '83ba6e590c3ead46'), 'oob_score_': 0.9382022471910112}
+== clf.oob-callable
+{'n': 10, 'trees': '892d0f3985a44435', 'node_counts': [13, 15, 19, 23, 13, 17], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': '5053c8b773d8e54f', 'member_classes': '72d90a59278244b4', 'importances': ('float64', (4,), 'aeebc0b1c85f2794'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 4, 'n_outputs_': 1, 'oob_decision_function_': ('float64', (150, 3), '8b2e5b7d185b9938'), 'oob_score_': 0.3333333333333333}
+== clf.repr
+"RandomForestClassifier(class_weight='balanced_subsample', max_depth=2,\n                       n_estimators=3)"
+== clf.member-repr
+"DecisionTreeClassifier(max_depth=2, max_features='sqrt', random_state=398764591)"
+== clf.len-getitem
+(3, 'DecisionTreeClassifier')
+== clf.n_jobs
+{'n': 4, 'trees': '8d3ea70edca2bef0', 'node_counts': [13, 15, 19, 23], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': '2e55848bd95e3c86', 'member_classes': '4409c51e475e5a22', 'importances': ('float64', (4,), '5cc7b68a4ba0826b'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 4, 'n_outputs_': 1}
+== clf.multi
+{'n': 4, 'trees': 'd2b07adba79e0e9c', 'node_counts': [15, 21, 17, 21], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': '2e55848bd95e3c86', 'member_classes': 'd5b1f0c007b5a4e0', 'importances': ('float64', (4,), 'c7b2c1d7437b84b9'), 'classes_': [array([0, 1, 2]), array([0, 1])], 'n_classes_': [3, 2], 'n_features_in_': 4, 'n_outputs_': 2}
+== clf.multi-proba
+[('float64', (150, 3), '5f375806da7e3149'), ('float64', (150, 2), '76686e23944ac42b')]
+== clf.multi-predict
+('int64', (150, 2), 'd95cc2f22eca6dbc')
+== clf.multi-balanced
+{'n': 3, 'trees': '712c9eb536258652', 'node_counts': [15, 19, 11], 'seeds': [209652396, 398764591, 924231285], 'samples': '25d574e633797a7c', 'member_classes': '22f644695b051dbf', 'importances': ('float64', (4,), '50022227f9ca07b4'), 'classes_': [array([0, 1, 2]), array([0, 1])], 'n_classes_': [3, 2], 'n_features_in_': 4, 'n_outputs_': 2}
+== clf.strings
+['setosa', 'setosa', 'versicolor', 'versicolor', 'virginica', 'virginica']
+== clf.str-series
+['setosa', 'setosa', 'versicolor', 'versicolor', 'virginica']
+== clf.feature-names
+['sepal length (cm)', 'sepal width (cm)', 'petal length (cm)', 'petal width (cm)']
+== clf.global-random-state
+([662124363, 1916507803, 1031005574], '503e3aa16b1d17bd', 253)
+== clf.random-state-instance
+{'n': 4, 'trees': '9ecff85f333100e3', 'node_counts': [19, 15, 25, 13], 'seeds': [218175338, 303761048, 893988089, 1460070019], 'samples': '539746e6b4f96ce1', 'member_classes': '4409c51e475e5a22', 'importances': ('float64', (4,), '4b61e2121e7eb169'), 'classes_': array([0, 1, 2]), 'n_classes_': 3, 'n_features_in_': 4, 'n_outputs_': 1}
+== reg.wine
+{'n': 6, 'trees': '3c9c6a32e8ada2b8', 'node_counts': [179, 197, 187, 191, 185, 179], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': '506829ba39079541', 'member_classes': None, 'importances': ('float64', (13,), '270c82f1ae64647e'), 'n_features_in_': 13, 'n_outputs_': 1}
+== reg.wine.predict
+('float64', (178,), 'f6caf95ed547d300')
+== reg.wine.oob
+{'n': 10, 'trees': '49262579c106357b', 'node_counts': [193, 193, 177, 185, 195, 187], 'seeds': [1791095845, 2135392491, 946286476, 1857819720], 'samples': '0b4a58038f48b45a', 'member_classes': None, 'importances': ('float64', (13,), '49499158686f4ffe'), 'n_features_in_': 13, 'n_outputs_': 1, 'oob_prediction_': ('float64', (178,), 'a93d4886577da526'), 'oob_score_': -2.5050046676134574}
+== reg.wine.sqrt
+{'n': 5, 'trees': '304819d35e92b87d', 'node_counts': [169, 143, 161, 165, 147], 'seeds': [1872583848, 794921487, 111352301, 1853453896], 'samples': 'e59ace8edf9211ab', 'member_classes': None, 'importances': ('float64', (13,), '2ed32453de89bced'), 'n_features_in_': 13, 'n_outputs_': 1}
+== reg.wine.score
+0.998910185547847
+== reg.cancer-nan
+{'n': 6, 'trees': 'ff70d732e76c13fc', 'node_counts': [683, 673, 669, 679, 685, 659], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': 'ed0908786259f097', 'member_classes': None, 'importances': ('float64', (30,), '3d9222d80ca7f1b7'), 'n_features_in_': 30, 'n_outputs_': 1}
+== reg.cancer-nan.predict
+('float64', (569,), 'e0907d6483a6c219')
+== reg.cancer-nan.oob
+{'n': 10, 'trees': '5d723a3d62cbbf3a', 'node_counts': [663, 637, 663, 649, 643, 683], 'seeds': [1791095845, 2135392491, 946286476, 1857819720], 'samples': '16b4475904261872', 'member_classes': None, 'importances': ('float64', (30,), '9770991c93a4a3f3'), 'n_features_in_': 30, 'n_outputs_': 1, 'oob_prediction_': ('float64', (569,), '794330cd11f61885'), 'oob_score_': 0.93473532038427}
+== reg.cancer-nan.sqrt
+{'n': 5, 'trees': '3713a0476c3ba85a', 'node_counts': [333, 275, 275, 277, 271], 'seeds': [1872583848, 794921487, 111352301, 1853453896], 'samples': 'cb2accf68a8576ea', 'member_classes': None, 'importances': ('float64', (30,), 'dd9fc17d61b723ef'), 'n_features_in_': 30, 'n_outputs_': 1}
+== reg.cancer-nan.score
+0.996477954721225
+== reg.digits
+{'n': 6, 'trees': 'fc987e7fcdaf16a5', 'node_counts': [313, 321, 355, 371, 317, 339], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': 'bd22be6440c7fe7b', 'member_classes': None, 'importances': ('float64', (64,), 'f70a529bcd2d3c02'), 'n_features_in_': 64, 'n_outputs_': 1}
+== reg.digits.predict
+('float64', (1797,), 'dd5d1d75c0c5525b')
+== reg.digits.oob
+{'n': 10, 'trees': '6ff35cd5f94b9ad4', 'node_counts': [321, 305, 311, 347, 353, 281], 'seeds': [1791095845, 2135392491, 946286476, 1857819720], 'samples': '8878425245d65214', 'member_classes': None, 'importances': ('float64', (64,), '119d6aa7f9a27cf1'), 'n_features_in_': 64, 'n_outputs_': 1, 'oob_prediction_': ('float64', (1797,), '7f017297e273dce1'), 'oob_score_': 0.7795563149077465}
+== reg.digits.sqrt
+{'n': 5, 'trees': '8de230b324461e8d', 'node_counts': [207, 241, 199, 249, 225], 'seeds': [1872583848, 794921487, 111352301, 1853453896], 'samples': 'e041a0cb92ff13d4', 'member_classes': None, 'importances': ('float64', (64,), '82a1cc8a2e385bca'), 'n_features_in_': 64, 'n_outputs_': 1}
+== reg.digits.score
+0.9453377676563582
+== reg.weights
+{'n': 5, 'trees': '2449e13e3bba7aad', 'node_counts': [171, 173, 179, 171, 181], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': '23fcd9566c8cfc7f', 'member_classes': None, 'importances': ('float64', (13,), '5594098fc209403d'), 'n_features_in_': 13, 'n_outputs_': 1}
+== reg.no-bootstrap
+{'n': 3, 'trees': 'be990122d3b0ac59', 'node_counts': [305, 311, 317], 'seeds': [209652396, 398764591, 924231285], 'samples': 'fb9031c0d05a67a3', 'member_classes': None, 'importances': ('float64', (13,), '4d98f87452155832'), 'n_features_in_': 13, 'n_outputs_': 1}
+== reg.multi
+{'n': 4, 'trees': '27a734aa6ae6d68b', 'node_counts': [217, 229, 235, 227], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': '40994c489eb81298', 'member_classes': None, 'importances': ('float64', (13,), '5cd09070417bef90'), 'n_features_in_': 13, 'n_outputs_': 2}
+== reg.multi-predict
+('float64', (178, 2), 'a8278be9e4909837')
+== reg.multi-oob
+{'n': 10, 'trees': 'a6ac71b4c8b35336', 'node_counts': [217, 229, 235, 227, 223, 229], 'seeds': [209652396, 398764591, 924231285, 1478610112], 'samples': '309be62ff4d52a8c', 'member_classes': None, 'importances': ('float64', (13,), '720e2f772327e63a'), 'n_features_in_': 13, 'n_outputs_': 2, 'oob_prediction_': ('float64', (178, 2), 'b44b11fa30c1d06c'), 'oob_score_': -1.5621270867601447}
+== reg.oob-callable
+6.611036025332851
+== reg.friedman_mse
+'squared_error'
+== reg.column-y
+('float64', (178,), '9557cf637cb46b05')
+== reg.apply
+('int64', (178, 3), '0b64733e5c910657')
+== reg.pure-importances
+[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+== err.max_samples-no-bootstrap
+!! ValueError: `max_sample` cannot be set if `bootstrap=False`. Either switch to `bootstrap=True` or set `max_sample=None`.
+== err.oob-no-bootstrap
+!! ValueError: Out of bag estimation only available if bootstrap=True
+== err.oob-multiclass-multioutput
+!! ValueError: The type of target cannot be used to compute OOB estimates. Got multiclass-multioutput while only the following are supported: continuous, continuous-multioutput, binary, multiclass, multilabel-indicator.
+== err.continuous
+!! ValueError: Unknown label type: continuous. Maybe you are trying to fit a classifier, which expects discrete classes on a regression target with continuous values.
+== err.not-fitted
+!! NotFittedError: This RandomForestClassifier instance is not fitted yet. Call 'fit' with appropriate arguments before using this estimator.
+== err.features
+!! ValueError: X has 3 features, but RandomForestClassifier is expecting 4 features as input.
+== err.inf
+!! ValueError: Input X contains infinity or a value too large for dtype('float32').
+== err.predict-inf
+!! ValueError: Input X contains infinity or a value too large for dtype('float32').
+== err.weights-shape
+!! ValueError: sample_weight.shape == (3,), expected (150,)!
+== err.class_weight-dict-multi
+!! ValueError: For multi-output, class_weight should be a list of dicts, or the string 'balanced'.
+== param.n_estimators
+!! InvalidParameterError: The 'n_estimators' parameter of RandomForestClassifier must be an int in the range [1, inf). Got 0 instead.
+== param.max_samples
+!! InvalidParameterError: The 'max_samples' parameter of RandomForestClassifier must be None, a float in the range (0.0, inf) or an int in the range [1, inf). Got 0.0 instead.
+== param.class_weight
+!! InvalidParameterError: The 'class_weight' parameter of RandomForestClassifier must be a str among {'balanced', 'balanced_subsample'}, an instance of 'dict', an instance of 'list' or None. Got 'even' instead.
+== param.criterion
+!! InvalidParameterError: The 'criterion' parameter of RandomForestRegressor must be a str among {'absolute_error', 'poisson', 'squared_error'}. Got 'gini' instead.
+== param.max_depth
+!! InvalidParameterError: The 'max_depth' parameter of RandomForestClassifier must be an int in the range [1, inf) or None. Got 0 instead.
+== param.max_features
+!! InvalidParameterError: The 'max_features' parameter of RandomForestRegressor must be an int in the range [1, inf), a float in the range (0.0, 1.0], a str among {'log2', 'sqrt'} or None. Got 'all' instead.
+== param.oob_score
+!! InvalidParameterError: The 'oob_score' parameter of RandomForestClassifier must be an instance of 'bool' or an instance of 'numpy.bool' or a callable. Got 'yes' instead.
+== param.random_state
+!! InvalidParameterError: The 'random_state' parameter of RandomForestClassifier must be an int in the range [0, 4294967295], an instance of 'numpy.random.mtrand.RandomState' or None. Got 'x' instead.

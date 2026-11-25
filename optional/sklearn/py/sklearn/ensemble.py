@@ -1,12 +1,14 @@
-"""Ensembles, from scikit-learn 1.9.1's sklearn/ensemble/_base.py, _bootstrap.py and _bagging.py: BaseEnsemble,
-BaggingClassifier and BaggingRegressor over decision trees (estimator=None or a DecisionTreeClassifier /
-DecisionTreeRegressor), on dense X and dense targets. Every random draw (the members' seeds, their feature and
-sample indices, with or without sample weights) is scikit-learn's, in its order, on Sagebrush's numpy. The members
-run one after another, in the order scikit-learn's n_jobs=None gives (n_jobs is accepted and has no effect); when
-they are all fit on the same columns, they share one copy of X and y in Sagebrush's decision-tree kernel.
+"""Ensembles, from scikit-learn 1.9.1's sklearn/ensemble/_base.py, _bootstrap.py, _bagging.py and _forest.py:
+BaseEnsemble; BaggingClassifier and BaggingRegressor over decision trees (estimator=None or a
+DecisionTreeClassifier / DecisionTreeRegressor); RandomForestClassifier and RandomForestRegressor; on dense X and
+dense targets. Every random draw (the members' seeds, their feature and sample indices, the forests' bootstraps,
+with or without sample weights) is scikit-learn's, in its order, on Sagebrush's numpy. The members run one after
+another, in the order scikit-learn's n_jobs=None gives (n_jobs is accepted and has no effect); members fit on the
+same columns (a forest's trees always) share one copy of X and y in Sagebrush's decision-tree kernel.
 
 Not in Sagebrush's sklearn 0.x subset, each a NotImplementedError: bagging other estimators than decision trees,
-warm_start=True, metadata routing, and sklearn.ensemble's other estimators."""
+warm_start=True, the trees' refused parameters (max_leaf_nodes, ccp_alpha > 0, monotonic_cst, the absolute_error
+and poisson criteria), decision_path, metadata routing, and sklearn.ensemble's other estimators."""
 
 import numbers
 from abc import ABCMeta, abstractmethod
@@ -17,17 +19,21 @@ import numpy as np
 
 from ._sk_config import get_config
 from ._sk_missing import missing as _sk_missing
-from .base import BaseEstimator, ClassifierMixin, MetaEstimatorMixin, RegressorMixin, _fit_context, clone, is_classifier
+from .base import (BaseEstimator, ClassifierMixin, MetaEstimatorMixin, MultiOutputMixin, RegressorMixin, _fit_context, clone,
+                   is_classifier)
+from .exceptions import DataConversionWarning
 from ._sk_tags import get_tags
 from .metrics import accuracy_score, r2_score
-from .tree import DecisionTreeClassifier, DecisionTreeRegressor, _SkShared
+from .tree import (DecisionTreeClassifier, DecisionTreeRegressor, _SkShared, _sk_clf_constraints, _sk_missing_mask,
+                   _sk_reg_constraints)
 from .utils._sk_available_if import available_if
-from .utils._sk_param import Interval, RealNotInt, _SkHasMethod
-from .utils.multiclass import _sk_label_values, check_classification_targets
+from .utils._sk_param import Interval, RealNotInt, StrOptions, _SkHasMethod
+from .utils.class_weight import compute_class_weight, compute_sample_weight
+from .utils.multiclass import _sk_label_values, check_classification_targets, type_of_target
 from .utils.random import sample_without_replacement
 from .utils.validation import _check_sample_weight, check_is_fitted, check_random_state, column_or_1d, validate_data
 
-__all__ = ["BaggingClassifier", "BaggingRegressor", "BaseEnsemble"]
+__all__ = ["BaggingClassifier", "BaggingRegressor", "BaseEnsemble", "RandomForestClassifier", "RandomForestRegressor"]
 
 MAX_INT = np.iinfo(np.int32).max
 
@@ -752,6 +758,758 @@ class BaggingRegressor(RegressorMixin, BaseBagging):
         if self.estimator is None:
             return DecisionTreeRegressor()
         return self.estimator
+
+
+# ---- sklearn/ensemble/_forest.py
+
+
+def _generate_sample_indices(random_state, n_samples, n_samples_bootstrap, sample_weight):
+    """Private function used to _parallel_build_trees function."""
+    random_instance = check_random_state(random_state)
+    if sample_weight is None:
+        sample_indices = random_instance.randint(0, n_samples, n_samples_bootstrap)
+    else:
+        normalized_sample_weight = sample_weight / np.sum(sample_weight)
+        sample_indices = random_instance.choice(
+            n_samples,
+            n_samples_bootstrap,
+            replace=True,
+            p=normalized_sample_weight,
+        )
+    sample_indices = sample_indices.astype(np.int32)
+    return sample_indices
+
+
+def _generate_unsampled_indices(random_state, n_samples, n_samples_bootstrap, sample_weight):
+    """Private function used to forest._set_oob_score function."""
+    sample_indices = _generate_sample_indices(random_state, n_samples, n_samples_bootstrap, sample_weight)
+    sample_counts = np.bincount(sample_indices, minlength=n_samples)
+    unsampled_mask = sample_counts == 0
+    indices_range = np.arange(n_samples)
+    unsampled_indices = indices_range[unsampled_mask]
+
+    return unsampled_indices
+
+
+def _parallel_build_trees(tree, bootstrap, X, y, sample_weight, tree_idx, n_trees, verbose=0, class_weight=None,
+                          n_samples_bootstrap=None, shared=None):
+    """Private function used to fit a single tree in parallel."""
+    # (scikit-learn calls tree._fit(X, y, sample_weight, check_input=False, missing_values_in_feature_mask): here
+    # every tree fits on `shared`, the forest's X, y and mask, of which the kernel holds one copy)
+    if verbose > 1:
+        print("building tree %d of %d" % (tree_idx + 1, n_trees))
+
+    if bootstrap:
+        n_samples = X.shape[0]
+        indices = _generate_sample_indices(tree.random_state, n_samples, n_samples_bootstrap, sample_weight)
+
+        # Simulate row-wise sampling by passing counts as sample_weight in trees.
+        sample_weight_tree = np.bincount(indices, minlength=n_samples)
+
+        if class_weight == "balanced_subsample":
+            expanded_class_weight = compute_sample_weight("balanced", y, indices=indices)
+            sample_weight_tree = sample_weight_tree * expanded_class_weight
+
+        tree._sk_fit_shared_input(shared, sample_weight_tree)
+    else:
+        tree._sk_fit_shared_input(shared, sample_weight)
+
+    return tree
+
+
+_sk_forest_constraints = {
+    "n_estimators": [Interval(Integral, 1, None, closed="left")],
+    "bootstrap": ["boolean"],
+    "oob_score": ["boolean", callable],
+    "n_jobs": [Integral, None],
+    "random_state": ["random_state"],
+    "verbose": ["verbose"],
+    "warm_start": ["boolean"],
+    "max_samples": [
+        None,
+        Interval(RealNotInt, 0.0, None, closed="neither"),
+        Interval(Integral, 1, None, closed="left"),
+    ],
+}
+
+
+class BaseForest(MultiOutputMixin, BaseEnsemble, metaclass=ABCMeta):
+    """Base class for forests of trees.
+
+    Warning: This class should not be used directly. Use derived classes
+    instead.
+    """
+
+    _parameter_constraints: dict = _sk_forest_constraints
+
+    @abstractmethod
+    def __init__(self, estimator, n_estimators=100, *, estimator_params=tuple(), bootstrap=False, oob_score=False,
+                 n_jobs=None, random_state=None, verbose=0, warm_start=False, class_weight=None, max_samples=None):
+        super().__init__(
+            estimator=estimator,
+            n_estimators=n_estimators,
+            estimator_params=estimator_params,
+        )
+
+        self.bootstrap = bootstrap
+        self.oob_score = oob_score
+        self.n_jobs = n_jobs
+        self.random_state = random_state
+        self.verbose = verbose
+        self.warm_start = warm_start
+        self.class_weight = class_weight
+        self.max_samples = max_samples
+
+    def apply(self, X):
+        """Apply trees in the forest to X, return leaf indices."""
+        X = self._validate_X_predict(X)
+        results = [tree.apply(X, check_input=False) for tree in self.estimators_]
+
+        return np.array(results).T
+
+    def decision_path(self, X):
+        """Return the decision path in the forest: not in Sagebrush's sklearn 0.x subset."""
+        _sk_refused(f"{type(self).__name__}.decision_path", "it returns a scipy sparse matrix")
+
+    def _sk_refuse_unsupported(self):
+        name = type(self).__name__
+        if self.warm_start:
+            _sk_refused(f"{name}(warm_start=True)", "adding trees to a fitted forest isn't")
+        if self.max_leaf_nodes is not None:
+            _sk_refused(f"{name}(max_leaf_nodes=...)", "the best-first builder isn't; max_leaf_nodes=None is")
+        if self.ccp_alpha != 0.0:
+            _sk_refused(f"{name}(ccp_alpha=...)", "minimal cost-complexity pruning isn't; ccp_alpha=0.0 is")
+        if self.monotonic_cst is not None:
+            _sk_refused(f"{name}(monotonic_cst=...)", "monotonicity constraints aren't")
+        if self.criterion in ("absolute_error", "poisson"):
+            _sk_refused(f"{name}(criterion={self.criterion!r})", "the squared_error criterion is")
+
+    @_fit_context(prefer_skip_nested_validation=True)
+    def fit(self, X, y, sample_weight=None):
+        """Build a forest of trees from the training set (X, y)."""
+        self._sk_refuse_unsupported()
+        # (a pandas Series of labels as a str array: scikit-learn's is an object array)
+        if is_classifier(self):
+            y = _sk_label_values(y)
+        # Validate or convert input data
+        X, y = validate_data(
+            self,
+            X,
+            y,
+            multi_output=True,
+            accept_sparse="csc",
+            dtype=np.float32,
+            ensure_all_finite=False,
+        )
+        # _compute_missing_values_in_feature_mask checks if X has missing values and
+        # will raise an error if the underlying tree base estimator can't handle missing
+        # values. Only the criterion is required to determine if the tree supports
+        # missing values.
+        # (scikit-learn asks a tree of this criterion: every supported criterion's tree accepts NaN in dense X)
+        missing_values_in_feature_mask = _sk_missing_mask(True, X, self.__class__.__name__)
+
+        if sample_weight is not None:
+            sample_weight = _check_sample_weight(sample_weight, X)
+
+        y = np.atleast_1d(y)
+        if y.ndim == 2 and y.shape[1] == 1:
+            warn(
+                (
+                    "A column-vector y was passed when a 1d array was"
+                    " expected. Please change the shape of y to "
+                    "(n_samples,), for example using ravel()."
+                ),
+                DataConversionWarning,
+                stacklevel=2,
+            )
+
+        if y.ndim == 1:
+            # reshape is necessary to preserve the data contiguity against vs
+            # [:, np.newaxis] that does not.
+            y = np.reshape(y, (-1, 1))
+
+        self._n_samples, self.n_outputs_ = y.shape
+
+        y, expanded_class_weight = self._validate_y_class_weight(y, sample_weight)
+
+        # (y is an ndarray here: np.atleast_1d made it one)
+        if y.dtype != np.float64 or not y.flags["C_CONTIGUOUS"]:
+            y = np.ascontiguousarray(y, dtype=np.float64)
+
+        # Combined _sample_weight = sample_weight * expanded_class_weight
+        # (when provided) used in _parallel_build_trees to draw indices
+        # (bootstrap=True) or passed to the trees (bootstrap=False).
+        if sample_weight is None:
+            _sample_weight = expanded_class_weight
+        elif expanded_class_weight is None:
+            _sample_weight = sample_weight
+        else:
+            _sample_weight = sample_weight * expanded_class_weight
+
+        # Storing _sample_weight (needed by _get_estimators_indices).
+        self._sample_weight = _sample_weight
+
+        if not self.bootstrap and self.max_samples is not None:
+            raise ValueError(
+                "`max_sample` cannot be set if `bootstrap=False`. "
+                "Either switch to `bootstrap=True` or set "
+                "`max_sample=None`."
+            )
+        elif self.bootstrap:
+            n_samples_bootstrap = _get_n_samples_bootstrap(X.shape[0], self.max_samples, _sample_weight)
+        else:
+            n_samples_bootstrap = None
+
+        self._n_samples_bootstrap = n_samples_bootstrap
+
+        self._validate_estimator()
+
+        if not self.bootstrap and self.oob_score:
+            raise ValueError("Out of bag estimation only available if bootstrap=True")
+
+        random_state = check_random_state(self.random_state)
+
+        # Free allocated memory, if any
+        self.estimators_ = []
+
+        n_more_estimators = self.n_estimators - len(self.estimators_)
+
+        trees = [self._make_estimator(append=False, random_state=random_state) for i in range(n_more_estimators)]
+
+        # (one after another, in scikit-learn's order; the trees share one copy of X, y and the mask)
+        shared = _SkShared(X, y, check_input=False, mask=missing_values_in_feature_mask)
+        try:
+            trees = [
+                _parallel_build_trees(
+                    t,
+                    self.bootstrap,
+                    X,
+                    y,
+                    _sample_weight,
+                    i,
+                    len(trees),
+                    verbose=self.verbose,
+                    class_weight=self.class_weight,
+                    n_samples_bootstrap=n_samples_bootstrap,
+                    shared=shared,
+                )
+                for i, t in enumerate(trees)
+            ]
+        finally:
+            shared.release()
+
+        # Collect newly grown trees
+        self.estimators_.extend(trees)
+
+        if self.oob_score and (n_more_estimators > 0 or not _sk_fitted_oob(self)):
+            y_type = type_of_target(y)
+            if y_type == "unknown" or (is_classifier(self) and y_type == "multiclass-multioutput"):
+                # FIXME: we could consider to support multiclass-multioutput if
+                # we introduce or reuse a constructor parameter (e.g.
+                # oob_score) allowing our user to pass a callable defining the
+                # scoring strategy on OOB sample.
+                raise ValueError(
+                    "The type of target cannot be used to compute OOB "
+                    f"estimates. Got {y_type} while only the following are "
+                    "supported: continuous, continuous-multioutput, binary, "
+                    "multiclass, multilabel-indicator."
+                )
+
+            if callable(self.oob_score):
+                self._set_oob_score_and_attributes(X, y, scoring_function=self.oob_score)
+            else:
+                self._set_oob_score_and_attributes(X, y)
+
+        # Decapsulate classes_ attributes
+        if is_classifier(self) and self.n_outputs_ == 1:
+            self.n_classes_ = self.n_classes_[0]
+            self.classes_ = self.classes_[0]
+
+        return self
+
+    @abstractmethod
+    def _set_oob_score_and_attributes(self, X, y, scoring_function=None):
+        """Compute and set the OOB score and attributes."""
+
+    def _compute_oob_predictions(self, X, y):
+        """Compute and set the OOB score."""
+        n_samples = y.shape[0]
+        n_outputs = self.n_outputs_
+        if is_classifier(self):
+            # n_classes_ is an ndarray at this stage
+            # all the supported type of target will have the same number of
+            # classes in all outputs
+            oob_pred_shape = (n_samples, self.n_classes_[0], n_outputs)
+        else:
+            # for regression, n_classes_ does not exist and we create an empty
+            # axis to be consistent with the classification case and make
+            # the array operations compatible with the 2 settings
+            oob_pred_shape = (n_samples, 1, n_outputs)
+
+        oob_pred = np.zeros(shape=oob_pred_shape, dtype=np.float64)
+        n_oob_pred = np.zeros((n_samples, n_outputs), dtype=np.int64)
+
+        for estimator in self.estimators_:
+            unsampled_indices = _generate_unsampled_indices(
+                estimator.random_state,
+                n_samples,
+                self._n_samples_bootstrap,
+                self._sample_weight,
+            )
+
+            y_pred = self._sk_oob_predictions(estimator, X[unsampled_indices, :])
+            oob_pred[unsampled_indices, ...] += y_pred
+            n_oob_pred[unsampled_indices, :] += 1
+
+        for k in range(n_outputs):
+            if (n_oob_pred == 0).any():
+                warn(
+                    (
+                        "Some inputs do not have OOB scores. This probably means "
+                        "too few trees were used to compute any reliable OOB "
+                        "estimates."
+                    ),
+                    UserWarning,
+                )
+                n_oob_pred[n_oob_pred == 0] = 1
+            oob_pred[..., k] /= n_oob_pred[..., [k]]
+
+        return oob_pred
+
+    def _validate_y_class_weight(self, y, sample_weight):
+        # Default implementation
+        return y, None
+
+    def _validate_X_predict(self, X):
+        """Validate X whenever one tries to predict, apply, predict_proba."""
+        check_is_fitted(self)
+        # (the trees support missing values: dense X, every supported criterion)
+        ensure_all_finite = "allow-nan"
+
+        X = validate_data(
+            self,
+            X,
+            dtype=np.float32,
+            accept_sparse="csr",
+            reset=False,
+            ensure_all_finite=ensure_all_finite,
+        )
+        return X
+
+    @property
+    def feature_importances_(self):
+        """The impurity-based feature importances: the trees' mean, normalized."""
+        check_is_fitted(self)
+
+        all_importances = [tree.feature_importances_ for tree in self.estimators_ if tree.tree_.node_count > 1]
+
+        if not all_importances:
+            return np.zeros(self.n_features_in_, dtype=np.float64)
+
+        all_importances = np.mean(all_importances, axis=0, dtype=np.float64)
+        return all_importances / np.sum(all_importances)
+
+    def _get_estimators_indices(self):
+        # Get drawn indices along both sample and feature axes
+        for tree in self.estimators_:
+            if not self.bootstrap:
+                yield np.arange(self._n_samples, dtype=np.int32)
+            else:
+                # tree.random_state is actually an immutable integer seed rather
+                # than a mutable RandomState instance, so it's safe to use it
+                # repeatedly when calling this property.
+                seed = tree.random_state
+                # Operations accessing random_state must be performed identically
+                # to those in `_parallel_build_trees()`
+                yield _generate_sample_indices(
+                    seed,
+                    self._n_samples,
+                    self._n_samples_bootstrap,
+                    self._sample_weight,
+                )
+
+    @property
+    def estimators_samples_(self):
+        """The subset of drawn samples for each base estimator."""
+        return [sample_indices for sample_indices in self._get_estimators_indices()]
+
+    def __sklearn_tags__(self):
+        tags = super().__sklearn_tags__()
+        # Only the criterion is required to determine if the tree supports
+        # missing values
+        estimator = type(self.estimator)(criterion=self.criterion)
+        tags.input_tags.allow_nan = get_tags(estimator).input_tags.allow_nan
+        return tags
+
+
+def _sk_fitted_oob(forest):
+    # (hasattr(self, "oob_score_"))
+    try:
+        forest.oob_score_
+        return True
+    except AttributeError:
+        return False
+
+
+def _accumulate_prediction(predict, X, out):
+    """Add a tree's prediction to the forest's running sum (scikit-learn's, without the lock)."""
+    prediction = predict(X, check_input=False)
+    if len(out) == 1:
+        out[0] += prediction
+    else:
+        for i in range(len(out)):
+            out[i] += prediction[i]
+
+
+class ForestClassifier(ClassifierMixin, BaseForest, metaclass=ABCMeta):
+    """Base class for forest of trees-based classifiers.
+
+    Warning: This class should not be used directly. Use derived classes
+    instead.
+    """
+
+    @abstractmethod
+    def __init__(self, estimator, n_estimators=100, *, estimator_params=tuple(), bootstrap=False, oob_score=False,
+                 n_jobs=None, random_state=None, verbose=0, warm_start=False, class_weight=None, max_samples=None):
+        super().__init__(
+            estimator=estimator,
+            n_estimators=n_estimators,
+            estimator_params=estimator_params,
+            bootstrap=bootstrap,
+            oob_score=oob_score,
+            n_jobs=n_jobs,
+            random_state=random_state,
+            verbose=verbose,
+            warm_start=warm_start,
+            class_weight=class_weight,
+            max_samples=max_samples,
+        )
+
+    @staticmethod
+    def _sk_oob_predictions(tree, X):
+        """Compute the OOB predictions for an individual tree (scikit-learn's _get_oob_predictions)."""
+        y_pred = tree.predict_proba(X, check_input=False)
+        y_pred = np.asarray(y_pred)
+        if y_pred.ndim == 2:
+            # binary and multiclass
+            y_pred = y_pred[..., np.newaxis]
+        else:
+            # Roll the first `n_outputs` axis to the last axis. We will reshape
+            # from a shape of (n_outputs, n_samples, n_classes) to a shape of
+            # (n_samples, n_classes, n_outputs).
+            # (np.rollaxis(y_pred, axis=0, start=3) on a 3-d array: the same view)
+            y_pred = y_pred.transpose(1, 2, 0)
+        return y_pred
+
+    def _set_oob_score_and_attributes(self, X, y, scoring_function=None):
+        """Compute and set the OOB score and attributes."""
+        self.oob_decision_function_ = self._compute_oob_predictions(X, y)
+        if self.oob_decision_function_.shape[-1] == 1:
+            # drop the n_outputs axis if there is a single output
+            self.oob_decision_function_ = self.oob_decision_function_.squeeze(axis=-1)
+
+        if scoring_function is None:
+            scoring_function = accuracy_score
+
+        self.oob_score_ = scoring_function(y, np.argmax(self.oob_decision_function_, axis=1))
+
+    def _validate_y_class_weight(self, y, sample_weight):
+        check_classification_targets(y)
+
+        y_original = np.copy(y)
+
+        self.classes_ = []
+        self.n_classes_ = []
+
+        y_store_unique_indices = np.zeros(y.shape, dtype=int)
+        for k in range(self.n_outputs_):
+            classes_k, y_store_unique_indices[:, k] = np.unique(y[:, k], return_inverse=True)
+            self.classes_.append(classes_k)
+            self.n_classes_.append(classes_k.shape[0])
+        y = y_store_unique_indices
+
+        if self.class_weight is None:
+            return y, None
+
+        # User defined class_weight (dict or list)
+        if isinstance(self.class_weight, (dict, list)):
+            expanded_class_weight = compute_sample_weight(self.class_weight, y_original)
+            return y, expanded_class_weight
+
+        # Checking class_weight options
+        valid_presets = ("balanced", "balanced_subsample")
+        if self.class_weight not in valid_presets:
+            raise ValueError(
+                "Valid presets for class_weight include "
+                '"balanced" and "balanced_subsample".'
+                'Given "%s".' % self.class_weight
+            )
+
+        # "balanced_subsample" option with subsampling (bootstrap=True)
+        if self.class_weight == "balanced_subsample" and self.bootstrap:
+            # class_weight will be computed on the bootstrap sample
+            return y, None
+
+        # Computing class_weight (dict or list) for the "balanced" option.
+        # The "balanced_subsample" option without subsampling (bootstrap=False)
+        # is equivalent to the "balanced" option.
+        class_weight = []
+        for k in range(self.n_outputs_):
+            class_weight_k_vect = compute_class_weight(
+                "balanced",
+                classes=self.classes_[k],
+                y=y_original[:, k],
+                sample_weight=sample_weight,
+            )
+            class_weight_k = {key: val for (key, val) in zip(self.classes_[k], class_weight_k_vect)}
+            class_weight.append(class_weight_k)
+        if self.n_outputs_ == 1:
+            class_weight = class_weight[0]
+        expanded_class_weight = compute_sample_weight(class_weight, y_original)
+
+        return y, expanded_class_weight
+
+    def predict(self, X):
+        """Predict class for X."""
+        proba = self.predict_proba(X)
+
+        if self.n_outputs_ == 1:
+            return self.classes_.take(np.argmax(proba, axis=1), axis=0)
+
+        else:
+            n_samples = proba[0].shape[0]
+            # all dtypes should be the same, so just take the first
+            class_type = self.classes_[0].dtype
+            predictions = np.empty((n_samples, self.n_outputs_), dtype=class_type)
+
+            for k in range(self.n_outputs_):
+                predictions[:, k] = self.classes_[k].take(np.argmax(proba[k], axis=1), axis=0)
+
+            return predictions
+
+    def predict_proba(self, X):
+        """Predict class probabilities for X."""
+        check_is_fitted(self)
+        # Check data
+        X = self._validate_X_predict(X)
+
+        # avoid storing the output of every estimator by summing them here
+        all_proba = [np.zeros((X.shape[0], j), dtype=np.float64) for j in np.atleast_1d(self.n_classes_)]
+        for e in self.estimators_:
+            _accumulate_prediction(e.predict_proba, X, all_proba)
+
+        for proba in all_proba:
+            proba /= len(self.estimators_)
+
+        if len(all_proba) == 1:
+            return all_proba[0]
+        else:
+            return all_proba
+
+    def predict_log_proba(self, X):
+        """Predict class log-probabilities for X."""
+        proba = self.predict_proba(X)
+
+        if self.n_outputs_ == 1:
+            return np.log(proba)
+
+        else:
+            for k in range(self.n_outputs_):
+                proba[k] = np.log(proba[k])
+
+            return proba
+
+    def __sklearn_tags__(self):
+        tags = super().__sklearn_tags__()
+        tags.classifier_tags.multi_label = True
+        tags.input_tags.sparse = True
+        return tags
+
+
+class ForestRegressor(RegressorMixin, BaseForest, metaclass=ABCMeta):
+    """Base class for forest of trees-based regressors.
+
+    Warning: This class should not be used directly. Use derived classes
+    instead.
+    """
+
+    @abstractmethod
+    def __init__(self, estimator, n_estimators=100, *, estimator_params=tuple(), bootstrap=False, oob_score=False,
+                 n_jobs=None, random_state=None, verbose=0, warm_start=False, max_samples=None):
+        super().__init__(
+            estimator,
+            n_estimators=n_estimators,
+            estimator_params=estimator_params,
+            bootstrap=bootstrap,
+            oob_score=oob_score,
+            n_jobs=n_jobs,
+            random_state=random_state,
+            verbose=verbose,
+            warm_start=warm_start,
+            max_samples=max_samples,
+        )
+
+    def predict(self, X):
+        """Predict regression target for X."""
+        check_is_fitted(self)
+        # Check data
+        X = self._validate_X_predict(X)
+
+        # avoid storing the output of every estimator by summing them here
+        if self.n_outputs_ > 1:
+            y_hat = np.zeros((X.shape[0], self.n_outputs_), dtype=np.float64)
+        else:
+            y_hat = np.zeros((X.shape[0]), dtype=np.float64)
+
+        for e in self.estimators_:
+            _accumulate_prediction(e.predict, X, [y_hat])
+
+        y_hat /= len(self.estimators_)
+
+        return y_hat
+
+    @staticmethod
+    def _sk_oob_predictions(tree, X):
+        """Compute the OOB predictions for an individual tree (scikit-learn's _get_oob_predictions)."""
+        y_pred = tree.predict(X, check_input=False)
+        if y_pred.ndim == 1:
+            # single output regression
+            y_pred = y_pred[:, np.newaxis, np.newaxis]
+        else:
+            # multioutput regression
+            y_pred = y_pred[:, np.newaxis, :]
+        return y_pred
+
+    def _set_oob_score_and_attributes(self, X, y, scoring_function=None):
+        """Compute and set the OOB score and attributes."""
+        self.oob_prediction_ = self._compute_oob_predictions(X, y).squeeze(axis=1)
+        if self.oob_prediction_.shape[-1] == 1:
+            # drop the n_outputs axis if there is a single output
+            self.oob_prediction_ = self.oob_prediction_.squeeze(axis=-1)
+
+        if scoring_function is None:
+            scoring_function = r2_score
+
+        self.oob_score_ = scoring_function(y, self.oob_prediction_)
+
+    def __sklearn_tags__(self):
+        tags = super().__sklearn_tags__()
+        tags.input_tags.sparse = True
+        return tags
+
+
+_sk_rfc_constraints = {
+    **_sk_forest_constraints,
+    **_sk_clf_constraints,
+    "class_weight": [
+        StrOptions({"balanced_subsample", "balanced"}),
+        dict,
+        list,
+        None,
+    ],
+}
+_sk_rfc_constraints.pop("splitter")
+
+_sk_rfr_constraints = {
+    **_sk_forest_constraints,
+    **_sk_reg_constraints,
+}
+_sk_rfr_constraints.pop("splitter")
+
+_SK_TREE_PARAMS = (
+    "criterion",
+    "max_depth",
+    "min_samples_split",
+    "min_samples_leaf",
+    "min_weight_fraction_leaf",
+    "max_features",
+    "max_leaf_nodes",
+    "min_impurity_decrease",
+    "random_state",
+    "ccp_alpha",
+    "monotonic_cst",
+)
+
+
+class RandomForestClassifier(ForestClassifier):
+    """A random forest classifier."""
+
+    _parameter_constraints: dict = _sk_rfc_constraints
+
+    def __init__(self, n_estimators=100, *, criterion="gini", max_depth=None, min_samples_split=2,
+                 min_samples_leaf=1, min_weight_fraction_leaf=0.0, max_features="sqrt", max_leaf_nodes=None,
+                 min_impurity_decrease=0.0, bootstrap=True, oob_score=False, n_jobs=None, random_state=None,
+                 verbose=0, warm_start=False, class_weight=None, ccp_alpha=0.0, max_samples=None,
+                 monotonic_cst=None):
+        super().__init__(
+            estimator=DecisionTreeClassifier(),
+            n_estimators=n_estimators,
+            estimator_params=_SK_TREE_PARAMS,
+            bootstrap=bootstrap,
+            oob_score=oob_score,
+            n_jobs=n_jobs,
+            random_state=random_state,
+            verbose=verbose,
+            warm_start=warm_start,
+            class_weight=class_weight,
+            max_samples=max_samples,
+        )
+
+        self.criterion = criterion
+        self.max_depth = max_depth
+        self.min_samples_split = min_samples_split
+        self.min_samples_leaf = min_samples_leaf
+        self.min_weight_fraction_leaf = min_weight_fraction_leaf
+        self.max_features = max_features
+        self.max_leaf_nodes = max_leaf_nodes
+        self.min_impurity_decrease = min_impurity_decrease
+        self.monotonic_cst = monotonic_cst
+        self.ccp_alpha = ccp_alpha
+
+
+class RandomForestRegressor(ForestRegressor):
+    """A random forest regressor."""
+
+    _parameter_constraints: dict = _sk_rfr_constraints
+
+    def __init__(self, n_estimators=100, *, criterion="squared_error", max_depth=None, min_samples_split=2,
+                 min_samples_leaf=1, min_weight_fraction_leaf=0.0, max_features=1.0, max_leaf_nodes=None,
+                 min_impurity_decrease=0.0, bootstrap=True, oob_score=False, n_jobs=None, random_state=None,
+                 verbose=0, warm_start=False, ccp_alpha=0.0, max_samples=None, monotonic_cst=None):
+        super().__init__(
+            estimator=DecisionTreeRegressor(),
+            n_estimators=n_estimators,
+            estimator_params=_SK_TREE_PARAMS,
+            bootstrap=bootstrap,
+            oob_score=oob_score,
+            n_jobs=n_jobs,
+            random_state=random_state,
+            verbose=verbose,
+            warm_start=warm_start,
+            max_samples=max_samples,
+        )
+
+        if isinstance(criterion, str) and criterion == "friedman_mse":
+            # TODO(1.11): remove support of "friedman_mse" criterion.
+            criterion = "squared_error"
+            warn(
+                'Value `"friedman_mse"` for `criterion` is deprecated and will be '
+                'removed in 1.11. It maps to `"squared_error"` as both '
+                'were always equivalent. Use `criterion="squared_error"` '
+                "to remove this warning.",
+                FutureWarning,
+            )
+
+        self.criterion = criterion
+        self.max_depth = max_depth
+        self.min_samples_split = min_samples_split
+        self.min_samples_leaf = min_samples_leaf
+        self.min_weight_fraction_leaf = min_weight_fraction_leaf
+        self.max_features = max_features
+        self.max_leaf_nodes = max_leaf_nodes
+        self.min_impurity_decrease = min_impurity_decrease
+        self.ccp_alpha = ccp_alpha
+        self.monotonic_cst = monotonic_cst
 
 
 def __getattr__(name):
