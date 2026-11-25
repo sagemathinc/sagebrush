@@ -243,3 +243,13 @@ for name in makers:
             for n, op in [("eq", operator.eq), ("lt", operator.lt)]:
                 case("tuple-%s-%d-%d-%s" % (name, k, m, n), lambda op=op, name=name, k=k, m=m: warned(lambda: op(makers[name](k), tuple([fill[name]] * m)))[0].tolist())
                 case("range-%s-%d-%d-%s" % (name, k, m, n), lambda op=op, name=name, k=k, m=m: warned(lambda: op(makers[name](k), range(m)))[0].tolist())
+
+# an Index compares as its own array: an empty object or str one has no order error with times
+dtu = pd.Series([], dtype="datetime64[us]")
+dt2 = pd.to_datetime(pd.Series(["2020-01-01", "2020-02-01"]))
+for name, s_, v in [("empty-object", dtu, pd.Index([])), ("empty-int", dtu, pd.Index([], dtype="int64")), ("empty-str", dtu, pd.Index([], dtype="str")),
+                    ("int", dt2, pd.Index([1, 2])), ("float", dt2, pd.Index([1.5, 2.0])), ("str", dt2, pd.Index(["2020-01-01", "2021-01-01"])),
+                    ("bad-str", dt2, pd.Index(["2020-01-01", "x"])), ("datetime", dt2, pd.DatetimeIndex(["2020-01-01", "2021-01-01"]))]:
+    for n, op in ops:
+        case("index-%s-%s" % (name, n), lambda op=op, s_=s_, v=v: op(s_, v).tolist())
+        case("index-%s-named-%s" % (name, n), lambda n=n, s_=s_, v=v: getattr(s_, n)(v).tolist())

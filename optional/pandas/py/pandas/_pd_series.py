@@ -319,7 +319,14 @@ class Series(object):
             right = _array_op_values(self._pd_col, list(other), len(self))
             return Series._pd_new(R.compare(self._pd_col, right, op, type(other).__name__), self._pd_index.copy(),
                                   self._pd_name)
-        elif isinstance(other, (list, np.ndarray, Index)):
+        elif isinstance(other, Index):
+            # (an Index compares as its own array: an empty object or str one, element by element, has no order
+            # error with times; an empty numeric one does, as an empty list does)
+            _compare_values(other.tolist(), len(self), False)
+            right = other._pd_column().copy()
+            name = "ndarray" if right.dtype in INTS or right.dtype in FLOATS or right.dtype == "bool" else None
+            return Series._pd_new(R.compare(self._pd_col, right, op, name), self._pd_index.copy(), self._pd_name)
+        elif isinstance(other, (list, np.ndarray)):
             right = _compare_values(other, len(self), False)
         elif _is_scalar(other):
             right = other

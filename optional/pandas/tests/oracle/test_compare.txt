@@ -2614,3 +2614,195 @@ dtype: bool
 !! ValueError: Lengths must match
 == range-dt-2-3-lt
 !! ValueError: Lengths must match
+== index-empty-object-eq
+[]
+== index-empty-object-named-eq
+[]
+== index-empty-object-ne
+[]
+== index-empty-object-named-ne
+[]
+== index-empty-object-lt
+[]
+== index-empty-object-named-lt
+[]
+== index-empty-object-le
+[]
+== index-empty-object-named-le
+[]
+== index-empty-object-gt
+[]
+== index-empty-object-named-gt
+[]
+== index-empty-object-ge
+[]
+== index-empty-object-named-ge
+[]
+== index-empty-int-eq
+[]
+== index-empty-int-named-eq
+[]
+== index-empty-int-ne
+[]
+== index-empty-int-named-ne
+[]
+== index-empty-int-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-empty-int-named-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-empty-int-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-empty-int-named-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-empty-int-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-empty-int-named-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-empty-int-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-empty-int-named-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-empty-str-eq
+[]
+== index-empty-str-named-eq
+[]
+== index-empty-str-ne
+[]
+== index-empty-str-named-ne
+[]
+== index-empty-str-lt
+[]
+== index-empty-str-named-lt
+[]
+== index-empty-str-le
+[]
+== index-empty-str-named-le
+[]
+== index-empty-str-gt
+[]
+== index-empty-str-named-gt
+[]
+== index-empty-str-ge
+[]
+== index-empty-str-named-ge
+[]
+== index-int-eq
+[False, False]
+== index-int-named-eq
+[False, False]
+== index-int-ne
+[True, True]
+== index-int-named-ne
+[True, True]
+== index-int-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-int-named-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-int-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-int-named-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-int-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-int-named-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-int-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-int-named-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-float-eq
+[False, False]
+== index-float-named-eq
+[False, False]
+== index-float-ne
+[True, True]
+== index-float-named-ne
+[True, True]
+== index-float-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-float-named-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-float-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-float-named-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-float-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-float-named-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-float-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-float-named-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and ndarray
+== index-str-eq
+[True, False]
+== index-str-named-eq
+[True, False]
+== index-str-ne
+[False, True]
+== index-str-named-ne
+[False, True]
+== index-str-lt
+[False, True]
+== index-str-named-lt
+[False, True]
+== index-str-le
+[True, True]
+== index-str-named-le
+[True, True]
+== index-str-gt
+[False, False]
+== index-str-named-gt
+[False, False]
+== index-str-ge
+[True, False]
+== index-str-named-ge
+[True, False]
+== index-bad-str-eq
+[False, False]
+== index-bad-str-named-eq
+[False, False]
+== index-bad-str-ne
+[True, True]
+== index-bad-str-named-ne
+[True, True]
+== index-bad-str-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and StringArray
+== index-bad-str-named-lt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and StringArray
+== index-bad-str-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and StringArray
+== index-bad-str-named-le
+!! TypeError: Invalid comparison between dtype=datetime64[us] and StringArray
+== index-bad-str-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and StringArray
+== index-bad-str-named-gt
+!! TypeError: Invalid comparison between dtype=datetime64[us] and StringArray
+== index-bad-str-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and StringArray
+== index-bad-str-named-ge
+!! TypeError: Invalid comparison between dtype=datetime64[us] and StringArray
+== index-datetime-eq
+[True, False]
+== index-datetime-named-eq
+[True, False]
+== index-datetime-ne
+[False, True]
+== index-datetime-named-ne
+[False, True]
+== index-datetime-lt
+[False, True]
+== index-datetime-named-lt
+[False, True]
+== index-datetime-le
+[True, True]
+== index-datetime-named-le
+[True, True]
+== index-datetime-gt
+[False, False]
+== index-datetime-named-gt
+[False, False]
+== index-datetime-ge
+[True, False]
+== index-datetime-named-ge
+[True, False]
