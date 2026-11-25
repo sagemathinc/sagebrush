@@ -6,6 +6,10 @@ import _skltree
 from sagebrush import skltree
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from _cases import case
+import sklearn.ensemble  # noqa: F401  (imported before any fit: the lazy check below)
+
+# importing sklearn.tree and sklearn.ensemble makes no instance of the kernel and compiles nothing
+case("lazy.import", lambda: _skltree._state()[0] == 0)
 
 
 def live():
@@ -115,3 +119,29 @@ def failing_tree():
 
 
 case("forest.failure", failing_tree)
+
+
+def interrupted(make):
+    # (a Stop, which reaches Python as KeyboardInterrupt, during the third tree's fit)
+    original = skltree.fit
+    calls = []
+
+    def stop_third(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 3:
+            raise KeyboardInterrupt()
+        return original(*args, **kwargs)
+
+    skltree.fit = stop_third
+    try:
+        make().fit(X, y)
+    except KeyboardInterrupt:
+        return "KeyboardInterrupt", len(calls), live() == before
+    finally:
+        skltree.fit = original
+    return "no interrupt", len(calls), live() == before
+
+
+case("stop.forest", lambda: interrupted(lambda: RandomForestClassifier(n_estimators=6, random_state=0)))
+case("stop.bagging", lambda: interrupted(lambda: BaggingClassifier(n_estimators=6, random_state=0)))
+case("stop.then-fit", lambda: unchanged(lambda: RandomForestClassifier(n_estimators=3, random_state=0).fit(X, y)))
