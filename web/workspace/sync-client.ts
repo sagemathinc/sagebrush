@@ -204,6 +204,9 @@ const META = "meta";
 /** why sync is off when another page's upgrade closed the workspace here (Workspace.closed) */
 const CLOSED_ELSEWHERE = "your files were upgraded by a newer Sagebrush page: reload this page to sync";
 const isNat = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
+/** The largest sealed envelope's base64 (the server's LIMITS.sealedOpBytes, 64 KiB, as base64): a longer one is no
+ * envelope of this device's, and isn't hashed. */
+const SEALED_ENV_B64_MAX = Math.ceil((64 << 10) / 3) * 4;
 // (the fields of an op that make it this op: what an echo must repeat of its record)
 const SAME = ["dseq", "t", "by", "op", "path", "to", "kind", "ref", "fid", "sha256", "size", "base", "parent"] as const;
 const sameOp = (a: WireOp, b: Record<string, unknown>) => SAME.every((k) => (a as Record<string, unknown>)[k] === b[k]);
@@ -804,29 +807,53 @@ export class SyncClient {
     // (this device's echoes: their records confirmed, if each is the very op of its record; a sealed echo is its record's
     // if it is the envelope this device kept for that dseq, and goes on as the record's own op)
     const mine = ops.filter((o) => o.device === this.w.device);
+    // (a sealed echo of this device's with no sealing module to check it by: not read, the pull stops, said)
+    if (!this.opts.e2e && mine.some(sealedRow)) {
+      c.halted = "sealed-unverified";
+      this.showWaiting(c, (await c.ob.status()).count);
+      return;
+    }
     if (mine.length) {
       const lo = mine[0].dseq, hi = mine[mine.length - 1].dseq;
       const recs = new Map((await c.ob.records(lo, Math.max(1, hi - lo + 1))).map((r) => [r.dseq, r]));
       const kept = mine.some(sealedRow) ? await c.ob.sealed(mine.filter(sealedRow).map((o) => o.dseq)) : new Map();
-      const ok: number[] = [];
+      const ok: number[] = [], echoed = new Map<number, string>(), passed = new Set<number>();
+      let sealedTop: number | undefined;
       for (const o of mine) {
         const r = recs.get(o.dseq);
         if (!r) {
-          // (a sealed echo of a record already gone: this device can't read it back; its op was applied here when made)
+          // (a sealed echo whose record is gone: one this device already confirmed (at or before its chain's last link)
+          // is read again from an earlier cursor, and is passed over, not read (its op was applied here when made); any
+          // other is no op of this device's)
           if (sealedRow(o)) {
-            await this.halt(c, "diverged", `the server's sealed op ${o.seq} for dseq ${o.dseq} has no record here`);
-            return;
+            if (sealedTop === undefined) sealedTop = (await c.ob.sealedLast())?.dseq ?? 0;
+            if (o.dseq > sealedTop) {
+              await this.halt(c, "diverged", `the server's sealed op ${o.seq} for dseq ${o.dseq} has no record here`);
+              return;
+            }
+            passed.add(o.seq);
           }
           continue;
         }
         if (sealedRow(o)) {
-          const s = kept.get(o.dseq);
-          if (!s || (await this.opts.e2e!.kit.envHashOf((o as unknown as { env: string }).env)) !== s.envHash) {
+          const s = kept.get(o.dseq), env = (o as unknown as { env: string }).env;
+          // (its hash, bounded first: an envelope past the largest the server takes, or that isn't base64, is no
+          // envelope of this device's)
+          let h: string | null = null;
+          if (env.length <= SEALED_ENV_B64_MAX) {
+            try {
+              h = await this.opts.e2e!.kit.envHashOf(env);
+            } catch {
+              h = null;
+            }
+          }
+          if (!s || h === null || h !== s.envHash) {
             await this.halt(c, "diverged", `the server's sealed op ${o.seq} for dseq ${o.dseq} isn't the envelope this device sealed`);
             return;
           }
           ops[ops.indexOf(o)] = { ...r.op, seq: o.seq, device: o.device, dseq: o.dseq } as unknown as IndexOp;
           ok.push(o.dseq);
+          echoed.set(o.dseq, h);
           continue;
         }
         if (!sameOp(r.op, o as unknown as Record<string, unknown>)) {
@@ -835,7 +862,16 @@ export class SyncClient {
         }
         ok.push(o.dseq);
       }
-      if (ok.length) await c.ob.confirmed(ok);
+      if (passed.size) for (let i = ops.length - 1; i >= 0; i--) if (passed.has(ops[i].seq)) ops.splice(i, 1);
+      if (ok.length) {
+        try {
+          await c.ob.confirmed(ok, echoed);
+        } catch (e) {
+          if (!(e instanceof SealedMismatch)) throw e;
+          await this.halt(c, "diverged", e.message);
+          return;
+        }
+      }
     }
     if (this.opts.onIndex && ops.length) {
       try {

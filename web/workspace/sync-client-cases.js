@@ -4937,6 +4937,78 @@ async function sealedSend() {
   await stop(c);
 }
 
+async function sealedEchoFirst() {
+  // (the ack lost, then the echo comes first: it confirms the record and makes its envelope the chain's last link, so the
+  // next envelope is sealed after it, on the same connection or after a reload)
+  for (const reload of [false, true]) {
+    const tag = reload ? "after a reload" : "same client";
+    const id = await account();
+    const f = await sealedFixture(id);
+    const w = await fresh();
+    const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+    check(await until(() => settled(w, c)), `sealed echo first (${tag}): synced`);
+    await ctl("log", { reset: true });
+    await ctl("set", { set: { dropAcks: 1, closeAfterDrop: true } });
+    await w.create("/echo-a.txt", { content: "A, its ack lost" });
+    check(await until(() => settled(w, c), 15_000), `sealed echo first (${tag}): A settled: ` + J(c.status));
+    const aItems = itemsOf(sealedSends(await ctl("log")));
+    const a = aItems[0];
+    check(a && aItems.filter((o) => o.dseq === a.dseq).length === 1, `sealed echo first (${tag}): A was sent once: its echo, not a resend, decided it: ` + J(aItems.map((o) => o.dseq)));
+    const hashOf = async (env) => b64u(new Uint8Array(await crypto.subtle.digest("SHA-256", Uint8Array.from(atob(env), (ch) => ch.charCodeAt(0)))));
+    const last = await metaGet(w.ws, `sync:${nsOf(c)}:sealedPrev`);
+    check(a && last?.hash === (await hashOf(a.env)) && last.dseq === a.dseq, `sealed echo first (${tag}): A's envelope is the chain's last link: ` + J(last));
+    let c2 = c;
+    if (reload) {
+      await stop(c);
+      c2 = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+    }
+    await ctl("log", { reset: true });
+    await w.create("/echo-b.txt", { content: "B, after A" });
+    check(await until(() => settled(w, c2), 15_000), `sealed echo first (${tag}): B settled: ` + J({ status: c2.status, rebuild: await metaGet(w.ws, `sync:${nsOf(c2)}:rebuild`), halted: c2.debug().halted }));
+    const b = itemsOf(sealedSends(await ctl("log"))).find((o) => o.adds?.length === 1);
+    const keys = await f.provider.epochKeys(1);
+    const fromB64u = (x) => Uint8Array.from(atob(x.replace(/-/g, "+").replace(/_/g, "/")), (ch) => ch.charCodeAt(0));
+    let opened = false;
+    try {
+      await f.kit.openIndexOp(keys, { device: w.device, dseq: b.dseq }, Uint8Array.from(atob(b.env), (ch) => ch.charCodeAt(0)), { prev: fromB64u(await hashOf(a.env)), adds: b.adds, releases: b.releases });
+      opened = true;
+    } catch {}
+    check(b && opened, `sealed echo first (${tag}): B opens naming A's hash as the envelope before it`);
+    await stop(c2);
+  }
+}
+
+async function sealedEchoNoKit() {
+  // (this device's own sealed op, read back by a client given no sealing module: not read, halted, said)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const w = await fresh();
+  const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(w, c)), "sealed echo, no kit: synced");
+  await w.mkdir("/nokit");
+  check(await until(() => settled(w, c), 15_000), "sealed echo, no kit: sent sealed and settled");
+  await stop(c);
+  const c2 = client(w);
+  check(await until(() => c2.debug().halted === "sealed-unverified", 15_000), "sealed echo, no kit: a client without the module halts at its own sealed op: " + J(c2.status));
+  await stop(c2);
+}
+
+async function sealedEchoMalformed() {
+  // (this device's own sealed op served back as an envelope that isn't base64: halted, diverged; the record kept and the
+  // cursor where it was)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const w = await fresh();
+  const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(w, c)), "sealed echo, malformed: synced");
+  const cursor0 = c.debug().cursor;
+  await ctl("set", { set: { tamperIndexEnvBad: 1 } });
+  await w.mkdir("/malformed");
+  check(await until(() => c.debug().halted === "diverged", 15_000), "sealed echo, malformed: halted, diverged: " + J(c.status));
+  check((await outbox(w)) >= 1 && c.debug().cursor === cursor0, "sealed echo, malformed: the record kept, the cursor where it was: " + J({ cursor0, cursor: c.debug().cursor }));
+  await stop(c);
+}
+
 async function sealedTamper() {
   // (the server names other bytes than this device sealed: in an ack, or in the echo it serves: halted, diverged)
   for (const via of ["ack", "echo"]) {
@@ -5064,7 +5136,7 @@ async function sealedForeign() {
   await stop(b);
 }
 
-const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper };
+const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

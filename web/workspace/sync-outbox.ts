@@ -635,19 +635,29 @@ export class Outbox {
   /** Records confirmed (their echo in an `index`, or the confirmed index past their seq: C3), removed under the
    * lease, in one transaction, their pins released, whether their ack came first or not (an echo first decides a
    * held identity's record as accepted). */
-  async confirmed(dseqs: number[]): Promise<void> {
+  async confirmed(dseqs: number[], echoed: Map<number, string> = new Map()): Promise<void> {
     await inTx(this.w.ws, ["outbox", "syncIndex", "syncLedger", ...RELEASE_STORES], "readwrite", async (tx) => {
       const out = tx.objectStore("outbox"), meta = tx.objectStore("meta");
       await fence(meta, this.lease);
       await bumpIntents(meta, this.ns);
+      let prev = (await req(meta.get(key(this.ns, "sealedPrev")))) as SealedPrev | undefined;
       const t = { ...NONE, ...((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) };
       const scanned = (await req(meta.get(key(this.ns, "scanned")))) as number | undefined;
       const lg = new LedgerTx(tx, this.ns);
       for (const dseq of dseqs) {
         const r = (await req(out.get([this.ns, dseq]))) as OutboxRecord | undefined;
         if (!r) continue;
+        // (a sealed record confirmed: its echo must be the envelope kept for it (or its ack already said so), and that
+        // envelope becomes the chain's last link here, before its sealed form goes: an echo that comes before a lost
+        // ack's resend still advances the chain, so the next envelope is sealed after this one)
+        const sealed = (await req(meta.get(sealedKey(this.ns, dseq)))) as Sealed | undefined;
+        if (sealed) {
+          const served = echoed.get(dseq);
+          if (served !== undefined ? served !== sealed.envHash : r.accepted === undefined) throw new SealedMismatch(dseq);
+          if (!prev || prev.dseq < dseq) meta.put((prev = { dseq, hash: sealed.envHash }), key(this.ns, "sealedPrev"));
+          meta.delete(sealedKey(this.ns, dseq));
+        }
         out.delete([this.ns, dseq]);
-        tx.objectStore("meta").delete(sealedKey(this.ns, dseq));
         t.count--;
         t.bytes -= recordBytes(r);
         t.charged -= chargeOf(r);
@@ -660,6 +670,11 @@ export class Outbox {
       await lg.finish();
     });
     afterReleases(this.w);
+  }
+
+  /** This device's newest accepted envelope (the chain's last link), if any. */
+  async sealedLast(): Promise<SealedPrev | undefined> {
+    return inTx(this.w.ws, "meta", "readonly", async (tx) => (await req(tx.objectStore("meta").get(key(this.ns, "sealedPrev")))) as SealedPrev | undefined);
   }
 
   /** The sealed forms kept for these dseqs (sync-seal.ts): what a resend sends again, unchanged. */
