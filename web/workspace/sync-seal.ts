@@ -12,7 +12,7 @@
 // its first in this sync generation). Within one message, an op's prev is the envelope just before it in that
 // message. The server ends a message at its first refusal and answers the rest `undecided`, so a refused envelope
 // never has a successor in the log; the undecided ones are sealed again after the accepted one.
-import { OP_REFS_MAX, opEpoch, opHash, openIndexOp, sealIndexOp, signIndexOp, verifyIndexOp } from "./e2e/index-op.ts";
+import { OP_REFS_MAX, opEpoch, opHash, openIndexOp, sealIndexOp, signIndexOp, verifyIndexOp, type OpRelease } from "./e2e/index-op.ts";
 import type { EpochKeys } from "./e2e/keys.ts";
 import type { WireOp } from "./sync-outbox";
 
@@ -56,18 +56,30 @@ export type Sealed = {
   head: string;
   chainGen: string;
   adds: string[];
-  releases: string[];
+  releases: OpRelease[];
   signer: string;
   sig: string;
 };
 
 /**
  * The blob references an op declares in the clear (the server counts them): as today's plaintext log counts them, a
- * data file's op adds a reference to the blob it names. Nothing is released yet: retention and Trash become explicit
- * ops that release (e2e PR 5d); until then the server holds every blob a sealed op adds, as it does for plaintext ops.
+ * data file's op adds a reference to the blob it names. Only a `release` op releases (e2e PR 5d): it adds nothing,
+ * changes no entry, and names the adds it ends; no other op carries a release, so a race between two devices releasing
+ * one add refuses a release, never a person's edit.
  */
-export function refsOf(op: WireOp): { adds: string[]; releases: string[] } {
+export function refsOf(op: WireOp): { adds: string[]; releases: OpRelease[] } {
+  if (op.op === RELEASE) return { adds: [], releases: (op.releases ?? []).map((r) => ({ address: r.address, add: r.add })) };
   return { adds: op.kind === "file" && op.sha256 !== undefined ? [op.sha256] : [], releases: [] };
+}
+
+/** The op that releases index references (e2e PR 5d): `{ dseq, t, by, op: "release", path: "/", kind: "folder", releases }`, nothing else. */
+export const RELEASE = "release";
+/** A release op as this device makes it. */
+export const releaseOp = (dseq: number, t: number, by: string, releases: readonly OpRelease[]): WireOp =>
+  ({ dseq, t, by, op: RELEASE, path: "/", kind: "folder", releases: releases.map((r) => ({ address: r.address, add: r.add })) });
+/** Whether an opened op is exactly a release op's form: those fields, no others (no content, nothing it could change). */
+export function isReleaseForm(op: Record<string, unknown>): boolean {
+  return Object.keys(op).sort().join(",") === "by,dseq,kind,op,path,releases,t" && op.op === RELEASE && op.path === "/" && op.kind === "folder" && Array.isArray(op.releases) && (op.releases as unknown[]).length > 0;
 }
 
 const b64 = (b: Uint8Array): string => {
@@ -138,6 +150,7 @@ export class SealedHalt extends Error {
 const REF = /^(?:a1:)?[0-9a-f]{64}$/;
 const ENV_B64_MAX = Math.ceil((64 << 10) / 3) * 4;
 const sameList = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+const sameReleases = (a: readonly OpRelease[], b: readonly OpRelease[]) => a.length === b.length && a.every((x, i) => x.address === b[i].address && x.add === b[i].add);
 
 /**
  * Verify one served sealed op (a log row with its signed values) and open it, after `st`:
@@ -167,7 +180,24 @@ export async function verifyRow(keys: OpKeys, syncGeneration: number, row: Recor
     // (a copy, taken before any await: the served row can't change what is checked and signed)
     return [...(x as string[])];
   };
-  const adds = list("adds"), releases = list("releases");
+  // (releases: { address, add } each, an add seq from 1, at most REFS_MAX, no add twice; copies of exactly those fields)
+  const releaseList = () => {
+    const x = row.releases ?? [];
+    if (!Array.isArray(x)) halt("releases that aren't a list");
+    if ((x as unknown[]).length > OP_REFS_MAX) halt("more releases than an op may have");
+    const out: OpRelease[] = [], seen = new Set<string>();
+    for (const r of x as unknown[]) {
+      const ok = !!r && typeof r === "object" && !Array.isArray(r) && Object.keys(r).sort().join(",") === "add,address";
+      const { address, add } = (ok ? r : {}) as { address?: unknown; add?: unknown };
+      if (!ok || typeof address !== "string" || !REF.test(address) || !Number.isSafeInteger(add) || (add as number) < 1) halt("releases that aren't { address, add }");
+      const k = `${address}:${add}`;
+      if (seen.has(k)) halt("releases naming one add twice");
+      seen.add(k);
+      out.push({ address: address as string, add: add as number });
+    }
+    return out;
+  };
+  const adds = list("adds"), releases = releaseList();
   let env: Uint8Array;
   try {
     if (env64.length > ENV_B64_MAX) throw new Error("too long");
@@ -229,11 +259,13 @@ export async function verifyRow(keys: OpKeys, syncGeneration: number, row: Recor
   let refsMatch = false;
   try {
     const own = refsOf(op);
-    refsMatch = sameList(own.adds, adds) && sameList(own.releases, releases);
+    refsMatch = sameList(own.adds, adds) && sameReleases(own.releases, releases);
   } catch {
     halt("an op whose references can't be read");
   }
   if (!refsMatch) halt("visible references that aren't its op's");
+  // (a release op is exactly its form: no content, nothing else it could change; e2e PR 5d)
+  if (op.op === RELEASE && !isReleaseForm(op as unknown as Record<string, unknown>)) halt("a release op that isn't only a release");
   const hash = b64url(await opHash(env));
   return { op, state: Object.freeze({ seq, floor: p!, chainGen: chain.generation, devices: Object.freeze({ ...st.devices, [device]: { dseq: dseq as number, hash } }) }) };
 }

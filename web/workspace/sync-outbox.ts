@@ -54,7 +54,7 @@ export class Fenced extends Error {
 const CURRENT = "sync:current";
 
 /** An op as the server takes it (design/sync-server.md §5.2's `ops` item). */
-export type WireOp = { dseq: number; t: number; by: string; op: string; path: string; to?: string; kind: Kind; ref?: string; fid?: string; parent?: string; sha256?: string; size?: number; base?: string };
+export type WireOp = { dseq: number; t: number; by: string; op: string; path: string; to?: string; kind: Kind; ref?: string; fid?: string; parent?: string; sha256?: string; size?: number; base?: string ; releases?: { address: string; add: number }[] };
 /** An outbox record: its op, fixed when made, and its decision so far.  `lseq`: the local op it was made from;
  * `id`: the identity it is for (the index byIdent's key); `accepted`: the server's seq, once acked; `heldSeq`: a
  * successor's, the held write it carries (its ledger row is that one's, task #14). */

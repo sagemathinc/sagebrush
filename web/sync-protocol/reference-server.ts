@@ -85,6 +85,8 @@ interface Account {
    * how many sealed ops the log holds */
   chain?: RefChain;
   refs: Map<string, number>;
+  /** the index's own references (e2e PR 5d, as web/sync/account.ts index_refs): `address:add_seq` -> the seq that released it, or null while live */
+  indexRefs: Map<string, number | null>;
   sealed: number;
 }
 
@@ -226,6 +228,8 @@ export class ReferenceServer {
     },
     /** A blob's sealed references, for assertions. */
     refs: (account: string, address: string): number => this.accounts.get(account)?.refs.get(address) ?? 0,
+    /** the index's references (e2e PR 5d): each add, `address:add_seq`, with the seq that released it or null */
+    indexRefs: (account: string): [string, number | null][] => [...(this.accounts.get(account)?.indexRefs ?? new Map())],
     /** A document's head and stored batches, for assertions. */
     doc: (account: string, doc: string) => {
       const d = this.accounts.get(account)?.docs.get(doc);
@@ -257,7 +261,7 @@ export class ReferenceServer {
     let p = this.making.get(id);
     if (!p) {
       p = accountHash(id).then((hash) => {
-        const made: Account = { id, hash, state: "off", generation: 0, ops: [], devices: new Map(), blobs: new Map(), docs: new Map(), sockets: new Set(), refs: new Map(), sealed: 0 };
+        const made: Account = { id, hash, state: "off", generation: 0, ops: [], devices: new Map(), blobs: new Map(), docs: new Map(), sockets: new Set(), refs: new Map(), indexRefs: new Map(), sealed: 0 };
         this.accounts.set(id, made);
         this.making.delete(id);
         return made;
@@ -319,7 +323,7 @@ export class ReferenceServer {
       a.state = "deleting";
       for (const s of [...a.sockets]) { s.deliver({ t: "error", code: "deleting", detail: { message: "this account's synced data is being deleted" } }); s.close(4410, "deleting"); }
       // (the key chain is the account's identity: it survives "Delete my synced data"; the sealed log doesn't)
-      Object.assign(a, { state: "off", ops: [], devices: new Map(), blobs: new Map(), docs: new Map(), refs: new Map(), sealed: 0 });
+      Object.assign(a, { state: "off", ops: [], devices: new Map(), blobs: new Map(), docs: new Map(), refs: new Map(), indexRefs: new Map(), sealed: 0 });
       return json({ state: "deleting", request_id: crypto.randomUUID(), generation: b.generation }, 202);
     }
     const bound = bindingRefusal(a, req.headers.get("x-sync-account"), req.headers.get("x-sync-generation"));
@@ -598,7 +602,8 @@ export class ReferenceServer {
    *   envelope and references (forbidden); the new ops within the sealed log's cap (limit);
    * - after the checks' awaits, the same sync generation, head and next dseq, or the message is refused;
    * - then each op in dseq order: a resend answered as it was decided (an accepted one with its envelope's hash);
-   *   adds must be held and gain a reference, releases must hold one and give it back; a refusal kept with its code,
+   *   adds must be held and gain a reference (an index add, keyed by the op's seq); each release must end a live index
+   *   add, the one its `add` names, and gives back that reference (e2e PR 5d); a refusal kept with its code,
    *   and it ends the message: each new op after it is undecided (nothing spent, kept or counted).
    */
   private async sealedOps(a: Account, device: string, list: unknown): Promise<SealedAck[]> {
@@ -647,7 +652,7 @@ export class ReferenceServer {
     if (added0 > 0 && a.sealed + added0 > this.sealedCap) throw new SyncError("limit", "this account's sealed log is full", { limit: "sealed_log", max: this.sealedCap });
     let next = next0, refused = dev.refused, seq = a.ops.length ? a.ops[a.ops.length - 1].seq : 0, ended = false;
     const out: SealedAck[] = [], rows: IndexOp[] = [], answers = new Map<number, { seq: number; env_sha256?: string } | { code: string }>();
-    const refs = new Map(a.refs);
+    const refs = new Map(a.refs), indexRefs = new Map(a.indexRefs);
     for (const [at, raw] of list.entries()) {
       const dseq = (raw as { dseq?: unknown })?.dseq;
       if (!isNat(dseq) || dseq < 1) throw new SyncError("invalid", "op: dseq");
@@ -669,13 +674,19 @@ export class ReferenceServer {
           throw new SyncError(code, "refused (a test's)");
         }
         for (const x of op.adds) if (!a.blobs.has(x)) throw new SyncError("missing", "upload the blob before the op that names it", { address: x });
-        for (const x of op.releases) if ((refs.get(x) ?? 0) < 1) throw new SyncError("invalid", "a release of a reference that isn't held", { address: x });
+        for (const r of op.releases) if (indexRefs.get(`${r.address}:${r.add}`) !== null) throw new SyncError("invalid", "a release of an index reference that isn't live", { address: r.address, add: r.add });
         const h = envHash.get(at);
         if (h === undefined) throw new SyncError("invalid", "op: not checked before its decision");
         const row: IndexOp = { seq: ++seq, device, dseq, size: op.env.length, env: toB64(op.env), head: op.head, chain_gen: op.chainGen, adds: op.adds, releases: op.releases, signer: op.signer, sig: op.sig };
         rows.push(row);
-        for (const x of op.adds) refs.set(x, (refs.get(x) ?? 0) + 1);
-        for (const x of op.releases) refs.set(x, (refs.get(x) ?? 0) - 1);
+        for (const x of op.adds) {
+          refs.set(x, (refs.get(x) ?? 0) + 1);
+          indexRefs.set(`${x}:${row.seq}`, null);
+        }
+        for (const r of op.releases) {
+          indexRefs.set(`${r.address}:${r.add}`, row.seq);
+          refs.set(r.address, (refs.get(r.address) ?? 0) - 1);
+        }
         answers.set(dseq, { seq: row.seq, env_sha256: h });
         out.push({ dseq, seq: row.seq, env_sha256: h });
       } catch (e) {
@@ -691,6 +702,7 @@ export class ReferenceServer {
     a.ops.push(...rows);
     a.sealed += rows.length;
     a.refs = refs;
+    a.indexRefs = indexRefs;
     for (const [k, v] of answers) dev.answers.set(k, v);
     dev.next_dseq = next;
     dev.refused = refused;

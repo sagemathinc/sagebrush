@@ -9,7 +9,7 @@
 // envelope (null for a device's first op), so a device's own ops form a chain no server can reorder or drop from the
 // middle of without its next op failing to open as expected; `adds` and `releases` are the blob references the op
 // declares in the clear, committed again inside the ciphertext so that the visible lists can't differ from the sealed
-// ones. Every byte of env is then covered by the signature (sealedOpMessage binds its SHA-256 with the account, both
+// ones. A release names the add it ends: `{ address, add }`, the seq of the accepted op whose adds named it (e2e PR 5d). Every byte of env is then covered by the signature (sealedOpMessage binds its SHA-256 with the account, both
 // generations, the key chain's head, the device, the dseq, the visible references and the signer).
 //
 // The layout is fixed and binary rather than canonical JSON: every field has one length and one spelling, so env has
@@ -41,12 +41,14 @@ const REF = /^(?:a1:)?[0-9a-f]{64}$/;
 
 /** Where an op sits in its device's sequence: the sync device's id and its dseq (from 1). */
 export type OpPlace = Readonly<{ device: string; dseq: number }>;
+/** A release of one index reference: the blob, and the seq of the accepted sealed op whose adds named it. */
+export type OpRelease = Readonly<{ address: string; add: number }>;
 /** What an envelope seals beside the op itself. */
-export type OpCommit = Readonly<{ prev: Uint8Array | null; adds: readonly string[]; releases: readonly string[] }>;
+export type OpCommit = Readonly<{ prev: Uint8Array | null; adds: readonly string[]; releases: readonly OpRelease[] }>;
 /** What a device signs for an op: sealedOpMessage's fields, all but env. */
 export type OpContext = Readonly<{
   account: string; syncGeneration: number; chainGeneration: string; head: string; device: string; dseq: number;
-  adds: readonly string[]; releases: readonly string[]; signer: string;
+  adds: readonly string[]; releases: readonly OpRelease[]; signer: string;
 }>;
 
 const core = () => fleetCore();
@@ -66,6 +68,24 @@ function refs(x: unknown, what: string): string[] {
   return list;
 }
 
+// (a release list as the server takes it: at most 64, each { address, add } with an add seq from 1, no add named twice.
+//  Copies of plain objects with exactly those fields, so nothing the caller holds changes between the check and its use)
+function releasesOf(x: unknown): OpRelease[] {
+  if (!Array.isArray(x)) refuse("bad_form", "releases is a list of { address, add }");
+  if ((x as unknown[]).length > OP_REFS_MAX) refuse("limit", `at most ${OP_REFS_MAX} releases`);
+  const out: OpRelease[] = [], seen = new Set<string>();
+  for (const r of x as unknown[]) {
+    const ok = !!r && typeof r === "object" && !Array.isArray(r) && Object.getPrototypeOf(r) === Object.prototype && Object.keys(r).sort().join(",") === "add,address";
+    const { address, add } = (ok ? r : {}) as { address?: unknown; add?: unknown };
+    if (!ok || typeof address !== "string" || !REF.test(address) || !Number.isSafeInteger(add) || (add as number) < 1) refuse("bad_form", "a release is { address, add }: a blob address and the seq of the op that added it");
+    const k = `${address}:${add}`;
+    if (seen.has(k)) refuse("bad_form", "releases names one add twice");
+    seen.add(k);
+    out.push({ address: address as string, add: add as number });
+  }
+  return out;
+}
+
 function prevOf(prev: unknown): string | null {
   if (prev === null) return null;
   if (!(prev instanceof Uint8Array) || prev.length !== 32) refuse("bad_form", "prev is the previous envelope's 32-byte SHA-256, or null");
@@ -80,7 +100,7 @@ export async function sealIndexOp(keys: EpochKeys, at: OpPlace, op: unknown, com
   // (the account and epoch come from what deriveEpochKeys recorded; keys is that frozen object, so keys.index is its own)
   const epoch = mintedEpoch(keys);
   const [object, version] = place(at);
-  const body = { op, prev: prevOf(commit?.prev), adds: refs(commit?.adds, "adds"), releases: refs(commit?.releases, "releases") };
+  const body = { op, prev: prevOf(commit?.prev), adds: refs(commit?.adds, "adds"), releases: releasesOf(commit?.releases) };
   // (canonText refuses what has no canonical form, bad_form, and plaintext past the envelope's room, limit)
   const pt = core().enc(core().canonText(body, OP_PLAINTEXT_MAX));
   try {
@@ -112,7 +132,7 @@ export const opHash = (env: Uint8Array): Promise<Uint8Array> => core().sha256(en
 export async function openIndexOp(keys: EpochKeys, at: OpPlace, env: Uint8Array, expect: OpCommit): Promise<unknown> {
   const epoch = mintedEpoch(keys);
   const [object, version] = place(at);
-  const want = { prev: prevOf(expect?.prev), adds: refs(expect?.adds, "adds"), releases: refs(expect?.releases, "releases") };
+  const want = { prev: prevOf(expect?.prev), adds: refs(expect?.adds, "adds"), releases: releasesOf(expect?.releases) };
   if (opEpoch(env) !== epoch.n) refuse("bad_form", "an envelope of another epoch than these keys'");
   const bytes = env.slice(); // (a copy before any await)
   const sealId = bytes.slice(1 + 8, HEAD), chunk = bytes.slice(HEAD);
@@ -129,8 +149,11 @@ export async function openIndexOp(keys: EpochKeys, at: OpPlace, env: Uint8Array,
     const keysOf = body! && typeof body === "object" && !Array.isArray(body) ? Object.keys(body).sort().join(",") : "";
     if (keysOf !== "adds,op,prev,releases") refuse("bad_form", "the sealed op isn't { op, prev, adds, releases }");
     const same = (a: unknown, b: string[]) => Array.isArray(a) && a.length === b.length && a.every((x, i) => x === b[i]);
+    // (each sealed release exactly { add, address } and the visible one at its place: the canonical form has no other)
+    const sameReleases = (a: unknown, b: OpRelease[]) => Array.isArray(a) && a.length === b.length && a.every((x, i) =>
+      !!x && typeof x === "object" && !Array.isArray(x) && Object.keys(x).sort().join(",") === "add,address" && (x as OpRelease).address === b[i].address && (x as OpRelease).add === b[i].add);
     if (body!.prev !== want.prev) refuse("bad_form", "the sealed op follows another envelope than the expected one");
-    if (!same(body!.adds, want.adds) || !same(body!.releases, want.releases)) refuse("bad_form", "the sealed op's references aren't the visible ones");
+    if (!same(body!.adds, want.adds) || !sameReleases(body!.releases, want.releases)) refuse("bad_form", "the sealed op's references aren't the visible ones");
     return body!.op;
   } finally {
     pt.fill(0);
@@ -140,7 +163,7 @@ export async function openIndexOp(keys: EpochKeys, at: OpPlace, env: Uint8Array,
 // (the signed bytes for an op: sealedOpMessage, the server's own, with copies of the reference lists)
 function message(ctx: OpContext, env: Uint8Array): Promise<Uint8Array> {
   if (!(env instanceof Uint8Array)) refuse("bad_form", "an op envelope is bytes");
-  return sealedOpMessage({ ...ctx, adds: refs(ctx?.adds, "adds"), releases: refs(ctx?.releases, "releases"), env });
+  return sealedOpMessage({ ...ctx, adds: refs(ctx?.adds, "adds"), releases: releasesOf(ctx?.releases), env });
 }
 
 /** Sign an envelope in its context with a device key ({ sign(bytes) } as the fleet core's asKey makes): the sig, base64url. */

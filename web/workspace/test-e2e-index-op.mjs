@@ -54,7 +54,7 @@ function oracleSeal(text, at) {
 // (the signed bytes, by hand: the domain line, then the fields with their keys sorted and no spaces)
 const signedByHand = (c, env) => s8("sagebrush.e2e.sealed-op.v1\n" + JSON.stringify({
   account: c.account, adds: c.adds, chain_generation: c.chainGeneration, device: c.device, dseq: c.dseq,
-  env: createHash("sha256").update(env).digest("base64url"), head: c.head, releases: c.releases, signer: c.signer, sync_generation: c.syncGeneration,
+  env: createHash("sha256").update(env).digest("base64url"), head: c.head, releases: c.releases.map((r) => ({ add: r.add, address: r.address })), signer: c.signer, sync_generation: c.syncGeneration,
 }));
 const edPublic = (raw) => createPublicKey({ key: Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), Buffer.from(raw)]), format: "der", type: "spki" });
 
@@ -63,7 +63,7 @@ const PREV = createHash("sha256").update("the previous envelope").digest();
 const OP = { kind: "put", path: "notes/a.txt", sha: "x", size: 5 }; // (keys in canonical order: it opens as canon parsed it)
 const CTX = {
   account: "aaaaaaaaaaaaaaaaaaaaaaaaaa", syncGeneration: 3, chainGeneration: "g".repeat(26), head: "A".repeat(43), device: DEV, dseq: 4,
-  adds: [A(1), A(2)], releases: [A(3)], signer: "bbbbbbbbbbbbbbbbbbbbbbbbba",
+  adds: [A(1), A(2)], releases: [{ address: A(3), add: 7 }], signer: "bbbbbbbbbbbbbbbbbbbbbbbbba",
 };
 const hx = (b) => Buffer.from(b).toString("hex");
 const unhx = (h) => Buffer.from(h, "hex");
@@ -103,7 +103,7 @@ try {
   // (seal in the page: the envelope's hex)
   const seal = (op, at, commit, k = "await keys()") => P.ev(`(async () => hx(await e2e.sealIndexOp(${k}, ${J(at)}, ${J(op)}, { prev: ${commit.prev ? `unhx(${J(hx(commit.prev))})` : "null"}, adds: ${J(commit.adds)}, releases: ${J(commit.releases)} })))()`);
   const open = (envHex, at, commit, k = "await keys()") => P.ev(`(async () => { try { return { op: await e2e.openIndexOp(${k}, ${J(at)}, unhx(${J(envHex)}), { prev: ${commit.prev ? `unhx(${J(hx(commit.prev))})` : "null"}, adds: ${J(commit.adds)}, releases: ${J(commit.releases)} }) }; } catch (e) { return { code: e?.code ?? String(e?.message ?? e) }; } })()`);
-  const C0 = { prev: null, adds: [], releases: [] }, C1 = { prev: PREV, adds: [A(1), A(2)], releases: [A(3)] };
+  const C0 = { prev: null, adds: [], releases: [] }, C1 = { prev: PREV, adds: [A(1), A(2)], releases: [{ address: A(3), add: 7 }] };
 
   // ---- O: the envelope, against the oracle
   {
@@ -111,7 +111,7 @@ try {
     const o1 = oracleOpen(e1, { dseq: 1 }), o4 = oracleOpen(e4, { dseq: 4 });
     ok(o1 && o1.version === 1 && o1.epoch === EPOCH && e1.length === 41 + Buffer.byteLength(o1.text) + 16, "O-1: an envelope is 0x01, the epoch as a u64, a 32-byte seal id and one chunk: the oracle opens it under K_index[e] (HKDF of S[e]), kind index-op, object = device, version = dseq, codec store.1", o1);
     ok(o1?.text === `{"adds":[],"op":{"kind":"put","path":"notes/a.txt","sha":"x","size":5},"prev":null,"releases":[]}`, "O-1: the sealed plaintext is canon({ op, prev, adds, releases }), written out by hand: a first op's prev is null", o1?.text);
-    ok(o4?.text === `{"adds":["${A(1)}","${A(2)}"],"op":{"kind":"put","path":"notes/a.txt","sha":"x","size":5},"prev":"${PREV.toString("base64url")}","releases":["${A(3)}"]}`, "O-1: a later op seals the previous envelope's SHA-256 (base64url) and the references it declares", o4?.text);
+    ok(o4?.text === `{"adds":["${A(1)}","${A(2)}"],"op":{"kind":"put","path":"notes/a.txt","sha":"x","size":5},"prev":"${PREV.toString("base64url")}","releases":[{"add":7,"address":"${A(3)}"}]}`, "O-1: a later op seals the previous envelope's SHA-256 (base64url) and the references it declares, each release with the add it ends", o4?.text);
     ok(oracleOpen(e1, { dseq: 2 }) === null && oracleOpen(e1, { dseq: 1, device: "dev-b" }) === null && oracleOpen(e1, { dseq: 1, account: "acct-2" }) === null && oracleOpen(e1, { dseq: 1, kind: "index-page" }) === null,
       "O-1: (and the oracle opens it at no other dseq, device, account or kind: each is bound in the key and the AAD)");
     const again = unhx(await seal(OP, { device: DEV, dseq: 1 }, C0));
@@ -152,6 +152,8 @@ try {
       "one add more": (await open(hx(env), at, { ...C1, adds: [A(1), A(2), A(4)] })).code,
       "a release shown as an add": (await open(hx(env), at, { ...C1, adds: [A(1), A(2), A(3)], releases: [] })).code,
       "no releases": (await open(hx(env), at, { ...C1, releases: [] })).code,
+      "the release's add another seq": (await open(hx(env), at, { ...C1, releases: [{ address: A(3), add: 8 }] })).code,
+      "the release's address another": (await open(hx(env), at, { ...C1, releases: [{ address: A(4), add: 7 }] })).code,
     };
     ok(Object.values(commits).every((c) => c === "bad_form"), "T-3: the sealed prev, adds and releases must be exactly the expected ones (order included), else bad_form", commits);
     const first = unhx(await seal(OP, { device: DEV, dseq: 1 }, C0));
@@ -202,18 +204,28 @@ try {
       out.short = await e2e.verifyIndexOp(k.raw, ctx, env, sig.slice(0, 43));
       const bad = unhx(${J(hx(sigBytes))}); bad[3] ^= 1;
       out.flipped = await e2e.verifyIndexOp(k.raw, ctx, env, fleetCore().b64(bad));
+      out.releaseAdd = await e2e.verifyIndexOp(k.raw, { ...ctx, releases: [{ address: ctx.releases[0].address, add: ctx.releases[0].add + 1 }] }, env, sig);
       return out;
     })()`);
-    ok(Object.values(v).every((x) => x === false) && Object.keys(v).length === 14, "S-2: the signature fails for any other account, sync or chain generation, head, device, dseq, adds (order too), releases, signer or envelope byte, another key, and a malformed, short or flipped sig", v);
+    ok(Object.values(v).every((x) => x === false) && Object.keys(v).length === 15, "S-2: the signature fails for any other account, sync or chain generation, head, device, dseq, adds (order too), releases (a release's add seq too), signer or envelope byte, another key, and a malformed, short or flipped sig", v);
     const signed = await P.ev(`(async () => {
       const k = await signer(), env = unhx(${J(hx(env))}), ctx = ${J(CTX)}, out = {};
       out.dupAdds = await code(() => e2e.signIndexOp(k, { ...ctx, adds: [ctx.adds[0], ctx.adds[0]] }, env));
       out.badRef = await code(() => e2e.signIndexOp(k, { ...ctx, releases: ["0".repeat(63)] }, env));
       out.many = await code(() => e2e.signIndexOp(k, { ...ctx, adds: Array.from({ length: 65 }, (_, i) => "a1:" + i.toString(16).padStart(64, "0")) }, env));
       out.notBytes = await code(() => e2e.signIndexOp(k, ctx, "env"));
+      const r0 = ctx.releases[0];
+      out.bareRelease = await code(() => e2e.signIndexOp(k, { ...ctx, releases: [r0.address] }, env));
+      out.noAdd = await code(() => e2e.signIndexOp(k, { ...ctx, releases: [{ address: r0.address }] }, env));
+      out.addZero = await code(() => e2e.signIndexOp(k, { ...ctx, releases: [{ address: r0.address, add: 0 }] }, env));
+      out.extraField = await code(() => e2e.signIndexOp(k, { ...ctx, releases: [{ ...r0, n: 1 }] }, env));
+      out.dupRelease = await code(() => e2e.signIndexOp(k, { ...ctx, releases: [r0, { ...r0 }] }, env));
+      out.manyReleases = await code(() => e2e.signIndexOp(k, { ...ctx, releases: Array.from({ length: 65 }, (_, i) => ({ address: r0.address, add: i + 1 })) }, env));
+      out.twoAddsOneAddress = await e2e.verifyIndexOp(k.raw, { ...ctx, releases: [r0, { address: r0.address, add: r0.add + 1 }] }, env, await e2e.signIndexOp(k, { ...ctx, releases: [r0, { address: r0.address, add: r0.add + 1 }] }, env));
       return out;
     })()`);
-    ok(J(signed) === J({ dupAdds: "bad_form", badRef: "bad_form", many: "limit", notBytes: "bad_form" }), "S-3: nothing is signed for references the server would refuse (a duplicate, a malformed address, 65), or an envelope that isn't bytes", signed);
+    ok(J(signed) === J({ dupAdds: "bad_form", badRef: "bad_form", many: "limit", notBytes: "bad_form", bareRelease: "bad_form", noAdd: "bad_form", addZero: "bad_form", extraField: "bad_form", dupRelease: "bad_form", manyReleases: "limit", twoAddsOneAddress: true }),
+      "S-3: nothing is signed for references the server would refuse (a duplicate, a malformed address, 65; a release that isn't exactly { address, add } with an add seq from 1, one add twice, 65 releases), or an envelope that isn't bytes; one address released twice, by two adds, is signed", signed);
     // (sealedOpMessage reads the lists after hashing the envelope: a caller's array changed meanwhile must not be what is signed)
     const late = await P.ev(`(async () => {
       const k = await signer(), env = unhx(${J(hx(env))}), ctx = ${J(CTX)}, adds = [...ctx.adds];
@@ -241,9 +253,11 @@ try {
     const r = await P.ev(`(async () => {
       const k = await keys(), at = { device: "d", dseq: 1 }, C = { prev: null, adds: [], releases: [] }, out = {};
       const refs = (n) => Array.from({ length: n }, (_, i) => "a1:" + i.toString(16).padStart(64, "0"));
-      out.refs64 = await code(() => e2e.sealIndexOp(k, at, 1, { ...C, adds: refs(64), releases: refs(64) }));
+      const rel = (n) => refs(n).map((address, i) => ({ address, add: i + 1 }));
+      out.refs64 = await code(() => e2e.sealIndexOp(k, at, 1, { ...C, adds: refs(64), releases: rel(64) }));
       out.refs65 = await code(() => e2e.sealIndexOp(k, at, 1, { ...C, adds: refs(65) }));
-      out.dup = await code(() => e2e.sealIndexOp(k, at, 1, { ...C, releases: [refs(1)[0], refs(1)[0]] }));
+      out.releases65 = await code(() => e2e.sealIndexOp(k, at, 1, { ...C, releases: rel(65) }));
+      out.dup = await code(() => e2e.sealIndexOp(k, at, 1, { ...C, releases: [rel(1)[0], rel(1)[0]] }));
       out.badAddr = await code(() => e2e.sealIndexOp(k, at, 1, { ...C, adds: ["a1:" + "G".repeat(64)] }));
       out.noLists = await code(() => e2e.sealIndexOp(k, at, 1, { prev: null }));
       out.dseq0 = await code(() => e2e.sealIndexOp(k, { device: "d", dseq: 0 }, 1, C));
@@ -258,7 +272,7 @@ try {
       out.openCopy = await code(async () => e2e.openIndexOp({ ...k }, at, await e2e.sealIndexOp(k, at, 1, C), C));
       return out;
     })()`);
-    ok(J(r) === J({ refs64: "ok", refs65: "limit", dup: "bad_form", badAddr: "bad_form", noLists: "bad_form", dseq0: "bad_form", dseqFrac: "bad_form", noDevice: "bad_form", shortPrev: "bad_form", prevString: "bad_form", notCanonical: "bad_form", undefinedOp: "bad_form", copy: "bad_form", otherIndex: "bad_form", openCopy: "bad_form" }),
+    ok(J(r) === J({ refs64: "ok", refs65: "limit", releases65: "limit", dup: "bad_form", badAddr: "bad_form", noLists: "bad_form", dseq0: "bad_form", dseqFrac: "bad_form", noDevice: "bad_form", shortPrev: "bad_form", prevString: "bad_form", notCanonical: "bad_form", undefinedOp: "bad_form", copy: "bad_form", otherIndex: "bad_form", openCopy: "bad_form" }),
       "L-4: 64 references each way seal and 65 don't (limit); a duplicate or malformed address, missing lists, a dseq that isn't a positive integer, no device, a prev that isn't 32 bytes, an op without canonical form, and keys deriveEpochKeys didn't make (a copy, or another index key) are bad_form", r);
     // (the caller's arrays and buffers, changed while sealing is under way, change nothing sealed)
     const race = await P.ev(`(async () => {
