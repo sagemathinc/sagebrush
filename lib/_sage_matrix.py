@@ -4696,6 +4696,21 @@ class ComplexNumber(complex):
         ...
         NotImplementedError: 6.52530446799852e-55 + 2.00875142464325e-343*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
 
+    Sage's methods (exp, sin, ..., norm, arg) are Sage's, and so are the
+    functions of an element of CC, which are its methods: an element of CC,
+    however real its value; past the doubles, an error::
+
+        sage: CC(1, 2).exp(), exp(CC(1, 0)), parent(exp(CC(1, 0)))
+        (-1.13120438375681 + 2.47172667200482*I, 2.71828182845905, Complex Field with 53 bits of precision)
+        sage: CC(1000, 1).exp()  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 1.06443396562763e434 + 1.65775768045351e434*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: sech(CC(800, 1))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 3.96352219093270e-348 - 6.17282007699970e-348*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+
     Each step of an integer power is checked, not only its result (an odd
     power squares past the doubles, then multiplies back), and so is 1/z::
 
@@ -4887,6 +4902,13 @@ class ComplexNumber(complex):
 
             sage: CC(-0.5, 0.8660254037844386).log()
             -1.11022302462516e-16 + 2.09439510239320*I
+
+        An argument below the doubles is refused (Sage's imaginary part is 1e-400)::
+
+            sage: CC(1e100, 1e-300).log()  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: 230.258509299405 + 1.00000000000000e-400*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
         """
         import _sage_real
         z = complex(self)
@@ -4896,6 +4918,12 @@ class ComplexNumber(complex):
             return ComplexNumber(z.imag, z.imag)
         # (each part as Sage's CC computes it: _cc_log)
         rho, theta = _sage_real._cc_log(z.real, z.imag)
+        if z.imag != 0 and abs(theta) < _NORMAL_MIN and abs(z.real) < _INF:
+            # (an argument below the normal doubles: atan2(y, x) underflowed,
+            # where Sage's is nonzero; the 53-bit MP field's, refused past the
+            # doubles)
+            C = _sage_real._cc_mp()
+            return _sage_real._cc_from_mp(C(z).log() if base is None else C(z).log(base))
         if base is None:
             return ComplexNumber(rho, theta)
         # (both parts over log(base), the correctly rounded logarithm in RR, each
@@ -5014,6 +5042,186 @@ class ComplexNumber(complex):
         return r if r is NotImplemented else not r
 
     __hash__ = complex.__hash__
+
+
+
+# Sage's methods of CC's elements: the transcendental ones are the 53-bit MP
+# field's, which are Sage's ComplexNumber methods step by step (MPFR's
+# exponents and all); a value past the doubles is refused, never an infinity
+# or a zero (_sage_real._cc_from_mp).  The functions of an element of CC
+# (exp(z), sin(z), ...) are these methods too, as in Sage.
+def _cc_mp_method(name, what, value):
+    def method(self):
+        import _sage_real
+        return _sage_real._cc_from_mp(getattr(_sage_real._cc_mp()(complex(self)), name)())
+    method.__name__ = method.__qualname__ = name
+    method.__doc__ = """%s, as Sage's ComplexNumber.%s computes it.
+
+        EXAMPLES::
+
+            sage: CC(1, 2).%s()
+            %s
+        """ % (what[0].upper() + what[1:], name, name, value)
+    return method
+
+
+_CC_MP_METHODS = (
+    ("exp", "the exponential", "-1.13120438375681 + 2.47172667200482*I"),
+    ("sin", "the sine", "3.16577851321617 + 1.95960104142161*I"),
+    ("cos", "the cosine", "2.03272300701967 - 3.05189779915180*I"),
+    ("tan", "the tangent", "0.0338128260798967 + 1.01479361614663*I"),
+    ("cot", "the cotangent", "0.0327977555337526 - 0.984329226458191*I"),
+    ("sec", "the secant", "0.151176298265577 + 0.226973675393722*I"),
+    ("csc", "the cosecant", "0.228375065599687 - 0.141363021612408*I"),
+    ("sinh", "the hyperbolic sine", "-0.489056259041294 + 1.40311925062204*I"),
+    ("cosh", "the hyperbolic cosine", "-0.642148124715520 + 1.06860742138278*I"),
+    ("tanh", "the hyperbolic tangent", "1.16673625724092 - 0.243458201185725*I"),
+    ("coth", "the hyperbolic cotangent", "0.821329797493852 + 0.171383612909185*I"),
+    ("sech", "the hyperbolic secant", "-0.413149344266940 - 0.687527438655479*I"),
+    ("csch", "the hyperbolic cosecant", "-0.221500930850509 - 0.635493799253900*I"),
+)
+for _n, _w, _v in _CC_MP_METHODS:
+    setattr(ComplexNumber, _n, _cc_mp_method(_n, _w, _v))
+
+
+def _cc_norm(self):
+    """The norm, |self|^2, as Sage's: RN(RN(a^2) + RN(b^2)), an element of RR.
+
+    EXAMPLES::
+
+        sage: CC(1, 2).norm()
+        5.00000000000000
+    """
+    import _sage_real
+    import _sage_lang
+    return _sage_lang._rr_from_mp(_sage_real._cc_mp()(complex(self)).norm())
+
+
+def _cc_arg(self):
+    """The argument in (-pi, pi], atan2(imag, real) correctly rounded, an
+    element of RR, as Sage's.
+
+    EXAMPLES::
+
+        sage: CC(1, 2).arg(), CC(-1, 0).argument()
+        (1.10714871779409, 3.14159265358979)
+    """
+    import _sage_real
+    import _sage_lang
+    return _sage_lang._rr_from_mp(_sage_real._cc_mp()(complex(self)).arg())
+
+
+ComplexNumber.norm = _cc_norm
+ComplexNumber.arg = ComplexNumber.argument = _cc_arg
+
+
+def _cc_predicates():
+    """Sage's tests of an element of CC."""
+    inf = float("inf")
+
+    def is_real(self):
+        """Whether the imaginary part is 0, as Sage's.
+
+        EXAMPLES::
+
+            sage: CC(1, 0).is_real(), CC(1, 2).is_real()
+            (True, False)
+        """
+        return complex(self).imag == 0
+
+    def is_imaginary(self):
+        """Whether the real part is 0, as Sage's.
+
+        EXAMPLES::
+
+            sage: CC(0, 2).is_imaginary(), CC(1, 2).is_imaginary()
+            (True, False)
+        """
+        return complex(self).real == 0
+
+    def is_zero(self):
+        """Whether self is 0.
+
+        EXAMPLES::
+
+            sage: CC(0, 0).is_zero(), CC(0, 1).is_zero()
+            (True, False)
+        """
+        return complex(self) == 0
+
+    def is_one(self):
+        """Whether self is 1.
+
+        EXAMPLES::
+
+            sage: CC(1, 0).is_one(), CC(1, 2).is_one()
+            (True, False)
+        """
+        return complex(self) == 1
+
+    def is_NaN(self):
+        """Whether a part is NaN, as Sage's.
+
+        EXAMPLES::
+
+            sage: CC(float("nan"), 0).is_NaN(), CC(0, float("nan")).is_NaN(), CC(1, 2).is_NaN()
+            (True, True, False)
+        """
+        z = complex(self)
+        return z.real != z.real or z.imag != z.imag
+
+    def is_infinity(self):
+        """Whether a part is infinite, as Sage's.
+
+        EXAMPLES::
+
+            sage: CC(1, oo).is_infinity(), CC(-oo, 0).is_infinity(), CC(1, 2).is_infinity()
+            (True, True, False)
+        """
+        z = complex(self)
+        return abs(z.real) == inf or abs(z.imag) == inf
+
+    def is_positive_infinity(self):
+        """Whether self is +infinity: the real part +infinity, the imaginary
+        part 0, as Sage's.
+
+        EXAMPLES::
+
+            sage: CC(oo, 0).is_positive_infinity(), CC(oo, 1).is_positive_infinity()
+            (True, False)
+        """
+        z = complex(self)
+        return z.real == inf and z.imag == 0
+
+    def is_negative_infinity(self):
+        """Whether self is -infinity: the real part -infinity, the imaginary
+        part 0, as Sage's.
+
+        EXAMPLES::
+
+            sage: CC(-oo, 0).is_negative_infinity(), CC(oo, 0).is_negative_infinity()
+            (True, False)
+        """
+        z = complex(self)
+        return z.real == -inf and z.imag == 0
+
+    def prec(self):
+        """The precision of CC, 53 bits.
+
+        EXAMPLES::
+
+            sage: CC(1, 2).prec()
+            53
+        """
+        return 53
+
+    for f in (is_real, is_imaginary, is_zero, is_one, is_NaN, is_infinity, is_positive_infinity,
+              is_negative_infinity, prec):
+        setattr(ComplexNumber, f.__name__, f)
+
+
+_cc_predicates()
+
 
 
 class ComplexField_:
