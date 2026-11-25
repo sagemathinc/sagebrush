@@ -544,6 +544,36 @@
    "variants": 1,
    "input_hash": "141415947"
   },
+  "hecke_matrix:l": {
+   "n": 97,
+   "variants": 1,
+   "input_hash": "808210933"
+  },
+  "hecke_matrix:m": {
+   "n": 11,
+   "variants": 1,
+   "input_hash": "808210847"
+  },
+  "hecke_matrix:s": {
+   "n": 2,
+   "variants": 1,
+   "input_hash": "808210838"
+  },
+  "hecke_space:l": {
+   "n": 5003,
+   "variants": 1,
+   "input_hash": "459954166"
+  },
+  "hecke_space:m": {
+   "n": 1009,
+   "variants": 1,
+   "input_hash": "523876388"
+  },
+  "hecke_space:s": {
+   "n": 389,
+   "variants": 1,
+   "input_hash": "808210836"
+  },
   "mat_fp31_charpoly:c0": {
    "n": 59,
    "variants": 8,

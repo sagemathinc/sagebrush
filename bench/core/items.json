@@ -1761,6 +1761,70 @@
    "variants_note": "one named input per size, a fixed level"
   },
   {
+   "id": "hecke_matrix",
+   "item": "ag3",
+   "category": "modular forms",
+   "label": "T_p on S_2(Gamma0(389)) (p = 2, 11, 97)",
+   "sizes": {
+    "s": {
+     "n": 2,
+     "timeout": 120
+    },
+    "m": {
+     "n": 11,
+     "timeout": 300
+    },
+    "l": {
+     "n": 97,
+     "timeout": 900
+    }
+   },
+   "fresh": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants": 1,
+   "variants_note": "one named input per size: the level 389, the prime p",
+   "route_note": "ours: twisted traces (each T_p builds its own newspace data, no space object); Magma: T_p on the sign-0 cuspidal modular symbols space (dimension 64, twice S_2), the space built outside the timer and timed in hecke_space",
+   "compares": "charpoly of T_p on S_2 (Magma's sign-0 charpoly is its square)"
+  },
+  {
+   "id": "hecke_space",
+   "item": "ag3",
+   "category": "modular forms",
+   "label": "the space for hecke_matrix: sign-0 cuspidal modular symbols, weight 2",
+   "sizes": {
+    "s": {
+     "n": 389,
+     "timeout": 120
+    },
+    "m": {
+     "n": 1009,
+     "timeout": 300
+    },
+    "l": {
+     "n": 5003,
+     "timeout": 900
+    }
+   },
+   "fresh": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants": 1,
+   "variants_note": "one named input per size, a fixed level",
+   "route_note": "Magma's space construction, timed apart from T_p; ours builds no space (the dimension formula alone), so this row has no ratio: add it to hecke_matrix to compare totals",
+   "compares": "dimension of S_2 only; no ratio",
+   "calibration": false,
+   "ratio": false
+  },
+  {
    "id": "ec_aplist",
    "item": "ag0",
    "category": "elliptic curves",

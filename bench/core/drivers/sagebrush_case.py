@@ -177,6 +177,10 @@ def smith_hard_rows(size, v):
     ]
 
 
+# hecke_matrix's level: prime, S_2 of dimension 32 (one rational newform,
+# the curve 389a of rank 2, and a 20-dimensional orbit)
+HECKE_LEVEL = 389
+
 # galois_group_small's inputs by degree, coefficients from the constant term
 # up: a sextic with group PSL(2,5) (6T12, order 60), x^8 - 2 (8T8, order 16,
 # a 2-group) and x^12 - 2 (12T28, order 48): small and imprimitive groups,
@@ -338,6 +342,17 @@ def prepare(v):
         return lambda: f.galois_group()
     if case_id in ("modsym_charpoly", "newforms"):
         operands([n, 2])
+    if case_id == "hecke_matrix":
+        # (T_n at the fixed level 389: the twisted traces build their
+        # newspace data inside each call, so there is no space to prebuild)
+        operands([HECKE_LEVEL, 2, n])
+        S = CuspForms(HECKE_LEVEL, 2)
+        return lambda: S.hecke_matrix(n)
+    if case_id == "hecke_space":
+        # (Magma's space construction; ours builds no space object, so the
+        # dimension formula alone: the row has no ratio)
+        operands([n, 2, 0])
+        return lambda: CuspForms(n, 2).dimension()
     if case_id == "ec_aplist":
         operands([0, 0, 1, -7, 6, n])
     if case_id == "modsym_charpoly":
@@ -388,6 +403,11 @@ def signature(answer):
         return str(int(answer.order()))
     if case_id == "modsym_charpoly":
         return "%d:%d" % (len(answer) - 1, seq_hash(answer))
+    if case_id == "hecke_matrix":
+        f = answer.charpoly()
+        return "%d:%d" % (f.degree(), seq_hash([int(c) for c in coeffs(f)]))
+    if case_id == "hecke_space":
+        return str(int(answer))
     if case_id == "newforms":
         forms = answer["newforms"] if isinstance(answer, dict) else answer
         dims = sorted(int(f["dim"] if "dim" in f else f["dimension"]) for f in forms)

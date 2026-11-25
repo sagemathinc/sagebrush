@@ -412,7 +412,7 @@ ARTS = {
 class Points(unittest.TestCase):
     """point() with the drivers replaced (no subprocess): its decisions."""
 
-    def run_point(self, inputs, expected=None, arts=ARTS, steal=0.0):
+    def run_point(self, inputs, expected=None, arts=ARTS, steal=0.0, row=ROW):
         calls = []
 
         def fake_invoke(b, row, n, mode, timeout, k=1):
@@ -428,7 +428,7 @@ class Points(unittest.TestCase):
             mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
             mock.patch.object(run, "EXPECTED", expected),
         ):
-            rec = run.point(ROW, "s", list(inputs), {"artifacts": arts})
+            rec = run.point(row, "s", list(inputs), {"artifacts": arts})
         return rec, calls
 
     def test_expected_input_mismatch_times_nothing(self):
@@ -457,6 +457,13 @@ class Points(unittest.TestCase):
         self.assertTrue(rec["noisy"])
         rec, _ = self.run_point({"user": "5", "magma": "5"}, steal=0.001)
         self.assertFalse(rec["noisy"])
+
+    def test_a_row_marked_no_ratio_has_none(self):
+        rec, _ = self.run_point({"user": "5", "magma": "5"})
+        self.assertIn("ratio_user", rec)
+        rec, _ = self.run_point({"user": "5", "magma": "5"}, row=dict(ROW, ratio=False))
+        self.assertEqual(rec["status"], "ok")
+        self.assertFalse([k for k in rec if k.startswith("ratio") or k.startswith("best_")])
 
 
 def proc_stat(rows):
@@ -979,7 +986,7 @@ class Files(unittest.TestCase):
             cal = sorted(k for k in r["sizes"] if k not in ("s", "m", "l"))
             self.assertEqual(sorted(set(r["sizes"]) - set(cal)), ["l", "m", "s"])
             self.assertIn(cal, ([], ["c0", "c1", "c2", "c3", "c4"]))
-        self.assertEqual(len(m["rows"]), 45)
+        self.assertEqual(len(m["rows"]), 47)
 
 
 class Units(unittest.TestCase):

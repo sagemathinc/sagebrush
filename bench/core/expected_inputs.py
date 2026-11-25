@@ -372,6 +372,10 @@ def operands(row: str, n: int, v: int) -> list[int]:
         return list(SMALL_GROUP_POLYS[n])
     if row in ("modsym_charpoly", "newforms"):
         return [n, 2]
+    if row == "hecke_matrix":
+        return [389, 2, n]
+    if row == "hecke_space":
+        return [n, 2, 0]
     if row == "ec_aplist":
         return [0, 0, 1, -7, 6, n]
     raise ValueError("no input formula for row " + row)

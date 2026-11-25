@@ -221,6 +221,10 @@ function Build(case_id, n, v)
         ops := Coefficients(pf);
     elif case_id eq "modsym_charpoly" then M:=ModularSymbols(n,2,+1); ops := [n, 2];
     elif case_id eq "newforms" then M:=NewSubspace(CuspidalSubspace(ModularSymbols(n,2,+1))); ops := [n, 2];
+    elif case_id eq "hecke_matrix" then
+        // (the space outside the timer: hecke_space times it)
+        M:=CuspidalSubspace(ModularSymbols(389,2,0)); ops := [389, 2, n];
+    elif case_id eq "hecke_space" then ops := [n, 2, 0];
     elif case_id eq "ec_aplist" then
         E:=EllipticCurve([0,0,1,-7,6]); conductor:=Conductor(E);
         ps:=[p:p in PrimesUpTo(n)|conductor mod p ne 0]; ops := [0, 0, 1, -7, 6, n];
@@ -248,6 +252,8 @@ function DoOp(case_id, S)
     elif case_id in {"galois_group","galois_group_small"} then return GaloisGroup(pf);
     elif case_id eq "modsym_charpoly" then return CharacteristicPolynomial(HeckeOperator(M,2));
     elif case_id eq "newforms" then return NewformDecomposition(M);
+    elif case_id eq "hecke_matrix" then return HeckeOperator(M,n);
+    elif case_id eq "hecke_space" then return CuspidalSubspace(ModularSymbols(n,2,0));
     elif case_id eq "ec_aplist" then return [<p,TraceOfFrobenius(ChangeRing(E,GF(p)))>:p in ps];
     end if;
     error "unknown case";
@@ -280,6 +286,13 @@ function Sig(case_id, n, answer)
         inv:=[Integers()!z:z in Invariants(answer)]; Sort(~inv); return IntegerToString(#answer) cat ":" cat Join([IntegerToString(z):z in inv],",");
     elif case_id in {"galois_group","galois_group_small"} then return IntegerToString(#answer);
     elif case_id eq "modsym_charpoly" then return IntegerToString(Degree(answer)) cat ":" cat IntegerToString(SeqHash(Coefficients(answer)));
+    elif case_id eq "hecke_matrix" then
+        // (sign 0: each form twice, so the charpoly is the square of S_2's)
+        ok, g := IsSquare(CharacteristicPolynomial(answer));
+        error if not ok, "the sign-0 charpoly is not a square";
+        g := ChangeRing(g, Integers());
+        return IntegerToString(Degree(g)) cat ":" cat IntegerToString(SeqHash(Coefficients(g)));
+    elif case_id eq "hecke_space" then return IntegerToString(Dimension(answer) div 2);
     elif case_id eq "newforms" then ds:=[Dimension(B):B in answer]; Sort(~ds); return IntegerToString(#ds) cat ":" cat Join([IntegerToString(d):d in ds],",");
     elif case_id eq "ec_aplist" then return IntegerToString(#answer) cat ":" cat IntegerToString(SeqHash([z[1]*1000+z[2]:z in answer]));
     end if;

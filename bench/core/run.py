@@ -1205,9 +1205,10 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
 
     # 1-thread ratios against the best 1-thread reference; then our best
     # against theirs over 1 and N threads (the 2x rule's ratio; native-host
-    # never counts toward it: headroom only)
+    # never counts toward it: headroom only).  A row marked "ratio": false
+    # times different work on each side (hecke_space): no ratio.
     refs = {b: sec(b) for b in ("magma", "flint") if sec(b)}
-    if rec["status"] == "ok" and refs:
+    if rec["status"] == "ok" and refs and row.get("ratio", True) is not False:
         best = min(refs, key=refs.get)
         rec["best_ref"] = {
             "backend": best,
