@@ -111,3 +111,38 @@ export async function chainEntries(db: D1, fleet: string): Promise<string[]> {
   const r = await db.prepare("SELECT bytes FROM fleet_chain_entries WHERE fleet = ?1 ORDER BY seq").bind(fleet).all<{ bytes: string }>();
   return r.results.map((x) => x.bytes);
 }
+
+// ---- the chain read (chain-read note r1.2): the host's generation, its nonce, and one page of the chain
+
+/** The host's current generation: its latest accepted grant's, or 1 with none (the chain read's floor, §1.1). */
+export async function hostGen(db: D1, fleet: string, host: string): Promise<number> {
+  const r = await db.prepare("SELECT COALESCE(MAX(gen), 1) AS gen FROM fleet_grants WHERE fleet = ?1 AND host = ?2").bind(fleet, host).first<{ gen: number }>();
+  if (!r || !Number.isSafeInteger(r.gen) || r.gen < 1) throw new Error("the host's generation");
+  return r.gen;
+}
+
+/**
+ * Spend a read's nonce: ONE batch, this host's nonces older than keep_ms pruned, then the insert if absent. True only
+ * if the insert wrote its row. (The window is 5 minutes, so a pruned nonce's request is refused before it gets here.)
+ */
+export async function spendRequestNonce(db: D1, d: { fleet: string; host: string; nonce: string; now: number }, keepMs: number): Promise<boolean> {
+  const res = await db.batch([
+    db.prepare("DELETE FROM fleet_request_nonces WHERE fleet = ?1 AND host = ?2 AND created_ms < ?3").bind(d.fleet, d.host, d.now - keepMs),
+    db.prepare("INSERT INTO fleet_request_nonces (fleet, host, nonce, created_ms) VALUES (?1, ?2, ?3, ?4) ON CONFLICT DO NOTHING").bind(d.fleet, d.host, d.nonce, d.now),
+  ]);
+  return (res[1]?.meta?.changes ?? 0) === 1;
+}
+
+/**
+ * One page of a fleet's chain, from ONE statement: the head (the highest seq, -1 before genesis) from an always-one-row
+ * select, LEFT JOINed to the first `max` entries after `after`, so an empty page still carries the true head.
+ */
+export async function chainPage(db: D1, fleet: string, after: number, max: number): Promise<{ head: number; entries: { seq: number; bytes: string }[] }> {
+  const rows = (await db.prepare("SELECT h.head AS head, e.seq AS seq, e.bytes AS bytes" +
+    " FROM (SELECT COALESCE((SELECT MAX(seq) FROM fleet_chain_entries WHERE fleet = ?1), -1) AS head) h" +
+    " LEFT JOIN (SELECT seq, bytes FROM fleet_chain_entries WHERE fleet = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3) e ON 1 ORDER BY e.seq")
+    .bind(fleet, after, max).all<{ head: number; seq: number | null; bytes: string | null }>()).results;
+  if (rows.length === 0) throw new Error("the page's head row");
+  const head = rows[0].head;
+  return { head, entries: rows.filter((r) => r.seq !== null).map((r) => ({ seq: r.seq as number, bytes: r.bytes as string })) };
+}
