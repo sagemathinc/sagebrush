@@ -557,6 +557,26 @@ fn signed_helper(t: &Tmp) -> (std::path::PathBuf, String) {
     (dst, team)
 }
 
+/// Runs `args` on `file`, failing the test with the tool's own output when it doesn't succeed.
+#[cfg(target_os = "macos")]
+fn tool(args: &[&str], file: &Path) {
+    let out = std::process::Command::new(args[0]).args(&args[1..]).arg(file).output().unwrap();
+    assert!(out.status.success(), "{args:?} {}: {}{}", file.display(), String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+}
+
+/// A small program of the test's own, compiled here (Xcode's cc), executable.
+#[cfg(target_os = "macos")]
+fn own_program(t: &Tmp, name: &str) -> std::path::PathBuf {
+    use std::io::Write as _;
+    let out = t.0.join(name);
+    let mut cc = std::process::Command::new("cc").args(["-x", "c", "-o"]).arg(&out).arg("-").stdin(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
+    cc.stdin.take().unwrap().write_all(b"int main(void) { return 0; }\n").unwrap();
+    let r = cc.wait_with_output().unwrap();
+    assert!(r.status.success(), "cc: {}", String::from_utf8_lossy(&r.stderr));
+    fs::set_permissions(&out, fs::Permissions::from_mode(0o755)).unwrap();
+    out
+}
+
 #[cfg(target_os = "macos")]
 fn bundle_signed(t: &Tmp) -> (String, std::path::PathBuf, String) {
     let sha = bundle(t, false);
@@ -579,15 +599,12 @@ fn a_signed_node_of_the_apps_team_passes_and_another_team_or_signature_is_refuse
     let ls = t.0.join("apple-ls");
     fs::copy("/bin/ls", &ls).unwrap();
     assert_eq!(verify_bundle(&t.0, &ls, &sha, NodeCheck::TeamSignature(&team)).unwrap_err(), BundleError::NodeSignature, "an Apple platform binary");
-    // (signed ad hoc)
-    let adhoc = t.0.join("adhoc-node");
-    fs::copy(&n, &adhoc).unwrap();
-    assert!(std::process::Command::new("codesign").args(["-f", "-s", "-"]).arg(&adhoc).output().unwrap().status.success());
+    // (signed ad hoc, and unsigned: a program of the test's own, so no other vendor's signature is rewritten)
+    let adhoc = own_program(&t, "adhoc-node");
+    tool(&["codesign", "-f", "-s", "-"], &adhoc);
     assert_eq!(verify_bundle(&t.0, &adhoc, &sha, NodeCheck::TeamSignature(&team)).unwrap_err(), BundleError::NodeSignature, "ad hoc");
-    // (unsigned)
-    let unsigned = t.0.join("unsigned-node");
-    fs::copy(&n, &unsigned).unwrap();
-    assert!(std::process::Command::new("codesign").args(["--remove-signature"]).arg(&unsigned).output().unwrap().status.success());
+    let unsigned = own_program(&t, "unsigned-node");
+    tool(&["codesign", "--remove-signature"], &unsigned);
     assert_eq!(verify_bundle(&t.0, &unsigned, &sha, NodeCheck::TeamSignature(&team)).unwrap_err(), BundleError::NodeSignature, "unsigned");
     // (one byte changed, early in the file and near its middle: each architecture's code is checked)
     let len = fs::metadata(&n).unwrap().len();
