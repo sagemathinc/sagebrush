@@ -151,6 +151,21 @@ def fppoly(size: int, salt: int) -> list[int]:
     return trim([(i * i * salt + 3 * i + 1) % P for i in range(size)])
 
 
+def gemm_entries(size: int, v: int, salt: int) -> list[list[int]]:
+    """drivers/numpy_case.py's base: entry k (row-major) is
+    (2654435761 k + 40503 v + salt) mod 2049 - 1024, an integer in
+    [-1024, 1024]."""
+    c = v * 40503 + salt
+    return [[((i * size + j) * 2654435761 + c) % 2049 - 1024 for j in range(size)] for i in range(size)]
+
+
+def gemm_operands(size: int, v: int) -> list[int]:
+    """The gemm rows' operands: n, v, A's row sums, B's column sums (both
+    rows hash the integer operands; the bits row maps them after)."""
+    a, b = gemm_entries(size, v, 12345), gemm_entries(size, v, 54321)
+    return [size, v] + [sum(r) for r in a] + [sum(col) for col in zip(*b)]
+
+
 def det_entries(kind: str, size: int, v: int) -> list[int]:
     """det_input's entries, row-major, as the drivers hash them."""
     out = []
@@ -458,11 +473,16 @@ def operands(row: str, n: int, v: int) -> list[int]:
         return [x for r in smith_hard_rows(n, v) for x in r]
     if row.startswith("mat_") and "_rank_" in row:
         return rank_entries(row, n, v)
+    if row in ("mat_f64_gemm", "mat_f64_gemm_bits"):
+        return gemm_operands(n, v)
     if row.startswith("mat_"):
         kind = row.split("_")[1]
         entries = det_entries(kind, n, v)
         if row.endswith("_solve"):
             entries += list(range(1, n + 1))
+        if row.endswith(("_mul", "_mul_fast")):
+            # (B: variant v + n of the same family)
+            entries += det_entries(kind, n, v + n)
         return entries
     if row == "groebner_cyclic":
         return cyclic_shape(n)

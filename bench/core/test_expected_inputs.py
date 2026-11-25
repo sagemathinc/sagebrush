@@ -168,7 +168,7 @@ class Drivers(unittest.TestCase):
     def check(self, driver: str, module: str, rows: list[dict]):
         py = python_with(module)
         if py is None:
-            if CI and module != "flint":
+            if CI and module not in ("flint", "numpy"):
                 self.fail(
                     f"BENCH_CI=1 but no Python imports {module}: the engine wheel must be installed"
                 )
@@ -188,7 +188,15 @@ class Drivers(unittest.TestCase):
         self.check(
             "sagebrush_case.py",
             "sagebrush",
-            [r for r in ROWS if r["backends"]["user"] != "pyjs"],
+            [r for r in ROWS if r["backends"].get("user") == "sage-mode"],
+        )
+
+    def test_numpy_driver(self):
+        # (its inputs mode under any NumPy: the CLI runs the same file)
+        self.check(
+            "numpy_case.py",
+            "numpy",
+            [r for r in ROWS if r.get("pyjs_driver") == "numpy_case.py"],
         )
 
     def test_python_flint_driver(self):

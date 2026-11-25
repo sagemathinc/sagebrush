@@ -273,6 +273,11 @@ def prepare(v):
             return lambda: A.hnf()
         if op in ("smith", "divisors"):
             return lambda: A.snf()
+        if op == "mul":
+            # (B: variant v + n of the same family)
+            B = flint.nmod_mat(det_rows(kind, n, v + n), P31 if kind == "fp31" else P)
+            operands(entries, [int(x) for x in flatten(B)])
+            return lambda: A * B
         b_rows = [[i + 1] for i in range(n)]
         b = (
             flint.nmod_mat(b_rows, P31 if kind == "fp31" else P)

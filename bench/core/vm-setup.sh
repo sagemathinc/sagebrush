@@ -19,6 +19,9 @@ uv venv --seed --python 3.14 engine/.venv >/dev/null
 uv pip install --python engine/.venv/bin/python maturin python-flint==0.9.0 >/dev/null
 (cd engine/py && ../.venv/bin/maturin build --release -i ../.venv/bin/python --out dist >/dev/null)
 uv pip install --python engine/.venv/bin/python engine/py/dist/*.whl >/dev/null
+# the blas reference column: real NumPy (pinned; its wheel bundles OpenBLAS), in a venv of its own
+uv venv --python 3.14 .venv-blas >/dev/null
+uv pip install --python .venv-blas/bin/python numpy==2.3.5 >/dev/null
 # the WebAssembly modules, built with CI's path mapping, then the CLI that embeds the engine
 pnpm install --frozen-lockfile >/dev/null
 RUSTFLAGS="--remap-path-prefix=$HOME/.cargo=/home/runner/.cargo" node scripts/build-engine.mjs >/dev/null

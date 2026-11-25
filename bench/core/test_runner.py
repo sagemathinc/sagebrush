@@ -1046,7 +1046,7 @@ class Files(unittest.TestCase):
             cal = sorted(k for k in r["sizes"] if k not in ("s", "m", "l"))
             self.assertEqual(sorted(set(r["sizes"]) - set(cal)), ["l", "m", "s"])
             self.assertIn(cal, ([], ["c0", "c1", "c2", "c3", "c4"]))
-        self.assertEqual(len(m["rows"]), 52)
+        self.assertEqual(len(m["rows"]), 58)
 
 
 class Units(unittest.TestCase):
@@ -2004,6 +2004,120 @@ class Host(unittest.TestCase):
         self.assertEqual(h["logical_cpus"], os.cpu_count())
         for c in h["caches"]:
             self.assertEqual(sorted(c), ["level", "size", "type"])
+
+
+class Gemm(unittest.TestCase):
+    """The gemm rows' harness pieces: the blas reference, a row's own pyjs
+    script, a row without a user column or a Magma one, the user column kept
+    at a few sizes (user_sizes), and the 1-thread pin of threads_by_affinity
+    rows."""
+
+    GEMM = dict(
+        ROW,
+        id="mat_f64_gemm",
+        backends={"user": "pyjs", "native": False, "magma": False, "flint": None, "blas": True},
+        pyjs_driver="numpy_case.py",
+        parallel=True,
+        threads_by_affinity=True,
+    )
+    ARTS = dict(ARTS, **{"python-blas": "0" * 64, "numpy-installed": "0" * 64})
+
+    def test_the_blas_command_and_its_needs(self):
+        exe = Path(sys.executable)
+        with mock.patch.object(run, "BLAS_PY", exe):
+            want = [str(exe), str(run.HERE / "drivers/numpy_case.py"), "mat_f64_gemm", "256", "time", "3"]
+            self.assertEqual(run.command("blas", self.GEMM, 256, "time", 3), want)
+            self.assertEqual(run.command("blas-n", self.GEMM, 256, "time", 3), want)
+            # (a row without the blas column, and a host without the venv)
+            self.assertIsNone(run.command("blas", ROW, 256, "time", 3))
+        with mock.patch.object(run, "BLAS_PY", Path("/nonexistent/python")):
+            self.assertIsNone(run.command("blas", self.GEMM, 256, "time", 3))
+        self.assertEqual(run.needs("blas-n", self.GEMM), ("python-blas", "numpy-installed"))
+        self.assertIn("NumPy", run.adapter("blas", self.GEMM))
+
+    def test_a_rows_own_pyjs_script(self):
+        with mock.patch.object(run, "PYJS", Path(sys.executable)):
+            cmd = run.command("user", self.GEMM, 256, "once", 3)
+            self.assertEqual(cmd[2], str(run.HERE / "drivers/numpy_case.py"))
+            big = dict(ROW, id="bigint_mul", backends={"user": "pyjs", "native": False, "magma": True, "flint": "python"})
+            self.assertEqual(run.command("user", big, 256, "once", 3)[2], str(run.HERE / "drivers/sagebrush_bigint.py"))
+
+    def test_no_user_column_and_no_magma_column(self):
+        fast = dict(ROW, backends={"user": None, "native": True, "magma": False, "flint": None})
+        self.assertIsNone(run.command("user", fast, 10, "once"))
+        with mock.patch.object(run, "MAGMA", Path(sys.executable)):
+            self.assertIsNone(run.command("magma", fast, 10, "once"))
+            self.assertIsNotNone(run.command("magma", ROW, 10, "once"))
+        # (both "not applicable" in a point, not "not on host")
+        with (
+            mock.patch.object(run, "invoke", lambda b, row, n, mode, timeout, k=1, cpus=None: {"status": "ok", "input_hash": "5", "signature": "s", "seconds": 1.0}),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"] if b == "native" else None),
+            mock.patch.object(run, "units", lambda *a: ("unmetered", "")),
+        ):
+            rec = run.point(fast, "s", ["user", "native", "magma", "flint"], {"artifacts": ARTS})
+        self.assertEqual({b: rec["backends"][b]["status"] for b in ("user", "magma", "flint")}, dict.fromkeys(("user", "magma", "flint"), "not applicable"))
+
+    def point(self, row, key, inputs):
+        calls = []
+
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            calls.append((b, mode))
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": "5"}
+            if mode == "once":
+                return {"status": "ok", "signature": "s"}
+            return {"status": "ok", "seconds": inputs[b], "signature": "K:1", "steal": 0.0}
+
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+            mock.patch.object(run, "EXPECTED", None),
+            mock.patch.object(run, "units", lambda *a: ("unmetered", "")),
+        ):
+            return run.point(row, key, list(inputs), {"artifacts": self.ARTS}), calls
+
+    def test_the_user_column_at_its_sizes_only_and_informational(self):
+        row = dict(ROW, sizes={"s": {"n": 10, "timeout": 30}, "m": {"n": 20, "timeout": 30}}, user_sizes=["s"])
+        rec, calls = self.point(row, "m", {"user": 4.0, "native": 1.0, "magma": 2.0})
+        self.assertEqual(rec["backends"]["user"]["status"], "skipped")
+        self.assertIn("user_sizes", rec["backends"]["user"]["detail"])
+        self.assertNotIn("user", {c[0] for c in calls})
+        self.assertEqual((rec["status"], rec["ratio_native"]), ("ok", 0.5))
+        rec, calls = self.point(row, "s", {"user": 4.0, "native": 1.0, "magma": 2.0})
+        self.assertIn(("user", "time"), calls)
+        self.assertTrue(rec["user_informational"])
+        self.assertNotIn("ratio_user", rec)
+        self.assertEqual(rec["ratio_native"], 0.5)
+        # (a row without user_sizes: the user ratio as before)
+        rec, _ = self.point(dict(row, user_sizes=None), "m", {"user": 4.0, "magma": 2.0})
+        self.assertEqual(rec["ratio_user"], 2.0)
+        self.assertNotIn("user_informational", rec)
+
+    def test_blas_is_a_reference(self):
+        rec, _ = self.point(self.GEMM, "s", {"user": 3.0, "blas": 1.5, "blas-n": 0.5})
+        self.assertEqual((rec["best_ref"]["backend"], rec["ratio_user"]), ("blas", 2.0))
+
+    def test_threads_by_affinity_pins_the_one_thread_columns(self):
+        got = []
+
+        def fake_child(cmd, timeout, threads=1, cap=None, extra=None, cpus=None):
+            got.append((threads, cpus))
+            return {"status": "ok", "output": "INPUTS|5\n"}
+
+        first = min(os.sched_getaffinity(0))
+        with (
+            mock.patch.object(run, "run_child", fake_child),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+        ):
+            # (the pin is recorded with the run)
+            self.assertEqual(run.invoke("user", self.GEMM, 256, "inputs", 30)["cpus"], [first])
+            got.clear()
+            run.invoke("user", self.GEMM, 256, "inputs", 30)
+            run.invoke("blas", self.GEMM, 256, "inputs", 30)
+            run.invoke("user-n", self.GEMM, 256, "inputs", 30)
+            run.invoke("user", self.GEMM, 256, "inputs", 30, 1, [0, 1])
+            run.invoke("user", ROW, 256, "inputs", 30)
+        self.assertEqual(got, [(1, [first]), (1, [first]), (run.THREADS, None), (2, [0, 1]), (1, None)])
 
 
 if __name__ == "__main__":
