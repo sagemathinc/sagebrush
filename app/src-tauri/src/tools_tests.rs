@@ -303,3 +303,93 @@ fn a_descendant_that_escapes_the_group_with_the_pipes_holds_nothing_of_ours_afte
     }
     assert_eq!(got, "closed closed", "no reader of ours outlived the call");
 }
+
+#[test]
+fn a_path_folder_that_is_not_roots_or_is_open_to_others_stops_the_run_before_it_starts() {
+    // (the tool would leave a mark if it ran at all)
+    let t = Tmp::new("pathdirs");
+    let mark = t.0.join("ran");
+    let p = script(&t.0, "claude", &format!("touch '{}'\n{GOOD}", mark.display()), 0o755);
+    assert_eq!(qualify_path(FIXED_PATH, &[0]).as_deref(), Ok("/usr/bin:/bin"), "the fixed folders qualify here");
+    let tmp_link = fs::canonicalize("/tmp").unwrap().join(format!("sb-tools-pathlink-{}-{}", std::process::id(), rand_suffix()));
+    std::os::unix::fs::symlink("/usr/bin", &tmp_link).unwrap();
+    let ours = t.0.display().to_string();
+    let link = tmp_link.display().to_string();
+    let mut cases: Vec<(Vec<&str>, ToolRefusal, &str)> = vec![
+        (vec!["/tmp"], ToolRefusal::ParentWritable, "root's, but open to others (sticky is no exception)"),
+        (vec![&link], ToolRefusal::ParentWritable, "a link to /usr/bin that sits in an open folder"),
+        (vec!["/usr/bin", "/tmp"], ToolRefusal::ParentWritable, "every folder, not only the first"),
+        (vec!["usr/bin"], ToolRefusal::NotAbsolute, "relative"),
+        (vec!["/usr/bin/sb-tools-no-such-folder"], ToolRefusal::Missing, "missing"),
+    ];
+    if my_uid() != 0 {
+        cases.push((vec![&ours], ToolRefusal::WrongOwner, "the person's own folder, not root's"));
+    }
+    for (dirs, want, what) in cases {
+        let r = choose_in(&p, my_uid(), &run(&t), &dirs, &[0]);
+        assert_eq!(r.unwrap_err(), want, "{what}");
+        assert!(!mark.exists(), "{what}: the tool never ran");
+    }
+    let _ = fs::remove_file(&tmp_link);
+    assert!(choose_in(&p, my_uid(), &run(&t), FIXED_PATH, &[0]).is_ok());
+    assert!(mark.exists(), "and with the fixed folders, it ran");
+}
+
+#[test]
+fn every_folder_above_a_path_folder_is_checked_and_the_path_is_the_folders_given() {
+    // (the person standing in for root as an allowed owner, so the rules above the folder can be exercised)
+    let me = my_uid();
+    let base = Tmp::under(Path::new(env!("CARGO_MANIFEST_DIR")), "pathup");
+    assert!(qualify_path(&[&base.0.display().to_string()], &[0, me]).is_ok(), "the test needs a clean chain above {}", base.0.display());
+    let up = base.0.join("up");
+    let inner = up.join("inner");
+    fs::create_dir_all(&inner).unwrap();
+    let inner_s = inner.display().to_string();
+    for (up_mode, inner_mode, want) in [
+        (0o777, 0o755, Err(ToolRefusal::ParentWritable)),
+        (0o1777, 0o755, Err(ToolRefusal::ParentWritable)),
+        (0o755, 0o775, Err(ToolRefusal::ParentWritable)),
+        (0o755, 0o1777, Err(ToolRefusal::ParentWritable)),
+        (0o755, 0o755, Ok(inner_s.clone())),
+    ] {
+        fs::set_permissions(&inner, fs::Permissions::from_mode(inner_mode)).unwrap();
+        fs::set_permissions(&up, fs::Permissions::from_mode(up_mode)).unwrap();
+        assert_eq!(qualify_path(&[&inner_s], &[0, me]), want, "up {up_mode:o}, inner {inner_mode:o}");
+    }
+    // (a link whose target is clean, but which sits in a folder open to others: the step it is on is refused)
+    let open = base.0.join("open");
+    fs::create_dir(&open).unwrap();
+    std::os::unix::fs::symlink(&inner, open.join("bin")).unwrap();
+    fs::set_permissions(&open, fs::Permissions::from_mode(0o777)).unwrap();
+    assert_eq!(qualify_path(&[&open.join("bin").display().to_string()], &[0, me]), Err(ToolRefusal::ParentWritable));
+    fs::set_permissions(&open, fs::Permissions::from_mode(0o755)).unwrap();
+    // (a link in a clean folder, to a folder whose own folder is open to others: the target's folders are checked
+    //  too, not only the steps as written)
+    fs::set_permissions(&up, fs::Permissions::from_mode(0o777)).unwrap();
+    assert_eq!(qualify_path(&[&open.join("bin").display().to_string()], &[0, me]), Err(ToolRefusal::ParentWritable));
+    fs::set_permissions(&up, fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(qualify_path(&[&open.join("bin").display().to_string()], &[0, me]).as_deref(), Ok(open.join("bin").to_str().unwrap()), "and once it is closed, the link is fine");
+    // (the run's PATH is exactly the qualified folders)
+    let t = Tmp::new("pathenv");
+    let p = script(&t.0, "claude", &format!("[ \"$PATH\" = '{inner_s}' ] || echo path\n{GOOD}"), 0o755);
+    assert_eq!(choose_in(&p, me, &run(&t), &[&inner_s], &[0, me]).map(|c| c.version), Ok("2.1.330".to_string()));
+}
+
+#[test]
+fn a_pipe_that_cannot_be_made_non_blocking_is_refused_without_reading_and_the_group_killed() {
+    // (the setup failure injected: nothing is read, the run is refused at once, and the tool, which would leave a
+    //  mark after a second, is killed with its group before it can)
+    let t = Tmp::new("nonblock");
+    let mark = t.0.join("ran");
+    let p = script(&t.0, "claude", &format!("{GOOD}\nsleep 1\ntouch '{}'", mark.display()), 0o755);
+    FAIL_NONBLOCK.with(|f| f.set(true));
+    let started = std::time::Instant::now();
+    let r = choose(&p, my_uid(), &run(&t));
+    let took = started.elapsed();
+    FAIL_NONBLOCK.with(|f| f.set(false));
+    assert_eq!(r.unwrap_err(), ToolRefusal::NoAnswer);
+    assert!(took < Duration::from_millis(900), "{took:?}");
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(!mark.exists(), "the tool was killed, not left running");
+    assert!(choose(&p, my_uid(), &run(&t)).is_ok(), "without the fault, the same tool is fine");
+}

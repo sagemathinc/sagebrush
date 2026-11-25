@@ -16,7 +16,10 @@
 // version(): no shell; an explicit environment (PATH fixed, HOME the person's, DISABLE_AUTOUPDATER=1, nothing
 // inherited); the app's own working folder; stdin closed; stdout and stderr each capped at VERSION_OUTPUT bytes; its
 // own process group, killed at VERSION_DEADLINE and reaped. Both streams are read on the calling thread from
-// non-blocking pipes, so no reader outlives the call, even if something the tool left behind holds a pipe open.
+// non-blocking pipes, so no reader outlives the call, even if something the tool left behind holds a pipe open; if
+// a pipe can't be made non-blocking, nothing is read and the run is refused. Before it runs, each FIXED_PATH folder
+// (and, for every step of its path, the resolved folder and all above it) must be root's and not writable by group
+// or others, so a helper the tool looks up there can't have been put there by anyone else.
 //
 // The refusal codes are the agent's (--claude-path) closed list, in its order: wrong_owner is the file or a folder
 // above it owned by someone other than the person or root; parent_writable a folder above it writable by others. Windows: unsupported_platform, until the agent host starts agents there.
@@ -26,6 +29,8 @@ use std::time::Duration;
 
 pub const VERSION_DEADLINE: Duration = Duration::from_secs(5);
 pub const VERSION_OUTPUT: usize = 4096;
+/// The version run's PATH, in order; each folder qualified before the run (qualify_path).
+pub const FIXED_PATH: &[&str] = &["/usr/bin", "/bin"];
 
 /// Why a chosen tool was refused (each a code the page shows in plain words).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,6 +115,12 @@ pub fn my_uid() -> u32 {
 /// `me`: the person's uid (my_uid(); tests give another to stand for "someone else").
 #[cfg(unix)]
 pub fn choose(path: &Path, me: u32, run: &VersionRun) -> Result<Chosen, ToolRefusal> {
+    choose_in(path, me, run, FIXED_PATH, &[0])
+}
+
+/// choose(), with the PATH folders and their allowed owners given (tests stand other folders and owners in).
+#[cfg(unix)]
+fn choose_in(path: &Path, me: u32, run: &VersionRun, dirs: &[&str], owners: &[u32]) -> Result<Chosen, ToolRefusal> {
     if !path.is_absolute() {
         return Err(ToolRefusal::NotAbsolute);
     }
@@ -117,7 +128,7 @@ pub fn choose(path: &Path, me: u32, run: &VersionRun) -> Result<Chosen, ToolRefu
     // (the final link, and any in the folders above, resolved once: the target is what is bound and shown)
     let target = std::fs::canonicalize(path).map_err(|_| ToolRefusal::Missing)?;
     let identity = check_file(&target, me)?;
-    let version = version(&target, run)?;
+    let version = version_in(&target, run, dirs, owners)?;
     // (the file must not have changed while its version ran)
     if check_file(&target, me)? != identity {
         return Err(ToolRefusal::IdentityChanged);
@@ -188,12 +199,65 @@ fn check_file(target: &Path, me: u32) -> Result<Identity, ToolRefusal> {
 /// supported.
 #[cfg(unix)]
 pub fn version(target: &Path, run: &VersionRun) -> Result<String, ToolRefusal> {
+    version_in(target, run, FIXED_PATH, &[0])
+}
+
+/// The PATH for the version run: `dirs` joined, once each is qualified. For every step of each folder's path (the
+/// folder itself and each folder above it, as written), the step is resolved and the resolved folder and every folder
+/// above it must be a real folder owned by one of `owners` (root alone, outside tests) and not writable by group or
+/// others: so no link on the way, and no folder a link or the PATH folder sits in, can be changed by anyone else.
+#[cfg(unix)]
+fn qualify_path(dirs: &[&str], owners: &[u32]) -> Result<String, ToolRefusal> {
+    use std::os::unix::fs::MetadataExt;
+    for d in dirs {
+        let p = Path::new(d);
+        if !p.is_absolute() {
+            return Err(ToolRefusal::NotAbsolute);
+        }
+        for step in p.ancestors() {
+            let resolved = std::fs::canonicalize(step).map_err(|_| ToolRefusal::Missing)?;
+            for f in resolved.ancestors() {
+                let m = std::fs::symlink_metadata(f).map_err(|_| ToolRefusal::Missing)?;
+                if m.file_type().is_symlink() || !m.is_dir() {
+                    return Err(ToolRefusal::ParentWritable);
+                }
+                if !owners.contains(&m.uid()) {
+                    return Err(ToolRefusal::WrongOwner);
+                }
+                if m.mode() & 0o022 != 0 {
+                    return Err(ToolRefusal::ParentWritable);
+                }
+            }
+        }
+    }
+    Ok(dirs.join(":"))
+}
+
+// (tests only: the setup of the non-blocking pipes fails, to reach the fail-closed path nothing else can)
+#[cfg(test)]
+thread_local! {
+    static FAIL_NONBLOCK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+#[cfg(test)]
+fn nonblock_fault() -> bool {
+    FAIL_NONBLOCK.with(|f| f.get())
+}
+#[cfg(not(test))]
+fn nonblock_fault() -> bool {
+    false
+}
+
+/// version(), with the PATH folders and their allowed owners given.
+#[cfg(unix)]
+fn version_in(target: &Path, run: &VersionRun, dirs: &[&str], owners: &[u32]) -> Result<String, ToolRefusal> {
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
+    // (refused before anything runs: a folder the tool would look its helpers up in, open to someone else)
+    let path_env = qualify_path(dirs, owners)?;
     let mut cmd = Command::new(target);
     cmd.arg("--version")
         .env_clear()
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", path_env)
         .env("HOME", run.home)
         .env("DISABLE_AUTOUPDATER", "1")
         .current_dir(run.cwd)
@@ -210,11 +274,14 @@ pub fn version(target: &Path, run: &VersionRun) -> Result<String, ToolRefusal> {
         child.stdout.take().map(|s| Box::new(s) as Box<dyn ReadFd>),
         child.stderr.take().map(|s| Box::new(s) as Box<dyn ReadFd>),
     ];
+    // (a pipe that can't be made non-blocking could block a read past the deadline: then nothing is read, and the
+    //  run goes straight to the cleanup below and is refused)
+    let mut nonblocking = streams.iter().all(|s| s.is_some()) && !nonblock_fault();
     for s in streams.iter().flatten() {
         let fd = s.raw();
-        unsafe {
-            let flags = libc::fcntl(fd, libc::F_GETFL);
-            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+            nonblocking = false;
         }
     }
     let mut bufs: [Vec<u8>; 2] = [Vec::new(), Vec::new()];
@@ -226,7 +293,7 @@ pub fn version(target: &Path, run: &VersionRun) -> Result<String, ToolRefusal> {
     let grace = Duration::from_secs(1);
     let mut gone = false;
     let mut exited_at: Option<std::time::Instant> = None;
-    loop {
+    while nonblocking {
         // (read what is there, waiting at most 10 ms)
         let mut fds: Vec<libc::pollfd> = Vec::new();
         let mut which: Vec<usize> = Vec::new();
