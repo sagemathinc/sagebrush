@@ -314,7 +314,7 @@ export class GzipInflater {
     const lengths = this.lengths;
     lengths.fill(0);
     for (let i = 0; i < ncode; i++) lengths[ORDER[i]] = this.bits(3);
-    if (construct(this.clen, lengths, 19) !== 0) throw new TarError("deflate", "an incomplete code-length code");
+    if (construct(this.clen, lengths, 19) !== 0) throw new TarError("deflate", "an incomplete or over-subscribed code-length code");
     let index = 0;
     const total = nlen + ndist;
     const codeLengths = new Uint8Array(total);

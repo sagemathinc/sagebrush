@@ -198,6 +198,81 @@ function acgt(n, seed = 1) {
   put(1, 1), put(3, 2);
   bad("deflate", raw(pack()), "a block of type 3");
   bad("deflate", raw(Uint8Array.of(1, 5, 0, 5, 0)), "a stored block whose length and complement disagree");
+  // (malformed dynamic blocks, each breaking one rule and nothing else, from a builder that takes the code lengths)
+  const ORDER19 = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+  const canonical = (lens) => {
+    const max = Math.max(0, ...lens);
+    const count = new Array(max + 1).fill(0);
+    for (const l of lens) if (l) count[l]++;
+    const next = [];
+    for (let b = 1, code = 0; b <= max; b++) next[b] = code = (code + (count[b - 1] ?? 0)) << 1;
+    return lens.map((l) => (l ? next[l]++ : -1));
+  };
+  /** A gzip member holding one dynamic block: `lit` and `dist` the code lengths (by symbol), `seq` the code-length
+   * symbols sent ([symbol, extra, extraBits]; by default each length as itself), `cl` the code-length code's lengths
+   * (by default a complete code over the symbols `seq` uses), `data` the block's symbols, `out` its expected output. */
+  const dyn = ({ lit, dist, seq, cl, data, hlit, hdist, out = new Uint8Array(0) }) => {
+    seq ??= [...lit, ...dist].map((l) => [l, 0, 0]);
+    if (!cl) {
+      cl = new Array(19).fill(0);
+      const used = [...new Set(seq.map(([s]) => s))];
+      const k = Math.max(1, Math.ceil(Math.log2(used.length)));
+      for (let s = 0; used.length < 2 ** k; s++) if (!used.includes(s)) used.push(s);
+      for (const s of used) cl[s] = k;
+    }
+    const clCodes = canonical(cl), litCodes = canonical(lit), distCodes = canonical(dist);
+    const b = [];
+    const put = (v, n) => { for (let i = 0; i < n; i++) b.push((v >> i) & 1); };
+    const huff = (code, len) => { for (let i = len - 1; i >= 0; i--) b.push((code >> i) & 1); };
+    put(1, 1), put(2, 2), put(hlit ?? lit.length - 257, 5), put(hdist ?? dist.length - 1, 5), put(15, 4);
+    for (const s of ORDER19) put(cl[s], 3);
+    for (const [s, x, n] of seq) (huff(clCodes[s], cl[s]), put(x, n));
+    for (const [kind, s, x = 0, n = 0] of data) {
+      if (kind === "bits") put(s, x);
+      else (kind === "dist" ? huff(distCodes[s], dist[s]) : huff(litCodes[s], lit[s]), put(x, n));
+    }
+    const body = Uint8Array.from({ length: Math.ceil(b.length / 8) }, (_, i) => b.slice(i * 8, i * 8 + 8).reduce((a, v, k) => a | (v << k), 0));
+    const t = new Uint8Array(8);
+    new DataView(t.buffer).setUint32(0, crc(out), true);
+    new DataView(t.buffer).setUint32(4, out.length, true);
+    return cat(Uint8Array.of(0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3), body, t);
+  };
+  const lens = (n, pairs) => Object.assign(new Array(n).fill(0), pairs);
+  const refusedAs = (re, g, msg) => {
+    const got = [1, g.length].map((chunk) => {
+      try {
+        run(g, chunk);
+        return "accepted";
+      } catch (e) {
+        return e instanceof TarError ? `${e.code}: ${e.message}` : String(e);
+      }
+    });
+    ok(got.every((m) => m.startsWith("deflate: ") && re.test(m)), `inflate ${msg}: refused (deflate, ${re.source}) for 1-byte and whole-body input`, got);
+  };
+  const okLit = lens(257, { 65: 1, 256: 1 });
+  ok(same(run(dyn({ lit: okLit, dist: [1], data: [["lit", 65], ["lit", 256]], out: bytes("A") }), 1), bytes("A")), "inflate: a hand-made dynamic block (the control for the refusals below)");
+  refusedAs(/too many length or distance codes/, dyn({ lit: okLit, dist: [1], hlit: 30, data: [] }), "a dynamic block with 287 length codes");
+  refusedAs(/too many length or distance codes/, dyn({ lit: okLit, dist: [1], hdist: 30, data: [] }), "a dynamic block with 31 distance codes");
+  refusedAs(/code-length code/, dyn({ lit: okLit, dist: [1], cl: lens(19, { 0: 1 }), seq: [], data: [] }), "an incomplete code-length code");
+  refusedAs(/code-length code/, dyn({ lit: okLit, dist: [1], cl: lens(19, { 0: 1, 1: 1, 2: 1 }), seq: [], data: [] }), "an over-subscribed code-length code");
+  refusedAs(/a repeat with no previous length/, dyn({ lit: okLit, dist: [1], seq: [[16, 0, 2], ...[...okLit, 1].map((l) => [l, 0, 0])], data: [] }), "a repeat of the previous length first");
+  refusedAs(/too many code lengths/, dyn({ lit: okLit, dist: [1], seq: [...okLit.map((l) => [l, 0, 0]), [18, 127, 7]], data: [] }), "repeated zeros past the last length");
+  refusedAs(/too many code lengths/, dyn({ lit: okLit, dist: [1, 1], seq: [...okLit.map((l) => [l, 0, 0]), [1, 0, 0], [16, 0, 2]], data: [] }), "a repeat of the previous length past the last length");
+  refusedAs(/no end-of-block code/, dyn({ lit: lens(257, { 65: 1, 66: 1 }), dist: [1], data: [["lit", 65]] }), "a dynamic block without an end-of-block code");
+  refusedAs(/an invalid literal\/length code/, dyn({ lit: lens(257, { 65: 1, 66: 1, 256: 1 }), dist: [1], data: [] }), "an over-subscribed literal/length code");
+  refusedAs(/an invalid literal\/length code/, dyn({ lit: lens(257, { 65: 1, 256: 2 }), dist: [1], data: [] }), "an incomplete literal/length code of more than one length-1 code");
+  refusedAs(/an invalid distance code/, dyn({ lit: okLit, dist: [1, 1, 1], data: [] }), "an over-subscribed distance code");
+  refusedAs(/an invalid distance code/, dyn({ lit: okLit, dist: [1, 2], data: [] }), "an incomplete distance code of more than one length-1 code");
+  refusedAs(/an invalid Huffman code/, dyn({ lit: lens(258, { 65: 1, 256: 2, 257: 2 }), dist: [1], data: [["lit", 65], ["lit", 257], ["bits", 1, 1]] }), "a distance outside a one-code distance code");
+  bits.length = 0;
+  put(1, 1), put(1, 2), putCode(0xc6, 8);
+  refusedAs(/an invalid length symbol/, raw(pack()), "the reserved length symbol 286");
+  bits.length = 0;
+  put(1, 1), put(1, 2), putCode(0x71, 8), putCode(1, 7), putCode(30, 5);
+  // (the fixed distance code has 30 symbols, as in zlib, so 30 and 31 are bit patterns no symbol has; a dynamic one has at
+  //  most 30 too: the distance-symbol check behind them is a second fence)
+  refusedAs(/an invalid Huffman code/, raw(pack()), "the reserved distance symbol 30, in a fixed block");
+
   let threw = null;
   try {
     new GzipInflater(() => {}, { total: 10, ratio: 0.5 });
