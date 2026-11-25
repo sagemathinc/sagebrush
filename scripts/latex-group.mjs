@@ -123,7 +123,10 @@ export const LATEX_LAZY = {
 // (289,970 raw / 97,826 gzip: Nov 25 2026, \bibliography reading the .bbl BibTeX made beside the .tex, and natbib's
 //  numbers and sort&compress: 289,906 / 97,762 measured on the shipped build of its merge with master d4692ae4, with bun
 //  1.4.4 and node 24.21.0 (+2,343 / +766 over master's 287,563 / 96,996), + 64)
-export const LATEX_CAPS = { raw: 289970, gzip: 97826 };
+// (290,885 raw / 98,139 gzip: Nov 25 2026, latex check naming an \input file and its line for a problem found there (the
+//  expander's file-line markers, the renderer's where()): 290,821 / 98,075 measured on the shipped build of master
+//  6e3a0f71 with it, with bun 1.4.4 and node 24.21.0 (+915 / +313 over master's 289,906 / 97,762), + 64)
+export const LATEX_CAPS = { raw: 290885, gzip: 98139 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -228,7 +231,9 @@ export const LATEX_LAZY_CAPS = {
   //  page module rather than bundled again; measured 16,482 / 6,886 on master 4d4225f9, + 64. Was 16 / 6 KiB)
   // (17,335 / 7,231: renewed at the landing merge on master 14279164: 16,494 / 6,881 before it -> 17,271 / 7,167 after,
   //  +777 / +286 inherited from a shared check's and the tools' changes, none of it that change's own code; + 64)
-  TOOLS: { label: "the LaTeX agent tools' chunk", raw: 17335, gzip: 7231 },
+  // (17,758 / 7,432: Nov 25 2026, latex_check naming a problem's \input file (check.ts's inputFileName): 17,694 / 7,368
+  //  measured on master 6e3a0f71 with it, + 64)
+  TOOLS: { label: "the LaTeX agent tools' chunk", raw: 17758, gzip: 7432 },
   // (the presenter: web/latex/present.ts with overlay.ts, fetched only when Present is pressed)
   PRESENT: { label: "the LaTeX presenter's chunk", raw: 16 * 1024, gzip: 6 * 1024 },
   // (a published document opened read only, doc.ts: fetched only for a /?tex-doc= link, the articles';

@@ -54,11 +54,14 @@ const dimPt = (s) => { const m = /^\s*(-?(?:\d+\.?\d*|\.\d+))\s*(pt|mm|cm|in|em|
 export function buildTree(events, items = []) {
   const root = { t: "g", kids: [] }; const st = [root];
   let pos = -1, last = -1;   // (last: the latest marker, kept: a code item's source position, it.at)
+  // (an \input file's line, {k:"fpos", file, line}, or back in the main file, {file: null}: on the next node as n.fp)
+  let fp;
   const top = () => st[st.length - 1];
   for (const e of events) {
     const before = top().kids.length, at = top();
-    if (typeof e === "number") { top().kids.push({ t: "x", v: e }); if (pos >= 0) { at.kids[before].p = pos; pos = -1; } continue; }
+    if (typeof e === "number") { top().kids.push({ t: "x", v: e }); if (pos >= 0) { at.kids[before].p = pos; pos = -1; } if (fp !== undefined) { at.kids[before].fp = fp; fp = undefined; } continue; }
     if (e.k === "pos") { pos = last = e.at; continue; }
+    if (e.k === "fpos") { fp = e.file ? { file: e.file, line: e.line } : null; continue; }
     switch (e.k) {
       case "o": { const g = { t: "g", kids: [] }; top().kids.push(g); st.push(g); break; }
       case "c": if (st.length > 1 && top().t === "g") st.pop(); break;
@@ -87,6 +90,7 @@ export function buildTree(events, items = []) {
       case "err": top().kids.push({ t: "err", code: e.code, name: e.name, text: e.text }); break;
       default: break;
     }
+    if (fp !== undefined && at.kids.length > before) { at.kids[before].fp = fp; fp = undefined; }
     if (pos >= 0 && at.kids.length > before) { at.kids[before].p = pos; pos = -1; }
   }
   return root.kids;
@@ -252,7 +256,7 @@ class Renderer {
     this.cls = "article"; this.book = false; this.clsOpt = ""; this.nat = null;
     // (frames: a beamer document's frames, in order {n, title, at}; problems: what the preview can't show or found wrong,
     //  each {kind, name, at} with at the source offset of the nearest node before it, or -1: `sagebrush latex check`)
-    this.frameList = []; this.problems = []; this.lastPos = -1; this.ov = null;
+    this.frameList = []; this.problems = []; this.lastPos = -1; this.lastFile = null; this.ov = null;
     this.ctr = { part: 0, chapter: 0, section: 0, subsection: 0, subsubsection: 0, paragraph: 0, subparagraph: 0, equation: 0, figure: 0, table: 0, footnote: 0 };
     this.appendix = false;
     this.thmCtr = {}; this.thms = {}; this.thmStyle = "plain"; this.eqWithin = null;
@@ -280,7 +284,9 @@ class Renderer {
     flow.html('<span class="unk" title="not supported in this prototype">\\' + esc(name) + "</span>", st);
   }
 
-  problem(kind, name) { if (!this.inPreamble && this.problems.length < 500) this.problems.push({ kind, name: String(name), at: this.lastPos }); }
+  // (where a problem is: the main file's offset, and, inside an \input file, that file and its line)
+  where() { return this.lastFile ? { at: this.lastPos, file: this.lastFile.file, fline: this.lastFile.line } : { at: this.lastPos }; }
+  problem(kind, name) { if (!this.inPreamble && this.problems.length < 500) this.problems.push({ kind, name: String(name), ...this.where() }); }
 
   // ---- argument readers over a sibling list
   isSp(n) { return n && n.t === "x" && !isCs(n.v) && catOf(n.v) === CAT.SPACE; }
@@ -407,6 +413,7 @@ class Renderer {
     for (let i = 0; i < nodes.length; i++) {
       const n = nodes[i];
       if (n.p !== undefined) { this.lastPos = n.p; if (!flow.inline) flow.pos = n.p; }
+      if (n.fp !== undefined) this.lastFile = n.fp;
       switch (n.t) {
         case "x": i = this.tok(nodes, i, ctx, flow); break;
         case "g": this.walk(n.kids, Object.assign({}, ctx, { st: Object.assign({}, ctx.st) }), flow); break;
@@ -438,7 +445,7 @@ class Renderer {
         case "err":
           // (an \input or \include not read: its name and why, never silent; in the preamble too, listed for the page's note)
           if (n.code === "input") {
-            if (this.problems.length < 500) this.problems.push({ kind: "input", name: String(n.name), at: this.lastPos, why: String(n.text || "") });
+            if (this.problems.length < 500) this.problems.push({ kind: "input", name: String(n.name), ...this.where(), why: String(n.text || "") });
             if (this.inPreamble) { if (this.inputMisses.length < 50) this.inputMisses.push({ name: String(n.name), why: String(n.text || "") }); }
             else flow.html('<span class="unk errchip" title="\\input or \\include: the file is not in the preview">[input: ' + esc(n.name) + ": " + esc(n.text || "not found") + "]</span>", ctx.st);
             break;
