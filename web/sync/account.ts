@@ -46,7 +46,7 @@ const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS ops (seq INTEGER PRIMARY KEY, device TEXT NOT NULL, dseq INTEGER NOT NULL, t INTEGER, by TEXT, op TEXT, path TEXT, \"to\" TEXT, kind TEXT, ref TEXT, fid TEXT, sha256 TEXT, size INTEGER, base TEXT, recv INTEGER, parent TEXT, UNIQUE (device, dseq))",
   "CREATE TABLE IF NOT EXISTS refused (device TEXT NOT NULL, dseq INTEGER NOT NULL, code TEXT NOT NULL, PRIMARY KEY (device, dseq))",
   "CREATE TABLE IF NOT EXISTS docs (doc TEXT PRIMARY KEY, kind TEXT NOT NULL, created INTEGER, bytes INTEGER NOT NULL DEFAULT 0, epoch INTEGER NOT NULL DEFAULT 1, head_seq INTEGER NOT NULL DEFAULT 0, deleted INTEGER)",
-  "CREATE TABLE IF NOT EXISTS holdings (sha256 TEXT PRIMARY KEY, key TEXT NOT NULL, size INTEGER NOT NULL, refs INTEGER NOT NULL DEFAULT 0, created INTEGER)",
+  "CREATE TABLE IF NOT EXISTS holdings (sha256 TEXT PRIMARY KEY, key TEXT NOT NULL, size INTEGER NOT NULL, refs INTEGER NOT NULL DEFAULT 0, created INTEGER, ct_sha256 TEXT)",
   "CREATE INDEX IF NOT EXISTS holdings_key ON holdings (key)",
   // a pin (§4.3): its identity is the patch's own, (doc, epoch, client, cseq, id, sha256), so two
   // attempts at one cseq with different ids are two pins (CORR-321-1); `inflight` counts the forwards
@@ -66,7 +66,7 @@ const SCHEMA = [
   // (each retried item keeps its own retry time and tries, so an outage backs off per item, CORR-B8A-2)
   "CREATE TABLE IF NOT EXISTS fences_due (session_hash TEXT NOT NULL, doc TEXT NOT NULL, expires INTEGER NOT NULL, retry_at INTEGER, tries INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (session_hash, doc))",
   "CREATE TABLE IF NOT EXISTS outbox (key TEXT PRIMARY KEY, created INTEGER, retry_at INTEGER, tries INTEGER NOT NULL DEFAULT 0)",
-  "CREATE TABLE IF NOT EXISTS reservations (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, bytes INTEGER NOT NULL, key TEXT NOT NULL, expires INTEGER NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS reservations (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, bytes INTEGER NOT NULL, key TEXT NOT NULL, expires INTEGER NOT NULL, ct_sha256 TEXT)",
   "CREATE INDEX IF NOT EXISTS reservations_key ON reservations (key)",
   // (finalized uploads, a day: a finalize answered again gives the same answer, CORR-796-2)
   "CREATE TABLE IF NOT EXISTS finalized (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, size INTEGER NOT NULL, at INTEGER NOT NULL)",
@@ -84,6 +84,8 @@ const MAX_HOLDS = LIMITS.liveBatches;
 
 /** The limits CoCalc gives an account (design/sync-server.md §6), as this service reads them. */
 /** (one storage_bytes for sharing and sync together, §6.1: sync has no storage limit of its own) */
+/** A held blob's identity: its address, its stored bytes' SHA-256 and its size (e2e PR 3a). */
+export type Held = { sha256: string; ct_sha256: string; size: number };
 export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; version_bytes: number; read_bytes_per_day: number; retention_days?: number; verify_bytes_per_day?: number }; issued?: number }
 /** Dev deployments with no CoCalc to ask (SHARE_DEV=1): small, fixed limits. */
 /** After CoCalc couldn't say an account's plan, how long before it's asked again (LIMIT-SYNC-STATUS-1). */
@@ -168,6 +170,13 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       // (an object made before an op column existed gains it: §3's `parent`, Oct 20)
       if (this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'ops'") && !this.sql.exec("PRAGMA table_info(ops)").toArray().some((c) => (c as Row).name === "parent")) {
         this.sql.exec("ALTER TABLE ops ADD COLUMN parent TEXT");
+      }
+      // (an object made before blobs had a ciphertext hash gains the column: e2e PR 3a; its old rows keep NULL, read as
+      // ct = the address they were checked against, and every new row has one)
+      for (const t of ["holdings", "reservations"]) {
+        if (this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = ?", t) && !this.sql.exec(`PRAGMA table_info(${t})`).toArray().some((c) => (c as Row).name === "ct_sha256")) {
+          this.sql.exec(`ALTER TABLE ${t} ADD COLUMN ct_sha256 TEXT`);
+        }
       }
       this.alarmAt = await ctx.storage.getAlarm();
       if (this.hasMeta()) this.arm();
@@ -1562,14 +1571,16 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * Reserve the bytes of one upload: one transaction, against the limits,
    * with at most uploadsAtOnce running.  A blob already held needs no upload.
    */
-  async reserve(a: { account: string; sha256: string; size: number; bind?: { account?: string; generation?: number } }): Promise<Result<{ have: true } | { id: string; key: string; expires: number }>> {
+  async reserve(a: { account: string; sha256: string; ct_sha256: string; size: number; bind?: { account?: string; generation?: number } }): Promise<Result<{ have: true } | { id: string; key: string; expires: number }>> {
+    // (the bytes' own hash, which R2 checks, is the caller's to declare: an address names bytes but needn't be their hash)
+    if (!isSha(a.ct_sha256)) return { error: { code: "invalid", message: "the bytes' SHA-256 (x-sb-ct-sha256) is required" } };
     // (no storage, no sync: refused before anything reads a table, CORR-00F-1)
     if (!this.exists()) return { error: { code: "forbidden", message: "turn on sync first" } };
     const b = attempt(() => this.bound(a.bind?.account, a.bind?.generation));
     if ("error" in b) return b;
     const l = await this.limits();
     // room in the one budget first (§6.1), for an upload the checks below would take
-    if (l && l.sync.enabled && a.size <= Math.min(l.max_file_bytes, MAX_PUT) && !this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", a.sha256)) {
+    if (l && l.sync.enabled && a.size <= Math.min(l.max_file_bytes, MAX_PUT) && !this.held(a.sha256)) {
       const r = await attemptAsync(async () => {
         this.admit(a.account, true);
         await this.room(a.size, "file");
@@ -1583,7 +1594,13 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       // (the binding again, in the transaction that answers or allocates: the generation may have been retired and
       // the next one turned on during the awaits above, astra's narrowed CORR-PR58-1)
       this.bound(a.bind?.account, a.bind?.generation);
-      if (this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", a.sha256)) return { have: true as const };
+      // (held already: "have" only for exactly these bytes, this hash and size; anything else at this address is a
+      // conflict naming what is held, never adopted or replaced)
+      const h = this.held(a.sha256);
+      if (h) {
+        if (h.ct_sha256 === a.ct_sha256 && h.size === a.size) return { have: true as const };
+        throw SyncAccount.blobConflict(h);
+      }
       if (!l) throw new SyncError("busy", "this account's limits aren't known yet; try again");
       if (!l.sync.enabled) throw new SyncError("readonly", "this account's plan doesn't include sync");
       if (a.size > Math.min(l.max_file_bytes, MAX_PUT)) throw new SyncError("limit", "this file is too large", { limit: "max_file_bytes", max: Math.min(l.max_file_bytes, MAX_PUT) });
@@ -1594,7 +1611,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const id = randomHex(16);
       const key = `s/${this.get("account_hash")!.slice(0, 32)}/${randomHex(18)}`;
       const ends = now + (testMode(this.env) ? 3000 : RESERVE_MS);
-      this.sql.exec("INSERT INTO reservations (id, sha256, bytes, key, expires) VALUES (?, ?, ?, ?, ?)", id, a.sha256, a.size, key, ends);
+      this.sql.exec("INSERT INTO reservations (id, sha256, bytes, key, expires, ct_sha256) VALUES (?, ?, ?, ?, ?, ?)", id, a.sha256, a.size, key, ends, a.ct_sha256);
       this.addUsed(a.size);
       // (a dead upload's bytes come back at its end, even if nothing else happens here: LIMIT-7FB-1)
       this.wakeBy(ends + 1);
@@ -1624,7 +1641,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     }
     const r = attempt(() => this.ctx.storage.transactionSync(() => {
       this.admit(a.account, true);
-      const res = this.one("SELECT sha256, bytes, key, expires FROM reservations WHERE id = ?", a.id);
+      const res = this.one("SELECT sha256, ct_sha256, bytes, key, expires FROM reservations WHERE id = ?", a.id);
       if (!res) {
         // (finalized already: the same answer for the same size, a conflict for another)
         const f = this.one("SELECT sha256, size FROM finalized WHERE id = ?", a.id);
@@ -1634,19 +1651,28 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       }
       if (Number(res.expires) < Date.now()) throw new SyncError("busy", "this upload took too long; send it again");
       this.sql.exec("DELETE FROM reservations WHERE id = ?", a.id);
-      const sha = String(res.sha256);
+      const sha = String(res.sha256), ct = res.ct_sha256 === null ? sha : String(res.ct_sha256);
+      // (another upload to this address finalized first, with other bytes: this one's object goes and its bytes come
+      // back, and it is told what is held, never "finalized"; a reservation from before the column reads as ct = sha)
+      const h = this.held(sha);
+      if (h && a.size === Number(res.bytes) && (h.ct_sha256 !== ct || h.size !== a.size)) {
+        this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) VALUES (?, ?)", res.key, Date.now());
+        this.addUsed(-Number(res.bytes));
+        return { conflict: h };
+      }
       if (a.size === Number(res.bytes)) this.sql.exec("INSERT INTO finalized (id, sha256, size, at) VALUES (?, ?, ?, ?)", a.id, sha, a.size, Date.now());
-      if (a.size !== Number(res.bytes) || this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", sha)) {
+      if (a.size !== Number(res.bytes) || h) {
         this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) VALUES (?, ?)", res.key, Date.now());
         this.addUsed(-Number(res.bytes));
         if (a.size !== Number(res.bytes)) throw new SyncError("invalid", "the stored size isn't the declared one");
         return { sha256: sha };
       }
-      this.sql.exec("INSERT INTO holdings (sha256, key, size, refs, created) VALUES (?, ?, ?, 0, ?)", sha, res.key, res.bytes, Date.now());
+      this.sql.exec("INSERT INTO holdings (sha256, key, size, refs, created, ct_sha256) VALUES (?, ?, ?, 0, ?, ?)", sha, res.key, res.bytes, Date.now(), ct);
       return { sha256: sha };
     }));
     this.wakeBy(Date.now() + 5000);
-    return r;
+    if ("ok" in r && "conflict" in r.ok) return { error: { code: "conflict", message: "the server holds other bytes under this address", detail: { held: r.ok.conflict } } };
+    return r as Result<{ sha256: string }>;
   }
 
   /** An upload that failed before finalize: its object and its reservation go now. */
@@ -1692,23 +1718,45 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Which of these blobs this account must upload (advisory, §5.4). */
-  async missing(a: { account: string; blobs: string[]; bind?: { account?: string; generation?: number } }): Promise<Result<{ missing: string[]; verifying: string[] }>> {
+  async missing(a: { account: string; blobs: { sha256: string; ct_sha256: string; size: number }[]; bind?: { account?: string; generation?: number } }): Promise<Result<{ missing: string[]; verifying: string[]; conflicts: Held[] }>> {
     return attempt(() => {
       this.admit(a.account, false);
       this.bound(a.bind?.account, a.bind?.generation);
       // (with chunked files on, a whole file's hash is answered too, design/tiered-files.md §4.1 "First, is the whole
       // file already there?": held as a verified manifest, or being verified, which the client then drives)
       const files = tieredOn(this.env) && this.hasFiles();
-      const missing: string[] = [], verifying: string[] = [];
-      for (const sha of a.blobs) {
-        if (this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", sha)) continue;
-        const f = files ? this.one("SELECT state FROM files WHERE sha256 = ?", sha) : undefined;
-        if (f && f.state !== "verifying") continue;
+      const missing: string[] = [], verifying: string[] = [], conflicts: Held[] = [];
+      for (const { sha256: sha, ct_sha256: ct, size } of a.blobs) {
+        // (held is "there" only as exactly these bytes: held otherwise is a conflict, so no caller sends an op naming
+        // an address whose bytes aren't the ones it means)
+        const h = this.held(sha);
+        if (h) {
+          if (h.ct_sha256 !== ct || h.size !== size) conflicts.push(h);
+          continue;
+        }
+        const f = files ? this.one("SELECT state, size FROM files WHERE sha256 = ?", sha) : undefined;
+        if (f && f.state !== "verifying") {
+          // (a chunked file, verified or live: held as its address (which its verification checked the chunks' bytes
+          // make; ct = address, the bridge until end-to-end encryption) and its size, under the same exact rule)
+          const fh: Held = { sha256: sha, ct_sha256: sha, size: Number(f.size) };
+          if (fh.ct_sha256 !== ct || fh.size !== size) conflicts.push(fh);
+          continue;
+        }
         if (f) verifying.push(sha);
         missing.push(sha);
       }
-      return { missing, verifying };
+      return { missing, verifying, conflicts };
     });
+  }
+
+  /** A held blob (e2e PR 3a): its address, the SHA-256 its stored bytes were checked against (a row from before that
+   * column has NULL, read as its address, which R2 checked them against then) and its size; undefined if not held. */
+  private held(address: string): Held | undefined {
+    const h = this.one("SELECT sha256, COALESCE(ct_sha256, sha256) AS ct, size FROM holdings WHERE sha256 = ?", address);
+    return h ? { sha256: String(h.sha256), ct_sha256: String(h.ct), size: Number(h.size) } : undefined;
+  }
+  private static blobConflict(h: Held): SyncError {
+    return new SyncError("conflict", "the server holds other bytes under this address", { held: h });
   }
 
   // ---- chunked files (design/tiered-files.md §4.1, §4.3, §5.1), behind tieredOn (DEV only)
@@ -2190,6 +2238,18 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   async testOldOps(): Promise<void> {
     if (!testMode(this.env)) return;
     this.sql.exec("ALTER TABLE ops DROP COLUMN parent");
+  }
+  /** Tests only: this object as one made before blobs had a ciphertext hash (e2e PR 3a): the column dropped. */
+  async testOldBlobs(): Promise<boolean> {
+    if (!testMode(this.env)) return false;
+    for (const t of ["holdings", "reservations"]) this.sql.exec(`ALTER TABLE ${t} DROP COLUMN ct_sha256`);
+    return this.sql.exec("PRAGMA table_info(holdings)").toArray().every((c) => (c as Row).name !== "ct_sha256");
+  }
+  /** Tests only: a holding's stored ct_sha256, as stored (null for a row from before the column). */
+  async testHeldCt(a: { sha256: string }): Promise<string | null | undefined> {
+    if (!testMode(this.env)) return undefined;
+    const h = this.one("SELECT ct_sha256 FROM holdings WHERE sha256 = ?", a.sha256);
+    return h ? (h.ct_sha256 === null ? null : String(h.ct_sha256)) : undefined;
   }
   async crash(): Promise<void> {
     if (!testMode(this.env)) return;
