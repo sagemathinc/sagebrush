@@ -197,7 +197,7 @@
     {
       "name": "preflight_missing",
       "owner": "host",
-      "meaning": "a required unit, Landlock or path-contract control is missing at start"
+      "meaning": "a required host platform, privilege, account, unit, adapter, Landlock or path-contract control is missing at start"
     },
     {
       "name": "landlock_abi",
@@ -223,6 +223,26 @@
       "name": "clone_detected",
       "owner": "host",
       "meaning": "the host keys don't match this machine id; re-pair"
+    },
+    {
+      "name": "identity_broken",
+      "owner": "host",
+      "meaning": "the host identity or ownership layout is invalid: its identity files are in no closed state, or its trusted parents, ownership lock, directory ownership, links, or restore-root separation fail their checks; nothing is served"
+    },
+    {
+      "name": "host_ended",
+      "owner": "host",
+      "meaning": "this host's certificate no longer verifies against its pinned chain; nothing is served until a reset"
+    },
+    {
+      "name": "lease_unqualified",
+      "owner": "host",
+      "meaning": "the execution lease is set on, and this release isn't qualified for it"
+    },
+    {
+      "name": "bad_config",
+      "owner": "host",
+      "meaning": "the host's own settings file is unreadable or holds an unknown key or value"
     },
     {
       "name": "qualify_required",
@@ -267,7 +287,7 @@
     {
       "name": "busy",
       "owner": "host",
-      "meaning": "the conversation already has an active turn, or a lease bound is reached"
+      "meaning": "the conversation already has an active turn, or a lease bound is reached, or another process owns the host's identity (its ownership lock)"
     },
     {
       "name": "agent_fenced",
