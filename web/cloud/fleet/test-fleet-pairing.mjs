@@ -5,7 +5,7 @@
 // the certificate signed by the fleet's own native device, and the fleet built through the person's real chain route.
 //   node web/cloud/fleet/test-fleet-pairing.mjs
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, createHmac, hkdfSync } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -29,13 +29,14 @@ let failures = 0, count = 0;
 const ok = (c, what, detail) => { count++; if (!c) { failures++; console.log("FAIL", what, detail === undefined ? "" : JSON.stringify(detail).slice(0, 600)); } };
 const AUD = "https://dev.sagebrush.space", SITE = "https://fleet.test";
 const NOW = Date.now();
+const SEED = new Uint8Array(32).fill(7);
 let seedN = 1;
 const key = () => core.keyFromSeed(new Uint8Array(32).fill(seedN++ & 255).map((x, i) => (i === 0 ? (seedN >> 8) & 255 : x)));
 const text = (b) => new TextDecoder().decode(b);
 const enc = (s) => new TextEncoder().encode(s);
 
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser"], { encoding: "utf8" });
-const mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "fleet", modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["FLEET_DB"], bindings: { FLEET_AUD: AUD } }] }));
+const mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "fleet", modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["FLEET_DB"], bindings: { FLEET_AUD: AUD, LEASE_KEY_SEED: core.b64(SEED) } }] }));
 const db = await mf.getD1Database("FLEET_DB");
 const MIGRATIONS = ["0001_fleet_leases.sql", "0002_fleet_writers_chain_hosts.sql", "0003_fleet_writers_grants_transfers.sql", "0004_fleet_request_nonces.sql", "0005_fleet_accounts_and_bytes.sql", "0006_fleet_pairings.sql"];
 for (const m of MIGRATIONS) for (const stmt of readFileSync(join(here, "migrations", m), "utf8").replace(/--[^\n]*/g, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(stmt).run();
@@ -112,7 +113,7 @@ async function asked(name) { const h = await hostOf(name); const r = await ask(h
 // ---- K: the constants (TESTS P3: the host's horizon depends on the tombstone's retention)
 ok(P.PAIRING_TOMBSTONE_MS === 30 * 24 * 3600_000, "K-1: PAIRING_TOMBSTONE_MS is 30 days");
 ok(P.PAIRING_HOST_RESUME_MAX_MS === 7 * 24 * 3600_000 && P.PAIRING_HOST_RESUME_MAX_MS <= P.PAIRING_TOMBSTONE_MS / 2, "K-2: the host's 7-day resume horizon is at most half the tombstone's retention");
-ok(P.PAIRING_LIFE_MS === 600_000 && P.PAIRING_CLAIM_MS === 60_000 && P.PAIRING_CLAIM_MS > 30_000, "K-3: a pairing lives 10 minutes; a claim's lease is 60 s, past a Worker request's 30 s");
+ok(P.PAIRING_LIFE_MS === 600_000 && P.PAIRING_CLAIM_MS === 60_000 && P.PAIRING_CLAIM_MS > 30_000, "K-3: a pairing lives 10 minutes; a claim's lease is 60 s (it keeps racers apart; the G rows show what keeps a host in one fleet)");
 {
   // (the name rule is the schema's own $defs.name: every reserved name and the pattern's edges agree)
   const def = SCHEMAS["fleet.schema.json"].$defs.name, re = new RegExp(def.pattern);
@@ -128,6 +129,13 @@ let happy;
   const { h, pairing, code, expires_at_ms } = await asked("lab-box");
   ok(core.isId(pairing) && /^[a-z2-7]{8}$/.test(code) && expires_at_ms === NOW + 600_000, "H-1: the request gives a pairing id, an 8-character code and a 10-minute expiry", { pairing, code, expires_at_ms });
   ok(!JSON.stringify(await all("SELECT * FROM fleet_pairings")).includes(code), "H-2: the code itself is stored nowhere (only its hash)");
+  {
+    // (SEC N2: a plain SHA-256 of 40 bits is undone by trying them all, so the stored hash is keyed by the Worker)
+    const stored = (await one("SELECT code_hash FROM fleet_pairings WHERE pairing = ?1", pairing))?.code_hash;
+    const k = Buffer.from(hkdfSync("sha256", SEED, new Uint8Array(0), "sagebrush.fleet.pairing-code.v1", 32));
+    ok(stored === createHmac("sha256", k).update(code).digest("base64url"), "H-12: the stored hash is HMAC-SHA-256 under the key HKDF'd from the lease seed", stored);
+    ok(stored !== createHash("sha256").update(code).digest("base64url"), "H-13: not the code's plain SHA-256");
+  }
   ok((await pollOf(h, pairing)).json?.state === "pending", "H-3: the poll answers pending before the approval");
   const look = await lookupAs(f.account, code.toUpperCase().slice(0, 4) + " - " + code.slice(4));
   ok(look.status === 200 && look.json.pairing === pairing && look.json.fingerprint === h.fingerprint && look.json.name === "lab-box" && look.json.host === h.host,
@@ -388,11 +396,47 @@ let happy;
   ok((await ask(h)).json?.state === "expired", "V-2: and its re-POST answers expired");
 }
 
+// ---- G: a holder whose lease lapsed can still be running (a Worker's 30 s limit is CPU time), so two holders can both
+// reach pairHost; the host still lands in exactly one fleet, because fleet_hosts.host is a global key (SEC N1)
+for (const order of ["B-first", "A-first"]) {
+  const fa = await fleetOf(), fb = await fleetOf();
+  const g = await asked();
+  const lapsed = NOW + P.PAIRING_CLAIM_MS + 1;
+  // (A claims first and holds past its lease; B claims after the lapse. B-first: B's pairHost runs before A's; A-first:
+  // A's runs before B's)
+  const aWait = order === "B-first" ? 700 : 300, bWait = order === "B-first" ? 0 : 900;
+  const a = approveAs(fa, { pairing: g.pairing, approval: await approvalOf(fa, g.h, g.pairing), cert: await certOf(fa, g.h) }, { seam: `wait-after-claim:${aWait}` });
+  await new Promise((r) => setTimeout(r, 150));
+  const b = approveAs(fb, { pairing: g.pairing, approval: await approvalOf(fb, g.h, g.pairing, { at: lapsed, auth: lapsed }), cert: await certOf(fb, g.h) },
+    bWait ? { now: lapsed, seam: `wait-after-claim:${bWait}` } : { now: lapsed });
+  const [ra, rb] = await Promise.all([a, b]);
+  const winner = order === "B-first" ? fb : fa, [win, lose] = order === "B-first" ? [rb, ra] : [ra, rb];
+  const hosts = await all("SELECT fleet FROM fleet_hosts WHERE host = ?1", g.h.host), certs = await all("SELECT fleet FROM fleet_host_certs WHERE host = ?1", g.h.host);
+  ok(hosts.length === 1 && certs.length === 1 && hosts[0].fleet === winner.fleet && certs[0].fleet === winner.fleet, `G-${order}-1: the host is in exactly one fleet, the first pairHost's`, { hosts, certs });
+  ok(win.status === 200 && lose.status !== 200, `G-${order}-2: the first pairHost succeeds and the late one is refused`, { ra, rb });
+  ok((await one("SELECT claim FROM fleet_pairings WHERE pairing = ?1", g.pairing))?.claim === null, `G-${order}-3: no claim is left behind`);
+  const st = (await pollOf(g.h, g.pairing, { now: lapsed + 10 })).json;
+  ok(st?.state === "approved" && st?.fleet === winner.fleet, `G-${order}-4: the poll names that fleet`, st);
+}
+
 // ---- S: the session and the method
 {
   ok((await call("/api/fleet/v1/pairings/lookup", { body: "{}", headers: { "x-test-account": "a", "x-test-session": "unavailable" } })).status === 503, "S-1: a session that can't be checked: 503");
   ok((await call("/api/fleet/v1/host/pair", { method: "GET" })).status === 405, "S-2: GET: 405");
   ok(errorOf(await lookupAs("acct-x", "abc")) === "bad_form", "S-3: a code that isn't 8 characters of a-z2-7: bad_form");
+}
+
+// ---- N: without the lease seed there is no code key, so the routes are unavailable
+{
+  const bare = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "fleet", modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["FLEET_DB"], bindings: { FLEET_AUD: AUD } }] }));
+  // (its database migrated as the main one, so the 503 can only be the missing seed)
+  const bareDb = await bare.getD1Database("FLEET_DB");
+  for (const m of MIGRATIONS) for (const stmt of readFileSync(join(here, "migrations", m), "utf8").replace(/--[^\n]*/g, "").split(";").map((s) => s.trim()).filter(Boolean)) await bareDb.prepare(stmt).run();
+  const h = await hostOf();
+  const body = JSON.stringify(h.body()), headers = { "x-test-now": String(NOW), "sagebrush-sig": await sig(h.host, h.K, "/api/fleet/v1/host/pair", body) };
+  const r = await dispatch(bare, SITE + "/api/fleet/v1/host/pair", { method: "POST", headers, body });
+  ok(r.status === 503, "N-1: a well-signed request to a Worker without LEASE_KEY_SEED: 503", r.status);
+  await bare.dispose();
 }
 
 console.log(`${count - failures}/${count} passed`);

@@ -19,7 +19,9 @@ export const PAIRING_LIFE_MS = 10 * 60_000;
 export const PAIRING_TOMBSTONE_MS = 30 * 24 * 3600_000;
 /** The host's local resume horizon (host d3r2; TESTS P3): it must stay at most half the tombstone's retention. */
 export const PAIRING_HOST_RESUME_MAX_MS = 7 * 24 * 3600_000;
-/** An approve's claim lease: longer than a Worker request's 30 s limit, so a lapsed holder can't still be running. */
+/** An approve's claim lease. It keeps racing approves apart; it can't bound a holder's run, because a Worker's 30 s
+ * limit is CPU time, not time spent awaiting D1, so a lapsed holder may still reach pairHost. What keeps a host in one
+ * fleet is fleet_hosts.host, a global key that pairHost inserts only where it is absent. */
 export const PAIRING_CLAIM_MS = 60_000;
 /** A pairing request's body cap. */
 export const PAIRING_BODY_MAX = 4096;
@@ -28,6 +30,8 @@ export const PAIRING_LIMITS = Object.freeze({
   requestsPerSourceHour: 10, livePerSource: 5, liveTotal: 10_000, pollsPerMinute: 30, lookupsPerAccount: 10, lookupsPerSource: 30, approvesPerAccount: 120,
 });
 const NONCE_KEEP_MS = 10 * 60_000;
+/** The HKDF label of the code-hash key (codeHash). */
+export const PAIRING_CODE_LABEL = "sagebrush.fleet.pairing-code.v1";
 const HOUR = 3600_000, MINUTE = 60_000;
 
 /** The parts of the fleet core these routes use (server.ts passes the installer's getter: only it names the core). */
@@ -84,7 +88,7 @@ export const isPairingName = (name: unknown): name is string => typeof name === 
 
 type Row = { pairing: string; code_hash: string | null; host: string; sign_key: string; enc_key: string; fingerprint: string; name: string; source: string;
   created_ms: number; expires_ms: number; claim: string | null; claim_account: string | null; claim_until_ms: number | null; fleet: string | null };
-type Env = { FLEET_DB?: D1; FLEET_AUD?: string };
+type Env = { FLEET_DB?: D1; FLEET_AUD?: string; LEASE_KEY_SEED?: string };
 
 // (a pairing's host has a standing certificate: the SQL term, with the row's alias `p`)
 const CERTIFIED = "EXISTS (SELECT 1 FROM fleet_host_certs c WHERE c.host = p.host)";
@@ -96,16 +100,17 @@ export async function handlePairing(req: Request, url: URL, env: Env, getCore: (
   if (path !== HOST_PAIR && path !== HOST_RESULT && path !== LOOKUP && path !== APPROVE) return null;
   if (req.method !== "POST") return bare(405);
   const db = env.FLEET_DB, aud = env.FLEET_AUD;
-  if (!db || !aud) return bare(503);
+  if (!db || !aud || !env.LEASE_KEY_SEED) return bare(503);
   const core = getCore();
   const now = hooks.now ?? (() => Date.now());
   try {
+    const codeKey = await pairingCodeKey(core, env.LEASE_KEY_SEED);
     const body = await readBody(req, path === APPROVE ? 2 * core.SIGNED_MAX + 1024 : PAIRING_BODY_MAX, 10_000);
     if (body === null) return bare(408);
     if (path === HOST_PAIR || path === HOST_RESULT) {
       const source = (req.headers.get("cf-connecting-ip") ?? "unknown").slice(0, 64);
       const target = url.pathname + url.search;
-      return path === HOST_PAIR ? await request(db, core, aud, now, hooks, source, target, req.headers.get("sagebrush-sig"), body)
+      return path === HOST_PAIR ? await request(db, core, codeKey, aud, now, hooks, source, target, req.headers.get("sagebrush-sig"), body)
         : await poll(db, core, aud, now, target, req.headers.get("sagebrush-sig"), body);
     }
     if (!deps) return bare(503);
@@ -114,7 +119,7 @@ export async function handlePairing(req: Request, url: URL, env: Env, getCore: (
     if (s.kind === "unavailable") return bare(503);
     if (s.kind !== "ok") return refusal("unauthenticated");
     if (!ACCOUNT.test(s.account)) return bare(500);
-    if (path === LOOKUP) return await lookup(db, core, now, s.account, (req.headers.get("cf-connecting-ip") ?? "unknown").slice(0, 64), body);
+    if (path === LOOKUP) return await lookup(db, core, codeKey, now, s.account, (req.headers.get("cf-connecting-ip") ?? "unknown").slice(0, 64), body);
     return await approve(db, core, aud, now, hooks, s.account, body);
   } catch (e) {
     if (e instanceof Refused) return refusal(e.code);
@@ -167,7 +172,25 @@ function newCode(core: PairingCore): string {
   for (let i = 7; i >= 0; i--) s += CODE_ALPHABET[Number((acc >> BigInt(5 * i)) & 31n)];
   return s;
 }
-const codeHash = (core: PairingCore, code: string) => core.sha256b64(utf8.encode(code));
+/** A code as stored: HMAC-SHA-256 under a key only the Worker holds, so a database read gives no working codes (a
+ * plain hash of 40 bits is undone by trying them all). The key is HKDF'd from the lease key's seed under its own label,
+ * so it needs no secret of its own; a new seed only ends the live codes, which last 10 minutes. */
+async function codeHash(core: PairingCore, key: CryptoKey, code: string): Promise<string> {
+  return core.b64(new Uint8Array(await crypto.subtle.sign("HMAC", key, utf8.encode(code))));
+}
+let codeKeyMemo: { seed: string; key: Promise<CryptoKey> } | null = null;
+function pairingCodeKey(core: PairingCore, seed: string): Promise<CryptoKey> {
+  if (codeKeyMemo?.seed !== seed) {
+    const key = (async () => {
+      const ikm = await crypto.subtle.importKey("raw", new Uint8Array(core.unb64(seed, 32)), "HKDF", false, ["deriveKey"]);
+      return crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: utf8.encode(PAIRING_CODE_LABEL) }, ikm,
+        { name: "HMAC", hash: "SHA-256", length: 256 }, false, ["sign"]);
+    })();
+    key.catch(() => { if (codeKeyMemo?.key === key) codeKeyMemo = null; });
+    codeKeyMemo = { seed, key };
+  }
+  return codeKeyMemo.key;
+}
 const isUnique = (e: unknown) => /UNIQUE/i.test(String((e as Error)?.message ?? e));
 
 /** The state a pairing row is in now, by ONE statement: approved (its certificate stands), expired, or pending. */
@@ -185,7 +208,7 @@ async function stateOf(db: D1, core: PairingCore, row: Row, now: number): Promis
 const rowOf = (db: D1, where: string, v: unknown) => db.prepare(`SELECT * FROM fleet_pairings WHERE ${where} = ?1`).bind(v).first<Row>();
 
 /** POST /host/pair: a new pairing, or (idempotent per host id and keys) the same one again. */
-async function request(db: D1, core: PairingCore, aud: string, now: () => number, hooks: PairingHooks, source: string, target: string, header: string | null, bytes: Uint8Array<ArrayBuffer>): Promise<Response> {
+async function request(db: D1, core: PairingCore, codeKey: CryptoKey, aud: string, now: () => number, hooks: PairingHooks, source: string, target: string, header: string | null, bytes: Uint8Array<ArrayBuffer>): Promise<Response> {
   const b = bodyOf(bytes, ["enc_key", "fingerprint", "host", "name", "sign_key"]);
   if (!core.isId(b.host) || typeof b.sign_key !== "string" || !B64_32.test(b.sign_key) || typeof b.enc_key !== "string" || !B64_32.test(b.enc_key)
     || typeof b.fingerprint !== "string" || !B64_32.test(b.fingerprint) || !isPairingName(b.name)) no("bad_form");
@@ -213,7 +236,7 @@ async function request(db: D1, core: PairingCore, aud: string, now: () => number
       const code = newCode(core);
       try {
         const r = await db.prepare(`UPDATE fleet_pairings AS p SET code_hash = ?1 WHERE p.pairing = ?2 AND ${LIVE.replaceAll("?NOW", "?3")}`)
-          .bind(await codeHash(core, code), row.pairing, t).run();
+          .bind(await codeHash(core, codeKey, code), row.pairing, t).run();
         if ((r.meta?.changes ?? 0) === 1) return json(200, { pairing: row.pairing, code, expires_at_ms: row.expires_ms });
       } catch (e) { if (!isUnique(e)) throw e; }
       continue; // (a code collision, or the state moved: decide again)
@@ -236,7 +259,7 @@ async function request(db: D1, core: PairingCore, aud: string, now: () => number
           " WHERE NOT EXISTS (SELECT 1 FROM fleet_pairings WHERE host = ?3) AND NOT EXISTS (SELECT 1 FROM fleet_hosts WHERE host = ?3)" +
           ` AND (SELECT COUNT(*) FROM fleet_pairings p WHERE p.source = ?8 AND ${live}) < ?11` +
           ` AND (SELECT COUNT(*) FROM fleet_pairings p WHERE ${live}) < ?12`)
-          .bind(pairing, await codeHash(core, code), host, signKey, encKey, fingerprint, name, source, t, expires, PAIRING_LIMITS.livePerSource, total),
+          .bind(pairing, await codeHash(core, codeKey, code), host, signKey, encKey, fingerprint, name, source, t, expires, PAIRING_LIMITS.livePerSource, total),
       ]);
     } catch (e) { if (isUnique(e)) continue; throw e; } // (a code collision, or a racing insert for this host id: decide again)
     if ((res[3]?.meta?.changes ?? 0) === 1) return json(200, { pairing, code, expires_at_ms: expires });
@@ -276,7 +299,7 @@ async function poll(db: D1, core: PairingCore, aud: string, now: () => number, t
 // ---- the app's two routes (F7)
 
 /** POST /pairings/lookup: the waiting host behind a code. It binds nothing (§1.3). */
-async function lookup(db: D1, core: PairingCore, now: () => number, account: string, source: string, bytes: Uint8Array): Promise<Response> {
+async function lookup(db: D1, core: PairingCore, codeKey: CryptoKey, now: () => number, account: string, source: string, bytes: Uint8Array): Promise<Response> {
   const t = now();
   if (!(await bucket(db, `pair-lookup:${account}`, PAIRING_LIMITS.lookupsPerAccount, MINUTE, t, core.newId()))) no("rate");
   if (!(await bucket(db, `pair-lookup-src:${source}`, PAIRING_LIMITS.lookupsPerSource, MINUTE, t, core.newId()))) no("rate");
@@ -284,7 +307,7 @@ async function lookup(db: D1, core: PairingCore, now: () => number, account: str
   if (typeof b.code !== "string" || b.code.length > 32) no("bad_form");
   const code = (b.code as string).toLowerCase().replace(/[\s-]/g, "");
   if (!/^[a-z2-7]{8}$/.test(code)) no("bad_form");
-  const row = await db.prepare(`SELECT * FROM fleet_pairings p WHERE p.code_hash = ?1 AND ${LIVE.replaceAll("?NOW", "?2")}`).bind(await codeHash(core, code), t).first<Row>();
+  const row = await db.prepare(`SELECT * FROM fleet_pairings p WHERE p.code_hash = ?1 AND ${LIVE.replaceAll("?NOW", "?2")}`).bind(await codeHash(core, codeKey, code), t).first<Row>();
   if (!row) no("not_found");
   const r = row!;
   return json(200, { pairing: r.pairing, host: r.host, sign_key: r.sign_key, enc_key: r.enc_key, fingerprint: r.fingerprint, name: r.name, expires_at_ms: r.expires_ms });
