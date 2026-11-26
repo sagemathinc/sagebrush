@@ -163,7 +163,7 @@ export class BoardCode {
     this.nb = mod.createNotebook(root, { kernel, reactive: true, analyzer, ...this.parts.assets() });
     this.nb.load({ mode: "python", cells: [], autorun: "always" });
     if (this.pictures) this.nb.usePictures?.(this.pictures);
-    this.highlight = (src) => (this.mode === "matlab" ? mod.highlightMatlab(src) : mod.highlight(src, this.mode === "sage"));
+    this.highlight = (src) => (this.mode === "matlab" ? mod.highlightMatlab(src) : this.mode === "magma" ? mod.highlightMagma(src) : mod.highlight(src, this.mode === "sage"));
     // (a cell's state is its element's class: queued, running, stale, error, cancelled)
     this.observer = new MutationObserver(() => this.changed());
     this.observer.observe(root, { attributes: true, attributeFilter: ["class"], subtree: true });

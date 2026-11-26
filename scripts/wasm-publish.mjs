@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Publish this run's four modules to the release bucket (design/wasm-artifacts.md section 5).  Run only by CI's
+// Publish this run's five modules to the release bucket (design/wasm-artifacts.md section 5).  Run only by CI's
 // wasm-publish job, on a master push or a dispatch on master, in the wasm-publish environment.
 //
 //   node scripts/wasm-publish.mjs <artifact dir>
@@ -43,7 +43,7 @@ export function awsPut(key, bytes, env = process.env, spawn = spawnSync) {
 
 export async function publish(dir, { root = ROOT, base = DEFAULT_BASE, put = awsPut, limits = LIMITS, env = process.env, log = (s) => console.log(s) } = {}) {
   const { manifest, bytes } = readArtifact(dir, { env });
-  // all four must equal the pins: no fresh build is ever published (a track's run gets "fresh" from the policy)
+  // all five must equal the pins: no fresh build is ever published (a track's run gets "fresh" from the policy)
   const verdict = policy(manifest.modules, { root, env });
   if (verdict.mode !== "pinned") throw new Error(`refusing to publish a fresh build:\n${verdict.lines.join("\n")}`);
   const pins = loadPins(root);
@@ -81,7 +81,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   }
   try {
     await publish(dir);
-    console.log("wasm-publish: all four modules are published and read back");
+    console.log("wasm-publish: all five modules are published and read back");
   } catch (e) {
     console.error(e.message);
     process.exit(1);
