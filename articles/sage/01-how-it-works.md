@@ -293,7 +293,8 @@ probable results, Sagebrush does too:
 
 A result is never presented as proven when it rests on an unproven step.
 
-**Fixed limits.** GF(p) matrix products and echelon forms whose request
+**Fixed limits.** Matrix products and echelon forms over GF(p) with
+$p < 2^{63}$ (the fields the engine's binary route takes) whose request
 passes the 256 MiB frame are refused with a fixed-limit error; the limit is
 the same in every runtime.
 

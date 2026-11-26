@@ -25,7 +25,8 @@ for n in [4, 6, 8, 9, 12, 30, 49, 360, 2**20, 2**64, 3**41, 2**64 * 3 + 6, 10**3
             S = matrix(R, size, size, [[0, 2, 3, 6, n // 2, n - 2][_below(6)] for _ in range(size * size)])
             print(n, size, trial, M.det(), S.det(), M.is_invertible(), S.is_invertible())
 
-# triangular, a zero column, repeated rows, and a unit determinant
+# triangular, a zero column, repeated rows, and a nonzero determinant that
+# is not a unit (2 mod 24)
 R = Zmod(24)
 print(matrix(R, [[2, 5, 7], [0, 3, 1], [0, 0, 4]]).det())
 print(matrix(R, [[2, 0, 7], [6, 0, 1], [10, 0, 4]]).det())
