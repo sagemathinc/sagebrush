@@ -228,6 +228,13 @@ def split_prefix_bytes(data):
     return gen, bytes(data[m.end():])
 
 
+def _human_s(s):
+    return "%dd" % (s // 86400) if s % 86400 == 0 else "%dh" % (s // 3600) if s % 3600 == 0 else "%dm" % (s // 60)
+
+
+IDLE_PASS_S = 30  # (how often the idle stop looks: a kernel is stopped at most this long after its --idle)
+
+
 def ping_text():
     return '{"relay":"ping"}'
 
@@ -757,22 +764,40 @@ def agent_kinds(kinds):
 
 
 class EngineKernels:
-    """The engine channel's kernels, one per (notebook, entry), made by `factory(nb, entry)` (P2c's engine, P2d's
-    Native (Python); tests: a double).  A kernel has attach(page), detach(page), page_text(page, text),
-    page_bytes(page, data) and stop(why); it may end by itself, calling ended(kernel).  The table outlives pages and
+    """The engine channel's kernels, one per (notebook, entry), made by `factory(nb, entry, on_end, charge)` (P2c's
+    engine, P2d's Native (Python); tests: a double).  A kernel has attach(page, fresh), detach(page), page_text(page,
+    text), page_bytes(page, data) and stop(why), and an `idle` IdleClock it tells of its cells' starts and ends; it
+    calls charge.started() when its process tree exists, ledger.reconcile(charge) once ready, and charge.reaped() once
+    its tree is gone (charge.ended_unreaped() before that, if it stopped or failed).  A new kernel is admitted by the
+    ledger first (admission.py); a page reattaching to a kernel is never charged again.  The table outlives pages and
     legs; the runner's exit stops every kernel."""
 
-    def __init__(self, factory):
+    def __init__(self, factory, ledger=None, idle_s=None, clock=time.monotonic):
         self.factory = factory
+        self.ledger = ledger
+        self.idle_s, self.clock = idle_s, clock
         self.by_key = {}
 
     def get(self, nb, entry):
         return self.by_key.get((nb, entry))
 
     def start(self, nb, entry):
-        k = self.factory(nb, entry, lambda: self.ended(nb, entry, k))
+        """A new kernel, admitted first: the kernel, or Refused (admission.py) with the words to show."""
+        charge = self.ledger.admit(entry) if self.ledger is not None else None
+        try:
+            k = self.factory(nb, entry, lambda: self.ended(nb, entry, k), charge)
+        except BaseException:
+            if charge is not None:
+                charge.reaped()  # (nothing was spawned: no tree to wait for)
+            raise
+        from sagebrush.remote.admission import IdleClock
+        k.idle = IdleClock(self.idle_s, self.clock)
         self.by_key[(nb, entry)] = k
         return k
+
+    def idle_due(self):
+        """The kernels idle has come for (quiescent past --idle): stopped by the caller."""
+        return [(key, k) for key, k in self.by_key.items() if getattr(k, "idle", None) is not None and k.idle.due()]
 
     def ended(self, nb, entry, k):
         if self.by_key.get((nb, entry)) is k:
@@ -796,11 +821,12 @@ class RelayRunner:
 
     def __init__(self, key, timers=None, cwd=None, err=None, post=_post, rnd=random.random, sleep=asyncio.sleep, port=None,
                  terminals=True, agents=False, agent_cmd=None, agent_grace_ms=AGENT_GRACE_MS, agent_log=None,
-                 now_ms=None, agent_cmds=None, kernels=None):
+                 now_ms=None, agent_cmds=None, kernels=None, ledger=None, idle_s=None):
         self.key = key
         # (engine pages (r3 P2a): only with a kernel factory, kernels(nb, entry, on_end) -> a kernel; the connection
         # generation is the highest seen, across legs; each notebook's session generation likewise)
-        self.engine = EngineKernels(kernels) if kernels is not None else None
+        from sagebrush.remote.admission import IDLE_DEFAULT_S
+        self.engine = EngineKernels(kernels, ledger, IDLE_DEFAULT_S if idle_s is None else idle_s) if kernels is not None else None
         self.cgen = 0
         self.nb_sgen = {}
         self.nb_page = {}  # (each notebook's attached engine page)
@@ -963,6 +989,18 @@ class RelayRunner:
         p.hello_timer = self.timers.set_timeout(no_hello, PAIR_LIMITS["helloMs"])
 
     # ---- engine pages (r3 P2a)
+    def idle_pass(self):
+        """The idle stop's pass (every IDLE_PASS_S while the runner runs): each quiescent kernel past --idle stopped by
+        its tree rule; its charge refunded only once reaped (the kernel's own)."""
+        if self.engine is None:
+            return []
+        due = self.engine.idle_due()
+        for (nb, entry), k in due:
+            if self.engine.by_key.get((nb, entry)) is k:
+                del self.engine.by_key[(nb, entry)]
+            k.stop("idle for %s with no page and no running cell" % _human_s(k.idle.limit))
+        return due
+
     def advance_cgen(self, cgen):
         """The relay's connection generation went up (a disconnect, sync off or reset): every engine page of an older
         one is detached; their kernels go on, unreachable until a page of this generation opens them."""
@@ -993,10 +1031,19 @@ class RelayRunner:
         k = self.engine.get(nb, entry)
         fresh = k is None
         if fresh:
-            k = self.engine.start(nb, entry)
+            from sagebrush.remote.admission import Refused
+            try:
+                k = self.engine.start(nb, entry)
+            except Refused as e:
+                # (said to the page in words, then that page ends; nothing else changes)
+                p.paired = True
+                p.send({"engine": "refused", "why": str(e)})
+                return p.close(1008, "refused: %s" % str(e)[:80])
         p.paired = True  # (no hello: the relay bound the page's identity (H1); the kernel speaks first)
         p.kernel = k
         self.nb_page[nb] = p
+        if getattr(k, "idle", None) is not None:
+            k.idle.attach()
         k.attach(p, fresh)
 
     def terminals(self):
@@ -1031,6 +1078,8 @@ class RelayRunner:
             if p.engine is not None and self.nb_page.get(p.engine["nb"]) is p:
                 del self.nb_page[p.engine["nb"]]
             if k is not None:
+                if getattr(k, "idle", None) is not None and k.page is p:
+                    k.idle.detach()
                 k.detach(p)  # (the kernel goes on, detached; a later page of its notebook and entry finds it)
             return
         if p.chan == "terminal":
