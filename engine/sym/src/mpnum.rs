@@ -149,16 +149,29 @@ impl Mp {
     pub fn top(&self) -> i64 {
         self.e + self.m.bits() as i64
     }
-    /// log2 |x| of a finite nonzero number, from the top 64 bits of its
-    /// mantissa (under 2^-52 relative error past those bits' own), and the
-    /// exact one when |x| is a power of 2.
+    /// log2 |x| of a finite nonzero number, with a relative error of a few
+    /// units of 2^-52, and the exact one when |x| is a power of 2.  From the
+    /// top 64 bits of the mantissa, but for |x| in [1/2, 2) from d = |x| - 1
+    /// taken exactly from the whole mantissa, as ln(1 + d)/ln 2: near 1 the
+    /// top bits alone give 0 (R100's 1 + 2^-70, whose 2^140th power is
+    /// +infinity).
     pub fn log2_abs(&self) -> (f64, Option<i64>) {
         let a = self.m.abs();
         let b = a.bits();
-        let s = b.saturating_sub(64);
-        let top = (&a >> s as usize).to_f64().unwrap();
         let exact = if a.trailing_zeros() == Some(b - 1) { Some(self.top() - 1) } else { None };
-        (top.log2() + (self.e + s as i64) as f64, exact)
+        let top = |v: &BigInt, e: i64| -> f64 {
+            let s = v.bits().saturating_sub(64);
+            let f = (v >> s as usize).to_f64().unwrap();
+            f * ((e + s as i64) as f64).exp2()
+        };
+        if (0..=1).contains(&self.top()) && self.e < 0 {
+            let d = &a - (BigInt::one() << (-self.e) as usize);
+            let df = if d.is_negative() { -top(&-d, self.e) } else { top(&d, self.e) };
+            return (df.ln_1p() / std::f64::consts::LN_2, exact);
+        }
+        let s = b.saturating_sub(64);
+        let t = (&a >> s as usize).to_f64().unwrap();
+        (t.log2() + (self.e + s as i64) as f64, exact)
     }
     pub fn signbit(&self) -> bool {
         self.m.is_negative() || self.neg0 || self.sp == Sp::NegInf
@@ -435,16 +448,24 @@ pub fn arith(a: &Mp, b: &Mp, op: char, prec: u32) -> Mp {
 /// power then one rounding when it is small, else bracketed (pow_bracket);
 /// refused past the range.
 pub fn pow_int(x: &Mp, n: i64) -> Mp {
+    pow_big(x, &BigInt::from(n))
+}
+
+/// x^n for an integer n of any size, correctly rounded (Sage's mpfr_pow_z):
+/// as pow_int, its parity and sign n's own, the bracket's binary powering
+/// over the bits of |n|, refused past the range.
+pub fn pow_big(x: &Mp, n: &BigInt) -> Mp {
     let p = x.prec;
-    let odd = n % 2 != 0;
-    if n == 0 {
+    let odd = n.is_odd();
+    let pos = n.is_positive();
+    if n.is_zero() {
         return Mp::fin(&BigInt::one(), 0, p);
     }
     match x.sp {
         Sp::NaN => return x.clone(),
-        Sp::PosInf => return if n > 0 { x.clone() } else { Mp::zero(p, false) },
+        Sp::PosInf => return if pos { x.clone() } else { Mp::zero(p, false) },
         Sp::NegInf => {
-            return if n > 0 {
+            return if pos {
                 Mp::special(p, if odd { Sp::NegInf } else { Sp::PosInf })
             } else {
                 Mp::zero(p, odd)
@@ -454,9 +475,9 @@ pub fn pow_int(x: &Mp, n: i64) -> Mp {
     }
     if x.m.is_zero() {
         let neg = x.neg0 && odd;
-        return if n > 0 { Mp::zero(p, neg) } else { Mp::special(p, if neg { Sp::NegInf } else { Sp::PosInf }) };
+        return if pos { Mp::zero(p, neg) } else { Mp::special(p, if neg { Sp::NegInf } else { Sp::PosInf }) };
     }
-    let k = n.unsigned_abs();
+    let k = n.abs();
     // (x = a 2^e with a odd: a power of 2 is a shift, and an odd power
     // either fits the bracket's width, so its ends agree, or has more than
     // p + 1 significant bits, so it is no rounding boundary)
@@ -465,23 +486,27 @@ pub fn pow_int(x: &Mp, n: i64) -> Mp {
     let e = x.e.checked_add(t as i64).unwrap_or_else(|| refuse_range());
     let neg = x.m.is_negative() && odd;
     let fin = |(m, e): (BigInt, i64)| Mp::checked(Mp { m: if neg { -m } else { m }, e, prec: p, sp: Sp::Fin, neg0: false });
-    if a.is_one() || a.bits().saturating_mul(k) <= 4 * p as u64 + 256 {
-        let ak = a.pow(k as u32);
-        let en = e.checked_mul(n).unwrap_or_else(|| refuse_range());
-        return fin(if n > 0 { round_int(&ak, en, p) } else { round_q(&BigInt::one(), &ak, p, en) });
+    if a.is_one() {
+        let en = (BigInt::from(e) * n).to_i64().unwrap_or_else(|| refuse_range());
+        return fin(round_int(&BigInt::one(), en, p));
     }
-    fin(pow_round(&a, e, n, p, p as u64 + 2 * (64 - k.leading_zeros() as u64) + 20))
+    if let Some(ks) = k.to_u64().filter(|&ks| a.bits().saturating_mul(ks) <= 4 * p as u64 + 256) {
+        let ak = a.pow(ks as u32);
+        let en = (BigInt::from(e) * n).to_i64().unwrap_or_else(|| refuse_range());
+        return fin(if pos { round_int(&ak, en, p) } else { round_q(&BigInt::one(), &ak, p, en) });
+    }
+    fin(pow_round(&a, e, n, p, p as u64 + 2 * k.bits() + 20))
 }
 
 /// (a 2^e)^n (a > 0 odd, n != 0) rounded to p bits, as the front end's
 /// _pow_round: bracketed by binary powering cut down and up to w bits; when
 /// both ends round alike that is the result, else w doubles.
-fn pow_round(a: &BigInt, e: i64, n: i64, p: u32, w: u64) -> (BigInt, i64) {
-    let k = n.unsigned_abs();
+fn pow_round(a: &BigInt, e: i64, n: &BigInt, p: u32, w: u64) -> (BigInt, i64) {
+    let k = n.abs();
     let mut w = w;
     loop {
-        let (lo, hi) = pow_bracket(a, e, k, w);
-        let (r1, r2) = if n > 0 {
+        let (lo, hi) = pow_bracket(a, e, &k, w);
+        let (r1, r2) = if n.is_positive() {
             (round_int(&lo.0, lo.1, p), round_int(&hi.0, hi.1, p))
         } else {
             // (1/x^k lies between 1/hi and 1/lo)
@@ -506,12 +531,13 @@ fn cut(m: BigInt, e: i64, w: u64, up: bool) -> (BigInt, i64) {
     (if up && inexact { q + BigInt::one() } else { q }, e + s as i64)
 }
 
-/// lo <= (a 2^e)^k <= hi (a > 0, k > 0), each m 2^e with m of at most
-/// w + 1 bits, by binary powering cut down (lo) and up (hi).  Refused where
-/// the power, or its inverse, is past the range for certain: a factor still
-/// to come is at least 1 when a 2^e >= 1 (so lo only grows) and at most 1
-/// below (hi only shrinks), which also bounds the exponents.
-fn pow_bracket(a: &BigInt, e: i64, k: u64, w: u64) -> ((BigInt, i64), (BigInt, i64)) {
+/// lo <= (a 2^e)^k <= hi (a > 0, k > 0 of any size), each m 2^e with m of
+/// at most w + 1 bits, by binary powering over the bits of k, cut down (lo)
+/// and up (hi).  Refused where the power, or its inverse, is past the range
+/// for certain: a factor still to come is at least 1 when a 2^e >= 1 (so
+/// lo only grows) and at most 1 below (hi only shrinks), which also bounds
+/// the exponents.
+fn pow_bracket(a: &BigInt, e: i64, k: &BigInt, w: u64) -> ((BigInt, i64), (BigInt, i64)) {
     let mul = |x: &(BigInt, i64), y: &(BigInt, i64), up: bool| -> (BigInt, i64) {
         let r = cut(&x.0 * &y.0, x.1.checked_add(y.1).unwrap_or_else(|| refuse_range()), w, up);
         let top = r.1 + r.0.bits() as i64;
@@ -522,13 +548,12 @@ fn pow_bracket(a: &BigInt, e: i64, k: u64, w: u64) -> ((BigInt, i64), (BigInt, i
     };
     let mut r = [(BigInt::one(), 0i64), (BigInt::one(), 0i64)];
     let mut base = [(a.clone(), e), (a.clone(), e)];
-    let mut k = k;
-    while k > 0 {
-        if k & 1 == 1 {
+    let bits = k.bits();
+    for i in 0..bits {
+        if k.bit(i) {
             r = [mul(&r[0], &base[0], false), mul(&r[1], &base[1], true)];
         }
-        k >>= 1;
-        if k > 0 {
+        if i + 1 < bits {
             base = [mul(&base[0], &base[0], false), mul(&base[1], &base[1], true)];
         }
     }
@@ -924,7 +949,7 @@ mod tests {
             for k in [5u64, 17, 64, 101, 333] {
                 let exact = (a.pow(k as u32), e * k as i64);
                 for w in [24u64, 40, 64] {
-                    let (lo, hi) = pow_bracket(&a, e, k, w);
+                    let (lo, hi) = pow_bracket(&a, e, &BigInt::from(k), w);
                     assert!(le(&lo, &exact) && le(&exact, &hi), "{} 2^{} ^ {} at {}", a, e, k, w);
                     assert_eq!(le(&hi, &lo), exact.0.bits() <= w, "{} 2^{} ^ {} at {}", a, e, k, w);
                 }
@@ -937,7 +962,7 @@ mod tests {
             for k in [5i64, 17, 64, 101] {
                 for n in [k, -k] {
                     let b = exact(&x, n);
-                    let r = pow_round(&BigInt::from(a), e, n, p, p as u64 + 1);
+                    let r = pow_round(&BigInt::from(a), e, &BigInt::from(n), p, p as u64 + 1);
                     assert!(b.m == r.0 && b.e == r.1, "{} 2^{} ^ {} at {}", a, e, n, p);
                 }
             }

@@ -456,14 +456,8 @@ impl Num {
     /// self^e by binary powering.
     pub fn pow_uint(&self, e: u64) -> Num {
         match self {
-            Num::Mp(x) => match i64::try_from(e) {
-                Ok(e) => Num::mp(mpnum::pow_int(x, e)),
-                Err(_) => not_implemented("a power of a real number with so large an exponent in a symbolic expression is not available in sagebrush yet"),
-            },
-            Num::Mpc(x) => match i64::try_from(e) {
-                Ok(e) => Num::mpc(x.pow_int(e)),
-                Err(_) => not_implemented("a power of a complex number with so large an exponent in a symbolic expression is not available in sagebrush yet"),
-            },
+            Num::Mp(x) => Num::mp(mpnum::pow_big(x, &BigInt::from(e))),
+            Num::Mpc(x) => Num::mpc(x.pow_big(&BigInt::from(e))),
             Num::Exact(a, b) if b.is_zero() => {
                 // r and base are powers of the reduced a, so a product has
                 // at least bits(r) + bits(base) - 1 bits: refuse before
@@ -976,12 +970,13 @@ pub enum PowRange {
 /// |b^n| = t n is exact and so is the decision (SR(RR(2))^(2^62 - 1) is
 /// +infinity, SR(RR(2))^(2^62 - 2) refused past the engine's MP numbers).
 /// Otherwise by the estimate lb n, with a margin for the error of lb (a
-/// double's log2, or an MP number's from its top 64 bits: under 2^-40
-/// relative, 2^-44 absolute) and, for a complex b, for generic_power's
-/// drift (each of its about 2 log2 n products has a relative error of a
-/// few units of 2^-53, which later squarings double: under n 2^-48 in
-/// log2), all under 8 + |lb n| 2^-40 + |n| 2^-44.
-pub fn pow_range(lb: f64, lb_exact: Option<i64>, n: f64, n_exact: Option<i128>) -> PowRange {
+/// double's log2, or an MP number's, Mp::log2_abs: under 2^-40 relative)
+/// and, for a complex b, for its parts' combination (2^-44 absolute) and
+/// generic_power's drift (each of its about 2 log2 n products has a
+/// relative error of a few units of 2^-53, which later squarings double:
+/// under n 2^-48 in log2): all under 8 + |lb n| 2^-40, plus |n| 2^-44 for a
+/// complex b.
+pub fn pow_range(lb: f64, lb_exact: Option<i64>, n: f64, n_exact: Option<i128>, complex: bool) -> PowRange {
     let max = crate::mpnum::MAX_EXP as i128;
     if let (Some(t), Some(n)) = (lb_exact, n_exact) {
         if let Some(l) = (t as i128).checked_mul(n) {
@@ -999,7 +994,7 @@ pub fn pow_range(lb: f64, lb_exact: Option<i64>, n: f64, n_exact: Option<i128>) 
     // (an exponent past the doubles as 10^300, still far past MPFR's)
     let n = n.clamp(-1e300, 1e300);
     let est = lb * n;
-    let margin = 8.0 + est.abs() * (-40f64).exp2() + n.abs() * (-44f64).exp2();
+    let margin = 8.0 + est.abs() * (-40f64).exp2() + if complex { n.abs() * (-44f64).exp2() } else { 0.0 };
     let mpfr = 62f64.exp2();
     let max = max as f64;
     if est - margin >= mpfr - 1.0 {
@@ -1034,7 +1029,7 @@ pub fn mp_pow(b: &Num, n: &BigInt) -> Num {
             return Num::mpc(z.pow_int(n.to_i64().unwrap_or_else(small)));
         }
         let (lb, lb_exact) = z.log2_abs();
-        return match pow_range(lb, lb_exact, n.to_f64().unwrap_or(f64::INFINITY), n.to_i128()) {
+        return match pow_range(lb, lb_exact, n.to_f64().unwrap_or(f64::INFINITY), n.to_i128(), true) {
             PowRange::Compute => Num::mpc(z.pow_big(n)),
             _ => mpnum::refuse_range(),
         };
@@ -1048,14 +1043,11 @@ pub fn mp_pow(b: &Num, n: &BigInt) -> Num {
         return Num::mp(mpnum::pow_int(x, small()));
     }
     let neg = x.m.is_negative() && n.is_odd();
-    match pow_range(lb, lb_exact, n.to_f64().unwrap_or(f64::INFINITY), n.to_i128()) {
+    match pow_range(lb, lb_exact, n.to_f64().unwrap_or(f64::INFINITY), n.to_i128(), false) {
         PowRange::Inf => Num::mp(Mp::special(x.prec, if neg { Sp::NegInf } else { Sp::PosInf })),
         PowRange::Zero => Num::mp(Mp::zero(x.prec, neg)),
         PowRange::Refuse => mpnum::refuse_range(),
-        PowRange::Compute => match n.to_i64() {
-            Some(n) => Num::mp(mpnum::pow_int(x, n)),
-            None => not_implemented("a power of a real number with so large an exponent in a symbolic expression is not available in sagebrush yet"),
-        },
+        PowRange::Compute => Num::mp(mpnum::pow_big(x, n)),
     }
 }
 
@@ -1104,7 +1096,7 @@ pub fn pow_past_doubles(re: f64, im: f64, n: f64, n_exact: Option<i128>, odd: bo
     let (lb, lb_exact) = log2_abs_c64(re, im);
     let real = im == 0.0 && !k.complex();
     let neg = real && re < 0.0 && odd;
-    match pow_range(lb, lb_exact, n, n_exact) {
+    match pow_range(lb, lb_exact, n, n_exact, !real) {
         PowRange::Compute => None,
         PowRange::Inf if real => Some(Num::Float(if neg { f64::NEG_INFINITY } else { f64::INFINITY }, 0.0, k)),
         PowRange::Zero if real => Some(Num::Float(if neg { -0.0 } else { 0.0 }, 0.0, k)),
@@ -1698,7 +1690,7 @@ mod tests {
         // below 2^(2^62 - 1); Sage's 2^(2^62 - 2) finite, 2^(2^62 - 1)
         // +infinity, 0.5^(2^62) finite, 0.5^(2^62 + 1) 0)
         let e62 = 1i128 << 62;
-        let r = |t: i64, n: i128| pow_range(t as f64, Some(t), n as f64, Some(n));
+        let r = |t: i64, n: i128| pow_range(t as f64, Some(t), n as f64, Some(n), false);
         assert_eq!(r(1, e62 - 2), PowRange::Refuse);
         assert_eq!(r(1, e62 - 1), PowRange::Inf);
         assert_eq!(r(-1, e62), PowRange::Refuse);
@@ -1723,6 +1715,19 @@ mod tests {
         // (1.5^7002 is about 2^4095.9, 1.5^7003 past 2^4096)
         assert_eq!(s(mp_pow(&mp(1.5, 24), &BigInt::from(7002))), mpnum::pow_int(&Mp::from_f64(1.5, 24), 7002).sage_str());
         assert!(crate::err::catch(|| mp_pow(&mp(1.5, 24), &BigInt::from(7003))).is_err());
+        // (near 1, an exponent past i64 within the MP numbers: Sage's
+        // (1 + 2^-99)^(2^65) and (1 + 2^-99)^(-(2^65 + 1)) at 100 bits)
+        let near = Num::mp(Mp::fin(&((BigInt::one() << 99usize) + BigInt::one()), -99, 100));
+        let e65 = BigInt::one() << 65usize;
+        assert_eq!(s(mp_pow(&near, &e65)), "1.0000000000582076609151614731");
+        assert_eq!(s(mp_pow(&near, &-(&e65 + BigInt::one()))), "0.99999999994179233908822665867");
+        // (within 2^-64 of 1, past MPFR's exponents: Sage's
+        // (1 + 2^-70)^(2^140) is +infinity, -(1 - 2^-70)^(2^140 + 1) is -0)
+        let e140 = BigInt::one() << 140usize;
+        let up = Num::mp(Mp::fin(&((BigInt::one() << 70usize) + BigInt::one()), -70, 100));
+        let down = Num::mp(Mp::fin(&-((BigInt::one() << 70usize) - BigInt::one()), -70, 100));
+        assert_eq!(s(mp_pow(&up, &e140)), "+infinity");
+        assert_eq!(s(mp_pow(&down, &(&e140 + BigInt::one()))), "-0.00000000000000000000000000000");
         // (a complex one: generic_power by the bits, I^(2^100) is 1, and
         // pow_big is pow_int within i64)
         let i = Mpc::new(Mp::zero(100, false), Mp::from_f64(1.0, 100));

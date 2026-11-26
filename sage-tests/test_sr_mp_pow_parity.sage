@@ -37,3 +37,18 @@ for C in [CC, ComplexField(30), ComplexField(100)]:
     for b in [C(0, 1), C(0, -1), C(-1, 0), C(1, 0)]:
         for n in [2^100, 2^100 + 1, 2^100 + 2, 2^100 + 3, -(2^100 + 1), 10^30 + 7]:
             print(C.prec(), p(b, n))
+
+# near 1, exponents past i64 whose powers are within the MP numbers: the
+# bracket by the bits of the exponent, correctly rounded
+for F in [RealField(100), RealField(200), RealField(400)]:
+    for b in [F(1) + F(2)^(-99), F(1) - F(2)^(-99), -(F(1) + F(2)^(-99)), F(1) + F(2)^(-150), -(F(1) - F(2)^(-190)), F(1) + F(2)^(-70)]:
+        for n in [2^65, -(2^65 + 1), 2^65 + 1, -(2^64), 3^41, -(3^41), 2^100 + 1, 10^25]:
+            print(F.prec(), p(b, n))
+
+# within 2^-64 of 1: past MPFR's exponents still an infinity or a 0, signed
+# by parity (the deviation from 1 read from the whole mantissa)
+for F in [RealField(100), RealField(200)]:
+    for d in [-70, -90]:
+        for b in [F(1) + F(2)^d, F(1) - F(2)^d, -(F(1) + F(2)^d), -(F(1) - F(2)^d)]:
+            for n in [2^140, 2^140 + 1, -(2^140 + 1), 2^160 + 3]:
+                print(F.prec(), p(b, n))
