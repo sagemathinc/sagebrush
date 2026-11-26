@@ -1230,10 +1230,23 @@ class FFVector:
             c = K(o.real(), o.imag())
         return K, (self if K is B else FFVector(K, [K(a) for a in self._e])), c
 
+    def _finite_meet(self, o):
+        """(the ring, this vector over it, o in it) when this vector is over
+        GF(q) or Z/n and o is a scalar over another such ring that Sage's
+        coercion meets with it (_pushout: Z/m and Z/n in Z/gcd(m, n), GF(p^k)
+        with Z/n when p divides n), else None."""
+        B = self._base
+        if not _mod_ring(B) or _vec_base(o) is not None:
+            return None
+        K = _pushout(B, o)
+        if K is None:
+            return None
+        return K, (self if K is B else FFVector(K, [K(a) for a in self._e])), K(o)
+
     def __mul__(self, o):
         if _vec_base(o) is not None:
             return _vector_op(self, o, "*")
-        m = self._inexact_meet(o)
+        m = self._inexact_meet(o) or self._finite_meet(o)
         if m is not None:
             K, v, c = m
             return FFVector(K, [a * c for a in v._e])
@@ -1269,7 +1282,7 @@ class FFVector:
         """
         if _vec_base(o) is not None:
             return _vector_op(o, self, "*")
-        m = self._inexact_meet(o)
+        m = self._inexact_meet(o) or self._finite_meet(o)
         if m is not None:
             K, v, c = m
             return FFVector(K, [c * a for a in v._e])
