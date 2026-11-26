@@ -2,8 +2,10 @@
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { optionalModules } from "./optional-wasm.mjs";
+import { MODULES } from "./wasm-modules.mjs";
 
-const failure = (...lines) => new Error(`wasm-fetch: ${lines.length} of 4 modules failed:\n${lines.join("\n")}`);
+// (the header wasm-fetch.mjs writes: N of every pinned module, MODULES)
+const failure = (...lines) => new Error(`wasm-fetch: ${lines.length} of ${MODULES.length} modules failed:\n${lines.join("\n")}`);
 const unpublished = (name) => `${name}: https://get.sagebrush.space/wasm/sha256/${"a".repeat(64)}.wasm: 404 (not published): this pin isn't published yet`;
 const throws = (error) => async () => { throw error; };
 const run = (fetch, env) => optionalModules({ fetch, env, log: () => {} });
