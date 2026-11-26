@@ -52,3 +52,13 @@ for F in [RealField(100), RealField(200)]:
         for b in [F(1) + F(2)^d, F(1) - F(2)^d, -(F(1) + F(2)^d), -(F(1) - F(2)^d)]:
             for n in [2^140, 2^140 + 1, -(2^140 + 1), 2^160 + 3]:
                 print(F.prec(), p(b, n))
+
+# high precision, the deviation from 1 and the exponent both past the
+# doubles: still an infinity or a 0 past MPFR's exponents (log2 |b^n| past
+# 2^99); twins below that computed, or past the MP numbers
+for F, t, ns in [(RealField(2048), 2000, [2^2100, 2^2100 + 1, -(2^2100 + 1), 2^2060, 2^2010, -(2^2010 + 1)]),
+                 (RealField(1100), 1000, [2^1100, 2^1100 + 1, -(2^1100 + 1), 2^1060, 2^1010, -(2^1010 + 1)])]:
+    for b in [F(1) + F(2)^(-t), F(1) - F(2)^(-t), -(F(1) + F(2)^(-t))]:
+        for n in ns:
+            r = p(b, n)
+            print(F.prec(), r if len(r) < 400 else r[:200] + " ... " + r[-60:])

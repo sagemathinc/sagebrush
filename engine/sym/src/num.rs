@@ -437,7 +437,7 @@ impl Num {
                 if *b == 0.0 && !k.complex() && a.is_finite() && *a != 0.0 && !(-1..=1).contains(&e) {
                     return pow_int_mp53(self, e, *k);
                 }
-                if let Some(r) = pow_past_doubles(*a, *b, e as f64, Some(e as i128), e % 2 != 0, &e, *k) {
+                if let Some(r) = pow_past_doubles(*a, *b, ((e as f64).abs().log2(), e < 0), Some(e as i128), e % 2 != 0, &e, *k) {
                     return r;
                 }
                 let (r, left) = in_steps(|| self.pow_int(e));
@@ -943,7 +943,7 @@ pub fn refuse_float_value(name: &str, v: &[(f64, f64)], k: Fk) -> ! {
 /// for a complex one): kept when each part is a double, refused otherwise.
 pub fn pow_int_mp53(b: &Num, n: i64, k: Fk) -> Num {
     let (re, im) = b.to_c64();
-    if let Some(r) = pow_past_doubles(re, im, n as f64, Some(n as i128), n % 2 != 0, &n, k) {
+    if let Some(r) = pow_past_doubles(re, im, ((n as f64).abs().log2(), n < 0), Some(n as i128), n % 2 != 0, &n, k) {
         return r;
     }
     from_mp53(&to_mp53(b).pow_int(n), k)
@@ -969,14 +969,17 @@ pub enum PowRange {
 /// - 1).  When |b| is a power of 2, 2^t (lb_exact), and n is exact, log2
 /// |b^n| = t n is exact and so is the decision (SR(RR(2))^(2^62 - 1) is
 /// +infinity, SR(RR(2))^(2^62 - 2) refused past the engine's MP numbers).
-/// Otherwise by the estimate lb n, with a margin for the error of lb (a
-/// double's log2, or an MP number's, Mp::log2_abs: under 2^-40 relative)
-/// and, for a complex b, for its parts' combination (2^-44 absolute) and
-/// generic_power's drift (each of its about 2 log2 n products has a
-/// relative error of a few units of 2^-53, which later squarings double:
-/// under n 2^-48 in log2): all under 8 + |lb n| 2^-40, plus |n| 2^-44 for a
-/// complex b.
-pub fn pow_range(lb: f64, lb_exact: Option<i64>, n: f64, n_exact: Option<i128>, complex: bool) -> PowRange {
+/// Otherwise by the estimate lb n, carried as its sign and log2 |lb n| =
+/// log2 |lb| + log2 |n| (lb as Mp::log2_abs gives it, n as log2 |n| and
+/// its sign), so that neither a tiny lb (R2048's 1 + 2^-2000) nor a huge
+/// n (2^2100) loses its scale: past 2^80 the sign decides (an infinity or
+/// a 0, far past MPFR's 2^62); below, the product is a double, with a
+/// margin for the error of lb (under 2^-40 relative) and, for a complex b,
+/// for its parts' combination (2^-44 absolute) and generic_power's drift
+/// (each of its about 2 log2 n products has a relative error of a few
+/// units of 2^-53, which later squarings double: under n 2^-48 in log2):
+/// all under 8 + |lb n| 2^-40, plus |n| 2^-44 for a complex b.
+pub fn pow_range(lb: (f64, f64), lb_exact: Option<i64>, n: (f64, bool), n_exact: Option<i128>, complex: bool) -> PowRange {
     let max = crate::mpnum::MAX_EXP as i128;
     if let (Some(t), Some(n)) = (lb_exact, n_exact) {
         if let Some(l) = (t as i128).checked_mul(n) {
@@ -991,10 +994,23 @@ pub fn pow_range(lb: f64, lb_exact: Option<i64>, n: f64, n_exact: Option<i128>, 
             };
         }
     }
-    // (an exponent past the doubles as 10^300, still far past MPFR's)
-    let n = n.clamp(-1e300, 1e300);
-    let est = lb * n;
-    let margin = 8.0 + est.abs() * (-40f64).exp2() + if complex { n.abs() * (-44f64).exp2() } else { 0.0 };
+    let ((ls, ll), (nl, nneg)) = (lb, n);
+    if ls == 0.0 {
+        return PowRange::Compute;
+    }
+    let sign = if nneg { -ls } else { ls };
+    let l2 = ll + nl;
+    if l2 > 80.0 {
+        // (a complex b's absolute margin, |n| 2^-44, is then under |lb n|/16
+        // when |lb| > 2^-40; else its powers are computed, refused past the
+        // MP numbers as they leave them)
+        if complex {
+            return if ll > -40.0 { PowRange::Refuse } else { PowRange::Compute };
+        }
+        return if sign > 0.0 { PowRange::Inf } else { PowRange::Zero };
+    }
+    let est = sign * l2.exp2();
+    let margin = 8.0 + est.abs() * (-40f64).exp2() + if complex { nl.exp2() * (-44f64).exp2() } else { 0.0 };
     let mpfr = 62f64.exp2();
     let max = max as f64;
     if est - margin >= mpfr - 1.0 {
@@ -1028,8 +1044,8 @@ pub fn mp_pow(b: &Num, n: &BigInt) -> Num {
         if z.re.sp != Sp::Fin || z.im.sp != Sp::Fin || z.is_zero() {
             return Num::mpc(z.pow_int(n.to_i64().unwrap_or_else(small)));
         }
-        let (lb, lb_exact) = z.log2_abs();
-        return match pow_range(lb, lb_exact, n.to_f64().unwrap_or(f64::INFINITY), n.to_i128(), true) {
+        let (ls, ll, lb_exact) = z.log2_abs();
+        return match pow_range((ls, ll), lb_exact, (log2_big(n), n.is_negative()), n.to_i128(), true) {
             PowRange::Compute => Num::mpc(z.pow_big(n)),
             _ => mpnum::refuse_range(),
         };
@@ -1038,12 +1054,12 @@ pub fn mp_pow(b: &Num, n: &BigInt) -> Num {
     if x.sp != Sp::Fin || x.m.is_zero() {
         return Num::mp(mpnum::pow_int(x, n.to_i64().unwrap_or_else(small)));
     }
-    let (lb, lb_exact) = x.log2_abs();
+    let (ls, ll, lb_exact) = x.log2_abs();
     if lb_exact == Some(0) {
         return Num::mp(mpnum::pow_int(x, small()));
     }
     let neg = x.m.is_negative() && n.is_odd();
-    match pow_range(lb, lb_exact, n.to_f64().unwrap_or(f64::INFINITY), n.to_i128(), false) {
+    match pow_range((ls, ll), lb_exact, (log2_big(n), n.is_negative()), n.to_i128(), false) {
         PowRange::Inf => Num::mp(Mp::special(x.prec, if neg { Sp::NegInf } else { Sp::PosInf })),
         PowRange::Zero => Num::mp(Mp::zero(x.prec, neg)),
         PowRange::Refuse => mpnum::refuse_range(),
@@ -1056,7 +1072,7 @@ pub fn mp_pow(b: &Num, n: &BigInt) -> Num {
 /// doubles, before computing when for certain (pow_past_doubles).
 pub fn pow_big_mp53(b: &Num, n: &BigInt, shown: &dyn std::fmt::Display, k: Fk) -> Num {
     let (re, im) = b.to_c64();
-    if let Some(r) = pow_past_doubles(re, im, n.to_f64().unwrap_or(f64::INFINITY), n.to_i128(), n.is_odd(), shown, k) {
+    if let Some(r) = pow_past_doubles(re, im, (log2_big(n), n.is_negative()), n.to_i128(), n.is_odd(), shown, k) {
         return r;
     }
     let v = match to_mp53(b) {
@@ -1066,9 +1082,10 @@ pub fn pow_big_mp53(b: &Num, n: &BigInt, shown: &dyn std::fmt::Display, k: Fk) -
     from_mp53(&v, k)
 }
 
-/// log2 |re + im*I| for finite doubles not both 0, and the exact one when
-/// it is a power of 2 (a part 0, the other +-2^t).
-pub fn log2_abs_c64(re: f64, im: f64) -> (f64, Option<i64>) {
+/// lb = log2 |re + im*I| for finite doubles not both 0, as its sign and
+/// log2 |lb| (Mp::log2_abs's form), and the exact lb when it is a power of
+/// 2 (a part 0, the other +-2^t).
+pub fn log2_abs_c64(re: f64, im: f64) -> (f64, f64, Option<i64>) {
     let (hi, lo) = if re.abs() >= im.abs() { (re.abs(), im.abs()) } else { (im.abs(), re.abs()) };
     let exact = if lo == 0.0 && hi.is_normal() && hi.to_bits() & ((1u64 << 52) - 1) == 0 {
         Some(((hi.to_bits() >> 52) as i64) - 1023)
@@ -1077,11 +1094,12 @@ pub fn log2_abs_c64(re: f64, im: f64) -> (f64, Option<i64>) {
     } else {
         None
     };
-    (hi.log2() + 0.5 * (1.0 + (lo / hi) * (lo / hi)).log2(), exact)
+    let lb = hi.log2() + 0.5 * (1.0 + (lo / hi) * (lo / hi)).log2();
+    (if lb == 0.0 { 0.0 } else { lb.signum() }, lb.abs().log2(), exact)
 }
 
 /// The power b^n of an RR or CC number b = re + im*I (parent k) to an
-/// integer n (as a double, n_exact when it fits an i128, odd its parity,
+/// integer n (as log2 |n| and its sign, n_exact when it fits an i128, odd its parity,
 /// shown as the refusal prints it) whose value is past the engine's MP
 /// numbers for certain (pow_range), decided before computing it.  Past
 /// MPFR's exponents, a real one is Sage's double: an infinity, or a 0,
@@ -1089,14 +1107,14 @@ pub fn log2_abs_c64(re: f64, im: f64) -> (f64, Option<i64>) {
 /// the doubles with no value of Sage's to show (SR(RR(2))^(10^6), not a
 /// refusal about its exact power's integer).  None where the power is to
 /// be computed.
-pub fn pow_past_doubles(re: f64, im: f64, n: f64, n_exact: Option<i128>, odd: bool, shown: &dyn std::fmt::Display, k: Fk) -> Option<Num> {
+pub fn pow_past_doubles(re: f64, im: f64, n: (f64, bool), n_exact: Option<i128>, odd: bool, shown: &dyn std::fmt::Display, k: Fk) -> Option<Num> {
     if !re.is_finite() || !im.is_finite() || (re == 0.0 && im == 0.0) {
         return None;
     }
-    let (lb, lb_exact) = log2_abs_c64(re, im);
+    let (ls, ll, lb_exact) = log2_abs_c64(re, im);
     let real = im == 0.0 && !k.complex();
     let neg = real && re < 0.0 && odd;
-    match pow_range(lb, lb_exact, n, n_exact, !real) {
+    match pow_range((ls, ll), lb_exact, n, n_exact, !real) {
         PowRange::Compute => None,
         PowRange::Inf if real => Some(Num::Float(if neg { f64::NEG_INFINITY } else { f64::INFINITY }, 0.0, k)),
         PowRange::Zero if real => Some(Num::Float(if neg { -0.0 } else { 0.0 }, 0.0, k)),
@@ -1690,7 +1708,7 @@ mod tests {
         // below 2^(2^62 - 1); Sage's 2^(2^62 - 2) finite, 2^(2^62 - 1)
         // +infinity, 0.5^(2^62) finite, 0.5^(2^62 + 1) 0)
         let e62 = 1i128 << 62;
-        let r = |t: i64, n: i128| pow_range(t as f64, Some(t), n as f64, Some(n), false);
+        let r = |t: i64, n: i128| pow_range(((t as f64).signum(), (t as f64).abs().log2()), Some(t), ((n as f64).abs().log2(), n < 0), Some(n), false);
         assert_eq!(r(1, e62 - 2), PowRange::Refuse);
         assert_eq!(r(1, e62 - 1), PowRange::Inf);
         assert_eq!(r(-1, e62), PowRange::Refuse);
@@ -1728,6 +1746,22 @@ mod tests {
         let down = Num::mp(Mp::fin(&-((BigInt::one() << 70usize) - BigInt::one()), -70, 100));
         assert_eq!(s(mp_pow(&up, &e140)), "+infinity");
         assert_eq!(s(mp_pow(&down, &(&e140 + BigInt::one()))), "-0.00000000000000000000000000000");
+        // (a deviation from 1 and an exponent past the doubles: R2048's
+        // (1 + 2^-2000)^(2^2100) is +infinity, its reciprocal power 0, as
+        // R1100's (1 - 2^-1000)^(2^1100); (1 + 2^-2000)^(2^2060), finite in
+        // Sage, is past the MP numbers)
+        let one_eps = |p: u32, t: usize, up: bool| {
+            let m = BigInt::one() << t;
+            Num::mp(Mp::fin(&(if up { m + BigInt::one() } else { m - BigInt::one() }), -(t as i64), p))
+        };
+        let pw = |k: usize| BigInt::one() << k;
+        let inf = |n: Num| n.as_mp().unwrap().sp == Sp::PosInf;
+        let zero = |n: Num| n.as_mp().unwrap().is_zero();
+        assert!(inf(mp_pow(&one_eps(2048, 2000, true), &pw(2100))));
+        assert!(zero(mp_pow(&one_eps(2048, 2000, true), &-(pw(2100) + BigInt::one()))));
+        assert!(zero(mp_pow(&one_eps(1100, 1000, false), &pw(1100))));
+        assert!(inf(mp_pow(&one_eps(1100, 1000, false), &-pw(1100))));
+        assert!(crate::err::catch(|| mp_pow(&one_eps(2048, 2000, true), &pw(2060))).is_err());
         // (a complex one: generic_power by the bits, I^(2^100) is 1, and
         // pow_big is pow_int within i64)
         let i = Mpc::new(Mp::zero(100, false), Mp::from_f64(1.0, 100));

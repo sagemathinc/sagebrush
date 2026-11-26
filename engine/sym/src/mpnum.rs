@@ -149,29 +149,45 @@ impl Mp {
     pub fn top(&self) -> i64 {
         self.e + self.m.bits() as i64
     }
-    /// log2 |x| of a finite nonzero number, with a relative error of a few
-    /// units of 2^-52, and the exact one when |x| is a power of 2.  From the
-    /// top 64 bits of the mantissa, but for |x| in [1/2, 2) from d = |x| - 1
-    /// taken exactly from the whole mantissa, as ln(1 + d)/ln 2: near 1 the
-    /// top bits alone give 0 (R100's 1 + 2^-70, whose 2^140th power is
-    /// +infinity).
-    pub fn log2_abs(&self) -> (f64, Option<i64>) {
+    /// lb = log2 |x| of a finite nonzero number, as its sign (0 for |x| = 1)
+    /// and log2 |lb|, never underflowing, with a relative error under 2^-45,
+    /// and the exact lb when |x| is a power of 2.  From the top 64 bits of
+    /// the mantissa, but for |x| in [1/2, 2) from d = |x| - 1 taken exactly
+    /// from the whole mantissa: lb = ln(1 + d)/ln 2, and below 2^-46 log2
+    /// |lb| = log2 |d| - log2(ln 2) (the next term, -d/2, is under 2^-47
+    /// relative).  Near 1 the top bits alone give 0 (R100's 1 + 2^-70, whose
+    /// 2^140th power is +infinity), and d itself may not be a double (R2048's
+    /// 1 + 2^-2000).
+    pub fn log2_abs(&self) -> (f64, f64, Option<i64>) {
         let a = self.m.abs();
         let b = a.bits();
         let exact = if a.trailing_zeros() == Some(b - 1) { Some(self.top() - 1) } else { None };
-        let top = |v: &BigInt, e: i64| -> f64 {
+        // (log2 of v 2^e, v > 0, from v's top 64 bits and its length)
+        let l2 = |v: &BigInt, e: i64| -> f64 {
             let s = v.bits().saturating_sub(64);
-            let f = (v >> s as usize).to_f64().unwrap();
-            f * ((e + s as i64) as f64).exp2()
+            (v >> s as usize).to_f64().unwrap().log2() + (e + s as i64) as f64
         };
+        let signed = |lb: f64| (if lb == 0.0 { 0.0 } else { lb.signum() }, lb.abs().log2());
         if (0..=1).contains(&self.top()) && self.e < 0 {
             let d = &a - (BigInt::one() << (-self.e) as usize);
-            let df = if d.is_negative() { -top(&-d, self.e) } else { top(&d, self.e) };
-            return (df.ln_1p() / std::f64::consts::LN_2, exact);
+            if d.is_zero() {
+                return (0.0, f64::NEG_INFINITY, exact);
+            }
+            let sign = if d.is_negative() { -1.0 } else { 1.0 };
+            let dl = l2(&d.abs(), self.e);
+            if dl < -46.0 {
+                return (sign, dl - std::f64::consts::LN_2.log2(), exact);
+            }
+            let (s, l) = signed((sign * dl.exp2()).ln_1p() / std::f64::consts::LN_2);
+            return (s, l, exact);
         }
-        let s = b.saturating_sub(64);
-        let t = (&a >> s as usize).to_f64().unwrap();
-        (t.log2() + (self.e + s as i64) as f64, exact)
+        let (s, l) = signed(l2(&a, self.e));
+        (s, l, exact)
+    }
+    /// lb as log2_abs gives it, a double (0 past the doubles' range).
+    pub fn log2_abs_f64(&self) -> f64 {
+        let (s, l, _) = self.log2_abs();
+        s * l.exp2()
     }
     pub fn signbit(&self) -> bool {
         self.m.is_negative() || self.neg0 || self.sp == Sp::NegInf
@@ -795,9 +811,11 @@ impl Mpc {
         }
         res
     }
-    /// log2 |self| for a finite nonzero number (parts within MP numbers), and
-    /// the exact one when it is a power of 2 (a part 0, the other +-2^t).
-    pub fn log2_abs(&self) -> (f64, Option<i64>) {
+    /// lb = log2 |self| for a finite nonzero number (parts within MP
+    /// numbers), as Mp::log2_abs gives it (sign, log2 |lb|), and the exact one
+    /// when it is a power of 2 (a part 0, the other +-2^t).  With both parts
+    /// nonzero, from the parts' (an absolute error of a few units of 2^-52).
+    pub fn log2_abs(&self) -> (f64, f64, Option<i64>) {
         let (r, i) = (&self.re, &self.im);
         if r.is_zero() {
             return i.log2_abs();
@@ -805,9 +823,10 @@ impl Mpc {
         if i.is_zero() {
             return r.log2_abs();
         }
-        let (a, b) = (r.log2_abs().0, i.log2_abs().0);
+        let (a, b) = (r.log2_abs_f64(), i.log2_abs_f64());
         let (hi, lo) = if a >= b { (a, b) } else { (b, a) };
-        (hi + 0.5 * (1.0 + (2.0 * (lo - hi)).exp2()).log2(), None)
+        let lb = hi + 0.5 * (1.0 + (2.0 * (lo - hi)).exp2()).log2();
+        (if lb == 0.0 { 0.0 } else { lb.signum() }, lb.abs().log2(), None)
     }
     /// self^n for an integer n, as Sage's generic_power: 1 for n = 0; for
     /// n < 0 the inverse to -n; the powers self^(2^i) by squaring, from the

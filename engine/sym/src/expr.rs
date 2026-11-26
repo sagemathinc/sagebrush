@@ -1003,9 +1003,9 @@ pub fn float_pow(b: &Num, x: &Num) -> Num {
         // (an RR exponent's parity is its double's: odd ones reach 2^53,
         // past int_power's 9.0e15)
         let n = if x.is_exact() {
-            x.as_int().map(|n| (n.to_f64().unwrap_or(f64::INFINITY), n.to_i128(), n.is_odd()))
+            x.as_int().filter(|n| !n.is_zero()).map(|n| ((crate::num::log2_big(&n), n.is_negative()), n.to_i128(), n.is_odd()))
         } else {
-            Some((xr, Some(xr as i128).filter(|_| xr.abs() < 1.7e38), xr.abs() < 9007199254740992.0 && xr % 2.0 != 0.0)).filter(|_| xr.is_finite() && xr.fract() == 0.0)
+            Some(((xr.abs().log2(), xr < 0.0), Some(xr as i128).filter(|_| xr.abs() < 1.7e38), xr.abs() < 9007199254740992.0 && xr % 2.0 != 0.0)).filter(|_| xr.is_finite() && xr.fract() == 0.0 && xr != 0.0)
         };
         if let Some((nf, ne, odd)) = n {
             // (-1 by the exponent's parity, which its double may have lost:
