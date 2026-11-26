@@ -351,6 +351,7 @@ let cur = 2; // (after the disconnect above)
       ok(first.status === 403, `durability (${what}): the first off read -> 403 (${first.status})`);
     }
     ok(await until(async () => (await engineState(r1.rid)).length === 0), `durability (${what}): the old page ended`);
+    await until(async () => p.got.some((t) => t.startsWith('{"relay":"cgen"')));
     const seen = [];
     while (p.got.length) seen.push(J(p.got.shift()));
     ok(seen.some((m) => m?.relay === "cgen" && m.cgen === cur + 1) && !seen.some((m) => m?.relay === "cgen" && m.cgen > cur + 1),
@@ -624,8 +625,36 @@ const expire = () => tick(r1.rid, 121_000); // (the attempt ids so far expire)
   ok((await engineState(r1.rid)).some((a) => a.engine.nb === "qb"), "queue: the other page stays");
   await site(`/__relay/__holdput?remote=${r1.rid}&on=0`);
   qb.leg.close();
-  await budgetSet("queue=");
+  await sleep(200);
   while (p.got.length) p.got.shift();
+  // (LIMITS H3: a waiting string is charged two bytes per UTF-16 unit, binary its bytes.  Wide text: two strings of
+  // 2.1 M units, one wide character each (about 2.1 MB on the wire, 4.2 MB held), pass 8 MiB together; binary of the
+  // same wire size would not.  Mixed: 3 MiB binary and one such string (7.2 MiB held) fit; 1 MiB more doesn't.)
+  const wide = (c) => JSON.stringify({ t: c.repeat(2_100_000) + "\u00e9" });
+  for (const [what, sends, closed, stays] of [
+    ["wide text", [["wa", wide("a")], ["wb", wide("b")]], "wb", "wa"],
+    ["binary of the same wire size (control)", [["ba", new Uint8Array(2_100_020)], ["bb", new Uint8Array(2_100_020)]], null, "bb"],
+    ["mixed", [["ma", new Uint8Array(3 * 1024 * 1024)], ["mb", wide("m")], ["ma", new Uint8Array(1024 * 1024)]], "ma", "mb"],
+  ]) {
+    await expire();
+    const pages = {};
+    for (const nb of new Set(sends.map(([nb]) => nb))) pages[nb] = await openAt(nb, cur);
+    await site(`/__relay/__holdput?remote=${r1.rid}&on=1`);
+    for (const [nb, m] of sends) {
+      pages[nb].leg.send(m);
+      await sleep(200);
+    }
+    const attached = async () => (await engineState(r1.rid)).map((a) => a.engine.nb);
+    if (closed) ok(await until(async () => !(await attached()).includes(closed), 100), `queue (${what}): ${closed} closed past 8 MiB held (${await attached()})`);
+    else { await sleep(300); ok(Object.keys(pages).every((nb) => true) && (await attached()).length === Object.keys(pages).length, `queue (${what}): every page stays (${await attached()})`); }
+    ok((await attached()).includes(stays), `queue (${what}): ${stays} stays`);
+    await site(`/__relay/__holdput?remote=${r1.rid}&on=0`);
+    for (const l of Object.values(pages)) l.leg.close();
+    await until(async () => (await engineState(r1.rid)).length === 0);
+    await sleep(200);
+    while (p.got.length) p.got.shift();
+  }
+  await budgetSet("queue=");
 }
 
 // ---- the old channels are unchanged: the relay's own test suite (test-relay.mjs) runs them; here, one check
