@@ -201,6 +201,15 @@ ${"many words ".repeat(14000)}
     const rr = await run(w, "render", "ex/talk2.tex", "-o", "t2.html");
     const hh = existsSync(join(w, "t2.html")) ? readFileSync(join(w, "t2.html"), "utf8") : "";
     check("input: the macros file's macros apply (../ and a leading /), \\include's text is there, nothing from outside", hh.includes("Hello from macros") && hh.includes("Included part with") && /mathbb/.test(hh) && !hh.includes("OUTSIDE TEXT"), { code: rr.code, err: rr.err, n: hh.length });
+    // (a problem in an \\input file: that file, as named from where the command runs, and its own line; in --json, the
+    //  main file's line it was read from too)
+    mkdirSync(join(ex, "sub"), { recursive: true });
+    writeFileSync(join(ex, "sub", "sec.tex"), "First.\n\\foo here.\n");
+    writeFileSync(join(ex, "talk3.tex"), "\\documentclass{article}\n\\begin{document}\nA.\n\\input{sub/sec}\n\\bar after.\n\\end{document}\n");
+    const c3 = await run(w, "check", "ex/talk3.tex"), j3 = (await run(w, "check", "ex/talk3.tex", "--json")).json;
+    const foo = j3?.problems.find((x) => x.name === "foo");
+    check("input: a problem in an \\input file is reported at that file and its line", /^ex\/sub\/sec\.tex:2: warning: \\foo is not supported/m.test(c3.out) && foo?.file === "ex/sub/sec.tex" && foo?.line === 2 && foo?.input_line === 4, { out: c3.out, foo });
+    check("input: the main file's own problem after it stays the main file's", /^ex\/talk3\.tex:5: warning: \\bar is not supported/m.test(c3.out), c3.out);
   }
 
   // ---- render: one self-contained HTML file
@@ -346,7 +355,7 @@ srv.listen(0, "127.0.0.1", () => fs.writeFileSync(path.join(prof, "DevToolsActiv
     writeFileSync(join(dir, "breaks.tex"), "\\documentclass{article}\n\\begin{document}\n\\newpage\nOne.\n\\newpage\nTwo.\\pagebreak[2] Still two.\\clearpage\\newpage Three.\\pagebreak Four.\n\\newpage\n\\end{document}\n");
     const bk = await runOpts({ env: { CHROME: browser } }, CLI, dir, "render", "breaks.tex", "--pdf", "breaks.pdf", "--json");
     check("pdf: an article's \\newpage, \\clearpage and \\pagebreak are its pages, as TeX's (3, none blank)", bk.code === 0 && bk.json?.pdf?.pages === 3, { code: bk.code, pdf: bk.json?.pdf, err: bk.json?.pdf_error ?? bk.err.slice(-300) });
-    // (a display wider than the text (the content pilot's, run 017): TeX lets it run on into the margin with an
+    // (a display wider than the text (as in a long real-world paper): TeX lets it run on into the margin with an
     //  "Overfull \hbox" warning, nothing lost; the PDF had it cut off at its box's edge, the check saying nothing. Now
     //  printed it runs on (the print rules), and render reports it: one warning, on its line, the exit 0 and ok as
     //  for any warning; a document whose displays fit has none)

@@ -132,7 +132,13 @@ export const LATEX_LAZY = {
 // (293,229 raw / 99,054 gzip: Nov 25 2026, starred references read as such, \ref*{key} drawn without its link (natbib's
 //  starred citations keep theirs): 293,165 / 98,990 measured on the shipped build of its merge with master bff44e83, with
 //  bun 1.4.4 and node 24.21.0 (+365 / +132 over master's 292,800 / 98,858), + 64)
-export const LATEX_CAPS = { raw: 293229, gzip: 99054 };
+// (294,144 raw / 99,370 gzip: Nov 25 2026, latex check naming an \input file and its line for a problem found there (the
+//  expander's file-line markers, the renderer's where()): 294,080 / 99,306 measured on the shipped build of its merge with
+//  master fb8a65b0, with bun 1.4.4 and node 24.21.0 (+915 / +316 over master's 293,165 / 98,990), + 64)
+// (294,217 raw / 99,416 gzip: Nov 25 2026, an element over PIECE_MAX split in turn (a theorem's long list, split.ts):
+//  294,153 / 99,352 measured on the shipped build of its merge with master b0b02122, with bun 1.4.4 and node 24.21.0
+//  (+73 / +46 over master's 294,080 / 99,306), + 64)
+export const LATEX_CAPS = { raw: 294217, gzip: 99416 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -240,7 +246,9 @@ export const LATEX_LAZY_CAPS = {
   //  page module rather than bundled again; measured 16,482 / 6,886 on master 4d4225f9, + 64. Was 16 / 6 KiB)
   // (17,335 / 7,231: renewed at the landing merge on master 14279164: 16,494 / 6,881 before it -> 17,271 / 7,167 after,
   //  +777 / +286 inherited from a shared check's and the tools' changes, none of it that change's own code; + 64)
-  TOOLS: { label: "the LaTeX agent tools' chunk", raw: 17335, gzip: 7231 },
+  // (17,758 / 7,432: Nov 25 2026, latex_check naming a problem's \input file (check.ts's inputFileName): 17,694 / 7,368
+  //  measured on master 6e3a0f71 with it, + 64)
+  TOOLS: { label: "the LaTeX agent tools' chunk", raw: 17758, gzip: 7432 },
   // (the presenter: web/latex/present.ts with overlay.ts, fetched only when Present is pressed)
   PRESENT: { label: "the LaTeX presenter's chunk", raw: 16 * 1024, gzip: 6 * 1024 },
   // (a published document opened read only, doc.ts: fetched only for a /?tex-doc= link, the articles';

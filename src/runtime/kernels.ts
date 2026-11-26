@@ -35,28 +35,38 @@ interface Exports {
 
 let K: Exports | null | undefined;
 
-function instantiate(b64: string): WebAssembly.Exports {
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports;
+// A module's exports, or null where this engine lacks a feature it uses (SIMD, relaxed SIMD): WebAssembly.validate
+// decides that, from the module's bytes alone, and only that is cached by the callers. Memory the computer can't give
+// while decoding, compiling or instantiating it (a RangeError) is no answer about the engine: refused, as a
+// MemoryError, nothing cached, so the next call tries again and gets the same kernel the input and the engine choose
+// (the project's rule: free memory decides run or refuse, never which algorithm).
+function instantiate(b64: string): WebAssembly.Exports | null {
+  try {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    if (!WebAssembly.validate(bytes)) return null;
+    return new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports;
+  } catch (e) {
+    if (e instanceof RangeError) throw setupNoMemory(e);
+    return null; // (a valid module this engine still won't compile or link: taken as the feature's absence, as before)
+  }
 }
+// (in the words object.ts's ENGINE_LIMITS names a MemoryError by)
+const setupNoMemory = (e: RangeError) =>
+  /^WebAssembly\.\w+\(\): Out of memory/.test(e.message) ? e : new RangeError(`WebAssembly.Instance(): Out of memory: ${e.message}`);
 let base = 0;
 let f64 = new Float64Array(0);
 let i32 = new Int32Array(0);
 
 function kernels(): Exports | null {
   if (K !== undefined) return K;
-  K = null;
-  try {
-    const g = globalThis as any;
-    if (g.__SAGEBRUSH_NO_WASM__ || g.process?.env?.SAGEBRUSH_NO_WASM || typeof WebAssembly !== "object") return K;
-    K = instantiate(KERNELS_WASM) as unknown as Exports;
-    base = K.memory.buffer.byteLength;
-  } catch {
-    K = null; // no WebAssembly SIMD here: the JavaScript code is used
-  }
-  return K;
+  const g = globalThis as any;
+  if (g.__SAGEBRUSH_NO_WASM__ || g.process?.env?.SAGEBRUSH_NO_WASM || typeof WebAssembly !== "object") return (K = null);
+  // (null: no WebAssembly SIMD here, the JavaScript code is used, for the session; a memory failure throws, K unset)
+  const e = instantiate(KERNELS_WASM) as unknown as Exports | null;
+  if (e) base = e.memory.buffer.byteLength;
+  return (K = e);
 }
 
 // Whether the kernels are in use.
@@ -323,15 +333,11 @@ function rlayout(R: { e: Relaxed; base: number; f64: Float64Array }, ...lens: nu
 let RX: { e: Relaxed; base: number; f64: Float64Array; tab: string } | null | undefined;
 function relaxed() {
   if (RX !== undefined) return RX;
-  RX = null;
-  try {
-    if ((globalThis as any).process?.env?.SAGEBRUSH_NO_RELAXED || !kernels()) return RX;
-    const e = instantiate(KERNELS_RELAXED_WASM) as unknown as Relaxed;
-    if (e.fma_probe() === 1) RX = { e, base: e.memory.buffer.byteLength, f64: new Float64Array(0), tab: "" };
-  } catch {
-    // no relaxed SIMD in this engine
-  }
-  return RX;
+  if ((globalThis as any).process?.env?.SAGEBRUSH_NO_RELAXED || !kernels()) return (RX = null);
+  // (null, for the session: no relaxed SIMD in this engine, or its multiply-add rounds twice; a memory failure throws,
+  // RX unset)
+  const e = instantiate(KERNELS_RELAXED_WASM) as unknown as Relaxed | null;
+  return (RX = e && e.fma_probe() === 1 ? { e, base: e.memory.buffer.byteLength, f64: new Float64Array(0), tab: "" } : null);
 }
 export function wasmFusedFMA(): boolean {
   return relaxed() !== null;

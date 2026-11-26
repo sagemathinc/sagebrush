@@ -5,7 +5,7 @@
 //   bun web/latex/test-latex-units.mjs   (in CI since #622: the engine's render checks, short verbatim among them)
 import { openBytes, encodeText, EDIT_MAX } from "./save.ts";
 import { imageCandidates, graphicsPathOf, notFoundWhy, relativePath, sniffImage, admitImageBytes, IMAGE_BOUNDS } from "./images.ts";
-import { splitChunk, PIECE_MAX, CHUNK_MAX, bytes, weight, tooLargeProblem } from "./split.ts";
+import { splitChunk, PIECE_MAX, CHUNK_MAX, SPLIT_DEPTH, bytes, weight, tooLargeProblem } from "./split.ts";
 import { watchdog, WATCHDOG_MS, LATE_MS } from "./watchdog.ts";
 import { autoClose } from "./envclose.ts";
 import { tokenizeLine } from "./highlight.ts";
@@ -112,6 +112,27 @@ check("split-table-placeholder", (() => { const t = splitChunk(table); return t.
 const huge = '<div class="p"><span class="katex">' + "x".repeat(PIECE_MAX + 10) + "</span></div>";
 check("split-one-huge-inline-placeholder", (() => { const t = splitChunk(huge); return t.length === 1 && /too large/.test(t[0]); })(), null);
 check("split-over-2MiB-placeholder", (() => { const t = splitChunk('<div class="p">' + "y ".repeat(CHUNK_MAX) + "</div>"); return t.length === 1 && /too large/.test(t[0]); })(), null);
+// (a theorem whose list is over PIECE_MAX, each item under it: the list split in turn, every piece a whole element, no
+//  placeholder, the theorem's head and id in the first piece only, every item and label kept in order; an item over it,
+//  that can't be split, still the placeholder, said; containers nested past SPLIT_DEPTH, the same)
+{
+  const item = (k) => '<li id="it' + k + '"><span class="lbl">(T' + (k + 1) + ")</span>" + '<div class="p">' + '<span class="katex">' + "m".repeat(40 * 1024) + "</span></div></li>";
+  const thmList = '<div class="thm thm-definition" id="thm-9"><div class="p"><span class="thmhead">Hypothesis 1.</span> For every tuple:</div><ol class="list enum d1">' + Array.from({ length: 8 }, (_, k) => item(k)).join("") + "</ol></div>";
+  let told = 0;
+  const tp = splitChunk(thmList, () => told++);
+  const plain = (x) => x.replace(/<[^>]+>/g, "");
+  check("split-theorem-list-in-turn", bytes(thmList) > PIECE_MAX && tp.length > 1 && told === 0 && tp.every((p) => weight(p) <= PIECE_MAX && !/too large/.test(p)) && tp[0].startsWith('<div class="thm thm-definition" id="thm-9">') && tp[0].includes("thmhead") && tp.slice(1).every((p) => p.startsWith('<div class="thm thm-definition cont">') && !p.includes("thmhead") && !p.includes('id="thm-9"')) && plain(tp.join("")) === plain(thmList) && JSON.stringify(tp.join("").match(/\(T\d+\)/g)) === JSON.stringify(Array.from({ length: 8 }, (_, k) => "(T" + (k + 1) + ")")), { n: tp.length, told, heads: tp.map((p) => p.slice(0, 60)) });
+  const bigItem = thmList.replace(item(3), '<li id="it3"><span class="lbl">(T4)</span><span class="katex">' + "m".repeat(PIECE_MAX + 10) + "</span></li>");
+  let told2 = 0; const bp = splitChunk(bigItem, () => told2++);
+  check("split-theorem-list-item-too-large", bp.length === 1 && /too large/.test(bp[0]) && told2 === 1, { n: bp.length, told2 });
+  // (SPLIT_DEPTH containers deep, then two paragraphs over PIECE_MAX together: split; one more level: the placeholder)
+  const nest = (d) => '<div class="x">'.repeat(d) + '<div class="p">' + "a ".repeat(70 * 1024) + '</div><div class="p">' + "b ".repeat(70 * 1024) + "</div>" + "</div>".repeat(d);
+  const atDepth = splitChunk(nest(SPLIT_DEPTH)), pastDepth = splitChunk(nest(SPLIT_DEPTH + 1));
+  check("split-depth-bound", atDepth.length > 1 && atDepth.every((p) => weight(p) <= PIECE_MAX) && pastDepth.length === 1 && /too large/.test(pastDepth[0]), { at: atDepth.length, past: pastDepth.length });
+  // (deeply nested, no stack trouble: a bounded time and a placeholder)
+  const t0 = performance.now(); const dp = splitChunk('<div class="x">'.repeat(5000) + "z ".repeat(80 * 1024) + "</div>".repeat(5000));
+  check("split-deep-nesting-bounded", dp.length === 1 && /too large/.test(dp[0]) && performance.now() - t0 < 2000, { n: dp.length, ms: Math.round(performance.now() - t0) });
+}
 // (a beamer slide is one box: kept whole up to PIECE_MAX, however many paragraphs it has; over it, a placeholder)
 {
   const slide = (k) => '<section class="slide" data-frame="1" id="frame-1" style="aspect-ratio:128/96;--sfs:3.032"><div class="slide-body">' + '<div class="p">' + "z ".repeat(400) + "</div>".repeat(1) + "".padEnd(0) + '<div class="p">w</div>'.repeat(k) + "</div></section>";
@@ -1207,6 +1228,29 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
   check("natbib-numbers", nu.includes("A [3, 1]. B [1, 2]. C [1, 2, 3]. D [4, 1, 2, 3]. E [1, Thm. 2]. F [1, 3]. G Ann [1]."), nu.slice(0, 200));
   // (without natbib's numbers, a \bibitem's own label, as before)
   check("natbib-labels-kept", /\[Ann\(2001\)\]/.test(plain(new Engine().update(NAT("sort").replace("\\usepackage[sort]{natbib}", ""), { cold: true }).chunks.join(""))), null);
+}
+
+// ---- latex check: a problem in an \input file is reported at that file and its own line (and the main file's line it
+// was read from, input_line), in reading order; text after the \input on the same line is the main file's again; the
+// file named from the main file's folder, as the main file is named
+{
+  const { engineInputs } = await import("./inputs.ts");
+  const { checkResult, checkText, inputFileName } = await import("./check.ts");
+  const names = [["/sec/x.tex", "/main.tex", "main.tex", "sec/x.tex"], ["/paper/sec/x.tex", "/paper/main.tex", "paper/main.tex", "paper/sec/x.tex"],
+    ["/shared/defs.tex", "/ex/doc.tex", "doc.tex", "../shared/defs.tex"], ["/a.tex", "/a/b/doc.tex", "doc.tex", "../../a.tex"], ["/w/sec/x.tex", "/w/main.tex", "/w/main.tex", "/w/sec/x.tex"]];
+  const badN = names.filter(([k, d, f, want]) => inputFileName(k, d, f) !== want).map(([k, d, f, want]) => [k, d, f, want, inputFileName(k, d, f)]);
+  check("check-input-file-name", badN.length === 0, badN);
+  const MAIN = "\\documentclass{article}\n\\begin{document}\nA \\zza.\n\\input{part} \\zzb.\n\\zzc.\n\\end{document}\n";
+  const known = new Map([["/ex/part.tex", { text: "One.\n\\zzd.\n\\input{nothere}\n\\input{sub/deep}\nTwo \\zze.\n" }], ["/ex/sub/deep.tex", { text: "\n\n\\zzf.\n" }],
+    ["/ex/nothere.tex", { absent: true }], ["/ex/nothere", { absent: true }]]);
+  const ei = engineInputs("/ex/main.tex", known), r = new Engine().update(MAIN, { cold: true, inputs: { files: ei.files, resolve: ei.resolve, version: 1 } });
+  const res = checkResult("main.tex", MAIN, { outcome: String(r.stats.outcome), beamer: false, problems: r.problems, frames: r.frames, sage: [] }, [], "/ex/main.tex");
+  const got = res.problems.filter((p) => p.kind === "command" || p.kind === "input").map((p) => [p.name, p.file ?? "main.tex", p.line, p.input_line ?? null]);
+  check("check-input-lines", JSON.stringify(got) === JSON.stringify([["zza", "main.tex", 3, null], ["zzd", "part.tex", 2, 4], ["nothere", "part.tex", 3, 4], ["zzf", "sub/deep.tex", 3, 4], ["zze", "part.tex", 5, 4], ["zzb", "main.tex", 4, null], ["zzc", "main.tex", 5, null]]), got);
+  check("check-input-text", /^part\.tex:2: warning: \\zzd is not supported/m.test(checkText(res)) && /^sub\/deep\.tex:3: warning: \\zzf/m.test(checkText(res)) && /^main\.tex:4: warning: \\zzb/m.test(checkText(res)), checkText(res));
+  // (without the main file's path: as before, every problem at the main file's line)
+  const old = checkResult("main.tex", MAIN, { outcome: "ok", beamer: false, problems: r.problems, frames: [], sage: [] }, []);
+  check("check-input-no-docpath", old.problems.every((p) => p.file === undefined && p.input_line === undefined) && old.problems.filter((p) => ["zzd", "zze", "zzf"].includes(p.name)).every((p) => p.line === 4), old.problems.map((p) => [p.name, p.line]));
 }
 
 // ---- envclose.ts (P1a): the close a "}" typed after \begin{X} adds, or none
