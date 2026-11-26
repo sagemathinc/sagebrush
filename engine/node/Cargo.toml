@@ -18,6 +18,8 @@ sagebrush-par = { path = "../par", features = ["parallel"] }
 sagebrush-web = { path = "../web" }
 sagebrush-sym = { path = "../sym" }
 sagebrush-mpoly = { path = "../mpoly" }
+sagebrush-ledger = { path = "../ledger" }
+serde_json = "1"
 napi = { version = "2", default-features = false, features = ["napi7"] }
 napi-derive = "2"
 

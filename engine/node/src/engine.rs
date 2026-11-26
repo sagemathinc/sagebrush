@@ -170,3 +170,58 @@ pub fn bin_call(req: Uint8Array) -> Result<Buffer> {
     })
     .map(Buffer::from)
 }
+
+/// The last symbolic-engine error (engine/web's sb_last_error): `""` or
+/// `"err\x1fKIND\x1fMESSAGE"`.
+#[napi(js_name = "lastError")]
+pub fn last_error() -> Result<String> {
+    guarded(|| match sagebrush_sym::err::take_last_error() {
+        Some((k, m)) => format!("err\x1f{}\x1f{}", k, m),
+        None => String::new(),
+    })
+}
+
+/// Reserve `bytes` for host work under the ledger (engine/web's
+/// sb_reserve, the same body): `{"handle": n}`, `{"memory": ...}` (refused)
+/// or `{"error": ...}`, as a JSON string.
+#[napi]
+pub fn reserve(what: String, bytes: f64) -> Result<String> {
+    guarded(|| {
+        let (handle, reply) = sagebrush_web::host_reserve(if what.is_empty() { "host" } else { &what }, bytes);
+        reply.unwrap_or_else(|| serde_json::json!({ "handle": handle })).to_string()
+    })
+}
+
+/// Grow a host reservation (sb_grow): `{"ok": true}`, `{"memory": ...}` or `{"error": ...}`.
+#[napi]
+pub fn grow(handle: f64, bytes: f64) -> Result<String> {
+    guarded(|| {
+        let (_code, reply) = sagebrush_web::host_grow(handle, bytes);
+        reply.unwrap_or_else(|| serde_json::json!({ "ok": true })).to_string()
+    })
+}
+
+/// Release a host reservation (sb_release): true, or false for no such handle.
+#[napi]
+pub fn release(handle: f64) -> Result<bool> {
+    guarded(|| sagebrush_web::host_release(handle) == 0)
+}
+
+/// The memory share of a default polynomial factorization (sb_set_memory_share).
+#[napi(js_name = "setMemoryShare")]
+pub fn set_memory_share(v: f64) -> Result<()> {
+    guarded(|| sagebrush_interrupt::set_memory_share(sagebrush_interrupt::share_from_f64(v)))
+}
+
+/// A WebAssembly instance's total: not applicable natively (no instance
+/// extent, design N1 r3.3); answers -1 and changes nothing.
+#[napi(js_name = "setInstanceTotal")]
+pub fn set_instance_total(_bytes: f64, _status: u32) -> Result<i32> {
+    guarded(|| -1)
+}
+
+/// Retired WebAssembly instances' bytes: none natively; a no-op answering 0.
+#[napi(js_name = "setRetiredBytes")]
+pub fn set_retired_bytes(_bytes: f64, _faulted: u32) -> Result<i32> {
+    guarded(|| 0)
+}

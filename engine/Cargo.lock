@@ -927,12 +927,14 @@ dependencies = [
  "sagebrush-ap",
  "sagebrush-bigint",
  "sagebrush-interrupt",
+ "sagebrush-ledger",
  "sagebrush-modsym",
  "sagebrush-mp",
  "sagebrush-mpoly",
  "sagebrush-par",
  "sagebrush-sym",
  "sagebrush-web",
+ "serde_json",
 ]
 
 [[package]]
