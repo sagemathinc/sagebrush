@@ -1,11 +1,13 @@
 // A code or text file's highlighting as tokens ([class, text]), for the code page (web/code/page.ts) to draw as text
 // nodes only (astra, 1a: no file's text ever goes through innerHTML). Python and Sage come from the notebook's own
-// highlighter (web/notebook/highlight.js), MATLAB from its own (highlight-matlab.js): their HTML, which has exactly one
-// shape (escaped text, and <span class="hX">escaped text</span>), is read back into tokens, and the tokens must join to
-// the source exactly or the text is drawn plain. Magma, JavaScript, JSON and Rust have a small scanner here; .txt is plain.
+// highlighter (web/notebook/highlight.js), MATLAB and Magma from their own (highlight-matlab.js, highlight-magma.js):
+// their HTML, which has exactly one shape (escaped text, and <span class="hX">escaped text</span>), is read back into
+// tokens, and the tokens must join to the source exactly or the text is drawn plain. JavaScript, JSON and Rust have a
+// small scanner here; .txt is plain.
 // The classes are the notebook's: hc comment, hs string, hn number, hk keyword, hb builtin, hf a name being defined.
 import { highlight } from "../notebook/highlight.js";
 import { highlightMatlab } from "../notebook/highlight-matlab.js";
+import { highlightMagma } from "../notebook/highlight-magma.js";
 import type { Lang } from "./langs";
 export { CODE_LANGS, langOf, type Lang } from "./langs";
 
@@ -32,19 +34,17 @@ export function tokensFromHtml(html: string, src: string): Tok[] | null {
   return out.map((t) => t[1]).join("") === src ? out : null;
 }
 
-// ---- a small scanner for Magma, JavaScript and JSON: comments, strings, numbers, keywords
-const MAGMA_KW = new Set("and assert by case catch cat declare default delete diff do elif else end error eval exists exit false for forall forward fprintf freeze function if import in intrinsic is join load local meet mod not notadj notin notsubset or print printf procedure quit random read readi repeat require requirege requirerange restore return save sdiff select subset then time to true try until vprint vprintf when where while xor".split(" "));
+// ---- a small scanner for JavaScript, JSON and Rust: comments, strings, numbers, keywords
 const JS_KW = new Set("async await break case catch class const continue debugger default delete do else export extends false finally for function if import in instanceof let new null of return static super switch this throw true try typeof undefined var void while with yield".split(" "));
 const JSON_KW = new Set(["true", "false", "null"]);
 const RUST_KW = new Set("as async await break const continue crate dyn else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while".split(" "));
-const SCAN: Record<"magma" | "js" | "json" | "rust", { re: RegExp; kw: Set<string> }> = {
-  magma: { re: /(\/\/[^\n]*|\/\*[\s\S]*?(?:\*\/|$))|("(?:\\.|[^"\\\n])*"?)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_][A-Za-z0-9_]*)/g, kw: MAGMA_KW },
+const SCAN: Record<"js" | "json" | "rust", { re: RegExp; kw: Set<string> }> = {
   js: { re: /(\/\/[^\n]*|\/\*[\s\S]*?(?:\*\/|$))|("(?:\\.|[^"\\\n])*"?|'(?:\\.|[^'\\\n])*'?|`(?:\\.|[^`\\])*`?)|(\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|([A-Za-z_$][A-Za-z0-9_$]*)/g, kw: JS_KW },
   json: { re: /(?!)()|("(?:\\.|[^"\\\n])*"?)|(-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|([A-Za-z]+)/g, kw: JSON_KW },
   // (a lifetime 'a isn't a string: only a quoted character or escape is)
   rust: { re: /(\/\/[^\n]*|\/\*[\s\S]*?(?:\*\/|$))|(b?"(?:\\.|[^"\\])*"?|b?'(?:\\.|[^'\\\n])'|r#"[\s\S]*?(?:"#|$)|r"[^"]*"?)|(\b\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?(?:[iu](?:8|16|32|64|128|size)|f32|f64)?\b)|([A-Za-z_][A-Za-z0-9_]*)/g, kw: RUST_KW },
 };
-function scan(src: string, lang: "magma" | "js" | "json" | "rust"): Tok[] {
+function scan(src: string, lang: "js" | "json" | "rust"): Tok[] {
   const { re, kw } = SCAN[lang], out: Tok[] = [];
   let last = 0;
   for (const m of src.matchAll(re)) {
@@ -64,7 +64,8 @@ export function tokensOf(src: string, lang: Lang): Tok[] {
   let t: Tok[] | null = null;
   if (lang === "python" || lang === "sage") t = tokensFromHtml(highlight(src, lang === "sage"), src);
   else if (lang === "matlab") t = tokensFromHtml(highlightMatlab(src), src);
-  else if (lang === "magma" || lang === "js" || lang === "json" || lang === "rust") t = scan(src, lang);
+  else if (lang === "magma") t = tokensFromHtml(highlightMagma(src), src);
+  else if (lang === "js" || lang === "json" || lang === "rust") t = scan(src, lang);
   return t ?? [["", src]];
 }
 
