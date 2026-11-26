@@ -249,7 +249,11 @@ try {
   check(await frame(`${fb}.querySelector('a.board-ask-choice[href="#s1"]').title === "→ Go to the next step"`), "a next item with no title or text: \"Go to the next step\", not its id");
   // Something else: the reader's own words, their field open and focused; Choose again: the options again
   await frame(`${fb}.querySelector('.board-ask-own').click()`);
-  check(!!(await until(() => frame(`${fb}.textContent.includes("Something else: your own words stand") && document.activeElement === document.querySelector('[data-ask="q2"] details textarea') && document.querySelector('[data-ask="q2"] details').open`))), "Something else: said, the reader's own words open and focused");
+  // (each part on its own, so a failure says which one: the words said, the field focused, the field open; and what has
+  // the focus instead, and whether the frame's document has it)
+  const ownState = `(() => { const ta = document.querySelector('[data-ask="q2"] details textarea'), a = document.activeElement; return { said: !!${fb}?.textContent.includes("Something else: your own words stand"), focused: !!ta && a === ta, open: !!document.querySelector('[data-ask="q2"] details')?.open, active: a ? a.tagName.toLowerCase() + (a.className ? "." + String(a.className).trim().replace(/\\s+/g, ".") : "") : null, hasFocus: document.hasFocus(), fields: document.querySelectorAll('[data-ask="q2"] details textarea').length }; })()`;
+  const ownOk = !!(await until(async () => { const s = await frame(ownState); return s.said && s.focused && s.open; }));
+  check(ownOk, "Something else: said, the reader's own words open and focused" + (ownOk ? "" : ": " + JSON.stringify(await frame(ownState).catch((e) => String(e?.message ?? e)))));
   await shot("submit-5d-own.png");
   check((await sent("decide")).length === 1, "...and nothing more asked of the host");
   // (other words written: Something else stands; then Choose again: the options, whatever the host said of the words before, astra's UI-E29-1)

@@ -840,7 +840,7 @@ def _window(k):
 def _mov_args(args, fname, takes_w):
     """(w, axis or None, omitnan, endpoints) from a moving statistic's options"""
     args = list(args)
-    w, axis, omit, ends = 0, None, False, "shrink"
+    w, axis, omit, ends, pairs = 0, None, False, "shrink", False
     if takes_w and args and not _istext(args[0]):
         if _m._numel(args[0]):
             w = _m._int_arg(args[0], "weight")
@@ -852,8 +852,12 @@ def _mov_args(args, fname, takes_w):
         if _istext(a):
             s = _text(a).lower()
             if s in ("includenan", "omitnan"):
+                if pairs:
+                    raise _err("NaN condition must come before parameter name and value pairs.",
+                               "MATLAB:movfun:nanFlagAfterPairs")
                 omit = s == "omitnan"
             elif s == "endpoints":
+                pairs = True
                 if not args:
                     raise _err("Endpoints needs a value.")
                 e = args.pop(0)
@@ -934,16 +938,27 @@ def _moving(A, kb, kf, stat, w, omit, ends):
                 # (|v| to the k as a float, and its sign from k's parity, which float(k) can lose past 2^53)
                 p = np.power(abs(v), float(k))
                 return acc * (-p if k % 2 and _math.copysign(1.0, v) < 0 else p)
-        # (the ones before the data first and after it last, in the order of the offsets)
-        acc = outside(acc, kb - cb)
-        for o in offs:
-            S, ok = shifted(o)
-            use = ok & ~np.isnan(S)
-            if stat == "prod":
-                acc = acc * np.where(use, S, 1)
-            else:
-                acc = acc + np.where(use, S, 0)
-        acc = outside(acc, kf - cf)
+        if stat == "prod":
+            # (the ones before the data first and after it last, in the order of the offsets)
+            acc = outside(acc, kb - cb)
+            for o in offs:
+                S, ok = shifted(o)
+                acc = acc * np.where(ok & ~np.isnan(S), S, 1)
+            acc = outside(acc, kf - cf)
+        else:
+            # (a sum: the window's data in order, then all its fill values at once, as MATLAB sums them, so
+            # that windows holding the same values give the same sum)
+            for o in offs:
+                S, ok = shifted(o)
+                lo, hi = max(0, -o), min(L, L - o)
+                if hi > lo:
+                    acc[lo:hi] = acc[lo:hi] + np.where(np.isnan(S[lo:hi]), 0, S[lo:hi])
+            if fill and not np.isnan(v):
+                i = np.arange(L)
+                k = kb + kf + 1 - (np.minimum(i + kf, L - 1) - np.maximum(i - kb, 0) + 1)
+                with np.errstate(over="ignore", invalid="ignore"):
+                    # (only where the window passes an end: 0 times an infinite v would be NaN)
+                    acc = np.where((k > 0)[:, None], acc + (k.astype(np.float64) * v)[:, None], acc)
         if stat in ("mean", "var", "std"):
             with np.errstate(invalid="ignore", divide="ignore"):
                 mean = acc / count
@@ -955,16 +970,24 @@ def _moving(A, kb, kf, stat, w, omit, ends):
                     with np.errstate(over="ignore", invalid="ignore"):
                         dv = np.abs(v - mean) ** 2
                     ss = ss + float(kb - cb) * dv if kb > cb else ss
+                # (whether each window's values are all one finite value: its variance is then exactly 0, as
+                # MATLAB's, though their mean may not round back to that value; equal infinities stay NaN)
+                first = np.full(A.shape, v, dtype=A.dtype) if vnum else np.zeros(A.shape, dtype=A.dtype)
+                seen = np.full(A.shape, bool(vnum))
+                same = np.ones(A.shape, dtype=bool)
                 for o in offs:
                     S, ok = shifted(o)
                     use = ok & ~np.isnan(S)
                     ss = ss + np.where(use, np.abs(S - mean) ** 2, 0)
+                    first = np.where(use & ~seen, S, first)
+                    seen |= use
+                    same &= ~use | ((S == first) & np.isfinite(S))
                 if vnum and kf > cf:
                     with np.errstate(over="ignore", invalid="ignore"):
                         ss = ss + float(kf - cf) * dv
                 den = np.where((w == 0) & (count > 1), count - 1, count)
                 with np.errstate(invalid="ignore", divide="ignore"):
-                    res = np.where(count == 1, 0.0, ss / den)
+                    res = np.where((count == 1) | same, 0.0, ss / den)
                     res = np.where(count == 0, _math.nan, res)
                 if stat == "std":
                     res = np.sqrt(res)
@@ -1622,3 +1645,257 @@ def writematrix_(A, *args):
     except OSError as e:
         raise _err("writematrix: cannot write the file '%s' (%s)." % (fname, e.strerror or e))
     return _m.NOVAL
+
+
+# ------------------------------------------------------------------ smoothdata
+
+_SMOOTH_METHODS = ("movmean", "movmedian", "gaussian", "lowess", "loess", "rlowess", "rloess", "sgolay")
+
+# (points per block of the local fits' batched solves: each block's design matrices are at most this many
+# entries, so the work's memory is bounded by the data's and this fixed size, whatever the window)
+_SMOOTH_BLOCK = 1 << 18
+
+# (the robust methods' refits after the first fit, each sample weighted by the bisquare of its residual over 6
+# median absolute residuals, the median taken at least sqrt(eps) times the data's largest magnitude: so a fit that
+# already passes through the data to rounding keeps its weights, as MATLAB's does)
+_ROBUST_ITERATIONS = 5
+
+
+def _smooth_args(args):
+    """(axis or None, method, the window as given, omitnan, degree or None)"""
+    args = list(args)
+    axis, method, given, omit, sf, degree = None, "movmean", None, True, None, None
+    if args and not _istext(args[0]):
+        axis = _dim_value(args.pop(0))
+    if args and _istext(args[0]) and _text(args[0]).lower() not in ("includenan", "omitnan", "smoothingfactor",
+                                                                      "samplepoints", "degree"):
+        method = _text(args.pop(0)).lower()
+        if method not in _SMOOTH_METHODS:
+            raise _err("Smoothing method must be 'movmean', 'movmedian', 'gaussian', 'lowess', 'loess', 'rlowess', "
+                       "'rloess', or 'sgolay'.", "MATLAB:smoothdata:invalidMethod")
+        if args and not _istext(args[0]):
+            given = args.pop(0)
+    while args:
+        a = args.pop(0)
+        if not _istext(a):
+            raise _err("smoothdata: the window length comes right after the method.")
+        s = _text(a).lower()
+        if s in ("includenan", "omitnan"):
+            omit = s == "omitnan"
+            continue
+        if s not in ("smoothingfactor", "degree", "samplepoints"):
+            raise _err("smoothdata: the option '%s' is not supported in Sagebrush." % _text(a))
+        if not args:
+            raise _err("smoothdata: '%s' needs a value." % _text(a))
+        v = args.pop(0)
+        if s == "samplepoints":
+            raise _err("smoothdata: 'SamplePoints' is not supported in Sagebrush: the samples are taken as equally "
+                       "spaced.")
+        if s == "smoothingfactor":
+            sf = _scalar(v)
+            if not 0 <= sf <= 1:
+                raise _err("'SmoothingFactor' value must be a scalar between 0 and 1.")
+        else:
+            degree = _scalar(v)
+            if not _math.isfinite(degree) or degree != _math.floor(degree) or degree < 0:
+                raise _err("'Degree' value must be a nonnegative integer scalar.")
+            degree = int(degree)
+    if sf is not None and given is not None:
+        raise _err("'SmoothingFactor' is not supported when the window length is specified.",
+                   "MATLAB:smoothdata:tuneAndWindow")
+    if degree is not None and method != "sgolay":
+        raise _err("'Degree' is supported only by the 'sgolay' method.")
+    if given is None:
+        # (MATLAB chooses the window from the data, by a heuristic its page doesn't give: refused, never guessed)
+        raise _err("smoothdata: the window MATLAB chooses from the data is not yet supported in Sagebrush: give "
+                   "the window length, as in smoothdata(A, '%s', 5)." % method)
+    return axis, method, given, omit, degree
+
+
+def _smooth_window(k, method):
+    """(kb, kf, sigma): the samples before and after each one in its window, and a Gaussian's width.  A length w:
+    for the moving mean and median the samples at offsets in [-w/2, w/2) (w need not be a whole number); for the
+    others floor(w) samples, centred (an even count takes one more before), the Gaussian's width w/5 still of w
+    itself.  [kb kf]: kb before and kf after, the width (kb + kf)/5"""
+    K = _vec(k).real
+    if K.size == 1:
+        w = float(K[0])
+        if not _math.isfinite(w) or w <= 0:
+            raise _err("Window length must be a finite, positive scalar or a 2-element vector of nonnegative values.")
+        if method not in ("movmean", "movmedian"):
+            w0 = _math.floor(w)
+            if w0 < 1:
+                raise _err("smoothdata: the window of '%s' must hold at least one sample." % method)
+            return w0 // 2, (w0 - 1) // 2, w / 5.0
+        return int(_math.floor(w / 2)), int(_math.ceil(w / 2)) - 1, w / 5.0
+    if K.size == 2:
+        if np.any(~np.isfinite(K)) or np.any(K != np.floor(K)) or np.any(K < 0):
+            raise _err("smoothdata: the window must be a 2-element vector of nonnegative integers in Sagebrush.")
+        return int(K[0]), int(K[1]), float(K[0] + K[1]) / 5.0
+    raise _err("Window length must be a finite, positive scalar or a 2-element vector of nonnegative values.")
+
+
+def _gaussian(F, kb, kf, sigma, omit):
+    """each element's window's mean weighted by exp(-d^2/(2 sigma^2)) at distance d, over the window's elements
+    inside the data (and not NaN, with omit): the weights renormalized at the ends"""
+    L = F.shape[0]
+    acc = np.zeros(F.shape, dtype=np.result_type(F.dtype, np.float64))
+    wsum = np.zeros(F.shape)
+    hasnan = np.zeros(F.shape, dtype=bool)
+    for o in range(-kb, kf + 1):
+        lo, hi = max(0, -o), min(L, L - o)
+        if hi <= lo:
+            continue
+        S = F[lo + o:hi + o]
+        g = (1.0 if o == 0 else 0.0) if sigma == 0 else _math.exp(-o * o / (2.0 * sigma * sigma))
+        if g == 0:
+            continue
+        isn = np.isnan(S)
+        hasnan[lo:hi] |= isn
+        acc[lo:hi] += np.where(isn, 0, g * S)
+        wsum[lo:hi] += np.where(isn, 0.0, g)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        res = acc / wsum
+    res = np.where(wsum == 0, _math.nan, res)
+    if not omit:
+        res = np.where(hasnan, _math.nan, res)
+    return res
+
+
+def _fit_windows(n, kb, kf):
+    """each position's local-fit window: lo (n,) of its first sample, the window's length m, and its half
+    width dmax (n,): the window [i-kb, i+kf] moved inside the data at the ends, kept at its length (the
+    data's, when shorter)"""
+    m = min(kb + kf + 1, n)
+    i = np.arange(n)
+    lo = np.clip(i - kb, 0, n - m)
+    dmax = np.maximum(i - lo, lo + m - 1 - i)
+    return lo, m, dmax
+
+
+def _tricube(x, dmax):
+    """(1 - |x/dmax|^3)^3 inside the half width dmax, 0 at and past it (1 where dmax is 0)"""
+    d = np.asarray(dmax, dtype=np.float64)
+    d = d[:, None] if d.ndim == 1 else d
+    with np.errstate(invalid="ignore", divide="ignore"):
+        t = np.abs(x) / d
+    t = np.where(d == 0, 0.0, t)
+    return np.where(t < 1, (1 - t ** 3) ** 3, 0.0)
+
+
+def _fit_rows(x, w, ok, deg):
+    """the rows c (b, m) with c @ y the weighted least-squares polynomial at 0, for b fits on offsets x (b, m) with
+    weights w and the usable samples ok: a fit whose weights are all 0 takes its usable samples equally, and one with
+    k weighted samples has degree at most k - 1 (the columns past it are 0, so the minimum-norm solution is that
+    lower degree's fit).  The offsets are scaled to [-1, 1] first, which leaves the value at 0 as it is and keeps
+    the system well conditioned"""
+    w = np.where(np.any(w > 0, axis=1, keepdims=True), w, ok.astype(np.float64))
+    k = np.sum(w > 0, axis=1)
+    s = np.maximum(np.max(np.abs(x), axis=1, keepdims=True), 1.0)
+    V = (x / s)[:, :, None] ** np.arange(deg + 1)
+    V = np.where(np.arange(deg + 1)[None, None, :] <= (k - 1)[:, None, None], V, 0.0)
+    r = np.sqrt(w)
+    P = np.linalg.pinv(V * r[:, :, None])
+    return P[:, 0, :] * r
+
+
+def _local_fit(y, kb, kf, deg, tricube, rw, omit):
+    """the local polynomial fit of degree deg at each position of the column y over its window, weighted by the
+    tricube of the distance over the window's half width (with tricube) and by rw (or None); NaN samples are left
+    out with omit, else a NaN that would carry weight makes the position NaN"""
+    n = y.shape[0]
+    out = np.empty(n, dtype=np.result_type(y.dtype, np.float64))
+    if n == 0:
+        return out
+    lo, m, dmax = _fit_windows(n, kb, kf)
+    nan = np.isnan(y)
+    if not nan.any() and rw is None:
+        # (every window whole and unweighted by the data: one row of coefficients per distinct offset of the
+        # window from its position, the interior's one and each end position's)
+        start = lo - np.arange(n)
+        keys, inv = np.unique(start, return_inverse=True)
+        x = keys[:, None] + np.arange(m)[None, :]
+        w = _tricube(x, np.maximum(-keys, keys + m - 1)) if tricube else np.ones(x.shape)
+        C = _fit_rows(x.astype(np.float64), w, np.ones(x.shape, dtype=bool), deg)
+        acc = np.zeros(n, dtype=out.dtype)
+        for j in range(m):
+            acc += C[inv, j] * y[lo + j]
+        return acc
+    ys = np.where(nan, 0, y)
+    step = max(1, _SMOOTH_BLOCK // (m * (deg + 1)))
+    for b0 in range(0, n, step):
+        b1 = min(n, b0 + step)
+        idx = lo[b0:b1, None] + np.arange(m)[None, :]
+        x = (idx - np.arange(b0, b1)[:, None]).astype(np.float64)
+        base = _tricube(x, dmax[b0:b1]) if tricube else np.ones(x.shape)
+        if rw is not None:
+            base = base * rw[idx]
+        ok = ~nan[idx]
+        C = _fit_rows(x, base * ok, ok, deg)
+        v = np.sum(C * ys[idx], axis=1)
+        v = np.where(np.any(ok, axis=1), v, _math.nan)
+        if not omit:
+            v = np.where(np.any(~ok & (base > 0), axis=1), _math.nan, v)
+        out[b0:b1] = v
+    return out
+
+
+def _robust_fit(y, kb, kf, deg, omit):
+    """the local fit, then _ROBUST_ITERATIONS refits with each sample weighted by the bisquare of its residual
+    (0 from the scale on); the positions the first fit leaves NaN stay NaN"""
+    f = _local_fit(y, kb, kf, deg, True, None, omit)
+    first = np.isnan(f)
+    good = ~np.isnan(y)
+    if not good.any():
+        return f
+    floor = _math.sqrt(np.finfo(np.float64).eps) * float(np.max(np.abs(y[good])))
+    for _ in range(_ROBUST_ITERATIONS):
+        r = np.abs(y - f)
+        ok = good & ~np.isnan(r)
+        if not ok.any():
+            break
+        scale = 6.0 * max(float(np.median(r[ok])), floor)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            t = r / scale if scale > 0 else np.where(r == 0, 0.0, np.inf)
+        rw = np.where(ok & (t < 1), (1 - t * t) ** 2, 0.0)
+        f = _local_fit(y, kb, kf, deg, True, rw, omit)
+    return np.where(first, _math.nan, f)
+
+
+@_bi("smoothdata")
+def smoothdata_(nargout, A, *args):
+    """[B, winsize] = smoothdata(A, dim, method, window, nanflag, 'Degree', d): A smoothed along dim (the first
+    dimension whose size isn't 1) by a moving mean or median, a Gaussian-weighted mean, local linear or quadratic
+    regression ('lowess', 'loess', robust 'rlowess', 'rloess'), or Savitzky-Golay polynomials ('sgolay', degree
+    2); missing values left out unless 'includenan'"""
+    axis, method, given, omit, degree = _smooth_args(args)
+    kb, kf, sigma = _smooth_window(given, method)
+    M = _md(A)
+    if method == "movmedian" and np.iscomplexobj(M):
+        raise _err("smoothdata: complex values are not supported by 'movmedian'.")
+    if axis is None:
+        axis = _first_dim(M.shape)
+    F, how = _to_front(M, axis)
+    n = F.shape[0]
+    deg = {"lowess": 1, "rlowess": 1, "loess": 2, "rloess": 2, "sgolay": 2 if degree is None else degree}.get(method)
+    if degree is not None and n and degree >= min(kb + kf + 1, n):
+        raise _err("'Degree' value must be less than the largest number of points in any window (%d)."
+                   % min(kb + kf + 1, n), "MATLAB:smoothdata:degreeTooLarge")
+    _m._admit_bytes(4 * F.size * 16, "smoothdata of %d elements" % F.size)
+    if method in ("movmean", "movmedian"):
+        res = _moving(F, kb, kf, method[3:], 0, omit, "shrink")
+    elif method == "gaussian":
+        res = _gaussian(F, kb, kf, sigma, omit)
+    else:
+        res = np.empty(F.shape, dtype=np.result_type(F.dtype, np.float64))
+        for c in range(F.shape[1]):
+            y = F[:, c]
+            if method in ("rlowess", "rloess"):
+                res[:, c] = _robust_fit(y, kb, kf, deg, omit)
+            else:
+                res[:, c] = _local_fit(y, kb, kf, deg, method != "sgolay", None, omit)
+    B = _out(_from_front(res, how), "single" if _m.class_(A) == "single" else "double")
+    if nargout < 2:
+        return B
+    # (winsize: the window as given, a row)
+    return [B, _out(np.array([[float(v) for v in _vec(given).real]]))]

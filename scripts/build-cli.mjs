@@ -104,7 +104,8 @@ writeFileSync(join(out, "packages.gen.js"), packagesGenSource(packages));
 // wasm/sagebrush-mp.wasm, at mpmath's first call into it: src/runtime/mpcore.ts;
 // and engine/nd's numerics
 // module, wasm/sagebrush-nd.wasm, at np.linalg.cholesky's first call:
-// src/runtime/nd.ts)
+// src/runtime/nd.ts; and the decision-tree kernel, wasm/sagebrush-skltree.wasm, at the
+// first sagebrush.skltree.dataset: src/runtime/skltree.ts)
 // (and nd's thread-pool helper, src/runtime/nd-helper.ts: the code each helper thread of nd.ts's pool runs, as a
 // worker_threads Worker; one copy)
 const ndHelper = execFileSync("bun", ["build", join(root, "src", "runtime", "nd-helper.ts"), "--target=node", "--format=esm", "--minify"], { cwd: root, encoding: "utf8" });
@@ -112,6 +113,7 @@ writeFileSync(join(out, "engine.gen.js"), `globalThis.__SAGEBRUSH_ENGINE__ = ${J
   `globalThis.__SAGEBRUSH_RASTER__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-raster.wasm")).toString("base64"))};\n` +
   `globalThis.__SAGEBRUSH_MP__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-mp.wasm")).toString("base64"))};\n` +
   `globalThis.__SAGEBRUSH_ND__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-nd.wasm")).toString("base64"))};\n` +
+  `globalThis.__SAGEBRUSH_SKLTREE__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-skltree.wasm")).toString("base64"))};\n` +
   `globalThis.__SAGEBRUSH_ND_HELPER__ = ${JSON.stringify(ndHelper)};\n`);
 // The notebook page for `sagebrush notebook` (src/notebook.ts), from web/dist
 // (`bun web/build.ts`, which needs lib.gen.js: so on a fresh checkout run this

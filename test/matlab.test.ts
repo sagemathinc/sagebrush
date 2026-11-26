@@ -1675,7 +1675,7 @@ test("statistics as documented: moving windows padded by 'Endpoints', quantile i
     "f = {@movmean, @movmedian, @movmax, @movsum, @movprod, @movvar, @movstd};",
     "for k = 1:numel(f), y = f{k}(x, 3, 'Endpoints', 2); fprintf('%.6g %.6g|', y(1), y(end)); end; fprintf('\\n');",
     "y = movmin(x, 3, 'Endpoints', 99); fprintf('%g %g\\n', y(1), y(end));",
-    "fprintf('%.6g ', movmean(x, 3, 'Endpoints', 'fill'), movmean(x, 3, 'Endpoints', 'fill', 'omitnan')); fprintf('\\n');",
+    "fprintf('%.6g ', movmean(x, 3, 'Endpoints', 'fill'), movmean(x, 3, 'omitnan', 'Endpoints', 'fill')); fprintf('\\n');",
     "fprintf('%g ', movsum([1 2; 3 4; 5 6], 2, 'Endpoints', true)); fprintf('\\n');",
     "fprintf('%d %d|', size(quantile([2 4 8], [0.25; 0.75])), size(quantile([2; 4; 8], [0.25 0.75])), size(prctile([2 4 8], [25; 75])), size(prctile([2; 4; 8], [25 75])), size(quantile(9, [0 0.5 1]))); fprintf('\\n');",
     "fprintf('%g ', quantile([1 2; 3 4; 5 6], [0.25 0.75])); fprintf('\\n');",
@@ -1700,7 +1700,7 @@ test("moving statistics with a fill take the window's outside positions as the f
   const t0 = Date.now();
   // (one 1 and 10000 filled zeros: the mean 1/10001; the sum 1; the max 1; with a NaN fill and omitnan, 1)
   const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c",
-    "fprintf('%.12g %.12g %.12g %.12g\\n', movmean(1, [5000 5000], 'Endpoints', 0), movsum(2, [5000 5000], 'Endpoints', 0), movmax(-1, [5000 5000], 'Endpoints', 0), movmean(1, [5000 5000], 'Endpoints', 'fill', 'omitnan'))"],
+    "fprintf('%.12g %.12g %.12g %.12g\\n', movmean(1, [5000 5000], 'Endpoints', 0), movsum(2, [5000 5000], 'Endpoints', 0), movmax(-1, [5000 5000], 'Endpoints', 0), movmean(1, [5000 5000], 'omitnan', 'Endpoints', 'fill'))"],
     { encoding: "utf8", timeout: 60000 });
   const ms = Date.now() - t0;
   assert.equal(out.trim(), "9.99900009999e-05 2 0 1");

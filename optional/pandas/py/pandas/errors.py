@@ -1,7 +1,7 @@
 """pandas.errors: the exceptions Sagebrush's pandas raises (pandas 3.1.0's
 names and bases)."""
 
-__all__ = ["OptionError", "ParserError", "EmptyDataError", "IndexingError", "PandasChangeWarning", "PandasDeprecationWarning", "Pandas4Warning"]
+__all__ = ["OptionError", "ParserError", "EmptyDataError", "IndexingError", "IntCastingNaNError", "InvalidIndexError", "PandasChangeWarning", "PandasDeprecationWarning", "Pandas4Warning"]
 
 
 class OptionError(AttributeError, KeyError):
@@ -18,6 +18,14 @@ class EmptyDataError(ValueError):
 
 class IndexingError(Exception):
     """An indexer pandas can't apply (too many axes)."""
+
+
+class IntCastingNaNError(ValueError):
+    """astype to an integer dtype of values with NaN or infinity."""
+
+
+class InvalidIndexError(Exception):
+    """An operation that needs unique labels on an index with repeated ones."""
 
 
 class PandasChangeWarning(Warning):

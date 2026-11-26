@@ -2,8 +2,168 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sagebrush.org/schema/fleet/1",
   "title": "Sagebrush fleet protocol v1 (O6/O7 r2.3)",
-  "$comment": "Frozen design: agent-autonomous-schemas.md r2.3, sha256 db905c9d72ba5d4e18620d3267ea9214992d3a82c735289dda4088970dddc7e3. Bodies by type name in $defs (sb.<name>.v1). The browser-session body is O11's and the four audit bodies are daybreak3's: imported by exact revision, absent here until then. Validate with lib/fleet/schema.mjs (closed subset).",
+  "$comment": "Frozen design: agent-autonomous-schemas.md r2.5, sha256 589730708dbc76d742f67831e2772e8f4a85fac51650640eb76fb0747c1a1bd3. Bodies by type name in $defs (sb.<name>.v1). The browser-session body is O11's, imported from O11 draft 5.1 (sha256 66755f3a1a97d060…); the four audit bodies are the audit design's, absent here until imported by exact revision. Validate with lib/fleet/schema.mjs (closed subset). Amended Nov 23 2026 by the owner's ruling (a Claude login is never held, sealed or relayed by the service; Claude subscriptions are host-local, signed in through Claude Code's own flow): no subscription, sealed package or package plaintext names provider claude, and there is no claude-setup-token purpose. Nor does an agent's broker list a claude-subscription right: the host-local pool is the only authority on Claude subscriptions, and the service never learns of one. An agent's client may still be claude.",
   "$defs": {
+    "agent-fence-ack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent",
+        "at_ms",
+        "aud",
+        "boot_id",
+        "fleet",
+        "gen",
+        "host",
+        "proven_empty",
+        "transfer"
+      ],
+      "$comment": "r2.4 §3.7.4, the old host's acknowledgement (body and acceptance rules by the lease lane). host is the old host; gen = entry_gen(agent, host), its last; transfer is the SHA-256 of the transfer it answers; boot_id is the kernel's (/proc/sys/kernel/random/boot_id).",
+      "properties": {
+        "fleet": {
+          "$ref": "#/$defs/id"
+        },
+        "aud": {
+          "$ref": "#/$defs/aud"
+        },
+        "agent": {
+          "$ref": "#/$defs/id"
+        },
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "gen": {
+          "$ref": "#/$defs/gen"
+        },
+        "transfer": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "boot_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "proven_empty": {
+          "const": true
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms"
+        }
+      }
+    },
+    "agent-transfer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent",
+        "at_ms",
+        "aud",
+        "auth_time_ms",
+        "chain_seq",
+        "fleet",
+        "from_host",
+        "gen",
+        "grant",
+        "nonce",
+        "not_after_ms",
+        "to_host",
+        "to_host_key"
+      ],
+      "$comment": "r2.4 §3.7.2. to_host_key is the new host certificate's fingerprint; grant is the SHA-256 of the signed bytes of to_host's grant that adds the agent; gen = entry_gen(agent, to_host). to_host != from_host and not_after_ms - at_ms <= 10 minutes are the service's checks; the new host checks neither the window nor freshness (§3.7.3 check 2).",
+      "properties": {
+        "fleet": {
+          "$ref": "#/$defs/id"
+        },
+        "aud": {
+          "$ref": "#/$defs/aud"
+        },
+        "agent": {
+          "$ref": "#/$defs/id"
+        },
+        "from_host": {
+          "$ref": "#/$defs/id"
+        },
+        "to_host": {
+          "$ref": "#/$defs/id"
+        },
+        "to_host_key": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "gen": {
+          "$ref": "#/$defs/gen"
+        },
+        "grant": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "nonce": {
+          "$ref": "#/$defs/b64_16"
+        },
+        "chain_seq": {
+          "$ref": "#/$defs/count"
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms"
+        },
+        "not_after_ms": {
+          "$ref": "#/$defs/ms"
+        },
+        "auth_time_ms": {
+          "$ref": "#/$defs/ms"
+        }
+      }
+    },
+    "agent-transfer-receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent",
+        "at_ms",
+        "aud",
+        "chain_seq",
+        "fleet",
+        "from_host",
+        "gen",
+        "nonce",
+        "to_host",
+        "to_host_key",
+        "transfer"
+      ],
+      "$comment": "r2.4 §3.7.3. Signed by the service key in force at chain_seq (§1.7's half-open rule). transfer is the SHA-256 of the transfer's signed bytes; every field it repeats equals the transfer's.",
+      "properties": {
+        "fleet": {
+          "$ref": "#/$defs/id"
+        },
+        "aud": {
+          "$ref": "#/$defs/aud"
+        },
+        "agent": {
+          "$ref": "#/$defs/id"
+        },
+        "from_host": {
+          "$ref": "#/$defs/id"
+        },
+        "to_host": {
+          "$ref": "#/$defs/id"
+        },
+        "to_host_key": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "gen": {
+          "$ref": "#/$defs/gen"
+        },
+        "nonce": {
+          "$ref": "#/$defs/b64_16"
+        },
+        "transfer": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "chain_seq": {
+          "$ref": "#/$defs/count"
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms"
+        }
+      }
+    },
     "agent_or_all": {
       "oneOf": [
         {
@@ -534,6 +694,71 @@
       "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$",
       "$comment": "64 bytes: 86 characters, zero pad bits. Signatures."
     },
+    "browser-session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "account_origins_manifest_sha256",
+        "agent",
+        "app_session_pub",
+        "at_ms",
+        "aud",
+        "browser_gen",
+        "chain_seq",
+        "exceptions_sha256",
+        "fleet",
+        "host",
+        "host_gen",
+        "not_after_ms",
+        "not_before_ms",
+        "session"
+      ],
+      "properties": {
+        "fleet": {
+          "$ref": "#/$defs/id"
+        },
+        "aud": {
+          "$ref": "#/$defs/aud"
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms"
+        },
+        "not_before_ms": {
+          "$ref": "#/$defs/ms"
+        },
+        "not_after_ms": {
+          "$ref": "#/$defs/ms"
+        },
+        "session": {
+          "$ref": "#/$defs/id"
+        },
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "agent": {
+          "$ref": "#/$defs/id"
+        },
+        "browser_gen": {
+          "$ref": "#/$defs/gen"
+        },
+        "host_gen": {
+          "$ref": "#/$defs/gen"
+        },
+        "chain_seq": {
+          "$ref": "#/$defs/count"
+        },
+        "app_session_pub": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "account_origins_manifest_sha256": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "exceptions_sha256": {
+          "$ref": "#/$defs/b64_32"
+        }
+      },
+      "$comment": "§3.6, O11 draft 5.1 §3 (agent-autonomous-browser-o11.md, sha256 66755f3a1a97d060…). app_session_pub is the session's X25519 key. not_before_ms <= not_after_ms <= at_ms + 12 h is checked by the channel's verifier (lib/fleet/channel)."
+    },
     "cap_plaintext": {
       "type": "object",
       "additionalProperties": false,
@@ -574,7 +799,7 @@
       "additionalProperties": false,
       "required": [],
       "properties": {},
-      "$comment": "config_schema 1 is grader's (host r2 §6.1), imported by exact revision when host r2-final clears. Until then only the empty object passes (§3.2)."
+      "$comment": "config_schema 1 is the host design's (host r2 §6.1), imported by exact revision when host r2-final clears. Until then only the empty object passes (§3.2)."
     },
     "count": {
       "type": "integer",
@@ -881,6 +1106,47 @@
             "aud",
             "auth_time_ms",
             "fleet",
+            "lease_key",
+            "op",
+            "prev",
+            "seq"
+          ],
+          "properties": {
+            "fleet": {
+              "$ref": "#/$defs/id"
+            },
+            "aud": {
+              "$ref": "#/$defs/aud"
+            },
+            "seq": {
+              "$ref": "#/$defs/count"
+            },
+            "prev": {
+              "type": "string",
+              "pattern": "^(|[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])$"
+            },
+            "at_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "auth_time_ms": {
+              "$ref": "#/$defs/ms"
+            },
+            "op": {
+              "const": "lease-key"
+            },
+            "lease_key": {
+              "$ref": "#/$defs/lease_key"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "at_ms",
+            "aud",
+            "auth_time_ms",
+            "fleet",
             "op",
             "policy",
             "prev",
@@ -948,6 +1214,66 @@
         },
         "sig": {
           "$ref": "#/$defs/b64_64"
+        }
+      }
+    },
+    "execution-lease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent",
+        "aud",
+        "boot_id",
+        "chain_seq",
+        "fleet",
+        "gen",
+        "host",
+        "host_key",
+        "lease_id",
+        "nonce",
+        "request",
+        "ttl_ms"
+      ],
+      "$comment": "r2.5 §3.8.2: one execution lease, signed by the lease key in force at chain_seq (§1.7a). agent, host, gen, nonce and boot_id are the request's; host_key is the verified certificate's fingerprint; request is the SHA-256 of the request's signed bytes; no wall-clock expiry (the host counts ttl_ms from when it sent the request).",
+      "properties": {
+        "fleet": {
+          "$ref": "#/$defs/id"
+        },
+        "aud": {
+          "$ref": "#/$defs/aud"
+        },
+        "agent": {
+          "$ref": "#/$defs/id"
+        },
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "host_key": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "gen": {
+          "$ref": "#/$defs/gen"
+        },
+        "lease_id": {
+          "$ref": "#/$defs/id"
+        },
+        "ttl_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600000
+        },
+        "nonce": {
+          "$ref": "#/$defs/b64_16"
+        },
+        "boot_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "request": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "chain_seq": {
+          "$ref": "#/$defs/count"
         }
       }
     },
@@ -1272,6 +1598,69 @@
       "maxLength": 26,
       "$comment": "r2.3 §1.1: 128 random bits and 2 zero bits, lowercase base32. The same grammar as schema/tags.schema.json $defs.id."
     },
+    "lease-request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent",
+        "at_ms",
+        "aud",
+        "boot_id",
+        "fleet",
+        "gen",
+        "host",
+        "nonce"
+      ],
+      "$comment": "r2.5 §3.8.1: a host asks for an agent's execution lease. host is the signer's certified id; gen = entry_gen(agent, host); nonce is 16 bytes from the OS; boot_id is the kernel's; at_ms feeds only the service's 5-minute window.",
+      "properties": {
+        "fleet": {
+          "$ref": "#/$defs/id"
+        },
+        "aud": {
+          "$ref": "#/$defs/aud"
+        },
+        "agent": {
+          "$ref": "#/$defs/id"
+        },
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "gen": {
+          "$ref": "#/$defs/gen"
+        },
+        "nonce": {
+          "$ref": "#/$defs/b64_16"
+        },
+        "boot_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms"
+        }
+      }
+    },
+    "lease_key": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alg",
+        "id",
+        "key"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "alg": {
+          "$ref": "#/$defs/alg"
+        },
+        "key": {
+          "$ref": "#/$defs/b64_32"
+        }
+      },
+      "$comment": "r2.5 §1.7a: the lease key, pinned by a native device's lease-key entry; same shape as service_key, never the same key."
+    },
     "ms": {
       "type": "integer",
       "minimum": 0,
@@ -1347,13 +1736,11 @@
         },
         "provider": {
           "enum": [
-            "claude",
             "codex"
           ]
         },
         "purpose": {
           "enum": [
-            "claude-setup-token",
             "codex-refresh-home",
             "codex-access-token"
           ]
@@ -1521,7 +1908,6 @@
     },
     "right": {
       "enum": [
-        "claude-subscription",
         "codex-access-token",
         "messages",
         "memory",
@@ -1595,13 +1981,11 @@
         },
         "provider": {
           "enum": [
-            "claude",
             "codex"
           ]
         },
         "purpose": {
           "enum": [
-            "claude-setup-token",
             "codex-refresh-home",
             "codex-access-token"
           ]
@@ -1662,7 +2046,8 @@
             "device",
             "host",
             "recovery",
-            "service"
+            "service",
+            "lease"
           ]
         },
         "id": {
@@ -1691,7 +2076,6 @@
         },
         "provider": {
           "enum": [
-            "claude",
             "codex"
           ]
         },

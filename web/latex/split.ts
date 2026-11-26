@@ -1,7 +1,7 @@
 // Splitting a large top-level chunk of the renderer's HTML into pieces (plan sbspace r5 §4, in the Worker), so that
 // no single insertion is larger than PIECE_MAX:
 //  - a container (a theorem div.thm, a proof div.proof, a list ol/ul.list, and the other block divs) is split at its
-//    top-level children; each later piece is a COPY of the container (same tag and classes, plus "cont"; no id, no
+//    top-level children, and a child over PIECE_MAX (a theorem's long list) in turn, at most SPLIT_DEPTH deep; each later piece is a COPY of the container (same tag and classes, plus "cont"; no id, no
 //    head), so styles carry over; list items keep their explicit labels (span.lbl: the list CSS has no counters);
 //  - a paragraph div.p is split at the boundaries between its inline runs, each later piece a div.p.cont;
 //  - a table is never split (its columns would misalign): over PIECE_MAX it is a placeholder, with its size;
@@ -11,10 +11,13 @@
 //    any chunk over CHUNK_MAX, is a placeholder saying so, with its size.
 // A piece's size against PIECE_TARGET and PIECE_MAX leaves out the data: URLs of its images' src (a \sageplot's SVG,
 // sagetex.mjs): one attribute value, read in one pass, not markup to parse; CHUNK_MAX counts every byte.
-// The input is the renderer's own HTML: well formed, every text escaped (no raw "<" in text), attributes quoted.
+// The input is the renderer's own HTML: well formed, every text escaped (no raw "<" in text), attributes quoted (with
+// spaces around "=" where KaTeX's MathML has them: <mtd class ="mtr-glue">, in gather, align and the like).
 export const PIECE_MAX = 128 * 1024, CHUNK_MAX = 2 * 2 ** 20;
 // (the size aimed for: smaller pieces parse in less time each; PIECE_MAX stays the most any piece may be)
 export const PIECE_TARGET = 32 * 1024;
+// (how many containers deep an element over PIECE_MAX is split in turn: a theorem's list's item's list)
+export const SPLIT_DEPTH = 4;
 const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
 const enc = new TextEncoder();
 export const bytes = (s: string) => enc.encode(s).length;
@@ -39,14 +42,14 @@ export function tooLargeProblem(why: string, size: number, at: number | undefine
 type Node = { start: number; end: number };
 /** The outermost element's open tag, its children's [start,end) spans, and its close tag; null if not one element. */
 function outer(h: string): { tag: string; open: string; close: string; kids: Node[] } | null {
-  const m = /^<([a-zA-Z][a-zA-Z0-9]*)((?:\s+[^\s=>"'/]+(?:="[^"]*")?)*)\s*>/.exec(h);
+  const m = /^<([a-zA-Z][a-zA-Z0-9]*)((?:\s+[^\s=>"'/]+(?:\s*=\s*"[^"]*")?)*)\s*>/.exec(h);
   if (!m) return null;
   const tag = m[1].toLowerCase(), close = "</" + m[1] + ">";
   if (!h.endsWith(close) || VOID.has(tag)) return null;
   const innerStart = m[0].length, innerEnd = h.length - close.length;
   const kids: Node[] = [];
   let i = innerStart, depth = 0, kidStart = innerStart;
-  const re = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)(?:\s+[^\s=>"'/]+(?:="[^"]*")?)*\s*(\/?)>|<!--[\s\S]*?-->/g;
+  const re = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)(?:\s+[^\s=>"'/]+(?:\s*=\s*"[^"]*")?)*\s*(\/?)>|<!--[\s\S]*?-->/g;
   re.lastIndex = innerStart;
   for (let t = re.exec(h); t && t.index < innerEnd; t = re.exec(h)) {
     if (t[0].startsWith("<!--")) continue;
@@ -68,7 +71,7 @@ function outer(h: string): { tag: string; open: string; close: string; kids: Nod
 /** The copy of a container's open tag for a later piece: its tag and classes plus "cont", without id or other
  * attributes but class and style. */
 function contOpen(open: string, tag: string): string {
-  const cls = /\sclass="([^"]*)"/.exec(open), style = /\sstyle="([^"]*)"/.exec(open);
+  const cls = /\sclass\s*=\s*"([^"]*)"/.exec(open), style = /\sstyle\s*=\s*"([^"]*)"/.exec(open);
   return "<" + tag + ' class="' + ((cls ? cls[1] + " " : "") + "cont") + '"' + (style ? ' style="' + style[1] + '"' : "") + ">";
 }
 
@@ -88,9 +91,17 @@ function splitText(t: string, max: number): string[] | null {
 
 /** One chunk as pieces, each at most PIECE_MAX bytes (or one placeholder: `tooLarge`, if given, is told why and its
  * size, for latex check). */
-export function splitChunk(h: string, tooLarge?: (why: string, size: number) => void): string[] {
+export function splitChunk(h: string, tooLarge?: (why: string, size: number) => void, depth = 0): string[] {
   const n = bytes(h), w = weight(h);
-  const ph = (why: string, open = "", close = "") => { tooLarge?.(why, n); return [open + placeholder(why, n) + close]; };
+  // (a placeholder only for what is over a limit: a chunk that fits one piece but can't be split is kept whole, one
+  //  piece; and the size said is the one compared with the limit said, the chunk's bytes over CHUNK_MAX, else its
+  //  weight over PIECE_MAX: "50 KiB, over 128 KiB" was a table kept from the reader)
+  const ph = (why: string, open = "", close = "") => {
+    if (n <= CHUNK_MAX && w <= PIECE_MAX) return [h];
+    const size = n > CHUNK_MAX ? n : w;
+    tooLarge?.(why, size);
+    return [open + placeholder(why, size) + close];
+  };
   if (w <= PIECE_TARGET && n <= CHUNK_MAX) return [h];
   if (n > CHUNK_MAX) {
     // (a slide over it too keeps its own open tag, found without parsing it all: every frame still a slide)
@@ -99,7 +110,7 @@ export function splitChunk(h: string, tooLarge?: (why: string, size: number) => 
   }
   const o = outer(h);
   if (!o) return ph("this block is too large to display in the prototype");
-  const cls = (/\sclass="([^"]*)"/.exec(o.open) || [])[1] || "";
+  const cls = (/\sclass\s*=\s*"([^"]*)"/.exec(o.open) || [])[1] || "";
   // (a beamer slide neither: it is one box of a fixed size, and its pieces would each be a slide)
   if (o.tag === "section" && /\bslide\b/.test(cls)) return w <= PIECE_MAX ? [h] : ph("this slide is too large to display in the prototype", o.open, o.close);
   if (o.tag === "table" || /\btabular\b/.test(cls) || o.kids.some((k) => /^<table\b/.test(h.slice(k.start, k.end)) && weight(h.slice(k.start, k.end)) > PIECE_MAX))
@@ -114,6 +125,13 @@ export function splitChunk(h: string, tooLarge?: (why: string, size: number) => 
     if (!s.startsWith("<")) { const t = splitText(s, PIECE_TARGET - 256); if (!t) return ph("this block is too large to display in the prototype"); parts.push(...t); continue; }
     // (one element over the target: a piece of its own, if it fits the maximum)
     if (b <= PIECE_MAX - 256) { parts.push(s); continue; }
+    // (one element over the maximum, a theorem's long list: split in turn, at most SPLIT_DEPTH containers deep, each
+    //  of its pieces a whole element (a later one a copy of its container, "cont") and a part of this one; one
+    //  placeholder piece means it couldn't be, and the pieces made here are checked against PIECE_MAX below)
+    if (depth < SPLIT_DEPTH) {
+      const sub = splitChunk(s, undefined, depth + 1);
+      if (sub.length > 1) { parts.push(...sub); continue; }
+    }
     return w <= PIECE_MAX ? [h] : ph("this block is too large to display in the prototype");
   }
   const first = o.open, later = contOpen(o.open, o.tag);

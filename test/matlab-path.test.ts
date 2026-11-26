@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -140,6 +140,54 @@ test("which and exist find what the search path finds", () => {
   assert.equal(r.out, "'x' is a variable.\nbuilt-in (Sagebrush)\n'nothere' not found.\n   1\n     2\n     2\n");
 });
 
+test("mfilename is the file the call is in: the program, a function file (where it was loaded), a local function, a script by name", () => {
+  const dir = tree({
+    "lib/where.m": "function r = where()\n  r = [mfilename ' ' mfilename('fullpath')];\nend\n",
+    "tellme.m": "disp(['script: ' mfilename])\n",
+    "other/.keep": "",
+  });
+  // (the folder as the program sees it, its links resolved, as the current folder is)
+  const real = realpathSync(dir);
+  const r = run(dir, [
+    "disp(mfilename)",
+    "disp(strcmp(mfilename('fullpath'), fullfile(pwd, 'main')))",
+    "addpath lib",
+    "disp(where())",
+    "cd other",
+    "disp(where())",
+    "cd('..')",
+    "tellme",
+    "loc()",
+    "disp(size(mfilename('class')))",
+    "f = @mfilename; disp(['[' f() ']'])",
+    // (any other single argument gives the name, as MATLAB's does: the options match exactly; two are too many)
+    "disp(mfilename('nope')), disp(mfilename('FULLPATH')), disp(mfilename(3))",
+    "try, mfilename('fullpath', 1), catch e, disp(e.identifier), end",
+    "[d, n] = fileparts(mfilename('fullpath')); disp(strcmp(d, pwd)), disp(n)",
+    "function loc()",
+    "  disp(['local: ' mfilename])",
+    "end",
+  ].join("\n") + "\n");
+  assert.equal(r.err, "");
+  const where = `where ${join(real, "lib", "where")}`;
+  assert.equal(r.out, [
+    "main", "   1",
+    // (the function file's own name and path, also after cd: its path as it was loaded)
+    where, where,
+    "script: tellme", "local: main",
+    "     0     0",
+    // (@mfilename names no file: empty)
+    "[]",
+    "main", "main", "main",
+    "MATLAB:maxrhs",
+    "   1", "main", "",
+  ].join("\n"));
+  // (a variable named mfilename is the variable; code in no file gives an empty char)
+  assert.equal(run(dir, "mfilename = 3;\ndisp(mfilename)\n").out, "     3\n");
+  const c = spawnSync(process.execPath, [cli, "--matlab", "-c", "disp(['[' mfilename ']'])"], { cwd: dir, encoding: "utf8" });
+  assert.equal(c.stdout, "[]\n");
+});
+
 test("Octave's pkg loads nothing and says so; pkg list gives no packages", () => {
   const dir = tree({});
   let r = run(dir, "pkg load statistics\ndisp(1)\n");
@@ -161,12 +209,13 @@ test("notebook session: the path, imports and scripts last from cell to cell; a 
     const msgs: any[] = [];
     const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
     await s.ready;
-    const cells = ["addpath lib", "disp(cube(2))", "setup", "disp(k)", "import geom.*", "disp(twice(3))", "x = 1;", "bump", "disp(y)"];
+    const cells = ["addpath lib", "disp(cube(2))", "setup", "disp(k)", "import geom.*", "disp(twice(3))", "x = 1;", "bump", "disp(y)", "disp(['[' mfilename ']'])"];
     for (let i = 0; i < cells.length; i++) await s.handle({ id: i + 1, code: cells[i], matlab: true });
     const out = (id: number) => msgs.filter((m) => m.id === id && m.stream === "stdout").map((m) => m.text).join("");
     const errs = msgs.filter((m) => m.stream === "stderr").map((m) => m.text).join("");
     assert.equal(errs, "");
-    assert.deepEqual([2, 4, 6, 8, 9].map(out), ["     8\n", "    42\n", "     6\n", "bumped to 2\n", "     2\n"]);
+    // (a cell is in no file: mfilename is empty)
+    assert.deepEqual([2, 4, 6, 8, 9, 10].map(out), ["     8\n", "    42\n", "     6\n", "bumped to 2\n", "     2\n", "[]\n"]);
   } finally {
     process.chdir(cwd);
   }
