@@ -55,10 +55,12 @@ const big = Buffer.from(Array.from({ length: BIG }, (_, i) => (i * 7 + (i >> 9))
   ok(chain.every((l) => all.includes(l)), "L-1: the key chain's five labels are in the same table");
   // (the design's own spellings, where it gives them)
   ok(LABELS.blobAddress === "sagebrush.blob.v1" && LABELS.blobFile === "sagebrush.blob.file.v1" && LABELS.blobChunk === "sagebrush.blob.chunk.v1", "L-1: the blob labels are §3.3's");
-  // (no label spelled outside the table: every "sagebrush.<...>.v1" in e2e/ is in labels.ts)
+  // (no label outside the table: every "sagebrush.<purpose>.v1" any module of e2e/ spells, a following "\n" separator
+  //  aside, is one of LABELS, so the one distinct, prefix-free check above covers every label in use)
   const files = readdirSync(e2eDir, { recursive: true }).filter((f) => /\.(?:ts|mts|js|mjs)$/.test(f) && f !== "labels.ts");
-  const stray = files.flatMap((f) => [...readFileSync(join(e2eDir, f), "utf8").matchAll(/["'`]sagebrush\.[^"'`]*["'`]/g)].map((m) => `${f}: ${m[0]}`));
-  ok(files.length >= 5 && stray.length === 0, `L-2: no module of e2e/ (${files.length} files, subdirectories too) spells a label itself (all come from LABELS)`, stray);
+  const spelled = files.flatMap((f) => [...readFileSync(join(e2eDir, f), "utf8").matchAll(/["'`](sagebrush\.[a-z0-9.-]+\.v1)(?:\\n)?["'`]/g)].map((m) => [f, m[1]]));
+  const stray = spelled.filter(([, l]) => !all.includes(l)).map(([f, l]) => `${f}: ${l}`);
+  ok(files.length >= 5 && stray.length === 0, `L-2: every label a module of e2e/ spells (${files.length} files, subdirectories too; ${spelled.length} spelled) is one of LABELS`, stray);
 }
 
 // ---- the page: e2e/ and @hpke/core, bundled for Chromium

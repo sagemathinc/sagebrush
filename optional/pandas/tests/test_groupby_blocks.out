@@ -1,0 +1,16 @@
+== blocks.series
+[0.0, 0.0]
+== blocks.series-unsorted
+[1.0, 1.0]
+== blocks.ctor-same-block
+[[1.0, 6.0], [1.0, 22.0]]
+== blocks.ctor-no-nan
+[[0.0, 4.0], [0.0, 4.0]]
+== blocks.added-nan-col
+[[1.0, 6.0], [1.0, 22.0]]
+== blocks.added-nan-col-mean
+[[0.25, 2.0], [0.25, 5.5]]
+== blocks.ctor-f32-std
+['float64', 'float64']
+== blocks.added-f32-std
+['float64', 'float64']

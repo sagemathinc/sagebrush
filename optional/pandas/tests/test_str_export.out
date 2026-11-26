@@ -1,0 +1,26 @@
+== series.to_numpy
+('ndarray', '<U9', (3,))
+== series.values
+('ndarray', '<U9', (3,))
+== series.unique
+('ndarray', '<U9', (2,))
+== series.empty
+('ndarray', '<U1', (0,))
+== frame.to_numpy
+('ndarray', '<U2', (2, 2))
+== frame.values
+('ndarray', '<U1', (2, 1))
+== series.missing
+!! NotImplementedError: pandas.Series.to_numpy() of a str column with missing values (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset
+== series.unique-missing
+!! NotImplementedError: pandas.Series.unique() of a str column with missing values (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset
+== frame.missing
+!! NotImplementedError: pandas.DataFrame.to_numpy() of str columns with missing values (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset
+== frame.mixed
+!! NotImplementedError: pandas.DataFrame.to_numpy() of a frame mixing str and other columns (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset
+== frame.mixed-values
+!! NotImplementedError: pandas.DataFrame.values of a frame mixing str and other columns (pandas gives an object array; Sagebrush's numpy has no object dtype yet) is not in Sagebrush's pandas 0.x subset
+== object.to_numpy
+!! NotImplementedError: pandas.Series.to_numpy() of an object column is not in Sagebrush's pandas 0.x subset
+== index.to_numpy
+('ndarray', '<U2', ['a', 'bc'])

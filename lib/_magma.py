@@ -140,6 +140,14 @@ def _absent_alternative(name):
     return _ABSENT[0].get(name)
 
 
+# Magma's file, process, environment and socket intrinsics: refused by name (Sagebrush has no file or process
+# route from Magma code), and, unlike another intrinsic Sagebrush lacks, they don't stop a file (_report)
+_FILE_PROCESS_NAMES = frozenset((
+    "Attach AttachSpec ChangeDirectory Detach DetachSpec Flush GetCurrentDirectory GetEnv Getc Getpid Gets Getuid "
+    "Open POpen Pipe PrintFile PrintFileMagma Puts Read ReadBinary ReadBytes Rewind Seek SetLogFile SetOutputFile "
+    "Socket System Tell UnsetLogFile UnsetOutputFile WaitForConnection Write WriteBinary WriteBytes").split())
+
+
 def _report(e, line, col):
     """A runtime error, reported as Magma does; then a file stops and a
     session goes on."""
@@ -163,6 +171,13 @@ def _report(e, line, col):
             alt = _absent_alternative(name)
             _sys.stdout.write("%sUser error: '%s' is a Magma intrinsic not implemented in Sagebrush%s\n"
                               % (_where(line, col), name, "; instead: " + alt if alt else ""))
+            # (and a file stops, with exit status 1, as at a runtime error:
+            # Magma has the intrinsic, so what follows would run on what it
+            # didn't compute; a session goes on.  A file, process,
+            # environment or socket intrinsic, which Sagebrush refuses by
+            # name on purpose, is reported and the file goes on, as before)
+            if _src[2] != "session" and name not in _FILE_PROCESS_NAMES:
+                raise SystemExit(1)
         else:
             # (wrapped at 80 columns, as Magma wraps it)
             _sys.stdout.write("%s%s\n" % (_where(line, col), _wrap("User error: Identifier '%s' has not been declared or assigned" % name, 0, 0)))
@@ -613,6 +628,10 @@ def _key(x):
         raise MagmaError("a set of polynomials over a finite field (or of their rings) is not supported yet")
     if isinstance(x, _FFLINALL):
         raise MagmaError("a set of matrices or vectors over a finite field is not supported yet")
+    if getattr(type(x), "_lazy_magma_type", None) == "GrpPerm" or isinstance(x, (_MSymGroup, _MDihedralGroup)):
+        # (equal groups are one element: lib/_magma_groups.py)
+        import _magma_groups
+        return _magma_groups.GroupKey(x)
     return x
 
 
@@ -1143,7 +1162,9 @@ def _own(v, name=None, depth=0):
     if isinstance(v, MSeq):
         t = MSeq([_own(x, None, depth + 1) for x in v], v.universe, getattr(v, "sample", None))
         _keep_inf(t, v, v[0] if len(v) else _UNDEF)
-        return t
+        # (a copy of ConjugacyClasses' sequence prints as its table too)
+        copy = getattr(type(v), "_table_copy", None)
+        return copy(v, t) if copy is not None else t
     if isinstance(v, MSet):
         s = MSet((), v.kind, v.universe)
         _keep_inf(s, v, v.items[0] if v.items else _UNDEF)
@@ -3081,8 +3102,8 @@ def _eq_kind(x):
         return "map"
     if _is_struct(x):
         return "struct"
-    if isinstance(x, (_MSymGroup, _MDihedralGroup)):
-        return "grp"  # (permutation groups: one set or sequence holds any)
+    if _is_perm_group(x):
+        return "grp"  # (permutation groups, lib/_magma_groups.py's too: one set or sequence holds any)
     if hasattr(x, "parent"):
         return "elt"
     return "other " + type(x).__name__
@@ -3310,6 +3331,9 @@ def _eq(a, b, pos=None, op="eq"):
         return _ffpoly_eq(a, b, op, pos)
     if isinstance(a, _FFLINALL) or isinstance(b, _FFLINALL):
         return _ffmat_eq(a, b, op, pos)
+    if _is_perm_group(a) and _is_perm_group(b):
+        import _magma_groups
+        return _magma_groups.equal(a, b)
     for x, y in ((a, b), (b, a)):
         if isinstance(x, (_MVector, _MPerm)):
             return x._magma_eq(y, op)
@@ -4031,6 +4055,10 @@ def _set_result(t, op, a, b, pos, message, mode="any"):
 
 
 def _subset(a, b, pos=None, op="subset"):
+    if _is_perm_group(a) and _is_perm_group(b):
+        import _magma_groups
+        r = _magma_groups.subset(a, b)
+        return r if op == "subset" else not r
     _set_pair(op, a, b, pos, "Arguments 1 and 2 have incompatible universal sets")
     a, b = _ff_sets(a, b, op, pos, "Arguments 1 and 2 have incompatible universal sets")
     return all(_cmpeq_in(x, b) for x in a)
@@ -4689,6 +4717,8 @@ def _range_str(v):
 def _brackets(v):
     if isinstance(v, MSeq):
         return "[ ", " ]"
+    if getattr(type(v), "_gset", False):
+        return "GSet{@ ", " @}"  # (an orbit, lib/_magma_groups.py)
     return {"set": ("{ ", " }"), "indexed": ("{@ ", " @}"), "multi": ("{* ", " *}")}[v.kind]
 
 
@@ -4778,6 +4808,10 @@ def _str1(v, indent, col, tail):
         return "[*\n" + ",\n".join(pad + _str(x, indent + 4) for x in v) + "\n" + " " * indent + "*]", False
     if isinstance(v, MRange):
         return _range_str(v), False
+    if getattr(v, "_classes_table", False):
+        # (Magma lays the table out in a sequence, a tuple or a string in
+        # ways of its own, its lines indented or not: not modelled)
+        raise MagmaError("printing the conjugacy classes inside another value or in a string is not supported yet")
     if isinstance(v, MSet) and v.range is not None and v.kind == "set" and _still_range(v):
         lo, hi, step = v.range
         return "{ %d .. %d }" % (lo, hi) if step == 1 else "{ %d .. %d by %d }" % (lo, hi, step), False
@@ -4990,7 +5024,9 @@ def _print_line(vals):
             if getattr(v, "_magma_block", False) and _atomic(vals[k - 1]):
                 out += "\n"  # a group starts on its own line
         col = len(out) - (out.rfind("\n") + 1)
-        out += _str(v, 0, col)
+        # (ConjugacyClasses' sequence, as its table: printed as a value of
+        # its own only, _str1)
+        out += v._table() if getattr(v, "_classes_table", False) else _str(v, 0, col)
     _sys.stdout.write(out + "\n")
 
 
@@ -5215,6 +5251,9 @@ def _coerce_int(x):
         return int(x)
     if isinstance(x, _Fraction) and x.denominator == 1:
         return int(x)
+    if isinstance(x, _Fraction):
+        # (Magma's words for a rational that isn't an integer: Integers()!(1/2))
+        raise MagmaError("Rational argument is not a whole integer\nLHS: RngInt\nRHS: FldRatElt", "'!'", False)
     if isinstance(x, (bool, str)):
         # Python would read "7" as 7 and true as 1
         raise MagmaError("Illegal coercion\nLHS: RngInt\nRHS: %s" % _type(x), "'!'", False)
@@ -5500,6 +5539,11 @@ def _type_name(x):
         return "GrpPermElt"
     if isinstance(x, (_MSymGroup, _MDihedralGroup)):
         return "GrpPerm"
+    if isinstance(x, _smod.EllipticCurve_rational_field):
+        return "CrvEll"
+    if getattr(type(x), "_lazy_magma_type", None) is not None:
+        # (a curve ChangeRing made: lib/_magma_classes.py's, not imported here)
+        return type(x)._lazy_magma_type
     if isinstance(x, _MResRing):
         return "RngIntRes"
     if isinstance(x, _MModMat):
@@ -5545,6 +5589,8 @@ def _type(x):
     if isinstance(x, (MSeq, MRange)):
         return "SeqEnum"
     if isinstance(x, MSet):
+        if getattr(type(x), "_gset", False):
+            return "GSetIndx"
         return {"set": "SetEnum", "indexed": "SetIndx", "multi": "SetMulti"}[x.kind]
     if isinstance(x, MTuple):
         return "Tup"
@@ -5595,6 +5641,10 @@ def _ext_type(x):
         return "Map[%s, %s]" % (_ext_type(x.dom), _ext_type(x.cod))
     if isinstance(x, MRec):
         return "Rec"
+    if getattr(type(x), "_lazy_magma_type", None) is not None:
+        return getattr(type(x), "_lazy_ext_type", None) or "%s[FldFin]" % _type_name(x)
+    if isinstance(x, _smod.EllipticCurve_rational_field):
+        return "CrvEll[FldRat]"
     return str(_type_of(x))
 
 
@@ -5664,6 +5714,7 @@ _ISA_UP = {t: frozenset(s.split()) for t, s in {
     "ModTupRngElt": "Mtrx", "ModTupFldElt": "ModTupRngElt Mtrx",
     "RngIntResElt": "RngElt", "RngIntRes": "Rng Str",
     "GrpPermElt": "", "GrpPerm": "Str",
+    "CrvEll": "CrvPln Crv Sch Str", "CrvPln": "Crv Sch Str",
     "BoolElt": "", "MonStgElt": "", "Tup": "", "List": "", "Rec": "", "Cat": "", "RecFrmt": "",
     "SeqEnum": "Str", "SetEnum": "Str", "SetIndx": "Str", "SetMulti": "Str", "Map": "Str",
     "RngInt": "Rng Str", "FldRat": "Fld Rng Str", "FldRe": "Fld Rng Str", "FldFin": "Fld Rng Str",
@@ -6434,6 +6485,8 @@ def Degree(f):
         return f.degree()
     if hasattr(f, "_magma_degree"):
         return f._magma_degree()
+    if _is_perm_group(f):
+        return f.n  # (a permutation group's degree: the points it acts on)
     raise MagmaError("Degree: bad argument")
 
 
@@ -7572,9 +7625,10 @@ def Sqrt(x):
 # calls being made, innermost last: an argument's call has returned before
 # its caller's is entered, so a nested or repeated call is told apart.
 _CALL_POS_NAMES = frozenset((
-    "ChangeRing CharacteristicPolynomial DefiningPolynomial Embed Generator Identity Integral IsSubfield "
-    "MinimalPolynomial Norm Normalise Normalize PrimeField Root RootsInSplittingField Solution SquarefreeFactorization "
-    "Submatrix Subsets Sym Trace Vector").split())
+    "Alt ChangeRing CharacteristicPolynomial ConjugacyClasses CyclicGroup DefiningPolynomial DerivedSubgroup Embed "
+    "Generator Identity Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Ngens Norm "
+    "Normalise Normalize Orbit Orbits PrimeField Root RootsInSplittingField Solution SquarefreeFactorization "
+    "Stabilizer Submatrix Subsets Sym Trace Vector").split())
 _CALLPOS = []
 
 
@@ -8834,7 +8888,7 @@ def Order(x):
         return x._magma_order()
     if isinstance(x, _MPerm):
         return x._order()
-    if isinstance(x, (_MSymGroup, _MDihedralGroup)):
+    if isinstance(x, (_MSymGroup, _MDihedralGroup)) or _is_perm_group(x):
         return x._magma_card()  # (a group's order, #G)
     raise MagmaError("Order of this argument is not supported yet", "'Order'")
 
@@ -9175,7 +9229,7 @@ def Eltseq(x):
     if isinstance(x, _MNFElt):
         # (its rational coefficients on 1, a, ..., a^(d-1), in the
         # rationals as Magma's)
-        c = list(x._c)
+        c = x.parent()._to_user(x._c)
         c += [0] * (x.parent().degree() - len(c))
         return MSeq([_qelt(_Fraction(q)) for q in c], _QQ)
     if isinstance(x, MSeq) and isinstance(x.universe, _MVectorSpace):
@@ -9566,6 +9620,17 @@ def EllipticCurve(a, b=None):
         raise MagmaError(str(e))
 
 
+@_signature("ChangeRing", "CrvEll", "FldFin", ret="Crv")
+def _change_ring_curve(E, F):
+    """An elliptic curve over the rationals with its coefficients mapped
+    into GF(q) (lib/_magma_classes.py, loaded when first used)."""
+    import _magma_classes
+    return _magma_classes.change_ring_curve(E, F)
+
+
+_unimplemented_signature("ChangeRing", "CrvEll", "Rng", ret="Crv")
+
+
 def TraceOfFrobenius(E, p):
     return E.ap(p)
 
@@ -9642,8 +9707,8 @@ class _MNFElt(_snf.NumberFieldElement):
     __slots__ = ()
 
     def __repr__(self):
-        # Magma: a common denominator in front, 1/2*(b^2 + b)
-        c = self._c
+        # Magma: a common denominator in front, 1/2*(b^2 + b) (on the generator's powers)
+        c = self._K._to_user(self._c)
         d = 1
         for x in c:
             d = d * x.denominator // _math.gcd(d, x.denominator)
@@ -9663,6 +9728,30 @@ class _MNumberField(_snf.NumberField_absolute):
 
     def __init__(self, f, quadratic=False, irreducible=False):
         super().__init__(f, "$.1", irreducible=irreducible)
+        # (as Magma 2.18-5 has it: a polynomial over the rationals defines the field made monic, NumberField(3*x^2
+        # + 1) is x^2 + 1/3; one over the integers made primitive with a positive leading coefficient, 2*y^2 - 3
+        # as given, 6*y^2 + 2 as 3*y^2 + 1 (below); either way the generator is its root, which the core's
+        # coordinates are on)
+        over_z = getattr(getattr(f, "parent", lambda: None)(), "base_ring", lambda: None)() is _sp.ZZ
+        if not over_z and self._uf[-1] != 1:
+            self._uf = tuple(_Fraction(a) / _Fraction(self._uf[-1]) for a in self._uf)
+        if over_z:
+            # (made primitive with a positive leading coefficient: 6*y^2 + 2 is 3*y^2 + 1, -2*y^2 + 3 is 2*y^2 - 3)
+            g = 0
+            for a in self._uf:
+                g = _math.gcd(g, int(a))
+            g = -g if self._uf[-1] < 0 else g
+            self._uf = tuple(int(a) // g for a in self._uf)
+        # (the primitive integral polynomial of the field's: its equation order's, whose discriminant is
+        # Discriminant(K); 3*x^2 + 1 for x^2 + 1/3)
+        L = 1
+        for a in self._uf:
+            L = L * _Fraction(a).denominator // _math.gcd(L, _Fraction(a).denominator)
+        zf = [int(_Fraction(a) * L) for a in self._uf]
+        g = 0
+        for a in zf:
+            g = _math.gcd(g, a)
+        self._zf = [a // g for a in zf] if not over_z else [int(a) for a in self._uf]
         self._quadratic = quadratic
         self._order = None
         self._fring = getattr(f, "_ring", None)  # the defining polynomial's ring
@@ -9701,7 +9790,7 @@ class _MNumberField(_snf.NumberField_absolute):
             # (which could factor s again)
             s = -int(self._f[0])
             return s if s % 4 == 1 else 4 * s
-        return _m_num(self.polynomial().discriminant())
+        return _m_num(_sp.PolynomialRing_(_sp.QQ, "x")(self._zf).discriminant())
 
     def _magma_coerce(self, x):
         try:
@@ -9714,7 +9803,7 @@ class _MNumberField(_snf.NumberField_absolute):
 
     def __repr__(self):
         kind = "Quadratic Field" if self._quadratic else "Number Field"
-        return "%s with defining polynomial %s over the Rational Field" % (kind, _snf._repr_poly(self._f, self._fvar()))
+        return "%s with defining polynomial %s over the Rational Field" % (kind, _snf._repr_poly(self._uf, self._fvar()))
 
     def _maximal_order(self):
         if self._order is None:
@@ -9731,8 +9820,9 @@ class _MOrder:
 
     def __repr__(self):
         K = self.K
-        f = _snf._repr_poly(K._f, K._var)
-        if K._nfdata()["index"] == 1:
+        f = _snf._repr_poly(K._zf, K._var)
+        # (a non-monic polynomial's equation order isn't the maximal order, as Magma has it)
+        if K._zf[-1] == 1 and K._nfdata()["index"] == 1:
             return "Maximal Equation Order with defining polynomial %s over its ground order" % f
         return "Maximal Order of Equation Order with defining polynomial %s over its ground order" % f
 
@@ -11416,6 +11506,14 @@ def _order_text(n):
     return "Order = %d" % n if f == str(n) else "Order = %d = %s" % (n, f)
 
 
+def _no_covering_group():
+    """Magma's error for a permutation coerced into a permutation group of
+    another degree (Sym(5)!(Sym(4)!(1, 2))), with no empty line after it;
+    one of the same degree that isn't in the group is an illegal
+    coercion."""
+    return MagmaError("Could not find a covering group\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", False)
+
+
 class _MSymGroup:
     """Sym(n): the symmetric group on 1 .. n (GrpPerm), its elements the
     permutations, composed left to right as Magma's: i^(p*q) = (i^p)^q."""
@@ -11459,7 +11557,7 @@ class _MSymGroup:
                 return x
             if x.G.n == self.n:
                 return _MPerm(self, x.images)  # (a dihedral group's, of degree n)
-            raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", True)
+            raise _no_covering_group()
         if isinstance(x, (MSeq, MRange)):
             # G![images]: the permutation i -> images[i], integers only
             # (CORR-DFC-4)
@@ -11684,9 +11782,12 @@ class _MDihedralGroup:
         # (cycles or images made a permutation as Sym(n)'s, then admitted
         # only if it is the group's: G!(1, 2) is Magma's Illegal coercion)
         p = x if isinstance(x, _MPerm) else _MSymGroup(self.n)._magma_coerce(x)
-        if p.G.n == self.n and self._has(p.images):
+        if p.G.n != self.n:
+            raise _no_covering_group()
+        if self._has(p.images):
             return _MPerm(self, p.images)
-        raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", True)
+        # (with no empty line after it, as Magma's)
+        raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", False)
 
 
 def DihedralGroup(n):
@@ -11698,6 +11799,100 @@ def DihedralGroup(n):
     if n > _SYM_MAX:
         raise MagmaError("DihedralGroup(n) for n above %d is not supported yet" % _SYM_MAX, "'DihedralGroup'")
     return _MDihedralGroup(n)
+
+
+@_signature("ConjugacyClasses", "GrpPerm", ret="SeqEnum")
+def _conjugacy_classes(G):
+    """Sym(n)'s conjugacy classes, as Magma lists and prints them
+    (lib/_magma_classes.py, loaded when first used)."""
+    import _magma_classes
+    return _magma_classes.conjugacy_classes(G)
+
+
+def _is_perm_group(x):
+    """A permutation group: Sym(n), DihedralGroup(n), or one of
+    lib/_magma_groups.py's (not imported here)."""
+    return isinstance(x, (_MSymGroup, _MDihedralGroup)) or getattr(type(x), "_lazy_magma_type", None) == "GrpPerm"
+
+
+def _groups():
+    import _magma_groups
+    return _magma_groups
+
+
+def _group_ctor(kind, first, gens, pos):
+    """PermutationGroup< n | gens > and sub< G | gens > (lib/_magma_groups.py)."""
+    if kind == "PermutationGroup":
+        return _groups().construct(first, gens, pos)
+    return _groups().sub(first, gens, pos)
+
+
+@_signature("Alt", "RngIntElt", ret="GrpPerm")
+def _alt(n):
+    """The alternating group on 1 .. n, with Magma's generators."""
+    if n < 1:
+        raise MagmaError("Argument 1 (%d) should be >= 1" % n, "'Alt'", True, _call_pos("Alt"))
+    if n > _COLLECT_MAX:
+        raise _collect_refusal()  # (its generators are lists of n points, collections)
+    return _groups().alt(n)
+
+
+@_signature("CyclicGroup", "RngIntElt", ret="GrpPerm")
+def _cyclic_group(n):
+    """The cyclic group of order n, generated by (1, 2, ..., n)."""
+    if n < 1:
+        raise MagmaError("Argument 1 (%d) should be >= 1" % n, "'CyclicGroup'", True, _call_pos("CyclicGroup"))
+    if n > _COLLECT_MAX:
+        raise _collect_refusal()  # (its generators are lists of n points, collections)
+    return _groups().cyclic(n)
+
+
+@_signature("Orbits", "GrpPerm", ret="SeqEnum")
+def _orbits(G):
+    """The orbits of a permutation group, in Magma's order."""
+    return _groups().orbits(G)
+
+
+@_signature("Orbit", "GrpPerm", "RngIntElt", ret="GSetIndx")
+def _orbit(G, x):
+    """The orbit of a point, in the order Magma lists it."""
+    return _groups().orbit(G, x)
+
+
+@_signature("Stabilizer", "GrpPerm", "RngIntElt", ret="GrpPerm")
+def _stabilizer(G, x):
+    """The stabilizer of a point (its generators Sagebrush's own)."""
+    return _groups().stabilizer(G, x)
+
+
+@_signature("IsTransitive", "GrpPerm", ret="BoolElt")
+def _is_transitive(G):
+    """Whether a permutation group is transitive on 1 .. n."""
+    return _groups().is_transitive(G)
+
+
+@_signature("IsAbelian", "GrpPerm", ret="BoolElt")
+def _is_abelian(G):
+    """Whether a permutation group is abelian."""
+    return _groups().is_abelian(G)
+
+
+@_signature("IsSolvable", "GrpPerm", ret="BoolElt")
+def _is_solvable(G):
+    """Whether a permutation group is solvable."""
+    return _groups().is_solvable(G)
+
+
+@_signature("DerivedSubgroup", "GrpPerm", ret="GrpPerm")
+def _derived_subgroup(G):
+    """The commutator subgroup (its generators Sagebrush's own)."""
+    return _groups().derived_subgroup(G)
+
+
+@_signature("Ngens", "GrpPerm", ret="RngIntElt")
+def _ngens(G):
+    """The number of generators of a permutation group."""
+    return _groups().ngens(G)
 
 
 class _IsoNotModelled:
@@ -11719,7 +11914,7 @@ def _iso_result(b):
 
 def _quadratic_disc(K):
     """The discriminant of a degree 2 field's defining polynomial, a rational."""
-    c = [_Fraction(_m_num(x)) for x in list(K._f)[:3]]
+    c = [_Fraction(_m_num(x)) for x in list(K._uf)[:3]]
     return c[1] * c[1] - 4 * c[0] * c[2]
 
 

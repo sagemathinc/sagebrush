@@ -25,7 +25,7 @@
 import { b64, concat, enc, refuse, sha256b64, unb64 } from "./bytes.mjs";
 import { canonText, parseCanonical } from "./canonical.mjs";
 import { crypto } from "./crypto.mjs";
-import { COMMIT_ROUTE, RECORD_HEADER_MAX } from "./relay.mjs";
+import { APP_TOKEN, COMMIT_ROUTE, RECORD_HEADER_MAX } from "./relay.mjs";
 import { compile } from "./schema.mjs";
 
 export const ADMIT_ROUTE = "/api/fleet/v1/relay/admit";
@@ -41,7 +41,7 @@ export const CALL_ID_TTL_MS = 10 * 60_000;
 // keeps (24 h), after which the relay closes everything and starts again from since=0.
 export const ADMIT_REFUSALS = Object.freeze([
   "bad_form", "bad_audience", "clock_skew", "bad_signature", "unknown_host", "host_revoked", "agent_revoked", "stale_generation", "grant_expired",
-  "not_granted", "limit", "device_unknown", "device_removed", "device_tier", "chain_fork", "browser_gen_stale",
+  "not_granted", "limit", "device_unknown", "device_removed", "device_tier", "chain_fork", "browser_gen_stale", "unauthenticated",
 ]);
 export const CURSOR_EXPIRED = "cursor_expired";
 export const FEED_MAX = 80; // (entries per list in one feed answer: three full lists stay under ANSWER_MAX, tested)
@@ -150,7 +150,7 @@ export const SCHEMAS = Object.freeze({
     oneOf: [
       closed({ v: { const: 1 }, kind: { const: "host" }, target: TARGET, sig: SIG }),
       closed({ v: { const: 1 }, kind: { const: "app" }, target: TARGET, record: { type: "string", pattern: "^[A-Za-z0-9_-]+$", maxLength: RECORD_HEADER_MAX }, request: N22,
-        cookie: { type: "string", pattern: "^[!-~]{1,4096}$" } }),
+        token: { type: "string", pattern: APP_TOKEN.source } }),
       closed({ v: { const: 1 }, kind: { const: "commit" }, target: { const: COMMIT_ROUTE }, sig: SIG, body: { type: "string", pattern: "^[A-Za-z0-9_-]{1,1366}$" } }),
     ],
   },

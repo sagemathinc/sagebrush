@@ -1026,7 +1026,7 @@ async function blobConflicts() {
     const w = await fresh();
     const c = client(w);
     check(await until(() => settled(w, c)), `blob conflict (${via}): synced`);
-    const held = { sha256: "e".repeat(64), ct_sha256: "e".repeat(64), size: 1 };
+    const held = { address: "e".repeat(64), ct_sha256: "e".repeat(64), size: 1 };
     const putsBefore = await puts();
     await ctl("set", { set: { fakeHttp: via === "check"
       ? [{ method: "POST", path: "/blobs/check", status: 200, body: { missing: [], conflicts: [held] }, times: 2 }]

@@ -33,7 +33,8 @@ import {
 import { PULL_FIELDS, batchHash, chainNext, chainSeed, checkDocClaim, checkDocFence, checkFgen, checkPullStart, checkUpto, hex } from "./doc-protocol.ts";
 import { checkSealedOp, isChainGeneration, isChainHead } from "./protocol.ts";
 import { sealedOpMessage } from "../workspace/e2e/sealed-op.mjs";
-import { fleetCore } from "../workspace/fleet/install.ts";
+import { e2eCore } from "../workspace/e2e/core-ready.ts";
+import * as prims from "../workspace/e2e/core/sealed-prims.mjs";
 
 /** The cookie a test session rides on: the same name as the site's, so a test front can pass it along. */
 export const SESSION_COOKIE = "__Host-sb_session";
@@ -326,14 +327,14 @@ export class ReferenceServer {
     if (bound) return err(bound.status, bound.code, { reason: bound.reason });
     if (p === "/api/sync/v1/blobs/check" && m === "POST") {
       if (a.state !== "active") return err(409, a.state === "deleting" ? "deleting" : "readonly");
-      let blobs: { sha256: string; ct_sha256: string; size: number }[];
+      let blobs: { address: string; ct_sha256: string; size: number }[];
       try {
         const b = fields(JSON.parse(await req.text()), ["blobs"], "check");
         if (!Array.isArray(b.blobs) || b.blobs.length > LIMITS.checkItems) throw new SyncError("limit", "at most " + LIMITS.checkItems, { limit: "check_items", max: LIMITS.checkItems });
         blobs = b.blobs.map((x) => {
-          const o = fields(x, ["sha256", "ct_sha256", "size"], "blob");
-          if (!isSha(o.sha256) || !isSha(o.ct_sha256) || !isNat(o.size)) throw new SyncError("invalid", "blob");
-          return { sha256: o.sha256 as string, ct_sha256: o.ct_sha256 as string, size: o.size as number };
+          const o = fields(x, ["address", "ct_sha256", "size"], "blob");
+          if (!isSha(o.address) || !isSha(o.ct_sha256) || !isNat(o.size)) throw new SyncError("invalid", "blob");
+          return { address: o.address as string, ct_sha256: o.ct_sha256 as string, size: o.size as number };
         });
       } catch (e) {
         return err(e instanceof SyncError && e.code === "limit" ? 413 : 400, e instanceof SyncError ? e.code : "invalid");
@@ -341,8 +342,8 @@ export class ReferenceServer {
       // (held is "there" only as exactly these bytes; held otherwise is a conflict naming what is held)
       const missing: string[] = [], conflicts: Held[] = [];
       for (const b of blobs) {
-        const h = await held(a, b.sha256);
-        if (!h) missing.push(b.sha256);
+        const h = await held(a, b.address);
+        if (!h) missing.push(b.address);
         else if (h.ct_sha256 !== b.ct_sha256 || h.size !== b.size) conflicts.push(h);
       }
       return json({ missing, ...(conflicts.length ? { conflicts } : {}) });
@@ -370,11 +371,11 @@ export class ReferenceServer {
       // (the first bytes held at an address stay: the same again is "have", other bytes a conflict, never a replacement)
       const h = await held(a, g[1]);
       if (h) {
-        if (h.ct_sha256 === ct && h.size === bytes.length) return json({ sha256: g[1], have: true });
+        if (h.ct_sha256 === ct && h.size === bytes.length) return json({ address: g[1], have: true });
         return err(409, "conflict", { message: "the server holds other bytes under this address", held: h });
       }
       a.blobs.set(g[1], bytes);
-      return json({ sha256: g[1], size: bytes.length });
+      return json({ address: g[1], size: bytes.length });
     }
     if (g && m === "GET") {
       if (!a.blobs.has(g[1])) return err(404, "missing");
@@ -619,7 +620,8 @@ export class ReferenceServer {
         throw new SyncError("conflict", "sealed under another key chain head: seal again under the current one", { reason: "stale_head", head: now });
       }
     }
-    const core = fleetCore();
+    e2eCore(); // (the fleet core's backend installed, once, before any signature is checked or hash taken)
+    const core = prims;
     const envHash = new Map<number, string>();
     for (const [at, raw] of list.entries()) {
       if (!fresh(raw, next0)) continue;
@@ -840,7 +842,7 @@ export class ReferenceServer {
       if (g < row.fgen) throw new SyncError("fenced", "this client was fenced: send under its new fgen", { client, fgen: row.fgen, next_cseq: row.next_cseq });
       if (g > row.fgen) throw new SyncError("invalid", "an fgen the server never gave", { client, fgen: row.fgen });
       // (every blob a new patch names is held before it can be stored, §4.3: CORR-173-2)
-      for (const sha of env.blobs ?? []) if (!a.blobs.has(sha)) throw new SyncError("missing", "upload the patch's blob first", { sha256: sha });
+      for (const sha of env.blobs ?? []) if (!a.blobs.has(sha)) throw new SyncError("missing", "upload the patch's blob first", { address: sha });
       accepted.add(env.id);
       c.fresh++;
       fresh.push({ env, start });
@@ -934,7 +936,7 @@ export class ReferenceServer {
     if (fgen.get(client)! < c.fgen) throw new SyncError("fenced", "this client was fenced: send under its new fgen", { client, fgen: c.fgen, next_cseq: c.next_cseq });
     if (fgen.get(client)! > c.fgen) throw new SyncError("invalid", "an fgen the server never gave", { client, fgen: c.fgen });
     if (env.cseq !== c.next_cseq || !(env.id > c.last_id)) throw new SyncError("order", "the root is its client's next patch", { client, next_cseq: c.next_cseq });
-    for (const sha of env.blobs ?? []) if (!a.blobs.has(sha)) throw new SyncError("missing", "upload the root's blob first", { sha256: sha });
+    for (const sha of env.blobs ?? []) if (!a.blobs.has(sha)) throw new SyncError("missing", "upload the root's blob first", { address: sha });
     d.epoch++;
     d.batches = [];
     d.ranges = new Map();
@@ -970,10 +972,10 @@ function attemptDoc<T>(f: () => T): T {
 }
 
 /** A held blob: its address, its bytes' SHA-256 and its size (design/e2e-encryption.md §3.3; e2e PR 3a). */
-type Held = { sha256: string; ct_sha256: string; size: number };
+type Held = { address: string; ct_sha256: string; size: number };
 async function held(a: { blobs: Map<string, Uint8Array> }, address: string): Promise<Held | undefined> {
   const b = a.blobs.get(address);
-  return b ? { sha256: address, ct_sha256: await sha256Hex(b), size: b.length } : undefined;
+  return b ? { address, ct_sha256: await sha256Hex(b), size: b.length } : undefined;
 }
 
 /** A blob PUT's `x-sync-release: <n>:<core sha>` (absent or malformed: no release). */

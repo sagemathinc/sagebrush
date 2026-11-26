@@ -2,10 +2,12 @@
 
 *Status: design, for review by astra (correctness), daybreak2 (limits) and William. Not built yet. When built, it stays behind the sync service's flag, which is off in production (design/sync-server.md §11).*
 
-This is design/workspace-files.md §8.2's third surface, "Anywhere, with sync", together with §8.4's grants and access log. With it, a person's own agent (Claude Code or Codex on any computer, or an agent in a cocalc.ai project) can work in their workspace through the workspace API's verbs while every device of theirs is closed. It is built on the sync server (design/sync-server.md), and the account object holds everything here.
+This is design/workspace-files.md §8.2's third surface, "Anywhere, with sync", together with §8.4's grants and access log. With it, a person's own agent (Claude Code or Codex on any computer, or an agent in a cocalc.ai project) can work in their workspace through the workspace API's verbs, without a page the agent drives. It is built on the sync server (design/sync-server.md), and the account object holds the grants, tokens, rates and access log.
+
+**Under end-to-end encryption** (decided Nov 23; design/e2e-encryption.md §6), the server can't read the workspace. So every verb is relayed to an online device of the person's, which decrypts, checks the grant's scope and answers (§4). With no device online, the agent is told to wait.
 
 **What it is not:**
-- **It runs no code.** A run is relayed to an open page of the person's, and happens there in the runner (§6). With no page open, a run is refused.
+- **It runs no code, and reads no data.** A run is relayed to an open page of the person's, and happens there in the runner (§6). Every other verb is relayed to a device too (§4).
 - **It is not the in-page surface** (`window.sagebrush.workspace`) and not the local MCP adapter. Those act with the page's authority (§9.2).
 
 ---
@@ -26,6 +28,10 @@ grants(
   created, expires, last_used, revoked, revoked_reason
 )
 ```
+
+**Under end-to-end encryption** (design/e2e-encryption.md §4, §6), the grant is split:
+- **sealed to the person's devices,** which alone read and enforce them: `agent`, `scopes`, `run_code` and `outward`;
+- **kept by the server,** to admit and limit requests without reading anything: `id`, `token_hash` and its tag, `rate`, `created`, `expires`, `last_used`, `revoked`, and its `gen` (design/sync-server.md §4.5), which rises with every change to the grant, a narrowed scope included.
 
 - **Scope** is a list of folders or files, each read or read-and-write.
   - A path covers itself and everything under it, matched on whole segments, so `/Algebra` doesn't cover `/Algebra2`.
@@ -58,11 +64,15 @@ grants(
    - meanwhile the agent polls `POST /api/agent/v1/pair/<pair_id>` with its `poll_secret`, and receives the token once, after approval;
    - a pairing expires after 10 minutes, and gives its token only once, to the holder of `poll_secret`.
 
-   **Pairing is the one route before any account, so its bounds are all stated** (LIMIT-D817-2). Its records are a D1 table, `pairings(pair_id, code_hash, poll_hash, ip_hash, wants, state, created, expires, polls, last_poll, account, grant)`, written when a pairing is made, approved and collected. It is never written on an edit.
+   **Under end-to-end encryption** (design/e2e-encryption.md §6), the server must not learn the agent's name or the paths it asks for, so the request's contents travel sealed:
+   - the agent sends `{sealed_wants}` in place of `{agent, wants}`: its name, `scopes` and `run_code`, encrypted so that only the page that approves can read them. One way is a key the agent puts in the pairing URL's fragment (`…/agents/pair#k=…`), which browsers never send to the server, as link shares do (e2e-encryption.md §5). The exact construction is settled with §4's open item, together with the agent's own key;
+   - **the approving page** decrypts the request, normalizes every path with `normPath`, applies the membership's `scopes_per_grant`, lets the person narrow it, and makes the grant with its sealed fields (§1);
+   - **the server** stores and bounds only opaque, structural things: the size of `sealed_wants`, the counts, the rates and the expiry below. It never runs `normPath` on a path or counts scopes.
+
+   **Pairing is the one route before any account, so its bounds are all stated** (LIMIT-D817-2). Its records are a D1 table, `pairings(pair_id, code_hash, poll_hash, ip_hash, sealed_wants, state, created, expires, polls, last_poll, account, grant)`, written when a pairing is made, approved and collected. It is never written on an edit, and `sealed_wants` is ciphertext.
    - **The request:**
      - at most 4 KiB of JSON;
-     - `agent` at most 64 characters;
-     - `wants.scopes` must fit the structural 4 KiB request and every path is checked by `normPath`; on approval, the account applies its membership's `scopes_per_grant` and the person may narrow the request.
+     - `sealed_wants` must fit the structural 4 KiB request. The approving page checks what is inside it: `agent` at most 64 characters, every path by `normPath`, and the membership's `scopes_per_grant`; the person may narrow the request.
      - Anything else is refused with 400 before any write.
    - **Making one:**
      - the IP limit first (Cloudflare's rate-limiting binding, 10 an hour per IP);
@@ -82,7 +92,7 @@ grants(
      - the scheduled job deletes every row an hour past its expiry, 1,000 at a time;
      - **no token is ever stored:** approval makes the grant without a secret. The first poll after approval makes the secret, has the account object store its hash, and returns the token once. A second collection finds the pairing `collected`.
    - **Failure paths never disclose a token:** an expired, used or unknown pairing gets the same 404.
-2. **From the grant dialog,** for an agent the person configures by hand:
+2. **From the grant dialog,** for an agent the person configures by hand. **Under end-to-end encryption this route is dropped, and grants are made by pairing only:** pairing is where the agent's own key is certified (§4, design/e2e-encryption.md §6), and a copied token has no key behind it.
    - the person makes the grant and copies the token, which is shown once;
    - this is also how a token reaches a cocalc.ai project, pasted as a project secret, until the cocalc.ai adapter (§10) does it for them.
 
@@ -103,18 +113,20 @@ grants(
 
 **At the Worker, before any object:** the IP's pre-authentication limit, and then the token's form and tag (§2).
 
-**Then every request, in this order, inside the account object:**
+**Then, in the account object: admission only.** Under end-to-end encryption the server can't read a path, a scope or a document, so it checks only what it holds (§1):
 1. The grant exists, isn't revoked or expired, its secret matches, and the account is `active` (or `readonly`, for reads). On dev, the account must also be in `SYNC_ACCOUNTS` (design/sync-server.md §11).
 2. The grant's rate limits, and then the account's (§7).
-3. The verb's paths are inside the scope, with the access the verb needs (read, or write).
-4. The verb runs.
-   - **A write to the index** (an op) is one transaction in the account object. The grant is checked again in it, so a revoke that lands while the request runs prevents the write.
-   - **A write to a document** is admitted, and then fenced if it must be (design/sync-server.md §4.5):
-     - the account object checks the grant and scope, and records an admission, in one transaction;
-     - the document object commits it only if it isn't fenced and hasn't expired (60 seconds);
-     - a revoke, a narrowed scope or a rename out of scope cancels pending admissions, and completes only once they are fenced or expired.
-     - So no write admitted before a revoke commits after the revoke completes.
-5. A row is written to the access log (§8), in the same transaction as the write or the admission. A document write's row is then marked `committed` or `refused` when its answer comes.
+3. The request goes, opaquely, to an online device of the person's (§4), with the grant's id and current `gen`. With none online, it waits (§4).
+
+**On the answering device, which decides everything about content:**
+4. The verb's paths are inside the grant's sealed scope, with the access the verb needs (read, or write); an outward action is granted beforehand or confirmed (§5); a run is the agent's own code (§6).
+5. The verb runs through the workspace API. A write becomes ops or patches that the device seals and signs, credited to the agent and naming the grant's id and the `gen` it checked.
+6. The device writes the access log's row, encrypted (§8).
+
+**Revoking, and fences, without reading a path:**
+- **A write to the index** (an op) is accepted by the account object only if its grant is live and the `gen` it names is the grant's current one, in the op's own transaction. So a revoke, or any change to the grant, that lands while the request runs prevents the write.
+- **A write to a document** is admitted, and then fenced if it must be (design/sync-server.md §4.5): the account object records an admission for the grant's id and `gen`; the document object commits it only if it isn't fenced and hasn't expired (60 seconds); a revoke or a change to the grant cancels pending admissions, and completes only once they are fenced or expired. So no write admitted before a revoke commits after the revoke completes.
+- **A rename out of scope** is the person's own op, which the server can't see the meaning of. It is caught where the paths are known: every device reduces the log in the same order, and an agent's op whose path is outside its grant's scope at that point in the log is refused by every device alike, as any op is under the deterministic reducer (design/e2e-encryption.md §4).
 
 **What a refusal says:**
 - 401 `unauthorized`: no such grant, a wrong secret, or expired or revoked. The answer never says which;
@@ -129,26 +141,33 @@ grants(
 
 **The verbs are the workspace API's (§8.2), generated from its schema** (`web/workspace/schema.json`, made from the TypeScript types). The same schema generates the MCP tools, so the surfaces can't drift apart.
 
-| Verb | Access | How it is done on the server |
+**Every verb is relayed to a device** (design/e2e-encryption.md §6):
+- **Where it goes:** an online device of the person's: an open tab, the desktop app, the sagebrush CLI or an Autonomous VM. Each is a full trusted device in the account's key chain, able to read everything the account holds: a grant limits what the agent does, not what that device can read (decided: no per-folder keys). The account object picks one, as it picks a page for a run (§6), and forwards the request opaquely.
+- **What the device does:** it decrypts, checks the grant's scope (`inScope`, and the Trash visibility rule for grants, `trashVisible`), does the verb through the workspace API, and answers. The grant's scopes are sealed to the person's devices: the server keeps only the grant's id, token hash, tag, rates and expiry.
+- **With no device online,** the endpoint answers "waiting for one of your devices" and queues the request opaquely. It never decrypts.
+- **Open, for the endpoint's own design with SEC:** how the request and the answer travel end to end between the agent and the answering device, so that the server relays only ciphertext in both directions. For example, a key the agent presents at pairing, which the person's device certifies. Until that is settled, the endpoint isn't built beyond DEV's `list` and `stat`.
+- **Today, on DEV:** only `list` and `stat` are built, and they answer from the server's derived index (`entries`, design/sync-server.md §3). That index goes away when index ops are sealed, and these two verbs move to the relay with the rest. The other verbs answer `not_built`, so nothing is lost by making them relay-only from the start.
+
+| Verb | Access | What the device does |
 |---|---|---|
-| `list`, `stat` | read | from `entries` (design/sync-server.md §3), filtered to the scope |
-| `read` | read | a data file: a signed URL (design/sync-server.md §5.4). A document: its current value (below) |
+| `list`, `stat` | read | from its index, filtered to the scope |
+| `read` | read | a data file: its bytes, decrypted. A document: its current value (below) |
 | `write(path, content, {base})` | write | a data file: blob, then op, with compare-and-swap on its `sha256`. A document: a patch (below) |
 | `create`, `mkdir` | write (the parent) | an op, credited to `agent:<name>` |
 | `rename`, `duplicate` | write (both paths) | an op |
 | `remove`, `restore` | write | an op (to Trash and back) |
 | `history`, `version` | read | a document's batches; a data file's versions |
-| `watch(path)` | read | on the socket: the ops and `changed` within the scope |
+| `watch(path)` | read | the ops and `changed` within the scope, as the device sees them |
 | `run(path, cell or note)` | write and `run_code` | relayed to a page (§6) |
 | `chat.next`, `chat.reply` | the chat document's access | §8.7's remote adapter: messages are patches on a `.chat` document |
 | `files.batch` | each item's access | many small reads/writes/ops in one idempotent request (design/fs-sync-scale.md §2) |
 
 - **Not verbs:** emptying Trash, clearing a history, dropping versions, making or changing grants, deleting synced data. Only a person, from a session, may do these (§8.2, §8.3).
-- **Ops and patches from a grant are credited:** `by: "agent:<name>"`, device `grant:<id>`, and author `agent:<name>` on each patch. The server sets these from the grant, never from the request.
+- **Ops and patches from a grant are credited:** `by: "agent:<name>"`, device `grant:<id>`, and author `agent:<name>` on each patch. The device sets these from the grant, never from the request, and signs them as its own.
 
-**Documents on the server.** Notebooks, boards and chats are patchflow logs, opaque to the sync objects (design/sync-server.md §10). The agent endpoint is the one place that reads them:
-- `read` and `write` on a document run in the Worker, in `web/sync/agent-docs.ts`, which uses the same patchflow codecs as the pages (web/notebook/history.js, web/board/history.ts);
-- it reads the latest snapshot and the batches since (design/sync-server.md §5.2 `pull`), and computes the value;
+**Documents.** Notebooks, boards and chats are patchflow logs, ciphertext to the sync objects (design/sync-server.md §10). Only the person's devices read them:
+- `read` and `write` on a document use the same patchflow codecs as the pages (web/notebook/history.js, web/board/history.ts);
+- the device reads the latest snapshot and the batches since (design/sync-server.md §5.2 `pull`), and computes the value;
 - for `write`, it makes the patch from `base` to the new value, and sends it as a one-patch batch with `expect_head` set to the head it read (design/sync-server.md §4.4), from the grant's own patchflow client (`grant:<id>`), credited to the agent;
 - **its bounds:** `document_bytes` of value and `document_batches` since the snapshot, from the account's membership record (design/fs-sync-scale.md §1). Beyond either, it answers 413 `limit`, with the tier metadata of §7, and suggests opening the page;
 - **a write is compare-and-swap,** checked in the document object's transaction. If the document has moved past `base`, it answers `conflict` with the current revision, as the in-page API does. A resend after a lost answer gets the original `seq`, not a conflict.
@@ -171,6 +190,7 @@ Each needs either a scope granted beforehand, or the person's confirmation at th
   - the agent can wait for the answer on its socket;
   - a confirmation applies to that one action, with exactly those arguments, for 10 minutes. With no page open, it waits until one opens, or until it expires.
 - **Granting is never pre-grantable.** No grant can make or change grants, its own included.
+- **Under end-to-end encryption,** `outward` is sealed with the scope, so the answering device checks it, and asks for and checks the confirmation. The server only relays the request and the person's answer, opaquely.
 
 ## 6. Running code
 
@@ -179,18 +199,18 @@ Each needs either a scope granted beforehand, or the person's confirmation at th
 - **`run` needs `run_code`** on the grant, and write access to the document.
 - **The relay:**
   - the account object picks a page that is connected on the account socket, says it accepts relayed runs (it has the document's interpreter available), and has had the person's input within the last 12 hours;
-  - it sends the page `{t: "run", run_id, grant, agent, path, target, code_sha256}`;
+  - it sends the page `{t: "run", run_id, grant, gen}` and the request, sealed: the path, the target and `code_sha256` are inside it, never visible to the server;
   - with no such page, it answers 409 `no_page`, and never queues a run.
-- **The page checks again before running,** from its own copy of the grant, which it gets over the account socket:
+- **The page decides,** from the grant's sealed fields, which it reads as any device does:
   - the grant still allows running in that path;
   - **the code is the agent's own** (§8.3, "code that agent wrote"): the cell's or note's current input was last changed by a patch authored by this grant's agent, and its SHA-256 is `code_sha256`. Code that another person or agent last changed is not this agent's to run. The agent can rewrite it, which makes it the agent's own, credited to it and visible in TimeTravel;
   - the run happens in the runner, never in the fallback worker (§8.3, danger 2). If the runner isn't available, it is refused with `runner_unavailable`.
 - **The person sees it:** a running indicator naming the agent, with Stop, and an entry in the conversation or the document's history.
-- **The result** is the run's outputs, bounded as the page bounds them (design/security.md rules 1-4). It goes back through the account object to the agent, and is logged with the code's hash.
+- **The result** is the run's outputs, bounded as the page bounds them (design/security.md rules 1-4). It goes back through the account object to the agent, sealed (§4's open point), and the page logs it, with the code's hash, in the encrypted access log (§8).
 - **Revoking reaches a running run** (§8.9 question 3):
   - turning off `run_code`, or revoking the grant, sends `{t: "grant", id, run_code: false}` or `{t: "revoked", grant}` to every page of the account;
   - a page stops that grant's runs at once, by the runner's Stop;
-  - a page that missed the message refuses at its next check, because every relayed run carries the grant's state from the account object, which is the only source of truth.
+  - a page that missed the message refuses at its next check, because every relayed run carries the grant's current `gen` from the account object, and a page with an older copy of the grant fetches it first.
 
 ## 7. Limits, sizes and rates
 
@@ -216,7 +236,8 @@ Every check and reservation precedes its write. For a batch, admission reserves 
 
 ## 8. The access log
 
-- **One row per request,** in the account object: time, grant, agent, verb, path (or paths), result, bytes, and for a run, the code's SHA-256. A request's arguments and contents are never logged.
+- **One row per request, written by the answering device, encrypted:** time, grant, agent, verb, path (or paths), result, bytes, and for a run, the code's SHA-256. A request's arguments and contents are never logged.
+- **The server keeps the row as ciphertext,** with only its time, size and grant id visible (design/e2e-encryption.md §4). It never holds a path or a code hash.
 - **Kept for 7 days, and at most 100,000 rows per account. The oldest go first.** Age and count are independent host bounds, so sustained traffic can evict a younger row at the count cap. Append and cleanup are bounded. Retention is not a membership field or tier benefit, so zero and downgrade cannot trigger separate early trimming.
 - **Who may read it:** the person, in "Agents with access", per grant or all together. An agent can't read the log, its own entries included.
 - **It is the person's data.** It is deleted with their synced data, by "Delete my synced data" and by the purge (design/sync-server.md §7). Sagebrush's operators have no view of it.
@@ -247,7 +268,7 @@ Every check and reservation precedes its write. For a batch, admission reserves 
      - another person's edit never runs by itself;
      - an agent never runs code someone else last changed.
    - **Revoking a running run:** §6.
-   - **Retention:** a write that can't keep the previous version is refused, on the server as on the client (design/sync-server.md §13). Filling the quota on purpose therefore blocks writes, and loses nothing.
+   - **Retention:** a write that can't keep the previous version is refused by the device doing the write, which also sends the retention op, since under end-to-end encryption the server can't keep a version on its own (design/e2e-encryption.md §4). Filling the quota on purpose therefore blocks writes, and loses nothing.
 4. **Rates and sizes per verb:** §7. An over-limit agent sees 429 or 413, with which limit it hit and when to retry.
 5. **The access log:** 7 days and 100,000 rows. Readable by the person only (§8).
 6. **The Inbox.**
@@ -259,20 +280,21 @@ Every check and reservation precedes its write. For a batch, admission reserves 
    - **An item is a read-only entry under `/Inbox/`.** Its code never runs, as with a shared collection.
    - **Accepting it** moves it into the workspace as the person's own copy. Its origin (who sent it, when) is kept on the entry. It is still never run by itself: the person runs it.
    - **Declining it** deletes it.
-7. **A collaborator's grant and the owner's files.**
-   - A grant covers only what the granting account owns, or may edit as a collaborator. It is checked against the document object's access list for that account, every time.
-   - When an owner removes a collaborator, the collaborator's grants lose that document at once, because the next check fails.
-   - The owner sees, in the document's access list, which agents have reached it through a collaborator's grant. Each is listed with the collaborator who granted it, and the owner can remove that access.
+7. **Another person's grant and the owner's files.**
+   - **Settled by end-to-end encryption:** no other account ever writes or reads the owner's documents. Another person gets an encrypted copy under their own keys, and proposes changes back (design/workspace-files.md §7.9). Live collaboration, and with it collaborators' grants, was dropped (design/e2e-encryption.md §5.1).
+   - So a grant covers only what the granting account owns. Another person's grant reaches only their own copy, never the owner's files, and nothing has to be checked against an access list.
 
 ## 10. The cocalc.ai adapter (step 11), in outline
 
 The panel of §8.7 talks to a person's cocalc.ai agents through CoCalc's Agent Network. This needs work on the CoCalc side, which @sagebrush-auth designs with the cocalc.ai agent team in its own short note. Its outline:
 
 - **The sender is the person, through their Sagebrush page.** CoCalc gets a new OAuth scope, `agents:message`, which the person approves at sign-in. The Sagebrush server uses the token from that scope to send as the person: never as an agent, and never on its own.
+- **A message to a cocalc.ai agent leaves end-to-end encryption, by the person's choice:** CoCalc and that agent read it, as any message sent to a third party's agent is read. The panel says so. Under end-to-end encryption the Sagebrush server still mustn't read it on the way: how the page's message reaches CoCalc without the Sagebrush server reading it is open, with §4's item.
 - **Addressing:** `cocalc agent destinations` for the person's account, shown in the panel.
 - **The flow:**
   - a message the person types becomes a CoCalc Agent Network message from the person's account to that agent, with `reply_to: sagebrush:<chat document>`;
-  - the agent's reply comes back through the Sagebrush server, which writes it into the `.chat` document as a patch credited to `agent:<name>`;
+  - the agent's reply comes back through the Sagebrush server, **which relays it opaquely to an online, trusted device of the person's** (§4). That device checks it against the grant and the conversation, credits it to `agent:<name>`, and seals and signs it as a patch on the `.chat` document. The server never makes a patch itself, since it can't read or write the document;
+  - with no device online, the reply waits, queued opaquely, and lands when one comes online;
   - so it is on every device, and in TimeTravel.
 - **The agent's access to the workspace** is an ordinary grant (§1), made through pairing, which the adapter starts and the person approves.
 - **What stays the same:**
@@ -284,30 +306,31 @@ The panel of §8.7 talks to a person's cocalc.ai agents through CoCalc's Agent N
 In Miniflare, with the sync server's harness:
 
 - **Before authentication:** a fresh, made-up account hash on every request, a bad tag, and a malformed token each get 401 from the Worker, create no object and write no row; the IP limit stops a flood.
-- **Pairing:** an oversized body is refused before any write; a fourth pending pairing from one IP, a full site, polling faster than 5 s (`slow_down`), more than 150 polls, and expired rows are each handled as §2 says; no failure path shows a token.
+- **Pairing:** an oversized body is refused before any write; the approving page refuses a request whose sealed contents fail `normPath`, exceed 64 characters of name, or exceed `scopes_per_grant`; a fourth pending pairing from one IP, a full site, polling faster than 5 s (`slow_down`), more than 150 polls, and expired rows are each handled as §2 says; no failure path shows a token.
 - **Reading:** a grant's URL debits at issue and works once; parallel and overlapping range requests on it give at most one success.
 - **Document writes:** a competing append between the read and the write gives `conflict`; a revoke while the write is delayed either finds it committed (and logged) or refuses it.
-- **Grants:**
+- **Grants, on the server:**
   - a token for another account, a wrong secret, an expired grant and a revoked grant each give the same 401;
-  - a revoke while a write is running prevents the write;
+  - a revoke, or a change to the grant, while a write is running prevents the write: an op or admission naming an old `gen` is refused;
   - revoking closes the grant's sockets;
-  - a pairing is used once, by the holder of its secret only, and a wrong code fails 5 times and then the pairing ends.
-- **Scope:**
+  - a pairing is used once, by the holder of its secret only, and a wrong code fails 5 times and then the pairing ends;
+  - **nothing the server stores or logs holds a path, a scope, an agent's name or a code hash:** every request, relay message and log row is checked for them, and so are a pairing's request, its D1 row and its approval, and the adapter's relayed replies.
+- **Scope, on the answering device:**
   - `/Algebra` doesn't cover `/Algebra2`;
   - `..`, `.`, `//` and other spellings normalize to the same path, or are refused;
-  - a rename out of scope is refused;
+  - an agent's op after a rename out of its scope is refused by every device alike;
   - Trash shows only what came from the scope.
 - **Person-only verbs** (emptying Trash, clearing a history, dropping versions, granting, deleting synced data) are refused for every grant.
-- **Outward actions** need a confirmation, or a scope given beforehand. A confirmation covers exactly one action, with those arguments.
+- **Outward actions** need a confirmation, or a scope given beforehand, checked by the device. A confirmation covers exactly one action, with those arguments.
 - **Runs:**
   - refused without `run_code`, without a page, and for code the agent didn't last change;
   - refused when the runner isn't there;
   - stopped when the grant is revoked.
 - **Limits:** each row of §7, at the limit and one over.
-- **The log:** a row for each request; never the token or the contents; trimmed oldest-first at 7 days and 100,000 rows.
+- **The log:** a row for each request, encrypted by the device; never the token or the contents; trimmed oldest-first at 7 days and 100,000 rows.
 - **Mutations,** each caught by a test:
-  - the scope check;
-  - the recheck inside the write's transaction;
+  - the device's scope check;
+  - the server's grant-`gen` check inside the write's transaction;
   - the constant-time comparison (removing the hash);
   - the run's author check;
   - the `Origin` refusal;

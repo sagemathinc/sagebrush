@@ -5,22 +5,22 @@
 //
 //   POST /api/sync/v1/enable             turn sync on for this account (allowlisted on dev)
 //   GET  /api/sync/v1/account            the account socket (upgrade; Origin checked)
-//   POST /api/sync/v1/blobs/check        {blobs: [{sha256, ct_sha256, size}]} -> {missing, conflicts?}
-//   PUT  /api/sync/v1/blob/<sha256>      the bytes, with x-sb-ct-sha256: their SHA-256, which R2 checks
-//   GET  /api/sync/v1/blob/<sha256>      303 to a signed URL on the user-content domain
+//   POST /api/sync/v1/blobs/check        {blobs: [{address, ct_sha256, size}]} -> {missing, conflicts?}
+//   PUT  /api/sync/v1/blob/<address>     the bytes, with x-sb-ct-sha256: their SHA-256, which R2 checks
+//   GET  /api/sync/v1/blob/<address>     303 to a signed URL on the user-content domain
 //
-// (a blob's `sha256` is its address, 64 hex: today the bytes' own hash, under end-to-end encryption a keyed address
+// (a blob's `address` is 64 hex: today the bytes' own hash, under end-to-end encryption a keyed address
 // (design/e2e-encryption.md §3.3).  So the server never assumes it is the bytes' hash: it checks the declared
 // ct_sha256, and holds one (ct_sha256, size) per address, the first; another at that address is a 409 conflict
-// naming what is held)
+// naming what is held.  The account object's tables still call the address column sha256)
 //
 // and, with chunked files on (SYNC_TIERED, DEV only; design/tiered-files.md §4.1):
 //
 //   POST /api/sync/v1/manifest                   {manifest} -> {state, position, chunks}
-//   POST /api/sync/v1/manifest/<sha256>/verify   one step of the server's check -> {state, position}
+//   POST /api/sync/v1/manifest/<address>/verify   one step of the server's check -> {state, position}
 //     (each call debits at least 64 MiB from the day's verification meter, so at most verify_bytes_per_day / 64 MiB
 //     calls start a day, each with at most 8 R2 gets; the cross-day assumption and its production gate: design/tiered-files.md §6)
-//   GET  /api/sync/v1/manifest/<sha256>          a verified file's manifest
+//   GET  /api/sync/v1/manifest/<address>         a verified file's manifest
 //
 // and, with agents on (SYNC_AGENT, DEV only; design/agent-endpoint.md, fs-sync step 1a):
 //
@@ -287,14 +287,14 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     if (!/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
     const text = await req.text();
     if (text.length > 128 << 10) return err(413, "limit");
-    let blobs: { sha256: string; ct_sha256: string; size: number }[];
+    let blobs: { address: string; ct_sha256: string; size: number }[];
     try {
       const b = fields(JSON.parse(text), ["blobs"], "check");
       if (!Array.isArray(b.blobs) || b.blobs.length > LIMITS.checkItems) throw new SyncError("limit", "at most " + LIMITS.checkItems);
       blobs = b.blobs.map((x) => {
-        const o = fields(x, ["sha256", "ct_sha256", "size"], "blob");
-        if (!isSha(o.sha256) || !isSha(o.ct_sha256) || !isNat(o.size)) throw new SyncError("invalid", "blob");
-        return { sha256: o.sha256, ct_sha256: o.ct_sha256, size: o.size };
+        const o = fields(x, ["address", "ct_sha256", "size"], "blob");
+        if (!isSha(o.address) || !isSha(o.ct_sha256) || !isNat(o.size)) throw new SyncError("invalid", "blob");
+        return { address: o.address, ct_sha256: o.ct_sha256, size: o.size };
       });
     } catch (e) {
       return err(e instanceof SyncError && e.code === "limit" ? 413 : 400, e instanceof SyncError ? e.code : "invalid");
@@ -717,7 +717,7 @@ async function putBlob(req: Request, env: Env, stub: ReturnType<NonNullable<Env[
   if (!isSha(ct)) return err(400, "invalid", { message: "x-sb-ct-sha256: the bytes' SHA-256 is required" });
   const r = await stub.reserve({ account, sha256, ct_sha256: ct, size, bind });
   if ("error" in r) return answer(r, json);
-  if ("have" in r.ok) return json({ sha256, have: true });
+  if ("have" in r.ok) return json({ address: sha256, have: true });
   const { id, key, expires } = r.ok;
   // The reservation's end is enforced on the upload itself (CORR-5E2-2): the body streams to R2
   // through a stream that is aborted a margin before it, and R2 makes an object only from a put that
