@@ -58,3 +58,7 @@ for K7 in [GF(2), GF(3), GF(101), Zmod(12), GF(4, 'b'), GF(9, 'c'), GF(125, 'd')
     B7 = matrix(K7, 2, 2, [1, 0, 0, 1]); B7.subdivide([1], [1])
     print(K7, copy(B7).subdivisions(), deepcopy(B7).subdivisions(), B7.__copy__().subdivisions(), B7.subdivisions())
     print(copy(B7))
+# the copy boundary between GF(2^16) (subdivisions dropped) and GF(2^17) (kept)
+for K7 in [GF(2^16, 'f'), GF(2^17, 'h')]:
+    B7 = matrix(K7, 2, 2, [1, 0, 0, 1]); B7.subdivide([1], [1])
+    print(K7, copy(B7).subdivisions(), deepcopy(B7).subdivisions())
