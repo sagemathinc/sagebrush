@@ -13150,6 +13150,11 @@
   "owner": "finite fields + configuration",
   "reason": "domain refusal: resultant, discriminant and is_square over Z/n with n composite (not a field) are not implemented; not a size or work limit"
  },
+ "lib/_sage_ff.py :: Polynomial_ff.nth_root :: NotImplementedError: nth_root of degree 2 of a polynomial over a field with several such roots is not supported yet #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusal: irreducible_element algorithms other than first_lexicographic/the default, and polynomial nth_root where several roots exist (Sage's choice not modelled); not a size or work limit"
+ },
  "lib/_sage_ff.py :: Polynomial_ff.nth_root :: modelled: NotImplementedError. #0": {
   "class": "none",
   "owner": "finite fields + configuration",
