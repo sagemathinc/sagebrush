@@ -16144,7 +16144,7 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
  },
- "lib/_matlab_krylov.py :: _minres :: for ii in range(1, maxit + 1): #0": {
+ "lib/_matlab_krylov.py :: _minres :: while ii < maxit: #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
@@ -16498,5 +16498,15 @@
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'MAX' in MAX_DENSE_SOLVE, the existing switch between the dense and sparse routes this docstring names; the triangular route's need is admitted or refused by the ledger's guard"
+ },
+ "lib/_matlab_krylov.py :: _minres :: if ii >= maxit: #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _minres :: Lanczos process restarts from the true residual, every step still counted against maxit, and from then on the #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
  }
 }

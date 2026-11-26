@@ -254,3 +254,58 @@ test("the solvers' work admitted before their first vector (test/matlab_krylov_a
   assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
   assert.equal(lines.length, 10, r.stdout);
 });
+
+test("minres with a badly scaled SPD preconditioner: honest flags and relres over the whole grid; convergence where MATLAB converges (test/matlab-krylov-oracle.json minres_scaled_converged)", () => {
+  // (the residual restart: where the recurrence's estimate passes tol and the true residual doesn't, the Lanczos
+  // process restarts from the true residual; flag 0 only on the true residual, relres the returned x's own)
+  const dir = mkdtempSync(join(tmpdir(), "sb-kbad-"));
+  writeFileSync(join(dir, "main.m"), [
+    "n = 6; A = diag(4*ones(n,1)) + diag(-ones(n-1,1),1) + diag(-ones(n-1,1),-1); b = (1:n)';",
+    "w0 = warning('off', 'all');",
+    "for big = [1e10 1e12 1e14 1e15 1e16 1e17 1e18 1e20 1e24 1e30]",
+    "  for kind = 1:2",
+    "    if kind == 1, M = A; M(2,2) = big; nm = 'spdM'; else, M = diag(diag(A)); M(2,2) = big; nm = 'diagM'; end",
+    "    for cfg = 1:3",
+    "      switch cfg",
+    "        case 1, tol = 1e-10; mx = 30;",
+    "        case 2, tol = 1e-6; mx = 30;",
+    "        case 3, tol = 1e-10; mx = 100;",
+    "      end",
+    "      [x, fl, rr, it, rv] = minres(A, b, tol, mx, M);",
+    "      fprintf('%s M22=%g tol=%g maxit=%d|%d|%d|%.17g|%.17g|%d\\n', nm, big, tol, mx, fl, it, rr, norm(b - A*x)/norm(b), numel(rv));",
+    "    end",
+    "  end",
+    "end",
+  ].join("\n") + "\n");
+  const r = spawnSync(process.execPath, [cli, "--matlab", "main.m"], { cwd: dir, encoding: "utf8", timeout: 600000 });
+  assert.equal(r.status, 0, r.stderr);
+  const rows = r.stdout.split("\n").filter((l: string) => l.includes("|")).map((l: string) => l.split("|"));
+  assert.equal(rows.length, 60, r.stdout);
+  const got = new Map(rows.map((r) => [r[0], r]));
+  for (const [tag, fl, it, rr, tru, nrv] of rows) {
+    const tol = Number(tag.split("tol=")[1].split(" ")[0]);
+    const maxit = Number(tag.split("maxit=")[1]);
+    assert.ok(["0", "1", "3"].includes(fl), `${tag}: flag ${fl}`);
+    // (flag 0 only on the true residual; relres is the returned x's true relative residual)
+    if (fl === "0") assert.ok(Number(tru) <= tol, `${tag}: flag 0 with true relres ${tru}`);
+    else assert.ok(Number(tru) > tol, `${tag}: flag ${fl} with true relres ${tru} <= tol`);
+    assert.ok(Math.abs(Number(rr) - Number(tru)) <= 1e-12 * Number(tru) + 1e-300, `${tag}: relres ${rr} vs ${tru}`);
+    // (every step counted against maxit; resvec one entry per step and the first)
+    assert.ok(Number(it) <= maxit && Number(nrv) <= maxit + 1, `${tag}: iter ${it}, resvec ${nrv}`);
+    if (fl === "1") assert.equal(Number(nrv), maxit + 1, `${tag}: resvec ${nrv}`);
+    // (never an iterate worse than x0 = 0's, relres 1)
+    assert.ok(Number(tru) <= 1, `${tag}: true relres ${tru}`);
+  }
+  for (const [tag, ml] of Object.entries(oracle.minres_scaled_at_most_matlab)) {
+    const row = got.get(tag)!;
+    // (MATLAB's values as printed, %.3g: up to half a unit in their third digit)
+    assert.ok(Number(row[4]) <= (ml as number) * (1 + 5e-3), `${tag}: true relres ${row[4]}, MATLAB's ${ml}`);
+  }
+  for (const [tag, it] of Object.entries(oracle.minres_scaled_converged)) {
+    const row = got.get(tag)!;
+    assert.ok(row, tag);
+    assert.equal(row[1], "0", `${tag}: flag ${row[1]}`);
+    assert.equal(Number(row[2]), it, `${tag}: iteration ${row[2]}`);
+  }
+});
+
