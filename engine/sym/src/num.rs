@@ -431,6 +431,15 @@ impl Num {
         // mpfr_pow_si, a complex one as generic_power)
         if let Num::Float(a, b, k) = self {
             if !k.double() && e != 0 && !IN_STEPS.with(|p| p.get()) {
+                // (a real one past x and 1/x is Sage's correctly rounded
+                // mpfr_pow_si, never binary powering's doubles, whose error
+                // grows with e: SR(RR(-1.0001))^40000 is 54.5872322227789)
+                if *b == 0.0 && !k.complex() && a.is_finite() && *a != 0.0 && !(-1..=1).contains(&e) {
+                    return pow_int_mp53(self, e, *k);
+                }
+                if let Some(r) = pow_past_doubles(*a, *b, e as f64, e % 2 != 0, &e, *k) {
+                    return r;
+                }
                 let (r, left) = in_steps(|| self.pow_int(e));
                 let lost = |i: usize| if *b == 0.0 { i == 0 && *a != 0.0 } else { true };
                 return rr_cc(r, &[self], left, lost, |v| v[0].pow_int(e));
@@ -939,7 +948,51 @@ pub fn refuse_float_value(name: &str, v: &[(f64, f64)], k: Fk) -> ! {
 /// computes it in the 53-bit MP field (mpfr_pow_si for a real b, generic_power
 /// for a complex one): kept when each part is a double, refused otherwise.
 pub fn pow_int_mp53(b: &Num, n: i64, k: Fk) -> Num {
+    let (re, im) = b.to_c64();
+    if let Some(r) = pow_past_doubles(re, im, n as f64, n % 2 != 0, &n, k) {
+        return r;
+    }
     from_mp53(&to_mp53(b).pow_int(n), k)
+}
+
+/// The power b^n of an RR or CC number b = re + im*I (parent k) to an
+/// integer n (as a double, odd its parity, shown as the refusal prints it)
+/// whose value is past the engine's MP numbers (2^(+-mpnum::MAX_EXP)) for
+/// certain, decided before computing it, by n log2 |b| with a margin for
+/// its double error and, for a complex b, for generic_power's (each of its
+/// about 2 log2 n products has a relative error of a few units of 2^-53,
+/// which later squarings double: all told under n 2^-48 in log2).  Past
+/// MPFR's exponents too (Sage's RR is [2^(-2^62), 2^(2^62 - 1))), a real
+/// one is Sage's double: an infinity, or a 0, signed as the power;
+/// otherwise it is refused, as an RR or CC value past the doubles with no
+/// value of Sage's to show (SR(RR(2))^(10^6), not a refusal about its exact
+/// power's integer).  None where the power is to be computed.
+pub fn pow_past_doubles(re: f64, im: f64, n: f64, odd: bool, shown: &dyn std::fmt::Display, k: Fk) -> Option<Num> {
+    let (hi, lo) = if re.abs() >= im.abs() { (re.abs(), im.abs()) } else { (im.abs(), re.abs()) };
+    if hi == 0.0 || !hi.is_finite() || !lo.is_finite() {
+        return None;
+    }
+    let l = hi.log2() + 0.5 * (1.0 + (lo / hi) * (lo / hi)).log2();
+    // (an exponent past the doubles as 10^300, still far past MPFR's)
+    let n = n.clamp(-1e300, 1e300);
+    let est = l * n;
+    let margin = 8.0 + est.abs() * 1e-12 + n.abs() * (-48f64).exp2();
+    let real = im == 0.0 && !k.complex();
+    let neg = real && re < 0.0 && odd;
+    let mpfr = 62f64.exp2();
+    if real && est - margin > mpfr {
+        return Some(Num::Float(if neg { f64::NEG_INFINITY } else { f64::INFINITY }, 0.0, k));
+    }
+    if real && est + margin < -mpfr {
+        return Some(Num::Float(if neg { -0.0 } else { 0.0 }, 0.0, k));
+    }
+    let max = crate::mpnum::MAX_EXP as f64;
+    if est - margin > max || est + margin < -max - 1.0 {
+        let b = crate::print::to_string(&crate::expr::num(Num::fl(re, im, k.to_real())));
+        let f = if k.complex() { "CC" } else { "RR" };
+        not_implemented(format!("pow({}, {}): the value in {}, past the double range, is not available in sagebrush yet", b, shown, f))
+    }
+    None
 }
 
 /// A number of the 53-bit MP field as RR's or CC's doubles (parent k), or
@@ -1516,6 +1569,32 @@ mod tests {
         assert_eq!(re(d(2.0).pow_int(-(i64::MIN + 1))), f64::INFINITY);
         assert_eq!(Num::one().pow_int(i64::MIN).sage_str(), "1");
         assert_eq!(Num::i().pow_int(i64::MIN).sage_str(), "1");
+    }
+
+    #[test]
+    fn rr_cc_huge_powers() {
+        // (an RR power is mpfr_pow_si's, correctly rounded, however large
+        // its exponent: Sage's values)
+        let rr = |x: f64| Num::Float(x, 0.0, Fk::RR);
+        let refused = |f: &dyn Fn() -> Num| match crate::err::catch(f) {
+            Err(SymError::NotImplemented(m)) => m,
+            r => panic!("not refused: {:?}", r),
+        };
+        assert_eq!(rr(-1.0001).pow_int(40000), rr(54.587232222778944));
+        assert_eq!(rr(1.0000001).pow_int(10_000_000), rr(2.7182816941320818));
+        assert_eq!(rr(0.9999999).pow_int(-1_000_000_000), rr(2.6881304409450066e43));
+        // (past the doubles: about RR, not about an exact power's integer)
+        assert!(refused(&|| rr(2.0).pow_int(1_000_000)).starts_with("pow(2.00000000000000, 1000000): the value in RR, past the double range"));
+        assert!(refused(&|| Num::Float(2.0, 1.0, Fk::CC).pow_int(1_000_000_000_000)).starts_with("pow(2.00000000000000 + 1.00000000000000*I, 1000000000000): the value in CC"));
+        // (past MPFR's exponents, Sage's infinity or 0, signed as the power)
+        assert_eq!(rr(2.0).pow_int(9_000_000_000_000_000_000), rr(f64::INFINITY));
+        assert_eq!(rr(-2.0).pow_int(9_000_000_000_000_000_001), rr(f64::NEG_INFINITY));
+        assert_eq!(rr(1e-300).pow_int(1_000_000_000_000_000_000), rr(0.0));
+        assert!(rr(-0.5).pow_int(9_000_000_000_000_000_001).to_c64().0.is_sign_negative());
+        assert_eq!(rr(2.0).pow_int(i64::MIN), rr(0.0));
+        // (the doubles' own powers stay as they were)
+        assert_eq!(rr(3.0).pow_int(2), rr(9.0));
+        assert_eq!(rr(2.0).pow_int(-1), rr(0.5));
     }
 
     #[test]

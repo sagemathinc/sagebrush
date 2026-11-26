@@ -426,9 +426,9 @@ pub fn pow_int_fits(x: &Mp, n: i64) -> bool {
     n == 0 || x.sp != Sp::Fin || x.m.is_zero() || x.m.bits().saturating_mul(n.unsigned_abs()) <= crate::num::MAX_INT_BITS
 }
 
-/// x^n for an integer n, correctly rounded (the exact power, an integer
-/// times a power of 2, then one rounding; refused as any integer past the
-/// engine's integers would be, num::check_int_bits_at_least).
+/// x^n for an integer n, correctly rounded (Sage's mpfr_pow_si): the exact
+/// power then one rounding when it is small, else bracketed (pow_bracket);
+/// refused past the range.
 pub fn pow_int(x: &Mp, n: i64) -> Mp {
     let p = x.prec;
     let odd = n % 2 != 0;
@@ -452,16 +452,83 @@ pub fn pow_int(x: &Mp, n: i64) -> Mp {
         return if n > 0 { Mp::zero(p, neg) } else { Mp::special(p, if neg { Sp::NegInf } else { Sp::PosInf }) };
     }
     let k = n.unsigned_abs();
-    crate::num::check_int_bits_at_least(x.m.bits().saturating_mul(k));
-    let mk = x.m.pow(k as u32);
-    let ek = x.e.checked_mul(k as i64).unwrap_or_else(|| refuse_range());
-    if n > 0 {
-        let (m, e) = round_int(&mk, ek, p);
-        return Mp::checked(Mp { m, e, prec: p, sp: Sp::Fin, neg0: false });
+    // (x = a 2^e with a odd: a power of 2 is a shift, and an odd power
+    // either fits the bracket's width, so its ends agree, or has more than
+    // p + 1 significant bits, so it is no rounding boundary)
+    let t = x.m.trailing_zeros().unwrap_or(0);
+    let a = x.m.abs() >> t as usize;
+    let e = x.e.checked_add(t as i64).unwrap_or_else(|| refuse_range());
+    let neg = x.m.is_negative() && odd;
+    let fin = |(m, e): (BigInt, i64)| Mp::checked(Mp { m: if neg { -m } else { m }, e, prec: p, sp: Sp::Fin, neg0: false });
+    if a.is_one() || a.bits().saturating_mul(k) <= 4 * p as u64 + 256 {
+        let ak = a.pow(k as u32);
+        let en = e.checked_mul(n).unwrap_or_else(|| refuse_range());
+        return fin(if n > 0 { round_int(&ak, en, p) } else { round_q(&BigInt::one(), &ak, p, en) });
     }
-    let (num, den) = if mk.is_negative() { (-BigInt::one(), -mk) } else { (BigInt::one(), mk) };
-    let (m, e) = round_q(&num, &den, p, -ek);
-    Mp::checked(Mp { m, e, prec: p, sp: Sp::Fin, neg0: false })
+    fin(pow_round(&a, e, n, p, p as u64 + 2 * (64 - k.leading_zeros() as u64) + 20))
+}
+
+/// (a 2^e)^n (a > 0 odd, n != 0) rounded to p bits, as the front end's
+/// _pow_round: bracketed by binary powering cut down and up to w bits; when
+/// both ends round alike that is the result, else w doubles.
+fn pow_round(a: &BigInt, e: i64, n: i64, p: u32, w: u64) -> (BigInt, i64) {
+    let k = n.unsigned_abs();
+    let mut w = w;
+    loop {
+        let (lo, hi) = pow_bracket(a, e, k, w);
+        let (r1, r2) = if n > 0 {
+            (round_int(&lo.0, lo.1, p), round_int(&hi.0, hi.1, p))
+        } else {
+            // (1/x^k lies between 1/hi and 1/lo)
+            (round_q(&BigInt::one(), &hi.0, p, -hi.1), round_q(&BigInt::one(), &lo.0, p, -lo.1))
+        };
+        if r1 == r2 {
+            return r1;
+        }
+        w *= 2;
+    }
+}
+
+/// m 2^e (m > 0) cut to at most w bits, down or up.
+fn cut(m: BigInt, e: i64, w: u64, up: bool) -> (BigInt, i64) {
+    let b = m.bits();
+    if b <= w {
+        return (m, e);
+    }
+    let s = b - w;
+    let q = &m >> s as usize;
+    let inexact = &(&q << s as usize) != &m;
+    (if up && inexact { q + BigInt::one() } else { q }, e + s as i64)
+}
+
+/// lo <= (a 2^e)^k <= hi (a > 0, k > 0), each m 2^e with m of at most
+/// w + 1 bits, by binary powering cut down (lo) and up (hi).  Refused where
+/// the power, or its inverse, is past the range for certain: a factor still
+/// to come is at least 1 when a 2^e >= 1 (so lo only grows) and at most 1
+/// below (hi only shrinks), which also bounds the exponents.
+fn pow_bracket(a: &BigInt, e: i64, k: u64, w: u64) -> ((BigInt, i64), (BigInt, i64)) {
+    let mul = |x: &(BigInt, i64), y: &(BigInt, i64), up: bool| -> (BigInt, i64) {
+        let r = cut(&x.0 * &y.0, x.1.checked_add(y.1).unwrap_or_else(|| refuse_range()), w, up);
+        let top = r.1 + r.0.bits() as i64;
+        if (!up && top > MAX_EXP + 4) || (up && top < -MAX_EXP - 4) {
+            refuse_range();
+        }
+        r
+    };
+    let mut r = [(BigInt::one(), 0i64), (BigInt::one(), 0i64)];
+    let mut base = [(a.clone(), e), (a.clone(), e)];
+    let mut k = k;
+    while k > 0 {
+        if k & 1 == 1 {
+            r = [mul(&r[0], &base[0], false), mul(&r[1], &base[1], true)];
+        }
+        k >>= 1;
+        if k > 0 {
+            base = [mul(&base[0], &base[0], false), mul(&base[1], &base[1], true)];
+        }
+    }
+    let [lo, hi] = r;
+    (lo, hi)
 }
 
 // ------------------------------------------------------------------ printing
@@ -771,6 +838,77 @@ mod tests {
         };
         let m = BigInt::parse_bytes(h.as_bytes(), 16).unwrap();
         Mp::fin(&if neg { -m } else { m }, e, p)
+    }
+
+    /// x^n by the bracket (pow_int past the exact power's small case) is
+    /// the exact power rounded once, as mpfr_pow_si: against that power,
+    /// for bases near 1 and not, both signs of x and n, at 20, 53 and 200
+    /// bits; Sage's values for exponents with no exact power to compute.
+    #[test]
+    fn pow_int_bracketed() {
+        let exact = |x: &Mp, n: i64| -> Mp {
+            let k = n.unsigned_abs();
+            let mk = x.m.pow(k as u32);
+            let (m, e) = if n > 0 {
+                round_int(&mk, x.e * k as i64, x.prec)
+            } else {
+                let (a, d) = if mk.is_negative() { (-BigInt::one(), -mk) } else { (BigInt::one(), mk) };
+                round_q(&a, &d, x.prec, -x.e * k as i64)
+            };
+            Mp { m, e, prec: x.prec, sp: Sp::Fin, neg0: false }
+        };
+        for p in [20u32, 53, 200] {
+            for v in [1.0000001, -1.0001, 0.9999999, 3.0 / 7.0, -1.1, 1.5, 0.75, -2.0 / 3.0] {
+                let x = Mp::from_q(&BigInt::from((v * 1e15f64).round() as i64), &BigInt::from(10i64.pow(15)), p);
+                for k in (1i64..=300).step_by(7).chain([997, 1024, 1500]) {
+                    for n in [k, -k] {
+                        if (x.top().abs() + 1) * k > MAX_EXP - 8 {
+                            continue;
+                        }
+                        let (a, b) = (pow_int(&x, n), exact(&x, n));
+                        assert!(a.same_value(&b), "{} ^ {} at {}: {} for {}", x.sage_str(), n, p, a.sage_str(), b.sage_str());
+                    }
+                }
+            }
+        }
+        // (the bracket itself: lo <= (a 2^e)^k <= hi, the exact power, and
+        // apart when it was cut, at widths that cut it)
+        let le = |x: &(BigInt, i64), y: &(BigInt, i64)| {
+            let e = x.1.min(y.1);
+            (&x.0 << (x.1 - e) as usize) <= (&y.0 << (y.1 - e) as usize)
+        };
+        for (a, e) in [(3u64, 0i64), (12345, -14), (0x1fffff, -21), (0x100001, -20), (7, -3)] {
+            let a = BigInt::from(a);
+            for k in [5u64, 17, 64, 101, 333] {
+                let exact = (a.pow(k as u32), e * k as i64);
+                for w in [24u64, 40, 64] {
+                    let (lo, hi) = pow_bracket(&a, e, k, w);
+                    assert!(le(&lo, &exact) && le(&exact, &hi), "{} 2^{} ^ {} at {}", a, e, k, w);
+                    assert_eq!(le(&hi, &lo), exact.0.bits() <= w, "{} 2^{} ^ {} at {}", a, e, k, w);
+                }
+            }
+        }
+        // (from a width too narrow to decide, w doubles until both ends
+        // round alike: still the exact power's rounding)
+        for (a, e, p) in [(3u64, 0i64, 20u32), (12345, -14, 20), (0x1fffff, -21, 53), (7, -3, 8)] {
+            let x = Mp::fin(&BigInt::from(a), e, p);
+            for k in [5i64, 17, 64, 101] {
+                for n in [k, -k] {
+                    let b = exact(&x, n);
+                    let r = pow_round(&BigInt::from(a), e, n, p, p as u64 + 1);
+                    assert!(b.m == r.0 && b.e == r.1, "{} 2^{} ^ {} at {}", a, e, n, p);
+                }
+            }
+        }
+        // (Sage's RR(1.0000001)^(10^7), RR(-1.0001)^40000 and
+        // RR(0.9999999)^(-10^9): an exact power of 53 million bits and more)
+        assert_eq!(pow_int(&r(1.0000001, 53), 10_000_000).to_f64(), 2.7182816941320818);
+        assert_eq!(pow_int(&r(-1.0001, 53), 40000).to_f64(), 54.587232222778944);
+        assert_eq!(pow_int(&r(0.9999999, 53), -1_000_000_000).to_f64(), 2.6881304409450066e43);
+        // (a power of 2 is a shift; past the range, refused)
+        assert!(pow_int(&r(-2.0, 53), 4001).same_value(&Mp::fin(&BigInt::from(-1), 4001, 53)));
+        assert!(crate::err::catch(|| pow_int(&r(1.5, 53), 1 << 40)).is_err());
+        assert!(crate::err::catch(|| pow_int(&r(1.5, 53), -(1 << 40))).is_err());
     }
 
     /// ComplexField(p)'s arithmetic as Sage's ComplexNumber computes it, each

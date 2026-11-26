@@ -8206,6 +8206,16 @@
   "owner": "symbolic engine",
   "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
  },
+ "engine/sym/src/mpnum.rs :: pow_bracket :: if (!up && top > MAX_EXP + 4) || (up && top < -MAX_EXP - 4) { #0": {
+  "class": "coverage",
+  "owner": "symbolic engine",
+  "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
+ },
+ "engine/sym/src/mpnum.rs :: pow_int_bracketed :: if (x.top().abs() + 1) * k > MAX_EXP - 8 { #0": {
+  "class": "none",
+  "owner": "symbolic engine",
+  "reason": "a unit test's choice of powers within the MP numbers' range, to compare with the exact power; refuses nothing"
+ },
  "engine/sym/src/mpnum.rs :: pow_int_fits :: n == 0 || x.sp != Sp::Fin || x.m.is_zero() || x.m.bits().saturating_mul(n.unsigned_abs()) <= crate::num::MAX_INT_BITS #0": {
   "class": "none",
   "owner": "symbolic engine",
@@ -8225,6 +8235,16 @@
   "class": "none",
   "owner": "symbolic engine",
   "reason": "the operand range on which an RR or CC operation's double steps are MPFR's (outside it the operation is done again in the 53-bit MP field); refuses nothing"
+ },
+ "engine/sym/src/num.rs :: pow_past_doubles :: if est - margin > max || est + margin < -max - 1.0 { #0": {
+  "class": "coverage",
+  "owner": "symbolic engine",
+  "reason": "an RR or CC power past the MP numbers' 2^+-4096 (mpnum::MAX_EXP) for certain, so past the doubles: refused as not available before it is computed, never a wrong value; not a resource cap"
+ },
+ "engine/sym/src/num.rs :: pow_past_doubles :: let max = crate::mpnum::MAX_EXP as f64; #0": {
+  "class": "coverage",
+  "owner": "symbolic engine",
+  "reason": "an RR or CC power past the MP numbers' 2^+-4096 (mpnum::MAX_EXP) for certain, so past the doubles: refused as not available before it is computed, never a wrong value; not a resource cap"
  },
  "engine/sym/src/num.rs :: tame :: x == 0.0 || (TAME_MIN..=TAME_MAX).contains(&x.abs()) #0": {
   "class": "none",
