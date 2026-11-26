@@ -34,3 +34,7 @@ export {
   CHAIN_ROUTE, CHAIN_PAGE_ENTRIES, CHAIN_PAGE_BYTES, CHAIN_READ_MS, CHAIN_NONCE_KEEP_MS, CHAIN_RATE_HOST, CHAIN_RATE_SOURCE, chainTarget, parseChainTarget,
   parseChainPage, handleChainRead, chainPageBody,
 } from "./chain-service.mjs";
+export {
+  GRANT_ROUTE, GRANT_PAIRS_MAX, GRANT_RESULT_MAX, GRANT_READ_BYTES, GRANT_READ_MS, GRANT_RATE_HOST, GRANT_RATE_SOURCE, grantTarget, parseGrantTarget,
+  parseGrantRead, handleGrantRead, grantReadBody,
+} from "./grant-service.mjs";

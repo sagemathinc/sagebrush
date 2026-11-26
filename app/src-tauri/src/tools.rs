@@ -157,7 +157,7 @@ pub fn recheck(chosen: &Chosen, me: u32) -> Result<(), ToolRefusal> {
 
 /// The target's own rules and its folders'; its identity.
 #[cfg(unix)]
-fn check_file(target: &Path, me: u32) -> Result<Identity, ToolRefusal> {
+pub(crate) fn check_file(target: &Path, me: u32) -> Result<Identity, ToolRefusal> {
     use std::os::unix::fs::MetadataExt;
     let m = std::fs::symlink_metadata(target).map_err(|_| ToolRefusal::Missing)?;
     if m.file_type().is_symlink() || !m.file_type().is_file() {
@@ -175,8 +175,17 @@ fn check_file(target: &Path, me: u32) -> Result<Identity, ToolRefusal> {
     if !exec {
         return Err(ToolRefusal::NotExecutable);
     }
+    check_folders(target.parent(), me)?;
+    Ok(Identity { dev: m.dev(), ino: m.ino(), size: m.size(), mtime_ns: m.mtime() as i128 * 1_000_000_000 + m.mtime_nsec() as i128, mode })
+}
+
+/// A file's own folder (`dir`) and every folder above it: each a real folder owned by the person or root, and not
+/// writable by group or others, except a root-owned sticky folder above the file's own folder.
+#[cfg(unix)]
+pub(crate) fn check_folders(dir: Option<&Path>, me: u32) -> Result<(), ToolRefusal> {
+    use std::os::unix::fs::MetadataExt;
     let mut first = true;
-    let mut dir = target.parent();
+    let mut dir = dir;
     while let Some(d) = dir {
         let dm = std::fs::symlink_metadata(d).map_err(|_| ToolRefusal::Missing)?;
         if !dm.is_dir() || dm.file_type().is_symlink() {
@@ -196,7 +205,7 @@ fn check_file(target: &Path, me: u32) -> Result<Identity, ToolRefusal> {
         first = false;
         dir = d.parent();
     }
-    Ok(Identity { dev: m.dev(), ino: m.ino(), size: m.size(), mtime_ns: m.mtime() as i128 * 1_000_000_000 + m.mtime_nsec() as i128, mode })
+    Ok(())
 }
 
 /// `<target> --version`, bounded and isolated; its answer, which must be exactly "<v> (Claude Code)\n" with v
@@ -250,12 +259,24 @@ fn nonblock_fault() -> bool {
 /// version(), with the PATH folders and their allowed owners given.
 #[cfg(unix)]
 fn version_in(target: &Path, run: &VersionRun, dirs: &[&str], owners: &[u32]) -> Result<String, ToolRefusal> {
+    let out = run_bounded(target, &["--version"], run, dirs, owners)?;
+    let v = parse_claude_version(&out).ok_or(ToolRefusal::VersionUnknown)?;
+    if !run.supported.contains(&v.as_str()) {
+        return Err(ToolRefusal::VersionMismatch);
+    }
+    Ok(v)
+}
+
+/// `<target> <args>`, bounded and isolated as version() describes; its stdout, once it exited 0 with both streams
+/// ended and within their caps (stderr only counted against its cap).
+#[cfg(unix)]
+pub(crate) fn run_bounded(target: &Path, args: &[&str], run: &VersionRun, dirs: &[&str], owners: &[u32]) -> Result<Vec<u8>, ToolRefusal> {
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
     // (a folder the tool would look its helpers up in, open to someone else, is left out of its PATH)
     let path_env = qualify_path(dirs, owners);
     let mut cmd = Command::new(target);
-    cmd.arg("--version")
+    cmd.args(args)
         .env_clear()
         .env("PATH", path_env)
         .env("HOME", run.home)
@@ -380,11 +401,7 @@ fn version_in(target: &Path, run: &VersionRun, dirs: &[&str], owners: &[u32]) ->
     if !status.success() {
         return Err(ToolRefusal::VersionUnknown);
     }
-    let v = parse_claude_version(&out).ok_or(ToolRefusal::VersionUnknown)?;
-    if !run.supported.contains(&v.as_str()) {
-        return Err(ToolRefusal::VersionMismatch);
-    }
-    Ok(v)
+    Ok(out)
 }
 
 /// "<MAJOR.MINOR.PATCH> (Claude Code)\n" exactly: canonical decimal parts, no other byte.
