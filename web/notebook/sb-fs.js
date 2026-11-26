@@ -107,7 +107,7 @@ export class FsCalls {
     s.high = count;
     // (a newer call from the same worker: the earlier one is over; its run, if any, still drains into the cache)
     if (s.call) finish(s.call);
-    const call = { worker: w, session: s, buffer: buf, n: count, seq: 0, done: false, waiting: null };
+    const call = { worker: w, session: s, buffer: buf, n: count, seq: 0, acked: 0, done: false, waiting: null };
     s.call = call;
     const c = checkRequest(d.op, d.params);
     if ("refused" in c) return this.answer(call, active, { error: { code: "invalid", message: c.refused } }, null);
@@ -123,10 +123,12 @@ export class FsCalls {
     const a = m.sbFsAck, s = this.sessions.get(w);
     if (!s || !plain(a) || typeof a.key !== "string" || !Number.isInteger(a.seq)) return;
     const call = s.call;
-    if (!call || call.done || a.key !== `${s.tag}.${call.n}` || a.seq !== call.seq || !call.waiting) return;
+    // (the piece the page wrote last, taken: the next may be written, now or when it is ready)
+    if (!call || call.done || a.key !== `${s.tag}.${call.n}` || a.seq !== call.seq || a.seq <= call.acked) return;
+    call.acked = a.seq;
     const go = call.waiting;
     call.waiting = null;
-    go();
+    if (go) go();
   }
 
   refuse(code) {
@@ -155,9 +157,14 @@ export class FsCalls {
   /** Write the call's next piece once the worker has taken the one before: false if the call is over. */
   send(call, kind, bytes) {
     if (call.done) return Promise.resolve(false);
-    const seq = ++call.seq;
-    const write = () => (call.done ? false : writePiece(call.buffer, call.n, seq, kind, bytes));
-    if (seq === 1) return Promise.resolve(write());
+    const seq = call.seq + 1;
+    const write = () => {
+      if (call.done) return false;
+      call.seq = seq;
+      return writePiece(call.buffer, call.n, seq, kind, bytes);
+    };
+    // (piece 1 at once; each later one once the worker has taken the one before it)
+    if (call.acked >= seq - 1) return Promise.resolve(write());
     return new Promise((resolve) => {
       call.waiting = () => resolve(write());
     });
