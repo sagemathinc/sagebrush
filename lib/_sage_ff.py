@@ -4740,6 +4740,16 @@ class Polynomial_ff:
             r = (r * g + self._ring(c)) % m
         return r
 
+    def modular_composition(self, other, modulus):
+        """self(other) modulo modulus: the same as compose_mod.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^3 + 1).modular_composition(x + 2, x^5 + 3*x + 1)
+            x^3 + 6*x^2 + 12*x + 9
+        """
+        return self.compose_mod(other, modulus)
+
     def minpoly_mod(self, other):
         """The minimal polynomial of self modulo other (of its image in
         R/(other)): the first linear relation among its powers.

@@ -6,6 +6,8 @@ f.compose_mod(f, f) -> 1
 (x^10).compose_mod(x^3 + 2, f) -> 60*x^4 + 34*x^3 + 90*x^2 + 61*x + 51
 (z^5 + z + 1).compose_mod(z^2 + 1, z^3 + z + 1) -> 0
 (y^4 + a).compose_mod(a*y + 1, y^3 + y + a) -> y^2 + 2*y + a + 2
+(x^3 + 1).modular_composition(x + 2, f) -> x^3 + 6*x^2 + 12*x + 9
+(y^4 + a).modular_composition(a*y + 1, y^3 + y + a) -> y^2 + 2*y + a + 2
 (x^2).minpoly_mod(f) -> x^5 + 6*x^3 + 9*x + 100
 (x + 1).minpoly_mod(x^3 - 2) -> x^3 + 98*x^2 + 3*x + 98
 R(5).minpoly_mod(f) -> x + 96
