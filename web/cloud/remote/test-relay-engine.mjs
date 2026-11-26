@@ -329,6 +329,39 @@ let cur = 2; // (after the disconnect above)
   t1.leg.close();
   J(await p.msg());
 }
+{
+  // (durability: the marker and the generation are one write.  A failed write leaves neither: the next definitive read
+  // advances and ends the page.  A stop right after the write (the pages not yet ended): the next definitive read ends
+  // them, never mistaking the marker for a finished advance.  Control: without a fault, the first read does it all.)
+  await tick(r1.rid, 121_000);
+  for (const [fault, what] of [["failput", "the write fails once"], ["skipstale", "a stop between the write and the ends"], [null, "control: no fault"]]) {
+    const f = await openAt(`nbD${fault ?? "x"}`, cur);
+    ok(f.status === 101, `durability (${what}): a page attached at cgen ${cur} (${f.status} ${f.error})`);
+    if (fault === "failput") await site(`/__relay/__failput?remote=${r1.rid}&key=cgen`);
+    if (fault === "skipstale") await site(`/__relay/__skipstale?remote=${r1.rid}&on=1`);
+    await setSync("state=off");
+    const first = await dialEngine(sa, r1.rid, { nb: "nbQ" });
+    await sleep(150);
+    const after1 = (await engineState(r1.rid)).length;
+    if (fault) {
+      ok(first.status === (fault === "failput" ? 500 : 403) && after1 === 1, `durability (${what}): the first off read leaves the page (${first.status}, ${after1} attached)`);
+      const second = await dialEngine(sa, r1.rid, { nb: "nbQ" });
+      ok(second.status === 403, `durability (${what}): the next definitive read -> 403 (${second.status} ${second.error})`);
+    } else {
+      ok(first.status === 403, `durability (${what}): the first off read -> 403 (${first.status})`);
+    }
+    ok(await until(async () => (await engineState(r1.rid)).length === 0), `durability (${what}): the old page ended`);
+    const seen = [];
+    while (p.got.length) seen.push(J(p.got.shift()));
+    ok(seen.some((m) => m?.relay === "cgen" && m.cgen === cur + 1) && !seen.some((m) => m?.relay === "cgen" && m.cgen > cur + 1),
+      `durability (${what}): advanced exactly once, to ${cur + 1} (${JSON.stringify(seen)})`);
+    cur++;
+    await setSync("state=active&gen=7");
+    x = await dialEngine(sa, r1.rid, { nb: "nbQ", cgen: cur - 1 });
+    ok(x.status === 409, `durability (${what}): the old generation -> 409 (${x.status})`);
+    await tick(r1.rid, 121_000);
+  }
+}
   await tick(r1.rid, 121_000); // (the attempt ids so far expire)
   // (the same transition read again, by opens, advances nothing more; an "active" read ends the transition)
   await setSync("state=off");
@@ -445,6 +478,33 @@ const expire = () => tick(r1.rid, 121_000); // (the attempt ids so far expire)
     await budgetSet(q);
     x = await dialEngine(sa, r1.rid, { nb: "nbC" });
     ok(x.status === 503 && /misconfigured/.test(x.error ?? ""), `budget: ${q} -> 503, in words (${x.status} ${x.error})`);
+    await budgetSet("pages=&queue=&attempts=");
+  }
+  // (the values together: each in its range, but their envelope past the object's memory -> 503; exactly at it -> admitted)
+  const { envelope: E, range, defaultsNeed } = (await json(await site("/__engine"))).body;
+  const fixed = E.channels + E.runtime + E.copies;
+  ok(defaultsNeed <= E.memory && fixed + 48 * 1024 * 1024 + 64 * E.perPage === defaultsNeed, `budget: the defaults fit the envelope (${defaultsNeed} of ${E.memory})`);
+  const room = E.memory - fixed; // (for queueBytes + pages * perPage)
+  const pagesAt = Math.floor((room - range.queueBytes[0]) / E.perPage);
+  const exactQueue = room - pagesAt * E.perPage;
+  ok(pagesAt <= range.pages[1] && exactQueue >= range.queueBytes[0] && exactQueue <= range.queueBytes[1], `budget: an exact fit within the ranges (${pagesAt} pages, ${exactQueue} bytes)`);
+  for (const [q, status, what] of [
+    [`pages=${pagesAt}&queue=${exactQueue}`, 101, "exactly the envelope"],
+    [`pages=${pagesAt}&queue=${exactQueue + 1}`, 503, "one byte past it"],
+    [`pages=${pagesAt + 1}&queue=${exactQueue}`, 503, "one page past it"],
+    [`pages=${range.pages[1]}&queue=${range.queueBytes[0]}`, 503, "the most pages with the least queue: each valid alone"],
+    [`pages=1&queue=${range.queueBytes[1]}`, 101, "the most queue with one page"],
+    [`pages=${range.pages[1]}&queue=${range.queueBytes[1]}&attempts=${range.attempts[1]}`, 503, "every maximum at once"],
+  ]) {
+    await expire();
+    await budgetSet(q);
+    x = await dialEngine(sa, r1.rid, { nb: "nbE" });
+    ok(x.status === status, `budget: ${what} (${q}) -> ${status} (${x.status} ${x.error})`);
+    if (x.leg) {
+      J(await p.msg());
+      x.leg.close();
+      J(await p.msg());
+    }
     await budgetSet("pages=&queue=&attempts=");
   }
 }

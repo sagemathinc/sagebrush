@@ -42,16 +42,32 @@ export const RELAY_CAPS: Record<Kind, Partial<Record<Chan, { legs: number; pageT
  * variables REMOTE_ENGINE_PAGES, REMOTE_ENGINE_QUEUE_BYTES and REMOTE_ENGINE_ATTEMPTS), never the host's memory, which
  * decides on kernels separately (r3.3 Limits).  The envelope it protects is the relay object's memory (128 MiB on the
  * platform): every engine page's frames waiting for the account's byte lease together at most `queueBytes` (a leg
- * whose frame would pass it closes 1013, as for its own window), and each page's socket and accounting (a few KiB)
- * times `pages`; with the other channels' windows (kernel 8 MiB, terminals 4 x 1 MiB, agent 8 MiB, the peer's 8 MiB)
- * the defaults stay under 80 MiB.  `attempts`: the engine pages' used attempt ids kept at once (each a few bytes of
+ * whose frame would pass it closes 1013, as for its own window), and each page's socket and accounting times `pages`.
+ * The settings are checked together against ENGINE_ENVELOPE: the other channels' windows, the runtime, two copies of
+ * the largest engine frame (one received, one being sent), `queueBytes` and `pages` times the per-page charge must
+ * fit the object's memory.  `attempts`: the engine pages' used attempt ids kept at once (each a few bytes of
  * storage, until its expiry).  Reaching `pages` refuses a further notebook's page in words (429); a notebook already
  * open replacing its own page is never refused by it.
  */
+/** The relay object's memory, as the engine budget is checked against it (bytes).  The charges are conservative
+ * figures, not measurements of one deployment: `perPage` covers a hibernatable socket's buffers, its serialized
+ * attachment (under 2 KiB) and its accounting; `runtime` the isolate's own heap and code; `copies` a received and a
+ * forwarded engine frame at once; `channels` the other channels' windows (runner kernel 8 MiB, 4 terminals at 1 MiB,
+ * agent 8 MiB, the peer's 8 MiB). */
+export const ENGINE_ENVELOPE = Object.freeze({
+  memory: 128 * 1024 * 1024,
+  channels: 28 * 1024 * 1024,
+  runtime: 24 * 1024 * 1024,
+  copies: 2 * (4 * 1024 * 1024 - 2048),
+  perPage: 16 * 1024,
+});
+/** What a budget needs of the relay object's memory, in bytes. */
+export const envelopeOf = (b: { pages: number; queueBytes: number }) =>
+  ENGINE_ENVELOPE.channels + ENGINE_ENVELOPE.runtime + ENGINE_ENVELOPE.copies + b.queueBytes + b.pages * ENGINE_ENVELOPE.perPage;
 export const ENGINE_BUDGET_DEFAULTS = Object.freeze({ pages: 64, queueBytes: 48 * 1024 * 1024, attempts: 16 });
 /** The settings' accepted ranges: outside them (or not a plain decimal integer), the budget is misconfigured and no
- * engine page is admitted (503), never a silent default. */
-export const ENGINE_BUDGET_RANGE = Object.freeze({ pages: [1, 4096], queueBytes: [8 * 1024 * 1024, 96 * 1024 * 1024], attempts: [1, 1024] });
+ * engine page is admitted (503), never a silent default; so is one whose values together don't fit ENGINE_ENVELOPE. */
+export const ENGINE_BUDGET_RANGE = Object.freeze({ pages: [1, 4096], queueBytes: [8 * 1024 * 1024, 64 * 1024 * 1024], attempts: [1, 1024] });
 export type EngineBudget = { pages: number; queueBytes: number; attempts: number };
 /** The budget from the Worker's variables, or null if any set one is invalid. */
 export function engineBudget(env: { REMOTE_ENGINE_PAGES?: string; REMOTE_ENGINE_QUEUE_BYTES?: string; REMOTE_ENGINE_ATTEMPTS?: string }): EngineBudget | null {
@@ -63,7 +79,8 @@ export function engineBudget(env: { REMOTE_ENGINE_PAGES?: string; REMOTE_ENGINE_
     if (n < lo || n > hi) return null;
     out[k] = n;
   }
-  return out;
+  // (each value in its range is not enough: together they must fit the object's memory)
+  return envelopeOf(out) <= ENGINE_ENVELOPE.memory ? out : null;
 }
 /** A peer leg's window, as a receiver (all its pages' messages to it): its kind's largest (§5: 8 MiB runner, 16 agent). */
 export const PEER_WINDOW: Record<Kind, number> = { runner: 8 * 1024 * 1024, agent: 16 * 1024 * 1024 };

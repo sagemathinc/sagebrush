@@ -815,9 +815,10 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
    * until an "active" read clears it. */
   private async syncOff(reason: string): Promise<void> {
     this.lastSync = undefined;
-    if (await this.ctx.storage.get("syncFenced")) return;
-    await this.ctx.storage.put("syncFenced", reason);
-    await this.advance(CLOSE.syncOff, "sync isn't active for this account");
+    // (the marker and the generation in one write: both or neither, so a failed write leaves no marker behind, and the
+    // next definitive read advances; a marker already there only ends what the advance may not have ended yet)
+    if (await this.ctx.storage.get("syncFenced")) return this.endStale(CLOSE.syncOff, "sync isn't active for this account");
+    await this.advance(CLOSE.syncOff, "sync isn't active for this account", { syncFenced: reason });
   }
   /** The alarm's sync read, when due and an engine page is attached: a definitive "not active" advances the connection
    * generation (the engine pages end, 4412); a transient failure leaves them be (new opens read for themselves). */
@@ -836,12 +837,26 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
   /** Advance the connection generation (H2, H5): the durable write first, then, in the same turn, every engine page
    * ended (code), its page-close sent, and the runner told the new generation, so a late frame or reconnect of the old
    * one is refused on both sides. */
-  private async advance(code: number, reason: string): Promise<void> {
+  private async advance(code: number, reason: string, with_: Record<string, unknown> = {}): Promise<void> {
     const cgen = ((await this.ctx.storage.get<number>("cgen")) ?? 1) + 1;
-    await this.ctx.storage.put("cgen", cgen);
-    for (const p of this.engines()) this.endPage(p, code, reason, true);
-    for (const p of this.peers()) if (((this.att(p) as PeerAtt).caps ?? []).includes(ENGINE_CAP)) this.sendControl(p, p, this.att(p), JSON.stringify({ relay: "cgen", cgen }));
-    await this.arm();
+    await this.ctx.storage.put({ ...with_, cgen });
+    await this.endStale(code, reason, true);
+  }
+  /** Every engine page of a generation below the stored one ended (code), its page-close sent, and the runner told
+   * the stored generation: idempotent, so a crash between the advance's write and these ends is finished by the next
+   * definitive read (or the alarm's), never left as a live page of an old generation. */
+  protected async endStale(code: number, reason: string, tell = false): Promise<void> {
+    const cgen = (await this.ctx.storage.get<number>("cgen")) ?? 1;
+    let ended = 0;
+    for (const p of this.engines()) {
+      if ((this.att(p) as PageAtt).engine!.cgen < cgen) {
+        this.endPage(p, code, reason, true);
+        ended++;
+      }
+    }
+    // (the runner told the generation by the advance, and again whenever pages of an older one had to be ended late)
+    if (tell || ended) for (const p of this.peers()) if (((this.att(p) as PeerAtt).caps ?? []).includes(ENGINE_CAP)) this.sendControl(p, p, this.att(p), JSON.stringify({ relay: "cgen", cgen }));
+    if (ended) await this.arm();
   }
   /** The workspace disconnected from this remote (H2): the connection generation advances. */
   private async disconnect(): Promise<Response> {

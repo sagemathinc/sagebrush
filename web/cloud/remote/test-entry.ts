@@ -12,7 +12,7 @@ import { handleShare, bindPurge, scheduled, authTier, type ShareEnv } from "../s
 import { handleRemote, verifyChallenge, purgeRemotes, remoteDeletes, body, type RemoteEnv } from "./server.ts";
 // (the relay's Durable Object, bound in test-relay.mjs's Miniflare only (test-remote.mjs runs without it: inert))
 import { RemoteRelay, RELAY_SYNC, type RelayEnv } from "./relay.ts";
-import { ENGINE_BUDGET_DEFAULTS, ENGINE_ENTRIES } from "./relay-caps.ts";
+import { ENGINE_BUDGET_DEFAULTS, ENGINE_BUDGET_RANGE, ENGINE_ENVELOPE, ENGINE_ENTRIES, envelopeOf } from "./relay-caps.ts";
 import { RemoteAccount, leaseBytes } from "./account.ts";
 import type { Kind } from "./relay-caps.ts";
 export { RemoteRelay, RemoteAccount };
@@ -59,6 +59,17 @@ export class TestRemoteRelay extends RemoteRelay {
   private failSend = false;
   private heldPuts = 0;
   private madeQueues: { frames: unknown[]; bytes: number; draining: boolean }[] = [];
+  private failPut: string | null = null;
+  private skipStale = false;
+  // (/__skipstale?on=1: the next end of stale engine pages doesn't happen, as if the object stopped right after the
+  // advance's write; the next definitive read must finish it)
+  protected async endStale(code: number, reason: string, tell = false): Promise<void> {
+    if (this.skipStale) {
+      this.skipStale = false;
+      return;
+    }
+    return super.endStale(code, reason, tell);
+  }
   constructor(ctx: DurableObjectState, env: RelayEnv) {
     super(ctx, env);
     const self = this as unknown as { consume(n: number, l: unknown[]): Promise<void>; queues: Map<WebSocket, unknown> };
@@ -86,6 +97,11 @@ export class TestRemoteRelay extends RemoteRelay {
               } finally {
                 this.heldPuts--;
               }
+            }
+            // (/__failput?key=cgen: the next write that includes that key fails once, nothing of it written)
+            if (this.failPut && (key === this.failPut || (key && typeof key === "object" && Object.hasOwn(key, this.failPut)))) {
+              this.failPut = null;
+              throw new Error("a storage write failed (test)");
             }
             return (store.put as (...a: unknown[]) => Promise<unknown>).call(store, key, ...rest);
           };
@@ -207,6 +223,8 @@ export class TestRemoteRelay extends RemoteRelay {
       else if (env.__saved) env.REMOTE_ACCOUNT = env.__saved;
       return Response.json({ bound: !!env.REMOTE_ACCOUNT });
     }
+    if (u.pathname === "/__failput") return Response.json({ key: (this.failPut = u.searchParams.get("key")) });
+    if (u.pathname === "/__skipstale") return Response.json({ on: (this.skipStale = u.searchParams.get("on") === "1") });
     if (u.pathname === "/__nosync") {
       // (this relay without the sync binding, as production today: /__nosync?on=1, back with on=0)
       const env = this.env as { SYNC_ACCOUNT?: unknown; __savedSync?: unknown };
@@ -439,7 +457,7 @@ export default {
         : { available: true, state: q.get("state") ?? "active", generation: Number(q.get("gen") ?? "1") };
       return Response.json({ ok: true });
     }
-    if (url.pathname === "/__engine") return Response.json({ syncEvery: RELAY_SYNC.everyMs, budget: ENGINE_BUDGET_DEFAULTS, entries: ENGINE_ENTRIES });
+    if (url.pathname === "/__engine") return Response.json({ syncEvery: RELAY_SYNC.everyMs, budget: ENGINE_BUDGET_DEFAULTS, range: ENGINE_BUDGET_RANGE, envelope: ENGINE_ENVELOPE, defaultsNeed: envelopeOf(ENGINE_BUDGET_DEFAULTS), entries: ENGINE_ENTRIES });
     if (url.pathname === "/__synccalls") return Response.json({ calls: syncCalls.splice(0) });
     if (url.pathname === "/__syncname" && (env as { SYNC_ACCOUNT?: DurableObjectNamespace }).SYNC_ACCOUNT) {
       // (names an account object, so /__synccalls shows which one the relay asked)
