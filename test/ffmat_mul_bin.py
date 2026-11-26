@@ -11,8 +11,9 @@ Each case prints "ok CASE ..." lines and raises on a failure.
                thin, entries p - 1; zero dimensions stay on the loop
     threshold  r k c = _MUL_BIN_MIN - 1 keeps the loop, _MUL_BIN_MIN takes
                the route, at thin and square shapes
-    frame      a frame-only non-fit (the frame cap hook) keeps the loop
-               under its own admission
+    frame      binary at the frame cap (the frame cap hook); one byte past
+               it the fixed limit's memory error, never the loop, at
+               square, thin and outer shapes
     preflight  the host's need at need and need - 1 (the figure hook): the
                route, or the memory error with what fits, never the loop
     outcomes   the engine's replies by code: the reservation refused is the

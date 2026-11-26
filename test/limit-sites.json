@@ -12999,6 +12999,11 @@
   "owner": "Sage-mode matrices (shape and exponent checks)",
   "reason": "Sage's TypeError for a matrix over a finite field (or Z/n) with one over QQ or another ring that does not coerce into it, or of incompatible shapes (Sage's parent wording); the other was taken as a scalar entry by entry, a wrong answer; refuses nothing Sage computes"
  },
+ "lib/_sage_ffmat.py :: FFMatrix._uncoerced :: raise TypeError(\"unsupported operand parent(s) for %s: '%r' and '%r'\" % ((op,) + pair)) #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "Sage's TypeError text for a scalar over QQ or a coprime Z/m with a finite-field matrix, which Sage refuses too; not a cap"
+ },
  "lib/_sage_ffmat.py :: FFVector.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), _sa().parent(o))) #0": {
   "class": "none",
   "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
