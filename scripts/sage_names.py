@@ -102,19 +102,59 @@ def shim_sources():
     raise SystemExit("sage_names: _sage_shim has no _SOURCES")
 
 
+def _import_tops(n):
+    """The Sage-layer modules one import statement names."""
+    if isinstance(n, ast.ImportFrom) and n.module and n.level == 0:
+        tops = [n.module.split(".")[0]]
+    elif isinstance(n, ast.Import):
+        tops = [a.name.split(".")[0] for a in n.names]
+    else:
+        return set()
+    return {t for t in tops if is_sage_module(t)}
+
+
+def _run_nodes(node):
+    """The nodes evaluated when node runs: everything under it except the
+    bodies of the functions and lambdas it defines (a def runs only its
+    decorators and defaults; a class runs its bases, decorators and body)."""
+    stack = [node]
+    while stack:
+        n = stack.pop()
+        yield n
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            stack += n.decorator_list + n.args.defaults + [d for d in n.args.kw_defaults if d is not None]
+        elif isinstance(n, ast.Lambda):
+            stack += n.args.defaults + [d for d in n.args.kw_defaults if d is not None]
+        else:
+            stack += list(ast.iter_child_nodes(n))
+
+
 def import_edges(m):
-    """The Sage-layer modules m imports at import time."""
-    out = set()
-    for n in module_body(parse(m)):
-        if isinstance(n, ast.ImportFrom) and n.module and n.level == 0:
-            top = n.module.split(".")[0]
-            if is_sage_module(top):
-                out.add(top)
-        elif isinstance(n, ast.Import):
-            for a in n.names:
-                top = a.name.split(".")[0]
-                if is_sage_module(top):
-                    out.add(top)
+    """The Sage-layer modules m imports at import time: its import statements
+    that run then (module level, class bodies), and those of its own module-
+    level functions that a statement run then calls, transitively
+    (class GraphPlot(_sa_plot().Graphics) imports sage_plot through
+    _sa_plot)."""
+    tree = parse(m)
+    funcs = {n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    out, called = set(), []
+    for top in module_body(tree):
+        for n in _run_nodes(top):
+            out |= _import_tops(n)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in funcs:
+                called.append(n.func.id)
+    seen = set()
+    while called:
+        f = called.pop()
+        if f in seen:
+            continue
+        seen.add(f)
+        # (a called function runs its whole body, but not the functions it defines)
+        for stmt in funcs[f].body:
+            for n in _run_nodes(stmt):
+                out |= _import_tops(n)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in funcs:
+                    called.append(n.func.id)
     out.discard(m)
     return out
 
