@@ -970,16 +970,24 @@ def _moving(A, kb, kf, stat, w, omit, ends):
                     with np.errstate(over="ignore", invalid="ignore"):
                         dv = np.abs(v - mean) ** 2
                     ss = ss + float(kb - cb) * dv if kb > cb else ss
+                # (whether each window's values are all one value: its variance is then exactly 0, as MATLAB's,
+                # though their mean may not round back to that value)
+                first = np.full(A.shape, v, dtype=A.dtype) if vnum else np.zeros(A.shape, dtype=A.dtype)
+                seen = np.full(A.shape, bool(vnum))
+                same = np.ones(A.shape, dtype=bool)
                 for o in offs:
                     S, ok = shifted(o)
                     use = ok & ~np.isnan(S)
                     ss = ss + np.where(use, np.abs(S - mean) ** 2, 0)
+                    first = np.where(use & ~seen, S, first)
+                    seen |= use
+                    same &= ~use | (S == first)
                 if vnum and kf > cf:
                     with np.errstate(over="ignore", invalid="ignore"):
                         ss = ss + float(kf - cf) * dv
                 den = np.where((w == 0) & (count > 1), count - 1, count)
                 with np.errstate(invalid="ignore", divide="ignore"):
-                    res = np.where(count == 1, 0.0, ss / den)
+                    res = np.where((count == 1) | same, 0.0, ss / den)
                     res = np.where(count == 0, _math.nan, res)
                 if stat == "std":
                     res = np.sqrt(res)

@@ -804,7 +804,8 @@
     ],
     "differs": [
       "Not supported: 'SamplePoints', and tables or timetables.",
-      "Checked against MATLAB for movmean and movmedian, not yet for movvar: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's variance with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
+      "Checked against MATLAB for movmean and movmedian, not yet for movvar: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's variance with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once.",
+      "Values may differ from MATLAB's in the last bit or two: MATLAB's arithmetic for each window isn't documented. A window of equal values gives exactly 0, as MATLAB's does."
     ],
     "status": "partial",
     "see_also": [
@@ -832,7 +833,8 @@
     ],
     "differs": [
       "Not supported: 'SamplePoints', and tables or timetables.",
-      "Checked against MATLAB for movmean and movmedian, not yet for movstd: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's standard deviation with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
+      "Checked against MATLAB for movmean and movmedian, not yet for movstd: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's standard deviation with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once.",
+      "Values may differ from MATLAB's in the last bit or two: MATLAB's arithmetic for each window isn't documented. A window of equal values gives exactly 0, as MATLAB's does."
     ],
     "status": "partial",
     "see_also": [
