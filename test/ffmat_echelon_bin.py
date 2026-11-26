@@ -16,8 +16,9 @@ Each case prints "ok CASE ..." lines and raises on a failure.
     preflight  the host's need at need and need - 1 (the figure hook): the
                route, or the memory error with what fits, never the Python
                path
-    frame      a frame-only non-fit (the frame cap hook) keeps the Python
-               path under its own admission
+    frame      binary at the frame cap (the frame cap hook); one byte past
+               it the fixed limit's memory error, never the Python path,
+               at tall, wide and square shapes
     outcomes   the engine's replies by code: the reservation refused is the
                memory error, called once; an engine without the op falls
                back; protocol and invariant failures are RuntimeError; a
