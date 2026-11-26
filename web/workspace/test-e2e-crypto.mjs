@@ -38,6 +38,7 @@ const sliceOf = (bytes, len, i) => bytes.subarray(i * MiB, i * MiB + piece(len, 
 const S = Buffer.from(Array.from({ length: 32 }, (_, i) => i));
 const SHA = createHash("sha256").update("a file's plaintext").digest();
 const CEK = Buffer.alloc(32, 0x42);
+const IDX_H = { account: "acct-1", kind: "index-snapshot", object: "root", version: "head-1", codec: "store.1", plaintextLength: 5, compressedLength: 5 };
 const BIG = 2 * MiB + 3;
 const big = Buffer.from(Array.from({ length: BIG }, (_, i) => (i * 7 + (i >> 9)) & 255));
 
@@ -163,7 +164,8 @@ try {
       const ck = await e2e.chunkKey(fk, 5);
       return {
         address: await e2e.wireAddress(k.addr, unhx(${J(SHA.toString("hex"))})),
-        index: await enc(k.index), wrap: await enc(k.wrap), file: hx(fk), chunk5: await enc(ck),
+        index: await (async () => { const o = await e2e.sealObject(k.index, ${J(IDX_H)}, big(5)); return [hx(o.sealId), o.chunks.map(hx)]; })(),
+        wrap: await enc(k.wrap), file: hx(fk), chunk5: await enc(ck),
         frozen: Object.isFrozen(k), n: k.n, account: k.account,
         keys: ["addr", "blobKey", "index", "wrap"].map((x) => [x, k[x].extractable, k[x].algorithm.name, [...k[x].usages].sort().join(",")]),
         chunkKey: [ck.extractable, ck.algorithm.name, [...ck.usages].sort().join(",")],
@@ -173,13 +175,17 @@ try {
     const zEnc = (k) => gcm(k, Buffer.alloc(12), Buffer.alloc(0), Buffer.alloc(16)).toString("hex");
     const want = "a1:" + createHmac("sha256", kAddr).update(Buffer.concat([s8("sagebrush.blob.v1"), SHA])).digest("hex");
     ok(r.address === want, "K-1: wireAddress = a1: + hex(HMAC-SHA256(K_addr[e], label ‖ sha)), K_addr = HKDF(S, label ‖ account ‖ u64(e))", { got: r.address, want });
-    ok(r.index === zEnc(epochKey(S, "sagebrush.e2e.epoch.index.v1", "acct-1", 7)), "K-1: K_index[e] is HKDF(S[e]) under its own label, account and epoch");
+    {
+      const kIndex = epochKey(S, "sagebrush.e2e.epoch.index.v1", "acct-1", 7), sealId = Buffer.from(r.index[0], "hex");
+      const want = gcm(objectKey(kIndex, IDX_H, sealId), Buffer.concat([Buffer.alloc(8), u32(0)]), objectAad(IDX_H, sealId, 0), big.subarray(0, 5)).toString("hex");
+      ok(r.index[1].length === 1 && r.index[1][0] === want, "K-1: K_index[e] is HKDF(S[e]) under its own label, account and epoch, a content key in shape: an index snapshot sealed directly under it is the oracle's (its own seal id and derived key)", r.index);
+    }
     ok(r.wrap === zEnc(epochKey(S, "sagebrush.e2e.epoch.wrap.v1", "acct-1", 7)), "K-1: K_wrap[e] likewise");
     const kFile = hkdf(kBlob, Buffer.concat([s8("sagebrush.blob.file.v1"), SHA, s8("zstd.1")]));
     ok(r.file === kFile.toString("hex"), "K-1: K_file = HKDF(K_blob[e], label ‖ sha ‖ codec)");
     ok(r.chunk5 === zEnc(hkdf(kFile, Buffer.concat([s8("sagebrush.blob.chunk.v1"), u32(5)]))), "K-1: K_chunk = HKDF(K_file, label ‖ u32(index))");
     ok(r.frozen && r.n === 7 && r.account === "acct-1", "K-2: the epoch's keys come frozen, with their epoch and account");
-    ok(J(r.keys) === J([["addr", false, "HMAC", "sign"], ["blobKey", false, "HKDF", "deriveBits"], ["index", false, "AES-GCM", "decrypt,encrypt"], ["wrap", false, "AES-GCM", "decrypt,encrypt"]]), "K-2: no epoch key is extractable, and each has only its own use", r.keys);
+    ok(J(r.keys) === J([["addr", false, "HMAC", "sign"], ["blobKey", false, "HKDF", "deriveBits"], ["index", false, "HKDF", "deriveKey"], ["wrap", false, "AES-GCM", "decrypt,encrypt"]]), "K-2: no epoch key is extractable, and each has only its own use", r.keys);
     ok(J(r.chunkKey) === J([false, "AES-GCM", "decrypt,encrypt"]), "K-2: a chunk key isn't extractable", r.chunkKey);
     // (each input separates: another epoch, account, secret, sha or codec gives other keys)
     const sep = await P.ev(`(async () => {
@@ -529,6 +535,27 @@ try {
     ok(J(work) === J({ random: 0, derive: 0, encrypt: 0, decrypt: 0 }), "K-6: and before any randomness, derivation or encryption", work);
     ok(J(objectKeys) === J([2, true]), "K-6: each sealing's and opening's own key is AES-GCM, not extractable, for encrypt and decrypt only", objectKeys);
     ok(J(own) === J(["ok", true]) && sameShape === "ok", "K-6: (importCek's key opens, deriving its sealing's key; so does a key of the same shape, as a structured clone would be)", [own, sameShape]);
+  }
+
+  {
+    // (the index's objects are sealed directly under K_index[e]: each kind its own, bound in the key and every AAD)
+    const r = await P.ev(`(async () => {
+      const k = await keys(), L = { maxPlaintext: 64, maxCompressed: 64, maxRatio: 1 }, id = (c) => c.slice();
+      const h = (kind) => ({ account: "acct-1", kind, object: "dev-1:42", version: "head-9", codec: "store.1", plaintextLength: 7, compressedLength: 7 });
+      const out = {};
+      for (const kind of ["index-op", "index-page", "index-snapshot"]) {
+        const o = await e2e.sealObject(k.index, h(kind), big(7));
+        out[kind] = [hx(await e2e.openObject(k.index, h(kind), o, id, L)) === hx(big(7)),
+          ...(await Promise.all(["index-op", "index-page", "index-snapshot"].filter((x) => x !== kind).map((x) => code(() => e2e.openObject(k.index, h(x), o, id, L)))))];
+      }
+      const other = await e2e.deriveEpochKeys(unhx("${S.toString("hex")}"), "acct-1", 8), o = await e2e.sealObject(k.index, h("index-op"), big(7));
+      out.otherEpoch = await code(() => e2e.openObject(other.index, h("index-op"), o, id, L));
+      out.wrapIsNotACek = [await code(() => e2e.sealObject(k.wrap, h("index-op"), big(7))), await code(() => e2e.sealObject(k.blobKey, h("index-op"), big(7)))];
+      return out;
+    })()`);
+    ok(["index-op", "index-page", "index-snapshot"].every((kind) => J(r[kind]) === J([true, "bad_form", "bad_form"])), "K-7: an index op, page and snapshot each seal and open under K_index[e], and none opens as another kind", r);
+    ok(r.otherEpoch === "bad_form", "K-7: another epoch's K_index doesn't open it", r.otherEpoch);
+    ok(J(r.wrapIsNotACek) === J(["bad_form", "bad_form"]), "K-7: K_wrap (AES-GCM) and K_blob (deriveBits) are refused as content keys: only K_index has that shape", r.wrapIsNotACek);
   }
 
   // ---- D: bounded inflating, after authentication

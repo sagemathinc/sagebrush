@@ -16,7 +16,8 @@ import {
   parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, same, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
 } from "../sync-protocol/protocol.ts";
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
-import { agentOn, allowed, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
+import { agentOn, allowed, e2eOn, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
+import { E2E, E2E_KEEP, E2EStore, e2eAccount, e2eAud } from "./e2e-chain.ts";
 import { AGENT, GRANT_ID, READS, SCOPED, VERBS, checkAgentName, checkScopes, inScope, makeToken, newGrantId, newSecret, secretHash, type Scope } from "./agent-token.ts";
 import { TRASH, normPath, within } from "../workspace/paths.ts";
 import { checkCall } from "../workspace/agent-schema.ts";
@@ -84,7 +85,7 @@ const MAX_HOLDS = LIMITS.liveBatches;
 /** The limits CoCalc gives an account (design/sync-server.md §6), as this service reads them. */
 /** (one storage_bytes for sharing and sync together, §6.1: sync has no storage limit of its own) */
 /** A held blob's identity: its address, its stored bytes' SHA-256 and its size (e2e PR 3a). */
-export type Held = { sha256: string; ct_sha256: string; size: number };
+export type Held = { address: string; ct_sha256: string; size: number };
 export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; version_bytes: number; read_bytes_per_day: number; retention_days?: number; verify_bytes_per_day?: number }; issued?: number }
 /** Dev deployments with no CoCalc to ask (SHARE_DEV=1): small, fixed limits. */
 /** After CoCalc couldn't say an account's plan, how long before it's asked again (LIMIT-SYNC-STATUS-1). */
@@ -124,6 +125,17 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private batches = new Bucket(LIMITS.batchBurst, LIMITS.batchRate);
   private opsRate = new Bucket(LIMITS.opsPerMinute, LIMITS.opsPerMinute / 60);
   private urls = new Bucket(LIMITS.urlsPerMinute, LIMITS.urlsPerMinute / 60);
+  private e2eAppends = new Bucket(E2E.appendsPerMinute, E2E.appendsPerMinute / 60);
+  private e2eMail = new Bucket(E2E.mailPerMinute, E2E.mailPerMinute / 60);
+  private e2eResets = new Bucket(E2E.resetsPerMinute, E2E.resetsPerMinute / 60);
+  private e2eResetWork = new Bucket(E2E.resetWorkPerMinute, E2E.resetWorkPerMinute / 60);
+  private e2eStore: E2EStore | null = null;
+  /** tests only: the E2E clock (the rate buckets' and the mailbox's), shifted (ms) or frozen at a moment; and the next E2E
+   * write's transaction made to fail after its writes */
+  private e2eShift = 0;
+  private e2eFrozen: number | null = null;
+  private e2eFailCommit = false;
+  private e2eHold = 0;
   private ticketsAll = new Bucket(TICKETS_PER_MINUTE_ACCOUNT, TICKETS_PER_MINUTE_ACCOUNT / 60);
   private ticketsBySession = new Map<string, Bucket>();
   private ticketBucket(session: string): Bucket {
@@ -602,7 +614,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const keys: PinKey[] = [];
       for (const e of b.patches)
         for (const sha of e.blobs ?? []) {
-          if (!this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", sha)) throw new SyncError("missing", "upload this blob first", { sha256: sha });
+          if (!this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", sha)) throw new SyncError("missing", "upload this blob first", { address: sha });
           const k = { doc, epoch, ref: patchRef(e), sha256: sha };
           const had = this.one("SELECT state FROM pins WHERE doc = ? AND epoch = ? AND ref = ? AND sha256 = ?", doc, epoch, k.ref, sha);
           if (!had) {
@@ -1300,6 +1312,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
   /** The alarm's part of the budget: give back slack beyond 2 chunks, or write a release D1 missed. */
   private async tendClaim(): Promise<void> {
+    if (testMode(this.env) && this.holdSlack) return;
     const cached = this.get("limits");
     if (!cached) return;
     const C = this.chunk((JSON.parse(cached) as Limits).storage_bytes);
@@ -1489,7 +1502,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const retired = Math.max(this.retired(), generation);
       const deleted = this.deleted();
       const tables = (this.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").toArray() as Row[]).map((r) => String(r.name));
-      for (const t of tables) this.sql.exec(`DROP TABLE IF EXISTS "${t}"`);
+      // (the E2E key chain is the account's identity: a sync-data purge keeps it, its current keyring and its current
+      // wrappers, named one by one in E2E_KEEP, and drops its mailbox; deleting the CoCalc account drops them all)
+      for (const t of tables) if (deleted || !E2E_KEEP.includes(t)) this.sql.exec(`DROP TABLE IF EXISTS "${t}"`);
       this.sql.exec("CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT)");
       this.sql.exec("INSERT INTO meta (k, v) VALUES ('retired', ?)", String(retired));
       // (one record, whatever came before: an earlier one not yet written is covered by this one, LIMIT-B92-1)
@@ -1613,7 +1628,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * uploads of the same bytes at once), this upload's object goes to the
    * outbox instead; a reservation already reaped can't be finalized.
    */
-  async finalize(a: { account: string; id: string; size: number }): Promise<Result<{ sha256: string }>> {
+  async finalize(a: { account: string; id: string; size: number }): Promise<Result<{ address: string }>> {
     // (during a purge: the upload's object is the purge's to delete, handed over in a transaction of its
     // own, which a refusal can't roll back, CORR-5E2-2)
     if (this.exists() && this.state() === "deleting") {
@@ -1633,7 +1648,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (!res) {
         // (finalized already: the same answer for the same size, a conflict for another)
         const f = this.one("SELECT sha256, size FROM finalized WHERE id = ?", a.id);
-        if (f && Number(f.size) === a.size) return { sha256: String(f.sha256) };
+        if (f && Number(f.size) === a.size) return { address: String(f.sha256) };
         if (f) throw new SyncError("conflict", "this upload was finalized with another size");
         throw new SyncError("busy", "this upload took too long; send it again");
       }
@@ -1653,14 +1668,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) VALUES (?, ?)", res.key, Date.now());
         this.addUsed(-Number(res.bytes));
         if (a.size !== Number(res.bytes)) throw new SyncError("invalid", "the stored size isn't the declared one");
-        return { sha256: sha };
+        return { address: sha };
       }
       this.sql.exec("INSERT INTO holdings (sha256, key, size, refs, created, ct_sha256) VALUES (?, ?, ?, 0, ?, ?)", sha, res.key, res.bytes, Date.now(), ct);
-      return { sha256: sha };
+      return { address: sha };
     }));
     this.wakeBy(Date.now() + 5000);
     if ("ok" in r && "conflict" in r.ok) return { error: { code: "conflict", message: "the server holds other bytes under this address", detail: { held: r.ok.conflict } } };
-    return r as Result<{ sha256: string }>;
+    return r as Result<{ address: string }>;
   }
 
   /** An upload that failed before finalize: its object and its reservation go now. */
@@ -1706,7 +1721,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Which of these blobs this account must upload (advisory, §5.4). */
-  async missing(a: { account: string; blobs: { sha256: string; ct_sha256: string; size: number }[]; bind?: { account?: string; generation?: number } }): Promise<Result<{ missing: string[]; verifying: string[]; conflicts: Held[] }>> {
+  async missing(a: { account: string; blobs: { address: string; ct_sha256: string; size: number }[]; bind?: { account?: string; generation?: number } }): Promise<Result<{ missing: string[]; verifying: string[]; conflicts: Held[] }>> {
     return attempt(() => {
       this.admit(a.account, false);
       this.bound(a.bind?.account, a.bind?.generation);
@@ -1714,7 +1729,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       // file already there?": held as a verified manifest, or being verified, which the client then drives)
       const files = tieredOn(this.env) && this.hasFiles();
       const missing: string[] = [], verifying: string[] = [], conflicts: Held[] = [];
-      for (const { sha256: sha, ct_sha256: ct, size } of a.blobs) {
+      for (const { address: sha, ct_sha256: ct, size } of a.blobs) {
         // (held is "there" only as exactly these bytes: held otherwise is a conflict, so no caller sends an op naming
         // an address whose bytes aren't the ones it means)
         const h = this.held(sha);
@@ -1726,7 +1741,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         if (f && f.state !== "verifying") {
           // (a chunked file, verified or live: held as its address (which its verification checked the chunks' bytes
           // make; ct = address, the bridge until end-to-end encryption) and its size, under the same exact rule)
-          const fh: Held = { sha256: sha, ct_sha256: sha, size: Number(f.size) };
+          const fh: Held = { address: sha, ct_sha256: sha, size: Number(f.size) };
           if (fh.ct_sha256 !== ct || fh.size !== size) conflicts.push(fh);
           continue;
         }
@@ -1741,7 +1756,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * column has NULL, read as its address, which R2 checked them against then) and its size; undefined if not held. */
   private held(address: string): Held | undefined {
     const h = this.one("SELECT sha256, COALESCE(ct_sha256, sha256) AS ct, size FROM holdings WHERE sha256 = ?", address);
-    return h ? { sha256: String(h.sha256), ct_sha256: String(h.ct), size: Number(h.size) } : undefined;
+    return h ? { address: String(h.sha256), ct_sha256: String(h.ct), size: Number(h.size) } : undefined;
   }
   private static blobConflict(h: Held): SyncError {
     return new SyncError("conflict", "the server holds other bytes under this address", { held: h });
@@ -2163,6 +2178,13 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   async setFailClaim(a: { on: boolean }): Promise<void> {
     if (testMode(this.env)) this.failClaim = a.on;
   }
+  private holdSlack = false;
+  /** Tests only: the alarm leaves the claim alone (no slack given back, no missed release written) while this is on, so
+   * a test can observe an unused claim for as long as it needs, however loaded the host is.  A give-back that sharing
+   * asks for (releaseClaim) still runs. */
+  async testHoldSlack(a: { on: boolean }): Promise<void> {
+    if (testMode(this.env)) this.holdSlack = a.on;
+  }
   /** Tests only: the budget as this object holds it. */
   async budget(): Promise<{ claim: number; blob_cap: number; files: number; documents: number; held: number; holds: number; dirty: boolean; calls: number; writes: number; alarm: number | null } | null> {
     if (!testMode(this.env) || !this.exists()) return null;
@@ -2351,6 +2373,132 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** The alarm: settle pins whose answer was lost (§4.3), and forget revoked sessions past their expiry. */
+  // ---- the E2E key chain and the enrollment mailbox (design/e2e-encryption.md §2, PR 2c), behind e2eOn (DEV only)
+
+  /**
+   * The checks every E2E call makes: the switch, this account (read admission: E2E writes still go through while the
+   * account is read-only or full, since removing a device or recovering is a safety action, but never while it is
+   * being deleted), and the client's binding. Then the account's store, made once.
+   */
+  private e2e(account: string, bind?: { account?: string; generation?: number }): E2EStore {
+    if (!e2eOn(this.env)) throw new SyncError("forbidden", "end-to-end encryption isn't enabled here");
+    this.admit(account, false);
+    this.bound(bind?.account, bind?.generation);
+    // (every write's transaction checks admission again: a deletion that began during the append's checks wins)
+    return (this.e2eStore ??= new E2EStore(this.sql, (f) => this.ctx.storage.transactionSync(() => {
+      this.admit(account, false);
+      const r = f();
+      // (tests only: a commit that fails after the writes, which roll back)
+      if (testMode(this.env) && this.e2eFailCommit) {
+        this.e2eFailCommit = false;
+        throw new Error("the commit failed (test seam)");
+      }
+      return r;
+    }), { aud: e2eAud(this.env.SHARE_DEV === "1"), account: e2eAccount(this.get("account_hash")!) },
+    // (tests only: an append held between its checks and its transaction)
+    () => (testMode(this.env) && this.e2eHold > 0 ? new Promise((r) => setTimeout(r, this.e2eHold)) : Promise.resolve())));
+  }
+
+  /** Append a chain entry with its package (keyring, wrappers), checked and stored together. */
+  async e2eAppend(a: { account: string; bind?: { account?: string; generation?: number }; entry: unknown; keyring?: unknown; wrappers?: unknown }): Promise<Result<{ seq: number; head: string }>> {
+    return attemptAsync(async () => {
+      const store = this.e2e(a.account, a.bind);
+      // (a reset never draws on the appends' bucket, which a compromised device can drain: it is charged to its own
+      // bucket, and only once its recovery signature and package have verified)
+      let claimed: unknown = null;
+      try { claimed = typeof a.entry === "string" ? (JSON.parse(a.entry) as { body?: { op?: unknown } })?.body?.op : null; } catch { /* (the checks refuse it) */ }
+      if (claimed !== "reset") {
+        const wait = this.e2eAppends.take(1, this.e2eNow());
+        if (wait) throw new SyncError("rate", "too many key-chain changes; wait", { retry_after: wait });
+      }
+      return store.append(a, {
+        work: () => {
+          const wait = this.e2eResetWork.take(1, this.e2eNow());
+          if (wait) throw new SyncError("rate", "too many reset attempts; wait", { retry_after: wait });
+        },
+        verified: () => {
+          const wait = this.e2eResets.take(1, this.e2eNow());
+          if (wait) throw new SyncError("rate", "too many resets; wait", { retry_after: wait });
+        },
+      });
+    });
+  }
+
+
+  /** A page of the chain. */
+  async e2eChain(a: { account: string; bind?: { account?: string; generation?: number }; from: number }): Promise<Result<ReturnType<E2EStore["chain"]>>> {
+    return attempt(() => this.e2e(a.account, a.bind).chain(a.from));
+  }
+
+  /** The latest current-epoch wrapper to a current device, or to the recovery key (by account alone). */
+  async e2eWrapper(a: { account: string; bind?: { account?: string; generation?: number }; kind: unknown; id?: unknown }): Promise<Result<NonNullable<ReturnType<E2EStore["wrapper"]>>>> {
+    return attempt(() => {
+      const w = this.e2e(a.account, a.bind).wrapper(a.kind, a.id);
+      if (!w) throw new SyncError("missing", "no current wrapper for that recipient");
+      return w;
+    });
+  }
+
+  /** The current epoch's keyring. */
+  async e2eKeyring(a: { account: string; bind?: { account?: string; generation?: number }; epoch: number }): Promise<Result<{ keyring: string }>> {
+    return attempt(() => {
+      const k = this.e2e(a.account, a.bind).keyring(a.epoch);
+      if (!k) throw new SyncError("missing", "no keyring for that epoch");
+      return k;
+    });
+  }
+
+  /** The enrollment mailbox: post one phase's message. */
+  async e2eMailPost(a: { account: string; bind?: { account?: string; generation?: number }; session: unknown; phase: unknown; msg: unknown }): Promise<Result<{ expires: number }>> {
+    return attempt(() => {
+      const store = this.e2e(a.account, a.bind);
+      const wait = this.e2eMail.take(1, this.e2eNow());
+      if (wait) throw new SyncError("rate", "too many enrollment messages; wait", { retry_after: wait });
+      return store.post(a.session, a.phase, a.msg, this.e2eNow());
+    });
+  }
+
+  /** The enrollment mailbox: read one phase's message. */
+  async e2eMailRead(a: { account: string; bind?: { account?: string; generation?: number }; session: unknown; phase: unknown }): Promise<Result<{ msg: string; expires: number }>> {
+    return attempt(() => {
+      const store = this.e2e(a.account, a.bind);
+      const wait = this.e2eMail.take(1, this.e2eNow());
+      if (wait) throw new SyncError("rate", "too many enrollment messages; wait", { retry_after: wait });
+      const m = store.read(a.session, a.phase, this.e2eNow());
+      if (!m) throw new SyncError("missing", "no such message");
+      return m;
+    });
+  }
+
+  /** The E2E clock: now, except in tests, where a seam may shift it or freeze it (so a rate test's buckets don't refill). */
+  private e2eNow(): number {
+    return (this.e2eFrozen ?? Date.now()) + this.e2eShift;
+  }
+
+  /** Tests only: shift or freeze the E2E clock (freeze: true holds it at this moment, false lets it run), and count the
+   * E2E rows. */
+  async testE2E(a: { shift?: number; freeze?: boolean; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number }; corrupt?: "state_hash" | "hash"; keyrings?: "drop-last" | "swap-last" | "stray-first" }): Promise<Record<string, number> | null> {
+    if (!testMode(this.env)) return null;
+    if (a.shift !== undefined) this.e2eShift = a.shift;
+    if (a.freeze !== undefined) this.e2eFrozen = a.freeze ? Date.now() : null;
+    if (a.failCommit !== undefined) this.e2eFailCommit = a.failCommit;
+    if (a.hold !== undefined) this.e2eHold = a.hold;
+    if (a.bounds !== undefined && this.e2eStore) Object.assign(this.e2eStore.bounds, a.bounds);
+    // (a stored keyring row lost, or replaced by other bytes under their own hash, as a storage fault would leave it)
+    if (a.keyrings === "drop-last") this.sql.exec("DELETE FROM e2e_keyrings WHERE epoch = (SELECT MAX(epoch) FROM e2e_keyrings)");
+    // (a stray row before epoch 1, as a damaged store might hold)
+    if (a.keyrings === "stray-first") this.sql.exec("INSERT INTO e2e_keyrings (epoch, generation, suite, prev, prev_ring, hash, bytes) VALUES (0, 'x', 1, 'x', '', 'x', randomblob(60))");
+    if (a.keyrings === "swap-last") this.sql.exec("UPDATE e2e_keyrings SET bytes = randomblob(60), hash = 'x' WHERE epoch = (SELECT MAX(epoch) FROM e2e_keyrings)");
+    if (a.corrupt === "state_hash" || a.corrupt === "hash") this.sql.exec(`UPDATE e2e_checkpoint SET ${a.corrupt} = 'x' WHERE id = 1`);
+    const out: Record<string, number> = {};
+    for (const t of ["e2e_chain", "e2e_keyrings", "e2e_wrappers", "e2e_head", "e2e_checkpoint", "e2e_mailbox"]) {
+      const there = this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = ?", t);
+      out[t] = there ? Number(this.one(`SELECT COUNT(*) AS n FROM ${t}`)!.n) : -1;
+    }
+    if (this.e2eStore) Object.assign(out, { preflights: this.e2eStore.counters.preflights, transitions: this.e2eStore.counters.transitions, replays: this.e2eStore.counters.replays });
+    return out;
+  }
+
   // ---- agents' grants and their requests (design/agent-endpoint.md §1-§3, §7, §8; fs-sync step 1a, behind SYNC_AGENT
   // on DEV).  The tables are made by the first grant, so an account without one is as it was.  The person makes,
   // lists, rotates and revokes grants from a session; an agent's request reaches agentCall only after the Worker has

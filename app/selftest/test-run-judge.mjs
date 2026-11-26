@@ -15,7 +15,7 @@ import { PassThrough } from "node:stream";
 import { readFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { capture, judge } from "./run-judge.mjs";
+import { capture, judge, agentBundleProblem } from "./run-judge.mjs";
 
 const here = new URL(".", import.meta.url);
 const read = (p) => readFileSync(new URL(p, here), "utf8");
@@ -29,7 +29,9 @@ const FILES = read("report-fixtures/desktop-good.txt").split("\n").filter((l) =>
 const withLatex = (lines) => read("report-fixtures/term-webkit-good.txt").split("\n").map((l) => (l.startsWith("ok   the page reaches the app's bridge: ") ? check2 : l))
   .flatMap((l) => (l.startsWith("ok   the shell worker can't reach the app's bridge: ") ? [l, ...lines] : [l])).join("\n");
 const REPORT = withLatex([...BOARD, ...LATEX, ...FILES]);
-const LOG = read("probe-log-fixtures/desktop-good-one.txt");
+// (the app's log: its agent bundle line first, from setup, then the probe's fixture)
+const AGENT_OK = "[agent] bundle: ok agent=0.8.16 node=24.21.0 claude_code=not_bundled node_check=bytes\n";
+const LOG = AGENT_OK + read("probe-log-fixtures/desktop-good-one.txt");
 const DONE = `[page] terminal bridge probe: done ${NONCE}\n`;
 const BEFORE_DONE = LOG.slice(0, LOG.indexOf(DONE));
 const WORKER = `[page] terminal bridge probe: worker-route:tauri-core-invoke ${NONCE}\n`;
@@ -122,6 +124,26 @@ for (const [what, lines] of [["no LaTeX editor lines", [...BOARD]], ["a LaTeX ed
   const rep = withLatex(lines);
   const r = await run("capture", async (p) => { p.stdout.write(rep); p.stderr.write(LOG); await tick(); p.emit("exit", 0, null); await tick(); await endAndClose(p); });
   check(!r.passed && r.res.problems.length === 0 && r.res.code === 0, `${what}: the report judge FAILS the run`);
+}
+// (the agent bundle line: macOS and Linux must report ok, Windows not_bundled; exactly one line)
+{
+  const ok = AGENT_OK.trim(), sig = "[agent] bundle: ok agent=0.8.16 node=24.21.0 claude_code=not_bundled node_check=signature";
+  check(agentBundleProblem(`x\n${ok}\ny`, "linux") === null, "the agent bundle: ok on Linux");
+  check(agentBundleProblem(sig, "darwin") === null, "the agent bundle: ok by signature on macOS");
+  check(agentBundleProblem("[agent] bundle: not_bundled", "win32") === null, "the agent bundle: not_bundled on Windows");
+  for (const [what, err, platform] of [
+    ["no line", "x\ny", "linux"],
+    ["two lines", `${ok}\n${ok}`, "linux"],
+    ["not bundled where it must be", "[agent] bundle: not_bundled", "darwin"],
+    ["refused", "[agent] bundle: refused Hash node_check=bytes", "linux"],
+    ["refused by signature", "[agent] bundle: refused NodeSignature node_check=signature", "darwin"],
+    ["ok on Windows, which bundles none", ok, "win32"],
+    ["another node_check", ok.replace("bytes", "none"), "linux"],
+    ["text after the line", `${ok} extra`, "linux"],
+  ]) check(agentBundleProblem(err, platform) !== null, `the agent bundle FAILS: ${what}`);
+  // (and the verdict: a run whose log lacks the line fails)
+  const r = await run("capture", async (p) => { p.stdout.write(REPORT); p.stderr.write(LOG.slice(AGENT_OK.length)); await tick(); p.emit("exit", 0, null); await tick(); await endAndClose(p); });
+  check(!r.passed, "a run with no agent bundle line FAILS the verdict");
 }
 console.log(bad ? "test-run-judge: FAILED" : "test-run-judge: all checks pass");
 process.exit(bad);

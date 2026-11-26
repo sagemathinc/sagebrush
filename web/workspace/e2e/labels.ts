@@ -16,6 +16,9 @@ export const LABELS = Object.freeze({
   // ---- a document's, snapshot's or index snapshot's chunks (§3.2): the per-sealing key, and the AAD (chunks.ts)
   objectKey: "sagebrush.e2e.object.key.v1",
   objectChunkAad: "sagebrush.e2e.object.chunk.aad.v1",
+  // ---- a document's payloads (§4): where a patch or a presence message belongs, its header's first field (doc-payload.ts)
+  docPatch: "sagebrush.e2e.doc.patch.v1",
+  docPresence: "sagebrush.e2e.doc.presence.v1",
   // ---- the key chain's (keys and devices, §11.1 and §11.2): here so that one table covers every label
   keyring: "sagebrush.keyring.v1",
   kemPop: "sagebrush.kem-pop.v1",

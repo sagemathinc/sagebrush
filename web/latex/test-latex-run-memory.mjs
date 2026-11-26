@@ -148,6 +148,18 @@ const MOUNT = [["talks/st.tex", { url: "https://files.example/c/1/aa", sha256: "
     ["/a.tex", "", "a.tex"], ["/any/b.tex", "", "any/b.tex"], ["/../a.tex", "", null], [null, "", null]];
   const badIn = ins.filter(([p, dir, want]) => inputIn(p, dir) !== want).map(([p, dir, want]) => [p, dir, want, inputIn(p, dir)]);
   check("inputIn: an \\input's file only in the .tex's folder or under it (never a sibling with the same start, \"../\", the top), as a plain path", badIn.length === 0, badIn);
+  // (a GitHub repository's files, as the share page mounts them: "/<repo>/<path>", each checked by its git blob id; the
+  //  root taken off, then the same folder boundary; was none of them, so a helper.py beside the .tex wasn't there)
+  const g = { url: "https://raw.example/o/r/c/talks/a.py", gitSha1: "b".repeat(40), size: 1 };
+  const G = [["/r/talks/a.py", g], ["/r/talks/sub/b.py", { ...g, extra: 1 }], ["/r/talks/../secret/k.py", g], ["/r/talks2/c.py", g], ["/r/talks/nohash.py", { url: "u", size: 1 }], ["/r/talks/both.py", { ...g, sha256: "aa" }], ["/r/talks/odd.py", { ...g, size: 1.5 }]];
+  check("mountIn: a GitHub listing's files under the .tex's folder, its root taken off, each as {url, gitSha1, size} only",
+    JSON.stringify(mountIn(G, "talks")) === JSON.stringify([["talks/a.py", g], ["talks/sub/b.py", g], ["talks/both.py", { url: g.url, sha256: "aa", size: 1 }]]), mountIn(G, "talks"));
+  check("mountIn: a GitHub listing at its top, every plain path but none traversing", JSON.stringify(mountIn(G, "").map((e) => e[0])) === JSON.stringify(["talks/a.py", "talks/sub/b.py", "talks2/c.py", "talks/both.py"]), mountIn(G, "").map((e) => e[0]));
+  // (a root is taken off only when every entry has it, a whole first segment: two roots, or one whose name starts
+  //  another's, or a share's relative paths among them, leave the absolute ones out as before)
+  const two = [["/r/talks/a.py", g], ["/s/talks/b.py", g]], prefix = [["/r/talks/a.py", g], ["/rx/talks/b.py", g]], mixed = [["talks/a.py", r], ["/r/talks/b.py", g]];
+  check("mountIn: no common root, nothing absolute given", mountIn(two, "talks").length === 0 && mountIn(prefix, "talks").length === 0 && JSON.stringify(mountIn(mixed, "talks").map((e) => e[0])) === JSON.stringify(["talks/a.py"]),
+    { two: mountIn(two, "talks"), prefix: mountIn(prefix, "talks"), mixed: mountIn(mixed, "talks") });
   // (the author's results: the editor's results file only (grader's T3 S7))
   const ok = { format: "sagebrush-latex-results", version: 1, wrapper: "W", items: [{ key: "k", s: "ok" }] };
   check("savedOf: the editor's results file read as the renderer reads it", JSON.stringify(savedOf(ok)) === JSON.stringify({ wrapper: "W", saved: ok.items }));
