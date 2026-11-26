@@ -769,7 +769,7 @@ def _wraps_in(op, dt):
 
 
 class _UFuncTypeError(TypeError):
-    pass
+    """NumPy's UFuncTypeError (numpy._core._exceptions), a TypeError: a ufunc's output its casting rule refuses"""
 
 
 _UFuncTypeError.__name__ = _UFuncTypeError.__qualname__ = "UFuncTypeError"
@@ -1508,13 +1508,6 @@ def _count_where(a, axis, keepdims, where):
     if where is None:
         raise TypeError("int() argument must be a string, a bytes-like object or a real number, not 'NoneType'")
     return sum(broadcast_to(where, a.shape), axis, intp, None, keepdims)
-
-
-class _UFuncTypeError(TypeError):
-    """NumPy's UFuncTypeError (numpy._core._exceptions), a TypeError: a ufunc's output its casting rule refuses"""
-
-
-_UFuncTypeError.__name__ = _UFuncTypeError.__qualname__ = "UFuncTypeError"
 
 
 def _root(r):
