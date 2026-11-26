@@ -206,19 +206,12 @@ test("the flags for a singular or indefinite preconditioner, maxit 0, the messag
   assert.match(rows.get("infS")![0], /Matrix multiplication of values that include Inf or NaN is not supported/);
 });
 
-test("lsqr's stop by Paige and Saunders's scaled test: b scaled by 1e-6 or 1e6 changes no iteration; NaN in b alike", () => {
+test("lsqr's stop by Paige and Saunders's scaled test: b scaled by 1e-6 or 1e6 changes no iteration", () => {
   const { rows } = run([
     ...SYSTEMS,
     "A = [1 2; 3 4; 5 6; 7 8]; c = [1; 2; 2; 3]; xs = A\\c;",
     "for s = [1 1e-6 1e6], [x, f, r, it] = lsqr(A, s*c, 1e-6, 20); rr = s*c - A*x; " +
       "fprintf('lsq%g|%d|%g|%.3g|%.3g\\n', s, f, it, norm(x/s - xs)/norm(xs), norm(A'*rr)/(norm(A, 'fro')*norm(rr))); end",
-    // (b with a NaN: every solver alike, no iteration, flag 4, x0, relres NaN, resvec [NaN])
-    "bn = b; bn(3) = NaN;",
-    "[x, f, r, it, rv] = pcg(T, bn); fprintf('nanpcg|%d|%g|%s|%g|%d\\n', f, r, mat2str(it), rv, isequal(x, zeros(n, 1)));",
-    "[x, f, r, it, rv] = minres(T, bn); fprintf('nanminres|%d|%g|%s|%g|%d\\n', f, r, mat2str(it), rv, isequal(x, zeros(n, 1)));",
-    "[x, f, r, it, rv] = gmres(T, bn, 3, 1e-8, 5, [], [], ones(n, 1)); fprintf('nangmres|%d|%g|%s|%g|%d\\n', f, r, mat2str(it), rv, isequal(x, ones(n, 1)));",
-    "[x, f, r, it, rv] = bicgstab(T, bn); fprintf('nanbicg|%d|%g|%s|%g|%d\\n', f, r, mat2str(it), rv, isequal(x, zeros(n, 1)));",
-    "[x, f, r, it, rv, lv] = lsqr(T, bn); fprintf('nanlsqr|%d|%g|%s|%g|%d|%d\\n', f, r, mat2str(it), rv, isequal(x, zeros(n, 1)), numel(lv));",
     // (a handle returning complex values, and a complex preconditioner: complex iterates)
     "H = full(T) + 0.5*eye(n) + 0.3i*(diag(ones(n-1,1),1) - diag(ones(n-1,1),-1));",
     "[x, f] = pcg(@(v) H*v, b, 1e-12, 50); fprintf('hcplx|%d|%.3g\\n', f, norm(x - H\\b)/norm(H\\b));",
@@ -239,9 +232,6 @@ test("lsqr's stop by Paige and Saunders's scaled test: b scaled by 1e-6 or 1e6 c
     // (the same two iterations at every scale, to the least-squares solution, stationary)
     assert.equal(flag, 0, s); assert.equal(it, 2, s); assert.ok(err < 1e-12, `${s}: ${err}`); assert.ok(stat < 1e-6, `${s}: ${stat}`);
   }
-  for (const id of ["nanpcg", "nanminres", "nanbicg"]) assert.deepEqual(rows.get(id), ["4", "NaN", "0", "NaN", "1"], id);
-  assert.deepEqual(rows.get("nangmres"), ["4", "NaN", "[0 0]", "NaN", "1"]);
-  assert.deepEqual(rows.get("nanlsqr"), ["4", "NaN", "0", "NaN", "1", "0"]);
   assert.equal(f("hcplx")[0], 0); assert.ok(f("hcplx")[1] < 1e-11);
   for (const id of ["mcplx", "mfull", "msp", "mpiv"]) { assert.equal(f(id)[0], 0, id); assert.ok(f(id)[1] <= 1e-11, id); }
   for (const id of ["lsqMc", "lsqSc"]) { assert.equal(f(id)[0], 0, id); assert.ok(f(id)[1] <= 1e-10, `${id}: ${f(id)[1]}`); }
@@ -253,6 +243,128 @@ test("the solvers' work admitted before their first vector (test/matlab_krylov_a
   const lines = r.stdout.trim().split("\n");
   assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
   assert.equal(lines.length, 10, r.stdout);
+});
+
+test("b with a NaN: each solver's flag, x, iter and resvec as MATLAB's (test/matlab-krylov-oracle.json nan_rhs_rows)", () => {
+  // (pcg and minres run out of iterations on NaNs, gmres too (its resvec's last entry 0 where maxit passed size(A,1)
+  // without restarts), bicgstab stops at iteration 2, lsqr at once with x0; a preconditioned pcg stops at iteration 1)
+  const dir = mkdtempSync(join(tmpdir(), "sb-knan-"));
+  writeFileSync(join(dir, "main.m"), [
+    "T = spdiags([-ones(6,1) 2*ones(6,1) -ones(6,1)], -1:1, 6, 6);",
+    "b = (1:6)'; b(3) = NaN; tol = 1e-8; x0 = ones(6,1); bn = NaN(6,1);",
+    "[x, fl, rr, it, rv] = gmres(T, b, 3, tol, 2); krow('1 gmres(A,b,3,tol,2)', x, fl, rr, it, rv);",
+    "[x, fl, rr, it, rv] = gmres(T, b, [], tol, 4); krow('2 gmres(A,b,[],tol,4)', x, fl, rr, it, rv);",
+    "[x, fl, rr, it, rv] = bicgstab(T, b, tol, 20); krow('3 bicgstab maxit20', x, fl, rr, it, rv);",
+    "[x, fl, rr, it, rv] = bicgstab(T, b, tol, 5); krow('3 bicgstab maxit5', x, fl, rr, it, rv);",
+    "[x, fl, rr, it, rv] = pcg(T, b, tol, 20, [], [], x0); krow('4 pcg x0=ones', x, fl, rr, it, rv);",
+    "[x, fl, rr, it, rv] = minres(T, b, tol, 20, [], [], x0); krow('4 minres x0=ones', x, fl, rr, it, rv);",
+    "M = spdiags(diag(T), 0, 6, 6);",
+    "[x, fl, rr, it, rv] = pcg(T, b, tol, 7, M); krow('5 pcg M=diag maxit7', x, fl, rr, it, rv);",
+    "[x, fl, rr, it, rv] = pcg(T, bn, tol, 20); krow('6 allnan pcg', x, fl, rr, it, rv);",
+    "[x, fl, rr, it, rv] = minres(T, bn, tol, 20); krow('6 allnan minres', x, fl, rr, it, rv);",
+    "[x, fl, rr, it, rv] = gmres(T, bn, [], tol, 20); krow('6 allnan gmres', x, fl, rr, it, rv);",
+    "[x, fl, rr, it, rv] = bicgstab(T, bn, tol, 20); krow('6 allnan bicgstab', x, fl, rr, it, rv);",
+    "[x, fl, rr, it, rv] = lsqr(T, bn, tol, 20); krow('6 allnan lsqr', x, fl, rr, it, rv);",
+    "[x, fl, rr, it, rv] = gmres(T, bn, 3, tol, 2); krow('6x allnan gmres(3,2)', x, fl, rr, it, rv);",
+    "[x, fl, rr, it, rv] = gmres(T, b, [], tol, 20, [], [], x0); krow('7 gmres x0=ones', x, fl, rr, it, rv);",
+    "[x, fl, rr, it, rv] = bicgstab(T, b, tol, 20, [], [], x0); krow('7 bicgstab x0=ones', x, fl, rr, it, rv);",
+    "[x, fl, rr, it, rv] = lsqr(T, b, tol, 20, [], [], x0); krow('7 lsqr x0=ones', x, fl, rr, it, rv);",
+    "function krow(tag, x, fl, rr, it, rv)",
+    "  fprintf('%s|x=%s|fl=%d|relres=%.6g|iter=%s|numel(resvec)=%d|all(isnan(resvec))=%d|any(isnan(resvec))=%d|resvec=%s\\n', ...",
+    "    tag, sprintf('%.6g ', x), fl, rr, sprintf('%g ', it), numel(rv), all(isnan(rv)), any(isnan(rv)), sprintf('%.4g ', rv));",
+    "end",
+  ].join("\n") + "\n");
+  const r = spawnSync(process.execPath, [cli, "--matlab", "main.m"], { cwd: dir, encoding: "utf8", timeout: 600000 });
+  assert.equal(r.status, 0, r.stderr);
+  const got = r.stdout.split("\n").map((l: string) => l.trimEnd()).filter((l: string) => l);
+  assert.deepEqual(got, oracle.nan_rhs_rows);
+});
+
+test("b with a NaN: the warnings' identifiers, the preconditioned solvers' flag 2 and the unrequested flags' messages", () => {
+  // (gmres warns that its Hessenberg system is ill conditioned, once per outer cycle, and that maxit passed
+  // size(A,1) without restarts; preconditioned, pcg, minres, gmres and bicgstab stop at the preconditioner's system;
+  // test/matlab-krylov-oracle.json nan_rhs_rows2 and nan_rhs_messages)
+  const dir = mkdtempSync(join(tmpdir(), "sb-knan2-"));
+  writeFileSync(join(dir, "main.m"), [
+    "T = spdiags([-ones(6,1) 2*ones(6,1) -ones(6,1)], -1:1, 6, 6);",
+    "b = (1:6)'; b(3) = NaN; tol = 1e-8; bok = (1:6)';",
+    "lastwarn('', ''); w0 = warning('off', 'all');",
+    "[x, fl, rr, it, rv] = gmres(T, b, 3, tol, 2); [m, id] = lastwarn;",
+    "warning(w0); fprintf('1a singular|id=%s|msg=%s\\n', id, m);",
+    "lastwarn('', ''); w0 = warning('off', 'all');",
+    "[x, fl, rr, it, rv] = gmres(T, bok, [], tol, 20); [m, id] = lastwarn;",
+    "warning(w0); fprintf('1b outer|id=%s|msg=%s\\n', id, m);",
+    "lastwarn('', ''); w0 = warning('off', 'all');",
+    "[x, fl, rr, it, rv] = gmres(T, b, [], tol, 6); [m, id] = lastwarn; warning(w0);",
+    "krow('1c gmres(A,b,[],tol,6)', x, fl, rr, it, rv); fprintf('1c lastwarn|id=%s|msg=%s\\n', id, m);",
+    "lastwarn('', ''); w0 = warning('off', 'all');",
+    "[x, fl, rr, it, rv] = gmres(T, b, [], tol, 7); [m, id] = lastwarn; warning(w0);",
+    "krow('1c gmres(A,b,[],tol,7)', x, fl, rr, it, rv); fprintf('1c7 lastwarn|id=%s|msg=%s\\n', id, m);",
+    "M = spdiags(diag(T), 0, 6, 6);",
+    "[x, fl, rr, it, rv] = minres(T, b, tol, 7, M); krow('2 minres M maxit7', x, fl, rr, it, rv);",
+    "[x, fl, rr, it, rv] = gmres(T, b, [], tol, 7, M); krow('2 gmres(A,b,[],tol,7,M)', x, fl, rr, it, rv);",
+    "[x, fl, rr, it, rv] = bicgstab(T, b, tol, 7, M); krow('2 bicgstab M maxit7', x, fl, rr, it, rv);",
+    "[x, fl, rr, it, rv] = pcg(T, b, tol, 7, M); krow('2 pcg M maxit7 (again)', x, fl, rr, it, rv);",
+    "disp('MESSAGES'); pcg(T, b); gmres(T, b, 3, tol, 2);",
+    "function krow(tag, x, fl, rr, it, rv)",
+    "  fprintf('%s|x=%s|fl=%d|relres=%.6g|iter=%s|numel(resvec)=%d|resvec=%s\\n', ...",
+    "    tag, sprintf('%.6g ', x), fl, rr, sprintf('%g ', it), numel(rv), sprintf('%.4g ', rv));",
+    "end",
+  ].join("\n") + "\n");
+  const r = spawnSync(process.execPath, [cli, "--matlab", "main.m"], { cwd: dir, encoding: "utf8", timeout: 600000 });
+  assert.equal(r.status, 0, r.stderr);
+  const lines = r.stdout.split("\n").map((l: string) => l.trimEnd()).filter((l: string) => l);
+  const at = lines.indexOf("MESSAGES");
+  assert.deepEqual(lines.slice(0, at), oracle.nan_rhs_rows2);
+  const msgs = oracle.nan_rhs_messages;
+  assert.deepEqual(lines.slice(at + 1), [...msgs.pcg, ...msgs.gmres]);
+  // (the two outer cycles' warnings, before gmres's message; and the outer-iterations warning of the gmres(.., 7, M) row)
+  assert.equal(r.stderr.split(msgs.gmres_warning).length - 1, 2, r.stderr);
+  assert.ok(r.stderr.includes("Warning: Maximum number of outer iterations is 7 but should be bounded by size(A,1). " +
+    "Setting the maximum number of outer iterations to 6."), r.stderr);
+});
+
+test("b with a NaN at maxit 0, 1 and 2: every solver's outputs and warnings as MATLAB's (test/matlab-krylov-oracle.json nan_rhs_grid)", () => {
+  // (maxit 0 runs no iteration (minres takes it as 1); bicgstab's flag 4 starts at maxit 2; gmres without restarts
+  // warns from maxit 2, gmres(2) once per outer cycle; preconditioned, flag 2 from maxit 1)
+  const dir = mkdtempSync(join(tmpdir(), "sb-kgrid-"));
+  writeFileSync(join(dir, "main.m"), [
+    "T = spdiags([-ones(6,1) 2*ones(6,1) -ones(6,1)], -1:1, 6, 6);",
+    "M = spdiags(diag(T), 0, 6, 6); tol = 1e-8;",
+    "b1 = (1:6)'; b1(3) = NaN; bn = NaN(6, 1);",
+    "names = {'pcg', 'minres', 'bicgstab', 'gmres', 'gmres(r2)'}; bs = {b1, bn}; bnames = {'b3nan', 'allnan'};",
+    "for bi_ = 1:2",
+    "  for k = 1:5",
+    "    for mx = [0 1 2]",
+    "      for useM = 0:1",
+    "        for usex0 = 0:1",
+    "          bb = bs{bi_};",
+    "          if usex0, x0 = ones(6, 1); else, x0 = []; end",
+    "          if useM, MM = M; else, MM = []; end",
+    "          tag = sprintf('%s %s maxit=%d M=%d x0=%d', names{k}, bnames{bi_}, mx, useM, usex0);",
+    "          lastwarn('', '');",
+    "          switch k",
+    "            case 1, [x, fl, rr, it, rv] = pcg(T, bb, tol, mx, MM, [], x0);",
+    "            case 2, [x, fl, rr, it, rv] = minres(T, bb, tol, mx, MM, [], x0);",
+    "            case 3, [x, fl, rr, it, rv] = bicgstab(T, bb, tol, mx, MM, [], x0);",
+    "            case 4, [x, fl, rr, it, rv] = gmres(T, bb, [], tol, mx, MM, [], x0);",
+    "            case 5, [x, fl, rr, it, rv] = gmres(T, bb, 2, tol, mx, MM, [], x0);",
+    "          end",
+    "          [wm, wid] = lastwarn;",
+    "          fprintf('%s|x=%s|fl=%d|rr=%.6g|it=%s|nrv=%d|rv=%s|w=%s\\n', tag, sprintf('%.6g ', x), fl, rr, sprintf('%g ', it), numel(rv), strtrim(sprintf('%.6g ', rv)), wid);",
+    "        end",
+    "      end",
+    "    end",
+    "  end",
+    "end",
+  ].join("\n") + "\n");
+  const r = spawnSync(process.execPath, [cli, "--matlab", "main.m"], { cwd: dir, encoding: "utf8", timeout: 600000 });
+  assert.equal(r.status, 0, r.stderr);
+  const got = r.stdout.split("\n").filter((l: string) => l);
+  // (the oracle's rows end in MATLAB's trailing space after resvec; trimmed on both sides)
+  const want = oracle.nan_rhs_grid.map((l: string) => l.replace(/ \|w=/, "|w="));
+  assert.deepEqual(got, want);
+  assert.equal(r.stderr.split("RCOND = NaN.").length - 1, oracle.nan_rhs_grid_warnings, r.stderr);
 });
 
 test("minres with a badly scaled SPD preconditioner: honest flags and relres over the whole grid; convergence where MATLAB converges (test/matlab-krylov-oracle.json minres_scaled_converged)", () => {
