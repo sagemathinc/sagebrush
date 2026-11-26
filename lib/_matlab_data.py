@@ -840,7 +840,7 @@ def _window(k):
 def _mov_args(args, fname, takes_w):
     """(w, axis or None, omitnan, endpoints) from a moving statistic's options"""
     args = list(args)
-    w, axis, omit, ends = 0, None, False, "shrink"
+    w, axis, omit, ends, pairs = 0, None, False, "shrink", False
     if takes_w and args and not _istext(args[0]):
         if _m._numel(args[0]):
             w = _m._int_arg(args[0], "weight")
@@ -852,8 +852,12 @@ def _mov_args(args, fname, takes_w):
         if _istext(a):
             s = _text(a).lower()
             if s in ("includenan", "omitnan"):
+                if pairs:
+                    raise _err("NaN condition must come before parameter name and value pairs.",
+                               "MATLAB:movfun:nanFlagAfterPairs")
                 omit = s == "omitnan"
             elif s == "endpoints":
+                pairs = True
                 if not args:
                     raise _err("Endpoints needs a value.")
                 e = args.pop(0)
@@ -934,16 +938,27 @@ def _moving(A, kb, kf, stat, w, omit, ends):
                 # (|v| to the k as a float, and its sign from k's parity, which float(k) can lose past 2^53)
                 p = np.power(abs(v), float(k))
                 return acc * (-p if k % 2 and _math.copysign(1.0, v) < 0 else p)
-        # (the ones before the data first and after it last, in the order of the offsets)
-        acc = outside(acc, kb - cb)
-        for o in offs:
-            S, ok = shifted(o)
-            use = ok & ~np.isnan(S)
-            if stat == "prod":
-                acc = acc * np.where(use, S, 1)
-            else:
-                acc = acc + np.where(use, S, 0)
-        acc = outside(acc, kf - cf)
+        if stat == "prod":
+            # (the ones before the data first and after it last, in the order of the offsets)
+            acc = outside(acc, kb - cb)
+            for o in offs:
+                S, ok = shifted(o)
+                acc = acc * np.where(ok & ~np.isnan(S), S, 1)
+            acc = outside(acc, kf - cf)
+        else:
+            # (a sum: the window's data in order, then all its fill values at once, as MATLAB sums them, so
+            # that windows holding the same values give the same sum)
+            for o in offs:
+                S, ok = shifted(o)
+                lo, hi = max(0, -o), min(L, L - o)
+                if hi > lo:
+                    acc[lo:hi] = acc[lo:hi] + np.where(np.isnan(S[lo:hi]), 0, S[lo:hi])
+            if fill and not np.isnan(v):
+                i = np.arange(L)
+                k = kb + kf + 1 - (np.minimum(i + kf, L - 1) - np.maximum(i - kb, 0) + 1)
+                with np.errstate(over="ignore", invalid="ignore"):
+                    # (only where the window passes an end: 0 times an infinite v would be NaN)
+                    acc = np.where((k > 0)[:, None], acc + (k.astype(np.float64) * v)[:, None], acc)
         if stat in ("mean", "var", "std"):
             with np.errstate(invalid="ignore", divide="ignore"):
                 mean = acc / count

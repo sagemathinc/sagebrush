@@ -620,7 +620,7 @@
     ],
     "differs": [
       "Not supported: 'SamplePoints', and tables or timetables.",
-      "Not yet checked against MATLAB: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's sum with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
+      "Checked against MATLAB for movmean and movmedian, not yet for movsum: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's sum with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
     ],
     "status": "partial",
     "see_also": [
@@ -655,8 +655,7 @@
       }
     ],
     "differs": [
-      "Not supported: 'SamplePoints', and tables or timetables.",
-      "Not yet checked against MATLAB: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's mean with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
+      "Not supported: 'SamplePoints', and tables or timetables."
     ],
     "status": "partial",
     "see_also": [
@@ -683,7 +682,7 @@
     ],
     "differs": [
       "Not supported: 'SamplePoints', and tables or timetables.",
-      "Not yet checked against MATLAB: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's product with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
+      "Checked against MATLAB for movmean and movmedian, not yet for movprod: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's product with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
     ],
     "status": "partial",
     "see_also": [
@@ -712,7 +711,7 @@
     "differs": [
       "Not supported: 'SamplePoints', and tables or timetables.",
       "Complex data is refused in Sagebrush.",
-      "Not yet checked against MATLAB: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's maximum with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
+      "Checked against MATLAB for movmean and movmedian, not yet for movmax: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's maximum with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
     ],
     "status": "partial",
     "see_also": [
@@ -741,7 +740,7 @@
     "differs": [
       "Not supported: 'SamplePoints', and tables or timetables.",
       "Complex data is refused in Sagebrush.",
-      "Not yet checked against MATLAB: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's minimum with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
+      "Checked against MATLAB for movmean and movmedian, not yet for movmin: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's minimum with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
     ],
     "status": "partial",
     "see_also": [
@@ -773,8 +772,7 @@
     ],
     "differs": [
       "Not supported: 'SamplePoints', and tables or timetables.",
-      "Complex data is refused, as in MATLAB.",
-      "Not yet checked against MATLAB: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's median with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
+      "Complex data is refused, as in MATLAB."
     ],
     "status": "partial",
     "see_also": [
@@ -806,7 +804,7 @@
     ],
     "differs": [
       "Not supported: 'SamplePoints', and tables or timetables.",
-      "Not yet checked against MATLAB: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's variance with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
+      "Checked against MATLAB for movmean and movmedian, not yet for movvar: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's variance with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
     ],
     "status": "partial",
     "see_also": [
@@ -834,7 +832,7 @@
     ],
     "differs": [
       "Not supported: 'SamplePoints', and tables or timetables.",
-      "Not yet checked against MATLAB: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's standard deviation with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
+      "Checked against MATLAB for movmean and movmedian, not yet for movstd: with 'Endpoints' a value v (or 'fill', NaN), Sagebrush reads the elements past the ends as v, taking part in each window's standard deviation with the data (movmean([4 8 6], 3, 'Endpoints', 0) is [4 6 4.6667]), rather than giving v at the positions whose windows pass an end; the fill values of a window far past the data are taken together, so a sum of them rounds once."
     ],
     "status": "partial",
     "see_also": [

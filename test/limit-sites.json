@@ -17017,5 +17017,10 @@
  "web/workspace/sync-ledger.ts :: waitSync :: if (t !== undefined && (!Number.isSafeInteger(t) || t < 1 || t > WAIT.timeoutMax)) throw Object.assign(new WorkspaceError(\"invalid\", `timeoutMs is an integer from 1 to ${WAIT.timeoutMax}`), { max: WAIT.timeoutMax }); #0": {
   "class": "1",
   "owner": "sync client"
+ },
+ "lib/_matlab_data.py :: _moving :: k = kb + kf + 1 - (np.minimum(i + kf, L - 1) - np.maximum(i - kb, 0) + 1) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in np.maximum; the line counts each window's positions outside the data, whose fill values a moving sum takes in at once, not a limit on a computation"
  }
 }
