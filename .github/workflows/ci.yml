@@ -425,14 +425,16 @@ jobs:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.size_inputs == 'true')
     runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
-    # Resolve 2 + install 5 + build 16 + npm metrics 2 + setup/cleanup 15.
-    timeout-minutes: 40
+    # Resolve 2 + install 5 + build 16 + npm metrics 2 + setup/cleanup 15; a master merge into a track builds its
+    # master side too (install 5 + build 16).
+    timeout-minutes: 60
     permissions:
       contents: read
       actions: read
     outputs:
       mode: ${{ steps.resolve.outputs.mode }}
-      # (a dispatch: origin/master as this job saw it, for the gate job's check of the same base)
+      # (a dispatch, or a master merge into a track: origin/master as this job saw it, for the gate job's check of the
+      # same base and master side)
       master: ${{ steps.resolve.outputs.master }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -493,10 +495,31 @@ jobs:
         continue-on-error: true
         timeout-minutes: 2
         run: node scripts/npm-pack-metrics.mjs --base --records "$RUNNER_TEMP/size-records" --root "$RUNNER_TEMP/size-base"
+      # (a change into a track that merges master in: the master commit it merges, its "side", is measured the same
+      # way, so a bundle fails only when it grows over the limit against both parents; design/size-gate.md)
+      - name: the master side's worktree
+        if: steps.resolve.outputs.side != ''
+        run: git worktree add --detach "$RUNNER_TEMP/size-side" "${{ steps.resolve.outputs.side }}"
+      - name: install (the master side)
+        if: steps.resolve.outputs.side != ''
+        timeout-minutes: 5
+        working-directory: ${{ runner.temp }}/size-side
+        run: pnpm install --frozen-lockfile
+      - name: build (the master side)
+        if: steps.resolve.outputs.side != ''
+        timeout-minutes: 16
+        working-directory: ${{ runner.temp }}/size-side
+        run: |
+          if [ -f wasm/pins.json ]; then timeout 8m node "$GITHUB_WORKSPACE/scripts/wasm-fetch-or-build.mjs" --root "$RUNNER_TEMP/size-side"; fi
+          timeout 8m sh -c 'pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs'
+      - name: record (the master side)
+        if: steps.resolve.outputs.side != ''
+        run: |
+          node scripts/size-measure.mjs --record --root "$RUNNER_TEMP/size-side" --out "$RUNNER_TEMP/size-records/side-record.json"
       - name: remove the worktrees
         if: always()
         run: |
-          for w in size-base; do
+          for w in size-base size-side; do
             [ -d "$RUNNER_TEMP/$w" ] && git worktree remove --force "$RUNNER_TEMP/$w" || true
           done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
