@@ -43,7 +43,7 @@
 import { adminLength, bindPurge, sessionOf, signedWith, type ShareEnv } from "../share/server.ts";
 import { parseRange } from "../share/files.ts";
 import { accountHash, fields, hmacHex, isNat, isSha, same, LIMITS, URL_MS, SyncError, type Result } from "../sync-protocol/protocol.ts";
-import { agentOn, allowed, gate, gateOn, testMode, tieredOn, type SyncEnv } from "./env.ts";
+import { e2eOn, agentOn, allowed, gate, gateOn, testMode, tieredOn, type SyncEnv } from "./env.ts";
 import { AGENT, tokenOf } from "./agent-token.ts";
 import { TIERED } from "./manifest.ts";
 import { Sha256 } from "./sha256.ts";
@@ -305,6 +305,49 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
   if (p === "/api/sync/v1/index/rebuild" && m === "POST") {
     if (!agentOn(env)) return err(404, "not found");
     return answer(await stub.indexRebuild({ account: who.id }), json);
+  }
+  // the E2E key chain and the enrollment mailbox (design/e2e-encryption.md §2, PR 2c), from the person's devices: a
+  // 404 while the switch is off. Every route carries the client's binding (x-sync-account, x-sync-generation).
+  if (p.startsWith("/api/sync/v1/e2e/")) {
+    if (!e2eOn(env)) return err(404, "not found");
+    if (p === "/api/sync/v1/e2e/chain" && m === "GET") {
+      const from = url.searchParams.get("from") ?? "0";
+      if (!/^\d{1,15}$/.test(from)) return err(400, "invalid", { message: "from" });
+      return answer(await stub.e2eChain({ account: who.id, bind, from: Number(from) }), json);
+    }
+    if (p === "/api/sync/v1/e2e/chain" && m === "POST") {
+      if (!/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
+      const text = await readBounded(req, 1 << 20);
+      if (text === null) return err(413, "limit", { limit: "body_bytes", max: 1 << 20 });
+      let b: Record<string, unknown>;
+      try {
+        b = fields(JSON.parse(text), ["entry", "keyring", "wrappers"], "append");
+      } catch {
+        return err(400, "invalid", { message: "send {entry, keyring?, wrappers}" });
+      }
+      return answer(await stub.e2eAppend({ account: who.id, bind, entry: b.entry, keyring: b.keyring, wrappers: b.wrappers }), (v) => json(v, 201));
+    }
+    if (p === "/api/sync/v1/e2e/wrapper" && m === "GET") {
+      const kind = url.searchParams.get("kind"), id = url.searchParams.get("id");
+      return answer(await stub.e2eWrapper({ account: who.id, bind, kind, ...(id !== null ? { id } : {}) }), json);
+    }
+    const kr = p.match(/^\/api\/sync\/v1\/e2e\/keyring\/(\d{1,15})$/);
+    if (kr && m === "GET") return answer(await stub.e2eKeyring({ account: who.id, bind, epoch: Number(kr[1]) }), json);
+    const mb = p.match(/^\/api\/sync\/v1\/e2e\/enroll\/([a-z2-7]{25}[aeimquy4])\/([1-5])$/);
+    if (mb && m === "GET") return answer(await stub.e2eMailRead({ account: who.id, bind, session: mb[1], phase: Number(mb[2]) }), json);
+    if (mb && m === "POST") {
+      if (!/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
+      const text = await readBounded(req, 32 << 10);
+      if (text === null) return err(413, "limit", { limit: "body_bytes", max: 32 << 10 });
+      let b: Record<string, unknown>;
+      try {
+        b = fields(JSON.parse(text), ["msg"], "message");
+      } catch {
+        return err(400, "invalid", { message: "send {msg}" });
+      }
+      return answer(await stub.e2eMailPost({ account: who.id, bind, session: mb[1], phase: Number(mb[2]), msg: b.msg }), (v) => json(v, 201));
+    }
+    return err(404, "not found");
   }
   // agents' grants, from the person's session (design/agent-endpoint.md §2, the grant dialog's calls; §8, the log): a
   // 404 while the switch is off

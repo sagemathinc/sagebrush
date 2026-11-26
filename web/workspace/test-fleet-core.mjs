@@ -109,8 +109,9 @@ const coreUsers = (webDir) => {
 };
 const users = coreUsers(web);
 ok(users.length === 0, "N-1: only e2e/ and the verifier (fleet-verify.ts) use the fleet core (trees under their own licence aside): page modules through fleet/install.ts, e2e/core/'s pure modules by named imports of the core's pure functions, never an installer", users);
-// (and nothing reaches the verifier yet: until a page that uses it is reviewed, no fleet verifying path is live. The
-//  scan covers fleet/ too, its own installer included: only the byte-pinned mirror files, PINS, are left out)
+// (and only the fleet pages reach the verifier: /agents/fleet/'s page.ts, read only, reviewed with it. Any other page
+//  module naming it is reported. The scan covers fleet/ too, its own installer included: only the byte-pinned mirror
+//  files, PINS, are left out)
 /** The modules under `webDir` (a web/ tree) that name the verifier, other than the verifier itself. */
 const verifierUsersIn = (webDir) => {
   const fleetDir = join(webDir, "workspace", "fleet");
@@ -126,7 +127,7 @@ const verifierUsersIn = (webDir) => {
   return out;
 };
 const verifierUsers = verifierUsersIn(web);
-ok(verifierUsers.length === 0, "N-2: no page module imports the verifier yet (no fleet verifying path is live)", verifierUsers);
+ok(JSON.stringify(verifierUsers) === JSON.stringify([join("agents", "fleet", "page.ts")]), "N-2: only the fleet pages (agents/fleet/page.ts) name the verifier; no other page module does", verifierUsers);
 {
   // (its control, on real files: the page's own installer importing the verifier is reported, while a pinned mirror
   //  file is left out of the scan)

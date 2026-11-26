@@ -357,6 +357,37 @@ for (const [what, text] of [
   const c = await relayLeg(); c.leg.runner({ t: "wat" }); await tick();
   check([a, b, c].every((x) => x.timers.live === 0 && x.timers.cleared === 1), "the ping timer is cleared on close(), on the socket's close and on a failure");
 }
+{
+  // (a probe: one ping now, outside the interval (the tab came back); a pong in time says alive, and its wait is cleared)
+  class ProbeTimers extends Timers {
+    constructor() { super(); this.waits = new Map(); this.waitsCleared = 0; }
+    setTimeout(f, ms) { const id = this.next++; this.waits.set(id, { f, ms }); return id; }
+    clearTimeout(id) { if (this.waits.delete(id)) this.waitsCleared++; }
+    expire() { for (const [id, w] of [...this.waits]) { this.waits.delete(id); w.f(); } }
+  }
+  const { t, leg, timers } = await relayLeg({ timers: new ProbeTimers() });
+  const alive = t.probe(1234);
+  check(relayMsgs(leg).filter((m) => m.relay === "ping").length === 1 && [...timers.waits.values()][0]?.ms === 1234, "a probe sends one ping now and waits the given time");
+  leg.raw(`{"relay":"pong"}`);
+  check((await alive) === true && timers.waits.size === 0 && timers.waitsCleared === 1 && t.missedPongs === 0, "a pong in time: alive, the wait cleared, the missed count reset");
+  // (no pong in time: not alive; the leg is left as it is, for the page to close)
+  const quiet = t.probe(50);
+  timers.expire();
+  check((await quiet) === false && t.state !== "ended" && t.missedPongs === 1, "no pong within the wait: not alive (the leg left to the page)");
+  // (the leg ending while a probe waits: not alive, at once)
+  const ending = t.probe(10_000);
+  t.close();
+  check((await ending) === false && timers.waits.size === 0, "the leg ending while a probe waits: not alive, its wait cleared");
+  // (an ended leg: not alive, and nothing sent)
+  const n = relayMsgs(leg).length;
+  check((await t.probe(10)) === false && relayMsgs(leg).length === n, "a probe of an ended leg: not alive, no ping sent");
+  // (two probes at once: one pong answers both)
+  const b = await relayLeg({ timers: new ProbeTimers() });
+  const p1 = b.t.probe(1000), p2 = b.t.probe(1000);
+  b.leg.raw(`{"relay":"pong"}`);
+  check((await p1) === true && (await p2) === true && b.timers.waits.size === 0, "one pong answers every probe waiting");
+  b.t.close();
+}
 
 check(spied.fetch === 0 && spied.xhr === 0, "zero network besides the relay leg");
 console.log(fails ? `${fails} failed` : "all passed");
