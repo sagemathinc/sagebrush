@@ -146,7 +146,7 @@ separate measurements:
     floating-point operations, in the same order, as its JavaScript
     fallback.
   - Elementwise arithmetic and most ufuncs are JavaScript loops over typed
-    arrays; only `exp` and `log` have WebAssembly SIMD kernels.
+    arrays; at the time only `exp` and `log` had WebAssembly SIMD kernels.
   - The elementwise row, `np.sum(np.sin(x) * x + x ** 2)` on 1,000,000
     floats, is about 40 times slower here than in Pyodide, the largest gap
     in the table. It is not the cost of dispatch. Timed one operation at a
@@ -160,9 +160,10 @@ separate measurements:
       JavaScript.
     - `x ** 2` takes 106 ms. It goes through a port of glibc's `pow`,
       while NumPy computes a square as `x * x`.
-  - Both are known and fixable without giving up the results: a square is
-    exactly `x * x`, and a correctly rounded `sin` can be fast if it is
-    compiled to WebAssembly, as `exp` and `log` already are.
+  - Both have been fixed since, without giving up the results: `x ** 2`
+    is now `x * x`, as in NumPy, and `sin` and `cos` of float64 arrays
+    run in WebAssembly, as `exp` and `log` already did. The elementwise
+    row above was measured before both.
 
 ## Where Sagebrush's design is weakest
 
