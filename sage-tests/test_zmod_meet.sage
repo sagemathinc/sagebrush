@@ -1,4 +1,4 @@
-# GF(q) and Z/n operands that Sage's coercion meets in a common ring: Z/m
+# GF(p) and Z/n operands that Sage's coercion meets in a common ring: Z/m
 # and Z/n in Z/gcd(m, n) (the smaller ring when one order divides the other,
 # GF(p) rather than Z/p), scalars, matrices
 # and vectors, for *, + and - in both orders; and the pairs Sage refuses.
