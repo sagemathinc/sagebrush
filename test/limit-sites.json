@@ -13252,6 +13252,16 @@
   "owner": "pyjs JSON/runtime memory",
   "row": "src-8"
  },
+ "src/runtime/kernels.ts :: wasmArgsort :: route = \"past-max\"; #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "the low-memory flag's routing past a WebAssembly memory's own fixed maximum (wasm32's, or engine/nd's declared one), chosen up front from input, fixed limits and SAGEBRUSH_LOW_MEMORY=1; no limit of ours"
+ },
+ "src/runtime/kernels.ts :: wasmKernels :: let route: FlagRoute = \"past-max\"; #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "the low-memory flag's routing past a WebAssembly memory's own fixed maximum (wasm32's, or engine/nd's declared one), chosen up front from input, fixed limits and SAGEBRUSH_LOW_MEMORY=1; no limit of ours"
+ },
  "src/runtime/modules.ts ::  :: import { heapLimit } from \"./heap\"; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)"
@@ -13718,10 +13728,10 @@
   "owner": "pyjs runtime",
   "reason": "engine/nd's shared memory's declared maximum (4 GiB, 1 GiB or 256 MiB, as much as can be reserved), recorded and reported in np.linalg._kernels(); no limit of ours"
  },
- "src/runtime/nd.ts :: reserve :: growTo(m, bytes, declaredMax.get(m)); #0": {
+ "src/runtime/nd.ts :: reserve :: growTo(m, bytes, declaredMax.get(m), \"always\"); #0": {
   "class": "none",
   "owner": "pyjs runtime",
-  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+  "reason": "the low-memory flag's routing past a WebAssembly memory's own fixed maximum (wasm32's, or engine/nd's declared one), chosen up front from input, fixed limits and SAGEBRUSH_LOW_MEMORY=1; no limit of ours"
  },
  "src/runtime/nd.ts :: sharedMemory :: const m = new WebAssembly.Memory({ initial: 17, maximum, shared: true }); #0": {
   "class": "none",
@@ -14144,25 +14154,35 @@
   "owner": "pyjs runtime",
   "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
  },
+ "src/runtime/wasm_room.ts :: fixedMax :: export type FlagRoute = \"past-max\" | \"always\" | \"none\"; #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "the low-memory flag's routing past a WebAssembly memory's own fixed maximum (wasm32's, or engine/nd's declared one), chosen up front from input, fixed limits and SAGEBRUSH_LOW_MEMORY=1; no limit of ours"
+ },
  "src/runtime/wasm_room.ts :: growTo :: const max = fixedMax(declared); #0": {
   "class": "none",
   "owner": "pyjs runtime",
   "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
  },
- "src/runtime/wasm_room.ts :: growTo :: export function growTo(mem: WebAssembly.Memory, bytes: number, declared = WASM32_MAX_BYTES): void { #0": {
+ "src/runtime/wasm_room.ts :: growTo :: export function growTo(mem: WebAssembly.Memory, bytes: number, declared = WASM32_MAX_BYTES, route: FlagRoute = \"past-max\"): void { #0": {
   "class": "none",
   "owner": "pyjs runtime",
-  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+  "reason": "the low-memory flag's routing past a WebAssembly memory's own fixed maximum (wasm32's, or engine/nd's declared one), chosen up front from input, fixed limits and SAGEBRUSH_LOW_MEMORY=1; no limit of ours"
  },
  "src/runtime/wasm_room.ts :: growTo :: if (!Number.isSafeInteger(bytes) || bytes > max) { #0": {
   "class": "none",
   "owner": "pyjs runtime",
   "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
  },
- "src/runtime/wasm_room.ts :: growTo :: throw new RangeError(`WebAssembly kernel workspace: needs ${need}, past its memory's maximum of ${max} bytes; ${ADVICE}`); #0": {
+ "src/runtime/wasm_room.ts :: growTo :: if (route === \"past-max\" && lowMemory()) throw USE_JS; #0": {
   "class": "none",
   "owner": "pyjs runtime",
-  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+  "reason": "the low-memory flag's routing past a WebAssembly memory's own fixed maximum (wasm32's, or engine/nd's declared one), chosen up front from input, fixed limits and SAGEBRUSH_LOW_MEMORY=1; no limit of ours"
+ },
+ "src/runtime/wasm_room.ts :: growTo :: throw new RangeError(`WebAssembly kernel workspace: needs ${need}, past its memory's maximum of ${max} bytes; ${advice(route !== \"none\")}`); #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "the low-memory flag's routing past a WebAssembly memory's own fixed maximum (wasm32's, or engine/nd's declared one), chosen up front from input, fixed limits and SAGEBRUSH_LOW_MEMORY=1; no limit of ours"
  },
  "src/runtime/zlib.ts ::  :: import { ARRAY_LIMITS } from \"./numpy\"; #0": {
   "class": "2",
