@@ -57,6 +57,7 @@ ok(turnMarkdown(thread, turn, { agent: "Claude" }).includes("- file: `/sin x squ
 ok(userMarkdown({ kind: "user", id: "q", text: "later", mode: "queued", time: 3 }) === "**You (queued):**\n\nlater", "a queued message says so");
 ok(threadMarkdown({ id: "e", title: "", entries: [], artifacts: [], applied_seq: 0 }, { agent: "Claude" }) === "# Chat\n", "an empty chat: its title only");
 ok(turnMarkdown(thread, { ...turn, parts: [], error: { code: "x", message: "the agent\nstopped" } }, { agent: "Codex" }) === "**Codex:**\n\nError: the agent stopped", "an error, on one line, under the agent's name");
+ok(turnMarkdown(thread, { ...turn, parts: [], error: { code: "claude_login_expired", message: "Failed to authenticate: … or use `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN" } }, { agent: "Claude" }) === "**Claude:**\n\nYour Claude sign-in expired. On the computer running your agent, run `claude auth login` in a terminal, then send your message again.", "an expired Claude sign-in: the page's words, never Claude Code's (#1804)");
 
 console.log(failures ? `FAIL: ${failures}` : "all passed");
 process.exit(failures ? 1 : 0);

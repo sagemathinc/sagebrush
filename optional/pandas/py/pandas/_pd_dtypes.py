@@ -21,7 +21,13 @@ is in the 0.x subset (NotImplementedError), rather than another dtype.
 
 import numpy as np
 
-__all__ = ["StringDtype", "STR", "is_missing", "infer", "resolve_dtype"]
+__all__ = ["StringDtype", "STR", "SMALL_INTS", "INTS", "FLOATS", "is_missing", "infer", "resolve_dtype"]
+
+# (numpy's smaller integers: a column of one holds a numpy array of that dtype, as int64 does; astype gives them)
+SMALL_INTS = ("int8", "int16", "int32", "uint8", "uint16", "uint32")
+INTS = ("int64",) + SMALL_INTS
+# (float32 as numpy's: a column of it holds a float32 array; it computes and prints as pandas' float32 does)
+FLOATS = ("float64", "float32")
 
 _I64_MIN, _I64_MAX = -(2 ** 63), 2 ** 63 - 1
 
@@ -127,6 +133,9 @@ def infer(values):
         return "bool" if not (has_missing or has_int or has_float) else "object"
     if has_int and not has_float and not has_missing:
         return "int64"
+    if has_float and all(isinstance(v, np.float32) for v in values):
+        # (numpy float32 scalars, and nothing else, make a float32 column, as pandas infers them)
+        return "float32"
     if has_int or has_float:
         return "float64"
     return "object"   # (only None)
@@ -150,12 +159,18 @@ def resolve_dtype(dtype):
     if isinstance(dtype, str):
         if dtype == "str":
             return STR
+        if dtype == "category":
+            raise NotImplementedError("pandas: the category dtype is not in Sagebrush's pandas 0.x subset yet")
+        if dtype in SMALL_INTS:
+            return dtype
         # ('string' is StringDtype(na_value=pd.NA), the nullable variant:
         # out, as pd.NA is)
         if dtype in ("int64", "int", "i8"):
             return "int64"
         if dtype in ("float64", "float", "f8"):
             return "float64"
+        if dtype in ("float32", "f4"):
+            return "float32"
         if dtype in ("bool", "?"):
             return "bool"
         if dtype in ("object", "O"):
@@ -174,6 +189,6 @@ def resolve_dtype(dtype):
         nd = np.dtype(dtype)
     except Exception:
         nd = None
-    if nd is not None and str(nd) in ("int64", "float64", "bool"):
+    if nd is not None and str(nd) in ("int64", "bool") + FLOATS + SMALL_INTS:
         return str(nd)
     raise NotImplementedError("pandas: dtype=%r is not in Sagebrush's pandas 0.x subset" % (dtype,))

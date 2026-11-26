@@ -28,7 +28,8 @@ export { desktopApp };
 export function latexHereFor(host: string, desktop: boolean, hosts: readonly string[] = __SB_LATEX_HOSTS__) {
   return desktop || latexOn(host, hosts);
 }
-/** Why Run doesn't run in the desktop app: its code would run in the app's interpreter, which has no sandbox. */
+/** Why Run doesn't run in the desktop app, where the page gives it no interpreter (the app's engine is its interpreter
+ * since #1540: index.html texSandbox; this is said only if that is missing). */
 export const APP_NO_RUN = "Run isn't available in the desktop app: to run this document's code, upload it, and the files it uses, to sagebrush.space and run it there in Chrome or Edge";
 
 // (the page module, from the site's root, where this page is: a variable, so the bundler leaves it to the browser)
@@ -153,8 +154,8 @@ export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: u
 }
 
 /** The editor for file `fid` mounted in `root`, as /?tex=<fid> has it (latexBoot); the app's self-test mounts it the same
- * way (web/notebook/selftest-latex.js). In the desktop app (`app`): no Agent, as on its notebook page, and Run says why
- * it doesn't run (it has no sandbox: `sandbox` is null there, index.html's RUNNER). */
+ * way (web/notebook/selftest-latex.js). In the desktop app (`desktop`): no Agent, as on its notebook page; Run runs in
+ * the app's engine (`sandbox`, index.html texSandbox), and only without one says why it doesn't (`app`). */
 export async function mountTex(root: HTMLElement, ws: Workspace, fid: string, sandbox: { WorkerKernel: unknown; RunnerWorker: unknown } | null, share: TexShare | null | undefined, embed = false) {
-  await (await import(PAGE)).mount(root, { ws, fid, back: () => leave("/"), sandbox, site: siteHref(""), ...(desktopApp() ? { app: APP_NO_RUN } : {}), ...(embed ? { embed: true } : {}), fileMenu: (menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }) => texFileMenu(ws, menu, { ...o, fid, share }), markdown: commentMarkdown });
+  await (await import(PAGE)).mount(root, { ws, fid, back: () => leave("/"), sandbox, site: siteHref(""), ...(desktopApp() ? { desktop: true, ...(sandbox ? {} : { app: APP_NO_RUN }) } : {}), ...(embed ? { embed: true } : {}), fileMenu: (menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }) => texFileMenu(ws, menu, { ...o, fid, share }), markdown: commentMarkdown });
 }

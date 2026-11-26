@@ -8,7 +8,9 @@
 // interacts'.
 import type { LatexEditor, mountEditor as MountEditor } from "./component";
 
-type Remote = { url: string; sha256: string; size: number };
+// (a share's file is checked by its SHA-256, a GitHub repository's by its git blob id: web/shims/fs.ts checks either
+//  when the file is read)
+type Remote = { url: string; sha256?: string; gitSha1?: string; size: number };
 export type SharedOpts = {
   /** The .tex's path in the share's manifest ("talks/st.tex"). */
   path: string;
@@ -18,8 +20,13 @@ export type SharedOpts = {
   results: unknown | null;
   /** The page's kernel and runner classes, and the runner's URL; null where this browser can't make the runner. */
   sandbox: { WorkerKernel: unknown; RunnerWorker: unknown; runnerUrl: string } | null;
-  /** The share's files ([manifest path, {url, sha256, size}]): only those under the .tex's folder are given to Sage. */
+  /** The share's files ([manifest path, {url, sha256, size}], or a GitHub repository's, ["/<repo>/<path>", {url,
+   *  gitSha1, size}]): only those under the .tex's folder are given to Sage. */
   mount: [string, Remote][];
+  /** A file of the share by manifest path, its bytes checked by the share page against the share's listing (SHA-256,
+   *  or GitHub's blob id at the listed commit), for \input and \include; null if the share has no such file. Asked
+   *  only for a path in the .tex's folder or under it. */
+  read?(path: string): Promise<Uint8Array | null>;
   say(text: string): void;
   onRunning(on: boolean): void;
   /** After each render, what the document has: code to run (Run's own items) and slides to present (as the editor
@@ -50,10 +57,23 @@ export function folderOf(path: string): string | null {
   if (parts.some((p) => p === "" || p === "." || p === "..")) return null;
   return parts.slice(0, -1).join("/");
 }
-/** The entries of `mount` in `dir` (folderOf's) or under it, each a plain relative path; anything else left out. */
+/** A GitHub listing's root, "/<repo>/", when every entry of `mount` is under the same one (the share page mounts a
+ *  repository's files there, as the notebook's interpreter has them); else "": a share's are plain relative paths. */
+const rootOf = (m: any[]) => { const r = /^\/[^/\\]+\//.exec(m[0]?.[0]); return r && m.every((e) => typeof e?.[0] === "string" && e[0].startsWith(r[0])) ? r[0] : ""; };
+/** The entries of `mount` in `dir` (folderOf's) or under it, each a plain relative path (a GitHub listing's with its
+ *  root taken off) and checked by a SHA-256 or a git blob id; anything else left out. */
 export function mountIn(mount: [string, Remote][], dir: string): [string, Remote][] {
-  return (Array.isArray(mount) ? mount : []).filter((e) => Array.isArray(e) && folderOf(e[0]) !== null && (dir === "" || e[0].startsWith(dir + "/")) && !!e[1] && typeof e[1].url === "string" && typeof e[1].sha256 === "string" && Number.isSafeInteger(e[1].size))
-    .map(([p, r]) => [p, { url: r.url, sha256: r.sha256, size: r.size }]);
+  const all: any[] = Array.isArray(mount) ? mount : [], root = rootOf(all);
+  return all.filter((e) => Array.isArray(e) && typeof e[0] === "string" && e[1] && typeof e[1].url === "string" && Number.isSafeInteger(e[1].size) && (typeof e[1].sha256 === "string" || typeof e[1].gitSha1 === "string"))
+    .map(([p, r]) => [p.slice(root.length), r]).filter(([p]) => folderOf(p) !== null && (dir === "" || p.startsWith(dir + "/")))
+    .map(([p, r]) => [p, typeof r.sha256 === "string" ? { url: r.url, sha256: r.sha256, size: r.size } : { url: r.url, gitSha1: r.gitSha1, size: r.size }]);
+}
+/** The manifest path an \input of the .tex in `dir` (folderOf's) may read, for the editor's candidate `p` (a path from
+ *  the share's top, "/a/b.tex"), or null: one outside `dir` ("../", a leading "/"), or not a plain relative path. */
+export function inputIn(p: string, dir: string): string | null {
+  if (typeof p !== "string" || !p.startsWith("/")) return null;
+  const rel = p.slice(1);
+  return folderOf(rel) !== null && (dir === "" || rel.startsWith(dir + "/")) ? rel : null;
 }
 /** The author's results as the renderer reads them, or none: the editor's results file (format, version, wrapper,
  *  items), its items' own checks left to the renderer (savedStates). */
@@ -70,7 +90,15 @@ export async function openShared(root: HTMLElement, o: SharedOpts): Promise<Shar
   const page = (await import(at("sagebrush-latex.js"))) as { mountEditor: typeof MountEditor };
   // (the author's results: what the slides show until a Run, and what an item a Run doesn't reach keeps)
   const results = savedOf(o.results);
-  const E: LatexEditor = page.mountEditor(root, { text: o.text, readOnly: true, layout: "preview", sage: results });
+  // (\input and \include: a file of the .tex's folder or under it, of this share as listed, read and checked by the share
+  //  page; one outside the folder is refused before any read, whatever the share holds)
+  const read = o.read;
+  const inputs = read && { docPath: "/" + o.path, read: async (p: string) => {
+    const rel = inputIn(p, dir);
+    if (rel === null) throw new Error("outside the shared folder");
+    return read(rel);
+  } };
+  const E: LatexEditor = page.mountEditor(root, { text: o.text, readOnly: true, layout: "preview", sage: results, ...(inputs ? { inputs } : {}) });
   const preview = E.previewRoot();
   const mount = mountIn(o.mount, dir);
   let session: ReturnType<RunCore["sessionOf"]> | null = null;
