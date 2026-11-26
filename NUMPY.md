@@ -86,6 +86,12 @@ pass, and CI runs them.
   them.
 - **Broadcasting ufuncs** with `out`, `where`, `reduce`, `accumulate` and
   `outer`.
+  - `out=` takes the loop's result only under `casting=` (default
+    `same_kind`), checked before anything is computed: a float result into an
+    integer `out=` is NumPy's `UFuncTypeError`, and `out` keeps its values.
+    `casting='unsafe'` casts. `clip` refuses the same way (as `maximum` or
+    `minimum` with one bound), and `ptp`'s `out=` is NumPy's: the maximum
+    reduced into `out`, then `subtract` into it.
 - **Reductions** with `axis` (int or tuple) and `keepdims`: `nan*`
   variants, `median`, `percentile`/`quantile` (NumPy's `_lerp`), `average`,
   `cov`, `corrcoef`.
