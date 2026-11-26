@@ -2122,7 +2122,7 @@
   "accc06e8ea606e13": {"decl":"src/runtime/zlib.ts :: step","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8ArrayConstructor.new(source)"},
   "34ee2e1390ea4298": {"decl":"src/sbfs.ts :: checkHeader","class":"allocates","via":"src/limits.ts :: plain"},
   "b04dac078d233c0d": {"decl":"src/sbfs.ts :: readHeader","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8Array.slice"},
-  "f035e24134ff02ab": {"decl":"src/sbfs.ts :: waitPiece","class":"no-new-store"},
+  "1c40d6f64464f234": {"decl":"src/sbfs.ts :: waitPiece","class":"no-new-store"},
   "d5abea982151a27f": {"decl":"src/scope.ts :: Collector.expr","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "1ab7a40ee087f2b3": {"decl":"src/scope.ts :: Collector.stmt","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "dbe4d89b4f7ac8b5": {"decl":"src/scope.ts :: SyntaxErr.class","class":"no-new-store"},
