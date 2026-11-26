@@ -5,8 +5,21 @@
 \begin{document}
 \section*{TikZ and pgfplots}
 
-\emph{In this preview:} TikZ and pgfplots pictures are not drawn yet; each shows as a placeholder with its
-source. A full LaTeX run draws them.
+\emph{In this preview:} TikZ pictures are drawn: their paths (lines, curves, circles and arcs, grids, arrows), styles,
+transforms, \texttt{\textbackslash foreach}, and their nodes, the text in a picture, typeset like the preview's
+mathematics. pgfplots isn't drawn yet: its picture shows as a placeholder naming what it needs. A full LaTeX run draws it.
+
+\begin{center}
+\begin{tikzpicture}
+  \draw[help lines] (-1.5,-1.5) grid (1.5,1.5);
+  \draw[->] (-1.6,0) -- (1.6,0);
+  \draw[->] (0,-1.6) -- (0,1.6);
+  \draw (0,0) circle (1);
+  \draw[red, thick] (0,0) -- (40:1);
+  \draw[red] (0.3,0) arc (0:40:0.3);
+  \draw[dashed] (40:1) -- ({cos(40)},0);
+\end{tikzpicture}
+\end{center}
 
 \begin{center}
 \begin{tikzpicture}

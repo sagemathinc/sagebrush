@@ -78,6 +78,10 @@ export function createPermissions() {
   const listeners = new Set();
   // (the switch choices this page couldn't keep in storage: they hold here, over what storage says, until it closes)
   const unkept = new Map(); // doc -> { files }
+  // (the desktop app's grants set aside while its record on disk, which its other windows write too, can't be read
+  // (web/workspace/grants-file.ts reconcileGrants, #1541): why, or null.  Meanwhile nothing is allowed and nothing
+  // widens; a narrowing still is made.  They come back once it is read again)
+  let suspended = null;
   const tell = (doc) => listeners.forEach((f) => f(doc));
   // ---- the scoped record: stored ({v, seq, docs: {doc: {write, read, net: [scope], denied: [[kind, scope, seq]], t}}})
   // and this page's session (doc -> {write, read, net: Set, denied: Map "kind\0scope" -> seq}, insertion = age)
@@ -179,7 +183,7 @@ export function createPermissions() {
     /** Whether `doc`'s code may do `perm` ("files" | "network") now. */
     may(doc, perm) {
       if (perm === "network") return false;
-      if (perm !== "files" || !doc) return false;
+      if (perm !== "files" || !doc || suspended) return false;
       const held = unkept.get(doc);
       if (held) return held.files;
       // (off unless the person allowed it: every document, their own and the bundled examples included (O1, O6))
@@ -190,6 +194,8 @@ export function createPermissions() {
      * caller says so). */
     set(doc, perm, on) {
       if (perm !== "files" || !doc) return true;
+      // (suspended: an Allow isn't made, nor held in this page for later)
+      if (on && suspended) return false;
       // (the switch is the scoped record's write scope "/": on, a stored grant of it; off, a stored denial of it, which
       // removes the grant, stored and once)
       const kept = on ? api.grant(doc, "write", "/").ok : api.deny(doc, "write", "/", { stored: true });
@@ -206,6 +212,7 @@ export function createPermissions() {
     grant(doc, kind, scope, { once = false } = {}) {
       const s = canonicalScope(kind, scope);
       if (!doc || !GRANT_KINDS.includes(kind) || s === null) return { ok: false, why: "scope" };
+      if (suspended) return { ok: false, why: "suspended" };
       const e = stored().docs[doc] ?? {}, ss = session.get(doc);
       const storedHas = (e[kind] ?? []).includes(s);
       const have = new Set([...(e[kind] ?? []), ...(ss?.[kind] ?? [])]);
@@ -301,7 +308,7 @@ export function createPermissions() {
      * canonical and without repeats; ["/"] for anywhere; [] for nowhere. A choice this page holds because storage
      * couldn't keep it (`unkept`) decides first, as `may` does. */
     writeTrees(doc) {
-      if (!doc) return [];
+      if (!doc || suspended) return [];
       const held = unkept.get(doc);
       if (held) return held.files ? ["/"] : [];
       const e = stored().docs[doc] ?? {}, ss = session.get(doc);
@@ -326,11 +333,20 @@ export function createPermissions() {
     },
     /** (the tests': how many documents have session entries, and how many session denials the page holds) */
     sessionCounts() { return { docs: session.size, denials: sessionDenials }; },
+    /** Every grant set aside (`why`, said to the person) or, with null, back: whether that changed anything.  The page
+     * then tells every interpreter (policyChanged), as for a change made in another tab. */
+    suspend(why) {
+      const next = why ? String(why) : null, flipped = !!next !== !!suspended;
+      suspended = next;
+      return flipped;
+    },
+    /** Why every grant is set aside, or null. */
+    suspended() { return suspended; },
     /** Told when `doc`'s permissions may have changed. */
     onChange(f) { listeners.add(f); return () => listeners.delete(f); },
     /** The record, read-only (the tests', and U11's adapter's): what it decides for `doc` now. */
     record(doc) {
-      return { doc, provenance: read(HOST_MADE, []).includes(doc) ? "host" : made.get(doc) ?? "unknown", held: unkept.get(doc) ?? null, files: api.may(doc, "files"), network: false, grants: api.grants(doc) };
+      return { doc, provenance: read(HOST_MADE, []).includes(doc) ? "host" : made.get(doc) ?? "unknown", held: unkept.get(doc) ?? null, files: api.may(doc, "files"), network: false, grants: api.grants(doc), suspended };
     },
   };
   return api;
