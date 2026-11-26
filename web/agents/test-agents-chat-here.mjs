@@ -226,7 +226,9 @@ try {
   // after Disconnect and a reload: nothing of the runner's pairing kept in any store
   await send("Page.reload", {});
   await sleep(300);
-  await until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb')`, 30000);
+  // (Connect shown: the workspace open and the pairing's Connect wired, as open() waits for; the composer alone comes
+  //  first, and under load a Chat here's click on Connect before that did nothing)
+  await until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb') && !document.querySelector('#connect').hidden`, 30000);
   const stores = await ev(`(async () => {
     const out = { local: JSON.stringify({ ...localStorage }), session: JSON.stringify({ ...sessionStorage }), idb: "" };
     for (const { name } of await indexedDB.databases()) {

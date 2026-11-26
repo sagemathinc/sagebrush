@@ -4,6 +4,7 @@
 // Offsets are JS string indices into getText() (UTF-16 code units, as a textarea's selectionStart).
 // (in the page module, /sagebrush-latex.js, beside mount(): the worker and the core are shared, not bundled twice)
 import { createEditor } from "./editor";
+import { admitInput, engineInputs, type Known } from "./inputs";
 import { PAGE_CSS } from "./style";
 
 export type LatexEditor = {
@@ -47,8 +48,10 @@ body.wsfiles .tex-page.tex-embed { left: auto; }
 let styled = false;
 
 /** The editor in `root` (its children replaced), with `opts.text`. `onChange` is called after the person's edits
- * (debounced, 300 ms; not after the host's own setText); `readOnly` makes the source read only; `layout: "preview"` shows the preview alone (a grader's view). */
-export function mountEditor(root: HTMLElement, opts: { text: string; onChange?(text: string): void; readOnly?: boolean; layout?: "split" | "preview"; sage?: { wrapper: string | null; saved: unknown[] } }): LatexEditor {
+ * (debounced, 300 ms; not after the host's own setText); `readOnly` makes the source read only; `layout: "preview"` shows the preview alone (a grader's view).
+ * `inputs`: the files \input and \include read, for a text at `docPath` whose files never change (the share page's):
+ * `read(path)` gives a path's bytes, null if there is no such file, or throws why it isn't given. */
+export function mountEditor(root: HTMLElement, opts: { text: string; onChange?(text: string): void; readOnly?: boolean; layout?: "split" | "preview"; sage?: { wrapper: string | null; saved: unknown[] }; inputs?: { docPath: string; read(path: string): Promise<Uint8Array | null> } }): LatexEditor {
   if (!styled) {
     styled = true;
     const st = document.createElement("style"); st.textContent = PAGE_CSS + EMBED_CSS; document.head.appendChild(st);
@@ -65,17 +68,46 @@ export function mountEditor(root: HTMLElement, opts: { text: string; onChange?(t
   const right = document.createElement("div"); right.className = "tex-right";
   const preview = document.createElement("div"); preview.className = "page tex-preview";
   right.appendChild(preview); main.append(left, right); box.append(main, status); root.appendChild(box);
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined, gone = false;
+  // (\input and \include: each path TeX would look at asked of the host once, in TeX's order, and bounded as the page
+  //  bounds them (inputs.ts); the host's files never change, so none is read again)
+  const ri = opts.inputs;
+  const inputs = ri ? { docPath: ri.docPath, known: new Map<string, Known>(), version: 0 } : undefined;
+  const wanted = new Set<string>();
+  let kept = 0, reading = false;
+  const readInputs = async (refs: string[]) => {
+    if (!ri || !inputs) return;
+    for (const p of engineInputs(inputs.docPath, inputs.known).wanted(refs)) wanted.add(p);
+    if (reading || !wanted.size) return;
+    reading = true;
+    let changed = false;
+    try {
+      for (const p of wanted) {
+        wanted.delete(p);
+        if (inputs.known.has(p) || inputs.known.size >= 1024) continue;
+        let k: Known;
+        try {
+          const b = await ri.read(p);
+          k = b === null ? { absent: true } : admitInput(b, kept, [...inputs.known.values()].filter((x) => "text" in x).length);
+          if (b && "text" in k) kept += b.length;
+        } catch (e) { k = { why: String((e as Error)?.message ?? e).slice(0, 200) }; }
+        if (gone) return;
+        inputs.known.set(p, k); changed = true;
+      }
+    } finally { reading = false; }
+    if (changed && !gone) { inputs.version++; E.request(); }
+  };
   const E = createEditor({
     left, right, preview, text: opts.text, readOnly: !!opts.readOnly, sage: opts.sage,
     workerUrl: new URL("sagebrush-latex-worker.js", import.meta.url),
     say: (t) => { status.textContent = t; },
     onEdit: () => { if (!opts.onChange) return; clearTimeout(timer); timer = setTimeout(() => opts.onChange!(E.getText()), 300); },
+    ...(inputs ? { inputs, onInputRefs: (refs: string[]) => void readInputs(refs) } : {}),
   });
   return {
     ...viewOf(E),
     setText: (t) => E.setText(t),
-    destroy: () => { clearTimeout(timer); E.destroy(); root.textContent = ""; },
+    destroy: () => { gone = true; clearTimeout(timer); E.destroy(); root.textContent = ""; },
     items: () => E.lastCheck()?.sage ?? null,
     redraw: () => E.request(),
   };
