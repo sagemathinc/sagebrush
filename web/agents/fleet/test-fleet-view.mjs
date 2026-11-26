@@ -45,6 +45,10 @@ for (const [raw, what] of [[null, "no answer"], [undefined, "undefined"], ["ok",
 {
   const r = V.readHostReport(report({ health: "great", health_reasons: ["clone_detected", "<b>x</b>", 7] }, { [A1]: agent({ run: "flying", fences: ["lease", "lease", "nope"], lease: "maybe", restore: "done" }) }), HOST, NOW);
   ok(r.kind === "report" && r.health === "unknown" && JSON.stringify(r.reasons) === '["clone_detected","unknown","unknown"]', "health and reasons outside their lists: unknown", r.kind === "report" && [r.health, r.reasons]);
+  const gate = V.readHostReport(report({ health: "failing", health_reasons: ["suspend_gate_stuck", "suspend_gate_exhausted"] }), HOST, NOW);
+  ok(gate.kind === "report" && JSON.stringify(gate.reasons) === '["suspend_gate_stuck","suspend_gate_exhausted"]' && V.healthShown(gate) === "failing", "the execution lease's suspend-gate reasons (suspend_gate_stuck, suspend_gate_exhausted) are known, with health failing", gate.kind === "report" && gate.reasons);
+  const daemon = V.readHostReport(report({ health: "failing", health_reasons: ["bad_config", "host_ended", "identity_broken", "lease_unqualified", "preflight_missing"] }), HOST, NOW);
+  ok(daemon.kind === "report" && JSON.stringify(daemon.reasons) === '["bad_config","host_ended","identity_broken","lease_unqualified","preflight_missing"]', "the host daemon's reasons (bad_config, host_ended, identity_broken, lease_unqualified, preflight_missing) are known, not unknown", daemon.kind === "report" && daemon.reasons);
   const a = V.agentShown(r, A1);
   ok(a?.run === "unknown" && JSON.stringify(a.fences) === '["lease","unknown"]' && a.lease === "unknown" && a.restore === "unknown", "run, fences (deduplicated), lease and restore outside their lists: unknown", a);
   const bad = V.readHostReport(report({}, { [A1]: agent({ fences: "lease" }), "not-an-id": agent(), [A2]: "running" }), HOST, NOW);

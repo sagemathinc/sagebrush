@@ -119,7 +119,9 @@ try {
   r = check();
   ok(r.status === 1 && r.out.includes(`pkgset/${S}.json: missing from app/dist`), "the set's index left out: refused");
   back();
-  const pkg = readdirSync(join(copy, "pkg"))[0];
+  // (the package the Terminal's set pins: pkg/ holds other sets' packages too, so not merely its first file)
+  const shellSet = JSON.parse(readFileSync(join(copy, "pkgset", `${S}.json`), "utf8"));
+  const pkg = `${Object.values(shellSet.packages)[0].js.sha256}.json`;
   back = moveAway(`pkg/${pkg}`);
   r = check();
   ok(r.status === 1 && r.out.includes(`pkg/${pkg} (`) && r.out.includes("missing from app/dist"), "the set's package left out: refused");

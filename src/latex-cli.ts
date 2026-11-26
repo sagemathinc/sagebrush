@@ -250,7 +250,7 @@ export function renderTex(file: string, text: string): { result: CheckResult; ht
   // (results not used, a helper they imported having changed since: said, the items shown as not run)
   const stale = saved.stale === null ? [] : [{ kind: "stale", name: saved.stale, at: -1 }];
   const result = checkResult(file, text, { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: r.problems.concat(tooLarge, stale), frames: r.frames,
-    sage: (r.sageItems as any[]).map((it, k) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(states[k] ? { s: states[k].s, msg: states[k].msg } : {}) })) }, imgReport);
+    sage: (r.sageItems as any[]).map((it, k) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(states[k] ? { s: states[k].s, msg: states[k].msg } : {}) })) }, imgReport, doc ?? undefined);
   return { result, html: pageHtml(basename(file), pieces.join("\n"), !!r.beamer) };
 }
 
