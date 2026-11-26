@@ -225,6 +225,30 @@ class RealNumber(float):
         Traceback (most recent call last):
         ...
         NotImplementedError: CC arithmetic with 1.35829852904939e331, an element of RR past the double range, is not available in sagebrush yet (CC holds doubles)
+
+    In a symbolic expression an element of RR or CC is a double too: where
+    the doubles' steps leave them, the value is Sage's (done again in the
+    53-bit MP field, Sage's steps) or an error, never an infinity or a lost
+    part::
+
+        sage: SR(RR(2^600)) * SR(RR(2^-600)), SR(RR(1.5)) / SR(CC(1e300, 1e300))
+        (1.00000000000000, 7.50000000000000e-301 - 7.50000000000000e-301*I)
+        sage: SR(RR(2^1000)) * 2^30  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 1.15052360631188e310, an element of RR past the double range, has no symbolic form in sagebrush yet
+        sage: (SR(CC(2^1000, 1)) * 2^30).n()  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 1.15052360631188e310 + 1.07374182400000e9*I, an element of CC past the double range, has no symbolic form in sagebrush yet
+        sage: SR(RR(1000)).exp()  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: exp(1000.00000000000): the value in RR, past the double range, is not available in sagebrush yet
+        sage: SR(CC(1000, 1)).exp()  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: exp(1000.00000000000 + 1.00000000000000*I): the value in CC, past the double range, is not available in sagebrush yet
     """
 
     __slots__ = ()

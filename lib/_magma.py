@@ -1101,10 +1101,25 @@ def _frange(a, b, c):
 _NEST_MAX = 100
 # and a copy that would make more containers than this (a value sharing
 # its parts, x := [x, x], copies to a tree of them) is refused before it
-# starts; with what it copies from, the largest copy admitted fits a 96 MB
-# heap (measured: about 90000 small sequences fit, HARD-756-1)
-_OWN_CONTAINERS_MAX = 5 * 10 ** 4
+# starts, by the collection memory guard: each container the copy makes
+# counts as one collection element (_COLLECT_COST bytes; measured on node
+# 24.21.0 at about 220 bytes live and 500 at the copy's peak, with the
+# count's memo about 40 bytes a part), so the bound is the collection
+# bound, from the heap (set at the end of this module, with _COLLECT_MAX;
+# HARD-756-1)
+_OWN_CONTAINERS_MAX = 0
 _OWN_RECORD_WEIGHT = 8
+
+
+def _own_refusal():
+    """The collection memory guard's refusal of a copy of more than
+    _OWN_CONTAINERS_MAX containers (each one collection element)."""
+    import _capacity
+    e = _memory_error(_memguard.memory_guard(
+        "A copy of a value of more than %d sequences, sets, tuples and records (a record counting as %d)" % (_OWN_CONTAINERS_MAX, _OWN_RECORD_WEIGHT),
+        (_OWN_CONTAINERS_MAX + 1) * _COLLECT_COST, _OWN_CONTAINERS_MAX * _COLLECT_COST, "one collection", fixed=_COLLECT_MAX == 10 ** 6))
+    e.capacity = _capacity.capacity()
+    return e
 
 
 def _is_copied(x):
@@ -1157,7 +1172,7 @@ def _own(v, name=None, depth=0):
     if depth == 0 and _is_copied(v) and any(_is_copied(x) for x in _copied_parts(v)):
         # (a value with containers in it: the size of its copy first)
         if _own_size(v, {}) > _OWN_CONTAINERS_MAX:
-            raise MagmaError("a value of more than %d sequences, sets, tuples and records (a record counting as %d) is not supported yet" % (_OWN_CONTAINERS_MAX, _OWN_RECORD_WEIGHT))
+            raise _own_refusal()
     if isinstance(v, MSeq):
         t = MSeq([_own(x, None, depth + 1) for x in v], v.universe, getattr(v, "sample", None))
         _keep_inf(t, v, v[0] if len(v) else _UNDEF)
@@ -11948,3 +11963,4 @@ __all__ += _CATEGORIES
 # (the comprehension bound, taken once, now that this module and all it
 # imports are loaded: see _collect_max)
 _COLLECT_MAX, _COLLECT_USED = _collect_max()
+_OWN_CONTAINERS_MAX = _COLLECT_MAX

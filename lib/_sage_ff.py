@@ -2079,8 +2079,10 @@ class FiniteField_ext:
             # the shared bounded core does the work)
             return _ff_convert(x, self)
         if isinstance(x, IntegerMod):
-            if x._parent._n == self._p:
-                return self._make([x._v])
+            # (Z/n maps onto the prime field when p divides n, as Sage's
+            # coercion and conversion do: the lift reduced mod p)
+            if x._parent._n % self._p == 0:
+                return self._make([x._v % self._p])
             raise TypeError("unable to coerce %r into %r" % (x, self))
         if isinstance(x, (bool, int)):
             return self._make([int(x)])
