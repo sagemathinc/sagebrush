@@ -7608,7 +7608,7 @@ def Sqrt(x):
 # calls being made, innermost last: an argument's call has returned before
 # its caller's is entered, so a nested or repeated call is told apart.
 _CALL_POS_NAMES = frozenset((
-    "ChangeRing CharacteristicPolynomial DefiningPolynomial Embed Generator Identity Integral IsSubfield "
+    "ChangeRing CharacteristicPolynomial ConjugacyClasses DefiningPolynomial Embed Generator Identity Integral IsSubfield "
     "MinimalPolynomial Norm Normalise Normalize PrimeField Root RootsInSplittingField Solution SquarefreeFactorization "
     "Submatrix Subsets Sym Trace Vector").split())
 _CALLPOS = []
