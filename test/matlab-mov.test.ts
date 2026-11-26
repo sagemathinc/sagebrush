@@ -256,6 +256,53 @@ test("'Endpoints' as MATLAB's movmean and movmedian: padding, the fill values su
   assert.deepEqual(r.stdout.split("\n").map((l: string) => l.trimEnd()).filter((l: string) => l.includes("|")), want);
 });
 
+test("a window of equal values: variance and standard deviation exactly 0, as MATLAB's, at any magnitude", () => {
+  // (MATLAB R2026b's rows, MATLAB Online, 2026-11-26: runs of 0.1, 7 and 1e8 + 0.1, whose window mean need not round back
+  // to the value; inside the data, at its ends, and with a fill value. The other windows agree with MATLAB's to the last
+  // bits, which differ: within 1e-14 here)
+  const dir = mkdtempSync(join(tmpdir(), "sb-movvar0-"));
+  writeFileSync(join(dir, "main.m"), [
+    "x = [0.1 0.1 0.1 0.1 0.1 7 7 7 7 1e8+0.1 1e8+0.1 1e8+0.1];",
+    "fprintf('var|%s\\n', sprintf('%.17g ', movvar(x, 3)));",
+    "fprintf('fill|%s\\n', sprintf('%.17g ', movvar(x, 3, 'Endpoints', 0.1)));",
+    "fprintf('std|%s\\n', sprintf('%.17g ', movstd(x, [0 2])));",
+    "fprintf('one|%s\\n', sprintf('%.17g ', movvar([0.1 0.1 0.1], 3, 'Endpoints', 0.1), movstd([0.1 0.1 0.1], 5, 1)));",
+    "fprintf('neg|%d\\n', any(movvar(1e6 + 1e-3*sin(1:1000), 7) < 0));",
+    // (equal infinities: not equal values, the variance NaN, as MATLAB's)
+    "fprintf('inf|%s\\n', sprintf('%.17g ', movvar([Inf Inf Inf 1], 3), movvar([-Inf -Inf -Inf], 3), movstd([Inf Inf], 2)));",
+    "fprintf('infomit|%s\\n', sprintf('%.17g ', movvar([Inf Inf Inf NaN], 3, 'omitnan')));",
+    "fprintf('infbf|%s\\n', sprintf('%.17g ', movvar([-Inf -Inf 2], [0 1])));",
+    // (a window far past the data, here one element: its fill values past both ends count too, equal to the data's or not)
+    "fprintf('far|%s\\n', sprintf('%.17g ', movvar(0.1, 9, 'Endpoints', 0.1), movvar(0.1, 9, 'Endpoints', 0.2)));",
+  ].join("\n") + "\n");
+  const r = spawnSync(process.execPath, [cli, "--matlab", "main.m"], { cwd: dir, encoding: "utf8", timeout: 120000 });
+  assert.equal(r.status, 0, r.stderr);
+  const got = new Map(r.stdout.split("\n").filter((l) => l.includes("|")).map((l) => [l.split("|")[0], nums(l.split("|")[1])] as [string, number[]]));
+  const want: Record<string, number[]> = {
+    var: [0, 0, 0, 0, 15.869999999999999, 15.870000000000001, 0, 0, 3333332873333348.5, 3333332873333348.5, 0, 0],
+    fill: [0, 0, 0, 0, 15.869999999999999, 15.870000000000001, 0, 0, 3333332873333348.5, 3333332873333348.5, 0, 3333333333333333.5],
+    std: [0, 0, 0, 3.9837168574084179, 3.9837168574084179, 0, 0, 57735022.935245715, 57735022.935245715, 0, 0, 0],
+  };
+  for (const [id, w] of Object.entries(want)) {
+    const g = got.get(id)!;
+    assert.equal(g.length, w.length, id);
+    // (each 0 exactly: a window of equal values; the others to the last bits)
+    w.forEach((v, k) => (v === 0 ? assert.equal(g[k], 0, `${id}[${k}]: ${g[k]}`) : close(`${id}[${k}]`, [g[k]], [v], 1e-14)));
+  }
+  assert.deepEqual(got.get("one"), [0, 0, 0, 0, 0, 0]);
+  assert.deepEqual(got.get("neg"), [0]);
+  // (each window holding two or more infinities: NaN; movstd([Inf Inf], 2) starts with [Inf] alone, one value, 0 as
+  // before; [-Inf -Inf 2] with [0 1] ends on 2 alone, 0)
+  const inf = got.get("inf")!;
+  assert.ok(inf.slice(0, 7).every(Number.isNaN) && inf[7] === 0 && Number.isNaN(inf[8]), `inf: ${inf}`);
+  assert.ok(got.get("infomit")!.slice(0, 3).every(Number.isNaN), `infomit: ${got.get("infomit")}`);
+  const infbf = got.get("infbf")!;
+  assert.ok(Number.isNaN(infbf[0]) && Number.isNaN(infbf[1]) && infbf[2] === 0, `infbf: ${infbf}`);
+  const far = got.get("far")!;
+  assert.equal(far[0], 0);
+  assert.ok(far[1] > 0, `far: ${far}`);
+});
+
 test("the moving statistics admitted before their copies are made (test/matlab_mov_admit_cases.py)", () => {
   const r = spawnSync(process.execPath, [cli, join(__dirname, "..", "..", "test", "matlab_mov_admit_cases.py")], { encoding: "utf8", timeout: 300000 });
   assert.equal(r.status, 0, r.stdout + r.stderr);
