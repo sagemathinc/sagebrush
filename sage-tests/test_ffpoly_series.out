@@ -1,0 +1,27 @@
+(1 + x).inverse_series_trunc(6) -> 100*x^5 + x^4 + 100*x^3 + x^2 + 100*x + 1
+(x^2 + 3).inverse_series_trunc(4) -> 56*x^2 + 34
+f.inverse_series_trunc(1) -> 1
+f.inverse_series_trunc(12) -> 46*x^11 + 9*x^10 + 11*x^9 + 3*x^8 + 8*x^7 + 28*x^6 + 59*x^5 + 81*x^4 + 74*x^3 + 9*x^2 + 98*x + 1
+(f * f.inverse_series_trunc(12)).truncate(12) -> 1
+x.inverse_series_trunc(3) -> ValueError: constant term 0 is not a unit
+(x + 1).inverse_series_trunc(0) -> ValueError: the precision must be positive, got 0
+(1 + z).inverse_series_trunc(8) -> z^7 + z^6 + z^5 + z^4 + z^3 + z^2 + z + 1
+(a + y).inverse_series_trunc(4) -> y^3 + 2*a*y^2 + (a + 1)*y + a + 2
+f.power_trunc(3, 4) -> 27*x^3 + 27*x^2 + 9*x + 1
+f.power_trunc(0, 3) -> 1
+f.power_trunc(0, 0) -> 0
+f.power_trunc(2, 0) -> 0
+f.multiplication_trunc(f, 0) -> ValueError: length must be > 0
+f.power_trunc(1, 2) -> 3*x + 1
+f.power_trunc(20, 6) -> 91*x^5 + 60*x^4 + 76*x^3 + 94*x^2 + 60*x + 1
+(x + 1).power_trunc(101, 102) -> x^101 + 1
+x.power_trunc(5, 5) -> 0
+x.power_trunc(5, 6) -> x^5
+(1 + z).power_trunc(7, 5) -> z^4 + z^3 + z^2 + z + 1
+f.multiplication_trunc(x^2 + 1, 4) -> 3*x^3 + x^2 + 3*x + 1
+f.multiplication_trunc(f, 7) -> 6*x^6 + 2*x^5 + 9*x^2 + 6*x + 1
+f.multiplication_trunc(x^5, 5) -> 0
+f.multiplication_trunc(x^5, 6) -> x^5
+f.multiplication_trunc(R(0), 3) -> 0
+(a*y + 1).multiplication_trunc(y + a, 2) -> (a + 2)*y + a
+(x + 1).inverse_mod(x^2 + 1) -> 50*x + 51

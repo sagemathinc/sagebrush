@@ -13115,10 +13115,50 @@
   "owner": "finite fields + configuration",
   "row": "inv-1"
  },
+ "lib/_sage_ff.py :: PolynomialRing_ff_.irreducible_element :: raise NotImplementedError(\"irreducible_element with algorithm=%r is not supported yet (only 'first_lexicographic')\" % algorithm) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusal: irreducible_element algorithms other than first_lexicographic/the default, and polynomial nth_root where several roots exist (Sage's choice not modelled); not a size or work limit"
+ },
+ "lib/_sage_ff.py :: PolynomialRing_ff_.monics :: def monics(self, of_degree=None, max_degree=None): #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "monics(max_degree=...) is Sage's argument: the caller's degree bound for the enumeration, not a size or work limit"
+ },
+ "lib/_sage_ff.py :: PolynomialRing_ff_.monics :: if (of_degree is None) == (max_degree is None): #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "monics(max_degree=...) is Sage's argument: the caller's degree bound for the enumeration, not a size or work limit"
+ },
+ "lib/_sage_ff.py :: PolynomialRing_ff_.monics :: lo, hi = (int(of_degree), int(of_degree)) if of_degree is not None else (0, int(max_degree)) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "monics(max_degree=...) is Sage's argument: the caller's degree bound for the enumeration, not a size or work limit"
+ },
+ "lib/_sage_ff.py :: PolynomialRing_ff_.monics :: raise ValueError(\"you should pass exactly one of of_degree and max_degree\") #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "monics(max_degree=...) is Sage's argument: the caller's degree bound for the enumeration, not a size or work limit"
+ },
+ "lib/_sage_ff.py :: PolynomialRing_ff_.monics :: sage: list(GF(3)['u'].monics(max_degree=1)) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "monics(max_degree=...) is Sage's argument: the caller's degree bound for the enumeration, not a size or work limit"
+ },
  "lib/_sage_ff.py :: Polynomial_ff._need_field :: raise NotImplementedError(\"%s over %r, which is not a field\" % (what, B)) #0": {
   "class": "none",
   "owner": "finite fields + configuration",
   "reason": "domain refusal: resultant, discriminant and is_square over Z/n with n composite (not a field) are not implemented; not a size or work limit"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.nth_root :: modelled: NotImplementedError. #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusal: irreducible_element algorithms other than first_lexicographic/the default, and polynomial nth_root where several roots exist (Sage's choice not modelled); not a size or work limit"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.nth_root :: raise NotImplementedError(\"nth_root of degree %d of a polynomial over a field with several such roots is not supported yet\" % n) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusal: irreducible_element algorithms other than first_lexicographic/the default, and polynomial nth_root where several roots exist (Sage's choice not modelled); not a size or work limit"
  },
  "lib/_sage_ff.py :: Polynomial_ff.splitting_field :: most EMBED_MAX elements (ff.embed_max, unlimited by default) checked on #0": {
   "class": "none",
