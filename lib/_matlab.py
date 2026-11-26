@@ -206,24 +206,23 @@ def mfilename_in(path):
     makes, one per file"""
     f = _mfilename_fns.get(path)
     if f is None:
-        f = _mfilename_fns[path] = Builtin(lambda nargout, *args: _mfilename(path, args), "mfilename", (0, 1))
+        f = _mfilename_fns[path] = Builtin(lambda nargout, *args: _mfilename(path, args), "mfilename", (0, None))
     return f
 
 
 def _mfilename(path, args):
     """the file's name without its folder and .m; 'fullpath': its absolute path without .m; 'class': the class of
-    a method's file, '' (Sagebrush has no classdef)"""
+    a method's file, '' (Sagebrush has no classdef); any other one argument, the name, as MATLAB gives (the options
+    match exactly: 'FULLPATH' is the name too)"""
     if len(args) > 1:
-        raise _err("Too many input arguments.", "MATLAB:TooManyInputs")
+        raise _err("Too many input arguments.", "MATLAB:maxrhs")
     stem = path[:-2] if path.endswith(".m") else path
-    if not args:
-        return Char(stem.replace("\\", "/").split("/")[-1])
-    opt = _text(args[0]) if _istext(args[0]) else None
+    opt = _text(args[0]) if args and _istext(args[0]) else None
     if opt == "fullpath":
         return Char(stem)
     if opt == "class":
         return Char("")
-    raise _err("The input must be 'fullpath' or 'class'.")
+    return Char(stem.replace("\\", "/").split("/")[-1])
 
 
 def _scriptname():

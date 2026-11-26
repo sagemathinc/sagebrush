@@ -160,7 +160,9 @@ test("mfilename is the file the call is in: the program, a function file (where 
     "loc()",
     "disp(size(mfilename('class')))",
     "f = @mfilename; disp(['[' f() ']'])",
-    "try, mfilename('bogus'), catch e, disp(e.message), end",
+    // (any other single argument gives the name, as MATLAB's does: the options match exactly; two are too many)
+    "disp(mfilename('nope')), disp(mfilename('FULLPATH')), disp(mfilename(3))",
+    "try, mfilename('fullpath', 1), catch e, disp(e.identifier), end",
     "[d, n] = fileparts(mfilename('fullpath')); disp(strcmp(d, pwd)), disp(n)",
     "function loc()",
     "  disp(['local: ' mfilename])",
@@ -176,7 +178,8 @@ test("mfilename is the file the call is in: the program, a function file (where 
     "     0     0",
     // (@mfilename names no file: empty)
     "[]",
-    "The input must be 'fullpath' or 'class'.",
+    "main", "main", "main",
+    "MATLAB:maxrhs",
     "   1", "main", "",
   ].join("\n"));
   // (a variable named mfilename is the variable; code in no file gives an empty char)
