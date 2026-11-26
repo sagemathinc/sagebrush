@@ -7,7 +7,8 @@
 //     JSON and text; after an edit, the report of the edited source (it waits for the preview to catch up);
 //   - latex_render: one PNG per frame at 1024 px and the slide's aspect ratio, the overflowing frame named, chosen
 //     frames only; an image of the folder drawn (its blob: URL inlined), KaTeX's fonts loaded;
-//   - an article: pages, 816 px wide.
+//   - an article: pages, 816 px wide;
+//   - a problem in an \input file: latex_check names that file and its line.
 //   SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=google-chrome node web/latex/test-latex-tools.mjs
 //   (LATEX_SHOTS=dir: the PNGs the tool returned, written there for a look)
 import { spawn } from "node:child_process";
@@ -205,6 +206,17 @@ $f'(x) = \sage{diff(f(x), x)}$
   await typeInto(SAGE.replace("x^3 - 2*x", "x^3 - 3*x"));
   const se = JSON.parse((await call("latex_check"))[0].text);
   check(se.code.every((x) => x.state === "not run") && se.problems.some((x) => /sagebrush latex run/.test(x.message)), "an edit of the code: its results no longer shown, run asked for", se.code);
+
+  // ---- a problem in an \input file: latex_check names that file (its workspace path) and its line, and the main
+  //      file's line it was read from
+  await send("Page.navigate", { url: base });
+  await until(`!!${W}`, 60000);
+  const ifid = await mk("/doc/art.tex", "\\documentclass{article}\n\\begin{document}\nA.\n\\input{part}\n\\end{document}\n");
+  await mk("/doc/part.tex", "One from part.\n\\zzq here.\n");
+  await send("Page.navigate", { url: base + "?tex=" + ifid + "&latex=1" });
+  check(await until(`(document.querySelector(".tex-preview")?.textContent ?? "").includes("One from part")`, 30000), "an \\input file read in the editor");
+  const icj = JSON.parse((await call("latex_check"))[0].text), zq = icj.problems.find((x) => x.name === "zzq");
+  check(zq?.file === "/doc/part.tex" && zq?.line === 2 && zq?.input_line === 4 && (await call("latex_check", { format: "text" }))[0].text.includes("/doc/part.tex:2: warning: \\zzq"), "latex_check: a problem in an \\input file at that file and its line", icj.problems);
 
   // ---- a frame whose \sageplot is over PIECE_MAX (128 KiB, sim run 8): drawn, in the preview and in Present; a frame
   //      whose markup alone is over it: a placeholder that is still a slide (the deck keeps its frames), and
