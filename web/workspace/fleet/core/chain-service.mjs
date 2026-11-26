@@ -162,15 +162,20 @@ export async function handleChainRead({ method, target, scheme, source, header, 
     page = await ctx.chain.page(h.fleet, after, CHAIN_PAGE_ENTRIES);
   } catch { return bare(503); }
   try {
-    return { status: 200, headers: { ...HEADERS }, body: pageBody(page, after) };
+    return { status: 200, headers: { ...HEADERS }, body: chainPageBody(page, after) };
   } catch {
     // (a gap, a page past its head or over its bytes: a store fault, and nothing is served)
     return bare(500);
   }
 }
 
-/** The response's bytes: the page's contiguous entries after `after`, stopped before CHAIN_PAGE_BYTES. */
-function pageBody(page, after) {
+/**
+ * The response's bytes for one page: the page's contiguous entries after `after`, stopped before CHAIN_PAGE_BYTES. The
+ * ONE encoder of a chain page: this route and the person's own chain read (the page's) both use it, so the two answers
+ * are byte-identical for the same fleet and `after`. `page` is chain.page()'s { head, entries: [{ seq, bytes }] }.
+ * Throws (a store fault) on a gap, a page past its head, an entry over SIGNED_MAX or one too big for any page.
+ */
+export function chainPageBody(page, after) {
   const head = page?.head;
   const rows = page?.entries;
   if (!Number.isSafeInteger(head) || head < -1 || !Array.isArray(rows) || rows.length > CHAIN_PAGE_ENTRIES) throw new Error("the page's form");

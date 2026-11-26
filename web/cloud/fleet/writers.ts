@@ -59,21 +59,49 @@ export async function loadChain(db: D1, core: WriterCore, fleet: string, aud: st
 }
 
 const text = (b: Uint8Array) => new TextDecoder("utf-8", { fatal: true }).decode(b);
+/** The reads scope r4 §3.1: at most this many hosts in a fleet, enforced inside the pairing batch. */
+export const HOSTS_MAX = 64;
 
-/** Append one chain entry: the core checks it against the stored chain (auth_time included); one conditional insert. */
-export async function appendChainEntry(db: D1, core: WriterCore, input: { fleet: string; aud: string; bytes: Uint8Array; now: number }, hooks: WriterHooks = {}): Promise<{ ok: true; seq: number } | { refused: string }> {
-  const chain = await loadChain(db, core, input.fleet, input.aud);
+/**
+ * Append one chain entry under the person's `account` (the reads scope r4 §1): the core checks it against the stored
+ * chain (auth_time included), then ONE batch. A genesis binds the fleet to the account in that batch, only if neither
+ * is bound yet; every entry (genesis or later) is inserted only while the fleet is bound to exactly this account. The
+ * read-back decides: ok, or not_found (another account's fleet: the same answer as for any fleet that isn't yours),
+ * not_granted (this account already has another fleet), or chain_fork (this account's own conflicting entry).
+ */
+export async function appendChainEntry(db: D1, core: WriterCore, input: { fleet: string; aud: string; bytes: Uint8Array; now: number; account: string }, hooks: WriterHooks = {}): Promise<{ ok: true; seq: number } | { refused: string }> {
+  // (a later entry is judged only for the fleet's own account, before its chain is read)
+  const owner = await db.prepare("SELECT account FROM fleet_accounts WHERE fleet = ?1").bind(input.fleet).first<{ account: string }>();
+  if (owner && owner.account !== input.account) return { refused: "not_found" };
+  // (the entry's own seq, before the core reads anything: a later entry for a fleet nobody owns is no fleet of yours,
+  // and this account's own second genesis is a fork of its chain)
+  let seq: unknown = null;
+  try { seq = core.parseCanonical(input.bytes)?.body?.seq; } catch { /* (the core refuses the form below) */ }
+  if (!owner && typeof seq === "number" && seq !== 0) return { refused: "not_found" };
+  if (owner && seq === 0) return { refused: "chain_fork" };
+  const chain = owner ? await loadChain(db, core, input.fleet, input.aud) : null;
   const next = (await core.applyChainEntry(chain ? chain.state : null, input.bytes, { aud: input.aud, fleet: input.fleet, now: input.now, checkAuthTime: true })).state;
   const prev = chain ? chain.head : { seq: -1, hash: "" };
   if (hooks.beforeBatch) await hooks.beforeBatch(0);
+  // ?1 fleet  ?2 seq  ?3 text  ?4 prev seq  ?5 prev hash  ?6 account
+  const bound = "EXISTS (SELECT 1 FROM fleet_accounts WHERE fleet = ?1 AND account = ?6)";
   const res = await db.batch([
+    db.prepare("INSERT INTO fleet_accounts (fleet, account) SELECT ?1, ?6 WHERE ?2 = 0 AND NOT EXISTS (SELECT 1 FROM fleet_accounts WHERE fleet = ?1 OR account = ?6)")
+      .bind(input.fleet, next.seq, null, null, null, input.account),
     // (the next seq exactly, on the head it was checked against: a concurrent append at that seq wins or loses whole)
     db.prepare("INSERT INTO fleet_chain_entries (fleet, seq, bytes) SELECT ?1, ?2, ?3 WHERE NOT EXISTS (SELECT 1 FROM fleet_chain_entries WHERE fleet = ?1 AND seq >= ?2)" +
-      ` AND (?2 = 0 OR (${headCas(1, 4, 5)}))`).bind(input.fleet, next.seq, text(input.bytes), prev.seq, prev.hash),
+      ` AND (?2 = 0 OR (${headCas(1, 4, 5)})) AND ${bound}`).bind(input.fleet, next.seq, text(input.bytes), prev.seq, prev.hash, input.account),
     db.prepare("INSERT INTO fleet_chain_hashes (fleet, seq, hash) SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM fleet_chain_entries WHERE fleet = ?1 AND seq = ?2 AND bytes = ?4)" +
       " AND NOT EXISTS (SELECT 1 FROM fleet_chain_hashes WHERE fleet = ?1 AND seq = ?2)").bind(input.fleet, next.seq, next.head, text(input.bytes)),
+    db.prepare("SELECT (SELECT account FROM fleet_accounts WHERE fleet = ?1) AS owner, (SELECT fleet FROM fleet_accounts WHERE account = ?2) AS mine")
+      .bind(input.fleet, input.account),
   ]);
-  return (res[0]?.meta?.changes ?? 0) === 1 ? { ok: true, seq: next.seq } : { refused: "chain_fork" };
+  if ((res[1]?.meta?.changes ?? 0) === 1) return { ok: true, seq: next.seq };
+  const row = (res[3]?.results?.[0] ?? null) as { owner: string | null; mine: string | null } | null;
+  if (!row) throw new Error("the append's read-back returned no row");
+  if (row.owner !== null && row.owner !== input.account) return { refused: "not_found" };
+  if (row.mine !== null && row.mine !== input.fleet) return { refused: "not_granted" };
+  return { refused: "chain_fork" };
 }
 
 /**
@@ -82,30 +110,34 @@ export async function appendChainEntry(db: D1, core: WriterCore, input: { fleet:
  * is re-read and verified once more, then a 503 (thrown).
  */
 export async function pairHost(db: D1, core: WriterCore, input: { fleet: string; aud: string; bytes: Uint8Array }, hooks: WriterHooks = {}): Promise<{ ok: true; host: string; created: boolean } | { refused: string }> {
+  // (at most HOSTS_MAX hosts in a fleet, counted inside the batch: two pairings racing for the last slot get one)
   for (let attempt = 0; attempt < 2; attempt++) {
     const chain = await loadChain(db, core, input.fleet, input.aud);
     if (!chain) return { refused: "not_granted" };
     const cert = await core.verifyHostCert(input.bytes, { aud: input.aud, fleet: input.fleet, chain: chain.state });
     const b = cert.body, h = chain.head;
     if (hooks.beforeBatch) await hooks.beforeBatch(attempt);
-    // ?1 host  ?2 fleet  ?3 sign_key  ?4 fingerprint  ?5 cert hash  ?6 head seq  ?7 head hash
+    // ?1 host  ?2 fleet  ?3 sign_key  ?4 fingerprint  ?5 cert hash  ?6 head seq  ?7 head hash  ?8 the certificate's text  ?9 HOSTS_MAX
     const res = await db.batch([
       db.prepare("INSERT INTO fleet_hosts (host, fleet, sign_key, fingerprint, revoked)" +
         " SELECT ?1, ?2, ?3, ?4, EXISTS (SELECT 1 FROM fleet_revocations WHERE fleet = ?2 AND kind = 'host' AND id = ?1)" +
-        ` WHERE NOT EXISTS (SELECT 1 FROM fleet_hosts WHERE host = ?1) AND ${headCas(2, 6, 7)}`).bind(b.host, input.fleet, b.sign_key, b.fingerprint, cert.hash, h.seq, h.hash),
-      db.prepare("INSERT INTO fleet_host_certs (fleet, host, cert) SELECT ?2, ?1, ?5" +
+        ` WHERE NOT EXISTS (SELECT 1 FROM fleet_hosts WHERE host = ?1) AND (SELECT COUNT(*) FROM fleet_hosts WHERE fleet = ?2) < ?9 AND ${headCas(2, 6, 7)}`)
+        .bind(b.host, input.fleet, b.sign_key, b.fingerprint, cert.hash, h.seq, h.hash, null, HOSTS_MAX),
+      db.prepare("INSERT INTO fleet_host_certs (fleet, host, cert, bytes) SELECT ?2, ?1, ?5, ?8" +
         " WHERE EXISTS (SELECT 1 FROM fleet_hosts WHERE host = ?1 AND fleet = ?2 AND sign_key = ?3 AND fingerprint = ?4)" +
-        ` AND NOT EXISTS (SELECT 1 FROM fleet_host_certs WHERE fleet = ?2 AND host = ?1) AND ${headCas(2, 6, 7)}`).bind(b.host, input.fleet, b.sign_key, b.fingerprint, cert.hash, h.seq, h.hash),
+        ` AND NOT EXISTS (SELECT 1 FROM fleet_host_certs WHERE fleet = ?2 AND host = ?1) AND ${headCas(2, 6, 7)}`)
+        .bind(b.host, input.fleet, b.sign_key, b.fingerprint, cert.hash, h.seq, h.hash, text(input.bytes)),
       db.prepare("SELECT (SELECT fleet FROM fleet_hosts WHERE host = ?1) AS fleet, (SELECT cert FROM fleet_host_certs WHERE fleet = ?2 AND host = ?1) AS cert," +
-        ` (${headCas(2, 3, 4)}) AS head_ok`).bind(b.host, input.fleet, h.seq, h.hash),
+        ` (${headCas(2, 3, 4)}) AS head_ok, (SELECT COUNT(*) FROM fleet_hosts WHERE fleet = ?2) AS hosts`).bind(b.host, input.fleet, h.seq, h.hash),
     ]);
     const created = (res[0]?.meta?.changes ?? 0) === 1;
-    const row = (res[2]?.results?.[0] ?? null) as { fleet: string | null; cert: string | null; head_ok: number } | null;
+    const row = (res[2]?.results?.[0] ?? null) as { fleet: string | null; cert: string | null; head_ok: number; hosts: number } | null;
     if (!row) throw new Error("the pairing's read-back returned no row");
     if (row.fleet !== null && row.fleet === input.fleet && row.cert === cert.hash) return { ok: true, host: b.host, created };
     // (an id already paired with other keys, another certificate or another fleet: never rebound)
     if (row.fleet !== null) return { refused: "bad_form" };
     if (row.head_ok !== 1) continue; // (the head moved between the verification and the batch: verify again)
+    if (row.hosts >= HOSTS_MAX) return { refused: "limit" };
     throw new Error("the pairing wrote nothing on an unchanged head");
   }
   throw new Error("the chain head moved twice during one pairing");
@@ -118,7 +150,8 @@ export async function revoke(db: D1, core: WriterCore, input: { fleet: string; a
   const r = await core.verifyRevocation(input.bytes, { aud: input.aud, fleet: input.fleet, chain: chain.state });
   if (r.what !== "host" && r.what !== "agent") return { refused: "bad_form" }; // (a package's revocation is the sealed-package store's)
   await db.batch([
-    db.prepare("INSERT OR IGNORE INTO fleet_revocations (fleet, kind, id) VALUES (?1, ?2, ?3)").bind(input.fleet, r.what, r.id),
+    // (the first revocation's exact text is kept, for the person's page to verify; a later one changes nothing)
+    db.prepare("INSERT OR IGNORE INTO fleet_revocations (fleet, kind, id, bytes) VALUES (?1, ?2, ?3, ?4)").bind(input.fleet, r.what, r.id, text(input.bytes)),
     r.what === "host"
       ? db.prepare("UPDATE fleet_hosts SET revoked = 1 WHERE host = ?1 AND fleet = ?2").bind(r.id, input.fleet)
       : db.prepare("UPDATE fleet_agents SET revoked = 1 WHERE agent = ?1 AND fleet = ?2").bind(r.id, input.fleet),
