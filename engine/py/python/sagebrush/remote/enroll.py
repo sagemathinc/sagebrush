@@ -125,8 +125,9 @@ def _unchanged(before):
     return False
 
 
-def main(argv):
-    """`sagebrush remote login [--origin URL] [--name NAME] [--force]`."""
+def main(argv, continuing=False):
+    """`sagebrush remote login [--origin URL] [--name NAME] [--force]`.  continuing: called by `sagebrush remote`, which
+    goes on to connect; otherwise the last line says what to run next."""
     import os
     import platform
     origin = os.environ.get("SAGEBRUSH_REMOTE_ORIGIN") or DEFAULT_ORIGIN
@@ -198,4 +199,6 @@ def main(argv):
         sys.stderr.write("\nNot enrolled.\n")
         return 130
     sys.stderr.write("Enrolled as %s (%s); the key is in %s.\n" % (key.name, key.remote_id, path))
+    if not continuing:
+        sys.stderr.write("Now run `sagebrush remote` and leave it running: this computer is connected while it runs.\n")
     return 0

@@ -518,6 +518,9 @@ def test_cli_against_http():
             sys.stderr = io.StringIO()
             from sagebrush.remote.pair import main
             assert main(["login", "--name", "box"]) == 0, sys.stderr.getvalue()
+            # (login on its own ends by saying what to run next; called by `sagebrush remote`, which goes on to
+            #  connect, it doesn't)
+            assert sys.stderr.getvalue().rstrip().endswith("Now run `sagebrush remote` and leave it running: this computer is connected while it runs."), sys.stderr.getvalue()
             k = keys.load()
             assert k.remote_id == "r" + "B" * 20 and k.origin == origin and Handler.polls == 2
             assert keys.b64url(k._d) not in sys.stderr.getvalue()
@@ -573,10 +576,10 @@ def test_cli_against_http():
             # `sagebrush remote` with an older file: straight to login (never advice to run the command that refuses)
             from sagebrush.remote import enroll as E, relay as R
             calls, real_main = [], E.main
-            E.main = lambda argv: calls.append(argv) or 7
+            E.main = lambda argv, **kw: calls.append((argv, kw)) or 7
             try:
                 sys.stderr = io.StringIO()
-                assert R.main([]) == 7 and calls == [[]], (calls, sys.stderr.getvalue())
+                assert R.main([]) == 7 and calls == [([], {"continuing": True})], (calls, sys.stderr.getvalue())
             finally:
                 E.main = real_main
     finally:
