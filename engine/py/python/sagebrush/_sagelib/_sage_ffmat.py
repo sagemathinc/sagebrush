@@ -150,6 +150,26 @@ def _common_field(a, b):
     return None
 
 
+def _never_meets(P, B):
+    """Whether Sage's coercion finds no common parent for a scalar over P
+    and a matrix over the finite ring B (GF(q) or Z/n), as observed in Sage
+    10.10: a Z/m coprime to B's order (Z/1 too), a real or complex
+    numerical field, the symbolic ring, and polynomials over QQ or over a
+    finite ring of order coprime to B's.  Integers, ZZ[x], and the rings
+    that do meet B are not among them."""
+    import _sage_poly
+    n = int(B.order())
+    if isinstance(P, _ff.IntegerModRing_):
+        return _gcd(P._n, n) == 1
+    if _ring_class(P) == "num" or P is _sa().SR:
+        return True
+    if type(P) is _sage_poly.PolynomialRing_:
+        return P.base_ring() is _sa().QQ
+    if isinstance(P, _ff.PolynomialRing_ff_):
+        return _gcd(int(P.base_ring().order()), n) == 1
+    return False
+
+
 def _mod_ring(R):
     """Whether R is GF(p) or Z/nZ: the rings whose meeting matrix and
     scalar arithmetic models (_meet, _pushout).  Extension fields GF(p^k),
@@ -1540,6 +1560,14 @@ class FFMatrix:
         Traceback (most recent call last):
         ...
         TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 1 by 1 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 6'
+
+    A Python complex (or float) keeps Python's refusal, as Sage's names
+    types too, though Sage's names its own matrix class::
+
+        sage: complex(1, 2) * matrix(GF(5), [[1]])  # sagebrush only (Sage: ... 'complex' and 'sage.matrix.matrix_modn_dense_flint.Matrix_modn_dense_flint')
+        Traceback (most recent call last):
+        ...
+        TypeError: unsupported operand type(s) for *: 'complex' and 'FFMatrix'
     """
 
     __slots__ = ("_base", "_rows", "_ncols")
@@ -1911,19 +1939,24 @@ class FFMatrix:
 
     def _uncoerced(self, o, op, left):
         """For self op o (o op self when left) that nothing above took:
-        Sage's TypeError naming the two parents when o is a scalar of QQ or
-        of a Z/m coprime to this ring's order n, or of Z/1 (Z/m with a
-        common factor met this ring in _pushout, as Sage's coercion meets
-        them); NotImplemented for anything else (Python's own refusal, or
-        o's own operator)."""
+        Sage's TypeError when o is a scalar of QQ, or this ring is finite
+        (GF(q) or Z/n) and o's parent never meets it (_never_meets): the
+        two parents named, or, for a symbolic o times the matrix, Sage's
+        symbolic ring's own refusal.  NotImplemented for anything else
+        (Python's own refusal, or o's own operator): Z/m with a common
+        factor met this ring in _pushout over GF(p) and Z/n."""
         P = _scalar_parent(o)
         if P is None:
             return NotImplemented
         if P is not _sa().QQ:
-            if not isinstance(P, _ff.IntegerModRing_) or not isinstance(self._base, _ff.IntegerModRing_):
+            # (a Python float or complex keeps Python's refusal: Sage's names
+            # their types, and its own matrix class, not parents)
+            if not callable(getattr(o, "parent", None)):
                 return NotImplemented
-            if _gcd(P._n, self._base._n) > 1:
+            if not isinstance(self._base, (_ff.IntegerModRing_, _ff.FiniteField_ext)) or not _never_meets(P, self._base):
                 return NotImplemented
+            if P is _sa().SR and op == "*":
+                raise TypeError("positive characteristic not allowed in symbolic computations")
         pair = (P, self.parent()) if left else (self.parent(), P)
         raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % ((op,) + pair))
 
