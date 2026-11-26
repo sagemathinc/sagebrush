@@ -12,7 +12,7 @@ import { handleShare, bindPurge, scheduled, authTier, type ShareEnv } from "../s
 import { handleRemote, verifyChallenge, purgeRemotes, remoteDeletes, body, type RemoteEnv } from "./server.ts";
 // (the relay's Durable Object, bound in test-relay.mjs's Miniflare only (test-remote.mjs runs without it: inert))
 import { RemoteRelay, RELAY_SYNC, type RelayEnv } from "./relay.ts";
-import { ENGINE_PAGES, ENGINE_ENTRIES } from "./relay-caps.ts";
+import { ENGINE_BUDGET_DEFAULTS, ENGINE_ENTRIES } from "./relay-caps.ts";
 import { RemoteAccount, leaseBytes } from "./account.ts";
 import type { Kind } from "./relay-caps.ts";
 export { RemoteRelay, RemoteAccount };
@@ -213,6 +213,13 @@ export class TestRemoteRelay extends RemoteRelay {
       if (u.searchParams.get("on") === "1") { env.__savedSync ??= env.SYNC_ACCOUNT; env.SYNC_ACCOUNT = undefined; }
       else if (env.__savedSync) env.SYNC_ACCOUNT = env.__savedSync;
       return Response.json({ bound: !!env.SYNC_ACCOUNT });
+    }
+    if (u.pathname === "/__enginebudget") {
+      // (this relay's engine budget variables, as a deployment would set them: ?pages=&queue=&attempts= (each "" unsets it))
+      const env = this.env as Record<string, string | undefined>;
+      for (const [q, k] of [["pages", "REMOTE_ENGINE_PAGES"], ["queue", "REMOTE_ENGINE_QUEUE_BYTES"], ["attempts", "REMOTE_ENGINE_ATTEMPTS"]])
+        if (u.searchParams.has(q)) env[k] = u.searchParams.get(q) || undefined;
+      return Response.json({ ok: true });
     }
     if (u.pathname === "/__alarm") {
       await this.alarm();
@@ -432,7 +439,7 @@ export default {
         : { available: true, state: q.get("state") ?? "active", generation: Number(q.get("gen") ?? "1") };
       return Response.json({ ok: true });
     }
-    if (url.pathname === "/__engine") return Response.json({ syncEvery: RELAY_SYNC.everyMs, pages: ENGINE_PAGES, entries: ENGINE_ENTRIES });
+    if (url.pathname === "/__engine") return Response.json({ syncEvery: RELAY_SYNC.everyMs, budget: ENGINE_BUDGET_DEFAULTS, entries: ENGINE_ENTRIES });
     if (url.pathname === "/__synccalls") return Response.json({ calls: syncCalls.splice(0) });
     if (url.pathname === "/__syncname" && (env as { SYNC_ACCOUNT?: DurableObjectNamespace }).SYNC_ACCOUNT) {
       // (names an account object, so /__synccalls shows which one the relay asked)

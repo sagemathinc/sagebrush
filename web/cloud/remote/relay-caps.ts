@@ -30,16 +30,41 @@ export const RELAY_CAPS: Record<Kind, Partial<Record<Chan, { legs: number; pageT
     // unchanged 8 MiB window)
     agent: { legs: 1, pageToPeer: RUNNER_AGENT_FRAME, peerToPage: RUNNER_AGENT_FRAME, window: 8 * 1024 * 1024 },
     // (the engine channel: `legs` is per notebook here (the newer page for a notebook replaces the older, whatever its
-    // entry); the remote's open notebooks together are bounded by ENGINE_PAGES)
+    // entry); the remote's open notebooks together are bounded by its service budget, engineBudget())
     engine: { legs: 1, pageToPeer: RUNNER_ENGINE_FRAME, peerToPage: RUNNER_ENGINE_FRAME, window: 8 * 1024 * 1024 },
   },
   agent: {
     agent: { legs: 1, pageToPeer: 12 * 1024 * 1024, peerToPage: 12 * 1024 * 1024 + 2048, window: 16 * 1024 * 1024 },
   },
 };
-/** A remote's engine pages at once, across its notebooks: the relay's own resource bound (each is a hibernatable
- * socket and its accounting), not a kernel count; the host's memory decides how many kernels run (r3.3 Limits). */
-export const ENGINE_PAGES = 64;
+/**
+ * The relay's service budget for engine pages (remote r3.3 P1), per remote: a deployment setting (the Worker's
+ * variables REMOTE_ENGINE_PAGES, REMOTE_ENGINE_QUEUE_BYTES and REMOTE_ENGINE_ATTEMPTS), never the host's memory, which
+ * decides on kernels separately (r3.3 Limits).  The envelope it protects is the relay object's memory (128 MiB on the
+ * platform): every engine page's frames waiting for the account's byte lease together at most `queueBytes` (a leg
+ * whose frame would pass it closes 1013, as for its own window), and each page's socket and accounting (a few KiB)
+ * times `pages`; with the other channels' windows (kernel 8 MiB, terminals 4 x 1 MiB, agent 8 MiB, the peer's 8 MiB)
+ * the defaults stay under 80 MiB.  `attempts`: the engine pages' used attempt ids kept at once (each a few bytes of
+ * storage, until its expiry).  Reaching `pages` refuses a further notebook's page in words (429); a notebook already
+ * open replacing its own page is never refused by it.
+ */
+export const ENGINE_BUDGET_DEFAULTS = Object.freeze({ pages: 64, queueBytes: 48 * 1024 * 1024, attempts: 16 });
+/** The settings' accepted ranges: outside them (or not a plain decimal integer), the budget is misconfigured and no
+ * engine page is admitted (503), never a silent default. */
+export const ENGINE_BUDGET_RANGE = Object.freeze({ pages: [1, 4096], queueBytes: [8 * 1024 * 1024, 96 * 1024 * 1024], attempts: [1, 1024] });
+export type EngineBudget = { pages: number; queueBytes: number; attempts: number };
+/** The budget from the Worker's variables, or null if any set one is invalid. */
+export function engineBudget(env: { REMOTE_ENGINE_PAGES?: string; REMOTE_ENGINE_QUEUE_BYTES?: string; REMOTE_ENGINE_ATTEMPTS?: string }): EngineBudget | null {
+  const out = { ...ENGINE_BUDGET_DEFAULTS };
+  for (const [k, v] of [["pages", env.REMOTE_ENGINE_PAGES], ["queueBytes", env.REMOTE_ENGINE_QUEUE_BYTES], ["attempts", env.REMOTE_ENGINE_ATTEMPTS]] as const) {
+    if (v === undefined) continue;
+    if (typeof v !== "string" || !/^[1-9][0-9]{0,9}$/.test(v)) return null;
+    const n = Number(v), [lo, hi] = ENGINE_BUDGET_RANGE[k];
+    if (n < lo || n > hi) return null;
+    out[k] = n;
+  }
+  return out;
+}
 /** A peer leg's window, as a receiver (all its pages' messages to it): its kind's largest (§5: 8 MiB runner, 16 agent). */
 export const PEER_WINDOW: Record<Kind, number> = { runner: 8 * 1024 * 1024, agent: 16 * 1024 * 1024 };
 

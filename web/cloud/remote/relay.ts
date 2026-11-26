@@ -45,7 +45,7 @@
 // Account accounting (the day budget and its leases, connected slots, rate buckets, the deadline alarm) is step b2b.  Not bound in any deployment until step b4 (@sagebrush): until then this class is exported and unused.
 import { DurableObject } from "cloudflare:workers";
 
-import { RELAY_CAPS, PEER_WINDOW, ENGINE_CAP, ENGINE_ENTRIES, ENGINE_PAGES, capsFor, peerWindow, type Kind, type Chan } from "./relay-caps.ts";
+import { RELAY_CAPS, PEER_WINDOW, ENGINE_CAP, ENGINE_ENTRIES, engineBudget, capsFor, peerWindow, type Kind, type Chan } from "./relay-caps.ts";
 export { RELAY_CAPS, PEER_WINDOW };
 export const RELAY_LIMITS = Object.freeze({
   control: 256, // a control message's bytes
@@ -158,6 +158,10 @@ export interface RelayEnv {
   REMOTE_ACCOUNT?: DurableObjectNamespace;
   /** the sync account objects (web/sync/account.ts); unbound (production today): sync unavailable, no engine page */
   SYNC_ACCOUNT?: { idFromName(name: string): unknown; get(id: unknown): SyncStatus };
+  /** the engine pages' service budget (relay-caps.ts engineBudget): unset, its defaults */
+  REMOTE_ENGINE_PAGES?: string;
+  REMOTE_ENGINE_QUEUE_BYTES?: string;
+  REMOTE_ENGINE_ATTEMPTS?: string;
 }
 
 // (b2b, §5: the account's leases, the per-leg rate, and dead legs (r1.11))
@@ -361,6 +365,16 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
     if (q.bytes + cost > this.allowance(a)) {
       this.close(from, 1013, "too much waiting for the account's byte lease");
       return Promise.resolve();
+    }
+    // (the engine pages' frames waiting, all together, within the service budget's queueBytes: the relay's memory)
+    if (a.leg === "page" && a.chan === "engine") {
+      let waiting = 0;
+      for (const [w, wq] of this.queues) if (wq !== q && (this.att(w) as Att).leg === "page" && (this.att(w) as PageAtt).chan === "engine") waiting += wq.bytes;
+      const budget = engineBudget(this.env);
+      if (!budget || waiting + q.bytes + cost > budget.queueBytes) {
+        this.close(from, 1013, "too much waiting for the account's byte lease, across this computer's notebooks");
+        return Promise.resolve();
+      }
     }
     q.frames.push({ n, cost, send, target });
     q.bytes += cost;
@@ -693,7 +707,7 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
    * and checked the identity's form; here, in order: the attempt id once; the connection generation the page presents
    * (none on a first open) still the current one; the account's sync read now and "active" (a sync generation that
    * changed since the open pages began ends them first); then, with nothing awaited from the last check to the accept,
-   * the runner connected and speaking engine/1, the remote's engine pages under ENGINE_PAGES, and the notebook's older
+   * the runner connected and speaking engine/1, the remote's engine pages under its service budget (pages), and the notebook's older
    * page (of any entry) replaced (4009).  The page is told its identity's generations ({"relay":"engine"}), the runner
    * the whole identity (page-open).
    */
@@ -704,20 +718,34 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
     const attempt = h.get("x-r-attempt") ?? "";
     const presented = h.get("x-r-cgen");
     const syncName = h.get("x-r-sync") ?? "";
+    const budget = engineBudget(this.env);
+    if (!budget) return no(503, "the relay's notebook budget is misconfigured");
     if (!capsFor(kind, "engine") || !/^[A-Za-z0-9_-]{1,43}$/.test(nb) || !(ENGINE_ENTRIES as readonly string[]).includes(entry)
       || !/^[A-Za-z0-9_-]{22}$/.test(attempt) || (presented !== null && !/^[1-9][0-9]{0,15}$/.test(presented)) || !/^acct:[0-9a-f]{64}$/.test(syncName)) {
       return no(400, "bad request");
     }
-    // (the attempt id, once: kept until its expiry; a reused one is refused whether or not its first open succeeded)
+    // (the attempt id, once: the used-set holds each id until its own expiry, at most `attempts` at a time; an unexpired
+    // used id is never dropped to make room, as for the peer's challenges (r1.8))
     const t = Math.floor(this.now() / 1000);
     const used = await this.ctx.storage.list<number>({ prefix: "att:" });
-    const stale = [...used].filter(([, e]) => e < t).map(([k]) => k);
+    const stale: string[] = [];
+    let live = 0;
+    for (const [k, e] of used) {
+      if (e < t) stale.push(k);
+      else live++;
+    }
     if (stale.length) await this.ctx.storage.delete(stale);
     if (used.has(`att:${attempt}`) && !stale.includes(`att:${attempt}`)) return no(403, "attempt used");
+    if (live >= budget.attempts) return no(429, "too many notebook connections at once: wait a minute, then try again");
     await this.ctx.storage.put({ [`att:${attempt}`]: t + RELAY_SYNC.attemptSeconds, syncName });
     if (await this.ctx.storage.get("revoked")) return no(403, "revoked");
     const st = await this.syncRead();
-    if (!st.active) return st.definitive ? no(403, st.reason) : no(503, st.reason);
+    if (!st.active) {
+      if (!st.definitive) return no(503, st.reason);
+      // (a definitive "not active", whoever reads it, fences the transition: H5)
+      await this.syncOff(st.reason);
+      return no(403, st.reason);
+    }
     await this.syncSeen(st.generation);
     // (a stale generation is refused before it takes a session generation)
     if (presented !== null && Number(presented) !== ((await this.ctx.storage.get<number>("cgen")) ?? 1)) return no(409, "stale connection: open the notebook again");
@@ -736,7 +764,7 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
     if (!((this.att(peer) as PeerAtt).caps ?? []).includes(ENGINE_CAP)) return no(503, "this computer runs an older sagebrush: update it to run notebooks there");
     const open = this.engines();
     const mine = open.filter((p) => (this.att(p) as PageAtt).engine?.nb === nb);
-    if (open.length - mine.length >= ENGINE_PAGES) return no(429, `this computer already has ${ENGINE_PAGES} notebooks open: close one first`);
+    if (open.length - mine.length >= budget.pages) return no(429, `this computer already has ${budget.pages} notebooks open through the relay: close one first`);
     const t0 = this.now();
     const a: PageAtt = {
       leg: "page", gen, conn: b64url(crypto.getRandomValues(new Uint8Array(12))), kind, chan: "engine", account, rx: newRx(), ping: t0,
@@ -777,8 +805,19 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
   private async syncSeen(generation: number): Promise<void> {
     const prev = await this.ctx.storage.get<number>("syncGen");
     if (prev !== generation) await this.ctx.storage.put("syncGen", generation);
+    if (await this.ctx.storage.get("syncFenced")) await this.ctx.storage.delete("syncFenced");
     this.lastSync = generation;
     if (prev !== undefined && prev !== generation) await this.advance(CLOSE.syncOff, "sync was reset for this account");
+  }
+  /** A definitive "not active", read by an open or by the alarm (H5): the first such read of a transition advances the
+   * connection generation, durably, once (the engine pages end, 4412; a page presenting the old generation is then
+   * refused, even if sync is active again before the next alarm); later reads of the same transition change nothing,
+   * until an "active" read clears it. */
+  private async syncOff(reason: string): Promise<void> {
+    this.lastSync = undefined;
+    if (await this.ctx.storage.get("syncFenced")) return;
+    await this.ctx.storage.put("syncFenced", reason);
+    await this.advance(CLOSE.syncOff, "sync isn't active for this account");
   }
   /** The alarm's sync read, when due and an engine page is attached: a definitive "not active" advances the connection
    * generation (the engine pages end, 4412); a transient failure leaves them be (new opens read for themselves). */
@@ -792,10 +831,7 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
     await this.ctx.storage.put("syncDue", this.now() + RELAY_SYNC.everyMs);
     const st = await this.syncRead();
     if (st.active) return this.syncSeen(st.generation);
-    if (st.definitive) {
-      this.lastSync = undefined;
-      return this.advance(CLOSE.syncOff, "sync isn't active for this account");
-    }
+    if (st.definitive) return this.syncOff(st.reason);
   }
   /** Advance the connection generation (H2, H5): the durable write first, then, in the same turn, every engine page
    * ended (code), its page-close sent, and the runner told the new generation, so a late frame or reconnect of the old

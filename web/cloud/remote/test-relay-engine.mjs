@@ -7,7 +7,10 @@
 //   one: 503 in words), the sync namespace derived from the session (never the page's);
 // - H1 and H4: the identity in page-open (nb, entry, sgen, cgen) and in the page's {"relay":"engine"}; the attempt id
 //   once; the notebook's newer page (any entry) replaces the older (4009, its page-close first) with a higher sgen;
-//   other notebooks coexist; ENGINE_PAGES at once;
+//   other notebooks coexist;
+// - the engine pages' service budget, a deployment setting: pages (exact, one more, replacement, close and reopen),
+//   the frames waiting across them (queueBytes, 1013), used attempt ids (exact, one more, never evicted early);
+//   a misconfigured budget admits none (503);
 // - H5: sync read before each open (off, readonly, no plan, no binding: 403; unreachable or a failed read: 503) and
 //   every RELAY_SYNC.everyMs while an engine page is attached (the alarm): a definitive change, or a new sync
 //   generation, advances the connection generation (pages end 4412, the runner told {"relay":"cgen"}); a transient
@@ -45,6 +48,13 @@ function ok(cond, what) {
 }
 const b64url = (b) => Buffer.from(b).toString("base64url");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function until(f, tries = 250) {
+  for (let i = 0; i < tries; i++) {
+    if (await f()) return true;
+    await sleep(20);
+  }
+  return false;
+}
 
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const bindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", REMOTE_CHAL_KEY: "chal-key", REMOTE_ACCOUNTS: `${A}, ${C}` };
@@ -272,18 +282,79 @@ const gopen = J(await p.msg());
 ok(g1.status === 101 && gopen?.cgen === 2 && gopen.sgen === 4, `H2: the current generation -> 101, cgen 2, the notebook's sgen goes on (${JSON.stringify(gopen)})`);
 await g1.leg.msg();
 
-// ---- H5: sync before each open
-for (const [q, status, what] of [
-  ["state=off", 403, "sync off"], ["state=readonly", 403, "sync read-only"], ["state=registering", 403, "sync registering"],
-  ["reason=plan_has_no_sync", 403, "a plan without sync"], ["reason=not_allowlisted", 403, "an account not allowed"],
-  ["reason=cocalc_unreachable", 503, "CoCalc unreachable"], ["throw=1", 503, "a failed status read"],
-]) {
-  await setSync(q);
+// ---- H5: sync before each open; a definitive "not active" read by an open fences the transition too
+/** An engine page at the current generation: {leg, cgen, sgen} (the page's hello), its page-open taken off the runner. */
+async function openAt(nb, cgen) {
+  const e = await dialEngine(sa, r1.rid, { nb, cgen });
+  if (e.status !== 101) return { status: e.status, error: e.error };
+  J(await p.msg());
+  const h = J(await e.leg.msg());
+  return { status: 101, leg: e.leg, cgen: h.cgen, sgen: h.sgen };
+}
+let cur = 2; // (after the disconnect above)
+{
+  // (the control SEC asked for: off seen only by an open, active again before any alarm: the old generation is fenced)
+  await setSync("state=off");
   x = await dialEngine(sa, r1.rid, { nb: "nbQ" });
-  ok(x.status === status && !x.leg, `H5: ${what} -> ${status} (${x.status} ${x.error})`);
+  ok(x.status === 403 && x.error === "sync_off", `H5: an open while sync is off -> 403 sync_off (${x.status} ${x.error})`);
+  {
+    const seen = [J(await p.msg()), J(await p.msg())];
+    ok(seen.some((m) => m?.relay === "page-close") && seen.some((m) => m?.relay === "cgen" && m.cgen === cur + 1),
+      `H5: that refused open alone advanced the generation: the open page's page-close and cgen ${cur + 1} at the runner (${JSON.stringify(seen)})`);
+  }
+  ok(await closedOr(g1.leg, 4412) && (await engineState(r1.rid)).length === 0, "H5: ... and the open engine page ended (4412)");
+  cur++;
+  await setSync("state=active&gen=7");
+  x = await dialEngine(sa, r1.rid, { nb: "nbA", cgen: cur - 1 });
+  ok(x.status === 409, `H5: sync active again before any alarm: the old generation -> 409 (${x.status} ${x.error})`);
+  const back = await openAt("nbA", cur);
+  ok(back.status === 101 && back.cgen === cur, `H5: the new generation -> 101 (${JSON.stringify([back.status, back.cgen])})`);
+  back.leg.close();
+  J(await p.msg());
 }
 {
+{
+  // (the control: a transient failure read by an open leaves an attached page and its generation be)
+  const t1 = await openAt("nbT", cur);
+  for (const q of ["throw=1", "reason=cocalc_unreachable"]) {
+    await setSync(q);
+    x = await dialEngine(sa, r1.rid, { nb: "nbU" });
+    ok(x.status === 503, `H5: an open reading ${q} -> 503 (${x.status} ${x.error})`);
+  }
+  await sleep(200);
+  const st = await engineState(r1.rid);
+  ok(st.length === 1 && st[0].engine.nb === "nbT" && st[0].engine.cgen === cur && t1.leg.closed === null && p.got.length === 0,
+    `H5: ... the attached page stays, at the same generation, and the runner hears nothing (${JSON.stringify([st.map((a) => a.engine), p.got])})`);
+  await setSync("state=active&gen=7");
+  t1.leg.close();
+  J(await p.msg());
+}
+  await tick(r1.rid, 121_000); // (the attempt ids so far expire)
+  // (the same transition read again, by opens, advances nothing more; an "active" read ends the transition)
+  await setSync("state=off");
+  x = await dialEngine(sa, r1.rid, { nb: "nbQ" });
+  J(await p.msg());
+  cur++;
+  for (const [q, status, what] of [
+    ["state=off", 403, "sync off"], ["state=readonly", 403, "sync read-only"], ["state=registering", 403, "sync registering"],
+    ["reason=plan_has_no_sync", 403, "a plan without sync"], ["reason=not_allowlisted", 403, "an account not allowed"],
+    ["reason=cocalc_unreachable", 503, "CoCalc unreachable"], ["throw=1", 503, "a failed status read"],
+  ]) {
+    await setSync(q);
+    x = await dialEngine(sa, r1.rid, { nb: "nbQ" });
+    ok(x.status === status && !x.leg, `H5: ${what} -> ${status} (${x.status} ${x.error})`);
+  }
+  ok(p.got.length === 0, `H5: later reads of the same transition advance nothing (${JSON.stringify(p.got)})`);
+  await setSync("state=active&gen=7");
+  const again = await openAt("nbA", cur);
+  ok(again.status === 101 && again.cgen === cur, `H5: one advance for the whole transition (cgen ${cur}) (${JSON.stringify([again.status, again.cgen])})`);
+  again.leg.close();
+  J(await p.msg());
+}
+{
+  await tick(r1.rid, 121_000); // (the attempt ids so far expire)
   // (the kernel and terminal channels aren't gated by sync: they are the earlier remote's)
+  await setSync("state=off");
   const kp = await dialPage(sa, r1.rid, "terminal");
   ok(kp.status === 101, `H5: a terminal page while sync is off -> 101 (${kp.status})`);
   J(await p.msg());
@@ -295,17 +366,32 @@ await setSync("state=active&gen=7");
 x = await dialEngine(sa, r1.rid, { nb: "nbQ" });
 ok(x.status === 403 && x.error === "sync_unavailable", `H5: no sync binding (production) -> 403 sync_unavailable (${x.status} ${x.error})`);
 await site(`/__relay/__nosync?remote=${r1.rid}&on=0`);
+// (no binding fenced the generation too: an active read then clears the transition)
+{
+  const seen = [];
+  while (p.got.length) seen.push(J(p.got.shift()));
+  ok(seen.some((m) => m?.relay === "cgen" && m.cgen === cur + 1), `H5: no binding is definitive: cgen ${cur + 1} (${JSON.stringify(seen)})`);
+  cur++;
+}
 
+await tick(r1.rid, 121_000); // (the attempt ids so far expire: their bound is its own rows')
 // ---- H5: every RELAY_SYNC.everyMs while an engine page is attached
 const { syncEvery } = (await json(await site("/__engine"))).body;
 ok(syncEvery === 5000, `H5: the window is 5 s (${syncEvery})`);
+const w1 = await openAt("nbA", cur);
+ok(w1.status === 101, `H5: an engine page for the alarm's rows (${w1.status} ${w1.error})`);
+// (both legs ping now: the logical clock moved past the dead-leg deadline while attempts expired, and the alarm below
+// also closes a leg whose last ping is that old)
+p.send('{"relay":"ping"}');
+w1.leg.send('{"relay":"ping"}');
+await until(async () => p.got.includes('{"relay":"pong"}') && w1.leg.got.includes('{"relay":"pong"}'));
 // (a transient failure leaves the pages be, and refuses new opens)
 await setSync("throw=1");
 await tick(r1.rid, syncEvery);
 await site("/__synccalls");
 await alarm(r1.rid);
 ok((await json(await site("/__synccalls"))).body.calls.length === 1, "H5: the alarm read sync once");
-ok((await engineState(r1.rid)).length === 1 && g1.leg.closed === null, "H5: a failed read leaves the engine page attached");
+ok((await engineState(r1.rid)).length === 1 && w1.leg.closed === null, "H5: a failed read leaves the engine page attached");
 await setSync("reason=cocalc_unreachable");
 await tick(r1.rid, syncEvery);
 await alarm(r1.rid);
@@ -321,49 +407,132 @@ await tick(r1.rid, syncEvery);
 await alarm(r1.rid);
 {
   const seen = [J(await p.msg()), J(await p.msg())];
-  ok(seen.some((m) => m?.relay === "page-close") && seen.some((m) => m?.relay === "cgen" && m.cgen === 3), `H5: sync off -> page-close and cgen 3 at the runner (${JSON.stringify(seen)})`);
+  ok(seen.some((m) => m?.relay === "page-close") && seen.some((m) => m?.relay === "cgen" && m.cgen === cur + 1), `H5: sync off at the alarm -> page-close and cgen ${cur + 1} (${JSON.stringify(seen)})`);
+  cur++;
 }
-ok(await closedOr(g1.leg, 4412) && (await engineState(r1.rid)).length === 0, "H5: sync off ends the engine page (4412)");
+ok(await closedOr(w1.leg, 4412) && (await engineState(r1.rid)).length === 0, "H5: sync off ends the engine page (4412)");
 // (a new sync generation while active: a reset, also ends the pages)
 await setSync("state=active&gen=7");
-const h1 = await dialEngine(sa, r1.rid, { nb: "nbA", cgen: 3 });
+const h1 = await openAt("nbA", cur);
 ok(h1.status === 101, `H5: active again, the current generation -> 101 (${h1.status} ${h1.error})`);
-J(await p.msg());
-await h1.leg.msg();
 await setSync("state=active&gen=8");
 await tick(r1.rid, syncEvery);
 await alarm(r1.rid);
 {
   const seen = [J(await p.msg()), J(await p.msg())];
-  ok(seen.some((m) => m?.relay === "cgen" && m.cgen === 4), `H5: a new sync generation -> cgen 4 (${JSON.stringify(seen)})`);
+  ok(seen.some((m) => m?.relay === "cgen" && m.cgen === cur + 1), `H5: a new sync generation -> cgen ${cur + 1} (${JSON.stringify(seen)})`);
+  cur++;
 }
 ok(await closedOr(h1.leg, 4412) && (await engineState(r1.rid)).length === 0, "H5: a sync reset ends the engine page (4412)");
 // (and an open finding a new generation ends the pages of the old one first)
-const i1 = await dialEngine(sa, r1.rid, { nb: "nbA", cgen: 4 });
-J(await p.msg());
-await i1.leg.msg();
+const i1 = await openAt("nbA", cur);
 await setSync("state=active&gen=9");
-const i2 = await dialEngine(sa, r1.rid, { nb: "nbB", cgen: 4 });
-ok(i2.status === 409, `H5: an open that finds a new sync generation advances it first, so its cgen 4 is stale -> 409 (${i2.status} ${i2.error})`);
+const i2 = await dialEngine(sa, r1.rid, { nb: "nbB", cgen: cur });
+ok(i2.status === 409, `H5: an open that finds a new sync generation advances it first, so its cgen is stale -> 409 (${i2.status} ${i2.error})`);
 ok(await closedOr(i1.leg, 4412) && (await engineState(r1.rid)).length === 0, "H5: ... and the old generation's page ended");
 while (p.got.length) p.got.shift();
+cur++;
 
-// ---- ENGINE_PAGES at once
+// ---- the engine pages' service budget (relay-caps.ts engineBudget): a deployment setting, with its defaults
+const budgetSet = (q) => site(`/__relay/__enginebudget?remote=${r1.rid}&${q}`);
+const expire = () => tick(r1.rid, 121_000); // (the attempt ids so far expire)
 {
-  const { pages } = (await json(await site("/__engine"))).body;
+  const { budget } = (await json(await site("/__engine"))).body;
+  ok(JSON.stringify(budget) === JSON.stringify({ pages: 64, queueBytes: 48 * 1024 * 1024, attempts: 16 }), `budget: the defaults (${JSON.stringify(budget)})`);
+  // (a set value outside its range, or not a plain integer: no engine page at all, never a silent default)
+  for (const q of ["pages=0", "pages=4097", "pages=abc", "pages=03", "queue=1024", "queue=200000000", "attempts=0", "attempts=1.5"]) {
+    await expire();
+    await budgetSet(q);
+    x = await dialEngine(sa, r1.rid, { nb: "nbC" });
+    ok(x.status === 503 && /misconfigured/.test(x.error ?? ""), `budget: ${q} -> 503, in words (${x.status} ${x.error})`);
+    await budgetSet("pages=&queue=&attempts=");
+  }
+}
+{
+  // (attempts: exact and one more, a used id never evicted, an expired one forgotten)
+  await expire();
+  await budgetSet("attempts=3");
+  await setSync("state=off"); // (each fresh attempt then fails after it is recorded)
+  const ids = [];
+  for (let i = 0; i < 3; i++) ids.push((await dialEngine(sa, r1.rid, { nb: "nbF" })).attempt);
+  await setSync("state=active&gen=9");
+  while (p.got.length) p.got.shift();
+  cur++;
+  x = await dialEngine(sa, r1.rid, { nb: "nbF" });
+  ok(x.status === 429 && /too many/.test(x.error ?? ""), `attempts: a 4th fresh attempt while 3 are unexpired -> 429, in words (${x.status} ${x.error})`);
+  x = await dialEngine(sa, r1.rid, { nb: "nbF", att: ids[0] });
+  ok(x.status === 403 && x.error === "attempt used", `attempts: a used one is still refused, never evicted to make room (${x.status} ${x.error})`);
+  await expire();
+  const fresh = await openAt("nbF", cur);
+  ok(fresh.status === 101, `attempts: once they expire, a fresh attempt -> 101 (${fresh.status} ${fresh.error})`);
+  fresh.leg?.close();
+  J(await p.msg());
+  await expire();
+  x = await dialEngine(sa, r1.rid, { nb: "nbF", att: ids[0] });
+  ok(x.status === 101, `attempts: an expired id is forgotten (${x.status} ${x.error})`);
+  J(await p.msg());
+  x.leg?.close();
+  J(await p.msg());
+  await budgetSet("attempts=");
+}
+{
+  // (pages: a configured 3, exact and one more, replacement at capacity, close and reopen)
+  await expire();
+  await budgetSet("pages=3");
   const legs = [];
+  for (const nb of ["c1", "c2", "c3"]) legs.push(await openAt(nb, cur));
+  ok(legs.every((l) => l.status === 101), `pages: 3 notebooks with pages=3 -> 101 (${legs.map((l) => l.status)})`);
+  x = await dialEngine(sa, r1.rid, { nb: "c4" });
+  ok(x.status === 429 && /3 notebooks open/.test(x.error ?? ""), `pages: a 4th notebook -> 429, in words (${x.status} ${x.error})`);
+  const again = await dialEngine(sa, r1.rid, { nb: "c2", entry: "python" });
+  ok(again.status === 101, `pages: an open notebook replacing its own page at capacity -> 101 (${again.status} ${again.error})`);
+  J(await p.msg()), J(await p.msg());
+  legs[0].leg.close();
+  ok(await until(async () => (await engineState(r1.rid)).length === 2), "pages: one closed, two left");
+  J(await p.msg());
+  const c4 = await openAt("c4", cur);
+  ok(c4.status === 101, `pages: after a close, another notebook -> 101 (${c4.status} ${c4.error})`);
+  x = await dialEngine(sa, r1.rid, { nb: "c5" });
+  ok(x.status === 429, `pages: and at 3 again, the next -> 429 (${x.status})`);
+  // (the default, 64, exact and one more)
+  await budgetSet("pages=");
+  for (const l of [legs[1].leg, legs[2].leg, again.leg, c4.leg]) l?.close();
+  await until(async () => (await engineState(r1.rid)).length === 0);
+  while (p.got.length) p.got.shift();
+  const many = [];
   let all = true;
-  for (let i = 0; i < pages; i++) {
+  for (let i = 0; i < 64; i++) {
+    if (i % 15 === 0) await expire();
     const e = await dialEngine(sa, r1.rid, { nb: `n${i}` });
     all &&= e.status === 101;
-    legs.push(e.leg);
+    many.push(e.leg);
   }
-  ok(all, `limit: ${pages} notebooks' engine pages -> 101`);
+  ok(all, "pages: 64 notebooks at the default -> 101");
+  await expire();
   x = await dialEngine(sa, r1.rid, { nb: "one-more" });
-  ok(x.status === 429 && /notebooks open/.test(x.error ?? ""), `limit: one more notebook -> 429, in words (${x.status} ${x.error})`);
-  x = await dialEngine(sa, r1.rid, { nb: "n0", entry: "python" });
-  ok(x.status === 101, `limit: an open notebook in another page still replaces its own (${x.status} ${x.error})`);
-  for (const l of [...legs, x.leg]) l?.close();
+  ok(x.status === 429 && /64 notebooks open/.test(x.error ?? ""), `pages: a 65th at the default -> 429, in words (${x.status} ${x.error})`);
+  for (const l of many) l?.close();
+  await until(async () => (await engineState(r1.rid)).length === 0);
+  while (p.got.length) p.got.shift();
+}
+{
+  // (queueBytes: the engine pages' frames waiting for the account's lease, all together; one past it closes 1013)
+  await expire();
+  await budgetSet("queue=8388608");
+  const qa = await openAt("qa", cur), qb = await openAt("qb", cur);
+  await site(`/__relay/__holdput?remote=${r1.rid}&on=1`); // (the debit write held: frames wait in their queues)
+  const big = new Uint8Array(3 * 1024 * 1024);
+  qa.leg.send(big);
+  qb.leg.send(big);
+  await sleep(300);
+  qa.leg.send(big); // (6 MiB waiting, and 3 more: past 8 MiB across the two pages)
+  ok(await closedOr(qa.leg, 1013) && await until(async () => !(await engineState(r1.rid)).some((a) => a.engine.nb === "qa"), 100),
+    "queue: a frame past the engine pages' waiting total closes its page 1013 (gone at the relay)");
+  ok((await engineState(r1.rid)).some((a) => a.engine.nb === "qb"), "queue: the other page stays");
+  await site(`/__relay/__holdput?remote=${r1.rid}&on=0`);
+  qb.leg.close();
+  await budgetSet("queue=");
+  while (p.got.length) p.got.shift();
 }
 
 // ---- the old channels are unchanged: the relay's own test suite (test-relay.mjs) runs them; here, one check
