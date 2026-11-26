@@ -6,9 +6,9 @@
 
 import { b64, bytesEqual, concat, enc, refuse, sha256, sha256b64, unb64 } from "./bytes.mjs";
 import { canonText } from "./canonical.mjs";
-import { checkPublicKey } from "./ed25519.mjs";
+import { checkPublicKey, keyId } from "./ed25519.mjs";
 import { open } from "./envelope.mjs";
-import { deviceKey, requireTier } from "./chain.mjs";
+import { deviceKey, leaseKeyAt, requireTier, serviceKeyAt } from "./chain.mjs";
 import { bodyValidator } from "./schemas.mjs";
 
 const B32 = "abcdefghijklmnopqrstuvwxyz234567";
@@ -34,7 +34,7 @@ export function showFingerprint(full) {
 // ---- shared steps
 
 /** Open a device-signed object: the signer counts at the body's chain_seq and at the pinned head (§2.3). */
-async function openByDevice(bytes, ctx, type, schema, { allowRemoved = false } = {}) {
+export async function openByDevice(bytes, ctx, type, schema, { allowRemoved = false } = {}) {
   let device = null;
   const env = await open(bytes, {
     aud: ctx.aud, fleet: ctx.fleet,
@@ -83,7 +83,7 @@ const underAgents = (p) => p === AGENTS || p.startsWith(AGENTS + "/");
 // The endpoint's path rules (core web/workspace/paths.ts normPath): absolute, "/"-separated, no empty, "." or ".."
 // names, no control characters, at most 1024 characters, 32 folders deep and 255 per name. A grant's scope must
 // already be in that canonical form (normPath would return it unchanged): anything else is refused here, before the
-// reserved-tree, uniqueness and widening checks, so "/x/../.agents" or "//.agents" never reach them as strings (astra4b).
+// reserved-tree, uniqueness and widening checks, so "/x/../.agents" or "//.agents" never reach them as strings.
 const MAX_PATH = 1024, MAX_DEPTH = 32, MAX_NAME = 255;
 const CONTROL = /[\u0000-\u001f\u007f]/;
 export function canonicalPath(p) {
@@ -126,7 +126,7 @@ export async function verifyGrant(bytes, ctx) {
   const g = env.body;
   freshAuth(ctx, g);
   if (g.host !== ctx.cert.body.host || g.cert !== ctx.cert.hash) refuse("not_granted", "another host or certificate");
-  // the generation: higher, or the same bytes again (§3.2, grader 4)
+  // the generation: higher, or the same bytes again (§3.2)
   const cur = ctx.current;
   let reapply = false;
   if (cur) {
@@ -232,6 +232,148 @@ export async function verifyApproval(bytes, ctx) {
   if (ctx.used(a.approval)) refuse("approval_used");
   requireTier(ctx.chain, env.device, true); // (every approval counts as widening under the native policy, §2.1)
   return a;
+}
+
+// ---- moving an agent to another host (r2.4 §3.7): the person's transfer, the service's receipt, the new host's checks
+
+/**
+ * §3.7.3 check 2, on the new host: the person-signed transfer. ctx: { aud, fleet, chain }. Its form, fleet and aud, its
+ * signature, the signer enrolled at its chain_seq and not removed at the pinned head, and the native-tier rule (a
+ * transfer widens to_host, ruling P2). Not its window or its freshness: the resume may come hours after not_after_ms,
+ * and the service checked both when it applied the transfer. Returns { body, hash } (hash: SHA-256 of its signed bytes).
+ */
+export async function verifyAgentTransfer(bytes, ctx) {
+  const env = await openByDevice(bytes, ctx, "sb.agent-transfer.v1", "agent-transfer");
+  requireTier(ctx.chain, env.device, true);
+  return { body: env.body, hash: await sha256b64(env.signed) };
+}
+
+const REPEATED = ["fleet", "aud", "agent", "from_host", "to_host", "to_host_key", "gen", "nonce"];
+
+/**
+ * §3.7.3 checks 1-3: { transfer, receipt } (each the envelope's bytes) as the service handed them out. ctx: { aud,
+ * fleet, chain }. 1, the receipt under the service key in force at its chain_seq (§1.7's half-open rule, as for audit
+ * acks); 2, the transfer (verifyAgentTransfer); 3, the receipt names exactly that transfer, by the SHA-256 of its
+ * signed bytes, and repeats every field of it unchanged. Returns { transfer, receipt, transferHash }.
+ */
+export async function verifyTransferReceipt(pair, ctx) {
+  const receipt = await open(pair.receipt, {
+    aud: ctx.aud, fleet: ctx.fleet,
+    resolveKey: (signer, t, body) => {
+      if (t !== "sb.agent-transfer-receipt.v1") refuse("bad_form", "another type");
+      bodyValidator("agent-transfer-receipt")(body);
+      return serviceKeyAt(ctx.chain, signer, body.chain_seq);
+    },
+  });
+  const transfer = await verifyAgentTransfer(pair.transfer, ctx);
+  const r = receipt.body, t = transfer.body;
+  if (r.transfer !== transfer.hash) refuse("bad_form", "the receipt names another transfer");
+  for (const k of REPEATED) if (r[k] !== t[k]) refuse("bad_form", `the receipt's ${k} isn't the transfer's`);
+  return { transfer: t, receipt: r, transferHash: transfer.hash };
+}
+
+/**
+ * §3.7.3 checks 4-6, the new host's own: `pair` is verifyTransferReceipt's result, `host` the host's records, read
+ * synchronously (the supervisor's; the host writes them, this never does):
+ *   id, fingerprint; grantHashAt(gen) -> sha | null (every grant it accepted); grantListsAgent(gen, agent);
+ *   listedSince(agent), entryGen(agent) -> gen | null; acceptedTransfer(agent) -> { gen, nonce, transfer } | null
+ *   (the newest it accepted); nonceSeen(nonce) -> transfer hash | null (host-wide).
+ * Check 6 is idempotent for the pair this host already accepted, so a resume retried after its first refusal passes
+ * again: { first: false }. A pair not yet accepted passes as { first: true }, and the caller records it durably
+ * before acting; "new" is enforced there, once.
+ */
+export function checkTransferForHost(pair, host) {
+  const t = pair.transfer;
+  // 4: this host, by id and by the fingerprint the person compared at pairing
+  if (t.to_host !== host.id || t.to_host_key !== host.fingerprint) refuse("not_granted", "a transfer to another host");
+  // 5a: a grant this host accepted at gen, by hash (not "the current grant": later grants may have come since)
+  const g = host.grantHashAt(t.gen);
+  if (g === null || g !== t.grant) refuse("not_granted", "a grant this host didn't accept at that generation");
+  if (!host.grantListsAgent(t.gen, t.agent)) refuse("not_granted", "that grant doesn't list the agent");
+  // 5b: in every grant since gen, and its entry not older than gen (it may have moved up: the lease carries that)
+  const since = host.listedSince(t.agent), cur = host.entryGen(t.agent);
+  if (since === null || cur === null) refuse("not_granted", "the agent isn't in this host's current grant");
+  if (since > t.gen || cur < t.gen) refuse("stale_generation", "the agent hasn't been listed since that generation");
+  // 6: the accepted pair again, or a newer one with a nonce never seen here
+  const accepted = host.acceptedTransfer(t.agent);
+  if (accepted) {
+    if (accepted.transfer === pair.transferHash && accepted.gen === t.gen && accepted.nonce === t.nonce) return { first: false };
+    if (t.gen <= accepted.gen) refuse("stale_generation", "not above the transfer this host accepted");
+  }
+  const seen = host.nonceSeen(t.nonce);
+  if (seen !== null && seen !== pair.transferHash) refuse("replay", "this nonce named another transfer here");
+  return { first: true };
+}
+
+// ---- the old host's fence acknowledgement (r2.4 §3.7.4)
+
+/**
+ * §3.7.4, the service's check of a fence acknowledgement's envelope: its form, fleet and aud, and the signature by the
+ * old host's certified key (the signer is that host, its key id the certificate's, and the body names the same host).
+ * ctx: { aud, fleet, cert }, where cert is verifyHostCert's result for the host's pairing. Whether it answers a transfer
+ * the service applied, at the old host's last generation, after the apply, and for the first time, is the service's
+ * own serialized decision (it holds that state), not this check. Returns { body, hash } (hash: of its signed bytes).
+ */
+export async function verifyFenceAck(bytes, ctx) {
+  const env = await open(bytes, {
+    aud: ctx.aud, fleet: ctx.fleet,
+    resolveKey: async (signer, t, body) => {
+      if (t !== "sb.agent-fence-ack.v1") refuse("bad_form", "another type");
+      bodyValidator("agent-fence-ack")(body);
+      if (signer.kind !== "host" || signer.id !== ctx.cert.body.host || body.host !== signer.id) refuse("bad_signature");
+      if (signer.key !== (await keyId("ed25519", ctx.cert.signRaw))) refuse("bad_signature", "not the certified host key");
+      return ctx.cert.signRaw;
+    },
+  });
+  return { body: env.body, hash: await sha256b64(env.signed) };
+}
+
+// ---- execution-lease renewal (r2.5 §3.8)
+
+/**
+ * §3.8.1, the service's check of a lease request: its form, fleet and aud, and the signature by the host's certified
+ * key. ctx: { aud, fleet, cert }, where cert is verifyHostCert's result for the host's CURRENT pairing. The window, the
+ * nonce, the binding, the revocations and the first-lease gate are the service's transaction (one serialized step per
+ * agent), not this check. Returns { body, hash } (hash: SHA-256 of its signed bytes, what the lease's request names).
+ */
+export async function verifyLeaseRequest(bytes, ctx) {
+  const env = await open(bytes, {
+    aud: ctx.aud, fleet: ctx.fleet,
+    resolveKey: async (signer, t, body) => {
+      if (t !== "sb.lease-request.v1") refuse("bad_form", "another type");
+      bodyValidator("lease-request")(body);
+      if (signer.kind !== "host" || signer.id !== ctx.cert.body.host || body.host !== signer.id) refuse("bad_signature");
+      if (signer.key !== (await keyId("ed25519", ctx.cert.signRaw))) refuse("bad_signature", "not the certified host key");
+      return ctx.cert.signRaw;
+    },
+  });
+  return { body: env.body, hash: await sha256b64(env.signed) };
+}
+
+const ECHOED = ["request", "agent", "gen", "nonce", "boot_id"];
+
+/**
+ * §3.8.2, the host's check of an execution lease. ctx: { aud, fleet, chain, host, hostKey, outstanding }: host and
+ * hostKey are this host's certified id and its certificate's fingerprint; outstanding is the ONE request in flight for
+ * the agent, { request (its hash), agent, gen, nonce, boot_id }, or null. In order: the form, fleet and aud; the lease
+ * key in force at chain_seq (§1.7a: kind "lease" only, never a service key); this host by id and key; the outstanding
+ * request echoed exactly (ttl_ms's bound is the schema's). Not the clock: expired on arrival, the 30-second boundary
+ * and the timers are the host state machine's, on CLOCK_BOOTTIME (lease note §3). Returns { body, hash }.
+ */
+export async function verifyExecutionLease(bytes, ctx) {
+  const env = await open(bytes, {
+    aud: ctx.aud, fleet: ctx.fleet,
+    resolveKey: (signer, t, body) => {
+      if (t !== "sb.execution-lease.v1") refuse("bad_form", "another type");
+      bodyValidator("execution-lease")(body);
+      return leaseKeyAt(ctx.chain, signer, body.chain_seq);
+    },
+  });
+  const l = env.body, o = ctx.outstanding;
+  if (l.host !== ctx.host || l.host_key !== ctx.hostKey) refuse("not_granted", "a lease for another host");
+  if (!o) refuse("not_granted", "no request outstanding");
+  for (const k of ECHOED) if (l[k] !== o[k]) refuse("not_granted", `the lease's ${k} isn't the outstanding request's`);
+  return { body: l, hash: await sha256b64(env.signed) };
 }
 
 /** The hash a question's preimage must produce for its subject (§4: paths_hash, payload_hash, args_hash). */

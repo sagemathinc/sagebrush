@@ -330,7 +330,8 @@ fn sha_hex(b: &[u8]) -> String {
     Sha256::digest(b).iter().map(|x| format!("{x:02x}")).collect()
 }
 
-// A bundle: resources/binaries/sagebrush-node and resources/agent/{package/bin/sagebrush-agent.mjs, package/lib/x.mjs,
+// A bundle: the Node sidecar (here at <tmp>/binaries/sagebrush-node; in the app beside its executable, shipped_node())
+// and resources/agent/{package/bin/sagebrush-agent.mjs, package/lib/x.mjs,
 // node_modules/dep/index.js}, its manifest, and the manifest's sha256.
 fn bundle(t: &Tmp, codex: bool) -> String {
     let r = &t.0;
@@ -346,11 +347,16 @@ fn bundle(t: &Tmp, codex: bool) -> String {
     fs::set_permissions(r.join("binaries/sagebrush-node"), fs::Permissions::from_mode(0o755)).unwrap();
     let list: Vec<serde_json::Value> = files.iter().map(|(p, b, m)| serde_json::json!({"path": p, "sha256": sha_hex(b), "size": b.len(), "mode": m})).collect();
     let mut m = serde_json::json!({"v": 1, "agent": {"version": "0.8.9", "release_sha256": sha_hex(b"tgz")}, "claude_code": {"version": "2.1.314"},
-        "node": {"version": "24.21.0", "path": "binaries/sagebrush-node", "sha256": sha_hex(b"node binary"), "size": 11}, "files": list});
+        "node": {"version": "24.21.0", "sha256": sha_hex(b"node binary"), "size": 11}, "files": list});
     if codex {
         m["codex"] = serde_json::json!({"version": "0.171.0", "triple": "x86_64-unknown-linux-gnu"});
     }
     write_manifest(t, &m)
+}
+
+/// The Node binary the start would exec, passed to verify_bundle.
+fn node(t: &Tmp) -> std::path::PathBuf {
+    t.0.join("binaries/sagebrush-node")
 }
 
 fn write_manifest(t: &Tmp, m: &serde_json::Value) -> String {
@@ -363,33 +369,50 @@ fn write_manifest(t: &Tmp, m: &serde_json::Value) -> String {
 fn a_bundle_as_built_passes_and_names_its_versions() {
     let t = Tmp::new("b-ok");
     let sha = bundle(&t, false);
-    let v = verify_bundle(&t.0, &sha).unwrap();
-    assert_eq!(v, Versions { agent: "0.8.9".into(), claude_code: "2.1.314".into(), codex: None, node: "24.21.0".into() });
+    let v = verify_bundle(&t.0, &node(&t), &sha, NodeCheck::Bytes).unwrap();
+    assert_eq!(v, Versions { agent: "0.8.9".into(), claude_code: Some("2.1.314".into()), codex: None, node: "24.21.0".into() });
     let t = Tmp::new("b-codex");
     let sha = bundle(&t, true);
-    assert_eq!(verify_bundle(&t.0, &sha).unwrap().codex.as_deref(), Some("0.171.0"));
+    assert_eq!(verify_bundle(&t.0, &node(&t), &sha, NodeCheck::Bytes).unwrap().codex.as_deref(), Some("0.171.0"));
+}
+
+#[test]
+fn the_node_checked_is_the_one_given_wherever_it_is_and_the_shipped_one_is_beside_the_executable() {
+    // (outside resources, as in the app: Contents/MacOS beside Contents/Resources)
+    let t = Tmp::new("b-node-out");
+    let sha = bundle(&t, false);
+    let other = Tmp::new("b-node-exe");
+    let moved = other.0.join("sagebrush-node");
+    fs::rename(node(&t), &moved).unwrap();
+    assert!(verify_bundle(&t.0, &moved, &sha, NodeCheck::Bytes).is_ok());
+    assert_eq!(verify_bundle(&t.0, &node(&t), &sha, NodeCheck::Bytes).unwrap_err(), BundleError::Missing, "only the node given is checked");
+    // (another binary given, of another size: refused)
+    fs::write(other.0.join("node2"), b"node").unwrap();
+    fs::set_permissions(other.0.join("node2"), fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(verify_bundle(&t.0, &other.0.join("node2"), &sha, NodeCheck::Bytes).unwrap_err(), BundleError::Size);
+    assert_eq!(shipped_node().unwrap(), std::env::current_exe().unwrap().parent().unwrap().join("sagebrush-node"));
 }
 
 #[test]
 fn no_agent_in_this_build_or_another_manifest_is_refused() {
     let t = Tmp::new("b-none");
     let sha = bundle(&t, false);
-    assert_eq!(verify_bundle(&t.0, "").unwrap_err(), BundleError::NotBundled);
-    assert_eq!(verify_bundle(&t.0, &sha.to_uppercase()).unwrap_err(), BundleError::ManifestHash, "the compiled-in hash is lowercase hex");
+    assert_eq!(verify_bundle(&t.0, &node(&t), "", NodeCheck::Bytes).unwrap_err(), BundleError::NotBundled);
+    assert_eq!(verify_bundle(&t.0, &node(&t), &sha.to_uppercase(), NodeCheck::Bytes).unwrap_err(), BundleError::ManifestHash, "the compiled-in hash is lowercase hex");
     let mut other = sha.clone().into_bytes();
     other[0] = if other[0] == b'0' { b'1' } else { b'0' };
-    assert_eq!(verify_bundle(&t.0, std::str::from_utf8(&other).unwrap()).unwrap_err(), BundleError::ManifestHash);
+    assert_eq!(verify_bundle(&t.0, &node(&t), std::str::from_utf8(&other).unwrap(), NodeCheck::Bytes).unwrap_err(), BundleError::ManifestHash);
     // (a manifest edited to match changed files has another hash)
     let mut m: serde_json::Value = serde_json::from_slice(&fs::read(t.0.join("agent/MANIFEST.json")).unwrap()).unwrap();
     m["agent"]["version"] = "9.9.9".into();
     write_manifest(&t, &m);
-    assert_eq!(verify_bundle(&t.0, &sha).unwrap_err(), BundleError::ManifestHash);
+    assert_eq!(verify_bundle(&t.0, &node(&t), &sha, NodeCheck::Bytes).unwrap_err(), BundleError::ManifestHash);
 }
 
 #[test]
 fn every_change_to_the_tree_is_refused() {
     type Mutate = fn(&Path);
-    let cases: [(&str, Mutate, BundleError); 11] = [
+    let cases: [(&str, Mutate, BundleError); 14] = [
         ("a listed file's content, same size", |r| fs::write(r.join("agent/package/lib/x.mjs"), b"export {}\t").unwrap(), BundleError::Hash),
         ("a listed file's size", |r| fs::write(r.join("agent/package/lib/x.mjs"), b"export {};\n").unwrap(), BundleError::Size),
         ("a file not listed (a planted module)", |r| fs::write(r.join("agent/node_modules/dep/evil.js"), b"x").unwrap(), BundleError::Extra),
@@ -401,14 +424,57 @@ fn every_change_to_the_tree_is_refused() {
         ("writable by others", |r| fs::set_permissions(r.join("agent/package/lib/x.mjs"), fs::Permissions::from_mode(0o666)).unwrap(), BundleError::Mode),
         ("the Node sidecar changed", |r| fs::write(r.join("binaries/sagebrush-node"), b"node binarY").unwrap(), BundleError::Hash),
         ("the Node sidecar a link", |r| { fs::remove_file(r.join("binaries/sagebrush-node")).unwrap(); std::os::unix::fs::symlink("/bin/sh", r.join("binaries/sagebrush-node")).unwrap() }, BundleError::Link),
+        ("the Node sidecar missing", |r| fs::remove_file(r.join("binaries/sagebrush-node")).unwrap(), BundleError::Missing),
+        ("the Node sidecar not executable", |r| fs::set_permissions(r.join("binaries/sagebrush-node"), fs::Permissions::from_mode(0o644)).unwrap(), BundleError::Mode),
+        ("the Node sidecar a folder", |r| { fs::remove_file(r.join("binaries/sagebrush-node")).unwrap(); fs::create_dir(r.join("binaries/sagebrush-node")).unwrap() }, BundleError::NotAFile),
     ];
     for (what, mutate, want) in cases {
         let t = Tmp::new("b-mut");
         let sha = bundle(&t, false);
-        assert!(verify_bundle(&t.0, &sha).is_ok());
+        assert!(verify_bundle(&t.0, &node(&t), &sha, NodeCheck::Bytes).is_ok());
         mutate(&t.0);
-        assert_eq!(verify_bundle(&t.0, &sha).unwrap_err(), want, "{what}");
+        assert_eq!(verify_bundle(&t.0, &node(&t), &sha, NodeCheck::Bytes).unwrap_err(), want, "{what}");
     }
+}
+
+#[test]
+fn claude_code_absent_is_a_bundle_without_it_and_present_in_another_form_is_refused() {
+    // (a build without the Claude Code CLI: the manifest has no claude_code block)
+    let t = Tmp::new("b-noclaude");
+    bundle(&t, false);
+    let mut m: serde_json::Value = serde_json::from_slice(&fs::read(t.0.join("agent/MANIFEST.json")).unwrap()).unwrap();
+    m.as_object_mut().unwrap().remove("claude_code");
+    let sha = write_manifest(&t, &m);
+    let v = verify_bundle(&t.0, &node(&t), &sha, NodeCheck::Bytes).unwrap();
+    assert_eq!(v, Versions { agent: "0.8.9".into(), claude_code: None, codex: None, node: "24.21.0".into() });
+    // (stray Claude Code bytes in a bundle without them are a file not listed)
+    let f = t.0.join("agent/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude");
+    fs::create_dir_all(f.parent().unwrap()).unwrap();
+    fs::write(&f, b"claude").unwrap();
+    fs::set_permissions(&f, fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(verify_bundle(&t.0, &node(&t), &sha, NodeCheck::Bytes).unwrap_err(), BundleError::Extra);
+    for (what, v) in [
+        ("null", serde_json::json!(null)),
+        ("a string", serde_json::json!("2.1.314")),
+        ("no version", serde_json::json!({})),
+        ("an empty version", serde_json::json!({"version": ""})),
+        ("a version not a string", serde_json::json!({"version": 2})),
+        ("a 65-character version", serde_json::json!({"version": "9".repeat(65)})),
+    ] {
+        let t = Tmp::new("b-claude-form");
+        bundle(&t, false);
+        let mut m: serde_json::Value = serde_json::from_slice(&fs::read(t.0.join("agent/MANIFEST.json")).unwrap()).unwrap();
+        m["claude_code"] = v;
+        let sha = write_manifest(&t, &m);
+        assert_eq!(verify_bundle(&t.0, &node(&t), &sha, NodeCheck::Bytes).unwrap_err(), BundleError::ManifestForm, "claude_code {what}");
+    }
+    // (64 characters is the bound, still accepted)
+    let t = Tmp::new("b-claude-64");
+    bundle(&t, false);
+    let mut m: serde_json::Value = serde_json::from_slice(&fs::read(t.0.join("agent/MANIFEST.json")).unwrap()).unwrap();
+    m["claude_code"] = serde_json::json!({"version": "9".repeat(64)});
+    let sha = write_manifest(&t, &m);
+    assert_eq!(verify_bundle(&t.0, &node(&t), &sha, NodeCheck::Bytes).unwrap().claude_code.as_deref(), Some("9".repeat(64).as_str()));
 }
 
 #[test]
@@ -427,22 +493,23 @@ fn a_manifest_with_bad_paths_or_form_is_refused() {
         let mut m: serde_json::Value = serde_json::from_slice(&fs::read(t.0.join("agent/MANIFEST.json")).unwrap()).unwrap();
         m["files"][1]["path"] = edit;
         let sha = write_manifest(&t, &m);
-        assert_eq!(verify_bundle(&t.0, &sha).unwrap_err(), want, "{what}");
+        assert_eq!(verify_bundle(&t.0, &node(&t), &sha, NodeCheck::Bytes).unwrap_err(), want, "{what}");
     }
     for (what, f) in [
         ("listed twice", (|m: &mut serde_json::Value| { let x = m["files"][0].clone(); m["files"].as_array_mut().unwrap().push(x) }) as fn(&mut serde_json::Value)),
         ("mode 0700", |m| m["files"][0]["mode"] = "0700".into()),
         ("v 2", |m| m["v"] = 2.into()),
-        ("no claude_code", |m| { m.as_object_mut().unwrap().remove("claude_code"); }),
         ("a bad release hash", |m| m["agent"]["release_sha256"] = "xyz".into()),
-        ("the node path escaping", |m| m["node"]["path"] = "../sagebrush-node".into()),
+        ("a leftover node path", |m| m["node"]["path"] = "binaries/sagebrush-node".into()),
+        ("another key in node", |m| m["node"]["triple"] = "x".into()),
+        ("no node size", |m| { m["node"].as_object_mut().unwrap().remove("size"); }),
     ] {
         let t = Tmp::new("b-form");
         bundle(&t, false);
         let mut m: serde_json::Value = serde_json::from_slice(&fs::read(t.0.join("agent/MANIFEST.json")).unwrap()).unwrap();
         f(&mut m);
         let sha = write_manifest(&t, &m);
-        assert!(verify_bundle(&t.0, &sha).is_err(), "{what}");
+        assert!(verify_bundle(&t.0, &node(&t), &sha, NodeCheck::Bytes).is_err(), "{what}");
     }
 }
 
@@ -453,5 +520,150 @@ fn the_agent_folder_itself_a_link_is_refused() {
     let real = t.0.join("agent-real");
     fs::rename(t.0.join("agent"), &real).unwrap();
     std::os::unix::fs::symlink(&real, t.0.join("agent")).unwrap();
-    assert_eq!(verify_bundle(&t.0, &sha).unwrap_err(), BundleError::Link);
+    assert_eq!(verify_bundle(&t.0, &node(&t), &sha, NodeCheck::Bytes).unwrap_err(), BundleError::Link);
+}
+
+#[test]
+fn a_team_requirement_only_for_a_team_id_in_its_form() {
+    let r = team_requirement("ABCDE12345").unwrap();
+    assert!(r.starts_with("anchor apple generic and ") && r.ends_with("certificate leaf[subject.OU] = \"ABCDE12345\""), "{r}");
+    assert!(r.contains("certificate leaf[field.1.2.840.113635.100.6.1.13] exists"), "a Developer ID Application leaf");
+    for bad in ["", "ABCDE1234", "ABCDE123456", "abcde12345", "ABCDE 1234", "ABCD\"12345", "ABCDE1234\n", "ÄBCDE12345"] {
+        assert!(team_requirement(bad).is_none(), "{bad:?}");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn a_signed_build_check_off_macos_refuses() {
+    let t = Tmp::new("b-sig-off");
+    let sha = bundle(&t, false);
+    assert_eq!(verify_bundle(&t.0, &node(&t), &sha, NodeCheck::TeamSignature("ABCDE12345")).unwrap_err(), BundleError::NodeSignature);
+    assert_eq!(node_check(), NodeCheck::Bytes);
+}
+
+// A standalone Developer ID-signed executable to stand in for the signed Node: Chrome's crash handler (Chrome is on
+// the macOS CI runners and on the test Mac), copied, with its Team ID as codesign reports it.
+#[cfg(target_os = "macos")]
+fn signed_helper(t: &Tmp) -> (std::path::PathBuf, String) {
+    let src = Path::new("/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/Current/Helpers/chrome_crashpad_handler");
+    assert!(src.is_file(), "the signed stand-in {} isn't here", src.display());
+    let dst = t.0.join("signed-node");
+    fs::copy(src, &dst).unwrap();
+    fs::set_permissions(&dst, fs::Permissions::from_mode(0o755)).unwrap();
+    let out = std::process::Command::new("codesign").args(["-dv"]).arg(&dst).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stderr).to_string();
+    let team = text.lines().find_map(|l| l.strip_prefix("TeamIdentifier=")).expect("a Team ID").trim().to_string();
+    (dst, team)
+}
+
+/// Runs `args` on `file`, failing the test with the tool's own output when it doesn't succeed.
+#[cfg(target_os = "macos")]
+fn tool(args: &[&str], file: &Path) {
+    let out = std::process::Command::new(args[0]).args(&args[1..]).arg(file).output().unwrap();
+    assert!(out.status.success(), "{args:?} {}: {}{}", file.display(), String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+}
+
+/// A small program of the test's own, compiled here (Xcode's cc), executable.
+#[cfg(target_os = "macos")]
+fn own_program(t: &Tmp, name: &str) -> std::path::PathBuf {
+    use std::io::Write as _;
+    let out = t.0.join(name);
+    let mut cc = std::process::Command::new("cc").args(["-x", "c", "-o"]).arg(&out).arg("-").stdin(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
+    cc.stdin.take().unwrap().write_all(b"int main(void) { return 0; }\n").unwrap();
+    let r = cc.wait_with_output().unwrap();
+    assert!(r.status.success(), "cc: {}", String::from_utf8_lossy(&r.stderr));
+    fs::set_permissions(&out, fs::Permissions::from_mode(0o755)).unwrap();
+    out
+}
+
+#[cfg(target_os = "macos")]
+fn bundle_signed(t: &Tmp) -> (String, std::path::PathBuf, String) {
+    let sha = bundle(t, false);
+    let (node, team) = signed_helper(t);
+    (sha, node, team)
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_signed_node_of_the_apps_team_passes_and_another_team_or_signature_is_refused() {
+    let t = Tmp::new("b-sig");
+    let (sha, n, team) = bundle_signed(&t);
+    // (the bytes differ from the manifest's: only the signature counts in a signed build)
+    assert_eq!(verify_bundle(&t.0, &n, &sha, NodeCheck::Bytes).unwrap_err(), BundleError::Size);
+    assert!(verify_bundle(&t.0, &n, &sha, NodeCheck::TeamSignature(&team)).is_ok());
+    let other = if team == "ABCDE12345" { "ZYXWV98765" } else { "ABCDE12345" };
+    assert_eq!(verify_bundle(&t.0, &n, &sha, NodeCheck::TeamSignature(other)).unwrap_err(), BundleError::NodeSignature, "another team");
+    assert_eq!(verify_bundle(&t.0, &n, &sha, NodeCheck::TeamSignature(&team.to_lowercase())).unwrap_err(), BundleError::NodeSignature, "a Team ID not in its form");
+    // (Apple's own platform binary: Apple's anchor, but no Developer ID leaf of this team)
+    let ls = t.0.join("apple-ls");
+    fs::copy("/bin/ls", &ls).unwrap();
+    assert_eq!(verify_bundle(&t.0, &ls, &sha, NodeCheck::TeamSignature(&team)).unwrap_err(), BundleError::NodeSignature, "an Apple platform binary");
+    // (signed ad hoc, and unsigned: a program of the test's own, so no other vendor's signature is rewritten)
+    let adhoc = own_program(&t, "adhoc-node");
+    tool(&["codesign", "-f", "-s", "-"], &adhoc);
+    assert_eq!(verify_bundle(&t.0, &adhoc, &sha, NodeCheck::TeamSignature(&team)).unwrap_err(), BundleError::NodeSignature, "ad hoc");
+    let unsigned = own_program(&t, "unsigned-node");
+    tool(&["codesign", "--remove-signature"], &unsigned);
+    assert_eq!(verify_bundle(&t.0, &unsigned, &sha, NodeCheck::TeamSignature(&team)).unwrap_err(), BundleError::NodeSignature, "unsigned");
+    // (one byte changed, early in the file and near its middle: each architecture's code is checked)
+    let len = fs::metadata(&n).unwrap().len();
+    for at in [20_000u64, len / 2] {
+        let bad = t.0.join(format!("bad-node-{at}"));
+        fs::copy(&n, &bad).unwrap();
+        let mut b = fs::read(&bad).unwrap();
+        b[at as usize] ^= 0x01;
+        fs::write(&bad, &b).unwrap();
+        fs::set_permissions(&bad, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(verify_bundle(&t.0, &bad, &sha, NodeCheck::TeamSignature(&team)).unwrap_err(), BundleError::NodeSignature, "a byte changed at {at}");
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_signed_node_must_still_be_a_plain_executable_file() {
+    let t = Tmp::new("b-sig-shape");
+    let (sha, n, team) = bundle_signed(&t);
+    let link = t.0.join("node-link");
+    std::os::unix::fs::symlink(&n, &link).unwrap();
+    assert_eq!(verify_bundle(&t.0, &link, &sha, NodeCheck::TeamSignature(&team)).unwrap_err(), BundleError::Link);
+    assert_eq!(verify_bundle(&t.0, &t.0.join("no-node"), &sha, NodeCheck::TeamSignature(&team)).unwrap_err(), BundleError::Missing);
+    fs::set_permissions(&n, fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(verify_bundle(&t.0, &n, &sha, NodeCheck::TeamSignature(&team)).unwrap_err(), BundleError::Mode, "not executable");
+    fs::set_permissions(&n, fs::Permissions::from_mode(0o757)).unwrap();
+    assert_eq!(verify_bundle(&t.0, &n, &sha, NodeCheck::TeamSignature(&team)).unwrap_err(), BundleError::Mode, "writable by others");
+    fs::set_permissions(&n, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(verify_bundle(&t.0, &n, &sha, NodeCheck::TeamSignature(&team)).is_ok());
+    // (the agent's own files are still checked exactly in a signed build)
+    fs::write(t.0.join("agent/node_modules/dep/evil.js"), b"x").unwrap();
+    assert_eq!(verify_bundle(&t.0, &n, &sha, NodeCheck::TeamSignature(&team)).unwrap_err(), BundleError::Extra);
+}
+
+// The bundle app/engine/bundle.mjs built beside this crate (CI runs it before these tests): the real tree, the
+// manifest sha256 build.rs compiled in, and the Node it put in binaries/, as an unsigned build checks them.
+#[test]
+fn the_bundle_bundle_mjs_built_passes() {
+    let sha = env!("SAGEBRUSH_AGENT_MANIFEST_SHA256");
+    if sha.is_empty() {
+        assert!(std::env::var_os("CI").is_none(), "CI bundles the agent (app/engine/bundle.mjs) before the app's tests");
+        return;
+    }
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let nodes: Vec<_> = fs::read_dir(dir.join("binaries")).unwrap().map(|e| e.unwrap().path()).filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("sagebrush-node-")).collect();
+    assert_eq!(nodes.len(), 1, "one Node in binaries/: {nodes:?}");
+    let v = verify_bundle(dir, &nodes[0], sha, NodeCheck::Bytes).unwrap();
+    assert_eq!(v.claude_code, None, "no Claude Code in this build");
+    assert_eq!(v.node, "24.21.0");
+    // (and one byte of a real module changed is refused)
+    let f = dir.join("agent/package/lib/fleet/bytes.mjs");
+    let f = if f.exists() { f } else { dir.join("agent/package/bin/sagebrush-agent.mjs") };
+    let orig = fs::read(&f).unwrap();
+    let mut b = orig.clone();
+    b[0] ^= 0x01;
+    fs::set_permissions(&f, fs::Permissions::from_mode(0o644)).unwrap();
+    fs::write(&f, &b).unwrap();
+    let r = verify_bundle(dir, &nodes[0], sha, NodeCheck::Bytes);
+    fs::write(&f, &orig).unwrap();
+    assert_eq!(r.unwrap_err(), BundleError::Hash);
+    assert!(verify_bundle(dir, &nodes[0], sha, NodeCheck::Bytes).is_ok(), "restored");
 }

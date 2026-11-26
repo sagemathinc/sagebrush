@@ -273,6 +273,7 @@ numpy.random.RandomState
 numpy.random.SeedSequence
 numpy.random.choice
 numpy.random.exponential
+numpy.random.gamma
 numpy.random.get_state
 numpy.random.normal
 numpy.random.permutation
@@ -285,6 +286,7 @@ numpy.random.sample
 numpy.random.set_state
 numpy.random.shuffle
 numpy.random.standard_exponential
+numpy.random.standard_gamma
 numpy.random.standard_normal
 numpy.random.uniform
 numpy.reciprocal

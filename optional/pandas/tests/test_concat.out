@@ -1,0 +1,258 @@
+== rows
+
+     a  b    c
+0  1.0  u  NaN
+1  2.0  v  NaN
+7  NaN  w  0.5
+== rows.dtypes
+[('a', 'float64'), ('b', 'str'), ('c', 'float64')]
+== rows.index
+Index([0, 1, 7], dtype='int64')
+== rows-ignore-index
+
+     a  b    c
+0  1.0  u  NaN
+1  2.0  v  NaN
+2  NaN  w  0.5
+== rows-ignore-index.index
+RangeIndex(start=0, stop=3, step=1)
+== rows-inner
+
+   b
+0  u
+1  v
+7  w
+== rows-same
+
+   a  b
+0  1  u
+1  2  v
+0  1  u
+1  2  v
+== rows-same.index
+Index([0, 1, 0, 1], dtype='int64')
+== rows-range-continues
+RangeIndex(start=0, stop=2, step=1)
+== rows-range-continues-2
+RangeIndex(start=0, stop=3, step=1)
+== rows-range-then-labels-2
+RangeIndex(start=0, stop=3, step=1)
+== rows-range-then-labels-3-5
+Index([0, 1, 3, 5], dtype='int64')
+== rows-range-then-labels-3
+Index([0, 1, 3], dtype='int64')
+== rows-range-then-labels-2-4
+Index([0, 1, 2, 4], dtype='int64')
+== rows-range-then-labels-2-3-4
+RangeIndex(start=0, stop=5, step=1)
+== rows-range-then-labels-
+RangeIndex(start=0, stop=2, step=1)
+== rows-labels-then-range
+Index([-1, 0, 1], dtype='int64')
+== rows-float-then-range
+Index([0.0, 0.0, 1.0], dtype='float64')
+== rows-range-then-float
+Index([0.0, 1.0, 2.0], dtype='float64')
+== rows-ranges-apart
+Index([0, 1, 4, 5], dtype='int64')
+== rows-ranges-step
+RangeIndex(start=0, stop=6, step=2)
+== rows-one-range
+RangeIndex(start=3, stop=9, step=6)
+== rows-empty-int-column
+[('a', 'int64')]
+== rows-empty-float-column
+[('a', 'float64')]
+== rows-empty-str-column
+[('a', 'object')]
+== rows-nan-int
+[('a', 'float64')]
+== rows-nan-bool
+[('a', 'object')]
+== rows-nan-str
+[('a', 'object')]
+== series-empty-object
+dtype('O')
+== series-empty-float
+
+0    1.0
+1    2.0
+dtype: float64
+== rows-columns-order
+
+     b  a    c
+0  1.0  2  NaN
+0  NaN  2  1.0
+== rows-columns-sort
+
+   a    b    c
+0  2  1.0  NaN
+0  2  NaN  1.0
+== rows-columns-reordered
+
+   b  a
+0  1  2
+0  2  1
+== rows-bool-gap
+[('f', 'object'), ('g', 'float64')]
+== rows-bool-gap.values
+
+      f    g
+0  True  NaN
+0   NaN  1.0
+== rows-str-gap
+[('a', 'int64'), ('b', 'str')]
+== rows-datetime-gap
+
+           t    u
+0 2020-01-01  NaN
+0        NaT  1.0
+== rows-uint8-gap
+[('a', 'float64'), ('b', 'float64')]
+== rows-empty-frame
+
+   a  b
+0  1  u
+1  2  v
+== rows-empty-object-column
+[('a', 'float64'), ('b', 'str')]
+== rows-named-index
+
+   a
+b   
+u  1
+v  2
+u  1
+v  2
+== rows-none-skipped
+
+   a  b
+0  1  u
+1  2  v
+== rows-tuple
+(4, 2)
+== rows-generator
+(4, 2)
+== rows-frame-and-series
+
+     a    b    0
+0  1.0    u  NaN
+1  2.0    v  NaN
+0  NaN  NaN  9.0
+== rows-verify-ok
+(4, 2)
+== rows-verify
+!! ValueError: Indexes have overlapping values: Index([0, 1], dtype='int64')
+== series
+
+0    1.0
+1    2.0
+0    3.5
+Name: p, dtype: float64
+== series.index
+Index([0, 1, 0], dtype='int64')
+== series-names-differ
+
+0    1.0
+1    2.0
+0    3.5
+dtype: float64
+== series-ignore-index
+
+0    1.0
+1    2.0
+2    3.5
+Name: p, dtype: float64
+== series-str-int
+
+0    a
+0    1
+dtype: object
+== series-bool-int
+
+0    True
+0       1
+dtype: object
+== series-uint8-int8
+
+0    1
+0    2
+dtype: int16
+== series-datetime-float
+
+0    2020-01-01 00:00:00
+0                    1.5
+dtype: object
+== series-index-str-int
+Index(['a', 0], dtype='object')
+== columns
+
+   a  b      c
+0  1  u   True
+1  2  v  False
+== columns-axis-name
+
+   a  b  a  b
+0  1  u  1  u
+1  2  v  2  v
+== columns-misaligned
+
+   a  b     c
+0  1  u   NaN
+1  2  v  True
+== columns-misaligned.dtypes
+[('a', 'int64'), ('b', 'str'), ('c', 'object')]
+== columns-series
+
+   p  0
+0  1  3
+1  2  4
+== columns-unnamed-series
+
+   0  1  z
+0  1  2  3
+== columns-frame-and-series
+
+   a  b  0
+0  1  u  5
+1  2  v  6
+== columns-union-order
+
+     p    q
+2  1.0  NaN
+1  2.0  NaN
+3  NaN  3.0
+== columns-union-sort
+
+     p    q
+1  2.0  NaN
+2  1.0  NaN
+3  NaN  3.0
+== columns-inner
+
+   p  q
+1  2  3
+== columns-ignore-index
+
+   0  1  2  3
+0  1  u  1  u
+1  2  v  2  v
+== columns-verify
+!! ValueError: Indexes have overlapping values: Index(['a', 'b'], dtype='str')
+== empty-list
+!! ValueError: No objects to concatenate
+== all-none
+!! ValueError: All objects passed were None
+== not-pandas
+!! TypeError: cannot concatenate object of type '<class 'int'>'; only Series and DataFrame objs are valid
+== one-frame
+!! TypeError: first argument must be an iterable of pandas objects, you passed an object of type "DataFrame"
+== bad-join
+!! ValueError: Only can inner (intersect) or outer (union) join the other axis
+== bad-axis
+!! ValueError: No axis named 2 for object type DataFrame
+== originals-kept
+(   a  b
+0  1  u
+1  2  v,    b    c
+7  w  0.5)

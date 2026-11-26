@@ -32,9 +32,14 @@ export const TYPES = Object.freeze({
   "sb.audit-checkpoint.v1": ["host"],
   "sb.audit-continuity.v1": ["host"],
   "sb.audit-ack.v1": ["service"],
+  "sb.agent-transfer.v1": ["device"],
+  "sb.agent-transfer-receipt.v1": ["service"],
+  "sb.agent-fence-ack.v1": ["host"],
+  "sb.lease-request.v1": ["host"],
+  "sb.execution-lease.v1": ["lease"],
 });
 
-const KINDS = new Set(["device", "host", "recovery", "service"]);
+const KINDS = new Set(["device", "host", "recovery", "service", "lease"]);
 const exactKeys = (o, keys) =>
   o && typeof o === "object" && !Array.isArray(o) && Object.keys(o).length === keys.length && keys.every((k) => Object.hasOwn(o, k));
 
