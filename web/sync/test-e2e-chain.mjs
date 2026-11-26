@@ -502,6 +502,8 @@ await section("a reset never draws on the appends' bucket, and only verified res
   const g = await W.genesis();
   ok((await post(s, V, "/api/sync/v1/e2e/chain", g.body)).status === 201, "(genesis)");
   const junk = await W.add(g.next, g.d);
+  // (the server's E2E clock held still, so no bucket refills however long this section takes)
+  await seam(V, { freeze: true });
   // (the appends' bucket drained, as a compromised device could)
   for (let i = 0; i < 31; i++) await post(s, V, "/api/sync/v1/e2e/chain", { ...junk.body, wrappers: [] });
   ok((await post(s, V, "/api/sync/v1/e2e/chain", junk.body)).status === 429, "(the appends' bucket is drained)");
@@ -522,6 +524,7 @@ await section("a reset never draws on the appends' bucket, and only verified res
   }
   const fifth = await W.reset(st);
   ok((await post(s, V, "/api/sync/v1/e2e/chain", fifth.body)).status === 429, "a fifth verified reset within the minute waits (the reset bucket is charged only by verified resets)");
+  await seam(V, { freeze: false });
 });
 
 await section("each stored keyring links to the stored one before it", async () => {
@@ -602,7 +605,8 @@ await section("a claimed reset's preflight: one signature check before any packa
   ok(c1.preflights === c0.preflights && c1.transitions === c0.transitions && c1.replays === c0.replays && c0.replays === 0, "an invalid recovery signature costs no replay and no countersignature, keyring or wrapper check, even on a cold object: " + JSON.stringify([c0, c1].map((c) => [c.replays, c.transitions])));
   // (c) recovery-signed resets with a torn package: each passes the preflight and is charged to the work bucket (30)
   const torn = await W.reset(g.next);
-  // (the bucket refills at half a token a second, so the first refusal comes after at least 30 checked attempts)
+  // (the server's E2E clock held still: the bucket doesn't refill, so the first refusal comes after exactly 30)
+  await seam(O, { freeze: true });
   let checked = 0, limited = null;
   for (let i = 0; i < 80 && limited === null; i++) {
     const before = await seamAll(O, {});
@@ -612,8 +616,9 @@ await section("a claimed reset's preflight: one signature check before any packa
     else if (st === 429) limited = after.transitions === before.transitions && after.preflights === before.preflights + 1 ? "ok" : "429 with a check";
     else limited = "status " + st;
   }
-  ok(checked >= 30, "each recovery-signed attempt with a torn package runs its package check, at least 30 before any wait: " + checked);
+  ok(checked === 30, "each recovery-signed attempt with a torn package runs its package check, 30 before any wait: " + checked);
   ok(limited === "ok", "then one waits: the work bucket bounds them, and the waiting one runs no package check: " + limited);
+  await seam(O, { freeze: false });
 });
 
 await section("many invalid resets don't stop the next valid one", async () => {
