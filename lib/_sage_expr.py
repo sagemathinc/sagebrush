@@ -16,7 +16,7 @@ import _display_budget
 from _display_budget import _charge
 
 try:  # the CPython package
-    from sagebrush._native import sym_call as _raw
+    from _sagebrush_lib._native import sym_call as _raw
 except ImportError:  # pyjs: the engine is linked into the runtime
     import _sbengine
     _raw = _sbengine.sym

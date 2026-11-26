@@ -1,0 +1,154 @@
+== str
+
+species
+setosa        2
+virginica     2
+versicolor    1
+Name: count, dtype: int64
+== str.index
+Index(['setosa', 'virginica', 'versicolor'], dtype='str', name='species')
+== str-dropna-false
+
+species
+setosa        2
+virginica     2
+versicolor    1
+NaN           1
+Name: count, dtype: int64
+== str-normalize
+
+species
+setosa        0.4
+virginica     0.4
+versicolor    0.2
+Name: proportion, dtype: float64
+== str-normalize-dropna-false
+
+species
+setosa        0.333333
+virginica     0.333333
+versicolor    0.166667
+NaN           0.166667
+Name: proportion, dtype: float64
+== str-ascending
+
+species
+versicolor    1
+setosa        2
+virginica     2
+Name: count, dtype: int64
+== str-no-sort
+
+species
+setosa        2
+virginica     2
+versicolor    1
+Name: count, dtype: int64
+== ties-first-appearance
+
+x    2
+y    2
+Name: count, dtype: int64
+== ties-ascending
+
+c    1
+b    2
+a    2
+Name: count, dtype: int64
+== float
+
+ 1.5    2
+-0.0    2
+ 2.0    1
+Name: count, dtype: int64
+== float-dropna-false
+
+ 1.5    2
+ NaN    2
+-0.0    2
+ 2.0    1
+Name: count, dtype: int64
+== float-dropna-false.index
+Index([1.5, nan, -0.0, 2.0], dtype='float64')
+== neg-zero-first
+
+-0.0    2
+ 1.0    1
+Name: count, dtype: int64
+== int
+
+target
+1    3
+0    3
+2    1
+Name: count, dtype: int64
+== int-normalize
+
+target
+1    0.428571
+0    0.428571
+2    0.142857
+Name: proportion, dtype: float64
+== int-no-sort
+
+target
+1    3
+0    3
+2    1
+Name: count, dtype: int64
+== bool
+
+True     2
+False    1
+Name: count, dtype: int64
+== bool.index
+Index([True, False], dtype='bool')
+== uint8.index
+Index([3, 1], dtype='uint8')
+== datetime
+
+2020-01-01    2
+NaT           1
+Name: count, dtype: int64
+== object
+
+1       2
+a       1
+None    1
+Name: count, dtype: int64
+== empty
+
+Series([], Name: count, dtype: int64)
+== empty-normalize
+
+Series([], Name: proportion, dtype: float64)
+== all-missing
+
+Series([], Name: count, dtype: int64)
+== all-missing-dropna-false
+
+NaN    2
+Name: count, dtype: int64
+== named-index-ignored
+
+1    2
+Name: count, dtype: int64
+== frame-column
+
+c
+a    2
+b    1
+Name: count, dtype: int64
+== sum
+5
+== proportions-sum
+1.0
+== original-kept
+
+0        setosa
+1     virginica
+2     virginica
+3        setosa
+4    versicolor
+5           NaN
+Name: species, dtype: str

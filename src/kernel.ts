@@ -16,7 +16,7 @@
 
 import { createHmac, randomUUID } from "crypto";
 import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, realpathSync, statSync, copyFileSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, resolve } from "path";
 import { homedir } from "os";
 import { Worker, parentPort, workerData } from "worker_threads";
 import { sessionLimits, startLimits } from "./limits";
@@ -52,14 +52,16 @@ function jupyterDataDir(args: string[]): string {
   if (i >= 0) {
     const p = args[i + 1];
     if (!p) throw new Error("--prefix needs a directory");
-    return join(p, "share", "jupyter");
+    // (absolute: kernel.json names the files installed under it, and Jupyter
+    // starts the kernel from wherever it is running, not from here)
+    return join(resolve(p), "share", "jupyter");
   }
   if (args.includes("--sys-prefix")) {
     const p = process.env.CONDA_PREFIX || process.env.VIRTUAL_ENV;
     if (!p) throw new Error("--sys-prefix: activate a conda or virtual environment first (or use --prefix DIR)");
     return join(p, "share", "jupyter");
   }
-  if (process.env.JUPYTER_DATA_DIR) return process.env.JUPYTER_DATA_DIR;
+  if (process.env.JUPYTER_DATA_DIR) return resolve(process.env.JUPYTER_DATA_DIR);
   if (process.platform === "darwin") return join(homedir(), "Library", "Jupyter");
   if (process.platform === "win32") return join(process.env.APPDATA || join(homedir(), "AppData", "Roaming"), "jupyter");
   return join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "jupyter");
@@ -114,7 +116,9 @@ export function installKernel(args: string[], uninstall = false): number {
     const f = args.indexOf("--figures");
     const figures = f >= 0 ? args[f + 1] : null;
     if (figures !== null && !FIGURE_MODES.includes(figures)) throw new Error(`--figures must be ${FIGURE_MODES.join(", ")}, not ${figures}`);
-    const base = join(jupyterDataDir(args), "kernels");
+    // Jupyter starts in the notebook's directory, not the installer's.
+    // In particular the copied bundle in argv must never stay relative.
+    const base = resolve(jupyterDataDir(args), "kernels");
     for (const mode of modes(args)) {
       const spec = SPECS[mode];
       const dir = join(base, spec.dir);

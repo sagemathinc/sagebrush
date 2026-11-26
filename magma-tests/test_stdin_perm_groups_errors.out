@@ -1,0 +1,55 @@
+
+>> G!(1,2);
+    ^
+Runtime error in '!': Illegal coercion
+LHS: GrpPerm
+RHS: GrpPermElt
+
+>> sub<G | (1,2)>;
+      ^
+Runtime error in sub< ... >: Can not build a generator from the arguments given
+
+
+>> (1,2)(3,4) in G;
+   ^
+Runtime error in elt< ... >: No permutation group context in which to create 
+cycle
+
+
+>> Alt(0);
+      ^
+Runtime error in 'Alt': Argument 1 (0) should be >= 1
+
+
+>> CyclicGroup(0);
+              ^
+Runtime error in 'CyclicGroup': Argument 1 (0) should be >= 1
+
+
+>> PermutationGroup<0 | >;
+                   ^
+Runtime error in 'SymmetricGroup': Argument 1 (0) should be >= 1
+
+
+>> Orbit(G, 5);
+        ^
+Runtime error in 'Orbit': Cannot apply permutation to this object
+
+
+>> Stabilizer(G, 0);
+             ^
+Runtime error in 'Stabilizer': Cannot compute stabilizer of this object
+
+
+>> Orbits(5);
+         ^
+Runtime error in 'Orbits': Bad argument types
+Argument types given: RngIntElt
+
+
+>> IsAbelian([1, 2]);
+            ^
+Runtime error in 'IsAbelian': Bad argument types
+Argument types given: SeqEnum[RngIntElt]
+
+end

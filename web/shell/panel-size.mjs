@@ -33,7 +33,10 @@ import { readPage } from "../../scripts/notebook-page.mjs";
 // surface, the line and output requests' checks, and a line or paste admitted whole against what its statement has
 // left, measured 471 393 / 131 554 on master 05e75348's 468 049 / 130 575 (+3 344 / +979); the ceilings at that
 // measurement + 64)
-const LIMIT_RAW = 471457, LIMIT_GZIP = 131618;
+// (the page's terminals showing every colour at a contrast of at least 4.5:1, and the light theme's bright white as a
+// grey that reads (web/term/xterm-view.ts, shared with this chunk): measured by CI 471 459 / 131 578 against 471 393 /
+// 131 554 (+66 / +24); the ceilings at that measurement + 64)
+const LIMIT_RAW = 471523, LIMIT_GZIP = 131642;
 const root = join(import.meta.dir, "..", "..");
 const dist = join(root, "web", "dist");
 const fails = [];

@@ -1,0 +1,135 @@
+== float-float
+
+0    1.5
+1    0.0
+2    3.0
+Name: f, dtype: float64
+== float-int
+
+0    1.5
+1    0.0
+2    3.0
+Name: f, dtype: float64
+== float-str
+
+0        1.5
+1    missing
+2        3.0
+Name: f, dtype: object
+== float-bool
+
+0     1.5
+1    True
+2     3.0
+Name: f, dtype: object
+== float-none
+
+0    1.5
+1    NaN
+2    3.0
+Name: f, dtype: float64
+== float-no-nan
+
+0    1.0
+1    2.0
+dtype: float64
+== int
+
+0    1
+1    2
+dtype: int64
+== int-str
+
+0    1
+1    2
+dtype: int64
+== str-str
+
+0    a
+1    b
+2    c
+dtype: str
+== str-int
+
+0    a
+1    0
+2    c
+dtype: object
+== object
+
+0    1
+1    0
+2    x
+dtype: object
+== bool
+
+0     True
+1    False
+dtype: bool
+== series-dict
+
+0    1.5
+1    9.0
+2    3.0
+Name: f, dtype: float64
+== all-nan
+
+0   -1.0
+1   -1.0
+dtype: float64
+== original-kept
+
+0    1.5
+1    NaN
+2    3.0
+Name: f, dtype: float64
+== frame.scalar
+
+    age town  n
+0  22.0    S  1
+1   0.0    0  2
+2  26.0    C  3
+3   0.0    S  4
+== frame.scalar-dtypes
+[('age', 'float64'), ('town', 'object'), ('n', 'int64')]
+== frame.dict
+
+    age town  n
+0  22.0    S  1
+1  24.0    Q  2
+2  26.0    C  3
+3  24.0    S  4
+== frame.dict-dtypes
+[('age', 'float64'), ('town', 'str'), ('n', 'int64')]
+== frame.dict-unknown-col
+
+    age town  n
+0  22.0    S  1
+1   NaN  NaN  2
+2  26.0    C  3
+3   NaN    S  4
+== frame.str-value
+[('age', 'object'), ('town', 'str'), ('n', 'int64')]
+== frame.str-value-values
+
+    age town  n
+0  22.0    S  1
+1     ?    ?  2
+2  26.0    C  3
+3     ?    S  4
+== frame.no-value
+!! TypeError: NDFrame.fillna() missing 1 required positional argument: 'value'
+== frame.original-kept
+
+    age town  n
+0  22.0    S  1
+1   NaN  NaN  2
+2  26.0    C  3
+3   NaN    S  4
+== frame.median
+
+    age town  n
+0  22.0    S  1
+1  26.0  NaN  2
+2  26.0    C  3
+3  26.0    S  4

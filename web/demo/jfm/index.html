@@ -40,7 +40,7 @@
 <main>
   <div class="kicker">Journal of Fluid Mechanics · JFM Notebooks · Sagebrush</div>
   <h1>Interactive JFM figures that run entirely in the reader's browser</h1>
-  <p class="lead">These are the vortex structures from a published JFM Notebook. The notebook itself runs here unmodified: <code>k3d</code>, <code>scipy.io.loadmat</code> and <code>numpy</code>. It runs on Sagebrush, a Python and Sage environment compiled to WebAssembly. Nothing is computed on a server. The page loads the published data, builds a mesh of half a million triangles, and you can turn it, zoom into it, and fly through it.</p>
+  <p class="lead">These are the vortex structures from a published JFM Notebook. The notebook itself runs here unmodified: <code>k3d</code>, <code>scipy.io.loadmat</code> and <code>numpy</code>. It runs on Sagebrush, a Python and Sage environment compiled to JavaScript and WebAssembly. Nothing is computed on a server. The page loads the published data, builds a mesh of half a million triangles, and you can turn it, zoom into it, and fly through it.</p>
 
   <div class="cards">
     <div class="card">
@@ -127,7 +127,7 @@
   <h2>Why this matters for publishing</h2>
   <ul>
     <li><b>The reader's own device does the work.</b> No kernel and no server process is started for each reader, so a figure costs the publisher a static file and nothing more. It loads quickly anywhere, and a downloaded 3D view works offline.</li>
-    <li><b>The published notebook is the figure.</b> “Run the notebook” opens the article's own <code>.ipynb</code> with its data and executes it in the page. In a few seconds the reader can change the color range, the colormap or the threshold and rerun it.</li>
+    <li><b>The published notebook is the figure.</b> “Run the notebook” opens the article's own <code>.ipynb</code> with its data in the page, and “Run all” executes it there. In a few seconds the reader can change the color range, the colormap or the threshold and rerun it.</li>
     <li><b>Archival and open.</b> The 3D view is one self-contained HTML file with the data inside. It has a static image and a text description for readers and tools that do not run scripts. Sagebrush is open source (MIT or Apache-2.0).</li>
     <li><b>It scales to a whole collection.</b> The same runtime can serve every notebook in the series. We plan to run all of them.</li>
   </ul>
