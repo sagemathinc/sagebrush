@@ -1,7 +1,10 @@
 # The remote's container image (docker/remote). `image` builds and smoke-tests it on every event, with a read-only
-# token. `publish` (only on a release tag, or a manual run asking to push) needs `image` to have passed, rebuilds
-# from the same trusted ref, and pushes ghcr.io/sagemathinc/sagebrush-remote as :latest and :<sagebrush version>.
+# token. `publish` needs `image` to have passed, rebuilds from the same trusted ref, and pushes
+# ghcr.io/sagemathinc/sagebrush-remote as :latest and :<sagebrush version>; it runs only in this repository, and only
+# for code that reached protected master: a manual run asking to push, on master itself, or a vX.Y.Z tag whose exact
+# commit passed full CI on master (release.yml's check), with the tag's version the built image's own.
 # Only `publish` can write packages, and its token is in the login step alone, never in a build or a container.
+# (scripts/test-remote-image-guard.mjs evaluates publish's if: over the events and runs its checks against stubs)
 name: remote-image
 on:
   pull_request:
@@ -39,13 +42,23 @@ jobs:
         run: docker/remote/smoke.sh sagebrush-remote:ci
   publish:
     needs: image
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.push)
+    if: github.repository == 'sagemathinc/sagebrush' && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.push && github.ref == 'refs/heads/master'))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
+      actions: read # the tagged commit's full CI, checked before anything is built
       contents: read
       packages: write
     steps:
+      - name: require green full CI on master for the tagged commit (release.yml's check)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ok=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&status=completed&per_page=100" \
+            --jq '[.workflow_runs[] | select(.conclusion == "success" and (.event == "push" or .event == "workflow_dispatch") and .head_branch == "master")] | length')
+          [ "$ok" -gt 0 ] || { echo "No successful full ci.yml run on master for $GITHUB_SHA"; exit 1; }
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
@@ -59,6 +72,10 @@ jobs:
           set -euo pipefail
           v=$(docker run --rm --entrypoint sagebrush sagebrush-remote:ci --version | awk '{print $2}')
           [[ $v =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected version: $v"; exit 1; }
+          # (a tag publishes only the version it names: vX.Y.Z must be the built image's sagebrush)
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            [ "$GITHUB_REF_NAME" = "v$v" ] || { echo "the tag $GITHUB_REF_NAME isn't the image's version v$v"; exit 1; }
+          fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: log in to GHCR
         env:
