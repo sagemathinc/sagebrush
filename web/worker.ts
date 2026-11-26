@@ -82,7 +82,9 @@ import { setStreamClock } from "../src/runtime/builtins";
 import { notebookSession } from "../src/notebook-session";
 import { waitForLine } from "../src/stdin-wait";
 import { LIVE_DEADLINE_MS, LIVE_MAX_BYTES, waitForAnswer, type LiveAnswer } from "../src/live-data";
-import type { LiveRequest } from "../src/notebook-session";
+import type { FsCall, LiveRequest } from "../src/notebook-session";
+import { exchange, FS_BUFFER_BYTES, type FsHeader, type FsIo } from "../src/sbfs";
+import { hostRelease, hostReserve } from "../src/runtime/engine";
 import { LIMITS_MAX_BYTES, utf8Bytes, type LimitsText } from "../src/limits";
 import { modeOfFlags } from "../src/modes";
 import { useSet, prefetchFor, onPkgUse, SetUnfetched } from "./pkgset-browser";
@@ -136,11 +138,31 @@ function liveData(req: LiveRequest): LiveAnswer | null {
   postMessage({ id: req.id, target: req.target, liveData: { op: req.op, params: req.params, key }, buffer });
   return waitForAnswer(buffer, R.INTR, LIVE_DEADLINE_MS);
 }
+// sagebrush:// (src/sbfs.ts): sagebrush.fs's closed operations, asked of the page as live data is, on this worker's one
+// transport buffer (FS_BUFFER_BYTES, made at the first call and kept: a fixed size per worker), reserved in the
+// engine's ledger for each call and released after it (exchange, design sagebrush-fsspec r3 §6.3).  The key
+// correlates the answer; it authorizes nothing: the page binds the call to this worker itself
+// (web/notebook/sb-fs.js).  No shared memory: unavailable.
+const FS_TAG = Math.random().toString(36).slice(2, 10);
+let fsCount = 0;
+let fsBuffer: SharedArrayBuffer | null = null;
+function sbFs(req: FsCall, sink: (piece: Uint8Array, at: number) => void): FsHeader | null {
+  if (typeof SharedArrayBuffer !== "function" || !(R.INTR.buffer instanceof SharedArrayBuffer) || !(globalThis as any).crossOriginIsolated) return null;
+  const io: FsIo = {
+    post: (m) => postMessage(m),
+    intr: R.INTR,
+    buffer: () => (fsBuffer ??= new SharedArrayBuffer(FS_BUFFER_BYTES)),
+    reserve: hostReserve,
+    release: hostRelease,
+  };
+  return exchange(io, FS_TAG, ++fsCount, req, sink);
+}
 // (the streams flush by the real clock, not the one a run's replay records: web/replay-env.ts)
 setStreamClock(replayEnv.now);
 const session = notebookSession((m) => postMessage(m), {
   stdin,
   liveData,
+  sbFs,
   limits,
   runs: {
     begin: (m) => {

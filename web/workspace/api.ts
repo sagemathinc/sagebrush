@@ -1445,6 +1445,17 @@ export class Workspace {
       return (await req(tx.objectStore("entries").getAll(after === null ? undefined : IDBKeyRange.lowerBound(after, true), limit))) as Entry[];
     });
   }
+  /** The account and generation this workspace syncs under (its lease, `sync:current`, whose namespace is
+   * "<account hash>:<generation>"), or null while sync is off: what a blob request binds itself to (x-sync-account,
+   * x-sync-generation, CORR-PR58-1), as the sync client's own blob requests do. */
+  async syncBinding(): Promise<{ account: string; generation: number } | null> {
+    this.open();
+    const cur = (await inTx(this.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get("sync:current")))) as { ns?: unknown; off?: boolean } | undefined;
+    if (!cur || cur.off || typeof cur.ns !== "string") return null;
+    const [account, gen] = cur.ns.split(":");
+    const generation = Number(gen);
+    return /^[0-9a-f]{64}$/.test(account) && Number.isSafeInteger(generation) && generation >= 0 ? { account, generation } : null;
+  }
   /** Up to `limit` op records after seq `after`, in order. */
   async opsPage(after: number, limit: number): Promise<Op[]> {
     return inTx(this.ws, "ops", "readonly", (tx) => req(tx.objectStore("ops").getAll(IDBKeyRange.lowerBound(after, true), limit)));

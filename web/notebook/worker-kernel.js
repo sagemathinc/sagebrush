@@ -154,8 +154,12 @@ export class WorkerKernel {
    *   settings given wrongly are never the defaults (astra CORR-FF93-1)
    * @param {{admit: Function, abort: Function}} [o.live] live data's admission (web/notebook/live-data.js's
    *   LiveCalls, with the adapter that holds the reader's key); none: every live-data request is unavailable
+   * @param {{fs: {attach: Function, detach: Function, admit: Function, ack: Function, cancel: Function}, own: () => string | null} | null} [o.files]
+   *   sagebrush://'s admission (web/notebook/sb-fs.js's FsCalls) and the kernel's own workspace: each worker this kernel
+   *   starts is recorded with it, the one source of its calls' scope; none: every sagebrush:// request goes unanswered
+   *   (the worker's wait times out as unavailable)
    */
-  constructor({ createWorker, onStart, onMessage, limits = null, live = null }) {
+  constructor({ createWorker, onStart, onMessage, limits = null, live = null, files = null }) {
     this.uid = ++WorkerKernel.count; // (one of several: a page may run one per notebook)
     this.createWorker = createWorker;
     this.limits = limits === undefined ? null : limits;
@@ -197,6 +201,8 @@ export class WorkerKernel {
     this.stoppedThrough = 0;
     // live data's admission (web/notebook/live-data.js): one for every worker this kernel starts
     this.live = live ?? NO_LIVE_DATA;
+    // sagebrush://'s admission and this kernel's own workspace (web/notebook/sb-fs.js)
+    this.files = files;
     // where output addressed to an @interact goes (set by the notebook)
     this.targetSink = () => null;
   }
@@ -220,7 +226,10 @@ export class WorkerKernel {
     this.modeState.clear();
     this.modeClaims.clear();
     const t0 = performance.now();
+    if (this.worker) this.files?.fs.detach(this.worker);
     const w = (this.worker = this.createWorker());
+    // (recorded with the kernel's own workspace before it can ask anything: a call's scope comes from here)
+    this.files?.fs.attach(w, this.files.own);
     // (the worker's first message: its limits, web/worker.ts's init gate)
     try {
       w.postMessage({ init: { limits: this.limits } });
@@ -323,8 +332,25 @@ export class WorkerKernel {
         else if (this.libShown) { this.libShown = false; this.emit("status", this.readyText); this.emit("loading", null); }
         return;
       }
+      // (a sagebrush:// piece taken, or a call the worker ended (a Stop, a timeout): bound to this worker's current
+      // call there, whatever run asked)
+      if (m.sbFsAck !== undefined) {
+        if (this.files && w === this.worker) this.files.fs.ack(m, w);
+        return;
+      }
+      if (m.sbFsCancel !== undefined) {
+        if (this.files && w === this.worker) this.files.fs.cancel(m, w);
+        return;
+      }
       const p = this.pending.get(m.id);
       if (!p) return;
+      // sagebrush:// (web/worker.ts's sbFs): admitted and bound to this worker (its channel), checked again in
+      // web/notebook/sb-fs.js; the worker acknowledges each piece it takes ({sbFsAck}, no run id)
+      if (m.sbFs !== undefined) {
+        const gen = this.generation;
+        if (this.files) this.files.fs.admit(m, w, gen, () => w === this.worker && gen === this.generation && this.pending.get(m.id) === p);
+        return;
+      }
       // live data (web/worker.ts's liveData): admitted, checked again and bound to this worker, its generation and
       // this run, here, for a plain worker (its buffer) and a runner's (its frame writes the answer) alike
       if (m.liveData !== undefined) {
@@ -698,6 +724,7 @@ export class WorkerKernel {
   close(message = "\nThe interpreter was stopped.\n") {
     clearInterval(this.flushTimer);
     this.live.abort();
+    if (this.worker) this.files?.fs.detach(this.worker);
     this.worker?.terminate();
     this.worker = null;
     this.retireInputs();

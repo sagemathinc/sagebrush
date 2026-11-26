@@ -881,6 +881,11 @@ def _mangle(labels, budget):
 
 def _open(src):
     if isinstance(src, str):
+        # (a workspace file by sagebrush://: read by range through the page, sagebrush.fs; the one URL accepted)
+        if src.startswith("sagebrush://"):
+            from sagebrush import fs as _sbfs
+            f = _sbfs.open(src, "r", encoding="utf-8", newline="")
+            return f.read, f.close
         if re.match(r"(?i)(https?|ftp|s3|gs)://", src):
             raise NotImplementedError("read_csv from a URL isn't supported; download the file into the project first")
         f = open(src, "r", encoding="utf-8", newline="")

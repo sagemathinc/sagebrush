@@ -61,9 +61,10 @@ import { installMagmaCompile } from "./magma-builtin";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
 import { mangleLocals, localPrefix } from "./dataflow";
 import { restoreDefNames, RENAME_HELPER, takeInitLines } from "./rename";
-import { unbox } from "./runtime/object";
+import { PyByteArray, unbox } from "./runtime/object";
 import { bundleMetadata } from "./runtime/index";
 import { checkParams, type LiveAnswer, type LiveOp, type LiveParams } from "./live-data";
+import { checkRequest, FS_MAX_MESSAGE, type FsHeader, type FsRequest } from "./sbfs";
 import { consumeCtrlC, INTR_GRADING } from "./runtime/interrupt";
 import { DISPLAY_ENVELOPE, displayCost } from "./output-cost";
 import { startLimits, type LimitsText } from "./limits";
@@ -151,9 +152,13 @@ export type StdinRequest = { id: number; target: number | null; prompt: string }
 // (src/live-data.ts), synchronously as stdin: the page's checked answer.
 // None: every request is unavailable, as on the command line.
 export type LiveRequest = { id: number; target: number | null; op: LiveOp; params: LiveParams };
+// sbFs: how sagebrush.fs asks the page for a workspace file's metadata or a range of its bytes (src/sbfs.ts),
+// synchronously as stdin; `sink(piece, at)` receives fs.read's bytes in order, `at` counted from the start of the
+// range.  None: every request is unavailable, as on the command line.
+export type FsCall = { id: number; target: number | null; request: FsRequest };
 export type StdinAnswer = string | null | { interrupted: true };
 export class LimitsError extends Error {}
-export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks; stdin?: (req: StdinRequest) => StdinAnswer; liveData?: (req: LiveRequest) => LiveAnswer | null } = {}): Session {
+export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks; stdin?: (req: StdinRequest) => StdinAnswer; liveData?: (req: LiveRequest) => LiveAnswer | null; sbFs?: (req: FsCall, sink: (piece: Uint8Array, at: number) => void) => FsHeader | null } = {}): Session {
   let current: number | null = null;
   let target: number | null = null;
   const write = (fd: number, text: string) => {
@@ -310,6 +315,41 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
             // (a Stop came while it waited: it is this KeyboardInterrupt, not another one at the next check)
             if (a && "error" in a && a.error === "interrupted") consumeCtrlC(R.INTR);
             return a ? JSON.stringify(a) : no;
+          },
+        }
+      : {}),
+    // sagebrush.fs's operations (src/sbfs.ts): checked here before anything is asked, and never in a graded run.
+    // fs.read's bytes go straight into `out`, a bytearray, from index `at` (so read(n) fills the output it made first,
+    // with no copy of its own); the answer is the page's header, as JSON.
+    ...(opts.sbFs
+      ? {
+          sb_fs(op: string, params: string, out?: unknown, at?: unknown) {
+            const no = (message: string) => JSON.stringify({ error: { code: "unavailable", message } });
+            if (current === null || typeof op !== "string" || typeof params !== "string" || params.length > FS_MAX_MESSAGE) return no("not a sagebrush:// request");
+            if ((Atomics.load(R.INTR as Int32Array, 0) & INTR_GRADING) !== 0) return no("sagebrush:// files can't be read during a graded run");
+            let p: unknown;
+            try {
+              p = JSON.parse(params);
+            } catch {
+              return no("not a sagebrush:// request");
+            }
+            const c = checkRequest(op, p);
+            if ("refused" in c) return JSON.stringify({ error: { code: "invalid", message: c.refused } });
+            let sink = (_piece: Uint8Array, _at: number) => {};
+            if (c.request.op === "fs.read") {
+              const n = c.request.params.length, base = unbox(at);
+              if (!(out instanceof PyByteArray) || !Number.isSafeInteger(base) || base < 0 || base + n > out.n) return no("fs.read needs a bytearray with room for the range");
+              const buf = out;
+              sink = (piece, k) => {
+                // (bounded by the page's checked header and the bytes counted in the worker: never past base + n)
+                if (k + piece.length <= n) buf.a.set(piece, base + k);
+              };
+            }
+            flush();
+            const h = opts.sbFs!({ id: current, target, request: c.request }, sink);
+            // (a Stop came while it waited: it is this KeyboardInterrupt, not another one at the next check)
+            if (h && "error" in h && h.error.code === "interrupted") consumeCtrlC(R.INTR);
+            return h ? JSON.stringify(h) : no("sagebrush:// files can be read only in a cross-origin isolated page");
           },
         }
       : {}),
