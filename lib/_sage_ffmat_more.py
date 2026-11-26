@@ -2,12 +2,39 @@
 (lib/_sage_ffmat.py resolves their names here: FFMatrix.__getattr__), so
 that a session that never calls them does not hold them: row and column
 operations, predicates, builders, subdivisions, inspection, the adjugate,
-permanent and Pfaffian; the vector helpers. Their values, errors and
-printing are the same whenever this loads."""
+permanent and Pfaffian, the minimal polynomial, eigenvalues and
+eigenvectors, LU, and the Jordan and rational forms; the vector helpers.
+Their values, errors and printing are the same whenever this loads."""
 import itertools
 
 import _sage_ff as _ff
-from _sage_ffmat import FFMatrix, FFVector, _sa, _vec_base
+from _sage_ffmat import FFMatrix, FFVector, FFSubspace, identity_matrix, _sa, _vec_base
+
+
+class _Sequence(list):
+    """A list printed one item per line, as Sage's sequences of vectors or
+    of (eigenvalue, eigenspace) pairs: also inside a tuple's repr."""
+
+    _display_as_list = True  # (but displayed as a list: sage_all._pretty_sequences)
+
+    def __repr__(self):
+        return "[\n" + ",\n".join(repr(v) for v in self) + "\n]"
+
+    __str__ = __repr__
+
+
+class _UserSubspace(FFSubspace):
+    """A subspace with the basis it was given (Sage's "User basis matrix")."""
+
+    def __init__(self, base, n, basis):
+        self._base, self._n = base, n
+        self._basis = [[base(x) for x in v] for v in basis]
+
+    def __repr__(self):
+        s = "Vector space of degree %d and dimension %d over %r\nUser basis matrix:\n" % (self._n, len(self._basis), self._base)
+        if not self._basis:
+            return s + "[]"
+        return s + repr(FFMatrix(self._base, self._basis, self._n))
 
 
 class FFMatrixMethods:
@@ -623,7 +650,383 @@ class FFMatrixMethods:
         """
         return tuple(list(x) for x in (getattr(self, "_subdiv", None) or ([], [])))
 
+    def minimal_polynomial(self, var="x"):
+        """The minimal polynomial (minpoly).
+
+        EXAMPLES::
+
+            sage: matrix(GF(101), [[2, 1, 0], [0, 2, 0], [0, 0, 3]]).minimal_polynomial()
+            x^3 + 94*x^2 + 16*x + 89
+        """
+        if not self.is_square():
+            raise ValueError("minimal polynomial not defined for non-square matrices")
+        return self.minpoly(var)
+
+    def _numeric_route(self, name, args, kwds):
+        # (RDF, CDF, ...: the numpy route of __getattr__)
+        return self.__getattr__(name)(*args, **kwds)
+
+    def _split_eigenvalues(self, what):
+        # [(eigenvalue, algebraic multiplicity)] in Sage's order (that of the
+        # charpoly's factorization), when the charpoly splits over the field
+        if not self.is_square():
+            raise TypeError("self must be square")
+        out = []
+        for g, e in self.charpoly().factor():
+            if g.degree() != 1:
+                raise NotImplementedError(what)
+            out.append((-g[0] / g[1], int(e)))
+        return out
+
+    def eigenvalues(self, *args, **kwds):
+        """The eigenvalues, with multiplicity, in the order of the
+        characteristic polynomial's factorization. Where it does not split
+        over the field, Sage's eigenvalues live in extension fields, not
+        modelled here: NotImplementedError.
+
+        EXAMPLES::
+
+            sage: matrix(GF(101), [[2, 1, 0], [0, 2, 0], [0, 0, 3]]).eigenvalues()
+            [3, 2, 2]
+            sage: matrix(GF(101), [[0, 1], [3, 0]]).eigenvalues()  # sagebrush only (Sage: [31*z2 + 39, 70*z2 + 62], in GF(101^2))
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: eigenvalues of a matrix whose characteristic polynomial does not split over Finite Field of size 101 are not supported yet (Sage gives them in extension fields)
+        """
+        if getattr(self._base, "_numeric", False):
+            return self._numeric_route("eigenvalues", args, kwds)
+        ev = self._split_eigenvalues("eigenvalues of a matrix whose characteristic polynomial does not split over %r are not supported yet (Sage gives them in extension fields)" % self._base)
+        return [lam for lam, e in ev for _ in range(e)]
+
+    def _square_for(self, side):
+        # (Sage's message names the matrix it works on: the transpose for
+        # the right eigenvectors)
+        if not self.is_square():
+            r, c = (self.ncols(), self.nrows()) if side == "right" else (self.nrows(), self.ncols())
+            raise TypeError("matrix must be square, not %d x %d" % (r, c))
+
+    def _eigenvectors(self, side):
+        self._square_for(side)
+        ev = self._split_eigenvalues("eigenvectors are not implemented for matrices with eigenvalues that are not in the fraction field of the base ring or in QQbar")
+        n = self.nrows()
+        out = []
+        for lam, e in ev:
+            M = self - lam * identity_matrix(self._base, n)
+            if side == "left":
+                M = M.transpose()
+            out.append((lam, _Sequence(FFVector(self._base, r) for r in M._kernel_basis()), _sa().Integer(e)))
+        return out
+
+    def eigenvectors_right(self, *args, **kwds):
+        """[(eigenvalue, basis of the right eigenspace, multiplicity)].
+
+        EXAMPLES::
+
+            sage: matrix(GF(101), [[1, 2], [2, 1]]).eigenvectors_right()
+            [(100, [(1, 100)], 1), (3, [(1, 1)], 1)]
+            sage: print(matrix(GF(101), [[1, 2], [2, 1]]).eigenvectors_right())
+            [(100, [
+            (1, 100)
+            ], 1), (3, [
+            (1, 1)
+            ], 1)]
+        """
+        if getattr(self._base, "_numeric", False):
+            return self._numeric_route("eigenvectors_right", args, kwds)
+        return self._eigenvectors("right")
+
+    def eigenvectors_left(self, *args, **kwds):
+        """[(eigenvalue, basis of the left eigenspace, multiplicity)].
+
+        EXAMPLES::
+
+            sage: matrix(GF(101), [[2, 1], [0, 2]]).eigenvectors_left()
+            [(2, [(0, 1)], 2)]
+        """
+        if getattr(self._base, "_numeric", False):
+            return self._numeric_route("eigenvectors_left", args, kwds)
+        return self._eigenvectors("left")
+
+    def _eigenspaces(self, side):
+        self._square_for(side)
+        ev = self._split_eigenvalues("eigenspaces of a matrix whose characteristic polynomial does not split over %r are not supported yet (Sage gives them over extension fields)" % self._base)
+        n = self.nrows()
+        out = []
+        for lam, e in ev:
+            M = self - lam * identity_matrix(self._base, n)
+            if side == "left":
+                M = M.transpose()
+            out.append((lam, _UserSubspace(self._base, n, M._kernel_basis())))
+        return _Sequence(out)
+
+    def eigenspaces_right(self, format="all", var="a", algebraic_multiplicity=False):
+        """[(eigenvalue, right eigenspace)], each space with its echelon basis
+        as the user basis (Sage's printing).
+
+        EXAMPLES::
+
+            sage: matrix(GF(101), [[2, 1], [0, 3]]).eigenspaces_right()
+            [(3,
+              Vector space of degree 2 and dimension 1 over Finite Field of size 101
+              User basis matrix:
+              [1 1]),
+             (2,
+              Vector space of degree 2 and dimension 1 over Finite Field of size 101
+              User basis matrix:
+              [1 0])]
+        """
+        return self._eigenspaces("right")
+
+    def eigenspaces_left(self, format="all", var="a", algebraic_multiplicity=False):
+        """[(eigenvalue, left eigenspace)].
+
+        EXAMPLES::
+
+            sage: print(matrix(GF(101), [[2, 1], [0, 3]]).eigenspaces_left())
+            [
+            (3, Vector space of degree 2 and dimension 1 over Finite Field of size 101
+            User basis matrix:
+            [0 1]),
+            (2, Vector space of degree 2 and dimension 1 over Finite Field of size 101
+            User basis matrix:
+            [  1 100])
+            ]
+        """
+        return self._eigenspaces("left")
+
+    def LU(self, pivot=None, format="plu"):
+        """(P, L, U) with self = P L U: L unit lower triangular, U in echelon
+        form. Over a finite field Sage pivots on the first nonzero entry of
+        each column (pivot='nonzero'); format='compact' gives (perm, M), L
+        below M's diagonal and U on and above it.
+
+        EXAMPLES::
+
+            sage: P, L, U = matrix(GF(101), [[0, 1], [2, 3]]).LU(); P, L, U
+            (
+            [0 1]  [1 0]  [2 3]
+            [1 0], [0 1], [0 1]
+            )
+        """
+        if pivot == "partial":
+            raise TypeError("cannot take absolute value of matrix entries, try 'pivot=nonzero'")
+        if pivot not in (None, "nonzero"):
+            raise ValueError("pivot strategy must be None, 'partial' or 'nonzero', not %s" % (pivot,))
+        if format not in ("plu", "compact"):
+            raise ValueError("format must be 'plu' or 'compact', not %s" % (format,))
+        m, n = len(self._rows), self._ncols
+        M = [list(r) for r in self._rows]
+        perm = list(range(m))
+        zero, one = self._base.zero(), self._base.one()
+        # (step c pivots in column c on the first nonzero entry in rows c
+        # and below, as Sage's; a column without one is passed over)
+        for c in range(min(m, n)):
+            i = next((i for i in range(c, m) if M[i][c]), None)
+            if i is None:
+                continue
+            if i != c:
+                M[c], M[i] = M[i], M[c]
+                perm[c], perm[i] = perm[i], perm[c]
+            inv = one / M[c][c]
+            for i in range(c + 1, m):
+                if M[i][c]:
+                    t = M[i][c] * inv
+                    Mi, Mc = M[i], M[c]
+                    for j in range(c + 1, n):
+                        Mi[j] = Mi[j] - t * Mc[j]
+                    Mi[c] = t  # (L's entry, below U's diagonal)
+        if format == "compact":
+            return tuple(perm), FFMatrix(self._base, M, n)
+        P = [[zero] * m for _ in range(m)]
+        for i, k in enumerate(perm):
+            P[k][i] = one
+        L = [[(one if i == j else (M[i][j] if j < i and j < n else zero)) for j in range(m)] for i in range(m)]
+        U = [[(M[i][j] if j >= i else zero) for j in range(n)] for i in range(m)]
+        return FFMatrix(self._base, P, m), FFMatrix(self._base, L, m), FFMatrix(self._base, U, n)
+
+    def fcp(self, var="x"):
+        """The factored characteristic polynomial.
+
+        EXAMPLES::
+
+            sage: matrix(GF(101), [[2, 1, 0], [0, 2, 0], [0, 0, 3]]).fcp()
+            (x + 98) * (x + 99)^2
+        """
+        if not self.is_square():
+            raise TypeError("self must be square")
+        return self.charpoly(var).factor()
+
+    def _jordan_chains(self, lam):
+        # Sage's Jordan chains for the eigenvalue lam: tops v taken from the
+        # echelon bases of ker M^s, M = self - lam, from the longest chains
+        # down, each independent of ker M^(s-1) and of the longer chains'
+        # images at that level; [(length, top)], longest first
+        n = self.nrows()
+        M = self - lam * identity_matrix(self._base, n)
+        ks = [None]
+        P = M
+        while True:
+            K = P._kernel_basis()
+            ks.append(K)
+            if len(ks) > 2 and len(K) == len(ks[-2]):
+                break
+            P = P * M
+        top = len(ks) - 2 if len(ks) > 2 else 1
+        chains = []
+
+        def image(t, v, s):
+            w = FFVector(self._base, v)
+            for _ in range(t - s):
+                w = M * w
+            return list(w)
+
+        for s in range(top, 0, -1):
+            have = (list(ks[s - 1]) if s > 1 else []) + [image(t, v, s) for t, v in chains if t > s]
+            rank = FFMatrix(self._base, have, n).rank() if have else 0
+            for v in ks[s]:
+                if FFMatrix(self._base, have + [list(v)], n).rank() > rank:
+                    chains.append((s, list(v)))
+                    have.append(list(v))
+                    rank += 1
+        chains.sort(key=lambda t: -t[0])
+        return M, chains
+
+    def jordan_form(self, base_ring=None, sparse=False, subdivide=True, transformation=False, eigenvalues=None, check_input=True):
+        """The Jordan normal form: blocks by eigenvalue (in the eigenvalues'
+        order), the larger first, subdivided between blocks; with
+        transformation=True, (J, P) with P^-1 self P = J, P's columns the
+        Jordan chains as Sage builds them.
+
+        EXAMPLES::
+
+            sage: matrix(GF(101), [[2, 1, 0], [0, 2, 0], [0, 0, 3]]).jordan_form()
+            [3|0 0]
+            [-+---]
+            [0|2 1]
+            [0|0 2]
+        """
+        if base_ring is not None and base_ring is not self._base:
+            return self.change_ring(base_ring).jordan_form(None, sparse, subdivide, transformation, eigenvalues, check_input)
+        if not self.is_square():
+            raise ValueError("Jordan normal form not implemented for non-square matrices.")
+        n = self.nrows()
+        try:
+            ev = self._split_eigenvalues("")
+        except NotImplementedError:
+            raise RuntimeError("Some eigenvalue does not exist in %r." % self._base)
+        zero, one = self._base.zero(), self._base.one()
+        J = [[zero] * n for _ in range(n)]
+        cols, cuts, k = [], [], 0
+        for lam, _ in ev:
+            M, chains = self._jordan_chains(lam)
+            for t, v in chains:
+                for i in range(t):
+                    J[k + i][k + i] = lam
+                    if i:
+                        J[k + i - 1][k + i] = one
+                if transformation:
+                    w = [FFVector(self._base, v)]
+                    for _ in range(t - 1):
+                        w.append(M * w[-1])
+                    cols.extend(list(x) for x in reversed(w))
+                k += t
+                cuts.append(k)
+        Jm = FFMatrix(self._base, J, n)
+        if subdivide and len(cuts) > 1:
+            Jm.subdivide(cuts[:-1], cuts[:-1])
+        if transformation:
+            return Jm, FFMatrix(self._base, cols, n).transpose()
+        return Jm
+
+    def _invariant_factors(self):
+        # the invariant factors of x I - self (its Smith form over F[x]),
+        # without the units, each dividing the next
+        n = self.nrows()
+        R = _ff.PolynomialRing_ff(self._base, "x")
+        x = R.gen()
+        M = [[(x if i == j else R(0)) - R(self._rows[i][j]) for j in range(n)] for i in range(n)]
+        out = []
+        for k in range(n):
+            while True:
+                pos = [(M[i][j].degree(), i, j) for i in range(k, n) for j in range(k, n) if M[i][j]]
+                if not pos:
+                    break
+                _, i, j = min(pos)
+                M[k], M[i] = M[i], M[k]
+                for r in M:
+                    r[k], r[j] = r[j], r[k]
+                piv = M[k][k]
+                clean = True
+                for i in range(k + 1, n):
+                    if M[i][k]:
+                        q = M[i][k] // piv
+                        M[i] = [a - q * b for a, b in zip(M[i], M[k])]
+                        clean = clean and not M[i][k]
+                for j in range(k + 1, n):
+                    if M[k][j]:
+                        q = M[k][j] // piv
+                        for r in M:
+                            r[j] = r[j] - q * r[k]
+                        clean = clean and not M[k][j]
+                if not clean:
+                    continue
+                bad = next((i for i in range(k + 1, n) for j in range(k + 1, n) if M[i][j] % piv), None)
+                if bad is None:
+                    break
+                M[k] = [a + b for a, b in zip(M[k], M[bad])]
+            out.append(M[k][k].monic())
+        return [d for d in out if d.degree() > 0]
+
+    def rational_form(self, format="right", subdivide=True):
+        """The rational canonical (Frobenius) form: a companion block for
+        each invariant factor, the smallest first, subdivided between
+        blocks; format 'right' (Sage's default), 'bottom', 'left' or 'top'
+        places the coefficients, 'invariants' gives the invariant factors'
+        coefficient lists.
+
+        EXAMPLES::
+
+            sage: matrix(GF(101), [[5, 0, 0], [0, 5, 1], [0, 0, 5]]).rational_form()
+            [ 5| 0  0]
+            [--+-----]
+            [ 0| 0 76]
+            [ 0| 1 10]
+        """
+        if format not in ("right", "bottom", "left", "top", "invariants"):
+            raise ValueError("'format' keyword must be 'right', 'bottom', 'left', 'top' or 'invariants', not %s" % (format,))
+        if not self.is_square():
+            raise TypeError("matrix must be square, not %s x %s" % (self.nrows(), self.ncols()))
+        inv = self._invariant_factors() if self.nrows() else []
+        if format == "invariants":
+            return [list(d.list()) for d in inv]
+        n = self.nrows()
+        zero, one = self._base.zero(), self._base.one()
+        F = [[zero] * n for _ in range(n)]
+        k, cuts = 0, []
+        for d in inv:
+            c = [-a for a in d.list()[:-1]]  # -c_0, ..., -c_{m-1}
+            m = len(c)
+            for i in range(m):
+                for j in range(m):
+                    if format == "right":
+                        v = c[i] if j == m - 1 else (one if i == j + 1 else zero)
+                    elif format == "bottom":
+                        v = c[j] if i == m - 1 else (one if j == i + 1 else zero)
+                    elif format == "left":
+                        v = c[m - 1 - i] if j == 0 else (one if j == i + 1 else zero)
+                    else:
+                        v = c[m - 1 - j] if i == 0 else (one if i == j + 1 else zero)
+                    F[k + i][k + j] = v
+            k += m
+            cuts.append(k)
+        Fm = FFMatrix(self._base, F, n)
+        if subdivide and len(cuts) > 1:
+            Fm.subdivide(cuts[:-1], cuts[:-1])
+        return Fm
+
     get_subdivisions = subdivisions
+    right_eigenvectors = eigenvectors_right
+    left_eigenvectors = eigenvectors_left
 
 
 class FFVectorMethods:

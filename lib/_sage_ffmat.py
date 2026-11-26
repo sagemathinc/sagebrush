@@ -3734,7 +3734,10 @@ _MORE_MATRIX = frozenset([
     "antitranspose", "elementwise_product", "block_sum", "tensor_product", "subdivide", "subdivisions", "get_subdivisions",
     "nonpivots", "pivot_rows", "nonzero_positions", "nonzero_positions_in_row", "nonzero_positions_in_column", "density",
     "left_kernel_matrix", "adjugate", "permanent", "pfaffian",
-    "_row_index", "_col_index", "_with", "_checked_indices",
+    "minimal_polynomial", "eigenvalues", "eigenvectors_right", "eigenvectors_left", "right_eigenvectors", "left_eigenvectors",
+    "eigenspaces_right", "eigenspaces_left", "LU", "fcp", "jordan_form", "rational_form",
+    "_row_index", "_col_index", "_with", "_checked_indices", "_numeric_route", "_split_eigenvalues", "_eigenvectors",
+    "_eigenspaces", "_jordan_chains", "_invariant_factors", "_square_for",
 ])
 _MORE_VECTOR = frozenset([
     "inner_product", "pairwise_product", "outer_product", "monic", "normalized", "lift", "lift_centered", "concatenate",
@@ -3751,7 +3754,7 @@ def _load_more():
         sage: _sage_ffmat._load_more(), _sage_ffmat._MORE_MATRIX <= set(dir(_sage_ffmat.FFMatrix)), _sage_ffmat._MORE_VECTOR <= set(dir(_sage_ffmat.FFVector))  # sagebrush only
         (True, True, True)
     """
-    if "pfaffian" not in FFMatrix.__dict__:
+    if "LU" not in FFMatrix.__dict__:
         import _sage_ffmat_more as m
         for cls, more, names in ((FFMatrix, m.FFMatrixMethods, _MORE_MATRIX), (FFVector, m.FFVectorMethods, _MORE_VECTOR)):
             got = {k for k in vars(more) if not k.startswith("__")}

@@ -13544,10 +13544,30 @@
   "owner": "linear algebra/runtime memory",
   "reason": "the binary route's host admission (product or echelon): past SBW1's frame cap a fixed-limit refusal through the memory guard (never the loop); a need past the one-matrix budget refused through the memory guard"
  },
+ "lib/_sage_ffmat_more.py :: FFMatrixMethods._split_eigenvalues :: raise NotImplementedError(what) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusals: eigen data where the charpoly does not split over the field (Sage answers in extension fields), jordan_form's RuntimeError there as Sage's, lift_centered over a non-prime field; not a size or work limit"
+ },
+ "lib/_sage_ffmat_more.py :: FFMatrixMethods.eigenvalues :: NotImplementedError: eigenvalues of a matrix whose characteristic polynomial does not split over Finite Field of size 101 are not supported yet (Sage gives them in extension fields) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusals: eigen data where the charpoly does not split over the field (Sage answers in extension fields), jordan_form's RuntimeError there as Sage's, lift_centered over a non-prime field; not a size or work limit"
+ },
+ "lib/_sage_ffmat_more.py :: FFMatrixMethods.eigenvalues :: modelled here: NotImplementedError. #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusals: eigen data where the charpoly does not split over the field (Sage answers in extension fields), jordan_form's RuntimeError there as Sage's, lift_centered over a non-prime field; not a size or work limit"
+ },
+ "lib/_sage_ffmat_more.py :: FFMatrixMethods.jordan_form :: except NotImplementedError: #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusals: eigen data where the charpoly does not split over the field (Sage answers in extension fields), jordan_form's RuntimeError there as Sage's, lift_centered over a non-prime field; not a size or work limit"
+ },
  "lib/_sage_ffmat_more.py :: FFVectorMethods.lift_centered :: raise NotImplementedError(\"lift_centered of a vector over %r is not supported yet\" % self._base) #0": {
   "class": "none",
   "owner": "finite fields + configuration",
-  "reason": "domain refusal: lift_centered of a vector over a non-prime field (moved from _sage_ffmat.py); not a size or work limit"
+  "reason": "domain refusals: eigen data where the charpoly does not split over the field (Sage answers in extension fields), jordan_form's RuntimeError there as Sage's, lift_centered over a non-prime field; not a size or work limit"
  },
  "lib/_sage_ffsub.py ::  :: CONWAY_MAX = 10 ** 7 #0": {
   "class": "3",
