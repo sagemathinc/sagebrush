@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkRequest, checkHeader, readLength, waitPiece, writePiece, releasePiece, readHeader, headerBytes, isWorkspacePath, FS_BUFFER_BYTES, FS_MAX_READ, FS_MAX_PATH, KIND_HEADER, KIND_DATA } from "../src/sbfs";
+import { checkRequest, checkHeader, readLength, waitPiece, writePiece, releasePiece, readHeader, headerBytes, isWorkspacePath, exchange, FS_BUFFER_BYTES, FS_MAX_READ, FS_MAX_PATH, KIND_HEADER, KIND_DATA } from "../src/sbfs";
 
 // src/sbfs.ts, sagebrush://'s closed operations (design sagebrush-fsspec r3 §4.2, §5.5): the requests' exact form,
 // the empty and end-of-file ranges, the headers' closed form, and the transport (a Stop winning, a piece of an
@@ -90,6 +90,52 @@ test("the transport: pieces in order, a Stop wins, an earlier call's piece is sk
   // the deadline
   let t = 0;
   assert.deepEqual(waitPiece(b, i, 3, 1, 50, () => (t += 30), 1), { error: "timeout" });
+});
+
+test("the transport's reservation lasts the call only: after a read and a Stop, a retired engine instance is made again (ENGINE E1)", () => {
+  const E = require("../src/runtime/engine");
+  const H = E.retireTest;
+  H.reset();
+  H.setTotal([4 * 1024 * (1 << 20), 0, 0]);
+  E.engineCall('{"fn":"progress_tables"}');
+  const buf = buffer(), i = intr(), posted: any[] = [];
+  // a page answering in the same thread, as each message is posted: the header, then the one data piece
+  const page = { stop: false };
+  const io = {
+    post: (m: any) => {
+      posted.push(m);
+      if (m.sbFs) {
+        if (page.stop) Atomics.store(i, 0, 1);
+        else writePiece(buf, Number(m.sbFs.key.split(".")[1]), 1, KIND_HEADER, headerBytes({ ok: { length: 3 } }));
+      } else if (m.sbFsAck?.seq === 1) writePiece(buf, Number(m.sbFsAck.key.split(".")[1]), 2, KIND_DATA, new Uint8Array([1, 2, 3]));
+    },
+    intr: i,
+    buffer: () => buf,
+    reserve: E.hostReserve,
+    release: E.hostRelease,
+  };
+  const req = { id: 1, target: null, request: { op: "fs.read" as const, params: { ws: null, path: "/x", version: V, offset: 0, length: 3 } } };
+  const got: number[] = [];
+  const h = exchange(io, "t", 1, req, (p) => got.push(...p));
+  assert.deepEqual([h, got], [{ ok: { length: 3 } }, [1, 2, 3]]);
+  assert.equal(H.state().oHost, 0, "no host obligation after a read");
+  page.stop = true;
+  const s2 = exchange(io, "t", 2, req, () => {});
+  Atomics.store(i, 0, 0);
+  assert.equal((s2 as any).error.code, "interrupted");
+  assert.equal(H.state().oHost, 0, "none after a Stop either");
+  assert.deepEqual(posted.at(-1), { sbFsCancel: { key: "t.2" } }, "the page is told the call is over");
+  // a Stop that traps retires the instance; the next engine call makes one again (no open handle in the way)
+  const first = H.state().liveId;
+  H.retire();
+  E.engineCall('{"fn":"progress_tables"}');
+  assert.ok(H.state().liveId > first);
+  // with no room in the ledger, the call is refused before anything is posted
+  const n = posted.length;
+  const refused = exchange({ ...io, reserve: () => ({ memory: {} }) }, "t", 3, req, () => {});
+  assert.equal((refused as any).error.code, "memory");
+  assert.equal(posted.length, n);
+  H.reset();
 });
 
 // ------------------------------------------------------------------ sagebrush.fs in Python, a synthetic page

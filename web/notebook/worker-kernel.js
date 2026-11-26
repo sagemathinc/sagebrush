@@ -154,7 +154,7 @@ export class WorkerKernel {
    *   settings given wrongly are never the defaults (astra CORR-FF93-1)
    * @param {{admit: Function, abort: Function}} [o.live] live data's admission (web/notebook/live-data.js's
    *   LiveCalls, with the adapter that holds the reader's key); none: every live-data request is unavailable
-   * @param {{fs: {attach: Function, detach: Function, admit: Function, ack: Function}, own: () => string | null} | null} [o.files]
+   * @param {{fs: {attach: Function, detach: Function, admit: Function, ack: Function, cancel: Function}, own: () => string | null} | null} [o.files]
    *   sagebrush://'s admission (web/notebook/sb-fs.js's FsCalls) and the kernel's own workspace: each worker this kernel
    *   starts is recorded with it, the one source of its calls' scope; none: every sagebrush:// request goes unanswered
    *   (the worker's wait times out as unavailable)
@@ -332,9 +332,14 @@ export class WorkerKernel {
         else if (this.libShown) { this.libShown = false; this.emit("status", this.readyText); this.emit("loading", null); }
         return;
       }
-      // (a sagebrush:// piece taken: bound to this worker's current call there, whatever run asked)
+      // (a sagebrush:// piece taken, or a call the worker ended (a Stop, a timeout): bound to this worker's current
+      // call there, whatever run asked)
       if (m.sbFsAck !== undefined) {
         if (this.files && w === this.worker) this.files.fs.ack(m, w);
+        return;
+      }
+      if (m.sbFsCancel !== undefined) {
+        if (this.files && w === this.worker) this.files.fs.cancel(m, w);
         return;
       }
       const p = this.pending.get(m.id);

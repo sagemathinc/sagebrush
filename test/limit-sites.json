@@ -14490,6 +14490,14 @@
   "owner": "python (@sagebrush-python)",
   "reason": "sagebrush://'s protocol bounds (a request's message and path bytes, bytes per fs.read call, which SagebrushFile.read loops over): protect the page and the worker's transport; never a cap on a file's size or the data read"
  },
+ "src/sbfs.ts :: lost :: if (!Number.isSafeInteger(len) || (len as number) < 0 || (len as number) > msg.request.params.length || (len as number) > FS_MAX_READ) return lost(\"unavailable\", \"answered something not understood\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "sagebrush://'s protocol bounds (a request's message and path bytes, bytes per fs.read call, which SagebrushFile.read loops over): protect the page and the worker's transport; never a cap on a file's size or the data read"
+ },
  "src/stdin-wait.ts :: stopped :: const max = buffer.byteLength - 8; #0": {
   "class": "none",
   "owner": "notebook/kernel",

@@ -1539,7 +1539,6 @@
   "db9ae4bf0906d0a8": {"decl":"src/runtime/engine.ts :: engineError","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "bcd225ad837ef683": {"decl":"src/runtime/engine.ts :: frameView","class":"no-new-store"},
   "a30165178a6a0930": {"decl":"src/runtime/engine.ts :: get","class":"allocates","via":"src/runtime/object.ts :: getattr"},
-  "5c78d3edbe564d4c": {"decl":"src/runtime/engine.ts :: hostReserve","class":"allocates","via":"lib:lib.dom.d.ts :: TextEncoder.encode"},
   "4908f6179e0e1690": {"decl":"src/runtime/engine.ts :: mpCall","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8Array.slice"},
   "83a0aa1d77af37c9": {"decl":"src/runtime/engine.ts :: only","class":"allocates","via":"src/runtime/object.ts :: tuple"},
   "008af92fb68a8e6a": {"decl":"src/runtime/engine.ts :: refuse","class":"no-new-store"},
@@ -2121,7 +2120,11 @@
   "d724a3c256bd7568": {"decl":"src/runtime/zlib.ts :: src","class":"no-new-store"},
   "accc06e8ea606e13": {"decl":"src/runtime/zlib.ts :: step","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8ArrayConstructor.new(source)"},
   "34ee2e1390ea4298": {"decl":"src/sbfs.ts :: checkHeader","class":"allocates","via":"src/limits.ts :: plain"},
+  "7dcaeab3e9eadefb": {"decl":"src/sbfs.ts :: err","class":"no-new-store"},
+  "c1d1a473322c35be": {"decl":"src/sbfs.ts :: exchange","class":"allocates","via":"web/lib-lazy.ts :: get"},
+  "2062317e2a2ba851": {"decl":"src/sbfs.ts :: lost","class":"no-new-store"},
   "b04dac078d233c0d": {"decl":"src/sbfs.ts :: readHeader","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8Array.slice"},
+  "ea705d807edc7200": {"decl":"src/sbfs.ts :: take","class":"no-new-store"},
   "1c40d6f64464f234": {"decl":"src/sbfs.ts :: waitPiece","class":"no-new-store"},
   "d5abea982151a27f": {"decl":"src/scope.ts :: Collector.expr","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "1ab7a40ee087f2b3": {"decl":"src/scope.ts :: Collector.stmt","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
@@ -2158,8 +2161,6 @@
   "edb0db22ef55e262": {"decl":"web/term-sync.ts :: WorkerChannel.header","class":"allocates","via":"lib:lib.dom.d.ts :: TextEncoder.encode"},
   "7fe9fa78d0614290": {"decl":"web/term-sync.ts :: WorkerChannel.request","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8ArrayConstructor.new(source)"},
   "c3e93044b6de6e08": {"decl":"web/term-sync.ts :: enc","class":"allocates","via":"lib:lib.dom.d.ts :: TextEncoder.encode"},
-  "abebe0cd445320f2": {"decl":"web/worker.ts :: fetchSync","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8Array.slice"},
-  "d5382405f4b06a33": {"decl":"web/worker.ts :: fsError","class":"no-new-store"},
-  "f1b8dfb2f5d4d651": {"decl":"web/worker.ts :: take","class":"allocates","via":"web/lib-lazy.ts :: get"}
+  "abebe0cd445320f2": {"decl":"web/worker.ts :: fetchSync","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8Array.slice"}
  }
 }

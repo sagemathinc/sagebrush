@@ -5,20 +5,31 @@
 //
 // Scope first (SEC C2): fs.stat, fs.list and fs.read check the workspace before anything is looked up, with one
 // refusal for every other workspace, whether or not the path exists, and without opening its index.  P0 reads only
-// the kernel's own workspace; a grant for another one (the kernel's Workspace access menu) comes with P0b.
+// the kernel's own workspace; a grant for another one (the kernel's Workspace access menu) comes next.
 //
 // Resolution on every call (SEC H2): (path, version) to the file's SHA-256 and size, from this page's own index of
 // the workspace (Workspace.stat, its history for an earlier version); Python never names an address or a header.
 //
 // Reads come only from R2, by Range (the P0 ruling): a file whose current bytes are only in this browser, not
 // uploaded yet, is refused, with no fallback and no read of the local record.  P0's blobs are unsealed: a chunk is
-// plain bytes at i * CHUNK.
+// plain bytes at i * CHUNK, and the blob's address is its bytes' SHA-256 (under E2E it is the index entry's keyed
+// address, never the plaintext SHA: P1).  Each blob request carries the workspace's sync binding (x-sync-account,
+// x-sync-generation), as the sync client's do, so another account's session or a reset sync is refused, never
+// answered from the wrong account.
 //
-// Memory (r3 §6.3, r3.1 §A, r3.2 §A.3'): fixed buffers made at the first read and reused: CACHE_SLOTS chunk slots,
-// RUNS run areas of RUN_CHUNKS chunks, and RUNS independent RECEIVE-byte receive buffers a BYOB read fills (one read
-// owns its buffer until it settles; a buffer lost to an errored or aborted body stays charged for this page's life,
-// at most LOSS_ALLOWANCE of them, then network reads are refused).  An abandoned call (a Stop, a newer call from the
-// same worker) never cancels its body: the run is read to its end and cached.  Runs past RUNS wait in order.
+// Memory (r3 §6.3, r3.1 §A, r3.2 §A.3'): one slab made at the first read and reused (CACHE_SLOTS chunk slots and
+// RUNS run areas of RUN_CHUNKS chunks), and RUNS independent RECEIVE-byte receive buffers a BYOB read fills (one
+// read owns its buffer until it settles; a buffer lost to an errored or aborted body stays charged for this page's
+// life, at most LOSS_ALLOWANCE of them, then network reads are refused).  Every call has one owner record: the
+// slots it pins, the pin capacity and run areas it holds or waits for; all of it is released exactly once when the
+// call ends, however it ends.  Pins are admitted host-wide (PIN_CAPACITY chunks, half the slots, so a fill always
+// finds a victim); runs past RUNS and pins past the capacity wait in order, and a call that is over leaves the
+// queues at once.  An abandoned call never cancels a body already being read: the run is read to its end and
+// cached.
+//
+// Listing is bounded too: the folder's rows are read LIST_PAGE_ROWS at a time from the workspace's entries
+// (Workspace.entriesPage), never the whole folder, and each page is encoded through a fixed scratch into a fixed
+// page buffer, one page at a time host-wide.
 //
 // Billing in P0 is today's: the blob route charges the whole blob per signed URL, and the URL is reused for its
 // lifetime (URL_REUSE_MS), as sync does; nothing here claims the range-bound enforcement of P3.
@@ -29,32 +40,69 @@ export const CHUNK = 1 << 20;
 export const RUN_CHUNKS = 16;
 export const RUNS = 2;
 export const CACHE_SLOTS = 64;
+export const PIN_CAPACITY = 2 * RUN_CHUNKS;
 export const RECEIVE = 64 << 10;
 export const LOSS_ALLOWANCE = 16;
 export const RUN_DEADLINE_MS = 60_000;
 export const URL_REUSE_MS = 5 * 60_000 - 10_000;
+export const URL_SLOTS = 64;
+export const LIST_PAGE_ROWS = 256;
+export const LIST_SCRATCH = 64 << 10;
 
 const KEY = /^[a-z0-9]{1,16}\.[1-9][0-9]{0,8}$/;
+const TRASH = "/Trash";
 const plain = (o) => o !== null && typeof o === "object" && !Array.isArray(o) && Object.getPrototypeOf(o) === Object.prototype;
 const fail = (code, message) => Object.assign(new Error(message), { fsCode: code });
+const OVER = () => fail("interrupted", "sagebrush://: the call is over");
 const OTHER_WS = "sagebrush://: this kernel may read only its own workspace; grant access in the kernel's Workspace access menu";
-// (a call is over: a newer call from its worker, the session's end; a write it waits on is let go, and writes nothing)
-function finish(call) {
-  call.done = true;
-  const go = call.waiting;
-  call.waiting = null;
-  if (go) go();
-}
+const LOST = "sagebrush://: this page lost 16 network reads; reload it to read sagebrush:// files again";
 const randomId = () => [...crypto.getRandomValues(new Uint8Array(24))].map((b) => "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"[b & 63]).join("");
+
+/** A counted resource handed out in order: acquire(owner, k) waits until k units are free and no earlier waiter is
+ * still waiting; a waiter whose owner is over leaves the queue (its promise rejects). */
+class Gate {
+  constructor(n) {
+    this.free = n;
+    this.queue = [];
+  }
+  acquire(owner, k) {
+    if (owner.done) return Promise.reject(OVER());
+    if (!this.queue.length && this.free >= k) {
+      this.free -= k;
+      return Promise.resolve();
+    }
+    return new Promise((resolve, reject) => {
+      const w = { k, resolve, reject, owner };
+      this.queue.push(w);
+      owner.waits.add({ gate: this, w });
+    });
+  }
+  release(k) {
+    this.free += k;
+    while (this.queue.length && this.free >= this.queue[0].k) {
+      const w = this.queue.shift();
+      this.free -= w.k;
+      for (const x of w.owner.waits) if (x.w === w) w.owner.waits.delete(x);
+      w.resolve();
+    }
+  }
+  cancel(w) {
+    const i = this.queue.indexOf(w);
+    if (i < 0) return;
+    this.queue.splice(i, 1);
+    w.reject(OVER());
+    this.release(0);
+  }
+}
 
 export class FsCalls {
   /**
    * @param {object} o
-   * @param {{stat(p: string): Promise<any>, list(p: string): Promise<any[]>, history(p: string): Promise<any[]>}} o.workspace
+   * @param {{stat(p: string): Promise<any>, entriesPage(after: string | null, limit: number): Promise<any[]>, history(p: string): Promise<any[]>, syncBinding(): Promise<{account: string, generation: number} | null>}} o.workspace
    *   this page's workspace (web/workspace/api.ts)
    * @param {typeof fetch} [o.fetchImpl]
    * @param {() => number} [o.now]
-   * @param {{deadlineMs?: number}} [o.limits]
+   * @param {number} [o.deadlineMs]
    */
   constructor({ workspace, fetchImpl = (...a) => fetch(...a), now = () => Date.now(), deadlineMs = RUN_DEADLINE_MS }) {
     this.workspace = workspace;
@@ -63,23 +111,26 @@ export class FsCalls {
     this.deadlineMs = deadlineMs;
     // per worker (the channel): {own, tag, high, call, cursor}
     this.sessions = new WeakMap();
+    // kernel sessions recorded and not yet ended
+    this.live = 0;
     // the device-only admission log: refusals, newest last (a bounded ring; no paths)
     this.log = [];
-    // chunk cache: key `${ws}:${sha}:${i}` -> slot index; slots in LRU order; pins per slot
+    // chunk cache: key `${ws}:${sha}:${i}` -> slot; each slot's key, its pins, and the slots in LRU order
     this.cache = new Map();
     this.slotKey = new Array(CACHE_SLOTS).fill(null);
     this.pins = new Uint8Array(CACHE_SLOTS);
     this.lru = [];
-    this.slots = null; // one ArrayBuffer of CACHE_SLOTS * CHUNK, at the first read
-    this.runAreas = null; // RUNS run areas of RUN_CHUNKS * CHUNK
+    this.slab = null; // one ArrayBuffer: CACHE_SLOTS slots, then RUNS run areas, at the first read
+    this.receive = new Array(RUNS).fill(undefined); // undefined: not made yet; null: lost past the allowance
     this.freeRuns = [];
-    this.runWaiters = [];
-    this.receive = []; // RUNS independent receive buffers
+    this.runGate = new Gate(RUNS);
+    this.pinGate = new Gate(PIN_CAPACITY);
+    this.listGate = new Gate(1);
+    this.listPageBuf = null;
+    this.listScratch = null;
     this.lost = 0;
-    this.urls = new Map(); // sha -> {url, until}
+    this.urls = new Map(); // `${ws}:${sha}` -> {url, until, bind}
     this.stats = { fetches: 0, cacheHits: 0, indexOpens: 0 };
-    // kernel sessions recorded and not yet ended
-    this.live = 0;
   }
 
   /** Record a kernel's worker and its own workspace (an id, or a function giving it: the page's workspace, which may
@@ -89,14 +140,26 @@ export class FsCalls {
     this.live++;
   }
 
-  /** The worker's session ends (the kernel stops, restarts or is closed): its cursor and call go with it. */
+  /** The worker's session ends (the kernel stops, restarts or is closed): its call and cursor go with it. */
   detach(worker) {
     const s = this.sessions.get(worker);
     if (!s) return;
-    if (s.call) finish(s.call);
+    if (s.call) this.finish(s.call);
     this.sessions.delete(worker);
     // (the page's last kernel session gone: its cached plaintext goes with it, r3 §6.2)
     if (--this.live === 0) this.dropAll();
+  }
+
+  /** A call is over (a newer call from its worker, a Stop the worker reports, the session's end): it leaves every
+   * queue, and a write it waits on is let go; what it holds is released where its work ends (serve). */
+  finish(call) {
+    if (call.done) return;
+    call.done = true;
+    for (const { gate, w } of [...call.waits]) gate.cancel(w);
+    call.waits.clear();
+    const go = call.waiting;
+    call.waiting = null;
+    if (go) go();
   }
 
   /** A {sbFs} message `m` from worker `w`; `active()` says whether it may still be answered. */
@@ -111,17 +174,11 @@ export class FsCalls {
     if (s.tag !== null && (s.tag !== tag || count <= s.high)) return;
     s.tag = tag;
     s.high = count;
-    // (a newer call from the same worker: the earlier one is over; its run, if any, still drains into the cache)
-    if (s.call) finish(s.call);
-    const call = { worker: w, session: s, buffer: buf, n: count, seq: 0, acked: 0, done: false, waiting: null };
+    // (a newer call from the same worker: the earlier one is over; a body it was reading still drains into the cache)
+    if (s.call) this.finish(s.call);
+    const call = { session: s, buffer: buf, n: count, seq: 0, acked: 0, done: false, waiting: null, waits: new Set(), held: new Map(), tokens: 0 };
     s.call = call;
-    const c = checkRequest(d.op, d.params);
-    if ("refused" in c) return this.answer(call, active, { error: { code: "invalid", message: c.refused } }, null);
-    if (!active()) return;
-    this.run(c.request, s).then(
-      ({ header, body }) => this.answer(call, active, header, body),
-      (e) => this.answer(call, active, { error: { code: e?.fsCode ?? "unavailable", message: e?.fsCode ? e.message : "sagebrush://: the page couldn't answer" } }, null),
-    );
+    this.serve(call, d, active);
   }
 
   /** {sbFsAck} from worker `w`: it took piece `seq` of its current call. */
@@ -137,27 +194,63 @@ export class FsCalls {
     if (go) go();
   }
 
+  /** {sbFsCancel} from worker `w`: its current call ended there (a Stop, a timeout). */
+  cancel(m, w) {
+    const a = m.sbFsCancel, s = this.sessions.get(w);
+    if (!s || !plain(a) || typeof a.key !== "string" || !s.call || a.key !== `${s.tag}.${s.call.n}`) return;
+    this.finish(s.call);
+  }
+
   refuse(code) {
     this.log.push({ t: this.now(), code });
     if (this.log.length > 256) this.log.shift();
   }
 
-  async answer(call, active, header, body) {
-    if (call.done || !active()) return;
-    if ("error" in header && (header.error.code === "permission" || header.error.code === "invalid")) this.refuse(header.error.code);
-    if (!(await this.send(call, KIND_HEADER, headerBytes(header)))) return;
-    if (!body) {
-      call.done = true;
-      return;
-    }
+  // ------------------------------------------------------------ one call, start to end
+
+  async serve(call, d, active) {
     try {
-      for await (const piece of body(call)) {
-        if (call.done) return;
-        if (!(await this.send(call, KIND_DATA, piece))) return;
+      const c = checkRequest(d.op, d.params);
+      if ("refused" in c) return await this.answer(call, active, { error: { code: "invalid", message: c.refused } });
+      if (!active()) return;
+      const req = c.request;
+      let ws;
+      try {
+        ws = this.scope(req.params.ws, call.session);
+      } catch (e) {
+        return await this.answer(call, active, this.errorOf(e));
       }
+      if (req.op === "fs.list") return await this.serveList(call, active, req.params, ws);
+      let header, body = null;
+      try {
+        if (req.op === "fs.stat") header = { ok: await this.stat(req.params) };
+        else ({ header, body } = await this.read(call, req.params, ws));
+      } catch (e) {
+        return await this.answer(call, active, this.errorOf(e));
+      }
+      if (!(await this.answer(call, active, header)) || !body) return;
+      for await (const piece of body) {
+        if (call.done || !(await this.send(call, KIND_DATA, piece))) return;
+      }
+    } catch {
+      // (a call already over: nothing more is written)
     } finally {
+      // (everything the call holds, released exactly once, however it ended)
       call.done = true;
+      this.releaseAll(call);
+      if (call.session.call === call) call.session.call = null;
     }
+  }
+
+  errorOf(e) {
+    return { error: { code: e?.fsCode ?? "unavailable", message: e?.fsCode ? e.message : "sagebrush://: the page couldn't answer" } };
+  }
+
+  /** Write the header: false if the call is over. */
+  async answer(call, active, header) {
+    if (call.done || !active()) return false;
+    if ("error" in header && (header.error.code === "permission" || header.error.code === "invalid")) this.refuse(header.error.code);
+    return this.send(call, KIND_HEADER, headerBytes(header));
   }
 
   /** Write the call's next piece once the worker has taken the one before: false if the call is over. */
@@ -174,6 +267,43 @@ export class FsCalls {
     return new Promise((resolve) => {
       call.waiting = () => resolve(write());
     });
+  }
+
+  // ------------------------------------------------------------ what a call holds
+
+  pin(call, slot) {
+    this.pins[slot]++;
+    call.held.set(slot, (call.held.get(slot) ?? 0) + 1);
+  }
+
+  unpin(call, slot) {
+    const n = call.held.get(slot);
+    if (!n) return;
+    this.pins[slot]--;
+    if (n === 1) call.held.delete(slot);
+    else call.held.set(slot, n - 1);
+  }
+
+  releaseAll(call) {
+    for (const [slot, n] of call.held) this.pins[slot] -= n;
+    call.held.clear();
+    for (const { gate, w } of [...call.waits]) gate.cancel(w);
+    call.waits.clear();
+    if (call.tokens) {
+      const k = call.tokens;
+      call.tokens = 0;
+      this.pinGate.release(k);
+    }
+  }
+
+  async takeTokens(call, k) {
+    await this.pinGate.acquire(call, k);
+    call.tokens += k;
+  }
+
+  giveTokens(call, k) {
+    call.tokens -= k;
+    this.pinGate.release(k);
   }
 
   // ------------------------------------------------------------ the operations
@@ -197,24 +327,10 @@ export class FsCalls {
     if (!e) throw fail("not_found", `sagebrush://${path}: no such file`);
     if (e.kind !== "file") throw fail("invalid", `sagebrush://${path}: not a data file`);
     if (!e.sha256) throw fail("unavailable", `sagebrush://${path}: its contents aren't known yet`);
-    if (version === undefined || version === e.sha256) return { e, sha: e.sha256, size: e.size ?? 0, current: true };
+    if (version === undefined || version === e.sha256) return { e, sha: e.sha256, size: e.size ?? 0 };
     const v = (await this.workspace.history(path)).find((x) => x.sha256 === version);
     if (!v) throw fail("not_found", `sagebrush://${path}: that version isn't in this workspace's history`);
-    return { e, sha: v.sha256, size: v.size, current: false };
-  }
-
-  async run(req, s) {
-    const ws = this.scope(req.params.ws, s);
-    if (req.op === "fs.stat") return { header: { ok: await this.stat(req.params) }, body: null };
-    if (req.op === "fs.list") return { header: { ok: await this.listPage(req.params, s, ws) }, body: null };
-    const { e, sha, size } = await this.resolve(req.params.path, req.params.version);
-    const n = readLength(size, req.params.offset, req.params.length);
-    if (n === 0) return { header: { ok: { length: 0 } }, body: null };
-    // (the first run is fetched before the header goes, so a file not uploaded yet, or a spent budget, is the
-    // answer's error, not a short read)
-    const first = this.chunksOf(req.params.offset, n);
-    const pre = await this.ensure(ws, sha, size, first.slice(0, RUN_CHUNKS), e);
-    return { header: { ok: { length: n } }, body: (call) => this.pieces(ws, sha, size, req.params.offset, n, e, pre, call) };
+    return { e, sha: v.sha256, size: v.size };
   }
 
   async stat({ path, version }) {
@@ -230,35 +346,129 @@ export class FsCalls {
     return { name, type: "file", size, version: sha, mtime: e.updated ?? null, kind: "blob", codec: "store.1", plaintext_length: size, compressed_length: size, chunks: Math.ceil(size / CHUNK), parts: 1 };
   }
 
+  /** fs.read: the header once the first group is cached (so a file not uploaded yet, a refused binding or a spent
+   * budget is the answer's error, not a short read), and the pieces, group by group. */
+  async read(call, p, ws) {
+    const { e, sha, size } = await this.resolve(p.path, p.version);
+    const n = readLength(size, p.offset, p.length);
+    if (n === 0) return { header: { ok: { length: 0 } }, body: null };
+    const all = this.chunksOf(p.offset, n);
+    const first = all.slice(0, RUN_CHUNKS);
+    await this.takeTokens(call, first.length);
+    const pre = await this.ensure(call, ws, sha, size, first, e);
+    return { header: { ok: { length: n } }, body: this.pieces(call, ws, sha, size, p.offset, n, e, all, pre) };
+  }
+
+  async *pieces(call, ws, sha, size, offset, n, e, all, pre) {
+    let held = pre;
+    for (let at = 0; at < all.length; at += RUN_CHUNKS) {
+      const group = all.slice(at, at + RUN_CHUNKS);
+      if (at > 0) {
+        await this.takeTokens(call, group.length);
+        held = await this.ensure(call, ws, sha, size, group, e);
+      }
+      for (const i of group) {
+        if (call.done) return;
+        const slot = held.get(i);
+        const lo = Math.max(offset, i * CHUNK), hi = Math.min(offset + n, (i + 1) * CHUNK, size);
+        // (a piece is at most one chunk, FS_PIECE bytes, copied into the worker's buffer when it is written)
+        const piece = this.slotView(slot, CHUNK).subarray(lo - i * CHUNK, hi - i * CHUNK);
+        if (piece.length > FS_PIECE) throw fail("unavailable", "sagebrush://: a piece too large");
+        yield piece;
+        this.unpin(call, slot);
+      }
+      this.giveTokens(call, group.length);
+    }
+  }
+
+  // ------------------------------------------------------------ listing, bounded
+
+  async serveList(call, active, p, ws) {
+    await this.listGate.acquire(call, 1);
+    try {
+      let bytes;
+      try {
+        bytes = await this.listPage(p, call.session, ws);
+      } catch (e) {
+        return await this.answer(call, active, this.errorOf(e));
+      }
+      if (call.done || !active()) return;
+      // (the page is written into the worker's buffer at once, piece 1, before the page buffer is used again)
+      await this.send(call, KIND_HEADER, bytes);
+    } finally {
+      this.listGate.release(1);
+    }
+  }
+
+  /** One page of `path`'s entries, as the header's JSON bytes in the fixed page buffer: the folder's rows read
+   * LIST_PAGE_ROWS at a time from where the cursor left off, never the whole folder. */
   async listPage({ path, cursor }, s, ws) {
-    let position = 0;
+    let after;
+    const prefix = path === "/" ? "/" : path + "/";
     if (cursor !== undefined) {
       const c = s.cursor;
       // (a cursor is this session's, for this workspace and folder, while that scope holds: SEC C3)
       if (!c || c.id !== cursor || c.ws !== ws || c.path !== path) throw fail("invalid", "sagebrush://: that listing cursor isn't this listing's");
-      position = c.position;
+      after = c.after;
+    } else {
+      const e = await this.entry(path);
+      if (!e) throw fail("not_found", `sagebrush://${path}: no such folder`);
+      if (e.kind !== "folder") throw fail("invalid", `sagebrush://${path}: not a folder`);
+      after = prefix;
     }
-    const e = await this.entry(path);
-    if (!e) throw fail("not_found", `sagebrush://${path}: no such folder`);
-    if (e.kind !== "folder") throw fail("invalid", `sagebrush://${path}: not a folder`);
-    const all = await this.workspace.list(path);
-    const entries = [];
-    let bytes = 2;
-    while (position < all.length && entries.length < FS_LIST_ENTRIES) {
-      const x = all[position];
-      const item = { name: x.path.slice(x.path.lastIndexOf("/") + 1), type: x.kind === "folder" ? "directory" : x.kind === "file" ? "file" : "other", size: x.kind === "file" ? x.size ?? 0 : 0, version: x.kind === "file" ? x.sha256 ?? null : null };
-      const k = new TextEncoder().encode(JSON.stringify(item)).length + 1;
-      if (entries.length && bytes + k > FS_LIST_BYTES - 128) break;
-      entries.push(item);
-      bytes += k;
-      position++;
+    this.listPageBuf ??= new Uint8Array(FS_LIST_BYTES);
+    this.listScratch ??= new Uint8Array(LIST_SCRATCH);
+    const out = this.listPageBuf, scratch = this.listScratch, enc = new TextEncoder();
+    const put = (text, at) => {
+      const { written } = enc.encodeInto(text, scratch);
+      if (at + written > out.length) return -1;
+      out.set(scratch.subarray(0, written), at);
+      return at + written;
+    };
+    let at = put('{"ok":{"entries":[', 0), count = 0, last = after, more = false;
+    const tail = 160; // room for the closing and a cursor
+    const inTrash = path === TRASH || path.startsWith(TRASH + "/");
+    scan: for (;;) {
+      let rows;
+      try {
+        rows = await this.workspace.entriesPage(last, LIST_PAGE_ROWS);
+      } catch (e) {
+        if (e?.code === "busy") throw fail("unavailable", "sagebrush://: a large move is being applied in this workspace; try again in a moment");
+        throw e;
+      }
+      if (!rows.length) break;
+      for (const x of rows) {
+        if (typeof x?.path !== "string" || !x.path.startsWith(prefix)) break scan;
+        const rest = x.path.slice(prefix.length);
+        const trash = x.path === TRASH || x.path.startsWith(TRASH + "/");
+        if (rest === "" || rest.includes("/") || (trash && !inTrash)) {
+          last = x.path;
+          continue;
+        }
+        if (count === FS_LIST_ENTRIES) {
+          more = true;
+          break scan;
+        }
+        const item = { name: rest, type: x.kind === "folder" ? "directory" : x.kind === "file" ? "file" : "other", size: x.kind === "file" ? x.size ?? 0 : 0, version: x.kind === "file" ? x.sha256 ?? null : null };
+        const next = put((count ? "," : "") + JSON.stringify(item), at);
+        if (next < 0 || next > out.length - tail) {
+          more = true;
+          break scan;
+        }
+        at = next;
+        count++;
+        last = x.path;
+      }
+      if (rows.length < LIST_PAGE_ROWS) break;
     }
-    if (position < all.length) {
-      s.cursor = { id: randomId(), ws, path, position };
-      return { entries, cursor: s.cursor.id };
+    if (more) {
+      s.cursor = { id: randomId(), ws, path, after: last };
+      at = put(`],"cursor":"${s.cursor.id}"}}`, at);
+    } else {
+      s.cursor = null;
+      at = put("]}}", at);
     }
-    s.cursor = null;
-    return { entries };
+    return out.subarray(0, at);
   }
 
   // ------------------------------------------------------------ chunks, runs and the cache
@@ -269,37 +479,39 @@ export class FsCalls {
     return out;
   }
 
+  /** The slab (slots and run areas) and the receive buffers, made at the first read: a refusal leaves whatever was
+   * made in place, for the next try to use, never a second copy. */
   firstUse() {
-    if (this.slots) return;
+    const bytes = (CACHE_SLOTS + RUNS * RUN_CHUNKS) * CHUNK + RUNS * RECEIVE;
     try {
-      this.slots = new ArrayBuffer(CACHE_SLOTS * CHUNK);
-      this.runAreas = [];
-      for (let r = 0; r < RUNS; r++) this.runAreas.push(new Uint8Array(RUN_CHUNKS * CHUNK));
-      for (let r = 0; r < RUNS; r++) this.receive.push(new ArrayBuffer(RECEIVE));
+      if (!this.slab) {
+        this.slab = new ArrayBuffer((CACHE_SLOTS + RUNS * RUN_CHUNKS) * CHUNK);
+        this.freeRuns = [...Array(RUNS).keys()];
+      }
+      for (let r = 0; r < RUNS; r++) if (this.receive[r] === undefined) this.receive[r] = new ArrayBuffer(RECEIVE);
     } catch {
-      this.slots = null;
-      this.runAreas = null;
-      this.receive = [];
-      throw fail("memory", `sagebrush://: this page couldn't set aside its ${(CACHE_SLOTS + RUNS * RUN_CHUNKS) * CHUNK + RUNS * RECEIVE} bytes for reading; use the native app on a computer with more memory`);
+      throw fail("memory", `sagebrush://: this page couldn't set aside its ${bytes} bytes for reading; use the native app on a computer with more memory`);
     }
-    this.freeRuns = [0, 1].slice(0, RUNS);
   }
 
   slotView(slot, len) {
-    return new Uint8Array(this.slots, slot * CHUNK, len);
+    return new Uint8Array(this.slab, slot * CHUNK, len);
   }
 
-  /** A free (or least recently used unpinned) slot, reserved before it is filled. */
+  runArea(r) {
+    return new Uint8Array(this.slab, (CACHE_SLOTS + r * RUN_CHUNKS) * CHUNK, RUN_CHUNKS * CHUNK);
+  }
+
+  /** A free (or the least recently used unpinned) slot for a fill; its old key dropped only if it still names it. */
   takeSlot() {
     for (let i = 0; i < CACHE_SLOTS; i++) if (this.slotKey[i] === null && !this.pins[i]) return i;
     for (let k = 0; k < this.lru.length; k++) {
       const i = this.lru[k];
-      if (!this.pins[i]) {
-        this.lru.splice(k, 1);
-        this.cache.delete(this.slotKey[i]);
-        this.slotKey[i] = null;
-        return i;
-      }
+      if (this.pins[i]) continue;
+      this.lru.splice(k, 1);
+      if (this.cache.get(this.slotKey[i]) === i) this.cache.delete(this.slotKey[i]);
+      this.slotKey[i] = null;
+      return i;
     }
     throw fail("unavailable", "sagebrush://: no free cache slot");
   }
@@ -319,6 +531,7 @@ export class FsCalls {
       const k = this.lru.indexOf(slot);
       if (k >= 0) this.lru.splice(k, 1);
     }
+    for (const k of [...this.urls.keys()]) if (k.startsWith(ws + ":")) this.urls.delete(k);
   }
 
   /** Every cached chunk and signed URL dropped (the workspace closed: sign-out, a reset, another tab's takeover). */
@@ -332,77 +545,50 @@ export class FsCalls {
     this.urls.clear();
   }
 
-  async takeRun() {
-    if (this.freeRuns.length) return this.freeRuns.shift();
-    return new Promise((resolve) => this.runWaiters.push(resolve));
-  }
-
-  giveRun(r) {
-    const w = this.runWaiters.shift();
-    if (w) w(r);
-    else this.freeRuns.push(r);
-  }
-
-  /** The chunks in `want` cached (fetched by runs of adjacent missing chunks), each pinned; their slots, in order. */
-  async ensure(ws, sha, size, want, e) {
+  /** The chunks in `want` cached and pinned for `call` (its pin capacity already taken for them), fetched by runs of
+   * adjacent missing chunks; their slots.  A cached chunk is pinned as it is found, before anything is awaited, so
+   * no fill can take its slot (LIMITS R1). */
+  async ensure(call, ws, sha, size, want, e) {
     this.firstUse();
     const slots = new Map();
-    let missing = [];
-    const flush = async () => {
-      if (!missing.length) return;
-      const got = await this.fetchRun(ws, sha, size, missing, e);
-      for (const [i, slot] of got) slots.set(i, slot);
-      missing = [];
-    };
+    const runs = [];
     for (const i of want) {
-      const key = `${ws}:${sha}:${i}`;
-      const slot = this.cache.get(key);
+      const slot = this.cache.get(`${ws}:${sha}:${i}`);
       if (slot !== undefined) {
-        await flush();
         this.stats.cacheHits++;
-        this.pins[slot]++;
+        this.pin(call, slot);
         this.touch(slot);
         slots.set(i, slot);
         continue;
       }
-      if (missing.length && (missing[missing.length - 1] !== i - 1 || missing.length === RUN_CHUNKS)) await flush();
-      missing.push(i);
+      const run = runs.at(-1);
+      if (run && run.at(-1) === i - 1) run.push(i);
+      else runs.push([i]);
     }
-    await flush();
+    for (const run of runs) {
+      if (call.done) throw OVER();
+      for (const [i, slot] of await this.fetchRun(call, ws, sha, size, run, e)) slots.set(i, slot);
+    }
     return slots;
-  }
-
-  async *pieces(ws, sha, size, offset, n, e, pre, call) {
-    const all = this.chunksOf(offset, n);
-    let held = pre;
-    try {
-      for (let at = 0; at < all.length; at += RUN_CHUNKS) {
-        const group = all.slice(at, at + RUN_CHUNKS);
-        if (at > 0) held = await this.ensure(ws, sha, size, group, e);
-        for (const i of group) {
-          const slot = held.get(i);
-          const lo = Math.max(offset, i * CHUNK), hi = Math.min(offset + n, (i + 1) * CHUNK, size);
-          const piece = this.slotView(slot, CHUNK).subarray(lo - i * CHUNK, hi - i * CHUNK);
-          // (a piece is at most one chunk, FS_PIECE bytes; copied into the worker's buffer as it is written)
-          if (piece.length > FS_PIECE) throw fail("unavailable", "sagebrush://: a piece too large");
-          if (!call.done) yield piece;
-          this.pins[slot]--;
-          held.delete(i);
-        }
-      }
-    } finally {
-      for (const slot of held.values()) this.pins[slot]--;
-    }
   }
 
   // ------------------------------------------------------------ R2
 
-  async signedUrl(sha, range, signal, e) {
-    const known = this.urls.get(sha);
-    if (known && known.until > this.now()) return { url: known.url, first: null };
+  async binding() {
+    const b = await this.workspace.syncBinding();
+    if (!b) throw fail("unavailable", "sagebrush://: sync is off for this workspace, and its files are read from the cloud copy; turn sync on");
+    return b;
+  }
+
+  async signedUrl(ws, sha, range, signal, e) {
+    const b = await this.binding();
+    const bind = `${b.account}:${b.generation}`, key = `${ws}:${sha}`;
+    const known = this.urls.get(key);
+    if (known && known.until > this.now() && known.bind === bind) return { url: known.url, first: null };
     let r;
     try {
-      r = await this.fetchImpl(`/api/sync/v1/blob/${sha}`, { credentials: "same-origin", redirect: "follow", headers: { range }, signal });
+      // (P0: the blob's address is its bytes' SHA-256, unsealed; under E2E it is the index entry's keyed address)
+      r = await this.fetchImpl(`/api/sync/v1/blob/${sha}`, { credentials: "same-origin", redirect: "follow", headers: { range, "x-sync-account": b.account, "x-sync-generation": String(b.generation) }, signal });
     } catch {
       throw fail("network", "sagebrush://: the server couldn't be reached");
     }
@@ -410,25 +596,38 @@ export class FsCalls {
       if (!e.remote) throw fail("unavailable", `${e.path}: its current bytes are only in this browser, not uploaded yet; read it with open('${e.path}') or wait for sync`);
       throw fail("not_found", `sagebrush://${e.path}: the server doesn't have these bytes`);
     }
+    if (r.status === 403 || r.status === 409) {
+      r.body?.cancel().catch(() => {});
+      this.urls.clear();
+      throw fail("permission", "sagebrush://: sync's account or generation changed (another sign-in, or sync was reset); reload the page");
+    }
     if (r.status === 429) throw fail("budget", "sagebrush://: today's download allowance is used up; try again tomorrow");
-    if (r.url && r.url !== "" && !r.url.endsWith(`/api/sync/v1/blob/${sha}`)) this.urls.set(sha, { url: r.url, until: this.now() + URL_REUSE_MS });
+    if (r.url && !r.url.endsWith(`/api/sync/v1/blob/${sha}`)) this.rememberUrl(key, { url: r.url, until: this.now() + URL_REUSE_MS, bind });
     return { url: null, first: r };
   }
 
-  /** One run of adjacent chunks fetched into a run area, checked exactly, then copied into reserved slots. */
-  async fetchRun(ws, sha, size, idx, e) {
-    if (this.lost >= LOSS_ALLOWANCE) throw fail("network", "sagebrush://: this page lost 16 network reads; reload it to read sagebrush:// files again");
-    const r = await this.takeRun();
-    if (this.receive[r] === null) {
-      this.giveRun(r);
-      throw fail("network", "sagebrush://: this page lost 16 network reads; reload it to read sagebrush:// files again");
-    }
+  /** A signed URL kept for reuse: expired ones swept, at most URL_SLOTS kept (the oldest goes first). */
+  rememberUrl(key, v) {
+    const now = this.now();
+    for (const [k, x] of this.urls) if (x.until <= now) this.urls.delete(k);
+    this.urls.delete(key);
+    while (this.urls.size >= URL_SLOTS) this.urls.delete(this.urls.keys().next().value);
+    this.urls.set(key, v);
+  }
+
+  /** One run of adjacent chunks fetched into a run area, checked exactly, then copied into slots `call` pins.  The
+   * loss allowance is checked when the run starts, after any wait (LIMITS R3). */
+  async fetchRun(call, ws, sha, size, idx, e) {
+    if (this.lost >= LOSS_ALLOWANCE) throw fail("network", LOST);
+    await this.runGate.acquire(call, 1);
+    const r = this.freeRuns.shift();
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), this.deadlineMs);
     try {
+      if (this.lost >= LOSS_ALLOWANCE || this.receive[r] === null) throw fail("network", LOST);
       const lo = idx[0] * CHUNK, hi = Math.min((idx[idx.length - 1] + 1) * CHUNK, size);
       const range = `bytes=${lo}-${hi - 1}`;
-      let { url, first } = await this.signedUrl(sha, range, ctrl.signal, e);
+      let { url, first } = await this.signedUrl(ws, sha, range, ctrl.signal, e);
       let res = first;
       if (!res) {
         try {
@@ -436,31 +635,37 @@ export class FsCalls {
         } catch {
           throw fail("network", "sagebrush://: the file server couldn't be reached");
         }
+        if (res.status === 403) {
+          // (an expired reuse: ask for a new URL once)
+          res.body?.cancel().catch(() => {});
+          this.urls.delete(`${ws}:${sha}`);
+          ({ first: res } = await this.signedUrl(ws, sha, range, ctrl.signal, e));
+        }
       }
       this.stats.fetches++;
-      if (res.status === 403 && !first) {
-        // (an expired reuse: ask for a new URL once)
-        this.urls.delete(sha);
-        ({ first: res } = await this.signedUrl(sha, range, ctrl.signal, e));
-      }
-      const area = this.runAreas[r];
+      const area = this.runArea(r);
       await this.readExact(res, range, lo, hi, size, area, ctrl, r);
       const out = new Map();
       for (const i of idx) {
-        const slot = this.takeSlot();
-        this.pins[slot]++;
-        const len = Math.min(CHUNK, size - i * CHUNK);
-        this.slotView(slot, len).set(area.subarray(i * CHUNK - lo, i * CHUNK - lo + len));
         const key = `${ws}:${sha}:${i}`;
-        this.slotKey[slot] = key;
-        this.cache.set(key, slot);
+        // (another call filled it meanwhile: that slot, pinned for this call too, never a second copy)
+        let slot = this.cache.get(key);
+        if (slot === undefined) {
+          slot = this.takeSlot();
+          const len = Math.min(CHUNK, size - i * CHUNK);
+          this.slotView(slot, len).set(area.subarray(i * CHUNK - lo, i * CHUNK - lo + len));
+          this.slotKey[slot] = key;
+          this.cache.set(key, slot);
+        }
+        this.pin(call, slot);
         this.touch(slot);
         out.set(i, slot);
       }
       return out;
     } finally {
       clearTimeout(timer);
-      this.giveRun(r);
+      this.freeRuns.push(r);
+      this.runGate.release(1);
     }
   }
 
@@ -501,8 +706,8 @@ export class FsCalls {
       if (!probe.done) throw fail("network", "sagebrush://: the download was longer than the range");
       this.receive[r] = buf;
     } catch (err) {
-      // (a read that settled without giving its buffer back: lost, charged for this page's life, r3.2 §A.3')
-      // (the count and the replacement in one synchronous step, so simultaneous failures can't pass the allowance:
+      // (a read that settled without giving its buffer back: lost, charged for this page's life, r3.2 §A.3'; the
+      // count and the replacement in one synchronous step, so simultaneous failures can't pass the allowance:
       // live + lost receive buffers never exceed (RUNS + LOSS_ALLOWANCE) * RECEIVE bytes, LIMITS L1)
       if (buf.byteLength === 0) {
         this.lost++;

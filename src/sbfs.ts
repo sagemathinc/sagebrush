@@ -180,6 +180,71 @@ export function writePiece(buffer: SharedArrayBuffer, call: number, seq: number,
   return true;
 }
 
+// ------------------------------------------------------------------ the worker's exchange
+
+/** What the exchange needs from its worker: post a message to the page, the shared interrupt word, the worker's one
+ * transport buffer (made once, kept for the worker's life: a fixed FS_BUFFER_BYTES), and the engine ledger's host
+ * obligations (src/runtime/engine.ts hostReserve and hostRelease), held for the call only. */
+export type FsIo = {
+  post: (m: unknown) => void;
+  intr: Int32Array;
+  buffer: () => SharedArrayBuffer;
+  reserve: (what: string, bytes: number) => { memory: unknown } | object;
+  release: (h: any) => void;
+};
+
+/** One call, from the worker: the request posted with a key (this worker's tag and the call's number), the header
+ * taken, then fs.read's pieces handed to `sink` in order, each acknowledged ({sbFsAck}) before the page writes the
+ * next.  The transport buffer is reserved in the engine's ledger for the call and released on every path, so no
+ * obligation outlives it (an engine instance can be made again after a Stop retires one).  A Stop or a timeout tells
+ * the page the call is over ({sbFsCancel}), so it lets go of what it holds for it. */
+export function exchange(io: FsIo, tag: string, call: number, msg: { id: number; target: number | null; request: FsRequest }, sink: (piece: Uint8Array, at: number) => void): FsHeader {
+  const err = (code: FsError, message: string): FsHeader => ({ error: { code, message } });
+  const h0 = io.reserve("sagebrush:// transport buffer", FS_BUFFER_BYTES);
+  if ("memory" in h0) return err("memory", `sagebrush://: no room for its ${FS_BUFFER_BYTES}-byte transport buffer; use the native app on a computer with more memory`);
+  const key = `${tag}.${call}`;
+  const buffer = io.buffer();
+  let over = false;
+  try {
+    releasePiece(buffer);
+    io.post({ id: msg.id, target: msg.target, sbFs: { op: msg.request.op, params: msg.request.params, key }, buffer });
+    const take = (seq: number, kind: number) => {
+      const p = waitPiece(buffer, io.intr, call, seq);
+      if ("error" in p) return p;
+      return p.kind === kind ? p : { error: "unavailable" as const };
+    };
+    const ack = (seq: number) => {
+      releasePiece(buffer);
+      io.post({ sbFsAck: { key, seq } });
+    };
+    const lost = (e: "interrupted" | "timeout" | "unavailable", what: string) => {
+      over = true;
+      return err(e, e === "interrupted" ? "interrupted" : `sagebrush://: the page ${what} (${e})`);
+    };
+    const first = take(1, KIND_HEADER);
+    if ("error" in first) return lost(first.error, "didn't answer");
+    const h = readHeader(first.bytes);
+    ack(1);
+    if ("error" in h || msg.request.op !== "fs.read") return h;
+    const len = h.ok.length;
+    if (!Number.isSafeInteger(len) || (len as number) < 0 || (len as number) > msg.request.params.length || (len as number) > FS_MAX_READ) return lost("unavailable", "answered something not understood");
+    let got = 0, seq = 1;
+    while (got < (len as number)) {
+      const q = take(++seq, KIND_DATA);
+      if ("error" in q) return lost(q.error, "stopped answering");
+      const n = q.bytes.length;
+      if (n === 0 || got + n > (len as number)) return lost("unavailable", "answered something not understood");
+      sink(q.bytes, got);
+      got += n;
+      ack(seq);
+    }
+    return h;
+  } finally {
+    if (over) io.post({ sbFsCancel: { key } });
+    io.release(h0);
+  }
+}
+
 /** The header as the bytes of its piece. */
 export function headerBytes(h: FsHeader): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(h));

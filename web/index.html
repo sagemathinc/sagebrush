@@ -1096,8 +1096,9 @@ async function pinUsedPkgset(owner, S) {
 const SB_FS = new FsCalls({
   workspace: {
     stat: (p) => ws.stat(p),
-    list: (p) => ws.list(p),
+    entriesPage: (after, limit) => ws.entriesPage(after, limit),
     history: (p) => ws.history(p),
+    syncBinding: () => ws.syncBinding(),
   },
 });
 function makeKernel(owner) {
