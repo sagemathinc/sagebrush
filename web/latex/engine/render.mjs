@@ -1140,7 +1140,7 @@ class Renderer {
     if (r.star && !plain) return this.resolveRef(Object.assign({}, r, { star: false }), false).replace(/<a\b[^>]*>|<\/a>/g, "");
     if ((r.cmd === "cite" || r.cmd === "citep" || r.cmd === "citet") && this.nat?.numbers) return this.natCite(r, plain);
     if (r.cmd === "cite" || r.cmd === "citep" || r.cmd === "citet") {
-      const parts = r.key.split(",").map((k) => k.trim()).filter(Boolean).map((k) => { const b = this.bib.get(k); return b ? (plain ? b.lab : '<a href="#' + b.id + '">' + b.lab + "</a>") : (plain ? "?" : '<span class="missing">' + esc(k) + "</span>"); });
+      const parts = r.key.split(",").map((k) => k.trim()).filter(Boolean).map((k) => { const b = this.bib.get(k); return b ? (plain ? b.lab : '<a href="#' + b.id + '">' + b.lab + "</a>") : this.citeMiss(k, plain); });
       return "[" + parts.join(", ") + (r.opt ? ", " + this.noteHtml(r.opt, plain) : "") + "]";
     }
     if (r.cmd === "cref" || r.cmd === "Cref") return this.cref(r, plain);
@@ -1168,11 +1168,17 @@ class Renderer {
   // (natbib's numbers, as TeX Live's natbib sets them: [3, 1] in the order given; with sort, in order; with compress, a
   //  run of three or more as a range, [1–3] (two stay [1, 2]); a missing key as "?"; \citet as each entry's author then
   //  its number, "Ann [1]"; a note last, inside the brackets)
+  // (a \cite of a key with no entry: "?", as LaTeX prints it, when the document has a bibliography (its key kept as the
+  //  mark's title); with none (BibTeX not run, no .bib read), the key, which is all there is to show)
+  citeMiss(k, plain) {
+    if (plain) return "?";
+    return this.bib.size ? '<span class="missing" title="' + esc(k) + '">?</span>' : '<span class="missing">' + esc(k) + "</span>";
+  }
   natCite(r, plain) {
     const link = (b) => (plain ? String(b.num) : '<a href="#' + b.id + '">' + b.num + "</a>");
     const note = r.opt ? ", " + this.noteHtml(r.opt, plain) : "";
     const keys = r.key.split(",").map((k) => k.trim()).filter(Boolean);
-    const miss = (k) => (plain ? "?" : '<span class="missing">' + esc(k) + "</span>");
+    const miss = (k) => this.citeMiss(k, plain);
     if (r.cmd === "citet") return keys.map((k, n) => { const b = this.bib.get(k); if (!b) return miss(k); const w = plain ? b.who.replace(/<[^>]*>/g, "") : b.who; return (w ? w + " " : "") + "[" + link(b) + (n === keys.length - 1 ? note : "") + "]"; }).join(", ");
     const found = keys.map((k) => ({ k, b: this.bib.get(k) }));
     if (this.nat.sort) found.sort((x, y) => (x.b ? x.b.num : Infinity) - (y.b ? y.b.num : Infinity));

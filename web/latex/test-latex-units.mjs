@@ -1232,6 +1232,65 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
   check("enumitem-not-its-own", /\[\(a\)\]/.test(t2) && /\[i\]/.test(t2) && JSON.stringify(l2) === JSON.stringify(["1.", "1.", "1."]), { l2, t: t2.replace(/\s+/g, " ").slice(0, 200) });
 }
 
+// ---- \bibliography{refs} with no .bbl beside the .tex and refs.bib read: the .bbl BibTeX's plain style would make
+// (bib.ts), given to the engine as that .bbl (inputs.ts), so each \cite is its number; a key with no entry "?". The
+// entries checked against BibTeX 0.99d's plain.bst for the same .bib (FIX: @string's, # joins, braces, quotes, (...)
+// entries, @comment and stray text, von and Jr names, "others", an organization, editors, special characters, every
+// type plain knows); a crossref'd entry takes its parent's title as its booktitle (BibTeX leaves "In ..." out); a doi,
+// an eprint and a url shown, simply (plain leaves them out)
+{
+  const { engineInputs } = await import("./inputs.ts");
+  const B = await import("./bib.ts");
+  const FIX = "@string{ams = \"American Mathematical Society\"}\n@string{jams = \"J. Amer. Math. Soc.\"}\n@comment{this is ignored}\nSome stray text outside entries.\n@article{knuth84,\n  author = {Donald E. Knuth},\n  title = {Literate Programming},\n  journal = {The Computer Journal},\n  volume = 27, number = {2}, pages = {97-111},\n  year = 1984, month = may\n}\n@book{lamport94,\n  author = \"Leslie Lamport\",\n  title = \"{\\LaTeX}: A Document Preparation System\",\n  publisher = {Addison-Wesley}, address = {Reading, Massachusetts},\n  edition = {Second}, year = {1994}\n}\n@inproceedings{vonneumann,\n  author = {John von Neumann and Oskar Morgenstern and others},\n  title = {On the {Theory} of Games: the {Zero-Sum} case},\n  booktitle = {Proceedings of the {ICM}},\n  editor = {A. Editor and B. Editor},\n  pages = {1--10}, year = {1950}, publisher = ams, address = {Providence}\n}\n@phdthesis{thesis, author={Ann Student}, title={Primes in Progressions}, school={Harvard University}, year={2010}}\n@techreport{tr, author={Bob Writer}, title={A Report}, institution={MIT}, number={42}, year={1999}}\n@misc{web, author={Carol Author}, title={A Web Page}, howpublished={\\url{https://example.org}}, year={2020}, note={Accessed 2021}}\n@article{jamsart, author={Zed Zeta}, title={On Zeta Functions}, journal=jams, volume={1}, pages={1--2}, year={1988}, month=jan # \"~1\"}\n@unpublished{unp, author={Dan Draft}, title={A Draft}, note={Preprint}, year={2023}}\n@STRING(pub = \"Spring\" # \"er\")\n@Article(paren,\n  Author = \"M{\\\"u}ller, Hans and {\\'E}mile Zola\",\n  Title = \"A {G}ood {Title} with $x^2$ Math\",\n  Journal = \"Ann. \" # \"Math.\",\n  Year = \"2005\", Volume = \"161\", Pages = \"1--3\")\n@book{org, author = {{World Health Organization}}, title = {Report}, publisher = pub, year = 2019}\n@book{ed, editor = {Pat Editor and Quinn Editor}, title = {Edited Volume}, publisher = {Wiley}, year = 2000, series = {Lecture Notes}, volume = {7}}\n@article{lower, author = {Ludwig van Beethoven and Charles de la Vall{\\'e}e Poussin}, title = {On Primes}, journal = {J}, year = {1896}, pages = {5}}\n@manual{man, title = {User Guide}, organization = {Acme}, edition = {third}, year = 2020}\n";
+  const BIBTEX = ["{man} Acme. \\newblock {\\em User Guide}, third edition, 2020.", "{web} Carol Author. \\newblock A web page. \\newblock \\url{https://example.org}, 2020. \\newblock Accessed 2021.", "{unp} Dan Draft. \\newblock A draft. \\newblock Preprint, 2023.", "{ed} Pat Editor and Quinn Editor, editors. \\newblock {\\em Edited Volume}, volume 7 of {\\em Lecture Notes}. \\newblock Wiley, 2000.", "{knuth84} Donald E. Knuth. \\newblock Literate programming. \\newblock {\\em The Computer Journal}, 27(2):97--111, May 1984.", "{lamport94} Leslie Lamport. \\newblock {\\em {\\LaTeX}: A Document Preparation System}. \\newblock Addison-Wesley, Reading, Massachusetts, second edition, 1994.", "{paren} Hans M{\\\"u}ller and {\\'E}mile Zola. \\newblock A {G}ood {Title} with $x^2$ math. \\newblock {\\em Ann. Math.}, 161:1--3, 2005.", "{thesis} Ann Student. \\newblock {\\em Primes in Progressions}. \\newblock PhD thesis, Harvard University, 2010.", "{lower} Ludwig van Beethoven and Charles de la Vall{\\'e}e Poussin. \\newblock On primes. \\newblock {\\em J}, page 5, 1896.", "{vonneumann} John von Neumann, Oskar Morgenstern, et al. \\newblock On the {Theory} of games: the {Zero-Sum} case. \\newblock In A. Editor and B. Editor, editors, {\\em Proceedings of the {ICM}}, pages 1--10, Providence, 1950. American Mathematical Society.", "{org} {World Health Organization}. \\newblock {\\em Report}. \\newblock Springer, 2019.", "{tr} Bob Writer. \\newblock A report. \\newblock Technical Report 42, MIT, 1999.", "{jamsart} Zed Zeta. \\newblock On zeta functions. \\newblock {\\em J. Amer. Math. Soc.}, 1:1--2, January 1 1988."];
+  const norm = (s) => s.replace(/~/g, " ").replace(/\s+/g, " ").trim();
+  const items = (s) => s.split("\\bibitem").slice(1).map((x) => norm(x.replace(/\\end\{thebibliography\}[\s\S]*$/, "")));
+  const mine = items(B.bibToBbl([FIX], { all: true, keys: [] }));
+  const off = mine.map((x, k) => [x, BIBTEX[k]]).filter(([a, b]) => a !== b);
+  check("bib-plain-as-bibtex", mine.length === 13 && off.length === 0, off.slice(0, 2));
+  // (the cited ones only, each with the key as cited (BibTeX's keys match whatever their case); one not in the .bib left out)
+  const some = B.bibToBbl([FIX], B.citedKeys(["\\cite{Knuth84} \\nocite{tr} % \\cite{thesis}\n\\citep[p.~2]{nosuch, lamport94}"]));
+  check("bib-cited-only", JSON.stringify(items(some).map((x) => /^\{([^}]*)\}/.exec(x)[1])) === JSON.stringify(["Knuth84", "lamport94", "tr"]), items(some));
+  // (crossref: the fields the entry lacks from its parent, its title the booktitle; a doi, an eprint, a url, simply)
+  const CR = "@incollection{part, author={John Doe}, title={A Chapter}, crossref={coll}, pages={5-9}}\n@book{coll, editor={Ed Itor}, title={The Collection}, publisher={Springer}, year=2001}\n@misc{arx, author={Ann Arx}, title={A Preprint}, eprint={2401.00001}, archivePrefix={arXiv}, year={2024}, doi={10.1000/xyz}, url={https://example.org/a}}";
+  const cr = items(B.bibToBbl([CR], { all: false, keys: ["part", "arx"] }));
+  check("bib-crossref-and-links", cr.length === 2 && cr[1] === "{part} John Doe. \\newblock A chapter. \\newblock In Ed Itor, editor, {\\em The Collection}, pages 5--9. Springer, 2001."
+    && cr[0] === "{arx} Ann Arx. \\newblock A preprint, 2024. \\newblock doi:10.1000/xyz, arXiv:2401.00001, \\url{https://example.org/a}.", cr);
+  // (a malformed entry ends at the next "@"; a repeated key keeps the first, as BibTeX does; @string's seen by the files after)
+  const bad = B.parseBib("@article{x, title = {Unclosed\n@article{y, title={Y}}\n@article{y, title={Second}}\n@string{s={Shared}}");
+  const two = B.parseBib("@misc{z, title = s}", bad);
+  check("bib-recover-first-wins", two.entries.get("y")?.fields.get("title") === "Y" && two.entries.get("z")?.fields.get("title") === "Shared", [...two.entries.keys()]);
+  // (names, as BibTeX splits them)
+  const np = (n) => { const p = B.nameParts(n); return [p.first, p.von, p.last, p.jr].join("|"); };
+  check("bib-names", np("Charles Louis Xavier Joseph de la Vall{\\'e}e Poussin") === "Charles Louis Xavier Joseph|de la|Vall{\\'e}e Poussin|"
+    && np("van Beethoven, Ludwig") === "Ludwig|van|Beethoven|" && np("Doe, Jr., John") === "John||Doe|Jr." && np("{World Health Organization}") === "||{World Health Organization}|"
+    && np("Ludwig {van} Beethoven") === "Ludwig {van}||Beethoven|", [np("Charles Louis Xavier Joseph de la Vall{\\'e}e Poussin"), np("Ludwig {van} Beethoven")]);
+  // (a title's case: braces, math and control sequences kept, the first letter and one after ": " as written)
+  check("bib-title-case", B.titleCase("On the {Theory} of Games: The {Zero-Sum} Case with $X^2$ and \\LaTeX") === "On the {Theory} of games: The {Zero-Sum} case with $X^2$ and \\LaTeX", B.titleCase("On the {Theory} of Games: The {Zero-Sum} Case with $X^2$ and \\LaTeX"));
+  check("bib-names-and-cites", JSON.stringify(B.bibNames(["\\bibliography{a, b.bib}\n% \\bibliography{c}\n\\bibliography{a}"])) === JSON.stringify(["a.bib", "b.bib"])
+    && B.citedKeys(["\\nocite{*}"]).all === true && B.citedKeys(["\\%\\cite{k} 100\\% % \\cite{no}"]).keys.join() === "k", null);
+  // ---- in the engine: the numbers, the list, "?" for a key with no entry; the host asked for refs.bib
+  const DOC = "\\documentclass{article}\n\\begin{document}\nA \\cite{knuth84,lamport94}. B \\cite{vonneumann}. C \\cite{nosuch}.\n\\bibliographystyle{plain}\n\\bibliography{refs}\n\\end{document}\n";
+  const run = (known, main = DOC) => { const ei = engineInputs("/ex/paper.tex", known, false, main, B.bblFor); return new Engine().update(main, { cold: true, inputs: { files: ei.files, resolve: ei.resolve, jobname: ei.jobname, version: 1 } }); };
+  const plain = (h) => h.replace(/<span class="katex-mathml">[\s\S]*?<\/span>/g, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ");
+  const r = run(new Map([["/ex/paper.bbl", { absent: true }], ["/ex/refs.bib", { text: FIX }]])), h = r.chunks.join(""), t = plain(h);
+  check("bib-engine", /A \[1, 2\]\. B \[3\]\. C \[\?\]\./.test(t) && /\[1\] Donald E\. Knuth\. Literate programming\. The Computer Journal, 27\(2\):97–111, May 1984\./.test(t)
+    && /\[3\] John von Neumann, Oskar Morgenstern, et al\./.test(t) && !/BibTeX is not run/.test(t) && /<span class="missing" title="nosuch">\?<\/span>/.test(h), t.slice(0, 600));
+  check("bib-asked", r.inputRefs.includes("paper.bbl") && r.inputRefs.includes("refs.bib") && JSON.stringify(engineInputs("/ex/paper.tex", new Map()).wanted(["refs.bib"])) === JSON.stringify(["/ex/refs.bib"]), r.inputRefs);
+  // (a .bbl beside it wins: BibTeX's own; before the host knows whether there is one, or before refs.bib is read, or with
+  //  no text given, nothing is made: the placeholder, keys in brackets, as before)
+  const BBL = "\\begin{thebibliography}{1}\n\\bibitem{knuth84} FROM_BBL.\n\\end{thebibliography}\n";
+  const wb = plain(run(new Map([["/ex/paper.bbl", { text: BBL }], ["/ex/refs.bib", { text: FIX }]])).chunks.join(""));
+  const none = [new Map([["/ex/refs.bib", { text: FIX }]]), new Map([["/ex/paper.bbl", { absent: true }]]), new Map([["/ex/paper.bbl", { absent: true }], ["/ex/refs.bib", { absent: true }]])]
+    .map((k) => run(k).chunks.join(""));
+  const noMain = engineInputs("/ex/paper.tex", new Map([["/ex/paper.bbl", { absent: true }], ["/ex/refs.bib", { text: FIX }]]));
+  check("bib-bbl-wins-and-waits", /FROM_BBL/.test(wb) && !/Literate/.test(wb) && none.every((x) => /BibTeX is not run/.test(x) && /class="missing">knuth84</.test(x)) && !noMain.files.has("/ex/paper.bbl"), { wb: wb.slice(0, 200) });
+  // (the \bibliography and the \cite's in an \input file count too)
+  const MAIN = "\\documentclass{article}\n\\begin{document}\n\\input{body}\n\\end{document}\n";
+  const ib = plain(run(new Map([["/ex/body.tex", { text: "See \\cite{tr}.\n\\bibliography{refs}\n" }], ["/ex/paper.bbl", { absent: true }], ["/ex/refs.bib", { text: FIX }]]), MAIN).chunks.join(""));
+  check("bib-from-input", /See \[1\]\./.test(ib) && /\[1\] Bob Writer\. A report\. Technical Report 42, MIT, 1999\./.test(ib), ib.slice(0, 300));
+}
+
 // ---- \bibliography{refs} reads \jobname.bbl, the thebibliography BibTeX wrote beside the .tex (inputs.ts jobname, the
 // expander's \bibliography): the references listed and each \cite resolved; without one, or before the host has read
 // it, the placeholder as before, and the host asked for it. natbib's numbers, sort&compress and \citet as TeX Live's
