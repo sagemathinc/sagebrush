@@ -186,6 +186,18 @@ def _kernels():
     return {"cholesky": k(chol), "solve": k(lu), "det": k(lu), "slogdet": k(lu), "inv": k(lu)}
 
 
+def _threads():
+    """engine/nd's thread pool for large matrix products (each dimension at
+    least 256) in this session: "threads", what a product gets now (1 until
+    the pool is ready); "state" ("none" before the first such product,
+    "starting", "ready", or "off" for the rest of the session); "why" not
+    more; and "products", the products so far by the participants each
+    actually ran on ({participants: count}).  For benchmarks and tests: the
+    bits of a product never depend on any of it."""
+    threads, state, why, products = _L._threads()
+    return {"threads": threads, "state": state, "why": why, "products": {k: c for k, c in products}}
+
+
 class _Result(tuple):
     _fields = ()
 

@@ -1,0 +1,137 @@
+B * ZZ
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 101
+[19 10]
+[43 14]
+ZZ * B
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 101
+[88 87]
+[31 46]
+B + ZZ
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 101
+[ 6 97]
+[10 12]
+ZZ + B
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 101
+[ 6 97]
+[10 12]
+B - ZZ
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 101
+[97  8]
+[97 97]
+ZZ - B
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 101
+[ 4 93]
+[ 4  4]
+B * QQ TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 101' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'
+QQ * B TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 101'
+B + QQ TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 101' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'
+QQ + B TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 101'
+B - QQ TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 101' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'
+QQ - B TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 101'
+B * ZZ
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2
+[1 0]
+[1 0]
+ZZ * B
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2
+[1 0]
+[1 0]
+B + ZZ
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2
+[0 0]
+[0 0]
+ZZ + B
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2
+[0 0]
+[0 0]
+B - ZZ
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2
+[0 0]
+[0 0]
+ZZ - B
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2
+[0 0]
+[0 0]
+B * QQ TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'
+QQ * B TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2'
+B + QQ TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'
+QQ + B TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2'
+B - QQ TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'
+QQ - B TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2'
+B * ZZ
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12
+[ 7 10]
+[ 7  2]
+ZZ * B
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12
+[11 10]
+[ 7 10]
+B + ZZ
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12
+[ 6  8]
+[10  0]
+ZZ + B
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12
+[ 6  8]
+[10  0]
+B - ZZ
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12
+[8 8]
+[8 8]
+ZZ - B
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12
+[4 4]
+[4 4]
+B * QQ TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'
+QQ * B TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12'
+B + QQ TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'
+QQ + B TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12'
+B - QQ TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'
+QQ - B TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12'
+B * ZZ
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 9223372036854775783
+[19 10]
+[43 14]
+ZZ * B
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 9223372036854775783
+[9223372036854775770 9223372036854775769]
+[                 31                  46]
+B + ZZ
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 9223372036854775783
+[                  6 9223372036854775779]
+[                 10                  12]
+ZZ + B
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 9223372036854775783
+[                  6 9223372036854775779]
+[                 10                  12]
+B - ZZ
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 9223372036854775783
+[9223372036854775779                   8]
+[9223372036854775779 9223372036854775779]
+ZZ - B
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 9223372036854775783
+[                  4 9223372036854775775]
+[                  4                   4]
+B * QQ TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 9223372036854775783' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'
+QQ * B TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 9223372036854775783'
+B + QQ TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 9223372036854775783' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'
+QQ + B TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 9223372036854775783'
+B - QQ TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 9223372036854775783' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'
+QQ - B TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 9223372036854775783'
+B * Z23
+Full MatrixSpace of 2 by 3 dense matrices over Finite Field of size 101
+[ 9 12 15]
+[19 26 33]
+Z32 * B
+Full MatrixSpace of 3 by 2 dense matrices over Finite Field of size 101
+[96 95]
+[92 91]
+[88 87]
+Z23 * B TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 3 dense matrices over Integer Ring' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 101'
+B * Z33 TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 101' and 'Full MatrixSpace of 3 by 3 dense matrices over Integer Ring'
+B + Z33 TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 101' and 'Full MatrixSpace of 3 by 3 dense matrices over Integer Ring'
+Z33 - B TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 3 by 3 dense matrices over Integer Ring' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 101'
+0x2 ZZ * B Full MatrixSpace of 0 by 2 dense matrices over Finite Field of size 101
+B * 2x0 ZZ Full MatrixSpace of 2 by 0 dense matrices over Finite Field of size 101
+Full MatrixSpace of 20 by 25 dense matrices over Finite Field of size 101 25477 57 18
+Full MatrixSpace of 25 by 20 dense matrices over Finite Field of size 101 25477 57 18

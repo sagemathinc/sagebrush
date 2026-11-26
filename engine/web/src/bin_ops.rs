@@ -7,7 +7,9 @@
 //! - `nmod_poly_gcd(p, a, b)` -> [the monic gcd];
 //! - `nmod_echelon(p, M, flags)` -> [pivots, det] or [pivots, det, rows]:
 //!   the JSON op's echelon (nmod_ops.rs) on a `MAT1` of words, without its
-//!   per-dimension cap (below).
+//!   per-dimension cap (below);
+//! - `nmod_mat_mul(p, A, B)` -> [A B]: the product of an r x k and a k x c
+//!   `MAT1` of words, row-major (below).
 //!
 //! p is a typed scalar (a `U641` of one word), prime, below 2^63.  A
 //! polynomial is a `U641` of its coefficients,
@@ -41,7 +43,7 @@
 
 use sagebrush_arith::cost::{tally, Family};
 use sagebrush_arith::nmod::{is_prime, Modulus};
-use sagebrush_arith::nmod_mat::Mat;
+use sagebrush_arith::nmod_mat::{product_peak, with_fast_product, Mat};
 use sagebrush_arith::{nmod_poly, ntt};
 use sagebrush_wire::{self as wire, Code, OpSpec, U64s, WireError};
 
@@ -100,7 +102,7 @@ fn find(name: &str) -> Option<&'static BinOp> {
 }
 
 fn spec(name: &str) -> Option<OpSpec> {
-    if name == ECHELON {
+    if name == ECHELON || name == MAT_MUL {
         return Some(OpSpec { min_args: 3, max_args: 3, request_cap: wire::FRAME_CAP });
     }
     // (an overflow, excluded at compile time above, would leave the op
@@ -221,6 +223,9 @@ fn run_with(req: &[u8], frame_cap: usize) -> Result<Vec<u8>, WireError> {
     let f = wire::admit_with(req, spec, u64::try_from(usize::MAX).unwrap_or(u64::MAX), frame_cap)?;
     if f.op == ECHELON {
         return echelon(&f);
+    }
+    if f.op == MAT_MUL {
+        return mat_mul(&f);
     }
     let op = find(f.op).ok_or(fail(Code::Internal, 0, "an admitted op without a row"))?;
     let arg = |i: usize| f.arg(i).ok_or(fail(Code::Internal, 0, "an admitted argument missing"));
@@ -432,6 +437,97 @@ fn echelon(f: &wire::Frame) -> Result<Vec<u8>, WireError> {
     let n = if want_rows { 3 } else { 2 };
     wire::write_ok_u641_with(&mut out, &results[..n], ECH_CHUNK, |k| {
         tally(Family::Move, k as u64);
+        sagebrush_interrupt::check_coarse();
+    })?;
+    Ok(out)
+}
+
+// ---------------------------------------------------------------- product
+
+const MAT_MUL: &str = "nmod_mat_mul";
+
+/// The allowance, in words, that `nmod_mat_mul` gives the product's fast
+/// route for its workspace beyond the classical product's
+/// (sagebrush_arith::nmod_mat::with_fast_product): a fixed constant, so that
+/// whether a product takes the fast route depends on its shape and its
+/// prime alone, never on the memory free when it runs.  2^24 words (128
+/// MiB) admits the fast route's extra words up to about 2600 x 2600 x 2600;
+/// a larger product whose plan is fast runs classical.
+pub const MAT_MUL_FAST_ALLOWANCE: u64 = 1 << 24;
+
+/// `nmod_mat_mul`'s request length for an r x k by k x c product: the header
+/// (4), the name's length and name (4 + 12), the argument count (4), p (4 +
+/// 12 + 8) and the two matrices (each 4 + `MAT1` 4 + rows 4 + cols 4 + `U641`
+/// 12 + 8 per entry): 104 + 8 (r k + k c).  None on an overflow.
+pub fn mat_mul_request_len(r: usize, k: usize, c: usize) -> Option<usize> {
+    r.checked_mul(k)?.checked_add(k.checked_mul(c)?)?.checked_mul(8)?.checked_add(104)
+}
+
+/// `nmod_mat_mul`'s reply length for an r x c product: the ok header (10) and
+/// the entries (16 + 8 r c).  None on an overflow or a length past a u32
+/// field.
+pub fn mat_mul_reply_len(r: usize, c: usize) -> Option<usize> {
+    wire::ok_u641_len(&[r.checked_mul(c)?])
+}
+
+/// `nmod_mat_mul`'s reservation for an r x k by k x c product over p: the
+/// decoded factors (8 (r k + k c)), the product's peak under
+/// [`MAT_MUL_FAST_ALLOWANCE`] (its result included:
+/// sagebrush_arith::nmod_mat::product_peak, the decision `Mat::mul` makes),
+/// the reply and [`ECH_SLACK`].  None on an overflow.
+pub fn mat_mul_reservation(r: usize, k: usize, c: usize, p: u64) -> Option<u64> {
+    let inputs = words(r.checked_mul(k)?.checked_add(k.checked_mul(c)?)?)?;
+    let (peak, _) = product_peak(r, k, c, &Modulus::new(p), MAT_MUL_FAST_ALLOWANCE)?;
+    let reply = u64::try_from(mat_mul_reply_len(r, c)?).ok()?;
+    inputs.checked_add(peak.checked_mul(8)?)?.checked_add(reply)?.checked_add(ECH_SLACK)
+}
+
+fn mat_mul(f: &wire::Frame) -> Result<Vec<u8>, WireError> {
+    let arg = |i: usize| f.arg(i).ok_or(fail(Code::Internal, 0, "an admitted argument missing"));
+    // S2: every schema and domain, allocation-free
+    let pa = arg(0)?;
+    let p = wire::scalar(pa)?;
+    if p >= MAX_P || !is_prime(p) {
+        let at = pa.offset.checked_add(12).ok_or(fail(Code::Internal, 0, "an offset past u64"))?;
+        return Err(fail(Code::Domain, at, "p must be a prime below 2^63"));
+    }
+    let ma = wire::mat1(arg(1)?, wire::ElemKind::Words, false)?;
+    let wire::Elems::Words(va) = ma.elems else {
+        return Err(fail(Code::Internal, 0, "a words matrix of another kind"));
+    };
+    let bb = arg(2)?;
+    let mb = wire::mat1(bb, wire::ElemKind::Words, false)?;
+    let wire::Elems::Words(vb) = mb.elems else {
+        return Err(fail(Code::Internal, 0, "a words matrix of another kind"));
+    };
+    if ma.cols != mb.rows {
+        return Err(fail(Code::Domain, bb.offset, "the factors' inner dimensions differ"));
+    }
+    let (r, k, c) = (ma.rows, ma.cols, mb.cols);
+    echelon_scan(&va, p)?;
+    echelon_scan(&vb, p)?;
+    // S2/S3: one reservation of the whole call's bound, before any
+    // allocation, held to the end (released on every exit, unwinding too)
+    let need = mat_mul_reservation(r, k, c, p).ok_or(fail(Code::Cap, 0, "a memory bound too large"))?;
+    let _r = sagebrush_ledger::reserve(MAT_MUL, need).map_err(|e| match e {
+        sagebrush_ledger::EngineError::Memory(_) => fail(Code::Cap, 0, "the call's memory reservation was refused"),
+        sagebrush_ledger::EngineError::Internal(_) => fail(Code::Internal, 0, "the ledger failed an invariant"),
+    })?;
+    let m = Modulus::new(p);
+    let a = Mat { rows: r, cols: k, m, d: echelon_decode(&va) };
+    let b = Mat { rows: k, cols: c, m, d: echelon_decode(&vb) };
+    let prod = with_fast_product(MAT_MUL_FAST_ALLOWANCE, || {
+        let _phase = sagebrush_interrupt::enter("product");
+        a.mul(&b)
+    });
+    drop((a, b));
+    // S3: the reply at its exact length, within the reservation's bound
+    let len = mat_mul_reply_len(r, c).ok_or(fail(Code::Internal, 0, "a result too large to frame"))?;
+    let _phase = sagebrush_interrupt::enter("reply");
+    let mut out = Vec::with_capacity(len);
+    let results: [&[u64]; 1] = [&prod.d];
+    wire::write_ok_u641_with(&mut out, &results, ECH_CHUNK, |n| {
+        tally(Family::Move, n as u64);
         sagebrush_interrupt::check_coarse();
     })?;
     Ok(out)

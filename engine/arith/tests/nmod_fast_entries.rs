@@ -66,6 +66,7 @@ fn the_fast_products_entries_are_admitted_or_gated() {
             ("fast_n0", true),
             ("fast_product_state", true),
             ("leave_fast_product_state", true),
+            ("product_peak", false),
             ("reset_fast_product", false),
             ("set_fast_n0", true),
             ("with_fast_product", false)
@@ -108,6 +109,6 @@ fn the_fast_products_entries_are_admitted_or_gated() {
     ));
     // and the re-exports: the allowance in production, its state gated
     assert!(body.contains(
-        "pub use fast::{reset_fast_product, with_fast_product};\n#[cfg(feature = \"test-hooks\")]\npub use fast::{fast_allowance_left, fast_n0, fast_product_state, leave_fast_product_state, set_fast_n0};\n"
+        "pub use fast::{product_peak, reset_fast_product, with_fast_product};\n#[cfg(feature = \"test-hooks\")]\npub use fast::{fast_allowance_left, fast_n0, fast_product_state, leave_fast_product_state, set_fast_n0};\n"
     ));
 }

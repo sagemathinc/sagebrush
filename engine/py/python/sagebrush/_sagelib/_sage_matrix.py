@@ -1582,6 +1582,20 @@ class Matrix:
         base = self._base if self._base is other._base else sa.QQ
         return base
 
+    def _finite(self, other, op):
+        """self as a matrix over the finite field (or Z/n) of other, an
+        FFMatrix not over a generic field, when self is over ZZ, as Sage
+        coerces ZZ into every ring; None for any other operand.  Over QQ or
+        another ring, or of the wrong shape for op (self op other), Sage's
+        TypeError (other was taken as a scalar, entry by entry)."""
+        if type(other).__name__ != "FFMatrix" or getattr(other._base, "_is_generic_field", False):
+            return None
+        bad = self.ncols() != other.nrows() if op == "*" else self.dimensions() != other.dimensions()
+        if bad or self._base is not _sa().ZZ:
+            raise TypeError("unsupported operand parent(s) for %s: '%s' and '%s'" % (op, self.parent(), other.parent()))
+        import _sage_ffmat
+        return _sage_ffmat.FFMatrix(other._base, self._rows, self.ncols())
+
     def _generic(self, other):
         """self as a matrix over the field of other (a QQbar matrix), or None."""
         base = getattr(other, "_base", None)
@@ -1729,6 +1743,9 @@ class Matrix:
         g = self._generic(other)
         if g is not None:
             return g + other
+        f = self._finite(other, "+")
+        if f is not None:
+            return f + other
         if isinstance(other, (int, _F)) or _is_sr_scalar(other):
             return self + self._scalar_matrix(int(other) if isinstance(other, bool) else other, "+")
         if not isinstance(other, Matrix):
@@ -1753,6 +1770,9 @@ class Matrix:
         g = self._generic(other)
         if g is not None:
             return g - other
+        f = self._finite(other, "-")
+        if f is not None:
+            return f - other
         if isinstance(other, (int, _F)) or _is_sr_scalar(other):
             return self - self._scalar_matrix(int(other) if isinstance(other, bool) else other, "-")
         if not isinstance(other, Matrix):
@@ -1780,6 +1800,9 @@ class Matrix:
         g = self._generic(other)
         if g is not None:
             return g * other
+        f = self._finite(other, "*")
+        if f is not None:
+            return f * other
         if isinstance(other, Matrix):
             if self.ncols() != other.nrows():
                 raise TypeError("unsupported operand parent(s) for *: '%s' and '%s'" % (self.parent(), other.parent()))
@@ -2090,7 +2113,7 @@ class Matrix:
 
     def echelon_form(self):
         """Over ZZ the Hermite form; over QQ the reduced row echelon form
-        (an empty matrix keeps its shape: astra's SAGE-940-2).
+        (an empty matrix keeps its shape: the review's SAGE-940-2).
 
         EXAMPLES::
 
@@ -2111,7 +2134,7 @@ class Matrix:
 
     def rref(self):
         """The reduced row echelon form over the fraction field: over ZZ
-        that is over QQ, not the Hermite form (astra's SAGE-940-3).
+        that is over QQ, not the Hermite form (the review's SAGE-940-3).
 
         EXAMPLES::
 

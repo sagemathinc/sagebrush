@@ -250,10 +250,13 @@ is read.
 Matrices over finite fields use Gaussian elimination over the field,
 with echelon forms, kernels, inverses, solving, characteristic polynomials
 and multiplicative orders. Over $\mathbb{Z}/n\mathbb{Z}$ with $n$
-composite, which is not a field, the ring arithmetic works, but the same
-elimination can meet a pivot that is not a unit, and then it raises an
-error instead of answering. For example, the determinant of
-`matrix(Zmod(6), [[2, 0], [0, 3]])` (which is $0$) is not computed yet.
+composite, which is not a field, the ring arithmetic works, and the
+determinant never divides: row operations of determinant 1 built from
+extended gcds clear each column, so `matrix(Zmod(12), [[5, 2], [9, 0]]).det()`
+is $6$, as in Sage, and `is_invertible()` asks whether the determinant is a
+unit. Other eliminations (echelon forms, inverses, solving) can still meet
+a pivot that is not a unit, and then they raise an error instead of
+answering.
 
 **Hilbert modular forms.** `HilbertModularForms(N)` gives the forms of
 weight $(2,2)$ over $F = \mathbb{Q}(\sqrt 5)$. It ports William Stein's
@@ -289,6 +292,11 @@ probable results, Sagebrush does too:
 - Gröbner bases over $\mathbb{Q}$ are proven by default, as Sage expects.
 
 A result is never presented as proven when it rests on an unproven step.
+
+**Fixed limits.** Matrix products and echelon forms over GF(p) with
+$p < 2^{63}$ (the fields the engine's binary route takes) whose request
+passes the 256 MiB frame are refused with a fixed-limit error; the limit is
+the same in every runtime.
 
 ## 6. How it was tested
 
