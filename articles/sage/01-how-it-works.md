@@ -293,6 +293,10 @@ probable results, Sagebrush does too:
 
 A result is never presented as proven when it rests on an unproven step.
 
+**Fixed limits.** GF(p) matrix products and echelon forms whose request
+passes the 256 MiB frame are refused with a fixed-limit error; the limit is
+the same in every runtime.
+
 ## 6. How it was tested
 
 SageMath was used as a black-box oracle: Sagebrush's authors ran it and
