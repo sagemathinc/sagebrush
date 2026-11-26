@@ -298,7 +298,9 @@ export const LATEX_LAZY_CAPS = {
   // (a shared talk's view, loaded by the share page by URL for a .tex only (Nov 12): its
   //  measurement + 64, 3,688 / 1,957 on master 8431bd54)
   // (and its raw cap renewed Nov 13 with the editor's bar and math timing: 3,789 measured + 64; its gzip, 1,976, within)
-  SHARE: { label: "the LaTeX shared talk's chunk", raw: 3853, gzip: 2021 },
+  // (4,166 / 2,156: Nov 26 2026, a GitHub repository's files mounted for a talk's Run (mountIn: the /<repo>/ root taken
+  //  off, a git blob id taken as a SHA-256 is): 4,102 / 2,092 measured on master 30c8705d with it, + 64)
+  SHARE: { label: "the LaTeX shared talk's chunk", raw: 4166, gzip: 2156 },
   // (the preview's code blocks coloured (hl.ts with the notebook's highlight.js), fetched once a preview has one: a lazy
   //  chunk, Nov 10: 4,410 / 2,355 measured on master e0b7306c,
   //  + 64 B each)
