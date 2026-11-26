@@ -36,6 +36,10 @@ PROTOCOL = 5
 # Input variants per point (items.json may lower it for a row or a size)
 DEFAULT_VARIANTS = 8
 VENV_PY = ROOT / "engine/.venv/bin/python"
+# The blas reference's interpreter: a venv of its own (vm-setup.sh) holding
+# real NumPy with its bundled OpenBLAS, apart from engine/.venv so the
+# Sage-mode driver never sees it
+BLAS_PY = ROOT / ".venv-blas/bin/python"
 PYJS = ROOT / "build/cli/pyjs.cjs"
 MAGMA = Path("/usr/local/bin/magma")
 NATIVE = HERE / "native/target/release/bench-core-native"
@@ -47,7 +51,7 @@ WASM = HERE / "native/target/wasm32-wasip1/release/bench-core-native.wasm"
 WASI_RUN = HERE / "drivers/wasi_run.mjs"
 FLINT_RUST = HERE / "flint-rust/target/release/bench-core-flint"
 # Every backend; a name ending in "-n" is its base run on N threads
-BACKENDS = "user,user-n,native,native-host,native-n,wasm,magma,flint,flint-n"
+BACKENDS = "user,user-n,native,native-host,native-n,wasm,magma,flint,flint-n,blas,blas-n"
 # The delegated cgroup v2 directory the memory caps live under (README)
 CGROUP_ROOT = Path(os.environ.get("BENCH_CGROUP", "/sys/fs/cgroup/bench-core"))
 # The threads of the "-n" backends (main sets it: --threads, else nproc)
@@ -714,6 +718,7 @@ BASE = {
     "native-n": "native",
     "wasm": "native",
     "flint-n": "flint",
+    "blas-n": "blas",
 }
 
 
@@ -741,6 +746,17 @@ def versions() -> dict:
         if VENV_PY.exists()
         else None,
         "magma": "V2.18-5" if MAGMA.exists() else None,
+        # (the blas column's NumPy, and the OpenBLAS its wheel bundles)
+        "numpy": out(
+            [
+                str(BLAS_PY),
+                "-c",
+                "import numpy; b = numpy.__config__.CONFIG['Build Dependencies']['blas']; "
+                "print(numpy.__version__, b.get('name'), b.get('version'))",
+            ]
+        )
+        if BLAS_PY.exists()
+        else None,
     }
 
 
@@ -874,6 +890,8 @@ def artifacts() -> dict:
     out["sagebrush-wheel"] = wheel_sha()
     out["sagebrush-installed"] = dist_files("sagebrush")
     out["python-flint-installed"] = dist_files("python-flint")
+    out["python-blas"] = sha256_file(Path(os.path.realpath(BLAS_PY))) if BLAS_PY.exists() else None
+    out["numpy-installed"] = dist_files("numpy", BLAS_PY) if BLAS_PY.exists() else None
     return out
 
 
@@ -887,6 +905,7 @@ NEEDS = {
     "magma": ("magma",),
     "flint-rust": ("flint-rust",),
     "flint-python": ("python", "python-flint-installed"),
+    "blas": ("python-blas", "numpy-installed"),
 }
 
 
@@ -894,7 +913,7 @@ def needs(backend: str, row: dict) -> tuple:
     """The artifacts a backend executes for this row."""
     base = backend[:-2] if backend.endswith("-n") else backend
     if base == "user":
-        return NEEDS["user-pyjs" if row["backends"]["user"] == "pyjs" else "user"]
+        return NEEDS["user-pyjs" if row["backends"].get("user") == "pyjs" else "user"]
     if base == "flint":
         return NEEDS[
             "flint-rust" if adapter("flint", row) == "flint-rust" else "flint-python"
@@ -989,12 +1008,16 @@ def command(backend: str, row: dict, n: int, mode: str, k: int = 1) -> list[str]
             else None
         )
     if backend == "user":
+        if not kinds.get("user"):
+            # (a row with no user column: the informational native-only rows)
+            return None
         if kinds["user"] == "pyjs":
+            # (the row's own pyjs script; the big-integer rows' by default)
             return (
                 [
                     "node",
                     str(PYJS),
-                    str(HERE / "drivers/sagebrush_bigint.py"),
+                    str(HERE / "drivers" / row.get("pyjs_driver", "sagebrush_bigint.py")),
                     cid,
                     str(n),
                     mode,
@@ -1032,7 +1055,14 @@ def command(backend: str, row: dict, n: int, mode: str, k: int = 1) -> list[str]
                 f"variants:={k}",
                 str(HERE / "drivers/magma_case.m"),
             ]
-            if MAGMA.exists()
+            if MAGMA.exists() and kinds.get("magma", True)
+            else None
+        )
+    if backend == "blas":
+        # (numpy_case.py under real NumPy: OPENBLAS_NUM_THREADS from run_child)
+        return (
+            [str(BLAS_PY), str(HERE / "drivers/numpy_case.py"), cid, str(n), mode, str(k)]
+            if kinds.get("blas") and BLAS_PY.exists()
             else None
         )
     if backend == "flint":
@@ -1062,10 +1092,11 @@ def adapter(backend: str, row: dict) -> str:
     if backend == "user":
         return (
             "pyjs (WebAssembly)"
-            if row["backends"]["user"] == "pyjs"
+            if row["backends"].get("user") == "pyjs"
             else "Sage mode (engine/.venv)"
         )
     return {
+        "blas": "NumPy with OpenBLAS (.venv-blas)",
         "native": "bench-core-native",
         "native-host": "bench-core-native (target-cpu=native)",
         "wasm": "bench-core-native (wasm32-wasip1, Node WASI)",
@@ -1091,6 +1122,9 @@ def wants_vtime(backend: str, row: dict) -> bool:
     )
 
 
+POOL_LINE = re.compile(r"^POOL\|(.*)$", re.M)
+
+
 def invoke(
     backend: str,
     row: dict,
@@ -1111,8 +1145,16 @@ def invoke(
         if mode in ("time", "time-fresh") and wants_vtime(backend, row)
         else None
     )
+    pinned = cpus is None and bool(row.get("threads_by_affinity"))
+    if pinned:
+        # (code that sizes its own threads from the CPUs it may use, the CLI's
+        # pool: a 1-thread column must be one CPU to be one thread, and an
+        # -n column its THREADS CPUs, the first ones; recorded)
+        cpus = sorted(os.sched_getaffinity(0))[: THREADS if backend.endswith("-n") else 1]
     threads = len(cpus) if cpus else (THREADS if backend.endswith("-n") else 1)
     r = run_child(cmd, timeout, threads, CAP, extra, cpus)
+    if pinned:
+        r["cpus"] = cpus
     r["steal"] = max_steal(s0, cpu_times())
     # (Magma 2.18 wraps long lines with backslash-newline)
     text = r.pop("output").replace("\\\n", "")
@@ -1121,6 +1163,19 @@ def invoke(
         r["status"] = "error"
     if r["status"] != "ok":
         r["detail"] = text[-600:]
+        return r
+    # (numpy_case.py under the CLI: the pool's record, the workers every
+    # product since its readiness gate ran on, apart from the CPUs; a timed
+    # user run of a threads_by_affinity row must have it)
+    pools = POOL_LINE.findall(text)
+    if pools:
+        try:
+            r["pool"] = json.loads(pools[-1])
+        except ValueError:
+            r["status"], r["detail"] = "error", "malformed POOL line: " + pools[-1][:200]
+            return r
+    elif row.get("threads_by_affinity") and BASE.get(backend, backend) == "user" and mode.startswith("time"):
+        r["status"], r["detail"] = "error", "no POOL record (the pool's readiness gate didn't run)"
         return r
     kind, fields = found[-1]
     parts = fields.split("|")
@@ -1277,6 +1332,13 @@ def selected(row: dict, key: str, backends: list[str]) -> tuple[list[str], dict]
     n = row["sizes"][key]["n"]
     present = [b for b in backends if command(b, row, n, "once")]
     skipped = {}
+    if row.get("user_sizes") is not None and key not in row["user_sizes"]:
+        # (a user column kept at a few sizes only, informational: a route
+        # that doesn't reach the engine yet, too slow for the rest)
+        for b in ("user", "user-n"):
+            if b in present:
+                present.remove(b)
+                skipped[b] = "the user column runs at sizes %s only (user_sizes)" % ", ".join(row["user_sizes"])
     if is_calibration_size(key):
         present = [b for b in present if b in VTIME_TARGETS]
         ws = working_set(row, n)
@@ -1304,6 +1366,7 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
         n=n,
         working_set_bytes=working_set(row, n),
         **({"stream": True} if row.get("stream") else {}),
+        **({"user_informational": True} if row.get("user_sizes") is not None else {}),
         fresh=row["fresh"],
         variants=k,
         backends={},
@@ -1326,8 +1389,8 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
             rec["backends"][b] = {
                 "status": "not applicable"
                 if (
-                    BASE.get(b, b) in ("native", "flint")
-                    and not (row["backends"][BASE.get(b, b)])
+                    BASE.get(b, b) in ("native", "flint", "magma", "blas", "user")
+                    and not row["backends"].get(BASE.get(b, b), BASE.get(b, b) == "magma")
                 )
                 or (b == "user-n" and not row.get("parallel"))
                 else "not on host"
@@ -1426,7 +1489,7 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
     # against theirs over 1 and N threads (the 2x rule's ratio; native-host
     # never counts toward it: headroom only).  A row marked "ratio": false
     # times different work on each side (hecke_space): no ratio.
-    refs = {b: sec(b) for b in ("magma", "flint") if sec(b)}
+    refs = {b: sec(b) for b in ("magma", "flint", "blas") if sec(b)}
     if rec["status"] == "ok" and refs and row.get("ratio", True) is not False:
         best = min(refs, key=refs.get)
         rec["best_ref"] = {
@@ -1435,10 +1498,11 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
             "seconds": refs[best],
         }
         for b in ("user", "native", "native-host", "wasm"):
-            if sec(b):
+            # (a user column limited to user_sizes is informational: no ratio)
+            if sec(b) and not (b == "user" and row.get("user_sizes") is not None):
                 rec["ratio_" + b.replace("-", "_")] = round(sec(b) / refs[best], 4)
         ours = {b: sec(b) for b in ("native", "native-n") if sec(b)}
-        theirs = {b: sec(b) for b in ("magma", "flint", "flint-n") if sec(b)}
+        theirs = {b: sec(b) for b in ("magma", "flint", "flint-n", "blas", "blas-n") if sec(b)}
         if ours and theirs:
             bo, bt = min(ours, key=ours.get), min(theirs, key=theirs.get)
             rec["best_ours"] = {"backend": bo, "seconds": ours[bo]}
@@ -1646,8 +1710,8 @@ def summary(out: Path, items: dict) -> None:
         "",
         "## Every point",
         "",
-        "| item | row | size | n | user | native | native-host | native-N | wasm | Magma | FLINT | FLINT-N | best 1-thread ref | user ratio | native ratio | wasm ratio | best/best | peak MiB | status |",
-        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---|",
+        "| item | row | size | n | user | native | native-host | native-N | wasm | Magma | FLINT | FLINT-N | BLAS | BLAS-N | best 1-thread ref | user ratio | native ratio | wasm ratio | best/best | peak MiB | status |",
+        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---|",
     ]
     for r in recs:
 
@@ -1672,8 +1736,10 @@ def summary(out: Path, items: dict) -> None:
             return text
 
         user_ratio = ratio("ratio_user")
+        # (a user column kept at a few sizes only: informational, no ratio)
+        user = t("user") + (" (informational)" if r.get("user_informational") and t("user") != "—" else "")
         lines.append(
-            f"| {r['item']} | {r['row']} | {r['size']} | {r['n']} | {t('user')} | {t('native')} | {t('native-host')} | {t('native-n')} | {t('wasm')} | {t('magma')} | {t('flint')} | {t('flint-n')} | {r.get('best_ref', {}).get('adapter', '—')} | {user_ratio} | {ratio('ratio_native')} | {ratio('ratio_wasm')} | {ratio('ratio_best')} | {peak} | {r['status']} |"
+            f"| {r['item']} | {r['row']} | {r['size']} | {r['n']} | {user} | {t('native')} | {t('native-host')} | {t('native-n')} | {t('wasm')} | {t('magma')} | {t('flint')} | {t('flint-n')} | {t('blas')} | {t('blas-n')} | {r.get('best_ref', {}).get('adapter', '—')} | {user_ratio} | {ratio('ratio_native')} | {ratio('ratio_wasm')} | {ratio('ratio_best')} | {peak} | {r['status']} |"
         )
     # the thread sweep: per row and -n backend, each column's median and
     # its speedup over the 1-core column
@@ -1690,7 +1756,10 @@ def summary(out: Path, items: dict) -> None:
                         cells.append(f"{label}: {t.get('status')}")
                     else:
                         up = f" ({one / sec:.2f}x)" if one else ""
-                        cells.append(f"{label}: {secs(sec)}{up}")
+                        # (the CLI pool's workers, when its record says: at
+                        # most 9, whatever the column's CPUs)
+                        w = (t.get("pool") or {}).get("threads")
+                        cells.append(f"{label}: {secs(sec)}{up}" + (f" [{w} workers]" if w else ""))
                 lines.append(f"- **{r['row']}** {r['size']} (n={r['n']}) {b}: " + "; ".join(cells))
     uncovered = [i for i in items.values() if i["status"] != "rows"]
     lines += ["", "## Items without rows", ""] + [

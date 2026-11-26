@@ -424,6 +424,11 @@ def prepare(v):
             return lambda: A.smith_form()[0]
         if op == "divisors":
             return lambda: A.elementary_divisors()
+        if op == "mul":
+            # (B: variant v + n of the same family)
+            B = det_input(ring, n, v + n)
+            operands(A.list(), B.list())
+            return lambda: A * B
         if op == "solve":
             b = vector(ring, [i + 1 for i in range(n)])
             operands(A.list(), list(b))

@@ -8,13 +8,14 @@ The finish line for an item is our native engine within $2\times$ of the best re
 
 | backend | driver | what it measures |
 |---|---|---|
-| user | `drivers/sagebrush_case.py` in `engine/.venv` (Sage mode); `drivers/sagebrush_bigint.py` under `build/cli/pyjs.cjs` for the big-integer rows | what users get. The big-integer rows run in WebAssembly |
+| user | `drivers/sagebrush_case.py` in `engine/.venv` (Sage mode); under `build/cli/pyjs.cjs`, a row's own script (`"pyjs_driver"`): `drivers/sagebrush_bigint.py` for the big-integer rows, `drivers/numpy_case.py` (NumPy's `A @ B`) for the f64 product rows | what users get. The pyjs rows run in WebAssembly. A row may have no user column (`"user": null`), or keep it at a few sizes only (`"user_sizes"`): those points are informational, with no user ratio, and the other sizes skip the column |
 | native | `native/`: a bench-only Rust binary that calls the engine's routines directly | the engine itself, without the Sage layer or the request wire |
 | native-host | the same binary built with `-C target-cpu=native` (in `native/target-host`) | headroom only: what this CPU's SIMD would give. It never counts toward the $2\times$ rule until the engine dispatches on CPU features at run time |
 | wasm | the same crate built for `wasm32-wasip1`, run under Node's WASI by `drivers/wasi_run.mjs` | the engine as WebAssembly. Same toolchain, release profile and default target features as the product's `wasm32-unknown-unknown` build (`scripts/build-engine.mjs`), and like it without the `parallel` feature. Only the target differs: WASI gives the driver its arguments, a clock and stdout, which the product's host provides in its own way |
 | magma | `drivers/magma_case.m`, run by `/usr/local/bin/magma` | Magma V2.18-5, a black-box reference |
 | flint | `flint-rust/` (Rust bindings) where it covers the operation, else `drivers/flint_case.py` (python-flint 0.9.0) | FLINT 3.6, a black-box reference |
-| native-n, flint-n | native and flint on $N$ threads (`--threads`, default the CPU count) | the parallel speed of each. Magma V2.18 runs on one thread |
+| blas | `drivers/numpy_case.py` in `.venv-blas` (NumPy 2.3.5, its wheel's OpenBLAS), on the rows marked `"blas": true` | a black-box reference for the f64 product. `OPENBLAS_NUM_THREADS` is the column's thread count |
+| native-n, flint-n, blas-n | native, flint and blas on $N$ threads (`--threads`, default the CPU count) | the parallel speed of each. Magma V2.18 runs on one thread |
 | user-n | user on $N$ threads, only on the rows marked `"parallel"` (F4, modular symbols, newforms) | the parallel speed users get |
 
 - The gap between user and native shows a *routing* cost: the Sage layer and the wire. The gap between native and the best reference shows an *algorithm* cost.
@@ -24,8 +25,8 @@ The finish line for an item is our native engine within $2\times$ of the best re
 - `native/` is built with the engine's pinned toolchain (`engine/rust-toolchain.toml`) and default flags, which is the code we ship. Its `Cargo.lock` starts from `engine/Cargo.lock`.
 - Natively, `native/` enables `sagebrush-par/parallel`, as every shipped native build does (the Python wheel, the Node addon, the CLI). The 1-thread columns set `RAYON_NUM_THREADS=1` and the -n columns $N$. Today only a few of the engine routines these rows call run in parallel, so most rows show no gain from threads yet.
 - Ratios:
-  - **1-thread:** user, native, native-host and wasm, each against the faster 1-thread reference (Magma or FLINT).
-  - **best/best** (the $2\times$ rule's): our faster of native and native-n against the fastest of Magma, flint and flint-n.
+  - **1-thread:** user, native, native-host and wasm, each against the fastest 1-thread reference (Magma, FLINT or NumPy/OpenBLAS).
+  - **best/best** (the $2\times$ rule's): our faster of native and native-n against the fastest of Magma, flint, flint-n, blas and blas-n.
 - The Rust FLINT oracle needs a static FLINT 3 build at `SAGEBRUSH_FLINT_PREFIX` (see `engine/flint/build.rs`).
 
 ## The protocol
@@ -115,7 +116,11 @@ Without it, `run.py` refuses to run and says why. `--mem-cap none` runs uncapped
 
 ## Thread sweep
 
-With `--sweep` (the shard driver always passes it), the rows marked `"sweep"` also time their -n backends on a series of pinned CPU sets: the first $c$ physical cores for $c = 1, 2, 4, 8, \dots$ (and all of them), one logical CPU per core, then every logical CPU (the `-smt` column) when the machine has SMT. A row marked `"sweep": "ends"` (mat_z_charpoly, the flat baseline) takes only the first and the last column. The cores come from `thread_siblings_list`, limited to the CPUs the runner may use.
+With `--sweep` (the shard driver always passes it), the rows marked `"sweep"` also time their -n backends on a series of pinned CPU sets: the first $c$ physical cores for $c = 1, 2, 4, 8, \dots$ (and all of them), one logical CPU per core, then every logical CPU (the `-smt` column) when the machine has SMT. A row marked `"sweep": "ends"` (mat_z_charpoly and the GF(p) products, flat baselines) takes only the first and the last column.
+
+Code that sizes its own thread pool from the CPUs it may use (the CLI's NumPy product: its pool follows `navigator.hardwareConcurrency`, which follows the affinity) needs its 1-thread columns pinned to one CPU. A row marked `"threads_by_affinity"` runs every column that isn't -n (user, blas) pinned to the first CPU the runner may use, and its -n columns outside the sweep to the first $N$ (`--threads`), recorded as the run's `cpus`. In the sweep each column is pinned to its CPUs, as on every row.
+
+The CLI's pool starts at its first large product, in the background, and a product that comes before it is ready runs on one thread. So `drivers/numpy_case.py`, under the CLI and before a timed run, starts the pool (one product, outside any timing) and waits for it (`np.linalg._threads()`). A run on $T$ CPUs (`BENCH_THREADS`) must then get $1 + \min(T - 1, 8)$ workers: the pool has at most 8 helpers, so at most 9 workers, whatever the column's CPUs, while blas-n gets the column's $N$. After the run the driver prints a `POOL` line, which run.py records as the run's `pool`: the workers it wanted, the state, and the workers every product since the gate actually ran on. The run fails unless they all ran on that count, and a timed user run of such a row without the record is an error. The sweep summary shows each column's workers beside its time. The cores come from `thread_siblings_list`, limited to the CPUs the runner may use.
 
 Each run is pinned twice: by `cpuset.cpus` in its capped cgroup (`cgroup-setup.sh` enables the cpuset controller too) and by its affinity, so `sched_getaffinity`, and so `available_parallelism`, see $c$. Its thread settings are $c$ as well: `BENCH_THREADS` (the Sage-mode driver passes it as `threads=` to modular symbols and newforms), `SAGEBRUSH_THREADS` (F4) and `RAYON_NUM_THREADS`. A column whose combined signature differs from the timed one is a `mismatch`; a column that can't be pinned (its cgroup's cpuset or the child's affinity refused) is that column's `error`, never the point's. Each point records the columns' results under `sweep` (the run identity lists the columns under `sweep_columns`), and the summary lists them with each column's speedup over one core. `cgroup-setup.sh` checks that a child cgroup takes a `cpuset.cpus`, and the VM build runs it once, so a VM that can't pin fails its setup rather than every point.
 

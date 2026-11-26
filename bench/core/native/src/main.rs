@@ -14,6 +14,10 @@ use std::time::Instant;
 const MOD: u64 = 1_000_000_007;
 const P: u64 = 65537;
 const P31: u64 = 2_147_483_647;
+/// The informational fast-product rows' allowance (u64 words): fixed, and
+/// beyond any plan's workspace at their sizes, so every product whose plan
+/// takes the fast route runs it (not the engine's admission)
+const FAST_ALLOWANCE: u64 = 1 << 32;
 
 fn residue(x: &BigInt) -> u64 {
     let text = x.to_string();
@@ -421,6 +425,21 @@ fn main() {
                 _ => run(&mode, variants, |v| { let (h, a) = fp(v); (h, move || a.charpoly()) }, |c| poly_sig(c)),
             }
         }
+        "mat_fp_mul" | "mat_fp31_mul" | "mat_fp_mul_fast" | "mat_fp31_mul_fast" => run(&mode, variants, |v| {
+            // (A from variant v, B from variant v + n; the classical product,
+            // the user path's default, or under _fast the fast route with
+            // FAST_ALLOWANCE)
+            let pm = if case_id.starts_with("mat_fp31_") { P31 } else { P };
+            let rows = |w: usize| -> Vec<Vec<u64>> { entries(n, pm, 0, w).into_iter().map(|r| r.into_iter().map(|x| x as u64).collect()).collect() };
+            let (ra, rb) = (rows(v), rows(v + n));
+            let h = hash_u64(&[ra.concat(), rb.concat()].concat());
+            let (a, b) = (nmod_mat::Mat::from_rows(&ra, Modulus::new(pm)), nmod_mat::Mat::from_rows(&rb, Modulus::new(pm)));
+            let fast = case_id.ends_with("_fast");
+            (h, move || if fast { nmod_mat::with_fast_product(FAST_ALLOWANCE, || a.mul(&b)) } else { a.mul(&b) })
+        }, |c| {
+            let xs: Vec<u64> = (0..n).flat_map(|i| c.row(i).to_vec()).collect();
+            format!("{}:{}", n, hash_u64(&xs))
+        }),
         "mat_fp_solve" | "mat_fp31_solve" => run(&mode, variants, |v| {
             let pm = if case_id.starts_with("mat_fp31_") { P31 } else { P };
             let rows: Vec<Vec<u64>> = entries(n, pm, 0, v).into_iter().map(|r| r.into_iter().map(|x| x as u64).collect()).collect();

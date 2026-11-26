@@ -64,7 +64,7 @@
    "id": "num0",
    "title": "Dense numerical linear algebra",
    "unlocks": [],
-   "status": "no rows yet (harness step 4)"
+   "status": "rows"
   },
   {
    "id": "num1",
@@ -1207,6 +1207,91 @@
    "working_set": "8*n**2"
   },
   {
+   "id": "mat_fp_mul",
+   "item": "la0",
+   "category": "linear algebra over Fp",
+   "label": "product A*B (p=65537)",
+   "sizes": {
+    "s": {
+     "n": 200,
+     "timeout": 120
+    },
+    "m": {
+     "n": 600,
+     "timeout": 300
+    },
+    "l": {
+     "n": 1500,
+     "timeout": 900
+    },
+    "c0": {
+     "n": 128,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 215,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 362,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 609,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 1024,
+     "timeout": 600
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   },
+   "user_sizes": [
+    "s"
+   ],
+   "route_note": "the engine's classical product (Mat::mul without an allowance, the default); the user column at size s only, informational (no ratio): the Sage-mode GF(p) product does not reach the engine yet (an entry loop in Python, https://github.com/sagemathinc/sagebrush/issues/2163), so the point shows when it does; native-n at the sweep's ends: no parallel product yet, a flat baseline against flint-n",
+   "sweep": "ends",
+   "working_set": "24*n**2"
+  },
+  {
+   "id": "mat_fp_mul_fast",
+   "item": "la0",
+   "category": "linear algebra over Fp",
+   "label": "product A*B (p=65537), the fast route under a fixed generous allowance (informational)",
+   "sizes": {
+    "s": {
+     "n": 200,
+     "timeout": 120
+    },
+    "m": {
+     "n": 600,
+     "timeout": 300
+    },
+    "l": {
+     "n": 1500,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": null,
+    "native": true,
+    "magma": false,
+    "flint": null
+   },
+   "route_note": "the native driver's Mat::mul under with_fast_product with a fixed allowance large enough for any plan at these sizes (not the engine's admission): what the fast route would give; no user path runs it yet, so no ratio and no calibration",
+   "compares": "the same products as mat_fp_mul; no ratio",
+   "calibration": false,
+   "ratio": false,
+   "working_set": "48*n**2"
+  },
+  {
    "id": "mat_fp31_det",
    "item": "la0",
    "category": "linear algebra over Fp, word-size p",
@@ -1398,6 +1483,91 @@
    },
    "control_note": "a control: charpoly is not on the folded u64 sums, so it should not move",
    "working_set": "8*n**2"
+  },
+  {
+   "id": "mat_fp31_mul",
+   "item": "la0",
+   "category": "linear algebra over Fp, word-size p",
+   "label": "product A*B (p = 2^31 - 1)",
+   "sizes": {
+    "s": {
+     "n": 200,
+     "timeout": 120
+    },
+    "m": {
+     "n": 600,
+     "timeout": 300
+    },
+    "l": {
+     "n": 1500,
+     "timeout": 900
+    },
+    "c0": {
+     "n": 128,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 215,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 362,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 609,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 1024,
+     "timeout": 600
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   },
+   "user_sizes": [
+    "s"
+   ],
+   "route_note": "the engine's classical product (Mat::mul without an allowance, the default); the user column at size s only, informational (no ratio): the Sage-mode GF(p) product does not reach the engine yet (an entry loop in Python, https://github.com/sagemathinc/sagebrush/issues/2163), so the point shows when it does; native-n at the sweep's ends: no parallel product yet, a flat baseline against flint-n",
+   "sweep": "ends",
+   "working_set": "24*n**2"
+  },
+  {
+   "id": "mat_fp31_mul_fast",
+   "item": "la0",
+   "category": "linear algebra over Fp, word-size p",
+   "label": "product A*B (p = 2^31 - 1), the fast route under a fixed generous allowance (informational)",
+   "sizes": {
+    "s": {
+     "n": 200,
+     "timeout": 120
+    },
+    "m": {
+     "n": 600,
+     "timeout": 300
+    },
+    "l": {
+     "n": 1500,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": null,
+    "native": true,
+    "magma": false,
+    "flint": null
+   },
+   "route_note": "the native driver's Mat::mul under with_fast_product with a fixed allowance large enough for any plan at these sizes (not the engine's admission): what the fast route would give; no user path runs it yet, so no ratio and no calibration",
+   "compares": "the same products as mat_fp31_mul; no ratio",
+   "calibration": false,
+   "ratio": false,
+   "working_set": "48*n**2"
   },
   {
    "id": "mat_q_det",
@@ -1594,6 +1764,100 @@
     "flint": "python"
    },
    "working_set": "32*n**2"
+  },
+  {
+   "id": "mat_f64_gemm",
+   "item": "num0",
+   "category": "dense numerical linear algebra",
+   "label": "f64 product A @ B, integer-valued entries (exact)",
+   "sizes": {
+    "s": {
+     "n": 256,
+     "timeout": 120
+    },
+    "m": {
+     "n": 512,
+     "timeout": 300
+    },
+    "l": {
+     "n": 1024,
+     "timeout": 900
+    },
+    "c0": {
+     "n": 256,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 431,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 724,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 1218,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 2048,
+     "timeout": 600
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "pyjs",
+    "native": false,
+    "magma": false,
+    "flint": null,
+    "blas": true
+   },
+   "pyjs_driver": "numpy_case.py",
+   "variants": 3,
+   "variants_note": "three input pairs: every variant's operands stay in memory, and the largest calibration size is 2048",
+   "route_note": "NumPy's A @ B through the CLI, which takes the engine's wasm GEMM on its thread pool for n >= 256; the pool's size follows the CPUs the process may use, so every 1-thread column is pinned to one CPU (threads_by_affinity); entries integers |x| <= 1024, so every product is exact in f64 and the signature is exact; the reference is NumPy with OpenBLAS, OPENBLAS_NUM_THREADS matched; the CLI's pool has at most 8 helpers, so 9 workers whatever the CPUs (blas gets the column's N): each timed user run records the workers its products ran on (pool); its calibration points carry user times only, with no units (no native column), so the fits skip them for the unit-cost terms",
+   "parallel": true,
+   "sweep": "cores",
+   "threads_by_affinity": true,
+   "working_set": "24*n**2"
+  },
+  {
+   "id": "mat_f64_gemm_bits",
+   "item": "num0",
+   "category": "dense numerical linear algebra",
+   "label": "f64 product A @ B, non-integer entries: the same bits on any number of threads (informational)",
+   "sizes": {
+    "s": {
+     "n": 256,
+     "timeout": 120
+    },
+    "m": {
+     "n": 512,
+     "timeout": 300
+    },
+    "l": {
+     "n": 1024,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "pyjs",
+    "native": false,
+    "magma": false,
+    "flint": null
+   },
+   "pyjs_driver": "numpy_case.py",
+   "variants": 3,
+   "variants_note": "three input pairs: every variant's operands stay in memory, and the largest calibration size is 2048",
+   "route_note": "mat_f64_gemm's inputs mapped to x/1024 + 1/3, so the products round; ours only (another library's rounding differs): its signature, a hash of the exact bits, must be the same in every sweep column",
+   "compares": "the exact bits of ours across thread counts; no ratio",
+   "calibration": false,
+   "ratio": false,
+   "parallel": true,
+   "sweep": "cores",
+   "threads_by_affinity": true,
+   "working_set": "24*n**2"
   },
   {
    "id": "groebner_cyclic",

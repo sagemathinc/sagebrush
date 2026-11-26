@@ -251,10 +251,13 @@ function Build(case_id, n, v)
     elif case_id in {"mat_z_det","mat_z_rank","mat_z_hnf","mat_z_smith","mat_z_charpoly","mat_z_elementary_divisors","mat_z_smith_hard","mat_z_elementary_divisors_hard"} then
         A := case_id in {"mat_z_smith_hard","mat_z_elementary_divisors_hard"} select SmithHard(n,v) else ZMat(n,v);
         ops := Eltseq(A);
-    elif case_id in {"mat_fp_det","mat_fp_rank","mat_fp_solve","mat_fp_charpoly","mat_fp31_det","mat_fp31_rank","mat_fp31_solve","mat_fp31_charpoly"} then
+    elif case_id in {"mat_fp_det","mat_fp_rank","mat_fp_solve","mat_fp_charpoly","mat_fp_mul","mat_fp31_det","mat_fp31_rank","mat_fp31_solve","mat_fp31_charpoly","mat_fp31_mul"} then
         // (mat_fp31_*: the same rows modulo 2^31 - 1)
-        A:=FpMat(n,v : p := Substring(case_id, 1, 9) eq "mat_fp31_" select 2147483647 else 65537); ops := Eltseq(A);
+        q := Substring(case_id, 1, 9) eq "mat_fp31_" select 2147483647 else 65537;
+        A:=FpMat(n,v : p := q); ops := Eltseq(A);
         if case_id in {"mat_fp_solve","mat_fp31_solve"} then w:=Vector(BaseRing(A),[i:i in [1..n]]); ops := ops cat Eltseq(w); end if;
+        // (the product's B: variant v + n, in the b slot)
+        if case_id in {"mat_fp_mul","mat_fp31_mul"} then b:=FpMat(n,v+n : p := q); ops := ops cat Eltseq(b); end if;
     elif case_id in {"mat_q_det","mat_q_rank","mat_q_solve","mat_q_charpoly"} then
         A:=QMat(n,v); ops := Eltseq(A);
         if case_id eq "mat_q_solve" then w:=Vector(Rationals(),[i:i in [1..n]]); ops := ops cat Eltseq(w); end if;
@@ -309,6 +312,7 @@ function DoOp(case_id, S)
     elif case_id in {"mat_z_elementary_divisors","mat_z_elementary_divisors_hard"} then return ElementaryDivisors(A);
     elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_fp31_charpoly","mat_q_charpoly"} then return CharacteristicPolynomial(A);
     elif case_id in {"mat_fp_solve","mat_fp31_solve","mat_q_solve"} then return Solution(Transpose(A),v);
+    elif case_id in {"mat_fp_mul","mat_fp31_mul"} then return A*b;
     elif case_id in {"groebner_cyclic","groebner_katsura"} then return GroebnerBasis(I);
     elif case_id in {"class_group","class_group_prime","class_group_composite","class_group_large_h","class_group_proven","class_group_generic"} then return ClassGroup(O);
     elif case_id in {"galois_group","galois_group_small"} then return GaloisGroup(pf);
@@ -347,7 +351,7 @@ function Sig(case_id, n, answer)
         d := [Integers()| Abs(z) : z in answer] cat [Integers()| 0 : i in [1..n-#answer]];
         error if case_id eq "mat_z_elementary_divisors_hard" and d ne [1] cat [1000003 : i in [2..n]], "the hard elementary divisors are not [1, p, ..., p]";
         return IntegerToString(n) cat ":" cat IntegerToString(SeqHash(d));
-    elif case_id in {"mat_z_hnf","mat_fp_solve","mat_fp31_solve","mat_q_solve"} then
+    elif case_id in {"mat_z_hnf","mat_fp_solve","mat_fp31_solve","mat_q_solve","mat_fp_mul","mat_fp31_mul"} then
         return IntegerToString(n) cat ":" cat IntegerToString(SeqHash(Eltseq(answer)));
     elif case_id in {"groebner_cyclic","groebner_katsura"} then
         ds:=[TotalDegree(f):f in answer]; Sort(~ds); return IntegerToString(#answer) cat ":" cat IntegerToString(SeqHash(ds));
