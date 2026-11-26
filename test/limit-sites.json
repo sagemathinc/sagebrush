@@ -5453,6 +5453,16 @@
   "owner": "Magma compatibility",
   "row": "inv-25"
  },
+ "lib/_magma.py :: _alt :: if n > _COLLECT_MAX: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
  "lib/_magma.py :: _collect :: _COLLECT_MAX of them, before the collection is built (HARD-FCC-1).\"\"\" #0": {
   "class": "1+2",
   "owner": "Magma compatibility/runtime memory",
@@ -5500,6 +5510,16 @@
   "explained": true,
   "owner": "Magma compatibility/runtime memory",
   "row": "inv-26"
+ },
+ "lib/_magma.py :: _cyclic_group :: if n > _COLLECT_MAX: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
  },
  "lib/_magma.py :: _ff_refuse :: bounds: fields of more than EMBED_MAX elements (ff.embed_max), or the work.\"\"\" #0": {
   "class": "none",
@@ -5662,6 +5682,61 @@
   "class": "3",
   "owner": "Magma compatibility",
   "row": "inv-25"
+ },
+ "lib/_magma_classes.py :: _MEllFF._magma_card :: except NotImplementedError: #0": {
+  "class": "coverage",
+  "owner": "Magma compatibility",
+  "reason": "the point count over GF(p) for p >= 2^64 is not available (Sage mode's counting, which needs SEA there): turned into Magma mode's refusal in words; an unsupported case, not a cap"
+ },
+ "lib/_magma_classes.py :: _classes_refusal :: fixed=_m._COLLECT_MAX == 10 ** 6)) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma_classes.py :: conjugacy_classes :: allow = _m._COLLECT_MAX * _m._COLLECT_COST #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma_groups.py :: _admit :: \"one computation\", fixed=_m._COLLECT_MAX == 10 ** 6)) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma_groups.py :: _admit :: need, allow, k = _engine_bytes(n, gens, what), _m._COLLECT_MAX * _m._COLLECT_COST, len(gens) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma_groups.py :: _admit_points :: if count > _m._COLLECT_MAX: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
  },
  "lib/_matlab.py :: _oob :: return _err(\"Index exceeds the number of array elements. Index must not exceed %d.\" % n, \"MATLAB:badsubscript\") #0": {
   "class": "none",
@@ -13638,12 +13713,27 @@
   "owner": "sagebrush-python",
   "reason": "engine/nd's thread pool: min(cores - 1, 8) helpers per product, and the module's bound of 16 participants; they share the machine's cores and change a product's time, never its bits"
  },
- "src/runtime/nd.ts :: sharedMemory :: for (const maximum of [65536, 16384, 4096]) { #0": {
+ "src/runtime/nd.ts :: reserve :: growTo(m, bytes, declaredMax.get(m)); #0": {
   "class": "none",
-  "owner": "sagebrush-matlab",
-  "reason": "engine/nd's WebAssembly.Memory (src/runtime/nd.ts): the declared maximum is wasm32's own 4 GiB bound (the module's import declares it), retried smaller only where that much address space can't be reserved; refuses no user work (a growth past it is the MemoryError cholesky reports)"
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
  },
- "src/runtime/nd.ts :: sharedMemory :: return new WebAssembly.Memory({ initial: 17, maximum, shared: true }); #0": {
+ "src/runtime/nd.ts :: sharedMemory :: const declaredMax = new WeakMap<WebAssembly.Memory, number>(); #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+ },
+ "src/runtime/nd.ts :: sharedMemory :: const m = new WebAssembly.Memory({ initial: 17, maximum, shared: true }); #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+ },
+ "src/runtime/nd.ts :: sharedMemory :: declaredMax.set(m, maximum * 65536); #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+ },
+ "src/runtime/nd.ts :: sharedMemory :: for (const maximum of [65536, 16384, 4096]) { #0": {
   "class": "none",
   "owner": "sagebrush-matlab",
   "reason": "engine/nd's WebAssembly.Memory (src/runtime/nd.ts): the declared maximum is wasm32's own 4 GiB bound (the module's import declares it), retried smaller only where that much address space can't be reserved; refuses no user work (a growth past it is the MemoryError cholesky reports)"
@@ -13906,15 +13996,15 @@
   "owner": "pyjs runtime",
   "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
  },
- "src/runtime/object.ts :: toPyExc :: const why = engineLimit(e.message); #0": {
+ "src/runtime/object.ts :: toPyExc :: const why = /^WebAssembly kernel workspace: /.test(e.message) ? e.message : engineLimit(e.message); #0": {
   "class": "none",
   "owner": "pyjs runtime",
-  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
  },
- "src/runtime/object.ts :: toPyExc :: if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\\.Memory\\.grow|failed to grow memory|WebAssembly\\.\\w+\\(\\): Out of memory/.test(e.message)) { #0": {
+ "src/runtime/object.ts :: toPyExc :: if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\\.Memory\\.grow|failed to grow memory|WebAssembly\\.\\w+\\(\\): Out of memory|^WebAssembly kernel workspace: /.test(e.message)) { #0": {
   "class": "none",
   "owner": "pyjs runtime",
-  "reason": "translates the JavaScript engine's own allocation failure (also a WebAssembly module's setup out of memory) into a MemoryError naming that engine limit; no limit of ours"
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
  },
  "src/runtime/ops.ts :: bytearrayInplaceRepeat :: if (size > SSIZE_MAX) raise(T.MemoryError); #0": {
   "class": "2",
@@ -14033,6 +14123,36 @@
   },
   "owner": "python (@sagebrush-python)",
   "reason": "2**53 - 1, JavaScript's limit on a typed array's length (ECMAScript ToIndex), checked before allocating: past it a MemoryError, a physical limit of the host (an engine may stop lower, its RangeError then a MemoryError too); not a cap of ours"
+ },
+ "src/runtime/wasm_room.ts ::  :: export const WASM32_MAX_BYTES = 65536 * 65536; #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+ },
+ "src/runtime/wasm_room.ts :: fixedMax :: const stub = (globalThis as any).__SAGEBRUSH_KERNEL_MAX_BYTES__; #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+ },
+ "src/runtime/wasm_room.ts :: growTo :: const max = fixedMax(declared); #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+ },
+ "src/runtime/wasm_room.ts :: growTo :: export function growTo(mem: WebAssembly.Memory, bytes: number, declared = WASM32_MAX_BYTES): void { #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+ },
+ "src/runtime/wasm_room.ts :: growTo :: if (!Number.isSafeInteger(bytes) || bytes > max) { #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+ },
+ "src/runtime/wasm_room.ts :: growTo :: throw new RangeError(`WebAssembly kernel workspace: needs ${need}, past its memory's maximum of ${max} bytes; ${ADVICE}`); #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
  },
  "src/runtime/zlib.ts ::  :: import { ARRAY_LIMITS } from \"./numpy\"; #0": {
   "class": "2",
@@ -14443,14 +14563,6 @@
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
- "web/latex/engine/tikz.mjs :: X :: if (out.length > TIKZ_LIMITS.SVG_BYTES) fail(\"a picture over \" + TIKZ_LIMITS.SVG_BYTES / 2 ** 20 + \" MiB of SVG\"); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
- },
  "web/latex/engine/tikz.mjs :: X :: if (st.cap) a += ' stroke-linecap=\"' + st.cap + '\"'; #0": {
   "class": "none",
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
@@ -14471,11 +14583,6 @@
   },
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
- },
- "web/latex/engine/tikz.mjs :: base :: op: 1, dop: null, fop: null, arrows: { start: null, end: null }, defaultTip: \"to\", rounded: 0, cap: null, join: null, step: [PT_PER_CM, PT_PER_CM], doDraw: false, doFill: false }; #0": {
-  "class": "none",
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "matched text that refuses nothing: the line cap's attribute, the path state's cap field, pgfmath's max function"
  },
  "web/latex/engine/tikz.mjs :: checkPt :: if (Math.abs(p[0]) > TIKZ_LIMITS.COORD_MAX || Math.abs(p[1]) > TIKZ_LIMITS.COORD_MAX) fail(\"a point farther than \" + Math.round(TIKZ_LIMITS.COORD_MAX / PT_PER_CM / 100) + \" m\"); #0": {
   "class": "1",
@@ -14587,14 +14694,6 @@
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
  "web/latex/engine/tikz.mjs :: options :: if (depth > TIKZ_LIMITS.STYLE_DEPTH) fail(\"styles naming styles more than \" + TIKZ_LIMITS.STYLE_DEPTH + \" deep (a style that names itself?)\"); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
- },
- "web/latex/engine/tikz.mjs :: r :: if (nx + ny > TIKZ_LIMITS.GRID_LINES) fail(\"a grid of more than \" + TIKZ_LIMITS.GRID_LINES + \" lines\"); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -15573,6 +15672,62 @@
   "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
   "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
  },
+ "web/sync/e2e-chain.ts :: stale :: const all = this.sql.exec(\"SELECT entry FROM e2e_chain WHERE seq >= ? ORDER BY seq LIMIT ?\", from, E2E.page).toArray() as Row[]; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: stale :: const r = this.sql.exec(\"SELECT bytes, seq, epoch FROM e2e_wrappers WHERE kind = ? AND rid = ? AND epoch = ? ORDER BY seq DESC LIMIT 1\", kind, id, h.epoch).toArray()[0] as Row | undefined; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: stale :: if (live >= E2E.sessions) throw new SyncError(\"limit\", \"too many enrollments at once\", { max: E2E.sessions }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: kept :: const last = this.sql.exec(\"SELECT epoch, hash FROM e2e_keyrings ORDER BY epoch DESC LIMIT 1\").toArray()[0] as Row | undefined; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: kept :: else if (this.kept() + 1 > this.bounds.entries && op !== \"remove\" && op !== \"recover\") throw new SyncError(\"limit\", \"the key chain is at its length bound: only removing a device, recovering or a reset goes on\", { max: this.bounds.entries }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: kept :: if (!isReset && this.kept() + 1 > this.bounds.entries + this.bounds.reserve) throw new SyncError(\"limit\", \"the key chain is at its length bound\", { max: this.bounds.entries + this.bounds.reserve }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: kept :: if ([...next.devices.values()].filter((d) => d.removed === null).length > E2E.devices) throw new SyncError(\"limit\", \"too many devices\", { max: E2E.devices }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
  "web/workspace/checkpoint.ts ::  :: export const CHECKPOINT_BLOB_MAX = 32 << 20; #0": {
   "class": "1",
   "disposition": {
@@ -15810,5 +15965,58 @@
  "web/workspace/sync-ledger.ts :: waitSync :: if (t !== undefined && (!Number.isSafeInteger(t) || t < 1 || t > WAIT.timeoutMax)) throw Object.assign(new WorkspaceError(\"invalid\", `timeoutMs is an integer from 1 to ${WAIT.timeoutMax}`), { max: WAIT.timeoutMax }); #0": {
   "class": "1",
   "owner": "sync client"
+ },
+ "web/latex/engine/tikz.mjs :: X :: if (size > TIKZ_LIMITS.SVG_BYTES) fail(\"a picture over \" + TIKZ_LIMITS.SVG_BYTES / 2 ** 20 + \" MiB of rendered output\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: atBorder :: if (nx + ny > TIKZ_LIMITS.GRID_LINES) fail(\"a grid of more than \" + TIKZ_LIMITS.GRID_LINES + \" lines\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: base :: op: 1, dop: null, fop: null, arrows: { start: null, end: null }, defaultTip: \"to\", rounded: 0, cap: null, join: null, step: [PT_PER_CM, PT_PER_CM], doDraw: false, doFill: false, #0": {
+  "class": "none",
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: the path state's cap field"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if ((this.labelHtml += utf8Len(r.html)) > TIKZ_LIMITS.LABEL_HTML) fail(\"node text past \" + TIKZ_LIMITS.LABEL_HTML / 2 ** 20 + \" MiB of HTML in a picture\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if ((this.nodeText += nb) > TIKZ_LIMITS.NODE_TEXT) fail(\"node text past \" + TIKZ_LIMITS.NODE_TEXT / 1024 + \" KiB in a picture\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if (++this.nodeCount > TIKZ_LIMITS.NODES) fail(\"more than \" + TIKZ_LIMITS.NODES + \" nodes in a picture\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if (nb > TIKZ_LIMITS.LABEL_TEXT) fail(\"a line of a node's text over \" + TIKZ_LIMITS.LABEL_TEXT / 1024 + \" KiB\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  }
 }

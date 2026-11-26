@@ -96,8 +96,6 @@
 !! NotImplementedError: pandas.MultiIndex is not in Sagebrush's pandas 0.x subset
 == name.pd.read_parquet
 !! NotImplementedError: pandas.read_parquet is not in Sagebrush's pandas 0.x subset
-== name.pd.get_dummies
-!! NotImplementedError: pandas.get_dummies is not in Sagebrush's pandas 0.x subset
 == name.DataFrame.pivot
 !! NotImplementedError: pandas.DataFrame.pivot is not in Sagebrush's pandas 0.x subset
 == name.DataFrame.merge
@@ -346,6 +344,18 @@
 !! NotImplementedError: pandas: an Index of category dtype (CategoricalIndex) is not in Sagebrush's pandas 0.x subset
 == category.compare-categorical
 !! NotImplementedError: pandas.Series comparison with a Categorical is not in Sagebrush's pandas 0.x subset
+== get_dummies.sparse
+!! NotImplementedError: pandas.get_dummies(sparse=True) is not in Sagebrush's pandas 0.x subset
+== get_dummies.series-list-prefix
+!! NotImplementedError: pandas.get_dummies(a list or dict prefix or prefix_sep of a Series) is not in Sagebrush's pandas 0.x subset
+== get_dummies.series-dict-prefix
+!! NotImplementedError: pandas.get_dummies(a list or dict prefix or prefix_sep of a Series) is not in Sagebrush's pandas 0.x subset
+== get_dummies.series-list-prefix-sep
+!! NotImplementedError: pandas.get_dummies(a list or dict prefix or prefix_sep of a Series) is not in Sagebrush's pandas 0.x subset
+== get_dummies.dtype
+!! NotImplementedError: pandas.get_dummies(dtype='int8') is not in Sagebrush's pandas 0.x subset
+== get_dummies.series-int8-labels
+!! NotImplementedError: pandas: get_dummies of a Series of dtype int8 without a prefix is not in Sagebrush's pandas 0.x subset
 == compare.series-repeated-labels
 !! NotImplementedError: pandas.DataFrame.eq with a Series of repeated labels is not in Sagebrush's pandas 0.x subset
 == compare.level
