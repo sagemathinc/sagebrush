@@ -134,6 +134,23 @@ test("the transport's reservation lasts the call only: after a read and a Stop, 
   H.retire();
   E.engineCall('{"fn":"progress_tables"}');
   assert.ok(H.state().liveId > first);
+  // a buffer that can't be made after the reservation, a sink that throws, a post that throws, a cancel that throws:
+  // each leaves no obligation open, and a request already posted is called off
+  const throwing = (o: any) => { try { exchange({ ...io, ...o.io }, "t", o.n, req, o.sink ?? (() => {})); } catch (e) { return e; } return null; };
+  page.stop = false;
+  assert.ok(throwing({ n: 4, io: { buffer: () => { throw new RangeError("no room"); } } }) instanceof RangeError);
+  assert.equal(H.state().oHost, 0, "a buffer that can't be made: no obligation open");
+  const before = posted.length;
+  assert.ok(throwing({ n: 5, sink: () => { throw new Error("sink"); } }) instanceof Error);
+  assert.equal(H.state().oHost, 0, "a throwing sink: no obligation open");
+  assert.deepEqual(posted.slice(before).map((m) => Object.keys(m).find((k) => k.startsWith("sb"))), ["sbFs", "sbFsAck", "sbFsCancel"], "...and the posted request is called off");
+  let k = 0;
+  assert.ok(throwing({ n: 6, io: { post: (m: any) => { if (k++ === 0) io.post(m); else throw new Error("post"); } } }) instanceof Error);
+  assert.equal(H.state().oHost, 0, "a post that throws (then its cancel too): no obligation open");
+  const live = H.state().liveId;
+  H.retire();
+  E.engineCall('{"fn":"progress_tables"}');
+  assert.ok(H.state().liveId > live, "...and a retired instance is made again");
   // with no room in the ledger, the call is refused before anything is posted
   const n = posted.length;
   const refused = exchange({ ...io, reserve: () => ({ memory: {} }) }, "t", 3, req, () => {});

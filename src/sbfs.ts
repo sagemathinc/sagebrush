@@ -203,11 +203,14 @@ export function exchange(io: FsIo, tag: string, call: number, msg: { id: number;
   const h0 = io.reserve("sagebrush:// transport buffer", FS_BUFFER_BYTES);
   if ("memory" in h0) return err("memory", `sagebrush://: no room for its ${FS_BUFFER_BYTES}-byte transport buffer; use the native app on a computer with more memory`);
   const key = `${tag}.${call}`;
-  const buffer = io.buffer();
-  let over = false;
+  // (from here on everything is inside the cleanup: a buffer that can't be made, a post or a sink that throws, and
+  // every early return leave no obligation open, and a request already posted is called off)
+  let posted = false, over = true;
   try {
+    const buffer = io.buffer();
     releasePiece(buffer);
     io.post({ id: msg.id, target: msg.target, sbFs: { op: msg.request.op, params: msg.request.params, key }, buffer });
+    posted = true;
     const take = (seq: number, kind: number) => {
       const p = waitPiece(buffer, io.intr, call, seq);
       if ("error" in p) return p;
@@ -217,15 +220,15 @@ export function exchange(io: FsIo, tag: string, call: number, msg: { id: number;
       releasePiece(buffer);
       io.post({ sbFsAck: { key, seq } });
     };
-    const lost = (e: "interrupted" | "timeout" | "unavailable", what: string) => {
-      over = true;
-      return err(e, e === "interrupted" ? "interrupted" : `sagebrush://: the page ${what} (${e})`);
-    };
+    const lost = (e: "interrupted" | "timeout" | "unavailable", what: string) => err(e, e === "interrupted" ? "interrupted" : `sagebrush://: the page ${what} (${e})`);
     const first = take(1, KIND_HEADER);
     if ("error" in first) return lost(first.error, "didn't answer");
     const h = readHeader(first.bytes);
     ack(1);
-    if ("error" in h || msg.request.op !== "fs.read") return h;
+    if ("error" in h || msg.request.op !== "fs.read") {
+      over = false;
+      return h;
+    }
     const len = h.ok.length;
     if (!Number.isSafeInteger(len) || (len as number) < 0 || (len as number) > msg.request.params.length || (len as number) > FS_MAX_READ) return lost("unavailable", "answered something not understood");
     let got = 0, seq = 1;
@@ -238,10 +241,16 @@ export function exchange(io: FsIo, tag: string, call: number, msg: { id: number;
       got += n;
       ack(seq);
     }
+    over = false;
     return h;
   } finally {
-    if (over) io.post({ sbFsCancel: { key } });
-    io.release(h0);
+    try {
+      if (posted && over) io.post({ sbFsCancel: { key } });
+    } catch {
+      // (a cancel that can't be posted still never keeps the obligation)
+    } finally {
+      io.release(h0);
+    }
   }
 }
 
