@@ -147,11 +147,14 @@ export const LATEX_LAZY = {
 //  note where it stops, from its source line (split.ts's boundRender, the worker's caller): 310,589 / 105,550 measured
 //  on the shipped build of its merge with master 1ed271fd, with bun 1.4.4 and node 24.21.0 (+827 / +353 over master's
 //  309,762 / 105,197), + 64)
-// (311,864 raw / 106,065 gzip: Nov 26 2026, a .bib read when there is no .bbl (the expander asks for each \bibliography
+// (311,297 raw / 105,855 gzip: Nov 26 2026, \input and \include in a shared or GitHub view (mountEditor's inputs,
+//  web/latex/component.ts): 311,233 / 105,791 measured on the shipped build of its merge with master 9063c669, with bun
+//  1.4.4 and node 24.21.0 (+644 / +241 over master's 310,589 / 105,550), + 64)
+// (312,484 raw / 106,308 gzip: Nov 26 2026, a .bib read when there is no .bbl (the expander asks for each \bibliography
 //  name's .bib, inputs.ts gives the engine the .bbl the .bib chunk makes, the worker fetches that chunk; a \cite of a key
-//  with no entry "?"): 311,800 / 106,001 measured on the shipped build of master 9063c669 with it, with bun 1.4.4 and
-//  node 24.21.0 (+1,211 / +451 over master's 310,589 / 105,550), + 64)
-export const LATEX_CAPS = { raw: 311864, gzip: 106065 };
+//  with no entry "?"): 312,420 / 106,244 measured on the shipped build of its merge with master bd4a014f, with bun 1.4.4 and
+//  node 24.21.0 (+1,187 / +453 over master's 311,233 / 105,791), + 64)
+export const LATEX_CAPS = { raw: 312484, gzip: 106308 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -281,7 +284,7 @@ export const LATEX_LAZY_CAPS = {
   //  its own row, not in an existing chunk; 5 KiB / 2.25 KiB, the smallest rounded cap above its first build's 4,540 / 2,008; 4,799 / 2,153 with the stale fade's code; 4,892 / 2,191 with display states made afresh on a cache hit)
   PYTHONTEX: { label: "the LaTeX PythonTeX results chunk", raw: 5 * 1024, gzip: 2.25 * 1024 },
   // (a .bib's reading, web/latex/bib.ts: the worker's, fetched when a document has a .bib read and no .bbl; inputs.ts
-  //  makes the .bbl from it. 8,147 / 3,368: Nov 26 2026, 8,083 / 3,304 measured on master 9063c669 with it, + 64)
+  //  makes the .bbl from it. 8,147 / 3,368: Nov 26 2026, 8,083 / 3,304 measured on master 9063c669 with it (the same on its merge with master bd4a014f), + 64)
   BIB: { label: "the LaTeX .bib chunk", raw: 8147, gzip: 3368 },
   // (Run's code: web/latex/run-core.mjs, fetched on the first Run (first-use code: the editor opens without it). Out of
   //  the group so save-as-you-type (eager by nature) fits under the group's cap without a raise (Nov 7:
@@ -318,7 +321,9 @@ export const LATEX_LAZY_CAPS = {
   // (and its raw cap renewed Nov 13 with the editor's bar and math timing: 3,789 measured + 64; its gzip, 1,976, within)
   // (4,166 / 2,156: Nov 26 2026, a GitHub repository's files mounted for a talk's Run (mountIn: the /<repo>/ root taken
   //  off, a git blob id taken as a SHA-256 is): 4,102 / 2,092 measured on master 30c8705d with it, + 64)
-  SHARE: { label: "the LaTeX shared talk's chunk", raw: 4166, gzip: 2156 },
+  // (4,473 / 2,270: Nov 26 2026, \input and \include read from the share's files, the .tex's folder only (share.ts's
+  //  inputIn and read): 4,409 / 2,206 measured on its merge with master 9063c669, + 64)
+  SHARE: { label: "the LaTeX shared talk's chunk", raw: 4473, gzip: 2270 },
   // (the preview's code blocks coloured (hl.ts with the notebook's highlight.js), fetched once a preview has one: a lazy
   //  chunk, Nov 10: 4,410 / 2,355 measured on master e0b7306c,
   //  + 64 B each)
