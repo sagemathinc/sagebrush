@@ -1777,11 +1777,14 @@ class FFMatrix:
         # (subdivided: | between column blocks, a -+- line between row blocks)
         cuts = [0] + list(cc) + [self._ncols]
         segs = [(cuts[i], cuts[i + 1]) for i in range(len(cuts) - 1)]
+        # (a line before row i for each time i is listed, so also at the
+        # bottom edge and twice for a repeated index, as Sage prints them)
+        sep = "[" + "+".join("-" * max(0, (b - a) * (w + 1) - 1) for a, b in segs) + "]"
         lines = []
         for i, r in enumerate(cells):
-            if i in rc:
-                lines.append("[" + "+".join("-" * max(0, (b - a) * (w + 1) - 1) for a, b in segs) + "]")
+            lines.extend([sep] * rc.count(i))
             lines.append("[" + "|".join(" ".join(c.rjust(w) for c in r[a:b]) for a, b in segs) + "]")
+        lines.extend([sep] * rc.count(len(cells)))
         return "\n".join(lines)
 
     def subdivide(self, row_lines=None, col_lines=None):
@@ -2679,7 +2682,12 @@ class FFMatrix:
             [4 1]
         """
         m, n = len(self._rows), self._ncols
-        return FFMatrix(self._base, [[self._rows[m - 1 - j][n - 1 - i] for j in range(m)] for i in range(n)], m)
+        M = FFMatrix(self._base, [[self._rows[m - 1 - j][n - 1 - i] for j in range(m)] for i in range(n)], m)
+        sd = getattr(self, "_subdiv", None)
+        if sd is not None:
+            # (the lines mirrored too, as Sage's)
+            M._subdiv = (sorted(n - c for c in sd[1]), sorted(m - r for r in sd[0]))
+        return M
 
     def elementwise_product(self, right):
         """The entry-by-entry (Hadamard) product, of matrices of one shape.

@@ -46,3 +46,10 @@ show('(lambda M: (M.subdivide([1], [1]), M)[1])(copy(S))', lambda: (lambda M: (M
 show('(lambda M: (M.subdivide([1], [2]), copy(M).subdivisions(), M.transpose().subdivisions(), (M + M).subdivisions(), M.subdivisions())[1:])(copy(R))', lambda: (lambda M: (M.subdivide([1], [2]), copy(M).subdivisions(), M.transpose().subdivisions(), (M + M).subdivisions(), M.subdivisions())[1:])(copy(R)))
 show('S.tensor_product(S).transpose()', lambda: S.tensor_product(S).transpose())
 show('R.tensor_product(S).subdivisions()', lambda: R.tensor_product(S).subdivisions())
+
+# subdivision lines at the edges and repeated, and mirrored by antitranspose
+A7 = matrix(GF(7), 3, 3, range(9))
+for rs, cs in [([3], []), ([0], []), ([1, 1], []), ([], [3]), ([], [0]), ([], [1, 1]), ([0, 3], []), ([3, 3], []), ([1, 1, 1], [2, 2])]:
+    B7 = copy(A7); B7.subdivide(rs, cs)
+    print(rs, cs); print(B7)
+    print("anti:"); print(B7.antitranspose())
