@@ -1680,7 +1680,7 @@ def coarse_bounds(rec: dict, columns: tuple[str, ...] = RATIO_COLUMNS) -> None:
             else:
                 pairs_ = [(a[0], r[0])]
             if cr:
-                op, each = ">", [o / max(x, r[1]) for o, x in pairs_]
+                op, each = ">", [o / (x + r[1]) for o, x in pairs_]
             else:
                 op, each = "<", [(o + a[1]) / x for o, x in pairs_ if x > 0]
             each.sort()
