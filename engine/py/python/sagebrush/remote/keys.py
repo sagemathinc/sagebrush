@@ -36,6 +36,13 @@ class KeyFileError(Exception):
     """The key file can't be used (the message says why, without its contents)."""
 
 
+class OldKeyFile(KeyFileError):
+    """A key file this version doesn't recognize: an older release's format, or not a key file at all.  It can't be
+    used, and nothing in it is worth keeping, so `sagebrush remote login` may move it aside and enroll again; unlike a
+    file it can't trust (another owner, open permissions, a symlink), which it leaves alone."""
+
+
+
 class RunnerKey:
     """A secret scalar d and what it was enrolled as.  repr() never shows d."""
 
@@ -108,11 +115,11 @@ def load(path=None):
         if not all(isinstance(s, str) for s in (rid, origin, name)):
             raise ValueError
     except (ValueError, KeyError, TypeError, UnicodeDecodeError):
-        raise KeyFileError("%s isn't a sagebrush remote key file (enroll again: sagebrush remote login)" % path)
+        raise OldKeyFile("%s isn't a key file this version of sagebrush recognizes (an older release's?)" % path)
     try:
         return RunnerKey(d, rid, origin, name)
     except KeyFileError:
-        raise KeyFileError("%s holds no valid key (enroll again: sagebrush remote login)" % path)
+        raise OldKeyFile("%s holds no valid key" % path)
 
 
 def _write_all(fd, data):
@@ -156,3 +163,12 @@ def save(key, path=None):
             pass
         raise
     return path
+
+
+def move_aside(path=None):
+    """An old key file renamed to key.json.old beside it (replacing an earlier .old), so a new enrollment can take its
+    place.  Returns the new name."""
+    path = path or default_path()
+    old = path + ".old"
+    os.replace(path, old)
+    return old

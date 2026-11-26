@@ -7,7 +7,9 @@ sagebrush/remote/keys.py, the key file) and `sagebrush remote login` (sagebrush/
   the secret never in repr;
 - the device flow against a fake enrollment server (the cloud's /api/remote/v1/device[/poll] answers, b1): pending,
   slow_down, approved, denied, expired, an approval page on another site, an inert cloud (404, not JSON), origins;
-- the CLI: login writes the key file; a second login without --force refuses.
+- the CLI: login writes the key file; a second login without --force refuses; a key file this version doesn't
+  recognize (an older release's) is moved aside to key.json.old by a login that succeeds, and `sagebrush remote` goes
+  straight to that login; a file that can't be trusted is still refused without --force.
 
     python engine/py/test_remote_enroll.py
 """
@@ -201,6 +203,12 @@ def test_key_file_refusals():
         for mode in (0o644, 0o640, 0o604, 0o610):  # (others, or the group alone: grader's K3)
             os.chmod(path, mode)
             assert "others" in refused(), oct(mode)
+            try:
+                keys.load()
+            except keys.OldKeyFile:
+                raise AssertionError("a file others can read is never taken for an old one")
+            except keys.KeyFileError:
+                pass
         os.chmod(path, 0o600)
         for mode in (0o755, 0o750, 0o710):
             os.chmod(d, mode)
@@ -246,6 +254,13 @@ def test_key_file_refusals():
             with open(path, "wb") as f:
                 f.write(body)
             assert secret not in refused()
+            # (each of these is a file this version doesn't recognize, which login may replace; one too long to read is
+            # refused for that, as before)
+            try:
+                keys.load()
+                raise AssertionError("loaded")
+            except keys.KeyFileError as e:
+                assert isinstance(e, keys.OldKeyFile) or (len(body) > 8192 and "too long" in str(e)), (body[:20], e)
         # saving into a directory others can write is refused
         os.chmod(d, 0o777)
         try:
@@ -521,15 +536,48 @@ def test_cli_against_http():
             sys.stderr = io.StringIO()
             assert main(["login", "--force", "--name", "n" * 100]) == 0, sys.stderr.getvalue()
             assert Handler.names[-1] == "n" * 64, Handler.names[-1]
-            # a key file that can't be trusted: without --force, exit 1, nothing asked of the cloud, the file left as it
-            # is (grader's E14)
+            # a key file that can't be trusted (others can read it): without --force, exit 1, nothing asked of the
+            # cloud, the file left as it is
             path = keys.default_path()
-            with open(path, "wb") as f:
-                f.write(b"{corrupt")
+            trusted = open(path, "rb").read()
+            os.chmod(path, 0o644)
             asked = len(Handler.names)
             sys.stderr = io.StringIO()
             assert main(["login"]) == 1 and "--force to enroll anew" in sys.stderr.getvalue()
-            assert open(path, "rb").read() == b"{corrupt" and len(Handler.names) == asked
+            assert open(path, "rb").read() == trusted and len(Handler.names) == asked and not os.path.exists(path + ".old")
+            os.chmod(path, 0o600)
+            # an older release's key file (Nov 6: v 1, origin and name null), or one that isn't a key file at all: login,
+            # without --force, enrolls again and keeps the old file as key.json.old
+            nov6 = json.dumps({**json.loads(trusted), "origin": None, "name": None}).encode()
+            for old in (nov6, b"{corrupt"):
+                with open(path, "wb") as f:
+                    f.write(old)
+                os.chmod(path, 0o600)
+                sys.stderr = io.StringIO()
+                assert main(["login", "--name", "box2"]) == 0, sys.stderr.getvalue()
+                said = sys.stderr.getvalue()
+                assert "enrolling this computer again" in said and "key.json.old" in said, said
+                assert open(path + ".old", "rb").read() == old and Handler.names[-1] == "box2"
+                assert keys.b64url(keys.load()._d) != json.loads(trusted)["d"]  # (a new key, not the old one reused)
+                assert keys.b64url(keys.load()._d) not in said
+            # (an older file and a login that fails: the old file stays as it was, nothing moved aside)
+            os.unlink(path + ".old")
+            with open(path, "wb") as f:
+                f.write(nov6)
+            Handler.inert = True
+            sys.stderr = io.StringIO()
+            assert main(["login"]) == 1 and "without JSON" in sys.stderr.getvalue()
+            assert open(path, "rb").read() == nov6 and not os.path.exists(path + ".old")
+            Handler.inert = False
+            # `sagebrush remote` with an older file: straight to login (never advice to run the command that refuses)
+            from sagebrush.remote import enroll as E, relay as R
+            calls, real_main = [], E.main
+            E.main = lambda argv: calls.append(argv) or 7
+            try:
+                sys.stderr = io.StringIO()
+                assert R.main([]) == 7 and calls == [[]], (calls, sys.stderr.getvalue())
+            finally:
+                E.main = real_main
     finally:
         sys.stderr = old_err
         if old_origin is None:
