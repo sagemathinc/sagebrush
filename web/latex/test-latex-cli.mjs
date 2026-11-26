@@ -28,6 +28,8 @@ const runOpts = (opts, cli, cwd, ...a) => new Promise((res) => {
 });
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 900)); };
+// (the CLI's KaTeX exports its layout tree, a private export the sizes of TikZ nodes' text are read from)
+check("cli-katex-layout-tree", /renderToHTMLTree/.test(readFileSync(new URL("../../build/cli/sagebrush-latex.cjs", import.meta.url).pathname, "utf8")), null);
 const dir = mkdtempSync(join(tmpdir(), "sb-latex-cli-"));
 
 const TALK = String.raw`\documentclass[aspectratio=169]{beamer}
@@ -68,7 +70,7 @@ For every $n \ge 1$, $\sum_{k=1}^n k = \frac{n(n+1)}{2}$.
 \end{frame}
 \begin{frame}[plain]{Not shown}
 \begin{weirdenv}inside\end{weirdenv}
-\begin{tikzpicture}\draw (0,0) -- (1,1) node {x};\end{tikzpicture}
+\begin{tikzpicture}\clip (0,0) rectangle (1,1);\end{tikzpicture}
 \includegraphics{../outside.png}
 
 \mystery{x} and $\frac{1}{$ there.
@@ -106,8 +108,8 @@ try {
   check("check-unknown-command-warning-with-line", p("command", "mystery")?.severity === "warning" && p("command", "mystery").line === lineOf(TALK, "\\mystery"), j.problems);
   check("check-math-error", p("math")?.severity === "error" && p("math").line === lineOf(TALK, "\\mystery"), j.problems);
   check("check-unknown-environment", p("environment", "weirdenv")?.severity === "warning" && p("environment", "weirdenv").line === lineOf(TALK, "\\begin{weirdenv}"), j.problems);
-  // (a picture with a node isn't drawn yet: its problem names why, "tikzpicture (a node on a path: ...)")
-  const tz = j.problems.find((x) => x.kind === "not-rendered" && x.name.startsWith("tikzpicture (") && /node/.test(x.name));
+  // (a picture using \clip isn't drawn yet: its problem names why, "tikzpicture (\clip isn't drawn by the preview yet)")
+  const tz = j.problems.find((x) => x.kind === "not-rendered" && x.name.startsWith("tikzpicture (") && /clip/.test(x.name));
   check("check-tikz-not-rendered", tz?.severity === "warning", j.problems);
   check("check-beamer-commands-known", !j.problems.some((x) => ["usetheme", "institute", "alert", "only", "pause", "frametitle", "framesubtitle"].includes(x.name)), j.problems);
   check("check-images-report", j.images.find((i) => i.name === "wave")?.found === true && j.images.find((i) => i.name === "wave").path === "wave.svg", j.images);

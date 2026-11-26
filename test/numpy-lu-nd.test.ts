@@ -262,8 +262,9 @@ test("a non-contiguous view or an integer matrix gives its contiguous float64 co
   assert.deepEqual(run(code), ["False True True True", "True True", "engine/nd"]);
 });
 
-// (engine cost policy r2: no room in the module's memory is not a refusal; the TypeScript LU computes it)
-test("a module memory that can't grow: inv, det and solve are computed in JavaScript, and the session goes on", async () => {
+// (no automatic fallback, William Nov 25 2026, #2147 N2: a module memory that can't grow is a MemoryError naming the
+// workspace, not the TypeScript LU; nothing is kept, so the next call runs on engine/nd)
+test("a module memory that can't grow: inv, det and solve each a MemoryError naming the workspace, and the session goes on", async () => {
   const { notebookSession } = require("../src/notebook-session");
   const Obj = require("../src/runtime/object");
   const s = notebookSession(() => {}, { captureStreams: true });
@@ -281,7 +282,9 @@ test("a module memory that can't grow: inv, det and solve are computed in JavaSc
   await s.handle({ id: 3, code: "OK = float(np.linalg.inv(B)[0, 0])" });
   const main = Obj.getattr(require("../src/runtime").R.importModule("__main__"), "__dict__");
   const v = (name: string) => Obj.callObj(Obj.getattr(main, "__getitem__"), [name]);
-  assert.deepEqual(require("../src/runtime").R.toArray(v("R")), ["0.5", "True", "0.5"]);
+  const R = require("../src/runtime").R.toArray(v("R"));
+  assert.equal(R.length, 3);
+  for (const r of R) assert.match(r, /^WebAssembly kernel workspace: could not grow by \d+ bytes \(more than the computer could give\); use the native app on a computer with more memory$/);
   assert.equal(v("OK"), 0.5);
 });
 

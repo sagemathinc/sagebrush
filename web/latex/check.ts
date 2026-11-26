@@ -42,6 +42,7 @@ const MESSAGES: Record<string, (name: string) => string> = {
   runaway: (n) => `\\${n}: the paragraph ended before its argument was complete (a missing "}"?)`,
   redefined: (n) => `\\newcommand: \\${n} is already defined (LaTeX would stop here; use \\renewcommand)`,
   toolarge: (n) => `${n}: the preview and Present show a placeholder instead (make it smaller, or split it)`,
+  toolong: (n) => `${n}: past the preview's 16 MiB, so the preview stops there (sagebrush latex render shows all of it)`,
   // (Magma, a Sagebrush extension: a name the document defines itself turns ours off; each of ours used, said once)
   own: (n) => (n === "magma" ? "This document defines its own \\magma, so Sagebrush's \\magma{} is off here." : `This document defines its own ${n} environment, so Sagebrush's ${n} is off here.`),
   sbonly: (n) => (n === "magma" ? "Sagebrush only: real LaTeX reports \\magma as an undefined control sequence (no package defines it)." : `Sagebrush only: real LaTeX reports environment ${n} as undefined (no package defines it).`),
