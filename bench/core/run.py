@@ -1122,6 +1122,16 @@ def wants_vtime(backend: str, row: dict) -> bool:
     )
 
 
+RATIO_COLUMNS = ("user", "native", "native-host", "wasm")
+
+
+def ratio_columns(row: dict) -> tuple[str, ...]:
+    """The columns that get a 1-thread ratio on this row: all of
+    RATIO_COLUMNS, except a user column limited to user_sizes, which is
+    informational (no ratio, measured or bound)."""
+    return tuple(b for b in RATIO_COLUMNS if not (b == "user" and row.get("user_sizes") is not None))
+
+
 POOL_LINE = re.compile(r"^POOL\|(.*)$", re.M)
 
 
@@ -1497,9 +1507,9 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
             "adapter": rec["backends"][best]["adapter"],
             "seconds": refs[best],
         }
-        for b in ("user", "native", "native-host", "wasm"):
+        for b in ratio_columns(row):
             # (a user column limited to user_sizes is informational: no ratio)
-            if sec(b) and not (b == "user" and row.get("user_sizes") is not None):
+            if sec(b):
                 rec["ratio_" + b.replace("-", "_")] = round(sec(b) / refs[best], 4)
         ours = {b: sec(b) for b in ("native", "native-n") if sec(b)}
         theirs = {b: sec(b) for b in ("magma", "flint", "flint-n", "blas", "blas-n") if sec(b)}
@@ -1527,7 +1537,7 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
                 return [x[0] for x in smp]
 
             ref = per_input(best)
-            for b in ("user", "native", "native-host", "wasm"):
+            for b in ratio_columns(row):
                 ours = per_input(b)
                 if not (ref and ours):
                     continue
@@ -1554,7 +1564,7 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
                 }
             # (no aggregate headline for a stream row: a backend without its
             # per-input pairing keeps the ratio of medians under that name)
-            for b in ("user", "native", "native-host", "wasm"):
+            for b in ratio_columns(row):
                 key = b.replace("-", "_")
                 if "per_input_" + key not in rec and "ratio_" + key in rec:
                     rec["ratio_" + key + "_of_medians"] = rec.pop("ratio_" + key)
@@ -1572,7 +1582,7 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
             crefs = {b: cold(b) for b in ("magma", "flint") if cold(b)}
             if crefs:
                 cbest = min(crefs.values())
-                for b in ("user", "native", "native-host", "wasm"):
+                for b in ratio_columns(row):
                     if cold(b):
                         rec["ratio_" + b.replace("-", "_")] = round(cold(b) / cbest, 4)
                 cours = [cold(b) for b in ("native", "native-n") if cold(b)]
@@ -1581,7 +1591,7 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
                     rec["ratio_best"] = round(min(cours) / min(ctheirs), 4)
             rec["ratio_basis"] = "cold"
     if rec["status"] == "ok" and row.get("ratio", True) is not False:
-        coarse_bounds(rec)
+        coarse_bounds(rec, ratio_columns(row))
     rec["complete"] = True
     return rec
 
@@ -1619,13 +1629,15 @@ def timed_value(rec: dict, b: str) -> tuple[float, float, list | None] | None:
     return (t["seconds"], g, None)
 
 
-def coarse_bounds(rec: dict) -> None:
+def coarse_bounds(rec: dict, columns: tuple[str, ...] = RATIO_COLUMNS) -> None:
     """Each headline ratio whose terms are within COARSE_TICKS of their
     timers' resolution, as a bound instead: ratio_<x>_bound = {op, value,
     ticks}, its number kept as ratio_<x>_quantized.  A coarse reference
     gives ">" ours / (reference + its resolution); coarse ours, "<" (ours +
     its resolution) / reference; both, no bound (op null).  A stream row's
-    bound is the median of the per-input bounds."""
+    bound is the median of the per-input bounds.  Only the row's ratio
+    columns (ratio_columns) get one: an informational column gets no bound
+    either."""
 
     def argmin(names, value):
         got = {b: value(b) for b in names}
@@ -1648,7 +1660,7 @@ def coarse_bounds(rec: dict) -> None:
             None,
         )
         ref = zero
-    pairs = {"ratio_" + b.replace("-", "_"): (b, ref) for b in ("user", "native", "native-host", "wasm")}
+    pairs = {"ratio_" + b.replace("-", "_"): (b, ref) for b in columns}
     pairs["ratio_best"] = best
     for key, (num, den) in pairs.items():
         if not (num and den) or (key not in rec and not (zero and key != "ratio_best" and timed_value(rec, num))):
@@ -1668,7 +1680,7 @@ def coarse_bounds(rec: dict) -> None:
             else:
                 pairs_ = [(a[0], r[0])]
             if cr:
-                op, each = ">", [o / (x + r[1]) for o, x in pairs_]
+                op, each = ">", [o / max(x, r[1]) for o, x in pairs_]
             else:
                 op, each = "<", [(o + a[1]) / x for o, x in pairs_ if x > 0]
             each.sort()

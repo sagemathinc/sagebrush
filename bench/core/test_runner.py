@@ -1457,6 +1457,81 @@ class CoarseBounds(unittest.TestCase):
         self.assertIn("> 50.0 (timer)", (d / "summary.md").read_text())
 
 
+class InformationalColumns(unittest.TestCase):
+    """A user column limited to user_sizes is informational: no ratio of
+    any kind (measured, per-input, cold or a coarse-timer bound), whatever
+    the row's kind; the other columns keep theirs."""
+
+    def point(self, row, timed, cold=None):
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": "5"}
+            if mode == "once":
+                r = {"status": "ok", "signature": "s"}
+                if cold:
+                    r["seconds_cold"] = cold[b]
+                return r
+            return dict(timed[b], status="ok", signature="K:1", steal=0.0)
+
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+            mock.patch.object(run, "EXPECTED", None),
+            mock.patch.object(run, "units", lambda *a: ("unmetered", "")),
+        ):
+            return run.point(row, "s", list(timed), {"artifacts": ARTS})
+
+    def per_op(self, seconds, g):
+        return {"seconds": seconds, "timing": {"granularity": g, "mode": "per-op"}}
+
+    def summary_line(self, rec):
+        d = Path(tempfile.mkdtemp(prefix="bench-core-info-"))
+        self.addCleanup(shutil.rmtree, d, True)
+        (d / "rows").mkdir()
+        rec = dict(rec, item="poly0", commit="c" * 40, machine={"label": "x86", "cpu": "Xeon", "arch": "x86_64", "nproc": 16, "flags": []}, engine_pin={"ok": False, "policy": "track", "sha256": "b" * 64})
+        (d / "rows/poly_fp_mul-s.json").write_text(json.dumps(rec))
+        run.summary(d, {})
+        lines = (d / "summary.md").read_text().splitlines()
+        head = [c.strip() for c in next(x for x in lines if x.startswith("| item | row |")).split("|")]
+        cells = [c.strip() for c in next(x for x in lines if x.startswith("| poly0 | poly_fp_mul | s |")).split("|")]
+        return dict(zip(head, cells))
+
+    def test_a_zero_reference_bounds_native_but_not_an_informational_user(self):
+        # (the reference read 0 below a 10 ms clock: native gets "> 100", the
+        # informational user column nothing, measured or bound)
+        row = dict(ROW, user_sizes=["s"])
+        rec = self.point(row, {"user": self.per_op(1.0, 0.01), "native": self.per_op(1.0, 1e-7), "magma": self.per_op(0.0, 0.01)})
+        self.assertEqual(rec["status"], "ok")
+        self.assertTrue(rec["user_informational"])
+        self.assertFalse([k for k in rec if k.startswith("ratio_user")])
+        self.assertEqual(rec["ratio_native_bound"]["op"], ">")
+        self.assertAlmostEqual(rec["ratio_native_bound"]["value"], 100.0)
+        cells = self.summary_line(rec)
+        self.assertEqual((cells["user ratio"], cells["native ratio"]), ("—", "> 100.0 (timer)"))
+        # (without user_sizes the user column gets its bound too)
+        rec = self.point(ROW, {"user": self.per_op(1.0, 1e-7), "native": self.per_op(1.0, 1e-7), "magma": self.per_op(0.0, 0.01)})
+        self.assertNotIn("user_informational", rec)
+        self.assertEqual(rec["ratio_user_bound"]["op"], ">")
+        self.assertAlmostEqual(rec["ratio_user_bound"]["value"], 100.0)
+        cells = self.summary_line(rec)
+        self.assertEqual((cells["user ratio"], cells["native ratio"]), ("> 100.0 (timer)", "> 100.0 (timer)"))
+
+    def test_a_cold_row_gives_an_informational_user_no_ratio(self):
+        row = dict(ROW, user_sizes=["s"], cold=True)
+        timed = {b: self.per_op(1.0, 1e-7) for b in ("user", "native", "magma")}
+        rec = self.point(row, timed, cold={"user": 2.0, "native": 1.0, "magma": 1.0})
+        self.assertEqual(rec["ratio_native"], 1.0)
+        self.assertFalse([k for k in rec if k.startswith("ratio_user")])
+
+    def test_a_stream_row_gives_an_informational_user_no_ratio(self):
+        row = dict(ROW, user_sizes=["s"], stream=True, variants=3)
+        smp = {"timing": {"granularity": 1e-7, "mode": "stream", "k": 3, "samples": [[2.0], [1.0], [1.0]]}, "seconds": 1.0}
+        rec = self.point(row, {"user": smp, "native": smp, "magma": smp})
+        self.assertEqual(rec["ratio_native"], 1.0)
+        self.assertIn("per_input_native", rec)
+        self.assertFalse([k for k in rec if k.startswith(("ratio_user", "per_input_user"))])
+
+
 class WorkingSet(unittest.TestCase):
     def test_every_rows_formula_at_every_size(self):
         rows = json.loads((Path(run.__file__).parent / "items.json").read_text())["rows"]
