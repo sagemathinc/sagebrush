@@ -40,8 +40,9 @@ pass, and CI runs them.
   (`numpy-tests/test_reduce_order.py`). `mean`, `var` and `std` follow
   NumPy's formulas. One gap remains: an operation's result (`a + 1`,
   `astype`) is laid out in C order, where NumPy keeps an F-ordered or
-  transposed input's layout, so a sum of such a result, and `var` and `std`
-  of such an input, can differ from NumPy's in the last bits.
+  transposed input's layout, so a reduction of such a result (a sum, a
+  mean, or `var` and `std` of it) can differ from NumPy's in the last bits;
+  `var` and `std` of the input itself agree.
 - **Random:** NumPy's exact streams.
   - `np.random.seed` and `RandomState`: MT19937 with NumPy's legacy seeding,
     53-bit doubles, polar-method normals, masked-rejection integers, and
