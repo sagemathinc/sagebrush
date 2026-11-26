@@ -150,6 +150,22 @@ def _common_field(a, b):
     return None
 
 
+def _mod_ring(R):
+    """Whether R is a finite field or Z/nZ (the rings _mod_pushout meets)."""
+    return isinstance(R, (_ff.IntegerModRing_, _ff.FiniteField_ext))
+
+
+def _meet(a, b):
+    """Where matrices over a and b meet for arithmetic: _common_field, and
+    for two rings of GF(q) and Z/nZ their common ring as Sage's coercion
+    has it (_mod_pushout: Z/m and Z/n in Z/gcd(m, n), the smaller one when
+    one order divides the other, GF(p) over Z/p); None otherwise."""
+    F = _common_field(a, b)
+    if F is None and _mod_ring(a) and _mod_ring(b):
+        F = _mod_pushout(a, b)
+    return F
+
+
 def _numerical_pair(a, b):
     """Whether a and b are two different numerical fields (RDF, CDF, RR, CC,
     RealField(p), ComplexField(p))."""
@@ -364,6 +380,17 @@ def _pushout(B, o):
     import _sage_qqbar as qb
     if isinstance(o, int):
         return None
+    if _mod_ring(B):
+        # (a scalar over another GF(q) or Z/m: the common ring, as Sage's
+        # coercion has it, _mod_pushout; GF(3)(2) * matrix(Zmod(12), ...) is
+        # over GF(3), Zmod(9)(2) * matrix(Zmod(12), ...) over Z/3)
+        # (but Sage refuses a scalar over Z/1 with a matrix over any other
+        # ring, though the matrices meet in Z/1: Zmod(1)(0) * matrix(Zmod(12),
+        # ...) is its TypeError, Zmod(12)(5) * matrix(Zmod(1), ...) is over Z/1)
+        P = _scalar_parent(o)
+        if P is None or P is B or not _mod_ring(P) or (isinstance(P, _ff.IntegerModRing_) and P._n == 1):
+            return None
+        return _mod_pushout(B, P)
     if B is not qb.QQbar and B is not qb.AA:
         # a real numerical field and a complex number: the complex field, a
         # double one when both are doubles (RDF with CDF or a Python complex
@@ -1752,7 +1779,9 @@ class FFMatrix:
         n, m = len(self._rows), self._ncols
         _admit_size(F, n, m)  # (the result is over F, whose entries can cost more)
         if op in "+-":
-            if n != m and not c == zero:
+            # (a zero from another GF(q) or Z/m still needs a square matrix:
+            # Sage coerces it into the matrix space first)
+            if n != m and (not c == zero or _mod_ring(F)):
                 op_parent = o.parent() if callable(getattr(o, "parent", None)) else type(o)
                 pair = (op_parent, self.parent()) if left else (self.parent(), op_parent)
                 raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % ((op,) + pair))
@@ -1774,7 +1803,7 @@ class FFMatrix:
         non-overlapping or empty product of matrices over QQ(sqrt2) and
         QQ(sqrt3) was a zero matrix, and AA + QQbar was over AA, the left
         operand's field (astra's CORR-ABC-1/2)."""
-        F = _common_field(self._base, o._base)
+        F = _meet(self._base, o._base)
         if F is None:
             raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % (op, self.parent(), o.parent()))
         return (self if self._base is F else FFMatrix(F, self._rows, self._ncols)), (o if o._base is F else FFMatrix(F, o._rows, o._ncols))
@@ -1862,9 +1891,10 @@ class FFMatrix:
     def _uncoerced(self, o, op, left):
         """For self op o (o op self when left) that nothing above took:
         Sage's TypeError naming the two parents when o is a scalar of QQ or
-        of a Z/m coprime to this ring's order n (Sage meets Z/m and Z/n in
-        Z/gcd(m, n) otherwise, not modelled here); NotImplemented for
-        anything else (Python's own refusal, or o's own operator)."""
+        of a Z/m coprime to this ring's order n, or of Z/1 (Z/m with a
+        common factor met this ring in _pushout, as Sage's coercion meets
+        them); NotImplemented for anything else (Python's own refusal, or
+        o's own operator)."""
         P = _scalar_parent(o)
         if P is None:
             return NotImplemented
@@ -1939,7 +1969,7 @@ class FFMatrix:
         if P is not self._base:
             # (a matrix over AA meets a vector over QQbar in QQbar, as two
             # matrices do: _common_field; other larger rings are not modelled)
-            if _common_field(self._base, B) is not P:
+            if _meet(self._base, B) is not P:
                 raise NotImplementedError("a matrix over %r and a vector over %r are not available together in sagebrush yet" % (self._base, B))
             A = FFMatrix(P, self._rows, self._ncols)
         return A, (v if isinstance(v, FFVector) and B is P else FFVector(P, _in_ring(P, v, B)))
