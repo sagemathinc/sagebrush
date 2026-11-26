@@ -92,6 +92,7 @@ try {
         if (m.method === "hello" && leg.refuse) setTimeout(() => this.fire("message", { data: JSON.stringify({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: leg.refuse } }) }), 0);
         else if (m.method === "hello") setTimeout(() => this.fire("message", { data: JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { purpose: "terminal", token: "tok-" + leg.legs.length, nonce: "n0", gen: leg.legs.length, incarnation: "i1", channels: ["kernel", "terminal"] } }) }), 0);
         if (m.t === "open") leg.opens.push(m);
+        if (m.relay === "ping" && leg.pongs) setTimeout(() => this.fire("message", { data: '{"relay":"pong"}' }), 0);
       }
       close(code, why) { this.closed = [code, why]; }
     };
@@ -99,6 +100,12 @@ try {
     leg.drop = (code, why) => leg.sock.fire("close", { code, reason: why });
     leg.ins = () => leg.sent.filter((m) => m.t === "in").map((m) => atob(m.b)).join("");
     leg.acks = () => leg.sent.filter((m) => m.t === "ack").map((m) => m.upto);
+    // (the tab hidden or shown, as the browser says it: document.hidden and visibilityState, then visibilitychange)
+    leg.visible = (v) => {
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => !v });
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (v ? "visible" : "hidden") });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
     navigator.clipboard && (navigator.clipboard.writeText = async () => { leg.clip++; });
     window.open = (...a) => { leg.opened.push(a); return null; };
     return true;
@@ -313,6 +320,62 @@ try {
   })()`);
   ok(JSON.stringify(hrefs) === JSON.stringify([null, null, null, null, null, null, null, "https://example.com/a%20b", "http://example.com/", "https://example.com/x"]), `webHref: http(s) only (${JSON.stringify(hrefs)})`);
 
+  // 7b. a paste: its text alone, never between bracketed-paste markers, the mode off or left on (a program killed before
+  // turning it off leaves it on; a shell without bracketed paste then showed the markers as ^[[200~ … ~)
+  const textarea = "document.querySelector('#rterm .xterm-helper-textarea')";
+  const pasteNow = (text) => ev(`(() => { const dt = new DataTransfer(); dt.setData('text/plain', ${JSON.stringify(text)}); ${textarea}.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); return true; })()`);
+  await ev(`${textarea}.focus(), true`);
+  for (const [what, mode] of [["the mode off", "\x1b[?2004l"], ["the mode left on", "\x1b[?2004h"]]) {
+    await out(mode);
+    await sleep(100);
+    const b = (await ev("__leg.ins()")).length;
+    await pasteNow("GPU Memory");
+    await until(`__leg.ins().length > ${b}`);
+    await sleep(100);
+    const got = (await ev("__leg.ins()")).slice(b);
+    ok(got === "GPU Memory", `${what}: a paste sends its text alone (${JSON.stringify(got)})`);
+  }
+  await out("\x1b[?2004l");
+  // 7c. Ctrl+C: ^C with nothing selected; with text selected, the browser's copy and nothing sent.  Ctrl+V: the
+  // browser's paste, never a ^V sent (CoCalc's keys, connected-terminal.ts initKeyHandler)
+  const ctrl = async (k, code, vk) => {
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, windowsVirtualKeyCode: vk, modifiers: 2 });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, windowsVirtualKeyCode: vk, modifiers: 2 });
+  };
+  await ev(`${textarea}.focus(), true`);
+  let b0 = (await ev("__leg.ins()")).length;
+  await ctrl("c", "KeyC", 67);
+  await until(`__leg.ins().length > ${b0}`);
+  ok((await ev("__leg.ins()")).slice(b0) === "\x03", "Ctrl+C with nothing selected: ^C, an interrupt");
+  await out("\x1b[2J\x1b[HSELECTME and more\r\n");
+  await until("/SELECTME/.test(document.querySelector('#rterm .xterm-rows').textContent)");
+  {
+    const r = await ev(`(() => {
+      const it = document.createTreeWalker(document.querySelector('#rterm .xterm-rows'), NodeFilter.SHOW_TEXT);
+      for (let t; (t = it.nextNode());) {
+        const i = t.data.indexOf("SELECTME");
+        if (i < 0) continue;
+        const range = document.createRange(); range.setStart(t, i + 2); range.setEnd(t, i + 3);
+        const b = range.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      }
+      return null;
+    })()`);
+    for (const n of [1, 2]) {
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", x: r.x, y: r.y, button: "left", clickCount: n });
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: r.x, y: r.y, button: "left", clickCount: n });
+    }
+    await sleep(200);
+  }
+  ok(await ev("document.querySelectorAll('#rterm .xterm-selection div').length > 0"), "a double-click selects a word");
+  b0 = (await ev("__leg.ins()")).length;
+  await ctrl("c", "KeyC", 67);
+  await sleep(400);
+  ok((await ev("__leg.ins()")).slice(b0) === "", "Ctrl+C with text selected: copied, nothing sent (no interrupt)");
+  await ctrl("v", "KeyV", 86);
+  await sleep(400);
+  ok(!(await ev("__leg.ins()")).slice(b0).includes("\x16"), "Ctrl+V sends no ^V: the browser's paste");
+
   // 8. a resize goes to the computer
   await send("Emulation.setDeviceMetricsOverride", { width: 800, height: 700, deviceScaleFactor: 1, mobile: false });
   await until(`__leg.sent.some((m) => m.t === 'resize' && m.cols < ${body.cols})`);
@@ -350,18 +413,92 @@ try {
   await sleep(100);
   const [wantD, gotD] = await bg();
   ok(wantL !== wantD && gotL === wantL && gotD === wantD, `the theme follows the page: light ${gotL} (${wantL}), dark ${gotD} (${wantD})`);
+  // 8d. a bold white prompt (\e[01;37m, as many PS1s draw the folder) reads on the light theme: at least 4.5:1
+  await setTheme("light");
+  await sleep(100);
+  await out("\x1b[2J\x1b[H\x1b[01;37mBOLDWHITE\x1b[0m plain\r\n");
+  await until("/BOLDWHITE/.test(document.querySelector('#rterm .xterm-rows').textContent)");
+  const contrast = await ev(`(() => {
+    const lum = (c) => { const m = c.match(/\\d+(\\.\\d+)?/g).slice(0, 3).map(Number).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]; };
+    const span = [...document.querySelectorAll('#rterm .xterm-rows span')].find((e) => e.textContent.includes('BOLDWHITE'));
+    const fg = getComputedStyle(span).color, bg = getComputedStyle(document.querySelector('#rterm .xterm-scrollable-element')).backgroundColor;
+    const [a, b] = [lum(fg), lum(bg)].sort((x, y) => y - x);
+    return { fg, bg, ratio: (a + 0.05) / (b + 0.05) };
+  })()`);
+  ok(contrast.ratio >= 4.5, `bold white on the light theme: ${contrast.fg} on ${contrast.bg}, ${contrast.ratio.toFixed(2)}:1`);
   await setTheme("system");
 
-  // 9. the leg lost: said, with Reconnect; Reconnect reattaches to the session with a fresh hello and proof
+  // 9. the leg lost: said, with Reconnect, and reattached by itself after a second (the same session, a fresh hello and
+  // proof): a tab in the background loses its leg (the browser slows its timers; the relay closes a leg 40 s without a
+  // ping), and coming back to a dead terminal until a reload is what this prevents
   await ev("__leg.drop(1006, 'runner not connected'), true");
   await until("/Not connected to box/.test(document.querySelector('#rterm .rstatus').textContent)");
-  ok(/runner not connected/.test(await status()), `a lost leg is said: ${JSON.stringify(await status())}`);
-  ok(await ev("[...document.querySelectorAll('#rterm .rhead button')].some((b) => b.textContent === 'Reconnect' && !b.hidden)"), "with Reconnect");
-  await ev("[...document.querySelectorAll('#rterm .rhead button')].find((b) => b.textContent === 'Reconnect').click(), true");
-  await until("__leg.opens.length === 2");
+  ok((await status()) === "Not connected to box: runner not connected. Reconnecting in 1 s…", `a lost leg is said, and a retry: ${JSON.stringify(await status())}`);
+  ok(await ev("[...document.querySelectorAll('#rterm .rhead button')].some((b) => b.textContent === 'Reconnect' && !b.hidden)"), "with Reconnect meanwhile");
+  ok((await ev("__leg.opens.length")) === 1, "nothing at once");
+  await until("__leg.opens.length === 2", 5000);
   const open2 = await ev("__leg.opens[1]");
   const c2 = unb64url(open2.dpop.split(".")[1]);
-  ok(JSON.parse(open2.body).session === "s-1" && open2.auth === "DPoP tok-2" && c2.jti !== c.jti && c2.htu.includes("gen=2"), "a reattach: the remembered session, a fresh hello and proof");
+  ok(JSON.parse(open2.body).session === "s-1" && open2.auth === "DPoP tok-2" && c2.jti !== c.jti && c2.htu.includes("gen=2"), "reattached by itself: the remembered session, a fresh hello and proof");
+  await push({ t: "opened", session: "s-1", nonce: "n2" });
+  await push({ t: "replay" });
+  await push({ t: "live" });
+  // 9a. a tab hidden while a retry waits: the retry is put off (no open while hidden); shown again, reattached at once
+  await ev("__leg.drop(1006, 'runner not connected'), true");
+  await until("/Reconnecting in 1 s/.test(document.querySelector('#rterm .rstatus').textContent)");
+  await ev("__leg.visible(false), true");
+  await sleep(1500);
+  ok((await ev("__leg.opens.length")) === 2, `hidden while a retry waited: nothing opened (${await ev("__leg.opens.length")} opens)`);
+  await ev("__leg.visible(true), true");
+  await until("__leg.opens.length === 3", 2000);
+  ok(JSON.parse(await ev("__leg.opens[2].body")).session === "s-1", "shown again: reattached at once, to the same session");
+  await push({ t: "opened", session: "s-1", nonce: "n2b" });
+  await push({ t: "replay" });
+  await push({ t: "live" });
+  // 9a2. the waits after a working leg is lost: 1, 2, 4 s (each try that doesn't open waits longer)
+  await ev("__leg.drop(1006, 'gone'), true");
+  await until("/Reconnecting in 1 s/.test(document.querySelector('#rterm .rstatus').textContent)");
+  await until("__leg.opens.length === 4", 3000);
+  await ev("__leg.drop(1006, 'gone'), true");
+  await until("/Reconnecting in 2 s/.test(document.querySelector('#rterm .rstatus').textContent)", 2000);
+  await until("__leg.opens.length === 5", 4000);
+  await ev("__leg.drop(1006, 'gone'), true");
+  await until("/Reconnecting in 4 s/.test(document.querySelector('#rterm .rstatus').textContent)", 2000);
+  ok(true, "the waits after a working leg is lost: 1 s, then 2 s, then 4 s");
+  await ev("[...document.querySelectorAll('#rterm .rhead button')].find((b) => b.textContent === 'Reconnect').click(), true");
+  await until("__leg.opens.length === 6", 2000);
+  ok(JSON.parse(await ev("__leg.opens[5].body")).session === "s-1", "Reconnect while a retry waits: at once, the same session");
+  await push({ t: "opened", session: "s-1", nonce: "n2c" });
+  await push({ t: "replay" });
+  await push({ t: "live" });
+  // 9b. in a hidden tab nothing is tried; shown again, a lost leg is reattached at once
+  const o9 = await ev("__leg.opens.length");
+  await ev("__leg.visible(false), true");
+  await ev("__leg.drop(1001, 'no ping for 40 s'), true");
+  await until("/Not connected to box/.test(document.querySelector('#rterm .rstatus').textContent)");
+  await sleep(2500);
+  ok((await ev("__leg.opens.length")) === o9 && (await status()) === "Not connected to box: no ping for 40 s.", `hidden: said, nothing tried (${await ev("__leg.opens.length")} opens; ${JSON.stringify(await status())})`);
+  await ev("__leg.visible(true), true");
+  await until(`__leg.opens.length === ${o9 + 1}`, 2000);
+  ok(JSON.parse(await ev(`__leg.opens[${o9}].body`)).session === "s-1", "shown again: reattached at once, to the same session");
+  await push({ t: "opened", session: "s-1", nonce: "n3" });
+  await push({ t: "replay" });
+  await push({ t: "live" });
+  // 9c. a leg that looks open when the tab is shown is probed: one ping; answered, nothing more
+  await ev("__leg.pongs = true, true");
+  const pings0 = await ev("__leg.sent.filter((m) => m.relay === 'ping').length");
+  await ev("(__leg.visible(false), __leg.visible(true)), true");
+  await sleep(5600);
+  ok((await ev("__leg.sent.filter((m) => m.relay === 'ping').length")) === pings0 + 1 && (await ev("__leg.opens.length")) === o9 + 1 && (await ev("__leg.sock.closed")) === null,
+    "shown with the leg open: one probe ping, answered, the leg kept");
+  // 9d. a probe not answered within 5 s: that leg is closed (4003) and the session reattached
+  await ev("__leg.pongs = false, true");
+  await ev("(__leg.visible(false), __leg.visible(true)), true");
+  const probed = (await ev("__leg.legs.length")) - 1;
+  await until(`__leg.legs[${probed}].closed !== null`, 7000);
+  ok((await ev(`__leg.legs[${probed}].closed[0]`)) === 4003, `no answer to the probe: the leg closed 4003 (${JSON.stringify(await ev(`__leg.legs[${probed}].closed`))})`);
+  await until(`__leg.opens.length === ${o9 + 2}`, 5000);
+  ok(JSON.parse(await ev(`__leg.opens[${o9 + 1}].body`)).session === "s-1", "and the session reattached on a new leg");
 
   // 10. exit: said, forgotten, New session
   await push({ t: "opened", session: "s-1", nonce: "n2" });
@@ -420,6 +557,8 @@ try {
   await ev("document.querySelector('#rtermbtn').click(), true");
   await until("/didn't accept/.test(document.querySelector('#rterm .rstatus')?.textContent ?? '')");
   ok((await status()) === "box didn't accept a terminal. Its Sagebrush may predate terminals: update it, then Reconnect. (no terminal channel)" && (await ev("__leg.opens.length")) === 0, `a refused hello is said: ${JSON.stringify(await status())}`);
+  await sleep(2500);
+  ok((await ev("__leg.legs.length")) === 1, "the computer's refusal isn't tried again by itself");
   // (a computer at its session limit: the runner's own number in the sentence)
   await ev("document.querySelector('#rterm .rhead button[aria-label=\"Close the terminal\"]').click(), true");
   await ev(FAKE);
@@ -442,9 +581,10 @@ try {
   await ev("(() => { const si = window.setInterval; window.__si = si; window.setInterval = (f, ms, ...a) => si(f, ms === 15000 ? 30 : ms, ...a); return true; })()");
   await ev("document.querySelector('#rtermbtn').click(), true");
   await until("/isn't answering/.test(document.querySelector('#rterm .rstatus')?.textContent ?? '')");
-  ok((await status()) === "box isn't answering: the connection went quiet. Reconnect.", `the relay gone quiet: the sentence alone, no "(no pong)": ${JSON.stringify(await status())}`);
-  ok(await ev("[...document.querySelectorAll('#rterm .rhead button')].some((b) => b.textContent === 'Reconnect' && !b.hidden) && __leg.sent.filter((m) => m.relay === 'ping').length === 2 && __leg.sock.closed?.[0] === 4002"),
+  ok((await status()) === "box isn't answering: the connection went quiet. Reconnecting in 1 s…", `the relay gone quiet: the sentence, no "(no pong)", and a retry: ${JSON.stringify(await status())}`);
+  ok(await ev("[...document.querySelectorAll('#rterm .rhead button')].some((b) => b.textContent === 'Reconnect' && !b.hidden) && __leg.sent.filter((m) => m.relay === 'ping').length === 2 && __leg.legs[0].closed?.[0] === 4002"),
     "two pings unanswered: the leg closed 4002, Reconnect offered");
+  await ev("document.querySelector('#rterm .rhead button[aria-label=\"Close the terminal\"]').click(), true");
   await ev("window.setInterval = window.__si, true");
   await goto(base + "?phone=0");
 } catch (e) {

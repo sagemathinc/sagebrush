@@ -1153,7 +1153,7 @@ class RelayRunner:
                 self.leg.start()
                 self.stats["legs"] += 1
                 up_at = time.monotonic()
-                self.err("Connected to %s as %s. Pick it in a notebook's \"Run on\" menu.\n" % (self.origin, self.key.name)
+                self.err("Connected to %s as %s. In a notebook, choose \"Remote: %s\" in the menu next to Run all, or open Terminal on your computer from its ... menu.\n" % (self.origin, self.key.name, self.key.name)
                          if first else "Reconnected.\n")
                 first = False
                 ping = asyncio.ensure_future(self.pinger(self.leg))
@@ -1303,12 +1303,14 @@ def main(argv):
         return 2
     try:
         key = _keys.load()
+    except _keys.OldKeyFile:
+        key = None  # (an older release's key file: enrolled again below, as with none; login keeps the old one aside)
     except _keys.KeyFileError as e:
         sys.stderr.write("sagebrush remote: %s\n" % e)
         return 1
     if key is None:
         from sagebrush.remote.enroll import main as login_main
-        code = login_main([])
+        code = login_main([], continuing=True)
         if code:
             return code
         key = _keys.load()

@@ -1,0 +1,34 @@
+Curve over GF(11) defined by
+$.1^3 + 2*$.1^2*$.3 + 10*$.1*$.2*$.3 + 10*$.2^2*$.3 + 4*$.1*$.3^2 + 8*$.2*$.3^2 
+    + 5*$.3^3
+
+>> #C;
+   ^
+Runtime error in '#': Bad argument types
+Argument types given: CrvPln[FldFin]
+
+
+>> Ep + 1;
+      ^
+Runtime error in '+': Bad argument types
+Argument types given: CrvEll[FldFin], RngIntElt
+
+
+>> EllipticCurve([0, -1, 1, -10, -10]) + 1;
+                                       ^
+Runtime error in '+': Bad argument types
+Argument types given: CrvEll[FldRat], RngIntElt
+
+
+>> #ChangeRing(EllipticCurve([0, 0, 0, -1, 0]), GF(2));
+   ^
+Runtime error in '#': Bad argument types
+Argument types given: CrvPln[FldFin]
+
+
+>> ConjugacyClasses(5);
+                   ^
+Runtime error in 'ConjugacyClasses': Bad argument types
+Argument types given: RngIntElt
+
+111

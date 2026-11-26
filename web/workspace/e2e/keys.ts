@@ -30,7 +30,8 @@ export type EpochKeys = Readonly<{
   addr: CryptoKey;
   /** HKDF, deriveBits only: blob file keys (named blobKey: a `blob` property is a workspace blob reference) */
   blobKey: CryptoKey;
-  /** AES-256-GCM: the index's sealed ops and the content keys stored with them */
+  /** HKDF, deriveKey only (a content key in shape): index ops, pages and snapshots are sealObject(index, ...), each
+   *  sealing with its own seal id and derived key */
   index: CryptoKey;
   /** AES-256-GCM: the content keys of documents and snapshots, and the inbox key pair */
   wrap: CryptoKey;
@@ -58,10 +59,13 @@ export async function deriveEpochKeys(S: Uint8Array, account: string, n: number)
   const aes = (label: string) => subtle().deriveKey(hkdf(epochInfo(label, account, n)), base, AES, false, ["encrypt", "decrypt"]);
   const addr = await subtle().deriveKey(hkdf(epochInfo(LABELS.epochAddr, account, n)), base, { name: "HMAC", hash: "SHA-256", length: 256 }, false, ["sign"]);
   // (WebCrypto derives no HKDF key directly: the bits, imported as one that isn't extractable, then cleared)
-  const bits = new Uint8Array(await subtle().deriveBits(hkdf(epochInfo(LABELS.epochBlob, account, n)), base, 256));
-  let blobKey: CryptoKey;
-  try { blobKey = await subtle().importKey("raw", bits, "HKDF", false, ["deriveBits"]); } finally { bits.fill(0); }
-  const keys: EpochKeys = Object.freeze({ n, account, addr, blobKey, index: await aes(LABELS.epochIndex), wrap: await aes(LABELS.epochWrap) });
+  const hkdfRoot = async (label: string, usage: "deriveBits" | "deriveKey") => {
+    const bits = new Uint8Array(await subtle().deriveBits(hkdf(epochInfo(label, account, n)), base, 256));
+    try { return await subtle().importKey("raw", bits, "HKDF", false, [usage]); } finally { bits.fill(0); }
+  };
+  const blobKey = await hkdfRoot(LABELS.epochBlob, "deriveBits");
+  const index = await hkdfRoot(LABELS.epochIndex, "deriveKey");
+  const keys: EpochKeys = Object.freeze({ n, account, addr, blobKey, index, wrap: await aes(LABELS.epochWrap) });
   MINTED.set(keys, Object.freeze({ account, n, addr, blobKey }));
   return keys;
 }

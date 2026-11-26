@@ -15,8 +15,9 @@ const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c
 
 // ---- the module's own text: it verifies, it doesn't sign
 const src = readFileSync(join(here, "fleet-verify.ts"), "utf8");
-const signing = src.replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, "").match(/\b(?:seal\w*|sign\w*|keyFromSeed|recoveryKey|newRecoveryCode|setupSender|hpkeSeal|makeDeviceKey|asKey)\b/g);
-ok(!signing, "S-2: fleet-verify.ts names no signing or key-making function of the core or fleet-device (comments aside)", signing);
+const signing = src.replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, "").match(/\b(?:seal\w*|sign(?!Raw\b)\w*|keyFromSeed|recoveryKey|newRecoveryCode|setupSender|hpkeSeal|makeDeviceKey|asKey)\b/g);
+// (signRaw is a verified host certificate's PUBLIC signing key, which hostFingerprintShown reads; it signs nothing)
+ok(!signing, "S-2: fleet-verify.ts names no signing or key-making function of the core or fleet-device (comments aside; signRaw, a certificate's public key, allowed)", signing);
 
 const dir = mkdtempSync(join(tmpdir(), "sb-fleet-verify-"));
 const entry = join(dir, "entry.ts");
@@ -176,7 +177,14 @@ try {
   {
     const P = await page();
     const names = await P.ev(`Object.keys(m.fv).sort().join()`);
-    ok(names === "PinMoved,StorageFailed,syncChain,verifyGrant,verifyGrantAck,verifyHostCert", "S-1: the module exports verification only: syncChain, verifyHostCert, verifyGrant, verifyGrantAck (and its errors StorageFailed, PinMoved)", names);
+    ok(names === "PinMoved,StorageFailed,hostFingerprintShown,readChainPage,syncChain,verifyGrant,verifyGrantAck,verifyHostCert,verifyHostRevocation", "S-1: the module exports verification and reading only: syncChain, readChainPage, verifyHostCert, verifyGrant, verifyGrantAck, verifyHostRevocation, hostFingerprintShown (and its errors StorageFailed, PinMoved)", names);
+    // (the fingerprint a person compares: recomputed from the verified certificate's keys, and equal to the first 100
+    //  bits of the full fingerprint the certificate carries, which the core has already checked against those keys)
+    const fp = await P.ev(`(async () => { const c = await m.fv.syncChain(${CTX}, F.objects.chain); const cert = await m.fv.verifyHostCert(${CTX}, c, F.objects.host_cert); const full = JSON.parse(F.objects.host_cert).body.fingerprint; const b = Uint8Array.from(atob(full.replace(/-/g, "+").replace(/_/g, "/")), (x) => x.charCodeAt(0)); let acc = 0n; for (const x of b.subarray(0, 13)) acc = (acc << 8n) | BigInt(x); acc >>= 4n; let want = ""; for (let i = 19; i >= 0; i--) want += "abcdefghijklmnopqrstuvwxyz234567"[Number((acc >> BigInt(5 * i)) & 31n)]; return { got: await m.fv.hostFingerprintShown(cert), want: want.match(/.{4}/g).join("-") }; })()`);
+    ok(/^[a-z2-7]{4}(-[a-z2-7]{4}){4}$/.test(fp.got) && fp.got === fp.want, "V-17: hostFingerprintShown: the first 100 bits of the certificate's full fingerprint, 20 base32 characters in groups of 4", fp);
+    // (a revocation: no fixture of one yet; anything else in its place is refused)
+    const rv = await code(P, `(async () => { const c = await m.fv.syncChain(${CTX}, F.objects.chain); await m.fv.verifyHostRevocation(${CTX}, c, F.ids.host, F.objects.host_cert); })()`);
+    ok(rv !== null, "V-18: verifyHostRevocation refuses an object that isn't a revocation (a host certificate in its place)", rv);
   }
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));
