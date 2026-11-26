@@ -4,10 +4,9 @@
 // the slice and checks only its size, never its form. The generation is visible to it, which is metadata: it is bound
 // again in the sealed header, so a slice whose prefix is edited fails to open.
 //
-// Opt-in, and not for production yet: DocSync uses this only when it is given a key provider (DocKeys), which no page
-// does. The provider here is a fixture until the sealed index's key declaration exists; and the rule that a
-// generation retired at a chain head can't seal anything authorized from that head on belongs to that declaration, not
-// to this module.
+// Opt-in: DocSync uses this only when it is given a key provider (DocKeys), which a page gives once its account has
+// end-to-end keys (doc-keys.ts, over the sealed index's key declarations). The rule that a generation retired at a
+// chain head can't seal anything authorized from that head on belongs to that declaration, not to this module.
 import { sealPatch, openPatch, PATCH_SLICE_MAX, SEAL_ID, type PatchPlace } from "./e2e/doc-payload.ts";
 import { TAG } from "./e2e/chunks.ts";
 import { concat, field, name, refuse, u64, utf8 } from "./e2e/bytes.ts";

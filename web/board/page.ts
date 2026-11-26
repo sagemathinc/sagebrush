@@ -88,6 +88,7 @@ import * as gitBranches from "../workspace/git-branch";
 import { openReviewDialog, showWhenBranches } from "../workspace/review/open-dialog";
 import { SyncOwner } from "../workspace/sync-owner";
 import { DocSync } from "../workspace/doc-sync";
+import { pageDocKeys } from "../workspace/doc-keys";
 import { answerPresence, TAB } from "../shell/presence";
 import { docSyncAllowed, followDocSync, docSyncChannel } from "../workspace/doc-sync-switch";
 // (the frame other sites embed and exported boards: built with __SB_NO_SYNC__, so no sync owner, and with it no
@@ -277,9 +278,11 @@ async function docSyncHere(w: Workspace) {
   const owner = SyncOwner.of(w);
   const allowed = await docSyncAllowed({ origin: location.origin, fetch: globalThis.fetch.bind(globalThis), clientRunning: () => owner.clientRunning() });
   if (!allowed) return;
+  // (the account's end-to-end keys, when it has them: every patch then sealed on the wire (workspace/doc-keys.ts))
+  const keys = await pageDocKeys();
   await followDocSync({
     // (a document's changes stored from another device: its Files entry's last-modified time, here too)
-    makeDocs: () => new DocSync({ onPage: (p) => void ws?.touch(p.doc, p.at).catch(() => {}) }),
+    makeDocs: () => new DocSync({ onPage: (p) => void ws?.touch(p.doc, p.at).catch(() => {}), keys }),
     makeChannel: () => (typeof BroadcastChannel === "function" ? new BroadcastChannel(docSyncChannel(w.ws.name)) : null),
     journalActive: () => w.journalActive(),
     setDocs: (docs) => owner.setDocs(docs),

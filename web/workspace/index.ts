@@ -38,6 +38,7 @@ export { rowIcons, ROWICON } from "./sync-rows";
 export { LEDGER, WAIT, STATE, CODE, HUB, OBSOLETE, OBSOLETE_KEY, hubOf, waitCount, noteSkip, queueObsolete, cleanObsoleteStep, seedLedger, ledgerKeys, classOf as ledgerClass, isWire, type SyncAnswer, type WaitResult } from "./sync-ledger";
 // (sync 2c-3: notebooks' contents on the account connection, and DEV's switch for them)
 export { DocSync } from "./doc-sync";
+export { pageDocKeys } from "./doc-keys";
 // (the notebook page: whether this device has a notebook's synced history yet, before opening one that arrived by sync)
 export { readJournal } from "../notebook/journal-rows.js";
 export { DOC_SYNC_ORIGINS, docSyncOrigin, docSyncAllowed, untilAllowed, enableDocSync, followDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./doc-sync-switch";
