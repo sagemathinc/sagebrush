@@ -67,3 +67,7 @@ test("textwrap's refusal checks the text by str's own iteration, the indents and
   const msg = "textwrap: text with characters beyond U+FFFF (such as '\u{1F600}') is not supported in Sagebrush yet";
   assert.equal(got, [msg, msg, msg, msg, msg, msg, msg, ""].join("\n"));
 });
+
+test("a list's assignment and deletion out of range name the assignment, as CPython's; bytearray.pop takes an index", () => {
+  same("index_errors_cases.py");
+});

@@ -2493,8 +2493,10 @@ method(list, "insert", (a: any[], i: any, x: any) => {
   return null;
 });
 method(list, "pop", (a: any[], i: any = -1) => {
+  // (the index a C ssize_t first, CPython's OverflowError past it, then the empty and range checks)
+  const k = AC.ssizeArg(i);
   if (a.length === 0) raise(T.IndexError, "pop from empty list");
-  let j = Number(O.index(i));
+  let j = Number(k);
   if (j === -1) return a.pop();
   if (j < 0) j += a.length;
   if (j < 0 || j >= a.length) raise(T.IndexError, "pop index out of range");
@@ -3243,10 +3245,17 @@ method(bytearray, "extend", (b: PyByteArray, x: any) => {
   b.n += add.length;
   return null;
 });
-method(bytearray, "pop", (b: PyByteArray) => {
+method(bytearray, "pop", (b: PyByteArray, i: any = -1) => {
+  // (bytearray.pop(index=-1), as CPython's: the index converted first, then the empty and range checks)
+  let j = Number(AC.ssizeArg(i));
   if (b.n === 0) raise(T.IndexError, "pop from empty bytearray");
+  if (j < 0) j += b.n;
+  if (j < 0 || j >= b.n) raise(T.IndexError, "pop index out of range");
   checkResizable(b);
-  return b.a[--b.n];
+  const v = b.a[j];
+  b.a.copyWithin(j, j + 1, b.n);
+  b.n--;
+  return v;
 });
 
 // ------------------------------------------------------------------ iterators
