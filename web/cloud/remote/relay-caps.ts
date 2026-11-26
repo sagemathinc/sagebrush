@@ -41,7 +41,8 @@ export const RELAY_CAPS: Record<Kind, Partial<Record<Chan, { legs: number; pageT
  * The relay's service budget for engine pages (remote r3.3 P1), per remote: a deployment setting (the Worker's
  * variables REMOTE_ENGINE_PAGES, REMOTE_ENGINE_QUEUE_BYTES and REMOTE_ENGINE_ATTEMPTS), never the host's memory, which
  * decides on kernels separately (r3.3 Limits).  The envelope it protects is the relay object's memory (128 MiB on the
- * platform): every engine page's frames waiting for the account's byte lease together at most `queueBytes` (a leg
+ * platform): every engine page's frames waiting for the account's byte lease together at most `queueBytes`, each
+ * charged what it holds in memory (a string two bytes per UTF-16 unit, binary its bytes) (a leg
  * whose frame would pass it closes 1013, as for its own window), and each page's socket and accounting times `pages`.
  * The settings are checked together against ENGINE_ENVELOPE: the other channels' windows, the runtime, two copies of
  * the largest engine frame (one received, one being sent), `queueBytes` and `pages` times the per-page charge must
