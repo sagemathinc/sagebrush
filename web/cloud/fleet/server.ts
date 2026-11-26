@@ -3,13 +3,17 @@
 //   POST /api/fleet/v1/host/lease    a host's lease request; 200: the execution lease (core lease-service.mjs)
 //   GET  /api/fleet/v1/host/chain    a host's signed read of its fleet's device chain (core chain-service.mjs; the
 //                                    chain-read note r1.2)
+//   /api/fleet/v1/{fleet,chain,hosts,hosts/<id>/grants}   the person's own fleet (person.ts; the reads scope r4)
 //
 // The handler holds every rule; this file supplies its ctx: the Worker's clock, the body read with a cap and a
 // deadline, the scheme and the source address, the D1 store (store.ts) and the lease key. It logs nothing.
 import { fleetCore } from "../../workspace/fleet/install.ts";
 import { bucket, chainEntries, chainPage, hostGen, hostRow, issueLease, spendRequestNonce, type D1 } from "./store.ts";
+import { handlePerson, type PersonDeps } from "./person.ts";
+import type { ShareEnv } from "../share/server.ts";
 
-export interface FleetEnv {
+/** ShareEnv: the person's routes read the site's own session (SHARE_DB, AUTH_PROVIDER, ...; person.ts shareSession). */
+export interface FleetEnv extends ShareEnv {
   FLEET_DB?: D1;
   /** the audience: "https://sagebrush.space" or "https://dev.sagebrush.space" */
   FLEET_AUD?: string;
@@ -54,9 +58,14 @@ export interface FleetHooks {
   beforeIssue?: (db: D1) => Promise<void>;
 }
 
-/** The fleet routes, or null for any other path. */
-export async function handleFleet(req: Request, env: FleetEnv, hooks: FleetHooks = {}): Promise<Response | null> {
+/**
+ * The fleet routes, or null for any other path. `person` is the mounting Worker's session resolver for the person's own
+ * routes (person.ts); without it they answer 503.
+ */
+export async function handleFleet(req: Request, env: FleetEnv, hooks: FleetHooks = {}, person?: PersonDeps): Promise<Response | null> {
   const url = new URL(req.url);
+  const mine = await handlePerson(req, url, env, fleetCore, person);
+  if (mine) return mine;
   if (url.pathname === CHAIN_ROUTE) return chainRead(req, url, env);
   if (url.pathname !== LEASE_ROUTE) return null;
   const db = env.FLEET_DB;
