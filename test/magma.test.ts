@@ -358,7 +358,7 @@ test("a copy of a value that shares its parts is admitted before it is made: x :
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], { input: "x := 1; for i in [1..40] do x := [x, x]; end for;\n1;\n", encoding: "utf8", timeout: WALL(60000) });
   const took = Date.now() - t0;
   assert.equal(r.signal, null, r.stderr);
-  assert.match(r.stdout.replace(/\s+/g, " "), /a value of more than 50000 sequences, sets, tuples and records \(a record counting as 8\) is not supported yet/);
+  assert.match(r.stdout.replace(/\s+/g, " "), /A copy of a value of more than \d+ sequences, sets, tuples and records \(a record counting as 8\) needs about .* for one collection/);
   assert.match(r.stdout, /\n1\n$/);
   assert.ok(took < 40000, `${took} ms`);
   // (a value of 40000 sequences is copied as before; at the default heap,
@@ -383,7 +383,7 @@ test("records nested deep or sharing their parts are bounded when copied too (HA
   assert.doesNotMatch(r.stdout + r.stderr, /RecursionError|Traceback/);
   const flat = r.stdout.replace(/\s+/g, " ");
   assert.match(flat, /a value nested more than 100 deep is not supported yet/);
-  assert.match(flat, /a value of more than 50000 sequences, sets, tuples and records \(a record counting as 8\) is not supported yet/);
+  assert.match(flat, /A copy of a value of more than \d+ sequences, sets, tuples and records \(a record counting as 8\) needs about .* for one collection/);
   assert.match(r.stdout, /\n1\n$/);
   assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });

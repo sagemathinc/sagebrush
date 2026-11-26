@@ -11309,10 +11309,20 @@
   "owner": "Magma compatibility/runtime memory",
   "row": "inv-26"
  },
- "lib/_magma.py ::  :: _OWN_CONTAINERS_MAX = 5 * 10 ** 4 #0": {
-  "class": "1+2",
+ "lib/_magma.py ::  :: _OWN_CONTAINERS_MAX = 0 #0": {
+  "class": "none",
   "owner": "Magma compatibility/runtime memory",
-  "row": "inv-26"
+  "reason": "the placeholder before _COLLECT_MAX is known (set at the module's end); refuses nothing"
+ },
+ "lib/_magma.py ::  :: _OWN_CONTAINERS_MAX = _COLLECT_MAX #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
  },
  "lib/_magma.py ::  :: _PRINT_DEPTH_MAX = 100 #0": {
   "class": "1+2",
@@ -11617,6 +11627,36 @@
  "lib/_magma.py :: _memory_error :: for k in (\"what\", \"need_bytes\", \"limit_bytes\", \"allowance_for\", \"record\", \"partial\", \"checkpoint\", \"fixed\"): #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
+ },
+ "lib/_magma.py :: _own_refusal :: \"A copy of a value of more than %d sequences, sets, tuples and records (a record counting as %d)\" % (_OWN_CONTAINERS_MAX, _OWN_RECORD_WEIGHT), #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma.py :: _own_refusal :: (_OWN_CONTAINERS_MAX + 1) * _COLLECT_COST, _OWN_CONTAINERS_MAX * _COLLECT_COST, \"one collection\", fixed=_COLLECT_MAX == 10 ** 6)) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma.py :: _own_refusal :: _OWN_CONTAINERS_MAX containers (each one collection element).\"\"\" #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
  },
  "lib/_magma.py :: _own_size :: if depth >= _NEST_MAX: #0": {
   "class": "1+2",
