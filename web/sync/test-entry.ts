@@ -29,6 +29,11 @@ export default {
       const hash = await accountHash(url.searchParams.get("account") ?? "");
       return Response.json(await env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + hash)).testAgent(await req.json()));
     }
+    // (tests only: the E2E mailbox's clock shifted, and the E2E rows counted)
+    if (url.pathname === "/__test/e2e") {
+      const hash = await accountHash(url.searchParams.get("account") ?? "");
+      return Response.json(await env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + hash)).testE2E(await req.json()));
+    }
     // (tests only: an alarm made due, then a later wake asked for, in one call)
     if (url.pathname === "/__test/wake") {
       const hash = await accountHash(url.searchParams.get("account") ?? "");

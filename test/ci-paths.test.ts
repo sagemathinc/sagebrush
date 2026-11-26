@@ -93,8 +93,9 @@ test("prose no code reads is docs-only: the other top-level pages, docs/'s pages
 
 test("prose classified docs-only is read by no code: no tracked file names one as a path", () => {
   const root = join(__dirname, "..", "..");
+  // The public-text baseline lists prose paths as hygiene debt, not as build or runtime inputs.
   const grep = (pattern: string) => {
-    const r = spawnSync("git", ["grep", "-nIE", pattern, "--", ":!design/", ":!notes/", ":!docs/*.md", ":!*.md", ":!test/ci-paths.test.ts"], { cwd: root, encoding: "utf8" });
+    const r = spawnSync("git", ["grep", "-nIE", pattern, "--", ":!design/", ":!notes/", ":!docs/*.md", ":!*.md", ":!test/ci-paths.test.ts", ":!scripts/public-text-allowlist.json"], { cwd: root, encoding: "utf8" });
     assert.ok(r.status === 0 || r.status === 1, r.stderr);
     return r.stdout.trim();
   };
@@ -116,7 +117,7 @@ test("the site's articles and blog are web's core: the web jobs and checks, not 
     const o = classify([f]);
     assert.deepEqual(suites(o), { node: "true", web: "true", modes: "false", engine_smoke: "false", docs_only: "false" }, f);
     assert.deepEqual([o.wasm_build, o.engine_full, o.engine_cpython, o.unsafe_sweep], ["false", "false", "false", "false"], f);
-    assert.deepEqual(JSON.parse(o.web_groups).length, 9, f);
+    assert.deepEqual(JSON.parse(o.web_groups).length, 10, f);
   }
 });
 
@@ -413,14 +414,14 @@ test("the long tier: the nightly schedule and a dispatch with long set; never a 
   for (const o of longRuns) {
     assert.equal(o.long, "true");
     assert.deepEqual(JSON.parse(o.mpmath_backends), ["sagebrush", "python"]);
-    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "moves", "pwa", "share-dialog", "share-dialog-2"]);
+    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "pwa", "lti", "lti-b", "share-dialog-2"]);
     assert.equal(o.slow_tests, "true");
     assert.equal(o.slow_scope, "1");
   }
   for (const o of notLong) {
     assert.equal(o.long, "false", JSON.stringify(o));
     assert.deepEqual(JSON.parse(o.mpmath_backends), ["sagebrush"]);
-    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "moves", "pwa", "share-dialog"]);
+    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "pwa", "lti", "lti-b"]);
     assert.equal(o.slow_tests, "false");
     assert.equal(o.slow_scope, "");
   }
@@ -549,7 +550,7 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
     "web/workspace/doc-sync.ts", "web/notebook/sync-rows.js", "web/notebook/db-merge3.ts", "web/board/syncdb.ts",
     "web/share/files.ts", "web/share-client/upload.ts", "web/csp.ts", "web/csp-policy.mts", "web/safe-html.ts",
     "web/cloud/share/server.ts", "web/cloud/share/migrations/0009_remotes.sql", "web/cloud/remote/relay.ts",
-    "web/cloud/mirror/account.ts", "web/cloud/support/support.ts", "web/workspace/agent-chat/mirror-format.ts",
+    "web/cloud/mirror/account.ts", "web/cloud/lti/launch.ts", "web/cloud/support/support.ts", "web/workspace/agent-chat/mirror-format.ts",
     "web/workspace/export/run.ts", "web/workspace/db.ts", "web/workspace/api.ts", "web/workspace/migrate.ts", "web/board/export.ts",
     "web/latex/save.ts", "scripts/check-export-size.mjs",
     // (the LaTeX group's inputs: its ceiling is checked only in the full tier's web-artifacts)
@@ -582,7 +583,7 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
 });
 
 test("the web jobs by area (CI speed plan option 7): a change inside one area runs that area's suites", () => {
-  const ALL = ["notebook", "preload", "latex", "board-a", "board-b", "board-c", "board-unit", "terminal", "remote-preview"];
+  const ALL = ["notebook", "preload", "latex", "board-a", "board-b", "board-c", "board-unit", "terminal", "remote-preview", "space"];
   const pick = (files: string[]) => {
     const o = classify(files);
     return { groups: JSON.parse(o.web_groups), runner: o.web_runner, export: o.web_export, lookalike: o.web_lookalike };
@@ -595,6 +596,10 @@ test("the web jobs by area (CI speed plan option 7): a change inside one area ru
   for (const f of ["examples/notebook/welcome/main.ipynb", "examples/latex/article/article.tex"]) assert.deepEqual(pick([f]).groups, ALL, f);
   // the terminal panel: its group alone
   assert.deepEqual(pick(["web/shell/panel.ts"]), { groups: ["terminal"], runner: "false", export: "false", lookalike: "false" });
+  // a space in 3D (web/space): its group alone (its page loads nothing of the others')
+  for (const f of ["web/space/src/main.js", "web/space/test-walk.mjs", "web/space/examples/intro.space.json"]) {
+    assert.deepEqual(pick([f]), { groups: ["space"], runner: "false", export: "false", lookalike: "false" }, f);
+  }
   // the workspace: web-runner, the export and lookalike jobs, and board-unit (the export's measure and reminder units)
   assert.deepEqual(pick(["web/workspace/browser.ts"]), { groups: ["board-unit"], runner: "true", export: "true", lookalike: "true" });
   // two areas: their union
@@ -692,16 +697,26 @@ test("a changed suite runs on its own pull request: its `// ci:` job, and the fu
   // a source another area's suite tests: the board's page selects latex (test-latex-page's newLatexHere, #566)
   assert.deepEqual(JSON.parse(classify(["web/board/page.ts"]).web_groups), ["latex", "board-a", "board-b", "board-c", "board-unit"]);
   assert.deepEqual(JSON.parse(classify(["web/board/frame.ts"]).web_groups), ["board-a", "board-b", "board-c", "board-unit"]);
+  // (the web-browser jobs: every selected group in exactly one of at most four jobs, the CI capacity ruling, Nov 22 2026;
+  // latex alone, on its own build; notebook alone, the longest group; terminal last in its job, since it rebuilds web/dist)
   const matrix = JSON.parse(classify(["web/index.html"]).web_matrix);
-  assert.deepEqual(matrix.filter((x: { group: string }) => x.group === "notebook").map((x: { shard: number }) => x.shard), [1, 2, 3]);
-  assert.deepEqual(matrix.filter((x: { group: string }) => x.group === "remote-preview").map((x: { shard: number }) => x.shard), [1, 2, 3]);
-  // (one remote-preview run a shard: each run takes minutes, so a new `// ci:` run there needs a new shard, not a
-  // doubled one near the job's timeout)
-  const repo = join(__dirname, "..", "..");
-  const preview = spawnSync(process.execPath, [join(repo, "scripts", "web-tests.mjs"), "plan", "web-browser/remote-preview"], { cwd: repo, encoding: "utf8" });
-  assert.equal(preview.status, 0, preview.stderr);
-  assert.equal(preview.stdout.split("\n").filter(Boolean).length, matrix.filter((x: { group: string }) => x.group === "remote-preview").length, preview.stdout);
-  assert.equal(matrix.filter((x: { group: string }) => !["notebook", "remote-preview"].includes(x.group)).length, 7);
+  assert.deepEqual(matrix, [
+    { name: "board", groups: "board-a board-b board-c board-unit preload" },
+    { name: "notebook", groups: "notebook space" },
+    { name: "remote-terminal", groups: "remote-preview terminal" },
+    { name: "latex", groups: "latex" },
+  ]);
+  const all = JSON.parse(classify(["web/index.html"]).web_groups);
+  assert.deepEqual(matrix.flatMap((x: { groups: string }) => x.groups.split(" ")).sort(), [...all].sort(), "every selected group in exactly one job");
+  // (a change that selects some groups runs only the jobs that hold them, each with only those)
+  assert.deepEqual(JSON.parse(classify(["web/board/frame.ts"]).web_matrix), [{ name: "board", groups: "board-a board-b board-c board-unit" }]);
+  assert.deepEqual(JSON.parse(classify(["web/shell/test-cross.mjs"], "", at).web_matrix), [{ name: "notebook", groups: "notebook" }, { name: "remote-terminal", groups: "terminal" }]);
+  assert.deepEqual(JSON.parse(classify(["web/board/page.ts"]).web_matrix).map((x: { name: string }) => x.name), ["board", "latex"]);
+  // (ci.yml runs each job's groups in a loop that keeps going after a failure, and fails the step if any failed)
+  const yml = readFileSync(join(__dirname, "..", "..", ".github", "workflows", "ci.yml"), "utf8");
+  const browser = yml.slice(yml.indexOf("\n  web-browser:\n"), yml.indexOf("\n  conformance:\n"));
+  assert.ok(browser.includes("for GROUP in $WEB_GROUPS; do") && !/^ +GROUPS:/m.test(browser) && browser.includes('[ -z "$failed" ] || { echo "::error::failed groups:$failed"; exit 1; }'));
+  assert.ok(!/--shard "\$\{\{ matrix\.shard \}\}/.test(browser), "no group is sharded any more");
   // a deleted suite (not in the checkout) runs nowhere
   assert.equal(classify(["web/gone/test-gone.mjs"], "", at).full, "false");
 });
@@ -875,7 +890,7 @@ test("size_inputs: on a track an engine source is a gate input (the engine ships
 
 test("wasm_build: what the modules are built from or handled by builds them on a pull request; every other event builds", () => {
   const build = (files: string[], env: Record<string, string> = {}) => classify(files, "", env).wasm_build;
-  for (const f of ["engine/poly/src/lib.rs", "wasm/pins.json", "Cargo.lock", "scripts/build-mp.mjs", "scripts/build-raster.mjs",
+  for (const f of ["engine/poly/src/lib.rs", "wasm/pins.json", "Cargo.lock", "scripts/build-mp.mjs", "scripts/build-raster.mjs", "scripts/build-skltree.mjs",
     "scripts/wasm-fetch.mjs", "scripts/wasm-artifact.mjs", "scripts/wasm-publish.mjs", ".github/actions/wasm-modules/action.yml",
     ".github/workflows/ci.yml"]) {
     assert.equal(build([f]), "true", f);
@@ -887,4 +902,61 @@ test("wasm_build: what the modules are built from or handled by builds them on a
   assert.equal(build(["lib/_sage_ffmat.py"], { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/track/math" }), "true");
   assert.equal(build([], { GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/master" }), "true");
   assert.equal(build([], { GITHUB_EVENT_NAME: "schedule", GITHUB_REF: "refs/heads/master" }), "true");
+});
+
+test("a master push the merge queue already tested (CI_QUEUE_TESTED): every test selection is off; only the modules' build stays", () => {
+  const push = { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" };
+  for (const files of [["src/compile.ts"], ["web/notebook/x.ts", "engine/poly/src/lib.rs", "magma-tests/x.m"]]) {
+    const o = classify(files, "", { ...push, CI_QUEUE_TESTED: "true" });
+    assert.equal(o.queue_tested, "true");
+    // (the matrices' contents, read only by jobs now off, and the counts aren't selections; app_build is app.yml's,
+    // which a queue-tested push doesn't change)
+    const kept = new Set(["wasm_build", "queue_tested", "mpmath_backends", "web_sync_shards", "files", "app_build"]);
+    for (const [k, v] of Object.entries(o)) if (!kept.has(k)) assert.ok(v === "false" || v === "[]" || v === "", `${files.join()}: ${k}=${v}`);
+    assert.equal(o.wasm_build, "true");
+    // (without it, or not "true", the same push runs the full tier)
+    for (const t of [undefined, "false", "1", "TRUE"]) {
+      const f = classify(files, "", t === undefined ? push : { ...push, CI_QUEUE_TESTED: t });
+      assert.deepEqual([f.queue_tested, f.full, f.node, f.engine_full], ["false", "true", "true", "true"], String(t));
+    }
+  }
+  // (only a master push: a track push, the queue's own run, a pull request ignore it)
+  assert.equal(classify(["src/x.ts"], "", { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/track/math", CI_QUEUE_TESTED: "true" }).full, "true");
+  assert.equal(classify(["src/x.ts"], "", { CI_QUEUE_TESTED: "true" }).queue_tested, "false");
+});
+
+test("latex_budget: a pull request changing the LaTeX group's inputs keeps web-artifacts, light or not; nothing else does", () => {
+  for (const files of [["web/latex/split.ts"], ["scripts/latex-group.mjs"], ["web/workspace/paths.ts"], ["web/build.ts"]]) {
+    assert.equal(classify(files).latex_budget, "true", files.join());
+    assert.equal(classify(files, "", { CI_PR_LIGHT: "true" }).latex_budget, "true", files.join());
+  }
+  for (const files of [["web/latex/test-latex-units.mjs"], ["web/board/x.ts"], ["design/x.md"]]) assert.equal(classify(files).latex_budget, "false", files.join());
+  assert.equal(classify(["web/latex/split.ts"], "", { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" }).latex_budget, "false");
+});
+
+test("PR CI light (CI_PR_LIGHT exactly \"true\"): a pull request keeps only checks' and the size gate's inputs and the modules' build", () => {
+  const files = ["src/compile.ts", "web/notebook/x.ts", "engine/poly/src/lib.rs", "magma-tests/x.m"];
+  const off = classify(files);
+  const on = classify(files, "", { CI_PR_LIGHT: "true" });
+  assert.equal(on.pr_light, "true");
+  assert.equal(off.pr_light, "false");
+  // (on: every selection off but the size inputs, which run checks, size-base and the measured gate, and the build)
+  const kept = new Set(["size_inputs", "wasm_build", "pr_light", "queue_tested", "mpmath_backends", "web_sync_shards", "files", "docs_only", "app_only", "optional_only", "long"]);
+  for (const [k, v] of Object.entries(on)) if (!kept.has(k)) assert.ok(v === "false" || v === "[]" || v === "", `${k}=${v}`);
+  assert.deepEqual([on.size_inputs, on.wasm_build], ["true", off.wasm_build]);
+  // (off: unset, "false", "1" or "TRUE" are no switch)
+  for (const v of ["false", "1", "TRUE", ""]) assert.deepEqual(classify(files, "", { CI_PR_LIGHT: v }), off, String(v));
+  // (a full-ci label, a queue group or a push ignores it)
+  assert.equal(classify(files, "full-ci", { CI_PR_LIGHT: "true" }).full, "true");
+  assert.equal(classify(files, "", { CI_PR_LIGHT: "true", GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" }).full, "true");
+  // (a docs-only change runs no checks either way)
+  assert.equal(classify(["design/x.md"], "", { CI_PR_LIGHT: "true" }).size_inputs, classify(["design/x.md"]).size_inputs);
+});
+
+test("app_build: a light pull request builds the desktop app only when it changes app/, the pins or app.yml; everything else always", () => {
+  assert.equal(classify(["web/index.html"], "", { CI_PR_LIGHT: "true" }).app_build, "false");
+  assert.equal(classify(["app/src-tauri/src/lib.rs"], "", { CI_PR_LIGHT: "true" }).app_build, "true");
+  assert.equal(classify(["web/index.html"]).app_build, "true");
+  assert.equal(classify(["web/index.html"], "full-ci", { CI_PR_LIGHT: "true" }).app_build, "true");
+  assert.equal(classify(["web/index.html"], "", { CI_PR_LIGHT: "true", GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" }).app_build, "true");
 });
