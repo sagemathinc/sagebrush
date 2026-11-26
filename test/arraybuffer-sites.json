@@ -1638,7 +1638,7 @@
   "ea3e1fbc6183f858": {"decl":"src/runtime/nd.ts :: ndBytes","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8ArrayConstructor.new(source)"},
   "823a90394afaeb85": {"decl":"src/runtime/nd.ts :: ndCholesky","class":"allocates","via":"lib:lib.es5.d.ts :: Float64Array.slice"},
   "e67be997ebfb527f": {"decl":"src/runtime/nd.ts :: ndLu","class":"allocates","via":"lib:lib.es5.d.ts :: Float64ArrayConstructor.new(source)"},
-  "8ba3d9b95f9905b1": {"decl":"src/runtime/nd.ts :: ndMatmul","class":"allocates","via":"src/runtime/nd.ts :: startPool"},
+  "5258de9253fb3512": {"decl":"src/runtime/nd.ts :: ndMatmul","class":"allocates","via":"src/runtime/nd.ts :: startPool"},
   "6458fef39ef9d532": {"decl":"src/runtime/nd.ts :: sharedMemory","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "45727fb1075865e0": {"decl":"src/runtime/numpy.ts :: DM","class":"allocates","via":"src/runtime/types.ts :: method"},
   "b10d3e1ba79f9732": {"decl":"src/runtime/numpy.ts :: DType.class","class":"no-new-store"},
