@@ -1,0 +1,23 @@
+((x + 1)^2 * (x + 2)^3).squarefree_decomposition() -> (x + 1)^2 * (x + 2)^3
+((x + 1)^2 * (x + 2)^3).radical() -> x^2 + 3*x + 2
+(x^2 + 2*x + 1).is_square() -> True
+(x^2 + 2*x + 1).is_square(root=True) -> (True, x + 1)
+(x^2 + 2*x + 2).is_square() -> False
+(x^2 + 2*x + 1).sqrt() -> x + 1
+(z^4 + 1).squarefree_decomposition() -> (z + 1)^4
+(z^4 + z^2).radical() -> z^2 + z
+(3*x^2).is_square() -> False
+R(0).is_square() -> True
+(3*x^2 + 3).radical() -> 3*x^2 + 3
+(4*x^2).is_square(root=True) -> (True, 2*x)
+(4*x^2 + 8*x + 4).is_square(root=True) -> (True, 2*x + 2)
+(x^2 + 2*x + 2).is_square(root=True) -> (False, None)
+(3*(x + 1)^2).squarefree_decomposition() -> (3) * (x + 1)^2
+(x^2 + x + 1).sqrt() -> TypeError: Polynomial is not a square. You must specify the name of the square root when using the default extend = True
+(4*x^2).sqrt() -> 2*x
+R(0).squarefree_decomposition() -> ArithmeticError: square-free decomposition of 0 is not defined
+R(5).squarefree_decomposition() -> 5
+R(0).radical() -> ZeroDivisionError: 
+R(5).radical() -> 1
+((y + a)^3 * (y + 1)).squarefree_decomposition() -> (y + 1) * (y + a)^3
+((z^2 + z + 1)^2 * z^4).squarefree_decomposition() -> (z^2 + z + 1)^2 * z^4

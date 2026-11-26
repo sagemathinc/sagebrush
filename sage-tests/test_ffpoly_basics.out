@@ -1,0 +1,37 @@
+f.reverse() -> x^5 + 3*x^4 + 1
+f.reverse(7) -> x^7 + 3*x^6 + x^2
+f.truncate(2) -> 3*x + 1
+f.shift(2) -> x^7 + 3*x^3 + x^2
+f.shift(-1) -> x^4 + 3
+(x^3 + x^2).valuation() -> 2
+R(0).valuation() -> +Infinity
+f.padded_list(7) -> [1, 3, 0, 0, 0, 1, 0]
+f.number_of_terms() -> 3
+(5*x^3).is_monomial() -> False
+(5*x^3).is_term() -> True
+x.is_gen() -> True
+(x^3 + 2*x).trailing_coefficient() -> 2
+f.monomial_coefficient(x^5) -> 1
+f.exponents() -> [0, 1, 5]
+f.coefficients(sparse=False) -> [1, 3, 0, 0, 0, 1]
+R(0).reverse() -> 0
+R(0).truncate(3) -> 0
+R(0).shift(2) -> 0
+R(0).padded_list(3) -> [0, 0, 0]
+f.padded_list(2) -> [1, 3]
+R(0).number_of_terms() -> 0
+R(0).is_monomial() -> False
+x.is_monomial() -> True
+R(1).is_monomial() -> True
+R(0).is_term() -> False
+(x + 1).is_gen() -> False
+R(0).trailing_coefficient() -> ValueError: min() iterable argument is empty
+(x^2 + 2*x).exponents() -> [1, 2]
+R(0).exponents() -> []
+(x^2 + 1).monomial_coefficient(x) -> 0
+(x^3).valuation() -> 3
+R(5).valuation() -> 0
+(x^2 + 1).reverse(1) -> x
+(x^3 + 2*x^2).reverse(degree=1) -> 0
+(y^2 + a).reverse() -> a*y^2 + 1
+(z^3 + z).shift(-1) -> z^2 + 1
