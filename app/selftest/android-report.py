@@ -53,7 +53,8 @@ REPORTED = [
 DESKTOP = [
     "the LaTeX editor is on in the desktop app",
     "a .tex opens in the editor and renders",
-    "Share, Agent and Run say what the app doesn't offer",
+    "Share and Agent say what the app doesn't offer",
+    "Run runs a SageTeX item in the app",
 ]
 # (the board page and the app's 404s in the desktop app, web/notebook/selftest-board.js: required with --desktop only)
 DESKTOP_BOARD = [
