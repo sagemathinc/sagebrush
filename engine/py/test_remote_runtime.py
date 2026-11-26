@@ -239,7 +239,7 @@ def test_prior_version_kept_and_staging_cleaned():
 
 
 def test_staged_member_replaced_before_activate():
-    """SEC B1: a loadable member other than node, replaced between its write and the activate, refuses the version."""
+    """SEC B1: a loadable member other than node, replaced between its write and the verify, refuses the version."""
     d, root = fresh_root()
     try:
         r = Release()
@@ -258,6 +258,141 @@ def test_staged_member_replaced_before_activate():
         assert T.read_current(root) is None and not os.path.exists(os.path.join(root, "versions", V))
     finally:
         shutil.rmtree(d)
+
+
+def test_changed_between_verify_and_activate():
+    """TESTS T3: the exact seam: the staged tree verified, THEN a member changed (same size), then the rename.  The
+    activated tree is verified again before "current" names it: the version is taken out and nothing is current."""
+    d, root = fresh_root()
+    try:
+        r = Release()
+        real = T.verify_tree
+        calls = []
+
+        def verify_then_alter(fd, m, plat, uid=None):
+            calls.append(1)
+            out = real(fd, m, plat, uid)
+            if len(calls) == 1:
+                st = [n for n in os.listdir(root) if n.startswith("staging-")][0]
+                with open(os.path.join(root, st, "bundle", "main.mjs"), "r+b") as f:
+                    f.write(b"#!")  # (the same size, other bytes)
+            return out
+        T.verify_tree = verify_then_alter
+        try:
+            refused(T.install, V, PLAT, r.get, root, r.pins, contains="main.mjs")
+        finally:
+            T.verify_tree = real
+        assert len(calls) == 2, "verified again after the rename"
+        assert T.read_current(root) is None and not os.path.exists(os.path.join(root, "versions", V))
+    finally:
+        shutil.rmtree(d)
+
+
+def test_directories_checked():
+    """TESTS T1: every directory on the way to a bound member: ours, not group- or world-writable, at launch (and so at
+    activation, the same walk)."""
+    d, root = fresh_root()
+    try:
+        r = Release()
+        final = T.install(V, PLAT, r.get, root, r.pins)
+        T.launch_check(V, PLAT, root, r.pins)  # (the control)
+        for rel in ("bundle/root", "bundle", "node/%s/bin" % NODEDIR, "."):
+            p = os.path.join(final, rel)
+            mode = stat.S_IMODE(os.stat(p).st_mode)
+            os.chmod(p, 0o777)
+            refused(T.launch_check, V, PLAT, root, r.pins, contains="isn't private")
+            os.chmod(p, mode)
+        T.launch_check(V, PLAT, root, r.pins)
+        # (a directory owned by someone else: the walk with another uid sees every directory as not ours)
+        vfd = os.open(final, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            m = json.loads(open(os.path.join(final, "manifest.json"), "rb").read())
+            refused(T.verify_tree, vfd, m, PLAT, os.getuid() + 1, contains="isn't private")
+        finally:
+            os.close(vfd)
+    finally:
+        shutil.rmtree(d)
+
+
+def test_only_the_current_version_launches():
+    """TESTS T2: no downgrade at launch either: an older version kept on disk is refused once a newer one is current."""
+    d, root = fresh_root()
+    try:
+        r = Release()
+        T.install(V, PLAT, r.get, root, r.pins)
+        V2 = "0.11.1"
+
+        def newer(x):
+            x.m["version"] = V2
+        r2 = Release(mutate=newer)
+        T.install(V2, PLAT, lambda path, n, sink=None: r2.get(path.replace(V2, V), n, sink), root, r2.pins)
+        assert os.path.isdir(os.path.join(root, "versions", V)), "the older version is still on disk"
+        refused(T.launch_check, V, PLAT, root, r.pins, contains="no downgrade")
+        T.launch_check(V2, PLAT, root, r2.pins)
+        refused(T.launch_check, "0.12.0", PLAT, root, {"0.12.0": "0" * 64}, contains="isn't the runtime installed")
+    finally:
+        shutil.rmtree(d)
+
+
+def test_fetching():
+    """https_get's rules, against a local server: the origin must be HTTPS; a body over its cap refused; a redirect
+    within the origin followed, one away from it refused; a body trickling past the deadline refused."""
+    import http.server
+    import threading
+    import time as _t
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            if self.path == "/small":
+                self._send(b"hello")
+            elif self.path == "/big":
+                self._send(b"x" * 100)
+            elif self.path == "/here":
+                self.send_response(302)
+                self.send_header("Location", "/small")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            elif self.path == "/away":
+                self.send_response(302)
+                self.send_header("Location", "http://127.0.0.2:%d/small" % self.server.server_port)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            elif self.path == "/slow":
+                self.send_response(200)
+                self.send_header("Content-Length", "10")
+                self.end_headers()
+                for _ in range(10):
+                    self.wfile.write(b"s")
+                    self.wfile.flush()
+                    _t.sleep(0.2)
+
+        def _send(self, b):
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    origin = "http://127.0.0.1:%d" % srv.server_port
+    saved_origin, saved_deadline = T.RUNTIME_ORIGIN, T.LIMITS["deadlineS"]
+    try:
+        T.RUNTIME_ORIGIN = origin
+        refused(T.https_get, "/small", 100, contains="isn't HTTPS")
+        assert T._get(origin, "/small", 100) == b"hello"
+        refused(T._get, origin, "/big", 99, contains="larger")
+        assert T._get(origin, "/big", 100) == b"x" * 100
+        assert T._get(origin, "/here", 100) == b"hello", "a redirect within the origin"
+        refused(T._get, origin, "/away", 100, contains="can't fetch")
+        T.LIMITS["deadlineS"] = 0.5
+        refused(T._get, origin, "/slow", 100, contains="too long")
+        T.LIMITS["deadlineS"] = 10
+        assert T._get(origin, "/slow", 100) == b"s" * 10
+    finally:
+        T.RUNTIME_ORIGIN, T.LIMITS["deadlineS"] = saved_origin, saved_deadline
+        srv.shutdown()
 
 
 if __name__ == "__main__":

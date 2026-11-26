@@ -177,8 +177,12 @@ def _no_dupes(pairs):
 class _SameOrigin(urllib.request.HTTPRedirectHandler):
     max_redirections = LIMITS["redirects"]
 
+    def __init__(self, origin):
+        super().__init__()
+        self.origin = origin
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        if urllib.parse.urlsplit(newurl)[:2] != urllib.parse.urlsplit(RUNTIME_ORIGIN)[:2]:
+        if urllib.parse.urlsplit(newurl)[:2] != urllib.parse.urlsplit(self.origin)[:2]:
             raise urllib.error.HTTPError(newurl, code, "a redirect away from the runtime's origin", headers, fp)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
@@ -187,8 +191,13 @@ def https_get(path, max_bytes, sink=None):
     """GET RUNTIME_ORIGIN + path, at most max_bytes (the body's bytes, or written to sink), by one deadline."""
     if not RUNTIME_ORIGIN.startswith("https://"):
         refuse("the runtime's origin isn't HTTPS")
-    url = RUNTIME_ORIGIN + path
-    opener = urllib.request.build_opener(_SameOrigin())
+    return _get(RUNTIME_ORIGIN, path, max_bytes, sink)
+
+
+def _get(origin, path, max_bytes, sink=None):
+    """https_get's work, for one origin (tests: a local one)."""
+    url = origin + path
+    opener = urllib.request.build_opener(_SameOrigin(origin))
     deadline = time.monotonic() + LIMITS["deadlineS"]
     try:
         with opener.open(urllib.request.Request(url, headers={"User-Agent": "sagebrush-remote"}), timeout=LIMITS["connectS"]) as r:
@@ -196,7 +205,7 @@ def https_get(path, max_bytes, sink=None):
             while True:
                 if time.monotonic() > deadline:
                     refuse("fetching the runtime took too long")
-                chunk = r.read(1 << 20)
+                chunk = r.read1(1 << 20)  # (what has arrived, so the deadline is checked as bytes trickle in)
                 if not chunk:
                     break
                 n += len(chunk)
@@ -217,12 +226,22 @@ def _open_dir(parent_fd, name):
     return os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
 
 
-def _walk_open(root_fd, rel, create=False):
-    """A held handle on rel's parent directory (no link anywhere on the way), and rel's last name."""
+def _check_dir(fd, what, uid=None):
+    """A held directory: ours, and not group- or world-writable (TESTS T1: every directory through activation and
+    launch), or refused."""
+    st = os.fstat(fd)
+    if st.st_uid != (os.getuid() if uid is None else uid) or st.st_mode & 0o022:
+        refuse("the runtime's folder %s isn't private to you (owner, or group- or world-writable)" % what)
+
+
+def _walk_open(root_fd, rel, create=False, uid=None):
+    """A held handle on rel's parent directory (no link anywhere on the way, each directory checked), and rel's last
+    name."""
     parts = rel.split("/")
     fd = os.dup(root_fd)
     try:
-        for part in parts[:-1]:
+        _check_dir(fd, "(its root)", uid)
+        for i, part in enumerate(parts[:-1]):
             if create:
                 try:
                     os.mkdir(part, 0o700, dir_fd=fd)
@@ -231,6 +250,7 @@ def _walk_open(root_fd, rel, create=False):
             nfd = _open_dir(fd, part)
             os.close(fd)
             fd = nfd
+            _check_dir(fd, "/".join(parts[:i + 1]), uid)
         return fd, parts[-1]
     except BaseException:
         os.close(fd)
@@ -240,7 +260,7 @@ def _walk_open(root_fd, rel, create=False):
 def _verify_member(root_fd, e, uid):
     """One bound member, under held handles: a regular file, not a link, ours, not group- or world-writable, with the
     manifest's mode, size and sha256; or refused."""
-    dfd, name = _walk_open(root_fd, e["path"])
+    dfd, name = _walk_open(root_fd, e["path"], uid=uid)
     try:
         fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dfd)
     except OSError:
@@ -395,6 +415,16 @@ def install(version, plat=None, get=None, root=None, pins=None, versions_seen=No
         # (the whole bound set, under held handles, then the activate: one rename of this exact tree)
         verify_tree(sfd, m, plat)
         os.rename(stage, final)
+        # (TESTS T3: the activated tree verified again, through its own handle, before "current" names it; anything
+        # changed between the first verify and the rename takes the new version out, and the prior stays current)
+        ffd = os.open(final, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            verify_tree(ffd, m, plat)
+        except BaseException:
+            shutil.rmtree(final, ignore_errors=True)
+            raise
+        finally:
+            os.close(ffd)
         _write_current(root, version)
         return final
     except BaseException:
@@ -438,6 +468,11 @@ def launch_check(version, plat=None, root=None, pins=None):
     held handles.  The paths to run (node, the bundle's root, the addon or None), or RuntimeError_."""
     root = root or state_dir()
     plat = plat or this_platform()
+    # (TESTS T2: only the current version runs; an older one kept on disk is never launched)
+    current = read_current(root)
+    if current != version:
+        refuse("This sagebrush (%s) isn't the runtime installed as current (%s): no downgrade, and no other version."
+               % (version, current or "none"))
     vdir = os.path.join(root, "versions", version)
     try:
         vfd = os.open(vdir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
