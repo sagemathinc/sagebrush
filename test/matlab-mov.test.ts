@@ -143,8 +143,8 @@ test("a fill value with a window of 1e9: counted, not walked; exact where the su
     P("median", "movmedian([1 2 3], 1e9, 'Endpoints', 2.5)"),
     P("var", "movvar([1 2 3], 1e9, 'Endpoints', 2)"),
     P("nan", "movmean([1 2 3], 1e9, 'Endpoints', 'fill')"),
-    P("nanomit", "movmean([1 2 3], 1e9, 'Endpoints', 'fill', 'omitnan')"),
-    P("nanmedian", "movmedian([1 2 3], 1e9, 'Endpoints', 'fill', 'omitnan')"),
+    P("nanomit", "movmean([1 2 3], 1e9, 'omitnan', 'Endpoints', 'fill')"),
+    P("nanmedian", "movmedian([1 2 3], 1e9, 'omitnan', 'Endpoints', 'fill')"),
     P("nanback", "movmean([1 2 3], [5 0], 'Endpoints', 'fill')"),
     P("medback", "movmedian([1 2 3], [9 0], 'Endpoints', -9)"),
     P("medfront", "movmedian([1 2 3], [0 9], 'Endpoints', 9)"),
@@ -156,6 +156,7 @@ test("a fill value with a window of 1e9: counted, not walked; exact where the su
     P("prodtwo", "movprod([1 1], [1e16 0], 'Endpoints', -2)"),
     P("prodtwof", "movprod([1 1], [0 1e16], 'Endpoints', -2)"),
     P("prodomit", "movprod([1 NaN], [1e16 0], 'omitnan', 'Endpoints', -1)"),
+    P("infmid", "movsum([1 2 3 4 5], 3, 'Endpoints', Inf)"),
   ]);
   const f = (id: string) => nums(field(got, id)[0]);
   // (a window of 1e9 holds the 3 values and 1e9 - 3 fill values at every position)
@@ -189,6 +190,70 @@ test("a fill value with a window of 1e9: counted, not walked; exact where the su
   assert.deepEqual(f("prodtwo"), [Infinity, -Infinity]);
   assert.deepEqual(f("prodtwof"), [-Infinity, Infinity]);
   assert.deepEqual(f("prodomit"), [1, -1]);
+  // (an infinite fill value only in the windows that pass an end: the others' sums stay finite)
+  assert.deepEqual(f("infmid"), [Infinity, 6, 9, 12, Infinity]);
+});
+
+test("'Endpoints' as MATLAB's movmean and movmedian: padding, the fill values summed after the data, the NaN flag before the pairs", () => {
+  // (MATLAB R2026b Update 2's rows, MATLAB Online, 2026-11-25: a value or 'fill' pads the data, so each window's
+  // statistic takes the fill values in, rather than replacing the results at the ends; a window of 9 over 4 elements
+  // gives one mean at every position, its data summed first and its fill values after; and a NaN flag after
+  // 'Endpoints' is refused, MATLAB:movfun:nanFlagAfterPairs)
+  const dir = mkdtempSync(join(tmpdir(), "sb-movend-"));
+  writeFileSync(join(dir, "main.m"), [
+    "format long g",
+    "show = @(name, x) fprintf('%s|%s|%s|%s\\n', name, class(x), mat2str(size(x)), sprintf('%.17g ', x));",
+    "try, show('movmean_e0', movmean([4 8 6 -1], 3, 'Endpoints', 0)), catch e, fprintf('movmean_e0|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmean_fill', movmean([4 8 6 -1], 3, 'Endpoints', 'fill')), catch e, fprintf('movmean_fill|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmean_fill_omit', movmean([4 8 6 -1], 3, 'Endpoints', 'fill', 'omitnan')), catch e, fprintf('movmean_fill_omit|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmean_e01_w5', movmean([4 8 6 -1], 5, 'Endpoints', 0.1)), catch e, fprintf('movmean_e01_w5|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmean_e01_w9', movmean([4 8 6 -1], 9, 'Endpoints', 0.1)), catch e, fprintf('movmean_e01_w9|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmean_e01_bf', movmean([4 8 6 -1], [3 0], 'Endpoints', 0.1)), catch e, fprintf('movmean_e01_bf|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmean_e7_nan', movmean([4 NaN 6 -1], 3, 'Endpoints', 7)), catch e, fprintf('movmean_e7_nan|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmean_e7_nan_omit', movmean([4 NaN 6 -1], 3, 'Endpoints', 7, 'omitnan')), catch e, fprintf('movmean_e7_nan_omit|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmean_discard_w9', movmean([4 8 6 -1], 9, 'Endpoints', 'discard')), catch e, fprintf('movmean_discard_w9|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmean_shrink_w9', movmean([4 8 6 -1], 9)), catch e, fprintf('movmean_shrink_w9|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmean_e_logical', movmean([4 8 6 -1], 3, 'Endpoints', true)), catch e, fprintf('movmean_e_logical|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmedian_e0', movmedian([4 8 6 -1], 3, 'Endpoints', 0)), catch e, fprintf('movmedian_e0|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmedian_fill', movmedian([4 8 6 -1], 3, 'Endpoints', 'fill')), catch e, fprintf('movmedian_fill|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmedian_fill_omit', movmedian([4 8 6 -1], 3, 'Endpoints', 'fill', 'omitnan')), catch e, fprintf('movmedian_fill_omit|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmedian_e01_w5', movmedian([4 8 6 -1], 5, 'Endpoints', 0.1)), catch e, fprintf('movmedian_e01_w5|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmedian_e01_w9', movmedian([4 8 6 -1], 9, 'Endpoints', 0.1)), catch e, fprintf('movmedian_e01_w9|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmedian_e01_bf', movmedian([4 8 6 -1], [3 0], 'Endpoints', 0.1)), catch e, fprintf('movmedian_e01_bf|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmedian_e7_nan', movmedian([4 NaN 6 -1], 3, 'Endpoints', 7)), catch e, fprintf('movmedian_e7_nan|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmedian_e7_nan_omit', movmedian([4 NaN 6 -1], 3, 'Endpoints', 7, 'omitnan')), catch e, fprintf('movmedian_e7_nan_omit|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmedian_discard_w9', movmedian([4 8 6 -1], 9, 'Endpoints', 'discard')), catch e, fprintf('movmedian_discard_w9|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmedian_shrink_w9', movmedian([4 8 6 -1], 9)), catch e, fprintf('movmedian_shrink_w9|ERROR|%s|%s\\n', e.identifier, e.message), end",
+    "try, show('movmedian_e_logical', movmedian([4 8 6 -1], 3, 'Endpoints', true)), catch e, fprintf('movmedian_e_logical|ERROR|%s|%s\\n', e.identifier, e.message), end",
+  ].join("\n") + "\n");
+  const r = spawnSync(process.execPath, [cli, "--matlab", "main.m"], { cwd: dir, encoding: "utf8", timeout: 120000 });
+  assert.equal(r.status, 0, r.stderr);
+  // (MATLAB's rows end in a space after the last value; trimmed on both sides)
+  const want = [
+    "movmean_e0|double|[1 4]|4 6 4.333333333333333 1.6666666666666667",
+    "movmean_fill|double|[1 4]|NaN 6 4.333333333333333 NaN",
+    "movmean_fill_omit|ERROR|MATLAB:movfun:nanFlagAfterPairs|NaN condition must come before parameter name and value pairs.",
+    "movmean_e01_w5|double|[1 4]|3.6399999999999997 3.4200000000000004 3.4200000000000004 2.6399999999999997",
+    "movmean_e01_w9|double|[1 4]|1.9444444444444444 1.9444444444444444 1.9444444444444444 1.9444444444444444",
+    "movmean_e01_bf|double|[1 4]|1.075 3.0499999999999998 4.5250000000000004 4.25",
+    "movmean_e7_nan|double|[1 4]|NaN NaN NaN 4",
+    "movmean_e7_nan_omit|ERROR|MATLAB:movfun:nanFlagAfterPairs|NaN condition must come before parameter name and value pairs.",
+    "movmean_discard_w9|double|[1 0]|",
+    "movmean_shrink_w9|double|[1 4]|4.25 4.25 4.25 4.25",
+    "movmean_e_logical|double|[1 4]|4.333333333333333 6 4.333333333333333 2",
+    "movmedian_e0|double|[1 4]|4 6 6 0",
+    "movmedian_fill|double|[1 4]|NaN 6 6 NaN",
+    "movmedian_fill_omit|ERROR|MATLAB:movfun:nanFlagAfterPairs|NaN condition must come before parameter name and value pairs.",
+    "movmedian_e01_w5|double|[1 4]|4 4 4 0.10000000000000001",
+    "movmedian_e01_w9|double|[1 4]|0.10000000000000001 0.10000000000000001 0.10000000000000001 0.10000000000000001",
+    "movmedian_e01_bf|double|[1 4]|0.10000000000000001 2.0499999999999998 5 5",
+    "movmedian_e7_nan|double|[1 4]|NaN NaN NaN 6",
+    "movmedian_e7_nan_omit|ERROR|MATLAB:movfun:nanFlagAfterPairs|NaN condition must come before parameter name and value pairs.",
+    "movmedian_discard_w9|double|[1 0]|",
+    "movmedian_shrink_w9|double|[1 4]|5 5 5 5",
+    "movmedian_e_logical|double|[1 4]|4 6 6 1",
+  ];
+  assert.deepEqual(r.stdout.split("\n").map((l: string) => l.trimEnd()).filter((l: string) => l.includes("|")), want);
 });
 
 test("the moving statistics admitted before their copies are made (test/matlab_mov_admit_cases.py)", () => {
