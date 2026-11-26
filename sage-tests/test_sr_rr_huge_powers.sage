@@ -38,6 +38,9 @@ for b in [RR(2), RR(-2), RR(0.5), RR(-0.5), RR(1e300), RR(-1e-300), RR(1.0000001
 # 1 and -1 by the exponent's parity, however large
 for n in [10^20, 10^20 + 1, -(10^20 + 1), 10^1000, 10^1000 + 1]:
     print(p(RR(-1), n), p(RR(1), n))
+# (an RR exponent's parity is its double's: odd ones up to 2^53)
+for n in [9 * 10^15 + 1, 2^53 - 1, -(2^53 - 1), 2^53, 2^53 + 2]:
+    print(p(RR(-1), RR(n)), p(RR(-1e300), RR(n)), p(RR(-1e-300), RR(n)))
 
 # CC: generic_power's own steps
 for b in [CC(1, 1), CC(0.6, 0.8), CC(1.0000001, 1e-7), CC(0, 1.0001)]:

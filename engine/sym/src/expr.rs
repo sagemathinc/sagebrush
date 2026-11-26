@@ -999,7 +999,13 @@ pub fn float_pow(b: &Num, x: &Num) -> Num {
     // (and to an integer past those: Sage's infinity or 0 past MPFR's
     // exponents, SR(RR(2))^(10^20) is +infinity, refused short of them)
     if int_power.is_none() && bi == 0.0 && xi == 0.0 && !k.complex() && br.is_finite() {
-        let n = if x.is_exact() { x.as_int().map(|n| (n.to_f64().unwrap_or(f64::INFINITY), n.is_odd())) } else { Some((xr, false)).filter(|_| xr.is_finite() && xr.fract() == 0.0) };
+        // (an RR exponent's parity is its double's: odd ones reach 2^53,
+        // past int_power's 9.0e15)
+        let n = if x.is_exact() {
+            x.as_int().map(|n| (n.to_f64().unwrap_or(f64::INFINITY), n.is_odd()))
+        } else {
+            Some((xr, xr.abs() < 9007199254740992.0 && xr % 2.0 != 0.0)).filter(|_| xr.is_finite() && xr.fract() == 0.0)
+        };
         if let Some((nf, odd)) = n {
             // (-1 by the exponent's parity, which its double may have lost:
             // SR(RR(-1))^(10^20 + 1) is -1)
