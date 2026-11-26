@@ -673,7 +673,11 @@ def pcg_(nargout, *args):
 
 def _minres(op, b, tol, maxit, M, x0, budget):
     """MINRES (Paige and Saunders): the Lanczos process on A, preconditioned by a symmetric positive definite M, and
-    the residual's norm kept by plane rotations"""
+    the residual's norm kept by plane rotations.  That norm is the recurrence's estimate (in M's inverse, scaled by
+    the first ratio); where it passes tol, the true residual is computed.  Where that doesn't pass too, the estimate
+    no longer speaks for the true residual (a badly scaled M can hide a component of the residual from it): the
+    Lanczos process restarts from the true residual, every step still counted against maxit, and from then on the
+    iterates are compared by their true residuals"""
     n2b = _norm(b)
     if n2b == 0:
         return np.zeros_like(x0), 0, 0.0, 0, [0.0], 0
@@ -684,72 +688,115 @@ def _minres(op, b, tol, maxit, M, x0, budget):
     tolb = tol * n2b
     if normr <= tolb:
         return x, 0, normr / n2b, 0, resvec, 0
-    y = M.solve(r1)
-    if y is None:
-        return x, 2, normr / n2b, 0, resvec, 0
-    b2 = np.real(_dot(r1, y))
-    if b2 <= 0 or not _finite(b2):
-        return x, 5, normr / n2b, 0, resvec, 0
-    beta1 = _math.sqrt(b2)
     xmin, normrmin, imin = x.copy(), normr, 0
-    oldb, beta, dbar, epsln, phibar = 0.0, beta1, 0.0, 0.0, beta1
-    cs, sn = -1.0, 0.0
-    w = w2 = np.zeros_like(x)
-    r2 = r1
-    # (phibar is the residual's norm in M's inverse: the true residual's is scaled by the first one's ratio)
-    scale = normr / beta1
     flag, stag, ii = 1, 0, 0
-    for ii in range(1, maxit + 1):
-        v = y / beta
-        y = op.times(v)
-        if ii >= 2:
-            y = y - (beta / oldb) * r1
-        alfa = np.real(_dot(v, y))
-        y = y - (alfa / beta) * r2
-        r1, r2 = r2, y
-        y = M.solve(r2)
+    restarted = False
+    # (the iterate of least true residual found so far)
+    xbest, nbest, ibest = x.copy(), normr, 0
+    while True:
+        # (a Lanczos process from r1, x's true residual)
+        y = M.solve(r1)
         if y is None:
+            if ii == 0:
+                return x, 2, normr / n2b, 0, resvec, 0
             flag = 2
             break
-        oldb = beta
-        b2 = np.real(_dot(r2, y))
-        if b2 < 0 or not _finite(b2):
+        b2 = np.real(_dot(r1, y))
+        if b2 <= 0 or not _finite(b2):
+            if ii == 0:
+                return x, 5, normr / n2b, 0, resvec, 0
             flag = 5
             break
-        beta = _math.sqrt(b2)
-        oldeps = epsln
-        delta = cs * dbar + sn * alfa
-        gbar = sn * dbar - cs * alfa
-        epsln = sn * beta
-        dbar = -cs * beta
-        gamma = _math.hypot(gbar, beta)
-        if gamma == 0 or not _math.isfinite(gamma):
-            flag = 4
+        beta1 = _math.sqrt(b2)
+        oldb, beta, dbar, epsln, phibar = 0.0, beta1, 0.0, 0.0, beta1
+        cs, sn = -1.0, 0.0
+        w = w2 = np.zeros_like(x)
+        r2 = r1
+        # (phibar is the residual's norm in M's inverse: the true residual's is scaled by the first one's ratio)
+        scale = normr / beta1
+        k = 0
+        restart = False
+        while ii < maxit:
+            ii += 1
+            k += 1
+            v = y / beta
+            y = op.times(v)
+            if k >= 2:
+                y = y - (beta / oldb) * r1
+            alfa = np.real(_dot(v, y))
+            y = y - (alfa / beta) * r2
+            r1, r2 = r2, y
+            y = M.solve(r2)
+            if y is None:
+                flag = 2
+                break
+            oldb = beta
+            b2 = np.real(_dot(r2, y))
+            if b2 < 0 or not _finite(b2):
+                flag = 5
+                break
+            beta = _math.sqrt(b2)
+            oldeps = epsln
+            delta = cs * dbar + sn * alfa
+            gbar = sn * dbar - cs * alfa
+            epsln = sn * beta
+            dbar = -cs * beta
+            gamma = _math.hypot(gbar, beta)
+            if gamma == 0 or not _math.isfinite(gamma):
+                flag = 4
+                break
+            cs, sn = gbar / gamma, beta / gamma
+            phi = cs * phibar
+            phibar = sn * phibar
+            w1, w2 = w2, w
+            w = (v - oldeps * w1 - delta * w2) / gamma
+            step = phi * w
+            # (stagnation: steps below x's precision; after a restart, MATLAB's own test, x unchanged by the step)
+            xn = x + step
+            if restarted:
+                stag = stag + 1 if np.array_equal(xn, x) else 0
+            else:
+                stag = stag + 1 if _norm(step) < _EPS * _norm(x) else 0
+            stagnated = stag >= (2 if restarted else _STAG_STEPS)
+            x = xn
+            normr = abs(phibar) * scale
+            resvec.append(normr)
+            if normr <= tolb or beta == 0 or stagnated:
+                estimated = normr <= tolb
+                r = b - op.times(x)
+                normr = _norm(r)
+                resvec[ii] = normr
+                if normr <= tolb:
+                    return x, 0, normr / n2b, ii, resvec, ii
+                if normr < nbest:
+                    xbest, nbest, ibest = x.copy(), normr, ii
+                # (the estimate passed tol and the true residual didn't: restart from it)
+                restart = estimated and beta != 0
+            if normr < normrmin:
+                xmin, normrmin, imin = x.copy(), normr, ii
+            if restart:
+                break
+            if stagnated:
+                flag = 3
+                break
+            if beta == 0:
+                # (the Lanczos process ended: x is the best the Krylov space holds, and it didn't meet the tolerance)
+                flag = 4
+                break
+        if not restart:
             break
-        cs, sn = gbar / gamma, beta / gamma
-        phi = cs * phibar
-        phibar = sn * phibar
-        w1, w2 = w2, w
-        w = (v - oldeps * w1 - delta * w2) / gamma
-        step = phi * w
-        stag = stag + 1 if _norm(step) < _EPS * _norm(x) else 0
-        x = x + step
-        normr = abs(phibar) * scale
-        resvec.append(normr)
-        if normr <= tolb or beta == 0 or stag >= _STAG_STEPS:
-            normr = _norm(b - op.times(x))
-            resvec[ii] = normr
-            if normr <= tolb:
-                return x, 0, normr / n2b, ii, resvec, ii
-        if normr < normrmin:
-            xmin, normrmin, imin = x.copy(), normr, ii
-        if stag >= _STAG_STEPS:
-            flag = 3
+        restarted = True
+        r1 = r
+        stag = 0
+        if ii >= maxit:
             break
-        if beta == 0:
-            # (the Lanczos process ended: x is the best the Krylov space holds, and it didn't meet the tolerance)
-            flag = 4
-            break
+    if restarted:
+        # (after a restart the estimate can't choose the iterate: the least true residual among those computed, xmin's
+        # and the last iterate's)
+        cands = [(nbest, ibest, xbest), (_norm(b - op.times(xmin)), imin, xmin)]
+        if imin != ii:
+            cands.append((_norm(b - op.times(x)), ii, x))
+        normrmin, imin, xmin = min(cands, key=lambda c: (c[0], c[1]))
     return xmin, flag, _norm(b - op.times(xmin)) / n2b, imin, resvec, ii
 
 

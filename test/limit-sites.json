@@ -16144,11 +16144,6 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
  },
- "lib/_matlab_krylov.py :: _minres :: for ii in range(1, maxit + 1): #0": {
-  "class": "none",
-  "owner": "matlab (@sagebrush-matlab)",
-  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
- },
  "lib/_matlab_krylov.py :: _pcg :: for ii in range(1, maxit + 1): #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
@@ -16568,5 +16563,20 @@
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'maxit', MATLAB's iteration-limit argument, which sets the NaN-in-b answer's iteration count and history length as MATLAB's do; each history entry admitted by the solver's memory budget"
+ },
+ "lib/_matlab_krylov.py :: _minres :: while ii < maxit: #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _minres :: if ii >= maxit: #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _minres :: Lanczos process restarts from the true residual, every step still counted against maxit, and from then on the #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
  }
 }
