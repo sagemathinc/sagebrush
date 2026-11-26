@@ -1310,7 +1310,7 @@ def main(argv):
         return 1
     if key is None:
         from sagebrush.remote.enroll import main as login_main
-        code = login_main([])
+        code = login_main([], continuing=True)
         if code:
             return code
         key = _keys.load()
