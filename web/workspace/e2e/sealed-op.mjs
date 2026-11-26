@@ -7,8 +7,7 @@
 // position, envelope or set of references.  The client signs these bytes; the server verifies them against the signer's
 // key in the current chain before the op has any effect.
 
-import { canonText } from "../fleet/core/canonical.mjs";
-import { enc, sha256b64 } from "../fleet/core/bytes.mjs";
+import { canonText, enc, sha256b64 } from "./core/sealed-prims.mjs";
 
 export const SEALED_OP_DOMAIN = "sagebrush.e2e.sealed-op.v1\n";
 

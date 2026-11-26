@@ -19,8 +19,8 @@ import { patchRef, unwrap, type BatchOut } from "./doc.ts";
 import { agentOn, allowed, e2eOn, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
 import { E2E, E2E_KEEP, E2EStore, e2eAccount, e2eAud } from "./e2e-chain.ts";
 import { sealedOpMessage } from "../workspace/e2e/sealed-op.mjs";
-import { verifyStrict } from "../workspace/fleet/core/ed25519.mjs";
-import { sha256b64, unb64 } from "../workspace/fleet/core/bytes.mjs";
+import { e2eCore } from "../workspace/e2e/core-ready.ts";
+import { sha256b64, unb64, verifyStrict } from "../workspace/e2e/core/sealed-prims.mjs";
 import { AGENT, GRANT_ID, READS, SCOPED, VERBS, checkAgentName, checkScopes, inScope, makeToken, newGrantId, newSecret, secretHash, type Scope } from "./agent-token.ts";
 import { TRASH, normPath, within } from "../workspace/paths.ts";
 import { checkCall } from "../workspace/agent-schema.ts";
@@ -141,8 +141,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private e2eResets = new Bucket(E2E.resetsPerMinute, E2E.resetsPerMinute / 60);
   private e2eResetWork = new Bucket(E2E.resetWorkPerMinute, E2E.resetWorkPerMinute / 60);
   private e2eStore: E2EStore | null = null;
-  /** tests only: the mailbox's clock, shifted (ms); and the next E2E write's transaction made to fail after its writes */
+  /** tests only: the E2E clock (the rate buckets' and the mailbox's), shifted (ms) or frozen at a moment; and the next E2E
+   * write's transaction made to fail after its writes */
   private e2eShift = 0;
+  private e2eFrozen: number | null = null;
   private e2eFailCommit = false;
   private e2eHold = 0;
   private ticketsAll = new Bucket(TICKETS_PER_MINUTE_ACCOUNT, TICKETS_PER_MINUTE_ACCOUNT / 60);
@@ -636,6 +638,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // for the whole message; a malformed one is left to its own refusal below.  And each one's envelope hash, for its ack,
     // kept by its place in the message, not its dseq: two ops naming one dseq are two envelopes)
     const envHash = new Map<number, string>();
+    e2eCore(); // (the fleet core's backend installed, once, before any signature is checked or hash taken)
     for (const [at, raw] of list.entries()) {
       if (!fresh(raw, next0)) continue;
       let op: SealedOp;
@@ -1487,6 +1490,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
   /** The alarm's part of the budget: give back slack beyond 2 chunks, or write a release D1 missed. */
   private async tendClaim(): Promise<void> {
+    if (testMode(this.env) && this.holdSlack) return;
     const cached = this.get("limits");
     if (!cached) return;
     const C = this.chunk((JSON.parse(cached) as Limits).storage_bytes);
@@ -2356,6 +2360,13 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   async setFailClaim(a: { on: boolean }): Promise<void> {
     if (testMode(this.env)) this.failClaim = a.on;
   }
+  private holdSlack = false;
+  /** Tests only: the alarm leaves the claim alone (no slack given back, no missed release written) while this is on, so
+   * a test can observe an unused claim for as long as it needs, however loaded the host is.  A give-back that sharing
+   * asks for (releaseClaim) still runs. */
+  async testHoldSlack(a: { on: boolean }): Promise<void> {
+    if (testMode(this.env)) this.holdSlack = a.on;
+  }
   /** Tests only: the budget as this object holds it. */
   async budget(): Promise<{ claim: number; blob_cap: number; files: number; documents: number; held: number; holds: number; dirty: boolean; calls: number; writes: number; alarm: number | null } | null> {
     if (!testMode(this.env) || !this.exists()) return null;
@@ -2585,16 +2596,16 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       let claimed: unknown = null;
       try { claimed = typeof a.entry === "string" ? (JSON.parse(a.entry) as { body?: { op?: unknown } })?.body?.op : null; } catch { /* (the checks refuse it) */ }
       if (claimed !== "reset") {
-        const wait = this.e2eAppends.take();
+        const wait = this.e2eAppends.take(1, this.e2eNow());
         if (wait) throw new SyncError("rate", "too many key-chain changes; wait", { retry_after: wait });
       }
       return store.append(a, {
         work: () => {
-          const wait = this.e2eResetWork.take();
+          const wait = this.e2eResetWork.take(1, this.e2eNow());
           if (wait) throw new SyncError("rate", "too many reset attempts; wait", { retry_after: wait });
         },
         verified: () => {
-          const wait = this.e2eResets.take();
+          const wait = this.e2eResets.take(1, this.e2eNow());
           if (wait) throw new SyncError("rate", "too many resets; wait", { retry_after: wait });
         },
       });
@@ -2629,9 +2640,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   async e2eMailPost(a: { account: string; bind?: { account?: string; generation?: number }; session: unknown; phase: unknown; msg: unknown }): Promise<Result<{ expires: number }>> {
     return attempt(() => {
       const store = this.e2e(a.account, a.bind);
-      const wait = this.e2eMail.take();
+      const wait = this.e2eMail.take(1, this.e2eNow());
       if (wait) throw new SyncError("rate", "too many enrollment messages; wait", { retry_after: wait });
-      return store.post(a.session, a.phase, a.msg, Date.now() + this.e2eShift);
+      return store.post(a.session, a.phase, a.msg, this.e2eNow());
     });
   }
 
@@ -2639,22 +2650,29 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   async e2eMailRead(a: { account: string; bind?: { account?: string; generation?: number }; session: unknown; phase: unknown }): Promise<Result<{ msg: string; expires: number }>> {
     return attempt(() => {
       const store = this.e2e(a.account, a.bind);
-      const wait = this.e2eMail.take();
+      const wait = this.e2eMail.take(1, this.e2eNow());
       if (wait) throw new SyncError("rate", "too many enrollment messages; wait", { retry_after: wait });
-      const m = store.read(a.session, a.phase, Date.now() + this.e2eShift);
+      const m = store.read(a.session, a.phase, this.e2eNow());
       if (!m) throw new SyncError("missing", "no such message");
       return m;
     });
   }
 
-  /** Tests only: shift the mailbox's clock, and count the E2E rows. */
-  async testE2E(a: { sealedCap?: number; sealedHold?: number; shareRefs?: { sha256: string; n: number }; shift?: number; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number }; corrupt?: "state_hash" | "hash"; keyrings?: "drop-last" | "swap-last" | "stray-first" }): Promise<Record<string, number> | null> {
+  /** The E2E clock: now, except in tests, where a seam may shift it or freeze it (so a rate test's buckets don't refill). */
+  private e2eNow(): number {
+    return (this.e2eFrozen ?? Date.now()) + this.e2eShift;
+  }
+
+  /** Tests only: shift or freeze the E2E clock (freeze: true holds it at this moment, false lets it run), and count the
+   * E2E rows. */
+  async testE2E(a: { sealedCap?: number; sealedHold?: number; shareRefs?: { sha256: string; n: number }; shift?: number; freeze?: boolean; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number }; corrupt?: "state_hash" | "hash"; keyrings?: "drop-last" | "swap-last" | "stray-first" }): Promise<Record<string, number> | null> {
     if (!testMode(this.env)) return null;
     if (a.sealedCap !== undefined) this.sealedCap = a.sealedCap;
     if (a.sealedHold !== undefined) this.sealedHold = a.sealedHold;
     // (a blob's shared count raised as a document's pin or a chunked file's manifest raises it: no index add)
     if (a.shareRefs && this.exists()) this.sql.exec("UPDATE holdings SET refs = refs + ? WHERE sha256 = ?", a.shareRefs.n, a.shareRefs.sha256);
     if (a.shift !== undefined) this.e2eShift = a.shift;
+    if (a.freeze !== undefined) this.e2eFrozen = a.freeze ? Date.now() : null;
     if (a.failCommit !== undefined) this.e2eFailCommit = a.failCommit;
     if (a.hold !== undefined) this.e2eHold = a.hold;
     if (a.bounds !== undefined && this.e2eStore) Object.assign(this.e2eStore.bounds, a.bounds);

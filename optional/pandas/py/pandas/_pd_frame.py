@@ -7,10 +7,12 @@ derived from a frame is an eager copy (Copy-on-Write, r7 §C3).
 
 import numpy as np
 
+from ._pd_errors import unsupported_name
 from ._pd_column import Column, column_from, set_values
-from ._pd_dtypes import STR, INTS, infer, is_missing, resolve_dtype
+from ._pd_dtypes import STR, INTS, FLOATS, infer, is_missing, resolve_dtype
 from ._pd_index import Index, RangeIndex, default_index, ensure_index
-from ._pd_series import Series, _astype, _broadcast, _head_positions, _tail_positions, _sample_positions, dtype_object, diff_column
+from ._pd_series import Series, _astype, _broadcast, _head_positions, _tail_positions, _sample_positions, dtype_object, diff_column, \
+    with_na_value, export_as, is_int_target, take_positions
 from ._pd_datetime import DT, to_us
 from .errors import _INPLACE, inplace_given
 from . import _pd_indexing as X
@@ -18,6 +20,9 @@ from . import _pd_reduce as R
 from . import _pd_repr
 from . import _pd_sort as S
 from . import _pd_reshape as RS
+from . import _pd_combine as CB
+from . import _pd_info as INF
+from . import _pd_stats as ST
 
 __all__ = ["DataFrame"]
 
@@ -53,20 +58,21 @@ def _common_dtype(cols):
         return "object"
     if all(d == ds[0] for d in ds):
         return ds[0]
-    if all(d in INTS or d == "float64" for d in ds):
-        # (numpy's promotion: uint8 with int64 is int64, any integer with float64 float64)
+    if all(d in INTS or d in FLOATS for d in ds):
+        # (numpy's promotion: uint8 with int64 is int64, any integer with float64 float64, float32 with int16
+        # float32 but with int32 float64)
         return str(np.result_type(*ds))
     return "object"
 
 
 def _row_values(cols, i, dtype):
-    if dtype == "float64":
+    if dtype in FLOATS:
         return [float(c._pd_values[i]) for c in cols]
     return [c.value(i) for c in cols]
 
 
 def _column_of(values, dtype):
-    if dtype in INTS or dtype in ("float64", "bool"):
+    if dtype in INTS or dtype in FLOATS or dtype == "bool":
         return Column(dtype, np.array(values, dtype=dtype))
     if dtype is DT:
         return Column(DT, np.array([to_us(v) for v in values], dtype=np.int64))
@@ -112,7 +118,7 @@ class DataFrame(object):
                 data = data.reshape((len(data), 1))
             if data.ndim != 2:
                 raise ValueError("Must pass 2-d input. shape=%r" % (tuple(data.shape),))
-            if str(data.dtype) not in ("int64", "float64", "bool"):
+            if str(data.dtype) not in ("int64", "float64", "float32", "bool"):
                 raise _unsupported("DataFrame of an array of dtype %s" % data.dtype)
             n, m = data.shape
             cols = [column_from(data[:, j].copy(), want) for j in range(m)]
@@ -182,7 +188,8 @@ class DataFrame(object):
             elif _is_scalar(v):
                 cols.append(column_from([v] * n, want))
             else:
-                col = column_from(v, want)
+                # (an empty list is float64 here, numpy's empty array; a Series of one is object)
+                col = column_from(v, want if want or not isinstance(v, (list, tuple)) or len(v) else "float64")
                 if len(col) != n:
                     raise ValueError("Length of values (%d) does not match length of index (%d)" % (len(col), n))
                 cols.append(col)
@@ -270,10 +277,29 @@ class DataFrame(object):
     def values(self):
         return self._pd_export("DataFrame.values", False)
 
-    def to_numpy(self, dtype=None, copy=False, na_value=None):
-        if dtype is not None or na_value is not None:
-            raise _unsupported("DataFrame.to_numpy(dtype=, na_value=)")
-        return self._pd_export("DataFrame.to_numpy()", copy)
+    def to_numpy(self, dtype=None, copy=False, na_value=RS.NO_VALUE):
+        """The values as a 2-D numpy array (see _pd_export), converted to
+        dtype if given (see _pd_series.export_as), then the missing values
+        as na_value if given. Read-only when the columns share one dtype and
+        neither copy nor na_value is given, as pandas' (a view of its one
+        block)."""
+        filling = na_value is not RS.NO_VALUE and not (isinstance(na_value, float) and na_value != na_value)
+        if dtype is None and not filling:
+            return self._pd_export("DataFrame.to_numpy()", copy)
+        cols = self._pd_cols
+        if dtype is not None:
+            # (pandas casts before it fills: a float NaN cast to an integer is numpy's, whatever na_value is)
+            if is_int_target(dtype) and any(c.dtype in FLOATS and c.isna().any() for c in cols):
+                raise _unsupported("DataFrame.to_numpy(dtype=) of missing values to an integer dtype (pandas casts NaN "
+                                   "with numpy before na_value applies)")
+        if filling:
+            cols = [with_na_value(c, na_value) for c in cols]
+        if dtype is None:
+            return DataFrame._pd_new(cols, self._pd_columns, self._pd_index)._pd_export("DataFrame.to_numpy()", True)
+        a = export_as(cols, dtype, "DataFrame.to_numpy(dtype=)")
+        if not copy and not filling and cols and all(c.dtype == cols[0].dtype for c in cols):
+            a.flags.writeable = False
+        return a
 
     def __array__(self, dtype=None, copy=None):
         if dtype is not None:
@@ -298,7 +324,7 @@ class DataFrame(object):
         if any(c.dtype is STR for c in self._pd_cols) and not all(c.is_list for c in self._pd_cols):
             raise _unsupported("%s of a frame mixing str and other columns (pandas gives an object array; Sagebrush's numpy has no object dtype yet)" % what)
         d = _common_dtype(self._pd_cols)
-        if (d not in INTS and d not in ("float64", "bool")) or any(c.is_list for c in self._pd_cols):
+        if (d not in INTS and d not in FLOATS and d != "bool") or any(c.is_list for c in self._pd_cols):
             raise _unsupported("%s of a frame with %s columns" % (what, "str/object" if any(c.is_list for c in self._pd_cols) else "mixed bool"))
         n, m = self.shape
         a = np.empty((n, m), dtype=d)
@@ -366,13 +392,16 @@ class DataFrame(object):
     def _pd_reduce(self, op, axis, skipna, numeric_only, kwargs, min_count=0):
         R.check_args("DataFrame.%s" % op, axis, kwargs, min_count)
         keep = [j for j, c in enumerate(self._pd_cols)
-                if not numeric_only or c.dtype in ("int64", "float64", "bool")]
+                if not numeric_only or c.dtype in INTS or c.dtype in FLOATS or c.dtype == "bool"]
         vals = [R.reduce_column(self._pd_cols[j], op, skipna) for j in keep]
         labels = self._pd_columns._pd_take(keep)
         if op == "count":
             col = Column("int64", np.array([int(v) for v in vals], dtype=np.int64))
         elif numeric_only and any(self._pd_cols[j].dtype == "float64" for j in keep) and op in ("sum", "mean"):
             col = Column("float64", np.array([float(v) for v in vals], dtype=np.float64))
+        elif vals and all(isinstance(v, np.float32) for v in vals):
+            # (float32 results alone stay float32, as pandas' frame of float32 sums)
+            col = Column("float32", np.array([float(v) for v in vals], dtype=np.float32))
         else:
             col = column_from(vals) if vals else Column("float64" if op != "count" else "int64", np.array([], dtype=np.float64))
         return Series._pd_new(col, labels)
@@ -391,6 +420,32 @@ class DataFrame(object):
 
     def count(self, axis=None, numeric_only=False):
         return self._pd_reduce("count", axis, True, numeric_only, {})
+
+    def _pd_truth(self, op, axis, bool_only, skipna, kwargs):
+        if kwargs or axis not in (0, "index"):
+            raise _unsupported("DataFrame.%s(axis=, **kwargs)" % op)
+        js = [j for j, c in enumerate(self._pd_cols) if not bool_only or c.dtype == "bool"]
+        vals = [bool(R.truth_column(self._pd_cols[j], op, skipna)) for j in js]
+        return Series._pd_new(Column("bool", np.array(vals, dtype=bool)), self._pd_columns._pd_take(js))
+
+    def any(self, *, axis=0, bool_only=False, skipna=True, **kwargs):
+        """Whether any value of each column is true: a bool Series."""
+        return self._pd_truth("any", axis, bool_only, skipna, kwargs)
+
+    def all(self, *, axis=0, bool_only=False, skipna=True, **kwargs):
+        """Whether every value of each column is true: a bool Series."""
+        return self._pd_truth("all", axis, bool_only, skipna, kwargs)
+
+    def take(self, indices, axis=0, **kwargs):
+        """The rows (axis=0) or columns (axis=1) at positions indices
+        (negative from the end), labels kept."""
+        if kwargs:
+            raise _unsupported("DataFrame.take(**kwargs)")
+        if axis in (0, "index", "rows"):
+            return self._pd_take_rows(take_positions(indices, len(self)))
+        if axis in (1, "columns"):
+            return self._pd_take_cols(take_positions(indices, len(self._pd_cols)))
+        raise ValueError("No axis named %s for object type DataFrame" % (axis,))
 
     # --- selection ---------------------------------------------------------
 
@@ -421,6 +476,7 @@ class DataFrame(object):
 
     def _pd_col_positions(self, key):
         """Columns for df[key] with a label or a list of labels."""
+        X.refuse_categorical_key(key)
         if X.is_list_like(key):
             return X.loc_positions(self._pd_columns, key)
         if isinstance(key, tuple):
@@ -496,6 +552,10 @@ class DataFrame(object):
         p = self._pd_columns._pd_positions(keys)
         if isinstance(p, list):
             raise _unsupported("DataFrame.set_index of a repeated column label")
+        from . import _pd_category as CT
+        if isinstance(self._pd_cols[p], CT.CatColumn):
+            # (pandas makes a CategoricalIndex of it)
+            raise CT.refuse("set_index of a category column")
         index = Index(self._pd_cols[p].copy(), name=keys)
         js = [j for j in range(len(self._pd_cols)) if j != p or not drop]
         out = DataFrame._pd_new([self._pd_cols[j].copy() for j in js], self._pd_columns._pd_take(js), index)
@@ -651,101 +711,451 @@ class DataFrame(object):
             return None
         return out
 
+    def drop(self, labels=None, *, axis=0, index=None, columns=None, level=None, inplace=_INPLACE, errors="raise"):
+        """Without the rows (axis=0, or index=) or the columns (axis=1, or
+        columns=) of labels, every one of a repeated label."""
+        inplace = inplace_given(inplace, "DataFrame.drop")
+        if level is not None:
+            raise _unsupported("DataFrame.drop(level=)")
+        if labels is not None:
+            if index is not None or columns is not None:
+                raise ValueError("Cannot specify both 'labels' and 'index'/'columns'")
+            if axis in (0, "index", "rows"):
+                index = labels
+            elif axis in (1, "columns"):
+                columns = labels
+            else:
+                raise ValueError("No axis named %s for object type DataFrame" % (axis,))
+        elif index is None and columns is None:
+            raise ValueError("Need to specify at least one of 'labels', 'index' or 'columns'")
+        out = self
+        if columns is not None:
+            keep = CB.keep_positions(out._pd_columns, columns, errors)
+            out = DataFrame._pd_new([out._pd_cols[j].copy() for j in keep], CB.kept_index(out._pd_columns, keep), out._pd_index.copy())
+        if index is not None:
+            keep = CB.keep_positions(out._pd_index, index, errors)
+            out = DataFrame._pd_new([c.take(keep) for c in out._pd_cols], out._pd_columns.copy(), CB.kept_index(out._pd_index, keep))
+        if out is self:
+            out = self.copy()
+        if inplace:
+            self._pd_init(out._pd_cols, out._pd_columns, out._pd_index)
+            return None
+        return out
+
+    def melt(self, id_vars=None, value_vars=None, var_name=None, value_name="value", col_level=None, ignore_index=True):
+        """Wide to long, as pandas 3.1's melt: the id_vars columns repeated
+        once for each value column, a column of the value columns' labels
+        (var_name, the columns' name or 'variable') and one of their values
+        end to end (value_name; concat's dtype rules)."""
+        if col_level is not None:
+            raise _unsupported("DataFrame.melt(col_level=) (a MultiIndex)")
+        labels = self._pd_columns.tolist()
+        if RS.hashable(value_name) and value_name in self._pd_columns:
+            raise ValueError("value_name (%s) cannot match an element in the DataFrame columns." % (value_name,))
+        ids = [] if id_vars is None else (list(id_vars) if X.is_list_like(id_vars) else [id_vars])
+        values = None if value_vars is None else (list(value_vars) if X.is_list_like(value_vars) else [value_vars])
+        js = list(range(len(labels)))
+        if ids or values:
+            wanted = ids + (values or [])
+            missing = [lab for lab in wanted if lab not in self._pd_columns]
+            if missing:
+                raise KeyError("The following id_vars or value_vars are not present in the DataFrame: %r" % (missing,))
+            if values is not None:
+                js = []
+                for lab in wanted:
+                    p = self._pd_columns._pd_positions(lab)
+                    for q in (p if isinstance(p, list) else [p]):
+                        if q not in js:
+                            js.append(q)
+        if var_name is None:
+            var_name = self._pd_columns.name if self._pd_columns.name is not None else "variable"
+        elif X.is_list_like(var_name) or isinstance(var_name, tuple):
+            raise ValueError("var_name=%r must be a scalar." % (var_name,))
+        names = ids + [var_name, value_name]
+        dups = [x for x in names if names.count(x) > 1]
+        if dups:
+            raise ValueError("melt output columns cannot contain duplicate names: %r" % (list(dict.fromkeys(dups)),))
+        id_js = []
+        for lab in ids:
+            p = self._pd_columns._pd_positions(lab)
+            if isinstance(p, list):
+                raise _unsupported("DataFrame.melt with a repeated id column label")
+            id_js.append(p)
+        value_js = [j for j in js if j not in id_js]
+        n, k = len(self), len(value_js)
+        cols = [CB.join_columns([self._pd_cols[j]] * k) if k else self._pd_cols[j].take([]) for j in id_js]
+        var_labels = self._pd_columns._pd_column().take([j for j in value_js for _ in range(n)])
+        cols.append(var_labels)
+        cols.append(CB.join_columns([self._pd_cols[j] for j in value_js]) if k else Column("float64", np.array([], dtype=np.float64)))
+        index = default_index(n * k) if ignore_index else self._pd_index._pd_take(list(range(n)) * k)
+        return DataFrame._pd_new(cols, Index(names), index)
+
+    def describe(self, percentiles=None, include=None, exclude=None):
+        """Series.describe of each numeric column (or of every column when
+        none is numeric, or include='all', or those include/exclude select),
+        side by side: the rows of the shortest first (count, unique, top,
+        freq before mean, std, ...), NaN where a column has no such row."""
+        qs = ST.refine_percentiles(percentiles)
+        if not self._pd_cols:
+            raise ValueError("Cannot describe a DataFrame without columns")
+        dtypes = [c.dtype for c in self._pd_cols]
+        every = list(range(len(dtypes)))
+        if include is None and exclude is None:
+            keep = [j for j, d in enumerate(dtypes) if ST.is_numeric(d) or d is DT] or every
+        elif isinstance(include, str) and include == "all":
+            if exclude is not None:
+                raise ValueError("exclude must be None when include is 'all'")
+            keep = every
+        else:
+            keep = ST.select_columns(dtypes, include, exclude)
+            if not keep:
+                raise ValueError("No columns match the specified include or exclude data types")
+        labels = ST.format_percentiles(qs)
+        descs = [ST.describe_column(self._pd_cols[j], qs, labels, "DataFrame.describe") for j in keep]
+        names = []
+        for d in sorted(descs, key=lambda d: len(d[0])):
+            for x in d[0]:
+                if x not in names:
+                    names.append(x)
+        cols = []
+        for (nm, values, forced), j in zip(descs, keep):
+            got = dict(zip(nm, values))
+            row = [got[x] if x in got else float("nan") for x in names]
+            cols.append(ST.describe_values(row, forced, ST.is_numeric(dtypes[j])))
+        return DataFrame._pd_new(cols, self._pd_columns._pd_take(keep), Index(names))
+
+    def corr(self, method="pearson", min_periods=1, numeric_only=False):
+        """Pearson's correlation of each pair of columns over the rows where
+        both are finite (pandas' nancorr, see _pd_stats): NaN for a constant
+        column or fewer than min_periods rows. Columns convert as
+        to_numpy(dtype=float) does; numeric_only keeps the numbers and bools."""
+        ST.check_method(method, "DataFrame.corr")
+        js = [j for j, c in enumerate(self._pd_cols) if not numeric_only or c.dtype in INTS or c.dtype in FLOATS or c.dtype == "bool"]
+        mat = ST.float_columns([self._pd_cols[j] for j in js], "DataFrame.corr")
+        minp = 1 if min_periods is None else int(min_periods)
+        out = ST.callable_corr(mat, method, minp) if callable(method) else ST.nancorr(mat, minp)
+        labels = self._pd_columns._pd_take(js)
+        cols = [Column("float64", np.array([out[i][j] for i in range(len(js))], dtype=np.float64)) for j in range(len(js))]
+        return DataFrame._pd_new(cols, labels, labels.copy())
+
+    def groupby(self, by=None, level=None, *, as_index=True, sort=True, group_keys=True, observed=True, dropna=True):
+        """The frame grouped by one key (a column label, a Series of the same
+        labels, a list of keys, or the index); see _pd_groupby."""
+        from ._pd_groupby import group_frame
+        return group_frame(self, by, level, as_index, sort, group_keys, observed, dropna)
+
+    def memory_usage(self, index=True, deep=False):
+        """The bytes pandas counts for each column (and the index, first,
+        labelled 'Index'): a Series of int64; see _pd_info."""
+        if deep:
+            INF.check_deep("DataFrame.memory_usage(deep=True)", self._pd_cols, self._pd_index if index else None)
+        sizes = [INF.column_nbytes(c) for c in self._pd_cols]
+        labels = self._pd_columns.tolist()
+        if index:
+            sizes = [INF.index_nbytes(self._pd_index)] + sizes
+            labels = ["Index"] + labels
+        return Series._pd_new(Column("int64", np.array(sizes, dtype=np.int64)), Index(labels) if index else self._pd_columns.copy())
+
+    def info(self, verbose=None, buf=None, max_cols=None, memory_usage=None, show_counts=None):
+        return INF.frame_info(self, verbose, buf, max_cols, memory_usage, show_counts)
+
     def __getattr__(self, name):
         if not name.startswith("_pd_") and not name.startswith("__"):
             if name in self._pd_columns:
                 return self[name]
             from ._pd_names import DATAFRAME
             if name in DATAFRAME:
-                raise _unsupported("DataFrame.%s" % name)
+                raise unsupported_name("DataFrame.%s" % name)
         raise AttributeError("'DataFrame' object has no attribute '%s'" % name)
 
-    # (arithmetic is M2's: every operator raises NotImplementedError)
+    # --- arithmetic (_pd_frame_arith) ---------------------------------------
+
     def __add__(self, other):
-        raise _unsupported("DataFrame.__add__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "add")
 
     def __radd__(self, other):
-        raise _unsupported("DataFrame.__radd__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "add", True)
 
     def __sub__(self, other):
-        raise _unsupported("DataFrame.__sub__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "sub")
 
     def __rsub__(self, other):
-        raise _unsupported("DataFrame.__rsub__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "sub", True)
 
     def __mul__(self, other):
-        raise _unsupported("DataFrame.__mul__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "mul")
 
     def __rmul__(self, other):
-        raise _unsupported("DataFrame.__rmul__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "mul", True)
 
     def __truediv__(self, other):
-        raise _unsupported("DataFrame.__truediv__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "truediv")
 
     def __rtruediv__(self, other):
-        raise _unsupported("DataFrame.__rtruediv__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "truediv", True)
 
     def __floordiv__(self, other):
-        raise _unsupported("DataFrame.__floordiv__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "floordiv")
 
     def __rfloordiv__(self, other):
-        raise _unsupported("DataFrame.__rfloordiv__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "floordiv", True)
 
     def __mod__(self, other):
-        raise _unsupported("DataFrame.__mod__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "mod")
 
     def __rmod__(self, other):
-        raise _unsupported("DataFrame.__rmod__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "mod", True)
 
     def __pow__(self, other):
-        raise _unsupported("DataFrame.__pow__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "pow")
 
     def __rpow__(self, other):
-        raise _unsupported("DataFrame.__rpow__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "pow", True)
 
     def __matmul__(self, other):
-        raise _unsupported("DataFrame.__matmul__ (arithmetic)")
+        raise _unsupported("DataFrame.__matmul__ (a matrix product)")
 
     def __rmatmul__(self, other):
-        raise _unsupported("DataFrame.__rmatmul__ (arithmetic)")
+        raise _unsupported("DataFrame.__rmatmul__ (a matrix product)")
 
     def __divmod__(self, other):
-        raise _unsupported("DataFrame.__divmod__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "floordiv"), FA.binary(self, other, "mod")
 
     def __rdivmod__(self, other):
-        raise _unsupported("DataFrame.__rdivmod__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "floordiv", True), FA.binary(self, other, "mod", True)
 
     def __neg__(self):
-        raise _unsupported("DataFrame.__neg__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.unary(self, "neg")
 
     def __pos__(self):
-        raise _unsupported("DataFrame.__pos__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.unary(self, "pos")
 
     def __abs__(self):
-        raise _unsupported("DataFrame.__abs__ (arithmetic)")
+        from . import _pd_frame_arith as FA
+        return FA.unary(self, "abs")
 
-    # (comparisons of frames are M2's too)
+    def abs(self):
+        """Each value's absolute value."""
+        return self.__abs__()
+
+    def add(self, other, axis="columns", level=None, fill_value=None):
+        """Named add: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "add", False, fill_value, axis, level, True)
+
+    def sub(self, other, axis="columns", level=None, fill_value=None):
+        """Named sub: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "sub", False, fill_value, axis, level, True)
+
+    def subtract(self, other, axis="columns", level=None, fill_value=None):
+        """Named sub: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "sub", False, fill_value, axis, level, True)
+
+    def mul(self, other, axis="columns", level=None, fill_value=None):
+        """Named mul: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "mul", False, fill_value, axis, level, True)
+
+    def multiply(self, other, axis="columns", level=None, fill_value=None):
+        """Named mul: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "mul", False, fill_value, axis, level, True)
+
+    def truediv(self, other, axis="columns", level=None, fill_value=None):
+        """Named truediv: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "truediv", False, fill_value, axis, level, True)
+
+    def div(self, other, axis="columns", level=None, fill_value=None):
+        """Named truediv: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "truediv", False, fill_value, axis, level, True)
+
+    def divide(self, other, axis="columns", level=None, fill_value=None):
+        """Named truediv: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "truediv", False, fill_value, axis, level, True)
+
+    def floordiv(self, other, axis="columns", level=None, fill_value=None):
+        """Named floordiv: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "floordiv", False, fill_value, axis, level, True)
+
+    def mod(self, other, axis="columns", level=None, fill_value=None):
+        """Named mod: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "mod", False, fill_value, axis, level, True)
+
+    def pow(self, other, axis="columns", level=None, fill_value=None):
+        """Named pow: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "pow", False, fill_value, axis, level, True)
+
+    def radd(self, other, axis="columns", level=None, fill_value=None):
+        """Named radd: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "add", True, fill_value, axis, level, True)
+
+    def rsub(self, other, axis="columns", level=None, fill_value=None):
+        """Named rsub: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "sub", True, fill_value, axis, level, True)
+
+    def rmul(self, other, axis="columns", level=None, fill_value=None):
+        """Named rmul: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "mul", True, fill_value, axis, level, True)
+
+    def rtruediv(self, other, axis="columns", level=None, fill_value=None):
+        """Named rtruediv: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "truediv", True, fill_value, axis, level, True)
+
+    def rdiv(self, other, axis="columns", level=None, fill_value=None):
+        """Named rtruediv: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "truediv", True, fill_value, axis, level, True)
+
+    def rfloordiv(self, other, axis="columns", level=None, fill_value=None):
+        """Named rfloordiv: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "floordiv", True, fill_value, axis, level, True)
+
+    def rmod(self, other, axis="columns", level=None, fill_value=None):
+        """Named rmod: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "mod", True, fill_value, axis, level, True)
+
+    def rpow(self, other, axis="columns", level=None, fill_value=None):
+        """Named rpow: as the operator, with axis ('columns' lines a Series or
+        list-like up with the columns, 'index' with the rows) and fill_value
+        (where one side is missing and the other isn't)."""
+        from . import _pd_frame_arith as FA
+        return FA.binary(self, other, "pow", True, fill_value, axis, level, True)
+
+    # --- comparisons (_pd_frame_arith.compare) ------------------------------
+
     def __eq__(self, other):
-        raise _unsupported("DataFrame.__eq__ (comparison)")
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "eq")
 
     def __ne__(self, other):
-        raise _unsupported("DataFrame.__ne__ (comparison)")
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "ne")
 
     def __lt__(self, other):
-        raise _unsupported("DataFrame.__lt__ (comparison)")
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "lt")
 
     def __le__(self, other):
-        raise _unsupported("DataFrame.__le__ (comparison)")
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "le")
 
     def __gt__(self, other):
-        raise _unsupported("DataFrame.__gt__ (comparison)")
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "gt")
 
     def __ge__(self, other):
-        raise _unsupported("DataFrame.__ge__ (comparison)")
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "ge")
+
+    def eq(self, other, axis="columns", level=None):
+        """Named eq: aligned on both axes (a label one side lacks compares
+        False, True for ne), a bool frame."""
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "eq", axis, level, True)
+
+    def ne(self, other, axis="columns", level=None):
+        """Named ne: aligned on both axes (a label one side lacks compares
+        False, True for ne), a bool frame."""
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "ne", axis, level, True)
+
+    def lt(self, other, axis="columns", level=None):
+        """Named lt: aligned on both axes (a label one side lacks compares
+        False, True for ne), a bool frame."""
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "lt", axis, level, True)
+
+    def le(self, other, axis="columns", level=None):
+        """Named le: aligned on both axes (a label one side lacks compares
+        False, True for ne), a bool frame."""
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "le", axis, level, True)
+
+    def gt(self, other, axis="columns", level=None):
+        """Named gt: aligned on both axes (a label one side lacks compares
+        False, True for ne), a bool frame."""
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "gt", axis, level, True)
+
+    def ge(self, other, axis="columns", level=None):
+        """Named ge: aligned on both axes (a label one side lacks compares
+        False, True for ne), a bool frame."""
+        from . import _pd_frame_arith as FA
+        return FA.compare(self, other, "ge", axis, level, True)
+
 
     def __setitem__(self, key, value):
         if isinstance(key, DataFrame):
             raise _unsupported("DataFrame[DataFrame] = value (where)")
+        X.refuse_categorical_key(key)
         if isinstance(key, slice) or X.is_bool_key(key):
             rows = X.getitem_slice_positions(self._pd_index, key) if isinstance(key, slice) \
                 else X.mask_positions(key, len(self), self._pd_index)
@@ -819,7 +1229,7 @@ class DataFrame(object):
             old = c.tolist()
             d = c.dtype
             try:
-                cols.append(column_from(old + [v], d if infer([v]) == d or (d == "float64" and infer([v]) == "int64") else None))
+                cols.append(column_from(old + [v], d if infer([v]) == d or (d in FLOATS and infer([v]) in ("int64", "float64")) else None))
             except (TypeError, ValueError):
                 cols.append(column_from(old + [v]))
         self._pd_cols = cols

@@ -111,7 +111,7 @@ export class Machine extends CoreMachine {
   //  unless a line at or after it is marked, so the highest line marked is that of the highest offset counted. Not the
   //  outer reader's place: after the main file read itself, that is behind lines already marked (astra4 POS-A4-1))
   restore(ck, files, delta = 0) {
-    super.restore(ck, files, delta); this.ev = []; this.nev = 0; this.deadline = Date.now() + TIME_LIMIT_MS;
+    super.restore(ck, files, delta); this.ev = []; this.nev = 0; this.deadline = Date.now() + TIME_LIMIT_MS; this.fposF = null;
     this.akH = this.srcSeen.get(this.mainPath); this.rt = 0; this.dd = 0;
     const seen = this.srcSeen.get(this.mainPath), text = files.get(this.mainPath);
     this.posFrontier = seen === undefined || typeof text !== "string" ? -1 : seen <= 0 ? 0 : text.lastIndexOf("\n", seen - 1) + 1;
@@ -121,9 +121,28 @@ export class Machine extends CoreMachine {
   //  of a half-read line) is never marked twice)
   countSrc(f, i) {
     super.countSrc(f, i);
-    if (f.path !== this.mainPath) return;
+    if (f.path !== this.mainPath) { this.fileLine(f); return; }
+    // (back in the main file after an \input: what follows is the main file's again)
+    if (this.fposF) { this.fposF = null; this.mark({ k: "fpos", file: null }); }
     const ls = f.lineStart ?? 0;
     if (ls > this.posFrontier) { this.posFrontier = ls; this.mark({ k: "pos", at: ls, ep: POS_EPOCH }); }
+  }
+  // (a line of an \input or \include file, first read: {k:"fpos", file, line} marks it, so latex check names the file and
+  //  its line for a problem found there, not the main file's \input line; once per line, the line found by its offset in
+  //  the file's own line index, made once per file)
+  fileLine(f) {
+    if (f.kind !== "file" || typeof f.text !== "string" || !this.files.has(f.path)) return;
+    const ls = f.lineStart ?? 0;
+    if (f === this.fposF && ls === this.fposLs) return;
+    this.fposF = f; this.fposLs = ls;
+    let idx = (this.nlIdx ??= new Map()).get(f.path);
+    if (!idx || idx.text !== f.text) {
+      const at = []; for (let k = f.text.indexOf("\n"); k !== -1; k = f.text.indexOf("\n", k + 1)) at.push(k);
+      idx = { text: f.text, at }; this.nlIdx.set(f.path, idx);
+    }
+    let lo = 0, hi = idx.at.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (idx.at[mid] < ls) lo = mid + 1; else hi = mid; }
+    this.mark({ k: "fpos", file: f.path, line: lo + 1 });
   }
   doInput(name) {
     name = String(name).trim();
@@ -372,9 +391,16 @@ export class Machine extends CoreMachine {
       this.pushArg(key);
       coreLabel.call(this, t);
     });
+    // (and the starred forms the packages define, their "*" read here, never taken for the key: hyperref's \ref*, \pageref*,
+    //  \autoref*, \nameref* and cleveref's \cref*, \Cref*, a reference without a link (marked star); natbib's \cite*,
+    //  \citet*, \citep*, with every author and still linked (not marked). \eqref has none, as in LaTeX)
+    const STARRED = new Set(["ref", "pageref", "autoref", "nameref", "cref", "Cref", "cite", "citep", "citet"]);
+    const CITES = new Set(["cite", "citep", "citet"]);
     for (const nm of ["ref", "eqref", "pageref", "cite", "cref", "Cref", "autoref", "citep", "citet", "nameref"]) P.prim(nm, function () {
+      const s = STARRED.has(nm) ? this.nextRaw() : null, star = s !== null && !isCs(s) && codeOf(s) === 42;
+      if (s !== null && !star) this.back(s);
       const opt = this.readOptRaw(); const key = this.readArgString();
-      this.mark({ k: "ref", cmd: nm, key, opt: opt ? this.toks2str(opt) : null });
+      this.mark({ k: "ref", cmd: nm, key, opt: opt ? this.toks2str(opt) : null, ...(star && !CITES.has(nm) ? { star: true } : {}) });
     });
     // \newcommand (and \newcommand*) on a name that already has a meaning: LaTeX's "already defined" error, and the old
     // meaning stays (the core's own prim reported E-ALREADY-DEFINED but redefined anyway); the arguments are consumed

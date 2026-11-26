@@ -6,8 +6,9 @@ derived from a Series is an eager copy (Copy-on-Write, r7 §C3).
 
 import numpy as np
 
+from ._pd_errors import unsupported_name
 from ._pd_column import Column, column_from, set_values, astype_column
-from ._pd_dtypes import STR, INTS, infer, is_missing, resolve_dtype
+from ._pd_dtypes import STR, INTS, FLOATS, infer, is_missing, resolve_dtype
 from ._pd_datetime import DT, NaT, FIELDS
 from .errors import _INPLACE, inplace_given
 from ._pd_index import Index, RangeIndex, default_index, ensure_index
@@ -16,6 +17,9 @@ from . import _pd_reduce as R
 from . import _pd_repr
 from . import _pd_sort as S
 from . import _pd_reshape as RS
+from . import _pd_combine as CB
+from . import _pd_info as INF
+from . import _pd_stats as ST
 
 __all__ = ["Series"]
 
@@ -32,6 +36,41 @@ def _is_scalar(v):
     return X.is_scalar_key(v) and not isinstance(v, (Index, Series))
 
 
+def _array_op_values(col, values, n):
+    """A range's or a tuple's values against a column, as the column's array
+    compares with them: numpy's broadcasting for numbers and bools (one value
+    broadcasts; a Series of one value against more is pandas' length error),
+    else equal lengths, with the str and datetime arrays' own messages."""
+    m = len(values)
+    if col.dtype is STR:
+        if m != n:
+            raise ValueError("Lengths of operands do not match: %d != %d" % (n, m))
+    elif col.dtype is DT:
+        if m != n:
+            raise ValueError("Lengths must match")
+    elif m != n:
+        if m == 1:
+            values = values * n
+        elif n == 1:
+            raise ValueError("Length of values (%d) does not match length of index (1)" % m)
+        else:
+            raise ValueError("operands could not be broadcast together with shapes (%d,) (%d,) " % (n, m))
+    return column_from(values) if values else Column("object", [])
+
+
+def _compare_values(values, n, broadcast):
+    # (a list-like compared by an operator: its length must be the Series', with pandas' message, or numpy's
+    # broadcast message for a range)
+    m = len(values)
+    if m != n:
+        if broadcast:
+            raise ValueError("operands could not be broadcast together with shapes (%d,) (%d,) " % (n, m))
+        raise ValueError("Lengths must match to compare", (n,), (m,))
+    if isinstance(values, Index):
+        values = values.tolist()
+    return column_from(values.copy() if isinstance(values, np.ndarray) else list(values))
+
+
 class Series(object):
     """A one-dimensional labelled array."""
 
@@ -39,6 +78,7 @@ class Series(object):
 
     def __init__(self, data=None, index=None, dtype=None, name=None, copy=None):
         from ._pd_frame import DataFrame
+        from . import _pd_category as CT
         if isinstance(data, np.ndarray) and copy is False:
             raise _unsupported("Series(..., copy=False) with an ndarray")
         if isinstance(data, DataFrame):
@@ -62,6 +102,11 @@ class Series(object):
                 idx = ensure_index(index)
                 vals = [data[k] if k in data else float("nan") for k in idx.tolist()]
                 col = column_from(vals, dtype)
+        elif isinstance(data, CT.Categorical):
+            col = column_from(data, dtype)
+            idx = default_index(len(col)) if index is None else ensure_index(index)
+            if len(idx) != len(col):
+                raise ValueError("Length of values (%d) does not match length of index (%d)" % (len(col), len(idx)))
         elif data is None or _is_scalar(data):
             if data is None and index is None:
                 col, idx = column_from([], dtype), default_index(0)
@@ -140,16 +185,26 @@ class Series(object):
     def values(self):
         return _export(self._pd_col, "Series.values")
 
-    def to_numpy(self, dtype=None, copy=False, na_value=None):
-        if dtype is not None or na_value is not None:
-            raise _unsupported("Series.to_numpy(dtype=, na_value=)")
+    def to_numpy(self, dtype=None, copy=False, na_value=RS.NO_VALUE, **kwargs):
+        """The values as a numpy array: missing values as na_value if given,
+        converted to dtype if given (a new, writable array when that changes
+        the dtype); see _export."""
+        if kwargs:
+            raise _unsupported("Series.to_numpy(**kwargs)")
+        col = self._pd_col if na_value is RS.NO_VALUE else with_na_value(self._pd_col, na_value)
+        if dtype is not None:
+            a = export_as([col], dtype, "Series.to_numpy(dtype=)")[:, 0]
+            # (read-only where the values already have that dtype: pandas' view of them)
+            if not copy and not col.is_list and str(a.dtype) == str(col._pd_values.dtype):
+                a.flags.writeable = False
+            return a
         if copy:
-            if self._pd_col.dtype is DT or self._pd_col.dtype is STR:
-                return _export(self._pd_col, "Series.to_numpy()")
-            if self._pd_col.is_list:
-                raise _unsupported("Series.to_numpy() of a%s %s column" % ("n" if self._pd_col.dtype == "object" else "", self._pd_col.dtype))
-            return self._pd_col._pd_values.copy()
-        return _export(self._pd_col, "Series.to_numpy()")
+            if col.dtype is DT or col.dtype is STR:
+                return _export(col, "Series.to_numpy()")
+            if col.is_list:
+                raise _unsupported("Series.to_numpy() of a%s %s column" % ("n" if col.dtype == "object" else "", col.dtype))
+            return col._pd_values.copy()
+        return _export(col, "Series.to_numpy()")
 
     @property
     def array(self):
@@ -229,18 +284,96 @@ class Series(object):
     def count(self):
         return R.reduce_column(self._pd_col, "count", True)
 
-    # --- comparisons (for boolean masks) -----------------------------------
+    def any(self, *, axis=0, bool_only=False, skipna=True, **kwargs):
+        """Whether any value is true (see _pd_reduce.truth_column)."""
+        if kwargs or axis not in (0, "index", None) or bool_only:
+            raise _unsupported("Series.any(axis=, bool_only=, **kwargs)")
+        return R.truth_column(self._pd_col, "any", skipna)
 
-    def _pd_compare(self, other, op):
+    def all(self, *, axis=0, bool_only=False, skipna=True, **kwargs):
+        """Whether every value is true (see _pd_reduce.truth_column)."""
+        if kwargs or axis not in (0, "index", None) or bool_only:
+            raise _unsupported("Series.all(axis=, bool_only=, **kwargs)")
+        return R.truth_column(self._pd_col, "all", skipna)
+
+    def take(self, indices, axis=0, **kwargs):
+        """The rows at positions indices (negative from the end), labels
+        kept."""
+        if kwargs:
+            raise _unsupported("Series.take(**kwargs)")
+        if axis not in (0, "index", "rows"):
+            raise ValueError("No axis named %s for object type Series" % (axis,))
+        return self._pd_take(take_positions(indices, len(self)))
+
+    # --- comparisons ---------------------------------------------------------
+
+    def _pd_compare(self, other, op, warned=False):
+        """An operator: another Series needs the same labels, a list-like the
+        same length; a frame's comparison is the frame's."""
+        from . import _pd_arith as A
+        from ._pd_frame import DataFrame
+        if isinstance(other, DataFrame):
+            return NotImplemented
+        if not warned:
+            other = A.operand(A.zerodim(other), "Series.%s" % op, False)
         if isinstance(other, Series):
             if not self._pd_index.equals(other._pd_index):
                 raise ValueError("Can only compare identically-labeled Series objects")
             right = other._pd_col
+        elif isinstance(other, (range, tuple)):
+            # (pandas passes a range or a tuple to the array's own comparison, without its length check)
+            right = _array_op_values(self._pd_col, list(other), len(self))
+            return Series._pd_new(R.compare(self._pd_col, right, op, type(other).__name__), self._pd_index.copy(),
+                                  self._pd_name)
+        elif isinstance(other, Index):
+            # (an Index compares as its own array: an empty object or str one, element by element, has no order
+            # error with times; an empty numeric one does, as an empty list does)
+            _compare_values(other.tolist(), len(self), False)
+            right = other._pd_column().copy()
+            name = "ndarray" if right.dtype in INTS or right.dtype in FLOATS or right.dtype == "bool" else None
+            return Series._pd_new(R.compare(self._pd_col, right, op, name), self._pd_index.copy(), self._pd_name)
+        elif isinstance(other, (list, np.ndarray)):
+            right = _compare_values(other, len(self), False)
         elif _is_scalar(other):
             right = other
         else:
             raise _unsupported("Series comparison with a %s" % type(other).__name__)
         return Series._pd_new(R.compare(self._pd_col, right, op), self._pd_index.copy(), self._pd_name)
+
+    def _pd_flex_compare(self, other, op, level, fill_value, axis):
+        """A named comparison: another Series aligned on the sorted union of
+        the labels (a label one side lacks compares False, True for ne); a
+        list, tuple or array of the same length; fill_value where one side
+        is missing and the other isn't, as the named arithmetic fills."""
+        from . import _pd_arith as A
+        from ._pd_frame import DataFrame
+        owner = "Series.%s" % op
+        if level is not None:
+            raise _unsupported("%s(level=) (a MultiIndex)" % owner)
+        if axis not in (0, "index", "rows"):
+            raise ValueError("No axis named %s for object type Series" % (axis,))
+        if isinstance(other, DataFrame):
+            raise TypeError("%s does not support a DataFrame `other`. Use df.%s(ser) instead." % (owner, op))
+        other = A.operand(A.zerodim(other), owner, True)
+        if isinstance(other, (range, Index)) or not isinstance(other, (Series, list, tuple, np.ndarray)):
+            # (a range, an Index or a scalar takes the operator's path, after filling this Series)
+            left = self
+            if fill_value is not None and not isinstance(other, (range, Index)) and is_missing(other):
+                # (pandas: a missing scalar is replaced by fill_value, and this Series' own missing values stay)
+                other = fill_value
+            elif fill_value is not None:
+                left = Series._pd_new(RS.fill_column(self._pd_col, fill_value), self._pd_index.copy(), self._pd_name)
+            return left._pd_compare(other, op, True)
+        left, right, index, name = self._pd_operand(other, owner)
+        if not isinstance(other, Series):
+            if len(right) != len(left):
+                raise ValueError("Lengths must be equal")
+            right = column_from(right.copy() if isinstance(right, np.ndarray) else list(right))
+        if fill_value is not None:
+            lm, rm = left.isna().tolist(), right.isna().tolist()
+            left = RS.fill_positions(left, dict((p, fill_value) for p, (a, b) in enumerate(zip(lm, rm)) if a and not b))
+            right = RS.fill_positions(right, dict((p, fill_value) for p, (a, b) in enumerate(zip(lm, rm)) if b and not a))
+        return Series._pd_new(R.compare(left, right, op, None), index, name)
 
     def __eq__(self, other):
         return self._pd_compare(other, "eq")
@@ -259,6 +392,30 @@ class Series(object):
 
     def __ge__(self, other):
         return self._pd_compare(other, "ge")
+
+    def eq(self, other, level=None, fill_value=None, axis=0):
+        """Named eq: aligned as the named arithmetic, a bool Series."""
+        return self._pd_flex_compare(other, "eq", level, fill_value, axis)
+
+    def ne(self, other, level=None, fill_value=None, axis=0):
+        """Named ne: aligned as the named arithmetic, a bool Series."""
+        return self._pd_flex_compare(other, "ne", level, fill_value, axis)
+
+    def lt(self, other, level=None, fill_value=None, axis=0):
+        """Named lt: aligned as the named arithmetic, a bool Series."""
+        return self._pd_flex_compare(other, "lt", level, fill_value, axis)
+
+    def le(self, other, level=None, fill_value=None, axis=0):
+        """Named le: aligned as the named arithmetic, a bool Series."""
+        return self._pd_flex_compare(other, "le", level, fill_value, axis)
+
+    def gt(self, other, level=None, fill_value=None, axis=0):
+        """Named gt: aligned as the named arithmetic, a bool Series."""
+        return self._pd_flex_compare(other, "gt", level, fill_value, axis)
+
+    def ge(self, other, level=None, fill_value=None, axis=0):
+        """Named ge: aligned as the named arithmetic, a bool Series."""
+        return self._pd_flex_compare(other, "ge", level, fill_value, axis)
 
     __hash__ = None
 
@@ -287,76 +444,259 @@ class Series(object):
             raise _unsupported("~ on a %s Series" % self._pd_col.dtype)
         return Series._pd_new(Column("bool", ~self._pd_col._pd_values), self._pd_index.copy(), self._pd_name)
 
-    # (arithmetic is M2's: every operator raises NotImplementedError)
+    # --- arithmetic (see _pd_arith) ---------------------------------------
+
+    def _pd_operand(self, other, owner):
+        """(this Series' column, the other operand, the result's index and
+        name): another Series aligned on the sorted union of the labels."""
+        from ._pd_frame import DataFrame
+        if isinstance(other, DataFrame):
+            raise _unsupported("%s with a DataFrame (a frame result)" % owner)
+        if isinstance(other, Index):
+            other = other.tolist()
+        if not isinstance(other, Series):
+            return self._pd_col, other, self._pd_index.copy(), self._pd_name
+        name = self._pd_name if self._pd_name == other._pd_name else None
+        if self._pd_index.equals(other._pd_index):
+            return self._pd_col, other._pd_col, self._pd_index.copy(), name
+        if not self._pd_index.is_unique or not other._pd_index.is_unique:
+            raise _unsupported("%s of Series with other, repeated labels" % owner)
+        from . import _pd_combine as CB
+        labels = CB.join_labels([self._pd_index, other._pd_index], "outer", True)
+        return self._pd_aligned(labels), other._pd_aligned(labels), labels, name
+
+    def _pd_aligned(self, labels):
+        """The column at labels (pandas' reindex for arithmetic): a float
+        column keeps its dtype (float32 too) with NaN at labels it hasn't;
+        others as _pd_reindex gives them."""
+        if self._pd_col.dtype not in FLOATS:
+            return self._pd_reindex(labels)._pd_col
+        positions = []
+        for lab in labels.tolist():
+            try:
+                positions.append(self._pd_index._pd_positions(lab))
+            except KeyError:
+                positions.append(None)
+        v = self._pd_col._pd_values
+        out = np.full(len(positions), np.nan, dtype=self._pd_col.dtype)
+        for k, p in enumerate(positions):
+            if p is not None:
+                out[k] = v[p]
+        return Column(self._pd_col.dtype, out)
+
+    def _pd_arith(self, other, op, reflected=False, fill_value=None, method=False):
+        from . import _pd_arith as A
+        from ._pd_frame import DataFrame
+        if isinstance(other, DataFrame) and not method:
+            # (an operator with a frame is the frame's: Python then calls its reflected operator)
+            return NotImplemented
+        from . import _pd_category as CT
+        self_cat = isinstance(self._pd_col, CT.CatColumn)
+        other_cat = isinstance(other, Series) and isinstance(other._pd_col, CT.CatColumn)
+        if self_cat or other_cat:
+            raise CT.arith_error(op, reflected, other, self_cat, other_cat)
+        owner = "Series.%s" % (("r" if reflected else "") + op)
+        other = A.operand(other, owner, method)
+        # (pandas' flex methods take a Series, list, tuple or array argument through their own path: its length
+        # checked first, and numpy's op without the zero division masks; a range, an Index, a scalar (a 0-d array
+        # too) and the operators keep the operator's path, numpy's broadcast message and the masks)
+        flex = method and isinstance(other, (Series, list, tuple, np.ndarray))
+        left, right, index, name = self._pd_operand(other, owner)
+        if flex and not isinstance(other, Series) and len(right) != len(left):
+            raise ValueError("Lengths must be equal")
+        if fill_value is not None and flex and not isinstance(right, Column):
+            # (pandas' flex path makes a list, tuple or array a Series first, so fill_value fills either side)
+            right = column_from(right.copy() if isinstance(right, np.ndarray) else list(right))
+        if fill_value is not None and isinstance(right, Column):
+            # (fill_value where one side is missing and the other isn't, each column keeping its dtype)
+            lm, rm = left.isna().tolist(), right.isna().tolist()
+            left = RS.fill_positions(left, dict((p, fill_value) for p, (a, b) in enumerate(zip(lm, rm)) if a and not b))
+            right = RS.fill_positions(right, dict((p, fill_value) for p, (a, b) in enumerate(zip(lm, rm)) if b and not a))
+        elif fill_value is not None:
+            if not isinstance(right, (list, tuple, range, np.ndarray)) and is_missing(right):
+                # (pandas: a missing scalar is replaced by fill_value, and this Series' own missing values stay)
+                right = fill_value
+            else:
+                left = RS.fill_column(left, fill_value)
+        mask_zero = not flex
+        return Series._pd_new(A.binary(left, right, op, reflected, owner, mask_zero), index, name)
+
     def __add__(self, other):
-        raise _unsupported("Series.__add__ (arithmetic)")
+        return self._pd_arith(other, "add")
 
     def __radd__(self, other):
-        raise _unsupported("Series.__radd__ (arithmetic)")
+        return self._pd_arith(other, "add", True)
 
     def __sub__(self, other):
-        raise _unsupported("Series.__sub__ (arithmetic)")
+        return self._pd_arith(other, "sub")
 
     def __rsub__(self, other):
-        raise _unsupported("Series.__rsub__ (arithmetic)")
+        return self._pd_arith(other, "sub", True)
 
     def __mul__(self, other):
-        raise _unsupported("Series.__mul__ (arithmetic)")
+        return self._pd_arith(other, "mul")
 
     def __rmul__(self, other):
-        raise _unsupported("Series.__rmul__ (arithmetic)")
+        return self._pd_arith(other, "mul", True)
 
     def __truediv__(self, other):
-        raise _unsupported("Series.__truediv__ (arithmetic)")
+        return self._pd_arith(other, "truediv")
 
     def __rtruediv__(self, other):
-        raise _unsupported("Series.__rtruediv__ (arithmetic)")
+        return self._pd_arith(other, "truediv", True)
 
     def __floordiv__(self, other):
-        raise _unsupported("Series.__floordiv__ (arithmetic)")
+        return self._pd_arith(other, "floordiv")
 
     def __rfloordiv__(self, other):
-        raise _unsupported("Series.__rfloordiv__ (arithmetic)")
+        return self._pd_arith(other, "floordiv", True)
 
     def __mod__(self, other):
-        raise _unsupported("Series.__mod__ (arithmetic)")
+        return self._pd_arith(other, "mod")
 
     def __rmod__(self, other):
-        raise _unsupported("Series.__rmod__ (arithmetic)")
+        return self._pd_arith(other, "mod", True)
 
     def __pow__(self, other):
-        raise _unsupported("Series.__pow__ (arithmetic)")
+        return self._pd_arith(other, "pow")
 
     def __rpow__(self, other):
-        raise _unsupported("Series.__rpow__ (arithmetic)")
-
-    def __matmul__(self, other):
-        raise _unsupported("Series.__matmul__ (arithmetic)")
-
-    def __rmatmul__(self, other):
-        raise _unsupported("Series.__rmatmul__ (arithmetic)")
+        return self._pd_arith(other, "pow", True)
 
     def __divmod__(self, other):
-        raise _unsupported("Series.__divmod__ (arithmetic)")
+        from ._pd_frame import DataFrame
+        if isinstance(other, DataFrame):
+            return NotImplemented
+        return self._pd_arith(other, "floordiv"), self._pd_arith(other, "mod")
 
     def __rdivmod__(self, other):
-        raise _unsupported("Series.__rdivmod__ (arithmetic)")
+        from ._pd_frame import DataFrame
+        if isinstance(other, DataFrame):
+            return NotImplemented
+        return self._pd_arith(other, "floordiv", True), self._pd_arith(other, "mod", True)
+
+    def __matmul__(self, other):
+        raise _unsupported("Series.__matmul__ (a dot product)")
+
+    def __rmatmul__(self, other):
+        raise _unsupported("Series.__rmatmul__ (a dot product)")
 
     def __neg__(self):
-        raise _unsupported("Series.__neg__ (arithmetic)")
+        from . import _pd_arith as A
+        return Series._pd_new(A.unary(self._pd_col, "neg"), self._pd_index.copy(), self._pd_name)
 
     def __pos__(self):
-        raise _unsupported("Series.__pos__ (arithmetic)")
+        from . import _pd_arith as A
+        return Series._pd_new(A.unary(self._pd_col, "pos"), self._pd_index.copy(), self._pd_name)
 
     def __abs__(self):
-        raise _unsupported("Series.__abs__ (arithmetic)")
+        from . import _pd_arith as A
+        return Series._pd_new(A.unary(self._pd_col, "abs"), self._pd_index.copy(), self._pd_name)
+
+    def abs(self):
+        return self.__abs__()
+
+    def add(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.add(level=, axis=)")
+        return self._pd_arith(other, "add", False, fill_value, method=True)
+
+    def sub(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.sub(level=, axis=)")
+        return self._pd_arith(other, "sub", False, fill_value, method=True)
+
+    def subtract(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.subtract(level=, axis=)")
+        return self._pd_arith(other, "sub", False, fill_value, method=True)
+
+    def mul(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.mul(level=, axis=)")
+        return self._pd_arith(other, "mul", False, fill_value, method=True)
+
+    def multiply(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.multiply(level=, axis=)")
+        return self._pd_arith(other, "mul", False, fill_value, method=True)
+
+    def truediv(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.truediv(level=, axis=)")
+        return self._pd_arith(other, "truediv", False, fill_value, method=True)
+
+    def div(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.div(level=, axis=)")
+        return self._pd_arith(other, "truediv", False, fill_value, method=True)
+
+    def divide(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.divide(level=, axis=)")
+        return self._pd_arith(other, "truediv", False, fill_value, method=True)
+
+    def floordiv(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.floordiv(level=, axis=)")
+        return self._pd_arith(other, "floordiv", False, fill_value, method=True)
+
+    def mod(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.mod(level=, axis=)")
+        return self._pd_arith(other, "mod", False, fill_value, method=True)
+
+    def pow(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.pow(level=, axis=)")
+        return self._pd_arith(other, "pow", False, fill_value, method=True)
+
+    def radd(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.radd(level=, axis=)")
+        return self._pd_arith(other, "add", True, fill_value, method=True)
+
+    def rsub(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.rsub(level=, axis=)")
+        return self._pd_arith(other, "sub", True, fill_value, method=True)
+
+    def rmul(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.rmul(level=, axis=)")
+        return self._pd_arith(other, "mul", True, fill_value, method=True)
+
+    def rtruediv(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.rtruediv(level=, axis=)")
+        return self._pd_arith(other, "truediv", True, fill_value, method=True)
+
+    def rdiv(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.rdiv(level=, axis=)")
+        return self._pd_arith(other, "truediv", True, fill_value, method=True)
+
+    def rfloordiv(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.rfloordiv(level=, axis=)")
+        return self._pd_arith(other, "floordiv", True, fill_value, method=True)
+
+    def rmod(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.rmod(level=, axis=)")
+        return self._pd_arith(other, "mod", True, fill_value, method=True)
+
+    def rpow(self, other, level=None, fill_value=None, axis=0):
+        if level is not None or axis not in (0, "index", "rows"):
+            raise _unsupported("Series.rpow(level=, axis=)")
+        return self._pd_arith(other, "pow", True, fill_value, method=True)
 
     def __getattr__(self, name):
         if name == "dt":
             raise AttributeError("Can only use .dt accessor with datetimelike values")
         from ._pd_names import SERIES
         if name in SERIES:
-            raise _unsupported("Series.%s" % name)
+            raise unsupported_name("Series.%s" % name)
         raise AttributeError("'Series' object has no attribute '%s'" % name)
 
     # --- selection ---------------------------------------------------------
@@ -368,17 +708,26 @@ class Series(object):
         return self._pd_take(positions)
 
     def _pd_reindex(self, index):
-        vals = []
+        from . import _pd_category as CT
+        positions = []
         for lab in index.tolist():
             try:
                 p = self._pd_index._pd_positions(lab)
             except KeyError:
-                vals.append(float("nan"))
+                positions.append(-1)
                 continue
             if isinstance(p, list):
                 raise ValueError("cannot reindex on an axis with duplicate labels")
-            vals.append(self._pd_col.value(p))
-        return Series._pd_new(column_from(vals) if vals else self._pd_col.take([]), index, self._pd_name)
+            positions.append(p)
+        col = self._pd_col
+        if isinstance(col, CT.CatColumn):
+            # (a category stays one: its codes taken, -1 for a missing label)
+            pos = np.asarray(positions, dtype=np.int64)
+            codes = np.full(len(pos), -1, dtype=col._pd_codes.dtype)
+            codes[pos >= 0] = col._pd_codes[pos[pos >= 0]]
+            return Series._pd_new(CT.CatColumn(col.dtype, codes), index, self._pd_name)
+        vals = [float("nan") if p < 0 else col.value(p) for p in positions]
+        return Series._pd_new(column_from(vals) if vals else col.take([]), index, self._pd_name)
 
     def _pd_select(self, positions, scalar):
         if scalar:
@@ -415,13 +764,16 @@ class Series(object):
         self._pd_set_positions(positions, value)
 
     def _pd_enlarge(self, label, value):
+        from . import _pd_category as CT
+        if isinstance(value, CT.Categorical):
+            raise CT.refuse("setting values from a Categorical")
         if not _is_scalar(value):
             raise ValueError("setting an array element with a sequence.")
         # (a new label: appended, the dtype kept where the value fits)
         vals = self.tolist() + [value]
         dt = self._pd_col.dtype
         try:
-            col = column_from(vals, dt if infer([value]) == dt or (dt == "float64" and infer([value]) == "int64") else None)
+            col = column_from(vals, dt if infer([value]) == dt or (dt in FLOATS and infer([value]) in ("int64", "float64")) else None)
         except (TypeError, ValueError):
             col = column_from(vals)
         self._pd_col = col
@@ -440,6 +792,13 @@ class Series(object):
         return _SeriesILoc(self)
 
     # --- time series (design-pandas-xlsx-timeseries PR A) --------------------
+
+    @property
+    def cat(self):
+        from . import _pd_category as CT
+        if not isinstance(self._pd_col, CT.CatColumn):
+            raise AttributeError("Can only use .cat accessor with a 'category' dtype")
+        return CT.CategoricalAccessor(self)
 
     @property
     def dt(self):
@@ -539,6 +898,15 @@ class Series(object):
         as 0.0): an array of the Series' dtype; a str Series gives a '<U'
         array (pandas: a StringArray; Sagebrush's numpy has no object dtype
         yet)."""
+        from . import _pd_category as CT
+        if isinstance(self._pd_col, CT.CatColumn):
+            # (a Categorical of the values in order of first appearance, missing once, all the categories kept)
+            seen, keep = set(), []
+            for i, k in enumerate(self._pd_col._pd_codes.tolist()):
+                if k not in seen:
+                    seen.add(k)
+                    keep.append(i)
+            return CT.Categorical._pd_from_column(self._pd_col.take(keep))
         col = self._pd_col
         seen = {}
         keep = []
@@ -579,6 +947,96 @@ class Series(object):
             self._pd_col, self._pd_index = out._pd_col, out._pd_index
             return None
         return out
+
+    def value_counts(self, normalize=False, sort=True, ascending=False, bins=None, dropna=True):
+        """Each distinct value's count (or share of all, normalize=True),
+        most frequent first, ties in order of first appearance (pandas'
+        stable sort); the values become the index, named after the Series."""
+        if bins is not None:
+            raise _unsupported("Series.value_counts(bins=) (an IntervalIndex)")
+        first, counts = CB.count_values(self._pd_col, dropna)
+        order = list(range(len(counts)))
+        if sort:
+            order.sort(key=lambda k: counts[k] if ascending else -counts[k])
+        index = Index(self._pd_col.take([first[k] for k in order]), name=self._pd_name)
+        n = np.array([counts[k] for k in order], dtype=np.int64)
+        if normalize:
+            return Series._pd_new(Column("float64", n / n.sum() if len(n) else np.array([], dtype=np.float64)), index, "proportion")
+        return Series._pd_new(Column("int64", n), index, "count")
+
+    def drop(self, labels=None, *, axis=0, index=None, columns=None, level=None, inplace=_INPLACE, errors="raise"):
+        """Without the rows of labels (or index=; columns= is a frame's and
+        ignored here), every row of a repeated label."""
+        inplace = inplace_given(inplace, "Series.drop")
+        if level is not None:
+            raise _unsupported("Series.drop(level=)")
+        if axis not in (0, "index", "rows"):
+            raise ValueError("No axis named %s for object type Series" % (axis,))
+        if labels is not None:
+            if index is not None or columns is not None:
+                raise ValueError("Cannot specify both 'labels' and 'index'/'columns'")
+        elif index is None and columns is None:
+            raise ValueError("Need to specify at least one of 'labels', 'index' or 'columns'")
+        else:
+            labels = index
+        if labels is None:
+            out = self.copy()
+        else:
+            keep = CB.keep_positions(self._pd_index, labels, errors)
+            out = Series._pd_new(self._pd_col.take(keep), CB.kept_index(self._pd_index, keep), self._pd_name)
+        if inplace:
+            self._pd_col, self._pd_index = out._pd_col, out._pd_index
+            return None
+        return out
+
+    def describe(self, percentiles=None, include=None, exclude=None):
+        """count, mean, std, min, the percentiles and max of a numeric
+        Series (float64); count, unique, top and freq of any other (see
+        _pd_stats)."""
+        qs = ST.refine_percentiles(percentiles)
+        if include is not None or exclude is not None:
+            import warnings
+            from .errors import Pandas4Warning
+            warnings.warn("The 'include' and 'exclude' arguments are deprecated for Series.describe and will be removed "
+                          "in a future version. These arguments have no effect on Series and will be removed.",
+                          Pandas4Warning, stacklevel=2)
+        names, values, forced = ST.describe_column(self._pd_col, qs, ST.format_percentiles(qs), "Series.describe")
+        return Series._pd_new(ST.describe_values(values, forced, ST.is_numeric(self._pd_col.dtype)), Index(names), self._pd_name)
+
+    def corr(self, other, method="pearson", min_periods=None):
+        """Pearson's correlation with other over the labels both have and the
+        rows where both are present (see _pd_stats.series_corr); NaN with
+        fewer than min_periods of them."""
+        if not isinstance(other, Series):
+            raise _unsupported("Series.corr of a %s" % type(other).__name__)
+        a, b = self._pd_col, other._pd_col
+        if not self._pd_index.equals(other._pd_index):
+            if not self._pd_index.is_unique or not other._pd_index.is_unique:
+                raise _unsupported("Series.corr of Series with repeated labels")
+            labels = [lab for lab in self._pd_index.tolist() if lab in other._pd_index]
+            a = a.take([self._pd_index._pd_positions(lab) for lab in labels])
+            b = b.take([other._pd_index._pd_positions(lab) for lab in labels])
+        if not len(a):
+            return float("nan")
+        x, y = ST.float_columns([a, b], "Series.corr")
+        ST.check_method(method, "Series.corr")
+        return ST.series_corr(x, y, method, min_periods)
+
+    def groupby(self, by=None, level=None, *, as_index=True, sort=True, group_keys=True, observed=True, dropna=True):
+        """The Series grouped by one key (a Series of the same labels, a list
+        of keys, or the index with level=0); see _pd_groupby."""
+        from ._pd_groupby import group_series
+        return group_series(self, by, level, as_index, sort, group_keys, observed, dropna)
+
+    def memory_usage(self, index=True, deep=False):
+        """The bytes pandas counts for the values (and the index); see
+        _pd_info."""
+        if deep:
+            INF.check_deep("Series.memory_usage(deep=True)", [self._pd_col], self._pd_index if index else None)
+        return INF.column_nbytes(self._pd_col) + (INF.index_nbytes(self._pd_index) if index else 0)
+
+    def info(self, verbose=None, buf=None, max_cols=None, memory_usage=None, show_counts=True):
+        return INF.series_info(self, verbose, buf, max_cols, memory_usage, show_counts)
 
     # --- reprs -------------------------------------------------------------
 
@@ -622,9 +1080,10 @@ _ObjectDtype = _ObjectDtypeType()
 
 def dtype_object(d):
     """The dtype object pandas shows for a column dtype."""
-    if d in INTS or d in ("float64", "bool"):
+    if d in INTS or d in FLOATS or d == "bool":
         return np.dtype(d)
-    return d if d is STR or d is DT else _ObjectDtype
+    from ._pd_category import CategoricalDtype
+    return d if d is STR or d is DT or isinstance(d, CategoricalDtype) else _ObjectDtype
 
 
 def _astype(col, dtype):
@@ -653,12 +1112,102 @@ def _export(col, what, readonly=True):
     return a
 
 
+def take_positions(indices, n):
+    """take's positions: numbers as integers (a float truncated), negative
+    ones from the end, each within n (pandas' IndexError otherwise)."""
+    from ._pd_index import Index
+    if isinstance(indices, (Series, Index)):
+        indices = indices.tolist()
+    if isinstance(indices, np.ndarray):
+        vals = indices.tolist()
+    elif isinstance(indices, (list, tuple, range)):
+        vals = list(indices)
+    else:
+        # (a scalar: pandas casts it with numpy, whose 0-d result has no length)
+        _intp(indices)
+        raise TypeError("len() of unsized object")
+    out = []
+    for i in vals:
+        i = _intp(i)
+        if i < -n or i >= n:
+            raise IndexError("indices are out-of-bounds")
+        out.append(i + n if i < 0 else i)
+    return out
+
+
+def _intp(v):
+    # (one position as numpy's cast to intp: a float truncates, NaN and None are int()'s errors)
+    if v is None:
+        raise TypeError("int() argument must be a string, a bytes-like object or a real number, not 'NoneType'")
+    if isinstance(v, (float, np.floating)) and v != v:
+        raise ValueError("cannot convert float NaN to integer")
+    if isinstance(v, (str, bool, int, float, np.integer, np.floating, np.bool_)):
+        return int(v)
+    raise TypeError("int() argument must be a string, a bytes-like object or a real number, not '%s'" % type(v).__name__)
+
+
+def with_na_value(col, na_value):
+    """col with its missing values replaced by na_value (to_numpy's), the
+    dtype kept where it holds the value (a float column filled with an int
+    stays float64), else inferred."""
+    missing = col.isna().tolist()
+    if not any(missing):
+        return col
+    vals = [na_value if m else v for v, m in zip(col.tolist(), missing)]
+    d = infer(vals)
+    if d in ("int64", "float64") and col.dtype in FLOATS:
+        d = col.dtype
+    return column_from(vals, d)
+
+
+def export_as(cols, dtype, what):
+    """to_numpy(dtype=) of columns, as a new 2-D array: numeric and bool
+    columns converted one by one with numpy's casts, str columns as their
+    '<U' array for dtype=str. Other conversions go through pandas' object
+    arrays, which Sagebrush's numpy doesn't have yet."""
+    if dtype is object or (isinstance(dtype, str) and dtype in ("O", "object")):
+        raise _unsupported("%s with dtype=object (Sagebrush's numpy has no object dtype yet)" % what)
+    n, m = (len(cols[0]) if cols else 0), len(cols)
+    if dtype is str or (isinstance(dtype, str) and dtype in ("str", "U", "<U")):
+        if cols and all(c.dtype is STR for c in cols):
+            parts = [_export(c, what, False) for c in cols]
+            return np.array([[p[i] for p in parts] for i in range(n)], dtype=str) if n else np.empty((0, m), dtype="<U1")
+        if any(c.is_list or c.dtype is DT for c in cols):
+            raise _unsupported("%s of str mixed with other columns, or of object or datetime columns" % what)
+        return _stacked(cols, np.result_type(*[c._pd_values.dtype for c in cols])).astype(str)
+    target = np.dtype(dtype)
+    if target.kind not in "biuf":
+        raise _unsupported("%s with dtype=%s" % (what, target))
+    if any(c.is_list or c.dtype is DT for c in cols):
+        raise _unsupported("%s of str, object or datetime columns to a numeric dtype (pandas converts an object array)" % what)
+    if target.kind in "iu" and any(c.isna().any() for c in cols):
+        raise _unsupported("%s of missing values to an integer dtype (numpy's cast of NaN; give na_value=)" % what)
+    return _stacked(cols, target)
+
+
+def is_int_target(dtype):
+    """Whether to_numpy's dtype is a numpy integer one."""
+    if dtype is object or dtype is str or (isinstance(dtype, str) and dtype in ("O", "object", "str", "U", "<U")):
+        return False
+    return np.dtype(dtype).kind in "iu"
+
+
+def _stacked(cols, dtype):
+    a = np.empty((len(cols[0]) if cols else 0, len(cols)), dtype=dtype)
+    for j, c in enumerate(cols):
+        a[:, j] = c._pd_values.astype(dtype)
+    return a
+
+
 def _broadcast(value, n):
     from ._pd_frame import DataFrame
+    from . import _pd_category as CT
     if isinstance(value, DataFrame):
         raise _unsupported("setting a Series from a DataFrame")
     if isinstance(value, Series):
         vals = value.tolist()
+    elif isinstance(value, CT.Categorical):
+        raise CT.refuse("setting values from a Categorical")
     elif isinstance(value, np.ndarray):
         vals = value.tolist()
     elif isinstance(value, (list, tuple, range)):
@@ -733,23 +1282,25 @@ class _SeriesLoc(object):
 
 
 def diff_column(col, periods):
-    """Column.diff: float64, NaN where the value `periods` away is missing
-    or past either end (pandas 3.1: int64 and float64 alike)."""
+    """Column.diff: float64 (float32 for a float32 column, computed in it),
+    NaN where the value `periods` away is missing or past either end (pandas
+    3.1: the integers and float64 alike)."""
     if isinstance(periods, bool) or not isinstance(periods, (int, np.integer)):
         raise ValueError("periods must be an integer")
     periods = int(periods)
     if col.dtype is DT:
         raise _unsupported("diff of a datetime64[us] column (a Timedelta column)")
-    if col.dtype not in INTS and col.dtype != "float64":
+    if col.dtype not in INTS and col.dtype not in FLOATS:
         raise _unsupported("diff of a %s column" % (col.dtype,))
-    v = col._pd_values.astype(np.float64)
+    d = "float32" if col.dtype == "float32" else "float64"
+    v = col._pd_values.astype(d)
     n = len(v)
-    out = np.full(n, np.nan, dtype=np.float64)
+    out = np.full(n, np.nan, dtype=d)
     if periods >= 0 and periods < n:
         out[periods:] = v[periods:] - v[:n - periods]
     elif periods < 0 and -periods < n:
         out[:n + periods] = v[:n + periods] - v[-periods:]
-    return Column("float64", out)
+    return Column(d, out)
 
 
 class _DatetimeProperties(object):
@@ -782,4 +1333,4 @@ class _DatetimeProperties(object):
         return Series._pd_new(Column(STR, [float("nan") if t is NaT else t.strftime(date_format) for t in s._pd_col.tolist()]), s._pd_index.copy(), s._pd_name)
 
     def __getattr__(self, name):
-        raise _unsupported("Series.dt.%s" % name)
+        raise unsupported_name("Series.dt.%s" % name)
