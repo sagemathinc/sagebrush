@@ -29,8 +29,8 @@
 // Errors are SyncErrors with fixed messages; the E2E core's own code goes in `detail.reason`.
 
 import { SyncError } from "../sync-protocol/protocol.ts";
-import { useCrypto, webCrypto } from "../workspace/fleet/core/index.mjs";
 import * as E from "../workspace/e2e/core/index.mjs";
+import { e2eCore } from "../workspace/e2e/core-ready.ts";
 
 export const E2E = Object.freeze({
   /** an entry's bytes, as the core's signed objects are bounded */
@@ -88,11 +88,10 @@ export const E2E_KEEP = Object.freeze(["e2e_chain", "e2e_keyrings", "e2e_wrapper
 /** How long an expired enrollment session's rows stay, refusing its reuse, before they are swept. */
 const TOMBSTONE_MS = 24 * 3600_000;
 
-// (the fleet core's one crypto backend, installed once per isolate: the same object again is a no-op)
-let backend: ReturnType<typeof webCrypto> | null = null;
+// (the fleet core's one crypto backend, installed once per isolate through the page's one way into the fleet core:
+// the same object again is a no-op)
 function ready() {
-  backend ??= webCrypto();
-  useCrypto(backend);
+  e2eCore();
 }
 
 const ID = /^[a-z2-7]{25}[aeimquy4]$/;
