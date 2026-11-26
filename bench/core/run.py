@@ -1580,8 +1580,107 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
                 if cours and ctheirs:
                     rec["ratio_best"] = round(min(cours) / min(ctheirs), 4)
             rec["ratio_basis"] = "cold"
+    if rec["status"] == "ok" and row.get("ratio", True) is not False:
+        coarse_bounds(rec)
     rec["complete"] = True
     return rec
+
+
+# A timed value within this many ticks of its timer's resolution (Magma's
+# 10 ms clock against a stream input timed once) is too coarse for a ratio:
+# the headline becomes a bound.
+COARSE_TICKS = 5
+
+
+def timed_value(rec: dict, b: str) -> tuple[float, float, list | None] | None:
+    """What a headline ratio uses for backend b, the resolution of the timer
+    it was read with (seconds), and for a stream row the per-input times it
+    pairs (inputs 1 .. K-1); None without a timing record.  A batched
+    median's resolution is the granularity over the repetitions per batch;
+    a stream input, a cold first op and a per-op sample are single
+    readings, so theirs is the granularity."""
+    t = rec["backends"].get(b, {}).get("time", {})
+    tm = t.get("timing") or {}
+    g = tm.get("granularity")
+    if not g or t.get("status") != "ok":
+        return None
+    if rec.get("ratio_basis") == "cold":
+        c = rec["backends"][b].get("check", {}).get("seconds_cold")
+        return None if c is None else (c, g, None)
+    if tm.get("mode") == "stream":
+        smp = [x[0] for x in tm.get("samples") or []][1:]
+        if not smp:
+            return None
+        return (sorted(smp)[(len(smp) - 1) // 2], g, smp)
+    if t.get("seconds") is None:
+        return None
+    if tm.get("mode") == "batched":
+        return (t["seconds"], g / max(1, int(tm.get("reps") or 1)), None)
+    return (t["seconds"], g, None)
+
+
+def coarse_bounds(rec: dict) -> None:
+    """Each headline ratio whose terms are within COARSE_TICKS of their
+    timers' resolution, as a bound instead: ratio_<x>_bound = {op, value,
+    ticks}, its number kept as ratio_<x>_quantized.  A coarse reference
+    gives ">" ours / (reference + its resolution); coarse ours, "<" (ours +
+    its resolution) / reference; both, no bound (op null).  A stream row's
+    bound is the median of the per-input bounds."""
+
+    def argmin(names, value):
+        got = {b: value(b) for b in names}
+        got = {b: v for b, v in got.items() if v}
+        return min(got, key=got.get) if got else None
+
+    if rec.get("ratio_basis") == "cold":
+        cold = lambda b: rec["backends"].get(b, {}).get("check", {}).get("seconds_cold")  # noqa: E731
+        ref = argmin(("magma", "flint"), cold)
+        best = (argmin(("native", "native-n"), cold), argmin(("magma", "flint", "flint-n"), cold))
+    else:
+        ref = (rec.get("best_ref") or {}).get("backend")
+        best = ((rec.get("best_ours") or {}).get("backend"), (rec.get("best_theirs") or {}).get("backend"))
+    zero = None
+    if ref is None:
+        # (every reference read 0, below its timer: no ratio was formed, but
+        # the reference's time is under one tick, so ours / tick bounds it)
+        zero = next(
+            (b for b in ("magma", "flint", "blas") if (timed_value(rec, b) or (1,))[0] == 0),
+            None,
+        )
+        ref = zero
+    pairs = {"ratio_" + b.replace("-", "_"): (b, ref) for b in ("user", "native", "native-host", "wasm")}
+    pairs["ratio_best"] = best
+    for key, (num, den) in pairs.items():
+        if not (num and den) or (key not in rec and not (zero and key != "ratio_best" and timed_value(rec, num))):
+            continue
+        a, r = timed_value(rec, num), timed_value(rec, den)
+        if a is None or r is None:
+            continue
+        ca, cr = a[0] < COARSE_TICKS * a[1], r[0] < COARSE_TICKS * r[1]
+        if not (ca or cr):
+            continue
+        ticks = {num: round(a[0] / a[1], 2), den: round(r[0] / r[1], 2)}
+        if ca and cr:
+            op, value = None, None
+        else:
+            if a[2] is not None and r[2] is not None and len(a[2]) == len(r[2]):
+                pairs_ = list(zip(a[2], r[2]))
+            else:
+                pairs_ = [(a[0], r[0])]
+            if cr:
+                op, each = ">", [o / (x + r[1]) for o, x in pairs_]
+            else:
+                op, each = "<", [(o + a[1]) / x for o, x in pairs_ if x > 0]
+            each.sort()
+            value = round(each[(len(each) - 1) // 2], 4) if each else None
+            if value is None:
+                op = None
+        # (the numbers it replaces, a stream row's ratio of medians too, kept
+        # under their own names: quantized, not measured)
+        for k in (key, key + "_of_medians"):
+            if k in rec:
+                rec[k.replace(key, key + "_quantized", 1)] = rec.pop(k)
+        rec[key + "_bound"] = {"op": op, "value": value, "ticks": ticks, "within": COARSE_TICKS}
 
 
 def write_atomic(path: Path, text: str) -> None:
@@ -1701,10 +1800,15 @@ def summary(out: Path, items: dict) -> None:
         "",
     ]
     gaps = [r for r in recs if (r.get("ratio_best") or 0) > 2]
+    # (a best/best that is only a bound above 2 is a gap too, listed apart)
+    bound_gaps = [r for r in recs if (r.get("ratio_best_bound") or {}).get("op") == ">" and r["ratio_best_bound"]["value"] > 2]
     gaps.sort(key=lambda r: -r["ratio_best"])
     lines += [
         f"- **{r['row']}** {r['size']} (n={r['n']}): best/best {r['ratio_best']:.2f}x ({r['best_ours']['backend']} against {r['best_theirs']['adapter']}); native 1-thread {r.get('ratio_native', 0):.2f}x, user {r.get('ratio_user', 0):.2f}x, wasm {r.get('ratio_wasm', 0):.2f}x"
         for r in gaps
+    ] + [
+        f"- **{r['row']}** {r['size']} (n={r['n']}): best/best > {r['ratio_best_bound']['value']:.2f}x, a bound (a term within {r['ratio_best_bound']['within']} timer ticks)"
+        for r in bound_gaps
     ] or ["None among the rows with a native driver."]
     lines += [
         "",
@@ -1727,6 +1831,10 @@ def summary(out: Path, items: dict) -> None:
         # (a cold row's ratios are the first calls', marked; the warm ones
         # beside them)
         def ratio(key, r=r):
+            bd = r.get(key + "_bound")
+            if key not in r and bd:
+                # (a ratio whose terms are within a few timer ticks: a bound)
+                return f"{bd['op']} {bd['value']} (timer)" if bd["op"] else "— (timer)"
             text = str(r.get(key, "—"))
             pi = r.get("per_input_" + key[len("ratio_"):])
             if pi:

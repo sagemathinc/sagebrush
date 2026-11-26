@@ -1340,6 +1340,123 @@ class SweepSummary(unittest.TestCase):
         )
 
 
+class CoarseBounds(unittest.TestCase):
+    """coarse_bounds: a headline ratio whose terms are within COARSE_TICKS of
+    their timers' resolution becomes a bound (Magma's 10 ms clock against a
+    stream input timed once)."""
+
+    def stream(self, samples, g):
+        return {"status": "ok", "seconds": sorted(samples)[len(samples) // 2], "timing": {"granularity": g, "mode": "stream", "samples": [[x] for x in samples]}}
+
+    def timed(self, seconds, g, mode="per-op", reps=None):
+        tm = {"granularity": g, "mode": mode}
+        if reps:
+            tm["reps"] = reps
+        return {"status": "ok", "seconds": seconds, "timing": tm}
+
+    def rec(self, user, magma, **extra):
+        r = {"status": "ok", "backends": {"user": {"time": user}, "magma": {"time": magma}}, "best_ref": {"backend": "magma"}, "ratio_user": 1.0}
+        r.update(extra)
+        return r
+
+    def test_a_coarse_stream_reference_gives_a_lower_bound(self):
+        # (inputs 1..3 paired: 1.0/0.02, 1.2/0.01, 1.1/0.02; input 0 is the cold one)
+        r = self.rec(self.stream([9.0, 1.0, 1.2, 1.1], 1e-7), self.stream([0.5, 0.01, 0.0, 0.01], 0.01), ratio_user=117.0, ratio_user_of_medians=110.0)
+        run.coarse_bounds(r)
+        self.assertNotIn("ratio_user", r)
+        self.assertEqual(r["ratio_user_bound"]["op"], ">")
+        self.assertAlmostEqual(r["ratio_user_bound"]["value"], 55.0)
+        self.assertEqual(r["ratio_user_bound"]["ticks"]["magma"], 1.0)
+        self.assertEqual((r["ratio_user_quantized"], r["ratio_user_quantized_of_medians"]), (117.0, 110.0))
+
+    def test_coarse_ours_gives_an_upper_bound(self):
+        r = self.rec(self.timed(0.02, 0.01), self.timed(1.0, 0.01))
+        run.coarse_bounds(r)
+        self.assertEqual(r["ratio_user_bound"]["op"], "<")
+        self.assertAlmostEqual(r["ratio_user_bound"]["value"], 0.03)
+
+    def test_both_coarse_gives_no_bound(self):
+        r = self.rec(self.timed(0.02, 0.01), self.timed(0.03, 0.01))
+        run.coarse_bounds(r)
+        self.assertNotIn("ratio_user", r)
+        self.assertEqual((r["ratio_user_bound"]["op"], r["ratio_user_bound"]["value"]), (None, None))
+
+    def test_fine_terms_and_batched_repetitions_keep_the_number(self):
+        # (5 ticks exactly is fine; a batched median's resolution is g / reps:
+        # 0.002 s at 100 reps per batch of a 10 ms clock is 20 ticks)
+        for user, magma in (
+            (self.timed(1.0, 1e-7), self.timed(0.05, 0.01)),
+            (self.timed(1.0, 1e-7), self.timed(0.002, 0.01, "batched", 100)),
+        ):
+            r = self.rec(user, magma)
+            run.coarse_bounds(r)
+            self.assertEqual(r["ratio_user"], 1.0)
+            self.assertNotIn("ratio_user_bound", r)
+
+    def test_a_reference_that_read_zero_bounds_the_ratio(self):
+        # (no best_ref was formed: every reference sample read 0)
+        r = self.rec(self.stream([9.0, 0.5, 0.6, 0.5], 1e-7), self.stream([0.0, 0.0, 0.0, 0.0], 0.01))
+        del r["best_ref"], r["ratio_user"]
+        run.coarse_bounds(r)
+        self.assertEqual(r["ratio_user_bound"]["op"], ">")
+        self.assertAlmostEqual(r["ratio_user_bound"]["value"], 50.0)
+        self.assertNotIn("ratio_user_quantized", r)
+
+    def test_a_cold_rows_first_ops(self):
+        r = {
+            "status": "ok",
+            "ratio_basis": "cold",
+            "ratio_user": 100.0,
+            "backends": {
+                "user": {"check": {"seconds_cold": 0.5}, "time": self.timed(0.4, 1e-7)},
+                "magma": {"check": {"seconds_cold": 0.005}, "time": self.timed(0.2, 0.01)},
+            },
+        }
+        run.coarse_bounds(r)
+        self.assertEqual(r["ratio_user_bound"]["op"], ">")
+        self.assertAlmostEqual(r["ratio_user_bound"]["value"], round(0.5 / 0.015, 4))
+
+    def test_best_over_best(self):
+        r = self.rec(self.timed(1.0, 1e-7), self.timed(1.0, 0.01))
+        r["backends"]["native"] = {"time": self.timed(0.5, 1e-7)}
+        r["backends"]["magma"]["time"] = self.stream([0.0, 0.01, 0.01], 0.01)
+        r.update(best_ours={"backend": "native"}, best_theirs={"backend": "magma"}, ratio_best=50.0)
+        run.coarse_bounds(r)
+        self.assertEqual(r["ratio_best_bound"]["op"], ">")
+        self.assertAlmostEqual(r["ratio_best_bound"]["value"], 25.0)
+
+    def test_a_point_marks_it_and_the_summary_shows_it(self):
+        # (through point(): a stream row whose reference reads one tick)
+        row = dict(ROW, stream=True, variants=3)
+
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": "5"}
+            if mode == "once":
+                return {"status": "ok", "signature": "s"}
+            smp = [[2.0], [1.0], [1.0]] if b == "user" else [[0.01], [0.01], [0.01]]
+            g = 1e-7 if b == "user" else 0.01
+            return {"status": "ok", "seconds": smp[1][0], "signature": "K:1", "steal": 0.0, "timing": {"granularity": g, "mode": "stream", "k": 3, "samples": smp}}
+
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+            mock.patch.object(run, "EXPECTED", None),
+            mock.patch.object(run, "units", lambda *a: ("unmetered", "")),
+        ):
+            rec = run.point(row, "s", ["user", "magma"], {"artifacts": ARTS})
+        self.assertEqual(rec["status"], "ok")
+        self.assertEqual(rec["ratio_user_bound"]["op"], ">")
+        self.assertAlmostEqual(rec["ratio_user_bound"]["value"], 50.0)
+        d = Path(tempfile.mkdtemp(prefix="bench-core-bound-"))
+        self.addCleanup(shutil.rmtree, d, True)
+        (d / "rows").mkdir()
+        rec.update(item="poly0", commit="c" * 40, machine={"label": "x86", "cpu": "Xeon", "arch": "x86_64", "nproc": 16, "flags": []}, engine_pin={"ok": False, "policy": "track", "sha256": "b" * 64})
+        (d / "rows/poly_fp_mul-s.json").write_text(json.dumps(rec))
+        run.summary(d, {})
+        self.assertIn("> 50.0 (timer)", (d / "summary.md").read_text())
+
+
 class WorkingSet(unittest.TestCase):
     def test_every_rows_formula_at_every_size(self):
         rows = json.loads((Path(run.__file__).parent / "items.json").read_text())["rows"]
