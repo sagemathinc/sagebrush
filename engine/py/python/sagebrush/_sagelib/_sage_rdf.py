@@ -610,6 +610,46 @@ class RealDoubleElement(float):
         """
         return float(self).is_integer()
 
+    def is_infinity(self):
+        """Whether +infinity or -infinity.
+
+        EXAMPLES::
+
+            sage: RDF(1).is_infinity(), RDF(-oo).is_infinity(), RDF(float('nan')).is_infinity()
+            (False, True, False)
+        """
+        return math.isinf(self)
+
+    def is_positive_infinity(self):
+        """Whether +infinity.
+
+        EXAMPLES::
+
+            sage: RDF(oo).is_positive_infinity(), RDF(-oo).is_positive_infinity()
+            (True, False)
+        """
+        return float(self) == math.inf
+
+    def is_negative_infinity(self):
+        """Whether -infinity.
+
+        EXAMPLES::
+
+            sage: RDF(-oo).is_negative_infinity(), RDF(oo).is_negative_infinity()
+            (True, False)
+        """
+        return float(self) == -math.inf
+
+    def is_NaN(self):
+        """Whether NaN.
+
+        EXAMPLES::
+
+            sage: RDF(float('nan')).is_NaN(), RDF(1).is_NaN()
+            (True, False)
+        """
+        return math.isnan(self)
+
     def real(self):
         """The number itself.
 
@@ -1024,6 +1064,51 @@ class ComplexDoubleElement:
             (True, True, False)
         """
         return not self
+
+    def is_infinity(self):
+        """Whether a part is infinite, as Sage's.
+
+        EXAMPLES::
+
+            sage: i, n = float('inf'), float('nan')
+            sage: CDF(0, -i).is_infinity(), CDF(i, n).is_infinity(), CDF(1, 2).is_infinity()
+            (True, True, False)
+        """
+        return math.isinf(self._z.real) or math.isinf(self._z.imag)
+
+    def is_positive_infinity(self):
+        """Whether self is +infinity: the real part +infinity, the imaginary
+        part 0, as Sage's.
+
+        EXAMPLES::
+
+            sage: i, n = float('inf'), float('nan')
+            sage: CDF(i, 0).is_positive_infinity(), CDF(i, n).is_positive_infinity(), CDF(0, i).is_positive_infinity()
+            (True, False, False)
+        """
+        return self._z.real == math.inf and self._z.imag == 0
+
+    def is_negative_infinity(self):
+        """Whether self is -infinity: the real part -infinity, the imaginary
+        part 0, as Sage's.
+
+        EXAMPLES::
+
+            sage: CDF(float('-inf'), 0).is_negative_infinity(), CDF(float('inf'), 0).is_negative_infinity()
+            (True, False)
+        """
+        return self._z.real == -math.inf and self._z.imag == 0
+
+    def is_NaN(self):
+        """Whether a part is NaN, as Sage's.
+
+        EXAMPLES::
+
+            sage: n = float('nan')
+            sage: CDF(1, n).is_NaN(), CDF(float('inf'), n).is_NaN(), CDF(1, 2).is_NaN()
+            (True, True, False)
+        """
+        return math.isnan(self._z.real) or math.isnan(self._z.imag)
 
     @staticmethod
     def _of(z):

@@ -792,6 +792,46 @@ class RealNumber(float):
         """
         return float(self) == 0
 
+    def is_infinity(self):
+        """Whether +infinity or -infinity.
+
+        EXAMPLES::
+
+            sage: RR(1).is_infinity(), RR('-inf').is_infinity(), RR('nan').is_infinity()
+            (False, True, False)
+        """
+        return _m.isinf(self)
+
+    def is_positive_infinity(self):
+        """Whether +infinity.
+
+        EXAMPLES::
+
+            sage: RR('inf').is_positive_infinity(), RR('-inf').is_positive_infinity(), RR(1).is_positive_infinity()
+            (True, False, False)
+        """
+        return float(self) == _m.inf
+
+    def is_negative_infinity(self):
+        """Whether -infinity.
+
+        EXAMPLES::
+
+            sage: RR('-inf').is_negative_infinity(), RR('inf').is_negative_infinity()
+            (True, False)
+        """
+        return float(self) == -_m.inf
+
+    def is_NaN(self):
+        """Whether NaN.
+
+        EXAMPLES::
+
+            sage: RR('nan').is_NaN(), RR('inf').is_NaN(), RR(1).is_NaN()
+            (True, False, False)
+        """
+        return _m.isnan(self)
+
     def str(self, base=10, digits=0, *args, no_sci=None, e=None, truncate=False, skip_zeroes=False):
         """The decimal string (with digits significant digits).
 
