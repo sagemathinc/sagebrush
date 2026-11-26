@@ -50,3 +50,14 @@ CASES = [
     ("degenerate", "import warnings\nwith warnings.catch_warnings(record=True) as w:\n    warnings.simplefilter('always')\n    r = stats.bootstrap((np.ones(6),), np.mean, n_resamples=50, rng=21)\nw = [x for x in w if type(x.message).__name__ != 'RuntimeWarning']\nout = res(r) + [[type(x.message).__name__ for x in w], [str(x.message)[:60] for x in w]]"),
     ("binom-rvs", "out = stats.binom.rvs(20, 0.3, size=8, random_state=22).tolist()"),
 ]
+# (rows from the numeric review: the method's case, a vector statistic, NaN, BCa paired, one resample)
+CASES += [
+    ("method-case-BCa", "out = res(stats.bootstrap((X,), np.mean, n_resamples=199, rng=41, method='BCa'))"),
+    ("method-case-upper", "out = res(stats.bootstrap((X,), np.mean, n_resamples=199, rng=42, method='PERCENTILE'))"),
+    ("vector-statistic", "f = lambda x, axis=-1: np.stack([np.mean(x, axis=axis), np.std(x, axis=axis, ddof=1)]); r = stats.bootstrap((X,), f, n_resamples=199, rng=43); out = res(r) + [list(np.shape(r.standard_error))]"),
+    ("nan-in-data", "import warnings\nwith warnings.catch_warnings(record=True) as w:\n    warnings.simplefilter('always')\n    r = stats.bootstrap((np.append(X[:6], np.nan),), np.mean, n_resamples=99, rng=44)\nw = [x for x in w if type(x.message).__name__ != 'RuntimeWarning']\nout = res(r) + [[type(x.message).__name__ for x in w]]"),
+    ("cl-0999", "out = res(stats.bootstrap((X,), np.mean, n_resamples=999, rng=45, confidence_level=0.999))"),
+    ("bca-paired-two", "out = res(stats.bootstrap((X, Y), lambda a, b, axis=-1: np.corrcoef(a, b)[0, 1] if np.ndim(a) == 1 else np.array([np.corrcoef(p, q)[0, 1] for p, q in zip(a, b)]), n_resamples=199, rng=46, paired=True, vectorized=True))"),
+    ("one-resample", "out = res(stats.bootstrap((X,), np.mean, n_resamples=1, rng=47, method='percentile'))"),
+    ("err-cl", "stats.bootstrap((X,), np.mean, rng=0, confidence_level=1.5); out = 0"),
+]

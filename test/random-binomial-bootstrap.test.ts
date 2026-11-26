@@ -10,7 +10,7 @@ import { join } from "node:path";
 // bootstrap's resamples are SciPy's exactly (the same draws: each case's distribution hash); its values agree
 // to 1e-12 relative, the last bits being where SciPy's own arithmetic differs: ndtri and ndtr in the BCa
 // interval, and NumPy's sums along a strided axis (the two cases of 2-d data, whose distributions are compared
-// by value, not by hash).
+// by value, not by hash), and np.corrcoef's (the paired BCa case, likewise).
 const ROOT = join(__dirname, "..", "..");
 const CLI = join(__dirname, "..", "src", "cli.js");
 const oracle = JSON.parse(readFileSync(join(ROOT, "test", "stats-oracle.json"), "utf8"));
@@ -58,7 +58,7 @@ test("scipy.stats.bootstrap: SciPy's resamples exactly, its intervals and standa
   const want = oracle["scipy_bootstrap_cases.py"];
   const got = runCases("scipy_bootstrap_cases.py");
   assert.deepEqual(Object.keys(got).sort(), Object.keys(want).sort());
-  const byValue = new Set(["axis-2d", "axis-0-columns"]);
+  const byValue = new Set(["axis-2d", "axis-0-columns", "bca-paired-two"]);
   const bad: string[] = [];
   const cmp = (w: any, g: any, path: string) => {
     if (Array.isArray(w) && Array.isArray(g) && w.length === g.length) { w.forEach((x, i) => cmp(x, g[i], `${path}[${i}]`)); return; }
@@ -70,4 +70,17 @@ test("scipy.stats.bootstrap: SciPy's resamples exactly, its intervals and standa
   };
   for (const cid of Object.keys(want)) cmp(want[cid], got[cid], cid);
   assert.deepEqual(bad, []);
+});
+
+test("numpy.random binomial: an array draw past 2**53 refused, never rounded (Sagebrush's int64 arrays are doubles)", () => {
+  const out = execFileSync(process.execPath, [CLI, "-c", `
+import numpy as np
+rs = np.random.RandomState(48)
+print(rs.binomial(2**60, 1e-15, size=2).tolist())
+try:
+    rs.binomial(2**53 + 3, 1.0, size=2)
+except NotImplementedError as e:
+    print("refused:", e)
+`], { encoding: "utf8" });
+  assert.equal(out, "[1092, 1158]\nrefused: int64 values beyond 2**53 are not supported yet\n");
 });

@@ -37,3 +37,22 @@ CASES += [
     ("gen-edges", "g = np.random.default_rng(24); out = [int(g.binomial(0, 0.3)), int(g.binomial(7, 0.0)), int(g.binomial(7, 1.0))] + g.binomial(9, 0.4, size=6).tolist() + [int(g.integers(0, 10**9))]"),
     ("legacy-edges-size", "rs = np.random.RandomState(25); out = rs.binomial(0, 0.3, size=3).tolist() + rs.binomial(7, 1.0, size=3).tolist() + rs.binomial(7, 0.0, size=2).tolist() + [rs.randint(0, 10**9)]"),
 ]
+# (rows from the numeric review: the n p = 30 boundary, huge n, broadcasting, the Generator's edges)
+CASES += [
+    ("np-exactly-30-inv", "rs = np.random.RandomState(31); out = rs.binomial(60, 0.5, size=30).tolist() + [rs.randint(0, 10**9)]"),
+    ("np-30-product", "rs = np.random.RandomState(32); out = [repr(300 * 0.1)] + rs.binomial(300, 0.1, size=30).tolist() + [rs.randint(0, 10**9)]"),
+    ("huge-n-tiny-p", "rs = np.random.RandomState(33); out = rs.binomial(10**12, 1e-11, size=30).tolist() + [rs.randint(0, 10**9)]"),
+    ("n-2pow53-plus", "rs = np.random.RandomState(34); out = rs.binomial(2**53 + 1, 0.5, size=3).tolist() + [rs.randint(0, 10**9)]"),
+    ("n-2pow53-reflect", "rs = np.random.RandomState(48); out = rs.binomial(2**53 + 1, 0.7, size=3).tolist() + [str(rs.binomial(2**53 + 3, 1.0)) for _ in range(2)] + [rs.randint(0, 10**9)]"),
+    ("n-2pow60", "rs = np.random.RandomState(35); out = rs.binomial(2**60, 1e-15, size=3).tolist() + [rs.randint(0, 10**9)]"),
+    ("broadcast-2d", "rs = np.random.RandomState(36); a = rs.binomial(np.array([[5], [500]]), np.array([0.2, 0.7, 0.99])); out = [list(a.shape), str(a.dtype)] + a.ravel().tolist() + [rs.randint(0, 10**9)]"),
+    ("size-mismatch", "rs = np.random.RandomState(37); rs.binomial([1, 2, 3], 0.5, size=2); out = 0"),
+    ("gen-array-edges", "g = np.random.default_rng(38); a = g.binomial([0, 7, 7, 9], [0.3, 0.0, 1.0, 0.4], size=(2, 4)); out = [str(a.dtype)] + a.ravel().tolist() + [int(g.integers(0, 10**9))]"),
+    ("gen-dtype-scalar", "g = np.random.default_rng(39); x = g.binomial(30, 0.6); out = [type(x).__name__, int(x), int(g.integers(0, 10**9))]"),
+    ("gen-huge-n", "g = np.random.default_rng(40); out = g.binomial(2**40, 0.25, size=5).tolist() + [int(g.integers(0, 10**9))]"),
+    # (n past 2**53: the scalar draws exact, a Python int, as strings here (JSON's numbers are doubles); an array
+    # holds a draw only below 2**53, Sagebrush's int64 arrays being doubles; n past int64 refused, as NumPy's)
+    ("n-2pow53-scalar", "rs = np.random.RandomState(48); a = rs.binomial(2**53 + 3, 1.0); b = rs.binomial(2**53 + 1, 0.7); out = [type(a).__name__, str(a), str(b), rs.randint(0, 10**9)]"),
+    ("gen-n-2pow62-reflect", "g = np.random.default_rng(49); out = [str(g.binomial(2**62 + 7, 0.75)), str(g.binomial(2**60 + 1, 0.999999)), str(g.binomial(2**53 + 5, 1 - 2.0**-40)), int(g.integers(0, 10**9))]"),
+    ("n-2pow63", "rs = np.random.RandomState(50); rs.binomial(2**63, 0.5); out = 0"),
+]

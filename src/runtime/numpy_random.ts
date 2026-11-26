@@ -392,10 +392,17 @@ function poisson(g: Gen, lam: number): number {
 }
 
 // NumPy's binomial (random_binomial, distributions.c; the legacy RandomState's too): p reflected to at most 1/2,
-// then inversion when n p <= 30, else Kachitvichyanukul and Schmeiser's BTPE.  n is an integer below 2^53 here,
-// where every product below is the double the C code's int64-times-double gives.
-function binomialInversion(g: Gen, n: number, p: number): number {
-  const q = 1.0 - p, qn = glibcExp(n * crlog(q)), np = n * p;
+// then inversion when n p <= 30, else Kachitvichyanukul and Schmeiser's BTPE.  n is an int64, carried as N: its
+// double (where the C code converts n, rounded to nearest as C rounds) and its integer offsets n + c exactly
+// before the one rounding (where the C code adds in int64 first), so n beyond 2^53 draws NumPy's numbers too.
+type BinomN = { d: number; b: bigint; off: (c: number) => number; gt: (y: number) => boolean };
+function binomN(b: bigint): BinomN {
+  const d = Number(b);
+  if (Number.isSafeInteger(d)) return { d, b, off: (c) => d + c, gt: (y) => y > d };
+  return { d, b, off: (c) => Number(b + BigInt(c)), gt: (y) => BigInt(y) > b };
+}
+function binomialInversion(g: Gen, N: BinomN, p: number): number {
+  const n = N.d, q = 1.0 - p, qn = glibcExp(n * crlog(q)), np = n * p;
   const bound = Math.trunc(Math.min(n, np + 10.0 * Math.sqrt(np * q + 1)));
   let X = 0, px = qn, U = g.nextDouble();
   while (U > px) {
@@ -406,13 +413,14 @@ function binomialInversion(g: Gen, n: number, p: number): number {
       U = g.nextDouble();
     } else {
       U -= px;
-      px = ((n - X + 1) * p * px) / (X * q);
+      px = (N.off(1 - X) * p * px) / (X * q);
     }
   }
   return X;
 }
-function binomialBtpe(g: Gen, n: number, p: number): number {
-  const r = Math.min(p, 1.0 - p), q = 1.0 - r;
+// (p <= 1/2 here: the caller reflects)
+function binomialBtpe(g: Gen, N: BinomN, p: number): number {
+  const n = N.d, r = Math.min(p, 1.0 - p), q = 1.0 - r;
   const fm = n * r + r, m = Math.floor(fm);
   const p1 = Math.floor(2.195 * Math.sqrt(n * r * q) - 4.6 * q) + 0.5;
   const xm = m + 0.5, xl = xm - p1, xr = xm + p1, c = 0.134 + 20.5 / (15.3 + m);
@@ -427,10 +435,7 @@ function binomialBtpe(g: Gen, n: number, p: number): number {
     const u = g.nextDouble() * p4;
     let v = g.nextDouble();
     let y: number;
-    if (u <= p1) {
-      y = Math.floor(xm - p1 * v + u);
-      return p > 0.5 ? n - y : y;
-    }
+    if (u <= p1) return Math.floor(xm - p1 * v + u);
     if (u <= p2) {
       const x = xl + (u - p1) / c;
       v = v * c + 1.0 - Math.abs(m - x + 0.5) / p1;
@@ -442,35 +447,38 @@ function binomialBtpe(g: Gen, n: number, p: number): number {
       v = v * (u - p2) * laml;
     } else {
       y = Math.floor(xr - crlog(v) / lamr);
-      if (y > n || v === 0.0) continue;
+      if (N.gt(y) || v === 0.0) continue;
       v = v * (u - p3) * lamr;
     }
     const k = Math.abs(y - m);
     if (!(k > 20 && k < nrq / 2.0 - 1)) {
-      const s = r / q, aa = s * (n + 1);
+      const s = r / q, aa = s * N.off(1);
       let F = 1.0;
       if (m < y) for (let i = m + 1; i <= y; i++) F *= aa / i - s;
       else if (m > y) for (let i = y + 1; i <= m; i++) F /= aa / i - s;
       if (v > F) continue;
-      return p > 0.5 ? n - y : y;
+      return y;
     }
     const rho = (k / nrq) * ((k * (k / 3.0 + 0.625) + 0.16666666666666666) / nrq + 0.5);
     const t = (-k * k) / (2 * nrq);
     const A = crlog(v);
-    if (A < t - rho) return p > 0.5 ? n - y : y;
+    if (A < t - rho) return y;
     if (A > t + rho) continue;
-    const x1 = y + 1, f1 = m + 1, z = n + 1 - m, w = n - y + 1;
-    if (A > xm * crlog(f1 / x1) + (n - m + 0.5) * crlog(z / w) + (y - m) * crlog((w * r) / (x1 * q)) +
+    const x1 = y + 1, f1 = m + 1, z = N.off(1 - m), w = N.off(1 - y);
+    if (A > xm * crlog(f1 / x1) + (N.off(-m) + 0.5) * crlog(z / w) + (y - m) * crlog((w * r) / (x1 * q)) +
         tail(f1, f1 * f1) + tail(z, z * z) + tail(x1, x1 * x1) + tail(w, w * w)) continue;
-    return p > 0.5 ? n - y : y;
+    return y;
   }
 }
-// (legacy: the RandomState's, which draws for n = 0 and p = 0 too, one uniform each, where the Generator's doesn't)
-function binomial(g: Gen, n: number, p: number, legacy: boolean): number {
-  if (!legacy && (n === 0 || p === 0.0)) return 0;
-  if (p <= 0.5) return p * n <= 30.0 ? binomialInversion(g, n, p) : binomialBtpe(g, n, p);
+// (legacy: the RandomState's, which draws for n = 0 and p = 0 too, one uniform each, where the Generator's doesn't;
+// the result exactly, a bigint where n - y is past 2^53)
+function binomial(g: Gen, N: BinomN, p: number, legacy: boolean): number | bigint {
+  if (!legacy && (N.b === 0n || p === 0.0)) return 0;
+  if (p <= 0.5) return p * N.d <= 30.0 ? binomialInversion(g, N, p) : binomialBtpe(g, N, p);
   const q = 1.0 - p;
-  return n - (q * n <= 30.0 ? binomialInversion(g, n, q) : binomialBtpe(g, n, q));
+  const y = q * N.d <= 30.0 ? binomialInversion(g, N, q) : binomialBtpe(g, N, q);
+  const r = N.b - BigInt(y), d = Number(r);
+  return Number.isSafeInteger(d) ? d : r;
 }
 
 // ------------------------------------------------------------------ the module
@@ -533,9 +541,12 @@ newBuiltinModule("_nprandom", (m) => {
   fn("legacy_exponential", (g: MT19937, size: any) => fill(size, "float64", () => -crlog(1.0 - g.nextDouble()), g, 2));
   fn("legacy_gamma", (g: MT19937, shape: any, size: any) => fill(size, "float64", () => legacyStandardGamma(g, O.fv(shape) ?? Number(shape))));
   fn("poisson", (g: Gen, lam: any, size: any) => fill(size, "int64", () => poisson(g, O.fv(lam) ?? Number(lam))));
+  // (n an int64, exactly; a scalar result exactly, a Python int; with a size, n below 2**53, where every draw is a
+  // double (numpy.random draws past that one by one, into int64 storage's own admission))
   fn("binomial", (g: Gen, n: any, p: any, size: any, legacy: any) => {
-    const nn = Number(n), pp = O.fv(p) ?? Number(p), leg = !!legacy;
-    return fill(size, "int64", () => binomial(g, nn, pp, leg));
+    const N = binomN(BigInt(n)), pp = O.fv(p) ?? Number(p), leg = !!legacy;
+    if (shape(size) === null) return binomial(g, N, pp, leg);
+    return fill(size, "int64", () => binomial(g, N, pp, leg) as number);
   });
   // integers in [low, high] (inclusive) by the legacy masked method or Lemire's
   fn("bounded", (g: Gen, low: any, high: any, size: any, lemire: any) => {

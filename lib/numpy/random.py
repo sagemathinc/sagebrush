@@ -80,14 +80,28 @@ def _poisson(g, lam, size):
 
 def _binomial(g, n, p, size, legacy):
     """NumPy's binomial draws (random_binomial: inversion, or BTPE when n min(p, 1 - p) > 30), n checked first"""
-    na, pa = _np.asarray(n), _np.asarray(p, float)
-    if _np.any(na < 0):
+    # (a scalar n kept as its Python int: exact past 2**53, as NumPy's int64 n, the draws too)
+    scalar = isinstance(n, int) or not _np.shape(n)
+    if scalar:
+        n = int(n)
+        if n > 2**63 - 1 or n < -2**63:
+            raise OverflowError("Python int too large to convert to C long")
+        if n < 0:
+            raise ValueError("n < 0")
+    elif _np.any(_np.asarray(n) < 0):
         raise ValueError("n < 0")
+    pa = _np.asarray(p, float)
     if _np.any(pa < 0) or _np.any(pa > 1) or _np.any(_np.isnan(pa)):
         raise ValueError("p < 0, p > 1 or p is NaN")
-    size = _bsize(size, n, p)
-    if not _np.shape(n) and not _np.shape(p):
-        return _r.binomial(g, int(n), float(p), _size(size), legacy)
+    size = _bsize(size, p, 0 if scalar else n)  # (NumPy's order: p, then n)
+    if scalar and not _np.shape(p):
+        if size is None or n < 2**53:
+            return _r.binomial(g, n, float(p), _size(size), legacy)
+        # (n past 2**53 with a size: drawn one by one, each exactly, kept only where an int64 array holds it
+        # (they are doubles), else refused, never rounded)
+        shape = tuple(_size(size))
+        return _np.array([_r.binomial(g, n, float(p), None, legacy) for _ in range(_math.prod(shape))],
+                         dtype=_np.int64).reshape(shape)
     shape = tuple(_size(size))
     nb = _np.broadcast_to(_np.asarray(n).astype(_np.int64), shape).ravel().tolist()
     pb = _np.broadcast_to(pa, shape).ravel().tolist()
