@@ -403,11 +403,28 @@ class RationalField(_Ring):
     the interval around its decimal value rounded to one more bit, so
     QQ(1e-20) differs from QQ(1e-20 + 0.0).  A literal of more than 15
     significant digits has more bits, as in Sage (1.2345678901234567: 57),
-    and converts from its own precision; QQ('1.2345678901234567') is its
-    exact value.
+    and converts from its own precision.  A string is read as Sage reads it:
+    an integer or p/q (hexadecimal 0x, binary 0b, octal with a leading 0),
+    never a decimal: QQ('0.5') is Sage's TypeError.
 
         sage: QQ(1e-20), QQ(1e-20 + 0.0)
         (1/99999999999999990439, 1/99999999999999997962)
+        sage: QQ('3/-4'), QQ(' 3 / 4 '), QQ('0x10'), QQ('010'), QQ(None)
+        (-3/4, 3/4, 16, 8, 0)
+        sage: QQ('12', 5), QQ('3', 4), QQ('1/ff', 16)
+        (7, 3, 1/255)
+        sage: QQ('3', '4')
+        Traceback (most recent call last):
+        ...
+        TypeError: an integer is required
+        sage: QQ('0.5')
+        Traceback (most recent call last):
+        ...
+        TypeError: unable to convert '0.5' to a rational
+        sage: QQ('1/0')
+        Traceback (most recent call last):
+        ...
+        TypeError: unable to convert '1/0' to a rational
     """
 
     def __reduce__(self):
@@ -1084,7 +1101,7 @@ class Polynomial:
             return self._make([], o)
         if len(self._c) * len(o._c) > 2500:
             # long products in the engine (NTT / Kronecker substitution)
-            from sagebrush import poly
+            from _sagebrush_lib import poly
             da, ca = self._integral()
             db, cb = o._integral()
             c = poly.mul(ca, cb)
@@ -1401,7 +1418,7 @@ class Polynomial:
             if over_zz or not a._c:
                 return Polynomial(self._ring if over_zz else a._ring, a._c)
             return a.change_ring(QQ).monic()
-        from sagebrush import poly
+        from _sagebrush_lib import poly
         da, ca = self._integral()
         db, cb = o._integral()
         g = poly.gcd(ca, cb)
@@ -1476,7 +1493,7 @@ class Polynomial:
         """
         if not self._c:
             raise ArithmeticError("factorization of 0 is not defined")
-        from sagebrush import poly
+        from _sagebrush_lib import poly
         sa = _sa()
         if self._ring._base is ZZ:
             content, fs = poly.factor(self._c) if self.degree() > 0 else (self._c[0], [])
@@ -1558,6 +1575,82 @@ class Polynomial:
             # second review's R2-POL-F3); over a field it is a unit
             return all(e == 1 for _, e in self.factor())
         return all(e == 1 for _, e in self.factor() if isinstance(_, Polynomial))
+
+    def squarefree_decomposition(self):
+        """The square-free decomposition, as Sage's: one factor for each
+        exponent, by the exponent; over QQ monic ones, the leading
+        coefficient in the factor of exponent 1 (else the unit); over ZZ
+        primitive ones with positive leading coefficients, the content and
+        sign the unit.  By Yun's algorithm (gcds, no factoring).
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: ((x - 1)^2*(2*x + 1)*(x^2 + 1)^3).squarefree_decomposition()
+            (2*x + 1) * (x - 1)^2 * (x^2 + 1)^3
+            sage: (3*(x - 1)^2/7).squarefree_decomposition(), R(-5).squarefree_decomposition()
+            ((3/7) * (x - 1)^2, -5)
+            sage: S.<y> = ZZ[]
+            sage: F = (-6*(y + 1)^2*(y^2 - 3)).squarefree_decomposition(); F
+            (-6) * (y^2 - 3) * (y + 1)^2
+            sage: F.unit(), list(F)
+            (-6, [(y^2 - 3, 1), (y + 1, 2)])
+            sage: ((2*y + 1)^2*(3*y - 1)).squarefree_decomposition()
+            (3*y - 1) * (2*y + 1)^2
+            sage: (3/7*x*(x + 1)^2).squarefree_decomposition(), (-3*x*(x + 1)^2).squarefree_decomposition()
+            (3/7*x * (x + 1)^2, (-3*x) * (x + 1)^2)
+            sage: F = S(0).squarefree_decomposition(); F, F.unit(), list(F)
+            (0, 0, [])
+            sage: R(0).squarefree_decomposition()
+            Traceback (most recent call last):
+            ...
+            ValueError: square-free decomposition not defined for zero polynomial
+        """
+        if not self._c:
+            if self._ring._base is ZZ:
+                # (as Sage's: over ZZ, 0 is the empty decomposition with unit 0)
+                return PolyFactorization([], _norm(0), field=True, by_exponent=True)
+            raise ValueError("square-free decomposition not defined for zero polynomial")
+        lc = _F(self._c[-1])
+        parts = []
+        if self.degree() > 0:
+            # (Yun's algorithm over QQ, on the monic polynomial: f = prod a_i^i
+            # with b_1 = f/gcd(f, f'), and a_i = gcd(b_i, b_i' ... ) as below)
+            Q = self._qq_ring()
+            f = Polynomial(Q, [_F(a) / lc for a in self._c])
+            fp = f.derivative()
+            a = f.gcd(fp)
+            b, c = f.quo_rem(a)[0], fp.quo_rem(a)[0]
+            d = c - b.derivative()
+            i = 1
+            while b.degree() > 0:
+                g = b.gcd(d)
+                if g.degree() > 0:
+                    parts.append((g, i))
+                b = b.quo_rem(g)[0]
+                d = d.quo_rem(g)[0] - b.derivative()
+                i += 1
+        unit = lc
+        if self._ring._base is ZZ:
+            items = []
+            for g, e in parts:
+                # (primitive, the leading coefficient positive: that of the
+                # monic factor's integral multiple, divided by its content)
+                _, cg = g._integral()
+                from math import gcd
+                k = 0
+                for a in cg:
+                    k = gcd(k, a)
+                h = Polynomial(self._ring, [a // k for a in cg])
+                unit /= _F(h._c[-1]) ** e
+                items.append((h, e))
+        else:
+            items = parts
+            if parts and parts[0][1] == 1:
+                g = parts[0][0]
+                items = [(Polynomial(g._ring, [_F(a) * lc for a in g._c]), 1)] + parts[1:]
+                unit = _F(1)
+        return PolyFactorization(items, _norm(unit), field=True, by_exponent=True)
 
     def roots(self, ring=None, multiplicities=True):
         """The roots in the base ring (or `ring`, ZZ or QQ): [(root, m)].
@@ -1673,10 +1766,13 @@ class PolyFactorization(list):
         ([(2, 1), (x - 1, 1), (x + 1, 1)], 1)
     """
 
-    def __init__(self, items, unit=1, field=False, constant=None, constant_value=None):
-        # Sage's order: degree, then exponent, then the factor
+    def __init__(self, items, unit=1, field=False, constant=None, constant_value=None, by_exponent=False):
+        # Sage's order: degree, then exponent, then the factor (a square-free
+        # decomposition's, one factor for each exponent: by the exponent)
         def key(it):
             f, e = it
+            if by_exponent:
+                return e
             if isinstance(f, Polynomial):
                 return (f.degree(), e, [_F(a) for a in reversed(f._c)])
             return (0, e, [_F(f)])
@@ -1737,13 +1833,15 @@ class PolyFactorization(list):
 
         def term(f, e):
             s = repr(f)
-            if (e != 1 or paren) and any(c in s for c in "*+- "):
+            # (a sign or a space only, as Sage's: 3/7*x * (x + 1)^2, (-3*x) * (x + 1)^2)
+            if (e != 1 or paren) and any(c in s for c in "+- "):
                 s = "(%s)" % s
             return s if e == 1 else "%s^%d" % (s, e)
 
         parts = [term(f, e) for f, e in self]
         if self._field:
-            if self._unit != 1:
+            # (a lone unit prints bare, as Sage's: -5, not (-5))
+            if self._unit != 1 and parts:
                 parts.insert(0, "(%r)" % (self._unit,))
         elif self._unit == -1:
             parts.insert(0, "(-1)")

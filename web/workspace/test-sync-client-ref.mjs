@@ -30,11 +30,13 @@ if (process.env.SYNC_REQUIRE_CLAIM !== "1") {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const J = JSON.stringify;
-// (each case signs in its own account, so none sees another's log)
-const ACCOUNTS = Array.from({ length: 89 }, (_, i) => `c1c1c1c1-${String(i).padStart(4, "0")}-4c1c-8c1c-c1c1c1c1c1${String(i).padStart(2, "0")}`);
+// (each case signs in its own account, so none sees another's log: 97 of them, then FULL and SMALL, which end the
+// cases' pool; an id's index stays under 100, its last group 12 hex digits)
+const accountId = (i) => `c1c1c1c1-${String(i).padStart(4, "0")}-4c1c-8c1c-c1c1c1c1c1${String(i).padStart(2, "0")}`;
 // (the cloud's fake CoCalc gives FULL a small storage and SMALL small files; the reference server has no plan limits,
 // so the two cases that use them are skipped here, by name)
-const FULL = ACCOUNTS[87], SMALL = ACCOUNTS[88];
+const FULL = accountId(87), SMALL = accountId(88);
+const ACCOUNTS = [...Array.from({ length: 99 }, (_, i) => accountId(i)).filter((a) => a !== FULL && a !== SMALL), FULL, SMALL];
 // (the control pages' accounts: their own, so no case of the main run sees a control's log)
 // (each control page takes its own 3 of them, by its place in CONTROL_PAGES)
 const CTL_ACCOUNTS = Array.from({ length: 30 }, (_, i) => `d0d0d0d0-${String(i).padStart(4, "0")}-4d0d-8d0d-d0d0d0d0d0${String(i).padStart(2, "0")}`);
@@ -102,13 +104,13 @@ if (process.env.RUN_LIMIT_S !== undefined && !(Number(process.env.RUN_LIMIT_S) >
 const LIMIT_S = process.env.RUN_LIMIT_S !== undefined ? Number(process.env.RUN_LIMIT_S) : REQUIRED_S;
 // ---- force-reload PR 0b (plan p0-harness r2): CASES=floors runs the real old front's floor rows (P0-0, P0-pos, P0-a,
 // P0-b, P0-c, sync-floor-cases.js) instead of the control pages and the main run.  Its page is built from OLD_FRONT, a
-// clean detached checkout of 98a9f74fb (the last front before stale_build), checked file by file (oldFront, below);
+// clean detached checkout of c1df54b2e (the last front before stale_build), checked file by file (oldFront, below);
 // P0_SENSITIVITY=pr-head is the declared control alone: OLD_FRONT at the PR's own head, and P0-0 only
 const CASES = process.env.CASES ?? null;
 const FLOORS = CASES === "floors";
 const OLD_FRONT = process.env.OLD_FRONT ?? null;
 const SENSITIVITY = process.env.P0_SENSITIVITY ?? null;
-const OLD_SHA = "98a9f74fb90c8283ffa9054f4f77133921ba1b83";
+const OLD_SHA = "c1df54b2e77c8383eec6284a9223b690be162542";
 for (const [bad, said] of [
   [CASES !== null && !FLOORS, `CASES=${CASES} is not a case list this runner has (floors)`],
   [FLOORS && !OLD_FRONT, "CASES=floors needs OLD_FRONT (a clean checkout of the old front)"],
@@ -359,7 +361,7 @@ const probe = (body, own = {}) => frontOp("probe", async () => {
         await new Promise((ok) => { wake = ok; setTimeout(ok, 50); });
       }
     };
-    ws.send(JSON.stringify({ t: "hello", v: 2, device, name: "probe", index_after: 0 }));
+    ws.send(JSON.stringify({ t: "hello", v: 3, device, name: "probe", index_after: 0 }));
     const welcome = await next((m) => m.t === "welcome");
     const index = [];
     let page = await next((m) => m.t === "index");
@@ -428,6 +430,7 @@ async function control(body) {
     case "set": Object.assign(ctl, body.set); return { ok: true };
     case "log": { const out = JSON.parse(JSON.stringify(log)); if (body.reset) resetLog(); return out; }
     case "closeAll": { if (ctl.closeAllReject) throw new Error("injected: closeAll rejected"); const n = closers.size; for (const f of [...closers]) f(1000); return { closed: n }; }
+    case "dead": { let n = 0; for (const c of pageSockets) if (!c.data.dead) { c.data.dead = true; n++; } return { dead: n }; }
     case "release": { const n = held.length; for (const f of held.splice(0)) f(); return { released: n }; }
     case "probe": return probe(body);
     // (index_changed notices, as the account object sends them (plan-sync-index-changed r1), `times` of them to every
@@ -683,7 +686,7 @@ async function serveOp(req, server, u, p) {
       return sessionAccount ? Response.json({ account_id: sessionAccount }) : Response.json({ error: "sign in first" }, { status: 401 });
     }
     const headers = {};
-    for (const k of ["content-type", "content-length", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v !== null) headers[k] = v; }
+    for (const k of ["content-type", "content-length", "x-sync-account", "x-sync-generation", "x-sb-ct-sha256"]) { const v = req.headers.get(k); if (v !== null) headers[k] = v; }
     // (the reference server reads a PUT's length from its header: the page's, forwarded; else the body's own)
     if (isPut && headers["content-length"] === undefined) headers["content-length"] = String(body.length);
     let r;
@@ -743,6 +746,8 @@ const websocket = {
       return d.closeBoth(1000);
     }
     up.onmessage = (text) => {
+      // (a socket gone dead without a close (a NAT or Wi-Fi path that stopped carrying anything): nothing passes)
+      if (d.dead) return;
       let m;
       try { m = JSON.parse(text); } catch { m = {}; }
       log.got.push({ t: m.t, req: m.req, ops: m.t === "ack" ? m.ops : m.t === "index" ? m.ops?.length : undefined, code: m.code });
@@ -797,6 +802,7 @@ const websocket = {
     try { m = JSON.parse(text); } catch { m = {}; }
     log.sent.push(m.t === "ops" ? { t: "ops", req: m.req, dseqs: m.ops.map((o) => o.dseq), json: m.ops.map((o) => JSON.stringify(o)), at: Date.now() } : { t: m.t, req: m.req, index_after: m.index_after, after: m.after, at: Date.now() });
     if (m.t === "hello") d.helloAccount = m.account ?? null;
+    if (d.dead) return;
     fl({ k: "sent", t: m.t, req: m.req, ...(m.t === "batch" ? { doc: m.doc } : {}) });
     // (every batch checked as the canonical reference server checks it (§5.8: one generation for each client in its
     // patches, and no other): a failing one is refused here, routed to its request, and never forwarded)
@@ -1173,7 +1179,7 @@ async function resourceControls() {
         for (const text of c.buf.splice(0)) ws.onmessage(text);
         const next = async (f, ms = 1000) => { const t = performance.now(); for (;;) { const m = got.find(f); if (m) return m; if (performance.now() - t > ms) return null; await sleep(10); } };
         const doc = crypto.randomUUID(), client = "ctlmsg1", id = "1".padStart(11, "0") + "_" + client;
-        ws.send(J({ t: "hello", v: 2, device: "c0c0c0c0c0c0c0c0", name: "ctl", index_after: 0, generation: 1 }));
+        ws.send(J({ t: "hello", v: 3, device: "c0c0c0c0c0c0c0c0", name: "ctl", index_after: 0, generation: 1 }));
         const welcome = await next((m) => m.t === "welcome" || m.t === "error");
         steps.push(["welcome", welcome?.t === "welcome" && welcome.state === "active" && welcome.generation === 1]);
         ws.send(J({ t: "doc_claim", req: 1, epoch: 1, doc, client }));
@@ -1439,7 +1445,7 @@ async function controlStop(cookie) {
 }
 
 /**
- * CASES=floors: the old front's page bundle, built from `dir` and proved to be 98a9f74fb's (plan p0-harness r2 §2),
+ * CASES=floors: the old front's page bundle, built from `dir` and proved to be c1df54b2e's (plan p0-harness r2 §2),
  * or a throw before any browser starts.  (1) HEAD is OLD_SHA (in the pr-head mode, P0-0 reports it instead); (2) the
  * checkout is clean, and its web/ made read-only before the build; (3) every input of the bundle, by its resolved path:
  * the one harness entry (exactly the re-exports below), a product file of the checkout whose bytes equal

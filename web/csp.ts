@@ -11,10 +11,11 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { hasSite, siteDir } from "./site-dir.mts";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
-import { frameOptions, framePolicy, pagePolicy, runnerPolicy, shellWorkerPolicy } from "./csp-policy.mts";
+import { frameOptions, framePolicy, ghPolicy, pagePolicy, runnerPolicy, shellWorkerPolicy, spacePolicy } from "./csp-policy.mts";
 import { FILES_RUNNER_SCRIPT } from "./notebook/files-runner.js";
+import { fileURLToPath } from "node:url";
 
-const here = dirname(new URL(import.meta.url).pathname);
+const here = dirname(fileURLToPath(import.meta.url));
 
 function pages(dir: string, rel = ""): string[] {
   const out: string[] = [];
@@ -57,7 +58,7 @@ export function headersFor(dir: string): string {
   }
   const rules: [string, string][] = [];
   for (const g of [...groups.values()].sort((a, b) => a.patterns[0].localeCompare(b.patterns[0])))
-    for (const pattern of g.patterns) rules.push([pattern, (g.patterns[0] === "/runner/*" || g.patterns[0] === "/engine/*" ? runnerPolicy : g.patterns[0] === "/frame/*" ? (h: string[]) => framePolicy(h, runnerScriptHash) : g.patterns[0] === "/agents/*" ? (h: string[]) => pagePolicy(h, "'none'") : pagePolicy)([...g.hashes].sort())]);
+    for (const pattern of g.patterns) rules.push([pattern, (g.patterns[0] === "/runner/*" || g.patterns[0] === "/engine/*" ? runnerPolicy : g.patterns[0] === "/frame/*" ? (h: string[]) => framePolicy(h, runnerScriptHash) : g.patterns[0] === "/agents/*" ? (h: string[]) => pagePolicy(h, "'none'") : g.patterns[0] === "/space/*" ? spacePolicy : pagePolicy)([...g.hashes].sort())]);
   // every page: exactly one policy, allowing each of its scripts
   for (const p of pages(dir)) {
     const need = scriptHashes(readFileSync(join(dir, p), "utf8"));
@@ -72,6 +73,10 @@ export function headersFor(dir: string): string {
   // policy would refuse anyway, and which a frame in others' pages shouldn't
   // have; the frame may be embedded by any page, even a cross-origin isolated
   // one: CORP)
+  // (a GitHub page, /gh/...: the /s/ page, with GitHub's three hosts to fetch from, csp-policy.mts ghPolicy; where the
+  // site's Worker serves it, web/site/src/preview.ts handleGhPage gives it the same)
+  const share = rules.find(([p]) => p === "/s/*");
+  if (share) rules.push(["/gh/*", ghPolicy(share[1])]);
   // the shell worker's script: a worker's policy is its own response's (plan-bash-shell r3 §6)
   if (existsSync(join(dir, "shell", "worker-boot.js"))) rules.push(["/shell/worker-boot.js", shellWorkerPolicy()]);
   // (and the runner's page is embedded by a cross-origin isolated page as an opaque origin, so cross-origin to it:

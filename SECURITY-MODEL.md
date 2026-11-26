@@ -1,0 +1,481 @@
+# Sagebrush security model
+
+**Status: normative goals, early implementation.** This document states what
+Sagebrush intends to protect and how those claims must be tested. The status
+table says which goals are true today. A goal is not a product claim until its
+status is **met** and its acceptance tests pass on the shipped artifact.
+
+The first priority is: **safe to run a malicious notebook**.
+
+## How to use this document
+
+- Security audits check implementation and deployed behavior against these
+  goals. A missing control is a product gap even when no exploit is known.
+- Every security-relevant change names the goal identifiers it affects and
+  explains whether it preserves, advances, weakens, or deliberately drops
+  them. Its tests exercise the affected trust boundary.
+- A new execution path, renderer, broker, package mechanism, credential,
+  publication path, or external service starts outside the model until this
+  file names its authority and tests.
+- A failure must be closed: refuse the operation or kill the untrusted realm.
+  Falling back to a realm with more authority is not recovery.
+- [SECURITY.md](SECURITY.md) says how to report a vulnerability. The detailed
+  mechanisms, history, and implementation notes live in
+  [design/security.md](design/security.md). Those documents do not override
+  the goals or status here.
+
+## Assets and trust boundaries
+
+The protected assets are:
+
+- the account, its session, identity, payment state, service grants, agent
+  grants, and third-party credentials;
+- each owned document, its source, outputs, history, attachments, and secrets;
+- workspace files and data not explicitly supplied to a run;
+- the user's computer, including local files, processes, devices, and
+  credentials;
+- the user's network identity and ability to make requests;
+- other users, their accounts, documents, computers, and network authority;
+- Sagebrush services and infrastructure; and
+- CoCalc accounts, credentials, services, and infrastructure.
+
+A document has one owner, never a collaborator. Collaboration is copy,
+proposal, review, and owner acceptance. A proposal is untrusted input until
+the owner accepts its exact effects.
+
+The important boundaries are:
+
+1. **Account origin / untrusted execution.** Notebook code must run in a realm
+   with no account-origin storage, DOM, cookies, authenticated requests, or
+   privileged application bridge.
+2. **Privileged host / file and network brokers.** Untrusted code receives
+   capabilities through narrow, revocable messages. It never turns a path,
+   URL, or claimed provenance into authority by itself.
+3. **Document / workspace.** Opening one document grants no write access to
+   another document. Default reads are confined to G1a's allowed locations,
+   including recursive reads within the document's non-root directory.
+4. **Rendered content / application UI.** Saved and newly produced output is
+   attacker-controlled content. It must not execute with account-origin or
+   native-application authority.
+5. **Browser / native executor.** A worker thread and a removed global are not
+   an operating-system sandbox. Native execution needs a restricted process
+   and explicit brokers.
+6. **Local product / connected computer.** Connecting a computer deliberately
+   crosses into that computer's files, processes, and network. The grant must
+   be explicit, scoped, visible, and revocable.
+7. **Sagebrush / external services.** CoCalc and every other provider are
+   separate security principals with separately scoped credentials. A CoCalc
+   compromise must not imply a Sagebrush compromise.
+8. **Private / published.** Sync, export, Git pushes, proposals, and published
+   links cross a disclosure boundary. Only the selected, previewed snapshot
+   may cross it.
+
+## Execution-location invariant
+
+**Sagebrush does not run user code on Sagebrush servers. Any user code
+execution must be on the user's owned or rented computer.** Hosted Sagebrush
+may store, sync, publish, and broker explicitly authorized data, but it is not
+a compute host and must not acquire an execution path for notebook code,
+packages, agents, build commands, or other user-supplied programs.
+
+Compute offered through CoCalc or another provider is a linked account with
+separately scoped account or key escrow. It is a separate site and security
+principal, like any other rented-compute provider. Isolation between workloads
+at that provider, including containment of a container escape, is the
+provider's responsibility. Such a compromise must remain confined by G7 and
+G9: it cannot become a Sagebrush session, credential, approval, deployment
+authority, or path to unrelated Sagebrush data.
+
+Sagebrush may rent a compute-provider VM on a user's behalf without becoming
+the compute host. User code still runs only on that external VM, never on a
+Sagebrush server. A managed VM is single-tenant: one student receives one VM.
+It has no shared credential, privileged network route, or infrastructure
+access beyond what any user-owned computer running `sagebrush remote` has.
+The provider API key stays on the Sagebrush control plane and is never sent to
+the VM. Compromising one VM therefore must not yield a Sagebrush session or
+credential, access to Sagebrush infrastructure, or access to another user's
+VM.
+
+Managed-VM enrollment is not designed yet. The planned mechanism gives each
+VM a pre-approved, one-time enrollment token. Its scope, binding, delivery,
+expiry, replay resistance, revocation, and acceptance tests require security
+review before implementation. Until that review is complete, managed VM
+enrollment remains outside the supported security model.
+
+G1, G3, G5, and G6 depend on execution occurring in the user's browser or on
+the user's owned or rented computer. They do not describe a Sagebrush-hosted
+execution service. G7 and G9 define the boundary that keeps a separately
+operated compute provider from becoming part of Sagebrush's authority.
+
+## Threat actors
+
+The primary threat is the author of a malicious notebook or shared copy. The
+notebook may exploit its language runtime, forge host messages, consume
+resources, persuade a user to grant authority, or contain hostile saved
+output. Opening it and running it are separate attack surfaces.
+
+The model also covers, in this order:
+
+1. malicious saved HTML, Markdown, SVG, images, widgets, and other outputs;
+2. a malicious agent, proposal, tool result, or prompt-injected action;
+3. a malicious package or compiled extension, including a compromised package
+   source;
+4. a compromised Sagebrush server, build, update channel, or external service;
+5. another user attempting cross-account or cross-document access; and
+6. an attacker with network position who can observe, replay, redirect, or
+   modify traffic.
+
+The model assumes the user's browser and operating system enforce their
+documented isolation primitives. Vulnerabilities in them remain residual
+risk, not a reason to give untrusted code ambient authority.
+
+### The desktop app and the local machine
+
+The desktop app runs on one person's computer, as that person's operating
+system user. The person intentionally operating the machine is trusted.
+Independent local programs already running with that person's authority are
+outside this product boundary: they could read or change the person's files
+directly. In particular, such a program swapping a workspace folder for a
+link while the app works on it is out of scope. Code that Sagebrush executes
+or renders (notebooks, packages it launches, saved output) and Sagebrush's own
+build and update path remain the threats above, even though they run as the
+same operating system user. An agent is both: what it does through
+Sagebrush's own brokers (the workspace agent protocol, its grants and
+approvals) remains threat 2 and G4; what an agent process does directly on the
+file system is a local program's, as under "Native mode without an OS sandbox"
+below.
+
+For files, the app's workspace commands (`app/src-tauri/src/disk_fs.rs`)
+confine every workspace path they receive to the app's workspace folder. Each
+path component is checked: no parent, empty, or `.` components, no
+separators, drive letters, or characters below U+0020 (workspace paths such as
+`/a/b` are rooted at the workspace folder, not the host's root), and no
+symbolic link or Windows reparse point at any component, the last one
+included. A hard link already in the workspace is read through; a write
+replaces it rather than writing through it. The check is
+on path names, then the operation uses the same names, so a link swapped in
+between would be followed; that race needs a local program, which is out of
+scope above. Notebook code cannot create symbolic links, hard links, or
+junctions, so it cannot set up such a swap itself;
+`web/test-app-engine-links.mjs` runs Python in the app's engine subprocess,
+where the engine runs (not yet Windows), and checks every tested route to one.
+
+The app's own page is the remaining reach. On the desktop it has no
+file-system plugin: the plugin is not registered or directly linked (only
+tauri-plugin-dialog links it, for its own use, which puts no API on the page),
+so there is no `window.__TAURI__.fs`, and the page's capability
+(`capabilities/default.json`, checked by `nav.rs`'s tests) grants no `fs:` or
+`dialog:` permission. The desktop self-test checks that the API is absent and
+that two of the plugin's commands are refused by Tauri's access control. The
+dialog plugin is still registered, for the app's own dialogs, but the page has
+no permission for its commands. Script in the page can still use the app's own
+commands. With them it reaches the whole workspace folder, the files the
+person has granted and those beside them (below), and the app's settings file
+(only its listed keys, size-capped). It can learn the workspace's and each
+granted file's absolute path, and the engine reads the app's own files. It
+reaches no other file of the person's, except through a hard link already
+among those files (below). Notebook output renders in that page today (see G2
+under Status today), so saved output that got past the sanitizers would reach
+all of those.
+
+Files from the rest of the computer come only from the person:
+- **How a file is granted.** The app's own Open and Save dialogs (drawn by the
+  app, over its window), a file the system hands it (double-clicked, or on the
+  command line), or the self-test's notebook. Each becomes a grant: an
+  unguessable 128-bit id for that file (`app/src-tauri/src/folder_fs.rs`,
+  `disk.rs`). Only the newest 8 grants are kept. The page names grants, never
+  a path outside the workspace. A picked symbolic link grants the file it
+  points at, so "its folder" below is that file's real folder.
+- **What a grant reaches.** The granted file, and the files beside it in its
+  folder by name only: top-level, not hidden (no leading `.`, no Windows short
+  name such as `REPORT~1.CSV`, no invisible format characters), and never a
+  symbolic link or anything but a plain file. A write goes to a temporary file
+  in the same folder, keeps the file's ordinary read, write and execute bits
+  on Unix (setuid, setgid and sticky are dropped), and replaces it by a
+  rename, so it never writes through a symbolic link.
+- **The risk this accepts.** Any other top-level file in that folder that
+  isn't hidden can be read, written or created, as the notebook's Python can:
+  a `conftest.py`, a `Makefile`, or `_netrc` in a home folder. In a notebook
+  inside a hidden folder (such as `~/.ssh`), the names beside it aren't
+  hidden. A file with Windows' Hidden attribute or macOS's hidden flag isn't
+  covered by the dot rule. A hard link that already exists, as the picked file
+  or one beside it, is a plain file to these checks: it is read through to the
+  file it shares, wherever that is, and a write replaces only this name,
+  leaving the other name's file as it was. Script in the page can open the
+  Save dialog with a name it proposes, so one Save click in a sensitive folder
+  grants that folder's plain files. The names are checked and then used, so a
+  symbolic link swapped in between would be followed by a read; that needs a
+  local program, out of scope above.
+
+These grants are meant to be the "Files on" mode under Weaker modes, with G1a
+and G1d dropped for exactly the granted file and the files beside it. One gap
+remains: the dialogs don't yet name the dropped goals, as Weaker modes
+requires. The phone apps are different: their system pickers hand over paths
+that only the file-system plugin reads, so on a phone the page keeps that
+plugin, with a scope of every path the app may reach there, and saved output
+that got past the sanitizers would reach that whole scope.
+
+This subsection scopes which local actors G1a and G1d defend against on the
+desktop. It drops nothing else: G3, G4's package and update authority, and
+G8's disclosure rules for sync and publication (symlinks included) apply to
+the desktop as written.
+
+A privileged Sagebrush service that walks a file system another, untrusted
+account can write at the same time is different. No Sagebrush service does
+today; one that does must, before it ships, resolve each path relative to
+directory handles it holds, never checking a path name and then using it: on
+Linux, `openat2` with `RESOLVE_BENEATH`, `RESOLVE_NO_SYMLINKS`, and
+`RESOLVE_NO_XDEV` (no mount crossings), and a link-count check before using a
+file (no hard links into another account's files).
+
+Losing a person's work on the desktop (a failed or unfinished save, an
+external edit written over) is a correctness failure, not a security one,
+unless a threat above caused it (saved output included), or a write from a
+stale execution generation (G3). It is still a defect, and
+it must be visible to the person, never silent. A notebook writing beyond its
+G1d grant remains a security failure.
+
+## Testable goals
+
+### G1. Default-deny unread execution
+
+Running an unread notebook in the default-deny profile:
+
+- **G1a — confined reads:** can read its own source, its private scratch space,
+  and immutable runtime inputs. When its containing directory is not the
+  workspace root, it can also read that directory recursively. It cannot read
+  documents or workspace files outside those allowed locations;
+- **G1b — credentials and origin:** cannot read or use account credentials,
+  origin storage, the account DOM, agent tokens, third-party tokens, or a
+  privileged native bridge;
+- **G1c — network:** cannot create an outbound request or cause a broker to
+  request an undeclared network destination, including through images, CSS,
+  SVG, imports, DNS, redirects, or credentialed same-origin requests;
+- **G1d — writes:** cannot persist a file, modify another document, invoke a
+  host action, or widen its own grants; and
+- **G1e — script:** cannot execute script in the account's origin. A complete
+  language-runtime escape remains inside an opaque, uncredentialed realm with
+  the same read, write, and network restrictions.
+
+The profile refuses to run if any required boundary is unavailable. Copies,
+imports, shared notebooks, and replays enter this profile without inheriting
+the author's grants.
+
+### G2. Untrusted rendering
+
+Opening or rendering a document, without running its code, cannot execute
+script in the account origin, make an automatic remote request, access origin
+storage or a native bridge, or mutate another document. This applies to saved
+and live HTML, Markdown, SVG, math, images, widgets, links, and error output.
+Sanitizers are defense in depth; the final output realm has no account or
+native authority.
+
+### G3. Capability integrity and revocation
+
+Every file, network, agent, tool, package, and publication capability is bound
+to the account, document, operation, parameters, execution generation, and
+expiry that granted it. Narrowing or revocation takes effect before the next
+observable effect. Stale, replayed, forged, reordered, and duplicate messages
+fail closed. A restart, fallback, reload, or host switch cannot widen a grant.
+
+### G4. Agents, proposals, and packages
+
+An agent or proposal cannot produce an external or persistent effect until
+the document owner approves the exact current action or diff. Approval is not
+transferable to changed parameters or later content. Package bytes and
+metadata are authenticated before execution, cannot replace core code, and
+receive no more authority than the run that loaded them. Compiled extensions
+must be treated as arbitrary native code unless a stronger sandbox proves
+otherwise.
+
+### G5. Stop and termination
+
+In the default-deny profile, after the user presses Stop, cooperative code
+must observe interruption within **1 second**. If the run has not reached a
+terminal state, including because it caught the interrupt or entered native
+code, the untrusted execution realm must be killed and replaced within
+**3 seconds** of Stop. The privileged UI remains responsive and no queued
+effect from the killed generation may commit.
+
+### G6. Resource containment
+
+Research computations have no hard runtime limit. Memory has no fixed security
+ceiling: exhaustion may kill or restart the execution realm, but must never
+compromise isolation or take down the privileged UI or another document. Stop
+remains the user's control for a long-running computation, with G5's deadlines.
+
+The default-deny profile enforces the following independent host-side limits.
+Each limit has the required behavior listed below. Enforcing it must not take
+down the privileged UI or another document.
+
+| Resource | Limit | Required behavior |
+|---|---:|---|
+| Output | 4 MiB or 10,000 messages per run, whichever comes first | Stop accepting output before copying or DOM insertion; mark the output truncated and stop the run |
+| Retained output | 16 MiB per document session | Require explicit deletion or export before retaining more |
+| Scratch storage | 64 MiB and 10,000 entries per execution realm | Refuse further writes; clear scratch when the realm is replaced or closed |
+
+All units, counting rules, and behavior are part of the goal; approximate
+telemetry is not an enforcement mechanism.
+
+### G7. Service and identity separation
+
+Sagebrush credentials are not accepted by CoCalc and CoCalc credentials are
+not accepted by Sagebrush. An integration uses a distinct, least-authority,
+expiring grant bound to its purpose. Compromise of CoCalc cannot mint a
+Sagebrush session, approve an action, read documents not sent to CoCalc, or
+obtain Sagebrush signing, deployment, payment, or agent credentials. The same
+rule applies to other providers.
+
+When Sagebrush rents a provider VM for a user, the provider API credential is
+a control-plane credential: it remains on a Sagebrush server and is never
+available to the VM. The VM connects through the ordinary remote-compute
+boundary with no shared credential or privileged route into Sagebrush. Its
+enrollment capability must be single-use, narrowly bound to that VM and user,
+expiring, revocable, and unable to authorize another VM or become a Sagebrush
+session. Compromise of one managed VM cannot authorize requests as another
+user, reach another managed VM, recover the provider API credential, or gain
+deployment, operator, payment, sync, or agent authority.
+
+A compromised Sagebrush service can access only data deliberately sent to
+that service. Local-only documents and credentials remain unavailable to it;
+synced or published data is within the service's stated trust boundary.
+
+### G8. Ownership, disclosure, and publishing
+
+Only a document's owner can accept a proposal, change its authoritative
+history, grant execution authority, or publish it. Sync and publication send
+only the files and history named by their preview, never outputs, secrets,
+credentials, hidden files, unrelated workspace data, or a later changed
+snapshot. Published content runs with no account-origin authority and does not
+become a collaboration channel back into the owned document.
+
+### G9. Cross-account isolation
+
+An ordinary authenticated request, sync operation, notebook, saved output,
+agent token, LTI launch, remote connection, share mutation, or object
+identifier cannot read, change, delete, enumerate, or obtain a capability for
+another owner's private document, workspace, account metadata, credentials,
+grants, remote, or execution state. Every account and document object reached
+by an ordinary request is derived from the authenticated identity or from a
+capability cryptographically bound to that identity and resource.
+
+Client-supplied account, owner, document, remote, registration, course,
+collection, or object identifiers can select objects only within authority
+already established by the authenticated identity or an explicitly supported
+capability. Equality checks, owner-scoped lookups, and public-capability
+validation enforce that boundary; an identifier alone never substitutes for
+authorization. Privileged cross-account operations are separately
+authenticated, least-authority, audited, revocable, and listed explicitly.
+
+### G10. Fresh authentication for dangerous actions
+
+A dangerous action requires both a valid session and fresh authentication by
+the account's current sign-in method. Freshness means that reauthentication
+completed no more than **N minutes** before the action. The proposed value is
+**N = 10 minutes**, matching the existing admin two-factor grant; this value
+remains subject to owner approval.
+
+The fresh proof is bound to the account and current session, expires without
+sliding renewal, and is invalidated by logout, session revocation, or an
+identity change. Failure or absence of reauthentication refuses the action.
+Fresh authentication is required for:
+
+- deleting an account;
+- linking or unlinking remote-compute accounts, agent grants, service grants,
+  or their keys;
+- creating an API, agent, integration, or other bearer token;
+- changing the sign-in identity or email address;
+- an owner-only removal that destroys or revokes another principal's access;
+- exporting or deleting all account data; and
+- administrative actions, which already require a fresh two-factor grant.
+
+An implementation may require fresh authentication for additional actions.
+Possession of an ordinary session, an object identifier, or a previously
+fresh proof from another account or session never satisfies this goal.
+
+## Status today
+
+This table describes the implementation as of November 16, 2026. **Partial**
+means useful controls exist but the whole goal is not a supported guarantee.
+
+| Goal | Status | Evidence and gap |
+|---|---|---|
+| G1 | **Not yet** | The hosted restricted runner has an opaque origin, restrictive CSP, brokered fetches, and guarded writes. However, it supplies all workspace data files to the interpreter instead of confining reads to the notebook's non-root directory, and native mode refuses this profile because it has no OS sandbox. On the desktop (as of November 20, 2026), a file the person picks grants its folder's plain, non-hidden top-level files to the notebook and the page, and the file dialogs don't name the goals they drop. |
+| G2 | **Partial** | HTML, Markdown, SVG, math, and image sanitizers plus hosted CSP block known script and remote-load paths. Notebook output still renders in the privileged page; the separate output realm is not wired into production, and the desktop page lacks the hosted CSP. On the desktop (as of November 20, 2026) the page has no file-system plugin, but an output that got past the sanitizers could still use the app's own commands: the whole workspace folder, the files the person has granted and those beside them, and the app's settings file. |
+| G3 | **Partial** | Write policy epochs, host-side path checks, worker generations, and non-replaying fallback close important races. Read and network settings are not yet one universal broker policy, and every restart, native, connected-computer, agent, and package path has not passed the same revocation suite. |
+| G4 | **Partial** | Optional package sets are content-addressed and cannot replace core modules. Agent and proposal flows have scoped approval mechanisms. There is no accepted containment boundary for arbitrary external compiled code, and the full approval/replay matrix is not yet a release gate. |
+| G5 | **Partial** | Compiled loops poll an interrupt word and the browser host restarts a still-pending interpreter after a delay. Coverage has waivers, interruption can be caught, native calls may not poll, and the 1/3-second contract is not enforced across shipped hosts. |
+| G6 | **Not yet** | Some allocators, images, transport queues, and explicit evaluations have limits. Ordinary runs have no output cap, numerical budgets default to unlimited, and memory exhaustion is not yet proven unable to affect the privileged UI or another document. |
+| G7 | **Partial** | Sagebrush uses its own identity and scoped integration protocols. Managed-VM enrollment is planned but not designed or implemented. A complete negative test proving that a compromised external service or managed VM cannot cross every identity, agent, sync, deployment, payment, provider-key, and VM-to-VM boundary is not yet a release gate. A compromised account-origin server can still serve privileged application code. |
+| G8 | **Partial** | Documents use a single-owner, copy-and-propose model; publication and sync have selection and secret-removal controls. Exact-snapshot, hidden-file, symlink, output, and cross-origin assertions are not yet one end-to-end acceptance gate for every disclosure path. |
+| G9 | **Partial** | Normal share and sync object derivation, document-owner equality, agent-token binding, LTI transaction binding, remote ownership checks, content-origin separation, signed admin routes, and audited admin reads provide substantial enforcement. Legacy CoCalc authentication, privileged integration keys, deployment and operator control, supply-chain compromise, self-hosted operator access, and deliberately granted remote and agent capabilities remain trust boundaries. A complete production object-lookup registry and shipped-deployment two-account adversarial suite do not yet exist. |
+| G10 | **Not yet** | Administrative actions use a fresh two-factor grant with a 10-minute lifetime. The other listed dangerous actions do not yet share a complete, tested fresh-authentication gate, and the proposed value of N has not been approved. |
+
+No row is **met** today. The product must not advertise the unqualified claim
+that an unread malicious notebook is safe to run.
+
+## Weaker modes
+
+The default-deny profile is the reference security claim. Each mode below is
+an explicit grant; its UI must name the dropped goals before execution.
+
+| Mode | Goals deliberately dropped | Goals that still apply |
+|---|---|---|
+| Network on | G1c for the approved destinations and request shapes | G1a, G1b, G1d, G1e, and G2–G10 |
+| Files on | G1a beyond the notebook's non-root directory, and G1d for the selected write handles or paths (on the desktop, a granted file and the plain, non-hidden files beside it) | G1b, G1c, G1e, and G2–G10 |
+| Connected computer | G1a, G1c, and G1d within the connected host's displayed grant; G5 and G6 unless that host proves the same limits | G1b, G1e, G2, G3, G4, and G7–G10 |
+| Native mode without an OS sandbox | G1a–G1e and G4's no-more-authority package clause for any runtime or compiled-code escape; G5 and G6 beyond controls the native host independently proves | G2, G3, and G7–G10 |
+| External compiled package | G4's no-more-authority clause; in an unsandboxed native host also G1a–G1e, G5, and G6 | Package identity and integrity in G4, plus G2, G3, and G7–G10 |
+| Publishing | G1a confidentiality and G8 privacy only for the exact previewed snapshot | G1b–G1e, G2–G7, G8 ownership and isolation, G9, and G10 |
+
+Combining modes combines their dropped goals. A saved choice must not silently
+apply to a copied notebook, another document, a changed destination, or a new
+execution generation.
+
+## Non-goals and residual risks
+
+- The model does not promise that notebook results are correct, honest, or
+  reproducible, or that a malicious notebook cannot mislead a person.
+- It does not make a deliberately granted network destination, file, agent,
+  package, connected computer, or published snapshot private from its
+  recipient.
+- It does not provide anonymity or hide timing, traffic volume, package
+  access patterns, or local resource use from infrastructure that serves the
+  request.
+- It does not protect a machine whose browser, operating system, or hardware
+  isolation is already compromised. Browser and OS vulnerabilities remain
+  residual risk.
+- It does not treat sanitization, language restrictions, signing,
+  notarization, content hashes, or reviewed source as an OS sandbox.
+- It does not guarantee availability of a shared device or service under
+  failures outside the stated per-run limits.
+- It does not provide or guarantee containment inside an external compute
+  provider. That provider owns its workload and operating-system isolation;
+  G7 and G9 still require its compromise to remain outside Sagebrush.
+- Side channels, parser/decoder defects, compiler/runtime defects, supply-chain
+  compromise, and social engineering remain residual risks. Defense in depth
+  must keep one defect from automatically gaining account, filesystem, and
+  network authority.
+
+## Goal-to-test map
+
+Existing tests are useful evidence, not proof of a whole goal. A goal becomes
+**met** only when its required acceptance test runs against the actual browser
+builds and signed native artifacts that ship.
+
+| Goal | Existing evidence | Required acceptance gate |
+|---|---|---|
+| G1 | `test/security.test.ts`, `web/test-app-engine-links.mjs`, `web/test-runner.mjs`, `web/test-runner-broker.mjs`, `web/test-runner-files.mjs`, `web/notebook/test-confine.mjs`, `web/test-confine-writes.mjs`, `web/notebook/test-runner-fallback.mjs`; on the desktop, `app/src-tauri/src/folder_fs_tests.rs`, `nav.rs`'s capability tests, and the desktop self-test's file checks (`web/index.html`, `web/workspace/persist-probe.ts`) | Run hostile Python and injected JavaScript in each shipped execution realm. Prove reads stay within the notebook's own source, private scratch space, immutable runtime inputs, and—only when its containing directory is not the workspace root—that directory recursively; prove no fetch, XHR, WebSocket, import, DNS, image, CSS, SVG, storage, DOM, credential, or native-bridge access; no persistent write; and fail-closed behavior when CSP, isolation, or the runner is missing. |
+| G2 | `test/safe-html.test.ts`, `web/board/test-xss.mjs`, `web/notebook/test-render-contain.mjs` | Open hostile saved outputs and stream hostile live outputs through every renderer in hosted and native builds. Record all requests and effects; prove the output realm has no account storage, authenticated fetch, parent DOM, application IPC, script execution, or automatic remote loads. |
+| G3 | `web/notebook/test-confine.mjs`, `web/test-confine-writes.mjs`, `web/notebook/test-runner-fallback.mjs` | For every broker, race grant, revoke, restart, fallback, reload, duplicate, reorder, stale generation, stale snapshot, and host switch. Assert no effect after revocation and no widening or replay. |
+| G4 | `test/pkgset.test.ts`, `web/test-pkgset.mjs`, `web/test-pkgset-pin.mjs`, `web/workspace/test-agent-pair.mjs`, `web/workspace/test-agent-e2e.mjs` | Mutate package indexes, chunks, approvals, proposal bodies, parameters, actors, generations, and timestamps. Inject arbitrary compiled/native code and prove it has only the declared sandbox authority, or label and refuse the stronger claim. |
+| G5 | `web/test-interrupt-browser.mjs`, `web/test-interrupt-matrix.mjs`, native self-tests | On each shipped browser and native host, test tight loops, caught interrupts, long native/Wasm calls, blocked message handling, background tabs, and queued writes. Measure from Stop at the trusted host. Require cooperative code to observe interruption within 1 second; if the run remains nonterminal, require realm death and replacement within 3 seconds of Stop, with no later queued effect. |
+| G6 | allocation guards, image-size tests, transport-queue tests, and limit sweeps | Exercise infinite output, object/ArrayBuffer/Wasm growth, decoder bombs, scratch-file floods, deep trees, message floods, long computations, and concurrent documents. Assert hard output enforcement, the retained-output and scratch limits, and isolation and privileged-UI survival under memory exhaustion. |
+| G7 | identity, session, integration, remote-compute, and service-worker integrity tests | Treat each external service, each managed VM, and the Sagebrush service as compromised in turn. Forge tokens, enrollment attempts, responses, redirects, metadata, updates, and callbacks; prove no session minting, cross-service credential use, unauthorized approval, access to local-only data, provider-key disclosure, privileged infrastructure path, or access from one VM to another. Replay and retarget every enrollment token; require one successful use only, bound to the intended user and VM, with expiry and revocation enforced before connection. |
+| G8 | sharing, folder-publication, copy, sync, and secret-removal tests | Publish and sync adversarial trees with outputs, secrets, hidden files, symlinks, traversal names, concurrent edits, and stale previews. Assert only the owner's exact previewed snapshot crosses the boundary and published content cannot act back on the account. |
+| G9 | `web/cloud/share/test-share.mjs`, `web/sync/test-sync.mjs`, `web/cloud/remote/test-remote.mjs`, `web/cloud/remote/test-relay.mjs`, hosted `web/lti/test-lti.mjs` launch, state/nonce-binding, and one-use ticket tests, agent-grant tests, and signed-admin audit tests | Create two unrelated accounts with documents, blobs, shares, grants, sessions, remotes, LTI state, and deletion records. Replay every ordinary route and socket frame from one account with every valid identifier from the other; require indistinguishable refusal and byte-for-byte unchanged state. Instrument every production object lookup and require an authenticated-identity, immutable-metadata, fixed, or named privileged/capability classification. Mutation-test every owner, session, hash, ticket, ACL, and request-id equality check. Prove public capabilities expose only committed public content; prove LTI subjects cannot mint Sagebrush sessions or collide across registrations, remote identifiers cannot cross accounts, and agent tokens cannot be retagged. Exercise revocation, deletion, and in-flight races, and run the suite against the built hosted Worker and supported self-host configuration. |
+| G10 | hosted admin tests for fresh two-factor expiry, session binding, replay refusal, and logout revocation | For every listed dangerous action, exercise an absent, expired, wrong-account, wrong-session, replayed, and revoked fresh proof. Require refusal before the first effect. Reauthenticate with each supported sign-in method, verify the approved N-minute boundary, and prove that ordinary requests do not extend it. Run the gate against the deployed Worker and supported self-host configuration. |
+
+Security fixes add a regression test at the lowest useful layer and, when they
+cross a trust boundary, an end-to-end test at that boundary. Passing a mock or
+source inspection alone cannot mark a goal met.

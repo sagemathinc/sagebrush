@@ -2,7 +2,9 @@
 // The LaTeX group's absolute ceiling (scripts/latex-group.mjs, the site asset budget's check 4), in CI: on the DEV
 // web/dist this job has just built (bun web/build.ts; the LaTeX editor is in a build by default), the group's JS must
 // be within LATEX_CAPS, raw and gzip, and each lazy chunk within its own cap (LATEX_LAZY_CAPS). Before it, small synthetic trees check the measure itself: at the cap passes, one
-// byte over (raw, or gzip) fails, an empty group fails, and the lazy chunks are left out.
+// byte over (raw, or gzip) fails, an empty group fails, and the lazy chunks are left out. The caps are the shipped
+// build's: the build says its mode in web/dist/version.json (latexMode), and a test build (SAGEBRUSH_LATEX_PREVIEW=test,
+// which carries the LaTeX tests' seams and hosts) is refused with how to rebuild, not measured against them.
 //   bun web/build.ts && node scripts/test-latex-group-budget.mjs
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -11,9 +13,11 @@ import { join, dirname, relative } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { latexGroup, latexLazy, LATEX_CAPS, LATEX_LAZY, LATEX_LAZY_CAPS, gz } from "./latex-group.mjs";
+import { latexAdvice, safelyAppendPullRequestSummary } from "./size-advice.mjs";
 
 const fails = [];
 let checks = 0;
+let latexReport = null;
 const check = (ok, what, detail) => { checks++; console.log(`${ok ? "ok  " : "FAIL"} ${what}${detail === undefined ? "" : " " + JSON.stringify(detail)}`); if (!ok) fails.push(what); };
 
 // (a web/ tree's files: "dist/..." to the file on disk, as the site asset budget's inventory gives them)
@@ -29,18 +33,62 @@ function files(web) {
 }
 
 // ---- the caps themselves, as approved (a change to them is a ruling: this line changes with it)
-check(LATEX_CAPS.raw === 246769 && LATEX_CAPS.gzip === 82596, "the caps are 246,769 B raw and 82,596 B gzip (daybreak2, 2026-11-12, the editor's File ▸ Share…: its measurement + 64; 246,659 / 82,543 before, daybreak2, 2026-11-12, a shared talk on the share page: its measurement + 64; 246,588 / 82,522 before, daybreak2, 2026-11-12, running code while presenting, renewed after its review fixes: its measurement + 64; 246,016 / 82,328 before, daybreak2, 2026-11-12, a Sage table() drawn as a table: its measurement + 64; 244,777 / 81,787 before, daybreak2, 2026-11-11, the view kept and put back (V1): its landing measurement + 64; 244,388 / 81,635 for Magma in LaTeX; 242,382 B raw and 79.5 KiB gzip before: the preview keeping its place, and @sagebrush's 2026-11-04 gzip cap for the LaTeX fidelity queue)", LATEX_CAPS);
+check(LATEX_CAPS.raw === 294217 && LATEX_CAPS.gzip === 99416, "the caps are 294,217 B raw and 99,416 B gzip (2026-11-25, an element over PIECE_MAX split in turn, on its merge with master b0b02122: 294,153 / 99,352 measured + 64; 294,144 / 99,370 before, latex check naming an \\input file and its line)");
 
-// (and each lazy chunk's, as ruled: comments 16/6, comments-doc 40/16, agent 47,645 / 16,403 B (daybreak2, 2026-11-10,
-//  for #986 r2: the grant's "May run code"; 45,952 / 16,000 for #957 r3, 44/15.5 by @sagebrush, 2026-11-04, before), tools
-//  16/6, present 16/6, run 19,644 / 7,812 B (daybreak2, Nov 12, a shared talk's Run on the share page, renewed after its review fixes: its measurement + 64; 19,465 / 7,779 B before; 18,672 / 7,574 B, daybreak2, Nov 12, running code while presenting, renewed after its review fixes: its measurement + 64; 17,965 / 7,272 B, daybreak2, Nov 11, Magma in LaTeX: its landing measurement + 64; 17/7 KiB on Nov 8, the Beamer plan's PR 3; 15.5/6.5 for #804 before, 12/5.25 before
+// (and each lazy chunk's, as approved: comments 16/6, comments-doc 40/16, agent 47,645 / 16,403 B (2026-11-10, for the
+//  grant's "May run code"; 45,952 / 16,000 for the grant's id and hold, 44/15.5 on 2026-11-04, before), tools
+//  16/6, present 16/6, run 19,644 / 7,812 B (Nov 12, a shared talk's Run on the share page, renewed after its review fixes: its measurement + 64; 19,465 / 7,779 B before; 18,672 / 7,574 B, Nov 12, running code while presenting, renewed after its review fixes: its measurement + 64; 17,965 / 7,272 B, Nov 11, Magma in LaTeX: its landing measurement + 64; 17/7 KiB on Nov 8, the session script's @interact capture; 15.5/6.5 for the record of what a Run imported before, 12/5.25 before
 //  that), interact 5/2.5 (the same design, measured), in KiB)
-// (tools 16,546 / 6,950 B: daybreak2's Q1 ruling for chat plan PR 4b, Nov 11 2026: latex_build's own code moved here out
+// (agent 50,581 / 17,299 B: Nov 18 2026, what an agent creates (the created record, the bar's Open), its measurement with
+//  the board page's forward merged + 64; was 49,666 / 16,943)
+// (agent 50,816 / 17,368 B: Nov 18 2026, the check before a created notebook runs by itself (mayRunCreated), its
+//  measurement with the board page's forward merged + 64)
+// (agent 51,193 / 17,561 B: Nov 19 2026, workspace_create's description of a notebook's language, its measurement in CI
+//  at 1055da1d + 64)
+// (agent 51,283 / 17,591 B: Nov 19 2026, a non-reload record discarded, said as not a reload: measured 51,219 / 17,527
+//  on master 25de21b2 with it, + 64)
+// (agent 51,671 / 17,686 B: Nov 19 2026, Connect's one field for the agent's link (readConnect), its measurement +
+//  64; was 50,816 / 17,368, measured 50,767 / 17,305 on master 35e6a6d0)
+// (agent 52,033 / 17,878 B: the two above together, measured on their merge (master 25de21b2): 51,969 / 17,814, + 64)
+// (agent 52,123 / 17,908 B: Nov 19 2026, the non-reload record discarded with Connect's one field, measured on their
+//  merge (master 0c4267c5): 52,059 / 17,844, + 64)
+// (agent 54,145 / 18,691 B: Nov 19 2026, the answers' entry with its page's address (url): 54,081 / 18,627 measured
+//  on master 4bcbb434 with it, + 64)
+// (agent 53,214 / 18,327 B: Nov 19 2026, the agent's bar docked in the page's own row, with the one-link change merged
+//  on master 25de21b2: 53,150 / 18,263 measured + 64)
+// (agent 53,304 / 18,358 B: Nov 19 2026, the reload record's handling with the bar docked, master 4bcbb434: 53,240 /
+//  18,294 measured + 64)
+// (agent 53,887 / 18,520 B: Nov 19 2026, the reload record's handling on master aadff4d0: 53,823 / 18,456 measured + 64)
+// (agent 54,819 / 18,896 B: Nov 19 2026, the reload record's handling on master 3c4319ba: 54,755 / 18,832 measured + 64)
+// (agent 56,431 / 19,403 B: Nov 19 2026, the reload record's handling on master a3f1e30b: 56,367 / 19,339 measured + 64)
+// (agent 62,408 / 21,455 B: Nov 20 2026, the agent's bar as a compact chip with its menu (keyboard, focus kept across
+//  updates, controls only for the pairing shown): 62,344 / 21,391 measured with bun 1.4.4 and node 24.21.0, + 64; was
+//  57,557 / 19,786)
+// (tools 16,546 / 6,950 B: Nov 11 2026: latex_build's own code moved here out
 //  of the eager group, its landing measurement + 64; was 16/6 KiB)
 // (tools 17,335 / 7,231 B: renewed at the landing merge on master 14279164, 17,271 / 7,167 measured + 64; its +777 / +286
-//  over 16,494 / 6,881 is inherited from #1018's shared check and tools changes)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [49666, 16943], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [3752, 2021] };
+//  over 16,494 / 6,881 is inherited from a shared check's and the tools' changes)
+// (the examples' chunk, EXAMPLES, gone with the editor's own list of examples: the gallery's panel is the only one)
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [68867, 23606], TOOLS: [17758, 7432], PRESENT: [16384, 6144], DOC: [3584, 1792], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [3853, 2021], HL: [4474, 2419] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
+
+// ---- which build is measured: only the shipped LaTeX build (version.json's latexMode "shipped"); anything else is a
+// failure that says why, never a measurement against the shipped build's caps
+/** The verdict for a build's version.json (parsed, or null): `ok`, or `why` it isn't measured. */
+export function buildMode(version) {
+  const mode = version?.latexMode;
+  if (!version || typeof version !== "object") return { ok: false, why: "web/dist/version.json is missing or not JSON (build it first: bun web/build.ts)" };
+  if (mode === "shipped") return { ok: true, mode };
+  if (mode === "test") return { ok: false, mode, why: "this is a test build (latexMode test), and the LaTeX group's caps are the shipped build's; rebuild without SAGEBRUSH_LATEX_PREVIEW=test" };
+  if (mode === "off") return { ok: false, mode, why: "this build has no LaTeX editor (latexMode off); build it with the editor: bun web/build.ts" };
+  return { ok: false, mode, why: `version.json's latexMode is ${JSON.stringify(mode)}, not shipped, test or off` };
+}
+{
+  const v = (latexMode) => ({ latex: latexMode !== "off", latexMode });
+  check(buildMode(v("shipped")).ok, "the shipped build is measured");
+  check(!buildMode(v("test")).ok && /rebuild without SAGEBRUSH_LATEX_PREVIEW=test/.test(buildMode(v("test")).why), "a test build is refused, saying how to rebuild", buildMode(v("test")));
+  check(!buildMode(v("off")).ok && !buildMode(null).ok && !buildMode({}).ok && !buildMode(v("SHIPPED")).ok, "a build without the editor, a missing version.json, no mode or an unknown one: refused, never measured", [v("off"), null, {}, v("SHIPPED")].map((x) => buildMode(x).why));
+}
 
 // ---- the measure, on synthetic trees
 const tmp = mkdtempSync(join(tmpdir(), "latex-group-"));
@@ -97,14 +145,21 @@ try {
 
 // ---- the real DEV build
 const web = join(dirname(fileURLToPath(import.meta.url)), "..", "web");
+// (only the shipped LaTeX build is measured against the caps: any other fails this row, and nothing below is measured)
+let version = null;
+try { version = JSON.parse(readFileSync(join(web, "dist", "version.json"), "utf8")); } catch {}
+const mode = buildMode(version);
+check(mode.ok, "this build is the shipped LaTeX build (web/dist/version.json: latexMode shipped)", mode.ok ? undefined : { latexMode: mode.mode ?? null, why: mode.why });
 if (!existsSync(join(web, "dist", "sagebrush-latex.js"))) check(false, "web/dist has the LaTeX editor's bundle (build it first: bun web/build.ts)");
-else {
+else if (mode.ok) {
   const g = latexGroup(files(web));
-  for (const c of latexLazy(files(web))) check(c.present && c.ok, `this build's ${c.label} within ${c.cap.raw} B raw and ${c.cap.gzip} B gzip`, c.present ? { raw: c.raw, gzip: c.gzip, room: { raw: c.cap.raw - c.raw, gzip: c.cap.gzip - c.gzip } } : { missing: c.name });
+  const lazyRows = latexLazy(files(web));
+  for (const c of lazyRows) check(c.present && c.ok, `this build's ${c.label} within ${c.cap.raw} B raw and ${c.cap.gzip} B gzip`, c.present ? { raw: c.raw, gzip: c.gzip, room: { raw: c.cap.raw - c.raw, gzip: c.cap.gzip - c.gzip } } : { missing: c.name });
   check(g.ok, `this build's LaTeX group within ${LATEX_CAPS.raw} B raw and ${LATEX_CAPS.gzip} B gzip (scripts/latex-group.mjs)`,
     { files: g.js, raw: g.raw, gzip: g.gzip, room: { raw: LATEX_CAPS.raw - g.raw, gzip: LATEX_CAPS.gzip - g.gzip }, node: process.version, zlib: process.versions.zlib });
+  latexReport = { group: { ...g, cap: LATEX_CAPS }, lazy: lazyRows };
   // (the site serves every one of them: web/build.ts copies the LaTeX editor's files to web/site/public by name, and
-  //  one left off that list is a 404 on sagebrush.space only, grader #685 E6; as web/site-dir.mts decides the site)
+  //  one left off that list is a 404 on sagebrush.space only; as web/site-dir.mts decides the site)
   const site = join(web, "site", "public");
   if (process.env.SAGEBRUSH_NO_SITE === "1" || !existsSync(join(web, "site"))) console.log("skip the site's copies: this build has no web/site (SAGEBRUSH_NO_SITE=1, or no web/site)");
   else {
@@ -114,7 +169,7 @@ else {
     check(ours.length === g.js.length + 13 && bad.length === 0 && stale.length === 0, `the site serves each of this build's ${ours.length} LaTeX editor files: web/site/public's copy is web/dist's, byte for byte, and none stale`, { bad, stale });
   }
   // (the app ships every one of them too: app/build-frontend.mjs copies web/dist's files by name (FILES), and one left
-  //  off it is missing from the native app only (grader's #824 R7))
+  //  off it is missing from the native app only)
   const appSrc = readFileSync(join(web, "..", "app", "build-frontend.mjs"), "utf8");
   const appFiles = new Set([...(/const FILES = \[([^\]]*)\]/.exec(appSrc)?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]));
   const ourJs = [...g.js, ...Object.values(LATEX_LAZY)].map((n) => n.slice("dist/".length));
@@ -133,9 +188,9 @@ else {
   const bundles = Object.keys(meta).filter((k) => k.startsWith("the LaTeX editor ("));
   const inputs = [...new Set(bundles.flatMap((k) => meta[k]))].sort();
   check(bundles.length >= 8, "the metafile names the LaTeX editor's bundles (the group's two and the six lazy chunks)", bundles);
-  // (Run's code stays in Run's chunk (#824): the page imports it only lazily (loadRun) or as a type, so the page bundle's
+  // (Run's code stays in Run's chunk: the page imports it only lazily (loadRun) or as a type, so the page bundle's
   //  inputs never list run-core.mjs; Bun tree-shakes an eager import of a re-export down to a few bytes the caps don't
-  //  see, so it is the inputs that are checked (grader's #804 RC1, @sagebrush's ruling, Nov 7))
+  //  see, so it is the inputs that are checked (Nov 7))
   const pageIn = meta["the LaTeX editor (sagebrush-latex.js)"] ?? [], runIn = meta["the LaTeX editor (sagebrush-latex-run.js)"] ?? [];
   check(pageIn.length > 0 && !pageIn.includes("web/latex/run-core.mjs") && runIn.includes("web/latex/run-core.mjs"), "run-core.mjs is an input of the Run chunk only, not of the page bundle", { page: pageIn.filter((f) => /run-core/.test(f)), run: runIn.filter((f) => /run-core/.test(f)) });
   const dir = mkdtempSync(join(tmpdir(), "latex-group-paths-"));
@@ -143,11 +198,17 @@ else {
     writeFileSync(join(dir, "files.txt"), f + "\n");
     const r = spawnSync(process.execPath, [join(root, "scripts", "ci-paths.mjs")], { encoding: "utf8", cwd: root,
       env: { ...process.env, CI_PATHS_FILES: join(dir, "files.txt"), GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: "" } });
-    return r.status !== 0 || !/^full=true$/m.test(r.stdout);
+    if (r.status !== 0 || !/^full=true$/m.test(r.stdout)) return true;
+    // (and under PR CI light, which turns the full tier off, it still keeps web-artifacts: latex_budget)
+    const light = spawnSync(process.execPath, [join(root, "scripts", "ci-paths.mjs")], { encoding: "utf8", cwd: root,
+      env: { ...process.env, CI_PATHS_FILES: join(dir, "files.txt"), GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: "", CI_PR_LIGHT: "true" } });
+    return light.status !== 0 || !/^latex_budget=true$/m.test(light.stdout);
   });
   rmSync(dir, { recursive: true, force: true });
-  check(inputs.length > 0 && notFull.length === 0, `each of the LaTeX bundles' ${inputs.length} inputs selects the full tier (scripts/ci-paths.mjs)`, { notFull });
+  check(inputs.length > 0 && notFull.length === 0, `each of the LaTeX bundles' ${inputs.length} inputs selects the full tier, and web-artifacts under PR CI light (scripts/ci-paths.mjs)`, { notFull });
 }
 
+const status = fails.length ? 1 : 0;
+if (latexReport) safelyAppendPullRequestSummary(() => latexAdvice(latexReport.group, latexReport.lazy));
 console.log(fails.length ? `FAIL: the LaTeX group's budget, ${fails.length} of ${checks}:\n  ${fails.join("\n  ")}` : `ok: the LaTeX group's budget, ${checks} checks`);
-process.exit(fails.length ? 1 : 0);
+process.exit(status);

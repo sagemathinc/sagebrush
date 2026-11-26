@@ -15,6 +15,15 @@ export function frameOptions(policy) {
   const fa = /(?:^|;)\s*frame-ancestors\s+([^;]*?)\s*(?:;|$)/.exec(policy)?.[1];
   return fa === "'none'" ? 'DENY' : fa === "'self'" ? 'SAMEORIGIN' : null;
 }
+// (a GitHub page's policy, /gh/...: the published /s/ page's, its fetches to GitHub's hosts only; the twin of
+// web/csp-policy.mts ghPolicy)
+export const GITHUB_CONNECT = ['https://api.github.com', 'https://raw.githubusercontent.com', 'https://data.jsdelivr.com'];
+export function ghPolicy(policy) {
+  return policy.split(';').map(d => d.trim()).filter(Boolean).map(d => {
+    const [name, ...sources] = d.split(/\s+/);
+    return name === 'connect-src' ? [name, ...sources.filter(s => s !== 'https:' && s !== 'http:'), ...GITHUB_CONNECT].join(' ') : d;
+  }).join('; ');
+}
 export const SCRIPT_POLICY = "default-src 'none'; script-src 'self' blob: 'unsafe-eval' 'wasm-unsafe-eval'; connect-src 'self'; worker-src 'self' blob:; base-uri 'none'; form-action 'none'";
 
 // A file's Cache-Control: production's, which the publisher signed into the object's metadata (prepare.mjs, from the
@@ -54,6 +63,9 @@ export function route(input) {
   if (u.protocol !== 'https:' || u.port || !u.hostname.endsWith(suffix)) return null;
   const name = u.hostname.slice(0, -suffix.length);
   if (!NAME.test(name)) return null;
+  // A public GitHub repository's notebook or folder (/gh/...): the shared-collection page, which reads the rest of the
+  // path itself and fetches GitHub from the reader's browser; nothing of the path reaches R2 (web/gh/source.ts).
+  if (u.pathname.startsWith('/gh/')) return { name, path: 's/index.html', gh: true };
   const parts = u.pathname.split('/').slice(1);
   if (parts.at(-1) === '') parts[parts.length - 1] = 'index.html';
   const decoded = [];
@@ -73,7 +85,7 @@ export default {
     const target = route(request.url);
     if (!target) return error(404);
     if (!['GET', 'HEAD'].includes(request.method)) return error(405);
-    const { name, path } = target;
+    const { name, path, gh } = target;
     try {
       // Exact file or a directory index only. Missing API routes never fall back to the app.
       let key = path;
@@ -92,7 +104,7 @@ export default {
         if (!policy || policy.size > 32768) return error(503);
         const { csp } = await policy.json();
         if (typeof csp !== 'string' || !csp.includes('default-src ') || /[\r\n]/.test(csp)) return error(503);
-        headers.set('Content-Security-Policy', csp);
+        headers.set('Content-Security-Policy', gh ? ghPolicy(csp) : csp);
         if (extension === 'html' && frameOptions(csp)) headers.set('X-Frame-Options', frameOptions(csp));
       }
       headers.set('ETag', object.httpEtag);

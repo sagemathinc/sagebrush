@@ -99,12 +99,13 @@ ws.onmessage = (ev) => {
   if (m.method === "Runtime.executionContextCreated" && m.params.context.auxData?.isDefault) contexts.set(m.params.context.auxData.frameId, { id: m.params.context.id, session: m.sessionId });
   if (m.method === "Target.attachedToTarget" && m.params.targetInfo.type === "iframe") {
     sessions.push(m.params.sessionId);
-    send("Runtime.enable", {}, m.params.sessionId);
-    send("Runtime.runIfWaitingForDebugger", {}, m.params.sessionId);
+    send("Runtime.enable", {}, m.params.sessionId).catch(() => {});
+    send("Runtime.runIfWaitingForDebugger", {}, m.params.sessionId).catch(() => {});
   }
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
 };
-const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
+// (an answer that never comes, the page or the browser gone, fails by name instead of leaving node nothing to wait for)
+const send = (method, params = {}, sessionId, ms = 60000) => new Promise((resolve, reject) => { const id = ++n, timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method}: no answer within ${ms / 1000} s`)); }, ms); waiting.set(id, (r) => { clearTimeout(timer); resolve(r); }); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
 const evalIn = async (expression, sessionId, contextId) => {
   const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, ...(contextId ? { contextId } : {}) }, sessionId);
   if (r?.exceptionDetails) throw new Error((r.exceptionDetails.exception?.description ?? JSON.stringify(r.exceptionDetails)).slice(0, 300) + " in: " + expression.slice(0, 300));
@@ -220,6 +221,8 @@ try {
     await frame(`(() => { const w = ${ta}; w.value = ${JSON.stringify(v)}; w.dispatchEvent(new Event("change")); return 1; })()`);
   };
   check(await frame(`!!${fb}`), "a question with decide offers Get feedback on my words");
+  // (its tooltip says where the words go: the page the board is shown in; and that Submit sends that page all the answers)
+  check(await frame(`(() => { const t = ${fb}.querySelector('button').title; return /the page this board is shown in/.test(t) && /Submit sends that page all your answers and your comment\./.test(t) && !/only when you submit/.test(t); })()`), "Get feedback's tooltip: the words go to the page the board is shown in; Submit sends that page all the answers and the comment");
   check(await frame(`!document.querySelector('[data-ask="q1"] .board-ask-decide')`), "a question without, doesn't");
   await top(`mode.decide = "confuses-transitive-with-two-transitive"`);
   await frame(`${fb}.querySelector('button').click()`);
@@ -246,7 +249,11 @@ try {
   check(await frame(`${fb}.querySelector('a.board-ask-choice[href="#s1"]').title === "→ Go to the next step"`), "a next item with no title or text: \"Go to the next step\", not its id");
   // Something else: the reader's own words, their field open and focused; Choose again: the options again
   await frame(`${fb}.querySelector('.board-ask-own').click()`);
-  check(!!(await until(() => frame(`${fb}.textContent.includes("Something else: your own words stand") && document.activeElement === document.querySelector('[data-ask="q2"] details textarea') && document.querySelector('[data-ask="q2"] details').open`))), "Something else: said, the reader's own words open and focused");
+  // (each part on its own, so a failure says which one: the words said, the field focused, the field open; and what has
+  // the focus instead, and whether the frame's document has it)
+  const ownState = `(() => { const ta = document.querySelector('[data-ask="q2"] details textarea'), a = document.activeElement; return { said: !!${fb}?.textContent.includes("Something else: your own words stand"), focused: !!ta && a === ta, open: !!document.querySelector('[data-ask="q2"] details')?.open, active: a ? a.tagName.toLowerCase() + (a.className ? "." + String(a.className).trim().replace(/\\s+/g, ".") : "") : null, hasFocus: document.hasFocus(), fields: document.querySelectorAll('[data-ask="q2"] details textarea').length }; })()`;
+  const ownOk = !!(await until(async () => { const s = await frame(ownState); return s.said && s.focused && s.open; }));
+  check(ownOk, "Something else: said, the reader's own words open and focused" + (ownOk ? "" : ": " + JSON.stringify(await frame(ownState).catch((e) => String(e?.message ?? e)))));
   await shot("submit-5d-own.png");
   check((await sent("decide")).length === 1, "...and nothing more asked of the host");
   // (other words written: Something else stands; then Choose again: the options, whatever the host said of the words before, astra's UI-E29-1)

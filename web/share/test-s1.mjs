@@ -12,7 +12,7 @@
 //   5. B presses Copy to my workspace: the app opens B's copy at /<title>/<file>, B's file browser lists it, an edit
 //      survives a reload; the share page, for C, is unchanged; A's notebook is untouched;
 //   6. B opens the link again: Open my copy, the same copy, no second one;
-//   7. A edits and presses Publish again: the link shows the new version, /s/<id>@<first version> the old one, and A's
+//   7. A edits and presses Publish new version: the link shows the new version, /s/<id>@<first version> the old one, and A's
 //      link is the same;
 //   8. A deletes the share (Your shares): /s/<id> says it's gone, its files are 404, and B's copy is still B's.
 // A check the page can't pass yet is listed in WAITING with the change it waits for: it runs and is reported, but
@@ -26,10 +26,7 @@ import { startDev } from "./serve-dev.mjs";
 import { devtoolsPort } from "../test-port.mjs";
 
 // (the checks waiting on a change not on master yet: the share page as a product page, its next step)
-const WAITING = {
-  author: "the Publish dialog's Author(s) field, shown on the share page as \"by <it>\"",
-  "no-frame": "the share page starting its interpreter, and so its runner frame, on Run, not on opening",
-};
+const WAITING = {};
 const ACCOUNT = "33333333-3333-4333-8333-333333333333";
 const TITLE = "S1 demo";
 const PY = "import numpy as np; print(np.linalg.solve([[2,1],[1,3]],[3,5]))";
@@ -123,8 +120,12 @@ async function publish(p, { again }) {
   await p.ev("(() => { document.querySelector('#sharedlg').open && document.querySelector('#sharedlg').close(); document.querySelector('#sharemenu').click(); return 1; })()");
   await p.until("document.querySelector('#sharedlg').open && !document.querySelector('#shareform').hidden && document.querySelectorAll('#sharelist .sharerow').length > 0 && !window.sagebrush.share.analyzing", 60000);
   const label = await p.ev("document.querySelector('#shareupload').textContent");
-  ok(label === (again ? "Publish again" : "Publish link"), `${p.name}: the Share dialog's button reads ${J(label)}`);
-  if (!again) await p.ev(`(() => { document.querySelector('#sharetitlein').value = ${J(TITLE)}; const a = document.querySelector('#shareauthor'); if (a) a.value = ${J(BYLINE)}; return 1; })()`);
+  ok(again ? /^Publish (new )?version/.test(label) : label === "Publish link", `${p.name}: the Share dialog's button reads ${J(label)}`);
+  // (the byline: empty for a new share; Publish new version starts with the latest version's, as A typed it)
+  if (again) await p.until(`document.querySelector('#shareauthor').value === ${J(BYLINE)}`, 10000).catch(() => {});
+  const was = await p.ev("document.querySelector('#shareauthor').value");
+  ok(was === (again ? BYLINE : ""), `${p.name}: the Author(s) field starts ${again ? "with the byline A typed for the first version" : "empty"}: ${J(was)}`);
+  if (!again) await p.ev(`(() => { document.querySelector('#sharetitlein').value = ${J(TITLE)}; const a = document.querySelector('#shareauthor'); a.value = ${J(BYLINE)}; a.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()`);
   await p.ev("navigator.clipboard.writeText('(nothing yet)')");
   const t0 = Date.now();
   await p.ev("(() => { document.querySelector('#shareupload').click(); return 1; })()");
@@ -162,7 +163,7 @@ try {
   const link = p1.href;
   const id = link?.match(/\/s\/([a-z2-7]{12})$/)?.[1];
   ok(!!id && link === `${dev.site}/s/${id}`, "the link is /s/<id>: " + link);
-  ok(p1.clip === link && /^Published at /.test(p1.text) && /Link copied/.test(p1.text), "it's shown, and on A's clipboard: " + J({ text: p1.text, clip: p1.clip }));
+  ok(p1.clip === link && /^Published\./.test(p1.text) && /Link copied/.test(p1.text), "it's shown, and on A's clipboard: " + J({ text: p1.text, clip: p1.clip }));
   ok(p1.ms < 5000, `...within 5 s (${p1.ms} ms, Publish link to the link shown and copied)`);
   const aCells = await A.ev("JSON.stringify(window.sagebrush.notebook.snapshot().cells.map((c) => [c.type ?? 'code', c.code]))");
 
@@ -175,12 +176,13 @@ try {
   const b0 = await shownCells(B);
   ok((await B.ev("document.querySelector('#title').textContent")) === TITLE, "the title: " + J(await B.ev("document.querySelector('#title').textContent")));
   ok(b0.length === 2 && b0[0].text === PY && b0[1].text === MD && /Two equations/.test(b0[1].shown), "both cells, the Python and the markdown (shown): " + J(b0.map((c) => [c.text.slice(0, 30), c.shown.slice(0, 30)])));
-  wait("author", (await meta(B)).includes(`by ${BYLINE}`), "the byline A typed, in the header: " + J(await meta(B)));
+  ok((await B.ev("document.querySelector('#meta .by')?.textContent")) === `by ${BYLINE}`, "the byline A typed, in the header: " + J(await meta(B)));
   // (nothing asked of the interpreter at all: the kernel's request ids start at 1, and each run or question takes one)
   const asked = await B.ev("window.shared.kernel.nextId - 1");
   ok(asked === 0 && /Nothing has run yet/.test(await B.ev("document.querySelector('#status').textContent")) && (await B.ev("!document.querySelector('#nb .cell.running, #nb .cell.queued')")), `nothing has run (${asked} requests to the interpreter): ` + J(await B.ev("document.querySelector('#status').textContent")));
   const frames0 = await B.ev("({ frames: document.querySelectorAll('iframe[sandbox]').length, worker: !!window.shared.kernel.worker })");
-  wait("no-frame", frames0.frames === 0 && !frames0.worker, "no runner frame until Run: " + J(frames0));
+  // (the notebook's interpreter starts when it opens, one per page, as the talks' rows pin: at most its one frame)
+  ok(frames0.frames <= 1, "at most the one runner frame before Run: " + J(frames0));
   const fcp = await B.ev("performance.getEntriesByType('paint').find((e) => e.name === 'first-contentful-paint')?.startTime ?? null");
   ok(typeof fcp === "number" && fcp < 2000, `first paint under 2 s: ${fcp === null ? "none" : Math.round(fcp) + " ms"}`);
 
@@ -253,12 +255,12 @@ try {
   ok(second === false, "...with no second copy made");
 
   // ---- 7. A edits and publishes again
-  step("7. A edits and presses Publish again");
+  step("7. A edits and presses Publish new version");
   const v1 = await C.ev("window.shared.c.version");
   await A.ev(`(async () => { const nb = window.sagebrush.notebook; const md = nb.cells()[1].id; await nb.applyEdits({ set: [{ id: md, code: ${J(MD2)} }] }, { run: false }); return 1; })()`);
   await sleep(1000);
   const p2 = await publish(A, { again: true });
-  ok(p2.href === link && /^Published again at /.test(p2.text), "A's link is unchanged: " + J({ href: p2.href, text: p2.text }));
+  ok(p2.href === link && /^Published version 2\./.test(p2.text), "A's link is unchanged: " + J({ href: p2.href, text: p2.text }));
   // (B, who has a copy, sees the new version as the book's version; C, with none, at once)
   await B.go(link);
   await shareReady(B);

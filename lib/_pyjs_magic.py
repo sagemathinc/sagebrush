@@ -6,6 +6,8 @@ below.
 
 Line magics:
     %matplotlib [inline]      figures are shown inline already
+    %config InlineBackend.figure_format = 'svg'   (or 'png', or figure_formats = {'png', 'svg'}): how figures
+                              are shown (sagebrush.figures; the default is "auto")
     %load_ext autoreload, %reload_ext autoreload, %unload_ext autoreload
     %autoreload [0|1|2|off|explicit|all|now], %aimport [mod, -mod]
     %time STATEMENT           the wall time (Sagebrush cannot measure CPU time)
@@ -387,6 +389,10 @@ def _update_class(old, new):
 
 _autoreload = None
 
+# (callables run before each cell or command, after autoreload's check: Sage's
+# attach() registers its reload of changed attached files)
+pre_run_hooks = []
+
 
 def _need_autoreload(magic):
     if _autoreload is None:
@@ -456,6 +462,36 @@ def _matplotlib(line):
     if gui not in ("", "inline"):
         raise UsageError("%%matplotlib %s is not supported in Sagebrush: figures are shown inline (%%matplotlib inline)"
                          % gui)
+
+
+
+# (%config: Jupyter's InlineBackend.figure_format(s), as the way figures are shown, lib/_graphics.py figures: 'svg'
+# is "svg", 'png' or 'retina' (or 'png2x') is "png", a PNG always being drawn at twice the size, and both are "both".
+# As IPython's: the value is evaluated in the notebook's namespace, and a format it can't show or another
+# configurable isn't an error, only said)
+_FORMAT_NAMES = {"png": "png", "svg": "svg", "retina": "png", "png2x": "png"}
+
+
+def _config(line):
+    import re
+    import _graphics
+    m = re.match(r"\s*InlineBackend\.(figure_formats?)\s*=\s*(.+?)\s*$", line, re.S)
+    if m is None:
+        print("Sagebrush's %%config sets InlineBackend.figure_formats (or InlineBackend.figure_format) only, how "
+              "figures are shown; %s is not used." % (line.strip() or "(nothing)"), file=sys.stderr)
+        return
+    v = eval(m.group(2), _user_ns())
+    names = [v] if isinstance(v, str) else list(v) if isinstance(v, (list, tuple, set, frozenset)) else None
+    if not names or not all(isinstance(n, str) for n in names):
+        raise UsageError("%%config InlineBackend.%s: give 'png', 'retina' or 'svg' (or a set of them), not %r"
+                         % (m.group(1), v))
+    bad = [n for n in names if n.lower() not in _FORMAT_NAMES]
+    if bad:
+        print("Sagebrush shows figures as 'png', 'retina' or 'svg', not %s: how they are shown is unchanged."
+              % ", ".join(repr(n) for n in bad), file=sys.stderr)
+        return
+    kinds = {_FORMAT_NAMES[n.lower()] for n in names}
+    _graphics.figures("both" if len(kinds) == 2 else kinds.pop())
 
 
 def _no_shell(line):
@@ -545,13 +581,14 @@ def _estimate(line):
     f = value(names[0])
     for n in names[1:]:
         f = getattr(f, n)
-    import sagebrush
+    import _sagebrush_lib as sagebrush
     return sagebrush.estimate(f, *args, **kwds)
 
 
 _LINE = {
     "estimate": _estimate,
     "matplotlib": _matplotlib,
+    "config": _config,
     "load_ext": _load_ext,
     "reload_ext": lambda line: _load_ext(line, True),
     "unload_ext": _unload_ext,
@@ -590,9 +627,11 @@ def run_cell_magic(name, line, body=None):
 
 
 def pre_run_cell():
-    """Before a cell runs: autoreload's check."""
+    """Before a cell runs: autoreload's check, then pre_run_hooks."""
     if _autoreload is not None:
         _autoreload.check()
+    for hook in list(pre_run_hooks):
+        hook()
 
 
 def post_run_cell():
@@ -616,6 +655,12 @@ class _Shell:
     @property
     def user_ns(self):
         return _user_ns()
+
+    @property
+    def displayhook(self):
+        """The output cache (_, __, ___, and the kernel's _N and Out): its cache_size, as IPython's displayhook's."""
+        import builtins
+        return getattr(builtins, "__pyjs_record_output__", None)
 
 
 _shell = _Shell()

@@ -1,4 +1,4 @@
-// The pins of the four WebAssembly modules (wasm/pins.json; design/wasm-artifacts.md).
+// The pins of the five WebAssembly modules (wasm/pins.json; design/wasm-artifacts.md).
 //   node scripts/wasm-pins.mjs --check              each module's state: pinned, local build, an earlier pin, unidentified, missing
 //   node scripts/wasm-pins.mjs --verify-committed   pins.json matches the modules committed at HEAD (while they are committed)
 //   node scripts/wasm-pins.mjs --from-committed     write pins.json from the modules committed at HEAD
@@ -13,7 +13,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { MODULES, ROOT, checkModules, committedMismatches, formatPins, loadPins, matches, moduleState, modulePath, parsePins, pinsPath, runMode, sha256, writeSidecar } from "./wasm-modules.mjs";
+import { MODULES, ROOT, checkModules, committedMismatches, formatPins, loadPins, matches, moduleState, modulePath, parsePins, pinsPath, readStamp, runMode, sha256, writeSidecar } from "./wasm-modules.mjs";
 import { DEFAULT_BASE, LIMITS, fetchModules } from "./wasm-fetch.mjs";
 import { MANIFEST, install, pack, policy, readArtifact } from "./wasm-artifact.mjs";
 import { BUCKET, awsPut, keyOf, publish } from "./wasm-publish.mjs";
@@ -104,7 +104,7 @@ async function selfTest() {
     await expect("pins.json with a short sha256", async () => parsePins(JSON.stringify({ v: 1, modules: { ...pinsOf(mods), [MODULES[0]]: { sha256: "abc", bytes: 1 } } })), /64 lowercase hex/);
     // the fetch: a clean download, then the controls
     const r1 = root("r1");
-    await pass("a cold fetch downloads all four and they check as pinned", async () => {
+    await pass("a cold fetch downloads all five and they check as pinned", async () => {
       await fetchModules(opts(r1));
       return checkModules({ root: r1, mode: "pinned" }).every((l) => l.endsWith("pinned"));
     });
@@ -262,7 +262,7 @@ async function selfTest() {
       await fetchModules(opts(rc));
       return matches(readFileSync(modulePath(MODULES[3], rc)), pinsOf(mods)[MODULES[3]]);
     });
-    // the committed modules against pins.json: all four, none, or a partial set; and git failures
+    // the committed modules against pins.json: all five, none, or a partial set; and git failures
     const repo = join(dir, "repo");
     mkdirSync(join(repo, "wasm"), { recursive: true });
     const g = (...a) => execFileSync("git", ["-C", repo, ...a], { stdio: "ignore" });
@@ -272,8 +272,8 @@ async function selfTest() {
     writeFileSync(pinsPath(repo), formatPins(pinsOf(mods)));
     for (const n of MODULES) writeFileSync(modulePath(n, repo), mods[n]);
     g("add", "-A");
-    g("commit", "-qm", "all four");
-    await pass("all four committed and matching their pins pass", async () => committedMismatches({ root: repo }).length === 0);
+    g("commit", "-qm", "all five");
+    await pass("all five committed and matching their pins pass", async () => committedMismatches({ root: repo }).length === 0);
     const head = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
     rmSync(modulePath(MODULES[2], repo));
     symlinkSync(MODULES[0], modulePath(MODULES[2], repo));
@@ -293,13 +293,13 @@ async function selfTest() {
     await pass("a pin whose length differs from the committed module fails, naming it", async () => committedMismatches({ root: repo, pins: { ...pinsOf(mods), [MODULES[3]]: { sha256: sha256(Buffer.from("changed")), bytes: 8 } } }).some((l) => l.startsWith(MODULES[3])));
     g("rm", "-q", `wasm/${MODULES[1]}`);
     g("commit", "-qm", "one removed");
-    await pass("a partial set fails, naming the missing module", async () => committedMismatches({ root: repo }).some((l) => /only 3 of the 4/.test(l) && l.includes(MODULES[1])));
+    await pass("a partial set fails, naming the missing module", async () => committedMismatches({ root: repo }).some((l) => new RegExp(`only ${MODULES.length - 1} of the ${MODULES.length}`).test(l) && l.includes(MODULES[1])));
     g("rm", "-q", ...MODULES.filter((n) => n !== MODULES[1]).map((n) => `wasm/${n}`));
     g("commit", "-qm", "none");
     await pass("no module committed passes (nothing to compare)", async () => committedMismatches({ root: repo }).length === 0);
     await expect("an unknown revision is an error, not a pass", async () => committedMismatches({ root: repo, rev: "no-such-rev" }), /is not a commit/);
     await expect("a directory that isn't a repository is an error", async () => committedMismatches({ root: join(dir, "r1") }), /is not a commit/);
-    // the CI artifact: exactly the four modules and this run's manifest, every module matching it
+    // the CI artifact: exactly the five modules and this run's manifest, every module matching it
     const run = { GITHUB_RUN_ID: "7", GITHUB_SHA: "c".repeat(40), GITHUB_EVENT_NAME: "push" };
     const artifact = (name, env = run) => {
       const ra = root(`ra-${name}`), d = join(ra, "artifact");
@@ -307,9 +307,16 @@ async function selfTest() {
       pack(d, { root: ra, env });
       return { ra, d };
     };
-    await pass("an artifact of this run installs all four, pinned", async () => {
+    await pass("an artifact of this run installs all five, pinned", async () => {
       const { d } = artifact("ok"), rt = root("ra-target");
       return install(d, { root: rt, env: run }).mode === "pinned" && checkModules({ root: rt, mode: "pinned" }).length === MODULES.length;
+    });
+    await pass("on a track, an artifact that doesn't match the pins installs, fresh, and records nothing as pinned", async () => {
+      const track = { ...run, GITHUB_REF_NAME: "track/math" };
+      const { d } = artifact("track", track), rt = root("ra-track-target");
+      writeFileSync(pinsPath(rt), formatPins({ ...pinsOf(mods), [MODULES[0]]: { sha256: "e".repeat(64), bytes: 9 } }));
+      const r = install(d, { root: rt, env: track });
+      return r.mode === "fresh" && Object.keys(readStamp(rt)).length === 0 && moduleState(MODULES[0], loadPins(rt)[MODULES[0]], rt).state !== "pinned";
     });
     for (const n of MODULES) {
       await expect(`an artifact missing ${n} is refused`, async () => {
@@ -337,11 +344,27 @@ async function selfTest() {
     for (const ev of ["push", "workflow_dispatch", "schedule"]) {
       await expect(`a stale pin is an error on ${ev}, even for an engine test job`, async () => policy(freshMods, { root: r1, allowFresh: true, env: { GITHUB_EVENT_NAME: ev } }), /the pin is stale: commit these wasm\/pins\.json lines/);
     }
+    // a merge queue group is what lands on its target: strict into master, even for an engine test job; fresh into a track
+    await expect("a stale pin is an error in a queue group into master, even for an engine test job", async () => policy(freshMods, { root: r1, allowFresh: true, env: { GITHUB_EVENT_NAME: "merge_group", GITHUB_REF_NAME: "gh-readonly-queue/master/pr-7-cccccccccccccccccccccccccccccccccccccccc" } }), /the pin is stale: commit these wasm\/pins\.json lines/);
+    await pass("a stale pin in a queue group into a track: fresh, labelled", async () => {
+      const r = policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "merge_group", GITHUB_REF_NAME: "gh-readonly-queue/track/math/pr-7-cccccccccccccccccccccccccccccccccccccccc" } });
+      if (r.mode !== "fresh") throw new Error(`mode ${r.mode}`);
+    });
     await expect("a stale pin is an error for every other reader on a pull request", async () => policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "pull_request" } }), /the pin is stale/);
     await pass("...and a labelled fresh run for a pull request's engine test job", async () => {
       const r = policy(freshMods, { root: r1, allowFresh: true, env: { GITHUB_EVENT_NAME: "pull_request" } });
       return r.mode === "fresh" && r.lines.some((l) => l.startsWith(`${MODULES[0]}: fresh build (pin mismatch)`));
     });
+    // on a track every reader runs the fresh build, labelled, and records nothing as pinned
+    for (const env of [{ GITHUB_EVENT_NAME: "push", GITHUB_REF_NAME: "track/math" }, { GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/track/math" }, { GITHUB_EVENT_NAME: "pull_request", GITHUB_BASE_REF: "track/math", GITHUB_HEAD_REF: "r6" }, { GITHUB_EVENT_NAME: "pull_request_target", GITHUB_BASE_REF: "track/math" }]) {
+      await pass(`a stale pin on a track (${env.GITHUB_EVENT_NAME}): fresh for every reader, labelled`, async () => {
+        const r = policy(freshMods, { root: r1, env });
+        return r.mode === "fresh" && r.lines.some((l) => l.startsWith(`${MODULES[0]}: fresh build (pin mismatch)`)) && r.lines.some((l) => /a track's run/.test(l));
+      });
+    }
+    await expect("a stale pin on a track's pull into master is an error for every other reader", async () => policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "pull_request", GITHUB_BASE_REF: "master", GITHUB_HEAD_REF: "track/math" } }), /the pin is stale/);
+    await expect("a stale pin on a track/math-like branch that isn't a track is an error", async () => policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "push", GITHUB_REF_NAME: "trackmath" } }), /the pin is stale/);
+    await expect("the schedule is never a track's run", async () => policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "schedule", GITHUB_REF_NAME: "track/math" } }), /the pin is stale/);
     // publishing, against this server as the bucket
     {
       const { ra, d } = artifact("publish");
@@ -349,10 +372,10 @@ async function selfTest() {
       const stash = new Map(gone.map((k) => [k, served.get(k)]));
       const puts = [];
       const put = (key, bytes) => (puts.push(key), served.set(key.split("/").pop(), bytes), "written");
-      for (const k of gone.slice(0, 2)) served.delete(k); // two published already, two not
+      for (const k of gone.slice(0, 2)) served.delete(k); // two not published, the rest already
       await pass("publishing uploads only the absent keys, and reads every one back", async () => {
         const res = await publish(d, { root: ra, base, put, limits: fast, env: run, log: () => {} });
-        return puts.length === 2 && res.filter((r) => r.state === "uploaded and read back").length === 2 && res.filter((r) => r.state === "already published").length === 2;
+        return puts.length === 2 && res.filter((r) => r.state === "uploaded and read back").length === 2 && res.filter((r) => r.state === "already published").length === MODULES.length - 2;
       });
       served.delete(gone[3]);
       const wrongPut = (key, bytes) => (served.set(key.split("/").pop(), Buffer.from(bytes).fill(0x42, 8)), "written");
@@ -367,6 +390,8 @@ async function selfTest() {
       const before = requests, putsBefore = puts.length;
       await expect("a build that doesn't match the pins is never published", () => publish(d, { root: rs, base, put, limits: fast, env: run, log: () => {} }), /the pin is stale/);
       results.push(requests === before && puts.length === putsBefore ? "ok   ...with no request and no upload" : `FAIL ...${requests - before} requests, ${puts.length - putsBefore} uploads`);
+      await expect("on a track, a build that doesn't match the pins is never published either", () => publish(d, { root: rs, base, put, limits: fast, env: { ...run, GITHUB_REF_NAME: "track/math" }, log: () => {} }), /refusing to publish a fresh build/);
+      results.push(requests === before && puts.length === putsBefore ? "ok   ...with no request and no upload, on a track too" : `FAIL ...${requests - before} requests, ${puts.length - putsBefore} uploads on a track`);
       for (const [k, v] of stash) served.set(k, v);
     }
     // the upload itself (awsPut), with a stand-in for the aws CLI

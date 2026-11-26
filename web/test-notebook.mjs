@@ -1,4 +1,4 @@
-// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
+// ci: web-runner order=507 chrome
 // End-to-end checks of the notebook page in headless Chromium: notebooks and
 // files persist across reloads, File > New/Open/Download/Upload, the files
 // panel, share links.  Serve web/dist first:
@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "./test-port.mjs";
+import { allowFiles } from "./test-allow.mjs";
 const url = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const profile = mkdtempSync(join(tmpdir(), "sb-notebook-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -28,6 +29,13 @@ ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.id && waiting.has(
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 500)); return r.result?.value; };
 const until = async (expr, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr)) return true; await sleep(100); } throw new Error("timeout: " + expr); };
+// (File > Share… is always its dialog since a95afc9d (#1123): its Copy link puts the link in the address bar too; the
+// dialog stays open, and each caller navigates away)
+const shareToAddress = async () => {
+  await ev("navigator.clipboard.writeText = async () => {}; document.querySelector('[data-f=share]').click()");
+  await until("document.querySelector('#sharedlg').open");
+  await ev("document.querySelector('#sharelink').click()");
+};
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) process.exitCode = 1; };
 const ready = () => until("document.querySelector('#status')?.textContent.startsWith('ready')");
 async function runCode(code) {
@@ -63,6 +71,8 @@ try {
   ok(await ev("(() => { const c = document.querySelector('.cell.markdown:not(.rendered)') ?? [...document.querySelectorAll('.cell.markdown')].at(-1); const hl = c.querySelector('.mb-edit pre'); return !!hl && (!!hl.querySelector('.hp') || !!hl.querySelector('.hk')); })()"), "the Markdown being edited is highlighted (the block written in)");
   await ev("(() => { const ta = [...document.querySelectorAll('.cell.markdown textarea')].at(-1); ta.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', ctrlKey: true, bubbles: true})); })()");
   await until("[...document.querySelectorAll('.cell.markdown')].at(-1).classList.contains('rendered')");
+  // no side panel registers on this page: no Agent button beside Share, and no empty panel to open (#1616)
+  ok(await ev("document.querySelector('#sidebtn').hidden && document.querySelector('#sbside').hidden && (window.sagebrush.side?.shown ?? null) === null"), "no Agent button beside Share and no empty side panel: nothing registers one here yet");
   // the toolbar stays in view as the notebook scrolls (William, Oct 17): Run all, the
   // function search and the File menu a press away at the bottom of a long notebook
   {
@@ -96,8 +106,7 @@ try {
       ok(fit.bottom <= fit.h && fit.scrolls && last.focused && last.inView && last.pressable, `in a 420 px window, ${menu} fits in it, its last entry reachable by keyboard and pointer: ` + JSON.stringify([fit, last]));
       await ev(`document.querySelector('${btn}').click(), 1`);
     }
-    // (the function search is in ⋯'s More tools row now (the declutter, William Nov 2): opened, as a person would)
-    await ev("(document.querySelector('#toolrow').hidden && document.querySelector('#moretools').click(), 1)");
+    // (the function search is always in the toolbar, with no More tools row)
     // (the function search's results, from the toolbar's middle, within the window at laptop widths, astra's UI-CA2-1)
     for (const width of [1100, 1024]) {
       await send("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
@@ -129,10 +138,16 @@ try {
     await ev("document.querySelector('#__tall').remove(), scrollTo(0, 0), 1");
     await sleep(200);
   }
+  // (every notebook starts with file changes off (#822): allowed as a person does, before the cell that writes)
+  await allowFiles(send, ev);
   let out = await runCode("import os\nwith open('data.txt', 'w') as f:\n    f.write('hello from python')\nos.makedirs('sub/dir', exist_ok=True)\nopen('sub/dir/x.csv', 'w').write('a,b\\n1,2\\n')\nprint(sorted(os.listdir('.')), os.path.exists('sub/dir/x.csv'), os.path.getsize('data.txt'))");
   ok(out.includes("['data.txt', 'sub'] True 17"), "open() and os work: " + out.trim());
   await ev("document.querySelector('#nbname').value = 'My research'; document.querySelector('#nbname').dispatchEvent(new Event('input'))");
   await until("document.querySelector('#saved').textContent.includes('saved')");
+  // (and its file renamed to match, which the page does 800 ms after the last keystroke (wsRenameSoon): waited for, as
+  // a person pauses. A reload within those 800 ms keeps the old file name for good, the title saved: a known gap,
+  // reported with #1438, not what this checks)
+  ok(await until("window.sagebrush.workspace.stat('/My research.ipynb').then((e) => !!e, () => false)"), "the notebook's file renamed to its name");
   await send("Page.reload");
   await ready();
   await until("document.querySelectorAll('.cell').length > 0");
@@ -162,13 +177,13 @@ try {
   ok((await ev("document.body.textContent.includes('hello from python')")), "ipynb import restores cells and outputs");
   await until("document.querySelectorAll('.cell.markdown.rendered').length === 2");
   ok(true, "ipynb import restores Markdown cells");
-  // open dialog lists the notebooks
+  // File > Open… (the workspace's files dialog, since 3a662028) lists the notebooks
   await ev("document.querySelector('[data-f=open]').click()");
-  await until("document.querySelector('#opendlg').open");
-  const names = await ev("[...document.querySelectorAll('#nblist .open span:first-child')].map(s => s.textContent)");
-  ok(names.includes("My research") && names.includes("Untitled") && names.includes("imported"), "Open lists: " + names.join(", "));
-  await ev("[...document.querySelectorAll('#nblist .open')].find(b => b.textContent.startsWith('My research')).click()");
-  await until("document.querySelector('#nbname').value === 'My research'");
+  await until("!!document.querySelector('.sbfopen .sbfiles') && document.querySelectorAll('.sbfopen .frow').length >= 3");
+  const names = await ev("[...document.querySelectorAll('.sbfopen .frow')].map((r) => r.dataset.path)");
+  ok(["/My research.ipynb", "/Untitled.ipynb", "/imported.ipynb"].every((n) => names.includes(n)), "Open lists: " + names.join(", "));
+  await ev(`document.querySelector('.sbfopen .frow[data-path="/My research.ipynb"]').click()`);
+  await until("document.querySelector('#nbname').value === 'My research' && !document.querySelector('.sbfopen')");
   ok(true, "Open switches notebooks");
   // upload a file through the panel, read it from Python
   await ev(`(() => { document.querySelector('#filesbtn').click(); const dt = new DataTransfer(); dt.items.add(new File(['x,y\\n3,4\\n'], 'up.csv')); const i = document.querySelector('#uploadinput'); i.files = dt.files; i.dispatchEvent(new Event('change')); })()`);
@@ -282,7 +297,7 @@ try {
   ok(/bad syntax/.test(out), "a Magma syntax error is reported: " + JSON.stringify(out.trim().slice(0, 60)));
   await ev("(() => { window.confirm = () => true; const m = document.querySelector('#mode'); m.value = 'python'; m.dispatchEvent(new Event('change')); })()");
   // share link round trip
-  await ev("navigator.clipboard.writeText = async () => {}; document.querySelector('[data-f=share]').click()");
+  await shareToAddress();
   await until("location.hash.includes('z=')");
   const link = await ev("location.href");
   await send("Page.navigate", { url: "about:blank" });
@@ -380,7 +395,7 @@ try {
   }
   ok(await ev("[...document.querySelectorAll('.cell')].some(c => [...c.querySelectorAll('.hc')].some(e => e.textContent === '% doubled') && [...c.querySelectorAll('.hf')].some(e => e.textContent === 'twice'))"),
     "MATLAB code is highlighted as MATLAB (% comments, the function's name)");
-  await ev("navigator.clipboard.writeText = async () => {}; document.querySelector('[data-f=share]').click()");
+  await shareToAddress();
   await until("location.hash.includes('m=matlab')");
   const mlink = await ev("location.href");
   await send("Page.navigate", { url: "about:blank" });

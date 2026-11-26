@@ -10,7 +10,8 @@
 //     held open by another process): no waiting forever;
 //   - a stream or spawn error, or a close without both streams' end.
 // judge(): the report (stdout's report lines) through android-report.py with
-// the engine THIS platform fixes, and the native witness (probe-log.py
+// the engine THIS platform fixes and --desktop (the desktop app's own checks, the
+// LaTeX editor's, required too), and the native witness (probe-log.py
 // --desktop) on all of stderr, with check 2's nonce.
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -64,6 +65,15 @@ export function python(args) {
   return r;
 }
 
+/** null when the app's log has exactly one "[agent] bundle:" line and it is what this platform must report. */
+export function agentBundleProblem(err, platform) {
+  const lines = String(err).split(/\r?\n/).filter((l) => l.startsWith("[agent] bundle: "));
+  if (lines.length !== 1) return `${lines.length} "[agent] bundle:" lines in the app's log, not 1`;
+  const bundled = platform === "darwin" || platform === "linux";
+  const want = bundled ? /^\[agent\] bundle: ok agent=\d+\.\d+\.\d+ node=\d+\.\d+\.\d+ claude_code=\S+ node_check=(bytes|signature)$/ : /^\[agent\] bundle: not_bundled$/;
+  return want.test(lines[0]) ? null : `${JSON.stringify(lines[0])} (${bundled ? "the agent is bundled here" : "no agent is bundled here"})`;
+}
+
 // -> { passed, report }; prints a FAIL line for each failing part.
 export function judge(res, { dir, platform = process.platform }) {
   const here = new URL(".", import.meta.url);
@@ -71,14 +81,14 @@ export function judge(res, { dir, platform = process.platform }) {
   const lines = reportLines(res.out);
   const report = join(dir, "report.txt");
   writeFileSync(report, lines.join("\n") + "\n");
-  // (the report judge, with this platform's engine)
+  // (the report judge, with this platform's engine, as the desktop app's report: --desktop)
   const engine = Object.hasOwn(ENGINE_OF_PLATFORM, platform) ? ENGINE_OF_PLATFORM[platform] : null;
   let judged = false;
   if (!engine) console.log(`FAIL no engine family is known for the platform ${JSON.stringify(platform)}`);
   else {
-    const j = python([fileURLToPath(new URL("android-report.py", here)), "--engine", engine, report]);
+    const j = python([fileURLToPath(new URL("android-report.py", here)), "--engine", engine, "--desktop", report]);
     judged = j.status === 0;
-    if (!judged) console.log(`FAIL the report judge, --engine ${engine} (android-report.py: ${j.error ? "no python" : "exit " + j.status})`);
+    if (!judged) console.log(`FAIL the report judge, --engine ${engine} --desktop (android-report.py: ${j.error ? "no python" : "exit " + j.status})`);
   }
   // (the native witness: the app's log, all of it, this run's nonce from the report's check 2)
   const stderr = join(dir, "stderr.txt");
@@ -91,6 +101,9 @@ export function judge(res, { dir, platform = process.platform }) {
     witness = w.status === 0;
     if (!witness) console.log(`FAIL the native witness (probe-log.py: ${w.error ? "no python" : "exit " + w.status})`);
   }
-  const passed = res.problems.length === 0 && res.code === 0 && res.out.includes("all passed") && judged && witness;
+  // (the agent bundle's check, run by the app on its own resources and Node: macOS and Linux bundle the agent)
+  const bundle = agentBundleProblem(res.err, platform);
+  if (bundle) console.log(`FAIL the agent bundle: ${bundle}`);
+  const passed = res.problems.length === 0 && res.code === 0 && res.out.includes("all passed") && judged && witness && !bundle;
   return { passed, report };
 }

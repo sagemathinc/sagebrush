@@ -26,6 +26,26 @@ test("a program on stdin runs in each mode: Python, Sage, Magma and MATLAB", () 
   }
 });
 
+test("a prompt (-i) on piped input runs every line, writes its last prompt, and exits 0 at the input's end, in each mode", () => {
+  // (the input ends while its last line runs: the prompt after it is written, not refused by a closed readline)
+  const cases: [string[], string, string][] = [
+    [["-q", "-i"], "x = 1\nprint(x)\n", ">>> >>> 1\n>>> "],
+    [["--sage", "-q", "-i"], "x = 1\nprint(x)\n", "sage: sage: 1\nsage: "],
+    [["--magma", "-q", "-i"], "x := 1;\nprint x;\n", "> > 1\n> "],
+    [["--matlab", "-q", "-i"], "x = 1;\ndisp(x)\n", ">> >>      1\n>> "],
+    // (and input that ends in the middle of a statement: the continuation prompt is the one written, an empty one
+    // in Magma and MATLAB)
+    [["-q", "-i"], "if True:\n", ">>> ... "],
+    [["--sage", "-q", "-i"], "if True:\n", "sage: ....: "],
+    [["--magma", "-q", "-i"], "x := (1 +\n", "> "],
+    [["--matlab", "-q", "-i"], "if true\n", ">> "],
+  ];
+  for (const [args, input, out] of cases) {
+    const r = run(args, input);
+    assert.deepEqual([r.status, r.stdout, r.stderr], [0, out, ""], args.join(" "));
+  }
+});
+
 test("MATLAB on stdin stops at its first error with exit status 1, and reports a syntax error with its line", () => {
   const r = run(["--matlab"], "disp(1)\nerror('boom')\ndisp(2)\n");
   assert.equal(r.status, 1);
@@ -232,6 +252,21 @@ test("an interactive --matlab session: MATLAB at a >> prompt, ... continues a li
   const f = tty(["--matlab"], "function y = f(x)\ndisp(7)\nexit\n");
   assert.equal(f.status, 0, f.out);
   assert.match(f.out, /Function definitions are not supported in this context\. Functions can only be created as local or nested functions in code files\.\n>> disp\(7\)\n     7\n/);
+});
+
+test("an interactive Python prompt: any SystemExit leaves it with its status, as CPython's; an error keeps it", { skip: !hasScript && "needs util-linux script(1)" }, () => {
+  const one = tty([], "x = 1\nexit(1)\nprint('after')\n");
+  assert.equal(one.status, 1, one.out);
+  assert.ok(!one.out.includes("\nafter"), one.out);
+  const bye = tty([], "exit('bye')\nprint('after')\n");
+  assert.equal(bye.status, 1, bye.out);
+  assert.ok(bye.out.includes("bye\n") && !bye.out.includes("\nafter"), bye.out);
+  const zero = tty([], "import sys\nsys.exit(0)\nprint('after')\n");
+  assert.equal(zero.status, 0, zero.out);
+  assert.ok(!zero.out.includes("\nafter"), zero.out);
+  const err = tty([], "raise ValueError('v')\nprint('still')\nexit()\n");
+  assert.equal(err.status, 0, err.out);
+  assert.ok(err.out.includes("ValueError: v") && err.out.includes("\nstill"), err.out);
 });
 
 test("Tab completes MATLAB's names at a --matlab prompt: a variable, and rand's family, never Python's", { skip: !hasScript && "needs util-linux script(1)" }, async () => {

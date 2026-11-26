@@ -6,7 +6,7 @@
 #   android-report.py), with the COI diagnosis read (coi-reading.py);
 # - release: the same file in the same place must NOT be picked up (no
 #   report, the notebook unchanged, the app still running): the debug-only
-#   boundary in lib.rs, shown at run time (astra's R-IOS-1).
+#   boundary in lib.rs, shown at run time.
 # There are no secrets, no signing and no upload here.  Never a required check.
 #
 # Pinned, each failing by name when absent (never a fallback):

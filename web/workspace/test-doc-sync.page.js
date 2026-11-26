@@ -2,7 +2,7 @@
 // Locks): a workspace with the journal active and DEV's docsync on, a notebook store per notebook, and doc-sync.ts's
 // DocSync on a minimal account socket to the reference server (hello, welcome, then the document requests).  The
 // harness drives two of these, as two devices of one account.
-import { W, N, H, DS, P, NB, ST } from "./all.js";
+import { W, N, H, DS, P, NB, ST, E } from "./all.js";
 
 const J = JSON.stringify;
 const T = { stores: new Map(), pending: new Map(), req: 0, log: [], warns: [] };
@@ -22,10 +22,34 @@ T.init = async (name) => {
   T.hdb = await W.openHistoryDb();
   N.DOC_SYNC.on = true;
   T.kit = N.journalClasses({ IdbStore: W.IdbStore, IdbPatchStore: W.IdbPatchStore });
-  T.ds = new DS.DocSync({ retryMs: 200, askMs: 5000 });
+  // (each pulled page that stored patches, and the document's Files entry stamped with its time, as the pages do)
+  T.pages = [];
+  T.ds = new DS.DocSync({ retryMs: 200, askMs: 5000, onPage: (p) => { T.pages.push(p); void T.w.touch(p.doc, p.at); } });
   return true;
 };
+/** Notebook `id` listed in this device's Files (as the page lists a notebook it opens); its entry's `updated`. */
+T.list = async (id) => { await T.w.locked(() => T.w.adopt("/", "Synced " + id.slice(0, 4), ".ipynb", { kind: "notebook", ref: id, mode: "python" })); return T.updatedOf(id); };
+T.updatedOf = async (id) => { const p = await T.w.pathOf("notebook", id); return p ? (await T.w.stat(p))?.updated ?? null : null; };
+T.pagesOf = (id) => T.pages.filter((p) => p.doc === id);
+T.touch = async (id, t) => { await T.w.touch(id, t); return T.updatedOf(id); };
 
+/** End-to-end encryption on the wire for this device (doc-seal.ts, opt-in): its DocSync made again, before it connects,
+ * with a fixture key provider over `gens` (each {cekId, keyEpoch, fill}: a content key of 32 bytes of `fill`), the
+ * one at `current` sealing new patches; `find` answers only a generation it lists. */
+T.useKeys = async (account, gens, current) => {
+  const keys = new Map(), at = (cekId, keyEpoch) => `${cekId}\u0000${keyEpoch}`;
+  for (const g of gens) keys.set(at(g.cekId, g.keyEpoch), await E.importCek(new Uint8Array(32).fill(g.fill)));
+  const cur = gens[current];
+  T.ds = new DS.DocSync({
+    retryMs: 200, askMs: 5000, onPage: (p) => { T.pages.push(p); void T.w.touch(p.doc, p.at); },
+    keys: {
+      account,
+      current: async () => ({ cekId: cur.cekId, keyEpoch: cur.keyEpoch, cek: keys.get(at(cur.cekId, cur.keyEpoch)) }),
+      find: async (doc, cekId, keyEpoch) => keys.get(at(cekId, keyEpoch)) ?? null,
+    },
+  });
+  return true;
+};
 /** The account socket (the front adds this device's session), hello, welcome, then DocSync connected on it. */
 T.connect = async (dev, account) => {
   const owner = await P.accountHash(account);
@@ -43,7 +67,7 @@ T.connect = async (dev, account) => {
     ws.onclose = () => { for (const [, f] of T.pending) f({ t: "error", code: "busy" }); T.pending.clear(); T.ds.disconnected(); };
   });
   await new Promise((ok) => { ws.onopen = ok; });
-  ws.send(J({ t: "hello", v: 2, device: `device-${dev}-0000`, name: dev, index_after: 0 }));
+  ws.send(J({ t: "hello", v: 3, device: `device-${dev}-0000`, name: dev, index_after: 0 }));
   await Promise.race([welcome, new Promise((_, no) => setTimeout(() => no(new Error("no welcome: " + J(T.log))), 10_000))]);
   await T.ds.connected({
     owner,
@@ -79,7 +103,9 @@ T.idle = async () => {
 T.warnsFrom = (from) => T.warns.slice(from);
 T.hiddenCount = () => T.hidden.length;
 T.warnCount = () => T.warns.length;
-T.record = async (id) => { const r = await rawGet(T.w.main, "notebooks", id); return r ? { codes: codesOf(r), mark: r.unjournaled ?? null, j: r.j, hashOk: r.hash === (await N.docHash(r)) } : null; };
+T.record = async (id) => { const r = await rawGet(T.w.main, "notebooks", id); return r ? { codes: codesOf(r), mark: r.unjournaled ?? null, j: r.j, hashOk: r.hash === (await N.docHash(r)), proof: r.proof ?? null, from: Array.isArray(r.from) ? r.from.length : 0, at: Array.isArray(r.at) ? r.at.length : 0, legacy: !!r.legacy } : null; };
+/** DEV's notebook sync turned off or on in this page (a notebook made and saved before sync was on, as a device has) */
+T.docSync = (on) => { N.DOC_SYNC.on = !!on; return N.DOC_SYNC.on; };
 T.journal = async (id) => { const js = await N.readJournal(T.hdb, id); return { start: js.start, slot: js.slot, lrows: js.lrows, cursor: js.cursor, J: js.J }; };
 T.events = () => T.ds.events.splice(0);
 T.stopped = () => Object.fromEntries(T.ds.stopped);
@@ -235,6 +261,66 @@ T.hideVersion = (id, on) => {
   };
   return true;
 };
+// ---- a lagging device (William's reverted edit, Nov 13): another device's patch in this device's history, the
+// page not yet showing it (the store's merge after its arrival held open), and a save made meanwhile with nothing typed
+/** The mounted notebook's store's merges after another device's patches, held until T.releaseRemote(). */
+T.holdRemote = (id) => {
+  const st = T.stores.get(id);
+  st.remoteHold = new Promise((r) => { T.releaseRemote = () => { st.remoteHold = undefined; r(); return true; }; });
+  return true;
+};
+/** What isn't typing: a cell's output changed (as a run's would), a cell's output cleared, or the notebook's own
+ * fields (not versioned) changed; the editor tells its store as for any change. */
+T.untyped = (how, cid) => {
+  const cell = cellsOf(T.nbDiv).find((c) => c.id === cid);
+  if (how === "output") { const pre = document.createElement("pre"); pre.textContent = "ran " + Date.now(); cell.out.append(pre); }
+  else if (how === "clear") cell.out.replaceChildren();
+  else T.nb.setMeta({ touched: Date.now() });
+  T.nb.flush();
+  return true;
+};
+/** The same, then the save it caused finished (the notebook's own saved(): every queued save written), for a case
+ * that reads what that save kept, rather than racing it with a fixed wait. */
+T.untypedSaved = async (how, cid) => { T.untyped(how, cid); await T.nb.saved(); return true; };
+/** A stale save (made from a revision the record has passed, from that record's value): its T1 kept and sent like any
+ * other, its T2 refused (a conflict): an orphan version, never the document. */
+T.editStale = async (id, cells) => {
+  const st = T.stores.get(id), rec = await rawGet(T.w.main, "notebooks", id);
+  const out = await st.save({ name: rec.name, mode: rec.mode, id, cells: cells.map(([cid, code]) => ({ id: cid, code })), baseRev: rec.rev - 1 }, { base: rec });
+  T.ds.kick(id);
+  return out?.conflict ? "conflict" : typeof out === "string" ? out : "saved";
+};
+/** A save of the notebook's mode (a field that isn't text), its cells as they are, then its patches sent. */
+T.editMode = async (id, mode) => {
+  const st = T.stores.get(id), rec = await rawGet(T.w.main, "notebooks", id);
+  const out = await st.save({ name: rec.name, mode, id, cells: rec.cells.map((c) => ({ id: c.id, code: c.code })), baseRev: rec.rev });
+  T.ds.kick(id);
+  return typeof out === "string" ? out : !!out?.saved;
+};
+/** A notebook's mode: its record's, and its history head's kernel. */
+T.modes = async (id) => { const r = await rawGet(T.w.main, "notebooks", id), s = T.stores.get(id)?.history?.session; return { record: r?.mode ?? null, head: s ? s.value().getOne({ type: "settings" })?.kernel ?? null : null }; };
+/** Holds for 12e: a save held after its document and base are taken (`save`), or the page's merge held after the
+ * store's merge and before it is shown (`gap`); released by T.release(). */
+T.hold = (id, what) => {
+  const st = T.stores.get(id);
+  const key = what === "save" ? "saveHold" : what === "t2" ? "t2Hold" : "gapHold";
+  st[key] = new Promise((r) => { T.release = () => { st[key] = undefined; r(); return true; }; });
+  return true;
+};
+/** The store's saves started, counted (each call of its save, the page's or any). */
+T.countSaves = (id) => {
+  const st = T.stores.get(id), real = st.save.bind(st);
+  T.saves = 0;
+  st.save = (...a) => { T.saves++; return real(...a); };
+  return true;
+};
+T.savesStarted = () => T.saves;
+/** Each client's patches in a notebook's history, by count. */
+T.byClient = async (id) => {
+  const js = await N.readJournal(T.hdb, id), out = {};
+  for (const [t] of js.jOf) out[t.slice(12)] = (out[t.slice(12)] ?? 0) + 1;
+  return { out, mine: js.slot?.client ?? null };
+};
 /** The history's head value of a notebook (its cells' [id, input], sorted). */
 T.head = (id) => { const s = T.stores.get(id)?.history?.session; return s ? J(s.value().get({ type: "cell" }).map((r) => [r.id, r.input]).sort()) : null; };
 
@@ -270,9 +356,26 @@ T.edPush = (cells) => {
   T.edStore.push({ ...structuredClone(T.edStore.doc), cells: cells.map(([id, code, outputs]) => ({ id, code, ...(outputs ? { outputs } : {}) })) });
   return true;
 };
+/** The page asked to go away the moment after typing (a simulated beforeunload, as a reload or a closed tab sends it):
+ * whether the page asked to stay (the browser's leave prompt); the person then declines, and the page stays. */
+T.leaveAsked = () => {
+  const e = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(e);
+  return e.defaultPrevented;
+};
+/** A cell of the mounted notebook focused and its text selected, for the person's own typing (CDP Input.insertText,
+ * a trusted input: what the notebook's leave prompt waits for). */
+T.focus = (cid) => {
+  const cell = cellsOf(T.nbDiv).find((c) => c?.id === cid);
+  if (!cell) return false;
+  cell.ta.focus();
+  cell.ta.select();
+  return true;
+};
 /** Typing in a cell of the mounted notebook: its text set, and the editor told (as a keystroke tells it). */
 T.type = (cid, text) => {
-  const cell = [...document.querySelectorAll(".sbnb .cells > *")].map((el) => el.cell).find((c) => c?.id === cid);
+  // (the notebook mounted last: earlier cases' notebooks stay on the page, with the same cell ids)
+  const cell = cellsOf(T.nbDiv).find((c) => c?.id === cid);
   if (!cell) return false;
   cell.ta.value = text;
   cell.ta.dispatchEvent(new Event("input", { bubbles: true }));

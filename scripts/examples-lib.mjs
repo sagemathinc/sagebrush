@@ -13,7 +13,8 @@ export const SLUG_MAX = 64;
 /** the most examples a shard runs, and the most shards a matrix has (GitHub's job limit): 16, so that a shard's
  * worst case, every example killed at its 30 s deadline, two at a time, is 4 minutes, and the job with its build
  * stays inside PR CI's 10 minutes (William, Nov 2 and Nov 4) */
-export const SHARD_MAX = 16;
+// (64 since the CI capacity ruling, Nov 22 2026: a shard of 16 took under a minute, most of it setup)
+export const SHARD_MAX = 64;
 export const MATRIX_MAX = 256;
 export const MODES = ["python", "sage", "magma", "matlab"];
 export const LEVELS = ["intro", "course", "research"];
@@ -78,10 +79,12 @@ const ALL = [
   /^scripts\/examples[^/]*\.mjs$/,
   /^\.github\/workflows\/ci\.yml$/,
 ];
+// (not the CPython package's own Python, engine/py/python/ and its tests: the CLI doesn't run it, and no module is
+// built from it; scripts/ci-paths.mjs enginePythonOnlyPaths)
 const ENGINE = [
   /^src\//,
   /^lib\//,
-  /^engine\//,
+  /^engine\/(?!py\/python\/|py\/test_[^/]*\.py$)/,
   /^wasm\//,
   /^pyparse\//,
   /^kernels\//,

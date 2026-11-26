@@ -1,7 +1,7 @@
 // Compile and run Python modules.
 
 import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync, readdirSync, rmSync } from "fs";
-import { join, resolve as resolvePath, dirname } from "path";
+import { join, posix, sep, resolve as resolvePath, dirname } from "path";
 import { runInThisContext, Script } from "vm";
 import { createHash } from "crypto";
 import { homedir } from "os";
@@ -11,7 +11,7 @@ import * as TK from "../pyparse/src/tokens.gen";
 import { analyze, SyntaxErr } from "./scope";
 import { Emitter, Compiled } from "./emit";
 import { R, ENTRY_FILE, ENTRY_NAME, frameState } from "./runtime/index";
-import { cwdPath, isBuiltinModule, oserr as fsOSError } from "./runtime/modules";
+import { cwdPath, isBuiltinModule, isConfined, oserr as fsOSError } from "./runtime/modules";
 import { dictDelete } from "./runtime/object";
 import { admitIndex, checkChunk, gradingExcluded, PkgsetError, type ChunkRef, type SetPlan, type SrcChunk, type PreChunk } from "./pkgset";
 import { INTR, INTR_GRADING } from "./runtime/interrupt";
@@ -81,7 +81,8 @@ let cacheRoot: string | null | undefined;
 function compileCacheDir(): string | null {
   if (cacheRoot !== undefined) return cacheRoot;
   cacheRoot = null;
-  if (!BUILD_ID || process.env.SAGEBRUSH_NO_COMPILE_CACHE) return null;
+  // (none while confined, `notebook run --confine`: a module cache the program could write would be run again)
+  if (!BUILD_ID || process.env.SAGEBRUSH_NO_COMPILE_CACHE || isConfined()) return null;
   try {
     const base = process.env.XDG_CACHE_HOME || join(homedir(), ".cache");
     const parent = join(base, "sagebrush");
@@ -168,6 +169,8 @@ function precompiled(source: string, filename: string, name: string, sage: boole
 const recording: Record<string, Compiled & { path: string }> | null = process.versions?.node && process.env.SAGEBRUSH_PRECOMPILE_OUT ? {} : null;
 if (recording !== null) {
   process.on("exit", () => {
+    // (a build step's recording, written with raw fs: never by a confined run)
+    if (isConfined()) return;
     const out = process.env.SAGEBRUSH_PRECOMPILE_OUT!;
     let prev: Precompiled | null = null;
     try { prev = JSON.parse(readFileSync(out, "utf8")); } catch {}
@@ -247,14 +250,16 @@ const pyEntry: (code: any, g: any, R: any, state: typeof frameState) => any = ru
 // whatever its code does with it, aliases included, even if it then raises,
 // the module is already known as what it is: execFile's optional-set tag)
 let moduleRuns = 0;
-export function execModule(source: string, filename: string, name: string, isPackage = false, sage = filename.endsWith(".sage"), made?: (m: any) => void): any {
+// (keys: the sys.modules names it is kept under, `name` unless given; pkg: its __package__, which relative imports read,
+// when that isn't its name's: the library's own sagebrush package, libraryPackage)
+export function execModule(source: string, filename: string, name: string, isPackage = false, sage = filename.endsWith(".sage"), made?: (m: any) => void, keys: string[] = [name], pkg?: string): any {
   const m = R.newModule(name);
   made?.(m);
   m.__file__ = filename;
-  m.__package__ = isPackage ? name : name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : "";
+  m.__package__ = pkg ?? (isPackage ? name : name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : "");
   if (isPackage) m.__path__ = [dirname(filename)];
   m.__builtins__ = R.builtins;
-  R.dictSet(R.sysModules, name, m);
+  for (const k of keys) R.dictSet(R.sysModules, k, m);
   // (a file run again, by reload or imported under a second name, is a
   // script of its own: the first run's functions keep their own globals)
   let jsName = scriptName(resolvePath(filename));
@@ -273,7 +278,7 @@ export function execModule(source: string, filename: string, name: string, isPac
     if (sage) R.loader.exec("from sage_all import *\nimport _sage_lazy as _sage_lazy_; _sage_lazy_.bind(globals()); del _sage_lazy_\n", m, "exec", "<sage>");
     pyEntry(fn, m, R, frameState);
   } catch (e) {
-    dictDelete(R.sysModules, name);
+    for (const k of keys) dictDelete(R.sysModules, k);
     throw e;
   }
   return m;
@@ -363,6 +368,17 @@ R.loader.exec = (src: string, ns: any, mode: string, filename: string, opts: Com
 // the bundler defines globalThis.__PYJS_LIB__ (relative path -> source),
 // served under the virtual directory LIB_VIRTUAL.
 export const LIB_VIRTUAL = "/$pyjs/lib";
+// Paths under the virtual root (the embedded library, the bundled and optional packages' mounts) are POSIX paths on
+// every system; only a real file's path is the system's (path.win32 on Windows, whose join would turn
+// "/$pyjs/lib" + "fractions.py" into "\$pyjs\lib\fractions.py", a file no lookup finds).
+const VIRTUAL_ROOT = "/$pyjs";
+const isVirtual = (p: string) => p === VIRTUAL_ROOT || p.startsWith(VIRTUAL_ROOT + "/");
+/** `base` joined with `parts`: POSIX for a virtual path, the system's join for a real one. */
+export function pathJoin(base: string, ...parts: string[]): string {
+  return isVirtual(base) ? posix.join(base, ...parts) : join(base, ...parts);
+}
+// (whether path `p` is in directory `base`, either separator: a mounted package's folder may be a real one)
+const within = (p: string, base: string) => p.startsWith(base + "/") || (sep !== "/" && p.startsWith(base + sep));
 const embedded: Record<string, string> | undefined = (globalThis as any).__PYJS_LIB__;
 // A sandboxed runtime may refuse to look at a path: then it is not there.
 const safeExists = (p: string) => {
@@ -376,7 +392,7 @@ const safeExists = (p: string) => {
 // reading one fetches its part of the library, web/lib-lazy.ts)
 const fileExists = (p: string) => {
   // (a mounted package's directory holds exactly its checked files)
-  if (mountedBases.length && mountedBases.some((b) => p.startsWith(b + "/"))) return mounted.has(p);
+  if (mountedBases.length && mountedBases.some((b) => within(p, b))) return mounted.has(p);
   // (a relative path, from a relative sys.path entry, against os.chdir's
   // directory: a worker thread's is virtual, modules.ts)
   return embedded !== undefined && p.startsWith(LIB_VIRTUAL + "/") ? Object.hasOwn(embedded, p.slice(LIB_VIRTUAL.length + 1)) : safeExists(cwdPath(p));
@@ -384,7 +400,7 @@ const fileExists = (p: string) => {
 // A directory of the user's files, as a namespace package's portion (PEP 420): never the embedded library's nor a
 // mounted package's, which hold only their checked files
 const dirExists = (p: string) => {
-  if (mountedBases.some((b) => p === b || p.startsWith(b + "/"))) return false;
+  if (mountedBases.some((b) => p === b || within(p, b))) return false;
   if (embedded !== undefined && (p === LIB_VIRTUAL || p.startsWith(LIB_VIRTUAL + "/"))) return false;
   // (only a directory can be listed: a file, or nothing, throws)
   try {
@@ -421,7 +437,75 @@ export function libDir(): string {
 
 // Import search: directories in sys.path, `name.py` or `name/__init__.py`; failing those anywhere (and in the
 // registry's and optional packages), a namespace package (PEP 420) of every directory `name` found on the way.
+// The library's own package, sagebrush (lib/sagebrush/), which the library imports by a private name,
+// _sagebrush_lib (`from _sagebrush_lib._engine import call`): that name is bound here to the library's files, before
+// any search, so a user's sagebrush.py or sagebrush/ folder never stands in for it, whatever sys.path holds.  Each file
+// is one module object: named "sagebrush[.x]" (its reprs, pickles and tracebacks as ever), its __package__ the private
+// name (so its relative imports stay the library's), kept in sys.modules under the private name, and under the public
+// one too unless that would hide a user's own sagebrush.  A user's import that finds the library's file gets that same
+// object (scripts/library-imports check: the library never imports the public name).
+export const LIB_PACKAGE = "_sagebrush_lib";
+const PUBLIC_PACKAGE = "sagebrush";
+const libraryModules: Map<string, any> = new Map(); // "" or ".x" -> the library's module
+function libraryPackageDir(): string {
+  return pathJoin(libDir(), PUBLIC_PACKAGE);
+}
+// (`name`, a public import, found `file`: is that the library's own sagebrush?)
+function isLibraryPackageFile(name: string, file: string): boolean {
+  if (name !== PUBLIC_PACKAGE && !name.startsWith(PUBLIC_PACKAGE + ".")) return false;
+  const dir = libraryPackageDir();
+  return file === pathJoin(dir, "__init__.py") || file.startsWith(dir + "/") || file.startsWith(dir + "\\");
+}
+// (whether the public name may name the library's module: nothing holds it yet, and a user's import would find the
+// library's file anyway, no sagebrush of theirs first on sys.path; for a submodule, the package there is the library's)
+function publicNameFree(rest: string): boolean {
+  const pub = PUBLIC_PACKAGE + rest;
+  if (R.sysModules.$m.get(pub) !== undefined) return false;
+  if (rest !== "") return R.sysModules.$m.get(PUBLIC_PACKAGE) === libraryModules.get("");
+  const lib = libDir();
+  for (const d of R.toArray(R.importModule("sys").path) as string[]) {
+    if (d === lib) return true;
+    if (fileExists(pathJoin(d, PUBLIC_PACKAGE, "__init__.py")) || fileExists(pathJoin(d, PUBLIC_PACKAGE + ".py")) || dirExists(pathJoin(d, PUBLIC_PACKAGE))) return false;
+  }
+  return true;
+}
+// The library's module sagebrush<rest> ("" or ".x.y"), loaded once; `also`: the public name a user's import asked by
+function libraryPackage(rest: string, also: string | null): any {
+  let m = libraryModules.get(rest);
+  if (m === undefined && rest !== "") {
+    // (its package first, which may import it)
+    R.importModule(LIB_PACKAGE + rest.slice(0, rest.lastIndexOf(".")));
+    m = libraryModules.get(rest);
+  }
+  if (m === undefined) {
+    const at = pathJoin(libraryPackageDir(), ...rest.split(".").filter(Boolean));
+    const init = pathJoin(at, "__init__.py"), isPackage = fileExists(init);
+    const file = isPackage ? init : at + ".py";
+    if (!isPackage && !fileExists(file)) return null;
+    const keys = [LIB_PACKAGE + rest];
+    if (also !== null) keys.push(also);
+    else if (publicNameFree(rest)) keys.push(PUBLIC_PACKAGE + rest);
+    const pkg = isPackage ? LIB_PACKAGE + rest : LIB_PACKAGE + rest.slice(0, rest.lastIndexOf("."));
+    try {
+      // (its submodules imported by the private name too, `from . import x` and `from _sagebrush_lib import x`)
+      const made = (m: any) => {
+        libraryModules.set(rest, m);
+        Object.defineProperty(m, R.IMPORT_NAME, { value: LIB_PACKAGE + rest, enumerable: false });
+      };
+      return execModule(fileRead(file), file, PUBLIC_PACKAGE + rest, isPackage, false, made, keys, pkg);
+    } catch (e) {
+      // (one that raised is gone from sys.modules, execModule, and from here: the next import runs it again)
+      libraryModules.delete(rest);
+      throw e;
+    }
+  }
+  // (already loaded: kept under the name asked for too)
+  R.dictSet(R.sysModules, also ?? LIB_PACKAGE + rest, m);
+  return m;
+}
 R.loader.load = (name: string) => {
+  // (the library's own package by its private name: bound to the library's files, never looked for on sys.path)
+  if (name === LIB_PACKAGE || name.startsWith(LIB_PACKAGE + ".")) return libraryPackage(name.slice(LIB_PACKAGE.length), null);
   const sys = R.importModule("sys");
   const parts = name.split(".");
   let dirs: string[];
@@ -441,26 +525,27 @@ R.loader.load = (name: string) => {
   const leaf = parts[parts.length - 1];
   const portions: string[] = [];
   for (const d of dirs) {
-    const pkg = join(d, leaf, "__init__.py");
-    if (fileExists(pkg)) return execFile(fileRead(pkg), pkg, name, true);
-    const file = join(d, leaf + ".py");
-    if (fileExists(file)) return execFile(fileRead(file), file, name, false);
+    const pkg = pathJoin(d, leaf, "__init__.py");
+    // (`import sagebrush` that finds the library's own file: the one module object the library has, libraryPackage)
+    if (fileExists(pkg)) return isLibraryPackageFile(name, pkg) ? libraryPackage(name.slice(PUBLIC_PACKAGE.length), name) : execFile(fileRead(pkg), pkg, name, true);
+    const file = pathJoin(d, leaf + ".py");
+    if (fileExists(file)) return isLibraryPackageFile(name, file) ? libraryPackage(name.slice(PUBLIC_PACKAGE.length), name) : execFile(fileRead(file), file, name, false);
     // (absolute, as CPython's: a relative sys.path entry against the current directory)
-    if (dirExists(join(d, leaf))) portions.push(resolvePath(cwdPath(join(d, leaf))));
+    if (dirExists(pathJoin(d, leaf))) portions.push(resolvePath(cwdPath(pathJoin(d, leaf))));
   }
   // (not on sys.path: a package's, if the registry names one for it; then
   // this session's optional package set's)
   const found = packageModule(name, false) ?? optionalModule(name, false);
-  if (found !== null) return execFile(found[0], found[1], name, found[1].endsWith("/__init__.py"));
+  if (found !== null) return execFile(found[0], found[1], name, /[\\/]__init__\.py$/.test(found[1]));
   return portions.length ? namespacePackage(name, portions) : null;
 };
 // The portions of namespace package `leaf` in `dirs`, or null if a module or package of the name is there
 function nsPortions(dirs: string[], leaf: string): string[] | null {
   const portions: string[] = [];
   for (const d of dirs) {
-    if (fileExists(join(d, leaf, "__init__.py")) || fileExists(join(d, leaf + ".py"))) return null;
+    if (fileExists(pathJoin(d, leaf, "__init__.py")) || fileExists(pathJoin(d, leaf + ".py"))) return null;
     // (absolute, as CPython's: a relative sys.path entry against the current directory)
-    if (dirExists(join(d, leaf))) portions.push(resolvePath(cwdPath(join(d, leaf))));
+    if (dirExists(pathJoin(d, leaf))) portions.push(resolvePath(cwdPath(pathJoin(d, leaf))));
   }
   return portions;
 }
@@ -556,7 +641,8 @@ function packageRegistry(): Registry | null {
   return (registry = r);
 }
 function packagesDir(): string {
-  const env = process.env.SAGEBRUSH_PACKAGES;
+  // (a host's package folder, read with raw fs: never while confined; the bundle's own copies then)
+  const env = isConfined() ? undefined : process.env.SAGEBRUSH_PACKAGES;
   if (env) return resolvePath(env);
   return embeddedPackages !== undefined ? PKG_VIRTUAL : resolvePath(__dirname, "../../packages");
 }
@@ -598,8 +684,8 @@ function mountPackage(id: string, name: string): string {
   if (done !== undefined) return done;
   const pkg = packageRegistry()!.packages[id];
   if (!pkg) throw (R.T as any).ImportError(`the registry names ${id} for '${name}' but has no entry for it`);
-  const dir = packagesDir(), base = join(dir, pkg.dir);
-  const got = new Map<string, string>();
+  const dir = packagesDir(), base = pathJoin(dir, pkg.dir);
+  const got = new Map<string, { text: string; path: string }>();
   for (const path of Object.keys(pkg.files).sort()) {
     const f = readPackageFile(dir, pkg, path);
     if (f === null) {
@@ -608,15 +694,15 @@ function mountPackage(id: string, name: string): string {
       throw e;
     }
     if (sha256Hex(f.bytes) !== pkg.files[path]) throw (R.T as any).ImportError(`${packageName(id)}: ${path} is not the file this build pinned`);
-    if (path.endsWith(".py")) got.set(join(base, path), f.text);
+    if (path.endsWith(".py")) got.set(pathJoin(base, path), { text: f.text, path });
   }
-  for (const [p, text] of got) {
+  for (const [p, { text, path }] of got) {
     mounted.set(p, text);
-    repoPaths.set(p, "packages/" + pkg.dir + "/" + p.slice(base.length + 1));
-    pkgKeys.set(p, pkg.dir + "/" + p.slice(base.length + 1));
+    repoPaths.set(p, "packages/" + pkg.dir + "/" + path);
+    pkgKeys.set(p, pkg.dir + "/" + path);
   }
   mountedBases.push(base);
-  const root = join(base, pkg.root);
+  const root = pathJoin(base, pkg.root);
   mountedRoots.set(id, root);
   return root;
 }
@@ -634,8 +720,8 @@ function packageModule(name: string, main: boolean): [string, string] | null {
     if (parent === undefined || parent === null || parent.__path__ === undefined) return null;
   }
   const id = reg.modules[name];
-  const at = join(mountPackage(id, name), ...name.split("."));
-  for (const p of [join(at, main ? "__main__.py" : "__init__.py"), at + ".py"]) {
+  const at = pathJoin(mountPackage(id, name), ...name.split("."));
+  for (const p of [pathJoin(at, main ? "__main__.py" : "__init__.py"), at + ".py"]) {
     const text = mounted.get(p);
     if (text !== undefined) return [text, p];
   }
@@ -676,8 +762,8 @@ export function findModuleSource(name: string): [string, string] | null {
   const leaf = parts[parts.length - 1];
   let found: [string, string] | null = null;
   for (const d of dirs) {
-    const main = join(d, leaf, "__main__.py");
-    const file = join(d, leaf + ".py");
+    const main = pathJoin(d, leaf, "__main__.py");
+    const file = pathJoin(d, leaf + ".py");
     if (fileExists(main)) found = [fileRead(main), main];
     else if (fileExists(file)) found = [fileRead(file), file];
     if (found !== null) break;
@@ -730,7 +816,7 @@ export function reservedNames() {
       if (isBuiltinModule(name)) return true;
       if (reg !== null && Object.hasOwn(reg.modules, name)) return true;
       const rel = name.split(".").join("/");
-      return fileExists(join(lib, rel + ".py")) || fileExists(join(lib, rel, "__init__.py"));
+      return fileExists(pathJoin(lib, rel + ".py")) || fileExists(pathJoin(lib, rel, "__init__.py"));
     },
     bundledDirs: new Set(reg === null ? [] : Object.values(reg.packages).map((p) => p.dir)),
   };
@@ -791,15 +877,15 @@ function mountOptional(id: string, name: string): string {
       err.name = name;
       throw err;
     }
-    const base = join(OPT_VIRTUAL, plan.S, p.dir);
+    const base = pathJoin(OPT_VIRTUAL, plan.S, p.dir);
     for (const [path, text] of src.files) {
-      const f = join(base, path);
+      const f = pathJoin(base, path);
       mounted.set(f, text);
       optKeys.set(f, { id: dep, path });
     }
-    if (pre !== null) for (const e of pre.entries) optPre.set(join(base, e.path) + (e.sage ? "\0sage" : "\0py"), { module: e.module, code: e.code, lineMap: e.lineMap });
+    if (pre !== null) for (const e of pre.entries) optPre.set(pathJoin(base, e.path) + (e.sage ? "\0sage" : "\0py"), { module: e.module, code: e.code, lineMap: e.lineMap });
     mountedBases.push(base);
-    optMounted.set(dep, join(base, p.root));
+    optMounted.set(dep, pathJoin(base, p.root));
   }
   if (!useSaid) {
     useSaid = true;
@@ -816,8 +902,8 @@ function optionalModule(name: string, main: boolean): [string, string] | null {
     if (parent === undefined || parent === null || parent.__path__ === undefined) return null;
   }
   const id = optional.plan.modules.get(name)!;
-  const at = join(mountOptional(id, name), ...name.split("."));
-  for (const p of [join(at, main ? "__main__.py" : "__init__.py"), at + ".py"]) {
+  const at = pathJoin(mountOptional(id, name), ...name.split("."));
+  for (const p of [pathJoin(at, main ? "__main__.py" : "__init__.py"), at + ".py"]) {
     const text = mounted.get(p);
     if (text !== undefined) return [text, p];
   }

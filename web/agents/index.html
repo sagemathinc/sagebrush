@@ -20,20 +20,60 @@
   /* the list of chats */
   nav.side { width: 250px; flex: none; background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 10px; gap: 8px; }
   nav.side .brand { font-weight: 650; padding: 4px 6px 8px; display: flex; align-items: center; gap: 8px; }
+  nav.side .brand .sb-mark { flex: none; }
   nav.side #new { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 7px 10px; text-align: left; cursor: pointer; }
   nav.side #new:hover { border-color: #c9c5b8; }
+  .thread.mirror .badge { margin-left: 6px; padding: 0 5px; border-radius: 6px; background: #e8e4d8; color: #6b6a63; font-size: 11px; font-weight: 500; }
+  nav.side #mirror-btn { margin-top: 6px; width: 100%; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); text-align: left; }
+  #mirror-log { flex: 1; overflow: auto; padding: 16px 24px; }
+  .mirror-section { margin: 0 auto 24px; max-width: 760px; }
+  .mirror-label { font-size: 12px; color: #6b6a63; margin: 0 0 10px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+  .mirror-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .mirror-tool, .mirror-approval, .mirror-artifact { font-size: 13px; color: #55544e; margin: 4px 0; }
+  .mirror-gap { font-size: 13px; color: #8a5a00; background: #fbf3df; border-radius: 6px; padding: 6px 10px; margin: 8px 0; }
+  .mirror-unconfirmed { font-size: 12px; color: #8a5a00; margin: 10px 0 6px; }
+  .mirror-section .unconfirmed { opacity: .72; border-left: 3px solid #e3c36a; padding-left: 8px; }
+  #mirror-readonly { padding: 10px 24px 16px; color: #55544e; font-size: 13px; text-align: center; }
+  #mirror-readonly button { margin-left: 8px; }
+  #mirror-dlg { max-width: 520px; border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+  #mirror-dlg .mirror-switch { display: flex; gap: 8px; align-items: center; font-weight: 550; }
+  #mirror-dlg p { color: #55544e; font-size: 14px; line-height: 1.45; }
+  #mirror-lines div { font-size: 13px; margin: 4px 0; }
+  #mirror-dlg .row { display: flex; justify-content: flex-end; margin-top: 12px; }
+  #mirror-dlg button.danger { color: #a3261a; }
+  #log[hidden], .composer-wrap[hidden], #mirror-log[hidden], #mirror-readonly[hidden] { display: none !important; }
   #threads { overflow: auto; display: flex; flex-direction: column; gap: 2px; }
   .thread { border: 0; background: none; text-align: left; padding: 7px 9px; border-radius: 7px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; }
   .thread:hover { background: #e8e5db; }
   .thread.on { background: #e2ded2; font-weight: 550; }
   .thread .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: auto; flex: none; animation: pulse 1.2s infinite; }
-  nav.side .foot { margin-top: auto; font-size: 12px; color: var(--muted); padding: 6px; }
+  nav.side .foot { font-size: 12px; color: var(--muted); padding: 6px; }
+  nav.side .sbver { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding-top: 0; user-select: all; }
+  /* (the files, one big button at the foot of the chat list: a person who came here from an agent's link finds them
+     without knowing the small switch at the top) */
+  nav.side #files-big { margin-top: auto; display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: inherit; font: inherit; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; }
+  nav.side #files-big:hover { border-color: #c9c5b8; }
+  nav.side #files-big:focus-visible { outline: 2px solid #4a6b49; outline-offset: 1px; }
+  nav.side #files-big svg { width: 20px; height: 20px; flex: none; }
 
   /* the chat: primary, full height */
   main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 9px 16px; border-bottom: 1px solid var(--line); flex: none; min-width: 0; }
   .top #who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .top #menu { display: none; border: 0; background: none; font-size: 20px; cursor: pointer; }
+  .top #menu { display: none; }
+  /* (the side panel's toggle, as the files' corner button on the other pages (William, Nov 12: the same in every mode):
+     the panel icon alone; in the chat list's header while it is shown, at the left of the top bar while it is hidden) */
+  .sb-side-toggle { display: inline-grid; place-items: center; flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: none; color: #5d645f; cursor: pointer; }
+  .top #menu.sb-side-toggle, nav.side #sidetoggle { border: 0; background: none; }
+  .top #menu.sb-side-toggle:hover, nav.side #sidetoggle:hover, .sb-side-toggle:hover { background: rgba(0, 0, 0, .07); color: var(--fg, #1f2421); }
+  .sb-side-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .sb-side-toggle svg { width: 18px; height: 18px; }
+  nav.side .brand { padding: 0 0 6px; gap: 6px; }
+  nav.side .brand .brand-name { font-size: 15px; font-weight: 650; }
+  .top .wordmark { color: #4a6b49; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; text-decoration: none; margin-right: 6px; }
+  body.side-hidden nav.side, body.side-hidden #sep-side { display: none !important; }
+  body.side-hidden .top #menu { display: inline-grid; }
+  body.side-hidden .top { padding-left: 8px; }
   .agent { display: flex; align-items: center; gap: 8px; font-weight: 600; }
   .agent .conn { width: 8px; height: 8px; border-radius: 50%; background: #b8b4a8; }
   .agent .conn.on { background: var(--ok); }
@@ -41,6 +81,15 @@
   .top .spacer { flex: 1; }
   .top button { font: inherit; font-size: 13px; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
   .top button.link { border: 0; background: none; color: var(--accent2); text-decoration: underline; }
+  /* (Copy chat: the conversation's first row, at its right; the header has no room for it at the chat's narrowest) */
+  #log-tools { display: flex; justify-content: flex-end; margin: -12px 0 6px; }
+  #log-tools[hidden] { display: none; }
+  #copychat { font: 12px system-ui, sans-serif; border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+  #copychat:hover { color: var(--fg, #1f2421); }
+  .user, .turn { position: relative; }
+  .copy-msg { position: absolute; top: 0; right: 0; opacity: 0; font: 12px system-ui, sans-serif; border: 1px solid var(--line); background: var(--card); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+  .user:hover > .copy-msg, .turn:hover > .copy-msg, .copy-msg:focus-visible { opacity: 1; }
+  @media (hover: none) { .copy-msg { opacity: .8; } }
   .top button:disabled { opacity: .6; cursor: default; }
   #help { flex: none; margin: 8px 16px 0; padding: 10px 14px; border: 1px solid var(--line); background: #fffdf6; border-radius: 10px; font-size: 14px; }
   #help pre { background: var(--code); padding: 8px 10px; border-radius: 6px; overflow-x: auto; user-select: all; }
@@ -50,6 +99,7 @@
   .file-body .code-edit { width: 100%; min-height: 70vh; border: 0; outline: none; resize: none; padding: 14px 18px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: #fff; }
   .agent small { font-weight: 400; color: var(--muted); white-space: nowrap; }
   .top .link, .top #connect { white-space: nowrap; }
+  .top .top-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px 10px; min-width: 0; }
   /* (O-2: beside the pane the chat can be 420 px; the header stays one line there, and the agent's name, not the
      buttons, gives way, cut with an ellipsis; the narrow layout keeps wrapping. Where the chat is under 520 px (the
      header's content box under 488), "on your computer" is visually hidden, kept for screen readers, rather than cut
@@ -57,14 +107,19 @@
   @media (min-width: 901px) {
     .top { flex-wrap: nowrap; container: sb-top / inline-size; }
     .top #who { display: block; flex: 0 1 auto; }
+    /* (the actions give way too: when the name has given what it can, they wrap within their group, under each
+       other, rather than run past the chat into the pane, #1793) */
+    .top .top-actions { flex: 0 1 auto; }
     .top #who .conn { display: inline-block; vertical-align: middle; margin-right: 8px; }
     @container sb-top (max-width: 488px) {
       .top #who small { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
       /* (and the name whole: the empty spacer and its gap go, the link keeps the right side, the dot 2 px closer) */
       .top .spacer { display: none; }
-      .top #howto { margin-left: auto; }
+      .top .top-actions { margin-left: auto; }
       .top #who .conn { margin-right: 6px; }
     }
+    /* (the Sagebrush wordmark gives way first: the chat list's header still says where you are) */
+    @container sb-top (max-width: 600px) { .top .wordmark { display: none; } }
   }
   .demo.live { color: var(--ok); border-color: #b9d7b5; }
   #log { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 24px 16px 8px; }
@@ -87,6 +142,7 @@
 
   .turn { margin-bottom: 26px; }
   .who { display: flex; align-items: center; gap: 7px; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+  .who-info { font-size: 12px; color: var(--muted); margin: -4px 0 6px 31px; }
   .avatar { color: var(--accent); font-size: 16px; }
   .demo { font-weight: 400; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 0 6px; }
   .msg { margin: 6px 0 10px; }
@@ -95,6 +151,9 @@
   .msg code, .doc code, .user code { background: var(--code); padding: 1px 4px; border-radius: 4px; }
   .msg pre, .doc pre { background: var(--code); padding: 10px 12px; border-radius: 8px; overflow-x: auto; }
   .msg pre code, .doc pre code { background: none; padding: 0; }
+  /* a code block's colours (web/agents/code-color.ts), the notebook's: keyword, builtin, string, number, comment, decorator, a name defined */
+  pre.code .hk { color: #8a3b8f; } pre.code .hb { color: #2a6fb0; } pre.code .hs { color: #975200; } pre.code .hn { color: #0b7a52; }
+  pre.code .hc { color: #5f665f; font-style: italic; } pre.code .hp { color: #5f665f; } pre.code .hd { color: #7f5800; } pre.code .hf { color: #2350a8; }
   .math.display { display: block; overflow-x: auto; margin: 8px 0; }
 
   details.thinking { color: var(--muted); font-size: 14px; margin: 4px 0 8px; }
@@ -125,6 +184,12 @@
   .att-detail > summary { cursor: pointer; color: var(--muted); }
   .att-detail pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; padding: 6px 8px; background: var(--code-bg, rgba(127,127,127,.08)); border-radius: 6px; }
   .att-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .att-body { font-size: 14px; margin-top: 4px; }
+  .att-reason { font-size: 14px; color: var(--muted); margin-top: 4px; overflow-wrap: anywhere; }
+  /* (a web card's three answers: Deny set apart; on a phone, one per row, Deny last after a gap) */
+  .att-actions.three { flex-wrap: wrap; }
+  .att-actions.three .att-deny { margin-left: auto; }
+  @media (max-width: 480px) { .att-actions.three { flex-direction: column; align-items: stretch; } .att-actions.three .att-deny { margin: 8px 0 0; } }
   .att-actions button, .composer button { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 5px 12px; cursor: pointer; }
   button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
   .att-state { font-size: 13px; color: var(--muted); margin-top: 6px; }
@@ -147,6 +212,8 @@
   #editor { max-height: 40vh; overflow-y: auto; min-height: 28px; }
   .composer .row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
   .composer .hint { font-size: 12px; color: var(--muted); margin-right: auto; }
+  /* (the keys, once there's something to send: the empty prompt shows none, #1806; the place is kept, nothing moves) */
+  .composer:not(.has-text) .hint { visibility: hidden; }
   .composer .hint kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--side); }
   #queued { font-size: 12px; color: var(--accent); }
   #send { background: var(--ink); color: #fff; border-color: var(--ink); }
@@ -190,17 +257,35 @@
     /* (a window too narrow for 180 + 420 + 320 beside an open pane: the chat list becomes the narrow overlay's) */
     body.side-collapsed nav.side { position: fixed; z-index: 15; top: 0; bottom: 0; left: 0; transform: translateX(-100%); transition: transform .15s; }
     body.side-collapsed.nav-open nav.side { transform: none; box-shadow: 0 0 30px #0003; }
-    body.side-collapsed .top #menu { display: block; }
+    body.side-collapsed .top #menu { display: inline-grid; }
   }
   /* (the notebook's popups, appended to the body, above the pane: fixed at z-index 20 in full screen and below 900 px) */
   body.agents-host .sbnb-menu, body.agents-host .sbnb-completer, body.agents-host .sbnb-dropline, body.agents-host .sbnb-tip { z-index: 40; }
-  .pane-host { flex: 1; overflow: auto; }
+  .pane-host { flex: 1; overflow: auto; min-height: 0; }
   .pane-host[hidden] { display: none; }
   .pane-bar[hidden] { display: none; } /* (else display: flex below beats [hidden]: an empty strip, BAC-7) */
   .pane-bar { padding: 6px 12px; font-size: 13px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--line); background: #fff7e6; }
   .pane-bar.refused, .pane-bar.gone { background: #fdecea; }
   .pane-bar button { font-size: 12px; }
-  .open-full { margin-left: 8px; font-size: 12px; }
+  /* (Open, at the head's right: the artifact's file on its own page, in a new tab, #1614) */
+  .pane-head .open-full { flex: none; margin: 0 4px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 7px; font-size: 13px; color: var(--ink); text-decoration: none; white-space: nowrap; }
+  .pane-head .open-full:hover { background: var(--side); }
+  .pane-head .open-full[hidden] { display: none; }
+  /* (a code or text file: View in colour, ✎ Edit with the colours behind the text typed; one font and padding for both
+     layers, so they line up, #1618) */
+  .file-path .mode-toggle { font: 12px system-ui, sans-serif; border: 1px solid var(--line); background: var(--card); border-radius: 6px; padding: 1px 8px; cursor: pointer; }
+  .file-path .mode-toggle[hidden] { display: none; }
+  .pane-body .file-body pre.code-view, .pane-body .code-wrap pre.code-hl, .pane-body .code-wrap .code-edit { margin: 0; padding: 14px 18px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; tab-size: 4; }
+  .code-wrap { position: relative; background: #fff; }
+  .pane-body .code-wrap pre.code-hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  .file-body .code-wrap .code-edit { position: relative; display: block; box-sizing: border-box; background: transparent; color: transparent; caret-color: var(--ink); }
+  .board-made { display: flex; align-items: center; gap: 12px; padding: 16px 18px; flex-wrap: wrap; }
+  .board-made .who { min-width: 0; overflow-wrap: anywhere; }
+  .board-made .open-board { background: #3f6b35; color: #fff; font-weight: 600; border-radius: 6px; padding: 5px 18px; text-decoration: none; }
+  .board-made .open-board[aria-disabled] { opacity: .5; pointer-events: none; }
+  .board-made .view-source { font: inherit; font-size: 12px; border: 1px solid var(--line, #cfd5c8); background: transparent; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  .board-made .gone { color: var(--muted); }
+  .board-source { margin: 0 18px 16px; }
   .nb-notice { margin: 8px 12px; padding: 6px 10px; font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; }
   /* (the notebook's wrapper, not its root: a container query styles what is inside the container, and .sbnb is the root) */
   .nb-artifact { container-type: inline-size; container-name: sbnb-pane; }
@@ -226,9 +311,36 @@
   .tabs { display: flex; gap: 2px; overflow-x: auto; margin-right: auto; }
   .tab { border: 0; background: none; padding: 5px 10px; border-radius: 7px; cursor: pointer; white-space: nowrap; font-size: 14px; }
   .tab.on { background: var(--card); box-shadow: 0 0 0 1px var(--line); font-weight: 550; }
+  /* (#1792: a tab and its ×, which shows on the tab shown and on hover; the pane's All artifacts) */
+  .tab-wrap { display: inline-flex; align-items: center; border-radius: 7px; flex: none; }
+  .tab-wrap.on { background: var(--card); box-shadow: 0 0 0 1px var(--line); }
+  .tab-wrap.on .tab.on { box-shadow: none; background: none; }
+  .tab-x { border: 0; background: none; cursor: pointer; padding: 2px 6px; margin-left: -6px; border-radius: 5px; color: var(--muted); font-size: 15px; line-height: 1; visibility: hidden; }
+  .tab-wrap:hover .tab-x, .tab-wrap.on .tab-x, .tab-wrap:focus-within .tab-x { visibility: visible; }
+  .tab-x:hover { background: var(--side); color: inherit; }
+  dialog.arts-dlg { border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; width: min(520px, 92vw); }
+  dialog.arts-dlg h3 { margin: 0 0 8px; font-size: 16px; }
+  dialog.arts-dlg .arts-list { display: flex; flex-direction: column; gap: 4px; max-height: 60vh; overflow-y: auto; }
+  dialog.arts-dlg .arts-item { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; text-align: left; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); cursor: pointer; font: inherit; color: inherit; }
+  dialog.arts-dlg .arts-item.on { border-color: var(--accent2, #4a6b49); }
+  dialog.arts-dlg .arts-item .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  dialog.arts-dlg .arts-item small { color: var(--muted); }
+  dialog.arts-dlg menu { display: flex; justify-content: flex-end; padding: 0; margin: 10px 0 0; }
+  /* (dictation, #1791: the mic by Send, red while listening, and what is being heard) */
+  #mic { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 4px 9px; cursor: pointer; font-size: 15px; line-height: 1; }
+  #mic.rec { background: #b3261e; border-color: #b3261e; color: #fff; animation: mic-pulse 1.2s ease-in-out infinite; }
+  @keyframes mic-pulse { 50% { opacity: .65; } }
+  @media (prefers-reduced-motion: reduce) { #mic.rec { animation: none; } }
+  .mic-ask { font-size: 12px; max-width: 46ch; }
+  .mic-ask button { font-size: 12px; }
+  .mic-status .link { border: 0; background: none; color: var(--accent2); text-decoration: underline; cursor: pointer; padding: 0; font: inherit; }
+  .mic-status { font-size: 12px; color: var(--muted); max-width: 52ch; max-height: 5.5em; overflow-y: auto; }
+  .mic-status .mic-heard { color: var(--ink); }
   .icon { border: 0; background: none; width: 30px; height: 30px; border-radius: 7px; cursor: pointer; font-size: 16px; color: var(--muted); }
   .icon:hover { background: var(--side); color: var(--ink); }
-  .pane-body { flex: 1; overflow: auto; }
+  /* (one scroller: the host shown; the body only holds it, so a host a pixel taller than its content never adds a
+     second scrollbar inside the body's, found in testing, Nov 21) */
+  .pane-body { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
   .pane-body .doc { padding: 22px 30px; max-width: 820px; margin: 0 auto; }
   body.fullscreen .pane-body .doc { font-size: 16px; padding-top: 40px; }
   .pane-body pre.code { margin: 0; padding: 16px 18px; white-space: pre; line-height: 1.5; }
@@ -239,7 +351,7 @@
   @media (max-width: 900px) {
     nav.side { position: fixed; z-index: 15; top: 0; bottom: 0; left: 0; transform: translateX(-100%); transition: transform .15s; }
     body.nav-open nav.side { transform: none; box-shadow: 0 0 30px #0003; }
-    .top #menu { display: block; }
+    .top #menu { display: inline-grid; }
     body.has-artifact #artifacts { position: fixed; inset: 0; width: auto; z-index: 20; }
   }
 </style>
@@ -247,6 +359,50 @@
      height it took its content's, tens of thousands of px, the pane scrolled it whole, and every preview render moved
      the source under the person typing. Only for the SHOWN host: the pane keeps every artifact's host, the others
      [hidden], and a display here would show them. Its own element: test-agents-artifacts.mjs measures with it disabled) -->
+<style id="delegate-styles">
+  /* Delegate (delegate-ui.ts): the switch, the Tasks list and its chips, a task's view in place of the chat, the sheet */
+  body.task-shown #log, body.task-shown .composer-wrap .composer { display: none; }
+  #task-view { flex: 1; overflow-y: auto; padding: 16px 24px; }
+  #task-view > * { max-width: 760px; margin-left: auto; margin-right: auto; }
+  #task-view .task-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  #task-view .task-head h2 { font-size: 18px; margin: 0; }
+  #task-view .task-head .link, #task-view .proposal-card { border: 0; background: none; color: var(--accent2); text-decoration: underline; cursor: pointer; padding: 0; }
+  #task-view .proposal-card { display: block; margin: 16px auto; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); text-decoration: none; text-align: left; width: 100%; }
+  #task-view .reason, #task-view .skipped { color: var(--muted); font-size: 13px; }
+  #task-view .steer { margin: 10px 0; }
+  #task-view .steer .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  #task-view .steer-form textarea { width: 100%; box-sizing: border-box; margin: 6px 0; font: inherit; }
+  #task-view .steer .msg:empty { display: none; }
+  #task-view .msg, .delegate-dlg .msg { color: var(--bad); }
+  #tasks { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; }
+  #tasks .tasks-h { font-size: 12px; color: var(--muted); padding: 4px 9px; text-transform: uppercase; letter-spacing: .04em; }
+  #tasks .task { min-width: 0; max-width: 100%; gap: 6px; }
+  #tasks .task .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  #tasks .away-note { margin: 0 9px 4px; font-size: 12px; color: var(--muted); }
+  #tasks .task.away { opacity: .7; cursor: default; }
+  .chip { font-size: 11px; border-radius: 9px; padding: 1px 7px; background: #e8e5db; color: var(--ink); margin-left: auto; flex: none; font-weight: 400; }
+  .chip.proposal, .chip.question { background: #f3dcc9; color: #7a2d07; }
+  .chip.merged { background: #d8e8d6; color: #24502a; }
+  .chip.failed { background: #f2d6d0; color: #7a2418; }
+  .delegate-dlg { border: 1px solid var(--line); border-radius: 12px; max-width: min(560px, 95vw); }
+  .delegate-dlg.proposal { width: min(900px, 95vw); max-width: 95vw; max-height: 90vh; overflow: auto; }
+  .delegate-dlg .x { float: right; border: 0; background: none; font-size: 20px; cursor: pointer; }
+  .delegate-dlg.sheet form > label, .delegate-dlg .field { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
+  .delegate-dlg textarea, .delegate-dlg input:not([type]) { font: inherit; padding: 6px 8px; border: 1px solid #d5d1c4; border-radius: 8px; }
+  .delegate-dlg .docs { margin: 0; padding-left: 18px; }
+  .delegate-dlg small { color: var(--muted); }
+  .delegate-dlg menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; }
+  .proposal-actions { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .proposal-actions .row { display: flex; justify-content: flex-end; gap: 8px; }
+  .proposal-actions button[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+  .merge-slot .conflicts h4 { margin: 10px 0 4px; font-size: 13px; }
+  .merge-slot .conflict > p { margin: 6px 0 4px; color: var(--muted); }
+  .merge-slot .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .merge-slot .sides > * { min-width: 0; }
+  .merge-slot pre { margin: 0 0 4px; max-height: 160px; overflow: auto; white-space: pre-wrap; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
+  .merge-slot button[aria-pressed="true"] { outline: 2px solid var(--accent); }
+  .merge-slot .incomplete { margin: 8px 0; }
+</style>
 <style id="tex-host-layout">
   #artifacts .pane-body:has(> .pane-host:not([hidden]) .tex-host) { display: flex; flex-direction: column; }
   #artifacts .pane-body > .pane-host:not([hidden]):has(.tex-host) { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -259,27 +415,35 @@
 <div class="ws-error" id="ws-error" role="alert" hidden><span id="ws-error-text"></span> <span class="ws-why" id="ws-error-why"></span> <button id="ws-retry">Retry</button></div>
 <div class="app">
   <nav class="side" id="chats" aria-label="Chats">
-    <div class="brand"><svg class="sb-mark" viewBox="0 0 32 32" width="18" height="18" aria-hidden="true" style="vertical-align:-3px;border-radius:4px"><rect width="32" height="32" fill="#AE472A"/><path fill="#FADEB6" d="M4.4 30.8 L7.4 30.8 L10.6 30.6 L13.7 30.2 L16.7 29.6 L19.3 28.8 L21.6 27.7 L23.3 25.9 L23.9 23.4 L22.9 21.3 L21.2 20.1 L19.5 19.4 L17.7 18.9 L16.1 18.4 L14.9 18.0 L14.4 17.6 L14.2 17.1 L14.3 16.8 L14.5 16.4 L14.8 16.1 L15.4 15.6 L16.0 15.2 L16.7 14.8 L17.4 14.3 L18.0 13.7 L18.3 13.3 L18.4 12.8 L18.3 12.4 L18.1 12.0 L17.7 11.7 L17.2 11.6 L16.8 11.7 L16.4 11.9 L15.9 12.3 L15.4 12.6 L14.7 13.0 L13.9 13.5 L13.1 14.0 L12.3 14.8 L11.7 15.8 L11.4 17.3 L11.9 19.2 L13.3 20.5 L14.9 21.4 L16.6 22.0 L18.3 22.6 L19.5 23.2 L20.1 23.7 L20.1 23.8 L20.1 23.9 L19.5 24.3 L18.0 24.9 L15.8 25.4 L13.2 25.7 L10.3 25.8 L7.4 25.8 L4.6 25.6 L3.6 25.8 L2.7 26.3 L2.1 27.1 L1.9 28.1 L2.1 29.1 L2.6 30.0 L3.4 30.6 Z"/><path fill="#BAC49E" d="M16.4 13.8C13.6 8.6 17.6 4.2 28.4 3C28.2 10.4 24 15 16.4 13.8Z"/></svg> Sagebrush agents</div>
+    <div class="brand"><button id="sidetoggle" class="sb-side-toggle" aria-controls="chats"></button><span class="brand-name">Agents</span></div>
     <button id="new">＋ New chat</button>
     <div id="threads"></div>
-    <div class="foot">Shift+Enter sends · Alt+Enter queues · Ctrl+Enter posts a note</div>
+    <button id="files-big" type="button" title="Your files and notebooks, in the file browser">Files…</button>
+    <button id="mirror-btn" type="button" hidden>Mirror…</button>
+    <div class="foot sbver" id="sbversion" hidden></div>
   </nav>
   <div class="sep" id="sep-side" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize the chat list" aria-controls="chats"></div>
   <main>
     <div class="top">
-      <button id="menu" aria-label="Chats">☰</button>
+      <button id="menu" class="sb-side-toggle" aria-controls="chats"></button>
+      <a class="wordmark" href="/?home" title="About Sagebrush, and where to start">Sagebrush</a>
       <div class="agent" id="who"><span class="conn demo"></span>Claude <small>scripted demo</small></div>
       <span class="spacer"></span>
-      <button id="howto" class="link">Use your own Claude</button>
-      <button id="review" class="link" hidden>Review changes</button>
-      <button id="connect" hidden>Connect Claude</button>
+      <!-- (the header's actions, one group: beside the pane, when they don't all fit on the header's line, they wrap
+           within it, so none is ever drawn past the chat (#1793)) -->
+      <span class="top-actions">
+        <button id="howto" class="link">Use your own Claude</button>
+        <button id="review" class="link" hidden>Review changes</button>
+        <button id="connect" hidden>Connect Claude</button>
+      </span>
       <span id="who-status" class="vh" role="status"></span>
     </div>
     <div id="help" hidden>
       <b>Run this on your computer</b>, then open the link it prints. <a href="/agents/connect/">Learn more</a>
-      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.1.tgz</pre>
+      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.18.tgz</pre>
     </div>
     <div id="log">
+      <div id="log-tools" hidden><button id="mirror-copy" type="button" hidden></button><button id="all-arts-chat" type="button" hidden title="Everything this chat has made or opened">☰ Artifacts</button><button id="copychat" type="button" title="This chat as Markdown: what you wrote, the agent's answers, a line for each thing it did, and links to its files">⧉ Copy chat</button></div>
       <div id="empty">
         <h1>What should we work on?</h1>
         <div>Ask anything, or try one of these:</div>
@@ -291,14 +455,22 @@
         </div>
       </div>
     </div>
+    <div id="mirror-log" hidden></div>
+    <div id="mirror-readonly" hidden><span id="mirror-readonly-text"></span> <button id="mirror-delete-one" type="button"></button></div>
     <div class="composer-wrap">
+      <!-- (the agent's bar, where the composer's footer row isn't shown (a task's view): a row above the composer; empty,
+           and so of no height, otherwise. The footer's slot is numbered higher, so it wins wherever it shows) -->
+      <div data-sbag-slot="1"></div>
       <div class="composer">
         <div id="editor"></div>
         <div class="row">
-          <span class="hint"><kbd>Shift</kbd>+<kbd>Enter</kbd> send · <kbd>Alt</kbd>+<kbd>Enter</kbd> queue · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> note</span>
+          <!-- (the agent's access, an icon at the start of the composer's footer row: click it for the details, Turn off
+               running code and Revoke; workspace/agent-ui.ts, [data-sbag-footer]. A1, #1546) -->
+          <span data-sbag-slot="2" data-sbag-footer></span>
+          <span class="hint"><kbd>Shift</kbd>+<kbd>Enter</kbd> <span id="keys">send</span> · <kbd>Alt</kbd>+<kbd>Enter</kbd> queue · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> note</span>
           <span id="queued"></span>
           <button id="note" title="Post a note, not sent to the agent (Ctrl+Enter)">Note</button>
-          <button id="queue" title="Send after the current turn (Alt+Enter)" hidden>Queue</button>
+          <button id="send-now" title="Interrupt the agent and send this now" hidden>Send now</button>
           <button id="stop" title="Stop the agent (Esc)" hidden>Stop</button>
           <span id="send-hint" hidden><span id="send-hint-text">Not connected: Connect Claude to send</span> <button id="send-hint-act">Connect</button></span>
           <button id="send" title="Send (Shift+Enter)">Send</button>
@@ -318,6 +490,15 @@
   <aside id="artifacts" aria-label="Artifacts"></aside>
 </div>
 <div id="toast" hidden></div>
+<dialog id="mirror-dlg" aria-labelledby="mirror-switch-label">
+  <div id="mirror-settings">
+    <label class="mirror-switch"><input type="checkbox" id="mirror-switch"> <span id="mirror-switch-label"></span></label>
+    <p id="mirror-about"></p>
+    <div id="mirror-lines" role="status"></div>
+    <div id="mirror-confirm" hidden><p id="mirror-confirm-text"></p><button id="mirror-confirm-yes" type="button" class="danger"></button> <button id="mirror-confirm-no" type="button">Cancel</button></div>
+    <div class="row"><button id="mirror-close" type="button">Close</button></div>
+  </div>
+</dialog>
 <dialog id="close-running" aria-labelledby="close-running-t">
   <form method="dialog">
     <p id="close-running-t">A notebook cell is running here. Stop it and close?</p>

@@ -10,27 +10,46 @@
 //   3. the grant (agent-grant.ts): folders, write, expiry;
 //   4. the limits: 8 calls in flight, 100 a second (a burst of 200), 8 MiB of contents;
 //   5. the workspace, through forAgent: every change credited to agent:<name>.
-// Nothing the server sends is ever evaluated; the page sends it nothing but notifications after the hello.
+// Nothing the server sends is ever evaluated. After the hello the page sends it notifications, and, through own()
+// (tasks-client.ts, Delegate's tasks.* only), its own requests, whose answers are matched by id.
 
 import { checkCall, badValue, AGENT_LIMITS } from "./agent-schema";
 import { editProblem, type NotebookEdit } from "./notebook-edit";
 import { authorize, grantFolders, grantProblem, newGrantId, norm, GRANT_ID, type Grant, type TrashEntry } from "./agent-grant";
 import { BRANCHES, within } from "./paths";
+import { entryUrl } from "./entry-url";
+import { MADE_CHANNEL, type TexMade, type TexMayRun, type TexMayRunYes } from "./agent-made-tex";
 
 /** What the hello's result says (the agent's own claims, shown as such). Over a runner (`link`), the agent's
  * agent.ready says it, with `child`: this agent process's identity, bound into every permission digest. */
-export type Hello = { protocol: 1; agent: { name: string; client: string; version?: string }; wants: { folders?: string[]; write?: boolean; run?: boolean }; session?: string; features?: string[]; child?: string };
+export type Hello = { protocol: 1; agent: { name: string; client: string; version?: string }; wants: { folders?: string[]; write?: boolean; run?: boolean }; session?: string; features?: string[]; child?: string; log?: { instance: string } };
 /** What a page may offer beyond the workspace's verbs, said in its hello and in the agent's: "notebook.edit", an
  * agent's edit of an open notebook by cell (web/workspace/notebook-edit.ts, A12 step 1); "permission.digest", an Allow
- * that carries the digest of the action shown (agent-canon.ts). */
-export const FEATURES = ["notebook.edit", "permission.digest"] as const;
+ * that carries the digest of the action shown (agent-canon.ts); "run.context", a run verb's call that carries the chat and
+ * the turn it came from (`conversation`, `turn_id`), added by the agent's server after the model's arguments, never the
+ * model's own (run_notebook in the notebook open on the page runs there only for that chat's running turn);
+ * "chat.resume", an agent that keeps each conversation's log and replays what a page missed (its hello's `log` names
+ * the run its numbers belong to); "edit.turn", a notebook.edit that carries the turn it came from (`turn_id`, the
+ * agent's server's), applied only while that turn is the chat's running one; "chat.steer", an agent that takes a message
+ * into its running turn (Steer, step 3); "egress.turn", a web card (the agent's fetch, the built-in search) that also
+ * offers "for this turn", its own action and digest (agent-egress.ts); "chat.resume.tag", an agent that gives a
+ * chat.resume's tag back on its chat.replay, so the log mirror reads the agent's log apart from the display (mirror.ts);
+ * "delegate.1", an agent that takes Delegate's tasks.* requests (pair-delegate-plan-r3.3 §2.5; the page's side is
+ * tasks-client.ts); "chat.brief", an agent that drafts a Delegate task's brief from a Pair chat (Delegate briefs);
+ * "workspace.image", an agent that takes a raster image's read as `{entry, rev, image: {base64}}` (imageOut). */
+export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn", "chat.resume.tag", "delegate.1", "chat.brief", "delegate.run", "workspace.image"] as const;
+/** The `log` an agent's hello or agent.ready names: its run, as the agent's random hex id; anything else, none. */
+export const logOf = (v: unknown): { instance: string } | undefined => {
+  const i = (v as { instance?: unknown } | null)?.instance;
+  return typeof i === "string" && /^[0-9a-f]{8,64}$/.test(i) ? { instance: i } : undefined;
+};
 /** The pairing's other end on one of the person's computers (agent-relay.ts's AgentLeg), in place of the loopback
  * socket, with its own frame bound, queue and reply slots: what the pairing asks of it. */
 export type AgentLink = {
   /** the leg as the pairing's socket; `ended` hears why it ended first */
   socket(ended: (e: { kind: string; why: string }) => void): WebSocket;
   /** an agent.ready: who the agent is (undefined: not one; false: one in an unknown form) */
-  ready(msg: any): { agent: Hello["agent"]; features: string[]; child: string } | false | undefined;
+  ready(msg: any): { agent: Hello["agent"]; features: string[]; child: string; log?: { instance: string } } | false | undefined;
   send(text: string): "ok" | "full" | "over" | "closed";
   /** a reply's place, taken as a call arrives (false: too many owed, the leg ends) */
   owe(): boolean;
@@ -72,8 +91,12 @@ export type RunSide = {
   live: { state(): PairState; grant(): Grant | null; closeReason(): string };
   onChange(cb: () => void): () => void;
   reply(result: unknown): void; fail(code: string, message: string): void;
+  /** the chat and the turn the call came from (run.context), both or neither: as the agent's server said them */
+  context?: { conversation: string; turnId: string };
 };
 export type RunVerbs = { serve(method: string, params: unknown, side: RunSide): Promise<void> };
+/** run.context's ids: at most this long (notebook.edit's conversation's bound) */
+const RUN_CONTEXT_LENGTH = 128;
 export const RUN_VERBS = ["workspace.run_notebook", "workspace.run_file", "workspace.run_stop", "workspace.latex_build"] as const;
 /** Where the page keeps grants (Workspace.agentGrants / putAgentGrant). */
 export type GrantStore = { agentGrants(): Promise<Record<string, unknown>>; putAgentGrant(id: string, g: unknown | null): Promise<void> };
@@ -121,12 +144,17 @@ export function actorOf(name: string, client: string): string {
   return "agent:" + n;
 }
 
-/** An entry as an agent sees it: its path, kind and what a person sees of it, nothing internal (ids, refs). */
-function entryOut(e: any) {
+/** An entry as an agent sees it: its path, kind and what a person sees of it, nothing internal (ids, refs). With
+ * `origin`, and when it has a page of its own (a notebook, a board, a .tex or code file), also `url`: that page on this
+ * site, as the file browser opens it (entry-url.ts), for the agent to give the person a link. It comes from this very
+ * entry, the one the verb returned under the grant: no other read. */
+function entryOut(e: any, origin?: string) {
   if (!e) return null;
   const out: Record<string, unknown> = { path: e.path, kind: e.kind, created: e.created, updated: e.updated };
   for (const k of ["mode", "size", "rev"]) if (e[k] !== undefined) out[k] = e[k];
   if (e.trashed) out.trashed = { from: e.trashed.from, at: e.trashed.at };
+  const u = origin && !e.trashed ? entryUrl(e) : null;
+  if (u) out.url = origin + u;
   return out;
 }
 
@@ -152,6 +180,28 @@ function contentOut(kind: string, c: unknown, what: string) {
   if (u.length > MAX) throw tooBig(u.length, what);
   try { return { text: new TextDecoder("utf-8", { fatal: true }).decode(u) }; } catch { return { base64: b64(u) }; }
 }
+/** An image as an agent with "workspace.image" may see it: at most this many bytes, so its base64 is at most
+ * 5,000,000 characters (the agent's own cap, which it checks again). */
+export const IMAGE_BYTES_MAX = 3_750_000;
+/** Whether `u` starts as a PNG, JPEG, GIF or WebP file does: by its bytes alone, never its name. */
+export function isRaster(u: Uint8Array): boolean {
+  const at = (i: number, s: number[]) => s.every((b, j) => u[i + j] === b);
+  return at(0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) // PNG
+    || at(0, [0xff, 0xd8, 0xff]) // JPEG
+    || at(0, [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]) || at(0, [0x47, 0x49, 0x46, 0x38, 0x39, 0x61]) // GIF87a, GIF89a
+    || (at(0, [0x52, 0x49, 0x46, 0x46]) && at(8, [0x57, 0x45, 0x42, 0x50])); // RIFF....WEBP
+}
+/** A file's contents as bytes, if they are a raster image's; else null (text, a document, other bytes). */
+const imageBytes = (c: unknown): Uint8Array | null => { const u = c instanceof Uint8Array ? c : c instanceof ArrayBuffer ? new Uint8Array(c) : null; return u && isRaster(u) ? u : null; };
+const isImageBytes = (c: unknown) => imageBytes(c) !== null;
+/** A file's bytes, if they are a raster image (else null, read as before): over IMAGE_BYTES_MAX refused with its size
+ * before any encoding. Nothing of the bytes goes into an error. */
+function imageOut(c: unknown, what: string): { base64: string } | null {
+  const u = imageBytes(c);
+  if (!u) return null;
+  if (u.length > IMAGE_BYTES_MAX) throw new AgentError("limit", `${what}: an image of ${u.length} bytes, at most ${IMAGE_BYTES_MAX} for an agent to see`);
+  return { base64: b64(u) };
+}
 /** Contents from the wire (8 MiB at most, refused with their size, never cut). */
 function contentIn(c: any, what: string): unknown {
   const v = "json" in c ? { json: c.json } : "text" in c ? { text: c.text as string } : { bytes: unb64(c.base64) };
@@ -160,12 +210,21 @@ function contentIn(c: any, what: string): unknown {
   return "json" in v ? v.json : "text" in v ? v.text : v.bytes;
 }
 
+/** A document an agent created through its pairing: `op` this creation's own id, `ref` a notebook's or board's document
+ * id (its identity wherever it moves), `grant` the grant it was created under; a file's `fid` and the revision it was
+ * left at, `rev` (a .tex's, for its run once by itself: agent-made-tex.ts). */
+export type Created = { op: string; path: string; kind: "notebook" | "board" | "file"; ref?: string; grant: string; updated?: number; fid?: string; rev?: number };
+const isTex = (c: Created | null): c is Created & { fid: string; rev: number } => !!c && c.kind === "file" && /\.tex$/i.test(c.path) && typeof c.fid === "string" && typeof c.rev === "number";
+
 export class AgentError extends Error {
   constructor(public code: string, message: string, public extra: Record<string, unknown> = {}) { super(message); }
 }
 
 /** The pairing.  `verbsFor(actor)` gives the workspace's verbs credited to `actor` (Workspace.forAgent). */
 // (what is said when the grant changed under a call: nothing of what it read, and, for a change, no claim either way)
+/** A grant as the server is told it (grant.changed): `delegate` only when on, so an agent that doesn't know it reads
+ * the same grant as before. */
+const changed = (g: Grant) => ({ id: g.id, agent: g.agent, client: g.client, folders: g.folders, write: g.write, run: g.run, expires: g.expires, ...(g.delegate ? { delegate: true } : {}) });
 export const CHANGED_WHILE_RUNNING = "the grant changed or expired while this ran: nothing of it is said (a change may or may not have been made)";
 
 export class AgentPairing {
@@ -173,7 +232,16 @@ export class AgentPairing {
   hello: Hello | null = null;
   grant: Grant | null = null;
   changes = 0;
+  /** What this agent created last through this pairing (workspace.create, answered under the grant in force): the page's
+   * Open for it */
+  created: Created | null = null;
+  /** The .tex this agent last built (latex_build, done, under the grant in force), at the revision it built, if that
+   * revision is still the file's when the build answered: its run once by itself, as a creation's (agent-made-tex.ts) */
+  built: Created | null = null;
   closeReason = "";
+  // (the editors' channel (agent-made-tex.ts), and the made .tex revisions whose one run has been answered yes)
+  private texChan: BroadcastChannel | null = null;
+  private texSpent = new Set<string>();
   private sock: WebSocket;
   private verbs: AgentVerbs | null = null;
   private inFlight = 0;
@@ -191,7 +259,15 @@ export class AgentPairing {
   private sessionSecret: string | undefined;
   private readonly gen = ++pairingGen;
   lostRecord: ReloadRecord | null = null;
+  /** Why the agent refused this page's hello, where it says (sagebrush-agent 0.8.12 and later, data.reason): another
+   * page is paired, a session it doesn't know (it restarted, or another code paired since), or a wrong, spent or
+   * expired code; null where it didn't say. */
+  refusedFor: "busy" | "unknown-session" | "bad-code" | null = null;
+  /** Whether its grant was remembered (kept in IndexedDB with its session, not in a reload record). */
+  get remembers(): boolean { return this.remember; }
   private revoked = false;
+  // (the page's own requests (Delegate's, tasks-client.ts): who hears their answers)
+  private ownAnswers: ((msg: any, bytes: number) => boolean) | null = null;
 
   /** Over a runner: the leg, the computer's name, and why the leg ended (for the page's words). */
   readonly link: AgentLink | null = null;
@@ -201,10 +277,12 @@ export class AgentPairing {
   constructor(
     readonly port: number,
     how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } } | { link: AgentLink; computer: string },
-    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; gitVerbs?: RunVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
+    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; gitVerbs?: RunVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>, turnId?: string) => Promise<unknown>; onCreated?: (c: Created, p: AgentPairing) => void; egressTurn?: boolean; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
   ) {
     if ("link" in how) { this.link = how.link; this.computer = how.computer; }
     else if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
+    // (the editors' channel, once the pairing is admitted: agent-made-tex.ts)
+    if (typeof BroadcastChannel === "function") { this.texChan = new BroadcastChannel(MADE_CHANNEL); this.texChan.onmessage = (e) => this.texAsked(e.data); }
     const now = this.now();
     this.tokens = AGENT_LIMITS.burst;
     this.refill = now;
@@ -229,7 +307,8 @@ export class AgentPairing {
         if (this.state === "closed") return; // (nothing after the end)
         if (typeof e.data !== "string") return this.close(1003, "only text frames");
         const max = this.state === "connecting" ? PRE_HELLO_MAX : AGENT_LIMITS.maxFrameBytes;
-        if (frameBytes(e.data, max) > max) return this.close(1009, `a message over ${max} bytes`);
+        const bytes = frameBytes(e.data, max);
+        if (bytes > max) return this.close(1009, `a message over ${max} bytes`);
         let msg: any;
         try { msg = parseStrict(e.data); } catch (err) { return this.close(1007, "not strict JSON: " + (err as Error).message); }
         if (!msg || typeof msg !== "object" || Array.isArray(msg) || msg.jsonrpc !== "2.0") return this.close(1002, "not JSON-RPC 2.0");
@@ -238,7 +317,7 @@ export class AgentPairing {
         const ready = this.link?.ready(msg);
         if (ready === false) return this.close(1002, "an agent.ready in an unknown form");
         if (ready) {
-          if (this.state !== "connecting") { this.hello = { ...this.hello!, ...ready }; this.emit(); return; }
+          if (this.state !== "connecting") { this.hello = { ...this.hello!, log: undefined, ...ready }; this.emit(); return; }
           this.hello = { protocol: 1, wants: { folders: ["/"], write: true }, ...ready };
           this.pairingId = newGrantId(12);
           this.state = "paired";
@@ -250,16 +329,19 @@ export class AgentPairing {
           if (msg.id !== "p1") return this.close(1002, "the first answer must be the hello's");
           if (msg.error) {
             const m = String(msg.error?.data?.message ?? msg.error?.message ?? "refused").slice(0, 300);
+            const why = msg.error?.data?.reason;
+            if (why === "busy" || why === "unknown-session" || why === "bad-code") this.refusedFor = why;
             this.end("the agent refused: " + m);
             return reject(new AgentError(String(msg.error?.data?.code ?? "refused"), m));
           }
           const r = msg.result;
           if (!r || r.protocol !== 1 || !r.agent || typeof r.agent.name !== "string") return this.close(1002, "a hello result in an unknown form");
-          this.hello = { protocol: 1, agent: { name: String(r.agent.name).slice(0, 80), client: String(r.agent.client ?? "").slice(0, 40), version: r.agent.version ? String(r.agent.version).slice(0, 40) : undefined }, wants: { folders: Array.isArray(r.wants?.folders) ? r.wants.folders.slice(0, 50).map(String) : undefined, write: !!r.wants?.write, run: !!r.wants?.run }, session: typeof r.session === "string" ? r.session : undefined, features: Array.isArray(r.features) ? r.features.filter((f: unknown): f is string => typeof f === "string" && (FEATURES as readonly string[]).includes(f)) : [], ...(typeof r.child === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(r.child) ? { child: r.child } : {}) };
+          this.hello = { protocol: 1, agent: { name: String(r.agent.name).slice(0, 80), client: String(r.agent.client ?? "").slice(0, 40), version: r.agent.version ? String(r.agent.version).slice(0, 40) : undefined }, wants: { folders: Array.isArray(r.wants?.folders) ? r.wants.folders.slice(0, 50).map(String) : undefined, write: !!r.wants?.write, run: !!r.wants?.run }, session: typeof r.session === "string" ? r.session : undefined, log: logOf(r.log), features: Array.isArray(r.features) ? r.features.filter((f: unknown): f is string => typeof f === "string" && (FEATURES as readonly string[]).includes(f)) : [], ...(typeof r.child === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(r.child) ? { child: r.child } : {}) };
           // (A14: a restore's session must be answered by the agent it was given to, name and client; else closed)
           if ("agent" in how && how.agent && (this.hello.agent.name !== how.agent.name || this.hello.agent.client !== how.agent.client)) {
-            this.close(1000, "another agent answered this page's session");
-            return reject(new AgentError("identity", "another agent answered this page's session"));
+            // (said first: a socket whose close is heard at once (Bun 1.3's) would otherwise answer it as a plain close)
+            reject(new AgentError("identity", "another agent answered this page's session"));
+            return this.close(1000, "another agent answered this page's session");
           }
           if (!this.pairingId) this.pairingId = newGrantId(12);
           if (this.hello.session) this.sessionSecret = this.hello.session;
@@ -273,7 +355,9 @@ export class AgentPairing {
           return;
         }
         if (typeof msg.method === "string" && typeof msg.id === "string") return void this.call(msg.id, msg.method, msg.params);
-        // (an answer: the page sends no requests after the hello)
+        // (an answer to one of the page's own requests, if its client knows the id; any other answer is dropped)
+        if (msg.method === undefined && typeof msg.id === "string" && this.ownAnswers?.(msg, bytes)) return;
+        // (any other answer: to no request the page has pending (not one of own()'s ids), dropped)
       };
     });
   }
@@ -298,22 +382,33 @@ export class AgentPairing {
     return this.sendBounded({ jsonrpc: "2.0", method, params }) ? "ok" : "over";
   }
   private emit() { for (const cb of this.listeners) cb(); }
+  /** For the page's own requests (tasks-client.ts, its only user): send one message, while granted and on the loopback
+   * pairing only, within the frame bound; and hear the answers, each with its frame's UTF-8 bytes as received (`hear`
+   * returns true for an id it knows). */
+  own(hear: (msg: any, bytes: number) => boolean): { send(m: unknown): "ok" | "closed" | "over" | "link" } {
+    this.ownAnswers = hear;
+    return { send: (m) => (this.link ? "link" : this.state !== "granted" ? "closed" : this.sendBounded(m) ? "ok" : "over") };
+  }
 
   /** The person's grant: sent to the server, kept (with the session secret if `remember`), and in force from now.
    * `id`: the id of the grant this resumes (a remembered one, or the reload record's); else this pairing's grant's,
-   * if it has one; else a new one (Q1: made here, never the agent's). */
-  async allow(g: { folders: string[]; write: boolean; run?: boolean; expires: number | null; id?: string }, remember: boolean) {
+   * if it has one; else a new one (Q1: made here, never the agent's). `delegate`: a return to the page given its grant
+   * again with the Delegate switch on, as it was (#1622): in the same grant, so the agent never sees it off between,
+   * which would stop its tasks' turns; only for an agent on this computer that offers Delegate, as setDelegate. */
+  async allow(g: { folders: string[]; write: boolean; run?: boolean; delegate?: boolean; expires: number | null; id?: string }, remember: boolean) {
     if (this.state !== "paired" && this.state !== "granted") throw new AgentError("invalid", "not paired");
     const h = this.hello!, now = this.now();
     const id = typeof g.id === "string" && GRANT_ID.test(g.id) ? g.id : this.grant?.id ?? newGrantId();
-    const grant: Grant = { id, agent: h.agent.name, client: h.agent.client, folders: grantFolders(g.folders), write: !!g.write, run: g.run === true, expires: g.expires, created: this.grant?.created ?? now, lastUsed: now };
+    // (the Delegate switch is apart from Pair's grant (§6.2): a new grant from the person keeps it as it was)
+    const grant: Grant = { id, agent: h.agent.name, client: h.agent.client, folders: grantFolders(g.folders), write: !!g.write, run: g.run === true, expires: g.expires, ...(this.grant?.delegate || (g.delegate === true && !this.link && h.features?.includes("delegate.1")) ? { delegate: true as const } : {}), created: this.grant?.created ?? now, lastUsed: now };
     this.grant = grant;
     this.remember = remember;
     this.verbs = this.opts.verbsFor(actorOf(h.agent.name, h.agent.client), { owner: () => grant.id });
-    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: grant.run, expires: grant.expires } });
-    // (what this page offers beyond the verbs: a notification, which a server that doesn't know it ignores, §1 rule 4)
+    // (what this page offers beyond the verbs, sent before its grant (A2-1): a notification, which a server that
+    //  doesn't know it ignores, §1 rule 4)
     // (permission.digest: every Allow carries the digest of the action shown, from any page that pairs)
-    this.send({ jsonrpc: "2.0", method: "page.features", params: { features: [...(this.opts.notebookEdit ? ["notebook.edit"] : []), "permission.digest"] } });
+    this.send({ jsonrpc: "2.0", method: "page.features", params: { features: [...(this.opts.notebookEdit ? ["notebook.edit", "edit.turn"] : []), "permission.digest", "tasks.reason", ...(this.opts.runVerbs ? ["run.context"] : []), ...(this.opts.egressTurn ? ["egress.turn"] : [])] } });
+    this.send({ jsonrpc: "2.0", method: "grant.changed", params: changed(grant) });
     await this.keep();
     // (S4: while it waited, the grant may have been revoked, the pairing closed or the grant replaced: then nothing
     //  of this allow() goes on, no record, no timer, no "granted")
@@ -329,7 +424,10 @@ export class AgentPairing {
     // (only a remembered grant outlives the page: "until this page closes" is never kept. The session kept is the one in
     //  force: the hello's after a code, the remembered one after a reconnect, whose hello carries none; the hello's alone
     //  lost it on the first reconnect, and the next had nothing to send (T1, found by git-proto at b72938d8a))
-    if (this.remember && this.grant.expires !== null) await this.opts.store.putAgentGrant(this.pairingId, { grant: this.grant, session: this.sessionSecret, port: this.port } satisfies Kept);
+    if (this.remember && this.grant.expires !== null) {
+      const { delegate: _, ...grant } = this.grant;
+      await this.opts.store.putAgentGrant(this.pairingId, { grant, session: this.sessionSecret, port: this.port } satisfies Kept);
+    }
   }
 
   /** The reload record (A14): written for an unremembered grant only (a remembered one is kept in IndexedDB, above),
@@ -337,7 +435,7 @@ export class AgentPairing {
   private keepForReload() {
     const r = this.opts.reload, g = this.grant, h = this.hello;
     if (!r || !g || !h || this.remember || !this.pairingId || !this.sessionSecret || this.gen !== pairingGen) return;
-    putReloadRecord(r.storage, { v: 1, pairingId: this.pairingId, session: this.sessionSecret, port: this.port, agent: { name: h.agent.name, client: h.agent.client }, grant: { folders: g.folders, write: g.write, ...(g.run ? { run: true } : {}), expires: g.expires, id: g.id }, workspace: r.scope.workspace, page: r.scope.page });
+    putReloadRecord(r.storage, { v: 1, pairingId: this.pairingId, session: this.sessionSecret, port: this.port, agent: { name: h.agent.name, client: h.agent.client }, grant: { folders: g.folders, write: g.write, ...(g.run ? { run: true } : {}), ...(g.delegate ? { delegate: true } : {}), expires: g.expires, id: g.id }, workspace: r.scope.workspace, page: r.scope.page });
   }
   /** The record removed from storage, if it is this pairing's (its id) and this is the newest pairing (its gen). */
   private dropReload() {
@@ -354,13 +452,31 @@ export class AgentPairing {
   async noRun() {
     const g = this.grant;
     if (this.state !== "granted" || !g || !g.run) return;
-    const next: Grant = { ...g, run: false };
-    this.grant = next;
-    this.verbs = this.opts.verbsFor(actorOf(this.hello!.agent.name, this.hello!.agent.client), { owner: () => next.id });
-    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: next.agent, client: next.client, folders: next.folders, write: next.write, run: false, expires: next.expires } });
-    this.emit();
+    const next = this.regrant({ ...g, run: false });
     await this.keep();
     if (this.grant === next) this.keepForReload();
+  }
+
+  /** The Delegate switch (§6.2), turned on or off by the person: the grant in force replaced by the same one with or
+   * without `delegate: true`, told to the server at once (whose every tasks.* call checks it; off stops the tasks'
+   * turns there). On only for an agent on this computer whose hello offers delegate.1. False if nothing was sent. */
+  setDelegate(on: boolean): boolean {
+    const g = this.grant;
+    if (this.state !== "granted" || !g || !!g.delegate === on || (on && (this.link || !this.hello?.features?.includes("delegate.1")))) return false;
+    const { delegate: _, ...rest } = g;
+    this.regrant(on ? { ...rest, delegate: true } : rest);
+    // (in this page's reload record too, so a return to the page turns it on again (#1622); a remembered grant never
+    //  keeps it, keep())
+    this.keepForReload();
+    return true;
+  }
+  // (the grant in force replaced by `next`: a call or run made under the old one finds it changed (current()) and ends)
+  private regrant(next: Grant): Grant {
+    this.grant = next;
+    this.verbs = this.opts.verbsFor(actorOf(this.hello!.agent.name, this.hello!.agent.client), { owner: () => next.id });
+    this.send({ jsonrpc: "2.0", method: "grant.changed", params: changed(next) });
+    this.emit();
+    return next;
   }
 
   /** Dropped: the socket closed and nothing else (no grant change sent, nothing forgotten): an attempt another pairing
@@ -407,6 +523,8 @@ export class AgentPairing {
   }
   private end(why: string) {
     if (this.state === "closed") return;
+    try { this.texChan?.close(); } catch {}
+    this.texChan = null;
     this.closeReason ||= why;
     // (A14: an involuntary loss, while the page stays: the record leaves storage, so a later reload doesn't try a
     //  session that just failed, and stays in memory for the bar's one [Reconnect]; a revoke dropped it already; the
@@ -489,11 +607,14 @@ export class AgentPairing {
       // still in force now, before anything is said, the refusal too, and before the workspace is touched)
       if (!this.current(g, verbs)) return this.fail(id, "invalid", grantProblem(this.grant, this.now()) ?? "the grant changed while this was checked");
       if (no) return this.fail(id, "invalid", no);
-      const result = method === "workspace.git_branch" ? await this.branch(g!, verbs!, (params as any).name) : await this.run(verbs!, method.slice("workspace.".length), params as any, auth.expect);
+      let made: any = null;
+      const result = method === "workspace.git_branch" ? await this.branch(g!, verbs!, (params as any).name) : await this.run(verbs!, method.slice("workspace.".length), params as any, auth.expect, (e) => (made = e));
       // (after the last wait, before anything is said: the same grant, in force now, or nothing of what it read)
       if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
       g!.lastUsed = this.now();
       this.reply(id, result);
+      // (a document this agent created, answered under this very grant: the page's to open, after the answer)
+      if (made) this.madeHere(made, g!);
     } catch (err: any) {
       // (the same check before any error is said: after a change, nothing more is read or said)
       if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
@@ -502,7 +623,8 @@ export class AgentPairing {
       const extra: Record<string, unknown> = {};
       if (code === "conflict" && method === "workspace.write") {
         // (the current contents, if within the content bound: else the conflict is said without them, and why)
-        try { const r = await verbs!.read((params as any).path); extra.current = { entry: entryOut(r.entry), rev: r.rev, content: contentOut(r.entry.kind, r.content, (params as any).path) }; }
+        // (an image, to an agent that takes images: never as text in an error; it reads it as one)
+        try { const r = await verbs!.read((params as any).path); if (this.images() && isImageBytes(r.content)) extra.currentOmitted = "its current contents are an image: read it"; else extra.current = { entry: entryOut(r.entry), rev: r.rev, content: contentOut(r.entry.kind, r.content, (params as any).path) }; }
         catch (e2: any) { if (e2 instanceof AgentError && e2.code === "limit") extra.currentOmitted = e2.message; }
         // (that read was a wait too: checked again before it is said)
         if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
@@ -515,11 +637,22 @@ export class AgentPairing {
 
   /** Whether this pairing edits notebooks by cell: the page offers it and the agent said it uses it (its hello). */
   private edits() { return !!this.opts.notebookEdit && !!this.hello?.features?.includes("notebook.edit"); }
+  /** Whether this pairing's agent takes a raster image's read as an image (its hello's "workspace.image"). */
+  private images() { return !!this.hello?.features?.includes("workspace.image"); }
 
   /** An agent's edit of a notebook (notebook-edit.ts): its grammar, then the grant as for a write of its path, then the
    * page's own apply (the open notebook's host); the same grant checked after every wait, as for the verbs. */
   private async edit(id: string, params: unknown) {
     if (!this.edits()) return this.fail(id, "invalid", "not a verb: \"notebook.edit\"");
+    // (edit.turn, when both ends said it: every edit says its turn, a short id, taken out before the edit's grammar is
+    //  checked; one without it, or with another value, is refused, nothing applied; an agent that didn't say it: as before)
+    let turnId: string | undefined;
+    if (this.hello?.features?.includes("edit.turn") && params && typeof params === "object" && !Array.isArray(params)) {
+      const { turn_id, ...rest } = params as Record<string, unknown>;
+      if (typeof turn_id !== "string" || !turn_id || turn_id.length > RUN_CONTEXT_LENGTH) return this.fail(id, "invalid", "edit: turn_id is the turn's id");
+      turnId = turn_id;
+      params = rest;
+    }
     const bad = badValue(params) ?? editProblem(params);
     if (bad) return this.fail(id, "invalid", bad);
     const e = params as NotebookEdit;
@@ -539,7 +672,7 @@ export class AgentPairing {
         hold = () => verbs.holdChange!(np);
       }
       // (with the check of this very grant, for the page to make right before it changes anything: astra's C1)
-      const result = await this.opts.notebookEdit!(e, () => this.current(g, verbs), hold);
+      const result = await this.opts.notebookEdit!(e, () => this.current(g, verbs), hold, turnId);
       if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
       g!.lastUsed = this.now();
       this.changes++;
@@ -560,18 +693,61 @@ export class AgentPairing {
   private async runVerb(id: string, method: string, params: unknown, rv = this.opts.runVerbs, counted = false) {
     if (!rv) return this.fail(id, "invalid", `not a verb: ${JSON.stringify(method)}`);
     const h = this.hello!;
+    // (run.context, when both ends said it: the chat and turn taken out of the call before its params are checked;
+    //  each a short string, else the call is refused; one without the other is neither)
+    let context: RunSide["context"];
+    if (rv === this.opts.runVerbs && h.features?.includes("run.context") && params && typeof params === "object" && !Array.isArray(params) && ("conversation" in params || "turn_id" in params)) {
+      const { conversation, turn_id, ...rest } = params as Record<string, unknown>;
+      const id1 = (v: unknown) => v === undefined || (typeof v === "string" && v.length > 0 && v.length <= RUN_CONTEXT_LENGTH);
+      if (!id1(conversation) || !id1(turn_id)) return this.fail(id, "invalid", "run context: conversation and turn_id are the chat's and the turn's ids");
+      if (typeof conversation === "string" && typeof turn_id === "string") context = { conversation, turnId: turn_id };
+      params = rest;
+    }
     this.inFlight++;
     try {
+      // (latex_build: the .tex as it was before, for its run once by itself if the build is done and it is unchanged; only
+      //  under the grant in force now (current), and one that could ever let it (Everything and May run code:
+      //  mayRunCreated), else nothing is read. Inside the try: every way out gives the call's slot back)
+      const g0 = this.grant, v0 = this.verbs;
+      const texPath = method === "workspace.latex_build" && typeof (params as any)?.path === "string" && this.current(g0, v0) && g0!.run === true && g0!.folders.length === 1 && g0!.folders[0] === "/" ? (params as any).path as string : null;
+      const before = texPath ? await v0!.stat(texPath).catch(() => null) : null;
       await rv.serve(method, params, {
         grant: this.grant, agent: h.agent.name, actor: actorOf(h.agent.name, h.agent.client), now: () => this.now(),
         current: (g) => this.current(g, this.verbs),
         live: { state: () => this.state, grant: () => this.grant, closeReason: () => this.closeReason },
         onChange: (cb) => this.onChange(cb),
-        reply: (r) => { if (counted) { this.changes++; this.emit(); } this.reply(id, r); }, fail: (c, m) => this.fail(id, c, m),
+        ...(context ? { context } : {}),
+        reply: (r) => { if (counted) { this.changes++; this.emit(); } this.reply(id, r); if (before && (r as any)?.ok === true && (r as any).ended === "done") void this.builtHere(before, g0, v0); }, fail: (c, m) => this.fail(id, c, m),
       });
     } finally {
       this.inFlight--;
     }
+  }
+
+  /** A .tex this agent built: its run once by itself, if it is still the revision it was before the build, under the
+   * same grant, in force now (a write meanwhile, the person's or the agent's: not this build's, nothing). */
+  private async builtHere(e: any, g: Grant | null, v: AgentVerbs | null) {
+    if (!g || !v || e?.kind !== "file" || typeof e.fid !== "string" || typeof e.rev !== "number" || !/\.tex$/i.test(e.path ?? "")) return;
+    const now = await v.stat(e.path).catch(() => null);
+    if (!now || now.fid !== e.fid || now.rev !== e.rev || !this.current(g, v)) return;
+    this.built = Object.freeze({ op: newGrantId(12), path: e.path, kind: "file" as const, grant: g.id ?? "", fid: e.fid, rev: e.rev });
+    this.texTell(this.built);
+  }
+  /** Said to the editors: this agent made this .tex at this revision (one showing it asks). */
+  private texTell(c: Created) {
+    if (isTex(c)) try { this.texChan?.postMessage({ t: "tex-made", fid: c.fid, rev: c.rev } satisfies TexMade); } catch {}
+  }
+  /** An editor's question (agent-made-tex.ts): yes, once, if the file at that revision is the .tex this agent last
+   * created or built, and it may run by itself now (mayRunCreated: the same conditions as a created notebook's). */
+  private texAsked(m: unknown) {
+    const q = m as TexMayRun;
+    if (!q || q.t !== "tex-may-run" || typeof q.id !== "string" || typeof q.fid !== "string" || typeof q.rev !== "number") return;
+    const c = [this.built, this.created].find((x) => isTex(x) && x.fid === q.fid && x.rev === q.rev);
+    // (spent by the file's revision: its creation and a build at the same revision are one chance, not two)
+    const at = q.fid + "@" + q.rev;
+    if (!c || this.texSpent.has(at) || !this.mayRunCreated(c)) return;
+    this.texSpent.add(at);
+    try { this.texChan?.postMessage({ t: "tex-may-run", id: q.id.slice(0, 64), ok: true } satisfies TexMayRunYes); } catch {}
   }
 
   /** git_branch (chat plan PR 3): the page's, for this grant, while it is the one in force. */
@@ -583,35 +759,65 @@ export class AgentPairing {
     return out;
   }
 
-  private async run(v: AgentVerbs, verb: string, p: any, expect?: TrashEntry): Promise<unknown> {
+  /** A document created by this agent: kept for the bar's Open, and told to the page (onCreated). Never a folder, a
+   * branch's worktree or the Trash: only what the person would open from Files. */
+  private madeHere(e: any, g: Grant) {
+    if (!e || typeof e.path !== "string" || !/^(notebook|board|file)$/.test(e.kind) || within(norm(e.path) ?? "/", BRANCHES) || /^\/Trash(\/|$)/.test(e.path)) return;
+    this.created = Object.freeze({ op: newGrantId(12), path: e.path, kind: e.kind, ...(typeof e.ref === "string" ? { ref: e.ref } : {}), grant: g.id ?? "", ...(typeof e.updated === "number" ? { updated: e.updated } : {}),
+      ...(e.kind === "file" && typeof e.fid === "string" && typeof e.rev === "number" ? { fid: e.fid, rev: e.rev } : {}) });
+    this.emit();
+    this.texTell(this.created!);
+    try { this.opts.onCreated?.(this.created, this); } catch (err) { console.warn("agent: the page's open of a created document failed:", err); }
+  }
+
+  /** Whether `c` may run once by itself now, asked as the page admits that run (the conditions decided Nov 18 2026): it is
+   * the last document this pairing created (or, a .tex, the last it built: Nov 19 2026), under the grant still in force,
+   * and that grant has May run code and Everything. Any narrower grant never: the page's interpreter reads the whole
+   * workspace, beyond the grant's folders. */
+  mayRunCreated(c: Created): boolean {
+    const g = this.grant;
+    return this.state === "granted" && (this.created === c || this.built === c) && !!g && g.id === c.grant && g.run === true && g.folders.length === 1 && g.folders[0] === "/" && grantProblem(g, this.now()) === null;
+  }
+
+  private async run(v: AgentVerbs, verb: string, p: any, expect?: TrashEntry, made?: (e: unknown) => void): Promise<unknown> {
     const sized = (c: any) => contentIn(c, p.path ?? "contents");
     const changed = <T,>(x: T) => { this.changes++; this.emit(); return x; };
+    // (the address of a single entry's page in its answer (entryOut): stat, read, write, create, rename, duplicate and
+    //  restore; not list's entries, nor a folder's, a removed one's or a data file's, which have no page of their own)
+    const url = this.opts.page.origin;
     switch (verb) {
       case "list": {
         const all = await v.list(p.folder, p.recursive ? { recursive: true } : {});
         const from = p.cursor === undefined ? 0 : /^[0-9]{1,9}$/.test(p.cursor) ? Number(p.cursor) : NaN;
         if (!Number.isFinite(from)) throw new AgentError("invalid", "not a cursor this page gave");
-        const page = all.slice(from, from + AGENT_LIMITS.maxList).map(entryOut);
+        const page = all.slice(from, from + AGENT_LIMITS.maxList).map((e) => entryOut(e));
         return from + page.length < all.length ? { entries: page, more: true, cursor: String(from + page.length) } : { entries: page };
       }
-      case "stat": return { entry: entryOut(await v.stat(p.path)) };
+      case "stat": return { entry: entryOut(await v.stat(p.path), url) };
       case "read": {
         const r = await v.read(p.path);
         if (r.entry.kind === "folder") throw new AgentError("invalid", `${p.path} is a folder: list it`);
+        // (a raster image, to an agent that said it takes one: exactly {entry, rev, image}, nothing more; an older
+        //  agent would pass that on as text, so it reads the file as before)
+        const image = this.images() ? imageOut(r.content, p.path) : null;
+        if (image) {
+          if (!Number.isSafeInteger(r.rev) || r.rev < 0) throw new AgentError("storage", `${p.path}: a revision in an unknown form`);
+          return { entry: entryOut(r.entry, url), rev: r.rev, image };
+        }
         // (a notebook's ref, for an edit by cell: the document read, so an edit never reaches another put at its path)
-        return { entry: entryOut(r.entry), rev: r.rev, content: contentOut(r.entry.kind, r.content, p.path), ...(this.edits() && r.entry.kind === "notebook" && typeof r.entry.ref === "string" ? { ref: r.entry.ref } : {}) };
+        return { entry: entryOut(r.entry, url), rev: r.rev, content: contentOut(r.entry.kind, r.content, p.path), ...(this.edits() && r.entry.kind === "notebook" && typeof r.entry.ref === "string" ? { ref: r.entry.ref } : {}) };
       }
       case "write": {
         // (an agent that edits notebooks by cell never rewrites one whole: that would drop its outputs, A12)
         if (this.edits() && /\.ipynb$/i.test(String(p.path))) throw new AgentError("invalid", `${p.path} is a notebook: change it with workspace_edit_notebook (by cell, its outputs kept), not a whole write`);
-        const r = await v.write(p.path, sized(p.content), p.base !== undefined ? { base: p.base } : {}); return changed({ entry: entryOut(r.entry), rev: r.rev }); }
-      case "create": return changed({ entry: entryOut(await v.create(p.path, { ...(p.content ? { content: sized(p.content) } : {}), ...(p.mode ? { mode: p.mode } : {}) })) });
+        const r = await v.write(p.path, sized(p.content), p.base !== undefined ? { base: p.base } : {}); return changed({ entry: entryOut(r.entry, url), rev: r.rev }); }
+      case "create": { const e = await v.create(p.path, { ...(p.content ? { content: sized(p.content) } : {}), ...(p.mode ? { mode: p.mode } : {}) }); made?.(e); return changed({ entry: entryOut(e, url) }); }
       case "mkdir": return changed({ entry: entryOut(await v.mkdir(p.path)) });
-      case "rename": return changed({ entry: entryOut(await v.rename(p.from, p.to)) });
-      case "duplicate": return changed({ entry: entryOut(await v.duplicate(p.path, p.to)) });
+      case "rename": return changed({ entry: entryOut(await v.rename(p.from, p.to), url) });
+      case "duplicate": return changed({ entry: entryOut(await v.duplicate(p.path, p.to), url) });
       case "remove": return changed({ entry: entryOut(await v.remove(p.path)) });
       // (only the very entry authorized: Workspace.restore checks it holding its lock, so one put in its place meanwhile isn't restored)
-      case "restore": if (!expect) throw new AgentError("invalid", "restore without its authorized entry"); return changed({ entry: entryOut(await v.restore(p.path, expect)) });
+      case "restore": if (!expect) throw new AgentError("invalid", "restore without its authorized entry"); return changed({ entry: entryOut(await v.restore(p.path, expect), url) });
       case "history": {
         const all = await v.history(p.path);
         const from = p.cursor === undefined ? 0 : /^[0-9]{1,9}$/.test(p.cursor) ? Number(p.cursor) : NaN;
@@ -634,14 +840,16 @@ export class AgentPairing {
 export const RELOAD_KEY = "sb-agent-reload-v1";
 // (the newest pairing's number on this page: only the newest writes or drops the record, A14 r3.1 §3)
 let pairingGen = 0;
-/** At most this long between the page leaving (pagehide) and its reload for the restore to be silent (R1-b). */
-export const RELOAD_FRESH_MS = 30_000;
+/** A return (a reload, or a navigation back to the same page in this browsing context) is silent until the grant's own
+ * end, never extended (ruled Nov 22 2026, #1620, SEC's bound); a grant with no end (while the page is open) for at most
+ * this long after the page left (R1-b; A5 item 2, ruled Nov 20 2026: one constant). */
+export const RETURN_MS = 10 * 60 * 1000;
 const RELOAD_MAX = 4096;
 
 export type ReloadRecord = {
   v: 1; pairingId: string; session: string; port: number;
   agent: { name: string; client: string };
-  grant: { folders: string[]; write: boolean; run?: boolean; expires: number | null; id?: string };
+  grant: { folders: string[]; write: boolean; run?: boolean; delegate?: boolean; expires: number | null; id?: string };
   workspace: string; page: string; leftAt?: number;
 };
 /** The page a record belongs to: its workspace's store and its own address (R1-d). */
@@ -669,9 +877,10 @@ export function parseReloadRecord(raw: string | null): ReloadRecord | null {
   const a = v.agent, g = v.grant;
   if (!a || typeof a !== "object" || Array.isArray(a) || !keysAre(a, ["name", "client"])) return null;
   if (!isStr(a.name, 80) || typeof a.client !== "string" || a.client.length > 40) return null;
-  if (!g || typeof g !== "object" || Array.isArray(g) || !keysAre(g, ["folders", "write", "expires"], ["id", "run"])) return null;
-  // ("May run code": present only as true; a record without it is a grant that may not run code)
+  if (!g || typeof g !== "object" || Array.isArray(g) || !keysAre(g, ["folders", "write", "expires"], ["id", "run", "delegate"])) return null;
+  // ("May run code", and the Delegate switch on: present only as true; a record without one is a grant without it)
   if ("run" in g && g.run !== true) return null;
+  if ("delegate" in g && g.delegate !== true) return null;
   if ("id" in g && !(typeof g.id === "string" && GRANT_ID.test(g.id))) return null;
   if (!Array.isArray(g.folders) || g.folders.length < 1 || g.folders.length > 64 || !g.folders.every((f: unknown) => isStr(f, 512))) return null;
   if (typeof g.write !== "boolean") return null;
@@ -685,15 +894,24 @@ export function parseReloadRecord(raw: string | null): ReloadRecord | null {
 }
 
 /** What a page may do with a parsed record:
- *  - "silent": reconnect now, with no gesture (a reload, fresh, same scope, not expired: R1-a..e);
- *  - "click": keep it in memory for one [Reconnect] (the same scope, not expired; only the reload or freshness failed);
- *  - "discard": never usable (another workspace or page, or the grant is over). */
+ *  - "silent": reconnect now, with no gesture: a reload, or a navigation back to the same page in this browsing context
+ *    (leaving for Files and coming back), until the grant's own end (one with no end: within RETURN_MS of leaving), the
+ *    same scope (R1-a..e; A5 item 2, design r3, SEC-cleared Nov 20 2026; the grant's window, ruled Nov 22 2026). A copy
+ *    of the record in a duplicated, restored or window.open tab is taken once there too: the agent's one live page
+ *    decides between them;
+ *  - "click": keep it in memory for one [Reconnect]: a reload, the same scope, not expired, only past that window;
+ *  - "discard": never usable: another workspace or page, the grant over, a record with no leftAt (as a copy taken
+ *    while its page lived has) or one in the future, any other navigation type, or a navigation back past that window:
+ *    those need a new Allow unless the grant was remembered. */
 export function reloadDecision(r: ReloadRecord, o: { scope: ReloadScope; navType: string; now: number }): "silent" | "click" | "discard" {
   if (r.workspace !== o.scope.workspace || r.page !== o.scope.page) return "discard";
   if (r.grant.expires !== null && !(o.now < r.grant.expires)) return "discard";
-  if (o.navType !== "reload" || r.leftAt === undefined) return "click";
+  if (r.leftAt === undefined || !(o.navType === "reload" || o.navType === "navigate" || o.navType === "back_forward")) return "discard";
   const age = o.now - r.leftAt;
-  return age >= 0 && age <= RELOAD_FRESH_MS ? "silent" : "click";
+  // (a leftAt in the future is no time the page left: never used, SEC's bound)
+  if (!(age >= 0)) return "discard";
+  if (r.grant.expires !== null || age <= RETURN_MS) return "silent";
+  return o.navType === "reload" ? "click" : "discard";
 }
 
 /** What taking the record found (S1): "none", no storage or no entry (genuinely absent); "bad", an entry this page
@@ -702,11 +920,17 @@ export function reloadDecision(r: ReloadRecord, o: { scope: ReloadScope; navType
 export type ReloadTake = { kind: "none" } | { kind: "bad" } | { kind: "ok"; record: ReloadRecord };
 /** The record, taken: read, removed at once (before any attempt, R1-c, this page only), then parsed. Fails closed: an
  * entry that can't be read or removed is "bad", never used. */
-export function takeReloadRecord(s: ReloadStorage | null): ReloadTake {
+export function takeReloadRecord(s: ReloadStorage | null, scope?: ReloadScope): ReloadTake {
   if (!s) return { kind: "none" };
   let raw: string | null = null;
   try { raw = s.getItem(RELOAD_KEY); } catch { return { kind: "bad" }; }
   if (raw === null) return { kind: "none" };
+  // (another page's record (the Agents page's, while the person is on a board): left alone, for that page to take when
+  //  they go back to it; A5. This page's own, or one that can't be read: taken, as before)
+  if (scope) {
+    const r = parseReloadRecord(raw);
+    if (r && r.page !== scope.page) return { kind: "none" };
+  }
   try { s.removeItem(RELOAD_KEY); } catch { return { kind: "bad" }; }
   const record = parseReloadRecord(raw);
   return record ? { kind: "ok", record } : { kind: "bad" };
@@ -720,10 +944,12 @@ export function putReloadRecord(s: ReloadStorage | null, r: ReloadRecord | null)
   const fits = raw !== null && parseReloadRecord(raw) !== null;
   try { if (fits) s.setItem(RELOAD_KEY, raw!); else s.removeItem(RELOAD_KEY); } catch { /* (no storage: no restore) */ }
 }
-/** On pagehide: the time the page left, on the record it holds (if it holds a valid one). */
-export function markReloadLeft(s: ReloadStorage | null, now: number): void {
+/** On pagehide: the time the page left, on the record it holds: a valid record of this page's own scope (workspace and
+ * page) only. Another page's record (the Agents page's, while the person is on a board) is left byte for byte as it
+ * is: a page passed through on the way never renews another page's window (A5). */
+export function markReloadLeft(s: ReloadStorage | null, now: number, scope: ReloadScope): void {
   if (!s) return;
   let r: ReloadRecord | null = null;
   try { r = parseReloadRecord(s.getItem(RELOAD_KEY)); } catch { return; }
-  if (r) putReloadRecord(s, { ...r, leftAt: now });
+  if (r && r.workspace === scope.workspace && r.page === scope.page) putReloadRecord(s, { ...r, leftAt: now });
 }

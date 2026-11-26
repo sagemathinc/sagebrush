@@ -12,7 +12,7 @@
 //   node web/cloud/remote/test-remote-browser.mjs
 import { spawn, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -112,9 +112,18 @@ try {
 } catch (e) {
   ok(false, "threw: " + (e?.stack ?? e));
 } finally {
-  chrome?.kill();
+  // (the profile is removed only once Chrome has exited: it writes there on its way out, and a profile removed under it
+  // fails ENOTEMPTY; SIGKILL if SIGTERM hasn't ended it in 5 s)
+  if (chrome && chrome.exitCode === null && chrome.signalCode === null) {
+    const gone = new Promise((r) => chrome.once("exit", r));
+    chrome.kill();
+    if (!(await Promise.race([gone.then(() => true), sleep(5000).then(() => false)]))) { chrome.kill("SIGKILL"); await gone; }
+  }
   await mf.dispose();
   rmSync(profile, { recursive: true, force: true });
+  // (checked a second after the removal: a Chrome still exiting would write the profile again by then)
+  await sleep(1000);
+  ok(!existsSync(profile), "the browser profile is gone after teardown (nothing wrote to it after Chrome exited)");
 }
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);

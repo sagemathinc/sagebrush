@@ -5,7 +5,8 @@ gen-doc-vectors.py; doc-claim-vectors.json) and core's reference server (referen
 
 ## doc-vectors.json's `refusals`: comparing a refusal with a case
 
-Each case of `refusals` gives a refusal's `code` and its `detail`: the refusal's own fields (`why`, `limit`,
+Each case of `refusals` names the request (`for`), the situation (`when`) and when it may be sent again (`again`),
+and in `error` gives a refusal's `code` and, if it has one, its `detail`: the refusal's own fields (`why`, `limit`,
 `retry_after_*`, `latest_at_seq`).
 
 On a document socket a refusal arrives as `{t: "error", req, code, detail: {message, ...the refusal's own fields}}`, as
@@ -59,7 +60,7 @@ The reference server has no caches, so a floor holds at once. Its `/api/sync/v1/
 (`set_at`, `d1now`), as D1's `unixepoch('subsec')` does.
 
 **The old front against it (PR 0b).** `CASES=floors OLD_FRONT=<dir> bun web/workspace/test-sync-client-ref.mjs` runs the
-real page of the last build before these codes, 98a9f74fb, against this server's floors (web/workspace/sync-floor-cases.js:
-rows P0-0, P0-pos, P0-a, P0-b and P0-c). `<dir>` is a clean detached checkout of 98a9f74fb (with a `node_modules` link);
+real page of the last build before these codes, c1df54b2e, against this server's floors (web/workspace/sync-floor-cases.js:
+rows P0-0, P0-pos, P0-a, P0-b and P0-c). `<dir>` is a clean detached checkout of c1df54b2e (with a `node_modules` link);
 the runner refuses it unless every file of the page's bundle is that commit's, byte for byte, and prints one `ROW` line
 per row. These rows must pass before any deployed server may refuse with `stale_build`, or any floor is set above 0.

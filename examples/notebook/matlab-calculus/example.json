@@ -1,0 +1,16 @@
+{
+ "title": "Calculus and vector fields (MATLAB)",
+ "summary": "Adaptive quadrature, numerical derivatives, roots and minima, and the gradient, divergence and curl of fields on a grid.",
+ "tags": [
+  "calculus",
+  "plots"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "matlab",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

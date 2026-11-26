@@ -16,9 +16,14 @@
 //   6. one browser offline (its network emulated off, and cut at the front): it says "Offline: …"; an edit made
 //      there reaches the other once it is back online, and it says "Synced" again;
 //   7, 8. second tabs (regression guards of today's behaviour): a second tab of the other browser opens a notebook
-//      still arriving once its history is here; a notebook made in a second tab of the first reaches the other.
-// Before the reload (step 2), whether a notebook typed in one browser reaches the other is said (OBS), not checked:
-// the switch is decided at a page's load.  Every wait is bounded; a watchdog ends an overrunning run.
+//      still arriving once its history is here; a notebook made in a second tab of the first reaches the other;
+//   9. the LaTeX page: an edit typed, and a notebook clicked in Files at once (within the editor's save delay): the
+//      edit is in the file on the first browser after the switch, and reaches the other.
+//  10. a notebook duplicated in one, never opened or typed in there, opens in the other with its cell; a burst of
+//      notebooks made at once: the walks after them are given only those, and one opens in the other; one made while
+//      a data file is written every 300 ms, and one renamed at once, each opens in the other.
+// Before the reload (step 2a), a notebook made and typed in one browser reaches the other: each page's notebook sync
+// turns on by itself once sync is on and its client runs.  Every wait is bounded; a watchdog ends an overrunning run.
 //   bun web/build.ts, then CHROME=chromium bun web/workspace/test-dev-sync-tryit.mjs
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -87,7 +92,7 @@ const front = Bun.serve({
       const h = new Headers();
       // (content-length too: the reference server checks a blob's PUT against it, as the site's server does; a Request
       // made from an ArrayBuffer carries none, sync-docs' finding on run 3)
-      for (const k of ["cookie", "content-type", "content-length", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
+      for (const k of ["cookie", "content-type", "content-length", "x-sync-account", "x-sync-generation", "x-sb-ct-sha256"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
       const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
       const r = await ref.fetch(new Request(ORIGIN + p + u.search, { method: req.method, headers: h, body }));
       const out = new Headers();
@@ -214,7 +219,10 @@ try {
   // own and unique, so this asserts nothing of how same-path collisions are named)
   const PRE = [["/PreSyncA1.ipynb", "pre_a1 = 11"], ["/PreSyncA2.ipynb", "pre_a2 = 22"]];
   for (const [p, code] of PRE) obs(`A makes ${p} before sync`, await A.ev(`${W}.create(${J(p)}, { content: { mode: "python", cells: [{ id: "c1", code: ${J(code)} }] } }).then((e) => e.path, (e) => "refused: " + (e?.message ?? e))`));
-  // ---- 2. sync turned on in each: Storage…, Turn on sync…, the confirm accepted
+  // ---- 2. sync turned on in each: Storage…, Turn on sync…, the confirm accepted; more than 20 s after the pages loaded
+  // (a page's notebook sync, decided at its load, would wait only that long for its sync client to start; turned on
+  // later, it still turns on, step 2a)
+  await sleep(22_000);
   for (const b of [A, B]) {
     check(await b.until(`!!document.querySelector("#wssidebar .fh button[aria-label=More]")`, 10_000), `${b.name}: the Files sidebar is shown`);
     await b.ev(`document.querySelector("#wssidebar .fh button[aria-label=More]").click()`);
@@ -227,10 +235,22 @@ try {
     check(on, `${b.name}: sync is on ("Turn off sync here" offered)`);
     obs(`${b.name}'s sync line after turning on`, await b.syncLine());
   }
-  // (before any reload: a notebook typed in A, and whether B gets it: said, not checked)
-  const pre = await A.ev(`${W}.create("/Before reload.ipynb", { mode: "python" }).then((e) => "made " + e.path, (e) => "refused: " + (e?.message ?? e))`);
-  obs("before the reload: A makes a notebook", pre);
-  if (pre.startsWith("made")) obs("before the reload: B lists A's new notebook", await B.until(row("/Before reload.ipynb"), 15_000));
+  // ---- 2a. before any reload: each page's notebook sync turns on by itself once sync is on and its client runs (it
+  // isn't decided only at the page's load), so a notebook made and typed in A reaches B
+  const nbsA = () => A.ev(`${W}.list("/", { recursive: true }).then((l) => l.filter((e) => e.kind === "notebook").map((e) => ({ path: e.path, ref: e.ref })))`);
+  // (the notebook File, New just made: a new one named Untitled, as File, New names it, not just the first new one:
+  // the other browser's own Welcome may reach this list through sync during the wait)
+  const madeNew = (l, before) => l.find((x) => /^\/Untitled( \(\d+\))?\.ipynb$/.test(x.path) && !before.some((y) => y.ref === x.ref))?.ref ?? null;
+  const nbPre = await nbsA();
+  await A.ev(`document.querySelector('[data-f="new"]').click()`);
+  let refPre = null;
+  for (let i = 0; i < 60 && !refPre; i++) { const l = await nbsA(); refPre = madeNew(l, nbPre); if (!refPre) await sleep(250); }
+  const typedPre = refPre ? await A.type(0, "before_reload = 1") : "no notebook";
+  await sleep(1500);
+  const pathPre = refPre ? (await nbsA()).find((x) => x.ref === refPre)?.path : null;
+  let reachedPre = false;
+  if (pathPre && (await B.until(row(pathPre), 20_000))) for (let i = 0; i < 20 && !reachedPre; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === ${J(pathPre)})?.click()`); reachedPre = await B.until(B.has("before_reload = 1"), 2000); }
+  check(typedPre === "typed" && !!pathPre && reachedPre, `before any reload: a notebook made and typed in A opens in B with its cell (within 40 s; ${J({ typedPre, pathPre, reachedPre, B: await B.codes() })})`);
   // ---- the reload the try-it script asks for
   for (const b of [A, B]) {
     check(await b.go(), `${b.name}: reloaded after turning sync on`);
@@ -243,7 +263,15 @@ try {
   const metaAt = (b, p) => b.ev(`[...document.querySelectorAll("#wssidebar .frow")].filter((r) => r.dataset.path === ${J(p)}).map((r) => r.querySelector(".m")?.textContent ?? "")`);
   const rowSays = (p, t) => `[...document.querySelectorAll("#wssidebar .frow")].some((r) => r.dataset.path === ${J(p)} && r.querySelector(".m")?.textContent === ${J(t)})`;
   check(await B.until(rowSays("/Welcome (2).ipynb", "(renamed)"), 30_000), `B: its own Welcome, placed at "Welcome (2).ipynb" by the server's index, says "(renamed)" (${J(await metaAt(B, "/Welcome (2).ipynb"))})`);
-  check(await B.until(rowSays("/Welcome.ipynb", "on another device"), 30_000), `B: A's Welcome, its content not here, says "on another device" (${J(await metaAt(B, "/Welcome.ipynb"))})`);
+  // (A's Welcome is listed in B; its content may reach B before this looks (notebook sync is on), so its row says "on
+  // another device" until then and nothing after: it is never "missing", as for B's in A below)
+  const rowOf = (p) => `[...document.querySelectorAll("#wssidebar .frow")].some((r) => r.dataset.path === ${J(p)})`;
+  check(await B.until(rowOf("/Welcome.ipynb"), 30_000), `B: A's Welcome is listed (${J(await metaAt(B, "/Welcome.ipynb"))})`);
+  await sleep(2000);
+  // (the folder's own row (data-sel), not a copy of it elsewhere in the sidebar: exactly one, there at this last look)
+  const folderMeta = (b, p) => b.ev(`(() => { const r = [...document.querySelectorAll("#wssidebar .frow[data-sel]")].filter((x) => x.dataset.path === ${J(p)}); return r.length === 1 ? { m: r[0].querySelector(".m")?.textContent ?? null } : { rows: r.length }; })()`);
+  const bWelcome = await folderMeta(B, "/Welcome.ipynb");
+  check(typeof bWelcome?.m === "string" && (bWelcome.m === "on another device" || bWelcome.m === ""), `B: A's Welcome is never "missing": its row says "on another device" while its content isn't here, nothing once it is (${J(bWelcome)}; all its rows: ${J(await metaAt(B, "/Welcome.ipynb"))})`);
   // (B's own Welcome was opened by its reload, so its synced history started and it reaches A: whether A's row says
   // "on another device" depends on that timing; it is never "missing")
   await sleep(2000);
@@ -280,7 +308,7 @@ try {
   // (the notebook page's File, New: a new notebook, opened here, typed into, then named SyncTest)
   await A.ev(`document.querySelector('[data-f="new"]').click()`);
   let ref3 = null;
-  for (let i = 0; i < 60 && !ref3; i++) { const l = await notebooks(); ref3 = l.find((x) => !nb1.some((y) => y.ref === x.ref))?.ref ?? null; if (!ref3) await sleep(250); }
+  for (let i = 0; i < 60 && !ref3; i++) { const l = await notebooks(); ref3 = madeNew(l, nb1); if (!ref3) await sleep(250); }
   check(!!ref3, `A: File, New makes a notebook with sync on (${J(await A.ev(`document.querySelector("#saved")?.textContent ?? ""`))})`);
   if (!ref3) throw new Error("no notebook to sync: File, New made none");
   check((await A.type(0, "x = 1")) === "typed", "A types x = 1");
@@ -360,6 +388,25 @@ try {
   obs("B back online: its edit reached A after (ms)", took);
   check(reached && took < 10_000, `B back online after 35 s offline: its edit reaches A within 10 s (${reached ? took + " ms" : "not within 45 s"})`);
   check(await B.until(`/^Synced/.test(document.querySelector("#wssidebar .fsync")?.textContent ?? "")`, 45_000), `…and B says Synced again (${J(await B.syncLine())})`);
+  // ---- 6b. both offline, B's page loaded while it couldn't reach the server (the front refuses its requests, as in an
+  // outage; then its network off too), an edit on each, both back: the page that couldn't ask whose session it has
+  // asks again by itself (no tab switch, no reload), and both end with both edits.  Before, it never synced until a
+  // tab switch or a reload, and the two differed for good.
+  for (const b of [A, B]) { cut.add(b.session); for (const ws of sockets) if (ws.data.session === b.session) ws.close(1001, "offline"); }
+  await A.offline(true);
+  check(await A.until(`/^Offline/.test(document.querySelector("#wssidebar .fsync")?.textContent ?? "")`, 30_000), `6b. A offline (${J(await A.syncLine())})`);
+  check(await B.go(), "6b. B reloaded while it can't reach the server");
+  await B.offline(true);
+  check(await B.until(B.has("x = offline"), 20_000), `6b. …B shows the notebook it had (${J(await B.codes())})`);
+  check((await A.type(0, "x = 6b_a")) === "typed" && (await B.type(1, "y = 6b_b")) === "typed", "6b. each types in a different cell while offline");
+  await sleep(3000);
+  for (const b of [A, B]) { cut.delete(b.session); await b.offline(false); }
+  const back6b = Date.now();
+  const met = await A.until(`${A.has("x = 6b_a")} && ${A.has("y = 6b_b")}`, 45_000) && await B.until(`${B.has("x = 6b_a")} && ${B.has("y = 6b_b")}`, 45_000);
+  const took6b = Date.now() - back6b;
+  obs("6b. both back: both had both edits after (ms)", took6b);
+  check(met && took6b < 10_000, `6b. both back online: both show both edits within 10 s, with no tab switch (${met ? took6b + " ms" : "not within 45 s"}; A ${J(await A.codes())}, B ${J(await B.codes())})`);
+  check(await B.until(`/^Synced/.test(document.querySelector("#wssidebar .fsync")?.textContent ?? "")`, 30_000), `6b. …and B says Synced (${J(await B.syncLine())})`);
   // ---- 7. a second tab of B (B's first tab holds the account connection) clicking a notebook still arriving: said,
   // then, with nothing more from A, opened once its history is here (a regression guard of today's behaviour:
   // sync-docs' N-2C3-2 asked whether a second tab gets its pull; it does)
@@ -370,7 +417,7 @@ try {
   const nb7 = await notebooks();
   await A.ev(`document.querySelector('[data-f="new"]').click()`);
   let ref7 = null;
-  for (let i = 0; i < 60 && !ref7; i++) { const l = await notebooks(); ref7 = l.find((x) => !nb7.some((y) => y.ref === x.ref))?.ref ?? null; if (!ref7) await sleep(250); }
+  for (let i = 0; i < 60 && !ref7; i++) { const l = await notebooks(); ref7 = madeNew(l, nb7); if (!ref7) await sleep(250); }
   check(!!ref7 && (await A.type(0, "w = 7")) === "typed", "A: another notebook, made with File, New and typed into");
   await sleep(1500);
   const path7 = (await notebooks()).find((x) => x.ref === ref7)?.path;
@@ -405,14 +452,94 @@ try {
   const nb8 = await notebooks();
   await A2.ev(`document.querySelector('[data-f="new"]').click()`);
   let ref8 = null;
-  for (let i = 0; i < 60 && !ref8; i++) { const l = await notebooks(); ref8 = l.find((x) => !nb8.some((y) => y.ref === x.ref))?.ref ?? null; if (!ref8) await sleep(250); }
+  for (let i = 0; i < 60 && !ref8; i++) { const l = await notebooks(); ref8 = madeNew(l, nb8); if (!ref8) await sleep(250); }
   const typed8 = ref8 ? await A2.type(0, "v = 8") : "no notebook";
   await sleep(1500);
   const path8 = ref8 ? (await notebooks()).find((x) => x.ref === ref8)?.path : null;
   let reached8 = false;
   if (path8) for (let i = 0; i < 15 && !reached8; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === ${J(path8)})?.click()`); reached8 = await B.until(B.has("v = 8"), 2000); }
   check(typed8 === "typed" && !!path8 && reached8, `a notebook made and typed in A's second tab opens in B with its cell (within 30 s; ${J({ typed8, path8, reached8, server: [...(ref.accounts?.get(ACCOUNT)?.docs?.keys() ?? [])].includes(ref8) })})`);
-  void pre;
+  // ---- 9. the LaTeX page: an edit typed, then at once (within its 800 ms save delay) a notebook clicked in Files, which
+  // leaves the page: the edit is written before it goes (the agents-ui audit: without that, it was in neither the file
+  // nor the other browser)
+  {
+    const TEX = "\\documentclass{article}\n\\begin{document}\nHello.\n\\end{document}\n";
+    const fid9 = await A.ev(`${W}.create("/Flush.tex", { content: ${J(TEX)} }).then((e) => e.fid ?? null, () => null)`);
+    check(!!fid9 && (await B.until(`${W}.read("/Flush.tex").then((r) => new TextDecoder().decode(r.content) === ${J(TEX)}).catch(() => false)`, 20_000)), `A makes /Flush.tex; B has its bytes (fid ${J(fid9)})`);
+    await A.send("Page.navigate", { url: ORIGIN + "/?tex=" + fid9 });
+    const up = await A.until(`(() => { const t = document.querySelector(".tex-page .tex-src"); return !!t && !t.readOnly && t.value.includes("Hello."); })()`, 45_000);
+    check(up && (await A.until(row(path3), 15_000)), `A: the LaTeX page opens /Flush.tex, editable, with the Files sidebar beside it`);
+    await A.ev(`(() => { const t = document.querySelector(".tex-page .tex-src"); t.focus(); t.setSelectionRange(t.value.length, t.value.length); return 1; })()`);
+    await A.send("Input.insertText", { text: "% A9tex" });
+    const clicked = await A.ev(`(() => { const r = [...document.querySelectorAll("#wssidebar .frow")].find((x) => x.dataset.path === ${J(path3)}); r?.click(); return !!r; })()`);
+    const left = clicked && (await A.until(`!document.querySelector(".tex-page") && document.querySelectorAll("#cells .cell").length > 0`, 30_000));
+    const onA = await A.ev(`${W}.read("/Flush.tex").then((r) => new TextDecoder().decode(r.content), (e) => "ERR " + (e?.message ?? e))`).catch((e) => "ERR " + e);
+    check(left && onA.includes("% A9tex"), `A: typed on the LaTeX page, a notebook clicked in Files at once: the notebook page is shown, and the edit is in the file (${J({ left, file: onA.slice(-40), dialogs: A.dialogs.splice(0) })})`);
+    check(await B.until(`${W}.read("/Flush.tex").then((r) => new TextDecoder().decode(r.content).includes("% A9tex")).catch(() => false)`, 20_000), "…and B has it within 20 s");
+  }
+  // ---- 10. a notebook made in A without being opened or typed in (Duplicate, as an upload or an agent's create makes
+  // one): A's page starts its synced history a moment after it is made, so B opens it with its cell
+  // (B's own walk, from here, by identity: the notebooks it hears of from the server aren't its to walk, step 10e)
+  await B.ev(`(window.__walkB10 = window.sagebrush?.startAll ?? null, 1)`);
+  const dup9 = await A.ev(`${W}.duplicate(${J(path7)}, "/dup9.ipynb").then((e) => e.path)`);
+  check(dup9 === "/dup9.ipynb", `A duplicates ${path7} without opening it (${J(dup9)})`);
+  check(await B.until(row("/dup9.ipynb"), 20_000), "B lists A's duplicate");
+  let reached9 = false;
+  for (let i = 0; i < 15 && !reached9; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/dup9.ipynb")?.click()`); reached9 = await B.until(B.has("w = 7"), 2000); }
+  check(reached9, `a notebook duplicated in A, never opened there, opens in B with its cell (within 30 s; ${J(await B.codes())})`);
+  // ---- 10b. a burst of notebooks made in A at once (an agent's creates), never opened there: each walk after them is
+  // given only notebooks just made (at most the five), never every notebook of A's again, and B opens one of them with its cell
+  const lib = await A.ev(`${W}.list("/", { recursive: true }).then((l) => l.filter((e) => e.kind === "notebook").length)`);
+  // (both of A's tabs hear the creates (A2 from step 8): the walks of either are sampled)
+  const tabs9b = [A, A2];
+  // (both of A's tabs quiet first: no walk of theirs ended for 3 s, so a walk still running from before (A2's load walk,
+  // step 10's duplicate) isn't taken for one after the burst)
+  for (let still = 0, last = null, t = Date.now(); still < 3 && Date.now() - t < 60_000; await sleep(1000)) {
+    const now = JSON.stringify(await Promise.all(tabs9b.map((t) => t.ev(`JSON.stringify(window.sagebrush?.startAll ?? null)`))));
+    still = now === last ? still + 1 : 0;
+    last = now;
+  }
+  const before9b = await Promise.all(tabs9b.map((t) => t.ev(`JSON.stringify(window.sagebrush?.startAll ?? null)`)));
+  const burst = await A.ev(`(async () => { const out = []; for (let i = 1; i <= 5; i++) out.push((await ${W}.create("/burst" + i + ".ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "burst = " + i }] } })).path); return out; })()`);
+  check(Array.isArray(burst) && burst.length === 5, `A makes five notebooks at once (${J(burst)})`);
+  const walks = new Set();
+  for (let t = Date.now(); Date.now() - t < 10_000; ) { for (let i = 0; i < tabs9b.length; i++) { const r = await tabs9b[i].ev(`JSON.stringify(window.sagebrush?.startAll ?? null)`); if (r !== before9b[i] && r !== "null") walks.add(i + ":" + r); } await sleep(200); }
+  // (listed: the candidate notebooks a walk was given, which the walk after a create is bounded by)
+  const listed = [...walks].map((x) => JSON.parse(x.slice(x.indexOf(":") + 1)).listed);
+  check(lib >= 10 && listed.length > 0 && listed.every((n) => n >= 1 && n < lib), `each walk after the burst was given only notebooks just made, never the whole library (listed ${J(listed)}; A has ${lib + 5} notebooks)`);
+  check(await B.until(row("/burst3.ipynb"), 20_000), "B lists A's burst");
+  let reachedB = false;
+  for (let i = 0; i < 15 && !reachedB; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/burst3.ipynb")?.click()`); reachedB = await B.until(B.has("burst = 3"), 2000); }
+  check(reachedB, `one of the burst opens in B with its cell (within 30 s; ${J(await B.codes())})`);
+  // ---- 10c. a notebook made in A while A keeps writing a data file every 300 ms (other changes): its walk isn't put off
+  // by them (the timer runs from the last create), and B opens it with its cell
+  const beforeQ = await Promise.all(tabs9b.map((t) => t.ev(`JSON.stringify(window.sagebrush?.startAll ?? null)`)));
+  await A.ev(`${W}.create("/noise.txt", { content: "0" }).then(() => 1, () => 1)`);
+  await A.ev(`${W}.create("/quiet.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "quiet = 1" }] } }).then((e) => e.path)`);
+  let walkedQ = false;
+  for (let i = 0; i < 20; i++) {
+    await A.ev(`${W}.write("/noise.txt", ${J("")} + Date.now()).then(() => 1, () => 1)`);
+    for (let k = 0; k < tabs9b.length && !walkedQ; k++) walkedQ = (await tabs9b[k].ev(`JSON.stringify(window.sagebrush?.startAll ?? null)`)) !== beforeQ[k];
+    await sleep(300);
+  }
+  check(walkedQ, "A writes a data file every 300 ms for 6 s after making a notebook: the notebook is walked meanwhile, not put off by the writes");
+  check(await B.until(row("/quiet.ipynb"), 20_000), "B lists /quiet.ipynb");
+  let reachedQ = false;
+  for (let i = 0; i < 15 && !reachedQ; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/quiet.ipynb")?.click()`); reachedQ = await B.until(B.has("quiet = 1"), 2000); }
+  check(reachedQ, `…and opens /quiet.ipynb with its cell (within 30 s; ${J(await B.codes())})`);
+  // ---- 10d. a notebook made in A and renamed at once (before the walk): followed by its id, it reaches B under its new
+  // name with its cell
+  const ren = await A.ev(`(async () => { const e = await ${W}.create("/ren.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "renamed = 1" }] } }); await ${W}.rename("/ren.ipynb", "/ren2.ipynb"); return (await ${W}.stat("/ren2.ipynb"))?.path ?? null; })()`);
+  check(ren === "/ren2.ipynb", `A makes /ren.ipynb and renames it to /ren2.ipynb at once (${J(ren)})`);
+  check(await B.until(row("/ren2.ipynb"), 20_000), "B lists /ren2.ipynb");
+  let reachedR = false;
+  for (let i = 0; i < 15 && !reachedR; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/ren2.ipynb")?.click()`); reachedR = await B.until(B.has("renamed = 1"), 2000); }
+  check(reachedR, `…and opens /ren2.ipynb, renamed before its walk, with its cell (within 30 s; ${J(await B.codes())})`);
+  // ---- 10e. B heard of all of those notebooks from the server (creates applied from it, each with its ref): B walks
+  // none of them (no walk at all since step 10: its result is the same object), so a device's first pull of a large
+  // library doesn't send its every notebook through a walk
+  await sleep(2500);
+  check(await B.ev(`window.sagebrush?.startAll === window.__walkB10`), "B, which only heard of A's new notebooks from the server, walks none of them");
   for (const b of browsers) for (const e of b.errors) fails.push(`${b.name}: page error: ${e}`);
 } catch (e) {
   fails.push("threw: " + String(e?.stack ?? e).slice(0, 600));

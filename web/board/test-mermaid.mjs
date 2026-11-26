@@ -52,7 +52,8 @@ const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebugge
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map();
 ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
-const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+// (an answer that never comes, the page or the browser gone, fails by name instead of leaving node nothing to wait for)
+const send = (method, params = {}, ms = 60000) => new Promise((resolve, reject) => { const id = ++n, timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method}: no answer within ${ms / 1000} s`)); }, ms); waiting.set(id, (r) => { clearTimeout(timer); resolve(r); }); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 500)); return r.result.value; };
 await send("Page.navigate", { url });
 for (let i = 0; i < 100 && !(await ev("!!window.ready").catch(() => false)); i++) await sleep(100);

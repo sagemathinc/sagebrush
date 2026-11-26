@@ -8,7 +8,7 @@ Apache-2.0. You don't need Sage, PARI or FLINT, or a C compiler; the
 wheels cover Linux, macOS and Windows.
 
 ```sh
-pip install sagebrush-mcp        # or: uvx sagebrush-mcp
+pip install sagebrush-mcp        # or: uvx sagebrush-mcp@latest
 ```
 
 **Claude Code:** `claude mcp add sagebrush -- sagebrush-mcp`
@@ -19,7 +19,7 @@ pip install sagebrush-mcp        # or: uvx sagebrush-mcp
 { "mcpServers": { "sagebrush": { "command": "sagebrush-mcp" } } }
 ```
 
-(`uvx sagebrush-mcp` as the command works without installing anything first.)
+(`uvx sagebrush-mcp@latest` as the command works without installing anything first, and uv checks for a newer release each time it starts.)
 
 ## Tools
 
@@ -29,7 +29,13 @@ pip install sagebrush-mcp        # or: uvx sagebrush-mcp
   and plots come back as SVG.
 - `python`: the same session, as plain Python.
 - `factor`, `number_field`, `newforms`: shortcuts for common questions.
-- `guide`: what is implemented. `reset`: clear the session.
+- `guide`: what is implemented. `search_docs`: search the Sage library's
+  documentation. `reset`: clear the session.
+- `run_status`, `run_result`, `run_cancel`, `run_list`, `run_keep`: runs
+  that outlast a call.
+- `workspace_connect`, then the `workspace_*`, `chat_*` and
+  `latex_comments_*` tools: the person's Sagebrush workspace, its chat panel
+  and comments on a `.tex`, through the page they pair.
 
 What the session covers:
 - **Integers:** factoring (ECM), primality.
@@ -43,12 +49,14 @@ What the session covers:
 - **Elliptic curves:** conductors, ranks, a_p.
 - **Plots.**
 
-The results agree with Sage. The test suite compares 3,500 lines of
-output with Sage itself.
+The results agree with Sage. The test suite, run under CPython, compares
+more than 4,000 lines of output with Sage itself.
 
-Each computation has a time limit (`timeout`, default 60 s). When it
-expires, the computation is interrupted and the session keeps its
-variables.
+A `sage` or `python` call waits up to `wait` seconds (60 by default). If
+the computation hasn't ended by then, the call returns a ticket and the
+computation keeps running: `run_result` waits for it, and `run_cancel`
+interrupts it (the session keeps its variables). Only a `run_deadline` you
+give, or a cancel, stops it. `timeout` is the old name of `wait`.
 
 This package is a thin entry point: the server is `sagebrush.mcp_server` in
 the [`sagebrush`](https://pypi.org/project/sagebrush/) package, so `pip

@@ -20,7 +20,11 @@ const hooks: {
   /** a rename, as one change of every path it moves (confinement phase 2: the page admits it whole or not at all);
    * unset, each path's change goes to `changed` */
   renamed: ((from: string, to: string, changes: [string, Uint8Array | null][]) => void) | null;
-} = { write: () => {}, changed: () => {}, read: () => {}, refused: () => {}, renamed: null };
+  /** a change refused as outside what this document may change: the person asked while the run waits (web/worker.ts);
+   * "allowed" once a new policy covering it is adopted, "denied" (asked, and not allowed: no other prompt), or
+   * "unavailable" (no waiting here: the refusal goes on as `refused` says) */
+  ask: ((path: string, what: string) => "allowed" | "denied" | "unavailable") | null;
+} = { write: () => {}, changed: () => {}, read: () => {}, refused: () => {}, renamed: null, ask: null };
 export const __hooks = hooks;
 
 // What this document may change (the page's policy, web/notebook/permissions.js; confinement phase 2, write trees):
@@ -32,7 +36,7 @@ export const __hooks = hooks;
 export type Refusal = "refused" | "changed";
 let allowed: (path: string) => true | Refusal = () => true;
 export function setWritable(f: (path: string) => true | Refusal) { allowed = f; }
-export const NOT_WRITABLE = "this notebook isn't allowed to change this file: allow its folder when the bar asks, or in File > Permissions…, then run it again";
+export const NOT_WRITABLE = "this notebook isn't allowed to change this file: allow its folder when Sagebrush asks, or in File > Permissions…, then run the cell again";
 export const PERMS_CHANGED = "this notebook's permissions changed while it ran: run it again";
 /** Scratch: /tmp and /$pyjs and what is below them, by path segment (/tmpfile and /tmp2 are ordinary paths). */
 export const scratch = (r: string) => r === "/tmp" || r.startsWith("/tmp/") || r === "/$pyjs" || r.startsWith("/$pyjs/");
@@ -40,7 +44,11 @@ function mayChange(r: string, what: string) {
   if (scratch(r)) return;
   const ok = allowed(r);
   if (ok === true) return;
-  hooks.refused(r, what, ok);
+  // (outside what may be changed: asked while the run waits, where it can; allowed, the change goes ahead in this run,
+  // checked again against the policy just adopted; a change while the permissions are changing is never asked)
+  const asked = ok === "refused" && hooks.ask ? hooks.ask(r, what) : "unavailable";
+  if (asked === "allowed" && allowed(r) === true) return;
+  if (asked === "unavailable") hooks.refused(r, what, ok);
   // (named so the runtime's open() and os calls raise PermissionError with these words, src/runtime/file-once.ts)
   const e: any = new Error(ok === "changed" ? PERMS_CHANGED : NOT_WRITABLE);
   e.name = "PermissionDenied";
@@ -50,6 +58,7 @@ function mayChange(r: string, what: string) {
 }
 
 import { sha256Hex } from "../../src/runtime/sha256";
+import { gitBlobSha1 } from "../../src/runtime/sha1";
 
 // ------------------------------------------------------------------ the mediated mode (a Terminal command's worker)
 // PR 3a (b1) design r4 §3: in a worker that runs one Terminal command, every path outside the scratch trees (exactly
@@ -144,9 +153,11 @@ function liveWrite(h: LiveFd, data: Uint8Array): number {
   return data.length;
 }
 
+// (a mounted file is checked by one hash: a shared collection's SHA-256, or a GitHub listing's git blob id)
 interface Remote {
   url: string;
-  sha256: string;
+  sha256?: string;
+  gitSha1?: string;
   size: number;
 }
 interface Entry {
@@ -250,13 +261,18 @@ export function load(entries: [string, Uint8Array, string?][]) {
     place(r, { data: new Uint8Array(data), mtime: Date.now(), path: r, origin: typeof tok === "string" ? tok : "s:" + String(p) });
   }
 }
-// A shared collection's files: [path, {url, sha256, size}], fetched when read.
+// A shared collection's files: [path, {url, sha256, size}], fetched when read; or a GitHub repository's, each with its
+// git blob id in place of the SHA-256 (web/gh). One without either hash isn't mounted: nothing is read unchecked.
+const HEX = (n: number) => new RegExp(`^[0-9a-f]{${n}}$`);
 export function mount(entries: [string, Remote][]) {
   if (med !== null) throw new Error("a shared collection can't be mounted in a Terminal command");
   for (const [p, remote] of entries) {
+    const sha256 = typeof remote.sha256 === "string" && HEX(64).test(remote.sha256) ? remote.sha256 : undefined;
+    const gitSha1 = !sha256 && typeof remote.gitSha1 === "string" && HEX(40).test(remote.gitSha1) ? remote.gitSha1 : undefined;
+    if (!sha256 && !gitSha1) continue;
     const r = resolve(p);
     ensureDirs(r);
-    place(r, { data: new Uint8Array(0), mtime: Date.now(), remote: { url: String(remote.url), sha256: String(remote.sha256), size: Number(remote.size) }, path: r });
+    place(r, { data: new Uint8Array(0), mtime: Date.now(), remote: { url: String(remote.url), ...(sha256 ? { sha256 } : { gitSha1 }), size: Number(remote.size) }, path: r });
   }
 }
 // (synchronously: Python's open() is synchronous, and a worker may block)
@@ -283,7 +299,7 @@ function fetchRemote(path: string, m: Remote): Uint8Array {
     if (x.status !== 200) fail("EIO", -5, `fetch (HTTP ${x.status})`, path);
     data = new Uint8Array(x.response as ArrayBuffer);
   }
-  if (data.length !== m.size || sha256Hex(data) !== m.sha256) fail("EIO", -5, "fetch (the file is not the one shared: wrong SHA-256)", path);
+  if (data.length !== m.size || (m.sha256 ? sha256Hex(data) !== m.sha256 : !m.gitSha1 || gitBlobSha1(data) !== m.gitSha1)) fail("EIO", -5, `fetch (the file is not the one shared: wrong ${m.sha256 ? "SHA-256" : "git blob id"})`, path);
   return data;
 }
 function contents(r: string, f: Entry): Uint8Array {
