@@ -23,6 +23,13 @@
 !! builtins.ValueError: Integer column has NA values in column 0
 == dtype-float-text
 !! builtins.ValueError: could not convert string to float: 'x'
+== dtype-datetime
+!! builtins.TypeError: the dtype datetime64[us] is not supported for parsing, pass this column using parse_dates instead
+== dtype-datetime-all
+!! builtins.TypeError: the dtype datetime64[us] is not supported for parsing, pass this column using parse_dates instead
+== dtype-other-key-ignored
+   a  b
+0  1  2
 == nrows-negative
 !! builtins.ValueError: 'nrows' must be an integer >=0
 == names-duplicate

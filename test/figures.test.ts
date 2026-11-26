@@ -79,10 +79,14 @@ const exited = (p: any) => new Promise<[number | null, string | null]>((resolve)
 test("figures of a process a signal ends: the prompt removes its own; a script's go with the next run, and the script still dies at once (HARD-191-1)", async () => {
   const { spawn } = require("node:child_process");
   const { dirname } = require("node:path");
+  // (a temporary directory of the test's own, TMPDIR: in a shared one, the sweep's bounds, HARD-260-1, can stop
+  // it before it reaches this test's directory, at a busy host's 100000th entry or after 8 other removals)
+  const env = { ...process.env, TMPDIR: mkdtempSync(join(dir, "tmp-")) };
+  const runHere = (args: string[]) => spawnSync(process.execPath, [cli, ...args], { encoding: "utf8", cwd: dir, env });
   // the prompt: removed on SIGTERM, and it still ends by the signal
   // (-i: the prompt after the script, its input from a pipe kept open)
   writeFileSync(join(dir, "plot.py"), PLOT);
-  const repl = spawn(process.execPath, [cli, "-i", "plot.py"], { cwd: dir, stdio: ["pipe", "pipe", "pipe"] });
+  const repl = spawn(process.execPath, [cli, "-i", "plot.py"], { cwd: dir, env, stdio: ["pipe", "pipe", "pipe"] });
   // (the prompt itself: until it is up this is still the script, whose
   // signals keep their default action)
   const m = await waitFor(repl, /Saved (\S+\.svg)[\s\S]*>>> $/);
@@ -93,7 +97,7 @@ test("figures of a process a signal ends: the prompt removes its own; a script's
   assert.ok(!existsSync(dirname(m[1])), m[1]);
   // a script busy computing: SIGTERM ends it at once (no handler to wait for it); its directory is left
   writeFileSync(join(dir, "busy.py"), PLOT + "print('busy', flush=True)\nwhile True:\n    pass\n");
-  const busy = spawn(process.execPath, [cli, "busy.py"], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+  const busy = spawn(process.execPath, [cli, "busy.py"], { cwd: dir, env, stdio: ["ignore", "pipe", "pipe"] });
   const b = await waitFor(busy, /Saved (\S+\.svg)[\s\S]*busy\n/);
   const bdone = exited(busy), t0 = Date.now();
   busy.kill("SIGTERM");
@@ -101,12 +105,12 @@ test("figures of a process a signal ends: the prompt removes its own; a script's
   assert.ok(Date.now() - t0 < 5000);
   assert.ok(existsSync(dirname(b[1])));
   // the next sagebrush that shows a figure removes it, an hour later (its process is gone)
-  let r = run(["plot.py"]);
+  let r = runHere(["plot.py"]);
   assert.equal(r.status, 0, r.stderr);
   assert.ok(existsSync(dirname(b[1])), b[1]);
   const old = new Date(Date.now() - 2 * 3600e3);
   utimesSync(dirname(b[1]), old, old);
-  r = run(["plot.py"]);
+  r = runHere(["plot.py"]);
   assert.equal(r.status, 0, r.stderr);
   assert.ok(!existsSync(dirname(b[1])), b[1]);
 });

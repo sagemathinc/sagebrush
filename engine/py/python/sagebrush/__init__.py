@@ -27,6 +27,37 @@ import importlib.util as _util
 import os as _os
 import sys as _sys
 
+
+# The Sage layer's modules (_sagelib/, the browser runtime's lib/ files) import this package by a private name,
+# _sagebrush_lib, which the browser runtime binds to its own copy whatever a user's sagebrush.py: here it is this
+# package itself, and each _sagebrush_lib.X is the module sagebrush.X, the same object, named sagebrush.X.
+class _PrivateName:
+    @staticmethod
+    def find_spec(name, path=None, target=None):
+        if not name.startswith("_sagebrush_lib."):
+            return None
+        import importlib
+        module = importlib.import_module(__name__ + name[len("_sagebrush_lib"):])
+        return _util.spec_from_loader(name, _SameModule(module))
+
+
+class _SameModule:
+    def __init__(self, module):
+        self.module = module
+        self.spec = module.__spec__
+
+    def create_module(self, spec):
+        return self.module
+
+    def exec_module(self, module):
+        # (the import system set the alias's spec on it: its own back, so it stays sagebrush.X in every way)
+        module.__spec__ = self.spec
+
+
+_sys.modules.setdefault("_sagebrush_lib", _sys.modules[__name__])
+if not any(f is _PrivateName for f in _sys.meta_path):
+    _sys.meta_path.insert(0, _PrivateName)
+
 from . import _compat  # noqa: E402,F401  (first: Python 3.10/3.11 get what the Sage layer uses of 3.12's)
 
 __all__ = ["ap", "capabilities", "limit", "linalg", "mf", "modsym", "nf", "poly", "progress_snapshot", "set_limits", "stop_points"]

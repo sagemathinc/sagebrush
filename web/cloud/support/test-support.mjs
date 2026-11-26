@@ -454,11 +454,22 @@ try {
     ok(!all.includes("reader@example.com") && !all.includes("203.0.113") && !all.includes("198.51.100") && !all.includes(KEY) && !all.includes(SECRET) && !all.includes("polars"), "no email, IP, key, secret or body text in any log line");
   }
 
-  // ---- the backstop
+  // ---- the backstop, on a fixed clock: its windows are UTC hours and days, so the rows below run with the backstop's
+  // clock fixed at the middle of an hour, and nothing (a slow run, a real boundary) moves it; the boundary itself is
+  // tested on purpose at its end, at fixed instants
   {
     reset();
     await db.prepare("DELETE FROM support_backstop").run();
-    const w = windows();
+    const HOUR = 3_600_000;
+    const mid = Math.floor(Date.now() / HOUR) * HOUR + HOUR / 2;
+    let fixed = null;
+    const setClock = async (at) => {
+      fixed = at;
+      ok((await (await dispatch(mf, `https://support-dev.sagebrush.space/__test/clock?at=${at ?? "real"}`)).json()).ok === true, "the backstop's clock set");
+    };
+    const now = () => fixed ?? Date.now();
+    await setClock(mid);
+    const w = windows(now());
     await setCount(w.hour, 598);
     const before = await counters();
     const burst = await Promise.all(Array.from({ length: 5 }, () => send()));
@@ -466,7 +477,7 @@ try {
     const after = await counters();
     ok(okCount === 2 && after[w.hour] === 600 && after[w.day] === (before[w.day] ?? 0) + 2, `concurrency at the hour boundary: exactly 2 of 5 admitted, both counters +2 (${okCount}; ${JSON.stringify(after)})`);
     const refused = burst.find((r) => r.status === 503);
-    const s = Math.floor(Date.now() / 1000);
+    const s = Math.floor(now() / 1000);
     const ra = Number(refused?.headers.get("retry-after"));
     ok(refused?.json?.error === "busy" && ra >= 1 && ra <= 3600 && Math.abs(ra - (3600 - (s % 3600))) <= 2, `an hour refusal: Retry-After to the next UTC hour (${ra})`);
     await pull();
@@ -484,7 +495,7 @@ try {
     const dc = await counters();
     ok(d1.status === 200 && d2.status === 503 && dc[w.day] === 3_000 && dc[w.hour] === 1, `day n = 2,999 admits exactly one; the refusal counts neither (${d1.status} ${d2.status} ${JSON.stringify(dc)})`);
     const dra = Number(d2.headers.get("retry-after"));
-    const ds = Math.floor(Date.now() / 1000);
+    const ds = Math.floor(now() / 1000);
     ok(dra >= 1 && dra <= 86_400 && Math.abs(dra - (86_400 - (ds % 86_400))) <= 2, `a day refusal: Retry-After to the next UTC day (${dra})`);
     // (both full: the refusal is the day's, with a Retry-After to the next UTC day; daybreak3 L1)
     await db.prepare("DELETE FROM support_backstop").run();
@@ -492,7 +503,7 @@ try {
     await setCount(w.day, 3_000);
     logs.length = 0;
     const both = await send();
-    const bs = Math.floor(Date.now() / 1000);
+    const bs = Math.floor(now() / 1000);
     const bra = Number(both.headers.get("retry-after"));
     await pull();
     ok(both.status === 503 && Math.abs(bra - (86_400 - (bs % 86_400))) <= 2, `hour and day both full: Retry-After to the next UTC day (${both.status} ${bra})`);
@@ -505,6 +516,19 @@ try {
     await send();
     ok((await counters())[w.hour] === 2, "no refund on a CoCalc failure");
     fake.mode = "ok";
+    // (the boundary, on purpose: a full hour one second before its end refuses with Retry-After 1; at the next hour's
+    // first millisecond a fresh row admits)
+    await db.prepare("DELETE FROM support_backstop").run();
+    const next = Math.floor(mid / HOUR) * HOUR + HOUR;
+    await setClock(next - 1000);
+    const late = windows(now());
+    await setCount(late.hour, 600);
+    const edge = await send();
+    ok(edge.status === 503 && Number(edge.headers.get("retry-after")) === 1, `a full hour, 1 s before its end: 503, Retry-After 1 (${edge.status} ${edge.headers.get("retry-after")})`);
+    await setClock(next);
+    const fresh = windows(now());
+    ok(fresh.hour !== late.hour && (await send()).status === 200 && (await counters())[fresh.hour] === 1, "at the next hour: a fresh row admits");
+    await setClock(null);
     // (the cron: old hour rows after 2 days, day rows after 30)
     const t = Math.floor(Date.now() / 1000);
     await db.prepare("INSERT INTO support_backstop (win, n, created) VALUES ('h:2000-01-01T00', 5, ?1), ('h:2000-01-02T00', 5, ?2), ('d:2000-01-01', 5, ?3), ('d:2000-01-02', 5, ?4)").bind(t - 3 * 86400, t - 86400, t - 31 * 86400, t - 3 * 86400).run();

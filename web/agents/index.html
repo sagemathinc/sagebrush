@@ -99,6 +99,7 @@
   .file-body .code-edit { width: 100%; min-height: 70vh; border: 0; outline: none; resize: none; padding: 14px 18px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: #fff; }
   .agent small { font-weight: 400; color: var(--muted); white-space: nowrap; }
   .top .link, .top #connect { white-space: nowrap; }
+  .top .top-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px 10px; min-width: 0; }
   /* (O-2: beside the pane the chat can be 420 px; the header stays one line there, and the agent's name, not the
      buttons, gives way, cut with an ellipsis; the narrow layout keeps wrapping. Where the chat is under 520 px (the
      header's content box under 488), "on your computer" is visually hidden, kept for screen readers, rather than cut
@@ -106,12 +107,15 @@
   @media (min-width: 901px) {
     .top { flex-wrap: nowrap; container: sb-top / inline-size; }
     .top #who { display: block; flex: 0 1 auto; }
+    /* (the actions give way too: when the name has given what it can, they wrap within their group, under each
+       other, rather than run past the chat into the pane, #1793) */
+    .top .top-actions { flex: 0 1 auto; }
     .top #who .conn { display: inline-block; vertical-align: middle; margin-right: 8px; }
     @container sb-top (max-width: 488px) {
       .top #who small { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
       /* (and the name whole: the empty spacer and its gap go, the link keeps the right side, the dot 2 px closer) */
       .top .spacer { display: none; }
-      .top #howto { margin-left: auto; }
+      .top .top-actions { margin-left: auto; }
       .top #who .conn { margin-right: 6px; }
     }
     /* (the Sagebrush wordmark gives way first: the chat list's header still says where you are) */
@@ -208,6 +212,8 @@
   #editor { max-height: 40vh; overflow-y: auto; min-height: 28px; }
   .composer .row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
   .composer .hint { font-size: 12px; color: var(--muted); margin-right: auto; }
+  /* (the keys, once there's something to send: the empty prompt shows none, #1806; the place is kept, nothing moves) */
+  .composer:not(.has-text) .hint { visibility: hidden; }
   .composer .hint kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--side); }
   #queued { font-size: 12px; color: var(--accent); }
   #send { background: var(--ink); color: #fff; border-color: var(--ink); }
@@ -261,7 +267,18 @@
   .pane-bar { padding: 6px 12px; font-size: 13px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--line); background: #fff7e6; }
   .pane-bar.refused, .pane-bar.gone { background: #fdecea; }
   .pane-bar button { font-size: 12px; }
-  .open-full { margin-left: 8px; font-size: 12px; }
+  /* (Open, at the head's right: the artifact's file on its own page, in a new tab, #1614) */
+  .pane-head .open-full { flex: none; margin: 0 4px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 7px; font-size: 13px; color: var(--ink); text-decoration: none; white-space: nowrap; }
+  .pane-head .open-full:hover { background: var(--side); }
+  .pane-head .open-full[hidden] { display: none; }
+  /* (a code or text file: View in colour, ✎ Edit with the colours behind the text typed; one font and padding for both
+     layers, so they line up, #1618) */
+  .file-path .mode-toggle { font: 12px system-ui, sans-serif; border: 1px solid var(--line); background: var(--card); border-radius: 6px; padding: 1px 8px; cursor: pointer; }
+  .file-path .mode-toggle[hidden] { display: none; }
+  .pane-body .file-body pre.code-view, .pane-body .code-wrap pre.code-hl, .pane-body .code-wrap .code-edit { margin: 0; padding: 14px 18px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; tab-size: 4; }
+  .code-wrap { position: relative; background: #fff; }
+  .pane-body .code-wrap pre.code-hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  .file-body .code-wrap .code-edit { position: relative; display: block; box-sizing: border-box; background: transparent; color: transparent; caret-color: var(--ink); }
   .board-made { display: flex; align-items: center; gap: 12px; padding: 16px 18px; flex-wrap: wrap; }
   .board-made .who { min-width: 0; overflow-wrap: anywhere; }
   .board-made .open-board { background: #3f6b35; color: #fff; font-weight: 600; border-radius: 6px; padding: 5px 18px; text-decoration: none; }
@@ -294,6 +311,31 @@
   .tabs { display: flex; gap: 2px; overflow-x: auto; margin-right: auto; }
   .tab { border: 0; background: none; padding: 5px 10px; border-radius: 7px; cursor: pointer; white-space: nowrap; font-size: 14px; }
   .tab.on { background: var(--card); box-shadow: 0 0 0 1px var(--line); font-weight: 550; }
+  /* (#1792: a tab and its ×, which shows on the tab shown and on hover; the pane's All artifacts) */
+  .tab-wrap { display: inline-flex; align-items: center; border-radius: 7px; flex: none; }
+  .tab-wrap.on { background: var(--card); box-shadow: 0 0 0 1px var(--line); }
+  .tab-wrap.on .tab.on { box-shadow: none; background: none; }
+  .tab-x { border: 0; background: none; cursor: pointer; padding: 2px 6px; margin-left: -6px; border-radius: 5px; color: var(--muted); font-size: 15px; line-height: 1; visibility: hidden; }
+  .tab-wrap:hover .tab-x, .tab-wrap.on .tab-x, .tab-wrap:focus-within .tab-x { visibility: visible; }
+  .tab-x:hover { background: var(--side); color: inherit; }
+  dialog.arts-dlg { border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; width: min(520px, 92vw); }
+  dialog.arts-dlg h3 { margin: 0 0 8px; font-size: 16px; }
+  dialog.arts-dlg .arts-list { display: flex; flex-direction: column; gap: 4px; max-height: 60vh; overflow-y: auto; }
+  dialog.arts-dlg .arts-item { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; text-align: left; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); cursor: pointer; font: inherit; color: inherit; }
+  dialog.arts-dlg .arts-item.on { border-color: var(--accent2, #4a6b49); }
+  dialog.arts-dlg .arts-item .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  dialog.arts-dlg .arts-item small { color: var(--muted); }
+  dialog.arts-dlg menu { display: flex; justify-content: flex-end; padding: 0; margin: 10px 0 0; }
+  /* (dictation, #1791: the mic by Send, red while listening, and what is being heard) */
+  #mic { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 4px 9px; cursor: pointer; font-size: 15px; line-height: 1; }
+  #mic.rec { background: #b3261e; border-color: #b3261e; color: #fff; animation: mic-pulse 1.2s ease-in-out infinite; }
+  @keyframes mic-pulse { 50% { opacity: .65; } }
+  @media (prefers-reduced-motion: reduce) { #mic.rec { animation: none; } }
+  .mic-ask { font-size: 12px; max-width: 46ch; }
+  .mic-ask button { font-size: 12px; }
+  .mic-status .link { border: 0; background: none; color: var(--accent2); text-decoration: underline; cursor: pointer; padding: 0; font: inherit; }
+  .mic-status { font-size: 12px; color: var(--muted); max-width: 52ch; max-height: 5.5em; overflow-y: auto; }
+  .mic-status .mic-heard { color: var(--ink); }
   .icon { border: 0; background: none; width: 30px; height: 30px; border-radius: 7px; cursor: pointer; font-size: 16px; color: var(--muted); }
   .icon:hover { background: var(--side); color: var(--ink); }
   /* (one scroller: the host shown; the body only holds it, so a host a pixel taller than its content never adds a
@@ -378,7 +420,6 @@
     <div id="threads"></div>
     <button id="files-big" type="button" title="Your files and notebooks, in the file browser">Files…</button>
     <button id="mirror-btn" type="button" hidden>Mirror…</button>
-    <div class="foot">Shift+Enter sends (queues while the agent works) · Alt+Enter queues · Ctrl+Enter posts a note</div>
     <div class="foot sbver" id="sbversion" hidden></div>
   </nav>
   <div class="sep" id="sep-side" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize the chat list" aria-controls="chats"></div>
@@ -388,17 +429,21 @@
       <a class="wordmark" href="/?home" title="About Sagebrush, and where to start">Sagebrush</a>
       <div class="agent" id="who"><span class="conn demo"></span>Claude <small>scripted demo</small></div>
       <span class="spacer"></span>
-      <button id="howto" class="link">Use your own Claude</button>
-      <button id="review" class="link" hidden>Review changes</button>
-      <button id="connect" hidden>Connect Claude</button>
+      <!-- (the header's actions, one group: beside the pane, when they don't all fit on the header's line, they wrap
+           within it, so none is ever drawn past the chat (#1793)) -->
+      <span class="top-actions">
+        <button id="howto" class="link">Use your own Claude</button>
+        <button id="review" class="link" hidden>Review changes</button>
+        <button id="connect" hidden>Connect Claude</button>
+      </span>
       <span id="who-status" class="vh" role="status"></span>
     </div>
     <div id="help" hidden>
       <b>Run this on your computer</b>, then open the link it prints. <a href="/agents/connect/">Learn more</a>
-      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.14.tgz</pre>
+      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.18.tgz</pre>
     </div>
     <div id="log">
-      <div id="log-tools" hidden><button id="mirror-copy" type="button" hidden></button><button id="copychat" type="button" title="This chat as Markdown: what you wrote, the agent's answers, a line for each thing it did, and links to its files">⧉ Copy chat</button></div>
+      <div id="log-tools" hidden><button id="mirror-copy" type="button" hidden></button><button id="all-arts-chat" type="button" hidden title="Everything this chat has made or opened">☰ Artifacts</button><button id="copychat" type="button" title="This chat as Markdown: what you wrote, the agent's answers, a line for each thing it did, and links to its files">⧉ Copy chat</button></div>
       <div id="empty">
         <h1>What should we work on?</h1>
         <div>Ask anything, or try one of these:</div>

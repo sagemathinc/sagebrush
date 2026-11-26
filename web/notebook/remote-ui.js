@@ -31,6 +31,7 @@ import { RemoteKernel } from "./remote-kernel.js";
 import { RemoteGate } from "./remote-gate.js";
 import { FakeGateway } from "./remote-fake.js";
 import { pairTunnel, parsePairLink, SYNTHETIC_BASE, TunnelNotSent } from "./pair-tunnel.js";
+import { relayTunnel } from "./relay-tunnel.js";
 
 // (the simulated gateway's address: https, as the client requires; never fetched, its fetch is the fake's)
 const PREVIEW_BASE = "https://compute.preview.invalid/api/compute/v1";
@@ -255,7 +256,7 @@ export class PreviewGateway extends FakeGateway {
  * NOT_CONNECTED), and retry() asks again.  Rejects only if it could not be
  * made at all (the caller closes `local` then).
  */
-export async function startPreview({ notebook, local, onStatus = () => {}, network = NO_NETWORK }) {
+export async function startPreview({ notebook, local, onStatus = () => {}, network = NO_NETWORK, words = (text) => statusText(text, network) }) {
   const gateway = new PreviewGateway(local, { network });
   let token = null;
   const client = await RemoteClient.create({ base: gateway.base, token: () => token, fetch: gateway.fetch });
@@ -268,7 +269,7 @@ export async function startPreview({ notebook, local, onStatus = () => {}, netwo
   const off = kernel.on("status", (text) => {
     const m = /^error: the remote kernel did not start: (.*)$/.exec(String(text));
     if (m) why = m[1];
-    onStatus(statusText(text, network));
+    onStatus(words(text));
   });
   // (a bind whose answer was lost, or refused, is asked again a few times)
   const bind = async () => {
@@ -419,6 +420,126 @@ export function pairedStarter({ WebSocket, helloMs, min } = {}) {
   };
 }
 
+// ------------------------------------------------------------- one of your computers, over the site's relay
+
+/** The words for a notebook running on one of your enrolled computers through the relay (`sagebrush remote`). */
+export const RELAYED = {
+  option: (name) => `Remote: ${name}`,
+  ready: (name) => `Remote: ${name} · ready`,
+  // (what running there means, said plainly; the page's About… dialog says the same)
+  help: "Runs this notebook's cells in Python on that computer, in the folder sagebrush remote started in, with that computer's files (this browser's files aren't copied there). A computer runs one notebook at a time: choosing it in another notebook or tab takes it over.",
+  // (the relay doesn't say why a leg ended, so a lost one names the likely cause without claiming it)
+  maybeReplaced: "another notebook or tab may have chosen this computer",
+};
+
+/** The status line's text for a relayed kernel's status, on the computer `name`. */
+export function relayedStatusText(name, text) {
+  const t = String(text ?? "");
+  // (ready says only that: the kernel's counts and round trips are for debugging, not the page)
+  return /^ready \(remote\)/.test(t) ? RELAYED.ready(name) : `${RELAYED.option(name)} · ${t}`;
+}
+
+/**
+ * The relayed runner's start, for remoteSwitch (deps.start): the kernel of one of your enrolled computers, through
+ * the relay's kernel page leg (relay-tunnel.js).  `answer` is the picker's {remoteId, name}; without one (Retry,
+ * Reconnect) it opens the last computer's leg again.  No code and no session: the site's session and the account's
+ * enrollment of that computer are what the relay checks, and the runner pairs with this page's key.  Resolves as
+ * pairedStarter does: {kernel, failed, retry(), close()}.  `legUrl(remoteId)`: the leg's URL (pageLegUrl);
+ * `WebSocket`, `helloMs`, `origin`: tests.
+ */
+export function relayedStarter({ legUrl, WebSocket, helloMs, origin } = {}) {
+  let last = null; // {remoteId, name}: the computer this page last chose
+  return async function startRelayed({ notebook, answer, onStatus = () => {}, onLost = () => {} }) {
+    if (answer) last = { remoteId: answer.remoteId, name: answer.name };
+    const target = last;
+    let tunnel = null;
+    let closed = false;
+    const client = await RemoteClient.create({
+      base: SYNTHETIC_BASE,
+      token: () => (tunnel ? tunnel.tokenSource() : Promise.reject(new Error("your computer isn't connected"))),
+      fetch: (url, init) => {
+        if (!tunnel) throw new TunnelNotSent("your computer isn't connected");
+        return tunnel.fetch(url, init);
+      },
+    });
+    const kernel = new RemoteKernel({ client, notebook: String(notebook ?? "notebook"), requireGate: true });
+    kernel.paired = true;
+    kernel.relayed = target?.name ?? null;
+    let why = "";
+    const off = kernel.on("status", (text) => {
+      const m = /^error: the remote kernel did not start: (.*)$/.exec(String(text));
+      if (m) why = m[1];
+      onStatus(relayedStatusText(target?.name ?? "your computer", text));
+    });
+    const open = async () => {
+      if (!target) return "choose one of your computers";
+      r.hint = null;
+      try {
+        tunnel = await relayTunnel({
+          url: legUrl(target.remoteId), jwk: client.jwk, jkt: client.jkt, WebSocket, origin, timeoutMs: helloMs,
+          // (the runner keeps one kernel page: a newer one replaces this one, and this leg just ends)
+          onClose: (w) => { tunnel = null; if (!closed) onLost(`${w}; ${RELAYED.maybeReplaced}`); },
+        });
+      } catch (e) {
+        r.noRetry = e?.kind === "config";
+        return e?.message ?? String(e);
+      }
+      if (closed) {
+        tunnel.close();
+        return "closed";
+      }
+      client.nonce = tunnel.nonce;
+      return null;
+    };
+    const bind = async () => {
+      if (!tunnel) {
+        const failed = await open();
+        if (failed) {
+          kernel.notReadyNote = NOT_CONNECTED;
+          r.failed = failed;
+          return false;
+        }
+      }
+      for (let i = 0; i < BIND_TRIES && !kernel.ready && !kernel.closed; i++) await kernel.start();
+      kernel.notReadyNote = kernel.ready ? null : NOT_CONNECTED;
+      r.failed = kernel.ready ? null : why || "the kernel on your computer did not start";
+      return kernel.ready;
+    };
+    const r = {
+      kernel,
+      gateway: null,
+      failed: null,
+      hint: null,
+      noRetry: false,
+      retry: bind,
+      get tunnel() { return tunnel; },
+      close() {
+        closed = true;
+        off();
+        kernel.close();
+        tunnel?.close();
+        tunnel = null;
+      },
+    };
+    await bind();
+    return r;
+  };
+}
+
+/**
+ * The relayed choice on a branch preview (sagebrush.cloud, the "remote-kernel" preview mock): the picker's words and
+ * flow, with the simulated gateway of startPreview in place of the relay, so its cells run on a second interpreter in
+ * this browser.  The status says so.  Never offered on the site: the page asks for it only with the preview mock on.
+ */
+export function previewRelayedStarter() {
+  let last = null;
+  return function startPreviewRelayed(o) {
+    if (o.answer) last = o.answer.name;
+    const name = `${last ?? "your computer"} (preview: simulated, in this browser)`;
+    return startPreview({ ...o, words: (text) => relayedStatusText(name, text) });
+  };
+}
+
 /** The pairing sheet's text (local-kernel plan r2 §6). */
 export const PAIR_SHEET = {
   title: "Run on your computer",
@@ -561,7 +682,10 @@ export function pairSheet(doc = document, prefill = null, userAgent = globalThis
 export function remoteSwitch(page, deps = {}) {
   // (the paired runner is the same switch: its own picker value, sheet, start and words; no preview interpreter)
   const kind = deps.kind ?? "gpu";
+  // (the label before each status: a string, or for the relayed choice an object naming the computer chosen now;
+  // `sep` between it and the message: ": ", or " · " for the relayed one)
   const label = deps.label ?? "Remote compute (preview)";
+  const sep = deps.sep ?? ": ";
   const sheet = deps.sheet ?? (() => connectSheet());
   const cancelSheet = deps.cancelSheet ?? closeSheet;
   const start = deps.start ?? startPreview;
@@ -605,7 +729,7 @@ export function remoteSwitch(page, deps = {}) {
         if (!live()) return; // (stale meanwhile: changes nothing)
         if (ok) clearActions();
         else {
-          page.status(`${label}: couldn't connect (${owner.r.failed}).${owner.r.hint ? " " + owner.r.hint : ""}`);
+          page.status(`${label}${sep}couldn't connect (${owner.r.failed}).${owner.r.hint ? " " + owner.r.hint : ""}`);
           offer(owner, owner.r.noRetry ? ["switch"] : ["retry", "switch"]);
         }
       }),
@@ -664,7 +788,7 @@ export function remoteSwitch(page, deps = {}) {
         try {
           answer = await sheet();
         } catch (e) {
-          return back(`${label}: ${e?.message ?? e}`);
+          return back(`${label}${sep}${e?.message ?? e}`);
         }
         if (!current()) return null; // (superseded: whoever did it settled this sheet and owns the picker)
         if (!answer || !live()) return back();
@@ -675,7 +799,7 @@ export function remoteSwitch(page, deps = {}) {
       let owner = null;
       const onLost = (why) => {
         if (!owner || !current()) return;
-        page.status(`${label}: disconnected (${why}).`);
+        page.status(`${label}${sep}disconnected (${why}).`);
         offer(owner, ["retry", "switch"]);
       };
       try {
@@ -697,7 +821,7 @@ export function remoteSwitch(page, deps = {}) {
       // (another tab took this notebook's kernel: Reconnect, or This browser)
       r.kernel.on?.("lifecycle", (_old, lc) => { if (lc.phase === "moved") offer(owner, ["reconnect", "switch"]); });
       if (r.failed) {
-        page.status(`${label}: couldn't connect (${r.failed}).${r.hint ? " " + r.hint : ""}`);
+        page.status(`${label}${sep}couldn't connect (${r.failed}).${r.hint ? " " + r.hint : ""}`);
         offer(owner, r.noRetry ? ["switch"] : ["retry", "switch"]);
       } else if (skipSheet) {
         page.status(`${deps.readyText ?? statusText("ready (remote)", network())} · a fresh kernel: earlier variables are gone`);
