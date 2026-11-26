@@ -92,6 +92,7 @@ try {
         if (m.method === "hello" && leg.refuse) setTimeout(() => this.fire("message", { data: JSON.stringify({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: leg.refuse } }) }), 0);
         else if (m.method === "hello") setTimeout(() => this.fire("message", { data: JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { purpose: "terminal", token: "tok-" + leg.legs.length, nonce: "n0", gen: leg.legs.length, incarnation: "i1", channels: ["kernel", "terminal"] } }) }), 0);
         if (m.t === "open") leg.opens.push(m);
+        if (m.relay === "ping" && leg.pongs) setTimeout(() => this.fire("message", { data: '{"relay":"pong"}' }), 0);
       }
       close(code, why) { this.closed = [code, why]; }
     };
@@ -99,6 +100,12 @@ try {
     leg.drop = (code, why) => leg.sock.fire("close", { code, reason: why });
     leg.ins = () => leg.sent.filter((m) => m.t === "in").map((m) => atob(m.b)).join("");
     leg.acks = () => leg.sent.filter((m) => m.t === "ack").map((m) => m.upto);
+    // (the tab hidden or shown, as the browser says it: document.hidden and visibilityState, then visibilitychange)
+    leg.visible = (v) => {
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => !v });
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (v ? "visible" : "hidden") });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
     navigator.clipboard && (navigator.clipboard.writeText = async () => { leg.clip++; });
     window.open = (...a) => { leg.opened.push(a); return null; };
     return true;
@@ -352,16 +359,47 @@ try {
   ok(wantL !== wantD && gotL === wantL && gotD === wantD, `the theme follows the page: light ${gotL} (${wantL}), dark ${gotD} (${wantD})`);
   await setTheme("system");
 
-  // 9. the leg lost: said, with Reconnect; Reconnect reattaches to the session with a fresh hello and proof
+  // 9. the leg lost: said, with Reconnect, and reattached by itself after a second (the same session, a fresh hello and
+  // proof): a tab in the background loses its leg (the browser slows its timers; the relay closes a leg 40 s without a
+  // ping), and coming back to a dead terminal until a reload is what this prevents
   await ev("__leg.drop(1006, 'runner not connected'), true");
   await until("/Not connected to box/.test(document.querySelector('#rterm .rstatus').textContent)");
-  ok(/runner not connected/.test(await status()), `a lost leg is said: ${JSON.stringify(await status())}`);
-  ok(await ev("[...document.querySelectorAll('#rterm .rhead button')].some((b) => b.textContent === 'Reconnect' && !b.hidden)"), "with Reconnect");
-  await ev("[...document.querySelectorAll('#rterm .rhead button')].find((b) => b.textContent === 'Reconnect').click(), true");
-  await until("__leg.opens.length === 2");
+  ok((await status()) === "Not connected to box: runner not connected. Reconnecting in 1 s…", `a lost leg is said, and a retry: ${JSON.stringify(await status())}`);
+  ok(await ev("[...document.querySelectorAll('#rterm .rhead button')].some((b) => b.textContent === 'Reconnect' && !b.hidden)"), "with Reconnect meanwhile");
+  ok((await ev("__leg.opens.length")) === 1, "nothing at once");
+  await until("__leg.opens.length === 2", 5000);
   const open2 = await ev("__leg.opens[1]");
   const c2 = unb64url(open2.dpop.split(".")[1]);
-  ok(JSON.parse(open2.body).session === "s-1" && open2.auth === "DPoP tok-2" && c2.jti !== c.jti && c2.htu.includes("gen=2"), "a reattach: the remembered session, a fresh hello and proof");
+  ok(JSON.parse(open2.body).session === "s-1" && open2.auth === "DPoP tok-2" && c2.jti !== c.jti && c2.htu.includes("gen=2"), "reattached by itself: the remembered session, a fresh hello and proof");
+  await push({ t: "opened", session: "s-1", nonce: "n2" });
+  await push({ t: "replay" });
+  await push({ t: "live" });
+  // 9b. in a hidden tab nothing is tried; shown again, a lost leg is reattached at once
+  await ev("__leg.visible(false), true");
+  await ev("__leg.drop(1001, 'no ping for 40 s'), true");
+  await until("/Not connected to box/.test(document.querySelector('#rterm .rstatus').textContent)");
+  await sleep(2500);
+  ok((await ev("__leg.opens.length")) === 2 && (await status()) === "Not connected to box: no ping for 40 s.", `hidden: said, nothing tried (${await ev("__leg.opens.length")} opens; ${JSON.stringify(await status())})`);
+  await ev("__leg.visible(true), true");
+  await until("__leg.opens.length === 3", 2000);
+  ok(JSON.parse(await ev("__leg.opens[2].body")).session === "s-1", "shown again: reattached at once, to the same session");
+  await push({ t: "opened", session: "s-1", nonce: "n3" });
+  await push({ t: "replay" });
+  await push({ t: "live" });
+  // 9c. a leg that looks open when the tab is shown is probed: one ping; answered, nothing more
+  await ev("__leg.pongs = true, true");
+  const pings0 = await ev("__leg.sent.filter((m) => m.relay === 'ping').length");
+  await ev("(__leg.visible(false), __leg.visible(true)), true");
+  await sleep(5600);
+  ok((await ev("__leg.sent.filter((m) => m.relay === 'ping').length")) === pings0 + 1 && (await ev("__leg.opens.length")) === 3 && (await ev("__leg.sock.closed")) === null,
+    "shown with the leg open: one probe ping, answered, the leg kept");
+  // 9d. a probe not answered within 5 s: that leg is closed (4003) and the session reattached
+  await ev("__leg.pongs = false, true");
+  await ev("(__leg.visible(false), __leg.visible(true)), true");
+  await until("__leg.legs[2].closed !== null", 7000);
+  ok((await ev("__leg.legs[2].closed[0]")) === 4003, `no answer to the probe: the leg closed 4003 (${JSON.stringify(await ev("__leg.legs[2].closed"))})`);
+  await until("__leg.opens.length === 4", 5000);
+  ok(JSON.parse(await ev("__leg.opens[3].body")).session === "s-1", "and the session reattached on a new leg");
 
   // 10. exit: said, forgotten, New session
   await push({ t: "opened", session: "s-1", nonce: "n2" });
@@ -420,6 +458,8 @@ try {
   await ev("document.querySelector('#rtermbtn').click(), true");
   await until("/didn't accept/.test(document.querySelector('#rterm .rstatus')?.textContent ?? '')");
   ok((await status()) === "box didn't accept a terminal. Its Sagebrush may predate terminals: update it, then Reconnect. (no terminal channel)" && (await ev("__leg.opens.length")) === 0, `a refused hello is said: ${JSON.stringify(await status())}`);
+  await sleep(2500);
+  ok((await ev("__leg.legs.length")) === 1, "the computer's refusal isn't tried again by itself");
   // (a computer at its session limit: the runner's own number in the sentence)
   await ev("document.querySelector('#rterm .rhead button[aria-label=\"Close the terminal\"]').click(), true");
   await ev(FAKE);
@@ -442,9 +482,10 @@ try {
   await ev("(() => { const si = window.setInterval; window.__si = si; window.setInterval = (f, ms, ...a) => si(f, ms === 15000 ? 30 : ms, ...a); return true; })()");
   await ev("document.querySelector('#rtermbtn').click(), true");
   await until("/isn't answering/.test(document.querySelector('#rterm .rstatus')?.textContent ?? '')");
-  ok((await status()) === "box isn't answering: the connection went quiet. Reconnect.", `the relay gone quiet: the sentence alone, no "(no pong)": ${JSON.stringify(await status())}`);
-  ok(await ev("[...document.querySelectorAll('#rterm .rhead button')].some((b) => b.textContent === 'Reconnect' && !b.hidden) && __leg.sent.filter((m) => m.relay === 'ping').length === 2 && __leg.sock.closed?.[0] === 4002"),
+  ok((await status()) === "box isn't answering: the connection went quiet. Reconnecting in 1 s…", `the relay gone quiet: the sentence, no "(no pong)", and a retry: ${JSON.stringify(await status())}`);
+  ok(await ev("[...document.querySelectorAll('#rterm .rhead button')].some((b) => b.textContent === 'Reconnect' && !b.hidden) && __leg.sent.filter((m) => m.relay === 'ping').length === 2 && __leg.legs[0].closed?.[0] === 4002"),
     "two pings unanswered: the leg closed 4002, Reconnect offered");
+  await ev("document.querySelector('#rterm .rhead button[aria-label=\"Close the terminal\"]').click(), true");
   await ev("window.setInterval = window.__si, true");
   await goto(base + "?phone=0");
 } catch (e) {
