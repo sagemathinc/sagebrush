@@ -343,9 +343,9 @@ await section("sealed ops: signed by a current device, under the current head", 
   ok(missing?.ops?.[0]?.code === "missing", "an op adding a blob not held: refused, missing");
   const phone = ad.nd;
   const r2 = await ws.ask({ t: "sops", ops: [await signed(W, phone, st, dev, n + 2, { releases: [sha(blob)] })] });
-  ok(Number.isInteger(r2?.ops?.[0]?.seq) && (await refs()) === 0, "another current device releases it: accepted, the reference given back");
-  const r3 = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n + 3, { releases: [sha(blob)] })] });
-  ok(r3?.ops?.[0]?.code === "invalid" && (await refs()) === 0, "releasing it again, with no reference left: refused, and nothing changes");
+  ok(Number.isInteger(r2?.ops?.[0]?.seq) && (await refs()) === 1, "another current device releases it: accepted, and the blob still held (held until the account is purged)");
+  const never = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n + 3, { releases: ["f".repeat(64)] })] });
+  ok(never?.ops?.[0]?.code === "invalid", "releasing a blob no op added: refused");
   n += 4;
 
   // (a removed device: the head is public, so it can seal under the new one, but its signature no longer counts)

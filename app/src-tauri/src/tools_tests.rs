@@ -305,34 +305,49 @@ fn a_descendant_that_escapes_the_group_with_the_pipes_holds_nothing_of_ours_afte
 }
 
 #[test]
-fn a_path_folder_that_is_not_roots_or_is_open_to_others_stops_the_run_before_it_starts() {
-    // (the tool would leave a mark if it ran at all)
+fn a_path_folder_that_is_not_roots_or_is_open_to_others_is_left_out_of_the_runs_path() {
+    // (the tool writes the PATH it got, with shell builtins only, then answers)
     let t = Tmp::new("pathdirs");
-    let mark = t.0.join("ran");
-    let p = script(&t.0, "claude", &format!("touch '{}'\n{GOOD}", mark.display()), 0o755);
-    assert_eq!(qualify_path(FIXED_PATH, &[0]).as_deref(), Ok("/usr/bin:/bin"), "the fixed folders qualify here");
+    let seen = t.0.join("seen");
+    let p = script(&t.0, "claude", &format!("printf '%s' \"$PATH\" > '{}'\n{GOOD}", seen.display()), 0o755);
     let tmp_link = fs::canonicalize("/tmp").unwrap().join(format!("sb-tools-pathlink-{}-{}", std::process::id(), rand_suffix()));
     std::os::unix::fs::symlink("/usr/bin", &tmp_link).unwrap();
     let ours = t.0.display().to_string();
     let link = tmp_link.display().to_string();
-    let mut cases: Vec<(Vec<&str>, ToolRefusal, &str)> = vec![
-        (vec!["/tmp"], ToolRefusal::ParentWritable, "root's, but open to others (sticky is no exception)"),
-        (vec![&link], ToolRefusal::ParentWritable, "a link to /usr/bin that sits in an open folder"),
-        (vec!["/usr/bin", "/tmp"], ToolRefusal::ParentWritable, "every folder, not only the first"),
-        (vec!["usr/bin"], ToolRefusal::NotAbsolute, "relative"),
-        (vec!["/usr/bin/sb-tools-no-such-folder"], ToolRefusal::Missing, "missing"),
+    let mut cases: Vec<(Vec<&str>, &str, &str)> = vec![
+        (FIXED_PATH.to_vec(), "/usr/bin:/bin", "the fixed folders qualify here"),
+        (vec!["/tmp"], NO_PATH, "root's, but open to others (sticky is no exception)"),
+        (vec![&link], NO_PATH, "a link to /usr/bin that sits in an open folder"),
+        (vec!["/usr/bin", "/tmp", "/bin"], "/usr/bin:/bin", "each folder on its own, in order"),
+        (vec!["usr/bin"], NO_PATH, "relative"),
+        (vec!["/usr/bin/sb-tools-no-such-folder"], NO_PATH, "missing"),
+        (vec![], NO_PATH, "none given"),
     ];
     if my_uid() != 0 {
-        cases.push((vec![&ours], ToolRefusal::WrongOwner, "the person's own folder, not root's"));
+        cases.push((vec![&ours], NO_PATH, "the person's own folder, not root's"));
+        cases.push((vec![&ours, "/bin"], "/bin", "the person's own folder left out, the next kept"));
     }
     for (dirs, want, what) in cases {
+        let _ = fs::remove_file(&seen);
         let r = choose_in(&p, my_uid(), &run(&t), &dirs, &[0]);
-        assert_eq!(r.unwrap_err(), want, "{what}");
-        assert!(!mark.exists(), "{what}: the tool never ran");
+        assert_eq!(r.map(|c| c.version), Ok("2.1.330".to_string()), "{what}: the tool still runs");
+        assert_eq!(fs::read_to_string(&seen).unwrap(), want, "{what}");
     }
     let _ = fs::remove_file(&tmp_link);
-    assert!(choose_in(&p, my_uid(), &run(&t), FIXED_PATH, &[0]).is_ok());
-    assert!(mark.exists(), "and with the fixed folders, it ran");
+}
+
+#[test]
+fn with_no_path_folder_left_a_helper_in_the_working_folder_is_not_found() {
+    // (an empty PATH would mean the working folder: a helper there must not be what the tool runs)
+    let t = Tmp::under(Path::new(env!("CARGO_MANIFEST_DIR")), "nopath");
+    script(&t.0, "helper", "echo found", 0o755);
+    let p = script(&t.0, "claude", &format!("helper 2>/dev/null\n{GOOD}"), 0o755);
+    assert_eq!(choose_in(&p, my_uid(), &run(&t), &["/tmp"], &[0]).map(|c| c.version), Ok("2.1.330".to_string()));
+    // (and the control: with PATH holding the working folder, the helper is found, its line refuses the answer)
+    let cwd = t.0.display().to_string();
+    let me = my_uid();
+    assert!(qualifies(&t.0, &[0, me]), "the test needs a clean chain above {cwd}");
+    assert_eq!(choose_in(&p, me, &run(&t), &[&cwd], &[0, me]).unwrap_err(), ToolRefusal::VersionUnknown);
 }
 
 #[test]
@@ -340,35 +355,36 @@ fn every_folder_above_a_path_folder_is_checked_and_the_path_is_the_folders_given
     // (the person standing in for root as an allowed owner, so the rules above the folder can be exercised)
     let me = my_uid();
     let base = Tmp::under(Path::new(env!("CARGO_MANIFEST_DIR")), "pathup");
-    assert!(qualify_path(&[&base.0.display().to_string()], &[0, me]).is_ok(), "the test needs a clean chain above {}", base.0.display());
+    assert!(qualifies(&base.0, &[0, me]), "the test needs a clean chain above {}", base.0.display());
     let up = base.0.join("up");
     let inner = up.join("inner");
     fs::create_dir_all(&inner).unwrap();
     let inner_s = inner.display().to_string();
     for (up_mode, inner_mode, want) in [
-        (0o777, 0o755, Err(ToolRefusal::ParentWritable)),
-        (0o1777, 0o755, Err(ToolRefusal::ParentWritable)),
-        (0o755, 0o775, Err(ToolRefusal::ParentWritable)),
-        (0o755, 0o1777, Err(ToolRefusal::ParentWritable)),
-        (0o755, 0o755, Ok(inner_s.clone())),
+        (0o777, 0o755, NO_PATH),
+        (0o1777, 0o755, NO_PATH),
+        (0o755, 0o775, NO_PATH),
+        (0o755, 0o1777, NO_PATH),
+        (0o755, 0o755, inner_s.as_str()),
     ] {
         fs::set_permissions(&inner, fs::Permissions::from_mode(inner_mode)).unwrap();
         fs::set_permissions(&up, fs::Permissions::from_mode(up_mode)).unwrap();
         assert_eq!(qualify_path(&[&inner_s], &[0, me]), want, "up {up_mode:o}, inner {inner_mode:o}");
     }
-    // (a link whose target is clean, but which sits in a folder open to others: the step it is on is refused)
+    // (a link whose target is clean, but which sits in a folder open to others: the step it is on fails)
     let open = base.0.join("open");
     fs::create_dir(&open).unwrap();
     std::os::unix::fs::symlink(&inner, open.join("bin")).unwrap();
+    let link_s = open.join("bin").display().to_string();
     fs::set_permissions(&open, fs::Permissions::from_mode(0o777)).unwrap();
-    assert_eq!(qualify_path(&[&open.join("bin").display().to_string()], &[0, me]), Err(ToolRefusal::ParentWritable));
+    assert_eq!(qualify_path(&[&link_s], &[0, me]), NO_PATH);
     fs::set_permissions(&open, fs::Permissions::from_mode(0o755)).unwrap();
     // (a link in a clean folder, to a folder whose own folder is open to others: the target's folders are checked
     //  too, not only the steps as written)
     fs::set_permissions(&up, fs::Permissions::from_mode(0o777)).unwrap();
-    assert_eq!(qualify_path(&[&open.join("bin").display().to_string()], &[0, me]), Err(ToolRefusal::ParentWritable));
+    assert_eq!(qualify_path(&[&link_s], &[0, me]), NO_PATH);
     fs::set_permissions(&up, fs::Permissions::from_mode(0o755)).unwrap();
-    assert_eq!(qualify_path(&[&open.join("bin").display().to_string()], &[0, me]).as_deref(), Ok(open.join("bin").to_str().unwrap()), "and once it is closed, the link is fine");
+    assert_eq!(qualify_path(&[&link_s], &[0, me]), link_s, "and once it is closed, the link is fine");
     // (the run's PATH is exactly the qualified folders)
     let t = Tmp::new("pathenv");
     let p = script(&t.0, "claude", &format!("[ \"$PATH\" = '{inner_s}' ] || echo path\n{GOOD}"), 0o755);

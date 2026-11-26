@@ -17,9 +17,11 @@
 // inherited); the app's own working folder; stdin closed; stdout and stderr each capped at VERSION_OUTPUT bytes; its
 // own process group, killed at VERSION_DEADLINE and reaped. Both streams are read on the calling thread from
 // non-blocking pipes, so no reader outlives the call, even if something the tool left behind holds a pipe open; if
-// a pipe can't be made non-blocking, nothing is read and the run is refused. Before it runs, each FIXED_PATH folder
-// (and, for every step of its path, the resolved folder and all above it) must be root's and not writable by group
-// or others, so a helper the tool looks up there can't have been put there by anyone else.
+// a pipe can't be made non-blocking, nothing is read and the run is refused. Its PATH holds only the FIXED_PATH
+// folders that qualify (for every step of the folder's path, the resolved folder and all above it root's and not
+// writable by group or others); any other is left out, so a helper the tool looks up can't have been put there by
+// anyone else. With none left, PATH is NO_PATH (never empty: an empty PATH means the working folder), so a lookup
+// fails.
 //
 // The refusal codes are the agent's (--claude-path) closed list, in its order: wrong_owner is the file or a folder
 // above it owned by someone other than the person or root; parent_writable a folder above it writable by others. Windows: unsupported_platform, until the agent host starts agents there.
@@ -29,8 +31,10 @@ use std::time::Duration;
 
 pub const VERSION_DEADLINE: Duration = Duration::from_secs(5);
 pub const VERSION_OUTPUT: usize = 4096;
-/// The version run's PATH, in order; each folder qualified before the run (qualify_path).
+/// The version run's PATH folders, in order; only those that qualify are used (qualify_path).
 pub const FIXED_PATH: &[&str] = &["/usr/bin", "/bin"];
+/// The PATH when no folder qualifies: a device, not a folder, so every lookup in it fails.
+pub const NO_PATH: &str = "/dev/null";
 
 /// Why a chosen tool was refused (each a code the page shows in plain words).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,35 +206,31 @@ pub fn version(target: &Path, run: &VersionRun) -> Result<String, ToolRefusal> {
     version_in(target, run, FIXED_PATH, &[0])
 }
 
-/// The PATH for the version run: `dirs` joined, once each is qualified. For every step of each folder's path (the
-/// folder itself and each folder above it, as written), the step is resolved and the resolved folder and every folder
-/// above it must be a real folder owned by one of `owners` (root alone, outside tests) and not writable by group or
-/// others: so no link on the way, and no folder a link or the PATH folder sits in, can be changed by anyone else.
+/// The PATH for the version run: the folders of `dirs` that qualify, in order, joined; NO_PATH if none does. A folder
+/// qualifies when, for every step of its path (the folder itself and each folder above it, as written), the step
+/// resolves and the resolved folder and every folder above it is a real folder owned by one of `owners` (root alone,
+/// outside tests) and not writable by group or others: so no link on the way, and no folder a link or the PATH folder
+/// sits in, can be changed by anyone else.
 #[cfg(unix)]
-fn qualify_path(dirs: &[&str], owners: &[u32]) -> Result<String, ToolRefusal> {
-    use std::os::unix::fs::MetadataExt;
-    for d in dirs {
-        let p = Path::new(d);
-        if !p.is_absolute() {
-            return Err(ToolRefusal::NotAbsolute);
-        }
-        for step in p.ancestors() {
-            let resolved = std::fs::canonicalize(step).map_err(|_| ToolRefusal::Missing)?;
-            for f in resolved.ancestors() {
-                let m = std::fs::symlink_metadata(f).map_err(|_| ToolRefusal::Missing)?;
-                if m.file_type().is_symlink() || !m.is_dir() {
-                    return Err(ToolRefusal::ParentWritable);
-                }
-                if !owners.contains(&m.uid()) {
-                    return Err(ToolRefusal::WrongOwner);
-                }
-                if m.mode() & 0o022 != 0 {
-                    return Err(ToolRefusal::ParentWritable);
-                }
-            }
-        }
+fn qualify_path(dirs: &[&str], owners: &[u32]) -> String {
+    let kept: Vec<&str> = dirs.iter().copied().filter(|d| qualifies(Path::new(d), owners)).collect();
+    if kept.is_empty() {
+        NO_PATH.to_string()
+    } else {
+        kept.join(":")
     }
-    Ok(dirs.join(":"))
+}
+
+#[cfg(unix)]
+fn qualifies(dir: &Path, owners: &[u32]) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    dir.is_absolute()
+        && dir.ancestors().all(|step| {
+            let Ok(resolved) = std::fs::canonicalize(step) else { return false };
+            resolved.ancestors().all(|f| {
+                std::fs::symlink_metadata(f).is_ok_and(|m| !m.file_type().is_symlink() && m.is_dir() && owners.contains(&m.uid()) && m.mode() & 0o022 == 0)
+            })
+        })
 }
 
 // (tests only: the setup of the non-blocking pipes fails, to reach the fail-closed path nothing else can)
@@ -252,8 +252,8 @@ fn nonblock_fault() -> bool {
 fn version_in(target: &Path, run: &VersionRun, dirs: &[&str], owners: &[u32]) -> Result<String, ToolRefusal> {
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
-    // (refused before anything runs: a folder the tool would look its helpers up in, open to someone else)
-    let path_env = qualify_path(dirs, owners)?;
+    // (a folder the tool would look its helpers up in, open to someone else, is left out of its PATH)
+    let path_env = qualify_path(dirs, owners);
     let mut cmd = Command::new(target);
     cmd.arg("--version")
         .env_clear()

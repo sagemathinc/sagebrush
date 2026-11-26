@@ -294,7 +294,7 @@ export function checkOp(v: unknown): Op {
 const CHAIN_HEAD = /^[A-Za-z0-9_-]{43}$/;
 export const isChainHead = (s: unknown): s is string => typeof s === "string" && CHAIN_HEAD.test(s);
 
-/** An E2E device's id in the key chain (26 base32 characters, web/workspace/fleet/core/bytes.mjs isId). */
+/** An E2E device's id in the key chain (26 base32 characters, as the fleet core's isId checks). */
 const E2E_ID = /^[a-z2-7]{25}[aeimquy4]$/;
 /** An Ed25519 signature: 64 bytes as unpadded base64url (86 characters). */
 const SIG = /^[A-Za-z0-9_-]{86}$/;

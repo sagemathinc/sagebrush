@@ -129,7 +129,27 @@ export const LATEX_LAZY = {
 // (292,864 raw / 98,922 gzip: Nov 25 2026, an accent before a font command with its argument, unbraced ($\bar\mathbb F$),
 //  braced before KaTeX: 292,800 / 98,858 measured on the shipped build of its merge with master 56958e3d, with bun 1.4.4 and
 //  node 24.21.0 (+1,167 / +449 over master's 291,633 / 98,409), + 64)
-export const LATEX_CAPS = { raw: 292864, gzip: 98922 };
+// (293,229 raw / 99,054 gzip: Nov 25 2026, starred references read as such, \ref*{key} drawn without its link (natbib's
+//  starred citations keep theirs): 293,165 / 98,990 measured on the shipped build of its merge with master bff44e83, with
+//  bun 1.4.4 and node 24.21.0 (+365 / +132 over master's 292,800 / 98,858), + 64)
+// (294,144 raw / 99,370 gzip: Nov 25 2026, latex check naming an \input file and its line for a problem found there (the
+//  expander's file-line markers, the renderer's where()): 294,080 / 99,306 measured on the shipped build of its merge with
+//  master fb8a65b0, with bun 1.4.4 and node 24.21.0 (+915 / +316 over master's 293,165 / 98,990), + 64)
+// (294,217 raw / 99,416 gzip: Nov 25 2026, an element over PIECE_MAX split in turn (a theorem's long list, split.ts):
+//  294,153 / 99,352 measured on the shipped build of its merge with master b0b02122, with bun 1.4.4 and node 24.21.0
+//  (+73 / +46 over master's 294,080 / 99,306), + 64)
+// (309,826 raw / 105,261 gzip: Nov 26 2026, TikZ nodes drawn in the preview (their text typeset by KaTeX, sized from its
+//  layout tree; anchors, placement, labels, lines stopping at their borders), in the worker's bundle with the paths:
+//  309,762 / 105,197 measured on the shipped build of its merge with master 20030715, with bun 1.4.4 and node 24.21.0
+//  (+15,609 / +5,845 over master's 294,153 / 99,352), + 64)
+// (310,653 raw / 105,614 gzip: Nov 26 2026, a render over the preview's 16 MiB shown up to there, whole chunks, and a
+//  note where it stops, from its source line (split.ts's boundRender, the worker's caller): 310,589 / 105,550 measured
+//  on the shipped build of its merge with master 1ed271fd, with bun 1.4.4 and node 24.21.0 (+827 / +353 over master's
+//  309,762 / 105,197), + 64)
+// (311,297 raw / 105,855 gzip: Nov 26 2026, \input and \include in a shared or GitHub view (mountEditor's inputs,
+//  web/latex/component.ts): 311,233 / 105,791 measured on the shipped build of its merge with master 9063c669, with bun
+//  1.4.4 and node 24.21.0 (+644 / +241 over master's 310,589 / 105,550), + 64)
+export const LATEX_CAPS = { raw: 311297, gzip: 105855 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -227,14 +247,21 @@ export const LATEX_LAZY_CAPS = {
   // (65,566 / 22,526: Nov 22 2026, A1 (#1546): the agent's access as an icon in the composer's footer row, its CSS (a
   //  masked shield and the footer rules) in the pairing's chunk (agent-ui.ts), measured on the shipped build of the head
   //  on master e4c0b8c0 with bun 1.4.4 and node 24.21.0: 65,502 / 22,462, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 67913, gzip: 23282 },
+  // (68,867 / 23,606: Nov 25 2026, image reads: a raster image's read as an image for an agent that takes one, by its
+  //  bytes (isRaster, imageOut, agent-pair.ts), measured on the shipped build of the head merged with master 5fb549fa
+  //  with bun 1.4.4 and node 24.21.0: 68,803 / 23,542, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 68867, gzip: 23606 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
   //  page module rather than bundled again; measured 16,482 / 6,886 on master 4d4225f9, + 64. Was 16 / 6 KiB)
   // (17,335 / 7,231: renewed at the landing merge on master 14279164: 16,494 / 6,881 before it -> 17,271 / 7,167 after,
   //  +777 / +286 inherited from a shared check's and the tools' changes, none of it that change's own code; + 64)
-  TOOLS: { label: "the LaTeX agent tools' chunk", raw: 17335, gzip: 7231 },
+  // (17,758 / 7,432: Nov 25 2026, latex_check naming a problem's \input file (check.ts's inputFileName): 17,694 / 7,368
+  //  measured on master 6e3a0f71 with it, + 64)
+  // (17,874 / 7,471: Nov 26 2026, latex_check's message for a document past the preview's 16 MiB (check.ts's
+  //  "toolong"): 17,810 / 7,407 measured on master 20030715 with it, + 64)
+  TOOLS: { label: "the LaTeX agent tools' chunk", raw: 17874, gzip: 7471 },
   // (the presenter: web/latex/present.ts with overlay.ts, fetched only when Present is pressed)
   PRESENT: { label: "the LaTeX presenter's chunk", raw: 16 * 1024, gzip: 6 * 1024 },
   // (a published document opened read only, doc.ts: fetched only for a /?tex-doc= link, the articles';
@@ -284,7 +311,11 @@ export const LATEX_LAZY_CAPS = {
   // (a shared talk's view, loaded by the share page by URL for a .tex only (Nov 12): its
   //  measurement + 64, 3,688 / 1,957 on master 8431bd54)
   // (and its raw cap renewed Nov 13 with the editor's bar and math timing: 3,789 measured + 64; its gzip, 1,976, within)
-  SHARE: { label: "the LaTeX shared talk's chunk", raw: 3853, gzip: 2021 },
+  // (4,166 / 2,156: Nov 26 2026, a GitHub repository's files mounted for a talk's Run (mountIn: the /<repo>/ root taken
+  //  off, a git blob id taken as a SHA-256 is): 4,102 / 2,092 measured on master 30c8705d with it, + 64)
+  // (4,473 / 2,270: Nov 26 2026, \input and \include read from the share's files, the .tex's folder only (share.ts's
+  //  inputIn and read): 4,409 / 2,206 measured on its merge with master 9063c669, + 64)
+  SHARE: { label: "the LaTeX shared talk's chunk", raw: 4473, gzip: 2270 },
   // (the preview's code blocks coloured (hl.ts with the notebook's highlight.js), fetched once a preview has one: a lazy
   //  chunk, Nov 10: 4,410 / 2,355 measured on master e0b7306c,
   //  + 64 B each)

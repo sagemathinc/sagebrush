@@ -26,6 +26,7 @@
 
 import { sha256Hex } from "./sha256";
 import { Crew, type WorkerLike } from "./nd-crew";
+import { growTo } from "./wasm_room";
 
 interface Nd {
   nd_info(what: number): number;
@@ -99,11 +100,15 @@ export function ndBytes(): Uint8Array {
 function sharedMemory(): WebAssembly.Memory | null {
   for (const maximum of [65536, 16384, 4096]) {
     try {
-      return new WebAssembly.Memory({ initial: 17, maximum, shared: true });
+      const m = new WebAssembly.Memory({ initial: 17, maximum, shared: true });
+      declaredMax.set(m, maximum * 65536);
+      return m;
     } catch {}
   }
   return null;
 }
+// (each memory's declared maximum, in bytes: its fixed limit, wasm_room.ts)
+const declaredMax = new WeakMap<WebAssembly.Memory, number>();
 
 const wasmOff = () => {
   const g = globalThis as any;
@@ -208,10 +213,11 @@ export function ndScratch(): number {
   return ex ? ex.nd_info(0) : 0;
 }
 
-// Make the memory at least `bytes` long; a RangeError if it can't grow.
+// Make the memory at least `bytes` long: a MemoryError for the call past its declared maximum (before any grow) or if
+// the computer refuses the grow (wasm_room.ts).
 function reserve(bytes: number): void {
-  const m = mem!, have = m.buffer.byteLength;
-  if (have < bytes) m.grow(Math.ceil((bytes - have) / 65536));
+  const m = mem!;
+  growTo(m, bytes, declaredMax.get(m));
 }
 
 /** The Cholesky factor of the n x n real symmetric A (row-major float64; only

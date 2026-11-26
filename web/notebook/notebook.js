@@ -32,6 +32,7 @@ const STOP_MESSAGE = "\nStopped: it did not stop when interrupted, so the interp
 // (web/notebook/highlight.js, which the board's editor uses too)
 import { esc, highlight, highlightMarkdown } from "./highlight.js";
 import { highlightMatlab } from "./highlight-matlab.js";
+import { highlightMagma } from "./highlight-magma.js";
 import { armStop, disarmStop, stopIgnored } from "./stop-guard.js";
 export { esc, highlight, highlightMarkdown };
 
@@ -223,7 +224,7 @@ export function createNotebook(root, opts = {}) {
   const cells = () => [...cellsEl.children].map((el) => el.cell).filter(Boolean);
   const index = (cell) => cells().indexOf(cell);
   function paint(cell) {
-    cell.hl.innerHTML = cell.type === "code" ? (isMatlab() ? highlightMatlab(cell.ta.value) : highlight(cell.ta.value, isSage())) : cell.type === "markdown" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + "\n";
+    cell.hl.innerHTML = cell.type === "code" ? (isMatlab() ? highlightMatlab(cell.ta.value) : isMagma() ? highlightMagma(cell.ta.value) : highlight(cell.ta.value, isSage())) : cell.type === "markdown" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + "\n";
     // (a Markdown cell's blocks: its text changed elsewhere, merged, undone, an agent's)
     if (cell.blocks && cell.ta.value !== cell.blocksText) { cell.blocksText = cell.ta.value; cell.blocks.value = cell.ta.value; }
   }
@@ -1882,6 +1883,7 @@ export function createNotebook(root, opts = {}) {
   }
   // Highlight fenced Python/Sage code in Markdown as in code cells.
   const mdHighlight = (code, lang) => (/^(matlab|m)$/i.test(lang ?? "") || (!lang && isMatlab()) ? highlightMatlab(code).replace(/\n$/, "")
+    : /^(magma|mag)$/i.test(lang ?? "") || (!lang && isMagma()) ? highlightMagma(code).replace(/\n$/, "")
     : !lang || /^(python|py|python3|sage|ipython)$/i.test(lang) ? highlight(code, /sage/i.test(lang) || (!lang && isSage())).replace(/\n$/, "") : null);
   async function renderMd(cell) {
     closeBlocks(cell);

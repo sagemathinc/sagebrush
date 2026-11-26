@@ -4735,7 +4735,7 @@ class RealIntervalElement:
         """The interval as text: style 'question' (2.?) or 'brackets'
         ([lo .. hi]); None, the default, follows
         sage.rings.real_mpfi.printing_style, as Sage does. An explicit style
-        is always honoured (astra's CORR-42D-1).
+        is always honoured (the correctness review CORR-42D-1).
 
         EXAMPLES::
 
