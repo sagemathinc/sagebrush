@@ -28,6 +28,9 @@ export const COPY = {
   unusable: "This page's earlier connection to Claude couldn't be used, so it needs a new code.",
   kept: "Claude was connected to this page earlier.",
   elsewhere: "Claude is connected to another page. Use that page, or close it and Reconnect here.",
+  otherTab: "Claude is connected in another tab of this browser. Use that tab, or close it and Connect here with the new link sagebrush-agent prints.",
+  released: "This tab let go of Claude because another tab of this browser asked for it. Your chats here are kept.",
+  notHere: "Claude couldn't be connected here with your remembered access. Your chats and draft are kept; try again, or Connect with a new link.",
   hint: "Not connected: Connect Claude to send",
 };
 
@@ -291,9 +294,13 @@ async function attach(B, targetId, { clock = false, retry = false } = {}) {
   };
   /** Text in the composer, typed (the editor's textarea comes on a click into its block). */
   P.draft = async (text) => {
-    if (!(await P.ev(`!!document.querySelector('#editor textarea')`))) {
-      const [x, y] = await P.ev(`(() => { const r = document.querySelector('#editor .mb-block').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
-      for (const type of ["mousePressed", "mouseReleased"]) await P.send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+    // (found in one step: the page may give the composer its textarea by itself between a look and a click (its boot
+    //  focuses the composer, so the block it would click is gone); then there is nothing to click)
+    for (const end = Date.now() + WAIT_MS; Date.now() < end; ) {
+      const at = await P.ev(`(() => { if (document.querySelector('#editor textarea')) return "typing"; const b = document.querySelector('#editor .mb-block'); if (!b) return null; const r = b.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+      if (at === "typing") break;
+      if (at) for (const type of ["mousePressed", "mouseReleased"]) await P.send("Input.dispatchMouseEvent", { type, x: at[0], y: at[1], button: "left", clickCount: 1 });
+      await P.until(`!!document.querySelector('#editor textarea')`, 2000).catch(() => {});
     }
     await P.until(`!!document.querySelector('#editor textarea')`);
     await P.ev(`document.querySelector('#editor textarea').focus()`);
@@ -491,16 +498,218 @@ export async function runA14({ site, ok, want = () => true }) {
     await Q.until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb')`, 20000);
     // (precondition: the opener held an exact record with no leftAt when it was copied; the copy's navigation)
     const nav = await Q.nav();
-    await Q.until(`document.querySelector('#conn-status').textContent !== ''`);
+    await Q.until(`document.querySelector('#conn-status').textContent === ${JSON.stringify(COPY.otherTab)}`);
     const quiet = await A.quiet(3000), bar = await Q.bar();
     ok(pre && pre.keys === RECORD_KEYS.replace("leftAt,", "") && pre.leftAt === null && nav === "navigate", "A14-3b precondition: the opener's record is exact with no leftAt, and the copy's navigation is 'navigate'", { pre: !!pre, leftAt: pre?.leftAt, nav });
-    ok(quiet && A.hellos === h0 && A.upgrades === u0 && bar.status === COPY.kept && bar.act === "Connect" && (await P.connected()), "A14-3b: the copy makes no silent attempt (no upgrade, no hello); it offers Connect, not Reconnect; the first tab stays connected", { quiet, hellos: A.hellos - h0, bar });
+    ok(quiet && A.hellos === h0 && A.upgrades === u0 && bar.status === COPY.otherTab && bar.act === "Connect" && (await P.connected()), "A14-3b: the copy makes no silent attempt (no upgrade, no hello); it says the first tab has Claude and offers Connect, not Reconnect; the first tab stays connected (#1550)", { quiet, hellos: A.hellos - h0, bar });
     const r0 = A.rejected, h1 = A.hellos;
     await Q.ev(`document.querySelector('#conn-act').click()`);
     await Q.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`);
     await sleep(500);
     const rt = await A.call("workspace.list", { folder: "/" });
-    ok(A.rejected === r0 && A.hellos === h1 && A.live.size === 1 && !!rt.result && (await P.connected()), "A14-3c: the copy's Connect opens the Connect dialog (a new code and Allow): no attempt with the first tab's grant, which stays connected", { rejected: A.rejected - r0, hellos: A.hellos - h1, live: A.live.size, rt: rt.result ? "answered" : rt });
+    const note = await Q.ev(`document.querySelector('.sbag-dlg .other-tab')?.textContent ?? null`);
+    ok(A.rejected === r0 && A.hellos === h1 && A.live.size === 1 && !!rt.result && (await P.connected()) && note === COPY.otherTab, "A14-3c: the copy's Connect opens the Connect dialog (a new code and Allow), saying first that the other tab has Claude: no attempt with the first tab's grant, which stays connected", { rejected: A.rejected - r0, hellos: A.hellos - h1, live: A.live.size, rt: rt.result ? "answered" : rt });
+  });
+
+  // A14-3d (#1550): a NEW tab while the first has the agent: no record, no attempt; it says the other tab has Claude, and
+  // its Connect says so too, instead of only asking for a link the agent hasn't printed; once the first tab is closed,
+  // the new one stops saying so by itself
+  await run("A14-3d", async (B, A) => {
+    const P = await B.tab();
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    const Q = await B.tab();
+    const h0 = A.hellos, u0 = A.upgrades;
+    await Q.navigate(`${site}/agents/`);
+    const said = await Q.until(`document.querySelector('#conn-status').textContent === ${JSON.stringify(COPY.otherTab)}`, 10000).then(() => true, () => false);
+    const quiet = await A.quiet(1000), bar = await Q.bar();
+    ok(said && quiet && A.hellos === h0 && A.upgrades === u0 && bar.status === COPY.otherTab && bar.act === "Connect" && !(await Q.connected()) && (await P.connected()), "A14-3d: a new tab while the first is connected says the other tab has Claude (no attempt, no hello); the first stays connected", { said, quiet, bar });
+    // (#1688: meanwhile this tab isn't the scripted demo: its header says where Claude is, no preview banner, Send inert)
+    const look = () => Q.ev(`({ who: document.querySelector('#who').textContent, banner: document.querySelector('#banner').textContent })`);
+    // (in a new chat of its own: one the demo could otherwise answer)
+    const n0 = await Q.ev(`document.querySelectorAll('#threads .thread').length`);
+    await Q.ev(`(document.querySelector('#new').click(), true)`);
+    await Q.until(`document.querySelectorAll('#threads .thread').length === ${n0} + 1`);
+    const l1 = await look(), st1 = await Q.sendState();
+    ok(l1.who === "Claude in another tab" && !/scripted/.test(l1.who + l1.banner) && st1.ariaDisabled === "true" && st1.disabled === false, "A14-3d: meanwhile not the scripted demo: the header says 'in another tab', no preview banner, Send aria-disabled (#1688)", { ...l1, st1 });
+    await Q.ev(`(document.querySelector('#connect').click(), true)`);
+    await Q.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`);
+    const note = await Q.ev(`document.querySelector('.sbag-dlg .other-tab')?.textContent ?? null`);
+    ok(note === COPY.otherTab, "A14-3d: its Connect dialog says the same first", note);
+    await Q.ev(`([...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click(), true)`);
+    await B.send("Target.closeTarget", { targetId: P.targetId });
+    const gone = await Q.until(`document.querySelector('#conn-status').textContent === '' && !document.querySelector('#conn-bar').classList.contains('on')`, 10000).then(() => true, () => false);
+    await Q.ev(`(document.querySelector('#connect').click(), true)`);
+    await Q.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`);
+    const after = await Q.ev(`document.querySelector('.sbag-dlg .other-tab')?.textContent ?? null`);
+    ok(gone && after === null, "A14-3d: with the first tab closed, the new tab stops saying so by itself, and its Connect asks only for the link", { gone, after });
+    const l2 = await look();
+    ok(/scripted demo/.test(l2.who), "A14-3d: and then, in that new chat, it is the scripted demo again, as before the other tab (#1688)", l2);
+  });
+
+  // A14-3e ("Use Claude here", #1550; SEC move-connection r1 option A): a second tab takes over a connection that is
+  // local and remembered, on the person's click only; the first lets go (never Revoke: the remembered grant stays) and
+  // never takes it back by itself. A third document of the site records every message on the tabs' channel: only the
+  // five exact strings, none with anything of the pairing. Every tab with the page's own retry on (it is one switch in
+  // the shared localStorage): a let-go tab must not take Claude back even so.
+  const CHANNEL = ["live?", "live", "remembered?", "remembered", "release"];
+  const recorder = async (B) => {
+    const R = await B.tab({ retry: true });
+    // (a plain document of the site, not the app)
+    const before = R.loads;
+    await R.send("Page.navigate", { url: `${site}/__a14-clock` });
+    for (const t0 = Date.now(); R.loads === before && Date.now() - t0 < 10000; ) await sleep(50);
+    await R.ev(`(window.__msgs = [], window.__ch = new BroadcastChannel('sb-agents-live'), window.__ch.onmessage = (e) => __msgs.push(typeof e.data === 'string' ? e.data : JSON.stringify(e.data)), true)`);
+    return { msgs: () => R.ev(`__msgs`), release: () => R.ev(`(window.__ch.postMessage('release'), true)`) };
+  };
+  await run("A14-3e", async (B, A) => {
+    const R = await recorder(B);
+    const P = await B.tab({ retry: true });
+    await pair(P, A, site, "3600000", true);
+    const conv = await chat(P, A);
+    const g1 = A.grants().at(-1);
+    const Q = await B.tab({ retry: true });
+    await Q.navigate(`${site}/agents/`);
+    const offered = await Q.until(`document.querySelector('#conn-act').textContent === 'Use Claude here' && !document.querySelector('#conn-act').hidden`, 15000).then(() => true, () => false);
+    const bar0 = await Q.bar();
+    ok(offered && bar0.status === COPY.otherTab && (await P.connected()) && !(await Q.connected()), "A14-3e: a remembered local connection in the first tab: the second offers 'Use Claude here' (and nothing connects before the click)", { offered, bar0 });
+    const h0 = A.hellos;
+    await Q.ev(`(document.querySelector('#conn-act').click(), true)`);
+    const moved = await Q.until(`document.querySelector('#connect').textContent === 'Connected'`, 15000).then(() => true, () => false);
+    await P.until(`document.querySelector('#conn-status').textContent !== ''`, 10000).catch(() => {});
+    const pb = await P.bar(), who = await Q.ev(`document.querySelector('#who-status').textContent`);
+    const g2 = A.grants().at(-1);
+    ok(moved && !(await P.connected()) && pb.status === COPY.released && A.live.size === 1 && g2 && canon(g1) === canon(g2) && who.startsWith("connected with remembered access: "), "A14-3e: after the click the second tab is connected with exactly the remembered grant; the first let go and says it was asked (not that another tab connected)", { moved, pb, live: A.live.size, g1, g2, who });
+    // (no reclaim: the first never connects again by itself, nor the agent sees another hello from it)
+    await sleep(6000);
+    ok(!(await P.connected()) && (await Q.connected()) && A.live.size === 1 && A.hellos === h0 + 1, "A14-3e: the first tab never takes Claude back by itself (6 s: no retry, no restore, no other hello)", { p: await P.connected(), hellos: A.hellos - h0 });
+    // (the same chat goes on from the second tab: chat.resume's conversation)
+    await Q.until(`[...document.querySelectorAll('#threads .thread')].length > 0`);
+    await Q.ev(`(document.querySelectorAll('#threads .thread')[0].click(), true)`);
+    await Q.draft("from the second tab");
+    const m0 = A.messages().length;
+    await Q.ev(`document.querySelector('#send').click()`);
+    for (const t = Date.now(); A.messages().length === m0 && Date.now() - t < 10000; ) await sleep(50);
+    ok(A.messages().at(-1)?.conversation === conv && A.messages().at(-1)?.text === "from the second tab", "A14-3e: a message from the second tab goes on in the same conversation", { conv: A.messages().at(-1)?.conversation === conv });
+    // (the remembered grant is still there: never revoked by the release)
+    const kept = await Q.ev(`new Promise((r) => { const q = indexedDB.open('sagebrush-workspace'); q.onsuccess = () => { try { const db = q.result, names = [...db.objectStoreNames]; r(names); } catch (e) { r(String(e)); } }; q.onerror = () => r('no db'); })`);
+    const msgs = await R.msgs();
+    ok(msgs.length > 0 && msgs.every((m) => CHANNEL.includes(m)) && msgs.includes("release") && !msgs.some((m) => m.includes(A.secret)), "A14-3e: every message on the channel is one of the five exact strings (nothing of the pairing)", { msgs: [...new Set(msgs)], kept });
+  });
+  await run("A14-3e-unremembered", async (B, A) => {
+    const R = await recorder(B);
+    const P = await B.tab({ retry: true });
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    const Q = await B.tab({ retry: true });
+    await Q.navigate(`${site}/agents/`);
+    await Q.until(`document.querySelector('#conn-status').textContent === ${JSON.stringify(COPY.otherTab)}`, 15000);
+    await sleep(3500);
+    const bar = await Q.bar();
+    await R.release();
+    await R.release();
+    await sleep(2000);
+    ok(bar.act === "Connect" && (await P.connected()) && A.live.size === 1, "A14-3e: an unremembered connection: no 'Use Claude here' (Connect, as before), and a release on the channel leaves it connected", { bar, p: await P.connected() });
+    ok((await R.msgs()).every((m) => CHANNEL.includes(m)), "A14-3e: (unremembered) only the exact strings on the channel", await R.msgs());
+  });
+  await run("A14-3e-forged", async (B, A) => {
+    const R = await recorder(B);
+    const P = await B.tab({ retry: true });
+    await pair(P, A, site, "3600000", true);
+    await chat(P, A);
+    const h0 = A.hellos;
+    await R.release();
+    await R.release();
+    await P.until(`document.querySelector('#conn-status').textContent === ${JSON.stringify(COPY.released)}`, 10000).catch(() => {});
+    const bar = await P.bar();
+    await sleep(6000);
+    const rem = await P.ev(`!document.querySelector('#conn-bar .remembered').hidden`);
+    ok(bar.status === COPY.released && !(await P.connected()) && A.live.size === 0 && A.hellos === h0 && rem, "A14-3e: a forged (and repeated) release only disconnects: nothing connects anywhere, no retry loop; the remembered access is still offered", { bar, live: A.live.size, hellos: A.hellos - h0, rem });
+    await P.ev(`(document.querySelector('#conn-remembered').click(), true)`);
+    const back = await P.until(`document.querySelector('#connect').textContent === 'Connected'`, 15000).then(() => true, () => false);
+    ok(back, "A14-3e: the person's own 'Use remembered access' connects that tab again (the grant was never revoked)");
+  });
+  await run("A14-3e-failed", async (B, A) => {
+    const P = await B.tab({ retry: true });
+    await pair(P, A, site, "3600000", true);
+    await chat(P, A);
+    const Q = await B.tab({ retry: true });
+    await Q.navigate(`${site}/agents/`);
+    await Q.until(`document.querySelector('#conn-act').textContent === 'Use Claude here'`, 15000);
+    await Q.draft("a draft kept");
+    // (this tab can't reach the agent: its socket refused, as a blocked local connection is)
+    await Q.ev(`(window.WebSocket = class { constructor() { throw new Error('blocked here'); } }, true)`);
+    const t0 = Date.now();
+    await Q.ev(`(document.querySelector('#conn-act').click(), true)`);
+    const said = await Q.until(`document.querySelector('#conn-alert').textContent === ${JSON.stringify(COPY.notHere)}`, 15000).then(() => true, () => false);
+    const took = Date.now() - t0, draft = await Q.composer();
+    ok(said && took < 15000 && !(await Q.connected()) && draft === "a draft kept", "A14-3e: a takeover that can't connect ends within its bounded wait, says so, and keeps the draft (nothing said connected)", { said, took, draft });
+  });
+  await run("A14-3e-stale", async (B, A) => {
+    // (#1706, the tests review's case: a retry queued from an older loss never takes back a newer connection that was
+    //  let go. The older loss's first retry timer (RETRY_FIRST_MS, 1000 ms) is held; the person connects a newer
+    //  remembered pairing from the Connect dialog; a release lets it go; then the held timer fires)
+    const R = await recorder(B);
+    const P = await B.tab({ retry: true });
+    await pair(P, A, site, "3600000", true);
+    await chat(P, A);
+    await P.ev(`(() => { window.__nativeTimeout = window.setTimeout; window.__wakes = []; window.setTimeout = (f, ms, ...args) => { if (ms === 1000) { __wakes.push(() => f(...args)); return __nativeTimeout(() => {}, 60000); } return __nativeTimeout(f, ms, ...args); }; return true; })()`);
+    A.stop();
+    await P.until(`window.__wakes.length > 0 && document.querySelector('#connect').textContent !== 'Connected'`, 10000);
+    A.restart();
+    await connectDialog(P, A, "3600000", true);
+    ok(await P.connected(), "A14-3e precondition: a newer remembered pairing is connected while the older loss's retry is still queued");
+    await R.release();
+    await P.until(`document.querySelector('#conn-status').textContent === ${JSON.stringify(COPY.released)}`, 10000);
+    const h = A.hellos;
+    await P.ev(`(window.setTimeout = window.__nativeTimeout, window.__wakes.splice(0).forEach((f) => f()), true)`);
+    await sleep(4000);
+    ok(!(await P.connected()) && A.live.size === 0 && A.hellos === h, "A14-3e: a retry queued from an older loss doesn't take back a newer connection that was let go (#1706)", { connected: await P.connected(), live: A.live.size, extraHellos: A.hellos - h, bar: await P.bar() });
+  });
+  await run("A14-3e-turn", async (B, A) => {
+    // (released while a turn runs: the first tab keeps its chat, ends nothing of the person's, throws nothing late, and
+    //  doesn't take Claude back; the second is connected)
+    const P = await B.tab({ retry: true });
+    await pair(P, A, site, "3600000", true);
+    A.hold = true;
+    await P.ev(`document.querySelector('#new').click()`);
+    await P.until(`!!document.querySelector('[data-try]')?.offsetParent`);
+    await P.ev(`document.querySelector('[data-try]').click()`);
+    await P.until(`!document.querySelector('#stop').hidden`, 10000);
+    const users = await P.users();
+    const Q = await B.tab({ retry: true });
+    await Q.navigate(`${site}/agents/`);
+    await Q.until(`document.querySelector('#conn-act').textContent === 'Use Claude here'`, 15000);
+    await Q.ev(`(document.querySelector('#conn-act').click(), true)`);
+    const moved = await Q.until(`document.querySelector('#connect').textContent === 'Connected'`, 15000).then(() => true, () => false);
+    await sleep(4000);
+    ok(moved && !(await P.connected()) && (await P.users()) === users && users >= 1 && P.errors.length === 0 && A.live.size === 1, "A14-3e: released during a running turn: the first tab keeps its chat and throws nothing late, and stays let go; the second is connected", { moved, users, now: await P.users(), errors: P.errors.slice(0, 3), live: A.live.size });
+    A.hold = false;
+  });
+  await run("A14-3e-two", async (B, A) => {
+    // (two remembered agents in this browser: the second tab says which one it connected; the first only that it let go)
+    const A2 = fakeAgent({ name: "Codex", client: "codex-app-server" });
+    try {
+      const P0 = await B.tab({ retry: true });
+      await pair(P0, A2, site, "3600000", true);
+      await B.send("Target.closeTarget", { targetId: P0.targetId });
+      await A2.quiet(500);
+      const P = await B.tab({ retry: true });
+      await pair(P, A, site, "3600000", true);
+      // (Codex not running while the second tab loads, so its own remembered reconnect at load connects nothing; running
+      //  again before the click: either remembered agent may answer it)
+      A2.stop();
+      const Q = await B.tab({ retry: true });
+      await Q.navigate(`${site}/agents/`);
+      await Q.until(`document.querySelector('#conn-act').textContent === 'Use Claude here'`, 15000);
+      A2.restart();
+      await Q.ev(`(document.querySelector('#conn-act').click(), true)`);
+      await Q.until(`document.querySelector('#connect').textContent === 'Connected'`, 15000);
+      await sleep(500);
+      const who = await Q.ev(`document.querySelector('#who').textContent`), pb = await P.bar();
+      const which = A.live.size === 1 ? "Claude" : A2.live.size === 1 ? "Codex" : null;
+      ok(which !== null && who.startsWith(which) && pb.status === COPY.released && !pb.status.includes("connected in"), "A14-3e: with two remembered agents, the second tab names the one it connected; the first says only that it let go", { who, which, pb: pb.status });
+    } finally { A2.stop(); }
   });
 
   // A14-4: Revoke, then reload: no bar, nothing reconnects, no record

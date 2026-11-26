@@ -1,0 +1,318 @@
+python 3.14.9 x86_64 glibc
+package et_xmlfile 2.0.0
+package numpy 2.5.1
+package openpyxl 3.1.5
+package pandas 3.1.0
+package python-dateutil 3.0.0
+package six 1.17.0
+package tzdata 2026.6
+pyarrow absent
+future.infer_string True
+str dtype <StringDtype(storage='python', na_value=nan)>
+option display.max_rows 60
+option display.min_rows 10
+option display.max_columns 0
+option display.width 80
+option display.precision 6
+option display.max_colwidth 50
+--
+== ctor
+
+0    1.000000e-01
+1    1.500000e+00
+2             NaN
+3   -2.250000e+00
+4    3.000000e+38
+Name: f, dtype: float32
+== ctor.dtype
+dtype('float32')
+== ctor.dtype-eq
+(True, True, 'float32')
+== ctor-dtype
+
+0    0.1
+1    2.0
+dtype: float32
+== ctor-dtype-np
+
+0    1.0
+1    2.0
+dtype: float32
+== ctor-scalars
+
+0    0.1
+1    2.0
+dtype: float32
+== ctor-scalars-nan
+dtype('float32')
+== ctor-scalars-mixed
+dtype('float64')
+== frame
+
+              a  b
+0  1.000000e-01  1
+1  1.500000e+00  2
+2           NaN  3
+3 -2.250000e+00  4
+4  3.000000e+38  5
+== frame.dtypes
+[('a', 'float32'), ('b', 'int64')]
+== frame-2d
+[('0', 'float32'), ('1', 'float32')]
+== frame-dtype
+[('a', 'float32')]
+== astype
+
+0    0.1
+1    inf
+2    NaN
+dtype: float32
+== astype-int
+[1.0, 16777216.0]
+== astype-back
+[0.10000000149011612, 1.5, nan, -2.25, 3.0000000054977558e+38]
+== astype-int-nan
+!! IntCastingNaNError: Cannot convert non-finite values (NA or inf) to integer. Replace or remove non-finite values or cast to an integer type that supports these values (e.g. 'Int64')
+== astype-int-finite
+
+0    1
+1   -2
+dtype: int32
+== astype-str
+
+0      0.1
+1      1.5
+2      NaN
+3    -2.25
+4    3e+38
+Name: f, dtype: str
+== astype-str-values
+['0.1', '1.5', nan, '-2.25', '3e+38']
+== item
+np.float32(1.5)
+== iloc
+np.float32(0.1)
+== tolist
+[0.10000000149011612, 1.5, nan, -2.25, 3.0000000054977558e+38]
+== values
+('float32', [0.10000000149011612, 1.5, nan, -2.25, 3.0000000054977558e+38])
+== to_numpy
+('float32', [0.10000000149011612, 1.5, nan, -2.25, 3.0000000054977558e+38])
+== to_numpy-float64
+[0.10000000149011612, 1.5, nan, -2.25, 3.0000000054977558e+38]
+== isna
+[False, False, True, False, False]
+== set-float
+
+0    3.000000e-01
+1    1.500000e+00
+2             NaN
+3   -2.250000e+00
+4    3.000000e+38
+Name: f, dtype: float32
+== set-int
+
+0    2.000000e+00
+1    1.500000e+00
+2             NaN
+3   -2.250000e+00
+4    3.000000e+38
+Name: f, dtype: float32
+== set-none
+
+0             NaN
+1    1.500000e+00
+2             NaN
+3   -2.250000e+00
+4    3.000000e+38
+Name: f, dtype: float32
+== set-str
+!! TypeError: Invalid value 'x' for dtype 'float32'
+== sum
+np.float32(3e+38)
+== mean
+np.float32(7.5e+37)
+== min
+np.float32(-2.25)
+== max
+np.float32(3e+38)
+== count
+np.int64(4)
+== sum-skipna-false
+np.float32(nan)
+== sum-empty
+np.float32(0.0)
+== mean-empty
+nan
+== min-all-missing
+np.float32(nan)
+== big.sum
+np.float32(326.1756)
+== big.mean
+np.float32(0.3261756)
+== gaps.sum
+np.float32(331.25977)
+== gaps.mean
+np.float32(0.36442217)
+== frame.sum
+
+a    3.000000e+38
+b    3.000000e+38
+dtype: float32
+== frame.mean-mixed
+
+a    7.500000e+37
+b    1.000000e+00
+dtype: float64
+== frame.to_numpy
+'float32'
+== frame.to_numpy-float64
+'float64'
+== frame.to_numpy-int64
+'float64'
+== frame.to_numpy-int32
+'float64'
+== frame.to_numpy-uint8
+'float32'
+== frame.T
+
+     0    1
+a  0.1  1.5
+b  0.1  1.5
+== frame.row
+
+a    0.1
+b    1.0
+Name: 0, dtype: float64
+== diff
+
+0             NaN
+1    1.400000e+00
+2             NaN
+3             NaN
+4    3.000000e+38
+Name: f, dtype: float32
+== diff.values
+[nan, 1.399999976158142, nan, nan, 3.0000000054977558e+38]
+== sort
+
+3   -2.250000e+00
+0    1.000000e-01
+1    1.500000e+00
+4    3.000000e+38
+2             NaN
+Name: f, dtype: float32
+== unique
+('float32', [0.10000000149011612, 1.5, nan, -2.25, 3.0000000054977558e+38])
+== fillna
+
+0    1.000000e-01
+1    1.500000e+00
+2    0.000000e+00
+3   -2.250000e+00
+4    3.000000e+38
+Name: f, dtype: float32
+== fillna-mean
+[0.10000000149011612, 1.5, 7.500000013744389e+37, -2.25, 3.0000000054977558e+38]
+== value_counts
+
+0.1    2
+2.0    1
+Name: count, dtype: int64
+== value_counts.index
+Index([0.10000000149011612, 2.0], dtype='float32')
+== concat
+dtype('float32')
+== concat-int32
+dtype('float64')
+== concat-int16
+dtype('float32')
+== concat-int64
+dtype('float64')
+== concat-uint8
+dtype('float32')
+== concat-float64
+[0.10000000149011612, 1.5, nan, -2.25, 3.0000000054977558e+38, 0.5]
+== concat-gap
+[('a', 'float32'), ('b', 'float64')]
+== melt
+[('variable', 'str'), ('value', 'float64')]
+== memory
+[132, 20]
+== info
+<class 'pandas.DataFrame'>
+RangeIndex: 5 entries, 0 to 4
+Data columns (total 1 columns):
+ #   Column  Non-Null Count  Dtype  
+---  ------  --------------  -----  
+ 0   a       4 non-null      float32
+dtypes: float32(1)
+memory usage: 152.0 bytes
+None
+== describe
+
+count    4.000000e+00
+mean     7.500000e+37
+std               inf
+min     -2.250000e+00
+25%     -4.875000e-01
+50%      8.000000e-01
+75%      7.500000e+37
+max      3.000000e+38
+Name: f, dtype: float64
+== describe.exact
+[4.0, 7.500000013744389e+37, inf, -2.25, -0.48749998211860657, 0.800000011920929, 7.500000013744389e+37, 3.0000000054977558e+38]
+== describe.big
+[1000.0, 0.32617560029029846, 7.365017414093018, -21.582983016967773, -4.795782923698425, 0.48506537079811096, 5.556511282920837, 27.22794532775879]
+== describe.gaps
+[909.0, 0.36442217230796814, 7.344188213348389, -21.582983016967773, -16.38942527770996, -8.976059913635254, -2.943399667739868, 0.4514223337173462, 2.1978647708892822, 16.153669357299805, 27.22794532775879]
+== describe.frame
+
+                  a         b
+count  4.000000e+00  5.000000
+mean   7.500000e+37  3.000000
+std             inf  1.581139
+min   -2.250000e+00  1.000000
+25%   -4.875000e-01  2.000000
+50%    8.000000e-01  3.000000
+75%    7.500000e+37  4.000000
+max    3.000000e+38  5.000000
+== corr
+[[1.0, -0.8133375267879148], [-0.8133375267879148, 1.0]]
+== corr.big
+[[1.0, 1.0, 0.05844597831576956], [1.0, 1.0, 0.06813631502904854], [0.05844597831576956, 0.06813631502904854, 1.0]]
+== series-corr
+-0.813337526788
+== compare
+[False, True, False, False, True]
+== compare-eq
+[True, False, False, False, False]
+== repr-frame
+
+              a             b
+0  1.000000e-01  1.000000e-01
+1  1.500000e+00  1.500000e+00
+2           NaN           NaN
+3 -2.250000e+00 -2.250000e+00
+4  3.000000e+38  3.000000e+38
+== repr-small
+
+0    1.000000e-10
+1    1.000000e+00
+dtype: float32
+== repr-html
+'<div>\n<style scoped>\n    .dataframe tbody tr th:only-of-type {\n        vertical-align: middle;\n    }\n\n    .dataframe tbody tr th {\n        vertical-align: top;\n    }\n\n    .dataframe thead th {\n        text-align: right;\n    }\n</style>\n<table border="1" class="dataframe">\n  <thead>\n    <tr style="text-align: right;">\n      <th></th>\n      <th>a</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <th>0</th>\n      <td>0.1</td>\n    </tr>\n    <tr>\n      <th>1</th>\n      <td>1.5</td>\n    </tr>\n  </tbody>\n</table>\n</div>'
+== apply
+
+0    2.000000e-01
+1    3.000000e+00
+2             NaN
+3   -4.500000e+00
+4    6.000000e+38
+Name: f, dtype: float64
+== isna-array
+[False, True]
+== compare-gt
+[False, True]
+== compare-int
+[True, False]

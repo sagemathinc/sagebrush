@@ -211,6 +211,10 @@ const hasAttr = (o: any, name: string): boolean => {
     throw e;
   }
 };
+// The name a module's submodules are imported under, where it isn't its __name__: the library's own sagebrush package,
+// named "sagebrush" but imported by the library as _sagebrush_lib (src/compile.ts libraryPackage)
+export const IMPORT_NAME = Symbol("the name a module's submodules are imported under");
+const childBase = (m: any): string => (typeof m?.[IMPORT_NAME] === "string" ? m[IMPORT_NAME] : unbox(getattr(m, "__name__")));
 // (a package's fromlist, as CPython's _handle_fromlist: each name it lacks
 // imported as its child; a child that does not exist is passed over, for
 // the from-import to report, unless it is None in sys.modules; '*' is its
@@ -229,7 +233,7 @@ function handleFromlist(m: any, fromlist: any, recursive: boolean): void {
     if (name === "*") {
       if (!recursive && hasAttr(m, "__all__")) handleFromlist(m, getattr(m, "__all__"), true);
     } else if (!hasAttr(m, name)) {
-      const from = `${unbox(getattr(m, "__name__"))}.${name}`;
+      const from = `${childBase(m)}.${name}`;
       try {
         importModule(from);
       } catch (e: any) {
@@ -374,10 +378,11 @@ export function importFrom(m: any, name: string): any {
   // module the submodule imports being missing, or a None in sys.modules,
   // propagates, as CPython's _handle_fromlist does for a package (and
   // handleFromlist above)
+  const sub = `${childBase(m)}.${name}`;
   try {
-    return importModule(`${m.__name__}.${name}`);
+    return importModule(sub);
   } catch (e: any) {
-    if (!(e?.$cls !== undefined && isinstance(e, T.ModuleNotFoundError) && e.name === `${m.__name__}.${name}` && dictGet(sysModules, `${m.__name__}.${name}`) !== null)) throw e;
+    if (!(e?.$cls !== undefined && isinstance(e, T.ModuleNotFoundError) && e.name === sub && dictGet(sysModules, sub) !== null)) throw e;
   }
   const err = T.ImportError(`cannot import name '${name}' from '${m.__name__}'`);
   // (as CPython's import_from: name the module's, path its file, name_from the name asked for; None where not a str)
