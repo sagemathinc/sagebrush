@@ -15597,6 +15597,62 @@
   "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
   "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
  },
+ "web/sync/e2e-chain.ts :: stale :: const all = this.sql.exec(\"SELECT entry FROM e2e_chain WHERE seq >= ? ORDER BY seq LIMIT ?\", from, E2E.page).toArray() as Row[]; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: stale :: const r = this.sql.exec(\"SELECT bytes, seq, epoch FROM e2e_wrappers WHERE kind = ? AND rid = ? AND epoch = ? ORDER BY seq DESC LIMIT 1\", kind, id, h.epoch).toArray()[0] as Row | undefined; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: stale :: if (live >= E2E.sessions) throw new SyncError(\"limit\", \"too many enrollments at once\", { max: E2E.sessions }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: kept :: const last = this.sql.exec(\"SELECT epoch, hash FROM e2e_keyrings ORDER BY epoch DESC LIMIT 1\").toArray()[0] as Row | undefined; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: kept :: else if (this.kept() + 1 > this.bounds.entries && op !== \"remove\" && op !== \"recover\") throw new SyncError(\"limit\", \"the key chain is at its length bound: only removing a device, recovering or a reset goes on\", { max: this.bounds.entries }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: kept :: if (!isReset && this.kept() + 1 > this.bounds.entries + this.bounds.reserve) throw new SyncError(\"limit\", \"the key chain is at its length bound\", { max: this.bounds.entries + this.bounds.reserve }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: kept :: if ([...next.devices.values()].filter((d) => d.removed === null).length > E2E.devices) throw new SyncError(\"limit\", \"too many devices\", { max: E2E.devices }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
  "web/workspace/checkpoint.ts ::  :: export const CHECKPOINT_BLOB_MAX = 32 << 20; #0": {
   "class": "1",
   "disposition": {
