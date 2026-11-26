@@ -63,6 +63,11 @@ declare const __SB_ND_HASH__: string;
 declare const __SB_MP_HASH__: string;
 (globalThis as any).__SAGEBRUSH_MP_URL__ = FILES ? FILES["sagebrush-mp.wasm"] : new URL("sagebrush-mp.wasm?h=" + __SB_MP_HASH__.slice(0, 16), BASE).href;
 (globalThis as any).__SAGEBRUSH_MP_SHA256__ = __SB_MP_HASH__;
+// the decision-tree kernel likewise, at the first sagebrush.skltree.dataset
+// (src/runtime/skltree.ts; the runner's broker may fetch it, web/runner-fetch.mts)
+declare const __SB_SKLTREE_HASH__: string;
+(globalThis as any).__SAGEBRUSH_SKLTREE_URL__ = FILES ? FILES["sagebrush-skltree.wasm"] : new URL("sagebrush-skltree.wasm?h=" + __SB_SKLTREE_HASH__.slice(0, 16), BASE).href;
+(globalThis as any).__SAGEBRUSH_SKLTREE_SHA256__ = __SB_SKLTREE_HASH__;
 // (the build's id, version and notices; the library itself is fetched in
 // chunks, web/lib-lazy.ts, which must come before src/compile)
 import "../build/cli/lib-meta.gen.js";

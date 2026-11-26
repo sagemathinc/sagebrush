@@ -65,6 +65,15 @@ export function python(args) {
   return r;
 }
 
+/** null when the app's log has exactly one "[agent] bundle:" line and it is what this platform must report. */
+export function agentBundleProblem(err, platform) {
+  const lines = String(err).split(/\r?\n/).filter((l) => l.startsWith("[agent] bundle: "));
+  if (lines.length !== 1) return `${lines.length} "[agent] bundle:" lines in the app's log, not 1`;
+  const bundled = platform === "darwin" || platform === "linux";
+  const want = bundled ? /^\[agent\] bundle: ok agent=\d+\.\d+\.\d+ node=\d+\.\d+\.\d+ claude_code=\S+ node_check=(bytes|signature)$/ : /^\[agent\] bundle: not_bundled$/;
+  return want.test(lines[0]) ? null : `${JSON.stringify(lines[0])} (${bundled ? "the agent is bundled here" : "no agent is bundled here"})`;
+}
+
 // -> { passed, report }; prints a FAIL line for each failing part.
 export function judge(res, { dir, platform = process.platform }) {
   const here = new URL(".", import.meta.url);
@@ -92,6 +101,9 @@ export function judge(res, { dir, platform = process.platform }) {
     witness = w.status === 0;
     if (!witness) console.log(`FAIL the native witness (probe-log.py: ${w.error ? "no python" : "exit " + w.status})`);
   }
-  const passed = res.problems.length === 0 && res.code === 0 && res.out.includes("all passed") && judged && witness;
+  // (the agent bundle's check, run by the app on its own resources and Node: macOS and Linux bundle the agent)
+  const bundle = agentBundleProblem(res.err, platform);
+  if (bundle) console.log(`FAIL the agent bundle: ${bundle}`);
+  const passed = res.problems.length === 0 && res.code === 0 && res.out.includes("all passed") && judged && witness && !bundle;
   return { passed, report };
 }

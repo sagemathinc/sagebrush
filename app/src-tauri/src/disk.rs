@@ -18,7 +18,7 @@ mod folder_fs;
 use folder_fs::Grant;
 
 /// The app's data folder (a self-test may name its own, SAGEBRUSH_APP_DATA_DIR).
-fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let base = app.path().app_data_dir().map_err(|e| format!("the app's data folder: {e}"))?;
     Ok(std::env::var_os("SAGEBRUSH_APP_DATA_DIR").map(PathBuf::from).filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some()).unwrap_or(base))
 }
@@ -29,7 +29,26 @@ fn root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     open_root(&d.join("Workspace"))
 }
 
-// ---- the page's commands (the main window only: capabilities/default.json)
+/// Whether `p` is a workspace path ("/a/b.ipynb", as every disk command takes it).
+pub fn workspace_path(p: &str) -> Result<(), String> {
+    components(p).map(|_| ())
+}
+
+/// Window `from` changed the workspace on disk (`what` "sb-disk-changed") or grants.json ("sb-grants-changed"): the
+/// app's other windows are told, to read it again (#1541: web/workspace/disk-mirror.ts DiskMirror.pull,
+/// grants-file.ts adoptGrants).  Every window hears it (a page listens for any window's events); each leaves out its
+/// own.
+fn told(app: &tauri::AppHandle, from: &tauri::Webview, what: &str) {
+    use tauri::Emitter;
+    if app.webview_windows().len() > 1 {
+        let _ = app.emit(what, serde_json::json!({ "from": from.label() }));
+    }
+}
+fn changed(app: &tauri::AppHandle, from: &tauri::Webview) {
+    told(app, from, "sb-disk-changed");
+}
+
+// ---- the page's commands (the app's windows: capabilities/default.json)
 
 fn path_header(req: &tauri::ipc::Request) -> Result<String, String> {
     let h = req.headers().get("Sagebrush-Path").ok_or("no path")?.to_str().map_err(|_| "a path that isn't text")?;
@@ -65,12 +84,13 @@ pub fn disk_read(app: tauri::AppHandle, path: String) -> Result<tauri::ipc::Resp
 /// The bytes are the request's body; the path its Sagebrush-Path header (percent-encoded), and what the page expects
 /// the file to be its Sagebrush-Expect header (disk_fs.rs Expect).  The file as written: {size, mtime, sha256}.
 #[tauri::command]
-pub fn disk_write(app: tauri::AppHandle, request: tauri::ipc::Request) -> Result<Option<Entry>, String> {
+pub fn disk_write(app: tauri::AppHandle, webview: tauri::Webview, request: tauri::ipc::Request) -> Result<Option<Entry>, String> {
     let p = path_header(&request)?;
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("the bytes must be sent as bytes".into()) };
     let expect = Expect::parse(request.headers().get("Sagebrush-Expect").and_then(|h| h.to_str().ok()))?;
     let root = root(&app)?;
     write(&root, &p, bytes, &expect)?;
+    changed(&app, &webview);
     stat(&root, &p)
 }
 
@@ -80,18 +100,24 @@ pub fn disk_stat(app: tauri::AppHandle, path: String) -> Result<Option<Entry>, S
 }
 
 #[tauri::command]
-pub fn disk_mkdir(app: tauri::AppHandle, path: String) -> Result<(), String> {
-    mkdir(&root(&app)?, &path)
+pub fn disk_mkdir(app: tauri::AppHandle, webview: tauri::Webview, path: String) -> Result<(), String> {
+    mkdir(&root(&app)?, &path)?;
+    changed(&app, &webview);
+    Ok(())
 }
 
 #[tauri::command]
-pub fn disk_rename(app: tauri::AppHandle, from: String, to: String, expect: Option<String>) -> Result<(), String> {
-    rename(&root(&app)?, &from, &to, &Expect::parse(expect.as_deref())?)
+pub fn disk_rename(app: tauri::AppHandle, webview: tauri::Webview, from: String, to: String, expect: Option<String>) -> Result<(), String> {
+    rename(&root(&app)?, &from, &to, &Expect::parse(expect.as_deref())?)?;
+    changed(&app, &webview);
+    Ok(())
 }
 
 #[tauri::command]
-pub fn disk_remove(app: tauri::AppHandle, path: String, expect: Option<String>) -> Result<(), String> {
-    remove(&root(&app)?, &path, &Expect::parse(expect.as_deref())?)
+pub fn disk_remove(app: tauri::AppHandle, webview: tauri::Webview, path: String, expect: Option<String>) -> Result<(), String> {
+    remove(&root(&app)?, &path, &Expect::parse(expect.as_deref())?)?;
+    changed(&app, &webview);
+    Ok(())
 }
 
 /// The folder the workspace is kept in, for the page to say where the files are.
@@ -214,19 +240,65 @@ fn grants_of(json: &str) -> Result<(), String> {
 
 #[tauri::command]
 pub fn grants_read(app: tauri::AppHandle) -> Result<String, String> {
-    let kept = read_small(&open_root(&data_dir(&app)?)?, "grants.json", GRANTS_MAX as u64)?;
-    Ok(kept.filter(|s| grants_of(s).is_ok()).unwrap_or_default())
+    grants_now(&open_root(&data_dir(&app)?)?)
+}
+
+/// grants.json as the page reads it: the page's record, or "" (none, or not a record).
+fn grants_now(dir: &std::path::Path) -> Result<String, String> {
+    Ok(read_small(dir, "grants.json", GRANTS_MAX as u64)?.filter(|s| grants_of(s).is_ok()).unwrap_or_default())
+}
+/// The app's windows each write the whole record (#1541), so a write is made only over the grants.json its window last
+/// read or wrote (`expect`, its text as grants_read gave it, "" for none): else it is refused, and the page merges what
+/// is there and writes again (web/workspace/grants-file.ts grantsSync).  One read-compare-write at a time.
+static GRANTS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub const GRANTS_CHANGED: &str = "grants.json was changed by another window";
+fn grants_swap(dir: &std::path::Path, json: &str, expect: &str) -> Result<(), String> {
+    grants_of(json)?;
+    let _held = GRANTS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if grants_now(dir)? != expect {
+        return Err(GRANTS_CHANGED.into());
+    }
+    write_small(dir, "grants.json", json)
 }
 
 #[tauri::command]
-pub fn grants_write(app: tauri::AppHandle, json: String) -> Result<(), String> {
-    grants_of(&json)?;
-    write_small(&open_root(&data_dir(&app)?)?, "grants.json", &json)
+pub fn grants_write(app: tauri::AppHandle, webview: tauri::Webview, json: String, expect: String) -> Result<(), String> {
+    grants_swap(&open_root(&data_dir(&app)?)?, &json, &expect)?;
+    told(&app, &webview, "sb-grants-changed");
+    Ok(())
 }
 
 #[cfg(test)]
 mod grants_tests {
     use super::grants_of;
+
+    #[test]
+    fn a_write_only_over_what_its_window_last_saw() {
+        let dir = std::env::temp_dir().join(format!("sb-grants-swap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (a, b, c) = (r#"{"v":1,"docs":{"file:/a":{"write":["/x"]}}}"#, r#"{"v":1,"docs":{}}"#, r#"{"v":1,"docs":{"file:/c":{}}}"#);
+        // (none there: only a write expecting none)
+        assert_eq!(super::grants_swap(&dir, a, b), Err(super::GRANTS_CHANGED.into()));
+        assert_eq!(super::grants_swap(&dir, a, ""), Ok(()));
+        // (a window that saw the first record takes the permission back; another that also saw only the first can't
+        // write over that, nor can one expecting none)
+        assert_eq!(super::grants_swap(&dir, b, a), Ok(()));
+        assert_eq!(super::grants_swap(&dir, c, a), Err(super::GRANTS_CHANGED.into()));
+        assert_eq!(super::grants_swap(&dir, c, ""), Err(super::GRANTS_CHANGED.into()));
+        assert_eq!(super::grants_now(&dir).unwrap(), b);
+        // (one that read it after can)
+        assert_eq!(super::grants_swap(&dir, c, b), Ok(()));
+        assert_eq!(super::grants_now(&dir).unwrap(), c);
+        // (a grants.json that isn't a record reads as none, and is written over only by a write expecting none)
+        std::fs::write(dir.join("grants.json"), "not json").unwrap();
+        assert_eq!(super::grants_now(&dir).unwrap(), "");
+        assert_eq!(super::grants_swap(&dir, a, c), Err(super::GRANTS_CHANGED.into()));
+        assert_eq!(super::grants_swap(&dir, a, ""), Ok(()));
+        // (and never a write that isn't a record)
+        assert!(super::grants_swap(&dir, "not json", a).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn only_the_page_s_record_within_its_cap() {
