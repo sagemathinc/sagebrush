@@ -3,8 +3,9 @@
 // with its real WebCrypto, against fixture epochs and a fixture declaration store: a document's first patch mints and
 // declares one generation (once, however many sealings ask at the same time), which another device of the account
 // opens from the declaration alone; the index asked once per chain head; a new epoch, or a retired generation, mints
-// anew while older patches still open; a declaration race settles on the index's answer; a wrapped key moved to
-// another place, edited or cut short is refused; and a failure caches nothing.
+// anew while older patches still open; a declaration race settles on the index's answer, and one refused as stale is
+// minted again once; a wrapped key moved to another place, edited or cut short is refused; and a failure caches
+// nothing.
 //   CHROME=google-chrome bun web/workspace/test-doc-keys.mjs
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -35,7 +36,7 @@ const html = `<!doctype html><script type="module">import * as m from "/s.js"; O
 window.code = async (f) => { try { await f(); return "ok"; } catch (e) { return e?.code ?? String(e?.message ?? e); } };
 window.ACCT = "e2e-acct-1";
 window.store = () => {
-  const decls = [], calls = { current: 0, exact: 0, declare: 0 }, s = { decls, calls, retired: new Set(), race: null, failOnce: false };
+  const decls = [], calls = { current: 0, exact: 0, declare: 0 }, s = { decls, calls, retired: new Set(), race: null, failOnce: false, stale: 0, onStale: null };
   const key = (d) => d.document + "/" + d.cekId + "/" + d.keyEpoch;
   s.api = {
     current: async (doc, head) => { calls.current++; for (let i = decls.length - 1; i >= 0; i--) if (decls[i].document === doc && !s.retired.has(key(decls[i]))) return decls[i]; return null; },
@@ -44,6 +45,7 @@ window.store = () => {
       calls.declare++;
       await new Promise((r) => setTimeout(r, 5));
       if (s.failOnce) { s.failOnce = false; throw new Error("offline"); }
+      if (s.stale > 0) { s.stale--; s.onStale?.(); throw Object.assign(new Error("stale head"), { code: "stale" }); }
       if (s.race) { decls.push(s.race); s.race = null; return decls[decls.length - 1]; }
       decls.push(d); return d;
     },
@@ -207,6 +209,22 @@ try {
     })()`);
     ok(r.first === "offline" && r.second === "ok" && r.declares === 2 && r.n === 1, "K-8: a declaration that fails fails the sealing, and the next asks again (nothing cached)", r);
     ok(/epoch 1's keys/.test(r.noKeys) && r.back === "ok", "K-8: a device without the generation's epoch keys refuses to open it, and opens it once it has them", r);
+  }
+
+  // ---- K-10: a declaration refused "stale" (the chain moved on before it went up) is minted again, once
+  {
+    const r = await P.ev(`(async () => {
+      const st = store(), a = account(${J(FILLS)}), p = K.docKeys({ epochs: a.api, declarations: st.api });
+      st.stale = 1; st.onStale = () => { a.head = "h-removal"; a.currentEpoch = 2; };
+      const g = await p.current(${J(DOC)});
+      const once = { epoch: g.keyEpoch, declares: st.calls.declare, decls: st.decls.map((d) => [d.keyEpoch, d.head]) };
+      const st2 = store(), b = account(${J(FILLS)}), q = K.docKeys({ epochs: b.api, declarations: st2.api });
+      st2.stale = 2;
+      const twice = await code(() => q.current(${J(DOC)}));
+      return { once, twice, declares2: st2.calls.declare };
+    })()`);
+    ok(r.once.epoch === 2 && r.once.declares === 2 && J(r.once.decls) === J([[2, "h-removal"]]), "K-10: a declaration refused stale is minted again under the chain read afresh (the new epoch, declared at the new head)", r);
+    ok(r.twice === "stale" && r.declares2 === 2, "K-10: only once: a second stale refusal fails the sealing", r);
   }
 
   // ---- K-9: no page has keys yet

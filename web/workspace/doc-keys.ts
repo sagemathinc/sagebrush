@@ -22,7 +22,8 @@ export interface AccountEpochs {
   chain(refresh?: boolean): Promise<{ readonly head: string; readonly currentEpoch: number }>;
   epochKeys(n: number): Promise<EpochKeys | null>;
 }
-/** A document key generation as the sealed index declares it, with the chain head that authorized its declaration. */
+/** A document key generation as the sealed index declares it, with the chain head that authorized its declaration (the
+ * head its op was sealed under: the index keeps no head of its own, and refuses a key epoch that isn't that head's). */
 export type KeyDeclaration = Readonly<{ document: string; cekId: string; keyEpoch: number; wrappedCek: Uint8Array; head: string }>;
 /** The sealed index's key declarations. */
 export interface DocDeclarations {
@@ -30,7 +31,8 @@ export interface DocDeclarations {
   current(doc: string, head: string): Promise<KeyDeclaration | null>;
   /** exactly the generation (doc, cekId, keyEpoch), or null */
   exact(doc: string, cekId: string, keyEpoch: number): Promise<KeyDeclaration | null>;
-  /** declare a new generation; resolves, once the index decides, with the generation current for `doc` after it */
+  /** declare a new generation; resolves, once the index decides, with the generation current for `doc` after it.
+   * Rejects with code "stale" if the chain moved past `head` before it went up (it is then minted again, once) */
   declare(d: KeyDeclaration): Promise<KeyDeclaration>;
 }
 
@@ -76,7 +78,12 @@ export function docKeys(src: { epochs: AccountEpochs; declarations: DocDeclarati
       const { head, currentEpoch } = await epochs.chain();
       const had = current.get(doc);
       if (had && had.head === head) return had.gen;
-      const gen = resolve(doc, head, currentEpoch);
+      // (a declaration re-sealed under a newer head than it names is refused "stale": the chain read again, once)
+      const gen = resolve(doc, head, currentEpoch).catch(async (e) => {
+        if ((e as { code?: string })?.code !== "stale") throw e;
+        const now = await epochs.chain(true);
+        return resolve(doc, now.head, now.currentEpoch);
+      });
       const entry = { head, gen };
       current.set(doc, entry);
       gen.catch(() => { if (current.get(doc) === entry) current.delete(doc); });
