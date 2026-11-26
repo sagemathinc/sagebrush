@@ -16,6 +16,7 @@ type How =
   | "memory-oom-once" // every maximum refused for memory, once
   | "memory-4g-refused" // only 4 GiB refused for memory (address space): 1 GiB is taken
   | "instance-oom-once" // the instance refused for memory, once
+  | "instance-exec-oom-once" // the instance refused for executable memory in an engine's own words (a CompileError), once
   | "no-shared" // the engine makes no shared memory (a TypeError): a feature it lacks
   | "not-isolated" // a page that isn't cross-origin isolated
   | "instance-link-error"; // a valid module the engine won't link: taken as the feature's absence
@@ -44,6 +45,7 @@ W.Instance = function (mod, imports) {
   if (m && m.buffer instanceof SharedArrayBuffer) {
     instances++;
     if (how === "instance-oom-once" && !instOomDone) { instOomDone = true; refused++; throw new RangeError("WebAssembly.Instance(): Out of memory: Cannot allocate Wasm memory for new instance"); }
+    if (how === "instance-exec-oom-once" && !instOomDone) { instOomDone = true; refused++; throw new W.CompileError("WebAssembly.Instance(): out of executable memory"); }
     if (how === "instance-link-error") { refused++; throw new W.LinkError("WebAssembly.Instance(): Import #0 \\"env\\" \\"memory\\": not supported here"); }
   }
   return new RealInstance(mod, imports);
@@ -101,6 +103,12 @@ test("only 4 GiB of address space refused: engine/nd with a 1 GiB maximum, the s
 
 test("engine/nd's instance refused for memory: a MemoryError for that call, then engine/nd answers the next", () => {
   const { out, err } = run("instance-oom-once");
+  assert.deepEqual(out, [REFUSED("engine/nd"), ND[1], "path engine/nd", "why ", `max ${2 ** 32}`]);
+  assert.match(err, /instances 2 refused 1\n/);
+});
+
+test("engine/nd's instance refused for executable memory (a CompileError, not a RangeError): a MemoryError, then engine/nd", () => {
+  const { out, err } = run("instance-exec-oom-once");
   assert.deepEqual(out, [REFUSED("engine/nd"), ND[1], "path engine/nd", "why ", `max ${2 ** 32}`]);
   assert.match(err, /instances 2 refused 1\n/);
 });
