@@ -929,7 +929,10 @@ dependencies = [
  "sagebrush-interrupt",
  "sagebrush-modsym",
  "sagebrush-mp",
+ "sagebrush-mpoly",
  "sagebrush-par",
+ "sagebrush-sym",
+ "sagebrush-web",
 ]
 
 [[package]]

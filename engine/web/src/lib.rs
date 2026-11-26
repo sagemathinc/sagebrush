@@ -59,8 +59,9 @@ pub extern "C" fn sb_reply_len() -> usize {
 }
 
 /// A top-level call starts: frames and live-progress state a trapped call
-/// left behind (a trap runs no destructors) are forgotten.
-fn new_run() {
+/// left behind (a trap runs no destructors) are forgotten.  Public for the
+/// native addon (engine/node), whose calls start the same way.
+pub fn new_run() {
     sagebrush_interrupt::progress::reset_frames();
     sagebrush_arith::smith::progress::reset();
     sagebrush_poly::reset_binomial_units();

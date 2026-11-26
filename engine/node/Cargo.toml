@@ -15,6 +15,9 @@ sagebrush-interrupt = { path = "../interrupt" }
 sagebrush-modsym = { path = "../modsym" }
 sagebrush-ap = { path = "../ap" }
 sagebrush-par = { path = "../par", features = ["parallel"] }
+sagebrush-web = { path = "../web" }
+sagebrush-sym = { path = "../sym" }
+sagebrush-mpoly = { path = "../mpoly" }
 napi = { version = "2", default-features = false, features = ["napi7"] }
 napi-derive = "2"
 
