@@ -1303,6 +1303,8 @@ def main(argv):
         return 2
     try:
         key = _keys.load()
+    except _keys.OldKeyFile:
+        key = None  # (an older release's key file: enrolled again below, as with none; login keeps the old one aside)
     except _keys.KeyFileError as e:
         sys.stderr.write("sagebrush remote: %s\n" % e)
         return 1

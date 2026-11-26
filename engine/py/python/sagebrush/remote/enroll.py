@@ -110,6 +110,21 @@ def login(origin, name, kind="runner", out=None, sleep=time.sleep, clock=time.mo
         raise EnrollError("%s refused: %s" % (origin, e or status))
 
 
+def _unchanged(before):
+    """The key file is still what it was when this login began: none still none, or the same old file (the same
+    object and bytes, and still one this version doesn't recognize)."""
+    now = keys.state()
+    if now != before:
+        return False
+    if now is None:
+        return True
+    try:
+        keys.load()
+    except keys.OldKeyFile:
+        return True
+    return False
+
+
 def main(argv):
     """`sagebrush remote login [--origin URL] [--name NAME] [--force]`."""
     import os
@@ -137,8 +152,13 @@ def main(argv):
             sys.stderr.write("sagebrush remote login: unknown argument %s\n" % a)
             return 2
         i += 1
+    stale = None
     try:
         old = keys.load()
+    except keys.OldKeyFile as e:
+        # (a key file this version can't use, an older release's for one: replaced by this enrollment, and kept aside
+        #  as key.json.old once the new key is ready, so a login that fails or is stopped leaves it as it was)
+        old, stale = None, e
     except keys.KeyFileError as e:
         old = None
         if not force:
@@ -148,10 +168,30 @@ def main(argv):
         sys.stderr.write("This computer is already enrolled as %s at %s (%s).  To enroll it again: --force (and revoke "
                          "the old one in your account's settings).\n" % (old.name, old.origin, old.remote_id))
         return 1
+    # (what the key file is now, none or an old one: without --force, this enrollment replaces it only if it is still
+    #  exactly that once the device flow ends; another login may finish meanwhile)
+    before = None
+    if not force:
+        try:
+            before = keys.state()
+        except keys.KeyFileError as e:
+            sys.stderr.write("sagebrush remote login: %s (or --force to enroll anew)\n" % e)
+            return 1
+    if stale is not None:
+        sys.stderr.write("sagebrush remote login: %s: enrolling this computer again.\n" % stale)
     try:
         key = login(origin, name[:64])
-        path = keys.save(key)
-    except (EnrollError, keys.KeyFileError) as e:
+        with keys.write_lock():
+            if not force and not _unchanged(before):
+                sys.stderr.write("sagebrush remote login: the key file changed while this computer was being enrolled "
+                                 "(another login?), so it is left as it is and this enrollment isn't saved.  Run "
+                                 "sagebrush remote login again (and remove the extra computer in your account's "
+                                 "settings).\n")
+                return 1
+            if stale is not None and os.path.lexists(keys.default_path()):
+                sys.stderr.write("The old file is kept as %s.\n" % keys.move_aside())
+            path = keys.save(key)
+    except (EnrollError, keys.KeyFileError, OSError) as e:
         sys.stderr.write("sagebrush remote login: %s\n" % e)
         return 1
     except KeyboardInterrupt:
