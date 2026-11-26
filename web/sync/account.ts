@@ -21,8 +21,9 @@ import { E2E, E2E_KEEP, E2EStore, e2eAccount, e2eAud } from "./e2e-chain.ts";
 import { sealedOpMessage } from "../workspace/e2e/sealed-op.mjs";
 import { e2eCore } from "../workspace/e2e/core-ready.ts";
 import { sha256b64, unb64, verifyStrict } from "../workspace/e2e/core/sealed-prims.mjs";
-import { AGENT, GRANT_ID, READS, SCOPED, VERBS, checkAgentName, RESERVED, checkScopes, inScope, makeToken, newGrantId, newSecret, secretHash, type Scope } from "./agent-token.ts";
-import { TRASH, normPath, within } from "../workspace/paths.ts";
+import { AGENT, GRANT_ID, READS, SCOPED, VERBS, checkAgentName, checkScopes, inScope, makeToken, newGrantId, newSecret, secretHash, type Scope } from "./agent-token.ts";
+import { TRASH, within } from "../workspace/paths.ts";
+import { reserved, scopeCheck } from "../workspace/agent-scope.ts";
 import { checkCall } from "../workspace/agent-schema.ts";
 import { IX, SCHEMA as IX_SCHEMA, IX_TABLES, Budget, BudgetStop, Entangled, applyOp, jobGet, jobNew, jobPut, jobStep } from "./entries.ts";
 import type { SyncEntry, SyncOp } from "../workspace/sync-reduce.ts";
@@ -2957,18 +2958,17 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       // it doesn't know, or one of the wrong type, is refused before any path is read)
       const bad = checkCall("workspace." + verb, p);
       if (bad) return answer(400, "invalid", null, { message: bad.slice(0, 200) });
-      let path: string;
-      try {
-        path = normPath((p as Record<string, unknown>)[key]);
-      } catch {
-        return answer(400, "invalid", null, { message: `${key}: not a workspace path` });
-      }
       const need = READS.has(verb) ? "read" : "write";
       const scopes = JSON.parse(String(g.scopes)) as Scope[];
+      // (the shared scope rule, web/workspace/agent-scope.ts: the path normalized first, then the agents' reserved
+      // folder, then the scopes)
+      const sc = scopeCheck(scopes, (p as Record<string, unknown>)[key], need);
+      if (sc.verdict === "invalid") return answer(400, "invalid", null, { message: `${key}: not a workspace path` });
+      const path = sc.path;
       // (Trash is reached by any grant, and shows only what came from its scope: by each entry's trashed_from, below)
       // (the agents' reserved folder answers as a path that isn't there, below, never as a scope refusal: so a call can't
       // tell what is in it, or whether it exists)
-      if (!within(path, TRASH) && !within(path, RESERVED) && !inScope(scopes, path, need)) return answer(403, "scope", [path], { path, access: need });
+      if (sc.verdict === "out" && !within(path, TRASH)) return answer(403, "scope", [path], { path, access: need });
       // (an encrypted account, e2e PR 5d: its log carries ops the server can't read, so the index derived from it is
       // wrong, not just behind; refused before it is read, before and after the first sealed op, until a device of the
       // person's answers through the relay)
@@ -3262,7 +3262,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
   private indexStat(path: string, scopes: Scope[]) {
     if (within(path, TRASH) && !this.trashVisible(path, scopes, new Map())) return null;
-    if (within(path, RESERVED)) return null;
+    if (reserved(path)) return null;
     const e = this.entryAt(path);
     return e ? this.entryView(e) : null;
   }
@@ -3277,7 +3277,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // (a folder in Trash the grant can't see answers as one that isn't there: its visibility first, then whether it is)
     if (within(folder, TRASH) && folder !== TRASH && !this.trashVisible(folder, scopes, new Map())) return missing;
     // (the agents' reserved folder, and everything in it, as a folder that isn't there)
-    if (within(folder, RESERVED)) return missing;
+    if (reserved(folder)) return missing;
     // (the folder as stored: its children's paths extend that spelling, whatever form, NFC or not, the call gave)
     if (folder !== "/" && folder !== TRASH) {
       const f = this.entryAt(folder);
@@ -3303,7 +3303,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       examined++;
       const path = String(r.path);
       last = path;
-      if (inTrash ? !this.trashVisible(path, scopes, tops) : within(path, TRASH) || within(path, RESERVED)) continue;
+      if (inTrash ? !this.trashVisible(path, scopes, tops) : within(path, TRASH) || reserved(path)) continue;
       out.push(this.entryView(JSON.parse(String(r.data)) as SyncEntry));
     }
     if (!(rows.length > examined) || last === null) return { entries: out, cursor: null };
