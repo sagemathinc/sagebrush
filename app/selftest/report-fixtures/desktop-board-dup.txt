@@ -22,7 +22,8 @@ ok   a page the app doesn't have isn't the notebook: {"/agents/":"404 not-in-app
 ok   the analyzer and KaTeX still load: at /: analyzer answered; sagebrush-math.js 200 text/javascript
 ok   the LaTeX editor is on in the desktop app: on=true New > LaTeX document: shown
 ok   a .tex opens in the editor and renders: the title and the formula shown
-ok   Share, Agent and Run say what the app doesn't offer: share=disabled "Sharing isn't available here: upload this file, and the f" agent=hidden run="Run" said "Run isn't available in the desktop app: to run this document"
+ok   Share and Agent say what the app doesn't offer: share=disabled "Sharing isn't available here: upload this file, and the f" agent=hidden
+ok   Run runs a SageTeX item in the app: run="Run the document's Sage code on this computer: Shift+Enter" preview="Hello from the app Two is 2, and x2+1." status=""
 info origin: "http://127.0.0.1:41234"
 info secure-context: true
 info top-level: true
