@@ -17022,5 +17022,10 @@
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'max' in np.maximum; the line counts each window's positions outside the data, whose fill values a moving sum takes in at once, not a limit on a computation"
+ },
+ "lib/_matlab.py :: _mfilename :: raise _err(\"Too many input arguments.\", \"MATLAB:maxrhs\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing by size: the census matches 'max' in MATLAB's identifier MATLAB:maxrhs, the error for more input arguments than mfilename takes"
  }
 }
