@@ -1816,7 +1816,7 @@ class FFMatrix:
             q = self._scalar_identity(o, "+", False)
             if q is None:
                 p = self._numeric_op(o, "+")
-                return NotImplemented if p is None else p
+                return self._uncoerced(o, "+", False) if p is None else p
             o = q
         A, o = self._coerced(o, "+")
         if o.dimensions() != A.dimensions():
@@ -1828,7 +1828,7 @@ class FFMatrix:
             q = self._scalar_identity(o, "+", True)
             if q is None:
                 p = self._numeric_op(o, "+", True)
-                return NotImplemented if p is None else p
+                return self._uncoerced(o, "+", True) if p is None else p
             o = q
         return self.__add__(o)
 
@@ -1841,7 +1841,7 @@ class FFMatrix:
             q = self._scalar_identity(o, "-", False)
             if q is None:
                 p = self._numeric_op(o, "-")
-                return NotImplemented if p is None else p
+                return self._uncoerced(o, "-", False) if p is None else p
             o = q
         A, o = self._coerced(o, "-")
         if o.dimensions() != A.dimensions():
@@ -1856,8 +1856,25 @@ class FFMatrix:
         q = self._scalar_identity(o, "-", True)
         if q is None:
             p = self._numeric_op(o, "-", True)
-            return NotImplemented if p is None else p
+            return self._uncoerced(o, "-", True) if p is None else p
         return q + (-self)
+
+    def _uncoerced(self, o, op, left):
+        """For self op o (o op self when left) that nothing above took:
+        Sage's TypeError naming the two parents when o is a scalar of QQ or
+        of a Z/m coprime to this ring's order n (Sage meets Z/m and Z/n in
+        Z/gcd(m, n) otherwise, not modelled here); NotImplemented for
+        anything else (Python's own refusal, or o's own operator)."""
+        P = _scalar_parent(o)
+        if P is None:
+            return NotImplemented
+        if P is not _sa().QQ:
+            if not isinstance(P, _ff.IntegerModRing_) or not isinstance(self._base, _ff.IntegerModRing_):
+                return NotImplemented
+            if _gcd(P._n, self._base._n) > 1:
+                return NotImplemented
+        pair = (P, self.parent()) if left else (self.parent(), P)
+        raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % ((op,) + pair))
 
     def __mul__(self, o):
         o = self._from_qq(o, "*")
@@ -1898,14 +1915,14 @@ class FFMatrix:
         c = self._scalar(o)
         if c is None:
             p = self._numeric_op(o, "*")
-            return NotImplemented if p is None else p
+            return self._uncoerced(o, "*", False) if p is None else p
         return FFMatrix(self._base, [[a * c for a in r] for r in self._rows], self._ncols)
 
     def __rmul__(self, o):
         c = self._scalar(o)
         if c is None:
             p = self._numeric_op(o, "*")
-            return NotImplemented if p is None else p
+            return self._uncoerced(o, "*", True) if p is None else p
         return FFMatrix(self._base, [[c * a for a in r] for r in self._rows], self._ncols)
 
     def _vector_operand(self, v, left):
