@@ -560,7 +560,9 @@ export function ndMatmul(A: Float64Array, B: Float64Array, n: number, m: number,
 function gemmOn(A: Float64Array, B: Float64Array, n: number, m: number, p: number, P: Pool | null): Float64Array | string {
   const T = P ? P.helpers + 1 : 1;
   const up = (x: number) => Math.ceil(x / 64) * 64;
-  const desc = P ? P.desc : base, lo = P ? base : base + 64;
+  // (the arena starts at base + 64 either way: on one thread the descriptor takes those 64 bytes, on the pool it sits
+  // in the pool's region and they stay unused; so the workspace is the same bytes, the pool up or not)
+  const desc = P ? P.desc : base, lo = base + 64;
   const stride = up(ex!.nd_info(0) * 8);
   const a = lo, b = up(a + 8 * m * p), c = up(b + 8 * n * m), scratch = up(c + 8 * n * p), hi = scratch + T * stride;
   // (the scratch is one stride per participant; every product reserves the strides of all the pool's participants,

@@ -449,3 +449,26 @@ nd.ndCholesky(I, 4); out.before = T.layout().base; product(); await ready(); out
   assert.equal(c.planned, 3, JSON.stringify(c));
   assert.equal(c.before, c.after, JSON.stringify(c));
 });
+
+// (the exact boundary: the bytes a product needs are the same before the pool is up and after, to the byte. Under a
+// stubbed fixed maximum, the product is refused one byte below its need and runs at it, whichever the pool's state;
+// LIMITS' probe, shape (256, 311, 1997))
+test("at the exact fixed maximum, a product runs, and one byte below it is refused, before the pool is up and after", () => {
+  const body = (first: boolean) => `nd.ndTest({ helpers: 3 });
+const g = globalThis, A = new Float64Array(256 * 311), B = new Float64Array(311 * 1997);
+const at = (max) => { g.__SAGEBRUSH_KERNEL_MAX_BYTES__ = max; try { nd.ndMatmul(A, B, 256, 311, 1997); return "ran"; } catch (e) { return String(e.message).match(/needs (\\d+) bytes/)?.[1] ?? String(e.message); } };
+${first ? "" : "nd.ndMatmul(...ops[3]); await ready();"}
+out.state = nd.ndThreads().state;
+out.need = Number(at(8 << 20));
+out.below = at(out.need - 1);
+out.exact = at(out.need);
+out.after = nd.ndThreads().state;`;
+  const cold = scenario(body(true)), warm = scenario(body(false));
+  assert.equal(warm.state, "ready", JSON.stringify(warm));
+  assert.ok(Number.isSafeInteger(cold.need) && cold.need > 8 << 20, JSON.stringify(cold));
+  assert.equal(cold.need, warm.need, JSON.stringify({ cold, warm }));
+  for (const r of [cold, warm]) {
+    assert.equal(r.below, String(r.need), JSON.stringify(r));
+    assert.equal(r.exact, "ran", JSON.stringify(r));
+  }
+});
