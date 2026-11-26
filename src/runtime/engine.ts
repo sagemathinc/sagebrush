@@ -312,6 +312,16 @@ function allowanceOf([bytes, status]: [number, number]): bigint {
   return b / SHARE_DEN;
 }
 
+/** E for another of the runtime's own WebAssembly modules to admit its memory against (the decision-tree kernel,
+ * src/runtime/skltree.ts; design note sklearn-trees r3 §6): the least E of the rows that apply, read as
+ * creationCheck reads them (the instance row, and the shared row in force: the nominal total when there is neither).
+ * A per-instance allowance, not a measure of the session's free memory. */
+export function moduleAllowance(): bigint {
+  const t = admissionTotals();
+  const rows = [t.instance, sharedOf(t)].filter((r): r is [number, number] => r !== null);
+  return rows.map(allowanceOf).reduce((a, b) => (b < a ? b : a));
+}
+
 /** The creation admission (C r15 section 3.2 with C r16b's scopes): on the
  * instance row phi (M0 + O_host) <= E_inst, retired instances being
  * outside its scope; on the shared row, when one applies, phi (M0 + R_ret

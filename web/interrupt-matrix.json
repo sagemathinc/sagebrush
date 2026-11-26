@@ -21,6 +21,7 @@
    "ops.ts": 3,
    "raster.ts": 2,
    "re.ts": 2,
+   "skltree.ts": 3,
    "strpos.ts": 1,
    "types.ts": 14
   },

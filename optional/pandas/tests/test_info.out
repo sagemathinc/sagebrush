@@ -1,0 +1,254 @@
+== frame
+<class 'pandas.DataFrame'>
+RangeIndex: 3 entries, 0 to 2
+Data columns (total 4 columns):
+ #   Column  Non-Null Count  Dtype  
+---  ------  --------------  -----  
+ 0   name    2 non-null      str    
+ 1   legs    3 non-null      int64  
+ 2   w       2 non-null      float64
+ 3   ok      3 non-null      bool   
+dtypes: bool(1), float64(1), int64(1), str(1)
+memory usage: 207.0 bytes
+None
+== frame.buffer
+("<class 'pandas.DataFrame'>\nRangeIndex: 3 entries, 0 to 2\nData columns (total 4 columns):\n #   Column  Non-Null Count  Dtype  \n---  ------  --------------  -----  \n 0   name    2 non-null      str    \n 1   legs    3 non-null      int64  \n 2   w       2 non-null      float64\n 3   ok      3 non-null      bool   \ndtypes: bool(1), float64(1), int64(1), str(1)\nmemory usage: 207.0 bytes\n", None)
+== frame.no-counts
+<class 'pandas.DataFrame'>
+RangeIndex: 3 entries, 0 to 2
+Data columns (total 4 columns):
+ #   Column  Dtype  
+---  ------  -----  
+ 0   name    str    
+ 1   legs    int64  
+ 2   w       float64
+ 3   ok      bool   
+dtypes: bool(1), float64(1), int64(1), str(1)
+memory usage: 207.0 bytes
+None
+== frame.not-verbose
+<class 'pandas.DataFrame'>
+RangeIndex: 3 entries, 0 to 2
+Columns: 4 entries, name to ok
+dtypes: bool(1), float64(1), int64(1), str(1)
+memory usage: 207.0 bytes
+None
+== frame.no-memory
+("<class 'pandas.DataFrame'>\nRangeIndex: 3 entries, 0 to 2\nData columns (total 4 columns):\n #   Column  Non-Null Count  Dtype  \n---  ------  --------------  -----  \n 0   name    2 non-null      str    \n 1   legs    3 non-null      int64  \n 2   w       2 non-null      float64\n 3   ok      3 non-null      bool   \ndtypes: bool(1), float64(1), int64(1), str(1)", None)
+== frame.max-cols
+<class 'pandas.DataFrame'>
+RangeIndex: 3 entries, 0 to 2
+Columns: 4 entries, name to ok
+dtypes: bool(1), float64(1), int64(1), str(1)
+memory usage: 207.0 bytes
+None
+== frame.max-cols-verbose
+<class 'pandas.DataFrame'>
+RangeIndex: 3 entries, 0 to 2
+Data columns (total 4 columns):
+ #   Column  Dtype  
+---  ------  -----  
+ 0   name    str    
+ 1   legs    int64  
+ 2   w       float64
+ 3   ok      bool   
+dtypes: bool(1), float64(1), int64(1), str(1)
+memory usage: 207.0 bytes
+None
+== frame.many-columns
+<class 'pandas.DataFrame'>
+RangeIndex: 1 entries, 0 to 0
+Columns: 101 entries, 0 to 100
+dtypes: int64(101)
+memory usage: 940.0 bytes
+None
+== frame.uint8
+<class 'pandas.DataFrame'>
+RangeIndex: 3 entries, 0 to 2
+Data columns (total 4 columns):
+ #   Column  Non-Null Count  Dtype  
+---  ------  --------------  -----  
+ 0   name    2 non-null      str    
+ 1   legs    3 non-null      uint8  
+ 2   w       2 non-null      float64
+ 3   ok      3 non-null      bool   
+dtypes: bool(1), float64(1), str(1), uint8(1)
+memory usage: 186.0 bytes
+None
+== frame.int-index
+<class 'pandas.DataFrame'>
+Index: 3 entries, 4 to 4
+Data columns (total 3 columns):
+ #   Column  Non-Null Count  Dtype  
+---  ------  --------------  -----  
+ 0   name    2 non-null      str    
+ 1   w       2 non-null      float64
+ 2   ok      3 non-null      bool   
+dtypes: bool(1), float64(1), str(1)
+memory usage: 75.0 bytes
+None
+== frame.float-index
+<class 'pandas.DataFrame'>
+Index: 1 entries, 2.5 to 2.5
+Data columns (total 1 columns):
+ #   Column  Non-Null Count  Dtype
+---  ------  --------------  -----
+ 0   a       1 non-null      int64
+dtypes: int64(1)
+memory usage: 16.0 bytes
+None
+== frame.str-index
+<class 'pandas.DataFrame'>
+Index: 2 entries, q to r
+Data columns (total 1 columns):
+ #   Column  Non-Null Count  Dtype
+---  ------  --------------  -----
+ 0   a       2 non-null      int64
+dtypes: int64(1)
+memory usage: 32.0+ bytes
+None
+== frame.datetime-index
+<class 'pandas.DataFrame'>
+DatetimeIndex: 2 entries, 2020-01-02 to 2021-03-04
+Data columns (total 1 columns):
+ #   Column  Non-Null Count  Dtype
+---  ------  --------------  -----
+ 0   a       2 non-null      int64
+dtypes: int64(1)
+memory usage: 32.0 bytes
+None
+== frame.object
+<class 'pandas.DataFrame'>
+RangeIndex: 2 entries, 0 to 1
+Data columns (total 1 columns):
+ #   Column  Non-Null Count  Dtype 
+---  ------  --------------  ----- 
+ 0   a       2 non-null      object
+dtypes: object(1)
+memory usage: 148.0+ bytes
+None
+== frame.long-label
+("<class 'pandas.DataFrame'>\nRangeIndex: 2 entries, 0 to 1\nData columns (total 1 columns):\n #   Column                   Non-Null Count  Dtype\n---  ------                   --------------  -----\n 0   a long column name here  2 non-null      int64\ndtypes: int64(1)\nmemory usage: 148.0 bytes\n", None)
+== frame.no-columns
+<class 'pandas.DataFrame'>
+Index: 2 entries, 1 to 2
+Empty DataFrame
+None
+== frame.empty
+<class 'pandas.DataFrame'>
+RangeIndex: 0 entries
+Empty DataFrame
+None
+== frame.no-rows
+<class 'pandas.DataFrame'>
+RangeIndex: 0 entries
+Data columns (total 1 columns):
+ #   Column  Non-Null Count  Dtype  
+---  ------  --------------  -----  
+ 0   a       0 non-null      float64
+dtypes: float64(1)
+memory usage: 132.0 bytes
+None
+== frame.deep-numeric
+<class 'pandas.DataFrame'>
+RangeIndex: 2 entries, 0 to 1
+Data columns (total 1 columns):
+ #   Column  Non-Null Count  Dtype
+---  ------  --------------  -----
+ 0   a       2 non-null      int64
+dtypes: int64(1)
+memory usage: 148.0 bytes
+None
+== frame.big-range
+<class 'pandas.DataFrame'>
+RangeIndex: 2 entries, 1099511627776 to 1099511627777
+Data columns (total 1 columns):
+ #   Column  Non-Null Count  Dtype
+---  ------  --------------  -----
+ 0   a       2 non-null      int64
+dtypes: int64(1)
+memory usage: 156.0 bytes
+None
+== series
+<class 'pandas.Series'>
+RangeIndex: 3 entries, 0 to 2
+Series name: w
+Non-Null Count  Dtype  
+--------------  -----  
+2 non-null      float64
+dtypes: float64(1)
+memory usage: 156.0 bytes
+None
+== series.unnamed
+<class 'pandas.Series'>
+RangeIndex: 2 entries, 0 to 1
+Series name: None
+Non-Null Count  Dtype
+--------------  -----
+2 non-null      int64
+dtypes: int64(1)
+memory usage: 148.0 bytes
+None
+== series.not-verbose
+<class 'pandas.Series'>
+RangeIndex: 2 entries, 0 to 1
+dtypes: int64(1)
+memory usage: 148.0 bytes
+None
+== series.no-counts
+<class 'pandas.Series'>
+RangeIndex: 2 entries, 0 to 1
+Series name: None
+Dtype
+-----
+int64
+dtypes: int64(1)
+memory usage: 148.0 bytes
+None
+== series.str
+<class 'pandas.Series'>
+RangeIndex: 3 entries, 0 to 2
+Series name: name
+Non-Null Count  Dtype
+--------------  -----
+2 non-null      str  
+dtypes: str(1)
+memory usage: 156.0 bytes
+None
+== series.max-cols
+!! ValueError: Argument `max_cols` can only be passed in DataFrame.info, not Series.info
+== memory
+
+Index    132
+name      24
+legs      24
+w         24
+ok         3
+dtype: int64
+== memory.no-index
+
+name    24
+legs    24
+w       24
+ok       3
+dtype: int64
+== memory.int-index
+
+Index    24
+name     24
+w        24
+ok        3
+dtype: int64
+== memory.range-sizes
+[np.int64(132), np.int64(132), np.int64(140), np.int64(148)]
+== memory.deep-numeric
+
+Index    132
+a         16
+dtype: int64
+== memory.series
+156
+== memory.series-no-index
+24
+== memory.datetime
+140

@@ -140,6 +140,14 @@ def _absent_alternative(name):
     return _ABSENT[0].get(name)
 
 
+# Magma's file, process, environment and socket intrinsics: refused by name (Sagebrush has no file or process
+# route from Magma code), and, unlike another intrinsic Sagebrush lacks, they don't stop a file (_report)
+_FILE_PROCESS_NAMES = frozenset((
+    "Attach AttachSpec ChangeDirectory Detach DetachSpec Flush GetCurrentDirectory GetEnv Getc Getpid Gets Getuid "
+    "Open POpen Pipe PrintFile PrintFileMagma Puts Read ReadBinary ReadBytes Rewind Seek SetLogFile SetOutputFile "
+    "Socket System Tell UnsetLogFile UnsetOutputFile WaitForConnection Write WriteBinary WriteBytes").split())
+
+
 def _report(e, line, col):
     """A runtime error, reported as Magma does; then a file stops and a
     session goes on."""
@@ -163,6 +171,13 @@ def _report(e, line, col):
             alt = _absent_alternative(name)
             _sys.stdout.write("%sUser error: '%s' is a Magma intrinsic not implemented in Sagebrush%s\n"
                               % (_where(line, col), name, "; instead: " + alt if alt else ""))
+            # (and a file stops, with exit status 1, as at a runtime error:
+            # Magma has the intrinsic, so what follows would run on what it
+            # didn't compute; a session goes on.  A file, process,
+            # environment or socket intrinsic, which Sagebrush refuses by
+            # name on purpose, is reported and the file goes on, as before)
+            if _src[2] != "session" and name not in _FILE_PROCESS_NAMES:
+                raise SystemExit(1)
         else:
             # (wrapped at 80 columns, as Magma wraps it)
             _sys.stdout.write("%s%s\n" % (_where(line, col), _wrap("User error: Identifier '%s' has not been declared or assigned" % name, 0, 0)))
@@ -5218,6 +5233,9 @@ def _coerce_int(x):
         return int(x)
     if isinstance(x, _Fraction) and x.denominator == 1:
         return int(x)
+    if isinstance(x, _Fraction):
+        # (Magma's words for a rational that isn't an integer: Integers()!(1/2))
+        raise MagmaError("Rational argument is not a whole integer\nLHS: RngInt\nRHS: FldRatElt", "'!'", False)
     if isinstance(x, (bool, str)):
         # Python would read "7" as 7 and true as 1
         raise MagmaError("Illegal coercion\nLHS: RngInt\nRHS: %s" % _type(x), "'!'", False)
@@ -9178,7 +9196,7 @@ def Eltseq(x):
     if isinstance(x, _MNFElt):
         # (its rational coefficients on 1, a, ..., a^(d-1), in the
         # rationals as Magma's)
-        c = list(x._c)
+        c = x.parent()._to_user(x._c)
         c += [0] * (x.parent().degree() - len(c))
         return MSeq([_qelt(_Fraction(q)) for q in c], _QQ)
     if isinstance(x, MSeq) and isinstance(x.universe, _MVectorSpace):
@@ -9645,8 +9663,8 @@ class _MNFElt(_snf.NumberFieldElement):
     __slots__ = ()
 
     def __repr__(self):
-        # Magma: a common denominator in front, 1/2*(b^2 + b)
-        c = self._c
+        # Magma: a common denominator in front, 1/2*(b^2 + b) (on the generator's powers)
+        c = self._K._to_user(self._c)
         d = 1
         for x in c:
             d = d * x.denominator // _math.gcd(d, x.denominator)
@@ -9666,6 +9684,30 @@ class _MNumberField(_snf.NumberField_absolute):
 
     def __init__(self, f, quadratic=False, irreducible=False):
         super().__init__(f, "$.1", irreducible=irreducible)
+        # (as Magma 2.18-5 has it: a polynomial over the rationals defines the field made monic, NumberField(3*x^2
+        # + 1) is x^2 + 1/3; one over the integers made primitive with a positive leading coefficient, 2*y^2 - 3
+        # as given, 6*y^2 + 2 as 3*y^2 + 1 (below); either way the generator is its root, which the core's
+        # coordinates are on)
+        over_z = getattr(getattr(f, "parent", lambda: None)(), "base_ring", lambda: None)() is _sp.ZZ
+        if not over_z and self._uf[-1] != 1:
+            self._uf = tuple(_Fraction(a) / _Fraction(self._uf[-1]) for a in self._uf)
+        if over_z:
+            # (made primitive with a positive leading coefficient: 6*y^2 + 2 is 3*y^2 + 1, -2*y^2 + 3 is 2*y^2 - 3)
+            g = 0
+            for a in self._uf:
+                g = _math.gcd(g, int(a))
+            g = -g if self._uf[-1] < 0 else g
+            self._uf = tuple(int(a) // g for a in self._uf)
+        # (the primitive integral polynomial of the field's: its equation order's, whose discriminant is
+        # Discriminant(K); 3*x^2 + 1 for x^2 + 1/3)
+        L = 1
+        for a in self._uf:
+            L = L * _Fraction(a).denominator // _math.gcd(L, _Fraction(a).denominator)
+        zf = [int(_Fraction(a) * L) for a in self._uf]
+        g = 0
+        for a in zf:
+            g = _math.gcd(g, a)
+        self._zf = [a // g for a in zf] if not over_z else [int(a) for a in self._uf]
         self._quadratic = quadratic
         self._order = None
         self._fring = getattr(f, "_ring", None)  # the defining polynomial's ring
@@ -9704,7 +9746,7 @@ class _MNumberField(_snf.NumberField_absolute):
             # (which could factor s again)
             s = -int(self._f[0])
             return s if s % 4 == 1 else 4 * s
-        return _m_num(self.polynomial().discriminant())
+        return _m_num(_sp.PolynomialRing_(_sp.QQ, "x")(self._zf).discriminant())
 
     def _magma_coerce(self, x):
         try:
@@ -9717,7 +9759,7 @@ class _MNumberField(_snf.NumberField_absolute):
 
     def __repr__(self):
         kind = "Quadratic Field" if self._quadratic else "Number Field"
-        return "%s with defining polynomial %s over the Rational Field" % (kind, _snf._repr_poly(self._f, self._fvar()))
+        return "%s with defining polynomial %s over the Rational Field" % (kind, _snf._repr_poly(self._uf, self._fvar()))
 
     def _maximal_order(self):
         if self._order is None:
@@ -9734,8 +9776,9 @@ class _MOrder:
 
     def __repr__(self):
         K = self.K
-        f = _snf._repr_poly(K._f, K._var)
-        if K._nfdata()["index"] == 1:
+        f = _snf._repr_poly(K._zf, K._var)
+        # (a non-monic polynomial's equation order isn't the maximal order, as Magma has it)
+        if K._zf[-1] == 1 and K._nfdata()["index"] == 1:
             return "Maximal Equation Order with defining polynomial %s over its ground order" % f
         return "Maximal Order of Equation Order with defining polynomial %s over its ground order" % f
 
@@ -11419,6 +11462,14 @@ def _order_text(n):
     return "Order = %d" % n if f == str(n) else "Order = %d = %s" % (n, f)
 
 
+def _no_covering_group():
+    """Magma's error for a permutation coerced into a permutation group of
+    another degree (Sym(5)!(Sym(4)!(1, 2))), with no empty line after it;
+    one of the same degree that isn't in the group is an illegal
+    coercion."""
+    return MagmaError("Could not find a covering group\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", False)
+
+
 class _MSymGroup:
     """Sym(n): the symmetric group on 1 .. n (GrpPerm), its elements the
     permutations, composed left to right as Magma's: i^(p*q) = (i^p)^q."""
@@ -11462,7 +11513,7 @@ class _MSymGroup:
                 return x
             if x.G.n == self.n:
                 return _MPerm(self, x.images)  # (a dihedral group's, of degree n)
-            raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", True)
+            raise _no_covering_group()
         if isinstance(x, (MSeq, MRange)):
             # G![images]: the permutation i -> images[i], integers only
             # (CORR-DFC-4)
@@ -11687,9 +11738,12 @@ class _MDihedralGroup:
         # (cycles or images made a permutation as Sym(n)'s, then admitted
         # only if it is the group's: G!(1, 2) is Magma's Illegal coercion)
         p = x if isinstance(x, _MPerm) else _MSymGroup(self.n)._magma_coerce(x)
-        if p.G.n == self.n and self._has(p.images):
+        if p.G.n != self.n:
+            raise _no_covering_group()
+        if self._has(p.images):
             return _MPerm(self, p.images)
-        raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", True)
+        # (with no empty line after it, as Magma's)
+        raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: GrpPermElt", "'!'", False)
 
 
 def DihedralGroup(n):
@@ -11722,7 +11776,7 @@ def _iso_result(b):
 
 def _quadratic_disc(K):
     """The discriminant of a degree 2 field's defining polynomial, a rational."""
-    c = [_Fraction(_m_num(x)) for x in list(K._f)[:3]]
+    c = [_Fraction(_m_num(x)) for x in list(K._uf)[:3]]
     return c[1] * c[1] - 4 * c[0] * c[2]
 
 

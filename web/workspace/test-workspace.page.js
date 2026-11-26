@@ -2682,7 +2682,10 @@ async function durabilityAuthority() {
   // (#919, daybreak3's E1)
   {
     const o = await named(), a = await openAs(o), e = await a.create("/same-tab.ipynb");
-    const S = await import("./stores.js"), origin = new S.IdbStore(a.main, e.ref), thrower = new S.IdbStore(a.main, e.ref), later = new S.IdbStore(a.main, e.ref);
+    // Use the workspace's store module for this same-tab check. The editor's
+    // separately bundled module has another channel identity and may still
+    // receive the creation broadcast after these subscriptions are installed.
+    const origin = new W.IdbStore(a.main, e.ref), thrower = new W.IdbStore(a.main, e.ref), later = new W.IdbStore(a.main, e.ref);
     const seen = { origin: 0, thrower: 0, later: [] }, warn = console.warn, warned = [];
     const offs = [origin.subscribe(() => seen.origin++), thrower.subscribe(() => { seen.thrower++; throw new Error("a subscriber's own fault"); }), later.subscribe((d) => seen.later.push(d))];
     console.warn = (...w) => warned.push(w.map(String).join(" "));

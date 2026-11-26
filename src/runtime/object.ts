@@ -1463,7 +1463,7 @@ export function toPyExc(e: any): any {
   // (JavaScriptCore sizes a result before it computes or allocates it, so
   // nothing is spent first) It says which limit: the JavaScript engine's own,
   // a hard limit and no cap of ours, or memory the computer couldn't give.
-  if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\.Memory\.grow|failed to grow memory/.test(e.message)) {
+  if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\.Memory\.grow|failed to grow memory|WebAssembly\.\w+\(\): Out of memory/.test(e.message)) {
     const why = engineLimit(e.message);
     const r = why === undefined ? T.MemoryError() : T.MemoryError(why);
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
@@ -1528,6 +1528,8 @@ const ENGINE_LIMITS: [RegExp, string][] = [
   [/WebAssembly\.Memory\.grow\(\): Maximum memory size exceeded|would exceed the memory's declared maximum size|expects the delta to be a valid page count/, "a WebAssembly module's memory past its maximum (4 GiB at most: wasm32)"],
   // (Firefox's "failed to grow memory" doesn't say which: taken as the computer's)
   [/WebAssembly\.Memory\.grow|Unable to grow instance memory|failed to grow memory/, "a WebAssembly module's memory: more than the computer could give"],
+  // (setting up a WebAssembly module, src/runtime/kernels.ts's: its compiled code or its memory)
+  [/WebAssembly\.\w+\(\): Out of memory/, "a WebAssembly module: more than the computer could give"],
 ];
 function engineLimit(message: string): string | undefined {
   return ENGINE_LIMITS.find(([re]) => re.test(message))?.[1];
