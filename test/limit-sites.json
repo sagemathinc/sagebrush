@@ -16429,7 +16429,7 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
  },
- "lib/_matlab_krylov.py :: lsqr_ :: nan = _nan_rhs(\"lsqr\", nargout, b, x0, tol, budget) #0": {
+ "lib/_matlab_krylov.py :: lsqr_ :: nan = _nan_rhs(\"lsqr\", nargout, b, x0, tol, budget, maxit, M=M) #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
@@ -16578,5 +16578,20 @@
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
+ },
+ "lib/_matlab_krylov.py :: _nan_rhs :: at iteration 0, x0 returned, resvec [NaN], flag 2 preconditioned, else flag 1 at maxit 0 and 4 (a scalar #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'maxit', MATLAB's iteration-limit argument, which sets the NaN-in-b answer's iteration count and history length as MATLAB's do; each history entry admitted by the solver's memory budget"
+ },
+ "lib/_matlab_krylov.py :: _nan_rhs :: flag, x, it, count = (2 if pre else 1 if maxit == 0 else 4), x0, 0, 1 #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'maxit', MATLAB's iteration-limit argument, which sets the NaN-in-b answer's iteration count and history length as MATLAB's do; each history entry admitted by the solver's memory budget"
+ },
+ "lib/_matlab_krylov.py :: _nan_rhs :: quantity NaN) from maxit 1. name: gmres's name in its message (gmres(restart) when it #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'maxit', MATLAB's iteration-limit argument, which sets the NaN-in-b answer's iteration count and history length as MATLAB's do; each history entry admitted by the solver's memory budget"
  }
 }
