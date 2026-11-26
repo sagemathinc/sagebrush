@@ -362,6 +362,39 @@ let cur = 2; // (after the disconnect above)
     await tick(r1.rid, 121_000);
   }
 }
+{
+  // (recovery when sync turns active again after a stop between the write and the ends: the open that reads "active"
+  // ends the old page (4412) before it clears the marker, and the old generation is refused)
+  await tick(r1.rid, 121_000);
+  for (const via of ["an active open", "the alarm"]) {
+    const f = await openAt(`nbR${via.length}`, cur);
+    ok(f.status === 101, `recovery (${via}): a page attached at cgen ${cur} (${f.status} ${f.error})`);
+    await site(`/__relay/__skipstale?remote=${r1.rid}&on=1`);
+    await setSync("state=off");
+    x = await dialEngine(sa, r1.rid, { nb: "nbQ" });
+    ok(x.status === 403 && (await engineState(r1.rid)).length === 1, `recovery (${via}): off commits, the stop leaves the old page (${x.status})`);
+    await setSync("state=active&gen=7");
+    if (via === "the alarm") {
+      p.send('{"relay":"ping"}');
+      f.leg.send('{"relay":"ping"}');
+      await until(async () => p.got.includes('{"relay":"pong"}'));
+      await tick(r1.rid, 5000);
+      await alarm(r1.rid);
+    } else {
+      const fresh = await openAt(`nbS${via.length}`, cur + 1);
+      ok(fresh.status === 101, `recovery (${via}): the active open at the new generation -> 101 (${fresh.status} ${fresh.error})`);
+      fresh.leg.close();
+    }
+    ok(await closedOr(f.leg, 4412) && await until(async () => !(await engineState(r1.rid)).some((a) => a.engine.cgen === cur)),
+      `recovery (${via}): the old generation's page ended`);
+    cur++;
+    x = await dialEngine(sa, r1.rid, { nb: "nbQ", cgen: cur - 1 });
+    ok(x.status === 409, `recovery (${via}): the old generation -> 409 (${x.status})`);
+    await sleep(100);
+    while (p.got.length) p.got.shift();
+    await tick(r1.rid, 121_000);
+  }
+}
   await tick(r1.rid, 121_000); // (the attempt ids so far expire)
   // (the same transition read again, by opens, advances nothing more; an "active" read ends the transition)
   await setSync("state=off");

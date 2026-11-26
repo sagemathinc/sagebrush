@@ -506,6 +506,8 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
    * no page left (set before the last one went) closes nothing: it is only cancelled (astra's ALARM-1). */
   async alarm(): Promise<void> {
     if (!this.pages().length) return this.ctx.storage.deleteAlarm();
+    // (any engine page of a generation below the stored one, left by a stop after an advance's write, ends here too)
+    await this.endStale(CLOSE.syncOff, "the connection's generation went up");
     await this.syncCheck();
     const now = this.now();
     for (const w of [...this.peers(), ...this.pages()]) {
@@ -805,7 +807,11 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
   private async syncSeen(generation: number): Promise<void> {
     const prev = await this.ctx.storage.get<number>("syncGen");
     if (prev !== generation) await this.ctx.storage.put("syncGen", generation);
-    if (await this.ctx.storage.get("syncFenced")) await this.ctx.storage.delete("syncFenced");
+    // (the transition ends here: what its advance may not have ended yet is ended first, then the marker cleared)
+    if (await this.ctx.storage.get("syncFenced")) {
+      await this.endStale(CLOSE.syncOff, "sync isn't active for this account");
+      await this.ctx.storage.delete("syncFenced");
+    }
     this.lastSync = generation;
     if (prev !== undefined && prev !== generation) await this.advance(CLOSE.syncOff, "sync was reset for this account");
   }
