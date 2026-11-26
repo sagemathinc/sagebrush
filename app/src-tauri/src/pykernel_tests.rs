@@ -27,19 +27,21 @@ fn run(t: &Tmp) -> VersionRun<'_> {
     VersionRun { home: &t.0, cwd: &t.0, supported: &[] }
 }
 
-/// The machine's own CPython for the tests: the first of the usual places that chooses (SB_TEST_PYTHON first).
+/// The machine's own CPython for the tests: SB_TEST_PYTHON when set (it must choose: CI pins the version this way),
+/// else the first of the usual places that chooses.
 fn system_python() -> ChosenPython {
     let t = Tmp::new("find");
+    if let Ok(c) = std::env::var("SB_TEST_PYTHON") {
+        return choose_python(Path::new(&c), my_uid(), &run(&t)).unwrap_or_else(|e| panic!("SB_TEST_PYTHON={c}: {}", e.code()));
+    }
     let mut tried = Vec::new();
-    let mut candidates: Vec<String> = std::env::var("SB_TEST_PYTHON").into_iter().collect();
-    candidates.extend(["/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3"].map(String::from));
-    for c in candidates {
-        match choose_python(Path::new(&c), my_uid(), &run(&t)) {
+    for c in ["/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3"] {
+        match choose_python(Path::new(c), my_uid(), &run(&t)) {
             Ok(p) => return p,
             Err(e) => tried.push(format!("{c}: {}", e.code())),
         }
     }
-    panic!("the tests need a CPython >= 3.10 that passes the rules; tried {tried:?}");
+    panic!("the tests need a CPython >= 3.10 that passes the rules (or SB_TEST_PYTHON naming one); tried {tried:?}");
 }
 
 fn script(dir: &Path, name: &str, body: &str, mode: u32) -> PathBuf {
@@ -59,7 +61,7 @@ try:
     pp = True
 except ImportError:
     pp = False
-say({"ready": True, "prefix": sys.prefix, "cwd": os.getcwd(), "path": sys.path, "env": sorted(os.environ),
+say({"ready": True, "sid": os.getsid(0), "pgid": os.getpgid(0), "pid": os.getpid(), "prefix": sys.prefix, "cwd": os.getcwd(), "path": sys.path, "env": sorted(os.environ),
      "sitecustomize": getattr(sys.modules.get("sitecustomize"), "__file__", None), "pp": pp})
 for line in sys.stdin:
     c = json.loads(line)
@@ -71,6 +73,23 @@ for line in sys.stdin:
             time.sleep(30)
         except KeyboardInterrupt:
             say({"interrupted": True})
+    elif k == "sleep_counted":
+        hits = []
+        signal.signal(signal.SIGINT, lambda *a: hits.append(1))
+        while not hits:
+            time.sleep(0.01)
+        say({"interrupted": True})
+    elif k == "lines":
+        sys.stdout.write(("x" * c["len"] + "\n") * c["n"]); sys.stdout.flush()
+        say({"flooded": True})
+    elif k == "burst_exit":
+        sys.stdout.write(("y" * 100 + "\n") * c["n"]); sys.stdout.flush()
+        os._exit(0)
+    elif k == "nap":
+        time.sleep(c["s"])
+    elif k == "stderr":
+        sys.stderr.write("e" * c["n"] + "END"); sys.stderr.flush()
+        say({"wrote": True})
     elif k == "line":
         sys.stdout.write("x" * c["n"] + "\n"); sys.stdout.flush()
     elif k == "big":
@@ -395,4 +414,171 @@ fn the_control_plane_prefixes_are_stripped_by_name_only() {
     assert_eq!(env[1].1, "TkAgg", "the person's MPLBACKEND kept");
     let env = kernel_env(std::iter::empty());
     assert_eq!(env, vec![("MPLBACKEND".into(), "Agg".into())]);
+}
+
+fn start_stub(name: &str) -> (Tmp, Kernel) {
+    let p = system_python();
+    let t = Tmp::new(name);
+    let (res, ws) = (stub(&t), workspace(&t));
+    let k = Kernel::start(&KernelSpec { python: &p, resources: &res, cwd: &ws, base_env: Some(path_env()) }, my_uid()).unwrap();
+    (t, k)
+}
+
+/// The queue's bound, in bytes as charged: the cap, and one line more.
+const QUEUE_BOUND: usize = QUEUE_MAX + LINE_MAX + EVENT_COST;
+/// What any queued line must cost at least besides its bytes, so a flood of empty lines is bounded in events too.
+const MIN_EVENT_COST: usize = 64;
+
+/// `n` lines of `len` bytes, flooded while nobody takes them: held to the bound, then every one delivered, in order.
+fn flood_then_drain(len: usize, n: usize) {
+    let (_t, k) = start_stub("flood");
+    line(&k);
+    k.send(&format!(r#"{{"cmd":"lines","len":{len},"n":{n}}}"#)).unwrap();
+    // (nobody takes anything for a while: the queue fills to its bound and the kernel waits on its stdout)
+    std::thread::sleep(Duration::from_millis(1500));
+    let (bytes, events) = (k.queued_bytes(), k.queued_events());
+    // (lines of one size: no more than one past the cap)
+    let bound = QUEUE_MAX + len + EVENT_COST;
+    assert!(bytes <= bound, "charged {bytes} > {bound}");
+    assert!(events <= QUEUE_MAX / (len + MIN_EVENT_COST) + 1, "{events} events held");
+    assert!(bytes > QUEUE_MAX / 2, "the flood reached the queue: {bytes}");
+    let mut got = 0;
+    loop {
+        match k.recv(Duration::from_secs(10)) {
+            Some(KernelEvent::Line(l)) if l == r#"{"flooded": true}"# => break,
+            Some(KernelEvent::Line(l)) => {
+                assert_eq!(l.len(), len);
+                got += 1;
+            }
+            other => panic!("{other:?} after {got}"),
+        }
+        assert!(k.queued_bytes() <= QUEUE_BOUND);
+    }
+    assert_eq!(got, n, "every line delivered");
+    k.send(r#"{"cmd":"echo","v":1}"#).unwrap();
+    assert_eq!(line(&k)["echo"], 1);
+}
+
+#[test]
+fn a_flood_of_empty_lines_is_held_to_the_queue_bound_and_then_delivered() {
+    flood_then_drain(0, 300_000);
+}
+
+#[test]
+fn a_flood_of_long_lines_is_held_to_the_queue_bound_and_then_delivered() {
+    flood_then_drain(1024, 16 * 1024);
+}
+
+#[test]
+fn stop_ends_a_kernel_blocked_on_a_full_queue() {
+    let (_t, mut k) = start_stub("fullstop");
+    line(&k);
+    k.send(r#"{"cmd":"lines","len":1024,"n":20000}"#).unwrap();
+    std::thread::sleep(Duration::from_millis(1000));
+    assert!(k.queued_bytes() > QUEUE_MAX / 2);
+    let started = Instant::now();
+    k.stop();
+    assert!(started.elapsed() < TERM_GRACE + Duration::from_secs(1), "{:?}", started.elapsed());
+    let mut last = None;
+    while let Some(e) = k.recv(Duration::from_millis(10)) {
+        last = Some(e);
+    }
+    assert_eq!(last, Some(KernelEvent::Exit("stopped".into())));
+}
+
+#[test]
+fn input_past_its_cap_is_refused_while_the_kernel_does_not_read() {
+    let (_t, k) = start_stub("input");
+    line(&k);
+    k.send(r#"{"cmd":"nap","s":5}"#).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let big = format!(r#"{{"cmd":"echo","v":"{}"}}"#, "z".repeat(1024 * 1024));
+    let mut accepted = 0;
+    let refused = loop {
+        match k.send(&big) {
+            Ok(()) => accepted += 1,
+            Err(e) => break e,
+        }
+        assert!(accepted <= 20, "never refused");
+    };
+    assert_eq!(refused, KernelError::InputRefused);
+    // (what the pipe itself took is out of the queue: at most a pipe's worth more than the cap)
+    assert!(accepted * (big.len() + 1) <= INPUT_MAX + 1024 * 1024, "{accepted} accepted");
+    assert!(accepted >= INPUT_MAX / (big.len() + 1) - 1, "{accepted} accepted");
+}
+
+#[test]
+fn only_the_last_of_stderr_is_kept() {
+    let (_t, k) = start_stub("stderr");
+    line(&k);
+    k.send(r#"{"cmd":"stderr","n":1048576}"#).unwrap();
+    assert_eq!(line(&k)["wrote"], true);
+    std::thread::sleep(Duration::from_millis(200));
+    let tail = k.stderr_tail();
+    assert_eq!(tail.len(), STDERR_KEEP);
+    assert!(tail.ends_with(b"eeeEND"));
+}
+
+#[test]
+fn output_written_just_before_the_kernel_exits_is_all_delivered() {
+    // (the queue's worth of 100-byte lines and 200 more, then the exit: when the exit is seen, the last lines are still
+    //  unread (the queue is full, nobody takes anything for half the grace), and they are read once taken)
+    let n = QUEUE_MAX / (100 + EVENT_COST) + 1 + 200;
+    let (_t, k) = start_stub("burst");
+    line(&k);
+    k.send(&format!(r#"{{"cmd":"burst_exit","n":{n}}}"#)).unwrap();
+    std::thread::sleep(EXIT_GRACE / 2);
+    let mut got = 0;
+    let why = loop {
+        match k.recv(Duration::from_secs(10)) {
+            Some(KernelEvent::Line(_)) => got += 1,
+            Some(KernelEvent::Exit(w)) => break w,
+            None => panic!("no exit"),
+        }
+    };
+    assert_eq!(got, n, "every line before the exit");
+    assert_eq!(why, "exit 0");
+}
+
+#[test]
+fn the_kernel_has_its_own_session_and_group() {
+    let (_t, k) = start_stub("session");
+    let r = line(&k);
+    assert_eq!(r["sid"], r["pid"], "its own session: {r}");
+    assert_eq!(r["pgid"], r["pid"], "its own group: {r}");
+}
+
+#[test]
+fn an_interrupt_asked_around_and_after_the_end_never_signals_after_the_reap() {
+    let (_t, k) = start_stub("trace");
+    line(&k);
+    // (a handler that counts and never raises, so the stream of interrupts can't end the stub early)
+    k.send(r#"{"cmd":"sleep_counted"}"#).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let k = Arc::new(k);
+    // (four threads ask for interrupts throughout: while it runs, while it exits, and after it is reaped)
+    let done = Arc::new(AtomicBool::new(false));
+    let askers: Vec<_> = (0..4)
+        .map(|_| {
+            let (k, done) = (k.clone(), done.clone());
+            std::thread::spawn(move || {
+                while !done.load(Ordering::SeqCst) {
+                    k.interrupt();
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            })
+        })
+        .collect();
+    assert_eq!(line(&k)["interrupted"], true);
+    k.send(r#"{"cmd":"exit","code":0}"#).unwrap();
+    assert_eq!(exit_of(&k, Duration::from_secs(10)), "exit 0");
+    std::thread::sleep(Duration::from_millis(300));
+    done.store(true, Ordering::SeqCst);
+    for a in askers {
+        a.join().unwrap();
+    }
+    let trace = k.trace();
+    let reap = trace.iter().position(|&w| w == "reaped").expect("reaped");
+    assert!(trace[..reap].contains(&"sigint"), "{trace:?}");
+    assert_eq!(&trace[reap..], &["reaped"], "nothing sent after the reap: {trace:?}");
 }

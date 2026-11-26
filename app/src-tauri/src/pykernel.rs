@@ -20,10 +20,12 @@
 // resource folder (the one holding sagebrush_kernel; an argument, never part of the code) first, changes to the
 // workspace, and runs sagebrush_kernel. Unlike the probe, the kernel gets the person's environment (their packages,
 // user site-packages, PYTHONPATH, GPU variables), less the app's own and CoCalc's variables (STRIPPED_PREFIXES:
-// control-plane credentials and private host settings), in its own process group, as the person. Its stdout is JSON lines, each at most LINE_MAX; its stderr is kept, the last STDERR_KEEP bytes.
+// control-plane credentials and private host settings), in its own session and process group (setsid), as the person.
+// Its stdout is JSON lines, each at most LINE_MAX, queued up to QUEUE_MAX (each charged EVENT_COST besides its
+// bytes, so empty lines count) and then not read until taken; its stderr is kept, the last STDERR_KEEP bytes.
 // One thread does all of a kernel's I/O, on non-blocking pipes under poll(), and it is joined before stop() returns,
-// so nothing of a kernel outlives its stop even if something it left behind holds a pipe. interrupt() is SIGINT to
-// the group; the end (stop(), or the kernel's own exit) is the tree rule: SIGTERM to the group, SIGKILL after
+// so nothing of a kernel outlives its stop even if something it left behind holds a pipe. That thread alone signals
+// the kernel and reaps it, so no signal can follow the reap. interrupt() asks it for SIGINT to the group; the end (stop(), or the kernel's own exit, its output read for at most EXIT_GRACE) is the tree rule: SIGTERM to the group, SIGKILL after
 // TERM_GRACE, then the reap. An exit is reported, never followed by a restart.
 
 use crate::tools::{self, Identity, ToolRefusal, VersionRun};
@@ -37,12 +39,20 @@ use std::time::{Duration, Instant};
 pub const MIN_PYTHON: (u32, u32) = (3, 10);
 /// A kernel's output line, at most (the remote host's ChildPort reads with the same limit).
 pub const LINE_MAX: usize = 4 * 1024 * 1024;
-/// Lines read but not yet taken: past this, the kernel's stdout is no longer read until they are (it blocks).
+/// Lines read but not yet taken, each charged its bytes plus EVENT_COST: past this, no more lines are queued and the
+/// kernel's stdout is no longer read until they are taken (it blocks). So at most QUEUE_MAX + LINE_MAX + EVENT_COST.
 pub const QUEUE_MAX: usize = 8 * 1024 * 1024;
+/// What a queued line costs besides its bytes (its event and its place in the queue), so empty lines count too.
+pub const EVENT_COST: usize = 64;
+/// One read from the kernel's stdout or stderr, at most.
+const CHUNK: usize = 64 * 1024;
 /// Input written but not yet taken by the kernel: past this, send() refuses.
 pub const INPUT_MAX: usize = 8 * 1024 * 1024;
 /// The kernel's stderr, the last bytes kept.
 pub const STDERR_KEEP: usize = 64 * 1024;
+/// After the kernel's own exit, how long its output is still read (all of it, unless something it left behind holds
+/// the pipes open).
+pub const EXIT_GRACE: Duration = Duration::from_secs(1);
 /// SIGTERM to SIGKILL, at the end.
 pub const TERM_GRACE: Duration = Duration::from_secs(2);
 /// Links followed from the chosen path to the interpreter, at most.
@@ -266,6 +276,16 @@ struct Shared {
     input: VecDeque<u8>,
     stderr: VecDeque<u8>,
     ended: bool,
+    /// (tests only) every signal sent to the kernel's group, and the reap, in order.
+    #[cfg(test)]
+    trace: Vec<&'static str>,
+}
+
+/// (tests only) a signal or the reap, recorded in order.
+#[allow(unused_variables)]
+fn note(shared: &(Mutex<Shared>, Condvar), what: &'static str) {
+    #[cfg(test)]
+    shared.0.lock().unwrap().trace.push(what);
 }
 
 /// A running kernel. Dropping it stops it.
@@ -273,7 +293,9 @@ pub struct Kernel {
     pid: libc::pid_t,
     shared: Arc<(Mutex<Shared>, Condvar)>,
     stop: Arc<AtomicBool>,
-    reaped: Arc<AtomicBool>,
+    /// An interrupt asked for: the I/O thread, the only one that signals the kernel or reaps it, sends it, so no
+    /// signal can follow the reap (after which the pid and group id could be someone else's).
+    interrupt: Arc<AtomicBool>,
     io: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -294,15 +316,30 @@ impl Kernel {
             None => kernel_env(std::env::vars_os()),
         };
         cmd.env_clear().envs(env);
-        cmd.current_dir(START_DIR).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0);
+        cmd.current_dir(START_DIR).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        // (its own session, and so its own group: pgid = sid = its pid; if setsid fails, the spawn fails)
+        unsafe {
+            cmd.pre_exec(|| if libc::setsid() < 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) });
+        }
         let mut child = cmd.spawn().map_err(|e| KernelError::Spawn(e.to_string()))?;
         let pid = child.id() as libc::pid_t;
         let (stdin, stdout, stderr) = (child.stdin.take(), child.stdout.take(), child.stderr.take());
-        let shared = Arc::new((Mutex::new(Shared { queue: VecDeque::new(), queued: 0, input: VecDeque::new(), stderr: VecDeque::new(), ended: false }), Condvar::new()));
+        let shared = Arc::new((
+            Mutex::new(Shared {
+                queue: VecDeque::new(),
+                queued: 0,
+                input: VecDeque::new(),
+                stderr: VecDeque::new(),
+                ended: false,
+                #[cfg(test)]
+                trace: Vec::new(),
+            }),
+            Condvar::new(),
+        ));
         let stop = Arc::new(AtomicBool::new(false));
-        let reaped = Arc::new(AtomicBool::new(false));
+        let interrupt = Arc::new(AtomicBool::new(false));
         let (Some(stdin), Some(stdout), Some(stderr)) = (stdin, stdout, stderr) else {
-            end_tree(pid, &reaped);
+            end_tree(pid, &shared);
             let _ = child.wait();
             return Err(KernelError::Spawn("no pipes".into()));
         };
@@ -313,7 +350,7 @@ impl Kernel {
             let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
             if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
                 // (a blocking pipe could hold the I/O thread past a stop: refused, and the tree ended)
-                end_tree(pid, &reaped);
+                end_tree(pid, &shared);
                 return Err(KernelError::Spawn("pipes not non-blocking".into()));
             }
         }
@@ -321,10 +358,10 @@ impl Kernel {
         //  tree rule, so the group id can't be reused while it is signalled)
         std::mem::forget(child);
         let io = {
-            let (shared, stop, reaped) = (shared.clone(), stop.clone(), reaped.clone());
-            std::thread::spawn(move || io_loop(pid, fds, shared, stop, reaped))
+            let (shared, stop, interrupt) = (shared.clone(), stop.clone(), interrupt.clone());
+            std::thread::spawn(move || io_loop(pid, fds, shared, stop, interrupt))
         };
-        Ok(Kernel { pid, shared, stop, reaped, io: Some(io) })
+        Ok(Kernel { pid, shared, stop, interrupt, io: Some(io) })
     }
 
     /// Send one line (no newline in it) to the kernel's stdin.
@@ -354,7 +391,7 @@ impl Kernel {
         loop {
             if let Some(e) = s.queue.pop_front() {
                 if let KernelEvent::Line(l) = &e {
-                    s.queued -= l.len();
+                    s.queued -= l.len() + EVENT_COST;
                 }
                 return Some(e);
             }
@@ -366,16 +403,31 @@ impl Kernel {
         }
     }
 
+    /// What the queued lines are charged now (QUEUE_MAX's measure).
+    pub fn queued_bytes(&self) -> usize {
+        self.shared.0.lock().unwrap().queued
+    }
+
+    /// How many events are queued now.
+    pub fn queued_events(&self) -> usize {
+        self.shared.0.lock().unwrap().queue.len()
+    }
+
     /// The last of the kernel's stderr.
     pub fn stderr_tail(&self) -> Vec<u8> {
         self.shared.0.lock().unwrap().stderr.iter().copied().collect()
     }
 
-    /// Stop what it is running (SIGINT to its group), while it hasn't been reaped.
+    /// Stop what it is running: SIGINT to its group, sent by the I/O thread while the kernel is unreaped (asked
+    /// after the end, it is dropped).
     pub fn interrupt(&self) {
-        if !self.reaped.load(Ordering::SeqCst) {
-            unsafe { libc::kill(-self.pid, libc::SIGINT) };
-        }
+        self.interrupt.store(true, Ordering::SeqCst);
+    }
+
+    /// (tests only) the signals sent and the reap, in order.
+    #[cfg(test)]
+    fn trace(&self) -> Vec<&'static str> {
+        self.shared.0.lock().unwrap().trace.clone()
     }
 
     /// End it (the tree rule), and join its I/O: when this returns, nothing of the kernel is held by the app.
@@ -409,17 +461,18 @@ fn exited(pid: libc::pid_t) -> Option<bool> {
 /// The tree rule, then the reap: SIGTERM to the group, SIGKILL after TERM_GRACE (or at once if the leader has already
 /// exited), then the leader reaped; its status, in words.
 #[cfg(unix)]
-fn end_tree(pid: libc::pid_t, reaped: &AtomicBool) -> String {
+fn end_tree(pid: libc::pid_t, shared: &(Mutex<Shared>, Condvar)) -> String {
     if exited(pid).is_none() {
-        reaped.store(true, Ordering::SeqCst);
         return "gone".into();
     }
     unsafe { libc::kill(-pid, libc::SIGTERM) };
+    note(shared, "sigterm");
     let t = Instant::now();
     while exited(pid) == Some(false) && t.elapsed() < TERM_GRACE {
         std::thread::sleep(Duration::from_millis(10));
     }
     unsafe { libc::kill(-pid, libc::SIGKILL) };
+    note(shared, "sigkill");
     let mut status: libc::c_int = 0;
     let r = loop {
         let r = unsafe { libc::waitpid(pid, &mut status, 0) };
@@ -428,7 +481,7 @@ fn end_tree(pid: libc::pid_t, reaped: &AtomicBool) -> String {
         }
         break r;
     };
-    reaped.store(true, Ordering::SeqCst);
+    note(shared, "reaped");
     if r != pid {
         "gone".into()
     } else if libc::WIFEXITED(status) {
@@ -440,25 +493,75 @@ fn end_tree(pid: libc::pid_t, reaped: &AtomicBool) -> String {
     }
 }
 
+/// `pending` split into lines and queued, while the queue has room; what is left stays in `pending`. A line past
+/// LINE_MAX, or one that isn't UTF-8, ends the kernel (the reason returned).
+fn feed(pending: &mut Vec<u8>, line: &mut Vec<u8>, shared: &(Mutex<Shared>, Condvar)) -> Option<String> {
+    let mut used = 0;
+    let mut s = shared.0.lock().unwrap();
+    while s.queued <= QUEUE_MAX && used < pending.len() {
+        let rest = &pending[used..];
+        match rest.iter().position(|&b| b == b'\n') {
+            Some(p) => {
+                if line.len() + p > LINE_MAX {
+                    return Some("line over the cap".into());
+                }
+                line.extend_from_slice(&rest[..p]);
+                used += p + 1;
+                match String::from_utf8(std::mem::take(line)) {
+                    Ok(l) => {
+                        s.queued += l.len() + EVENT_COST;
+                        s.queue.push_back(KernelEvent::Line(l));
+                        shared.1.notify_all();
+                    }
+                    Err(_) => return Some("not UTF-8".into()),
+                }
+            }
+            None => {
+                if line.len() + rest.len() > LINE_MAX {
+                    return Some("line over the cap".into());
+                }
+                line.extend_from_slice(rest);
+                used = pending.len();
+            }
+        }
+    }
+    pending.drain(..used);
+    None
+}
+
 /// All of one kernel's I/O, on this thread: stdin written from the input queue, stdout split into lines, stderr kept,
 /// the exit observed; at the end the tree rule, the reap, the pipes closed, and Exit queued.
 #[cfg(unix)]
-fn io_loop(pid: libc::pid_t, fds: [std::os::fd::OwnedFd; 3], shared: Arc<(Mutex<Shared>, Condvar)>, stop: Arc<AtomicBool>, reaped: Arc<AtomicBool>) {
+fn io_loop(pid: libc::pid_t, fds: [std::os::fd::OwnedFd; 3], shared: Arc<(Mutex<Shared>, Condvar)>, stop: Arc<AtomicBool>, interrupt: Arc<AtomicBool>) {
     use std::os::fd::AsRawFd;
     let [stdin, stdout, stderr] = fds;
     let mut stdin = Some(stdin);
     let mut open = [true, true]; // stdout, stderr
     let mut line: Vec<u8> = Vec::new();
+    // (read from stdout but not yet queued as lines, because the queue was full: at most one read)
+    let mut pending: Vec<u8> = Vec::new();
     let mut why: Option<String> = None;
-    let mut chunk = vec![0u8; 64 * 1024];
+    let mut exited_at: Option<Instant> = None;
+    let mut chunk = vec![0u8; CHUNK];
     loop {
         if stop.load(Ordering::SeqCst) {
             why = Some("stopped".into());
             break;
         }
+        // (the leader is unreaped until end_tree below, which only this thread calls: its group is still its own)
+        if interrupt.swap(false, Ordering::SeqCst) {
+            unsafe { libc::kill(-pid, libc::SIGINT) };
+            note(&shared, "sigint");
+        }
+        if !pending.is_empty() {
+            why = feed(&mut pending, &mut line, &shared);
+            if why.is_some() {
+                break;
+            }
+        }
         let (want_out, has_input) = {
             let s = shared.0.lock().unwrap();
-            (s.queued <= QUEUE_MAX, !s.input.is_empty())
+            (s.queued <= QUEUE_MAX && pending.is_empty(), !s.input.is_empty())
         };
         let mut pfds: Vec<libc::pollfd> = Vec::new();
         let mut which: Vec<u8> = Vec::new();
@@ -506,34 +609,8 @@ fn io_loop(pid: libc::pid_t, fds: [std::os::fd::OwnedFd; 3], shared: Arc<(Mutex<
                     if n == 0 {
                         open[0] = false;
                     } else if n > 0 {
-                        let mut rest = &chunk[..n as usize];
-                        while let Some(p) = rest.iter().position(|&b| b == b'\n') {
-                            if line.len() + p > LINE_MAX {
-                                why = Some("line over the cap".into());
-                                break;
-                            }
-                            line.extend_from_slice(&rest[..p]);
-                            rest = &rest[p + 1..];
-                            match String::from_utf8(std::mem::take(&mut line)) {
-                                Ok(l) => {
-                                    let mut s = shared.0.lock().unwrap();
-                                    s.queued += l.len();
-                                    s.queue.push_back(KernelEvent::Line(l));
-                                    shared.1.notify_all();
-                                }
-                                Err(_) => {
-                                    why = Some("not UTF-8".into());
-                                    break;
-                                }
-                            }
-                        }
-                        if why.is_none() {
-                            if line.len() + rest.len() > LINE_MAX {
-                                why = Some("line over the cap".into());
-                            } else {
-                                line.extend_from_slice(rest);
-                            }
-                        }
+                        pending.extend_from_slice(&chunk[..n as usize]);
+                        why = feed(&mut pending, &mut line, &shared);
                     } else {
                         let e = std::io::Error::last_os_error();
                         if e.kind() != std::io::ErrorKind::WouldBlock && e.kind() != std::io::ErrorKind::Interrupted {
@@ -565,13 +642,18 @@ fn io_loop(pid: libc::pid_t, fds: [std::os::fd::OwnedFd; 3], shared: Arc<(Mutex<
         if why.is_some() {
             break;
         }
-        // (the kernel's own exit ends it; its output already read is kept, what is still in the pipes is not waited
-        //  for: something it left behind could hold them)
-        if exited(pid) != Some(false) {
-            break;
+        // (the kernel's own exit ends it: its output is read to the end, for at most EXIT_GRACE, since something it
+        //  left behind could hold the pipes)
+        if exited_at.is_none() && exited(pid) != Some(false) {
+            exited_at = Some(Instant::now());
+        }
+        if let Some(t) = exited_at {
+            if (!open[0] && pending.is_empty() && !open[1]) || t.elapsed() >= EXIT_GRACE {
+                break;
+            }
         }
     }
-    let status = end_tree(pid, &reaped);
+    let status = end_tree(pid, &shared);
     drop(stdin);
     drop(stdout);
     drop(stderr);
