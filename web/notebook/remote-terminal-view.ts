@@ -244,6 +244,21 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
     const row = extraKeysRow("rkeys", (data) => client?.input(data), () => term?.focus());
     if (row) panel.insertBefore(row, body);
     term = safeTerminal({ scrollback: SCROLLBACK, onTitle: (t) => { title.textContent = t; } });
+    // (a paste is sent as its text, never between bracketed-paste markers: a program that turned the mode on and was
+    // killed before turning it off leaves it on, and a shell without bracketed paste (bash before 5.1, or one configured
+    // off) then shows the markers as ^[[200~ … ~.  The page can't tell a stale mode from a live one)
+    term.options.ignoreBracketedPasteMode = true;
+    // Ported from CoCalc packages/frontend/frame-editors/terminal-editor/connected-terminal.ts (SageMath, Inc.; relicensed by the copyright owner, Nov 7 2026)
+    // (initKeyHandler, lines 1975-1989 @a06a9ef1: Ctrl+C (Cmd+C) with text selected copies it, the
+    // browser's copy, instead of an interrupt; without a selection it is ^C as always; Ctrl+V (Cmd+V) is always the
+    // browser's paste, which xterm takes from the paste event.  Returning false: xterm does nothing with the key, and the
+    // browser does what it does with it)
+    term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+      if (event.type !== "keydown") return true;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c" && term?.hasSelection()) return false;
+      if ((event.ctrlKey || event.metaKey) && event.key === "v") return false;
+      return true;
+    });
     // Ported from CoCalc packages/frontend/frame-editors/terminal-editor/connected-terminal.ts (SageMath, Inc.; relicensed by the copyright owner, Nov 7 2026)
     // (onKey / onData, lines 527-548 @2265acac: while output is being drawn, keys still go through onKey, or typing
     // "123456789" across the number row drops a "4".  There, it is while any output renders, because CoCalc's

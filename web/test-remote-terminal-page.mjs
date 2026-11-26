@@ -320,6 +320,62 @@ try {
   })()`);
   ok(JSON.stringify(hrefs) === JSON.stringify([null, null, null, null, null, null, null, "https://example.com/a%20b", "http://example.com/", "https://example.com/x"]), `webHref: http(s) only (${JSON.stringify(hrefs)})`);
 
+  // 7b. a paste: its text alone, never between bracketed-paste markers, the mode off or left on (a program killed before
+  // turning it off leaves it on; a shell without bracketed paste then showed the markers as ^[[200~ … ~)
+  const textarea = "document.querySelector('#rterm .xterm-helper-textarea')";
+  const pasteNow = (text) => ev(`(() => { const dt = new DataTransfer(); dt.setData('text/plain', ${JSON.stringify(text)}); ${textarea}.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); return true; })()`);
+  await ev(`${textarea}.focus(), true`);
+  for (const [what, mode] of [["the mode off", "\x1b[?2004l"], ["the mode left on", "\x1b[?2004h"]]) {
+    await out(mode);
+    await sleep(100);
+    const b = (await ev("__leg.ins()")).length;
+    await pasteNow("GPU Memory");
+    await until(`__leg.ins().length > ${b}`);
+    await sleep(100);
+    const got = (await ev("__leg.ins()")).slice(b);
+    ok(got === "GPU Memory", `${what}: a paste sends its text alone (${JSON.stringify(got)})`);
+  }
+  await out("\x1b[?2004l");
+  // 7c. Ctrl+C: ^C with nothing selected; with text selected, the browser's copy and nothing sent.  Ctrl+V: the
+  // browser's paste, never a ^V sent (CoCalc's keys, connected-terminal.ts initKeyHandler)
+  const ctrl = async (k, code, vk) => {
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, windowsVirtualKeyCode: vk, modifiers: 2 });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, windowsVirtualKeyCode: vk, modifiers: 2 });
+  };
+  await ev(`${textarea}.focus(), true`);
+  let b0 = (await ev("__leg.ins()")).length;
+  await ctrl("c", "KeyC", 67);
+  await until(`__leg.ins().length > ${b0}`);
+  ok((await ev("__leg.ins()")).slice(b0) === "\x03", "Ctrl+C with nothing selected: ^C, an interrupt");
+  await out("\x1b[2J\x1b[HSELECTME and more\r\n");
+  await until("/SELECTME/.test(document.querySelector('#rterm .xterm-rows').textContent)");
+  {
+    const r = await ev(`(() => {
+      const it = document.createTreeWalker(document.querySelector('#rterm .xterm-rows'), NodeFilter.SHOW_TEXT);
+      for (let t; (t = it.nextNode());) {
+        const i = t.data.indexOf("SELECTME");
+        if (i < 0) continue;
+        const range = document.createRange(); range.setStart(t, i + 2); range.setEnd(t, i + 3);
+        const b = range.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      }
+      return null;
+    })()`);
+    for (const n of [1, 2]) {
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", x: r.x, y: r.y, button: "left", clickCount: n });
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: r.x, y: r.y, button: "left", clickCount: n });
+    }
+    await sleep(200);
+  }
+  ok(await ev("document.querySelectorAll('#rterm .xterm-selection div').length > 0"), "a double-click selects a word");
+  b0 = (await ev("__leg.ins()")).length;
+  await ctrl("c", "KeyC", 67);
+  await sleep(400);
+  ok((await ev("__leg.ins()")).slice(b0) === "", "Ctrl+C with text selected: copied, nothing sent (no interrupt)");
+  await ctrl("v", "KeyV", 86);
+  await sleep(400);
+  ok(!(await ev("__leg.ins()")).slice(b0).includes("\x16"), "Ctrl+V sends no ^V: the browser's paste");
+
   // 8. a resize goes to the computer
   await send("Emulation.setDeviceMetricsOverride", { width: 800, height: 700, deviceScaleFactor: 1, mobile: false });
   await until(`__leg.sent.some((m) => m.t === 'resize' && m.cols < ${body.cols})`);
@@ -357,6 +413,19 @@ try {
   await sleep(100);
   const [wantD, gotD] = await bg();
   ok(wantL !== wantD && gotL === wantL && gotD === wantD, `the theme follows the page: light ${gotL} (${wantL}), dark ${gotD} (${wantD})`);
+  // 8d. a bold white prompt (\e[01;37m, as many PS1s draw the folder) reads on the light theme: at least 4.5:1
+  await setTheme("light");
+  await sleep(100);
+  await out("\x1b[2J\x1b[H\x1b[01;37mBOLDWHITE\x1b[0m plain\r\n");
+  await until("/BOLDWHITE/.test(document.querySelector('#rterm .xterm-rows').textContent)");
+  const contrast = await ev(`(() => {
+    const lum = (c) => { const m = c.match(/\\d+(\\.\\d+)?/g).slice(0, 3).map(Number).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]; };
+    const span = [...document.querySelectorAll('#rterm .xterm-rows span')].find((e) => e.textContent.includes('BOLDWHITE'));
+    const fg = getComputedStyle(span).color, bg = getComputedStyle(document.querySelector('#rterm .xterm-scrollable-element')).backgroundColor;
+    const [a, b] = [lum(fg), lum(bg)].sort((x, y) => y - x);
+    return { fg, bg, ratio: (a + 0.05) / (b + 0.05) };
+  })()`);
+  ok(contrast.ratio >= 4.5, `bold white on the light theme: ${contrast.fg} on ${contrast.bg}, ${contrast.ratio.toFixed(2)}:1`);
   await setTheme("system");
 
   // 9. the leg lost: said, with Reconnect, and reattached by itself after a second (the same session, a fresh hello and
