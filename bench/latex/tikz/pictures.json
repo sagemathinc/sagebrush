@@ -1,5 +1,5 @@
 {
-  "_": "The TikZ benchmark's pictures (paths, styles, transforms, \\foreach; no nodes, which the preview doesn't draw yet), written for this benchmark. src: a tikzpicture's body. iou: the least ink overlap (within 0.24 pt) the picture is held to, recorded from its first run, with why when it is not the default.",
+  "_": "The TikZ benchmark's pictures (paths, styles, transforms, \\foreach; and nodes: text, anchors, placement), written for this benchmark. src: a tikzpicture's body. iou: the least ink overlap (within 0.24 pt) the picture is held to, recorded from its first run, with why when it is not the default.",
   "pictures": [
     { "id": "T01", "name": "segment", "src": "\\draw (0,0) -- (3,1);" },
     { "id": "T02", "name": "polyline-cycle", "src": "\\draw (0,0) -- (2,0) -- (2.5,1.5) -- (0.5,2) -- cycle;" },
@@ -40,6 +40,18 @@
     { "id": "T37", "name": "staircase", "src": "\\draw (0,0) -| (0.6,0.4) -| (1.2,0.8) -| (1.8,1.2) -| (2.4,1.6) -| (3,2); \\draw[red] (0,0) -- (3,2);" },
     { "id": "T38", "name": "tikzset-styles", "src": "\\tikzset{axis/.style={->, thick}, tick/.style={thin, gray}} \\draw[axis] (0,0) -- (3,0); \\draw[axis] (0,0) -- (0,2); \\foreach \\x in {0.5,1,...,2.5} \\draw[tick] (\\x,0) -- (\\x,2);" },
     { "id": "T39", "name": "nested-squares", "src": "\\foreach \\k in {0,...,6} \\draw[rotate={\\k*10}, scale={1-\\k*0.1}] (-1.5,-1.5) rectangle (1.5,1.5);" },
-    { "id": "T40", "name": "spiral-segments", "src": "\\foreach \\a in {0,20,...,700} \\draw[blue] ({\\a}:{0.002*\\a}) -- ({\\a+20}:{0.002*(\\a+20)});" }
+    { "id": "T40", "name": "spiral-segments", "src": "\\foreach \\a in {0,20,...,700} \\draw[blue] ({\\a}:{0.002*\\a}) -- ({\\a+20}:{0.002*(\\a+20)});" },
+    { "id": "N01", "name": "labelled-axes", "src": "\\draw[->] (-0.5,0) -- (3.5,0) node[right] {$x$}; \\draw[->] (0,-0.5) -- (0,2.5) node[above] {$y$}; \\foreach \\x in {1,2,3} \\draw (\\x,0.1) -- (\\x,-0.1) node[below] {$\\x$}; \\draw[thick, blue] (0,0) -- (3,2) node[above left] {$y=\\frac{2}{3}x$};" },
+    { "id": "N02", "name": "unit-circle-labels", "src": "\\draw[->] (-1.5,0) -- (1.5,0) node[right] {$x$}; \\draw[->] (0,-1.5) -- (0,1.5) node[above] {$y$}; \\draw (0,0) circle (1); \\draw[red, thick] (0,0) -- (40:1) node[above right] {$P$}; \\draw (0.3,0) arc (0:40:0.3) node[midway, right] {$\\theta$};" },
+    { "id": "N03", "name": "graph", "src": "\\node[draw,circle] (a) at (0,0) {1}; \\node[draw,circle] (b) at (2,0) {2}; \\node[draw,circle] (c) at (1,1.5) {3}; \\node[draw,circle] (d) at (3,1.5) {4}; \\draw (a) -- (b) -- (c) -- (a); \\draw[->] (b) -- (d); \\draw[->] (c) to[bend left] (d);" },
+    { "id": "N04", "name": "commutative-square", "src": "\\node (A) at (0,2) {$A$}; \\node (B) at (2,2) {$B$}; \\node (C) at (0,0) {$C$}; \\node (D) at (2,0) {$D$}; \\draw[->] (A) -- node[above] {$f$} (B);", "iou": 0.75, "why": "mostly a thin horizontal line and five letters: Chrome's 0.4 pt line is wider than pdftoppm's along all of it (the box and the letters agree)" },
+    { "id": "N05", "name": "flowchart", "src": "\\node[draw, rounded corners] (s) at (0,0) {Start}; \\node[draw] (p) at (0,-1.2) {Read $n$}; \\node[draw, circle] (q) at (0,-2.4) {$n>0$?}; \\node[draw, rounded corners] (e) at (2.5,-2.4) {Stop}; \\draw[->] (s) -- (p); \\draw[->] (p) -- (q); \\draw[->] (q) -- (e) node[midway, above] {no};" },
+    { "id": "N06", "name": "tree", "src": "\\node[draw] (r) at (2,3) {root}; \\node[draw] (a) at (0.5,1.8) {$a$}; \\node[draw] (b) at (3.5,1.8) {$b$}; \\node[draw] (c) at (0,0.6) {$c$}; \\node[draw] (d) at (1,0.6) {$d$}; \\draw (r) -- (a); \\draw (r) -- (b); \\draw (a) -- (c); \\draw (a) -- (d);" },
+    { "id": "N07", "name": "positioning", "src": "\\node[draw] (A) {Input}; \\node[draw, right=of A] (B) {Process}; \\node[draw, right=of B] (C) {Output}; \\draw[->] (A) -- (B); \\draw[->] (B) -- (C); \\node[below=of B] {feedback};" },
+    { "id": "N08", "name": "triangle-vertices", "src": "\\coordinate (A) at (0,0); \\coordinate (B) at (3,0); \\coordinate (C) at (1,2); \\draw (A) -- (B) -- (C) -- cycle; \\node[below left] at (A) {$A$}; \\node[below right] at (B) {$B$}; \\node[above] at (C) {$C$}; \\node[below] at ($(A)!0.5!(B)$) {$c$};" },
+    { "id": "N09", "name": "number-line", "src": "\\draw[->] (-0.5,0) -- (4.5,0); \\foreach \\x in {0,...,4} { \\draw (\\x,0.1) -- (\\x,-0.1); \\node[below] at (\\x,-0.1) {$\\x$}; } \\fill[red] (1.5,0) circle (2pt) node[above] {$\\frac{3}{2}$};" },
+    { "id": "N10", "name": "venn", "src": "\\draw (0,0) circle (1); \\draw (1.2,0) circle (1); \\node at (-0.4,0) {$A$}; \\node at (1.6,0) {$B$}; \\node at (0.6,0) {$A\\cap B$}; \\node[font=\\small] at (0.6,-1.4) {two sets};" },
+    { "id": "N11", "name": "labels-and-pins", "src": "\\node[draw, circle, label=above:$v_1$] (a) at (0,0) {}; \\node[draw, circle, label=below:$v_2$] (b) at (2,0) {}; \\node[draw, circle, label=right:$v_3$] (c) at (1,1.5) {}; \\draw (a) -- (b) -- (c) -- (a);" },
+    { "id": "N12", "name": "multiline", "src": "\\node[draw, align=center] at (0,0) {first line\\\\second}; \\node[draw, align=left] at (3,0) {left\\\\aligned text};" }
   ]
 }
