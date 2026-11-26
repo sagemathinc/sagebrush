@@ -153,7 +153,8 @@ def _common_field(a, b):
 def _never_meets(P, B):
     """Whether Sage's coercion finds no common parent for a scalar over P
     and a matrix over the finite ring B (GF(q) or Z/n), as observed in Sage
-    10.10: a Z/m coprime to B's order (Z/1 too), a real or complex
+    10.10: a Z/m coprime to B's order (Z/1 too), an extension field that
+    _mod_pushout does not meet with B, a real or complex
     numerical field, the symbolic ring, and polynomials over QQ or over a
     finite ring of order coprime to B's.  Integers, ZZ[x], and the rings
     that do meet B are not among them."""
@@ -161,6 +162,8 @@ def _never_meets(P, B):
     n = int(B.order())
     if isinstance(P, _ff.IntegerModRing_):
         return _gcd(P._n, n) == 1
+    if isinstance(P, _ff.FiniteField_ext):
+        return _mod_pushout(P, B) is None
     if _ring_class(P) == "num" or P is _sa().SR:
         return True
     if type(P) is _sage_poly.PolynomialRing_:
@@ -171,18 +174,17 @@ def _never_meets(P, B):
 
 
 def _mod_ring(R):
-    """Whether R is GF(p) or Z/nZ: the rings whose meeting matrix and
-    scalar arithmetic models (_meet, _pushout).  Extension fields GF(p^k),
-    k > 1, are not among them: their meeting with Z/nZ is not modelled, so
-    such pairs keep their refusal."""
-    return isinstance(R, _ff.IntegerModRing_)
+    """Whether R is GF(q) or Z/nZ: the rings whose meeting matrix and
+    scalar arithmetic models (_meet, _pushout, _mod_pushout)."""
+    return isinstance(R, (_ff.IntegerModRing_, _ff.FiniteField_ext))
 
 
 def _meet(a, b):
     """Where matrices over a and b meet for arithmetic: _common_field, and
-    for two rings of GF(p) and Z/nZ their common ring as Sage's coercion
+    for two rings of GF(q) and Z/nZ their common ring as Sage's coercion
     has it (_mod_pushout: Z/m and Z/n in Z/gcd(m, n), the smaller one when
-    one order divides the other, GF(p) over Z/p); None otherwise (FFMatrix's examples).
+    one order divides the other, GF(p) over Z/p, GF(p^k) over Z/n when p
+    divides n); None otherwise (FFMatrix's examples).
     """
     F = _common_field(a, b)
     if F is None and _mod_ring(a) and _mod_ring(b):
@@ -405,7 +407,7 @@ def _pushout(B, o):
     if isinstance(o, int):
         return None
     if _mod_ring(B):
-        # (a scalar over another GF(p) or Z/m: the common ring, as Sage's
+        # (a scalar over another GF(q) or Z/m: the common ring, as Sage's
         # coercion has it, _mod_pushout; GF(3)(2) * matrix(Zmod(12), ...) is
         # over GF(3), Zmod(9)(2) * matrix(Zmod(12), ...) over Z/3)
         # (but Sage refuses a scalar over Z/1 with a matrix over any other
@@ -514,8 +516,8 @@ def _mod_pushout(R, S):
         return None  # (two extension fields: GF(4) and GF(16) do not meet in Sage)
     if ext[0] or ext[1]:
         E, Z = (R, S) if ext[0] else (S, R)
-        if Z._n == 1:
-            raise NotImplementedError("vectors over %r and %r are not available together in sagebrush yet" % (R, S))
+        # (Z/1 meets no extension field in Sage, nor any Z/n not divisible
+        # by its characteristic)
         return E if Z._n % E._p == 0 else None
     g = math.gcd(R._n, S._n)
     if g == 1:
@@ -1544,22 +1546,18 @@ class FFMatrix:
         [5 3], 5, x^2 + 2*x + 5, 48
         )
 
-    With an operand over another GF(p) or Z/n, where Sage's coercion meets
-    the two rings (_meet); an extension field GF(p^k), k > 1, with Z/n keeps
-    its refusal::
+    With an operand over another GF(q) or Z/n, where Sage's coercion meets
+    the two rings (_meet): a Z/n element enters GF(p^k) through its integer
+    lift when p divides n::
 
         sage: matrix(Zmod(12), [[1, 2]]) * matrix(Zmod(9), [[1], [1]])
         [0]
         sage: (GF(3)(2) * matrix(Zmod(12), [[1, 2]])).parent()
         Full MatrixSpace of 1 by 2 dense matrices over Finite Field of size 3
-        sage: GF(4, 'a')(1) * matrix(Zmod(6), [[1]])  # sagebrush only (Sage: [1], over GF(4))
-        Traceback (most recent call last):
-        ...
-        TypeError: unsupported operand type(s) for *: 'FiniteFieldElement' and 'FFMatrix'
-        sage: matrix(GF(4, 'a'), [[1]]) * matrix(Zmod(6), [[1]])  # sagebrush only (Sage: [1], over GF(4))
-        Traceback (most recent call last):
-        ...
-        TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 1 by 1 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 6'
+        sage: (GF(4, 'a')(1) * matrix(Zmod(6), [[1]])).parent()
+        Full MatrixSpace of 1 by 1 dense matrices over Finite Field in a of size 2^2
+        sage: matrix(GF(4, 'a'), [[1]]) * matrix(Zmod(6), [[3]])
+        [1]
 
     A Python complex (or float) keeps Python's refusal, as Sage's names
     types too, though Sage's names its own matrix class::
@@ -1961,10 +1959,9 @@ class FFMatrix:
         raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % ((op,) + pair))
 
     def __mul__(self, o):
-        """self * o.  Over GF(p) and Z/n, an operand over another of these
-        rings meets this one where Sage's coercion meets them (_meet); an
-        extension field GF(p^k), k > 1, with Z/n keeps its refusal (FFMatrix's
-        examples).
+        """self * o.  Over GF(q) and Z/n, an operand over another of these
+        rings meets this one where Sage's coercion meets them (_meet,
+        FFMatrix's examples).
         """
         o = self._from_qq(o, "*")
         if isinstance(o, FFMatrix):
