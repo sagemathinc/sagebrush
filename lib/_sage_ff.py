@@ -2618,6 +2618,8 @@ class FiniteFieldElement:
 
             sage: k.<a> = GF(9); (a^2).sqrt() in [a, -a]
             True
+            sage: (a + 1).sqrt(), k(2).sqrt(), (2*a + 2).sqrt()
+            (a, a + 1, 2*a + 1)
         """
         K = self._parent
         if not self:
@@ -2627,8 +2629,14 @@ class FiniteFieldElement:
                 return []
             raise ValueError("must be a perfect square.")
         q = K._q
+        table = K._log_table() if K._p != 2 and q < 2 ** 16 else None
         if K._p == 2:
             r = self ** (q // 2)
+        elif table is not None:
+            # (Sage's root below 2^16 elements: g^(k/2) for self = g^k, g the
+            # multiplicative generator and 0 <= k < q - 1; the other is -r)
+            g, logs = table
+            r = g ** (logs[K._index(self)] // 2)
         else:
             # Tonelli-Shanks in the cyclic group of order q - 1
             Q, S = q - 1, 0
@@ -4373,7 +4381,9 @@ class Polynomial_ff:
 
     def squarefree_decomposition(self):
         """The squarefree decomposition: f = u prod g_i^i with each g_i
-        squarefree and the g_i pairwise coprime, ordered by i.
+        squarefree and the g_i pairwise coprime, in Sage's order: the
+        exponents prime to the characteristic p increasing, then those of
+        the p-th power part, found from its p-th root.
 
         EXAMPLES::
 
@@ -4381,20 +4391,18 @@ class Polynomial_ff:
             (x + 1)^2 * (x + 2)^3
             sage: T.<z> = GF(2)[]; (z^4 + 1).squarefree_decomposition()
             (z + 1)^4
-            sage: (3*(x + 1)^2).squarefree_decomposition()
-            (3) * (x + 1)^2
+            sage: (3*(x + 1)^2).squarefree_decomposition(), (z^3*(z + 1)^2).squarefree_decomposition()
+            ((3) * (x + 1)^2, z^3 * (z + 1)^2)
         """
         if not self._c:
             raise ArithmeticError("square-free decomposition of 0 is not defined")
-        F = self.factor()
-        by = {}
-        for g, e in F:
-            by[e] = by[e] * g if e in by else g
-        return _FFFactorization([(by[e], e) for e in sorted(by)], F.unit(), self._ring)
+        self._need_field("the squarefree decomposition")
+        return _FFFactorization(_sqf_items(self.monic()), self._c[-1], self._ring)
 
     def radical(self):
-        """The leading coefficient times the product of the distinct monic
-        irreducible factors (1 for a nonzero constant).
+        """The product of the squarefree parts, with the leading coefficient
+        when the characteristic is above the degree, as Sage (1 for a nonzero
+        constant).
 
         EXAMPLES::
 
@@ -4402,14 +4410,19 @@ class Polynomial_ff:
             (x^2 + 3*x + 2, 3*x^2 + 3)
             sage: T.<z> = GF(2)[]; (z^4 + z^2).radical()
             z^2 + z
+            sage: U.<u> = GF(3)[]; (2*u^4 + u^2).radical(), (2*u^2 + 2).radical()
+            (u^3 + 2*u, 2*u^2 + 2)
         """
         if not self._c:
             raise ZeroDivisionError()
         if self.degree() == 0:
             return self._ring(1)
-        F = self.factor()
-        r = self._ring(F.unit())
-        for g, _ in F:
+        # (as Sage: when the characteristic p is at most the degree, the
+        # product of the squarefree parts without the unit; otherwise
+        # f // gcd(f, f'), which keeps the leading coefficient)
+        p = int(self._ring._base.characteristic())
+        r = self._ring(1) if p <= self.degree() else self._ring(self._c[-1])
+        for g, _ in _sqf_items(self.monic()):
             r = r * g
         return r
 
@@ -4591,9 +4604,10 @@ class Polynomial_ff:
             (1, 0)
         """
         m = self._coerce(m)
-        if m is None or not m.is_monomial():
-            raise ValueError("m must be a monomial")
-        return self[m.degree()]
+        if m is None:
+            raise TypeError("m must be a polynomial")
+        # (as Sage: the coefficient at m's degree, whatever m's other terms)
+        return self[max(m.degree(), 0)] if m else self._ring._base.zero()
 
     def is_irreducible(self):
         """Whether irreducible (Ben-Or / Rabin test over GF(q)).
@@ -4859,6 +4873,35 @@ def _sort_key(c):
     return 0
 
 
+def _sqf_items(f):
+    """The squarefree decomposition of the monic f over GF(q) as (g, e)
+    pairs: Yun's steps for the exponents prime to p, then the p-th root of
+    what remains, recursively, its exponents times p."""
+    R = f._ring
+    out = []
+    if f.degree() <= 0:
+        return out
+    c = f.gcd(f.derivative())
+    w = f // c
+    i = 1
+    while w.degree() > 0:
+        y = w.gcd(c)
+        z = w // y
+        if z.degree() > 0:
+            out.append((z.monic(), i))
+        i += 1
+        w, c = y, c // y
+    if c.degree() > 0:
+        B = R._base
+        p = int(B.characteristic())
+        q = int(B.order())
+        # (c is a polynomial in x^p: its p-th root takes every p-th
+        # coefficient to the power q / p, the inverse of Frobenius)
+        root = Polynomial_ff(R, [a ** (q // p) for a in c._c[::p]])
+        out.extend((g, e * p) for g, e in _sqf_items(root.monic()))
+    return out
+
+
 class _FFFactorization(list):
     """A factorization of a polynomial over a finite field: (factor,
     exponent) pairs and a unit, printed as Sage prints it."""
@@ -4887,6 +4930,8 @@ class _FFFactorization(list):
                     s = "(" + s + ")"
             parts.append(s if e == 1 else "%s^%d" % (s, e))
         out = " * ".join(parts)
+        if not parts and self._unit.is_one():
+            return "1"
         if not self._unit.is_one():
             out = "(%r) * " % (self._unit,) + out if parts else repr(self._unit)
         return out
