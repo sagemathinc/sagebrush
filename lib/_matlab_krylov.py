@@ -491,22 +491,51 @@ class _History(list):
         list.append(self, v)
 
 
-def _nan_rhs(fname, nargout, b, x0, tol, budget, gmres=False, lsq=False):
-    """b with a NaN: no iteration, flag 4 (a scalar quantity is NaN), x0 returned, relres NaN, resvec [NaN], in every
-    solver alike; None when b has none"""
+def _nan_rhs(fname, nargout, b, x0, tol, budget, maxit=0, inner=0, outer=0, capped=False, M=None, name=None):
+    """b with a NaN, as MATLAB's solvers answer it, each its own way (no iteration is run); None when b has none.
+    Preconditioned, pcg, minres, gmres and bicgstab stop with flag 2 (the preconditioner's system), x0 returned,
+    resvec [NaN], at iteration 1 (pcg, bicgstab), 0 (minres) or [0 0] (gmres).  Otherwise pcg and minres flag 1
+    (maxit reached), x all NaN, iter maxit, resvec maxit + 1 NaNs; gmres flag 1, x all NaN, iter [0 0], resvec
+    inner*outer + 1 NaNs, its last 0 where maxit reached size(A,1) without restarts (capped), warning that the
+    Hessenberg system is ill conditioned once per outer cycle; bicgstab flag 4 (a scalar quantity NaN) at iteration
+    2, x all NaN, resvec 2 maxit + 1 entries, 3 NaNs then zeros; lsqr flag 4 at iteration 0, x0 returned, resvec
+    [NaN].  name: gmres's name in its message (gmres(restart) when it restarts)"""
     if not np.any(np.isnan(b)):
         return None
-    resvec = _History(budget, [_math.nan])
+    nan = _math.nan
+    xnan = np.full_like(x0, nan)
+    nans = None
+    ret = 0
+    if fname == "lsqr":
+        flag, x, it, count = 4, x0, 0, 1
+    elif M is not None and M.ops:
+        flag, x, it, count = 2, x0, {"pcg": 1, "bicgstab": 1, "minres": 0}.get(fname), 1
+    elif fname == "bicgstab":
+        flag, x, it, count, nans = 4, xnan, min(2, maxit), 2 * maxit + 1, 3
+    elif fname == "gmres":
+        flag, x, it, count = 1, xnan, None, inner * outer + 1
+        nans = count - 1 if capped else None
+        for _ in range(outer):
+            _m.warning_("Matrix is singular, close to singular or badly scaled. Results may be inaccurate. "
+                        "RCOND = NaN.", "MATLAB:illConditionedMatrix")
+    else:
+        flag, x, it, count = 1, xnan, maxit, maxit + 1
+        ret = maxit
+    # (each entry admitted before it is made, as every history)
+    resvec = _History(budget)
+    for i in range(count):
+        resvec.append(nan if nans is None or i < nans else 0.0)
     if nargout < 2:
-        if gmres:
-            _m._write("gmres stopped at outer iteration 0 (inner iteration 0) without converging to the desired "
+        if fname == "gmres":
+            stop = (outer, inner) if flag == 1 else (0, 0)
+            _m._write("%s stopped at outer iteration %d (inner iteration %d) without converging to the desired "
                       "tolerance %.2g\nbecause %s.\nThe iterate returned (number 0(0)) has relative residual NaN.\n"
-                      % (tol, _REASONS[4]))
+                      % (name or "gmres", stop[0], stop[1], tol, _REASONS[flag]))
         else:
-            _report(fname, 4, _math.nan, 0, 0, tol)
-    it = _m._unmat(np.array([[0.0, 0.0]])) if gmres else 0
-    return _outputs(nargout, x0, 4, _math.nan, it, resvec,
-                    extra=[_col(np.zeros(0))] if lsq else ())
+            _report(fname, flag, nan, ret, it, tol)
+    if fname == "gmres":
+        it = _m._unmat(np.array([[0.0, 0.0]]))
+    return _outputs(nargout, x, flag, nan, it, resvec, extra=[_col(np.zeros(0))] if fname == "lsqr" else ())
 
 
 _REASONS = {
@@ -522,15 +551,24 @@ def _it(v):
     return "%d" % v if v == int(v) else "%g" % v
 
 
+def _g2(v):
+    """a value in a solver's message, as MATLAB prints it (%.2g, with NaN and Inf as MATLAB spells them)"""
+    if v != v:
+        return "NaN"
+    if v in (_math.inf, -_math.inf):
+        return "Inf" if v > 0 else "-Inf"
+    return "%.2g" % v
+
+
 def _report(fname, flag, relres, it_ret, it_stop, tol):
     """the message a solver prints when its flag isn't requested"""
     if flag == 0:
-        _m._write("%s converged at iteration %s to a solution with relative residual %.2g.\n"
-                  % (fname, _it(it_ret), relres))
+        _m._write("%s converged at iteration %s to a solution with relative residual %s.\n"
+                  % (fname, _it(it_ret), _g2(relres)))
         return
     _m._write("%s stopped at iteration %s without converging to the desired tolerance %.2g\n"
-              "because %s.\nThe iterate returned (number %s) has relative residual %.2g.\n"
-              % (fname, _it(it_stop), tol, _REASONS[flag], _it(it_ret), relres))
+              "because %s.\nThe iterate returned (number %s) has relative residual %s.\n"
+              % (fname, _it(it_stop), tol, _REASONS[flag], _it(it_ret), _g2(relres)))
 
 
 def _outputs(nargout, x, flag, relres, it, resvec, extra=()):
@@ -611,7 +649,7 @@ def pcg_(nargout, *args):
     op, b, tol, maxit, _, M, x0, m, n, cplx, budget = _setup("pcg", nargout, args,
                                                               lambda n, r, k: (_SHORT, 0, (_its(n, k) + 1, 1)))
     maxit = min(n, 20) if maxit is None else maxit
-    nan = _nan_rhs("pcg", nargout, b, x0, tol, budget)
+    nan = _nan_rhs("pcg", nargout, b, x0, tol, budget, maxit, M=M)
     if nan is not None:
         return nan
     x, flag, relres, it, resvec, stop = _pcg(op, b, tol, maxit, M, x0, budget)
@@ -714,7 +752,7 @@ def minres_(nargout, *args):
     op, b, tol, maxit, _, M, x0, m, n, cplx, budget = _setup("minres", nargout, args,
                                                               lambda n, r, k: (_SHORT, 0, (_its(n, k) + 1, 1)))
     maxit = min(n, 20) if maxit is None else maxit
-    nan = _nan_rhs("minres", nargout, b, x0, tol, budget)
+    nan = _nan_rhs("minres", nargout, b, x0, tol, budget, maxit, M=M)
     if nan is not None:
         return nan
     x, flag, relres, it, resvec, stop = _minres(op, b, tol, maxit, M, x0, budget)
@@ -857,20 +895,27 @@ def gmres_(nargout, *args):
                     "Setting the number of inner iterations to %d." % (restart, n),
                     "MATLAB:gmres:tooManyInnerItsRestart")
         restart = n
+    restarts = restart is not None and restart < n
+    if not restarts and maxit is not None and maxit > n:
+        _m.warning_("Maximum number of outer iterations is %d but should be bounded by size(A,1). Setting the "
+                    "maximum number of outer iterations to %d." % (maxit, n), "MATLAB:gmres:tooManyInnerItsMaxit")
+    # (its name in its messages: gmres(restart) when it restarts)
+    name = "gmres(%d)" % restart if restarts else "gmres"
     inner, outer = _gmres_inner(n, restart, maxit)
     # (maxit 0 without restarts: no iteration at all)
-    nan = _nan_rhs("gmres", nargout, b, x0, tol, budget, gmres=True)
+    nan = _nan_rhs("gmres", nargout, b, x0, tol, budget, inner=inner, outer=outer,
+                   capped=not restarts and maxit is not None and maxit >= n, M=M, name=name)
     if nan is not None:
         return nan
     x, flag, relres, it, resvec, stop = _gmres(op, b, tol, max(inner, 1), outer if inner else 0, M, x0, n, budget)
     if nargout < 2:
         if flag == 0:
-            _m._write("gmres converged at outer iteration %d (inner iteration %d) to a solution with relative "
-                      "residual %.2g.\n" % (it[0], it[1], relres))
+            _m._write("%s converged at outer iteration %d (inner iteration %d) to a solution with relative "
+                      "residual %s.\n" % (name, it[0], it[1], _g2(relres)))
         else:
-            _m._write("gmres stopped at outer iteration %d (inner iteration %d) without converging to the desired "
-                      "tolerance %.2g\nbecause %s.\nThe iterate returned (number %d(%d)) has relative residual %.2g.\n"
-                      % (stop[0], stop[1], tol, _REASONS[flag], it[0], it[1], relres))
+            _m._write("%s stopped at outer iteration %d (inner iteration %d) without converging to the desired "
+                      "tolerance %.2g\nbecause %s.\nThe iterate returned (number %d(%d)) has relative residual %s.\n"
+                      % (name, stop[0], stop[1], tol, _REASONS[flag], it[0], it[1], _g2(relres)))
     return _outputs(nargout, x, flag, relres, _m._unmat(np.array([[float(it[0]), float(it[1])]])), resvec)
 
 
@@ -975,7 +1020,7 @@ def bicgstab_(nargout, *args):
     op, b, tol, maxit, _, M, x0, m, n, cplx, budget = _setup("bicgstab", nargout, args,
                                                               lambda n, r, k: (_SHORT, 0, (2 * _its(n, k) + 1, 1)))
     maxit = min(n, 20) if maxit is None else maxit
-    nan = _nan_rhs("bicgstab", nargout, b, x0, tol, budget)
+    nan = _nan_rhs("bicgstab", nargout, b, x0, tol, budget, maxit, M=M)
     if nan is not None:
         return nan
     x, flag, relres, it, resvec, stop = _bicgstab(op, b, tol, maxit, M, x0, budget)
@@ -1081,7 +1126,7 @@ def lsqr_(nargout, *args):
                                                               lambda n, r, k: (_SHORT, 0, (2 * _its(n, k) + 2, 2)),
                                                               square=False, nout=6)
     maxit = min(m, 20) if maxit is None else maxit
-    nan = _nan_rhs("lsqr", nargout, b, x0, tol, budget, lsq=True)
+    nan = _nan_rhs("lsqr", nargout, b, x0, tol, budget)
     if nan is not None:
         return nan
     x, flag, relres, it, resvec, lsvec, stop = _lsqr(op, b, tol, maxit, M, x0, budget)
