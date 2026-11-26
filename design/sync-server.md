@@ -6,6 +6,7 @@
 
 | Date | Commit | What changed for the client |
 |---|---|---|
+| Nov 24 | (this change, §10) | **End-to-end encryption is the one mode** (design/e2e-encryption.md). Payloads, snapshots and blobs become ciphertext, blob names become keyed addresses, index ops are sealed and signed by the device, presence is sealed, and only the owner writes a document. Nothing in this table's protocol is built for it yet: the PR order is e2e-encryption.md §7. |
 | Oct 19 | (this change, §6.2) | **After a membership ends**, the account's `state` is `readonly`: every write is refused with `readonly`, the socket gets an `error` `readonly` with `purge_after`, and reading, pulling and "Download all" keep working. `GET /api/share/me` has `sync_retention: {state, readonly_since, purge_after}` (ms). The Sync panel shows the help line in web/drafts/faq-sync.md, with `purge_after`'s date. A renewal before then makes the account `active` again. (§6.2) |
 | Oct 19 | (§6.1) | **One storage budget for sharing and sync.** `storage_full` now means the account's one `storage_bytes` is used, by sharing and sync together. A file upload stops at it. Document batches go on past it, into the ceiling (`max(storage_bytes / 10, 50 MB)`), and only then get `storage_full`. `GET /api/share/me` answers `usage`, the sum, and `usage_breakdown: {sharing_files, sharing_versions, sync_files, sync_documents}` (`sync_claim` in place of sync's lines if its account object can't be reached). A batch or upload can answer `busy` with `retry_after` while the budget can't be checked; retry it. (§6.1) |
 | Oct 19 | (CORR-02C-1) | Turning sync on answers `{state, generation}`, and `welcome` carries `generation` too. **"Delete my synced data" must name it:** `POST /api/sync/v1/delete {"confirm": "delete", "generation": g}`, from the latest `welcome` or enable answer. Without it the request gets 400. With another generation (a request sent before sync was turned off and on again) it answers 202 with `state: "stale"` and the current `generation`, and deletes nothing. Turning sync on can now also answer 409 `conflict` (it met another change) or 503 `busy` (D1 didn't answer). Both are safe to retry. (§7.1) |
@@ -42,7 +43,7 @@ This is the server side of design/workspace-files.md §7 (backup and sync) and �
 | **R2** (`sagebrush-share`, the same bucket) | `s/<account hash, 32 hex>/<random>` | Blob bytes, snapshots, archived patch segments, outputs, and daily exports |
 | **D1** (`sagebrush-share`, the same database) | — | Only what sharing already has: accounts, sessions, tombstones, purges. The sync service adds one table, `sync_accounts` (§9), written when sync is turned on and when it is purged, never on an edit. |
 
-**Why the document object's name includes the owner.** The document id is the client's own, made offline: a notebook's UUID, or a board's 12 random hex. If the name were the id alone, anyone who learned an id could claim it before the owner first synced it. With the owner in the name, two accounts can't name the same object, so the id can't be squatted. A shared document (§7.9, phase 3) is reached by naming its owner and its id. The object checks its access list.
+**Why the document object's name includes the owner.** The document id is the client's own, made offline: a notebook's UUID, or a board's 12 random hex. If the name were the id alone, anyone who learned an id could claim it before the owner first synced it. With the owner in the name, two accounts can't name the same object, so the id can't be squatted. Only its owner reaches it: there are no shared live documents (§10).
 
 **Why `s/` and not sharing's `a/`.** "Delete my shared data" sweeps `a/<hash>/`, and "Delete my synced data" sweeps `s/<hash>/`, so neither removes the other's bytes. Deleting the CoCalc account sweeps both (§9). Both prefixes use the same hash, the same bucket and the same upload checks (R2 refuses bytes that don't match their SHA-256).
 
@@ -64,9 +65,14 @@ This is the server side of design/workspace-files.md §7 (backup and sync) and �
   - A sync request is authenticated by its session cookie and D1, which gives the account.
   - An agent's request is authenticated by its token's tag (design/agent-endpoint.md §2): an HMAC the server made, checked at the Worker before the token's account hash is used to name anything.
   - A request that fails either check gets 401 from the Worker, without touching any object.
-- **An IP limit comes first,** independent of any account a request claims: Cloudflare's rate-limiting binding (`SYNC_PREAUTH`, keyed by IP), 60 requests a minute on `/api/sync/` and `/api/agent/`, before authentication. Over it, 429, with `retry_after` 60000 (the limit's minute).
-  - A sync request that fails authentication costs one D1 read, within that limit.
-  - **The binding is part of the flag** (LIMIT-321-1): with the objects bound but no `SYNC_PREAUTH`, sync is off (404).
+- **Three ingress limits on `/api/sync/`,** Cloudflare's rate-limiting bindings, in this order. Over any of them the answer is 429 with its own `limit` name and `retry_after` 60000 (the limit's minute).
+  1. **Raw ingress per IP first** (`SYNC_INGRESS_IP`, `ingress_per_ip`, 1,000,000 a minute where deployed): every request, before anything reads a session, whatever the request claims. It is meant to leave room for ordinary classroom traffic behind one address.
+  2. **Failures per IP** (`SYNC_PREAUTH`, `failed_sync_per_ip`, 60 a minute): only a request refused before it is known whose it is counts here: cross-site (403, even with a valid cookie), and no session or one that isn't valid (401). Past it, those get 429. A valid same-site session skips this limit; it still counts against the raw ingress.
+  3. **Ingress per account** (`SYNC_ACCOUNT_INGRESS`, `account_ingress_per_minute`): every authenticated request, keyed by the account of its session (never one the request names), before any object, status and enable included. The account object's own limits (ops, batches, tickets, reads, uploads at once) apply after it, unchanged.
+  - A session cookie not of the shape the site makes (43 base64url characters) is no session, before any hash or D1 read.
+  - **A known limit:** a well-formed but unknown session cookie costs one session lookup (a D1 primary-key read). Failures are charged after that lookup, so the failure limit doesn't bound it; the raw per-IP cap does. Load from many addresses at once is for an edge rate rule on `/api/sync/` (a cloud follow-up), not for a per-IP limit.
+  - **The bindings are part of the flag** (LIMIT-321-1): with the objects bound but any of the three missing, sync is off (404), and nothing is read.
+  - `/api/agent/` keeps its own limits: `SYNC_PREAUTH` per IP on every request, and its failures on `SYNC_AGENT_FAIL` (design/agent-endpoint.md).
 - **An object never creates or writes storage for a request it refuses.** A refused request reads at most the rows it needs to refuse, and an account object that doesn't exist yet is created only by "turn on sync" from a session.
 
 **Sessions:**
@@ -103,8 +109,8 @@ This is the server side of design/workspace-files.md §7 (backup and sync) and �
 **Signing out** records the revoke before sharing deletes the session. If the revoke can't be recorded, the sign-out answers 503 and the session stays, rather than signing out while a socket could still write (CORR-6D6-2).
 
 **Access to a document is checked on every message** (CORR-D81-7):
-- The document object holds the access list itself (§4), so it checks the account's role on every batch, pull and presence message, without a call.
-- A change to the access list (removing a collaborator, or changing a role) happens in the document object. In the same request, it closes the sockets of every account that lost access, and downgrades the attachments of those whose role changed.
+- The document object holds its owner itself (§4), so it checks the account on every batch, pull and presence message, without a call.
+- Only the owner's account ever has access. Under end-to-end encryption no other account writes a document: another person gets an encrypted copy instead (design/e2e-encryption.md §5, design/workspace-files.md §7.9).
 - The 10-minute recheck is only for the D1 session behind a socket. It is never how access is enforced.
 
 **State-changing HTTP requests** follow sharing's rules: they must carry `Origin` equal to the site, and be JSON or a blob PUT.
@@ -155,12 +161,12 @@ grants(...), access_log(...)                         (design/agent-endpoint.md)
 - The server gives each op it accepts a `seq` of its own. **The server's order is the order of the log:** every device applies the ops in `seq` order, so all of them reach the same index.
 - **One reducer.** The conflict rules of §7.2 (the later rename wins; an edit after a delete brings the file back out of Trash; a second new file at a path becomes `name (2)`) are one pure function, `reduce(entries, op) -> entries'`. It lives in `web/workspace/sync-reduce.ts` and is used by the client and by the server, with one test suite, so they can't disagree.
 - `t` is the device's clock, shown to the person, and never used for order.
-- The server keeps `entries`, the result, because it needs paths: for quota, for an agent's scope (design/agent-endpoint.md), and to answer `list` while every device is closed. §10 says what this means for end-to-end encryption.
+- The server keeps `entries`, the result, because it needs paths: for quota, for an agent's scope (design/agent-endpoint.md), and to answer `list` while every device is closed. **Superseded by end-to-end encryption** (§10): index ops are sealed, the server keeps no `entries`, and an agent's requests are answered by an online device of the person's.
 - **Checked when applied:** the path (`normPath`'s rules, with the same tests as the client), the kind, the size, and that a referenced blob is held (`refs` + 1 in the same transaction) or a document is the account's. An op that fails a check is refused with its code, and is never in the log. The ops after it still apply, each as the reducer would apply it if the refused op had never been sent (a rename of a path that isn't there changes nothing). The client then takes the server's log as the truth, and rebuilds its index from it.
 
 **Data files' versions (§2.5): the device's own versions stay on the device** in phase 1 (@sagebrush-board): they aren't uploaded. **The server keeps versions of its own:**
 - An overwrite the server sees (a `write` that replaces a data file's `sha256`) keeps the old blob as a version, in the same transaction.
-- Without this, the old blob would lose its last reference and be deleted. An agent's overwrite through the endpoint, while every device is closed, would then lose bytes, which §8.3 rules out.
+- Without this, the old blob would lose its last reference and be deleted. An agent's overwrite through the endpoint would then lose bytes, which §8.3 rules out. **Under end-to-end encryption** (§10), the server can't see an overwrite, so the device that writes, one answering for an agent included, sends the retention op itself.
 - Overwrites made between two syncs on one device have their versions only on that device.
 - The client's retention rules apply, in the reducer: the latest 20, none older than 30 days, and all together at most `sync.version_bytes`. Versions count against the quota.
 - If storage is too full to keep the previous version, the `write` is refused with `storage_full`, as on the client (§13).
@@ -175,7 +181,7 @@ grants(...), access_log(...)                         (design/agent-endpoint.md)
 
 ```
 meta(k, v)        owner_hash, owner_account, doc, kind, created, epoch, head_seq, bytes
-acl(account, role)                          owner; editors and viewers in phase 3
+acl(account, role)                          the owner only (no other account ever writes a document: §10)
 batches(seq INTEGER PRIMARY KEY, epoch, author, writer, device, recv,
         envs TEXT, body BLOB, blobs TEXT)   one row per batch: its checked envelopes, its payloads, its blobs
 clients(client PRIMARY KEY, writer, next_cseq)
@@ -259,6 +265,8 @@ A grant's write spans two objects: the account object holds the grant, and the d
 - **So no write admitted before a revoke can commit after the revoke completes,** and none can be admitted after the revoke's transaction.
 - **A lost answer** is settled the same way as a pin (§4.3): after `expires`, by asking the document object.
 
+**Under end-to-end encryption** (§10, design/agent-endpoint.md §3), the account object can't read a scope or a path. So admission checks only that the grant is live and that the write names its current `gen`; any change to the grant (a revoke, a narrowed scope, `run_code` turned off) raises `gen` and cancels pending admissions by the fence above, unchanged. The scope itself is checked by the device that answers, and a rename that takes a document out of scope is caught by every device's reducer, which refuses the agent's later ops there alike. The access log's row is written by that device, encrypted.
+
 ### 4.6 The epoch: "Clear history" keeps the document (CORR-D81-6)
 
 - **What the person's page sends:** `clear {expect_head, root}`, where `root` is a batch of one patch with no parents: the document's current value, as one patch from empty. It comes from a person's session only, never a grant.
@@ -288,7 +296,7 @@ Snapshots bound the replay for a new device (§7.2).
   - it uploads the snapshot as a blob, and registers `{at_seq, sha256, bytes}`;
   - the blob is pinned as a patch's blob is (§4.3);
   - the server checks only that `at_seq` is a batch of the current epoch, and that the blob is held.
-- **Who may make them:** only the owner's sessions, because a snapshot is trusted by every device that opens from it. In phase 3, a collaborator's snapshot would be a way to show the owner a document that differs from its history.
+- **Who may make them:** only the owner's sessions, because a snapshot is trusted by every device that opens from it.
 - **A snapshot never replaces history.** The batches stay (TimeTravel shows every version), and a device can always rebuild from the batches alone. "Rebuild from history" in the Sync panel does exactly that, and checks the result against the snapshot.
 - **When:** the client offers one after 500 batches or 4 MB of patches since the last snapshot. The server keeps the latest 3.
 
@@ -320,8 +328,8 @@ Version 1: JSON messages over WebSockets, plus HTTP for blobs and for the case w
   - It carries the index, the batches for documents nobody else has open, and the notifications that a document changed elsewhere.
   - It uses the hibernation API (§7.3).
 - **A document socket,** at `GET /api/sync/v1/doc/<owner>/<doc>?ticket=…` (upgrade). The ticket is used once (§2).
-  - It is opened only while another device or person also has the document open. The account object says when: it sends `watching`.
-  - Batches then go to it at once, not every 30 seconds, and presence rides on it without being stored (§7.9).
+  - It is opened only while another of the person's devices also has the document open. The account object says when: it sends `watching`.
+  - Batches then go to it at once, not every 30 seconds, and presence rides on it, sealed and never stored (design/workspace-files.md §7.9, §10).
 - **HTTP, for when a socket isn't open:** `POST /api/sync/v1/batch`, with the same body as a socket's `batch`.
   - This is for a page being hidden or closed (`fetch(…, {keepalive: true})`), and for an agent (design/agent-endpoint.md).
   - A keepalive request's body is at most 64 KiB, so the page sends what fits, and the rest goes when it opens again.
@@ -651,7 +659,10 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
 | Workspace population | membership `sync.agent.workspace_entries` and `folder_entries`, checked when an operation could grow them; index construction has a separate host safety ceiling and resumable work slices (design/fs-sync-scale.md §3) | `limit` with tier/upgrade fields for growth; existing rows stay readable after a downgrade |
 | Documents per account | 100,000 | `limit` |
 | Requests unanswered per socket | 8 | `busy` |
-| Before authentication (§2) | 60 requests a minute per IP on `/api/sync/` and `/api/agent/` | 429, at the Worker |
+| `/api/sync/` raw ingress (§2) | 1,000,000 requests a minute per IP, every request, before anything else | 429 `ingress_per_ip`, at the Worker |
+| `/api/sync/` failures (§2) | 60 a minute per IP: requests refused before they authenticate (cross-site, no valid session) | 429 `failed_sync_per_ip`, at the Worker |
+| `/api/sync/` ingress per account (§2) | 3,000 requests a minute per account, every authenticated request | 429 `account_ingress_per_minute`, at the Worker |
+| `/api/agent/` (§2, design/agent-endpoint.md) | 60 a minute per IP (`SYNC_PREAUTH`), every request; failed authentication on `SYNC_AGENT_FAIL` | 429 `too many requests` with `retry_after` (the IP limit); 429 `rate`, `failed_auth_per_ip` (failures) |
 | Account sockets | 20 per account (the oldest is closed) | close 4408 |
 | Document sockets | 50 per document; 64 per account; 16 per session (§2) | `busy` |
 | Tickets unredeemed | 32 per session | `busy` |
@@ -694,21 +705,34 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
 
 ## 10. Encryption
 
-**(a), as decided (§7.4):** R2 and Durable Object storage are encrypted at rest by Cloudflare.
+**End-to-end, as the one mode** (William, Nov 23: "Yes, approve E2E as the one mode"; design/workspace-files.md §7.4). This replaces (a), encryption at rest by Cloudflare, decided on Oct 18. The design, with its PR order, is design/e2e-encryption.md. This section says what it changes in the server above.
 
-**What keeps (b), end-to-end, possible later:**
-- **Opaque now:**
-  - patch payloads, snapshots, outputs and blob bytes are bytes to the server. What it does read is the graph: each patch's `cseq`, id, parents, size and blob references (§4.1), which hold no content;
-  - it never parses them, and nothing in this design needs it to;
-  - blob names come from one client function (§1).
-- **Not opaque now: the index.**
-  - Paths, kinds and sizes are visible to the server, because the server needs them for quota, for an agent's scope, and to answer an agent while every device is closed.
-  - Under (b), the index would be encrypted too. The cost:
-    - quota would count bytes only;
-    - an agent's scope would be checked only in the page;
-    - the agent endpoint (design/agent-endpoint.md) would work only with a key the person gives that agent, or through an open page.
-  - That is the real trade-off of (b), and it isn't hidden by this design.
-- **The agent endpoint's document verbs do parse documents** (design/agent-endpoint.md §4). They do so in their own module, never in the objects above. Under (b), they would need that key.
+**What stays as designed here,** because it was built to keep end-to-end possible:
+- patch payloads, snapshots and blob bytes are bytes to the server, which never parses them. They become ciphertext, under each document's or file's key (e2e-encryption.md §3.1);
+- what the server reads is the graph (§4.1): each patch's `cseq`, id, parents, size and blob references. That stays visible, as metadata;
+- blob names come from one client function (§1). It now keys them with the account's secret, so a holding's name is a keyed address, never a plain SHA-256 (e2e-encryption.md §3.3);
+- snapshots and "Clear history" roots are made by a client already (§4.6, §4.7).
+
+**What changes:**
+- **The index is sealed.** Index ops (path, kind, size, ids, hashes) are encrypted and signed by the device. The server sees each op's size and the blob references it adds and releases, and no longer derives an index of its own. So:
+  - quota counts bytes only, as it already does;
+  - retention and Trash become ops a device sends;
+  - an agent's scope is checked by a device of the person's, not by the server (design/agent-endpoint.md §4).
+- **Presence** is sealed under the document's key. The server relays it as it does now, and sees only its timing and size.
+- **Only the owner writes a document.** The access list's editors and viewers, planned for live collaboration, are dropped: another person gets an encrypted copy, and proposes changes back (design/workspace-files.md §7.9).
+- **Outputs** aren't synced (William, Oct 26), so §4.8's outputs map and the `outputs` message aren't built.
+
+**What the server still sees** is listed in e2e-encryption.md §4: the account hash and device ids, sizes, timing and access patterns, each document's kind and patch graph (ids, parents, ordering), blob equality within one account, which shares exist between which accounts, and each account's public keys and key chain.
+
+**The limits,** said plainly in e2e-encryption.md §8:
+- a malicious server can omit, delay or roll back data, or show devices different histories, though it can't forge or read it;
+- a page served by a compromised or compelled origin can use the keys while it is open;
+- another person's keys are trusted at first use, with a loud warning if they change, so a substitution at first use isn't caught;
+- **post-quantum:** X25519 isn't, so ciphertext kept today could be opened by a future quantum computer. A hybrid suite comes in a later epoch, through crypto agility (e2e-encryption.md §11.1), not in the first version.
+
+**Deleting:** "Delete my synced data" keeps the account's key identity (the key chain, the current keyring and wrappers, and each device's name and public key), and deleting the CoCalc account removes it (a SEC ruling; e2e-encryption.md §2).
+
+**No migration:** sync is DEV-only, so DEV's synced data is wiped and its devices re-enrolled at the cutover. Plaintext data is never converted.
 
 ## 11. The flag, and what is deployed
 
@@ -753,7 +777,6 @@ The tests run in Miniflare, as `web/share/test-share.mjs` does, with Durable Obj
   - an expired session's socket can't write;
   - a revoke whose call failed is caught by the 10-minute check;
   - a ticket can't be used for another document, account or session, after it expires, twice, or after its session is revoked (astra's replay trace);
-  - a collaborator removed, or downgraded to viewer, can't send another batch, and their sockets close at once;
   - astra's race: an upgrade paused after `redeem`, the revoke completed, and then the attach resumed: the attach is refused. A fence that lands after an attach closes the socket;
   - socket leases: a lost close report frees its slot within 15 minutes. The counts are the live leases after an object is evicted.
 - **Before authentication:** a fresh, made-up account hash on every request, and tokens with a bad tag, create no object and no row, and are cut off by the IP limit.
@@ -802,7 +825,7 @@ Those about grants and agents are answered in full in design/agent-endpoint.md �
 4. **Rates and sizes:** §8 for sync. An agent has its own, smaller limits (design/agent-endpoint.md §7). An over-limit agent sees 429, with `retry_after` and which limit it hit.
 5. **The access log** is in the account object (design/agent-endpoint.md §8). It is deleted with the account's data.
 6. **The Inbox** is design/agent-endpoint.md §9.6. On this server, an Inbox item is an entry under `/Inbox/` with a flag that keeps it read-only until a person accepts it.
-7. **A collaborator's grant** never reaches the owner's files: a grant is checked against what its *granting* account may do, by the same access list (design/agent-endpoint.md §9.7).
+7. **Another person's grant** never reaches the owner's files: another person only ever holds an encrypted copy under their own keys, so their grant reaches only that copy (design/agent-endpoint.md §9.7).
 
 ## 14. Open questions
 
@@ -822,3 +845,8 @@ Those about grants and agents are answered in full in design/agent-endpoint.md �
 - `meta.blob` for large patches;
 - who sends snapshots, and when;
 - the 64 KiB limit on a keepalive request when a page is hidden.
+
+**Deferred: a notebook a device stopped syncing (the merge rule's "two copies").** Two devices' edits of a notebook merge from their common ancestor in the patch graph (§4.4), so a device rejoins by sending its patches. Only a device that can't join that graph has no canonical ancestor. Today that is a notebook a device stopped on a final refusal: `limit` (one patch over 1 MiB, such as a large image pasted into a Markdown cell), `chain`, or `invalid`. A client never sends a clear (§4.6) or a snapshot (§4.7) yet. Such a notebook keeps its edits on that device and the Sync panel lists the stop, but that device's copy then goes its own way. Planned:
+- when a notebook stops with unsent edits, its current value is kept as a notebook of its own, `<name> (conflict, <device's first 8>).ipynb`, as §4.6 does for a clear;
+- the original then follows the server again: this device's synced history of it is dropped and pulled again.
+- For `limit`, the copy's first patch would meet the same limit: blobs in patches (`meta.blob`, above) come first.

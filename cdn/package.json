@@ -1,6 +1,6 @@
 {
   "name": "sagebrush-web",
-  "version": "0.10.1",
+  "version": "0.10.3",
   "description": "Sagebrush engines (Rust -> WebAssembly, single-file ES modules) and CPython's parser in TypeScript, for browsers and chat artifacts",
   "type": "module",
   "exports": {
@@ -22,7 +22,7 @@
     "url": "git+https://github.com/sagemathinc/sagebrush.git",
     "directory": "cdn"
   },
-  "homepage": "https://github.com/sagemathinc/sagebrush/tree/main/cdn",
+  "homepage": "https://github.com/sagemathinc/sagebrush/tree/master/cdn",
   "license": "(MIT OR Apache-2.0) AND PSF-2.0",
   "publishConfig": {
     "access": "public"

@@ -5,7 +5,7 @@
 // authority at all in this mode (no sign-in, purge call, plan or tier from it, its sessions refused, no fallback).
 //
 //   node web/cloud/share/test-identity.mjs
-import { createHash, createHmac, createSign, generateKeyPairSync } from "node:crypto";
+import { createHash, createHmac, createSign, generateKeyPairSync, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { migrations } from "./migrations.mjs";
 import { dispatch } from "../../miniflare-dispatch.mjs";
@@ -41,7 +41,18 @@ const k1 = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const k2 = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const stranger = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const jwk = (k, kid) => ({ ...k.publicKey.export({ format: "jwk" }), kid, alg: "RS256", use: "sig" });
-const fake = { keys: [jwk(k1, "k1")], jwksDown: false, jwksGate: null, jwksHuge: false, authStatus: 0, jwksFetches: 0, codes: new Map(), authDown: false, revoked: [], revokeAuthBad: 0, cocalcCalls: 0, authCalls: 0 };
+const fake = { keys: [jwk(k1, "k1")], jwksDown: false, jwksGate: null, jwksHuge: false, authStatus: 0, jwksFetches: 0, codes: new Map(), authDown: false, revoked: [], revokeAuthBad: 0, cocalcCalls: 0, authCalls: 0,
+  // (refresh tokens: live ones map to their user and session; a refresh rotates the token, and the old one is refused)
+  rts: new Map(), refreshDown: false, refreshCalls: 0, refreshGate: null, refreshAs: null, revokeDown: false, revokeCalls: 0,
+  // (an exact refresh answer, a revoke held at the fake or answered 404 like a route that doesn't exist)
+  refreshStatus: null, revokeGate: null, revokeEntered: null, revoke404: false,
+  // (a refresh answered without a usable refresh token, or with an access token signed by a key WorkOS doesn't publish)
+  refreshNoRt: null, refreshSignWith: null,
+  // (the user a refresh answers with: null, WorkOS's usual { id } of the session's own user; a function of that
+  // session's { subject, sid } gives another, or undefined for an answer with no user at all)
+  refreshUser: null,
+  // (one session's refresh held after its answer is decided (the user as it is when asked), released by the test)
+  refreshHold: null };
 const nowS = () => Math.floor(Date.now() / 1000);
 function sign(claims, { kid = "k1", key = k1.privateKey, alg = "RS256" } = {}) {
   const h = b64url(JSON.stringify({ alg, kid, typ: "JWT" })), p = b64url(JSON.stringify(claims));
@@ -75,12 +86,54 @@ async function outbound(req) {
     const b = await req.json();
     const c = fake.codes.get(b.code);
     fake.codes.delete(b.code);
+    if (b.grant_type === "refresh_token") {
+      fake.refreshCalls++;
+      if (b.client_id !== CLIENT || b.client_secret !== API_KEY) return Response.json({ error: "invalid_client" }, { status: 401 });
+      const asked = fake.rts.get(b.refresh_token);
+      const heldUser = asked && fake.refreshHold?.sid === asked.sid ? (fake.refreshUser ? fake.refreshUser(asked) : { id: asked.subject }) : undefined;
+      if (heldUser !== undefined) {
+        fake.refreshHold.entered();
+        await fake.refreshHold.p;
+      }
+      if (fake.refreshGate) await fake.refreshGate;
+      if (fake.refreshDown) return new Response("down", { status: 503 });
+      if (fake.refreshStatus) return new Response(fake.refreshStatus.body ?? "", { status: fake.refreshStatus.status, headers: { "content-type": "application/json" } });
+      const r = fake.rts.get(b.refresh_token);
+      if (!r) return Response.json({ error: "invalid_grant" }, { status: 400 });
+      fake.rts.delete(b.refresh_token);
+      const next = "rt_" + randomBytes(9).toString("hex");
+      fake.rts.set(next, r);
+      const as = fake.refreshAs ?? r;
+      const access = fake.refreshSignWith ? sign(claimsFor(as.subject, as.sid), { key: fake.refreshSignWith }) : sign(claimsFor(as.subject, as.sid));
+      const user = heldUser !== undefined ? heldUser : fake.refreshUser ? fake.refreshUser(r) : { id: r.subject };
+      if (fake.refreshNoRt === "missing") return Response.json({ access_token: access, user });
+      if (fake.refreshNoRt === "empty") return Response.json({ access_token: access, refresh_token: "", user });
+      return Response.json({ access_token: access, refresh_token: next, user });
+    }
+    // (held before answering at all, even a refusal)
+    if (c?.gateFirst) await c.gate;
+    // (no answer at all after the code was sent, past the exchange's own deadline: WorkOS may have made a session)
+    if (c?.drop) await new Promise((r) => setTimeout(r, 7000));
     if (!c || b.client_id !== CLIENT || b.client_secret !== API_KEY || b.grant_type !== "authorization_code" || sha256b64url(b.code_verifier ?? "") !== c.challenge)
       return Response.json({ error: "invalid_grant" }, { status: 400 });
     if (c.gate) await c.gate;
-    return Response.json({ access_token: c.token ?? sign(claimsFor(c.subject, c.sid)), refresh_token: "rt_" + c.sid, authentication_method: "MagicAuth", user: { id: c.subject, email: "someone@example.com" } });
+    // (an answer that can't be read: WorkOS may have made a session we can't name)
+    if (c.garbage) return new Response("not json", { status: 200, headers: { "content-type": "application/json" } });
+    // (WorkOS made the session, then a gateway answered with an error)
+    if (c.failAfter) return new Response("bad gateway", { status: c.failAfter });
+    const rt = "rt_" + randomBytes(9).toString("hex");
+    fake.rts.set(rt, { subject: c.subject, sid: c.sid });
+    return Response.json({ access_token: c.token ?? sign(claimsFor(c.subject, c.sid)), ...(c.noRefresh ? {} : { refresh_token: rt }), authentication_method: "MagicAuth", user: "user" in c ? c.user : { id: c.subject, email: "someone@example.test" } });
   }
   if (u.pathname === "/user_management/sessions/revoke" && req.method === "POST") {
+    fake.revokeCalls++;
+    if (fake.revokeGate) {
+      const g = fake.revokeGate;
+      fake.revokeEntered?.();
+      await g;
+    }
+    if (fake.revokeDown) return new Response("down", { status: 503 });
+    if (fake.revoke404) return new Response("<html>Not Found</html>", { status: 404, headers: { "content-type": "text/html" } });
     if (req.headers.get("authorization") !== `Bearer ${API_KEY}`) {
       fake.revokeAuthBad++;
       return new Response("no", { status: 401 });
@@ -92,7 +145,8 @@ async function outbound(req) {
 }
 
 const script = execFileSync("bun", ["build", join(here, "test-identity-entry.ts"), "--format", "esm", "--target", "browser"], { encoding: "utf8" });
-const bindings = { AUTH_PROVIDER: "workos", AUTH_ENV: "test", AUTH_ORIGIN: SITE, WORKOS_CLIENT_ID: CLIENT, WORKOS_ISSUER: ISSUER, WORKOS_API_KEY: API_KEY, WORKOS_API: WORKOS, SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", FILES_ORIGIN: "https://files.test",
+const REFRESH_KEYS = `v1:${randomBytes(32).toString("base64")}`;
+const bindings = { AUTH_PROVIDER: "workos", AUTH_ENV: "test", AUTH_ORIGIN: SITE, WORKOS_CLIENT_ID: CLIENT, WORKOS_ISSUER: ISSUER, WORKOS_API_KEY: API_KEY, WORKOS_API: WORKOS, REFRESH_KEYS, SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", FILES_ORIGIN: "https://files.test",
   // (CoCalc configured too, as on a deployment moving over: with AUTH_PROVIDER "workos" none of it may be used)
   COCALC_ORIGIN: COCALC, COCALC_CLIENT_SECRET: "client-secret", PURGE_KEY: "purge-key" };
 const worker = (b) => new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "share", modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"], bindings: b, outboundService: outbound }] }));
@@ -227,7 +281,8 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
   const s = cookieOf(cb, "__Host-sb_session");
   ok(cb.status === 302 && cb.headers.get("location") === "/after?x=1" && !!s, `S3 the callback signs in and returns (${cb.status} ${cb.headers.get("location")})`);
   ok(cb.headers.get("referrer-policy") === "no-referrer", "S3 the callback sends no referrer");
-  ok(/Max-Age=3600/.test(setCookieLine(cb, "__Host-sb_session") ?? ""), "S3 the session cookie lasts the validation hour");
+  const ma = Number(/Max-Age=(\d+)/.exec(setCookieLine(cb, "__Host-sb_session") ?? "")?.[1]);
+  ok(ma > 30 * 86400 - 60 && ma <= 30 * 86400, `S3 the session cookie lasts to the session's absolute end (30 days), past every validation hour (${ma})`);
   const m = await (await me(s)).json();
   ok(/^[0-9a-f-]{36}$/.test(m.account_id ?? "") && m.account_id !== "user_01ALICE", `S4 the account id is ours, not WorkOS's (${m.account_id})`);
   ok(m.limits?.tier === "free" && m.limits?.storage_bytes === 256 * 1024 * 1024, `S4 Sagebrush's free plan (${JSON.stringify(m.limits)})`);
@@ -342,8 +397,11 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
   const dave = await signIn("user_01DAVE", "session_01DV");
   await db.prepare("UPDATE sessions SET abs_expires = ?1 WHERE provider_sid = 'session_01DV'").bind(nowS() - 1).run();
   ok((await me(dave.session)).status === 401, "R4 a session past its absolute end is refused");
-  await db.prepare("UPDATE sessions SET abs_expires = ?1, expires = ?2 WHERE provider_sid = 'session_01DV'").bind(nowS() + 86400, nowS() - 1).run();
-  ok((await me(dave.session)).status === 401, "R4 a session past its validation hour is refused");
+  await db.prepare("UPDATE sessions SET abs_expires = ?1, expires = ?2, validated = ?3 WHERE provider_sid = 'session_01DV'").bind(nowS() + 86400, nowS() - 1, nowS() - 3700).run();
+  const calls = fake.refreshCalls;
+  ok((await me(dave.session)).status === 200 && fake.refreshCalls === calls + 1, "R4 a session past its validation hour is refreshed with WorkOS first, then served");
+  const dv = await db.prepare("SELECT validated, expires FROM sessions WHERE provider_sid = 'session_01DV'").first();
+  ok(dv.validated >= nowS() - 5 && dv.expires > nowS() + 3500, `R4 and its validation and hour start again (${JSON.stringify(dv)})`);
 }
 
 // ---- 5. CoCalc is no authority: no sign-in, no purge call, no plans or tiers, its sessions refused, no fallback
@@ -404,10 +462,11 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
 {
   const legacyBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", FILES_ORIGIN: "https://files.test" };
   const seed = async (d, kind, opts = {}) => {
-    const token = "tok-" + kind + "-" + Math.random().toString(36).slice(2);
+    // (a session token as the site makes it: 32 random bytes, base64url, 43 characters; any other shape is no session)
+    const token = randomBytes(32).toString("base64url");
     const acct = crypto.randomUUID();
     await d.prepare("INSERT INTO accounts (account_id, created, disabled) VALUES (?1, 1, ?2)").bind(acct, opts.disabled ? 1 : null).run();
-    await d.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, abs_expires) VALUES (?1, ?2, ?3, ?4, ?5, ?6)").bind(createHash("sha256").update(token).digest("hex"), acct, nowS(), nowS() + 3600, kind, opts.abs ?? null).run();
+    await d.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, abs_expires, validated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?3)").bind(createHash("sha256").update(token).digest("hex"), acct, nowS(), nowS() + 3600, kind, opts.abs ?? (kind === "workos" ? nowS() + 30 * 86400 : null)).run();
     return `__Host-sb_session=${token}`;
   };
   const mine = (m, s) => fetchSite(m, "/api/share/mine", { headers: { cookie: s } });
@@ -435,7 +494,361 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
   await wUngated.dispose();
 }
 
-// ---- 8. guards a row must see on its own: the state compare, the callback's origin, unavailable never invalid, the
+// ---- 8. sessions: refresh before use, fencing, the outage grace, local revocation, the barrier, the revoke outbox
+{
+  const sess = (sid, d = db) => d.prepare("SELECT * FROM sessions WHERE provider_sid = ?1").bind(sid).first();
+  const queued = async (sid, d = db) => (await d.prepare("SELECT reason, sid_unknown, attempts, exhausted FROM revoke_outbox WHERE sid = ?1").bind(sid).all()).results;
+  const age = (sid, by = 3700) => db.prepare("UPDATE sessions SET validated = ?2, expires = ?3, refresh_failed = NULL WHERE provider_sid = ?1").bind(sid, nowS() - by, nowS() - 1).run();
+  const post = (m, path, session, body = {}) => fetchSite(m, path, { method: "POST", headers: { "content-type": "application/json", origin: SITE, ...(session ? { cookie: session } : {}) }, body: JSON.stringify(body) });
+  const accountOf = async (sid) => (await sess(sid)).account_id;
+  const settle = () => new Promise((r) => setTimeout(r, 250));
+  const gate = () => {
+    let open;
+    const p = new Promise((r) => (open = r));
+    return { p, open };
+  };
+
+  // the seal itself, in workerd
+  const k = () => randomBytes(32).toString("base64");
+  const sl = await (await fetchSite(mf, "/__seal", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ old: `v1:${k()}`, next: `v2:${k()}` }) })).json();
+  ok(sl.oldVersion === "v1" && sl.newVersion === "v2" && sl.rotatedOpensOld === "rt_one" && sl.rotatedOpensNew === "rt_two", `T1 a rotation seals with the new key and still opens the old (${JSON.stringify(sl)})`);
+  ok(sl.retiredOpensOld === null, "T1 a retired key's seals no longer open");
+  ok(sl.otherSession === null && sl.otherIdentity === null && sl.otherEnv === null && sl.versionSwapped === null, "T1 a seal moved to another session, identity, environment or key version doesn't open");
+  ok(sl.freshNonce && sl.malformed.every(Boolean), "T1 every seal has a fresh nonce; a missing, short, colon-less or repeated key is refused");
+
+  // refresh: concurrent requests share one refresh, the token rotates, the session is served
+  const e = await signIn("user_01EZRA", "session_01EZ");
+  await age("session_01EZ");
+  const ct0 = (await sess("session_01EZ")).refresh_ct;
+  let g = gate();
+  fake.refreshGate = g.p;
+  const c0 = fake.refreshCalls;
+  const many = Array.from({ length: 6 }, () => me(e.session));
+  await settle();
+  g.open();
+  fake.refreshGate = null;
+  const st = (await Promise.all(many)).map((r) => r.status);
+  ok(st.every((s) => s === 200) && fake.refreshCalls === c0 + 1, `T2 six concurrent requests past the hour share one refresh and are all served (${st}, ${fake.refreshCalls - c0} refreshes)`);
+  const e1 = await sess("session_01EZ");
+  const liveE = [...fake.rts.values()].filter((r) => r.sid === "session_01EZ").length;
+  ok(e1.refresh_ct !== ct0 && e1.key_version === "v1" && liveE === 1, `T2 the rotated refresh token is stored (sealed), and WorkOS holds exactly one live token for it (${e1.refresh_ct !== ct0} ${e1.key_version} ${liveE})`);
+  ok(!JSON.stringify(e1).includes("rt_"), "T2 the stored row holds no refresh token in the clear");
+
+  // a stale refusal, after another refresh rotated the token, ends nothing
+  const f = await signIn("user_01FINN", "session_01F1");
+  await age("session_01F1");
+  const fRow = await sess("session_01F1");
+  const fRt = [...fake.rts.entries()].find(([, r]) => r.sid === "session_01F1")[0];
+  g = gate();
+  fake.refreshGate = g.p;
+  const inFlight = me(f.session);
+  await settle();
+  // (another isolate's refresh wins meanwhile: a new sealed token and validation are in the row; WorkOS then refuses the old token)
+  await db.prepare("UPDATE sessions SET refresh_ct = 'rotated-elsewhere', validated = ?2, expires = ?3 WHERE provider_sid = ?1").bind("session_01F1", nowS(), nowS() + 3600).run();
+  fake.rts.delete(fRt);
+  g.open();
+  fake.refreshGate = null;
+  const fs = (await inFlight).status;
+  ok(fs === 200 && (await sess("session_01F1")) && (await queued("session_01F1")).length === 0, `T3 a stale refusal for a rotated-away token ends nothing; the request goes on with the winner's session (${fs})`);
+  ok(fRow.refresh_ct !== "rotated-elsewhere", "T3 (the row really had changed under it)");
+
+  // a refresh that finishes after each kind of local revocation changes nothing and can't bring the session back
+  for (const kind of ["logout", "everywhere", "disable"]) {
+    const subj = `user_01LATE${kind.toUpperCase()}`, sid = `session_01L${kind.slice(0, 3).toUpperCase()}`;
+    const s = await signIn(subj, sid);
+    const other = kind === "everywhere" ? await signIn(subj, sid + "B") : null;
+    const acct = await accountOf(sid);
+    await age(sid);
+    g = gate();
+    fake.refreshGate = g.p;
+    const pending = me(s.session);
+    await settle();
+    if (kind === "logout") await post(mf, "/auth/logout", s.session);
+    if (kind === "everywhere") await post(mf, "/auth/logout-everywhere", other.session);
+    if (kind === "disable") await post(mf, "/__disable", null, { account: acct });
+    g.open();
+    fake.refreshGate = null;
+    const r = (await pending).status;
+    await settle();
+    const left = await db.prepare("SELECT COUNT(*) n FROM sessions WHERE account_id = ?1").bind(acct).first();
+    ok(r === 401 && left.n === 0, `T4 a refresh finishing after ${kind}: refused, and no session comes back (${r}, ${left.n})`);
+    const q = [...(await queued(sid)), ...(fake.revoked.includes(sid) ? ["delivered"] : [])];
+    ok(q.length >= 1, `T4 ${kind}: WorkOS's session is queued for revoking or already revoked (${JSON.stringify(q)})`);
+    ok((await me(s.session)).status === 401, `T4 ${kind}: the old cookie stays refused`);
+  }
+
+  // the outage grace: from the last good validation, never from a failed attempt
+  const h = await signIn("user_01HOPE", "session_01H1");
+  await db.prepare("UPDATE sessions SET validated = ?2 WHERE provider_sid = ?1").bind("session_01H1", nowS() - 3590).run();
+  let c1 = fake.refreshCalls;
+  ok((await me(h.session)).status === 200 && fake.refreshCalls === c1, "T5 inside its hour: served without asking WorkOS");
+  await age("session_01H1");
+  const vBefore = (await sess("session_01H1")).validated;
+  fake.refreshDown = true;
+  c1 = fake.refreshCalls;
+  ok((await me(h.session)).status === 200 && fake.refreshCalls === c1 + 1, "T5 WorkOS down, past the hour, inside the grace: served after one failed attempt");
+  const h1 = await sess("session_01H1");
+  ok(h1.validated === vBefore && h1.refresh_failed !== null && h1.expires === Math.min(vBefore + 24 * 3600, h1.abs_expires), `T5 a failed attempt never moves validated; expiry becomes its grace end (${JSON.stringify({ v: h1.validated, e: h1.expires })})`);
+  c1 = fake.refreshCalls;
+  ok((await me(h.session)).status === 200 && fake.refreshCalls === c1, "T5 within a minute of the failure: not asked again, still served");
+  await db.prepare("UPDATE sessions SET validated = ?2, refresh_failed = NULL WHERE provider_sid = ?1").bind("session_01H1", nowS() - 24 * 3600 - 5).run();
+  const past = await me(h.session);
+  ok(past.status === 503 && (await sess("session_01H1")), `T5 past the grace with WorkOS down: 503 "retry", and the session is kept (${past.status})`);
+  await db.prepare("UPDATE sessions SET abs_expires = ?2 WHERE provider_sid = ?1").bind("session_01H1", nowS() - 1).run();
+  ok((await me(h.session)).status === 401, "T5 past its absolute end: refused, grace or not");
+  await db.prepare("UPDATE sessions SET abs_expires = ?2, validated = ?3, refresh_failed = ?3, expires = ?4 WHERE provider_sid = ?1").bind("session_01H1", nowS() + 86400, nowS() - 3700, nowS() + 3600).run();
+  await post(mf, "/auth/logout", h.session);
+  ok((await me(h.session)).status === 401 && !(await sess("session_01H1")), "T5 a local sign-out ends it at once, grace or not");
+  fake.refreshDown = false;
+
+  // WorkOS refusing, or answering for another user or session, ends the session (its revocation queued)
+  const i = await signIn("user_01IRIS", "session_01I1");
+  await age("session_01I1");
+  for (const [rt, r] of fake.rts) if (r.sid === "session_01I1") fake.rts.delete(rt);
+  ok((await me(i.session)).status === 401 && !(await sess("session_01I1")), "T6 WorkOS refusing the refresh ends the session");
+  ok((await queued("session_01I1"))[0]?.reason === "refused" || fake.revoked.includes("session_01I1"), "T6 and its WorkOS session is queued for revoking");
+  const j = await signIn("user_01JUDE", "session_01J1");
+  await age("session_01J1");
+  fake.refreshAs = { subject: "user_01SOMEONE", sid: "session_01OTHER" };
+  ok((await me(j.session)).status === 401 && !(await sess("session_01J1")), "T6 a refresh answering for another user or session ends it; it never moves the session");
+  fake.refreshAs = null;
+  const k1s = await signIn("user_01KAI", "session_01K1");
+  const k2s = await signIn("user_01KIM", "session_01K2");
+  await db.prepare("UPDATE sessions SET refresh_ct = (SELECT refresh_ct FROM sessions WHERE provider_sid = 'session_01K1') WHERE provider_sid = 'session_01K2'").run();
+  await age("session_01K2");
+  ok((await me(k2s.session)).status === 401 && (await me(k1s.session)).status === 200, "T6 a sealed token copied into another session doesn't open there: that session ends, the original is untouched");
+
+  // sign-out everywhere is a barrier: a sign-in that started before it can't make a session, even finishing after
+  const before = await begin(mf, "/x");
+  const m1 = await signIn("user_01MAYA", "session_01M1");
+  await post(mf, "/auth/logout-everywhere", m1.session);
+  const late = await finish(before, "user_01MAYA", "session_01M0");
+  await settle();
+  ok(late.status === 403 && !cookieOf(late, "__Host-sb_session"), `T7 a sign-in started before sign-out everywhere is refused, though it finishes after (${late.status})`);
+  ok((await queued("session_01M0")).length === 1 || fake.revoked.includes("session_01M0"), "T7 and the session WorkOS made for it is queued for revoking");
+  const after = await signIn("user_01MAYA", "session_01M2");
+  ok(after.session && (await me(after.session)).status === 200, "T7 a sign-in started after the barrier stands");
+
+  // at most SESSIONS_MAX sessions: the evicted one's WorkOS session is queued
+  fake.revokeDown = true;
+  for (let n = 0; n < 21; n++) await signIn("user_01NOEL", `session_01N${String(n).padStart(2, "0")}`);
+  ok((await db.prepare("SELECT COUNT(*) n FROM sessions WHERE provider_sid LIKE 'session_01N%'").first()).n === 20 && (await queued("session_01N00"))[0]?.reason === "evicted", "T8 a 21st session evicts the oldest, whose WorkOS session is queued in the same batch");
+
+  // delivery: retried with backoff, then kept as exhausted, never dropped
+  for (let n = 0; n < 8; n++) {
+    await db.prepare("UPDATE revoke_outbox SET next_at = 0 WHERE sid = 'session_01N00'").run();
+    await fetchSite(mf, "/__drain", { method: "POST" });
+  }
+  const ex = (await queued("session_01N00"))[0];
+  ok(ex?.attempts === 8 && ex?.exhausted === 1, `T8 a revoke failing 8 times is kept as exhausted (${JSON.stringify(ex)})`);
+  const counts0 = await (await fetchSite(mf, "/__outbox")).json();
+  ok(counts0.exhausted >= 1, `T8 and counted for the admin page (${JSON.stringify(counts0)})`);
+  const lo = await signIn("user_01OTTO", "session_01O1");
+  ok((await post(mf, "/auth/logout", lo.session)).status === 200 && (await queued("session_01O1")).length === 1, "T8 a sign-out with WorkOS down still signs out; the revoke stays queued, never claimed done");
+  fake.revokeDown = false;
+  await db.prepare("UPDATE revoke_outbox SET next_at = 0 WHERE sid = 'session_01O1'").run();
+  await fetchSite(mf, "/__drain", { method: "POST" });
+  ok((await queued("session_01O1")).length === 0 && fake.revoked.includes("session_01O1"), "T8 once WorkOS answers, the revoke is delivered and its row (its slot) goes");
+
+  // the sweep: a session past its absolute end keeps its slot until its revoke is queued; a pending exchange that
+  // never finished becomes an outbox row whose sid is unknown
+  const p1 = await signIn("user_01PIA", "session_01P1");
+  await db.prepare("UPDATE sessions SET abs_expires = ?2 WHERE provider_sid = ?1").bind("session_01P1", nowS() - 10).run();
+  const usedBefore = (await (await fetchSite(mf, "/__outbox")).json()).used;
+  ok((await me(p1.session)).status === 401 && (await sess("session_01P1")), "T9 past its absolute end it can't be used, but its row (and slot) stays until the sweep");
+  ok((await (await fetchSite(mf, "/__outbox")).json()).used === usedBefore, "T9 expiry alone frees no slot");
+  await db.prepare("INSERT INTO pending_exchanges (id, started, expires) VALUES ('dead-exchange', ?1, ?2)").bind(nowS() - 600, nowS() - 400).run();
+  const unknownBefore = (await (await fetchSite(mf, "/__outbox")).json()).unknown;
+  await fetchSite(mf, "/__scheduled", { method: "POST" });
+  ok(!(await sess("session_01P1")) && fake.revoked.includes("session_01P1"), "T9 the sweep removes it, queuing (and here delivering) its revoke");
+  const after9 = await (await fetchSite(mf, "/__outbox")).json();
+  ok(after9.unknown === unknownBefore + 1 && !(await db.prepare("SELECT 1 FROM pending_exchanges WHERE id = 'dead-exchange'").first()), "T9 a pending exchange that never finished is kept as sid-unknown, never freed");
+
+  // an exchange whose answer is lost after sending: a session may exist at WorkOS, so its slot is kept, sid unknown
+  const u0 = (await (await fetchSite(mf, "/__outbox")).json()).unknown;
+  const lost = await signIn("user_01QUIN", "session_01Q1", { garbage: true });
+  ok(lost.cb.status === 503 && (await (await fetchSite(mf, "/__outbox")).json()).unknown === u0 + 1, `T10 an unreadable exchange answer: refused, its slot kept as sid-unknown (${lost.cb.status})`);
+  const noRt = await signIn("user_01RAE", "session_01R1", { noRefresh: true });
+  await settle();
+  ok(noRt.cb.status === 401 && !noRt.session && ((await queued("session_01R1")).length === 1 || fake.revoked.includes("session_01R1")), "T10 a sign-in without a refresh token can't be kept valid: refused, its WorkOS session queued");
+}
+
+// ---- 9. capacity: no WorkOS session exists without room to revoke it
+{
+  const small = worker({ ...bindings, REVOKE_CAPACITY: "3" });
+  const sdb = await small.getD1Database("SHARE_DB");
+  await migrate(sdb);
+  const used = async () => (await (await fetchSite(small, "/__outbox")).json()).used;
+  const signInAt = async (subject, sid, opts = {}) => {
+    const b = await begin(small, "/x");
+    const code = b64url(Buffer.from(Math.random().toString()));
+    fake.codes.set(code, { subject, sid, challenge: b.to.searchParams.get("code_challenge"), ...opts });
+    const cb = await fetchSite(small, `/auth/callback?code=${code}&state=${b.to.searchParams.get("state")}`, { headers: { cookie: b.oauth } });
+    return { cb, session: cookieOf(cb, "__Host-sb_session") };
+  };
+  const post = (path, session, body = {}) => fetchSite(small, path, { method: "POST", headers: { "content-type": "application/json", origin: SITE, ...(session ? { cookie: session } : {}) }, body: JSON.stringify(body) });
+  fake.revokeDown = true;
+  const a = await signInAt("user_01CAPA", "session_01CA");
+  const b2 = await signInAt("user_01CAPB", "session_01CB");
+  // (an account to disable, while it still has room)
+  const c3 = await signInAt("user_01CAPC", "session_01CC");
+  ok(a.session && b2.session && c3.session && (await used()) === 3, "C1 three sign-ins fill a capacity of three");
+  const calls = fake.authCalls;
+  const full = await signInAt("user_01CAPD", "session_01CD");
+  ok(full.cb.status === 503 && fake.authCalls === calls, `C1 at capacity a sign-in is refused before WorkOS is asked (${full.cb.status})`);
+  ok((await post("/auth/logout", a.session)).status === 200 && (await used()) === 3, "C2 at capacity a sign-out still signs out; its slot becomes its queued revoke");
+  ok((await signInAt("user_01CAPE", "session_01CE")).cb.status === 503, "C2 so a new sign-in is still refused while the revoke is queued");
+  ok((await post("/auth/logout-everywhere", b2.session)).status === 200 && (await used()) === 3, "C2 sign-out everywhere at capacity revokes locally and keeps its obligation");
+  // (room for one: the reserved slot of a sign-in refused after the exchange holds its revoke)
+  fake.revokeDown = false;
+  await sdb.prepare("UPDATE revoke_outbox SET next_at = 0").run();
+  await fetchSite(small, "/__drain", { method: "POST" });
+  ok((await used()) === 1, `C3 delivered revokes free their slots (${await used()})`);
+  const cAcct = (await sdb.prepare("SELECT account_id FROM sessions WHERE provider_sid = 'session_01CC'").first()).account_id;
+  fake.revokeDown = true;
+  await post("/__disable", null, { account: cAcct });
+  const dis = await signInAt("user_01CAPC", "session_01CC2");
+  ok(dis.cb.status === 403 && (await sdb.prepare("SELECT COUNT(*) n FROM revoke_outbox WHERE sid = 'session_01CC2'").first()).n === 1, `C3 a disabled account's sign-in, refused after the exchange, queues WorkOS's session in its reserved slot (${dis.cb.status})`);
+  ok((await used()) <= 3, `C3 the sum never exceeds the capacity (${await used()})`);
+  fake.revokeDown = false;
+  await small.dispose();
+}
+
+// ---- 10. the security review's cases: a swept reservation, a stale drain, the cookie, the clock after awaits,
+// local sign-out everywhere, and what counts as a refusal or a delivery
+{
+  const sess = (sid) => db.prepare("SELECT * FROM sessions WHERE provider_sid = ?1").bind(sid).first();
+  const used = async () => (await (await fetchSite(mf, "/__outbox")).json()).used;
+  const settle = () => new Promise((r) => setTimeout(r, 200));
+  const post = (path, session) => fetchSite(mf, path, { method: "POST", headers: { "content-type": "application/json", origin: SITE, ...(session ? { cookie: session } : {}) }, body: "{}" });
+
+  // SLOT1: a callback whose reservation the sweep took while WorkOS was answering makes no session and no second slot;
+  // the exchange's sid-unknown row now names the WorkOS session, in the same slot
+  fake.revokeDown = true;
+  for (const outcome of ["success", "token-refused", "code-refused"]) {
+    const sid = `session_01SW${outcome.slice(0, 4).toUpperCase()}`;
+    let open;
+    const hold = new Promise((r) => (open = r));
+    const b = await begin(mf);
+    const opts = outcome === "token-refused" ? { gate: hold, token: "not.a.token" } : outcome === "code-refused" ? { gate: hold, gateFirst: true } : { gate: hold };
+    const code = b64url(Buffer.from(Math.random().toString()));
+    if (outcome !== "code-refused") fake.codes.set(code, { subject: `user_01SW${outcome.length}`, sid, challenge: b.to.searchParams.get("code_challenge"), ...opts });
+    else fake.codes.set(code, { subject: "user_01SWX", sid, challenge: "wrong-challenge", ...opts });
+    const late = fetchSite(mf, `/auth/callback?code=${code}&state=${b.to.searchParams.get("state")}`, { headers: { cookie: b.oauth } });
+    await settle();
+    const pend = (await db.prepare("SELECT id FROM pending_exchanges").all()).results;
+    const used0 = await used();
+    await db.prepare("UPDATE pending_exchanges SET expires = 0").run();
+    await fetchSite(mf, "/__scheduled", { method: "POST" });
+    const used1 = await used();
+    open();
+    const r = await late;
+    const used2 = await used();
+    const row = await db.prepare("SELECT sid, sid_unknown, reason FROM revoke_outbox WHERE exchange_id = ?1").bind(pend[0]?.id ?? "").first();
+    if (outcome === "success") {
+      ok(r.status === 503 && !cookieOf(r, "__Host-sb_session") && !(await sess(sid)), `X1 a callback finishing after its reservation was swept makes no session (${r.status})`);
+      ok(used1 === used0 && used2 === used1 && row?.sid === sid && row?.sid_unknown === 0, `X1 and the exchange's one slot now names its WorkOS session (${used0} ${used1} ${used2} ${JSON.stringify(row)})`);
+    } else if (outcome === "token-refused") {
+      ok(r.status === 401 && used2 === used1 && row?.sid_unknown === 1, `X1 a swept callback whose token fails keeps its one sid-unknown slot (${r.status} ${used1} ${used2} ${JSON.stringify(row)})`);
+    } else {
+      ok(r.status === 400 && used2 === used1 - 1 && !row, `X1 a swept callback whose code WorkOS refused frees its slot: no session was made (${r.status} ${used1} ${used2})`);
+    }
+  }
+  fake.revokeDown = false;
+
+  // DRAIN2: a drain claims each row before sending; a drain finishing late can't complete a newer obligation
+  {
+    const iso = worker(bindings);
+    const idb = await iso.getD1Database("SHARE_DB");
+    await migrate(idb);
+    await idb.prepare("INSERT INTO revoke_outbox (sid, reason, created, next_at) VALUES ('session_01DROLD', 'test', 0, 0)").run();
+    const oldId = (await idb.prepare("SELECT id FROM revoke_outbox").first()).id;
+    let release, entered;
+    const entry = new Promise((r) => (entered = r));
+    fake.revokeEntered = entered;
+    fake.revokeGate = new Promise((r) => (release = r));
+    const slow = fetchSite(iso, "/__drain", { method: "POST" });
+    await entry;
+    fake.revokeGate = null;
+    fake.revokeEntered = null;
+    const second = await (await fetchSite(iso, "/__drain", { method: "POST" })).json();
+    ok(second.delivered === 0 && second.failed === 0, `X2 a second drain skips a row another drain has claimed (${JSON.stringify(second)})`);
+    // (the old obligation goes another way meanwhile, an admin resolving it, and a new one arrives)
+    await idb.prepare("DELETE FROM revoke_outbox WHERE id = ?1").bind(oldId).run();
+    await idb.prepare("INSERT INTO revoke_outbox (sid, reason, created, next_at) VALUES ('session_01DRNEW', 'test', 0, 0)").run();
+    const newId = (await idb.prepare("SELECT id FROM revoke_outbox").first()).id;
+    release();
+    await slow;
+    const rows = (await idb.prepare("SELECT sid FROM revoke_outbox").all()).results.map((x) => x.sid);
+    ok(newId !== oldId && rows.join() === "session_01DRNEW", `X2 ids are never reused, and the late drain leaves the new obligation in place (${oldId} ${newId} ${rows})`);
+    await iso.dispose();
+  }
+
+  // TIME4: a refresh that crosses the grace end while WorkOS is down is decided on the clock after it returns
+  {
+    const h = await signIn("user_01TIME", "session_01TM");
+    await db.prepare("UPDATE sessions SET validated = ?2, expires = ?2 + 3600, refresh_failed = NULL WHERE provider_sid = ?1").bind("session_01TM", nowS() - 24 * 3600 + 2).run();
+    let release;
+    fake.refreshGate = new Promise((r) => (release = r));
+    fake.refreshDown = true;
+    const req = me(h.session);
+    await new Promise((r) => setTimeout(r, 2300));
+    release();
+    const r = await req;
+    fake.refreshGate = null;
+    fake.refreshDown = false;
+    ok(r.status === 503 && (await sess("session_01TM")), `X3 the grace ending during the refresh: 503, not served, the row kept (${r.status})`);
+  }
+
+  // LOCAL5: sign-out everywhere with the only cookie past its grace and WorkOS down: local, at once, no refresh
+  {
+    const q = await signIn("user_01LOCAL", "session_01LC");
+    await db.prepare("UPDATE sessions SET validated = ?2, expires = ?2 + 3600, refresh_failed = NULL WHERE provider_sid = ?1").bind("session_01LC", nowS() - 24 * 3600 - 10).run();
+    fake.refreshDown = true;
+    const calls = fake.refreshCalls;
+    const r = await post("/auth/logout-everywhere", q.session);
+    fake.refreshDown = false;
+    ok(r.status === 200 && !(await sess("session_01LC")) && fake.refreshCalls === calls, `X4 sign-out everywhere past the grace, WorkOS down: done locally without asking WorkOS (${r.status}, ${fake.refreshCalls - calls} refreshes)`);
+  }
+
+  // STATUS6: only WorkOS's invalid_grant ends a session; an uncertain exchange keeps its slot; a 404 isn't a delivery
+  for (const [status, body, what] of [[408, "", "408"], [401, '{"error":"invalid_client"}', "401 (our client)"], [400, '{"error":"invalid_request"}', "400 other than invalid_grant"]]) {
+    const sid = `session_01ST${status}${what.length}`;
+    const s = await signIn(`user_01ST${status}${what.length}`, sid);
+    await db.prepare("UPDATE sessions SET validated = ?2, expires = ?2 + 3600, refresh_failed = NULL WHERE provider_sid = ?1").bind(sid, nowS() - 3700).run();
+    fake.refreshStatus = { status, body };
+    const r = await me(s.session);
+    fake.refreshStatus = null;
+    ok(r.status === 200 && (await sess(sid))?.refresh_failed !== null, `X5 a refresh answered ${what}: treated as WorkOS unavailable, served in grace, the session kept (${r.status})`);
+  }
+  {
+    const sid = "session_01STIG";
+    const s = await signIn("user_01STIG", sid);
+    await db.prepare("UPDATE sessions SET validated = ?2, expires = ?2 + 3600, refresh_failed = NULL WHERE provider_sid = ?1").bind(sid, nowS() - 3700).run();
+    fake.refreshStatus = { status: 400, body: '{"error":"invalid_grant","error_description":"Session has already ended."}' };
+    const r = await me(s.session);
+    fake.refreshStatus = null;
+    ok(r.status === 401 && !(await sess(sid)), `X5 WorkOS's invalid_grant ends the session (${r.status})`);
+  }
+  for (const st of [500, 429, 408]) {
+    const u0 = (await (await fetchSite(mf, "/__outbox")).json()).unknown;
+    const s = await signIn(`user_01EX${st}`, `session_01EX${st}`, { failAfter: st });
+    ok(s.cb.status === 503 && (await (await fetchSite(mf, "/__outbox")).json()).unknown === u0 + 1, `X5 an exchange answered ${st} keeps its slot as sid-unknown: WorkOS may have made a session (${s.cb.status})`);
+  }
+  {
+    const lo = await signIn("user_01R404", "session_01R4");
+    fake.revoke404 = true;
+    await post("/auth/logout", lo.session);
+    await settle();
+    await db.prepare("UPDATE revoke_outbox SET next_at = 0, claim = NULL WHERE sid = 'session_01R4'").run();
+    await fetchSite(mf, "/__drain", { method: "POST" });
+    fake.revoke404 = false;
+    const q = (await db.prepare("SELECT attempts FROM revoke_outbox WHERE sid = 'session_01R4'").first());
+    ok(q && q.attempts >= 1, `X5 a revoke answered 404 (a route that isn't there) stays queued, never counted as delivered (${JSON.stringify(q)})`);
+  }
+}
+
+// ---- 11. guards a row must see on its own: the state compare, the callback's origin, unavailable never invalid, the
 // enrollment tier, one shared key fetch, the streamed key-set cap, the state cleanup's paging
 {
   const statesN = async () => (await db.prepare("SELECT COUNT(*) n FROM auth_states").first()).n;
@@ -512,6 +925,294 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
   for (let i = 0; i < 1500; i += 250) await db.prepare(`INSERT INTO auth_states (nonce_hash, expires) VALUES ${Array.from({ length: 250 }, (_, j) => `('old-${i + j}', ${old})`).join(",")}`).run();
   await fetchSite(mf, "/__scheduled", { method: "POST" });
   ok((await db.prepare("SELECT COUNT(*) n FROM auth_states WHERE nonce_hash LIKE 'old-%'").first()).n === 0, "G8 the scheduled cleanup removes 1,500 expired states, past its first page");
+}
+
+// ---- 12. the second test review's cases: refresh answers without a usable token or with an unverifiable one, a lost
+// exchange connection, a remote page during an outage, a short refresh-token key, a malformed session id
+{
+  const sess = (sid) => db.prepare("SELECT * FROM sessions WHERE provider_sid = ?1").bind(sid).first();
+  const counts = async () => (await fetchSite(mf, "/__outbox")).json();
+  const pastHour = (sid) => db.prepare("UPDATE sessions SET validated = ?2, expires = ?2 + 3600, refresh_failed = NULL WHERE provider_sid = ?1").bind(sid, nowS() - 3700).run();
+
+  // a refresh answered with no, or an empty, refresh token: unavailable (served in grace), never resealed with nothing
+  for (const how of ["missing", "empty"]) {
+    const sid = `session_01NR${how.slice(0, 3).toUpperCase()}`;
+    const s = await signIn(`user_01NR${how.slice(0, 3).toUpperCase()}`, sid);
+    await pastHour(sid);
+    const ct = (await sess(sid)).refresh_ct;
+    fake.refreshNoRt = how;
+    const r = await me(s.session);
+    fake.refreshNoRt = null;
+    const row = await sess(sid);
+    ok(r.status === 200 && row.refresh_ct === ct && row.refresh_failed !== null, `Y1 a refresh answered with ${how} refresh token: unavailable, served in grace, the stored token kept (${r.status})`);
+  }
+
+  // a refreshed access token that doesn't verify (a key WorkOS doesn't publish): the session ends, its revoke queued
+  {
+    const s = await signIn("user_01BADSIG", "session_01BS");
+    await pastHour("session_01BS");
+    fake.refreshSignWith = stranger.privateKey;
+    const r = await me(s.session);
+    fake.refreshSignWith = null;
+    const q = await db.prepare("SELECT reason FROM revoke_outbox WHERE sid = 'session_01BS'").first();
+    ok(r.status === 401 && !(await sess("session_01BS")) && (q?.reason === "refresh-invalid" || fake.revoked.includes("session_01BS")), `Y2 a refreshed token that fails verification ends the session, its revoke queued (${r.status}, ${JSON.stringify(q)})`);
+  }
+
+  // no answer to the exchange within its deadline (the fetch fails): a session may exist, so the slot stays, sid unknown
+  {
+    const u0 = (await counts()).unknown;
+    const s = await signIn("user_01DROP", "session_01DR", { drop: true });
+    ok(s.cb.status === 503 && !s.session && (await counts()).unknown === u0 + 1, `Y3 the exchange answered nothing within its deadline: 503, its slot kept as sid-unknown (${s.cb.status})`);
+  }
+
+  // a remote page past the grace with WorkOS down: 503 "can't be checked", not a sign-in prompt
+  {
+    const s = await signIn("user_01REMOTE", "session_01RM");
+    await db.prepare("UPDATE sessions SET validated = ?2, expires = ?2 + 3600, refresh_failed = NULL WHERE provider_sid = ?1").bind("session_01RM", nowS() - 24 * 3600 - 10).run();
+    fake.refreshDown = true;
+    const r = await fetchSite(mf, "/remote/connect", { headers: { cookie: s.session } });
+    const text = await r.text();
+    fake.refreshDown = false;
+    ok(r.status === 503 && /be checked right now/.test(text) && !/Sign in to connect/.test(text), `Y4 a remote page past the grace with WorkOS down: 503, can't be checked, no sign-in prompt (${r.status})`);
+  }
+
+  // a refresh-token key of 16 bytes (AES-128) is refused: no sealing possible, so sign-in is unavailable before WorkOS
+  {
+    const short = worker({ ...bindings, REFRESH_KEYS: `v1:${randomBytes(16).toString("base64")}` });
+    await migrate(await short.getD1Database("SHARE_DB"));
+    const calls = fake.authCalls;
+    const r = await fetchSite(short, "/auth/login?return=/x");
+    ok(r.status === 503 && !r.headers.get("location") && fake.authCalls === calls, `Y5 a 16-byte refresh-token key: sign-in unavailable (503) before WorkOS is asked (${r.status})`);
+    await short.dispose();
+  }
+  // the callback too: a valid state and code arriving where REFRESH_KEYS can't be parsed get 503 before WorkOS is asked,
+  // with no slot reserved and the state not spent (it then still finishes where the keys are usable)
+  {
+    const broken = worker({ ...bindings, REFRESH_KEYS: "nocolon" });
+    const bdb = await broken.getD1Database("SHARE_DB");
+    await migrate(bdb);
+    const b = await begin(mf);
+    const code = b64url(Buffer.from(Math.random().toString()));
+    fake.codes.set(code, { subject: "user_01KEYSCB", sid: "session_01KEYSCB", challenge: b.to.searchParams.get("code_challenge") });
+    const calls = fake.authCalls;
+    const r = await fetchSite(broken, `/auth/callback?code=${code}&state=${b.to.searchParams.get("state")}`, { headers: { cookie: b.oauth } });
+    const left = await bdb.prepare("SELECT (SELECT COUNT(*) FROM pending_exchanges) AS pending, (SELECT COUNT(*) FROM auth_states) AS states, (SELECT COUNT(*) FROM sessions) AS sessions").first();
+    ok(r.status === 503 && fake.authCalls === calls && left.pending === 0 && left.states === 0 && left.sessions === 0, `Y5b a callback under an unparseable REFRESH_KEYS: 503 before WorkOS is asked, no slot, state not spent (${r.status}, calls ${fake.authCalls - calls}, ${JSON.stringify(left)})`);
+    await broken.dispose();
+    const done = await fetchSite(mf, `/auth/callback?code=${code}&state=${b.to.searchParams.get("state")}`, { headers: { cookie: b.oauth } });
+    ok(done.status === 302 && !!cookieOf(done, "__Host-sb_session"), `Y5b the same state and code then finish where the keys are usable (${done.status})`);
+  }
+
+  // a refused token whose session id is malformed: its slot holds sid-unknown, never that string
+  {
+    const h = b64url(JSON.stringify({ alg: "RS256", kid: "k1" })), pl = b64url(JSON.stringify({ ...claimsFor("user_01MALF", "x"), sid: "session_bad sid!" }));
+    const u0 = (await counts()).unknown;
+    const s = await signIn("user_01MALF", "session_01MF", { token: `${h}.${pl}.${b64url("nosig")}` });
+    const bad = await db.prepare("SELECT COUNT(*) n FROM revoke_outbox WHERE sid = 'session_bad sid!'").first();
+    ok(s.cb.status === 401 && bad.n === 0 && (await counts()).unknown === u0 + 1, `Y6 a refused token with a malformed session id queues sid-unknown, never the string (${s.cb.status}, ${bad.n})`);
+  }
+}
+
+// ---- 13. an identity's verified email: only WorkOS's own answer for the token's subject, only when verified, exact
+// (trimmed, lowercased), written in the sign-in's batch and at each refresh, cleared by anything else; nothing else sets it
+{
+  const emailOf = async (subject) => await db.prepare("SELECT email, email_at FROM identities WHERE subject = ?1").bind(subject).first();
+  const pastHour = (sid) => db.prepare("UPDATE sessions SET validated = ?2, expires = ?2 + 3600, refresh_failed = NULL WHERE provider_sid = ?1").bind(sid, nowS() - 3700).run();
+  const refreshNow = async (sid, session) => {
+    await pastHour(sid);
+    return me(session);
+  };
+  const u = (id, email, email_verified) => ({ id, ...(email === undefined ? {} : { email }), ...(email_verified === undefined ? {} : { email_verified }) });
+
+  const a = await signIn("user_01EMAIL1", "session_01EM1", { user: u("user_01EMAIL1", "  Alice.Smith@Example.TEST ", true) });
+  const ea = await emailOf("user_01EMAIL1");
+  ok(a.cb.status === 302 && ea?.email === "alice.smith@example.test" && Number.isSafeInteger(ea.email_at) && Math.abs(ea.email_at - nowS()) < 30, `E1 a verified address at sign-in: stored trimmed and lowercased, with its time (${a.cb.status}, ${JSON.stringify(ea)})`);
+  for (const [k, user, what] of [
+    ["E2", u("user_01EMAIL2", "bob@example.test", false), "email_verified false"],
+    ["E3", u("user_01EMAIL3", "carl@example.test"), "email_verified missing"],
+    ["E4", u("user_01EMAIL4", "dora@example.test", "true"), "email_verified the string \"true\""],
+    ["E5", u("user_01SOMEONEELSE", "eve@example.test", true), "another user's verified address (user.id isn't the token's subject)"],
+    ["E6", null, "no user in WorkOS's answer"],
+  ]) {
+    const subject = k === "E5" ? "user_01EMAIL5" : k === "E6" ? "user_01EMAIL6" : user.id;
+    const r = await signIn(subject, `session_${k}`, { user });
+    const e = await emailOf(subject);
+    ok(r.cb.status === 302 && e && e.email === null, `${k} ${what}: the sign-in stands, no address stored (${r.cb.status}, ${JSON.stringify(e)})`);
+  }
+  for (const [i, bad] of ["a b@example.test", "no-at.example.test", "a@b@example.test", "@example.test", "a@", "tab\t@example.test", "x".repeat(310) + "@example.test"].entries()) {
+    const subject = `user_01BADEMAIL${i}`;
+    await signIn(subject, `session_01BE${i}`, { user: u(subject, bad, true) });
+    ok((await emailOf(subject))?.email === null, `E7 a malformed verified address is never stored (${JSON.stringify(bad.slice(0, 24))})`);
+  }
+
+  // a later sign-in replaces it, a later unverified one clears it
+  const a2 = await signIn("user_01EMAIL1", "session_01EM1b", { user: u("user_01EMAIL1", "alice.new@example.test", true) });
+  ok(a2.cb.status === 302 && (await emailOf("user_01EMAIL1")).email === "alice.new@example.test", "E8 a later sign-in with another verified address replaces it");
+  // (the account menu: /api/share/me says who is signed in, from the identity's verified address)
+  const meA2 = await (await me(a2.session)).json();
+  ok(meA2.email === "alice.new@example.test", `E8 /api/share/me names the signed-in account by its verified address (${JSON.stringify(meA2.email)})`);
+  const a3 = await signIn("user_01EMAIL1", "session_01EM1c", { user: u("user_01EMAIL1", "alice.new@example.test", false) });
+  ok(a3.cb.status === 302 && (await emailOf("user_01EMAIL1")).email === null, "E8 a later sign-in whose address is no longer verified clears it");
+  ok((await (await me(a3.session)).json()).email == null, "E8 ...and /api/share/me then names no address: never an unverified one");
+
+  // a refresh: WorkOS's answer for the same user sets, changes or clears it; an outage changes nothing
+  const r = await signIn("user_01EMAILR", "session_01EMR", { user: u("user_01EMAILR", "rita@example.test", true) });
+  const t0 = (await emailOf("user_01EMAILR")).email_at;
+  await db.prepare("UPDATE identities SET email_at = email_at - 100 WHERE subject = 'user_01EMAILR'").run();
+  fake.refreshUser = (x) => u(x.subject, "Rita.Changed@Example.TEST", true);
+  const r1 = await refreshNow("session_01EMR", r.session);
+  const e1 = await emailOf("user_01EMAILR");
+  ok(r1.status === 200 && e1.email === "rita.changed@example.test" && e1.email_at >= t0, `E9 a refresh with a changed verified address: stored, its time moved (${r1.status}, ${JSON.stringify(e1)})`);
+  for (const [k, f, what] of [
+    ["E10", (x) => u(x.subject, "rita.changed@example.test", false), "no longer verified"],
+    ["E11", (x) => u("user_01SOMEONEELSE", "rita.changed@example.test", true), "another user's"],
+    ["E12", () => undefined, "no user in the answer"],
+  ]) {
+    await db.prepare("UPDATE identities SET email = 'rita.changed@example.test' WHERE subject = 'user_01EMAILR'").run();
+    fake.refreshUser = f;
+    const rr = await refreshNow("session_01EMR", r.session);
+    ok(rr.status === 200 && (await emailOf("user_01EMAILR")).email === null, `${k} a refresh whose answer is ${what}: the stored address is cleared (${rr.status})`);
+  }
+  await db.prepare("UPDATE identities SET email = 'rita.changed@example.test', email_at = 7 WHERE subject = 'user_01EMAILR'").run();
+  fake.refreshUser = (x) => u(x.subject, "someone.else@example.test", true);
+  fake.refreshDown = true;
+  const rd = await refreshNow("session_01EMR", r.session);
+  fake.refreshDown = false;
+  const ed = await emailOf("user_01EMAILR");
+  ok(rd.status === 200 && ed.email === "rita.changed@example.test" && ed.email_at === 7, `E13 a refresh WorkOS can't answer (the session in its grace): the address and its time unchanged (${rd.status}, ${JSON.stringify(ed)})`);
+  fake.refreshUser = null;
+
+  // a refused sign-in writes nothing: the account disabled, a new verified address in WorkOS's answer
+  await db.prepare("UPDATE identities SET email = 'before@example.test' WHERE subject = 'user_01EMAIL1'").run();
+  const acct = (await db.prepare("SELECT account_id FROM identities WHERE subject = 'user_01EMAIL1'").first()).account_id;
+  await db.prepare("UPDATE accounts SET disabled = 1 WHERE account_id = ?1").bind(acct).run();
+  const refused = await signIn("user_01EMAIL1", "session_01EM1d", { user: u("user_01EMAIL1", "after@example.test", true) });
+  await db.prepare("UPDATE accounts SET disabled = NULL WHERE account_id = ?1").bind(acct).run();
+  ok(refused.cb.status === 403 && (await emailOf("user_01EMAIL1")).email === "before@example.test", `E14 a refused sign-in (account disabled) writes no address: the batch that would have rolled back (${refused.cb.status})`);
+
+  // nothing but WorkOS's answer sets it: /auth/dev, /api/share/me and a session of the account change no identity
+  const snap = async () => JSON.stringify((await db.prepare("SELECT identity_id, email, email_at FROM identities ORDER BY identity_id").all()).results);
+  const s0 = await snap();
+  const dev = await fetchSite(mf, "/auth/dev", { method: "POST", headers: { "content-type": "application/json", origin: SITE }, body: JSON.stringify({ token: "dev-token", account_id: acct }) });
+  const devCookie = cookieOf(dev, "__Host-sb_session");
+  await me(devCookie);
+  await me(a2.session);
+  ok(dev.status === 200 && (await snap()) === s0, `E15 /auth/dev on an account with an identity, and /api/share/me with dev and WorkOS sessions: no identity's address or time changed (${dev.status})`);
+
+  // a successful WorkOS answer for a refresh that lost its session's fence meanwhile (another refresh rotated the
+  // session first) writes no address: the identity keeps what the winner wrote
+  {
+    const subject = "user_01LOSTFENCE", sid = "session_01LOSTFENCE";
+    const s = await signIn(subject, sid, { user: u(subject, "before@example.test", true) });
+    await pastHour(sid);
+    let release;
+    fake.refreshGate = new Promise((r) => (release = r));
+    fake.refreshUser = () => u(subject, "stale@example.test", true);
+    const calls = fake.refreshCalls;
+    const pending = me(s.session);
+    for (let i = 0; i < 100 && fake.refreshCalls === calls; i++) await new Promise((r) => setTimeout(r, 10));
+    ok(fake.refreshCalls === calls + 1, "E16 the refresh is held at WorkOS");
+    const t = nowS();
+    await db.batch([
+      db.prepare("UPDATE sessions SET refresh_ct = 'winner-elsewhere', validated = ?2, expires = ?2 + 3600 WHERE provider_sid = ?1").bind(sid, t),
+      db.prepare("UPDATE identities SET email = 'winner@example.test', email_at = 17 WHERE subject = ?1").bind(subject),
+    ]);
+    release();
+    fake.refreshGate = null;
+    const response = await pending;
+    fake.refreshUser = null;
+    const e = await emailOf(subject);
+    ok(response.status === 200 && e.email === "winner@example.test" && e.email_at === 17, `E17 a successful answer after the session's fence was lost leaves the winner's address untouched (${response.status}, ${JSON.stringify(e)})`);
+  }
+
+  // ---- the answers' order: an older answer still in flight never overwrites a newer one written meanwhile
+  const obsOf = async (subject) => await db.prepare("SELECT email, email_at, email_obs FROM identities WHERE subject = ?1").bind(subject).first();
+  const gate = () => {
+    let open;
+    const p = new Promise((r) => (open = r));
+    return { p, open };
+  };
+  const hold = (sid) => {
+    let open, entered;
+    const p = new Promise((r) => (open = r)), e = new Promise((r) => (entered = r));
+    fake.refreshHold = { sid, p, entered };
+    return { open, entered: e };
+  };
+  // F1: two sessions of one identity; A (session 1's refresh, verified old address) held, B (session 2's, no longer
+  // verified) written, A released
+  {
+    const s1 = await signIn("user_01FENCE1", "session_01F1a", { user: u("user_01FENCE1", "old@example.test", true) });
+    const s2 = await signIn("user_01FENCE1", "session_01F1b", { user: u("user_01FENCE1", "old@example.test", true) });
+    await pastHour("session_01F1a");
+    await pastHour("session_01F1b");
+    fake.refreshUser = (x) => u(x.subject, "old@example.test", true);
+    const h = hold("session_01F1a");
+    const pa = me(s1.session);
+    await h.entered;
+    fake.refreshUser = (x) => u(x.subject, "old@example.test", false);
+    const rb = await me(s2.session);
+    const afterB = await obsOf("user_01FENCE1");
+    h.open();
+    const ra = await pa;
+    fake.refreshHold = null;
+    fake.refreshUser = null;
+    const afterA = await obsOf("user_01FENCE1");
+    ok(rb.status === 200 && afterB.email === null && ra.status === 200 && JSON.stringify(afterA) === JSON.stringify(afterB), `F1 two sessions: the older verified answer, released after the newer unverified one was written, restores nothing and moves nothing (B ${rb.status} ${JSON.stringify(afterB)}, A ${ra.status} ${JSON.stringify(afterA)})`);
+  }
+  // F2: a sign-in's answer A (verified old address) held at the exchange; a refresh's B (a changed address) written; A
+  // released: its session stands, B's address stays
+  {
+    const s = await signIn("user_01FENCE2", "session_01F2a", { user: u("user_01FENCE2", "old2@example.test", true) });
+    await pastHour("session_01F2a");
+    const g = gate();
+    const calls = fake.authCalls;
+    const b = await begin();
+    const pa = finish(b, "user_01FENCE2", "session_01F2b", { user: u("user_01FENCE2", "old2@example.test", true), gate: g.p });
+    while (fake.authCalls === calls) await new Promise((r) => setTimeout(r, 20));
+    fake.refreshUser = (x) => u(x.subject, "new2@example.test", true);
+    const rb = await me(s.session);
+    fake.refreshUser = null;
+    const afterB = await obsOf("user_01FENCE2");
+    g.open();
+    const ra = await pa;
+    const afterA = await obsOf("user_01FENCE2");
+    ok(rb.status === 200 && afterB.email === "new2@example.test" && ra.status === 302 && JSON.stringify(afterA) === JSON.stringify(afterB), `F2 a sign-in's older answer released after a refresh wrote a newer one: the sign-in stands, the newer address stays (${ra.status}, ${JSON.stringify(afterA)})`);
+  }
+  // F3: a refresh's answer A (verified old address) held; a new sign-in's B (no longer verified) written; A released
+  {
+    const s = await signIn("user_01FENCE3", "session_01F3a", { user: u("user_01FENCE3", "old3@example.test", true) });
+    await pastHour("session_01F3a");
+    fake.refreshUser = (x) => u(x.subject, "old3@example.test", true);
+    const h = hold("session_01F3a");
+    const pa = me(s.session);
+    await h.entered;
+    const sb = await signIn("user_01FENCE3", "session_01F3b", { user: u("user_01FENCE3", "old3@example.test", false) });
+    const afterB = await obsOf("user_01FENCE3");
+    h.open();
+    const ra = await pa;
+    fake.refreshHold = null;
+    fake.refreshUser = null;
+    const afterA = await obsOf("user_01FENCE3");
+    ok(sb.cb.status === 302 && afterB.email === null && ra.status === 200 && JSON.stringify(afterA) === JSON.stringify(afterB), `F3 a refresh's older answer released after a sign-in wrote a newer one: nothing restored or moved (${ra.status}, ${JSON.stringify(afterA)})`);
+  }
+  // F4: no ticket to be had (the clock's row gone): a sign-in is refused before WorkOS is asked; a refresh is an outage,
+  // its session in its grace and the stored address unchanged
+  {
+    const s = await signIn("user_01FENCE4", "session_01F4a", { user: u("user_01FENCE4", "four@example.test", true) });
+    await pastHour("session_01F4a");
+    const before = await obsOf("user_01FENCE4");
+    await db.prepare("DELETE FROM identity_email_clock").run();
+    const calls = fake.authCalls;
+    const sb = await signIn("user_01FENCE4", "session_01F4b", { user: u("user_01FENCE4", "other@example.test", true) });
+    const asked = fake.authCalls - calls;
+    fake.refreshUser = (x) => u(x.subject, "other@example.test", true);
+    const rr = await me(s.session);
+    fake.refreshUser = null;
+    const row = await db.prepare("SELECT refresh_failed FROM sessions WHERE provider_sid = 'session_01F4a'").first();
+    const after = await obsOf("user_01FENCE4");
+    await db.prepare("INSERT INTO identity_email_clock (id, n) VALUES (1, 1000000)").run();
+    ok(sb.cb.status === 503 && asked === 0 && rr.status === 200 && row.refresh_failed !== null && JSON.stringify(after) === JSON.stringify(before), `F4 without a ticket: sign-in 503 before WorkOS is asked (${sb.cb.status}, ${asked} asks), a refresh an outage (${rr.status}, refresh_failed set), the address unchanged (${JSON.stringify(after)})`);
+  }
 }
 
 await mf.dispose();

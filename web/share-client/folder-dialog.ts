@@ -6,7 +6,7 @@
 //
 // Its words (William, Nov 12): what is shared is the folder's contents, nothing special about notebooks; the share is a
 // copy, the same until the folder is shared again; no account is needed to open it, run its code or edit its LaTeX;
-// nothing shared is indexed by search engines; signed out, this is where to sign in or make an account; the license
+// shared pages ask search engines not to list them (noindex, which a search engine may ignore); signed out, this is where to sign in or make an account; the license
 // is "None given" unless chosen, with what that means (CoCalc's policies).
 //
 // A talk's Share… (the LaTeX editor's File menu, `talk`): the same dialog for the talk's folder, as a talk's code can
@@ -50,12 +50,12 @@ export const TALK_SAVE_FAILED = "Couldn't save the document, so nothing was shar
 export const TALK_SCOPE = "Shares this document and the files it uses, ticked below. The other files in its folder are listed unticked: tick any it needs that weren't found.";
 
 /** The dialog's words: what a share is and isn't (also the sign-in prompt's). */
-export const SHARE_OPEN = "Anyone with a link can open the share, run its code and edit its LaTeX in their browser, with no account. Nothing shared is listed by search engines.";
+export const SHARE_OPEN = "Anyone with a link can open the share, run its code and edit its LaTeX in their browser, with no account. Shared pages ask search engines not to list them.";
 export const SHARE_COPY = "The share is a copy: it stays as it is while you keep working here. Share again to publish your changes, at the same links.";
 /** Where sharing isn't (a preview, the CLI's page): what it is and where it works, never a dead end (William, Nov 12). */
-export const SHARE_NOSERVER = "Publishing a link needs Sagebrush's share service, which this site doesn't have. On sagebrush.space, sign in with CoCalc (or make an account) and share from there.";
+export const SHARE_NOSERVER = "Publishing a link needs Sagebrush's share service, which this site doesn't have. On sagebrush.space, sign in (or make an account) and share from there.";
 export const SHARE_SITE = "https://sagebrush.space";
-export const SHARE_SIGNIN = "Sharing needs a CoCalc account: sign in, or make one, and come back here.";
+export const SHARE_SIGNIN = "Sharing needs you to be signed in: sign in, or make an account, and come back here.";
 export const POLICIES = "https://cocalc.ai/policies";
 
 // (files read for secrets: text by name, each at most this many bytes; a larger one isn't read, and says so)
@@ -151,7 +151,7 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
   const s = await shareStatus();
   if (!s.enabled || !s.me) {
     status.textContent = s.enabled ? SHARE_SIGNIN : s.error ? "Couldn't reach the server to check your sign-in. Try again in a moment." : SHARE_NOSERVER;
-    if (s.enabled) body.append(el("p", { className: "note", textContent: SHARE_OPEN }), el("a", { className: "btn", href: signInUrl(location.pathname + location.search), textContent: "Sign in with CoCalc" }));
+    if (s.enabled) body.append(el("p", { className: "note", textContent: SHARE_OPEN }), el("a", { className: "btn", href: signInUrl(location.pathname + location.search), textContent: "Sign in" }));
     else if (!s.error) body.append(el("p", { className: "note", textContent: SHARE_OPEN }), el("a", { className: "btn", href: SHARE_SITE, target: "_blank", rel: "noopener", textContent: "Open sagebrush.space" }));
     // (and the share that needs no service: the files themselves, downloaded)
     if (h.zip && !s.error) {
@@ -240,7 +240,7 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
     ...(talk ? [el("p", { className: "note", textContent: TALK_SCOPE })] : []),
     el("p", { className: "note", textContent: (talk ? "Publishes a copy of this document and the files it uses, with a link to it. " : "Publishes a copy of the folder's contents, with a link to each notebook and LaTeX document in it. ") + SHARE_OPEN }),
     el("p", { className: "note", textContent: SHARE_COPY }),
-    ...(me.name || me.email ? [el("p", { className: "note", textContent: `Signed in to CoCalc as ${me.name || me.email}.` })] : []),
+    ...(me.name || me.email ? [el("p", { className: "note", textContent: `Signed in as ${me.name || me.email}.` })] : []),
     el("label", { className: "f" }, "Title ", title),
     el("label", { className: "f" }, "Author(s) ", author),
     el("label", { className: "f" }, "License ", license, el("a", { href: POLICIES, target: "_blank", rel: "noopener", textContent: "What “None given” means" })),

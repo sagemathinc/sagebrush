@@ -1016,6 +1016,39 @@ async function restoredPause() {
   await stop(c2);
 }
 
+async function blobConflicts() {
+  // (e2e PR 3a: the server holds other bytes under an address one of this device's records names, told by blobs/check
+  // or by the PUT: the connection halts, with its reason; no upload goes, and no op naming that file is sent)
+  const sentFor = async (path) => (await ctl("log")).sent.filter((m) => m.t === "ops" && (m.ops ?? []).some((o) => o.path === path)).length;
+  const puts = async () => (await ctl("log")).http.filter((h) => h.method === "PUT").length;
+  for (const via of ["check", "put"]) {
+    await account();
+    const w = await fresh();
+    const c = client(w);
+    check(await until(() => settled(w, c)), `blob conflict (${via}): synced`);
+    const held = { address: "e".repeat(64), ct_sha256: "e".repeat(64), size: 1 };
+    const putsBefore = await puts();
+    await ctl("set", { set: { fakeHttp: via === "check"
+      ? [{ method: "POST", path: "/blobs/check", status: 200, body: { missing: [], conflicts: [held] }, times: 2 }]
+      : [{ method: "PUT", status: 409, body: { error: "conflict", message: "the server holds other bytes under this address", held }, times: 2 }] } });
+    const path = `/conflict-${via}.bin`;
+    await w.create(path, { content: bytes(300, via === "check" ? 71 : 72) });
+    check(await until(() => /other bytes/.test(c.status.reason ?? "")), `blob conflict (${via}): halted, saying why: ` + J(c.status));
+    await sleep(400);
+    check(c.debug().halted === "blob-conflict" && c.stats.blobConflicts >= 1, `blob conflict (${via}): the connection is halted, and counted`);
+    check((await sentFor(path)) === 0 && (await outbox(w)) >= 1, `blob conflict (${via}): no op naming the file was sent; its record is kept`);
+    if (via === "check") check((await puts()) === putsBefore, "blob conflict (check): nothing was uploaded either");
+    await stop(c);
+    // (a reload: the new connection asks again, is told the same, and halts again; still nothing naming the file goes)
+    const c2 = client(w);
+    check(await until(() => c2.debug().halted === "blob-conflict" && /other bytes/.test(c2.status.reason ?? "")), `blob conflict (${via}): after a reload, halted again: ` + J(c2.status));
+    await sleep(400);
+    check((await sentFor(path)) === 0 && (await outbox(w)) >= 1, `blob conflict (${via}): after a reload, still no op naming the file`);
+    if (via === "check") check((await puts()) === putsBefore, "blob conflict (check): after a reload, still nothing uploaded");
+    await stop(c2);
+  }
+}
+
 async function indexThrottled() {
   // (CORR-PR58-3: a pull refused with retry_after; ops accepted meanwhile pull nothing before it ends; a prolonged
   // timer waits on; then pages in order, every record confirmed)
@@ -1227,6 +1260,78 @@ async function refusalAtomic() {
 // ---- step 4: the confirmed index and its view, live notices (D8), idle discovery (D8b)
 
 /** A client with the confirmed index (step 4's onIndex). */
+async function liveCheck() {
+  // (the liveness check: A's socket goes dead without a close (the front's `dead`: nothing passes either way), B changes
+  // something; A catches up once the page is shown again, or by the periodic check while visible, and never while
+  // hidden; a live socket is never replaced; one check at a time)
+  const keep = { ...W.CLIENT };
+  const fid = () => "/c-" + Math.random().toString(36).slice(2, 8) + ".txt";
+  // (A connected and settled, its socket then dead; B, connected after, makes `p`; how long until A has it)
+  const round = async (a, ca, b, p) => {
+    check(await until(() => settled(a, ca), 20_000), "live: A settled");
+    await ctl("dead");
+    const cb = viewClient(b);
+    try {
+      check(await until(() => settled(b, cb), 20_000), "live: B settled");
+      await b.create(p, { content: "x" });
+      check(await until(() => settled(b, cb), 20_000), "live: B's change up");
+    } finally {
+      await stop(cb);
+    }
+  };
+  const has = (w, p, ms) => until(async () => !!(await w.stat(p)), ms);
+  // (a front without the `dead` control (one made before it): said, not failed)
+  const probe = await ctl("dead").catch(() => null);
+  if (typeof probe?.dead !== "number") return void check(true, "skipped: liveCheck, this front has no `dead` control");
+  try {
+    // (1) shown again: caught up within 5 s; one check failed, one reconnect
+    await account();
+    let a = await fresh(), b = await fresh();
+    let ca = viewClient(a);
+    let p = fid();
+    await round(a, ca, b, p);
+    const c0 = ca.stats.connects, f0 = ca.stats.liveFails;
+    check(!(await has(a, p, 1500)), "live: a dead socket: A doesn't have it by itself");
+    const t0 = Date.now();
+    document.dispatchEvent(new Event("visibilitychange"));
+    const ok1 = await has(a, p, 5000);
+    check(ok1 && ca.stats.liveFails === f0 + 1 && ca.stats.connects === c0 + 1, `live: shown again: A has it after ${Date.now() - t0} ms, one check failed, one reconnect: ` + J({ fails: ca.stats.liveFails - f0, connects: ca.stats.connects - c0 }));
+    // (a live socket: checks pass, nothing replaced, however often asked; one check at a time)
+    const n0 = ca.stats.liveChecks, c1 = ca.stats.connects;
+    for (let i = 0; i < 5; i++) { document.dispatchEvent(new Event("visibilitychange")); dispatchEvent(new Event("focus")); }
+    await sleep(W.CLIENT.liveMs + 1500);
+    check(ca.stats.liveChecks - n0 >= 1 && ca.stats.liveChecks - n0 <= 2 && ca.stats.liveFails === f0 + 1 && ca.stats.connects === c1, "live: a live socket checked (once per check at most), never replaced: " + J({ checks: ca.stats.liveChecks - n0, fails: ca.stats.liveFails - f0, connects: ca.stats.connects - c1, state: ca.status.state, reason: ca.status.reason, ends: ca.stats.ends }));
+    await stop(ca);
+    // (2) the periodic check while visible: caught up with nothing shown or focused
+    W.CLIENT.liveEveryMs = 2000;
+    a = await fresh();
+    ca = viewClient(a);
+    p = fid();
+    await round(a, ca, b, p);
+    const t1 = Date.now();
+    const ok2 = await has(a, p, 2000 + W.CLIENT.liveMs + 5000);
+    check(ok2, `live: visible, nothing done: the periodic check catches up after ${Date.now() - t1} ms`);
+    await stop(ca);
+    // (3) hidden: no periodic check; shown: caught up
+    let back = null;
+    const net = { online: () => true, onBack: (f) => { back = f; return () => { back = null; }; }, visible: () => false };
+    a = await fresh();
+    ca = viewClient(a, { net });
+    p = fid();
+    await round(a, ca, b, p);
+    const h0 = ca.stats.liveChecks;
+    check(!(await has(a, p, 2000 + W.CLIENT.liveMs + 1500)) && ca.stats.liveChecks === h0, "live: hidden: no periodic check, not caught up: " + J({ checks: ca.stats.liveChecks - h0 }));
+    net.visible = () => true;
+    back?.();
+    check(await has(a, p, 5000), "live: …then shown: caught up");
+    await stop(ca);
+  } finally {
+    Object.assign(W.CLIENT, keep);
+  }
+}
+
+/** A page that is hidden, online, and never shown again: no liveness checks of its own. */
+const HIDDEN = { online: () => true, onBack: () => () => {}, visible: () => false };
 const viewClient = (w, opts = {}) => client(w, { onIndex: W.confirmedIndex(w), ...opts });
 
 async function echoNoCopy() {
@@ -1298,13 +1403,115 @@ async function noticeFlood() {
   }
 }
 
+async function idleMidPage() {
+  // (a timer's pull while a page is being applied: the page clears `pulling` before it moves the cursor, so a pull asked
+  // then, from the old cursor, would be answered with ops the cursor has passed and end the connection.  The timers'
+  // pulls run on the message chain, after the page: the idle pull's wake fired mid-page leaves one connection)
+  await account();
+  const w = await fresh();
+  const clock = fakeClock();
+  const base = W.confirmedIndex(w);
+  let hold = null, entered = false;
+  const onIndex = async (page) => { if (hold) { entered = true; await hold.wait; } return base(page); };
+  const c = viewClient(w, { clock, net: HIDDEN, onIndex });
+  try {
+    check(await until(() => settled(w, c)), "idle mid-page: synced");
+    await otherOps(10, 0, "m");
+    let release;
+    hold = { wait: new Promise((r) => { release = r; }) };
+    await ctl("notice", { head: (await serverOps(w)).all.at(-1).seq });
+    check(await until(() => entered, 10_000), "idle mid-page: a page is being applied (held)");
+    const pulls = c.stats.pulls;
+    await clock.advance(W.CLIENT.idlePullMs + 1000);
+    await sleep(300);
+    hold = null;
+    release();
+    check(await until(async () => !!(await w.stat("/m9")), 10_000), "idle mid-page: the page applied");
+    await sleep(500);
+    check(!c.stats.ends.closed && c.stats.connects === 1 && c.status.state === "synced", "idle mid-page: the idle pull waited for the page; the same connection: " + J({ ends: c.stats.ends, connects: c.stats.connects, pulls: c.stats.pulls - pulls, state: c.status.state }));
+  } finally {
+    await stop(c);
+  }
+}
+
+async function indexRetryMidPage() {
+  // (the index timer's retry, set by the server's refusal of a pull, fired while a page the server sent is being
+  // applied: the pull waits for the page (on the message chain); the same connection, no close)
+  await account();
+  const w = await fresh();
+  const clock = fakeClock();
+  const base = W.confirmedIndex(w);
+  let hold = null, entered = false;
+  const onIndex = async (page) => { if (hold) { entered = true; await hold.wait; } return base(page); };
+  const c = viewClient(w, { clock, net: HIDDEN, onIndex });
+  try {
+    check(await until(() => settled(w, c)), "index retry mid-page: synced");
+    await otherOps(5, 0, "q");
+    const { all } = await serverOps(w);
+    const head = all.at(-1).seq;
+    // (the next pull refused for a while: the index timer set, its retry a wake-up)
+    await ctl("set", { set: { fakePull: [{ code: "rate", detail: { message: "faked", retry_after: 4000 } }] } });
+    await ctl("notice", { head });
+    await sleep(300);
+    check(await until(() => c.debug().inflight === 0 && c.debug().wakes > 0, 5000), "index retry mid-page: the pull refused, its retry set: " + J(c.debug()));
+    // (a page of those ops, pushed by the server, held while it is applied; the retry's time comes meanwhile)
+    let release;
+    hold = { wait: new Promise((r) => { release = r; }) };
+    await ctl("frame", { frame: { t: "index", ops: all.filter((o) => o.seq > 0 && /^\/q\d$/.test(o.path)), more: false } });
+    check(await until(() => entered, 10_000), "index retry mid-page: a page is being applied (held)");
+    await clock.advance(5000);
+    await sleep(300);
+    hold = null;
+    release();
+    check(await until(async () => !!(await w.stat("/q4")), 10_000), "index retry mid-page: the page applied");
+    await sleep(500);
+    check(!c.stats.ends.closed && c.stats.connects === 1 && c.status.state === "synced", "index retry mid-page: the retry's pull waited for the page; the same connection: " + J({ ends: c.stats.ends, connects: c.stats.connects, state: c.status.state }));
+  } finally {
+    await stop(c);
+  }
+}
+
+async function liveSlowPage() {
+  // (a liveness check asked while a page is being applied for longer than the check's deadline: the check begins when
+  // the page is done, its deadline from then; the live connection is kept)
+  const keep = { ...W.CLIENT };
+  await account();
+  const w = await fresh();
+  const base = W.confirmedIndex(w);
+  let hold = null, entered = false;
+  const onIndex = async (page) => { if (hold) { entered = true; await hold.wait; } return base(page); };
+  const c = viewClient(w, { onIndex });
+  try {
+    W.CLIENT.liveMs = 500;
+    check(await until(() => settled(w, c)), "slow page: synced");
+    await otherOps(5, 0, "s");
+    let release;
+    hold = { wait: new Promise((r) => { release = r; }) };
+    await ctl("notice", { head: (await serverOps(w)).all.at(-1).seq });
+    check(await until(() => entered, 10_000), "slow page: a page is being applied (held)");
+    const f0 = c.stats.liveFails, k0 = c.stats.liveChecks;
+    document.dispatchEvent(new Event("visibilitychange"));
+    await sleep(3 * W.CLIENT.liveMs);
+    hold = null;
+    release();
+    check(await until(async () => !!(await w.stat("/s4")), 10_000), "slow page: the page applied");
+    await sleep(2 * W.CLIENT.liveMs + 500);
+    check(c.stats.liveChecks - k0 === 1 && c.stats.liveFails === f0 && !c.stats.ends.stale && c.stats.connects === 1, "slow page: the check asked mid-page ran after it, with its own deadline; the live connection kept: " + J({ checks: c.stats.liveChecks - k0, fails: c.stats.liveFails - f0, ends: c.stats.ends, connects: c.stats.connects }));
+  } finally {
+    Object.assign(W.CLIENT, keep);
+    await stop(c);
+  }
+}
+
 async function idleDiscovery() {
   // (D8b r2: the only notice dropped; the ops arrive at the 5-minute idle pull, every page of a log longer than one
   // page, with no edit and no reconnect, and no pull before it)
   await account();
   const w = await fresh();
   const clock = fakeClock();
-  const c = viewClient(w, { clock });
+  // (a hidden page: no periodic liveness check (a visible one pulls every CLIENT.liveEveryMs of silence, liveCheck),
+  // so the idle pull is the only one)
+  const c = viewClient(w, { clock, net: HIDDEN });
   try {
     check(await until(() => settled(w, c)), "idle discovery: synced");
     await otherOps(1500, 0, "i");
@@ -1509,6 +1716,47 @@ async function downloadStale2() {
     check((await b.stat(pTrash.path))?.fid === pOld.fid && sameBytes(await b.contents(await b.stat(pTrash.path)), bytes(1500, 3)), "download stale 2: the removed one's bytes installed in Trash, by its identity");
   } finally {
     await ctl("set", { set: { holdGet: false } });
+    await ctl("release");
+    await stop(ca);
+    await stop(cb);
+  }
+}
+
+async function conflictFresh() {
+  // (a write that loses to another device's: the server keeps both, the other's under the name and this one's as
+  // `name (conflict, …)`; this device then shows the same, not its own bytes under the name.  The other's write
+  // comes down first, while this one's record is still undecided (its upload held), so the page that decides it
+  // changes only the copy)
+  const { a, b, ca, cb } = await twoDevices();
+  try {
+    const base = bytes(3000, 1), mineA = bytes(3000, 2), mineB = bytes(3000, 3);
+    await a.create("/w.bin", { content: base });
+    check(await until(() => settled(a, ca)), "conflict, fresh: A's file up");
+    await seen(b, cb, "/w.bin");
+    check(await until(async () => { const x = await b.stat("/w.bin"); return x && !x.remote; }), "conflict, fresh: B has its bytes");
+    const fid = (await b.stat("/w.bin")).fid;
+    await ctl("set", { set: { holdPut: true } });
+    await b.write("/w.bin", mineB);
+    check(await until(async () => (await ctl("log")).putsNow === 1), "conflict, fresh: B's upload held (its record undecided)");
+    await ctl("set", { set: { holdPut: false } });
+    await a.write("/w.bin", mineA);
+    check(await until(() => settled(a, ca)), "conflict, fresh: A's write up first");
+    for (let i = 0; i < 30 && (await W.confirmedEntry(b, nsOf(cb), fid))?.sha256 !== (await a.stat("/w.bin")).sha256; i++) { await ctl("notice", { head: (await serverOps(b)).all.at(-1).seq }); await sleep(100); }
+    check((await W.confirmedEntry(b, nsOf(cb), fid))?.sha256 === (await a.stat("/w.bin")).sha256 && sameBytes(await b.contents(await b.stat("/w.bin")), mineB), "conflict, fresh: A's write in B's confirmed index while B's own is undecided: B still shows its own");
+    await ctl("release");
+    check(await until(() => settled(b, cb)), "conflict, fresh: B's write decided");
+    // (the copy comes down as the server's own op, after B's write is decided: waited for, as the rows below wait for
+    // theirs; read once at once, it was missing in about one CI run in many)
+    let copy;
+    await until(async () => !!(copy = (await b.list("/")).find((e) => e.path.startsWith("/w (conflict, "))));
+    check(!!copy, "conflict, fresh: B has the conflict copy: " + J((await b.list("/")).map((e) => e.path)));
+    check(await until(async () => { const x = await b.stat("/w.bin"); return x && !x.remote && x.sha256 === (await a.stat("/w.bin")).sha256; }), "conflict, fresh: B shows the server's version under the name: " + J(await b.stat("/w.bin")));
+    check(sameBytes(await b.contents(await b.stat("/w.bin")), mineA), "conflict, fresh: …A's bytes");
+    check(await until(async () => { const x = copy && (await b.stat(copy.path)); return x && !x.remote; }) && sameBytes(await b.contents(await b.stat(copy.path)), mineB), "conflict, fresh: …and its own beside it, in the copy");
+    // (and A, which never lost: the same two)
+    check(await until(async () => !!(await seen(a, ca, copy.path)) && !(await a.stat(copy.path)).remote) && sameBytes(await a.contents(await a.stat(copy.path)), mineB) && sameBytes(await a.contents(await a.stat("/w.bin")), mineA), "conflict, fresh: A has the same two");
+  } finally {
+    await ctl("set", { set: { holdPut: false } });
     await ctl("release");
     await stop(ca);
     await stop(cb);
@@ -1936,6 +2184,101 @@ async function firstSyncCollision() {
   }
 }
 
+async function resetRejoin() {
+  // (sync reset (sync-reset.ts): a browser holding an older build's sync state can't sync; reset, it joins as a new
+  // device, and nothing is overwritten or lost on either side: the cloud's /x.txt stays /x.txt with its bytes, this
+  // browser's own /x.txt is kept as /x (2).txt with its bytes, listed as renamed, and its other files go up as they are)
+  await account();
+  const a = await fresh(), ca = viewClient(a);
+  const cloud = bytes(3_000, 1), local = bytes(2_000, 2), only = bytes(1_000, 3);
+  try {
+    await a.create("/x.txt", { content: cloud });
+    check(await until(() => settled(a, ca)), "reset, rejoin: the cloud has /x.txt");
+  } finally {
+    await stop(ca);
+  }
+  const b = await fresh();
+  const mine = await b.create("/x.txt", { content: local });
+  await b.create("/only.txt", { content: only });
+  // (an older build's state: its lease, a cursor and an outbox record, without this build's marker)
+  await new Promise((ok, no) => {
+    const tx = b.ws.transaction(["meta", "outbox"], "readwrite"), meta = tx.objectStore("meta");
+    const old = `${"e".repeat(64)}:7:${b.device}`;
+    meta.put({ ns: old, gen: 3 }, "sync:current");
+    meta.put(5, `sync:${old}:cursor`);
+    tx.objectStore("outbox").put({ ns: old, dseq: 1 });
+    tx.oncomplete = ok;
+    tx.onerror = tx.onabort = () => no(tx.error);
+  });
+  const d0 = await W.detectOldSync(b);
+  let refused = null;
+  try { await W.switchToIf(b, `${"f".repeat(64)}:1:${b.device}`); } catch (e) { refused = e; }
+  check(d0.old && refused instanceof W.OldSyncError, "reset, rejoin: old here, a lease refused: " + J({ d0, refused: refused?.name }));
+  await W.resetSyncHere(b);
+  const d1 = await W.detectOldSync(b);
+  check(!d1.old && (await metaGet(b.ws, W.PROTO_KEY)) === W.PROTO && (await outbox(b)) === 0 && (await metaGet(b.ws, "sync:current"))?.off === true, "reset, rejoin: clean after the reset, the link forgotten (the lease kept turned off, which fences): " + J(d1));
+  check(sameBytes(await b.contents(await b.stat("/x.txt")), local) && sameBytes(await b.contents(await b.stat("/only.txt")), only), "reset, rejoin: this browser's files untouched by the reset");
+  const cb = viewClient(b);
+  try {
+    check(await until(() => settled(b, cb), 20_000), "reset, rejoin: synced as a new device");
+    const x = await seen(b, cb, "/x.txt");
+    const ours = (await b.list("/")).find((e) => e.fid === mine.fid);
+    check(x?.fid !== mine.fid && ours?.path === "/x (2).txt", "reset, rejoin: the cloud's /x.txt here, this browser's at /x (2).txt: " + J({ x: x?.fid, ours: ours?.path }));
+    check(await until(async () => { const e = await b.stat("/x.txt"); return e && !e.remote; }), "reset, rejoin: the cloud's /x.txt fetched");
+    check(sameBytes(await b.contents(await b.stat("/x.txt")), cloud) && sameBytes(await b.contents(await b.stat("/x (2).txt")), local) && sameBytes(await b.contents(await b.stat("/only.txt")), only), "reset, rejoin: every file's bytes here are its own: the cloud's, this browser's renamed, the other");
+    const listed = await metaGet(b.ws, `sync:${nsOf(cb)}:listed`);
+    check(listed?.renamed >= 1 && W.listedSummary(listed).includes("renamed (another device has one with the name)"), "reset, rejoin: said on the page (the Sync panel's list): " + J(listed && W.listedSummary(listed)));
+    // (the log keeps each op as sent: this browser's /x.txt went up under its own identity, beside the cloud's; its
+    // name `x (2).txt` is the reducer's, seen by the other device below)
+    const { all: server, mine: up } = await serverOps(b);
+    const xs = server.filter((o) => o.path === "/x.txt").map((o) => o.fid);
+    check(up.some((o) => o.fid === mine.fid) && new Set(xs).size === 2 && up.some((o) => o.path === "/only.txt"), "reset, rejoin: the server has both /x.txt files, each its own, and /only.txt: " + J(server.map((o) => [o.op, o.path, o.fid?.slice(0, 6)])));
+  } finally {
+    await stop(cb);
+  }
+  // (A, the other device, sees both, the cloud's bytes unchanged)
+  const ca2 = viewClient(a);
+  try {
+    check(await until(() => settled(a, ca2)), "reset, rejoin: A synced again");
+    const r = await seen(a, ca2, "/x (2).txt");
+    check(r && sameBytes(await a.contents(await a.stat("/x.txt")), cloud), "reset, rejoin: A has its /x.txt unchanged and lists this browser's /x (2).txt");
+  } finally {
+    await stop(ca2);
+  }
+}
+
+async function sameNameRenamed() {
+  // (two devices, each with its own /spiral.ipynb made before sync, both turned on: two documents, nothing lost; the
+  // second's own put at /spiral (2).ipynb by the reducer is retitled "spiral (2)" (its title is its file's name again,
+  // as after a rename made here), and the change that moved it says so (Change.renamed), for a page that has it open)
+  await account();
+  const a = await fresh(), b = await fresh();
+  const na = await a.create("/spiral.ipynb"), nb = await b.create("/spiral.ipynb");
+  const title = async (w, e) => (await w.contents(e))?.name;
+  const t0 = [await title(a, na), await title(b, nb)];
+  const told = [];
+  const off = b.watch((c) => { if (c.renamed) told.push(...c.renamed); });
+  const ca = viewClient(a);
+  try {
+    check(await until(() => settled(a, ca), 20_000), "same name: A synced");
+    const cb = viewClient(b);
+    try {
+      check(await until(() => settled(b, cb), 20_000), "same name: B synced");
+      const mineB = (await b.list("/")).find((e) => e.ref === nb.ref), theirsB = await b.stat("/spiral.ipynb");
+      check(mineB?.path === "/spiral (2).ipynb" && mineB.renamed?.to === "/spiral (2).ipynb" && theirsB?.ref === na.ref && theirsB.remote, "same name: two documents; B's own at /spiral (2).ipynb, A's at /spiral.ipynb: " + J({ mine: mineB?.path, theirs: theirsB?.ref === na.ref }));
+      check(await until(async () => (await title(b, mineB)) === "spiral (2)", 5000), `same name: B's own retitled with its file: ${J(t0)} -> ${J(await title(b, mineB))}`);
+      check(told.length === 1 && J(told[0]) === J({ kind: "notebook", ref: nb.ref, from: "/spiral.ipynb", to: "/spiral (2).ipynb" }), "same name: the change says it was renamed: " + J(told));
+      const theirsA = await seen(a, ca, "/spiral (2).ipynb");
+      check(theirsA?.ref === nb.ref && (await title(a, na)) === "spiral" && (await a.stat("/spiral.ipynb"))?.ref === na.ref, "same name: A keeps its own /spiral.ipynb titled spiral, and lists B's as /spiral (2).ipynb");
+    } finally {
+      await stop(cb);
+    }
+  } finally {
+    off();
+    await stop(ca);
+  }
+}
+
 async function rebuildKickAfterHalt() {
   // (web-sync's "cap, no reset" flake: the server's invalid "rebuild" refusal answered after the sender went idle, so
   // nothing but that answer can start the rebuild: it must start by itself, at once, not wait for a reconnect)
@@ -2163,7 +2506,7 @@ async function s5Section() {
   const w = await fresh();
   const shapes = [
     [{ available: false, reason: "not_allowlisted", state: "off" }, (el) => el.textContent === "", "not_allowlisted: hidden"],
-    [{ available: false, reason: "plan_has_no_sync", state: "off" }, (el) => /\[x\] Turn on sync/.test(buttons(el).join()) && /isn't available/.test(text(el)), "plan_has_no_sync: disabled, the fallback words"],
+    [{ available: false, reason: "plan_has_no_sync", state: "off" }, (el) => /\[x\] Turn on sync/.test(buttons(el).join()) && /Your plan doesn't include sync/.test(text(el)) && !/plan_has_no_sync/.test(text(el)), "plan_has_no_sync: disabled, in plain words (never the code)"],
     [{ available: false, reason: "cocalc_unreachable", state: "off", message: "CoCalc says no" }, (el) => /CoCalc says no/.test(text(el)), "cocalc_unreachable: the server's own words"],
     [{ available: true, state: "deleting", generation: 2 }, (el) => /\[x\] Deleting your synced data/.test(buttons(el).join()), "deleting: said, disabled"],
     [{ available: true, state: "active", generation: 2 }, (el) => !/Delete my synced data/.test(buttons(el).join()), "active, no limit_bytes (no server precondition): no delete"],
@@ -2184,6 +2527,41 @@ async function s5Section() {
   check(/Can't check sync right now/.test(el.textContent) && down.poll.armed, "section: status unreadable: unknown (neither off nor on), asked again later");
   down.dispose();
   check(!down.poll.armed && !down.poll.busy, "section: dispose (the panel closed) leaves no timer, no request");
+}
+
+async function s5Reasons() {
+  // (the server's reason codes in plain words, one table for the foot and the panel; the code only in the foot's tooltip;
+  // the server's own sentence first; a browser that synced before told why sync stopped, and as whom)
+  const codes = ["not_allowlisted", "plan_has_no_sync", "cocalc_unreachable", "deleted", "unavailable"];
+  const lines = codes.map((c) => W.sidebarLine({ state: "off", reason: c }));
+  check(codes.every((c) => W.REASON_WORDS[c] && W.reasonWords(c).code === c) && lines.every((l, i) => l === "Sync off: " + W.REASON_WORDS[codes[i]] && !l.includes("_")), "reasons: every server code has words, and the foot never shows a code: " + J(lines));
+  const unknown = W.reasonWords("email_not_listed"), phrase = W.reasonWords("sign in first");
+  check(unknown.text === W.REASON_WORDS.unavailable && unknown.code === "email_not_listed" && phrase.text === "sign in first" && phrase.code === undefined, "reasons: an unknown code gets generic words (the code kept for the tooltip); a reason already in words is said as it is: " + J({ unknown, phrase }));
+  check(W.sidebarLine({ state: "off", reason: "not_allowlisted", message: "Sync isn't available yet" }) === "Sync isn't available yet" && W.sidebarTitle({ state: "off", reason: "not_allowlisted" }) === "Sync off (not_allowlisted): opens the Storage panel" && W.sidebarTitle({ state: "off", reason: "sign in first" }) === undefined && W.sidebarTitle({ state: "synced" }) === undefined, "reasons: the server's own sentence first; the code in the tooltip only");
+  // (the panel: not_allowlisted hidden for a browser that never synced, said with the account's email for one that did)
+  const fetchAs = (status) => async (url) => {
+    const path = String(url).replace(/^https?:\/\/[^/]+/, "");
+    if (path === "/api/share/me") return Response.json({ account_id: "acct-reasons", email: "someone@example.com" });
+    if (path === "/api/sync/v1/status") return Response.json(status);
+    return new Response("{}", { status: 404 });
+  };
+  const panel = async (w, status) => {
+    const el = document.createElement("div"), s = W.syncSection(w, el, hostOf(w), { fetch: fetchAs(status) });
+    await until(() => el.textContent !== "", 2000);
+    await sleep(100);
+    const t = text(el);
+    s.dispose();
+    return t;
+  };
+  const never = await fresh();
+  check((await panel(never, { available: false, reason: "not_allowlisted", state: "off" })) === "", "reasons: not_allowlisted, this browser never synced: hidden");
+  const used = await fresh();
+  await W.switchToIf(used, `${"a".repeat(64)}:1:${used.device}`);
+  await W.syncOffIf(used);
+  const t1 = await panel(used, { available: false, reason: "not_allowlisted", state: "off" });
+  check(/Sync is off here: not available for this account/.test(t1) && /signed in as someone@example\.com/.test(t1) && !/not_allowlisted/.test(t1), "reasons: not_allowlisted, this browser synced before: said, as whom, never the code: " + J(t1));
+  const t2 = await panel(used, { available: false, reason: "not_allowlisted", state: "off", message: "Sync isn't available yet" });
+  check(/Sync isn't available yet \(signed in as someone@example\.com\)/.test(t2), "reasons: …with the server's own sentence when it gives one: " + J(t2));
 }
 
 async function s5Delete() {
@@ -2294,6 +2672,261 @@ async function s5Docs() {
   check(!el.textContent.includes("Notebooks sync between your devices"), "docs: the Sync panel's notebooks note isn't shown on this test origin (DEV's only)");
   s.dispose();
   owner.destroy();
+}
+
+async function s5Retry() {
+  // (a session that couldn't be asked: /api/share/me unreachable (offline, a 5xx, a 429) is neither yes nor no; with no
+  // client running the owner tries again, the wait doubling to its bound, and at once when the browser is back online;
+  // a client starting resets the wait.  401, 403 and another account are a final no: no try again.  pagehide clears
+  // the waiting try; nothing waits while sync is off here)
+  await account();
+  const w = await fresh();
+  // (sync turned on here first, through the panel, with the real session: the durable lease is on)
+  const o0 = W.SyncOwner.of(w, { origin: location.origin });
+  o0.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o0.view().s.state === "synced", 15_000), "retry: sync on, a client synced");
+  s.dispose();
+  o0.destroy();
+  // (a page loaded afresh, its /api/share/me answered as `me` says; every other request real)
+  const real = window.fetch.bind(window);
+  let me = "throw", asked = 0;
+  const fetchMe = async (url, init) => {
+    if (!String(url).endsWith("/api/share/me")) return real(url, init);
+    asked++;
+    if (me === "throw") throw new TypeError("Failed to fetch");
+    // (a request that hangs: it answers only by being aborted)
+    if (me === "hang") return new Promise((_, no) => init?.signal?.addEventListener("abort", () => no(new DOMException("aborted", "AbortError"))));
+    if (me === "real") return real(url, init);
+    if (me === "other") return new Response(JSON.stringify({ account_id: "00000000-0000-4000-8000-0000000000ff" }), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response("{}", { status: me, headers: { "content-type": "application/json" } });
+  };
+  const saved = { ...W.OWNER };
+  Object.assign(W.OWNER, { retryMs: 100, retryMaxMs: 400 });
+  try {
+    for (const transient of ["throw", 503, 429]) {
+      me = transient;
+      asked = 0;
+      const o = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+      o.start();
+      // (each try asks once: 1 at load, then after 100, 200, 400, 400 ms…)
+      const t0 = Date.now();
+      check(await until(() => asked >= 4, 5000), `retry (${transient}): asked again on its own: ${asked}`);
+      const took = Date.now() - t0;
+      check(o.client === null && took >= 650, `retry (${transient}): no client while it can't ask, the waits doubling (4 asks after ${took} ms)`);
+      const n = asked;
+      await new Promise((r) => setTimeout(r, 900));
+      check(asked - n >= 1 && asked - n <= 3, `retry (${transient}): the wait bounded at its maximum: ${asked - n} asks in 900 ms`);
+      // (the session answers again: a client starts, and nothing waits any more)
+      me = "real";
+      check(await until(() => o.view().s.state === "synced", 15_000), `retry (${transient}): the session answers: a client starts and syncs`);
+      const settled = asked;
+      await new Promise((r) => setTimeout(r, 900));
+      check(asked === settled && o.stats.retries >= 3, `retry (${transient}): once running, no more tries: ${asked - settled}`);
+      o.destroy();
+    }
+    // (a request that hangs is given up after its bound, and tried again: the owner never waits on it for good)
+    Object.assign(W.OWNER, { askMs: 200 });
+    me = "hang";
+    asked = 0;
+    const oh = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+    oh.start();
+    check(await until(() => asked >= 3 && oh.stats.retries >= 2, 5000), "retry: a hung /api/share/me is given up after its bound and tried again: " + J({ asked, retries: oh.stats.retries }));
+    me = "real";
+    check(await until(() => oh.view().s.state === "synced", 15_000), "retry: …and once it answers, a client starts");
+    oh.destroy();
+    Object.assign(W.OWNER, { askMs: saved.askMs });
+    // (final answers: no try again)
+    for (const final of [401, 403, "other"]) {
+      me = final;
+      asked = 0;
+      const o = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+      o.start();
+      await until(() => asked >= 1, 5000);
+      await new Promise((r) => setTimeout(r, 900));
+      check(asked === 1 && o.client === null && o.stats.retries === 0, `retry: ${final} is a final no: asked once, no client, no try again (${asked})`);
+      o.destroy();
+    }
+    // (back online: a waiting try goes at once, the wait being long)
+    Object.assign(W.OWNER, { retryMs: 60_000, retryMaxMs: 60_000 });
+    me = "throw";
+    asked = 0;
+    const o1 = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+    o1.start();
+    await until(() => asked >= 1, 5000);
+    me = "real";
+    const tOn = Date.now();
+    window.dispatchEvent(new Event("online"));
+    // (synced long before the 60 s wait, its timer never having fired; the client itself asks /api/share/me too)
+    check(await until(() => o1.view().s.state === "synced", 15_000) && Date.now() - tOn < 15_000 && o1.stats.retries === 0, "retry: an online event sends the waiting try at once (not its timer): " + J({ ms: Date.now() - tOn, retries: o1.stats.retries }));
+    // (a client starting reset the wait: unreachable again after it stops, the first wait is the shortest again)
+    o1.destroy();
+    Object.assign(W.OWNER, { retryMs: 100, retryMaxMs: 400 });
+    // (pagehide: the waiting try cleared, nothing more asked)
+    me = "throw";
+    asked = 0;
+    const o2 = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+    o2.start();
+    await until(() => asked >= 1, 5000);
+    o2.suspend();
+    await new Promise((r) => setTimeout(r, 700));
+    check(asked === 1 && o2.stats.retries === 0, "retry: pagehide clears the waiting try: " + asked);
+    o2.destroy();
+    // (sync off here: the session isn't asked, and nothing waits)
+    await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); const m = tx.objectStore("meta"); const r = m.get("sync:current"); r.onsuccess = () => m.put({ ...r.result, off: true }, "sync:current"); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    asked = 0;
+    const o3 = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+    o3.start();
+    await new Promise((r) => setTimeout(r, 700));
+    check(asked === 0 && o3.stats.retries === 0 && o3.client === null, "retry: sync off here: nothing asked, nothing waits: " + asked);
+    o3.destroy();
+  } finally {
+    Object.assign(W.OWNER, saved);
+  }
+}
+
+async function s5Unsent() {
+  // (changes not sent: while sync is on here, the line says how many of this browser's changes haven't gone up, the
+  // outbox's records and the ops past the scan watermark, whatever the client's state; never "Synced", nor nothing)
+  const f = (s) => W.foot(s, 0), line = (s) => W.sidebarLine(s, 0);
+  check(f({ state: "synced" }) === "Synced" && f({ state: "synced", unsent: 3 }) === "3 changes not sent", "unsent: synced with changes not sent says them, never Synced: " + J(f({ state: "synced", unsent: 3 })));
+  check(f({ state: "connecting", unsent: 1 }) === "Connecting… · 1 change not sent" && f({ state: "paused", reason: "x", unsent: 2 }) === "Paused: x · 2 changes not sent", "unsent: connecting and paused add them");
+  check(f({ state: "syncing", waiting: 1, unsent: 4 }) === "Syncing 4 changes…" && f({ state: "offline", waiting: 5, unsent: 2 }) === "Offline: 5 changes wait", "unsent: syncing and offline count the larger of the two");
+  check(line({ state: "off", unsent: 2 }) === "2 changes not sent" && line({ state: "off" }) === "" && line({ state: "off", unsent: 1000, unsentMore: true }) === "1,000 or more changes not sent", "unsent: sync on here but not running: said, not an empty line");
+  await account();
+  const w = await fresh();
+  const o0 = W.SyncOwner.of(w, { origin: location.origin });
+  o0.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o0.view().s.state === "synced", 15_000), "unsent: sync on, a client synced");
+  check(await until(() => line(o0.view().s) === "Synced · just now", 5000), "unsent: nothing waiting: Synced: " + line(o0.view().s));
+  s.dispose();
+  o0.destroy();
+  // (a page loaded later whose session can't be asked: sync on here, no client running)
+  const real = window.fetch.bind(window);
+  const offMe = async (url, init) => { if (String(url).endsWith("/api/share/me")) throw new TypeError("Failed to fetch"); return real(url, init); };
+  const o1 = W.SyncOwner.of(w, { origin: location.origin, fetch: offMe });
+  o1.start();
+  await until(() => o1.stats.reconciles >= 1, 5000);
+  check(o1.client === null && line(o1.view().s) === "", "unsent: no client, nothing changed yet: nothing to say: " + J(o1.view().s));
+  await w.create("/u1.txt", { content: "one" });
+  await w.write("/u1.txt", "one two");
+  check(await until(() => o1.view().s.unsent === 2, 5000), "unsent: two changes made here while no client runs: counted, past the scan watermark: " + J(o1.view().s));
+  check(line(o1.view().s) === "2 changes not sent", "unsent: …and said on the line, not an empty one: " + J(line(o1.view().s)));
+  o1.destroy();
+  // (a page that can ask: the client sends them, and the line is Synced again)
+  const o2 = W.SyncOwner.of(w, { origin: location.origin });
+  o2.start();
+  check(await until(() => o2.view().s.state === "synced" && !o2.view().s.unsent, 15_000), "unsent: once sent, none left: " + J(o2.view().s));
+  check(line(o2.view().s) === "Synced · just now", "unsent: …and Synced again: " + line(o2.view().s));
+  o2.destroy();
+}
+
+async function s5UnsentTail() {
+  // (the count's cost: a long tail of the server's own ops past the watermark (a client stopped mid-download) is read
+  // UNSENT.visit records a time, each read going on from the last, so a burst of nudges doesn't read it again; until its
+  // end the line says "some changes not sent", never "Synced" nor nothing; then one late change of this browser's is
+  // counted exactly)
+  const line = (s) => W.sidebarLine(s, 0);
+  check(line({ state: "off", unsentMore: true }) === "some changes not sent" && W.foot({ state: "synced", unsentMore: true }, 0) === "some changes not sent" && line({ state: "off", unsent: 3, unsentMore: true }) === "3 or more changes not sent", "tail: not all read yet: said, never Synced");
+  await account();
+  const w = await fresh();
+  const o0 = W.SyncOwner.of(w, { origin: location.origin });
+  o0.start();
+  const el = document.createElement("div");
+  const sec = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o0.view().s.state === "synced", 15_000), "tail: sync on, a client synced");
+  sec.dispose();
+  o0.destroy();
+  // (the watermark, once the stopped client has left it still: what the tail is counted from)
+  const scannedMark = () => new Promise((ok, no) => {
+    const st = w.ws.transaction("meta").objectStore("meta"), k = st.getAllKeys();
+    k.onsuccess = () => { const key = k.result.find((x) => /^sync:.*:scanned$/.test(String(x))); if (key === undefined) return ok(null); const g = st.get(key); g.onsuccess = () => ok(g.result ?? null); g.onerror = () => no(g.error); };
+    k.onerror = () => no(k.error);
+  });
+  let mark = await scannedMark();
+  for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 250)); const m = await scannedMark(); if (m === mark && i >= 3) break; mark = m; }
+  // (the tail: TAIL ops applied from the server, logged past the watermark, as a stopped client leaves them)
+  const TAIL = 5000;
+  await new Promise((ok, no) => { const tx = w.ws.transaction("ops", "readwrite"); const ops = tx.objectStore("ops"); for (let i = 0; i < TAIL; i++) ops.add({ op: "noop", origin: "server", t: 0 }); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  const real = window.fetch.bind(window);
+  const offMe = async (url, init) => { if (String(url).endsWith("/api/share/me")) throw new TypeError("Failed to fetch"); return real(url, init); };
+  const o1 = W.SyncOwner.of(w, { origin: location.origin, fetch: offMe });
+  // (no nudge from here: the reads go on by themselves to the end, each line it says recorded)
+  const seen = [];
+  o1.onChange(() => { const l = line(o1.view().s); if (seen.at(-1) !== l) seen.push(l); });
+  o1.start();
+  const ended = await until(() => o1.stats.unsentMostRead > 0 && !o1.view().s.unsentMore && !o1.countingNow(), 10_000);
+  const most = o1.stats.unsentMostRead;
+  check(most <= 2000 && seen.includes("some changes not sent") && seen.every((l) => l === "some changes not sent" || l === ""), "tail: each read visits UNSENT.visit records at most; until the end, \"some changes not sent\": " + J({ most, seen }));
+  check(ended && line(o1.view().s) === "", "tail: with no nudge, read on to its end by itself, the server's own ops: nothing not sent: " + J({ s: o1.view().s, reads: o1.stats.unsentReads }));
+  const visited = o1.stats.unsentVisited;
+  const past = await new Promise((ok, no) => { const c = w.ws.transaction("ops").objectStore("ops").count(IDBKeyRange.lowerBound(mark, true)); c.onsuccess = () => ok(c.result); c.onerror = () => no(c.error); });
+  check(typeof mark === "number" && (await scannedMark()) === mark && past >= TAIL && visited <= past, "tail: the whole tail read once, not once a read: " + J({ visited, past, reads: o1.stats.unsentReads, TAIL }));
+  // (one late change of this browser's: counted exactly, and a burst of nudges reads only what's new)
+  await w.create("/late.txt", { content: "late" });
+  check(await until(() => o1.view().s.unsent === 1 && !o1.view().s.unsentMore, 5000), "tail: one late change: 1 not sent: " + J(o1.view().s));
+  check(line(o1.view().s) === "1 change not sent", "tail: …said: " + J(line(o1.view().s)));
+  const v1 = o1.stats.unsentVisited, r1 = o1.stats.unsentReads, t1 = performance.now();
+  await Promise.all(Array.from({ length: 50 }, () => o1.recount()));
+  const burst = { visited: o1.stats.unsentVisited - v1, reads: o1.stats.unsentReads - r1, ms: Math.round(performance.now() - t1) };
+  check(burst.reads <= 2 && burst.visited <= 2 && o1.view().s.unsent === 1, "tail: 50 nudges at once: at most two reads, nothing read again: " + J(burst));
+  console.log("  tail: " + J({ TAIL, past, visitedTail: visited, reads: o1.stats.unsentReads, mostRead: o1.stats.unsentMostRead, burst }));
+  o1.destroy();
+}
+
+async function s5UnsentCap() {
+  // (the count's cap: past UNSENT.max (1,000), from the outbox or from the ops, it is "1,000 or more", even when the read
+  // ends there; exactly 1,000 is 1,000)
+  await account();
+  const w = await fresh();
+  const o0 = W.SyncOwner.of(w, { origin: location.origin });
+  o0.start();
+  const el = document.createElement("div");
+  const sec = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o0.view().s.state === "synced", 15_000), "cap: sync on, a client synced");
+  sec.dispose();
+  o0.destroy();
+  await sleep(1000);
+  // (the namespace's watermark moved to the last op: nothing past it; then the outbox and the ops set as each control asks)
+  const tx = (mode, f) => new Promise((ok, no) => { const t = w.ws.transaction(["meta", "ops"], mode); let out; Promise.resolve(f(t)).then((x) => (out = x)); t.oncomplete = () => ok(out); t.onerror = () => no(t.error); });
+  const ns = await tx("readonly", (t) => new Promise((ok) => { const k = t.objectStore("meta").getAllKeys(); k.onsuccess = () => ok(String(k.result.find((x) => /^sync:.*:scanned$/.test(String(x)))).slice(5, -8)); }));
+  const last = await tx("readonly", (t) => new Promise((ok) => { const c = t.objectStore("ops").openKeyCursor(null, "prev"); c.onsuccess = () => ok(c.result?.key ?? 0); }));
+  const outboxOf = await tx("readonly", (t) => new Promise((ok) => { const g = t.objectStore("meta").get(`sync:${ns}:outbox`); g.onsuccess = () => ok(g.result ?? {}); }));
+  const setOutbox = (count) => tx("readwrite", (t) => { t.objectStore("meta").put({ ...outboxOf, count }, `sync:${ns}:outbox`); });
+  await tx("readwrite", (t) => { t.objectStore("meta").put(last, `sync:${ns}:scanned`); });
+  const real = window.fetch.bind(window);
+  const offMe = async (url, init) => { if (String(url).endsWith("/api/share/me")) throw new TypeError("Failed to fetch"); return real(url, init); };
+  const o1 = W.SyncOwner.of(w, { origin: location.origin, fetch: offMe });
+  o1.start();
+  await until(() => o1.stats.reconciles >= 1, 5000);
+  const now = async () => { await o1.recount(); const s = o1.view().s; return { unsent: s.unsent, more: !!s.unsentMore, line: W.sidebarLine(s, 0) }; };
+  await setOutbox(1001);
+  let v = await now();
+  check(v.unsent === 1000 && v.more && v.line === "1,000 or more changes not sent", "cap: an outbox of 1,001, nothing past the watermark: \"1,000 or more\": " + J(v));
+  await setOutbox(1000);
+  v = await now();
+  check(v.unsent === 1000 && !v.more && v.line === "1,000 changes not sent", "cap: an outbox of exactly 1,000: 1,000, not \"or more\": " + J(v));
+  // (this browser's own ops past the watermark, the read ending where the cap is passed: 1,000, then 1,001)
+  await setOutbox(0);
+  await tx("readwrite", (t) => { const ops = t.objectStore("ops"); for (let i = 0; i < 1000; i++) ops.add({ op: "noop", t: 0 }); });
+  v = await now();
+  check(v.unsent === 1000 && !v.more && v.line === "1,000 changes not sent", "cap: exactly 1,000 ops of this browser's past the watermark: 1,000: " + J(v));
+  await tx("readwrite", (t) => { t.objectStore("ops").add({ op: "noop", t: 0 }); });
+  v = await now();
+  check(v.unsent === 1000 && v.more && v.line === "1,000 or more changes not sent", "cap: 1,001, the read ending at the cap: \"1,000 or more\": " + J(v));
+  o1.destroy();
+  await setOutbox(outboxOf.count ?? 0);
 }
 
 async function s5Tabs() {
@@ -4231,7 +4864,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

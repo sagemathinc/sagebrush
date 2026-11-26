@@ -42,7 +42,7 @@ const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--for
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
 const shareBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret", PURGE_KEY: "purge-key", LIMITS_KEY: "limits-key" };
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
-const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 100000, period: 60 } }, SYNC_FILES_LIMIT: { namespace_id: id + "1", simple: { limit: 100000, period: 60 } } });
+const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 100000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_FILES_LIMIT: { namespace_id: id + "1", simple: { limit: 100000, period: 60 } } });
 
 // ---- a fake CoCalc: each account's plan
 const plan = (enabled, max = 50_000) => ({ storage_bytes: 1 << 20, max_file_bytes: max, sync: { enabled, version_bytes: 1000, read_bytes_per_day: 1 << 20 } });
@@ -118,7 +118,7 @@ function client(m, name) {
         },
         async ask(msg) { const r = ++req; ws.send(JSON.stringify({ ...msg, req: r })); return sock.next((x) => x.req === r); },
         async hello(device) {
-          ws.send(JSON.stringify({ t: "hello", v: 2, device, name: "test", index_after: 0 }));
+          ws.send(JSON.stringify({ t: "hello", v: 3, device, name: "test", index_after: 0 }));
           const w = await sock.next((x) => x.t === "welcome" || x.t === "error");
           const ix = w?.t === "welcome" ? await sock.next((x) => x.t === "index") : null;
           return { welcome: w, index: ix };
@@ -172,7 +172,7 @@ function client(m, name) {
     const ss = await all.signIn(SMALL);
     ok((await all.enable(ss)) === 200, "all: a small plan's account turns sync on");
     const bytes = Buffer.from("x".repeat(500)), sha = createHash("sha256").update(bytes).digest("hex");
-    const put = await all.go(`/api/sync/v1/blob/${sha}`, { method: "PUT", headers: { cookie: ss, origin: all.origin, "content-type": "application/octet-stream" }, body: bytes });
+    const put = await all.go(`/api/sync/v1/blob/${sha}`, { method: "PUT", headers: { cookie: ss, origin: all.origin, "content-type": "application/octet-stream", "x-sb-ct-sha256": sha }, body: bytes });
     const pb = await put.json().catch(() => null);
     ok(put.status >= 400 && /too large/.test(JSON.stringify(pb)), "all: a file over the plan's maximum (100 bytes) refused at its upload: " + JSON.stringify({ status: put.status, body: pb }));
     // (any other value, or none: only the lists)
@@ -218,7 +218,7 @@ function client(m, name) {
       ok(b?.t !== "ack", "rollback: unbound: an op sent on that socket anyway is refused: " + JSON.stringify(b));
       sock.ws.close();
     }
-    const up = await c.check(s, [{ sha256: "0".repeat(64), size: 10 }]);
+    const up = await c.check(s, [{ address: "0".repeat(64), ct_sha256: "0".repeat(64), size: 10 }]);
     ok(up.code === 403, "rollback: unbound: uploads refused: " + up.code);
     await m.dispose();
     // (bound again: the same account goes on from what it had: its op kept, nothing lost or redone)

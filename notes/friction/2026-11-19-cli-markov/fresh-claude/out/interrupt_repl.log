@@ -1,0 +1,25 @@
+sage:
+[[SEND "P = matrix(QQ, [[1/2,1/4,1/4,0],[1/5,1/2,1/10,1/5],[0,0,1,0],[0,0,0,1]]); keep = P^5; print('SET', keep[0,0])" at 16:21:17]]
+P = matrix(QQ, [[1/2,1/4,1/4,0],[1/5,1/2,1/10,1/5],[0,0,1,0],[0,0,0,1]]); keep = P^5; print('SET', keep[0,0])
+SET 1/10
+sage:
+[[SEND 's = 0\r' at 16:21:21]]
+
+[[SEND 'for i in range(10^9): s += i' at 16:21:21]]
+
+[[SEND '' at 16:21:21]]
+s = 0
+sage:
+sage: for i in range(10^9): s += i
+
+[[SEND Ctrl-C (\x03)]]
+
+[[5.01s after Ctrl-C]]
+
+[[SEND "print('AFTER', keep[0,0], P.nrows(), 's>0:', s > 0)" at 16:21:29]]
+
+[[SEND "print('NEWCALC', (identity_matrix(QQ,2) - P[0:2,0:2]).inverse())" at 16:21:34]]
+
+[[child alive before cleanup: True]]
+
+SUMMARY {'keyboardinterrupt_shown': False, 'state_kept': False, 'new_calc_ok': False, 'child_alive_after': True}

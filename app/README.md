@@ -2,10 +2,12 @@
 
 The sagebrush.space notebook as an app for macOS, Linux and Windows. The
 page runs in the system's web view (WebKit on macOS and Linux, WebView2 on
-Windows), and Python and the engines run there as WebAssembly, exactly as
-on the site. The installers are about 10–15 MB.
+Windows). On macOS (Apple silicon) and Linux (x64), notebooks run in an
+engine process the app ships (the page's own worker in a pinned Node; see
+below); on Windows, and where that engine can't start, Python and the
+engines run in the web view as WebAssembly, exactly as on the site. The installers are about 10–15 MB.
 
-The Rust shell (`src-tauri/src/main.rs`) adds what a web page cannot do:
+The Rust shell (`src-tauri/src/lib.rs` and the modules beside it) adds what a web page cannot do:
 
 - **The computer's files.** File → *Open file…* and *Save as…* use the
   system's dialogs. A notebook opened from disk is its `.ipynb` file and is
@@ -51,6 +53,7 @@ pnpm run build && node scripts/build-cli.mjs   # the Python library
 bun web/build.ts                               # the notebook page (web/dist); bun 1.4.4
 # (if it stops with "web/js-dependencies.json changed": node scripts/third-party-notices.mjs, then bun web/build.ts again)
 node app/build-frontend.mjs                    # app/dist: the page's files for the app
+node app/engine/bundle.mjs                     # macOS and Linux: the engine the app ships (below)
 cd app/src-tauri && tauri build                # or `cargo tauri build`, or `npx @tauri-apps/cli@2 build`
 ```
 
@@ -60,7 +63,9 @@ tauri".
 
 The bundles are in
 `app/src-tauri/target/release/bundle/` (`.app`/`.dmg`, `.deb`/`.AppImage`/`.rpm`,
-`.msi`/`.exe`). They are not signed or notarized yet.
+`.msi`/`.exe`). They are not signed or notarized. The `mac-release` job in
+`.github/workflows/app.yml` (for an `app-v*` tag, or a dispatch with `sign`)
+builds the Mac app signed and notarized.
 
 A plain `cargo build` in `app/src-tauri` (no CLI) builds only the binary,
 in debug mode, as `target/debug/sagebrush-app`, without any bundle. It is
@@ -93,7 +98,7 @@ connected emulator or device, and
 `.github/workflows/app-mobile-selftest.yml` runs it on an emulator (it
 reports whether the page is cross-origin isolated in Android's WebView).
 
-## The engine subprocess (not used by the app yet)
+## The engine subprocess
 
 `app/engine/` is the engine the desktop app is moving to
 (`design/native-desktop.md`): a separate process that the app talks to over
@@ -107,6 +112,19 @@ node app/engine/main.mjs --stdio --root web/dist
 node web/test-app-engine.mjs        # its tests
 ```
 
+The app ships one on macOS (Apple silicon) and Linux (x64)
+(`app/engine/bundle.mjs`, before the build): Node 24.21.0, pinned by its
+SHA-256 for each, beside the app's executable (`externalBin` in
+`tauri.macos.conf.json` and `tauri.linux.conf.json`; on macOS signed with the
+app, with `entitlements.plist`: the two JIT entitlements Node needs under the
+hardened runtime), and the engine and its interpreter's files in the app's
+resources. The app starts it when a notebook runs (`src/engine.rs`), and a
+notebook that may change files runs there. Where it can't start (on Linux, a C
+library older than Node 24 needs: glibc 2.28), the page runs Python itself.
+`SAGEBRUSH_APP_ENGINE=off` runs without it, as on Windows for now;
+`SAGEBRUSH_APP_ENGINE=<main.mjs>` (with `SAGEBRUSH_APP_ENGINE_ROOT`, and
+`SAGEBRUSH_APP_ENGINE_NODE`) runs another.
+
 ## Next
 
 - Signing: an Apple Developer ID with notarization, and Windows code signing.
@@ -115,4 +133,6 @@ node web/test-app-engine.mjs        # its tests
 - The engine subprocess above in the app, then the Rust engines in it
   natively instead of as WebAssembly, for speed and for computations bigger
   than WebAssembly's 4 GB.
-- iOS and Android, from this same project (Tauri 2 mobile).
+- iOS and Android, from this same project (Tauri 2 mobile). CI already
+  builds both and runs the app's self-test on an Android emulator and an
+  iPhone simulator; neither is signed for distribution yet.

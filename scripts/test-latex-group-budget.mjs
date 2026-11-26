@@ -13,9 +13,11 @@ import { join, dirname, relative } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { latexGroup, latexLazy, LATEX_CAPS, LATEX_LAZY, LATEX_LAZY_CAPS, gz } from "./latex-group.mjs";
+import { latexAdvice, safelyAppendPullRequestSummary } from "./size-advice.mjs";
 
 const fails = [];
 let checks = 0;
+let latexReport = null;
 const check = (ok, what, detail) => { checks++; console.log(`${ok ? "ok  " : "FAIL"} ${what}${detail === undefined ? "" : " " + JSON.stringify(detail)}`); if (!ok) fails.push(what); };
 
 // (a web/ tree's files: "dist/..." to the file on disk, as the site asset budget's inventory gives them)
@@ -31,17 +33,43 @@ function files(web) {
 }
 
 // ---- the caps themselves, as approved (a change to them is a ruling: this line changes with it)
-check(LATEX_CAPS.raw === 249317 && LATEX_CAPS.gzip === 83380, "the caps are 249,317 B raw and 83,380 B gzip (2026-11-13, the LaTeX editor's bar in the notebook's colours and buttons with its Share button, and math typeset in the same step as its text: its measurement + 64; 246,769 / 82,596 before, 2026-11-12, the editor's File ▸ Share…: its measurement + 64; 246,659 / 82,543 before, 2026-11-12, a shared talk on the share page: its measurement + 64; 246,588 / 82,522 before, 2026-11-12, running code while presenting, renewed after its review fixes: its measurement + 64; 246,016 / 82,328 before, 2026-11-12, a Sage table() drawn as a table: its measurement + 64; 244,777 / 81,787 before, 2026-11-11, the view kept and put back: its landing measurement + 64; 244,388 / 81,635 for Magma in LaTeX; 242,382 B raw and 79.5 KiB gzip before: the preview keeping its place, and the 2026-11-04 gzip cap for the LaTeX fidelity queue)", LATEX_CAPS);
+check(LATEX_CAPS.raw === 294217 && LATEX_CAPS.gzip === 99416, "the caps are 294,217 B raw and 99,416 B gzip (2026-11-25, an element over PIECE_MAX split in turn, on its merge with master b0b02122: 294,153 / 99,352 measured + 64; 294,144 / 99,370 before, latex check naming an \\input file and its line)");
 
 // (and each lazy chunk's, as approved: comments 16/6, comments-doc 40/16, agent 47,645 / 16,403 B (2026-11-10, for the
 //  grant's "May run code"; 45,952 / 16,000 for the grant's id and hold, 44/15.5 on 2026-11-04, before), tools
 //  16/6, present 16/6, run 19,644 / 7,812 B (Nov 12, a shared talk's Run on the share page, renewed after its review fixes: its measurement + 64; 19,465 / 7,779 B before; 18,672 / 7,574 B, Nov 12, running code while presenting, renewed after its review fixes: its measurement + 64; 17,965 / 7,272 B, Nov 11, Magma in LaTeX: its landing measurement + 64; 17/7 KiB on Nov 8, the session script's @interact capture; 15.5/6.5 for the record of what a Run imported before, 12/5.25 before
 //  that), interact 5/2.5 (the same design, measured), in KiB)
+// (agent 50,581 / 17,299 B: Nov 18 2026, what an agent creates (the created record, the bar's Open), its measurement with
+//  the board page's forward merged + 64; was 49,666 / 16,943)
+// (agent 50,816 / 17,368 B: Nov 18 2026, the check before a created notebook runs by itself (mayRunCreated), its
+//  measurement with the board page's forward merged + 64)
+// (agent 51,193 / 17,561 B: Nov 19 2026, workspace_create's description of a notebook's language, its measurement in CI
+//  at 1055da1d + 64)
+// (agent 51,283 / 17,591 B: Nov 19 2026, a non-reload record discarded, said as not a reload: measured 51,219 / 17,527
+//  on master 25de21b2 with it, + 64)
+// (agent 51,671 / 17,686 B: Nov 19 2026, Connect's one field for the agent's link (readConnect), its measurement +
+//  64; was 50,816 / 17,368, measured 50,767 / 17,305 on master 35e6a6d0)
+// (agent 52,033 / 17,878 B: the two above together, measured on their merge (master 25de21b2): 51,969 / 17,814, + 64)
+// (agent 52,123 / 17,908 B: Nov 19 2026, the non-reload record discarded with Connect's one field, measured on their
+//  merge (master 0c4267c5): 52,059 / 17,844, + 64)
+// (agent 54,145 / 18,691 B: Nov 19 2026, the answers' entry with its page's address (url): 54,081 / 18,627 measured
+//  on master 4bcbb434 with it, + 64)
+// (agent 53,214 / 18,327 B: Nov 19 2026, the agent's bar docked in the page's own row, with the one-link change merged
+//  on master 25de21b2: 53,150 / 18,263 measured + 64)
+// (agent 53,304 / 18,358 B: Nov 19 2026, the reload record's handling with the bar docked, master 4bcbb434: 53,240 /
+//  18,294 measured + 64)
+// (agent 53,887 / 18,520 B: Nov 19 2026, the reload record's handling on master aadff4d0: 53,823 / 18,456 measured + 64)
+// (agent 54,819 / 18,896 B: Nov 19 2026, the reload record's handling on master 3c4319ba: 54,755 / 18,832 measured + 64)
+// (agent 56,431 / 19,403 B: Nov 19 2026, the reload record's handling on master a3f1e30b: 56,367 / 19,339 measured + 64)
+// (agent 62,408 / 21,455 B: Nov 20 2026, the agent's bar as a compact chip with its menu (keyboard, focus kept across
+//  updates, controls only for the pairing shown): 62,344 / 21,391 measured with bun 1.4.4 and node 24.21.0, + 64; was
+//  57,557 / 19,786)
 // (tools 16,546 / 6,950 B: Nov 11 2026: latex_build's own code moved here out
 //  of the eager group, its landing measurement + 64; was 16/6 KiB)
 // (tools 17,335 / 7,231 B: renewed at the landing merge on master 14279164, 17,271 / 7,167 measured + 64; its +777 / +286
 //  over 16,494 / 6,881 is inherited from a shared check's and the tools' changes)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [49666, 16943], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [3853, 2021] };
+// (the examples' chunk, EXAMPLES, gone with the editor's own list of examples: the gallery's panel is the only one)
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [68867, 23606], TOOLS: [17758, 7432], PRESENT: [16384, 6144], DOC: [3584, 1792], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [3853, 2021], HL: [4474, 2419] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- which build is measured: only the shipped LaTeX build (version.json's latexMode "shipped"); anything else is a
@@ -125,9 +153,11 @@ check(mode.ok, "this build is the shipped LaTeX build (web/dist/version.json: la
 if (!existsSync(join(web, "dist", "sagebrush-latex.js"))) check(false, "web/dist has the LaTeX editor's bundle (build it first: bun web/build.ts)");
 else if (mode.ok) {
   const g = latexGroup(files(web));
-  for (const c of latexLazy(files(web))) check(c.present && c.ok, `this build's ${c.label} within ${c.cap.raw} B raw and ${c.cap.gzip} B gzip`, c.present ? { raw: c.raw, gzip: c.gzip, room: { raw: c.cap.raw - c.raw, gzip: c.cap.gzip - c.gzip } } : { missing: c.name });
+  const lazyRows = latexLazy(files(web));
+  for (const c of lazyRows) check(c.present && c.ok, `this build's ${c.label} within ${c.cap.raw} B raw and ${c.cap.gzip} B gzip`, c.present ? { raw: c.raw, gzip: c.gzip, room: { raw: c.cap.raw - c.raw, gzip: c.cap.gzip - c.gzip } } : { missing: c.name });
   check(g.ok, `this build's LaTeX group within ${LATEX_CAPS.raw} B raw and ${LATEX_CAPS.gzip} B gzip (scripts/latex-group.mjs)`,
     { files: g.js, raw: g.raw, gzip: g.gzip, room: { raw: LATEX_CAPS.raw - g.raw, gzip: LATEX_CAPS.gzip - g.gzip }, node: process.version, zlib: process.versions.zlib });
+  latexReport = { group: { ...g, cap: LATEX_CAPS }, lazy: lazyRows };
   // (the site serves every one of them: web/build.ts copies the LaTeX editor's files to web/site/public by name, and
   //  one left off that list is a 404 on sagebrush.space only; as web/site-dir.mts decides the site)
   const site = join(web, "site", "public");
@@ -168,11 +198,17 @@ else {
     writeFileSync(join(dir, "files.txt"), f + "\n");
     const r = spawnSync(process.execPath, [join(root, "scripts", "ci-paths.mjs")], { encoding: "utf8", cwd: root,
       env: { ...process.env, CI_PATHS_FILES: join(dir, "files.txt"), GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: "" } });
-    return r.status !== 0 || !/^full=true$/m.test(r.stdout);
+    if (r.status !== 0 || !/^full=true$/m.test(r.stdout)) return true;
+    // (and under PR CI light, which turns the full tier off, it still keeps web-artifacts: latex_budget)
+    const light = spawnSync(process.execPath, [join(root, "scripts", "ci-paths.mjs")], { encoding: "utf8", cwd: root,
+      env: { ...process.env, CI_PATHS_FILES: join(dir, "files.txt"), GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: "", CI_PR_LIGHT: "true" } });
+    return light.status !== 0 || !/^latex_budget=true$/m.test(light.stdout);
   });
   rmSync(dir, { recursive: true, force: true });
-  check(inputs.length > 0 && notFull.length === 0, `each of the LaTeX bundles' ${inputs.length} inputs selects the full tier (scripts/ci-paths.mjs)`, { notFull });
+  check(inputs.length > 0 && notFull.length === 0, `each of the LaTeX bundles' ${inputs.length} inputs selects the full tier, and web-artifacts under PR CI light (scripts/ci-paths.mjs)`, { notFull });
 }
 
+const status = fails.length ? 1 : 0;
+if (latexReport) safelyAppendPullRequestSummary(() => latexAdvice(latexReport.group, latexReport.lazy));
 console.log(fails.length ? `FAIL: the LaTeX group's budget, ${fails.length} of ${checks}:\n  ${fails.join("\n  ")}` : `ok: the LaTeX group's budget, ${checks} checks`);
-process.exit(fails.length ? 1 : 0);
+process.exit(status);

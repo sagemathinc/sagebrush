@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { cleanDoc, pageCount, pageView } from "./doc.ts";
 import { boardFromText, fromMermaid, mermaidBlocks, toMermaid, toMermaidMarkdown } from "./mermaid.ts";
 // (the example boards are the corpus's, examples/board/<slug>/: file name -> path)
-import { boardFiles } from "../examples/legacy.ts";
+import { boardFiles } from "../examples/boards.ts";
 const EXAMPLES = new Map(boardFiles());
 
 const fails = [];

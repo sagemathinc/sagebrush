@@ -60,7 +60,7 @@ EXAMPLES::
     Hilbert modular forms of dimension 20, level 31 (of norm 961=31^2) over QQ(sqrt(5))
 """
 
-from sagebrush._engine import call as _call
+from _sagebrush_lib._engine import call as _call
 from _sage_lang import _CallableInt
 
 

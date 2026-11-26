@@ -63,7 +63,7 @@ const shareBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOK
 const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 1 << 30 } };
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
 const mf = new Miniflare(convertV4MiniflareOptions({
-  workers: [{ ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: async () => Response.json(plan), ratelimits: { SYNC_PREAUTH: { namespace_id: "4001", simple: { limit: 1_000_000, period: 60 } }, SYNC_AGENT_FAIL: { namespace_id: "4002", simple: { limit: 1_000_000, period: 60 } } } }],
+  workers: [{ ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: async () => Response.json(plan), ratelimits: { SYNC_PREAUTH: { namespace_id: "4001", simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "84001", simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "94001", simple: { limit: 1_000_000, period: 60 } }, SYNC_AGENT_FAIL: { namespace_id: "4002", simple: { limit: 1_000_000, period: 60 } } } }],
 }));
 {
   const db = await mf.getD1Database("SHARE_DB", "on");
@@ -131,7 +131,7 @@ async function socket(s, device) {
       }, 5000);
     });
   };
-  ws.send(JSON.stringify({ t: "hello", v: 2, device, name: "test", index_after: 0 }));
+  ws.send(JSON.stringify({ t: "hello", v: 3, device, name: "test", index_after: 0 }));
   await next((m) => m.t === "welcome");
   await next((m) => m.t === "index");
   let req = 0, dseq = 0;

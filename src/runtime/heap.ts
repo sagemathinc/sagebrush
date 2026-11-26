@@ -29,11 +29,26 @@ function oldSpaceFlag(): number | null {
 // getHeapStatistics takes about 12 ms a call, so reading it at every
 // conversion of a big int made micropython's int_big_div time out there)
 let cached = 0;
+/** The memory the host gives this interpreter, in bytes, where it says so: the desktop app's engine does
+ * (app/engine/thread.mjs, its heap's old generation exactly: all of the computer's memory); null elsewhere. */
+export function hostMemory(g: any = globalThis): number | null {
+  const n = g.__SAGEBRUSH_MEMORY__;
+  return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
+}
+/** Whether this interpreter runs on the person's own computer, with no browser tab's limits: in the desktop app's
+ * engine (hostMemory) or in the CLI, on Node itself (not Bun or Deno, whose runs here are the conformance tests'). */
+export function nativeHost(g: any = globalThis): boolean {
+  if (hostMemory(g) !== null) return true;
+  const p = g.process;
+  return !!p?.versions?.node && typeof p.getBuiltinModule === "function" && !p.versions.bun && !p.versions.deno;
+}
 export function heapLimit(): number {
   return (cached ||= readHeapLimit());
 }
 function readHeapLimit(): number {
   const g: any = globalThis;
+  const host = hostMemory();
+  if (host !== null) return host;
   const flag = oldSpaceFlag();
   if (flag !== null) return flag;
   let n: any = null;

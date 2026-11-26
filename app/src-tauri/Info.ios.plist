@@ -3,7 +3,7 @@
 <!-- Merged by the Tauri CLI into the iOS app's Info.plist when it builds
      (gen/apple stays exactly as `cargo tauri ios init` generated it):
      - NSAllowsLocalNetworking: the page is served by the app itself from
-       http://127.0.0.1 (the localhost plugin, lib.rs), which App Transport
+       http://127.0.0.1 (lib.rs serve_page), which App Transport
        Security blocks otherwise;
      - UIFileSharingEnabled + LSSupportsOpeningDocumentsInPlace: the app's
        Documents (where notebooks are saved) shows in the Files app.

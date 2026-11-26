@@ -1,0 +1,118 @@
+== series.apply-int
+
+a    10
+b    20
+c    30
+Name: n, dtype: int64
+== series.apply-float
+
+a    0.5
+b    1.0
+c    1.5
+Name: n, dtype: float64
+== series.apply-bool
+
+a    False
+b     True
+c     True
+Name: n, dtype: bool
+== series.apply-str
+
+a    v1
+b    v2
+c    v3
+Name: n, dtype: str
+== series.apply-nan
+
+0    3.0
+1    NaN
+2   -4.0
+dtype: float64
+== series.apply-str-col
+
+0    6
+1    9
+2    6
+Name: species, dtype: int64
+== series.apply-str-upper
+
+0       SETOSA
+1    VIRGINICA
+2       SETOSA
+Name: species, dtype: str
+== series.apply-builtin
+
+0    1.5
+1    NaN
+2    2.0
+dtype: float64
+== series.apply-to-none
+
+a    None
+b    None
+c    None
+Name: n, dtype: object
+== series.apply-raises
+!! ZeroDivisionError: division by zero
+== series.apply-empty
+
+Series([], dtype: float64)
+== frame.apply-sum
+
+a     6.0
+b    15.5
+dtype: float64
+== frame.apply-max
+
+a    3.0
+b    6.0
+dtype: float64
+== frame.apply-rows
+
+x    5.0
+y    7.5
+z    9.0
+dtype: float64
+== frame.apply-rows-columns
+
+x    2.0
+y    4.0
+z    6.0
+dtype: float64
+== frame.apply-series-result
+
+   a    b
+z  3  6.0
+y  2  5.5
+x  1  4.0
+== frame.apply-str-cols
+
+0       a
+1    bbbb
+dtype: str
+== unique.int
+('ndarray', [3, 1, 2], (3,))
+== unique.float-nan
+('ndarray', [2.5, nan, 1.0], (3,))
+== unique.bool
+('ndarray', [True, False], (2,))
+== unique.str
+(['setosa', 'virginica'], (2,))
+== unique.empty
+('ndarray', [], (0,))
+== unique.order
+('ndarray', [10, 2, 7, 3], (4,))
+== unique.neg-zero
+('ndarray', [0.0, 1.0], (2,))
+== to_numpy.str-series
+(['setosa', 'virginica', 'setosa'], (3,))
+== to_numpy.str-values
+(['setosa', 'virginica', 'setosa'], (3,))
+== to_numpy.str-frame
+([['a', 'cc'], ['b', 'd']], (2, 2))
+== to_numpy.str-frame-values
+([['a'], ['b']], (2, 1))
+== to_numpy.numeric-unchanged
+('ndarray', [[1.0, 4.0], [2.0, 5.5], [3.0, 6.0]], (3, 2))
+== to_numpy.after-astype-str
+([['1', '4.0'], ['2', '5.5'], ['3', '6.0']], (3, 2))

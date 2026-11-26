@@ -7,7 +7,7 @@ The app's page (the notebook) has its own notices, THIRD-PARTY-NOTICES.txt besid
 
 == Derived code and data ==
 
-== Rust crates compiled into the app (403) ==
+== Rust crates compiled into the app (404) ==
 
 Sagebrush's own crates: sagebrush-app. The list includes dependencies on every platform and those used only while compiling (procedural macros), so it covers more than any one build contains.
 
@@ -261,6 +261,8 @@ schemars 0.9.0: MIT
 schemars 1.2.2: MIT
 schemars_derive 0.8.22: MIT
 scopeguard 1.2.0: MIT OR Apache-2.0
+security-framework 3.7.0: MIT OR Apache-2.0
+security-framework-sys 2.17.0: MIT OR Apache-2.0
 selectors 0.38.0: MPL-2.0 [no license file in the crate: the standard text] [MPL-2.0: unmodified; its source is at https://crates.io/crates/selectors/0.38.0]
 semver 1.0.28: MIT OR Apache-2.0
 serde 1.0.229: MIT OR Apache-2.0
@@ -302,7 +304,6 @@ tauri-codegen 2.7.1: Apache-2.0 OR MIT
 tauri-macros 2.7.1: Apache-2.0 OR MIT
 tauri-plugin-dialog 2.8.1: Apache-2.0 OR MIT
 tauri-plugin-fs 2.6.0: Apache-2.0 OR MIT
-tauri-plugin-localhost 2.4.0: Apache-2.0 OR MIT
 tauri-runtime 2.12.1: Apache-2.0 OR MIT
 tauri-runtime-wry 2.12.1: Apache-2.0 OR MIT
 tauri-utils 2.10.1: Apache-2.0 OR MIT
@@ -1263,7 +1264,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------
-Used by: atomic-waker 1.1.2 (LICENSE-APACHE), base64 0.21.7 (LICENSE-APACHE), base64 0.22.1 (LICENSE-APACHE), base64 0.23.1 (LICENSE-APACHE), bitflags 1.3.2 (LICENSE-APACHE), bitflags 2.13.2 (LICENSE-APACHE), bs58 0.5.1 (LICENSE-APACHE), bumpalo 3.20.3 (LICENSE-APACHE), camino 1.2.6 (LICENSE-APACHE), cfg-if 1.0.5 (LICENSE-APACHE), chunked_transfer 1.5.0 (LICENSE-APACHE), core-foundation 0.10.1 (LICENSE-APACHE), core-foundation-sys 0.8.7 (LICENSE-APACHE), core-graphics 0.25.0 (LICENSE-APACHE), core-graphics-types 0.2.0 (LICENSE-APACHE), crossbeam-channel 0.5.17 (LICENSE-APACHE), crossbeam-utils 0.8.23 (LICENSE-APACHE), displaydoc 0.2.7 (LICENSE-APACHE), equivalent 1.0.2 (LICENSE-APACHE), fastrand 2.5.0 (LICENSE-APACHE), flate2 1.1.10 (LICENSE-APACHE), fnv 1.0.7 (LICENSE-APACHE), form_urlencoded 1.2.2 (LICENSE-APACHE), glob 0.3.4 (LICENSE-APACHE), hashbrown 0.12.3 (LICENSE-APACHE), hashbrown 0.17.1 (LICENSE-APACHE), heck 0.4.1 (LICENSE-APACHE), heck 0.5.0 (LICENSE-APACHE), html5ever 0.39.0 (LICENSE-APACHE), httparse 1.10.1 (LICENSE-APACHE), idna 1.1.0 (LICENSE-APACHE), idna_adapter 1.2.2 (LICENSE-APACHE), indexmap 1.9.3 (LICENSE-APACHE), indexmap 2.14.2 (LICENSE-APACHE), jni 0.21.1 (LICENSE-APACHE), js-sys 0.3.106 (LICENSE-APACHE), keyboard-types 0.8.3 (LICENSE-APACHE), libappindicator 0.9.0 (LICENSE-APACHE), lock_api 0.4.14 (LICENSE-APACHE), log 0.4.34 (LICENSE-APACHE), markup5ever 0.39.0 (LICENSE-APACHE), mime 0.3.17 (LICENSE-APACHE), muda 0.20.0 (LICENSE-APACHE), num-traits 0.2.19 (LICENSE-APACHE), once_cell 1.21.4 (LICENSE-APACHE), parking_lot 0.12.5 (LICENSE-APACHE), parking_lot_core 0.9.12 (LICENSE-APACHE), percent-encoding 2.3.2 (LICENSE-APACHE), png 0.17.16 (LICENSE-APACHE), png 0.18.1 (LICENSE-APACHE), regex 1.13.1 (LICENSE-APACHE), regex-automata 0.4.18 (LICENSE-APACHE), regex-syntax 0.8.11 (LICENSE-APACHE), scopeguard 1.2.0 (LICENSE-APACHE), serde_with 3.24.0 (LICENSE-APACHE), serde_with_macros 3.24.0 (LICENSE-APACHE), servo_arc 0.4.3 (LICENSE-APACHE), smallvec 1.16.2 (LICENSE-APACHE), socket2 0.6.5 (LICENSE-APACHE), stable_deref_trait 1.2.1 (LICENSE-APACHE), string_cache 0.9.0 (LICENSE-APACHE), syn 1.0.109 (LICENSE-APACHE), tao-macros 0.1.4 (LICENSE-APACHE), tendril 0.5.1 (LICENSE-APACHE), tiny_http 0.12.0 (LICENSE-APACHE), toml_datetime 0.6.3 (LICENSE-APACHE), tray-icon 0.25.1 (LICENSE-APACHE), unicode-segmentation 1.13.3 (LICENSE-APACHE), url 2.5.8 (LICENSE-APACHE), uuid 1.27.0 (LICENSE-APACHE), wasi 0.11.1+wasi-snapshot-preview1 (LICENSE-APACHE), wasip2 1.0.4+wasi-0.2.12 (LICENSE-APACHE), wasm-bindgen 0.2.129 (LICENSE-APACHE), wasm-bindgen-futures 0.4.79 (LICENSE-APACHE), wasm-bindgen-macro 0.2.129 (LICENSE-APACHE), wasm-bindgen-macro-support 0.2.129 (LICENSE-APACHE), wasm-bindgen-shared 0.2.129 (LICENSE-APACHE), web_atoms 0.2.6 (LICENSE-APACHE), web-sys 0.3.106 (LICENSE-APACHE), window-vibrancy 0.8.1 (LICENSE-APACHE), wit-bindgen 0.57.1 (LICENSE-APACHE), wry 0.57.0 (LICENSE-APACHE)
+Used by: atomic-waker 1.1.2 (LICENSE-APACHE), base64 0.21.7 (LICENSE-APACHE), base64 0.22.1 (LICENSE-APACHE), base64 0.23.1 (LICENSE-APACHE), bitflags 1.3.2 (LICENSE-APACHE), bitflags 2.13.2 (LICENSE-APACHE), bs58 0.5.1 (LICENSE-APACHE), bumpalo 3.20.3 (LICENSE-APACHE), camino 1.2.6 (LICENSE-APACHE), cfg-if 1.0.5 (LICENSE-APACHE), chunked_transfer 1.5.0 (LICENSE-APACHE), core-foundation 0.10.1 (LICENSE-APACHE), core-foundation-sys 0.8.7 (LICENSE-APACHE), core-graphics 0.25.0 (LICENSE-APACHE), core-graphics-types 0.2.0 (LICENSE-APACHE), crossbeam-channel 0.5.17 (LICENSE-APACHE), crossbeam-utils 0.8.23 (LICENSE-APACHE), displaydoc 0.2.7 (LICENSE-APACHE), equivalent 1.0.2 (LICENSE-APACHE), fastrand 2.5.0 (LICENSE-APACHE), flate2 1.1.10 (LICENSE-APACHE), fnv 1.0.7 (LICENSE-APACHE), form_urlencoded 1.2.2 (LICENSE-APACHE), glob 0.3.4 (LICENSE-APACHE), hashbrown 0.12.3 (LICENSE-APACHE), hashbrown 0.17.1 (LICENSE-APACHE), heck 0.4.1 (LICENSE-APACHE), heck 0.5.0 (LICENSE-APACHE), html5ever 0.39.0 (LICENSE-APACHE), httparse 1.10.1 (LICENSE-APACHE), idna 1.1.0 (LICENSE-APACHE), idna_adapter 1.2.2 (LICENSE-APACHE), indexmap 1.9.3 (LICENSE-APACHE), indexmap 2.14.2 (LICENSE-APACHE), jni 0.21.1 (LICENSE-APACHE), js-sys 0.3.106 (LICENSE-APACHE), keyboard-types 0.8.3 (LICENSE-APACHE), libappindicator 0.9.0 (LICENSE-APACHE), lock_api 0.4.14 (LICENSE-APACHE), log 0.4.34 (LICENSE-APACHE), markup5ever 0.39.0 (LICENSE-APACHE), mime 0.3.17 (LICENSE-APACHE), muda 0.20.0 (LICENSE-APACHE), num-traits 0.2.19 (LICENSE-APACHE), once_cell 1.21.4 (LICENSE-APACHE), parking_lot 0.12.5 (LICENSE-APACHE), parking_lot_core 0.9.12 (LICENSE-APACHE), percent-encoding 2.3.2 (LICENSE-APACHE), png 0.17.16 (LICENSE-APACHE), png 0.18.1 (LICENSE-APACHE), regex 1.13.1 (LICENSE-APACHE), regex-automata 0.4.18 (LICENSE-APACHE), regex-syntax 0.8.11 (LICENSE-APACHE), scopeguard 1.2.0 (LICENSE-APACHE), security-framework 3.7.0 (LICENSE-APACHE), security-framework-sys 2.17.0 (LICENSE-APACHE), serde_with 3.24.0 (LICENSE-APACHE), serde_with_macros 3.24.0 (LICENSE-APACHE), servo_arc 0.4.3 (LICENSE-APACHE), smallvec 1.16.2 (LICENSE-APACHE), socket2 0.6.5 (LICENSE-APACHE), stable_deref_trait 1.2.1 (LICENSE-APACHE), string_cache 0.9.0 (LICENSE-APACHE), syn 1.0.109 (LICENSE-APACHE), tao-macros 0.1.4 (LICENSE-APACHE), tendril 0.5.1 (LICENSE-APACHE), tiny_http 0.12.0 (LICENSE-APACHE), toml_datetime 0.6.3 (LICENSE-APACHE), tray-icon 0.25.1 (LICENSE-APACHE), unicode-segmentation 1.13.3 (LICENSE-APACHE), url 2.5.8 (LICENSE-APACHE), uuid 1.27.0 (LICENSE-APACHE), wasi 0.11.1+wasi-snapshot-preview1 (LICENSE-APACHE), wasip2 1.0.4+wasi-0.2.12 (LICENSE-APACHE), wasm-bindgen 0.2.129 (LICENSE-APACHE), wasm-bindgen-futures 0.4.79 (LICENSE-APACHE), wasm-bindgen-macro 0.2.129 (LICENSE-APACHE), wasm-bindgen-macro-support 0.2.129 (LICENSE-APACHE), wasm-bindgen-shared 0.2.129 (LICENSE-APACHE), web_atoms 0.2.6 (LICENSE-APACHE), web-sys 0.3.106 (LICENSE-APACHE), window-vibrancy 0.8.1 (LICENSE-APACHE), wit-bindgen 0.57.1 (LICENSE-APACHE), wry 0.57.0 (LICENSE-APACHE)
 ------------------------------------------------------------------------
 
 Apache License
@@ -6390,7 +6391,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------
-Used by: fdeflate 0.3.7 (LICENSE-APACHE), field-offset 0.3.6 (LICENSE-APACHE), miniz_oxide 0.8.9 (LICENSE-APACHE.md), miniz_oxide 0.9.1 (LICENSE-APACHE.md), num-conv 0.2.2 (LICENSE-Apache), pin-project-lite 0.2.17 (LICENSE-APACHE), portable-atomic 1.15.0 (LICENSE-APACHE), portable-atomic-util 0.2.8 (LICENSE-APACHE), raw-window-handle 0.6.2 (LICENSE-APACHE.md), sync_wrapper 1.0.2 (LICENSE), tauri 2.12.1 (LICENSE-APACHE-2.0), tauri-codegen 2.7.1 (LICENSE-APACHE-2.0), tauri-macros 2.7.1 (LICENSE-APACHE-2.0), tauri-plugin-dialog 2.8.1 (LICENSE_APACHE-2.0), tauri-plugin-fs 2.6.0 (LICENSE_APACHE-2.0), tauri-plugin-localhost 2.4.0 (LICENSE_APACHE-2.0), tauri-runtime 2.12.1 (LICENSE-APACHE-2.0), tauri-runtime-wry 2.12.1 (LICENSE-APACHE-2.0), tauri-utils 2.10.1 (LICENSE-APACHE-2.0), time 0.3.55 (LICENSE-Apache), time-core 0.1.9 (LICENSE-Apache), time-macros 0.2.32 (LICENSE-Apache)
+Used by: fdeflate 0.3.7 (LICENSE-APACHE), field-offset 0.3.6 (LICENSE-APACHE), miniz_oxide 0.8.9 (LICENSE-APACHE.md), miniz_oxide 0.9.1 (LICENSE-APACHE.md), num-conv 0.2.2 (LICENSE-Apache), pin-project-lite 0.2.17 (LICENSE-APACHE), portable-atomic 1.15.0 (LICENSE-APACHE), portable-atomic-util 0.2.8 (LICENSE-APACHE), raw-window-handle 0.6.2 (LICENSE-APACHE.md), sync_wrapper 1.0.2 (LICENSE), tauri 2.12.1 (LICENSE-APACHE-2.0), tauri-codegen 2.7.1 (LICENSE-APACHE-2.0), tauri-macros 2.7.1 (LICENSE-APACHE-2.0), tauri-plugin-dialog 2.8.1 (LICENSE_APACHE-2.0), tauri-plugin-fs 2.6.0 (LICENSE_APACHE-2.0), tauri-runtime 2.12.1 (LICENSE-APACHE-2.0), tauri-runtime-wry 2.12.1 (LICENSE-APACHE-2.0), tauri-utils 2.10.1 (LICENSE-APACHE-2.0), time 0.3.55 (LICENSE-Apache), time-core 0.1.9 (LICENSE-Apache), time-macros 0.2.32 (LICENSE-Apache)
 ------------------------------------------------------------------------
 
 Apache License
@@ -10985,6 +10986,31 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------
+Used by: security-framework 3.7.0 (LICENSE-MIT), security-framework-sys 2.17.0 (LICENSE-MIT)
+------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) 2015 Steven Fackler
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------
 Used by: serde_spanned 0.6.9 (LICENSE-MIT), serde_spanned 1.1.1 (LICENSE-MIT), toml 1.1.6+spec-1.1.0 (LICENSE-MIT), toml_datetime 1.1.1+spec-1.1.0 (LICENSE-MIT), toml_edit 0.19.15 (LICENSE-MIT), toml_edit 0.20.2 (LICENSE-MIT), toml_edit 0.25.15+spec-1.1.0 (LICENSE-MIT), toml_parser 1.1.3+spec-1.1.0 (LICENSE-MIT), toml_writer 1.1.2+spec-1.1.0 (LICENSE-MIT)
 ------------------------------------------------------------------------
 
@@ -11798,7 +11824,7 @@ PackageDownloadLocation: git+ssh://github.com/tauri-apps/tao.git
 Creator: Person: Daniel Thompson-Yvetot
 
 ------------------------------------------------------------------------
-Used by: tauri 2.12.1 (LICENSE-MIT), tauri-codegen 2.7.1 (LICENSE-MIT), tauri-macros 2.7.1 (LICENSE-MIT), tauri-plugin-dialog 2.8.1 (LICENSE_MIT), tauri-plugin-fs 2.6.0 (LICENSE_MIT), tauri-plugin-localhost 2.4.0 (LICENSE_MIT), tauri-runtime 2.12.1 (LICENSE-MIT), tauri-runtime-wry 2.12.1 (LICENSE-MIT), tauri-utils 2.10.1 (LICENSE-MIT)
+Used by: tauri 2.12.1 (LICENSE-MIT), tauri-codegen 2.7.1 (LICENSE-MIT), tauri-macros 2.7.1 (LICENSE-MIT), tauri-plugin-dialog 2.8.1 (LICENSE_MIT), tauri-plugin-fs 2.6.0 (LICENSE_MIT), tauri-runtime 2.12.1 (LICENSE-MIT), tauri-runtime-wry 2.12.1 (LICENSE-MIT), tauri-utils 2.10.1 (LICENSE-MIT)
 ------------------------------------------------------------------------
 
 MIT License
@@ -11824,7 +11850,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------
-Used by: tauri-plugin-dialog 2.8.1 (LICENSE.spdx), tauri-plugin-fs 2.6.0 (LICENSE.spdx), tauri-plugin-localhost 2.4.0 (LICENSE.spdx)
+Used by: tauri-plugin-dialog 2.8.1 (LICENSE.spdx), tauri-plugin-fs 2.6.0 (LICENSE.spdx)
 ------------------------------------------------------------------------
 
 SPDXVersion: SPDX-2.1

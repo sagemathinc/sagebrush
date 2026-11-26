@@ -1,0 +1,204 @@
+== take
+
+    a    b    c
+30  3  NaN  2.0
+10  1    x  0.5
+== take-negative
+
+    a    b    c
+30  3  NaN  2.0
+== take-array
+
+    a  b    c
+20  2  y  NaN
+20  2  y  NaN
+10  1  x  0.5
+== take-columns
+
+      b
+10    x
+20    y
+30  NaN
+== take-columns-negative
+
+      c  a
+10  0.5  1
+20  NaN  2
+30  2.0  3
+== take-out-of-bounds
+!! IndexError: indices are out-of-bounds
+== take-out-of-bounds-negative
+!! IndexError: indices are out-of-bounds
+== take-float
+
+    a  b    c
+10  1  x  0.5
+== take-empty
+
+Empty DataFrame
+Columns: [a, b, c]
+Index: []
+== take-scalar
+'raises TypeError'
+== take-scalar-bool
+'raises TypeError'
+== take-scalar-np-int
+'raises TypeError'
+== take-frame-scalar
+'raises TypeError'
+== take-none
+!! TypeError: int() argument must be a string, a bytes-like object or a real number, not 'NoneType'
+== take-nan
+!! ValueError: cannot convert float NaN to integer
+== take-str
+!! ValueError: invalid literal for int() with base 10: 'a'
+== take-tuple
+
+p    1.5
+q    NaN
+Name: v, dtype: float64
+== take-range-index
+RangeIndex(start=3, stop=-1, step=-2)
+== take-series
+
+q    NaN
+p    1.5
+Name: v, dtype: float64
+== take-series-axis
+!! ValueError: No axis named 1 for object type Series
+== take-original-kept
+
+    a    b    c
+10  1    x  0.5
+20  2    y  NaN
+30  3  NaN  2.0
+== any
+np.True_
+== any-empty
+np.False_
+== all-empty
+np.True_
+== all-nan-skipped
+np.True_
+== all-nan-kept
+np.True_
+== any-nan-only
+np.False_
+== any-nan-only-kept
+np.True_
+== any-zeros
+np.False_
+== all-ints
+np.True_
+== any-str
+np.True_
+== all-str
+np.False_
+== all-str-missing
+np.True_
+== any-float32
+np.True_
+== any-object-none-kept
+np.False_
+== all-object-none-kept
+np.False_
+== all-object-str-none-kept
+np.False_
+== all-object-nan-kept
+np.True_
+== any-object-nan-kept
+np.True_
+== all-object-none-skipped
+np.True_
+== all-object-zero-none-kept
+np.False_
+== all-str-missing-kept
+np.True_
+== frame-all-none-nan-kept
+
+o    False
+n     True
+dtype: bool
+== frame-any-none-nan-kept
+
+o    True
+n    True
+dtype: bool
+== frame-any
+
+a    True
+b    True
+c    True
+dtype: bool
+== frame-all
+
+a    True
+b    True
+c    True
+dtype: bool
+== frame-all-numbers
+
+a    True
+c    True
+dtype: bool
+== frame-any-bool-only
+
+f    False
+t     True
+dtype: bool
+== frame-any.dtype
+dtype('bool')
+== index-to_numpy
+('int64', [1, 2], (2,))
+== index-to_numpy-float
+('float64', [1.5, 2.0], (2,))
+== index-to_numpy-range
+('int64', [0, 1, 2], (3,))
+== index-to_numpy-dtype
+('float32', [1.0, 2.0], (2,))
+== index-asarray
+('float64', [1.5, 2.0], (2,))
+== index-asarray-range
+('int64', [0, 1, 2], (3,))
+== index-asarray-columns-int
+('int64', [0, 1], (2,))
+== index-astype-float
+Index([1.0, 2.0], dtype='float64')
+== index-astype-str
+Index(['1', '2'], dtype='str', name='n')
+== index-astype-int
+Index([1, 2], dtype='int64')
+== index-astype-range
+Index([0.0, 1.0, 2.0], dtype='float64')
+== cv-results
+
+   mean_fit_time               params  ...  mean_test_score  rank_test_score
+0          0.010     {'max_depth': 2}  ...             0.90                3
+1          0.020     {'max_depth': 3}  ...             0.95                1
+2          0.015  {'max_depth': None}  ...             0.93                2
+
+[3 rows x 5 columns]
+== cv-results.dtypes
+[('mean_fit_time', 'float64'), ('params', 'object'), ('param_max_depth', 'float64'), ('mean_test_score', 'float64'), ('rank_test_score', 'int64')]
+== cv-results-sorted
+
+   param_max_depth  mean_test_score
+1              3.0             0.95
+2              NaN             0.93
+0              2.0             0.90
+== cross-validate-mean
+
+fit_time      0.15
+test_score    0.85
+dtype: float64
+== importances
+
+alcohol    0.5
+hue        0.3
+ash        0.2
+dtype: float64
+== importances-head
+
+ash    0.2
+hue    0.3
+dtype: float64

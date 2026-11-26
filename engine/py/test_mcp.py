@@ -249,8 +249,12 @@ def structured():
         call("number_field", {"polynomial": bad}, "invalid_arguments")
     for bad in ["23; __sagebrush_data__ = {}", "23.5", "1e3", None]:
         call("newforms", {"level": bad}, "invalid_arguments")
-    # (rational coefficients parse, and the engine refuses them: integral only)
-    assert "integer coefficients" in call("number_field", {"polynomial": "x^2/4 + 23/4"}, "unimplemented")["error"]["message"]
+    # (rational coefficients parse, and the field is the one of the polynomial made monic and integral: x^2/4 + 23/4
+    # keeps its polynomial and has x^2 + 23's invariants)
+    rq = call("number_field", {"polynomial": "x^2/4 + 23/4"})["result"]
+    rz = call("number_field", {"polynomial": "x^2 + 23"})["result"]
+    assert rq["polynomial"] == "1/4*x^2 + 23/4" and (rq["degree"], rq["signature"], rq["discriminant"]) == (2, [0, 1], {"value": "-23", "certified": True, "assumes": []}), rq
+    assert {k: v for k, v in rq.items() if k != "polynomial"} == {k: v for k, v in rz.items() if k != "polynomial"}, (rq, rz)
     # ... and user code cannot reach the shortcut tools' session: a patched
     # is_prime in the sage tool's session leaves factor's status honest
     call("sage", {"code": "import sagebrush.sage as S\nS.is_prime = lambda *a, **k: True\nS.is_prime(2^127 - 1, proof=True)"})
@@ -436,8 +440,129 @@ def full_rows():
     print("full rows: ok")
 
 
+def warm_up():
+    """The warm-up at start: one owned child importing what a session's worker imports, in a background thread; off
+    with SAGEBRUSH_MCP_WARM_UP=0; no failure escapes (not even the thread's); a child past WARM_UP_S is ended; stop()
+    ends and reaps it; main() starts it and stops it when serving ends, so no child outlives the server; --version and
+    --help start none"""
+    import subprocess as sp
+    import sagebrush.mcp_server as m
+
+    class Proc:
+        def __init__(self, stuck=False):
+            self.stuck, self.ended, self.signals = stuck, False, []
+
+        def wait(self, timeout=None):
+            if self.stuck and not self.ended:
+                raise sp.TimeoutExpired("warm-up", timeout)
+            return 0
+
+        def poll(self):
+            return 0 if self.ended or not self.stuck else None
+
+        def terminate(self):
+            self.signals.append("TERM")
+            self.ended = True
+
+        def kill(self):
+            self.signals.append("KILL")
+            self.ended = True
+
+    calls = []
+    w = m._warm_up(env={}, popen=lambda argv, **kw: calls.append((argv, kw)) or Proc())
+    w.thread.join(10)
+    assert not w.thread.is_alive() and w.thread.daemon, w
+    assert calls == [([sys.executable, "-c", m.WARM_UP_CODE], {"stdin": sp.DEVNULL, "stdout": sp.DEVNULL, "stderr": sp.DEVNULL})], calls
+    w.stop()  # (after the child ended: nothing to do)
+    for off in ("0", " 0 "):
+        assert m._warm_up(env={"SAGEBRUSH_MCP_WARM_UP": off}, popen=lambda *a, **k: calls.append(a)) is None and len(calls) == 1, calls
+
+    def boom(*a, **k):
+        raise OSError("no such interpreter")
+    w = m._warm_up(env={}, popen=boom)
+    w.thread.join(10)
+    assert not w.thread.is_alive()
+    w.stop()
+    # the thread itself can't be made or started: None, nothing escapes (main goes on to serve)
+    real_thread = m.threading.Thread
+
+    class NoStart(real_thread):
+        def start(self):
+            raise RuntimeError("can't start new thread")
+
+    class NoThread:
+        def __init__(self, *a, **k):
+            raise OSError("no threads")
+    for broken in (NoStart, NoThread):
+        m.threading.Thread = broken
+        try:
+            assert m._warm_up(env={}, popen=lambda *a, **k: Proc()) is None, broken
+        finally:
+            m.threading.Thread = real_thread
+    # a child still running at WARM_UP_S is terminated (killed if it ignores that) and reaped
+    stuck = Proc(stuck=True)
+    w = m._warm_up(env={}, popen=lambda *a, **k: stuck)
+    w.thread.join(10)
+    assert stuck.signals == ["TERM"] and stuck.ended, stuck.signals
+    # stop() before the child starts: it never starts
+    w = m._WarmUp(lambda *a, **k: calls.append("late"))
+    w.stop()
+    w._go()
+    assert "late" not in calls
+    # stop() ends a real running child at once (no WARM_UP_S wait) and reaps it
+    real = []
+    w = m._WarmUp(lambda argv, **kw: real.append(sp.Popen([sys.executable, "-c", "import time; time.sleep(60)"], **kw)) or real[-1])
+    w.thread = m.threading.Thread(target=w._go, daemon=True)
+    w.thread.start()
+    t0 = time.time()
+    while not real and time.time() - t0 < 10:
+        time.sleep(0.01)
+    w.stop()
+    assert real and real[0].poll() is not None and time.time() - t0 < m.WARM_UP_GRACE_S + 5, real
+    # the code it runs imports for real (a misspelt module would make the warm-up silently useless)
+    r = sp.run([sys.executable, "-c", m.WARM_UP_CODE], capture_output=True, text=True, timeout=m.WARM_UP_S)
+    assert r.returncode == 0, r.stderr
+    # main() starts it before serving; --version and --help return first
+    probe = ("import sys, sagebrush.mcp_server as m\n"
+             "m._warm_up = lambda: sys.stderr.write('WARM-UP\\n') and None\n"
+             "m.main()\n")
+    for argv, want in (([], True), (["--version"], False), (["--help"], False)):
+        r = sp.run([sys.executable, "-c", probe] + argv, input="", capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0 and ("WARM-UP" in r.stderr) == want, (argv, r.returncode, r.stderr[-300:])
+    # a real server with a slow warm-up, its input ended at once: it exits promptly and leaves no child behind
+    if os.name == "posix":
+        pidfile = os.path.join(tempfile.mkdtemp(prefix="sb-warm-"), "pid")
+        child = "import os, time; open(%r, 'w').write(str(os.getpid())); time.sleep(60)" % pidfile
+        slow = ("import os, sys, time, sagebrush.mcp_server as m\n"
+                "m.WARM_UP_CODE = %r\n"
+                "real = m._warm_up\n"
+                "def wait_for_child():\n"
+                "    w = real()\n"
+                "    t0 = time.time()\n"
+                "    while not os.path.exists(%r) and time.time() - t0 < 30:\n"
+                "        time.sleep(0.02)\n"
+                "    return w\n"
+                "m._warm_up = wait_for_child\n"
+                "m.main()\n") % (child, pidfile)
+        t0 = time.time()
+        r = sp.run([sys.executable, "-c", slow], input="", capture_output=True, text=True, timeout=60)
+        took = time.time() - t0
+        assert r.returncode == 0 and os.path.exists(pidfile), (r.returncode, r.stderr[-300:])
+        pid = int(open(pidfile).read())
+        try:
+            os.kill(pid, 0)
+            alive = True
+        except ProcessLookupError:
+            alive = False
+        if alive:  # (the failure leaves nothing behind either)
+            import signal
+            os.kill(pid, signal.SIGKILL)
+        assert not alive and took < 30, (pid, alive, took)
+    print("warm-up: ok")
+
 if __name__ == "__main__":
     version()
+    warm_up()
     full_rows()
     raw()
     structured()

@@ -20,9 +20,10 @@ import * as Ty from "./types";
 import { PyComplex } from "./complex";
 import { newBuiltinModule } from "./modules";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, EXP_TABLES, LOG_TABLES, glibcPow, glibcPowf } from "./libm";
-import { gemmBuffers, wasmUnary, wasmSinCos, wasmSort, wasmArgsort } from "./kernels";
+import { gemmBuffers, noRoom, wasmUnary, wasmSinCos, wasmSort, wasmArgsort } from "./kernels";
 import { ND_MATMUL_MIN, ndMatmul, useNd } from "./nd";
 import * as FD from "./fdlibm";
+import { nativeHost } from "./heap";
 import * as CR from "./crmath";
 
 const { T, raise, tuple, typeName, NotImplemented } = Obj;
@@ -226,6 +227,12 @@ const scalarDtype = (w: Weak): DType => w.dt ?? { b: D.bool, i: D.int64, f: D.fl
 
 // ------------------------------------------------------------------ ndarray
 
+// NumPy's NPY_MAXDIMS: no array has more dimensions, each way of making one refusing with its own message
+const MAX_DIMS = 64;
+function tooManyDims(n: number): never {
+  return raise(T.ValueError, `maximum supported dimension for an ndarray is currently ${MAX_DIMS}, found ${n}`) as never;
+}
+
 export class NDArray {
   constructor(
     public dt: DType,
@@ -234,7 +241,9 @@ export class NDArray {
     public strides: number[],
     public offset = 0,
     public base: NDArray | null = null,
-  ) {}
+  ) {
+    if (shape.length > MAX_DIMS) tooManyDims(shape.length);
+  }
   // read-only (broadcast_to's views, and views of them; flags.writeable =
   // False): writes raise
   ro = false;
@@ -280,8 +289,16 @@ const prod = (a: number[]) => a.reduce((x, y) => x * y, 1);
 // overflows. Past intp it is NumPy's own ValueError, as NumPy refuses on any
 // machine; past the caps, NumPy's MemoryError wording (_ArrayMemoryError).
 // (one object, so a test can lower the caps to check the boundary cheaply)
+// The bytes cap is a browser's: the browser byte cap remains 4 GiB; the element cap is this file's own index arithmetic's,
+// everywhere, until that is audited.
 export const ARRAY_LIMITS = { elements: 2 ** 32, bytes: 2 ** 32 };
+// (on the person's own computer, heap.ts nativeHost: the desktop app's engine and the CLI, no byte cap, as in Sage or
+// Magma: code uses the memory the computer has, the operating system the limit; the largest safe
+// integer rather than Infinity, since the admission counts in BigInt)
+if (nativeHost()) ARRAY_LIMITS.bytes = Number.MAX_SAFE_INTEGER;
 export function admitArray(shape: readonly (number | bigint)[], dt: DType, scratch = 0): void {
+  // (NumPy's limit of 64 dimensions first, before any storage is asked for)
+  if (shape.length > MAX_DIMS) tooManyDims(shape.length);
   let n = 1n;
   for (const d of shape) n *= typeof d === "bigint" ? d : BigInt(d);
   const bytes = n * BigInt(dt.itemsize);
@@ -651,6 +668,10 @@ function seqItems(x: any): any[] {
   return Array.isArray(x) ? x : O.toArray(x);
 }
 
+function nestedTooDeep(): never {
+  return raise(T.ValueError, `setting an array element with a sequence. The requested array would exceed the maximum number of dimension of ${MAX_DIMS}.`) as never;
+}
+
 // Shape and dtype of nested Python data. (shapeOnly: a dtype was given, so
 // an element is converted once, by fill, through that dtype's protocol
 // alone, as NumPy's: no other numeric protocol called here first, astra
@@ -658,12 +679,14 @@ function seqItems(x: any): any[] {
 function discover(x: any, depth: number, shape: number[] & { leaf?: number }, kinds: { dt: DType | null }, shapeOnly = false) {
   if (x instanceof NDArray) {
     const s = x.shape;
+    if (depth + s.length > MAX_DIMS) nestedTooDeep();
     for (let i = 0; i < s.length; i++) setDim(shape, depth + i, s[i]);
     kinds.dt = kinds.dt ? promote(kinds.dt, x.dt) : x.dt;
     return;
   }
   if (isSeq(x)) {
     if (protocolSeq(x)) throw PROTOCOL;
+    if (depth >= MAX_DIMS) nestedTooDeep();
     const items = seqItems(x);
     setDim(shape, depth, items.length);
     for (const it of items) discover(it, depth + 1, shape, kinds, shapeOnly);
@@ -994,9 +1017,15 @@ export function tolist(a: NDArray): any {
 
 // ------------------------------------------------------------------ indexing
 
-function normAxis(ax: number, nd: number): number {
+// NumPy's AxisError (numpy.exceptions, a ValueError and an IndexError), which the numpy
+// package hands over as it loads (set_axis_error); before that, an IndexError
+let axisError: any = null;
+function normAxis(ax: number, nd: number, prefix: string | null = null): number {
   const a = ax < 0 ? ax + nd : ax;
-  if (a < 0 || a >= nd || !Number.isInteger(a)) raise(T.AxisError ?? T.IndexError, `axis ${ax} is out of bounds for array of dimension ${nd}`);
+  if (a < 0 || a >= nd || !Number.isInteger(a)) {
+    if (axisError) throw Obj.markRaised(Obj.callObj(axisError, [ax, nd, prefix]));
+    raise(T.IndexError, `${prefix === null ? "" : prefix + ": "}axis ${ax} is out of bounds for array of dimension ${nd}`);
+  }
   return a;
 }
 
@@ -1038,6 +1067,11 @@ function resolveIndex(a: NDArray, key: any): IndexResult {
   items = items.map((k) => (Array.isArray(k) && !(k as any).$t ? fromPy(k) : k));
   items = items.map((k) => (Array.isArray(k) && (k as any).$t ? fromPy(k) : k));
   const hasAdv = items.some((k) => k instanceof NDArray);
+  // (the result's dimensions, counted as NumPy counts them before indexing: the array's, less those an integer or
+  // an index array takes, plus each newaxis, plus the index arrays' broadcast rank (a boolean one's nonzero is 1-d))
+  const advRank = hasAdv ? Math.max(0, ...items.filter((k) => k instanceof NDArray).map((k: any) => (k.dt.kind === "b" ? 1 : k.ndim))) : 0;
+  const resultDims = a.ndim - items.reduce((s, k) => s + (k instanceof O.PySlice || k === null ? 0 : consumes(k)), 0) + items.filter((k) => k === null).length + advRank;
+  if (resultDims > MAX_DIMS) raise(T.IndexError, `number of dimensions must be within [0, ${MAX_DIMS}], indexing result would have ${resultDims}`);
   if (!hasAdv) {
     const shape: number[] = [], strides: number[] = [];
     let off = a.offset, d = 0;
@@ -1883,6 +1917,9 @@ function unaryRaw(op: string, x: any): any {
       && wasmSinCos(op === "cos", CR.SINCOS_TABLE, ad as Float64Array, a.offset, a.size, od as Float64Array, op === "cos" ? CR.cos : CR.sin)) return out;
   if (UN_EXPR[op] && a.ndim > 0 && a.size > 0) {
     unaryKernel(op, a.isC())(ad, a.offset, a.strides, a.shape, od, a.size);
+    // (an integer has no -0: -v at 0 is -0, which an int64 array would keep
+    // and give back as -0.0, so 1 / x would be -inf)
+    if (op === "negative" && rt.isInt && rt.ctor === Float64Array) for (let k = 0; k < a.size; k++) od[k] += 0;
     return out;
   }
   const f = op === "reciprocal" && rt.isInt ? (x: number) => (x === 0 ? 0 : Math.trunc(1 / x)) : spec.f;
@@ -1988,8 +2025,11 @@ function pairwiseSqDev(d: any, off: number, n: number, m: number): number {
 }
 
 // Reduce `a` over `axes` with fold(acc, x) from init; `inner` reduces a run of
-// the innermost axis at once (pairwise sums).
-function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DType, init: number, fold: (acc: number, x: number) => number, inner?: (d: any, off: number, n: number, st: number) => number): NDArray {
+// the innermost axis at once (pairwise sums). With `first` (a sum without an
+// identity: NumPy's initial=None) each result starts from its first element
+// and a pairwise run sums the rest, as NumPy's reduction does; init must then
+// be -0, which leaves the sequential folds' first element as it is.
+function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DType, init: number, fold: (acc: number, x: number) => number, inner?: (d: any, off: number, n: number, st: number) => number, first = false): NDArray {
   const nd = a.ndim;
   const ax = axes === null ? a.shape.map((_, i) => i) : [...new Set(axes.map((x) => normAxis(x, nd)))];
   const keep = a.shape.map((_, i) => i).filter((i) => !ax.includes(i));
@@ -2005,7 +2045,8 @@ function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
   // pairwise only when the reduction is over the last axis (as NumPy's inner loop)
   // reducing the leading axes of a C-contiguous array: accumulate whole rows
   // (NumPy adds slice by slice in this case, so the order is NumPy's too)
-  if (inner && a.isC() && red.length < nd && red.every((x, i) => x === i) && !keepdims && prod(outShape) > 1) {
+  // (not when the reduced axes are empty: there is no first row, and the result is the identity)
+  if (inner && a.isC() && red.length < nd && red.every((x, i) => x === i) && !keepdims && prod(outShape) > 1 && rn > 0) {
     const rows = rn, w = prod(outShape);
     const od = out.data;
     const acc = rt === D.float32 ? new Float32Array(w) : new Float64Array(w);
@@ -2020,13 +2061,15 @@ function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
   // everything that is not reduced has length 1: NumPy's iterator drops those
   // axes, leaving one contiguous run, summed pairwise
   if (inner && a.isC() && prod(outShape) === 1 && rn > 0) {
-    out.data[0] = castNum(rt, fold(init, inner(d, a.offset, rn, 1)));
+    out.data[0] = castNum(rt, first ? fold(d[a.offset], inner(d, a.offset + 1, rn - 1, 1)) : fold(init, inner(d, a.offset, rn, 1)));
     return keepdims ? reshape(out, a.shape.map((n, i) => (ax.includes(i) ? 1 : n))) : out;
   }
   const usePairwise = inner && red.length >= 1 && red[red.length - 1] === nd - 1 && (red.length === 1 || a.isC());
   loop1(outShape, kstr, a.offset, (base, k) => {
     let acc = init;
-    if (usePairwise && red.length === 1) acc = fold(acc, inner!(d, base, rn, rstr[0]));
+    const st = red.length === 1 ? rstr[0] : 1;
+    if (usePairwise && first && rn > 0 && (red.length === 1 || (a.isC() && red.length === nd))) acc = fold(d[base], inner!(d, base + st, rn - 1, st));
+    else if (usePairwise && red.length === 1) acc = fold(acc, inner!(d, base, rn, rstr[0]));
     else if (usePairwise && a.isC() && red.length === nd) acc = fold(acc, inner!(d, base, rn, 1));
     else if (inner && red.length === 1) {
       // over an outer axis NumPy adds slice by slice: sequentially
@@ -2041,10 +2084,36 @@ function reduceAxes(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
   return out;
 }
 
+// (a bool axis, Python's or NumPy's, refused with NumPy's TypeError: True and False are not axes there, though
+// Python's bools are ints)
+function refuseBoolAxis(axis: any, msg: string): void {
+  // (np.bool_ is an int subclass named bool: lib/numpy/__init__.py)
+  if (typeof Obj.unbox(axis) === "boolean" || typeName(axis) === "bool") raise(T.TypeError, msg);
+}
+
+// (a reduction's axis, each read in turn as NumPy reads them: a bool refused, then the index; its bounds after)
+function axisInt(x: any): number {
+  refuseBoolAxis(x, "an integer is required");
+  return intNum(x);
+}
+
 function axesArg(axis: any, nd: number): number[] | null {
   if (axis === null || axis === undefined) return null;
-  if (Array.isArray(axis)) return axis.map((x) => normAxis(intNum(x), nd));
-  return [normAxis(intNum(axis), nd)];
+  // (a list is no axis, as NumPy's C reductions take only an int or a tuple: its TypeError, #1944)
+  if (Obj.typeOf(axis) === T.list || (Array.isArray(axis) && Obj.typeOf(axis) !== T.tuple)) intNum(axis);
+  // (a 0-d array with an integer axis of 0 or -1: no axis to reduce, the value itself, as NumPy's C reductions allow
+  // (a legacy allowance, #1907); a tuple of axes, or any other integer, is out of bounds as before)
+  if (nd === 0 && !Array.isArray(axis)) {
+    const v = axisInt(axis);
+    if (v === 0 || v === -1) return [];
+  }
+  if (Array.isArray(axis)) {
+    const axes = axis.map((x) => normAxis(axisInt(x), nd));
+    // (an axis named twice, as itself or by its negative: NumPy's ValueError, #1944)
+    if (new Set(axes).size !== axes.length) raise(T.ValueError, "duplicate value in 'axis'");
+    return axes;
+  }
+  return [normAxis(axisInt(axis), nd)];
 }
 
 function sumType(dt: DType): DType {
@@ -2053,7 +2122,8 @@ function sumType(dt: DType): DType {
   return dt;
 }
 
-function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null): any {
+// (first: no identity, NumPy's initial=None: each result starts from its first element; see reduceAxes)
+function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null, first = false): any {
   const rt = dtype !== null ? toDtype(dtype) : sumType(a.dt);
   const axs = axesArg(axis, a.ndim);
   const outN = axs === null ? 1 : prod(a.shape.filter((_, i) => !axs.includes(i)));
@@ -2063,7 +2133,7 @@ function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null): any {
     // LIMIT-PR56-1; the parts are views, not copies)
     admitWork(outN * (2 * (8 + 8) + 16), "sum");
     const re = realPart(a), im = imagPart(a);
-    const r = sum(re, axis, keepdims), i = sum(im, axis, keepdims);
+    const r = sum(re, axis, keepdims, null, first), i = sum(im, axis, keepdims, null, first);
     return combineComplex(r, i, rt.cplx ? rt : a.dt);
   }
   // (a float sum of another dtype sums a converted copy: that copy, the
@@ -2071,10 +2141,11 @@ function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null): any {
   const widen = rt !== a.dt && rt.kind === "f";
   admitWork((widen ? a.size * rt.itemsize : 0) + outN * (rt.itemsize + 8), "sum");
   const src = widen ? copy(a, rt) : a;
-  if (rt === D.float32) return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, 0, (x, y) => f32(x + y), pairwise32), axis, keepdims);
+  const init = first ? -0 : 0;
+  if (rt === D.float32) return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, init, (x, y) => f32(x + y), pairwise32, first), axis, keepdims);
   // (int64: each partial sum checked, as wideExact)
   const add = isWide(rt) ? (x: number, y: number) => wideExact(rt, "add", x + y, x, y) : (x: number, y: number) => x + y;
-  return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, 0, add, rt.kind === "f" ? pairwise : undefined), axis, keepdims);
+  return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, init, add, rt.kind === "f" ? pairwise : undefined, first), axis, keepdims);
 }
 // The product of a complex array (or of one into a complex dtype) over the
 // axes: each output element the product of its reduced elements, one at a
@@ -2085,14 +2156,14 @@ function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null): any {
 // np.array([[1e-200, 1e200], [1e-200, 1e200]], dtype=complex).T NumPy gives
 // 1+0j and this 0j (as the real fold does for a real array), a known
 // traversal-order limitation.
-function complexProd(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DType, init: [number, number] | null = null): NDArray {
+function complexProd(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DType, init: [number, number] | null = null, mask: NDArray | null = null): NDArray {
   // (NumPy discards the imaginary parts with a ComplexWarning, which Sagebrush does not have)
   if (a.dt.cplx && !rt.cplx) raise(T.TypeError, `prod: a complex array multiplied in the real dtype ${rt.name} would lose its imaginary parts; take .real first`);
   const nd = a.ndim;
   const ax = axes === null ? a.shape.map((_, i) => i) : [...new Set(axes.map((x) => normAxis(x, nd)))].sort((x, y) => x - y);
   const keep = a.shape.map((_, i) => i).filter((i) => !ax.includes(i));
   // (the reduced elements in prodOrder's order, each its value in rt)
-  const { off, rshape, rst } = prodOrder(a, ax, rt);
+  const { off, rshape, rst, order } = prodOrder(a, ax, rt, mask);
   const outShape = keep.map((i) => a.shape[i]);
   const out = empty(outShape, rt);
   const f32 = rt === D.complex64;
@@ -2102,6 +2173,23 @@ function complexProd(a: NDArray, axes: number[] | null, keepdims: boolean, rt: D
     return f32 ? [Math.fround(xr), Math.fround(xi)] : [xr, xi];
   };
   const kshape = keep.map((i) => a.shape[i]), kst = keep.map((i) => a.strides[i]);
+  if (mask !== null) {
+    // (where=, #1944: as NumPy's masked reduction, from 1 (or initial) through the kept elements only, each multiplied
+    // in, in the order its iterator takes for the input, the result and the mask)
+    const md = mask.data, kmst = keep.map((i) => mask.strides[i]), rmst = order.map((i) => mask.strides[i]);
+    loop2(kshape, kst, off, kmst, mask.offset, (p0, m0, r) => {
+      let [re, im] = init ? (f32 ? [Math.fround(init[0]), Math.fround(init[1])] : init) : [1, 0];
+      loop2(rshape, rst, p0, rmst, m0, (p, q) => {
+        if (!md[q]) return;
+        const [xr, xi] = val(p);
+        [re, im] = [re * xr - im * xi, re * xi + im * xr];
+        if (f32) [re, im] = [Math.fround(re), Math.fround(im)];
+      });
+      o[2 * r] = re;
+      o[2 * r + 1] = im;
+    });
+    return keepdims ? reshape(out, a.shape.map((n, i) => (ax.includes(i) ? 1 : n))) : out;
+  }
   loop1(kshape, kst, off, (p0, r) => {
     // (from the first element, as NumPy's reduction: 1 only for none;
     // initial= starts the product, as NumPy's)
@@ -2123,7 +2211,8 @@ function complexProd(a: NDArray, axes: number[] | null, keepdims: boolean, rt: D
   return keepdims ? reshape(out, a.shape.map((n, i) => (ax.includes(i) ? 1 : n))) : out;
 }
 function finish(r: NDArray, axis: any, keepdims: boolean): any {
-  return r.ndim === 0 && !keepdims ? pyScalarOf(r.dt, r.data, r.offset) : r;
+  // (a 0-d result is NumPy's scalar, keepdims or not: a 0-d array's reduction kept as 0-d, #1907)
+  return r.ndim === 0 ? pyScalarOf(r.dt, r.data, r.offset) : r;
 }
 // (a complex array's components are views of it, read-only where it is,
 // as NumPy's; a real array's imag is a new read-only array of zeros)
@@ -2186,7 +2275,10 @@ function minmax(a: NDArray, axis: any, keepdims: boolean, isMax: boolean, initia
 }
 
 function argminmax(a: NDArray, axis: any, isMax: boolean): any {
-  if (axis === null || axis === undefined) a = ravel(a);
+  // (no axis: the flattened array; a 0-d array with an axis: as one of one element, as NumPy's argmax views it, so its
+  // axis 0 or -1 gives 0 and any other is out of bounds for dimension 1, #1907)
+  if (axis !== null && axis !== undefined) refuseBoolAxis(axis, "an integer is required for the axis");
+  if (axis === null || axis === undefined || a.ndim === 0) a = ravel(a);
   const ax = axis === null || axis === undefined ? 0 : normAxis(intNum(axis), a.ndim);
   if (a.shape[ax] === 0) raise(T.ValueError, `attempt to get ${isMax ? "argmax" : "argmin"} of an empty sequence`);
   const t = moveAxisToEnd(a, ax);
@@ -2257,13 +2349,13 @@ function mulIn(rt: DType, what: string): (p: number, x: number) => number {
 // broadcast axis's zero stride included), each walked in its own
 // direction, a negative stride not reversed (the reduction's
 // NPY_ITER_DONT_NEGATE_STRIDES: astra CORR-76A-2, CORR-3D5-1, CORR-948-1)
-function prodOrder(a: NDArray, ax: number[], rt: DType): { off: number; rshape: number[]; rst: number[] } {
+function prodOrder(a: NDArray, ax: number[], rt: DType, mask: NDArray | null = null): { off: number; rshape: number[]; rst: number[]; order: number[] } {
   if (rt === D.float32 || rt.name === "float16" || rt === D.complex64) {
     const rshape = ax.map((i) => a.shape[i]), rst = ax.map((i) => a.strides[i]);
     if (rshape.filter((n) => n > 1).length > 1 && !(ax.length === a.ndim && a.isC())) {
       raise(T.NotImplementedError, `${rt.name} prod over several axes or a non-contiguous view is not supported yet`);
     }
-    return { off: a.offset, rshape, rst };
+    return { off: a.offset, rshape, rst, order: ax };
   }
   // (the reduced axes in the order of all the axes NumPy's iterator
   // chooses for the input and the result, whose reduced axes have stride 0)
@@ -2272,8 +2364,9 @@ function prodOrder(a: NDArray, ax: number[], rt: DType): { off: number; rshape: 
     outSt[i] = st;
     st *= a.shape[i];
   }
-  const order = iterAxisOrder(nd, [a.strides, outSt]).filter((i) => ax.includes(i)).reverse();
-  return { off: a.offset, rshape: order.map((i) => a.shape[i]), rst: order.map((i) => a.strides[i]) };
+  // (a where= mask is one more operand of NumPy's iterator: its strides take part in the order, #1944)
+  const order = iterAxisOrder(nd, mask === null ? [a.strides, outSt] : [a.strides, outSt, mask.strides]).filter((i) => ax.includes(i)).reverse();
+  return { off: a.offset, rshape: order.map((i) => a.shape[i]), rst: order.map((i) => a.strides[i]), order };
 }
 // NumPy's nditer axis ordering (npyiter_find_best_axis_ordering): the
 // axes innermost first, an insertion sort from C order that moves an axis
@@ -2309,17 +2402,30 @@ function iterAxisOrder(nd: number, strides: number[][]): number[] {
   }
   return perm;
 }
-function prodReduce(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DType, init: number, hasInitial: boolean): NDArray {
+function prodReduce(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DType, init: number, hasInitial: boolean, mask: NDArray | null = null): NDArray {
   const nd = a.ndim;
   const ax = axes === null ? a.shape.map((_, i) => i) : [...new Set(axes.map((x) => normAxis(x, nd)))].sort((x, y) => x - y);
   const keep = a.shape.map((_, i) => i).filter((i) => !ax.includes(i));
   const outShape = keep.map((i) => a.shape[i]);
   const out = empty(outShape, rt);
-  const { off, rshape, rst } = prodOrder(a, ax, rt);
+  const { off, rshape, rst, order } = prodOrder(a, ax, rt, mask);
   const mul = mulIn(rt, "prod");
   const cast = (v: number) => (rt.kind === "f" ? castNum(rt, v) : v);
   const d = a.data, od = out.data;
   const kshape = keep.map((i) => a.shape[i]), kst = keep.map((i) => a.strides[i]);
+  if (mask !== null) {
+    // (where=, #1944: as NumPy's masked reduction, from the identity (or initial) through the kept elements only, in
+    // the order its iterator takes for the input, the result and the mask)
+    const md = mask.data, kmst = keep.map((i) => mask.strides[i]), rmst = order.map((i) => mask.strides[i]);
+    loop2(kshape, kst, off, kmst, mask.offset, (p0, m0, k) => {
+      let acc = init;
+      loop2(rshape, rst, p0, rmst, m0, (p, q) => {
+        if (md[q]) acc = mul(acc, cast(d[p]));
+      });
+      od[k] = castNum(rt, acc);
+    });
+    return keepdims ? reshape(out, a.shape.map((n, i) => (ax.includes(i) ? 1 : n))) : out;
+  }
   loop1(kshape, kst, off, (p0, k) => {
     let acc = init, first = !hasInitial;
     loop1(rshape, rst, p0, (p) => {
@@ -2336,7 +2442,11 @@ function prodReduce(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
 }
 
 function cumulative(a: NDArray, axis: any, isProd: boolean, dtype: any): NDArray {
-  if (axis === null || axis === undefined) a = ravel(a);
+  // (no axis, or a 0-d array (as one of one element, as NumPy's cumsum views it, so its axis 0 or -1 is that one and
+  // any other is out of bounds for dimension 1, #1907): the flattened array)
+  if (axis !== null && axis !== undefined) refuseBoolAxis(axis, "an integer is required for the axis");
+  if (axis === null || axis === undefined || a.ndim === 0) a = ravel(a);
+  if (axis !== null && axis !== undefined) normAxis(intNum(axis), a.ndim);
   if (a.ndim === 1 && a.isC() && (dtype === null || dtype === undefined) && a.dt.kind === "f") {
     // (the first element is copied, as NumPy does: 0 + -0.0 would be +0.0)
     const out = empty(a.shape, a.dt), d = a.data, od = out.data, n = a.size;
@@ -2479,18 +2589,24 @@ function matmul(x: any, y: any): any {
   // engine/nd's GEMM, on its thread pool where that is ready (src/runtime/nd.ts): every dimension at least
   // ND_MATMUL_MIN, where the module runs this session; by size alone, so that a product's bits never depend on
   // whether the pool is up (the module's sums are in blocks of k, so not the bits of the paths below)
+  // (no room in the module's memory for the operands: the paths below compute it, never refused for the module's sake;
+  // its last bits are then theirs, so under memory pressure they can depend on the memory the machine could give)
   if (Math.min(n, m, p) >= ND_MATMUL_MIN && useNd()) {
-    const wa = new Float64Array(n * m), wb = new Float64Array(m * p), f64out = ct === D.float64;
-    loop2(batch, Ab, A.offset, Bb, B.offset, (pa, pb, bk) => {
-      if (as1 === 1 && as0 === m) wa.set(ad.subarray(pa, pa + n * m) as any);
-      else for (let i = 0, t = 0; i < n; i++) for (let k = 0, x = pa + i * as0; k < m; k++, x += as1) wa[t++] = ad[x];
-      if (bs1 === 1 && bs0 === p) wb.set(bd.subarray(pb, pb + m * p) as any);
-      else for (let k = 0, t = 0; k < m; k++) for (let j = 0, y = pb + k * bs0; j < p; j++, y += bs1) wb[t++] = bd[y];
-      const wc = ndMatmul(wa, wb, n, m, p), ob = bk * n * p;
-      if (f64out) (od as Float64Array).set(wc, ob);
-      else for (let t = 0; t < n * p; t++) od[ob + t] = castNum(ct, wc[t]);
-    });
-    return squeezeMatmul(out, a, b, ct);
+    try {
+      const wa = new Float64Array(n * m), wb = new Float64Array(m * p), f64out = ct === D.float64;
+      loop2(batch, Ab, A.offset, Bb, B.offset, (pa, pb, bk) => {
+        if (as1 === 1 && as0 === m) wa.set(ad.subarray(pa, pa + n * m) as any);
+        else for (let i = 0, t = 0; i < n; i++) for (let k = 0, x = pa + i * as0; k < m; k++, x += as1) wa[t++] = ad[x];
+        if (bs1 === 1 && bs0 === p) wb.set(bd.subarray(pb, pb + m * p) as any);
+        else for (let k = 0, t = 0; k < m; k++) for (let j = 0, y = pb + k * bs0; j < p; j++, y += bs1) wb[t++] = bd[y];
+        const wc = ndMatmul(wa, wb, n, m, p), ob = bk * n * p;
+        if (f64out) (od as Float64Array).set(wc, ob);
+        else for (let t = 0; t < n * p; t++) od[ob + t] = castNum(ct, wc[t]);
+      });
+      return squeezeMatmul(out, a, b, ct);
+    } catch (e) {
+      if (!noRoom(e)) throw e;
+    }
   }
   // WebAssembly SIMD (kernels/src/lib.rs), same sums in the same order
   const W = gemmBuffers(n, p, m);
@@ -3294,7 +3410,9 @@ export class StrArray {
     public strides: number[],
     public offset = 0,
     public base: StrArray | null = null,
-  ) {}
+  ) {
+    if (shape.length > MAX_DIMS) tooManyDims(shape.length);
+  }
 }
 export interface StrArray {
   readonly size: number;
@@ -3417,6 +3535,7 @@ function numStr(dt: DType, data: any, p: number): string {
 }
 
 export function strEmpty(shape: number[], dt: StrDType): StrArray {
+  // (admitArray refuses more than 64 dimensions before the strings are made)
   admitArray(shape, dt as unknown as DType);
   return new StrArray(dt, new Array(prod(shape)).fill(""), shape.slice(), cStrides(shape));
 }
@@ -3925,7 +4044,7 @@ newBuiltinModule("_numpy", (m) => {
   M("transpose", (a: NDArray, ...axes: any[]) => tr(a, axes.length === 0 || (axes.length === 1 && axes[0] === null) ? null : shapeArg(axes.length === 1 ? axes[0] : tuple(axes))));
   M("swapaxes", (a: NDArray, x: any, y: any) => {
     const order = a.shape.map((_, i) => i);
-    const i = normAxis(Number(x), a.ndim), j = normAxis(Number(y), a.ndim);
+    const i = normAxis(Number(x), a.ndim, "axis1"), j = normAxis(Number(y), a.ndim, "axis2");
     [order[i], order[j]] = [order[j], order[i]];
     return tr(a, order);
   });
@@ -3952,6 +4071,8 @@ newBuiltinModule("_numpy", (m) => {
 
   // creation (strings in the data, a string array or a string dtype: a string array)
   fn("array", (obj: any, dtype: any = null, copyFlag: any = true, ndmin: any = 0) => {
+    // (ndmin checked first, as NumPy's: before any conversion or protocol call)
+    if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`);
     let r: any;
     if (obj instanceof StrArray) r = dtype === null ? (copyFlag === false ? obj : strCopy(obj)) : strAstype(obj, dtype);
     else if (obj instanceof NDArray && dtype !== null && strSpec(dtype) !== null) r = numToStr(obj, strSpec(dtype)!);
@@ -4155,25 +4276,27 @@ newBuiltinModule("_numpy", (m) => {
     const r = binary(op, x, y);
     return isArrayLike(x) || isArrayLike(y) ? r : pyScalarOf(r.dt, r.data, 0);
   });
-  fn("sum", (a: any, axis: any = null, keepdims: any = false, dtype: any = null) => sum(asarray(a), opt(axis), !!keepdims, opt(dtype)));
+  fn("sum", (a: any, axis: any = null, keepdims: any = false, dtype: any = null, first: any = false) => sum(asarray(a), opt(axis), !!keepdims, opt(dtype), !!first));
   // sum((a - m)**2) over a whole C-contiguous float64 array, or None
   fn("sqdev_sum", (x: any, m: any) => {
     const a = asarray(x);
     if (a.dt !== D.float64 || !a.isC() || a.size === 0) return null;
     return 0 + pairwiseSqDev(a.data, a.offset, a.size, toNum(m));
   });
-  fn("prod", (a: any, axis: any = null, keepdims: any = false, dtype: any = null, initial: any = null) => {
+  fn("prod", (a: any, axis: any = null, keepdims: any = false, dtype: any = null, initial: any = null, where: any = null) => {
     const x = asarray(a);
     const rt = dtype !== null ? toDtype(dtype) : sumType(x.dt);
+    // (where=: a bool mask of x's shape, checked and broadcast by the caller, #1944)
+    const m = where === null ? null : asarray(where);
 
     // (complex: real and imaginary parts multiplied together; a real fold
     // read only the real parts)
-    if (x.dt.cplx || rt.cplx) return finish(complexProd(x, axesArg(axis, x.ndim), !!keepdims, rt, initial === null ? null : toC(initial)), axis, !!keepdims);
+    if (x.dt.cplx || rt.cplx) return finish(complexProd(x, axesArg(axis, x.ndim), !!keepdims, rt, initial === null ? null : toC(initial), m), axis, !!keepdims);
     // (in rt, as NumPy's multiply loop: each element cast to rt, each product
     // rounded to it or wrapped to its integer width; from initial, in the
     // reduced elements' memory order: prodReduce)
     const init = initial === null ? 1 : rt.isInt ? toNum(initial, rt) : castNum(rt, toNum(initial));
-    return finish(prodReduce(x, axesArg(axis, x.ndim), !!keepdims, rt, init, initial !== null), axis, !!keepdims);
+    return finish(prodReduce(x, axesArg(axis, x.ndim), !!keepdims, rt, init, initial !== null, m), axis, !!keepdims);
   });
   fn("amax", (a: any, axis: any = null, keepdims: any = false, initial: any = null, first: any = false) => minmax(asarray(a), opt(axis), !!keepdims, true, opt(initial), !!first));
   fn("amin", (a: any, axis: any = null, keepdims: any = false, initial: any = null, first: any = false) => minmax(asarray(a), opt(axis), !!keepdims, false, opt(initial), !!first));
@@ -4267,7 +4390,7 @@ newBuiltinModule("_numpy", (m) => {
     }
     const arrs = xs.map((x: any) => asarray(x));
     if (axis === null) return concat(arrs.map(ravel), 0);
-    return concat(arrs, Number(axis));
+    return concat(arrs, intNum(axis));
   });
   fn("broadcast_to", (a: any, shape: any) => {
     if (a instanceof StrArray) {
@@ -4313,16 +4436,18 @@ newBuiltinModule("_numpy", (m) => {
     return out;
   });
   fn("sort", (a: any, axis: any = -1) => {
-    if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, false) : strSort(a, normAxis(Number(axis), a.ndim), false);
+    if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, false) : strSort(a, normAxis(intNum(axis), a.ndim), false);
     const x = asarray(a);
     if (axis === null) return sortAxis(ravel(x), 0, false);
-    return sortAxis(x, normAxis(Number(axis), x.ndim), false);
+    // (the axis read as an index: a list or tuple is NumPy's TypeError, #1944; a float in sort's own words)
+    if (typeName(axis) === "float") raise(T.TypeError, "integer argument expected, got float");
+    return sortAxis(x, normAxis(intNum(axis), x.ndim), false);
   });
   fn("argsort", (a: any, axis: any = -1) => {
-    if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, true) : strSort(a, normAxis(Number(axis), a.ndim), true);
+    if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, true) : strSort(a, normAxis(intNum(axis), a.ndim), true);
     const x = asarray(a);
     if (axis === null) return sortAxis(ravel(x), 0, true);
-    return sortAxis(x, normAxis(Number(axis), x.ndim), true);
+    return sortAxis(x, normAxis(intNum(axis), x.ndim), true);
   });
   fn("result_type", (...xs: any[]) => {
     // (a Python scalar is weak, NEP 50: np.result_type(1, 'i1') is int8)
@@ -4401,6 +4526,7 @@ newBuiltinModule("_numpy", (m) => {
     return null;
   });
   // (lib/numpy's set_printoptions validates and passes every option)
+  fn("set_axis_error", (cls: any) => ((axisError = cls), null));
   fn("set_printoptions", (precision: any, threshold: any, edgeitems: any, linewidth: any, suppress: any, sign: any, floatmode: any, nanstr: any, infstr: any, fb: any, fi: any, ff: any, fc: any, fU: any, overrideRepr: any) => {
     printopts.precision = Number(precision);
     printopts.threshold = Number(threshold);

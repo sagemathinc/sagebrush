@@ -1,0 +1,9 @@
+Act as a new user of Sagebrush, using only its publicly installable CLI through npm/npx or the PyPI wheel. Do not inspect any local product checkout, project source, other agents' notes, or prior session state. Work only in this fresh scratch directory. Do not modify the product, file issues, push commits, or contact other agents.
+
+Real task: produce an exact, machine-readable absorbing Markov-chain report for the following row-stochastic transition matrix. State order is new, engaged, converted, abandoned; the last two states are absorbing.
+P = [[1/2,1/4,1/4,0], [1/5,1/2,1/10,1/5], [0,0,1,0], [0,0,0,1]].
+Compute the fundamental matrix, eventual absorption probabilities, expected steps to absorption, step-count variance, and P^5. Return a saved JSON report with exact rationals represented in a documented way. Use Sagebrush to perform the mathematics; independent checks against available standard tools are welcome, but do not silently substitute those tools for Sagebrush.
+
+Find the public installation and usage instructions as a normal new user would. Try machine-readable discovery/output and errors. Test several relevant invalid inputs and compare error types with CPython or Sage where available. Exercise interrupt/Stop on a bounded long-running calculation and check whether existing session state remains usable, if the CLI permits this. Avoid unbounded hangs; clean up only the processes you start.
+
+Log EVERY workaround and obstacle you encounter: exact commands, outputs/errors, impact on completing this task, and a suggested fix. Also state coverage hits and misses, the Stop/state result, error-type parity, and whether results and errors were machine-readable. Save commands/transcript notes and the final findings in this scratch directory. Spend at most about 20 minutes on this sample; the log matters more than finishing. Do not assume a missing feature works.

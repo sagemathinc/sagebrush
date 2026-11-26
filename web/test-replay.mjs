@@ -307,6 +307,36 @@ try {
     c.ws.close();
     await fetch(`http://127.0.0.1:${port}/json/close/` + t3.id);
   }
+
+  // ---- [F1] the Figures choice each run was shown with is given again when it is replayed (a small figure is an
+  // SVG under Auto: replayed without its PNG choice, its output would differ): a cell run with PNG, an @interact
+  // drawn with SVG and then moved with PNG
+  await a.ev(`document.querySelector('#filebtn').click(); document.querySelector('[data-f="new"]').click(); true`);
+  await a.until("sagebrush.notebook.cells().length === 1", 5000);
+  await a.until("sagebrush.kernel.ready", 15000);
+  await sleep(500);
+  const FIG = "import matplotlib.pyplot as plt\nplt.figure(figsize=(2, 1)); plt.plot([1, 3, 2]); plt.show()";
+  const FINT = "from ipywidgets import interact\n@interact(n=(2, 6))\ndef f(n=2):\n    plt.figure(figsize=(2, 1)); plt.plot(range(n)); plt.show()";
+  await a.ev(`(() => { const nb = sagebrush.notebook; nb.setInput(nb.cells()[0], ${JSON.stringify(FIG)}); nb.addCell(${JSON.stringify(FINT)}); nb.setFigures("png"); return true; })()`);
+  await sleep(700);
+  await a.ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells()[0]); nb.setFigures('svg'); await nb.run(nb.cells()[1]); nb.setFigures('png'); await nb.setInteract([...nb.interacts.keys()][0], { n: 5 }); return true; })()");
+  const fShown = await a.ev("sagebrush.notebook.cells().map((c) => c.out.querySelector('figure img') ? 'png' : c.out.querySelector('figure svg') ? 'svg' : null)");
+  const fRuns = await a.ev("JSON.stringify(sagebrush.history.records('run').slice(-3).map((r) => [r.kind, r.figures ?? null]))");
+  ok(JSON.stringify(fShown) === '["png","png"]' && fRuns === '[["code","png"],["code","svg"],["interact","png"]]', "[F1] runs journaled with their Figures choice: " + fRuns + " " + JSON.stringify(fShown));
+  await sleep(700);
+  await a.ev("(() => { sagebrush.notebook.flush(); return true; })()");
+  const fUrl = await resumeUrl(await a.ev("sagebrush.history.head()"));
+  const t4 = await (await fetch(`http://127.0.0.1:${port}/json/new?` + encodeURIComponent(new URL(fUrl, base).href), { method: "PUT" })).json();
+  const f = await tab(t4.webSocketDebuggerUrl);
+  try {
+    await f.send("Page.bringToFront");
+    await f.until("window.sagebrush?.replayReport !== undefined", 60000);
+    const fr = await f.ev("sagebrush.replayReport");
+    ok(fr.runs === 3 && fr.diverged.length === 0, "[F1] …replayed with them, identical (a cell's PNG, an @interact's SVG then PNG): " + JSON.stringify(fr));
+  } finally {
+    f.ws.close();
+    await fetch(`http://127.0.0.1:${port}/json/close/` + t4.id);
+  }
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {

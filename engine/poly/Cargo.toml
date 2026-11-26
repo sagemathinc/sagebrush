@@ -16,6 +16,11 @@ num-traits = "0.2"
 # Tests of other crates inject the recombination faults (vanhoeij::fault):
 # never enabled in a build that ships (dev-dependencies only)
 test-faults = []
+# The unbudgeted L^2 entries (l2, l2_proof, l2_report and the L2 state's
+# own methods) for the LLL benchmarks: never enabled in a build that ships
+# (dev-dependencies only), so that one's only way into the reducer is
+# l2_budgeted (or l2_budgeted_typed)
+bench = []
 
 [dev-dependencies]
 # (tests only: Stop at a chosen check of a named site, tests/binomial_stop.rs)
