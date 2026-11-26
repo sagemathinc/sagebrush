@@ -233,6 +233,7 @@ def _human_s(s):
 
 
 IDLE_PASS_S = 30  # (how often the idle stop looks: a kernel is stopped at most this long after its --idle)
+IDLE_OMITTED = object()  # (RelayRunner's idle_s when not given: the default, never confused with None, "never")
 
 
 def ping_text():
@@ -787,8 +788,13 @@ class EngineKernels:
         try:
             k = self.factory(nb, entry, lambda: self.ended(nb, entry, k), charge)
         except BaseException:
+            # (refunded here only if nothing was spawned (the factory never called charge.started()); once something
+            # was, the factory's own teardown reports the reap (charge.reaped()), and until then the charge is held)
             if charge is not None:
-                charge.reaped()  # (nothing was spawned: no tree to wait for)
+                if charge.started_at is None:
+                    charge.reaped()
+                else:
+                    charge.ended_unreaped()
             raise
         from sagebrush.remote.admission import IdleClock
         k.idle = IdleClock(self.idle_s, self.clock)
@@ -821,12 +827,14 @@ class RelayRunner:
 
     def __init__(self, key, timers=None, cwd=None, err=None, post=_post, rnd=random.random, sleep=asyncio.sleep, port=None,
                  terminals=True, agents=False, agent_cmd=None, agent_grace_ms=AGENT_GRACE_MS, agent_log=None,
-                 now_ms=None, agent_cmds=None, kernels=None, ledger=None, idle_s=None):
+                 now_ms=None, agent_cmds=None, kernels=None, ledger=None, idle_s=IDLE_OMITTED):
         self.key = key
         # (engine pages (r3 P2a): only with a kernel factory, kernels(nb, entry, on_end) -> a kernel; the connection
         # generation is the highest seen, across legs; each notebook's session generation likewise)
         from sagebrush.remote.admission import IDLE_DEFAULT_S
-        self.engine = EngineKernels(kernels, ledger, IDLE_DEFAULT_S if idle_s is None else idle_s) if kernels is not None else None
+        # (idle_s: seconds, None for never (parse_idle("never")), or omitted for the default; never isn't the default)
+        self.engine = EngineKernels(kernels, ledger, IDLE_DEFAULT_S if idle_s is IDLE_OMITTED else idle_s) if kernels is not None else None
+        self.idle_task = None
         self.cgen = 0
         self.nb_sgen = {}
         self.nb_page = {}  # (each notebook's attached engine page)
@@ -1366,8 +1374,29 @@ class RelayRunner:
             self.stats["pings"] += 1
             leg.send_text(ping_text(), "control")
 
+    async def idle_loop(self):
+        """The idle stop's pass every IDLE_PASS_S, for the runner's whole life: through legs, losses and backoffs alike
+        (kernels outlive legs); cancelled when run() ends."""
+        while True:
+            await self.sleep(IDLE_PASS_S)
+            self.idle_pass()
+
     async def run(self, stop):
         """Dial, serve, dial again, until stop is set or a Fatal; returns the exit status."""
+        if self.engine is not None and self.idle_task is None:
+            self.idle_task = asyncio.ensure_future(self.idle_loop())
+        try:
+            return await self._run(stop)
+        finally:
+            if self.idle_task is not None:
+                self.idle_task.cancel()
+                try:
+                    await self.idle_task
+                except BaseException:
+                    pass
+                self.idle_task = None
+
+    async def _run(self, stop):
         attempt = 0
         first = True
         while not stop.is_set():

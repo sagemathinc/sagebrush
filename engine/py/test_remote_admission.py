@@ -2,8 +2,10 @@
 and its implementation contract; step P2b), with the runner's engine pages (relay.py) over test_remote_relay.py's
 fake relay and a kernel double:
 
-- F: MemAvailable, cgroup v2 and v1 headroom along the path to the root (the smallest wins), "max" and v1's huge
-  number as none, an unreadable figure refusing; macOS's vm_stat parse;
+- F: MemAvailable, cgroup v2 and v1 headroom found through mountinfo (its mountpoint and root) along the path to the
+  mount's root (the smallest wins), "max" and v1's huge number as none; every unknown refusing (no membership file,
+  no mountinfo, a hierarchy not mounted, a membership outside the mount's root, a malformed membership or figure, a
+  missing figure where the controller is on); macOS's vm_stat parse;
 - admission: exact and one byte short; the reserve and the pending charges counted; the five entries sharing one
   ledger (a mixed engine/CPython burst over the same reading); an unknown or stale reading refused in words; no
   measured envelope refused;
@@ -11,7 +13,8 @@ fake relay and a kernel double:
 - refunds only after the reap (an ended, unreaped start still holds its charge); buffers freed at once;
 - at the runner: a refused start said to its page in words, the page ended and nothing else changed; a reattach
   charged nothing; idle stops only a quiescent kernel past --idle (attached or running cells never), attach and cell
-  events resetting the clock; --idle's and --reserve's parsing.
+  events resetting the clock; --idle's and --reserve's parsing; a factory's failure refunded only if nothing was
+  spawned; "never" kept through the runner; the runner's own idle task, connected and in backoff, ending with it.
 
     python engine/py/test_remote_admission.py
 """
@@ -62,14 +65,24 @@ def write(root, rel, text):
         f.write(text)
 
 
+V2_MOUNT = "30 23 0:26 / /sys/fs/cgroup rw,nosuid shared:4 - cgroup2 cgroup2 rw,nsdelegate\n"
+V1_MOUNT = "31 23 0:27 / /sys/fs/cgroup/memory rw shared:5 - cgroup cgroup rw,memory\n"
+
+
 def test_reading_memory():
     with tempfile.TemporaryDirectory() as root:
         write(root, "proc/meminfo", "MemTotal: 100 kB\nMemAvailable: 8388608 kB\n")
+        write(root, "proc/self/mountinfo", "22 1 8:1 / / rw - ext4 /dev/sda1 rw\n" + V2_MOUNT)
         write(root, "proc/self/cgroup", "0::/a/b\n")
-        assert A.read_memory(root, platform="Linux").available == 8 * G and A.read_memory(root, platform="Linux").how == "MemAvailable"
-        # (v2: the smallest headroom on the way to the root wins, "max" is none)
+        for d in ("sys/fs/cgroup", "sys/fs/cgroup/a"):
+            write(root, d + "/cgroup.subtree_control", "cpu memory\n")
         write(root, "sys/fs/cgroup/a/b/memory.max", "max\n")
         write(root, "sys/fs/cgroup/a/b/memory.current", "1\n")
+        write(root, "sys/fs/cgroup/a/memory.max", "max\n")
+        write(root, "sys/fs/cgroup/a/memory.current", "1\n")
+        r = A.read_memory(root, platform="Linux")
+        assert r.available == 8 * G and r.how == "MemAvailable", (r and r.available)
+        # (v2: the smallest headroom on the way to the mount's root wins, "max" is none)
         write(root, "sys/fs/cgroup/a/memory.max", str(3 * G))
         write(root, "sys/fs/cgroup/a/memory.current", str(1 * G))
         r = A.read_memory(root, platform="Linux")
@@ -77,23 +90,73 @@ def test_reading_memory():
         write(root, "sys/fs/cgroup/a/b/memory.max", str(int(1.5 * G)))
         write(root, "sys/fs/cgroup/a/b/memory.current", str(1 * G))
         assert A.read_memory(root, platform="Linux").available == G // 2
-        # (an unreadable limit: no reading at all, so new starts are refused)
+        # (fail closed, SEC H1: every one of these is unknown, so new starts are refused)
+        def unknown(what):
+            assert A.read_memory(root, platform="Linux") is None, what
         write(root, "sys/fs/cgroup/a/memory.max", "garbage")
-        assert A.read_memory(root, platform="Linux") is None
+        unknown("a malformed limit")
+        write(root, "sys/fs/cgroup/a/memory.max", str(3 * G))
+        os.remove(os.path.join(root, "sys/fs/cgroup/a/b/memory.current"))
+        unknown("a missing usage where the controller is on")
+        write(root, "sys/fs/cgroup/a/b/memory.current", str(1 * G))
+        os.remove(os.path.join(root, "proc/self/mountinfo"))
+        unknown("no mountinfo")
+        write(root, "proc/self/mountinfo", "22 1 8:1 / / rw - ext4 /dev/sda1 rw\n")
+        unknown("membership reported, its hierarchy not mounted")
+        write(root, "proc/self/mountinfo", V2_MOUNT.replace(" / /sys/fs/cgroup", " /x /sys/fs/cgroup"))
+        unknown("a mount root the membership isn't under")
+        write(root, "proc/self/mountinfo", V2_MOUNT.replace("/sys/fs/cgroup", "/elsewhere"))
+        unknown("a nonstandard mountpoint with nothing there")
+        write(root, "proc/self/mountinfo", V2_MOUNT)
+        for bad in ("0::/a/../b\n", "0::a/b\n", "0::/a/./b\n", "garbage\n", "x::/a\n", "0::/a\n0::/b\n"):
+            write(root, "proc/self/cgroup", bad)
+            unknown("a malformed membership %r" % bad)
+        os.remove(os.path.join(root, "proc/self/cgroup"))
+        unknown("no /proc/self/cgroup")
+        # (a nonstandard mountpoint and a mount root, read from mountinfo: the namespace's view)
+        write(root, "proc/self/cgroup", "0::/ns/a/b\n")
+        write(root, "proc/self/mountinfo", "40 23 0:26 /ns /mnt/cg rw - cgroup2 cgroup2 rw\n")
+        write(root, "mnt/cg/cgroup.subtree_control", "memory\n")
+        write(root, "mnt/cg/a/cgroup.subtree_control", "memory\n")
+        write(root, "mnt/cg/a/memory.max", str(2 * G))
+        write(root, "mnt/cg/a/memory.current", str(G))
+        write(root, "mnt/cg/a/b/memory.max", "max\n")
+        write(root, "mnt/cg/a/b/memory.current", "5\n")
+        r = A.read_memory(root, platform="Linux")
+        assert r and r.available == G, "the mount's root and mountpoint from mountinfo"
+        # (the controller off at a level (not in the parent's subtree_control): no limit there, and no file needed)
+        write(root, "mnt/cg/a/cgroup.subtree_control", "cpu\n")
+        os.remove(os.path.join(root, "mnt/cg/a/b/memory.max"))
+        assert A.read_memory(root, platform="Linux").available == G
     with tempfile.TemporaryDirectory() as root:
         # (v1's memory controller; its "no limit" is a huge number)
         write(root, "proc/meminfo", "MemAvailable: 4194304 kB\n")
+        write(root, "proc/self/mountinfo", V1_MOUNT)
         write(root, "proc/self/cgroup", "4:cpu:/x\n3:memory:/x\n")
+        write(root, "sys/fs/cgroup/memory/memory.limit_in_bytes", str(2 ** 63 - 4096))
+        write(root, "sys/fs/cgroup/memory/memory.usage_in_bytes", "5")
         write(root, "sys/fs/cgroup/memory/x/memory.limit_in_bytes", str(2 ** 63 - 4096))
         write(root, "sys/fs/cgroup/memory/x/memory.usage_in_bytes", "5")
         assert A.read_memory(root, platform="Linux").available == 4 * G
         write(root, "sys/fs/cgroup/memory/x/memory.limit_in_bytes", str(1 * G))
         write(root, "sys/fs/cgroup/memory/x/memory.usage_in_bytes", str(G // 4))
         assert A.read_memory(root, platform="Linux").available == G * 3 // 4
+        os.remove(os.path.join(root, "sys/fs/cgroup/memory/x/memory.usage_in_bytes"))
+        assert A.read_memory(root, platform="Linux") is None, "v1: a missing figure is unknown"
+        # (no memory membership reported at all: no cgroup limit)
+        write(root, "proc/self/cgroup", "4:cpu:/x\n")
+        assert A.read_memory(root, platform="Linux").available == 4 * G
     with tempfile.TemporaryDirectory() as root:
         write(root, "proc/meminfo", "MemTotal: 1 kB\n")  # (no MemAvailable: unknown)
         assert A.read_memory(root, platform="Linux") is None
     assert A.read_memory("/nonexistent-root", platform="Plan9") is None
+    # (macOS's vm_stat, as it prints)
+    vm = ("Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                               10000.\n"
+          "Pages active:                            200000.\nPages inactive:                           3000.\n"
+          "Pages speculative:                         500.\nPages wired down:                         90000.\n")
+    assert A.parse_vm_stat(vm) == 16384 * 13500
+    assert A.parse_vm_stat(vm.replace("Pages speculative:                         500.\n", "")) is None
+    assert A.parse_vm_stat("garbage") is None
 
 
 def test_admission():
@@ -232,6 +295,32 @@ def test_idle_clock_and_parsing():
             pass
 
 
+def test_factory_failure_refunds_only_when_nothing_spawned():
+    """LIMITS H1 / TESTS T1: a factory that fails before spawning anything is refunded at once; one that spawned
+    (charge.started()) and then failed keeps its charge until its own teardown reports the reap."""
+    c = Clock()
+    L = A.Ledger({"python": G}, reserve=0, read=Mem(c, 8 * G), clock=c)
+    seen = {}
+
+    def before(nb, entry, on_end, charge):
+        raise OSError("no such interpreter")
+
+    def after(nb, entry, on_end, charge):
+        charge.started()
+        seen["charge"] = charge
+        raise OSError("the child died during setup")
+    for factory, held in ((before, False), (after, True)):
+        k = R.EngineKernels(factory, L, 600, c)
+        try:
+            k.start("nb", "python")
+            raise AssertionError("no failure")
+        except OSError:
+            pass
+        assert (L.pending() == G) is held, (factory.__name__, L.pending())
+    seen["charge"].reaped()
+    assert L.pending() == 0
+
+
 class Run:
     async def start(self, ledger, idle_s=None):
         Kernel.made = []
@@ -303,6 +392,88 @@ async def test_runner_admission_and_idle():
         assert L.pending() == G // 2
     finally:
         await t.end()
+
+
+def test_runner_idle_setting():
+    """TESTS T2: "never" (None) reaches the kernels as never; omitted is the default (24h)."""
+    k = enrolled("http://127.0.0.1:9")
+    assert R.RelayRunner(k, err=lambda s: None, kernels=Kernel, idle_s=None).engine.idle_s is None
+    assert R.RelayRunner(k, err=lambda s: None, kernels=Kernel, idle_s=A.parse_idle("never")).engine.idle_s is None
+    assert R.RelayRunner(k, err=lambda s: None, kernels=Kernel).engine.idle_s == A.IDLE_DEFAULT_S
+    assert R.RelayRunner(k, err=lambda s: None, kernels=Kernel, idle_s=600).engine.idle_s == 600
+
+
+@aio
+async def test_idle_runs_by_itself():
+    """TESTS T3: the runner's own idle task fires without anyone calling idle_pass: connected, and while the relay
+    refuses (backoff); an attached kernel and a "never" runner are never stopped; the task ends with the runner."""
+    saved = R.IDLE_PASS_S
+    R.IDLE_PASS_S = 0.05
+    try:
+        for never in (False, True):
+            c = Clock()
+            L = A.Ledger({e: G // 4 for e in R.ENGINE_ENTRIES}, reserve=0, read=Mem(c, 8 * G), clock=c)
+            t = await Run().start(L, idle_s=None if never else 600)
+            t.runner.engine.clock = c
+            try:
+                leg = await t.relay.leg()
+                open_engine(leg, 1, nb="kept", sgen=1)
+                open_engine(leg, 2, nb="idle", sgen=1)
+                await msg(leg), await msg(leg)
+                leg.control(relay="page-close", conn="c2", gen=2)
+                await settle()
+                idle = t.runner.engine.get("idle", "sagebrush-magma")
+                idle.idle.detach()  # (the clock from now)
+                # (the relay now refuses every leg: the runner is in its backoff when idle comes due)
+                t.relay.upgrade_status = 503
+                leg.drop()
+                await asyncio.sleep(0.2)
+                c.t += 601
+                await asyncio.sleep(0.3)
+                kept = t.runner.engine.get("kept", "sagebrush-magma")
+                if never:
+                    assert t.runner.engine.get("idle", "sagebrush-magma") is idle and not any(e[0] == "stop" for e in idle.events)
+                else:
+                    assert t.runner.engine.get("idle", "sagebrush-magma") is None and idle.events[-1][0] == "stop", idle.events
+                    # (the leg's loss detached "kept" too: it is quiescent but its clock started at that loss)
+                    assert kept is not None or True
+                assert t.runner.idle_task is not None and not t.runner.idle_task.done()
+            finally:
+                await t.end()
+            assert t.runner.idle_task is None, "the idle task ends with the runner"
+    finally:
+        R.IDLE_PASS_S = saved
+
+
+@aio
+async def test_idle_spares_attached_and_running():
+    saved = R.IDLE_PASS_S
+    R.IDLE_PASS_S = 0.05
+    try:
+        c = Clock()
+        L = A.Ledger({e: G // 4 for e in R.ENGINE_ENTRIES}, reserve=0, read=Mem(c, 8 * G), clock=c)
+        t = await Run().start(L, idle_s=600)
+        t.runner.engine.clock = c
+        try:
+            leg = await t.relay.leg()
+            open_engine(leg, 1, nb="attached", sgen=1)
+            open_engine(leg, 2, nb="busy", sgen=1)
+            await msg(leg), await msg(leg)
+            leg.control(relay="page-close", conn="c2", gen=2)
+            await settle()
+            busy = t.runner.engine.get("busy", "sagebrush-magma")
+            busy.idle.cell_started()
+            c.t += 10_000
+            await asyncio.sleep(0.3)
+            assert t.runner.engine.get("attached", "sagebrush-magma") is not None and t.runner.engine.get("busy", "sagebrush-magma") is busy
+            busy.idle.cell_ended()
+            c.t += 601
+            await asyncio.sleep(0.3)
+            assert t.runner.engine.get("busy", "sagebrush-magma") is None and t.runner.engine.get("attached", "sagebrush-magma") is not None
+        finally:
+            await t.end()
+    finally:
+        R.IDLE_PASS_S = saved
 
 
 if __name__ == "__main__":

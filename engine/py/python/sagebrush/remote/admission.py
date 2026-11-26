@@ -96,61 +96,137 @@ def _read_int(path):
         return None
 
 
+def _unescape_mount(field):
+    """mountinfo's octal escapes (space, tab, newline, backslash) undone."""
+    return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), field)
+
+
+def _mounts(root):
+    """The cgroup mounts from /proc/self/mountinfo: [(kind, root-in-hierarchy, mountpoint)], kind "v2" or "v1"
+    (v1 with the memory controller only); None if mountinfo can't be read or a line is malformed."""
+    try:
+        with open(os.path.join(root, "proc/self/mountinfo"), encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except (OSError, UnicodeDecodeError):
+        return None
+    out = []
+    for line in lines:
+        left, sep, right = line.partition(" - ")
+        lf, rf = left.split(" "), right.split(" ")
+        if not sep or len(lf) < 6 or len(rf) < 3:
+            return None
+        fstype, superopts = rf[0], rf[2].split(",")
+        if fstype == "cgroup2":
+            out.append(("v2", _unescape_mount(lf[3]), _unescape_mount(lf[4])))
+        elif fstype == "cgroup" and "memory" in superopts:
+            out.append(("v1", _unescape_mount(lf[3]), _unescape_mount(lf[4])))
+    return out
+
+
+def _clean_path(p):
+    """A cgroup path's components, or None for anything but a plain absolute path (no ".", "..", empty parts)."""
+    if not p.startswith("/"):
+        return None
+    parts = [x for x in p.split("/")[1:] if x != ""] if p != "/" else []
+    if any(x in (".", "..") for x in parts) or "//" in p.rstrip("/") or "\0" in p:
+        return None
+    return parts
+
+
 def _cgroup_headroom(root):
-    """The smallest finite headroom of this process's cgroups, from its own to the root (v2, and v1's memory
-    controller), or "none" where no limit is set, or None if a figure can't be read."""
+    """The smallest finite memory headroom of this process's cgroups, from its own up to the namespace's root (the
+    mount's root), v2 and v1's memory controller, found through /proc/self/mountinfo (its mountpoint and its root in the
+    hierarchy); "none" where no limit is set anywhere on the way; None (unknown: new starts are refused) when the
+    membership can't be read, or a reported membership's mount, directory or figure is missing or malformed."""
     try:
         with open(os.path.join(root, "proc/self/cgroup"), encoding="utf-8") as f:
             lines = f.read().splitlines()
-    except OSError:
-        return "none"
-    best = "none"
+    except (OSError, UnicodeDecodeError):
+        return None
+    member = {}
     for line in lines:
         parts = line.split(":", 2)
-        if len(parts) != 3:
-            continue
+        if len(parts) != 3 or not parts[0].isdigit():
+            return None
         _, ctrls, path = parts
-        if ctrls == "":
-            base, limit_f, usage_f = os.path.join(root, "sys/fs/cgroup"), "memory.max", "memory.current"
-        elif "memory" in ctrls.split(","):
-            base, limit_f, usage_f = os.path.join(root, "sys/fs/cgroup/memory"), "memory.limit_in_bytes", "memory.usage_in_bytes"
-        else:
+        kind = "v2" if ctrls == "" and parts[0] == "0" else "v1" if "memory" in ctrls.split(",") else None
+        if kind is None:
             continue
-        p = path.strip("/")
-        while True:
-            d = os.path.join(base, p) if p else base
-            if os.path.isdir(d):
-                lim, use = _read_int(os.path.join(d, limit_f)), _read_int(os.path.join(d, usage_f))
-                if lim is None and os.path.exists(os.path.join(d, limit_f)):
-                    return None
-                # (v1's "no limit" is a huge number; anything at or past 2^62 is taken as none)
-                if isinstance(lim, int) and lim < 2 ** 62:
-                    if not isinstance(use, int):
-                        return None
-                    h = max(0, lim - use)
-                    best = h if best == "none" else min(best, h)
-            if not p:
+        comps = _clean_path(path)
+        if comps is None or kind in member:
+            return None
+        member[kind] = comps
+    if not member:
+        return "none"  # (no memory membership reported at all: no cgroup limit applies)
+    mounts = _mounts(root)
+    if mounts is None:
+        return None
+    best = "none"
+    for kind, comps in member.items():
+        mount = next((m for m in mounts if m[0] == kind), None)
+        if mount is None:
+            return None  # (membership reported, its hierarchy not mounted here: unknown)
+        mroot = _clean_path(mount[1])
+        if mroot is None or comps[:len(mroot)] != mroot:
+            return None  # (the membership isn't under the mount's root: a namespace we can't see)
+        rel = comps[len(mroot):]
+        base = os.path.join(root, mount[2].lstrip("/"))
+        limit_f, usage_f = ("memory.max", "memory.current") if kind == "v2" else ("memory.limit_in_bytes", "memory.usage_in_bytes")
+        # (from the process's own cgroup up to the mount's root; the root itself has no limit file in v2)
+        for depth in range(len(rel), -1, -1):
+            d = os.path.join(base, *rel[:depth]) if depth else base
+            if not os.path.isdir(d):
+                return None
+            if kind == "v2" and depth == 0:
                 break
-            p = os.path.dirname(p)
+            if kind == "v2":
+                # (the memory controller is on here only if the parent's subtree_control names it; then the files
+                # must be there)
+                parent = os.path.join(base, *rel[:depth - 1]) if depth > 1 else base
+                ctl = _read_text(os.path.join(parent, "cgroup.subtree_control"))
+                if ctl is None:
+                    return None
+                if "memory" not in ctl.split():
+                    continue
+            lim, use = _read_int(os.path.join(d, limit_f)), _read_int(os.path.join(d, usage_f))
+            if lim is None or (lim != "max" and not isinstance(use, int)):
+                return None
+            # (v1's "no limit" is a huge number; anything at or past 2^62 is taken as none)
+            if isinstance(lim, int) and lim < 2 ** 62:
+                h = max(0, lim - use)
+                best = h if best == "none" else min(best, h)
     return best
 
 
+def _read_text(path):
+    try:
+        with open(path, encoding="ascii") as f:
+            return f.read()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def parse_vm_stat(out):
+    """macOS's vm_stat output: free, inactive and speculative pages times the page size, or None."""
+    m = re.search(r"page size of (\d+) bytes", out)
+    if not m:
+        return None
+    page, total = int(m.group(1)), 0
+    for k in ("Pages free", "Pages inactive", "Pages speculative"):
+        mm = re.search(r"^%s:\s+(\d+)\.$" % k, out, re.M)
+        if not mm:
+            return None
+        total += int(mm.group(1))
+    return page * total
+
+
 def _vm_stat():
-    """macOS: free, inactive and speculative pages times the page size, or None."""
+    """macOS: vm_stat's figure, or None."""
     try:
         out = subprocess.run(["/usr/bin/vm_stat"], capture_output=True, text=True, timeout=2, env={"PATH": "/usr/bin:/bin"}).stdout
     except (OSError, subprocess.SubprocessError):
         return None
-    m = re.search(r"page size of (\d+) bytes", out)
-    if not m:
-        return None
-    page, pages = int(m.group(1)), {}
-    for k in ("Pages free", "Pages inactive", "Pages speculative"):
-        mm = re.search(r"%s:\s+(\d+)\." % k, out)
-        if not mm:
-            return None
-        pages[k] = int(mm.group(1))
-    return page * sum(pages.values())
+    return parse_vm_stat(out)
 
 
 def read_memory(root="/", clock=time.monotonic, platform=None):
