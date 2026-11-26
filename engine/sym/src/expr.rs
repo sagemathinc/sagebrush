@@ -991,6 +991,32 @@ pub fn float_pow(b: &Num, x: &Num) -> Num {
         }
         r
     };
+    // (a real base's integer power past x and 1/x is mpfr_pow_si's always:
+    // powf, wasm's libm, is not correctly rounded, SR(RR(-1.0001))^40000)
+    if let Some(n) = int_power.filter(|n| bi == 0.0 && !k.complex() && br.is_finite() && !(-1..=1).contains(n)) {
+        return crate::num::pow_int_mp53(b, n, k);
+    }
+    // (and to an integer past those: Sage's infinity or 0 past MPFR's
+    // exponents, SR(RR(2))^(10^20) is +infinity, refused short of them)
+    if int_power.is_none() && bi == 0.0 && xi == 0.0 && !k.complex() && br.is_finite() {
+        // (an RR exponent's parity is its double's: odd ones reach 2^53,
+        // past int_power's 9.0e15)
+        let n = if x.is_exact() {
+            x.as_int().map(|n| (n.to_f64().unwrap_or(f64::INFINITY), n.is_odd()))
+        } else {
+            Some((xr, xr.abs() < 9007199254740992.0 && xr % 2.0 != 0.0)).filter(|_| xr.is_finite() && xr.fract() == 0.0)
+        };
+        if let Some((nf, odd)) = n {
+            // (-1 by the exponent's parity, which its double may have lost:
+            // SR(RR(-1))^(10^20 + 1) is -1)
+            if br.abs() == 1.0 {
+                return Num::Float(if br < 0.0 && odd { -1.0 } else { 1.0 }, 0.0, k);
+            }
+            if let Some(r) = crate::num::pow_past_doubles(br, 0.0, nf, odd, &crate::print::to_string(&num(x.clone())), k) {
+                return r;
+            }
+        }
+    }
     if bi == 0.0 && xi == 0.0 && (br >= 0.0 || xr.fract() == 0.0) {
         return checked(Num::Float(br.powf(xr), 0.0, k));
     }
