@@ -190,8 +190,9 @@ test("a URL with no hash, or a malformed one, is never fetched: the session runs
   assert.deepEqual(c, { path: "typescript", why: "the numerics module could not be loaded (the numerics module fetched is not the one this page was built with)", fetches: 1 });
 });
 
-// (engine cost policy r2: no room in the module's memory is not a refusal; the loop computes it. Was grader N12's MemoryError)
-test("a module memory that can't grow: the factor is computed in JavaScript, the same, and the session goes on", async () => {
+// (no automatic fallback, William Nov 25 2026, #2147 N2: a module memory that can't grow is a MemoryError naming the
+// workspace, not the JavaScript loop; nothing is kept, so the next call factors on engine/nd)
+test("a module memory that can't grow: a MemoryError naming the workspace, and the session goes on", async () => {
   const { notebookSession } = require("../src/notebook-session");
   const s = notebookSession(() => {}, { captureStreams: true });
   await s.ready;
@@ -208,7 +209,7 @@ test("a module memory that can't grow: the factor is computed in JavaScript, the
   await s.handle({ id: 3, code: "OK = float(np.linalg.cholesky(B)[0, 0])" });
   const main = require("../src/runtime/object").getattr(require("../src/runtime").R.importModule("__main__"), "__dict__");
   const v = (name: string) => require("../src/runtime/object").callObj(require("../src/runtime/object").getattr(main, "__getitem__"), [name]);
-  assert.equal(v("R"), Math.SQRT2);
+  assert.match(v("R"), /^WebAssembly kernel workspace: could not grow by \d+ bytes \(more than the computer could give\); use the native app on a computer with more memory$/);
   assert.equal(v("OK"), Math.SQRT2);
 });
 
