@@ -11,10 +11,15 @@
 #   and uses Claude Code from its own dependencies, into ~/.cache, on first use.
 # - /home/sb is the volume: the computer's key (~/.config/sagebrush/remote/key.json), the agents' logins, and the
 #   folder the notebook and terminal start in (~/work). A restart, or a new image, keeps them: no new pairing.
-ARG UV_VERSION=0.11.25
-FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+# Both bases by digest, never a tag alone: the bytes this image copies (uv) and is built on (Debian) are the ones
+# reviewed.  Each digest is the tag's multi-platform index, as read from its registry on Nov 26 2026; the image is
+# built for linux/amd64 (the remote-image workflow checks the built image's architecture), whose manifests are
+#   uv 0.11.25           linux/amd64 sha256:bb38f0ebd7d5d42c60d46a72cc8dbf2ed66c7263212f3b94a8ddfe2b60f7f8ca
+#   debian:stable-slim   linux/amd64 sha256:97df7a62b82338f3c67d3a6f6c847ba44759f9c1b825cf58d3239d95a5478700
+# Moving either (a new uv, Debian's security updates) is a change here: the tag and its new index digest together.
+FROM ghcr.io/astral-sh/uv:0.11.25@sha256:1e3808aa9023d0980e7c15b1fa7c1ac16ff35925780cf5c459858b2d693f01a9 AS uv
 
-FROM debian:stable-slim
+FROM debian:stable-slim@sha256:a64d9dbf633e2a2503afac76be521dc25d9b5765150b30d31a3914d4ae969cab
 ARG SAGEBRUSH_VERSION=0.10.3
 ARG AGENT_VERSION=0.8.18
 ARG AGENT_SHA256=4a4b055092df1c3cafb1907473872595dc7d1c324923b0494a19c9afeace3237

@@ -38,6 +38,11 @@ jobs:
           persist-credentials: false
       - name: build
         run: DOCKER_BUILDKIT=1 docker build -t sagebrush-remote:ci docker/remote
+      - name: architecture (the digests the Dockerfile pins are recorded for linux/amd64)
+        run: |
+          set -euo pipefail
+          a=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' sagebrush-remote:ci)
+          [ "$a" = linux/amd64 ] || { echo "built for $a, not linux/amd64"; exit 1; }
       - name: smoke (start, connect, run a cell; restart, connect again with the volume's key)
         run: docker/remote/smoke.sh sagebrush-remote:ci
   publish:

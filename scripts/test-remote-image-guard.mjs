@@ -4,7 +4,8 @@
 // commit passed full CI on master (release.yml's check), with the tag naming the built image's own version.  Its `if:`
 // is read from the workflow and evaluated over the events below (GitHub's expression syntax, only the parts it uses:
 // anything else in it fails this test); its CI check and its version check are read from the workflow and run here
-// against a stub `gh` (answering from fixed run lists, through the real jq) and a stub `docker`. 
+// against a stub `gh` (answering from fixed run lists, through the real jq) and a stub `docker`.  Both Dockerfile
+// bases are pinned by digest, and the image job checks the built architecture the digests are recorded for.
 //
 //   node scripts/test-remote-image-guard.mjs
 import { spawnSync } from "node:child_process";
@@ -15,6 +16,7 @@ import { fileURLToPath } from "node:url";
 
 const root = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const text = readFileSync(join(root, ".github", "workflows", "remote-image.yml"), "utf8");
+const dockerfile = readFileSync(join(root, "docker", "remote", "Dockerfile"), "utf8");
 let failed = 0, passed = 0;
 const ok = (c, what) => (c ? passed++ : (failed++, console.log("FAIL " + what)));
 const jobText = (name) => new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  [A-Za-z0-9_-]+:\\n|(?![\\s\\S]))`, "m").exec(text)?.[1] ?? null;
@@ -176,6 +178,12 @@ jq "$jq_filter" "$RUNS"
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }
+
+// 4. the bases by digest, and the architecture they're recorded for
+const froms = [...dockerfile.matchAll(/^FROM\s+(\S+)/gm)].map((m) => m[1]);
+ok(froms.length === 2 && froms.every((f) => /^[a-z0-9./-]+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$/.test(f)), `every FROM is a tag and its digest (${froms.join(", ")})`);
+ok(!/\$\{?[A-Z_]+\}?/.test(froms.join(" ")), "no FROM takes a build argument");
+ok(/docker image inspect --format '\{\{\.Os\}\}\/\{\{\.Architecture\}\}' sagebrush-remote:ci/.test(image) && /\[ "\$a" = linux\/amd64 \]/.test(image), "the image job checks the built image is linux/amd64");
 
 console.log(failed ? `remote image guard: ${failed} failed, ${passed} passed` : `remote image guard: ${passed} checks pass`);
 process.exit(failed ? 1 : 0);
