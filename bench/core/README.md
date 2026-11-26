@@ -27,6 +27,14 @@ The finish line for an item is our native engine within $2\times$ of the best re
 - Ratios:
   - **1-thread:** user, native, native-host and wasm, each against the fastest 1-thread reference (Magma, FLINT or NumPy/OpenBLAS).
   - **best/best** (the $2\times$ rule's): our faster of native and native-n against the fastest of Magma, flint, flint-n, blas and blas-n.
+  - **Coarse timers:** some timed values are within a few ticks of their timer's resolution. Magma's clock ticks every 10 ms, so a stream input timed once reads 0, 1 or 2 ticks on a small input.
+    - The resolution is the granularity for a single reading (a stream input, a cold first op, a per-op sample), and the granularity over the repetitions for a batched median.
+    - A headline ratio with a term under 5 ticks (`COARSE_TICKS`) is reported as a bound instead (`ratio_<x>_bound`: op, value and both terms' ticks), and its number is kept as `ratio_<x>_quantized`:
+      - a coarse reference gives $>$ ours / (reference + one tick);
+      - coarse ours gives $<$ (ours + one tick) / reference;
+      - both give no bound.
+    - A stream row's bound is the median of its per-input bounds. A reference that read 0 everywhere bounds the ratio the same way.
+    - The summary shows `> x (timer)`, and a best/best bound above 2 is listed with the gaps.
 - The Rust FLINT oracle needs a static FLINT 3 build at `SAGEBRUSH_FLINT_PREFIX` (see `engine/flint/build.rs`).
 
 ## The protocol
