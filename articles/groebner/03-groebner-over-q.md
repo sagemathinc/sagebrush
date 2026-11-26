@@ -67,10 +67,10 @@ rationals). That detail turned out to matter as much as the main idea.
     the best prime. Most rows reduce to zero, so later primes cost a small
     fraction of a full elimination.
 - **Reconstruction**, row by row:
-  - Each entry is CRT-lifted by Garner. A row is put over a common
-    denominator as it goes: multiply the next entry by the denominator so
-    far; if the result is small, the entry is known without rational
-    reconstruction.
+  - Each entry is CRT-lifted by the explicit CRT of `sagebrush-arith`. A
+    row is put over a common denominator as it goes: multiply the next
+    entry by the denominator so far; if the result is small, the entry is
+    known without rational reconstruction.
   - Acceptance requires bits(numerator) + bits(denominator) + 60 ≤
     bits(modulus): two primes to spare.
   - A "hard entry" (the last one that failed) is tried first, so an
@@ -111,8 +111,9 @@ worst case improved 3×. Magma had made the same choice.
 
 - **Garner is $O(k^2)$ per value.** That is fine for 20 primes and
   terrible for 2000, which lex bases need (article 5). From 64 primes a
-  product tree takes over, at $O(M(k)\log k)$ per value. Katsura-7's lex
-  reconstruction went from 37 s to 3.6 s.
+  product tree took over, at $O(M(k)\log k)$ per value. Katsura-7's lex
+  reconstruction went from 37 s to 3.6 s. Both have since given way to
+  the explicit CRT of `sagebrush-arith`.
 - **Reconstruction runs in parallel over rows.** Rows are independent, and
   this made the proof certificate 50× faster in its reconstruction phase.
 - **`to_u64_digits` allocates three times.** The bigint facade went

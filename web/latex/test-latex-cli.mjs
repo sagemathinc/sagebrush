@@ -6,7 +6,7 @@
 // an overflowing frame reported.
 //   node scripts/build-cli.mjs && node web/latex/test-latex-cli.mjs
 //   (CHROME=/path/to/chrome for the PNGs; LATEX_CLI_PNG=1 makes a missing browser a failure, not a skip)
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, mkdirSync, copyFileSync, symlinkSync, truncateSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync, mkdirSync, copyFileSync, symlinkSync, truncateSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
@@ -28,6 +28,8 @@ const runOpts = (opts, cli, cwd, ...a) => new Promise((res) => {
 });
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 900)); };
+// (the CLI's KaTeX exports its layout tree, a private export the sizes of TikZ nodes' text are read from)
+check("cli-katex-layout-tree", /renderToHTMLTree/.test(readFileSync(new URL("../../build/cli/sagebrush-latex.cjs", import.meta.url).pathname, "utf8")), null);
 const dir = mkdtempSync(join(tmpdir(), "sb-latex-cli-"));
 
 const TALK = String.raw`\documentclass[aspectratio=169]{beamer}
@@ -68,7 +70,7 @@ For every $n \ge 1$, $\sum_{k=1}^n k = \frac{n(n+1)}{2}$.
 \end{frame}
 \begin{frame}[plain]{Not shown}
 \begin{weirdenv}inside\end{weirdenv}
-\begin{tikzpicture}\draw (0,0) -- (1,1);\end{tikzpicture}
+\begin{tikzpicture}\clip (0,0) rectangle (1,1);\end{tikzpicture}
 \includegraphics{../outside.png}
 
 \mystery{x} and $\frac{1}{$ there.
@@ -106,7 +108,9 @@ try {
   check("check-unknown-command-warning-with-line", p("command", "mystery")?.severity === "warning" && p("command", "mystery").line === lineOf(TALK, "\\mystery"), j.problems);
   check("check-math-error", p("math")?.severity === "error" && p("math").line === lineOf(TALK, "\\mystery"), j.problems);
   check("check-unknown-environment", p("environment", "weirdenv")?.severity === "warning" && p("environment", "weirdenv").line === lineOf(TALK, "\\begin{weirdenv}"), j.problems);
-  check("check-tikz-not-rendered", p("not-rendered", "tikzpicture")?.severity === "warning", j.problems);
+  // (a picture using \clip isn't drawn yet: its problem names why, "tikzpicture (\clip isn't drawn by the preview yet)")
+  const tz = j.problems.find((x) => x.kind === "not-rendered" && x.name.startsWith("tikzpicture (") && /clip/.test(x.name));
+  check("check-tikz-not-rendered", tz?.severity === "warning", j.problems);
   check("check-beamer-commands-known", !j.problems.some((x) => ["usetheme", "institute", "alert", "only", "pause", "frametitle", "framesubtitle"].includes(x.name)), j.problems);
   check("check-images-report", j.images.find((i) => i.name === "wave")?.found === true && j.images.find((i) => i.name === "wave").path === "wave.svg", j.images);
   check("check-problems-in-line-order", j.problems.every((x, k, a) => k === 0 || (a[k - 1].line ?? 1e9) <= (x.line ?? 1e9)), j.problems.map((x) => x.line));
@@ -199,6 +203,15 @@ ${"many words ".repeat(14000)}
     const rr = await run(w, "render", "ex/talk2.tex", "-o", "t2.html");
     const hh = existsSync(join(w, "t2.html")) ? readFileSync(join(w, "t2.html"), "utf8") : "";
     check("input: the macros file's macros apply (../ and a leading /), \\include's text is there, nothing from outside", hh.includes("Hello from macros") && hh.includes("Included part with") && /mathbb/.test(hh) && !hh.includes("OUTSIDE TEXT"), { code: rr.code, err: rr.err, n: hh.length });
+    // (a problem in an \\input file: that file, as named from where the command runs, and its own line; in --json, the
+    //  main file's line it was read from too)
+    mkdirSync(join(ex, "sub"), { recursive: true });
+    writeFileSync(join(ex, "sub", "sec.tex"), "First.\n\\foo here.\n");
+    writeFileSync(join(ex, "talk3.tex"), "\\documentclass{article}\n\\begin{document}\nA.\n\\input{sub/sec}\n\\bar after.\n\\end{document}\n");
+    const c3 = await run(w, "check", "ex/talk3.tex"), j3 = (await run(w, "check", "ex/talk3.tex", "--json")).json;
+    const foo = j3?.problems.find((x) => x.name === "foo");
+    check("input: a problem in an \\input file is reported at that file and its line", /^ex\/sub\/sec\.tex:2: warning: \\foo is not supported/m.test(c3.out) && foo?.file === "ex/sub/sec.tex" && foo?.line === 2 && foo?.input_line === 4, { out: c3.out, foo });
+    check("input: the main file's own problem after it stays the main file's", /^ex\/talk3\.tex:5: warning: \\bar is not supported/m.test(c3.out), c3.out);
   }
 
   // ---- render: one self-contained HTML file
@@ -241,6 +254,74 @@ ${"many words ".repeat(14000)}
     //  gives up at 30 s, with what it said)
     const ft = await fakeRun("#!/bin/sh\necho 'fake-chrome: still starting' >&2\nexec sleep 40\n", "fspng");
     check("png: a browser that never opens its DevTools port: the 30 s timeout, with what it said", ft.code === 1 && /didn't open its DevTools port in 30 s; it said: fake-chrome: still starting$/.test(ft.json?.png_error ?? ""), { code: ft.code, png_error: ft.json?.png_error });
+    // (a browser whose page never loads, as a long document's on a busy computer: a DevTools that never sends
+    //  Page.loadEventFired, and answers Page.navigate at once (FAKE_NAV unset), never ("never") or 30 s
+    //  late ("late"). --timeout is the wait, for the navigation and the load together; the error says the HTML's size and
+    //  what to do, the HTML kept, the browser closed and its profile removed. FAKE_INFO: where it writes its pid and
+    //  profile)
+    const cdpFake = join(dir, "fake-cdp");
+    writeFileSync(cdpFake, `#!${process.execPath}
+const http = require("http"), crypto = require("crypto"), fs = require("fs"), path = require("path");
+const prof = process.argv.find((a) => a.startsWith("--user-data-dir=")).slice(16), nav = process.env.FAKE_NAV ?? "";
+fs.writeFileSync(process.env.FAKE_INFO, JSON.stringify({ pid: process.pid, prof }));
+const srv = http.createServer((q, r) => { r.setHeader("content-type", "application/json"); r.end(JSON.stringify([{ type: "page", webSocketDebuggerUrl: "ws://127.0.0.1:" + srv.address().port + "/devtools/page/1" }])); });
+srv.on("upgrade", (q, sock) => {
+  sock.write("HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\nSec-WebSocket-Accept: " + crypto.createHash("sha1").update(q.headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64") + "\\r\\n\\r\\n");
+  let buf = Buffer.alloc(0);
+  const answer = (id) => { const out = Buffer.from(JSON.stringify({ id, result: {} })); if (!sock.destroyed) sock.write(Buffer.concat([Buffer.from(out.length < 126 ? [129, out.length] : [129, 126, out.length >> 8, out.length & 255]), out])); };
+  sock.on("data", (d) => {
+    buf = Buffer.concat([buf, d]);
+    for (;;) {
+      if (buf.length < 2) return;
+      let n = buf[1] & 127, at = 2;
+      if (n === 126) { if (buf.length < 4) return; n = buf.readUInt16BE(2); at = 4; } else if (n === 127) { if (buf.length < 10) return; n = Number(buf.readBigUInt64BE(2)); at = 10; }
+      if (buf.length < at + 4 + n) return;
+      const mask = buf.subarray(at, at + 4), body = Buffer.from(buf.subarray(at + 4, at + 4 + n).map((b, i) => b ^ mask[i % 4])), op = buf[0] & 15;
+      buf = buf.subarray(at + 4 + n);
+      if (op !== 1) continue;
+      const m = JSON.parse(body);
+      if (m.method === "Page.navigate" && nav === "never") continue;
+      if (m.method === "Page.navigate" && nav === "late") { setTimeout(() => answer(m.id), 30000); continue; }
+      answer(m.id);
+    }
+  });
+  sock.on("error", () => {});
+});
+srv.listen(0, "127.0.0.1", () => fs.writeFileSync(path.join(prof, "DevToolsActivePort"), srv.address().port + "\\n/devtools/browser/x\\n"));
+`, { mode: 0o755 });
+    const t0 = Date.now();
+    const cdpRun = (name, nav, ...a) => new Promise((res) => {
+      const info = join(dir, `info-${name}.json`);
+      const q = spawn(process.execPath, [CLI, "latex", "render", "talk.tex", "-o", `${name}.html`, ...a, "--json"], { cwd: dir, env: { ...process.env, CHROME: cdpFake, FAKE_NAV: nav, FAKE_INFO: info } });
+      // (a CLI that never ends is killed at 90 s, its row failed: never a hung test)
+      let o = "", killed = false; q.stdout.on("data", (x) => (o += x));
+      const kill = setTimeout(() => { killed = true; q.kill("SIGKILL"); }, 90000);
+      q.on("close", (code) => {
+        clearTimeout(kill);
+        const ms = Date.now() - t0;
+        let json = null; try { json = JSON.parse(o); } catch {}
+        let pid = 0, prof = "", alive = true; try { ({ pid, prof } = JSON.parse(readFileSync(info, "utf8"))); } catch {}
+        try { process.kill(pid, 0); } catch { alive = false; }
+        res({ code, killed, json, ms, err: json?.pdf_error ?? json?.png_error ?? "", ended: pid > 0 && !alive, cleaned: prof !== "" && !existsSync(prof), html: existsSync(join(dir, `${name}.html`)) });
+      });
+    });
+    // (all at once: the one without --timeout waits for its HTML's size)
+    const [sl, st, nv, lt] = await Promise.all([cdpRun("sl", "", "--png", "slpng"), cdpRun("st", "", "--pdf", "st.pdf", "--timeout", "2"),
+      cdpRun("nv", "never", "--pdf", "nv.pdf", "--timeout", "2"), cdpRun("lt", "late", "--pdf", "lt.pdf", "--timeout", "2")]);
+    const gaveUp = (r, name, secs) => r.code === 1 && !r.killed && new RegExp(`^the browser didn't finish loading the HTML \\(\\d+\\.\\d MiB\\) in ${secs} s; .*--timeout.*open ${name}\\.html in a browser$`).test(r.err)
+      && r.html && r.ended && r.cleaned && !existsSync(join(dir, `${name}.pdf`));
+    check("pdf --timeout: a page that never loads, given up at the timeout with the HTML's size and what to do; the HTML kept, no PDF, the browser closed and its profile removed",
+      gaveUp(st, "st", 2) && st.ms < 15000, st);
+    check("pdf --timeout: a navigate the browser never answers ends at the same deadline, the browser closed and its profile removed", gaveUp(nv, "nv", 2) && nv.ms < 15000, nv);
+    check("pdf --timeout: a navigate answered after the deadline: given up at the deadline, not when it answers", gaveUp(lt, "lt", 2) && lt.ms < 25000, lt);
+    // (the HTML's size, as written: 30 s and 10 s for each MiB begun, 40 s for this one's under 1 MiB)
+    const want = 30 + 10 * Math.ceil(statSync(join(dir, "sl.html")).size / 2 ** 20);
+    check("png: a page that never loads, without --timeout: the wait for its size", gaveUp(sl, "sl", want) && want > 30 && sl.ms >= want * 1000 - 1000, { ...sl, want });
+  }
+  {
+    const bad = await run(dir, "render", "talk.tex", "--timeout", "0");
+    const notCheck = await run(dir, "check", "talk.tex", "--timeout", "5");
+    check("render --timeout: a number of seconds, at most 3600; check has none", bad.code === 2 && /--timeout needs a number of seconds, at most 3600/.test(bad.err ?? "") && notCheck.code === 2 && /unknown option --timeout/.test(notCheck.err ?? ""), { bad, notCheck });
   }
   const browser = process.env.CHROME || ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((b) => existsSync(b));
   if (!browser) {
@@ -276,6 +357,19 @@ ${"many words ".repeat(14000)}
     writeFileSync(join(dir, "breaks.tex"), "\\documentclass{article}\n\\begin{document}\n\\newpage\nOne.\n\\newpage\nTwo.\\pagebreak[2] Still two.\\clearpage\\newpage Three.\\pagebreak Four.\n\\newpage\n\\end{document}\n");
     const bk = await runOpts({ env: { CHROME: browser } }, CLI, dir, "render", "breaks.tex", "--pdf", "breaks.pdf", "--json");
     check("pdf: an article's \\newpage, \\clearpage and \\pagebreak are its pages, as TeX's (3, none blank)", bk.code === 0 && bk.json?.pdf?.pages === 3, { code: bk.code, pdf: bk.json?.pdf, err: bk.json?.pdf_error ?? bk.err.slice(-300) });
+    // (a display wider than the text (as in a long real-world paper): TeX lets it run on into the margin with an
+    //  "Overfull \hbox" warning, nothing lost; the PDF had it cut off at its box's edge, the check saying nothing. Now
+    //  printed it runs on (the print rules), and render reports it: one warning, on its line, the exit 0 and ok as
+    //  for any warning; a document whose displays fit has none)
+    writeFileSync(join(dir, "wide.tex"), "\\documentclass{article}\n\\begin{document}\n\\[\n\\mu(x)=\\sup\\left\\{\\nu>0:\\ 0<\\left|x-\\frac pq\\right|<\\frac1{q^\\nu}\n\\text{ for infinitely many coprime integers }p,q,\\ q\\ge2\\right\\}.\n\\]\n\\end{document}\n");
+    const wd = await runOpts({ env: { CHROME: browser } }, CLI, dir, "render", "wide.tex", "--pdf", "wide.pdf", "--json");
+    const wideOver = (wd.json?.check?.problems ?? []).filter((p) => p.kind === "overfull");
+    const printRule = /@media print \{[^@]*\.sb-standalone \.dmath \{ overflow: visible; \}/.test(existsSync(join(dir, "wide.html")) ? readFileSync(join(dir, "wide.html"), "utf8") : "");
+    check("pdf: a display wider than the text runs on when printed, and is reported: one overfull warning on its line, exit 0", wd.code === 0 && wd.json?.pdf?.pages === 1 && wd.json?.check?.ok === true && wideOver.length === 1 && wideOver[0].severity === "warning" && wideOver[0].line === 4 && /\\mu ?\(x\)/.test(wideOver[0].name) && /\d+px wider than the text/.test(wideOver[0].message) && printRule,
+      { code: wd.code, pdf: wd.json?.pdf, problems: wd.json?.check?.problems, printRule, err: wd.json?.pdf_error ?? wd.err.slice(-300) });
+    writeFileSync(join(dir, "fits.tex"), "\\documentclass{article}\n\\begin{document}\n\\[\n\\mu(x)=\\sup\\left\\{\\nu>0:\\ 0<\\left|x-\\frac pq\\right|<\\frac1{q^\\nu}\\right\\}.\n\\]\n\\end{document}\n");
+    const ft = await runOpts({ env: { CHROME: browser } }, CLI, dir, "render", "fits.tex", "--pdf", "fits.pdf", "--json");
+    check("pdf: a document whose displays fit has no overfull warning", ft.code === 0 && ft.json?.pdf?.pages === 1 && !(ft.json?.check?.problems ?? []).some((p) => p.kind === "overfull"), { code: ft.code, problems: ft.json?.check?.problems, err: ft.json?.pdf_error ?? ft.err.slice(-300) });
     check("png-overflow-reported", pages[3]?.overflow_px > 0 && pages.filter((x) => x.overflow_px).length === 1 && pages[1].title === "Overlays", pages);
     // (sim run 11 X01, run 12 BL01: displays squeezed and clipped while their frame read as fitting. Against TeX Live
     //  2025, beamer at aspectratio=169: X01's frame fits; with k copies of its nested-root display, each after a line
@@ -347,6 +441,23 @@ $\sage{1/0}$ then $\sage{2+2}$.
   await run(dir, "render", "sage.tex", "-o", "sage.html");
   const sh = readFileSync(join(dir, "sage.html"), "utf8");
   check("render after run: the plot and the results drawn", /<img class="sageplot" alt="a plot" src="data:image\/svg\+xml;base64,/.test(sh) && sh.includes("274177") && !sh.includes("Sage item 2: not run"), null);
+  // (what a sageblock prints: never drawn, as in SageTeX, and not in the results file; but run reports it, each item's
+  //  output in --json and its last lines in the text, for whoever ran it; a \sage{} item printing nothing has none)
+  {
+    const PR = "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sageblock}\nn = 6*7\nprint(\"printed\", n)\n\\end{sageblock}\nThe value is $\\sage{n}$.\n\\end{document}\n";
+    writeFileSync(join(dir, "printed.tex"), PR);
+    const pj = await run(dir, "run", "printed.tex", "--json");
+    const pres = existsSync(join(dir, "printed.tex.results.json")) ? JSON.parse(readFileSync(join(dir, "printed.tex.results.json"), "utf8")) : null;
+    const pt = await run(dir, "run", "printed.tex");
+    await run(dir, "render", "printed.tex", "-o", "printed.html");
+    const ph = existsSync(join(dir, "printed.html")) ? readFileSync(join(dir, "printed.html"), "utf8") : "";
+    check("run: a sageblock's printed output in --json (its item, not the \\sage{} one) and in the text, never drawn, nor in the results file",
+      pj.code === 0 && pj.json?.items?.[0]?.mode === "block" && pj.json.items[0].output === "printed 42\n" && !("output" in (pj.json.items[1] ?? {}))
+      && pres && !JSON.stringify(pres).includes("printed 42") && /printed\.tex:4: SageTeX item 1 \(block\) printed \(not drawn in the document\):\n {4}printed 42\n/.test(pt.out)
+      && ph.includes("42") && !ph.includes("printed 42"), { code: pj.code, items: pj.json?.items, out: pt.out.slice(0, 400), err: pj.err.slice(-300) });
+    const help = await run(dir, "--help");
+    check("run's help: what an item prints isn't drawn, as in SageTeX; \\sage{} or \\sagestr{} puts a value there", /isn't drawn in the document, as in SageTeX/.test(help.out) && /\\sage\{\} or \\sagestr\{\}/.test(help.out), help.out.slice(0, 900));
+  }
   // (Magma in LaTeX, through `sagebrush latex run`: quit; ends only its item; Magma's names and Sage's apart, both ways;
   //  a Sage item's SystemExit is its failure and blocks the rest, which don't run (the item after it would write
   //  ran.txt); the summary counts code items)

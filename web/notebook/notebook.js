@@ -32,6 +32,7 @@ const STOP_MESSAGE = "\nStopped: it did not stop when interrupted, so the interp
 // (web/notebook/highlight.js, which the board's editor uses too)
 import { esc, highlight, highlightMarkdown } from "./highlight.js";
 import { highlightMatlab } from "./highlight-matlab.js";
+import { highlightMagma } from "./highlight-magma.js";
 import { armStop, disarmStop, stopIgnored } from "./stop-guard.js";
 export { esc, highlight, highlightMarkdown };
 
@@ -158,12 +159,12 @@ const KEYS_HTML = `<form method="dialog"><b>Keyboard shortcuts</b><button aria-l
 <tr><td>${k("D")} ${k("D")}</td><td>delete the cell</td></tr>
 <tr><td>${k("Z")}</td><td>undo the cell deletion</td></tr>
 <tr><td>${k("X")} ${k("C")} ${k("V")}</td><td>cut, copy, paste below (${k("Shift", "V")}: above)</td></tr>
-<tr><td>${k("M")} ${k("Y")}</td><td>to Markdown, to code</td></tr>
+<tr><td>${k("M")} ${k("Y")} ${k("R")}</td><td>to Markdown, to code, to raw</td></tr>
 <tr><td>${k("Shift", "M")}</td><td>merge with the cell below</td></tr>
 <tr><td>${k("I")} ${k("I")}</td><td>interrupt</td></tr>
 <tr><td>${k("0")} ${k("0")}</td><td>restart the interpreter</td></tr>
 <tr><td>${k("H")}</td><td>this list</td></tr></table></div></div>
-<p>Drag a cell by its prompt (or the ⠿ handle) to move it. On a Mac, ${k("Cmd")} works where ${k("Ctrl")} is shown.</p>`;
+<p>Drag a cell by its prompt (or the ⠿ handle) to move it. On a Mac, ${k("Cmd")} works where ${k("Ctrl")} is shown, except in ${k("Ctrl", "M")}.</p>`;
 
 /**
  * A notebook in `root`.
@@ -223,7 +224,7 @@ export function createNotebook(root, opts = {}) {
   const cells = () => [...cellsEl.children].map((el) => el.cell).filter(Boolean);
   const index = (cell) => cells().indexOf(cell);
   function paint(cell) {
-    cell.hl.innerHTML = cell.type === "code" ? (isMatlab() ? highlightMatlab(cell.ta.value) : highlight(cell.ta.value, isSage())) : cell.type === "markdown" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + "\n";
+    cell.hl.innerHTML = cell.type === "code" ? (isMatlab() ? highlightMatlab(cell.ta.value) : isMagma() ? highlightMagma(cell.ta.value) : highlight(cell.ta.value, isSage())) : cell.type === "markdown" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + "\n";
     // (a Markdown cell's blocks: its text changed elsewhere, merged, undone, an agent's)
     if (cell.blocks && cell.ta.value !== cell.blocksText) { cell.blocksText = cell.ta.value; cell.blocks.value = cell.ta.value; }
   }
@@ -1882,6 +1883,7 @@ export function createNotebook(root, opts = {}) {
   }
   // Highlight fenced Python/Sage code in Markdown as in code cells.
   const mdHighlight = (code, lang) => (/^(matlab|m)$/i.test(lang ?? "") || (!lang && isMatlab()) ? highlightMatlab(code).replace(/\n$/, "")
+    : /^(magma|mag)$/i.test(lang ?? "") || (!lang && isMagma()) ? highlightMagma(code).replace(/\n$/, "")
     : !lang || /^(python|py|python3|sage|ipython)$/i.test(lang) ? highlight(code, /sage/i.test(lang) || (!lang && isSage())).replace(/\n$/, "") : null);
   async function renderMd(cell) {
     closeBlocks(cell);
@@ -2889,7 +2891,7 @@ export function createNotebook(root, opts = {}) {
     get store() { return store; },
     on(event, f) { (listeners[event] ??= []).push(f); return () => { listeners[event] = listeners[event].filter((g) => g !== f); }; },
     showKeys() { keysDlg.showModal(); },
-    setReadOnly(ro) { opts.readOnly = !!ro; root.classList.toggle("readonly", !!ro); for (const c of cells()) c.ta.readOnly = !!ro; },
+    setReadOnly(ro) { opts.readOnly = !!ro; root.classList.toggle("readonly", !!ro); for (const c of cells()) c.ta.readOnly = !!ro; guard(); },
     // outputs, for other places (a console's picture panel) and agents
     output: { text: appendText, display: appendDisplay, interact: renderInteract, forget: forgetInteracts, sink: areaSink },
     outputText, pictures, interacts, setInteract, saveOutputs, loadOutputs,

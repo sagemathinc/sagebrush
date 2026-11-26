@@ -2,7 +2,8 @@
 // A Delegate task's proposal for the person to read (proposal-view.ts), in a real browser, from a fake source (the
 // page's view of the host's tasks.diff and tasks.file): its list, each kind of file's diff, the notebook as proposed
 // (read only, no code run, outputs filtered), a .tex rendered (a stand-in LaTeX module: what it's given and when it's
-// let go), its bounds, a failing source, one open at a time, close, and the host page's actions at its foot.
+// let go), a .md rendered by the host's Markdown renderer (a stand-in), a plain text file as text, code and boards as
+// "Diff only", its bounds, a failing source, one open at a time, close, and the host page's actions at its foot.
 //   CHROME=google-chrome bun web/workspace/review/test-proposal-view.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -29,6 +30,10 @@ const FILES = {
     "notes.txt": "one\ntwo\nthree\n",
     "old.txt": "gone\n",
     "doc.tex": "\\documentclass{article}\n\\begin{document}\nOld text.\n% \\input{commented}\n\\end{document}\n",
+    "readme.md": "# Old title\n\nSome text.\n",
+    "page.txt": "plain\n",
+    "calc.py": "x = 1\n",
+    "plan.board.json": "{\"v\":1,\"items\":[]}\n",
   },
   proposal: {
     "nb.ipynb": nb([code("c1", "x = 2"), code("c2", "print(x)"), code("c3", "plot()", [
@@ -40,6 +45,10 @@ const FILES = {
     "pic.png": "\x89PNG...",
     "doc.tex": "\\documentclass{article}\n\\begin{document}\n\\section{Results}\nNew text.\n\\input{more}\n\\end{document}\n",
     "fresh.tex": "\\documentclass{article}\n\\begin{document}\nFresh.\n\\end{document}\n",
+    "readme.md": "# New title\n\nSome text.\n",
+    "page.txt": "<b id=txtplanted>bold</b><img src=x onerror=\"window.__ranTxt=1\">\n",
+    "calc.py": "x = 2\n",
+    "plan.board.json": "{\"v\":1,\"items\":[{\"id\":\"a\"}]}\n",
   },
 };
 const LIST = { base: "1111111aaaaaaaa", proposal: "2222222bbbbbbbb", round: 2, seq: 9, files: [
@@ -55,12 +64,22 @@ const TEXLIST = { base: "1111111aaaaaaaa", proposal: "2222222bbbbbbbb", round: 1
   { path: "fresh.tex", kind: "tex", change: "added" },
   { path: "notes.txt", kind: "text", change: "modified" },
 ] };
+// (a proposal of a Markdown file, a plain text file that looks like HTML, code and a board)
+const MDLIST = { base: "1111111aaaaaaaa", proposal: "2222222bbbbbbbb", round: 1, seq: 4, files: [
+  { path: "readme.md", kind: "text", change: "modified" },
+  { path: "page.txt", kind: "text", change: "modified" },
+  { path: "calc.py", kind: "code", change: "modified" },
+  { path: "plan.board.json", kind: "board", change: "modified" },
+] };
 // (inlined into the page's script: "<" escaped, so a "</script>" in a document can't end it)
 const safe = (v) => JSON.stringify(v).replace(/</g, "\\u003c");
 writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>proposal test</title><div id="p"></div><script type="module">
 import { openProposal, PROPOSAL_TEXT, PROPOSAL_LIMITS } from "./pv.js";
 const FILES = ${safe(FILES)}, LIST = ${safe(LIST)};
-window.TEXLIST = ${safe(TEXLIST)};
+window.TEXLIST = ${safe(TEXLIST)}; window.MDLIST = ${safe(MDLIST)};
+// (a stand-in for the host page's Markdown renderer: what it's given; its HTML marks the first line)
+window.mdCalls = [];
+const mdStub = (src) => { window.mdCalls.push(src); return '<h2 class="stub-md">' + src.split("\\n")[0].replace(/[<>&]/g, "") + "</h2>"; };
 // (a stand-in for the LaTeX page module: what mountEditor is given, and each mount let go)
 window.tex = { mounts: [], destroyed: 0 };
 const texMod = { mountEditor: (root, opts) => {
@@ -71,6 +90,7 @@ const texMod = { mountEditor: (root, opts) => {
 const commitSide = (c) => (c === LIST.base ? "base" : c === LIST.proposal ? "proposal" : null);
 window.T = PROPOSAL_TEXT; window.L = PROPOSAL_LIMITS;
 window.FILES_PROPOSAL_DOC = FILES.proposal["doc.tex"]; window.FILES_BASE_DOC = FILES.base["doc.tex"];
+window.FILES_PROPOSAL_MD = FILES.proposal["readme.md"]; window.FILES_PROPOSAL_TXT = FILES.proposal["page.txt"];
 window.reads = [];
 window.calls = { fromFile: 0, mount: 0 };
 // (a notebook's .ipynb text padded with trailing spaces (JSON allows them) to exactly n UTF-8 bytes; with fill, a
@@ -99,7 +119,8 @@ window.open1 = (o, withActions) => {
   const actions = withActions ? Object.assign(document.createElement("div"), { id: "acts", textContent: "ACTIONS" }) : undefined;
   window.view?.close();
   const latex = o.latex === "stub" ? () => new Promise((r) => setTimeout(() => r(texMod), o.latexDelay ?? 0)) : o.latex === "fail" ? () => Promise.reject(new Error("no")) : undefined;
-  window.view = openProposal(window.make(o), p, { notebook: () => import("./nb.js").then((m) => ({ ...m, fromFile: (...a) => { window.calls.fromFile++; return m.fromFile(...a); }, createNotebook: (...a) => { window.calls.mount++; return m.createNotebook(...a); } })), latex, actions });
+  const markdown = o.markdown === "stub" ? mdStub : undefined;
+  window.view = openProposal(window.make(o), p, { notebook: () => import("./nb.js").then((m) => ({ ...m, fromFile: (...a) => { window.calls.fromFile++; return m.fromFile(...a); }, createNotebook: (...a) => { window.calls.mount++; return m.createNotebook(...a); } })), latex, markdown, actions });
   return true;
 };
 window.clickFile = (path) => { [...document.querySelectorAll("#p .file .path")].find((b) => b.textContent === path).click(); return true; };
@@ -247,6 +268,43 @@ try {
   await ev("window.clickFile('doc.tex')");
   await until("!!document.querySelector('#p .file p')");
   ok((await ev("window.tex.mounts.length")) === 0 && (await ev("document.querySelector('#p .file p').textContent")) === "Too large to show here.", "a .tex past PROPOSAL_LIMITS.bytes: neither diffed nor rendered");
+
+  // ---- a .md rendered by the host's renderer, a plain text file as text, code and a board: "Diff only"
+  const fileAt = (i) => `[...document.querySelectorAll('#p .file')][${i}]`;
+  await ev("window.mdCalls = []; window.open1({ list: window.MDLIST, markdown: 'stub' })");
+  await until("document.querySelectorAll('#p .file').length === 4");
+  ok((await ev("window.mdCalls.length")) === 0, "a Markdown proposal's list: nothing rendered before a file is opened");
+  await ev("window.clickFile('readme.md')");
+  await until("!!document.querySelector('#p .md-rendered .stub-md')");
+  const m1 = await ev(`(() => { const f = ${fileAt(0)}, r = f.querySelector('.md-rendered'); return { plus: [...f.querySelectorAll('.l\\\\+')].map((x) => x.textContent), shown: r.querySelector('.stub-md')?.textContent, buttons: [...r.querySelectorAll('button')].map((b) => b.textContent + ":" + b.getAttribute('aria-pressed')), calls: window.mdCalls.slice() }; })()`);
+  ok(m1.plus.join() === "+ # New title" && m1.shown === "# New title" && m1.calls.length === 1 && m1.calls[0] === await ev("FILES_PROPOSAL_MD"), "a changed .md: its line diff, and under it the proposal's text through the host's renderer, shown as its HTML", m1);
+  ok(JSON.stringify(m1.buttons) === JSON.stringify(["As proposed:true", "Before:false"]), "a .md: As proposed shown first, Before offered (the same shape as a .tex)", m1.buttons);
+  await ev(`[...${fileAt(0)}.querySelectorAll('.md-rendered button')].find((b) => b.textContent === 'Before').click()`);
+  await until(`${fileAt(0)}.querySelector('.stub-md')?.textContent === '# Old title'`);
+  ok((await ev("window.mdCalls.length")) === 2 && (await ev(`${fileAt(0)}.querySelectorAll('.md-rendered .stub-md').length`)) === 1, "Before: the base's text rendered in place of the proposal's");
+  await ev("window.clickFile('page.txt')");
+  await until(`!!${fileAt(1)}.querySelector('.text-rendered pre')`);
+  const t6 = await ev(`(() => { const f = ${fileAt(1)}; return { pre: f.querySelector('.text-rendered pre').textContent, planted: !!document.getElementById('txtplanted'), imgs: f.querySelectorAll('.text-rendered img').length, ran: window.__ranTxt ?? null, mdGone: !document.querySelector('#p .md-rendered'), calls: window.mdCalls.length }; })()`);
+  ok(t6.pre === await ev("FILES_PROPOSAL_TXT") && !t6.planted && t6.imgs === 0 && t6.ran === null, "a plain text file that looks like HTML: shown as its text, never read as HTML", t6);
+  ok(t6.mdGone && t6.calls === 2, "a text file isn't given to the Markdown renderer; the .md's render let go", t6);
+  for (const [i, path] of [[2, "calc.py"], [3, "plan.board.json"]]) {
+    await ev(`window.clickFile('${path}')`);
+    await until(`!!${fileAt(i)}.querySelector('pre.diff')`);
+    const c = await ev(`(() => { const f = ${fileAt(i)}; return { diff: f.querySelectorAll('pre.diff').length, says: [...f.querySelectorAll('p.st')].map((p) => p.textContent), rendered: f.querySelectorAll('.md-rendered, .text-rendered, .tex-rendered').length }; })()`);
+    ok(c.diff === 1 && c.says.includes("Diff only: no rendered preview or code execution here yet.") && c.rendered === 0, `${path}: its line diff and "Diff only", nothing rendered`, c);
+  }
+  // (no Markdown renderer on the page: the diff only; past PROPOSAL_LIMITS.bytes: never given to the renderer)
+  await ev("window.mdCalls = []; window.open1({ list: window.MDLIST })");
+  await until("document.querySelectorAll('#p .file').length === 4");
+  await ev("window.clickFile('readme.md')");
+  await until("!!document.querySelector('#p pre.diff')");
+  await sleep(300);
+  ok((await ev("!document.querySelector('#p .md-rendered') && !document.querySelector('#p .file .msg')")) && (await ev("window.mdCalls.length")) === 0, "a page without a Markdown renderer: a .md's diff only, nothing said");
+  await ev("window.open1({ list: window.MDLIST, markdown: 'stub', big: 'readme.md' })");
+  await until("document.querySelectorAll('#p .file').length === 4");
+  await ev("window.clickFile('readme.md')");
+  await until("!!document.querySelector('#p .file p')");
+  ok((await ev("window.mdCalls.length")) === 0 && (await ev("document.querySelector('#p .file p').textContent")) === "Too large to show here.", "a .md past PROPOSAL_LIMITS.bytes: neither diffed nor rendered");
 
   // ---- bounds, failures, one open at a time, close
   await ev("window.open1({ big: 'notes.txt' })");

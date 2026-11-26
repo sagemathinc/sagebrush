@@ -1016,6 +1016,39 @@ async function restoredPause() {
   await stop(c2);
 }
 
+async function blobConflicts() {
+  // (e2e PR 3a: the server holds other bytes under an address one of this device's records names, told by blobs/check
+  // or by the PUT: the connection halts, with its reason; no upload goes, and no op naming that file is sent)
+  const sentFor = async (path) => (await ctl("log")).sent.filter((m) => m.t === "ops" && (m.ops ?? []).some((o) => o.path === path)).length;
+  const puts = async () => (await ctl("log")).http.filter((h) => h.method === "PUT").length;
+  for (const via of ["check", "put"]) {
+    await account();
+    const w = await fresh();
+    const c = client(w);
+    check(await until(() => settled(w, c)), `blob conflict (${via}): synced`);
+    const held = { address: "e".repeat(64), ct_sha256: "e".repeat(64), size: 1 };
+    const putsBefore = await puts();
+    await ctl("set", { set: { fakeHttp: via === "check"
+      ? [{ method: "POST", path: "/blobs/check", status: 200, body: { missing: [], conflicts: [held] }, times: 2 }]
+      : [{ method: "PUT", status: 409, body: { error: "conflict", message: "the server holds other bytes under this address", held }, times: 2 }] } });
+    const path = `/conflict-${via}.bin`;
+    await w.create(path, { content: bytes(300, via === "check" ? 71 : 72) });
+    check(await until(() => /other bytes/.test(c.status.reason ?? "")), `blob conflict (${via}): halted, saying why: ` + J(c.status));
+    await sleep(400);
+    check(c.debug().halted === "blob-conflict" && c.stats.blobConflicts >= 1, `blob conflict (${via}): the connection is halted, and counted`);
+    check((await sentFor(path)) === 0 && (await outbox(w)) >= 1, `blob conflict (${via}): no op naming the file was sent; its record is kept`);
+    if (via === "check") check((await puts()) === putsBefore, "blob conflict (check): nothing was uploaded either");
+    await stop(c);
+    // (a reload: the new connection asks again, is told the same, and halts again; still nothing naming the file goes)
+    const c2 = client(w);
+    check(await until(() => c2.debug().halted === "blob-conflict" && /other bytes/.test(c2.status.reason ?? "")), `blob conflict (${via}): after a reload, halted again: ` + J(c2.status));
+    await sleep(400);
+    check((await sentFor(path)) === 0 && (await outbox(w)) >= 1, `blob conflict (${via}): after a reload, still no op naming the file`);
+    if (via === "check") check((await puts()) === putsBefore, "blob conflict (check): after a reload, still nothing uploaded");
+    await stop(c2);
+  }
+}
+
 async function indexThrottled() {
   // (CORR-PR58-3: a pull refused with retry_after; ops accepted meanwhile pull nothing before it ends; a prolonged
   // timer waits on; then pages in order, every record confirmed)
@@ -4831,7 +4864,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
