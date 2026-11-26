@@ -13007,6 +13007,16 @@
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
+ "lib/_sage_ffmat.py :: FFMatrix :: TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 1 by 1 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 6' #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "doctest output: the refusal kept for an extension field with Z/n (their meeting is not modelled); not a cap"
+ },
+ "lib/_sage_ffmat.py :: FFMatrix :: TypeError: unsupported operand type(s) for *: 'FiniteFieldElement' and 'FFMatrix' #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "doctest output: the refusal kept for an extension field with Z/n (their meeting is not modelled); not a cap"
+ },
  "lib/_sage_ffmat.py :: FFMatrix.__rtruediv__ :: raise TypeError(\"unsupported operand parent(s) for /: '%s' and '%s'\" % (_sa().parent(o), self.parent())) #0": {
   "class": "none",
   "owner": "sage kernel (@sagebrush-sage2)",
