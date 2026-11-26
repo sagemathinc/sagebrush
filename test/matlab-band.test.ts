@@ -6,8 +6,8 @@ import { readFileSync } from "node:fs";
 // MATLAB mode's sparse solves, rank-13 PR 2 (plan-matlab-nocliffs r6 sections
 // 2.4, 2.4a, 2.5; ruling d2): the chunked bandwidths (master's exact result),
 // the chunked band path (master's answers, kernels of at most E, its work
-// exact), the cost route and its admission fallback, the full and dense
-// admissions, and the browser interim.  test/matlab_band_cases.py prints one
+// exact), the cost route (from the input alone; free memory only admits or
+// refuses it), the full and dense admissions, and the browser interim.  test/matlab_band_cases.py prints one
 // "ok" line per check under the engine; test/matlab_legacy_pin.py (CPython)
 // pins the interim's bodies to master's and checks where they're reached.
 const TEST = __dirname + "/../../test/";
@@ -15,14 +15,14 @@ const LIB = __dirname + "/../../lib/";
 const CLI = __dirname + "/../src/cli.js";
 const WALL = (ms: number) => ms * (Number(process.env.SAGEBRUSH_TIME_SCALE) || 1);
 
-test("bandwidths, the band path, the route, the fallback table and ruling d2 (test/matlab_band_cases.py)", { timeout: 900_000 }, () => {
+test("bandwidths, the band path, the route, the refusal table and ruling d2 (test/matlab_band_cases.py)", { timeout: 900_000 }, () => {
   const r = spawnSync(process.execPath, [CLI, TEST + "matlab_band_cases.py"], { encoding: "utf8", timeout: WALL(900000) });
   assert.equal(r.status, 0, r.stderr);
   // (MATLAB's singular-matrix warning is expected, on the zero-pivot fixture only)
   assert.ok(r.stderr.split("\n").every((l) => l === "" || l === "Warning: Matrix is singular to working precision."), r.stderr);
   const lines = r.stdout.trim().split("\n").filter((l) => !l.startsWith("Warning: "));
   assert.ok(lines.every((l) => l.startsWith("ok ")), r.stdout);
-  assert.equal(lines.length, 26, r.stdout);
+  assert.equal(lines.length, 27, r.stdout);
 });
 
 test("the first-use fix: small full() and dense solves exempt below SMALL_NEED, cold, chunked; admitted above (test/matlab_firstuse_cases.py)", () => {
