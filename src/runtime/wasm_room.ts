@@ -10,6 +10,17 @@ export const WASM32_MAX_BYTES = 65536 * 65536;
 
 const ADVICE = "use the native app on a computer with more memory";
 
+/** Whether a failure setting up or growing a WebAssembly module's memory is memory the computer couldn't give (a
+ *  RangeError, or an engine's own words: a thrown "out of memory", a CompileError for executable memory): never an
+ *  answer about the engine's features. */
+export function memoryFailure(e: unknown): boolean {
+  return e instanceof RangeError || /out of (executable )?memory/i.test(String((e as any)?.message ?? e));
+}
+
+/** The refusal for a module whose setup the computer had no memory for (object.ts makes it a MemoryError). */
+export const setupRefusal = (what: string) =>
+  new RangeError(`WebAssembly kernel workspace: ${what} could not be set up (more than the computer could give); ${ADVICE}`);
+
 // The fixed maximum for a memory declared up to `declared` bytes. (The tests stub a smaller one, as a fixed limit,
 // with globalThis.__SAGEBRUSH_KERNEL_MAX_BYTES__)
 function fixedMax(declared: number): number {

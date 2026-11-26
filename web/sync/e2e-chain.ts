@@ -390,4 +390,20 @@ export class E2EStore {
     const r = this.sql.exec("SELECT msg, expires FROM e2e_mailbox WHERE session = ? AND phase = ? AND expires > ?", session, phase, now).toArray()[0] as Row | undefined;
     return r ? { msg: r.msg as string, expires: Number(r.expires) } : null;
   }
+
+  /** The stored head, for what is sealed under it (sealed ops, e2e PR 5b): null before the chain's genesis. */
+  current(): { seq: number; hash: string; generation: string } | null {
+    const h = this.headRow();
+    return h ? { seq: h.seq, hash: h.head, generation: h.generation } : null;
+  }
+  /** The E2E account id these are made for. */
+  get account(): string {
+    return this.ctx.account;
+  }
+  /** The Ed25519 key of `id` if it is a current (not removed) device at the stored head, else null (sealed ops). */
+  async currentSigner(id: string): Promise<Uint8Array | null> {
+    const st = await this.state();
+    const d = st?.devices.get(id) as { removed: number | null; sign?: unknown } | undefined;
+    return d && d.removed === null && d.sign instanceof Uint8Array ? d.sign : null;
+  }
 }

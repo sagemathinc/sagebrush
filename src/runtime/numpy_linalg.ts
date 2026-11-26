@@ -12,7 +12,7 @@ import { NDArray, empty, toDtype, ascontig, copy as npcopy, admitWork } from "./
 import { glibcLog, glibcExp } from "./libm";
 import { gemmBuffers, wasmFusedFMA, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmQRQtb, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
 import * as FD from "./fdlibm";
-import { useNd, ndCholesky, ndLu, ndPath, ndRequestWarm, ndScratch, ndWarmState } from "./nd";
+import { useNd, ndCholesky, ndLu, ndMemoryMax, ndPath, ndRequestWarm, ndScratch, ndWarmState } from "./nd";
 import { pollInterrupt } from "./ops";
 
 const { T, raise, tuple } = Obj;
@@ -1445,7 +1445,7 @@ newBuiltinModule("_nplinalg", (m) => {
   // smallest n of cholesky and of the LU's four, the warm-up's state)
   fn("_kernels", () => {
     const p = ndPath();
-    return tuple([p.path, p.kernel, p.why, CHOL_ND_MIN, LU_ND_MIN, ndWarmState()]);
+    return tuple([p.path, p.kernel, p.why, CHOL_ND_MIN, LU_ND_MIN, ndWarmState(), ndMemoryMax()]);
   });
   fn("eigh", (a: NDArray, upper: any) => {
     // (mat's copies, the symmetric copy, the eigenvectors in and out of
