@@ -1158,7 +1158,9 @@ def _own(v, name=None, depth=0):
     if isinstance(v, MSeq):
         t = MSeq([_own(x, None, depth + 1) for x in v], v.universe, getattr(v, "sample", None))
         _keep_inf(t, v, v[0] if len(v) else _UNDEF)
-        return t
+        # (a copy of ConjugacyClasses' sequence prints as its table too)
+        copy = getattr(type(v), "_table_copy", None)
+        return copy(v, t) if copy is not None else t
     if isinstance(v, MSet):
         s = MSet((), v.kind, v.universe)
         _keep_inf(s, v, v.items[0] if v.items else _UNDEF)
@@ -4793,6 +4795,10 @@ def _str1(v, indent, col, tail):
         return "[*\n" + ",\n".join(pad + _str(x, indent + 4) for x in v) + "\n" + " " * indent + "*]", False
     if isinstance(v, MRange):
         return _range_str(v), False
+    if getattr(v, "_classes_table", False):
+        # (Magma lays the table out in a sequence, a tuple or a string in
+        # ways of its own, its lines indented or not: not modelled)
+        raise MagmaError("printing the conjugacy classes inside another value or in a string is not supported yet")
     if isinstance(v, MSet) and v.range is not None and v.kind == "set" and _still_range(v):
         lo, hi, step = v.range
         return "{ %d .. %d }" % (lo, hi) if step == 1 else "{ %d .. %d by %d }" % (lo, hi, step), False
@@ -5005,7 +5011,9 @@ def _print_line(vals):
             if getattr(v, "_magma_block", False) and _atomic(vals[k - 1]):
                 out += "\n"  # a group starts on its own line
         col = len(out) - (out.rfind("\n") + 1)
-        out += _str(v, 0, col)
+        # (ConjugacyClasses' sequence, as its table: printed as a value of
+        # its own only, _str1)
+        out += v._table() if getattr(v, "_classes_table", False) else _str(v, 0, col)
     _sys.stdout.write(out + "\n")
 
 
@@ -5518,6 +5526,11 @@ def _type_name(x):
         return "GrpPermElt"
     if isinstance(x, (_MSymGroup, _MDihedralGroup)):
         return "GrpPerm"
+    if isinstance(x, _smod.EllipticCurve_rational_field):
+        return "CrvEll"
+    if getattr(type(x), "_lazy_magma_type", None) is not None:
+        # (a curve ChangeRing made: lib/_magma_classes.py's, not imported here)
+        return type(x)._lazy_magma_type
     if isinstance(x, _MResRing):
         return "RngIntRes"
     if isinstance(x, _MModMat):
@@ -5613,6 +5626,10 @@ def _ext_type(x):
         return "Map[%s, %s]" % (_ext_type(x.dom), _ext_type(x.cod))
     if isinstance(x, MRec):
         return "Rec"
+    if getattr(type(x), "_lazy_magma_type", None) is not None:
+        return "%s[FldFin]" % _type_name(x)
+    if isinstance(x, _smod.EllipticCurve_rational_field):
+        return "CrvEll[FldRat]"
     return str(_type_of(x))
 
 
@@ -5682,6 +5699,7 @@ _ISA_UP = {t: frozenset(s.split()) for t, s in {
     "ModTupRngElt": "Mtrx", "ModTupFldElt": "ModTupRngElt Mtrx",
     "RngIntResElt": "RngElt", "RngIntRes": "Rng Str",
     "GrpPermElt": "", "GrpPerm": "Str",
+    "CrvEll": "CrvPln Crv Sch Str", "CrvPln": "Crv Sch Str",
     "BoolElt": "", "MonStgElt": "", "Tup": "", "List": "", "Rec": "", "Cat": "", "RecFrmt": "",
     "SeqEnum": "Str", "SetEnum": "Str", "SetIndx": "Str", "SetMulti": "Str", "Map": "Str",
     "RngInt": "Rng Str", "FldRat": "Fld Rng Str", "FldRe": "Fld Rng Str", "FldFin": "Fld Rng Str",
@@ -7590,7 +7608,7 @@ def Sqrt(x):
 # calls being made, innermost last: an argument's call has returned before
 # its caller's is entered, so a nested or repeated call is told apart.
 _CALL_POS_NAMES = frozenset((
-    "ChangeRing CharacteristicPolynomial DefiningPolynomial Embed Generator Identity Integral IsSubfield "
+    "ChangeRing CharacteristicPolynomial ConjugacyClasses DefiningPolynomial Embed Generator Identity Integral IsSubfield "
     "MinimalPolynomial Norm Normalise Normalize PrimeField Root RootsInSplittingField Solution SquarefreeFactorization "
     "Submatrix Subsets Sym Trace Vector").split())
 _CALLPOS = []
@@ -9582,6 +9600,17 @@ def EllipticCurve(a, b=None):
         return _smod.EllipticCurve(list(a) if isinstance(a, (MSeq, MRange)) else a, b)
     except (ValueError, ArithmeticError) as e:
         raise MagmaError(str(e))
+
+
+@_signature("ChangeRing", "CrvEll", "FldFin", ret="Crv")
+def _change_ring_curve(E, F):
+    """An elliptic curve over the rationals with its coefficients mapped
+    into GF(q) (lib/_magma_classes.py, loaded when first used)."""
+    import _magma_classes
+    return _magma_classes.change_ring_curve(E, F)
+
+
+_unimplemented_signature("ChangeRing", "CrvEll", "Rng", ret="Crv")
 
 
 def TraceOfFrobenius(E, p):
@@ -11752,6 +11781,14 @@ def DihedralGroup(n):
     if n > _SYM_MAX:
         raise MagmaError("DihedralGroup(n) for n above %d is not supported yet" % _SYM_MAX, "'DihedralGroup'")
     return _MDihedralGroup(n)
+
+
+@_signature("ConjugacyClasses", "GrpPerm", ret="SeqEnum")
+def _conjugacy_classes(G):
+    """Sym(n)'s conjugacy classes, as Magma lists and prints them
+    (lib/_magma_classes.py, loaded when first used)."""
+    import _magma_classes
+    return _magma_classes.conjugacy_classes(G)
 
 
 class _IsoNotModelled:

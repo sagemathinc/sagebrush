@@ -5663,6 +5663,31 @@
   "owner": "Magma compatibility",
   "row": "inv-25"
  },
+ "lib/_magma_classes.py :: _MEllFF._magma_card :: except NotImplementedError: #0": {
+  "class": "coverage",
+  "owner": "Magma compatibility",
+  "reason": "the point count over GF(p) for p >= 2^64 is not available (Sage mode's counting, which needs SEA there): turned into Magma mode's refusal in words; an unsupported case, not a cap"
+ },
+ "lib/_magma_classes.py :: _classes_refusal :: fixed=_m._COLLECT_MAX == 10 ** 6)) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma_classes.py :: conjugacy_classes :: allow = _m._COLLECT_MAX * _m._COLLECT_COST #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
  "lib/_matlab.py :: _oob :: return _err(\"Index exceeds the number of array elements. Index must not exceed %d.\" % n, \"MATLAB:badsubscript\") #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
