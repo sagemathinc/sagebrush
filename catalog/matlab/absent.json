@@ -472,20 +472,6 @@
     ]
   },
   {
-    "name": "smoothdata",
-    "kind": "function",
-    "signature": "B = smoothdata(A)",
-    "summary": "Smooths noisy data by a moving average or another method.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "movmean or movmedian with a window length: movmean(A, 5).",
-    "tags": [
-      "data cleaning",
-      "statistics"
-    ]
-  },
-  {
     "name": "solve",
     "kind": "function",
     "signature": "S = solve(eqn, var)",

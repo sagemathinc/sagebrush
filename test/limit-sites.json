@@ -17027,5 +17027,50 @@
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing by size: the census matches 'max' in MATLAB's identifier MATLAB:maxrhs, the error for more input arguments than mfilename takes"
+ },
+ "lib/_matlab_data.py :: _fit_rows :: s = np.maximum(np.max(np.abs(x), axis=1, keepdims=True), 1.0) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _fit_windows :: dmax = np.maximum(i - lo, lo + m - 1 - i) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _fit_windows :: return lo, m, dmax #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _local_fit :: base = _tricube(x, dmax[b0:b1]) if tricube else np.ones(x.shape) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _local_fit :: lo, m, dmax = _fit_windows(n, kb, kf) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _local_fit :: w = _tricube(x, np.maximum(-keys, keys + m - 1)) if tricube else np.ones(x.shape) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _tricube :: \"\"\"(1 - |x/dmax|^3)^3 inside the half width dmax, 0 at and past it (1 where dmax is 0)\"\"\" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _tricube :: d = np.asarray(dmax, dtype=np.float64) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _tricube :: def _tricube(x, dmax): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
  }
 }

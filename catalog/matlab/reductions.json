@@ -845,5 +845,40 @@
       "statistics",
       "data"
     ]
+  },
+  {
+    "name": "smoothdata",
+    "kind": "function",
+    "signature": "B = smoothdata(A, method, window)\nB = smoothdata(A, dim, method, window)\nB = smoothdata(___, nanflag)\nB = smoothdata(A, 'sgolay', window, 'Degree', d)\n[B, winsize] = smoothdata(___)",
+    "summary": "Smooths noisy data over a window: moving mean or median, Gaussian weights, local regression (robust or not), or Savitzky-Golay.",
+    "doc": "Along the first dimension whose size isn't 1 (or `dim`). `method` is 'movmean' (the default), 'movmedian', 'gaussian' (weights $e^{-d^2/(2\\sigma^2)}$, $\\sigma$ the window over 5), 'lowess' and 'loess' (local linear and quadratic least squares with tricube weights), 'rlowess' and 'rloess' (the same, refitted 5 times with bisquare weights so outliers lose their weight), or 'sgolay' (unweighted local polynomials, degree 2 or `'Degree'`). A window length `k` centres the window (an even `k` takes one more before); `[kb kf]` takes `kb` elements before and `kf` after. The local fits keep a full window at the data's ends, moved inside it. NaN is left out (`'omitnan'`, the default) or makes the windows that weigh it NaN (`'includenan'`). `winsize` is the window as given.",
+    "examples": [
+      {
+        "code": "smoothdata([4 8 6 -1 -2 -3 -1 3 4 5], 'movmean', 3)",
+        "expected": "\nans =\n\n  Columns 1 through 7\n\n    6.0000    6.0000    4.3333    1.0000   -2.0000   -2.0000   -0.3333\n\n  Columns 8 through 10\n\n    2.0000    4.0000    4.5000\n\n"
+      },
+      {
+        "code": "smoothdata([1 NaN 3 4 5], 'gaussian', 3)",
+        "expected": "\nans =\n\n    1.0000    2.0000    3.1996    4.0000    4.8004\n\n"
+      },
+      {
+        "code": "[B, w] = smoothdata([1 4 2 8 5], 'sgolay', 5)",
+        "expected": "\nB =\n\n    1.0286    3.0857    4.5714    5.4857    5.8286\n\n\nw =\n\n     5\n\n"
+      }
+    ],
+    "differs": [
+      "Not supported yet: the window MATLAB chooses from the data when none is given (smoothdata(A), and 'SmoothingFactor'), whose heuristic MATLAB doesn't document; give the window length.",
+      "Not supported: 'SamplePoints', and tables or timetables."
+    ],
+    "status": "partial",
+    "see_also": [
+      "movmean",
+      "movmedian",
+      "filter"
+    ],
+    "tags": [
+      "data cleaning",
+      "statistics"
+    ]
   }
 ]
