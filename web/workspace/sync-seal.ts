@@ -46,7 +46,8 @@ export type Sealed = {
   head: string;
   chainGen: string;
   adds: string[];
-  releases: string[];
+  /** each the add it ends: the blob's address and the seq of the accepted op whose adds named it */
+  releases: { address: string; add: number }[];
   signer: string;
   sig: string;
 };
@@ -56,7 +57,7 @@ export type Sealed = {
  * data file's op adds a reference to the blob it names. Nothing is released yet: retention and Trash become explicit
  * ops that release (e2e PR 5d); until then the server holds every blob a sealed op adds, as it does for plaintext ops.
  */
-export function refsOf(op: WireOp): { adds: string[]; releases: string[] } {
+export function refsOf(op: WireOp): { adds: string[]; releases: { address: string; add: number }[] } {
   return { adds: op.kind === "file" && op.sha256 !== undefined ? [op.sha256] : [], releases: [] };
 }
 
