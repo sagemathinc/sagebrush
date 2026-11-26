@@ -34,6 +34,9 @@ export interface SupportOptions {
   // (tests only, test-entry.ts: called with the body's size right after the bounded read, while the request holds
   // its admission slot and its bytes)
   onBodyRead?: (bytes: number) => Promise<void>;
+  // (tests only, test-entry.ts: the backstop's clock, so its hour and day windows are tested at a fixed time and never
+  // across a real UTC boundary mid-test; the Worker itself runs on Date.now)
+  backstopNow?: () => number;
 }
 
 export const MAX_BODY_BYTES = 131_072;
@@ -185,7 +188,7 @@ async function admitted(req: Request, env: SupportEnv, ip: string, declared: num
   const parsed = parseSupportRequest(raw);
   if (parsed === undefined) return fail(400, "bad-request");
   // 8. the abuse backstop
-  const now = Date.now();
+  const now = (opts.backstopNow ?? Date.now)();
   let gate: "ok" | "hour" | "day";
   try {
     gate = await admitBackstop(env.SUPPORT_DB, now);
