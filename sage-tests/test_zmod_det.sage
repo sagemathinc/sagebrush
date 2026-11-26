@@ -14,6 +14,8 @@ print(A.det(), A.determinant(), parent(A.det()), A.is_invertible())
 print(matrix(Zmod(12), [[2, 3], [3, 2]]).det(), matrix(Zmod(12), [[5, 0], [0, 7]]).det())
 print(matrix(Zmod(12), [[4, 6], [6, 3]]).det(), matrix(Zmod(12), [[0, 0], [0, 0]]).det())
 print(matrix(Zmod(12), 0, 0).det(), matrix(Zmod(12), [[6]]).det())
+# (Z/1: this row follows Sage 10.9, where every determinant is 0; Sage 10.10
+# fails internally on a nonempty matrix over Z/1, a ValueError from its own code)
 print(matrix(Zmod(1), [[0, 0], [0, 0]]).det(), matrix(Zmod(1), 0, 0).det())
 
 for n in [4, 6, 8, 9, 12, 30, 49, 360, 2**20, 2**64, 3**41, 2**64 * 3 + 6, 10**30]:
