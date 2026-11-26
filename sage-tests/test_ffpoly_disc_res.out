@@ -1,0 +1,20 @@
+f.discriminant() -> 87
+(x^2 + 1).discriminant() -> 97
+(x^2 + 2*x + 1).discriminant() -> 0
+R(7).discriminant() -> 0
+f.resultant(x^2 + 2) -> 99
+(x^2 - 1).resultant(x - 1) -> 0
+R(5).resultant(f) -> 95
+(y^2 + a).discriminant() -> 2*a
+(y^3 + y + a).resultant(y + 1) -> 2*a + 2
+(x + 3).discriminant() -> 1
+(2*x + 3).discriminant() -> 1
+(3*x^3 + x + 5).discriminant() -> 74
+(T(z^3 + 2)).discriminant() -> 0
+(z^4 + z + 2).discriminant() -> 1
+(y^3 + a*y^2 + 1).discriminant() -> a + 2
+R(0).resultant(x) -> 0
+x.resultant(R(0)) -> 0
+R(3).resultant(R(5)) -> 1
+(2*x + 1).resultant(3*x^2 + 1) -> 7
+(z^3 + z).resultant(z^2 + 1) -> 0

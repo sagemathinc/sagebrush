@@ -13115,6 +13115,11 @@
   "owner": "finite fields + configuration",
   "row": "inv-1"
  },
+ "lib/_sage_ff.py :: Polynomial_ff._need_field :: raise NotImplementedError(\"%s over %r, which is not a field\" % (what, B)) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusal: resultant, discriminant and is_square over Z/n with n composite (not a field) are not implemented; not a size or work limit"
+ },
  "lib/_sage_ff.py :: Polynomial_ff.splitting_field :: most EMBED_MAX elements (ff.embed_max, unlimited by default) checked on #0": {
   "class": "none",
   "owner": "finite fields + configuration"

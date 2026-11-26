@@ -2173,6 +2173,41 @@ class FiniteField_ext:
             self._logs = (g, logs)
         return self._logs
 
+    def _small_generator(self):
+        """The generator Sage's fields below 2^16 elements work with (their
+        square roots are its powers): the generator itself when the modulus is
+        primitive; else the first primitive one of a^k + c (k = 1, ..., n - 1),
+        then of a^2 + b*a + c, with b and c running through the powers g, g^2,
+        ..., g^(p-1) of the least primitive root g of GF(p) (c from 0 in the
+        second). None beyond those, or for larger fields.
+
+        EXAMPLES::
+
+            sage: R.<t> = GF(3)[]; K.<a> = GF(9, modulus=t^2 + 1)
+            sage: K._small_generator(), GF(9, 'b')._small_generator()  # sagebrush only
+            (a + 2, b)
+        """
+        table = self._log_table()
+        if table is None:
+            return None
+        if self._primitive:
+            return self.gen()
+        if not hasattr(self, "_small_gen"):
+            logs, N = table[1], self._q - 1
+            a = self.gen()
+            g = int(primitive_root(self._p))
+            cs = [pow(g, i, self._p) for i in range(1, self._p)]
+
+            def first(cands):
+                for x in cands:
+                    if _m.gcd(logs[self._index(x)], N) == 1:
+                        return x
+
+            self._small_gen = first(a ** k + c for k in range(1, self._n) for c in cs)
+            if self._small_gen is None:
+                self._small_gen = first(a * a + b * a + c for b in cs for c in [0] + cs)
+        return self._small_gen
+
     def __iter__(self):
         """0, then the powers of the generator (Sage's order), or all
         polynomials when the modulus is not primitive."""
@@ -2618,6 +2653,8 @@ class FiniteFieldElement:
 
             sage: k.<a> = GF(9); (a^2).sqrt() in [a, -a]
             True
+            sage: (a + 1).sqrt(), k(2).sqrt(), (2*a + 2).sqrt()
+            (a, a + 1, 2*a + 1)
         """
         K = self._parent
         if not self:
@@ -2627,8 +2664,18 @@ class FiniteFieldElement:
                 return []
             raise ValueError("must be a perfect square.")
         q = K._q
+        table = K._log_table() if K._p != 2 and q < 2 ** 16 else None
+        h = K._small_generator() if table is not None else None
         if K._p == 2:
             r = self ** (q // 2)
+        elif h is not None:
+            # (Sage's root below 2^16 elements: h^(k/2) for self = h^k,
+            # 0 <= k < q - 1, h its internal generator, _small_generator)
+            g, logs = table
+            k = logs[K._index(self)]
+            if h != g:
+                k = k * pow(logs[K._index(h)], -1, q - 1) % (q - 1)
+            r = h ** (k // 2)
         else:
             # Tonelli-Shanks in the cyclic group of order q - 1
             Q, S = q - 1, 0
@@ -4309,6 +4356,298 @@ class Polynomial_ff:
             return True
         return self.gcd(self.derivative()).degree() == 0
 
+    def _need_field(self, what):
+        B = self._ring._base
+        if not B.is_field():
+            raise NotImplementedError("%s over %r, which is not a field" % (what, B))
+
+    def resultant(self, other):
+        """The resultant of self and other, by the Euclidean algorithm.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^5 + 3*x + 1).resultant(x^2 + 2), R(5).resultant(x^5 + 3*x + 1)
+            (99, 95)
+            sage: (x^2 - 1).resultant(x - 1), R(0).resultant(x)
+            (0, 0)
+        """
+        self._need_field("the resultant")
+        a, b = self, self._coerce(other)
+        B = self._ring._base
+        if not a or not b:
+            return B.zero()
+        res = B.one()
+        while b.degree() > 0:
+            r = a % b
+            if not r:
+                return B.zero()
+            m, n = a.degree(), b.degree()
+            if m * n % 2:
+                res = -res
+            res = res * b._c[-1] ** (m - r.degree())
+            a, b = b, r
+        return res * b._c[-1] ** a.degree()
+
+    def discriminant(self):
+        """The discriminant: (-1)^(n(n-1)/2) Res(f, f') / lc(f), with f' taken
+        at its formal degree n - 1 (1 for a linear polynomial, 0 for a
+        constant).
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^5 + 3*x + 1).discriminant(), (x^2 + 1).discriminant(), (x + 3).discriminant()
+            (87, 97, 1)
+            sage: T.<z> = GF(3)[]; (z^3 + 2).discriminant(), (z^4 + z + 2).discriminant()
+            (0, 2)
+        """
+        self._need_field("the discriminant")
+        B = self._ring._base
+        n = self.degree()
+        if n <= 0:
+            return B.zero()
+        if n == 1:
+            return B.one()
+        d = self.derivative()
+        if not d:
+            return B.zero()
+        lc = self._c[-1]
+        # (Res(f, f') with f' at its true degree k; the Sylvester matrix at
+        # the formal degree n - 1 has the extra factor lc^(n - 1 - k))
+        r = self.resultant(d) * lc ** (n - 1 - d.degree())
+        if (n * (n - 1) // 2) % 2:
+            r = -r
+        return r / lc
+
+    def squarefree_decomposition(self):
+        """The squarefree decomposition: f = u prod g_i^i with each g_i
+        squarefree and the g_i pairwise coprime, in Sage's order: the
+        exponents prime to the characteristic p increasing, then those of
+        the p-th power part, found from its p-th root.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; ((x + 1)^2 * (x + 2)^3).squarefree_decomposition()
+            (x + 1)^2 * (x + 2)^3
+            sage: T.<z> = GF(2)[]; (z^4 + 1).squarefree_decomposition()
+            (z + 1)^4
+            sage: (3*(x + 1)^2).squarefree_decomposition(), (z^3*(z + 1)^2).squarefree_decomposition()
+            ((3) * (x + 1)^2, z^3 * (z + 1)^2)
+        """
+        if not self._c:
+            raise ArithmeticError("square-free decomposition of 0 is not defined")
+        self._need_field("the squarefree decomposition")
+        return _FFFactorization(_sqf_items(self.monic()), self._c[-1], self._ring)
+
+    def radical(self):
+        """The product of the squarefree parts, with the leading coefficient
+        when the characteristic is above the degree, as Sage (1 for a nonzero
+        constant).
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; ((x + 1)^2 * (x + 2)^3).radical(), (3*x^2 + 3).radical()
+            (x^2 + 3*x + 2, 3*x^2 + 3)
+            sage: T.<z> = GF(2)[]; (z^4 + z^2).radical()
+            z^2 + z
+            sage: U.<u> = GF(3)[]; (2*u^4 + u^2).radical(), (2*u^2 + 2).radical()
+            (u^3 + 2*u, 2*u^2 + 2)
+        """
+        if not self._c:
+            raise ZeroDivisionError()
+        if self.degree() == 0:
+            return self._ring(1)
+        # (as Sage: when the characteristic p is at most the degree, the
+        # product of the squarefree parts without the unit; otherwise
+        # f // gcd(f, f'), which keeps the leading coefficient)
+        p = int(self._ring._base.characteristic())
+        r = self._ring(1) if p <= self.degree() else self._ring(self._c[-1])
+        for g, _ in _sqf_items(self.monic()):
+            r = r * g
+        return r
+
+    def is_square(self, root=False):
+        """Whether self is a square (with root=True: (True, a square root)
+        or (False, None)).
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^2 + 2*x + 1).is_square(), (x^2 + 2*x + 2).is_square(), (3*x^2).is_square()
+            (True, False, False)
+            sage: (4*x^2 + 8*x + 4).is_square(root=True), R(0).is_square()
+            ((True, 2*x + 2), True)
+        """
+        self._need_field("is_square")
+        if not self._c:
+            return (True, self) if root else True
+        F = self.factor()
+        u = F.unit()
+        ok = u.is_square() and all(e % 2 == 0 for _, e in F)
+        if not root:
+            return ok
+        if not ok:
+            return False, None
+        r = self._ring(u.sqrt())
+        for g, e in F:
+            r = r * g ** (e // 2)
+        return True, r
+
+    def sqrt(self):
+        """A square root (TypeError when self is not a square).
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^2 + 2*x + 1).sqrt(), (4*x^2).sqrt()
+            (x + 1, 2*x)
+        """
+        ok, r = self.is_square(root=True)
+        if not ok:
+            raise TypeError("Polynomial is not a square. You must specify the name of the square root when using the default extend = True")
+        return r
+
+    def reverse(self, degree=None):
+        """The coefficients reversed, as a polynomial of degree at most
+        degree (default: self's degree).
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; f = x^5 + 3*x + 1; f.reverse(), f.reverse(7), (x^2 + 1).reverse(1)
+            (x^5 + 3*x^4 + 1, x^7 + 3*x^6 + x^2, x)
+        """
+        c = list(self._c)
+        n = len(c) - 1 if degree is None else int(degree)
+        c = (c + [self._ring._base.zero()] * (n + 1 - len(c)))[:n + 1] if n >= 0 else []
+        return Polynomial_ff(self._ring, c[::-1])
+
+    def truncate(self, n):
+        """self modulo x^n.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^5 + 3*x + 1).truncate(2)
+            3*x + 1
+        """
+        return Polynomial_ff(self._ring, self._c[:max(int(n), 0)])
+
+    def shift(self, n):
+        """self times x^n (n < 0: the terms below x^-n dropped).
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; f = x^5 + 3*x + 1; f.shift(2), f.shift(-1)
+            (x^7 + 3*x^3 + x^2, x^4 + 3)
+        """
+        n = int(n)
+        if not self._c:
+            return self
+        if n >= 0:
+            return Polynomial_ff(self._ring, [self._ring._base.zero()] * n + list(self._c))
+        return Polynomial_ff(self._ring, self._c[-n:])
+
+    def valuation(self):
+        """The exponent of the lowest nonzero term (+Infinity for 0).
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^3 + x^2).valuation(), R(5).valuation(), R(0).valuation()
+            (2, 0, +Infinity)
+        """
+        for i, c in enumerate(self._c):
+            if c:
+                return _Integer(i)
+        return _sa().infinity
+
+    def padded_list(self, n=None):
+        """The coefficients, constant first, cut or padded with zeros to
+        length n.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^5 + 3*x + 1).padded_list(7), (x^5 + 3*x + 1).padded_list(2)
+            ([1, 3, 0, 0, 0, 1, 0], [1, 3])
+        """
+        c = list(self._c)
+        if n is None:
+            return c
+        n = int(n)
+        return (c + [self._ring._base.zero()] * (n - len(c)))[:n]
+
+    def number_of_terms(self):
+        """The number of nonzero coefficients.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^5 + 3*x + 1).number_of_terms()
+            3
+        """
+        return _Integer(sum(1 for c in self._c if c))
+
+    def exponents(self):
+        """The exponents of the nonzero terms, ascending.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^5 + 3*x + 1).exponents()
+            [0, 1, 5]
+        """
+        return [i for i, c in enumerate(self._c) if c]
+
+    def is_monomial(self):
+        """Whether self is x^n (coefficient 1).
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (5*x^3).is_monomial(), x.is_monomial(), R(1).is_monomial()
+            (False, True, True)
+        """
+        return bool(self._c) and self._c[-1].is_one() and sum(1 for c in self._c if c) == 1
+
+    def is_term(self):
+        """Whether self is a nonzero multiple of a power of x.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (5*x^3).is_term(), R(0).is_term()
+            (True, False)
+        """
+        return sum(1 for c in self._c if c) == 1
+
+    def is_gen(self):
+        """Whether self is the generator x.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; x.is_gen(), (x + 1).is_gen()
+            (True, False)
+        """
+        return len(self._c) == 2 and not self._c[0] and self._c[1].is_one()
+
+    def trailing_coefficient(self):
+        """The coefficient of the lowest nonzero term.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^3 + 2*x).trailing_coefficient()
+            2
+        """
+        for c in self._c:
+            if c:
+                return c
+        raise ValueError("min() iterable argument is empty")
+
+    def monomial_coefficient(self, m):
+        """The coefficient of the monomial m in self.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^5 + 3*x + 1).monomial_coefficient(x^5), (x^2 + 1).monomial_coefficient(x)
+            (1, 0)
+        """
+        m = self._coerce(m)
+        if m is None:
+            raise TypeError("m must be a polynomial")
+        # (as Sage: the coefficient at m's degree, whatever m's other terms)
+        return self[max(m.degree(), 0)] if m else self._ring._base.zero()
+
     def is_irreducible(self):
         """Whether irreducible (Ben-Or / Rabin test over GF(q)).
 
@@ -4573,6 +4912,35 @@ def _sort_key(c):
     return 0
 
 
+def _sqf_items(f):
+    """The squarefree decomposition of the monic f over GF(q) as (g, e)
+    pairs: Yun's steps for the exponents prime to p, then the p-th root of
+    what remains, recursively, its exponents times p."""
+    R = f._ring
+    out = []
+    if f.degree() <= 0:
+        return out
+    c = f.gcd(f.derivative())
+    w = f // c
+    i = 1
+    while w.degree() > 0:
+        y = w.gcd(c)
+        z = w // y
+        if z.degree() > 0:
+            out.append((z.monic(), i))
+        i += 1
+        w, c = y, c // y
+    if c.degree() > 0:
+        B = R._base
+        p = int(B.characteristic())
+        q = int(B.order())
+        # (c is a polynomial in x^p: its p-th root takes every p-th
+        # coefficient to the power q / p, the inverse of Frobenius)
+        root = Polynomial_ff(R, [a ** (q // p) for a in c._c[::p]])
+        out.extend((g, e * p) for g, e in _sqf_items(root.monic()))
+    return out
+
+
 class _FFFactorization(list):
     """A factorization of a polynomial over a finite field: (factor,
     exponent) pairs and a unit, printed as Sage prints it."""
@@ -4601,6 +4969,8 @@ class _FFFactorization(list):
                     s = "(" + s + ")"
             parts.append(s if e == 1 else "%s^%d" % (s, e))
         out = " * ".join(parts)
+        if not parts and self._unit.is_one():
+            return "1"
         if not self._unit.is_one():
             out = "(%r) * " % (self._unit,) + out if parts else repr(self._unit)
         return out
