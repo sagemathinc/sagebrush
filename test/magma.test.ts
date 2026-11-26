@@ -68,6 +68,51 @@ test("a notebook or kernel cell (no recovery) still stops at its first error, an
   assert.equal(runtime.stdout, "1\nRuntime error: stop\n");
 });
 
+test("a script file stops at an intrinsic Sagebrush lacks, with exit status 1, as at a runtime error; a file or process intrinsic is refused and the file goes on; a session goes on", () => {
+  const { mkdtempSync, writeFileSync, rmSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const { spawnSync } = require("node:child_process");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const dir = mkdtempSync(join(tmpdir(), "magma-file-"));
+  try {
+    const file = (src: string) => {
+      const f = join(dir, "script.m");
+      writeFileSync(f, src);
+      return spawnSync(process.execPath, [cli, "--magma", f], { encoding: "utf8", timeout: WALL(60000) });
+    };
+    const said = /User error: 'QuadraticForms' is a Magma intrinsic not implemented in Sagebrush\n$/;
+    const lacking = file("print 1;\nQ := QuadraticForms(-23);\nprint \"AFTER\";\n");
+    assert.equal(lacking.status, 1, lacking.stdout + lacking.stderr);
+    assert.match(lacking.stdout, /^1\n/);
+    assert.match(lacking.stdout, said);
+    // (also read in a function's body, where the function reads it)
+    const inFunction = file("function f(D) return QuadraticForms(D); end function;\nprint 1;\nQ := f(-23);\nprint \"AFTER\";\n");
+    assert.equal(inFunction.status, 1, inFunction.stdout + inFunction.stderr);
+    assert.match(inFunction.stdout, /^1\n[\s\S]*User error: 'QuadraticForms' is a Magma intrinsic not implemented in Sagebrush\n$/);
+    // as a runtime error, and a "not supported yet" one, stop it
+    const runtime = file("print 1;\nerror \"stop\";\nprint \"AFTER\";\n");
+    assert.equal(runtime.status, 1);
+    assert.doesNotMatch(runtime.stdout, /AFTER/);
+    // a name Magma doesn't have either is Magma's compile-time error: the file goes on, as in Magma
+    const undeclared = file("print 1;\nFoo;\nprint \"AFTER\";\n");
+    assert.equal(undeclared.status, 0);
+    assert.match(undeclared.stdout, /Identifier 'Foo' has not been declared or assigned\nAFTER\n$/);
+    // a file or process intrinsic is refused by name and the file goes on, exit status 0 (no file or process route)
+    for (const call of ['System("ls");', 'print Read("x.txt");', 'Write("x.txt", 1);', 'p := POpen("ls", "r");']) {
+      const refused = file(`print 1;\n${call}\nprint "AFTER";\n`);
+      assert.equal(refused.status, 0, call + refused.stdout + refused.stderr);
+      assert.match(refused.stdout, /is a Magma intrinsic not implemented in Sagebrush\nAFTER\n$/, call);
+    }
+    // on standard input (Magma's interactive session) every error is reported and the session goes on
+    const session = spawnSync(process.execPath, [cli, "--magma"], { input: "Q := QuadraticForms(-23);\nprint \"AFTER\";\n", encoding: "utf8", timeout: WALL(60000) });
+    assert.equal(session.status, 0);
+    assert.match(session.stdout, /is a Magma intrinsic not implemented in Sagebrush\nAFTER\n$/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("QuadraticField's squarefree part by bounded work: a hard 78-digit semiprime is refused at once (HARD-731-1)", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
@@ -1596,19 +1641,27 @@ test("Matrix checks its shape in Magma's words before it builds anything: no Pyt
 test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
+  const run = (src: string) => spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
+  // (the degree bound is _COLLECT_MAX, the heap left over in 96 MiB, which
+  // moves with the build, the machine's load and between runs (29696 or
+  // 30720 on CI's Node 24 in late October 2026, 33792 on Node 26, 19456 on
+  // a loaded machine) and is never more than 49152: so the degree admitted
+  // here is half of the bound measured in a run of its own, D, under the
+  // bound of the run below by a wide margin, and the three refused, 100000,
+  // 10^20 and 3000^2, stay over it, whatever it is)
+  const probe = run("R<x> := PolynomialRing(GF(7));\n(x+1)^100000;\n");
+  const bound = Number(probe.stdout.replace(/\s+/g, " ").match(/a polynomial of degree more than (\d+) is not supported yet/)?.[1]);
+  assert.ok(bound > 4000 && bound <= 49152, probe.stdout + probe.stderr);
+  // (D's derivative, D (D - 1) coefficient products, stays over 10^6)
+  const D = Math.floor(bound / 2);
   const t0 = Date.now();
   const src = "R<x> := PolynomialRing(GF(7)); K<w> := GF(9); S<y> := PolynomialRing(K);\n" +
     "(x+1)^100000;\nx^(10^20);\n(R!3)^(10^20);\nFactorization(x^1001 + 1);\nFactorization(y^70 + w);\nIsIrreducible(y^70 + w);\n" +
-    "f := x^3000 + 3*x + 1; g := f * f;\nh := y^400 + w; k := h * h;\nEvaluate(f, f);\nGCD(f, f);\nDerivative(x^20000 + x, 19999);\n" +
+    `f := x^3000 + 3*x + 1; g := f * f;\nh := y^400 + w; k := h * h;\nEvaluate(f, f);\nGCD(f, f);\nDerivative(x^${D} + x, ${D - 1});\n` +
     // (each step within the allowance, the fold past it: HARD-53E-1)
     "a := x^500 + 1; GCD([a, a, a, a, a, a]);\nLCM([x^300 + 1, x^300 + 2, x^300 + 3, x^300 + 4]);\n" +
-    "Degree(x^20000); #Factorization(x^200 + x + 1);\n\"end\";\n";
-  // (the degree bound is _COLLECT_MAX, the heap left over in 96 MiB, which
-  // moves with the build and between runs (29696 or 30720 on CI's Node 24
-  // in late October 2026, 33792 on Node 26) and is never more than 49152:
-  // so the degrees admitted here stay at 20000, under it, and the three
-  // refused, 100000, 10^20 and 3000^2, stay over it, whatever it is)
-  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
+    `Degree(x^${D}); #Factorization(x^200 + x + 1);\n"end";\n`;
+  const r = run(src);
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
   assert.equal((out.match(/a polynomial of degree more than \d+ is not supported yet/g) ?? []).length, 3, r.stdout);
@@ -1623,7 +1676,7 @@ test("polynomial arithmetic over a finite field is admitted before it computes, 
   for (const what of ["a product", "a Gcd", "a derivative", "a Lcm"])
     assert.ok(out.includes(`${what} of polynomials over a finite field of more than 1000000 coefficient products is not supported yet`), what + r.stdout);
   assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
-  assert.match(r.stdout, /\n20000\n\d+\nend\n$/);
+  assert.match(r.stdout, new RegExp(`\\n${D}\\n\\d+\\nend\\n$`));
   assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 

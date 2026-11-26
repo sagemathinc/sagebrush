@@ -41,7 +41,7 @@ self.onmessage = async (e: MessageEvent) => {
     else eng.opts = Object.assign({}, eng.opts, { images: m.images || {}, sage, run: !!m.run });
     if (m.inputs && typeof m.inputs.docPath === "string" && Array.isArray(m.inputs.known)) inputs = { docPath: m.inputs.docPath, known: new Map(m.inputs.known.slice(0, 1024)), version: Number(m.inputs.version) || 0 };
     const ei = inputs ? engineInputs(inputs.docPath, inputs.known) : null;
-    const text = String(m.text ?? ""), opts = ei ? { inputs: { files: ei.files, resolve: ei.resolve, version: inputs!.version } } : {};
+    const text = String(m.text ?? ""), opts = ei ? { inputs: { files: ei.files, resolve: ei.resolve, jobname: ei.jobname, version: inputs!.version } } : {};
     // (rendered again with beamer's code: the same text, so not expanded again)
     let r = await withBeamer(eng.update(text, { cold: !!m.cold, ...opts }), loadBeamer, () => eng.update(text, opts));
     if (r.needPy) r = await withPythontex(r, loadPythontex, () => eng.update(text, opts));

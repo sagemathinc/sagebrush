@@ -93,8 +93,9 @@ test("prose no code reads is docs-only: the other top-level pages, docs/'s pages
 
 test("prose classified docs-only is read by no code: no tracked file names one as a path", () => {
   const root = join(__dirname, "..", "..");
+  // The public-text baseline lists prose paths as hygiene debt, not as build or runtime inputs.
   const grep = (pattern: string) => {
-    const r = spawnSync("git", ["grep", "-nIE", pattern, "--", ":!design/", ":!notes/", ":!docs/*.md", ":!*.md", ":!test/ci-paths.test.ts"], { cwd: root, encoding: "utf8" });
+    const r = spawnSync("git", ["grep", "-nIE", pattern, "--", ":!design/", ":!notes/", ":!docs/*.md", ":!*.md", ":!test/ci-paths.test.ts", ":!scripts/public-text-allowlist.json"], { cwd: root, encoding: "utf8" });
     assert.ok(r.status === 0 || r.status === 1, r.stderr);
     return r.stdout.trim();
   };
@@ -889,7 +890,7 @@ test("size_inputs: on a track an engine source is a gate input (the engine ships
 
 test("wasm_build: what the modules are built from or handled by builds them on a pull request; every other event builds", () => {
   const build = (files: string[], env: Record<string, string> = {}) => classify(files, "", env).wasm_build;
-  for (const f of ["engine/poly/src/lib.rs", "wasm/pins.json", "Cargo.lock", "scripts/build-mp.mjs", "scripts/build-raster.mjs",
+  for (const f of ["engine/poly/src/lib.rs", "wasm/pins.json", "Cargo.lock", "scripts/build-mp.mjs", "scripts/build-raster.mjs", "scripts/build-skltree.mjs",
     "scripts/wasm-fetch.mjs", "scripts/wasm-artifact.mjs", "scripts/wasm-publish.mjs", ".github/actions/wasm-modules/action.yml",
     ".github/workflows/ci.yml"]) {
     assert.equal(build([f]), "true", f);

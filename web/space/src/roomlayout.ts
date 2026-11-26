@@ -5,8 +5,16 @@
 // Imports hang in a column on the left wall; what has no links at all waits on a shelf below.  Writes each node's
 // `position` (and `position2d`, the same without depth).
 import { sizeOf } from "./sizes.ts";
+import { checkSpace } from "./read.ts";
+
+// (how many layouts were begun: the tests' sentinel that a refused room is never laid out)
+export const laid = { rooms: 0 };
 
 export function layered(nodes, edges) {
+  laid.rooms++;
+  // (every room is laid out here, whatever made it (a folder's, a file's, a class's): checked whole first, as any space
+  //  is, so none over the viewer's limits is laid out)
+  checkSpace({ format: "sagebrush-space", nodes, edges });
   const main = nodes.filter((n) => n.kind !== "import" && !n.shelf);
   const ids = new Set(main.map((n) => n.id));
   const out = new Map<any, any[]>(main.map((n) => [n.id, []])), inn = new Map<any, any[]>(main.map((n) => [n.id, []]));

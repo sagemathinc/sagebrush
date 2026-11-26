@@ -10,7 +10,9 @@ import { normPath, PathError, type Kind } from "../workspace/paths.ts";
 
 // (2: every notebook merges exactly, CoCalc's way (plan-exact-only r1, Oct 30): a version 1 client merged concurrent
 // edits by the older rule, so it is refused at hello (`invalid`) and never syncs with a version 2 one)
-export const VERSION = 2;
+// (3: a blob is named by its `address` in blobs/check, the PUT's answer and a conflict's `held` (e2e PR 3a), where
+// version 2 said `sha256`: a version 2 page is refused at hello and reloads, never sending a check this server refuses)
+export const VERSION = 3;
 
 /** §8: the server's limits.  Each has a test in web/sync/test-sync.mjs. */
 export const LIMITS = {

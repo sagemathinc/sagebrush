@@ -18,6 +18,7 @@ On the **Link** tab, **Publish link** puts this notebook on a page of its own at
 - Every version also has a link of its own that never changes: **Copy a link to this version only** in the link's **⋯** menu, or under **Your shares ▸ Versions**.
 - **Include edit history (TimeTravel)** publishes the notebook's history up to this version, so readers can play it back with **▶ History**. It's off unless you check it, and it can contain text you later deleted.
 - Anyone who has the link can open the page, run it and copy it, and can pass the link on. A published link isn't private: what keeps it from strangers is only that they don't have it.
+- **Publishing is public, and separate from your own files.** What you publish is a copy made from this browser, and anyone, Sagebrush's server included, can read it. When sync becomes end-to-end encrypted ([Storage](storage#encryption)), your synced files stay that way: publishing never reads them from the server, and is the explicit exception.
 - Shared pages ask search engines not to list them. Search engines may ignore that request; anyone with the link can still open the page.
 - Before you publish, check everything that goes with it: the code and text, the outputs, the data files you chose (for a folder or a talk, the files left ticked), and the edit history if you include it.
 - Nothing runs on its own: a visitor's browser runs the notebook's code only when they run it (with **Run all**, for example), in a sandboxed frame apart from the page.

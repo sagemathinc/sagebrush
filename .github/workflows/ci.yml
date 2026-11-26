@@ -96,6 +96,8 @@ jobs:
         with:
           node-version: 24
       - run: git diff --check
+      - name: public text adds no reviewer handles or local paths
+        run: node scripts/test-public-text.mjs && node scripts/public-text.mjs
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -180,7 +182,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -243,7 +245,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -288,7 +290,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -326,7 +328,7 @@ jobs:
         with:
           node-version: "24.21.0"
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -636,7 +638,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -740,7 +742,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -786,7 +788,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -843,7 +845,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -889,7 +891,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -938,7 +940,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -990,7 +992,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1043,7 +1045,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1109,7 +1111,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1229,7 +1231,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1361,7 +1363,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1408,7 +1410,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1475,7 +1477,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1591,7 +1593,7 @@ jobs:
         with:
           node-version: "24.21.0"
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1645,7 +1647,7 @@ jobs:
           if grep -q ' rc=[1-9]' "$RUNNER_TEMP/sweep/timings.txt"; then tail -20 "$RUNNER_TEMP"/sweep/*.err; exit 1; fi
           node scripts/unsafe-inventory.mjs --check --compiler "$RUNNER_TEMP"/sweep/host-default.json "$RUNNER_TEMP"/sweep/host-features.json "$RUNNER_TEMP"/sweep/wasm.json "$RUNNER_TEMP"/sweep/windows.json --metadata "$RUNNER_TEMP/sweep/metadata.json"
 
-  # The four WebAssembly modules, built once for the jobs that read wasm/ (design/wasm-artifacts.md section 4): on a
+  # The five WebAssembly modules, built once for the jobs that read wasm/ (design/wasm-artifacts.md section 4): on a
   # pull request that changes what they're built from or how they're handled (scripts/ci-paths.mjs, wasm_build), and
   # on every other event.  Uploaded with their manifest (this run, this commit) as wasm-modules-<sha>; the readers
   # check it and the pin policy (scripts/wasm-artifact.mjs) before installing.
@@ -1669,7 +1671,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-      - name: build the four modules, and the pins they need
+      - name: build the five modules, and the pins they need
         run: |
           node scripts/build-engine.mjs
           node scripts/check-engine-module.mjs wasm/sagebrush-engine.wasm
@@ -1709,7 +1711,7 @@ jobs:
         with:
           name: wasm-modules-${{ github.sha }}
           path: ${{ runner.temp }}/wasm-modules
-      - name: publish the four modules, each read back
+      - name: publish the five modules, each read back
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -1741,7 +1743,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the producer's four modules, checked, when it ran: built once per run; labelled fresh on a pull request whose
+      # (the producer's five modules, checked, when it ran: built once per run; labelled fresh on a pull request whose
       # pins are stale, so this job still smoke-tests the change)
       - if: needs.wasm-modules.result == 'success'
         uses: ./.github/actions/wasm-modules
@@ -1764,7 +1766,7 @@ jobs:
           SAGEBRUSH_TIME_SCALE: "3"
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
-          # (the four modules: this run's wasm-modules build when it ran, installed by the step above; else built here)
+          # (the five modules: this run's wasm-modules build when it ran, installed by the step above; else built here)
           [ "$PRODUCED" = true ] || node scripts/build-engine.mjs
           # (no-cliffs C r16 section 3.2: no start section, every active segment within the initial memory and table)
           node scripts/check-engine-module.mjs wasm/sagebrush-engine.wasm
@@ -1801,7 +1803,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1847,7 +1849,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1886,7 +1888,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -2050,7 +2052,7 @@ jobs:
         with:
           node-version: "24.21.0"
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -2108,7 +2110,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -2153,7 +2155,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}

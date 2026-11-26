@@ -713,6 +713,20 @@ for (const [what, text] of [["a pong with a space in it", '{"relay":"pong" }'], 
   const { leg } = await openLeg();
   const ready = (child) => leg.ready({ jsonrpc: "2.0", method: "agent.ready", params: { agent: { name: "C" }, child } });
   ok(ready("") === false && ready("a".repeat(129)) === false && ready("a/b") === false && ready("a".repeat(128)).child === "a".repeat(128), "agent.ready's child: empty, 129 characters or a / are an unknown form; 128 base64url characters are taken");
+  const f = leg.ready({ jsonrpc: "2.0", method: "agent.ready", params: { agent: { name: "C" }, child: "c", features: ["workspace.image", "no.such"] } }).features;
+  ok(f.join() === "workspace.image", "agent.ready's features: workspace.image kept over a runner too, an unknown one dropped");
+  leg.close();
+}
+// ---- an image read's answer over a runner: whole within F, else the limit error, none of its bytes
+{
+  const { leg, runner } = await openLeg();
+  const img = (n) => ({ jsonrpc: "2.0", id: "s" + n, result: { entry: { path: "/a.png", kind: "file" }, rev: 1, image: { base64: "iVBORw0KGgo" + "A".repeat(n === 1 ? 1000 : F) } } });
+  leg.owe(); leg.answer("s1", [img(1)]);
+  leg.owe(); leg.answer("s2", [img(2)]);
+  await until(() => runner.forwarded.length === 2, "both written");
+  const [a, b] = runner.forwarded.map((m) => JSON.parse(m));
+  ok(a.id === "s1" && a.result?.image?.base64 === img(1).result.image.base64, "an image answer within F: sent whole");
+  ok(b.id === "s2" && b.error?.data?.code === "limit" && !("result" in b) && !runner.forwarded[1].includes("iVBORw0KGgo"), "an image answer over F: the limit error, none of its bytes, nothing cut");
   leg.close();
 }
 

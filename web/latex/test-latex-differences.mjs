@@ -104,6 +104,12 @@ latex("render", "bib.tex", "-o", "bib.html");
 const html = existsSync(join(dir, "bib.html")) ? readFileSync(join(dir, "bib.html"), "utf8") : "";
 ok(html.includes("[bibliography from refs.bib: BibTeX is not run]") && /\[\s*knuth84\s*\]/.test(html.replace(/<[^>]+>/g, "")), "Not supported: BibTeX's line shown, and \\cite as the key in brackets, as the page says", html.length);
 ok(PAGE.includes('"[bibliography from refs.bib: BibTeX is not run]"'), "the page quotes the BibTeX line as the preview shows it");
+// (and the .bbl BibTeX made beside the .tex: read by \bibliography, as the page says)
+writeFileSync(join(dir, "bib.bbl"), "\\begin{thebibliography}{1}\n\\bibitem{knuth84}\nD.~Knuth.\n\\newblock Literate programming, 1984.\n\\end{thebibliography}\n");
+latex("render", "bib.tex", "-o", "bib2.html");
+const html2 = existsSync(join(dir, "bib2.html")) ? readFileSync(join(dir, "bib2.html"), "utf8") : "";
+ok(!html2.includes("BibTeX is not run") && /\[\s*1\s*\]/.test(html2.replace(/<[^>]+>/g, "")) && /Literate programming, 1984/.test(html2), "a .bbl beside the .tex: its references shown, and \\cite numbered, as the page says", html2.length);
+ok(/\\bibliography reads the \.bbl BibTeX made beside the \.tex/.test(PAGE), "the page says a .bbl beside the .tex is read");
 
 // ---- PythonTeX's indented code (@sagebrush's ruling, #978): dedented and run here, where PythonTeX stops; the page says so
 {

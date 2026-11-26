@@ -6,7 +6,7 @@
 // an overflowing frame reported.
 //   node scripts/build-cli.mjs && node web/latex/test-latex-cli.mjs
 //   (CHROME=/path/to/chrome for the PNGs; LATEX_CLI_PNG=1 makes a missing browser a failure, not a skip)
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, mkdirSync, copyFileSync, symlinkSync, truncateSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync, mkdirSync, copyFileSync, symlinkSync, truncateSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
@@ -203,6 +203,15 @@ ${"many words ".repeat(14000)}
     const rr = await run(w, "render", "ex/talk2.tex", "-o", "t2.html");
     const hh = existsSync(join(w, "t2.html")) ? readFileSync(join(w, "t2.html"), "utf8") : "";
     check("input: the macros file's macros apply (../ and a leading /), \\include's text is there, nothing from outside", hh.includes("Hello from macros") && hh.includes("Included part with") && /mathbb/.test(hh) && !hh.includes("OUTSIDE TEXT"), { code: rr.code, err: rr.err, n: hh.length });
+    // (a problem in an \\input file: that file, as named from where the command runs, and its own line; in --json, the
+    //  main file's line it was read from too)
+    mkdirSync(join(ex, "sub"), { recursive: true });
+    writeFileSync(join(ex, "sub", "sec.tex"), "First.\n\\foo here.\n");
+    writeFileSync(join(ex, "talk3.tex"), "\\documentclass{article}\n\\begin{document}\nA.\n\\input{sub/sec}\n\\bar after.\n\\end{document}\n");
+    const c3 = await run(w, "check", "ex/talk3.tex"), j3 = (await run(w, "check", "ex/talk3.tex", "--json")).json;
+    const foo = j3?.problems.find((x) => x.name === "foo");
+    check("input: a problem in an \\input file is reported at that file and its line", /^ex\/sub\/sec\.tex:2: warning: \\foo is not supported/m.test(c3.out) && foo?.file === "ex/sub/sec.tex" && foo?.line === 2 && foo?.input_line === 4, { out: c3.out, foo });
+    check("input: the main file's own problem after it stays the main file's", /^ex\/talk3\.tex:5: warning: \\bar is not supported/m.test(c3.out), c3.out);
   }
 
   // ---- render: one self-contained HTML file
@@ -245,6 +254,74 @@ ${"many words ".repeat(14000)}
     //  gives up at 30 s, with what it said)
     const ft = await fakeRun("#!/bin/sh\necho 'fake-chrome: still starting' >&2\nexec sleep 40\n", "fspng");
     check("png: a browser that never opens its DevTools port: the 30 s timeout, with what it said", ft.code === 1 && /didn't open its DevTools port in 30 s; it said: fake-chrome: still starting$/.test(ft.json?.png_error ?? ""), { code: ft.code, png_error: ft.json?.png_error });
+    // (a browser whose page never loads, as a long document's on a busy computer: a DevTools that never sends
+    //  Page.loadEventFired, and answers Page.navigate at once (FAKE_NAV unset), never ("never") or 30 s
+    //  late ("late"). --timeout is the wait, for the navigation and the load together; the error says the HTML's size and
+    //  what to do, the HTML kept, the browser closed and its profile removed. FAKE_INFO: where it writes its pid and
+    //  profile)
+    const cdpFake = join(dir, "fake-cdp");
+    writeFileSync(cdpFake, `#!${process.execPath}
+const http = require("http"), crypto = require("crypto"), fs = require("fs"), path = require("path");
+const prof = process.argv.find((a) => a.startsWith("--user-data-dir=")).slice(16), nav = process.env.FAKE_NAV ?? "";
+fs.writeFileSync(process.env.FAKE_INFO, JSON.stringify({ pid: process.pid, prof }));
+const srv = http.createServer((q, r) => { r.setHeader("content-type", "application/json"); r.end(JSON.stringify([{ type: "page", webSocketDebuggerUrl: "ws://127.0.0.1:" + srv.address().port + "/devtools/page/1" }])); });
+srv.on("upgrade", (q, sock) => {
+  sock.write("HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\nSec-WebSocket-Accept: " + crypto.createHash("sha1").update(q.headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64") + "\\r\\n\\r\\n");
+  let buf = Buffer.alloc(0);
+  const answer = (id) => { const out = Buffer.from(JSON.stringify({ id, result: {} })); if (!sock.destroyed) sock.write(Buffer.concat([Buffer.from(out.length < 126 ? [129, out.length] : [129, 126, out.length >> 8, out.length & 255]), out])); };
+  sock.on("data", (d) => {
+    buf = Buffer.concat([buf, d]);
+    for (;;) {
+      if (buf.length < 2) return;
+      let n = buf[1] & 127, at = 2;
+      if (n === 126) { if (buf.length < 4) return; n = buf.readUInt16BE(2); at = 4; } else if (n === 127) { if (buf.length < 10) return; n = Number(buf.readBigUInt64BE(2)); at = 10; }
+      if (buf.length < at + 4 + n) return;
+      const mask = buf.subarray(at, at + 4), body = Buffer.from(buf.subarray(at + 4, at + 4 + n).map((b, i) => b ^ mask[i % 4])), op = buf[0] & 15;
+      buf = buf.subarray(at + 4 + n);
+      if (op !== 1) continue;
+      const m = JSON.parse(body);
+      if (m.method === "Page.navigate" && nav === "never") continue;
+      if (m.method === "Page.navigate" && nav === "late") { setTimeout(() => answer(m.id), 30000); continue; }
+      answer(m.id);
+    }
+  });
+  sock.on("error", () => {});
+});
+srv.listen(0, "127.0.0.1", () => fs.writeFileSync(path.join(prof, "DevToolsActivePort"), srv.address().port + "\\n/devtools/browser/x\\n"));
+`, { mode: 0o755 });
+    const t0 = Date.now();
+    const cdpRun = (name, nav, ...a) => new Promise((res) => {
+      const info = join(dir, `info-${name}.json`);
+      const q = spawn(process.execPath, [CLI, "latex", "render", "talk.tex", "-o", `${name}.html`, ...a, "--json"], { cwd: dir, env: { ...process.env, CHROME: cdpFake, FAKE_NAV: nav, FAKE_INFO: info } });
+      // (a CLI that never ends is killed at 90 s, its row failed: never a hung test)
+      let o = "", killed = false; q.stdout.on("data", (x) => (o += x));
+      const kill = setTimeout(() => { killed = true; q.kill("SIGKILL"); }, 90000);
+      q.on("close", (code) => {
+        clearTimeout(kill);
+        const ms = Date.now() - t0;
+        let json = null; try { json = JSON.parse(o); } catch {}
+        let pid = 0, prof = "", alive = true; try { ({ pid, prof } = JSON.parse(readFileSync(info, "utf8"))); } catch {}
+        try { process.kill(pid, 0); } catch { alive = false; }
+        res({ code, killed, json, ms, err: json?.pdf_error ?? json?.png_error ?? "", ended: pid > 0 && !alive, cleaned: prof !== "" && !existsSync(prof), html: existsSync(join(dir, `${name}.html`)) });
+      });
+    });
+    // (all at once: the one without --timeout waits for its HTML's size)
+    const [sl, st, nv, lt] = await Promise.all([cdpRun("sl", "", "--png", "slpng"), cdpRun("st", "", "--pdf", "st.pdf", "--timeout", "2"),
+      cdpRun("nv", "never", "--pdf", "nv.pdf", "--timeout", "2"), cdpRun("lt", "late", "--pdf", "lt.pdf", "--timeout", "2")]);
+    const gaveUp = (r, name, secs) => r.code === 1 && !r.killed && new RegExp(`^the browser didn't finish loading the HTML \\(\\d+\\.\\d MiB\\) in ${secs} s; .*--timeout.*open ${name}\\.html in a browser$`).test(r.err)
+      && r.html && r.ended && r.cleaned && !existsSync(join(dir, `${name}.pdf`));
+    check("pdf --timeout: a page that never loads, given up at the timeout with the HTML's size and what to do; the HTML kept, no PDF, the browser closed and its profile removed",
+      gaveUp(st, "st", 2) && st.ms < 15000, st);
+    check("pdf --timeout: a navigate the browser never answers ends at the same deadline, the browser closed and its profile removed", gaveUp(nv, "nv", 2) && nv.ms < 15000, nv);
+    check("pdf --timeout: a navigate answered after the deadline: given up at the deadline, not when it answers", gaveUp(lt, "lt", 2) && lt.ms < 25000, lt);
+    // (the HTML's size, as written: 30 s and 10 s for each MiB begun, 40 s for this one's under 1 MiB)
+    const want = 30 + 10 * Math.ceil(statSync(join(dir, "sl.html")).size / 2 ** 20);
+    check("png: a page that never loads, without --timeout: the wait for its size", gaveUp(sl, "sl", want) && want > 30 && sl.ms >= want * 1000 - 1000, { ...sl, want });
+  }
+  {
+    const bad = await run(dir, "render", "talk.tex", "--timeout", "0");
+    const notCheck = await run(dir, "check", "talk.tex", "--timeout", "5");
+    check("render --timeout: a number of seconds, at most 3600; check has none", bad.code === 2 && /--timeout needs a number of seconds, at most 3600/.test(bad.err ?? "") && notCheck.code === 2 && /unknown option --timeout/.test(notCheck.err ?? ""), { bad, notCheck });
   }
   const browser = process.env.CHROME || ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((b) => existsSync(b));
   if (!browser) {
@@ -280,7 +357,7 @@ ${"many words ".repeat(14000)}
     writeFileSync(join(dir, "breaks.tex"), "\\documentclass{article}\n\\begin{document}\n\\newpage\nOne.\n\\newpage\nTwo.\\pagebreak[2] Still two.\\clearpage\\newpage Three.\\pagebreak Four.\n\\newpage\n\\end{document}\n");
     const bk = await runOpts({ env: { CHROME: browser } }, CLI, dir, "render", "breaks.tex", "--pdf", "breaks.pdf", "--json");
     check("pdf: an article's \\newpage, \\clearpage and \\pagebreak are its pages, as TeX's (3, none blank)", bk.code === 0 && bk.json?.pdf?.pages === 3, { code: bk.code, pdf: bk.json?.pdf, err: bk.json?.pdf_error ?? bk.err.slice(-300) });
-    // (a display wider than the text (the content pilot's, run 017): TeX lets it run on into the margin with an
+    // (a display wider than the text (as in a long real-world paper): TeX lets it run on into the margin with an
     //  "Overfull \hbox" warning, nothing lost; the PDF had it cut off at its box's edge, the check saying nothing. Now
     //  printed it runs on (the print rules), and render reports it: one warning, on its line, the exit 0 and ok as
     //  for any warning; a document whose displays fit has none)
