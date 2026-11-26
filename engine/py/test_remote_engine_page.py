@@ -56,6 +56,11 @@ class Kernel:
 
     def page_text(self, page, text):
         self.events.append(("text", text))
+        if text.startswith("send:"):
+            # (send:text:N:C, N copies of character C; send:bin:N, N bytes: the kernel's outgoing size probes)
+            _, what, n, *c = text.split(":")
+            self.sent = page.send_text(c[0] * int(n), "data") if what == "text" else page.send_bytes(b"\x07" * int(n))
+            return
         page.send_text("echo:" + text, "data")
 
     def page_bytes(self, page, data):
@@ -297,6 +302,44 @@ async def test_wire_refusals():
         leg.raw(0x2, b"2\n" + b"\x00" * R.ENGINE_FRAME)
         kind, gen, data = await msg(leg)
         assert (kind, gen, len(data)) == ("binary", 2, R.ENGINE_FRAME), "exactly ENGINE_FRAME passes"
+    finally:
+        await t.end()
+
+
+@aio
+async def test_outgoing_engine_cap():
+    """TESTS T1: an engine page's outgoing message is held to ENGINE_FRAME before it is written, text as UTF-8 bytes
+    and binary: exactly the cap goes; one byte over ends that page only (1009 here, close {gen} to the relay), and
+    another notebook's page on the same leg keeps working."""
+    t = await Run().start()
+    try:
+        leg = await t.relay.leg()
+        F = R.ENGINE_FRAME
+        open_engine(leg, 1, nb="other", entry="python", sgen=1)
+        await msg(leg)
+        gen, sgen = 2, 1
+        for probe, size, passes in [
+            ("send:bin:%d" % F, F, True), ("send:bin:%d" % (F + 1), F + 1, False),
+            ("send:text:%d:a" % F, F, True), ("send:text:%d:a" % (F + 1), F + 1, False),
+            ("send:text:%d:\u00e9" % (F // 2), F, True), ("send:text:%d:\u00e9" % (F // 2 + 1), F + 2, False),  # (2 bytes each)
+        ]:
+            open_engine(leg, gen, nb="nbA", sgen=sgen)
+            await msg(leg)
+            k = t.runner.engine.get("nbA", "sagebrush-magma")
+            leg.send_text("%d\n%s" % (gen, probe))
+            if passes:
+                kind, g, data = await msg(leg, 30)
+                got = len(data) if isinstance(data, bytes) else len(data.encode("utf-8"))
+                assert g == gen and got == size and k.sent, (probe, kind, g, got)
+            else:
+                await settle()
+                assert not k.sent and {"relay": "close", "gen": gen} in leg.controls, probe
+                assert not t.runner.leg.closed and leg.closed_code is None, "the leg stays"
+                # (the other notebook still works, on the same leg)
+                other = 1
+                leg.send_text('%d\n{"still":1}' % other)
+                assert await msg(leg) == ("text", other, 'echo:{"still":1}'), probe
+            gen, sgen = gen + 1, sgen + 1
     finally:
         await t.end()
 

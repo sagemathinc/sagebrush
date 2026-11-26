@@ -682,10 +682,22 @@ class RelayPage:
     def fits(self, n, kind):
         return not self.closed and self.leg.fits(n + len(self.prefix), kind)
 
+    def over_engine_cap(self, n):
+        """An engine page's outgoing message over ENGINE_FRAME (n: its payload's bytes, after the prefix): that page
+        ends (1009), before anything is written, never the leg (the relay's cap would close the whole leg, every other
+        notebook's page with it).  True when refused."""
+        if self.chan == "engine" and n > ENGINE_FRAME:
+            self.close(1009, "a message over the engine page's cap")
+            return True
+        return False
+
     def send_text(self, text, kind):
         if self.closed:
             return False
-        data = (self.prefix + text).encode("utf-8", "surrogatepass")
+        payload = text.encode("utf-8", "surrogatepass")
+        if self.over_engine_cap(len(payload)):
+            return False
+        data = self.prefix.encode("ascii") + payload
         if not self.leg.fits(len(data), kind):
             # (this page's answers aren't leaving: this page ends, 1013; the leg and any next page go on)
             self.close(1013, "the page isn't reading its answers")
@@ -697,7 +709,7 @@ class RelayPage:
 
     def send_bytes(self, data, kind="data"):
         """An engine page's binary message (the kernel's stream), with its generation prefix; as send_text otherwise."""
-        if self.closed:
+        if self.closed or self.over_engine_cap(len(data)):
             return False
         frame = self.prefix.encode("ascii") + bytes(data)
         if not self.leg.fits(len(frame), kind):
