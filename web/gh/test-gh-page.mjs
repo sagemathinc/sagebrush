@@ -36,7 +36,12 @@ const FILES = { "examples/notebooks/count-zeros.ipynb": fx("count-zeros.ipynb"),
   "examples/notebooks/plot.png": Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64"),
   // (a data file in a folder below the notebook's, and enough files below that to pass the copy's 20-file cap)
   "examples/notebooks/data/x.csv": Buffer.from("n,p\n1,2\n2,3\n"),
-  ...Object.fromEntries(Array.from({ length: 19 }, (_, i) => [`examples/notebooks/data/pad/p${String(i + 1).padStart(2, "0")}.txt`, Buffer.from(`pad ${i + 1}\n`)])) };
+  ...Object.fromEntries(Array.from({ length: 19 }, (_, i) => [`examples/notebooks/data/pad/p${String(i + 1).padStart(2, "0")}.txt`, Buffer.from(`pad ${i + 1}\n`)])),
+  // (two folders whose paths are as long as examples/notebooks/, which has a README: one with none, one with its own,
+  //  listed after it)
+  "examples/noreadme1/a.txt": Buffer.from("no README here\n"),
+  "examples/zeta-only/README.md": Buffer.from("# Zeta's own README\n\nOnly this folder's.\n"),
+  "examples/zeta-only/b.txt": Buffer.from("b\n") };
 const blobId = (b) => createHash("sha1").update(Buffer.concat([Buffer.from(`blob ${b.length}\0`), b])).digest("hex");
 const TREE = { sha: "t".repeat(40), truncated: false, tree: [{ path: "examples", mode: "040000", type: "tree", sha: "a".repeat(40) }, { path: "examples/notebooks", mode: "040000", type: "tree", sha: "b".repeat(40) },
   ...Object.entries(FILES).map(([path, b]) => ({ path, mode: "100644", type: "blob", sha: blobId(b), size: b.length }))].sort((a, b) => (a.path < b.path ? -1 : 1)) };
@@ -134,6 +139,24 @@ try {
   const refused = await ev(`new Promise((r) => { document.addEventListener("securitypolicyviolation", (e) => r(e.effectiveDirective + " " + e.blockedURI), { once: true }); fetch("https://cdn.jsdelivr.net/gh/o/math-notebooks@main/NOTES.txt").catch(() => {}); setTimeout(() => r(null), 5000); })`);
   ok(refused === "connect-src https://cdn.jsdelivr.net/gh/o/math-notebooks@main/NOTES.txt" && !asked.some((a) => a.startsWith("cdn.jsdelivr.net")), "a fetch to another site is refused by the policy, never sent", { refused, asked });
   ok(asked.filter((a) => a.startsWith("api.github.com")).join() === `api.github.com/repos/o/math-notebooks/commits/main,api.github.com/repos/o/math-notebooks/git/trees/${C}` && asked.includes("raw.githubusercontent.com/o/math-notebooks/" + C + "/examples/notebooks/README.md"), "two calls on GitHub's API; the README from raw, at the commit", asked);
+
+  // ---- a folder's README is its own: none for a folder without one, and its own where another folder's path is as long
+  //  (each folder is a page of its own, so nothing of the folder before it carries over)
+  ok(await go("/gh/o/math-notebooks/tree/main/examples/noreadme1") && await until(`[...document.querySelectorAll("#files li")].some((l) => l.textContent.includes("a.txt"))`), "a folder with no README: its list");
+  await sleep(1500);
+  // (and none asked for: no README fetched for this page, so none can be drawn late either)
+  const readmeAsked = () => asked.filter((a) => /^raw\.githubusercontent\.com\/.*\/readme\.md$/i.test(a));
+  ok(await ev(`document.querySelector("#readme").hidden && document.querySelector("#readme").textContent === ""`) && readmeAsked().length === 0, "…and no README shown, not another folder's, nor fetched", { shown: await text("#readme"), asked: readmeAsked() });
+  ok(await go("/gh/o/math-notebooks/tree/main/examples/zeta-only") && await until(`!document.querySelector("#readme").hidden`), "a folder with its own README, after another as long");
+  ok((await text("#readme")).includes("Zeta's own README") && !(await text("#readme")).includes("companion-notebook"), "…shows its own", await text("#readme"));
+  ok(await go("/gh/o/math-notebooks/tree/main/examples/notebooks") && await until(`!document.querySelector("#readme").hidden`) && (await text("#readme")).includes("companion-notebook"), "(examples/notebooks still shows its own)");
+  await ev(`[...document.querySelectorAll("#files a")].find((a) => a.textContent === "../").click(), 1`);
+  ok(await until(`location.pathname === "/gh/o/math-notebooks/tree/main/examples" && document.querySelectorAll("#files li").length > 0`), "(its ../ link: up to examples)");
+  asked.length = 0;
+  await ev(`[...document.querySelectorAll("#files a")].find((a) => a.textContent === "noreadme1/").click(), 1`);
+  ok(await until(`location.pathname.endsWith("/examples/noreadme1") && [...document.querySelectorAll("#files li")].some((l) => l.textContent.includes("a.txt"))`), "(then into noreadme1/, by its link)");
+  await sleep(1500);
+  ok(await ev(`document.querySelector("#readme").hidden && document.querySelector("#readme").textContent === ""`) && readmeAsked().length === 0, "from a folder with a README to one without, by its links: no README shown, nor fetched", { shown: await text("#readme"), asked: readmeAsked() });
 
   // ---- a notebook opened from the folder's list: brought into view (its bar at the window's top), focus on its name;
   // in a short window, where it opens below the list and the README
