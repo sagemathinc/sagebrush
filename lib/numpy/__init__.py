@@ -2728,9 +2728,47 @@ def searchsorted(a, v, side="left", sorter=None):
     return array(res, dtype=int64).reshape(vv.shape) if vv.ndim else int64(res[0])
 
 
+def _unique_axis(ar, axis, return_index, return_inverse, return_counts):
+    # (as NumPy's: the sub-arrays along the axis, each flattened to a row; the rows sorted lexicographically and
+    # stably (a stable argsort of each column, the last first; NumPy's order, NaN last), and adjacent equal rows
+    # merged. A row holding a NaN equals no other, NaN != NaN, whatever equal_nan says)
+    if ar.dtype.kind == "O":
+        raise TypeError(f"The axis argument to unique is not supported for dtype {ar.dtype}")
+    a = ascontiguousarray(moveaxis(ar, axis, 0))
+    shape = a.shape
+    n = shape[0]
+    m = 1
+    for k in shape[1:]:
+        m *= k
+    rows = a.reshape(n, m)
+    order = arange(n)
+    for j in range(rows.shape[1] - 1, -1, -1):
+        order = order[argsort(rows[order, j])]
+    s = rows[order]
+    flags = concatenate([ones(_builtins.min(n, 1), bool_), (s[1:] != s[:-1]).any(axis=1)]) if n else zeros(0, bool_)
+    u = moveaxis(a[order[flags]].reshape((int(flags.sum()),) + shape[1:]), 0, axis)
+    if not (return_index or return_inverse or return_counts):
+        return u
+    res = [u]
+    starts = flatnonzero(flags)
+    if return_index:
+        res.append(order[starts])
+    if return_inverse:
+        inv = zeros(n, int64)
+        inv[order] = cumsum(flags) - 1
+        res.append(inv)
+    if return_counts:
+        res.append(diff(concatenate([starts, array([n])])))
+    return tuple(res)
+
+
 def unique(ar, return_index=False, return_inverse=False, return_counts=False, axis=None, *, equal_nan=True):
     if axis is not None:
-        _normalize_axis_index(axis, asarray(ar).ndim)
+        # (the axis checked first, a 1-D array's too, as NumPy's; a 1-D array then takes the plain path)
+        ar = asarray(ar)
+        ax = _normalize_axis_index(axis, ar.ndim)
+        if ar.ndim != 1:
+            return _unique_axis(ar, ax, return_index, return_inverse, return_counts)
     if not (return_index or return_inverse or return_counts) and asarray(ar).dtype.kind != "c":
         return _np.unique1d(ar)
     a = asarray(ar).ravel()
