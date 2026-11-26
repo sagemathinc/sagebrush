@@ -38,15 +38,19 @@ def _rel(name):
 
 
 def find(name):
-    """the file name.m (+ns/name.m for ns.name) is found in, or None"""
+    """the file name.m (+ns/name.m for ns.name) is found in, or a class folder's @name/name.m, or None; in each folder,
+    the class folder first, as MATLAB's precedence puts class constructors in @-folders before other functions"""
     rel = _rel(name)
+    head, tail = _os.path.split(rel)
+    at = _os.path.join(head, "@" + tail[:-2], tail)
     for d in _dirs():
-        p = _os.path.join(d, rel)
-        try:
-            if _os.path.isfile(p):
-                return p
-        except OSError:
-            continue
+        for r in (at, rel):
+            p = _os.path.join(d, r)
+            try:
+                if _os.path.isfile(p):
+                    return p
+            except OSError:
+                continue
     return None
 
 
@@ -96,6 +100,11 @@ def load(name):
     if py is None:
         return None
     head, _, body = py.partition("\n")
+    if head.startswith("#class"):
+        # (a classdef file: lib/_matlab_classdef.py defines the class; its constructor is the name's function)
+        import _matlab_classdef
+        _m._file_lines[name.split(".")[-1]] = lines
+        return _matlab_classdef.load(name, p, body, function_file)
     if head.startswith("#script"):
         f = _script(name, p, body, head.split()[1:])
         scripts.add(f)
@@ -113,6 +122,26 @@ def load(name):
             if first is None:
                 first = v
     return first
+
+
+def function_file(p):
+    """the first function of the function file p (an @-folder's method file), or None"""
+    try:
+        py, lines = _translate(p)
+    except OSError:
+        return None
+    if py is None:
+        return None
+    head, _, body = py.partition("\n")
+    if not head.startswith("#function"):
+        return None
+    ns = {"__name__": "_matlab_file_" + _os.path.basename(p)[:-2]}
+    exec(body, ns)
+    for v in ns.values():
+        if type(v) is _m.Function:
+            _m._file_lines[v.name] = lines
+            return v
+    return None
 
 
 def _script(name, p, py, fnames):

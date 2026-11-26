@@ -322,6 +322,16 @@ type Stmt = { line: number; col: number } & (
 interface FuncDef { name: string; params: string[]; outs: string[]; body: Stmt[]; line: number; args: ArgEntry[] }
 
 /** an entry of an `arguments` block: x (1,:) double {mustBeNumeric} = 0, or opts.Name ... */
+/** a classdef file: the class's definition, and the local functions after it */
+interface ClassProp { name: string; dflt: Expr | null; attrs: Record<string, string>; validated: boolean; line: number; col: number }
+interface ClassMethod { f: FuncDef; attrs: Record<string, string>; col: number }
+interface ClassSig { name: string; attrs: Record<string, string>; line: number; col: number }
+interface ClassDefAst {
+  name: string; attrs: Record<string, string>; supers: string[]; line: number;
+  props: ClassProp[]; methods: ClassMethod[]; sigs: ClassSig[]; locals: FuncDef[];
+  // (what the class uses that Sagebrush doesn't do yet, refused when the class loads: events, enumeration, get./set.)
+  later: { what: string; line: number }[];
+}
 interface ArgEntry { name: string; field: string | null; dims: (number | null)[] | null; cls: string | null; validators: Expr[]; dflt: Expr | null; line: number }
 
 // ------------------------------------------------------------------ parser
@@ -627,6 +637,164 @@ class Parser {
       body.push(...this.statementAndSep());
     }
     return { name, params, outs, body, line: ft.line, args };
+  }
+
+  /** whether the file starts with classdef (after blank lines and comments) */
+  atClassdef(): boolean {
+    let k = 0;
+    while (this.peek(k).t === "nl" || (this.peek(k).t === "op" && (this.peek(k).v === ";" || this.peek(k).v === ","))) k++;
+    const t = this.peek(k);
+    return (t.t === "id" || t.t === "cmd") && t.v === "classdef";
+  }
+
+  /** a block's or the class's attributes, (Name = value, Name, ~Name): their values as written ("true" for a bare
+   * name, "false" for ~Name), by name */
+  attrList(): Record<string, string> {
+    const out: Record<string, string> = {};
+    if (!this.at("(")) return out;
+    this.next();
+    while (!this.at(")")) {
+      if (this.eat(",")) continue;
+      const neg = this.eat("~") || this.eat("!");
+      const name = this.ident();
+      if (this.eat("=")) {
+        const parts: string[] = [];
+        let depth = 0;
+        while (true) {
+          const t = this.peek();
+          if (t.t === "eof" || t.t === "nl") this.fail("expected ')' to close the attributes");
+          if (depth === 0 && t.t === "op" && (t.v === "," || t.v === ")")) break;
+          if (t.t === "op" && (t.v === "(" || t.v === "{" || t.v === "[")) depth++;
+          if (t.t === "op" && (t.v === ")" || t.v === "}" || t.v === "]")) depth--;
+          parts.push(t.t === "str" ? `'${t.v}'` : t.v);
+          this.next();
+        }
+        out[name] = parts.join("");
+      } else out[name] = neg ? "false" : "true";
+    }
+    this.next();
+    return out;
+  }
+
+  /** a dotted name, a.b.c */
+  dottedName(): string {
+    let n = this.ident();
+    while (this.at(".") && this.peek(1).t === "id") { this.next(); n += "." + this.next().v; }
+    return n;
+  }
+
+  /** a classdef file: the class, then its local functions */
+  classFile(): ClassDefAst {
+    this.skipSeps();
+    const head = this.peek();
+    let name: string, attrs: Record<string, string> = {}, supers: string[] = [];
+    if (head.t === "cmd") {
+      // (classdef Name, or classdef Name < A & B, lexed as a command)
+      this.next();
+      const m = /^\s*([A-Za-z]\w*)\s*(?:<\s*(.+?))?\s*$/.exec(head.args!.join(" "));
+      if (!m) this.fail("expected the class's name after classdef", head);
+      name = m[1];
+      if (m[2]) supers = m[2].split("&").map((x) => x.trim());
+      if (supers.some((x) => !/^[A-Za-z]\w*(\.[A-Za-z]\w*)*$/.test(x))) this.fail("expected superclass names after '<'", head);
+    } else {
+      this.next();
+      attrs = this.attrList();
+      name = this.ident();
+      if (this.eat("<")) {
+        supers.push(this.dottedName());
+        while (this.eat("&")) supers.push(this.dottedName());
+      }
+    }
+    const cd: ClassDefAst = { name, attrs, supers, line: head.line, props: [], methods: [], sigs: [], locals: [], later: [] };
+    while (true) {
+      this.skipSeps();
+      const t = this.peek();
+      if (t.t === "eof") this.fail("expected 'end' to close the classdef");
+      if (this.at("end")) { this.next(); break; }
+      const blk = t.t === "id" || t.t === "cmd" ? t.v : "";
+      if (blk === "properties") { this.next(); this.propertiesBlock(cd, this.attrList()); continue; }
+      if (blk === "methods") { this.next(); this.methodsBlock(cd, this.attrList()); continue; }
+      if (blk === "events" || blk === "enumeration") {
+        this.next();
+        cd.later.push({ what: blk === "events" ? "events" : "enumeration", line: t.line });
+        // (its contents, to its end)
+        while (!this.at("end")) { if (this.peek().t === "eof") this.fail(`expected 'end' to close the ${blk} block`); this.next(); }
+        this.next();
+        continue;
+      }
+      this.fail(`expected properties, methods, events or enumeration in a classdef, but found ${desc(t)}`);
+    }
+    while (true) {
+      this.skipSeps();
+      if (this.peek().t === "eof") return cd;
+      if (!this.at("function")) this.fail(`only functions may follow a classdef, but found ${desc(this.peek())}`);
+      cd.locals.push(this.funcDef());
+    }
+  }
+
+  propertiesBlock(cd: ClassDefAst, attrs: Record<string, string>) {
+    while (true) {
+      this.skipSeps();
+      if (this.at("end")) { this.next(); return; }
+      const t = this.peek();
+      if (t.t === "eof") this.fail("expected 'end' to close the properties block");
+      const name = this.ident();
+      // (a size, a class or validators: property validation, kept to be refused when the class loads)
+      let validated = false;
+      while (this.peek().line === t.line && !this.at("=") && !this.sep() && this.peek().t !== "eof") {
+        validated = true;
+        if (this.at("(") || this.at("{")) {
+          const close = this.at("(") ? ")" : "}";
+          let depth = 0;
+          do {
+            if (this.at("(") || this.at("{")) depth++;
+            else if (this.at(")") || this.at("}")) depth--;
+            this.next();
+          } while (depth > 0 && this.peek().t !== "eof" && this.peek().t !== "nl");
+          void close;
+        } else this.next();
+      }
+      const dflt = this.eat("=") ? this.expr() : null;
+      cd.props.push({ name, dflt, attrs, validated, line: t.line, col: t.col });
+      if (!this.at("end") && !this.sep() && this.peek().t !== "eof") this.fail(`unexpected ${desc(this.peek())}`);
+    }
+  }
+
+  methodsBlock(cd: ClassDefAst, attrs: Record<string, string>) {
+    while (true) {
+      this.skipSeps();
+      if (this.at("end")) { this.next(); return; }
+      const t = this.peek();
+      if (t.t === "eof") this.fail("expected 'end' to close the methods block");
+      if (this.at("function")) {
+        // (a property accessor, function v = get.Name(obj): stage 5's)
+        let k = 1;
+        while (this.peek(k).line === t.line && !(this.peek(k).t === "id" && (this.peek(k).v === "get" || this.peek(k).v === "set") && this.peek(k + 1).t === "op" && this.peek(k + 1).v === ".")) {
+          if (this.peek(k).t === "op" && this.peek(k).v === "(") { k = -1; break; }
+          k++;
+          if (this.peek(k).t === "eof" || this.peek(k).t === "nl") { k = -1; break; }
+        }
+        if (k > 0 && this.peek(k).line === t.line && this.peek(k).t === "id") cd.later.push({ what: "property get and set methods", line: t.line });
+        cd.methods.push({ f: this.funcDef(), attrs, col: t.col });
+        continue;
+      }
+      // (a method's signature alone: an abstract method, or one defined in its own file of the @-folder)
+      let name = "";
+      const line = t.line;
+      while (this.peek().line === line && !this.sep() && this.peek().t !== "eof") {
+        const u = this.next();
+        if (u.t === "id" && !name) name = u.v;
+        if (u.t === "op" && u.v === "=") name = "";
+        if (u.t === "op" && u.v === "(") {
+          // (the parameters: skipped)
+          while (!this.at(")") && this.peek().t !== "eof" && this.peek().t !== "nl") this.next();
+          this.eat(")");
+          break;
+        }
+      }
+      if (!name) this.fail("expected a method's name", t);
+      cd.sigs.push({ name, attrs, line, col: t.col });
+    }
   }
 
   /** `arguments` (or `arguments (Input)`) starting a line: a validation block */
@@ -1082,6 +1250,8 @@ class Emitter {
   // (the file this code is in, for mfilename: a Python expression, the program's own file at run time by default, a
   // path file's absolute path, or "" for code in no file)
   mfile = "_m._program_file()";
+  // (the class whose methods are being emitted: their property reads and assignments pass its access checks)
+  classCtx: string | null = null;
 
   constructor(private funcs: FuncDef[], private filename: string, private cell = false) {
     for (const f of funcs) this.fnNames.add(f.name);
@@ -1102,6 +1272,38 @@ class Emitter {
   functionFile(): string {
     this.emit("import _matlab as _m");
     for (const f of this.funcs) this.funcDef(f);
+    return this.out.join("\n") + "\n";
+  }
+
+  /** a classdef file (lib/_matlab_classdef.py): its local functions, its methods under their own Python names (never
+   * the file's local functions: a method named like a built-in doesn't take its calls), its properties' defaults as
+   * functions evaluated once, when the class is first used, and the class defined from all of it */
+  classFile(cd: ClassDefAst, path: string): string {
+    this.emit("import _matlab as _m");
+    for (const f of cd.locals) this.funcDef(f);
+    const methods: string[] = [];
+    cd.methods.forEach((m, k) => {
+      this.classCtx = cd.name;
+      const self = m.f.name === cd.name && m.f.outs.length ? m.f.outs[0] : undefined;
+      this.funcDef(m.f, { py: `_cdm${k}`, self });
+      this.classCtx = null;
+      methods.push(`(${JSON.stringify(m.f.name)}, _cdm${k}, ${pyLit(m.attrs)}, ${m.f.line}, ${m.col})`);
+    });
+    const defaults: string[] = [];
+    cd.props.forEach((p, k) => {
+      if (!p.dflt) return;
+      const fn: FuncDef = { name: cd.name, params: [], outs: [], body: [], line: p.line, args: [] };
+      const scope: Scope = { fn, vars: new Set(), globals: new Set(), persistents: new Set(), imports: importsOf([], this.fnNames) };
+      this.emit(`def _cdd${k}():`);
+      this.indent(() => this.emit(`return ${this.valueExpr(p.dflt!, scope)}`));
+      defaults.push(`${JSON.stringify(p.name)}: _cdd${k}`);
+    });
+    const meta = {
+      name: cd.name, attrs: cd.attrs, supers: cd.supers, line: cd.line, file: path,
+      props: cd.props.map((p) => ({ name: p.name, attrs: p.attrs, validated: p.validated, line: p.line, col: p.col })),
+      sigs: cd.sigs, later: cd.later,
+    };
+    this.emit(`_m.cd_define(${pyLit(meta)}, [${methods.join(", ")}], {${defaults.join(", ")}})`);
     return this.out.join("\n") + "\n";
   }
 
@@ -1144,8 +1346,8 @@ class Emitter {
   }
 
   // -------- functions
-  funcDef(f: FuncDef) {
-    const py = pyName(f.name);
+  funcDef(f: FuncDef, opts: { py?: string; self?: string } = {}) {
+    const py = opts.py ?? pyName(f.name);
     const varargin = f.params[f.params.length - 1] === "varargin";
     let params = varargin ? f.params.slice(0, -1) : f.params;
     const varargout = f.outs[f.outs.length - 1] === "varargout";
@@ -1174,7 +1376,8 @@ class Emitter {
       for (const p of f.params) if (p !== "~" && changed.has(p)) this.emit(`${pyName(p)} = _m.cp(${pyName(p)})`);
       // every other local starts undefined
       const locals = [...new Set([...f.outs, ...assigned(f.body)])].filter((n) => !f.params.includes(n));
-      for (const n of locals) this.emit(`${pyName(n)} = _m.Undef(${JSON.stringify(n)})`);
+      // (a class's constructor: its output starts as the object being made, defaults set)
+      for (const n of locals) this.emit(n === opts.self ? `${pyName(n)} = _m.cd_self()` : `${pyName(n)} = _m.Undef(${JSON.stringify(n)})`);
       for (const o of f.outs) scope.vars.add(o);
       this.emit(`_L = ${f.line}`);
       this.emit("try:");
@@ -1539,9 +1742,9 @@ class Emitter {
       if (scope.globals.has(lv.name)) {
         const tv = this.fresh();
         this.emit(`${tv} = ${value}`);
-        this.emit(`${name} = _m.assign(${base}, ${tp}, ${tv})`);
+        this.emit(`${name} = ${this.assignCall(base, tp, tv)}`);
       } else {
-        this.emit(`${name} = _m.assign(${base}, ${tp}, ${value})`);
+        this.emit(`${name} = ${this.assignCall(base, tp, value)}`);
       }
       scope.vars.add(lv.name);
       this.afterAssign(lv.name, scope);
@@ -1560,12 +1763,17 @@ class Emitter {
       const tp = this.fresh(), tv = this.fresh();
       this.emit(`${tp} = [${parts.join(", ")}]`);
       this.emit(`${tv} = ${value}`);
-      this.emit(`${name} = _m.assign(${base}, ${tp}, ${tv})`);
+      this.emit(`${name} = ${this.assignCall(base, tp, tv)}`);
     } else {
-      this.emit(`${name} = _m.assign(${base}, [${parts.join(", ")}], ${value})`);
+      this.emit(`${name} = ${this.assignCall(base, `[${parts.join(", ")}]`, value)}`);
     }
     scope.vars.add(lv.name);
     this.afterAssign(lv.name, scope);
+  }
+
+  /** an assignment's call: in a class's methods, with the class for its access checks */
+  assignCall(base: string, path: string, value: string): string {
+    return this.classCtx ? `_m.cassign(${base}, ${path}, ${value}, ${JSON.stringify(this.classCtx)})` : `_m.assign(${base}, ${path}, ${value})`;
   }
 
   isVar(name: string, scope: Scope) {
@@ -1667,7 +1875,7 @@ class Emitter {
         }
         return this.indexExpr(e, scope, "1");
       case "field": {
-        const f = `_m.field(${this.fieldBase(e.e, scope)}, ${JSON.stringify(e.name)})`;
+        const f = this.classCtx ? `_m.cfield(${this.fieldBase(e.e, scope)}, ${JSON.stringify(e.name)}, ${JSON.stringify(this.classCtx)})` : `_m.field(${this.fieldBase(e.e, scope)}, ${JSON.stringify(e.name)})`;
         // (a class's static method named alone is called: uint8.empty)
         return e.e.k === "id" && !this.isVar(e.e.name, scope) ? `_m.val(${f})` : f;
       }
@@ -1770,16 +1978,27 @@ class Emitter {
       }
       base = this.lookup(f.name, scope);
       e.frame.fn = true;
+      // (a function named, not the file's own: resolved after its arguments are evaluated, as MATLAB picks it by
+      // their classes, so a class first used in them dispatches its method)
+      // (an end in them, x(min(end, 5)), reads the call's frame: its code is the lookup itself)
+      if (!this.fnNames.has(f.name)) {
+        e.frame.code = base;
+        return `_m.paren_r(${this.argList(e.args, scope)}, ${base}, ${nargout})`;
+      }
     } else if (f.k === "id" && scope.caps?.has(f.name)) {
       base = `_m.capf(${pyName(f.name)}, ${JSON.stringify(f.name)})`;
       e.frame.fn = true;
+      // (as a named function's call above: its arguments first)
+      e.frame.code = base;
+      return `_m.paren_r(${this.argList(e.args, scope)}, ${base}, ${nargout})`;
     }
     // (at the top level, x(args) after clear x is the function x again)
     else if (f.k === "id" && this.mayClear && !scope.fn && !scope.anon && !scope.globals.has(f.name) && !this.fnNames.has(f.name)) {
       base = this.lookup(f.name, scope);
       e.frame.fn = true;
     }
-    else if (f.k === "field" && this.chainOnName(f, scope)) base = `_m.field(${this.fieldBase(f.e, scope)}, ${JSON.stringify(f.name)})`;
+    // (x.name(args): the member itself, a method uncalled, which the arguments then call; a property indexed)
+    else if (f.k === "field") base = `_m.mfield(${this.fieldBase(f.e, scope)}, ${JSON.stringify(f.name)}, ${this.classCtx ? JSON.stringify(this.classCtx) : "None"})`;
     else base = this.expr(f, scope);
     base = this.onceBase(e.frame, base);
     return `_m.paren(${base}, ${this.argList(e.args, scope)}, ${nargout})`;
@@ -1813,8 +2032,10 @@ class Emitter {
       const base = this.onceBase(a.frame, this.expr(a.e, scope));
       return `_m.brace_cs(${base}, ${this.argList(a.args, scope)})`;
     }
-    if (a.k === "field") return `_m.field_cs(${this.fieldBase(a.e, scope)}, ${JSON.stringify(a.name)})`;
-    if (a.k === "dynfield") return `_m.field_cs(${this.fieldBase(a.e, scope)}, _m.fieldname(${this.expr(a.name, scope)}))`;
+    // (in a class's methods, with its access)
+    const ctx = this.classCtx ? `, ${JSON.stringify(this.classCtx)}` : "";
+    if (a.k === "field") return `_m.field_cs(${this.fieldBase(a.e, scope)}, ${JSON.stringify(a.name)}${ctx})`;
+    if (a.k === "dynfield") return `_m.field_cs(${this.fieldBase(a.e, scope)}, _m.fieldname(${this.expr(a.name, scope)})${ctx})`;
     return `[${this.expr(a, scope)}]`;
   }
 
@@ -2068,17 +2289,39 @@ export function matlabFunctionFileToPython(src: string): string {
  */
 export function matlabPathFileToPython(src: string, name: string, path = ""): string {
   const p = new Parser(lex(src));
+  if (p.atClassdef()) {
+    // (a classdef file, after a first line #class: lib/_matlab_classdef.py defines the class from it)
+    const cd = p.classFile();
+    checkTreeDepth([], [...cd.locals, ...cd.methods.map((m) => m.f)]);
+    const em = new Emitter(cd.locals, name);
+    // (mfilename('class') there: the class's name)
+    em.mfile = `${JSON.stringify(path)}, ${JSON.stringify(cd.name)}`;
+    return `#class ${cd.name}\n` + checkPython(em.classFile(cd, path));
+  }
   const stmts = p.program();
   checkTreeDepth(stmts, p.functions);
   // (path: the file's absolute path, which mfilename gives; "" when unknown)
   if (!stmts.length && p.functions.length) {
     const em = new Emitter(p.functions, "");
     em.mfile = JSON.stringify(path);
+    // (a method file of a class's @-folder: its own name is the method, which a call or a handle in it reaches by
+    // dispatch, not directly: @myop there names whatever myop is for its arguments)
+    if (/[\\/]@[^\\/]+[\\/][^\\/]+$/.test(path)) em.fnNames.delete(p.functions[0].name);
     return "#function\n" + checkPython(em.functionFile());
   }
   const em = new Emitter(p.functions, name);
   em.mfile = JSON.stringify(path);
   return ["#script", ...p.functions.map((f) => pyName(f.name))].join(" ") + "\n" + checkPython(em.scriptFile(stmts, src, name));
+}
+
+/** a JSON-like value as a Python literal */
+function pyLit(v: unknown): string {
+  if (v === null || v === undefined) return "None";
+  if (typeof v === "boolean") return v ? "True" : "False";
+  if (typeof v === "number") return String(v);
+  if (typeof v === "string") return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map(pyLit).join(", ")}]`;
+  return `{${Object.entries(v as Record<string, unknown>).map(([k, x]) => `${JSON.stringify(k)}: ${pyLit(x)}`).join(", ")}}`;
 }
 
 /** The functions a MATLAB file defines (its first is the file's own). */

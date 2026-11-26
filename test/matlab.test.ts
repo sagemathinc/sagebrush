@@ -60,7 +60,8 @@ test("in brackets, whitespace separates elements", () => {
   assert.equal(elems("[1 -2 + 3]"), "1.0, _m.plus((-2.0), 3.0)");
   assert.equal(elems("[a' b']").match(/_m\.ctranspose\(/g)?.length, 2);
   assert.match(elems("[f (1)]"), /^_m\.val\(.*\), 1\.0$/);
-  assert.match(elems("[f(1)]"), /^_m\.paren\(/);
+  // (a named function's call: its arguments evaluated first, _m.paren_r)
+  assert.match(elems("[f(1)]"), /^_m\.paren(_r)?\(/);
 });
 
 test("command syntax: format long, hold on", () => {

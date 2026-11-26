@@ -201,18 +201,22 @@ def _program_file():
 _mfilename_fns = {}
 
 
-def mfilename_in(path):
-    """mfilename for the code of the file at path ("" for code in no file): the built-in each call of it there
-    makes, one per file"""
-    f = _mfilename_fns.get(path)
+def mfilename_in(path, cls=None):
+    """mfilename for the code of the file at path ("" for code in no file), in class cls's file (or, for a method file
+    of an @-folder, its class): the built-in each call of it there makes, one per file"""
+    f = _mfilename_fns.get((path, cls))
     if f is None:
-        f = _mfilename_fns[path] = Builtin(lambda nargout, *args: _mfilename(path, args), "mfilename", (0, None))
+        if cls is None:
+            folder = _os.path.basename(_os.path.dirname(path)) if path else ""
+            cls = folder[1:] if folder.startswith("@") else ""
+        f = _mfilename_fns[(path, cls)] = Builtin(lambda nargout, *args: _mfilename(path, args, cls), "mfilename",
+                                                  (0, None))
     return f
 
 
-def _mfilename(path, args):
+def _mfilename(path, args, cls=""):
     """the file's name without its folder and .m; 'fullpath': its absolute path without .m; 'class': the class of
-    a method's file, '' (Sagebrush has no classdef); any other one argument, the name, as MATLAB gives (the options
+    a classdef file or of an @-folder's method file, else ''; any other one argument, the name, as MATLAB gives (the options
     match exactly: 'FULLPATH' is the name too)"""
     if len(args) > 1:
         raise _err("Too many input arguments.", "MATLAB:maxrhs")
@@ -221,7 +225,7 @@ def _mfilename(path, args):
     if opt == "fullpath":
         return Char(stem)
     if opt == "class":
-        return Char("")
+        return Char(cls)
     return Char(stem.replace("\\", "/").split("/")[-1])
 
 
@@ -1536,7 +1540,7 @@ def cond(v):
 
 def transpose(a):
     t = type(a)
-    if t is float or t is bool or t is complex:
+    if t is float or t is bool or t is complex or t is Obj:
         return a
     if t is np.ndarray:
         if a.ndim > 2:
@@ -1559,7 +1563,7 @@ def transpose(a):
 
 def ctranspose(a):
     t = type(a)
-    if t is float or t is bool:
+    if t is float or t is bool or t is Obj:
         return a
     if t is complex:
         return a.conjugate()
@@ -1921,6 +1925,71 @@ class Struct:
         return Struct(a, shape, list(self.fields))
 
 
+class Obj:
+    """An object of a value class defined by a classdef file (lib/_matlab_classdef.py): its class, and its properties'
+    values by name, in the class's order.  An assignment copies it (cp, _value_class), as MATLAB's value objects"""
+    __slots__ = ("cls", "props")
+    _value_class = True
+
+    def __init__(self, cls, props):
+        self.cls = cls
+        self.props = props
+
+    def copy(self):
+        return Obj(self.cls, {k: cp(x) for k, x in self.props.items()})
+
+
+# (the classdef classes loaded: each constructor, a built-in, to its class; the names a loaded class defines as
+# methods, which resolution dispatches on; and a generation raised as each class loads, so a resolution cached
+# before then, a function handle's, is made again)
+_CD_CTORS = {}
+_CDM = {}
+_CD_GEN = [0]
+# (the class whose method is assigning, for its access checks: _m.cassign)
+_CD_CTX = [None]
+
+
+def _cd():
+    """lib/_matlab_classdef.py, loaded with the first class"""
+    import _matlab_classdef
+    return _matlab_classdef
+
+
+def cd_define(meta, methods, defaults):
+    return _cd().define(meta, methods, defaults)
+
+
+def cd_self():
+    return _cd().constructing()
+
+
+def mfield(obj, name, ctx=None):
+    """obj.name as the base of obj.name(args): a method uncalled (the arguments call it); else field()"""
+    t = type(obj)
+    if t is Obj:
+        return _cd().get(obj, name, ctx, False)
+    if t is Builtin and obj in _CD_CTORS:
+        return _cd().static(_CD_CTORS[obj], name, False)
+    return field(obj, name)
+
+
+def cfield(obj, name, ctx):
+    """obj.name in a class's methods: with that class's access"""
+    if type(obj) is Obj:
+        return _cd().get(obj, name, ctx, True)
+    return field(obj, name)
+
+
+def cassign(base, path, v, ctx):
+    """an assignment in a class's methods: with that class's access"""
+    old = _CD_CTX[0]
+    _CD_CTX[0] = ctx
+    try:
+        return assign(base, path, v)
+    finally:
+        _CD_CTX[0] = old
+
+
 class Sparse:
     """A sparse matrix (double or logical): lib/_matlab_sparse.py.  m-by-n,
     compressed sparse column (jc, ir, pr), as MATLAB stores it; immutable."""
@@ -2055,15 +2124,18 @@ class Anon:
 
 class Handle:
     """A handle to a named function (@sin): resolved when first called."""
-    __slots__ = ("target", "name")
+    __slots__ = ("target", "name", "gen")
 
     def __init__(self, target, name):
         self.target = target
         self.name = name
+        self.gen = -1
 
     def call(self, nargout, args):
-        if self.target is None:
+        # (resolved again when a class has loaded since: its methods may now take the name, _CD_GEN)
+        if self.target is None or (self.gen != _CD_GEN[0] and self.gen >= 0):
             self.target = fn(self.name)
+            self.gen = _CD_GEN[0]
         return self.target.call(nargout, args)
 
 
@@ -2151,6 +2223,15 @@ def fn(name, top=False, imports=None):
         f = host.imported(name, imports) if host is not None else None
         if f is not None:
             return f
+    if name in _CDM:
+        # (a loaded class's method: called for an object of the class, else what the name is without it)
+        return _cd().dispatcher(name, top, imports)
+    return _fn_tail(name, top, imports)
+
+
+def _fn_tail(name, top=False, imports=None):
+    """the built-in, path function or script, or namespace a name is, after the workspace's functions, its imports
+    and the classes' methods"""
     b = _B.get(name)
     if b is not None:
         return b
@@ -2182,7 +2263,12 @@ def _from_path(name):
     host = _path_files()
     if host is None:
         return None
-    f = host.load(name)
+    try:
+        f = host.load(name)
+    except BaseException:
+        # (a file that fails to load, a class MATLAB refuses: refused again at each use, never taken as absent)
+        _path_cache.pop(name, None)
+        raise
     _path_cache[name] = f
     return f
 
@@ -2301,6 +2387,11 @@ def paren(obj, args, nargout=1):
 
 
 call = paren
+
+
+def paren_r(args, obj, nargout=1):
+    """paren(obj, args, nargout) with the arguments evaluated first: a named function's call (src/matlab.ts)"""
+    return paren(obj, args, nargout)
 
 
 def nout(r, n):
@@ -2651,6 +2742,8 @@ def _combine(vecs, d):
 def index(obj, args):
     """obj(args)"""
     t = type(obj)
+    if t is Obj:
+        return _cd().index_scalar(obj, args)
     # fast paths: one or two scalar subscripts of an array
     if t is np.ndarray and len(args) <= 2 and type(args[0]) is float and (len(args) == 1 or type(args[1]) is float):
         if len(args) == 1:
@@ -2781,7 +2874,9 @@ def fieldname(v):
     return _text(v, "field name")
 
 
-def field_cs(obj, name):
+def field_cs(obj, name, ctx=None):
+    if type(obj) is Obj:
+        return [_cd().get(obj, name, ctx, True)]
     if type(obj) is Builtin or type(obj) is Function:
         return [field(obj, name)]
     if type(obj) is Namespace:
@@ -2810,6 +2905,10 @@ def field_cs(obj, name):
 
 
 def field(obj, name):
+    if type(obj) is Obj:
+        return _cd().get(obj, name, None, True)
+    if type(obj) is Builtin and obj in _CD_CTORS:
+        return _cd().static(_CD_CTORS[obj], name, True)
     if type(obj) is Builtin or type(obj) is Function:
         if obj.name in _CLASSES:
             return _class_static(obj.name, name)
@@ -2946,6 +3045,8 @@ def assign(base, path, v):
 def _asg(cur, path, i, v):
     kind, arg = path[i]
     last = i == len(path) - 1
+    if kind == "f" and type(cur) is Obj:
+        return _cd().set_member(cur, arg, path, i, v, _CD_CTX[0])
     if kind == "f" and isinstance(cur, HandleObj):
         # (a handle: its property is set, every variable holding it sees the change)
         if last:
@@ -3146,6 +3247,13 @@ def _resize(cur, dims):
 
 
 def _assign_paren(cur, args, v, brace=False):
+    if not brace and (type(cur) is Obj or (type(v) is Obj and (cur is None or (type(cur) is np.ndarray and cur.size == 0)))):
+        # (an object at x(1), or x(1) = obj for an x that is new: one object, until object arrays)
+        return _cd().assign_scalar(cur, args, v)
+    return _assign_paren_any(cur, args, v, brace)
+
+
+def _assign_paren_any(cur, args, v, brace=False):
     """cur(args) = v (brace: v is a 1-by-1 Cell holding the value of cur{args} = v)"""
     if isinstance(cur, Undef):
         cur = None
@@ -3434,6 +3542,8 @@ def class_(v):
         return "function_handle"
     if t is MException:
         return "MException"
+    if t is Obj:
+        return v.cls.name
     if isinstance(v, HandleObj):
         return v._mclass
     if t is HandleArr:
@@ -4065,6 +4175,8 @@ def _brief(v, in_cell):
         return "%s cell" % _dimstr(d) if in_cell else "{%s cell}" % _dimstr(d)
     if t is Struct:
         return "%s struct" % _dimstr(d) if in_cell else "[%s struct]" % _dimstr(d)
+    if t is Obj:
+        return "%s %s" % (_dimstr(d), cls) if in_cell else "[%s %s]" % (_dimstr(d), cls)
     if _iscallable(v):
         return func2str_text(v)
     if _isnumlike(v):
@@ -4237,6 +4349,9 @@ def _blocks(v):
     if t is Struct:
         h, b = _struct_blocks(v)
         return h, b, True
+    if t is Obj:
+        h, b = _cd().blocks(v)
+        return h, b, True
     if t is Anon or t is Handle or t is Function or t is Builtin:
         return ["  function_handle with value:"], ["    " + func2str_text(v)], False
     if isinstance(v, HandleObj):
@@ -4334,8 +4449,8 @@ def display(name, v):
     blocks = head + body
     if _format["spacing"] == "loose":
         _write("\n%s =%s\n\n%s\n\n" % (name, " " if obj else "", "\n\n".join(blocks)))
-    elif type(v) is Struct and len(v.a) == 1 and v.fields:
-        # (format compact still separates a struct's header from its fields)
+    elif (type(v) is Struct and len(v.a) == 1 and v.fields) or (type(v) is Obj and body):
+        # (format compact still separates a struct's header from its fields, and an object's from its properties)
         _write("%s = \n%s\n\n%s\n" % (name, "\n".join(head), "\n".join(body)))
     else:
         _write("%s =%s\n%s\n" % (name, " " if obj else "", "\n".join(blocks)))
@@ -4353,6 +4468,9 @@ def _disp_text(v):
     if t is Str:
         return v.s + "\n"
     head, body, obj = _blocks(v)
+    if t is Obj:
+        # (an object's disp keeps its class line: "  Rect with properties:")
+        return "\n\n".join(head + body) + ("\n\n" if _format["spacing"] == "loose" else "\n")
     if t is Struct and len(v.a) != 1:
         body = head + body
     if _isnumlike(v) and _numel(v) == 0:
@@ -5078,6 +5196,8 @@ def class_b(x):
 def isa_(x, name):
     n = _text(name)
     c = class_(x)
+    if type(x) is Obj:
+        return _cd().isa(x, n)
     if n == c:
         return True
     if n == "numeric":
@@ -9943,6 +10063,8 @@ def cell_(*args):
 def struct_(*args):
     if not args:
         return Struct([{}], (1, 1), [])
+    if len(args) == 1 and type(args[0]) is Obj:
+        return _cd().to_struct(args[0])
     if len(args) % 2:
         raise _err("Field and value input arguments must come in pairs.")
     names = []
@@ -9974,6 +10096,8 @@ def struct_(*args):
 
 @_bs("fieldnames")
 def fieldnames_(s):
+    if type(s) is Obj:
+        return _cd().fieldnames(s)
     if type(s) is MException:
         f = ["identifier", "message", "cause", "stack", "Correction"]
     elif type(s) is Struct:
@@ -10306,6 +10430,8 @@ def deal_(nargout, *args):
 
 def _isequal2(a, b, nan_equal):
     ta, tb = type(a), type(b)
+    if ta is Obj or tb is Obj:
+        return _cd().isequal(a, b, lambda x, y: _isequal2(x, y, nan_equal))
     if ta is Cell or tb is Cell:
         if ta is not tb or a.shape != b.shape:
             return False
@@ -10341,6 +10467,27 @@ def _isequal2(a, b, nan_equal):
         same = lambda X, Y: (X == Y) | (np.isnan(X) & np.isnan(Y))
         return bool(np.all(same(np.real(A), np.real(B)) & same(np.imag(A), np.imag(B))))
     return bool(np.all(A == B))
+
+
+@_bi("properties")
+def properties_b(nargout, x):
+    return _cd().properties_(nargout, x)
+
+
+@_bi("methods")
+def methods_b(nargout, x):
+    return _cd().methods_(nargout, x)
+
+
+@_bs("isobject")
+def isobject_(x):
+    return type(x) is Obj
+
+
+@_bs("isprop")
+def isprop_b(x, name):
+    # (not an object: false for each element, as MATLAB's isprop gives)
+    return _cd().isprop_(x, name) if type(x) is Obj else _box(np.zeros(tuple(reversed(_dims(x))), dtype=bool))
 
 
 @_bs("isequal")

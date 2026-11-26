@@ -1,0 +1,99 @@
+[
+  {
+    "name": "properties",
+    "kind": "function",
+    "signature": "properties(obj)\nproperties(classname)\np = properties(___)",
+    "summary": "The public properties of an object or of a class defined by a classdef file.",
+    "doc": "`p = properties(obj)` gives the names of the properties code outside the class can read, as a column cell array of char vectors, in the order the class defines them, its Constant properties last. Without an output it displays them under \"Properties for class Name:\". Sagebrush supports value classes defined by classdef files (on the path, in @-folders with method files, and in +package folders); handle classes, inheritance, operator overloading, events, enumerations and property validation are not supported yet, and refused when the class loads.",
+    "examples": [
+      {
+        "code": "fid = fopen('Pt.m', 'w');\nfprintf(fid, 'classdef Pt\\n  properties\\n    x = 1\\n    y = 2\\n  end\\n  methods\\n    function d = norm1(obj)\\n      d = abs(obj.x) + abs(obj.y);\\n    end\\n  end\\nend\\n');\nfclose(fid);\nproperties(Pt)",
+        "expected": "\nProperties for class Pt:\n\n    x\n    y\n\n"
+      }
+    ],
+    "differs": [
+      "Objects of value classes only (classdef files): handle classes and MATLAB's own classes are not supported yet."
+    ],
+    "status": "partial",
+    "see_also": [
+      "methods",
+      "isprop",
+      "fieldnames"
+    ],
+    "tags": [
+      "data types"
+    ]
+  },
+  {
+    "name": "methods",
+    "kind": "function",
+    "signature": "methods(obj)\nmethods(classname)\nm = methods(___)",
+    "summary": "The public methods of an object or of a class defined by a classdef file, its constructor included.",
+    "doc": "`m = methods(obj)` gives the names of the class's public methods, its constructor and its static methods included, sorted, as a column cell array. Without an output it lists them under \"Methods for class Name:\", the static methods after \"Static methods:\". Sagebrush supports value classes defined by classdef files (on the path, in @-folders with method files, and in +package folders); handle classes, inheritance, operator overloading, events, enumerations and property validation are not supported yet, and refused when the class loads.",
+    "examples": [
+      {
+        "code": "fid = fopen('Pt.m', 'w');\nfprintf(fid, 'classdef Pt\\n  properties\\n    x = 1\\n    y = 2\\n  end\\n  methods\\n    function d = norm1(obj)\\n      d = abs(obj.x) + abs(obj.y);\\n    end\\n  end\\nend\\n');\nfclose(fid);\nmethods(Pt)",
+        "expected": "\nMethods for class Pt:\n\nPt     norm1  \n\n"
+      }
+    ],
+    "differs": [
+      "Objects of value classes only (classdef files)."
+    ],
+    "status": "partial",
+    "see_also": [
+      "properties",
+      "ismethod"
+    ],
+    "tags": [
+      "data types"
+    ]
+  },
+  {
+    "name": "isobject",
+    "kind": "function",
+    "signature": "tf = isobject(x)",
+    "summary": "Whether a value is an object of a class defined by a classdef file.",
+    "doc": "True for an object of a class a classdef file defines, false for every other value: numbers, text, cells, structs and function handles. Sagebrush supports value classes defined by classdef files (on the path, in @-folders with method files, and in +package folders); handle classes, inheritance, operator overloading, events, enumerations and property validation are not supported yet, and refused when the class loads.",
+    "examples": [
+      {
+        "code": "isobject(3)",
+        "expected": "\nans =\n\n  logical\n\n   0\n\n"
+      }
+    ],
+    "differs": [
+      "Objects of handle classes and of MATLAB's own classes (graphics objects, containers.Map) are not objects here: isobject is false for them."
+    ],
+    "status": "partial",
+    "see_also": [
+      "isa",
+      "class"
+    ],
+    "tags": [
+      "data types"
+    ]
+  },
+  {
+    "name": "isprop",
+    "kind": "function",
+    "signature": "tf = isprop(obj, name)",
+    "summary": "Whether an object has a property of that name, whatever its access.",
+    "doc": "True when the object's class defines the property, public or not, Constant properties included; a method's name is not a property. For a value that is not an object it is false, element by element: `isprop([1 2 3], 'x')` is a 1-by-3 false array. Sagebrush supports value classes defined by classdef files (on the path, in @-folders with method files, and in +package folders); handle classes, inheritance, operator overloading, events, enumerations and property validation are not supported yet, and refused when the class loads.",
+    "examples": [
+      {
+        "code": "isprop([1 2 3], 'x')",
+        "expected": "\nans =\n\n  1×3 logical array\n\n   0   0   0\n\n"
+      }
+    ],
+    "differs": [
+      "Arrays of objects are not supported yet."
+    ],
+    "status": "partial",
+    "see_also": [
+      "properties",
+      "isfield"
+    ],
+    "tags": [
+      "data types"
+    ]
+  }
+]
