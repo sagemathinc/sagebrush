@@ -4,12 +4,15 @@
 //   GET  /api/fleet/v1/host/chain    a host's signed read of its fleet's device chain (core chain-service.mjs; the
 //                                    chain-read note r1.2)
 //   /api/fleet/v1/{fleet,chain,hosts,hosts/<id>/grants}   the person's own fleet (person.ts; the reads scope r4)
+//   POST /api/fleet/v1/host/pair[/result], /api/fleet/v1/pairings/{lookup,approve}   host pairing (pairing.ts; the
+//                                    pairing service note d3)
 //
 // The handler holds every rule; this file supplies its ctx: the Worker's clock, the body read with a cap and a
 // deadline, the scheme and the source address, the D1 store (store.ts) and the lease key. It logs nothing.
 import { fleetCore } from "../../workspace/fleet/install.ts";
 import { bucket, chainEntries, chainPage, hostGen, hostRow, issueLease, spendRequestNonce, type D1 } from "./store.ts";
 import { handlePerson, type PersonDeps } from "./person.ts";
+import { handlePairing, type PairingHooks } from "./pairing.ts";
 import type { ShareEnv } from "../share/server.ts";
 
 /** ShareEnv: the person's routes read the site's own session (SHARE_DB, AUTH_PROVIDER, ...; person.ts shareSession). */
@@ -56,6 +59,8 @@ const bare = (status: number) => new Response(null, { status, headers: { "cache-
 export interface FleetHooks {
   /** runs after the handler's checks and its issue-time sample, immediately before the lease batch */
   beforeIssue?: (db: D1) => Promise<void>;
+  /** the pairing routes' seams (pairing.ts) */
+  pairing?: PairingHooks;
 }
 
 /**
@@ -66,6 +71,8 @@ export async function handleFleet(req: Request, env: FleetEnv, hooks: FleetHooks
   const url = new URL(req.url);
   const mine = await handlePerson(req, url, env, fleetCore, person);
   if (mine) return mine;
+  const pairing = await handlePairing(req, url, env, fleetCore, person, hooks.pairing);
+  if (pairing) return pairing;
   if (url.pathname === CHAIN_ROUTE) return chainRead(req, url, env);
   if (url.pathname !== LEASE_ROUTE) return null;
   const db = env.FLEET_DB;

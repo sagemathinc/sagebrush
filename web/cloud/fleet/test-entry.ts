@@ -29,6 +29,24 @@ export default {
         return kind === "none" || !account ? { kind: "none" as const } : { kind: "ok" as const, account };
       },
     };
-    return (await handleFleet(req, env, change ? { beforeIssue: async (db) => { await change(db); } } : {}, person)) ?? new Response("not the fleet API", { status: 404 });
+    // (the pairing routes' seams: x-test-now moves the Worker's clock; x-test-pairing-total lowers the live total;
+    // x-test-pairing names a holder that dies after its claim or after pairing, or waits before claiming)
+    const clock = r(req, "x-test-now"), total = r(req, "x-test-pairing-total"), seam = req.headers.get("x-test-pairing");
+    const die = () => { throw new Error("the holder died (test seam)"); };
+    const pairing = {
+      ...(clock !== null ? { now: () => clock } : {}),
+      ...(total !== null ? { liveTotal: total } : {}),
+      ...(seam === "die-after-claim" ? { afterClaim: async () => die() } : {}),
+      ...(seam === "die-after-pair" ? { afterPair: async () => die() } : {}),
+      ...(seam?.startsWith("wait-before-claim:") ? { beforeClaim: () => new Promise<void>((res) => setTimeout(res, Number(seam.slice(18)))) } : {}),
+      ...(seam?.startsWith("wait-after-claim:") ? { afterClaim: () => new Promise<void>((res) => setTimeout(res, Number(seam.slice(17)))) } : {}),
+    };
+    return (await handleFleet(req, env, { ...(change ? { beforeIssue: async (db) => { await change(db); } } : {}), pairing }, person)) ?? new Response("not the fleet API", { status: 404 });
   },
 };
+
+/** A header's safe integer, or null. */
+function r(req: Request, name: string): number | null {
+  const v = req.headers.get(name);
+  return v !== null && /^[0-9]{1,16}$/.test(v) ? Number(v) : null;
+}
