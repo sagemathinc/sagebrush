@@ -5,7 +5,7 @@
 //   bun web/latex/test-latex-units.mjs   (in CI since #622: the engine's render checks, short verbatim among them)
 import { openBytes, encodeText, EDIT_MAX } from "./save.ts";
 import { imageCandidates, graphicsPathOf, notFoundWhy, relativePath, sniffImage, admitImageBytes, IMAGE_BOUNDS } from "./images.ts";
-import { splitChunk, PIECE_MAX, CHUNK_MAX, bytes, weight, tooLargeProblem } from "./split.ts";
+import { splitChunk, PIECE_MAX, CHUNK_MAX, SPLIT_DEPTH, bytes, weight, tooLargeProblem, boundRender, RENDER_BOUNDS } from "./split.ts";
 import { watchdog, WATCHDOG_MS, LATE_MS } from "./watchdog.ts";
 import { autoClose } from "./envclose.ts";
 import { tokenizeLine } from "./highlight.ts";
@@ -112,6 +112,27 @@ check("split-table-placeholder", (() => { const t = splitChunk(table); return t.
 const huge = '<div class="p"><span class="katex">' + "x".repeat(PIECE_MAX + 10) + "</span></div>";
 check("split-one-huge-inline-placeholder", (() => { const t = splitChunk(huge); return t.length === 1 && /too large/.test(t[0]); })(), null);
 check("split-over-2MiB-placeholder", (() => { const t = splitChunk('<div class="p">' + "y ".repeat(CHUNK_MAX) + "</div>"); return t.length === 1 && /too large/.test(t[0]); })(), null);
+// (a theorem whose list is over PIECE_MAX, each item under it: the list split in turn, every piece a whole element, no
+//  placeholder, the theorem's head and id in the first piece only, every item and label kept in order; an item over it,
+//  that can't be split, still the placeholder, said; containers nested past SPLIT_DEPTH, the same)
+{
+  const item = (k) => '<li id="it' + k + '"><span class="lbl">(T' + (k + 1) + ")</span>" + '<div class="p">' + '<span class="katex">' + "m".repeat(40 * 1024) + "</span></div></li>";
+  const thmList = '<div class="thm thm-definition" id="thm-9"><div class="p"><span class="thmhead">Hypothesis 1.</span> For every tuple:</div><ol class="list enum d1">' + Array.from({ length: 8 }, (_, k) => item(k)).join("") + "</ol></div>";
+  let told = 0;
+  const tp = splitChunk(thmList, () => told++);
+  const plain = (x) => x.replace(/<[^>]+>/g, "");
+  check("split-theorem-list-in-turn", bytes(thmList) > PIECE_MAX && tp.length > 1 && told === 0 && tp.every((p) => weight(p) <= PIECE_MAX && !/too large/.test(p)) && tp[0].startsWith('<div class="thm thm-definition" id="thm-9">') && tp[0].includes("thmhead") && tp.slice(1).every((p) => p.startsWith('<div class="thm thm-definition cont">') && !p.includes("thmhead") && !p.includes('id="thm-9"')) && plain(tp.join("")) === plain(thmList) && JSON.stringify(tp.join("").match(/\(T\d+\)/g)) === JSON.stringify(Array.from({ length: 8 }, (_, k) => "(T" + (k + 1) + ")")), { n: tp.length, told, heads: tp.map((p) => p.slice(0, 60)) });
+  const bigItem = thmList.replace(item(3), '<li id="it3"><span class="lbl">(T4)</span><span class="katex">' + "m".repeat(PIECE_MAX + 10) + "</span></li>");
+  let told2 = 0; const bp = splitChunk(bigItem, () => told2++);
+  check("split-theorem-list-item-too-large", bp.length === 1 && /too large/.test(bp[0]) && told2 === 1, { n: bp.length, told2 });
+  // (SPLIT_DEPTH containers deep, then two paragraphs over PIECE_MAX together: split; one more level: the placeholder)
+  const nest = (d) => '<div class="x">'.repeat(d) + '<div class="p">' + "a ".repeat(70 * 1024) + '</div><div class="p">' + "b ".repeat(70 * 1024) + "</div>" + "</div>".repeat(d);
+  const atDepth = splitChunk(nest(SPLIT_DEPTH)), pastDepth = splitChunk(nest(SPLIT_DEPTH + 1));
+  check("split-depth-bound", atDepth.length > 1 && atDepth.every((p) => weight(p) <= PIECE_MAX) && pastDepth.length === 1 && /too large/.test(pastDepth[0]), { at: atDepth.length, past: pastDepth.length });
+  // (deeply nested, no stack trouble: a bounded time and a placeholder)
+  const t0 = performance.now(); const dp = splitChunk('<div class="x">'.repeat(5000) + "z ".repeat(80 * 1024) + "</div>".repeat(5000));
+  check("split-deep-nesting-bounded", dp.length === 1 && /too large/.test(dp[0]) && performance.now() - t0 < 2000, { n: dp.length, ms: Math.round(performance.now() - t0) });
+}
 // (a beamer slide is one box: kept whole up to PIECE_MAX, however many paragraphs it has; over it, a placeholder)
 {
   const slide = (k) => '<section class="slide" data-frame="1" id="frame-1" style="aspect-ratio:128/96;--sfs:3.032"><div class="slide-body">' + '<div class="p">' + "z ".repeat(400) + "</div>".repeat(1) + "".padEnd(0) + '<div class="p">w</div>'.repeat(k) + "</div></section>";
@@ -138,6 +159,13 @@ check("split-over-2MiB-placeholder", (() => { const t = splitChunk('<div class="
   const ov = splitChunk(over, (why, size) => told3.push(tooLargeProblem(why, size, 5)));
   check("split-slide-over-chunk-max-still-the-slide", bytes(over) > CHUNK_MAX && ov.length === 1 && ov[0].startsWith(open) && ov[0].endsWith("</section>") && /this slide is too large/.test(ov[0]) && /over 2048 KiB/.test(told3[0]?.name ?? ""), { head: ov[0].slice(0, 200), told3 });
   check("split-weight", weight('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') === bytes('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') - "data:abc".length && weight("src=\"data:zz\" text") === bytes("src=\"data:zz\" text"), null);
+  // (a placeholder over a data: URL image says the weight it is over PIECE_MAX by, never the bytes with the image's
+  //  URL: a table too large by its markup, a plot of 600 KiB in it, under CHUNK_MAX; to latex check and on the page)
+  const tbl = '<table class="tabular"><tr><td>' + plot.replace("A".repeat(PIECE_MAX * 2), "C".repeat(600 * 1024)) + "</td></tr>" + "<tr><td>cell</td></tr>".repeat(7000) + "</table>", told4 = [];
+  const tp = splitChunk(tbl, (why, size) => told4.push(size));
+  check("split-placeholder-says-weight", bytes(tbl) < CHUNK_MAX && weight(tbl) > PIECE_MAX && bytes(tbl) - weight(tbl) >= 600 * 1024 && tp.length === 1
+    && told4.length === 1 && told4[0] === weight(tbl) && tp[0].includes("(" + Math.ceil(weight(tbl) / 1024) + " KiB)") && !tp[0].includes("(" + Math.ceil(bytes(tbl) / 1024) + " KiB)"),
+    { n: bytes(tbl), w: weight(tbl), told4, ph: tp[0]?.slice(0, 120) });
 }
 check("split-small-unchanged", splitChunk('<div class="p">hi</div>')[0] === '<div class="p">hi</div>', null);
 // (issue 623: a table float of amsldoc's, 50 KiB, was "too large (50 KiB, over 128 KiB)". KaTeX's MathML writes
@@ -158,6 +186,47 @@ check("split-small-unchanged", splitChunk('<div class="p">hi</div>')[0] === '<di
   for (const h of [table, huge, '<div class="p">' + "y ".repeat(CHUNK_MAX) + "</div>"]) splitChunk(h, (why, size) => said.push(tooLargeProblem(why, size, 0).name));
   const over = said.map((s) => /\((\d+) KiB, over (\d+) KiB\)$/.exec(s)).map((m) => m && +m[1] > +m[2]);
   check("split-placeholder-size-over-its-limit", said.length === 3 && over.every(Boolean), said);
+}
+
+// ---- a render over RENDER_BOUNDS (16 MiB of HTML, 20,000 chunks): the document up to there, whole chunks, then one
+// note where it stops, from its source line on; never part of a chunk, never past either bound with the note; was
+// the whole document replaced by one line, nothing of it shown. latex check is told only of placeholders shown.
+{
+  const MiB = 2 ** 20, sum = (r) => r.items.reduce((a, it) => a + it.b, 0);
+  const lines = (n) => Array.from({ length: n }, (_, k) => "line " + k).join("\n"), offs = (n) => { const o = []; let at = 0; for (let k = 0; k < n; k++) { o.push(at); at += ("line " + k).length + 1; } return o; };
+  // (under both: as before, every chunk, its own positions, nothing cut)
+  const small = boundRender(['<div class="p">a</div>', '<div class="p">b</div>'], [0, 10], "x\ny");
+  check("bound-render-under", small.cut === null && small.groups === 2 && small.items.length === 2 && JSON.stringify(small.pos) === "[0,10]", small);
+  // (16 MiB exactly in chunks of 16 KiB: all of it, no room kept back; one chunk more: the note in place of the last
+  //  one, which its room needs, within 16 MiB with it, at that chunk's line)
+  const k16 = '<div class="p">' + "y".repeat(16384 - 21) + "</div>";
+  const n = RENDER_BOUNDS.html / 16384, exact = boundRender(Array(n).fill(k16), offs(n), lines(n));
+  check("bound-render-exactly-16-mib", bytes(k16) === 16384 && exact.cut === null && exact.groups === n && sum(exact) === RENDER_BOUNDS.html, { b: bytes(k16), cut: exact.cut, sum: sum(exact) });
+  // (the chunk left first is a table too large: its placeholder isn't shown, so latex check isn't told of it)
+  const table = '<table class="tabular">' + "<tr><td>t</td></tr>".repeat(9000) + "</table>", told = [];
+  const over = boundRender(Array(n).fill(k16).concat([table]), offs(n + 1), lines(n + 1), (g, why) => told.push(g));
+  const last = over.items[over.items.length - 1];
+  check("bound-render-note-takes-room", over.cut !== null && over.groups === n && sum(over) <= RENDER_BOUNDS.html && last.g === n - 1 && /^<div class="bounderr">The preview stops here: it shows at most 16 MiB of a document, and the rest, from line \d+ of the source on, is past that\./.test(last.h)
+    && last.h.includes("from line " + n + " of") && over.cut.line === n && over.pos.length === n && over.pos[n - 1] === offs(n)[n - 1] && told.length === 0,
+    { cut: over.cut, groups: over.groups, sum: sum(over), told, note: last.h.slice(0, 160) });
+  // (20,000 chunks: all of them; 20,001: 19,999 and the note, the chunks' bound kept)
+  const tiny = '<div class="p">t</div>';
+  const at20k = boundRender(Array(RENDER_BOUNDS.chunks).fill(tiny), undefined, ""), past = boundRender(Array(RENDER_BOUNDS.chunks + 1).fill(tiny), undefined, "");
+  check("bound-render-chunks", at20k.cut === null && at20k.groups === RENDER_BOUNDS.chunks && past.cut !== null && past.groups === RENDER_BOUNDS.chunks && past.items.length === RENDER_BOUNDS.chunks
+    && /bounderr/.test(past.items[past.items.length - 1].h) && !/from line/.test(past.items[past.items.length - 1].h) && past.pos.every((p) => p === -1), { a: at20k.groups, b: past.groups, n: past.items.length });
+  // (a long article's 18 MiB in paragraphs of 60 KB, each split into pieces: whole chunks only, every one kept with all
+  //  its pieces, the most that fit with the note; a placeholder in a shown chunk still told, at its chunk)
+  const para = '<div class="p">' + "x ".repeat(30000) + "</div>", m = 300, told2 = [];
+  const chunks = [table].concat(Array(m - 1).fill(para)), big = boundRender(chunks, offs(m), lines(m), (g, why, size) => told2.push([g, size]));
+  const K = big.groups - 1, gs = [...new Set(big.items.map((it) => it.g))];
+  const per = (h) => splitChunk(h).reduce((a, p) => a + bytes(p), 0);
+  check("bound-render-whole-chunks", big.cut !== null && K > 0 && sum(big) <= RENDER_BOUNDS.html && gs.length === K + 1 && gs.every((g, k) => g === k)
+    && big.items.filter((it) => it.g === 1).length === splitChunk(para).length && sum(big) - bytes(big.items[big.items.length - 1].h) + per(para) + 1024 > RENDER_BOUNDS.html
+    && told2.length === 1 && told2[0][0] === 0 && big.cut.line === K + 1, { K, sum: sum(big), told2, line: big.cut?.line });
+  // (and latex check says it, at the line the preview stops)
+  const { checkResult } = await import("./check.ts");
+  const ck = checkResult("a.tex", lines(m), { outcome: "ok", beamer: false, problems: [{ kind: "toolong", name: "the rest of the document", at: offs(m)[K] }], frames: [], sage: [] }, []);
+  check("bound-render-check", ck.problems.length === 1 && ck.problems[0].kind === "toolong" && ck.problems[0].line === K + 1 && /16 MiB/.test(ck.problems[0].message ?? ""), ck.problems);
 }
 
 // ---- watchdog.ts (issue 619): the preview's watchdog judges the worker by the page's time; a timer the page's own
@@ -955,7 +1024,7 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
     article: ["Sums of Squares", "Contents", "Theorem", "Proof"], beamer: ["A Short Talk", "Overlays", "Two columns", "A math slide"],
     sagetex: ["In this preview", "sagebrush latex run"], pythontex: ["In this preview", "Python item 2: not run"],
     matlab: ["MATLAB in LaTeX", "eig(A)"], figure: ["Figure 1", "The function"], cv: ["Ada Example", "Education", "Publications"],
-    tikz: ["[tikzpicture: the axis environment", "[tikzpicture: a node on a path"], bibliography: ["[1]", "Diamond"], homework: ["Homework 3", "(10 points)"],
+    tikz: ["[tikzpicture: the axis environment", "TikZ pictures are drawn"], bibliography: ["[1]", "Diamond"], homework: ["Homework 3", "(10 points)"],
   };
   const record = [];
   for (const ex of EXAMPLES) {
@@ -1207,6 +1276,29 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
   check("natbib-numbers", nu.includes("A [3, 1]. B [1, 2]. C [1, 2, 3]. D [4, 1, 2, 3]. E [1, Thm. 2]. F [1, 3]. G Ann [1]."), nu.slice(0, 200));
   // (without natbib's numbers, a \bibitem's own label, as before)
   check("natbib-labels-kept", /\[Ann\(2001\)\]/.test(plain(new Engine().update(NAT("sort").replace("\\usepackage[sort]{natbib}", ""), { cold: true }).chunks.join(""))), null);
+}
+
+// ---- latex check: a problem in an \input file is reported at that file and its own line (and the main file's line it
+// was read from, input_line), in reading order; text after the \input on the same line is the main file's again; the
+// file named from the main file's folder, as the main file is named
+{
+  const { engineInputs } = await import("./inputs.ts");
+  const { checkResult, checkText, inputFileName } = await import("./check.ts");
+  const names = [["/sec/x.tex", "/main.tex", "main.tex", "sec/x.tex"], ["/paper/sec/x.tex", "/paper/main.tex", "paper/main.tex", "paper/sec/x.tex"],
+    ["/shared/defs.tex", "/ex/doc.tex", "doc.tex", "../shared/defs.tex"], ["/a.tex", "/a/b/doc.tex", "doc.tex", "../../a.tex"], ["/w/sec/x.tex", "/w/main.tex", "/w/main.tex", "/w/sec/x.tex"]];
+  const badN = names.filter(([k, d, f, want]) => inputFileName(k, d, f) !== want).map(([k, d, f, want]) => [k, d, f, want, inputFileName(k, d, f)]);
+  check("check-input-file-name", badN.length === 0, badN);
+  const MAIN = "\\documentclass{article}\n\\begin{document}\nA \\zza.\n\\input{part} \\zzb.\n\\zzc.\n\\end{document}\n";
+  const known = new Map([["/ex/part.tex", { text: "One.\n\\zzd.\n\\input{nothere}\n\\input{sub/deep}\nTwo \\zze.\n" }], ["/ex/sub/deep.tex", { text: "\n\n\\zzf.\n" }],
+    ["/ex/nothere.tex", { absent: true }], ["/ex/nothere", { absent: true }]]);
+  const ei = engineInputs("/ex/main.tex", known), r = new Engine().update(MAIN, { cold: true, inputs: { files: ei.files, resolve: ei.resolve, version: 1 } });
+  const res = checkResult("main.tex", MAIN, { outcome: String(r.stats.outcome), beamer: false, problems: r.problems, frames: r.frames, sage: [] }, [], "/ex/main.tex");
+  const got = res.problems.filter((p) => p.kind === "command" || p.kind === "input").map((p) => [p.name, p.file ?? "main.tex", p.line, p.input_line ?? null]);
+  check("check-input-lines", JSON.stringify(got) === JSON.stringify([["zza", "main.tex", 3, null], ["zzd", "part.tex", 2, 4], ["nothere", "part.tex", 3, 4], ["zzf", "sub/deep.tex", 3, 4], ["zze", "part.tex", 5, 4], ["zzb", "main.tex", 4, null], ["zzc", "main.tex", 5, null]]), got);
+  check("check-input-text", /^part\.tex:2: warning: \\zzd is not supported/m.test(checkText(res)) && /^sub\/deep\.tex:3: warning: \\zzf/m.test(checkText(res)) && /^main\.tex:4: warning: \\zzb/m.test(checkText(res)), checkText(res));
+  // (without the main file's path: as before, every problem at the main file's line)
+  const old = checkResult("main.tex", MAIN, { outcome: "ok", beamer: false, problems: r.problems, frames: [], sage: [] }, []);
+  check("check-input-no-docpath", old.problems.every((p) => p.file === undefined && p.input_line === undefined) && old.problems.filter((p) => ["zzd", "zze", "zzf"].includes(p.name)).every((p) => p.line === 4), old.problems.map((p) => [p.name, p.line]));
 }
 
 // ---- envclose.ts (P1a): the close a "}" typed after \begin{X} adds, or none

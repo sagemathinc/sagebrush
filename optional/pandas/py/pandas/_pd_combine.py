@@ -5,7 +5,7 @@ counts of one column's values."""
 import numpy as np
 
 from ._pd_column import Column
-from ._pd_dtypes import INTS
+from ._pd_dtypes import INTS, FLOATS
 from ._pd_datetime import DT, NAT_INT
 from . import _pd_indexing as X
 
@@ -21,7 +21,7 @@ def join_dtype(dtypes, gap):
     d0 = dtypes[0]
     if all(d == d0 for d in dtypes):
         d = d0
-    elif all(d in INTS or d == "float64" for d in dtypes):
+    elif all(d in INTS or d in FLOATS for d in dtypes):
         # (numpy's promotion: uint8 with int8 is int16, any integer with float64 float64)
         d = str(np.result_type(*dtypes))
     else:
@@ -38,8 +38,8 @@ def join_columns(parts):
     many missing values, for an object that hasn't the column)."""
     gap = any(not isinstance(p, Column) and p > 0 for p in parts)
     d = join_dtype([p.dtype for p in parts if isinstance(p, Column)], gap)
-    if d in INTS or d in ("float64", "bool"):
-        arrays = [p._pd_values.astype(d) if isinstance(p, Column) else np.full(p, np.nan, dtype=np.float64) for p in parts if not isinstance(p, int) or p]
+    if d in INTS or d in FLOATS or d == "bool":
+        arrays = [p._pd_values.astype(d) if isinstance(p, Column) else np.full(p, np.nan, dtype=d) for p in parts if not isinstance(p, int) or p]
         return Column(d, np.concatenate(arrays) if arrays else np.array([], dtype=d))
     if d is DT:
         arrays = [p._pd_values if isinstance(p, Column) else np.full(p, NAT_INT, dtype=np.int64) for p in parts]

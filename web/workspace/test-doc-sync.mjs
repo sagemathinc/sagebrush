@@ -780,7 +780,7 @@ try {
     await settle();
     await B.call("mount", N);
     // (an output to clear: the cell's, given before the lag, and saved)
-    if (how === "clear") { await B.call("untyped", "output", "a"); await settle(); await sleep(300); }
+    if (how === "clear") { await B.call("untypedSaved", "output", "a"); await settle(); }
     const before = await B.call("byClient", N);
     await B.call("holdRemote", N);
     await A.call("edit", N, [["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]);
@@ -788,10 +788,12 @@ try {
     const held = { head: await B.call("head", N), shown: await B.call("shown") };
     const isHeld = held.head === J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]) && held.shown === J([["a", "A = [8 -2; 1 1]"], ["b", "eig(A)"]]);
     check(isHeld, `12b (${how}): held: A's change in B's history, not yet on B's page: ` + J(held));
-    await B.call("untyped", how, "a");
-    await sleep(300);
-    // (the save resolved with what it kept, A's text merged in: the page shows it at once, before the held merge runs)
-    const mid = await B.call("byClient", N), midShown = await B.call("shown");
+    // (the save waited for, not a fixed sleep: it resolves with what it kept, A's text merged in, and the page shows
+    // that at once, before the held merge runs; the page is then read until it does, within 5 s)
+    await B.call("untypedSaved", how, "a");
+    let midShown = await B.call("shown");
+    for (const t = Date.now(); midShown !== want && Date.now() - t < 5000; midShown = await B.call("shown")) await sleep(50);
+    const mid = await B.call("byClient", N);
     await B.call("releaseRemote");
     await settle();
     await sleep(900);
