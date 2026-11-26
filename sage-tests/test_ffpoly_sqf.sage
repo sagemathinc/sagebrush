@@ -13,7 +13,7 @@ def show(label, f):
         r = f()
         print(label, "->", repr(r), flush=True)
     except Exception as e:
-        print(label, "->", "%s: %s" % (type(e).__name__, str(e).split(chr(10))[0]), flush=True)
+        print(label, "->", ("%s: %s" % (type(e).__name__, str(e).split(chr(10))[0])).rstrip(), flush=True)
 show('((x + 1)^2 * (x + 2)^3).squarefree_decomposition()', lambda: ((x + 1)^2 * (x + 2)^3).squarefree_decomposition())
 show('((x + 1)^2 * (x + 2)^3).radical()', lambda: ((x + 1)^2 * (x + 2)^3).radical())
 show('(x^2 + 2*x + 1).is_square()', lambda: (x^2 + 2*x + 1).is_square())
@@ -54,6 +54,9 @@ show('(2*u^9*(u + 1)^3*(u + 2)).squarefree_decomposition()', lambda: (2*u^9*(u +
 show('((y + a)^6*(y + 1)).squarefree_decomposition()', lambda: ((y + a)^6*(y + 1)).squarefree_decomposition())
 show('(3*(u + 1)^3).radical()', lambda: (3*(u + 1)^3).radical())
 show('(3*(u + 1)^4).radical()', lambda: (3*(u + 1)^4).radical())
+show('(2*(u + 1)^3).radical()', lambda: (2*(u + 1)^3).radical())
+show('(2*(u + 1)^4).radical()', lambda: (2*(u + 1)^4).radical())
+show('(2*(u + 1)^2).radical()', lambda: (2*(u + 1)^2).radical())
 show('(3*(v + 1)^7).radical()', lambda: (3*(v + 1)^7).radical())
 show('(3*(v + 1)^8).radical()', lambda: (3*(v + 1)^8).radical())
 show('(3*(x + 1)^101).radical()', lambda: (3*(x + 1)^101).radical())
