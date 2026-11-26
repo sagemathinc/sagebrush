@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { DOCUMENT_MODES, FLAG_MODES, KERNEL_MODES, KERNEL_SPECS, MODE_NAMES, REPL_MODES, TRANSLATED_MODES, isFlagMode, isModeName, isTranslated, modeFlag, modeFlags, modeOfFlags } from "../src/modes";
 import { installKernel } from "../src/kernel";
 import { cleanDoc } from "../web/board/doc";
@@ -126,6 +126,32 @@ test("the Jupyter kernels: specs, install order and --mode's error", () => {
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a relative --prefix installs the kernel under its absolute path, and kernel.json names only absolute paths", () => {
+  const parent = mkdtempSync(join(tmpdir(), "sb-prefix-"));
+  const here = process.cwd();
+  const out: string[] = [];
+  const write = process.stdout.write;
+  (process.stdout as any).write = (s: string) => (out.push(String(s)), true);
+  let code: number;
+  try {
+    process.chdir(parent);
+    code = installKernel(["--prefix", "jp", "--mode", "python"]);
+  } finally {
+    process.stdout.write = write;
+    process.chdir(here);
+  }
+  try {
+    assert.equal(code, 0);
+    const dir = join(realpathSync(parent), "jp", "share", "jupyter", "kernels", "sagebrush-python");
+    assert.deepEqual(out.map((l) => l.replace(realpathSync(parent), "P").replace(parent, "P")), ['installed the Jupyter kernel "Sagebrush (Python)" in P/jp/share/jupyter/kernels/sagebrush-python\n']);
+    const k = JSON.parse(readFileSync(join(dir, "kernel.json"), "utf8"));
+    const paths = k.argv.slice(0, k.argv.indexOf("--jupyter-kernel"));
+    assert.ok(paths.length > 0 && paths.every((p: string) => isAbsolute(p)), `kernel.json argv: ${JSON.stringify(k.argv)}`);
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
   }
 });
 

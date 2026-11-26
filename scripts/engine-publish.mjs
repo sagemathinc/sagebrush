@@ -7,7 +7,7 @@
 //   2. the published engine/<id>/manifest.json is read FIRST: another manifest there refuses before any write; this
 //      one there means the engine is published (only missing lib/ objects are put);
 //   3. lib/ objects (content-named, shared by every engine): one there with this size is kept; one there with
-//      ANOTHER size refuses, never overwritten;
+//      ANOTHER size refuses, never overwritten (a HEAD answered without a length: the object's sha256 decides);
 //   4. the engine's own files, then its manifest LAST, so an engine is served only once all of it is in;
 //   5. the manifest is read back and must be this one, byte for byte.
 // Prints keys and counts, never a credential.
@@ -61,7 +61,12 @@ export async function publishEngine({ dir, s3, log = console.log }) {
   const want = [];
   for (const f of lib) {
     const h = await s3.head(f);
-    if (h.status === 200) {
+    if (h.status === 200 && h.size === null) {
+      // (a 200 without its length: the object itself, by its sha256, which the manifest names)
+      const g = await s3.get(f);
+      if (g.status !== 200) throw new Error(`GET ${f}: ${g.status}, after HEAD 200 without a length`);
+      if (sha(g.body) !== man.files[f].sha256) throw new Error(`${f} is in the bucket with ANOTHER content (sha256 ${sha(g.body).slice(0, 16)}..., ${g.body.length} bytes): refusing to overwrite it`);
+    } else if (h.status === 200) {
       if (h.size !== man.files[f].size) throw new Error(`${f} is in the bucket with ANOTHER size (${h.size}, not ${man.files[f].size}): refusing to overwrite it`);
     } else if (h.status === 404) want.push(f);
     else throw new Error(`HEAD ${f}: ${h.status}`);

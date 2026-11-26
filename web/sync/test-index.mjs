@@ -131,7 +131,7 @@ async function socket(s, device) {
       }, 5000);
     });
   };
-  ws.send(JSON.stringify({ t: "hello", v: 2, device, name: "test", index_after: 0 }));
+  ws.send(JSON.stringify({ t: "hello", v: 3, device, name: "test", index_after: 0 }));
   await next((m) => m.t === "welcome");
   await next((m) => m.t === "index");
   let req = 0, dseq = 0;
