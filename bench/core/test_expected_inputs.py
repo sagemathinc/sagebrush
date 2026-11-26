@@ -3,7 +3,10 @@
 
 - Tier (a), runs anywhere: expected_inputs.py reproduces every point's
   input hash in expected_inputs_golden.json, the hashes every backend agreed
-  on in a full VM run (the file says which).
+  on in a full VM run (the file says which). The l sizes take about a
+  minute: under BENCH_CI=1 only s and m are recomputed (the same generators
+  at smaller n), and l, like the calibration sizes, is checked for its
+  shape; every VM run checks every point's hash.
 - Tier (b): the drivers' own `inputs` mode, at the small size of every row,
   equals expected_inputs.py.
   - The Sage-mode driver needs the engine's Python package. Under
@@ -29,6 +32,9 @@ import expected_inputs  # noqa: E402
 import run  # noqa: E402
 
 CI = os.environ.get("BENCH_CI") == "1"
+# (the sizes whose hashes Golden recomputes: s and m in CI, within its
+# budget; every regular size elsewhere)
+GOLDEN_SIZES = ("s", "m") if CI else ("s", "m", "l")
 ROWS = json.loads((HERE / "items.json").read_text())["rows"]
 
 
@@ -74,12 +80,14 @@ class Golden(unittest.TestCase):
             set(golden) | set(pending),
             {f"{r['id']}:{k}" for r in ROWS for k in r["sizes"]},
         )
-        got = expected_inputs.expected(["s", "m", "l"], [])
+        sizes = GOLDEN_SIZES
+        got = expected_inputs.expected(list(sizes), [])
         for key, want in {**golden, **pending}.items():
-            if key.rpartition(":")[2] not in ("s", "m", "l"):
-                # (a calibration size: its hash takes minutes to recompute
-                # here, so only its shape is checked; every VM run checks
-                # each backend's input hash against it, as for every point)
+            if key.rpartition(":")[2] not in sizes:
+                # (a calibration size, or l under BENCH_CI: its hash takes
+                # minutes to recompute here, so only its shape is checked;
+                # every VM run checks each backend's input hash against it,
+                # as for every point)
                 row = next(r for r in ROWS if r["id"] == key.partition(":")[0])
                 size = key.rpartition(":")[2]
                 self.assertEqual(

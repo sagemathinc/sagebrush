@@ -1660,14 +1660,14 @@ class WasmSkip(unittest.TestCase):
         with mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]):
             bs = ["user", "native", "wasm", "magma"]
             big = dict(row, working_set="5*2**30")
-            self.assertEqual(run.selected(big, "c0", bs), (["user", "native"], {"wasm": mock.ANY}))
+            self.assertEqual(run.selected(big, "c0", bs), (["user", "native"], {"wasm": mock.ANY, "magma": mock.ANY}))
             self.assertIn("2 GiB", run.selected(big, "c0", bs)[1]["wasm"])
             # (the margin: 3 GiB is skipped too)
             self.assertIn("wasm", run.selected(dict(row, working_set="3*2**30"), "c0", bs)[1])
             # (not at the regular sizes, nor under 4 GiB, nor without a formula)
             self.assertEqual(run.selected(big, "s", bs), (bs, {}))
-            self.assertEqual(run.selected(dict(row, working_set="2**30"), "c0", bs)[1], {})
-            self.assertEqual(run.selected(row, "c0", bs), (["user", "native", "wasm"], {}))
+            self.assertEqual(list(run.selected(dict(row, working_set="2**30"), "c0", bs)[1]), ["magma"])
+            self.assertEqual(run.selected(row, "c0", bs), (["user", "native", "wasm"], {"magma": mock.ANY}))
 
     def test_the_point_records_the_skip(self):
         row = dict(ROW, working_set="5*2**30", sizes={"c0": {"n": 10, "timeout": 30}})
@@ -1690,6 +1690,37 @@ class WasmSkip(unittest.TestCase):
         self.assertEqual(rec["backends"]["wasm"]["status"], "skipped")
         self.assertNotIn("wasm", calls)
 
+    def test_a_calibration_size_labels_the_references_skipped(self):
+        # (the references are not on host only when they are not; at a
+        # calibration size they are skipped by rule, and the point says so)
+        row = dict(ROW, sizes={"c0": {"n": 10, "timeout": 30}})
+
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": "5"}
+            if mode == "once":
+                return {"status": "ok", "signature": "s"}
+            return {"status": "ok", "seconds": 1.0, "signature": "K:1"}
+
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+            mock.patch.object(run, "units", lambda *a: ("unmetered", "")),
+        ):
+            rec = run.point(row, "c0", ["user", "native", "magma", "flint", "flint-n", "native-n"], {"artifacts": ARTS})
+        for b in ("magma", "flint", "flint-n", "native-n"):
+            self.assertEqual(rec["backends"][b]["status"], "skipped", b)
+            self.assertIn("calibrated targets only", rec["backends"][b]["detail"])
+        self.assertEqual(rec["backends"]["native"]["time"]["status"], "ok")
+        # (a backend absent from this host stays "not on host")
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: None if b == "magma" else ["x"]),
+            mock.patch.object(run, "units", lambda *a: ("unmetered", "")),
+        ):
+            rec = run.point(row, "c0", ["user", "magma"], {"artifacts": ARTS})
+        self.assertEqual(rec["backends"]["magma"]["status"], "not on host")
+
 
 class DryRun(unittest.TestCase):
     def test_it_lists_every_point_with_its_working_set(self):
@@ -1705,8 +1736,12 @@ class DryRun(unittest.TestCase):
             [line.split()[:4] for line in lines],
             [["mat_fp_det", "s", "60", "ws=28800"], ["mat_fp_det", "c0", "122", "ws=119072"], ["groebner_cyclic", "s", "5", "ws=None"]],
         )
-        # (no reference at a calibration size)
-        self.assertNotIn("magma", lines[1])
+        # (no reference runs at a calibration size: it is listed skipped where
+        # this host has it; a host without Magma, like CI's, doesn't list it)
+        cols = lines[1].split()[4:]
+        if run.MAGMA.exists():
+            self.assertIn("magma:skipped", cols)
+        self.assertNotIn("magma", [w for w in cols if not w.endswith(":skipped")])
 
 
 class RotationOrder(unittest.TestCase):

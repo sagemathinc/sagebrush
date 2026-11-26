@@ -3507,6 +3507,9 @@ def _rr_function(name, args, numeric):
 # (the parts of Sage's values of these functions of CC that are an exact 0:
 # the imaginary part on the real line; on the imaginary axis, the real part
 # of the odd functions and the imaginary part of the even ones)
+# (the functions of an element of CC that are its methods, Sage's)
+_CC_METHOD_FUNCTIONS = frozenset(("exp", "sin", "cos", "tan", "cot", "sec", "csc", "sinh", "cosh", "tanh", "coth",
+                                  "sech", "csch"))
 _CC_REAL_ON_REALS = frozenset(("exp", "sin", "cos", "tan", "sinh", "cosh", "tanh", "cot", "sec", "csc", "coth",
                                "sech", "csch", "arctan", "arcsinh"))
 _CC_IMAGINARY_ON_IMAGINARIES = frozenset(("sin", "tan", "sinh", "tanh", "cot", "csc", "coth", "csch", "arcsin"))
@@ -3536,7 +3539,10 @@ def _cc_function(name, args, r):
         parts += [z.real, z.imag]
     if not all(abs(t) < _INF for t in parts):
         return r
-    if isinstance(r, complex):
+    if r is None:
+        # (the engine refused its double value, past the double range)
+        re = im = _INF
+    elif isinstance(r, complex):
         # (complex's own parts: CC's .real is a callable real)
         v = complex.__complex__(r)
         re, im = v.real, v.imag
@@ -3594,8 +3600,20 @@ def _function(name, numeric=None, cnumeric=None):
                     if rr and not _rr_exact(r, fl) and name not in ("sgn", "heaviside"):
                         return _rr_function(name, args, numeric)
                     return _RealNumber(r)
-            r = _one("fun", name, *[_to_s(a) for a in args]).n()
-            if any(type(a).__name__ == "ComplexNumber" for a in args):
+            if len(args) == 1 and not kw and name in _CC_METHOD_FUNCTIONS and type(args[0]).__name__ == "ComplexNumber":
+                # (an element of CC alone: its own method, as in Sage, an
+                # element of CC however real its value)
+                return getattr(args[0], name)()
+            cc = any(type(a).__name__ == "ComplexNumber" for a in args)
+            try:
+                r = _one("fun", name, *[_to_s(a) for a in args]).n()
+            except NotImplementedError:
+                # (an element of CC: the engine's double value was past the
+                # double range, so Sage's is the MP field's, _cc_function)
+                if not cc:
+                    raise
+                r = None
+            if cc:
                 return _cc_function(name, args, r)
             return r
         if len(args) == 1 and not kw and type(args[0]).__name__ in ("RealNumberMP", "ComplexNumberMP"):

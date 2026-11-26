@@ -318,7 +318,8 @@ impl Num {
             (o, Num::Mp(x)) => mp_binop(x, o, '+', true),
             _ => {
                 let ((a, b), (c, d)) = (self.to_c64(), o.to_c64());
-                Num::fl(a + c, b + d, self.fk_with(o))
+                let (r, left) = tracked(|| Num::fl(step(a + c, false), step(b + d, false), self.fk_with(o)));
+                rr_cc(r, &[self, o], left, |_| false, |v| v[0].add(&v[1]))
             }
         }
     }
@@ -350,11 +351,15 @@ impl Num {
                 // imaginary parts are NaN for an infinite or NaN number (inf*0), and RR('inf')*x
                 // became (NaN - NaN*I)*x (Sage: (+infinity)*x). A real times a complex is the
                 // complex formula, as Sage (SR(RR(2))*SR(CC(infinity, 1)) is +infinity + NaN*I)
-                if b == 0.0 && d == 0.0 {
-                    Num::fl(a * c, 0.0, k)
-                } else {
-                    Num::fl(a * c - b * d, a * d + b * c, k)
-                }
+                let p = |x: f64, y: f64| step(x * y, x != 0.0 && y != 0.0);
+                let (r, left) = tracked(|| {
+                    if b == 0.0 && d == 0.0 {
+                        Num::fl(p(a, c), 0.0, k)
+                    } else {
+                        Num::fl(step(p(a, c) - p(b, d), false), step(p(a, d) + p(b, c), false), k)
+                    }
+                });
+                rr_cc(r, &[self, o], left, |_| false, |v| v[0].mul(&v[1]))
             }
         }
     }
@@ -371,10 +376,18 @@ impl Num {
                 Num::Exact(a / &n, -b / &n)
             }
             // a real one as a real (1/inf is 0, not inf/inf = NaN)
-            Num::Float(a, b, k) if *b == 0.0 => Num::Float(1.0 / a, 0.0, *k),
+            Num::Float(a, b, k) if *b == 0.0 => {
+                let (r, left) = tracked(|| Num::Float(step(1.0 / a, true), 0.0, *k));
+                rr_cc(r, &[self], left, |_| false, |v| v[0].inv())
+            }
+            // (a part of 1/z is 0 only where z's is: a/n and b/n underflow)
             Num::Float(a, b, k) => {
-                let n = a * a + b * b;
-                Num::Float(a / n, -b / n, *k)
+                let (r, left) = tracked(|| {
+                    let n = step(step(a * a, *a != 0.0) + step(b * b, *b != 0.0), false);
+                    Num::Float(step(a / n, *a != 0.0), step(-b / n, *b != 0.0), *k)
+                });
+                let lost = |i: usize| if i == 0 { *a != 0.0 } else { *b != 0.0 };
+                rr_cc(r, &[self], left, lost, |v| v[0].inv())
             }
             // 1/x in its field, rounded once
             Num::Mp(x) => Num::mp(mpnum::arith(&Mp::fin(&BigInt::one(), 0, x.prec), x, '/', x.prec)),
@@ -383,6 +396,16 @@ impl Num {
         }
     }
     pub fn div(&self, o: &Num) -> Num {
+        // (an RR or CC quotient checked as a whole: Sage's is self times 1/o,
+        // each in the MP field)
+        if let Num::Float(_, _, k) = if matches!(self, Num::Float(..)) { self } else { o } {
+            if !k.double() && !IN_STEPS.with(|p| p.get()) {
+                let (r, left) = in_steps(|| self.mul(&o.inv()));
+                let a = self.to_c64();
+                let lost = |i: usize| if r.to_c64().1 == 0.0 && o.to_c64().1 == 0.0 && a.1 == 0.0 { i == 0 && a.0 != 0.0 } else { true };
+                return rr_cc(r.clone(), &[self, o], left, lost, |v| v[0].mul(&v[1].inv()));
+            }
+        }
         self.mul(&o.inv())
     }
     pub fn pow_int(&self, e: i64) -> Num {
@@ -402,6 +425,16 @@ impl Num {
             // (Sage's generic_power: the inverse first for e < 0, then
             // binary powering, each product Sage's)
             return Num::mpc(x.pow_int(e));
+        }
+        // (an RR or CC power is checked as a whole, against Sage's: a 0 part
+        // of a nonzero number's power may be lost, for a real one as
+        // mpfr_pow_si, a complex one as generic_power)
+        if let Num::Float(a, b, k) = self {
+            if !k.double() && e != 0 && !IN_STEPS.with(|p| p.get()) {
+                let (r, left) = in_steps(|| self.pow_int(e));
+                let lost = |i: usize| if *b == 0.0 { i == 0 && *a != 0.0 } else { true };
+                return rr_cc(r, &[self], left, lost, |v| v[0].pow_int(e));
+            }
         }
         // (by the exponent's magnitude: -e overflows at i64::MIN, the review's
         // RDF(2)^(-2^63))
@@ -749,6 +782,191 @@ pub fn fcmp(x: f64, y: f64) -> Ordering {
     }
 }
 
+// ------------------------------------------------------------------ RR and CC past the doubles
+
+// Sage's RR and CC are MPFR numbers at 53 bits, whose exponents reach far
+// past a double's; a symbolic RR or CC number here holds doubles.  Where
+// every double step of an operation (each product, quotient and sum, the
+// steps of an inverse, a quotient a times 1/b and an integer power
+// included) stays among the normal doubles, the steps are MPFR's, each
+// rounded alike, and the result is Sage's.  Where one left them (step(): a
+// product or quotient of nonzero numbers 0 or subnormal, or a step infinite
+// or NaN), or an operand is not tame (each part 0 or of magnitude 2^-510 to
+// 2^510), or a part of the result is infinite, NaN, subnormal or a lost 0,
+// the operation is done again in the 53-bit MP field, Sage's steps: its
+// value is kept when each part is a double, and refused when it is not
+// (never an infinity or a 0 that Sage does not have, nor a part an
+// underflowed step lost; https://github.com/sagemathinc/sagebrush/issues/1949).
+
+const TAME_MIN: f64 = f64::from_bits(513 << 52); // 2^-510
+const TAME_MAX: f64 = f64::from_bits(1533 << 52); // 2^510
+
+fn tame(x: f64) -> bool {
+    x == 0.0 || (TAME_MIN..=TAME_MAX).contains(&x.abs())
+}
+
+/// An infinite, NaN or subnormal double: a value that left the normal ones.
+fn off(x: f64) -> bool {
+    !x.is_finite() || (x != 0.0 && x.abs() < f64::MIN_POSITIVE)
+}
+
+thread_local! {
+    // (set while an integer power or a quotient steps through its products:
+    // it is checked as a whole, Sage's mpfr_pow_si, generic_power or a times
+    // 1/b, not each step)
+    static IN_STEPS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    // (set when a double step left the normal doubles, step(): where it did,
+    // the operation is not MPFR's and is done again in the 53-bit MP field)
+    static LEFT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// x, a double step's result, noted (LEFT) where it left the normal
+/// doubles: infinite or NaN, or 0 or subnormal where `nonzero` (a product
+/// or quotient of nonzero numbers, which MPFR keeps normal).
+fn step(x: f64, nonzero: bool) -> f64 {
+    if !x.is_finite() || (nonzero && x.abs() < f64::MIN_POSITIVE) {
+        LEFT.with(|l| l.set(true));
+    }
+    x
+}
+
+/// f() and whether a step of it left the normal doubles (LEFT, kept for
+/// an enclosing call).
+fn tracked(f: impl FnOnce() -> Num) -> (Num, bool) {
+    let before = LEFT.with(|l| l.replace(false));
+    let r = f();
+    let left = LEFT.with(|l| l.get());
+    LEFT.with(|l| l.set(before || left));
+    (r, left)
+}
+
+/// f() with the RR and CC checks of its steps suspended (IN_STEPS), the
+/// previous state restored after it (a nested call keeps its caller's), and
+/// whether any of its steps left the normal doubles.
+fn in_steps(f: impl FnOnce() -> Num) -> (Num, bool) {
+    struct Done(bool);
+    impl Drop for Done {
+        fn drop(&mut self) {
+            IN_STEPS.with(|p| p.set(self.0));
+        }
+    }
+    let _done = Done(IN_STEPS.with(|p| p.replace(true)));
+    tracked(f)
+}
+
+/// A top-level call starts: the RR and CC checks are on and no step is
+/// noted, whatever a trapped call left (a trap runs no destructors, so
+/// in_steps' restore may not run).
+pub fn reset_steps() {
+    IN_STEPS.with(|p| p.set(false));
+    LEFT.with(|l| l.set(false));
+}
+
+/// An operand of an RR or CC operation as a number of the 53-bit MP field,
+/// its own (an element of RR a real, of CC a complex one, an exact number
+/// real unless it has an imaginary part; mixed, the MP field's coercion
+/// does what Sage's does): a double exactly, an exact number rounded once.
+fn to_mp53(x: &Num) -> Num {
+    let q = |a: &Q| Mp::from_q(a.numer(), a.denom(), 53);
+    match x {
+        Num::Exact(a, b) if !b.is_zero() => Num::mpc(Mpc::new(q(a), q(b))),
+        Num::Exact(a, _) => Num::mp(q(a)),
+        Num::Float(a, b, k) if k.complex() || *b != 0.0 => Num::mpc(Mpc::new(Mp::from_f64(*a, 53), Mp::from_f64(*b, 53))),
+        Num::Float(a, _, _) => Num::mp(Mp::from_f64(*a, 53)),
+        _ => x.clone(),
+    }
+}
+
+/// r, the double result of an RR or CC operation on finite operands `ops`,
+/// or the 53-bit MP field's (`mp` on the operands there) where r may have
+/// left the doubles: a step of it did (`left`), an operand is not tame, a
+/// part of r is off, or a part of r is 0 where `zero_lost` says Sage's may
+/// not be.  That value is kept when each
+/// part is a double and refused when it is not.  RDF and CDF are doubles in
+/// Sage too, and an infinite or NaN operand takes the double steps (Sage's
+/// special values).
+fn rr_cc(r: Num, ops: &[&Num], left: bool, zero_lost: impl Fn(usize) -> bool, mp: impl FnOnce(&[Num]) -> Num) -> Num {
+    let Num::Float(re, im, k) = r else { return r };
+    if k.double() || IN_STEPS.with(|p| p.get()) {
+        return r;
+    }
+    let parts: Vec<(f64, f64)> = ops.iter().map(|x| x.to_c64()).collect();
+    let special = |x: &&Num| match x {
+        Num::Float(a, b, _) => !a.is_finite() || !b.is_finite(),
+        Num::Exact(..) => false,
+        _ => true,
+    };
+    if ops.iter().any(special) {
+        return r;
+    }
+    let suspect = left || parts.iter().any(|&(a, b)| !tame(a) || !tame(b)) || off(re) || off(im) || (re == 0.0 && zero_lost(0)) || (im == 0.0 && zero_lost(1));
+    if !suspect {
+        return r;
+    }
+    let v: Vec<Num> = ops.iter().map(|x| to_mp53(x)).collect();
+    from_mp53(&mp(&v), k)
+}
+
+/// The double value r of a function `name` at finite RR or CC arguments v,
+/// refused where it may have left the doubles (no MP version of the
+/// function here): a part infinite or NaN where `pole` does not allow it, a
+/// part subnormal, or 0 where `zero_ok` does not say Sage's value has an
+/// exact 0 there (part 0 real, 1 imaginary).
+pub fn check_float_value(name: &str, v: &[(f64, f64)], r: &Num, pole: bool, zero_ok: impl Fn(usize) -> bool) {
+    if float_value_off(v, r, pole, zero_ok) {
+        refuse_float_value(name, v, r.fk().unwrap_or(Fk::RR));
+    }
+}
+
+/// Whether check_float_value refuses r.
+pub fn float_value_off(v: &[(f64, f64)], r: &Num, pole: bool, zero_ok: impl Fn(usize) -> bool) -> bool {
+    let Num::Float(re, im, k) = *r else { return false };
+    if k.double() || v.iter().any(|&(a, b)| !a.is_finite() || !b.is_finite()) {
+        return false;
+    }
+    let bad = |x: f64, i: usize| if !x.is_finite() { !pole } else if x == 0.0 { !zero_ok(i) } else { x.abs() < f64::MIN_POSITIVE };
+    bad(re, 0) || bad(im, 1)
+}
+
+/// The refusal of a function's RR or CC value (parent k) at v past the doubles.
+pub fn refuse_float_value(name: &str, v: &[(f64, f64)], k: Fk) -> ! {
+    let args: Vec<String> = v.iter().map(|&(a, b)| crate::print::to_string(&crate::expr::num(Num::fl(a, b, k.to_real())))).collect();
+    let f = if k.complex() { "CC" } else { "RR" };
+    not_implemented(format!("{}({}): the value in {}, past the double range, is not available in sagebrush yet", name, args.join(", "), f))
+}
+
+/// b^n for an RR or CC number b (parent k) and an integer n, as Sage
+/// computes it in the 53-bit MP field (mpfr_pow_si for a real b, generic_power
+/// for a complex one): kept when each part is a double, refused otherwise.
+pub fn pow_int_mp53(b: &Num, n: i64, k: Fk) -> Num {
+    from_mp53(&to_mp53(b).pow_int(n), k)
+}
+
+/// A number of the 53-bit MP field as RR's or CC's doubles (parent k), or
+/// refused, with Sage's value, when a part is not a double.
+fn from_mp53(v: &Num, k: Fk) -> Num {
+    let back = |x: &Mp| {
+        let d = x.to_f64();
+        if Mp::from_f64(d, 53).same_value(x) {
+            Some(d)
+        } else {
+            None
+        }
+    };
+    let refuse = |s: String, f: &str| -> ! { not_implemented(format!("{}, an element of {} past the double range, has no symbolic form in sagebrush yet", s, f)) };
+    match v {
+        Num::Mp(x) => match back(x) {
+            Some(d) => Num::Float(d, 0.0, k),
+            None => refuse(x.sage_str(), if k.complex() { "CC" } else { "RR" }),
+        },
+        Num::Mpc(z) => match (back(&z.re), back(&z.im)) {
+            (Some(a), Some(b)) => Num::fl(a, b, k),
+            _ => refuse(z.sage_str(), "CC"),
+        },
+        _ => v.clone(),
+    }
+}
+
 /// x of RealField(p) (p > 53) or ComplexField(p) at 53 bits as a double, as
 /// Sage's coercion into RR or CC rounds it; refused when the 53-bit value
 /// is past the doubles (an element of RR or CC has no other symbolic form
@@ -1085,6 +1303,54 @@ mod tests {
         };
         assert_eq!(h(&mpq(1, 2, 100)), h(&mpq(1, 2, 30)));
         assert_eq!(mpq(-1, 2, 100).cmp(&mpq(1, 3, 10)), Ordering::Less);
+    }
+
+    #[test]
+    fn rr_cc_past_the_doubles() {
+        // (Sage's RR and CC have MPFR's exponents: a result past the doubles
+        // is refused with Sage's value, one whose steps left them is Sage's)
+        let rr = |x: f64| Num::Float(x, 0.0, Fk::RR);
+        let refused = |f: &dyn Fn() -> Num| match crate::err::catch(f) {
+            Err(SymError::NotImplemented(m)) => m,
+            r => panic!("not refused: {:?}", r),
+        };
+        let p = |e: i32| 2f64.powi(e);
+        assert_eq!(rr(p(600)).mul(&rr(p(-600))), rr(1.0));
+        assert_eq!(rr(p(-600)).div(&rr(p(-600))), rr(1.0));
+        assert!(refused(&|| rr(p(1000)).mul(&Num::int(1 << 30))).starts_with("1.15052360631188e310, an element of RR past the double range"));
+        assert!(refused(&|| rr(p(-600)).mul(&rr(p(-600)))).starts_with("5.80771375621750e-362, an element of RR"));
+        assert!(refused(&|| rr(1e300).pow_int(2)).starts_with("1.00000000000000e600, an element of RR"));
+        assert_eq!(rr(p(-1020)).inv(), rr(p(1020)));
+        assert!(refused(&|| Num::Float(p(600), 1.0, Fk::CC).mul(&Num::Float(p(600), 0.0, Fk::CC))).starts_with("1.72184794563858e361 + 4.14951556888099e180*I, an element of CC"));
+        // (an integer power of CC is Sage's generic_power, a quotient Sage's
+        // a times 1/b, each checked as a whole)
+        assert_eq!(Num::Float(1.0, 1.0, Fk::CC).pow_int(2), Num::Float(0.0, 2.0, Fk::CC));
+        assert!(refused(&|| rr(1.5).div(&Num::Float(p(600), 1.0, Fk::CC))).starts_with("3.61487979765433e-181 - 8.71157063432625e-362*I, an element of CC"));
+        // RDF and CDF are doubles in Sage too
+        assert_eq!(Num::Float(1e300, 0.0, Fk::RDF).mul(&Num::Float(1e300, 0.0, Fk::RDF)), Num::Float(f64::INFINITY, 0.0, Fk::RDF));
+        // (the checks are off only inside in_steps: a nested one restores its
+        // caller's state, and a top-level call turns them back on after a
+        // trap left them off)
+        let on = || !IN_STEPS.with(|p| p.get());
+        in_steps(|| {
+            in_steps(|| Num::zero());
+            assert!(!on());
+            Num::zero()
+        });
+        // (a step inside a quotient or a power that left the doubles is
+        // noted: 1/b's real part 2^-1200 is lost to the doubles, so a/a was
+        // 1 + 2^-800*I and a/b's real part 2^-800, Sage's 1 and 2^-799)
+        let a = Num::Float(p(-400), -p(400), Fk::CC);
+        let b = Num::Float(p(400), -p(-400), Fk::CC);
+        assert_eq!(a.div(&a), Num::Float(1.0, 0.0, Fk::CC));
+        assert_eq!(a.div(&b), Num::Float(p(-799), -1.0, Fk::CC));
+        // (and 1/a itself, 2^-1200 + 2^-400*I in Sage, is past the doubles)
+        assert!(refused(&|| a.pow_int(-1)).starts_with("5.80771375621750e-362 + 3.87259191484932e-121*I, an element of CC"));
+        assert!(on());
+        IN_STEPS.with(|p| p.set(true));
+        reset_steps();
+        assert!(on());
+        assert!(refused(&|| rr(p(-600)).mul(&rr(p(-600)))).starts_with("5.80771375621750e-362"));
     }
 
     #[test]

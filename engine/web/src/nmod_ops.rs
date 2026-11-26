@@ -75,9 +75,9 @@ const NTT_N: usize = 1 << 16;
 pub const ECH_MAX_DIM: usize = 1024;
 pub const ECH_MAX_TEXT: usize = mul(ENTRY_TEXT, mul(ECH_MAX_DIM, ECH_MAX_DIM));
 pub const ECH_MAX_REQUEST: usize = add(ECH_MAX_TEXT, FIELDS);
-/// parse: R + 20 E (serde's "m") + 8 E; compute: R + 8 E + 28 KiB (the
-/// accumulator, a partial sum and the pivots); reply: R + 8 E + 20 E +
-/// 8 KiB.
+/// parse: R + 20 E (serde's "m") + 8 E; compute: R + 20 E (retained matrix
+/// text) + 8 E + 28 KiB (the accumulator, a partial sum and the pivots);
+/// reply: R + 8 E + 20 E + 8 KiB.
 pub const ECH_PEAK: usize = add(add(ECH_MAX_REQUEST, mul(28, mul(ECH_MAX_DIM, ECH_MAX_DIM))), 33 * 1024);
 /// Elimination and back substitution: at most 2 E min(rows, cols).
 pub const ECH_WORK: u64 = 2 * (ECH_MAX_DIM * ECH_MAX_DIM) as u64 * ECH_MAX_DIM as u64;
@@ -324,9 +324,18 @@ fn echelon(mut o: Map<String, Value>) -> Result<String, String> {
             parse_list(r, cols, true, m.n, &mut d, OP)?;
         }
     }
-    drop(s);
+    // (the text is dropped after the elimination, not before: freed first,
+    // its room was where the elimination's pivots (min(rows, cols) words,
+    // allocated at once) went, and the reply, a little longer than the text
+    // at the envelope, no longer fit there and grew the heap by its whole
+    // size.  Freed now, its room and the gap before it take the reply, as
+    // the peak counts it; the parse already holds the text and the matrix
+    // together, so the peak is unchanged.  The reply exceeds the text by
+    // about 121 bytes at the envelope and relies on reusing the text's
+    // hole, so reordering these allocations can move the growth test)
     let mut a = Mat { rows, cols, m, d };
     let (piv, det) = a.echelon(reduced, true);
+    drop(s);
     let _phase = sagebrush_interrupt::enter("reply");
     let mut out = Reply::new(if want_rows { ENTRY_TEXT * e } else { 0 } + ENTRY_TEXT * (piv.len() + 1) + 64);
     out.raw("{\"pivots\":\"");

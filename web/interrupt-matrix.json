@@ -112,7 +112,8 @@
    "mode": "sage",
    "s0": 600,
    "smin": 200,
-   "smax": 1024,
+   "smax": 2048,
+   "leak_from": 4,
    "grow": {
     "kind": "scale",
     "p": 3

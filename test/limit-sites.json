@@ -8198,6 +8198,16 @@
   "owner": "symbolic engine",
   "row": "inv-44"
  },
+ "engine/sym/src/num.rs :: fcmp :: const TAME_MAX: f64 = f64::from_bits(1533 << 52); // 2^510 #0": {
+  "class": "none",
+  "owner": "symbolic engine",
+  "reason": "the operand range on which an RR or CC operation's double steps are MPFR's (outside it the operation is done again in the 53-bit MP field); refuses nothing"
+ },
+ "engine/sym/src/num.rs :: tame :: x == 0.0 || (TAME_MIN..=TAME_MAX).contains(&x.abs()) #0": {
+  "class": "none",
+  "owner": "symbolic engine",
+  "reason": "the operand range on which an RR or CC operation's double steps are MPFR's (outside it the operation is done again in the 53-bit MP field); refuses nothing"
+ },
  "engine/sym/src/rewrite.rs :: has_float :: const MAX_REDUCE_TERMS: u64 = 1024; #0": {
   "class": "2+3",
   "owner": "symbolic engine",
@@ -11299,10 +11309,20 @@
   "owner": "Magma compatibility/runtime memory",
   "row": "inv-26"
  },
- "lib/_magma.py ::  :: _OWN_CONTAINERS_MAX = 5 * 10 ** 4 #0": {
-  "class": "1+2",
+ "lib/_magma.py ::  :: _OWN_CONTAINERS_MAX = 0 #0": {
+  "class": "none",
   "owner": "Magma compatibility/runtime memory",
-  "row": "inv-26"
+  "reason": "the placeholder before _COLLECT_MAX is known (set at the module's end); refuses nothing"
+ },
+ "lib/_magma.py ::  :: _OWN_CONTAINERS_MAX = _COLLECT_MAX #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
  },
  "lib/_magma.py ::  :: _PRINT_DEPTH_MAX = 100 #0": {
   "class": "1+2",
@@ -11607,6 +11627,36 @@
  "lib/_magma.py :: _memory_error :: for k in (\"what\", \"need_bytes\", \"limit_bytes\", \"allowance_for\", \"record\", \"partial\", \"checkpoint\", \"fixed\"): #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
+ },
+ "lib/_magma.py :: _own_refusal :: \"A copy of a value of more than %d sequences, sets, tuples and records (a record counting as %d)\" % (_OWN_CONTAINERS_MAX, _OWN_RECORD_WEIGHT), #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma.py :: _own_refusal :: (_OWN_CONTAINERS_MAX + 1) * _COLLECT_COST, _OWN_CONTAINERS_MAX * _COLLECT_COST, \"one collection\", fixed=_COLLECT_MAX == 10 ** 6)) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma.py :: _own_refusal :: _OWN_CONTAINERS_MAX containers (each one collection element).\"\"\" #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
  },
  "lib/_magma.py :: _own_size :: if depth >= _NEST_MAX: #0": {
   "class": "1+2",
@@ -12692,6 +12742,11 @@
   "owner": "sage kernel (@sagebrush-sage2)",
   "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
  },
+ "lib/_sage_expr.py :: _function.f :: except NotImplementedError: #0": {
+  "class": "none",
+  "owner": "Sage kernel",
+  "reason": "an element of CC whose engine value was refused past the doubles goes to the 53-bit MP field; refuses nothing itself"
+ },
  "lib/_sage_expr.py :: _ilt_term :: raise NotImplementedError(\"inverse_laplace: no inverse known for %s\" % F) #0": {
   "class": "coverage",
   "owner": "Sage kernel (@sagebrush-sage2)",
@@ -13525,6 +13580,26 @@
   "owner": "HMF Python API",
   "row": "inv-27"
  },
+ "lib/_sage_lang.py :: RealNumber :: NotImplementedError: 1.15052360631188e310 + 1.07374182400000e9*I, an element of CC past the double range, has no symbolic form in sagebrush yet #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's expected output for that refusal of an RR or CC value past the doubles in a symbolic expression, not a cap"
+ },
+ "lib/_sage_lang.py :: RealNumber :: NotImplementedError: 1.15052360631188e310, an element of RR past the double range, has no symbolic form in sagebrush yet #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's expected output for that refusal of an RR or CC value past the doubles in a symbolic expression, not a cap"
+ },
+ "lib/_sage_lang.py :: RealNumber :: NotImplementedError: exp(1000.00000000000 + 1.00000000000000*I): the value in CC, past the double range, is not available in sagebrush yet #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's expected output for that refusal of an RR or CC value past the doubles in a symbolic expression, not a cap"
+ },
+ "lib/_sage_lang.py :: RealNumber :: NotImplementedError: exp(1000.00000000000): the value in RR, past the double range, is not available in sagebrush yet #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's expected output for that refusal of an RR or CC value past the doubles in a symbolic expression, not a cap"
+ },
  "lib/_sage_matrix.py ::  :: _MAX_ENTRIES = 1 << 22 #0": {
   "class": "2",
   "owner": "matrices/runtime memory",
@@ -13551,6 +13626,11 @@
   "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
  },
  "lib/_sage_matrix.py :: ComplexNumber :: NotImplementedError: 1.06443396562763e434 + 1.65775768045351e434*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
+ },
+ "lib/_sage_matrix.py :: ComplexNumber :: NotImplementedError: 1.06443396562763e434 + 1.65775768045351e434*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #1": {
   "class": "coverage",
   "owner": "Sage kernel",
   "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
@@ -13585,6 +13665,11 @@
   "owner": "Sage kernel",
   "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
  },
+ "lib/_sage_matrix.py :: ComplexNumber :: NotImplementedError: 3.96352219093270e-348 - 6.17282007699970e-348*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
+ },
  "lib/_sage_matrix.py :: ComplexNumber :: NotImplementedError: 5.07595889754946e-435 in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
   "class": "coverage",
   "owner": "Sage kernel",
@@ -13611,6 +13696,11 @@
   "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
  },
  "lib/_sage_matrix.py :: ComplexNumber :: NotImplementedError: 7.52316384526264e-37 + 1.54395514325390e-325*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
+ },
+ "lib/_sage_matrix.py :: ComplexNumber.log :: NotImplementedError: 230.258509299405 + 1.00000000000000e-400*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
   "class": "coverage",
   "owner": "Sage kernel",
   "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"

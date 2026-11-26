@@ -188,18 +188,23 @@ def gemm_operands(row: str, size: int, v: int) -> list[int]:
 
 
 def det_entries(kind: str, size: int, v: int) -> list[int]:
-    """det_input's entries, row-major, as the drivers hash them."""
+    """det_input's entries, row-major, as the drivers hash them: entry
+    (i, j) from b^(j + 3) mod m, b = i + 2 + v, each power of a row from
+    the one before (the same values as pow(b, j + 3, m), far fewer
+    multiplications)."""
+    m = {"q": 101, "z": 1000003, "fp31": P31}.get(kind, P)
     out = []
     for i in range(size):
+        b = i + 2 + v
+        x = pow(b, 3, m)
         for j in range(size):
             if kind == "q":
-                out.append(rat(pow(i + 2 + v, j + 3, 101) - 50, 1 + (i * j) % 7))
+                out.append(rat(x - 50, 1 + (i * j) % 7))
             elif kind == "z":
-                out.append(pow(i + 2 + v, j + 3, 1000003) - 500001)
-            elif kind == "fp31":
-                out.append(pow(i + 2 + v, j + 3, P31))
+                out.append(x - 500001)
             else:
-                out.append(pow(i + 2 + v, j + 3, P))
+                out.append(x)
+            x = x * b % m
     return out
 
 
@@ -526,8 +531,35 @@ def operands(row: str, n: int, v: int) -> list[int]:
     raise ValueError("no input formula for row " + row)
 
 
+def operand_family(row: str) -> str:
+    """Rows whose operands are the same formula share a family, so each
+    variant's hash is computed once: the det_input rows of one ring (det,
+    rank, charpoly, hnf, smith, divisors; solve and mul add their own
+    right-hand sides), and a _fast row with its base row."""
+    row = row.removesuffix("_fast")
+    if (
+        row.startswith("mat_")
+        and "_rank_" not in row
+        and not row.endswith("_hard")
+        and row not in ("mat_f64_gemm", "mat_f64_gemm_bits")
+    ):
+        kind = row.split("_")[1]
+        tail = "solve" if row.endswith("_solve") else "mul" if row.endswith("_mul") else ""
+        return f"det:{kind}:{tail}"
+    return row
+
+
+_VARIANT_HASH: dict = {}
+
+
 def input_hash(row: str, n: int, k: int) -> int:
-    return ihash(ihash(operands(row, n, v)) for v in range(k))
+    def one(v):
+        key = (operand_family(row), n, v)
+        if key not in _VARIANT_HASH:
+            _VARIANT_HASH[key] = ihash(operands(row, n, v))
+        return _VARIANT_HASH[key]
+
+    return ihash(one(v) for v in range(k))
 
 
 def expected(sizes: list[str], only: list[str]) -> dict:
