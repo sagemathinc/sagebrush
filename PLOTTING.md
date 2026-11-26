@@ -119,8 +119,9 @@ faces are flat-shaded. `size` is the circumradius, or the edge length for
 
 A Graphics3d shows two ways at once:
 
-- **Interactive view (notebook, Jupyter, saved `.html`).** Our own WebGL 1
-  viewer (`web/viewer3d.js`, about 50 kB, no libraries). It uses smooth
+- **Interactive view (notebook, Jupyter, saved `.html`).** Our own WebGL
+  viewer (`web/viewer3d.js`, about 90 kB, no libraries; WebGL2 where
+  available, else WebGL 1). It uses smooth
   shading and thick curves drawn as tubes. Labels follow the page's light
   or dark theme. Navigation (the toolbar appears on hover, and **?** lists
   the controls):
@@ -164,12 +165,13 @@ plt.show()        # or nothing: in the notebook, a cell's figures show when it e
 Supported:
 
 - `figure`, `subplots` (axes arrays index like numpy: `axs[1, 0]`),
-  `subplot`.
+  `subplot`, `add_axes` and `GridSpec` (or `add_gridspec`).
+- `contourf` and `colorbar`; `fill`, `semilogx`, `semilogy` and `loglog`.
 - `plot` with format strings (`'r--o'`, `'C2'`), `scatter` (with colormaps),
   `bar`/`barh` (categorical labels), `hist` (`density`, `cumulative`,
   `histtype='step'`), `fill_between`, `errorbar`, `step`, `stem`, `pie`,
-  `imshow` (viridis/gray), `axhline`/`axvline` (`xmin`/`xmax`, a label in
-  the legend), `text` and `annotate`.
+  `imshow` (any colormap, `vmin`/`vmax`), `axhline`/`axvline` (`xmin`/`xmax`,
+  a label in the legend), `text` and `annotate`.
 - Colormaps by name: `matplotlib.colormaps` (all of matplotlib 3.11.1's
   names), `plt.get_cmap`, `plt.colormaps()`, `cm.viridis`, and `cmap=` in
   `imshow`, `scatter`, `contourf` and `ScalarMappable`. A name matplotlib
@@ -307,8 +309,12 @@ Agents in the browser can drive interacts: `read_notebook` lists them with
 their ids and values, and `set_interact` changes values and returns the new
 output and pictures.
 
-This is a native, light implementation of the controls. Full ipywidgets
-(Output, layouts, `observe`, `jslink`) would run the real traitlets/ipywidgets
+This is a native, light implementation of the controls. Widgets also work on
+their own: a widget, or a `VBox`/`HBox` of them, shown as a cell's value or
+with `display()` is drawn as controls, and moving one calls its `.observe()`
+handlers (a `Button` its `on_click`) and reruns `interactive_output`.
+Setting `.value` from Python does not move a drawn control, and there is no
+`jslink` or `Layout`. Full ipywidgets would run the real traitlets/ipywidgets
 Python over the Jupyter comm protocol, rendered by `@cocalc/widgets`, as
 sagejs does. That layer would load on demand.
 
@@ -339,7 +345,8 @@ open('D-vortices.html', 'w').write(plot.get_snapshot())   # a standalone interac
   - `line` and `lines`;
   - `volume`: ray-marched in WebGL2 through a 3D texture, with
     `color_map`, `opacity_function`, `alpha_coef`, `samples` and `bounds`;
-  - `surface`, `vectors`, `text`, `text2d` and `label`.
+  - `marching_cubes` (an isosurface), `surface`, `vectors`, `text`, `text2d`
+    and `label`.
 - **Plot options:** `plot += obj`, `axes` (`x^+` shows as x⁺),
   `grid`/`grid_auto_fit`, `grid_visible`; the camera fits the scene;
   there is a colorbar for the color-mapped object.
@@ -349,7 +356,7 @@ open('D-vortices.html', 'w').write(plot.get_snapshot())   # a standalone interac
   meshes are drawn indexed with their colors per vertex. The 708,446-triangle
   vortex mesh above goes from Run to an interactive view in about 2.5 s.
 - **Not yet:** volumes are drawn over the other objects (no depth
-  occlusion). Also missing are `voxels`, `marching_cubes`, textures,
+  occlusion). Also missing are `voxels`, textures,
   time series and camera settings. Snapshots are not compressed (19 MB
   where k3d's are 10 MB).
 - `scipy.io.loadmat`/`savemat`, `zlib`, `base64` and `numpy.frombuffer`
@@ -366,4 +373,5 @@ built by `web/demo/jfm/build.sh`.
 
 - Zooming by resampling.
 - LaTeX labels (KaTeX).
-- Colorbars, contour labels (`labels=True`), streamlines.
+- Colorbars and contour labels in Sage's `contour_plot` (`colorbar=True`,
+  `labels=True`), streamlines.

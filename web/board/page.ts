@@ -1110,6 +1110,12 @@ function openEntry(e: Entry, how: "here" | "tab") {
   const url = e.kind === "board" ? location.pathname + "?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref!);
   if (how === "tab") return void window.open(url, "_blank", "noopener");
   if (e.kind === "board" && e.ref === source.slice(6)) return;
+  // (in the app, a notebook or board another window shows: that window to the front instead, app/src-tauri/src/windows.rs
+  // window_claim, #1541)
+  if (desktopApp && (e.kind === "notebook" || e.kind === "board")) {
+    void (window as any).__TAURI__.core.invoke("window_claim", { doc: e.path }).then((at: string | null) => { if (at == null) void leaveFor(url, nameOf(e.path)); }, () => void leaveFor(url, nameOf(e.path)));
+    return;
+  }
   void leaveFor(url, nameOf(e.path));
 }
 // Leaving this board for another page, whichever way (an open, an upload, the file browser): what
@@ -1775,8 +1781,9 @@ if (ws) {
       upload: (files, folder) => uploadToWorkspace(ws, files, mounted.agent.snapshot().doc?.mode ?? "python", folder),
       openAs: (e, as) => openAsHere(ws, e, as, mounted.agent.snapshot().doc?.mode ?? "python").then((err) => (err ? `"${nameOf(e.path)}" couldn't be opened as a ${as}: ${err}` : undefined)),
       close: () => show(false),
-      // (Agents…: the agents page, left as for any other page, this board's saves made first)
-      agents: () => void leaveFor("/agents/", "Agents"),
+      // (Agents…: the agents page, left as for any other page, this board's saves made first; not in the desktop app,
+      // which has no agents page yet (#1542))
+      ...(desktopApp ? {} : { agents: () => void leaveFor("/agents/", "Agents") }),
       // (the Storage panel's export: its lazy chunk at the site's root, beside the notebook page)
       exportUrl: (f) => new URL("/" + f, location.href).href,
       // (and this board's own saves settled first, as settled() waits for them before the page goes elsewhere:
