@@ -694,7 +694,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
           out.push({ dseq, seq: Number(this.one("SELECT last_insert_rowid() AS n")!.n), env_sha256: h });
           this.set("sealed_ops", Number(this.get("sealed_ops") ?? 0) + 1);
           for (const a of op.adds) this.sql.exec("UPDATE holdings SET refs = refs + 1 WHERE sha256 = ?", a);
-          for (const a of op.releases) this.sql.exec("UPDATE holdings SET refs = refs - 1 WHERE sha256 = ?", a);
+          // (a release is recorded in the op and nowhere else: every blob an op names is held until the account is
+          // purged (design/e2e-encryption.md, version retention), so a release never gives a reference back, and the
+          // day-old sweep never takes a blob an index op named, nor a reference a document's pin holds)
         } catch (e) {
           if (!(e instanceof SyncError)) throw e;
           if (refusedCount() >= LIMITS.refusalsPerDevice) throw new SyncError("invalid", "too many refused ops: rebuild from the server's log");
