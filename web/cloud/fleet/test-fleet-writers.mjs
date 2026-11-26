@@ -34,7 +34,7 @@ const key = () => core.keyFromSeed(new Uint8Array(32).fill(seedN++));
 // ---- the database: both migrations, applied as the deploy does
 const mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "fleet", modules: true, script: "export default { fetch() { return new Response('') } }", compatibilityDate: "2026-10-01", d1Databases: ["FLEET_DB"] }] }));
 const db = await mf.getD1Database("FLEET_DB");
-for (const m of ["0001_fleet_leases.sql", "0002_fleet_writers_chain_hosts.sql"])
+for (const m of ["0001_fleet_leases.sql", "0002_fleet_writers_chain_hosts.sql", "0003_fleet_writers_grants_transfers.sql", "0004_fleet_request_nonces.sql", "0005_fleet_accounts_and_bytes.sql"])
   for (const stmt of readFileSync(join(here, "migrations", m), "utf8").replace(/--[^\n]*/g, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(stmt).run();
 const all = async (sql, ...v) => (await db.prepare(sql).bind(...v).all()).results;
 const exec = (sql, ...v) => db.prepare(sql).bind(...v).run();
@@ -44,11 +44,11 @@ const snapshot = async () => JSON.stringify(await Promise.all(["fleet_chain_entr
 async function fleetOf() {
   const fleet = core.newId(), N = await key(), nId = core.newId(), R = await key();
   const sN = { kind: "device", id: nId, alg: "ed25519", key: N.key };
-  const f = { fleet, N, nId, sN, seq: 0, head: "" };
+  const f = { fleet, N, nId, sN, seq: 0, head: "", account: core.newId() };
   f.body = (op, extra) => ({ fleet, aud: AUD, seq: f.seq, prev: f.head, op, at_ms: NOW, auth_time_ms: NOW, ...extra });
   f.entry = (op, extra, by = { s: sN, k: N }) => core.seal("sb.device-chain.v1", by.s, f.body(op, extra), by.k);
   f.append = async (bytes, hooks) => {
-    const r = await W.appendChainEntry(db, core, { fleet, aud: AUD, bytes, now: NOW }, hooks);
+    const r = await W.appendChainEntry(db, core, { fleet, aud: AUD, bytes, now: NOW, account: f.account }, hooks);
     if (r.ok) { const st = await W.loadChain(db, core, fleet, AUD); f.seq = st.head.seq + 1; f.head = st.head.hash; }
     return r;
   };
@@ -80,7 +80,7 @@ const revocationOf = (f, what, id, signer = { s: f.sN, k: f.N }) => core.seal("s
   const before = await snapshot();
   const mine = await f.entry("policy", { policy: { require_native_for_widening: true } });
   const theirs = await f.entry("policy", { policy: { require_native_for_widening: true } });
-  const r = await f.append(mine, { beforeBatch: async () => { await W.appendChainEntry(db, core, { fleet: f.fleet, aud: AUD, bytes: theirs, now: NOW }); } });
+  const r = await f.append(mine, { beforeBatch: async () => { await W.appendChainEntry(db, core, { fleet: f.fleet, aud: AUD, bytes: theirs, now: NOW, account: f.account }); } });
   ok(r.refused === "chain_fork", "W-1: an append raced by another at its seq: chain_fork", r);
   const st2 = await W.loadChain(db, core, f.fleet, AUD);
   ok(st2.head.seq === 2 && before !== (await snapshot()), "W-1: exactly the other one landed");
@@ -202,7 +202,7 @@ const failing = (i) => ({ prepare: (s) => db.prepare(s), batch: (stmts) => { con
     await f.append(await f.genesis);
     const e = await f.entry("policy", { policy: { require_native_for_widening: true } });
     const before = await snapshot();
-    const got = await codeOf(W.appendChainEntry(failing(i), core, { fleet: f.fleet, aud: AUD, bytes: e, now: NOW }));
+    const got = await codeOf(W.appendChainEntry(failing(i), core, { fleet: f.fleet, aud: AUD, bytes: e, now: NOW, account: f.account }));
     ok(got.startsWith("threw:") && (await snapshot()) === before, `W-6: the append's statement ${i + 1} failing: nothing written (entry and hash together)`, got);
   }
   for (let i = 0; i < 3; i++) {

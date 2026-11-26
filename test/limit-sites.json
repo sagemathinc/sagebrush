@@ -20375,12 +20375,12 @@
   "owner": "sagebrush-python",
   "reason": "engine/nd's thread pool: min(cores - 1, 8) helpers per product, and the module's bound of 16 participants; they share the machine's cores and change a product's time, never its bits"
  },
- "src/runtime/nd.ts :: reserve :: growTo(m, bytes, declaredMax.get(m)); #0": {
+ "src/runtime/nd.ts :: ndMemoryMax :: return mem ? declaredMax.get(mem) ?? 0 : 0; #0": {
   "class": "none",
   "owner": "pyjs runtime",
-  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+  "reason": "engine/nd's shared memory's declared maximum (4 GiB, 1 GiB or 256 MiB, as much as can be reserved), recorded and reported in np.linalg._kernels(); no limit of ours"
  },
- "src/runtime/nd.ts :: sharedMemory :: const declaredMax = new WeakMap<WebAssembly.Memory, number>(); #0": {
+ "src/runtime/nd.ts :: reserve :: growTo(m, bytes, declaredMax.get(m)); #0": {
   "class": "none",
   "owner": "pyjs runtime",
   "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
@@ -20399,6 +20399,11 @@
   "class": "none",
   "owner": "sagebrush-matlab",
   "reason": "engine/nd's WebAssembly.Memory (src/runtime/nd.ts): the declared maximum is wasm32's own 4 GiB bound (the module's import declares it), retried smaller only where that much address space can't be reserved; refuses no user work (a growth past it is the MemoryError cholesky reports)"
+ },
+ "src/runtime/nd.ts :: sharedOk :: const declaredMax = new WeakMap<WebAssembly.Memory, number>(); #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "engine/nd's shared memory's declared maximum (4 GiB, 1 GiB or 256 MiB, as much as can be reserved), recorded and reported in np.linalg._kernels(); no limit of ours"
  },
  "src/runtime/nd.ts :: up :: const MAX_HELPERS = 8; #0": {
   "class": "1",
@@ -20622,6 +20627,11 @@
   "class": "none",
   "owner": "NumPy shim/runtime memory",
   "reason": "the FFT table cache's retention bound (and its test hook): evicts or skips caching a table, refuses nothing"
+ },
+ "src/runtime/numpy_linalg.ts ::  :: import { useNd, ndCholesky, ndLu, ndMemoryMax, ndPath, ndProducts, ndRequestWarm, ndScratch, ndThreads, ndWarmState } from \"./nd\"; #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "engine/nd's shared memory's declared maximum (4 GiB, 1 GiB or 256 MiB, as much as can be reserved), recorded and reported in np.linalg._kernels(); no limit of ours"
  },
  "src/runtime/object.ts :: engineLimit :: function engineLimit(message: string): string | undefined { #0": {
   "class": "none",

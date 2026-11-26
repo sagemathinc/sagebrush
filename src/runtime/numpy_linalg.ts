@@ -12,7 +12,7 @@ import { NDArray, empty, toDtype, ascontig, copy as npcopy, admitWork } from "./
 import { glibcLog, glibcExp } from "./libm";
 import { gemmBuffers, wasmFusedFMA, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmQRQtb, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
 import * as FD from "./fdlibm";
-import { useNd, ndCholesky, ndLu, ndPath, ndProducts, ndRequestWarm, ndScratch, ndThreads, ndWarmState } from "./nd";
+import { useNd, ndCholesky, ndLu, ndMemoryMax, ndPath, ndProducts, ndRequestWarm, ndScratch, ndThreads, ndWarmState } from "./nd";
 import { pollInterrupt } from "./ops";
 
 const { T, raise, tuple } = Obj;
@@ -1445,7 +1445,7 @@ newBuiltinModule("_nplinalg", (m) => {
   // smallest n of cholesky and of the LU's four, the warm-up's state)
   fn("_kernels", () => {
     const p = ndPath();
-    return tuple([p.path, p.kernel, p.why, CHOL_ND_MIN, LU_ND_MIN, ndWarmState()]);
+    return tuple([p.path, p.kernel, p.why, CHOL_ND_MIN, LU_ND_MIN, ndWarmState(), ndMemoryMax()]);
   });
   // engine/nd's thread pool for large matrix products (src/runtime/nd.ts): (the threads a product gets now, the
   // pool's state, why not more, and the products so far as (participants, count) pairs)

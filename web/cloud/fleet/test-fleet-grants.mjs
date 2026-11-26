@@ -39,7 +39,7 @@ const text = (b) => new TextDecoder().decode(b);
 // ---- the database: all three migrations, applied as the deploy does
 const mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "fleet", modules: true, script: "export default { fetch() { return new Response('') } }", compatibilityDate: "2026-10-01", d1Databases: ["FLEET_DB"] }] }));
 const db = await mf.getD1Database("FLEET_DB");
-const MIGRATIONS = ["0001_fleet_leases.sql", "0002_fleet_writers_chain_hosts.sql", "0003_fleet_writers_grants_transfers.sql"];
+const MIGRATIONS = ["0001_fleet_leases.sql", "0002_fleet_writers_chain_hosts.sql", "0003_fleet_writers_grants_transfers.sql", "0004_fleet_request_nonces.sql", "0005_fleet_accounts_and_bytes.sql"];
 const statementsOf = (m) => readFileSync(join(here, "migrations", m), "utf8").replace(/--[^\n]*/g, "").split(";").map((s) => s.trim()).filter(Boolean);
 for (const m of MIGRATIONS) for (const stmt of statementsOf(m)) await db.prepare(stmt).run();
 const all = async (sql, ...v) => (await db.prepare(sql).bind(...v).all()).results;
@@ -52,11 +52,11 @@ const snapshot = async () => JSON.stringify(await Promise.all(TABLES.map((t) => 
 async function fleetOf({ serviceKey = true } = {}) {
   const fleet = core.newId(), N = await key(), nId = core.newId(), R = await key();
   const sN = { kind: "device", id: nId, alg: "ed25519", key: N.key };
-  const f = { fleet, N, nId, sN, by: { s: sN, k: N }, seq: 0, head: "", keys: [] };
+  const f = { fleet, N, nId, sN, by: { s: sN, k: N }, seq: 0, head: "", keys: [], account: core.newId() };
   f.body = (op, extra) => ({ fleet, aud: AUD, seq: f.seq, prev: f.head, op, at_ms: NOW, auth_time_ms: NOW, ...extra });
   f.entry = (op, extra, by = f.by) => core.seal("sb.device-chain.v1", by.s, f.body(op, extra), by.k);
   f.append = async (bytes, hooks) => {
-    const r = await W.appendChainEntry(db, core, { fleet, aud: AUD, bytes, now: NOW }, hooks);
+    const r = await W.appendChainEntry(db, core, { fleet, aud: AUD, bytes, now: NOW, account: f.account }, hooks);
     if (!r.ok) throw new Error(`append: ${JSON.stringify(r)}`);
     const st = await W.loadChain(db, core, fleet, AUD);
     f.seq = st.head.seq + 1; f.head = st.head.hash;
