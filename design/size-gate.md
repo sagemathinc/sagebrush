@@ -79,7 +79,10 @@ master side doesn't have is the track's own, gated against the base alone.
 The size-base job builds and records the side (`side-record.json`) beside the
 base, under the same recipe and pins; a missing or mismatched side record fails
 closed, as a base record does. A change into a track that brings no new master
-commits has no side and is gated as before. (Ruling by @sagebrush, Nov 26 2026,
+commits has no side and is gated as before. When one bundle's growth is over the
+limit against both parents (the track's own growth and master's each too large
+for it), the sync fails: sync master in smaller steps, or ask the merger for a
+ruling. (Ruling by @sagebrush, Nov 26 2026,
 after a master sync into `track/numeric` carried 85 master pull requests' growth
 as one transition.)
 
