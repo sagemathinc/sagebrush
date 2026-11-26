@@ -13256,7 +13256,7 @@
   "owner": "linear algebra/runtime memory",
   "reason": "the binary echelon's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
  },
- "lib/_sage_ffmat_bin.py :: _ech_bin_route :: host's need (_ech_need) within its budget.  None for another field, an #0": {
+ "lib/_sage_ffmat_bin.py :: _ech_bin_route :: host's need (_ech_need) within its budget.  None for another field or #0": {
   "class": "2",
   "disposition": {
    "2": {
@@ -13264,7 +13264,17 @@
    }
   },
   "owner": "linear algebra/runtime memory",
-  "reason": "the binary echelon's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
+  "reason": "the binary route's host admission (product or echelon): past SBW1's frame cap a fixed-limit refusal through the memory guard (never the loop); a need past the one-matrix budget refused through the memory guard"
+ },
+ "lib/_sage_ffmat_bin.py :: _ech_bin_route :: own admission). A request past the frame cap raises the fixed limit's #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "reason": "the binary route's host admission (product or echelon): past SBW1's frame cap a fixed-limit refusal through the memory guard (never the loop); a need past the one-matrix budget refused through the memory guard"
  },
  "lib/_sage_ffmat_bin.py :: _ech_bound :: return (_fm._echelon_transport_figure or _fm._heap_budget)() // _fm._HEAP_SHARE #0": {
   "class": "2",
@@ -13276,6 +13286,26 @@
   "owner": "linear algebra/runtime memory",
   "reason": "the binary echelon's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
  },
+ "lib/_sage_ffmat_bin.py :: _frame_refuse :: \"\"\"The refusal of a request past the frame cap (a fixed-limit #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "reason": "the binary route's host admission (product or echelon): past SBW1's frame cap a fixed-limit refusal through the memory guard (never the loop); a need past the one-matrix budget refused through the memory guard"
+ },
+ "lib/_sage_ffmat_bin.py :: _frame_refuse :: cap, and the largest n x n noun whose request fits.\"\"\" #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "reason": "the binary route's host admission (product or echelon): past SBW1's frame cap a fixed-limit refusal through the memory guard (never the loop); a need past the one-matrix budget refused through the memory guard"
+ },
  "lib/_sage_ffmat_bin.py :: _mul_bin_call :: refused (Cap) is the memory error, a domain failure ValueError, a #0": {
   "class": "2",
   "disposition": {
@@ -13286,7 +13316,7 @@
   "owner": "linear algebra/runtime memory",
   "reason": "the binary product's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
  },
- "lib/_sage_ffmat_bin.py :: _mul_bin_route :: frame cap and the host's need (_mul_need) within its budget.  None for #0": {
+ "lib/_sage_ffmat_bin.py :: _mul_bin_route :: below the threshold (the loop, under its own admission). A request past #0": {
   "class": "2",
   "disposition": {
    "2": {
@@ -13294,9 +13324,9 @@
    }
   },
   "owner": "linear algebra/runtime memory",
-  "reason": "the binary product's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
+  "reason": "the binary route's host admission (product or echelon): past SBW1's frame cap a fixed-limit refusal through the memory guard (never the loop); a need past the one-matrix budget refused through the memory guard"
  },
- "lib/_sage_ffmat_bin.py :: _mul_bin_route :: threshold or a frame-only non-fit (the loop, under its own admission). #0": {
+ "lib/_sage_ffmat_bin.py :: _mul_bin_route :: the frame cap raises the fixed limit's memory error (_frame_refuse), and #0": {
   "class": "2",
   "disposition": {
    "2": {
@@ -13304,7 +13334,17 @@
    }
   },
   "owner": "linear algebra/runtime memory",
-  "reason": "the binary product's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
+  "reason": "the binary route's host admission (product or echelon): past SBW1's frame cap a fixed-limit refusal through the memory guard (never the loop); a need past the one-matrix budget refused through the memory guard"
+ },
+ "lib/_sage_ffmat_bin.py :: _mul_bin_route :: within the frame cap and the host's need (_mul_need) within its budget. #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "reason": "the binary route's host admission (product or echelon): past SBW1's frame cap a fixed-limit refusal through the memory guard (never the loop); a need past the one-matrix budget refused through the memory guard"
  },
  "lib/_sage_ffsub.py ::  :: CONWAY_MAX = 10 ** 7 #0": {
   "class": "3",
