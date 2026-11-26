@@ -9,12 +9,10 @@
 import "./engine/shim.mjs";
 import { Engine, withBeamer, withPythontex, installPythontex, once, declaresBeamer } from "./engine/pipeline.mjs";
 import { setKatex, installBeamer } from "./engine/render.mjs";
-import { splitChunk, bytes, tooLargeProblem } from "./split";
+import { boundRender, tooLargeProblem } from "./split";
 import { WRAPPER_VERSION, itemKey } from "./engine/sagetex.mjs";
 import { engineInputs, type Known } from "./inputs";
 
-export const RENDER_BOUNDS = { chunks: 20000, html: 16 * 2 ** 20 };
-const TOO_LARGE = '<div class="bounderr">This document is too large for the prototype\'s preview.</div>';
 
 let eng: any = null;
 // (the page's included files, kept from the last message that had them: inputs.ts)
@@ -45,22 +43,13 @@ self.onmessage = async (e: MessageEvent) => {
     // (rendered again with beamer's code: the same text, so not expanded again)
     let r = await withBeamer(eng.update(text, { cold: !!m.cold, ...opts }), loadBeamer, () => eng.update(text, opts));
     if (r.needPy) r = await withPythontex(r, loadPythontex, () => eng.update(text, opts));
-    // (each piece with its UTF-8 size, b: the page's patch budget charges the same measure as split.ts)
-    const items: { g: number; h: string; b: number }[] = [];
-    let total = 0, stopped = false;
-    // (a chunk shown as a placeholder: latex_check's warning at its place, check.ts)
+    // (each piece with its UTF-8 size, b: the page's patch budget charges the same measure as split.ts; a chunk shown
+    //  as a placeholder: latex_check's warning at its place, check.ts; past RENDER_BOUNDS, the document up to there and
+    //  a note where it stops, said to latex_check too)
     const tooLarge: { kind: string; name: string; at: number }[] = [];
-    if (r.chunks.length > RENDER_BOUNDS.chunks) stopped = true;
-    for (let g = 0; g < r.chunks.length && !stopped; g++) {
-      for (const h of splitChunk(r.chunks[g], (why, size) => tooLarge.push(tooLargeProblem(why, size, r.chunkPos?.[g])))) {
-        const b = bytes(h);
-        total += b;
-        if (total > RENDER_BOUNDS.html) { stopped = true; break; }
-        items.push({ g, h, b });
-      }
-    }
-    if (stopped) { items.length = 0; items.push({ g: 0, h: TOO_LARGE, b: bytes(TOO_LARGE) }); }
-    (self as any).postMessage(Object.assign(echo, { ok: true, items, groups: stopped ? 1 : r.chunks.length, pos: stopped ? [-1] : r.chunkPos, imageRefs: r.imageRefs || [], inputRefs: r.inputRefs || [], stats: r.stats, tooLarge: stopped,
+    const { items, groups, pos, cut } = boundRender(r.chunks, r.chunkPos, text, (g, why, size) => tooLarge.push(tooLargeProblem(why, size, r.chunkPos?.[g])));
+    if (cut) tooLarge.push({ kind: "toolong", name: "the rest of the document", at: cut.at });
+    (self as any).postMessage(Object.assign(echo, { ok: true, items, groups, pos, imageRefs: r.imageRefs || [], inputRefs: r.inputRefs || [], stats: r.stats, tooLarge: !!cut,
       // (what latex_check reports, check.ts: small, the problems bounded by the renderer)
       check: { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: (r.problems || []).concat(tooLarge), frames: r.frames || [], sage: (r.sageItems || []).map((it: any, k: number) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(r.sageStates?.[k] ? { s: r.sageStates[k].s, msg: r.sageStates[k].msg } : {}),
         // (and what the editor's Run needs, run-core.mjs: the item's key, its code, a refused one's name; the code

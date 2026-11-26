@@ -263,6 +263,18 @@ ${"many words ".repeat(14000)}
   await key("ArrowRight", "ArrowRight");
   check(await until(`${P}.dataset.frame === "3" && !!${P}.querySelector(".tp-stage .toolarge")`, 5000), "Present: the frame too large, its placeholder");
   await key("Escape", "Escape");
+
+  // ---- a document past the preview's 16 MiB, through the real worker: latex_check's warning where the preview stops,
+  //  at the same source line as the note the preview shows (kind "toolong", a warning)
+  const LONG = "\\documentclass{article}\n\\begin{document}\nFIRSTWORDS here.\n\n" + "Para $a_{1}+b^{2}=c_{3}$ and $\\sum_{k=1}^{n} k^{2}$.\n\n".repeat(8000) + "\\end{document}\n";
+  const lfid = await mk("/long.tex", LONG);
+  await send("Page.navigate", { url: base + "?tex=" + lfid + "&latex=1" });
+  const NOTE = `document.querySelector(".tex-preview .bounderr")`;
+  await until(`/The preview stops here/.test(${NOTE}?.textContent ?? "")`, 180000);
+  const noteLine = +((/from line (\d+) of/.exec(await ev(`${NOTE}?.textContent ?? ""`)) || [])[1] ?? 0);
+  const lc = JSON.parse((await call("latex_check"))[0].text), tl = lc.problems.filter((x) => x.kind === "toolong");
+  check(noteLine > 4 && tl.length === 1 && tl[0].severity === "warning" && tl[0].line === noteLine && /16 MiB/.test(tl[0].message),
+    "latex_check: a document past 16 MiB, one warning where the preview stops, at the note's line", { noteLine, toolong: tl, n: lc.problems.length });
   await until(`!${P}`, 5000);
 
   // ---- an article: pages
