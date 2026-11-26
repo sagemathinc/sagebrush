@@ -70,8 +70,9 @@ The other direction: a change into a track (a pull request, a queue entry or a
 push onto `track/*`) that merges master in brings every master pull request
 since the track's last sync, and each of those already passed this backstop on
 master. So such a change is also measured against the master commit it merges
-(its "side": the merge-base of the tested commit and `origin/master`, when the
-track's base doesn't already contain it), and a bundle fails only when its
+(its "side": the newest commit on `origin/master`'s first-parent line that the
+tested commit contains, when the track's base doesn't already contain it; track
+work that master merged in turn is never a side), and a bundle fails only when its
 growth is over the limit against **both** the track's base and that master
 commit. A byte present in either parent was gated where it landed. A bundle the
 master side doesn't have is the track's own, gated against the base alone.
