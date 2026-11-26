@@ -12262,6 +12262,11 @@
   "owner": "notebook/kernel",
   "row": "src-17"
  },
+ "src/notebook-session.ts ::  :: import { checkRequest, FS_MAX_MESSAGE, type FsHeader, type FsRequest } from \"./sbfs\"; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "sagebrush://'s names (the request-size constant imported, the error vocabulary with budget): matched words that bound nothing here"
+ },
  "src/notebook-session.ts :: aboveOf :: return m.above.filter((k: unknown): k is string => typeof k === \"string\" && /^[A-Za-z0-9]{1,128}$/.test(k)).slice(0, MAX_ABOVE); #0": {
   "class": "1",
   "disposition": {
@@ -12310,13 +12315,21 @@
   "owner": "notebook/kernel",
   "row": "src-17"
  },
- "src/notebook-session.ts :: notebookSession :: export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks; stdin?: (req: StdinRequest) => StdinAnswer; liveData?: (req: LiveRequest) => LiveAnswer | null } = {}): Session { #0": {
+ "src/notebook-session.ts :: no :: if (current === null || typeof op !== \"string\" || typeof params !== \"string\" || params.length > FS_MAX_MESSAGE) return no(\"not a sagebrush:// request\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "sagebrush://'s protocol bounds (a request's message and path bytes, bytes per fs.read call, which SagebrushFile.read loops over): protect the page and the worker's transport; never a cap on a file's size or the data read"
+ },
+ "src/notebook-session.ts :: notebookSession :: export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks; stdin?: (req: StdinRequest) => StdinAnswer; liveData?: (req: LiveRequest) => LiveAnswer | null; sbFs?: (req: FsCall, sink: (piece: Uint8Array, at: number) => void) => FsHeader | null } = {}): Session { #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "notebook/kernel",
-  "reason": "the session's output bound per item and run (limit: item, run, displays): protects the page that receives a run's streams and displays; refuses nothing and stops no computation (the rest of the output is cut, said once); the line changed only by X1's test hooks and input()'s stdin option"
+  "reason": "the session's output bound per item and run (limit: item, run, displays): protects the page that receives a run's streams and displays; refuses nothing and stops no computation; the line changed only by X1's test hooks, input()'s stdin and sagebrush://'s sbFs options"
  },
  "src/notebook-session.ts :: room :: const room = () => (opts.limit ? Math.min(opts.limit.item - used.item, opts.limit.run - used.run) : Infinity); #0": {
   "class": "1",
@@ -14431,6 +14444,51 @@
   },
   "owner": "Sage mode preparser (@sagebrush-sage)",
   "reason": "Python's tokenizer limit on nested brackets (its MAXLEVEL, 200): code nested deeper is left to Python, which refuses it whatever the preparser does; parser protection that bounds the ellipsis rewrite's bracket stack, not a cap of a user's computation"
+ },
+ "src/sbfs.ts ::  :: export const FS_ERRORS = [\"not_found\", \"permission\", \"invalid\", \"memory\", \"codec\", \"budget\", \"network\", \"integrity\", \"unavailable\", \"timeout\", \"interrupted\"] as const; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "sagebrush://'s names (the request-size constant imported, the error vocabulary with budget): matched words that bound nothing here"
+ },
+ "src/sbfs.ts ::  :: export const FS_MAX_MESSAGE = 8192; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "sagebrush://'s protocol bounds (a request's message and path bytes, bytes per fs.read call, which SagebrushFile.read loops over): protect the page and the worker's transport; never a cap on a file's size or the data read"
+ },
+ "src/sbfs.ts ::  :: export const FS_MAX_PATH = 4096; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "sagebrush://'s protocol bounds (a request's message and path bytes, bytes per fs.read call, which SagebrushFile.read loops over): protect the page and the worker's transport; never a cap on a file's size or the data read"
+ },
+ "src/sbfs.ts ::  :: export const FS_MAX_READ = 64 << 20; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "sagebrush://'s protocol bounds (a request's message and path bytes, bytes per fs.read call, which SagebrushFile.read loops over): protect the page and the worker's transport; never a cap on a file's size or the data read"
+ },
+ "src/sbfs.ts :: checkRequest :: if (!Number.isSafeInteger(length) || (length as number) < 0 || (length as number) > FS_MAX_READ) return { refused: `length must be an integer from 0 to ${FS_MAX_READ}` }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "sagebrush://'s protocol bounds (a request's message and path bytes, bytes per fs.read call, which SagebrushFile.read loops over): protect the page and the worker's transport; never a cap on a file's size or the data read"
+ },
+ "src/sbfs.ts :: isWorkspacePath :: if (utf8Length(p) > FS_MAX_PATH) return false; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "sagebrush://'s protocol bounds (a request's message and path bytes, bytes per fs.read call, which SagebrushFile.read loops over): protect the page and the worker's transport; never a cap on a file's size or the data read"
  },
  "src/stdin-wait.ts :: stopped :: const max = buffer.byteLength - 8; #0": {
   "class": "none",

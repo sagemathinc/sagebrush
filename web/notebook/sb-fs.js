@@ -78,19 +78,25 @@ export class FsCalls {
     this.lost = 0;
     this.urls = new Map(); // sha -> {url, until}
     this.stats = { fetches: 0, cacheHits: 0, indexOpens: 0 };
+    // kernel sessions recorded and not yet ended
+    this.live = 0;
   }
 
   /** Record a kernel's worker and its own workspace (an id, or a function giving it: the page's workspace, which may
    * open after the kernel starts) when the page makes it: the one source of a call's scope. */
   attach(worker, own) {
     this.sessions.set(worker, { own, tag: null, high: 0, call: null, cursor: null });
+    this.live++;
   }
 
   /** The worker's session ends (the kernel stops, restarts or is closed): its cursor and call go with it. */
   detach(worker) {
     const s = this.sessions.get(worker);
-    if (s?.call) finish(s.call);
+    if (!s) return;
+    if (s.call) finish(s.call);
     this.sessions.delete(worker);
+    // (the page's last kernel session gone: its cached plaintext goes with it, r3 §6.2)
+    if (--this.live === 0) this.dropAll();
   }
 
   /** A {sbFs} message `m` from worker `w`; `active()` says whether it may still be answered. */
@@ -313,6 +319,17 @@ export class FsCalls {
       const k = this.lru.indexOf(slot);
       if (k >= 0) this.lru.splice(k, 1);
     }
+  }
+
+  /** Every cached chunk and signed URL dropped (the workspace closed: sign-out, a reset, another tab's takeover). */
+  dropAll() {
+    for (let i = 0; i < CACHE_SLOTS; i++) {
+      if (this.pins[i] || this.slotKey[i] === null) continue;
+      this.cache.delete(this.slotKey[i]);
+      this.slotKey[i] = null;
+    }
+    this.lru = this.lru.filter((i) => this.slotKey[i] !== null);
+    this.urls.clear();
   }
 
   async takeRun() {

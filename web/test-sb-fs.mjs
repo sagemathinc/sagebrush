@@ -283,4 +283,22 @@ const K = worker(fs, () => OWN);
   ok(urls.length === 2 && urls[0].includes("/api/sync/v1/blob/") && urls[1].includes("files.example/signed/"), "the second run uses the signed URL the first one got");
 }
 
+{
+  // r3 §6.2: the cache goes when the page's last kernel session ends, and when the workspace closes
+  const fsx = new FsCalls({ workspace, fetchImpl }), A = worker(fsx, OWN), B = worker(fsx, OWN);
+  const f = FILES["/d/small.txt"];
+  await A.ask("fs.read", { ws: null, path: "/d/small.txt", version: f.sha, offset: 0, length: 5 });
+  fsx.detach(A);
+  ok(fsx.cache.size === 1, "one session ended, another still open: the cache stays");
+  fsx.detach(B);
+  ok(fsx.cache.size === 0 && fsx.urls.size === 0, "the last session ended: nothing cached");
+  const C = worker(fsx, OWN);
+  await C.ask("fs.read", { ws: null, path: "/d/small.txt", version: f.sha, offset: 0, length: 5 });
+  fsx.dropAll();
+  ok(fsx.cache.size === 0, "the workspace closed: nothing cached");
+  const D = worker(fsx, OWN);
+  const r = await D.ask("fs.read", { ws: null, path: "/d/small.txt", version: f.sha, offset: 0, length: 5 });
+  ok(new TextDecoder().decode(r.data) === "hello", "...and reads go on from R2");
+}
+
 ok(CACHE_SLOTS === 64 && RUN_CHUNKS === 16, "the fixed settings: 64 slots, 16-chunk runs");
