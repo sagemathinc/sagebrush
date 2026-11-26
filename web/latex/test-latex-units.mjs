@@ -138,6 +138,13 @@ check("split-over-2MiB-placeholder", (() => { const t = splitChunk('<div class="
   const ov = splitChunk(over, (why, size) => told3.push(tooLargeProblem(why, size, 5)));
   check("split-slide-over-chunk-max-still-the-slide", bytes(over) > CHUNK_MAX && ov.length === 1 && ov[0].startsWith(open) && ov[0].endsWith("</section>") && /this slide is too large/.test(ov[0]) && /over 2048 KiB/.test(told3[0]?.name ?? ""), { head: ov[0].slice(0, 200), told3 });
   check("split-weight", weight('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') === bytes('<div class="p"><img class="sageplot" src="data:abc" alt="x"> é</div>') - "data:abc".length && weight("src=\"data:zz\" text") === bytes("src=\"data:zz\" text"), null);
+  // (a placeholder over a data: URL image says the weight it is over PIECE_MAX by, never the bytes with the image's
+  //  URL: a table too large by its markup, a plot of 600 KiB in it, under CHUNK_MAX; to latex check and on the page)
+  const tbl = '<table class="tabular"><tr><td>' + plot.replace("A".repeat(PIECE_MAX * 2), "C".repeat(600 * 1024)) + "</td></tr>" + "<tr><td>cell</td></tr>".repeat(7000) + "</table>", told4 = [];
+  const tp = splitChunk(tbl, (why, size) => told4.push(size));
+  check("split-placeholder-says-weight", bytes(tbl) < CHUNK_MAX && weight(tbl) > PIECE_MAX && bytes(tbl) - weight(tbl) >= 600 * 1024 && tp.length === 1
+    && told4.length === 1 && told4[0] === weight(tbl) && tp[0].includes("(" + Math.ceil(weight(tbl) / 1024) + " KiB)") && !tp[0].includes("(" + Math.ceil(bytes(tbl) / 1024) + " KiB)"),
+    { n: bytes(tbl), w: weight(tbl), told4, ph: tp[0]?.slice(0, 120) });
 }
 check("split-small-unchanged", splitChunk('<div class="p">hi</div>')[0] === '<div class="p">hi</div>', null);
 // (issue 623: a table float of amsldoc's, 50 KiB, was "too large (50 KiB, over 128 KiB)". KaTeX's MathML writes
