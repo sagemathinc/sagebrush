@@ -5728,6 +5728,11 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing itself: a memory-guard or allocation refusal (MemoryError) of an array of 5 GB or more is reported with MATLAB's array-size-preference identifier and message instead of nomem"
  },
+ "lib/_matlab.py :: _mfilename :: raise _err(\"Too many input arguments.\", \"MATLAB:maxrhs\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing by size: the census matches 'max' in MATLAB's identifier MATLAB:maxrhs, the error for more input arguments than mfilename takes"
+ },
  "lib/_matlab.py :: _oob :: return _err(\"Index exceeds the number of array elements. Index must not exceed %d.\" % n, \"MATLAB:badsubscript\") #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
@@ -5878,6 +5883,41 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: np.maximum/np.minimum find the known value before or after each entry and keep its index in range; not a limit"
  },
+ "lib/_matlab_data.py :: _fit_rows :: s = np.maximum(np.max(np.abs(x), axis=1, keepdims=True), 1.0) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _fit_windows :: dmax = np.maximum(i - lo, lo + m - 1 - i) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _fit_windows :: return lo, m, dmax #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _local_fit :: base = _tricube(x, dmax[b0:b1]) if tricube else np.ones(x.shape) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _local_fit :: lo, m, dmax = _fit_windows(n, kb, kf) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _local_fit :: w = _tricube(x, np.maximum(-keys, keys + m - 1)) if tricube else np.ones(x.shape) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _moving :: k = kb + kf + 1 - (np.minimum(i + kf, L - 1) - np.maximum(i - kb, 0) + 1) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in np.maximum; the line counts each window's positions outside the data, whose fill values a moving sum takes in at once, not a limit on a computation"
+ },
  "lib/_matlab_data.py :: _moving :: res = np.minimum(res, v) if stat == \"min\" else np.maximum(res, v) #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
@@ -5897,6 +5937,21 @@
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'max' in the name maxk; the line names or documents maxk and mink, which take the k largest or smallest elements, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _tricube :: \"\"\"(1 - |x/dmax|^3)^3 inside the half width dmax, 0 at and past it (1 where dmax is 0)\"\"\" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _tricube :: d = np.asarray(dmax, dtype=np.float64) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _tricube :: def _tricube(x, dmax): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
  },
  "lib/_matlab_data.py :: fillmissing_ :: and 'EndValues', 'MaxGap', 'SamplePoints' and 'MissingLocations': A's missing values (NaN in double and single #0": {
   "class": "none",
@@ -6414,6 +6469,11 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'maxit', MATLAB's iteration-limit argument, which sets the NaN-in-b answer's iteration count and history length as MATLAB's do; each history entry admitted by the solver's memory budget"
  },
+ "lib/_matlab_krylov.py :: _nan_rhs :: at iteration 0, x0 returned, resvec [NaN], flag 2 preconditioned, else flag 1 at maxit 0 and 4 (a scalar #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'maxit', MATLAB's iteration-limit argument, which sets the NaN-in-b answer's iteration count and history length as MATLAB's do; each history entry admitted by the solver's memory budget"
+ },
  "lib/_matlab_krylov.py :: _nan_rhs :: def _nan_rhs(fname, nargout, b, x0, tol, budget, maxit=0, inner=0, outer=0, capped=False, M=None, name=None): #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
@@ -6439,6 +6499,11 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'maxit', MATLAB's iteration-limit argument, which sets the NaN-in-b answer's iteration count and history length as MATLAB's do; each history entry admitted by the solver's memory budget"
  },
+ "lib/_matlab_krylov.py :: _nan_rhs :: flag, x, it, count = (2 if pre else 1 if maxit == 0 else 4), x0, 0, 1 #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'maxit', MATLAB's iteration-limit argument, which sets the NaN-in-b answer's iteration count and history length as MATLAB's do; each history entry admitted by the solver's memory budget"
+ },
  "lib/_matlab_krylov.py :: _nan_rhs :: flag, x, it, count, nans = 4, xnan, 2, 2 * maxit + 1, 3 #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
@@ -6455,6 +6520,11 @@
   "reason": "refuses nothing: the census matches 'maxit', MATLAB's iteration-limit argument, which sets the NaN-in-b answer's iteration count and history length as MATLAB's do; each history entry admitted by the solver's memory budget"
  },
  "lib/_matlab_krylov.py :: _nan_rhs :: maxit 0: pcg, bicgstab and gmres do nothing: flag 1, x0 returned, iter 0, resvec [NaN] (gmres preconditioned #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'maxit', MATLAB's iteration-limit argument, which sets the NaN-in-b answer's iteration count and history length as MATLAB's do; each history entry admitted by the solver's memory budget"
+ },
+ "lib/_matlab_krylov.py :: _nan_rhs :: quantity NaN) from maxit 1. name: gmres's name in its message (gmres(restart) when it #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'maxit', MATLAB's iteration-limit argument, which sets the NaN-in-b answer's iteration count and history length as MATLAB's do; each history entry admitted by the solver's memory budget"
@@ -6634,7 +6704,7 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'max' in maxit, MATLAB's name for the iteration count the caller chooses (default min(size(A,1), 20), or gmres's), which the solvers run up to as MATLAB does; the work each iteration does is admitted before the first"
  },
- "lib/_matlab_krylov.py :: lsqr_ :: nan = _nan_rhs(\"lsqr\", nargout, b, x0, tol, budget) #0": {
+ "lib/_matlab_krylov.py :: lsqr_ :: nan = _nan_rhs(\"lsqr\", nargout, b, x0, tol, budget, maxit, M=M) #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing itself: the census matches 'budget', the solver's memory ledger, whose every reservation is admitted as the total owned by _m._admit_bytes (the memory guard), not a limit of its own"
@@ -17017,60 +17087,5 @@
  "web/workspace/sync-ledger.ts :: waitSync :: if (t !== undefined && (!Number.isSafeInteger(t) || t < 1 || t > WAIT.timeoutMax)) throw Object.assign(new WorkspaceError(\"invalid\", `timeoutMs is an integer from 1 to ${WAIT.timeoutMax}`), { max: WAIT.timeoutMax }); #0": {
   "class": "1",
   "owner": "sync client"
- },
- "lib/_matlab_data.py :: _moving :: k = kb + kf + 1 - (np.minimum(i + kf, L - 1) - np.maximum(i - kb, 0) + 1) #0": {
-  "class": "none",
-  "owner": "matlab (@sagebrush-matlab)",
-  "reason": "refuses nothing: the census matches 'max' in np.maximum; the line counts each window's positions outside the data, whose fill values a moving sum takes in at once, not a limit on a computation"
- },
- "lib/_matlab.py :: _mfilename :: raise _err(\"Too many input arguments.\", \"MATLAB:maxrhs\") #0": {
-  "class": "none",
-  "owner": "matlab (@sagebrush-matlab)",
-  "reason": "refuses nothing by size: the census matches 'max' in MATLAB's identifier MATLAB:maxrhs, the error for more input arguments than mfilename takes"
- },
- "lib/_matlab_data.py :: _fit_rows :: s = np.maximum(np.max(np.abs(x), axis=1, keepdims=True), 1.0) #0": {
-  "class": "none",
-  "owner": "matlab (@sagebrush-matlab)",
-  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
- },
- "lib/_matlab_data.py :: _fit_windows :: dmax = np.maximum(i - lo, lo + m - 1 - i) #0": {
-  "class": "none",
-  "owner": "matlab (@sagebrush-matlab)",
-  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
- },
- "lib/_matlab_data.py :: _fit_windows :: return lo, m, dmax #0": {
-  "class": "none",
-  "owner": "matlab (@sagebrush-matlab)",
-  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
- },
- "lib/_matlab_data.py :: _local_fit :: base = _tricube(x, dmax[b0:b1]) if tricube else np.ones(x.shape) #0": {
-  "class": "none",
-  "owner": "matlab (@sagebrush-matlab)",
-  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
- },
- "lib/_matlab_data.py :: _local_fit :: lo, m, dmax = _fit_windows(n, kb, kf) #0": {
-  "class": "none",
-  "owner": "matlab (@sagebrush-matlab)",
-  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
- },
- "lib/_matlab_data.py :: _local_fit :: w = _tricube(x, np.maximum(-keys, keys + m - 1)) if tricube else np.ones(x.shape) #0": {
-  "class": "none",
-  "owner": "matlab (@sagebrush-matlab)",
-  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
- },
- "lib/_matlab_data.py :: _tricube :: \"\"\"(1 - |x/dmax|^3)^3 inside the half width dmax, 0 at and past it (1 where dmax is 0)\"\"\" #0": {
-  "class": "none",
-  "owner": "matlab (@sagebrush-matlab)",
-  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
- },
- "lib/_matlab_data.py :: _tricube :: d = np.asarray(dmax, dtype=np.float64) #0": {
-  "class": "none",
-  "owner": "matlab (@sagebrush-matlab)",
-  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
- },
- "lib/_matlab_data.py :: _tricube :: def _tricube(x, dmax): #0": {
-  "class": "none",
-  "owner": "matlab (@sagebrush-matlab)",
-  "reason": "refuses nothing: the census matches 'max' (dmax, np.maximum or np.max): smoothdata's local-fit window's half width, the farthest sample's distance, or its offsets' scale, not a limit on a computation"
  }
 }

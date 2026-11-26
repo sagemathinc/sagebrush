@@ -281,8 +281,9 @@ class _Op:
             r = np.bincount(self.cols, weights=prod, minlength=v.n)
         return np.conj(r)
 
-    def solve(self, x, trans=False):
-        """M\\x (M'\\x with trans), or None when it isn't finite (an ill-conditioned preconditioner)"""
+    def solve(self, x, trans=False, keep=False):
+        """M\\x (M'\\x with trans), or None when it isn't finite (an ill-conditioned preconditioner); keep: returned
+        even so"""
         if self.handle:
             y = self._handle_call(x, "transp" if trans else "notransp", self.n)
         elif self.isdiag:
@@ -293,7 +294,7 @@ class _Op:
                 y = np.asarray(self.F.solve(x.reshape((-1, 1)), trans=trans)).reshape(-1)
         else:
             y = self._dense_solve(x, trans)
-        return y if _finite(y) else None
+        return y if keep or _finite(y) else None
 
     def csolve(self, x):
         """M'\\x"""
@@ -327,9 +328,9 @@ class _Precond:
     def __init__(self, ops):
         self.ops = [o for o in ops if o is not None]
 
-    def solve(self, x):
+    def solve(self, x, keep=False):
         for o in self.ops:
-            x = o.solve(x)
+            x = o.solve(x, keep=keep)
             if x is None:
                 return None
         return x
@@ -501,7 +502,8 @@ def _nan_rhs(fname, nargout, b, x0, tol, budget, maxit=0, inner=0, outer=0, capp
     size(A,1) without restarts (capped), warning that the Hessenberg system is ill conditioned once per outer cycle
     when it restarts, else once from maxit 2; bicgstab at maxit 1 flag 1 at iteration 1, resvec 3 NaNs, from maxit 2
     flag 4 (a scalar quantity NaN) at iteration 2, resvec 2 maxit + 1 entries, 3 NaNs then zeros, x all NaN; lsqr
-    flag 4 at iteration 0, x0 returned, resvec [NaN].  name: gmres's name in its message (gmres(restart) when it
+    at iteration 0, x0 returned, resvec [NaN], flag 2 preconditioned, else flag 1 at maxit 0 and 4 (a scalar
+    quantity NaN) from maxit 1.  name: gmres's name in its message (gmres(restart) when it
     restarts)"""
     if not np.any(np.isnan(b)):
         return None
@@ -511,7 +513,7 @@ def _nan_rhs(fname, nargout, b, x0, tol, budget, maxit=0, inner=0, outer=0, capp
     ret = 0
     pre = M is not None and bool(M.ops)
     if fname == "lsqr":
-        flag, x, it, count = 4, x0, 0, 1
+        flag, x, it, count = (2 if pre else 1 if maxit == 0 else 4), x0, 0, 1
     elif maxit == 0 and fname != "minres" and not (pre and fname == "gmres"):
         flag, x, it, count = 1, x0, 0, 1
     elif pre:
@@ -824,7 +826,9 @@ def minres_(nargout, *args):
 def _gmres(op, b, tol, restart, outer, M, x0, n, budget):
     """restarted GMRES (Saad and Schultz) on M\\A x = M\\b: Arnoldi with modified Gram-Schmidt, orthogonalized
     twice, and Givens rotations for the least-squares problem; (x, flag, relres, [outer inner], resvec, stop)"""
-    mb = M.solve(b)
+    # (b with an Inf: M\\b and M\\r0 keep it, so the residual Inf meets tol*Inf, relative residual NaN, as MATLAB)
+    keep = not _finite(b)
+    mb = M.solve(b, keep=keep)
     if mb is None:
         return x0, 2, 1.0, [0, 0], [_norm(b)], [0, 0]
     n2b = _norm(mb)
@@ -832,7 +836,7 @@ def _gmres(op, b, tol, restart, outer, M, x0, n, budget):
         return np.zeros_like(x0), 0, 0.0, [0, 0], [0.0], [0, 0]
     tolb = tol * n2b
     x = x0.copy()
-    r = M.solve(b - op.times(x))
+    r = M.solve(b - op.times(x), keep=keep)
     if r is None:
         return x, 2, 1.0, [0, 0], [_norm(b)], [0, 0]
     normr = _norm(r)
@@ -1100,6 +1104,10 @@ def _lsqr(op, b, tol, maxit, M, x0, budget):
     beta = _norm(u)
     resvec, lsvec = _History(budget, [beta]), _History(budget)
     tolb = tol * n2b
+    # (b with an Inf: preconditioned, the first direction r/norm(r) is not finite, so flag 2, as MATLAB; without,
+    # the residual Inf meets tol*Inf)
+    if not _finite(beta) and M.ops:
+        return x, 2, _math.nan, 0, resvec, lsvec, 0
     if beta <= tolb:
         return x, 0, beta / n2b, 0, resvec, lsvec, 0
     u = u / beta
@@ -1184,7 +1192,7 @@ def lsqr_(nargout, *args):
                                                               lambda n, r, k: (_SHORT, 0, (2 * _its(n, k) + 2, 2)),
                                                               square=False, nout=6)
     maxit = min(m, 20) if maxit is None else maxit
-    nan = _nan_rhs("lsqr", nargout, b, x0, tol, budget)
+    nan = _nan_rhs("lsqr", nargout, b, x0, tol, budget, maxit, M=M)
     if nan is not None:
         return nan
     x, flag, relres, it, resvec, lsvec, stop = _lsqr(op, b, tol, maxit, M, x0, budget)

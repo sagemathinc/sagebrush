@@ -367,6 +367,46 @@ test("b with a NaN at maxit 0, 1 and 2: every solver's outputs and warnings as M
   assert.equal(r.stderr.split("RCOND = NaN.").length - 1, oracle.nan_rhs_grid_warnings, r.stderr);
 });
 
+test("lsqr with a NaN in b, and every solver with an Inf in b: outputs as MATLAB's (test/matlab-krylov-oracle.json edge_rhs_grid)", () => {
+  // (lsqr, b with a NaN: flag 2 preconditioned, else flag 1 at maxit 0 and 4 from maxit 1; b with an Inf: the
+  // residual Inf meets tol*Inf, flag 0 and relres NaN, except preconditioned lsqr, flag 2; x0 returned throughout)
+  const dir = mkdtempSync(join(tmpdir(), "sb-kedge-"));
+  writeFileSync(join(dir, "main.m"), [
+    "T = spdiags([-ones(6,1) 2*ones(6,1) -ones(6,1)], -1:1, 6, 6);",
+    "M = spdiags(diag(T), 0, 6, 6); tol = 1e-8;",
+    "b1 = (1:6)'; b1(3) = NaN; bn = NaN(6, 1); bi = (1:6)'; bi(2) = Inf;",
+    "names = {'pcg', 'minres', 'bicgstab', 'gmres', 'gmres(r2)', 'lsqr'}; bs = {b1, bn, bi}; bnames = {'b3nan', 'allnan', 'b2inf'};",
+    "for bi_ = 1:3",
+    "  for k = 1:6",
+    "    if bi_ < 3 && k < 6, continue, end",
+    "    for mx = [0 1 2 3 5]",
+    "      for useM = 0:1",
+    "        for usex0 = 0:1",
+    "          bb = bs{bi_};",
+    "          if usex0, x0 = ones(6, 1); else, x0 = []; end",
+    "          if useM, MM = M; else, MM = []; end",
+    "          tag = sprintf('%s %s maxit=%d M=%d x0=%d', names{k}, bnames{bi_}, mx, useM, usex0);",
+    "          switch k",
+    "            case 1, [x, fl, rr, it, rv] = pcg(T, bb, tol, mx, MM, [], x0);",
+    "            case 2, [x, fl, rr, it, rv] = minres(T, bb, tol, mx, MM, [], x0);",
+    "            case 3, [x, fl, rr, it, rv] = bicgstab(T, bb, tol, mx, MM, [], x0);",
+    "            case 4, [x, fl, rr, it, rv] = gmres(T, bb, [], tol, mx, MM, [], x0);",
+    "            case 5, [x, fl, rr, it, rv] = gmres(T, bb, 2, tol, mx, MM, [], x0);",
+    "            case 6, [x, fl, rr, it, rv] = lsqr(T, bb, tol, mx, MM, [], x0);",
+    "          end",
+    "          fprintf('%s|x=%s|fl=%d|rr=%.6g|it=%s|nrv=%d|rv=%s\\n', tag, sprintf('%.6g ', x), fl, rr, sprintf('%g ', it), numel(rv), strtrim(sprintf('%.6g ', rv)));",
+    "        end",
+    "      end",
+    "    end",
+    "  end",
+    "end",
+  ].join("\n") + "\n");
+  const r = spawnSync(process.execPath, [cli, "--matlab", "main.m"], { cwd: dir, encoding: "utf8", timeout: 600000 });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.stdout.split("\n").filter((l: string) => l), oracle.edge_rhs_grid);
+  assert.equal(r.stderr, "");
+});
+
 test("minres with a badly scaled SPD preconditioner: honest flags and relres over the whole grid; convergence where MATLAB converges (test/matlab-krylov-oracle.json minres_scaled_converged)", () => {
   // (the residual restart: where the recurrence's estimate passes tol and the true residual doesn't, the Lanczos
   // process restarts from the true residual; flag 0 only on the true residual, relres the returned x's own)
