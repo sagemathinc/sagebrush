@@ -165,6 +165,17 @@ test("sagebrush.fs against a synthetic page: open, read, seek, info, ls, exists,
   // a version by ?v=
   assert.equal(await run(`print(fs.cat_file('sagebrush:///data/t.csv?v=${old.sha}'))`), "b'a,b\\n9,9\\n'\n");
   assert.equal(await run(`try:\n    fs.open('sagebrush:///data/t.csv?v=${"e".repeat(64)}')\nexcept FileNotFoundError as e:\n    print(e)`), "that version isn't in this workspace's history\n");
+  // the version is pinned at open: a file written meanwhile still reads as it was opened
+  page.calls = [];
+  await run("pinned = fs.open('sagebrush:///data/t.csv')");
+  const was = files["/data/t.csv"];
+  files["/data/t.csv"] = { bytes: enc("a,b\n7,7\n"), sha: "f".repeat(64) };
+  const prevOld = { ...old };
+  Object.assign(old, was);
+  assert.equal(await run("print(pinned.read())"), "b'a,b\\n1,2\\n3,4\\n'\n");
+  assert.equal(page.calls.filter((c) => c.op === "fs.read").every((c) => c.params.version === "c".repeat(64)), true);
+  files["/data/t.csv"] = was;
+  Object.assign(old, prevOld);
   // ls follows the cursor; URLs carry the workspace as given
   assert.equal(await run("print(fs.ls('sagebrush:///data'))"), "['sagebrush:///data/big.bin', 'sagebrush:///data/t.csv']\n");
   // errors: another workspace, a write mode, a bad URL, a folder opened

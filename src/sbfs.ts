@@ -139,7 +139,7 @@ export function waitPiece(buffer: SharedArrayBuffer, intr: Int32Array, call: num
     if (left <= 0) return { error: "timeout" };
     Atomics.wait(ctl, 0, 0, Math.min(sliceMs, left));
   }
-  if (stopped()) return { error: "interrupted" };
+  // (a Stop is checked after every wake, before the piece: one landing with the piece in the same wait wins)
   const n = Atomics.load(ctl, 1), s = Atomics.load(ctl, 2), kind = Atomics.load(ctl, 3);
   if (s !== seq || !(n >= 0 && n <= buffer.byteLength - FS_HEADER) || (kind !== KIND_HEADER && kind !== KIND_DATA)) return { error: "unavailable" };
   return { kind, bytes: new Uint8Array(buffer, FS_HEADER, n) };
