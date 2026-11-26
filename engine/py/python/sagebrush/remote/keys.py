@@ -6,6 +6,9 @@ from the OS (os.urandom) and used only by the native es256_sign (p256); it is ne
 is a symlink, not ours, or readable by others is refused rather than used or repaired."""
 
 import base64
+import contextlib
+import fcntl
+import hashlib
 import json
 import os
 import stat
@@ -86,9 +89,8 @@ def _check_private(st, what):
         raise KeyFileError("%s is readable or writable by others (chmod go-rwx)" % what)
 
 
-def load(path=None):
-    """The enrolled key, or None if there is no file.  Raises KeyFileError for a file that can't be trusted or read."""
-    path = path or default_path()
+def _read(path):
+    """(its stat, its bytes), or None if there is no file; KeyFileError for a file that can't be trusted or read."""
     try:
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
     except FileNotFoundError:
@@ -106,6 +108,17 @@ def load(path=None):
         os.close(fd)
     if len(raw) > 8192:
         raise KeyFileError("%s is too long" % path)
+    return st, raw
+
+
+def load(path=None):
+    """The enrolled key, or None if there is no file.  Raises KeyFileError for a file that can't be trusted or read,
+    OldKeyFile for one this version doesn't recognize."""
+    path = path or default_path()
+    r = _read(path)
+    if r is None:
+        return None
+    raw = r[1]
     try:
         v = json.loads(raw.decode("utf-8"))
         if not isinstance(v, dict) or v.get("v") != KEY_VERSION:
@@ -172,3 +185,34 @@ def move_aside(path=None):
     old = path + ".old"
     os.replace(path, old)
     return old
+
+
+def state(path=None):
+    """What the key file is now, for a later "still exactly this?": None if there is none, else its device, inode, size,
+    modification time and the SHA-256 of its bytes.  KeyFileError, as load's, for a file it can't trust."""
+    r = _read(path or default_path())
+    if r is None:
+        return None
+    st, raw = r
+    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, hashlib.sha256(raw).hexdigest())
+
+
+@contextlib.contextmanager
+def write_lock(path=None):
+    """Held while a login decides whether it may replace the key file and replaces it: one enrollment at a time on this
+    computer, so one finishing during another's device flow is never moved aside or overwritten by it.  The lock file
+    sits beside the key, in its private directory."""
+    path = path or default_path()
+    d = os.path.dirname(path)
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    st = os.lstat(d)
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        raise KeyFileError("%s isn't a directory" % d)
+    _check_private(st, d)
+    fd = os.open(os.path.join(d, ".key.lock"), os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_CLOEXEC", 0), 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)

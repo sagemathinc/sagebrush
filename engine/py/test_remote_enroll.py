@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 
 from sagebrush._native import remote as _native
 from sagebrush.remote import enroll, keys
@@ -586,6 +587,110 @@ def test_cli_against_http():
             os.environ["SAGEBRUSH_REMOTE_ORIGIN"] = old_origin
         srv.shutdown()
         srv.server_close()
+
+
+def test_login_racing_another_enrollment():
+    """A login replaces the key file only if it is still exactly what the login began with: another login that
+    finishes during this one's device flow (a valid key installed meanwhile) is left as it is, and nothing moved aside;
+    --force still replaces whatever is there."""
+    from sagebrush.remote import enroll as E
+    real_login, old_err = E.login, sys.stderr
+    try:
+        with TmpHome():
+            path = keys.default_path()
+            nov6 = json.dumps({"v": 1, "d": keys.b64url(enrolled()._d), "remote_id": "r" + "C" * 20, "origin": None,
+                               "name": None}).encode()
+            for start in ("old", "none"):
+                for p in (path, path + ".old"):
+                    if os.path.lexists(p):
+                        os.unlink(p)
+                if start == "old":
+                    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+                    with open(path, "wb") as f:
+                        f.write(nov6)
+                    os.chmod(path, 0o600)
+                intervening = enrolled()
+                intervening.remote_id = "r" + "I" * 20
+
+                def racing_login(origin, name, **kw):
+                    keys.save(intervening)  # (another login, finishing first)
+                    k = enrolled()
+                    k.remote_id = "r" + "M" * 20
+                    return k
+                E.login = racing_login
+                sys.stderr = io.StringIO()
+                assert E.main([]) == 1, (start, sys.stderr.getvalue())
+                assert "changed while this computer was being enrolled" in sys.stderr.getvalue()
+                assert keys.load().remote_id == intervening.remote_id and not os.path.exists(path + ".old"), start
+                assert keys.b64url(intervening._d) not in sys.stderr.getvalue()
+                # (--force: replaces whatever is there, as before)
+                sys.stderr = io.StringIO()
+                assert E.main(["--force"]) == 0, sys.stderr.getvalue()
+                assert keys.load().remote_id == "r" + "M" * 20
+            # (the file swapped for a different old one, same format: also left alone, nothing moved aside)
+            for p in (path, path + ".old"):
+                if os.path.lexists(p):
+                    os.unlink(p)
+            with open(path, "wb") as f:
+                f.write(nov6)
+            os.chmod(path, 0o600)
+            other = b"{not the same old file"
+
+            def swapping_login(origin, name, **kw):
+                with open(path + ".swap", "wb") as f:
+                    f.write(other)
+                os.chmod(path + ".swap", 0o600)
+                os.replace(path + ".swap", path)
+                return enrolled()
+            E.login = swapping_login
+            sys.stderr = io.StringIO()
+            assert E.main([]) == 1 and open(path, "rb").read() == other and not os.path.exists(path + ".old")
+            # (a valid key already there when the check began, though the first read saw an old one (installed between
+            # that read and the snapshot): same object and bytes after the login, but no longer old: left as it is)
+            os.unlink(path)
+            valid = enrolled()
+            keys.save(valid)
+            real_load, calls = keys.load, []
+
+            def first_read_old(p=None):
+                calls.append(1)
+                if len(calls) == 1:
+                    raise keys.OldKeyFile("an old file, as first read")
+                return real_load(p)
+            keys.load = first_read_old
+            E.login = lambda origin, name, **kw: enrolled()
+            try:
+                sys.stderr = io.StringIO()
+                assert E.main([]) == 1, sys.stderr.getvalue()
+            finally:
+                keys.load = real_load
+            assert real_load()._d == valid._d and not os.path.exists(path + ".old")
+            # (the lock: another enrollment holding it while it installs its key; this login waits for it, then finds
+            #  the file changed and leaves it; without the lock it would replace the file and exit 0)
+            os.unlink(path)
+            with open(path, "wb") as f:
+                f.write(nov6)
+            os.chmod(path, 0o600)
+            held, other_key = threading.Event(), enrolled()
+            other_key.remote_id = "r" + "L" * 20
+
+            def other_enrollment():
+                with keys.write_lock():
+                    held.set()
+                    time.sleep(0.5)
+                    keys.save(other_key)
+
+            def locked_login(origin, name, **kw):
+                threading.Thread(target=other_enrollment, daemon=True).start()
+                held.wait(5)
+                return enrolled()
+            E.login = locked_login
+            sys.stderr = io.StringIO()
+            assert E.main([]) == 1, sys.stderr.getvalue()
+            assert keys.load().remote_id == other_key.remote_id and not os.path.exists(path + ".old")
+    finally:
+        E.login = real_login
+        sys.stderr = old_err
 
 
 if __name__ == "__main__":
