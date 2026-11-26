@@ -36,6 +36,11 @@ mod agent_host;
 #[cfg(desktop)]
 #[allow(dead_code)]
 mod tools;
+// (Native (Python), the machine's own CPython as a kernel: choosing the interpreter and running the kernel, before the
+//  kernel menu offers it)
+#[cfg(all(desktop, unix))]
+#[allow(dead_code)]
+mod pykernel;
 mod nav;
 mod version;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};

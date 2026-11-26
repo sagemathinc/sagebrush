@@ -150,6 +150,33 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
+      # (Native (Python)'s Rust tests need a CPython the app's rules accept, and the runners' own aren't: macOS's
+      # Homebrew and /usr/local/bin folders are group-writable and its /usr/bin python3 is 3.9. So the oldest supported
+      # CPython is installed and named to the tests, which also pins the version they run on.)
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        id: py
+        if: runner.os != 'Windows'
+        with:
+          python-version: "3.10"
+      # (the tool cache's folders are group-writable as installed, and the app's rules refuse an interpreter in folders
+      # someone else could change: here, a throwaway runner, write for group and others is removed from the install
+      # and every folder above it, so the installed CPython is one the rules accept; nothing is made more open)
+      - name: the tests' CPython, closed to group and others
+        if: runner.os != 'Windows'
+        env:
+          PY: ${{ steps.py.outputs.python-path }}
+        run: |
+          set -eu
+          real=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$PY")
+          for start in "$PY" "$real"; do
+            d=$(dirname "$start")
+            while [ "$d" != "/" ]; do
+              sudo chmod go-w "$d"
+              d=$(dirname "$d")
+            done
+          done
+          sudo chmod -R go-w "$(dirname "$(dirname "$real")")"
+          ls -ld "$(dirname "$real")" "$real"
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -230,6 +257,8 @@ jobs:
       - name: the app's Rust tests
         if: runner.os != 'Windows'
         working-directory: app/src-tauri
+        env:
+          SB_TEST_PYTHON: ${{ steps.py.outputs.python-path }}
         run: cargo test --lib
       - name: build
         if: runner.os != 'Linux'
