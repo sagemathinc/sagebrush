@@ -261,31 +261,38 @@ def test_staged_member_replaced_before_activate():
 
 
 def test_changed_between_verify_and_activate():
-    """TESTS T3: the exact seam: the staged tree verified, THEN a member changed (same size), then the rename.  The
-    activated tree is verified again before "current" names it: the version is taken out and nothing is current."""
-    d, root = fresh_root()
-    try:
-        r = Release()
-        real = T.verify_tree
-        calls = []
-
-        def verify_then_alter(fd, m, plat, uid=None):
-            calls.append(1)
-            out = real(fd, m, plat, uid)
-            if len(calls) == 1:
-                st = [n for n in os.listdir(root) if n.startswith("staging-")][0]
-                with open(os.path.join(root, st, "bundle", "main.mjs"), "r+b") as f:
-                    f.write(b"#!")  # (the same size, other bytes)
-            return out
-        T.verify_tree = verify_then_alter
+    """TESTS T3 / SEC S3: the exact seam: the staged tree verified, THEN a member replaced (the same size, other
+    bytes), then the rename: node, a bundle file and the addon in turn.  The activated tree is verified again before
+    "current" names it: the version is taken out and nothing is current."""
+    for rel, why in (("node/%s/bin/node" % NODEDIR, "bin/node"), ("bundle/main.mjs", "main.mjs"), ("addon/sagebrush-engine.node", "sagebrush-engine.node")):
+        d, root = fresh_root()
         try:
-            refused(T.install, V, PLAT, r.get, root, r.pins, contains="main.mjs")
+            r = Release()
+            real = T.verify_tree
+            calls = []
+
+            def verify_then_replace(fd, m, plat, uid=None):
+                calls.append(1)
+                out = real(fd, m, plat, uid)
+                if len(calls) == 1:
+                    st = [n for n in os.listdir(root) if n.startswith("staging-")][0]
+                    p = os.path.join(root, st, rel)
+                    data = open(p, "rb").read()
+                    # (a replacement, not an edit in place: a new file of the same size renamed over it)
+                    with open(p + ".new", "wb") as f:
+                        f.write(b"!" + data[1:])
+                    os.chmod(p + ".new", stat.S_IMODE(os.stat(p).st_mode))
+                    os.replace(p + ".new", p)
+                return out
+            T.verify_tree = verify_then_replace
+            try:
+                refused(T.install, V, PLAT, r.get, root, r.pins, contains=why)
+            finally:
+                T.verify_tree = real
+            assert len(calls) == 2, (rel, "verified again after the rename")
+            assert T.read_current(root) is None and not os.path.exists(os.path.join(root, "versions", V)), rel
         finally:
-            T.verify_tree = real
-        assert len(calls) == 2, "verified again after the rename"
-        assert T.read_current(root) is None and not os.path.exists(os.path.join(root, "versions", V))
-    finally:
-        shutil.rmtree(d)
+            shutil.rmtree(d)
 
 
 def test_directories_checked():
@@ -364,10 +371,13 @@ def test_fetching():
                 self.send_response(200)
                 self.send_header("Content-Length", "10")
                 self.end_headers()
-                for _ in range(10):
-                    self.wfile.write(b"s")
-                    self.wfile.flush()
-                    _t.sleep(0.2)
+                try:
+                    for _ in range(10):
+                        self.wfile.write(b"s")
+                        self.wfile.flush()
+                        _t.sleep(0.2)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # (the client gave up at its deadline: what the row is about)
 
         def _send(self, b):
             self.send_response(200)
