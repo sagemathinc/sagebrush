@@ -160,6 +160,13 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "Random(1, 4);",
     "Universe({ {1} });",
     "H<h> := GF(2^11); J<j> := GF(2^10); h + j;",
+    "ConjugacyClasses(DihedralGroup(4));",
+    "[ConjugacyClasses(Sym(2))];",
+    "Sprint(ConjugacyClasses(Sym(2)));",
+    "#ConjugacyClasses(Sym(80));",
+    "Ep := ChangeRing(EllipticCurve([0, -1, 1, -10, -10]), GF(101)); Conductor(Ep);",
+    "ChangeRing(EllipticCurve([0, -1, 1, -10, -10]), Rationals());",
+    "ChangeRing(Ep, GF(7));",
   ].join("\n") + "\n";
   const out = spawnSync(process.execPath, [cli, "--magma"], { input: src, encoding: "utf8" }).stdout;
   // (messages are wrapped at 80 columns, as Magma's are)
@@ -183,6 +190,12 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "Runtime error in 'Random': Random after SetSeed or GetSeed is not supported yet",
     "Runtime error in 'Universe': Universe of this SetEnum is not supported yet",
     "Runtime error in '+': arithmetic of elements of GF(2^11) and GF(2^10) is not supported yet (subfields are computed here only in fields of at most 10^7 elements",
+    "Runtime error in 'ConjugacyClasses': ConjugacyClasses of a dihedral group is not supported yet",
+    "Runtime error: printing the conjugacy classes inside another value or in a string is not supported yet",
+    "A collection of more than 1000000 elements needs about",
+    "Runtime error in 'Conductor': Conductor of an elliptic curve over a finite field is not supported yet",
+    "Runtime error in 'ChangeRing': ChangeRing of a CrvEll, FldRat is not supported yet",
+    "Runtime error in 'ChangeRing': ChangeRing of an elliptic curve over a finite field is not supported yet",
   ]) assert.ok(flat.includes(said), said + "\n" + out);
   // Integers(F) is F's maximal order
   assert.match(flat, /Maximal Equation Order with defining polynomial z\^2 - 5 over its ground order|Maximal Order/);
@@ -1705,7 +1718,7 @@ test("an intrinsic of several signatures refuses in words those Magma has and Sa
   const { join } = require("node:path");
   const cli = join(__dirname, "..", "src", "cli.js");
   const src = "P<x> := PolynomialRing(Integers());\nTrace(x^2 + 1);\nF<z> := GF(9);\nTrace(z, GF(3));\n" +
-    "K<w> := QuadraticField(7);\nTrace(w, Rationals());\nE := EllipticCurve([0, -1, 1, -10, -20]);\nTrace(E);\n" +
+    "K<w> := QuadraticField(7);\nTrace(w, Rationals());\nM := ModularForms(11, 2);\nTrace(M);\nE := EllipticCurve([0, -1, 1, -10, -20]);\nTrace(E);\n" +
     "ISA(Mtrx, MtrxS);\nISA(1, RngIntElt);\n\"end\";\n";
   const out = spawnSync(process.execPath, [cli, "--magma"], { input: src, encoding: "utf8" }).stdout as string;
   // (Magma has these signatures: not Bad argument types)
@@ -1715,7 +1728,9 @@ test("an intrinsic of several signatures refuses in words those Magma has and Sa
   assert.ok(out.includes("Runtime error in 'Trace': Trace of a FldQuadElt, FldRat is not supported yet"), out);
   // (a value whose type the signatures don't know)
   assert.ok(out.includes("Runtime error in 'Trace': Trace with these arguments is not supported yet"), out);
-  assert.doesNotMatch(out, /Runtime error in 'Trace': Bad argument types/);
+  // (an elliptic curve's type is known, CrvEll: no signature takes it, Magma's words, checked against Magma)
+  assert.ok(out.includes("Runtime error in 'Trace': Bad argument types\nArgument types given: CrvEll[FldRat]\n"), out);
+  assert.equal(out.match(/Runtime error in 'Trace': Bad argument types/g)?.length, 1, out);
   // (ISA of a type outside the table is not guessed)
   assert.ok(out.includes("ISA(Mtrx, MtrxS) is not supported yet"), out);
   assert.ok(out.includes("Runtime error in 'ISA': Bad argument types\nArgument types given: RngIntElt, Cat[RngIntElt]\n"), out);

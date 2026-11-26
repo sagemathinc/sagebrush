@@ -29,6 +29,7 @@ TABLE = {
     "Subsets": (["sequences and sets"], "The set of the subsets of a set, or of those of a given size."),
     "Sym": (["structures"], "The symmetric group on 1 .. n, whose elements are permutations."),
     "DihedralGroup": (["structures"], "The dihedral group of order 2n as permutations of 1 .. n."),
+    "ConjugacyClasses": (["structures"], "The conjugacy classes of a symmetric group: tuples <order, length, representative>, printed as a table."),
     "IsIsomorphic": (["structures"], "Whether two quadratic fields, or the symmetric and dihedral groups, are isomorphic (the isomorphism itself is not given)."),
     "Identity": (["structures"], "The identity element of a group."),
     # structures and types
@@ -898,6 +899,12 @@ q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)""",
 37
 > Conductor(EllipticCurve("11a1"));
 11""",
+    "ConjugacyClasses": """\
+> G := Sym(4);
+> #ConjugacyClasses(G);
+5
+> ConjugacyClasses(G)[3];
+<2, 6, (1, 2)>""",
     "TraceOfFrobenius": """\
 > E := EllipticCurve([0, -1, 1, 0, 0]);
 > TraceOfFrobenius(E, 7);
@@ -1105,6 +1112,10 @@ SIGNATURES = {
         "RngIntElt": ("The symmetric group on 1 .. n; i^p is the image of i under a permutation p.",
                       "> G := Sym(3);\n> p := G!(1, 2, 3);\n> [i^p : i in [1..3]];\n[ 2, 3, 1 ]"),
     },
+    "ConjugacyClasses": {
+        "GrpPerm": ("A symmetric group's conjugacy classes, one for each cycle type, by the order of their elements, then their length.",
+                    "> #ConjugacyClasses(Sym(5));\n7"),
+    },
     "Identity": {
         "GrpPerm": ("The identity permutation of a symmetric group.", "> Order(Identity(Sym(5)));\n1"),
     },
@@ -1113,6 +1124,8 @@ SIGNATURES = {
                          "> P<x> := PolynomialRing(Integers());\n> ChangeRing(P, GF(25));\nUnivariate Polynomial Ring over GF(5^2)\nMapping from: RngUPol: P to Univariate Polynomial Ring over GF(5^2)"),
         "RngUPolElt, Rng": ("The polynomial with each coefficient coerced into R; between finite fields into an overfield or a subfield.",
                             "> K<b> := GF(16); U<u> := PolynomialRing(K); F<a> := GF(4);\n> ChangeRing(u^2 + b^5*u + 1, F);\n$.1^2 + a*$.1 + 1"),
+        "CrvEll, FldFin": ("An elliptic curve over the rationals reduced modulo the field's characteristic (# is its number of points); where the model is singular, a plane curve.",
+                           "> E := EllipticCurve([0, -1, 1, -10, -10]);\n> #ChangeRing(E, GF(101));\n111"),
     },
     "Trace": {
         "RngIntElt": ("An integer is its own trace.", "> Trace(-7);\n-7"),
