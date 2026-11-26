@@ -160,7 +160,7 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
         on: (e: any) => {
           if (client !== t || ended) return;
           if (e.t === "opened") {
-            tries = 0;
+            tries = 1;
             sessionStorage.setItem(SESSION_KEY(r.remote_id), e.session);
             endB.hidden = false;
             say("");
@@ -208,18 +208,29 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
   function retryLater(r: Runner): void {
     if (!auto || ended || runner !== r) return;
     if (document.hidden) { lostWhileHidden = true; return; }
-    // (tries: the opens attempted since the last one that worked; the first retry after a working leg waits the least)
+    // (tries: the opens attempted since the last one that worked, that one counted as 1: the waits run 1, 2, 4, 8, 15 s,
+    // whether a working leg was lost or the first open failed)
     const n = Math.max(0, tries - 1);
     if (n >= RECONNECT.waitsMs.length) return say(`${status.textContent} Press Reconnect to try again.`.trim());
     const ms = RECONNECT.waitsMs[n];
     say(`${status.textContent} Reconnecting in ${Math.round(ms / 1000)} s…`.trim());
     clearRetry();
-    retryTimer = setTimeout(() => { retryTimer = null; connect(); }, ms);
+    // (a tab hidden while it waits: no open now; the tab shown again reattaches, onShown)
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      if (document.hidden) { lostWhileHidden = true; return; }
+      connect();
+    }, ms);
   }
   // (the tab shown again, back online, or restored from the back-forward cache: a lost leg is reattached now; one that
   // looks open is probed, and one that doesn't answer is closed, which reattaches it)
   function onShown(): void {
-    if (ended || document.hidden || !auto || !runner) return;
+    if (ended || !auto || !runner) return;
+    // (hidden: a retry waiting is put off until the tab is shown again)
+    if (document.hidden) {
+      if (retryTimer !== null) { clearRetry(); lostWhileHidden = true; }
+      return;
+    }
     const t = client;
     if (lostWhileHidden || retryTimer !== null || !t || t.state === "ended") {
       if (lostWhileHidden || retryTimer !== null) { tries = 0; connect(); }

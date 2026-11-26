@@ -443,15 +443,44 @@ try {
   await push({ t: "opened", session: "s-1", nonce: "n2" });
   await push({ t: "replay" });
   await push({ t: "live" });
+  // 9a. a tab hidden while a retry waits: the retry is put off (no open while hidden); shown again, reattached at once
+  await ev("__leg.drop(1006, 'runner not connected'), true");
+  await until("/Reconnecting in 1 s/.test(document.querySelector('#rterm .rstatus').textContent)");
+  await ev("__leg.visible(false), true");
+  await sleep(1500);
+  ok((await ev("__leg.opens.length")) === 2, `hidden while a retry waited: nothing opened (${await ev("__leg.opens.length")} opens)`);
+  await ev("__leg.visible(true), true");
+  await until("__leg.opens.length === 3", 2000);
+  ok(JSON.parse(await ev("__leg.opens[2].body")).session === "s-1", "shown again: reattached at once, to the same session");
+  await push({ t: "opened", session: "s-1", nonce: "n2b" });
+  await push({ t: "replay" });
+  await push({ t: "live" });
+  // 9a2. the waits after a working leg is lost: 1, 2, 4 s (each try that doesn't open waits longer)
+  await ev("__leg.drop(1006, 'gone'), true");
+  await until("/Reconnecting in 1 s/.test(document.querySelector('#rterm .rstatus').textContent)");
+  await until("__leg.opens.length === 4", 3000);
+  await ev("__leg.drop(1006, 'gone'), true");
+  await until("/Reconnecting in 2 s/.test(document.querySelector('#rterm .rstatus').textContent)", 2000);
+  await until("__leg.opens.length === 5", 4000);
+  await ev("__leg.drop(1006, 'gone'), true");
+  await until("/Reconnecting in 4 s/.test(document.querySelector('#rterm .rstatus').textContent)", 2000);
+  ok(true, "the waits after a working leg is lost: 1 s, then 2 s, then 4 s");
+  await ev("[...document.querySelectorAll('#rterm .rhead button')].find((b) => b.textContent === 'Reconnect').click(), true");
+  await until("__leg.opens.length === 6", 2000);
+  ok(JSON.parse(await ev("__leg.opens[5].body")).session === "s-1", "Reconnect while a retry waits: at once, the same session");
+  await push({ t: "opened", session: "s-1", nonce: "n2c" });
+  await push({ t: "replay" });
+  await push({ t: "live" });
   // 9b. in a hidden tab nothing is tried; shown again, a lost leg is reattached at once
+  const o9 = await ev("__leg.opens.length");
   await ev("__leg.visible(false), true");
   await ev("__leg.drop(1001, 'no ping for 40 s'), true");
   await until("/Not connected to box/.test(document.querySelector('#rterm .rstatus').textContent)");
   await sleep(2500);
-  ok((await ev("__leg.opens.length")) === 2 && (await status()) === "Not connected to box: no ping for 40 s.", `hidden: said, nothing tried (${await ev("__leg.opens.length")} opens; ${JSON.stringify(await status())})`);
+  ok((await ev("__leg.opens.length")) === o9 && (await status()) === "Not connected to box: no ping for 40 s.", `hidden: said, nothing tried (${await ev("__leg.opens.length")} opens; ${JSON.stringify(await status())})`);
   await ev("__leg.visible(true), true");
-  await until("__leg.opens.length === 3", 2000);
-  ok(JSON.parse(await ev("__leg.opens[2].body")).session === "s-1", "shown again: reattached at once, to the same session");
+  await until(`__leg.opens.length === ${o9 + 1}`, 2000);
+  ok(JSON.parse(await ev(`__leg.opens[${o9}].body`)).session === "s-1", "shown again: reattached at once, to the same session");
   await push({ t: "opened", session: "s-1", nonce: "n3" });
   await push({ t: "replay" });
   await push({ t: "live" });
@@ -460,15 +489,16 @@ try {
   const pings0 = await ev("__leg.sent.filter((m) => m.relay === 'ping').length");
   await ev("(__leg.visible(false), __leg.visible(true)), true");
   await sleep(5600);
-  ok((await ev("__leg.sent.filter((m) => m.relay === 'ping').length")) === pings0 + 1 && (await ev("__leg.opens.length")) === 3 && (await ev("__leg.sock.closed")) === null,
+  ok((await ev("__leg.sent.filter((m) => m.relay === 'ping').length")) === pings0 + 1 && (await ev("__leg.opens.length")) === o9 + 1 && (await ev("__leg.sock.closed")) === null,
     "shown with the leg open: one probe ping, answered, the leg kept");
   // 9d. a probe not answered within 5 s: that leg is closed (4003) and the session reattached
   await ev("__leg.pongs = false, true");
   await ev("(__leg.visible(false), __leg.visible(true)), true");
-  await until("__leg.legs[2].closed !== null", 7000);
-  ok((await ev("__leg.legs[2].closed[0]")) === 4003, `no answer to the probe: the leg closed 4003 (${JSON.stringify(await ev("__leg.legs[2].closed"))})`);
-  await until("__leg.opens.length === 4", 5000);
-  ok(JSON.parse(await ev("__leg.opens[3].body")).session === "s-1", "and the session reattached on a new leg");
+  const probed = (await ev("__leg.legs.length")) - 1;
+  await until(`__leg.legs[${probed}].closed !== null`, 7000);
+  ok((await ev(`__leg.legs[${probed}].closed[0]`)) === 4003, `no answer to the probe: the leg closed 4003 (${JSON.stringify(await ev(`__leg.legs[${probed}].closed`))})`);
+  await until(`__leg.opens.length === ${o9 + 2}`, 5000);
+  ok(JSON.parse(await ev(`__leg.opens[${o9 + 1}].body`)).session === "s-1", "and the session reattached on a new leg");
 
   // 10. exit: said, forgotten, New session
   await push({ t: "opened", session: "s-1", nonce: "n2" });
