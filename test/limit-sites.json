@@ -12989,6 +12989,11 @@
   "owner": "sage kernel (@sagebrush-sage2)",
   "reason": "a TypeError for a number and a matrix or vector that do not meet (a non-square matrix, a vector), Sage's coercion message; refuses nothing for size"
  },
+ "lib/_sage_ffmat.py :: FFMatrix._from_qq :: raise TypeError(\"unsupported operand parent(s) for %s: '%s' and '%s'\" % (op, a.parent(), b.parent())) #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "Sage's TypeError for a matrix over a finite field (or Z/n) with one over QQ or another ring that does not coerce into it, or of incompatible shapes (Sage's parent wording); the other was taken as a scalar entry by entry, a wrong answer; refuses nothing Sage computes"
+ },
  "lib/_sage_ffmat.py :: FFVector.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), _sa().parent(o))) #0": {
   "class": "none",
   "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
@@ -13618,6 +13623,11 @@
   "class": "none",
   "owner": "sage kernel (@sagebrush-sage2)",
   "reason": "a TypeError for a number and a matrix or vector that do not meet (a non-square matrix, a vector), Sage's coercion message; refuses nothing for size"
+ },
+ "lib/_sage_matrix.py :: Matrix._finite :: raise TypeError(\"unsupported operand parent(s) for %s: '%s' and '%s'\" % (op, self.parent(), other.parent())) #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "Sage's TypeError for a matrix over a finite field (or Z/n) with one over QQ or another ring that does not coerce into it, or of incompatible shapes (Sage's parent wording); the other was taken as a scalar entry by entry, a wrong answer; refuses nothing Sage computes"
  },
  "lib/_sage_matrix.py :: Matrix._integral_exponent :: raise NotImplementedError(\"non-integral exponents not supported\") #0": {
   "class": "none",

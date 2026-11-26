@@ -1574,8 +1574,8 @@ class FFMatrix:
         return self.nrows() == self.ncols()
 
     def __repr__(self):
-        if not self._rows:
-            return "%d x %d dense matrix over %r" % (0, self._ncols, self._base)
+        if not self._rows or not self._ncols:
+            return "[]"
         cells = [[repr(x) for x in r] for r in self._rows]
         # (one width for every entry, the widest, as Sage over every field:
         # matrix(GF(101), [[1, 100], [2, 3]]) printed its columns at their
@@ -1789,15 +1789,28 @@ class FFMatrix:
         if F is not self._base:
             raise NotImplementedError("%s a matrix over %r with one over %r is not available in sagebrush yet" % (what, self._base, other._base))
 
-    def _from_qq(self, o):
-        """A QQ matrix o as a matrix over this (QQbar) field."""
+    def _from_qq(self, o, op=None, left=False):
+        """A QQ or ZZ matrix o as a matrix over this (QQbar) field; a ZZ
+        matrix as one over this finite field, as Sage coerces ZZ into every
+        ring (o was taken as a scalar, entry by entry: a matrix of
+        matrices).  With op (self op o, or o op self when left), Sage's
+        TypeError for operands of the wrong shapes, and, over a finite
+        field, for a matrix over QQ or another ring; o itself otherwise."""
         import _sage_matrix
-        if isinstance(o, _sage_matrix.Matrix) and getattr(self._base, "_is_generic_field", False):
+        if not isinstance(o, _sage_matrix.Matrix):
+            return o
+        generic = getattr(self._base, "_is_generic_field", False)
+        if op is not None:
+            a, b = (o, self) if left else (self, o)
+            bad = a.ncols() != b.nrows() if op == "*" else a.dimensions() != b.dimensions()
+            if bad or not (generic or o._base is _sa().ZZ):
+                raise TypeError("unsupported operand parent(s) for %s: '%s' and '%s'" % (op, a.parent(), b.parent()))
+        if generic or o._base is _sa().ZZ:
             return FFMatrix(self._base, o._rows, o.ncols())
         return o
 
     def __add__(self, o):
-        o = self._from_qq(o)
+        o = self._from_qq(o, "+")
         if not isinstance(o, FFMatrix):
             q = self._scalar_identity(o, "+", False)
             if q is None:
@@ -1822,7 +1835,7 @@ class FFMatrix:
         return FFMatrix(self._base, [[-a for a in r] for r in self._rows], self._ncols)
 
     def __sub__(self, o):
-        o = self._from_qq(o)
+        o = self._from_qq(o, "-")
         if not isinstance(o, FFMatrix):
             q = self._scalar_identity(o, "-", False)
             if q is None:
@@ -1836,7 +1849,7 @@ class FFMatrix:
 
     def __rsub__(self, o):
         # o - A for a scalar o (a QQ matrix o goes through _from_qq)
-        q = self._from_qq(o)
+        q = self._from_qq(o, "-", True)
         if isinstance(q, FFMatrix):
             return q + (-self)
         q = self._scalar_identity(o, "-", True)
@@ -1846,7 +1859,7 @@ class FFMatrix:
         return q + (-self)
 
     def __mul__(self, o):
-        o = self._from_qq(o)
+        o = self._from_qq(o, "*")
         if isinstance(o, FFMatrix):
             if self._ncols != o.nrows():
                 raise TypeError("unsupported operand parent(s) for *: '%r' and '%r'" % (self.parent(), o.parent()))
