@@ -493,34 +493,45 @@ class _History(list):
 
 def _nan_rhs(fname, nargout, b, x0, tol, budget, maxit=0, inner=0, outer=0, capped=False, M=None, name=None):
     """b with a NaN, as MATLAB's solvers answer it, each its own way (no iteration is run); None when b has none.
-    Preconditioned, pcg, minres, gmres and bicgstab stop with flag 2 (the preconditioner's system), x0 returned,
-    resvec [NaN], at iteration 1 (pcg, bicgstab), 0 (minres) or [0 0] (gmres).  Otherwise pcg and minres flag 1
-    (maxit reached), x all NaN, iter maxit, resvec maxit + 1 NaNs; gmres flag 1, x all NaN, iter [0 0], resvec
-    inner*outer + 1 NaNs, its last 0 where maxit reached size(A,1) without restarts (capped), warning that the
-    Hessenberg system is ill conditioned once per outer cycle; bicgstab flag 4 (a scalar quantity NaN) at iteration
-    2, x all NaN, resvec 2 maxit + 1 entries, 3 NaNs then zeros; lsqr flag 4 at iteration 0, x0 returned, resvec
-    [NaN].  name: gmres's name in its message (gmres(restart) when it restarts)"""
+    maxit 0: pcg, bicgstab and gmres do nothing: flag 1, x0 returned, iter 0, resvec [NaN] (gmres preconditioned
+    flag 2); minres takes maxit 0 as 1.  Preconditioned, from maxit 1 (minres from 0), pcg, minres, gmres and bicgstab
+    stop with flag 2 (the preconditioner's system), x0 returned, resvec [NaN], at iteration 1 (pcg, bicgstab), 0
+    (minres) or [0 0] (gmres).  Otherwise pcg and minres flag 1 (maxit reached), x all NaN, iter maxit, resvec
+    maxit + 1 NaNs; gmres flag 1, x all NaN, iter [0 0], resvec inner*outer + 1 NaNs, its last 0 where maxit reached
+    size(A,1) without restarts (capped), warning that the Hessenberg system is ill conditioned once per outer cycle
+    when it restarts, else once from maxit 2; bicgstab at maxit 1 flag 1 at iteration 1, resvec 3 NaNs, from maxit 2
+    flag 4 (a scalar quantity NaN) at iteration 2, resvec 2 maxit + 1 entries, 3 NaNs then zeros, x all NaN; lsqr
+    flag 4 at iteration 0, x0 returned, resvec [NaN].  name: gmres's name in its message (gmres(restart) when it
+    restarts)"""
     if not np.any(np.isnan(b)):
         return None
     nan = _math.nan
     xnan = np.full_like(x0, nan)
     nans = None
     ret = 0
+    pre = M is not None and bool(M.ops)
     if fname == "lsqr":
         flag, x, it, count = 4, x0, 0, 1
-    elif M is not None and M.ops:
+    elif maxit == 0 and fname != "minres" and not (pre and fname == "gmres"):
+        flag, x, it, count = 1, x0, 0, 1
+    elif pre:
         flag, x, it, count = 2, x0, {"pcg": 1, "bicgstab": 1, "minres": 0}.get(fname), 1
+    elif fname == "bicgstab" and maxit == 1:
+        flag, x, it, count = 1, xnan, 1, 3
+        ret = 1
     elif fname == "bicgstab":
-        flag, x, it, count, nans = 4, xnan, min(2, maxit), 2 * maxit + 1, 3
+        flag, x, it, count, nans = 4, xnan, 2, 2 * maxit + 1, 3
     elif fname == "gmres":
         flag, x, it, count = 1, xnan, None, inner * outer + 1
         nans = count - 1 if capped else None
-        for _ in range(outer):
+        restarts = name is not None and name != "gmres"
+        for _ in range(outer if restarts else (1 if inner >= 2 else 0)):
             _m.warning_("Matrix is singular, close to singular or badly scaled. Results may be inaccurate. "
                         "RCOND = NaN.", "MATLAB:illConditionedMatrix")
     else:
-        flag, x, it, count = 1, xnan, maxit, maxit + 1
-        ret = maxit
+        m = max(maxit, 1) if fname == "minres" else maxit
+        flag, x, it, count = 1, xnan, m, m + 1
+        ret = m
     # (each entry admitted before it is made, as every history)
     resvec = _History(budget)
     for i in range(count):
@@ -903,7 +914,7 @@ def gmres_(nargout, *args):
     name = "gmres(%d)" % restart if restarts else "gmres"
     inner, outer = _gmres_inner(n, restart, maxit)
     # (maxit 0 without restarts: no iteration at all)
-    nan = _nan_rhs("gmres", nargout, b, x0, tol, budget, inner=inner, outer=outer,
+    nan = _nan_rhs("gmres", nargout, b, x0, tol, budget, maxit, inner=inner, outer=outer,
                    capped=not restarts and maxit is not None and maxit >= n, M=M, name=name)
     if nan is not None:
         return nan

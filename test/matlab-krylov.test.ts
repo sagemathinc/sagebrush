@@ -323,3 +323,46 @@ test("b with a NaN: the warnings' identifiers, the preconditioned solvers' flag 
   assert.ok(r.stderr.includes("Warning: Maximum number of outer iterations is 7 but should be bounded by size(A,1). " +
     "Setting the maximum number of outer iterations to 6."), r.stderr);
 });
+
+test("b with a NaN at maxit 0, 1 and 2: every solver's outputs and warnings as MATLAB's (test/matlab-krylov-oracle.json nan_rhs_grid)", () => {
+  // (maxit 0 runs no iteration (minres takes it as 1); bicgstab's flag 4 starts at maxit 2; gmres without restarts
+  // warns from maxit 2, gmres(2) once per outer cycle; preconditioned, flag 2 from maxit 1)
+  const dir = mkdtempSync(join(tmpdir(), "sb-kgrid-"));
+  writeFileSync(join(dir, "main.m"), [
+    "T = spdiags([-ones(6,1) 2*ones(6,1) -ones(6,1)], -1:1, 6, 6);",
+    "M = spdiags(diag(T), 0, 6, 6); tol = 1e-8;",
+    "b1 = (1:6)'; b1(3) = NaN; bn = NaN(6, 1);",
+    "names = {'pcg', 'minres', 'bicgstab', 'gmres', 'gmres(r2)'}; bs = {b1, bn}; bnames = {'b3nan', 'allnan'};",
+    "for bi_ = 1:2",
+    "  for k = 1:5",
+    "    for mx = [0 1 2]",
+    "      for useM = 0:1",
+    "        for usex0 = 0:1",
+    "          bb = bs{bi_};",
+    "          if usex0, x0 = ones(6, 1); else, x0 = []; end",
+    "          if useM, MM = M; else, MM = []; end",
+    "          tag = sprintf('%s %s maxit=%d M=%d x0=%d', names{k}, bnames{bi_}, mx, useM, usex0);",
+    "          lastwarn('', '');",
+    "          switch k",
+    "            case 1, [x, fl, rr, it, rv] = pcg(T, bb, tol, mx, MM, [], x0);",
+    "            case 2, [x, fl, rr, it, rv] = minres(T, bb, tol, mx, MM, [], x0);",
+    "            case 3, [x, fl, rr, it, rv] = bicgstab(T, bb, tol, mx, MM, [], x0);",
+    "            case 4, [x, fl, rr, it, rv] = gmres(T, bb, [], tol, mx, MM, [], x0);",
+    "            case 5, [x, fl, rr, it, rv] = gmres(T, bb, 2, tol, mx, MM, [], x0);",
+    "          end",
+    "          [wm, wid] = lastwarn;",
+    "          fprintf('%s|x=%s|fl=%d|rr=%.6g|it=%s|nrv=%d|rv=%s|w=%s\\n', tag, sprintf('%.6g ', x), fl, rr, sprintf('%g ', it), numel(rv), strtrim(sprintf('%.6g ', rv)), wid);",
+    "        end",
+    "      end",
+    "    end",
+    "  end",
+    "end",
+  ].join("\n") + "\n");
+  const r = spawnSync(process.execPath, [cli, "--matlab", "main.m"], { cwd: dir, encoding: "utf8", timeout: 600000 });
+  assert.equal(r.status, 0, r.stderr);
+  const got = r.stdout.split("\n").filter((l: string) => l);
+  // (the oracle's rows end in MATLAB's trailing space after resvec; trimmed on both sides)
+  const want = oracle.nan_rhs_grid.map((l: string) => l.replace(/ \|w=/, "|w="));
+  assert.deepEqual(got, want);
+  assert.equal(r.stderr.split("RCOND = NaN.").length - 1, oracle.nan_rhs_grid_warnings, r.stderr);
+});
