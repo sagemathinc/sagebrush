@@ -21,7 +21,7 @@ const { Miniflare, convertV4MiniflareOptions } = require("miniflare");
 
 let failures = 0, count = 0;
 const ok = (c, what, detail) => { count++; if (!c) { failures++; console.log("FAIL", what, detail === undefined ? "" : JSON.stringify(detail).slice(0, 300)); } };
-const MIGRATIONS = ["0001_fleet_leases.sql", "0002_fleet_writers_chain_hosts.sql", "0003_fleet_writers_grants_transfers.sql"];
+const MIGRATIONS = ["0001_fleet_leases.sql", "0002_fleet_writers_chain_hosts.sql", "0003_fleet_writers_grants_transfers.sql", "0004_fleet_request_nonces.sql"];
 const statements = MIGRATIONS.flatMap((m) => readFileSync(join(here, "migrations", m), "utf8").replace(/--[^\n]*/g, "").split(";").map((s) => s.trim()).filter(Boolean));
 
 const ID = "abcdefghijklmnopqrstuvwxy2", B43 = "A".repeat(42) + "w", B22 = "A".repeat(21) + "w";
@@ -47,6 +47,7 @@ const TABLES = {
   fleet_fence_acks: { row: { fleet: ID, transfer: B43 }, text: { fleet: "id", transfer: "b43" } },
   fleet_host_queue: { row: { fleet: ID, host: ID, kind: "transfer", ref: B43, at_ms: 0 }, text: { fleet: "id", host: "id", kind: "enum", ref: "b43" } },
   fleet_grant_decisions: { row: { request: ID, decided: "ok" }, text: { request: "id", decided: "enum" } },
+  fleet_request_nonces: { row: { fleet: ID, host: ID, nonce: B22, created_ms: 0 }, text: { fleet: "id", host: "id", nonce: "b22" } },
 };
 const VALID = { id: ID, b43: B43, b22: B22 };
 
