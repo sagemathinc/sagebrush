@@ -2448,6 +2448,17 @@ try {
     check(landed && lts.every((d) => d <= 50), "no Long Task over 50 ms while re-patching (a timing box)", { lts, own, landed });
   } else console.log("timing, reported, not gated (a build box): long tasks over 50 ms:", JSON.stringify(lts.filter((d) => d > 50)), "own step/swap over 50 ms:", own.step > 50 || own.swap > 50);
 
+  // ---- a document past the preview's 16 MiB (a long paper's formulas, each KaTeX's HTML and MathML): its start shown,
+  //  then the note where the preview stops, last, from a line of its source; was one line in place of all of it
+  const longDoc = "\\documentclass{article}\n\\begin{document}\nFIRSTWORDS here.\n\n" + "Para $a_{1}+b^{2}=c_{3}$ and $\\sum_{k=1}^{n} k^{2}$.\n\n".repeat(8000) + "LASTWORDS\n\\end{document}\n";
+  const fLong = await mk("/t/long.tex", enc(longDoc));
+  await open(fLong);
+  const longOk = await until(`/The preview stops here/.test(document.querySelector(".tex-preview .bounderr")?.textContent ?? "")`, 180000);
+  const lg = await ev(`(() => { const P = document.querySelector(".tex-preview"), t = P.textContent, b = [...P.querySelectorAll(".bounderr")];
+    return { first: t.includes("FIRSTWORDS"), last: t.includes("LASTWORDS"), notes: b.length, noteLast: b.length === 1 && t.trimEnd().endsWith(b[0].textContent.trimEnd()),
+      line: +((/from line (\\d+) of/.exec(b[0]?.textContent ?? "") || [])[1] ?? 0), old: /too large for the prototype/.test(t), utf8: new TextEncoder().encode(P.innerHTML).length }; })()`);
+  check(longOk && lg.first && !lg.last && lg.notes === 1 && lg.noteLast && lg.line > 4 && !lg.old && lg.utf8 > 8 * 2 ** 20 && lg.utf8 <= 17 * 2 ** 20, "a document past 16 MiB: its start shown, then the note where the preview stops, from its source line", lg);
+
   // ---- a 1.5 MiB enumerate and a 1.5 MiB plain theorem: pieces whose styles and labels continue; a large table: a placeholder
   const thmDoc = "\\documentclass{article}\n\\newtheorem{theorem}{Theorem}\n\\begin{document}\n\\begin{theorem}\n" + "theorem words go on and on here. ".repeat(6000).split(". ").join(".\n\n") + "\n\\end{theorem}\n\n\\begin{enumerate}\n" + "\\item an item\n".repeat(6000) + "\\end{enumerate}\n\\end{document}\n";
   const ft = await mk("/t/thm.tex", enc(thmDoc));

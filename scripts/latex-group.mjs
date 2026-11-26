@@ -138,7 +138,11 @@ export const LATEX_LAZY = {
 // (294,217 raw / 99,416 gzip: Nov 25 2026, an element over PIECE_MAX split in turn (a theorem's long list, split.ts):
 //  294,153 / 99,352 measured on the shipped build of its merge with master b0b02122, with bun 1.4.4 and node 24.21.0
 //  (+73 / +46 over master's 294,080 / 99,306), + 64)
-export const LATEX_CAPS = { raw: 294217, gzip: 99416 };
+// (295,044 raw / 99,759 gzip: Nov 26 2026, a render over the preview's 16 MiB shown up to there, whole chunks, and a
+//  note where it stops, from its source line (split.ts's boundRender, the worker's caller): 294,980 / 99,695 measured
+//  on the shipped build of master 20030715 with it, with bun 1.4.4 and node 24.21.0 (+827 / +343 over master's
+//  294,153 / 99,352), + 64)
+export const LATEX_CAPS = { raw: 295044, gzip: 99759 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -248,7 +252,9 @@ export const LATEX_LAZY_CAPS = {
   //  +777 / +286 inherited from a shared check's and the tools' changes, none of it that change's own code; + 64)
   // (17,758 / 7,432: Nov 25 2026, latex_check naming a problem's \input file (check.ts's inputFileName): 17,694 / 7,368
   //  measured on master 6e3a0f71 with it, + 64)
-  TOOLS: { label: "the LaTeX agent tools' chunk", raw: 17758, gzip: 7432 },
+  // (17,874 / 7,471: Nov 26 2026, latex_check's message for a document past the preview's 16 MiB (check.ts's
+  //  "toolong"): 17,810 / 7,407 measured on master 20030715 with it, + 64)
+  TOOLS: { label: "the LaTeX agent tools' chunk", raw: 17874, gzip: 7471 },
   // (the presenter: web/latex/present.ts with overlay.ts, fetched only when Present is pressed)
   PRESENT: { label: "the LaTeX presenter's chunk", raw: 16 * 1024, gzip: 6 * 1024 },
   // (a published document opened read only, doc.ts: fetched only for a /?tex-doc= link, the articles';
