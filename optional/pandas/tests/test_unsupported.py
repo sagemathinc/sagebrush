@@ -66,7 +66,7 @@ case("value.sum-beyond-2-53", lambda: pd.Series([2 ** 52, 2 ** 52, 1]).sum())
 case("frame.ragged-rows", lambda: pd.DataFrame([[1, 2], [3]]))
 
 # names outside the subset
-for name in ["NA", "merge", "crosstab", "Timedelta", "MultiIndex", "read_parquet", "get_dummies"]:
+for name in ["NA", "merge", "crosstab", "Timedelta", "MultiIndex", "read_parquet"]:
     case("name.pd." + name, lambda name=name: getattr(pd, name))
 for name in ["pivot", "merge", "cov", "rank", "query", "pivot_table", "nlargest", "plot", "nsmallest", "value_counts", "to_csv", "where"]:
     case("name.DataFrame." + name, lambda name=name: getattr(df, name))
@@ -193,6 +193,12 @@ case("category.key", lambda: pd.Series([1, 2], index=["u", "v"])[pd.Categorical(
 case("category.set-values", lambda: (lambda x: x.__setitem__(slice(None), pd.Categorical([7, 8])))(pd.Series([1, 2])))
 case("category.index", lambda: pd.Series([1, 2], index=pd.Categorical(["u", "v"])))
 case("category.compare-categorical", lambda: pd.Series(["u", "x"]) == pd.Categorical(["u", "v"]))
+case("get_dummies.sparse", lambda: pd.get_dummies(pd.Series(["a"]), sparse=True))
+case("get_dummies.series-list-prefix", lambda: pd.get_dummies(pd.Series(["a"]), prefix=["p"]))
+case("get_dummies.series-dict-prefix", lambda: pd.get_dummies(pd.Series(["a"]), prefix={"a": "p"}))
+case("get_dummies.series-list-prefix-sep", lambda: pd.get_dummies(pd.Series(["a"]), prefix="p", prefix_sep=["-"]))
+case("get_dummies.dtype", lambda: pd.get_dummies(pd.Series(["a"]), dtype="int8"))
+case("get_dummies.series-int8-labels", lambda: pd.get_dummies(pd.Series([1, 2]).astype("int8")))
 case("compare.series-repeated-labels", lambda: df.eq(pd.Series([1, 2], index=["a", "a"])))
 case("compare.level", lambda: df.eq(1, level=0))
 case("compare.series-level", lambda: s.eq(1, level=0))
