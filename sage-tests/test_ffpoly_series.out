@@ -25,3 +25,10 @@ f.multiplication_trunc(x^5, 6) -> x^5
 f.multiplication_trunc(R(0), 3) -> 0
 (a*y + 1).multiplication_trunc(y + a, 2) -> (a + 2)*y + a
 (x + 1).inverse_mod(x^2 + 1) -> 50*x + 51
+f.multiplication_trunc(f, -1) -> ValueError: length must be > 0
+(z + 1).multiplication_trunc(z + 1, 0) -> 0
+(z + 1).multiplication_trunc(z + 1, -1) -> z^2 + 1
+(y + a).multiplication_trunc(y, 0) -> 0
+(y + a).multiplication_trunc(y + 1, -2) -> y^2 + (a + 1)*y + a
+f.power_trunc(2, -1) -> 0
+(z + 1).power_trunc(2, 0) -> 0

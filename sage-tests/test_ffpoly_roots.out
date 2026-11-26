@@ -39,3 +39,19 @@ R(5).is_primitive() -> False
 (y + a).is_primitive() -> True
 (y^2 + y + a).is_primitive() -> True
 T(z^8 + z^4 + z^3 + z^2 + 1).is_primitive() -> True
+T(z^20 + z^3 + 1).is_primitive() -> True
+T(z^16 + z^5 + z^3 + z^2 + 1).is_primitive() -> True
+T(z^31 + z^3 + 1).is_primitive() -> True
+T(z^33 + z^13 + 1).is_primitive() -> True
+T(z^36 + z^11 + 1).is_primitive() -> True
+GF(5)["s"]([2, 1, 0, 0, 0, 0, 0, 0, 0, 1]).is_primitive() -> False
+[g.is_primitive() for g in S.monics(of_degree=2) if g.is_irreducible()][:12] -> [False, False, False, False, True, False, True, False, False, True, False, True]
+(2*x^2).nth_root(2) -> ValueError: no nth root
+(x^2 + 1).nth_root(2) -> ValueError: not a 2nd power
+((x + 1)^2).nth_root(4) -> ValueError: not a 4th power
+(x*(x + 1)^2).nth_root(2) -> ValueError: not a 2nd power
+(2*(x^2 + 1)).nth_root(2) -> ValueError: no nth root
+(x^3 + x).nth_root(5) -> ValueError: not a 5th power
+R(3).nth_root(2) -> ValueError: no nth root
+(x^2 + 2*x).nth_root(2) -> ValueError: not a 2nd power
+((y + 1)^2 + a).nth_root(2) -> ValueError: not a 2nd power

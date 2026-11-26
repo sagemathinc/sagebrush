@@ -4832,6 +4832,14 @@ class Polynomial_ff:
             (x + 3, 26*x + 26)
             sage: T.<z> = GF(2)[]; (z^4 + 1).nth_root(2)
             z^2 + 1
+            sage: (x^2 + 1).nth_root(2)
+            Traceback (most recent call last):
+            ...
+            ValueError: not a 2nd power
+            sage: U.<u> = GF(3)[]; ((u + 1)^2).nth_root(2)  # sagebrush only (Sage: u + 1)
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: nth_root of degree 2 of a polynomial over a field with several such roots is not supported yet
         """
         self._need_field("nth_root")
         n = int(n)
@@ -4840,12 +4848,21 @@ class Polynomial_ff:
         if n == 1 or not self._c:
             return self
         q = int(self._ring._base.order())
-        if _m.gcd(n, q - 1) != 1:
-            raise NotImplementedError("nth_root of degree %d of a polynomial over a field with several such roots is not supported yet" % n)
+        g = _m.gcd(n, q - 1)
+        # (Sage's checks, in its order: the power of x, the constant term
+        # left after it, then the rest)
+        v = self.valuation()
+        if v % n:
+            raise ValueError("not a %s power" % _ordinal(n))
+        c0 = self._c[v]
+        if g != 1 and c0 ** ((q - 1) // g) != 1:
+            raise ValueError("no nth root")
         F = self.factor()
         u = F.unit()
-        if any(e % n for _, e in F):
+        if any(e % n for _, e in F) or (g != 1 and u ** ((q - 1) // g) != 1):
             raise ValueError("not a %s power" % _ordinal(n))
+        if g != 1:
+            raise NotImplementedError("nth_root of degree %d of a polynomial over a field with several such roots is not supported yet" % n)
         r = self._ring(u.nth_root(n))
         for g, e in F:
             r = r * g ** (e // n)
@@ -4873,7 +4890,8 @@ class Polynomial_ff:
             # (Sage asks for the order of x mod x, which is 0)
             raise ValueError("The order of P(=0) does not divide %d" % N)
         for r, _ in _factor_int(N):
-            if (x ** (N // r)) % self == self._ring(1):
+            # (x^(N/r) mod self by repeated squaring, reducing as it goes)
+            if pow(x, N // r, self) == self._ring(1):
                 return False
         return True
 
@@ -4982,8 +5000,14 @@ class Polynomial_ff:
             3*x^3 + x^2 + 3*x + 1
         """
         n = int(n)
+        B = self._ring._base
         if n <= 0:
-            raise ValueError("length must be > 0")
+            # (Sage's classes differ here: over GF(p), p odd, and Z/n a
+            # ValueError; over GF(2) and GF(p^k), k > 1, 0 for n = 0 and the
+            # whole product for n < 0)
+            if isinstance(B, IntegerModRing_) and B._n != 2:
+                raise ValueError("length must be > 0")
+            return self * self._coerce(other) if n < 0 else Polynomial_ff(self._ring, [])
         return (self.truncate(n) * self._coerce(other).truncate(n)).truncate(n)
 
     def is_irreducible(self):
