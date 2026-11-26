@@ -1736,9 +1736,12 @@ class DryRun(unittest.TestCase):
             [line.split()[:4] for line in lines],
             [["mat_fp_det", "s", "60", "ws=28800"], ["mat_fp_det", "c0", "122", "ws=119072"], ["groebner_cyclic", "s", "5", "ws=None"]],
         )
-        # (no reference runs at a calibration size: it is listed skipped)
-        self.assertIn("magma:skipped", lines[1].split()[4:])
-        self.assertNotIn("magma", [w for w in lines[1].split()[4:] if not w.endswith(":skipped")])
+        # (no reference runs at a calibration size: it is listed skipped where
+        # this host has it; a host without Magma, like CI's, doesn't list it)
+        cols = lines[1].split()[4:]
+        if run.MAGMA.exists():
+            self.assertIn("magma:skipped", cols)
+        self.assertNotIn("magma", [w for w in cols if not w.endswith(":skipped")])
 
 
 class RotationOrder(unittest.TestCase):

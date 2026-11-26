@@ -65,7 +65,7 @@ const CASES = [
   { id: "P1", mode: "python", calibration: "nonterminating", setup: "k = 0", target: "while True:\n    k += 1", probe: "assert sum(range(10)) == 45" },
   { id: "P2a", mode: "python", s0: 3_000_000, smin: 100_000, smax: 25_000_000, leak_s: 3_000_000, leak_measure: "heap+external", grow: (s, r) => Math.round(s * r), setup: "", target: "_r = sorted(range(S), key=lambda v: -v)", probe: "assert sorted([3, 1, 2]) == [1, 2, 3]" },
   { id: "E2", mode: "sage", s0: 22, smin: 12, smax: 44, grow: (s, r) => s + Math.max(1, Math.round(Math.log(r) / 0.18)) * Math.sign(Math.log(r)), setup: "n = next_prime(10**S) * next_prime(3 * 10**S)", target: "_r = factor(n)", probe: "assert len(factor(2**64 + 1)) == 2" },
-  { id: "E3a", mode: "sage", s0: 600, smin: 200, smax: 1024, grow: (s, r) => Math.round(s * Math.cbrt(r)), setup: "M = random_matrix(GF(32003), S)", target: "_r = [M.rank() for _ in range(5)]", probe: "assert matrix(GF(32003), [[1, 2], [2, 4]]).rank() == 1" },
+  { id: "E3a", mode: "sage", s0: 600, smin: 200, smax: 2048, leak_from: 4, grow: (s, r) => Math.round(s * Math.cbrt(r)), setup: "M = random_matrix(GF(32003), S)", target: "_r = [M.rank() for _ in range(5)]", probe: "assert matrix(GF(32003), [[1, 2], [2, 4]]).rank() == 1" },
   { id: "E6a", mode: "sage", s0: 6, smin: 4, smax: 9, grow: (s, r) => s + (r > 1 ? 1 : -1), setup: "R = PolynomialRing(GF(32003), 'x', S)\nX = R.gens()\nI = R.ideal([sum(prod(X[(j + t) % S] for t in range(d)) for j in range(S)) for d in range(1, S)] + [prod(X) - 1])", target: "_r = I.groebner_basis()", probe: "assert (X[0] + X[1])**2 - X[0]**2 - X[1]**2 == 2 * X[0] * X[1]\nassert len(I.gens()) == len(X) and I.gens()[0] in R\nR2 = PolynomialRing(GF(32003), 'y', 2)\nassert len(R2.ideal([R2.gen(0)**2 - 1, R2.gen(1) - 1]).groebner_basis()) == 2", retained: true },
   // newforms' trace forms to a large bound (what hecke_matrix(p) on a weight-4 space asks for): the
   // divisor counts and the per-prime Heilbronn images, each polled for Stop
@@ -401,8 +401,10 @@ async function runHost(host) {
       const r = await run("phases", offsets);
       for (const t of r.trials) cells.push({ cell: "phase", delay_ms: offsets[t.i - 1], ...cls(t, offsets[t.i - 1]) });
     }
-    // the leak series, whose repeats are cells too: 20 in --full, 5 (the short check) otherwise
-    const reps = MODE === "full" ? 20 : 5;
+    // the leak series, whose repeats are cells too: 20 in --full, 5 (the short check) otherwise, plus one
+    // per repeat a case's window starts after 3 (leak_from), so its short check still spans two repeats
+    const leakFrom = c.leak_from ?? 3;
+    const reps = MODE === "full" ? 20 : 5 + (leakFrom - 3);
     const d = at("0.5");
     // (a case with leak_s, P2a: the leak series at that smaller fixed size, where one retained list
     // still dwarfs the runner's RSS noise; its delay from the calibration's own attempt at leak_s)
@@ -420,7 +422,7 @@ async function runHost(host) {
     }
     // a process that outlived its session's kill is a leaked worker: the row fails (r4 §1)
     const left = [...cal.attempts, ...sessions].flatMap((x) => x.left ?? []);
-    const leak0 = leakCheck(lr.samples, 20, c.leak_measure ?? "rss");
+    const leak0 = leakCheck(lr.samples, 20, c.leak_measure ?? "rss", leakFrom);
     const leak1 = left.length ? { ...(leak0 ?? {}), ok: false, survived_kill: left } : leak0;
     // (a final-drop candidate of the leak series, marked or not, is recorded with a measured leak, and on the row
     // itself (below) either way, so the report prints its end cause and its margin, grader's C1; an unmeasured leak

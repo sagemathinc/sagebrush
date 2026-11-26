@@ -689,3 +689,19 @@ test("S1: an unknown XK kind is malformed evidence (INVALID), never a pinnable F
   assert.deepEqual([r.outcome, r.malformed], ["INVALID", true]);
   assert.deepEqual(ci([xkw(300)], { xk: `{ kind: "sideways" }`, kase: "P1" }), ["INCOMPLETE", "INCOMPLETE", null, true]);
 });
+
+test("leak check from a case's leak_from: a one-time heap step before it passes, growth across its window still fails", () => {
+  const ser = (rss: number[]) => JSON.stringify(rss.map((r, k) => ({ i: k + 1, rss_kb: r, threads: 9 })));
+  // (E3a on cli at s = 1024, CI: one 80 MB step between repeats 3 and 4, then flat; from 3 that
+  // fails the 64 MiB allowance, from 4, with the sixth repeat the window adds, it passes)
+  const e3a = [517740, 568176, 583960, 664344, 664740, 665100];
+  assert.equal(run(`leakCheck(${ser(e3a)})`).ok, false);
+  const from4 = run(`leakCheck(${ser(e3a)}, 20, "rss", 4)`);
+  assert.equal(from4.ok, true);
+  assert.equal(from4.from, 4);
+  assert.equal(from4.to, 6);
+  // (a leak that keeps growing, 40 MB a repeat, fails from 4 too: 80 MB over repeats 4..6)
+  assert.equal(run(`leakCheck(${ser([500e3, 540e3, 580e3, 620e3, 660e3, 700e3])}, 20, "rss", 4)`).ok, false);
+  // (a window with fewer than two repeats is unmeasured)
+  assert.equal(run(`leakCheck(${ser([500e3, 500e3, 500e3, 500e3])}, 20, "rss", 4)`), null);
+});
