@@ -5,7 +5,7 @@
 //   bun web/latex/test-latex-units.mjs   (in CI since #622: the engine's render checks, short verbatim among them)
 import { openBytes, encodeText, EDIT_MAX } from "./save.ts";
 import { imageCandidates, graphicsPathOf, notFoundWhy, relativePath, sniffImage, admitImageBytes, IMAGE_BOUNDS } from "./images.ts";
-import { splitChunk, PIECE_MAX, CHUNK_MAX, SPLIT_DEPTH, bytes, weight, tooLargeProblem } from "./split.ts";
+import { splitChunk, PIECE_MAX, CHUNK_MAX, SPLIT_DEPTH, bytes, weight, tooLargeProblem, boundRender, RENDER_BOUNDS } from "./split.ts";
 import { watchdog, WATCHDOG_MS, LATE_MS } from "./watchdog.ts";
 import { autoClose } from "./envclose.ts";
 import { tokenizeLine } from "./highlight.ts";
@@ -186,6 +186,47 @@ check("split-small-unchanged", splitChunk('<div class="p">hi</div>')[0] === '<di
   for (const h of [table, huge, '<div class="p">' + "y ".repeat(CHUNK_MAX) + "</div>"]) splitChunk(h, (why, size) => said.push(tooLargeProblem(why, size, 0).name));
   const over = said.map((s) => /\((\d+) KiB, over (\d+) KiB\)$/.exec(s)).map((m) => m && +m[1] > +m[2]);
   check("split-placeholder-size-over-its-limit", said.length === 3 && over.every(Boolean), said);
+}
+
+// ---- a render over RENDER_BOUNDS (16 MiB of HTML, 20,000 chunks): the document up to there, whole chunks, then one
+// note where it stops, from its source line on; never part of a chunk, never past either bound with the note; was
+// the whole document replaced by one line, nothing of it shown. latex check is told only of placeholders shown.
+{
+  const MiB = 2 ** 20, sum = (r) => r.items.reduce((a, it) => a + it.b, 0);
+  const lines = (n) => Array.from({ length: n }, (_, k) => "line " + k).join("\n"), offs = (n) => { const o = []; let at = 0; for (let k = 0; k < n; k++) { o.push(at); at += ("line " + k).length + 1; } return o; };
+  // (under both: as before, every chunk, its own positions, nothing cut)
+  const small = boundRender(['<div class="p">a</div>', '<div class="p">b</div>'], [0, 10], "x\ny");
+  check("bound-render-under", small.cut === null && small.groups === 2 && small.items.length === 2 && JSON.stringify(small.pos) === "[0,10]", small);
+  // (16 MiB exactly in chunks of 16 KiB: all of it, no room kept back; one chunk more: the note in place of the last
+  //  one, which its room needs, within 16 MiB with it, at that chunk's line)
+  const k16 = '<div class="p">' + "y".repeat(16384 - 21) + "</div>";
+  const n = RENDER_BOUNDS.html / 16384, exact = boundRender(Array(n).fill(k16), offs(n), lines(n));
+  check("bound-render-exactly-16-mib", bytes(k16) === 16384 && exact.cut === null && exact.groups === n && sum(exact) === RENDER_BOUNDS.html, { b: bytes(k16), cut: exact.cut, sum: sum(exact) });
+  // (the chunk left first is a table too large: its placeholder isn't shown, so latex check isn't told of it)
+  const table = '<table class="tabular">' + "<tr><td>t</td></tr>".repeat(9000) + "</table>", told = [];
+  const over = boundRender(Array(n).fill(k16).concat([table]), offs(n + 1), lines(n + 1), (g, why) => told.push(g));
+  const last = over.items[over.items.length - 1];
+  check("bound-render-note-takes-room", over.cut !== null && over.groups === n && sum(over) <= RENDER_BOUNDS.html && last.g === n - 1 && /^<div class="bounderr">The preview stops here: it shows at most 16 MiB of a document, and the rest, from line \d+ of the source on, is past that\./.test(last.h)
+    && last.h.includes("from line " + n + " of") && over.cut.line === n && over.pos.length === n && over.pos[n - 1] === offs(n)[n - 1] && told.length === 0,
+    { cut: over.cut, groups: over.groups, sum: sum(over), told, note: last.h.slice(0, 160) });
+  // (20,000 chunks: all of them; 20,001: 19,999 and the note, the chunks' bound kept)
+  const tiny = '<div class="p">t</div>';
+  const at20k = boundRender(Array(RENDER_BOUNDS.chunks).fill(tiny), undefined, ""), past = boundRender(Array(RENDER_BOUNDS.chunks + 1).fill(tiny), undefined, "");
+  check("bound-render-chunks", at20k.cut === null && at20k.groups === RENDER_BOUNDS.chunks && past.cut !== null && past.groups === RENDER_BOUNDS.chunks && past.items.length === RENDER_BOUNDS.chunks
+    && /bounderr/.test(past.items[past.items.length - 1].h) && !/from line/.test(past.items[past.items.length - 1].h) && past.pos.every((p) => p === -1), { a: at20k.groups, b: past.groups, n: past.items.length });
+  // (a long article's 18 MiB in paragraphs of 60 KB, each split into pieces: whole chunks only, every one kept with all
+  //  its pieces, the most that fit with the note; a placeholder in a shown chunk still told, at its chunk)
+  const para = '<div class="p">' + "x ".repeat(30000) + "</div>", m = 300, told2 = [];
+  const chunks = [table].concat(Array(m - 1).fill(para)), big = boundRender(chunks, offs(m), lines(m), (g, why, size) => told2.push([g, size]));
+  const K = big.groups - 1, gs = [...new Set(big.items.map((it) => it.g))];
+  const per = (h) => splitChunk(h).reduce((a, p) => a + bytes(p), 0);
+  check("bound-render-whole-chunks", big.cut !== null && K > 0 && sum(big) <= RENDER_BOUNDS.html && gs.length === K + 1 && gs.every((g, k) => g === k)
+    && big.items.filter((it) => it.g === 1).length === splitChunk(para).length && sum(big) - bytes(big.items[big.items.length - 1].h) + per(para) + 1024 > RENDER_BOUNDS.html
+    && told2.length === 1 && told2[0][0] === 0 && big.cut.line === K + 1, { K, sum: sum(big), told2, line: big.cut?.line });
+  // (and latex check says it, at the line the preview stops)
+  const { checkResult } = await import("./check.ts");
+  const ck = checkResult("a.tex", lines(m), { outcome: "ok", beamer: false, problems: [{ kind: "toolong", name: "the rest of the document", at: offs(m)[K] }], frames: [], sage: [] }, []);
+  check("bound-render-check", ck.problems.length === 1 && ck.problems[0].kind === "toolong" && ck.problems[0].line === K + 1 && /16 MiB/.test(ck.problems[0].message ?? ""), ck.problems);
 }
 
 // ---- watchdog.ts (issue 619): the preview's watchdog judges the worker by the page's time; a timer the page's own
@@ -983,7 +1024,7 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
     article: ["Sums of Squares", "Contents", "Theorem", "Proof"], beamer: ["A Short Talk", "Overlays", "Two columns", "A math slide"],
     sagetex: ["In this preview", "sagebrush latex run"], pythontex: ["In this preview", "Python item 2: not run"],
     matlab: ["MATLAB in LaTeX", "eig(A)"], figure: ["Figure 1", "The function"], cv: ["Ada Example", "Education", "Publications"],
-    tikz: ["[tikzpicture: the axis environment", "[tikzpicture: a node on a path"], bibliography: ["[1]", "Diamond"], homework: ["Homework 3", "(10 points)"],
+    tikz: ["[tikzpicture: the axis environment", "TikZ pictures are drawn"], bibliography: ["[1]", "Diamond"], homework: ["Homework 3", "(10 points)"],
   };
   const record = [];
   for (const ex of EXAMPLES) {

@@ -10,7 +10,7 @@ import * as Obj from "./object";
 import { newBuiltinModule } from "./modules";
 import { NDArray, empty, toDtype, ascontig, copy as npcopy, admitWork } from "./numpy";
 import { glibcLog, glibcExp } from "./libm";
-import { gemmBuffers, noRoom, wasmFusedFMA, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmQRQtb, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
+import { gemmBuffers, wasmFusedFMA, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmQRQtb, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
 import * as FD from "./fdlibm";
 import { useNd, ndCholesky, ndLu, ndPath, ndProducts, ndRequestWarm, ndScratch, ndThreads, ndWarmState } from "./nd";
 import { pollInterrupt } from "./ops";
@@ -57,18 +57,10 @@ function view(a: NDArray): Float64Array {
   return c.data.subarray(0, a.shape[0] * a.shape[1]);
 }
 
-// engine/nd's LU of the n x n A and X = A^-1 B (src/runtime/nd.ts ndLu); null where A or B has an Inf or NaN, or
-// where the module's memory can't hold them (the caller's own LU then computes it)
+// engine/nd's LU of the n x n A and X = A^-1 B (src/runtime/nd.ts ndLu); null where A or B has an Inf or NaN (the
+// caller's own LU then computes it). Past the module's memory's maximum, or a grow refused: a MemoryError
 function luNd(A: Float64Array, n: number, B: Float64Array | null, r: number, _what: string) {
-  let f;
-  try {
-    f = ndLu(A, n, B, r);
-  } catch (e) {
-    // (no room in the module's memory: null, and the caller's own LU computes it, never refused for the module's sake)
-    if (noRoom(e)) return null;
-    throw e;
-  }
-  return f;
+  return ndLu(A, n, B, r);
 }
 
 // det's and slogdet's factors of the n x n a: P's sign and U's diagonal, every s-th element of d
@@ -1415,14 +1407,8 @@ newBuiltinModule("_nplinalg", (m) => {
       if (a.ndim !== 2) raise(T.ValueError ?? T.TypeError, `${a.ndim}-dimensional array given. Array must be two-dimensional`);
       const n = a.shape[0];
       const c = ascontig(a.dt.name === "float64" ? a : npcopy(a, F64()));
-      let F: Float64Array | number | null;
-      try {
-        F = ndCholesky(c.data.subarray(0, n * n), n);
-      } catch (e) {
-        // (no room in the module's memory: the loop below computes it, never refused for the module's sake)
-        if (!noRoom(e)) throw e;
-        F = null;
-      }
+      // (past the module's memory's maximum, or a grow refused: a MemoryError, never the loop below)
+      const F: Float64Array | number | null = ndCholesky(c.data.subarray(0, n * n), n);
       if (F !== null) {
         if (typeof F !== "number") return out(F, [n, n]);
         // (engine/nd refuses a NaN pivot; NumPy's rule passes it: the loop below then gives OpenBLAS's NaN pattern, the

@@ -100,6 +100,8 @@ ws.onmessage = (ev) => {
   if (m.method === "Target.attachedToTarget" && m.params.targetInfo.type === "iframe") {
     sessions.push(m.params.sessionId);
     send("Runtime.enable", {}, m.params.sessionId).catch(() => {});
+    // (the frame's page focused, as the top page is: below)
+    send("Emulation.setFocusEmulationEnabled", { enabled: true }, m.params.sessionId).catch(() => {});
     send("Runtime.runIfWaitingForDebugger", {}, m.params.sessionId).catch(() => {});
   }
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
@@ -133,6 +135,10 @@ const $ = (part) => `document.querySelector('[data-sbb="${part}"]')`;
 try {
   await send("Runtime.enable");
   await send("Page.enable");
+  // (the page behaves as focused whether or not headless Chrome gives its window the focus: without this, a run where
+  // it doesn't (document.hasFocus() false) can't focus the reader's own words, and the focus checks fail on the
+  // machine, not the board)
+  await send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
 
   // without a nonce: the board shows, with no Submit (a port posted anyway is not taken)

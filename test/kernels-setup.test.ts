@@ -12,7 +12,7 @@ import { join } from "node:path";
 // A preload makes one module (the main one, which exports dgemm, or the relaxed one, which doesn't) fail as
 // V8 fails when memory runs out, or fail validation, or answer its probe as a twice-rounding multiply-add would; it
 // counts the instantiations, on stderr.
-type How = "oom-once" | "other-once" | "invalid" | "probe0";
+type How = "oom-once" | "other-once" | "string-once" | "compile-oom-once" | "compile-other" | "invalid" | "probe0";
 function preload(dir: string, which: "main" | "relaxed", how: How): string {
   const pre = join(dir, "pre.js");
   writeFileSync(pre, `const W = WebAssembly, RealModule = W.Module, RealInstance = W.Instance, realValidate = W.validate;
@@ -32,6 +32,11 @@ W.Instance = function (mod, imports) {
     if (how === "oom-once" && failed === 0) { failed++; throw new RangeError("WebAssembly.Instance(): Out of memory: Cannot allocate Wasm memory for new instance"); }
     // (a resource failure in other words, as another engine or V8's code space might say it)
     if (how === "other-once" && failed === 0) { failed++; throw new RangeError("Wasm code space exhausted"); }
+    // (not a RangeError: SpiderMonkey's thrown string, a CompileError when executable memory runs out)
+    if (how === "string-once" && failed === 0) { failed++; throw "out of memory"; }
+    if (how === "compile-oom-once" && failed === 0) { failed++; throw new W.CompileError("Out of executable memory in function at index 7"); }
+    // (any other failure of a module that validated: taken as the feature's absence, for the session)
+    if (how === "compile-other") { failed++; throw new W.CompileError("WebAssembly.Instance(): unsupported here"); }
     made++;
     const inst = new RealInstance(mod, imports);
     if (how === "probe0") return { exports: Object.assign({}, inst.exports, { fma_probe: () => 0 }) };
@@ -77,7 +82,7 @@ const EXP = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", 
   { encoding: "utf8", env: { ...process.env, SAGEBRUSH_NO_WASM: "1" } }).trim();
 
 test("the main kernels' setup out of memory: a MemoryError, nothing kept, and the next call uses the kernels", () => {
-  for (const how of ["oom-once", "other-once"] as const) {
+  for (const how of ["oom-once", "other-once", "string-once", "compile-oom-once"] as const) {
     const { out, err } = run("main", how);
     assert.deepEqual(out, [
       "sort EXC MemoryError a WebAssembly module: more than the computer could give",
@@ -108,6 +113,12 @@ test("an engine without the main kernels' SIMD: the JavaScript code, for the ses
   const { out, err } = run("main", "invalid");
   assert.deepEqual(out, [`sort ${SORTED}`, `exp ${EXP}`, `sort again ${SORTED}`, `exp again ${EXP}`, "wasm False", "wasm_fma False"]);
   assert.match(err, /instances 0 failed 0/);
+});
+
+test("a valid main module that fails otherwise (no memory words): the JavaScript code, tried once, for the session", () => {
+  const { out, err } = run("main", "compile-other");
+  assert.deepEqual(out, [`sort ${SORTED}`, `exp ${EXP}`, `sort again ${SORTED}`, `exp again ${EXP}`, "wasm False", "wasm_fma False"]);
+  assert.match(err, /instances 0 failed 1/);
 });
 
 test("an engine without relaxed SIMD, or whose multiply-add rounds twice: the main kernels, for the session", () => {

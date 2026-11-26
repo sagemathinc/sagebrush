@@ -147,3 +147,42 @@ export function splitChunk(h: string, tooLarge?: (why: string, size: number) => 
   void para;
   return pieces.every((p) => weight(p) <= PIECE_MAX) ? pieces : ph("this block is too large to display in the prototype");
 }
+
+/** A render's whole size: its chunks' pieces in all, at most `html` bytes and `chunks` chunks (the page's memory). */
+export const RENDER_BOUNDS = { chunks: 20000, html: 16 * 2 ** 20 };
+
+/** A render's chunks as the page's items, within RENDER_BOUNDS: whole chunks in order while they fit, and if any are
+ * left, one more chunk in their place saying where the preview stops (its source line) and why, the chunks before it
+ * fewer if the note needs their room; never part of a chunk. `tooLarge` is told of the shown chunks' placeholders
+ * only; `cut` is where the rest begins. */
+export function boundRender(chunks: string[], chunkPos: number[] | undefined, text: string,
+  tooLarge?: (g: number, why: string, size: number) => void): { items: { g: number; h: string; b: number }[]; groups: number; pos: number[]; cut: { at: number; line: number | null } | null } {
+  const kept: { ps: string[]; bs: number[]; told: [string, number][]; n: number }[] = [];
+  let total = 0, g = 0;
+  for (; g < chunks.length && g < RENDER_BOUNDS.chunks; g++) {
+    const told: [string, number][] = [];
+    const ps = splitChunk(chunks[g], (why, size) => told.push([why, size])), bs = ps.map(bytes), n = bs.reduce((a, b) => a + b, 0);
+    if (total + n > RENDER_BOUNDS.html) break;
+    total += n;
+    kept.push({ ps, bs, told, n });
+  }
+  let note: string | null = null, at = -1, line: number | null = null;
+  if (g < chunks.length) {
+    // (the note in the place of the chunks left: a chunk of its own, within both bounds with the ones before it)
+    const say = (k: number) => {
+      at = typeof chunkPos?.[k] === "number" ? chunkPos[k] : -1;
+      line = null;
+      if (at >= 0) { line = 1; for (let i = text.indexOf("\n"); i !== -1 && i < at; i = text.indexOf("\n", i + 1)) line++; }
+      return '<div class="bounderr">The preview stops here: it shows at most ' + RENDER_BOUNDS.html / 2 ** 20 + " MiB of a document, and the rest" +
+        (line ? ", from line " + line + " of the source on," : "") + " is past that. <code>sagebrush latex render</code> shows all of it.</div>";
+    };
+    note = say(kept.length);
+    while (kept.length && (kept.length + 1 > RENDER_BOUNDS.chunks || total + bytes(note) > RENDER_BOUNDS.html)) { total -= kept.pop()!.n; note = say(kept.length); }
+  }
+  const items: { g: number; h: string; b: number }[] = [];
+  kept.forEach((c, k) => { c.ps.forEach((h, j) => items.push({ g: k, h, b: c.bs[j] })); for (const [why, size] of c.told) tooLarge?.(k, why, size); });
+  if (note === null) return { items, groups: chunks.length, pos: chunkPos || [], cut: null };
+  items.push({ g: kept.length, h: note, b: bytes(note) });
+  const pos = Array.from({ length: kept.length }, (_, k) => (typeof chunkPos?.[k] === "number" ? chunkPos[k] : -1));
+  return { items, groups: kept.length + 1, pos: pos.concat([at]), cut: { at, line } };
+}

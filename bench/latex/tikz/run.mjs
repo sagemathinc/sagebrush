@@ -9,17 +9,23 @@
 // how dark they make it, isn't the drawing's error: pdftoppm draws a 0.4 pt line solid, Chrome spreads it); a picture
 // passes if its box does and its widened IoU is at least its `iou` in pictures.json (IOU_MIN without one).
 // Writes results.json and table.md.
-//   node bench/latex/tikz/run.mjs [--only T01,T02] [--out DIR] [--keep]   (CHROME, default chromium; pdflatex, pdftoppm)
+//   node bench/latex/tikz/run.mjs [--only T01,N01] [--pictures FILE] [--out DIR] [--keep]   (CHROME, default chromium; pdflatex, pdftoppm)
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inflateSync } from "node:zlib";
+import { fileURLToPath } from "node:url";
+import katex from "katex";
 import { renderTikz } from "../../../web/latex/engine/tikz.mjs";
+import { setKatex, tikzLabel } from "../../../web/latex/engine/render.mjs";
+setKatex(katex.renderToString, katex.__renderToHTMLTree);
+// (KaTeX's stylesheet and fonts, for the nodes' text in the preview's page)
+const KATEX_CSS = "file://" + fileURLToPath(import.meta.resolve("katex/dist/katex.min.css"));
 
 const here = new URL(".", import.meta.url).pathname;
 const arg = (name, dflt) => { const i = process.argv.indexOf("--" + name); return i > 0 ? process.argv[i + 1] : dflt; };
-const all = JSON.parse(readFileSync(join(here, "pictures.json"), "utf8")).pictures;
+const all = JSON.parse(readFileSync(arg("pictures", join(here, "pictures.json")), "utf8")).pictures;
 const only = arg("only", null)?.split(",");
 const pictures = only ? all.filter((p) => only.includes(p.id)) : all;
 const OUT = arg("out", join(here, "..", "results", new Date().toISOString().slice(0, 10) + "-tikz"));
@@ -29,7 +35,7 @@ const work = mkdtempSync(join(tmpdir(), "sb-tikz-bench-"));
 function fail(why) { console.error("run.mjs: " + why); process.exit(2); }
 
 // ---- TeX: one document, a page and a logged box per picture
-const tex = ["\\documentclass[tikz,border=0pt]{standalone}", "\\usetikzlibrary{arrows.meta,calc}",
+const tex = ["\\documentclass[tikz,border=0pt]{standalone}", "\\usetikzlibrary{arrows.meta,calc,positioning}",
   "\\newcommand\\bb[2]{\\begin{tikzpicture}#2\\pgfextractx{\\dimen0}{\\pgfpointanchor{current bounding box}{south west}}" +
   "\\pgfextracty{\\dimen2}{\\pgfpointanchor{current bounding box}{south west}}\\pgfextractx{\\dimen4}{\\pgfpointanchor{current bounding box}{north east}}" +
   "\\pgfextracty{\\dimen6}{\\pgfpointanchor{current bounding box}{north east}}\\immediate\\write16{BBOX #1 \\the\\dimen0\\space\\the\\dimen2\\space\\the\\dimen4\\space\\the\\dimen6}\\end{tikzpicture}}",
@@ -90,7 +96,7 @@ for (const [n, p] of pictures.entries()) {
   const tb = texBox[p.id]; if (!tb) fail("no box in the log for " + p.id);
   const tW = tb[2] - tb[0], tH = tb[3] - tb[1];
   let html, why = null;
-  try { html = renderTikz(p.src, {}, { colors: {}, idn: 0 }); } catch (e) { why = e.why ?? e.message; }
+  try { html = renderTikz(p.src, { label: (t, f) => tikzLabel(t, f) }, { colors: {}, idn: 0 }); } catch (e) { why = e.why ?? e.message; }
   const row = { id: p.id, name: p.name, tex: { w: +tW.toFixed(2), h: +tH.toFixed(2) } };
   if (why) { rows.push({ ...row, ok: false, why }); continue; }
   const ob = /data-box="([^"]+)"/.exec(html)[1].split(" ").map(Number), oW = ob[2] - ob[0], oH = ob[3] - ob[1];
@@ -100,7 +106,7 @@ for (const [n, p] of pictures.entries()) {
   // the rest of the page does), so its pictures are 0.375% larger than TeX's: the scale here takes that out, so a TeX pt
   // is the same pixels on both sides and the comparison is of the drawing, not of the page's unit)
   const page = join(work, p.id + ".html"), shot = join(work, p.id + ".png");
-  writeFileSync(page, '<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#fff">' + html + "</body></html>");
+  writeFileSync(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="' + KATEX_CSS + '"></head><body style="margin:0;background:#fff">' + html + "</body></html>");
   const cw = Math.ceil((oW * 96) / 72.27) + 4, ch = Math.ceil((oH * 96) / 72.27) + 4;
   const sc = spawnSync(CHROME, ["--headless", "--no-sandbox", "--disable-gpu", "--hide-scrollbars", `--force-device-scale-factor=${(DPI / 96) * (72 / 72.27)}`,
     `--window-size=${Math.max(cw, 64)},${Math.max(ch, 64)}`, `--screenshot=${shot}`, "file://" + page], { encoding: "utf8", timeout: 60_000 });

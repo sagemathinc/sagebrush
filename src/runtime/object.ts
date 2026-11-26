@@ -1463,8 +1463,9 @@ export function toPyExc(e: any): any {
   // (JavaScriptCore sizes a result before it computes or allocates it, so
   // nothing is spent first) It says which limit: the JavaScript engine's own,
   // a hard limit and no cap of ours, or memory the computer couldn't give.
-  if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\.Memory\.grow|failed to grow memory|WebAssembly\.\w+\(\): Out of memory/.test(e.message)) {
-    const why = engineLimit(e.message);
+  if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\.Memory\.grow|failed to grow memory|WebAssembly\.\w+\(\): Out of memory|^WebAssembly kernel workspace: /.test(e.message)) {
+    // (a WebAssembly kernel's workspace, src/runtime/wasm_room.ts: its own words, with the bytes it needed)
+    const why = /^WebAssembly kernel workspace: /.test(e.message) ? e.message : engineLimit(e.message);
     const r = why === undefined ? T.MemoryError() : T.MemoryError(why);
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
     return markRaised(r);
