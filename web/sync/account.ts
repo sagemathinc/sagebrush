@@ -710,8 +710,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
             this.sql.exec("INSERT INTO index_refs (address, add_seq) VALUES (?, ?)", a, seq);
           }
           for (const r of op.releases) {
+            // (the index's ledger only: every blob an op names is held until the account is purged
+            // (design/e2e-encryption.md, version retention), so a release never gives its shared reference back, and
+            // the day-old sweep never takes a blob an index op named, nor a reference a document's pin holds)
             this.sql.exec("UPDATE index_refs SET released_seq = ? WHERE address = ? AND add_seq = ? AND released_seq IS NULL", seq, r.address, r.add);
-            this.sql.exec("UPDATE holdings SET refs = refs - 1 WHERE sha256 = ?", r.address);
           }
         } catch (e) {
           if (!(e instanceof SyncError)) throw e;

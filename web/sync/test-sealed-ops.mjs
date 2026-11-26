@@ -345,9 +345,9 @@ await section("sealed ops: signed by a current device, under the current head", 
   ok(missing?.ops?.[0]?.code === "missing", "an op adding a blob not held: refused, missing");
   const phone = ad.nd;
   const r2 = await ws.ask({ t: "sops", ops: [await signed(W, phone, st, dev, n + 2, { releases: [{ address: sha(blob), add: r1.ops[0].seq }] })] });
-  ok(Number.isInteger(r2?.ops?.[0]?.seq) && (await refs()) === 0, "another current device releases it: accepted, the reference given back");
+  ok(Number.isInteger(r2?.ops?.[0]?.seq) && (await refs()) === 1, "another current device releases it: accepted, and the blob still held (held until the account is purged)");
   const r3 = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n + 3, { releases: [{ address: sha(blob), add: r1.ops[0].seq }] })] });
-  ok(r3?.ops?.[0]?.code === "invalid" && (await refs()) === 0, "releasing it again, with no reference left: refused, and nothing changes");
+  ok(r3?.ops?.[0]?.code === "invalid" && (await refs()) === 1, "releasing it again, its add already ended: refused, and nothing changes");
   n += 4;
 
   // (a removed device: the head is public, so it can seal under the new one, but its signature no longer counts)
@@ -557,10 +557,10 @@ await section("releases keyed to the add they end: exact, once, and only an inde
   // (two live adds of one address, released independently, each once)
   const rel = async (releases) => (await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n++, { releases })] }))?.ops?.[0];
   const x1 = await rel([{ address: sha(b1), add: s2 }]);
-  ok(Number.isInteger(x1?.seq) && (await one(b1)) === 1, "the second add of b1 released: accepted, b1's count 2 -> 1: " + J(x1));
+  ok(Number.isInteger(x1?.seq) && (await one(b1)) === 2, "the second add of b1 released: accepted, b1's shared count kept at 2: " + J(x1));
   await refused([{ address: sha(b1), add: s2 }], "the same add released again");
   const x2 = await rel([{ address: sha(b1), add: s1 }]);
-  ok(Number.isInteger(x2?.seq) && (await one(b1)) === 0, "the first add of b1 released: accepted, b1's count 1 -> 0");
+  ok(Number.isInteger(x2?.seq) && (await one(b1)) === 2, "the first add of b1 released: accepted, b1's shared count still 2 (no release gives one back)");
   const ix2 = (await acct.inspect({}))?.index_refs ?? [];
   ok(J(ix2.filter((r) => r.address === sha(b1))) === J([{ address: sha(b1), add_seq: s1, released_seq: x2.seq }, { address: sha(b1), add_seq: s2, released_seq: x1.seq }]),
     "each add records the op that released it: " + J(ix2));
@@ -576,9 +576,9 @@ await section("releases keyed to the add they end: exact, once, and only an inde
   ok(took >= 1500 && took < 2900, "(both were held at once, past their checks, before either committed: " + took + " ms, not two holds in turn)");
   n += 1, m += 1;
   const codes = [ansA?.ops?.[0], ansB?.ops?.[0]].map((o) => (Number.isInteger(o?.seq) ? "seq" : o?.code));
-  ok(J(codes.slice().sort()) === J(["invalid", "seq"]) && (await one(b2)) === 1, "two devices release one add at once: one accepted, one refused invalid, b2's count 2 -> 1 (once): " + J({ codes, refs: await one(b2) }));
+  ok(J(codes.slice().sort()) === J(["invalid", "seq"]) && (await one(b2)) === 2 && ((await acct.inspect({}))?.index_refs ?? []).filter((r) => r.address === sha(b2) && r.add_seq === s3 && r.released_seq !== null).length === 1, "two devices release one add at once: one accepted, one refused invalid, the add ended once: " + J({ codes, refs: await one(b2) }));
   const x3 = await (async () => (await wp.ask({ t: "sops", ops: [await signed(W, phone, st, pdev, m++, { releases: [{ address: sha(b2), add: s4 }] })] }))?.ops?.[0])();
-  ok(Number.isInteger(x3?.seq) && (await one(b2)) === 0, "the other device releases b2's other add, which this device added: accepted, 1 -> 0");
+  ok(Number.isInteger(x3?.seq) && (await one(b2)) === 2, "the other device releases b2's other add, which this device added: accepted, its shared count kept");
   ok((await one(b3)) === 3, "b3's shared count is still the pins' and the plaintext op's, untouched by every refusal");
   ws.ws.close();
   wp.ws.close();
