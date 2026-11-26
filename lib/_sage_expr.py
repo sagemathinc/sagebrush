@@ -3539,7 +3539,10 @@ def _cc_function(name, args, r):
         parts += [z.real, z.imag]
     if not all(abs(t) < _INF for t in parts):
         return r
-    if isinstance(r, complex):
+    if r is None:
+        # (the engine refused its double value, past the double range)
+        re = im = _INF
+    elif isinstance(r, complex):
         # (complex's own parts: CC's .real is a callable real)
         v = complex.__complex__(r)
         re, im = v.real, v.imag
@@ -3601,8 +3604,16 @@ def _function(name, numeric=None, cnumeric=None):
                 # (an element of CC alone: its own method, as in Sage, an
                 # element of CC however real its value)
                 return getattr(args[0], name)()
-            r = _one("fun", name, *[_to_s(a) for a in args]).n()
-            if any(type(a).__name__ == "ComplexNumber" for a in args):
+            cc = any(type(a).__name__ == "ComplexNumber" for a in args)
+            try:
+                r = _one("fun", name, *[_to_s(a) for a in args]).n()
+            except NotImplementedError:
+                # (an element of CC: the engine's double value was past the
+                # double range, so Sage's is the MP field's, _cc_function)
+                if not cc:
+                    raise
+                r = None
+            if cc:
                 return _cc_function(name, args, r)
             return r
         if len(args) == 1 and not kw and type(args[0]).__name__ in ("RealNumberMP", "ComplexNumberMP"):
