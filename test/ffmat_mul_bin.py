@@ -156,20 +156,42 @@ def case_threshold():
     ok("T", T, "r k c = T - 1 on the loop, T on the binary route (thin both ways and square)")
 
 
-def case_frame():
-    F = GF(32003)
-    r, k, c = 40, 30, 20
-    A, B = rand_matrix(F, r, k, 41), rand_matrix(F, k, c, 42)
-    q = FB._mul_request_len(r, k, c)
-    want = loop(lambda: A * B)
-    FB._SBW1_FRAME_CAP = q
+def frame_refused(f, what, q, cap, n_of):
+    """f() past the frame cap: the fixed limit's memory error, no call, the
+    request bytes against the cap, and the largest square that fits."""
+    import _memguard
     try:
-        assert calls(lambda: A * B) == (want, [(r, k, c)])
-        FB._SBW1_FRAME_CAP = q - 1
-        assert calls(lambda: A * B) == (want, []), "a frame-only non-fit keeps the loop"
-    finally:
-        FB._SBW1_FRAME_CAP = None
-    ok("Q", q, "binary at the frame cap, the loop one byte past it")
+        calls(f)
+        raise AssertionError(what + ": admitted past the frame cap")
+    except _memguard.SagebrushMemoryError as e:
+        assert CALLS == [], (what, CALLS)
+        assert e.fixed and e.need_bytes == q and e.limit_bytes == cap, (what, e.need_bytes, e.limit_bytes)
+        assert n_of(e.fits) <= cap < n_of(e.fits + 1), (what, e.fits)
+        assert what in str(e) and "fixed limit" in str(e) and "At most about a %d x %d" % (e.fits, e.fits) in str(e), (what, str(e))
+
+
+def case_frame():
+    # (the binary route at the frame cap; one byte past it the fixed limit's
+    # memory error, never the loop, which past SBW1's cap always has at
+    # least 2^24 multiply-adds to do: square, thin and outer shapes)
+    F = GF(32003)
+    for r, k, c in [(40, 30, 20), (1, 400, 1), (40, 1, 30)]:
+        A, B = rand_matrix(F, r, k, 41), rand_matrix(F, k, c, 42)
+        q = FB._mul_request_len(r, k, c)
+        want = loop(lambda: A * B)
+        FB._SBW1_FRAME_CAP = q
+        try:
+            assert calls(lambda: A * B) == (want, [(r, k, c)]), (r, k, c)
+            FB._SBW1_FRAME_CAP = q - 1
+            frame_refused(lambda: A * B, "The product of a %d x %d and a %d x %d matrix" % (r, k, k, c), q, q - 1,
+                          lambda n: FB._mul_request_len(n, n, n))
+        finally:
+            FB._SBW1_FRAME_CAP = None
+        ok("Q", q, "%d x %d x %d: binary at the frame cap, the fixed limit's memory error one byte past it" % (r, k, c))
+    # (SBW1's own cap: the largest square that fits is 4095)
+    n = FB._isqrt((FB._ech_frame_cap() - FB._mul_request_len(0, 0, 0)) // 16)
+    assert n == 4095 and FB._mul_request_len(n, n, n) <= 1 << 28 < FB._mul_request_len(n + 1, n + 1, n + 1)
+    ok("N", n, "the largest square product within SBW1's frame cap")
 
 
 def case_preflight():

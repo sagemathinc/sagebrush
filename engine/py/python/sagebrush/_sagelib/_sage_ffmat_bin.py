@@ -7,6 +7,7 @@ that may take the route, not with _sage_ffmat: Magma mode imports that
 module at its start, and this code needn't be in its heap until then."""
 
 import sys as _sys
+from math import isqrt as _isqrt
 
 import _sage_ff as _ff
 import _sage_ffmat as _fm
@@ -171,21 +172,40 @@ def _ech_refuse(base, r, c, need, bound, want_rows, out_of, what=None):
     return e
 
 
+def _frame_refuse(what, need, n, noun):
+    """The refusal of a request past the frame cap (a fixed-limit
+    SagebrushMemoryError: more memory won't help), in place of the loop,
+    which past the frame always has at least 2^24 multiply-adds to do (a
+    product: r k + k c above 2^25 words; an echelon: r c above 2^25) and so
+    would run for minutes to hours: what, its request bytes against the
+    cap, and the largest n x n noun whose request fits."""
+    import _memguard
+    e = _memguard.memory_guard(what, need, _ech_frame_cap(), "one engine request", fixed=True)
+    e.fits = n
+    lines = e.args[0].split("\n")
+    i = next((j for j, t in enumerate(lines) if "needs about" in t), len(lines) - 1)
+    lines[i] += " At most about a %d x %d %s fits." % (n, n, noun)
+    e.args = ("\n".join(lines),) + e.args[1:]
+    return e
+
+
 def _ech_bin_route(base, r, c, want_rows, out, out_of=None):
     """p when the binary nmod_echelon takes an r x c matrix over base whose
     caller builds out bytes of result: a prime field below 2^63, the
     binary entry point present, the request within the frame cap and the
-    host's need (_ech_need) within its budget.  None for another field, an
-    engine without the entry point or a frame-only non-fit (the callers'
-    other paths, under their own admission).  A proved memory non-fit raises
-    the memory error (never the Python path)."""
+    host's need (_ech_need) within its budget.  None for another field or
+    an engine without the entry point (the callers' other paths, under their
+    own admission).  A request past the frame cap raises the fixed limit's
+    memory error (_frame_refuse), and a proved memory non-fit the memory
+    error (never the Python path)."""
     if not _fm._ECH_BIN_ENABLED or not isinstance(base, _ff.IntegerModRing_) or r < 1 or c < 1:
         return None
     p = _ff._engine_prime(base)
     if not p or not _ff._SBW1_LE:
         return None
     if r >= 1 << 32 or c >= 1 << 32 or _ech_request_len(r, c) > _ech_frame_cap():
-        return None
+        n = _isqrt(max(_ech_frame_cap() - _ech_request_len(0, 0), 0) // 8)
+        raise _frame_refuse("The echelon form of a %d x %d matrix over %r" % (r, c, base), _ech_request_len(r, c), n, "matrix")
     need = _ech_need(r, c, want_rows, out)
     bound = _ech_bound()
     if need > bound:
@@ -425,10 +445,9 @@ def _ech_kernel_out(r, c):
 # ---- the product's binary route (engine/web bin_ops.rs nmod_mat_mul, SBW1):
 # A * B over a prime field below 2^63, taken from the product's shape alone:
 # at least _sage_ffmat._MUL_BIN_MIN multiply-adds (below it the Python loop
-# is faster),
-# the request within the frame cap, and the host's need (_mul_need) within
-# its budget; a proved memory non-fit raises the memory error, never the
-# loop.  The pieces, the binding's copies and the reply's reading are the
+# is faster), and the host's need (_mul_need) within its budget; a request
+# past the frame cap or a proved memory non-fit raises the memory error,
+# never the loop.  The pieces, the binding's copies and the reply's reading are the
 # echelon's (above).
 
 # the engine's fixed allowance for the fast product's extra words, in
@@ -532,11 +551,11 @@ def _mul_bin_route(base, r, k, c):
     """p when the binary nmod_mat_mul takes the product of an r x k and a
     k x c matrix over base: a prime field below 2^63, the binary entry point
     present, at least _sage_ffmat._MUL_BIN_MIN multiply-adds, the request
-    within the
-    frame cap and the host's need (_mul_need) within its budget.  None for
-    another field, an engine without the entry point, a product below the
-    threshold or a frame-only non-fit (the loop, under its own admission).
-    A proved memory non-fit raises the memory error (never the loop)."""
+    within the frame cap and the host's need (_mul_need) within its budget.
+    None for another field, an engine without the entry point or a product
+    below the threshold (the loop, under its own admission).  A request past
+    the frame cap raises the fixed limit's memory error (_frame_refuse), and
+    a proved memory non-fit the memory error (never the loop)."""
     if not _fm._MUL_BIN_ENABLED or not isinstance(base, _ff.IntegerModRing_) or min(r, k, c) < 1:
         return None
     if r * k * c < _fm._MUL_BIN_MIN:
@@ -545,7 +564,8 @@ def _mul_bin_route(base, r, k, c):
     if not p or not _ff._SBW1_LE:
         return None
     if max(r, k, c) >= 1 << 32 or _mul_request_len(r, k, c) > _ech_frame_cap():
-        return None
+        n = _isqrt(max(_ech_frame_cap() - _mul_request_len(0, 0, 0), 0) // 16)
+        raise _frame_refuse("The product of a %d x %d and a %d x %d matrix over %r" % (r, k, k, c, base), _mul_request_len(r, k, c), n, "product")
     need = _mul_need(r, k, c, p, _ech_out_cost(base, r, c))
     bound = _ech_bound()
     if need > bound:
