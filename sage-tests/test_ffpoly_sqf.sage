@@ -66,4 +66,12 @@ show('((c*t + 1)^2).is_square(root=True)', lambda: ((c*t + 1)^2).is_square(root=
 show('((a*y^2 + 2*y + a)^2).sqrt()', lambda: ((a*y^2 + 2*y + a)^2).sqrt())
 show('[F9(e).sqrt() for e in F9 if e.is_square()]', lambda: [F9(e).sqrt() for e in F9 if e.is_square()])
 show('[G25(e).sqrt() for e in G25 if e.is_square()]', lambda: [G25(e).sqrt() for e in G25 if e.is_square()])
+# moduli that are not primitive: Sage's root is a power of its own generator
+N9.<e> = GF(9, modulus=U.gen()^2 + 1)
+N25.<d> = GF(25, modulus=PolynomialRing(GF(5), 's').gen()^2 + 2)
+N81.<h> = GF(81, modulus=U.gen()^4 + U.gen()^2 + 2)
+N125.<k> = GF(125, modulus=PolynomialRing(GF(5), 's').gen()^3 + PolynomialRing(GF(5), 's').gen() + 1)
+show('((e + 2)^2).sqrt(), ((e + 2)^2).sqrt(all=True)', lambda: (((e + 2)^2).sqrt(), ((e + 2)^2).sqrt(all=True)))
+for N in [N9, N25, N81, N125]:
+    show('sorted sqrt over %s' % N.modulus(), lambda: sorted([(str(x), str(x.sqrt())) for x in N if x.is_square()]))
 show('((u + 1)^7*(u + 2)^3*(u^2 + u + 2)).squarefree_decomposition()', lambda: ((u + 1)^7*(u + 2)^3*(u^2 + u + 2)).squarefree_decomposition())

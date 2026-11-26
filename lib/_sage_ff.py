@@ -2173,6 +2173,41 @@ class FiniteField_ext:
             self._logs = (g, logs)
         return self._logs
 
+    def _small_generator(self):
+        """The generator Sage's fields below 2^16 elements work with (their
+        square roots are its powers): the generator itself when the modulus is
+        primitive; else the first primitive one of a^k + c (k = 1, ..., n - 1),
+        then of a^2 + b*a + c, with b and c running through the powers g, g^2,
+        ..., g^(p-1) of the least primitive root g of GF(p) (c from 0 in the
+        second). None beyond those, or for larger fields.
+
+        EXAMPLES::
+
+            sage: R.<t> = GF(3)[]; K.<a> = GF(9, modulus=t^2 + 1)
+            sage: K._small_generator(), GF(9, 'b')._small_generator()  # sagebrush only
+            (a + 2, b)
+        """
+        table = self._log_table()
+        if table is None:
+            return None
+        if self._primitive:
+            return self.gen()
+        if not hasattr(self, "_small_gen"):
+            logs, N = table[1], self._q - 1
+            a = self.gen()
+            g = int(primitive_root(self._p))
+            cs = [pow(g, i, self._p) for i in range(1, self._p)]
+
+            def first(cands):
+                for x in cands:
+                    if _m.gcd(logs[self._index(x)], N) == 1:
+                        return x
+
+            self._small_gen = first(a ** k + c for k in range(1, self._n) for c in cs)
+            if self._small_gen is None:
+                self._small_gen = first(a * a + b * a + c for b in cs for c in [0] + cs)
+        return self._small_gen
+
     def __iter__(self):
         """0, then the powers of the generator (Sage's order), or all
         polynomials when the modulus is not primitive."""
@@ -2630,13 +2665,17 @@ class FiniteFieldElement:
             raise ValueError("must be a perfect square.")
         q = K._q
         table = K._log_table() if K._p != 2 and q < 2 ** 16 else None
+        h = K._small_generator() if table is not None else None
         if K._p == 2:
             r = self ** (q // 2)
-        elif table is not None:
-            # (Sage's root below 2^16 elements: g^(k/2) for self = g^k, g the
-            # multiplicative generator and 0 <= k < q - 1; the other is -r)
+        elif h is not None:
+            # (Sage's root below 2^16 elements: h^(k/2) for self = h^k,
+            # 0 <= k < q - 1, h its internal generator, _small_generator)
             g, logs = table
-            r = g ** (logs[K._index(self)] // 2)
+            k = logs[K._index(self)]
+            if h != g:
+                k = k * pow(logs[K._index(h)], -1, q - 1) % (q - 1)
+            r = h ** (k // 2)
         else:
             # Tonelli-Shanks in the cyclic group of order q - 1
             Q, S = q - 1, 0
